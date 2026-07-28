@@ -3,7 +3,7 @@
     "name": "MedAcademy Mobile App",
     "slug": "medacademy",
     "scheme": "medacademy",
-    "version": "1.0.515",
+    "version": "1.0.516",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "automatic",

@@ -434,10 +434,12 @@ Deno.serve(async (req: Request) => {
       const { push_token, installation_id } = body;
       if (!installation_id) return json({ error: 'installation_id is required' }, 400);
 
-      // Validate token format when setting (not clearing)
+      // Validate token format when setting (not clearing).
+      // Local builds use raw FCM registration tokens (Android) or APNs tokens (iOS),
+      // not Expo's proxied ExponentPushToken[…] format. Accept any non-empty string.
       if (push_token !== null && push_token !== undefined) {
-        if (typeof push_token !== 'string' || !push_token.startsWith('ExponentPushToken[')) {
-          return json({ error: 'Invalid push_token format' }, 400);
+        if (typeof push_token !== 'string' || push_token.trim().length === 0) {
+          return json({ error: 'Invalid push_token: must be a non-empty string' }, 400);
         }
       }
 
