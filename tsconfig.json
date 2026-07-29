@@ -1,0 +1,25 @@
+{
+  "extends": "expo/tsconfig.base",
+  "compilerOptions": {
+    "strict": true,
+    "paths": {
+      "@/*": [
+        "./src/*"
+      ],
+      "vdocipher-rn-bridge": [
+        "./src/types/vdocipher-rn-bridge"
+      ]
+    }
+  },
+  "include": [
+    "src",
+    "nativewind-env.d.ts",
+    ".expo/types/**/*.ts",
+    "expo-env.d.ts"
+  ],
+  "exclude": [
+    "babel.config.js",
+    "metro.config.js",
+    "tailwind.config.js"
+  ]
+}

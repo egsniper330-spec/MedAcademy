@@ -1,0 +1,19 @@
+{
+    "vcs": {
+        "enabled": true,
+        "clientKind": "git",
+        "useIgnoreFile": true
+    },
+    "files": {
+        "includes": ["src/**/*.{js,jsx,ts,tsx}"]
+    },
+    "linter": {
+        "enabled": true,
+        "rules": {
+            "recommended": false
+        }
+    },
+    "formatter": {
+        "enabled": false
+    }
+}

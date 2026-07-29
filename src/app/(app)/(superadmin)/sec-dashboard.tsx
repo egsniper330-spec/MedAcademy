@@ -1,0 +1,328 @@
+import React, { useState, useCallback } from 'react';
+import {
+  View, Text, ScrollView, Pressable, ActivityIndicator,
+  useColorScheme, RefreshControl, FlatList,
+} from 'react-native';
+import { useFocusEffect, useRouter } from 'expo-router';
+import {
+  ShieldAlert, ShieldCheck, Wifi, Globe, Bug, Lock,
+  Fingerprint, Camera, AlertTriangle, TrendingUp,
+  Users, BarChart3, Download, Filter,
+} from 'lucide-react-native';
+import { neuColors, neuFlatStyle, neuPressedStyle } from '@/lib/neu';
+import { NeuCard } from '@/components/NeuCard';
+import { NeuButton } from '@/components/NeuButton';
+import { PageHeader } from '@/components/PageHeader';
+import { useToast } from '@/components/Toast';
+import { supabase } from '@/client/supabase';
+import { friendlyError } from '@/lib/validation';
+import { Share } from 'react-native';
+
+interface SecurityStats {
+  total_events:    number;
+  root_jailbreak:  number;
+  vpn:             number;
+  proxy:           number;
+  ssl_pinning:     number;
+  screenshot:      number;
+  screen_recording:number;
+  debug:           number;
+  app_integrity:   number;
+}
+
+interface RiskyDevice {
+  device_id:      string;
+  user_id:        string;
+  user_name:      string;
+  user_email:     string;
+  max_risk_score: number;
+  event_types:    string[];
+  last_seen:      string;
+  platform:       string;
+}
+
+interface SecurityEvent {
+  id:               string;
+  user_id:          string | null;
+  device_id:        string | null;
+  event_type:       string;
+  detection_method: string | null;
+  policy_action:    string | null;
+  risk_score:       number;
+  ip_address:       string | null;
+  platform:         string | null;
+  created_at:       string;
+  profiles?:        { full_name: string; email: string } | null;
+}
+
+const EVENT_META: Record<string, { label: string; color: string; icon: React.ComponentType<{ size: number; color: string }> }> = {
+  root_detected:             { label: 'Root',          color: '#EF4444', icon: ShieldAlert },
+  jailbreak_detected:        { label: 'Jailbreak',     color: '#EF4444', icon: ShieldAlert },
+  vpn_detected:              { label: 'VPN',           color: '#F59E0B', icon: Wifi },
+  proxy_detected:            { label: 'Proxy',         color: '#F59E0B', icon: Globe },
+  debug_detected:            { label: 'Debug',         color: '#8B5CF6', icon: Bug },
+  frida_detected:            { label: 'Frida',         color: '#8B5CF6', icon: Fingerprint },
+  xposed_detected:           { label: 'Xposed',        color: '#8B5CF6', icon: Fingerprint },
+  ssl_pinning_failure:       { label: 'SSL Pinning',   color: '#EF4444', icon: Lock },
+  screenshot_detected:       { label: 'Screenshot',    color: '#06B6D4', icon: Camera },
+  screen_recording_detected: { label: 'Recording',     color: '#06B6D4', icon: Camera },
+  app_integrity_compromised: { label: 'Integrity',     color: '#EF4444', icon: Lock },
+};
+
+const DAYS_OPTIONS = [7, 14, 30, 90];
+
+export default function SecurityDashboard() {
+  const scheme = useColorScheme();
+  const isDark = scheme === 'dark';
+  const c = isDark ? neuColors.dark : neuColors.light;
+  const flat = neuFlatStyle(isDark);
+  const router = useRouter();
+  const { showToast } = useToast();
+
+  const [stats, setStats]           = useState<SecurityStats | null>(null);
+  const [riskyDevices, setRiskyDevices] = useState<RiskyDevice[]>([]);
+  const [recentEvents, setRecentEvents] = useState<SecurityEvent[]>([]);
+  const [loading, setLoading]       = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [days, setDays]             = useState(30);
+
+  const load = useCallback(async () => {
+    try {
+      const startDate = new Date(Date.now() - days * 24 * 3600 * 1000).toISOString();
+
+      const [statsRes, devicesRes, eventsRes] = await Promise.all([
+        supabase.rpc('get_security_stats', {
+          p_start_date: startDate,
+          p_end_date: new Date().toISOString(),
+        }),
+        supabase.rpc('get_risky_devices', { p_min_score: 20, p_limit: 20, p_offset: 0 }),
+        supabase
+          .from('security_events')
+          .select('*, profiles(full_name, email)')
+          .order('created_at', { ascending: false })
+          .limit(50),
+      ]);
+
+      if (statsRes.data)   setStats(statsRes.data as SecurityStats);
+      if (devicesRes.data) setRiskyDevices(devicesRes.data as RiskyDevice[]);
+      if (eventsRes.data)  setRecentEvents(eventsRes.data as SecurityEvent[]);
+    } catch (e) {
+      showToast({ type: 'error', message: friendlyError(e, 'Failed to load security data.') });
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  }, [days, showToast]);
+
+  useFocusEffect(useCallback(() => { void load(); }, [load]));
+
+  const onRefresh = () => { setRefreshing(true); void load(); };
+
+  const handleExport = async () => {
+    if (!recentEvents.length) return;
+    const lines = [
+      'Timestamp,User,Device,Event Type,Detection Method,Risk Score,Platform,Policy Action',
+      ...recentEvents.map((e) =>
+        `"${e.created_at}","${e.profiles?.full_name ?? e.user_id ?? ''}","${e.device_id ?? ''}","${e.event_type}","${e.detection_method ?? ''}",${e.risk_score},"${e.platform ?? ''}","${e.policy_action ?? ''}"`
+      ),
+    ];
+    const csv = lines.join('\n');
+    if (process.env.EXPO_OS === 'web') {
+      const blob = new Blob([csv], { type: 'text/csv' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = 'security-events.csv'; a.click();
+      URL.revokeObjectURL(url);
+    } else {
+      await Share.share({ message: csv, title: 'Security Events Report' });
+    }
+  };
+
+  const StatCard = ({
+    label, value, icon: Icon, color,
+  }: { label: string; value: number; icon: React.ComponentType<{ size: number; color: string }>; color: string }) => (
+    <View style={[flat, {
+      flex: 1, minWidth: 140, borderRadius: 16, padding: 16,
+      gap: 8, alignItems: 'flex-start',
+    }]}>
+      <View style={{
+        width: 36, height: 36, borderRadius: 10,
+        backgroundColor: `${color}18`,
+        alignItems: 'center', justifyContent: 'center',
+      }}>
+        <Icon size={18} color={color} />
+      </View>
+      <Text style={{ fontSize: 26, fontWeight: '800', color }}>{value ?? 0}</Text>
+      <Text style={{ fontSize: 11, color: `${c.text}77`, fontWeight: '600' }}>{label}</Text>
+    </View>
+  );
+
+  const riskColor = (score: number) =>
+    score >= 60 ? '#EF4444' : score >= 30 ? '#F59E0B' : '#22C55E';
+
+  if (loading) {
+    return (
+      <View style={{ flex: 1, backgroundColor: c.base, alignItems: 'center', justifyContent: 'center' }}>
+        <ActivityIndicator size="large" color={c.primary} />
+      </View>
+    );
+  }
+
+  return (
+    <View style={{ flex: 1, backgroundColor: c.base }}>
+      <PageHeader title="Security Dashboard" />
+      <ScrollView
+        contentContainerStyle={{ padding: 16, gap: 20, paddingBottom: 48 }}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />}
+        contentInsetAdjustmentBehavior="automatic"
+      >
+        {/* Day Filter + Export */}
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+          <Filter size={16} color={`${c.text}77`} />
+          {DAYS_OPTIONS.map((d) => (
+            <Pressable key={d} onPress={() => setDays(d)}
+              style={[flat, {
+                paddingHorizontal: 14, paddingVertical: 6, borderRadius: 20,
+                backgroundColor: days === d ? c.primary : undefined,
+              }]}>
+              <Text style={{ fontSize: 12, fontWeight: '600', color: days === d ? '#fff' : `${c.text}88` }}>
+                {d}d
+              </Text>
+            </Pressable>
+          ))}
+          <View style={{ flex: 1 }} />
+          <Pressable onPress={() => void handleExport()}
+            style={[flat, { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20, flexDirection: 'row', alignItems: 'center', gap: 6 }]}>
+            <Download size={14} color={c.primary} />
+            <Text style={{ fontSize: 12, fontWeight: '600', color: c.primary }}>Export</Text>
+          </Pressable>
+        </View>
+
+        {/* Overview Stats */}
+        <Text style={{ fontSize: 16, fontWeight: '700', color: c.text }}>
+          Overview — Last {days} Days
+        </Text>
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 12 }}>
+          <StatCard label="Total Events"      value={stats?.total_events ?? 0}    icon={BarChart3}    color={c.primary} />
+          <StatCard label="Root / Jailbreak"  value={stats?.root_jailbreak ?? 0}  icon={ShieldAlert}  color="#EF4444" />
+          <StatCard label="VPN Detections"    value={stats?.vpn ?? 0}             icon={Wifi}         color="#F59E0B" />
+          <StatCard label="Proxy Attempts"    value={stats?.proxy ?? 0}           icon={Globe}        color="#F59E0B" />
+          <StatCard label="SSL Failures"      value={stats?.ssl_pinning ?? 0}     icon={Lock}         color="#EF4444" />
+          <StatCard label="Screenshots"       value={stats?.screenshot ?? 0}      icon={Camera}       color="#06B6D4" />
+          <StatCard label="Recordings"        value={stats?.screen_recording ?? 0}icon={Camera}       color="#06B6D4" />
+          <StatCard label="Debug / Frida"     value={stats?.debug ?? 0}           icon={Bug}          color="#8B5CF6" />
+          <StatCard label="Integrity Issues"  value={stats?.app_integrity ?? 0}   icon={ShieldAlert}  color="#EF4444" />
+        </View>
+
+        {/* Risky Devices */}
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+          <Users size={18} color={c.primary} />
+          <Text style={{ fontSize: 16, fontWeight: '700', color: c.text }}>
+            Risky Devices ({riskyDevices.length})
+          </Text>
+        </View>
+        {riskyDevices.length === 0 ? (
+          <View style={[flat, { borderRadius: 16, padding: 24, alignItems: 'center', gap: 8 }]}>
+            <ShieldCheck size={32} color="#22C55E" />
+            <Text style={{ fontSize: 14, color: `${c.text}77` }}>No risky devices detected</Text>
+          </View>
+        ) : (
+          riskyDevices.map((dev) => (
+            <View key={dev.device_id} style={[flat, {
+              borderRadius: 16, padding: 16, gap: 10,
+            }]}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                <View style={{
+                  width: 40, height: 40, borderRadius: 12,
+                  backgroundColor: `${riskColor(dev.max_risk_score)}18`,
+                  alignItems: 'center', justifyContent: 'center',
+                }}>
+                  <AlertTriangle size={20} color={riskColor(dev.max_risk_score)} />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={{ fontSize: 14, fontWeight: '700', color: c.text }}>
+                    {dev.user_name || 'Unknown User'}
+                  </Text>
+                  <Text style={{ fontSize: 12, color: `${c.text}77` }}>{dev.user_email}</Text>
+                </View>
+                <View style={{
+                  paddingHorizontal: 10, paddingVertical: 4, borderRadius: 20,
+                  backgroundColor: `${riskColor(dev.max_risk_score)}18`,
+                }}>
+                  <Text style={{ fontSize: 13, fontWeight: '800', color: riskColor(dev.max_risk_score) }}>
+                    {dev.max_risk_score}
+                  </Text>
+                </View>
+              </View>
+              {/* Threat badges */}
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
+                {(dev.event_types ?? []).map((et) => {
+                  const meta = EVENT_META[et];
+                  if (!meta) return null;
+                  return (
+                    <View key={et} style={{
+                      paddingHorizontal: 8, paddingVertical: 3, borderRadius: 20,
+                      backgroundColor: `${meta.color}18`,
+                    }}>
+                      <Text style={{ fontSize: 11, fontWeight: '600', color: meta.color }}>
+                        {meta.label}
+                      </Text>
+                    </View>
+                  );
+                })}
+              </View>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                <Text style={{ fontSize: 11, color: `${c.text}55` }}>
+                  {dev.platform?.toUpperCase()} · {new Date(dev.last_seen).toLocaleDateString()}
+                </Text>
+              </View>
+            </View>
+          ))
+        )}
+
+        {/* Recent Events */}
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+          <TrendingUp size={18} color={c.primary} />
+          <Text style={{ fontSize: 16, fontWeight: '700', color: c.text }}>
+            Recent Events ({recentEvents.length})
+          </Text>
+        </View>
+        {recentEvents.slice(0, 20).map((evt) => {
+          const meta = EVENT_META[evt.event_type] ?? { label: evt.event_type, color: c.primary, icon: ShieldAlert };
+          const Icon = meta.icon;
+          return (
+            <View key={evt.id} style={[flat, {
+              borderRadius: 14, padding: 14, flexDirection: 'row',
+              alignItems: 'center', gap: 12,
+            }]}>
+              <View style={{
+                width: 36, height: 36, borderRadius: 10,
+                backgroundColor: `${meta.color}18`,
+                alignItems: 'center', justifyContent: 'center',
+              }}>
+                <Icon size={18} color={meta.color} />
+              </View>
+              <View style={{ flex: 1, gap: 2 }}>
+                <Text style={{ fontSize: 13, fontWeight: '700', color: c.text }}>{meta.label}</Text>
+                <Text style={{ fontSize: 11, color: `${c.text}66` }}>
+                  {evt.profiles?.full_name ?? evt.user_id?.slice(0, 8) ?? 'Unknown'} · {evt.platform ?? 'unknown'}
+                </Text>
+                <Text style={{ fontSize: 11, color: `${c.text}55` }}>
+                  {new Date(evt.created_at).toLocaleString()}
+                </Text>
+              </View>
+              <View style={{
+                paddingHorizontal: 8, paddingVertical: 3, borderRadius: 20,
+                backgroundColor: `${meta.color}18`,
+              }}>
+                <Text style={{ fontSize: 12, fontWeight: '700', color: meta.color }}>
+                  {evt.risk_score}
+                </Text>
+              </View>
+            </View>
+          );
+        })}
+      </ScrollView>
+    </View>
+  );
+}

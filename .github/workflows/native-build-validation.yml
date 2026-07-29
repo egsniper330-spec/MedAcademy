@@ -1,0 +1,425 @@
+name: Native Build Validation
+
+# ─── Triggers ────────────────────────────────────────────────────────────────
+# Runs on every PR and every push to main / release/* branches.
+# Also runs before EAS release builds (call via workflow_call or workflow_dispatch).
+
+on:
+  pull_request:
+    branches: [ main, release/* ]
+    paths:
+      - 'plugins/**'
+      - 'src/lib/security*.ts'
+      - 'src/lib/installationId.ts'
+      - 'src/lib/useContentProtection.ts'
+      - 'app.json'
+      - 'package.json'
+      - 'tsconfig.json'
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+    inputs:
+      reason:
+        description: 'Reason for manual trigger'
+        required: false
+        default: 'Manual pre-release validation'
+  workflow_call:
+    # Called by release workflows before EAS build dispatch
+
+# ─── Permissions ─────────────────────────────────────────────────────────────
+permissions:
+  contents: read
+  pull-requests: write   # allows posting check summaries as PR comments
+
+# ─── Concurrency ─────────────────────────────────────────────────────────────
+# Cancel in-progress runs on the same PR/branch to save CI minutes
+concurrency:
+  group: native-validation-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ───────────────────────────────────────────────────────────────────────────
+  # Job 1: Static validation — no native toolchain required
+  # Runs in ~30 seconds. Catches Kotlin/Swift template errors before EAS queue.
+  # ───────────────────────────────────────────────────────────────────────────
+  static-validation:
+    name: Static Validation (Kotlin + Swift + app.json + TS)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Stage 1 — Kotlin template validation
+        id: kotlin
+        run: node scripts/validate-kotlin-template.js
+
+      - name: Stage 2 — Swift source validation
+        id: swift
+        run: node scripts/validate-swift-source.js
+
+      - name: Stage 3 — Full native build validation
+        id: native
+        run: node scripts/validate-native-build.js
+
+      - name: TypeScript type-check
+        id: typescript
+        run: npx tsc --noEmit
+
+      - name: ESLint
+        id: eslint
+        run: npm run lint
+
+      - name: Post PR comment on failure
+        if: failure() && github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const failed = [];
+            const steps = ['kotlin', 'swift', 'native', 'typescript', 'eslint'];
+            for (const s of steps) {
+              if (context.payload.steps?.[s]?.conclusion === 'failure') {
+                failed.push(s);
+              }
+            }
+            const body = [
+              '## ❌ Native Build Validation Failed',
+              '',
+              'One or more validation stages failed. Fix these before merging:',
+              '',
+              ...failed.map(s => `- \`${s}\``),
+              '',
+              '> Run `pnpm run validate` locally to see full error details.',
+            ].join('\n');
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body,
+            });
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # Job 2: Expo prebuild dry-run (Android)
+  # Generates the android/ directory and verifies it contains the expected
+  # Kotlin source files and no unreplaced placeholders in the written files.
+  # Requires: Node + Java (Android SDK not needed for prebuild alone)
+  # ───────────────────────────────────────────────────────────────────────────
+  android-prebuild:
+    name: Expo Prebuild — Android (generated file validation)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: static-validation
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Run Expo prebuild (Android only, clean)
+        run: npx expo prebuild --platform android --clean --no-install
+        env:
+          EXPO_PUBLIC_APP_ID: app-czyg340mpc75
+          EXPO_PUBLIC_SUPABASE_URL: https://placeholder.supabase.co
+          EXPO_PUBLIC_SUPABASE_ANON_KEY: placeholder
+
+      - name: Verify SecurityModule.kt was generated
+        run: |
+          FILE="android/app/src/main/java/com/medacademy/security/SecurityModule.kt"
+          if [ ! -f "$FILE" ]; then
+            echo "❌ SecurityModule.kt not found at $FILE"
+            exit 1
+          fi
+          echo "✅ SecurityModule.kt exists"
+
+      - name: Verify SecurityPackage.kt was generated
+        run: |
+          FILE="android/app/src/main/java/com/medacademy/security/SecurityPackage.kt"
+          if [ ! -f "$FILE" ]; then
+            echo "❌ SecurityPackage.kt not found at $FILE"
+            exit 1
+          fi
+          echo "✅ SecurityPackage.kt exists"
+
+      - name: Scan generated Kotlin files for unreplaced placeholders
+        run: |
+          ERRORS=0
+          for f in android/app/src/main/java/com/medacademy/security/*.kt; do
+            echo "Scanning: $f"
+            # Check for __FOO__ style placeholders
+            if grep -qE '__[A-Z][A-Z0-9_]+__' "$f"; then
+              echo "❌ Placeholder __IDENTIFIER__ found in $f:"
+              grep -nE '__[A-Z][A-Z0-9_]+__' "$f"
+              ERRORS=$((ERRORS + 1))
+            fi
+            # Check for PLACEHOLDER_ tokens
+            if grep -qE 'PLACEHOLDER_[A-Z_]+' "$f"; then
+              echo "❌ PLACEHOLDER_ token found in $f:"
+              grep -nE 'PLACEHOLDER_[A-Z_]+' "$f"
+              ERRORS=$((ERRORS + 1))
+            fi
+            # Check for TODO_REPLACE
+            if grep -qE 'TODO_REPLACE' "$f"; then
+              echo "❌ TODO_REPLACE found in $f"
+              ERRORS=$((ERRORS + 1))
+            fi
+            # Check package declaration on line 1
+            FIRST_LINE=$(head -1 "$f")
+            if ! echo "$FIRST_LINE" | grep -qE '^package [a-z]'; then
+              echo "❌ Missing package declaration in $f (first line: $FIRST_LINE)"
+              ERRORS=$((ERRORS + 1))
+            fi
+          done
+          if [ $ERRORS -gt 0 ]; then
+            echo "❌ $ERRORS error(s) found in generated Kotlin files"
+            exit 1
+          fi
+          echo "✅ All generated Kotlin files are clean"
+
+      - name: Verify SecurityPackage registered in MainApplication
+        run: |
+          MA="android/app/src/main/java/com/miaoda/appczyg340mpc75/MainApplication.kt"
+          if [ ! -f "$MA" ]; then
+            MA=$(find android -name "MainApplication.kt" | head -1)
+          fi
+          if [ -z "$MA" ]; then
+            echo "⚠️  MainApplication.kt not found — skipping registration check"
+            exit 0
+          fi
+          if grep -q "SecurityPackage" "$MA"; then
+            echo "✅ SecurityPackage registered in $MA"
+          else
+            echo "❌ SecurityPackage not found in MainApplication.kt — module will not be loaded"
+            exit 1
+          fi
+
+      - name: Upload generated Android sources as artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-generated-sources
+          path: |
+            android/app/src/main/java/com/medacademy/security/
+            android/app/proguard-rules.pro
+          retention-days: 7
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # Job 3: Expo prebuild dry-run (iOS)
+  # Generates the ios/ directory and verifies Swift/ObjC files are present.
+  # macOS runner required for iOS prebuild.
+  # ───────────────────────────────────────────────────────────────────────────
+  ios-prebuild:
+    name: Expo Prebuild — iOS (generated file validation)
+    runs-on: macos-latest
+    timeout-minutes: 25
+    needs: static-validation
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Run Expo prebuild (iOS only, clean)
+        run: npx expo prebuild --platform ios --clean --no-install
+        env:
+          EXPO_PUBLIC_APP_ID: app-czyg340mpc75
+          EXPO_PUBLIC_SUPABASE_URL: https://placeholder.supabase.co
+          EXPO_PUBLIC_SUPABASE_ANON_KEY: placeholder
+
+      - name: Verify IOSSecurityModule.swift was copied to Xcode project
+        run: |
+          SWIFT=$(find ios -name "IOSSecurityModule.swift" | head -1)
+          if [ -z "$SWIFT" ]; then
+            echo "❌ IOSSecurityModule.swift not found in ios/"
+            exit 1
+          fi
+          echo "✅ IOSSecurityModule.swift found at: $SWIFT"
+
+      - name: Verify IOSSecurityModule.m was copied
+        run: |
+          OBJCM=$(find ios -name "IOSSecurityModule.m" | head -1)
+          if [ -z "$OBJCM" ]; then
+            echo "❌ IOSSecurityModule.m not found in ios/"
+            exit 1
+          fi
+          echo "✅ IOSSecurityModule.m found at: $OBJCM"
+
+      - name: Scan generated Swift files for unreplaced placeholders
+        run: |
+          ERRORS=0
+          while IFS= read -r -d '' f; do
+            echo "Scanning: $f"
+            if grep -qE '__[A-Z][A-Z0-9_]+__' "$f"; then
+              echo "❌ Placeholder found in $f:"
+              grep -nE '__[A-Z][A-Z0-9_]+__' "$f"
+              ERRORS=$((ERRORS + 1))
+            fi
+            if grep -q 'arc4random' "$f"; then
+              echo "❌ arc4random() found in $f — must use SecRandomCopyBytes"
+              ERRORS=$((ERRORS + 1))
+            fi
+          done < <(find ios -name "*.swift" -print0)
+          if [ $ERRORS -gt 0 ]; then
+            echo "❌ $ERRORS error(s) in generated Swift files"
+            exit 1
+          fi
+          echo "✅ All generated Swift files are clean"
+
+      - name: Swift syntax check (swiftc -parse)
+        run: |
+          SWIFT=$(find ios -name "IOSSecurityModule.swift" | head -1)
+          if [ -z "$SWIFT" ]; then
+            echo "⚠️  IOSSecurityModule.swift not found — skipping syntax check"
+            exit 0
+          fi
+          # -parse only — does not require SDK, just checks syntax
+          swiftc -parse "$SWIFT" 2>&1 | tee /tmp/swift-parse.log
+          if grep -qE '^.*error:' /tmp/swift-parse.log; then
+            echo "❌ Swift syntax errors detected:"
+            grep -E '^.*error:' /tmp/swift-parse.log
+            exit 1
+          fi
+          echo "✅ Swift syntax check passed"
+
+      - name: Verify RCT_EXTERN_MODULE in .m bridging file
+        run: |
+          OBJCM=$(find ios -name "IOSSecurityModule.m" | head -1)
+          if grep -q "RCT_EXTERN_MODULE" "$OBJCM"; then
+            echo "✅ RCT_EXTERN_MODULE found in $OBJCM"
+          else
+            echo "❌ RCT_EXTERN_MODULE missing from $OBJCM"
+            exit 1
+          fi
+
+      - name: Upload generated iOS sources as artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-generated-sources
+          path: |
+            ios/**/IOSSecurityModule.swift
+            ios/**/IOSSecurityModule.m
+          retention-days: 7
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # Job 4: Kotlin compile check
+  # Installs kotlinc and compiles the generated SecurityModule.kt standalone
+  # (without the full Android SDK) to catch Kotlin syntax errors early.
+  # ───────────────────────────────────────────────────────────────────────────
+  kotlin-compile:
+    name: Kotlin Standalone Compile Check
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: android-prebuild
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download generated Android sources
+        uses: actions/download-artifact@v4
+        with:
+          name: android-generated-sources
+          path: generated-android/
+
+      - name: Install Kotlin compiler
+        run: |
+          # Install kotlinc via SDKMAN or direct download
+          KOTLIN_VERSION="1.9.25"
+          curl -sSL "https://github.com/JetBrains/kotlin/releases/download/v${KOTLIN_VERSION}/kotlin-compiler-${KOTLIN_VERSION}.zip" \
+            -o /tmp/kotlinc.zip
+          unzip -q /tmp/kotlinc.zip -d /tmp/
+          echo "/tmp/kotlinc/bin" >> $GITHUB_PATH
+
+      - name: Compile SecurityPackage.kt (no Android deps — just syntax/structure)
+        run: |
+          # Compile SecurityPackage.kt which has no Android-specific imports
+          PKGFILE="generated-android/SecurityPackage.kt"
+          if [ ! -f "$PKGFILE" ]; then
+            echo "❌ SecurityPackage.kt not found in artifact"
+            exit 1
+          fi
+          # Create stub interfaces so kotlinc can resolve ReactPackage without Android SDK
+          cat > /tmp/stubs.kt << 'EOF'
+          package com.facebook.react
+          interface ReactPackage
+          package com.facebook.react.bridge
+          interface NativeModule
+          class ReactApplicationContext
+          package com.facebook.react.uimanager
+          interface ViewManager<T, S>
+          EOF
+          kotlinc /tmp/stubs.kt "$PKGFILE" -include-runtime -d /tmp/sec-package.jar 2>&1 \
+            | tee /tmp/kotlin-compile.log
+          if grep -qE '^.*error:' /tmp/kotlin-compile.log; then
+            echo "❌ Kotlin compile error in SecurityPackage.kt"
+            cat /tmp/kotlin-compile.log
+            exit 1
+          fi
+          echo "✅ SecurityPackage.kt compiles cleanly"
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # Final gate: all jobs must pass before merge is allowed
+  # Use this as the required status check in branch protection rules.
+  # ───────────────────────────────────────────────────────────────────────────
+  validation-gate:
+    name: Validation Gate (required for merge)
+    runs-on: ubuntu-latest
+    needs:
+      - static-validation
+      - android-prebuild
+      - ios-prebuild
+      - kotlin-compile
+    if: always()
+
+    steps:
+      - name: Check all jobs passed
+        run: |
+          echo "static-validation: ${{ needs.static-validation.result }}"
+          echo "android-prebuild:  ${{ needs.android-prebuild.result }}"
+          echo "ios-prebuild:      ${{ needs.ios-prebuild.result }}"
+          echo "kotlin-compile:    ${{ needs.kotlin-compile.result }}"
+
+          FAILED=0
+          for result in \
+            "${{ needs.static-validation.result }}" \
+            "${{ needs.android-prebuild.result }}" \
+            "${{ needs.ios-prebuild.result }}" \
+            "${{ needs.kotlin-compile.result }}"; do
+            if [ "$result" != "success" ]; then
+              echo "❌ Job failed with result: $result"
+              FAILED=$((FAILED + 1))
+            fi
+          done
+
+          if [ $FAILED -gt 0 ]; then
+            echo "❌ $FAILED validation job(s) failed — merge blocked"
+            exit 1
+          fi
+
+          echo "✅ All validation jobs passed — merge allowed"

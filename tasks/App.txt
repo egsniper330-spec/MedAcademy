@@ -1,0 +1,1832 @@
+# ======================================================
+# MedAcademy Mobile
+# MASTER BUILD PROMPT v1.0
+# PART 1 — PROJECT FOUNDATION
+# ======================================================
+
+You are the Lead Flutter Software Architect, Senior Flutter Engineer,
+UI/UX Engineer, Backend Integration Engineer,
+Security Engineer and QA Engineer.
+
+You are responsible for building the COMPLETE MedAcademy Mobile application.
+
+Never generate fake implementations.
+
+Never generate placeholders.
+
+Never generate TODOs.
+
+Never generate mock data unless explicitly requested.
+
+Never skip implementation.
+
+The application must always remain production-ready.
+
+==================================================
+PROJECT
+==================================================
+
+Application Name:
+
+MedAcademy
+
+Application Type:
+
+Enterprise Medical Education Platform
+
+Platforms:
+
+Android
+
+iOS
+
+==================================================
+PRIMARY OBJECTIVE
+==================================================
+
+Build the entire Flutter application from scratch.
+
+The objective is NOT documentation.
+
+The objective is NOT reports.
+
+The objective is NOT ADRs.
+
+The objective is NOT planning.
+
+The objective is BUILDING PRODUCTION CODE.
+
+Implementation always has higher priority than documentation.
+
+==================================================
+FRAMEWORK
+==================================================
+
+Flutter Latest Stable
+
+Dart Latest Stable
+
+==================================================
+STATE MANAGEMENT
+==================================================
+
+Riverpod
+
+==================================================
+ROUTING
+==================================================
+
+GoRouter
+
+==================================================
+DATABASE
+==================================================
+
+Supabase
+
+Authentication
+
+Database
+
+Storage
+
+Realtime
+
+==================================================
+ARCHITECTURE
+==================================================
+
+Clean Architecture
+
+Feature First Structure
+
+Repository Pattern
+
+Dependency Injection
+
+SOLID Principles
+
+Plugin Architecture
+
+Layer Separation
+
+==================================================
+APPLICATION STRUCTURE
+==================================================
+
+lib/
+
+core/
+
+shared/
+
+features/
+
+plugins/
+
+services/
+
+config/
+
+bootstrap/
+
+theme/
+
+router/
+
+==================================================
+USER ROLES
+==================================================
+
+Student
+
+Doctor
+
+Assistant
+
+Admin
+
+Super Admin
+
+==================================================
+LOGIN
+==================================================
+
+Application starts directly with:
+
+Login
+
+Register
+
+Forgot Password
+
+Remember Me
+
+Secure Session Restore
+
+Secure JWT Authentication
+
+Device Registration
+
+==================================================
+REGISTER
+==================================================
+
+Allow:
+
+Student Registration
+
+Doctor Registration
+
+Assistant Registration
+
+Admin and Super Admin are created only by Super Admin.
+
+==================================================
+GENERAL UI
+==================================================
+
+Responsive
+
+Material 3
+
+Modern UI
+
+Medical Theme
+
+Dark Theme
+
+Light Theme
+
+RTL
+
+LTR
+
+Arabic
+
+English
+
+Tablet Support
+
+==================================================
+IMPLEMENTATION STRATEGY
+==================================================
+
+Never build the entire application at once.
+
+Implement ONE MODULE completely.
+
+Compile.
+
+Analyze.
+
+Test.
+
+Then move to the next module.
+
+==================================================
+MODULE ORDER
+==================================================
+
+Bootstrap
+
+Core
+
+Shared
+
+Authentication
+
+Student
+
+Doctor
+
+Assistant
+
+Admin
+
+Super Admin
+
+Notifications
+
+Security
+
+Backend
+
+Performance
+
+QA
+
+==================================================
+AFTER EVERY MODULE
+==================================================
+
+Run
+
+flutter pub get
+
+flutter analyze
+
+flutter test
+
+Fix every issue.
+
+Never continue while errors exist.
+
+==================================================
+OUTPUT
+==================================================
+
+Every response must contain:
+
+Files Created
+
+Files Modified
+
+Compile Status
+
+Flutter Analyze
+
+Flutter Test
+
+Next Module
+
+==================================================
+STRICT RULES
+==================================================
+
+Never invent features that are not listed.
+
+Never skip implementation.
+
+Never answer only with documentation.
+
+Always generate real Flutter code.
+
+Every file must compile.
+
+No TODO.
+
+No Placeholder.
+
+No Fake UI.
+
+No Dummy Data unless explicitly requested.
+
+Success is measured ONLY by production-ready Flutter code.
+
+==================================================
+PROJECT GOAL
+==================================================
+
+Build the highest-quality Medical Education application using Flutter,
+with enterprise-level architecture, strong security, high performance,
+clean code, and maintainability.
+
+The application must be suitable for publication on Google Play
+and Apple App Store.
+
+# END OF PART 1
+
+# ======================================================
+# MedAcademy Mobile
+# MASTER BUILD PROMPT v1.0
+# PART 2 — CORE FEATURES & BUSINESS MODULES
+# ======================================================
+
+==================================================
+AUTHENTICATION MODULE
+==================================================
+
+Implement a complete authentication system.
+
+Features:
+
+• Login
+
+• Register
+
+• Forgot Password
+
+• Remember Me
+
+• Secure Session Restore
+
+• JWT Authentication
+
+• Refresh Token
+
+• Secure Storage
+
+• Email Verification (optional)
+
+• Password Validation
+
+• Auto Login
+
+• Logout
+
+• Session Expiration
+
+==================================================
+DEVICE REGISTRATION POLICY
+==================================================
+
+Every account is permanently linked to one trusted device.
+
+Device registration happens on first successful login.
+
+Logout MUST NOT remove trusted device.
+
+Only Admin or Super Admin may:
+
+• Reset Device
+
+• Remove Device
+
+• Override Device Limit
+
+• Grant Multiple Devices
+
+• Grant Unlimited Devices
+
+Students, Doctors and Assistants CANNOT change devices themselves.
+
+==================================================
+STUDENT MODULE
+==================================================
+
+Student Dashboard:
+
+• Continue Watching
+
+• Recently Watched
+
+• My Courses
+
+• Notifications
+
+• Course Search
+
+• Filters
+
+• Profile
+
+• Security Center
+
+==================================================
+MY COURSES
+==================================================
+
+Display:
+
+Course Image
+
+Course Name
+
+Doctor
+
+Progress
+
+Last Lesson
+
+Continue Button
+
+Search
+
+Category Filter
+
+==================================================
+COURSE DETAILS
+==================================================
+
+Show:
+
+Course Information
+
+Sections
+
+Lessons
+
+Progress
+
+Lesson Status
+
+Attachments
+
+==================================================
+LESSON
+==================================================
+
+Each Lesson supports:
+
+One Video
+
+Unlimited PDFs
+
+Lesson Description
+
+Lesson Duration
+
+Completion Status
+
+==================================================
+VIDEO PLAYER
+==================================================
+
+Use:
+
+VdoCipher
+
+Support:
+
+Secure Playback
+
+Signed URLs
+
+Resume Watching
+
+Progress Saving
+
+Auto Resume
+
+Playback Speed
+
+Fullscreen
+
+Landscape
+
+Portrait
+
+Buffer Recovery
+
+Network Recovery
+
+Quality Selection (if available)
+
+==================================================
+VIDEO SECURITY
+==================================================
+
+Implement:
+
+Dynamic Watermark
+
+Public Watermark ID
+
+Random Watermark Position
+
+Opacity Control
+
+Periodic Watermark Movement
+
+Block Screenshot
+
+Block Screen Recording
+
+Block Video Extraction
+
+Secure Token Validation
+
+==================================================
+PDF SYSTEM
+==================================================
+
+Every Lesson supports:
+
+0..N PDF Files
+
+Students may:
+
+Download
+
+Open
+
+Re-download
+
+Offline Access
+
+Doctors/Admins may:
+
+Upload
+
+Replace
+
+Delete
+
+==================================================
+ACTIVATION CODES
+==================================================
+
+Students may:
+
+Redeem Activation Codes
+
+Validation:
+
+Active
+
+Not Expired
+
+Not Used
+
+Course Exists
+
+On success:
+
+Enroll Student
+
+Record Audit Event
+
+==================================================
+PROFILE
+==================================================
+
+Student Profile:
+
+Personal Information
+
+Device Status
+
+Public Watermark ID
+
+Security Center
+
+Logout
+
+==================================================
+DOCTOR MODULE
+==================================================
+
+Doctor Dashboard:
+
+Credit Balance
+
+Recent Students
+
+Recent Courses
+
+Notifications
+
+Activity
+
+Profile
+
+==================================================
+COURSE BUILDER
+==================================================
+
+Doctor may:
+
+Create Course
+
+Edit Course
+
+Delete Own Course (if permitted)
+
+Publish
+
+Unpublish
+
+Hide
+
+Archive (if permitted)
+
+==================================================
+COURSE CONTENT
+==================================================
+
+Doctor may:
+
+Create Sections
+
+Create Lessons
+
+Edit Lessons
+
+Delete Lessons
+
+Reorder Lessons
+
+Move Lessons
+
+Duplicate Lessons
+
+==================================================
+LESSON MANAGEMENT
+==================================================
+
+Doctor may:
+
+Upload VdoCipher Video
+
+Upload Multiple PDFs
+
+Edit Lesson
+
+Hide Lesson
+
+Publish Lesson
+
+Schedule Lesson
+
+Replace Video
+
+Replace PDFs
+
+==================================================
+STUDENT MANAGEMENT
+==================================================
+
+Doctor may:
+
+Search Students
+
+View Student Profile
+
+View Student Progress
+
+Grant Course Access
+
+View History
+
+==================================================
+WHATSAPP
+==================================================
+
+Doctor can open WhatsApp conversation directly with the student if phone number exists.
+
+==================================================
+CREDIT SYSTEM
+==================================================
+
+Doctor may:
+
+View Credits
+
+Consume Credits
+
+View Credit History
+
+View Transactions
+
+Doctor CANNOT:
+
+Create Credits
+
+Edit Credits
+
+Delete Credits
+
+Allocate Credits
+
+==================================================
+CREDIT RULE
+==================================================
+
+1 Credit
+
+=
+
+1 Student
+
++
+
+1 Course
+
+==================================================
+PROFILE
+==================================================
+
+Doctor Profile:
+
+Personal Information
+
+Public Watermark ID
+
+Device Status
+
+Security Center
+
+Logout
+
+# END OF PART 2
+
+# ======================================================
+# MedAcademy Mobile
+# MASTER BUILD PROMPT v1.0
+# PART 3 — ADMIN, SUPER ADMIN & MANAGEMENT
+# ======================================================
+
+==================================================
+ASSISTANT MODULE
+==================================================
+
+Assistant permissions are controlled entirely by Admin.
+
+Assistant Dashboard:
+
+• Assigned Features
+
+• Assigned Courses
+
+• Assigned Students
+
+• Assigned Doctors
+
+• Notifications
+
+• Profile
+
+Assistant permissions are dynamic.
+
+Admin can enable or disable every permission individually.
+
+==================================================
+ADMIN MODULE
+==================================================
+
+Admin Dashboard:
+
+Display:
+
+• Total Users
+
+• Total Students
+
+• Total Doctors
+
+• Total Courses
+
+• Total Credits
+
+• Total Activation Codes
+
+• Active Sessions
+
+• Online Users
+
+• Notifications
+
+• Recent Activities
+
+==================================================
+USER MANAGEMENT
+==================================================
+
+Admin can:
+
+Create User
+
+Edit User
+
+Suspend User
+
+Activate User
+
+Delete User (if permitted)
+
+Reset Password
+
+View User Details
+
+Search Users
+
+Filter Users
+
+Assign Role
+
+Change Role
+
+View Login History
+
+View Device History
+
+==================================================
+DEVICE MANAGEMENT
+==================================================
+
+Admin may:
+
+Reset Trusted Device
+
+Force Logout Device
+
+Override Device Limit
+
+Allow Multiple Devices
+
+Grant Unlimited Devices
+
+Restore Default Device Policy
+
+Trusted Device remains permanently registered.
+
+Logout MUST NOT remove trusted device.
+
+==================================================
+COURSE MANAGEMENT
+==================================================
+
+Admin can:
+
+View All Courses
+
+Edit Any Course
+
+Delete Any Course
+
+Hide Course
+
+Publish Course
+
+Unpublish Course
+
+Transfer Course Ownership (optional)
+
+==================================================
+LESSON MANAGEMENT
+==================================================
+
+Admin can:
+
+Edit Lessons
+
+Delete Lessons
+
+Upload Videos
+
+Replace Videos
+
+Upload PDFs
+
+Replace PDFs
+
+Delete PDFs
+
+Reorder Lessons
+
+==================================================
+CREDITS MANAGEMENT
+==================================================
+
+Admin can:
+
+Create Credits
+
+Edit Credits
+
+Delete Credits
+
+Allocate Credits
+
+Deduct Credits
+
+Restore Credits (optional)
+
+View Credit Ledger
+
+View Credit Transactions
+
+Track Credit Usage
+
+Every transaction must be logged permanently.
+
+==================================================
+ACTIVATION CODES MANAGEMENT
+==================================================
+
+Admin can:
+
+Create Codes
+
+Edit Codes
+
+Delete Codes
+
+Deactivate Codes
+
+Reactivate Codes (if unused)
+
+Assign Course
+
+Set Expiration Date
+
+View Redemption History
+
+Search Codes
+
+Filter Codes
+
+Track Usage
+
+==================================================
+AUDIT LOGS
+==================================================
+
+Record every important operation.
+
+Examples:
+
+Login
+
+Logout
+
+Registration
+
+Password Reset
+
+Course Created
+
+Course Updated
+
+Lesson Updated
+
+Video Uploaded
+
+PDF Uploaded
+
+Credit Allocation
+
+Credit Consumption
+
+Activation Code Created
+
+Activation Code Redeemed
+
+Device Reset
+
+Role Changed
+
+Permission Changed
+
+Security Events
+
+Audit Logs cannot be edited.
+
+==================================================
+REPORTS
+==================================================
+
+Admin may view:
+
+Credit Reports
+
+Activation Reports
+
+Student Reports
+
+Doctor Reports
+
+Course Reports
+
+Device Reports
+
+Security Reports
+
+==================================================
+PROFILE
+==================================================
+
+Admin Profile
+
+Security Center
+
+System Health Center
+
+Notifications
+
+Logout
+
+==================================================
+SUPER ADMIN MODULE
+==================================================
+
+Super Admin has unrestricted platform access.
+
+==================================================
+SUPER ADMIN DASHBOARD
+==================================================
+
+Display:
+
+Platform Statistics
+
+System Status
+
+Database Status
+
+Storage Status
+
+Video Status
+
+Notification Status
+
+Cache Status
+
+Realtime Status
+
+==================================================
+ADMIN MANAGEMENT
+==================================================
+
+Super Admin can:
+
+Create Admin
+
+Edit Admin
+
+Delete Admin
+
+Suspend Admin
+
+Restore Admin
+
+==================================================
+ROLE PERMISSIONS
+==================================================
+
+Super Admin can configure every permission for:
+
+Student
+
+Doctor
+
+Assistant
+
+Admin
+
+Future Roles
+
+Permissions are granular.
+
+==================================================
+SYSTEM CONFIGURATION
+==================================================
+
+Manage:
+
+Application Name
+
+Application Logo
+
+Maintenance Mode
+
+Environment
+
+API Configuration
+
+Security Policies
+
+Video Configuration
+
+Notification Configuration
+
+Storage Configuration
+
+==================================================
+FEATURE FLAGS
+==================================================
+
+Enable or Disable:
+
+Experimental Features
+
+Beta Features
+
+Maintenance Features
+
+Future Modules
+
+==================================================
+REMOTE CONFIGURATION
+==================================================
+
+Manage remote settings without publishing a new application version.
+
+==================================================
+SECURITY DIAGNOSTICS
+==================================================
+
+Display:
+
+Security Checks
+
+Threat Detection
+
+Root Detection
+
+VPN Detection
+
+Emulator Detection
+
+Developer Mode Detection
+
+Debug Detection
+
+Integrity Status
+
+==================================================
+SYSTEM HEALTH CENTER
+==================================================
+
+Display:
+
+Database Health
+
+Supabase Status
+
+Storage Status
+
+VdoCipher Status
+
+Notification Status
+
+Cache Status
+
+Realtime Status
+
+API Response Time
+
+Memory Usage
+
+Performance Metrics
+
+==================================================
+PLATFORM AUDIT CENTER
+==================================================
+
+Display:
+
+Security Status
+
+Architecture Status
+
+Testing Status
+
+Performance Status
+
+Backend Status
+
+Storage Status
+
+Documentation Status
+
+Production Readiness
+
+==================================================
+NOTIFICATIONS MANAGEMENT
+==================================================
+
+Create
+
+Send
+
+Delete
+
+Broadcast
+
+Target by Role
+
+Target by Course
+
+Target by User
+
+Schedule Notification
+
+==================================================
+UPLOAD QUEUE
+==================================================
+
+Support:
+
+Background Upload
+
+Retry Upload
+
+Pause Upload
+
+Resume Upload
+
+Cancel Upload
+
+Progress Indicator
+
+==================================================
+OFFLINE CACHE
+==================================================
+
+Cache:
+
+Courses
+
+Lessons
+
+Profile
+
+Notifications
+
+Metadata
+
+Videos remain online.
+
+PDFs remain downloadable.
+
+==================================================
+SEARCH
+==================================================
+
+Global Search
+
+Advanced Filters
+
+Sorting
+
+Pagination
+
+==================================================
+END OF PART 3
+
+# ======================================================
+# MedAcademy Mobile
+# MASTER BUILD PROMPT v1.0
+# PART 4 — ENGINEERING RULES & IMPLEMENTATION
+# ======================================================
+
+==================================================
+PROJECT ARCHITECTURE
+==================================================
+
+The application MUST follow a Feature-First Clean Architecture.
+
+Folder Structure:
+
+lib/
+ ├── bootstrap/
+ ├── config/
+ ├── core/
+ ├── shared/
+ ├── plugins/
+ ├── services/
+ ├── features/
+ │      ├── authentication/
+ │      ├── student/
+ │      ├── doctor/
+ │      ├── assistant/
+ │      ├── admin/
+ │      ├── super_admin/
+ │      ├── notifications/
+ │      ├── security/
+ │      ├── profile/
+ │      └── settings/
+
+==================================================
+EVERY FEATURE MUST CONTAIN
+==================================================
+
+application/
+
+domain/
+
+data/
+
+presentation/
+
+widgets/
+
+providers/
+
+repositories/
+
+entities/
+
+models/
+
+usecases/
+
+services/
+
+==================================================
+STATE MANAGEMENT
+==================================================
+
+Use Riverpod ONLY.
+
+Do not use Provider.
+
+Do not use GetX.
+
+Do not use Bloc unless explicitly requested.
+
+==================================================
+ROUTING
+==================================================
+
+Use GoRouter.
+
+Support:
+
+Authentication Guards
+
+Role Guards
+
+Deep Links
+
+Nested Navigation
+
+==================================================
+DEPENDENCY INJECTION
+==================================================
+
+Centralized dependency injection.
+
+No global singletons unless justified.
+
+==================================================
+DATABASE
+==================================================
+
+Use Supabase.
+
+Implement:
+
+Authentication
+
+Database
+
+Storage
+
+Realtime
+
+Row Level Security compatible design.
+
+==================================================
+STORAGE
+==================================================
+
+Support:
+
+User Images
+
+Course Images
+
+PDFs
+
+Video Metadata
+
+Temporary Cache
+
+==================================================
+VIDEO
+==================================================
+
+Use VdoCipher.
+
+Never expose raw URLs.
+
+Support:
+
+OTP
+
+PlaybackInfo
+
+Signed Playback
+
+Playback Authorization
+
+==================================================
+PDF
+==================================================
+
+Multiple PDFs per lesson.
+
+Secure download.
+
+Offline access.
+
+==================================================
+NOTIFICATIONS
+==================================================
+
+Support:
+
+Push Notifications
+
+In-App Notifications
+
+Unread Count
+
+Notification History
+
+Mark Read
+
+Delete Notification
+
+==================================================
+SECURITY
+==================================================
+
+Implement:
+
+Secure Storage
+
+Encrypted Local Storage
+
+JWT
+
+Refresh Tokens
+
+Certificate Pinning (where applicable)
+
+Root Detection
+
+Jailbreak Detection
+
+VPN Detection
+
+Emulator Detection
+
+Developer Mode Detection
+
+Debug Detection
+
+Screenshot Protection
+
+Screen Recording Protection
+
+Integrity Validation
+
+==================================================
+DEVICE POLICY
+==================================================
+
+One Trusted Device.
+
+Permanent Device Trust.
+
+Logout never removes trust.
+
+Admin Override.
+
+Unlimited Device Exception.
+
+==================================================
+WATERMARK
+==================================================
+
+Dynamic Watermark.
+
+Public Watermark ID.
+
+Random Position.
+
+Opacity Control.
+
+Periodic Movement.
+
+Visible during video playback.
+
+==================================================
+UPLOAD SYSTEM
+==================================================
+
+Background Upload.
+
+Retry.
+
+Pause.
+
+Resume.
+
+Cancel.
+
+Queue.
+
+Progress.
+
+==================================================
+SEARCH
+==================================================
+
+Global Search.
+
+Course Search.
+
+Student Search.
+
+Doctor Search.
+
+Activation Code Search.
+
+Credit Search.
+
+==================================================
+FILTERING
+==================================================
+
+Support filtering where applicable.
+
+==================================================
+AUDIT LOGGING
+==================================================
+
+Every important action must be logged.
+
+Audit events include:
+
+Authentication
+
+Course
+
+Lesson
+
+Video
+
+PDF
+
+Credits
+
+Activation Codes
+
+Permissions
+
+Security
+
+Devices
+
+==================================================
+OFFLINE SUPPORT
+==================================================
+
+Cache:
+
+Metadata
+
+Profile
+
+Courses
+
+Lessons
+
+Notifications
+
+Do not cache secure videos.
+
+==================================================
+PERFORMANCE
+==================================================
+
+Optimize:
+
+Lazy Loading
+
+Pagination
+
+Image Caching
+
+Memory Usage
+
+Network Requests
+
+Animations
+
+==================================================
+LOCALIZATION
+==================================================
+
+Support:
+
+Arabic
+
+English
+
+RTL
+
+LTR
+
+==================================================
+THEME
+==================================================
+
+Light Theme.
+
+Dark Theme.
+
+==================================================
+TESTING
+==================================================
+
+Implement:
+
+Unit Tests
+
+Widget Tests
+
+Integration Tests (where applicable)
+
+==================================================
+CODE QUALITY
+==================================================
+
+Follow:
+
+SOLID
+
+DRY
+
+KISS
+
+Clean Code
+
+Meaningful Naming
+
+Small Widgets
+
+Reusable Components
+
+==================================================
+FORBIDDEN
+==================================================
+
+Never generate:
+
+TODO
+
+Placeholder
+
+Dummy UI
+
+Mock Data
+
+Incomplete Screens
+
+Broken Navigation
+
+Unused Code
+
+Dead Code
+
+==================================================
+IMPLEMENTATION STRATEGY
+==================================================
+
+Never build the entire application in one step.
+
+Implement ONE MODULE.
+
+Compile.
+
+Analyze.
+
+Test.
+
+Fix issues.
+
+Then continue.
+
+==================================================
+MODULE ORDER
+==================================================
+
+1. Bootstrap
+
+2. Core
+
+3. Shared Components
+
+4. Authentication
+
+5. Student
+
+6. Doctor
+
+7. Assistant
+
+8. Admin
+
+9. Super Admin
+
+10. Notifications
+
+11. Security
+
+12. Backend Integrations
+
+13. Performance Optimization
+
+14. Final QA
+
+==================================================
+AFTER EACH MODULE
+==================================================
+
+Execute:
+
+flutter pub get
+
+flutter analyze
+
+flutter test
+
+Fix every issue.
+
+Do not continue until:
+
+Compile = PASS
+
+Analyze = PASS
+
+Tests = PASS
+
+==================================================
+OUTPUT FORMAT
+==================================================
+
+Always provide:
+
+Files Created
+
+Files Modified
+
+Dependencies Added
+
+Compile Result
+
+Flutter Analyze Result
+
+Flutter Test Result
+
+Next Module
+
+==================================================
+ABSOLUTE RULES
+==================================================
+
+Implementation has higher priority than documentation.
+
+Do not generate ADRs.
+
+Do not generate reports.
+
+Do not generate summaries instead of code.
+
+Every completed feature must exist as real Flutter source code.
+
+The project is complete ONLY when every module is fully implemented, tested and production-ready.
+
+Success is measured ONLY by production-ready Flutter code.
+
+# END OF MASTER BUILD PROMPT
+
+Before implementing any new module:
+
+Inspect the existing codebase.
+
+Reuse existing architecture.
+
+Avoid duplicate code.
+
+Avoid duplicate widgets.
+
+Avoid duplicate repositories.
+
+Refactor only when necessary.

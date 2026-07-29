@@ -1,0 +1,66 @@
+# Learn more https://docs.github.com/en/get-started/getting-started-with-git/ignoring-files
+
+# dependencies
+node_modules/
+
+# Expo
+.expo/
+dist/
+web-build/
+expo-env.d.ts
+
+# Native
+.kotlin/
+*.orig.*
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
+
+# Metro
+.metro-health-check*
+
+# debug
+npm-debug.*
+yarn-debug.*
+yarn-error.*
+
+# macOS
+.DS_Store
+*.pem
+
+# local env files — never commit real credentials
+# .env.local.template IS committed (safe — contains only empty placeholders)
+.env
+.env.local
+.env.development.local
+.env.staging.local
+.env.production.local
+.env*.local
+
+# Supabase server-side secrets (CLI use only — never in app bundle)
+supabase/.env.secrets
+
+# typescript
+*.tsbuildinfo
+
+# generated native folders
+/ios
+/android
+
+# Claude Code
+.claude/
+output/
+output.tar.gz
+
+.native-wind-cache/
+.metro-cache/
+package.json.*
+.sync
+history/*.json
+.claude/
+/.skills
+/tasks
+package.json.[0-9]*
+.native-wind-cache

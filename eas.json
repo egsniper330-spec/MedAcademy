@@ -1,0 +1,67 @@
+{
+  "cli": {
+    "version": ">= 12.0.0"
+  },
+  "build": {
+    "development": {
+      "developmentClient": true,
+      "distribution": "internal",
+      "android": {
+        "buildType": "apk",
+        "gradleCommand": ":app:assembleDebug"
+      },
+      "ios": {
+        "simulator": true
+      },
+      "env": {
+        "EXPO_PUBLIC_APP_ID": "",
+        "EXPO_PUBLIC_SUPABASE_URL": "",
+        "EXPO_PUBLIC_SUPABASE_ANON_KEY": ""
+      }
+    },
+    "development-device": {
+      "developmentClient": true,
+      "distribution": "internal",
+      "android": {
+        "buildType": "apk"
+      },
+      "ios": {
+        "simulator": false
+      }
+    },
+    "release-apk": {
+      "distribution": "internal",
+      "android": {
+        "buildType": "apk",
+        "gradleCommand": ":app:assembleRelease"
+      },
+      "env": {
+        "EXPO_PUBLIC_APP_ID": "app-czyg340mpc75",
+        "EXPO_PUBLIC_SUPABASE_URL": "https://xdvjwfuqipatkpimejcb.supabase.co",
+        "EXPO_PUBLIC_SUPABASE_ANON_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inhkdmp3ZnVxaXBhdGtwaW1lamNiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM5NzA2MzQsImV4cCI6MjA5OTU0NjYzNH0.QMTGKiInyYK8kJjrpS39wg7b_gBWhhCbeAUFJJv5neM"
+      }
+    },
+    "preview": {
+      "distribution": "internal",
+      "android": {
+        "buildType": "apk"
+      },
+      "env": {
+        "EXPO_PUBLIC_APP_ID": "app-czyg340mpc75",
+        "EXPO_PUBLIC_SUPABASE_URL": "https://xdvjwfuqipatkpimejcb.supabase.co",
+        "EXPO_PUBLIC_SUPABASE_ANON_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inhkdmp3ZnVxaXBhdGtwaW1lamNiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM5NzA2MzQsImV4cCI6MjA5OTU0NjYzNH0.QMTGKiInyYK8kJjrpS39wg7b_gBWhhCbeAUFJJv5neM"
+      }
+    },
+    "production": {
+      "autoIncrement": true,
+      "env": {
+        "EXPO_PUBLIC_APP_ID": "app-czyg340mpc75",
+        "EXPO_PUBLIC_SUPABASE_URL": "https://xdvjwfuqipatkpimejcb.supabase.co",
+        "EXPO_PUBLIC_SUPABASE_ANON_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inhkdmp3ZnVxaXBhdGtwaW1lamNiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM5NzA2MzQsImV4cCI6MjA5OTU0NjYzNH0.QMTGKiInyYK8kJjrpS39wg7b_gBWhhCbeAUFJJv5neM"
+      }
+    }
+  },
+  "submit": {
+    "production": {}
+  }
+}

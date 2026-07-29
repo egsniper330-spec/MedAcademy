@@ -1,0 +1,69 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* MedAcademy Brand — Neumorphic Light */
+    /* Primary: Deep Navy #081A35 | Royal Blue #1E90FF | Accent #2DA8FF */
+    --background: 216 40% 93%;
+    --foreground: 216 60% 12%;
+    --card: 216 40% 93%;
+    --card-foreground: 216 60% 12%;
+    --popover: 216 40% 93%;
+    --popover-foreground: 216 60% 12%;
+    --primary: 210 100% 56%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 212 30% 87%;
+    --secondary-foreground: 216 60% 12%;
+    --muted: 212 24% 88%;
+    --muted-foreground: 215 18% 46%;
+    --accent: 205 96% 58%;
+    --accent-foreground: 0 0% 100%;
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 215 24% 82%;
+    --input: 216 40% 93%;
+    --ring: 210 100% 56%;
+    --radius: 1rem;
+    /* Neumorphic shadow tokens */
+    --neu-base: hsl(216, 40%, 93%);
+    --neu-shadow-dark: rgba(160, 185, 215, 0.78);
+    --neu-shadow-light: rgba(255, 255, 255, 0.88);
+    --success: 142 72% 36%;
+    --success-foreground: 0 0% 100%;
+    --warning: 38 92% 50%;
+    --warning-foreground: 0 0% 100%;
+  }
+
+  .dark {
+    /* MedAcademy Brand — Neumorphic Dark */
+    /* Dark base mirrors Deep Navy #081A35 */
+    --background: 216 62% 10%;
+    --foreground: 210 40% 92%;
+    --card: 216 62% 10%;
+    --card-foreground: 210 40% 92%;
+    --popover: 216 58% 13%;
+    --popover-foreground: 210 40% 92%;
+    --primary: 210 100% 60%;
+    --primary-foreground: 216 62% 8%;
+    --secondary: 216 30% 18%;
+    --secondary-foreground: 210 40% 92%;
+    --muted: 216 28% 15%;
+    --muted-foreground: 215 18% 55%;
+    --accent: 205 96% 58%;
+    --accent-foreground: 216 62% 8%;
+    --destructive: 0 62% 52%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 216 26% 20%;
+    --input: 216 62% 10%;
+    --ring: 210 100% 60%;
+    --neu-base: hsl(216, 62%, 10%);
+    --neu-shadow-dark: rgba(4, 10, 22, 0.72);
+    --neu-shadow-light: rgba(30, 60, 110, 0.42);
+    --success: 142 60% 42%;
+    --success-foreground: 0 0% 100%;
+    --warning: 38 86% 52%;
+    --warning-foreground: 0 0% 100%;
+  }
+}

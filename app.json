@@ -1,0 +1,138 @@
+{
+  "expo": {
+    "name": "MedAcademy Mobile App",
+    "slug": "medacademy",
+    "scheme": "medacademy",
+    "version": "1.0.515",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "automatic",
+    "ios": {
+      "supportsTablet": true,
+      "buildNumber": "204",
+      "bundleIdentifier": "com.medacademy.app",
+      "entitlements": {
+        "com.apple.developer.devicecheck": true,
+        "com.apple.developer.app-attest-environment": "production"
+      },
+      "infoPlist": {
+        "NSFaceIDUsageDescription": "Allow MedAcademy to use Face ID for secure login.",
+        "NSCameraUsageDescription": "Allow MedAcademy to access your camera to take profile photos and course images.",
+        "NSMicrophoneUsageDescription": "Allow MedAcademy to access your microphone to record audio messages and voice lectures.",
+        "NSPhotoLibraryUsageDescription": "Allow MedAcademy to access your photo library to upload profile pictures and course thumbnails.",
+        "NSPhotoLibraryAddUsageDescription": "Allow MedAcademy to save media to your photo library.",
+        "NSUserNotificationsUsageDescription": "Allow MedAcademy to send you notifications about new lectures, assignments, exams, course updates, and messages.",
+        "NSAppTransportSecurity": {
+          "NSAllowsArbitraryLoads": false
+        },
+        "NSPrivacyAccessedAPITypes": [
+          {
+            "NSPrivacyAccessedAPIType": "NSPrivacyAccessedAPICategoryFileTimestamp",
+            "NSPrivacyAccessedAPITypeReasons": [
+              "C617.1"
+            ]
+          },
+          {
+            "NSPrivacyAccessedAPIType": "NSPrivacyAccessedAPICategorySystemBootTime",
+            "NSPrivacyAccessedAPITypeReasons": [
+              "35F9.1"
+            ]
+          }
+        ]
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#081A35"
+      },
+      "predictiveBackGestureEnabled": false,
+      "versionCode": 204,
+      "package": "com.medacademy.app"
+    },
+    "web": {
+      "bundler": "metro",
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      "./plugins/withSecurityModule",
+      "./plugins/withProguardRules",
+      "expo-router",
+      "expo-asset",
+      "expo-sqlite",
+      "expo-font",
+      "expo-system-ui",
+      [
+        "expo-secure-store",
+        {
+          "faceIDPermission": "Allow MedAcademy to use Face ID for secure login."
+        }
+      ],
+      "expo-web-browser",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Allow MedAcademy to access your photos for uploading course thumbnails and covers.",
+          "cameraPermission": "Allow MedAcademy to access your camera."
+        }
+      ],
+      "expo-document-picker",
+      [
+        "expo-file-system",
+        {}
+      ],
+      "expo-image",
+      "@react-native-async-storage/expo-with-async-storage",
+      "expo-sharing",
+      "expo-video",
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/icon.png",
+          "color": "#1E90FF",
+          "androidMode": "default",
+          "androidCollapsedTitle": "MedAcademy",
+          "iosDisplayInForeground": true,
+          "sounds": []
+        }
+      ],
+      [
+        "expo-media-library",
+        {
+          "photosPermission": "Allow MedAcademy to access your photos.",
+          "savePhotosPermission": "Allow MedAcademy to save media to your library.",
+          "isAccessMediaLocationEnabled": true
+        }
+      ],
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "minSdkVersion": 24,
+            "compileSdkVersion": 36,
+            "targetSdkVersion": 36,
+            "enableProguardInReleaseBuilds": true,
+            "abiFilters": [
+              "armeabi-v7a",
+              "arm64-v8a",
+              "x86_64"
+            ],
+            "extraMavenRepos": [
+              "https://github.com/VdoCipher/maven-repo/raw/master/repo"
+            ]
+          },
+          "ios": {
+            "deploymentTarget": "15.1"
+          }
+        }
+      ],
+      "expo-haptics"
+    ],
+    "router": {
+      "root": "src"
+    },
+    "experiments": {
+      "typedRoutes": true
+    }
+  }
+}
