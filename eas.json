@@ -54,6 +54,9 @@
     },
     "production": {
       "autoIncrement": true,
+      "ios": {
+        "distribution": "store"
+      },
       "env": {
         "EXPO_PUBLIC_APP_ID": "app-czyg340mpc75",
         "EXPO_PUBLIC_SUPABASE_URL": "https://xdvjwfuqipatkpimejcb.supabase.co",
