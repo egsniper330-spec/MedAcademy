@@ -3,7 +3,7 @@
     "name": "MedAcademy Mobile App",
     "slug": "medacademy",
     "scheme": "medacademy",
-    "version": "1.0.517",
+    "version": "1.0.518",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "automatic",
@@ -23,7 +23,9 @@
         "NSPhotoLibraryUsageDescription": "Allow MedAcademy to access your photo library to upload profile pictures and course thumbnails.",
         "NSPhotoLibraryAddUsageDescription": "Allow MedAcademy to save media to your photo library.",
         "NSUserNotificationsUsageDescription": "Allow MedAcademy to send you notifications about new lectures, assignments, exams, course updates, and messages.",
-        "UIBackgroundModes": ["remote-notification"],
+        "UIBackgroundModes": [
+          "remote-notification"
+        ],
         "NSAppTransportSecurity": {
           "NSAllowsArbitraryLoads": false
         },
@@ -132,6 +134,11 @@
     ],
     "router": {
       "root": "src"
+    },
+    "extra": {
+      "eas": {
+        "projectId": "YOUR_EXPO_PROJECT_ID_HERE"
+      }
     },
     "experiments": {
       "typedRoutes": true
