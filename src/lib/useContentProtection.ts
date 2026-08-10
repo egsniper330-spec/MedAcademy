@@ -11,6 +11,10 @@
  * onPauseVideo: called immediately when recording is detected on Android.
  *               The lesson screen passes its pause handler here so the video
  *               stops before the overlay appears.
+ *
+ * Super Admin bypass: when isSuperAdmin is true all protection is disabled.
+ * The SA is allowed to screenshot/record in their administrative capacity.
+ * Must come from SecurityContext.isSuperAdmin (backend-verified profile role).
  */
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { supabase } from '@/client/supabase';
@@ -47,6 +51,13 @@ export function useContentProtection(
   enabled: boolean,
   /** Optional: called immediately when recording starts — use to pause video */
   onPauseVideo?: () => void,
+  /**
+   * True when the authenticated session belongs to a verified Super Admin.
+   * When true, all content protection is disabled — FLAG_SECURE is released,
+   * screenshot/recording listeners are not installed, and violations are never
+   * reported. Must come from SecurityContext.isSuperAdmin.
+   */
+  isSuperAdmin?: boolean,
 ): ContentProtectionState {
   const [screenshotDetected, setScreenshotDetected] = useState(false);
   const [recordingActive, setRecordingActive]       = useState(false);
@@ -128,6 +139,8 @@ export function useContentProtection(
   useEffect(() => {
     if (!enabled || process.env.EXPO_OS === 'web') return;
     if (process.env.EXPO_OS !== 'android') return;
+    // Super Admin bypass: do not apply FLAG_SECURE for SA sessions
+    if (isSuperAdmin) return;
 
     let cleanup: (() => void) | undefined;
     (async () => {
@@ -141,7 +154,7 @@ export function useContentProtection(
     })();
 
     return () => { cleanup?.(); };
-  }, [enabled]);
+  }, [enabled, isSuperAdmin]);
 
   // ── Android: native screen-recording detection ─────────────────────────────
   // Two-layer detection on Android:
@@ -149,14 +162,16 @@ export function useContentProtection(
   //   2. JS-side poll (500 ms fallback):   in case the native emitter is not yet
   //      wired up (e.g. first install before first EAS prebuild runs)
   // When recording starts → pause video immediately + show overlay + report.
+  // Super Admin bypass: SA is allowed to record in their administrative capacity.
   useEffect(() => {
     if (!enabled || process.env.EXPO_OS !== 'android') return;
+    if (isSuperAdmin) return;
 
     let alreadyReported = false;
 
     const handleStart = () => {
       if (!isMounted.current) return;
-      onPauseVideo?.();           // pause video before overlay appears
+      onPauseVideo?.();
       setRecordingActive(true);
       if (!alreadyReported) {
         alreadyReported = true;
@@ -194,14 +209,16 @@ export function useContentProtection(
     };
   // reportViolation and onPauseVideo are stable callbacks (useCallback / inline)
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [enabled]);
+  }, [enabled, isSuperAdmin]);
 
   // ── iOS screenshot detection ───────────────────────────────────────────────
   // Layer 1: IOSSecurityModule NativeEventEmitter (iOSScreenshotTaken)
   //          Fires from UIApplication.userDidTakeScreenshotNotification — instant.
   // Layer 2: expo-screen-capture addScreenshotListener (fallback for Expo Go / older builds)
+  // Super Admin bypass: SA is allowed to screenshot in their administrative capacity.
   useEffect(() => {
     if (!enabled || process.env.EXPO_OS !== 'ios') return;
+    if (isSuperAdmin) return;
 
     // Layer 1: native module emitter (preferred — faster, no JS thread polling)
     const unsubNative = onNativeScreenshotTaken(async () => {
@@ -229,7 +246,7 @@ export function useContentProtection(
       unsubNative();
       expoSub?.remove();
     };
-  }, [enabled, reportViolation]);
+  }, [enabled, isSuperAdmin, reportViolation]);
 
   // ── iOS screen recording detection ────────────────────────────────────────
   // Layer 1: IOSSecurityModule NativeEventEmitter push events
@@ -237,8 +254,10 @@ export function useContentProtection(
   //          Fired by UIScreen.capturedDidChangeNotification + 0.5s timer in Swift.
   // Layer 2: JS-side poll via isNativeScreenBeingRecorded() (500 ms fallback)
   //          Handles Expo Go and first-install before prebuild runs.
+  // Super Admin bypass: SA is allowed to record in their administrative capacity.
   useEffect(() => {
     if (!enabled || process.env.EXPO_OS !== 'ios') return;
+    if (isSuperAdmin) return;
 
     let alreadyReported = false;
 
@@ -259,7 +278,6 @@ export function useContentProtection(
     };
 
     // Layer 1: subscribe to IOSSecurityModule NativeEventEmitter push events
-    // onScreenRecordingStarted/Stopped now routes to iOSScreenRecordingStarted/Stopped on iOS
     const unsubStart = onScreenRecordingStarted(() => { void handleStart(); });
     const unsubStop  = onScreenRecordingStopped(handleStop);
 
@@ -282,7 +300,7 @@ export function useContentProtection(
       if (recordingPollRef.current) clearInterval(recordingPollRef.current);
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [enabled]);
+  }, [enabled, isSuperAdmin]);
 
   const acknowledgeScreenshot = useCallback(() => {
     setScreenshotDetected(false);

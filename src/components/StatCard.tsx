@@ -1,7 +1,7 @@
 import React, { useRef } from 'react';
-import { Animated, FlatList, View, Text, useWindowDimensions, useColorScheme, Platform } from 'react-native';
+import { Animated, FlatList, View, Text, useColorScheme, Platform } from 'react-native';
 import { NeuCard } from '@/components/NeuCard';
-import { neuColors } from '@/lib/neu';
+import { neuColors, useLayout } from '@/lib/neu';
 import { spacing, radius, typography, iconContainer } from '@/lib/ds';
 
 // ─── Simple inline StatCard (admin / doctor / superadmin dashboards) ──────────
@@ -46,24 +46,26 @@ export interface StatCardItem {
   isFuture?: boolean;
 }
 
-// Card height is fixed — FlatList needs it for getItemLayout.
-const CARD_HEIGHT = 118;
 const GAP = spacing.sm;
 
 export function StatCardCarousel({ cards }: { cards: StatCardItem[] }) {
-  const { width: screenWidth } = useWindowDimensions();
   const scheme = useColorScheme();
   const isDark = scheme === 'dark';
   const c = isDark ? neuColors.dark : neuColors.light;
+  const layout = useLayout();
 
-  // Responsive card width:
-  //  Tablets (≥768): ~28% screen width, max 180
-  //  Phones:          ~40% screen width, max 155
-  //  Floor at 130 so cards never clip on iPhone SE (320pt) or small Androids
-  const isTablet = screenWidth >= 768;
-  const CARD_WIDTH = isTablet
-    ? Math.max(130, Math.min(180, Math.floor(screenWidth * 0.28)))
-    : Math.max(130, Math.min(155, Math.floor(screenWidth * 0.40)));
+  // Fluid card dimensions — derived entirely from adaptive tokens.
+  // cardImageHeight is a 16:9 fluid value (140–320dp); we halve it for a portrait
+  // stat card so it scales continuously: ~70dp compact → ~160dp large tablet.
+  // CARD_HEIGHT: touchTarget (44–52dp) × 2.5 gives a comfortable card height
+  // that never clips content on small phones and never wastes space on tablets.
+  const CARD_HEIGHT = Math.round(layout.touchTarget * 2.5);
+  // Card width: ~42% of available content width (after gutters), clamped to a
+  // range that keeps cards readable. No breakpoint — pure fluid scaling.
+  const availableWidth = layout.width - layout.screenPx * 2;
+  const CARD_WIDTH = Math.round(
+    Math.max(layout.touchTarget * 2.8, Math.min(availableWidth * 0.45, layout.touchTarget * 4.2))
+  );
   const SNAP_INTERVAL = CARD_WIDTH + GAP;
 
   const scrollX = useRef(new Animated.Value(0)).current;
@@ -106,10 +108,13 @@ export function StatCardCarousel({ cards }: { cards: StatCardItem[] }) {
           overflow: Platform.OS === 'android' ? 'hidden' : 'visible',
         }}
       >
-        <NeuCard radius={radius.lg} style={{ height: CARD_HEIGHT, padding: spacing.md, justifyContent: 'space-between' }}>
+        <NeuCard radius={layout.cardRadius} style={{ height: CARD_HEIGHT, padding: layout.cardPx, justifyContent: 'space-between' }}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.sm }}>
             <View style={{
-              width: 36, height: 36, borderRadius: radius.md,
+              // Icon container: fluid 32–44dp, tracks touchTarget
+              width: Math.round(layout.touchTarget * 0.76),
+              height: Math.round(layout.touchTarget * 0.76),
+              borderRadius: layout.cardRadius / 2,
               backgroundColor: item.isFuture ? `${c.text}10` : item.color,
               alignItems: 'center', justifyContent: 'center',
               overflow: 'hidden',

@@ -32,11 +32,14 @@ type ContactItem = {
 };
 
 // ── Animated contact card ─────────────────────────────────────────────────────
-function ContactCard({ item, index }: { item: ContactItem; index: number }) {
+function ContactCard({ item }: { item: ContactItem; index: number }) {
   const isDark = useColorScheme() === 'dark';
   const c = isDark ? neuColors.dark : neuColors.light;
+  const layout = useLayout();
 
   const press = usePressAnim();
+  const iconSz   = layout.touchTarget + 8;
+  const iconInner = Math.round(iconSz * 0.46);
 
   return (
     <Animated.View style={press.style}>
@@ -47,29 +50,30 @@ function ContactCard({ item, index }: { item: ContactItem; index: number }) {
         accessibilityRole="button"
         accessibilityLabel={item.label}
       >
-        <NeuCard radius={18} style={{ flexDirection: 'row', alignItems: 'center', padding: 16, gap: 14 }}>
+        <NeuCard radius={layout.cardRadius} style={{ flexDirection: 'row', alignItems: 'center', padding: layout.cardPx, gap: layout.pad.md }}>
 
           {/* Icon badge */}
           <View style={{
-            width: 52, height: 52, borderRadius: 16,
+            width: iconSz, height: iconSz,
+            borderRadius: layout.heroIconRadius / 1.5,
             backgroundColor: `${item.color}15`,
             alignItems: 'center', justifyContent: 'center',
             flexShrink: 0,
           }}>
-            <item.icon size={24} color={item.color} />
+            <item.icon size={iconInner} color={item.color} />
           </View>
 
           {/* Label + description */}
           <View style={{ flex: 1, gap: 3 }}>
             <Text style={{
-              fontSize: 15, fontWeight: '800',
-              color: c.text, lineHeight: 19,
+              fontSize: layout.bodySize + 1, fontWeight: '800',
+              color: c.text, lineHeight: (layout.bodySize + 1) * 1.3,
             }}>
               {item.label}
             </Text>
             <Text style={{
-              fontSize: 12, fontWeight: '500',
-              color: c.text, opacity: 0.45, lineHeight: 17,
+              fontSize: layout.captionSize, fontWeight: '500',
+              color: c.text, opacity: 0.45, lineHeight: layout.captionSize * 1.4,
             }} numberOfLines={2}>
               {item.description}
             </Text>
@@ -78,13 +82,13 @@ function ContactCard({ item, index }: { item: ContactItem; index: number }) {
           {/* Open chevron pill */}
           <View style={{
             flexDirection: 'row', alignItems: 'center', gap: 2,
-            paddingHorizontal: 10, paddingVertical: 6,
-            borderRadius: 12,
+            paddingHorizontal: layout.pad.sm + 2, paddingVertical: layout.pad.xs + 2,
+            borderRadius: layout.cardRadius / 1.5,
             backgroundColor: `${item.color}14`,
             flexShrink: 0,
           }}>
-            <Text style={{ fontSize: 12, fontWeight: '700', color: item.color }}>Open</Text>
-            <ChevronRight size={13} color={item.color} strokeWidth={2.5} />
+            <Text style={{ fontSize: layout.captionSize, fontWeight: '700', color: item.color }}>Open</Text>
+            <ChevronRight size={layout.captionSize + 1} color={item.color} strokeWidth={2.5} />
           </View>
 
         </NeuCard>
@@ -98,7 +102,6 @@ export default function ContactPage() {
   const isDark = useColorScheme() === 'dark';
   const c = isDark ? neuColors.dark : neuColors.light;
   const layout = useLayout();
-  const insets = layout.insets;
 
   const [branding, setBranding] = useState<any>(null);
   const [loading, setLoading]   = useState(true);
@@ -163,12 +166,15 @@ export default function ContactPage() {
     });
   }
 
+  const heroIconSz  = layout.heroIconSize * 1.1;
+  const heroInnerSz = Math.round(heroIconSz * 0.48);
+
   return (
     <ScrollView
       style={{ flex: 1, backgroundColor: c.base }}
       contentInsetAdjustmentBehavior="automatic"
       contentContainerStyle={{
-        padding: 20,
+        padding: layout.screenPx,
         paddingBottom: layout.scrollBottom(),
       }}
     >
@@ -177,35 +183,36 @@ export default function ContactPage() {
       {/* ── Hero ─────────────────────────────────────────────────────────── */}
       <Animated.View style={{
         alignItems: 'center',
-        marginBottom: 28,
-        marginTop: 4,
+        marginBottom: layout.sectionGap,
+        marginTop: layout.pad.xs,
         ...heroEntrance.style,
       }}>
         {/* Neumorphic circular icon */}
         <View style={{
-          width: 88, height: 88, borderRadius: 44,
+          width: heroIconSz, height: heroIconSz,
+          borderRadius: heroIconSz / 2,
           alignItems: 'center', justifyContent: 'center',
-          marginBottom: 18,
+          marginBottom: layout.pad.lg,
           ...neuMicroStyle(isDark),
         }}>
-          <HeartHandshake size={38} color={c.primary} />
+          <HeartHandshake size={heroInnerSz} color={c.primary} />
         </View>
 
-        <Text style={{ fontSize: 22, fontWeight: '800', color: c.text, marginBottom: 8 }}>
+        <Text style={{ fontSize: layout.titleSize * 0.85, fontWeight: '800', color: c.text, marginBottom: layout.pad.sm }}>
           Contact Us
         </Text>
 
         {/* Accent divider */}
         <View style={{
-          width: 36, height: 3, borderRadius: 2,
+          width: layout.pad.xxl, height: 3, borderRadius: 2,
           backgroundColor: c.primary, opacity: 0.55,
-          marginBottom: 12,
+          marginBottom: layout.pad.md,
         }} />
 
         <Text style={{
-          fontSize: 13, color: c.text, opacity: 0.5,
-          textAlign: 'center', lineHeight: 20,
-          paddingHorizontal: 16,
+          fontSize: layout.captionSize + 1, color: c.text, opacity: 0.5,
+          textAlign: 'center', lineHeight: (layout.captionSize + 1) * 1.55,
+          paddingHorizontal: layout.screenPx,
         }}>
           Need help? Choose one of the contact methods below{'\n'}and we'll be happy to assist you.
         </Text>
@@ -213,19 +220,19 @@ export default function ContactPage() {
 
       {/* ── Content ──────────────────────────────────────────────────────── */}
       {loading ? (
-        <ActivityIndicator color={c.primary} style={{ marginVertical: 48 }} />
+        <ActivityIndicator color={c.primary} style={{ marginVertical: layout.sectionGap * 2 }} />
       ) : contacts.length === 0 ? (
-        <NeuCard radius={18} style={{ padding: 32, alignItems: 'center', gap: 12 }}>
-          <HeartHandshake size={44} color={c.primary} opacity={0.22} />
-          <Text style={{ fontSize: 15, fontWeight: '700', color: c.text, opacity: 0.5, textAlign: 'center' }}>
+        <NeuCard radius={layout.cardRadius} style={{ padding: layout.cardPx * 2, alignItems: 'center', gap: layout.pad.md }}>
+          <HeartHandshake size={layout.heroIconSize} color={c.primary} opacity={0.22} />
+          <Text style={{ fontSize: layout.bodySize + 1, fontWeight: '700', color: c.text, opacity: 0.5, textAlign: 'center' }}>
             Contact details are not yet configured.
           </Text>
-          <Text style={{ fontSize: 12, color: c.text, opacity: 0.35, textAlign: 'center' }}>
+          <Text style={{ fontSize: layout.captionSize, color: c.text, opacity: 0.35, textAlign: 'center' }}>
             Please check back soon.
           </Text>
         </NeuCard>
       ) : (
-        <View style={{ gap: 12 }}>
+        <View style={{ gap: layout.itemGap }}>
           {contacts.map((item, i) => (
             <ContactCard key={i} item={item} index={i} />
           ))}

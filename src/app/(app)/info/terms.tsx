@@ -50,7 +50,8 @@ export default function TermsPage() {
   const isDark = useColorScheme() === 'dark';
   const c = isDark ? neuColors.dark : neuColors.light;
   const layout = useLayout();
-  const insets = layout.insets;
+  const iconSz  = layout.heroIconSize;
+  const iconInner = Math.round(iconSz * 0.5);
 
   return (
     <ScrollView
@@ -61,29 +62,33 @@ export default function TermsPage() {
       <PageHeader title="Terms & Conditions" showBack />
 
       {/* Icon header */}
-      <View style={{ alignItems: 'center', marginBottom: 28, marginTop: 4 }}>
+      <View style={{ alignItems: 'center', marginBottom: layout.sectionGap, marginTop: layout.pad.xs }}>
         <View style={{
-          width: 72, height: 72, borderRadius: 22, backgroundColor: `${c.primary}15`,
-          alignItems: 'center', justifyContent: 'center', marginBottom: 14,
-          shadowColor: c.shadowDark, shadowOffset: { width: 4, height: 4 },
+          width: iconSz, height: iconSz,
+          borderRadius: layout.heroIconRadius,
+          backgroundColor: `${c.primary}15`,
+          alignItems: 'center', justifyContent: 'center',
+          marginBottom: layout.pad.md,
+          shadowColor: c.shadowDark,
+          shadowOffset: { width: 4, height: 4 },
           shadowOpacity: 0.55, shadowRadius: 10,
         }}>
-          <FileText size={34} color={c.primary} />
+          <FileText size={iconInner} color={c.primary} />
         </View>
-        <Text style={{ fontSize: 11, color: c.text, opacity: 0.4, textAlign: 'center' }}>
+        <Text style={{ fontSize: layout.captionSize, color: c.text, opacity: 0.4, textAlign: 'center' }}>
           Last updated: July 2025
         </Text>
       </View>
 
       {SECTIONS.map((section, i) => (
-        <NeuCard key={i} radius={18} style={{ padding: 18, marginBottom: 12 }}>
+        <NeuCard key={i} radius={layout.cardRadius} style={{ padding: layout.cardPx, marginBottom: layout.itemGap }}>
           <Text style={{
-            fontSize: 13, fontWeight: '800', color: c.primary,
-            marginBottom: 8, letterSpacing: 0.2,
+            fontSize: layout.captionSize + 1, fontWeight: '800', color: c.primary,
+            marginBottom: layout.pad.sm, letterSpacing: 0.2,
           }}>
             {section.heading}
           </Text>
-          <Text style={{ fontSize: 14, color: c.text, opacity: 0.7, lineHeight: 22 }}>
+          <Text style={{ fontSize: layout.bodySize, color: c.text, opacity: 0.7, lineHeight: layout.bodySize * 1.6 }}>
             {section.body}
           </Text>
         </NeuCard>

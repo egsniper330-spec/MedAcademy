@@ -267,31 +267,35 @@ async function detectRootJailbreak(): Promise<SecurityThreat | null> {
 
     if (process.env.EXPO_OS === 'ios') {
       const flags = await getNativeSecurityFlags();
-      console.log('[SecurityCheck][RootJailbreak] iOS jailbreakDetected=', flags.jailbreakDetected);
+      if (__DEV__) console.log('[SecurityCheck][RootJailbreak] iOS jailbreakDetected=', flags.jailbreakDetected);
       if (!flags.jailbreakDetected) return null;
       return {
         type: 'jailbreak_detected',
-        detectionMethod: 'IOSSecurityModule: jailbreak heuristics (paths/fork/dylib/envvar/symlink/dlopen/objc)',
+        detectionMethod: 'Jailbreak detected',
         detected: true,
       };
     }
 
     // Android — use native SecurityModule multi-method root check
     const flags = await getNativeSecurityFlags();
-    console.log('[SecurityCheck][RootJailbreak] Android rootDetected=', flags.rootDetected,
-      '| flags=', JSON.stringify({
-        rootDetected: flags.rootDetected,
-        magiskDetected: flags.magiskDetected,
-        tampered: flags.tampered,
-      }));
+    if (__DEV__) {
+      console.log('[SecurityCheck][RootJailbreak] Android rootDetected=', flags.rootDetected,
+        '| flags=', JSON.stringify({
+          rootDetected: flags.rootDetected,
+          magiskDetected: flags.magiskDetected,
+          tampered: flags.tampered,
+        }));
+    }
     if (!flags.rootDetected) return null;
     return {
       type: 'root_detected',
-      detectionMethod: 'SecurityModule: su paths + system props + test-keys + /system write test + package scan',
+      detectionMethod: 'Root access detected',
       detected: true,
     };
   } catch (e) {
-    console.log('[SecurityCheck][RootJailbreak] exception:', e);
+    if (__DEV__) {
+      console.log('[SecurityCheck][RootJailbreak] exception:', e);
+    }
     return null;
   }
 }
@@ -315,28 +319,39 @@ async function detectVPN(): Promise<SecurityThreat | null> {
     // If admin has whitelisted any VPNs, skip detection for this device
     const whitelist = await getVpnWhitelist();
     if (whitelist.length > 0) {
-      console.log('[SecurityCheck][VPN] skipped — admin VPN whitelist has entries');
+      if (__DEV__) {
+        console.log('[SecurityCheck][VPN] skipped — admin VPN whitelist has entries');
+      }
       return null;
     }
 
     if (process.env.EXPO_OS === 'ios') {
+      if (__DEV__) {
+        console.log('[SecurityCheck][VPN] iOS: calling isNativeVPNDetected (JS-NetInfo fallback active)…');
+      }
       const vpn = await isNativeVPNDetected();
-      console.log('[SecurityCheck][VPN] iOS vpnDetected=', vpn);
+      if (__DEV__) {
+        console.log('[SecurityCheck][VPN] iOS: isNativeVPNDetected =', vpn);
+      }
       if (!vpn) return null;
-      return { type: 'vpn_detected', detectionMethod: 'IOSSecurityModule: utun/ipsec interface scan', detected: true };
+      return { type: 'vpn_detected', detectionMethod: 'VPN Connection detected', detected: true };
     }
 
     // Android — use native SecurityModule (ConnectivityManager + NetworkInterface scan)
     const flags = await getNativeSecurityFlags();
-    console.log('[SecurityCheck][VPN] Android vpnDetected=', flags.vpnDetected);
+    if (__DEV__) {
+      console.log('[SecurityCheck][VPN] Android vpnDetected=', flags.vpnDetected);
+    }
     if (!flags.vpnDetected) return null;
     return {
       type: 'vpn_detected',
-      detectionMethod: 'SecurityModule: ConnectivityManager TRANSPORT_VPN + NetworkInterface tun/vpn/ppp scan',
+      detectionMethod: 'VPN Connection detected',
       detected: true,
     };
   } catch (e) {
-    console.log('[SecurityCheck][VPN] exception:', e);
+    if (__DEV__) {
+      console.log('[SecurityCheck][VPN] exception:', e);
+    }
     return null;
   }
 }
@@ -352,9 +367,11 @@ async function detectProxy(): Promise<SecurityThreat | null> {
 
     if (process.env.EXPO_OS === 'ios') {
       const proxy = await isNativeProxyDetected();
-      console.log('[SecurityCheck][Proxy] iOS proxyDetected=', proxy);
+      if (__DEV__) {
+        console.log('[SecurityCheck][Proxy] iOS proxyDetected=', proxy);
+      }
       if (!proxy) return null;
-      return { type: 'proxy_detected', detectionMethod: 'IOSSecurityModule: CFNetworkCopySystemProxySettings', detected: true };
+      return { type: 'proxy_detected', detectionMethod: 'Proxy connection detected', detected: true };
     }
 
     // Android: environment variable scan
@@ -362,12 +379,16 @@ async function detectProxy(): Promise<SecurityThreat | null> {
     const httpsProxy = (globalThis as Record<string, unknown>)['https_proxy'] as string | undefined;
     const allProxy   = (globalThis as Record<string, unknown>)['all_proxy']   as string | undefined;
     const found = !!(httpProxy || httpsProxy || allProxy);
-    console.log('[SecurityCheck][Proxy] Android proxyDetected=', found,
-      '| http_proxy=', httpProxy, 'https_proxy=', httpsProxy, 'all_proxy=', allProxy);
+    if (__DEV__) {
+      console.log('[SecurityCheck][Proxy] Android proxyDetected=', found,
+        '| http_proxy=', httpProxy, 'https_proxy=', httpsProxy, 'all_proxy=', allProxy);
+    }
     if (!found) return null;
-    return { type: 'proxy_detected', detectionMethod: `env-proxy: ${httpProxy ?? httpsProxy ?? allProxy}`, detected: true };
+    return { type: 'proxy_detected', detectionMethod: 'Proxy connection detected', detected: true };
   } catch (e) {
-    console.log('[SecurityCheck][Proxy] exception:', e);
+    if (__DEV__) {
+      console.log('[SecurityCheck][Proxy] exception:', e);
+    }
     return null;
   }
 }
@@ -384,25 +405,31 @@ async function detectDebug(): Promise<SecurityThreat | null> {
 
     if (__DEV__) {
       console.log('[SecurityCheck][Debug] __DEV__=true');
-      return { type: 'debug_detected', detectionMethod: '__DEV__ === true', detected: true };
+      return { type: 'debug_detected', detectionMethod: 'Debug mode active', detected: true };
     }
 
     if (process.env.EXPO_OS === 'android') {
       const flags = await getNativeSecurityFlags();
-      console.log('[SecurityCheck][Debug] Android emulatorDetected=', flags.emulatorDetected);
+      if (__DEV__) {
+        console.log('[SecurityCheck][Debug] Android emulatorDetected=', flags.emulatorDetected);
+      }
       if (flags.emulatorDetected) {
         return {
           type: 'debug_detected',
-          detectionMethod: 'SecurityModule: Build fingerprint/model/manufacturer + QEMU props + sensor count',
+          detectionMethod: 'Emulator / debug environment detected',
           detected: true,
         };
       }
     }
 
-    console.log('[SecurityCheck][Debug] no debug/emulator detected');
+    if (__DEV__) {
+      console.log('[SecurityCheck][Debug] no debug/emulator detected');
+    }
     return null;
   } catch (e) {
-    console.log('[SecurityCheck][Debug] exception:', e);
+    if (__DEV__) {
+      console.log('[SecurityCheck][Debug] exception:', e);
+    }
     return null;
   }
 }
@@ -418,11 +445,13 @@ async function detectDeveloperOptions(): Promise<SecurityThreat | null> {
 
     if (process.env.EXPO_OS === 'ios') {
       const flags = await getNativeSecurityFlags();
-      console.log('[SecurityCheck][DevOptions] iOS debuggerAttached=', flags.debuggerAttached);
+      if (__DEV__) {
+        console.log('[SecurityCheck][DevOptions] iOS debuggerAttached=', flags.debuggerAttached);
+      }
       if (!flags.debuggerAttached) return null;
       return {
         type: 'developer_options_enabled',
-        detectionMethod: 'IOSSecurityModule: sysctl kinfo_proc P_TRACED / isatty(stdin)',
+        detectionMethod: 'Debugger attached',
         detected: true,
       };
     }
@@ -434,11 +463,20 @@ async function detectDeveloperOptions(): Promise<SecurityThreat | null> {
     if (flags.adbEnabled)              active.push('USB Debugging (ADB) enabled');
     if (flags.debuggerAttached)        active.push('Debugger attached');
     if (flags.testOnlyBuild)           active.push('test-only build flag');
-    console.log('[SecurityCheck][DevOptions] Android checks=', active.join(', ') || 'none');
+    if (__DEV__) {
+      console.log('[SecurityCheck][DevOptions] Android checks=', active.join(', ') || 'none');
+    }
     if (active.length === 0) return null;
-    return { type: 'developer_options_enabled', detectionMethod: active.join(', '), detected: true };
+    // Build a clean user-facing label — never expose raw method names
+    const label = flags.developerOptionsEnabled ? 'Developer options enabled'
+      : flags.adbEnabled ? 'USB debugging enabled'
+      : flags.debuggerAttached ? 'Debugger attached'
+      : 'Developer mode active';
+    return { type: 'developer_options_enabled', detectionMethod: label, detected: true };
   } catch (e) {
-    console.log('[SecurityCheck][DevOptions] exception:', e);
+    if (__DEV__) {
+      console.log('[SecurityCheck][DevOptions] exception:', e);
+    }
     return null;
   }
 }
@@ -454,7 +492,9 @@ async function detectScreenRecording(): Promise<SecurityThreat | null> {
     if (process.env.EXPO_OS === 'web') return null;
 
     const flags = await getNativeSecurityFlags();
-    console.log('[SecurityCheck][ScreenRecording] screenBeingRecorded=', flags.screenBeingRecorded);
+    if (__DEV__) {
+      console.log('[SecurityCheck][ScreenRecording] screenBeingRecorded=', flags.screenBeingRecorded);
+    }
     if (!flags.screenBeingRecorded) return null;
 
     const method = process.env.EXPO_OS === 'ios'
@@ -462,7 +502,9 @@ async function detectScreenRecording(): Promise<SecurityThreat | null> {
       : 'SecurityModule: MediaProjection / WindowManager.isScreenRecorded()';
     return { type: 'screen_recording_detected', detectionMethod: method, detected: true };
   } catch (e) {
-    console.log('[SecurityCheck][ScreenRecording] exception:', e);
+    if (__DEV__) {
+      console.log('[SecurityCheck][ScreenRecording] exception:', e);
+    }
     return null;
   }
 }
@@ -472,7 +514,7 @@ function detectAppIntegrity(): SecurityThreat | null {
     if (process.env.EXPO_OS === 'web') return null;
     if (__DEV__) {
       console.log('[SecurityCheck][AppIntegrity] __DEV__=true');
-      return { type: 'app_integrity_compromised', detectionMethod: '__DEV__ === true', detected: true };
+      return { type: 'app_integrity_compromised', detectionMethod: 'App integrity check failed', detected: true };
     }
     return null;
   } catch { return null; }
@@ -490,15 +532,16 @@ async function detectFrida(): Promise<SecurityThreat | null> {
     if (process.env.EXPO_OS === 'web') return null;
 
     const flags = await getNativeSecurityFlags();
-    console.log('[SecurityCheck][Frida] fridaDetected=', flags.fridaDetected);
+    if (__DEV__) {
+      console.log('[SecurityCheck][Frida] fridaDetected=', flags.fridaDetected);
+    }
     if (!flags.fridaDetected) return null;
 
-    const method = process.env.EXPO_OS === 'ios'
-      ? 'IOSSecurityModule: dylib injection scan (frida-gadget/DYLD_INSERT_LIBRARIES)'
-      : 'SecurityModule: Frida port/process/maps/file scan';
-    return { type: 'frida_detected', detectionMethod: method, detected: true };
+    return { type: 'frida_detected', detectionMethod: 'Instrumentation framework detected', detected: true };
   } catch (e) {
-    console.log('[SecurityCheck][Frida] exception:', e);
+    if (__DEV__) {
+      console.log('[SecurityCheck][Frida] exception:', e);
+    }
     return null;
   }
 }
@@ -508,15 +551,19 @@ async function detectXposed(): Promise<SecurityThreat | null> {
   try {
     if (process.env.EXPO_OS !== 'android') return null;
     const flags = await getNativeSecurityFlags();
-    console.log('[SecurityCheck][Xposed] xposedDetected=', flags.xposedDetected);
+    if (__DEV__) {
+      console.log('[SecurityCheck][Xposed] xposedDetected=', flags.xposedDetected);
+    }
     if (!flags.xposedDetected) return null;
     return {
       type: 'xposed_detected',
-      detectionMethod: 'SecurityModule: XposedBridge class / package / stack trace',
+      detectionMethod: 'Xposed framework detected',
       detected: true,
     };
   } catch (e) {
-    console.log('[SecurityCheck][Xposed] exception:', e);
+    if (__DEV__) {
+      console.log('[SecurityCheck][Xposed] exception:', e);
+    }
     return null;
   }
 }
@@ -605,7 +652,7 @@ async function detectSSLPinning(): Promise<SecurityThreat | null> {
     if (!probeOk) {
       return {
         type: 'ssl_pinning_failure',
-        detectionMethod: 'SSL probe: TLS handshake rejected by certificate pinner (MITM or cert mismatch)',
+        detectionMethod: 'SSL/TLS certificate mismatch detected',
         detected: true,
       };
     }
@@ -621,15 +668,19 @@ async function detectMagisk(): Promise<SecurityThreat | null> {
   try {
     if (process.env.EXPO_OS !== 'android') return null;
     const flags = await getNativeSecurityFlags();
-    console.log('[SecurityCheck][Magisk] magiskDetected=', flags.magiskDetected);
+    if (__DEV__) {
+      console.log('[SecurityCheck][Magisk] magiskDetected=', flags.magiskDetected);
+    }
     if (!flags.magiskDetected) return null;
     return {
       type: 'magisk_detected',
-      detectionMethod: 'SecurityModule: Magisk paths/mounts/packages/Zygisk',
+      detectionMethod: 'Root management framework detected',
       detected: true,
     };
   } catch (e) {
-    console.log('[SecurityCheck][Magisk] exception:', e);
+    if (__DEV__) {
+      console.log('[SecurityCheck][Magisk] exception:', e);
+    }
     return null;
   }
 }
@@ -639,15 +690,19 @@ async function detectOverlay(): Promise<SecurityThreat | null> {
   try {
     if (process.env.EXPO_OS !== 'android') return null;
     const flags = await getNativeSecurityFlags();
-    console.log('[SecurityCheck][Overlay] overlayDetected=', flags.overlayDetected);
+    if (__DEV__) {
+      console.log('[SecurityCheck][Overlay] overlayDetected=', flags.overlayDetected);
+    }
     if (!flags.overlayDetected) return null;
     return {
       type: 'overlay_detected',
-      detectionMethod: 'SecurityModule: SYSTEM_ALERT_WINDOW / suspicious overlay packages',
+      detectionMethod: 'Screen overlay detected',
       detected: true,
     };
   } catch (e) {
-    console.log('[SecurityCheck][Overlay] exception:', e);
+    if (__DEV__) {
+      console.log('[SecurityCheck][Overlay] exception:', e);
+    }
     return null;
   }
 }
@@ -664,9 +719,11 @@ async function detectTamper(): Promise<SecurityThreat | null> {
 
     if (process.env.EXPO_OS === 'ios') {
       const flags = await getNativeSecurityFlags();
-      console.log('[SecurityCheck][Tamper] iOS bundleTampered=', flags.bundleTampered);
+      if (__DEV__) {
+        console.log('[SecurityCheck][Tamper] iOS bundleTampered=', flags.bundleTampered);
+      }
       if (flags.bundleTampered) {
-        return { type: 'tamper_detected', detectionMethod: 'IOSSecurityModule: MachO header integrity check', detected: true };
+        return { type: 'tamper_detected', detectionMethod: 'App integrity check failed', detected: true };
       }
       return null;
     }
@@ -674,23 +731,27 @@ async function detectTamper(): Promise<SecurityThreat | null> {
     // Android
     const flags = await getNativeSecurityFlags();
     const { SIGNATURE_CHECK_READY, TRUSTED_CERTS } = getSecurityGuards();
-    console.log('[SecurityCheck][Tamper] Android signatureValid=', flags.signatureValid, '| tampered=', flags.tampered,
-      '| sigCheckReady=', SIGNATURE_CHECK_READY, '| trustedCerts=', TRUSTED_CERTS.length);
+    if (__DEV__) {
+      console.log('[SecurityCheck][Tamper] Android signatureValid=', flags.signatureValid, '| tampered=', flags.tampered,
+        '| sigCheckReady=', SIGNATURE_CHECK_READY, '| trustedCerts=', TRUSTED_CERTS.length);
+    }
 
     // Signature check: pass only when runtime cert matches ANY trusted fingerprint.
     if (SIGNATURE_CHECK_READY && TRUSTED_CERTS.length > 0) {
       if (!flags.signatureValid) {
-        return { type: 'signature_invalid', detectionMethod: 'SecurityModule: cert SHA-256 mismatch (none of the trusted fingerprints matched)', detected: true };
+        return { type: 'signature_invalid', detectionMethod: 'App signature verification failed', detected: true };
       }
     }
 
     if (flags.tampered) {
-      return { type: 'tamper_detected', detectionMethod: 'SecurityModule: installer/lib tamper', detected: true };
+      return { type: 'tamper_detected', detectionMethod: 'App integrity check failed', detected: true };
     }
 
     return null;
   } catch (e) {
-    console.log('[SecurityCheck][Tamper] exception:', e);
+    if (__DEV__) {
+      console.log('[SecurityCheck][Tamper] exception:', e);
+    }
     return null;
   }
 }
@@ -706,15 +767,19 @@ async function detectMockLocation(): Promise<SecurityThreat | null> {
   try {
     if (process.env.EXPO_OS !== 'android') return null;
     const flags = await getNativeSecurityFlags();
-    console.log('[SecurityCheck][MockLocation] mockLocationDetected=', flags.mockLocationDetected);
+    if (__DEV__) {
+      console.log('[SecurityCheck][MockLocation] mockLocationDetected=', flags.mockLocationDetected);
+    }
     if (!flags.mockLocationDetected) return null;
     return {
       type: 'debug_detected',
-      detectionMethod: 'SecurityModule: mock location — AppOpsManager MOCK_LOCATION + Settings.Secure',
+      detectionMethod: 'Mock location enabled',
       detected: true,
     };
   } catch (e) {
-    console.log('[SecurityCheck][MockLocation] exception:', e);
+    if (__DEV__) {
+      console.log('[SecurityCheck][MockLocation] exception:', e);
+    }
     return null;
   }
 }
@@ -753,7 +818,7 @@ export async function runPlayIntegrityCheck(): Promise<SecurityThreat | null> {
     if (_piResult !== null && Date.now() < _piExpiry) {
       return _piResult ? null : {
         type: 'play_integrity_failed',
-        detectionMethod: 'Play Integrity API (cached)',
+        detectionMethod: 'Device integrity check failed',
         detected: true,
       };
     }
@@ -786,7 +851,7 @@ export async function runPlayIntegrityCheck(): Promise<SecurityThreat | null> {
     if (!passed) {
       return {
         type: 'play_integrity_failed',
-        detectionMethod: `Play Integrity API: ${verifyData?.verdict ?? 'failed'}`,
+        detectionMethod: 'Device integrity check failed',
         detected: true,
       };
     }
@@ -815,7 +880,7 @@ async function runAppAttestCheck(): Promise<SecurityThreat | null> {
     if (_piResult !== null && Date.now() < _piExpiry) {
       return _piResult ? null : {
         type: 'app_attest_failed',
-        detectionMethod: 'App Attest / DeviceCheck (cached)',
+        detectionMethod: 'Device integrity check failed',
         detected: true,
       };
     }
@@ -916,7 +981,7 @@ async function runAppAttestCheck(): Promise<SecurityThreat | null> {
       if (!passed) {
         return {
           type: 'app_attest_failed',
-          detectionMethod: `App Attest: ${verifyData?.reason ?? 'assertion failed'}`,
+          detectionMethod: 'Device integrity check failed',
           detected: true,
         };
       }
@@ -948,7 +1013,7 @@ async function runAppAttestCheck(): Promise<SecurityThreat | null> {
     if (!dcPassed) {
       return {
         type: 'app_attest_failed',
-        detectionMethod: 'DeviceCheck fallback: device token validation failed',
+        detectionMethod: 'Device integrity check failed',
         detected: true,
       };
     }
@@ -978,15 +1043,21 @@ export function computeRiskScore(threats: SecurityThreat[]): number {
 // ─── Full Security Check ──────────────────────────────────────────────────────
 
 export async function runSecurityChecks(): Promise<SecurityCheckResult> {
-  console.log('[SecurityCheck][runSecurityChecks] ▶ starting all checks on platform=', process.env.EXPO_OS);
+  if (__DEV__) {
+    console.log('[SecurityCheck][runSecurityChecks] ▶ starting all checks on platform=', process.env.EXPO_OS);
+  }
 
   // Warm up the native flag batch cache ONCE so every detector re-uses it
   let rawFlags: Awaited<ReturnType<typeof getNativeSecurityFlags>> | null = null;
   try {
     rawFlags = await getNativeSecurityFlags();
-    console.log('[SecurityCheck][runSecurityChecks] raw native flags:', JSON.stringify(rawFlags));
+    if (__DEV__) {
+      console.log('[SecurityCheck][runSecurityChecks] raw native flags:', JSON.stringify(rawFlags));
+    }
   } catch (e) {
-    console.log('[SecurityCheck][runSecurityChecks] ⚠️ getNativeSecurityFlags failed:', e);
+    if (__DEV__) {
+      console.log('[SecurityCheck][runSecurityChecks] ⚠️ getNativeSecurityFlags failed:', e);
+    }
   }
 
   const [
@@ -1012,7 +1083,9 @@ export async function runSecurityChecks(): Promise<SecurityCheckResult> {
   const integrityThreat = detectAppIntegrity();
 
   if (__DEV__ && sslThreat) {
-    console.warn('[security] SSL pinning failure detected:', sslThreat.detectionMethod);
+    if (__DEV__) {
+      console.warn('[security] SSL pinning failure detected:', sslThreat.detectionMethod);
+    }
   }
 
   const allThreats: SecurityThreat[] = [
@@ -1022,11 +1095,15 @@ export async function runSecurityChecks(): Promise<SecurityCheckResult> {
     tamperThreat, mockLocThreat, piThreat, sslThreat,
   ].filter((t): t is SecurityThreat => t !== null && t.detected);
 
-  console.log('[SecurityCheck][runSecurityChecks] ✅ detected threats:', allThreats.map(t => t.type).join(', ') || 'none');
+  if (__DEV__) {
+    console.log('[SecurityCheck][runSecurityChecks] ✅ detected threats:', allThreats.map(t => t.type).join(', ') || 'none');
+  }
 
   const riskScore = computeRiskScore(allThreats);
   const policies  = await getSecurityPolicies();
-  console.log('[SecurityCheck][runSecurityChecks] riskScore=', riskScore);
+  if (__DEV__) {
+    console.log('[SecurityCheck][runSecurityChecks] riskScore=', riskScore);
+  }
 
   let blocksLogin  = false;
   let blocksVideo  = false;

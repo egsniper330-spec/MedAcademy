@@ -9,7 +9,7 @@ import {
   Fingerprint, Camera, AlertTriangle, TrendingUp,
   Users, BarChart3, Download, Filter,
 } from 'lucide-react-native';
-import { neuColors, neuFlatStyle, neuPressedStyle } from '@/lib/neu';
+import { neuColors, useLayout, neuFlatStyle, neuPressedStyle, safeBottom } from '@/lib/neu';
 import { NeuCard } from '@/components/NeuCard';
 import { NeuButton } from '@/components/NeuButton';
 import { PageHeader } from '@/components/PageHeader';
@@ -17,7 +17,6 @@ import { useToast } from '@/components/Toast';
 import { supabase } from '@/client/supabase';
 import { friendlyError } from '@/lib/validation';
 import { Share } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 interface SecurityStats {
   total_events:    number;
@@ -76,7 +75,8 @@ export default function SecurityDashboard() {
   const scheme = useColorScheme();
   const isDark = scheme === 'dark';
   const c = isDark ? neuColors.dark : neuColors.light;
-  const insets = useSafeAreaInsets();
+  const layout = useLayout();
+  const insets = layout.insets;
   const flat = neuFlatStyle(isDark);
   const router = useRouter();
   const { showToast } = useToast();
@@ -144,18 +144,19 @@ export default function SecurityDashboard() {
     label, value, icon: Icon, color,
   }: { label: string; value: number; icon: React.ComponentType<{ size: number; color: string }>; color: string }) => (
     <View style={[flat, {
-      flex: 1, minWidth: 140, borderRadius: 16, padding: 16,
-      gap: 8, alignItems: 'flex-start',
+      flex: 1, minWidth: 140, borderRadius: layout.cardRadius, padding: layout.cardPx,
+      gap: layout.pad.sm, alignItems: 'flex-start',
     }]}>
       <View style={{
-        width: 36, height: 36, borderRadius: 10,
+        width: layout.touchTarget * 0.82, height: layout.touchTarget * 0.82,
+        borderRadius: layout.cardRadius / 1.5,
         backgroundColor: `${color}18`,
         alignItems: 'center', justifyContent: 'center',
       }}>
-        <Icon size={18} color={color} />
+        <Icon size={Math.round(layout.touchTarget * 0.42)} color={color} />
       </View>
-      <Text style={{ fontSize: 26, fontWeight: '800', color }}>{value ?? 0}</Text>
-      <Text style={{ fontSize: 11, color: `${c.text}77`, fontWeight: '600' }}>{label}</Text>
+      <Text style={{ fontSize: layout.titleSize, fontWeight: '800', color }}>{value ?? 0}</Text>
+      <Text style={{ fontSize: layout.captionSize, color: `${c.text}77`, fontWeight: '600' }}>{label}</Text>
     </View>
   );
 
@@ -174,37 +175,37 @@ export default function SecurityDashboard() {
     <View style={{ flex: 1, backgroundColor: c.base }}>
       <PageHeader title="Security Dashboard" />
       <ScrollView
-        contentContainerStyle={{ padding: 16, gap: 20, paddingBottom: Math.max(insets.bottom, 24) + 24 }}
+        contentContainerStyle={{ padding: layout.screenPx, gap: layout.sectionGap, paddingBottom: layout.scrollBottom() }}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />}
         contentInsetAdjustmentBehavior="automatic"
       >
         {/* Day Filter + Export */}
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-          <Filter size={16} color={`${c.text}77`} />
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: layout.pad.sm, flexWrap: 'wrap' }}>
+          <Filter size={layout.bodySize} color={`${c.text}77`} />
           {DAYS_OPTIONS.map((d) => (
             <Pressable key={d} onPress={() => setDays(d)}
               style={[flat, {
-                paddingHorizontal: 14, paddingVertical: 6, borderRadius: 20,
+                paddingHorizontal: layout.pad.md, paddingVertical: layout.pad.xs + 1, borderRadius: 20,
                 backgroundColor: days === d ? c.primary : undefined,
               }]}>
-              <Text style={{ fontSize: 12, fontWeight: '600', color: days === d ? '#fff' : `${c.text}88` }}>
+              <Text style={{ fontSize: layout.captionSize, fontWeight: '600', color: days === d ? '#fff' : `${c.text}88` }}>
                 {d}d
               </Text>
             </Pressable>
           ))}
           <View style={{ flex: 1 }} />
           <Pressable onPress={() => void handleExport()}
-            style={[flat, { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20, flexDirection: 'row', alignItems: 'center', gap: 6 }]}>
-            <Download size={14} color={c.primary} />
-            <Text style={{ fontSize: 12, fontWeight: '600', color: c.primary }}>Export</Text>
+            style={[flat, { paddingHorizontal: layout.pad.md, paddingVertical: layout.pad.sm, borderRadius: 20, flexDirection: 'row', alignItems: 'center', gap: layout.pad.sm }]}>
+            <Download size={layout.captionSize + 2} color={c.primary} />
+            <Text style={{ fontSize: layout.captionSize, fontWeight: '600', color: c.primary }}>Export</Text>
           </Pressable>
         </View>
 
         {/* Overview Stats */}
-        <Text style={{ fontSize: 16, fontWeight: '700', color: c.text }}>
+        <Text style={{ fontSize: layout.bodySize + 2, fontWeight: '700', color: c.text }}>
           Overview — Last {days} Days
         </Text>
-        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 12 }}>
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: layout.itemGap }}>
           <StatCard label="Total Events"      value={stats?.total_events ?? 0}    icon={BarChart3}    color={c.primary} />
           <StatCard label="Root / Jailbreak"  value={stats?.root_jailbreak ?? 0}  icon={ShieldAlert}  color="#EF4444" />
           <StatCard label="VPN Detections"    value={stats?.vpn ?? 0}             icon={Wifi}         color="#F59E0B" />
@@ -217,56 +218,56 @@ export default function SecurityDashboard() {
         </View>
 
         {/* Risky Devices */}
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-          <Users size={18} color={c.primary} />
-          <Text style={{ fontSize: 16, fontWeight: '700', color: c.text }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: layout.pad.sm }}>
+          <Users size={layout.bodySize + 2} color={c.primary} />
+          <Text style={{ fontSize: layout.bodySize + 2, fontWeight: '700', color: c.text }}>
             Risky Devices ({riskyDevices.length})
           </Text>
         </View>
         {riskyDevices.length === 0 ? (
-          <View style={[flat, { borderRadius: 16, padding: 24, alignItems: 'center', gap: 8 }]}>
-            <ShieldCheck size={32} color="#22C55E" />
-            <Text style={{ fontSize: 14, color: `${c.text}77` }}>No risky devices detected</Text>
+          <View style={[flat, { borderRadius: layout.cardRadius, padding: layout.cardPx * 1.5, alignItems: 'center', gap: layout.pad.sm }]}>
+            <ShieldCheck size={Math.round(layout.touchTarget * 0.72)} color="#22C55E" />
+            <Text style={{ fontSize: layout.bodySize, color: `${c.text}77` }}>No risky devices detected</Text>
           </View>
         ) : (
           riskyDevices.map((dev) => (
             <View key={dev.device_id} style={[flat, {
-              borderRadius: 16, padding: 16, gap: 10,
+              borderRadius: layout.cardRadius, padding: layout.cardPx, gap: layout.pad.sm,
             }]}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: layout.pad.md }}>
                 <View style={{
-                  width: 40, height: 40, borderRadius: 12,
+                  width: layout.touchTarget, height: layout.touchTarget,
+                  borderRadius: layout.cardRadius,
                   backgroundColor: `${riskColor(dev.max_risk_score)}18`,
                   alignItems: 'center', justifyContent: 'center',
                 }}>
-                  <AlertTriangle size={20} color={riskColor(dev.max_risk_score)} />
+                  <AlertTriangle size={Math.round(layout.touchTarget * 0.46)} color={riskColor(dev.max_risk_score)} />
                 </View>
                 <View style={{ flex: 1 }}>
-                  <Text style={{ fontSize: 14, fontWeight: '700', color: c.text }}>
+                  <Text style={{ fontSize: layout.bodySize, fontWeight: '700', color: c.text }}>
                     {dev.user_name || 'Unknown User'}
                   </Text>
-                  <Text style={{ fontSize: 12, color: `${c.text}77` }}>{dev.user_email}</Text>
+                  <Text style={{ fontSize: layout.captionSize, color: `${c.text}77` }}>{dev.user_email}</Text>
                 </View>
                 <View style={{
-                  paddingHorizontal: 10, paddingVertical: 4, borderRadius: 20,
+                  paddingHorizontal: layout.pad.sm, paddingVertical: layout.pad.xs, borderRadius: 20,
                   backgroundColor: `${riskColor(dev.max_risk_score)}18`,
                 }}>
-                  <Text style={{ fontSize: 13, fontWeight: '800', color: riskColor(dev.max_risk_score) }}>
+                  <Text style={{ fontSize: layout.bodySize, fontWeight: '800', color: riskColor(dev.max_risk_score) }}>
                     {dev.max_risk_score}
                   </Text>
                 </View>
               </View>
-              {/* Threat badges */}
-              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: layout.pad.sm }}>
                 {(dev.event_types ?? []).map((et) => {
                   const meta = EVENT_META[et];
                   if (!meta) return null;
                   return (
                     <View key={et} style={{
-                      paddingHorizontal: 8, paddingVertical: 3, borderRadius: 20,
+                      paddingHorizontal: layout.pad.sm, paddingVertical: layout.pad.xs, borderRadius: 20,
                       backgroundColor: `${meta.color}18`,
                     }}>
-                      <Text style={{ fontSize: 11, fontWeight: '600', color: meta.color }}>
+                      <Text style={{ fontSize: layout.captionSize, fontWeight: '600', color: meta.color }}>
                         {meta.label}
                       </Text>
                     </View>
@@ -274,7 +275,7 @@ export default function SecurityDashboard() {
                 })}
               </View>
               <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-                <Text style={{ fontSize: 11, color: `${c.text}55` }}>
+                <Text style={{ fontSize: layout.captionSize, color: `${c.text}55` }}>
                   {dev.platform?.toUpperCase()} · {new Date(dev.last_seen).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
                 </Text>
               </View>
@@ -283,9 +284,9 @@ export default function SecurityDashboard() {
         )}
 
         {/* Recent Events */}
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-          <TrendingUp size={18} color={c.primary} />
-          <Text style={{ fontSize: 16, fontWeight: '700', color: c.text }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: layout.pad.sm }}>
+          <TrendingUp size={layout.bodySize + 2} color={c.primary} />
+          <Text style={{ fontSize: layout.bodySize + 2, fontWeight: '700', color: c.text }}>
             Recent Events ({recentEvents.length})
           </Text>
         </View>
@@ -294,30 +295,31 @@ export default function SecurityDashboard() {
           const Icon = meta.icon;
           return (
             <View key={evt.id} style={[flat, {
-              borderRadius: 14, padding: 14, flexDirection: 'row',
-              alignItems: 'center', gap: 12,
+              borderRadius: layout.cardRadius, padding: layout.cardPx, flexDirection: 'row',
+              alignItems: 'center', gap: layout.pad.md,
             }]}>
               <View style={{
-                width: 36, height: 36, borderRadius: 10,
+                width: layout.touchTarget * 0.82, height: layout.touchTarget * 0.82,
+                borderRadius: layout.cardRadius / 1.5,
                 backgroundColor: `${meta.color}18`,
                 alignItems: 'center', justifyContent: 'center',
               }}>
-                <Icon size={18} color={meta.color} />
+                <Icon size={Math.round(layout.touchTarget * 0.42)} color={meta.color} />
               </View>
-              <View style={{ flex: 1, gap: 2 }}>
-                <Text style={{ fontSize: 13, fontWeight: '700', color: c.text }}>{meta.label}</Text>
-                <Text style={{ fontSize: 11, color: `${c.text}66` }}>
+              <View style={{ flex: 1, gap: layout.pad.xs }}>
+                <Text style={{ fontSize: layout.bodySize, fontWeight: '700', color: c.text }}>{meta.label}</Text>
+                <Text style={{ fontSize: layout.captionSize, color: `${c.text}66` }}>
                   {evt.profiles?.full_name ?? evt.user_id?.slice(0, 8) ?? 'Unknown'} · {evt.platform ?? 'unknown'}
                 </Text>
-                <Text style={{ fontSize: 11, color: `${c.text}55` }}>
+                <Text style={{ fontSize: layout.captionSize, color: `${c.text}55` }}>
                   {new Date(evt.created_at).toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true })}
                 </Text>
               </View>
               <View style={{
-                paddingHorizontal: 8, paddingVertical: 3, borderRadius: 20,
+                paddingHorizontal: layout.pad.sm, paddingVertical: layout.pad.xs, borderRadius: 20,
                 backgroundColor: `${meta.color}18`,
               }}>
-                <Text style={{ fontSize: 12, fontWeight: '700', color: meta.color }}>
+                <Text style={{ fontSize: layout.captionSize + 1, fontWeight: '700', color: meta.color }}>
                   {evt.risk_score}
                 </Text>
               </View>

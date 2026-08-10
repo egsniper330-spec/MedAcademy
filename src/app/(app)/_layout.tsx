@@ -16,6 +16,7 @@ const UPLOAD_ROLES = new Set(['doctor', 'admin', 'super_admin']);
 // Applied at layout level so every screen inside (app)/ is protected,
 // not just lesson/[id].tsx. The lesson screen adds its own keyed lock
 // ('lesson') for the violation-reporting layer on top of this one.
+// Root _layout.tsx also holds 'root-shell' which covers auth screens.
 const APP_SC_KEY = 'app-shell';
 
 function AppLayoutNav() {
@@ -41,19 +42,26 @@ function AppLayoutNav() {
   //     with the correct new role → correct dashboard is pushed
   // ─────────────────────────────────────────────────────────────────────────
 
-  const { check, reset, onNewBlockingThreat } = useSecurity();
+  const { check, reset, onNewBlockingThreat, isSuperAdmin } = useSecurity();
 
   // ── App-shell FLAG_SECURE ──────────────────────────────────────────────────
   // Activates Android FLAG_SECURE for ALL screens inside (app)/, blocking
   // screenshots and screen recording across the entire authenticated session.
+  // Super Admin bypass: release this lock so SA can screenshot in their
+  // administrative capacity. The root 'root-shell' lock is separately managed.
   // The lesson screen adds a second keyed lock ('lesson') for its
   // violation-reporting overlay — both locks must be released before the OS
   // permits capture again, so the lesson lock acts as belt-and-suspenders.
   useEffect(() => {
     if (process.env.EXPO_OS === 'web') return;
-    ScreenCapture.preventScreenCaptureAsync(APP_SC_KEY).catch(() => {});
+    if (isSuperAdmin) {
+      // Verified Super Admin: release the app-shell lock
+      ScreenCapture.allowScreenCaptureAsync(APP_SC_KEY).catch(() => {});
+    } else {
+      ScreenCapture.preventScreenCaptureAsync(APP_SC_KEY).catch(() => {});
+    }
     return () => { ScreenCapture.allowScreenCaptureAsync(APP_SC_KEY).catch(() => {}); };
-  }, []);
+  }, [isSuperAdmin]);
 
   // ── Background → foreground re-check ──────────────────────────────────────
   // Re-run all security checks when the app returns from background so that

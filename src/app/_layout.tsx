@@ -4,18 +4,19 @@
 // will throw immediately with a full diagnostic instead of silently succeeding.
 import { assertMeDoBlocked } from '@/lib/medo-guard';
 
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { Stack } from 'expo-router';
-import { View } from 'react-native';
+import { View, AppState } from 'react-native';
 import { PortalHost } from '@rn-primitives/portal';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import * as NavigationBar from 'expo-navigation-bar';
+import * as ScreenCapture from 'expo-screen-capture';
 
 import { SessionProvider, useSession } from '@/ctx';
 import { ToastProvider } from '@/components/Toast';
 import { ImpersonationBanner } from '@/components/ImpersonationBanner';
-import { SecurityProvider } from '@/lib/SecurityContext';
+import { SecurityProvider, useSecurity } from '@/lib/SecurityContext';
 import { SecureAppOverlay } from '@/components/SecureAppOverlay';
 import { ForceUpdateScreen } from '@/components/ForceUpdateScreen';
 import { useForceUpdate } from '@/lib/useForceUpdate';
@@ -77,6 +78,75 @@ function ForceUpdateGate({ children }: { children: React.ReactNode }) {
   );
 }
 
+/**
+ * RootScreenCapture — iOS screenshot/screen-recording protection at the ROOT level.
+ *
+ * Root cause of the Login-screen gap: expo-screen-capture's preventScreenCaptureAsync
+ * was only called inside (app)/_layout.tsx, which mounts AFTER the user has already
+ * passed through the (auth)/ screens. This means the Login and other auth screens had
+ * zero protection.
+ *
+ * Fix: call preventScreenCaptureAsync here, at the root layout level, so protection
+ * is active from the very first frame — before any navigation, before any auth screen,
+ * and before any session is established.
+ *
+ * Key = 'root-shell' — distinct from the (app)/ 'app-shell' key and the lesson 'lesson'
+ * key. All three locks must be individually released before the OS permits capture again.
+ *
+ * Super Admin bypass: when a verified Super Admin session is active, we release this
+ * root-level lock so they can take screenshots in their administrative capacity. The
+ * bypass is driven by isSuperAdmin from SecurityContext (backend-verified profile role).
+ *
+ * AppState: the protection is re-applied on every foreground transition to survive
+ * background/foreground cycles where iOS may reset the UITextField secure state.
+ */
+const ROOT_SC_KEY = 'root-shell';
+
+function RootScreenCapture() {
+  const { isSuperAdmin } = useSecurity();
+  const isSuperAdminRef = useRef(isSuperAdmin);
+  isSuperAdminRef.current = isSuperAdmin;
+
+  // Apply / release based on Super Admin status
+  useEffect(() => {
+    if (process.env.EXPO_OS === 'web') return;
+    if (isSuperAdmin) {
+      // Super Admin: release the root-level lock so they can screenshot freely
+      ScreenCapture.allowScreenCaptureAsync(ROOT_SC_KEY).catch(() => {});
+    } else {
+      // Normal user (including unauthenticated): protection must be active
+      ScreenCapture.preventScreenCaptureAsync(ROOT_SC_KEY).catch(() => {});
+    }
+  }, [isSuperAdmin]);
+
+  // Re-apply on every foreground transition — iOS may reset the protection state
+  // across background/foreground cycles (particularly on older iOS versions).
+  useEffect(() => {
+    if (process.env.EXPO_OS === 'web') return;
+    const sub = AppState.addEventListener('change', (nextState) => {
+      if (nextState === 'active') {
+        if (isSuperAdminRef.current) {
+          ScreenCapture.allowScreenCaptureAsync(ROOT_SC_KEY).catch(() => {});
+        } else {
+          ScreenCapture.preventScreenCaptureAsync(ROOT_SC_KEY).catch(() => {});
+        }
+      }
+    });
+    return () => sub.remove();
+  }, []);
+
+  // Release the root-level lock when this component unmounts (should never happen
+  // in normal app lifecycle, but ensures clean state on web/test environments).
+  useEffect(() => {
+    if (process.env.EXPO_OS === 'web') return;
+    return () => {
+      ScreenCapture.allowScreenCaptureAsync(ROOT_SC_KEY).catch(() => {});
+    };
+  }, []);
+
+  return null;
+}
+
 function RootLayoutNav() {
   const { session, isLoading } = useSession();
 
@@ -124,6 +194,8 @@ const RootLayout: React.FC = () => {
       <GestureHandlerRootView style={{ flex: 1 }}>
         <SessionProvider>
           <SecurityProvider>
+            {/* RootScreenCapture: iOS screenshot protection from app launch (before login) */}
+            <RootScreenCapture />
             {/* ForceUpdateGate wraps ALL content — runs before auth, before navigation */}
             <ForceUpdateGate>
               <ToastProvider>

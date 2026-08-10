@@ -6,6 +6,10 @@
  *          lock and never interferes with useContentProtection's 'lesson' tag.
  * iOS:     detects screenshots via addScreenshotListener
  *          Recording detection requires native module — not available in expo-screen-capture SDK55
+ *
+ * Super Admin bypass: when isSuperAdmin is true the FLAG_SECURE lock is released
+ * and the screenshot listener is not installed. This must only be set from a
+ * backend-verified session (SecurityContext.isSuperAdmin).
  */
 import { useEffect } from 'react';
 import * as ScreenCapture from 'expo-screen-capture';
@@ -22,6 +26,12 @@ interface Options {
   onScreenshotDetected?: () => void;
   /** Device ID to attach to the security log event. */
   deviceId?: string;
+  /**
+   * True when the authenticated session belongs to a verified Super Admin.
+   * When true, FLAG_SECURE is released and screenshot listener is not installed.
+   * Must come from SecurityContext.isSuperAdmin (backend-verified profile role).
+   */
+  isSuperAdmin?: boolean;
 }
 
 export function useScreenCapture(opts: Options = {}) {
@@ -29,15 +39,21 @@ export function useScreenCapture(opts: Options = {}) {
     blockCapture = true,
     onScreenshotDetected,
     deviceId,
+    isSuperAdmin = false,
   } = opts;
 
   // Activate secure capture prevention using a stable keyed tag.
+  // Super Admin bypass: release the lock so SA can take screenshots freely.
   // Using a key (instead of the no-arg overload) means allowScreenCaptureAsync
   // in cleanup ONLY removes this hook's lock — it never lifts a lock set by
   // another hook (e.g. useContentProtection's 'lesson' tag).
   useEffect(() => {
     if (process.env.EXPO_OS === 'web') return;
-    if (!blockCapture) return;
+    if (!blockCapture || isSuperAdmin) {
+      // Either explicitly disabled or Super Admin bypass active — ensure lock is released
+      ScreenCapture.allowScreenCaptureAsync(SC_KEY).catch(() => {});
+      return;
+    }
 
     ScreenCapture.preventScreenCaptureAsync(SC_KEY).catch(() => {
       // Non-fatal — simulators/emulators may reject this
@@ -46,11 +62,13 @@ export function useScreenCapture(opts: Options = {}) {
     return () => {
       ScreenCapture.allowScreenCaptureAsync(SC_KEY).catch(() => {});
     };
-  }, [blockCapture]);
+  }, [blockCapture, isSuperAdmin]);
 
   // Screenshot detection (addScreenshotListener — available in expo-screen-capture SDK55)
+  // Super Admin bypass: do not install listener — SA is allowed to screenshot.
   useEffect(() => {
     if (process.env.EXPO_OS === 'web') return;
+    if (isSuperAdmin) return;
 
     const subscription = ScreenCapture.addScreenshotListener(() => {
       void logSecurityEvent({
@@ -62,5 +80,5 @@ export function useScreenCapture(opts: Options = {}) {
     });
 
     return () => subscription.remove();
-  }, [onScreenshotDetected, deviceId]);
+  }, [onScreenshotDetected, deviceId, isSuperAdmin]);
 }

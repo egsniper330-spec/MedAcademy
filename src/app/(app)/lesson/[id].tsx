@@ -85,10 +85,11 @@ export default function LessonPlayer() {
   const router = useRouter();
   const { id } = useLocalSearchParams<{ id: string }>();
   const { profile } = useProfileStore();
-  const { blocksVideo, hasWarnings, riskScore, threats } = useSecurity();
+  const { blocksVideo, hasWarnings, riskScore, threats, isSuperAdmin } = useSecurity();
 
-  // Enable screenshot/recording protection while this screen is mounted
-  useScreenCapture({ blockCapture: true });
+  // Enable screenshot/recording protection while this screen is mounted.
+  // Super Admin bypass: SA sessions are exempt — they can screenshot/record freely.
+  useScreenCapture({ blockCapture: true, isSuperAdmin });
 
   // Pause video callback — passed to useContentProtection so recording
   // detection can stop playback immediately before showing the overlay.
@@ -96,15 +97,15 @@ export default function LessonPlayer() {
     setPlayerVisible(false);
   }, []);
 
-  // Content protection: Android native recording detection + iOS screenshot/recording + strike system
+  // Content protection: Android native recording detection + iOS screenshot/recording + strike system.
+  // Super Admin bypass: SA sessions are fully exempt from violation reporting.
   const {
     screenshotDetected,
     recordingActive,
-
     warningMessage,
     strikeCount,
     acknowledgeScreenshot,
-  } = useContentProtection(true, pauseVideo);
+  } = useContentProtection(true, pauseVideo, isSuperAdmin);
 
   const [lesson, setLesson] = useState<any>(null);
   const [loading, setLoading] = useState(true);
