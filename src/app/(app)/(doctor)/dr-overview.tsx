@@ -81,7 +81,7 @@ export default function DoctorDashboard() {
   if (loading || creditsLoading) return <ActivityIndicator style={{ flex: 1 }} color={c.primary} />;
 
   return (
-    <>
+    <View style={{ flex: 1, backgroundColor: c.base }}>
       <PermissionRationaleModal
         type="notifications"
         visible={showNotifRationale}
@@ -103,44 +103,44 @@ export default function DoctorDashboard() {
             onPress={() => router.push('/(app)/notifications' as RelativePathString)}
             accessibilityLabel="Notifications"
             accessibilityRole="button"
-            style={[{ width: 42, height: 42, borderRadius: 13, alignItems: 'center', justifyContent: 'center' }, neuMicroStyle(isDark)]}
+            style={[{ width: layout.touchTarget, height: layout.touchTarget, borderRadius: layout.cardRadius, alignItems: 'center', justifyContent: 'center' }, neuMicroStyle(isDark)]}
           >
-            <Bell size={19} color={c.primary} />
+            <Bell size={Math.round(layout.touchTarget * 0.44)} color={c.primary} />
           </Pressable>
         }
       />
       <View style={{ paddingHorizontal: layout.screenPx, paddingBottom: layout.scrollBottom() }}>
 
         {/* 7-tile KPI Grid */}
-        <View style={{ flexDirection: 'row', flexWrap: 'wrap', marginBottom: 20, gap: 0 }}>
-          <StatCard label="Total Students"      value={totalStudents}       icon={<Users size={14} color="#fff" />}        color="#7C3AED" />
-          <StatCard label="Active"              value={activeStudents}      icon={<GraduationCap size={14} color="#fff" />} color="#16A34A" />
-          <StatCard label="Suspended"           value={suspendedStudents}   icon={<Ban size={14} color="#fff" />}          color="#D97706" />
-          <StatCard label="My Courses"          value={totalCourses}        icon={<BookOpen size={14} color="#fff" />}     color={c.primary} />
-          <StatCard label="Credits"             value={creditsRemaining}    icon={<CreditCard size={14} color="#fff" />}   color="#2DA8FF" />
-          <StatCard label="Today's Activations" value={todayActivations}    icon={<Zap size={14} color="#fff" />}         color="#F59E0B" />
-          <StatCard label="Published"           value={courses.filter(cr => cr.status === 'published').length} icon={<TrendingUp size={14} color="#fff" />} color="#6366F1" />
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', marginBottom: layout.sectionGap }}>
+          <StatCard label="Total Students"      value={totalStudents}       icon={<Users size={layout.captionSize + 2} color="#fff" />}        color="#7C3AED" />
+          <StatCard label="Active"              value={activeStudents}      icon={<GraduationCap size={layout.captionSize + 2} color="#fff" />} color="#16A34A" />
+          <StatCard label="Suspended"           value={suspendedStudents}   icon={<Ban size={layout.captionSize + 2} color="#fff" />}          color="#D97706" />
+          <StatCard label="My Courses"          value={totalCourses}        icon={<BookOpen size={layout.captionSize + 2} color="#fff" />}     color={c.primary} />
+          <StatCard label="Credits"             value={creditsRemaining}    icon={<CreditCard size={layout.captionSize + 2} color="#fff" />}   color="#2DA8FF" />
+          <StatCard label="Today's Activations" value={todayActivations}    icon={<Zap size={layout.captionSize + 2} color="#fff" />}         color="#F59E0B" />
+          <StatCard label="Published"           value={courses.filter(cr => cr.status === 'published').length} icon={<TrendingUp size={layout.captionSize + 2} color="#fff" />} color="#6366F1" />
         </View>
 
         {/* Quick Actions */}
-        <Text style={{ fontSize: 15, fontWeight: '800', color: c.text, marginBottom: 12 }}>Quick Actions</Text>
-        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginBottom: 24 }}>
+        <Text style={{ fontSize: layout.bodySize + 1, fontWeight: '800', color: c.text, marginBottom: layout.pad.md }}>Quick Actions</Text>
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: layout.itemGap, marginBottom: layout.sectionGap }}>
           {[
-            { label: 'My Courses', icon: <BookOpen size={22} color={c.primary} />, color: c.primary, route: '/(app)/(doctor)/courses' },
-            { label: 'Students',   icon: <Users size={22} color="#7C3AED" />,       color: '#7C3AED', route: '/(app)/(doctor)/students' },
-            { label: 'Archived',   icon: <Archive size={22} color="#D97706" />,     color: '#D97706', route: '/(app)/archived-courses' },
-            { label: 'Alerts',     icon: <Bell size={22} color="#2DA8FF" />,         color: '#2DA8FF', route: '/(app)/notifications' },
+            { label: 'My Courses', icon: <BookOpen size={Math.round(layout.touchTarget * 0.5)} color={c.primary} />, color: c.primary, route: '/(app)/(doctor)/courses' },
+            { label: 'Students',   icon: <Users size={Math.round(layout.touchTarget * 0.5)} color="#7C3AED" />,       color: '#7C3AED', route: '/(app)/(doctor)/students' },
+            { label: 'Archived',   icon: <Archive size={Math.round(layout.touchTarget * 0.5)} color="#D97706" />,     color: '#D97706', route: '/(app)/archived-courses' },
+            { label: 'Alerts',     icon: <Bell size={Math.round(layout.touchTarget * 0.5)} color="#2DA8FF" />,         color: '#2DA8FF', route: '/(app)/notifications' },
           ].map(({ label, icon, color, route }) => (
             <NeuCard
               key={label}
               pressable
               onPress={() => router.push(route as RelativePathString)}
-              style={{ alignItems: 'center', paddingVertical: 12, paddingHorizontal: 10, width: '22%', flexGrow: 1, minWidth: 72 }}
+              style={{ alignItems: 'center', paddingVertical: layout.pad.md, paddingHorizontal: layout.pad.sm, width: '22%', flexGrow: 1 }}
             >
-              <View style={{ width: 38, height: 38, borderRadius: 12, backgroundColor: `${color}18`, alignItems: 'center', justifyContent: 'center', marginBottom: 6 }}>
+              <View style={{ width: layout.touchTarget, height: layout.touchTarget, borderRadius: layout.cardRadius, backgroundColor: `${color}18`, alignItems: 'center', justifyContent: 'center', marginBottom: layout.pad.sm }}>
                 {icon}
               </View>
-              <Text numberOfLines={2} style={{ fontSize: 11, fontWeight: '600', color: c.text, textAlign: 'center', lineHeight: 14 }}>
+              <Text numberOfLines={2} style={{ fontSize: layout.captionSize, fontWeight: '600', color: c.text, textAlign: 'center', lineHeight: layout.captionSize * 1.4 }}>
                 {label}
               </Text>
             </NeuCard>
@@ -150,23 +150,23 @@ export default function DoctorDashboard() {
         {/* Recent Enrollments */}
         {recentEnrollments.length > 0 && (
           <>
-            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
-              <Text style={{ fontSize: 15, fontWeight: '800', color: c.text }}>Recent Enrollments</Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: layout.pad.md }}>
+              <Text style={{ fontSize: layout.bodySize + 1, fontWeight: '800', color: c.text }}>Recent Enrollments</Text>
               <Pressable onPress={() => router.push('/(app)/(doctor)/students' as RelativePathString)}>
-                <Text style={{ fontSize: 12, fontWeight: '700', color: c.primary }}>See All</Text>
+                <Text style={{ fontSize: layout.captionSize + 1, fontWeight: '700', color: c.primary }}>See All</Text>
               </Pressable>
             </View>
             {recentEnrollments.map(e => (
-              <NeuCard key={e.id} style={{ marginBottom: 8, padding: 12 }}>
+              <NeuCard key={e.id} style={{ marginBottom: layout.itemGap, padding: layout.cardPx }}>
                 <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                  <View style={{ width: 36, height: 36, borderRadius: 11, backgroundColor: `${c.primary}18`, alignItems: 'center', justifyContent: 'center', marginRight: 10 }}>
-                    <Text style={{ fontSize: 13, fontWeight: '800', color: c.primary }}>{e.student?.full_name?.[0]?.toUpperCase() ?? '?'}</Text>
+                  <View style={{ width: layout.touchTarget, height: layout.touchTarget, borderRadius: layout.cardRadius, backgroundColor: `${c.primary}18`, alignItems: 'center', justifyContent: 'center', marginRight: layout.pad.md }}>
+                    <Text style={{ fontSize: layout.bodySize, fontWeight: '800', color: c.primary }}>{e.student?.full_name?.[0]?.toUpperCase() ?? '?'}</Text>
                   </View>
                   <View style={{ flex: 1 }}>
-                    <Text style={{ fontSize: 13, fontWeight: '600', color: c.text }} numberOfLines={1}>{e.student?.full_name}</Text>
-                    <Text style={{ fontSize: 11, color: c.text, opacity: 0.5 }} numberOfLines={1}>{e.course?.title}</Text>
+                    <Text style={{ fontSize: layout.bodySize, fontWeight: '600', color: c.text }} numberOfLines={1}>{e.student?.full_name}</Text>
+                    <Text style={{ fontSize: layout.captionSize, color: c.text, opacity: 0.5 }} numberOfLines={1}>{e.course?.title}</Text>
                   </View>
-                  <Text style={{ fontSize: 10, color: c.text, opacity: 0.35 }}>{new Date(e.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</Text>
+                  <Text style={{ fontSize: layout.captionSize - 1, color: c.text, opacity: 0.35 }}>{new Date(e.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</Text>
                 </View>
               </NeuCard>
             ))}
@@ -174,10 +174,10 @@ export default function DoctorDashboard() {
         )}
 
         {/* Recent Courses */}
-        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12, marginTop: 8 }}>
-          <Text style={{ fontSize: 15, fontWeight: '800', color: c.text }}>Recent Courses</Text>
+        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: layout.pad.md, marginTop: layout.pad.sm }}>
+          <Text style={{ fontSize: layout.bodySize + 1, fontWeight: '800', color: c.text }}>Recent Courses</Text>
           <Pressable onPress={() => router.push('/(app)/(doctor)/courses' as RelativePathString)}>
-            <Text style={{ fontSize: 12, fontWeight: '700', color: c.primary }}>See All</Text>
+            <Text style={{ fontSize: layout.captionSize + 1, fontWeight: '700', color: c.primary }}>See All</Text>
           </Pressable>
         </View>
         {courses.slice(0, 3).map((course) => (
@@ -185,32 +185,32 @@ export default function DoctorDashboard() {
             key={course.id}
             pressable
             onPress={() => router.push(`/(app)/course/${course.id}` as RelativePathString)}
-            style={{ flexDirection: 'row', alignItems: 'center', padding: 12, marginBottom: 8 }}
+            style={{ flexDirection: 'row', alignItems: 'center', padding: layout.cardPx, marginBottom: layout.itemGap }}
           >
             <CourseThumbnail
               imageUrl={course.image_url ?? course.thumbnail_url ?? course.cover_url}
-              width={42}
-              height={42}
-              borderRadius={11}
+              width={layout.touchTarget}
+              height={layout.touchTarget}
+              borderRadius={layout.cardRadius}
             />
-            <View style={{ flex: 1, marginLeft: 10 }}>
-              <Text style={{ fontSize: 13, fontWeight: '700', color: c.text }} numberOfLines={1}>{course.title}</Text>
-              <Text style={{ fontSize: 11, color: c.text, opacity: 0.45, marginTop: 2 }}>{course.category?.name ?? 'General'}</Text>
+            <View style={{ flex: 1, marginLeft: layout.pad.md }}>
+              <Text style={{ fontSize: layout.bodySize, fontWeight: '700', color: c.text }} numberOfLines={1}>{course.title}</Text>
+              <Text style={{ fontSize: layout.captionSize, color: c.text, opacity: 0.45, marginTop: 2 }}>{course.category?.name ?? 'General'}</Text>
             </View>
-            <View style={{ backgroundColor: statusColor(course.status) + '20', borderRadius: 8, paddingHorizontal: 7, paddingVertical: 3 }}>
-              <Text style={{ fontSize: 10, fontWeight: '700', color: statusColor(course.status), textTransform: 'capitalize' }}>{course.status}</Text>
+            <View style={{ backgroundColor: statusColor(course.status) + '20', borderRadius: layout.cardRadius / 2, paddingHorizontal: layout.pad.sm, paddingVertical: layout.pad.xs }}>
+              <Text style={{ fontSize: layout.captionSize - 1, fontWeight: '700', color: statusColor(course.status), textTransform: 'capitalize' }}>{course.status}</Text>
             </View>
           </NeuCard>
         ))}
         {courses.length === 0 && (
-          <NeuCard style={{ alignItems: 'center', padding: 28 }}>
-            <Plus size={32} color={c.primary} opacity={0.3} style={{ marginBottom: 8 }} />
-            <Text style={{ color: c.text, opacity: 0.45, fontSize: 13 }}>No courses yet. Create your first course!</Text>
+          <NeuCard style={{ alignItems: 'center', padding: layout.cardPx * 2 }}>
+            <Plus size={Math.round(layout.touchTarget * 0.72)} color={c.primary} opacity={0.3} style={{ marginBottom: layout.pad.sm }} />
+            <Text style={{ color: c.text, opacity: 0.45, fontSize: layout.bodySize }}>No courses yet. Create your first course!</Text>
           </NeuCard>
         )}
       </View>
     </ScrollView>
-    </>
+    </View>
   );
 }
 

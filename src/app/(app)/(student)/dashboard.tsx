@@ -159,31 +159,23 @@ export default function StudentDashboard() {
   ];
 
   // ── Helpers ───────────────────────────────────────────────────────────────
-  const neuInset = {
-    backgroundColor: c.base,
-    borderRadius: 14,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    shadowColor: c.shadowDark,
-    shadowOffset: { width: -2, height: -2 },
-    shadowOpacity: 0.5,
-    shadowRadius: 5,
-  };
-
   const chipStyle = (active: boolean) => ({
-    paddingHorizontal: 12, paddingVertical: 7, borderRadius: 20,
+    paddingHorizontal: layout.pad.md, paddingVertical: layout.pad.xs + 2, borderRadius: 20,
     backgroundColor: active ? c.primary : c.base,
     shadowColor: active ? 'transparent' : c.shadowDark,
     shadowOffset: { width: 2, height: 2 },
     shadowOpacity: active ? 0 : 0.45,
     shadowRadius: 4,
-    marginRight: 8,
+    marginRight: layout.pad.sm,
   });
   const chipText = (active: boolean) => ({
-    fontSize: 12, fontWeight: '600' as const,
+    fontSize: layout.captionSize, fontWeight: '600' as const,
     color: active ? '#fff' : c.text,
     opacity: active ? 1 : 0.65,
   });
+
+  // Fluid thumbnail size: 72–96dp based on layout.touchTarget
+  const thumbSize = Math.round(layout.touchTarget * 1.75);
 
   // Price display: price_egp column (0 = free)
   const formatPrice = (course: any) => {
@@ -198,42 +190,40 @@ export default function StudentDashboard() {
   const renderMyCourseCard = (sub: any) => {
     const course = sub.course;
     if (!course) return null;
+    const iconSz = Math.round(thumbSize * 0.36);
     return (
       <Pressable
         key={sub.id}
         onPress={() => router.push(`/(app)/course/${course.id}` as RelativePathString)}
-        style={{ marginBottom: 8 }}
+        style={{ marginBottom: layout.itemGap }}
       >
         <NeuCard style={{ padding: 0, overflow: 'hidden' }}>
           <View style={{ flexDirection: 'row', alignItems: 'stretch' }}>
-            {/* Thumbnail — 80×80 */}
             {course.image_url ? (
               <Image
                 source={{ uri: course.image_url }}
-                style={{ width: 80, height: 80, flexShrink: 0 }}
+                style={{ width: thumbSize, height: thumbSize, flexShrink: 0 }}
                 contentFit="cover"
               />
             ) : (
-              <View style={{ width: 80, height: 80, backgroundColor: `${c.primary}12`,
+              <View style={{ width: thumbSize, height: thumbSize, backgroundColor: `${c.primary}12`,
                 alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                <BookOpen size={28} color={c.primary} opacity={0.25} />
+                <BookOpen size={iconSz} color={c.primary} opacity={0.25} />
               </View>
             )}
-            {/* Content */}
-            <View style={{ flex: 1, paddingHorizontal: 10, paddingVertical: 8, justifyContent: 'space-between' }}>
-              <Text style={{ fontSize: 13, fontWeight: '700', color: c.text, lineHeight: 17 }} numberOfLines={2}>
+            <View style={{ flex: 1, paddingHorizontal: layout.pad.md, paddingVertical: layout.pad.sm, justifyContent: 'space-between' }}>
+              <Text style={{ fontSize: layout.bodySize, fontWeight: '700', color: c.text, lineHeight: layout.bodySize * 1.35 }} numberOfLines={2}>
                 {course.title}
               </Text>
-              <Text style={{ fontSize: 11, color: c.text, opacity: 0.45, marginTop: 2 }} numberOfLines={1}>
+              <Text style={{ fontSize: layout.captionSize, color: c.text, opacity: 0.45, marginTop: 2 }} numberOfLines={1}>
                 {`Dr. ${course.doctor?.full_name ?? '—'}${course.category?.name ? ` · ${course.category.name}` : ''}`}
               </Text>
-              {/* Continue button only — no progress bar (progress requires a separate RPC) */}
               <View style={{ marginTop: 4, flexDirection: 'row', justifyContent: 'flex-end' }}>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4,
-                  backgroundColor: `${c.primary}15`, borderRadius: 7,
-                  paddingHorizontal: 8, paddingVertical: 3 }}>
-                  <Play size={9} color={c.primary} />
-                  <Text style={{ fontSize: 10, fontWeight: '700', color: c.primary }}>Continue</Text>
+                  backgroundColor: `${c.primary}15`, borderRadius: layout.cardRadius / 2,
+                  paddingHorizontal: layout.pad.sm, paddingVertical: layout.pad.xs }}>
+                  <Play size={layout.captionSize - 2} color={c.primary} />
+                  <Text style={{ fontSize: layout.captionSize - 1, fontWeight: '700', color: c.primary }}>Continue</Text>
                 </View>
               </View>
             </View>
@@ -243,53 +233,56 @@ export default function StudentDashboard() {
     );
   };
 
-  const renderExploreCourseCard = (course: any) => (
-    <Pressable
-      key={course.id}
-      onPress={() => router.push(`/(app)/course/${course.id}` as RelativePathString)}
-      style={{ marginBottom: 8 }}
-    >
-      <NeuCard style={{ padding: 0, overflow: 'hidden' }}>
-        <View style={{ flexDirection: 'row' }}>
-          {course.image_url ? (
-            <Image
-              source={{ uri: course.image_url }}
-              style={{ width: 80, height: 80, flexShrink: 0 }}
-              contentFit="cover"
-            />
-          ) : (
-            <View style={{ width: 80, height: 80, backgroundColor: `${c.primary}12`,
-              alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-              <BookOpen size={26} color={c.primary} opacity={0.25} />
-            </View>
-          )}
-          <View style={{ flex: 1, paddingHorizontal: 10, paddingVertical: 8, justifyContent: 'space-between' }}>
-            <Text style={{ fontSize: 13, fontWeight: '700', color: c.text, lineHeight: 17 }} numberOfLines={2}>
-              {course.title}
-            </Text>
-            <Text style={{ fontSize: 11, color: c.text, opacity: 0.45, marginTop: 2 }} numberOfLines={1}>
-              Dr. {course.doctor?.full_name ?? '—'}
-            </Text>
-            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 6 }}>
-              <Text style={{ fontSize: 12, fontWeight: '800',
-                color: isFree(course) ? '#16A34A' : c.primary }}>
-                {formatPrice(course)}
+  const renderExploreCourseCard = (course: any) => {
+    const iconSz = Math.round(thumbSize * 0.34);
+    return (
+      <Pressable
+        key={course.id}
+        onPress={() => router.push(`/(app)/course/${course.id}` as RelativePathString)}
+        style={{ marginBottom: layout.itemGap }}
+      >
+        <NeuCard style={{ padding: 0, overflow: 'hidden' }}>
+          <View style={{ flexDirection: 'row' }}>
+            {course.image_url ? (
+              <Image
+                source={{ uri: course.image_url }}
+                style={{ width: thumbSize, height: thumbSize, flexShrink: 0 }}
+                contentFit="cover"
+              />
+            ) : (
+              <View style={{ width: thumbSize, height: thumbSize, backgroundColor: `${c.primary}12`,
+                alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                <BookOpen size={iconSz} color={c.primary} opacity={0.25} />
+              </View>
+            )}
+            <View style={{ flex: 1, paddingHorizontal: layout.pad.md, paddingVertical: layout.pad.sm, justifyContent: 'space-between' }}>
+              <Text style={{ fontSize: layout.bodySize, fontWeight: '700', color: c.text, lineHeight: layout.bodySize * 1.35 }} numberOfLines={2}>
+                {course.title}
               </Text>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3,
-                backgroundColor: `${c.primary}15`, borderRadius: 7,
-                paddingHorizontal: 8, paddingVertical: 3 }}>
-                <Text style={{ fontSize: 10, fontWeight: '700', color: c.primary }}>View</Text>
-                <ChevronRight size={9} color={c.primary} />
+              <Text style={{ fontSize: layout.captionSize, color: c.text, opacity: 0.45, marginTop: 2 }} numberOfLines={1}>
+                Dr. {course.doctor?.full_name ?? '—'}
+              </Text>
+              <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: layout.pad.sm }}>
+                <Text style={{ fontSize: layout.captionSize + 1, fontWeight: '800',
+                  color: isFree(course) ? '#16A34A' : c.primary }}>
+                  {formatPrice(course)}
+                </Text>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3,
+                  backgroundColor: `${c.primary}15`, borderRadius: layout.cardRadius / 2,
+                  paddingHorizontal: layout.pad.sm, paddingVertical: layout.pad.xs }}>
+                  <Text style={{ fontSize: layout.captionSize - 1, fontWeight: '700', color: c.primary }}>View</Text>
+                  <ChevronRight size={layout.captionSize - 1} color={c.primary} />
+                </View>
               </View>
             </View>
           </View>
-        </View>
-      </NeuCard>
-    </Pressable>
-  );
+        </NeuCard>
+      </Pressable>
+    );
+  };
 
   return (
-    <>
+    <View style={{ flex: 1, backgroundColor: c.base }}>
       <PermissionRationaleModal
         type="notifications"
         visible={showNotifRationale}
@@ -312,19 +305,19 @@ export default function StudentDashboard() {
               onPress={() => router.push('/(app)/(student)/activate' as RelativePathString)}
               accessibilityLabel="Activate course code"
               accessibilityRole="button"
-              style={[{ width: 42, height: 42, borderRadius: 13, alignItems: 'center', justifyContent: 'center' }, neuMicroStyle(isDark)]}
+              style={[{ width: layout.touchTarget + 2, height: layout.touchTarget + 2, borderRadius: layout.cardRadius, alignItems: 'center', justifyContent: 'center' }, neuMicroStyle(isDark)]}
             >
-              <Key size={17} color={c.accent} />
+              <Key size={Math.round((layout.touchTarget + 2) * 0.4)} color={c.accent} />
             </Pressable>
             <Pressable
               onPress={() => router.push('/(app)/notifications' as RelativePathString)}
               accessibilityLabel={unreadCount > 0 ? `Notifications, ${unreadCount} unread` : 'Notifications'}
               accessibilityRole="button"
-              style={[{ width: 42, height: 42, borderRadius: 13, alignItems: 'center', justifyContent: 'center' }, neuMicroStyle(isDark)]}
+              style={[{ width: layout.touchTarget + 2, height: layout.touchTarget + 2, borderRadius: layout.cardRadius, alignItems: 'center', justifyContent: 'center' }, neuMicroStyle(isDark)]}
             >
-              <Bell size={18} color={c.primary} />
+              <Bell size={Math.round((layout.touchTarget + 2) * 0.43)} color={c.primary} />
               {unreadCount > 0 && (
-                <View style={{ position: 'absolute', top: 8, right: 8, width: 7, height: 7, borderRadius: 3.5, backgroundColor: '#EF4444' }} />
+                <View style={{ position: 'absolute', top: layout.pad.sm, right: layout.pad.sm, width: layout.pad.sm, height: layout.pad.sm, borderRadius: layout.pad.xs, backgroundColor: '#EF4444' }} />
               )}
             </Pressable>
           </>
@@ -333,7 +326,7 @@ export default function StudentDashboard() {
       <View style={{ paddingHorizontal: layout.screenPx }}>
 
         {/* ── Search bar ────────────────────────────────────────────────── */}
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 10 }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: layout.pad.sm, marginBottom: layout.pad.sm }}>
           <NeuSearchBar
             c={c}
             value={searchQuery}
@@ -344,12 +337,12 @@ export default function StudentDashboard() {
           />
           <Pressable
             onPress={() => setShowFilters(v => !v)}
-            style={[{ width: 46, height: 46, borderRadius: 13, alignItems: 'center', justifyContent: 'center' }, neuMicroStyle(isDark)]}
+            style={[{ width: layout.touchTarget + 2, height: layout.touchTarget + 2, borderRadius: layout.cardRadius, alignItems: 'center', justifyContent: 'center' }, neuMicroStyle(isDark)]}
           >
-            <SlidersHorizontal size={18} color={hasActiveFilters ? c.primary : c.text} opacity={hasActiveFilters ? 1 : 0.55} />
+            <SlidersHorizontal size={layout.bodySize + 2} color={hasActiveFilters ? c.primary : c.text} opacity={hasActiveFilters ? 1 : 0.55} />
             {activeFilterCount > 0 && (
-              <View style={{ position: 'absolute', top: 7, right: 7, width: 13, height: 13, borderRadius: 6.5, backgroundColor: c.primary, alignItems: 'center', justifyContent: 'center' }}>
-                <Text style={{ fontSize: 8, fontWeight: '800', color: '#fff' }}>{activeFilterCount}</Text>
+              <View style={{ position: 'absolute', top: layout.pad.xs, right: layout.pad.xs, width: 14, height: 14, borderRadius: 7, backgroundColor: c.primary, alignItems: 'center', justifyContent: 'center' }}>
+                <Text style={{ fontSize: layout.captionSize - 3, fontWeight: '800', color: '#fff' }}>{activeFilterCount}</Text>
               </View>
             )}
           </Pressable>
@@ -357,10 +350,9 @@ export default function StudentDashboard() {
 
         {/* ── Filter panel ──────────────────────────────────────────────── */}
         {showFilters && (
-          <NeuCard style={{ marginBottom: 14, padding: 14 }}>
-            {/* Category */}
-            <Text style={{ fontSize: 10, fontWeight: '800', color: c.text, opacity: 0.45, marginBottom: 8, textTransform: 'uppercase', letterSpacing: 0.8 }}>Category</Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 12 }}>
+          <NeuCard style={{ marginBottom: layout.pad.md, padding: layout.cardPx }}>
+            <Text style={{ fontSize: layout.captionSize - 1, fontWeight: '800', color: c.text, opacity: 0.45, marginBottom: layout.pad.sm, textTransform: 'uppercase', letterSpacing: 0.8 }}>Category</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: layout.pad.md }}>
               <Pressable onPress={() => setFilters(f => ({ ...f, category: null }))} style={chipStyle(!filters.category)}>
                 <Text style={chipText(!filters.category)}>All</Text>
               </Pressable>
@@ -371,11 +363,10 @@ export default function StudentDashboard() {
               ))}
             </ScrollView>
 
-            {/* Teacher */}
             {teachers.length > 0 && (
               <>
-                <Text style={{ fontSize: 10, fontWeight: '800', color: c.text, opacity: 0.45, marginBottom: 8, textTransform: 'uppercase', letterSpacing: 0.8 }}>Teacher</Text>
-                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 12 }}>
+                <Text style={{ fontSize: layout.captionSize - 1, fontWeight: '800', color: c.text, opacity: 0.45, marginBottom: layout.pad.sm, textTransform: 'uppercase', letterSpacing: 0.8 }}>Teacher</Text>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: layout.pad.md }}>
                   <Pressable onPress={() => setFilters(f => ({ ...f, teacher: null }))} style={chipStyle(!filters.teacher)}>
                     <Text style={chipText(!filters.teacher)}>All</Text>
                   </Pressable>
@@ -388,9 +379,8 @@ export default function StudentDashboard() {
               </>
             )}
 
-            {/* Price */}
-            <Text style={{ fontSize: 10, fontWeight: '800', color: c.text, opacity: 0.45, marginBottom: 8, textTransform: 'uppercase', letterSpacing: 0.8 }}>Price</Text>
-            <View style={{ flexDirection: 'row', gap: 8 }}>
+            <Text style={{ fontSize: layout.captionSize - 1, fontWeight: '800', color: c.text, opacity: 0.45, marginBottom: layout.pad.sm, textTransform: 'uppercase', letterSpacing: 0.8 }}>Price</Text>
+            <View style={{ flexDirection: 'row', gap: layout.pad.sm }}>
               {(['all', 'free', 'paid'] as const).map(pt => (
                 <Pressable key={pt} onPress={() => setFilters(f => ({ ...f, priceType: pt }))} style={chipStyle(filters.priceType === pt)}>
                   <Text style={chipText(filters.priceType === pt)}>{pt.charAt(0).toUpperCase() + pt.slice(1)}</Text>
@@ -401,9 +391,9 @@ export default function StudentDashboard() {
             {hasActiveFilters && (
               <Pressable
                 onPress={() => setFilters({ category: null, teacher: null, priceType: 'all' })}
-                style={{ marginTop: 12, alignItems: 'center' }}
+                style={{ marginTop: layout.pad.md, alignItems: 'center' }}
               >
-                <Text style={{ fontSize: 12, fontWeight: '700', color: '#DC2626' }}>Clear All Filters</Text>
+                <Text style={{ fontSize: layout.captionSize + 1, fontWeight: '700', color: '#DC2626' }}>Clear All Filters</Text>
               </Pressable>
             )}
           </NeuCard>
@@ -416,32 +406,32 @@ export default function StudentDashboard() {
       {loading ? (
         <ActivityIndicator color={c.primary} style={{ marginTop: 40 }} />
       ) : (
-        <View style={{ paddingHorizontal: layout.screenPx, paddingTop: 12, paddingBottom: layout.scrollBottom() }}>
+        <View style={{ paddingHorizontal: layout.screenPx, paddingTop: layout.pad.md, paddingBottom: layout.scrollBottom() }}>
 
           {/* ── My Courses ───────────────────────────────────────────────── */}
-          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
-            <Text style={{ fontSize: 16, fontWeight: '800', color: c.text }}>My Courses</Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: layout.pad.md }}>
+            <Text style={{ fontSize: layout.bodySize + 2, fontWeight: '800', color: c.text }}>My Courses</Text>
             {subscriptions.length > 3 && (
               <Pressable onPress={() => router.push('/(app)/(student)/my-courses' as RelativePathString)}
-                style={{ flexDirection: 'row', alignItems: 'center', gap: 3 }}>
-                <Text style={{ fontSize: 12, fontWeight: '700', color: c.primary }}>See All</Text>
-                <ChevronRight size={13} color={c.primary} />
+                style={{ flexDirection: 'row', alignItems: 'center', gap: layout.pad.xs }}>
+                <Text style={{ fontSize: layout.captionSize + 1, fontWeight: '700', color: c.primary }}>See All</Text>
+                <ChevronRight size={layout.captionSize + 1} color={c.primary} />
               </Pressable>
             )}
           </View>
 
           {filteredMyCourses.length === 0 ? (
-            <NeuCard style={{ alignItems: 'center', padding: 28, marginBottom: 20 }}>
-              <BookOpen size={38} color={c.primary} opacity={0.25} style={{ marginBottom: 10 }} />
-              <Text style={{ fontSize: 14, fontWeight: '700', color: c.text, opacity: 0.5, marginBottom: 4 }}>
+            <NeuCard style={{ alignItems: 'center', padding: layout.cardPx * 1.5, marginBottom: layout.sectionGap }}>
+              <BookOpen size={Math.round(layout.touchTarget * 0.85)} color={c.primary} opacity={0.25} style={{ marginBottom: layout.pad.sm }} />
+              <Text style={{ fontSize: layout.bodySize, fontWeight: '700', color: c.text, opacity: 0.5, marginBottom: layout.pad.xs }}>
                 {searchQuery ? 'No matching courses' : "You haven't enrolled in any courses yet."}
               </Text>
               {!searchQuery && (
                 <Pressable
                   onPress={() => { setSearchQuery(''); setShowFilters(false); }}
-                  style={{ marginTop: 10, backgroundColor: c.primary, borderRadius: 11, paddingHorizontal: 18, paddingVertical: 9 }}
+                  style={{ marginTop: layout.pad.sm, backgroundColor: c.primary, borderRadius: layout.cardRadius, paddingHorizontal: layout.pad.lg, paddingVertical: layout.pad.sm }}
                 >
-                  <Text style={{ fontSize: 13, fontWeight: '700', color: '#fff' }}>Browse Courses ↓</Text>
+                  <Text style={{ fontSize: layout.bodySize, fontWeight: '700', color: '#fff' }}>Browse Courses ↓</Text>
                 </Pressable>
               )}
             </NeuCard>
@@ -451,9 +441,9 @@ export default function StudentDashboard() {
               {filteredMyCourses.length > 3 && (
                 <Pressable
                   onPress={() => router.push('/(app)/(student)/my-courses' as RelativePathString)}
-                  style={{ alignItems: 'center', marginBottom: 20 }}
+                  style={{ alignItems: 'center', marginBottom: layout.sectionGap }}
                 >
-                  <Text style={{ fontSize: 13, fontWeight: '700', color: c.primary }}>
+                  <Text style={{ fontSize: layout.bodySize, fontWeight: '700', color: c.primary }}>
                     View all {filteredMyCourses.length} courses →
                   </Text>
                 </Pressable>
@@ -462,11 +452,11 @@ export default function StudentDashboard() {
           )}
 
           {/* ── Explore / Available Courses ───────────────────────────── */}
-          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12, marginTop: 8 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: layout.pad.md, marginTop: layout.pad.sm }}>
             <View>
-              <Text style={{ fontSize: 16, fontWeight: '800', color: c.text }}>Explore Courses</Text>
+              <Text style={{ fontSize: layout.bodySize + 2, fontWeight: '800', color: c.text }}>Explore Courses</Text>
               {filteredExplore.length > 0 && (
-                <Text style={{ fontSize: 11, color: c.text, opacity: 0.4, marginTop: 2 }}>
+                <Text style={{ fontSize: layout.captionSize, color: c.text, opacity: 0.4, marginTop: 2 }}>
                   {filteredExplore.length} available
                 </Text>
               )}
@@ -474,17 +464,17 @@ export default function StudentDashboard() {
           </View>
 
           {filteredExplore.length === 0 ? (
-            <NeuCard style={{ alignItems: 'center', padding: 28, marginBottom: 20 }}>
-              <Search size={38} color={c.primary} opacity={0.25} style={{ marginBottom: 10 }} />
-              <Text style={{ fontSize: 14, fontWeight: '700', color: c.text, opacity: 0.5, textAlign: 'center' }}>
+            <NeuCard style={{ alignItems: 'center', padding: layout.cardPx * 1.5, marginBottom: layout.sectionGap }}>
+              <Search size={Math.round(layout.touchTarget * 0.85)} color={c.primary} opacity={0.25} style={{ marginBottom: layout.pad.sm }} />
+              <Text style={{ fontSize: layout.bodySize, fontWeight: '700', color: c.text, opacity: 0.5, textAlign: 'center' }}>
                 {searchQuery || hasActiveFilters ? 'No courses match your search' : 'No new courses available'}
               </Text>
               {(searchQuery || hasActiveFilters) && (
                 <Pressable
                   onPress={() => { setSearchQuery(''); setFilters({ category: null, teacher: null, priceType: 'all' }); }}
-                  style={{ marginTop: 10 }}
+                  style={{ marginTop: layout.pad.sm }}
                 >
-                  <Text style={{ fontSize: 13, fontWeight: '700', color: c.primary }}>Clear search & filters</Text>
+                  <Text style={{ fontSize: layout.bodySize, fontWeight: '700', color: c.primary }}>Clear search & filters</Text>
                 </Pressable>
               )}
             </NeuCard>
@@ -495,6 +485,6 @@ export default function StudentDashboard() {
         </View>
       )}
     </ScrollView>
-    </>
+    </View>
   );
 }

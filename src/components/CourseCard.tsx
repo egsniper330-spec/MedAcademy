@@ -5,7 +5,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { Play, Bell, CheckCircle, BookOpen } from 'lucide-react-native';
 import Reanimated, { FadeInDown } from 'react-native-reanimated';
 import { NeuCard } from '@/components/NeuCard';
-import { neuColors } from '@/lib/neu';
+import { neuColors, useLayout } from '@/lib/neu';
 
 // ── Shimmer skeleton for thumbnail loading state ──────────────────────────
 function SkeletonShimmer({ width, height, borderRadius = 0 }: { width: number | string; height: number; borderRadius?: number }) {
@@ -75,6 +75,24 @@ export function CourseCard({
   const scheme = useColorScheme();
   const isDark = scheme === 'dark';
   const c = isDark ? neuColors.dark : neuColors.light;
+  const layout = useLayout();
+
+  // Fluid thumb size: ~20% of available width on phones, ~15% on tablets, min 64dp, max 100dp
+  const availW     = layout.width - layout.screenPx * 2;
+  const thumbSize  = Math.round(Math.max(64, Math.min(100, availW * (layout.isTablet ? 0.13 : 0.20))));
+  const contentPx  = layout.pad.md;
+  const contentPy  = layout.pad.sm + 2;
+
+  // Fluid banner height (non-compact): 16:9 of card width, clamped
+  const bannerH    = Math.round(Math.max(90, Math.min(160, availW * 0.42)));
+
+  // Font sizes from adaptive tokens
+  const titleFs    = layout.bodySize + 1;
+  const metaFs     = layout.captionSize;
+  const priceFs    = layout.captionSize + 1;
+  const badgeFs    = layout.captionSize - 2;
+  const btnFs      = layout.captionSize;
+  const progressFs = layout.captionSize - 2;
 
   const showEnrollmentUI = isEnrolled !== undefined;
 
@@ -82,31 +100,31 @@ export function CourseCard({
   if (compact) {
     return (
       <Reanimated.View entering={FadeInDown.delay(index * 60).springify().damping(14)}>
-        <Pressable onPress={onPress} style={{ marginBottom: 8 }}>
+        <Pressable onPress={onPress} style={{ marginBottom: layout.pad.sm }}>
           <NeuCard style={{ padding: 0, overflow: 'hidden' }}>
           <View style={{ flexDirection: 'row', alignItems: 'stretch' }}>
-            {/* Thumbnail — fixed 80×80 square */}
-            <CompactThumb imageUrl={imageUrl} primary={c.primary} size={80}
+            {/* Thumbnail — fluid square */}
+            <CompactThumb imageUrl={imageUrl} primary={c.primary} size={thumbSize}
               badge={showEnrollmentUI && isEnrolled ? (enrollmentStatus === 'completed' ? 'done' : 'enrolled') : undefined}
             />
 
             {/* Content */}
-            <View style={{ flex: 1, paddingHorizontal: 10, paddingVertical: 8, justifyContent: 'space-between' }}>
+            <View style={{ flex: 1, paddingHorizontal: contentPx, paddingVertical: contentPy, justifyContent: 'space-between' }}>
               {/* Title */}
-              <Text style={{ fontSize: 13, fontWeight: '700', color: c.text, lineHeight: 17 }} numberOfLines={2}>
+              <Text style={{ fontSize: titleFs, fontWeight: '700', color: c.text, lineHeight: titleFs * 1.3 }} numberOfLines={2}>
                 {title}
               </Text>
 
               {/* Doctor */}
               {doctorName ? (
-                <Text style={{ fontSize: 11, color: c.text, opacity: 0.5, marginTop: 2 }} numberOfLines={1}>
+                <Text style={{ fontSize: metaFs, color: c.text, opacity: 0.5, marginTop: layout.pad.xs }} numberOfLines={1}>
                   Dr. {doctorName}
                 </Text>
               ) : null}
 
               {/* Price */}
               {priceEgp !== undefined && !isEnrolled ? (
-                <Text style={{ fontSize: 12, fontWeight: '800', marginTop: 3,
+                <Text style={{ fontSize: priceFs, fontWeight: '800', marginTop: layout.pad.xs,
                   color: (!priceEgp || priceEgp === 0) ? '#16A34A' : c.primary }}>
                   {(!priceEgp || priceEgp === 0) ? 'Free' : `EGP ${Number(priceEgp).toFixed(0)}`}
                 </Text>
@@ -114,10 +132,10 @@ export function CourseCard({
 
               {/* Progress bar */}
               {progress !== undefined ? (
-                <View style={{ marginTop: 4 }}>
+                <View style={{ marginTop: layout.pad.xs }}>
                   <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 2 }}>
-                    <Text style={{ fontSize: 10, color: c.text, opacity: 0.45 }}>Progress</Text>
-                    <Text style={{ fontSize: 10, color: PROGRESS_COLOR_DIM, fontWeight: '600' }}>{progress}%</Text>
+                    <Text style={{ fontSize: progressFs, color: c.text, opacity: 0.45 }}>Progress</Text>
+                    <Text style={{ fontSize: progressFs, color: PROGRESS_COLOR_DIM, fontWeight: '600' }}>{progress}%</Text>
                   </View>
                   <View style={{ height: 3, backgroundColor: isDark ? '#1a3a2a' : '#dcfce7', borderRadius: 2, overflow: 'hidden' }}>
                     <LinearGradient
@@ -131,10 +149,10 @@ export function CourseCard({
 
               {/* Legacy status */}
               {status && !showEnrollmentUI ? (
-                <View style={{ marginTop: 4, alignSelf: 'flex-start',
+                <View style={{ marginTop: layout.pad.xs, alignSelf: 'flex-start',
                   backgroundColor: legacyStatusColor(status, c.primary),
-                  paddingHorizontal: 7, paddingVertical: 2, borderRadius: 20 }}>
-                  <Text style={{ fontSize: 9, color: '#fff', fontWeight: '600', textTransform: 'uppercase' }}>{status}</Text>
+                  paddingHorizontal: layout.pad.sm, paddingVertical: 2, borderRadius: layout.cardRadius }}>
+                  <Text style={{ fontSize: badgeFs, color: '#fff', fontWeight: '600', textTransform: 'uppercase' }}>{status}</Text>
                 </View>
               ) : null}
 
@@ -143,21 +161,22 @@ export function CourseCard({
                 isEnrolled ? (
                   <Pressable
                     onPress={(e) => { e.stopPropagation(); if (onAction) { onAction(); } else { onPress(); } }}
-                    style={{ marginTop: 5, flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
-                      gap: 5, paddingVertical: 5, borderRadius: 8,
+                    style={{ marginTop: layout.pad.xs, flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+                      gap: layout.pad.xs, paddingVertical: layout.pad.sm, borderRadius: layout.cardRadius / 1.5,
                       backgroundColor: `${c.primary}18` }}
                   >
-                    <Play size={10} color={c.primary} />
-                    <Text style={{ fontSize: 11, fontWeight: '700', color: c.primary }}>Continue</Text>
+                    <Play size={btnFs} color={c.primary} />
+                    <Text style={{ fontSize: btnFs, fontWeight: '700', color: c.primary }}>Continue</Text>
                   </Pressable>
                 ) : (
                   <Pressable
                     onPress={(e) => { e.stopPropagation(); if (onSubscribe) { onSubscribe(); } else { onPress(); } }}
-                    style={{ marginTop: 5, flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
-                      gap: 5, paddingVertical: 5, borderRadius: 8, backgroundColor: c.primary }}
+                    style={{ marginTop: layout.pad.xs, flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+                      gap: layout.pad.xs, paddingVertical: layout.pad.sm, borderRadius: layout.cardRadius / 1.5,
+                      backgroundColor: c.primary }}
                   >
-                    <Bell size={10} color="#fff" />
-                    <Text style={{ fontSize: 11, fontWeight: '700', color: '#fff' }}>Subscribe</Text>
+                    <Bell size={btnFs} color="#fff" />
+                    <Text style={{ fontSize: btnFs, fontWeight: '700', color: '#fff' }}>Subscribe</Text>
                   </Pressable>
                 )
               ) : null}
@@ -172,45 +191,45 @@ export function CourseCard({
   // ── Default (non-compact): vertical card with full-width banner ──────────
   return (
     <Reanimated.View entering={FadeInDown.delay(index * 60).springify().damping(14)}>
-      <Pressable onPress={onPress} style={{ marginBottom: 12 }}>
+      <Pressable onPress={onPress} style={{ marginBottom: layout.pad.md }}>
         <NeuCard style={{ padding: 0, overflow: 'hidden' }}>
-        {/* Thumbnail banner */}
-        <CourseThumbnailBanner imageUrl={imageUrl} height={110} primary={c.primary}>
+        {/* Thumbnail banner — fluid height */}
+        <CourseThumbnailBanner imageUrl={imageUrl} height={bannerH} primary={c.primary}>
           {showEnrollmentUI && isEnrolled && (
             <View style={{
-              position: 'absolute', top: 7, right: 7,
+              position: 'absolute', top: layout.pad.sm, right: layout.pad.sm,
               backgroundColor: enrollmentStatus === 'completed' ? '#16A34A' : c.primary,
-              borderRadius: 20, paddingHorizontal: 8, paddingVertical: 3,
-              flexDirection: 'row', alignItems: 'center', gap: 4,
+              borderRadius: layout.cardRadius, paddingHorizontal: layout.pad.sm, paddingVertical: 3,
+              flexDirection: 'row', alignItems: 'center', gap: layout.pad.xs,
             }}>
-              <CheckCircle size={10} color="#fff" />
-              <Text style={{ fontSize: 10, color: '#fff', fontWeight: '700' }}>
+              <CheckCircle size={badgeFs + 1} color="#fff" />
+              <Text style={{ fontSize: badgeFs + 1, color: '#fff', fontWeight: '700' }}>
                 {enrollmentStatus === 'completed' ? 'Completed' : 'Enrolled'}
               </Text>
             </View>
           )}
         </CourseThumbnailBanner>
 
-        <View style={{ padding: 10 }}>
-          <Text style={{ fontSize: 14, fontWeight: '700', color: c.text, marginBottom: 2 }} numberOfLines={2}>
+        <View style={{ padding: contentPx }}>
+          <Text style={{ fontSize: titleFs, fontWeight: '700', color: c.text, marginBottom: 2 }} numberOfLines={2}>
             {title}
           </Text>
 
           {doctorName ? (
-            <Text style={{ fontSize: 11, color: c.text, opacity: 0.55, marginBottom: 4 }}>
+            <Text style={{ fontSize: metaFs, color: c.text, opacity: 0.55, marginBottom: layout.pad.xs }}>
               Dr. {doctorName}
             </Text>
           ) : null}
 
           {description ? (
-            <Text style={{ fontSize: 11, color: c.text, opacity: 0.5, lineHeight: 16, marginBottom: 5 }} numberOfLines={1}>
+            <Text style={{ fontSize: metaFs, color: c.text, opacity: 0.5, lineHeight: metaFs * 1.4, marginBottom: layout.pad.xs }} numberOfLines={1}>
               {description}
             </Text>
           ) : null}
 
           {priceEgp !== undefined && !isEnrolled ? (
-            <View style={{ alignSelf: 'flex-start', marginBottom: 5 }}>
-              <Text style={{ fontSize: 12, fontWeight: '800',
+            <View style={{ alignSelf: 'flex-start', marginBottom: layout.pad.xs }}>
+              <Text style={{ fontSize: priceFs, fontWeight: '800',
                 color: (!priceEgp || priceEgp === 0) ? '#16A34A' : c.primary }}>
                 {(!priceEgp || priceEgp === 0) ? 'Free' : `EGP ${Number(priceEgp).toFixed(0)}`}
               </Text>
@@ -218,10 +237,10 @@ export function CourseCard({
           ) : null}
 
           {progress !== undefined ? (
-            <View style={{ marginBottom: 5 }}>
+            <View style={{ marginBottom: layout.pad.xs }}>
               <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 3 }}>
-                <Text style={{ fontSize: 10, color: c.text, opacity: 0.5 }}>Progress</Text>
-                <Text style={{ fontSize: 10, color: PROGRESS_COLOR_DIM, fontWeight: '600' }}>{progress}%</Text>
+                <Text style={{ fontSize: progressFs, color: c.text, opacity: 0.5 }}>Progress</Text>
+                <Text style={{ fontSize: progressFs, color: PROGRESS_COLOR_DIM, fontWeight: '600' }}>{progress}%</Text>
               </View>
               <View style={{ height: 3, backgroundColor: isDark ? '#1a3a2a' : '#dcfce7', borderRadius: 2, overflow: 'hidden' }}>
                 <LinearGradient
@@ -234,10 +253,10 @@ export function CourseCard({
           ) : null}
 
           {status && !showEnrollmentUI ? (
-            <View style={{ marginTop: 3, alignSelf: 'flex-start',
+            <View style={{ marginTop: layout.pad.xs, alignSelf: 'flex-start',
               backgroundColor: legacyStatusColor(status, c.primary),
-              paddingHorizontal: 8, paddingVertical: 2, borderRadius: 20 }}>
-              <Text style={{ fontSize: 9, color: '#fff', fontWeight: '600', textTransform: 'uppercase' }}>{status}</Text>
+              paddingHorizontal: layout.pad.sm, paddingVertical: 2, borderRadius: layout.cardRadius }}>
+              <Text style={{ fontSize: badgeFs, color: '#fff', fontWeight: '600', textTransform: 'uppercase' }}>{status}</Text>
             </View>
           ) : null}
 
@@ -245,21 +264,23 @@ export function CourseCard({
             isEnrolled ? (
               <Pressable
                 onPress={(e) => { e.stopPropagation(); if (onAction) { onAction(); } else { onPress(); } }}
-                style={{ marginTop: 4, flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
-                  gap: 6, paddingVertical: 8, borderRadius: 10, backgroundColor: `${c.primary}18` }}
+                style={{ marginTop: layout.pad.xs, flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+                  gap: layout.pad.sm, paddingVertical: layout.pad.md, borderRadius: layout.cardRadius / 1.5,
+                  backgroundColor: `${c.primary}18` }}
               >
-                <Play size={12} color={c.primary} />
-                <Text style={{ fontSize: 12, fontWeight: '700', color: c.primary }}>Continue Learning</Text>
+                <Play size={btnFs + 1} color={c.primary} />
+                <Text style={{ fontSize: btnFs + 1, fontWeight: '700', color: c.primary }}>Continue Learning</Text>
               </Pressable>
             ) : (
               <Pressable
                 onPress={(e) => { e.stopPropagation(); if (onSubscribe) { onSubscribe(); } else { onPress(); } }}
-                style={{ marginTop: 4, flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
-                  gap: 6, paddingVertical: 8, borderRadius: 10, backgroundColor: c.primary,
+                style={{ marginTop: layout.pad.xs, flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+                  gap: layout.pad.sm, paddingVertical: layout.pad.md, borderRadius: layout.cardRadius / 1.5,
+                  backgroundColor: c.primary,
                   shadowColor: c.primary, shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.2, shadowRadius: 5 }}
               >
-                <Bell size={12} color="#fff" />
-                <Text style={{ fontSize: 12, fontWeight: '700', color: '#fff' }}>Subscribe</Text>
+                <Bell size={btnFs + 1} color="#fff" />
+                <Text style={{ fontSize: btnFs + 1, fontWeight: '700', color: '#fff' }}>Subscribe</Text>
               </Pressable>
             )
           ) : null}
@@ -277,7 +298,7 @@ function legacyStatusColor(status: string, primary: string) {
   return primary;
 }
 
-// ── Compact thumbnail: fixed square with optional enrollment badge ─────────
+// ── Compact thumbnail: fluid square with optional enrollment badge ─────────
 interface CompactThumbProps {
   imageUrl?: string | null;
   primary: string;
@@ -289,10 +310,10 @@ function CompactThumb({ imageUrl, primary, size, badge }: CompactThumbProps) {
   const [failed, setFailed] = React.useState(false);
   const [loaded, setLoaded] = React.useState(false);
   const showImage = !!imageUrl && !failed;
+  const iconSz = Math.round(size * 0.35);
   return (
     <View style={{ width: size, height: size, backgroundColor: `${primary}12`,
       alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-      {/* Skeleton shimmer shown until image loads or on error */}
       {showImage && !loaded && (
         <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 }}>
           <SkeletonShimmer width={size} height={size} />
@@ -309,13 +330,13 @@ function CompactThumb({ imageUrl, primary, size, badge }: CompactThumbProps) {
           transition={300}
         />
       ) : (
-        <BookOpen size={28} color={primary} opacity={0.22} />
+        <BookOpen size={iconSz} color={primary} opacity={0.22} />
       )}
       {badge ? (
         <View style={{ position: 'absolute', bottom: 4, right: 4,
           backgroundColor: badge === 'done' ? '#16A34A' : primary,
-          borderRadius: 12, padding: 3 }}>
-          <CheckCircle size={10} color="#fff" />
+          borderRadius: size / 4, padding: 3 }}>
+          <CheckCircle size={Math.round(size * 0.14)} color="#fff" />
         </View>
       ) : null}
     </View>

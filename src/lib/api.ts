@@ -2606,7 +2606,55 @@ export async function upsertSystemConfig(key: string, value: unknown) {
   if (error) throw error;
 }
 
-// ── Dashboard Stats ───────────────────────────────────────────────────────────
+// ── Support Settings ──────────────────────────────────────────────────────────
+
+export interface SupportContactEntry {
+  value:   string;
+  label:   string;
+  enabled: boolean;
+}
+
+export interface SupportSettings {
+  phone?:    SupportContactEntry;
+  whatsapp?: SupportContactEntry;
+  telegram?: SupportContactEntry;
+}
+
+/** Fetch all support contact entries from the support_settings table. */
+export async function getSupportSettings(): Promise<SupportSettings> {
+  const { data, error } = await supabase
+    .from('support_settings')
+    .select('key, value, label, enabled');
+  if (error) throw error;
+  const result: SupportSettings = {};
+  for (const row of data ?? []) {
+    if (row.key === 'phone' || row.key === 'whatsapp' || row.key === 'telegram') {
+      result[row.key as keyof SupportSettings] = {
+        value:   row.value   ?? '',
+        label:   row.label   ?? '',
+        enabled: row.enabled ?? false,
+      };
+    }
+  }
+  return result;
+}
+
+/** Upsert a single support contact entry (Super Admin only). */
+export async function upsertSupportSetting(
+  key: 'phone' | 'whatsapp' | 'telegram',
+  entry: Partial<SupportContactEntry>,
+) {
+  const { data: { user } } = await supabase.auth.getUser();
+  const { error } = await supabase
+    .from('support_settings')
+    .upsert(
+      { key, ...entry, updated_by: user?.id, updated_at: new Date().toISOString() },
+      { onConflict: 'key' },
+    );
+  if (error) throw error;
+}
+
+
 export async function getAdminStats() {
   const [users, courses, codes, students, doctors] = await Promise.all([
     supabase.from('profiles').select('id', { count: 'exact', head: true }),

@@ -83,9 +83,9 @@ export default function AdminDashboard() {
             onPress={() => router.push('/(app)/notifications' as RelativePathString)}
             accessibilityLabel="Notifications"
             accessibilityRole="button"
-            style={[{ width: 42, height: 42, borderRadius: 13, alignItems: 'center', justifyContent: 'center' }, neuMicroStyle(isDark)]}
+            style={[{ width: layout.touchTarget, height: layout.touchTarget, borderRadius: layout.cardRadius, alignItems: 'center', justifyContent: 'center' }, neuMicroStyle(isDark)]}
           >
-            <Bell size={19} color={c.primary} />
+            <Bell size={Math.round(layout.touchTarget * 0.44)} color={c.primary} />
           </Pressable>
         }
       />
@@ -93,37 +93,37 @@ export default function AdminDashboard() {
 
         {/* Stats */}
         {loading ? (
-          <ActivityIndicator color={c.primary} style={{ marginVertical: 24 }} />
+          <ActivityIndicator color={c.primary} style={{ marginVertical: layout.sectionGap }} />
         ) : stats && (
           <>
-            <Text style={{ fontSize: 11, fontWeight: '800', color: c.text, opacity: 0.4, marginBottom: 10, textTransform: 'uppercase', letterSpacing: 1 }}>Platform Overview</Text>
-            <View style={{ flexDirection: 'row', flexWrap: 'wrap', marginBottom: 4, gap: 0 }}>
-              <StatCard label="Students"    value={stats.totalStudents}    icon={<Users size={14} color="#fff" />}        color="#7C3AED" />
-              <StatCard label="Doctors"     value={stats.totalDoctors}     icon={<Stethoscope size={14} color="#fff" />}  color="#16A34A" />
-              <StatCard label="Devices"     value={stats.totalDevices}     icon={<Smartphone size={14} color="#fff" />}   color="#D97706" />
-              <StatCard label="Active Codes" value={stats.activeCodes}     icon={<Ticket size={14} color="#fff" />}       color={c.primary} />
-              <StatCard label="Credits"     value={stats.totalCredits}     icon={<CreditCard size={14} color="#fff" />}   color="#16A34A" />
-              <StatCard label="Consumed"    value={stats.usedCredits}      icon={<CreditCard size={14} color="#fff" />}   color="#D97706" />
-              <StatCard label="Courses"     value={stats.totalCourses}     icon={<BookOpen size={14} color="#fff" />}     color="#2DA8FF" />
-              <StatCard label="Published"   value={stats.publishedCourses} icon={<BookOpen size={14} color="#fff" />}     color="#16A34A" />
+            <Text style={{ fontSize: layout.captionSize, fontWeight: '800', color: c.text, opacity: 0.4, marginBottom: layout.pad.sm, textTransform: 'uppercase', letterSpacing: 1 }}>Platform Overview</Text>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', marginBottom: layout.pad.xs }}>
+              <StatCard label="Students"    value={stats.totalStudents}    icon={<Users size={layout.captionSize + 2} color="#fff" />}        color="#7C3AED" />
+              <StatCard label="Doctors"     value={stats.totalDoctors}     icon={<Stethoscope size={layout.captionSize + 2} color="#fff" />}  color="#16A34A" />
+              <StatCard label="Devices"     value={stats.totalDevices}     icon={<Smartphone size={layout.captionSize + 2} color="#fff" />}   color="#D97706" />
+              <StatCard label="Active Codes" value={stats.activeCodes}     icon={<Ticket size={layout.captionSize + 2} color="#fff" />}       color={c.primary} />
+              <StatCard label="Credits"     value={stats.totalCredits}     icon={<CreditCard size={layout.captionSize + 2} color="#fff" />}   color="#16A34A" />
+              <StatCard label="Consumed"    value={stats.usedCredits}      icon={<CreditCard size={layout.captionSize + 2} color="#fff" />}   color="#D97706" />
+              <StatCard label="Courses"     value={stats.totalCourses}     icon={<BookOpen size={layout.captionSize + 2} color="#fff" />}     color="#2DA8FF" />
+              <StatCard label="Published"   value={stats.publishedCourses} icon={<BookOpen size={layout.captionSize + 2} color="#fff" />}     color="#16A34A" />
             </View>
           </>
         )}
 
         {/* Quick Actions */}
-        <Text style={{ fontSize: 15, fontWeight: '800', color: c.text, marginBottom: 12, marginTop: 8 }}>Quick Actions</Text>
-        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginBottom: 12 }}>
+        <Text style={{ fontSize: layout.bodySize + 1, fontWeight: '800', color: c.text, marginBottom: layout.pad.md, marginTop: layout.pad.sm }}>Quick Actions</Text>
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: layout.itemGap, marginBottom: layout.pad.md }}>
           {quickActions.map(({ icon: Icon, label, color, path }) => (
             <NeuCard
               key={label}
               pressable
               onPress={() => router.push(path as RelativePathString)}
-              style={{ width: '46%', flexGrow: 1, alignItems: 'center', paddingVertical: 14, paddingHorizontal: 8 }}
+              style={{ width: '46%', flexGrow: 1, alignItems: 'center', paddingVertical: layout.pad.md, paddingHorizontal: layout.pad.sm }}
             >
-              <View style={{ width: 40, height: 40, borderRadius: 12, backgroundColor: `${color}18`, alignItems: 'center', justifyContent: 'center', marginBottom: 7 }}>
-                <Icon size={20} color={color} />
+              <View style={{ width: layout.touchTarget, height: layout.touchTarget, borderRadius: layout.cardRadius, backgroundColor: `${color}18`, alignItems: 'center', justifyContent: 'center', marginBottom: layout.pad.sm }}>
+                <Icon size={Math.round(layout.touchTarget * 0.46)} color={color} />
               </View>
-              <Text style={{ fontSize: 12, fontWeight: '700', color: c.text, textAlign: 'center', lineHeight: 16 }} numberOfLines={2}>{label}</Text>
+              <Text style={{ fontSize: layout.captionSize + 1, fontWeight: '700', color: c.text, textAlign: 'center', lineHeight: layout.captionSize * 1.4 }} numberOfLines={2}>{label}</Text>
             </NeuCard>
           ))}
         </View>

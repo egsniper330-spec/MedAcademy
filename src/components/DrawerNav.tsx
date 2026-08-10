@@ -240,6 +240,7 @@ function getNavSections(role: string, c: typeof neuColors.light, earningsEnabled
         { icon: AlertOctagon,label: 'Violation Management',path: '/(app)/(superadmin)/violation-management',      color: '#D97706'  },
         { icon: Settings,   label: 'Platform Settings',    path: '/(app)/(superadmin)/sa-platform',               color: '#6B7280'  },
         { icon: Zap,        label: 'System Config',        path: '/(app)/(superadmin)/config',                    color: '#2DA8FF'  },
+        { icon: HeartHandshake, label: 'Support Settings', path: '/(app)/(superadmin)/sa-support-settings',       color: '#22C55E'  },
         { icon: Flag,       label: 'Feature Flags',        path: '/(app)/(superadmin)/feature-flags',             color: '#7C3AED'  },
         { icon: Wrench,     label: 'Maintenance',          path: '/(app)/(superadmin)/maintenance',               color: '#D97706'  },
         { icon: SquareCode, label: 'System Providers',     path: '/(app)/(superadmin)/sa-system-providers',       color: '#2DA8FF'  },
@@ -274,14 +275,14 @@ function NavItem({ item, onPress, c }: { item: NavItemType; onPress: () => void;
       }}
     >
       <View style={{
-        width: 34, height: 34, borderRadius: radius.sm + 2,
+        ...iconContainer.sm,
         backgroundColor: `${item.color ?? c.primary}18`,
         alignItems: 'center', justifyContent: 'center',
       }}>
-        <item.icon size={16} color={item.color ?? c.primary} />
+        <item.icon size={iconContainer.xs.width / 2 + 2} color={item.color ?? c.primary} />
       </View>
       <Text style={{ flex: 1, ...typography.labelSm, color: c.text }}>{item.label}</Text>
-      <ChevronRight size={13} color={`${c.text}33`} />
+      <ChevronRight size={iconContainer.xs.width / 2} color={`${c.text}33`} />
     </Pressable>
   );
 }
@@ -302,8 +303,8 @@ function LogoutRow({ onPress }: { onPress: () => void }) {
         backgroundColor: pressed ? '#DC262615' : 'transparent',
       }}
     >
-      <View style={{ width: 34, height: 34, borderRadius: radius.sm + 2, backgroundColor: '#DC262618', alignItems: 'center', justifyContent: 'center' }}>
-        <LogOut size={16} color="#DC2626" />
+      <View style={{ ...iconContainer.sm, backgroundColor: '#DC262618', alignItems: 'center', justifyContent: 'center' }}>
+        <LogOut size={iconContainer.xs.width / 2 + 2} color="#DC2626" />
       </View>
       <Text style={{ flex: 1, ...typography.labelSm, color: '#DC2626' }}>Sign Out</Text>
     </Pressable>
@@ -436,7 +437,7 @@ export default function DrawerNav() {
                 accessibilityLabel="Close menu"
                 accessibilityRole="button"
                 style={({ pressed }) => ({
-                  width: 32, height: 32, borderRadius: radius.sm + 2,
+                  ...iconContainer.sm,
                   backgroundColor: c.base,
                   alignItems: 'center', justifyContent: 'center',
                   opacity: pressed ? 0.6 : 1,
@@ -452,7 +453,7 @@ export default function DrawerNav() {
                   }),
                 })}
               >
-                <X size={15} color={`${c.text}80`} />
+                <X size={iconContainer.xs.width / 2} color={`${c.text}80`} />
               </Pressable>
             </View>
 
@@ -476,13 +477,13 @@ export default function DrawerNav() {
             }}>
               {/* Avatar blob */}
               <View style={{
-                width: 42, height: 42, borderRadius: radius.md + 1,
+                ...iconContainer.md,
                 backgroundColor: `${roleBadgeColor[role]}18`,
                 alignItems: 'center', justifyContent: 'center',
                 borderWidth: 1.5,
                 borderColor: `${roleBadgeColor[role]}30`,
               }}>
-                <Text style={{ fontSize: 20 }}>👤</Text>
+                <Text style={{ fontSize: iconContainer.md.width * 0.48 }}>👤</Text>
               </View>
 
               {/* Name + role + email */}

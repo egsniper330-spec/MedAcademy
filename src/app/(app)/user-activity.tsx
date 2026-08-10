@@ -124,44 +124,46 @@ function presetToDateRange(preset: string): { dateFrom?: string; dateTo?: string
 // ─── Profile Header ───────────────────────────────────────────────────────────
 
 function ProfileHeader({ profile, c }: { profile: UserProfileSummary; c: typeof neuColors.light }) {
+  const layout = useLayout();
   const roleColor   = ROLE_COLOR[profile.role]   ?? '#6B7280';
   const statusColor = STATUS_COLOR[profile.status] ?? '#6B7280';
   const displayEmail = profile.profile_email ?? profile.email ?? '—';
   const initials = (profile.full_name ?? 'U').split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2);
+  const avatarSize = Math.round(layout.touchTarget * 1.25);
 
   return (
-    <NeuCard style={{ marginBottom: 16, padding: 18 }}>
-      <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 14 }}>
+    <NeuCard style={{ marginBottom: layout.itemGap, padding: layout.cardPx }}>
+      <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: layout.pad.md }}>
         <View style={{
-          width: 56, height: 56, borderRadius: 18,
+          width: avatarSize, height: avatarSize, borderRadius: layout.cardRadius,
           backgroundColor: `${roleColor}20`, alignItems: 'center', justifyContent: 'center',
-          marginRight: 14,
+          marginRight: layout.pad.md,
         }}>
-          <Text style={{ fontSize: 20, fontWeight: '800', color: roleColor }}>{initials}</Text>
+          <Text style={{ fontSize: layout.titleSize, fontWeight: '800', color: roleColor }}>{initials}</Text>
         </View>
         <View style={{ flex: 1 }}>
-          <Text style={{ fontSize: 18, fontWeight: '800', color: c.text }}>{profile.full_name}</Text>
-          <Text style={{ fontSize: 13, color: c.text, opacity: 0.5, marginTop: 2 }}>{displayEmail}</Text>
+          <Text style={{ fontSize: layout.bodySize + 4, fontWeight: '800', color: c.text }}>{profile.full_name}</Text>
+          <Text style={{ fontSize: layout.captionSize + 1, color: c.text, opacity: 0.5, marginTop: 2 }}>{displayEmail}</Text>
           {profile.phone && (
-            <Text style={{ fontSize: 12, color: c.text, opacity: 0.4, marginTop: 1 }}>{profile.phone}</Text>
+            <Text style={{ fontSize: layout.captionSize, color: c.text, opacity: 0.4, marginTop: 1 }}>{profile.phone}</Text>
           )}
         </View>
       </View>
 
-      <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap', marginBottom: 14 }}>
-        <View style={{ backgroundColor: `${roleColor}18`, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 5 }}>
-          <Text style={{ fontSize: 12, fontWeight: '700', color: roleColor, textTransform: 'capitalize' }}>
+      <View style={{ flexDirection: 'row', gap: layout.pad.sm, flexWrap: 'wrap', marginBottom: layout.pad.md }}>
+        <View style={{ backgroundColor: `${roleColor}18`, borderRadius: layout.cardRadius / 1.5, paddingHorizontal: layout.pad.md, paddingVertical: layout.pad.xs + 1 }}>
+          <Text style={{ fontSize: layout.captionSize + 1, fontWeight: '700', color: roleColor, textTransform: 'capitalize' }}>
             {profile.role.replace(/_/g, ' ')}
           </Text>
         </View>
-        <View style={{ backgroundColor: `${statusColor}18`, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 5 }}>
-          <Text style={{ fontSize: 12, fontWeight: '700', color: statusColor, textTransform: 'capitalize' }}>
+        <View style={{ backgroundColor: `${statusColor}18`, borderRadius: layout.cardRadius / 1.5, paddingHorizontal: layout.pad.md, paddingVertical: layout.pad.xs + 1 }}>
+          <Text style={{ fontSize: layout.captionSize + 1, fontWeight: '700', color: statusColor, textTransform: 'capitalize' }}>
             {profile.status}
           </Text>
         </View>
       </View>
 
-      <View style={{ gap: 6 }}>
+      <View style={{ gap: layout.pad.sm }}>
         {([
           ['Account Created', profile.created_at],
           ['Last Login',      profile.last_login],
@@ -169,8 +171,8 @@ function ProfileHeader({ profile, c }: { profile: UserProfileSummary; c: typeof 
           ['Last Active',     profile.last_active],
         ] as [string, string | null | undefined][]).map(([label, val]) => (
           <View key={label} style={{ flexDirection: 'row' }}>
-            <Text style={{ fontSize: 12, color: c.text, opacity: 0.45, minWidth: 90, flexShrink: 0 }}>{label}</Text>
-            <Text style={{ fontSize: 12, color: c.text, flex: 1 }}>{formatTsShort(val)}</Text>
+            <Text style={{ fontSize: layout.captionSize, color: c.text, opacity: 0.45, minWidth: 100, flexShrink: 0 }}>{label}</Text>
+            <Text style={{ fontSize: layout.captionSize, color: c.text, flex: 1 }}>{formatTsShort(val)}</Text>
           </View>
         ))}
       </View>
@@ -181,14 +183,16 @@ function ProfileHeader({ profile, c }: { profile: UserProfileSummary; c: typeof 
 // ─── Timeline Entry Row ───────────────────────────────────────────────────────
 
 function TimelineRow({ entry, isLast, c }: { entry: UserActivityEntry; isLast: boolean; c: typeof neuColors.light }) {
+  const layout = useLayout();
   const aColor = actionColor(entry.action, entry.log_status);
+  const iconTrackSize = Math.round(layout.touchTarget * 0.88);
 
   return (
     <View style={{ flexDirection: 'row', alignItems: 'stretch' }}>
       {/* Vertical track */}
-      <View style={{ width: 40, alignItems: 'center' }}>
-        <View style={{ width: 36, height: 36, borderRadius: 12, backgroundColor: `${aColor}18`, alignItems: 'center', justifyContent: 'center' }}>
-          <Clock size={16} color={aColor} />
+      <View style={{ width: iconTrackSize + layout.pad.sm, alignItems: 'center' }}>
+        <View style={{ width: iconTrackSize, height: iconTrackSize, borderRadius: layout.cardRadius / 1.3, backgroundColor: `${aColor}18`, alignItems: 'center', justifyContent: 'center' }}>
+          <Clock size={Math.round(iconTrackSize * 0.44)} color={aColor} />
         </View>
         {!isLast && (
           <View style={{ width: 2, flex: 1, backgroundColor: `${c.text}0C`, marginTop: 4, marginBottom: -4, minHeight: 20 }} />
@@ -196,29 +200,29 @@ function TimelineRow({ entry, isLast, c }: { entry: UserActivityEntry; isLast: b
       </View>
 
       {/* Card */}
-      <View style={{ flex: 1, marginLeft: 12, paddingBottom: isLast ? 0 : 16 }}>
-        <NeuCard style={{ padding: 14 }}>
+      <View style={{ flex: 1, marginLeft: layout.pad.md, paddingBottom: isLast ? 0 : layout.itemGap }}>
+        <NeuCard style={{ padding: layout.cardPx }}>
           {/* Action badge + status */}
-          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
-            <View style={{ backgroundColor: `${aColor}18`, borderRadius: 6, paddingHorizontal: 8, paddingVertical: 2, flexShrink: 1 }}>
-              <Text style={{ fontSize: 11, fontWeight: '700', color: aColor, textTransform: 'uppercase', letterSpacing: 0.4 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: layout.pad.sm }}>
+            <View style={{ backgroundColor: `${aColor}18`, borderRadius: layout.cardRadius / 2, paddingHorizontal: layout.pad.sm, paddingVertical: layout.pad.xs, flexShrink: 1 }}>
+              <Text style={{ fontSize: layout.captionSize, fontWeight: '700', color: aColor, textTransform: 'uppercase', letterSpacing: 0.4 }}>
                 {actionLabel(entry.action)}
               </Text>
             </View>
             {entry.log_status === 'failed'
-              ? <XCircle size={14} color="#DC2626" />
+              ? <XCircle size={layout.captionSize + 2} color="#DC2626" />
               : entry.log_status === 'warning'
-              ? <AlertTriangle size={14} color="#D97706" />
-              : <CheckCircle size={14} color="#16A34A" />
+              ? <AlertTriangle size={layout.captionSize + 2} color="#D97706" />
+              : <CheckCircle size={layout.captionSize + 2} color="#16A34A" />
             }
           </View>
 
           {entry.description ? (
-            <Text style={{ fontSize: 13, color: c.text, lineHeight: 19, marginBottom: 6 }}>
+            <Text style={{ fontSize: layout.bodySize, color: c.text, lineHeight: layout.bodySize * 1.5, marginBottom: layout.pad.sm }}>
               {entry.description}
             </Text>
           ) : entry.target_name ? (
-            <Text style={{ fontSize: 13, color: c.text, marginBottom: 6 }}>
+            <Text style={{ fontSize: layout.bodySize, color: c.text, marginBottom: layout.pad.sm }}>
               <Text style={{ fontWeight: '600' }}>{entry.target_name}</Text>
               {entry.resource_type
                 ? <Text style={{ color: c.text, opacity: 0.45 }}> · {entry.resource_type.replace(/_/g, ' ')}</Text>
@@ -227,12 +231,12 @@ function TimelineRow({ entry, isLast, c }: { entry: UserActivityEntry; isLast: b
           ) : null}
 
           {entry.actor_name && (
-            <Text style={{ fontSize: 11, color: c.text, opacity: 0.5, marginBottom: 4 }}>
+            <Text style={{ fontSize: layout.captionSize, color: c.text, opacity: 0.5, marginBottom: layout.pad.xs }}>
               {`By: ${entry.actor_name}${entry.actor_role ? ` (${entry.actor_role.replace(/_/g, ' ')})` : ''}`}
             </Text>
           )}
 
-          <Text style={{ fontSize: 11, color: c.text, opacity: 0.35 }}>{formatTs(entry.created_at)}</Text>
+          <Text style={{ fontSize: layout.captionSize, color: c.text, opacity: 0.35 }}>{formatTs(entry.created_at)}</Text>
         </NeuCard>
       </View>
     </View>
@@ -247,21 +251,22 @@ function FilterPill({
   label: string; active: boolean; color: string;
   onPress: () => void; icon?: React.ElementType; c: typeof neuColors.light;
 }) {
+  const layout = useLayout();
   return (
     <Pressable
       onPress={onPress}
       accessibilityLabel={label}
       accessibilityRole="button"
       style={{
-        flexDirection: 'row', alignItems: 'center', gap: 4,
-        paddingHorizontal: 12, paddingVertical: 7, borderRadius: 20,
+        flexDirection: 'row', alignItems: 'center', gap: layout.pad.xs,
+        paddingHorizontal: layout.pad.md, paddingVertical: layout.pad.sm, borderRadius: 20,
         backgroundColor: active ? color : `${c.text}0C`,
         shadowColor: active ? color : 'transparent',
         shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.3, shadowRadius: 5,
       }}
     >
-      {Icon && <Icon size={12} color={active ? '#fff' : c.text} opacity={active ? 1 : 0.55} />}
-      <Text style={{ fontSize: 12, fontWeight: '600', color: active ? '#fff' : c.text, opacity: active ? 1 : 0.65 }}>
+      {Icon && <Icon size={layout.captionSize} color={active ? '#fff' : c.text} opacity={active ? 1 : 0.55} />}
+      <Text style={{ fontSize: layout.captionSize, fontWeight: '600', color: active ? '#fff' : c.text, opacity: active ? 1 : 0.65 }}>
         {label}
       </Text>
     </Pressable>
@@ -286,25 +291,25 @@ function DirectionDropdown({
         accessibilityLabel={`Filter by direction: ${selected.label}`}
         accessibilityRole="button"
         style={{
-          flexDirection: 'row', alignItems: 'center', gap: 6,
+          flexDirection: 'row', alignItems: 'center', gap: layout.pad.xs,
           backgroundColor: value ? c.primary : `${c.text}0C`,
-          borderRadius: 20, paddingHorizontal: 12, paddingVertical: 7,
+          borderRadius: 20, paddingHorizontal: layout.pad.md, paddingVertical: layout.pad.sm,
           shadowColor: value ? c.primary : 'transparent',
           shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.3, shadowRadius: 5,
         }}
       >
-        <Filter size={12} color={value ? '#fff' : c.text} opacity={value ? 1 : 0.55} />
-        <Text style={{ fontSize: 12, fontWeight: '600', color: value ? '#fff' : c.text, opacity: value ? 1 : 0.65 }}>
+        <Filter size={layout.captionSize} color={value ? '#fff' : c.text} opacity={value ? 1 : 0.55} />
+        <Text style={{ fontSize: layout.captionSize, fontWeight: '600', color: value ? '#fff' : c.text, opacity: value ? 1 : 0.65 }}>
           {selected.label}
         </Text>
-        <ChevronDown size={11} color={value ? '#fff' : c.text} opacity={value ? 0.8 : 0.4} />
+        <ChevronDown size={layout.captionSize - 1} color={value ? '#fff' : c.text} opacity={value ? 0.8 : 0.4} />
       </Pressable>
 
       <Modal transparent visible={open} animationType="fade" onRequestClose={() => setOpen(false)}>
         <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.35)' }} onPress={() => setOpen(false)} accessibilityLabel="Close" accessibilityRole="button">
           <View style={{
-            position: 'absolute', top: 180, left: 20, right: 20,
-            backgroundColor: c.base, borderRadius: 18,
+            position: 'absolute', top: 180, left: layout.pad.lg, right: layout.pad.lg,
+            backgroundColor: c.base, borderRadius: layout.cardRadius,
             shadowColor: c.shadowDark, shadowOffset: { width: 0, height: 8 },
             shadowOpacity: 0.5, shadowRadius: 20, overflow: 'hidden',
           }}>
@@ -315,14 +320,14 @@ function DirectionDropdown({
                 accessibilityLabel={d.label}
                 accessibilityRole="button"
                 style={{
-                  paddingHorizontal: layout.screenPx, paddingVertical: 16,
+                  paddingHorizontal: layout.screenPx, paddingVertical: layout.pad.md,
                   borderBottomWidth: i < DIRECTIONS.length - 1 ? 1 : 0,
                   borderBottomColor: `${c.text}0C`,
                   backgroundColor: value === d.key ? `${c.primary}10` : 'transparent',
                 }}
               >
                 <Text style={{
-                  fontSize: 14, fontWeight: value === d.key ? '700' : '500',
+                  fontSize: layout.bodySize, fontWeight: value === d.key ? '700' : '500',
                   color: value === d.key ? c.primary : c.text,
                 }}>
                   {d.label}
@@ -464,37 +469,37 @@ export default function UserAuditLogs() {
 
       {/* ── Header ─────────────────────────────────────────────────────── */}
       <View style={{
-        paddingHorizontal: layout.screenPx, paddingTop: 0, paddingBottom: 14,
+        paddingHorizontal: layout.screenPx, paddingTop: 0, paddingBottom: layout.pad.md,
         backgroundColor: c.base,
         shadowColor: c.shadowDark, shadowOffset: { width: 0, height: 3 },
         shadowOpacity: 0.12, shadowRadius: 8,
       }}>
         {/* Back row + title */}
-        <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 16 }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: layout.pad.md }}>
           <Pressable
             onPress={() => router.back()}
             accessibilityLabel="Go back"
             accessibilityRole="button"
             style={{
-              marginRight: 12, padding: 8,
-              backgroundColor: `${c.text}0A`, borderRadius: 12,
+              marginRight: layout.pad.md, padding: layout.pad.sm,
+              backgroundColor: `${c.text}0A`, borderRadius: layout.cardRadius / 1.5,
               shadowColor: c.shadowDark, shadowOffset: { width: 2, height: 2 },
               shadowOpacity: 0.4, shadowRadius: 4,
             }}
           >
-            <ArrowLeft size={20} color={c.text} opacity={0.7} />
+            <ArrowLeft size={layout.bodySize + 4} color={c.text} opacity={0.7} />
           </Pressable>
           <View style={{ flex: 1 }}>
-            <Text style={{ fontSize: 11, fontWeight: '600', color: c.text, opacity: 0.4, textTransform: 'uppercase', letterSpacing: 0.8 }}>
+            <Text style={{ fontSize: layout.captionSize, fontWeight: '600', color: c.text, opacity: 0.4, textTransform: 'uppercase', letterSpacing: 0.8 }}>
               Audit Logs
             </Text>
-            <Text style={{ fontSize: 20, fontWeight: '800', color: c.text, marginTop: 1 }} numberOfLines={1}>
+            <Text style={{ fontSize: layout.titleSize, fontWeight: '800', color: c.text, marginTop: 1 }} numberOfLines={1}>
               {userName}
             </Text>
           </View>
           {totalCount > 0 && (
-            <NeuCard style={{ paddingHorizontal: 12, paddingVertical: 6 }}>
-              <Text style={{ fontSize: 13, fontWeight: '700', color: c.primary }}>
+            <NeuCard style={{ paddingHorizontal: layout.pad.md, paddingVertical: layout.pad.sm }}>
+              <Text style={{ fontSize: layout.bodySize + 1, fontWeight: '700', color: c.primary }}>
                 {totalCount.toLocaleString('en-US')}
               </Text>
             </NeuCard>
@@ -504,29 +509,29 @@ export default function UserAuditLogs() {
         {/* Search bar */}
         <View style={{
           flexDirection: 'row', alignItems: 'center',
-          backgroundColor: c.base, borderRadius: 14,
-          paddingHorizontal: 14, paddingVertical: 11, marginBottom: 12,
+          backgroundColor: c.base, borderRadius: layout.cardRadius,
+          paddingHorizontal: layout.cardPx, paddingVertical: layout.pad.md, marginBottom: layout.pad.md,
           shadowColor: c.shadowDark, shadowOffset: { width: 2, height: 2 },
           shadowOpacity: 0.45, shadowRadius: 6,
         }}>
-          <Search size={16} color={c.text} opacity={0.35} />
+          <Search size={layout.captionSize + 2} color={c.text} opacity={0.35} />
           <TextInput
             value={search}
             onChangeText={onSearchChange}
             placeholder={`Search ${userName}'s logs…`}
             placeholderTextColor={`${c.text}45`}
-            style={{ flex: 1, marginLeft: 10, fontSize: 14, color: c.text }}
+            style={{ flex: 1, marginLeft: layout.pad.sm, fontSize: layout.bodySize, color: c.text }}
           />
           {search.length > 0 && (
             <Pressable onPress={clearSearch} hitSlop={8} accessibilityLabel="Clear search" accessibilityRole="button">
-              <X size={15} color={c.text} opacity={0.4} />
+              <X size={layout.captionSize + 1} color={c.text} opacity={0.4} />
             </Pressable>
           )}
         </View>
 
         {/* Date preset row */}
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 10 }}>
-          <View style={{ flexDirection: 'row', gap: 8, paddingRight: 8 }}>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: layout.pad.sm }}>
+          <View style={{ flexDirection: 'row', gap: layout.pad.sm, paddingRight: layout.pad.sm }}>
             {DATE_PRESETS.map(p => (
               <FilterPill
                 key={p.key}
@@ -549,7 +554,7 @@ export default function UserAuditLogs() {
 
         {/* Activity type chips */}
         <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-          <View style={{ flexDirection: 'row', gap: 8, paddingRight: 8 }}>
+          <View style={{ flexDirection: 'row', gap: layout.pad.sm, paddingRight: layout.pad.sm }}>
             {CATEGORIES.map(cat => {
               const Icon = cat.icon;
               return (
@@ -570,41 +575,41 @@ export default function UserAuditLogs() {
 
       {/* Active filter summary badge */}
       {activeFiltersCount > 0 && (
-        <View style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: layout.screenPx, paddingTop: 10 }}>
-          <View style={{ backgroundColor: `${c.primary}12`, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 4 }}>
-            <Text style={{ fontSize: 11, color: c.primary, fontWeight: '600' }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: layout.screenPx, paddingTop: layout.pad.sm }}>
+          <View style={{ backgroundColor: `${c.primary}12`, borderRadius: layout.cardRadius / 2, paddingHorizontal: layout.pad.md, paddingVertical: layout.pad.xs + 1 }}>
+            <Text style={{ fontSize: layout.captionSize, color: c.primary, fontWeight: '600' }}>
               {activeFiltersCount} filter{activeFiltersCount > 1 ? 's' : ''} active
             </Text>
           </View>
           <Pressable
             onPress={() => applyFilter({ category: '', direction: '', datePreset: '' })}
-            style={{ marginLeft: 8, paddingHorizontal: 10, paddingVertical: 4 }}
+            style={{ marginLeft: layout.pad.sm, paddingHorizontal: layout.pad.md, paddingVertical: layout.pad.xs + 1 }}
           >
-            <Text style={{ fontSize: 11, color: c.text, opacity: 0.45, fontWeight: '600' }}>Clear all</Text>
+            <Text style={{ fontSize: layout.captionSize, color: c.text, opacity: 0.45, fontWeight: '600' }}>Clear all</Text>
           </Pressable>
         </View>
       )}
 
       {/* ── Content ──────────────────────────────────────────────────── */}
       {loading ? (
-        <ActivityIndicator color={c.primary} size="large" style={{ marginTop: 60 }} />
+        <ActivityIndicator color={c.primary} size="large" style={{ marginTop: layout.sectionGap * 2 }} />
       ) : (
         <FlatList
           data={entries}
           keyExtractor={item => item.id}
-          contentContainerStyle={{ paddingHorizontal: layout.screenPx, paddingTop: 16, paddingBottom: layout.scrollBottom() }}
+          contentContainerStyle={{ paddingHorizontal: layout.screenPx, paddingTop: layout.pad.md, paddingBottom: layout.scrollBottom() }}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />}
           onEndReached={loadMore}
           onEndReachedThreshold={0.3}
           contentInsetAdjustmentBehavior="automatic"
           ListHeaderComponent={profile ? <ProfileHeader profile={profile} c={c} /> : null}
           ListEmptyComponent={
-            <View style={{ alignItems: 'center', paddingVertical: 80 }}>
-              <Clock size={52} color={c.primary} opacity={0.15} style={{ marginBottom: 14 }} />
-              <Text style={{ fontSize: 16, fontWeight: '700', color: c.text, opacity: 0.35 }}>
+            <View style={{ alignItems: 'center', paddingVertical: layout.sectionGap * 3 }}>
+              <Clock size={Math.round(layout.touchTarget * 1.1)} color={c.primary} opacity={0.15} style={{ marginBottom: layout.pad.md }} />
+              <Text style={{ fontSize: layout.bodySize + 2, fontWeight: '700', color: c.text, opacity: 0.35 }}>
                 No logs found
               </Text>
-              <Text style={{ fontSize: 13, color: c.text, opacity: 0.25, marginTop: 6, textAlign: 'center' }}>
+              <Text style={{ fontSize: layout.bodySize, color: c.text, opacity: 0.25, marginTop: layout.pad.sm, textAlign: 'center' }}>
                 {activeFiltersCount > 0
                   ? 'Try clearing some filters'
                   : `No audit events recorded for ${userName}`}
@@ -613,15 +618,15 @@ export default function UserAuditLogs() {
           }
           ListFooterComponent={
             loadingMore ? (
-              <View style={{ paddingVertical: 20, alignItems: 'center' }}>
-                <RefreshCw size={20} color={c.primary} opacity={0.5} />
+              <View style={{ paddingVertical: layout.pad.lg, alignItems: 'center' }}>
+                <RefreshCw size={layout.bodySize + 4} color={c.primary} opacity={0.5} />
               </View>
             ) : entries.length > 0 && entries.length < totalCount ? (
-              <Pressable onPress={loadMore} style={{ paddingVertical: 16, alignItems: 'center' }}>
-                <Text style={{ fontSize: 13, color: c.primary, fontWeight: '600' }}>Load more</Text>
+              <Pressable onPress={loadMore} style={{ paddingVertical: layout.pad.lg, alignItems: 'center' }}>
+                <Text style={{ fontSize: layout.bodySize, color: c.primary, fontWeight: '600' }}>Load more</Text>
               </Pressable>
             ) : entries.length > 0 ? (
-              <Text style={{ textAlign: 'center', fontSize: 12, color: c.text, opacity: 0.3, paddingVertical: 16 }}>
+              <Text style={{ textAlign: 'center', fontSize: layout.captionSize, color: c.text, opacity: 0.3, paddingVertical: layout.pad.lg }}>
                 All {totalCount.toLocaleString('en-US')} events shown
               </Text>
             ) : null

@@ -6,6 +6,10 @@
  *   - App preview thumbnails in the Recent Apps switcher leaking protected content
  *   - Shoulder-surfing via fast background/foreground switching
  *
+ * Super Admin bypass: when a verified Super Admin session is active the overlay
+ * is suppressed so SA can freely switch between apps without the blur. The bypass
+ * is driven by isSuperAdmin from SecurityContext (backend-verified profile role).
+ *
  * Implementation:
  *   - On Android: FLAG_SECURE (via expo-screen-capture) already prevents
  *     OS-level screenshots; this overlay is a belt-and-suspenders JS layer.
@@ -18,6 +22,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { View, Text, AppState, AppStateStatus, useColorScheme } from 'react-native';
 import Animated, { useSharedValue, useAnimatedStyle, withTiming } from 'react-native-reanimated';
+import { useSecurity } from '@/lib/SecurityContext';
 
 export function SecureAppOverlay() {
   const [visible, setVisible] = useState(false);
@@ -25,6 +30,7 @@ export function SecureAppOverlay() {
   const opacity = useSharedValue(0);
   const scheme = useColorScheme();
   const isDark = scheme === 'dark';
+  const { isSuperAdmin } = useSecurity();
 
   useEffect(() => {
     if (process.env.EXPO_OS === 'web') return;
@@ -32,6 +38,13 @@ export function SecureAppOverlay() {
     const sub = AppState.addEventListener('change', (nextState: AppStateStatus) => {
       const prev = appStateRef.current;
       appStateRef.current = nextState;
+
+      // Super Admin bypass: never show the protective overlay for SA sessions
+      if (isSuperAdmin) {
+        setVisible(false);
+        opacity.value = 0;
+        return;
+      }
 
       const goingToBackground =
         (prev === 'active') &&
@@ -45,22 +58,20 @@ export function SecureAppOverlay() {
         setVisible(true);
         opacity.value = withTiming(1, { duration: 80 });
       } else if (comingToForeground) {
-        opacity.value = withTiming(0, { duration: 200 }, () => {
-          // Remove from render tree after fade-out completes
-        });
-        // Remove slightly after fade starts so animation is smooth
+        opacity.value = withTiming(0, { duration: 200 });
         setTimeout(() => setVisible(false), 200);
       }
     });
 
     return () => sub.remove();
-  }, [opacity]);
+  }, [opacity, isSuperAdmin]);
 
   const overlayStyle = useAnimatedStyle(() => ({
     opacity: opacity.value,
   }));
 
-  if (!visible) return null;
+  // Super Admin: never show the overlay
+  if (isSuperAdmin || !visible) return null;
 
   return (
     <Animated.View
@@ -74,7 +85,6 @@ export function SecureAppOverlay() {
         gap: 16,
       }]}
     >
-      {/* Shield icon placeholder — pure View to avoid image loading delay */}
       <View style={{
         width: 72, height: 72, borderRadius: 22,
         backgroundColor: isDark ? '#1E293B' : '#E2E8F0',

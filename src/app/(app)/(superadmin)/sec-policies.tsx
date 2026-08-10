@@ -4,12 +4,11 @@ import {
   View, Text, ScrollView, Pressable, ActivityIndicator,
   Switch, useColorScheme, TextInput,
 } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   ShieldAlert, ShieldCheck, Wifi, Globe, Bug, Lock,
   Camera, Trash2, Plus, Save,
 } from 'lucide-react-native';
-import { neuColors, neuFlatStyle } from '@/lib/neu';
+import { neuColors, useLayout, neuFlatStyle, safeBottom } from '@/lib/neu';
 import { NeuButton } from '@/components/NeuButton';
 import { PageHeader } from '@/components/PageHeader';
 import { useToast } from '@/components/Toast';
@@ -61,7 +60,8 @@ export default function SecurityPoliciesScreen() {
   const scheme = useColorScheme();
   const isDark = scheme === 'dark';
   const c = isDark ? neuColors.dark : neuColors.light;
-  const insets = useSafeAreaInsets();
+  const layout = useLayout();
+  const insets = layout.insets;
   const flat = neuFlatStyle(isDark);
   const router = useRouter();
   const { showToast } = useToast();
@@ -152,16 +152,16 @@ export default function SecurityPoliciesScreen() {
     <View style={{ flex: 1, backgroundColor: c.base }}>
       <PageHeader title="Security Policies" />
       <ScrollView
-        contentContainerStyle={{ padding: 16, gap: 20, paddingBottom: Math.max(insets.bottom, 24) + 24 }}
+        contentContainerStyle={{ padding: layout.screenPx, gap: layout.sectionGap, paddingBottom: layout.scrollBottom() }}
         contentInsetAdjustmentBehavior="automatic"
       >
         {/* Intro */}
         <View style={[flat, {
-          borderRadius: 16, padding: 16, flexDirection: 'row', gap: 12, alignItems: 'flex-start',
+          borderRadius: layout.cardRadius, padding: layout.cardPx, flexDirection: 'row', gap: layout.pad.md, alignItems: 'flex-start',
           borderLeftWidth: 4, borderLeftColor: c.primary,
         }]}>
-          <ShieldCheck size={20} color={c.primary} />
-          <Text style={{ flex: 1, fontSize: 13, color: c.text, lineHeight: 18 }}>
+          <ShieldCheck size={layout.bodySize + 4} color={c.primary} />
+          <Text style={{ flex: 1, fontSize: layout.bodySize, color: c.text, lineHeight: layout.bodySize * 1.5 }}>
             Configure how the platform responds to each security threat. Changes apply to all users immediately.
           </Text>
         </View>
@@ -172,19 +172,19 @@ export default function SecurityPoliciesScreen() {
           if (!meta) return null;
           const Icon = meta.icon;
           return (
-            <View key={policy.id} style={[flat, { borderRadius: 18, padding: 16, gap: 14 }]}>
+            <View key={policy.id} style={[flat, { borderRadius: layout.cardRadius, padding: layout.cardPx, gap: layout.pad.md }]}>
               {/* Header */}
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: layout.pad.md }}>
                 <View style={{
-                  width: 40, height: 40, borderRadius: 12,
+                  width: layout.touchTarget, height: layout.touchTarget, borderRadius: layout.cardRadius,
                   backgroundColor: `${c.primary}18`,
                   alignItems: 'center', justifyContent: 'center',
                 }}>
-                  <Icon size={20} color={c.primary} />
+                  <Icon size={Math.round(layout.touchTarget * 0.46)} color={c.primary} />
                 </View>
                 <View style={{ flex: 1 }}>
-                  <Text style={{ fontSize: 15, fontWeight: '700', color: c.text }}>{meta.label}</Text>
-                  <Text style={{ fontSize: 12, color: `${c.text}77` }}>{meta.desc}</Text>
+                  <Text style={{ fontSize: layout.bodySize + 1, fontWeight: '700', color: c.text }}>{meta.label}</Text>
+                  <Text style={{ fontSize: layout.captionSize, color: `${c.text}77` }}>{meta.desc}</Text>
                 </View>
                 <Switch
                   value={policy.enabled}
@@ -195,20 +195,20 @@ export default function SecurityPoliciesScreen() {
               </View>
               {/* Action selector */}
               {policy.enabled && (
-                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: layout.pad.sm }}>
                   {ACTIONS.map((act) => {
                     const selected = policy.action === act.value;
                     return (
                       <Pressable key={act.value}
                         onPress={() => updateLocalPolicy(policy.id, 'action', act.value)}
                         style={[flat, {
-                          paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20,
+                          paddingHorizontal: layout.pad.md, paddingVertical: layout.pad.sm, borderRadius: 20,
                           backgroundColor: selected ? act.color : undefined,
                           borderWidth: selected ? 0 : 1,
                           borderColor: `${act.color}55`,
                         }]}>
                         <Text style={{
-                          fontSize: 12, fontWeight: '700',
+                          fontSize: layout.captionSize, fontWeight: '700',
                           color: selected ? '#fff' : act.color,
                         }}>
                           {act.label}
@@ -219,7 +219,7 @@ export default function SecurityPoliciesScreen() {
                 </View>
               )}
               {!policy.enabled && (
-                <Text style={{ fontSize: 12, color: `${c.text}55`, fontStyle: 'italic' }}>
+                <Text style={{ fontSize: layout.captionSize, color: `${c.text}55`, fontStyle: 'italic' }}>
                   Detection disabled — no action taken, no events logged.
                 </Text>
               )}
@@ -230,60 +230,60 @@ export default function SecurityPoliciesScreen() {
         {/* Save */}
         <NeuButton
           label={saving ? 'Saving...' : 'Save Policies'}
-          icon={<Save size={18} color="#fff" />}
+          icon={<Save size={layout.bodySize + 2} color="#fff" />}
           onPress={() => { void handleSave(); }}
           variant="primary"
           loading={saving}
         />
 
         {/* VPN Whitelist */}
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-          <Wifi size={18} color={c.primary} />
-          <Text style={{ fontSize: 16, fontWeight: '700', color: c.text }}>VPN Whitelist</Text>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: layout.pad.sm }}>
+          <Wifi size={layout.bodySize + 2} color={c.primary} />
+          <Text style={{ fontSize: layout.bodySize + 2, fontWeight: '700', color: c.text }}>VPN Whitelist</Text>
         </View>
-        <Text style={{ fontSize: 13, color: `${c.text}77` }}>
+        <Text style={{ fontSize: layout.bodySize, color: `${c.text}77` }}>
           Whitelisted VPNs bypass the VPN detection policy. Add trusted corporate VPN names.
         </Text>
 
         {/* Add VPN */}
-        <View style={{ flexDirection: 'row', gap: 10, alignItems: 'center' }}>
-          <View style={[flat, { flex: 1, minWidth: 0, borderRadius: 14 }]}>
+        <View style={{ flexDirection: 'row', gap: layout.pad.sm, alignItems: 'center' }}>
+          <View style={[flat, { flex: 1, minWidth: 0, borderRadius: layout.cardRadius }]}>
             <TextInput
               value={newVpnName}
               onChangeText={setNewVpnName}
               placeholder="VPN name (e.g. Corporate VPN)"
               placeholderTextColor={`${c.text}55`}
-              style={{ paddingHorizontal: 14, paddingVertical: 12, fontSize: 14, color: c.text, minWidth: 0 }}
+              style={{ paddingHorizontal: layout.cardPx, paddingVertical: layout.pad.md, fontSize: layout.bodySize, color: c.text, minWidth: 0 }}
             />
           </View>
           <Pressable
             onPress={() => void handleAddVpn()}
             disabled={addingVpn || !newVpnName.trim()}
             style={[flat, {
-              width: 44, height: 44, borderRadius: 14,
+              width: layout.touchTarget + 2, height: layout.touchTarget + 2, borderRadius: layout.cardRadius,
               alignItems: 'center', justifyContent: 'center',
               backgroundColor: newVpnName.trim() ? c.primary : undefined,
               opacity: newVpnName.trim() ? 1 : 0.5,
             }]}>
-            {addingVpn ? <ActivityIndicator size="small" color="#fff" /> : <Plus size={20} color={newVpnName.trim() ? '#fff' : c.text} />}
+            {addingVpn ? <ActivityIndicator size="small" color="#fff" /> : <Plus size={layout.bodySize + 4} color={newVpnName.trim() ? '#fff' : c.text} />}
           </Pressable>
         </View>
 
         {/* Whitelist items */}
         {whitelist.length === 0 ? (
-          <View style={[flat, { borderRadius: 14, padding: 20, alignItems: 'center' }]}>
-            <Text style={{ fontSize: 13, color: `${c.text}66` }}>No whitelisted VPNs</Text>
+          <View style={[flat, { borderRadius: layout.cardRadius, padding: layout.cardPx * 1.25, alignItems: 'center' }]}>
+            <Text style={{ fontSize: layout.bodySize, color: `${c.text}66` }}>No whitelisted VPNs</Text>
           </View>
         ) : (
           whitelist.map((vpn) => (
             <View key={vpn.id} style={[flat, {
-              borderRadius: 14, padding: 14, flexDirection: 'row',
-              alignItems: 'center', gap: 12,
+              borderRadius: layout.cardRadius, padding: layout.cardPx, flexDirection: 'row',
+              alignItems: 'center', gap: layout.pad.md,
             }]}>
-              <Wifi size={18} color={c.primary} />
-              <Text style={{ flex: 1, fontSize: 14, fontWeight: '600', color: c.text }}>{vpn.name}</Text>
+              <Wifi size={layout.bodySize + 2} color={c.primary} />
+              <Text style={{ flex: 1, fontSize: layout.bodySize, fontWeight: '600', color: c.text }}>{vpn.name}</Text>
               <Pressable onPress={() => void handleRemoveVpn(vpn.id)}>
-                <Trash2 size={18} color="#EF4444" />
+                <Trash2 size={layout.bodySize + 2} color="#EF4444" />
               </Pressable>
             </View>
           ))
