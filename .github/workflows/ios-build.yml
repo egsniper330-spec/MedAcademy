@@ -255,6 +255,7 @@ jobs:
       # 7. xcodebuild (unsigned, Release)
       # CODE_SIGNING_ALLOWED=NO gives a compiled binary packageable as unsigned IPA.
       # PIPESTATUS[0] captures xcodebuild's real exit code from the tee pipeline.
+      # Complete compiler diagnostics printed on failure (no tail truncation).
       # -------------------------------------------------------------------------
       - name: Build iOS app (unsigned, Release)
         id: xcode-build
@@ -268,6 +269,28 @@ jobs:
           echo "Scheme:             $SCHEME"
           echo "Build dir:          $BUILD_DIR"
 
+          # ------------------------------------------------------------------
+          # Tool versions (for diagnosis)
+          # ------------------------------------------------------------------
+          echo ""
+          echo "=== Tool versions ==="
+          xcodebuild -version
+          clang --version
+          ruby --version
+          pod --version
+
+          # fmt version from CocoaPods lock file
+          echo ""
+          echo "=== fmt version ==="
+          grep -i "fmt" ios/Podfile.lock 2>/dev/null \
+            || grep -i "fmt" ios/Pods/Manifest.lock 2>/dev/null \
+            || echo "(fmt not found in lock files)"
+
+          # ------------------------------------------------------------------
+          # Build
+          # ------------------------------------------------------------------
+          echo ""
+          echo "=== Starting xcodebuild ==="
           set -o pipefail
 
           xcodebuild \
@@ -289,8 +312,30 @@ jobs:
           BUILD_EXIT=${PIPESTATUS[0]}
 
           if [ "$BUILD_EXIT" -ne 0 ]; then
-            echo "xcodebuild failed with exit code $BUILD_EXIT"
-            tail -200 /tmp/xcodebuild.log
+            echo ""
+            echo "================================================================"
+            echo "BUILD FAILED (exit $BUILD_EXIT) -- compiler diagnostics below"
+            echo "================================================================"
+
+            echo ""
+            echo "=== COMPILER ERRORS (error: / fatal error: / clang: error: / FAILED) ==="
+            grep -n -E "error:|fatal error:|clang: error:|: FAILED$" /tmp/xcodebuild.log \
+              | tail -150 || true
+
+            echo ""
+            echo "=== fmt COMPILATION CONTEXT (format.cc +/-50 lines) ==="
+            grep -n -B 30 -A 50 "Pods/fmt/src/format.cc" /tmp/xcodebuild.log \
+              | tail -300 || true
+
+            echo ""
+            echo "=== Folly / React Native C++ CONTEXT ==="
+            grep -n -E "Folly|RCT|folly|hermes" /tmp/xcodebuild.log \
+              | grep -E "error:|fatal error:" | tail -50 || true
+
+            echo ""
+            echo "=== LAST 300 LINES of build log ==="
+            tail -300 /tmp/xcodebuild.log
+
             exit "$BUILD_EXIT"
           fi
 
