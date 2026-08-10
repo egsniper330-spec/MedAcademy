@@ -1,6 +1,6 @@
 name: iOS Unsigned Build
 
-# ─── Triggers ─────────────────────────────────────────────────────────────────
+# Triggers
 on:
   workflow_dispatch:
     inputs:
@@ -18,74 +18,106 @@ on:
       - 'patches/**'
   workflow_call:
 
-# ─── Concurrency ──────────────────────────────────────────────────────────────
+# Concurrency - cancel in-progress runs on the same branch to save CI minutes
 concurrency:
   group: ios-build-${{ github.ref }}
   cancel-in-progress: true
 
-# ─── Permissions ──────────────────────────────────────────────────────────────
 permissions:
   contents: read
 
 jobs:
+  # ---------------------------------------------------------------------------
+  # iOS Build: unsigned IPA
+  #
+  # Pipeline:
+  #   1. expo prebuild regenerates ios/ from app.json + config plugins
+  #   2. CocoaPods install
+  #   3. xcodebuild (CODE_SIGNING_ALLOWED=NO)
+  #   4. Package .app into Payload/ zip -> .ipa
+  #   5. Validate IPA >= 10 MB before uploading
+  # ---------------------------------------------------------------------------
   ios-build:
     name: Build Unsigned iOS IPA
     runs-on: macos-latest
     timeout-minutes: 90
 
     env:
+      # Placeholder env-vars needed by Expo config plugins during prebuild only.
+      # They do NOT affect the compiled binary.
       EXPO_PUBLIC_APP_ID: app-czyg340mpc75
       EXPO_PUBLIC_SUPABASE_URL: https://placeholder.supabase.co
       EXPO_PUBLIC_SUPABASE_ANON_KEY: placeholder
 
     steps:
+      # -------------------------------------------------------------------------
+      # 1. Checkout
+      # -------------------------------------------------------------------------
       - name: Checkout
         uses: actions/checkout@v4
 
+      # -------------------------------------------------------------------------
+      # 2. Node.js + npm dependencies
+      # -------------------------------------------------------------------------
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '20'
 
       - name: Install Node dependencies
+        # npm ci uses package-lock.json for a clean, reproducible install.
+        # --ignore-scripts skips postinstall (patch-package, sync-android-version)
+        # which are not needed for an iOS build.
         run: npm ci --ignore-scripts
 
+      # -------------------------------------------------------------------------
+      # 3. Expo Prebuild (iOS only, clean)
+      # Regenerates ios/ from app.json + config plugins.
+      # --no-install skips pod install so we control it explicitly below.
+      # -------------------------------------------------------------------------
       - name: Expo Prebuild (iOS, clean)
         run: npx expo prebuild --platform ios --clean --no-install
 
+      # -------------------------------------------------------------------------
+      # 4. Verify prebuild output
+      # -------------------------------------------------------------------------
       - name: Verify prebuild output
+        shell: bash
         run: |
           WORKSPACE=$(find ios -name "*.xcworkspace" -maxdepth 2 | head -1)
           if [ -z "$WORKSPACE" ]; then
-            echo "❌ No .xcworkspace found in ios/ after prebuild"
+            echo "FAIL: No .xcworkspace found in ios/ after prebuild"
             ls -la ios/
             exit 1
           fi
-          echo "✅ Xcode workspace: $WORKSPACE"
+          echo "OK: Xcode workspace: $WORKSPACE"
 
           SWIFT=$(find ios -name "IOSSecurityModule.swift" | head -1)
-          OBJCM=$(find ios -name "IOSSecurityModule.m"     | head -1)
+          OBJCM=$(find ios -name "IOSSecurityModule.m" | head -1)
           if [ -z "$SWIFT" ] || [ -z "$OBJCM" ]; then
-            echo "❌ IOSSecurityModule files missing from ios/"
+            echo "FAIL: IOSSecurityModule files missing from ios/ - withSecurityModule plugin may have failed"
             exit 1
           fi
-          echo "✅ IOSSecurityModule.swift: $SWIFT"
-          echo "✅ IOSSecurityModule.m:     $OBJCM"
+          echo "OK: IOSSecurityModule.swift: $SWIFT"
+          echo "OK: IOSSecurityModule.m: $OBJCM"
 
-          if ! grep -q 'buildReactNativeFromSource' ios/Podfile.properties.json 2&gt;/dev/null; then
-            echo "⚠️  ios.buildReactNativeFromSource not found in Podfile.properties.json"
-            cat ios/Podfile.properties.json
+          if grep -q 'buildReactNativeFromSource' ios/Podfile.properties.json 2>/dev/null; then
+            echo "OK: buildReactNativeFromSource confirmed in Podfile.properties.json"
           else
-            echo "✅ buildReactNativeFromSource confirmed in Podfile.properties.json"
+            echo "WARN: ios.buildReactNativeFromSource not found in Podfile.properties.json"
+            cat ios/Podfile.properties.json
           fi
 
+      # -------------------------------------------------------------------------
+      # 5. Ruby + CocoaPods
+      # -------------------------------------------------------------------------
       - name: Setup Ruby
         uses: ruby/setup-ruby@v1
         with:
           ruby-version: '3.3'
           bundler-cache: false
 
-      - name: Install CocoaPods
+      - name: Install CocoaPods gem
         run: |
           gem install cocoapods --no-document
           pod --version
@@ -96,46 +128,57 @@ jobs:
         run: |
           set -o pipefail
           echo "Running pod install..."
-          pod install --repo-update 2&gt;&1 | tee /tmp/pod-install.log
-          POD_STATUS=$?
-          if [ $POD_STATUS -ne 0 ]; then
-            echo "❌ pod install failed (exit $POD_STATUS)"
-            tail -50 /tmp/pod-install.log
-            exit $POD_STATUS
+          pod install --repo-update 2>&1 | tee /tmp/pod-install.log
+          POD_STATUS=${PIPESTATUS[0]}
+
+          if [ "$POD_STATUS" -ne 0 ]; then
+            echo "FAIL: pod install failed (exit $POD_STATUS)"
+            tail -100 /tmp/pod-install.log || true
+            exit "$POD_STATUS"
           fi
-          echo "✅ pod install succeeded"
+
+          echo "OK: pod install succeeded"
 
           if [ ! -d "Pods" ]; then
-            echo "❌ Pods/ directory not created by pod install"
+            echo "FAIL: Pods/ directory was not created"
             exit 1
           fi
-          echo "✅ Pods/ directory present"
+          echo "OK: Pods/ directory present"
 
           WORKSPACE=$(find . -name "*.xcworkspace" -maxdepth 2 | head -1)
           if [ -z "$WORKSPACE" ]; then
-            echo "❌ No .xcworkspace found after pod install"
+            echo "FAIL: No .xcworkspace found after pod install"
             exit 1
           fi
-          echo "✅ Xcode workspace present: $WORKSPACE"
+          echo "OK: Xcode workspace present: $WORKSPACE"
 
+      # -------------------------------------------------------------------------
+      # 6. Discover Xcode workspace and scheme
+      # -------------------------------------------------------------------------
       - name: Discover Xcode workspace and scheme
         id: xcode-info
+        shell: bash
         run: |
           WORKSPACE=$(find ios -name "*.xcworkspace" -maxdepth 2 | head -1)
           if [ -z "$WORKSPACE" ]; then
-            echo "❌ No .xcworkspace found after pod install"
+            echo "FAIL: No .xcworkspace found"
             exit 1
           fi
-          echo "workspace=$WORKSPACE" &gt;&gt; "$GITHUB_OUTPUT"
-          echo "✅ Workspace: $WORKSPACE"
+          echo "workspace=$WORKSPACE" >> "$GITHUB_OUTPUT"
+          echo "OK: Workspace: $WORKSPACE"
 
           SCHEME=$(basename "$WORKSPACE" .xcworkspace)
-          echo "scheme=$SCHEME" &gt;&gt; "$GITHUB_OUTPUT"
-          echo "✅ Scheme: $SCHEME"
+          echo "scheme=$SCHEME" >> "$GITHUB_OUTPUT"
+          echo "OK: Scheme: $SCHEME"
 
           echo "--- Available schemes ---"
-          xcodebuild -workspace "$WORKSPACE" -list 2&gt;/dev/null || true
+          xcodebuild -workspace "$WORKSPACE" -list 2>/dev/null || true
 
+      # -------------------------------------------------------------------------
+      # 7. xcodebuild (unsigned, Release)
+      # CODE_SIGNING_ALLOWED=NO gives a compiled binary packageable as unsigned IPA.
+      # PIPESTATUS[0] captures xcodebuild's exit code, not xcpretty's.
+      # -------------------------------------------------------------------------
       - name: Build iOS app (unsigned, Release)
         id: xcode-build
         shell: bash
@@ -145,10 +188,11 @@ jobs:
           BUILD_DIR="$RUNNER_TEMP/ios-build"
 
           echo "Building workspace: $WORKSPACE"
-          echo "Scheme: $SCHEME"
-          echo "Build dir: $BUILD_DIR"
+          echo "Scheme:             $SCHEME"
+          echo "Build dir:          $BUILD_DIR"
 
           set -o pipefail
+
           xcodebuild \
             -workspace "$WORKSPACE" \
             -scheme "$SCHEME" \
@@ -163,12 +207,12 @@ jobs:
             GCC_OPTIMIZATION_LEVEL=0 \
             SWIFT_OPTIMIZATION_LEVEL="-Onone" \
             build \
-            2&gt;&1 | tee /tmp/xcodebuild.log | xcpretty --color || true
+            2>&1 | tee /tmp/xcodebuild.log | xcpretty --color
 
-          BUILD_EXIT=$?
+          BUILD_EXIT=${PIPESTATUS[0]}
 
-          if [ $BUILD_EXIT -ne 0 ]; then
-            echo "⚠️  First build attempt failed (exit $BUILD_EXIT), retrying without xcpretty..."
+          if [ "$BUILD_EXIT" -ne 0 ]; then
+            echo "WARN: First build attempt failed (exit $BUILD_EXIT), retrying without xcpretty..."
             xcodebuild \
               -workspace "$WORKSPACE" \
               -scheme "$SCHEME" \
@@ -183,121 +227,212 @@ jobs:
               GCC_OPTIMIZATION_LEVEL=0 \
               SWIFT_OPTIMIZATION_LEVEL="-Onone" \
               build \
-              2&gt;&1 | tee /tmp/xcodebuild-raw.log
+              2>&1 | tee /tmp/xcodebuild-raw.log
             BUILD_EXIT=$?
           fi
 
-          if [ $BUILD_EXIT -ne 0 ]; then
-            echo "❌ xcodebuild failed (exit $BUILD_EXIT)"
-            tail -100 /tmp/xcodebuild.log 2&gt;/dev/null || tail -100 /tmp/xcodebuild-raw.log 2&gt;/dev/null
-            exit $BUILD_EXIT
+          if [ "$BUILD_EXIT" -ne 0 ]; then
+            echo "FAIL: xcodebuild failed (exit $BUILD_EXIT)"
+            echo "--- Last 100 lines of build log ---"
+            tail -100 /tmp/xcodebuild.log 2>/dev/null || tail -100 /tmp/xcodebuild-raw.log 2>/dev/null
+            exit "$BUILD_EXIT"
           fi
 
-          echo "✅ xcodebuild succeeded"
-          echo "build_dir=$BUILD_DIR" &gt;&gt; "$GITHUB_OUTPUT"
+          echo "OK: xcodebuild succeeded"
+          echo "build_dir=$BUILD_DIR" >> "$GITHUB_OUTPUT"
 
+      # -------------------------------------------------------------------------
+      # 8. Locate built .app bundle
+      # xcodebuild places the .app at:
+      #   <derivedDataPath>/Build/Products/Release-iphoneos/<Name>.app
+      # -------------------------------------------------------------------------
       - name: Locate built .app bundle
         id: locate-app
+        shell: bash
         run: |
           BUILD_DIR="${{ steps.xcode-build.outputs.build_dir }}"
-          APP_PATH=$(find "$BUILD_DIR/Build/Products" -name "*.app" \
-            -not -name "*.app.dSYM" -maxdepth 3 -type d | head -1)
+
+          echo "Searching for .app in: $BUILD_DIR"
+          APP_PATH=$(find "$BUILD_DIR/Build/Products" \
+            -name "*.app" \
+            -not -name "*.app.dSYM" \
+            -maxdepth 3 \
+            -type d \
+            | head -1)
 
           if [ -z "$APP_PATH" ]; then
-            echo "❌ No .app bundle found under $BUILD_DIR/Build/Products"
+            echo "FAIL: No .app bundle found under $BUILD_DIR/Build/Products"
+            echo "Contents of Build/Products:"
             find "$BUILD_DIR/Build/Products" -maxdepth 3 | head -40 || echo "(empty)"
             exit 1
           fi
-          echo "✅ Found .app at: $APP_PATH"
-          APP_NAME=$(basename "$APP_PATH" .app)
-          echo "app_path=$APP_PATH" &gt;&gt; "$GITHUB_OUTPUT"
-          echo "app_name=$APP_NAME" &gt;&gt; "$GITHUB_OUTPUT"
+          echo "OK: Found .app at: $APP_PATH"
 
+          APP_NAME=$(basename "$APP_PATH" .app)
+          echo "app_path=$APP_PATH" >> "$GITHUB_OUTPUT"
+          echo "app_name=$APP_NAME" >> "$GITHUB_OUTPUT"
+
+      # -------------------------------------------------------------------------
+      # 9. Validate .app bundle integrity
+      # -------------------------------------------------------------------------
       - name: Validate .app bundle integrity
+        shell: bash
         run: |
           APP_PATH="${{ steps.locate-app.outputs.app_path }}"
           APP_NAME="${{ steps.locate-app.outputs.app_name }}"
 
-          [ ! -d "$APP_PATH" ] && echo "❌ .app is not a directory" && exit 1
-          echo "✅ .app is a directory"
+          echo "=== Validating: $APP_PATH ==="
+
+          if [ ! -d "$APP_PATH" ]; then
+            echo "FAIL: $APP_PATH is not a directory"
+            exit 1
+          fi
+          echo "OK: .app is a directory"
 
           EXEC_PATH="$APP_PATH/$APP_NAME"
-          [ ! -f "$EXEC_PATH" ] && echo "❌ Executable not found at: $EXEC_PATH" && ls -la "$APP_PATH" && exit 1
-          EXEC_SIZE=$(stat -f%z "$EXEC_PATH" 2&gt;/dev/null || stat -c%s "$EXEC_PATH")
-          echo "✅ Executable: $EXEC_PATH ($EXEC_SIZE bytes)"
-          [ "$EXEC_SIZE" -lt 1000000 ] && echo "❌ Executable too small ($EXEC_SIZE bytes)" && exit 1
-          echo "✅ Executable size OK"
+          if [ ! -f "$EXEC_PATH" ]; then
+            echo "FAIL: Executable not found at: $EXEC_PATH"
+            ls -la "$APP_PATH" | head -30
+            exit 1
+          fi
+          EXEC_SIZE=$(stat -f%z "$EXEC_PATH" 2>/dev/null || stat -c%s "$EXEC_PATH")
+          echo "OK: Executable found: $EXEC_PATH ($EXEC_SIZE bytes)"
+
+          if [ "$EXEC_SIZE" -lt 1000000 ]; then
+            echo "FAIL: Executable too small ($EXEC_SIZE bytes < 1 MB) -- incomplete build"
+            exit 1
+          fi
+          echo "OK: Executable size is reasonable ($EXEC_SIZE bytes)"
 
           PLIST="$APP_PATH/Info.plist"
-          [ ! -f "$PLIST" ] && echo "❌ Info.plist missing" && exit 1
-          BUNDLE_ID=$(plutil -extract CFBundleIdentifier raw "$PLIST" 2&gt;/dev/null || true)
-          BUNDLE_VER=$(plutil -extract CFBundleShortVersionString raw "$PLIST" 2&gt;/dev/null || true)
-          echo "✅ Info.plist  CFBundleIdentifier=$BUNDLE_ID  version=$BUNDLE_VER"
-          [ -z "$BUNDLE_ID" ] && echo "❌ CFBundleIdentifier empty" && exit 1
-          echo "✅ Bundle ID confirmed: $BUNDLE_ID"
+          if [ ! -f "$PLIST" ]; then
+            echo "FAIL: Info.plist not found in .app"
+            exit 1
+          fi
+          BUNDLE_ID=$(plutil -extract CFBundleIdentifier raw "$PLIST" 2>/dev/null || true)
+          BUNDLE_VER=$(plutil -extract CFBundleShortVersionString raw "$PLIST" 2>/dev/null || true)
+          echo "OK: Info.plist present"
+          echo "    CFBundleIdentifier:         $BUNDLE_ID"
+          echo "    CFBundleShortVersionString: $BUNDLE_VER"
+
+          if [ -z "$BUNDLE_ID" ]; then
+            echo "FAIL: CFBundleIdentifier is empty -- corrupted Info.plist or wrong build"
+            exit 1
+          fi
+          echo "OK: Bundle ID confirmed: $BUNDLE_ID"
 
           if [ -d "$APP_PATH/Frameworks" ]; then
-            FW=$(find "$APP_PATH/Frameworks" -name "*.framework" -maxdepth 1 | wc -l | tr -d ' ')
-            echo "✅ Frameworks/ present ($FW frameworks)"
+            FW_COUNT=$(find "$APP_PATH/Frameworks" -name "*.framework" -maxdepth 1 | wc -l | tr -d ' ')
+            echo "OK: Frameworks/ present with $FW_COUNT framework(s)"
           else
-            echo "⚠️  No Frameworks/ (OK for static build)"
+            echo "WARN: No Frameworks/ directory (may be OK for fully-static build)"
           fi
 
-          echo "--- .app summary ---" && du -sh "$APP_PATH" && ls -la "$APP_PATH" | head -20
+          echo "--- .app bundle summary ---"
+          du -sh "$APP_PATH"
+          ls -la "$APP_PATH" | head -20
 
+      # -------------------------------------------------------------------------
+      # 10. Package into unsigned IPA
+      # Standard IPA structure: a ZIP archive containing Payload/<AppName>.app/
+      # -------------------------------------------------------------------------
       - name: Create unsigned IPA
         id: create-ipa
+        shell: bash
         run: |
           APP_PATH="${{ steps.locate-app.outputs.app_path }}"
           APP_NAME="${{ steps.locate-app.outputs.app_name }}"
           IPA_DIR="$RUNNER_TEMP/ipa-staging"
           IPA_PATH="$RUNNER_TEMP/${APP_NAME}-unsigned.ipa"
 
-          rm -rf "$IPA_DIR" && mkdir -p "$IPA_DIR/Payload"
+          echo "=== Creating unsigned IPA ==="
+          echo "Source .app: $APP_PATH"
+          echo "Output IPA:  $IPA_PATH"
+
+          rm -rf "$IPA_DIR"
+          mkdir -p "$IPA_DIR/Payload"
+
+          # Copy entire .app into Payload/ preserving symlinks
           cp -a "$APP_PATH" "$IPA_DIR/Payload/${APP_NAME}.app"
-          echo "✅ Payload/ created" && ls -la "$IPA_DIR/Payload/"
+          echo "OK: Payload/ directory created"
+          ls -la "$IPA_DIR/Payload/"
 
           cd "$IPA_DIR"
           zip -r "$IPA_PATH" Payload/ --symlinks
-          [ $? -ne 0 ] && echo "❌ zip failed" && exit 1
-          echo "✅ zip OK"
+          ZIP_EXIT=$?
+          if [ "$ZIP_EXIT" -ne 0 ]; then
+            echo "FAIL: zip failed (exit $ZIP_EXIT)"
+            exit "$ZIP_EXIT"
+          fi
+          echo "OK: zip completed successfully"
 
-          echo "ipa_path=$IPA_PATH" &gt;&gt; "$GITHUB_OUTPUT"
-          echo "app_name=$APP_NAME" &gt;&gt; "$GITHUB_OUTPUT"
+          echo "ipa_path=$IPA_PATH" >> "$GITHUB_OUTPUT"
+          echo "app_name=$APP_NAME" >> "$GITHUB_OUTPUT"
 
+      # -------------------------------------------------------------------------
+      # 11. Validate IPA -- hard gate before upload
+      # Fails the workflow if IPA is not a real archive >= 10 MB.
+      # -------------------------------------------------------------------------
       - name: Validate IPA (hard gate before upload)
+        shell: bash
         run: |
           IPA_PATH="${{ steps.create-ipa.outputs.ipa_path }}"
           APP_NAME="${{ steps.create-ipa.outputs.app_name }}"
 
-          [ ! -f "$IPA_PATH" ] && echo "❌ IPA missing" && exit 1
-          echo "✅ IPA exists"
+          echo "=== IPA Validation ==="
+          echo "Path: $IPA_PATH"
 
-          unzip -t "$IPA_PATH" &gt; /dev/null 2&gt;&1 || { echo "❌ Not a valid ZIP"; file "$IPA_PATH"; exit 1; }
-          echo "✅ Valid ZIP"
+          if [ ! -f "$IPA_PATH" ]; then
+            echo "FAIL: IPA file does not exist at: $IPA_PATH"
+            exit 1
+          fi
+          echo "OK: IPA file exists"
 
-          unzip -l "$IPA_PATH" | grep -q "Payload/${APP_NAME}.app/" || \
-            { echo "❌ Missing Payload/${APP_NAME}.app/"; unzip -l "$IPA_PATH" | head -30; exit 1; }
-          echo "✅ Contains Payload/${APP_NAME}.app/"
+          if ! unzip -t "$IPA_PATH" > /dev/null 2>&1; then
+            echo "FAIL: IPA is NOT a valid ZIP archive"
+            file "$IPA_PATH"
+            hexdump -C "$IPA_PATH" | head -4
+            exit 1
+          fi
+          echo "OK: IPA is a valid ZIP archive"
 
-          unzip -l "$IPA_PATH" | grep -q "Payload/${APP_NAME}.app/${APP_NAME}$" && \
-            echo "✅ Executable present in IPA" || echo "⚠️  Executable not listed by name"
+          if ! unzip -l "$IPA_PATH" | grep -q "Payload/${APP_NAME}.app/"; then
+            echo "FAIL: IPA does not contain Payload/${APP_NAME}.app/"
+            echo "--- IPA contents (first 30 entries) ---"
+            unzip -l "$IPA_PATH" | head -30
+            exit 1
+          fi
+          echo "OK: IPA contains Payload/${APP_NAME}.app/"
 
-          IPA_SIZE=$(stat -f%z "$IPA_PATH" 2&gt;/dev/null || stat -c%s "$IPA_PATH")
+          if unzip -l "$IPA_PATH" | grep -q "Payload/${APP_NAME}.app/${APP_NAME}$"; then
+            echo "OK: Executable present in IPA"
+          else
+            echo "WARN: Executable not listed by exact name -- may still be valid"
+          fi
+
+          # Hard size gate: must be >= 10 MB
+          IPA_SIZE=$(stat -f%z "$IPA_PATH" 2>/dev/null || stat -c%s "$IPA_PATH")
           IPA_SIZE_MB=$(echo "scale=2; $IPA_SIZE / 1048576" | bc)
           echo "--- IPA size: $IPA_SIZE bytes (${IPA_SIZE_MB} MB) ---"
 
-          if [ "$IPA_SIZE" -lt 10485760 ]; then
-            echo "❌ IPA too small: ${IPA_SIZE_MB} MB &lt; 10 MB — broken build or placeholder"
+          MIN_BYTES=10485760
+          if [ "$IPA_SIZE" -lt "$MIN_BYTES" ]; then
+            echo "FAIL: IPA is too small: $IPA_SIZE bytes (${IPA_SIZE_MB} MB) -- must be >= 10 MB"
+            echo "      This indicates a broken build, wrong path, placeholder, or empty archive."
+            echo "--- IPA contents ---"
             unzip -l "$IPA_PATH" | head -40
             exit 1
           fi
-          echo "✅ IPA size OK: ${IPA_SIZE_MB} MB"
+          echo "OK: IPA size is acceptable: $IPA_SIZE bytes (${IPA_SIZE_MB} MB)"
 
           echo "--- IPA contents (first 40 entries) ---"
           unzip -l "$IPA_PATH" | head -40
-          echo "✅ All IPA validations passed"
 
+          echo "OK: All IPA validations passed -- proceeding to upload"
+
+      # -------------------------------------------------------------------------
+      # 12. Upload IPA artifact
+      # -------------------------------------------------------------------------
       - name: Upload unsigned IPA
         uses: actions/upload-artifact@v4
         with:
@@ -306,6 +441,9 @@ jobs:
           retention-days: 14
           if-no-files-found: error
 
+      # -------------------------------------------------------------------------
+      # 13. Upload build logs on failure
+      # -------------------------------------------------------------------------
       - name: Upload Xcode build log (on failure)
         if: failure()
         uses: actions/upload-artifact@v4
@@ -318,17 +456,20 @@ jobs:
           retention-days: 7
           if-no-files-found: ignore
 
+      # -------------------------------------------------------------------------
+      # 14. Build summary
+      # -------------------------------------------------------------------------
       - name: Build summary
         if: success()
+        shell: bash
         run: |
           IPA_PATH="${{ steps.create-ipa.outputs.ipa_path }}"
           APP_NAME="${{ steps.create-ipa.outputs.app_name }}"
-          IPA_SIZE=$(stat -f%z "$IPA_PATH" 2&gt;/dev/null || stat -c%s "$IPA_PATH")
+          IPA_SIZE=$(stat -f%z "$IPA_PATH" 2>/dev/null || stat -c%s "$IPA_PATH")
           IPA_SIZE_MB=$(echo "scale=2; $IPA_SIZE / 1048576" | bc)
-          echo "╔══════════════════════════════════════════════════════╗"
-          echo "║           iOS Build Completed Successfully           ║"
-          echo "╠══════════════════════════════════════════════════════╣"
-          echo "║  App:      $APP_NAME"
-          echo "║  IPA size: ${IPA_SIZE_MB} MB"
-          echo "║  Artifact: MedAcademy-unsigned-IPA"
-          echo "╚══════════════════════════════════════════════════════╝"
+          echo "================================================"
+          echo "iOS Build Completed Successfully"
+          echo "App:      $APP_NAME"
+          echo "IPA size: ${IPA_SIZE_MB} MB"
+          echo "Artifact: MedAcademy-unsigned-IPA"
+          echo "================================================"
