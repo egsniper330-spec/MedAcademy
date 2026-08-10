@@ -8,9 +8,12 @@
 // regardless of whether the project uses npm, yarn, or pnpm.
 const fs   = require('fs');
 const path = require('path');
-const expoDir = path.dirname(require.resolve('expo/package.json'));
+// Resolve @expo/config-plugins from expo's own package tree so we always get
+// the version that matches the installed Expo SDK (55.x), regardless of whether
+// any unrelated version is listed in the project's package.json.
+const expoRoot = path.dirname(require.resolve('expo/package.json'));
 const { withDangerousMod, withMainApplication, withXcodeProject } = require(
-  require.resolve('@expo/config-plugins', { paths: [expoDir] })
+  require.resolve('@expo/config-plugins', { paths: [expoRoot] })
 );
 
 // ─── Kotlin source: SecurityModule ───────────────────────────────────────────
@@ -78,6 +81,10 @@ class SecurityModule(private val reactContext: ReactApplicationContext) :
     ReactContextBaseJavaModule(reactContext) {
 
     override fun getName(): String = "SecurityModule"
+
+    init {
+        Log.d(TAG, "◀▶ SecurityModule INSTANTIATED — module is live and registered")
+    }
 
     // ══════════════════════════════════════════════════════════════════════════
     // PHASE 1 — Developer / ADB / Debugger / Screen Recording
@@ -169,7 +176,7 @@ class SecurityModule(private val reactContext: ReactApplicationContext) :
             if (cm != null) {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
                     val allNetworks = cm.allNetworks
-                    Log.d(TAG, "[detectVpn] allNetworks.count=$\{allNetworks.size}")
+                    Log.d(TAG, "[detectVpn] allNetworks.count=\${allNetworks.size}")
                     for (network in allNetworks) {
                         val caps = cm.getNetworkCapabilities(network)
                         if (caps != null && caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN)) {
@@ -189,7 +196,7 @@ class SecurityModule(private val reactContext: ReactApplicationContext) :
                 }
             }
         } catch (e: Exception) {
-            Log.d(TAG, "[detectVpn] CM tier exception: $\{e.message}")
+            Log.d(TAG, "[detectVpn] CM tier exception: \${e.message}")
         }
 
         // Tier 2: NetworkInterface scan — catches VPN interfaces not reported by CM
@@ -205,13 +212,13 @@ class SecurityModule(private val reactContext: ReactApplicationContext) :
                     if ((name.startsWith("tun") || name.startsWith("vpn") ||
                          name.startsWith("ppp") || name.startsWith("ipsec")) &&
                         iface.isUp && !iface.isLoopback) {
-                        Log.d(TAG, "[detectVpn] VPN interface found: $name (up=$\{iface.isUp})")
+                        Log.d(TAG, "[detectVpn] VPN interface found: $name (up=\${iface.isUp})")
                         return true
                     }
                 }
             }
         } catch (e: Exception) {
-            Log.d(TAG, "[detectVpn] NetworkInterface tier exception: $\{e.message}")
+            Log.d(TAG, "[detectVpn] NetworkInterface tier exception: \${e.message}")
         }
 
         Log.d(TAG, "[detectVpn] no VPN detected")
@@ -276,7 +283,7 @@ class SecurityModule(private val reactContext: ReactApplicationContext) :
 
         // 4. /system write test — on truly un-rooted devices /system is mounted read-only
         val writeTestResult = runCatching {
-            val f = File("/system/medacademy-rwtest-$\{System.currentTimeMillis()}")
+            val f = File("/system/medacademy-rwtest-\${System.currentTimeMillis()}")
             val opened = f.createNewFile()
             if (opened) f.delete()
             opened
@@ -376,10 +383,10 @@ class SecurityModule(private val reactContext: ReactApplicationContext) :
         return try {
             val sm = reactContext.getSystemService(Context.SENSOR_SERVICE) as? SensorManager
             val sensors = sm?.getSensorList(Sensor.TYPE_ALL) ?: emptyList()
-            Log.d(TAG, "[detectEmulator] sensorCount=$\{sensors.size}")
+            Log.d(TAG, "[detectEmulator] sensorCount=\${sensors.size}")
             sensors.isEmpty()
         } catch (e: Exception) {
-            Log.d(TAG, "[detectEmulator] sensor check exception: $\{e.message}")
+            Log.d(TAG, "[detectEmulator] sensor check exception: \${e.message}")
             false
         }
     }
@@ -423,13 +430,13 @@ class SecurityModule(private val reactContext: ReactApplicationContext) :
                             appInfo.packageName
                         )
                         if (mode == AppOpsManager.MODE_ALLOWED) {
-                            Log.d(TAG, "[detectMockLocation] MOCK_LOCATION granted to $\{appInfo.packageName}")
+                            Log.d(TAG, "[detectMockLocation] MOCK_LOCATION granted to \${appInfo.packageName}")
                             return true
                         }
                     }
                 }
             } catch (e: Exception) {
-                Log.d(TAG, "[detectMockLocation] AppOpsManager tier exception: $\{e.message}")
+                Log.d(TAG, "[detectMockLocation] AppOpsManager tier exception: \${e.message}")
             }
         }
 
@@ -443,7 +450,7 @@ class SecurityModule(private val reactContext: ReactApplicationContext) :
             Log.d(TAG, "[detectMockLocation] legacy ALLOW_MOCK_LOCATION=$legacyFlag")
             if (legacyFlag != 0) return true
         } catch (e: Exception) {
-            Log.d(TAG, "[detectMockLocation] legacy flag exception: $\{e.message}")
+            Log.d(TAG, "[detectMockLocation] legacy flag exception: \${e.message}")
         }
 
         // Tier 3: scan for any installed app with ACCESS_MOCK_LOCATION permission
@@ -454,10 +461,10 @@ class SecurityModule(private val reactContext: ReactApplicationContext) :
                 PackageManager.MATCH_ALL
             )
             val external = mockApps.filter { it.packageName != reactContext.packageName }
-            Log.d(TAG, "[detectMockLocation] mockLocationApps=$\{external.map { it.packageName }}")
+            Log.d(TAG, "[detectMockLocation] mockLocationApps=" + external.map { it.packageName }.toString())
             if (external.isNotEmpty()) return true
         } catch (e: Exception) {
-            Log.d(TAG, "[detectMockLocation] permission scan exception: $\{e.message}")
+            Log.d(TAG, "[detectMockLocation] permission scan exception: \${e.message}")
         }
 
         return false
@@ -907,6 +914,7 @@ class SecurityModule(private val reactContext: ReactApplicationContext) :
     fun getSecurityFlags(promise: Promise) {
         Log.d(TAG, "[getSecurityFlags] ▶ called")
         try {
+            val _t0 = System.currentTimeMillis()
             val r: WritableMap = Arguments.createMap()
 
             // ── Phase 1 ────────────────────────────────────────────────────
@@ -966,11 +974,11 @@ class SecurityModule(private val reactContext: ReactApplicationContext) :
             Log.d(TAG, "[getSecurityFlags] vpn=$vpn rooted=$rooted emulator=$emulator mockLoc=$mockLoc")
 
             val _elapsed = System.currentTimeMillis() - _t0
-            Log.d(TAG, "[getSecurityFlags] ✅ all checks complete in $\{_elapsed}ms")
-            Log.d(TAG, "[getSecurityFlags] RAW_FLAGS=$\{r}")
+            Log.d(TAG, "[getSecurityFlags] ✅ all checks complete in \${_elapsed}ms")
+            Log.d(TAG, "[getSecurityFlags] RAW_FLAGS=\${r}")
             promise.resolve(r)
         } catch (e: Exception) {
-            Log.e(TAG, "[getSecurityFlags] ❌ exception: $\{e.message}", e)
+            Log.e(TAG, "[getSecurityFlags] ❌ exception: \${e.message}", e)
             promise.reject("SECURITY_CHECK_FAILED", e.message, e)
         }
     }
@@ -1063,22 +1071,61 @@ function withSecurityKotlinSources(config) {
 }
 
 // ─── withMainApplication: register SecurityPackage ───────────────────────────
+//
+// RN 0.83 uses a different MainApplication pattern than older versions.
+// The old `getPackages()` + `return packages` pattern is gone; now it's:
+//
+//   PackageList(this).packages.apply {
+//     // add(MyPackage()) here
+//   }
+//
+// We target the `apply {` block's opening comment line to insert our add() call,
+// and fall back to the old pattern for backwards-compatibility with older templates.
 
 function withSecurityPackageRegistration(config) {
   return withMainApplication(config, (cfg) => {
     let contents = cfg.modResults.contents;
-    if (contents.includes('SecurityPackage')) return cfg; // idempotent
 
-    // Insert import after the first React import line
-    contents = contents.replace(
-      /(import com\.facebook\.react\.ReactApplication)/,
-      'import com.medacademy.security.SecurityPackage\n$1'
-    );
-    // Insert package registration before `return packages`
-    contents = contents.replace(
-      /(\s+)(return packages\b)/,
-      '$1packages.add(SecurityPackage())\n$1$2'
-    );
+    // ── 1. Idempotency guard ────────────────────────────────────────────────
+    // Only skip if SecurityPackage is BOTH imported AND registered (add() call present).
+    // If only the import exists (old failed insertion), we still need to add the registration.
+    const alreadyRegistered =
+      contents.includes('SecurityPackage') &&
+      contents.includes('add(SecurityPackage())');
+    if (alreadyRegistered) return cfg;
+
+    // ── 2. Ensure import is present ─────────────────────────────────────────
+    if (!contents.includes('import com.medacademy.security.SecurityPackage')) {
+      contents = contents.replace(
+        /(import com\.facebook\.react\.ReactApplication)/,
+        'import com.medacademy.security.SecurityPackage\n$1'
+      );
+    }
+
+    // ── 3a. RN 0.83 pattern: PackageList(this).packages.apply { … } ─────────
+    // Insert add(SecurityPackage()) as the first line inside the apply block.
+    if (contents.includes('PackageList(this).packages.apply {')) {
+      contents = contents.replace(
+        /(PackageList\(this\)\.packages\.apply \{)/,
+        '$1\n          add(SecurityPackage())'
+      );
+    }
+    // ── 3b. Legacy pattern: `return packages` ───────────────────────────────
+    else if (/\breturn packages\b/.test(contents)) {
+      contents = contents.replace(
+        /(\s+)(return packages\b)/,
+        '$1packages.add(SecurityPackage())\n$1$2'
+      );
+    }
+    // ── 3c. Fallback: append before closing brace of getPackages() ──────────
+    else {
+      // Best-effort: insert before the first `return` in the file
+      contents = contents.replace(
+        /(\s+)(return\b)/,
+        '$1// SecurityPackage registered by withSecurityModule plugin\n$1add(SecurityPackage())\n$1$2'
+      );
+    }
+
     cfg.modResults.contents = contents;
     return cfg;
   });
@@ -1243,6 +1290,127 @@ function withIOSSwiftSources(config) {
   });
 }
 
+// ─── withIOSEmbedPodsFrameworks ───────────────────────────────────────────────
+//
+// PROBLEM THIS SOLVES:
+//   When RCT_USE_PREBUILT_RNCORE=1 (Expo SDK 55 default), react_native_pods.rb
+//   links React as a pre-built dynamic .xcframework. The binary records:
+//       @rpath/React.framework/React
+//   CocoaPods injects a "[CP] Embed Pods Frameworks" PBXShellScriptBuildPhase
+//   that calls Pods-<Target>-frameworks.sh, which copies + code-signs all dynamic
+//   pod frameworks into <App>.app/Frameworks/ at build time.
+//
+//   Because ios/ is fully regenerated by `expo prebuild` on every EAS build,
+//   any direct pbxproj edit is wiped. The only durable fix is this config plugin,
+//   which re-injects the phase into the freshly generated project.pbxproj before
+//   Xcode builds.
+//
+//   Without this phase React.framework is never copied into the .app bundle →
+//   DYLD cannot resolve @rpath/React.framework/React → EXC_CRASH at launch before
+//   JS starts.
+//
+// HOW IT WORKS:
+//   Uses the xcode@3 native addBuildPhase() API (the same path CocoaPods uses)
+//   to add a PBXShellScriptBuildPhase, then appends inputFileListPaths and
+//   outputFileListPaths (xcfilelist support, not available in the addBuildPhase
+//   options object but needed for Xcode incremental builds).
+//
+//   The phase is inserted immediately before "[CP] Copy Pods Resources" so the
+//   final build phase order matches what a normal `pod install` produces:
+//     [CP] Check Pods Manifest.lock
+//     Sources → Frameworks → Resources
+//     Bundle React Native code and images
+//     [CP] Embed Pods Frameworks        ← inserted here
+//     [CP] Copy Pods Resources
+//
+// IDEMPOTENCY:
+//   Skips silently if a phase named "[CP] Embed Pods Frameworks" already exists
+//   (e.g., a subsequent `pod install` already added it after prebuild).
+
+const EMBED_PODS_PHASE_NAME = '[CP] Embed Pods Frameworks';
+
+function withIOSEmbedPodsFrameworks(config) {
+  return withXcodeProject(config, (cfg) => {
+    const proj    = cfg.modResults;
+    const appName = cfg.modRequest.projectName;
+    const target  = proj.getFirstTarget();
+
+    // ── Idempotency: skip if the phase already exists ─────────────────────
+    const existingPhases =
+      proj.hash.project.objects['PBXShellScriptBuildPhase'] || {};
+    const alreadyPresent = Object.values(existingPhases).some(
+      (phase) =>
+        typeof phase === 'object' &&
+        phase.name &&
+        (phase.name === EMBED_PODS_PHASE_NAME ||
+          phase.name === `"${EMBED_PODS_PHASE_NAME}"`)
+    );
+    if (alreadyPresent) return cfg;
+
+    // ── Add the phase via xcode@3 addBuildPhase() API ─────────────────────
+    // pbxShellScriptBuildPhaseObj() inside the library wraps shellScript in
+    // quotes and escapes embedded quotes automatically — pass the raw string.
+    const { uuid: phaseUuid, buildPhase } = proj.addBuildPhase(
+      [],                          // no individual file refs — script handles all
+      'PBXShellScriptBuildPhase',
+      EMBED_PODS_PHASE_NAME,
+      target.uuid,
+      {
+        shellPath: '/bin/sh',
+        // Raw script content — xcode@3 will quote + escape this correctly
+        shellScript:
+          `"$\{PODS_ROOT}/Target Support Files/Pods-${appName}/Pods-${appName}-frameworks.sh"\n`,
+        inputPaths:  [],
+        outputPaths: [],
+      }
+    );
+
+    // ── Append xcfilelist paths (incremental build support) ────────────────
+    // These are NOT supported by the addBuildPhase options object in xcode@3,
+    // so we patch the phase object directly after creation.
+    buildPhase.inputFileListPaths = [
+      `"$\{PODS_ROOT}/Target Support Files/Pods-${appName}/Pods-${appName}-frameworks-$\{CONFIGURATION}-input-files.xcfilelist"`,
+    ];
+    buildPhase.outputFileListPaths = [
+      `"$\{PODS_ROOT}/Target Support Files/Pods-${appName}/Pods-${appName}-frameworks-$\{CONFIGURATION}-output-files.xcfilelist"`,
+    ];
+    buildPhase.showEnvVarsInLog = 0;
+
+    // ── Move phase to the correct position in buildPhases ─────────────────
+    // addBuildPhase() appends to the END. We need it BEFORE "[CP] Copy Pods
+    // Resources" so framework embedding happens before resource copying.
+    const nativeTargets = proj.pbxNativeTargetSection();
+    for (const key of Object.keys(nativeTargets)) {
+      const t = nativeTargets[key];
+      if (!t || typeof t !== 'object' || !t.buildPhases) continue;
+      if (t.name !== appName && t.name !== `"${appName}"`) continue;
+
+      const phases = t.buildPhases;
+
+      // Remove the entry addBuildPhase() just appended at the end
+      const appendedIdx = phases.findIndex(
+        (p) => (typeof p === 'object' ? p.value : p) === phaseUuid
+      );
+      if (appendedIdx >= 0) phases.splice(appendedIdx, 1);
+
+      // Find "[CP] Copy Pods Resources" to insert just before it
+      const copyResIdx = phases.findIndex((p) => {
+        const comment = typeof p === 'object' ? p.comment : '';
+        return comment && comment.includes('Copy Pods Resources');
+      });
+
+      const insertAt = copyResIdx >= 0 ? copyResIdx : phases.length;
+      phases.splice(insertAt, 0, {
+        value: phaseUuid,
+        comment: EMBED_PODS_PHASE_NAME,
+      });
+      break;
+    }
+
+    return cfg;
+  });
+}
+
 // ─── withXcodeProject: add Swift/ObjC files to compile sources phase ─────────
 // This ensures Xcode knows to compile the two files we copied above.
 // withXcodeProject gives us direct access to the parsed .pbxproj.
@@ -1309,6 +1477,7 @@ const withSecurityModule = (config) => {
   config = withSecurityPackageRegistration(config);
   // iOS
   config = withIOSSwiftSources(config);
+  config = withIOSEmbedPodsFrameworks(config);
   config = withIOSXcodeFiles(config);
   return config;
 };
