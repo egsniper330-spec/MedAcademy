@@ -1,0 +1,97 @@
+name: Build iOS Unsigned IPA
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+jobs:
+  build-ios:
+    name: Build iOS
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+          run_install: false
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Verify project
+        run: |
+          node --version
+          pnpm --version
+          npx expo --version
+
+      - name: Generate iOS native project
+        run: npx expo prebuild --platform ios --clean
+
+      - name: Install CocoaPods
+        run: |
+          cd ios
+          pod install --repo-update
+
+      - name: Build unsigned iOS app
+        run: |
+          xcodebuild \
+            -workspace ios/MedAcademy.xcworkspace \
+            -scheme MedAcademy \
+            -configuration Release \
+            -sdk iphoneos \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY=""
+
+      - name: Locate built app
+        run: |
+          echo "Searching for .app..."
+          find build -type d -name "*.app" -print
+
+      - name: Create unsigned IPA
+        run: |
+          mkdir -p Payload
+
+          APP_PATH=$(find build -type d -path "*/Build/Products/Release-iphoneos/*.app" | head -n 1)
+
+          if [ -z "$APP_PATH" ]; then
+            echo "ERROR: No iOS .app was produced."
+            exit 1
+          fi
+
+          echo "Using app: $APP_PATH"
+
+          cp -R "$APP_PATH" Payload/
+
+          zip -r MedAcademy-unsigned.ipa Payload
+
+      - name: Upload unsigned IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: MedAcademy-iOS-unsigned
+          path: MedAcademy-unsigned.ipa
+          retention-days: 30
+
+      - name: Upload build logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: iOS-build-logs
+          path: |
+            build/
+            ios/build/
+          retention-days: 7
+          if-no-files-found: ignore
