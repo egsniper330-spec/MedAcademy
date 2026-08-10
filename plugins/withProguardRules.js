@@ -1,16 +1,12 @@
 // CommonJS — Expo config plugins are require()d by the prebuild pipeline.
 // plugins/ is excluded from oxlint via .eslintignore.
-//
-// @expo/config-plugins is NOT a direct project dependency — it lives inside
-// expo's own node_modules tree. Under pnpm, require('@expo/config-plugins')
-// from the project root fails because pnpm does not hoist transitive deps.
-// We resolve it from expo's package directory so Node can always find it,
-// regardless of whether the project uses npm, yarn, or pnpm.
 const fs   = require('fs');
 const path = require('path');
-const expoDir = path.dirname(require.resolve('expo/package.json'));
+// Resolve @expo/config-plugins from expo's own package tree so we always get
+// the SDK-55-compatible version (55.x), not any top-level project dep.
+const expoRoot = path.dirname(require.resolve('expo/package.json'));
 const { withDangerousMod, withAppBuildGradle } = require(
-  require.resolve('@expo/config-plugins', { paths: [expoDir] })
+  require.resolve('@expo/config-plugins', { paths: [expoRoot] })
 );
 
 // ─── ProGuard / R8 rules ─────────────────────────────────────────────────────
