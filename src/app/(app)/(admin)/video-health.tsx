@@ -18,7 +18,7 @@ import { PageHeader } from '@/components/PageHeader';
 import { NeuCard } from '@/components/NeuCard';
 import { VideoHealthDetails } from '@/components/VideoHealthDetails';
 import { supabase } from '@/client/supabase';
-import { neuColors, neuFlatStyle, neuPressedStyle } from '@/lib/neu';
+import { neuColors, useLayout, neuFlatStyle, neuPressedStyle, safeBottom } from '@/lib/neu';
 import { formatBytes } from '@/lib/videoUploadEngine';
 import { exportCSV } from '@/lib/exportUtils';
 
@@ -176,6 +176,8 @@ export default function VideoHealthScreen() {
   const scheme = useColorScheme();
   const isDark = scheme === 'dark';
   const c = isDark ? neuColors.dark : neuColors.light;
+  const layout = useLayout();
+  const insets = layout.insets;
 
   const [uploads, setUploads] = useState<any[]>([]);
   const [dailyReport, setDailyReport] = useState<any>(null);
@@ -429,7 +431,7 @@ export default function VideoHealthScreen() {
       <ScrollView contentInsetAdjustmentBehavior="automatic"
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />}
         style={{ flex: 1 }}>
-        <View style={{ padding: 20, gap: 16, paddingBottom: 40 }}>
+        <View style={{ padding: layout.screenPx, gap: 16, paddingBottom: layout.scrollBottom() }}>
 
           {/* Header */}
           <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 8 }}>
@@ -497,7 +499,7 @@ export default function VideoHealthScreen() {
                   <HealthScoreBadge pct={healthPct} isDark={isDark} />
                   {dailyReport && (
                     <Text style={{ fontSize: 11, color: c.text, opacity: 0.35 }}>
-                      Last scan: {new Date(dailyReport.created_at).toLocaleDateString()}
+                      Last scan: {new Date(dailyReport.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
                     </Text>
                   )}
                 </NeuCard>
@@ -703,7 +705,7 @@ export default function VideoHealthScreen() {
                           </Pressable>
                         </View>
                         <Text style={{ fontSize: 10, color: c.text, opacity: 0.3 }}>
-                          {new Date(alert.created_at).toLocaleDateString()}
+                          {new Date(alert.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
                         </Text>
                       </NeuCard>
                     );

@@ -21,7 +21,7 @@ import { NeuCard } from '@/components/NeuCard';
 import { NeuButton } from '@/components/NeuButton';
 import { ResponsiveModal } from '@/components/ResponsiveModal';
 import { useToast } from '@/components/Toast';
-import { neuColors } from '@/lib/neu';
+import { neuColors, useLayout } from '@/lib/neu';
 import {
   getDoctors, allocateCredits, refundCredits, getCreditTransactions,
   getCreditLedger, getCreditLedgerStats, getCreditDailyStats, getTopDoctorsByCredits,
@@ -114,7 +114,8 @@ function StatBox({ label, value, color, c }: { label: string; value: number; col
 // TAB 1 — Credit Management
 // ══════════════════════════════════════════════════════════════════════════
 function ManagementTab({ c, isDark }: { c: typeof neuColors.light; isDark: boolean }) {
-  const { showToast } = useToast();
+    const layout = useLayout();
+const { showToast } = useToast();
 
   const [doctors, setDoctors]           = useState<any[]>([]);
   const [loading, setLoading]           = useState(true);
@@ -189,15 +190,15 @@ function ManagementTab({ c, isDark }: { c: typeof neuColors.light; isDark: boole
 
   return (
     <>
-      <KeyboardAvoidingView behavior="padding" style={{ flex: 1 }}>
+      <KeyboardAvoidingView behavior={process.env.EXPO_OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1 }}>
         <ScrollView
           contentInsetAdjustmentBehavior="automatic"
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />}
         >
-          <View style={{ padding: 20 }}>
+          <View style={{ padding: layout.screenPx }}>
             {/* Search */}
             <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 16, minWidth: 0 }}>
-              <Search size={15} color={`${c.text}55`} style={{ position: 'absolute', left: 14, zIndex: 1 }} />
+              <Search size={15} color={`${c.text}55`}  />
               <TextInput
                 value={search} onChangeText={setSearch}
                 placeholder="Search doctors..."
@@ -300,7 +301,7 @@ function ManagementTab({ c, isDark }: { c: typeof neuColors.light; isDark: boole
                 </Text>
                 {tx.notes && <Text style={{ fontSize: 11, color: c.text, opacity: 0.5 }}>{tx.notes}</Text>}
                 <Text style={{ fontSize: 11, color: c.text, opacity: 0.4 }}>
-                  {new Date(tx.created_at).toLocaleString()}
+                  {new Date(tx.created_at).toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true })}
                 </Text>
               </View>
               <Text style={{ fontSize: 16, fontWeight: '800', color }}>{isPos ? '+' : '-'}{tx.amount}</Text>
@@ -316,7 +317,8 @@ function ManagementTab({ c, isDark }: { c: typeof neuColors.light; isDark: boole
 // TAB 2 — Credit History (merged ledger + analytics)
 // ══════════════════════════════════════════════════════════════════════════
 function HistoryTab({ c, isDark }: { c: typeof neuColors.light; isDark: boolean }) {
-  const router = useRouter();
+    const layout = useLayout();
+const router = useRouter();
 
   const [rows, setRows]             = useState<TxRow[]>([]);
   const [stats, setStats]           = useState<Stats | null>(null);
@@ -410,7 +412,7 @@ function HistoryTab({ c, isDark }: { c: typeof neuColors.light; isDark: boolean 
         contentInsetAdjustmentBehavior="automatic"
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />}
         ListHeaderComponent={
-          <View style={{ padding: 20, paddingTop: 8 }}>
+          <View style={{ padding: layout.screenPx, paddingTop: 8 }}>
             {/* Summary stats */}
             {stats && (
               <>
@@ -503,7 +505,7 @@ function HistoryTab({ c, isDark }: { c: typeof neuColors.light; isDark: boolean 
             {/* Search + filter toolbar */}
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 12 }}>
               <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center' }}>
-                <Search size={14} color={`${c.text}55`} style={{ position: 'absolute', left: 12, zIndex: 1 }} />
+                <Search size={14} color={`${c.text}55`}  />
                 <TextInput
                   value={search} onChangeText={setSearch}
                   placeholder="Search doctor, course, type..."
@@ -511,7 +513,7 @@ function HistoryTab({ c, isDark }: { c: typeof neuColors.light; isDark: boolean 
                   style={{ ...inp, flex: 1, paddingLeft: 34, marginBottom: 0 } as object}
                 />
                 {search !== '' && (
-                  <Pressable onPress={() => setSearch('')} style={{ position: 'absolute', right: 12 }}>
+                  <Pressable onPress={() => setSearch('')} >
                     <X size={13} color={`${c.text}55`} />
                   </Pressable>
                 )}
@@ -565,7 +567,7 @@ function HistoryTab({ c, isDark }: { c: typeof neuColors.light; isDark: boolean 
           const actorName = (tx.performed_by_name ?? '').replace(/super[\s_-]?admin/gi, 'Admin') || null;
           const actorRole = (tx.performed_by_role ?? '').replace(/super[\s_-]?admin/gi, 'Admin') || null;
           return (
-            <Pressable onPress={() => setSelected(tx)} style={{ paddingHorizontal: 20, marginBottom: 10 }}>
+            <Pressable onPress={() => setSelected(tx)} style={{ paddingHorizontal: layout.screenPx, marginBottom: 10 }}>
               <NeuCard style={{ padding: 14 }}>
                 <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 12 }}>
                   <View style={{ width: 38, height: 38, borderRadius: 12, backgroundColor: `${color}18`,
@@ -715,13 +717,14 @@ export default function CreditsScreen() {
   const scheme = useColorScheme();
   const isDark = scheme === 'dark';
   const c = isDark ? neuColors.dark : neuColors.light;
+  const layout = useLayout();
 
   const [tab, setTab] = useState<'management' | 'history'>('management');
 
   return (
     <View style={{ flex: 1, backgroundColor: c.base }}>
       {/* Header + tab switcher */}
-      <View style={{ paddingHorizontal: 20, paddingTop: 16, paddingBottom: 8 }}>
+      <View style={{ paddingHorizontal: layout.screenPx, paddingTop: 16, paddingBottom: 8 }}>
         <PageHeader title="Credits" subtitle="Manage & track all credit activity" accentColor="#7C3AED" />
         <View style={{ flexDirection: 'row', gap: 10, marginTop: 4 }}>
           <TabPill

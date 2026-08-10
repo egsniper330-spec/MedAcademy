@@ -16,7 +16,7 @@ import { createManagedUser, getUniversities, getFaculties, getAcademicLevels, ty
 import { NeuCard } from '@/components/NeuCard';
 import { NeuButton } from '@/components/NeuButton';
 import { useToast } from '@/components/Toast';
-import { neuColors, neuFlatStyle } from '@/lib/neu';
+import { neuColors, neuFlatStyle, useLayout } from '@/lib/neu'
 
 type ImportRole = 'student' | 'doctor' | 'admin';
 
@@ -59,6 +59,7 @@ export default function BulkImportScreen() {
   const scheme = useColorScheme();
   const isDark = scheme === 'dark';
   const c    = isDark ? neuColors.dark : neuColors.light;
+  const layout = useLayout();
   const flat = neuFlatStyle(isDark);
   const { showToast } = useToast();
 
@@ -173,7 +174,7 @@ export default function BulkImportScreen() {
 
   return (
     <ScrollView style={{ flex: 1, backgroundColor: c.base }} contentInsetAdjustmentBehavior="automatic">
-      <View style={{ padding: 20 }}>
+      <View style={{ padding: layout.screenPx }}>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 4, marginTop: 8 }}>
           <Upload size={22} color={c.primary} />
           <Text style={{ fontSize: 24, fontWeight: '800', color: c.text }}>Bulk Import</Text>

@@ -15,7 +15,7 @@ import {
 import { supabase } from '@/client/supabase';
 import { NeuCard } from '@/components/NeuCard';
 import { NeuButton } from '@/components/NeuButton';
-import { neuColors } from '@/lib/neu';
+import { neuColors, useLayout } from '@/lib/neu';
 import { PageHeader } from '@/components/PageHeader';
 
 interface AuditResult {
@@ -59,6 +59,7 @@ export default function DbAuditPanel() {
   const scheme = useColorScheme();
   const isDark  = scheme === 'dark';
   const c       = isDark ? neuColors.dark : neuColors.light;
+  const layout = useLayout();
 
   const [audit,       setAudit]       = useState<AuditResult | null>(null);
   const [loading,     setLoading]     = useState(true);
@@ -120,7 +121,7 @@ export default function DbAuditPanel() {
       contentInsetAdjustmentBehavior="automatic"
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />}
     >
-      <View style={{ padding: 20 }}>
+      <View style={{ padding: layout.screenPx }}>
         <PageHeader title="Database Audit" subtitle="Integrity checks, orphans, duplicates & broken FKs" accentColor="#7C3AED" />
 
         {/* ── Action Buttons ─────────────────────────────────────────────── */}
@@ -155,7 +156,7 @@ export default function DbAuditPanel() {
         ) : (
           <>
             {/* ── Issue Summary Banner ──────────────────────────────────────── */}
-            <NeuCard style={{ padding: 20, marginBottom: 20, flexDirection: 'row', alignItems: 'center', gap: 16 }}>
+            <NeuCard style={{ padding: layout.screenPx, marginBottom: 20, flexDirection: 'row', alignItems: 'center', gap: 16 }}>
               <View style={{
                 width: 56, height: 56, borderRadius: 18,
                 backgroundColor: totalIssues === 0 ? '#16A34A18' : '#DC262618',
@@ -171,7 +172,7 @@ export default function DbAuditPanel() {
                   {totalIssues === 0 ? 'Database is Clean' : `${totalIssues} Issue${totalIssues > 1 ? 's' : ''} Detected`}
                 </Text>
                 <Text style={{ fontSize: 12, color: c.text, opacity: 0.45, marginTop: 3 }}>
-                  Checked: {new Date(audit.checked_at).toLocaleString()}
+                  Checked: {new Date(audit.checked_at).toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true })}
                 </Text>
               </View>
             </NeuCard>
@@ -244,7 +245,7 @@ export default function DbAuditPanel() {
                       </View>
                       <View style={{ alignItems: 'flex-end' }}>
                         <Text style={{ fontSize: 13, fontWeight: '700', color: c.primary }}>{t.size_pretty}</Text>
-                        <Text style={{ fontSize: 11, color: c.text, opacity: 0.4 }}>{t.row_count?.toLocaleString() ?? 0} rows</Text>
+                        <Text style={{ fontSize: 11, color: c.text, opacity: 0.4 }}>{(t.row_count ?? 0).toLocaleString('en-US') } rows</Text>
                       </View>
                     </View>
                   ))}

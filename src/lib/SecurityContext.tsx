@@ -109,15 +109,22 @@ export function SecurityProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const check = useCallback(async (deviceId?: string): Promise<SecurityCheckResult> => {
-    if (checkRef.current) return result ?? DEFAULT_RESULT;
+    if (checkRef.current) {
+      console.log('[SecurityContext][Stage-6] check() skipped — already in progress, returning cached result');
+      return result ?? DEFAULT_RESULT;
+    }
     checkRef.current = true;
     setChecking(true);
+    console.log('[SecurityContext][Stage-6] check() ▶ starting runSecurityChecks()');
     try {
       const r = await runSecurityChecks();
+      console.log('[SecurityContext][Stage-6] setResult() with threats=', r.threats.map(t => t.type).join(',') || 'none',
+        'blocksLogin=', r.blocksLogin, 'blocksVideo=', r.blocksVideo, 'riskScore=', r.riskScore);
       setResult(r);
       void logThreats(r.threats, r.policies, r.riskScore, deviceId);
       return r;
-    } catch {
+    } catch (e) {
+      console.error('[SecurityContext][Stage-6] ❌ runSecurityChecks() threw — falling back to DEFAULT_RESULT:', e);
       const fallback = { ...DEFAULT_RESULT, policies: await getSecurityPolicies() };
       setResult(fallback);
       return fallback;

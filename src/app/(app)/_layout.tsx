@@ -1,6 +1,6 @@
-import { useEffect, useRef, useCallback } from 'react';
+import { useEffect, useRef } from 'react';
 import { Stack, useRouter } from 'expo-router';
-import { ActivityIndicator, AppState, View } from 'react-native';
+import { AppState, View } from 'react-native';
 import * as ScreenCapture from 'expo-screen-capture';
 import { useSession } from '@/ctx';
 import { useProfileStore } from '@/lib/store';
@@ -26,6 +26,20 @@ function AppLayoutNav() {
   // Guard: role-based redirect must only fire ONCE after login.
   // Any later store update (e.g. profile refresh from the Profile screen)
   // must NOT re-trigger the redirect or the user gets kicked back to dashboard.
+  //
+  // SESSION ISOLATION CONTRACT
+  // ─────────────────────────────────────────────────────────────────────────
+  // When session?.user is null (signed-out):
+  //   • clearProfile() resets profile→null AND isProfileLoading→true
+  //   • hasNavigated.current is reset to false
+  //   • The Stack.Protected guard={!!session} in the root layout unmounts
+  //     the entire (app) route group, wiping all navigator state.
+  // When a NEW session arrives (different user):
+  //   • getProfile() is called with the new user's ID
+  //   • setProfile() fires → isProfileLoading:false + profile set
+  //   • The redirect effect sees hasNavigated.current=false and fires once
+  //     with the correct new role → correct dashboard is pushed
+  // ─────────────────────────────────────────────────────────────────────────
 
   const { check, reset, onNewBlockingThreat } = useSecurity();
 
@@ -99,8 +113,10 @@ function AppLayoutNav() {
         setProfileLoading(false);
       }
     })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session?.user?.id]);
 
+  // ── Role-based redirect ────────────────────────────────────────────────────
   useEffect(() => {
     // Skip if still loading, no profile, or already redirected this session
     if (isProfileLoading || !profile || hasNavigated.current) return;
@@ -115,16 +131,13 @@ function AppLayoutNav() {
     else if (role === 'doctor') router.replace('/(app)/(doctor)/dr-overview' as RelativePathString);
     else if (role === 'admin') router.replace('/(app)/(admin)/admin-overview' as RelativePathString);
     else if (role === 'super_admin') router.replace('/(app)/(superadmin)/sa-overview' as RelativePathString);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [profile, isProfileLoading]);
 
-  if (isProfileLoading) {
-    return (
-      <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: '#EAEEf5' }}>
-        <ActivityIndicator size="large" color="#1E90FF" />
-      </View>
-    );
-  }
-
+  // CRITICAL: Stack MUST always render unconditionally — same principle as root _layout.tsx.
+  // Returning a spinner here unmounts the Stack navigator on every profile-load cycle,
+  // destroying all navigation state and causing blank screens / Unmatched Route errors.
+  // The index.tsx spinner covers the visual loading gap instead.
   return (
     <Stack screenOptions={{ headerShown: false }}>
       <Stack.Screen name="(student)" />
@@ -138,6 +151,7 @@ function AppLayoutNav() {
       <Stack.Screen name="edit-profile" />
       <Stack.Screen name="notifications" />
       <Stack.Screen name="security" />
+      <Stack.Screen name="security-diagnostics" />
       <Stack.Screen name="my-devices" />
       <Stack.Screen name="login-history" />
       <Stack.Screen name="user-activity" />

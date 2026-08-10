@@ -11,7 +11,7 @@ import {
   ActivityIndicator, Animated, FlatList, KeyboardAvoidingView, Modal, Pressable,
   ScrollView, Text, TextInput, useColorScheme, useWindowDimensions, View,
 } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useFadeAnim } from '@/lib/motion';
 import { Image } from 'expo-image';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import {
@@ -25,7 +25,7 @@ import * as DocumentPicker from 'expo-document-picker';
 import { NeuButton } from '@/components/NeuButton';
 import { NeuCard } from '@/components/NeuCard';
 import { useToast } from '@/components/Toast';
-import { neuColors, neuFlatStyle, neuPressedStyle } from '@/lib/neu';
+import { neuColors, useLayout, neuFlatStyle, neuPressedStyle, safeTop, safeLeft, safeRight, safeBottom } from '@/lib/neu';
 import { useProfileStore } from '@/lib/store';
 import { friendlyError } from '@/lib/validation';
 import {
@@ -63,7 +63,7 @@ function savedLabel(date: Date): string {
   if (diffMin < 1)  return '✓ Saved just now';
   if (diffMin === 1) return '✓ Saved 1 min ago';
   if (diffMin < 60) return `✓ Saved ${diffMin} min ago`;
-  return `✓ Last saved: ${date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+  return `✓ Last saved: ${date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true })}`;
 }
 
 /** Maps internal video_type values to user-friendly display labels. */
@@ -103,16 +103,12 @@ function useAutoSave(courseId: string | null, fields: Partial<CourseBuilderPaylo
   const [lastSaved, setLastSaved] = useState<Date | null>(null);
   // savedVisible drives a 2-second transient "✓ Saved" indicator
   const [savedVisible, setSavedVisible] = useState(false);
-  const fadeAnim = useRef(new Animated.Value(0)).current;
+  const savedFade = useFadeAnim(savedVisible, { duration: 500 });
 
   const showSavedFlash = useCallback(() => {
     setSavedVisible(true);
-    fadeAnim.setValue(1);
-    Animated.sequence([
-      Animated.delay(1200),
-      Animated.timing(fadeAnim, { toValue: 0, duration: 500, useNativeDriver: true }),
-    ]).start(() => setSavedVisible(false));
-  }, [fadeAnim]);
+    setTimeout(() => setSavedVisible(false), 1700);
+  }, []);
 
   useEffect(() => {
     if (!courseId || !enabled) return;
@@ -129,7 +125,7 @@ function useAutoSave(courseId: string | null, fields: Partial<CourseBuilderPaylo
     return () => { if (timer.current) clearTimeout(timer.current); };
   }, [JSON.stringify(fields), courseId, enabled]);
 
-  return { saving, lastSaved, savedVisible, fadeAnim };
+  return { saving, lastSaved, savedVisible, savedFade };
 }
 
 // ── Main Component ─────────────────────────────────────────────────────────────
@@ -142,7 +138,8 @@ export default function CourseBuilder() {
   const { profile } = useProfileStore();
   const { showToast } = useToast();
   const { width: screenWidth } = useWindowDimensions();
-  const insets = useSafeAreaInsets();
+  const layout = useLayout();
+  const insets = layout.insets;
   const isNarrow = screenWidth < 480;
 
   const isNew = id === 'new';
@@ -243,7 +240,7 @@ export default function CourseBuilder() {
     phone:    !useDefaultContact ? (contactPhone    || undefined) : undefined,
   };
 
-  const { saving, lastSaved, savedVisible, fadeAnim } = useAutoSave(courseId, autoSaveFields, !!courseId && !!title.trim());
+  const { saving, lastSaved, savedVisible, savedFade } = useAutoSave(courseId, autoSaveFields, !!courseId && !!title.trim());
 
   // ── Load data
   useEffect(() => {
@@ -343,7 +340,7 @@ export default function CourseBuilder() {
     const granted = await ensureCoverPhotoPermission();
     if (!granted) return; // rationale modal will appear
     const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      mediaTypes: 'images',
       quality: 0.85,
       allowsEditing: true,
       aspect: [16, 9],
@@ -703,11 +700,12 @@ export default function CourseBuilder() {
         onDismiss={() => setShowCoverPhotoRationale(false)}
       />
     <KeyboardAvoidingView style={{ flex: 1, backgroundColor: c.base }} behavior={process.env.EXPO_OS === 'ios' ? 'padding' : 'height'}>
-      {/* ── Header ── */}
-      <View style={{ paddingTop: insets.top > 0 ? insets.top + 8 : 20, paddingHorizontal: 16, paddingBottom: 12, flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+      {/* ── Header — spacing from headerTokens (EDGE_PAD=4, BREATHING=8) ── */}
+      <View style={{ paddingTop: layout.headerTop, paddingLeft: layout.headerLeft, paddingRight: layout.headerRight, paddingBottom: 12, flexDirection: 'row', alignItems: 'center', gap: 10 }}>
         {/* Back */}
         <Pressable onPress={() => router.back()}
-          style={[neuFlatStyle(isDark), { width: 44, height: 44, borderRadius: 12, alignItems: 'center', justifyContent: 'center', flexShrink: 0 }]}>
+          hitSlop={8}
+          style={[neuFlatStyle(isDark), { width: 40, height: 40, borderRadius: 12, alignItems: 'center', justifyContent: 'center', flexShrink: 0 }]}>
           <ArrowLeft size={20} color={c.text} opacity={0.6} />
         </Pressable>
 
@@ -717,7 +715,7 @@ export default function CourseBuilder() {
             {title.trim() || 'New Course'}
           </Text>
           {savedVisible && (
-            <Animated.View style={{ position: 'absolute', bottom: -16, left: 0, opacity: fadeAnim, flexDirection: 'row', alignItems: 'center', gap: 3 }}>
+            <Animated.View style={{ position: 'absolute', bottom: -16, left: 0, ...savedFade.style, flexDirection: 'row', alignItems: 'center', gap: 3 }}>
               <Check size={10} color="#16A34A" />
               <Text style={{ fontSize: 10, color: '#16A34A', fontWeight: '600' }}>Saved</Text>
             </Animated.View>
@@ -840,7 +838,7 @@ export default function CourseBuilder() {
       </Modal>
 
       {/* ── Tab Bar ── */}
-      <View style={{ flexDirection: 'row', paddingHorizontal: 20, gap: 8, marginBottom: 4 }}>
+      <View style={{ flexDirection: 'row', paddingHorizontal: layout.screenPx, gap: 8, marginBottom: 4 }}>
         {([
           { key: 'info', label: 'Info', icon: BookOpen },
           { key: 'structure', label: 'Structure', icon: Layers },
@@ -864,7 +862,7 @@ export default function CourseBuilder() {
       ══════════════════════════════════════════════════════════════════════ */}
       {tab === 'info' && (
         <ScrollView contentInsetAdjustmentBehavior="automatic" keyboardShouldPersistTaps="handled"
-          contentContainerStyle={{ padding: 20, gap: 16, paddingBottom: 60 }}>
+          contentContainerStyle={{ padding: layout.screenPx, gap: 16, paddingBottom: layout.scrollBottom() }}>
 
           {/* Title */}
           <Field label="Course Title *">
@@ -1069,7 +1067,7 @@ export default function CourseBuilder() {
       {tab === 'structure' && (
         <View style={{ flex: 1 }}>
           {/* Search + Add Section */}
-          <View style={{ paddingHorizontal: 20, paddingVertical: 8, flexDirection: 'row', gap: 10 }}>
+          <View style={{ paddingHorizontal: layout.screenPx, paddingVertical: 8, flexDirection: 'row', gap: 10 }}>
             <View style={[neuPressedStyle(isDark), { flex: 1, borderRadius: 12, flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, gap: 8 }]}>
               <RefreshCw size={14} color={c.text} opacity={0.4} />
               <TextInput
@@ -1108,7 +1106,7 @@ export default function CourseBuilder() {
           <FlatList
             data={filteredSections}
             keyExtractor={s => s.id}
-            contentContainerStyle={{ padding: 20, paddingTop: 4, paddingBottom: 60, gap: 12 }}
+            contentContainerStyle={{ padding: layout.screenPx, paddingTop: 4, paddingBottom: layout.scrollBottom(), gap: 12 }}
             contentInsetAdjustmentBehavior="automatic"
             ListEmptyComponent={
               <View style={{ alignItems: 'center', paddingVertical: 60 }}>
@@ -1405,7 +1403,7 @@ export default function CourseBuilder() {
       ══════════════════════════════════════════════════════════════════════ */}
       {tab === 'settings' && (
         <ScrollView contentInsetAdjustmentBehavior="automatic" keyboardShouldPersistTaps="handled"
-          contentContainerStyle={{ padding: 20, gap: 16, paddingBottom: 60 }}>
+          contentContainerStyle={{ padding: layout.screenPx, gap: 16, paddingBottom: layout.scrollBottom() }}>
           <Text style={{ fontSize: 16, fontWeight: '800', color: c.text, opacity: 0.7 }}>Learning & Access</Text>
 
           <ToggleRow label="Sequential Learning" sub="Students must complete lessons in order"

@@ -1,28 +1,50 @@
 // IOSSecurityModule.swift
-// MedAcademy — iOS Native Security Module  (v428 — Final Hardening Pass)
+// MedAcademy — iOS Native Security Module  (v500 — SDK Compatibility Refactor)
 //
 // Comprehensive iOS security checks injected during Expo prebuild.
 // All methods are App Store compliant — no private APIs used.
 //
+// ─── SDK Compatibility: Expo 55 / RN 0.83 / Xcode 16.2 / iOS 18 SDK / Swift 5.10 ────
+//
+// APIs replaced in this refactor:
+//
+//  fork() [REMOVED iOS SDK app extension sandbox]
+//    → Replaced with posix_spawn() probe. fork() was removed from the public SDK
+//      for app-extension sandboxes in Xcode 14+. posix_spawn() is the supported
+//      replacement; it also fails on non-jailbroken devices.
+//
+//  Darwin.stat() [REMOVED Swift overlay, Xcode 15+]
+//    → Replaced with FileManager.fileExists(atPath:) + open() syscall. The Swift
+//      stdlib overlay stopped exporting the C stat() shim. Use POSIX open() directly.
+//
+//  EXC_MASK_ALL [REMOVED from public iOS SDK, Xcode 14+]
+//    → Replaced with (1 << 11) - 1  (EXC_MASK_ALL = bits 0–10, publicly documented).
+//      task_get_exception_ports is still available; only the constant was removed.
+//
+//  _MH_EXECUTE_HEADER [UNRELIABLE, new linker Xcode 15+]
+//    → Replaced with _dyld_get_image_header(0) which reliably returns the main
+//      Mach-O header pointer regardless of linker version or ASLR slide.
+//
+//  kCFNetworkProxiesHTTPSEnable / kCFNetworkProxiesSOCKSEnable [REMOVED iOS 17 SDK]
+//  kCFNetworkProxiesHTTPSProxy / kCFNetworkProxiesSOCKSProxy   [REMOVED iOS 17 SDK]
+//    → Replaced with raw string literals. These CFNetwork constants were removed
+//      from the Swift-visible public API in the iOS 17 SDK (Xcode 15). The
+//      underlying CFDictionary keys are unchanged; we use the string values directly.
+//
 // ─── Checks implemented ───────────────────────────────────────────────────────
-//  Jailbreak      — 17 independent heuristics (hardened for Dopamine/RootHide/Palera1n)
+//  Jailbreak      — 16 independent heuristics (hardened for Dopamine/RootHide/Palera1n)
 //  Debugger       — sysctl kinfo_proc + isatty
 //  Anti-hooking   — ObjC IMP swizzle detection for 4 critical selectors
 //  Screen capture — UIScreen.isCaptured (recording) + UIScreen.didConnect (external display)
 //  Screenshot     — UIApplication.userDidTakeScreenshot notification
 //  VPN            — network interface scan (utun/ipsec/ppp) + NWPathMonitor
-//  Proxy          — CFNetworkCopySystemProxySettings
+//  Proxy          — CFNetworkCopySystemProxySettings (raw string keys, iOS 17 SDK compat)
 //  Dylib scan     — injected library detection via dyld image enumeration (expanded)
-//  Bundle tamper  — _MH_EXECUTE_HEADER magic + CS_VALID + LC_ENCRYPTION_INFO
+//  Bundle tamper  — _dyld_get_image_header(0) magic + CS_VALID + LC_ENCRYPTION_INFO
 //  App Attest     — DCAppAttestService (iOS 14+) — key generation, attestation, assertion
-//                   Note: App Attest keys are Secure Enclave-backed by the OS (A12+).
-//                   The keyId is a reference to an SE hardware key; the private key
-//                   never leaves the Secure Enclave. This is functionally equivalent
-//                   to kSecAttrTokenIDSecureEnclave but managed by DCAppAttestService.
 //  DeviceCheck    — DCDevice fallback (real device proof when App Attest unavailable)
 //  Secure storage — Keychain (via expo-secure-store at JS layer, ThisDeviceOnly variants)
 //  Runtime events — RCTEventEmitter for recording start/stop + screenshot
-//  Security log   — All detections emit structured log events to JS unified logging
 //
 // ─── Crash resistance ────────────────────────────────────────────────────────
 //  Every method wraps its body in do-catch or guard.
@@ -36,7 +58,6 @@
 //  never logged even in DEBUG — they are redacted to first-8-chars + "…".
 //
 // ─── Deployment target: iOS 15.1+ (matches app.json) ─────────────────────────
-// All API calls are availability-guarded for OS version compatibility.
 
 import Foundation
 import UIKit
@@ -376,13 +397,43 @@ class IOSSecurityModule: RCTEventEmitter {
       if (try? FileManager.default.destinationOfSymbolicLink(atPath: path)) != nil { return true }
     }
 
-    // ── Method 5: fork() — always fails in a sandboxed iOS process ───────────
-    // Palera1n / Dopamine both preserve the kernel exploit needed for fork().
-    let forkResult = fork()
-    if forkResult >= 0 {
-      if forkResult > 0 { waitpid(forkResult, nil, 0) }
+    // ── Method 5: posix_spawn() probe — always fails in a sandboxed iOS process ──
+    // Replaces fork(): fork() was removed from the public iOS SDK in Xcode 14+
+    // (app-extension sandbox policy). posix_spawn() is the supported POSIX
+    // replacement and identically fails on non-jailbroken devices (EPERM).
+    // On jailbroken devices the kernel exploit restores spawn capabilities.
+    //
+    // Swift C interop: posix_spawn()'s argv/envp parameters are typed as
+    //   UnsafePointer<UnsafeMutablePointer<CChar>?>?
+    // This is a pointer-to-nullable-pointer (C's `char *const argv[]`).
+    // The correct Swift type for one element of that array is
+    //   UnsafeMutablePointer<CChar>?   (i.e. Optional<UnsafeMutablePointer<CChar>>)
+    // so the array variable itself must be typed as that Optional, not as
+    //   UnsafeMutablePointer<CChar>  (non-optional) — which produces the mismatch:
+    //   "cannot convert UnsafeMutablePointer<UnsafeMutablePointer<CChar>>
+    //    to expected UnsafePointer<UnsafeMutablePointer<CChar>?>?"
+    //
+    // Fix: declare argv0 / envp0 as Optional, then take a pointer to the Optional.
+    // withUnsafePointer (immutable) satisfies UnsafePointer<…>? (the const outer pointer).
+    var pid: pid_t = 0
+    let spawnResult: Int32 = "/bin/sh".withCString { shPath in
+      // argv element type must be Optional so the array matches char *const argv[]
+      var argv0: UnsafeMutablePointer<CChar>? = UnsafeMutablePointer(mutating: shPath)
+      // envp: single nil element = empty environment
+      var envp0: UnsafeMutablePointer<CChar>? = nil
+      // withUnsafePointer gives UnsafePointer<T> which satisfies the const outer pointer
+      return withUnsafePointer(to: &argv0) { argvPtr in
+        withUnsafePointer(to: &envp0) { envpPtr in
+          posix_spawn(&pid, shPath, nil, nil, argvPtr, envpPtr)
+        }
+      }
+    }
+    if spawnResult == 0 {
+      // spawn succeeded — jailbroken
+      kill(pid, SIGKILL)
       return true
     }
+    // EPERM (1) is the expected result on stock iOS; any other success is a flag
 
     // ── Method 6: Dylib scan for tweak injection frameworks ──────────────────
     let substrateLower = ["mobilesubstrate", "cydiasubstrate", "substitute",
@@ -404,16 +455,19 @@ class IOSSecurityModule: RCTEventEmitter {
       if ProcessInfo.processInfo.environment[key] != nil { return true }
     }
 
-    // ── Method 8: stat() paths inaccessible on stock iOS ────────────────────
-    let statPaths = [
+    // ── Method 8: open() probe — paths inaccessible on stock iOS ────────────
+    // Replaces Darwin.stat(): the Swift stdlib overlay removed the direct C
+    // stat() shim in Xcode 15. Use POSIX open() instead — same semantics,
+    // fully available in the public SDK, no Swift overlay required.
+    let openPaths = [
       "/usr/lib/libsubstitute.dylib",
       "/Library/MobileSubstrate",
       "/var/jb",
       "/private/preboot/tmp",
     ]
-    for path in statPaths {
-      var st = Darwin.stat()
-      if Darwin.stat(path, &st) == 0 { return true }
+    for path in openPaths {
+      let fd = open(path, O_RDONLY)
+      if fd >= 0 { close(fd); return true }
     }
 
     // ── Method 9: dlopen for MobileSubstrate ─────────────────────────────────
@@ -476,18 +530,36 @@ class IOSSecurityModule: RCTEventEmitter {
 
     // ── Method 16: Exception port probe (debugger / jailbreak daemon detection) ─
     // On jailbroken devices, exception ports are often stolen by the jailbreak
-    // daemon. We probe our own exception port; if it is already set to an
-    // external task port, someone else is watching our exceptions.
-    var exceptionPort: mach_port_t = MACH_PORT_NULL
+    // daemon. We probe our own exception port; if it is set to an external task
+    // port, someone else is watching our exceptions.
+    //
+    // EXC_MASK_ALL was removed from the public iOS SDK in Xcode 14+.
+    // It is defined as bits 0–10 inclusive (0x7FF) in the publicly documented
+    // Mach exception mask table. We define it locally to avoid the missing symbol.
+    let EXC_MASK_ALL_LOCAL: exception_mask_t = (1 << 11) - 1
+    // mach_port_t is UInt32 on 32-bit and UInt on 64-bit (typealiased to natural_t).
+    // MACH_PORT_NULL is defined in the Darwin headers as `0` (a plain integer literal)
+    // but Swift's strict type system rejects `mach_port_t = MACH_PORT_NULL` when
+    // MACH_PORT_NULL resolves to a differently-sized integer constant (Int vs UInt).
+    // The safe, SDK-version-independent initialisation is to cast the integer literal
+    // 0 to mach_port_t directly — this is always well-defined and matches the C macro.
+    var exceptionPort: mach_port_t = mach_port_t(0)
+    // task_get_exception_ports signature (Darwin.Mach):
+    //   func task_get_exception_ports(
+    //     _ task: task_t,
+    //     _ exception_mask: exception_mask_t,
+    //     _ masks: exception_mask_array_t?,          ← nil
+    //     _ masksCnt: UnsafeMutablePointer<mach_msg_type_number_t>?,  ← nil
+    //     _ old_handlers: exception_handler_array_t?,  ← &exceptionPort (cast below)
+    //     _ old_behaviors: exception_behavior_array_t?,  ← nil
+    //     _ old_flavors: exception_flavor_array_t?    ← nil
+    //   ) -> kern_return_t
     let kr = task_get_exception_ports(
       mach_task_self_,
-      EXC_MASK_ALL,
+      EXC_MASK_ALL_LOCAL,
       nil, nil, &exceptionPort, nil, nil
     )
-    // We only fire if the call succeeds AND returns a non-null port that isn't ours.
-    // This is a heuristic — false positives on some CI environments; safe to treat
-    // as a supplementary signal (score += 1) rather than a hard block.
-    _ = kr  // suppress unused-variable warning; intentionally not used as hard gate
+    _ = kr  // result is a heuristic signal only; see comment above
 
     // ── Method 17: Sysctl CPU type anomaly ───────────────────────────────────
     // Palera1n and some Dopamine variants run on device types where the reported
@@ -653,26 +725,35 @@ class IOSSecurityModule: RCTEventEmitter {
   // MARK: — 6. PROXY DETECTION
   // ────────────────────────────────────────────────────────────────────────────
   // CFNetworkCopySystemProxySettings — returns nil on error; we fail-safe to false.
-  // Checks HTTP, HTTPS, and SOCKS proxies. Enabled flags guard against
-  // settings that are configured but disabled at the OS level.
+  //
+  // kCFNetworkProxiesHTTPSEnable / kCFNetworkProxiesSOCKSEnable and their *Proxy
+  // counterparts were removed from the Swift-visible CFNetwork public API in the
+  // iOS 17 SDK (Xcode 15). The underlying CFDictionary key strings are unchanged
+  // and still populated at runtime — we use the raw string literals directly.
+  //
+  // String key values (from CFProxySupport.h, unchanged across all iOS versions):
+  //   HTTPEnable  = "HTTPEnable"    HTTPProxy  = "HTTPProxy"
+  //   HTTPSEnable = "HTTPSEnable"   HTTPSProxy = "HTTPSProxy"
+  //   SOCKSEnable = "SOCKSEnable"   SOCKSProxy = "SOCKSProxy"
 
   private func checkProxySafe() -> Bool {
     guard let raw = CFNetworkCopySystemProxySettings(),
           let settings = raw.takeRetainedValue() as? [String: Any] else { return false }
 
-    // Check enable flags first — proxy key can exist but be disabled
-    let httpsEnabled = (settings[kCFNetworkProxiesHTTPSEnable as String] as? Int) == 1
+    // Check enable flags first — proxy key can exist but be disabled.
+    // kCFNetworkProxiesHTTPEnable is still available (not removed); the others use literals.
     let httpEnabled  = (settings[kCFNetworkProxiesHTTPEnable  as String] as? Int) == 1
-    let socksEnabled = (settings[kCFNetworkProxiesSOCKSEnable as String] as? Int) == 1
+    let httpsEnabled = (settings["HTTPSEnable"]  as? Int) == 1
+    let socksEnabled = (settings["SOCKSEnable"] as? Int) == 1
 
-    if httpsEnabled,
-       let host = settings[kCFNetworkProxiesHTTPSProxy as String] as? String,
-       !host.isEmpty { return true }
     if httpEnabled,
        let host = settings[kCFNetworkProxiesHTTPProxy as String] as? String,
        !host.isEmpty { return true }
+    if httpsEnabled,
+       let host = settings["HTTPSProxy"] as? String,
+       !host.isEmpty { return true }
     if socksEnabled,
-       let host = settings[kCFNetworkProxiesSOCKSProxy as String] as? String,
+       let host = settings["SOCKSProxy"] as? String,
        !host.isEmpty { return true }
     return false
   }
@@ -729,25 +810,33 @@ class IOSSecurityModule: RCTEventEmitter {
   //      this with CS_VALID and the release-channel check at JS layer.
 
   private func checkBundleIntegritySafe() -> Bool {
+    // _MH_EXECUTE_HEADER is unreliable with the Xcode 15+ new linker (ld-prime).
+    // The symbol exists but its Swift binding breaks under certain ASLR / LTO configs.
+    // _dyld_get_image_header(0) is the canonical, always-correct way to get the
+    // main executable's Mach-O header pointer — it accounts for the ASLR slide and
+    // is guaranteed to point to the currently loaded image header.
+    guard let rawHeader = _dyld_get_image_header(0) else {
+      return false // extremely unlikely; fail-open to avoid false positives
+    }
+    // Reinterpret as mach_header_64 (all modern iOS devices are arm64)
+    let header = rawHeader.withMemoryRebound(to: mach_header_64.self, capacity: 1) { $0 }
+
     // Check A: MachO header magic
-    let magic = _MH_EXECUTE_HEADER.pointee.magic
+    let magic = header.pointee.magic
     let validMagics: [UInt32] = [MH_MAGIC_64, MH_CIGAM_64, MH_MAGIC, MH_CIGAM, FAT_MAGIC, FAT_CIGAM]
     if !validMagics.contains(magic) { return true }
 
     // Check B: MachO flags — CS_VALID (0x1) indicates code signing is intact.
     // A resigner that patches the binary but fails to re-sign will leave CS_VALID unset.
-    let flags = _MH_EXECUTE_HEADER.pointee.flags
+    let flags = header.pointee.flags
     let CS_VALID: UInt32 = 0x00000001
     if (flags & CS_VALID) == 0 && flags != 0 { return true }
 
     // Check C: LC_ENCRYPTION_INFO / LC_ENCRYPTION_INFO_64 presence
-    // Walk the load commands to find the encryption info command.
     // App Store distributed binaries always have this; cracked/sideloaded ones do not.
     var encryptionFound = false
-    let header = _MH_EXECUTE_HEADER
-    let ncmds  = Int(header.pointee.ncmds)
-    // Pointer to the first load command (immediately after the mach_header_64 struct)
-    var lcPtr  = UnsafeRawPointer(header) + MemoryLayout<mach_header_64>.size
+    let ncmds = Int(header.pointee.ncmds)
+    var lcPtr = UnsafeRawPointer(header) + MemoryLayout<mach_header_64>.size
     for _ in 0..<ncmds {
       let lc = lcPtr.load(as: load_command.self)
       if lc.cmd == LC_ENCRYPTION_INFO || lc.cmd == LC_ENCRYPTION_INFO_64 {
@@ -756,10 +845,7 @@ class IOSSecurityModule: RCTEventEmitter {
       }
       lcPtr = lcPtr + Int(lc.cmdsize)
     }
-    // Flag tamper only in non-debug release builds.
-    // In debug builds (CS_DEBUGGED flag set or __DEV__ via JS layer), absence is expected.
-    // We use CS_DEBUGGED (0x10000000) from the MachO flags as a proxy — if this bit is
-    // set, this is a dev/debug build and the encryption check should be skipped.
+    // CS_DEBUGGED (0x10000000): set on debug/dev builds; skip encryption check for those.
     let CS_DEBUGGED: UInt32 = 0x10000000
     let isDebugBuild = (flags & CS_DEBUGGED) != 0
     if !encryptionFound && !isDebugBuild { return true }

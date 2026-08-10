@@ -2,14 +2,14 @@ import { useCallback, useState } from 'react';
 import { View, Text, ScrollView, useColorScheme, Pressable, RefreshControl, ActivityIndicator } from 'react-native';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { BookOpen, Users, TrendingUp, Bell, Archive, GraduationCap, Ban, Zap, CreditCard, Plus } from 'lucide-react-native';
+import { DashboardHeader } from '@/components/DashboardHeader';
 import { useProfileStore } from '@/lib/store';
 import { getCourses, getDoctorStudentEnrollments } from '@/lib/api';
 import { useCreditBalance } from '@/lib/useCreditBalance';
 import { getFirstName } from '@/lib/utils';
 import { NeuCard } from '@/components/NeuCard';
 import { StatCard } from '@/components/StatCard';
-import { neuColors, neuMicroStyle } from '@/lib/neu';
-import HamburgerButton from '@/components/HamburgerButton';
+import { neuColors, useLayout, neuMicroStyle, safeBottom } from '@/lib/neu';
 import { CourseThumbnail } from '@/components/CourseThumbnail';
 import type { RelativePathString } from 'expo-router';
 import { useNotificationPermission } from '@/hooks/useNotificationPermission';
@@ -19,6 +19,8 @@ export default function DoctorDashboard() {
   const scheme = useColorScheme();
   const isDark = scheme === 'dark';
   const c = isDark ? neuColors.dark : neuColors.light;
+  const layout = useLayout();
+  const insets = layout.insets;
   const { profile } = useProfileStore();
   const router = useRouter();
 
@@ -92,18 +94,11 @@ export default function DoctorDashboard() {
       contentInsetAdjustmentBehavior="automatic"
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />}
     >
-      <View style={{ paddingHorizontal: 20, paddingBottom: 32 }}>
-        {/* Header */}
-        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20, marginTop: 14 }}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-            <HamburgerButton />
-            <View>
-              <Text style={{ fontSize: 11, color: c.text, opacity: 0.45, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 0.6 }}>Doctor Panel</Text>
-              <Text style={{ fontSize: 21, fontWeight: '800', color: c.text, lineHeight: 26 }}>
-                {firstName ? `${firstName} 👋` : '👋'}
-              </Text>
-            </View>
-          </View>
+      {/* DashboardHeader sits OUTSIDE the inner padding view so it can own its own horizontal padding */}
+      <DashboardHeader
+        roleLabel="Doctor Panel"
+        greeting={firstName ? `${firstName} 👋` : '👋'}
+        rightActions={
           <Pressable
             onPress={() => router.push('/(app)/notifications' as RelativePathString)}
             accessibilityLabel="Notifications"
@@ -112,7 +107,9 @@ export default function DoctorDashboard() {
           >
             <Bell size={19} color={c.primary} />
           </Pressable>
-        </View>
+        }
+      />
+      <View style={{ paddingHorizontal: layout.screenPx, paddingBottom: layout.scrollBottom() }}>
 
         {/* 7-tile KPI Grid */}
         <View style={{ flexDirection: 'row', flexWrap: 'wrap', marginBottom: 20, gap: 0 }}>
@@ -169,7 +166,7 @@ export default function DoctorDashboard() {
                     <Text style={{ fontSize: 13, fontWeight: '600', color: c.text }} numberOfLines={1}>{e.student?.full_name}</Text>
                     <Text style={{ fontSize: 11, color: c.text, opacity: 0.5 }} numberOfLines={1}>{e.course?.title}</Text>
                   </View>
-                  <Text style={{ fontSize: 10, color: c.text, opacity: 0.35 }}>{new Date(e.created_at).toLocaleDateString()}</Text>
+                  <Text style={{ fontSize: 10, color: c.text, opacity: 0.35 }}>{new Date(e.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</Text>
                 </View>
               </NeuCard>
             ))}

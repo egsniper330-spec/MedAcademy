@@ -21,7 +21,7 @@ import {
   User, Mail, Phone, Lock, BookOpen, CreditCard, Ticket,
 } from 'lucide-react-native';
 import * as Clipboard from 'expo-clipboard';
-import { neuColors, neuFlatStyle } from '@/lib/neu';
+import { neuColors, useLayout, neuFlatStyle, safeBottom } from '@/lib/neu';
 import { NeuCard } from '@/components/NeuCard';
 import { NeuButton } from '@/components/NeuButton';
 import { PageHeader } from '@/components/PageHeader';
@@ -31,6 +31,8 @@ type LoginType = 'email' | 'phone' | 'both';
 
 export default function StudentCredentialsScreen() {
   const scheme = useColorScheme();
+  const layout = useLayout();
+  const insets = layout.insets;
   const isDark = scheme === 'dark';
   const c    = isDark ? neuColors.dark : neuColors.light;
   const flat = neuFlatStyle(isDark);
@@ -153,7 +155,7 @@ export default function StudentCredentialsScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: c.base }}>
-      <ScrollView contentContainerStyle={{ padding: 20, gap: 16, paddingBottom: 60 }}>
+      <ScrollView contentContainerStyle={{ padding: layout.screenPx, gap: 16, paddingBottom: layout.scrollBottom() }}>
         <PageHeader title="Student Created" onBack={handleDone} />
 
         {/* Success banner */}

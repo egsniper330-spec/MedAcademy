@@ -13,7 +13,7 @@ import { Video, Users, Globe, Lock, Unlock, AlertTriangle, Search, ChevronDown, 
 import { PageHeader } from '@/components/PageHeader';
 import { NeuCard } from '@/components/NeuCard';
 import { useToast } from '@/components/Toast';
-import { neuColors } from '@/lib/neu';
+import { neuColors, useLayout } from '@/lib/neu';
 import {
   getVideoProviders, setGlobalProviderEnabled,
   getDoctorsForProviderMgmt, getTeacherProviderPermissionsById,
@@ -43,6 +43,7 @@ export default function VideoProvidersScreen() {
   const scheme = useColorScheme();
   const isDark = scheme === 'dark';
   const c = isDark ? neuColors.dark : neuColors.light;
+  const layout = useLayout();
   const { showToast } = useToast();
 
   const [providers, setProviders] = useState<VideoProvider[]>([]);
@@ -163,7 +164,7 @@ export default function VideoProvidersScreen() {
       contentInsetAdjustmentBehavior="automatic"
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />}
     >
-      <View style={{ padding: 20, gap: 20 }}>
+      <View style={{ padding: layout.screenPx, gap: 20 }}>
         <PageHeader title="Video Providers" subtitle="Control upload providers globally and per teacher" />
 
         {/* Warning banner when all providers off */}

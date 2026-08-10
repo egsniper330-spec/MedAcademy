@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { View, Text, ScrollView, useColorScheme, Pressable, KeyboardAvoidingView, TextInput } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { ArrowLeft, Lock, Shield, Eye, EyeOff, CheckCircle, AlertCircle } from 'lucide-react-native';
 import { PageHeader } from '@/components/PageHeader';
@@ -13,6 +14,7 @@ import { NeuInputRow } from '@/components/NeuInputRow';
 
 export default function SecurityCenter() {
   const scheme = useColorScheme();
+  const insets = useSafeAreaInsets();
   const isDark = scheme === 'dark';
   const c = isDark ? neuColors.dark : neuColors.light;
   const router = useRouter();

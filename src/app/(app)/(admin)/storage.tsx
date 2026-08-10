@@ -13,7 +13,7 @@ import { PageHeader } from '@/components/PageHeader';
 import { getStorageStats } from '@/lib/api';
 import { formatBytes } from '@/lib/videoUploadEngine';
 import { NeuCard } from '@/components/NeuCard';
-import { neuColors } from '@/lib/neu';
+import { neuColors, useLayout } from '@/lib/neu';
 
 const BUCKET_ICONS: Record<string, React.ElementType> = {
   videos: Film, images: Image, avatars: Image, documents: FileText,
@@ -23,6 +23,7 @@ export default function StorageMonitorScreen() {
   const scheme = useColorScheme();
   const isDark = scheme === 'dark';
   const c = isDark ? neuColors.dark : neuColors.light;
+  const layout = useLayout();
 
   const [stats, setStats] = useState<any>(null);
   const [loading, setLoading] = useState(true);
@@ -41,7 +42,7 @@ export default function StorageMonitorScreen() {
   return (
     <ScrollView style={{ flex: 1, backgroundColor: c.base }} contentInsetAdjustmentBehavior="automatic"
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />}>
-      <View style={{ padding: 20 }}>
+      <View style={{ padding: layout.screenPx }}>
         <PageHeader title="Storage Monitor" subtitle="Supabase Storage + VdoCipher usage" accentColor="#2DA8FF" />
 
         {loading ? <ActivityIndicator color={c.primary} style={{ marginTop: 40 }} /> : stats && (

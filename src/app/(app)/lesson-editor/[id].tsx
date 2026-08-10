@@ -9,7 +9,7 @@ import {
   Pressable, ScrollView, Text, TextInput, useColorScheme, View,
   useWindowDimensions,
 } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useFadeAnim } from '@/lib/motion';
 import { Image } from 'expo-image';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import {
@@ -24,7 +24,7 @@ import { randomUUID } from 'expo-crypto';
 import { NeuButton } from '@/components/NeuButton';
 import { NeuCard } from '@/components/NeuCard';
 import { useToast } from '@/components/Toast';
-import { neuColors, neuFlatStyle, neuPressedStyle } from '@/lib/neu';
+import { neuColors, useLayout, neuFlatStyle, neuPressedStyle, safeTop, safeLeft, safeRight, safeBottom } from '@/lib/neu';
 import { useProfileStore } from '@/lib/store';
 import { friendlyError } from '@/lib/validation';
 import {
@@ -138,7 +138,7 @@ function savedLabel(date: Date): string {
   if (diffMin < 1) return '✓ Saved just now';
   if (diffMin === 1) return '✓ Saved 1 min ago';
   if (diffMin < 60) return `✓ Saved ${diffMin} min ago`;
-  return `✓ Last saved: ${date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+  return `✓ Last saved: ${date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true })}`;
 }
 
 export default function LessonEditor() {
@@ -150,7 +150,8 @@ export default function LessonEditor() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const { profile } = useProfileStore();
   const { showToast } = useToast();
-  const insets = useSafeAreaInsets();
+  const layout = useLayout();
+  const insets = layout.insets;
 
   const [tab, setTab] = useState<LessonTab>('video');
   const [loading, setLoading] = useState(true);
@@ -158,15 +159,11 @@ export default function LessonEditor() {
   const [lastSaved, setLastSaved] = useState<Date | null>(null);
   // Transient "✓ Saved" flash — reserves NO layout space
   const [savedVisible, setSavedVisible] = useState(false);
-  const fadeAnim = useRef(new Animated.Value(0)).current;
+  const savedFade = useFadeAnim(savedVisible, { duration: 500 });
   const showSavedFlash = useCallback(() => {
     setSavedVisible(true);
-    fadeAnim.setValue(1);
-    Animated.sequence([
-      Animated.delay(1200),
-      Animated.timing(fadeAnim, { toValue: 0, duration: 500, useNativeDriver: true }),
-    ]).start(() => setSavedVisible(false));
-  }, [fadeAnim]);
+    setTimeout(() => setSavedVisible(false), 1700);
+  }, []);
   const [uploading, setUploading] = useState(false);
   const [duplicateInfo, setDuplicateInfo] = useState<{ fileName: string; existingLesson?: string } | null>(null);
   const [pendingFile, setPendingFile] = useState<DocumentPicker.DocumentPickerAsset | null>(null);
@@ -723,9 +720,10 @@ export default function LessonEditor() {
         onAssetAttached={async () => { setShowReplaceSheet(false); await loadLesson(); }}
       />
 
-      {/* ── Header ── */}
-      <View style={{ paddingTop: insets.top > 0 ? insets.top + 8 : 20, paddingHorizontal: 20, paddingBottom: 12, flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+      {/* ── Header — spacing from headerTokens (EDGE_PAD=4, BREATHING=8) ── */}
+      <View style={{ paddingTop: layout.headerTop, paddingLeft: layout.headerLeft, paddingRight: layout.headerRight, paddingBottom: 12, flexDirection: 'row', alignItems: 'center', gap: 12 }}>
         <Pressable onPress={() => router.back()}
+          hitSlop={8}
           style={[neuFlatStyle(isDark), { width: 40, height: 40, borderRadius: 12, alignItems: 'center', justifyContent: 'center' }]}>
           <ArrowLeft size={20} color={c.text} opacity={0.6} />
         </Pressable>
@@ -737,7 +735,7 @@ export default function LessonEditor() {
           />
           {/* Transient ✓ Saved flash — no reserved layout space */}
           {savedVisible && (
-            <Animated.View style={{ position: 'absolute', bottom: -14, left: 0, opacity: fadeAnim, flexDirection: 'row', alignItems: 'center', gap: 3 }}>
+            <Animated.View style={{ position: 'absolute', bottom: -14, left: 0, ...savedFade.style, flexDirection: 'row', alignItems: 'center', gap: 3 }}>
               <Check size={10} color="#16A34A" />
               <Text style={{ fontSize: 10, color: '#16A34A', fontWeight: '600' }}>Saved</Text>
             </Animated.View>
@@ -751,7 +749,7 @@ export default function LessonEditor() {
       </View>
 
       {/* ── Tab Bar ── */}
-      <View style={{ flexDirection: 'row', paddingHorizontal: 20, gap: 8, marginBottom: 4 }}>
+      <View style={{ flexDirection: 'row', paddingHorizontal: layout.screenPx, gap: 8, marginBottom: 4 }}>
         {([
           { key: 'video',      label: 'Video',     icon: Play },
           { key: 'materials',  label: 'Materials', icon: Paperclip },
@@ -780,7 +778,7 @@ export default function LessonEditor() {
       ══════════════════════════════════════════════════════════════════════ */}
       {tab === 'video' && (
         <ScrollView contentInsetAdjustmentBehavior="automatic" keyboardShouldPersistTaps="handled"
-          contentContainerStyle={{ padding: 20, gap: 16, paddingBottom: 60 }}>
+          contentContainerStyle={{ padding: layout.screenPx, gap: 16, paddingBottom: layout.scrollBottom() }}>
 
           {/* ── Live upload / processing status card ─────────────────────── */}
           {activeTask && (
@@ -1066,7 +1064,7 @@ export default function LessonEditor() {
                   </NeuCard>
                 ) : (
                 // ── Video already linked — Replace + Delete ────────────────────
-                <NeuCard style={[neuPressedStyle(isDark), { padding: 20, alignItems: 'center', gap: 10 }]}>
+                <NeuCard style={[neuPressedStyle(isDark), { padding: layout.screenPx, alignItems: 'center', gap: 10 }]}>
                   <View style={{ width: 52, height: 52, borderRadius: 26, backgroundColor: `${c.primary}18`, alignItems: 'center', justifyContent: 'center' }}>
                     <Video size={26} color={c.primary} />
                   </View>
@@ -1123,7 +1121,7 @@ export default function LessonEditor() {
                   <View style={{ gap: 12 }}>
                     {/* Upload new */}
                     <Pressable onPress={() => handleUploadVideo()}
-                      style={[neuFlatStyle(isDark), { padding: 20, borderRadius: 20, flexDirection: 'row', alignItems: 'center', gap: 16 }]}>
+                      style={[neuFlatStyle(isDark), { padding: layout.screenPx, borderRadius: 20, flexDirection: 'row', alignItems: 'center', gap: 16 }]}>
                       <View style={{ width: 52, height: 52, borderRadius: 14, backgroundColor: `${c.primary}15`, alignItems: 'center', justifyContent: 'center' }}>
                         <Upload size={24} color={c.primary} opacity={0.8} />
                       </View>
@@ -1137,7 +1135,7 @@ export default function LessonEditor() {
 
                     {/* Choose from library */}
                     <Pressable onPress={() => setShowLibraryPicker(true)}
-                      style={[neuFlatStyle(isDark), { padding: 20, borderRadius: 20, flexDirection: 'row', alignItems: 'center', gap: 16 }]}>
+                      style={[neuFlatStyle(isDark), { padding: layout.screenPx, borderRadius: 20, flexDirection: 'row', alignItems: 'center', gap: 16 }]}>
                       <View style={{ width: 52, height: 52, borderRadius: 14, backgroundColor: `${c.accent}15`, alignItems: 'center', justifyContent: 'center' }}>
                         <Film size={24} color={c.accent} opacity={0.8} />
                       </View>
@@ -1320,7 +1318,7 @@ export default function LessonEditor() {
       {tab === 'materials' && (
         <View style={{ flex: 1 }}>
           {/* Upload button */}
-          <View style={{ paddingHorizontal: 20, paddingVertical: 10 }}>
+          <View style={{ paddingHorizontal: layout.screenPx, paddingVertical: 10 }}>
             <Pressable onPress={handleUploadMaterial} disabled={uploading}
               style={{ backgroundColor: c.primary, padding: 14, borderRadius: 14, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, opacity: uploading ? 0.7 : 1 }}>
               {uploading ? <ActivityIndicator size="small" color="#fff" /> : <Upload size={18} color="#fff" />}
@@ -1337,7 +1335,7 @@ export default function LessonEditor() {
             data={materials}
             keyExtractor={m => m.id}
             contentInsetAdjustmentBehavior="automatic"
-            contentContainerStyle={{ padding: 20, paddingTop: 4, gap: 10, paddingBottom: 60 }}
+            contentContainerStyle={{ padding: layout.screenPx, paddingTop: 4, gap: 10, paddingBottom: layout.scrollBottom() }}
             ListEmptyComponent={
               <View style={{ alignItems: 'center', paddingVertical: 60 }}>
                 <Paperclip size={44} color={c.primary} opacity={0.2} />
@@ -1425,7 +1423,7 @@ export default function LessonEditor() {
       ══════════════════════════════════════════════════════════════════════ */}
       {tab === 'settings' && (
         <ScrollView contentInsetAdjustmentBehavior="automatic" keyboardShouldPersistTaps="handled"
-          contentContainerStyle={{ padding: 20, gap: 16, paddingBottom: 60 }}>
+          contentContainerStyle={{ padding: layout.screenPx, gap: 16, paddingBottom: layout.scrollBottom() }}>
           <Text style={{ fontSize: 16, fontWeight: '800', color: c.text, opacity: 0.7 }}>Lesson Access</Text>
 
           <SettingToggle

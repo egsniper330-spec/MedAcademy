@@ -14,7 +14,7 @@ import {
   DollarSign, TrendingUp, Calendar, Award, BookOpen, ArrowRight,
 } from 'lucide-react-native';
 import { NeuCard } from '@/components/NeuCard';
-import { neuColors } from '@/lib/neu';
+import { neuColors, useLayout } from '@/lib/neu';
 import { getPricingSettings, getCreditLedger, getActivationLedgerStats } from '@/lib/api';
 
 type PricingSettings = {
@@ -26,6 +26,7 @@ export default function RevenueAnalyticsScreen() {
   const scheme = useColorScheme();
   const isDark = scheme === 'dark';
   const c = isDark ? neuColors.dark : neuColors.light;
+  const layout = useLayout();
   const router = useRouter();
 
   const [loading, setLoading]       = useState(true);
@@ -114,7 +115,7 @@ export default function RevenueAnalyticsScreen() {
       topDoctors, topAdmins, topCourses, months, monthlyVals, maxMonthly };
   })();
 
-  const fmt = (n: number, cur = 'EGP') => `${cur} ${n.toLocaleString()}`;
+  const fmt = (n: number, cur = 'EGP') => `${cur} ${n.toLocaleString('en-US')}`;
 
   const KpiCard = ({ label, value, color, sub }: { label: string; value: string; color: string; sub?: string }) => (
     <NeuCard style={{ flex: 1, padding: 14, minWidth: 140 }}>
@@ -146,7 +147,7 @@ export default function RevenueAnalyticsScreen() {
       contentInsetAdjustmentBehavior="automatic"
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />}
     >
-      <View style={{ padding: 20 }}>
+      <View style={{ padding: layout.screenPx }}>
         {/* Header */}
         <PageHeader title="Revenue Analytics" subtitle={pricing ? `Credit: ${pricing.creditPrice.currency} ${pricing.creditPrice.amount} · Code: ${pricing.activationCodePrice.amount}` : 'Financial dashboard'} accentColor="#16A34A" />
 

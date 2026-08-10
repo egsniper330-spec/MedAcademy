@@ -1,16 +1,15 @@
 import { useCallback, useState } from 'react';
 import { View, Text, ScrollView, useColorScheme, Pressable, RefreshControl, TextInput, ActivityIndicator, Modal } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Image } from 'expo-image';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { Plus, BookOpen, Search, Archive, Clock, Users, ChevronRight, GraduationCap, MoreVertical, Trash2, Pencil, AlertTriangle } from 'lucide-react-native';
-import HamburgerButton from '@/components/HamburgerButton';
+import { DashboardHeader } from '@/components/DashboardHeader';
 import { useProfileStore } from '@/lib/store';
 import { getCoursesWithArchived, createCourse, deleteCourseWithCleanup, getCourseDeleteStats } from '@/lib/api';
 import { NeuCard } from '@/components/NeuCard';
 import { NeuButton } from '@/components/NeuButton';
 import { useToast } from '@/components/Toast';
-import { neuColors } from '@/lib/neu';
+import { neuColors, useLayout, safeBottom } from '@/lib/neu';
 import { useDebounce } from '@/lib/useDebounce';
 import type { RelativePathString } from 'expo-router';
 
@@ -24,8 +23,9 @@ const STATUS_COLORS: Record<string, string> = {
 export default function DoctorCourses() {
   const scheme = useColorScheme();
   const isDark = scheme === 'dark';
-  const insets = useSafeAreaInsets();
   const c = isDark ? neuColors.dark : neuColors.light;
+  const layout = useLayout();
+  const insets = layout.insets;
   const { profile } = useProfileStore();
   const router = useRouter();
 
@@ -138,24 +138,23 @@ export default function DoctorCourses() {
       <ScrollView style={{ flex: 1, backgroundColor: c.base }}
         contentInsetAdjustmentBehavior="automatic"
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}>
-        {/* Header */}
-        <View style={{ paddingTop: insets.top + 12, paddingHorizontal: 20, paddingBottom: 16, flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-          <HamburgerButton />
-          <View style={{ flex: 1 }}>
-            <Text style={{ fontSize: 26, fontWeight: '800', color: c.text }}>My Courses</Text>
-            <Text style={{ fontSize: 13, color: c.text, opacity: 0.45, marginTop: 2 }}>{courses.length} course{courses.length !== 1 ? 's' : ''}</Text>
-          </View>
-          <Pressable onPress={handleNewCourse} disabled={creating}
-            style={{ backgroundColor: c.primary, paddingHorizontal: 16, paddingVertical: 11, borderRadius: 14, flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-            {creating
+        {/* Header — uses DashboardHeader for consistent safe-area + hamburger alignment */}
+        <DashboardHeader
+          greeting="My Courses"
+          roleLabel={`${courses.length} course${courses.length !== 1 ? 's' : ''}`}
+          rightActions={
+            <Pressable onPress={handleNewCourse} disabled={creating}
+              style={{ backgroundColor: c.primary, paddingHorizontal: 16, paddingVertical: 11, borderRadius: 14, flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+              {creating
               ? <ActivityIndicator size="small" color="#fff" />
               : <Plus size={18} color="#fff" />}
-            <Text style={{ fontSize: 14, fontWeight: '700', color: '#fff' }}>New</Text>
-          </Pressable>
-        </View>
+              <Text style={{ fontSize: 14, fontWeight: '700', color: '#fff' }}>New</Text>
+            </Pressable>
+          }
+        />
 
         {/* Search + Archive toggle */}
-        <View style={{ paddingHorizontal: 20, marginBottom: 16, gap: 10 }}>
+        <View style={{ paddingHorizontal: layout.screenPx, marginBottom: 16, gap: 10 }}>
           <View style={[{ borderRadius: 14, flexDirection: 'row', alignItems: 'center', paddingHorizontal: 14, gap: 10, minWidth: 0 },
             { backgroundColor: c.base, shadowColor: c.shadowDark, shadowOffset: { width: 3, height: 3 }, shadowOpacity: 0.6, shadowRadius: 8, elevation: 3 }]}>
             <Search size={16} color={c.text} opacity={0.4} style={{ flexShrink: 0 }} />
@@ -175,7 +174,7 @@ export default function DoctorCourses() {
         </View>
 
         {/* Course list */}
-        <View style={{ paddingHorizontal: 20, gap: 14, paddingBottom: 40 }}>
+        <View style={{ paddingHorizontal: layout.screenPx, gap: 14, paddingBottom: layout.scrollBottom() }}>
           {loading ? (
             <View style={{ paddingVertical: 60, alignItems: 'center' }}>
               <ActivityIndicator color={c.primary} />
@@ -341,7 +340,7 @@ export default function DoctorCourses() {
       <Modal visible={!!deleteTarget} transparent animationType="slide" onRequestClose={() => { if (!deleteLoading) { setDeleteTarget(null); setDeleteStats(null); } }}>
         <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'flex-end' }}>
           <View style={{ backgroundColor: c.base, borderTopLeftRadius: 24, borderTopRightRadius: 24,
-            padding: 24, paddingBottom: 40, gap: 20,
+            padding: 24, paddingBottom: layout.scrollBottom(), gap: 20,
             shadowColor: '#000', shadowOffset: { width: 0, height: -4 }, shadowOpacity: 0.15, shadowRadius: 20, elevation: 16 }}>
 
             {/* Warning header */}
@@ -366,8 +365,8 @@ export default function DoctorCourses() {
                 {([
                   ['Course',           deleteStats.title],
                   ['Doctor',           deleteStats.doctor_name],
-                  ['Created',          deleteStats.created_at ? new Date(deleteStats.created_at).toLocaleDateString() : '—'],
-                  ['Last updated',     deleteStats.updated_at ? new Date(deleteStats.updated_at).toLocaleDateString() : '—'],
+                  ['Created',          deleteStats.created_at ? new Date(deleteStats.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '—'],
+                  ['Last updated',     deleteStats.updated_at ? new Date(deleteStats.updated_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '—'],
                   ['Students enrolled',deleteStats.enrolled_count],
                   ['Sections',         deleteStats.section_count],
                   ['Lessons',          deleteStats.lesson_count],

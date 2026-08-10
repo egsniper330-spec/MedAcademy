@@ -17,7 +17,7 @@ import { NeuCard } from '@/components/NeuCard';
 import { NeuButton } from '@/components/NeuButton';
 import { ResponsiveModal } from '@/components/ResponsiveModal';
 import { useToast } from '@/components/Toast';
-import { neuColors } from '@/lib/neu';
+import { neuColors, useLayout } from '@/lib/neu';
 import { validateRequired, friendlyError } from '@/lib/validation';
 import { useDebounce } from '@/lib/useDebounce';
 import { getPublicEmail } from '@/lib/api';
@@ -26,6 +26,7 @@ export default function AdminCreditsScreen() {
   const scheme = useColorScheme();
   const isDark = scheme === 'dark';
   const c = isDark ? neuColors.dark : neuColors.light;
+  const layout = useLayout();
   const { showToast } = useToast();
 
   const [doctors, setDoctors] = useState<any[]>([]);
@@ -109,10 +110,10 @@ export default function AdminCreditsScreen() {
   };
 
   return (
-    <KeyboardAvoidingView behavior="padding" style={{ flex: 1, backgroundColor: c.base }}>
+    <KeyboardAvoidingView behavior={process.env.EXPO_OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1, backgroundColor: c.base }}>
       <ScrollView contentInsetAdjustmentBehavior="automatic"
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />}>
-        <View style={{ padding: 20 }}>
+        <View style={{ padding: layout.screenPx }}>
           <PageHeader title="Credit Management" subtitle="Add & remove doctor credits" accentColor="#7C3AED" />
 
           {/* Search */}
@@ -213,7 +214,7 @@ export default function AdminCreditsScreen() {
               <View style={{ flex: 1 }}>
                 <Text style={{ fontSize: 13, fontWeight: '700', color: c.text, textTransform: 'capitalize' }}>{tx.transaction_type}</Text>
                 {tx.notes && <Text style={{ fontSize: 11, color: c.text, opacity: 0.5 }}>{tx.notes}</Text>}
-                <Text style={{ fontSize: 11, color: c.text, opacity: 0.4 }}>{new Date(tx.created_at).toLocaleString()}</Text>
+                <Text style={{ fontSize: 11, color: c.text, opacity: 0.4 }}>{new Date(tx.created_at).toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true })}</Text>
               </View>
               <Text style={{ fontSize: 16, fontWeight: '800', color: txCol }}>
                 {isAlloc ? '+' : '-'}{Math.abs(tx.amount)}

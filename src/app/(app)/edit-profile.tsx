@@ -10,13 +10,15 @@ import { updateProfile, getPublicEmail, isInternalEmail } from '@/lib/api';
 import { NeuCard } from '@/components/NeuCard';
 import { NeuButton } from '@/components/NeuButton';
 import { useToast } from '@/components/Toast';
-import { neuColors } from '@/lib/neu';
+import { neuColors, useLayout } from '@/lib/neu';
 import { normalizePhoneE164 } from '@/lib/identifier';
 import { validateRequired, friendlyError } from '@/lib/validation';
 import { NeuInputRow } from '@/components/NeuInputRow';
 
 export default function EditProfile() {
   const scheme = useColorScheme();
+  const layout = useLayout();
+  const insets = layout.insets;
   const isDark = scheme === 'dark';
   const c = isDark ? neuColors.dark : neuColors.light;
   const router = useRouter();
@@ -83,7 +85,7 @@ export default function EditProfile() {
 
 
   return (
-    <KeyboardAvoidingView behavior="padding" style={{ flex: 1, backgroundColor: c.base }}>
+    <KeyboardAvoidingView behavior={process.env.EXPO_OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1, backgroundColor: c.base }}>
       <ScrollView contentContainerStyle={{ flexGrow: 1, padding: 24, paddingTop: 0 }} keyboardShouldPersistTaps="handled">
         <PageHeader title="Edit Profile" showBack />
 
@@ -153,7 +155,7 @@ export default function EditProfile() {
         </NeuCard>
 
         {/* ── ID (read-only) ── */}
-        <NeuCard radius={22} style={{ padding: 20, marginTop: 18 }}>
+        <NeuCard radius={22} style={{ padding: layout.screenPx, marginTop: 18 }}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 10 }}>
             <View style={{ width: 34, height: 34, borderRadius: 10, backgroundColor: `${c.primary}15`, alignItems: 'center', justifyContent: 'center' }}>
               <Fingerprint size={17} color={c.primary} />

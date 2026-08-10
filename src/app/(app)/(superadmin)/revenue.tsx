@@ -20,7 +20,7 @@ import { NeuCard } from '@/components/NeuCard';
 import { NeuButton } from '@/components/NeuButton';
 import { ResponsiveModal } from '@/components/ResponsiveModal';
 import { useToast } from '@/components/Toast';
-import { neuColors } from '@/lib/neu';
+import { neuColors, useLayout } from '@/lib/neu';
 import { useCurrencyConfig } from '@/lib/currency';
 import { friendlyError } from '@/lib/validation';
 import { useProfileStore } from '@/lib/store';
@@ -39,6 +39,7 @@ export default function RevenueDashboard() {
   const scheme = useColorScheme();
   const isDark = scheme === 'dark';
   const c = isDark ? neuColors.dark : neuColors.light;
+  const layout = useLayout();
   const { fmtLarge, fmt, config: currencyCfg } = useCurrencyConfig();
   const { showToast } = useToast();
   const { profile } = useProfileStore();
@@ -131,7 +132,7 @@ export default function RevenueDashboard() {
   return (
     <ScrollView style={{ flex: 1, backgroundColor: c.base }} contentInsetAdjustmentBehavior="automatic"
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />}>
-      <View style={{ padding: 20 }}>
+      <View style={{ padding: layout.screenPx }}>
         <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20, marginTop: 8 }}>
           <PageHeader title="Revenue Dashboard" subtitle={`Platform earnings · ${currencyCfg.code}`} accentColor="#16A34A" />
           <NeuButton label="Pricing" icon={<Edit2 size={14} color={c.primary} />} onPress={() => setPricingModal(true)} variant="secondary" style={{ paddingHorizontal: 16 }} />

@@ -19,7 +19,7 @@ import { NeuCard } from '@/components/NeuCard';
 import { NeuButton } from '@/components/NeuButton';
 import { ResponsiveModal } from '@/components/ResponsiveModal';
 import { useToast } from '@/components/Toast';
-import { neuColors } from '@/lib/neu';
+import { neuColors, useLayout } from '@/lib/neu';
 import { useDebounce } from '@/lib/useDebounce';
 import { friendlyError } from '@/lib/validation';
 
@@ -27,6 +27,7 @@ export default function MaintenanceModeScreen() {
   const scheme = useColorScheme();
   const isDark = scheme === 'dark';
   const c = isDark ? neuColors.dark : neuColors.light;
+  const layout = useLayout();
   const { showToast } = useToast();
 
   const [enabled, setEnabled] = useState(false);
@@ -101,7 +102,7 @@ export default function MaintenanceModeScreen() {
   return (
     <ScrollView style={{ flex: 1, backgroundColor: c.base }} contentInsetAdjustmentBehavior="automatic"
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />}>
-      <View style={{ padding: 20 }}>
+      <View style={{ padding: layout.screenPx }}>
         <PageHeader title="Maintenance Mode" subtitle="Control platform availability" accentColor="#DC2626" />
 
         {loading ? <ActivityIndicator color={c.primary} style={{ marginTop: 40 }} /> : (
@@ -180,7 +181,7 @@ export default function MaintenanceModeScreen() {
                     <Text style={{ fontSize: 11, fontWeight: '700', color: c.primary }}>{item.profile?.role ?? ''}</Text>
                   </View>
                   <Pressable onPress={() => handleRemove(item.user_id)}
-                    style={{ width: 32, height: 32, borderRadius: 10, backgroundColor: '#DC262618', alignItems: 'center', justifyContent: 'center' }}>
+                    hitSlop={6} style={{ width: 32, height: 32, borderRadius: 10, backgroundColor: '#DC262618', alignItems: 'center', justifyContent: 'center' }}>
                     <Trash2 size={15} color="#DC2626" />
                   </Pressable>
                 </View>

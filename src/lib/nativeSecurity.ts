@@ -38,9 +38,13 @@ export interface NativeSecurityFlags {
   overlayDetected: boolean;
   signatureValid:  boolean;
   tampered:        boolean;
+  // Phase 3 — new native checks (Android; iOS maps jailbreak/vpn to same keys)
+  vpnDetected:          boolean;
+  rootDetected:         boolean;
+  emulatorDetected:     boolean;
+  mockLocationDetected: boolean;
   // iOS-only extras (Android module returns false for these)
   jailbreakDetected?:      boolean;
-  vpnDetected?:            boolean;
   proxyDetected?:          boolean;
   dylibInjectionDetected?: boolean;
   bundleTampered?:         boolean;
@@ -58,9 +62,13 @@ const SAFE_FLAGS: NativeSecurityFlags = {
   overlayDetected:         false,
   signatureValid:          true,   // assume valid on non-Android (safe default)
   tampered:                false,
+  // Phase 3
+  vpnDetected:          false,
+  rootDetected:         false,
+  emulatorDetected:     false,
+  mockLocationDetected: false,
   // iOS extras default to safe
   jailbreakDetected:       false,
-  vpnDetected:             false,
   proxyDetected:           false,
   dylibInjectionDetected:  false,
   bundleTampered:          false,
@@ -88,26 +96,43 @@ function getIOSModule(): typeof NativeModules['IOSSecurityModule'] | null {
 export async function getNativeSecurityFlags(): Promise<NativeSecurityFlags> {
   if (Platform.OS === 'android') {
     const mod = getModule();
-    if (!mod) return SAFE_FLAGS;
+    console.log('[NativeSecurity][Stage-2] getModule() =>', mod ? '✓ module found' : '✗ NULL — SecurityModule not compiled/registered');
+    if (!mod) {
+      console.warn('[NativeSecurity][Stage-2] ❌ Module is null — returning SAFE_FLAGS. All detectors will report false. Check native compile errors.');
+      return SAFE_FLAGS;
+    }
     try {
+      console.log('[NativeSecurity][Stage-2] Calling mod.getSecurityFlags()…');
       const flags = await mod.getSecurityFlags() as NativeSecurityFlags;
-      return { ...SAFE_FLAGS, ...flags };
-    } catch {
+      console.log('[NativeSecurity][Stage-5] JS received native response:', JSON.stringify(flags));
+      const merged = { ...SAFE_FLAGS, ...flags };
+      console.log('[NativeSecurity][Stage-5] After SAFE_FLAGS merge (should be identical):', JSON.stringify(merged));
+      return merged;
+    } catch (e) {
+      console.error('[NativeSecurity][Stage-2] ❌ getSecurityFlags() threw:', e, '— returning SAFE_FLAGS');
       return SAFE_FLAGS;
     }
   }
 
   if (Platform.OS === 'ios') {
     const mod = getIOSModule();
-    if (!mod) return SAFE_FLAGS;
+    console.log('[NativeSecurity][Stage-2] getIOSModule() =>', mod ? '✓ iOS module found' : '✗ NULL — IOSSecurityModule not registered');
+    if (!mod) {
+      console.warn('[NativeSecurity][Stage-2] ❌ iOS module null — returning SAFE_FLAGS');
+      return SAFE_FLAGS;
+    }
     try {
       const flags = await mod.getSecurityFlags() as NativeSecurityFlags;
-      return { ...SAFE_FLAGS, ...flags };
-    } catch {
+      console.log('[NativeSecurity][Stage-5] iOS JS received native response:', JSON.stringify(flags));
+      const merged = { ...SAFE_FLAGS, ...flags };
+      return merged;
+    } catch (e) {
+      console.error('[NativeSecurity][Stage-2] ❌ iOS getSecurityFlags() threw:', e, '— returning SAFE_FLAGS');
       return SAFE_FLAGS;
     }
   }
 
+  console.log('[NativeSecurity][Stage-2] Platform is web — returning SAFE_FLAGS');
   return SAFE_FLAGS;
 }
 
@@ -206,14 +231,49 @@ export async function isNativeTampered(): Promise<boolean> {
   return false;
 }
 
-// ─── iOS-only APIs ────────────────────────────────────────────────────────────
+// ─── Phase 3 — new individual Android APIs ────────────────────────────────────
 
-/** iOS VPN detection via network interface scan. Always false on Android/Web. */
+/** Android VPN detection via ConnectivityManager TRANSPORT_VPN + NetworkInterface tun/ppp scan.
+ *  On iOS, VPN is detected via IOSSecurityModule utun/ipsec interface scan. */
 export async function isNativeVPNDetected(): Promise<boolean> {
-  if (Platform.OS !== 'ios') return false;
-  const mod = getIOSModule();
+  if (Platform.OS === 'android') {
+    const mod = getModule();
+    if (!mod) return false;
+    try { return await mod.isVpnActive() as boolean; } catch { return false; }
+  }
+  if (Platform.OS === 'ios') {
+    const mod = getIOSModule();
+    if (!mod) return false;
+    try { return await mod.isVPNDetected() as boolean; } catch { return false; }
+  }
+  return false;
+}
+
+/** Android multi-method root detection (su paths, props, test-keys, write test, packages).
+ *  iOS: always false — use jailbreakDetected from getSecurityFlags instead. */
+export async function isNativeRootDetected(): Promise<boolean> {
+  if (Platform.OS !== 'android') return false;
+  const mod = getModule();
   if (!mod) return false;
-  try { return await mod.isVPNDetected() as boolean; } catch { return false; }
+  try { return await mod.isRooted() as boolean; } catch { return false; }
+}
+
+/** Android emulator detection (Build fingerprint/model/props/sensor count).
+ *  Always false on iOS/Web. */
+export async function isNativeEmulatorDetected(): Promise<boolean> {
+  if (Platform.OS !== 'android') return false;
+  const mod = getModule();
+  if (!mod) return false;
+  try { return await mod.isEmulator() as boolean; } catch { return false; }
+}
+
+/** Android mock location detection (AppOpsManager + Settings.Secure + permission scan).
+ *  Always false on iOS/Web. */
+export async function isNativeMockLocationDetected(): Promise<boolean> {
+  if (Platform.OS !== 'android') return false;
+  const mod = getModule();
+  if (!mod) return false;
+  try { return await mod.isMockLocationEnabled() as boolean; } catch { return false; }
 }
 
 /** iOS proxy detection via CFNetworkCopySystemProxySettings. Always false on Android/Web. */

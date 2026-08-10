@@ -89,6 +89,8 @@ export function formatCurrency(
 /**
  * Format with thousands separator (for large revenue figures).
  * e.g. formatCurrencyLarge(12500) → "12,500 ج.م"
+ * Always uses en-US locale to guarantee English digits (0-9) regardless
+ * of the device's regional setting.
  */
 export function formatCurrencyLarge(
   amount: number,

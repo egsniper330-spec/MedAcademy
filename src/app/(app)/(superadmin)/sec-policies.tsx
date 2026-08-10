@@ -4,6 +4,7 @@ import {
   View, Text, ScrollView, Pressable, ActivityIndicator,
   Switch, useColorScheme, TextInput,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   ShieldAlert, ShieldCheck, Wifi, Globe, Bug, Lock,
   Camera, Trash2, Plus, Save,
@@ -60,6 +61,7 @@ export default function SecurityPoliciesScreen() {
   const scheme = useColorScheme();
   const isDark = scheme === 'dark';
   const c = isDark ? neuColors.dark : neuColors.light;
+  const insets = useSafeAreaInsets();
   const flat = neuFlatStyle(isDark);
   const router = useRouter();
   const { showToast } = useToast();
@@ -150,7 +152,7 @@ export default function SecurityPoliciesScreen() {
     <View style={{ flex: 1, backgroundColor: c.base }}>
       <PageHeader title="Security Policies" />
       <ScrollView
-        contentContainerStyle={{ padding: 16, gap: 20, paddingBottom: 48 }}
+        contentContainerStyle={{ padding: 16, gap: 20, paddingBottom: Math.max(insets.bottom, 24) + 24 }}
         contentInsetAdjustmentBehavior="automatic"
       >
         {/* Intro */}

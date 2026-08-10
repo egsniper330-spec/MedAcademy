@@ -5,7 +5,7 @@ import { useFocusEffect, useRouter } from 'expo-router';
 import { useProfileStore } from '@/lib/store';
 import { getMySubscriptions } from '@/lib/api';
 import { CourseCard } from '@/components/CourseCard';
-import { neuColors } from '@/lib/neu';
+import { neuColors, useLayout } from '@/lib/neu';
 import type { RelativePathString } from 'expo-router';
 import { NeuSearchBar } from '@/components/NeuInputRow';
 
@@ -13,6 +13,8 @@ export default function MyCourses() {
   const scheme = useColorScheme();
   const isDark = scheme === 'dark';
   const c = isDark ? neuColors.dark : neuColors.light;
+  const layout = useLayout();
+  const insets = layout.insets;
   const { profile } = useProfileStore();
   const router = useRouter();
 
@@ -42,7 +44,7 @@ export default function MyCourses() {
       contentInsetAdjustmentBehavior="automatic"
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />}
     >
-      <View style={{ padding: 20 }}>
+      <View style={{ padding: layout.screenPx }}>
         <PageHeader title="My Courses" subtitle="Your subscribed courses" />
 
         {/* Search */}

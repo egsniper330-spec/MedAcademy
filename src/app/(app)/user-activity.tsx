@@ -28,7 +28,7 @@ import {
   type UserActivityEntry, type UserProfileSummary,
 } from '@/lib/api';
 import { NeuCard } from '@/components/NeuCard';
-import { neuColors } from '@/lib/neu';
+import { neuColors, useLayout, safeBottom } from '@/lib/neu';
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -96,14 +96,14 @@ function actionColor(action: string, status: string): string {
 
 function formatTs(iso: string): string {
   const d = new Date(iso);
-  return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })
+  return d.toLocaleDateString('en-US', { day: '2-digit', month: 'short', year: 'numeric' })
     + '  '
     + d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
 }
 
 function formatTsShort(iso: string | null | undefined): string {
   if (!iso) return '—';
-  return new Date(iso).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })
+  return new Date(iso).toLocaleDateString('en-US', { day: '2-digit', month: 'short', year: 'numeric' })
     + '  '
     + new Date(iso).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
 }
@@ -169,7 +169,7 @@ function ProfileHeader({ profile, c }: { profile: UserProfileSummary; c: typeof 
           ['Last Active',     profile.last_active],
         ] as [string, string | null | undefined][]).map(([label, val]) => (
           <View key={label} style={{ flexDirection: 'row' }}>
-            <Text style={{ fontSize: 12, color: c.text, opacity: 0.45, width: 118 }}>{label}</Text>
+            <Text style={{ fontSize: 12, color: c.text, opacity: 0.45, minWidth: 90, flexShrink: 0 }}>{label}</Text>
             <Text style={{ fontSize: 12, color: c.text, flex: 1 }}>{formatTsShort(val)}</Text>
           </View>
         ))}
@@ -276,6 +276,7 @@ function DirectionDropdown({
   value: string; onChange: (v: string) => void; c: typeof neuColors.light;
 }) {
   const [open, setOpen] = useState(false);
+  const layout = useLayout();
   const selected = DIRECTIONS.find(d => d.key === value) ?? DIRECTIONS[0];
 
   return (
@@ -314,7 +315,7 @@ function DirectionDropdown({
                 accessibilityLabel={d.label}
                 accessibilityRole="button"
                 style={{
-                  paddingHorizontal: 20, paddingVertical: 16,
+                  paddingHorizontal: layout.screenPx, paddingVertical: 16,
                   borderBottomWidth: i < DIRECTIONS.length - 1 ? 1 : 0,
                   borderBottomColor: `${c.text}0C`,
                   backgroundColor: value === d.key ? `${c.primary}10` : 'transparent',
@@ -339,6 +340,8 @@ function DirectionDropdown({
 
 export default function UserAuditLogs() {
   const scheme = useColorScheme();
+  const layout = useLayout();
+  const insets = layout.insets;
   const isDark  = scheme === 'dark';
   const c = isDark ? neuColors.dark : neuColors.light;
   const router  = useRouter();
@@ -461,7 +464,7 @@ export default function UserAuditLogs() {
 
       {/* ── Header ─────────────────────────────────────────────────────── */}
       <View style={{
-        paddingHorizontal: 20, paddingTop: 0, paddingBottom: 14,
+        paddingHorizontal: layout.screenPx, paddingTop: 0, paddingBottom: 14,
         backgroundColor: c.base,
         shadowColor: c.shadowDark, shadowOffset: { width: 0, height: 3 },
         shadowOpacity: 0.12, shadowRadius: 8,
@@ -492,7 +495,7 @@ export default function UserAuditLogs() {
           {totalCount > 0 && (
             <NeuCard style={{ paddingHorizontal: 12, paddingVertical: 6 }}>
               <Text style={{ fontSize: 13, fontWeight: '700', color: c.primary }}>
-                {totalCount.toLocaleString()}
+                {totalCount.toLocaleString('en-US')}
               </Text>
             </NeuCard>
           )}
@@ -567,7 +570,7 @@ export default function UserAuditLogs() {
 
       {/* Active filter summary badge */}
       {activeFiltersCount > 0 && (
-        <View style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, paddingTop: 10 }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: layout.screenPx, paddingTop: 10 }}>
           <View style={{ backgroundColor: `${c.primary}12`, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 4 }}>
             <Text style={{ fontSize: 11, color: c.primary, fontWeight: '600' }}>
               {activeFiltersCount} filter{activeFiltersCount > 1 ? 's' : ''} active
@@ -589,7 +592,7 @@ export default function UserAuditLogs() {
         <FlatList
           data={entries}
           keyExtractor={item => item.id}
-          contentContainerStyle={{ paddingHorizontal: 20, paddingTop: 16, paddingBottom: 60 }}
+          contentContainerStyle={{ paddingHorizontal: layout.screenPx, paddingTop: 16, paddingBottom: layout.scrollBottom() }}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />}
           onEndReached={loadMore}
           onEndReachedThreshold={0.3}
@@ -619,7 +622,7 @@ export default function UserAuditLogs() {
               </Pressable>
             ) : entries.length > 0 ? (
               <Text style={{ textAlign: 'center', fontSize: 12, color: c.text, opacity: 0.3, paddingVertical: 16 }}>
-                All {totalCount.toLocaleString()} events shown
+                All {totalCount.toLocaleString('en-US')} events shown
               </Text>
             ) : null
           }

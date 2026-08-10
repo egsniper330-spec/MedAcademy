@@ -22,7 +22,7 @@ import { NeuCard } from '@/components/NeuCard';
 import { NeuButton } from '@/components/NeuButton';
 import { ResponsiveModal } from '@/components/ResponsiveModal';
 import { useToast } from '@/components/Toast';
-import { neuColors } from '@/lib/neu';
+import { neuColors, useLayout } from '@/lib/neu';
 import { displayPhoneNational } from '@/lib/phone';
 import { getContactDisplay, getPublicEmail } from '@/lib/api';
 import { friendlyError } from '@/lib/validation';
@@ -47,6 +47,7 @@ export default function DoctorStudents() {
   const scheme = useColorScheme();
   const isDark = scheme === 'dark';
   const c = isDark ? neuColors.dark : neuColors.light;
+  const layout = useLayout();
   const { profile } = useProfileStore();
   const { showToast } = useToast();
   const router = useRouter();
@@ -277,7 +278,7 @@ export default function DoctorStudents() {
                 <Text style={{ fontSize: 10, color: c.text, opacity: 0.4 }} numberOfLines={1}>{s.university.name}</Text>
               )}
               <Text style={{ fontSize: 10, color: c.text, opacity: 0.35 }}>
-                {new Date(enrollment.enrolled_at).toLocaleDateString()}
+                {new Date(enrollment.enrolled_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
               </Text>
               {enrollment.activation_method && (
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3 }}>
@@ -388,7 +389,7 @@ export default function DoctorStudents() {
                 <Text style={{ fontSize: 11, color: c.primary, opacity: 0.8 }} numberOfLines={1}>{e.course?.title}</Text>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 2 }}>
                   <Text style={{ fontSize: 10, color: c.text, opacity: 0.4 }}>
-                    Added {new Date(e.enrolled_at).toLocaleDateString()}
+                    Added {new Date(e.enrolled_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
                   </Text>
                   {e.activation_method && (
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3 }}>
@@ -428,7 +429,7 @@ export default function DoctorStudents() {
         contentInsetAdjustmentBehavior="automatic"
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />}
       >
-        <View style={{ padding: 20 }}>
+        <View style={{ padding: layout.screenPx }}>
           <PageHeader
             title="Students"
             subtitle={`${enrollments.length} total · ${credits?.remaining ?? 0} credits remaining`}
@@ -709,7 +710,7 @@ export default function DoctorStudents() {
 
           // Registration date
           const registeredDate = s?.created_at
-            ? new Date(s.created_at).toLocaleDateString()
+            ? new Date(s.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
             : null;
 
           // Always-shown student info rows (Phone and ID always present even if "Not Available")
@@ -728,7 +729,7 @@ export default function DoctorStudents() {
             { label: 'Faculty',        value: s?.faculty?.name },
             { label: 'Academic Level', value: s?.academic_level?.name },
             { label: 'Course',         value: actionTarget.course?.title },
-            { label: 'Enrolled',       value: new Date(actionTarget.enrolled_at).toLocaleDateString() },
+            { label: 'Enrolled',       value: new Date(actionTarget.enrolled_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) },
             { label: 'Enrollment Status', value: actionTarget.status },
             { label: 'Method',         value: actionTarget.activation_method },
           ].filter(r => !!r.value) as { label: string; value: string }[];

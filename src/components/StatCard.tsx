@@ -1,7 +1,8 @@
 import React, { useRef } from 'react';
-import { Animated, FlatList, View, Text, useWindowDimensions, useColorScheme } from 'react-native';
+import { Animated, FlatList, View, Text, useWindowDimensions, useColorScheme, Platform } from 'react-native';
 import { NeuCard } from '@/components/NeuCard';
 import { neuColors } from '@/lib/neu';
+import { spacing, radius, typography, iconContainer } from '@/lib/ds';
 
 // ─── Simple inline StatCard (admin / doctor / superadmin dashboards) ──────────
 interface StatCardProps {
@@ -16,20 +17,20 @@ export function StatCard({ label, value, icon, color }: StatCardProps) {
   const isDark = scheme === 'dark';
   const c = isDark ? neuColors.dark : neuColors.light;
   return (
-    <NeuCard style={{ minWidth: 130, flex: 1, margin: 5, padding: 12 }}>
-      <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8, gap: 8 }}>
+    <NeuCard style={{ minWidth: 130, flex: 1, margin: spacing.xs, padding: spacing.md }}>
+      <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: spacing.sm, gap: spacing.sm }}>
         {icon ? (
           <View style={{
-            width: 32, height: 32, borderRadius: 10,
+            ...iconContainer.sm,
             backgroundColor: color ?? c.primary,
             alignItems: 'center', justifyContent: 'center',
           }}>
             {icon}
           </View>
         ) : null}
-        <Text style={{ fontSize: 12, color: c.text, opacity: 0.55, flex: 1 }} numberOfLines={1}>{label}</Text>
+        <Text style={{ ...typography.caption, color: c.text, opacity: 0.55, flex: 1 }} numberOfLines={1}>{label}</Text>
       </View>
-      <Text style={{ fontSize: 26, fontWeight: '800', color: color ?? c.primary, lineHeight: 30 }}>{value}</Text>
+      <Text style={{ ...typography.display, color: color ?? c.primary }}>{value}</Text>
     </NeuCard>
   );
 }
@@ -45,8 +46,9 @@ export interface StatCardItem {
   isFuture?: boolean;
 }
 
+// Card height is fixed — FlatList needs it for getItemLayout.
 const CARD_HEIGHT = 118;
-const GAP = 10;
+const GAP = spacing.sm;
 
 export function StatCardCarousel({ cards }: { cards: StatCardItem[] }) {
   const { width: screenWidth } = useWindowDimensions();
@@ -55,9 +57,9 @@ export function StatCardCarousel({ cards }: { cards: StatCardItem[] }) {
   const c = isDark ? neuColors.dark : neuColors.light;
 
   // Responsive card width:
-  // • Tablets (≥768): ~28% screen width, max 180
-  // • Phones: ~40% screen width, max 155
-  // • Floor at 130 so cards never clip on iPhone SE (320pt) or small Androids
+  //  Tablets (≥768): ~28% screen width, max 180
+  //  Phones:          ~40% screen width, max 155
+  //  Floor at 130 so cards never clip on iPhone SE (320pt) or small Androids
   const isTablet = screenWidth >= 768;
   const CARD_WIDTH = isTablet
     ? Math.max(130, Math.min(180, Math.floor(screenWidth * 0.28)))
@@ -94,18 +96,30 @@ export function StatCardCarousel({ cards }: { cards: StatCardItem[] }) {
     });
 
     return (
-      <Animated.View style={{ width: CARD_WIDTH, transform: [{ scale }], opacity }}>
-        <NeuCard radius={18} style={{ height: CARD_HEIGHT, padding: 14, justifyContent: 'space-between' }}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+      <Animated.View
+        style={{
+          width: CARD_WIDTH,
+          transform: [{ scale }],
+          opacity,
+          backgroundColor: Platform.OS === 'android' ? c.base : 'transparent',
+          borderRadius: radius.lg,
+          overflow: Platform.OS === 'android' ? 'hidden' : 'visible',
+        }}
+      >
+        <NeuCard radius={radius.lg} style={{ height: CARD_HEIGHT, padding: spacing.md, justifyContent: 'space-between' }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.sm }}>
             <View style={{
-              width: 36, height: 36, borderRadius: 11,
+              width: 36, height: 36, borderRadius: radius.md,
               backgroundColor: item.isFuture ? `${c.text}10` : item.color,
               alignItems: 'center', justifyContent: 'center',
+              overflow: 'hidden',
             }}>
               {item.icon}
             </View>
             <Text style={{
-              fontSize: 11, fontWeight: '600', color: c.text,
+              ...typography.micro,
+              fontWeight: '600',
+              color: c.text,
               opacity: item.isFuture ? 0.35 : 0.6, flex: 1,
             }} numberOfLines={2}>
               {item.label}
@@ -113,13 +127,13 @@ export function StatCardCarousel({ cards }: { cards: StatCardItem[] }) {
           </View>
           <View>
             <Text style={{
-              fontSize: 28, fontWeight: '800', lineHeight: 32,
+              ...typography.displayLg,
               color: item.isFuture ? `${c.text}30` : item.color,
             }}>
               {item.isFuture ? '—' : item.value}
             </Text>
             {item.sublabel ? (
-              <Text style={{ fontSize: 10, color: c.text, opacity: 0.35, marginTop: 2 }}>{item.sublabel}</Text>
+              <Text style={{ ...typography.micro, color: c.text, opacity: 0.35, marginTop: 2 }}>{item.sublabel}</Text>
             ) : null}
           </View>
         </NeuCard>
@@ -137,10 +151,10 @@ export function StatCardCarousel({ cards }: { cards: StatCardItem[] }) {
       decelerationRate="fast"
       snapToAlignment="start"
       scrollEventThrottle={16}
-      contentContainerStyle={{ paddingHorizontal: 20, gap: GAP, paddingVertical: 6 }}
+      contentContainerStyle={{ paddingHorizontal: spacing.xl, gap: GAP, paddingVertical: spacing.xs }}
       onScroll={Animated.event(
         [{ nativeEvent: { contentOffset: { x: scrollX } } }],
-        { useNativeDriver: true }
+        { useNativeDriver: true },
       )}
       renderItem={renderCard}
       getItemLayout={(_, index) => ({

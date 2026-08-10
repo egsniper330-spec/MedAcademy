@@ -28,6 +28,7 @@ import {
 import { supabase } from '@/client/supabase';
 import { useProfileStore } from '@/lib/store';
 import { neuColors, neuMicroStyle } from '@/lib/neu';
+import { spacing, radius, typography, iconContainer, safeBottom } from '@/lib/ds';
 import { useDrawer } from './DrawerContext';
 import { BrandLogo } from '@/components/BrandLogo';
 import { getInstallationId } from '@/lib/installationId';
@@ -265,20 +266,21 @@ function NavItem({ item, onPress, c }: { item: NavItemType; onPress: () => void;
       accessibilityLabel={item.label}
       accessibilityRole="button"
       style={{
-        flexDirection: 'row', alignItems: 'center', gap: 11,
-        paddingHorizontal: 14, paddingVertical: 10, marginHorizontal: 8, marginBottom: 1,
-        borderRadius: 13,
+        flexDirection: 'row', alignItems: 'center', gap: spacing.sm + spacing.xs,
+        paddingHorizontal: spacing.lg, paddingVertical: spacing.sm + spacing.xs,
+        marginHorizontal: spacing.sm, marginBottom: 1,
+        borderRadius: radius.md,
         backgroundColor: pressed ? `${item.color ?? c.primary}18` : 'transparent',
       }}
     >
       <View style={{
-        width: 34, height: 34, borderRadius: 10,
+        width: 34, height: 34, borderRadius: radius.sm + 2,
         backgroundColor: `${item.color ?? c.primary}18`,
         alignItems: 'center', justifyContent: 'center',
       }}>
         <item.icon size={16} color={item.color ?? c.primary} />
       </View>
-      <Text style={{ flex: 1, fontSize: 13.5, fontWeight: '600', color: c.text }}>{item.label}</Text>
+      <Text style={{ flex: 1, ...typography.labelSm, color: c.text }}>{item.label}</Text>
       <ChevronRight size={13} color={`${c.text}33`} />
     </Pressable>
   );
@@ -294,15 +296,16 @@ function LogoutRow({ onPress }: { onPress: () => void }) {
       accessibilityLabel="Sign out"
       accessibilityRole="button"
       style={{
-        flexDirection: 'row', alignItems: 'center', gap: 11,
-        paddingHorizontal: 14, paddingVertical: 10, borderRadius: 13,
+        flexDirection: 'row', alignItems: 'center', gap: spacing.sm + spacing.xs,
+        paddingHorizontal: spacing.lg, paddingVertical: spacing.sm + spacing.xs,
+        borderRadius: radius.md,
         backgroundColor: pressed ? '#DC262615' : 'transparent',
       }}
     >
-      <View style={{ width: 34, height: 34, borderRadius: 10, backgroundColor: '#DC262618', alignItems: 'center', justifyContent: 'center' }}>
+      <View style={{ width: 34, height: 34, borderRadius: radius.sm + 2, backgroundColor: '#DC262618', alignItems: 'center', justifyContent: 'center' }}>
         <LogOut size={16} color="#DC2626" />
       </View>
-      <Text style={{ flex: 1, fontSize: 13.5, fontWeight: '600', color: '#DC2626' }}>Sign Out</Text>
+      <Text style={{ flex: 1, ...typography.labelSm, color: '#DC2626' }}>Sign Out</Text>
     </Pressable>
   );
 }
@@ -354,6 +357,10 @@ export default function DrawerNav() {
       const installationId = await getInstallationId();
       await unregisterPushToken(installationId);
     } catch { /* non-fatal — server token expires naturally */ }
+    // Eagerly wipe the profile store BEFORE signOut so the (app)/_layout.tsx
+    // role-redirect effect cannot fire with stale role data from the old user
+    // while the new session is still being established.
+    useProfileStore.getState().clearProfile();
     setTimeout(() => supabase.auth.signOut(), 200);
   };
 
@@ -414,15 +421,13 @@ export default function DrawerNav() {
 
             {/* Zone A — Brand + close button */}
             <View style={{
-              paddingHorizontal: 20,
-              paddingTop: insets.top + 16,   // respect status bar / Dynamic Island
-              paddingBottom: 18,
+              paddingHorizontal: spacing.xl,
+              paddingTop: insets.top + spacing.lg,
+              paddingBottom: spacing.lg + spacing.xs,
               flexDirection: 'row',
               alignItems: 'center',
               justifyContent: 'space-between',
             }}>
-              {/* Drawer-optimised logo: mark + "Med\nAcademy" side-by-side,
-                  transparent bg, auto light/dark — no background box */}
               <BrandLogo variant="drawer" size={isTablet ? 56 : 48} />
 
               {/* Close button — neumorphic pill */}
@@ -431,7 +436,7 @@ export default function DrawerNav() {
                 accessibilityLabel="Close menu"
                 accessibilityRole="button"
                 style={({ pressed }) => ({
-                  width: 32, height: 32, borderRadius: 10,
+                  width: 32, height: 32, borderRadius: radius.sm + 2,
                   backgroundColor: c.base,
                   alignItems: 'center', justifyContent: 'center',
                   opacity: pressed ? 0.6 : 1,
@@ -453,9 +458,9 @@ export default function DrawerNav() {
 
             {/* Zone B — User identity card */}
             <View style={{
-              marginHorizontal: 14,
-              marginBottom: 14,
-              borderRadius: 16,
+              marginHorizontal: spacing.lg - spacing.xs,
+              marginBottom: spacing.lg - spacing.xs,
+              borderRadius: radius.lg,
               backgroundColor: isDark
                 ? 'rgba(255,255,255,0.04)'
                 : 'rgba(8,26,53,0.04)',
@@ -463,15 +468,15 @@ export default function DrawerNav() {
               borderColor: isDark
                 ? 'rgba(255,255,255,0.07)'
                 : 'rgba(8,26,53,0.06)',
-              paddingHorizontal: 14,
-              paddingVertical: 12,
+              paddingHorizontal: spacing.lg - spacing.xs,
+              paddingVertical: spacing.md,
               flexDirection: 'row',
               alignItems: 'center',
-              gap: 12,
+              gap: spacing.md,
             }}>
               {/* Avatar blob */}
               <View style={{
-                width: 42, height: 42, borderRadius: 13,
+                width: 42, height: 42, borderRadius: radius.md + 1,
                 backgroundColor: `${roleBadgeColor[role]}18`,
                 alignItems: 'center', justifyContent: 'center',
                 borderWidth: 1.5,
@@ -483,18 +488,19 @@ export default function DrawerNav() {
               {/* Name + role + email */}
               <View style={{ flex: 1, gap: 1 }}>
                 <Text
-                  style={{ fontSize: 14, fontWeight: '800', color: c.text, letterSpacing: -0.2 }}
+                  style={{ ...typography.label, color: c.text, letterSpacing: -0.2 }}
                   numberOfLines={1}
                 >
                   {profile?.full_name?.split(' ')[0] ?? 'User'}
                 </Text>
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.xs + 1 }}>
                   <View style={{
-                    width: 6, height: 6, borderRadius: 3,
+                    width: 6, height: 6, borderRadius: radius.full,
                     backgroundColor: roleBadgeColor[role],
                   }} />
                   <Text style={{
-                    fontSize: 11, fontWeight: '700',
+                    ...typography.micro,
+                    fontWeight: '700',
                     color: roleBadgeColor[role],
                     letterSpacing: 0.2,
                   }}>
@@ -503,7 +509,7 @@ export default function DrawerNav() {
                 </View>
                 {profile?.email ? (
                   <Text
-                    style={{ fontSize: 10.5, color: c.text, opacity: 0.4, marginTop: 1 }}
+                    style={{ ...typography.micro, color: c.text, opacity: 0.4, marginTop: 1 }}
                     numberOfLines={1}
                   >
                     {profile.email}
@@ -514,18 +520,28 @@ export default function DrawerNav() {
 
             {/* Zone C — Hairline divider */}
             <View style={{
-              marginHorizontal: 20,
+              marginHorizontal: spacing.xl,
               height: 1,
               backgroundColor: isDark ? 'rgba(255,255,255,0.07)' : 'rgba(8,26,53,0.07)',
             }} />
           </View>
 
           {/* Nav sections — bottom pad respects home-indicator safe area */}
-          <View style={{ paddingBottom: Math.max(insets.bottom, 16) + 24 }}>
+          <View style={{ paddingBottom: safeBottom(insets.bottom, spacing.xxl) }}>
             {sections.map((section, si) => (
               <View key={si}>
                 {section.title && (
-                  <Text style={{ fontSize: 10, fontWeight: '800', color: c.text, opacity: 0.35, paddingHorizontal: 20, paddingTop: 20, paddingBottom: 8, textTransform: 'uppercase', letterSpacing: 1.2 }}>
+                  <Text style={{
+                    ...typography.micro,
+                    fontWeight: '800',
+                    color: c.text,
+                    opacity: 0.35,
+                    paddingHorizontal: spacing.xl,
+                    paddingTop: spacing.xl,
+                    paddingBottom: spacing.sm,
+                    textTransform: 'uppercase',
+                    letterSpacing: 1.2,
+                  }}>
                     {section.title}
                   </Text>
                 )}
@@ -536,7 +552,7 @@ export default function DrawerNav() {
             ))}
 
             {/* Logout */}
-            <View style={{ marginHorizontal: 10, marginTop: 12, borderTopWidth: 1, borderTopColor: `${c.text}0D`, paddingTop: 12 }}>
+            <View style={{ marginHorizontal: spacing.sm + spacing.xs, marginTop: spacing.md, borderTopWidth: 1, borderTopColor: `${c.text}0D`, paddingTop: spacing.md }}>
               <LogoutRow onPress={handleLogout} />
             </View>
           </View>

@@ -23,7 +23,7 @@ import { NeuCard } from '@/components/NeuCard';
 import { NeuButton } from '@/components/NeuButton';
 import { PageHeader } from '@/components/PageHeader';
 import { ResponsiveModal } from '@/components/ResponsiveModal';
-import { neuColors } from '@/lib/neu';
+import { neuColors, useLayout } from '@/lib/neu';
 import { useToast } from '@/components/Toast';
 import {
   getAdminDoctorEarningsDashboard,
@@ -39,10 +39,10 @@ import type {
 } from '@/lib/api';
 
 const fmt = (n: number) =>
-  `EGP ${n.toLocaleString('en-EG', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
+  `EGP ${n.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
 
 const fmtDate = (iso: string) =>
-  new Date(iso).toLocaleString('en-GB', {
+  new Date(iso).toLocaleString('en-US', {
     day: '2-digit', month: 'short', year: 'numeric',
     hour: '2-digit', minute: '2-digit',
   });
@@ -56,6 +56,7 @@ export default function DoctorEarningsScreen() {
   const scheme  = useColorScheme();
   const isDark  = scheme === 'dark';
   const c       = isDark ? neuColors.dark : neuColors.light;
+  const layout = useLayout();
   const { showToast } = useToast();
 
   const [loading,    setLoading]    = useState(true);
@@ -183,7 +184,7 @@ export default function DoctorEarningsScreen() {
         contentInsetAdjustmentBehavior="automatic"
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />}
       >
-        <View style={{ padding: 20, gap: 16 }}>
+        <View style={{ padding: layout.screenPx, gap: 16 }}>
 
           {/* ── Header ── */}
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
@@ -297,7 +298,7 @@ export default function DoctorEarningsScreen() {
               </Text>
 
               {/* Big total */}
-              <NeuCard style={{ padding: 20, alignItems: 'center', gap: 6 }}>
+              <NeuCard style={{ padding: layout.screenPx, alignItems: 'center', gap: 6 }}>
                 <View style={{ width: 52, height: 52, borderRadius: 16, backgroundColor: '#16A34A18',
                   alignItems: 'center', justifyContent: 'center', marginBottom: 4 }}>
                   <TrendingUp size={26} color="#16A34A" />

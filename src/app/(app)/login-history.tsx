@@ -12,16 +12,18 @@ import { ArrowLeft, CheckCircle, XCircle, Smartphone, Globe, Clock } from 'lucid
 import { PageHeader } from '@/components/PageHeader';
 import { Pressable } from 'react-native';
 import { getLoginHistory, LoginHistoryRecord } from '@/lib/api';
-import { neuColors, neuFlatStyle } from '@/lib/neu';
+import { neuColors, useLayout, neuFlatStyle, neuMicroStyle, safeBottom } from '@/lib/neu';
 import { NeuCard } from '@/components/NeuCard';
 
 function formatDate(iso: string): string {
   const d = new Date(iso);
-  return d.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+  return d.toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true });
 }
 
 export default function LoginHistory() {
   const scheme = useColorScheme();
+  const layout = useLayout();
+  const insets = layout.insets;
   const isDark = scheme === 'dark';
   const c = isDark ? neuColors.dark : neuColors.light;
   const router = useRouter();
@@ -54,7 +56,6 @@ export default function LoginHistory() {
           width: 40, height: 40, borderRadius: 12,
           backgroundColor: item.success ? '#16A34A18' : '#DC262618',
           alignItems: 'center', justifyContent: 'center',
-          ...Platform.select({ ios: neuFlatStyle(isDark), android: { elevation: 2, backgroundColor: c.base } }),
         }}>
           {item.success
             ? <CheckCircle size={20} color="#16A34A" />
@@ -98,7 +99,7 @@ export default function LoginHistory() {
 
   return (
     <View style={{ flex: 1, backgroundColor: c.base }}>
-      <View style={{ padding: 20, paddingTop: 0 }}>
+      <View style={{ padding: layout.screenPx, paddingTop: 0 }}>
         {/* Header */}
         <PageHeader title="Login History" subtitle={userName ?? undefined} showBack />
 
@@ -133,7 +134,7 @@ export default function LoginHistory() {
           data={history}
           keyExtractor={item => item.id}
           renderItem={renderItem}
-          contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 40 }}
+          contentContainerStyle={{ paddingHorizontal: layout.screenPx, paddingBottom: layout.scrollBottom() }}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />}
           contentInsetAdjustmentBehavior="automatic"
         />

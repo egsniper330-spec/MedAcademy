@@ -16,7 +16,7 @@ import {
 import { PageHeader } from '@/components/PageHeader';
 import { NeuCard } from '@/components/NeuCard';
 import { supabase } from '@/client/supabase';
-import { neuColors, neuFlatStyle, neuPressedStyle } from '@/lib/neu';
+import { neuColors, useLayout, neuFlatStyle, neuPressedStyle, safeBottom } from '@/lib/neu';
 import { formatBytes } from '@/lib/videoUploadEngine';
 
 type HealthStatus = 'online' | 'offline' | 'degraded' | 'maintenance' | 'unknown';
@@ -33,6 +33,8 @@ export default function VideoSettingsScreen() {
   const scheme = useColorScheme();
   const isDark = scheme === 'dark';
   const c = isDark ? neuColors.dark : neuColors.light;
+  const layout = useLayout();
+  const insets = layout.insets;
 
   const [provider, setProvider] = useState<any>(null);
   const [stats, setStats] = useState({ total: 0, ready: 0, storage: 0 });
@@ -97,7 +99,7 @@ export default function VideoSettingsScreen() {
     <View style={{ flex: 1, backgroundColor: c.base }}>
       <ScrollView contentInsetAdjustmentBehavior="automatic"
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />}
-        contentContainerStyle={{ padding: 20, gap: 16, paddingBottom: 40 }}>
+        contentContainerStyle={{ padding: layout.screenPx, gap: 16, paddingBottom: layout.scrollBottom() }}>
 
         <View style={{ marginTop: 8 }}>
           <PageHeader title="Video Settings" subtitle="Provider & health configuration" accentColor="#7C3AED" />
@@ -159,8 +161,8 @@ export default function VideoSettingsScreen() {
                 { label: 'DRM Protection',     value: provider?.config?.supports_drm ? 'Yes' : 'No' },
                 { label: 'Max File Size',      value: `${provider?.config?.max_file_size_gb ?? 5} GB` },
                 { label: 'API Status',         value: healthCfg.label },
-                { label: 'Last Health Check',  value: provider?.health_checked_at ? new Date(provider.health_checked_at).toLocaleString() : 'Never' },
-                { label: 'Last Sync',          value: provider?.last_sync_at ? new Date(provider.last_sync_at).toLocaleString() : 'Never' },
+                { label: 'Last Health Check',  value: provider?.health_checked_at ? new Date(provider.health_checked_at).toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true }) : 'Never' },
+                { label: 'Last Sync',          value: provider?.last_sync_at ? new Date(provider.last_sync_at).toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true }) : 'Never' },
               ].map(({ label, value }) => (
                 <View key={label} style={{ flexDirection: 'row', justifyContent: 'space-between',
                   paddingVertical: 6, borderBottomWidth: 1, borderBottomColor: `${c.text}08` }}>

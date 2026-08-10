@@ -5,7 +5,7 @@
  *  • Container: `flex-row` + `minWidth: 0` (allows shrink past intrinsic width)
  *  • TextInput:  `flex: 1` + `minWidth: 0` (never clips placeholder)
  *  • No fixed heights — vertical space comes from paddingVertical only
- *  • paddingVertical: 14 gives comfortable touch target (≥ 44 pt)
+ *  • paddingVertical from ds.spacing.md gives comfortable touch target (≥ 44 pt)
  *  • Works with Dynamic Island, notch, small Android, tablets, iPads
  */
 import React from 'react';
@@ -14,6 +14,7 @@ import {
   type TextInputProps, type ViewStyle, type TextStyle,
 } from 'react-native';
 import { neuColors } from '@/lib/neu';
+import { spacing, radius, typography } from '@/lib/ds';
 
 export interface NeuInputRowProps extends TextInputProps {
   /** Left icon element (e.g. <Mail size={18} color={...} />) */
@@ -47,10 +48,10 @@ export function NeuInputRow({
           alignItems: 'center',
           minWidth: 0,                        // allow shrink on narrow screens
           backgroundColor: c.base,
-          borderRadius: 13,
-          paddingHorizontal: 14,
-          paddingVertical: 14,
-          marginBottom: 12,
+          borderRadius: radius.md,
+          paddingHorizontal: spacing.lg,
+          paddingVertical: spacing.md,
+          marginBottom: spacing.md,
           // neumorphic shadow
           shadowColor: hasError ? '#DC2626' : c.shadowDark,
           shadowOffset: { width: 2, height: 2 },
@@ -64,7 +65,7 @@ export function NeuInputRow({
       ]}
     >
       {leftIcon ? (
-        <View style={{ marginRight: 10, flexShrink: 0 }}>
+        <View style={{ marginRight: spacing.sm, flexShrink: 0 }}>
           {leftIcon}
         </View>
       ) : null}
@@ -76,7 +77,7 @@ export function NeuInputRow({
           {
             flex: 1,
             minWidth: 0,                      // critical — prevents placeholder clip
-            fontSize: 15,
+            ...typography.label,
             color: c.text,
             paddingVertical: 0,               // vertical space handled by container
           } as TextStyle,
@@ -85,7 +86,7 @@ export function NeuInputRow({
       />
 
       {rightElement ? (
-        <View style={{ marginLeft: 8, flexShrink: 0 }}>
+        <View style={{ marginLeft: spacing.sm, flexShrink: 0 }}>
           {rightElement}
         </View>
       ) : null}
@@ -125,9 +126,9 @@ export function NeuSearchBar({
           minWidth: 0,
           flex: 1,
           backgroundColor: c.base,
-          borderRadius: 13,
-          paddingHorizontal: 12,
-          paddingVertical: 12,
+          borderRadius: radius.md,
+          paddingHorizontal: spacing.md,
+          paddingVertical: spacing.md,
           shadowColor: c.shadowDark,
           shadowOffset: { width: 2, height: 2 },
           shadowOpacity: 0.45,
@@ -136,7 +137,7 @@ export function NeuSearchBar({
         containerStyle,
       ]}
     >
-      <View style={{ marginRight: 8, flexShrink: 0 }}>
+      <View style={{ marginRight: spacing.sm, flexShrink: 0 }}>
         {leftIcon ?? <Search size={16} color={c.text} opacity={0.38} />}
       </View>
       <TextInput
@@ -152,13 +153,13 @@ export function NeuSearchBar({
         style={{
           flex: 1,
           minWidth: 0,                        // prevents placeholder clip
-          fontSize: 14,
+          ...typography.body,
           color: c.text,
           paddingVertical: 0,
         }}
       />
       {value.length > 0 && onClear ? (
-        <Pressable onPress={onClear} style={{ padding: 4, marginLeft: 4, flexShrink: 0 }}>
+        <Pressable onPress={onClear} style={{ padding: spacing.xs, marginLeft: spacing.xs, flexShrink: 0 }}>
           <X size={14} color={c.text} opacity={0.4} />
         </Pressable>
       ) : null}

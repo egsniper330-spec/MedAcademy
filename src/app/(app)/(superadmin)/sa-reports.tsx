@@ -14,7 +14,7 @@ import {
   TrendingUp, ClipboardList, Activity,
 } from 'lucide-react-native';
 import { PageHeader } from '@/components/PageHeader';
-import { neuColors, neuFlatStyle, neuPressedStyle } from '@/lib/neu';
+import { neuColors, neuFlatStyle, neuPressedStyle, useLayout } from '@/lib/neu';
 import Bell from '@/components/Bell';
 
 // ── Nav item ───────────────────────────────────────────────────────────────
@@ -69,10 +69,11 @@ export default function SAReports() {
   const scheme = useColorScheme();
   const isDark = scheme === 'dark';
   const c = isDark ? neuColors.dark : neuColors.light;
+  const layout = useLayout();
 
   return (
     <ScrollView style={{ flex: 1, backgroundColor: c.base }} contentInsetAdjustmentBehavior="automatic">
-      <View style={{ padding: 20 }}>
+      <View style={{ padding: layout.screenPx }}>
 
         {/* ── Header ──────────────────────────────────────────────────── */}
         <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6, marginTop: 8 }}>

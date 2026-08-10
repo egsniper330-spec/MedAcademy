@@ -12,12 +12,13 @@ import { Flag, RefreshCw } from 'lucide-react-native';
 import { PageHeader } from '@/components/PageHeader';
 import { getFeatureFlags, toggleFeatureFlag } from '@/lib/api';
 import { NeuCard } from '@/components/NeuCard';
-import { neuColors } from '@/lib/neu';
+import { neuColors, useLayout } from '@/lib/neu';
 
 export default function FeatureFlagsScreen() {
   const scheme = useColorScheme();
   const isDark = scheme === 'dark';
   const c = isDark ? neuColors.dark : neuColors.light;
+  const layout = useLayout();
 
   const [flags, setFlags] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -54,7 +55,7 @@ export default function FeatureFlagsScreen() {
   return (
     <ScrollView style={{ flex: 1, backgroundColor: c.base }} contentInsetAdjustmentBehavior="automatic"
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />}>
-      <View style={{ padding: 20 }}>
+      <View style={{ padding: layout.screenPx }}>
         <PageHeader title="Feature Flags" subtitle="Toggle platform capabilities" />
 
 

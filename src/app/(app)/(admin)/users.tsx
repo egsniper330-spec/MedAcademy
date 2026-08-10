@@ -23,7 +23,7 @@ import { EditUserDialog } from '@/components/EditUserDialog';
 import { DeviceManagerSheet } from '@/components/DeviceManagerSheet';
 import { BulkSelectBar, type BulkAction } from '@/components/BulkSelectBar';
 import { useToast } from '@/components/Toast';
-import { neuColors, neuFlatStyle } from '@/lib/neu';
+import { neuColors, neuFlatStyle, useLayout } from '@/lib/neu'
 import { validateEmail, validateRequired, validatePasswordSimple, validateMatch } from '@/lib/validation';
 import { parseError, logAndParse } from '@/lib/parseError';
 import { useActionLoading } from '@/lib/useActionLoading';
@@ -110,6 +110,7 @@ export default function AdminUsers() {
   const scheme = useColorScheme();
   const isDark = scheme === 'dark';
   const c = isDark ? neuColors.dark : neuColors.light;
+  const layout = useLayout();
   const { showToast } = useToast();
   const router = useRouter();
   const { isLoading, run } = useActionLoading();
@@ -442,7 +443,7 @@ export default function AdminUsers() {
     <View style={{ flex: 1, backgroundColor: c.base }}>
       <ScrollView contentInsetAdjustmentBehavior="automatic"
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />}>
-        <View style={{ padding: 20 }}>
+        <View style={{ padding: layout.screenPx }}>
           {/* Header + Add User + Bulk toggle */}
           <View style={{ marginBottom: 16, marginTop: 8 }}>
             <PageHeader
@@ -646,7 +647,7 @@ export default function AdminUsers() {
                     {h.ip_address && <Text style={{ fontSize: 11, color: c.text, opacity: 0.4 }}>{h.ip_address}</Text>}
                     {!h.success && h.failure_reason && <Text style={{ fontSize: 11, color: '#DC2626', opacity: 0.8 }}>{h.failure_reason}</Text>}
                   </View>
-                  <Text style={{ fontSize: 11, color: c.text, opacity: 0.4 }}>{h.created_at ? new Date(h.created_at).toLocaleDateString() : ''}</Text>
+                  <Text style={{ fontSize: 11, color: c.text, opacity: 0.4 }}>{h.created_at ? new Date(h.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : ''}</Text>
                 </View>
               </NeuCard>
             ))}

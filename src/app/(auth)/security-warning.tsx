@@ -2,6 +2,7 @@ import React from 'react';
 import {
   View, Text, ScrollView, Pressable, useColorScheme,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import type { RelativePathString } from 'expo-router';
 import {
@@ -31,6 +32,7 @@ const THREAT_META: Record<string, { label: string; icon: React.ComponentType<{ s
 export default function SecurityWarningScreen() {
   const router = useRouter();
   const scheme = useColorScheme();
+  const insets = useSafeAreaInsets();
   const isDark = scheme === 'dark';
   const c = isDark ? neuColors.dark : neuColors.light;
   const flat = neuFlatStyle(isDark);
@@ -61,7 +63,7 @@ export default function SecurityWarningScreen() {
   return (
     <View style={{ flex: 1, backgroundColor: c.base }}>
       <ScrollView
-        contentContainerStyle={{ padding: 24, gap: 20, paddingBottom: 48 }}
+        contentContainerStyle={{ padding: 24, gap: 20, paddingBottom: Math.max(insets.bottom, 24) + 24 }}
         contentInsetAdjustmentBehavior="automatic"
       >
         {/* Header */}

@@ -10,14 +10,18 @@ import { getSuperAdminStats } from '@/lib/api';
 import { getFirstName } from '@/lib/utils';
 import { NeuCard } from '@/components/NeuCard';
 import { StatCard } from '@/components/StatCard';
-import { neuColors, neuMicroStyle } from '@/lib/neu';
-import HamburgerButton from '@/components/HamburgerButton';
+import { neuColors, useLayout, neuMicroStyle, safeBottom } from '@/lib/neu';
+import { DashboardHeader } from '@/components/DashboardHeader';
 import type { RelativePathString } from 'expo-router';
+import { useNotificationPermission } from '@/hooks/useNotificationPermission';
+import { PermissionRationaleModal } from '@/components/PermissionRationaleModal';
 
 export default function AdminDashboard() {
   const scheme = useColorScheme();
   const isDark = scheme === 'dark';
   const c = isDark ? neuColors.dark : neuColors.light;
+  const layout = useLayout();
+  const insets = layout.insets;
   const { profile } = useProfileStore();
   const router = useRouter();
 
@@ -32,6 +36,19 @@ export default function AdminDashboard() {
 
   useFocusEffect(useCallback(() => { setLoading(true); loadData(); }, [loadData]));
   const onRefresh = async () => { setRefreshing(true); await loadData(); setRefreshing(false); };
+
+  const {
+    triggerNotificationPermission,
+    showRationale: showNotifRationale,
+    setShowRationale: setShowNotifRationale,
+    isBlocked: notifBlocked,
+    confirmRequest: confirmNotifRequest,
+  } = useNotificationPermission();
+
+  useFocusEffect(useCallback(() => {
+    (async () => { await triggerNotificationPermission(); })();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []));
 
   const firstName = getFirstName(profile?.full_name);
 
@@ -58,18 +75,10 @@ export default function AdminDashboard() {
       contentInsetAdjustmentBehavior="automatic"
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />}
     >
-      <View style={{ paddingHorizontal: 20, paddingBottom: 32 }}>
-        {/* Header — safe area via contentInsetAdjustmentBehavior */}
-        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20, marginTop: 14 }}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-            <HamburgerButton />
-            <View>
-              <Text style={{ fontSize: 11, color: c.text, opacity: 0.45, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 0.6 }}>Admin Panel</Text>
-              <Text style={{ fontSize: 21, fontWeight: '800', color: c.text, lineHeight: 26 }}>
-                {firstName ? `${firstName} 👋` : 'Dashboard 👋'}
-              </Text>
-            </View>
-          </View>
+      <DashboardHeader
+        roleLabel="Admin Panel"
+        greeting={firstName ? `${firstName} 👋` : 'Dashboard 👋'}
+        rightActions={
           <Pressable
             onPress={() => router.push('/(app)/notifications' as RelativePathString)}
             accessibilityLabel="Notifications"
@@ -78,7 +87,9 @@ export default function AdminDashboard() {
           >
             <Bell size={19} color={c.primary} />
           </Pressable>
-        </View>
+        }
+      />
+      <View style={{ paddingHorizontal: layout.screenPx, paddingBottom: layout.scrollBottom() }}>
 
         {/* Stats */}
         {loading ? (
@@ -117,6 +128,13 @@ export default function AdminDashboard() {
           ))}
         </View>
       </View>
+      <PermissionRationaleModal
+        type="notifications"
+        visible={showNotifRationale}
+        isBlocked={notifBlocked}
+        onConfirm={confirmNotifRequest}
+        onDismiss={() => setShowNotifRationale(false)}
+      />
     </ScrollView>
   );
 }

@@ -1,7 +1,7 @@
 import { useState, useMemo, useCallback } from 'react';
 import {
   View, Text, ScrollView, useColorScheme, Pressable,
-  RefreshControl, TextInput, ActivityIndicator,
+  RefreshControl, ActivityIndicator,
 } from 'react-native';
 import { Image } from 'expo-image';
 import { useFocusEffect, useRouter } from 'expo-router';
@@ -20,8 +20,8 @@ import { NeuCard } from '@/components/NeuCard';
 import { NeuSearchBar } from '@/components/NeuInputRow';
 import { StatCardCarousel } from '@/components/StatCard';
 import type { StatCardItem } from '@/components/StatCard';
-import { neuColors, neuMicroStyle } from '@/lib/neu';
-import HamburgerButton from '@/components/HamburgerButton';
+import { neuColors, neuMicroStyle, useLayout, safeBottom } from '@/lib/neu';
+import { DashboardHeader } from '@/components/DashboardHeader';
 import { useNotificationPermission } from '@/hooks/useNotificationPermission';
 import { PermissionRationaleModal } from '@/components/PermissionRationaleModal';
 
@@ -36,6 +36,8 @@ export default function StudentDashboard() {
   const scheme = useColorScheme();
   const isDark = scheme === 'dark';
   const c = isDark ? neuColors.dark : neuColors.light;
+  const layout = useLayout();
+  const insets = layout.insets;
   const { profile } = useProfileStore();
   const router = useRouter();
 
@@ -300,19 +302,12 @@ export default function StudentDashboard() {
       contentInsetAdjustmentBehavior="automatic"
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />}
     >
-      <View style={{ paddingHorizontal: 20 }}>
-        {/* ── Header ─────────────────────────────────────────────────────── */}
-        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 18, marginTop: 14 }}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-            <HamburgerButton />
-            <View>
-              <Text style={{ fontSize: 11, color: c.text, opacity: 0.45, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 0.6 }}>Welcome back,</Text>
-              <Text style={{ fontSize: 21, fontWeight: '800', color: c.text, lineHeight: 26 }}>
-                {firstName ? `${firstName} 👋` : '👋'}
-              </Text>
-            </View>
-          </View>
-          <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center' }}>
+      {/* DashboardHeader owns its safe-area top padding — no paddingTop on outer View */}
+      <DashboardHeader
+        roleLabel="Welcome back,"
+        greeting={firstName ? `${firstName} 👋` : '👋'}
+        rightActions={
+          <>
             <Pressable
               onPress={() => router.push('/(app)/(student)/activate' as RelativePathString)}
               accessibilityLabel="Activate course code"
@@ -332,8 +327,10 @@ export default function StudentDashboard() {
                 <View style={{ position: 'absolute', top: 8, right: 8, width: 7, height: 7, borderRadius: 3.5, backgroundColor: '#EF4444' }} />
               )}
             </Pressable>
-          </View>
-        </View>
+          </>
+        }
+      />
+      <View style={{ paddingHorizontal: layout.screenPx }}>
 
         {/* ── Search bar ────────────────────────────────────────────────── */}
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 10 }}>
@@ -419,7 +416,7 @@ export default function StudentDashboard() {
       {loading ? (
         <ActivityIndicator color={c.primary} style={{ marginTop: 40 }} />
       ) : (
-        <View style={{ paddingHorizontal: 20, paddingTop: 12, paddingBottom: 32 }}>
+        <View style={{ paddingHorizontal: layout.screenPx, paddingTop: 12, paddingBottom: layout.scrollBottom() }}>
 
           {/* ── My Courses ───────────────────────────────────────────────── */}
           <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>

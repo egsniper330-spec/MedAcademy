@@ -8,6 +8,7 @@ import {
   View, Text, TextInput, ScrollView, KeyboardAvoidingView,
   Pressable, useColorScheme,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import type { RelativePathString } from 'expo-router';
 import { Lock, Eye, EyeOff, ShieldCheck } from 'lucide-react-native';
@@ -22,6 +23,7 @@ import { NeuInputRow } from '@/components/NeuInputRow';
 
 export default function ForcePasswordChangeScreen() {
   const scheme = useColorScheme();
+  const insets = useSafeAreaInsets();
   const isDark = scheme === 'dark';
   const c = isDark ? neuColors.dark : neuColors.light;
   const flat = neuFlatStyle(isDark);
@@ -97,7 +99,7 @@ export default function ForcePasswordChangeScreen() {
   return (
     <View style={{ flex: 1, backgroundColor: c.base }}>
       <KeyboardAvoidingView behavior={process.env.EXPO_OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1 }}>
-        <ScrollView contentContainerStyle={{ padding: 24, gap: 20, paddingBottom: 60, justifyContent: 'center', flexGrow: 1 }}
+        <ScrollView contentContainerStyle={{ padding: 24, gap: 20, paddingBottom: Math.max(insets.bottom, 30) + 30, justifyContent: 'center', flexGrow: 1 }}
           keyboardShouldPersistTaps="handled">
 
           {/* Header */}

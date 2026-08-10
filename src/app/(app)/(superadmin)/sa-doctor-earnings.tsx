@@ -28,7 +28,7 @@ import {
   TrendingDown,
 } from 'lucide-react-native';
 import { NeuCard } from '@/components/NeuCard';
-import { neuColors } from '@/lib/neu';
+import { neuColors, useLayout, safeBottom } from '@/lib/neu';
 import {
   getDoctorEarningsDashboard,
   bucketEarningsTimeSeries,
@@ -48,11 +48,11 @@ import {
 // ─────────────────────────────────────────────────────────────────────────────
 function fmtEGP(n: number): string {
   const abs = Math.abs(n);
-  const s = `EGP ${abs.toLocaleString('en-EG', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
+  const s = `EGP ${abs.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
   return n < 0 ? `−${s}` : `+${s}`;
 }
 function fmtEGPPlain(n: number): string {
-  return `EGP ${Math.abs(n).toLocaleString('en-EG', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
+  return `EGP ${Math.abs(n).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
 }
 function fmtDate(iso: string): string {
   return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
@@ -61,7 +61,7 @@ function fmtDateShort(iso: string): string {
   return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 }
 function fmtDateTime(iso: string): string {
-  return new Date(iso).toLocaleString('en-GB', {
+  return new Date(iso).toLocaleString('en-US', {
     day: '2-digit', month: 'short', year: 'numeric',
     hour: '2-digit', minute: '2-digit',
   });
@@ -413,6 +413,8 @@ const PRICING_LABEL: Record<string, string> = {
 function StudentProfileModal({ tx, doctorId, onClose, c }: {
   tx: EarningsTransactionRow; doctorId: string; onClose: () => void; c: typeof neuColors.light;
 }) {
+  const layout = useLayout();
+  const insets = layout.insets;
   const [profile,   setProfile]   = useState<DoctorStudentProfile | null>(null);
   const [loading,   setLoading]   = useState(true);
   const [isDeleted, setIsDeleted] = useState(false);
@@ -449,7 +451,7 @@ function StudentProfileModal({ tx, doctorId, onClose, c }: {
           <View style={{ alignItems: 'center', paddingTop: 12 }}>
             <View style={{ width: 40, height: 4, borderRadius: 2, backgroundColor: `${c.text}20` }} />
           </View>
-          <View style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, paddingTop: 14, paddingBottom: 10 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: layout.screenPx, paddingTop: 14, paddingBottom: 10 }}>
             {profile?.avatar_url && !isDeleted ? (
               <Image source={{ uri: profile.avatar_url }} style={{ width: 48, height: 48, borderRadius: 14, marginRight: 12 }} />
             ) : (
@@ -474,7 +476,7 @@ function StudentProfileModal({ tx, doctorId, onClose, c }: {
             </Pressable>
           </View>
 
-          <ScrollView contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 48 }}>
+          <ScrollView contentContainerStyle={{ paddingHorizontal: layout.screenPx, paddingBottom: layout.scrollBottom() }}>
             {loading ? (
               <ActivityIndicator color={c.primary} style={{ marginVertical: 48 }} />
             ) : (
@@ -505,7 +507,7 @@ function StudentProfileModal({ tx, doctorId, onClose, c }: {
                   <InfoRow icon={<Zap size={14} color={c.primary} />} label="Transaction Type" value={EARNINGS_TX_LABEL[tx.transaction_type] ?? tx.transaction_type} c={c} />
                   <InfoRow icon={<Calendar size={14} color={c.primary} />} label="Date" value={fmtDate(tx.created_at)} c={c} />
                   <InfoRow icon={<DollarSign size={14} color={tx.amount >= 0 ? '#16A34A' : '#DC2626'} />} label="Revenue"
-                    value={`${tx.amount >= 0 ? '+' : '−'}EGP ${Math.abs(tx.amount).toLocaleString('en-EG')}`} c={c} />
+                    value={`${tx.amount >= 0 ? '+' : '−'}EGP ${Math.abs(tx.amount).toLocaleString('en-US')}`} c={c} />
                   {tx.price_snapshot > 0 && <InfoRow icon={<Award size={14} color={c.primary} />} label="Pricing Source" value={pricingLabel} c={c} />}
                   {tx.notes && <InfoRow icon={<Hash size={14} color={c.primary} />} label="Notes" value={tx.notes} c={c} />}
                 </NeuCard>
@@ -558,6 +560,8 @@ export default function SADoctorEarnings() {
   const { doctor_id, doctor_name } = useLocalSearchParams<{ doctor_id: string; doctor_name?: string }>();
   const router = useRouter();
   const scheme = useColorScheme();
+  const layout = useLayout();
+  const insets = layout.insets;
   const c      = scheme === 'dark' ? neuColors.dark : neuColors.light;
 
   // ── State ──────────────────────────────────────────────────────────────────
@@ -619,9 +623,9 @@ export default function SADoctorEarnings() {
       style={{ flex: 1, backgroundColor: c.base }}
       contentInsetAdjustmentBehavior="automatic"
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />}
-      contentContainerStyle={{ paddingBottom: 60 }}
+      contentContainerStyle={{ paddingBottom: layout.scrollBottom() }}
     >
-      <View style={{ padding: 20 }}>
+      <View style={{ padding: layout.screenPx }}>
 
         {/* ── Header ──────────────────────────────────────────────────────── */}
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 20, marginTop: 12 }}>
@@ -778,7 +782,7 @@ export default function SADoctorEarnings() {
                       <View style={{ flex: 1 }}>
                         <Text style={{ fontSize: 11, color: c.text, opacity: 0.45 }}>Credit Selling Price</Text>
                         <Text style={{ fontSize: 26, fontWeight: '900', color: '#7C3AED' }}>
-                          EGP {actStats.credit_selling_price.toLocaleString()}
+                          EGP {actStats.credit_selling_price.toLocaleString('en-US')}
                         </Text>
                         <Text style={{ fontSize: 11, color: c.text, opacity: 0.35, marginTop: 1 }}>per credit</Text>
                       </View>
@@ -809,7 +813,7 @@ export default function SADoctorEarnings() {
                       <View style={{ flex: 1 }}>
                         <Text style={{ fontSize: 11, color: c.text, opacity: 0.45 }}>Credit-Based Earnings</Text>
                         <Text style={{ fontSize: 20, fontWeight: '900', color: '#16A34A' }}>
-                          EGP {actStats.total_earnings.toLocaleString()}
+                          EGP {actStats.total_earnings.toLocaleString('en-US')}
                         </Text>
                         <Text style={{ fontSize: 11, color: c.text, opacity: 0.35 }}>
                           {actStats.total_used} credits × EGP {actStats.credit_selling_price}
@@ -825,7 +829,7 @@ export default function SADoctorEarnings() {
                       ].map(row => (
                         <View key={row.label} style={{ flexDirection: 'row', alignItems: 'center' }}>
                           <Clock size={14} color={c.text} opacity={0.4} style={{ marginRight: 8 }} />
-                          <Text style={{ fontSize: 12, color: c.text, opacity: 0.45, width: 100 }}>{row.label}</Text>
+                          <Text style={{ fontSize: 12, color: c.text, opacity: 0.45, minWidth: 80, flexShrink: 0 }}>{row.label}</Text>
                           <Text style={{ fontSize: 12, color: c.text, flex: 1 }}>
                             {row.value ? fmtDateTime(row.value) : '—'}
                           </Text>
@@ -871,7 +875,7 @@ export default function SADoctorEarnings() {
                       <View>
                         <Text style={{ fontSize: 11, color: c.text, opacity: 0.45 }}>Revenue from Credit Sales</Text>
                         <Text style={{ fontSize: 20, fontWeight: '900', color: '#16A34A' }}>
-                          EGP {creditRevenue.toLocaleString()}
+                          EGP {creditRevenue.toLocaleString('en-US')}
                         </Text>
                       </View>
                     </NeuCard>

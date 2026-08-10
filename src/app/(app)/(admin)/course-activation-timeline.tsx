@@ -13,7 +13,7 @@ import {
   ArrowLeft, Hash,
 } from 'lucide-react-native';
 import { NeuCard } from '@/components/NeuCard';
-import { neuColors } from '@/lib/neu';
+import { neuColors, useLayout } from '@/lib/neu';
 import { getActivationLedger } from '@/lib/api';
 
 type CodeRow = {
@@ -40,6 +40,7 @@ export default function CourseActivationTimelineScreen() {
   const scheme = useColorScheme();
   const isDark = scheme === 'dark';
   const c = isDark ? neuColors.dark : neuColors.light;
+  const layout = useLayout();
   const router = useRouter();
 
   const [loading, setLoading]       = useState(true);
@@ -102,7 +103,7 @@ export default function CourseActivationTimelineScreen() {
         contentInsetAdjustmentBehavior="automatic"
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />}
         ListHeaderComponent={
-          <View style={{ padding: 20, paddingTop: 8 }}>
+          <View style={{ padding: layout.screenPx, paddingTop: 8 }}>
             {/* Back */}
             <Pressable onPress={() => router.back()}
               style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 16 }}>
@@ -172,7 +173,7 @@ export default function CourseActivationTimelineScreen() {
           const col  = STATUS_COLOR[code.status] ?? '#6B7280';
           const Icon = STATUS_ICON[code.status] ?? Ticket;
           return (
-            <View style={{ paddingHorizontal: 20, marginBottom: 8 }}>
+            <View style={{ paddingHorizontal: layout.screenPx, marginBottom: 8 }}>
               <NeuCard style={{ padding: 12 }}>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
                   <Icon size={18} color={col} />

@@ -13,7 +13,7 @@ import { useRouter } from 'expo-router';
 import { Upload, Download, AlertCircle, CheckCircle, XCircle } from 'lucide-react-native';
 import * as DocumentPicker from 'expo-document-picker';
 import { fetch } from 'expo/fetch';
-import { neuColors, neuFlatStyle } from '@/lib/neu';
+import { neuColors, useLayout, neuFlatStyle, safeBottom } from '@/lib/neu';
 import { PageHeader } from '@/components/PageHeader';
 import { NeuCard } from '@/components/NeuCard';
 import { NeuButton } from '@/components/NeuButton';
@@ -60,6 +60,8 @@ export default function BulkImportStudentsScreen() {
   const scheme = useColorScheme();
   const isDark = scheme === 'dark';
   const c = isDark ? neuColors.dark : neuColors.light;
+  const layout = useLayout();
+  const insets = layout.insets;
   const flat = neuFlatStyle(isDark);
   const router = useRouter();
   const { profile } = useProfileStore();
@@ -202,7 +204,7 @@ Jane Smith,jane@example.com,,Cairo University,Medicine,Level 2,,none`;
 
   return (
     <View style={{ flex: 1, backgroundColor: c.base }}>
-      <ScrollView contentContainerStyle={{ padding: 20, gap: 16, paddingBottom: 60 }}>
+      <ScrollView contentContainerStyle={{ padding: layout.screenPx, gap: 16, paddingBottom: layout.scrollBottom() }}>
         <PageHeader title="Bulk Import Students" subtitle="Upload CSV to create multiple students" />
 
         {/* ── UPLOAD ─────────────────────────────────────────────────── */}

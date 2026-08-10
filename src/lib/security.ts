@@ -257,7 +257,8 @@ async function getVpnWhitelist(): Promise<string[]> {
 
 /**
  * Root / Jailbreak detection.
- * Android: react-native-device-info isRooted() (first pass) + SecurityModule batch flags.
+ * Android: SecurityModule.getSecurityFlags().rootDetected (6 heuristics: su paths, props,
+ *          test-keys, /system write test, which su, root packages).
  * iOS:     IOSSecurityModule.getSecurityFlags().jailbreakDetected (10 independent heuristics).
  */
 async function detectRootJailbreak(): Promise<SecurityThreat | null> {
@@ -265,10 +266,8 @@ async function detectRootJailbreak(): Promise<SecurityThreat | null> {
     if (process.env.EXPO_OS === 'web') return null;
 
     if (process.env.EXPO_OS === 'ios') {
-      // Use the native IOSSecurityModule — flags are fetched in the batch call
-      // by runSecurityChecks(). We call getNativeSecurityFlags() here because
-      // this function may be called individually too.
       const flags = await getNativeSecurityFlags();
+      console.log('[SecurityCheck][RootJailbreak] iOS jailbreakDetected=', flags.jailbreakDetected);
       if (!flags.jailbreakDetected) return null;
       return {
         type: 'jailbreak_detected',
@@ -277,54 +276,69 @@ async function detectRootJailbreak(): Promise<SecurityThreat | null> {
       };
     }
 
-    // Android: react-native-device-info provides a quick first pass
-    const mod = await import('react-native-device-info');
-    const DeviceInfo = (mod.default ?? mod) as unknown as Record<string, unknown>;
-    const isRootedFn = DeviceInfo['isRooted'] as (() => Promise<boolean>) | undefined;
-    const isRooted = typeof isRootedFn === 'function' ? await isRootedFn() : false;
-    if (!isRooted) return null;
+    // Android — use native SecurityModule multi-method root check
+    const flags = await getNativeSecurityFlags();
+    console.log('[SecurityCheck][RootJailbreak] Android rootDetected=', flags.rootDetected,
+      '| flags=', JSON.stringify({
+        rootDetected: flags.rootDetected,
+        magiskDetected: flags.magiskDetected,
+        tampered: flags.tampered,
+      }));
+    if (!flags.rootDetected) return null;
     return {
       type: 'root_detected',
-      detectionMethod: 'react-native-device-info isRooted()',
+      detectionMethod: 'SecurityModule: su paths + system props + test-keys + /system write test + package scan',
       detected: true,
     };
-  } catch { return null; }
+  } catch (e) {
+    console.log('[SecurityCheck][RootJailbreak] exception:', e);
+    return null;
+  }
 }
 
 /**
  * VPN detection.
- * Android: expo-network NetworkStateType.VPN.
+ * Android: SecurityModule.getSecurityFlags().vpnDetected
+ *          (ConnectivityManager TRANSPORT_VPN on ALL active networks + NetworkInterface
+ *          tun/vpn/ppp/ipsec interface scan). expo-network is NOT used — it only reads the
+ *          primary transport type and misses VPN-over-WiFi / VPN-over-cellular.
  * iOS:     IOSSecurityModule — utun/ipsec interface scan (no entitlement needed).
  *
- * Whitelist: if the security_vpn_whitelist table has ANY rows, it means the admin
- * has explicitly configured whitelisted VPN names. Because expo-network only returns
- * the connection *type* (not the VPN name), we cannot match against the whitelist on
- * Android. If the table is non-empty it means corporate/admin VPNs are intentionally
- * allowed — skip detection entirely. On iOS the interface scan similarly has no name.
- *
- * Empty whitelist (default) → always enforce VPN block as per policy.
+ * Whitelist: if the security_vpn_whitelist table has ANY rows, the admin has explicitly
+ * allowed corporate VPNs — skip detection entirely (we cannot match by name on either
+ * platform without a Network Extension entitlement).
  */
 async function detectVPN(): Promise<SecurityThreat | null> {
   try {
     if (process.env.EXPO_OS === 'web') return null;
 
     // If admin has whitelisted any VPNs, skip detection for this device
-    // (we cannot distinguish corporate from personal VPN without the VPN name).
     const whitelist = await getVpnWhitelist();
-    if (whitelist.length > 0) return null;
+    if (whitelist.length > 0) {
+      console.log('[SecurityCheck][VPN] skipped — admin VPN whitelist has entries');
+      return null;
+    }
 
     if (process.env.EXPO_OS === 'ios') {
       const vpn = await isNativeVPNDetected();
+      console.log('[SecurityCheck][VPN] iOS vpnDetected=', vpn);
       if (!vpn) return null;
       return { type: 'vpn_detected', detectionMethod: 'IOSSecurityModule: utun/ipsec interface scan', detected: true };
     }
 
-    // Android
-    const Network = await import('expo-network');
-    const state = await Network.getNetworkStateAsync();
-    if (state.type !== Network.NetworkStateType.VPN) return null;
-    return { type: 'vpn_detected', detectionMethod: 'expo-network NetworkStateType.VPN', detected: true };
-  } catch { return null; }
+    // Android — use native SecurityModule (ConnectivityManager + NetworkInterface scan)
+    const flags = await getNativeSecurityFlags();
+    console.log('[SecurityCheck][VPN] Android vpnDetected=', flags.vpnDetected);
+    if (!flags.vpnDetected) return null;
+    return {
+      type: 'vpn_detected',
+      detectionMethod: 'SecurityModule: ConnectivityManager TRANSPORT_VPN + NetworkInterface tun/vpn/ppp scan',
+      detected: true,
+    };
+  } catch (e) {
+    console.log('[SecurityCheck][VPN] exception:', e);
+    return null;
+  }
 }
 
 /**
@@ -338,6 +352,7 @@ async function detectProxy(): Promise<SecurityThreat | null> {
 
     if (process.env.EXPO_OS === 'ios') {
       const proxy = await isNativeProxyDetected();
+      console.log('[SecurityCheck][Proxy] iOS proxyDetected=', proxy);
       if (!proxy) return null;
       return { type: 'proxy_detected', detectionMethod: 'IOSSecurityModule: CFNetworkCopySystemProxySettings', detected: true };
     }
@@ -346,22 +361,50 @@ async function detectProxy(): Promise<SecurityThreat | null> {
     const httpProxy  = (globalThis as Record<string, unknown>)['http_proxy']  as string | undefined;
     const httpsProxy = (globalThis as Record<string, unknown>)['https_proxy'] as string | undefined;
     const allProxy   = (globalThis as Record<string, unknown>)['all_proxy']   as string | undefined;
-    if (httpProxy || httpsProxy || allProxy) {
-      return { type: 'proxy_detected', detectionMethod: `env-proxy: ${httpProxy ?? httpsProxy ?? allProxy}`, detected: true };
-    }
+    const found = !!(httpProxy || httpsProxy || allProxy);
+    console.log('[SecurityCheck][Proxy] Android proxyDetected=', found,
+      '| http_proxy=', httpProxy, 'https_proxy=', httpsProxy, 'all_proxy=', allProxy);
+    if (!found) return null;
+    return { type: 'proxy_detected', detectionMethod: `env-proxy: ${httpProxy ?? httpsProxy ?? allProxy}`, detected: true };
+  } catch (e) {
+    console.log('[SecurityCheck][Proxy] exception:', e);
     return null;
-  } catch { return null; }
+  }
 }
 
+/**
+ * Debug / emulator detection.
+ * Android: SecurityModule.getSecurityFlags().emulatorDetected (Build fingerprint/model/
+ *          manufacturer/QEMU props/sensor count) PLUS __DEV__ JS flag.
+ * iOS/all: __DEV__ flag only (iOS emulator is Simulator, not security-relevant).
+ */
 async function detectDebug(): Promise<SecurityThreat | null> {
   try {
     if (process.env.EXPO_OS === 'web') return null;
-    if (__DEV__) return { type: 'debug_detected', detectionMethod: '__DEV__ === true', detected: true };
-    const DeviceInfo = await import('react-native-device-info');
-    const isEmu = typeof DeviceInfo.isEmulator === 'function' ? await DeviceInfo.isEmulator() : false;
-    if (isEmu) return { type: 'debug_detected', detectionMethod: 'react-native-device-info isEmulator()', detected: true };
+
+    if (__DEV__) {
+      console.log('[SecurityCheck][Debug] __DEV__=true');
+      return { type: 'debug_detected', detectionMethod: '__DEV__ === true', detected: true };
+    }
+
+    if (process.env.EXPO_OS === 'android') {
+      const flags = await getNativeSecurityFlags();
+      console.log('[SecurityCheck][Debug] Android emulatorDetected=', flags.emulatorDetected);
+      if (flags.emulatorDetected) {
+        return {
+          type: 'debug_detected',
+          detectionMethod: 'SecurityModule: Build fingerprint/model/manufacturer + QEMU props + sensor count',
+          detected: true,
+        };
+      }
+    }
+
+    console.log('[SecurityCheck][Debug] no debug/emulator detected');
     return null;
-  } catch { return null; }
+  } catch (e) {
+    console.log('[SecurityCheck][Debug] exception:', e);
+    return null;
+  }
 }
 
 /**
@@ -375,6 +418,7 @@ async function detectDeveloperOptions(): Promise<SecurityThreat | null> {
 
     if (process.env.EXPO_OS === 'ios') {
       const flags = await getNativeSecurityFlags();
+      console.log('[SecurityCheck][DevOptions] iOS debuggerAttached=', flags.debuggerAttached);
       if (!flags.debuggerAttached) return null;
       return {
         type: 'developer_options_enabled',
@@ -390,9 +434,13 @@ async function detectDeveloperOptions(): Promise<SecurityThreat | null> {
     if (flags.adbEnabled)              active.push('USB Debugging (ADB) enabled');
     if (flags.debuggerAttached)        active.push('Debugger attached');
     if (flags.testOnlyBuild)           active.push('test-only build flag');
+    console.log('[SecurityCheck][DevOptions] Android checks=', active.join(', ') || 'none');
     if (active.length === 0) return null;
     return { type: 'developer_options_enabled', detectionMethod: active.join(', '), detected: true };
-  } catch { return null; }
+  } catch (e) {
+    console.log('[SecurityCheck][DevOptions] exception:', e);
+    return null;
+  }
 }
 
 /**
@@ -406,19 +454,26 @@ async function detectScreenRecording(): Promise<SecurityThreat | null> {
     if (process.env.EXPO_OS === 'web') return null;
 
     const flags = await getNativeSecurityFlags();
+    console.log('[SecurityCheck][ScreenRecording] screenBeingRecorded=', flags.screenBeingRecorded);
     if (!flags.screenBeingRecorded) return null;
 
     const method = process.env.EXPO_OS === 'ios'
       ? 'IOSSecurityModule: UIScreen.isCaptured (AirPlay/QuickTime/ReplayKit)'
       : 'SecurityModule: MediaProjection / WindowManager.isScreenRecorded()';
     return { type: 'screen_recording_detected', detectionMethod: method, detected: true };
-  } catch { return null; }
+  } catch (e) {
+    console.log('[SecurityCheck][ScreenRecording] exception:', e);
+    return null;
+  }
 }
 
 function detectAppIntegrity(): SecurityThreat | null {
   try {
     if (process.env.EXPO_OS === 'web') return null;
-    if (__DEV__) return { type: 'app_integrity_compromised', detectionMethod: '__DEV__ === true', detected: true };
+    if (__DEV__) {
+      console.log('[SecurityCheck][AppIntegrity] __DEV__=true');
+      return { type: 'app_integrity_compromised', detectionMethod: '__DEV__ === true', detected: true };
+    }
     return null;
   } catch { return null; }
 }
@@ -435,13 +490,17 @@ async function detectFrida(): Promise<SecurityThreat | null> {
     if (process.env.EXPO_OS === 'web') return null;
 
     const flags = await getNativeSecurityFlags();
+    console.log('[SecurityCheck][Frida] fridaDetected=', flags.fridaDetected);
     if (!flags.fridaDetected) return null;
 
     const method = process.env.EXPO_OS === 'ios'
       ? 'IOSSecurityModule: dylib injection scan (frida-gadget/DYLD_INSERT_LIBRARIES)'
       : 'SecurityModule: Frida port/process/maps/file scan';
     return { type: 'frida_detected', detectionMethod: method, detected: true };
-  } catch { return null; }
+  } catch (e) {
+    console.log('[SecurityCheck][Frida] exception:', e);
+    return null;
+  }
 }
 
 /** Xposed / LSPosed / EdXposed — Android only (no iOS equivalent) */
@@ -449,13 +508,17 @@ async function detectXposed(): Promise<SecurityThreat | null> {
   try {
     if (process.env.EXPO_OS !== 'android') return null;
     const flags = await getNativeSecurityFlags();
+    console.log('[SecurityCheck][Xposed] xposedDetected=', flags.xposedDetected);
     if (!flags.xposedDetected) return null;
     return {
       type: 'xposed_detected',
       detectionMethod: 'SecurityModule: XposedBridge class / package / stack trace',
       detected: true,
     };
-  } catch { return null; }
+  } catch (e) {
+    console.log('[SecurityCheck][Xposed] exception:', e);
+    return null;
+  }
 }
 
 /**
@@ -558,13 +621,17 @@ async function detectMagisk(): Promise<SecurityThreat | null> {
   try {
     if (process.env.EXPO_OS !== 'android') return null;
     const flags = await getNativeSecurityFlags();
+    console.log('[SecurityCheck][Magisk] magiskDetected=', flags.magiskDetected);
     if (!flags.magiskDetected) return null;
     return {
       type: 'magisk_detected',
       detectionMethod: 'SecurityModule: Magisk paths/mounts/packages/Zygisk',
       detected: true,
     };
-  } catch { return null; }
+  } catch (e) {
+    console.log('[SecurityCheck][Magisk] exception:', e);
+    return null;
+  }
 }
 
 /** Overlay / tapjacking — Android only (SYSTEM_ALERT_WINDOW has no iOS equivalent) */
@@ -572,13 +639,17 @@ async function detectOverlay(): Promise<SecurityThreat | null> {
   try {
     if (process.env.EXPO_OS !== 'android') return null;
     const flags = await getNativeSecurityFlags();
+    console.log('[SecurityCheck][Overlay] overlayDetected=', flags.overlayDetected);
     if (!flags.overlayDetected) return null;
     return {
       type: 'overlay_detected',
       detectionMethod: 'SecurityModule: SYSTEM_ALERT_WINDOW / suspicious overlay packages',
       detected: true,
     };
-  } catch { return null; }
+  } catch (e) {
+    console.log('[SecurityCheck][Overlay] exception:', e);
+    return null;
+  }
 }
 
 /**
@@ -593,6 +664,7 @@ async function detectTamper(): Promise<SecurityThreat | null> {
 
     if (process.env.EXPO_OS === 'ios') {
       const flags = await getNativeSecurityFlags();
+      console.log('[SecurityCheck][Tamper] iOS bundleTampered=', flags.bundleTampered);
       if (flags.bundleTampered) {
         return { type: 'tamper_detected', detectionMethod: 'IOSSecurityModule: MachO header integrity check', detected: true };
       }
@@ -602,6 +674,8 @@ async function detectTamper(): Promise<SecurityThreat | null> {
     // Android
     const flags = await getNativeSecurityFlags();
     const { SIGNATURE_CHECK_READY, TRUSTED_CERTS } = getSecurityGuards();
+    console.log('[SecurityCheck][Tamper] Android signatureValid=', flags.signatureValid, '| tampered=', flags.tampered,
+      '| sigCheckReady=', SIGNATURE_CHECK_READY, '| trustedCerts=', TRUSTED_CERTS.length);
 
     // Signature check: pass only when runtime cert matches ANY trusted fingerprint.
     if (SIGNATURE_CHECK_READY && TRUSTED_CERTS.length > 0) {
@@ -615,7 +689,34 @@ async function detectTamper(): Promise<SecurityThreat | null> {
     }
 
     return null;
-  } catch { return null; }
+  } catch (e) {
+    console.log('[SecurityCheck][Tamper] exception:', e);
+    return null;
+  }
+}
+
+/**
+ * Mock location detection — Android only.
+ * Uses SecurityModule.getSecurityFlags().mockLocationDetected which checks:
+ *   - AppOpsManager.OPSTR_MOCK_LOCATION granted to any non-system app (API 23+)
+ *   - Settings.Secure.ALLOW_MOCK_LOCATION legacy flag (pre-API 23 fallback)
+ *   - Installed packages holding ACCESS_MOCK_LOCATION permission
+ */
+async function detectMockLocation(): Promise<SecurityThreat | null> {
+  try {
+    if (process.env.EXPO_OS !== 'android') return null;
+    const flags = await getNativeSecurityFlags();
+    console.log('[SecurityCheck][MockLocation] mockLocationDetected=', flags.mockLocationDetected);
+    if (!flags.mockLocationDetected) return null;
+    return {
+      type: 'debug_detected',
+      detectionMethod: 'SecurityModule: mock location — AppOpsManager MOCK_LOCATION + Settings.Secure',
+      detected: true,
+    };
+  } catch (e) {
+    console.log('[SecurityCheck][MockLocation] exception:', e);
+    return null;
+  }
 }
 
 /**
@@ -877,12 +978,21 @@ export function computeRiskScore(threats: SecurityThreat[]): number {
 // ─── Full Security Check ──────────────────────────────────────────────────────
 
 export async function runSecurityChecks(): Promise<SecurityCheckResult> {
-  // Batch all native checks via a single getSecurityFlags() bridge call first,
-  // then run Play Integrity / App Attest + network checks in parallel.
+  console.log('[SecurityCheck][runSecurityChecks] ▶ starting all checks on platform=', process.env.EXPO_OS);
+
+  // Warm up the native flag batch cache ONCE so every detector re-uses it
+  let rawFlags: Awaited<ReturnType<typeof getNativeSecurityFlags>> | null = null;
+  try {
+    rawFlags = await getNativeSecurityFlags();
+    console.log('[SecurityCheck][runSecurityChecks] raw native flags:', JSON.stringify(rawFlags));
+  } catch (e) {
+    console.log('[SecurityCheck][runSecurityChecks] ⚠️ getNativeSecurityFlags failed:', e);
+  }
+
   const [
     rootThreat, vpnThreat, proxyThreat, debugThreat, devOptsThreat, screenRecThreat,
     fridaThreat, xposedThreat, magiskThreat, overlayThreat, tamperThreat,
-    piThreat, sslThreat,
+    mockLocThreat, piThreat, sslThreat,
   ] = await Promise.all([
     detectRootJailbreak(),
     detectVPN(),
@@ -895,6 +1005,7 @@ export async function runSecurityChecks(): Promise<SecurityCheckResult> {
     detectMagisk(),
     detectOverlay(),
     detectTamper(),
+    detectMockLocation(),
     runPlayIntegrityCheck(),
     detectSSLPinning(),
   ]);
@@ -908,11 +1019,14 @@ export async function runSecurityChecks(): Promise<SecurityCheckResult> {
     rootThreat, vpnThreat, proxyThreat, debugThreat,
     devOptsThreat, screenRecThreat, integrityThreat,
     fridaThreat, xposedThreat, magiskThreat, overlayThreat,
-    tamperThreat, piThreat, sslThreat,
+    tamperThreat, mockLocThreat, piThreat, sslThreat,
   ].filter((t): t is SecurityThreat => t !== null && t.detected);
+
+  console.log('[SecurityCheck][runSecurityChecks] ✅ detected threats:', allThreats.map(t => t.type).join(', ') || 'none');
 
   const riskScore = computeRiskScore(allThreats);
   const policies  = await getSecurityPolicies();
+  console.log('[SecurityCheck][runSecurityChecks] riskScore=', riskScore);
 
   let blocksLogin  = false;
   let blocksVideo  = false;

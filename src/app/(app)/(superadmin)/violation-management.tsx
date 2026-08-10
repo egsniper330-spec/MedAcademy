@@ -9,6 +9,7 @@ import {
   View, Text, ScrollView, useColorScheme, Pressable,
   ActivityIndicator, TextInput, FlatList,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect } from 'expo-router';
 import {
   ShieldOff, RotateCcw, UserCheck, AlertTriangle,
@@ -53,6 +54,7 @@ const ACTION_COLORS: Record<string, string> = {
 export default function ViolationManagementScreen() {
   const isDark = useColorScheme() === 'dark';
   const c = isDark ? neuColors.dark : neuColors.light;
+  const insets = useSafeAreaInsets();
   const flat = neuFlatStyle(isDark);
 
   const [violations, setViolations]   = useState<Violation[]>([]);
@@ -194,7 +196,7 @@ export default function ViolationManagementScreen() {
         </View>
 
         <Text style={{ fontSize: 11, color: c.text, opacity: 0.35 }}>
-          {new Date(v.created_at).toLocaleString()} · {v.platform ?? 'unknown'} · {v.installation_id?.slice(0, 8) ?? '—'}
+          {new Date(v.created_at).toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true })} · {v.platform ?? 'unknown'} · {v.installation_id?.slice(0, 8) ?? '—'}
         </Text>
 
         {/* Action buttons */}
@@ -281,7 +283,7 @@ export default function ViolationManagementScreen() {
           data={filtered}
           keyExtractor={(item) => item.id}
           renderItem={renderItem}
-          contentContainerStyle={{ padding: 16, gap: 12, paddingBottom: 40 }}
+          contentContainerStyle={{ padding: 16, gap: 12, paddingBottom: Math.max(insets.bottom, 20) + 20 }}
           contentInsetAdjustmentBehavior="automatic"
         />
       )}

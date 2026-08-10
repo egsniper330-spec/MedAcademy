@@ -27,7 +27,7 @@ import { DeleteAccountModal } from '@/components/DeleteAccountModal';
 import { displayPhoneNational } from '@/lib/phone';
 import { NeuCard } from '@/components/NeuCard';
 import { useToast } from '@/components/Toast';
-import { neuColors } from '@/lib/neu';
+import { neuColors, useLayout, animation, zIndex } from '@/lib/neu';
 import { useDebounce } from '@/lib/useDebounce';
 import { friendlyError } from '@/lib/validation';
 import { PageHeader } from '@/components/PageHeader';
@@ -97,6 +97,7 @@ export default function GlobalSearchScreen() {
   const scheme = useColorScheme();
   const isDark = scheme === 'dark';
   const c = isDark ? neuColors.dark : neuColors.light;
+  const layout = useLayout();
   const { showToast } = useToast();
   const { startImpersonation } = useImpersonationStore();
   const router = useRouter();
@@ -164,7 +165,7 @@ export default function GlobalSearchScreen() {
   };
 
   const closeDrawer = () => {
-    Animated.timing(drawerAnim, { toValue: DRAWER_WIDTH, duration: 220, useNativeDriver: true }).start(() => {
+    Animated.timing(drawerAnim, { toValue: DRAWER_WIDTH, duration: animation.fast, useNativeDriver: true }).start(() => {
       setDrawerUser(null);
     });
   };
@@ -446,7 +447,7 @@ export default function GlobalSearchScreen() {
             {drawerAuditLogs.slice(0, 3).map((log: any) => (
               <NeuCard key={log.id} pressed radius={12} style={{ padding: 12 }}>
                 <Text style={{ fontSize: 12, fontWeight: '600', color: c.text }}>{log.action}</Text>
-                <Text style={{ fontSize: 11, color: c.text, opacity: 0.4 }}>{new Date(log.created_at).toLocaleString()}</Text>
+                <Text style={{ fontSize: 11, color: c.text, opacity: 0.4 }}>{new Date(log.created_at).toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true })}</Text>
               </NeuCard>
             ))}
             {drawerAuditLogs.length === 0 && !drawerAuditLoading && (
@@ -472,10 +473,10 @@ export default function GlobalSearchScreen() {
               { label: 'Faculty', value: user.faculty?.name ?? '—' },
               { label: 'Level', value: user.academic_level?.name ?? '—' },
               { label: 'User ID', value: user.id },
-              { label: 'Created', value: user.created_at ? new Date(user.created_at).toLocaleDateString() : '—' },
+              { label: 'Created', value: user.created_at ? new Date(user.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '—' },
             ].map(row => (
               <View key={row.label} style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: `${c.text}08` }}>
-                <Text style={{ fontSize: 13, color: c.text, opacity: 0.5, width: 100 }}>{row.label}</Text>
+                <Text style={{ fontSize: 13, color: c.text, opacity: 0.5, minWidth: 80, flexShrink: 0 }}>{row.label}</Text>
                 <Text style={{ fontSize: 13, fontWeight: '600', color: c.text, flex: 1, textAlign: 'right' }} numberOfLines={2}>{row.value}</Text>
               </View>
             ))}
@@ -498,7 +499,7 @@ export default function GlobalSearchScreen() {
                   {d.is_active ? <Wifi size={20} color="#16A34A" /> : <WifiOff size={20} color="#DC2626" />}
                   <View style={{ flex: 1 }}>
                     <Text style={{ fontSize: 13, fontWeight: '600', color: c.text }}>{d.device_name ?? d.device_id ?? 'Unknown Device'}</Text>
-                    <Text style={{ fontSize: 11, color: c.text, opacity: 0.4 }}>{d.platform ?? '—'} · {d.last_seen ? new Date(d.last_seen).toLocaleDateString() : '—'}</Text>
+                    <Text style={{ fontSize: 11, color: c.text, opacity: 0.4 }}>{d.platform ?? '—'} · {d.last_seen ? new Date(d.last_seen).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '—'}</Text>
                   </View>
                   <View style={{ backgroundColor: d.is_active ? '#16A34A18' : '#DC262618', paddingHorizontal: 7, paddingVertical: 3, borderRadius: 7 }}>
                     <Text style={{ fontSize: 10, fontWeight: '700', color: d.is_active ? '#16A34A' : '#DC2626' }}>{d.is_active ? 'Active' : 'Inactive'}</Text>
@@ -616,7 +617,7 @@ export default function GlobalSearchScreen() {
                   <View style={{ flex: 1 }}>
                     <Text style={{ fontSize: 11, color: c.text, opacity: 0.45 }}>Total Earnings</Text>
                     <Text style={{ fontSize: 20, fontWeight: '900', color: '#16A34A' }}>
-                      EGP {drawerActStats.total_earnings.toLocaleString()}
+                      EGP {drawerActStats.total_earnings.toLocaleString('en-US')}
                     </Text>
                     <Text style={{ fontSize: 11, color: c.text, opacity: 0.35 }}>
                       {drawerActStats.total_used} credits × EGP {drawerActStats.credit_selling_price}
@@ -635,7 +636,7 @@ export default function GlobalSearchScreen() {
                       <Text style={{ fontSize: 12, color: c.text, opacity: 0.45, width: 90 }}>{row.label}</Text>
                       <Text style={{ fontSize: 12, color: c.text, flex: 1 }}>
                         {row.value
-                          ? new Date(row.value).toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+                          ? new Date(row.value).toLocaleString('en-US', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true })
                           : '—'}
                       </Text>
                     </View>
@@ -700,7 +701,7 @@ export default function GlobalSearchScreen() {
                           </Text>
                         </View>
                         <Text style={{ fontSize: 10, color: c.text, opacity: 0.3 }}>
-                          {new Date(log.created_at).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })}
+                          {new Date(log.created_at).toLocaleDateString('en-US', { day: '2-digit', month: 'short' })}
                         </Text>
                       </View>
                       {log.description
@@ -742,7 +743,7 @@ export default function GlobalSearchScreen() {
                     <AlertTriangle size={16} color="#D97706" />
                     <View style={{ flex: 1 }}>
                       <Text style={{ fontSize: 12, fontWeight: '700', color: c.text }}>{log.action}</Text>
-                      <Text style={{ fontSize: 11, color: c.text, opacity: 0.4 }}>{new Date(log.created_at).toLocaleString()}</Text>
+                      <Text style={{ fontSize: 11, color: c.text, opacity: 0.4 }}>{new Date(log.created_at).toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true })}</Text>
                     </View>
                   </View>
                 </NeuCard>
@@ -799,7 +800,7 @@ export default function GlobalSearchScreen() {
   return (
     <View style={{ flex: 1, backgroundColor: c.base }}>
       <ScrollView contentInsetAdjustmentBehavior="automatic">
-        <View style={{ padding: 20 }}>
+        <View style={{ padding: layout.screenPx }}>
           <PageHeader title="Global Search" subtitle="Search users, courses, academic entities" accentColor={c.primary} />
 
           {/* Search bar */}
@@ -861,7 +862,7 @@ export default function GlobalSearchScreen() {
 
       {/* ── Right-side Profile Drawer ─────────────────────────────────────────── */}
       {drawerUser !== null && (
-        <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 200, pointerEvents: 'box-none' }}>
+        <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: zIndex.overlay, pointerEvents: 'box-none' }}>
           {/* Overlay */}
           <Pressable style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.45)' }} onPress={closeDrawer} />
 

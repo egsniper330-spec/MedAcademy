@@ -15,7 +15,7 @@ import {
 import { supabase } from '@/client/supabase';
 import { NeuCard } from '@/components/NeuCard';
 import { NeuButton } from '@/components/NeuButton';
-import { neuColors } from '@/lib/neu';
+import { neuColors, useLayout } from '@/lib/neu';
 import { PageHeader } from '@/components/PageHeader';
 
 // ─── CSV helpers ──────────────────────────────────────────────────────────────
@@ -63,6 +63,7 @@ export default function ExportPanel() {
   const scheme  = useColorScheme();
   const isDark  = scheme === 'dark';
   const c       = isDark ? neuColors.dark : neuColors.light;
+  const layout = useLayout();
 
   const [status, setStatus] = useState<Record<string, ExportStatus>>({});
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -217,7 +218,7 @@ export default function ExportPanel() {
 
   return (
     <ScrollView style={{ flex: 1, backgroundColor: c.base }} contentInsetAdjustmentBehavior="automatic">
-      <View style={{ padding: 20 }}>
+      <View style={{ padding: layout.screenPx }}>
         <PageHeader title="Export Center" subtitle="Download CSV reports for any subsystem" accentColor="#D97706" />
 
         <NeuCard style={{ padding: 14, marginBottom: 20, flexDirection: 'row', gap: 10, alignItems: 'center' }}>

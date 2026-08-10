@@ -15,7 +15,7 @@ import {
 import { NeuCard } from '@/components/NeuCard';
 import { PageHeader } from '@/components/PageHeader';
 import { NeuButton } from '@/components/NeuButton';
-import { neuColors } from '@/lib/neu';
+import { neuColors, useLayout } from '@/lib/neu';
 import { getCreditLedger, getDoctorCreditSummary, getDoctorActivityStats, getProfile } from '@/lib/api';
 import type { DoctorActivityStats } from '@/lib/api';
 import { useProfileStore } from '@/lib/store';
@@ -58,6 +58,7 @@ export default function DoctorCreditTimelineScreen() {
   const scheme = useColorScheme();
   const isDark = scheme === 'dark';
   const c = isDark ? neuColors.dark : neuColors.light;
+  const layout = useLayout();
   const router = useRouter();
   const { profile: currentUser } = useProfileStore();
   // Super Admins get routed to the dedicated SA earnings page (identical data, read-only UI).
@@ -147,7 +148,7 @@ export default function DoctorCreditTimelineScreen() {
   if (roleAllowed === false) {
     return (
       <View style={{ flex: 1, backgroundColor: c.base }}>
-        <View style={{ padding: 20, paddingTop: 60, alignItems: 'center', justifyContent: 'center', flex: 1, gap: 20 }}>
+        <View style={{ padding: layout.screenPx, paddingTop: 60, alignItems: 'center', justifyContent: 'center', flex: 1, gap: 20 }}>
           <View style={{
             width: 72, height: 72, borderRadius: 24,
             backgroundColor: `${c.shadowDark}18`,
@@ -178,7 +179,7 @@ export default function DoctorCreditTimelineScreen() {
       contentInsetAdjustmentBehavior="automatic"
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />}
     >
-      <View style={{ padding: 20 }}>
+      <View style={{ padding: layout.screenPx }}>
         <PageHeader title={doctor_name ?? 'Doctor Timeline'} subtitle={`Credit history · ${txRows.length} transactions`} accentColor={c.primary} />
 
         {loading && <ActivityIndicator size="large" color={c.primary} style={{ marginVertical: 40 }} />}
@@ -188,7 +189,7 @@ export default function DoctorCreditTimelineScreen() {
             <Text style={{ fontSize: 15, fontWeight: '700', color: '#DC2626', textAlign: 'center' }}>Failed to load data</Text>
             <Text style={{ fontSize: 12, color: c.text, opacity: 0.5, textAlign: 'center' }}>{loadError}</Text>
             <Pressable onPress={() => { setLoading(true); setLoadError(null); load(); }}
-              style={{ backgroundColor: c.primary, borderRadius: 10, paddingHorizontal: 20, paddingVertical: 10, marginTop: 4 }}>
+              style={{ backgroundColor: c.primary, borderRadius: 10, paddingHorizontal: layout.screenPx, paddingVertical: 10, marginTop: 4 }}>
               <Text style={{ color: '#fff', fontWeight: '700' }}>Retry</Text>
             </Pressable>
           </NeuCard>
@@ -238,7 +239,7 @@ export default function DoctorCreditTimelineScreen() {
                   <View style={{ flex: 1 }}>
                     <Text style={{ fontSize: 11, color: c.text, opacity: 0.45 }}>Credit Selling Price</Text>
                     <Text style={{ fontSize: 26, fontWeight: '900', color: '#7C3AED' }}>
-                      EGP {actStats.credit_selling_price.toLocaleString()}
+                      EGP {actStats.credit_selling_price.toLocaleString('en-US')}
                     </Text>
                     <Text style={{ fontSize: 11, color: c.text, opacity: 0.35, marginTop: 1 }}>per credit</Text>
                   </View>
@@ -269,7 +270,7 @@ export default function DoctorCreditTimelineScreen() {
                   <View style={{ flex: 1 }}>
                     <Text style={{ fontSize: 11, color: c.text, opacity: 0.45 }}>Total Earnings</Text>
                     <Text style={{ fontSize: 20, fontWeight: '900', color: '#16A34A' }}>
-                      EGP {actStats.total_earnings.toLocaleString()}
+                      EGP {actStats.total_earnings.toLocaleString('en-US')}
                     </Text>
                     <Text style={{ fontSize: 11, color: c.text, opacity: 0.35 }}>
                       {actStats.total_used} credits × EGP {actStats.credit_selling_price}
@@ -285,10 +286,10 @@ export default function DoctorCreditTimelineScreen() {
                   ].map(row => (
                     <View key={row.label} style={{ flexDirection: 'row', alignItems: 'center' }}>
                       <Clock size={14} color={c.text} opacity={0.4} style={{ marginRight: 8 }} />
-                      <Text style={{ fontSize: 12, color: c.text, opacity: 0.45, width: 100 }}>{row.label}</Text>
+                      <Text style={{ fontSize: 12, color: c.text, opacity: 0.45, minWidth: 80, flexShrink: 0 }}>{row.label}</Text>
                       <Text style={{ fontSize: 12, color: c.text, flex: 1 }}>
                         {row.value
-                          ? new Date(row.value).toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+                          ? new Date(row.value).toLocaleString('en-US', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true })
                           : '—'}
                       </Text>
                     </View>
@@ -324,7 +325,7 @@ export default function DoctorCreditTimelineScreen() {
               <View>
                 <Text style={{ fontSize: 11, color: c.text, opacity: 0.45 }}>Revenue Generated</Text>
                 <Text style={{ fontSize: 20, fontWeight: '900', color: '#16A34A' }}>
-                  {'EGP'} {revenue.toLocaleString()}
+                  {'EGP'} {revenue.toLocaleString('en-US')}
                 </Text>
               </View>
             </NeuCard>

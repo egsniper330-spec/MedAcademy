@@ -24,7 +24,7 @@ import { DeleteAccountModal } from '@/components/DeleteAccountModal';
 import { NeuCard } from '@/components/NeuCard';
 import { NeuButton } from '@/components/NeuButton';
 import { useToast } from '@/components/Toast';
-import { neuColors, neuFlatStyle } from '@/lib/neu';
+import { neuColors, useLayout, neuFlatStyle, safeBottom } from '@/lib/neu';
 import { logAndParse } from '@/lib/parseError';
 import { exportCSV } from '@/lib/exportUtils';
 
@@ -145,6 +145,8 @@ const TrashItemRow = memo(function TrashItemRow({
 
 export default function TrashBin() {
   const scheme = useColorScheme();
+  const layout = useLayout();
+  const insets = layout.insets;
   const isDark = scheme === 'dark';
   const c    = isDark ? neuColors.dark : neuColors.light;
   const flat = neuFlatStyle(isDark);
@@ -374,8 +376,8 @@ export default function TrashBin() {
       name:       i.full_name,
       email:      i.email,
       role:       i.role,
-      trashed_at: i.trashed_at ? new Date(i.trashed_at).toLocaleDateString() : '',
-      expires_at: i.trash_expires_at ? new Date(i.trash_expires_at).toLocaleDateString() : '',
+      trashed_at: i.trashed_at ? new Date(i.trashed_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '',
+      expires_at: i.trash_expires_at ? new Date(i.trash_expires_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '',
       reason:     i.trash_reason ?? '',
       trashed_by: i.trashed_by_name ?? '',
     }));
@@ -401,7 +403,7 @@ export default function TrashBin() {
 
   // ── ListHeaderComponent (all UI above the list) ───────────────────────────
   const ListHeader = useMemo(() => (
-    <View style={{ padding: 20, paddingBottom: 0 }}>
+    <View style={{ padding: layout.screenPx, paddingBottom: 0 }}>
       {/* Header */}
       <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 4, marginTop: 8, gap: 10 }}>
         <Trash2 size={22} color="#EF4444" />
@@ -503,7 +505,7 @@ export default function TrashBin() {
             style={{ paddingHorizontal: 12 }}
           />
           <Pressable onPress={() => setSelected(new Set())}
-            style={{ width: 32, height: 32, borderRadius: 8, backgroundColor: `${c.text}10`, alignItems: 'center', justifyContent: 'center' }}>
+            hitSlop={6} style={{ width: 32, height: 32, borderRadius: 8, backgroundColor: `${c.text}10`, alignItems: 'center', justifyContent: 'center' }}>
             <X size={14} color={c.text} />
           </Pressable>
         </NeuCard>
@@ -530,7 +532,7 @@ export default function TrashBin() {
 
   // ── ListFooterComponent ───────────────────────────────────────────────────
   const ListFooter = useMemo(() => (
-    <View style={{ paddingHorizontal: 20, paddingBottom: 20 }}>
+    <View style={{ paddingHorizontal: layout.screenPx, paddingBottom: 20 }}>
       {loadingMore && (
         <View style={{ paddingVertical: 16, alignItems: 'center' }}>
           <ActivityIndicator color={c.primary} />
@@ -565,7 +567,7 @@ export default function TrashBin() {
   // ── Empty state ───────────────────────────────────────────────────────────
   const ListEmpty = useMemo(() => (
     loading ? null : (
-      <View style={{ paddingHorizontal: 20 }}>
+      <View style={{ paddingHorizontal: layout.screenPx }}>
         <NeuCard style={{ padding: 32, alignItems: 'center' }}>
           <Trash2 size={32} color={`${c.text}30`} />
           <Text style={{ fontSize: 14, color: c.text, opacity: 0.4, marginTop: 12 }}>Trash bin is empty</Text>
@@ -587,7 +589,7 @@ export default function TrashBin() {
           renderItem={renderItem}
           extraData={extraData}
           contentInsetAdjustmentBehavior="automatic"
-          contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 40 }}
+          contentContainerStyle={{ paddingHorizontal: layout.screenPx, paddingBottom: layout.scrollBottom() }}
           // Pagination
           onEndReached={loadMore}
           onEndReachedThreshold={0.4}

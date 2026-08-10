@@ -16,7 +16,7 @@ import {
 import { PageHeader } from '@/components/PageHeader';
 import { supabase } from '@/client/supabase';
 import { NeuCard } from '@/components/NeuCard';
-import { neuColors, neuFlatStyle, neuPressedStyle } from '@/lib/neu';
+import { neuColors, neuFlatStyle, neuPressedStyle, useLayout } from '@/lib/neu';
 import { formatBytes } from '@/lib/videoUploadEngine';
 
 type MonitorTab = 'health' | 'uploads' | 'audit';
@@ -48,6 +48,7 @@ export default function VideoMonitorScreen() {
   const scheme = useColorScheme();
   const isDark = scheme === 'dark';
   const c = isDark ? neuColors.dark : neuColors.light;
+  const layout = useLayout();
   const router = useRouter();
 
   const [uploads, setUploads] = useState<any[]>([]);
@@ -220,7 +221,7 @@ export default function VideoMonitorScreen() {
   return (
     <ScrollView style={{ flex: 1, backgroundColor: c.base }} contentInsetAdjustmentBehavior="automatic"
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />}>
-      <View style={{ padding: 20, gap: 16 }}>
+      <View style={{ padding: layout.screenPx, gap: 16 }}>
 
         {/* Header */}
         <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 8 }}>
@@ -359,7 +360,7 @@ export default function VideoMonitorScreen() {
                       </Text>
                     </View>
                     <Text style={{ fontSize: 10, color: c.text, opacity: 0.35 }}>
-                      {ts.toLocaleDateString()} {ts.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                      {ts.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })} {ts.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true })}
                     </Text>
                   </View>
                 );

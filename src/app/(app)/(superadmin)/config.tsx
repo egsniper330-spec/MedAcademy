@@ -6,12 +6,13 @@ import { PageHeader } from '@/components/PageHeader';
 import { getSystemConfig, upsertSystemConfig } from '@/lib/api';
 import { NeuCard } from '@/components/NeuCard';
 import { NeuButton } from '@/components/NeuButton';
-import { neuColors } from '@/lib/neu';
+import { neuColors, useLayout } from '@/lib/neu';
 
 export default function SuperAdminConfig() {
   const scheme = useColorScheme();
   const isDark = scheme === 'dark';
   const c = isDark ? neuColors.dark : neuColors.light;
+  const layout = useLayout();
 
   const [configs, setConfigs] = useState<any[]>([]);
   const [edits, setEdits] = useState<Record<string, string>>({});
@@ -49,7 +50,7 @@ export default function SuperAdminConfig() {
   return (
     <ScrollView style={{ flex: 1, backgroundColor: c.base }} contentInsetAdjustmentBehavior="automatic"
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />}>
-      <View style={{ padding: 20 }}>
+      <View style={{ padding: layout.screenPx }}>
         <PageHeader title="System Configuration" subtitle="Manage platform-wide settings" />
 
         {loading ? <ActivityIndicator color={c.primary} style={{ marginTop: 40 }} /> : (
@@ -78,7 +79,7 @@ export default function SuperAdminConfig() {
                   placeholderTextColor={`${c.text}55`}
                 />
               </View>
-              <NeuButton label={saving === cfg.key ? 'Saving…' : 'Save'} onPress={() => handleSave(cfg.key)} loading={saving === cfg.key} style={{ alignSelf: 'flex-end', paddingHorizontal: 20, paddingVertical: 10 }} />
+              <NeuButton label={saving === cfg.key ? 'Saving…' : 'Save'} onPress={() => handleSave(cfg.key)} loading={saving === cfg.key} style={{ alignSelf: 'flex-end', paddingHorizontal: layout.screenPx, paddingVertical: 10 }} />
             </NeuCard>
           ))
         )}

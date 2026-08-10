@@ -18,7 +18,7 @@ import {
 import { NeuCard } from '@/components/NeuCard';
 import { NeuButton } from '@/components/NeuButton';
 import { ResponsiveModal } from '@/components/ResponsiveModal';
-import { neuColors } from '@/lib/neu';
+import { neuColors, useLayout } from '@/lib/neu';
 import { getActivationLedger, getActivationLedgerStats } from '@/lib/api';
 import { exportCSV, CODE_COLUMNS } from '@/lib/exportUtils';
 import { useDebounce } from '@/lib/useDebounce';
@@ -74,6 +74,7 @@ export default function CodeHistoryScreen() {
   const scheme = useColorScheme();
   const isDark = scheme === 'dark';
   const c = isDark ? neuColors.dark : neuColors.light;
+  const layout = useLayout();
   const router = useRouter();
 
   const [rows, setRows]   = useState<CodeRow[]>([]);
@@ -146,7 +147,7 @@ export default function CodeHistoryScreen() {
         contentInsetAdjustmentBehavior="automatic"
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />}
         ListHeaderComponent={
-          <View style={{ padding: 20, paddingTop: 8 }}>
+          <View style={{ padding: layout.screenPx, paddingTop: 8 }}>
             {/* Header */}
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 20 }}>
               <View style={{ flex: 1 }}>
@@ -183,13 +184,13 @@ export default function CodeHistoryScreen() {
 
             {/* Search */}
             <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 12, minWidth: 0 }}>
-              <Search size={15} color={`${c.text}55`} style={{ position: 'absolute', left: 14, zIndex: 1 }} />
+              <Search size={15} color={`${c.text}55`}  />
               <TextInput value={search} onChangeText={setSearch}
                 placeholder="Search code, course, student..."
                 placeholderTextColor={`${c.text}55`}
                 style={{ ...inp, flex: 1, minWidth: 0, paddingLeft: 36 }} />
               {search !== '' && (
-                <Pressable onPress={() => setSearch('')} style={{ position: 'absolute', right: 12 }}>
+                <Pressable onPress={() => setSearch('')} >
                   <X size={14} color={`${c.text}55`} />
                 </Pressable>
               )}
@@ -215,7 +216,7 @@ export default function CodeHistoryScreen() {
         renderItem={({ item: row }) => {
           const color = statusColor(row.status);
           return (
-            <Pressable onPress={() => setSelected(row)} style={{ paddingHorizontal: 20, marginBottom: 10 }}>
+            <Pressable onPress={() => setSelected(row)} style={{ paddingHorizontal: layout.screenPx, marginBottom: 10 }}>
               <NeuCard style={{ padding: 14 }}>
                 <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 12 }}>
                   <View style={{ width: 38, height: 38, borderRadius: 12, backgroundColor: `${color}18`, alignItems: 'center', justifyContent: 'center', marginTop: 2 }}>

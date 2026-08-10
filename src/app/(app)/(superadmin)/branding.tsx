@@ -13,12 +13,13 @@ import { PageHeader } from '@/components/PageHeader';
 import { getBranding, updateBranding } from '@/lib/api';
 import { NeuCard } from '@/components/NeuCard';
 import { NeuButton } from '@/components/NeuButton';
-import { neuColors } from '@/lib/neu';
+import { neuColors, useLayout } from '@/lib/neu';
 
 export default function BrandingScreen() {
   const scheme = useColorScheme();
   const isDark = scheme === 'dark';
   const c = isDark ? neuColors.dark : neuColors.light;
+  const layout = useLayout();
 
   const [brand, setBrand] = useState<any>(null);
   const [loading, setLoading] = useState(true);
@@ -68,7 +69,7 @@ export default function BrandingScreen() {
   return (
     <ScrollView style={{ flex: 1, backgroundColor: c.base }} contentInsetAdjustmentBehavior="automatic"
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />}>
-      <View style={{ padding: 20 }}>
+      <View style={{ padding: layout.screenPx }}>
         <PageHeader title="Branding" subtitle="Customize platform appearance" accentColor="#7C3AED" />
 
         {success && (

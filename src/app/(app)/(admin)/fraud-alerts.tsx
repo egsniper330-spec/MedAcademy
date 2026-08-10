@@ -9,7 +9,7 @@ import { PageHeader } from '@/components/PageHeader';
 import { NeuCard } from '@/components/NeuCard';
 import { NeuButton } from '@/components/NeuButton';
 import { useToast } from '@/components/Toast';
-import { neuColors } from '@/lib/neu';
+import { neuColors, useLayout } from '@/lib/neu';
 import { supabase } from '@/client/supabase';
 import { getContactDisplay } from '@/lib/api';
 
@@ -42,6 +42,7 @@ export default function FraudAlertsScreen() {
   const scheme = useColorScheme();
   const isDark = scheme === 'dark';
   const c = isDark ? neuColors.dark : neuColors.light;
+  const layout = useLayout();
   const { showToast } = useToast();
 
   const [flags, setFlags] = useState<FraudFlag[]>([]);
@@ -89,7 +90,7 @@ export default function FraudAlertsScreen() {
       contentInsetAdjustmentBehavior="automatic"
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />}
     >
-      <View style={{ padding: 20 }}>
+      <View style={{ padding: layout.screenPx }}>
         <PageHeader title="Fraud Alerts" subtitle="Platform anomaly detection" accentColor="#DC2626" />
 
         {/* Summary bar */}

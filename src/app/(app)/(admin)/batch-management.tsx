@@ -18,7 +18,7 @@ import { NeuCard } from '@/components/NeuCard';
 import { NeuButton } from '@/components/NeuButton';
 import { ResponsiveModal } from '@/components/ResponsiveModal';
 import { useToast } from '@/components/Toast';
-import { neuColors } from '@/lib/neu';
+import { neuColors, useLayout } from '@/lib/neu';
 import { getCodeBatches, getActivationLedger, invokeEdgeFunction } from '@/lib/api';
 
 type Batch = {
@@ -50,6 +50,7 @@ export default function BatchManagementScreen() {
   const scheme = useColorScheme();
   const isDark = scheme === 'dark';
   const c = isDark ? neuColors.dark : neuColors.light;
+  const layout = useLayout();
   const { showToast } = useToast();
 
   const [batches, setBatches]     = useState<Batch[]>([]);
@@ -121,7 +122,7 @@ export default function BatchManagementScreen() {
         contentInsetAdjustmentBehavior="automatic"
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />}
         ListHeaderComponent={
-          <View style={{ padding: 20, paddingTop: 8 }}>
+          <View style={{ padding: layout.screenPx, paddingTop: 8 }}>
             <PageHeader title="Batch Manager" subtitle={`${batches.length} batches`} accentColor="#D97706" />
             {loading && <ActivityIndicator size="large" color={c.primary} style={{ marginTop: 40 }} />}
           </View>
@@ -132,7 +133,7 @@ export default function BatchManagementScreen() {
           const pct = usedPct(batch);
 
           return (
-            <View style={{ paddingHorizontal: 20, marginBottom: 12 }}>
+            <View style={{ paddingHorizontal: layout.screenPx, marginBottom: 12 }}>
               <Pressable onPress={() => toggleExpand(batch.id)}>
                 <NeuCard style={{ padding: 16 }}>
                   <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 12 }}>

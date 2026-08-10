@@ -17,7 +17,7 @@ import { supabase } from '@/client/supabase';
 import { NeuCard } from '@/components/NeuCard';
 import { NeuButton } from '@/components/NeuButton';
 import { useToast } from '@/components/Toast';
-import { neuColors } from '@/lib/neu';
+import { neuColors, useLayout } from '@/lib/neu';
 import { friendlyError } from '@/lib/validation';
 import { useDebounce } from '@/lib/useDebounce';
 import { useImpersonationStore, useProfileStore, type UserRole } from '@/lib/store';
@@ -31,6 +31,7 @@ export default function ImpersonationScreen() {
   const scheme = useColorScheme();
   const isDark = scheme === 'dark';
   const c = isDark ? neuColors.dark : neuColors.light;
+  const layout = useLayout();
   const router = useRouter();
   const { showToast } = useToast();
   const { startImpersonation } = useImpersonationStore();
@@ -130,7 +131,7 @@ export default function ImpersonationScreen() {
 
   return (
     <ScrollView style={{ flex: 1, backgroundColor: c.base }} contentInsetAdjustmentBehavior="automatic">
-      <View style={{ padding: 20 }}>
+      <View style={{ padding: layout.screenPx }}>
         <PageHeader title="Impersonation" subtitle="Log in as another user" accentColor="#D97706" />
 
         <NeuCard style={{ marginBottom: 20, padding: 14, flexDirection: 'row', gap: 10 }}>
@@ -210,7 +211,7 @@ export default function ImpersonationScreen() {
             <NeuCard key={log.id} style={{ marginBottom: 10, padding: 14 }}>
               <Text style={{ fontSize: 13, fontWeight: '700', color: c.text }}>{log.action?.replace(/_/g, ' ')}</Text>
               <Text style={{ fontSize: 12, color: c.text, opacity: 0.5, marginTop: 3 }}>
-                {log.details?.target_name ?? 'Unknown'} ({log.details?.target_role ?? ''}) • {new Date(log.created_at).toLocaleString()}
+                {log.details?.target_name ?? 'Unknown'} ({log.details?.target_role ?? ''}) • {new Date(log.created_at).toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true })}
               </Text>
             </NeuCard>
           ))}

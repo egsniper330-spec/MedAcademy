@@ -16,7 +16,7 @@ import {
   CreditCard, Ticket, CheckCircle, ArrowLeft, ArrowRight,
 } from 'lucide-react-native';
 import { useProfileStore } from '@/lib/store';
-import { neuColors, neuFlatStyle } from '@/lib/neu';
+import { neuColors, useLayout, neuFlatStyle, safeBottom , zIndex} from '@/lib/neu';
 import { PageHeader } from '@/components/PageHeader';
 import { NeuCard } from '@/components/NeuCard';
 import { NeuButton } from '@/components/NeuButton';
@@ -70,7 +70,7 @@ function PickerSheet({
   return (
     <View style={{
       position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
-      backgroundColor: 'rgba(0,0,0,0.35)', zIndex: 100, justifyContent: 'flex-end',
+      backgroundColor: 'rgba(0,0,0,0.35)', zIndex: zIndex.modal, justifyContent: 'flex-end',
     }}>
       <View style={[flat, { borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 20, maxHeight: '60%' }]}>
         <Text style={{ fontSize: 17, fontWeight: '700', color: c.text, marginBottom: 16 }}>{title}</Text>
@@ -129,6 +129,8 @@ export default function CreateStudentScreen() {
   const scheme = useColorScheme();
   const isDark = scheme === 'dark';
   const c = isDark ? neuColors.dark : neuColors.light;
+  const layout = useLayout();
+  const insets = layout.insets;
   const flat = neuFlatStyle(isDark);
   const router = useRouter();
   const { profile } = useProfileStore();
@@ -300,8 +302,8 @@ export default function CreateStudentScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: c.base }}>
-      <KeyboardAvoidingView behavior="padding" style={{ flex: 1 }}>
-        <ScrollView contentContainerStyle={{ padding: 20, gap: 16, paddingBottom: 60 }} keyboardShouldPersistTaps="handled">
+      <KeyboardAvoidingView behavior={process.env.EXPO_OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1 }}>
+        <ScrollView contentContainerStyle={{ padding: layout.screenPx, gap: 16, paddingBottom: layout.scrollBottom() }} keyboardShouldPersistTaps="handled">
           <PageHeader title="Create Student" subtitle={step === 1 ? 'Step 1 of 2 — Student Info' : 'Step 2 of 2 — Creation Mode'} />
 
           {/* Step indicator */}

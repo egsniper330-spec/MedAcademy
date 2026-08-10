@@ -16,9 +16,11 @@ import {
 import { useProfileStore } from '@/lib/store';
 import { getSuperAdminStats } from '@/lib/api';
 import { getFirstName } from '@/lib/utils';
-import { neuColors, neuFlatStyle, neuPressedStyle } from '@/lib/neu';
-import HamburgerButton from '@/components/HamburgerButton';
+import { neuColors, neuFlatStyle, neuPressedStyle, useLayout } from '@/lib/neu';
+import { DashboardHeader } from '@/components/DashboardHeader';
 import Bell from '@/components/Bell';
+import { useNotificationPermission } from '@/hooks/useNotificationPermission';
+import { PermissionRationaleModal } from '@/components/PermissionRationaleModal';
 
 // ── KPI Card ─────────────────────────────────────────────────────────────────
 function KpiCard({
@@ -145,6 +147,7 @@ export default function SuperAdminDashboard() {
   const scheme = useColorScheme();
   const isDark = scheme === 'dark';
   const c = isDark ? neuColors.dark : neuColors.light;
+  const layout = useLayout();
   const { profile } = useProfileStore();
   const router = useRouter();
 
@@ -161,6 +164,19 @@ export default function SuperAdminDashboard() {
 
   useFocusEffect(useCallback(() => { setLoading(true); loadData(); }, [loadData]));
   const onRefresh = async () => { setRefreshing(true); await loadData(); setRefreshing(false); };
+
+  const {
+    triggerNotificationPermission,
+    showRationale: showNotifRationale,
+    setShowRationale: setShowNotifRationale,
+    isBlocked: notifBlocked,
+    confirmRequest: confirmNotifRequest,
+  } = useNotificationPermission();
+
+  useFocusEffect(useCallback(() => {
+    (async () => { await triggerNotificationPermission(); })();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []));
 
   const firstName = getFirstName(profile?.full_name);
 
@@ -219,6 +235,7 @@ export default function SuperAdminDashboard() {
       title: 'Platform & Settings',
       items: [
         { icon: ShieldAlert, label: 'Security',         description: 'Dashboard, policies & logs',      color: '#EF4444',  path: '/(app)/(superadmin)/sec-dashboard' },
+        { icon: Shield,      label: 'Security Diag.',   description: 'Native module diagnostics',       color: '#DC2626',  path: '/(app)/security-diagnostics' },
         { icon: Flag,        label: 'Feature Flags',    description: 'Toggle platform features',        color: '#7C3AED',  path: '/(app)/(superadmin)/feature-flags' },
         { icon: Paintbrush,  label: 'Branding',         description: 'Logo, colours & identity',        color: '#D97706',  path: '/(app)/(superadmin)/branding' },
         { icon: Wrench,      label: 'Maintenance',      description: 'Mode & system operations',        color: '#6B7280',  path: '/(app)/(superadmin)/maintenance' },
@@ -235,21 +252,12 @@ export default function SuperAdminDashboard() {
       contentInsetAdjustmentBehavior="automatic"
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />}
     >
-      <View style={{ padding: 20 }}>
-
-        {/* ── Header ──────────────────────────────────────────────────── */}
-        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20, marginTop: 8 }}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-            <HamburgerButton />
-            <View>
-              <Text style={{ fontSize: 11, color: c.text, opacity: 0.4, textTransform: 'uppercase', letterSpacing: 1 }}>Super Admin</Text>
-              <Text style={{ fontSize: 22, fontWeight: '900', color: c.text, letterSpacing: -0.5 }}>
-                {firstName ? `Hi, ${firstName} 👋` : 'Dashboard 👋'}
-              </Text>
-            </View>
-          </View>
-          <Bell />
-        </View>
+      <DashboardHeader
+        roleLabel="Super Admin"
+        greeting={firstName ? `Hi, ${firstName} 👋` : 'Dashboard 👋'}
+        rightActions={<Bell />}
+      />
+      <View style={{ padding: layout.screenPx, paddingTop: 0 }}>
 
         {/* ── Global search ───────────────────────────────────────────── */}
         <Pressable
@@ -286,8 +294,8 @@ export default function SuperAdminDashboard() {
             {/* ── KPI row 2: Revenue & Operations ──────────────────────── */}
             <SectionLabel label="Revenue & Operations" c={c} />
             <View style={{ flexDirection: 'row', flexWrap: 'wrap', marginRight: -10 }}>
-              <KpiCard label="Total Credits"    value={stats.totalCredits.toLocaleString()}  icon={CreditCard}  color="#16A34A" path="/(app)/(superadmin)/sa-credits"    c={c} isDark={isDark} />
-              <KpiCard label="Used Credits"     value={stats.usedCredits.toLocaleString()}   icon={Coins}       color="#D97706" path="/(app)/(superadmin)/sa-credits"      c={c} isDark={isDark} />
+              <KpiCard label="Total Credits"    value={stats.totalCredits.toLocaleString('en-US')}  icon={CreditCard}  color="#16A34A" path="/(app)/(superadmin)/sa-credits"    c={c} isDark={isDark} />
+              <KpiCard label="Used Credits"     value={stats.usedCredits.toLocaleString('en-US')}   icon={Coins}       color="#D97706" path="/(app)/(superadmin)/sa-credits"      c={c} isDark={isDark} />
               <KpiCard label="Published"        value={stats.publishedCourses}               icon={BookOpen}    color="#2DA8FF" path="/(app)/(admin)/global-search"       c={c} isDark={isDark} />
               <KpiCard label="Draft Courses"    value={stats.draftCourses}                   icon={FileText}    color="#6B7280" path="/(app)/(admin)/global-search"       c={c} isDark={isDark} />
             </View>
@@ -370,6 +378,13 @@ export default function SuperAdminDashboard() {
         </View>
 
       </View>
+      <PermissionRationaleModal
+        type="notifications"
+        visible={showNotifRationale}
+        isBlocked={notifBlocked}
+        onConfirm={confirmNotifRequest}
+        onDismiss={() => setShowNotifRationale(false)}
+      />
     </ScrollView>
   );
 }

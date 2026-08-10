@@ -2,6 +2,7 @@ import React, { useRef, useState } from 'react';
 import { Animated, Pressable, Text, ActivityIndicator, View, useColorScheme, ViewStyle, TextStyle } from 'react-native';
 import * as Haptics from 'expo-haptics';
 import { neuFlatStyle, neuPressedStyle, neuColors } from '@/lib/neu';
+import { radius, spacing, typography } from '@/lib/ds';
 
 interface NeuButtonProps {
   label: string;
@@ -49,21 +50,21 @@ export function NeuButton({
       onPressOut={handlePressOut}
       onPress={onPress}
       disabled={disabled || loading}
-      style={{ width: fullWidth ? '100%' : undefined, borderRadius: 14 }}
+      style={{ width: fullWidth ? '100%' : undefined, borderRadius: radius.md }}
     >
       <Animated.View
         style={[
           shadowStyle,
           {
-            borderRadius: 14,
-            paddingVertical: 14,
-            paddingHorizontal: 24,
+            borderRadius: radius.md,
+            paddingVertical: spacing.md,
+            paddingHorizontal: spacing.xxl,
             backgroundColor: bgColor,
             alignItems: 'center',
             justifyContent: 'center',
             opacity: disabled ? 0.58 : 1,
             flexDirection: 'row',
-            gap: 8,
+            gap: spacing.sm,
             transform: [{ scale }],
           },
           style,
@@ -73,12 +74,14 @@ export function NeuButton({
           <ActivityIndicator color={labelColor} size="small" />
         ) : (
           <>
-            {icon && <View style={{ marginRight: 2 }}>{icon}</View>}
+            {icon && <View>{icon}</View>}
             <Text
               numberOfLines={1}
               style={[{
-                fontSize: 15, fontWeight: '700', color: labelColor,
-                letterSpacing: 0.2, flexShrink: 1,
+                ...typography.label,
+                color: labelColor,
+                letterSpacing: 0.2,
+                flexShrink: 1,
               }, textStyle]}
             >
               {label}

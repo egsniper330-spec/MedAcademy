@@ -18,7 +18,7 @@ import { NeuCard } from '@/components/NeuCard';
 import { NeuButton } from '@/components/NeuButton';
 import { ResponsiveModal } from '@/components/ResponsiveModal';
 import { useToast } from '@/components/Toast';
-import { neuColors } from '@/lib/neu';
+import { neuColors, useLayout } from '@/lib/neu';
 import { getDoctors, invokeEdgeFunction } from '@/lib/api';
 import { useDebounce } from '@/lib/useDebounce';
 import { getPublicEmail } from '@/lib/api';
@@ -27,6 +27,7 @@ export default function BulkCreditsScreen() {
   const scheme = useColorScheme();
   const isDark = scheme === 'dark';
   const c = isDark ? neuColors.dark : neuColors.light;
+  const layout = useLayout();
   const { showToast } = useToast();
 
   const [doctors, setDoctors]       = useState<any[]>([]);
@@ -133,18 +134,18 @@ export default function BulkCreditsScreen() {
         contentInsetAdjustmentBehavior="automatic"
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />}
         ListHeaderComponent={
-          <View style={{ padding: 20, paddingTop: 8 }}>
+          <View style={{ padding: layout.screenPx, paddingTop: 8 }}>
             {/* Header */}
             <PageHeader title="Bulk Credits" subtitle={`${selected.size} selected of ${filtered.length} doctors`} />
 
             {/* Search */}
             <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 12, minWidth: 0 }}>
-              <Search size={15} color={`${c.text}55`} style={{ position: 'absolute', left: 14, zIndex: 1 }} />
+              <Search size={15} color={`${c.text}55`}  />
               <TextInput value={search} onChangeText={setSearch} placeholder="Search doctors..."
                 placeholderTextColor={`${c.text}55`}
                 style={{ ...(inp as object), flex: 1, minWidth: 0, paddingLeft: 36, marginBottom: 0 }} />
               {search !== '' && (
-                <Pressable onPress={() => setSearch('')} style={{ position: 'absolute', right: 12 }}>
+                <Pressable onPress={() => setSearch('')} >
                   <X size={14} color={`${c.text}55`} />
                 </Pressable>
               )}
@@ -180,7 +181,7 @@ export default function BulkCreditsScreen() {
         renderItem={({ item: doc }) => {
           const isSelected = selected.has(doc.id);
           return (
-            <Pressable onPress={() => toggleSelect(doc.id)} style={{ paddingHorizontal: 20, marginBottom: 8 }}>
+            <Pressable onPress={() => toggleSelect(doc.id)} style={{ paddingHorizontal: layout.screenPx, marginBottom: 8 }}>
               <NeuCard style={{ padding: 14, borderWidth: isSelected ? 1.5 : 0, borderColor: isSelected ? c.primary : 'transparent' }}>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
                   {isSelected
@@ -212,7 +213,7 @@ export default function BulkCreditsScreen() {
       {/* Operation Modal */}
       <ResponsiveModal visible={opModal} onClose={() => setOpModal(false)}
         title={opType === 'add' ? `Add Credits to ${selected.size} Doctors` : `Remove Credits from ${selected.size} Doctors`}>
-        <KeyboardAvoidingView behavior="padding">
+        <KeyboardAvoidingView behavior={process.env.EXPO_OS === 'ios' ? 'padding' : 'height'}>
           <Text style={{ fontSize: 13, color: c.text, opacity: 0.5, marginBottom: 16 }}>
             {opType === 'add'
               ? 'The same amount will be added to all selected doctors.'

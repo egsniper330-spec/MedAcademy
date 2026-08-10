@@ -12,7 +12,7 @@ import {
 } from '@/lib/api';
 import { NeuCard } from '@/components/NeuCard';
 import { NeuButton } from '@/components/NeuButton';
-import { neuColors } from '@/lib/neu';
+import { neuColors, useLayout } from '@/lib/neu';
 import { useToast } from '@/components/Toast';
 
 const TARGET_TYPES = [
@@ -31,6 +31,7 @@ export default function NotificationsCenterScreen() {
   const scheme = useColorScheme();
   const isDark = scheme === 'dark';
   const c = isDark ? neuColors.dark : neuColors.light;
+  const layout = useLayout();
 
   const [title, setTitle] = useState('');
   const [body, setBody] = useState('');
@@ -79,7 +80,7 @@ export default function NotificationsCenterScreen() {
   return (
     <ScrollView style={{ flex: 1, backgroundColor: c.base }} contentInsetAdjustmentBehavior="automatic"
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />}>
-      <View style={{ padding: 20 }}>
+      <View style={{ padding: layout.screenPx }}>
         <PageHeader title="Notification Center" subtitle="Send messages to users" accentColor="#D97706" />
 
         {/* Compose */}
@@ -166,7 +167,7 @@ export default function NotificationsCenterScreen() {
                   <View style={{ backgroundColor: `${c.primary}18`, borderRadius: 6, paddingHorizontal: 7, paddingVertical: 2 }}>
                     <Text style={{ fontSize: 10, fontWeight: '700', color: c.primary }}>{n.target_type ?? 'individual'}</Text>
                   </View>
-                  <Text style={{ fontSize: 11, color: c.text, opacity: 0.4 }}>{new Date(n.sent_at ?? n.created_at).toLocaleString()}</Text>
+                  <Text style={{ fontSize: 11, color: c.text, opacity: 0.4 }}>{new Date(n.sent_at ?? n.created_at).toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true })}</Text>
                 </View>
               </NeuCard>
             ))}

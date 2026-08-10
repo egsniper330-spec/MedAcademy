@@ -1,6 +1,5 @@
 import { useCallback, useRef, useState } from 'react';
 import { View, Text, ScrollView, useColorScheme, Pressable, ActivityIndicator, Modal, Platform, useWindowDimensions } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Image } from 'expo-image';
 import { useFocusEffect, useRouter, useLocalSearchParams } from 'expo-router';
 import {
@@ -12,7 +11,7 @@ import { supabase } from '@/client/supabase';
 import { useProfileStore } from '@/lib/store';
 import { NeuCard } from '@/components/NeuCard';
 import { NeuButton } from '@/components/NeuButton';
-import { neuColors, neuFlatStyle } from '@/lib/neu';
+import { neuColors, useLayout, neuFlatStyle, safeTop, safeLeft, safeRight } from '@/lib/neu';
 // expo-file-system v55: legacy sub-path exports createDownloadResumable
 // (real progress callbacks) + documentDirectory/cacheDirectory string constants
 import {
@@ -80,7 +79,8 @@ export default function LessonPlayer() {
   const isDark = scheme === 'dark';
   const c = isDark ? neuColors.dark : neuColors.light;
   const flat = neuFlatStyle(isDark);
-  const insets = useSafeAreaInsets();
+  const layout = useLayout();
+  const insets = layout.insets;
   const { width: screenWidth } = useWindowDimensions();
   const router = useRouter();
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -419,7 +419,7 @@ export default function LessonPlayer() {
                   onPress={() => setDownloadState(prev => ({ ...prev, visible: false }))}
                   accessibilityLabel="Dismiss download panel"
                   accessibilityRole="button"
-                  style={{ width: 32, height: 32, borderRadius: 9, backgroundColor: `${c.text}0D`, alignItems: 'center', justifyContent: 'center' }}
+                  hitSlop={6} style={{ width: 32, height: 32, borderRadius: 9, backgroundColor: `${c.text}0D`, alignItems: 'center', justifyContent: 'center' }}
                 >
                   <X size={15} color={c.text} />
                 </Pressable>
@@ -457,19 +457,20 @@ export default function LessonPlayer() {
           </View>
         </View>
       </Modal>
-      {/* Header — safe-area aware, clears Dynamic Island / notch on every device */}
-      <View style={{ paddingTop: insets.top + 12, paddingHorizontal: 20, paddingBottom: 12, flexDirection: 'row', alignItems: 'center' }}>
+      {/* Header — spacing from headerTokens (EDGE_PAD=4, BREATHING=8) */}
+      <View style={{ paddingTop: layout.headerTop, paddingLeft: layout.headerLeft, paddingRight: layout.headerRight, paddingBottom: 12, flexDirection: 'row', alignItems: 'center' }}>
         <Pressable onPress={() => router.back()}
+          hitSlop={8}
           accessibilityLabel="Go back"
           accessibilityRole="button"
           style={{ width: 40, height: 40, borderRadius: 12, backgroundColor: c.base, alignItems: 'center', justifyContent: 'center',
-            shadowColor: c.shadowDark, shadowOffset: { width: 2, height: 2 }, shadowOpacity: 0.6, shadowRadius: 5, marginRight: 14 }}>
+            shadowColor: c.shadowDark, shadowOffset: { width: 2, height: 2 }, shadowOpacity: 0.5, shadowRadius: 5, marginRight: 14 }}>
           <ArrowLeft size={20} color={c.text} opacity={0.6} />
         </Pressable>
         <Text style={{ fontSize: 17, fontWeight: '800', color: c.text, flex: 1 }} numberOfLines={1}>{lesson.title}</Text>
       </View>
 
-      <View style={{ padding: 20, gap: 16 }}>
+      <View style={{ padding: layout.screenPx, gap: 16 }}>
         {/* Lesson meta — BUG#1: status badge hidden from students */}
         <NeuCard>
           <Text style={{ fontSize: 20, fontWeight: '800', color: c.text, marginBottom: 8 }}>{lesson.title}</Text>
@@ -713,7 +714,7 @@ export default function LessonPlayer() {
                 })}
               </>
             ) : (
-              <NeuCard style={{ padding: 20, alignItems: 'center', gap: 10 }}>
+              <NeuCard style={{ padding: layout.screenPx, alignItems: 'center', gap: 10 }}>
                 <Lock size={32} color={c.text} opacity={0.2} />
                 <Text style={{ fontSize: 14, fontWeight: '600', color: c.text, opacity: 0.5 }}>
                   Subscribe to access {(lesson.lesson_materials?.length ?? 0) + (lesson.lesson_pdfs?.length ?? 0)} materials

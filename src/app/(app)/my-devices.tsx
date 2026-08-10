@@ -14,7 +14,7 @@ import {
   RotateCcw, Pencil, History, ChevronRight, Info, Infinity,
 } from 'lucide-react-native';
 import { getMyDevices, logoutDevice, renameDevice, DeviceRecord } from '@/lib/api';
-import { neuColors, neuFlatStyle } from '@/lib/neu';
+import { neuColors, useLayout, neuFlatStyle, neuMicroStyle } from '@/lib/neu';
 import { NeuCard } from '@/components/NeuCard';
 import { NeuButton } from '@/components/NeuButton';
 import { ResponsiveModal } from '@/components/ResponsiveModal';
@@ -51,6 +51,8 @@ function DeviceBadge({ label, color, bg }: { label: string; color: string; bg: s
 
 export default function MyDevices() {
   const scheme = useColorScheme();
+  const layout = useLayout();
+  const insets = layout.insets;
   const isDark = scheme === 'dark';
   const c = isDark ? neuColors.dark : neuColors.light;
   const router = useRouter();
@@ -122,7 +124,7 @@ export default function MyDevices() {
         contentInsetAdjustmentBehavior="automatic"
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />}
       >
-        <View style={{ padding: 20, paddingTop: 12 }}>
+        <View style={{ padding: layout.screenPx, paddingTop: 12 }}>
           {/* Back navigation header */}
           <PageHeader title="My Devices" subtitle="Manage your registered devices" showBack />
 
@@ -223,7 +225,6 @@ export default function MyDevices() {
                       width: 46, height: 46, borderRadius: 14,
                       backgroundColor: isBlocked ? '#DC262618' : `${c.primary}18`,
                       alignItems: 'center', justifyContent: 'center',
-                      ...Platform.select({ ios: neuFlatStyle(isDark), android: { elevation: 2, backgroundColor: c.base } }),
                     }}>
                       <Smartphone size={22} color={isBlocked ? '#DC2626' : c.primary} />
                     </View>
@@ -276,21 +277,21 @@ export default function MyDevices() {
                       <View style={{ gap: 6 }}>
                         <Pressable
                           onPress={() => { setRenameText(device.device_name ?? ''); setModal({ type: 'rename', device }); }}
-                          style={{ width: 32, height: 32, borderRadius: 10, backgroundColor: `${c.primary}18`, alignItems: 'center', justifyContent: 'center' }}
+                          hitSlop={6} style={{ width: 32, height: 32, borderRadius: 10, backgroundColor: `${c.primary}18`, alignItems: 'center', justifyContent: 'center' }}
                         >
                           <Pencil size={14} color={c.primary} />
                         </Pressable>
                         {current && (
                           <Pressable
                             onPress={() => setModal({ type: 'logout', device })}
-                            style={{ width: 32, height: 32, borderRadius: 10, backgroundColor: '#DC262618', alignItems: 'center', justifyContent: 'center' }}
+                            hitSlop={6} style={{ width: 32, height: 32, borderRadius: 10, backgroundColor: '#DC262618', alignItems: 'center', justifyContent: 'center' }}
                           >
                             <RotateCcw size={14} color="#DC2626" />
                           </Pressable>
                         )}
                         <Pressable
                           onPress={() => setModal({ type: 'info', device })}
-                          style={{ width: 32, height: 32, borderRadius: 10, backgroundColor: `${c.text}0D`, alignItems: 'center', justifyContent: 'center' }}
+                          hitSlop={6} style={{ width: 32, height: 32, borderRadius: 10, backgroundColor: `${c.text}0D`, alignItems: 'center', justifyContent: 'center' }}
                         >
                           <Info size={14} color={`${c.text}99`} />
                         </Pressable>
@@ -371,8 +372,8 @@ export default function MyDevices() {
             ['App Version', modal.device.app_version],
             ['Manufacturer', modal.device.manufacturer],
             ['IP Address', modal.device.ip_address],
-            ['Registered', modal.device.registered_at ? new Date(modal.device.registered_at).toLocaleString() : null],
-            ['Last Active', modal.device.last_active_at ? new Date(modal.device.last_active_at).toLocaleString() : null],
+            ['Registered', modal.device.registered_at ? new Date(modal.device.registered_at).toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true }) : null],
+            ['Last Active', modal.device.last_active_at ? new Date(modal.device.last_active_at).toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true }) : null],
           ].filter(([, v]) => v).map(([k, v]) => (
             <View key={k as string} style={{ flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 7, borderBottomWidth: 1, borderBottomColor: `${c.text}0A` }}>
               <Text style={{ fontSize: 13, color: c.text, opacity: 0.5, fontWeight: '600' }}>{k}</Text>

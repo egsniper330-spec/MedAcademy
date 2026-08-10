@@ -7,6 +7,7 @@ import {
   View, Text, ScrollView, Pressable, ActivityIndicator,
   TextInput, useColorScheme, RefreshControl, Modal,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect } from 'expo-router';
 import {
   Archive, BookOpen, Clock, RefreshCw, Search,
@@ -27,6 +28,7 @@ export default function ArchivedCoursesScreen() {
   const scheme = useColorScheme();
   const isDark = scheme === 'dark';
   const c = isDark ? neuColors.dark : neuColors.light;
+  const insets = useSafeAreaInsets();
   const { profile } = useProfileStore();
   const { showToast } = useToast();
 
@@ -146,7 +148,7 @@ export default function ArchivedCoursesScreen() {
           </View>
         </View>
 
-        <View style={{ paddingHorizontal: 20, gap: 14, paddingBottom: 60 }}>
+        <View style={{ paddingHorizontal: 20, gap: 14, paddingBottom: Math.max(insets.bottom, 30) + 30 }}>
           {loading ? (
             <View style={{ paddingVertical: 60, alignItems: 'center' }}>
               <ActivityIndicator color={c.primary} />
@@ -181,7 +183,7 @@ export default function ArchivedCoursesScreen() {
 
                 {/* Meta grid */}
                 <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 12 }}>
-                  <MetaItem icon={Clock} label={`Archived ${new Date(course.archived_at).toLocaleDateString()}`} c={c} />
+                  <MetaItem icon={Clock} label={`Archived ${new Date(course.archived_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`} c={c} />
                   {course.archived_by_name && (
                     <MetaItem icon={Archive} label={`By ${course.archived_by_name}`} c={c} />
                   )}

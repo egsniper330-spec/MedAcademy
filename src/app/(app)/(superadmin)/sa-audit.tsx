@@ -22,7 +22,7 @@ import {
 } from 'lucide-react-native';
 import { getAuditTrail, AuditTrailEntry } from '@/lib/api';
 import { NeuCard } from '@/components/NeuCard';
-import { neuColors } from '@/lib/neu';
+import { neuColors, useLayout, safeBottom } from '@/lib/neu';
 import { PageHeader } from '@/components/PageHeader';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -110,12 +110,12 @@ function relativeTime(iso: string): string {
   if (mins  < 60) return `${mins}m ago`;
   if (hours < 24) return `${hours}h ago`;
   if (days  < 7)  return `${days}d ago`;
-  return new Date(iso).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+  return new Date(iso).toLocaleDateString('en-US', { day: '2-digit', month: 'short', year: 'numeric' });
 }
 
 function fullTimestamp(iso: string): string {
   const d = new Date(iso);
-  return `${d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}  ${d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true })}`;
+  return `${d.toLocaleDateString('en-US', { day: '2-digit', month: 'short', year: 'numeric' })}  ${d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true })}`;
 }
 
 function timeRangeFromKey(key: string): { dateFrom?: string; dateTo?: string } {
@@ -186,7 +186,7 @@ function DetailRow({ label, value, c, mono = false }: {
 }) {
   return (
     <View style={{ flexDirection: 'row', paddingVertical: 6, borderBottomWidth: 1, borderBottomColor: `${c.text}08` }}>
-      <Text style={{ fontSize: 12, color: c.text, opacity: 0.45, width: 100, flexShrink: 0 }}>{label}</Text>
+      <Text style={{ fontSize: 12, color: c.text, opacity: 0.45, minWidth: 80, flexShrink: 0 }}>{label}</Text>
       <Text style={{ fontSize: 12, color: c.text, flex: 1, fontFamily: mono ? 'monospace' : undefined }} numberOfLines={3}>{value}</Text>
     </View>
   );
@@ -366,6 +366,8 @@ function SearchField({ placeholder, value, onChange, c }: {
 
 export default function SAaudit() {
   const scheme = useColorScheme();
+  const layout = useLayout();
+  const insets = layout.insets;
   const c = scheme === 'dark' ? neuColors.dark : neuColors.light;
 
   const [entries,     setEntries]    = useState<AuditTrailEntry[]>([]);
@@ -471,7 +473,7 @@ export default function SAaudit() {
     <View style={{ flex: 1, backgroundColor: c.base }}>
 
       {/* ── Header ─────────────────────────────────────────────────────── */}
-      <View style={{ paddingHorizontal: 20, paddingTop: 20, paddingBottom: 8 }}>
+      <View style={{ paddingHorizontal: layout.screenPx, paddingTop: 20, paddingBottom: 8 }}>
         <PageHeader
           title="Audit Trail"
           subtitle="Complete administrative activity log"
@@ -480,7 +482,7 @@ export default function SAaudit() {
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
               {totalCount > 0 && (
                 <View style={{ backgroundColor: `${c.primary}15`, borderRadius: 10, paddingHorizontal: 10, paddingVertical: 4 }}>
-                  <Text style={{ fontSize: 12, fontWeight: '700', color: c.primary }}>{totalCount.toLocaleString()} entries</Text>
+                  <Text style={{ fontSize: 12, fontWeight: '700', color: c.primary }}>{totalCount.toLocaleString('en-US')} entries</Text>
                 </View>
               )}
               <Pressable
@@ -581,7 +583,7 @@ export default function SAaudit() {
         <FlatList
           data={entries}
           keyExtractor={item => item.id}
-          contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 48 }}
+          contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: layout.scrollBottom() }}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />}
           onEndReached={loadMore}
           onEndReachedThreshold={0.3}
@@ -606,7 +608,7 @@ export default function SAaudit() {
               </Pressable>
             ) : entries.length > 0 ? (
               <Text style={{ textAlign: 'center', fontSize: 12, color: c.text, opacity: 0.25, paddingVertical: 16 }}>
-                All {totalCount.toLocaleString()} entries shown
+                All {totalCount.toLocaleString('en-US')} entries shown
               </Text>
             ) : null
           }

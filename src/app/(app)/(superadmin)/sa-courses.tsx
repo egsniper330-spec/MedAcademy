@@ -27,7 +27,7 @@ import { PageHeader } from '@/components/PageHeader';
 import { NeuCard } from '@/components/NeuCard';
 import { NeuButton } from '@/components/NeuButton';
 import { useToast } from '@/components/Toast';
-import { neuColors, neuFlatStyle } from '@/lib/neu';
+import { neuColors, neuFlatStyle, useLayout, zIndex } from '@/lib/neu'
 import { useDebounce } from '@/lib/useDebounce';
 import {
   getCoursesWithArchived,
@@ -224,7 +224,7 @@ function DeleteModal({
     <View style={{
       position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
       backgroundColor: 'rgba(0,0,0,0.45)',
-      alignItems: 'center', justifyContent: 'center', padding: 20, zIndex: 100,
+      alignItems: 'center', justifyContent: 'center', padding: 20, zIndex: zIndex.modal,
     }}>
       <NeuCard style={{ width: '100%', maxWidth: 420, padding: 24 }}>
         <View style={{ alignItems: 'center', marginBottom: 16 }}>
@@ -301,6 +301,7 @@ export default function SACourses() {
   const scheme = useColorScheme();
   const isDark = scheme === 'dark';
   const c = isDark ? neuColors.dark : neuColors.light;
+  const layout = useLayout();
   const router = useRouter();
   const { showToast } = useToast();
 
@@ -443,7 +444,7 @@ export default function SACourses() {
         contentInsetAdjustmentBehavior="automatic"
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />}
       >
-        <View style={{ padding: 20 }}>
+        <View style={{ padding: layout.screenPx }}>
 
           {/* ── Header ──────────────────────────────────────────────────── */}
           <PageHeader

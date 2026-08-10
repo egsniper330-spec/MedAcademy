@@ -3,7 +3,6 @@ import {
   View, Text, ScrollView, KeyboardAvoidingView,
   Pressable, useColorScheme,
 } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import type { RelativePathString } from 'expo-router';
 import { Mail, Phone, Lock, Eye, EyeOff } from 'lucide-react-native';
@@ -11,7 +10,7 @@ import { supabase } from '@/client/supabase';
 import { NeuCard } from '@/components/NeuCard';
 import { NeuButton } from '@/components/NeuButton';
 import { BrandLogo } from '@/components/BrandLogo';
-import { neuColors } from '@/lib/neu';
+import { neuColors, useLayout, safeTop, safeBottom } from '@/lib/neu';
 import { detectIdentifierType, resolveEmailFromIdentifier } from '@/lib/identifier';
 import { registerDevice } from '@/lib/api';
 import { getInstallationId, storeDeviceFingerprint } from '@/lib/installationId';
@@ -40,7 +39,8 @@ export default function SignIn() {
   const isDark = scheme === 'dark';
   const c = isDark ? neuColors.dark : neuColors.light;
   const router = useRouter();
-  const insets = useSafeAreaInsets();
+  const layout = useLayout();
+  const insets = layout.insets;
   const { check } = useSecurity();
 
   const [identifier, setIdentifier] = useState('');
@@ -230,9 +230,9 @@ export default function SignIn() {
           paddingHorizontal: 24,
           // Top: clears Dynamic Island (≈59 pt) + breathing room; min 40 on
           // Android where insets.top may be 0 in headerless stack screens.
-          paddingTop: Math.max(insets.top + 16, 40),
+          paddingTop: layout.headerTop,
           // Bottom: respects home-indicator on iPhone; min 32 on all others.
-          paddingBottom: Math.max(insets.bottom + 16, 32),
+          paddingBottom: layout.scrollBottom(),
         }}
         keyboardShouldPersistTaps="handled"
         contentInsetAdjustmentBehavior="automatic"
@@ -246,7 +246,7 @@ export default function SignIn() {
           </Text>
         </View>
 
-        <NeuCard radius={20} style={{ padding: 20 }}>
+        <NeuCard radius={20} style={{ padding: layout.screenPx }}>
           {/* Email or Phone — auto-detect */}
           <Text style={{ fontSize: 11, fontWeight: '700', color: c.text, opacity: 0.5, marginBottom: 7, textTransform: 'uppercase', letterSpacing: 0.9 }}>
             Email or Phone
@@ -301,16 +301,6 @@ export default function SignIn() {
         </NeuCard>
 
         <View style={{ flexDirection: 'row', justifyContent: 'center', marginTop: 16, gap: 4 }}>
-          <Pressable
-            onPress={() => router.push('/(auth)/forgot-password' as import('expo-router').RelativePathString)}
-            accessibilityLabel="Forgot your password? Reset it"
-            accessibilityRole="button"
-          >
-            <Text style={{ color: c.primary, fontWeight: '600', fontSize: 13 }}>Forgot Password?</Text>
-          </Pressable>
-        </View>
-
-        <View style={{ flexDirection: 'row', justifyContent: 'center', marginTop: 10, gap: 4 }}>
           <Text style={{ color: c.text, opacity: 0.5, fontSize: 13 }}>{"Don't have an account?"}</Text>
           <Pressable onPress={() => router.push('/(auth)/sign-up')} accessibilityLabel="Register a new account" accessibilityRole="button">
             <Text style={{ color: c.primary, fontWeight: '700', fontSize: 13 }}>Register</Text>

@@ -125,7 +125,7 @@ export function VideoHealthDetails({ upload, visible, onClose, onScanComplete }:
   const hasChecks = Object.keys(checks).length > 0;
   const ts = (d: string) => {
     const dt = new Date(d);
-    return `${dt.toLocaleDateString()} ${dt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+    return `${dt.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })} ${dt.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true })}`;
   };
 
   const TABS = [

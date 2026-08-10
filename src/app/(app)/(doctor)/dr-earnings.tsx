@@ -41,8 +41,8 @@ import {
 } from '@/lib/api';
 import { NeuCard } from '@/components/NeuCard';
 import { useToast } from '@/components/Toast';
-import { neuColors } from '@/lib/neu';
-import HamburgerButton from '@/components/HamburgerButton';
+import { neuColors, useLayout, safeBottom } from '@/lib/neu';
+import { DashboardHeader } from '@/components/DashboardHeader';
 
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -50,11 +50,11 @@ import HamburgerButton from '@/components/HamburgerButton';
 // ─────────────────────────────────────────────────────────────────────────────
 function fmtEGP(n: number): string {
   const abs = Math.abs(n);
-  const s = `EGP ${abs.toLocaleString('en-EG', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
+  const s = `EGP ${abs.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
   return n < 0 ? `−${s}` : `+${s}`;
 }
 function fmtEGPPlain(n: number): string {
-  return `EGP ${Math.abs(n).toLocaleString('en-EG', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
+  return `EGP ${Math.abs(n).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
 }
 function fmtDate(iso: string): string {
   return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
@@ -344,6 +344,8 @@ function StudentProfileModal({ tx, doctorId, onClose, onAction, c }: {
   tx: EarningsTransactionRow; doctorId: string;
   onClose: () => void; onAction: () => void; c: typeof neuColors.light;
 }) {
+  const layout = useLayout();
+  const insets = layout.insets;
   const [profile,       setProfile]       = useState<DoctorStudentProfile | null>(null);
   const [loading,       setLoading]       = useState(true);
   const [isDeleted,     setIsDeleted]     = useState(false);
@@ -421,7 +423,7 @@ function StudentProfileModal({ tx, doctorId, onClose, onAction, c }: {
           </View>
 
           <View style={{ flexDirection: 'row', alignItems: 'center',
-                         paddingHorizontal: 20, paddingTop: 14, paddingBottom: 10 }}>
+                         paddingHorizontal: layout.screenPx, paddingTop: 14, paddingBottom: 10 }}>
             <View style={{ width: 48, height: 48, borderRadius: 14, marginRight: 12,
                            backgroundColor: isDeleted ? '#DC262614' : `${c.primary}15`,
                            alignItems: 'center', justifyContent: 'center' }}>
@@ -453,7 +455,7 @@ function StudentProfileModal({ tx, doctorId, onClose, onAction, c }: {
             </Pressable>
           </View>
 
-          <ScrollView contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 48 }}>
+          <ScrollView contentContainerStyle={{ paddingHorizontal: layout.screenPx, paddingBottom: layout.scrollBottom() }}>
             {loading ? (
               <ActivityIndicator color={c.primary} style={{ marginVertical: 48 }} />
             ) : (
@@ -496,7 +498,7 @@ function StudentProfileModal({ tx, doctorId, onClose, onAction, c }: {
                   <InfoRow
                     icon={<DollarSign size={14} color={tx.amount >= 0 ? '#16A34A' : '#DC2626'} />}
                     label="Revenue"
-                    value={`${tx.amount >= 0 ? '+' : '−'}EGP ${Math.abs(tx.amount).toLocaleString('en-EG')}`}
+                    value={`${tx.amount >= 0 ? '+' : '−'}EGP ${Math.abs(tx.amount).toLocaleString('en-US')}`}
                     c={c} />
                   {tx.price_snapshot > 0 && (
                     <InfoRow icon={<Settings size={14} color={c.primary} />}
@@ -511,7 +513,7 @@ function StudentProfileModal({ tx, doctorId, onClose, onAction, c }: {
                   <>
                     <SectionLabel text="Course Enrollments" c={c} />
                     {profile.enrollments.length === 0 ? (
-                      <NeuCard radius={16} style={{ padding: 20, alignItems: 'center', gap: 8, marginBottom: 16 }}>
+                      <NeuCard radius={16} style={{ padding: layout.screenPx, alignItems: 'center', gap: 8, marginBottom: 16 }}>
                         <BookOpen size={22} color={`${c.text}30`} />
                         <Text style={{ fontSize: 13, color: c.text, opacity: 0.3, textAlign: 'center' }}>
                           No enrollments on your courses.
@@ -877,6 +879,8 @@ function PricingSettingsSection({
 // ─────────────────────────────────────────────────────────────────────────────
 export default function DoctorEarnings() {
   const scheme = useColorScheme();
+  const layout = useLayout();
+  const insets = layout.insets;
   const c      = scheme === 'dark' ? neuColors.dark : neuColors.light;
   const { profile, setProfile } = useProfileStore();
   const { showToast } = useToast();
@@ -928,21 +932,18 @@ export default function DoctorEarnings() {
       style={{ flex: 1, backgroundColor: c.base }}
       contentInsetAdjustmentBehavior="automatic"
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />}
-      contentContainerStyle={{ paddingBottom: 60 }}
+      contentContainerStyle={{ paddingBottom: layout.scrollBottom() }}
     >
-      <View style={{ padding: 20 }}>
-
-        {/* Header */}
-        <View style={{ marginBottom: 20, marginTop: 12 }}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 4 }}>
-            <HamburgerButton />
-            <View style={{ width: 38, height: 38, borderRadius: 12, backgroundColor: `${c.primary}18`, alignItems: 'center', justifyContent: 'center' }}>
-              <TrendingUp size={19} color={c.primary} />
-            </View>
-            <Text style={{ fontSize: 22, fontWeight: '800', color: c.text }}>Earnings</Text>
+      <DashboardHeader
+        roleLabel="Doctor revenue · independent pricing · EGP"
+        greeting="Earnings"
+        rightActions={
+          <View style={{ width: 38, height: 38, borderRadius: 12, backgroundColor: `${c.primary}18`, alignItems: 'center', justifyContent: 'center' }}>
+            <TrendingUp size={19} color={c.primary} />
           </View>
-          <Text style={{ fontSize: 13, color: c.text, opacity: 0.38, marginLeft: 48 }}>Doctor revenue · independent pricing · EGP</Text>
-        </View>
+        }
+      />
+      <View style={{ padding: layout.screenPx, paddingTop: 0 }}>
 
         {/* Toggle */}
         <EarningsToggleCard enabled={earningsEnabled} toggling={toggling} onToggle={handleToggle} c={c} />

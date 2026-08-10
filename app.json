@@ -1,15 +1,15 @@
 {
   "expo": {
-    "name": "MedAcademy Mobile App",
+    "name": "MedAcademy",
     "slug": "medacademy",
     "scheme": "medacademy",
-    "version": "1.0.520",
+    "version": "1.0.578",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "automatic",
     "ios": {
       "supportsTablet": true,
-      "buildNumber": "204",
+      "buildNumber": "209",
       "bundleIdentifier": "com.medacademy.app",
       "entitlements": {
         "com.apple.developer.devicecheck": true,
@@ -51,8 +51,10 @@
         "backgroundColor": "#081A35"
       },
       "predictiveBackGestureEnabled": false,
-      "versionCode": 204,
-      "package": "com.medacademy.app"
+      "versionCode": 209,
+      "package": "com.medacademy.app",
+      "navigationBarColor": "#00000000",
+      "softwareKeyboardLayoutMode": "adjustResize"
     },
     "web": {
       "bundler": "metro",
@@ -61,7 +63,12 @@
     "plugins": [
       "./plugins/withSecurityModule",
       "./plugins/withProguardRules",
-      "expo-router",
+      [
+        "expo-router",
+        {
+          "root": "src/app"
+        }
+      ],
       "expo-asset",
       "expo-sqlite",
       "expo-font",
@@ -76,8 +83,9 @@
       [
         "expo-image-picker",
         {
-          "photosPermission": "Allow MedAcademy to access your photos for uploading course thumbnails and covers.",
-          "cameraPermission": "Allow MedAcademy to access your camera."
+          "photosPermission": "Allow MedAcademy to access your photos to upload profile pictures and course thumbnails.",
+          "cameraPermission": "Allow MedAcademy to access your camera to take profile photos and course images.",
+          "microphonePermission": "Allow MedAcademy to access your microphone to record audio during video capture."
         }
       ],
       "expo-document-picker",
@@ -89,6 +97,12 @@
       "@react-native-async-storage/expo-with-async-storage",
       "expo-sharing",
       "expo-video",
+      [
+        "expo-audio",
+        {
+          "microphonePermission": "Allow MedAcademy to access your microphone to record audio messages and voice lectures."
+        }
+      ],
       [
         "expo-notifications",
         {
@@ -129,15 +143,19 @@
             "deploymentTarget": "15.1"
           }
         }
+      ],
+      [
+        "expo-navigation-bar",
+        {
+          "position": "absolute",
+          "visibility": "visible",
+          "behavior": "inset-swipe",
+          "style": "dark"
+        }
       ]
     ],
-    "router": {
-      "root": "src"
-    },
     "extra": {
-      "eas": {
-        "projectId": "YOUR_EXPO_PROJECT_ID_HERE"
-      }
+      "eas": {}
     },
     "experiments": {
       "typedRoutes": true

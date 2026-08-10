@@ -19,7 +19,7 @@ import {
 import { PageHeader } from '@/components/PageHeader';
 import { NeuCard } from '@/components/NeuCard';
 import { StatCard } from '@/components/StatCard';
-import { neuColors } from '@/lib/neu';
+import { neuColors, useLayout } from '@/lib/neu';
 import { getSuperAdminStats } from '@/lib/api';
 import Bell from '@/components/Bell';
 
@@ -54,6 +54,7 @@ export default function SAAnalytics() {
   const scheme = useColorScheme();
   const isDark = scheme === 'dark';
   const c = isDark ? neuColors.dark : neuColors.light;
+  const layout = useLayout();
   const router = useRouter();
 
   const [stats, setStats] = useState<any>(null);
@@ -101,7 +102,7 @@ export default function SAAnalytics() {
       contentInsetAdjustmentBehavior="automatic"
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />}
     >
-      <View style={{ padding: 20 }}>
+      <View style={{ padding: layout.screenPx }}>
         {/* Header */}
         <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20, marginTop: 8 }}>
           <PageHeader title="Analytics" subtitle="Platform metrics & health" accentColor={c.primary} rightAction={<Bell />} />

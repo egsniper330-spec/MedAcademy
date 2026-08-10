@@ -38,10 +38,17 @@ interface ProfileStore {
 
 export const useProfileStore = create<ProfileStore>((set) => ({
   profile: null,
+  // Start as `true` so any component that reads the store before the first
+  // fetch sees "loading" rather than "no profile". This prevents the role-
+  // redirect guard from treating the initial empty state as "loaded/done".
   isProfileLoading: true,
   setProfile: (profile) => set({ profile, isProfileLoading: false }),
   setProfileLoading: (isProfileLoading) => set({ isProfileLoading }),
-  clearProfile: () => set({ profile: null, isProfileLoading: false }),
+  // CRITICAL: set isProfileLoading:true (not false) so that after a logout
+  // the role-redirect effect in (app)/_layout.tsx does NOT fire prematurely
+  // with profile=null. The guard `if (isProfileLoading || !profile)` will
+  // block until the *new* user's profile is fetched and setProfile() is called.
+  clearProfile: () => set({ profile: null, isProfileLoading: true }),
 }));
 
 // ── Impersonation store ───────────────────────────────────────────────────────

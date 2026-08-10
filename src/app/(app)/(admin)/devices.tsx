@@ -25,7 +25,7 @@ import {
 import { NeuCard } from '@/components/NeuCard';
 import { NeuButton } from '@/components/NeuButton';
 import { ResponsiveModal } from '@/components/ResponsiveModal';
-import { neuColors, neuFlatStyle } from '@/lib/neu';
+import { neuColors, neuFlatStyle, useLayout } from '@/lib/neu'
 import { PageHeader } from '@/components/PageHeader';
 import { getPublicEmail } from '@/lib/api';
 import { supabase } from '@/client/supabase';
@@ -92,6 +92,7 @@ export default function AdminDevices() {
   const scheme = useColorScheme();
   const isDark = scheme === 'dark';
   const c = isDark ? neuColors.dark : neuColors.light;
+  const layout = useLayout();
   const router = useRouter();
 
   const [users, setUsers] = useState<UserRow[]>([]);
@@ -506,7 +507,7 @@ export default function AdminDevices() {
         contentInsetAdjustmentBehavior="automatic"
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />}
       >
-        <View style={{ padding: 20, paddingTop: 0 }}>
+        <View style={{ padding: layout.screenPx, paddingTop: 0 }}>
           {/* Header */}
           <PageHeader
             title="Device Management"

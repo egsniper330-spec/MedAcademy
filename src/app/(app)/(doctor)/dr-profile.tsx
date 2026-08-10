@@ -14,7 +14,6 @@ import {
   ActivityIndicator, RefreshControl, TextInput, Switch, Modal,
   KeyboardAvoidingView, useWindowDimensions,
 } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Clipboard from 'expo-clipboard';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { Image } from 'expo-image';
@@ -49,7 +48,7 @@ import { NeuButton } from '@/components/NeuButton';
 import { NeuInputRow } from '@/components/NeuInputRow';
 import { ResponsiveModal } from '@/components/ResponsiveModal';
 import { useToast } from '@/components/Toast';
-import { neuColors } from '@/lib/neu';
+import { neuColors, safeBottom, useLayout } from '@/lib/neu';
 import { usePermission } from '@/hooks/usePermission';
 import { PermissionRationaleModal } from '@/components/PermissionRationaleModal';
 
@@ -58,11 +57,11 @@ import { PermissionRationaleModal } from '@/components/PermissionRationaleModal'
 // ─────────────────────────────────────────────────────────────────────────────
 function fmtEGP(n: number): string {
   const abs = Math.abs(n);
-  const s = `EGP ${abs.toLocaleString('en-EG', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
+  const s = `EGP ${abs.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
   return n < 0 ? `−${s}` : `+${s}`;
 }
 function fmtEGPPlain(n: number): string {
-  return `EGP ${Math.abs(n).toLocaleString('en-EG', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
+  return `EGP ${Math.abs(n).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
 }
 function fmtDate(iso: string): string {
   return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
@@ -124,7 +123,7 @@ function InfoRow({ icon, label, value, c }: { icon: React.ReactNode; label: stri
     <View style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 12,
                    borderBottomWidth: 1, borderBottomColor: `${c.text}08` }}>
       <View style={{ width: 32, alignItems: 'center' }}>{icon}</View>
-      <Text style={{ fontSize: 13, color: c.text, opacity: 0.5, width: 110, marginLeft: 8 }}>{label}</Text>
+      <Text style={{ fontSize: 13, color: c.text, opacity: 0.5, minWidth: 90, flexShrink: 0, marginLeft: 8 }}>{label}</Text>
       <Text style={{ flex: 1, fontSize: 14, fontWeight: '600', color: c.text, textAlign: 'right' }} numberOfLines={1}>
         {value || '—'}
       </Text>
@@ -210,7 +209,8 @@ function RevenueChart({ transactions, c }: { transactions: EarningsTransactionRo
 }
 
 function CourseRevenueTable({ rows, c }: { rows: EarningsCourseRow[]; c: typeof neuColors.light }) {
-  return (
+    const layout = useLayout();
+return (
     <NeuCard radius={18} style={{ overflow: 'hidden', marginBottom: 20 }}>
       <View style={{ flexDirection: 'row', paddingVertical: 10, paddingHorizontal: 14,
                      backgroundColor: `${c.text}06`, borderBottomWidth: 1, borderBottomColor: `${c.text}08` }}>
@@ -220,7 +220,7 @@ function CourseRevenueTable({ rows, c }: { rows: EarningsCourseRow[]; c: typeof 
         <Text style={{ width: 28, textAlign: 'right', fontSize: 9, fontWeight: '800', color: c.text, opacity: 0.4, textTransform: 'uppercase' }}>%</Text>
       </View>
       {rows.length === 0 ? (
-        <View style={{ padding: 20, alignItems: 'center' }}>
+        <View style={{ padding: layout.screenPx, alignItems: 'center' }}>
           <Text style={{ fontSize: 13, color: c.text, opacity: 0.3 }}>No course data yet</Text>
         </View>
       ) : rows.map(r => (
@@ -499,7 +499,8 @@ function StudentProfileModal({ tx, doctorId, onClose, onAction, c }: {
   tx: EarningsTransactionRow; doctorId: string;
   onClose: () => void; onAction: () => void; c: typeof neuColors.light;
 }) {
-  const insets = useSafeAreaInsets();
+  const layout = useLayout();
+  const insets = layout.insets;
   const [studentProfile, setStudentProfile] = useState<DoctorStudentProfile | null>(null);
   const [loading,        setLoading]        = useState(true);
   const [isDeleted,      setIsDeleted]      = useState(false);
@@ -569,14 +570,14 @@ function StudentProfileModal({ tx, doctorId, onClose, onAction, c }: {
           borderTopRightRadius: 28,
           maxHeight: '92%',
           width: '100%',
-          paddingBottom: insets.bottom,
+          paddingBottom: layout.scrollBottom(),
         }}>
           <View style={{ alignItems: 'center', paddingTop: 12 }}>
             <View style={{ width: 40, height: 4, borderRadius: 2, backgroundColor: `${c.text}20` }} />
           </View>
           {/* Header */}
           <View style={{ flexDirection: 'row', alignItems: 'center',
-                         paddingHorizontal: 20, paddingTop: 14, paddingBottom: 10 }}>
+                         paddingHorizontal: layout.screenPx, paddingTop: 14, paddingBottom: 10 }}>
             {studentProfile?.avatar_url && !isDeleted ? (
               <Image source={{ uri: studentProfile.avatar_url }}
                 style={{ width: 48, height: 48, borderRadius: 14, marginRight: 12 }} />
@@ -609,7 +610,7 @@ function StudentProfileModal({ tx, doctorId, onClose, onAction, c }: {
             </Pressable>
           </View>
 
-          <ScrollView contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 48 }}>
+          <ScrollView contentContainerStyle={{ paddingHorizontal: layout.screenPx, paddingBottom: layout.scrollBottom() }}>
             {loading ? <ActivityIndicator color={c.primary} style={{ marginVertical: 48 }} /> : (
               <>
                 {isDeleted && (
@@ -674,7 +675,7 @@ function StudentProfileModal({ tx, doctorId, onClose, onAction, c }: {
                     { icon: <Zap size={14} color={c.primary} />, label: 'Type', value: TX_MODAL_LABEL[tx.transaction_type] ?? tx.transaction_type },
                     { icon: <Calendar size={14} color={c.primary} />, label: 'Date', value: fmtDate(tx.created_at) },
                     { icon: <DollarSign size={14} color={tx.amount >= 0 ? '#16A34A' : '#DC2626'} />,
-                      label: 'Revenue', value: `${tx.amount >= 0 ? '+' : '−'}EGP ${Math.abs(tx.amount).toLocaleString('en-EG')}` },
+                      label: 'Revenue', value: `${tx.amount >= 0 ? '+' : '−'}EGP ${Math.abs(tx.amount).toLocaleString('en-US')}` },
                   ].map(r => (
                     <View key={r.label} style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
                       <View style={{ width: 30, height: 30, borderRadius: 9, backgroundColor: `${c.primary}12`,
@@ -848,7 +849,7 @@ function useContactEdit(profile: any, setProfile: (p: any) => void) {
         </View>
       }
     >
-      <KeyboardAvoidingView behavior="padding">
+      <KeyboardAvoidingView behavior={process.env.EXPO_OS === 'ios' ? 'padding' : 'height'}>
         <Text style={{ fontSize: 13, color: c.text, opacity: 0.5, marginBottom: 16, lineHeight: 19 }}>
           These become the default contact methods for all your courses. Each field is optional.
         </Text>
@@ -959,6 +960,8 @@ function EarningsTab({ doctorId, earningsEnabled, c }: { // eslint-disable-line 
   const [refreshing, setRefreshing] = useState(false);
   const [selectedTx, setSelectedTx] = useState<EarningsTransactionRow | null>(null);
   const { showToast } = useToast();
+  const layout = useLayout();
+  const insets = layout.insets;
 
   const load = useCallback(async () => {
     try {
@@ -1013,7 +1016,7 @@ function EarningsTab({ doctorId, earningsEnabled, c }: { // eslint-disable-line 
       style={{ flex: 1, backgroundColor: c.base }}
       contentInsetAdjustmentBehavior="automatic"
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />}
-      contentContainerStyle={{ padding: 20, paddingBottom: 40 }}
+      contentContainerStyle={{ padding: layout.screenPx, paddingBottom: layout.scrollBottom() }}
     >
       {/* ── Stat cards ───────────────────────────────────────────────── */}
       <EarnSL label="Overview" c={c} />
@@ -1088,6 +1091,8 @@ export default function DoctorProfile() {
   const isDark = scheme === 'dark';
   const c = isDark ? neuColors.dark : neuColors.light;
   const router = useRouter();
+  const layout = useLayout();
+  const insets = layout.insets;
   const { profile, setProfile } = useProfileStore();
 
   const [activeTab,    setActiveTab]    = useState<ProfileTab>('profile');
@@ -1188,13 +1193,17 @@ export default function DoctorProfile() {
     if (!profile?.id) return;
     setAvatarUploading(true);
     try {
-      const uri  = result.assets[0].uri;
-      const ext  = uri.split('.').pop() ?? 'jpg';
-      const path = `avatars/${profile.id}.${ext}`;
-      const blob = await (await fetch(uri)).blob();
+      const asset = result.assets[0];
+      const uri   = asset.uri;
+      const ext   = uri.split('.').pop()?.toLowerCase() ?? 'jpg';
+      const path  = `avatars/${profile.id}.${ext}`;
+      // Use expo/fetch (supports arrayBuffer on Android content:// URIs)
+      const { fetch: expoFetch } = await import('expo/fetch');
+      const response = await expoFetch(uri);
+      const buffer   = await response.arrayBuffer();
       const { error: upErr } = await supabase.storage
         .from('user-avatars')
-        .upload(path, blob, { upsert: true, contentType: `image/${ext}` });
+        .upload(path, buffer, { upsert: true, contentType: asset.mimeType ?? `image/${ext}` });
       if (upErr) throw upErr;
       const { data: { publicUrl } } = supabase.storage.from('user-avatars').getPublicUrl(path);
       const updated = await updateProfile(profile.id, { avatar_url: publicUrl });
@@ -1271,7 +1280,14 @@ export default function DoctorProfile() {
     setRefreshing(false);
   };
 
-  const handleLogout = async () => { setShowLogout(false); await supabase.auth.signOut(); };
+  const handleLogout = async () => {
+    setShowLogout(false);
+    // Eagerly wipe the profile store so no stale role data remains visible
+    // while supabase.auth.signOut() completes and the new session initialises.
+    const { clearProfile } = useProfileStore.getState();
+    clearProfile();
+    await supabase.auth.signOut();
+  };
 
   const statusColor = profile?.status === 'active' ? '#16A34A'
     : profile?.status === 'suspended' ? '#DC2626' : '#D97706';
@@ -1284,7 +1300,7 @@ export default function DoctorProfile() {
       style={{ flex: 1, backgroundColor: c.base }}
       contentInsetAdjustmentBehavior="automatic"
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />}
-      contentContainerStyle={{ padding: 20, paddingBottom: 40 }}
+      contentContainerStyle={{ padding: layout.screenPx, paddingBottom: layout.scrollBottom() }}
     >
       {/* Stats row */}
       <SectionLabel label="Overview" color={c.text} />
@@ -1395,7 +1411,7 @@ export default function DoctorProfile() {
       <ScrollView
         style={{ flex: 1, backgroundColor: c.base }}
         contentInsetAdjustmentBehavior="automatic"
-        contentContainerStyle={{ padding: 20, paddingBottom: 40 }}
+        contentContainerStyle={{ padding: layout.screenPx, paddingBottom: layout.scrollBottom() }}
       >
         {/* ── Edit Profile ───────────────────────────────────────────── */}
         <SectionLabel label="Profile" color={c.text} />
@@ -1461,7 +1477,7 @@ export default function DoctorProfile() {
             </View>
           }
         >
-          <KeyboardAvoidingView behavior="padding">
+          <KeyboardAvoidingView behavior={process.env.EXPO_OS === 'ios' ? 'padding' : 'height'}>
             <Text style={{ fontSize: 11, fontWeight: '700', color: c.text, opacity: 0.5, textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 6 }}>Full Name</Text>
             <NeuInputRow
               c={c}
@@ -1507,7 +1523,7 @@ export default function DoctorProfile() {
             ) : undefined
           }
         >
-          <KeyboardAvoidingView behavior="padding">
+          <KeyboardAvoidingView behavior={process.env.EXPO_OS === 'ios' ? 'padding' : 'height'}>
             {pwdSuccess ? (
               <View style={{ alignItems: 'center', paddingVertical: 12, gap: 10 }}>
                 <CheckCircle size={44} color="#16A34A" />
@@ -1563,7 +1579,7 @@ export default function DoctorProfile() {
         onDismiss={() => setShowPhotoRationale(false)}
       />
       {/* ── Avatar + name header ─────────────────────────────────────────── */}
-      <View style={{ paddingTop: 20, paddingHorizontal: 20, paddingBottom: 0,
+      <View style={{ paddingTop: 20, paddingHorizontal: layout.screenPx, paddingBottom: 0,
                      backgroundColor: c.base }}>
         <View style={{ alignItems: 'center', marginBottom: 20 }}>
           <Pressable onPress={handlePickAvatar} style={{ marginBottom: 12 }}>

@@ -22,7 +22,7 @@ import { NeuCard } from '@/components/NeuCard';
 import { NeuButton } from '@/components/NeuButton';
 import { ResponsiveModal } from '@/components/ResponsiveModal';
 import { useToast } from '@/components/Toast';
-import { neuColors } from '@/lib/neu';
+import { neuColors, useLayout , zIndex} from '@/lib/neu';
 import { useProfileStore } from '@/lib/store';
 import { UserSearchInput, type SearchedUser } from '@/components/UserSearchInput';
 import { displayPhoneNational } from '@/lib/phone';
@@ -263,7 +263,7 @@ function BatchGeneratorModal({
         </View>
       ) : (
         // ── Form screen — reference layout ──────────────────────────────────
-        <KeyboardAvoidingView behavior="padding">
+        <KeyboardAvoidingView behavior={process.env.EXPO_OS === 'ios' ? 'padding' : 'height'}>
 
           {/* Row 1: Batch Name (full width) */}
           <FieldLabel text="Batch Name" error={errors.batchName} />
@@ -485,7 +485,7 @@ function BatchCodesModal({
 
       {/* Search */}
       <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 12 }}>
-        <Search size={14} color={`${c.text}55`} style={{ position: 'absolute', left: 14, zIndex: 1 }} />
+        <Search size={14} color={`${c.text}55`}  />
         <TextInput
           value={search} onChangeText={setSearch}
           placeholder="Search code, status, used by..."
@@ -493,7 +493,7 @@ function BatchCodesModal({
           style={{ ...inp, paddingLeft: 36 }}
         />
         {search !== '' && (
-          <Pressable onPress={() => setSearch('')} style={{ position: 'absolute', right: 12 }}>
+          <Pressable onPress={() => setSearch('')} >
             <X size={13} color={`${c.text}55`} />
           </Pressable>
         )}
@@ -561,7 +561,8 @@ function BatchCard({
   onAction: (type: string, batchId: string, label: string) => void;
   onViewCodes: (batch: Batch) => void;
 }) {
-  const [menuOpen, setMenuOpen] = useState(false);
+    const layout = useLayout();
+const [menuOpen, setMenuOpen] = useState(false);
   const unused  = Math.max(0, batch.total_count - batch.used_count - batch.disabled_count - batch.expired_count);
   const usedPct = batch.total_count > 0 ? Math.round((batch.used_count / batch.total_count) * 100) : 0;
 
@@ -578,7 +579,7 @@ function BatchCard({
   const batchLabel = batch.label ?? `Batch ${batch.id.slice(0, 8)}`;
 
   return (
-    <View style={{ paddingHorizontal: 20, marginBottom: 12 }}>
+    <View style={{ paddingHorizontal: layout.screenPx, marginBottom: 12 }}>
       <NeuCard style={{ padding: 16 }}>
         <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 12 }}>
           {/* Card body — tap to view codes */}
@@ -654,7 +655,7 @@ function BatchCard({
             </Pressable>
             {menuOpen && (
               <View style={{
-                position: 'absolute', top: 38, right: 0, width: 230, borderRadius: 16, zIndex: 999,
+                position: 'absolute', top: 38, right: 0, minWidth: 180, maxWidth: 260, borderRadius: 16, zIndex: zIndex.loader,
                 backgroundColor: c.base,
                 shadowColor: c.shadowDark, shadowOffset: { width: 4, height: 8 },
                 shadowOpacity: 0.25, shadowRadius: 16,
@@ -702,6 +703,7 @@ export default function AdminCodes() {
   const scheme = useColorScheme();
   const isDark = scheme === 'dark';
   const c = isDark ? neuColors.dark : neuColors.light;
+  const layout = useLayout();
   const { showToast } = useToast();
 
   // ── Shared state ────────────────────────────────────────────────────────
@@ -959,7 +961,7 @@ export default function AdminCodes() {
   return (
     <View style={{ flex: 1, backgroundColor: c.base }}>
       {/* ── Header ─────────────────────────────────────────────────────── */}
-      <View style={{ paddingHorizontal: 20, paddingTop: 16, paddingBottom: 0 }}>
+      <View style={{ paddingHorizontal: layout.screenPx, paddingTop: 16, paddingBottom: 0 }}>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 14 }}>
           <View style={{ flex: 1 }}>
             <PageHeader title="Activation Codes" subtitle="Generate & manage codes" />
@@ -993,16 +995,16 @@ export default function AdminCodes() {
           contentInsetAdjustmentBehavior="automatic"
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />}
           ListHeaderComponent={
-            <View style={{ paddingHorizontal: 20 }}>
+            <View style={{ paddingHorizontal: layout.screenPx }}>
               {/* Search */}
               <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 10 }}>
-                <Search size={14} color={`${c.text}55`} style={{ position: 'absolute', left: 14, zIndex: 1 }} />
+                <Search size={14} color={`${c.text}55`}  />
                 <TextInput value={codeSearch} onChangeText={setCodeSearch}
                   placeholder="Search code, course, status..."
                   placeholderTextColor={`${c.text}55`}
                   style={{ ...inp, paddingLeft: 36 }} />
                 {codeSearch !== '' && (
-                  <Pressable onPress={() => setCodeSearch('')} style={{ position: 'absolute', right: 12 }}>
+                  <Pressable onPress={() => setCodeSearch('')} >
                     <X size={13} color={`${c.text}55`} />
                   </Pressable>
                 )}
@@ -1054,7 +1056,7 @@ export default function AdminCodes() {
             </View>
           }
           renderItem={({ item: code }) => (
-            <View style={{ paddingHorizontal: 20, marginBottom: 10 }}>
+            <View style={{ paddingHorizontal: layout.screenPx, marginBottom: 10 }}>
               <NeuCard style={{ padding: 14, borderWidth: selectedIds.has(code.id) ? 1.5 : 0, borderColor: c.primary }}>
                 <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8, gap: 8 }}>
                   {code.status !== 'used' && (
@@ -1105,7 +1107,7 @@ export default function AdminCodes() {
                     </Text>
                   </View>
                   <Text style={{ fontSize: 11, color: c.text, opacity: 0.35 }}>
-                    {new Date(code.created_at).toLocaleDateString()}
+                    {new Date(code.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
                   </Text>
                 </View>
               </NeuCard>
@@ -1130,15 +1132,15 @@ export default function AdminCodes() {
           contentInsetAdjustmentBehavior="automatic"
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />}
           ListHeaderComponent={
-            <View style={{ paddingHorizontal: 20, paddingBottom: 4 }}>
+            <View style={{ paddingHorizontal: layout.screenPx, paddingBottom: 4 }}>
               <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 12 }}>
-                <Search size={14} color={`${c.text}55`} style={{ position: 'absolute', left: 14, zIndex: 1 }} />
+                <Search size={14} color={`${c.text}55`}  />
                 <TextInput value={batchSearch} onChangeText={setBatchSearch}
                   placeholder="Search batch name, course, prefix..."
                   placeholderTextColor={`${c.text}55`}
                   style={{ ...inp, paddingLeft: 36 }} />
                 {batchSearch !== '' && (
-                  <Pressable onPress={() => setBatchSearch('')} style={{ position: 'absolute', right: 12 }}>
+                  <Pressable onPress={() => setBatchSearch('')} >
                     <X size={13} color={`${c.text}55`} />
                   </Pressable>
                 )}

@@ -17,7 +17,7 @@ import {
   Search, Sparkles, ChevronDown, ChevronUp, Zap,
   Eye, EyeOff,
 } from 'lucide-react-native';
-import { neuColors, neuFlatStyle } from '@/lib/neu';
+import { neuColors, useLayout, neuFlatStyle, safeBottom } from '@/lib/neu';
 import { supabase } from '@/client/supabase';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -399,6 +399,8 @@ export default function SystemProvidersScreen() {
   const scheme = useColorScheme();
   const isDark = scheme === 'dark';
   const c = isDark ? neuColors.dark : neuColors.light;
+  const layout = useLayout();
+  const insets = layout.insets;
 
   const [providers, setProviders] = useState<ProviderRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -477,7 +479,7 @@ export default function SystemProvidersScreen() {
   return (
     <View style={{ flex: 1, backgroundColor: c.base }}>
       {/* Header */}
-      <View style={{ paddingTop: 0, paddingHorizontal: 20, paddingBottom: 12 }}>
+      <View style={{ paddingTop: 0, paddingHorizontal: layout.screenPx, paddingBottom: 12 }}>
         <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
             <Zap size={22} color={c.primary} />
@@ -504,7 +506,7 @@ export default function SystemProvidersScreen() {
 
       {/* Category filter tabs */}
       <ScrollView horizontal showsHorizontalScrollIndicator={false}
-        contentContainerStyle={{ paddingHorizontal: 20, gap: 8, paddingBottom: 12 }}>
+        contentContainerStyle={{ paddingHorizontal: layout.screenPx, gap: 8, paddingBottom: 12 }}>
         {categories.map((cat) => {
           const meta = CATEGORY_META[cat];
           const isActive = activeCategory === cat;
@@ -534,7 +536,7 @@ export default function SystemProvidersScreen() {
         </View>
       ) : (
         <ScrollView
-          contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 40 }}
+          contentContainerStyle={{ paddingHorizontal: layout.screenPx, paddingBottom: layout.scrollBottom() }}
           contentInsetAdjustmentBehavior="automatic"
           refreshControl={
             <RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(); }}

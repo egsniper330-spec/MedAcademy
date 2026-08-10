@@ -1,0 +1,18 @@
+diff --git a/node_modules/expo-router/build/fork/extractPathFromURL.js b/node_modules/expo-router/build/fork/extractPathFromURL.js
+index f0c9b99..0606e6d 100644
+--- a/node_modules/expo-router/build/fork/extractPathFromURL.js
++++ b/node_modules/expo-router/build/fork/extractPathFromURL.js
+@@ -103,8 +103,9 @@ function fromDeepLink(url) {
+     return results;
+ }
+ function extractExpoPathFromURL(_prefixes, url = '') {
+-    return (extractExactPathFromURL(url)
+-        // TODO: We should get rid of this, dropping specificities is not good
+-        .replace(/^\//, ''));
++    const raw = extractExactPathFromURL(url).replace(/^\//, '');
++    // When scheme:/// (app cold-start from home screen) strips to empty string,
++    // treat it as the root "/" so index route is always matched.
++    return raw === '' ? '/' : raw;
+ }
+ //# sourceMappingURL=extractPathFromURL.js.map
+\ No newline at end of file

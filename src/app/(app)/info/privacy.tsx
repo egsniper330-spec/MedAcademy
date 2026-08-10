@@ -4,7 +4,7 @@
 import { ScrollView, View, Text, useColorScheme } from 'react-native';
 import { PageHeader } from '@/components/PageHeader';
 import { NeuCard } from '@/components/NeuCard';
-import { neuColors } from '@/lib/neu';
+import { neuColors, useLayout, safeBottom } from '@/lib/neu';
 import { Shield } from 'lucide-react-native';
 
 const SECTIONS = [
@@ -49,12 +49,14 @@ const SECTIONS = [
 export default function PrivacyPage() {
   const isDark = useColorScheme() === 'dark';
   const c = isDark ? neuColors.dark : neuColors.light;
+  const layout = useLayout();
+  const insets = layout.insets;
 
   return (
     <ScrollView
       style={{ flex: 1, backgroundColor: c.base }}
       contentInsetAdjustmentBehavior="automatic"
-      contentContainerStyle={{ padding: 20, paddingBottom: 48 }}
+      contentContainerStyle={{ padding: layout.screenPx, paddingBottom: layout.scrollBottom() }}
     >
       <PageHeader title="Privacy Policy" showBack />
 

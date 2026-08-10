@@ -17,7 +17,7 @@ import {
 import { supabase } from '@/client/supabase';
 import { NeuCard } from '@/components/NeuCard';
 import { NeuButton } from '@/components/NeuButton';
-import { neuColors, neuFlatStyle } from '@/lib/neu';
+import { neuColors, useLayout, neuFlatStyle, safeBottom } from '@/lib/neu';
 import { PageHeader } from '@/components/PageHeader';
 
 type CPAction = 'warn_only' | 'strike_system' | 'auto_logout' | 'auto_suspend';
@@ -105,6 +105,8 @@ function ActionPicker({ label, value, options, optionLabels, onChange, isDark }:
 export default function ContentProtectionPolicyScreen() {
   const isDark = useColorScheme() === 'dark';
   const c = isDark ? neuColors.dark : neuColors.light;
+  const layout = useLayout();
+  const insets = layout.insets;
   const flat = neuFlatStyle(isDark);
 
   const [policy, setPolicy] = useState<Policy>(DEFAULTS);
@@ -157,7 +159,7 @@ export default function ContentProtectionPolicyScreen() {
     <ScrollView style={{ flex: 1, backgroundColor: c.base }} contentInsetAdjustmentBehavior="automatic">
       <PageHeader title="Content Protection" subtitle="Configure screenshot & recording policies" />
 
-      <View style={{ padding: 20, gap: 16 }}>
+      <View style={{ padding: layout.screenPx, gap: 16 }}>
         {/* ── Detection Policies ── */}
         <SectionTitle icon={<Camera size={18} color={c.primary} />} title="Detection Policies" />
         <NeuCard>
@@ -285,7 +287,7 @@ export default function ContentProtectionPolicyScreen() {
         )}
 
         {/* Actions */}
-        <View style={{ flexDirection: 'row', gap: 12, paddingBottom: 32 }}>
+        <View style={{ flexDirection: 'row', gap: 12, paddingBottom: layout.scrollBottom() }}>
           <Pressable
             onPress={() => { setPolicy(DEFAULTS); setSaved(false); }}
             style={[flat, { flex: 1, borderRadius: 14, paddingVertical: 14, alignItems: 'center', flexDirection: 'row', justifyContent: 'center', gap: 8 }]}

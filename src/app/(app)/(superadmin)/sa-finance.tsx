@@ -16,7 +16,7 @@ import {
   Coins, Download, Stethoscope, Globe, ClipboardList,
 } from 'lucide-react-native';
 import { PageHeader } from '@/components/PageHeader';
-import { neuColors, neuFlatStyle, neuPressedStyle } from '@/lib/neu';
+import { neuColors, neuFlatStyle, neuPressedStyle, useLayout } from '@/lib/neu';
 import { getRevenueStats } from '@/lib/api';
 import { useCurrencyConfig } from '@/lib/currency';
 import Bell from '@/components/Bell';
@@ -73,6 +73,7 @@ export default function SAFinance() {
   const scheme = useColorScheme();
   const isDark = scheme === 'dark';
   const c = isDark ? neuColors.dark : neuColors.light;
+  const layout = useLayout();
   const { fmtLarge } = useCurrencyConfig();
 
   const [stats, setStats] = useState<any>(null);
@@ -93,7 +94,7 @@ export default function SAFinance() {
       contentInsetAdjustmentBehavior="automatic"
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />}
     >
-      <View style={{ padding: 20 }}>
+      <View style={{ padding: layout.screenPx }}>
 
         {/* ── Header ──────────────────────────────────────────────────── */}
         <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6, marginTop: 8 }}>

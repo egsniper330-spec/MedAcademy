@@ -17,6 +17,7 @@ import { useToast } from '@/components/Toast';
 import { supabase } from '@/client/supabase';
 import { friendlyError } from '@/lib/validation';
 import { Share } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 interface SecurityStats {
   total_events:    number;
@@ -75,6 +76,7 @@ export default function SecurityDashboard() {
   const scheme = useColorScheme();
   const isDark = scheme === 'dark';
   const c = isDark ? neuColors.dark : neuColors.light;
+  const insets = useSafeAreaInsets();
   const flat = neuFlatStyle(isDark);
   const router = useRouter();
   const { showToast } = useToast();
@@ -172,7 +174,7 @@ export default function SecurityDashboard() {
     <View style={{ flex: 1, backgroundColor: c.base }}>
       <PageHeader title="Security Dashboard" />
       <ScrollView
-        contentContainerStyle={{ padding: 16, gap: 20, paddingBottom: 48 }}
+        contentContainerStyle={{ padding: 16, gap: 20, paddingBottom: Math.max(insets.bottom, 24) + 24 }}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />}
         contentInsetAdjustmentBehavior="automatic"
       >
@@ -273,7 +275,7 @@ export default function SecurityDashboard() {
               </View>
               <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
                 <Text style={{ fontSize: 11, color: `${c.text}55` }}>
-                  {dev.platform?.toUpperCase()} · {new Date(dev.last_seen).toLocaleDateString()}
+                  {dev.platform?.toUpperCase()} · {new Date(dev.last_seen).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
                 </Text>
               </View>
             </View>
@@ -308,7 +310,7 @@ export default function SecurityDashboard() {
                   {evt.profiles?.full_name ?? evt.user_id?.slice(0, 8) ?? 'Unknown'} · {evt.platform ?? 'unknown'}
                 </Text>
                 <Text style={{ fontSize: 11, color: `${c.text}55` }}>
-                  {new Date(evt.created_at).toLocaleString()}
+                  {new Date(evt.created_at).toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true })}
                 </Text>
               </View>
               <View style={{

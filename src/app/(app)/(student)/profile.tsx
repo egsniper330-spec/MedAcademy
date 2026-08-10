@@ -3,7 +3,6 @@
  * Replaces the separate Edit Profile + Security pages for students.
  */
 import { useState, useCallback } from 'react';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   View, Text, ScrollView, useColorScheme, Pressable,
   ActivityIndicator, RefreshControl, Modal, TextInput, KeyboardAvoidingView,
@@ -29,7 +28,7 @@ import { NeuCard } from '@/components/NeuCard';
 import { NeuButton } from '@/components/NeuButton';
 import { NeuInputRow } from '@/components/NeuInputRow';
 import { ResponsiveModal } from '@/components/ResponsiveModal';
-import { neuColors } from '@/lib/neu';
+import { neuColors, useLayout, safeBottom } from '@/lib/neu';
 import { validateRequired, friendlyError } from '@/lib/validation';
 import { useToast } from '@/components/Toast';
 import * as ImagePicker from 'expo-image-picker';
@@ -97,7 +96,7 @@ function InfoRow({ icon, label, value, c }: { icon: React.ReactNode; label: stri
   return (
     <View style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: `${c.text}08` }}>
       <View style={{ width: 32, alignItems: 'center' }}>{icon}</View>
-      <Text style={{ fontSize: 13, color: c.text, opacity: 0.5, width: 110, marginLeft: 8 }}>{label}</Text>
+      <Text style={{ fontSize: 13, color: c.text, opacity: 0.5, minWidth: 90, flexShrink: 0, marginLeft: 8 }}>{label}</Text>
       <Text style={{ flex: 1, fontSize: 14, fontWeight: '600', color: c.text, textAlign: 'right' }} numberOfLines={1}>
         {value || '—'}
       </Text>
@@ -182,6 +181,8 @@ export default function StudentProfile() {
   const scheme = useColorScheme();
   const isDark = scheme === 'dark';
   const c = isDark ? neuColors.dark : neuColors.light;
+  const layout = useLayout();
+  const insets = layout.insets;
   const router = useRouter();
   const { profile, setProfile } = useProfileStore();
   const { showToast } = useToast();
@@ -293,13 +294,17 @@ export default function StudentProfile() {
     if (!profile?.id) return;
     setAvatarUploading(true);
     try {
-      const uri  = result.assets[0].uri;
-      const ext  = uri.split('.').pop() ?? 'jpg';
-      const path = `avatars/${profile.id}.${ext}`;
-      const blob = await (await fetch(uri)).blob();
+      const asset = result.assets[0];
+      const uri   = asset.uri;
+      const ext   = uri.split('.').pop()?.toLowerCase() ?? 'jpg';
+      const path  = `avatars/${profile.id}.${ext}`;
+      // Use expo/fetch (supports arrayBuffer on Android content:// URIs)
+      const { fetch: expoFetch } = await import('expo/fetch');
+      const response = await expoFetch(uri);
+      const buffer   = await response.arrayBuffer();
       const { error: upErr } = await supabase.storage
         .from('user-avatars')
-        .upload(path, blob, { upsert: true, contentType: `image/${ext}` });
+        .upload(path, buffer, { upsert: true, contentType: asset.mimeType ?? `image/${ext}` });
       if (upErr) throw upErr;
       const { data: { publicUrl } } = supabase.storage.from('user-avatars').getPublicUrl(path);
       const updated = await updateProfile(profile.id, { avatar_url: publicUrl });
@@ -397,7 +402,14 @@ export default function StudentProfile() {
     setAcadLoading(false);
   };
 
-  const handleLogout = async () => { setShowLogout(false); await supabase.auth.signOut(); };
+  const handleLogout = async () => {
+    setShowLogout(false);
+    // Eagerly wipe the profile store so no stale role data remains visible
+    // while supabase.auth.signOut() completes and the new session initialises.
+    const { clearProfile } = useProfileStore.getState();
+    clearProfile();
+    await supabase.auth.signOut();
+  };
 
   const completedCount = subscriptions.filter(s => s.completed_at).length;
   const activeCount    = subscriptions.length - completedCount;
@@ -418,9 +430,9 @@ export default function StudentProfile() {
       style={{ flex: 1, backgroundColor: c.base }}
       contentInsetAdjustmentBehavior="automatic"
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />}
-      contentContainerStyle={{ paddingBottom: 40 }}
+      contentContainerStyle={{ paddingBottom: layout.scrollBottom() }}
     >
-      <View style={{ padding: 20 }}>
+      <View style={{ padding: layout.screenPx }}>
         <PermissionRationaleModal
           type="mediaLibrary"
           visible={showPhotoRationale}
@@ -619,7 +631,7 @@ export default function StudentProfile() {
           </View>
         }
       >
-        <KeyboardAvoidingView behavior="padding">
+        <KeyboardAvoidingView behavior={process.env.EXPO_OS === 'ios' ? 'padding' : 'height'}>
           <Text style={{ fontSize: 11, fontWeight: '700', color: c.text, opacity: 0.5, textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 6 }}>Full Name</Text>
           <NeuInputRow
             c={c}
@@ -665,7 +677,7 @@ export default function StudentProfile() {
           ) : undefined
         }
       >
-        <KeyboardAvoidingView behavior="padding">
+        <KeyboardAvoidingView behavior={process.env.EXPO_OS === 'ios' ? 'padding' : 'height'}>
           {pwdSuccess ? (
             <View style={{ alignItems: 'center', paddingVertical: 12, gap: 10 }}>
               <CheckCircle size={44} color="#16A34A" />

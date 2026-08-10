@@ -10,7 +10,7 @@ import { getFeaturedCourses, searchAllPublishedCourses, getMySubscriptions } fro
 import { CourseCard } from '@/components/CourseCard';
 import { SubscribeSheet, type SubscribeSheetContact } from '@/components/SubscribeSheet';
 import { PageHeader } from '@/components/PageHeader';
-import { neuColors } from '@/lib/neu';
+import { neuColors, useLayout, safeBottom } from '@/lib/neu';
 import { NeuSearchBar } from '@/components/NeuInputRow';
 import type { RelativePathString } from 'expo-router';
 
@@ -64,6 +64,8 @@ function doctorOf(item: CourseItem): { id: string; full_name: string } | null {
   const scheme = useColorScheme();
   const isDark = scheme === 'dark';
   const c = isDark ? neuColors.dark : neuColors.light;
+  const layout = useLayout();
+  const insets = layout.insets;
   const router = useRouter();
   const { profile } = useProfileStore();
 
@@ -187,7 +189,7 @@ function doctorOf(item: CourseItem): { id: string; full_name: string } | null {
   };
 
   const ListHeader = (
-    <View style={{ paddingHorizontal: 20, paddingTop: 12 }}>
+    <View style={{ paddingHorizontal: layout.screenPx, paddingTop: 12 }}>
       <PageHeader
         title="Courses"
         subtitle={isSearching
@@ -227,7 +229,7 @@ function doctorOf(item: CourseItem): { id: string; full_name: string } | null {
   );
 
   const ListEmpty = (
-    <View style={{ alignItems: 'center', paddingVertical: 60, paddingHorizontal: 20 }}>
+    <View style={{ alignItems: 'center', paddingVertical: 60, paddingHorizontal: layout.screenPx }}>
       {loadingFeatured && !isSearching
         ? <ActivityIndicator size="large" color={c.primary} />
         : (
@@ -255,7 +257,7 @@ function doctorOf(item: CourseItem): { id: string; full_name: string } | null {
         renderItem={renderItem}
         ListHeaderComponent={ListHeader}
         ListEmptyComponent={ListEmpty}
-        contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 32 }}
+        contentContainerStyle={{ paddingHorizontal: layout.screenPx, paddingBottom: layout.scrollBottom() }}
         contentInsetAdjustmentBehavior="automatic"
         keyboardShouldPersistTaps="handled"
         keyboardDismissMode="on-drag"

@@ -17,7 +17,7 @@ import { supabase } from '@/client/supabase';
 import { NeuCard } from '@/components/NeuCard';
 import { NeuButton } from '@/components/NeuButton';
 import { useToast } from '@/components/Toast';
-import { neuColors, neuFlatStyle } from '@/lib/neu';
+import { neuColors, neuFlatStyle, useLayout } from '@/lib/neu'
 import { logAndParse } from '@/lib/parseError';
 
 const PERM_LABELS: Array<{ key: keyof DeletePermissions; label: string; desc: string; danger?: boolean }> = [
@@ -40,6 +40,7 @@ export default function DeletePermissionsScreen() {
   const scheme = useColorScheme();
   const isDark = scheme === 'dark';
   const c    = isDark ? neuColors.dark : neuColors.light;
+  const layout = useLayout();
   const flat = neuFlatStyle(isDark);
   const { showToast } = useToast();
 
@@ -167,7 +168,7 @@ export default function DeletePermissionsScreen() {
   return (
     <ScrollView style={{ flex: 1, backgroundColor: c.base }} contentInsetAdjustmentBehavior="automatic"
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />}>
-      <View style={{ padding: 20 }}>
+      <View style={{ padding: layout.screenPx }}>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 4, marginTop: 8 }}>
           <Shield size={22} color={c.primary} />
           <Text style={{ fontSize: 24, fontWeight: '800', color: c.text }}>Delete Permissions</Text>

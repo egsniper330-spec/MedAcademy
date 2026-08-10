@@ -12,7 +12,7 @@ import { NeuCard } from '@/components/NeuCard';
 import { NeuButton } from '@/components/NeuButton';
 import { CourseProgressBar } from '@/components/CourseProgressBar';
 import { ContactSheet } from '@/components/ContactSheet';
-import { neuColors } from '@/lib/neu';
+import { neuColors, useLayout, safeTop, safeLeft, safeBottom } from '@/lib/neu';
 import type { RelativePathString } from 'expo-router';
 
 // Enable LayoutAnimation on Android
@@ -42,6 +42,8 @@ export default function CourseDetail() {
   const isDark = scheme === 'dark';
   const c = isDark ? neuColors.dark : neuColors.light;
   const router = useRouter();
+  const layout = useLayout();
+  const insets = layout.insets;
   const { id } = useLocalSearchParams<{ id: string }>();
   const { profile } = useProfileStore();
 
@@ -151,34 +153,35 @@ export default function CourseDetail() {
   );
 
   return (
-    <ScrollView style={{ flex: 1, backgroundColor: c.base }}
+    <ScrollView style={{ flex: 1, backgroundColor: c.base }} contentContainerStyle={{ paddingBottom: layout.scrollBottom() }}
       contentInsetAdjustmentBehavior="automatic"
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}>
 
-      {/* Cover image */}
+      {/* Cover image — aspect ratio stays correct on landscape/tablet */}
       {(course.image_url || course.cover_url || course.thumbnail_url) ? (
         <Image
           source={{ uri: course.image_url ?? course.cover_url ?? course.thumbnail_url }}
-          style={{ width: '100%', height: 200 }}
+          style={{ width: '100%', aspectRatio: 16/9 }}
           contentFit="cover"
         />
       ) : (
-        <View style={{ width: '100%', height: 140, backgroundColor: `${c.primary}12`, alignItems: 'center', justifyContent: 'center' }}>
+        <View style={{ width: '100%', aspectRatio: 16/9, backgroundColor: `${c.primary}12`, alignItems: 'center', justifyContent: 'center' }}>
           <GraduationCap size={52} color={c.primary} opacity={0.2} />
         </View>
       )}
 
-      {/* Back button overlay */}
-      <View style={{ position: 'absolute', top: 50, left: 20 }}>
+      {/* Back button overlay — position from safe-area insets via headerTokens */}
+      <View style={{ position: 'absolute', top: layout.headerTop, left: layout.headerLeft }}>
         <Pressable onPress={() => router.back()}
+          hitSlop={8}
           accessibilityLabel="Go back"
           accessibilityRole="button"
-          style={{ width: 44, height: 44, borderRadius: 12, backgroundColor: `${c.base}ee`, alignItems: 'center', justifyContent: 'center' }}>
-          <ArrowLeft size={18} color={c.text} opacity={0.7} />
+          style={{ width: 40, height: 40, borderRadius: 12, backgroundColor: `${c.base}ee`, alignItems: 'center', justifyContent: 'center' }}>
+          <ArrowLeft size={22} color={c.text} opacity={0.75} />
         </Pressable>
       </View>
 
-      <View style={{ padding: 20, gap: 16 }}>
+      <View style={{ padding: layout.screenPx, gap: 16 }}>
         {/* Archived banner */}
         {course.archived_at && (
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10,
@@ -188,7 +191,7 @@ export default function CourseDetail() {
             <View style={{ flex: 1 }}>
               <Text style={{ fontSize: 13, fontWeight: '700', color: '#D97706' }}>Course Archived</Text>
               <Text style={{ fontSize: 11, color: '#D97706', opacity: 0.75 }}>
-                {`Archived ${new Date(course.archived_at).toLocaleDateString()}${course.archive_reason ? ` · ${course.archive_reason}` : ''}`}
+                {`Archived ${new Date(course.archived_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}${course.archive_reason ? ` · ${course.archive_reason}` : ''}`}
               </Text>
             </View>
           </View>
@@ -406,7 +409,7 @@ export default function CourseDetail() {
                     const locked = isLessonLocked(lesson, lIdx, section) || (!isSubscribed && !lesson.is_preview);
                     const canAccess = !locked && !isScheduled;
                     const scheduledDate = isScheduled && lesson.scheduled_at
-                      ? new Date(lesson.scheduled_at).toLocaleDateString()
+                      ? new Date(lesson.scheduled_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
                       : null;
 
                     return (

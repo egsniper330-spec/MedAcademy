@@ -12,7 +12,7 @@ import { PageHeader } from '@/components/PageHeader';
 import { getReportData, getArchiveAnalytics, getCourseLifecycleLogs, formatStudyTime } from '@/lib/api';
 import { NeuCard } from '@/components/NeuCard';
 import { NeuButton } from '@/components/NeuButton';
-import { neuColors } from '@/lib/neu';
+import { neuColors, useLayout } from '@/lib/neu';
 
 const REPORT_TYPES = [
   { key: 'users',      label: 'User Report',            icon: Users,      color: '#1E90FF', desc: 'All registered users with roles and universities' },
@@ -48,6 +48,7 @@ export default function ReportsScreen() {
   const scheme = useColorScheme();
   const isDark = scheme === 'dark';
   const c = isDark ? neuColors.dark : neuColors.light;
+  const layout = useLayout();
 
   const [selectedType, setSelectedType] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -101,7 +102,7 @@ export default function ReportsScreen() {
 
   return (
     <ScrollView style={{ flex: 1, backgroundColor: c.base }} contentInsetAdjustmentBehavior="automatic">
-      <View style={{ padding: 20 }}>
+      <View style={{ padding: layout.screenPx }}>
         <PageHeader title="Reports" subtitle="Export platform data as CSV" accentColor="#7C3AED" />
 
         {/* Report Type Selection */}
@@ -181,7 +182,7 @@ export default function ReportsScreen() {
                 </View>
                 <View style={{ flexDirection: 'row', gap: 14 }}>
                   <Text style={{ fontSize: 11, color: c.text, opacity: 0.45 }}>
-                    {log.actor_role ?? '—'} · {new Date(log.created_at).toLocaleDateString()}
+                    {log.actor_role ?? '—'} · {new Date(log.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
                   </Text>
                   {log.reason ? (
                     <Text style={{ fontSize: 11, color: c.text, opacity: 0.45 }} numberOfLines={1}>
@@ -212,7 +213,7 @@ export default function ReportsScreen() {
               <NeuCard key={i} style={{ marginBottom: 10, padding: 14 }}>
                 {Object.entries(row).slice(0, 4).map(([key, val]) => (
                   <View key={key} style={{ flexDirection: 'row', marginBottom: 4 }}>
-                    <Text style={{ fontSize: 11, fontWeight: '700', color: c.text, opacity: 0.5, width: 120 }}>{key}</Text>
+                    <Text style={{ fontSize: 11, fontWeight: '700', color: c.text, opacity: 0.5, minWidth: 90, flexShrink: 0 }}>{key}</Text>
                     <Text style={{ fontSize: 11, color: c.text, flex: 1 }} numberOfLines={1}>{String(val ?? '')}</Text>
                   </View>
                 ))}

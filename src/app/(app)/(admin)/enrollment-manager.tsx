@@ -7,6 +7,7 @@ import {
   View, Text, ScrollView, useColorScheme, Pressable,
   TextInput, ActivityIndicator, KeyboardAvoidingView,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect } from 'expo-router';
 import {
   UserPlus, BookOpen, Search, X, ChevronDown, Check,
@@ -209,7 +210,7 @@ function EnrollmentRow({ row, isSuperAdmin, onRemove, onVisibilityChange, changi
   const [expanded, setExpanded] = useState(false);
   const displayName = row.student?.full_name || '(Unknown)';
   const displayEmail = row.student?.profile_email || row.student?.email || '';
-  const date = new Date(row.enrolled_at).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+  const date = new Date(row.enrolled_at).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
   const visLevel: EnrollmentVisibility = row.visibility_level ?? 'all';
   const isRestricted = visLevel !== 'all';
   const meta = VIS_META[visLevel];
@@ -263,6 +264,7 @@ export default function EnrollmentManager() {
   const scheme = useColorScheme();
   const isDark = scheme === 'dark';
   const c = isDark ? neuColors.dark : neuColors.light;
+  const insets = useSafeAreaInsets();
   const { showToast } = useToast();
   const { profile } = useProfileStore();
   const isSuperAdmin = profile?.role === 'super_admin';
@@ -406,7 +408,7 @@ export default function EnrollmentManager() {
     >
       <PageHeader title="Enrollment Manager" />
       <ScrollView
-        contentContainerStyle={{ padding: 16, paddingBottom: 60 }}
+        contentContainerStyle={{ padding: 16, paddingBottom: Math.max(insets.bottom, 30) + 30 }}
         keyboardShouldPersistTaps="handled"
         contentInsetAdjustmentBehavior="automatic"
       >

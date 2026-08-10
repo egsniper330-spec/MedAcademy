@@ -19,7 +19,7 @@ import { NeuCard } from '@/components/NeuCard';
 import { NeuButton } from '@/components/NeuButton';
 import { ResponsiveModal } from '@/components/ResponsiveModal';
 import { useToast } from '@/components/Toast';
-import { neuColors } from '@/lib/neu';
+import { neuColors, useLayout } from '@/lib/neu';
 import { validateRequired, friendlyError } from '@/lib/validation';
 
 type Tab = 'universities' | 'faculties' | 'levels';
@@ -66,6 +66,7 @@ export default function AcademicManagement() {
   const scheme = useColorScheme();
   const isDark = scheme === 'dark';
   const c = isDark ? neuColors.dark : neuColors.light;
+  const layout = useLayout();
   const { showToast } = useToast();
 
   const [tab, setTab] = useState<Tab>('universities');
@@ -274,7 +275,7 @@ export default function AcademicManagement() {
     <View style={{ flex: 1, backgroundColor: c.base }}>
       <ScrollView contentInsetAdjustmentBehavior="automatic"
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />}>
-        <View style={{ padding: 20 }}>
+        <View style={{ padding: layout.screenPx }}>
           <PageHeader title="Academic Structure" subtitle="Manage universities, faculties and levels" />
 
           {/* Tab bar */}
@@ -313,13 +314,13 @@ export default function AcademicManagement() {
                         </Text>
                       </View>
                       <View style={{ flexDirection: 'row', gap: 8 }}>
-                        <Pressable onPress={() => handleToggleUniversity(uni)} style={{ width: 32, height: 32, borderRadius: 8, backgroundColor: `${uni.is_active ? '#16A34A' : '#6B7280'}18`, alignItems: 'center', justifyContent: 'center' }}>
+                        <Pressable onPress={() => handleToggleUniversity(uni)} hitSlop={6} style={{ width: 32, height: 32, borderRadius: 8, backgroundColor: `${uni.is_active ? '#16A34A' : '#6B7280'}18`, alignItems: 'center', justifyContent: 'center' }}>
                           {uni.is_active ? <ToggleRight size={16} color="#16A34A" /> : <ToggleLeft size={16} color="#6B7280" />}
                         </Pressable>
-                        <Pressable onPress={() => { setEditUni(uni); setUniModal(true); }} style={{ width: 32, height: 32, borderRadius: 8, backgroundColor: `${c.primary}18`, alignItems: 'center', justifyContent: 'center' }}>
+                        <Pressable onPress={() => { setEditUni(uni); setUniModal(true); }} hitSlop={6} style={{ width: 32, height: 32, borderRadius: 8, backgroundColor: `${c.primary}18`, alignItems: 'center', justifyContent: 'center' }}>
                           <Edit2 size={14} color={c.primary} />
                         </Pressable>
-                        <Pressable onPress={() => handleDeleteUniversity(uni.id)} style={{ width: 32, height: 32, borderRadius: 8, backgroundColor: '#DC262618', alignItems: 'center', justifyContent: 'center' }}>
+                        <Pressable onPress={() => handleDeleteUniversity(uni.id)} hitSlop={6} style={{ width: 32, height: 32, borderRadius: 8, backgroundColor: '#DC262618', alignItems: 'center', justifyContent: 'center' }}>
                           <Trash2 size={14} color="#DC2626" />
                         </Pressable>
                       </View>

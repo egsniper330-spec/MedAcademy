@@ -15,14 +15,13 @@ import {
   ActivityIndicator, FlatList, KeyboardAvoidingView, Modal,
   Pressable, ScrollView, Text, TextInput, useColorScheme, View,
 } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Image } from 'expo-image';
 import { useFocusEffect } from 'expo-router';
 import {
   BookOpen, ChevronDown, ChevronUp, Clock, Edit2, Film, RefreshCw,
   Search, SortAsc, SortDesc, Trash2, X,
 } from 'lucide-react-native';
-import { neuColors, neuFlatStyle, neuPressedStyle } from '@/lib/neu';
+import { neuColors, useLayout, neuFlatStyle, neuPressedStyle, safeTop, safeLeft, safeRight, safeBottom , zIndex} from '@/lib/neu';
 import { NeuCard } from '@/components/NeuCard';
 import { useToast } from '@/components/Toast';
 import { friendlyError } from '@/lib/validation';
@@ -44,7 +43,7 @@ function formatBytes(bytes: number | null): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 function formatDate(iso: string): string {
-  return new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+  return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 }
 
 const STATUS_FILTERS = [
@@ -64,7 +63,8 @@ const SORT_OPTIONS = [
 export default function VideoLibraryScreen() {
   const scheme = useColorScheme();
   const isDark = scheme === 'dark';
-  const insets = useSafeAreaInsets();
+  const layout = useLayout();
+  const insets = layout.insets;
   const c = isDark ? neuColors.dark : neuColors.light;
   const { showToast } = useToast();
 
@@ -158,11 +158,11 @@ export default function VideoLibraryScreen() {
       <NeuCard style={{ marginBottom: 14, borderRadius: 18, overflow: 'hidden', padding: 0 }}>
         {/* ── Thumbnail row ── */}
         <View style={{ flexDirection: 'row' }}>
-          <View style={{ width: 112, height: 80 }}>
+          <View style={{ width: 112, aspectRatio: 112/80 }}>
             {item.thumbnail_url ? (
-              <Image source={{ uri: item.thumbnail_url }} style={{ width: 112, height: 80 }} contentFit="cover" />
+              <Image source={{ uri: item.thumbnail_url }} style={{ width: 112, aspectRatio: 112/80 }} contentFit="cover" />
             ) : (
-              <View style={{ width: 112, height: 80, backgroundColor: `${c.primary}12`, alignItems: 'center', justifyContent: 'center' }}>
+              <View style={{ width: 112, aspectRatio: 112/80, backgroundColor: `${c.primary}12`, alignItems: 'center', justifyContent: 'center' }}>
                 <Film size={28} color={c.primary} opacity={0.35} />
               </View>
             )}
@@ -333,8 +333,8 @@ export default function VideoLibraryScreen() {
         </View>
       </Modal>
 
-      {/* ── Header ── */}
-      <View style={{ paddingTop: insets.top + 12, paddingHorizontal: 20, paddingBottom: 12 }}>
+      {/* ── Header — spacing from headerTokens (EDGE_PAD=4, BREATHING=8) ── */}
+      <View style={{ paddingTop: layout.headerTop, paddingLeft: layout.headerLeft, paddingRight: layout.headerRight, paddingBottom: 12 }}>
         <Text style={{ fontSize: 24, fontWeight: '800', color: c.text }}>Video Library</Text>
         <Text style={{ fontSize: 13, color: c.text, opacity: 0.45, marginTop: 4 }}>
           One upload, reusable across any lesson
@@ -373,7 +373,7 @@ export default function VideoLibraryScreen() {
 
           {showSortMenu && (
             <View style={[neuFlatStyle(isDark), {
-              position: 'absolute', top: 46, right: 0, zIndex: 99,
+              position: 'absolute', top: 46, right: 0, zIndex: zIndex.dropdown,
               borderRadius: 14, padding: 8, minWidth: 160, gap: 2,
             }]}>
               {SORT_OPTIONS.map(opt => (
@@ -430,7 +430,7 @@ export default function VideoLibraryScreen() {
           data={assets}
           keyExtractor={(item) => item.id}
           renderItem={renderItem}
-          contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 40 }}
+          contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: layout.scrollBottom() }}
           contentInsetAdjustmentBehavior="automatic"
           showsVerticalScrollIndicator={false}
           ListEmptyComponent={

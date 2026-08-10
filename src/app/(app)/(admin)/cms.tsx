@@ -13,7 +13,7 @@ import { FileText, Edit3, Check, ChevronRight, ChevronDown } from 'lucide-react-
 import { getCMSPages, updateCMSPage } from '@/lib/api';
 import { NeuCard } from '@/components/NeuCard';
 import { NeuButton } from '@/components/NeuButton';
-import { neuColors } from '@/lib/neu';
+import { neuColors, useLayout } from '@/lib/neu';
 
 const PAGE_COLORS: Record<string, string> = {
   about_us: '#1E90FF', contact_us: '#16A34A', privacy_policy: '#7C3AED', terms_conditions: '#D97706',
@@ -23,6 +23,7 @@ export default function CMSPagesScreen() {
   const scheme = useColorScheme();
   const isDark = scheme === 'dark';
   const c = isDark ? neuColors.dark : neuColors.light;
+  const layout = useLayout();
 
   const [pages, setPages] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -63,7 +64,7 @@ export default function CMSPagesScreen() {
   return (
     <ScrollView style={{ flex: 1, backgroundColor: c.base }} contentInsetAdjustmentBehavior="automatic"
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />}>
-      <View style={{ padding: 20 }}>
+      <View style={{ padding: layout.screenPx }}>
         <PageHeader title="CMS Pages" subtitle="Edit platform content pages" accentColor="#16A34A" />
 
         {loading ? <ActivityIndicator color={c.primary} style={{ marginTop: 40 }} /> : (

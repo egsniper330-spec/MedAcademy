@@ -5,13 +5,14 @@ import { CreditCard, TrendingUp, TrendingDown, Clock } from 'lucide-react-native
 import { useCreditBalance } from '@/lib/useCreditBalance';
 import { getCreditHistory, type CreditTransaction } from '@/lib/creditService';
 import { NeuCard } from '@/components/NeuCard';
-import { neuColors } from '@/lib/neu';
+import { neuColors, useLayout } from '@/lib/neu';
 import { PageHeader } from '@/components/PageHeader';
 
 export default function DoctorCredits() {
   const scheme = useColorScheme();
   const isDark = scheme === 'dark';
   const c = isDark ? neuColors.dark : neuColors.light;
+  const layout = useLayout();
 
   // ── Single source of truth: creditService via hook ──────────────────────────
   const { balance: credits, loading: balLoading, refresh: refreshBalance } = useCreditBalance();
@@ -42,7 +43,7 @@ export default function DoctorCredits() {
   return (
     <ScrollView style={{ flex: 1, backgroundColor: c.base }} contentInsetAdjustmentBehavior="automatic"
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />}>
-      <View style={{ padding: 20 }}>
+      <View style={{ padding: layout.screenPx }}>
         <PageHeader title="My Credits" subtitle="Credit balance & history" accentColor={c.primary} />
 
         {loading ? <ActivityIndicator color={c.primary} style={{ marginTop: 40 }} /> : (
@@ -99,7 +100,7 @@ export default function DoctorCredits() {
                   )}
                   <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 3 }}>
                     <Clock size={11} color={c.text} opacity={0.35} />
-                    <Text style={{ fontSize: 11, color: c.text, opacity: 0.35, marginLeft: 3 }}>{new Date(tx.created_at).toLocaleDateString()}</Text>
+                    <Text style={{ fontSize: 11, color: c.text, opacity: 0.35, marginLeft: 3 }}>{new Date(tx.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</Text>
                   </View>
                 </View>
                 <Text style={{ fontSize: 18, fontWeight: '800', color: txColor }}>

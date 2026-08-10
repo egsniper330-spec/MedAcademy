@@ -4,6 +4,7 @@ import {
   ActivityIndicator, Pressable,
 } from 'react-native';
 import { useFocusEffect } from 'expo-router';
+import { DashboardHeader } from '@/components/DashboardHeader';
 import {
   Activity, Database, Users, Server, RefreshCw,
   Trash2, CheckCircle, XCircle, Clock, FileX, Film,
@@ -13,7 +14,7 @@ import { getAdminStats } from '@/lib/api';
 import { supabase } from '@/client/supabase';
 import { NeuCard } from '@/components/NeuCard';
 import { NeuButton } from '@/components/NeuButton';
-import { neuColors, neuFlatStyle } from '@/lib/neu';
+import { neuColors, neuFlatStyle, useLayout } from '@/lib/neu'
 import { useToast } from '@/components/Toast';
 import { logAndParse } from '@/lib/parseError';
 
@@ -50,6 +51,7 @@ export default function SuperAdminHealth() {
   const scheme = useColorScheme();
   const isDark = scheme === 'dark';
   const c    = isDark ? neuColors.dark : neuColors.light;
+  const layout = useLayout();
   const flat = neuFlatStyle(isDark);
   const { showToast } = useToast();
 
@@ -144,20 +146,18 @@ export default function SuperAdminHealth() {
       contentInsetAdjustmentBehavior="automatic"
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />}
     >
-      <View style={{ padding: 20 }}>
-        <Text style={{ fontSize: 24, fontWeight: '800', color: c.text, marginBottom: 4, marginTop: 8 }}>
-          Health Center
-        </Text>
-        <Text style={{ fontSize: 13, color: c.text, opacity: 0.5, marginBottom: 20 }}>
-          Real-time platform health monitoring
-        </Text>
+      <DashboardHeader
+        roleLabel="Real-time platform health monitoring"
+        greeting="Health Center"
+      />
+      <View style={{ padding: layout.screenPx, paddingTop: 0 }}>
 
         {loading ? (
           <ActivityIndicator color={c.primary} style={{ marginTop: 40 }} />
         ) : (
           <>
             {/* ── Overall Status Banner ── */}
-            <NeuCard radius={22} style={{ padding: 20, marginBottom: 20, flexDirection: 'row', alignItems: 'center' }}>
+            <NeuCard radius={22} style={{ padding: layout.screenPx, marginBottom: 20, flexDirection: 'row', alignItems: 'center' }}>
               <View style={{ width: 56, height: 56, borderRadius: 18, backgroundColor: overallHealthy ? '#16A34A20' : '#DC262620', alignItems: 'center', justifyContent: 'center', marginRight: 16 }}>
                 <Activity size={28} color={overallHealthy ? '#16A34A' : '#DC2626'} />
               </View>
@@ -166,7 +166,7 @@ export default function SuperAdminHealth() {
                   {overallHealthy ? 'All Systems Operational' : 'Degraded Performance'}
                 </Text>
                 <Text style={{ fontSize: 12, color: c.text, opacity: 0.5, marginTop: 3 }}>
-                  Last checked: {new Date().toLocaleTimeString()}
+                  Last checked: {new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true })}
                 </Text>
               </View>
             </NeuCard>
@@ -318,7 +318,7 @@ export default function SuperAdminHealth() {
                                 {rec.orphan_videos  && <Film  size={13} color="#EF4444" />}
                               </View>
                               <Text style={{ fontSize: 11, color: c.text, opacity: 0.4, marginTop: 3 }}>
-                                {new Date(rec.created_at).toLocaleDateString()} · {rec.files_removed} files · {rec.videos_removed} videos
+                                {new Date(rec.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })} · {rec.files_removed} files · {rec.videos_removed} videos
                               </Text>
                             </View>
                           </View>
@@ -329,7 +329,7 @@ export default function SuperAdminHealth() {
                 )}
               </>
             ) : (
-              <NeuCard style={{ padding: 20, alignItems: 'center' }}>
+              <NeuCard style={{ padding: layout.screenPx, alignItems: 'center' }}>
                 <Trash2 size={28} color={c.primary} style={{ opacity: 0.3 } as any} />
                 <Text style={{ fontSize: 13, color: c.text, opacity: 0.4, marginTop: 10 }}>No deletion records yet</Text>
               </NeuCard>

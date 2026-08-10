@@ -1,4 +1,4 @@
-import { Platform, View } from 'react-native';
+import { View } from 'react-native';
 import { Tabs } from 'expo-router';
 import { useColorScheme } from 'react-native';
 import { LayoutDashboard, Compass, BookOpen, UserCircle } from 'lucide-react-native';
@@ -16,21 +16,18 @@ function StudentTabs() {
       initialRouteName="dashboard"
       screenOptions={{
         headerShown: false,
+        // DO NOT set height or paddingBottom manually — React Navigation + SafeAreaProvider
+        // handles the bottom inset automatically via the native window insets API.
+        // Setting height/paddingBottom manually breaks Android 3-button nav and gesture nav.
         tabBarStyle: {
           backgroundColor: c.base,
           borderTopWidth: 0,
-          height: Platform.OS === 'ios' ? 82 : 64,
-          paddingTop: 6,
-          paddingBottom: Platform.OS === 'ios' ? 24 : 8,
-          ...Platform.select({
-            ios: {
-              shadowColor: c.shadowDark,
-              shadowOffset: { width: 0, height: -4 },
-              shadowOpacity: 0.55,
-              shadowRadius: 14,
-            },
-            android: { elevation: 16 },
-          }),
+          paddingTop: 8,
+          shadowColor: c.shadowDark,
+          shadowOffset: { width: 0, height: -4 },
+          shadowOpacity: 0.45,
+          shadowRadius: 12,
+          elevation: 16,
         },
         tabBarActiveTintColor: c.primary,
         tabBarInactiveTintColor: `${c.text}44`,
