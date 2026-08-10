@@ -3,17 +3,15 @@
     "name": "MedAcademy",
     "slug": "medacademy",
     "scheme": "medacademy",
-    "version": "1.0.578",
+    "version": "1.0.775",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "automatic",
     "ios": {
       "supportsTablet": true,
-      "buildNumber": "209",
+      "buildNumber": "212",
       "bundleIdentifier": "com.medacademy.app",
       "entitlements": {
-        "com.apple.developer.devicecheck": true,
-        "com.apple.developer.app-attest-environment": "production",
         "aps-environment": "production"
       },
       "infoPlist": {
@@ -51,18 +49,15 @@
         "backgroundColor": "#081A35"
       },
       "predictiveBackGestureEnabled": false,
-      "versionCode": 209,
+      "versionCode": 220,
       "package": "com.medacademy.app",
-      "navigationBarColor": "#00000000",
-      "softwareKeyboardLayoutMode": "adjustResize"
+      "softwareKeyboardLayoutMode": "resize"
     },
     "web": {
       "bundler": "metro",
       "favicon": "./assets/favicon.png"
     },
     "plugins": [
-      "./plugins/withSecurityModule",
-      "./plugins/withProguardRules",
       [
         "expo-router",
         {
@@ -129,7 +124,6 @@
             "minSdkVersion": 24,
             "compileSdkVersion": 36,
             "targetSdkVersion": 36,
-            "enableProguardInReleaseBuilds": true,
             "abiFilters": [
               "armeabi-v7a",
               "arm64-v8a",
@@ -140,19 +134,18 @@
             ]
           },
           "ios": {
-            "deploymentTarget": "15.1"
+            "deploymentTarget": "15.1",
+            "extraPodspecSources": [
+              "https://github.com/CocoaPods/Specs.git"
+            ],
+            "buildReactNativeFromSource": true
           }
         }
       ],
-      [
-        "expo-navigation-bar",
-        {
-          "position": "absolute",
-          "visibility": "visible",
-          "behavior": "inset-swipe",
-          "style": "dark"
-        }
-      ]
+      "./plugins/withSecurityModule",
+      "./plugins/withProguardRules",
+      "./plugins/withDynamicVersions",
+      "./plugins/withGradleWrapper"
     ],
     "extra": {
       "eas": {}
