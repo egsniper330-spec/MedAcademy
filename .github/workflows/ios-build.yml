@@ -177,7 +177,7 @@ jobs:
       # -------------------------------------------------------------------------
       # 7. xcodebuild (unsigned, Release)
       # CODE_SIGNING_ALLOWED=NO gives a compiled binary packageable as unsigned IPA.
-      # PIPESTATUS[0] captures xcodebuild's exit code, not xcpretty's.
+      # PIPESTATUS[0] captures xcodebuild's real exit code from the tee pipeline.
       # -------------------------------------------------------------------------
       - name: Build iOS app (unsigned, Release)
         id: xcode-build
@@ -207,34 +207,13 @@ jobs:
             GCC_OPTIMIZATION_LEVEL=0 \
             SWIFT_OPTIMIZATION_LEVEL="-Onone" \
             build \
-            2>&1 | tee /tmp/xcodebuild.log | xcpretty --color
+            2>&1 | tee /tmp/xcodebuild.log
 
           BUILD_EXIT=${PIPESTATUS[0]}
 
           if [ "$BUILD_EXIT" -ne 0 ]; then
-            echo "WARN: First build attempt failed (exit $BUILD_EXIT), retrying without xcpretty..."
-            xcodebuild \
-              -workspace "$WORKSPACE" \
-              -scheme "$SCHEME" \
-              -configuration Release \
-              -sdk iphoneos \
-              -derivedDataPath "$BUILD_DIR" \
-              CODE_SIGNING_ALLOWED=NO \
-              CODE_SIGNING_REQUIRED=NO \
-              CODE_SIGN_IDENTITY="" \
-              AD_HOC_CODE_SIGNING_ALLOWED=YES \
-              ENABLE_BITCODE=NO \
-              GCC_OPTIMIZATION_LEVEL=0 \
-              SWIFT_OPTIMIZATION_LEVEL="-Onone" \
-              build \
-              2>&1 | tee /tmp/xcodebuild-raw.log
-            BUILD_EXIT=$?
-          fi
-
-          if [ "$BUILD_EXIT" -ne 0 ]; then
-            echo "FAIL: xcodebuild failed (exit $BUILD_EXIT)"
-            echo "--- Last 100 lines of build log ---"
-            tail -100 /tmp/xcodebuild.log 2>/dev/null || tail -100 /tmp/xcodebuild-raw.log 2>/dev/null
+            echo "xcodebuild failed with exit code $BUILD_EXIT"
+            tail -200 /tmp/xcodebuild.log
             exit "$BUILD_EXIT"
           fi
 
