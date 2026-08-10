@@ -1335,15 +1335,61 @@ function withIOSEmbedPodsFrameworks(config) {
     const appName = cfg.modRequest.projectName;
     const target  = proj.getFirstTarget();
 
-    // ── Idempotency: skip if the phase already exists ─────────────────────
-    const existingPhases =
+    const phaseObjects =
       proj.hash.project.objects['PBXShellScriptBuildPhase'] || {};
-    const alreadyPresent = Object.values(existingPhases).some(
-      (phase) =>
-        typeof phase === 'object' &&
-        phase.name &&
-        (phase.name === EMBED_PODS_PHASE_NAME ||
-          phase.name === `"${EMBED_PODS_PHASE_NAME}"`)
+
+    // ── Clean-up: remove any stale/orphaned embed-phase entries ───────────
+    // A stale entry can occur when a previous plugin run inserted a phase
+    // with a hardcoded UUID that was later removed from the objects dict
+    // but not from the buildPhases array, or vice-versa.  Clearing both
+    // guarantees the subsequent idempotency check and insertion are clean.
+    const staleUuids = Object.keys(phaseObjects).filter((k) => {
+      const p = phaseObjects[k];
+      return (
+        typeof p === 'object' &&
+        p.name &&
+        (p.name === EMBED_PODS_PHASE_NAME ||
+          p.name === `"${EMBED_PODS_PHASE_NAME}"`)
+      );
+    });
+
+    // Collect the UUIDs that appear in the buildPhases array but have no
+    // matching object (dangling references from old hardcoded-UUID approach).
+    const nativeTargetSection = proj.pbxNativeTargetSection();
+    for (const tKey of Object.keys(nativeTargetSection)) {
+      const t = nativeTargetSection[tKey];
+      if (!t || typeof t !== 'object' || !Array.isArray(t.buildPhases)) continue;
+      if (t.name !== appName && t.name !== `"${appName}"`) continue;
+      // Remove array entries whose comment names the phase but whose UUID has
+      // no backing object (dangling) OR whose UUID is in our stale set.
+      for (let i = t.buildPhases.length - 1; i >= 0; i--) {
+        const entry = t.buildPhases[i];
+        const uuid    = typeof entry === 'object' ? entry.value   : entry;
+        const comment = typeof entry === 'object' ? entry.comment : '';
+        const isEmbedComment = comment && comment.includes('Embed Pods');
+        const isOrphan = !phaseObjects[uuid] || staleUuids.includes(uuid);
+        if (isEmbedComment || (staleUuids.includes(uuid) && isOrphan)) {
+          t.buildPhases.splice(i, 1);
+        }
+      }
+      break;
+    }
+    // Remove stale objects + their _comment twin entries.
+    for (const uuid of staleUuids) {
+      delete phaseObjects[uuid];
+      delete phaseObjects[`${uuid}_comment`];
+    }
+
+    // ── Idempotency: if a valid phase object already exists, stop ─────────
+    // This handles the case where pod install ran AFTER prebuild and already
+    // added its own [CP] Embed Pods Frameworks phase (CocoaPods generates a
+    // new UUID each time).  We trust pod install's version and skip.
+    const alreadyPresent = Object.values(phaseObjects).some(
+      (p) =>
+        typeof p === 'object' &&
+        p.name &&
+        (p.name === EMBED_PODS_PHASE_NAME ||
+          p.name === `"${EMBED_PODS_PHASE_NAME}"`)
     );
     if (alreadyPresent) return cfg;
 
@@ -1351,13 +1397,14 @@ function withIOSEmbedPodsFrameworks(config) {
     // pbxShellScriptBuildPhaseObj() inside the library wraps shellScript in
     // quotes and escapes embedded quotes automatically — pass the raw string.
     const { uuid: phaseUuid, buildPhase } = proj.addBuildPhase(
-      [],                          // no individual file refs — script handles all
+      [],   // no individual file refs — the generated frameworks.sh handles all
       'PBXShellScriptBuildPhase',
       EMBED_PODS_PHASE_NAME,
       target.uuid,
       {
         shellPath: '/bin/sh',
-        // Raw script content — xcode@3 will quote + escape this correctly
+        // Raw value — xcode@3's pbxShellScriptBuildPhaseObj wraps + escapes this.
+        // Result in pbxproj: shellScript = "\"${PODS_ROOT}/.../frameworks.sh\"\n";
         shellScript:
           `"$\{PODS_ROOT}/Target Support Files/Pods-${appName}/Pods-${appName}-frameworks.sh"\n`,
         inputPaths:  [],
@@ -1365,9 +1412,11 @@ function withIOSEmbedPodsFrameworks(config) {
       }
     );
 
-    // ── Append xcfilelist paths (incremental build support) ────────────────
-    // These are NOT supported by the addBuildPhase options object in xcode@3,
-    // so we patch the phase object directly after creation.
+    // ── Append xcfilelist paths (incremental-build support) ───────────────
+    // xcode@3's addBuildPhase options object does not expose these fields, so
+    // we patch the in-memory phase object directly after creation.
+    // ${CONFIGURATION} is resolved by Xcode at build time to "Debug"/"Release",
+    // matching the xcfilelist filenames CocoaPods generates during pod install.
     buildPhase.inputFileListPaths = [
       `"$\{PODS_ROOT}/Target Support Files/Pods-${appName}/Pods-${appName}-frameworks-$\{CONFIGURATION}-input-files.xcfilelist"`,
     ];
@@ -1376,34 +1425,30 @@ function withIOSEmbedPodsFrameworks(config) {
     ];
     buildPhase.showEnvVarsInLog = 0;
 
-    // ── Move phase to the correct position in buildPhases ─────────────────
-    // addBuildPhase() appends to the END. We need it BEFORE "[CP] Copy Pods
-    // Resources" so framework embedding happens before resource copying.
+    // ── Reposition: move phase to just before [CP] Copy Pods Resources ────
+    // addBuildPhase() appends to the end of the target's buildPhases array.
+    // CocoaPods expects the order: … Bundle RN code → Embed Pods → Copy Resources.
     const nativeTargets = proj.pbxNativeTargetSection();
     for (const key of Object.keys(nativeTargets)) {
       const t = nativeTargets[key];
       if (!t || typeof t !== 'object' || !t.buildPhases) continue;
       if (t.name !== appName && t.name !== `"${appName}"`) continue;
 
-      const phases = t.buildPhases;
+      const bpArr = t.buildPhases;
 
-      // Remove the entry addBuildPhase() just appended at the end
-      const appendedIdx = phases.findIndex(
+      // Remove the entry addBuildPhase() just appended at the tail.
+      const appendedIdx = bpArr.findIndex(
         (p) => (typeof p === 'object' ? p.value : p) === phaseUuid
       );
-      if (appendedIdx >= 0) phases.splice(appendedIdx, 1);
+      if (appendedIdx >= 0) bpArr.splice(appendedIdx, 1);
 
-      // Find "[CP] Copy Pods Resources" to insert just before it
-      const copyResIdx = phases.findIndex((p) => {
+      // Insert immediately before [CP] Copy Pods Resources (or at end).
+      const copyResIdx = bpArr.findIndex((p) => {
         const comment = typeof p === 'object' ? p.comment : '';
         return comment && comment.includes('Copy Pods Resources');
       });
-
-      const insertAt = copyResIdx >= 0 ? copyResIdx : phases.length;
-      phases.splice(insertAt, 0, {
-        value: phaseUuid,
-        comment: EMBED_PODS_PHASE_NAME,
-      });
+      const insertAt = copyResIdx >= 0 ? copyResIdx : bpArr.length;
+      bpArr.splice(insertAt, 0, { value: phaseUuid, comment: EMBED_PODS_PHASE_NAME });
       break;
     }
 
