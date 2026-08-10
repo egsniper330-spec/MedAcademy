@@ -159,20 +159,97 @@ jobs:
         id: xcode-info
         shell: bash
         run: |
-          WORKSPACE=$(find ios -name "*.xcworkspace" -maxdepth 2 | head -1)
+          # ------------------------------------------------------------------
+          # Step 1: Find the top-level CocoaPods workspace directly under ios/
+          # (maxdepth 1 so we never pick up ios/*.xcodeproj/project.xcworkspace)
+          # ------------------------------------------------------------------
+          WORKSPACE=$(find ios -maxdepth 1 -type d -name "*.xcworkspace" | head -1)
+
           if [ -z "$WORKSPACE" ]; then
-            echo "FAIL: No .xcworkspace found"
+            echo "FAIL: No top-level .xcworkspace found directly under ios/"
+            echo "      (CocoaPods must generate ios/<Name>.xcworkspace after pod install)"
+            echo ""
+            echo "All .xcworkspace paths found (for diagnosis):"
+            find ios -maxdepth 3 -type d -name "*.xcworkspace" -print
+            echo ""
+            echo "All .xcodeproj paths found (for diagnosis):"
+            find ios -maxdepth 2 -name "*.xcodeproj" -print
             exit 1
           fi
+
+          echo "=== Selected workspace ==="
+          echo "$WORKSPACE"
+
+          # ------------------------------------------------------------------
+          # Step 2: List all available schemes in the workspace
+          # ------------------------------------------------------------------
+          echo ""
+          echo "=== Available schemes ==="
+          SCHEMES_OUTPUT=$(xcodebuild -workspace "$WORKSPACE" -list 2>&1)
+          echo "$SCHEMES_OUTPUT"
+
+          # ------------------------------------------------------------------
+          # Step 3: Determine the correct application scheme.
+          # Priority order:
+          #   a) A scheme whose name exactly matches the workspace basename
+          #      (e.g. workspace = ios/MedAcademy.xcworkspace -> try "MedAcademy")
+          #   b) The first scheme listed that is NOT "Pods" and NOT a test scheme
+          # ------------------------------------------------------------------
+          WORKSPACE_BASENAME=$(basename "$WORKSPACE" .xcworkspace)
+
+          # Extract scheme names from xcodebuild -list output
+          # Schemes appear after the "Schemes:" line, one per indented line
+          ALL_SCHEMES=$(echo "$SCHEMES_OUTPUT" \
+            | awk '/Schemes:/{found=1; next} found && /^[[:space:]]+[^[:space:]]/{print $1}')
+
+          echo ""
+          echo "Parsed scheme list:"
+          echo "$ALL_SCHEMES"
+
+          # a) Try exact match on workspace basename
+          SCHEME=""
+          if echo "$ALL_SCHEMES" | grep -qx "$WORKSPACE_BASENAME"; then
+            SCHEME="$WORKSPACE_BASENAME"
+            echo "Selected scheme (exact match): $SCHEME"
+          fi
+
+          # b) Fall back: first scheme that is not "Pods" and not a *Tests scheme
+          if [ -z "$SCHEME" ]; then
+            SCHEME=$(echo "$ALL_SCHEMES" \
+              | grep -v "^Pods$" \
+              | grep -v "Tests$" \
+              | head -1)
+            if [ -n "$SCHEME" ]; then
+              echo "Selected scheme (first non-Pods/non-Tests): $SCHEME"
+            fi
+          fi
+
+          if [ -z "$SCHEME" ]; then
+            echo "FAIL: Could not determine a valid application scheme."
+            echo "      Available schemes:"
+            echo "$ALL_SCHEMES"
+            exit 1
+          fi
+
+          # ------------------------------------------------------------------
+          # Step 4: Hard-validate that the selected scheme actually exists
+          # ------------------------------------------------------------------
+          if ! echo "$ALL_SCHEMES" | grep -qx "$SCHEME"; then
+            echo "FAIL: Selected scheme '$SCHEME' is not in the workspace scheme list."
+            echo "      Available schemes:"
+            echo "$ALL_SCHEMES"
+            exit 1
+          fi
+
+          echo ""
+          echo "=== Selected scheme ==="
+          echo "$SCHEME"
+
+          # ------------------------------------------------------------------
+          # Step 5: Export outputs
+          # ------------------------------------------------------------------
           echo "workspace=$WORKSPACE" >> "$GITHUB_OUTPUT"
-          echo "OK: Workspace: $WORKSPACE"
-
-          SCHEME=$(basename "$WORKSPACE" .xcworkspace)
           echo "scheme=$SCHEME" >> "$GITHUB_OUTPUT"
-          echo "OK: Scheme: $SCHEME"
-
-          echo "--- Available schemes ---"
-          xcodebuild -workspace "$WORKSPACE" -list 2>/dev/null || true
 
       # -------------------------------------------------------------------------
       # 7. xcodebuild (unsigned, Release)
