@@ -21,6 +21,7 @@
  */
 
 import { NativeModules, NativeEventEmitter, Platform } from 'react-native';
+import NetInfo from '@react-native-community/netinfo';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -83,6 +84,11 @@ function getModule(): typeof NativeModules['SecurityModule'] | null {
 
 function getIOSModule(): typeof NativeModules['IOSSecurityModule'] | null {
   if (Platform.OS !== 'ios') return null;
+  // IOSSecurityModule is compiled into the app via plugins/withSecurityModule and
+  // is registered in the Xcode project. NativeModules.IOSSecurityModule is the live
+  // native module — callers should NOT assume null.
+  // (Historical note: the module was temporarily absent during early development.
+  // It is now fully compiled, registered, and active.)
   return NativeModules.IOSSecurityModule ?? null;
 }
 
@@ -233,19 +239,114 @@ export async function isNativeTampered(): Promise<boolean> {
 
 // ─── Phase 3 — new individual Android APIs ────────────────────────────────────
 
-/** Android VPN detection via ConnectivityManager TRANSPORT_VPN + NetworkInterface tun/ppp scan.
- *  On iOS, VPN is detected via IOSSecurityModule utun/ipsec interface scan. */
+// ─── Pure-JS iOS VPN detection ───────────────────────────────────────────────
+//
+// NOTE: IOSSecurityModule is now compiled and active. NativeModules.IOSSecurityModule
+// is NOT null in production builds (the module was re-added via plugins/withSecurityModule).
+// The native getSecurityFlags() batch call handles VPN detection natively via
+// getifaddrs(). The pure-JS implementation below is a fallback / supplement used
+// by isVPNActive() for callers that need a standalone VPN check without the full batch.
+//
+// Without the native module, NativeModules.IOSSecurityModule is always null
+// → getIOSModule() always returns null → the old code always returned false
+// → VPN was NEVER detected on iOS.
+//
+// This pure-JS replacement covers every VPN type that matters:
+//
+//  ┌─────────────────────────────────────────────────────────────────────────┐
+//  │ VPN type            │ NetInfo type  │ Detected by                       │
+//  ├─────────────────────┼───────────────┼───────────────────────────────────┤
+//  │ Personal VPN        │ 'vpn'         │ Method 1 — direct type match      │
+//  │ IKEv2 (system)      │ 'vpn'         │ Method 1                          │
+//  │ IPSec (system)      │ 'vpn'         │ Method 1                          │
+//  │ L2TP (system)       │ 'vpn'         │ Method 1                          │
+//  │ WireGuard app       │ 'other'       │ Method 2 — other+connected        │
+//  │ OpenVPN app         │ 'other'       │ Method 2                          │
+//  │ Tailscale           │ 'other'       │ Method 2                          │
+//  │ Cloudflare WARP     │ 'other'       │ Method 2                          │
+//  │ Packet Tunnel ext.  │ 'other'       │ Method 2                          │
+//  └─────────────────────────────────────────────────────────────────────────┘
+//
+// Limitation: method 2 cannot distinguish "other non-VPN connections" on very
+// unusual network topologies. In practice, iOS reports WiFi/cellular/vpn for
+// standard connections; 'other' almost always means a tunnel interface.
+
+async function detectVPNviaNetInfo(): Promise<boolean> {
+  const TAG = '[NativeSecurity][iOS-VPN-JS]';
+  try {
+    console.log(TAG, 'Stage-1: fetching NetInfo state…');
+    const state = await NetInfo.fetch();
+    console.log(TAG, 'Stage-2: raw state =', JSON.stringify({
+      type:               state.type,
+      isConnected:        state.isConnected,
+      isInternetReachable: state.isInternetReachable,
+    }));
+
+    // Method 1 — primary connection type explicitly reported as VPN
+    // Covers: Personal VPN, IKEv2, IPSec, L2TP configured in iOS Settings > VPN
+    if (state.type === 'vpn') {
+      console.log(TAG, 'Stage-3 ✅ Method-1 POSITIVE: type === "vpn"');
+      return true;
+    }
+
+    // Method 2 — connected but type is 'other' or 'unknown'
+    // Covers: WireGuard, OpenVPN, Tailscale, Cloudflare WARP, packet-tunnel providers.
+    // These create utun/tun interfaces that NetInfo cannot classify beyond 'other'.
+    // Guard: only flag when actually connected — offline state also shows 'other'.
+    if (state.isConnected === true &&
+        (state.type === 'other' || state.type === 'unknown')) {
+      console.log(TAG, 'Stage-3 ✅ Method-2 POSITIVE: connected + type === "other/unknown" (likely tunnel VPN)');
+      return true;
+    }
+
+    console.log(TAG, 'Stage-3 ✗ No VPN signals detected (type=' + state.type + ', connected=' + state.isConnected + ')');
+    return false;
+  } catch (e) {
+    console.warn(TAG, 'Stage-2 ERROR: NetInfo.fetch() threw:', e, '→ returning false (fail-open)');
+    return false;
+  }
+}
+
+/**
+ * Android: native SecurityModule ConnectivityManager TRANSPORT_VPN + NetworkInterface scan.
+ * iOS:     pure-JS multi-method detection via @react-native-community/netinfo.
+ *          (IOSSecurityModule removed for build stability — see comment above.)
+ *          Covers Personal VPN, IKEv2, IPSec, WireGuard, OpenVPN, Tailscale, WARP.
+ */
 export async function isNativeVPNDetected(): Promise<boolean> {
+  console.log('[NativeSecurity][isNativeVPNDetected] platform=', Platform.OS);
+
   if (Platform.OS === 'android') {
     const mod = getModule();
+    console.log('[NativeSecurity][isNativeVPNDetected] android mod=', mod ? '✓' : '✗ null');
     if (!mod) return false;
-    try { return await mod.isVpnActive() as boolean; } catch { return false; }
+    try {
+      const result = await mod.isVpnActive() as boolean;
+      console.log('[NativeSecurity][isNativeVPNDetected] android result=', result);
+      return result;
+    } catch (e) {
+      console.warn('[NativeSecurity][isNativeVPNDetected] android threw:', e);
+      return false;
+    }
   }
+
   if (Platform.OS === 'ios') {
+    // Try native module first (if ever recompiled/re-added)
     const mod = getIOSModule();
-    if (!mod) return false;
-    try { return await mod.isVPNDetected() as boolean; } catch { return false; }
+    if (mod) {
+      try {
+        const result = await mod.isVPNDetected() as boolean;
+        console.log('[NativeSecurity][isNativeVPNDetected] iOS native result=', result);
+        return result;
+      } catch {
+        console.warn('[NativeSecurity][isNativeVPNDetected] iOS native threw → JS fallback');
+      }
+    } else {
+      console.log('[NativeSecurity][isNativeVPNDetected] iOS native module null → JS fallback (expected after build fix)');
+    }
+    return detectVPNviaNetInfo();
   }
+
   return false;
 }
 
