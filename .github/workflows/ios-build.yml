@@ -1,97 +1,107 @@
 name: Build iOS Unsigned IPA
 
 on:
-  workflow_dispatch:
   push:
     branches:
       - main
+  workflow_dispatch:
 
 jobs:
-  build-ios:
+  ios-build:
     name: Build iOS
     runs-on: macos-latest
 
     steps:
-      - name: Checkout repository
+      # 1. Checkout latest project
+      - name: Checkout
         uses: actions/checkout@v4
 
+      # 2. Setup Node.js
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: pnpm
+          cache: npm
 
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v4
-        with:
-          version: 10
-          run_install: false
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Verify project
+      # 3. Verify npm
+      - name: Check Node and npm
         run: |
           node --version
-          pnpm --version
-          npx expo --version
+          npm --version
 
-      - name: Generate iOS native project
+      # 4. Install dependencies
+      - name: Install dependencies
+        run: npm ci
+
+      # 5. Generate iOS native project
+      - name: Expo Prebuild
         run: npx expo prebuild --platform ios --clean
 
+      # 6. Install CocoaPods dependencies
       - name: Install CocoaPods
         run: |
           cd ios
           pod install --repo-update
 
-      - name: Build unsigned iOS app
+      # 7. Build unsigned iOS app
+      - name: Build unsigned iOS
         run: |
           xcodebuild \
             -workspace ios/MedAcademy.xcworkspace \
             -scheme MedAcademy \
             -configuration Release \
-            -sdk iphoneos \
-            -derivedDataPath build \
-            CODE_SIGNING_ALLOWED=NO \
+            -destination generic/platform=iOS \
+            CODE_SIGN_IDENTITY="" \
             CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGN_IDENTITY=""
+            CODE_SIGNING_ALLOWED=NO \
+            -derivedDataPath build \
+            | tee build.log
 
-      - name: Locate built app
+      # 8. Show build errors if the build failed
+      - name: Show build errors
+        if: failure()
         run: |
-          echo "Searching for .app..."
-          find build -type d -name "*.app" -print
+          echo "========== BUILD ERRORS =========="
+          grep -E "error:|ERROR|fatal error:" build.log | head -100 || true
+          echo "========== END ERRORS =========="
 
+      # 9. Locate generated .app
+      - name: Find iOS app
+        run: |
+          echo "Searching for generated .app..."
+          find build -name "*.app" -type d -print
+
+      # 10. Package unsigned .app into IPA
       - name: Create unsigned IPA
         run: |
-          mkdir -p Payload
-
-          APP_PATH=$(find build -type d -path "*/Build/Products/Release-iphoneos/*.app" | head -n 1)
+          APP_PATH=$(find build -name "*.app" -type d | head -1)
 
           if [ -z "$APP_PATH" ]; then
-            echo "ERROR: No iOS .app was produced."
+            echo "ERROR: No .app was generated."
             exit 1
           fi
 
-          echo "Using app: $APP_PATH"
+          echo "Found app:"
+          echo "$APP_PATH"
 
+          mkdir -p Payload
           cp -R "$APP_PATH" Payload/
 
           zip -r MedAcademy-unsigned.ipa Payload
 
+      # 11. Upload IPA
       - name: Upload unsigned IPA
         uses: actions/upload-artifact@v4
         with:
-          name: MedAcademy-iOS-unsigned
+          name: MedAcademy-unsigned-IPA
           path: MedAcademy-unsigned.ipa
-          retention-days: 30
+          retention-days: 7
 
-      - name: Upload build logs
+      # 12. Upload build log
+      - name: Upload build log
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: iOS-build-logs
-          path: |
-            build/
-            ios/build/
+          name: iOS-build-log
+          path: build.log
           retention-days: 7
-          if-no-files-found: ignore
