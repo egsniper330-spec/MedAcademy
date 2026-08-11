@@ -194,48 +194,19 @@ jobs:
             exit 0
           fi
 
-          # Build the patch block
-          PATCH_BLOCK='// FMT_USE_CONSTEVAL_PATCHED_FOR_APPLE_CLANG_21\n// Force-disable consteval for Apple Clang 21 (Xcode 26): stricter consteval\n// rules reject fmt 11.0.2 FMT_STRING() usage in format-inl.h.\n#if defined(__apple_build_version__) && __apple_build_version__ >= 21000000\n#  undef  FMT_USE_CONSTEVAL\n#  define FMT_USE_CONSTEVAL 0\n#endif'
+          PATCH_BLOCK='// FMT_USE_CONSTEVAL_PATCHED_FOR_APPLE_CLANG_21\n// Force-disable consteval for Apple Clang 21 (Xcode 26)\n#if defined(__apple_build_version__) && __apple_build_version__ >= 21000000\n#  undef  FMT_USE_CONSTEVAL\n#  define FMT_USE_CONSTEVAL 0\n#endif'
 
-          # Strategy 1: insert after the last #endif that closes the FMT_USE_CONSTEVAL
-          # detection block -- identified as the first #endif line that follows
-          # the #ifndef FMT_USE_CONSTEVAL guard.
-          if grep -q "#ifndef FMT_USE_CONSTEVAL" "$BASE_H"; then
-            # Use python for reliable multi-line insertion (sed -i varies on macOS)
-            python3 - "$BASE_H" "$PATCH_BLOCK" << 'PYEOF'
-import sys, re
+          # Decode the base64-encoded Python patcher -- no heredoc needed,
+          # 100% YAML-safe since the encoded string is a single quoted scalar.
+          PATCHER=$(mktemp /tmp/fmt_patch_XXXXXX.py)
+          echo 'aW1wb3J0IHN5cywgcmUKcGF0aCA9IHN5cy5hcmd2WzFdCnBhdGNoID0gc3lzLmFyZ3ZbMl0ucmVwbGFjZSgnXFxuJywgJ1xuJykKdGV4dCA9IG9wZW4ocGF0aCkucmVhZCgpCnBhdHRlcm4gPSByJygjaWZuZGVmIEZNVF9VU0VfQ09OU1RFVkFMXGIuKj8jZW5kaWZcYlteXG5dKlxuKScKbSA9IHJlLnNlYXJjaChwYXR0ZXJuLCB0ZXh0LCByZS5ET1RBTEwpCmlmIG06CiAgICBpcCA9IG0uZW5kKCkKICAgIG9wZW4ocGF0aCwndycpLndyaXRlKHRleHRbOmlwXSsnXG4nK3BhdGNoKydcbicrdGV4dFtpcDpdKQogICAgcHJpbnQoJ09LOiBQYXRjaCBpbnNlcnRlZCBhZnRlciAjaWZuZGVmIEZNVF9VU0VfQ09OU1RFVkFMIGJsb2NrJykKICAgIHN5cy5leGl0KDApCm0yID0gcmUuc2VhcmNoKHInKCNkZWZpbmUgRk1UX0JBU0VfSF9cbiknLCB0ZXh0KQppZiBtMjoKICAgIGlwID0gbTIuZW5kKCkKICAgIG9wZW4ocGF0aCwndycpLndyaXRlKHRleHRbOmlwXSsnXG4nK3BhdGNoKydcbicrdGV4dFtpcDpdKQogICAgcHJpbnQoJ09LOiBQYXRjaCBpbnNlcnRlZCBhZnRlciBpbmNsdWRlIGd1YXJkIChmYWxsYmFjayknKQogICAgc3lzLmV4aXQoMCkKcHJpbnQoJ1dBUk46IE5laXRoZXIgaW5zZXJ0aW9uIHBvaW50IGZvdW5kIC0tIHBhdGNoIE5PVCBhcHBsaWVkJykKc3lzLmV4aXQoMCkK' | base64 --decode > "$PATCHER"
 
-path = sys.argv[1]
-patch = sys.argv[2].replace('\\n', '\n')
-text = open(path).read()
+          python3 "$PATCHER" "$BASE_H" "$PATCH_BLOCK"
+          PY_EXIT=$?
+          rm -f "$PATCHER"
 
-# Find the #ifndef FMT_USE_CONSTEVAL ... #endif block and insert after it
-pattern = r'(#ifndef FMT_USE_CONSTEVAL\b.*?#endif\b[^\n]*\n)'
-m = re.search(pattern, text, re.DOTALL)
-if m:
-    insert_pos = m.end()
-    patched = text[:insert_pos] + '\n' + patch + '\n' + text[insert_pos:]
-    open(path, 'w').write(patched)
-    print("OK: Patch inserted after #ifndef FMT_USE_CONSTEVAL block")
-    sys.exit(0)
-
-# Fallback: insert after the include guard #define line
-m2 = re.search(r'(#define FMT_BASE_H_\n)', text)
-if m2:
-    insert_pos = m2.end()
-    patched = text[:insert_pos] + '\n' + patch + '\n' + text[insert_pos:]
-    open(path, 'w').write(patched)
-    print("OK: Patch inserted after include guard (fallback)")
-    sys.exit(0)
-
-print("WARN: Neither insertion point found -- patch NOT applied")
-print("      fmt/base.h may have unexpected structure")
-sys.exit(0)
-PYEOF
-          else
-            echo "WARN: #ifndef FMT_USE_CONSTEVAL not found in $BASE_H"
-            echo "      Patch not applied -- fmt/base.h may have unexpected structure"
-            echo "      Build will proceed; expect consteval errors on Apple Clang 21"
+          if [ $PY_EXIT -ne 0 ]; then
+            echo "WARN: patcher exited $PY_EXIT"
           fi
 
           echo ""
@@ -245,12 +216,9 @@ PYEOF
           if grep -q "$SENTINEL" "$BASE_H"; then
             echo "OK: Patch confirmed applied"
           else
-            echo "WARN: Sentinel not found after patch attempt -- check output above"
+            echo "WARN: Sentinel not found after patch attempt"
           fi
 
-      # -------------------------------------------------------------------------
-      # 6. Discover Xcode workspace and scheme
-      # -------------------------------------------------------------------------
       - name: Discover Xcode workspace and scheme
         id: xcode-info
         shell: bash
