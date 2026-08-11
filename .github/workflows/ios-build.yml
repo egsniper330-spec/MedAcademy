@@ -196,6 +196,18 @@ jobs:
 
           PATCH_BLOCK='// FMT_USE_CONSTEVAL_PATCHED_FOR_APPLE_CLANG_21\n// Force-disable consteval for Apple Clang 21 (Xcode 26)\n#if defined(__apple_build_version__) && __apple_build_version__ >= 21000000\n#  undef  FMT_USE_CONSTEVAL\n#  define FMT_USE_CONSTEVAL 0\n#endif'
 
+          # Make fmt/base.h writable before patching.
+          # CocoaPods installs headers read-only; Python open(path,'w') raises
+          # PermissionError: [Errno 13] Permission denied without this step.
+          echo "=== File permissions before chmod ==="
+          ls -la "$BASE_H"
+          chmod u+w "$BASE_H"
+          if [ ! -w "$BASE_H" ]; then
+            echo "FAIL: $BASE_H is not writable after chmod u+w -- cannot patch"
+            exit 1
+          fi
+          echo "OK: $BASE_H is writable"
+
           # Decode the base64-encoded Python patcher -- no heredoc needed,
           # 100% YAML-safe since the encoded string is a single quoted scalar.
           PATCHER=$(mktemp /tmp/fmt_patch_XXXXXX.py)
