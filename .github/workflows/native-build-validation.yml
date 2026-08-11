@@ -56,13 +56,8 @@ jobs:
         with:
           node-version: '20'
 
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v4
-        with:
-          version: 10
-
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile --ignore-scripts
+        run: npm ci --ignore-scripts
 
       - name: Stage 1 — Kotlin template validation
         id: kotlin
@@ -103,7 +98,7 @@ jobs:
               '',
               ...failed.map(s => `- \`${s}\``),
               '',
-              '> Run `pnpm run validate` locally to see full error details.',
+              '> Run `npm run validate` locally to see full error details.',
             ].join('\n');
             github.rest.issues.createComment({
               issue_number: context.issue.number,
@@ -133,13 +128,8 @@ jobs:
         with:
           node-version: '20'
 
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v4
-        with:
-          version: 10
-
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile --ignore-scripts
+        run: npm ci --ignore-scripts
 
       - name: Run Expo prebuild (Android only, clean)
         run: npx expo prebuild --platform android --clean --no-install
@@ -248,13 +238,8 @@ jobs:
         with:
           node-version: '20'
 
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v4
-        with:
-          version: 10
-
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile --ignore-scripts
+        run: npm ci --ignore-scripts
 
       - name: Run Expo prebuild (iOS only, clean)
         run: npx expo prebuild --platform ios --clean --no-install

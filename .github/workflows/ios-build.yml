@@ -475,11 +475,29 @@ jobs:
           EXEC_SIZE=$(stat -f%z "$EXEC_PATH" 2>/dev/null || stat -c%s "$EXEC_PATH")
           echo "OK: Executable found: $EXEC_PATH ($EXEC_SIZE bytes)"
 
-          if [ "$EXEC_SIZE" -lt 1000000 ]; then
-            echo "FAIL: Executable too small ($EXEC_SIZE bytes < 1 MB) -- incomplete build"
+          # ── Mach-O binary format check ──────────────────────────────────────
+          # Verify the executable is a real Mach-O binary (not a stub, script,
+          # or empty placeholder) by inspecting the file type reported by `file`.
+          FILE_TYPE=$(file "$EXEC_PATH")
+          echo "    file(1) output: $FILE_TYPE"
+          if ! echo "$FILE_TYPE" | grep -qiE "Mach-O"; then
+            echo "FAIL: Executable is not a Mach-O binary -- incomplete or corrupt build"
+            echo "      Expected 'Mach-O' in file(1) output, got: $FILE_TYPE"
             exit 1
           fi
-          echo "OK: Executable size is reasonable ($EXEC_SIZE bytes)"
+          echo "OK: Executable is a valid Mach-O binary"
+
+          # ── Architecture check (arm64 required for iOS device builds) ───────
+          # lipo -info prints the architecture list for the binary.
+          # A Release-iphoneos build must contain arm64.
+          LIPO_INFO=$(lipo -info "$EXEC_PATH" 2>&1)
+          echo "    lipo -info output: $LIPO_INFO"
+          if ! echo "$LIPO_INFO" | grep -q "arm64"; then
+            echo "FAIL: arm64 slice not found in executable -- wrong SDK or incomplete build"
+            echo "      lipo -info reported: $LIPO_INFO"
+            exit 1
+          fi
+          echo "OK: arm64 architecture confirmed"
 
           PLIST="$APP_PATH/Info.plist"
           if [ ! -f "$PLIST" ]; then
