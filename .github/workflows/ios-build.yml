@@ -153,6 +153,38 @@ jobs:
           echo "OK: Xcode workspace present: $WORKSPACE"
 
       # -------------------------------------------------------------------------
+      # 5b. Verify fmt patch was applied by post_install
+      # -------------------------------------------------------------------------
+      - name: Verify fmt consteval patch
+        shell: bash
+        run: |
+          BASE_H="ios/Pods/fmt/include/fmt/base.h"
+
+          echo "=== fmt version from Podfile.lock ==="
+          grep -i " fmt " ios/Podfile.lock 2>/dev/null || echo "(not found in Podfile.lock)"
+
+          if [ ! -f "$BASE_H" ]; then
+            echo "INFO: $BASE_H not found -- fmt pod not installed, skipping patch check"
+            exit 0
+          fi
+
+          echo "=== Checking patch sentinel in fmt/base.h ==="
+          if grep -q "FMT_USE_CONSTEVAL_PATCHED_FOR_APPLE_CLANG_21" "$BASE_H"; then
+            echo "OK: Patch sentinel found -- FMT_USE_CONSTEVAL override is present"
+          else
+            echo "WARN: Patch sentinel NOT found in $BASE_H"
+            echo "      The Podfile post_install patch may not have applied correctly."
+            echo "      Printing FMT_USE_CONSTEVAL lines for diagnosis:"
+            grep -n "FMT_USE_CONSTEVAL" "$BASE_H" || echo "(no FMT_USE_CONSTEVAL lines found)"
+            echo ""
+            echo "      Build will continue but may fail with Apple Clang 21 consteval errors."
+          fi
+
+          echo ""
+          echo "=== FMT_USE_CONSTEVAL section in base.h ==="
+          grep -n -A 3 "FMT_USE_CONSTEVAL" "$BASE_H" | head -60
+
+      # -------------------------------------------------------------------------
       # 6. Discover Xcode workspace and scheme
       # -------------------------------------------------------------------------
       - name: Discover Xcode workspace and scheme
