@@ -203,6 +203,41 @@ function withLucideResolver(config) {
   return { ...config, resolver: { ...config.resolver, resolveRequest } };
 }
 
+// ─── @/ path alias resolver ───────────────────────────────────────────────────
+// Resolves "@/foo/bar" → "<projectRoot>/src/foo/bar" at the Metro resolver level.
+//
+// WHY THIS IS NEEDED:
+//   tsconfig.json maps "@/*" → ["./src/*"]. @expo/cli's export:embed command
+//   activates the tsconfig-paths resolver inside withMetroMultiPlatformAsync,
+//   which ALSO resolves these aliases. However, that resolver depends on:
+//     1. TypeScript being importable via resolveFrom(projectRoot, 'typescript')
+//     2. evaluateTsConfig() parsing tsconfig successfully
+//     3. loadTsConfigPathsAsync() returning a non-null result
+//   Any failure in those steps silently sets tsConfigResolve=null, leaving
+//   "@/" unresolved. This Metro-level resolver is independent of all that:
+//   it runs unconditionally in the resolver chain before @expo/cli's wrapper.
+//
+// PLACEMENT: Applied LAST (outermost wrapper), so it intercepts "@/" imports
+// before any other custom resolver sees them, and falls through cleanly for
+// all other module names.
+function withAtAliasResolver(config) {
+  const PROJECT_SRC = path.join(__dirname, 'src');
+  const upstream = config.resolver?.resolveRequest ?? null;
+  const resolveRequest = (context, moduleName, platform) => {
+    if (moduleName.startsWith('@/')) {
+      const relativePath = moduleName.slice(2); // strip the "@/"
+      const absolutePath = path.join(PROJECT_SRC, relativePath);
+      // Delegate to Metro's default resolver with the absolute path.
+      // Metro will apply its standard extension resolution
+      // (.ts, .tsx, .js, .jsx, index.ts, etc.) automatically.
+      return context.resolveRequest(context, absolutePath, platform);
+    }
+    if (upstream) return upstream(context, moduleName, platform);
+    return context.resolveRequest(context, moduleName, platform);
+  };
+  return { ...config, resolver: { ...config.resolver, resolveRequest } };
+}
+
 // ─── WASM asset support ────────────────────────────────────────────────────────
 function withWasmSupport(config) {
   const existing = config.resolver?.assetExts ?? [];
@@ -229,6 +264,7 @@ module.exports = async function (metroDefaults) {
   config = withPlatformStubs(config);
   config = withLucideResolver(config);
   config = withWasmSupport(config);
+  config = withAtAliasResolver(config);
 
   // NativeWind: processes global.css and inlines Tailwind at build time.
   // Called inside the async function so tailwindConfig() / jiti run async —
