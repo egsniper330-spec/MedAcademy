@@ -109,6 +109,38 @@ jobs:
           fi
 
       # -------------------------------------------------------------------------
+      # 4b. Verify JSC engine configuration (hard gate before pod install)
+      #
+      # expo prebuild --clean regenerates Podfile.properties.json from app.json.
+      # Confirm that expo.jsEngine is "jsc" (not "hermes") before proceeding.
+      # If this gate fails, the engine config in app.json is wrong — do not build.
+      # -------------------------------------------------------------------------
+      - name: Verify JSC engine in Podfile.properties.json
+        shell: bash
+        run: |
+          PROPS="ios/Podfile.properties.json"
+          if [ ! -f "$PROPS" ]; then
+            echo "FAIL: $PROPS not found after prebuild"
+            exit 1
+          fi
+          ENGINE=$(python3 -c "import json,sys; d=json.load(open('$PROPS')); print(d.get('expo.jsEngine','(not set)'))")
+          echo "expo.jsEngine = $ENGINE"
+          if [ "$ENGINE" != "jsc" ]; then
+            echo "FAIL: expo.jsEngine is '$ENGINE', expected 'jsc'."
+            echo "      app.json must have: expo.ios.jsEngine = \"jsc\""
+            cat "$PROPS"
+            exit 1
+          fi
+          echo "OK: expo.jsEngine = jsc — Hermes will NOT be selected by CocoaPods"
+
+          # Also confirm Podfile hermes_enabled logic resolves to false
+          if grep -q "hermes_enabled.*expo\.jsEngine.*==.*hermes" ios/Podfile; then
+            echo "OK: Podfile hermes_enabled guard confirmed present"
+          else
+            echo "WARN: Podfile hermes_enabled guard not found — inspect Podfile"
+          fi
+
+      # -------------------------------------------------------------------------
       # 5. Ruby + CocoaPods
       # -------------------------------------------------------------------------
       - name: Setup Ruby
@@ -125,8 +157,28 @@ jobs:
       - name: CocoaPods install
         working-directory: ios
         shell: bash
+        # USE_THIRD_PARTY_JSC=1 is required for React Native 0.83+ to switch the iOS
+        # JS engine from Hermes to JavaScriptCore.
+        #
+        # Background: In RN 0.83, use_hermes() in jsengine.rb is defined as:
+        #   def use_hermes; return !use_third_party_jsc(); end
+        # This function IGNORES the :hermes_enabled parameter passed to use_react_native!
+        # and ONLY checks the USE_THIRD_PARTY_JSC env var. Without this env var,
+        # react_native_post_install always sets USE_HERMES=1 build setting, which causes
+        # Xcode to link hermesvm.framework regardless of Podfile.properties.json.
+        #
+        # Setting USE_THIRD_PARTY_JSC=1 makes use_hermes() return false, so:
+        #   1. react_native_post_install sets USE_HERMES=0 build setting
+        #   2. hermesvm.framework is NOT linked or embedded
+        #   3. JavaScriptCore (system framework) is used instead
+        #
+        # Combined with :hermes_enabled => false (from Podfile.properties.json expo.jsEngine=jsc),
+        # this ensures hermes-engine and React-hermes pods are also NOT installed.
+        env:
+          USE_THIRD_PARTY_JSC: "1"
         run: |
           set -o pipefail
+          echo "USE_THIRD_PARTY_JSC=$USE_THIRD_PARTY_JSC  (must be 1 for JSC engine)"
           echo "Running pod install..."
           pod install --repo-update 2>&1 | tee /tmp/pod-install.log
           POD_STATUS=${PIPESTATUS[0]}
@@ -151,6 +203,23 @@ jobs:
             exit 1
           fi
           echo "OK: Xcode workspace present: $WORKSPACE"
+
+          # ── Hard gate: hermes-engine pod must NOT be installed ───────────────
+          # If hermes-engine is present in Pods/, the iOS app will embed hermesvm.framework.
+          # This gate catches any misconfiguration before the expensive xcodebuild step.
+          if [ -d "Pods/hermes-engine" ]; then
+            echo "FAIL: Pods/hermes-engine/ is present after pod install."
+            echo "      The iOS engine is still Hermes. USE_THIRD_PARTY_JSC=1 was not effective."
+            echo "      Check that USE_THIRD_PARTY_JSC is exported before pod install and"
+            echo "      that expo.jsEngine=jsc in ios/Podfile.properties.json."
+            ls -la "Pods/hermes-engine/" | head -10
+            exit 1
+          fi
+          echo "OK: Pods/hermes-engine is absent — JSC engine confirmed"
+
+          if ls Pods/hermes-engine.podspec 2>/dev/null || ls Pods/hermes-engine*.podspec 2>/dev/null; then
+            echo "WARN: hermes-engine podspec found in Pods/ root — verify hermesvm.framework is not embedded"
+          fi
 
       # -------------------------------------------------------------------------
       # 5b. Patch fmt 11.0.2 for Apple Clang 21 (Xcode 26) consteval bug
@@ -622,6 +691,25 @@ jobs:
 
           echo "--- IPA contents (first 40 entries) ---"
           unzip -l "$IPA_PATH" | head -40
+
+          # ── Hard gate: hermesvm.framework must NOT be in the IPA ─────────────
+          # hermesvm.framework is embedded under Payload/<App>.app/Frameworks/
+          # If it is present, the iOS JS engine is still Hermes and the app will
+          # crash on iOS 26 with EXC_BAD_ACCESS in HadesGC / ObjCTurboModule.
+          # This is the final binary-level confirmation that JSC is active.
+          if unzip -l "$IPA_PATH" | grep -q "hermesvm.framework"; then
+            echo ""
+            echo "================================================================"
+            echo "FAIL: hermesvm.framework is present in the IPA."
+            echo "      The iOS JS engine is still Hermes."
+            echo "      USE_THIRD_PARTY_JSC=1 was not effective during pod install,"
+            echo "      or a stale Pods/ cache was used."
+            echo "      Hermes entries found:"
+            unzip -l "$IPA_PATH" | grep -i "hermes"
+            echo "================================================================"
+            exit 1
+          fi
+          echo "OK: hermesvm.framework is ABSENT from IPA — JSC engine confirmed"
 
           echo "OK: All IPA validations passed -- proceeding to upload"
 
