@@ -204,15 +204,9 @@ jobs:
             2>/dev/null)
 
           if [ -z "$JSENGINE_RB" ] || [ ! -f "$JSENGINE_RB" ]; then
-            # Fallback: resolve from Podfile require path
-            JSENGINE_RB=$(python3 -c "
-import subprocess, os
-rn_pkg = subprocess.check_output(
-  ['node','--print',\"require.resolve('react-native/package.json')\"],
-  cwd=os.path.join(os.getcwd(), '..'),
-  text=True).strip()
-print(os.path.join(os.path.dirname(rn_pkg), 'scripts', 'cocoapods', 'jsengine.rb'))
-" 2>/dev/null)
+            # Fallback: resolve react-native package root from the project root, then build path
+            RN_PKG=$(cd .. && node --print "require.resolve('react-native/package.json')" 2>/dev/null)
+            JSENGINE_RB="${RN_PKG%/package.json}/scripts/cocoapods/jsengine.rb"
           fi
 
           echo "jsengine.rb path: $JSENGINE_RB"
@@ -225,32 +219,26 @@ print(os.path.join(os.path.dirname(rn_pkg), 'scripts', 'cocoapods', 'jsengine.rb
           if grep -q "CI_JSC_OVERRIDE" "$JSENGINE_RB"; then
             echo "INFO: jsengine.rb already patched (idempotency guard hit)"
           else
-            # Append three function overrides.
+            # Append three Ruby function overrides using printf so the content stays
+            # fully indented inside this YAML run: | block (bash heredocs require the
+            # delimiter at column 0, which breaks YAML parsing of the workflow file).
             # Ruby allows redefining methods; the last definition wins.
-            # use_hermes        → false : no hermesvm.framework, USE_HERMES=0 build setting
-            # use_third_party_jsc → false : prevents depend_on_js_engine adding React-jsc
-            # depend_on_js_engine → no-op : no pod dependency on hermes-engine or React-jsc
-            cat >> "$JSENGINE_RB" << 'RUBY_OVERRIDE'
-
-# CI_JSC_OVERRIDE — injected by ios-build.yml for React Native 0.83 + iOS JSC build.
-# iOS engine: system JavaScriptCore (hermesvm.framework must be absent from IPA).
-# Android engine: Hermes (unaffected — android build does not run this file).
-# Overrides use_hermes, use_third_party_jsc, depend_on_js_engine.
-# TRANSIENT: node_modules is recreated on every CI run; this override is never committed.
-def use_hermes
-  false   # Use system JSC; react_native_post_install sets USE_HERMES=0 build setting
-end
-
-def use_third_party_jsc
-  false   # Prevent depend_on_js_engine from adding React-jsc (not installed in this project)
-end
-
-def depend_on_js_engine(s)
-  # No-op: system JSC requires no pod dependency.
-  # hermes-engine: excluded by :hermes_enabled=>false in use_react_native!
-  # React-jsc:     excluded by use_third_party_jsc=>false above
-end
-RUBY_OVERRIDE
+            #   use_hermes         → false : USE_HERMES=0 build setting → no hermesvm.framework
+            #   use_third_party_jsc→ false : prevents depend_on_js_engine adding React-jsc
+            #   depend_on_js_engine→ no-op : no pod dependency on hermes-engine or React-jsc
+            printf '\n' >> "$JSENGINE_RB"
+            printf '# CI_JSC_OVERRIDE — injected by ios-build.yml for RN 0.83 + iOS JSC build.\n' >> "$JSENGINE_RB"
+            printf '# iOS engine: system JavaScriptCore (hermesvm.framework absent from IPA).\n' >> "$JSENGINE_RB"
+            printf '# Android engine: Hermes (unaffected — android build does not use this file).\n' >> "$JSENGINE_RB"
+            printf '# TRANSIENT: node_modules is recreated on every CI run; never committed.\n' >> "$JSENGINE_RB"
+            printf 'def use_hermes\n' >> "$JSENGINE_RB"
+            printf '  false\n' >> "$JSENGINE_RB"
+            printf 'end\n' >> "$JSENGINE_RB"
+            printf 'def use_third_party_jsc\n' >> "$JSENGINE_RB"
+            printf '  false\n' >> "$JSENGINE_RB"
+            printf 'end\n' >> "$JSENGINE_RB"
+            printf 'def depend_on_js_engine(s)\n' >> "$JSENGINE_RB"
+            printf 'end\n' >> "$JSENGINE_RB"
             echo "OK: jsengine.rb patched for iOS JSC engine"
           fi
 
