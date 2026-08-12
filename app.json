@@ -3,7 +3,7 @@
     "name": "MedAcademy",
     "slug": "medacademy",
     "scheme": "medacademy",
-    "version": "1.0.832",
+    "version": "1.0.838",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "automatic",
@@ -144,6 +144,7 @@
           }
         }
       ],
+      "./plugins/withIosJsc",
       "./plugins/withSecurityModule",
       "./plugins/withProguardRules",
       "./plugins/withDynamicVersions",
