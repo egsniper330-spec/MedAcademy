@@ -135,32 +135,6 @@ jobs:
           echo "OK: expo.jsEngine = jsc confirmed in Podfile.properties.json"
 
       # -------------------------------------------------------------------------
-      # 4c. Inspect and patch generated ios/Podfile — force hermes_enabled=false
-      #
-      # After expo prebuild, ios/Podfile is freshly generated. The patcher:
-      #   1. Prints the use_react_native!() block BEFORE any change (CI log)
-      #   2. Detects existing hermes_enabled parameter and changes it to false
-      #      — handles :hermes_enabled => <expr> (hash-rocket) and
-      #        hermes_enabled: <expr> (keyword) syntax
-      #      — handles multi-line value expressions (|| continuation)
-      #   3. Inserts :hermes_enabled => false if the parameter is absent
-      #   4. Writes the patched Podfile back to disk
-      #   5. Prints the use_react_native!() block AFTER patching (CI log)
-      #   6. Re-reads and hard-asserts exactly one hermes_enabled=false
-      #   7. Exits non-zero on any failure — workflow stops before pod install
-      #
-      # This is a temporary modification. ios/ is regenerated on every build.
-      # No node_modules or React Native source files are touched.
-      # -------------------------------------------------------------------------
-      - name: Inspect and patch ios/Podfile — force hermes_enabled => false
-        shell: bash
-        run: |
-          set -euo pipefail
-          python3 scripts/patch_podfile_jsc.py ios/Podfile
-          echo ""
-          echo "=== Podfile patch complete — hermes_enabled => false confirmed ==="
-
-      # -------------------------------------------------------------------------
       # 5. Ruby + CocoaPods
       # -------------------------------------------------------------------------
       - name: Setup Ruby
@@ -177,19 +151,24 @@ jobs:
       - name: CocoaPods install
         working-directory: ios
         shell: bash
+        env:
+          # USE_THIRD_PARTY_JSC=1 is the correct mechanism to disable Hermes in
+          # React Native 0.83. It is read by jsengine.rb use_third_party_jsc():
+          #   use_hermes() = !use_third_party_jsc() = !(ENV['USE_THIRD_PARTY_JSC']=='1')
+          # Setting it to "1" makes use_hermes() return false, which prevents
+          # hermes-engine from being resolved as a CocoaPods dependency.
+          # This env var MUST be present in the same process that runs pod install.
+          USE_THIRD_PARTY_JSC: "1"
         run: |
           set -o pipefail
 
-          # Pre-flight: the Podfile patch step must have produced hermes_enabled=false.
-          # Check for both Ruby hash syntaxes the patcher may have used.
-          if grep -qE ':hermes_enabled\s*=>\s*false|hermes_enabled:\s*false' Podfile; then
-            echo "OK: Podfile has hermes_enabled=false — proceeding with pod install"
-          else
-            echo "FAIL: Podfile does not contain hermes_enabled=false"
-            echo "      Current hermes_enabled lines:"
-            grep 'hermes_enabled' Podfile || echo "(hermes_enabled not found at all)"
+          # Pre-flight: confirm USE_THIRD_PARTY_JSC is exactly "1" in this shell.
+          echo "USE_THIRD_PARTY_JSC=$USE_THIRD_PARTY_JSC"
+          if [ "$USE_THIRD_PARTY_JSC" != "1" ]; then
+            echo "FAIL: USE_THIRD_PARTY_JSC is not '1' — aborting before pod install"
             exit 1
           fi
+          echo "OK: USE_THIRD_PARTY_JSC=1 confirmed"
 
           echo "Running pod install..."
           pod install --repo-update 2>&1 | tee /tmp/pod-install.log
@@ -219,7 +198,25 @@ jobs:
           # ── Hard gate: hermes-engine pod must NOT be installed ───────────────
           if [ -d "Pods/hermes-engine" ]; then
             echo "FAIL: Pods/hermes-engine/ is present after pod install."
-            echo "      hermes_enabled=false in the Podfile did not take effect."
+            echo "      USE_THIRD_PARTY_JSC=1 did not prevent Hermes from being installed."
+            echo ""
+            echo "--- Diagnostics ---"
+            echo "USE_THIRD_PARTY_JSC=$USE_THIRD_PARTY_JSC"
+            PROPS="../ios/Podfile.properties.json"
+            [ -f "$PROPS" ] || PROPS="Podfile.properties.json"
+            echo "expo.jsEngine=$(python3 -c "import json; d=json.load(open('$PROPS')); print(d.get('expo.jsEngine','(not set)'))" 2>/dev/null || echo '(could not read)')"
+            echo ""
+            echo "use_react_native! block in Podfile:"
+            python3 -c "import re; t=open('Podfile').read(); m=re.search(r'use_react_native!\s*\(.*?\)', t, re.DOTALL); print(m.group(0) if m else '(use_react_native! block not found)')"
+            echo ""
+            echo "jsengine.rb use_hermes / use_third_party_jsc logic:"
+            JSE=$(find ../node_modules -path "*/react-native/scripts/cocoapods/jsengine.rb" 2>/dev/null | head -1)
+            if [ -n "$JSE" ]; then
+              grep -A 5 "use_third_party_jsc\|use_hermes" "$JSE" | head -30
+            else
+              echo "(jsengine.rb not found)"
+            fi
+            echo "---"
             ls -la "Pods/hermes-engine/" | head -10
             exit 1
           fi
