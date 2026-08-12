@@ -6,45 +6,48 @@ Usage:
     python3 scripts/patch_podfile_jsc.py ios/Podfile
 
 Called by .github/workflows/ios-build.yml after `expo prebuild` and
-before `pod install`.
+before `pod install`.  This is Fix 3 of 3 for JSC on RN 0.83.2.
 
-Why this exists
----------------
-`expo prebuild --clean` regenerates ios/Podfile from a template. In
-Expo SDK 55 / React Native 0.83.2 the generated Podfile contains:
+ROOT CAUSE — Two independent Hermes paths in RN 0.83.2
+-------------------------------------------------------
+PATH 1  react_native_pods.rb use_react_native!()
+  Line 78 unconditionally hardcodes:  hermes_enabled= true
+  This ignores the :hermes_enabled value from the Podfile entirely.
+  When hermes_enabled is true it calls setup_hermes!() which installs
+  hermes-engine and React-hermes CocoaPods.
+  FIX 1: workflow step "Patch RN react_native_pods.rb" patches line 78
+         from  hermes_enabled= true  →  hermes_enabled= false
 
-    use_react_native!(
-      :hermes_enabled => podfile_properties['expo.jsEngine'] == nil ||
-                         podfile_properties['expo.jsEngine'] == 'hermes',
-      ...
-    )
+PATH 2  jsengine.rb use_hermes() / depend_on_js_engine()
+  use_hermes() = !use_third_party_jsc() = !(ENV['USE_THIRD_PARTY_JSC']=='1')
+  Controls depend_on_js_engine() in podspecs and the USE_HERMES Xcode build
+  setting written in post_install.
+  FIX 2: workflow sets env USE_THIRD_PARTY_JSC=1 on the pod install step.
 
-This dynamic expression is evaluated at CocoaPods dependency-resolution
-time, inside use_react_native!, which immediately calls setup_hermes!
-when the expression is true.  Even with expo.jsEngine=jsc correctly set
-in Podfile.properties.json, RN 0.83 has a secondary jsengine.rb path
-(use_hermes() / use_third_party_jsc()) that can re-enable Hermes after
-the fact via the USE_HERMES build setting.
-
-The only fully deterministic fix is to replace the dynamic expression
-with the literal `false` *before* CocoaPods ever reads the Podfile.
+PATH 3  ios/Podfile :hermes_enabled value
+  The generated Podfile passes :hermes_enabled => <dynamic-expr> to
+  use_react_native!().  Belt-and-suspenders: if line 78 of react_native_pods.rb
+  ever becomes conditional again, the Podfile value would matter.
+  FIX 3: THIS SCRIPT patches the Podfile to set :hermes_enabled => false.
 
 What this script does
 ---------------------
 1.  Locates the use_react_native!( ... ) block using brace-depth
     matching — not a regex over the whole file.
-2.  Inside that block only:
+2.  Prints the located block to the CI log BEFORE patching.
+3.  Inside that block only:
     a. If :hermes_enabled is present with any value  → replace with false
-    b. If :hermes_enabled is absent                  → insert as first arg
-3.  Writes the patched content back to the same file.
-4.  Re-reads and asserts exactly one :hermes_enabled => false exists in
-    the use_react_native! block.
-5.  Exits 0 on success, non-zero on any failure.
+       Handles both:  :hermes_enabled => <expr>   (hash-rocket style)
+                      hermes_enabled: <expr>       (keyword style)
+    b. If :hermes_enabled is absent  → insert as first argument
+4.  Writes the patched content back to the same file.
+5.  Re-reads and asserts exactly one hermes_enabled=false in the block.
+6.  Exits 0 on success, non-zero on any failure.
 
 What this script does NOT do
 -----------------------------
 - Does not modify node_modules
-- Does not modify React Native source
+- Does not modify React Native source (that is Fix 1 in the workflow)
 - Does not modify Podfile.lock
 - Does not touch any file other than the single Podfile path given as argv[1]
 - Does not affect Android configuration
@@ -109,19 +112,29 @@ def main():
     print()
 
     # ── Step 2: normalise or insert :hermes_enabled ──────────────────────────
-    # Matches:  :hermes_enabled => <value>   where value runs to , or ) or \n
+    # Matches both Ruby hash syntaxes:
+    #   :hermes_enabled => <value>   (hash-rocket, Expo SDK 55 generated style)
+    #   hermes_enabled: <value>      (keyword style)
+    # Value runs to the next comma, closing paren, or newline.
+    # Uses re.DOTALL so the value can span continuation lines (e.g. multiline
+    # boolean expressions ending in || or &&).
     hermes_pat = re.compile(
-        r':hermes_enabled\s*=>\s*[^,\n\)]+',
-        re.MULTILINE
+        r'(?::hermes_enabled\s*=>\s*|hermes_enabled:\s*)[^,\)]+',
+        re.MULTILINE | re.DOTALL
     )
     matches = hermes_pat.findall(block)
 
     if len(matches) > 1:
-        print(f"WARN: {len(matches)} :hermes_enabled occurrences found — normalising all to false")
+        print(f"WARN: {len(matches)} hermes_enabled occurrences found — normalising all to false")
 
     if matches:
-        new_block = hermes_pat.sub(':hermes_enabled => false', block)
-        print(f"Replaced {len(matches)} :hermes_enabled occurrence(s): {matches} -> false")
+        # Determine replacement syntax to match what was found
+        if ':hermes_enabled =>' in matches[0]:
+            replacement = ':hermes_enabled => false'
+        else:
+            replacement = 'hermes_enabled: false'
+        new_block = hermes_pat.sub(replacement, block)
+        print(f"Replaced {len(matches)} hermes_enabled occurrence(s): {[m.strip() for m in matches]} -> false")
     else:
         # Insert as first argument, preserving existing indentation style
         insert_at = len('use_react_native!(')
@@ -162,7 +175,10 @@ def main():
         print(f"  {line}")
     print()
 
-    all_hermes = re.findall(r':hermes_enabled\s*=>\s*(\S+)', verify_block)
+    all_hermes = re.findall(
+        r'(?::hermes_enabled\s*=>\s*|hermes_enabled:\s*)(\S+)',
+        verify_block
+    )
 
     if len(all_hermes) != 1:
         print(f"FAIL: Expected exactly 1 :hermes_enabled in block, found {len(all_hermes)}: {all_hermes}")
