@@ -135,6 +135,94 @@ jobs:
           echo "OK: expo.jsEngine = jsc confirmed in Podfile.properties.json"
 
       # -------------------------------------------------------------------------
+      # 4c. Patch generated ios/Podfile — force :hermes_enabled => false
+      #
+      # expo prebuild regenerates ios/Podfile each build. The generated Podfile
+      # passes a dynamic hermes_enabled expression to use_react_native!() that
+      # evaluates to true when expo.jsEngine is read from Podfile.properties.json
+      # at pod install time via a Ruby expression — NOT at prebuild time.
+      #
+      # Setting :hermes_enabled => false in the Podfile is the correct mechanism
+      # to prevent use_react_native!() from calling setup_hermes!(), which is what
+      # actually adds hermes-engine as a CocoaPods dependency.
+      #
+      # NOTE: USE_THIRD_PARTY_JSC=1 must NOT be set — it causes pod install to
+      # resolve 'React-jsc' which does not exist in the public CocoaPods registry,
+      # breaking pod install with "[1] Unable to find a specification for React-jsc".
+      #
+      # This temporary patch is discarded when ios/ is regenerated on the next build.
+      # No node_modules or React Native source files are touched.
+      # -------------------------------------------------------------------------
+      - name: Patch ios/Podfile — force :hermes_enabled => false
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          PODFILE="ios/Podfile"
+          if [ ! -f "$PODFILE" ]; then
+            echo "FAIL: $PODFILE not found — expo prebuild must have failed"
+            exit 1
+          fi
+
+          echo "=== use_react_native! block BEFORE patch ==="
+          python3 -c "import re; t=open('$PODFILE').read(); m=re.search(r'use_react_native!\s*\(.*?\)', t, re.DOTALL); print(m.group(0) if m else '(block not found)')"
+          echo ""
+
+          # Replace the dynamic hermes_enabled expression with literal false.
+          # Handles both Ruby hash syntaxes Expo SDK 55 may generate:
+          #   :hermes_enabled => <expr>   (hash-rocket, multi-line || expression)
+          #   hermes_enabled: <expr>      (keyword style)
+          python3 - "$PODFILE" <<'PYEOF'
+          import sys, re
+          path = sys.argv[1]
+          text = open(path).read()
+
+          # Locate use_react_native!( ... ) with balanced parens
+          start = text.find('use_react_native!(')
+          if start == -1:
+              print("FAIL: use_react_native!( not found in Podfile")
+              sys.exit(1)
+          depth, end = 0, -1
+          for i in range(start + len('use_react_native!(') - 1, len(text)):
+              if text[i] == '(': depth += 1
+              elif text[i] == ')':
+                  depth -= 1
+                  if depth == 0: end = i; break
+          if end == -1:
+              print("FAIL: unmatched parentheses in use_react_native! block")
+              sys.exit(1)
+
+          block = text[start:end+1]
+          pat = re.compile(r'(?::hermes_enabled\s*=>\s*|hermes_enabled:\s*)[^,)]+', re.DOTALL)
+          matches = pat.findall(block)
+          if matches:
+              syntax = ':hermes_enabled => false' if ':hermes_enabled =>' in matches[0] else 'hermes_enabled: false'
+              new_block = pat.sub(syntax, block)
+          else:
+              # Insert as first argument
+              rest = block[len('use_react_native!('):]
+              indent = (re.search(r'\n(\s+)', rest) or type('',(),{'group':lambda s,i:' '})()).group(1)
+              new_block = 'use_react_native!(\n' + indent + ':hermes_enabled => false,' + block[len('use_react_native!('):]
+
+          open(path, 'w').write(text[:start] + new_block + text[end+1:])
+
+          # Verify
+          t2 = open(path).read()
+          m2 = re.search(r'use_react_native!\s*\(.*?\)', t2, re.DOTALL)
+          block2 = m2.group(0) if m2 else ''
+          vals = re.findall(r'(?::hermes_enabled\s*=>\s*|hermes_enabled:\s*)(\S+)', block2)
+          vals = [v.rstrip(',') for v in vals]
+          if vals != ['false']:
+              print(f"FAIL: hermes_enabled values after patch: {vals}, expected ['false']")
+              sys.exit(1)
+          print("OK: :hermes_enabled => false set in use_react_native! block")
+          PYEOF
+
+          echo ""
+          echo "=== use_react_native! block AFTER patch ==="
+          python3 -c "import re; t=open('$PODFILE').read(); m=re.search(r'use_react_native!\s*\(.*?\)', t, re.DOTALL); print(m.group(0) if m else '(block not found)')"
+
+      # -------------------------------------------------------------------------
       # 5. Ruby + CocoaPods
       # -------------------------------------------------------------------------
       - name: Setup Ruby
@@ -151,24 +239,18 @@ jobs:
       - name: CocoaPods install
         working-directory: ios
         shell: bash
-        env:
-          # USE_THIRD_PARTY_JSC=1 is the correct mechanism to disable Hermes in
-          # React Native 0.83. It is read by jsengine.rb use_third_party_jsc():
-          #   use_hermes() = !use_third_party_jsc() = !(ENV['USE_THIRD_PARTY_JSC']=='1')
-          # Setting it to "1" makes use_hermes() return false, which prevents
-          # hermes-engine from being resolved as a CocoaPods dependency.
-          # This env var MUST be present in the same process that runs pod install.
-          USE_THIRD_PARTY_JSC: "1"
         run: |
           set -o pipefail
 
-          # Pre-flight: confirm USE_THIRD_PARTY_JSC is exactly "1" in this shell.
-          echo "USE_THIRD_PARTY_JSC=$USE_THIRD_PARTY_JSC"
-          if [ "$USE_THIRD_PARTY_JSC" != "1" ]; then
-            echo "FAIL: USE_THIRD_PARTY_JSC is not '1' — aborting before pod install"
+          # Pre-flight: Podfile patch step must have set :hermes_enabled => false.
+          if grep -qE ':hermes_enabled\s*=>\s*false|hermes_enabled:\s*false' Podfile; then
+            echo "OK: Podfile has :hermes_enabled => false — proceeding with pod install"
+          else
+            echo "FAIL: Podfile does not contain :hermes_enabled => false"
+            echo "      Current hermes_enabled lines:"
+            grep 'hermes_enabled' Podfile || echo "(hermes_enabled not found at all)"
             exit 1
           fi
-          echo "OK: USE_THIRD_PARTY_JSC=1 confirmed"
 
           echo "Running pod install..."
           pod install --repo-update 2>&1 | tee /tmp/pod-install.log
@@ -198,24 +280,11 @@ jobs:
           # ── Hard gate: hermes-engine pod must NOT be installed ───────────────
           if [ -d "Pods/hermes-engine" ]; then
             echo "FAIL: Pods/hermes-engine/ is present after pod install."
-            echo "      USE_THIRD_PARTY_JSC=1 did not prevent Hermes from being installed."
+            echo "      :hermes_enabled => false in the Podfile did not prevent Hermes."
             echo ""
             echo "--- Diagnostics ---"
-            echo "USE_THIRD_PARTY_JSC=$USE_THIRD_PARTY_JSC"
-            PROPS="../ios/Podfile.properties.json"
-            [ -f "$PROPS" ] || PROPS="Podfile.properties.json"
-            echo "expo.jsEngine=$(python3 -c "import json; d=json.load(open('$PROPS')); print(d.get('expo.jsEngine','(not set)'))" 2>/dev/null || echo '(could not read)')"
-            echo ""
             echo "use_react_native! block in Podfile:"
-            python3 -c "import re; t=open('Podfile').read(); m=re.search(r'use_react_native!\s*\(.*?\)', t, re.DOTALL); print(m.group(0) if m else '(use_react_native! block not found)')"
-            echo ""
-            echo "jsengine.rb use_hermes / use_third_party_jsc logic:"
-            JSE=$(find ../node_modules -path "*/react-native/scripts/cocoapods/jsengine.rb" 2>/dev/null | head -1)
-            if [ -n "$JSE" ]; then
-              grep -A 5 "use_third_party_jsc\|use_hermes" "$JSE" | head -30
-            else
-              echo "(jsengine.rb not found)"
-            fi
+            python3 -c "import re; t=open('Podfile').read(); m=re.search(r'use_react_native!\s*\(.*?\)', t, re.DOTALL); print(m.group(0) if m else '(block not found)')"
             echo "---"
             ls -la "Pods/hermes-engine/" | head -10
             exit 1
