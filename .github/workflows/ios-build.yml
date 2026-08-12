@@ -157,96 +157,22 @@ jobs:
       - name: CocoaPods install
         working-directory: ios
         shell: bash
-        # ── JSC engine fix for React Native 0.83.2 ──────────────────────────────
-        #
-        # PROBLEM (two-layer):
-        #
-        # Layer 1 — build setting: In RN 0.83, react_native_post_install calls
-        # use_hermes() from jsengine.rb, which is HARDCODED as:
-        #   def use_hermes; return !use_third_party_jsc(); end
-        # This ignores :hermes_enabled entirely and only reads the USE_THIRD_PARTY_JSC
-        # env var. Without it, USE_HERMES=1 build setting is always written →
-        # Xcode links hermesvm.framework regardless of Podfile.properties.json.
-        #
-        # Layer 2 — React-jsc missing: Setting USE_THIRD_PARTY_JSC=1 fixes Layer 1
-        # but triggers a second failure: depend_on_js_engine() in jsengine.rb adds
-        # spec.dependency 'React-jsc' to every native module (via install_modules_dependencies).
-        # React-jsc belongs to @react-native-community/javascriptcore which is NOT
-        # installed in this project. CocoaPods fails: "Unable to find a specification
-        # for React-jsc / React-jsi depended upon by RNGestureHandler".
-        #
-        # FIX (transient CI patch to jsengine.rb):
-        # Before pod install, append three Ruby function overrides to jsengine.rb:
-        #   use_hermes()         → always false  (JSC path, no hermesvm.framework)
-        #   use_third_party_jsc()→ always false  (prevents React-jsc dependency)
-        #   depend_on_js_engine()→ no-op         (no hermes/jsc pod dependency added)
-        #
-        # Effect on react_native_post_install:
-        #   - USE_HERMES build setting → false  ← hermesvm.framework NOT linked
-        #   - setup_hermes!() → NOT called      ← hermes-engine pod NOT installed
-        #   - React-RuntimeHermes → NOT added   ← no Hermes runtime
-        #   - depend_on_js_engine → no-op       ← no React-jsc dep (avoids missing pod)
-        # iOS falls back to the system JavaScriptCore.framework (always present on device).
-        #
-        # This patch is TRANSIENT: jsengine.rb lives in node_modules which is NOT
-        # committed and is fully recreated on every CI run by npm ci / pnpm install.
-        # The patch is applied once per job and is gone after the runner terminates.
-        #
-        # app.json ios.jsEngine=jsc + Podfile.properties.json expo.jsEngine=jsc remain
-        # the canonical configuration; :hermes_enabled => false in use_react_native!
-        # is still honoured at the Podfile level for setup_hermes! pod inclusion.
+        # hermes_enabled is set to the literal `false` in ios/Podfile by the
+        # withIosJsc Expo config plugin (plugins/withIosJsc.js), which runs
+        # during `expo prebuild` above. No env-var tricks needed here.
         run: |
           set -o pipefail
 
-          # ── Step 1: Patch jsengine.rb ─────────────────────────────────────────
-          JSENGINE_RB=$(node --print \
-            "require.resolve('react-native/package.json').replace('package.json','scripts/cocoapods/jsengine.rb')" \
-            2>/dev/null)
-
-          if [ -z "$JSENGINE_RB" ] || [ ! -f "$JSENGINE_RB" ]; then
-            # Fallback: resolve react-native package root from the project root, then build path
-            RN_PKG=$(cd .. && node --print "require.resolve('react-native/package.json')" 2>/dev/null)
-            JSENGINE_RB="${RN_PKG%/package.json}/scripts/cocoapods/jsengine.rb"
-          fi
-
-          echo "jsengine.rb path: $JSENGINE_RB"
-          if [ ! -f "$JSENGINE_RB" ]; then
-            echo "FAIL: cannot locate jsengine.rb — aborting"
+          # Verify withIosJsc plugin applied correctly before spending time on pod install
+          if grep -q ':hermes_enabled => false' Podfile; then
+            echo "OK: Podfile has :hermes_enabled => false (withIosJsc plugin confirmed)"
+          else
+            echo "FAIL: Podfile does NOT contain ':hermes_enabled => false'"
+            echo "      The withIosJsc plugin did not run or the Podfile format changed."
+            grep 'hermes_enabled' Podfile || echo "(hermes_enabled not found at all)"
             exit 1
           fi
 
-          # Confirm the file has not already been patched (idempotency guard)
-          if grep -q "CI_JSC_OVERRIDE" "$JSENGINE_RB"; then
-            echo "INFO: jsengine.rb already patched (idempotency guard hit)"
-          else
-            # Append three Ruby function overrides using printf so the content stays
-            # fully indented inside this YAML run: | block (bash heredocs require the
-            # delimiter at column 0, which breaks YAML parsing of the workflow file).
-            # Ruby allows redefining methods; the last definition wins.
-            #   use_hermes         → false : USE_HERMES=0 build setting → no hermesvm.framework
-            #   use_third_party_jsc→ false : prevents depend_on_js_engine adding React-jsc
-            #   depend_on_js_engine→ no-op : no pod dependency on hermes-engine or React-jsc
-            printf '\n' >> "$JSENGINE_RB"
-            printf '# CI_JSC_OVERRIDE — injected by ios-build.yml for RN 0.83 + iOS JSC build.\n' >> "$JSENGINE_RB"
-            printf '# iOS engine: system JavaScriptCore (hermesvm.framework absent from IPA).\n' >> "$JSENGINE_RB"
-            printf '# Android engine: Hermes (unaffected — android build does not use this file).\n' >> "$JSENGINE_RB"
-            printf '# TRANSIENT: node_modules is recreated on every CI run; never committed.\n' >> "$JSENGINE_RB"
-            printf 'def use_hermes\n' >> "$JSENGINE_RB"
-            printf '  false\n' >> "$JSENGINE_RB"
-            printf 'end\n' >> "$JSENGINE_RB"
-            printf 'def use_third_party_jsc\n' >> "$JSENGINE_RB"
-            printf '  false\n' >> "$JSENGINE_RB"
-            printf 'end\n' >> "$JSENGINE_RB"
-            printf 'def depend_on_js_engine(s)\n' >> "$JSENGINE_RB"
-            printf 'end\n' >> "$JSENGINE_RB"
-            echo "OK: jsengine.rb patched for iOS JSC engine"
-          fi
-
-          # Verify the patch landed
-          echo "--- jsengine.rb tail (last 20 lines) ---"
-          tail -20 "$JSENGINE_RB"
-
-          # ── Step 2: pod install ───────────────────────────────────────────────
           echo "Running pod install..."
           pod install --repo-update 2>&1 | tee /tmp/pod-install.log
           POD_STATUS=${PIPESTATUS[0]}
@@ -277,9 +203,9 @@ jobs:
           # This gate catches any misconfiguration before the expensive xcodebuild step.
           if [ -d "Pods/hermes-engine" ]; then
             echo "FAIL: Pods/hermes-engine/ is present after pod install."
-            echo "      The iOS engine is still Hermes — jsengine.rb patch was not effective."
-            echo "      Check that the jsengine.rb patch step succeeded above and that"
-            echo "      expo.jsEngine=jsc is set in ios/Podfile.properties.json."
+            echo "      hermes_enabled is not false in ios/Podfile."
+            echo "      Check that withIosJsc plugin ran during expo prebuild and that"
+            echo "      ios/Podfile contains ':hermes_enabled => false'."
             ls -la "Pods/hermes-engine/" | head -10
             exit 1
           fi
@@ -770,8 +696,8 @@ jobs:
             echo "================================================================"
             echo "FAIL: hermesvm.framework is present in the IPA."
             echo "      The iOS JS engine is still Hermes."
-            echo "      USE_THIRD_PARTY_JSC=1 was not effective during pod install,"
-            echo "      or a stale Pods/ cache was used."
+            echo "      withIosJsc plugin did not set hermes_enabled => false,"
+            echo "      or hermesvm.framework was linked despite JSC configuration."
             echo "      Hermes entries found:"
             unzip -l "$IPA_PATH" | grep -i "hermes"
             echo "================================================================"
