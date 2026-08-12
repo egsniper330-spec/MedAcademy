@@ -135,92 +135,67 @@ jobs:
           echo "OK: expo.jsEngine = jsc confirmed in Podfile.properties.json"
 
       # -------------------------------------------------------------------------
-      # 4c. Patch generated ios/Podfile — force :hermes_enabled => false
+      # 4c. Patch react_native_pods.rb line 78 — neutralise hardcoded hermes override
       #
-      # expo prebuild regenerates ios/Podfile each build. The generated Podfile
-      # passes a dynamic hermes_enabled expression to use_react_native!() that
-      # evaluates to true when expo.jsEngine is read from Podfile.properties.json
-      # at pod install time via a Ruby expression — NOT at prebuild time.
+      # RN 0.83.2 react_native_pods.rb use_react_native!() has TWO hermes_enabled
+      # declarations:
       #
-      # Setting :hermes_enabled => false in the Podfile is the correct mechanism
-      # to prevent use_react_native!() from calling setup_hermes!(), which is what
-      # actually adds hermes-engine as a CocoaPods dependency.
+      #   Line 70 (parameter default):  hermes_enabled: true
+      #   Line 78 (local reassignment): hermes_enabled= true   ← hardcoded override
       #
-      # NOTE: USE_THIRD_PARTY_JSC=1 must NOT be set — it causes pod install to
-      # resolve 'React-jsc' which does not exist in the public CocoaPods registry,
-      # breaking pod install with "[1] Unable to find a specification for React-jsc".
+      # Line 78 unconditionally overwrites the parameter value with true before the
+      # if hermes_enabled / setup_hermes!() call on line 158.
+      # This means whatever :hermes_enabled value the Podfile passes is completely
+      # ignored — hermes-engine is always installed regardless.
       #
-      # This temporary patch is discarded when ios/ is regenerated on the next build.
-      # No node_modules or React Native source files are touched.
+      # Fix: change line 78 from  hermes_enabled= true  →  hermes_enabled= false
+      #
+      # This is a temporary in-place patch of a generated dependency file.
+      # It is applied AFTER expo prebuild (which writes node_modules) and BEFORE
+      # pod install. node_modules is NOT committed to the repo.
       # -------------------------------------------------------------------------
-      - name: Patch ios/Podfile — force :hermes_enabled => false
+      - name: Patch react_native_pods.rb — neutralise hardcoded hermes_enabled=true
         shell: bash
         run: |
           set -euo pipefail
 
-          PODFILE="ios/Podfile"
-          if [ ! -f "$PODFILE" ]; then
-            echo "FAIL: $PODFILE not found — expo prebuild must have failed"
+          RNP=$(find node_modules/.pnpm \
+            -path "*/react-native/scripts/react_native_pods.rb" \
+            2>/dev/null | head -1)
+
+          if [ -z "$RNP" ]; then
+            echo "FAIL: react_native_pods.rb not found in node_modules/.pnpm"
+            exit 1
+          fi
+          echo "Found: $RNP"
+
+          echo "=== hermes_enabled lines BEFORE patch ==="
+          grep -n "hermes_enabled" "$RNP" | head -10
+
+          # Line 78: hermes_enabled= true  (local variable unconditional override)
+          # This is the ONLY line that needs changing.
+          # The parameter default on line 70 (hermes_enabled: true) stays untouched.
+          if grep -qE '^\s+hermes_enabled= true$' "$RNP"; then
+            sed -i -E 's/^(\s+)hermes_enabled= true$/\1hermes_enabled= false/' "$RNP"
+            echo "Patched: hermes_enabled= true  →  hermes_enabled= false"
+          elif grep -qE '^\s+hermes_enabled= false$' "$RNP"; then
+            echo "Already patched (idempotent)"
+          else
+            echo "FAIL: expected pattern 'hermes_enabled= true' not found"
+            echo "      RN source may have changed. All hermes_enabled occurrences:"
+            grep -n "hermes_enabled" "$RNP" | head -20
             exit 1
           fi
 
-          echo "=== use_react_native! block BEFORE patch ==="
-          python3 -c "import re; t=open('$PODFILE').read(); m=re.search(r'use_react_native!\s*\(.*?\)', t, re.DOTALL); print(m.group(0) if m else '(block not found)')"
           echo ""
+          echo "=== hermes_enabled lines AFTER patch ==="
+          grep -n "hermes_enabled" "$RNP" | head -10
 
-          # Replace the dynamic hermes_enabled expression with literal false.
-          # Handles both Ruby hash syntaxes Expo SDK 55 may generate:
-          #   :hermes_enabled => <expr>   (hash-rocket, multi-line || expression)
-          #   hermes_enabled: <expr>      (keyword style)
-          python3 - "$PODFILE" <<'PYEOF'
-          import sys, re
-          path = sys.argv[1]
-          text = open(path).read()
-
-          # Locate use_react_native!( ... ) with balanced parens
-          start = text.find('use_react_native!(')
-          if start == -1:
-              print("FAIL: use_react_native!( not found in Podfile")
-              sys.exit(1)
-          depth, end = 0, -1
-          for i in range(start + len('use_react_native!(') - 1, len(text)):
-              if text[i] == '(': depth += 1
-              elif text[i] == ')':
-                  depth -= 1
-                  if depth == 0: end = i; break
-          if end == -1:
-              print("FAIL: unmatched parentheses in use_react_native! block")
-              sys.exit(1)
-
-          block = text[start:end+1]
-          pat = re.compile(r'(?::hermes_enabled\s*=>\s*|hermes_enabled:\s*)[^,)]+', re.DOTALL)
-          matches = pat.findall(block)
-          if matches:
-              syntax = ':hermes_enabled => false' if ':hermes_enabled =>' in matches[0] else 'hermes_enabled: false'
-              new_block = pat.sub(syntax, block)
-          else:
-              # Insert as first argument
-              rest = block[len('use_react_native!('):]
-              indent = (re.search(r'\n(\s+)', rest) or type('',(),{'group':lambda s,i:' '})()).group(1)
-              new_block = 'use_react_native!(\n' + indent + ':hermes_enabled => false,' + block[len('use_react_native!('):]
-
-          open(path, 'w').write(text[:start] + new_block + text[end+1:])
-
-          # Verify
-          t2 = open(path).read()
-          m2 = re.search(r'use_react_native!\s*\(.*?\)', t2, re.DOTALL)
-          block2 = m2.group(0) if m2 else ''
-          vals = re.findall(r'(?::hermes_enabled\s*=>\s*|hermes_enabled:\s*)(\S+)', block2)
-          vals = [v.rstrip(',') for v in vals]
-          if vals != ['false']:
-              print(f"FAIL: hermes_enabled values after patch: {vals}, expected ['false']")
-              sys.exit(1)
-          print("OK: :hermes_enabled => false set in use_react_native! block")
-          PYEOF
-
-          echo ""
-          echo "=== use_react_native! block AFTER patch ==="
-          python3 -c "import re; t=open('$PODFILE').read(); m=re.search(r'use_react_native!\s*\(.*?\)', t, re.DOTALL); print(m.group(0) if m else '(block not found)')"
+          if grep -qE '^\s+hermes_enabled= true$' "$RNP"; then
+            echo "FAIL: hermes_enabled= true still present after patch"
+            exit 1
+          fi
+          echo "OK: hardcoded hermes_enabled override neutralised"
 
       # -------------------------------------------------------------------------
       # 5. Ruby + CocoaPods
@@ -242,14 +217,19 @@ jobs:
         run: |
           set -o pipefail
 
-          # Pre-flight: Podfile patch step must have set :hermes_enabled => false.
-          if grep -qE ':hermes_enabled\s*=>\s*false|hermes_enabled:\s*false' Podfile; then
-            echo "OK: Podfile has :hermes_enabled => false — proceeding with pod install"
+          # Pre-flight: react_native_pods.rb line 78 must have been patched to false.
+          RNP=$(find ../node_modules/.pnpm \
+            -path "*/react-native/scripts/react_native_pods.rb" \
+            2>/dev/null | head -1)
+          if [ -n "$RNP" ]; then
+            if grep -qE '^\s+hermes_enabled= true$' "$RNP"; then
+              echo "FAIL: react_native_pods.rb still has hardcoded hermes_enabled= true"
+              echo "      The patch step above must have failed."
+              exit 1
+            fi
+            echo "OK: react_native_pods.rb hardcoded hermes_enabled override is absent"
           else
-            echo "FAIL: Podfile does not contain :hermes_enabled => false"
-            echo "      Current hermes_enabled lines:"
-            grep 'hermes_enabled' Podfile || echo "(hermes_enabled not found at all)"
-            exit 1
+            echo "WARN: react_native_pods.rb not found for pre-flight check — continuing"
           fi
 
           echo "Running pod install..."
@@ -280,9 +260,11 @@ jobs:
           # ── Hard gate: hermes-engine pod must NOT be installed ───────────────
           if [ -d "Pods/hermes-engine" ]; then
             echo "FAIL: Pods/hermes-engine/ is present after pod install."
-            echo "      :hermes_enabled => false in the Podfile did not prevent Hermes."
+            echo "      The react_native_pods.rb line 78 patch did not take effect."
             echo ""
             echo "--- Diagnostics ---"
+            echo "hermes_enabled lines in react_native_pods.rb:"
+            [ -n "$RNP" ] && grep -n "hermes_enabled" "$RNP" | head -10 || echo "(not found)"
             echo "use_react_native! block in Podfile:"
             python3 -c "import re; t=open('Podfile').read(); m=re.search(r'use_react_native!\s*\(.*?\)', t, re.DOTALL); print(m.group(0) if m else '(block not found)')"
             echo "---"
