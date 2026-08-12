@@ -1,53 +1,52 @@
 #!/usr/bin/env python3
 """
-patch_podfile_jsc.py  —  force :hermes_enabled => false in ios/Podfile
-======================================================================
+patch_podfile_jsc.py  —  force hermes_enabled=false in generated ios/Podfile
+=============================================================================
 Usage:
     python3 scripts/patch_podfile_jsc.py ios/Podfile
 
-Called by .github/workflows/ios-build.yml after `expo prebuild` and
-before `pod install`.  This is Fix 3 of 3 for JSC on RN 0.83.2.
+Called by .github/workflows/ios-build.yml after `expo prebuild --clean`
+and before `pod install`.
 
-ROOT CAUSE — Two independent Hermes paths in RN 0.83.2
--------------------------------------------------------
-PATH 1  react_native_pods.rb use_react_native!()
-  Line 78 unconditionally hardcodes:  hermes_enabled= true
-  This ignores the :hermes_enabled value from the Podfile entirely.
-  When hermes_enabled is true it calls setup_hermes!() which installs
-  hermes-engine and React-hermes CocoaPods.
-  FIX 1: workflow step "Patch RN react_native_pods.rb" patches line 78
-         from  hermes_enabled= true  →  hermes_enabled= false
+Why this exists
+---------------
+`expo prebuild --clean` regenerates ios/Podfile from a template each build.
+The generated Podfile passes a dynamic hermes_enabled expression to
+use_react_native!() that may not evaluate to false even when expo.jsEngine=jsc
+is set in Podfile.properties.json.
 
-PATH 2  jsengine.rb use_hermes() / depend_on_js_engine()
-  use_hermes() = !use_third_party_jsc() = !(ENV['USE_THIRD_PARTY_JSC']=='1')
-  Controls depend_on_js_engine() in podspecs and the USE_HERMES Xcode build
-  setting written in post_install.
-  FIX 2: workflow sets env USE_THIRD_PARTY_JSC=1 on the pod install step.
+This script temporarily patches the freshly generated ios/Podfile to
+explicitly set hermes_enabled=false before CocoaPods reads it.
+The ios/ directory is discarded and regenerated on the next build — this
+is an intentional ephemeral modification, not a permanent source change.
 
-PATH 3  ios/Podfile :hermes_enabled value
-  The generated Podfile passes :hermes_enabled => <dynamic-expr> to
-  use_react_native!().  Belt-and-suspenders: if line 78 of react_native_pods.rb
-  ever becomes conditional again, the Podfile value would matter.
-  FIX 3: THIS SCRIPT patches the Podfile to set :hermes_enabled => false.
+No node_modules, React Native source files, or any file outside
+ios/Podfile are touched by this script.
 
 What this script does
 ---------------------
-1.  Locates the use_react_native!( ... ) block using brace-depth
-    matching — not a regex over the whole file.
-2.  Prints the located block to the CI log BEFORE patching.
-3.  Inside that block only:
-    a. If :hermes_enabled is present with any value  → replace with false
-       Handles both:  :hermes_enabled => <expr>   (hash-rocket style)
-                      hermes_enabled: <expr>       (keyword style)
-    b. If :hermes_enabled is absent  → insert as first argument
-4.  Writes the patched content back to the same file.
-5.  Re-reads and asserts exactly one hermes_enabled=false in the block.
-6.  Exits 0 on success, non-zero on any failure.
+1.  Reads the generated ios/Podfile.
+2.  Locates the use_react_native!( ... ) block using balanced-paren
+    matching — not a whole-file regex.
+3.  Prints the located block to stdout BEFORE patching (CI log).
+4.  Inside that block only:
+    a. If hermes_enabled is present with any value  → replace with false
+       Handles both Ruby hash syntaxes:
+         :hermes_enabled => <expr>   (hash-rocket, Expo SDK 55 generated style)
+         hermes_enabled: <expr>      (keyword style)
+       Also handles multi-line values (e.g. || continuation expressions).
+    b. If hermes_enabled is absent  → inserts :hermes_enabled => false
+       as the first argument, preserving existing indentation.
+5.  Writes the patched content back to the same file.
+6.  Re-reads and prints the use_react_native!() block AFTER patching.
+7.  Hard-asserts exactly one hermes_enabled=false exists in the block.
+8.  Exits 0 on success, non-zero on any failure — workflow halts before
+    pod install if this step fails.
 
 What this script does NOT do
 -----------------------------
 - Does not modify node_modules
-- Does not modify React Native source (that is Fix 1 in the workflow)
+- Does not modify React Native source files
 - Does not modify Podfile.lock
 - Does not touch any file other than the single Podfile path given as argv[1]
 - Does not affect Android configuration
