@@ -13,6 +13,7 @@ on:
     paths:
       - 'ios/**'
       - 'plugins/**'
+      - 'scripts/**'
       - 'app.json'
       - 'package.json'
       - 'patches/**'
@@ -109,11 +110,11 @@ jobs:
           fi
 
       # -------------------------------------------------------------------------
-      # 4b. Verify JSC engine configuration (hard gate before pod install)
+      # 4b. Verify expo.jsEngine=jsc in Podfile.properties.json
       #
       # expo prebuild --clean regenerates Podfile.properties.json from app.json.
-      # Confirm that expo.jsEngine is "jsc" (not "hermes") before proceeding.
-      # If this gate fails, the engine config in app.json is wrong — do not build.
+      # Confirm expo.jsEngine is "jsc" before patching. If this fails, app.json
+      # ios.jsEngine is misconfigured — do not build.
       # -------------------------------------------------------------------------
       - name: Verify JSC engine in Podfile.properties.json
         shell: bash
@@ -123,7 +124,7 @@ jobs:
             echo "FAIL: $PROPS not found after prebuild"
             exit 1
           fi
-          ENGINE=$(python3 -c "import json,sys; d=json.load(open('$PROPS')); print(d.get('expo.jsEngine','(not set)'))")
+          ENGINE=$(python3 -c "import json; d=json.load(open('$PROPS')); print(d.get('expo.jsEngine','(not set)'))")
           echo "expo.jsEngine = $ENGINE"
           if [ "$ENGINE" != "jsc" ]; then
             echo "FAIL: expo.jsEngine is '$ENGINE', expected 'jsc'."
@@ -131,14 +132,38 @@ jobs:
             cat "$PROPS"
             exit 1
           fi
-          echo "OK: expo.jsEngine = jsc — Hermes will NOT be selected by CocoaPods"
+          echo "OK: expo.jsEngine = jsc confirmed in Podfile.properties.json"
 
-          # Also confirm Podfile hermes_enabled logic resolves to false
-          if grep -q "hermes_enabled.*expo\.jsEngine.*==.*hermes" ios/Podfile; then
-            echo "OK: Podfile hermes_enabled guard confirmed present"
-          else
-            echo "WARN: Podfile hermes_enabled guard not found — inspect Podfile"
-          fi
+      # -------------------------------------------------------------------------
+      # 4c. Patch generated ios/Podfile — force hermes_enabled => false
+      #
+      # expo prebuild generates ios/Podfile with a dynamic hermes_enabled
+      # expression that evaluates at pod install time. In RN 0.83.2 / Expo SDK 55
+      # this dynamic check does not reliably produce false even when
+      # expo.jsEngine=jsc is set. The Expo config plugin approach is also
+      # unreliable because dangerous mods run before the Podfile template is
+      # written in some Expo SDK versions.
+      #
+      # SOLUTION: patch the already-generated ios/Podfile directly in the
+      # workflow, after prebuild, before pod install. This is 100% deterministic
+      # because we are editing a concrete file on disk, not relying on any
+      # plugin execution order or Ruby evaluation.
+      #
+      # The Python patcher:
+      #   1. Locates the use_react_native!( ... ) block in ios/Podfile
+      #   2. Normalises any existing hermes_enabled value to false
+      #   3. Inserts :hermes_enabled => false if the parameter is absent
+      #   4. Writes the patched Podfile back to disk
+      #   5. Re-reads and asserts exactly one hermes_enabled exists with value false
+      #   6. Exits non-zero on any failure so the workflow halts before pod install
+      # -------------------------------------------------------------------------
+      - name: Patch ios/Podfile — force hermes_enabled => false
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/patch_podfile_jsc.py ios/Podfile
+          echo ""
+          echo "=== Podfile patch complete — hermes_enabled => false confirmed ==="
 
       # -------------------------------------------------------------------------
       # 5. Ruby + CocoaPods
@@ -157,18 +182,16 @@ jobs:
       - name: CocoaPods install
         working-directory: ios
         shell: bash
-        # hermes_enabled is set to the literal `false` in ios/Podfile by the
-        # withIosJsc Expo config plugin (plugins/withIosJsc.js), which runs
-        # during `expo prebuild` above. No env-var tricks needed here.
         run: |
           set -o pipefail
 
-          # Verify withIosJsc plugin applied correctly before spending time on pod install
+          # Hard pre-flight: the Podfile patch step above must have produced this.
+          # If not, something is wrong with the patch step — fail fast.
           if grep -q ':hermes_enabled => false' Podfile; then
-            echo "OK: Podfile has :hermes_enabled => false (withIosJsc plugin confirmed)"
+            echo "OK: Podfile has :hermes_enabled => false — proceeding with pod install"
           else
             echo "FAIL: Podfile does NOT contain ':hermes_enabled => false'"
-            echo "      The withIosJsc plugin did not run or the Podfile format changed."
+            echo "      The Podfile patch step did not complete successfully."
             grep 'hermes_enabled' Podfile || echo "(hermes_enabled not found at all)"
             exit 1
           fi
@@ -204,8 +227,7 @@ jobs:
           if [ -d "Pods/hermes-engine" ]; then
             echo "FAIL: Pods/hermes-engine/ is present after pod install."
             echo "      hermes_enabled is not false in ios/Podfile."
-            echo "      Check that withIosJsc plugin ran during expo prebuild and that"
-            echo "      ios/Podfile contains ':hermes_enabled => false'."
+            echo "      The Podfile patch step or the patcher assertion failed."
             ls -la "Pods/hermes-engine/" | head -10
             exit 1
           fi

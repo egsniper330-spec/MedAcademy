@@ -3,7 +3,7 @@
     "name": "MedAcademy",
     "slug": "medacademy",
     "scheme": "medacademy",
-    "version": "1.0.838",
+    "version": "1.0.841",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "automatic",
