@@ -648,6 +648,221 @@ jobs:
           echo "OK: Podfile patched — ExpoModulesJSI will receive React-jsc HEADER_SEARCH_PATHS"
 
       # -------------------------------------------------------------------------
+      # 5a-v. Patch RCTDefaultReactNativeFactoryDelegate.mm:
+      #       add #else branch that returns jsrt_create_jsc_factory()
+      #
+      # ROOT CAUSE (Build 8):
+      #   error: non-void function does not return a value [-Werror,-Wreturn-type]
+      #   File: Libraries/AppDelegate/RCTDefaultReactNativeFactoryDelegate.mm
+      #   Target: React-RCTAppDelegate
+      #
+      # React Native 0.83.2 ships:
+      #
+      #   - (JSRuntimeFactoryRef)createJSRuntimeFactory
+      #   {
+      #   #if USE_THIRD_PARTY_JSC != 1
+      #     return jsrt_create_hermes_factory();
+      #   #endif
+      #   }
+      #
+      # When USE_THIRD_PARTY_JSC=1 (our JSC build), the preprocessor removes the
+      # only return statement. The function body is then empty and returns nothing.
+      # -Werror,-Wreturn-type turns this into a fatal compilation error.
+      #
+      # CALL CHAIN (why this matters):
+      #   AppDelegate.swift
+      #     └── ReactNativeDelegate : ExpoReactNativeFactoryDelegate (Swift)
+      #           └── ExpoReactNativeFactoryDelegate : RCTDefaultReactNativeFactoryDelegate (Obj-C)
+      #                 └── createJSRuntimeFactory  ← THIS METHOD, broken on JSC path
+      #
+      # ExpoReactNativeFactoryDelegate does NOT override createJSRuntimeFactory,
+      # so RCTDefaultReactNativeFactoryDelegate's implementation is used directly.
+      # ReactNativeDelegate in AppDelegate.swift also does NOT override it.
+      # The broken Obj-C implementation is the one that gets called.
+      #
+      # THE FIX — two minimal changes to RCTDefaultReactNativeFactoryDelegate.mm:
+      #
+      # CHANGE 1 — import block (lines 12-14):
+      #   BEFORE:
+      #     #if USE_THIRD_PARTY_JSC != 1
+      #     #import <React/RCTHermesInstanceFactory.h>
+      #     #endif
+      #   AFTER:
+      #     #if USE_THIRD_PARTY_JSC != 1
+      #     #import <React/RCTHermesInstanceFactory.h>
+      #     #else
+      #     #import <ReactJSC/RCTJscInstanceFactory.h>
+      #     #endif
+      #
+      #   RCTJscInstanceFactory.h (from React-jsc pod, module name ReactJSC) declares:
+      #     extern "C" JSRuntimeFactoryRef jsrt_create_jsc_factory(void);
+      #   The header is available as <ReactJSC/RCTJscInstanceFactory.h> because
+      #   React-jsc.podspec sets module_name = "ReactJSC".
+      #   The guard ensures: Hermes builds import hermes factory; JSC builds import JSC factory.
+      #
+      # CHANGE 2 — factory method (lines 44-49):
+      #   BEFORE:
+      #     - (JSRuntimeFactoryRef)createJSRuntimeFactory
+      #     {
+      #     #if USE_THIRD_PARTY_JSC != 1
+      #       return jsrt_create_hermes_factory();
+      #     #endif
+      #     }
+      #   AFTER:
+      #     - (JSRuntimeFactoryRef)createJSRuntimeFactory
+      #     {
+      #     #if USE_THIRD_PARTY_JSC != 1
+      #       return jsrt_create_hermes_factory();
+      #     #else
+      #       return jsrt_create_jsc_factory();
+      #     #endif
+      #     }
+      #
+      #   The added #else branch ensures the function always has a return value,
+      #   silencing -Werror,-Wreturn-type. jsrt_create_jsc_factory() returns the
+      #   JSRuntimeFactory backed by @react-native-community/javascriptcore 0.2.0.
+      #
+      # SAFETY: Both changes are symmetric #if/#else pairs — no side-effects on
+      #   Hermes builds (the original #if branch is unchanged).
+      #
+      # PERMANENCE: node_modules is fully reinstalled by npm ci on every build run.
+      #   This patch is transient and re-applied after npm ci.
+      # -------------------------------------------------------------------------
+      - name: Patch RCTDefaultReactNativeFactoryDelegate.mm for JSC runtime factory
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # Locate RCTDefaultReactNativeFactoryDelegate.mm inside node_modules.
+          # Use find so the path is independent of pnpm's hash-versioned directory.
+          MM=$(find node_modules -path "*/Libraries/AppDelegate/RCTDefaultReactNativeFactoryDelegate.mm" \
+               -not -path "*/node_modules/*/node_modules/*" 2>/dev/null | head -1)
+
+          if [ -z "$MM" ]; then
+            echo "FAIL: RCTDefaultReactNativeFactoryDelegate.mm not found in node_modules"
+            exit 1
+          fi
+          echo "Found: $MM"
+
+          echo "--- RCTDefaultReactNativeFactoryDelegate.mm BEFORE patch ---"
+          cat -n "$MM"
+
+          python3 - "$MM" <<'PYEOF'
+          import sys
+
+          path = sys.argv[1]
+
+          with open(path, 'r') as f:
+              content = f.read()
+
+          # ------------------------------------------------------------------
+          # Idempotent sentinel: the #else branch in createJSRuntimeFactory.
+          # Present only after this patch has been applied.
+          # ------------------------------------------------------------------
+          sentinel = 'return jsrt_create_jsc_factory();'
+          if sentinel in content:
+              print("Already patched — skipping.")
+              sys.exit(0)
+
+          # ------------------------------------------------------------------
+          # CHANGE 1: Extend the import guard to include ReactJSC in JSC builds.
+          # ------------------------------------------------------------------
+          import_before = (
+              '#if USE_THIRD_PARTY_JSC != 1\n'
+              '#import <React/RCTHermesInstanceFactory.h>\n'
+              '#endif\n'
+          )
+          import_after = (
+              '#if USE_THIRD_PARTY_JSC != 1\n'
+              '#import <React/RCTHermesInstanceFactory.h>\n'
+              '#else\n'
+              '#import <ReactJSC/RCTJscInstanceFactory.h>\n'
+              '#endif\n'
+          )
+
+          if import_before not in content:
+              print(f"ERROR: import guard block not found in {path}")
+              print("Expected:")
+              print(import_before)
+              sys.exit(1)
+
+          content = content.replace(import_before, import_after, 1)
+
+          # ------------------------------------------------------------------
+          # CHANGE 2: Add #else return jsrt_create_jsc_factory() to factory method.
+          # ------------------------------------------------------------------
+          factory_before = (
+              '- (JSRuntimeFactoryRef)createJSRuntimeFactory\n'
+              '{\n'
+              '#if USE_THIRD_PARTY_JSC != 1\n'
+              '  return jsrt_create_hermes_factory();\n'
+              '#endif\n'
+              '}\n'
+          )
+          factory_after = (
+              '- (JSRuntimeFactoryRef)createJSRuntimeFactory\n'
+              '{\n'
+              '#if USE_THIRD_PARTY_JSC != 1\n'
+              '  return jsrt_create_hermes_factory();\n'
+              '#else\n'
+              '  return jsrt_create_jsc_factory();\n'
+              '#endif\n'
+              '}\n'
+          )
+
+          if factory_before not in content:
+              print(f"ERROR: createJSRuntimeFactory method block not found in {path}")
+              print("Expected:")
+              print(factory_before)
+              sys.exit(1)
+
+          content = content.replace(factory_before, factory_after, 1)
+
+          with open(path, 'w') as f:
+              f.write(content)
+
+          print("Patch applied successfully.")
+          PYEOF
+
+          echo ""
+          echo "--- RCTDefaultReactNativeFactoryDelegate.mm AFTER patch ---"
+          cat -n "$MM"
+
+          echo ""
+          echo "=== Validation ==="
+
+          # 1. ReactJSC import present
+          if ! grep -qF '#import <ReactJSC/RCTJscInstanceFactory.h>' "$MM"; then
+            echo "FAIL: ReactJSC import not found"
+            exit 1
+          fi
+          echo "PASS: #import <ReactJSC/RCTJscInstanceFactory.h> present"
+
+          # 2. jsrt_create_jsc_factory() return present
+          if ! grep -qF 'return jsrt_create_jsc_factory();' "$MM"; then
+            echo "FAIL: jsrt_create_jsc_factory() return not found"
+            exit 1
+          fi
+          echo "PASS: return jsrt_create_jsc_factory() present"
+
+          # 3. jsrt_create_hermes_factory() still present (unchanged Hermes path)
+          if ! grep -qF 'return jsrt_create_hermes_factory();' "$MM"; then
+            echo "FAIL: jsrt_create_hermes_factory() return unexpectedly removed"
+            exit 1
+          fi
+          echo "PASS: return jsrt_create_hermes_factory() still present (Hermes path intact)"
+
+          # 4. createJSRuntimeFactory has exactly one occurrence (no duplication)
+          COUNT=$(grep -c 'createJSRuntimeFactory' "$MM" || true)
+          if [ "$COUNT" -ne 1 ]; then
+            echo "FAIL: createJSRuntimeFactory appears $COUNT times (expected 1)"
+            exit 1
+          fi
+          echo "PASS: createJSRuntimeFactory appears exactly once"
+
+          echo "OK: RCTDefaultReactNativeFactoryDelegate.mm patched — JSC runtime factory wired"
+
+      # -------------------------------------------------------------------------
       # 5b. CocoaPods install
       #
       # USE_THIRD_PARTY_JSC=1 tells jsengine.rb's use_third_party_jsc() to return
