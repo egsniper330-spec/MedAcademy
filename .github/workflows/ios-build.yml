@@ -219,6 +219,59 @@ jobs:
           echo "OK: react_native_pods.rb patched successfully"
 
       # -------------------------------------------------------------------------
+      # 5a-ii. Patch jsengine.rb: add -DUSE_HERMES=0 to use_third_party_jsc_flags
+      #
+      # ROOT CAUSE (compile error): RCTCxxBridge.mm guards the Hermes import with:
+      #   #if !defined(USE_HERMES) || USE_HERMES == 1
+      #   #import <reacthermes/HermesExecutorFactory.h>   ← line 49
+      #
+      # React-Core.podspec sets s.compiler_flags = js_engine_flags().
+      # js_engine_flags() calls use_third_party_jsc_flags() when JSC is selected,
+      # which returns only "-DUSE_THIRD_PARTY_JSC=1".
+      #
+      # That defines USE_THIRD_PARTY_JSC but does NOT define USE_HERMES.
+      # So !defined(USE_HERMES) evaluates to true → Hermes header is included →
+      # fatal error: 'reacthermes/HermesExecutorFactory.h' file not found.
+      #
+      # THE FIX: patch use_third_party_jsc_flags() to return both flags:
+      #   "-DUSE_THIRD_PARTY_JSC=1 -DUSE_HERMES=0"
+      #
+      # This makes RCTCxxBridge.mm's guard evaluate as:
+      #   !defined(USE_HERMES) → false (now defined)
+      #   USE_HERMES == 1      → false (defined as 0)
+      #   → false || false = false → Hermes header is NOT included ✓
+      # -------------------------------------------------------------------------
+      - name: Patch jsengine.rb for JSC support
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          JSENGINE="node_modules/react-native/scripts/cocoapods/jsengine.rb"
+
+          if [ ! -f "$JSENGINE" ]; then
+            echo "FAIL: $JSENGINE not found — npm ci may not have run"
+            exit 1
+          fi
+
+          echo "--- jsengine.rb BEFORE patch ---"
+          grep -n "use_third_party_jsc_flags\|USE_HERMES\|USE_THIRD_PARTY_JSC" "$JSENGINE"
+
+          # Patch: add -DUSE_HERMES=0 to the JSC flags return value.
+          # Idempotent: if already patched the original string won't match.
+          sed -i '' \
+            's/return "-DUSE_THIRD_PARTY_JSC=1"/return "-DUSE_THIRD_PARTY_JSC=1 -DUSE_HERMES=0"/' \
+            "$JSENGINE"
+
+          echo "--- jsengine.rb AFTER patch ---"
+          grep -n "use_third_party_jsc_flags\|USE_HERMES\|USE_THIRD_PARTY_JSC" "$JSENGINE"
+
+          if ! grep -q 'return "-DUSE_THIRD_PARTY_JSC=1 -DUSE_HERMES=0"' "$JSENGINE"; then
+            echo "FAIL: jsengine.rb patch did not apply"
+            exit 1
+          fi
+          echo "OK: jsengine.rb patched successfully"
+
+      # -------------------------------------------------------------------------
       # 5b. CocoaPods install
       #
       # USE_THIRD_PARTY_JSC=1 tells jsengine.rb's use_third_party_jsc() to return
