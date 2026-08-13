@@ -648,6 +648,136 @@ jobs:
           echo "OK: Podfile patched — ExpoModulesJSI will receive React-jsc HEADER_SEARCH_PATHS"
 
       # -------------------------------------------------------------------------
+      # 5a-vi. Patch RCTDefaultReactNativeFactoryDelegate.mm: add NULL fallback return
+      #
+      # ROOT CAUSE (Build 11):
+      #   USE_THIRD_PARTY_JSC=1 is now correctly propagated (v18 jsengine.rb fix).
+      #   However, when USE_THIRD_PARTY_JSC=1, the method body is empty:
+      #
+      #     - (JSRuntimeFactoryRef)createJSRuntimeFactory
+      #     {
+      #     #if USE_THIRD_PARTY_JSC != 1
+      #       return jsrt_create_hermes_factory();
+      #     #endif
+      #     }     ← NO return statement → -Werror,-Wreturn-type → compile error
+      #
+      #   error: non-void function does not return a value [-Werror,-Wreturn-type]
+      #   File: Libraries/AppDelegate/RCTDefaultReactNativeFactoryDelegate.mm:49
+      #
+      # FIX:
+      #   Add 'return NULL;' after the #endif so the method always returns.
+      #   JSRuntimeFactoryRef is typedef void* — NULL is a valid sentinel value.
+      #   The Swift override in AppDelegate.swift (Step 5a-v) means this ObjC base
+      #   method is NEVER called at runtime when USE_THIRD_PARTY_JSC=1; the NULL
+      #   return only satisfies -Werror=return-type at compile time.
+      #
+      #   RESULT after patch:
+      #     - (JSRuntimeFactoryRef)createJSRuntimeFactory
+      #     {
+      #     #if USE_THIRD_PARTY_JSC != 1
+      #       return jsrt_create_hermes_factory();
+      #     #endif
+      #       return NULL;    ← added: satisfies -Werror=return-type; never reached
+      #     }
+      #
+      # SCOPE:
+      #   This patches node_modules (transient on CI — fresh checkout each run).
+      #   The patch is idempotent: sentinel 'return NULL; // jsc-null-fallback'
+      #   prevents double-application if the step somehow runs twice.
+      # -------------------------------------------------------------------------
+      - name: Patch RCTDefaultReactNativeFactoryDelegate.mm — add NULL return for JSC path
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          MM=$(find node_modules -path "*/Libraries/AppDelegate/RCTDefaultReactNativeFactoryDelegate.mm" \
+               -not -path "*/node_modules/*/node_modules/*" 2>/dev/null | head -1)
+
+          if [ -z "$MM" ]; then
+            echo "FAIL: RCTDefaultReactNativeFactoryDelegate.mm not found in node_modules"
+            exit 1
+          fi
+          echo "Found: $MM"
+
+          # Idempotency sentinel
+          if grep -qF 'jsc-null-fallback' "$MM"; then
+            echo "Already patched — skipping."
+          else
+            echo "--- BEFORE patch (lines 44-55) ---"
+            sed -n '44,55p' "$MM"
+
+            # Insert 'return NULL; // jsc-null-fallback' before the method-closing '}'
+            # that follows the #endif.  The structure is exactly:
+            #   #endif\n}\n
+            # and this pattern occurs only once in this method (confirmed in source).
+            # We use Python for reliable multi-line replacement.
+            python3 - "$MM" <<'PYEOF'
+          import sys
+
+          path = sys.argv[1]
+          with open(path, 'r') as f:
+              content = f.read()
+
+          old = (
+              '- (JSRuntimeFactoryRef)createJSRuntimeFactory\n'
+              '{\n'
+              '#if USE_THIRD_PARTY_JSC != 1\n'
+              '  return jsrt_create_hermes_factory();\n'
+              '#endif\n'
+              '}'
+          )
+          new = (
+              '- (JSRuntimeFactoryRef)createJSRuntimeFactory\n'
+              '{\n'
+              '#if USE_THIRD_PARTY_JSC != 1\n'
+              '  return jsrt_create_hermes_factory();\n'
+              '#endif\n'
+              '  return NULL; // jsc-null-fallback\n'
+              '}'
+          )
+
+          if old not in content:
+              print("ERROR: expected method block not found — source may have changed")
+              print("Actual lines 44-55:")
+              for i, line in enumerate(content.split('\n')[43:55], 44):
+                  print(f"  {i}: {repr(line)}")
+              sys.exit(1)
+
+          content = content.replace(old, new, 1)
+
+          with open(path, 'w') as f:
+              f.write(content)
+
+          print("Patch applied.")
+          PYEOF
+
+            echo ""
+            echo "--- AFTER patch (lines 44-56) ---"
+            sed -n '44,56p' "$MM"
+          fi
+
+          echo ""
+          echo "=== Validation ==="
+
+          # 1. NULL fallback present
+          if grep -qF 'return NULL; // jsc-null-fallback' "$MM"; then
+            echo "PASS: 'return NULL; // jsc-null-fallback' present"
+          else
+            echo "FAIL: NULL fallback not found"
+            exit 1
+          fi
+
+          # 2. Hermes return still present (guarded)
+          if grep -qF 'return jsrt_create_hermes_factory();' "$MM"; then
+            echo "PASS: Hermes return still present (guarded by #if)"
+          else
+            echo "FAIL: Hermes return was accidentally removed"
+            exit 1
+          fi
+
+          echo "OK: RCTDefaultReactNativeFactoryDelegate.mm patched — NULL return added for JSC path"
+
+      # -------------------------------------------------------------------------
       # 5a-v. Patch ios/AppDelegate.swift (transient): wire JSC runtime factory
       #
       # ROOT CAUSE (Build 8 / Build 9):
@@ -664,6 +794,7 @@ jobs:
       #     return jsrt_create_hermes_factory();
       #   #endif
       #   }                    ← empty when USE_THIRD_PARTY_JSC=1 → -Werror fires
+      #                          (fixed by Step 5a-vi above)
       #
       # CORRECT FIX — per @react-native-community/javascriptcore 0.2.0 README:
       #   The documented integration is to override createJSRuntimeFactory in the
@@ -679,7 +810,7 @@ jobs:
       #   - AppDelegate.swift compiles in the application target → has full access
       #     to all pod headers including ReactJSC.
       #   - The Swift override shadow-overrides the broken Obj-C base implementation
-      #     so it is called instead.
+      #     so it is called instead. Step 5a-vi ensures the base still compiles.
       #
       # GENERATED STRUCTURE (expo prebuild --clean):
       #   // ios/MedAcademy/AppDelegate.swift
@@ -729,8 +860,6 @@ jobs:
       #   This patch is re-applied transiently in each CI run after prebuild and
       #   before pod install. The source-controlled file (.github/workflows/…) is
       #   the only permanent change.
-      #
-      # NOTE: RCTDefaultReactNativeFactoryDelegate.mm is NOT modified by this step.
       # -------------------------------------------------------------------------
       - name: Patch AppDelegate.swift — wire JSC runtime factory via ReactNativeDelegate override
         shell: bash
