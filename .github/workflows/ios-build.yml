@@ -219,27 +219,58 @@ jobs:
           echo "OK: react_native_pods.rb patched successfully"
 
       # -------------------------------------------------------------------------
-      # 5a-ii. Patch jsengine.rb: add -DUSE_HERMES=0 to use_third_party_jsc_flags
+      # 5a-ii. Patch jsengine.rb: fix flag string to prevent macro concatenation
       #
-      # ROOT CAUSE (compile error): RCTCxxBridge.mm guards the Hermes import with:
-      #   #if !defined(USE_HERMES) || USE_HERMES == 1
-      #   #import <reacthermes/HermesExecutorFactory.h>   ← line 49
+      # ROOT CAUSE (Build 7 — React-RCTAppDelegate compile error):
+      #   fatal error: 'reacthermes/HermesExecutorFactory.h' file not found
+      #   Target: React-RCTAppDelegate
+      #   File: RCTAppSetupUtils.h line 16-17
       #
-      # React-Core.podspec sets s.compiler_flags = js_engine_flags().
-      # js_engine_flags() calls use_third_party_jsc_flags() when JSC is selected,
-      # which returns only "-DUSE_THIRD_PARTY_JSC=1".
+      # The condition in RCTAppSetupUtils.h:
+      #   #if USE_THIRD_PARTY_JSC != 1
+      #   #import <reacthermes/HermesExecutorFactory.h>
       #
-      # That defines USE_THIRD_PARTY_JSC but does NOT define USE_HERMES.
-      # So !defined(USE_HERMES) evaluates to true → Hermes header is included →
-      # fatal error: 'reacthermes/HermesExecutorFactory.h' file not found.
+      # The compiler invocation "visibly" contained -DUSE_THIRD_PARTY_JSC=1
+      # yet the preprocessor still reached the Hermes #import. Here is why:
       #
-      # THE FIX: patch use_third_party_jsc_flags() to return both flags:
-      #   "-DUSE_THIRD_PARTY_JSC=1 -DUSE_HERMES=0"
+      # React-RCTAppDelegate.podspec line 21:
+      #   other_cflags = "$(inherited) " + new_arch_enabled_flag + js_engine_flags()
       #
-      # This makes RCTCxxBridge.mm's guard evaluate as:
-      #   !defined(USE_HERMES) → false (now defined)
-      #   USE_HERMES == 1      → false (defined as 0)
-      #   → false || false = false → Hermes header is NOT included ✓
+      # where:
+      #   new_arch_enabled_flag = " -DRCT_NEW_ARCH_ENABLED=1"  (leading space, no trailing)
+      #   js_engine_flags()     = "-DUSE_THIRD_PARTY_JSC=1 -DUSE_HERMES=0"  (no leading space)
+      #
+      # String concatenation WITHOUT a separating space produces:
+      #   "$(inherited)  -DRCT_NEW_ARCH_ENABLED=1-DUSE_THIRD_PARTY_JSC=1 -DUSE_HERMES=0"
+      #
+      # Clang splits on whitespace, yielding three tokens:
+      #   $(inherited)
+      #   -DRCT_NEW_ARCH_ENABLED=1-DUSE_THIRD_PARTY_JSC=1   ← ONE malformed token
+      #   -DUSE_HERMES=0
+      #
+      # Clang interprets -DRCT_NEW_ARCH_ENABLED=1-DUSE_THIRD_PARTY_JSC=1 as:
+      #   #define RCT_NEW_ARCH_ENABLED  1-DUSE_THIRD_PARTY_JSC=1   (garbage value)
+      # USE_THIRD_PARTY_JSC is NEVER defined as an independent macro.
+      #
+      # With USE_THIRD_PARTY_JSC undefined (treated as 0):
+      #   #if USE_THIRD_PARTY_JSC != 1  →  0 != 1  →  TRUE  →  Hermes included
+      #   → 'reacthermes/HermesExecutorFactory.h' file not found (hermes absent)
+      #
+      # (The -DUSE_HERMES=0 token IS properly separated and reaches Clang correctly,
+      # which is why the RCTCxxBridge.mm guard works — but RCTAppSetupUtils.h uses
+      # USE_THIRD_PARTY_JSC, not USE_HERMES, so it still fires.)
+      #
+      # THE FIX: add a LEADING SPACE to use_third_party_jsc_flags() return value:
+      #   return " -DUSE_THIRD_PARTY_JSC=1 -DUSE_HERMES=0"
+      #             ^^ leading space ^^
+      #
+      # Resulting concatenation:
+      #   "$(inherited) " + " -DRCT_NEW_ARCH_ENABLED=1" + " -DUSE_THIRD_PARTY_JSC=1 -DUSE_HERMES=0"
+      # = "$(inherited)  -DRCT_NEW_ARCH_ENABLED=1 -DUSE_THIRD_PARTY_JSC=1 -DUSE_HERMES=0"
+      #
+      # Tokens: $(inherited), -DRCT_NEW_ARCH_ENABLED=1, -DUSE_THIRD_PARTY_JSC=1, -DUSE_HERMES=0
+      # All four tokens correctly separated. USE_THIRD_PARTY_JSC = 1 properly defined.
+      # RCTAppSetupUtils.h: USE_THIRD_PARTY_JSC != 1 → 1 != 1 → FALSE → Hermes NOT included ✓
       # -------------------------------------------------------------------------
       - name: Patch jsengine.rb for JSC support
         shell: bash
@@ -256,16 +287,21 @@ jobs:
           echo "--- jsengine.rb BEFORE patch ---"
           grep -n "use_third_party_jsc_flags\|USE_HERMES\|USE_THIRD_PARTY_JSC" "$JSENGINE"
 
-          # Patch: add -DUSE_HERMES=0 to the JSC flags return value.
+          # Patch: use_third_party_jsc_flags() must return BOTH flags WITH a leading
+          # space so that string-concatenation in React-RCTAppDelegate.podspec:
+          #   other_cflags = "$(inherited) " + new_arch_enabled_flag + js_engine_flags()
+          # produces properly space-separated tokens on the Clang command line.
+          # Without the leading space, -DRCT_NEW_ARCH_ENABLED=1 and -DUSE_THIRD_PARTY_JSC=1
+          # are fused into one malformed token and USE_THIRD_PARTY_JSC is never defined.
           # Idempotent: if already patched the original string won't match.
           sed -i '' \
-            's/return "-DUSE_THIRD_PARTY_JSC=1"/return "-DUSE_THIRD_PARTY_JSC=1 -DUSE_HERMES=0"/' \
+            's/return "-DUSE_THIRD_PARTY_JSC=1"/return " -DUSE_THIRD_PARTY_JSC=1 -DUSE_HERMES=0"/' \
             "$JSENGINE"
 
           echo "--- jsengine.rb AFTER patch ---"
           grep -n "use_third_party_jsc_flags\|USE_HERMES\|USE_THIRD_PARTY_JSC" "$JSENGINE"
 
-          if ! grep -q 'return "-DUSE_THIRD_PARTY_JSC=1 -DUSE_HERMES=0"' "$JSENGINE"; then
+          if ! grep -q 'return " -DUSE_THIRD_PARTY_JSC=1 -DUSE_HERMES=0"' "$JSENGINE"; then
             echo "FAIL: jsengine.rb patch did not apply"
             exit 1
           fi
