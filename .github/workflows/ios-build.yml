@@ -648,7 +648,134 @@ jobs:
           echo "OK: Podfile patched — ExpoModulesJSI will receive React-jsc HEADER_SEARCH_PATHS"
 
       # -------------------------------------------------------------------------
-      # 5a-vi. Patch RCTAppSetupUtils.mm: add nullptr return for USE_THIRD_PARTY_JSC=1
+      # 5a-vi. Patch RCTAppSetupUtils.h: guard Hermes import with USE_HERMES
+      #
+      # ROOT CAUSE (Build 13):
+      #   RCTAppSetupUtils.h line 16 has:
+      #     #if USE_THIRD_PARTY_JSC != 1
+      #     #import <reacthermes/HermesExecutorFactory.h>
+      #     #endif
+      #
+      #   The Expo pod's compile command (ExpoReactNativeFactory.mm,
+      #   EXReactRootViewFactory.mm — target 'Expo' from Pods) uses a shared
+      #   response file (common-args.resp) that does NOT include -DUSE_THIRD_PARTY_JSC.
+      #   When USE_THIRD_PARTY_JSC is undefined, the preprocessor evaluates
+      #   'undefined != 1' → true → imports the Hermes header → fatal error:
+      #     'reacthermes/HermesExecutorFactory.h' file not found
+      #   (hermes-engine is intentionally absent in this JSC build).
+      #
+      #   The -DUSE_HERMES=0 flag IS present in common-args.resp and is therefore
+      #   reliably available to ALL compilation units including the Expo pod.
+      #
+      # FIX:
+      #   Replace the USE_THIRD_PARTY_JSC guard with a USE_HERMES guard:
+      #     #if !defined(USE_HERMES) || USE_HERMES == 1  // jsc-hermes-header-guard
+      #     #import <reacthermes/HermesExecutorFactory.h>
+      #     #endif
+      #
+      #   This correctly skips the Hermes import whenever USE_HERMES=0,
+      #   regardless of whether USE_THIRD_PARTY_JSC is defined.
+      #
+      #   Hermes build (USE_HERMES=1): condition true → header imported (unchanged)
+      #   JSC build   (USE_HERMES=0): condition false → header not imported (fixed)
+      #   Unknown     (USE_HERMES undefined): defaults to true → safe fallback
+      #
+      # NO OTHER DECLARATIONS in RCTAppSetupUtils.h depend on the Hermes header;
+      # the header only provides HermesExecutorFactory used in .mm, not in .h.
+      #
+      # IDEMPOTENCY: sentinel 'jsc-hermes-header-guard' — skip if already patched.
+      # SCOPE: node_modules only — transient, never committed.
+      # -------------------------------------------------------------------------
+      - name: Patch RCTAppSetupUtils.h — guard Hermes import with USE_HERMES
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          H=$(find node_modules -path "*/Libraries/AppDelegate/RCTAppSetupUtils.h" \
+               -not -path "*/node_modules/*/node_modules/*" 2>/dev/null | head -1)
+
+          if [ -z "$H" ]; then
+            echo "FAIL: RCTAppSetupUtils.h not found in node_modules"
+            exit 1
+          fi
+          echo "Found: $H"
+
+          if grep -qF 'jsc-hermes-header-guard' "$H"; then
+            echo "Already patched — skipping."
+          else
+            echo "--- BEFORE patch (lines 14-20) ---"
+            sed -n '14,20p' "$H"
+
+            python3 - "$H" <<'PYEOF'
+          import sys
+
+          path = sys.argv[1]
+          with open(path, 'r') as f:
+              content = f.read()
+
+          OLD = (
+              '#if USE_THIRD_PARTY_JSC != 1\n'
+              '#import <reacthermes/HermesExecutorFactory.h>\n'
+              '#endif'
+          )
+          NEW = (
+              '#if !defined(USE_HERMES) || USE_HERMES == 1 // jsc-hermes-header-guard\n'
+              '#import <reacthermes/HermesExecutorFactory.h>\n'
+              '#endif'
+          )
+
+          count = content.count(OLD)
+          if count != 1:
+              print(f"ERROR: expected exactly 1 occurrence of pattern, found {count}")
+              for i, line in enumerate(content.split('\n')[13:20], 14):
+                  print(f"  {i}: {repr(line)}")
+              sys.exit(1)
+
+          content = content.replace(OLD, NEW, 1)
+          with open(path, 'w') as f:
+              f.write(content)
+          print("Patch applied.")
+          PYEOF
+
+            echo ""
+            echo "--- AFTER patch (lines 14-20) ---"
+            sed -n '14,20p' "$H"
+          fi
+
+          echo ""
+          echo "=== Validation ==="
+
+          if grep -qF 'jsc-hermes-header-guard' "$H"; then
+            echo "PASS: sentinel 'jsc-hermes-header-guard' present"
+          else
+            echo "FAIL: sentinel not found"
+            exit 1
+          fi
+
+          if grep -qF '!defined(USE_HERMES) || USE_HERMES == 1' "$H"; then
+            echo "PASS: guard condition uses USE_HERMES"
+          else
+            echo "FAIL: expected USE_HERMES guard not found"
+            exit 1
+          fi
+
+          if grep -qF 'HermesExecutorFactory.h' "$H"; then
+            echo "PASS: Hermes import still present (protected by guard)"
+          else
+            echo "FAIL: Hermes import was accidentally removed"
+            exit 1
+          fi
+
+          if grep -qF 'USE_THIRD_PARTY_JSC' "$H"; then
+            echo "WARN: USE_THIRD_PARTY_JSC still present in header (check context)"
+          else
+            echo "PASS: USE_THIRD_PARTY_JSC no longer guards the Hermes import"
+          fi
+
+          echo "OK: RCTAppSetupUtils.h patched — Hermes import guarded by USE_HERMES"
+
+      # -------------------------------------------------------------------------
+      # 5a-vii. Patch RCTAppSetupUtils.mm: add nullptr return for USE_THIRD_PARTY_JSC=1
       #
       # ROOT CAUSE (Build 12):
       #   RCTAppSetupUtils.mm contains two functions:
