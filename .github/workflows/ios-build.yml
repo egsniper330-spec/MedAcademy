@@ -272,38 +272,43 @@ jobs:
           echo "OK: jsengine.rb patched successfully"
 
       # -------------------------------------------------------------------------
-      # 5a-iii. Patch EXJavaScriptRuntime.mm: guard unconditional hermes import
+      # 5a-iii. Patch EXJavaScriptRuntime.mm: two-part fix for JSC builds
       #
-      # ROOT CAUSE: expo-modules-core 55.0.15 / EXJavaScriptRuntime.mm line 10
-      # has an UNCONDITIONAL top-level import:
+      # expo-modules-core 55.0.15 / EXJavaScriptRuntime.mm has TWO bugs when
+      # hermes-engine pod is absent:
       #
+      # BUG 1 (line 10) — unconditional top-level import:
       #   #import <hermes/hermes.h>
+      #   This requires a `hermes/` header directory from hermes-engine pod.
+      #   When absent → fatal error: 'hermes/hermes.h' file not found
       #
-      # This requires a `hermes/` header directory provided by hermes-engine pod.
-      # When hermes-engine is absent (JSC build), the compiler cannot find
-      # `hermes/hermes.h` → fatal error at compile time.
+      # BUG 2 (line 41, the #else branch) — missing JSC runtime header:
+      #   _runtime = jsc::makeJSCRuntime();
+      #   jsc::makeJSCRuntime() is declared in <jsc/JSCRuntime.h> (from
+      #   react-native ReactCommon/jsc/). This header is never imported anywhere
+      #   in the file. When hermes-engine is present it doesn't matter (the
+      #   #else branch is dead code). When hermes-engine is absent, the compiler
+      #   hits the #else branch and fails:
+      #     error: use of undeclared identifier 'jsc'
+      #     error: no member named 'makeJSCRuntime' in namespace 'facebook::jsi'
+      #   NOTE: 'using namespace facebook' is in scope via EXJSIConversions.h
+      #   (line 5 import), so jsc:: resolves correctly once the header is included.
       #
-      # The file already uses the correct guard on line 26:
-      #   #if __has_include(<reacthermes/HermesExecutorFactory.h>)
-      #     _runtime = facebook::hermes::makeHermesRuntime();
-      #   #else
-      #     _runtime = jsc::makeJSCRuntime();
-      #   #endif
+      # THE FIX (applied atomically):
+      #   Replace the unconditional `#import <hermes/hermes.h>` with:
       #
-      # THE FIX: wrap the line-10 import in the same __has_include guard, making
-      # the Hermes API header inclusion conditional on Hermes actually being present:
+      #     #if __has_include(<reacthermes/HermesExecutorFactory.h>)
+      #     #import <hermes/hermes.h>
+      #     #else
+      #     #include <jsc/JSCRuntime.h>
+      #     #endif
       #
-      #   #if __has_include(<reacthermes/HermesExecutorFactory.h>)
-      #   #import <hermes/hermes.h>
-      #   #endif
+      # This is semantically correct:
+      #   - Hermes branch: includes hermes.h (existing behavior, unchanged)
+      #   - JSC branch: includes jsc/JSCRuntime.h which declares jsc::makeJSCRuntime()
+      #   - The __has_include gate mirrors the existing gate on line 26+ exactly
       #
-      # This is semantically correct: <hermes/hermes.h> declares the
-      # facebook::hermes:: namespace types that are only used inside the
-      # __has_include block on line 26 — so guarding the import the same way
-      # is safe and necessary.
-      #
-      # NOTE: we use python3 for this multi-line substitution because it requires
-      # inserting surrounding lines, which GNU sed one-liner cannot do cleanly.
+      # NOTE: python3 used for multi-line substitution (sed can't insert lines).
       # -------------------------------------------------------------------------
       - name: Patch EXJavaScriptRuntime.mm for JSC support
         shell: bash
@@ -317,32 +322,36 @@ jobs:
             exit 1
           fi
 
-          echo "--- EXJavaScriptRuntime.mm BEFORE patch (L8-L12) ---"
-          sed -n '8,12p' "$EXJSRT"
+          echo "--- EXJavaScriptRuntime.mm BEFORE patch (L8-L13) ---"
+          sed -n '8,13p' "$EXJSRT"
 
-          # Replace the unconditional import line with a guarded version.
-          # Idempotent: if already patched the exact target line won't exist.
           python3 - "$EXJSRT" <<'PYEOF'
           import sys
 
           path = sys.argv[1]
+
+          # Original unconditional hermes import (BUG 1 + entry point for BUG 2 fix)
           target = '#import <hermes/hermes.h>\n'
+
+          # Replacement: guard hermes import + add JSC include in #else branch
           replacement = (
               '#if __has_include(<reacthermes/HermesExecutorFactory.h>)\n'
               '#import <hermes/hermes.h>\n'
+              '#else\n'
+              '#include <jsc/JSCRuntime.h>\n'
               '#endif\n'
           )
 
           with open(path, 'r') as f:
               content = f.read()
 
-          # Only patch if not already patched (idempotent)
+          # Idempotent: skip if already patched
           if replacement in content:
               print("Already patched — skipping.")
               sys.exit(0)
 
           if target not in content:
-              print(f"ERROR: target line not found in {path}")
+              print(f"ERROR: target line '{target.strip()}' not found in {path}")
               sys.exit(1)
 
           new_content = content.replace(target, replacement, 1)
@@ -352,14 +361,19 @@ jobs:
           print("Patch applied successfully.")
           PYEOF
 
-          echo "--- EXJavaScriptRuntime.mm AFTER patch (L8-L14) ---"
-          sed -n '8,14p' "$EXJSRT"
+          echo "--- EXJavaScriptRuntime.mm AFTER patch (L8-L15) ---"
+          sed -n '8,15p' "$EXJSRT"
 
+          # Verify both parts of the patch are present
           if ! grep -q '#if __has_include(<reacthermes/HermesExecutorFactory.h>)' "$EXJSRT"; then
-            echo "FAIL: EXJavaScriptRuntime.mm patch did not apply"
+            echo "FAIL: hermes guard not found after patch"
             exit 1
           fi
-          echo "OK: EXJavaScriptRuntime.mm patched successfully"
+          if ! grep -q '#include <jsc/JSCRuntime.h>' "$EXJSRT"; then
+            echo "FAIL: jsc/JSCRuntime.h include not found after patch"
+            exit 1
+          fi
+          echo "OK: EXJavaScriptRuntime.mm patched successfully (both hermes guard + jsc include)"
 
       # -------------------------------------------------------------------------
       # 5b. CocoaPods install
