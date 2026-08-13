@@ -648,107 +648,107 @@ jobs:
           echo "OK: Podfile patched — ExpoModulesJSI will receive React-jsc HEADER_SEARCH_PATHS"
 
       # -------------------------------------------------------------------------
-      # 5a-v. Patch RCTDefaultReactNativeFactoryDelegate.mm:
-      #       add #else branch that returns jsrt_create_jsc_factory()
+      # 5a-v. Patch ios/AppDelegate.swift (transient): wire JSC runtime factory
       #
-      # ROOT CAUSE (Build 8):
+      # ROOT CAUSE (Build 8 / Build 9):
       #   error: non-void function does not return a value [-Werror,-Wreturn-type]
       #   File: Libraries/AppDelegate/RCTDefaultReactNativeFactoryDelegate.mm
-      #   Target: React-RCTAppDelegate
+      #   Method: -createJSRuntimeFactory
       #
-      # React Native 0.83.2 ships:
+      # React Native 0.83.2's createJSRuntimeFactory in RCTDefaultReactNativeFactory
+      # Delegate.mm has only a Hermes-guarded return, no JSC path:
       #
       #   - (JSRuntimeFactoryRef)createJSRuntimeFactory
       #   {
       #   #if USE_THIRD_PARTY_JSC != 1
       #     return jsrt_create_hermes_factory();
       #   #endif
-      #   }
+      #   }                    ← empty when USE_THIRD_PARTY_JSC=1 → -Werror fires
       #
-      # When USE_THIRD_PARTY_JSC=1 (our JSC build), the preprocessor removes the
-      # only return statement. The function body is then empty and returns nothing.
-      # -Werror,-Wreturn-type turns this into a fatal compilation error.
+      # CORRECT FIX — per @react-native-community/javascriptcore 0.2.0 README:
+      #   The documented integration is to override createJSRuntimeFactory in the
+      #   APPLICATION's AppDelegate, NOT to patch React Native's own delegate.
       #
-      # CALL CHAIN (why this matters):
-      #   AppDelegate.swift
-      #     └── ReactNativeDelegate : ExpoReactNativeFactoryDelegate (Swift)
-      #           └── ExpoReactNativeFactoryDelegate : RCTDefaultReactNativeFactoryDelegate (Obj-C)
-      #                 └── createJSRuntimeFactory  ← THIS METHOD, broken on JSC path
+      #   Patching RCTDefaultReactNativeFactoryDelegate.mm (as v19 attempted) is
+      #   wrong because React-RCTAppDelegate does NOT have React-jsc in its pod
+      #   dependencies, so the ReactJSC module is unavailable when that file
+      #   compiles → 'ReactJSC/RCTJscInstanceFactory.h' file not found (Build 9).
       #
-      # ExpoReactNativeFactoryDelegate does NOT override createJSRuntimeFactory,
-      # so RCTDefaultReactNativeFactoryDelegate's implementation is used directly.
-      # ReactNativeDelegate in AppDelegate.swift also does NOT override it.
-      # The broken Obj-C implementation is the one that gets called.
+      # WHY AppDelegate.swift IS THE RIGHT TARGET:
+      #   - ReactJSC is a dependency of the APPLICATION target (via React-jsc pod).
+      #   - AppDelegate.swift compiles in the application target → has full access
+      #     to all pod headers including ReactJSC.
+      #   - The Swift override shadow-overrides the broken Obj-C base implementation
+      #     so it is called instead.
       #
-      # THE FIX — two minimal changes to RCTDefaultReactNativeFactoryDelegate.mm:
+      # GENERATED STRUCTURE (expo prebuild --clean):
+      #   // ios/MedAcademy/AppDelegate.swift
+      #   internal import Expo
+      #   import React
+      #   import ReactAppDependencyProvider
+      #   @main
+      #   class AppDelegate: ExpoAppDelegate { ... }
       #
-      # CHANGE 1 — import block (lines 12-14):
+      #   class ReactNativeDelegate: ExpoReactNativeFactoryDelegate {
+      #     override func sourceURL(for bridge: RCTBridge) -> URL? { ... }
+      #     override func bundleURL() -> URL? { ... }
+      #   }           ← INJECT override func createJSRuntimeFactory BEFORE this '}'
+      #
+      # TWO CHANGES to AppDelegate.swift:
+      #
+      # CHANGE 1 — add 'import ReactJSC' after existing imports.
       #   BEFORE:
-      #     #if USE_THIRD_PARTY_JSC != 1
-      #     #import <React/RCTHermesInstanceFactory.h>
-      #     #endif
+      #     internal import Expo
+      #     import React
+      #     import ReactAppDependencyProvider
       #   AFTER:
-      #     #if USE_THIRD_PARTY_JSC != 1
-      #     #import <React/RCTHermesInstanceFactory.h>
-      #     #else
-      #     #import <ReactJSC/RCTJscInstanceFactory.h>
-      #     #endif
+      #     internal import Expo
+      #     import React
+      #     import ReactAppDependencyProvider
+      #     import ReactJSC
       #
-      #   RCTJscInstanceFactory.h (from React-jsc pod, module name ReactJSC) declares:
-      #     extern "C" JSRuntimeFactoryRef jsrt_create_jsc_factory(void);
-      #   The header is available as <ReactJSC/RCTJscInstanceFactory.h> because
-      #   React-jsc.podspec sets module_name = "ReactJSC".
-      #   The guard ensures: Hermes builds import hermes factory; JSC builds import JSC factory.
-      #
-      # CHANGE 2 — factory method (lines 44-49):
-      #   BEFORE:
-      #     - (JSRuntimeFactoryRef)createJSRuntimeFactory
-      #     {
-      #     #if USE_THIRD_PARTY_JSC != 1
-      #       return jsrt_create_hermes_factory();
-      #     #endif
-      #     }
-      #   AFTER:
-      #     - (JSRuntimeFactoryRef)createJSRuntimeFactory
-      #     {
-      #     #if USE_THIRD_PARTY_JSC != 1
-      #       return jsrt_create_hermes_factory();
-      #     #else
-      #       return jsrt_create_jsc_factory();
-      #     #endif
+      # CHANGE 2 — inject override inside ReactNativeDelegate class, before
+      #   its closing '}':
+      #     override func createJSRuntimeFactory() -> JSRuntimeFactory {
+      #       return jsrt_create_jsc_factory()
       #     }
       #
-      #   The added #else branch ensures the function always has a return value,
-      #   silencing -Werror,-Wreturn-type. jsrt_create_jsc_factory() returns the
-      #   JSRuntimeFactory backed by @react-native-community/javascriptcore 0.2.0.
+      # IDEMPOTENCY:
+      #   Sentinel = 'import ReactJSC' already present → skip both changes.
       #
-      # SAFETY: Both changes are symmetric #if/#else pairs — no side-effects on
-      #   Hermes builds (the original #if branch is unchanged).
+      # WHY NO HEADER SEARCH PATH CHANGE IS NEEDED:
+      #   React-jsc.podspec declares module_name = "ReactJSC" and DEFINES_MODULE=YES.
+      #   CocoaPods generates a Swift-importable module at:
+      #     Pods/Headers/Public/ReactJSC/React-jsc.modulemap
+      #   The application target automatically sees this module (all pod modules
+      #   are in the module search path for the app target). No manual xcconfig
+      #   change is required.
       #
-      # PERMANENCE: node_modules is fully reinstalled by npm ci on every build run.
-      #   This patch is transient and re-applied after npm ci.
+      # PERMANENCE:
+      #   ios/ is deleted and regenerated by expo prebuild --clean on every build.
+      #   This patch is re-applied transiently in each CI run after prebuild and
+      #   before pod install. The source-controlled file (.github/workflows/…) is
+      #   the only permanent change.
+      #
+      # NOTE: RCTDefaultReactNativeFactoryDelegate.mm is NOT modified by this step.
       # -------------------------------------------------------------------------
-      - name: Patch RCTDefaultReactNativeFactoryDelegate.mm for JSC runtime factory
+      - name: Patch AppDelegate.swift — wire JSC runtime factory via ReactNativeDelegate override
         shell: bash
         run: |
           set -euo pipefail
 
-          # Locate RCTDefaultReactNativeFactoryDelegate.mm inside node_modules.
-          # Use find so the path is independent of pnpm's hash-versioned directory.
-          MM=$(find node_modules -path "*/Libraries/AppDelegate/RCTDefaultReactNativeFactoryDelegate.mm" \
-               -not -path "*/node_modules/*/node_modules/*" 2>/dev/null | head -1)
+          APPDELEGATE="ios/MedAcademy/AppDelegate.swift"
 
-          if [ -z "$MM" ]; then
-            echo "FAIL: RCTDefaultReactNativeFactoryDelegate.mm not found in node_modules"
+          if [ ! -f "$APPDELEGATE" ]; then
+            echo "FAIL: $APPDELEGATE not found — expo prebuild must have run first"
             exit 1
           fi
-          echo "Found: $MM"
 
-          echo "--- RCTDefaultReactNativeFactoryDelegate.mm BEFORE patch ---"
-          cat -n "$MM"
+          echo "--- AppDelegate.swift BEFORE patch ---"
+          cat -n "$APPDELEGATE"
 
-          python3 - "$MM" <<'PYEOF'
-          import sys
+          python3 - "$APPDELEGATE" <<'PYEOF'
+          import sys, re
 
           path = sys.argv[1]
 
@@ -756,67 +756,82 @@ jobs:
               content = f.read()
 
           # ------------------------------------------------------------------
-          # Idempotent sentinel: the #else branch in createJSRuntimeFactory.
-          # Present only after this patch has been applied.
+          # Idempotent sentinel: 'import ReactJSC' only exists after patching.
           # ------------------------------------------------------------------
-          sentinel = 'return jsrt_create_jsc_factory();'
-          if sentinel in content:
+          if 'import ReactJSC' in content:
               print("Already patched — skipping.")
               sys.exit(0)
 
           # ------------------------------------------------------------------
-          # CHANGE 1: Extend the import guard to include ReactJSC in JSC builds.
+          # CHANGE 1: Insert 'import ReactJSC' after 'import ReactAppDependencyProvider'.
+          # This exact line is present in every Expo-generated AppDelegate.swift.
           # ------------------------------------------------------------------
-          import_before = (
-              '#if USE_THIRD_PARTY_JSC != 1\n'
-              '#import <React/RCTHermesInstanceFactory.h>\n'
-              '#endif\n'
-          )
-          import_after = (
-              '#if USE_THIRD_PARTY_JSC != 1\n'
-              '#import <React/RCTHermesInstanceFactory.h>\n'
-              '#else\n'
-              '#import <ReactJSC/RCTJscInstanceFactory.h>\n'
-              '#endif\n'
-          )
-
-          if import_before not in content:
-              print(f"ERROR: import guard block not found in {path}")
-              print("Expected:")
-              print(import_before)
+          anchor_import = 'import ReactAppDependencyProvider'
+          if anchor_import not in content:
+              print(f"ERROR: '{anchor_import}' not found in {path}")
+              print("Actual imports:")
+              for i, line in enumerate(content.split('\n')[:10], 1):
+                  print(f"  {i}: {line}")
               sys.exit(1)
 
-          content = content.replace(import_before, import_after, 1)
-
-          # ------------------------------------------------------------------
-          # CHANGE 2: Add #else return jsrt_create_jsc_factory() to factory method.
-          # ------------------------------------------------------------------
-          factory_before = (
-              '- (JSRuntimeFactoryRef)createJSRuntimeFactory\n'
-              '{\n'
-              '#if USE_THIRD_PARTY_JSC != 1\n'
-              '  return jsrt_create_hermes_factory();\n'
-              '#endif\n'
-              '}\n'
-          )
-          factory_after = (
-              '- (JSRuntimeFactoryRef)createJSRuntimeFactory\n'
-              '{\n'
-              '#if USE_THIRD_PARTY_JSC != 1\n'
-              '  return jsrt_create_hermes_factory();\n'
-              '#else\n'
-              '  return jsrt_create_jsc_factory();\n'
-              '#endif\n'
-              '}\n'
+          content = content.replace(
+              anchor_import,
+              anchor_import + '\nimport ReactJSC',
+              1
           )
 
-          if factory_before not in content:
-              print(f"ERROR: createJSRuntimeFactory method block not found in {path}")
-              print("Expected:")
-              print(factory_before)
+          # ------------------------------------------------------------------
+          # CHANGE 2: Inject createJSRuntimeFactory override into ReactNativeDelegate.
+          #
+          # Strategy: find the class ReactNativeDelegate block, then find the
+          # very last '}' that belongs to it (the class-closing brace). We do
+          # this by scanning lines after the class declaration and tracking
+          # brace depth — the class closes when depth returns to 0.
+          # Inject the override method before that closing brace.
+          # ------------------------------------------------------------------
+          class_marker = 'class ReactNativeDelegate:'
+          lines = content.split('\n')
+
+          class_start = None
+          for i, line in enumerate(lines):
+              if class_marker in line:
+                  class_start = i
+                  break
+
+          if class_start is None:
+              print(f"ERROR: '{class_marker}' not found in {path}")
               sys.exit(1)
 
-          content = content.replace(factory_before, factory_after, 1)
+          print(f"Found ReactNativeDelegate class at line {class_start + 1}")
+
+          # Walk from class_start, track brace depth to find class-closing '}'
+          depth = 0
+          class_close = None
+          for i in range(class_start, len(lines)):
+              depth += lines[i].count('{') - lines[i].count('}')
+              if depth <= 0 and i > class_start:
+                  class_close = i
+                  break
+
+          if class_close is None:
+              print("ERROR: Could not find closing '}' of ReactNativeDelegate class")
+              sys.exit(1)
+
+          print(f"ReactNativeDelegate class closes at line {class_close + 1}")
+
+          # Build the method to inject (2-space indent matches generated style)
+          override_method = (
+              '\n'
+              '  override func createJSRuntimeFactory() -> JSRuntimeFactory {\n'
+              '    return jsrt_create_jsc_factory()\n'
+              '  }\n'
+          )
+
+          # Insert the override before the class-closing brace
+          new_lines = lines[:class_close] + override_method.split('\n') + lines[class_close:]
+          # The split('\n') of override_method produces ['', '  override...', ...', '']
+          # which adds a blank line before and after — clean and idiomatic Swift
+          content = '\n'.join(new_lines)
 
           with open(path, 'w') as f:
               f.write(content)
@@ -825,42 +840,45 @@ jobs:
           PYEOF
 
           echo ""
-          echo "--- RCTDefaultReactNativeFactoryDelegate.mm AFTER patch ---"
-          cat -n "$MM"
+          echo "--- AppDelegate.swift AFTER patch ---"
+          cat -n "$APPDELEGATE"
 
           echo ""
           echo "=== Validation ==="
 
-          # 1. ReactJSC import present
-          if ! grep -qF '#import <ReactJSC/RCTJscInstanceFactory.h>' "$MM"; then
-            echo "FAIL: ReactJSC import not found"
-            exit 1
-          fi
-          echo "PASS: #import <ReactJSC/RCTJscInstanceFactory.h> present"
-
-          # 2. jsrt_create_jsc_factory() return present
-          if ! grep -qF 'return jsrt_create_jsc_factory();' "$MM"; then
-            echo "FAIL: jsrt_create_jsc_factory() return not found"
-            exit 1
-          fi
-          echo "PASS: return jsrt_create_jsc_factory() present"
-
-          # 3. jsrt_create_hermes_factory() still present (unchanged Hermes path)
-          if ! grep -qF 'return jsrt_create_hermes_factory();' "$MM"; then
-            echo "FAIL: jsrt_create_hermes_factory() return unexpectedly removed"
-            exit 1
-          fi
-          echo "PASS: return jsrt_create_hermes_factory() still present (Hermes path intact)"
-
-          # 4. createJSRuntimeFactory has exactly one occurrence (no duplication)
-          COUNT=$(grep -c 'createJSRuntimeFactory' "$MM" || true)
+          # 1. import ReactJSC present exactly once
+          COUNT=$(grep -c 'import ReactJSC' "$APPDELEGATE" || true)
           if [ "$COUNT" -ne 1 ]; then
-            echo "FAIL: createJSRuntimeFactory appears $COUNT times (expected 1)"
+            echo "FAIL: 'import ReactJSC' appears $COUNT times (expected 1)"
             exit 1
           fi
-          echo "PASS: createJSRuntimeFactory appears exactly once"
+          echo "PASS: 'import ReactJSC' appears exactly once"
 
-          echo "OK: RCTDefaultReactNativeFactoryDelegate.mm patched — JSC runtime factory wired"
+          # 2. createJSRuntimeFactory present exactly once
+          COUNT=$(grep -c 'createJSRuntimeFactory' "$APPDELEGATE" || true)
+          if [ "$COUNT" -ne 1 ]; then
+            echo "FAIL: 'createJSRuntimeFactory' appears $COUNT times (expected 1)"
+            exit 1
+          fi
+          echo "PASS: 'createJSRuntimeFactory' appears exactly once"
+
+          # 3. jsrt_create_jsc_factory() call present
+          if ! grep -qF 'jsrt_create_jsc_factory()' "$APPDELEGATE"; then
+            echo "FAIL: 'jsrt_create_jsc_factory()' not found"
+            exit 1
+          fi
+          echo "PASS: 'jsrt_create_jsc_factory()' present"
+
+          # 4. RCTDefaultReactNativeFactoryDelegate.mm must NOT contain ReactJSC
+          MM=$(find node_modules -path "*/Libraries/AppDelegate/RCTDefaultReactNativeFactoryDelegate.mm" \
+               -not -path "*/node_modules/*/node_modules/*" 2>/dev/null | head -1)
+          if grep -qF 'ReactJSC' "$MM" 2>/dev/null; then
+            echo "FAIL: RCTDefaultReactNativeFactoryDelegate.mm was modified (contains ReactJSC) — must not be touched"
+            exit 1
+          fi
+          echo "PASS: RCTDefaultReactNativeFactoryDelegate.mm is unmodified"
+
+          echo "OK: AppDelegate.swift patched — createJSRuntimeFactory wired to jsrt_create_jsc_factory()"
 
       # -------------------------------------------------------------------------
       # 5b. CocoaPods install
