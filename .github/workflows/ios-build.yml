@@ -686,10 +686,33 @@ jobs:
       # IDEMPOTENCY: sentinel 'jsc-hermes-header-guard' — skip if already patched.
       # SCOPE: node_modules only — transient, never committed.
       # -------------------------------------------------------------------------
-      - name: Patch RCTAppSetupUtils.h — guard Hermes import with USE_HERMES
+      - name: Patch RCTAppSetupUtils.h — remove unconditional HermesExecutorFactory import
         shell: bash
         run: |
           set -euo pipefail
+
+          # ROOT CAUSE (Build 14):
+          #   RCTAppSetupUtils.h line 16-18 is:
+          #     #if USE_THIRD_PARTY_JSC != 1
+          #     #import <reacthermes/HermesExecutorFactory.h>
+          #     #endif
+          #
+          #   The previous v25 fix replaced the condition with USE_HERMES.
+          #   That works for the React-RCTAppDelegate pod which receives
+          #   -DUSE_HERMES=0. But ~120 other pods (ExpoAudio, ExpoModulesCore,
+          #   etc.) include this header via the umbrella and receive NO
+          #   USE_HERMES flag at all, so !defined(USE_HERMES) is true and
+          #   the import is still active — same fatal error.
+          #
+          # CORRECT FIX:
+          #   Remove all 3 lines entirely. HermesExecutorFactory.h is NOT
+          #   needed by the header itself — all declarations use only
+          #   facebook::react::JSExecutorFactory which comes from
+          #   <jsireact/JSIExecutor.h> (line 21). The Hermes import was
+          #   only ever needed by RCTAppSetupUtils.mm, not by the header.
+          #   Removing it is safe regardless of JSC or Hermes mode.
+          #
+          # IDEMPOTENCY: sentinel 'jsc-removed-hermes-import'
 
           H=$(find node_modules -path "*/Libraries/AppDelegate/RCTAppSetupUtils.h" \
                -not -path "*/node_modules/*/node_modules/*" 2>/dev/null | head -1)
@@ -703,29 +726,27 @@ jobs:
           echo "--- BEFORE patch (lines 14-20) ---"
           sed -n '14,20p' "$H"
 
-          if grep -qF 'jsc-hermes-header-guard' "$H"; then
+          if grep -qF 'jsc-removed-hermes-import' "$H"; then
             echo "Already patched — skipping."
           else
-            if ! grep -qF '#if USE_THIRD_PARTY_JSC != 1' "$H"; then
-              echo "FAIL: expected '#if USE_THIRD_PARTY_JSC != 1' not found in $H"
-              sed -n '14,22p' "$H"
-              exit 1
-            fi
-
-            # Write the patch script to a temp file using printf (no heredoc needed).
-            # Replaces only the #if guard line; the #import and #endif are unchanged.
+            # Write the patch script to a temp file using printf.
+            # Removes the 3-line block:
+            #   #if USE_THIRD_PARTY_JSC != 1
+            #   #import <reacthermes/HermesExecutorFactory.h>
+            #   #endif
+            # and inserts a one-line sentinel comment in its place.
             PATCH_PY=$(mktemp /tmp/patch_rct_h_XXXXXX.py)
             printf 'import sys\n' > "$PATCH_PY"
             printf 'path = sys.argv[1]\n' >> "$PATCH_PY"
             printf 'content = open(path).read()\n' >> "$PATCH_PY"
-            printf 'old = "#if USE_THIRD_PARTY_JSC != 1"\n' >> "$PATCH_PY"
-            printf 'new = "#if !defined(USE_HERMES) || USE_HERMES == 1 // jsc-hermes-header-guard"\n' >> "$PATCH_PY"
-            printf 'if old not in content:\n' >> "$PATCH_PY"
-            printf '    print("FAIL: pattern not found"); sys.exit(1)\n' >> "$PATCH_PY"
-            printf 'count = content.count(old)\n' >> "$PATCH_PY"
+            printf 'block = "#if USE_THIRD_PARTY_JSC != 1\\n#import <reacthermes/HermesExecutorFactory.h>\\n#endif\\n"\n' >> "$PATCH_PY"
+            printf 'sentinel = "// jsc-removed-hermes-import\\n"\n' >> "$PATCH_PY"
+            printf 'if block not in content:\n' >> "$PATCH_PY"
+            printf '    print("FAIL: 3-line Hermes block not found in " + path); sys.exit(1)\n' >> "$PATCH_PY"
+            printf 'count = content.count(block)\n' >> "$PATCH_PY"
             printf 'if count != 1:\n' >> "$PATCH_PY"
             printf '    print(f"ERROR: expected 1 occurrence, found {count}"); sys.exit(1)\n' >> "$PATCH_PY"
-            printf 'result = content.replace(old, new, 1)\n' >> "$PATCH_PY"
+            printf 'result = content.replace(block, sentinel, 1)\n' >> "$PATCH_PY"
             printf 'open(path,"w").write(result)\n' >> "$PATCH_PY"
             printf 'print("Patch applied.")\n' >> "$PATCH_PY"
 
@@ -739,34 +760,29 @@ jobs:
           echo ""
           echo "=== Hard validation — fail workflow if patch not effective ==="
 
-          if ! grep -qF 'jsc-hermes-header-guard' "$H"; then
-            echo "FAIL: sentinel 'jsc-hermes-header-guard' not present after patch"
+          if ! grep -qF 'jsc-removed-hermes-import' "$H"; then
+            echo "FAIL: sentinel 'jsc-removed-hermes-import' not present after patch"
             sed -n '14,20p' "$H"
             exit 1
           fi
-          echo "PASS: sentinel 'jsc-hermes-header-guard' present"
+          echo "PASS: sentinel 'jsc-removed-hermes-import' present"
 
-          if ! grep -qF '!defined(USE_HERMES) || USE_HERMES == 1' "$H"; then
-            echo "FAIL: expected USE_HERMES guard not found"
+          if grep -qF 'HermesExecutorFactory.h' "$H"; then
+            echo "FAIL: HermesExecutorFactory.h import still present — patch did not remove it"
+            grep -n 'HermesExecutorFactory' "$H"
             exit 1
           fi
-          echo "PASS: guard condition uses USE_HERMES"
+          echo "PASS: HermesExecutorFactory.h import is gone"
 
-          if ! grep -qF 'HermesExecutorFactory.h' "$H"; then
-            echo "FAIL: Hermes import was accidentally removed"
-            exit 1
-          fi
-          echo "PASS: Hermes import still present (protected by guard)"
-
-          if grep -qF '#if USE_THIRD_PARTY_JSC != 1' "$H"; then
+          if grep -qF '#if USE_THIRD_PARTY_JSC' "$H"; then
             echo "FAIL: old USE_THIRD_PARTY_JSC guard still present — patch did not apply"
             exit 1
           fi
-          echo "PASS: old USE_THIRD_PARTY_JSC guard replaced"
+          echo "PASS: old USE_THIRD_PARTY_JSC guard removed"
 
-          echo "--- Final guard block (lines 14-20) ---"
+          echo "--- Final header lines 14-20 ---"
           sed -n '14,20p' "$H"
-          echo "OK: RCTAppSetupUtils.h patched — Hermes import guarded by USE_HERMES"
+          echo "OK: RCTAppSetupUtils.h patched — HermesExecutorFactory import removed"
 
       # -------------------------------------------------------------------------
       # 5a-vii. Patch RCTAppSetupUtils.mm: add nullptr return for USE_THIRD_PARTY_JSC=1
