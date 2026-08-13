@@ -272,6 +272,96 @@ jobs:
           echo "OK: jsengine.rb patched successfully"
 
       # -------------------------------------------------------------------------
+      # 5a-iii. Patch EXJavaScriptRuntime.mm: guard unconditional hermes import
+      #
+      # ROOT CAUSE: expo-modules-core 55.0.15 / EXJavaScriptRuntime.mm line 10
+      # has an UNCONDITIONAL top-level import:
+      #
+      #   #import <hermes/hermes.h>
+      #
+      # This requires a `hermes/` header directory provided by hermes-engine pod.
+      # When hermes-engine is absent (JSC build), the compiler cannot find
+      # `hermes/hermes.h` → fatal error at compile time.
+      #
+      # The file already uses the correct guard on line 26:
+      #   #if __has_include(<reacthermes/HermesExecutorFactory.h>)
+      #     _runtime = facebook::hermes::makeHermesRuntime();
+      #   #else
+      #     _runtime = jsc::makeJSCRuntime();
+      #   #endif
+      #
+      # THE FIX: wrap the line-10 import in the same __has_include guard, making
+      # the Hermes API header inclusion conditional on Hermes actually being present:
+      #
+      #   #if __has_include(<reacthermes/HermesExecutorFactory.h>)
+      #   #import <hermes/hermes.h>
+      #   #endif
+      #
+      # This is semantically correct: <hermes/hermes.h> declares the
+      # facebook::hermes:: namespace types that are only used inside the
+      # __has_include block on line 26 — so guarding the import the same way
+      # is safe and necessary.
+      #
+      # NOTE: we use python3 for this multi-line substitution because it requires
+      # inserting surrounding lines, which GNU sed one-liner cannot do cleanly.
+      # -------------------------------------------------------------------------
+      - name: Patch EXJavaScriptRuntime.mm for JSC support
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          EXJSRT="node_modules/expo-modules-core/ios/JSI/EXJavaScriptRuntime.mm"
+
+          if [ ! -f "$EXJSRT" ]; then
+            echo "FAIL: $EXJSRT not found"
+            exit 1
+          fi
+
+          echo "--- EXJavaScriptRuntime.mm BEFORE patch (L8-L12) ---"
+          sed -n '8,12p' "$EXJSRT"
+
+          # Replace the unconditional import line with a guarded version.
+          # Idempotent: if already patched the exact target line won't exist.
+          python3 - "$EXJSRT" <<'PYEOF'
+          import sys
+
+          path = sys.argv[1]
+          target = '#import <hermes/hermes.h>\n'
+          replacement = (
+              '#if __has_include(<reacthermes/HermesExecutorFactory.h>)\n'
+              '#import <hermes/hermes.h>\n'
+              '#endif\n'
+          )
+
+          with open(path, 'r') as f:
+              content = f.read()
+
+          # Only patch if not already patched (idempotent)
+          if replacement in content:
+              print("Already patched — skipping.")
+              sys.exit(0)
+
+          if target not in content:
+              print(f"ERROR: target line not found in {path}")
+              sys.exit(1)
+
+          new_content = content.replace(target, replacement, 1)
+          with open(path, 'w') as f:
+              f.write(new_content)
+
+          print("Patch applied successfully.")
+          PYEOF
+
+          echo "--- EXJavaScriptRuntime.mm AFTER patch (L8-L14) ---"
+          sed -n '8,14p' "$EXJSRT"
+
+          if ! grep -q '#if __has_include(<reacthermes/HermesExecutorFactory.h>)' "$EXJSRT"; then
+            echo "FAIL: EXJavaScriptRuntime.mm patch did not apply"
+            exit 1
+          fi
+          echo "OK: EXJavaScriptRuntime.mm patched successfully"
+
+      # -------------------------------------------------------------------------
       # 5b. CocoaPods install
       #
       # USE_THIRD_PARTY_JSC=1 tells jsengine.rb's use_third_party_jsc() to return
