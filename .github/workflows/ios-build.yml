@@ -169,13 +169,27 @@ jobs:
         working-directory: ios
         env:
           USE_THIRD_PARTY_JSC: "1"
+          # USE_HERMES=0 is required in addition to USE_THIRD_PARTY_JSC=1.
+          # ExpoModulesCore.podspec and ExpoModulesJSI.podspec use ENV['USE_HERMES']
+          # (not USE_THIRD_PARTY_JSC) to decide whether to add hermes-engine as a
+          # dependency. Their logic is:
+          #   use_hermes = ENV['USE_HERMES'] == nil || ENV['USE_HERMES'] == '1'
+          # When USE_HERMES is unset (nil), use_hermes evaluates to true and
+          # hermes-engine is pulled in regardless of USE_THIRD_PARTY_JSC.
+          # Setting USE_HERMES=0 forces use_hermes = false in both podspecs.
+          USE_HERMES: "0"
         shell: bash
         run: |
           set -euo pipefail
 
           echo "USE_THIRD_PARTY_JSC=${USE_THIRD_PARTY_JSC}"
+          echo "USE_HERMES=${USE_HERMES}"
           if [ "${USE_THIRD_PARTY_JSC}" != "1" ]; then
             echo "ERROR: USE_THIRD_PARTY_JSC is not set to 1 — aborting"
+            exit 1
+          fi
+          if [ "${USE_HERMES}" != "0" ]; then
+            echo "ERROR: USE_HERMES is not set to 0 — aborting"
             exit 1
           fi
 
