@@ -149,34 +149,95 @@ jobs:
           pod --version
 
       # -------------------------------------------------------------------------
-      # 5a. CocoaPods install
+      # 5a. Patch react_native_pods.rb to honour USE_THIRD_PARTY_JSC
       #
-      # USE_THIRD_PARTY_JSC=1 is set directly in this step's env block so it is
-      # present in the same process that runs `pod install`. This tells
-      # jsengine.rb (via the use_third_party_jsc() helper) to skip hermes-engine
-      # and use the system JavaScriptCore instead.
+      # ROOT CAUSE (React Native 0.83.x — all patch versions, confirmed by diff):
       #
-      # The permanent app configuration in app.json sets:
-      #   expo.ios.jsEngine = "jsc"   → written to ios/Podfile.properties.json
-      #                                 by expo prebuild (verified in step 4b above)
-      # That property is read by the generated ios/Podfile at pod install time.
-      # USE_THIRD_PARTY_JSC=1 ensures jsengine.rb honours the jsc selection.
+      #   react_native_pods.rb line 78:
+      #     hermes_enabled= true   ← unconditional, ignores :hermes_enabled param
       #
-      # No ios/ files are permanently modified — ios/ is regenerated on every
-      # expo prebuild --clean and must NOT be relied upon as a permanent fix.
+      #   line 158:  if hermes_enabled → setup_hermes!(...)   ← installs hermes-engine pod
+      #   line 186:  setup_bridgeless!(..., :use_hermes => hermes_enabled)
+      #              → adds React-RuntimeHermes pod
+      #              → React-RuntimeHermes.podspec has unconditional hermes-engine dep
+      #
+      # use_react_native!() uses the LOCAL variable `hermes_enabled` (always true),
+      # NOT the use_hermes() helper from jsengine.rb (which correctly returns false
+      # when USE_THIRD_PARTY_JSC=1).  So even with USE_THIRD_PARTY_JSC=1,
+      # setup_hermes! fires and hermes-engine is installed.
+      #
+      # THE FIX: patch the two lines in react_native_pods.rb so they consult
+      # use_third_party_jsc() before invoking hermes setup.  This is a targeted
+      # 2-line sed patch to node_modules/ — NOT to ios/.  node_modules/ is
+      # populated by `npm ci` on every CI run, so the patch is re-applied every
+      # build.  ios/ is never touched.
+      #
+      # PATCH LINES (idempotent — sed only replaces when the original text matches):
+      #   L158:  if hermes_enabled
+      #          → if hermes_enabled && !use_third_party_jsc()
+      #   L186:  setup_bridgeless!(:react_native_path => prefix, :use_hermes => hermes_enabled)
+      #          → setup_bridgeless!(:react_native_path => prefix, :use_hermes => hermes_enabled && !use_third_party_jsc())
+      # -------------------------------------------------------------------------
+      - name: Patch react_native_pods.rb for JSC support
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          RN_PODS="node_modules/react-native/scripts/react_native_pods.rb"
+
+          if [ ! -f "$RN_PODS" ]; then
+            echo "FAIL: $RN_PODS not found — npm ci may not have run"
+            exit 1
+          fi
+
+          echo "--- react_native_pods.rb BEFORE patch (hermes lines) ---"
+          grep -n "if hermes_enabled\|setup_bridgeless" "$RN_PODS"
+
+          # Patch L158: gate setup_hermes! on use_third_party_jsc() check.
+          # sed matches exact original text; if already patched the line won't match → idempotent.
+          sed -i '' \
+            's/^  if hermes_enabled$/  if hermes_enabled \&\& !use_third_party_jsc()/' \
+            "$RN_PODS"
+
+          # Patch L186: gate setup_bridgeless! use_hermes arg on same check.
+          sed -i '' \
+            's/:use_hermes => hermes_enabled)$/:use_hermes => hermes_enabled \&\& !use_third_party_jsc())/' \
+            "$RN_PODS"
+
+          echo "--- react_native_pods.rb AFTER patch (hermes lines) ---"
+          grep -n "if hermes_enabled\|setup_bridgeless" "$RN_PODS"
+
+          # Verify both patches landed.
+          if ! grep -q "if hermes_enabled && !use_third_party_jsc()" "$RN_PODS"; then
+            echo "FAIL: L158 patch did not apply"
+            exit 1
+          fi
+          if ! grep -q ":use_hermes => hermes_enabled && !use_third_party_jsc()" "$RN_PODS"; then
+            echo "FAIL: L186 patch did not apply"
+            exit 1
+          fi
+          echo "OK: react_native_pods.rb patched successfully"
+
+      # -------------------------------------------------------------------------
+      # 5b. CocoaPods install
+      #
+      # USE_THIRD_PARTY_JSC=1 tells jsengine.rb's use_third_party_jsc() to return
+      # true, which — after the patch above — prevents setup_hermes! from running
+      # and prevents setup_bridgeless! from adding React-RuntimeHermes.
+      # All other RN podspecs that guard on use_hermes() already work correctly
+      # because use_hermes() = !use_third_party_jsc() in jsengine.rb.
+      #
+      # USE_HERMES=0 additionally satisfies ExpoModulesCore.podspec and
+      # ExpoModulesJSI.podspec, which check ENV['USE_HERMES'] directly (not
+      # USE_THIRD_PARTY_JSC) to decide whether to add hermes-engine as a dep.
+      #
+      # node_modules/ is NOT ios/ — patching it here does not permanently modify
+      # ios/ and does not affect expo prebuild --clean on the next run.
       # -------------------------------------------------------------------------
       - name: CocoaPods install
         working-directory: ios
         env:
           USE_THIRD_PARTY_JSC: "1"
-          # USE_HERMES=0 is required in addition to USE_THIRD_PARTY_JSC=1.
-          # ExpoModulesCore.podspec and ExpoModulesJSI.podspec use ENV['USE_HERMES']
-          # (not USE_THIRD_PARTY_JSC) to decide whether to add hermes-engine as a
-          # dependency. Their logic is:
-          #   use_hermes = ENV['USE_HERMES'] == nil || ENV['USE_HERMES'] == '1'
-          # When USE_HERMES is unset (nil), use_hermes evaluates to true and
-          # hermes-engine is pulled in regardless of USE_THIRD_PARTY_JSC.
-          # Setting USE_HERMES=0 forces use_hermes = false in both podspecs.
           USE_HERMES: "0"
         shell: bash
         run: |
@@ -184,14 +245,6 @@ jobs:
 
           echo "USE_THIRD_PARTY_JSC=${USE_THIRD_PARTY_JSC}"
           echo "USE_HERMES=${USE_HERMES}"
-          if [ "${USE_THIRD_PARTY_JSC}" != "1" ]; then
-            echo "ERROR: USE_THIRD_PARTY_JSC is not set to 1 — aborting"
-            exit 1
-          fi
-          if [ "${USE_HERMES}" != "0" ]; then
-            echo "ERROR: USE_HERMES is not set to 0 — aborting"
-            exit 1
-          fi
 
           echo "Running pod install..."
           pod install --repo-update 2>&1 | tee /tmp/pod-install.log
@@ -221,14 +274,16 @@ jobs:
           # ── Hard gate: hermes-engine pod must NOT be installed ────────────────
           if [ -d "Pods/hermes-engine" ]; then
             echo "FAIL: Pods/hermes-engine/ is present after pod install."
-            echo "      USE_THIRD_PARTY_JSC=1 did not prevent hermes-engine."
+            echo "      The react_native_pods.rb patch (step 5a) may not have applied."
             echo ""
             echo "--- Diagnostics ---"
             echo "USE_THIRD_PARTY_JSC : ${USE_THIRD_PARTY_JSC}"
+            echo "USE_HERMES          : ${USE_HERMES}"
             echo "expo.jsEngine from Podfile.properties.json:"
             python3 -c "import json; d=json.load(open('Podfile.properties.json')); print(d.get('expo.jsEngine','(not set)'))"
-            echo "use_react_native! block in Podfile:"
-            python3 -c "import re; t=open('Podfile').read(); m=re.search(r'use_react_native!\s*\(.*?\)', t, re.DOTALL); print(m.group(0) if m else '(block not found)')"
+            echo "react_native_pods.rb hermes lines:"
+            grep -n "if hermes_enabled\|setup_bridgeless" \
+              "../node_modules/react-native/scripts/react_native_pods.rb" || true
             echo "React Native version:"
             python3 -c "import json; d=json.load(open('../node_modules/react-native/package.json')); print(d.get('version','unknown'))" 2>/dev/null || echo "(unknown)"
             echo "Expo SDK version:"
