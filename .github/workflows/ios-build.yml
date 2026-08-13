@@ -1098,7 +1098,7 @@ jobs:
       #
       # CHANGE 2 — inject override inside ReactNativeDelegate class, before
       #   its closing '}':
-      #     override func createJSRuntimeFactory() -> JSRuntimeFactory {
+      #     override func createJSRuntimeFactory() -> UnsafeMutableRawPointer? {
       #       return jsrt_create_jsc_factory()
       #     }
       #
@@ -1206,10 +1206,14 @@ jobs:
 
           print(f"ReactNativeDelegate class closes at line {class_close + 1}")
 
-          # Build the method to inject (2-space indent matches generated style)
+          # Build the method to inject (2-space indent matches generated style).
+          # Return type is UnsafeMutableRawPointer? — the Swift bridging of
+          # JSRuntimeFactoryRef (typedef void*) from RCTJSRuntimeConfiguratorProtocol.h.
+          # 'JSRuntimeFactory' is a C++ class, not a Swift type; using it causes
+          #   error: cannot find type 'JSRuntimeFactory' in scope
           override_method = (
               '\n'
-              '  override func createJSRuntimeFactory() -> JSRuntimeFactory {\n'
+              '  override func createJSRuntimeFactory() -> UnsafeMutableRawPointer? {\n'
               '    return jsrt_create_jsc_factory()\n'
               '  }\n'
           )
