@@ -58,21 +58,28 @@ jobs:
         uses: actions/checkout@v4
 
       # -------------------------------------------------------------------------
-      # 2. Node.js + npm dependencies
+      # 2. Node.js + pnpm dependencies
+      # This project uses pnpm (pnpm-lock.yaml, lockfileVersion 9.0).
+      # pnpm/action-setup installs a pinned pnpm version before setup-node so
+      # that setup-node's caching integration works correctly.
+      # pnpm 9.x is required for lockfileVersion 9.0 compatibility.
       # -------------------------------------------------------------------------
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '20'
+          cache: 'pnpm'
 
       - name: Install Node dependencies
-        # The project uses pnpm (pnpm-lock.yaml). Use pnpm install --frozen-lockfile
-        # for a clean, reproducible install that mirrors npm ci semantics.
-        # --ignore-scripts skips postinstall (patch-package, sync-android-version)
+        # --frozen-lockfile: fail if pnpm-lock.yaml is out of sync with package.json
+        # --ignore-scripts: skips postinstall (patch-package, sync-android-version)
         # which are not needed for an iOS build.
-        run: |
-          npm install -g pnpm --prefer-offline 2>/dev/null || npm install -g pnpm
-          pnpm install --frozen-lockfile --ignore-scripts
+        run: pnpm install --frozen-lockfile --ignore-scripts
 
       # -------------------------------------------------------------------------
       # 3. Expo Prebuild (iOS only, clean)
