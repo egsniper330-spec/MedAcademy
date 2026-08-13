@@ -668,9 +668,13 @@ jobs:
       #   reliably available to ALL compilation units including the Expo pod.
       #
       # FIX:
-      #   Replace the USE_THIRD_PARTY_JSC guard line with a USE_HERMES guard:
-      #     #if !defined(USE_HERMES) || USE_HERMES == 1 // jsc-hermes-header-guard
-      #   This single-line substitution is performed with sed so no heredoc is needed.
+      #   Replace the USE_THIRD_PARTY_JSC guard with a USE_HERMES guard:
+      #     #if !defined(USE_HERMES) || USE_HERMES == 1  // jsc-hermes-header-guard
+      #     #import <reacthermes/HermesExecutorFactory.h>
+      #     #endif
+      #
+      #   This correctly skips the Hermes import whenever USE_HERMES=0,
+      #   regardless of whether USE_THIRD_PARTY_JSC is defined.
       #
       #   Hermes build (USE_HERMES=1): condition true → header imported (unchanged)
       #   JSC build   (USE_HERMES=0): condition false → header not imported (fixed)
@@ -702,30 +706,32 @@ jobs:
           if grep -qF 'jsc-hermes-header-guard' "$H"; then
             echo "Already patched — skipping."
           else
-            # Verify expected original guard line is present before modifying
             if ! grep -qF '#if USE_THIRD_PARTY_JSC != 1' "$H"; then
               echo "FAIL: expected '#if USE_THIRD_PARTY_JSC != 1' not found in $H"
-              echo "Actual lines 14-22:"
               sed -n '14,22p' "$H"
               exit 1
             fi
 
-            # Use python3 -c (no heredoc) to avoid shell indentation ambiguity.
-            # Replaces ONLY the guard condition line; the #import and #endif are unchanged.
-            python3 -c "
-import sys
-path = sys.argv[1]
-content = open(path).read()
-old = '#if USE_THIRD_PARTY_JSC != 1'
-new = '#if !defined(USE_HERMES) || USE_HERMES == 1 // jsc-hermes-header-guard'
-if old not in content:
-    print('FAIL: pattern not found'); sys.exit(1)
-result = content.replace(old, new, 1)
-open(path,'w').write(result)
-print('Patch applied.')
-" "$H"
+            # Write the patch script to a temp file using printf (no heredoc needed).
+            # Replaces only the #if guard line; the #import and #endif are unchanged.
+            PATCH_PY=$(mktemp /tmp/patch_rct_h_XXXXXX.py)
+            printf 'import sys\n' > "$PATCH_PY"
+            printf 'path = sys.argv[1]\n' >> "$PATCH_PY"
+            printf 'content = open(path).read()\n' >> "$PATCH_PY"
+            printf 'old = "#if USE_THIRD_PARTY_JSC != 1"\n' >> "$PATCH_PY"
+            printf 'new = "#if !defined(USE_HERMES) || USE_HERMES == 1 // jsc-hermes-header-guard"\n' >> "$PATCH_PY"
+            printf 'if old not in content:\n' >> "$PATCH_PY"
+            printf '    print("FAIL: pattern not found"); sys.exit(1)\n' >> "$PATCH_PY"
+            printf 'count = content.count(old)\n' >> "$PATCH_PY"
+            printf 'if count != 1:\n' >> "$PATCH_PY"
+            printf '    print(f"ERROR: expected 1 occurrence, found {count}"); sys.exit(1)\n' >> "$PATCH_PY"
+            printf 'result = content.replace(old, new, 1)\n' >> "$PATCH_PY"
+            printf 'open(path,"w").write(result)\n' >> "$PATCH_PY"
+            printf 'print("Patch applied.")\n' >> "$PATCH_PY"
 
-            echo ""
+            python3 "$PATCH_PY" "$H"
+            rm -f "$PATCH_PY"
+
             echo "--- AFTER patch (lines 14-20) ---"
             sed -n '14,20p' "$H"
           fi
@@ -735,7 +741,6 @@ print('Patch applied.')
 
           if ! grep -qF 'jsc-hermes-header-guard' "$H"; then
             echo "FAIL: sentinel 'jsc-hermes-header-guard' not present after patch"
-            echo "Actual file lines 14-20:"
             sed -n '14,20p' "$H"
             exit 1
           fi
@@ -754,15 +759,13 @@ print('Patch applied.')
           echo "PASS: Hermes import still present (protected by guard)"
 
           if grep -qF '#if USE_THIRD_PARTY_JSC != 1' "$H"; then
-            echo "FAIL: old USE_THIRD_PARTY_JSC guard still present — replacement did not apply"
+            echo "FAIL: old USE_THIRD_PARTY_JSC guard still present — patch did not apply"
             exit 1
           fi
           echo "PASS: old USE_THIRD_PARTY_JSC guard replaced"
 
-          echo ""
           echo "--- Final guard block (lines 14-20) ---"
           sed -n '14,20p' "$H"
-          echo ""
           echo "OK: RCTAppSetupUtils.h patched — Hermes import guarded by USE_HERMES"
 
       # -------------------------------------------------------------------------
