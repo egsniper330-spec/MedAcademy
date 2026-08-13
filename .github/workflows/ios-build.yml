@@ -274,40 +274,33 @@ jobs:
       # -------------------------------------------------------------------------
       # 5a-iii. Patch EXJavaScriptRuntime.mm: guard unconditional hermes import
       #
-      # expo-modules-core 55.0.15 / EXJavaScriptRuntime.mm:
+      # expo-modules-core 55.0.15 / EXJavaScriptRuntime.mm line 10:
       #
-      #   Line 10 (BUG — unconditional, no preprocessor gate):
+      #   BUG: bare, unconditional top-level import with no preprocessor gate:
       #     #import <hermes/hermes.h>
       #
-      #   When hermes-engine pod is absent (JSC build), there is no `hermes/`
-      #   header directory → fatal error: 'hermes/hermes.h' file not found.
+      #   When hermes-engine pod is absent (JSC build), `hermes/hermes.h` does
+      #   not exist → fatal error: 'hermes/hermes.h' file not found.
       #
-      #   NOTE: The file already contains __has_include(<reacthermes/...>) on
-      #   line 26 (runtime-creation guard). The idempotency check MUST NOT use
-      #   that string — it exists in the unpatched file and would cause the
-      #   patch to be skipped every time. Instead we check for the absence of
-      #   the bare '#import <hermes/hermes.h>' line at the top level.
+      #   The file already has a correct __has_include gate on line 26 that
+      #   guards runtime creation, but that gate is too late — the bare import
+      #   above causes a compile error before any code paths are evaluated.
       #
-      # THE FIX: replace the bare top-level import with a guarded block:
-      #
+      # THE FIX: wrap line 10's import in the same __has_include guard.
+      # Result:
       #   #if __has_include(<reacthermes/HermesExecutorFactory.h>)
       #   #import <hermes/hermes.h>
-      #   #else
-      #   #include <JSCRuntime.h>
       #   #endif
       #
-      # WHY #include <JSCRuntime.h> in the #else branch:
-      #   The file's #else branch (line 41) calls jsc::makeJSCRuntime(), which
-      #   is declared in JSCRuntime.h from React-jsc. ExpoModulesJSI's clang
-      #   search paths include -I.../Pods/Headers/Public/React-jsc, so
-      #   JSCRuntime.h is reachable as a flat include <JSCRuntime.h>.
-      #   Without this include, the compiler hits 'use of undeclared identifier
-      #   jsc' when the #else branch is compiled for the JSC build.
+      # NO #else branch: jsc::makeJSCRuntime() on line ~41 needs JSCRuntime.h,
+      # but that header must be made available via the correct HEADER_SEARCH_PATHS
+      # on the ExpoModulesJSI target — NOT by guessing include paths in source.
+      # Step 5a-iv (Podfile post_install patch) adds the correct search path.
       #
-      # WHY NOT <jsc/JSCRuntime.h>:
-      #   React-jsc.podspec does not set header_dir, so CocoaPods places headers
-      #   at Pods/Headers/Public/React-jsc/ (flat). The search path gives
-      #   access to them as <JSCRuntime.h>, not <jsc/JSCRuntime.h>.
+      # IDEMPOTENCY NOTE: the unpatched file already contains the string
+      # '__has_include(<reacthermes/HermesExecutorFactory.h>)' on line 26.
+      # The sentinel must therefore be the #if guard line followed immediately
+      # by the hermes import — that sequence is unique to the patched state.
       #
       # NOTE: python3 used for multi-line substitution (sed cannot insert lines).
       # -------------------------------------------------------------------------
@@ -332,31 +325,24 @@ jobs:
           path = sys.argv[1]
 
           # The bare unconditional top-level import to replace.
-          # NOTE: the unpatched file already has __has_include on line 26 (runtime
-          # creation guard). We must NOT use that string as the idempotency sentinel.
           target = '#import <hermes/hermes.h>\n'
 
-          # Replacement: guard the import; also include JSCRuntime.h in the #else
-          # branch so jsc::makeJSCRuntime() (called on the very next #else branch
-          # lower in the file) resolves without a missing-declaration error.
+          # Guard it. No #else branch: JSCRuntime.h is made available to the
+          # ExpoModulesJSI target via the Podfile post_install HEADER_SEARCH_PATHS
+          # patch (step 5a-iv), so jsc::makeJSCRuntime() on line ~41 will resolve
+          # through the existing __has_include/#else block without any extra include.
           replacement = (
               '#if __has_include(<reacthermes/HermesExecutorFactory.h>)\n'
               '#import <hermes/hermes.h>\n'
-              '#else\n'
-              '#include <JSCRuntime.h>\n'
               '#endif\n'
           )
 
           with open(path, 'r') as f:
               content = f.read()
 
-          # Idempotent: the replacement block itself starts with the #if guard line
-          # immediately before the hermes import. Check for that exact sequence.
-          # We cannot check for __has_include alone (the unpatched file already has
-          # it on the runtime-creation guard at line 26).
-          # We cannot check for absence of the bare import (our replacement block
-          # still contains the import, just inside the guard).
-          # The unique sentinel is the guard line directly followed by the import.
+          # Idempotent sentinel: the #if guard line immediately before the hermes
+          # import. This sequence does NOT appear in the unpatched file (line 26
+          # has the same __has_include string but the next line is NOT the import).
           sentinel = (
               '#if __has_include(<reacthermes/HermesExecutorFactory.h>)\n'
               '#import <hermes/hermes.h>\n'
@@ -376,20 +362,130 @@ jobs:
           print("Patch applied successfully.")
           PYEOF
 
-          echo "--- EXJavaScriptRuntime.mm AFTER patch (lines 8-16) ---"
-          sed -n '8,16p' "$EXJSRT"
+          echo "--- EXJavaScriptRuntime.mm AFTER patch (lines 8-14) ---"
+          sed -n '8,14p' "$EXJSRT"
 
-          # Verify: bare import must be gone, JSCRuntime include must be present
-          if grep -qF '#import <hermes/hermes.h>' "$EXJSRT" && \
-             ! grep -qF '#if __has_include(<reacthermes/HermesExecutorFactory.h>)' "$EXJSRT"; then
-            echo "FAIL: bare hermes import still present without guard"
+          if ! grep -qF '#if __has_include(<reacthermes/HermesExecutorFactory.h>)' "$EXJSRT"; then
+            echo "FAIL: hermes guard not found after patch"
             exit 1
           fi
-          if ! grep -qF '#include <JSCRuntime.h>' "$EXJSRT"; then
-            echo "FAIL: JSCRuntime.h include not found after patch"
+          echo "OK: EXJavaScriptRuntime.mm patched — hermes import is now guarded"
+
+      # -------------------------------------------------------------------------
+      # 5a-iv. Patch ios/Podfile: inject post_install hook to add JSCRuntime.h
+      #        as a SYSTEM header search path for ExpoModulesJSI
+      #
+      # ROOT CAUSE — 'JSCRuntime.h' file not found with <angled> include:
+      #
+      #   EXJavaScriptRuntime.mm #else branch (line ~41) calls jsc::makeJSCRuntime().
+      #   That function is declared in JSCRuntime.h from @react-native-community/
+      #   javascriptcore, which React-jsc.podspec installs from common/JSCRuntime.h.
+      #
+      #   CocoaPods installs React-jsc public headers (from source_files common/*.h)
+      #   to: ios/Pods/Headers/Public/React-jsc/JSCRuntime.h
+      #
+      #   CocoaPods makes this available to ExpoModulesJSI (which s.dependency
+      #   'React-jsc') via headermap — but headermaps are only accessible via
+      #   double-quoted includes (#include "JSCRuntime.h"), NOT angle brackets
+      #   (#include <JSCRuntime.h>). The existing code uses the angle-bracket form.
+      #
+      #   The correct fix is to expose $(PODS_ROOT)/Headers/Public/React-jsc as
+      #   a SYSTEM_HEADER_SEARCH_PATH on the ExpoModulesJSI Xcode target, making
+      #   <JSCRuntime.h> resolvable as an angle-bracket include.
+      #
+      # THE FIX: patch ios/Podfile to append a post_install block that finds the
+      #   ExpoModulesJSI target and adds to its SYSTEM_HEADER_SEARCH_PATHS:
+      #     $(PODS_ROOT)/Headers/Public/React-jsc
+      #
+      # WHY post_install and NOT pod_target_xcconfig in the podspec:
+      #   ExpoModulesJSI.podspec is in node_modules/ (not ios/). We could patch it,
+      #   but that would affect all builds including Hermes builds. The post_install
+      #   hook in the Podfile is the idiomatic CocoaPods mechanism for per-project
+      #   target build-setting overrides.
+      #
+      # WHY SYSTEM_HEADER_SEARCH_PATHS and NOT HEADER_SEARCH_PATHS:
+      #   HEADER_SEARCH_PATHS in CocoaPods are emitted as -I flags, which support
+      #   both angle brackets AND quotes. SYSTEM_HEADER_SEARCH_PATHS uses -isystem,
+      #   which also supports angle brackets. Either works here.
+      #   We use HEADER_SEARCH_PATHS += $(PODS_ROOT)/Headers/Public/React-jsc
+      #   to append (not replace) the existing paths.
+      #
+      # SCOPE: ExpoModulesJSI target only. No other targets are modified.
+      #
+      # TIMING: This step runs AFTER expo prebuild --clean generates ios/Podfile
+      #         but BEFORE pod install. The patched Podfile is consumed by pod
+      #         install to generate xcconfig / resp files with the correct -I paths.
+      #
+      # PERMANENCE: This modifies the generated ios/Podfile temporarily during CI.
+      #   ios/ is never committed. On the next run, expo prebuild --clean regenerates
+      #   ios/Podfile fresh, and this step re-applies the patch. ✓
+      # -------------------------------------------------------------------------
+      - name: Patch Podfile — add HEADER_SEARCH_PATHS for ExpoModulesJSI (JSCRuntime.h)
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          PODFILE="ios/Podfile"
+
+          if [ ! -f "$PODFILE" ]; then
+            echo "FAIL: $PODFILE not found — expo prebuild must have run first"
             exit 1
           fi
-          echo "OK: EXJavaScriptRuntime.mm patched — hermes import guarded, JSCRuntime.h included"
+
+          echo "--- Podfile tail BEFORE patch ---"
+          tail -5 "$PODFILE"
+
+          python3 - "$PODFILE" <<'PYEOF'
+          import sys
+
+          path = sys.argv[1]
+
+          # Idempotent sentinel
+          sentinel = '# JSC-fix: ExpoModulesJSI JSCRuntime.h header search path'
+
+          with open(path, 'r') as f:
+              content = f.read()
+
+          if sentinel in content:
+              print("Already patched — skipping.")
+              sys.exit(0)
+
+          # Ruby post_install block to append to the Podfile.
+          # Targets the ExpoModulesJSI pod target specifically.
+          # Adds $(PODS_ROOT)/Headers/Public/React-jsc to HEADER_SEARCH_PATHS
+          # so that #include <JSCRuntime.h> resolves with angle brackets.
+          injection = """
+          # JSC-fix: ExpoModulesJSI JSCRuntime.h header search path
+          post_install do |installer|
+            installer.pods_project.targets.each do |target|
+              if target.name == 'ExpoModulesJSI'
+                target.build_configurations.each do |config|
+                  existing = config.build_settings['HEADER_SEARCH_PATHS'] || '$(inherited)'
+                  config.build_settings['HEADER_SEARCH_PATHS'] = [
+                    existing,
+                    '"$(PODS_ROOT)/Headers/Public/React-jsc"'
+                  ].join(' ')
+                end
+              end
+            end
+          end
+          """
+
+          new_content = content.rstrip() + '\n' + injection
+          with open(path, 'w') as f:
+              f.write(new_content)
+
+          print("Patch applied successfully.")
+          PYEOF
+
+          echo "--- Podfile tail AFTER patch ---"
+          tail -20 "$PODFILE"
+
+          if ! grep -q 'ExpoModulesJSI' "$PODFILE"; then
+            echo "FAIL: ExpoModulesJSI post_install block not found in Podfile"
+            exit 1
+          fi
+          echo "OK: Podfile patched — ExpoModulesJSI will receive HEADER_SEARCH_PATHS for React-jsc headers"
 
       # -------------------------------------------------------------------------
       # 5b. CocoaPods install
