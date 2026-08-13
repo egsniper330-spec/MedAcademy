@@ -1,10 +1,10 @@
 // CommonJS — Expo config plugins are require()d by the prebuild pipeline.
 // plugins/ is excluded from oxlint via .eslintignore.
 //
-// withIosJsc — two-part iOS JSC configuration for the generated Podfile.
+// withIosJsc — iOS JSC configuration applied to the generated Podfile.
 //
-// PART 1: force hermes_enabled: false
-// ─────────────────────────────────────
+// PART 1: force hermes_enabled: false in the generated Podfile
+// ─────────────────────────────────────────────────────────────
 // The Expo-generated Podfile computes hermes_enabled dynamically:
 //
 //   use_react_native!(
@@ -13,13 +13,17 @@
 //     ...
 //   )
 //
-// In React Native 0.83, use_react_native! calls setup_hermes! during CocoaPods
-// dependency resolution when hermes_enabled evaluates to true. This installs the
-// hermes-engine pod even when Podfile.properties.json correctly contains
-// expo.jsEngine=jsc.
+// This patch replaces the dynamic expression with the literal `false`, ensuring
+// the :hermes_enabled argument passed into use_react_native!() is false.
 //
-// Replace the dynamic expression with the literal `false` directly in the
-// generated Podfile, so hermes_enabled is unconditionally false for iOS.
+// NOTE: In React Native 0.83.x, use_react_native!() ignores the :hermes_enabled
+// parameter entirely (line 78 of react_native_pods.rb unconditionally sets a
+// local `hermes_enabled = true`). The actual gate is the react_native_pods.rb
+// patch applied in the GitHub Actions workflow step "Patch react_native_pods.rb
+// for JSC support" (step 5a), which runs after expo prebuild and before pod
+// install. This Podfile patch is retained as defence-in-depth: if a future RN
+// version fixes the parameter-ignore bug, the generated Podfile is already
+// correct.
 //
 // PART 2: register React-jsc as a local pod
 // ──────────────────────────────────────────
