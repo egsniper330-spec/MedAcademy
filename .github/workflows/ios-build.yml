@@ -81,6 +81,94 @@ jobs:
         run: npm ci --ignore-scripts
 
       # -------------------------------------------------------------------------
+      # 2b. Validate required GitHub Secrets
+      # Fail fast with an actionable message when Supabase credentials are absent.
+      #
+      # WHY THIS MATTERS (Black-Screen Root Cause):
+      #   EXPO_PUBLIC_* variables are baked into the Metro JS bundle at xcodebuild
+      #   time (not at prebuild time). If either secret is unset (empty string),
+      #   the placeholder gets embedded into the bundle. At first launch:
+      #     • medo-guard.ts assertMeDoBlocked() checks EXPO_PUBLIC_SUPABASE_URL.
+      #     • If the URL is wrong/empty it throws synchronously during root-module
+      #       evaluation — BEFORE any React component mounts → BLACK SCREEN.
+      #   Catching this early prevents a confusing runtime failure with no visible
+      #   error message on device.
+      #
+      # HOW TO FIX if this step fails:
+      #   Repository → Settings → Secrets and variables → Actions → New secret:
+      #     EXPO_PUBLIC_SUPABASE_URL      = https://xdvjwfuqipatkpimejcb.supabase.co
+      #     EXPO_PUBLIC_SUPABASE_ANON_KEY = <your project anon key>
+      # -------------------------------------------------------------------------
+      - name: Validate required GitHub Secrets
+        shell: bash
+        run: |
+          set -euo pipefail
+          FAIL=0
+
+          if [ -z "${{ secrets.EXPO_PUBLIC_SUPABASE_URL }}" ]; then
+            echo "================================================================"
+            echo "FAIL: Secret EXPO_PUBLIC_SUPABASE_URL is not set."
+            echo ""
+            echo "  This secret must contain the full Supabase project URL:"
+            echo "    https://xdvjwfuqipatkpimejcb.supabase.co"
+            echo ""
+            echo "  Without it the Metro bundle bakes an empty SUPABASE_URL,"
+            echo "  assertMeDoBlocked() throws at startup, and the app shows"
+            echo "  a black screen with no visible error on device."
+            echo ""
+            echo "  Fix: Repository → Settings → Secrets and variables → Actions"
+            echo "       Add secret: EXPO_PUBLIC_SUPABASE_URL"
+            echo "================================================================"
+            FAIL=1
+          else
+            echo "OK: EXPO_PUBLIC_SUPABASE_URL is set"
+          fi
+
+          if [ -z "${{ secrets.EXPO_PUBLIC_SUPABASE_ANON_KEY }}" ]; then
+            echo "================================================================"
+            echo "FAIL: Secret EXPO_PUBLIC_SUPABASE_ANON_KEY is not set."
+            echo ""
+            echo "  This secret must contain the anon/public key for project"
+            echo "  xdvjwfuqipatkpimejcb (found in Supabase Dashboard → API)."
+            echo ""
+            echo "  Fix: Repository → Settings → Secrets and variables → Actions"
+            echo "       Add secret: EXPO_PUBLIC_SUPABASE_ANON_KEY"
+            echo "================================================================"
+            FAIL=1
+          else
+            echo "OK: EXPO_PUBLIC_SUPABASE_ANON_KEY is set"
+          fi
+
+          # Validate that the URL contains the expected project ref so a copy-paste
+          # error (e.g. old project URL) is caught immediately rather than at runtime.
+          SUPABASE_URL="${{ secrets.EXPO_PUBLIC_SUPABASE_URL }}"
+          EXPECTED_REF="xdvjwfuqipatkpimejcb"
+          if [ -n "$SUPABASE_URL" ] && ! echo "$SUPABASE_URL" | grep -q "$EXPECTED_REF"; then
+            echo "================================================================"
+            echo "FAIL: EXPO_PUBLIC_SUPABASE_URL does not contain the expected"
+            echo "      project reference: $EXPECTED_REF"
+            echo ""
+            echo "  Configured URL: $SUPABASE_URL"
+            echo "  Expected URL:   https://$EXPECTED_REF.supabase.co"
+            echo ""
+            echo "  assertMeDoBlocked() will throw at runtime if the URL is wrong."
+            echo "================================================================"
+            FAIL=1
+          elif [ -n "$SUPABASE_URL" ]; then
+            echo "OK: EXPO_PUBLIC_SUPABASE_URL contains expected project ref ($EXPECTED_REF)"
+          fi
+
+          if [ "$FAIL" -eq 1 ]; then
+            echo ""
+            echo "One or more required secrets are missing or invalid."
+            echo "Add them in: Repository → Settings → Secrets and variables → Actions"
+            exit 1
+          fi
+
+          echo ""
+          echo "All required secrets are present and valid."
+
+      # -------------------------------------------------------------------------
       # 3. Expo Prebuild (iOS only, clean)
       # Regenerates ios/ from app.json + config plugins.
       # --no-install skips pod install so we control it explicitly below.
@@ -1586,6 +1674,7 @@ jobs:
             ENABLE_BITCODE=NO \
             GCC_OPTIMIZATION_LEVEL=0 \
             SWIFT_OPTIMIZATION_LEVEL="-Onone" \
+            USE_HERMES=false \
             build \
             2>&1 | tee /tmp/xcodebuild.log
 
@@ -1845,6 +1934,50 @@ jobs:
             exit 1
           fi
           echo "OK: hermesvm.framework is ABSENT from IPA — JSC engine confirmed"
+
+          # ── Hard gate: no statically-linked Hermes symbols in main binary ────
+          # hermesvm.framework can be ABSENT (passes the zip check above) yet
+          # Hermes code can still execute when hermes-engine is linked as a
+          # STATIC library — its symbols end up directly inside the app binary
+          # rather than as a separate .framework.  In that case the app crashes
+          # at runtime with hermes::vm::* backtraces despite the zip gate
+          # passing (EXC_BAD_ACCESS / SIGSEGV during Map.set / GC rehash).
+          #
+          # This second gate uses `nm` to inspect the Mach-O binary for
+          # hermes::vm:: symbols.  Any match means Hermes is statically linked
+          # and the build must be rejected.
+          #
+          # nm flags:
+          #   -a  include all symbols (debug + non-debug)
+          #   -u  undefined symbols only is NOT what we want; we want DEFINED
+          #       symbols inside this binary → use default (no -u)
+          #   We pipe through grep for the hermes::vm:: namespace prefix,
+          #   which is unique to the Hermes C++ runtime.
+          APP_EXEC_PATH="${{ steps.locate-app.outputs.app_path }}/${{ steps.locate-app.outputs.app_name }}"
+          echo "--- nm check for statically-linked hermes::vm:: symbols ---"
+          echo "    binary: $APP_EXEC_PATH"
+          if nm "$APP_EXEC_PATH" 2>/dev/null | grep -q "hermes::vm::"; then
+            echo ""
+            echo "================================================================"
+            echo "FAIL: hermes::vm:: symbols found in main binary."
+            echo "      Hermes is statically linked into the app executable."
+            echo "      Even though hermesvm.framework is absent from the IPA,"
+            echo "      Hermes will execute at runtime and cause:"
+            echo "        EXC_BAD_ACCESS / SIGSEGV in hermes::vm::OrderedHashMap"
+            echo "      (seen as a black screen crash on first launch)."
+            echo ""
+            echo "      This means the JSC patches did not fully prevent"
+            echo "      hermes-engine from being linked.  Check:"
+            echo "        1. react_native_pods.rb patch (use_third_party_jsc gate)"
+            echo "        2. Podfile :hermes_enabled => false"
+            echo "        3. USE_HERMES Xcode build setting"
+            echo ""
+            echo "      Matching hermes::vm symbols (first 20):"
+            nm "$APP_EXEC_PATH" 2>/dev/null | grep "hermes::vm::" | head -20
+            echo "================================================================"
+            exit 1
+          fi
+          echo "OK: hermes::vm:: symbols ABSENT from binary — no static Hermes linkage"
 
           echo "OK: All IPA validations passed -- proceeding to upload"
 
