@@ -272,41 +272,113 @@ jobs:
           echo "OK: jsengine.rb patched successfully"
 
       # -------------------------------------------------------------------------
-      # 5a-iii. Patch EXJavaScriptRuntime.mm: two-part fix for JSC builds
+      # 5a-iii. Patch React-jsc.podspec: set header_dir = "jsc"
       #
-      # expo-modules-core 55.0.15 / EXJavaScriptRuntime.mm has TWO bugs when
-      # hermes-engine pod is absent:
+      # ROOT CAUSE — 'jsc/JSCRuntime.h' file not found:
       #
-      # BUG 1 (line 10) — unconditional top-level import:
+      # EXJavaScriptRuntime.mm (expo-modules-core 55.0.15) uses:
+      #   #include <jsc/JSCRuntime.h>   (line 13, after our hermes guard below)
+      #
+      # @react-native-community/javascriptcore 0.2.0 / React-jsc.podspec does NOT
+      # set s.header_dir. CocoaPods uses the pod name as the default header
+      # directory, so JSCRuntime.h is installed at:
+      #   ios/Pods/Headers/Public/React-jsc/JSCRuntime.h
+      #
+      # ExpoModulesJSI's clang command (confirmed from xcodebuild response file)
+      # includes only the BARE header root:
+      #   -I .../ios/Pods/Headers/Public
+      # but NOT the per-pod subdirectory:
+      #   -I .../ios/Pods/Headers/Public/React-jsc  ← absent for ExpoModulesJSI
+      #
+      # With only the bare -I, the compiler resolves #include <jsc/JSCRuntime.h>
+      # as Pods/Headers/Public/jsc/JSCRuntime.h — which does NOT exist because
+      # the headers landed in Pods/Headers/Public/React-jsc/ instead.
+      #
+      # THE FIX: add `s.header_dir = "jsc"` to React-jsc.podspec BEFORE pod install.
+      # CocoaPods then installs JSCRuntime.h at:
+      #   ios/Pods/Headers/Public/jsc/JSCRuntime.h
+      # Now #include <jsc/JSCRuntime.h> resolves correctly via the bare
+      # -I Pods/Headers/Public that ExpoModulesJSI already has. ✓
+      #
+      # This patch is applied to node_modules/ (not ios/), so it is safe,
+      # and is idempotent (skipped if already set).
+      # -------------------------------------------------------------------------
+      - name: Patch React-jsc.podspec header_dir for JSC support
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          PODSPEC="node_modules/@react-native-community/javascriptcore/React-jsc.podspec"
+
+          if [ ! -f "$PODSPEC" ]; then
+            echo "FAIL: $PODSPEC not found — npm ci may not have run"
+            exit 1
+          fi
+
+          echo "--- React-jsc.podspec BEFORE patch ---"
+          grep -n "header_dir\|module_name\|pod_target_xcconfig" "$PODSPEC"
+
+          # Use python3 for idempotent line-insertion (sed multiline append breaks YAML).
+          python3 - "$PODSPEC" <<'PYEOF'
+          import sys, re
+
+          path = sys.argv[1]
+          with open(path, 'r') as f:
+              content = f.read()
+
+          # Idempotent: skip if already patched
+          if 's.header_dir' in content:
+              print("Already patched — skipping.")
+              sys.exit(0)
+
+          # Insert s.header_dir = "jsc" right after the s.module_name line
+          target = '  s.module_name            = "ReactJSC"'
+          if target not in content:
+              print(f"ERROR: expected line not found: {target}")
+              sys.exit(1)
+
+          new_content = content.replace(
+              target,
+              target + '\n  s.header_dir             = "jsc"',
+              1
+          )
+          with open(path, 'w') as f:
+              f.write(new_content)
+          print("Patch applied successfully.")
+          PYEOF
+
+          echo "--- React-jsc.podspec AFTER patch ---"
+          grep -n "header_dir\|module_name\|pod_target_xcconfig" "$PODSPEC"
+
+          if ! grep -q 'header_dir.*jsc' "$PODSPEC"; then
+            echo "FAIL: header_dir = \"jsc\" not found in $PODSPEC after patch"
+            exit 1
+          fi
+          echo "OK: React-jsc.podspec patched — JSCRuntime.h will install under Pods/Headers/Public/jsc/"
+
+      # -------------------------------------------------------------------------
+      # 5a-iv. Patch EXJavaScriptRuntime.mm: guard unconditional hermes import
+      #
+      # expo-modules-core 55.0.15 / EXJavaScriptRuntime.mm line 10:
+      #   #import <hermes/hermes.h>   ← unconditional top-level import
+      #
+      # When hermes-engine pod is absent (JSC build), there is no `hermes/`
+      # header directory, so the compiler immediately fails with:
+      #   fatal error: 'hermes/hermes.h' file not found
+      #
+      # The file already has a correct __has_include guard on lines 26-42 that
+      # gates runtime creation on hermes availability. The only problem is this
+      # bare top-level import which runs before any guard.
+      #
+      # THE FIX: wrap the import in the same __has_include guard:
+      #
+      #   #if __has_include(<reacthermes/HermesExecutorFactory.h>)
       #   #import <hermes/hermes.h>
-      #   This requires a `hermes/` header directory from hermes-engine pod.
-      #   When absent → fatal error: 'hermes/hermes.h' file not found
+      #   #endif
       #
-      # BUG 2 (line 41, the #else branch) — missing JSC runtime header:
-      #   _runtime = jsc::makeJSCRuntime();
-      #   jsc::makeJSCRuntime() is declared in <jsc/JSCRuntime.h> (from
-      #   react-native ReactCommon/jsc/). This header is never imported anywhere
-      #   in the file. When hermes-engine is present it doesn't matter (the
-      #   #else branch is dead code). When hermes-engine is absent, the compiler
-      #   hits the #else branch and fails:
-      #     error: use of undeclared identifier 'jsc'
-      #     error: no member named 'makeJSCRuntime' in namespace 'facebook::jsi'
-      #   NOTE: 'using namespace facebook' is in scope via EXJSIConversions.h
-      #   (line 5 import), so jsc:: resolves correctly once the header is included.
-      #
-      # THE FIX (applied atomically):
-      #   Replace the unconditional `#import <hermes/hermes.h>` with:
-      #
-      #     #if __has_include(<reacthermes/HermesExecutorFactory.h>)
-      #     #import <hermes/hermes.h>
-      #     #else
-      #     #include <jsc/JSCRuntime.h>
-      #     #endif
-      #
-      # This is semantically correct:
-      #   - Hermes branch: includes hermes.h (existing behavior, unchanged)
-      #   - JSC branch: includes jsc/JSCRuntime.h which declares jsc::makeJSCRuntime()
-      #   - The __has_include gate mirrors the existing gate on line 26+ exactly
+      # This is the minimal change. The JSC #else branch (jsc::makeJSCRuntime())
+      # compiles correctly because JSCRuntime.h is now available via the
+      # Pods/Headers/Public/jsc/ path established by step 5a-iii above.
       #
       # NOTE: python3 used for multi-line substitution (sed can't insert lines).
       # -------------------------------------------------------------------------
@@ -330,23 +402,21 @@ jobs:
 
           path = sys.argv[1]
 
-          # Original unconditional hermes import (BUG 1 + entry point for BUG 2 fix)
+          # Original unconditional hermes import (the only bug to fix here)
           target = '#import <hermes/hermes.h>\n'
 
-          # Replacement: guard hermes import + add JSC include in #else branch
+          # Replacement: guard the hermes import so it only fires when hermes is present
           replacement = (
               '#if __has_include(<reacthermes/HermesExecutorFactory.h>)\n'
               '#import <hermes/hermes.h>\n'
-              '#else\n'
-              '#include <jsc/JSCRuntime.h>\n'
               '#endif\n'
           )
 
           with open(path, 'r') as f:
               content = f.read()
 
-          # Idempotent: skip if already patched
-          if replacement in content:
+          # Idempotent: skip if already patched (guard is present)
+          if '#if __has_include(<reacthermes/HermesExecutorFactory.h>)' in content:
               print("Already patched — skipping.")
               sys.exit(0)
 
@@ -361,19 +431,14 @@ jobs:
           print("Patch applied successfully.")
           PYEOF
 
-          echo "--- EXJavaScriptRuntime.mm AFTER patch (L8-L15) ---"
-          sed -n '8,15p' "$EXJSRT"
+          echo "--- EXJavaScriptRuntime.mm AFTER patch (L8-L14) ---"
+          sed -n '8,14p' "$EXJSRT"
 
-          # Verify both parts of the patch are present
           if ! grep -q '#if __has_include(<reacthermes/HermesExecutorFactory.h>)' "$EXJSRT"; then
             echo "FAIL: hermes guard not found after patch"
             exit 1
           fi
-          if ! grep -q '#include <jsc/JSCRuntime.h>' "$EXJSRT"; then
-            echo "FAIL: jsc/JSCRuntime.h include not found after patch"
-            exit 1
-          fi
-          echo "OK: EXJavaScriptRuntime.mm patched successfully (both hermes guard + jsc include)"
+          echo "OK: EXJavaScriptRuntime.mm patched — hermes import is now guarded"
 
       # -------------------------------------------------------------------------
       # 5b. CocoaPods install
