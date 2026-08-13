@@ -66,10 +66,13 @@ jobs:
           node-version: '20'
 
       - name: Install Node dependencies
-        # npm ci uses package-lock.json for a clean, reproducible install.
+        # The project uses pnpm (pnpm-lock.yaml). Use pnpm install --frozen-lockfile
+        # for a clean, reproducible install that mirrors npm ci semantics.
         # --ignore-scripts skips postinstall (patch-package, sync-android-version)
         # which are not needed for an iOS build.
-        run: npm ci --ignore-scripts
+        run: |
+          npm install -g pnpm --prefer-offline 2>/dev/null || npm install -g pnpm
+          pnpm install --frozen-lockfile --ignore-scripts
 
       # -------------------------------------------------------------------------
       # 3. Expo Prebuild (iOS only, clean)
