@@ -648,7 +648,128 @@ jobs:
           echo "OK: Podfile patched — ExpoModulesJSI will receive React-jsc HEADER_SEARCH_PATHS"
 
       # -------------------------------------------------------------------------
-      # 5a-vi. Patch RCTDefaultReactNativeFactoryDelegate.mm: add NULL fallback return
+      # 5a-vi. Patch RCTAppSetupUtils.mm: add nullptr return for USE_THIRD_PARTY_JSC=1
+      #
+      # ROOT CAUSE (Build 12):
+      #   RCTAppSetupUtils.mm contains two functions:
+      #     RCTAppSetupDefaultJsExecutorFactory(...)
+      #     RCTAppSetupJsExecutorFactoryForOldArch(...)
+      #   Both have the structure (inside #ifndef RCT_REMOVE_LEGACY_ARCH):
+      #
+      #     #if USE_THIRD_PARTY_JSC != 1
+      #       return std::make_unique<HermesExecutorFactory>(...);
+      #     #endif
+      #     // ← NO return here → empty non-void function → -Werror=return-type
+      #
+      #   When USE_THIRD_PARTY_JSC=1 the Hermes return is excluded and the
+      #   function has no return path, causing:
+      #     error: non-void function does not return a value [-Werror,-Wreturn-type]
+      #     RCTAppSetupUtils.mm:155 and RCTAppSetupUtils.mm:179
+      #
+      # FIX:
+      #   Add '#else return nullptr; #endif' to both USE_THIRD_PARTY_JSC blocks.
+      #   The RN 0.83.2 source already returns nullptr in the RCT_REMOVE_LEGACY_ARCH
+      #   branch with the comment "This method should not be invoked in the New Arch."
+      #   Since RCT_NEW_ARCH_ENABLED=1 these functions are never called at runtime;
+      #   nullptr only satisfies -Werror=return-type at compile time.
+      #
+      #   RESULT:
+      #     #if USE_THIRD_PARTY_JSC != 1
+      #       return std::make_unique<HermesExecutorFactory>(...);
+      #     #else
+      #       return nullptr; // jsc-nullptr-fallback
+      #     #endif
+      #
+      # IDEMPOTENCY: sentinel 'jsc-nullptr-fallback' — skip if already patched.
+      # SCOPE: node_modules only — transient, never committed.
+      # -------------------------------------------------------------------------
+      - name: Patch RCTAppSetupUtils.mm — add nullptr return for JSC+NewArch path
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          MM=$(find node_modules -path "*/Libraries/AppDelegate/RCTAppSetupUtils.mm" \
+               -not -path "*/node_modules/*/node_modules/*" 2>/dev/null | head -1)
+
+          if [ -z "$MM" ]; then
+            echo "FAIL: RCTAppSetupUtils.mm not found in node_modules"
+            exit 1
+          fi
+          echo "Found: $MM"
+
+          if grep -qF 'jsc-nullptr-fallback' "$MM"; then
+            echo "Already patched — skipping."
+          else
+            echo "--- BEFORE patch (lines 146-154 and 170-178) ---"
+            sed -n '146,155p' "$MM"
+            echo "---"
+            sed -n '170,179p' "$MM"
+
+            python3 - "$MM" <<'PYEOF'
+          import sys
+
+          path = sys.argv[1]
+          with open(path, 'r') as f:
+              content = f.read()
+
+          OLD = (
+              '#if USE_THIRD_PARTY_JSC != 1\n'
+              '  return std::make_unique<facebook::react::HermesExecutorFactory>(\n'
+              '      facebook::react::RCTJSIExecutorRuntimeInstaller(runtimeInstallerLambda));\n'
+              '#endif'
+          )
+          NEW = (
+              '#if USE_THIRD_PARTY_JSC != 1\n'
+              '  return std::make_unique<facebook::react::HermesExecutorFactory>(\n'
+              '      facebook::react::RCTJSIExecutorRuntimeInstaller(runtimeInstallerLambda));\n'
+              '#else\n'
+              '  return nullptr; // jsc-nullptr-fallback\n'
+              '#endif'
+          )
+
+          count = content.count(OLD)
+          if count != 2:
+              print(f"ERROR: expected exactly 2 occurrences of pattern, found {count}")
+              for i, line in enumerate(content.split('\n')[139:185], 140):
+                  print(f"  {i}: {repr(line)}")
+              sys.exit(1)
+
+          content = content.replace(OLD, NEW)  # replaces all 2 occurrences
+
+          with open(path, 'w') as f:
+              f.write(content)
+
+          print(f"Patch applied to {count} occurrences.")
+          PYEOF
+
+            echo ""
+            echo "--- AFTER patch (lines 146-157 and 172-183) ---"
+            sed -n '146,157p' "$MM"
+            echo "---"
+            sed -n '172,183p' "$MM"
+          fi
+
+          echo ""
+          echo "=== Validation ==="
+
+          COUNT=$(grep -cF 'return nullptr; // jsc-nullptr-fallback' "$MM" || true)
+          if [ "$COUNT" -ne 2 ]; then
+            echo "FAIL: expected 2 nullptr fallbacks, found $COUNT"
+            exit 1
+          fi
+          echo "PASS: exactly 2 'return nullptr; // jsc-nullptr-fallback' present"
+
+          COUNT=$(grep -cF 'return std::make_unique<facebook::react::HermesExecutorFactory>' "$MM" || true)
+          if [ "$COUNT" -ne 2 ]; then
+            echo "FAIL: Hermes returns altered — expected 2, found $COUNT"
+            exit 1
+          fi
+          echo "PASS: both Hermes returns still present and guarded by #if USE_THIRD_PARTY_JSC != 1"
+
+          echo "OK: RCTAppSetupUtils.mm patched — nullptr added for USE_THIRD_PARTY_JSC=1 path"
+
+      # -------------------------------------------------------------------------
+      # 5a-vii. Patch RCTDefaultReactNativeFactoryDelegate.mm: add NULL fallback return
       #
       # ROOT CAUSE (Build 11):
       #   USE_THIRD_PARTY_JSC=1 is now correctly propagated (v18 jsengine.rb fix).
