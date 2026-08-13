@@ -372,55 +372,51 @@ jobs:
           echo "OK: EXJavaScriptRuntime.mm patched — hermes import is now guarded"
 
       # -------------------------------------------------------------------------
-      # 5a-iv. Patch ios/Podfile: inject post_install hook to add JSCRuntime.h
-      #        as a SYSTEM header search path for ExpoModulesJSI
+      # 5a-iv. Patch ios/Podfile: inject ExpoModulesJSI HEADER_SEARCH_PATHS fix
+      #        INSIDE the existing post_install hook (not a second hook)
       #
       # ROOT CAUSE — 'JSCRuntime.h' file not found with <angled> include:
       #
-      #   EXJavaScriptRuntime.mm #else branch (line ~41) calls jsc::makeJSCRuntime().
-      #   That function is declared in JSCRuntime.h from @react-native-community/
-      #   javascriptcore, which React-jsc.podspec installs from common/JSCRuntime.h.
+      #   EXJavaScriptRuntime.mm #else branch calls jsc::makeJSCRuntime(), declared
+      #   in JSCRuntime.h (from @react-native-community/javascriptcore).
+      #   React-jsc.podspec installs this header to:
+      #     ios/Pods/Headers/Public/React-jsc/JSCRuntime.h
+      #   CocoaPods exposes it to ExpoModulesJSI via headermap (double-quote access
+      #   only). Angle-bracket #include <JSCRuntime.h> requires the directory to be
+      #   in a proper -I search path, which CocoaPods does NOT add automatically
+      #   for transitive headermap dependencies.
       #
-      #   CocoaPods installs React-jsc public headers (from source_files common/*.h)
-      #   to: ios/Pods/Headers/Public/React-jsc/JSCRuntime.h
+      # THE FIX: Inside the existing post_install block in ios/Podfile, add Ruby
+      #   code to find the ExpoModulesJSI target and append
+      #   $(PODS_ROOT)/Headers/Public/React-jsc to its HEADER_SEARCH_PATHS.
+      #   This becomes a proper -I flag so #include <JSCRuntime.h> resolves.
       #
-      #   CocoaPods makes this available to ExpoModulesJSI (which s.dependency
-      #   'React-jsc') via headermap — but headermaps are only accessible via
-      #   double-quoted includes (#include "JSCRuntime.h"), NOT angle brackets
-      #   (#include <JSCRuntime.h>). The existing code uses the angle-bracket form.
+      # WHY INJECT INSIDE (not append a second block):
+      #   CocoaPods does not allow multiple post_install blocks — adding a second
+      #   one causes "Specifying multiple post_install hooks is unsupported."
+      #   The generated Podfile already has exactly one post_install block from
+      #   expo prebuild. This step injects BEFORE its closing 'end' (the inner
+      #   'end' that closes the post_install block, not the outer 'end' that
+      #   closes the 'target' block).
       #
-      #   The correct fix is to expose $(PODS_ROOT)/Headers/Public/React-jsc as
-      #   a SYSTEM_HEADER_SEARCH_PATH on the ExpoModulesJSI Xcode target, making
-      #   <JSCRuntime.h> resolvable as an angle-bracket include.
+      # INJECTION POINT: The generated Podfile looks like:
+      #   target 'MedAcademy' do
+      #     ...
+      #     post_install do |installer|
+      #       react_native_post_install(...)
+      #     end          ← inner end (closes post_install) — inject BEFORE this
+      #   end            ← outer end (closes target block)
       #
-      # THE FIX: patch ios/Podfile to append a post_install block that finds the
-      #   ExpoModulesJSI target and adds to its SYSTEM_HEADER_SEARCH_PATHS:
-      #     $(PODS_ROOT)/Headers/Public/React-jsc
-      #
-      # WHY post_install and NOT pod_target_xcconfig in the podspec:
-      #   ExpoModulesJSI.podspec is in node_modules/ (not ios/). We could patch it,
-      #   but that would affect all builds including Hermes builds. The post_install
-      #   hook in the Podfile is the idiomatic CocoaPods mechanism for per-project
-      #   target build-setting overrides.
-      #
-      # WHY SYSTEM_HEADER_SEARCH_PATHS and NOT HEADER_SEARCH_PATHS:
-      #   HEADER_SEARCH_PATHS in CocoaPods are emitted as -I flags, which support
-      #   both angle brackets AND quotes. SYSTEM_HEADER_SEARCH_PATHS uses -isystem,
-      #   which also supports angle brackets. Either works here.
-      #   We use HEADER_SEARCH_PATHS += $(PODS_ROOT)/Headers/Public/React-jsc
-      #   to append (not replace) the existing paths.
+      #   We locate the LAST occurrence of a line that is exactly '  end' (2-space
+      #   indent, closes post_install) before the final 'end' (closes target).
+      #   Concretely: we find the closing pattern of the post_install block and
+      #   insert our Ruby snippet before it.
       #
       # SCOPE: ExpoModulesJSI target only. No other targets are modified.
-      #
-      # TIMING: This step runs AFTER expo prebuild --clean generates ios/Podfile
-      #         but BEFORE pod install. The patched Podfile is consumed by pod
-      #         install to generate xcconfig / resp files with the correct -I paths.
-      #
-      # PERMANENCE: This modifies the generated ios/Podfile temporarily during CI.
-      #   ios/ is never committed. On the next run, expo prebuild --clean regenerates
-      #   ios/Podfile fresh, and this step re-applies the patch. ✓
+      # PERMANENCE: ios/Podfile is regenerated by expo prebuild --clean on every
+      #   run. This patch is re-applied transiently in each CI run. ✓
       # -------------------------------------------------------------------------
-      - name: Patch Podfile — add HEADER_SEARCH_PATHS for ExpoModulesJSI (JSCRuntime.h)
+      - name: Patch Podfile — inject ExpoModulesJSI HEADER_SEARCH_PATHS into existing post_install
         shell: bash
         run: |
           set -euo pipefail
@@ -432,16 +428,16 @@ jobs:
             exit 1
           fi
 
-          echo "--- Podfile tail BEFORE patch ---"
-          tail -5 "$PODFILE"
+          echo "--- Podfile BEFORE patch ---"
+          cat -n "$PODFILE"
 
           python3 - "$PODFILE" <<'PYEOF'
-          import sys
+          import sys, re
 
           path = sys.argv[1]
 
-          # Idempotent sentinel
-          sentinel = '# JSC-fix: ExpoModulesJSI JSCRuntime.h header search path'
+          # Idempotent sentinel — unique string that only appears after patching
+          sentinel = '# JSC-fix: ExpoModulesJSI HEADER_SEARCH_PATHS'
 
           with open(path, 'r') as f:
               content = f.read()
@@ -450,42 +446,119 @@ jobs:
               print("Already patched — skipping.")
               sys.exit(0)
 
-          # Ruby post_install block to append to the Podfile.
-          # Targets the ExpoModulesJSI pod target specifically.
-          # Adds $(PODS_ROOT)/Headers/Public/React-jsc to HEADER_SEARCH_PATHS
-          # so that #include <JSCRuntime.h> resolves with angle brackets.
-          injection = """
-          # JSC-fix: ExpoModulesJSI JSCRuntime.h header search path
-          post_install do |installer|
-            installer.pods_project.targets.each do |target|
-              if target.name == 'ExpoModulesJSI'
-                target.build_configurations.each do |config|
-                  existing = config.build_settings['HEADER_SEARCH_PATHS'] || '$(inherited)'
-                  config.build_settings['HEADER_SEARCH_PATHS'] = [
-                    existing,
-                    '"$(PODS_ROOT)/Headers/Public/React-jsc"'
-                  ].join(' ')
-                end
-              end
-            end
-          end
-          """
+          # Verify exactly one post_install block exists
+          hook_count = content.count('post_install do |installer|')
+          if hook_count == 0:
+              print("ERROR: No 'post_install do |installer|' block found in Podfile")
+              sys.exit(1)
+          if hook_count > 1:
+              print(f"ERROR: Found {hook_count} post_install blocks — expected exactly 1")
+              sys.exit(1)
 
-          new_content = content.rstrip() + '\n' + injection
+          # The Ruby snippet to inject inside the post_install block.
+          # Targets ExpoModulesJSI only. Appends to existing HEADER_SEARCH_PATHS.
+          # Uses 4-space indent to match the interior of the post_install block.
+          snippet = (
+              '    # JSC-fix: ExpoModulesJSI HEADER_SEARCH_PATHS\n'
+              '    # Adds $(PODS_ROOT)/Headers/Public/React-jsc as an angle-bracket\n'
+              '    # accessible -I path so #include <JSCRuntime.h> resolves.\n'
+              '    installer.pods_project.targets.each do |target|\n'
+              '      if target.name == \'ExpoModulesJSI\'\n'
+              '        target.build_configurations.each do |config|\n'
+              '          existing = config.build_settings[\'HEADER_SEARCH_PATHS\'] || \'$(inherited)\'\n'
+              '          config.build_settings[\'HEADER_SEARCH_PATHS\'] = [\n'
+              '            existing,\n'
+              '            \'"$(PODS_ROOT)/Headers/Public/React-jsc"\'\n'
+              '          ].join(\' \')\n'
+              '        end\n'
+              '      end\n'
+              '    end\n'
+          )
+
+          # Locate the closing 'end' of the post_install block.
+          # The generated Podfile structure is:
+          #   post_install do |installer|\n
+          #     react_native_post_install(...)\n
+          #   end\n         ← this closes post_install (2-space indent)
+          # end             ← this closes target block (0-space indent)
+          #
+          # Strategy: find 'post_install do |installer|', then find the first
+          # line that is exactly '  end' (2-space indent) after it. That is the
+          # closing 'end' of the post_install block. Inject our snippet before it.
+          lines = content.split('\n')
+          post_install_idx = None
+          for i, line in enumerate(lines):
+              if 'post_install do |installer|' in line:
+                  post_install_idx = i
+                  break
+
+          if post_install_idx is None:
+              print("ERROR: Could not locate post_install block start")
+              sys.exit(1)
+
+          # Find the first '  end' line after post_install_idx
+          close_idx = None
+          for i in range(post_install_idx + 1, len(lines)):
+              stripped = lines[i].rstrip()
+              if stripped == '  end':
+                  close_idx = i
+                  break
+
+          if close_idx is None:
+              print("ERROR: Could not locate closing 'end' of post_install block")
+              sys.exit(1)
+
+          print(f"post_install block at line {post_install_idx+1}, closes at line {close_idx+1}")
+
+          # Insert snippet lines before close_idx
+          snippet_lines = snippet.rstrip('\n').split('\n')
+          new_lines = lines[:close_idx] + snippet_lines + lines[close_idx:]
+          new_content = '\n'.join(new_lines)
+
           with open(path, 'w') as f:
               f.write(new_content)
 
           print("Patch applied successfully.")
           PYEOF
 
-          echo "--- Podfile tail AFTER patch ---"
-          tail -20 "$PODFILE"
+          echo ""
+          echo "--- Podfile AFTER patch ---"
+          cat -n "$PODFILE"
 
-          if ! grep -q 'ExpoModulesJSI' "$PODFILE"; then
-            echo "FAIL: ExpoModulesJSI post_install block not found in Podfile"
+          echo ""
+          echo "=== Validation ==="
+
+          # 1. Exactly one post_install hook
+          COUNT=$(grep -c 'post_install do |installer|' "$PODFILE" || true)
+          if [ "$COUNT" -ne 1 ]; then
+            echo "FAIL: Expected 1 post_install block, found $COUNT"
             exit 1
           fi
-          echo "OK: Podfile patched — ExpoModulesJSI will receive HEADER_SEARCH_PATHS for React-jsc headers"
+          echo "PASS: Exactly 1 post_install block"
+
+          # 2. ExpoModulesJSI patch present
+          if ! grep -q 'ExpoModulesJSI' "$PODFILE"; then
+            echo "FAIL: ExpoModulesJSI injection not found"
+            exit 1
+          fi
+          echo "PASS: ExpoModulesJSI injection present"
+
+          # 3. React-jsc header path present
+          if ! grep -q 'React-jsc' "$PODFILE"; then
+            echo "FAIL: React-jsc header path not found"
+            exit 1
+          fi
+          echo "PASS: React-jsc header path present"
+
+          # 4. No duplicate sentinel
+          DUP=$(grep -c 'JSC-fix: ExpoModulesJSI HEADER_SEARCH_PATHS' "$PODFILE" || true)
+          if [ "$DUP" -ne 1 ]; then
+            echo "FAIL: Sentinel appears $DUP times (expected 1)"
+            exit 1
+          fi
+          echo "PASS: Sentinel appears exactly once (no duplicates)"
+
+          echo "OK: Podfile patched — ExpoModulesJSI will receive React-jsc HEADER_SEARCH_PATHS"
 
       # -------------------------------------------------------------------------
       # 5b. CocoaPods install
