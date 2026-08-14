@@ -174,8 +174,18 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
     // ── 1. Initial session load ───────────────────────────────────────────────
     (async () => {
       authLog('getSession: START');
-      const { data: { session: s } } = await supabase.auth.getSession();
-      authLog(`getSession: DONE user=${s?.user?.id ?? 'none'} expires_at=${s?.expires_at ?? 'n/a'} has_access_token=${!!s?.access_token} has_refresh_token=${!!s?.refresh_token}`);
+      let s: Session | null = null;
+      try {
+        const { data } = await supabase.auth.getSession();
+        s = data.session;
+        authLog(`getSession: DONE user=${s?.user?.id ?? 'none'} expires_at=${s?.expires_at ?? 'n/a'} has_access_token=${!!s?.access_token} has_refresh_token=${!!s?.refresh_token}`);
+      } catch (err) {
+        // getSession() should never throw (supabase-js returns {data, error}), but if
+        // the network layer rejects (e.g. completely unreachable host on first network
+        // call), we must still resolve isLoading so the UI renders instead of staying
+        // black.
+        authLog(`getSession: UNEXPECTED ERROR (non-fatal, treating as no session): ${err}`);
+      }
 
       if (s) {
         const [storedFp, storedVer] = await Promise.all([
