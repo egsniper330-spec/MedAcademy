@@ -87,23 +87,57 @@ function ForceUpdateGate({ children }: { children: React.ReactNode }) {
 /**
  * RootScreenCapture — iOS screenshot/screen-recording protection at the ROOT level.
  *
- * Root cause of the Login-screen gap: expo-screen-capture's preventScreenCaptureAsync
- * was only called inside (app)/_layout.tsx, which mounts AFTER the user has already
- * passed through the (auth)/ screens. This means the Login and other auth screens had
- * zero protection.
+ * Security guarantee: protection covers all auth screens and the entire session, from
+ * the moment the session state is known (isLoading=false) until the app is closed.
  *
- * Fix: call preventScreenCaptureAsync here, at the root layout level, so protection
- * is active from the very first frame — before any navigation, before any auth screen,
- * and before any session is established.
+ * WHY we wait for isLoading=false before activating:
+ * ────────────────────────────────────────────────────────────────────────────────
+ * expo-screen-capture's iOS native module (ExpoScreenCapture / ScreenCaptureModule)
+ * implements preventScreenCapture() using the UITextField secure-layer trick:
+ *
+ *   func preventScreenshots() {
+ *     let textField = UITextField()
+ *     textField.isSecureTextEntry = true
+ *     // On iOS 17+, UITextField allocates private CALayer sublayers immediately
+ *     // on creation, even before being added to any view hierarchy.
+ *     if let sublayer = textField.layer.sublayers?.first {
+ *       keyWindow.layer.removeFromSuperlayer()       // ← detaches window from screen
+ *       sublayer.addSublayer(keyWindow.layer)        // ← moves into private off-screen layer
+ *     }
+ *   }
+ *
+ * On iOS with New Architecture (Fabric/JSI), useEffects fire synchronously with
+ * the first JS→native commit, which is dispatched to the main thread in the SAME
+ * run-loop cycle as the initial CATransaction.flush(). At that point the window's
+ * CALayer tree has been constructed in memory but the layers have NOT yet been
+ * presented to the iOS display compositor (the GPU has not received the first frame).
+ *
+ * When preventScreenCapture() runs at this moment:
+ *   1. keyWindow.layer.removeFromSuperlayer() — detaches the window layer from the
+ *      screen's root layer before the compositor has registered it.
+ *   2. sublayer.addSublayer(keyWindow.layer) — reparents it into UITextField's
+ *      private off-screen CALayer (backed by no UIWindow or UIScreen).
+ *
+ * Result: the entire app renders into an off-screen buffer. The physical display
+ * receives no content. The screen appears completely BLACK.
+ *
+ * Fix: gate preventScreenCapture on isLoading=false. By that point:
+ *   • SessionProvider.getSession() has completed (one async round-trip).
+ *   • At least one React render cycle and main-thread run-loop iteration have passed.
+ *   • The CATransaction for the first frame has been flushed and presented.
+ *   • The window's CALayer is fully registered with the display compositor.
+ *   • Reparenting now works correctly — content remains visible.
+ *
+ * Security: the loading phase shows only an ActivityIndicator (no sensitive content).
+ * Protection activates before any auth screen or user-owned content is ever rendered.
  *
  * Key = 'root-shell' — distinct from the (app)/ 'app-shell' key and the lesson 'lesson'
  * key. All three locks must be individually released before the OS permits capture again.
  *
  * Super Admin bypass: when a verified Super Admin session is active, we release this
- * root-level lock so they can take screenshots in their administrative capacity. The
- * bypass is driven by isSuperAdmin from SecurityContext (backend-verified profile role).
+ * root-level lock so they can take screenshots in their administrative capacity.
  *
- * AppState: the protection is re-applied on every foreground transition to survive
+ * AppState: protection is re-applied on every foreground transition to survive
  * background/foreground cycles where iOS may reset the UITextField secure state.
  */
 const ROOT_SC_KEY = 'root-shell';
@@ -113,10 +147,18 @@ function RootScreenCapture() {
   const isSuperAdminRef = useRef(isSuperAdmin);
   isSuperAdminRef.current = isSuperAdmin;
 
-  // Apply / release based on Super Admin status
+  // isLoading from SessionProvider: false once getSession() has resolved.
+  // We MUST NOT call preventScreenCaptureAsync until isLoading=false.
+  // See detailed explanation in the comment block above.
+  const { isLoading } = useSession();
+
+  // Apply / release based on Super Admin status.
+  // Gated on !isLoading so the first native frame is already presented before
+  // we reparent keyWindow.layer into the UITextField secure sublayer.
   useEffect(() => {
     if (process.env.EXPO_OS === 'web') return;
     if (!ScreenCapture) return; // native module not linked (missing pod) — no-op
+    if (isLoading) return;      // wait: first frame not yet committed to the compositor
     if (isSuperAdmin) {
       // Super Admin: release the root-level lock so they can screenshot freely
       ScreenCapture.allowScreenCaptureAsync(ROOT_SC_KEY).catch(() => {});
@@ -124,7 +166,7 @@ function RootScreenCapture() {
       // Normal user (including unauthenticated): protection must be active
       ScreenCapture.preventScreenCaptureAsync(ROOT_SC_KEY).catch(() => {});
     }
-  }, [isSuperAdmin]);
+  }, [isSuperAdmin, isLoading]);
 
   // Re-apply on every foreground transition — iOS may reset the protection state
   // across background/foreground cycles (particularly on older iOS versions).
