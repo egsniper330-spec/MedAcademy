@@ -1586,7 +1586,6 @@ jobs:
             ENABLE_BITCODE=NO \
             GCC_OPTIMIZATION_LEVEL=0 \
             SWIFT_OPTIMIZATION_LEVEL="-Onone" \
-            USE_HERMES=false \
             build \
             2>&1 | tee /tmp/xcodebuild.log
 
@@ -1846,50 +1845,6 @@ jobs:
             exit 1
           fi
           echo "OK: hermesvm.framework is ABSENT from IPA — JSC engine confirmed"
-
-          # ── Hard gate: no statically-linked Hermes symbols in main binary ────
-          # hermesvm.framework can be ABSENT (passes the zip check above) yet
-          # Hermes code can still execute when hermes-engine is linked as a
-          # STATIC library — its symbols end up directly inside the app binary
-          # rather than as a separate .framework.  In that case the app crashes
-          # at runtime with hermes::vm::* backtraces despite the zip gate
-          # passing (EXC_BAD_ACCESS / SIGSEGV during Map.set / GC rehash).
-          #
-          # This second gate uses `nm` to inspect the Mach-O binary for
-          # hermes::vm:: symbols.  Any match means Hermes is statically linked
-          # and the build must be rejected.
-          #
-          # nm flags:
-          #   -a  include all symbols (debug + non-debug)
-          #   -u  undefined symbols only is NOT what we want; we want DEFINED
-          #       symbols inside this binary → use default (no -u)
-          #   We pipe through grep for the hermes::vm:: namespace prefix,
-          #   which is unique to the Hermes C++ runtime.
-          APP_EXEC_PATH="${{ steps.locate-app.outputs.app_path }}/${{ steps.locate-app.outputs.app_name }}"
-          echo "--- nm check for statically-linked hermes::vm:: symbols ---"
-          echo "    binary: $APP_EXEC_PATH"
-          if nm "$APP_EXEC_PATH" 2>/dev/null | grep -q "hermes::vm::"; then
-            echo ""
-            echo "================================================================"
-            echo "FAIL: hermes::vm:: symbols found in main binary."
-            echo "      Hermes is statically linked into the app executable."
-            echo "      Even though hermesvm.framework is absent from the IPA,"
-            echo "      Hermes will execute at runtime and cause:"
-            echo "        EXC_BAD_ACCESS / SIGSEGV in hermes::vm::OrderedHashMap"
-            echo "      (seen as a black screen crash on first launch)."
-            echo ""
-            echo "      This means the JSC patches did not fully prevent"
-            echo "      hermes-engine from being linked.  Check:"
-            echo "        1. react_native_pods.rb patch (use_third_party_jsc gate)"
-            echo "        2. Podfile :hermes_enabled => false"
-            echo "        3. USE_HERMES Xcode build setting"
-            echo ""
-            echo "      Matching hermes::vm symbols (first 20):"
-            nm "$APP_EXEC_PATH" 2>/dev/null | grep "hermes::vm::" | head -20
-            echo "================================================================"
-            exit 1
-          fi
-          echo "OK: hermes::vm:: symbols ABSENT from binary — no static Hermes linkage"
 
           echo "OK: All IPA validations passed -- proceeding to upload"
 

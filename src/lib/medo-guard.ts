@@ -108,11 +108,15 @@ export function assertMeDoBlocked(): void {
   const configuredUrl = process.env.EXPO_PUBLIC_SUPABASE_URL ?? '';
 
   if (!configuredUrl) {
-    const msg =
-      '[MEDO-GUARD] ❌  EXPO_PUBLIC_SUPABASE_URL is not set. ' +
-      'The app has no Supabase project configured.';
-    console.error(msg);
-    throw new Error(msg);
+    // Warn but don't throw — the env var may be missing in local dev/preview
+    // environments where EAS env injection hasn't run yet. The app will still
+    // fail gracefully at the Supabase call level rather than crashing the root layout.
+    console.warn(
+      '[MEDO-GUARD] ⚠️  EXPO_PUBLIC_SUPABASE_URL is not set. ' +
+      'The app has no Supabase project configured. ' +
+      'Add it to .env or configure EAS environment variables.'
+    );
+    return;
   }
 
   const host = extractHostname(configuredUrl);
@@ -125,7 +129,13 @@ export function assertMeDoBlocked(): void {
       `  Actual host:               ${host ?? '(parse error)'}\n` +
       `  Fix: set EXPO_PUBLIC_SUPABASE_URL=https://${ACTIVE_PROJECT}.supabase.co in .env.local`;
     console.error(msg);
-    throw new Error(msg);
+    // In development: throw immediately so the misconfiguration is caught during testing.
+    // In production: log and return — throwing here crashes the root-layout module
+    // evaluation, which leaves React Native with no component tree to render and
+    // produces a completely black screen with no visible error on device.
+    // The app will fail gracefully when Supabase API calls return auth errors.
+    if (__DEV__) throw new Error(msg);
+    return;
   }
 
   // Verify old project is not the configured URL
@@ -135,7 +145,8 @@ export function assertMeDoBlocked(): void {
       `  EXPO_PUBLIC_SUPABASE_URL = "${configuredUrl}"\n` +
       `  This URL must be updated to point to: ${ACTIVE_PROJECT}`;
     console.error(msg);
-    throw new Error(msg);
+    if (__DEV__) throw new Error(msg);
+    return;
   }
 
   console.log('[MEDO-GUARD] ✅  Active project verified:', ACTIVE_PROJECT);
