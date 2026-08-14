@@ -1,0 +1,11 @@
+diff --git a/node_modules/expo-screen-capture/app.plugin.js b/node_modules/expo-screen-capture/app.plugin.js
+new file mode 100644
+index 0000000..12d72b3
+--- /dev/null
++++ b/node_modules/expo-screen-capture/app.plugin.js
+@@ -0,0 +1,5 @@
++// Fix for Node 24 TypeScript ESM stripping incompatibility.
++// expo-screen-capture has no build-time config modifications.
++const { createRunOncePlugin } = require('@expo/config-plugins');
++const withScreenCapture = (config) => config;
++module.exports = createRunOncePlugin(withScreenCapture, 'expo-screen-capture', '55.0.16');

@@ -11,7 +11,13 @@ import { PortalHost } from '@rn-primitives/portal';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import * as NavigationBar from 'expo-navigation-bar';
-import * as ScreenCapture from 'expo-screen-capture';
+// expo-screen-capture uses requireNativeModule() which throws at import time
+// if the native pod was not linked (i.e. the package was missing from app.json
+// plugins when `expo prebuild` ran).  Guard with requireOptionalNativeModule so
+// a missing pod produces a no-op instead of crashing the root layout.
+import { requireOptionalNativeModule } from 'expo-modules-core';
+type ScreenCaptureModule = typeof import('expo-screen-capture');
+const ScreenCapture = requireOptionalNativeModule<ScreenCaptureModule>('ExpoScreenCapture') as ScreenCaptureModule | null;
 
 import { SessionProvider, useSession } from '@/ctx';
 import { ToastProvider } from '@/components/Toast';
@@ -110,6 +116,7 @@ function RootScreenCapture() {
   // Apply / release based on Super Admin status
   useEffect(() => {
     if (process.env.EXPO_OS === 'web') return;
+    if (!ScreenCapture) return; // native module not linked (missing pod) — no-op
     if (isSuperAdmin) {
       // Super Admin: release the root-level lock so they can screenshot freely
       ScreenCapture.allowScreenCaptureAsync(ROOT_SC_KEY).catch(() => {});
@@ -123,12 +130,13 @@ function RootScreenCapture() {
   // across background/foreground cycles (particularly on older iOS versions).
   useEffect(() => {
     if (process.env.EXPO_OS === 'web') return;
+    if (!ScreenCapture) return; // native module not linked — no-op
     const sub = AppState.addEventListener('change', (nextState) => {
       if (nextState === 'active') {
         if (isSuperAdminRef.current) {
-          ScreenCapture.allowScreenCaptureAsync(ROOT_SC_KEY).catch(() => {});
+          ScreenCapture!.allowScreenCaptureAsync(ROOT_SC_KEY).catch(() => {});
         } else {
-          ScreenCapture.preventScreenCaptureAsync(ROOT_SC_KEY).catch(() => {});
+          ScreenCapture!.preventScreenCaptureAsync(ROOT_SC_KEY).catch(() => {});
         }
       }
     });
@@ -139,8 +147,9 @@ function RootScreenCapture() {
   // in normal app lifecycle, but ensures clean state on web/test environments).
   useEffect(() => {
     if (process.env.EXPO_OS === 'web') return;
+    if (!ScreenCapture) return; // native module not linked — no-op
     return () => {
-      ScreenCapture.allowScreenCaptureAsync(ROOT_SC_KEY).catch(() => {});
+      ScreenCapture!.allowScreenCaptureAsync(ROOT_SC_KEY).catch(() => {});
     };
   }, []);
 

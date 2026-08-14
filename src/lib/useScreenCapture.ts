@@ -12,8 +12,11 @@
  * backend-verified session (SecurityContext.isSuperAdmin).
  */
 import { useEffect } from 'react';
-import * as ScreenCapture from 'expo-screen-capture';
+import { requireOptionalNativeModule } from 'expo-modules-core';
 import { logSecurityEvent } from '@/lib/security';
+
+type ScreenCaptureModule = typeof import('expo-screen-capture');
+const ScreenCapture = requireOptionalNativeModule<ScreenCaptureModule>('ExpoScreenCapture') as ScreenCaptureModule | null;
 
 // Stable key — distinct from useContentProtection's 'lesson' key so the two
 // hooks can coexist on the same screen without racing on cleanup.
@@ -49,6 +52,7 @@ export function useScreenCapture(opts: Options = {}) {
   // another hook (e.g. useContentProtection's 'lesson' tag).
   useEffect(() => {
     if (process.env.EXPO_OS === 'web') return;
+    if (!ScreenCapture) return; // native module not linked (missing pod) — no-op
     if (!blockCapture || isSuperAdmin) {
       // Either explicitly disabled or Super Admin bypass active — ensure lock is released
       ScreenCapture.allowScreenCaptureAsync(SC_KEY).catch(() => {});
@@ -60,7 +64,7 @@ export function useScreenCapture(opts: Options = {}) {
     });
 
     return () => {
-      ScreenCapture.allowScreenCaptureAsync(SC_KEY).catch(() => {});
+      ScreenCapture!.allowScreenCaptureAsync(SC_KEY).catch(() => {});
     };
   }, [blockCapture, isSuperAdmin]);
 
@@ -68,6 +72,7 @@ export function useScreenCapture(opts: Options = {}) {
   // Super Admin bypass: do not install listener — SA is allowed to screenshot.
   useEffect(() => {
     if (process.env.EXPO_OS === 'web') return;
+    if (!ScreenCapture) return; // native module not linked — no-op
     if (isSuperAdmin) return;
 
     const subscription = ScreenCapture.addScreenshotListener(() => {
