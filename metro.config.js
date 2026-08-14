@@ -55,6 +55,10 @@ const EXPO_CALENDAR_STUB         = path.join(STUBS, 'expo-calendar-stub.js');
 const EXPO_FILE_SYSTEM_STUB      = path.join(STUBS, 'expo-file-system-stub.js');
 const EXPO_FILE_SYSTEM_NEXT_STUB = path.join(STUBS, 'expo-file-system-next-stub.js');
 const EXPO_IMAGE_PICKER_STUB     = path.join(STUBS, 'expo-image-picker-stub.js');
+// @react-native-community/netinfo throws at module-evaluation time on web when
+// NativeModules.RNCNetInfo is null.  The throw propagates through SecurityContext
+// and kills the entire JS startup → white/black screen.  Stub it out on web.
+const NETINFO_STUB               = path.join(STUBS, 'netinfo-stub.js');
 
 // ─── cssInterop: redirect expo-image / expo-linear-gradient / expo-blur ───────
 // These stubs call cssInterop() on the real package so NativeWind className
@@ -141,6 +145,16 @@ function withPlatformStubs(config) {
       !context.originModulePath.includes('expo-haptics-stub.js')
     ) {
       return { filePath: EXPO_HAPTICS_STUB, type: 'sourceFile' };
+    }
+    // @react-native-community/netinfo throws at module-evaluation on web
+    // (NativeModules.RNCNetInfo is null → hard throw in nativeInterface.js)
+    // which kills the entire JS startup before React renders anything.
+    if (
+      platform === 'web' &&
+      moduleName === '@react-native-community/netinfo' &&
+      !context.originModulePath.includes('netinfo-stub.js')
+    ) {
+      return { filePath: NETINFO_STUB, type: 'sourceFile' };
     }
     if (
       platform === 'web' &&

@@ -1,7 +1,9 @@
 import { useEffect, useRef } from 'react';
 import { Stack, useRouter } from 'expo-router';
 import { AppState, View } from 'react-native';
-import * as ScreenCapture from 'expo-screen-capture';
+import { requireOptionalNativeModule } from 'expo-modules-core';
+type ScreenCaptureModule = typeof import('expo-screen-capture');
+const ScreenCapture = requireOptionalNativeModule<ScreenCaptureModule>('ExpoScreenCapture') as ScreenCaptureModule | null;
 import { useSession } from '@/ctx';
 import { useProfileStore } from '@/lib/store';
 import { getProfile } from '@/lib/api';
@@ -54,13 +56,14 @@ function AppLayoutNav() {
   // permits capture again, so the lesson lock acts as belt-and-suspenders.
   useEffect(() => {
     if (process.env.EXPO_OS === 'web') return;
+    if (!ScreenCapture) return; // native module not linked (missing pod) — no-op
     if (isSuperAdmin) {
       // Verified Super Admin: release the app-shell lock
       ScreenCapture.allowScreenCaptureAsync(APP_SC_KEY).catch(() => {});
     } else {
       ScreenCapture.preventScreenCaptureAsync(APP_SC_KEY).catch(() => {});
     }
-    return () => { ScreenCapture.allowScreenCaptureAsync(APP_SC_KEY).catch(() => {}); };
+    return () => { ScreenCapture!.allowScreenCaptureAsync(APP_SC_KEY).catch(() => {}); };
   }, [isSuperAdmin]);
 
   // ── Background → foreground re-check ──────────────────────────────────────
