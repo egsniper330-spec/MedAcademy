@@ -14,6 +14,8 @@ import { getProfile } from '@/lib/api';
 import { UploadFAB } from '@/components/VideoUploadQueue';
 import { useSecurity } from '@/lib/SecurityContext';
 import type { RelativePathString } from 'expo-router';
+import { diag, diagError } from '@/lib/diagnostics';
+
 
 // Roles that can upload videos and need the floating upload queue FAB.
 const UPLOAD_ROLES = new Set(['doctor', 'admin', 'super_admin']);
@@ -82,13 +84,19 @@ function AppLayoutNav() {
   useEffect(() => {
     if (process.env.EXPO_OS === 'web') return;
     let cancelled = false;
+    diag('APP_SC', `APP_SC_KEY effect SCHEDULED setTimeout(0)`, `isSuperAdmin=${isSuperAdmin}`);
     const timer = setTimeout(() => {
       if (cancelled) return;
+      diag('APP_SC', `APP_SC_KEY setTimeout(0) FIRED`, `isSuperAdmin=${isSuperAdmin}`);
       if (isSuperAdmin) {
         // Verified Super Admin: release the app-shell lock
-        ScreenCaptureLib.allowScreenCaptureAsync(APP_SC_KEY).catch(() => {});
+        ScreenCaptureLib.allowScreenCaptureAsync(APP_SC_KEY)
+          .then(() => diag('APP_SC', 'APP_SC_KEY allowScreenCaptureAsync RESOLVED'))
+          .catch((e) => diagError('ERR', 'APP_SC_KEY allowScreenCaptureAsync FAILED', e));
       } else {
-        ScreenCaptureLib.preventScreenCaptureAsync(APP_SC_KEY).catch(() => {});
+        ScreenCaptureLib.preventScreenCaptureAsync(APP_SC_KEY)
+          .then(() => diag('APP_SC', 'APP_SC_KEY preventScreenCaptureAsync RESOLVED'))
+          .catch((e) => diagError('ERR', 'APP_SC_KEY preventScreenCaptureAsync FAILED', e));
       }
     }, 0);
     return () => {

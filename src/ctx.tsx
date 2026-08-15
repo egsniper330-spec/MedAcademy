@@ -5,6 +5,10 @@ import * as SecureStore from 'expo-secure-store';
 
 import { supabase } from '@/client/supabase';
 import { getInstallationId, getStoredDeviceFingerprint, clearDeviceFingerprint } from '@/lib/installationId';
+import { diag, diagError } from '@/lib/diagnostics';
+
+// DIAG: record that the SessionProvider module was evaluated (proves bundle loading).
+diag('SESSION', 'ctx.tsx module evaluated');
 
 // ─────────────────────────────────────────────────────────────────────────────
 // AUTH TIMELINE LOGGER — silent in production, active only in __DEV__ builds
@@ -70,6 +74,8 @@ const POST_SIGNIN_GRACE_MS = 8_000;
 export function SessionProvider({ children }: { children: React.ReactNode }) {
   const [session, setSession]   = useState<Session | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  // DIAG: SessionProvider component function called (first render).
+  diag('SESSION', 'SessionProvider render/mount');
 
   const sessionRef         = useRef<Session | null>(null);
   const revokingRef        = useRef(false);
@@ -170,21 +176,25 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     authLog('SessionProvider: mounting');
+    diag('SESSION', 'SessionProvider useEffect mounting');
 
     // ── 1. Initial session load ───────────────────────────────────────────────
     (async () => {
       authLog('getSession: START');
+      diag('SESSION', 'getSession START');
       let s: Session | null = null;
       try {
         const { data } = await supabase.auth.getSession();
         s = data.session;
         authLog(`getSession: DONE user=${s?.user?.id ?? 'none'} expires_at=${s?.expires_at ?? 'n/a'} has_access_token=${!!s?.access_token} has_refresh_token=${!!s?.refresh_token}`);
+        diag('SESSION', 'getSession DONE', `user=${s?.user?.id ?? 'none'} session=${!!s}`);
       } catch (err) {
         // getSession() should never throw (supabase-js returns {data, error}), but if
         // the network layer rejects (e.g. completely unreachable host on first network
         // call), we must still resolve isLoading so the UI renders instead of staying
         // black.
         authLog(`getSession: UNEXPECTED ERROR (non-fatal, treating as no session): ${err}`);
+        diagError('ERR', 'getSession UNEXPECTED ERROR', err);
       }
 
       if (s) {
@@ -204,6 +214,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       sessionRef.current = s;
       setIsLoading(false);
       authLog('setIsLoading(false)');
+      diag('SESSION', 'setIsLoading FALSE — auth init complete', `session=${!!s}`);
 
       // Only check on a truly RESTORED session (lastSignedInAt=0 means no
       // SIGNED_IN/INITIAL_SESSION has fired yet → storedVersion from previous launch).
@@ -218,6 +229,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
     // ── 2. Auth state listener ────────────────────────────────────────────────
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, s) => {
       authLog(`onAuthStateChange: event=${event} user=${s?.user?.id ?? 'none'} expires_at=${s?.expires_at ?? 'n/a'} has_access_token=${!!s?.access_token} has_refresh_token=${!!s?.refresh_token}`);
+      diag('SESSION', `onAuthStateChange ${event}`, `user=${s?.user?.id ?? 'none'}`);
       setSession(s);
       sessionRef.current = s;
 
