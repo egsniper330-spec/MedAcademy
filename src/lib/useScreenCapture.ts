@@ -60,18 +60,39 @@ export function useScreenCapture(opts: Options = {}) {
   // Using a key (instead of the no-arg overload) means allowScreenCaptureAsync
   // in cleanup ONLY removes this hook's lock — it never lifts a lock set by
   // another hook (e.g. useContentProtection's 'lesson' tag).
+  //
+  // iOS TIMING FIX — setTimeout(0):
+  // On iOS with New Architecture (Fabric/JSI), useEffects fire in the same
+  // main-thread run-loop cycle as the React commit that mounts this screen.
+  // If preventScreenCapture() runs at that moment it calls
+  // keyWindow.layer.removeFromSuperlayer() before the first CATransaction for
+  // the new screen has flushed → window layer reparented into UITextField's
+  // off-screen CALayer → screen goes BLACK.
+  // A single setTimeout(0) defers the call to the next run-loop iteration, by
+  // which point the initial CATransaction has already flushed and the window
+  // layer is properly registered with the display compositor.
+  // Android: FLAG_SECURE sets a SurfaceView flag, never reparents the window
+  // layer, and is not affected by this timing issue — behaviour unchanged.
   useEffect(() => {
     if (process.env.EXPO_OS === 'web') return;
+    let cancelled = false;
     if (!blockCapture || isSuperAdmin) {
+      // Release path is immediate — allowScreenCaptureAsync never reparents
+      // the window layer so there is no compositor timing risk.
       ScreenCaptureLib.allowScreenCaptureAsync(SC_KEY).catch(() => {});
       return;
     }
 
-    ScreenCaptureLib.preventScreenCaptureAsync(SC_KEY).catch(() => {
-      // Non-fatal — simulators/emulators may reject this
-    });
+    const timer = setTimeout(() => {
+      if (cancelled) return;
+      ScreenCaptureLib.preventScreenCaptureAsync(SC_KEY).catch(() => {
+        // Non-fatal — simulators/emulators may reject this
+      });
+    }, 0);
 
     return () => {
+      cancelled = true;
+      clearTimeout(timer);
       ScreenCaptureLib.allowScreenCaptureAsync(SC_KEY).catch(() => {});
     };
   }, [blockCapture, isSuperAdmin]);

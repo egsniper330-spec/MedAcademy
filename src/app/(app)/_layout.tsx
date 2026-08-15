@@ -58,15 +58,44 @@ function AppLayoutNav() {
   // The lesson screen adds a second keyed lock ('lesson') for its
   // violation-reporting overlay — both locks must be released before the OS
   // permits capture again, so the lesson lock acts as belt-and-suspenders.
+  //
+  // iOS TIMING FIX — setTimeout(0) async tick:
+  // On iOS with New Architecture (Fabric/JSI), useEffects fire synchronously
+  // within the same React commit that mounts (app)/_layout. This commit is
+  // triggered by the same state update that sets isLoading=false in SessionProvider.
+  // Both events land in the same main-thread run-loop cycle, meaning
+  // preventScreenCapture() runs before the first CATransaction.flush()
+  // has presented the initial frame to the display compositor.
+  //
+  // When preventScreenshots() runs at that moment, it calls
+  // keyWindow.layer.removeFromSuperlayer() and then reparents keyWindow.layer
+  // into UITextField's private off-screen CALayer. The iOS display compositor
+  // never receives the first frame → black screen.
+  //
+  // A single setTimeout(0) defers the call to the NEXT main-thread run-loop
+  // iteration, by which point the initial CATransaction has already flushed and
+  // the window layer is properly registered with the compositor. The reparenting
+  // then works correctly and content stays visible.
+  //
+  // Android: FLAG_SECURE sets a SurfaceView flag — it never reparents the window
+  // layer and is unaffected by this timing issue. The Android path is unchanged.
   useEffect(() => {
     if (process.env.EXPO_OS === 'web') return;
-    if (isSuperAdmin) {
-      // Verified Super Admin: release the app-shell lock
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      if (cancelled) return;
+      if (isSuperAdmin) {
+        // Verified Super Admin: release the app-shell lock
+        ScreenCaptureLib.allowScreenCaptureAsync(APP_SC_KEY).catch(() => {});
+      } else {
+        ScreenCaptureLib.preventScreenCaptureAsync(APP_SC_KEY).catch(() => {});
+      }
+    }, 0);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
       ScreenCaptureLib.allowScreenCaptureAsync(APP_SC_KEY).catch(() => {});
-    } else {
-      ScreenCaptureLib.preventScreenCaptureAsync(APP_SC_KEY).catch(() => {});
-    }
-    return () => { ScreenCaptureLib.allowScreenCaptureAsync(APP_SC_KEY).catch(() => {}); };
+    };
   }, [isSuperAdmin]);
 
   // ── Background → foreground re-check ──────────────────────────────────────
