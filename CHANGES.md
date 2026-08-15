@@ -1,4 +1,228 @@
-# CHANGES.md — iOS Startup Diagnostic Instrumentation (v2 — React-UI-independent)
+# CHANGES.md — iOS Startup Diagnostic v3 (Windows-compatible retrieval)
+
+## Summary of changes
+
+| File | Change |
+|------|--------|
+| `src/lib/diagnostics.ts` | Rewritten: immediate AsyncStorage write on every event, HTTP POST beacon, `buildLogText()` export, `STORAGE_KEY` export |
+| `src/app/diag.tsx` | **NEW** — standalone expo-router route `/diag`, zero provider dependencies, reads AsyncStorage directly |
+| `src/app/_layout.tsx` | Added `Stack.Screen name="diag"` outside all guards; removed `DiagScreen` overlay import |
+| `src/components/DiagScreen.tsx` | Fixed `loadPersistedDiag` call (return type changed to `{sessionId,entries}|null`) |
+
+**No changes to:** `ios/`, `app.json`, `.github/workflows/`, `ctx.tsx`, `(app)/_layout.tsx`, `useScreenCapture.ts`, JSC/Hermes config, ScreenCapture logic, SessionProvider.
+
+---
+
+## Why v2 failed (and what v3 fixes)
+
+v2 added a `DiagScreen` React overlay at `zIndex 99999`. The overlay was still invisible
+because it is a **React component** — when the entire React render tree produces no output
+(black screen), the overlay is also black. There is no such thing as a React component that
+renders "above" a non-rendering React tree.
+
+v3 removes the overlay entirely and replaces it with two React-UI-independent mechanisms:
+
+1. **`/diag` expo-router route** — a plain `default export` page registered **outside all
+   `Stack.Protected` guards and outside `SessionProvider`/`SecurityProvider`**. It is
+   navigable via deep link (`medacademy:///diag`) even when the normal app UI is black,
+   because expo-router's deep-link handler fires before `index.tsx` renders.
+
+2. **Immediate AsyncStorage write on every `diag()` call** — no debounce. The log is
+   persisted within milliseconds of the first JS event, before any React component mounts.
+   If the app crashes or black-screens before the `/diag` route can be reached, the log
+   is still readable on the next launch via the `/diag` "Prev session" tab.
+
+---
+
+## Detailed file changes
+
+### `src/lib/diagnostics.ts` (rewritten)
+
+**Key changes vs v2:**
+
+| Feature | v2 | v3 |
+|---------|----|----|
+| AsyncStorage write | Debounced 800 ms | **Immediate on every `diag()` call** |
+| HTTP beacon | None | **POST to `EXPO_PUBLIC_DIAG_ENDPOINT` (debounced 1 500 ms)** |
+| `loadPersistedDiag` return type | `DiagEntry[]` | `{ sessionId: string; entries: DiagEntry[] } \| null` |
+| `buildLogText()` | Not exported | **Exported** — used by `/diag` Share button and beacon |
+| `STORAGE_KEY` | Not exported | **Exported** — used by `/diag` direct AsyncStorage read |
+
+**`EXPO_PUBLIC_DIAG_ENDPOINT`** — optional env var baked into the bundle at build time.
+Set to any URL that accepts `POST text/plain` and returns a paste URL in the response body.
+Recommended: `https://paste.rs` (returns the paste URL as the response body).
+Leave unset to disable HTTP beaconing (storage-only mode).
+
+### `src/app/diag.tsx` (new file)
+
+Standalone diagnostic screen with NO imports from:
+- `@/ctx` (SessionProvider)
+- `@/lib/SecurityContext`
+- `@/lib/store`
+- `@/client/supabase`
+
+It reads AsyncStorage **directly** using the exported `STORAGE_KEY` constant.
+
+Features:
+- **Current tab** — log from current session (reads AsyncStorage directly)
+- **Prev tab** — log from previous session (different `sessionId`)
+- **↻ Reload** — re-reads AsyncStorage
+- **⬆ Share / Copy** — iOS native Share sheet (AirDrop, Mail, copy to clipboard)
+- **📡 POST Beacon** — manually trigger HTTP POST to `EXPO_PUBLIC_DIAG_ENDPOINT`
+
+### `src/app/_layout.tsx` (modified)
+
+Added inside `RootLayoutNav()`:
+```tsx
+<Stack.Screen name="diag" options={{ title: 'Diagnostics', headerShown: true }} />
+```
+Placed **before** both `Stack.Protected` blocks so it is always reachable.
+
+Removed `DiagScreen` import and `<DiagScreen />` JSX (replaced by comment).
+
+---
+
+## HOW TO RETRIEVE THE LOG ON WINDOWS
+
+### Method 1 — Deep link to `/diag` (PRIMARY — no tools needed)
+
+This works even if the app normally shows a black screen.
+
+**Step 1 — Open the app once** (even if it goes black immediately, the log is written
+to AsyncStorage within ~50 ms of the first JS event).
+
+**Step 2 — Navigate to the `/diag` screen using one of these techniques:**
+
+#### Option A: iPhone Contacts trick (no extra app needed)
+1. Open the built-in **Contacts** app on the iPhone.
+2. Tap **+** to create a new contact (name: "Diag").
+3. Tap **add URL** → type or paste: `medacademy:///diag`
+4. Tap **Done** to save.
+5. Tap the URL in the contact card → the app opens at `/diag`.
+
+#### Option B: iPhone Safari address bar
+1. Open **Safari** on the iPhone.
+2. Tap the address bar → type: `medacademy:///diag` → tap **Go**.
+3. Safari will prompt "Open in MedAcademy?" → tap **Open**.
+
+#### Option C: QR code (generate on Windows, scan on iPhone)
+1. On your Windows PC, go to https://qr.io or https://www.qr-code-generator.com.
+2. Enter the URL: `medacademy:///diag`
+3. Download the QR code image.
+4. On the iPhone, open the **Camera** app and scan the QR code.
+5. Tap the notification banner → the app opens at `/diag`.
+
+**Step 3 — Read the log on the `/diag` screen.**
+
+The screen shows all events colour-coded by tag. Scroll up to see the earliest events.
+If the current session shows no events, tap **Prev** to see the previous session's log.
+
+**Step 4 — Export the log (send it to yourself).**
+
+Tap **⬆ Share / Copy** → the iOS Share sheet appears. Options:
+- **AirDrop** to another Apple device on the same WiFi (then email/upload from there).
+- **Mail** — email yourself the log text.
+- **Copy** — copies to clipboard; paste into Notes or a text editor.
+- **Files** — save to iCloud Drive; accessible from Windows via iCloud for Windows or
+  iCloud.com.
+- **WhatsApp / Telegram / Messages** — paste into any messaging app.
+
+### Method 2 — HTTP POST beacon (AUTOMATIC — fires without touching the phone)
+
+This fires **automatically** ~1.5 seconds after the last diagnostic event, even if the
+app is black, as long as the phone has internet access.
+
+**Setup (one-time, at build time):**
+
+1. Add to your `.env` / GitHub Actions secret / EAS secret:
+   ```
+   EXPO_PUBLIC_DIAG_ENDPOINT=https://paste.rs
+   ```
+2. Rebuild the IPA with this env var set.
+
+**How to read it:**
+1. Install the app and launch it (even if black).
+2. Wait ~3 seconds.
+3. The app POSTs the full log to `https://paste.rs`.
+4. The response body is the paste URL (e.g. `https://paste.rs/AbCdEf`).
+5. That URL is logged as a `[BEACON]` event in the diagnostic log AND printed to console.
+6. On your Windows PC, open the paste URL in any browser.
+
+**Alternative paste endpoints:**
+- `https://paste.rs` — returns URL in body, no auth needed, free
+- `https://hastebin.com/documents` — returns JSON `{"key":"..."}`, base URL is `https://hastebin.com/`
+- Any webhook endpoint (e.g. a free Pipedream / webhook.site URL)
+
+### Method 3 — idevicesyslog on Windows (console.log capture)
+
+If you want raw console.log output on Windows without Xcode:
+
+1. Install **iTunes** (from Apple website — NOT the Microsoft Store version).
+2. Download **libimobiledevice** Windows build from:
+   https://github.com/libimobiledevice-win32/imobiledevice-net/releases
+   Extract to `C:\imd\`.
+3. Connect iPhone via USB. Run in PowerShell:
+   ```powershell
+   C:\imd\idevicesyslog.exe | Select-String "\[DIAG"
+   ```
+4. Launch the app. All `[DIAG +Nms]` lines appear in the PowerShell window.
+
+### Method 4 — 3uTools (GUI app for Windows)
+
+1. Download **3uTools** from https://www.3u.com (free, Windows).
+2. Connect iPhone via USB, trust the PC.
+3. In 3uTools: **Toolbox → Real-time Log**.
+4. Filter by `DIAG`.
+5. Launch the app. All diagnostic events appear.
+
+---
+
+## What each tag tells you
+
+| Tag | Meaning |
+|-----|---------|
+| `JS` | JS bundle evaluated — proves JSC is running and the bundle loaded |
+| `GLOBAL` | Global error catcher status + any uncaught errors |
+| `SESSION` | `ctx.tsx` eval → `SessionProvider` mount → `getSession` START/DONE → `setIsLoading(false)` |
+| `LAYOUT` | `_layout.tsx` eval → `RootLayout` executing → mount `useEffect` |
+| `SC` | ROOT_SC_KEY screen-capture: isLoading gate skip/fire, resolve/fail |
+| `APP_SC` | APP_SC_KEY: setTimeout(0) scheduled/fired, resolve/fail |
+| `USE_SC` | SC_KEY (lesson screen): allow/prevent, resolve/fail |
+| `ERR` | Any caught error with message + stack line |
+| `BEACON` | HTTP POST result (status + paste URL if endpoint is configured) |
+
+## Expected happy-path (fresh install, no prior session)
+
+```
+[JS]      bundle eval — diagnostics v3 loaded
+[GLOBAL]  ErrorUtils.setGlobalHandler installed
+[GLOBAL]  unhandledrejection listener installed
+[SESSION] ctx.tsx module evaluated
+[LAYOUT]  _layout.tsx module evaluated — JS runtime is alive
+[LAYOUT]  RootLayout component executing
+[SESSION] SessionProvider render/mount
+[SESSION] SessionProvider useEffect mounting
+[SESSION] getSession START
+[LAYOUT]  RootLayout mount useEffect fired
+[SC]      RootScreenCapture render   isLoading=true
+[SC]      ROOT_SC_KEY effect — isLoading=true SKIPPED
+[SESSION] getSession DONE            user=none session=false
+[SESSION] setIsLoading FALSE
+[SC]      RootScreenCapture render   isLoading=false
+[SC]      ROOT_SC_KEY effect FIRING
+[SC]      ROOT_SC_KEY preventScreenCaptureAsync RESOLVED
+[BEACON]  HTTP 200 → https://paste.rs/AbCdEf   (if endpoint configured)
+```
+
+## Removal instructions
+
+Once diagnosis is complete:
+1. Delete `src/app/diag.tsx`
+2. Delete `src/lib/diagnostics.ts`
+3. Delete `src/components/DiagScreen.tsx`
+4. In `src/app/_layout.tsx`: remove the `diag` import line, the `Stack.Screen name="diag"` element, and the comment block
+5. In `src/ctx.tsx`, `src/app/(app)/_layout.tsx`, `src/lib/useScreenCapture.ts`: remove `import { diag, diagError }` and all `diag()`/`diagError()` calls
+6. Remove `EXPO_PUBLIC_DIAG_ENDPOINT` from your env / secrets if set
 
 **Root change:** `diagnostics.ts` completely rewritten. Every `diag()` call now
 **immediately writes to `console.log`** — no React rendering required.

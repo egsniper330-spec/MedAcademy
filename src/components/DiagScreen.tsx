@@ -68,8 +68,8 @@ export function DiagScreen() {
 
   // Load persisted log from previous session on mount
   useEffect(() => {
-    loadPersistedDiag().then((prev) => {
-      if (prev.length > 0) setPrevEntries(prev);
+    loadPersistedDiag().then((result) => {
+      if (result && result.entries.length > 0) setPrevEntries(result.entries);
     }).catch(() => {});
   }, []);
 

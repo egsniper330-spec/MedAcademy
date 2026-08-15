@@ -46,7 +46,6 @@ assertMeDoBlocked();
 
 // ── DIAGNOSTIC: instrument this module's evaluation ───────────────────────────
 import { diag, diagError } from '@/lib/diagnostics';
-import { DiagScreen } from '@/components/DiagScreen';
 diag('LAYOUT', '_layout.tsx module evaluated — JS runtime is alive');
 
 /**
@@ -268,6 +267,14 @@ function RootLayoutNav() {
     <Stack screenOptions={{ headerShown: false }}>
       {/* index is ALWAYS in the route table — serves as loading screen and landing page */}
       <Stack.Screen name="index" />
+      {/*
+       * ── /diag — standalone diagnostic screen ─────────────────────────────
+       * Registered OUTSIDE all Stack.Protected guards.
+       * Accessible via deep link: medacademy:///diag
+       * Renders even when SessionProvider / SecurityProvider cause a black screen.
+       * Remove once diagnosis is complete.
+       */}
+      <Stack.Screen name="diag" options={{ title: 'Diagnostics', headerShown: true }} />
       {/* Public routes (sign-in, sign-up, etc.) — active only when not logged in */}
       <Stack.Protected guard={!session && !isLoading}>
         <Stack.Screen name="(auth)" />
@@ -321,13 +328,10 @@ const RootLayout: React.FC = () => {
           </SecurityProvider>
         </SessionProvider>
         {/*
-         * ── DIAGNOSTIC OVERLAY ────────────────────────────────────────────────
-         * Rendered OUTSIDE SessionProvider/SecurityProvider so it is visible
-         * even when all providers fail or when the normal UI goes black.
-         * zIndex 99999 keeps it above every navigator and overlay.
-         * Remove this and the DiagScreen import once diagnosis is complete.
+         * ── DIAGNOSTIC OVERLAY REMOVED (v3) ──────────────────────────────────
+         * Use medacademy:///diag deep link to access the diagnostic screen.
+         * DiagScreen React overlay was not visible when the React tree was black.
          */}
-        <DiagScreen />
       </GestureHandlerRootView>
     </SafeAreaProvider>
   );
