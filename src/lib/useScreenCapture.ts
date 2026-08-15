@@ -12,11 +12,21 @@
  * backend-verified session (SecurityContext.isSuperAdmin).
  */
 import { useEffect } from 'react';
-import { requireOptionalNativeModule } from 'expo-modules-core';
+// Import the JS wrapper module directly — NOT requireOptionalNativeModule.
+//
+// WHY: requireOptionalNativeModule('ExpoScreenCapture') returns the raw native
+// module proxy, which only exposes .preventScreenCapture() and .allowScreenCapture()
+// (native-level, no key argument).  The public keyed API functions
+// preventScreenCaptureAsync(key) and allowScreenCaptureAsync(key) are JS
+// wrapper functions defined in expo-screen-capture/build/ScreenCapture.js —
+// they do NOT exist on the native proxy.  Calling them on the proxy gives
+// undefined → TypeError: undefined is not a function → fatal crash on Android.
+//
+// The JS module itself guards every native call with availability checks
+// (`if (!ExpoScreenCapture.preventScreenCapture)`), so it is safe even when
+// the native module is unavailable.
+import * as ScreenCaptureLib from 'expo-screen-capture';
 import { logSecurityEvent } from '@/lib/security';
-
-type ScreenCaptureModule = typeof import('expo-screen-capture');
-const ScreenCapture = requireOptionalNativeModule<ScreenCaptureModule>('ExpoScreenCapture') as ScreenCaptureModule | null;
 
 // Stable key — distinct from useContentProtection's 'lesson' key so the two
 // hooks can coexist on the same screen without racing on cleanup.
@@ -52,19 +62,17 @@ export function useScreenCapture(opts: Options = {}) {
   // another hook (e.g. useContentProtection's 'lesson' tag).
   useEffect(() => {
     if (process.env.EXPO_OS === 'web') return;
-    if (!ScreenCapture) return; // native module not linked (missing pod) — no-op
     if (!blockCapture || isSuperAdmin) {
-      // Either explicitly disabled or Super Admin bypass active — ensure lock is released
-      ScreenCapture.allowScreenCaptureAsync(SC_KEY).catch(() => {});
+      ScreenCaptureLib.allowScreenCaptureAsync(SC_KEY).catch(() => {});
       return;
     }
 
-    ScreenCapture.preventScreenCaptureAsync(SC_KEY).catch(() => {
+    ScreenCaptureLib.preventScreenCaptureAsync(SC_KEY).catch(() => {
       // Non-fatal — simulators/emulators may reject this
     });
 
     return () => {
-      ScreenCapture!.allowScreenCaptureAsync(SC_KEY).catch(() => {});
+      ScreenCaptureLib.allowScreenCaptureAsync(SC_KEY).catch(() => {});
     };
   }, [blockCapture, isSuperAdmin]);
 
@@ -72,10 +80,9 @@ export function useScreenCapture(opts: Options = {}) {
   // Super Admin bypass: do not install listener — SA is allowed to screenshot.
   useEffect(() => {
     if (process.env.EXPO_OS === 'web') return;
-    if (!ScreenCapture) return; // native module not linked — no-op
     if (isSuperAdmin) return;
 
-    const subscription = ScreenCapture.addScreenshotListener(() => {
+    const subscription = ScreenCaptureLib.addScreenshotListener(() => {
       void logSecurityEvent({
         eventType: 'screenshot_detected',
         detectionMethod: 'expo-screen-capture addScreenshotListener',

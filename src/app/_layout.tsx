@@ -11,13 +11,25 @@ import { PortalHost } from '@rn-primitives/portal';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import * as NavigationBar from 'expo-navigation-bar';
-// expo-screen-capture uses requireNativeModule() which throws at import time
-// if the native pod was not linked (i.e. the package was missing from app.json
-// plugins when `expo prebuild` ran).  Guard with requireOptionalNativeModule so
-// a missing pod produces a no-op instead of crashing the root layout.
-import { requireOptionalNativeModule } from 'expo-modules-core';
-type ScreenCaptureModule = typeof import('expo-screen-capture');
-const ScreenCapture = requireOptionalNativeModule<ScreenCaptureModule>('ExpoScreenCapture') as ScreenCaptureModule | null;
+// expo-screen-capture: import the JS module directly so we call the real
+// preventScreenCaptureAsync / allowScreenCaptureAsync wrapper functions.
+//
+// WHY NOT requireOptionalNativeModule:
+//   requireOptionalNativeModule('ExpoScreenCapture') returns the RAW native
+//   module proxy, which only exposes the low-level native methods:
+//     .preventScreenCapture()  (no key, no async wrapper)
+//     .allowScreenCapture()    (no key, no async wrapper)
+//   The public API functions preventScreenCaptureAsync(key) and
+//   allowScreenCaptureAsync(key) live in the JS wrapper (ScreenCapture.js),
+//   NOT on the native proxy.  Calling .preventScreenCaptureAsync() on the
+//   proxy returns undefined → TypeError: undefined is not a function → CRASH.
+//
+// SAFE IMPORT: expo-screen-capture/build/ScreenCapture.js itself guards every
+// call with `if (!ExpoScreenCapture.preventScreenCapture)` before invoking the
+// native method, so it is safe even on platforms where the native module is
+// not linked (the function throws UnavailabilityError, which we .catch()).
+// On web, we guard with process.env.EXPO_OS === 'web' before calling anything.
+import * as ScreenCaptureLib from 'expo-screen-capture';
 
 import { SessionProvider, useSession } from '@/ctx';
 import { ToastProvider } from '@/components/Toast';
@@ -157,14 +169,13 @@ function RootScreenCapture() {
   // we reparent keyWindow.layer into the UITextField secure sublayer.
   useEffect(() => {
     if (process.env.EXPO_OS === 'web') return;
-    if (!ScreenCapture) return; // native module not linked (missing pod) — no-op
     if (isLoading) return;      // wait: first frame not yet committed to the compositor
     if (isSuperAdmin) {
       // Super Admin: release the root-level lock so they can screenshot freely
-      ScreenCapture.allowScreenCaptureAsync(ROOT_SC_KEY).catch(() => {});
+      ScreenCaptureLib.allowScreenCaptureAsync(ROOT_SC_KEY).catch(() => {});
     } else {
       // Normal user (including unauthenticated): protection must be active
-      ScreenCapture.preventScreenCaptureAsync(ROOT_SC_KEY).catch(() => {});
+      ScreenCaptureLib.preventScreenCaptureAsync(ROOT_SC_KEY).catch(() => {});
     }
   }, [isSuperAdmin, isLoading]);
 
@@ -172,26 +183,23 @@ function RootScreenCapture() {
   // across background/foreground cycles (particularly on older iOS versions).
   useEffect(() => {
     if (process.env.EXPO_OS === 'web') return;
-    if (!ScreenCapture) return; // native module not linked — no-op
     const sub = AppState.addEventListener('change', (nextState) => {
       if (nextState === 'active') {
         if (isSuperAdminRef.current) {
-          ScreenCapture!.allowScreenCaptureAsync(ROOT_SC_KEY).catch(() => {});
+          ScreenCaptureLib.allowScreenCaptureAsync(ROOT_SC_KEY).catch(() => {});
         } else {
-          ScreenCapture!.preventScreenCaptureAsync(ROOT_SC_KEY).catch(() => {});
+          ScreenCaptureLib.preventScreenCaptureAsync(ROOT_SC_KEY).catch(() => {});
         }
       }
     });
     return () => sub.remove();
   }, []);
 
-  // Release the root-level lock when this component unmounts (should never happen
-  // in normal app lifecycle, but ensures clean state on web/test environments).
+  // Release the root-level lock on unmount (clean state for web/test environments).
   useEffect(() => {
     if (process.env.EXPO_OS === 'web') return;
-    if (!ScreenCapture) return; // native module not linked — no-op
     return () => {
-      ScreenCapture!.allowScreenCaptureAsync(ROOT_SC_KEY).catch(() => {});
+      ScreenCaptureLib.allowScreenCaptureAsync(ROOT_SC_KEY).catch(() => {});
     };
   }, []);
 

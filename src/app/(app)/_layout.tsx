@@ -1,9 +1,13 @@
 import { useEffect, useRef } from 'react';
 import { Stack, useRouter } from 'expo-router';
 import { AppState, View } from 'react-native';
-import { requireOptionalNativeModule } from 'expo-modules-core';
-type ScreenCaptureModule = typeof import('expo-screen-capture');
-const ScreenCapture = requireOptionalNativeModule<ScreenCaptureModule>('ExpoScreenCapture') as ScreenCaptureModule | null;
+// Fix: import JS wrapper module directly (not requireOptionalNativeModule).
+// requireOptionalNativeModule returns the raw native proxy which only has
+// .preventScreenCapture() / .allowScreenCapture() (no key arg, no async wrapper).
+// The keyed public API preventScreenCaptureAsync(key) / allowScreenCaptureAsync(key)
+// are JS-level functions in ScreenCapture.js — undefined on the proxy →
+// TypeError: undefined is not a function → fatal Android crash.
+import * as ScreenCaptureLib from 'expo-screen-capture';
 import { useSession } from '@/ctx';
 import { useProfileStore } from '@/lib/store';
 import { getProfile } from '@/lib/api';
@@ -56,14 +60,13 @@ function AppLayoutNav() {
   // permits capture again, so the lesson lock acts as belt-and-suspenders.
   useEffect(() => {
     if (process.env.EXPO_OS === 'web') return;
-    if (!ScreenCapture) return; // native module not linked (missing pod) — no-op
     if (isSuperAdmin) {
       // Verified Super Admin: release the app-shell lock
-      ScreenCapture.allowScreenCaptureAsync(APP_SC_KEY).catch(() => {});
+      ScreenCaptureLib.allowScreenCaptureAsync(APP_SC_KEY).catch(() => {});
     } else {
-      ScreenCapture.preventScreenCaptureAsync(APP_SC_KEY).catch(() => {});
+      ScreenCaptureLib.preventScreenCaptureAsync(APP_SC_KEY).catch(() => {});
     }
-    return () => { ScreenCapture!.allowScreenCaptureAsync(APP_SC_KEY).catch(() => {}); };
+    return () => { ScreenCaptureLib.allowScreenCaptureAsync(APP_SC_KEY).catch(() => {}); };
   }, [isSuperAdmin]);
 
   // ── Background → foreground re-check ──────────────────────────────────────
