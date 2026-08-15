@@ -1,205 +1,182 @@
-# iOS Black-Screen Audit — v922
-## Full Startup Path Audit + Two Additional Fixes
+# CHANGES.md — iOS Startup Diagnostic Instrumentation
+
+**Purpose:** Capture the exact iOS startup sequence at runtime (Release build) to
+determine the last successful operation before the black screen occurs.
+
+**Constraint:** No application behaviour changed. No build configuration changed.
+No `ios/`, `app.json`, `.github/workflows/`, or JSC/Hermes settings touched.
 
 ---
 
-## Summary
+## New Files
 
-After applying the v921 fix (`setTimeout(0)` on the `APP_SC_KEY` effect in `(app)/_layout.tsx`),
-a complete startup-path audit was performed to ensure no other independent iOS black-screen
-causes remained. Two additional call sites with the identical timing race were found and fixed.
+### `src/lib/diagnostics.ts`
+Release-safe diagnostic event store.
 
----
+- Works in **both Debug and Release** builds — no `__DEV__` guard.
+- Maintains an **in-memory ring buffer** (max 120 entries) updated synchronously on every `diag()` call.
+- Batches writes to **AsyncStorage** every 400 ms so the log persists across a crash or black screen.
+- First entry recorded at **module evaluation time** — proves the JS bundle started executing.
+- API:
+  - `diag(tag, msg, extra?)` — append an entry (fire-and-forget, never throws)
+  - `diagError(tag, label, err)` — append an error entry with message + first stack line
+  - `getDiagEntries()` — synchronous read of current ring (used by overlay)
+  - `loadPersistedDiag()` — async read of previous session's persisted log
+  - `clearDiag()` — wipe ring + AsyncStorage
+  - `getDiagSessionId()` — unique ID per JS process start
 
-## Root Cause Recap (all three issues share the same mechanism)
+### `src/components/DiagScreen.tsx`
+Always-visible floating diagnostic overlay.
 
-`expo-screen-capture`'s iOS native `preventScreenshots()` works by reparenting
-`keyWindow.layer` into a `UITextField`'s off-screen `CALayer` hierarchy. This takes
-the window layer **out of the display compositor tree**.
-
-On iOS with New Architecture / Fabric / JSI, `useEffect` callbacks and AppState event
-handlers execute on the main thread in the **same run-loop iteration** as the React or
-UIKit event that triggered them. If `preventScreenCapture()` is called in that iteration,
-the window layer is removed from the compositor **before the pending `CATransaction` has
-been flushed to the display**, producing a **permanent black screen**.
-
-`setTimeout(0)` defers the call to the **next run-loop iteration**, by which point the
-`CATransaction` has already been committed and the window is visible. The native API then
-reparents an already-presented layer, which works correctly.
-
-`allowScreenCaptureAsync` (the release path) is always immediate — it re-inserts the layer
-and never causes a black-screen condition regardless of timing.
-
----
-
-## Issue Inventory
-
-### Issue 1 — `(app)/_layout.tsx` APP_SC_KEY initial mount effect [FIXED IN v921]
-
-| Property | Value |
-|---|---|
-| File | `src/app/(app)/_layout.tsx` |
-| Trigger | `(app)/` group mounts when `isLoading` transitions from `true` → `false` |
-| Risk | Startup black screen — fires before first frame |
-| Status | **Fixed in v921** — wrapped in `setTimeout(0)` with `cancelled` flag |
+- Rendered **outside** `SessionProvider`/`SecurityProvider` at `zIndex 99999` so it
+  is visible even when the entire app UI is black.
+- Polls the in-memory ring every **250 ms** and displays up to 60 entries.
+- Shows: `+Nms` elapsed, wall-clock `HH:MM:SS.mmm`, colour-coded tag, message, extra.
+- **PREV button** — loads and shows the **previous session's persisted log**, so you
+  can read what happened in a black-screen run after restarting the app.
+- **EXPORT button** — writes the full log to `AsyncStorage` key `__medacademy_diag_export__`
+  AND prints it to `console.log` (appears in Xcode device console).
+- Tap `▼ DIAG` pill to collapse to a single header bar.
+- `pointerEvents="box-none"` on the container — touch passes through to the app beneath.
 
 ---
 
-### Issue 2 — `_layout.tsx` RootScreenCapture AppState `'active'` handler [FIXED IN v922]
+## Modified Files
 
-| Property | Value |
-|---|---|
-| File | `src/app/_layout.tsx` |
-| Trigger | Device background → foreground resume (even during auth loading) |
-| Risk | Black screen on FIRST foreground resume during the `~100–500 ms` `getSession()` window |
+### `src/ctx.tsx`
+Added `diag` calls for every auth milestone. All fire in Release builds.
 
-**Evidence**: The AppState `'active'` event fires **independently of `isLoading`**. If the
-user briefly backgrounds and restores the app during the auth-loading phase, iOS delivers
-the `'active'` event on the same run-loop iteration as the UIKit window re-presentation.
-The previous code called `preventScreenCaptureAsync` with no deferral in that callback.
+| Tag | Event |
+|-----|-------|
+| `SESSION` | `ctx.tsx module evaluated` — proves bundle loaded this module |
+| `SESSION` | `SessionProvider render/mount` — component body executing |
+| `SESSION` | `SessionProvider useEffect mounting` — effect registered |
+| `SESSION` | `getSession START` — supabase.auth.getSession() called |
+| `SESSION` | `getSession DONE` — resolved; includes `user=` and `session=` |
+| `ERR`     | `getSession UNEXPECTED ERROR` — if getSession throws (should never happen) |
+| `SESSION` | `setIsLoading FALSE` — isLoading gate released; includes `session=` |
+| `SESSION` | `onAuthStateChange <EVENT>` — every auth state change with event name |
 
-**Fix applied** (`src/app/_layout.tsx`):
+### `src/app/_layout.tsx`
+Added `diag` calls for module eval, layout mount, and all screen-capture operations.
+`DiagScreen` wired in as always-on overlay (outside all providers).
 
-```ts
-// BEFORE
-const sub = AppState.addEventListener('change', (nextState) => {
-  if (nextState === 'active') {
-    if (isSuperAdminRef.current) {
-      ScreenCaptureLib.allowScreenCaptureAsync(ROOT_SC_KEY).catch(() => {});
-    } else {
-      ScreenCaptureLib.preventScreenCaptureAsync(ROOT_SC_KEY).catch(() => {});
-    }
-  }
-});
+| Tag | Event |
+|-----|-------|
+| `LAYOUT` | `_layout.tsx module evaluated` — first line after assertMeDoBlocked() |
+| `LAYOUT` | `RootLayout component executing` — React has bootstrapped |
+| `LAYOUT` | `RootLayout mount useEffect fired` |
+| `SC` | `RootScreenCapture render` — every render with `isLoading=` / `isSuperAdmin=` |
+| `SC` | `ROOT_SC_KEY effect — isLoading=true SKIPPED` — gate active, SC deferred |
+| `SC` | `ROOT_SC_KEY effect FIRING` — gate passed, SC call imminent |
+| `SC` | `ROOT_SC_KEY preventScreenCaptureAsync RESOLVED` / `FAILED` |
+| `SC` | `ROOT_SC_KEY allowScreenCaptureAsync RESOLVED` / `FAILED` |
+| `SC` | `ROOT_SC_KEY AppState active — scheduling setTimeout(0)` |
+| `SC` | `ROOT_SC_KEY AppState setTimeout(0) FIRED` |
+| `SC` | `ROOT_SC_KEY AppState prevent/allow RESOLVED` / `FAILED` |
 
-// AFTER
-let timer: ReturnType<typeof setTimeout> | null = null;
-const sub = AppState.addEventListener('change', (nextState) => {
-  if (nextState === 'active') {
-    if (timer !== null) clearTimeout(timer);       // cancel racing timer
-    timer = setTimeout(() => {
-      timer = null;
-      if (isSuperAdminRef.current) {
-        ScreenCaptureLib.allowScreenCaptureAsync(ROOT_SC_KEY).catch(() => {});
-      } else {
-        ScreenCaptureLib.preventScreenCaptureAsync(ROOT_SC_KEY).catch(() => {});
-      }
-    }, 0);
-  }
-});
-return () => {
-  if (timer !== null) clearTimeout(timer);
-  sub.remove();
-};
+### `src/app/(app)/_layout.tsx`
+Added `diag` calls for the APP_SC_KEY screen-capture effect.
+
+| Tag | Event |
+|-----|-------|
+| `APP_SC` | `APP_SC_KEY effect SCHEDULED setTimeout(0)` — effect body entered |
+| `APP_SC` | `APP_SC_KEY setTimeout(0) FIRED` — deferred callback executing |
+| `APP_SC` | `APP_SC_KEY preventScreenCaptureAsync RESOLVED` / `FAILED` |
+| `APP_SC` | `APP_SC_KEY allowScreenCaptureAsync RESOLVED` / `FAILED` |
+
+### `src/lib/useScreenCapture.ts`
+Added `diag` calls for the SC_KEY screen-capture effect (used on the lesson screen).
+
+| Tag | Event |
+|-----|-------|
+| `USE_SC` | `SC_KEY allow (immediate)` — release path (blockCapture=false or isSuperAdmin) |
+| `USE_SC` | `SC_KEY allowScreenCaptureAsync RESOLVED` / `FAILED` |
+| `USE_SC` | `SC_KEY prevent SCHEDULED setTimeout(0)` |
+| `USE_SC` | `SC_KEY setTimeout(0) FIRED — calling preventScreenCaptureAsync` |
+| `USE_SC` | `SC_KEY preventScreenCaptureAsync RESOLVED` / `FAILED` |
+
+---
+
+## How to Use on Device
+
+### Reading the overlay
+1. Build and install this IPA on the iOS device.
+2. Launch the app.
+3. Even if the screen is black, the `▼ DIAG [N]` pill will be visible at the **bottom** of the screen.
+4. Tap the pill to expand the log.
+5. If the screen is completely black (no UI at all), the DiagScreen is also black — this means the
+   React render tree itself never produced any output (JS crash before first render, or a native
+   crash). In that case use **Step B** below.
+
+### Reading the persisted log (PREV button)
+1. If the app black-screened on the previous launch, restart the app.
+2. Even if the new launch also black-screens, tap `▶ DIAG` → tap `PREV`.
+3. This shows the persisted log written during the black-screen session, including the
+   last event reached before the screen went black.
+
+### Reading via Xcode device console
+1. Connect iPhone to Mac, open **Xcode → Window → Devices and Simulators**.
+2. Select the device, click the triangle console button.
+3. Tap **EXPORT** in the overlay (or wait — the log is also printed to console on every EXPORT tap).
+4. Search for `[DIAG EXPORT]` in the console output.
+5. All entries are printed as: `[+Nms] [HH:MM:SS.mmm] [TAG] message | extra`
+
+### Reading via AsyncStorage (RN Debugger / Flipper)
+- Key: `__medacademy_startup_diag__` — live log, updated every 400 ms
+- Key: `__medacademy_diag_export__` — last EXPORT snapshot
+
+---
+
+## What Each Tag Tells You
+
+| Tag | What it proves |
+|-----|---------------|
+| `JS` | JS bundle was evaluated — runtime is alive, bundle loaded |
+| `SESSION` | `ctx.tsx module evaluated → SessionProvider mounted → getSession START/DONE → setIsLoading(false)` |
+| `LAYOUT` | `_layout.tsx module evaluated → RootLayout executing → useEffect fired` |
+| `SC` | ROOT_SC_KEY screen-capture calls with exact timing |
+| `APP_SC` | APP_SC_KEY calls (only fires after isLoading=false + (app) mounted) |
+| `USE_SC` | SC_KEY calls (only fires when lesson screen mounts) |
+| `ERR` | Any caught error anywhere in the instrumented paths |
+
+**Expected happy-path sequence on a clean install (no session):**
+```
+[JS]      bundle eval — diagnostics module loaded
+[SESSION] ctx.tsx module evaluated
+[LAYOUT]  _layout.tsx module evaluated — JS runtime is alive
+[LAYOUT]  RootLayout component executing
+[SESSION] SessionProvider render/mount
+[SESSION] SessionProvider useEffect mounting
+[SESSION] getSession START
+[LAYOUT]  RootLayout mount useEffect fired
+[SC]      RootScreenCapture render   isLoading=true isSuperAdmin=false
+[SC]      ROOT_SC_KEY effect — isLoading=true SKIPPED
+[SESSION] getSession DONE             user=none session=false
+[SESSION] setIsLoading FALSE
+[SC]      RootScreenCapture render   isLoading=false isSuperAdmin=false
+[SC]      ROOT_SC_KEY effect FIRING  isSuperAdmin=false
+[SC]      ROOT_SC_KEY preventScreenCaptureAsync RESOLVED
 ```
 
-**Android / Web**: Unaffected. FLAG_SECURE never reparents the window layer; the timer adds
-negligible latency (< 1 ms). Web is guarded by `EXPO_OS === 'web'`.
+**If the log stops at `getSession START` with no `DONE` entry:** getSession is hanging
+(network issue, Supabase URL wrong, or storage deadlock).
+
+**If the log shows `ROOT_SC_KEY effect FIRING` but no `RESOLVED`:** the native
+`preventScreenCaptureAsync` call threw synchronously before the Promise resolved.
+
+**If no `JS` entry appears at all:** the JS bundle did not start (native crash, missing
+bundle, wrong JSC/Hermes linkage).
 
 ---
 
-### Issue 3 — `useScreenCapture.ts` SC_KEY initial mount effect [FIXED IN v922]
+## Removal Instructions
 
-| Property | Value |
-|---|---|
-| File | `src/lib/useScreenCapture.ts` |
-| Trigger | Lesson screen (`lesson/[id].tsx`) mounts after navigation push |
-| Risk | Black screen when navigating into any lesson |
-
-**Evidence**: `useScreenCapture({ blockCapture: true })` is called unconditionally at the
-top of `lesson/[id].tsx`. Its internal `useEffect` called `preventScreenCaptureAsync`
-synchronously with no deferral. On iOS NA, a Stack navigation push triggers a React commit
-→ `useEffect` fires in the same run-loop iteration as the push's `CATransaction` → same
-UITextField layer reparent race → lesson screen appears black.
-
-This is an **independent black screen cause** from Issue 1: startup and lesson navigation
-are separate React commit cycles. A device that never triggers the startup race (e.g.,
-because `getSession()` resolves before first frame) would still hit the lesson race on
-every lesson entry.
-
-**Fix applied** (`src/lib/useScreenCapture.ts`):
-
-```ts
-// BEFORE
-useEffect(() => {
-  if (process.env.EXPO_OS === 'web') return;
-  if (!blockCapture || isSuperAdmin) {
-    ScreenCaptureLib.allowScreenCaptureAsync(SC_KEY).catch(() => {});
-    return;
-  }
-  ScreenCaptureLib.preventScreenCaptureAsync(SC_KEY).catch(() => {}); // ← synchronous, no defer
-  return () => {
-    ScreenCaptureLib.allowScreenCaptureAsync(SC_KEY).catch(() => {});
-  };
-}, [blockCapture, isSuperAdmin]);
-
-// AFTER
-useEffect(() => {
-  if (process.env.EXPO_OS === 'web') return;
-  let cancelled = false;
-  if (!blockCapture || isSuperAdmin) {
-    ScreenCaptureLib.allowScreenCaptureAsync(SC_KEY).catch(() => {}); // immediate is safe
-    return;
-  }
-  const timer = setTimeout(() => {
-    if (cancelled) return;
-    ScreenCaptureLib.preventScreenCaptureAsync(SC_KEY).catch(() => {});
-  }, 0);
-  return () => {
-    cancelled = true;
-    clearTimeout(timer);
-    ScreenCaptureLib.allowScreenCaptureAsync(SC_KEY).catch(() => {});
-  };
-}, [blockCapture, isSuperAdmin]);
-```
-
-**Android / Web**: Unaffected. Android FLAG_SECURE path unchanged; Web guarded by
-`EXPO_OS === 'web'`.
-
----
-
-## Other Call Sites — Confirmed Safe (No Change Needed)
-
-| Call site | Why safe |
-|---|---|
-| `RootScreenCapture` main isLoading effect (`_layout.tsx` ~line 170) | Already gated: `if (isLoading) return` prevents call until auth resolves. By that point, first frame has always been committed. |
-| `(app)/_layout.tsx` APP_SC_KEY effect | Fixed in v921 — `setTimeout(0)` already in place. |
-| `useContentProtection.ts` `'lesson'` key | `if (process.env.EXPO_OS !== 'android') return` — never executes on iOS. |
-| `SecureAppOverlay.tsx` AppState handler | Manages an overlay `<View>` blur, makes NO `preventScreenCapture` calls. |
-
----
-
-## Files Changed
-
-| File | Change |
-|---|---|
-| `src/app/_layout.tsx` | `RootScreenCapture` AppState `'active'` handler wrapped in `setTimeout(0)` with `cancelled`-style timer ref |
-| `src/lib/useScreenCapture.ts` | `preventScreenCaptureAsync` call deferred with `setTimeout(0)` + `cancelled` flag |
-
-**Files intentionally NOT changed**: `(app)/_layout.tsx` (Issue 1 fix already in v921),
-`ios/`, `app.json`, `.github/workflows/ios-build.yml`, `babel.config.js`, `metro.config.js`,
-`package.json`, `Podfile`, any Xcode project file.
-
----
-
-## Validation
-
-- `npx tsc --noEmit --skipLibCheck` → **exits 0** (no TypeScript errors)
-- `git diff --name-only .github/workflows/ ios/ app.json babel.config.js metro.config.js package.json` → **no changes** (build pipeline untouched)
-- Android: FLAG_SECURE behaviour unchanged — `allowScreenCaptureAsync` remains immediate,
-  `preventScreenCaptureAsync` deferred by ≤ 1 ms (one event loop tick), functionally identical
-- Web: all three issues were already guarded by `EXPO_OS === 'web'` checks; no Web code path changed
-
----
-
-## Security Guarantee Preserved
-
-All three fixes defer only the **activate** path. The **release** path (`allowScreenCaptureAsync`)
-is always immediate. This means:
-
-1. During the brief `setTimeout(0)` window (< 1 ms), the previous protection key is still
-   active from the prior screen/state.
-2. The loading screen shows only an `ActivityIndicator` — no sensitive content is visible
-   without protection in any of the three scenarios.
-3. Super Admin bypass is unaffected — SA sessions take the immediate `allow` path which
-   has no timing risk.
+Once diagnosis is complete, revert these changes:
+1. Delete `src/lib/diagnostics.ts`
+2. Delete `src/components/DiagScreen.tsx`
+3. In `src/ctx.tsx`: remove `import { diag, diagError }` and all `diag()`/`diagError()` calls
+4. In `src/app/_layout.tsx`: remove `import { diag, diagError }`, `import { DiagScreen }`,
+   all `diag()` calls, and the `<DiagScreen />` element
+5. In `src/app/(app)/_layout.tsx`: remove `import { diag, diagError }` and all `diag()` calls
+6. In `src/lib/useScreenCapture.ts`: remove `import { diag, diagError }` and all `diag()` calls

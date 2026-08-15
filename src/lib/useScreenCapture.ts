@@ -28,6 +28,8 @@ import { useEffect } from 'react';
 import * as ScreenCaptureLib from 'expo-screen-capture';
 import { logSecurityEvent } from '@/lib/security';
 
+import { diag, diagError } from '@/lib/diagnostics';
+
 // Stable key — distinct from useContentProtection's 'lesson' key so the two
 // hooks can coexist on the same screen without racing on cleanup.
 const SC_KEY = 'screen-capture';
@@ -79,15 +81,20 @@ export function useScreenCapture(opts: Options = {}) {
     if (!blockCapture || isSuperAdmin) {
       // Release path is immediate — allowScreenCaptureAsync never reparents
       // the window layer so there is no compositor timing risk.
-      ScreenCaptureLib.allowScreenCaptureAsync(SC_KEY).catch(() => {});
+      diag('USE_SC', `SC_KEY allow (immediate)`, `blockCapture=${blockCapture} isSuperAdmin=${isSuperAdmin}`);
+      ScreenCaptureLib.allowScreenCaptureAsync(SC_KEY)
+        .then(() => diag('USE_SC', 'SC_KEY allowScreenCaptureAsync RESOLVED'))
+        .catch((e) => diagError('ERR', 'SC_KEY allowScreenCaptureAsync FAILED', e));
       return;
     }
 
+    diag('USE_SC', `SC_KEY prevent SCHEDULED setTimeout(0)`);
     const timer = setTimeout(() => {
       if (cancelled) return;
-      ScreenCaptureLib.preventScreenCaptureAsync(SC_KEY).catch(() => {
-        // Non-fatal — simulators/emulators may reject this
-      });
+      diag('USE_SC', 'SC_KEY setTimeout(0) FIRED — calling preventScreenCaptureAsync');
+      ScreenCaptureLib.preventScreenCaptureAsync(SC_KEY)
+        .then(() => diag('USE_SC', 'SC_KEY preventScreenCaptureAsync RESOLVED'))
+        .catch((e) => diagError('ERR', 'SC_KEY preventScreenCaptureAsync FAILED', e));
     }, 0);
 
     return () => {
