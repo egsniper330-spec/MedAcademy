@@ -181,18 +181,43 @@ function RootScreenCapture() {
 
   // Re-apply on every foreground transition — iOS may reset the protection state
   // across background/foreground cycles (particularly on older iOS versions).
+  //
+  // iOS TIMING FIX — setTimeout(0) in AppState 'active' handler:
+  // When iOS resumes from background it re-presents the window on the display
+  // compositor. On iOS New Architecture (Fabric/JSI) the AppState 'active' event
+  // fires on the same main-thread run-loop iteration as the incoming CATransaction
+  // that re-presents the first resumed frame. If preventScreenCapture() runs in
+  // that same iteration, it calls keyWindow.layer.removeFromSuperlayer() before
+  // the resumed frame has been flushed to the compositor → BLACK SCREEN (identical
+  // mechanism to the startup race in the isLoading effect above).
+  //
+  // A single setTimeout(0) defers the call to the NEXT run-loop iteration, by
+  // which point the resume CATransaction has already flushed. The window layer
+  // is re-registered with the compositor before we reparent it.
+  //
+  // Android: FLAG_SECURE never reparents the window layer; this timing is harmless.
+  // Web: guarded by the EXPO_OS check.
   useEffect(() => {
     if (process.env.EXPO_OS === 'web') return;
+    let timer: ReturnType<typeof setTimeout> | null = null;
     const sub = AppState.addEventListener('change', (nextState) => {
       if (nextState === 'active') {
-        if (isSuperAdminRef.current) {
-          ScreenCaptureLib.allowScreenCaptureAsync(ROOT_SC_KEY).catch(() => {});
-        } else {
-          ScreenCaptureLib.preventScreenCaptureAsync(ROOT_SC_KEY).catch(() => {});
-        }
+        // Clear any pending timer from a rapid background/foreground cycle
+        if (timer !== null) clearTimeout(timer);
+        timer = setTimeout(() => {
+          timer = null;
+          if (isSuperAdminRef.current) {
+            ScreenCaptureLib.allowScreenCaptureAsync(ROOT_SC_KEY).catch(() => {});
+          } else {
+            ScreenCaptureLib.preventScreenCaptureAsync(ROOT_SC_KEY).catch(() => {});
+          }
+        }, 0);
       }
     });
-    return () => sub.remove();
+    return () => {
+      if (timer !== null) clearTimeout(timer);
+      sub.remove();
+    };
   }, []);
 
   // Release the root-level lock on unmount (clean state for web/test environments).
