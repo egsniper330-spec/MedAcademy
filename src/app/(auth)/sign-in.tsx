@@ -61,70 +61,10 @@ export default function SignIn() {
     setLoading(true);
     setError('');
 
-    // ── Release-safe auth diagnostics ─────────────────────────────────────────
-    // Never logs password, tokens, keys, or full user data.
-    const _t0 = Date.now();
-    const _ts = () => `t=${Date.now() - _t0}ms`;
-    const _authTag = '[AUTH]';
-    const _authErr = '[AUTH_ERROR]';
-    const _platform = process.env.EXPO_OS ?? 'unknown';
-    const _isPhone = /^[\+0-9\s\-\.\(\)]{4,}$/.test(trimmed) && !/^[^@\s]+@[^@\s]+/.test(trimmed);
-    const _loginMethod = _isPhone ? 'phone' : 'email';
-    console.log(_authTag, `login started | platform=${_platform} method=${_loginMethod} ${_ts()}`);
-
-    // ── SUPABASE client validation ─────────────────────────────────────────────
-    // Verify URL and anon key are present and well-formed at runtime.
-    // This catches misconfigured EAS environment variable injection on iOS.
-    const _supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL ?? '';
-    const _anonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? '';
-    let _urlValid = false;
-    let _urlHost = '(none)';
-    try {
-      const parsed = new URL(_supabaseUrl);
-      _urlValid = parsed.protocol === 'https:' && parsed.hostname.length > 0;
-      _urlHost = parsed.hostname;
-    } catch { _urlValid = false; }
-    console.log('[SUPABASE]', `URL_HOST=${_urlHost} URL_VALID=${_urlValid} ANON_KEY_PRESENT=${_anonKey.length > 0} ${_ts()}`);
-
-    if (!_urlValid || !_anonKey) {
-      console.log(_authErr, `stage=supabase_config URL_VALID=${_urlValid} ANON_KEY_PRESENT=${_anonKey.length > 0}`);
-      setError('App configuration error. Please reinstall or contact support.');
-      setLoading(false);
-      return;
-    }
-
-    // ── NETTEST: basic HTTPS connectivity probe (no credentials) ───────────────
-    // Tests whether iOS can reach the Supabase server at all before auth.
-    // If this fails, the problem is networking/ATS/TLS — not credentials.
-    const _netTestUrl = `${_supabaseUrl}/rest/v1/?apikey=${_anonKey}`;
-    console.log('[NETTEST]', `START host=${_urlHost} ${_ts()}`);
-    try {
-      const _ntController = new AbortController();
-      const _ntTimeout = setTimeout(() => _ntController.abort(), 10000);
-      const _ntRes = await globalThis.fetch(_netTestUrl, {
-        method: 'GET',
-        signal: _ntController.signal,
-      });
-      clearTimeout(_ntTimeout);
-      console.log('[NETTEST]', `END status=${_ntRes.status} ${_ts()}`);
-    } catch (_ntErr: unknown) {
-      const _ntMsg = (_ntErr instanceof Error) ? _ntErr.message : String(_ntErr);
-      const _ntName = (_ntErr instanceof Error) ? _ntErr.name : 'Error';
-      console.log('[NETTEST_ERROR]', `name=${_ntName} message=${_ntMsg} ${_ts()}`);
-      // Network is unreachable — surface a clear message immediately.
-      // No point attempting auth if the server is not reachable.
-      setError(`Network error: cannot reach server. Please check your connection.\n(${_ntMsg})`);
-      setLoading(false);
-      return;
-    }
-
     try {
       // Step 1: Run security checks BEFORE creating any session
       const installationId = await getInstallationId();
-      console.log(_authTag, `security check START ${_ts()}`);
-      const _secStart = Date.now();
       const secResult = await check(installationId);
-      console.log(_authTag, `security check END elapsed=${Date.now()-_secStart}ms blocksLogin=${secResult.blocksLogin} riskScore=${secResult.riskScore} ${_ts()}`);
 
       // If policy blocks login, show security warning screen immediately
       if (secResult.blocksLogin) {
@@ -142,19 +82,14 @@ export default function SignIn() {
       }
 
       // Step 2: Resolve to email
-      console.log(_authTag, `account lookup START method=${_loginMethod} ${_ts()}`);
-      const _lookupStart = Date.now();
       const email = await resolveEmailFromIdentifier(trimmed);
-      console.log(_authTag, `account lookup END elapsed=${Date.now()-_lookupStart}ms found=${!!email} ${_ts()}`);
       if (!email) {
-        console.log(_authErr, `stage=account_lookup method=${_loginMethod} result=not_found ${_ts()}`);
         setError('No account found for this email or phone number.');
         setLoading(false);
         return;
       }
 
       // Step 3: PRE-LOGIN device check — BEFORE creating any Supabase session
-      console.log(_authTag, `device pre-check START ${_ts()}`);
       const { data: checkData, error: checkError } = await supabase
         .rpc('pre_login_device_check', {
           p_email: email,
@@ -162,25 +97,21 @@ export default function SignIn() {
         });
 
       if (checkError) {
-        console.warn(_authErr, `stage=device_precheck name=${checkError.name ?? 'unknown'} message=${checkError.message} ${_ts()}`);
         // Non-fatal: allow login attempt if the check itself fails (network issue, etc.)
       } else if (checkData && checkData.allowed === false) {
         const reason: string = checkData.reason ??
           'This account is already active on another authorized device.';
-        console.warn(_authErr, `stage=device_precheck result=denied reason=${reason} ${_ts()}`);
         setError(reason);
         setLoading(false);
         return;
       }
 
       // Step 4: Create auth session (only after device check passes)
-      console.log(_authTag, `signInWithPassword START host=${_urlHost} ${_ts()}`);
       const signInStart = Date.now();
       const { data, error: authError } = await supabase.auth.signInWithPassword({ email, password });
       const signInMs = Date.now() - signInStart;
 
       if (authError) {
-        console.log(_authErr, `stage=supabase_signin name=${authError.name ?? 'AuthError'} status=${authError.status ?? 0} message=${authError.message} elapsed=${signInMs}ms ${_ts()}`);
         const msg = authError.message ?? '';
 
         // Distinguish network failures from credential failures.
@@ -224,8 +155,6 @@ export default function SignIn() {
         setLoading(false);
         return;
       }
-
-      console.log(_authTag, `signInWithPassword END session=${!!data.session} elapsed=${signInMs}ms ${_ts()}`);
 
       // Step 5: Register / update device record (now we have a valid session)
       const platform    = process.env.EXPO_OS ?? 'unknown';
@@ -271,7 +200,6 @@ export default function SignIn() {
       }
 
       // Step 6: Show security warning if threats detected but login is allowed
-      console.log(_authTag, `navigation START hasWarnings=${secResult.hasWarnings} ${_ts()}`);
       if (secResult.hasWarnings && secResult.threats.length > 0) {
         const userRole = data.user?.user_metadata?.role ?? 'student';
         const dashboardPath = `/(app)/(${userRole === 'super_admin' ? 'superadmin' : userRole})/dashboard` as RelativePathString;
@@ -291,12 +219,6 @@ export default function SignIn() {
       // SessionProvider + layout handle routing by role.
     } catch (e: unknown) {
       const errMsg = (e as Error)?.message ?? 'Sign-in failed. Please try again.';
-      const errName = (e as Error)?.name ?? 'Error';
-      const firstStackLine = ((e as Error)?.stack ?? '')
-        .split('\n')
-        .find(l => l.includes('.tsx') || l.includes('.ts') || l.includes('.js'))
-        ?.trim() ?? '';
-      console.log(_authErr, `stage=unhandled name=${errName} message=${errMsg} ${_ts()}${firstStackLine ? ' stack=' + firstStackLine : ''}`);
 
       // Surface network failures with a clear, actionable message.
       const msgLower = errMsg.toLowerCase();
