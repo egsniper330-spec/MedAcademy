@@ -192,7 +192,7 @@ const { showToast } = useToast();
     <>
       <KeyboardAvoidingView behavior={process.env.EXPO_OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1 }}>
         <ScrollView
-          contentInsetAdjustmentBehavior="automatic"
+          contentContainerStyle={{ paddingBottom: layout.scrollBottom() }}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />}
         >
           <View style={{ padding: layout.screenPx }}>
@@ -409,7 +409,7 @@ const router = useRouter();
       <FlatList
         data={filtered}
         keyExtractor={item => item.id}
-        contentInsetAdjustmentBehavior="automatic"
+        contentContainerStyle={{ paddingBottom: layout.scrollBottom() }}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />}
         ListHeaderComponent={
           <View style={{ padding: layout.screenPx, paddingTop: 8 }}>

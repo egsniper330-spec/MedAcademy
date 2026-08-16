@@ -7,7 +7,6 @@ import {
   View, Text, ScrollView, useColorScheme, Pressable,
   TextInput, ActivityIndicator, KeyboardAvoidingView,
 } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect } from 'expo-router';
 import {
   UserPlus, BookOpen, Search, X, ChevronDown, Check,
@@ -18,7 +17,7 @@ import { NeuCard } from '@/components/NeuCard';
 import { NeuButton } from '@/components/NeuButton';
 import { ResponsiveModal } from '@/components/ResponsiveModal';
 import { useToast } from '@/components/Toast';
-import { neuColors } from '@/lib/neu';
+import { neuColors, useLayout, safeBottom } from '@/lib/neu';
 import { useProfileStore } from '@/lib/store';
 import { useDebounce } from '@/lib/useDebounce';
 import {
@@ -264,7 +263,8 @@ export default function EnrollmentManager() {
   const scheme = useColorScheme();
   const isDark = scheme === 'dark';
   const c = isDark ? neuColors.dark : neuColors.light;
-  const insets = useSafeAreaInsets();
+  const layout = useLayout();
+  const insets = layout.insets;
   const { showToast } = useToast();
   const { profile } = useProfileStore();
   const isSuperAdmin = profile?.role === 'super_admin';
@@ -408,9 +408,8 @@ export default function EnrollmentManager() {
     >
       <PageHeader title="Enrollment Manager" />
       <ScrollView
-        contentContainerStyle={{ padding: 16, paddingBottom: Math.max(insets.bottom, 30) + 30 }}
+        contentContainerStyle={{ padding: 16, paddingBottom: layout.scrollBottom() }}
         keyboardShouldPersistTaps="handled"
-        contentInsetAdjustmentBehavior="automatic"
       >
         {/* Tab bar */}
         <View style={{

@@ -441,7 +441,8 @@ export default function AdminUsers() {
 
   return (
     <View style={{ flex: 1, backgroundColor: c.base }}>
-      <ScrollView contentInsetAdjustmentBehavior="automatic"
+      <ScrollView
+          contentContainerStyle={{ paddingBottom: layout.scrollBottom() }}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />}>
         <View style={{ padding: layout.screenPx }}>
           {/* Header + Add User + Bulk toggle */}

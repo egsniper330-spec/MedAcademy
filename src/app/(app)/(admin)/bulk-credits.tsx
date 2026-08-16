@@ -131,7 +131,7 @@ export default function BulkCreditsScreen() {
       <FlatList
         data={filtered}
         keyExtractor={item => item.id}
-        contentInsetAdjustmentBehavior="automatic"
+        contentContainerStyle={{ paddingBottom: layout.scrollBottom() }}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />}
         ListHeaderComponent={
           <View style={{ padding: layout.screenPx, paddingTop: 8 }}>

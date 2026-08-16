@@ -7,7 +7,6 @@ import {
   View, Text, ScrollView, Pressable, ActivityIndicator,
   TextInput, useColorScheme, RefreshControl, Modal,
 } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect } from 'expo-router';
 import {
   Archive, BookOpen, Clock, RefreshCw, Search,
@@ -21,14 +20,15 @@ import {
 import { NeuCard } from '@/components/NeuCard';
 import { NeuButton } from '@/components/NeuButton';
 import { useToast } from '@/components/Toast';
-import { neuColors, neuFlatStyle, neuPressedStyle } from '@/lib/neu';
+import { neuColors, useLayout, neuFlatStyle, neuPressedStyle, safeBottom } from '@/lib/neu';
 import { PageHeader } from '@/components/PageHeader';
 
 export default function ArchivedCoursesScreen() {
   const scheme = useColorScheme();
   const isDark = scheme === 'dark';
   const c = isDark ? neuColors.dark : neuColors.light;
-  const insets = useSafeAreaInsets();
+  const layout = useLayout();
+  const insets = layout.insets;
   const { profile } = useProfileStore();
   const { showToast } = useToast();
 
@@ -112,7 +112,6 @@ export default function ArchivedCoursesScreen() {
   return (
     <View style={{ flex: 1, backgroundColor: c.base }}>
       <ScrollView
-        contentInsetAdjustmentBehavior="automatic"
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}>
 
         {/* Header */}
@@ -148,7 +147,7 @@ export default function ArchivedCoursesScreen() {
           </View>
         </View>
 
-        <View style={{ paddingHorizontal: 20, gap: 14, paddingBottom: Math.max(insets.bottom, 30) + 30 }}>
+        <View style={{ paddingHorizontal: 20, gap: 14, paddingBottom: layout.scrollBottom() }}>
           {loading ? (
             <View style={{ paddingVertical: 60, alignItems: 'center' }}>
               <ActivityIndicator color={c.primary} />

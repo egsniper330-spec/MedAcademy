@@ -91,7 +91,6 @@ export default function DoctorDashboard() {
       />
     <ScrollView
       style={{ flex: 1, backgroundColor: c.base }}
-      contentInsetAdjustmentBehavior="automatic"
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />}
     >
       {/* DashboardHeader sits OUTSIDE the inner padding view so it can own its own horizontal padding */}

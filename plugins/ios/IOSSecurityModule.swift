@@ -689,27 +689,150 @@ class IOSSecurityModule: RCTEventEmitter {
   // ────────────────────────────────────────────────────────────────────────────
   // MARK: — 5. VPN DETECTION
   // ────────────────────────────────────────────────────────────────────────────
-  // getifaddrs() network interface scan — detects all VPN providers including
-  // WireGuard, OpenVPN, system VPN, per-app VPN, and IPSec tunnels.
-  // No entitlement required. ppp* prefix added for L2TP/PPP-based VPNs.
+  //
+  // FALSE-POSITIVE FIX — v2 (two-gate check)
+  //
+  // The previous single-gate implementation called getifaddrs() and returned
+  // true whenever ANY interface name started with "utun". This is incorrect:
+  // iOS always creates utun0, utun1, utun2 (and often more) as permanent
+  // SYSTEM interfaces for Continuity / Handoff, AirDrop, and iCloud Private
+  // Relay's Network Extension — completely independent of user-configured VPNs.
+  // These interfaces are present in getifaddrs() output on EVERY physical
+  // iPhone regardless of VPN state, causing a 100% false-positive rate.
+  //
+  // Correct approach — BOTH gates must pass:
+  //
+  //   Gate 1 (NWPathMonitor):
+  //     Query the active best network path. On a device with no VPN active,
+  //     the path uses .wifi or .cellular. System utun interfaces (Continuity,
+  //     AirDrop, Private Relay) do NOT become the active path transport —
+  //     only the primary interface does. If the path uses only
+  //     .wifi / .cellular / .loopback / .wiredEthernet → return false immediately.
+  //     A real active VPN tunnel routes traffic through an interface that
+  //     NWPath classifies as .other (no standard type).
+  //
+  //   Gate 2 (getifaddrs + IFF_UP):
+  //     Only runs when Gate 1 says the active path uses a non-standard
+  //     interface type. Scans for utun* / ipsec* / ppp* interfaces where
+  //     the IFF_UP flag is set (interface is allocated AND active).
+  //     A VPN profile that is installed but disconnected will NOT have
+  //     IFF_UP set → Gate 2 fails → result = false.
+  //
+  // "tun" prefix (without "utun") is intentionally removed. It does not
+  // exist on stock iOS (only Linux/Android TUN kernel devices use it).
+  // Keeping it risks matching future system interfaces with no benefit.
+  //
+  // VPN types correctly detected:
+  //   Personal VPN (IKEv2/IPSec/L2TP) in Settings → VPN: utun* UP + path .other
+  //   WireGuard / OpenVPN / Tailscale / Cloudflare WARP (packet-tunnel): same
+  //   Per-app VPN: same
+  //
+  // Cases that no longer false-positive:
+  //   System utun (Continuity/AirDrop): present but path = .wifi/.cellular
+  //   iCloud Private Relay: Apple surfaces it as .wifi/.cellular to NWPath
+  //   VPN profile installed but not connected: utun not UP
 
   private func checkVPNSafe() -> Bool {
+    // ── Gate 1: NWPathMonitor — is the active path using a non-standard interface? ──
+    //
+    // We start a one-shot NWPathMonitor and wait up to 300 ms for its first
+    // pathUpdateHandler callback. If the handler fires and ALL active interfaces
+    // on the path are .wifi / .cellular / .loopback / .wiredEthernet, the
+    // active transport is a standard interface — no VPN tunnel is routing
+    // traffic — and we return false immediately without scanning interfaces.
+    //
+    // 300 ms timeout: NWPathMonitor normally fires within milliseconds on a
+    // connected device. The generous timeout guards against edge cases (brief
+    // radio sleep). On timeout we fall through to Gate 2 (conservative path).
+    let monitor  = NWPathMonitor()
+    let sema     = DispatchSemaphore(value: 0)
+    var activePathHasNonStandardInterface = false
+
+    monitor.pathUpdateHandler = { path in
+      // Check whether the path uses any interface type that is NOT a standard
+      // known transport. Standard types (.wifi, .cellular, .loopback,
+      // .wiredEthernet) never carry active VPN tunnels as the primary transport.
+      let nonStandard = path.availableInterfaces.contains { iface in
+        path.usesInterfaceType(iface.type)    // interface is actually used by path
+          && iface.type != .wifi
+          && iface.type != .cellular
+          && iface.type != .loopback
+          && iface.type != .wiredEthernet
+      }
+      activePathHasNonStandardInterface = nonStandard
+      sema.signal()
+    }
+    let q = DispatchQueue(label: "medacademy.vpn.pathcheck", qos: .userInitiated)
+    monitor.start(queue: q)
+    let timedOut = sema.wait(timeout: .now() + 0.3) == .timedOut
+    monitor.cancel()
+
+    if timedOut {
+#if DEBUG
+      NSLog("[IOSSecurityModule][VPN] Gate-1: NWPathMonitor timed out — proceeding to Gate-2")
+#endif
+      // Conservative: let Gate 2 decide if we couldn't get a path update
+    } else if !activePathHasNonStandardInterface {
+#if DEBUG
+      NSLog("[IOSSecurityModule][VPN] Gate-1 FAIL — path uses only wifi/cellular/loopback → no VPN")
+#endif
+      return false  // Active path is standard transport → definitely no VPN routing
+    } else {
+#if DEBUG
+      NSLog("[IOSSecurityModule][VPN] Gate-1 PASS — path uses non-standard interface type")
+#endif
+    }
+
+    // ── Gate 2: getifaddrs + IFF_UP — is a VPN-type interface actually UP? ──
+    //
+    // Only reached when Gate 1 detected a non-standard path (or timed out).
+    // We confirm by checking that a VPN-prefixed interface has IFF_UP set.
+    // IFF_UP means the interface is both allocated AND currently active.
+    // A VPN that is configured but not connected will NOT have IFF_UP.
     var ifaddr: UnsafeMutablePointer<ifaddrs>?
-    guard getifaddrs(&ifaddr) == 0, let firstAddr = ifaddr else { return false }
+    guard getifaddrs(&ifaddr) == 0, let firstAddr = ifaddr else {
+#if DEBUG
+      NSLog("[IOSSecurityModule][VPN] Gate-2: getifaddrs() failed → returning false")
+#endif
+      return false
+    }
     defer { freeifaddrs(ifaddr) }
+
     var ptr = firstAddr
     while true {
       let iface = ptr.pointee
       if let nameCStr = iface.ifa_name {
-        let name = String(cString: nameCStr)
-        if name.hasPrefix("utun") || name.hasPrefix("ipsec") ||
-           name.hasPrefix("tun")  || name.hasPrefix("ppp") {
+        let name  = String(cString: nameCStr)
+        let flags = Int32(iface.ifa_flags)
+        let isUp  = (flags & IFF_UP) != 0
+        // utun* — all iOS VPN types: IKEv2, IPSec, WireGuard, packet-tunnel ext
+        // ipsec* — legacy kernel IPSec interface (older iOS VPN stacks)
+        // ppp*   — L2TP/PPPoE-based VPN tunnels
+        // "tun" WITHOUT "utun" prefix intentionally omitted: stock iOS does not
+        // create bare "tun" interfaces; only Linux/Android TUN devices do.
+        let isVpnPrefix = name.hasPrefix("utun") || name.hasPrefix("ipsec") || name.hasPrefix("ppp")
+#if DEBUG
+        if isVpnPrefix {
+          NSLog("[IOSSecurityModule][VPN] Gate-2 candidate: name=%@ flags=0x%X isUp=%@",
+                name, flags, isUp ? "YES" : "NO")
+        }
+#endif
+        if isVpnPrefix && isUp {
+#if DEBUG
+          NSLog("[IOSSecurityModule][VPN] Gate-2 PASS — VPN interface UP: %@", name)
+          NSLog("[IOSSecurityModule][VPN] Final: VPN ACTIVE")
+#endif
           return true
         }
       }
       guard let next = iface.ifa_next else { break }
       ptr = next
     }
+
+#if DEBUG
+    NSLog("[IOSSecurityModule][VPN] Gate-2 FAIL — no VPN interface found with IFF_UP")
+    NSLog("[IOSSecurityModule][VPN] Final: NO VPN")
+#endif
     return false
   }
 

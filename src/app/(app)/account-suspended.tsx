@@ -39,7 +39,6 @@ export default function AccountBlockedScreen() {
         paddingBottom: layout.scrollBottom(),
         gap: layout.pad.sm,
       }}
-      contentInsetAdjustmentBehavior="automatic"
     >
       {/* Hero icon */}
       <View style={{

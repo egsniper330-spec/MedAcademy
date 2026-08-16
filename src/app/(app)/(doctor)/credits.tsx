@@ -41,7 +41,7 @@ export default function DoctorCredits() {
   };
 
   return (
-    <ScrollView style={{ flex: 1, backgroundColor: c.base }} contentInsetAdjustmentBehavior="automatic"
+    <ScrollView style={{ flex: 1, backgroundColor: c.base }}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />}>
       <View style={{ padding: layout.screenPx }}>
         <PageHeader title="My Credits" subtitle="Credit balance & history" accentColor={c.primary} />

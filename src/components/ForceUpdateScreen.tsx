@@ -73,7 +73,6 @@ export function ForceUpdateScreen({
           justifyContent: 'center',
           gap: 24,
         }}
-        contentInsetAdjustmentBehavior="automatic"
         // Prevent pull-to-refresh gestures from doing anything
         bounces={false}
         scrollEnabled={false}

@@ -326,22 +326,28 @@ async function detectVPN(): Promise<SecurityThreat | null> {
     }
 
     if (process.env.EXPO_OS === 'ios') {
-      if (__DEV__) {
-        console.log('[SecurityCheck][VPN] iOS: calling isNativeVPNDetected (JS-NetInfo fallback active)…');
-      }
+      // Diagnostic: always log on iOS so false-positive investigations have evidence.
+      // iOS path: native IOSSecurityModule.checkVPNSafe() (NWPath gate + getifaddrs IFF_UP gate).
+      // JS fallback (detectVPNviaNetInfo) only runs when native module is null.
+      console.log('[SecurityCheck][VPN] iOS: invoking isNativeVPNDetected…',
+        '| detector=IOSSecurityModule.checkVPNSafe (two-gate: NWPath+getifaddrs)',
+        '| fallback=NetInfo type===vpn only');
       const vpn = await isNativeVPNDetected();
-      if (__DEV__) {
-        console.log('[SecurityCheck][VPN] iOS: isNativeVPNDetected =', vpn);
-      }
+      console.log('[SecurityCheck][VPN] iOS: raw result =', vpn,
+        '| decision =', vpn ? '🔴 BLOCK (VPN active)' : '✅ PASS (no VPN)');
       if (!vpn) return null;
-      return { type: 'vpn_detected', detectionMethod: 'VPN Connection detected', detected: true };
+      return {
+        type: 'vpn_detected',
+        detectionMethod: 'VPN Connection detected',
+        detected: true,
+      };
     }
 
-    // Android — use native SecurityModule (ConnectivityManager + NetworkInterface scan)
+    // Android — native SecurityModule: ConnectivityManager TRANSPORT_VPN +
+    // NetworkInterface name scan (tun/vpn/ppp/ipsec). Correctly excludes WiFi/cellular.
     const flags = await getNativeSecurityFlags();
-    if (__DEV__) {
-      console.log('[SecurityCheck][VPN] Android vpnDetected=', flags.vpnDetected);
-    }
+    console.log('[SecurityCheck][VPN] Android: raw vpnDetected =', flags.vpnDetected,
+      '| decision =', flags.vpnDetected ? '🔴 BLOCK' : '✅ PASS');
     if (!flags.vpnDetected) return null;
     return {
       type: 'vpn_detected',

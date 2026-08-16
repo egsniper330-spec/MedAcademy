@@ -101,7 +101,8 @@ export default function ReportsScreen() {
   };
 
   return (
-    <ScrollView style={{ flex: 1, backgroundColor: c.base }} contentInsetAdjustmentBehavior="automatic">
+    <ScrollView style={{ flex: 1, backgroundColor: c.base }}
+          contentContainerStyle={{ paddingBottom: layout.scrollBottom() }}>
       <View style={{ padding: layout.screenPx }}>
         <PageHeader title="Reports" subtitle="Export platform data as CSV" accentColor="#7C3AED" />
 

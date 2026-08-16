@@ -111,7 +111,8 @@ export default function AdminCreditsScreen() {
 
   return (
     <KeyboardAvoidingView behavior={process.env.EXPO_OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1, backgroundColor: c.base }}>
-      <ScrollView contentInsetAdjustmentBehavior="automatic"
+      <ScrollView
+          contentContainerStyle={{ paddingBottom: layout.scrollBottom() }}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />}>
         <View style={{ padding: layout.screenPx }}>
           <PageHeader title="Credit Management" subtitle="Add & remove doctor credits" accentColor="#7C3AED" />

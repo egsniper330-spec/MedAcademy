@@ -588,7 +588,6 @@ export default function TrashBin() {
           keyExtractor={i => i.id}
           renderItem={renderItem}
           extraData={extraData}
-          contentInsetAdjustmentBehavior="automatic"
           contentContainerStyle={{ paddingHorizontal: layout.screenPx, paddingBottom: layout.scrollBottom() }}
           // Pagination
           onEndReached={loadMore}

@@ -102,13 +102,15 @@ export default function ForcePasswordChangeScreen() {
         <ScrollView
           contentContainerStyle={{
             paddingHorizontal: layout.screenPx,
-            paddingTop: layout.pad.xxl,
+            // headerTop accounts for status bar + Dynamic Island/notch + breathing room
+            paddingTop: layout.headerTop,
             paddingBottom: layout.scrollBottom(),
             gap: layout.pad.lg,
             justifyContent: 'center',
             flexGrow: 1,
           }}
           keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
         >
           {/* Header */}
           <View style={{ alignItems: 'center', gap: layout.pad.md, marginBottom: layout.pad.sm }}>

@@ -992,7 +992,7 @@ export default function AdminCodes() {
         <FlatList
           data={filteredCodes}
           keyExtractor={item => item.id}
-          contentInsetAdjustmentBehavior="automatic"
+          contentContainerStyle={{ paddingBottom: layout.scrollBottom() }}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />}
           ListHeaderComponent={
             <View style={{ paddingHorizontal: layout.screenPx }}>
@@ -1129,7 +1129,7 @@ export default function AdminCodes() {
         <FlatList
           data={filteredBatches}
           keyExtractor={item => item.id}
-          contentInsetAdjustmentBehavior="automatic"
+          contentContainerStyle={{ paddingBottom: layout.scrollBottom() }}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />}
           ListHeaderComponent={
             <View style={{ paddingHorizontal: layout.screenPx, paddingBottom: 4 }}>

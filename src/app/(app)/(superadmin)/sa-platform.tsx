@@ -74,7 +74,8 @@ export default function SAPlatform() {
   const layout = useLayout();
 
   return (
-    <ScrollView style={{ flex: 1, backgroundColor: c.base }} contentInsetAdjustmentBehavior="automatic">
+    <ScrollView style={{ flex: 1, backgroundColor: c.base }}
+          contentContainerStyle={{ paddingBottom: layout.scrollBottom() }}>
       <View style={{ padding: layout.screenPx }}>
 
         {/* ── Header ──────────────────────────────────────────────────── */}

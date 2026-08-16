@@ -861,7 +861,7 @@ export default function CourseBuilder() {
           TAB: INFO
       ══════════════════════════════════════════════════════════════════════ */}
       {tab === 'info' && (
-        <ScrollView contentInsetAdjustmentBehavior="automatic" keyboardShouldPersistTaps="handled"
+        <ScrollView keyboardShouldPersistTaps="handled"
           contentContainerStyle={{ padding: layout.screenPx, gap: 16, paddingBottom: layout.scrollBottom() }}>
 
           {/* Title */}
@@ -1107,7 +1107,6 @@ export default function CourseBuilder() {
             data={filteredSections}
             keyExtractor={s => s.id}
             contentContainerStyle={{ padding: layout.screenPx, paddingTop: 4, paddingBottom: layout.scrollBottom(), gap: 12 }}
-            contentInsetAdjustmentBehavior="automatic"
             ListEmptyComponent={
               <View style={{ alignItems: 'center', paddingVertical: 60 }}>
                 <Layers size={44} color={c.primary} opacity={0.2} />
@@ -1402,7 +1401,7 @@ export default function CourseBuilder() {
           TAB: SETTINGS
       ══════════════════════════════════════════════════════════════════════ */}
       {tab === 'settings' && (
-        <ScrollView contentInsetAdjustmentBehavior="automatic" keyboardShouldPersistTaps="handled"
+        <ScrollView keyboardShouldPersistTaps="handled"
           contentContainerStyle={{ padding: layout.screenPx, gap: 16, paddingBottom: layout.scrollBottom() }}>
           <Text style={{ fontSize: 16, fontWeight: '800', color: c.text, opacity: 0.7 }}>Learning & Access</Text>
 

@@ -40,7 +40,8 @@ export default function StorageMonitorScreen() {
   const bucketColors = ['#1E90FF', '#7C3AED', '#16A34A', '#D97706', '#2DA8FF', '#DC2626'];
 
   return (
-    <ScrollView style={{ flex: 1, backgroundColor: c.base }} contentInsetAdjustmentBehavior="automatic"
+    <ScrollView style={{ flex: 1, backgroundColor: c.base }}
+          contentContainerStyle={{ paddingBottom: layout.scrollBottom() }}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />}>
       <View style={{ padding: layout.screenPx }}>
         <PageHeader title="Storage Monitor" subtitle="Supabase Storage + VdoCipher usage" accentColor="#2DA8FF" />

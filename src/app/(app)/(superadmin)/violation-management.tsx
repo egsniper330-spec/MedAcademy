@@ -9,7 +9,6 @@ import {
   View, Text, ScrollView, useColorScheme, Pressable,
   ActivityIndicator, TextInput, FlatList,
 } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect } from 'expo-router';
 import {
   ShieldOff, RotateCcw, UserCheck, AlertTriangle,
@@ -17,7 +16,7 @@ import {
 } from 'lucide-react-native';
 import { supabase } from '@/client/supabase';
 import { NeuCard } from '@/components/NeuCard';
-import { neuColors, neuFlatStyle } from '@/lib/neu';
+import { neuColors, useLayout, neuFlatStyle, safeBottom } from '@/lib/neu';
 import { PageHeader } from '@/components/PageHeader';
 
 interface Violation {
@@ -54,7 +53,8 @@ const ACTION_COLORS: Record<string, string> = {
 export default function ViolationManagementScreen() {
   const isDark = useColorScheme() === 'dark';
   const c = isDark ? neuColors.dark : neuColors.light;
-  const insets = useSafeAreaInsets();
+  const layout = useLayout();
+  const insets = layout.insets;
   const flat = neuFlatStyle(isDark);
 
   const [violations, setViolations]   = useState<Violation[]>([]);
@@ -283,8 +283,7 @@ export default function ViolationManagementScreen() {
           data={filtered}
           keyExtractor={(item) => item.id}
           renderItem={renderItem}
-          contentContainerStyle={{ padding: 16, gap: 12, paddingBottom: Math.max(insets.bottom, 20) + 20 }}
-          contentInsetAdjustmentBehavior="automatic"
+          contentContainerStyle={{ padding: 16, gap: 12, paddingBottom: layout.scrollBottom() }}
         />
       )}
     </View>

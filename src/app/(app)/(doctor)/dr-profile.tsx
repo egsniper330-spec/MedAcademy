@@ -1017,7 +1017,6 @@ function EarningsTab({ doctorId, earningsEnabled, c }: { // eslint-disable-line 
   return (
     <ScrollView
       style={{ flex: 1, backgroundColor: c.base }}
-      contentInsetAdjustmentBehavior="automatic"
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />}
       contentContainerStyle={{ padding: layout.screenPx, paddingBottom: layout.scrollBottom() }}
     >
@@ -1301,7 +1300,6 @@ export default function DoctorProfile() {
   const renderProfileTab = () => (
     <ScrollView
       style={{ flex: 1, backgroundColor: c.base }}
-      contentInsetAdjustmentBehavior="automatic"
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />}
       contentContainerStyle={{ padding: layout.screenPx, paddingBottom: layout.scrollBottom() }}
     >
@@ -1413,7 +1411,6 @@ export default function DoctorProfile() {
     return (
       <ScrollView
         style={{ flex: 1, backgroundColor: c.base }}
-        contentInsetAdjustmentBehavior="automatic"
         contentContainerStyle={{ padding: layout.screenPx, paddingBottom: layout.scrollBottom() }}
       >
         {/* ── Edit Profile ───────────────────────────────────────────── */}

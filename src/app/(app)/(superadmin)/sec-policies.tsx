@@ -153,7 +153,6 @@ export default function SecurityPoliciesScreen() {
       <PageHeader title="Security Policies" />
       <ScrollView
         contentContainerStyle={{ padding: layout.screenPx, gap: layout.sectionGap, paddingBottom: layout.scrollBottom() }}
-        contentInsetAdjustmentBehavior="automatic"
       >
         {/* Intro */}
         <View style={[flat, {

@@ -241,68 +241,79 @@ export async function isNativeTampered(): Promise<boolean> {
 
 // ─── Pure-JS iOS VPN detection ───────────────────────────────────────────────
 //
-// NOTE: IOSSecurityModule is now compiled and active. NativeModules.IOSSecurityModule
-// is NOT null in production builds (the module was re-added via plugins/withSecurityModule).
-// The native getSecurityFlags() batch call handles VPN detection natively via
-// getifaddrs(). The pure-JS implementation below is a fallback / supplement used
-// by isVPNActive() for callers that need a standalone VPN check without the full batch.
+// This is a FALLBACK only — used when the native IOSSecurityModule is null
+// (e.g. Expo Go, simulator without native module compiled).
 //
-// Without the native module, NativeModules.IOSSecurityModule is always null
-// → getIOSModule() always returns null → the old code always returned false
-// → VPN was NEVER detected on iOS.
+// In production builds, isNativeVPNDetected() calls mod.isVPNDetected() via the
+// native Swift module (IOSSecurityModule.checkVPNSafe()), which now uses a two-gate
+// check (NWPath + getifaddrs IFF_UP). This JS path is only reached on fallback.
 //
-// This pure-JS replacement covers every VPN type that matters:
+// FALSE-POSITIVE FIX:
+//
+// The previous Method 2 triggered on state.type === 'other' || 'unknown'.
+// @react-native-community/netinfo returns 'other' for ANY connection type it cannot
+// classify as wifi, cellular, bluetooth, ethernet, wimax, or vpn. This includes:
+//   • Ethernet adapters via USB-C/Lightning dongle (not VPN)
+//   • Tethering / Personal Hotspot connections (not VPN)
+//   • Some corporate Wi-Fi SSIDs where system reports 'other' (not VPN)
+//   • iCloud Private Relay (NOT a VPN; iOS does not report it as vpn)
+//
+// Method 1 (state.type === 'vpn') is the ONLY reliable cross-platform signal from
+// NetInfo. @react-native-community/netinfo reports type=vpn when:
+//   • iOS Settings > VPN is actively connected (IKEv2, IPSec, L2TP, Personal VPN)
+//   • NEVPNManager status is .connected at the framework level
+//
+// Third-party packet-tunnel apps (WireGuard, OpenVPN, Tailscale, Cloudflare WARP)
+// on iOS do NOT reliably report type=vpn — they require the native module's NWPath +
+// getifaddrs approach. The JS fallback therefore misses them, but this is acceptable
+// because: (a) the native module IS compiled and will handle them, (b) the JS fallback
+// only runs when the native module is absent, where we prefer no false-positive.
 //
 //  ┌─────────────────────────────────────────────────────────────────────────┐
-//  │ VPN type            │ NetInfo type  │ Detected by                       │
+//  │ VPN type            │ NetInfo type  │ JS fallback detects?              │
 //  ├─────────────────────┼───────────────┼───────────────────────────────────┤
-//  │ Personal VPN        │ 'vpn'         │ Method 1 — direct type match      │
-//  │ IKEv2 (system)      │ 'vpn'         │ Method 1                          │
-//  │ IPSec (system)      │ 'vpn'         │ Method 1                          │
-//  │ L2TP (system)       │ 'vpn'         │ Method 1                          │
-//  │ WireGuard app       │ 'other'       │ Method 2 — other+connected        │
-//  │ OpenVPN app         │ 'other'       │ Method 2                          │
-//  │ Tailscale           │ 'other'       │ Method 2                          │
-//  │ Cloudflare WARP     │ 'other'       │ Method 2                          │
-//  │ Packet Tunnel ext.  │ 'other'       │ Method 2                          │
+//  │ Personal VPN        │ 'vpn'         │ ✅ Method 1 — direct type match   │
+//  │ IKEv2 (system)      │ 'vpn'         │ ✅ Method 1                       │
+//  │ IPSec (system)      │ 'vpn'         │ ✅ Method 1                       │
+//  │ L2TP (system)       │ 'vpn'         │ ✅ Method 1                       │
+//  │ WireGuard app       │ 'other'       │ ❌ Not detected (native handles)  │
+//  │ OpenVPN app         │ 'other'       │ ❌ Not detected (native handles)  │
+//  │ Tailscale           │ 'other'       │ ❌ Not detected (native handles)  │
+//  │ Cloudflare WARP     │ 'other'       │ ❌ Not detected (native handles)  │
+//  │ Ethernet dongle     │ 'other'       │ ✅ Not flagged (false-pos removed) │
+//  │ Hotspot             │ 'other'       │ ✅ Not flagged (false-pos removed) │
 //  └─────────────────────────────────────────────────────────────────────────┘
-//
-// Limitation: method 2 cannot distinguish "other non-VPN connections" on very
-// unusual network topologies. In practice, iOS reports WiFi/cellular/vpn for
-// standard connections; 'other' almost always means a tunnel interface.
 
 async function detectVPNviaNetInfo(): Promise<boolean> {
-  const TAG = '[NativeSecurity][iOS-VPN-JS]';
+  const TAG = '[NativeSecurity][iOS-VPN-JS-fallback]';
   try {
     console.log(TAG, 'Stage-1: fetching NetInfo state…');
     const state = await NetInfo.fetch();
     console.log(TAG, 'Stage-2: raw state =', JSON.stringify({
-      type:               state.type,
-      isConnected:        state.isConnected,
+      type:                state.type,
+      isConnected:         state.isConnected,
       isInternetReachable: state.isInternetReachable,
     }));
 
-    // Method 1 — primary connection type explicitly reported as VPN
-    // Covers: Personal VPN, IKEv2, IPSec, L2TP configured in iOS Settings > VPN
+    // Method 1 — only reliable JS signal: NetInfo explicitly classifies as 'vpn'.
+    // Covers: Personal VPN, IKEv2, IPSec, L2TP in iOS Settings > VPN.
     if (state.type === 'vpn') {
-      console.log(TAG, 'Stage-3 ✅ Method-1 POSITIVE: type === "vpn"');
+      console.log(TAG, 'Stage-3 ✅ POSITIVE: type === "vpn" (explicit VPN transport)');
       return true;
     }
 
-    // Method 2 — connected but type is 'other' or 'unknown'
-    // Covers: WireGuard, OpenVPN, Tailscale, Cloudflare WARP, packet-tunnel providers.
-    // These create utun/tun interfaces that NetInfo cannot classify beyond 'other'.
-    // Guard: only flag when actually connected — offline state also shows 'other'.
-    if (state.isConnected === true &&
-        (state.type === 'other' || state.type === 'unknown')) {
-      console.log(TAG, 'Stage-3 ✅ Method-2 POSITIVE: connected + type === "other/unknown" (likely tunnel VPN)');
-      return true;
-    }
+    // Method 2 REMOVED — type=other/unknown caused false positives on:
+    //   • USB-C Ethernet adapters, Hotspot, corporate Wi-Fi, iCloud Private Relay.
+    // Packet-tunnel VPNs (WireGuard, OpenVPN, Tailscale, WARP) that show as 'other'
+    // are handled by the native IOSSecurityModule two-gate check. When the native
+    // module is absent (fallback path), we accept the miss to avoid false positives.
 
-    console.log(TAG, 'Stage-3 ✗ No VPN signals detected (type=' + state.type + ', connected=' + state.isConnected + ')');
+    console.log(TAG, 'Stage-3 ✗ No VPN signal. type=' + state.type +
+      ', connected=' + String(state.isConnected) +
+      ' (note: type=other is NOT treated as VPN in JS fallback)');
     return false;
   } catch (e) {
-    console.warn(TAG, 'Stage-2 ERROR: NetInfo.fetch() threw:', e, '→ returning false (fail-open)');
+    console.warn(TAG, 'NetInfo.fetch() threw:', e, '→ fail-open (returning false)');
     return false;
   }
 }

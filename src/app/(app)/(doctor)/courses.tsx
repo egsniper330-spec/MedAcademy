@@ -136,7 +136,6 @@ export default function DoctorCourses() {
   return (
     <>
       <ScrollView style={{ flex: 1, backgroundColor: c.base }}
-        contentInsetAdjustmentBehavior="automatic"
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}>
         {/* Header — uses DashboardHeader for consistent safe-area + hamburger alignment */}
         <DashboardHeader

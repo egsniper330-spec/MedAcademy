@@ -799,7 +799,7 @@ export default function GlobalSearchScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: c.base }}>
-      <ScrollView contentInsetAdjustmentBehavior="automatic">
+      <ScrollView contentContainerStyle={{ paddingBottom: layout.scrollBottom() }}>
         <View style={{ padding: layout.screenPx }}>
           <PageHeader title="Global Search" subtitle="Search users, courses, academic entities" accentColor={c.primary} />
 
@@ -903,7 +903,7 @@ export default function GlobalSearchScreen() {
             </ScrollView>
 
             {/* Tab body */}
-            <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 18 }} contentInsetAdjustmentBehavior="automatic">
+            <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 18, paddingBottom: layout.scrollBottom() }}>
               {renderDrawerContent()}
             </ScrollView>
           </Animated.View>

@@ -537,7 +537,6 @@ export default function SystemProvidersScreen() {
       ) : (
         <ScrollView
           contentContainerStyle={{ paddingHorizontal: layout.screenPx, paddingBottom: layout.scrollBottom() }}
-          contentInsetAdjustmentBehavior="automatic"
           refreshControl={
             <RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(); }}
               tintColor={c.primary} />

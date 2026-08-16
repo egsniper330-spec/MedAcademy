@@ -3,13 +3,12 @@ import {
   View, Text, ScrollView, useColorScheme, Pressable,
   RefreshControl, ActivityIndicator, useWindowDimensions,
 } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect } from 'expo-router';
 import { Bell, Check, Trash2 } from 'lucide-react-native';
 import { useProfileStore } from '@/lib/store';
 import { getNotifications, markNotificationRead, deleteNotification } from '@/lib/api';
 import { NeuCard } from '@/components/NeuCard';
-import { neuColors, neuMicroStyle } from '@/lib/neu';
+import { neuColors, useLayout, neuMicroStyle, safeTop, safeBottom } from '@/lib/neu';
 import { PageHeader } from '@/components/PageHeader';
 import { DrawerProvider } from '@/components/DrawerContext';
 import DrawerNav from '@/components/DrawerNav';
@@ -19,7 +18,8 @@ function NotificationsContent() {
   const isDark = scheme === 'dark';
   const c = isDark ? neuColors.dark : neuColors.light;
   const { profile } = useProfileStore();
-  const insets = useSafeAreaInsets();
+  const layout = useLayout();
+  const insets = layout.insets;
   const { height: screenHeight } = useWindowDimensions();
 
   const [notifications, setNotifications] = useState<any[]>([]);
@@ -48,7 +48,7 @@ function NotificationsContent() {
   // Approximate header height for the empty-state centering calculation.
   // PageHeader paddingTop = max(insets.top + 10, 24), paddingBottom = 14,
   // title line-height = 24 → total ≈ insets.top + 10 + 14 + 24 = insets.top + 48.
-  const approxHeaderHeight = Math.max(insets.top + 48, 72);
+  const approxHeaderHeight = layout.headerTop + 48;
 
   return (
     <View style={{ flex: 1, backgroundColor: c.base }}>
@@ -61,9 +61,8 @@ function NotificationsContent() {
         contentContainerStyle={{
           padding: 20,
           paddingTop: 8,
-          paddingBottom: Math.max(insets.bottom, 24) + 16,
+          paddingBottom: layout.scrollBottom(),
         }}
-        contentInsetAdjustmentBehavior="automatic"
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />}
       >
         {loading ? (
@@ -72,7 +71,7 @@ function NotificationsContent() {
 
           // ── Empty state — vertically centred in visible screen space ──
           <View style={{
-            minHeight: screenHeight - approxHeaderHeight - insets.bottom - 40,
+            minHeight: screenHeight - approxHeaderHeight - layout.insets.bottom - 40,
             alignItems: 'center',
             justifyContent: 'center',
             paddingHorizontal: 32,

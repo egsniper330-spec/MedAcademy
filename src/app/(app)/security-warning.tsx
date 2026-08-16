@@ -260,7 +260,6 @@ export default function SecurityWarningScreen() {
           paddingBottom: layout.scrollBottom(),
           gap: layout.pad.lg,
         }}
-        contentInsetAdjustmentBehavior="automatic"
       >
         {/* Header */}
         <View style={{ alignItems: 'center', gap: layout.pad.md, paddingTop: layout.pad.lg }}>

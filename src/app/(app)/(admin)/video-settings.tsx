@@ -97,7 +97,7 @@ export default function VideoSettingsScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: c.base }}>
-      <ScrollView contentInsetAdjustmentBehavior="automatic"
+      <ScrollView
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />}
         contentContainerStyle={{ padding: layout.screenPx, gap: 16, paddingBottom: layout.scrollBottom() }}>
 

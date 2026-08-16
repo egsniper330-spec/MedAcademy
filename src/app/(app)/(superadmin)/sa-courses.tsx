@@ -441,7 +441,6 @@ export default function SACourses() {
     <View style={{ flex: 1, backgroundColor: c.base }}>
       <ScrollView
         style={{ flex: 1 }}
-        contentInsetAdjustmentBehavior="automatic"
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />}
       >
         <View style={{ padding: layout.screenPx }}>

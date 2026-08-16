@@ -438,7 +438,6 @@ export default function AdminAudit() {
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />}
           onEndReached={loadMore}
           onEndReachedThreshold={0.3}
-          contentInsetAdjustmentBehavior="automatic"
           ListEmptyComponent={
             <View style={{ alignItems: 'center', paddingVertical: 80 }}>
               <Shield size={48} color={c.primary} opacity={0.15} style={{ marginBottom: 12 }} />

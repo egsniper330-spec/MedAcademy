@@ -601,7 +601,6 @@ export default function UserAuditLogs() {
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />}
           onEndReached={loadMore}
           onEndReachedThreshold={0.3}
-          contentInsetAdjustmentBehavior="automatic"
           ListHeaderComponent={profile ? <ProfileHeader profile={profile} c={c} /> : null}
           ListEmptyComponent={
             <View style={{ alignItems: 'center', paddingVertical: layout.sectionGap * 3 }}>

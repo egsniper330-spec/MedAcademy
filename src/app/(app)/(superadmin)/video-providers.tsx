@@ -161,7 +161,6 @@ export default function VideoProvidersScreen() {
   return (
     <ScrollView
       style={{ flex: 1, backgroundColor: c.base }}
-      contentInsetAdjustmentBehavior="automatic"
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />}
     >
       <View style={{ padding: layout.screenPx, gap: 20 }}>

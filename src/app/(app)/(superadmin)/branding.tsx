@@ -67,7 +67,8 @@ export default function BrandingScreen() {
   );
 
   return (
-    <ScrollView style={{ flex: 1, backgroundColor: c.base }} contentInsetAdjustmentBehavior="automatic"
+    <ScrollView style={{ flex: 1, backgroundColor: c.base }}
+          contentContainerStyle={{ paddingBottom: layout.scrollBottom() }}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />}>
       <View style={{ padding: layout.screenPx }}>
         <PageHeader title="Branding" subtitle="Customize platform appearance" accentColor="#7C3AED" />

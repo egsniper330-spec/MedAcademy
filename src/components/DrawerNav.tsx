@@ -410,7 +410,7 @@ export default function DrawerNav() {
           }),
         }}
       >
-        <ScrollView showsVerticalScrollIndicator={false} contentInsetAdjustmentBehavior="automatic">
+        <ScrollView showsVerticalScrollIndicator={false}>
 
           {/* ── Drawer Header ──────────────────────────────────────────────
               Three-zone layout (Notion / Linear / GitHub style):

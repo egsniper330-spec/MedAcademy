@@ -323,7 +323,6 @@ export function VideoLibraryPicker({ visible, onClose, onSelect }: Props) {
             keyExtractor={(item) => item.id}
             renderItem={renderItem}
             contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 32 }}
-            contentInsetAdjustmentBehavior="automatic"
             showsVerticalScrollIndicator={false}
           />
         )}
