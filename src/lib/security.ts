@@ -629,7 +629,11 @@ async function detectSSLPinning(): Promise<SecurityThreat | null> {
     try {
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 8000);
-      const res = await fetch(probeUrl, {
+      // Use globalThis.fetch explicitly — NOT bare `fetch`.
+      // On iOS JSC, bare `fetch` in module scope can resolve to undefined if the
+      // lazy getter hasn't fired yet.  globalThis.fetch is always the live value
+      // (medo-guard + whatwg-fetch polyfill) at the time this async function runs.
+      const res = await globalThis.fetch(probeUrl, {
         method: 'GET',
         signal: controller.signal,
       });
@@ -642,7 +646,7 @@ async function detectSSLPinning(): Promise<SecurityThreat | null> {
       try {
         const fallbackController = new AbortController();
         const fallbackTimeout = setTimeout(() => fallbackController.abort(), 5000);
-        await fetch('https://www.apple.com/library/test/success.html', {
+        await globalThis.fetch('https://www.apple.com/library/test/success.html', {
           method: 'HEAD',
           signal: fallbackController.signal,
         });

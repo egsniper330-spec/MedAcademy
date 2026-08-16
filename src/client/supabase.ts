@@ -14,14 +14,20 @@ const supabaseAnonKey: string = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY || 'pl
 // installed on `global`, causing every auth/postgrest/storage network call to
 // throw "Network request failed" — while Android (Hermes) and Web work fine.
 //
-// Fix: explicitly bind globalThis.fetch and pass it via `global.fetch` so
-// supabase-js always uses the same reference that medo-guard has patched.
-// The lambda is typed as the supabase-js `Fetch` alias (= typeof fetch), which
-// in its typings is `(input: RequestInfo | URL, init?: RequestInit) => Promise<Response>`.
-// We cast to `typeof fetch` (which resolves to that same signature here) to
-// satisfy the SupabaseClientOptions type without a per-overload union juggle.
+// Fix: pass `global.fetch` (the medo-guard-patched wrapper) directly to the
+// Supabase client.  By the time this module evaluates:
+//  1. React Native's setUpXHR polyfill has already run (it is a prepended
+//     polyfill script) and the `global.fetch` lazy getter has been triggered by
+//     medo-guard.ts (which runs before this module via the first import in
+//     _layout.tsx), so `global.fetch` is the real whatwg-fetch function.
+//  2. medo-guard has already replaced `globalThis.fetch` with its interceptor,
+//     so passing `global.fetch` here means all supabase requests go through the
+//     medo-guard as well as the real network stack.
+//
+// We capture the reference ONCE at module-eval time — which is safe because
+// medo-guard.ts (imported first) has already materialised it.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-const _resolvedFetch = ((...args: Parameters<typeof fetch>) => globalThis.fetch(...args)) as any;
+const _resolvedFetch = globalThis.fetch as any;
 
 
 // Supabase requires a synchronous storage adapter. expo-secure-store is
