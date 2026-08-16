@@ -118,7 +118,20 @@ export async function resolveEmailFromIdentifier(identifier: string): Promise<st
     const { data, error } = await supabase
       .rpc('get_email_by_phone', { p_phone: lookupPhone });
     if (error) {
-      console.error('[resolveEmailFromIdentifier] RPC error:', error.message);
+      // Re-throw network-level errors so the sign-in handler can show the real
+      // message ("Network request failed") instead of the misleading
+      // "No account found for this email or phone number".
+      // Only swallow application-level errors (e.g. function not found — that
+      // would be a misconfiguration, not a transient network failure).
+      console.error('[resolveEmailFromIdentifier] RPC error:', error.message, '| code:', error.code);
+      const networkError =
+        error.message.toLowerCase().includes('network') ||
+        error.message.toLowerCase().includes('failed to fetch') ||
+        error.message.toLowerCase().includes('timeout') ||
+        // PostgREST / supabase-js wraps fetch errors with code 'PGRST' prefix
+        // or FetchError name; a missing function returns code '404' / 'PGRST301'
+        (error.code !== undefined && !String(error.code).startsWith('PGRST') && error.code !== '404');
+      if (networkError) throw error;
       return null;
     }
     return data ?? null;

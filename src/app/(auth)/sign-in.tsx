@@ -61,10 +61,21 @@ export default function SignIn() {
     setLoading(true);
     setError('');
 
+    // ── Release-safe auth diagnostics ─────────────────────────────────────────
+    // Logs platform, stage, and error info. Never logs password, tokens, or keys.
+    const _authTag = '[AUTH]';
+    const _authErr = '[AUTH_ERROR]';
+    const _platform = process.env.EXPO_OS ?? 'unknown';
+    const _isPhone = /^[\+0-9\s\-\.\(\)]{4,}$/.test(trimmed) && !/^[^@\s]+@[^@\s]+/.test(trimmed);
+    const _loginMethod = _isPhone ? 'phone' : 'email';
+    console.log(_authTag, `login started | platform=${_platform} method=${_loginMethod}`);
+
     try {
       // Step 1: Run security checks BEFORE creating any session
       const installationId = await getInstallationId();
+      console.log(_authTag, 'security check started');
       const secResult = await check(installationId);
+      console.log(_authTag, `security check done | blocksLogin=${secResult.blocksLogin} riskScore=${secResult.riskScore}`);
 
       // If policy blocks login, show security warning screen immediately
       if (secResult.blocksLogin) {
@@ -82,15 +93,19 @@ export default function SignIn() {
       }
 
       // Step 2: Resolve to email
+      console.log(_authTag, `account lookup started | method=${_loginMethod}`);
       const email = await resolveEmailFromIdentifier(trimmed);
       if (!email) {
+        console.log(_authErr, `stage=account_lookup method=${_loginMethod} result=not_found`);
         setError('No account found for this email or phone number.');
         setLoading(false);
         return;
       }
+      console.log(_authTag, 'account lookup completed | email resolved');
 
       // Step 3: PRE-LOGIN device check — BEFORE creating any Supabase session
       // Uses the anon key; no JWT needed. Blocks if device limit exceeded.
+      console.log(_authTag, 'device pre-check started');
       const { data: checkData, error: checkError } = await supabase
         .rpc('pre_login_device_check', {
           p_email: email,
@@ -98,23 +113,27 @@ export default function SignIn() {
         });
 
       if (checkError) {
-        console.warn('[SignIn] pre_login_device_check RPC error:', checkError.message);
+        console.warn(_authErr, `stage=device_precheck name=${checkError.name ?? 'unknown'} message=${checkError.message}`);
         // Non-fatal: allow login attempt if the check itself fails (network issue, etc.)
       } else if (checkData && checkData.allowed === false) {
         // Map every known rejection reason to a clear user-facing message.
         // device_blocked is caught here (pre-session) so the auth session is NEVER created.
         const reason: string = checkData.reason ??
           'This account is already active on another authorized device.';
-        console.warn('[SignIn] pre_login_device_check denied:', { reason, checkData });
+        console.warn(_authErr, `stage=device_precheck result=denied reason=${reason}`);
         setError(reason);
         setLoading(false);
         return; // ← session is NEVER created
       }
 
       // Step 4: Create auth session (only after device check passes)
+      console.log(_authTag, `Supabase signIn started | host=${process.env.EXPO_PUBLIC_SUPABASE_URL?.replace(/https?:\/\//, '').split('.')[0] ?? 'unknown'}.supabase.co`);
+      const signInStart = Date.now();
       const { data, error: authError } = await supabase.auth.signInWithPassword({ email, password });
+      const signInMs = Date.now() - signInStart;
 
       if (authError) {
+        console.log(_authErr, `stage=supabase_signin name=${authError.name ?? 'AuthError'} status=${authError.status ?? 0} message=${authError.message} elapsed=${signInMs}ms`);
         // Safety-net: if Supabase Auth returns "User is banned." it means either:
         //   (a) The account is blocked by an admin (ban_duration set by block-user EF).
         //   (b) The auth.users row has ban_duration but the profile was already deleted.
@@ -140,6 +159,8 @@ export default function SignIn() {
         setLoading(false);
         return;
       }
+
+      console.log(_authTag, `Supabase signIn completed | session=${!!data.session} elapsed=${signInMs}ms`);
 
       // Step 5: Register / update device record (now we have a valid session)
       const platform    = process.env.EXPO_OS ?? 'unknown';
@@ -196,6 +217,7 @@ export default function SignIn() {
       }
 
       // Step 6: Show security warning if threats detected but login is allowed
+      console.log(_authTag, `navigation started | hasWarnings=${secResult.hasWarnings}`);
       if (secResult.hasWarnings && secResult.threats.length > 0) {
         const userRole = data.user?.user_metadata?.role ?? 'student';
         const dashboardPath = `/(app)/(${userRole === 'super_admin' ? 'superadmin' : userRole})/dashboard` as RelativePathString;
@@ -214,7 +236,15 @@ export default function SignIn() {
 
       // SessionProvider + layout handle routing by role.
     } catch (e: unknown) {
-      setError((e as Error)?.message ?? 'Sign-in failed. Please try again.');
+      const errMsg = (e as Error)?.message ?? 'Sign-in failed. Please try again.';
+      const errName = (e as Error)?.name ?? 'Error';
+      // Capture first relevant stack line for debugging (never expose to user)
+      const firstStackLine = ((e as Error)?.stack ?? '')
+        .split('\n')
+        .find(l => l.includes('.tsx') || l.includes('.ts') || l.includes('.js'))
+        ?.trim() ?? '';
+      console.log(_authErr, `stage=unhandled name=${errName} message=${errMsg}${firstStackLine ? ' stack=' + firstStackLine : ''}`);
+      setError(errMsg);
     }
     setLoading(false);
   };

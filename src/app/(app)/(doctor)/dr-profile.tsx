@@ -461,9 +461,14 @@ function GlobalPriceCard({ doctorId, c, onRecalculate }: {
       )}
 
       {/* Reset confirmation modal */}
-      <Modal visible={showResetConfirm} transparent animationType="fade">
-        <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
-          <NeuCard radius={24} style={{ padding: 24, gap: 16, width: '100%', maxWidth: 400 }}>
+      {/*
+        Fix: added statusBarTranslucent so scrim covers the Android status bar.
+        Fix: card uses marginHorizontal instead of width:'100%' + padding:20 so it
+        respects landscape iPad safe-area insets and never overflows tiny phones.
+      */}
+      <Modal visible={showResetConfirm} transparent animationType="fade" statusBarTranslucent>
+        <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)', alignItems: 'center', justifyContent: 'center', paddingHorizontal: 20 }}>
+          <NeuCard radius={24} style={{ padding: 24, gap: 16, width: '100%', maxWidth: 400, alignSelf: 'center' }}>
             <View style={{ alignItems: 'center', gap: 10 }}>
               <View style={{ width: 54, height: 54, borderRadius: 16, backgroundColor: '#DC262614',
                              alignItems: 'center', justifyContent: 'center' }}>
@@ -564,13 +569,16 @@ function StudentProfileModal({ tx, doctorId, onClose, onAction, c }: {
   const accountStatusColor = isDeleted ? '#DC2626' : hasSuspended ? '#D97706' : '#16A34A';
 
   return (
-    <Modal visible animationType="slide" transparent onRequestClose={onClose}>
+    <Modal visible animationType="slide" transparent statusBarTranslucent onRequestClose={onClose}>
       <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' }}>
         <View style={{
           backgroundColor: c.base,
           borderTopLeftRadius: 28,
           borderTopRightRadius: 28,
-          maxHeight: '92%',
+          // Fix: was '92%' (of full screen height, ignoring safe-area insets).
+          // Now calculated as (screenH - insets.top) * 0.92 so it is always
+          // within the visible viewport — critical on landscape and small phones.
+          maxHeight: layout.insets ? (layout.height - layout.insets.top) * 0.92 : '92%',
           width: '100%',
           paddingBottom: layout.scrollBottom(),
         }}>

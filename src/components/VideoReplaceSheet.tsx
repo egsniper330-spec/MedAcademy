@@ -14,6 +14,7 @@ import { useState } from 'react';
 import {
   ActivityIndicator, Modal, Pressable, Text, useColorScheme, View,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Film, Library, RefreshCw, Upload, X } from 'lucide-react-native';
 import { neuColors, neuFlatStyle, neuPressedStyle } from '@/lib/neu';
 import { VideoLibraryPicker } from '@/components/VideoLibraryPicker';
@@ -40,6 +41,9 @@ interface Props {
 
 type Step = 'choose_source' | 'choose_scope' | 'applying';
 
+// VideoReplaceSheet uses presentationStyle="formSheet" on iOS (detent sheet).
+// On Android that prop is ignored — the modal is full-screen, so we must apply
+// a paddingTop matching the status-bar inset ourselves.
 export function VideoReplaceSheet({
   visible, lessonId, currentAssetId, sharedLessonCount,
   onClose, onUploadNew, onAssetAttached,
@@ -94,17 +98,35 @@ export function VideoReplaceSheet({
     setApplying(false);
   };
 
+  const isIOS = process.env.EXPO_OS === 'ios';
+  const insets = useSafeAreaInsets();
+
   return (
     <>
       <Modal
         visible={visible && !showLibraryPicker}
         animationType="slide"
+        // presentationStyle="formSheet" gives the native detent sheet on iOS.
+        // On Android this prop is silently ignored and the modal is full-screen,
+        // so we compensate by adding a paddingTop equal to the status-bar inset.
         presentationStyle="formSheet"
+        statusBarTranslucent
         onRequestClose={handleClose}>
         <View style={{ flex: 1, backgroundColor: c.base }}>
 
-          {/* ── Header ── */}
-          <View style={{ paddingTop: 20, paddingHorizontal: 20, paddingBottom: 16, flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+          {/* ── Header ──
+              iOS formSheet: system renders the drag handle above the content so
+              paddingTop only needs a small gap (12 dp). Dynamic Island / notch
+              insets are NOT applied inside a formSheet — the OS manages them.
+              Android full-screen: no automatic offset, must add insets.top. */}
+          <View style={{
+            paddingTop: isIOS ? 12 : Math.max(insets.top, 16),
+            paddingHorizontal: 20,
+            paddingBottom: 16,
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: 12,
+          }}>
             <View style={{ flex: 1 }}>
               <Text style={{ fontSize: 18, fontWeight: '800', color: c.text }}>Replace Video</Text>
               <Text style={{ fontSize: 12, color: c.text, opacity: 0.45, marginTop: 2 }}>

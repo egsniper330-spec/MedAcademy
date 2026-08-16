@@ -11,8 +11,9 @@
 import { useEffect, useState } from 'react';
 import {
   View, Text, Pressable, Modal, Linking, useColorScheme,
-  Platform, StyleSheet,
+  Platform, StyleSheet, useWindowDimensions,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Animated, {
   useSharedValue, useAnimatedStyle, withSpring, withTiming,
 } from 'react-native-reanimated';
@@ -122,12 +123,16 @@ export function ContactSheet({ visible, onClose, courseTitle, contact }: Contact
   const scheme = useColorScheme();
   const isDark = scheme === 'dark';
   const c = isDark ? neuColors.dark : neuColors.light;
+  const insets = useSafeAreaInsets();
+  const { height: screenH } = useWindowDimensions();
 
   // Available platforms for this course
   const available = PLATFORMS.filter(p => contact[p.key]);
 
-  // Sheet slide-up animation
-  const translateY = useSharedValue(400);
+  // Sheet slide-up animation — clamp initial offset to screen height so it
+  // always animates in from off-screen regardless of device/orientation
+  const slideOffset = screenH;
+  const translateY = useSharedValue(slideOffset);
   const backdropOpacity = useSharedValue(0);
 
   useEffect(() => {
@@ -135,10 +140,10 @@ export function ContactSheet({ visible, onClose, courseTitle, contact }: Contact
       translateY.value = withSpring(0, { damping: 22, stiffness: 220, mass: 0.8 });
       backdropOpacity.value = withTiming(1, { duration: 220 });
     } else {
-      translateY.value = withTiming(400, { duration: 260 });
+      translateY.value = withTiming(slideOffset, { duration: 260 });
       backdropOpacity.value = withTiming(0, { duration: 200 });
     }
-  }, [visible]);
+  }, [visible, slideOffset]);
 
   const sheetStyle = useAnimatedStyle(() => ({
     transform: [{ translateY: translateY.value }],
@@ -155,7 +160,6 @@ export function ContactSheet({ visible, onClose, courseTitle, contact }: Contact
     if (canOpen) {
       await Linking.openURL(url);
     } else {
-      // Fallback: try the HTTPS web URL directly
       await Linking.openURL(url).catch(() => null);
     }
     onClose();
@@ -178,11 +182,15 @@ export function ContactSheet({ visible, onClose, courseTitle, contact }: Contact
         <Pressable style={StyleSheet.absoluteFillObject} onPress={onClose} />
       </Animated.View>
 
-      {/* Sheet */}
+      {/* Sheet — anchored to bottom, maxHeight so it never overflows in landscape */}
       <Animated.View style={[sheetStyle, styles.sheetContainer]}>
         <View style={[styles.sheet, {
           backgroundColor: c.base,
           shadowColor: c.shadowDark,
+          // Bottom padding: real home-indicator / Android nav-bar inset + breathing room
+          paddingBottom: Math.max(insets.bottom + 8, 20),
+          // Cap height so content never runs off-screen in landscape
+          maxHeight: screenH * 0.85,
         }]}>
           {/* Handle */}
           <View style={[styles.handle, { backgroundColor: `${c.text}20` }]} />
@@ -219,9 +227,6 @@ export function ContactSheet({ visible, onClose, courseTitle, contact }: Contact
               />
             ))}
           </View>
-
-          {/* Bottom safe area padding */}
-          <View style={{ height: Platform.OS === 'ios' ? 28 : 16 }} />
         </View>
       </Animated.View>
     </Modal>

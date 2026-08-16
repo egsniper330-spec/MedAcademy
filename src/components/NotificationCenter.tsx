@@ -12,6 +12,7 @@ import { useEffect, useRef } from 'react';
 import {
   Animated, FlatList, Modal, Pressable, Text, useColorScheme, View,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   Bell, Upload, Pause, Play, CheckCircle, XCircle, AlertTriangle,
   Clock, Loader, Film, X, Trash2,
@@ -146,6 +147,7 @@ function NotificationPanel({
 }) {
   const c = isDark ? neuColors.dark : neuColors.light;
   const { notifications, clearAll } = useUploadNotificationStore();
+  const insets = useSafeAreaInsets();
   const slideAnim = useRef(new Animated.Value(-420)).current;
 
   useEffect(() => {
@@ -182,10 +184,10 @@ function NotificationPanel({
         shadowRadius: 20,
         elevation: 24,
       }}>
-        {/* Header */}
+        {/* Header — paddingTop uses real status-bar/Dynamic-Island inset */}
         <View style={{
           flexDirection: 'row', alignItems: 'center',
-          paddingHorizontal: 16, paddingTop: 52, paddingBottom: 12,
+          paddingHorizontal: 16, paddingTop: insets.top + 12, paddingBottom: 12,
           borderBottomWidth: 1, borderBottomColor: `${c.text}10`,
         }}>
           <View style={{

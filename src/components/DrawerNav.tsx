@@ -350,19 +350,83 @@ export default function DrawerNav() {
   };
 
   const handleLogout = async () => {
+    const _t0 = Date.now();
+    console.log('[AUTH] logout started');
     closeDrawer();
-    // Cancel any pending push-token retry before signing out
+
+    // ── Step 1: Cancel any pending push-token retry (synchronous, instant) ──
     cancelPushTokenRetry();
-    // Clear push token from the server before the session expires
-    try {
-      const installationId = await getInstallationId();
-      await unregisterPushToken(installationId);
-    } catch { /* non-fatal — server token expires naturally */ }
-    // Eagerly wipe the profile store BEFORE signOut so the (app)/_layout.tsx
-    // role-redirect effect cannot fire with stale role data from the old user
-    // while the new session is still being established.
+    console.log('[AUTH] push token retry cancelled', `duration=${Date.now() - _t0}ms`);
+
+    // ── Step 2: Wipe local state IMMEDIATELY ─────────────────────────────────
+    // clearProfile() here prevents (app)/_layout.tsx role-redirect from firing
+    // with stale role data while a new session is being established later.
+    // This is SYNCHRONOUS — no await, no network, instant state change.
     useProfileStore.getState().clearProfile();
-    setTimeout(() => supabase.auth.signOut(), 200);
+    console.log('[AUTH] profile store cleared', `duration=${Date.now() - _t0}ms`);
+
+    // ── Step 3: Clear local session tokens immediately (scope:'local') ───────
+    //
+    // ROOT CAUSE OF LOGOUT DELAY:
+    // The previous code ran TWO sequential network operations before clearing
+    // local state:
+    //   1. await unregisterPushToken()  → supabase.functions.invoke('device-binding')
+    //      = a full Edge Function HTTP round-trip (~200–2000ms on cellular)
+    //   2. setTimeout(supabase.auth.signOut, 200)  → scope:'global' (default)
+    //      = a POST to /auth/v1/logout on the Supabase server, invalidating ALL
+    //        sessions for this user. On slow networks this can take 1–5+ seconds.
+    //
+    // The user was stuck visually inside the authenticated app for the entire
+    // combined duration of these two network calls before any navigation occurred.
+    //
+    // FIX: Use scope:'local' which:
+    //   1. Calls this.admin.signOut(accessToken, 'local') — still sends the
+    //      server request to invalidate THIS session's refresh token on the server.
+    //   2. Regardless of whether the server call succeeds or fails (404/401/403
+    //      are all silently ignored per GoTrueClient._signOut()), it ALWAYS calls
+    //      _removeSession() which synchronously wipes the local token from
+    //      SecureStore/AsyncStorage and fires the SIGNED_OUT auth state event.
+    //   3. The SIGNED_OUT event reaches SessionProvider's onAuthStateChange →
+    //      setSession(null) → Stack.Protected guard={!!session} becomes false →
+    //      expo-router immediately unmounts (app)/ and shows the login screen.
+    //
+    // The server-side logout (invalidating the current session's refresh token)
+    // still happens — it just doesn't BLOCK navigation anymore.
+    // The push-token cleanup runs as a parallel fire-and-forget.
+    //
+    // Other-device sessions are NOT revoked (that is scope:'global' behavior).
+    // For this app's security model, logging out one device should not force
+    // all other devices offline. Use forceSignOut() in ctx.tsx for that.
+    console.log('[AUTH] signOut (scope:local) started', `duration=${Date.now() - _t0}ms`);
+    const signOutPromise = supabase.auth.signOut({ scope: 'local' })
+      .then(() => {
+        console.log('[AUTH] signOut (scope:local) completed', `duration=${Date.now() - _t0}ms`);
+      })
+      .catch((e) => {
+        console.warn('[AUTH_ERROR] signOut error (non-fatal — local session already cleared):', e?.message);
+      });
+
+    // ── Step 4: Push-token server cleanup — fire-and-forget ──────────────────
+    // Runs in parallel with the signOut server call. Uses the current session's
+    // access token which is still valid until _removeSession() runs inside
+    // signOut(). In practice both promises race; if unregister wins it clears
+    // the token cleanly; if signOut wins first the EF call will fail with 401
+    // which is caught and swallowed — the push token expires naturally anyway.
+    getInstallationId()
+      .then((installationId) => unregisterPushToken(installationId))
+      .then(() => {
+        console.log('[AUTH] push token unregistered', `duration=${Date.now() - _t0}ms`);
+      })
+      .catch(() => { /* non-fatal — server token expires naturally */ });
+
+    // Await signOut so the SIGNED_OUT event fires before this handler returns.
+    // Navigation is driven by SessionProvider's onAuthStateChange (which receives
+    // the SIGNED_OUT event and sets session→null, triggering Stack.Protected to
+    // unmount the app shell). We do NOT call router.replace here — that would
+    // create a race between the navigation from this handler and the navigation
+    // from the Stack.Protected guard, causing a double-redirect.
+    await signOutPromise;
+    console.log('[AUTH] logout completed', `total=${Date.now() - _t0}ms`);
   };
 
   const role = (profile?.role ?? 'student') as import('@/lib/enums').UserRole;

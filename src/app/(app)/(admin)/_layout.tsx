@@ -16,12 +16,12 @@ function AdminTabs() {
       initialRouteName="admin-overview"
       screenOptions={{
         headerShown: false,
-        // DO NOT set height or paddingBottom manually — React Navigation + SafeAreaProvider
-        // handles the bottom inset automatically via the native window insets API.
         tabBarStyle: {
           backgroundColor: c.base,
           borderTopWidth: 0,
-          paddingTop: 8,
+          // No paddingTop — React Navigation + SafeAreaProvider handles bottom
+          // inset automatically. Fixed paddingTop causes icon/label misalignment
+          // across device sizes.
           shadowColor: c.shadowDark,
           shadowOffset: { width: 0, height: -4 },
           shadowOpacity: 0.45,
@@ -70,9 +70,11 @@ function AdminTabs() {
 }
 
 export default function AdminTabLayout() {
+  const isDark = useColorScheme() === 'dark';
+  const c = isDark ? neuColors.dark : neuColors.light;
   return (
     <DrawerProvider>
-      <View style={{ flex: 1 }}>
+      <View style={{ flex: 1, backgroundColor: c.base }}>
         <AdminTabs />
         <DrawerNav />
       </View>

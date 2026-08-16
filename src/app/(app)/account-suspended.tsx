@@ -19,7 +19,15 @@ export default function AccountBlockedScreen() {
   const layout = useLayout();
 
   const handleLogout = async () => {
-    await supabase.auth.signOut();
+    const _t0 = Date.now();
+    console.log('[AUTH] account-suspended logout started');
+    // Use scope:'local' — clears local session tokens and fires SIGNED_OUT
+    // event immediately without waiting for the server to revoke all sessions.
+    // Stack.Protected in the root layout will navigate to sign-in once
+    // session becomes null. The explicit router.replace is kept as a
+    // belt-and-suspenders fallback in case the auth state change is delayed.
+    await supabase.auth.signOut({ scope: 'local' });
+    console.log('[AUTH] account-suspended logout completed', `duration=${Date.now() - _t0}ms`);
     router.replace('/(auth)/sign-in');
   };
 

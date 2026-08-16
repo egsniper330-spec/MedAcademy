@@ -175,7 +175,11 @@ export function DeviceManagerSheet({ visible, onClose, userId, userName }: Devic
       {loading ? (
         <ActivityIndicator color={c.primary} style={{ marginVertical: 30 }} />
       ) : (
-        <ScrollView style={{ maxHeight: 520 }} showsVerticalScrollIndicator={false}>
+        // Remove fixed maxHeight — ResponsiveModal already caps the sheet to
+        // (screenH - safeTop) * 0.92 and provides its own ScrollView.
+        // Wrapping in another maxHeight-constrained ScrollView double-caps the
+        // height and breaks layout on small phones (SE) and landscape.
+        <View>
           {/* Summary row */}
           <View style={{ flexDirection: 'row', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
             {[
@@ -316,7 +320,7 @@ export function DeviceManagerSheet({ visible, onClose, userId, userName }: Devic
               );
             })
           )}
-        </ScrollView>
+        </View>
       )}
     </ResponsiveModal>
   );

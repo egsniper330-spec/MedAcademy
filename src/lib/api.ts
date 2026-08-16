@@ -61,7 +61,9 @@ export async function invokeEdgeFunction<T = unknown>(
     ).toString();
     const { data: { session } } = await supabase.auth.getSession();
     const url = `${process.env.EXPO_PUBLIC_SUPABASE_URL}/functions/v1/${name}?${qs}`;
-    const res = await fetch(url, {
+    // Use globalThis.fetch (medo-guard-patched) — same reference used by
+    // the supabase client — to avoid iOS JSC bare-fetch resolution issues.
+    const res = await globalThis.fetch(url, {
       method: 'GET',
       headers: {
         Authorization: `Bearer ${session?.access_token ?? ''}`,

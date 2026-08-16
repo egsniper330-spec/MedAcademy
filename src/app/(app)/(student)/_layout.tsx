@@ -16,13 +16,12 @@ function StudentTabs() {
       initialRouteName="dashboard"
       screenOptions={{
         headerShown: false,
-        // DO NOT set height or paddingBottom manually — React Navigation + SafeAreaProvider
-        // handles the bottom inset automatically via the native window insets API.
-        // Setting height/paddingBottom manually breaks Android 3-button nav and gesture nav.
+        // No paddingTop — React Navigation + SafeAreaProvider handles bottom
+        // inset automatically. Fixed paddingTop causes icon/label misalignment
+        // across device sizes.
         tabBarStyle: {
           backgroundColor: c.base,
           borderTopWidth: 0,
-          paddingTop: 8,
           shadowColor: c.shadowDark,
           shadowOffset: { width: 0, height: -4 },
           shadowOpacity: 0.45,
@@ -45,9 +44,11 @@ function StudentTabs() {
 }
 
 export default function StudentTabLayout() {
+  const isDark = useColorScheme() === 'dark';
+  const c = isDark ? neuColors.dark : neuColors.light;
   return (
     <DrawerProvider>
-      <View style={{ flex: 1 }}>
+      <View style={{ flex: 1, backgroundColor: c.base }}>
         <StudentTabs />
         <DrawerNav />
       </View>
