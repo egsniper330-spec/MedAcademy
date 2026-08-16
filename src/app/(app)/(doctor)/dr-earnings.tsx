@@ -7,7 +7,7 @@
  * Pricing        : doctor_global_price (global) → course publish price (fallback)
  * Platform price : NEVER used — completely independent financial system
  */
-import { useState, useCallback, useMemo } from 'react';
+import { useState, useCallback, useMemo, useEffect } from 'react';
 import {
   View, Text, ScrollView, Pressable, ActivityIndicator,
   RefreshControl, TextInput, Switch, Modal, useColorScheme,
@@ -370,7 +370,8 @@ function StudentProfileModal({ tx, doctorId, onClose, onAction, c }: {
     setLoading(false);
   }, [tx.student_id, doctorId]);
 
-  useMemo(() => { (async () => loadProfile())(); }, []);  // eslint-disable-line react-hooks/exhaustive-deps
+  // useEffect (not useMemo) — side effects must not run during the render pass
+  useEffect(() => { (async () => loadProfile())(); }, []);  // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleAction = async (
     action: 'suspend' | 'restore' | 'remove',
@@ -661,7 +662,8 @@ function PricingSettingsSection({
     setLoading(false);
   }, [doctorId]);
 
-  useMemo(() => { (async () => load())(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  // useEffect (not useMemo) — side effects must not run during the render pass
+  useEffect(() => { (async () => load())(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const saveGlobal = async () => {
     if (!settings) return;
