@@ -274,6 +274,46 @@ function withWasmSupport(config) {
 module.exports = async function (metroDefaults) {
   let config = getDefaultConfig(__dirname);
 
+  // ─── pnpm + inotify fix ─────────────────────────────────────────────────────
+  // The container has a hard inotify limit of ~15 925 watches but node_modules
+  // contains >18 000 directories.  The .pnpm store is excluded from watchman
+  // via .watchmanconfig (ignore_dirs: node_modules/.pnpm) to prevent the
+  // "inotify watches exhausted" poison state.  We compensate by:
+  //   1. Adding node_modules/.pnpm to Metro's watchFolders so Metro still
+  //      resolves real package files there via its crawl (not inotify-watch).
+  //   2. Setting useWatchman: true so Metro NEVER falls back to FallbackWatcher
+  //      or NativeWatcher — both of which open one inotify fd per directory and
+  //      immediately exhaust the limit.
+  const pnpmStore = path.join(__dirname, 'node_modules/.pnpm');
+  config = {
+    ...config,
+    watchFolders: [...(config.watchFolders || []), pnpmStore],
+    resolver: {
+      ...config.resolver,
+      useWatchman: true,
+    },
+  };
+  // ───────────────────────────────────────────────────────────────────────────
+
+  // ─── TextEncoder / TextDecoder polyfill for JSC (iOS) ──────────────────────
+  // JSC does not have TextEncoder built-in (Hermes does). exceljs's browser
+  // bundle executes `typeof TextEncoder === 'undefined'` at module-eval time;
+  // under JSC New-Architecture (Bridgeless) this throws a ReferenceError that
+  // crashes the entire JS startup (black screen). polyfillModuleNames are
+  // injected as prepended scripts — before InitializeCore and before any app
+  // module — ensuring TextEncoder is available when exceljs is first required.
+  config = {
+    ...config,
+    serializer: {
+      ...config.serializer,
+      polyfillModuleNames: [
+        ...(config.serializer?.polyfillModuleNames ?? []),
+        require.resolve('./src/polyfills/text-encoding.js'),
+      ],
+    },
+  };
+  // ───────────────────────────────────────────────────────────────────────────
+
   config = withCssInterop(config);
   config = withPlatformStubs(config);
   config = withLucideResolver(config);
