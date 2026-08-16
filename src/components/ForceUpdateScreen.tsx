@@ -19,6 +19,7 @@ import React, { useEffect } from 'react';
 import {
   View, Text, ScrollView, useColorScheme, BackHandler,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { RefreshCcw, ArrowUpCircle, Star, Package } from 'lucide-react-native';
 import { neuColors, neuFlatStyle } from '@/lib/neu';
 import { NeuButton } from '@/components/NeuButton';
@@ -47,6 +48,7 @@ export function ForceUpdateScreen({
   const isDark = scheme === 'dark';
   const c = isDark ? neuColors.dark : neuColors.light;
   const flat = neuFlatStyle(isDark);
+  const insets = useSafeAreaInsets();
 
   // ── Intercept Android hardware Back button ─────────────────────────────────
   // Only block Back when this is a hard force-update (not a soft banner).
@@ -62,13 +64,19 @@ export function ForceUpdateScreen({
   const isHardBlock = isForceUpdateRequired && !soft;
   const accentColor = isHardBlock ? '#EF4444' : '#F59E0B';
 
+  // Safe bottom: home indicator / gesture bar / Android nav bar + breathing room
+  const safePaddingBottom = Math.max(insets.bottom + 24, 48);
+  // Safe top: status bar / notch / Dynamic Island + breathing room
+  const safePaddingTop = Math.max(insets.top + 16, 32);
+
   return (
     <View style={{ flex: 1, backgroundColor: c.base }}>
       <ScrollView
         contentContainerStyle={{
           flexGrow: 1,
-          padding: 24,
-          paddingBottom: 48,
+          paddingHorizontal: 24,
+          paddingTop: safePaddingTop,
+          paddingBottom: safePaddingBottom,
           alignItems: 'center',
           justifyContent: 'center',
           gap: 24,

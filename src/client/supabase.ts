@@ -5,6 +5,25 @@ import * as SecureStore from 'expo-secure-store';
 const supabaseUrl: string = process.env.EXPO_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co';
 const supabaseAnonKey: string = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY || 'placeholder';
 
+// ─── iOS JSC fetch fix ────────────────────────────────────────────────────────
+// @supabase/supabase-js accepts a custom fetch via `global.fetch`.
+// When omitted, the internal `resolveFetch()` helper falls back to a bare
+// `fetch` identifier captured at CJS bundle evaluation time. On iOS with the
+// custom JSC engine (@react-native-community/javascriptcore), that bare
+// identifier can resolve before React Native's whatwg-fetch polyfill is
+// installed on `global`, causing every auth/postgrest/storage network call to
+// throw "Network request failed" — while Android (Hermes) and Web work fine.
+//
+// Fix: explicitly bind globalThis.fetch and pass it via `global.fetch` so
+// supabase-js always uses the same reference that medo-guard has patched.
+// The lambda is typed as the supabase-js `Fetch` alias (= typeof fetch), which
+// in its typings is `(input: RequestInfo | URL, init?: RequestInit) => Promise<Response>`.
+// We cast to `typeof fetch` (which resolves to that same signature here) to
+// satisfy the SupabaseClientOptions type without a per-overload union juggle.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const _resolvedFetch = ((...args: Parameters<typeof fetch>) => globalThis.fetch(...args)) as any;
+
+
 // Supabase requires a synchronous storage adapter. expo-secure-store is
 // async-only on native; localStorage (injected by expo-sqlite) works
 // synchronously on Web. We implement the LargeSecureStore pattern:
@@ -67,5 +86,15 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
     autoRefreshToken:     true,
     persistSession:       true,
     detectSessionInUrl:   false,
+  },
+  global: {
+    // iOS JSC fix: pass fetch explicitly so every supabase-js subsystem
+    // (auth, postgrest, storage, functions) uses globalThis.fetch, which is
+    // the medo-guard-patched version and is guaranteed to be initialized by
+    // the time this module evaluates.  Without this, @supabase/auth-js falls
+    // back to a bare `fetch` identifier captured in its own CJS scope, which
+    // on iOS JSC (custom @react-native-community/javascriptcore engine) can
+    // resolve to an uninitialized reference → "Network request failed".
+    fetch: _resolvedFetch,
   },
 });

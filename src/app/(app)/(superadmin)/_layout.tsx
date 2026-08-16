@@ -25,7 +25,9 @@ function SuperAdminTabs() {
         tabBarStyle: {
           backgroundColor: c.base,
           borderTopWidth: 0,
-          paddingTop: 8,
+          // No paddingTop — React Navigation + SafeAreaProvider handles bottom
+          // inset automatically. Fixed paddingTop causes icon/label misalignment
+          // across device sizes.
           shadowColor: c.shadowDark,
           shadowOffset: { width: 0, height: -4 },
           shadowOpacity: 0.45,
@@ -98,9 +100,11 @@ function SuperAdminTabs() {
 }
 
 export default function SuperAdminTabLayout() {
+  const isDark = useColorScheme() === 'dark';
+  const c = isDark ? neuColors.dark : neuColors.light;
   return (
     <DrawerProvider>
-      <View style={{ flex: 1 }}>
+      <View style={{ flex: 1, backgroundColor: c.base }}>
         <SuperAdminTabs />
         <DrawerNav />
       </View>

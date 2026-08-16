@@ -158,7 +158,7 @@ export function DeleteAccountModal({ userId, visible, onClose, onDeleted }: Prop
         </View>
       }
     >
-      <ScrollView showsVerticalScrollIndicator={false} style={{ maxHeight: 480 }}>
+      <ScrollView showsVerticalScrollIndicator={false}>
         {/* Loading */}
         {loading && (
           <View style={{ alignItems: 'center', paddingVertical: 40 }}>

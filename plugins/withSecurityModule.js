@@ -30,9 +30,13 @@ import android.hardware.Sensor
 import android.hardware.SensorManager
 import android.location.LocationManager
 import android.net.ConnectivityManager
+import android.net.Network
 import android.net.NetworkCapabilities
+import android.net.NetworkRequest
 import android.os.Build
 import android.os.Debug
+import android.os.Handler
+import android.os.Looper
 import android.provider.Settings
 import android.util.Log
 import android.view.WindowManager
@@ -84,6 +88,105 @@ class SecurityModule(private val reactContext: ReactApplicationContext) :
 
     init {
         Log.d(TAG, "◀▶ SecurityModule INSTANTIATED — module is live and registered")
+        registerVpnNetworkCallback()
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // VPN NETWORK CALLBACK — real-time VPN state push to JS
+    //
+    // ConnectivityManager.NetworkCallback fires whenever any network matching
+    // the request changes. We request TRANSPORT_VPN so we are notified:
+    //   • onAvailable  → a VPN network became active   → emit vpnStateChanged(true)
+    //   • onLost       → the VPN network was torn down → emit vpnStateChanged(false)
+    //
+    // This fixes the core bug: previously VPN was only checked on-demand (point-in-
+    // time snapshot). The callback fires immediately when the user enables/disables
+    // a VPN app (WireGuard, OpenVPN, Android system VPN, VPNService-based apps)
+    // while the MedAcademy app is running, regardless of whether the device stays
+    // internet-connected. JS receives the event via NativeEventEmitter and triggers
+    // a full runSecurityChecks() cycle.
+    //
+    // Lifecycle:
+    //   • Registered in init{} when the module is instantiated by React Native.
+    //   • Unregistered in onCatalystInstanceDestroy() (module teardown).
+    //   • Main-thread Handler used for all CM interactions (required on some OEMs).
+    //
+    // API compatibility:
+    //   API 21+: registerNetworkCallback(NetworkRequest, NetworkCallback) is available
+    //   and stable. We guard with Build.VERSION_CODES.LOLLIPOP but in practice this
+    //   app targets API 24+ so the guard is belt-and-suspenders only.
+    // ══════════════════════════════════════════════════════════════════════════
+
+    private val mainHandler = Handler(Looper.getMainLooper())
+    private var vpnNetworkCallback: ConnectivityManager.NetworkCallback? = null
+
+    private fun registerVpnNetworkCallback() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.LOLLIPOP) return
+        try {
+            val cm = reactContext.getSystemService(Context.CONNECTIVITY_SERVICE)
+                as? ConnectivityManager ?: return
+
+            val request = NetworkRequest.Builder()
+                .addTransportType(NetworkCapabilities.TRANSPORT_VPN)
+                .removeCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN)
+                .build()
+
+            val callback = object : ConnectivityManager.NetworkCallback() {
+                override fun onAvailable(network: Network) {
+                    Log.d(TAG, "[VpnCallback] onAvailable — VPN network active: \$network")
+                    emitVpnStateChanged(true)
+                }
+                override fun onLost(network: Network) {
+                    Log.d(TAG, "[VpnCallback] onLost — VPN network torn down: \$network")
+                    // Re-check: another VPN network may still be active
+                    // (split-tunnel: the VPN network went away but WiFi stayed).
+                    // Call detectVpn() to confirm real state before emitting false.
+                    val stillActive = runCatching { detectVpn() }.getOrDefault(false)
+                    Log.d(TAG, "[VpnCallback] onLost re-check stillActive=\$stillActive")
+                    emitVpnStateChanged(stillActive)
+                }
+            }
+
+            // Register on main thread — some OEMs (Xiaomi, OPPO) require this
+            mainHandler.post {
+                try {
+                    cm.registerNetworkCallback(request, callback)
+                    vpnNetworkCallback = callback
+                    Log.d(TAG, "[VpnCallback] registered successfully (TRANSPORT_VPN watcher active)")
+                } catch (e: Exception) {
+                    Log.d(TAG, "[VpnCallback] registerNetworkCallback failed: \${e.message}")
+                }
+            }
+        } catch (e: Exception) {
+            Log.d(TAG, "[VpnCallback] setup exception: \${e.message}")
+        }
+    }
+
+    private fun emitVpnStateChanged(vpnActive: Boolean) {
+        try {
+            val params = Arguments.createMap()
+            params.putBoolean("vpnActive", vpnActive)
+            reactContext
+                .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
+                .emit("vpnStateChanged", params)
+            Log.d(TAG, "[VpnCallback] emitted vpnStateChanged vpnActive=\$vpnActive")
+        } catch (e: Exception) {
+            Log.d(TAG, "[VpnCallback] emit exception: \${e.message}")
+        }
+    }
+
+    override fun onCatalystInstanceDestroy() {
+        super.onCatalystInstanceDestroy()
+        val cb = vpnNetworkCallback ?: return
+        try {
+            val cm = reactContext.getSystemService(Context.CONNECTIVITY_SERVICE)
+                as? ConnectivityManager
+            cm?.unregisterNetworkCallback(cb)
+            vpnNetworkCallback = null
+            Log.d(TAG, "[VpnCallback] unregistered on module teardown")
+        } catch (e: Exception) {
+            Log.d(TAG, "[VpnCallback] unregister exception: \${e.message}")
+        }
     }
 
     // ══════════════════════════════════════════════════════════════════════════

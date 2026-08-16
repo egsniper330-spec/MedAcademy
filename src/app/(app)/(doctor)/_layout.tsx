@@ -32,7 +32,10 @@ function DoctorTabs() {
         tabBarStyle: {
           backgroundColor: c.base,
           borderTopWidth: 0,
-          paddingTop: 8,
+          // No paddingTop here — React Navigation + SafeAreaProvider manages
+          // bottom inset automatically via native window insets. A fixed
+          // paddingTop: 8 pushes icons/labels down on tall phones and causes
+          // label clipping on small screens.
           shadowColor: c.shadowDark,
           shadowOffset: { width: 0, height: -4 },
           shadowOpacity: 0.45,
@@ -64,9 +67,11 @@ function DoctorTabs() {
 }
 
 export default function DoctorTabLayout() {
+  const isDark = useColorScheme() === 'dark';
+  const c = isDark ? neuColors.dark : neuColors.light;
   return (
     <DrawerProvider>
-      <View style={{ flex: 1 }}>
+      <View style={{ flex: 1, backgroundColor: c.base }}>
         <DoctorTabs />
         <DrawerNav />
       </View>

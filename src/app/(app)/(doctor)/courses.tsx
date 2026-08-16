@@ -307,36 +307,65 @@ export default function DoctorCourses() {
       </ScrollView>
 
       {/* ── Options menu modal ──────────────────────────────────────────────────── */}
-      <Modal visible={menuVisible} transparent animationType="fade" onRequestClose={closeMenu}>
-        <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.35)' }} onPress={closeMenu}>
-          <View style={{ position: 'absolute', bottom: 32, left: 20, right: 20,
-            backgroundColor: c.base, borderRadius: 20, overflow: 'hidden',
-            shadowColor: '#000', shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.18, shadowRadius: 24, elevation: 12 }}>
-            {/* Course name header */}
-            <View style={{ padding: 18, borderBottomWidth: 1, borderBottomColor: `${c.text}10` }}>
-              <Text style={{ fontSize: 14, fontWeight: '700', color: c.text }} numberOfLines={1}>
-                {menuCourse?.title}
-              </Text>
+      {/*
+        Fix: was `position:'absolute', bottom:32` — hardcoded 32dp ignored the
+        Android navigation-bar inset. With gesture-nav the bar can be 40+ dp,
+        hiding the bottom button behind system UI.
+        Fix: use `justifyContent:'flex-end'` on the scrim so the sheet naturally
+        sits at the bottom, then apply `paddingBottom: Math.max(insets.bottom, 16)`
+        on the sheet itself to clear the nav-bar on every device.
+        Fix: added statusBarTranslucent so the scrim covers the Android status bar.
+      */}
+      <Modal visible={menuVisible} transparent animationType="fade" statusBarTranslucent onRequestClose={closeMenu}>
+        <Pressable
+          style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.35)', justifyContent: 'flex-end' }}
+          onPress={closeMenu}
+        >
+          <Pressable onPress={e => e.stopPropagation()}>
+            <View style={{
+              backgroundColor: c.base,
+              borderTopLeftRadius: 20,
+              borderTopRightRadius: 20,
+              overflow: 'hidden',
+              // Clears Android nav-bar (gesture or 3-button) and iPhone home indicator
+              paddingBottom: Math.max(insets.bottom, 16),
+              shadowColor: '#000',
+              shadowOffset: { width: 0, height: -4 },
+              shadowOpacity: 0.14,
+              shadowRadius: 20,
+              elevation: 12,
+            }}>
+              {/* Drag handle */}
+              <View style={{ alignItems: 'center', paddingTop: 10, paddingBottom: 4 }}>
+                <View style={{ width: 36, height: 4, borderRadius: 2, backgroundColor: `${c.text}20` }} />
+              </View>
+              {/* Course name header */}
+              <View style={{ padding: 18, borderBottomWidth: 1, borderBottomColor: `${c.text}10` }}>
+                <Text style={{ fontSize: 14, fontWeight: '700', color: c.text }} numberOfLines={1}>
+                  {menuCourse?.title}
+                </Text>
+              </View>
+              {/* Edit */}
+              <Pressable onPress={handleEdit}
+                style={{ flexDirection: 'row', alignItems: 'center', gap: 14, padding: 18,
+                  borderBottomWidth: 1, borderBottomColor: `${c.text}08` }}>
+                <Pencil size={18} color={c.primary} />
+                <Text style={{ fontSize: 15, fontWeight: '600', color: c.text }}>Edit Course</Text>
+              </Pressable>
+              {/* Delete */}
+              <Pressable onPress={handleOpenDelete}
+                style={{ flexDirection: 'row', alignItems: 'center', gap: 14, padding: 18 }}>
+                <Trash2 size={18} color="#DC2626" />
+                <Text style={{ fontSize: 15, fontWeight: '600', color: '#DC2626' }}>Delete Course</Text>
+              </Pressable>
             </View>
-            {/* Edit */}
-            <Pressable onPress={handleEdit}
-              style={{ flexDirection: 'row', alignItems: 'center', gap: 14, padding: 18,
-                borderBottomWidth: 1, borderBottomColor: `${c.text}08` }}>
-              <Pencil size={18} color={c.primary} />
-              <Text style={{ fontSize: 15, fontWeight: '600', color: c.text }}>Edit Course</Text>
-            </Pressable>
-            {/* Delete */}
-            <Pressable onPress={handleOpenDelete}
-              style={{ flexDirection: 'row', alignItems: 'center', gap: 14, padding: 18 }}>
-              <Trash2 size={18} color="#DC2626" />
-              <Text style={{ fontSize: 15, fontWeight: '600', color: '#DC2626' }}>Delete Course</Text>
-            </Pressable>
-          </View>
+          </Pressable>
         </Pressable>
       </Modal>
 
       {/* ── Delete confirmation modal ───────────────────────────────────────────── */}
-      <Modal visible={!!deleteTarget} transparent animationType="slide" onRequestClose={() => { if (!deleteLoading) { setDeleteTarget(null); setDeleteStats(null); } }}>
+      {/* Fix: added statusBarTranslucent so scrim covers the Android status bar */}
+      <Modal visible={!!deleteTarget} transparent animationType="slide" statusBarTranslucent onRequestClose={() => { if (!deleteLoading) { setDeleteTarget(null); setDeleteStats(null); } }}>
         <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'flex-end' }}>
           <View style={{ backgroundColor: c.base, borderTopLeftRadius: 24, borderTopRightRadius: 24,
             padding: 24, paddingBottom: layout.scrollBottom(), gap: 20,

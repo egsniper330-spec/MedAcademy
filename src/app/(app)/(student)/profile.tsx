@@ -6,7 +6,12 @@ import { useState, useCallback } from 'react';
 import {
   View, Text, ScrollView, useColorScheme, Pressable,
   ActivityIndicator, RefreshControl, Modal, TextInput, KeyboardAvoidingView,
+  useWindowDimensions,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+// Alias for use inside the PickerRow sub-component (avoids name collision with
+// the layout.insets already used by the main component via useLayout)
+const usePickerInsets = useSafeAreaInsets;
 import * as Clipboard from 'expo-clipboard';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { Image } from 'expo-image';
@@ -104,7 +109,12 @@ function InfoRow({ icon, label, value, c }: { icon: React.ReactNode; label: stri
   );
 }
 
-// Picker row for selecting university/faculty/level
+// PickerRow — inline bottom-sheet picker for university / faculty / level.
+// Fixes:
+//   • statusBarTranslucent so the scrim covers the Android status bar
+//   • useWindowDimensions + useSafeAreaInsets replaces the percent-based
+//     maxHeight:'72%' which used full-screen height and ignored safe areas
+//   • insets.bottom added to sheet so list rows are never behind the nav-bar
 function PickerRow({
   label, value, items, onSelect, c,
 }: {
@@ -116,6 +126,13 @@ function PickerRow({
 }) {
   const [open, setOpen] = useState(false);
   const selectedName = items.find(i => i.id === value)?.name ?? '— Select —';
+  const { height: screenH } = useWindowDimensions();
+  const insets = usePickerInsets();
+
+  // Available height = screen minus status-bar (top inset).
+  // Cap at 72 % of that so the backdrop remains visible above the sheet.
+  const sheetMaxH = (screenH - insets.top) * 0.72;
+
   return (
     <View style={{ marginBottom: 14 }}>
       <Text style={{ fontSize: 11, fontWeight: '600', color: c.text, opacity: 0.5, marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.8 }}>
@@ -136,40 +153,75 @@ function PickerRow({
         <Text style={{ flex: 1, fontSize: 15, color: value ? c.text : `${c.text}55` }}>{selectedName}</Text>
         <ChevronRight size={16} color={c.text} opacity={0.3} />
       </Pressable>
-      <Modal visible={open} transparent animationType="slide" onRequestClose={() => setOpen(false)}>
-        <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.35)', justifyContent: 'flex-end' }} onPress={() => setOpen(false)} accessibilityLabel="Close picker" accessibilityRole="button">
-          <Pressable onPress={e => e.stopPropagation()}>
-            <View style={{ backgroundColor: c.base, borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 20, maxHeight: '72%', width: '100%' }}>
-              <View style={{ width: 36, height: 4, borderRadius: 2, backgroundColor: `${c.text}20`, alignSelf: 'center', marginBottom: 16 }} />
-              <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 16 }}>
-                <Text style={{ flex: 1, fontSize: 17, fontWeight: '700', color: c.text }} numberOfLines={1}>{label}</Text>
-                <Pressable onPress={() => setOpen(false)} accessibilityLabel="Close" accessibilityRole="button" style={{ padding: 4 }}><X size={20} color={c.text} opacity={0.4} /></Pressable>
-              </View>
-              <ScrollView keyboardShouldPersistTaps="handled">
-                {items.map(item => (
-                  <Pressable
-                    key={item.id}
-                    onPress={() => { onSelect(item.id, item.name); setOpen(false); }}
-                    accessibilityLabel={item.name}
-                    accessibilityRole="button"
-                    style={{
-                      flexDirection: 'row', alignItems: 'center',
-                      paddingVertical: 14, paddingHorizontal: 4,
-                      borderBottomWidth: 1, borderBottomColor: `${c.text}08`,
-                    }}
-                  >
-                    <Text style={{ flex: 1, fontSize: 15, color: c.text }} numberOfLines={2}>{item.name}</Text>
-                    {item.id === value && <CheckCircle size={18} color={c.primary} />}
-                  </Pressable>
-                ))}
-                {items.length === 0 && (
-                  <Text style={{ fontSize: 14, color: c.text, opacity: 0.4, textAlign: 'center', paddingVertical: 24 }}>
-                    No options available
-                  </Text>
-                )}
-              </ScrollView>
+
+      {/* statusBarTranslucent: scrim covers the Android status bar correctly */}
+      <Modal
+        visible={open}
+        transparent
+        animationType="slide"
+        statusBarTranslucent
+        onRequestClose={() => setOpen(false)}
+      >
+        {/* Backdrop — flex:1 fills remaining space above sheet; tap to dismiss */}
+        <Pressable
+          style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.35)' }}
+          onPress={() => setOpen(false)}
+          accessibilityLabel="Close picker"
+          accessibilityRole="button"
+        />
+
+        {/* Sheet — sits after backdrop, anchored to bottom, no flex */}
+        <Pressable onPress={e => e.stopPropagation()}>
+          <View style={{
+            backgroundColor: c.base,
+            borderTopLeftRadius: 24,
+            borderTopRightRadius: 24,
+            padding: 20,
+            // Safe-area-aware height cap: never overflows in landscape or on SE
+            maxHeight: sheetMaxH,
+            width: '100%',
+            // Home-indicator / Android gesture-nav bar padding
+            paddingBottom: Math.max(insets.bottom + 8, 20),
+          }}>
+            {/* Drag handle */}
+            <View style={{ width: 36, height: 4, borderRadius: 2, backgroundColor: `${c.text}20`, alignSelf: 'center', marginBottom: 16 }} />
+            {/* Header row */}
+            <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 16 }}>
+              <Text style={{ flex: 1, fontSize: 17, fontWeight: '700', color: c.text }} numberOfLines={1}>{label}</Text>
+              <Pressable
+                onPress={() => setOpen(false)}
+                accessibilityLabel="Close"
+                accessibilityRole="button"
+                style={{ padding: 4 }}
+              >
+                <X size={20} color={c.text} opacity={0.4} />
+              </Pressable>
             </View>
-          </Pressable>
+            {/* Item list — scrollable; flex:1 fills inside the capped sheet */}
+            <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+              {items.map(item => (
+                <Pressable
+                  key={item.id}
+                  onPress={() => { onSelect(item.id, item.name); setOpen(false); }}
+                  accessibilityLabel={item.name}
+                  accessibilityRole="button"
+                  style={{
+                    flexDirection: 'row', alignItems: 'center',
+                    paddingVertical: 14, paddingHorizontal: 4,
+                    borderBottomWidth: 1, borderBottomColor: `${c.text}08`,
+                  }}
+                >
+                  <Text style={{ flex: 1, fontSize: 15, color: c.text }} numberOfLines={2}>{item.name}</Text>
+                  {item.id === value && <CheckCircle size={18} color={c.primary} />}
+                </Pressable>
+              ))}
+              {items.length === 0 && (
+                <Text style={{ fontSize: 14, color: c.text, opacity: 0.4, textAlign: 'center', paddingVertical: 24 }}>
+                  No options available
+                </Text>
+              )}
+            </ScrollView>
+          </View>
         </Pressable>
       </Modal>
     </View>

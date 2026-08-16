@@ -26,7 +26,7 @@
 import React, {
   createContext, useContext, useState, useCallback, useRef, useEffect,
 } from 'react';
-import { AppState, Platform } from 'react-native';
+import { AppState, Platform, NativeEventEmitter, NativeModules } from 'react-native';
 import NetInfo from '@react-native-community/netinfo';
 import Constants from 'expo-constants';
 import {
@@ -325,16 +325,58 @@ export function SecurityProvider({ children }: { children: React.ReactNode }) {
     lastBuildRef.current = Constants.expoConfig?.version ?? null;
 
     // ── Network reconnect trigger ──────────────────────────────────────────
-    // Run a security check after a genuine reconnect (offline → online transition).
-    // Debounced by 3 s to avoid thrashing on flapping connections.
+    // Run a security check on ANY network state change — not just reconnect.
+    //
+    // BUG FIX: The previous condition `if (state.isConnected && ...)` only fired
+    // when transitioning offline→online. When a VPN is enabled WHILE the device is
+    // already connected (the common case), isConnected stays true and the handler's
+    // condition was already met — NetInfo may not fire a new event at all, or when
+    // it does fire the condition suppressed the re-check via the debounce timer.
+    //
+    // The fix: respond to EVERY NetInfo state change event so that the VPN-enable
+    // transition (Wi-Fi→Wi-Fi+VPN while isConnected stays true) is always caught.
+    // The 3s debounce still prevents thrashing on flapping connections.
+    //
+    // NOTE: Android NetworkCallback (in SecurityModule.kt) is the primary VPN
+    // detection mechanism — it fires immediately via the vpnStateChanged event.
+    // This NetInfo listener is a belt-and-suspenders catch-all for transitions
+    // the NetworkCallback may miss (e.g. VPN-over-cellular on some OEMs).
     const netUnsub = NetInfo.addEventListener((state) => {
-      if (state.isConnected && appActiveRef.current) {
-        if (netReconnectTimer.current) clearTimeout(netReconnectTimer.current);
-        netReconnectTimer.current = setTimeout(() => {
-          void runPeriodicCheckRef.current();
-        }, NETWORK_RECONNECT_DEBOUNCE_MS);
-      }
+      if (!appActiveRef.current) return;
+      if (netReconnectTimer.current) clearTimeout(netReconnectTimer.current);
+      netReconnectTimer.current = setTimeout(() => {
+        void runPeriodicCheckRef.current();
+      }, NETWORK_RECONNECT_DEBOUNCE_MS);
     });
+
+    // ── Android native VPN state callback ─────────────────────────────────
+    // SecurityModule.kt registers a ConnectivityManager.NetworkCallback for
+    // TRANSPORT_VPN. When a VPN network becomes available or is torn down,
+    // it emits "vpnStateChanged" to JS immediately (no polling delay).
+    // This is the primary path for real-time VPN detection on Android — it
+    // fires within milliseconds of the user enabling/disabling their VPN app,
+    // regardless of whether the device stays internet-connected.
+    let vpnEventUnsub: (() => void) | null = null;
+    if (Platform.OS === 'android' && NativeModules.SecurityModule) {
+      try {
+        const emitter = new NativeEventEmitter(NativeModules.SecurityModule);
+        const subscription = emitter.addListener('vpnStateChanged', (event: { vpnActive: boolean }) => {
+          console.log('[SecurityContext][VpnCallback] vpnStateChanged event received vpnActive=', event?.vpnActive);
+          if (!appActiveRef.current) return;
+          // Immediate re-check — no debounce needed because the NetworkCallback
+          // already confirmed the VPN state changed. Use the VPN_RECHECK_DEBOUNCE_MS
+          // (1.5s) just to let the network stack settle before we read CM again.
+          if (vpnRecheckTimer.current) clearTimeout(vpnRecheckTimer.current);
+          vpnRecheckTimer.current = setTimeout(() => {
+            void runPeriodicCheckRef.current();
+          }, VPN_RECHECK_DEBOUNCE_MS);
+        });
+        vpnEventUnsub = () => subscription.remove();
+        console.log('[SecurityContext][VpnCallback] NativeEventEmitter subscribed to vpnStateChanged');
+      } catch (e) {
+        console.warn('[SecurityContext][VpnCallback] NativeEventEmitter setup failed:', e);
+      }
+    }
 
     void checkAndRefreshSecurityConfig();
 
@@ -349,6 +391,7 @@ export function SecurityProvider({ children }: { children: React.ReactNode }) {
     return () => {
       appStateSub.remove();
       netUnsub();
+      vpnEventUnsub?.();
       if (netReconnectTimer.current) clearTimeout(netReconnectTimer.current);
       if (vpnRecheckTimer.current)   clearTimeout(vpnRecheckTimer.current);
       if (intervalRef.current)   { clearInterval(intervalRef.current);   intervalRef.current = null; }

@@ -25,10 +25,17 @@ import {
   Text,
   View,
   useColorScheme,
+  useWindowDimensions,
+  ScrollView,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Settings, ShieldAlert } from 'lucide-react-native';
 import { neuColors } from '@/lib/neu';
 import { PERMISSION_RATIONALES, type PermissionType } from '@/lib/permissions';
+
+// ─── cssInterop note ─────────────────────────────────────────────────────────
+// All Pressable elements here use cssInterop={false} + function-style `style`
+// so Android does not lose backgroundColor when using the pressed state callback.
 
 interface Props {
   type: PermissionType;
@@ -51,19 +58,27 @@ export function PermissionRationaleModal({
   const isDark = useColorScheme() === 'dark';
   const c = isDark ? neuColors.dark : neuColors.light;
   const rationale = PERMISSION_RATIONALES[type];
+  const insets = useSafeAreaInsets();
+  const { width: screenW, height: screenH } = useWindowDimensions();
+
+  // Caps to 400 dp max; ensures readable width on tablets and margins on small phones
+  const cardW = Math.min(screenW - Math.max(48, insets.left + insets.right + 48), 400);
+  // Limit card height so buttons remain visible even at large accessibility font sizes
+  const cardMaxH = screenH - Math.max(insets.top, 40) - Math.max(insets.bottom, 40) - 40;
 
   // Neumorphic surface style
   const surface = {
     backgroundColor: c.base,
     borderRadius: 24,
-    padding: 28,
-    marginHorizontal: 24,
-    // raised shadow pair
+    overflow: 'hidden' as const,
+    width: cardW,
+    maxHeight: cardMaxH,
     shadowColor: c.shadowDark,
     shadowOffset: { width: 6, height: 6 },
     shadowOpacity: 0.55,
     shadowRadius: 12,
-  } as const;
+    elevation: 16,
+  };
 
   // Primary button — neumorphic pressed inset feel
   const primaryBtn = {
@@ -97,85 +112,97 @@ export function PermissionRationaleModal({
       statusBarTranslucent
       onRequestClose={onDismiss}
     >
-      {/* Scrim */}
+      {/* Scrim — padding ensures card is never hidden behind system UI in any orientation */}
       <Pressable
         onPress={onDismiss}
         style={{
           flex: 1,
           backgroundColor: 'rgba(0,0,0,0.48)',
           justifyContent: 'center',
+          alignItems: 'center',
+          paddingHorizontal: Math.max(insets.left + 24, 24),
+          paddingTop: Math.max(insets.top, 24),
+          paddingBottom: Math.max(insets.bottom, 24),
         }}
       >
         {/* Card — stop scrim tap propagating inside */}
         <Pressable onPress={() => {}} style={surface}>
+          {/* ScrollView so content survives large system font sizes */}
+          <ScrollView
+            contentContainerStyle={{ padding: 28 }}
+            showsVerticalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
+            bounces={false}
+          >
+            {/* Icon */}
+            <View style={{ alignItems: 'center', marginBottom: 20 }}>
+              <View style={{
+                width: 68, height: 68, borderRadius: 22,
+                backgroundColor: isBlocked ? '#EF444418' : `${c.primary}18`,
+                alignItems: 'center', justifyContent: 'center',
+                shadowColor: isBlocked ? '#EF4444' : c.primary,
+                shadowOffset: { width: 0, height: 6 },
+                shadowOpacity: 0.2,
+                shadowRadius: 10,
+              }}>
+                {isBlocked
+                  ? <ShieldAlert size={34} color="#EF4444" />
+                  : <PermissionIcon type={type} color={c.primary} />
+                }
+              </View>
+            </View>
 
-          {/* Icon */}
-          <View style={{ alignItems: 'center', marginBottom: 20 }}>
-            <View style={{
-              width: 68, height: 68, borderRadius: 22,
-              backgroundColor: isBlocked ? '#EF444418' : `${c.primary}18`,
-              alignItems: 'center', justifyContent: 'center',
-              shadowColor: isBlocked ? '#EF4444' : c.primary,
-              shadowOffset: { width: 0, height: 6 },
-              shadowOpacity: 0.2,
-              shadowRadius: 10,
+            {/* Title */}
+            <Text style={{
+              fontSize: 18, fontWeight: '800', color: c.text,
+              textAlign: 'center', marginBottom: 10, letterSpacing: -0.2,
+            }}>
+              {isBlocked ? 'Permission Required' : rationale.title}
+            </Text>
+
+            {/* Message */}
+            <Text style={{
+              fontSize: 14, color: c.text, opacity: 0.62,
+              textAlign: 'center', lineHeight: 21, marginBottom: 28,
             }}>
               {isBlocked
-                ? <ShieldAlert size={34} color="#EF4444" />
-                : <PermissionIcon type={type} color={c.primary} />
-              }
-            </View>
-          </View>
-
-          {/* Title */}
-          <Text style={{
-            fontSize: 18, fontWeight: '800', color: c.text,
-            textAlign: 'center', marginBottom: 10, letterSpacing: -0.2,
-          }}>
-            {isBlocked ? 'Permission Required' : rationale.title}
-          </Text>
-
-          {/* Message */}
-          <Text style={{
-            fontSize: 14, color: c.text, opacity: 0.62,
-            textAlign: 'center', lineHeight: 21, marginBottom: 28,
-          }}>
-            {isBlocked
-              ? `This feature requires ${permissionLabel(type)} access. Please enable it in your device Settings to continue.`
-              : rationale.message}
-          </Text>
-
-          {/* Confirm button */}
-          <Pressable
-            onPress={onConfirm}
-            style={({ pressed }) => [primaryBtn, { opacity: pressed ? 0.82 : 1 }]}
-          >
-            {isBlocked
-              ? (
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                  <Settings size={16} color="#fff" />
-                  <Text style={{ color: '#fff', fontWeight: '700', fontSize: 15 }}>
-                    Open Settings
-                  </Text>
-                </View>
-              )
-              : (
-                <Text style={{ color: '#fff', fontWeight: '700', fontSize: 15 }}>
-                  {rationale.confirmLabel ?? 'Allow'}
-                </Text>
-              )}
-          </Pressable>
-
-          {/* Dismiss button */}
-          <Pressable
-            onPress={onDismiss}
-            style={({ pressed }) => [secondaryBtn, { opacity: pressed ? 0.7 : 1 }]}
-          >
-            <Text style={{ color: c.text, fontWeight: '600', fontSize: 14, opacity: 0.6 }}>
-              {isBlocked ? 'Not Now' : (rationale.denyLabel ?? 'Not Now')}
+                ? `This feature requires ${permissionLabel(type)} access. Please enable it in your device Settings to continue.`
+                : rationale.message}
             </Text>
-          </Pressable>
 
+            {/* Confirm button */}
+            <Pressable
+              cssInterop={false}
+              onPress={onConfirm}
+              style={({ pressed }) => [primaryBtn, { opacity: pressed ? 0.82 : 1 }]}
+            >
+              {isBlocked
+                ? (
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                    <Settings size={16} color="#fff" />
+                    <Text style={{ color: '#fff', fontWeight: '700', fontSize: 15 }}>
+                      Open Settings
+                    </Text>
+                  </View>
+                )
+                : (
+                  <Text style={{ color: '#fff', fontWeight: '700', fontSize: 15 }}>
+                    {rationale.confirmLabel ?? 'Allow'}
+                  </Text>
+                )}
+            </Pressable>
+
+            {/* Dismiss button */}
+            <Pressable
+              cssInterop={false}
+              onPress={onDismiss}
+              style={({ pressed }) => [secondaryBtn, { opacity: pressed ? 0.7 : 1 }]}
+            >
+              <Text style={{ color: c.text, fontWeight: '600', fontSize: 14, opacity: 0.6 }}>
+                {isBlocked ? 'Not Now' : (rationale.denyLabel ?? 'Not Now')}
+              </Text>
+            </Pressable>
+          </ScrollView>
         </Pressable>
       </Pressable>
     </Modal>
@@ -186,10 +213,11 @@ export function PermissionRationaleModal({
 
 function permissionLabel(type: PermissionType): string {
   switch (type) {
-    case 'camera':       return 'Camera';
-    case 'mediaLibrary': return 'Photo Library';
-    case 'notifications':return 'Notification';
-    case 'microphone':   return 'Microphone';
+    case 'camera':        return 'Camera';
+    case 'mediaLibrary':  return 'Photo Library';
+    case 'video':         return 'Video Library';
+    case 'notifications': return 'Notifications';
+    case 'microphone':    return 'Microphone';
   }
 }
 
@@ -201,8 +229,12 @@ function PermissionIcon({ type, color }: { type: PermissionType; color: string }
       return <Camera size={34} color={color} />;
     }
     case 'mediaLibrary': {
-      const { Image } = require('lucide-react-native');
-      return <Image size={34} color={color} />;
+      const { ImageIcon } = require('lucide-react-native');
+      return <ImageIcon size={34} color={color} />;
+    }
+    case 'video': {
+      const { Video } = require('lucide-react-native');
+      return <Video size={34} color={color} />;
     }
     case 'notifications': {
       const { Bell } = require('lucide-react-native');

@@ -122,7 +122,7 @@ export function AdaptiveScreen({
       <KeyboardAvoidingView
         style={[styles.root, { backgroundColor: bg }]}
         behavior={process.env.EXPO_OS === 'ios' ? 'padding' : 'height'}
-        keyboardVerticalOffset={0}
+  keyboardVerticalOffset={layout.headerTop}
       >
         <ScrollView
           showsVerticalScrollIndicator={false}

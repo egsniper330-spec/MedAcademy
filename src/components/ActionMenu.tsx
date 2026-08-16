@@ -82,19 +82,17 @@ export function ActionMenu({
   return (
     <ResponsiveModal visible={visible} onClose={onClose} title={title} subtitle={subtitle}>
       {badge && <View style={{ marginBottom: 14 }}>{badge}</View>}
-      <ScrollView style={{ maxHeight: 480 }} showsVerticalScrollIndicator={false}>
-        <View style={{ gap: 6 }}>
-          {visible_actions.map(def => (
-            <ActionItem
-              key={def.key}
-              def={def}
-              loading={loadingKeys.has(def.key)}
-              anyLoading={anyLoading}
-              onAction={onAction}
-            />
-          ))}
-        </View>
-      </ScrollView>
+      <View style={{ gap: 6 }}>
+        {visible_actions.map(def => (
+          <ActionItem
+            key={def.key}
+            def={def}
+            loading={loadingKeys.has(def.key)}
+            anyLoading={anyLoading}
+            onAction={onAction}
+          />
+        ))}
+      </View>
     </ResponsiveModal>
   );
 }
