@@ -362,7 +362,8 @@ export default function LessonPlayer() {
     : lesson.duration_seconds ? Math.floor(lesson.duration_seconds / 60) : null;
 
   return (
-    <ScrollView style={{ flex: 1, backgroundColor: c.base }} contentInsetAdjustmentBehavior="automatic">
+    <ScrollView style={{ flex: 1, backgroundColor: c.base }}
+          contentContainerStyle={{ paddingBottom: layout.scrollBottom() }}>
       {/* ── iOS Screen Recording block overlay (absolute, covers video area) ── */}
       {recordingActive && (
         <RecordingBlockedOverlay />

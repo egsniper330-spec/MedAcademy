@@ -221,56 +221,84 @@ export default function SignIn() {
 
 
 
+  // Adaptive label style — replaces hardcoded fontSize: 11, marginBottom: 7
+  const fieldLabelStyle = {
+    fontSize: layout.captionSize,
+    fontWeight: '700' as const,
+    color: c.text,
+    opacity: 0.5,
+    marginBottom: layout.pad.xs,
+    textTransform: 'uppercase' as const,
+    letterSpacing: 0.9,
+  };
+
   return (
-    <KeyboardAvoidingView behavior={process.env.EXPO_OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1, backgroundColor: c.base }}>
+    <KeyboardAvoidingView
+      behavior={process.env.EXPO_OS === 'ios' ? 'padding' : 'height'}
+      style={{ flex: 1, backgroundColor: c.base }}
+    >
       <ScrollView
         contentContainerStyle={{
           flexGrow: 1,
           justifyContent: 'center',
-          paddingHorizontal: 24,
-          // Top: clears Dynamic Island (≈59 pt) + breathing room; min 40 on
-          // Android where insets.top may be 0 in headerless stack screens.
+          // screenPx: fluid horizontal gutter (14–40dp). Replaces hardcoded 24.
+          paddingHorizontal: layout.screenPx,
           paddingTop: layout.headerTop,
-          // Bottom: respects home-indicator on iPhone; min 32 on all others.
           paddingBottom: layout.scrollBottom(),
         }}
         keyboardShouldPersistTaps="handled"
-        contentInsetAdjustmentBehavior="automatic"
+        showsVerticalScrollIndicator={false}
       >
         {/* Logo + title */}
-        <View style={{ alignItems: 'center', marginBottom: 36 }}>
-          <BrandLogo variant="auto" size={52} />
-          <Text style={{ fontSize: 26, fontWeight: '800', color: c.text, letterSpacing: -0.3, marginTop: 8 }}>Welcome Back</Text>
-          <Text style={{ fontSize: 13, color: c.text, opacity: 0.5, marginTop: 5, textAlign: 'center', lineHeight: 18 }}>
+        <View style={{ alignItems: 'center', marginBottom: layout.pad.xxl }}>
+          <BrandLogo variant="auto" size={Math.round(layout.heroIconSize * 0.59)} />
+          <Text style={{
+            fontSize: layout.titleSize,
+            fontWeight: '800',
+            color: c.text,
+            letterSpacing: -0.3,
+            marginTop: layout.pad.sm,
+          }}>Welcome Back</Text>
+          <Text style={{
+            fontSize: layout.captionSize,
+            color: c.text,
+            opacity: 0.5,
+            marginTop: layout.pad.xs,
+            textAlign: 'center',
+            lineHeight: layout.captionSize * 1.5,
+          }}>
             Sign in to your MedAcademy account
           </Text>
         </View>
 
-        <NeuCard radius={20} style={{ padding: layout.screenPx }}>
-          {/* Email or Phone — auto-detect */}
-          <Text style={{ fontSize: 11, fontWeight: '700', color: c.text, opacity: 0.5, marginBottom: 7, textTransform: 'uppercase', letterSpacing: 0.9 }}>
-            Email or Phone
-          </Text>
+        {/* Card — padding from adaptive screenPx instead of hardcoded 16/24 */}
+        <NeuCard radius={layout.cardRadius} style={{ padding: layout.cardPx }}>
+          {/* Email or Phone */}
+          <Text style={fieldLabelStyle}>Email or Phone</Text>
           <NeuInputRow
             c={c}
             value={identifier}
             onChangeText={setIdentifier}
             placeholder="user@gmail.com or 01020xxxxxxx"
-            // CRITICAL: keyboardType must NEVER change dynamically on a live TextInput.
             keyboardType="default"
             autoCapitalize="none"
             autoCorrect={false}
             spellCheck={false}
-            leftIcon={<IdentIcon size={17} color={c.text} opacity={0.38} />}
+            leftIcon={<IdentIcon size={layout.captionSize + 4} color={c.text} opacity={0.38} />}
             rightElement={identifierType === 'phone' ? (
-              <View style={{ backgroundColor: `${c.primary}18`, borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2 }}>
-                <Text style={{ fontSize: 9, fontWeight: '800', color: c.primary }}>PHONE</Text>
+              <View style={{
+                backgroundColor: `${c.primary}18`,
+                borderRadius: layout.pad.xs,
+                paddingHorizontal: layout.pad.xs + 2,
+                paddingVertical: 2,
+              }}>
+                <Text style={{ fontSize: layout.captionSize - 2, fontWeight: '800', color: c.primary }}>PHONE</Text>
               </View>
             ) : undefined}
           />
 
           {/* Password */}
-          <Text style={{ fontSize: 11, fontWeight: '700', color: c.text, opacity: 0.5, marginBottom: 7, textTransform: 'uppercase', letterSpacing: 0.9 }}>Password</Text>
+          <Text style={fieldLabelStyle}>Password</Text>
           <NeuInputRow
             c={c}
             value={password}
@@ -280,34 +308,43 @@ export default function SignIn() {
             autoCapitalize="none"
             autoCorrect={false}
             spellCheck={false}
-            leftIcon={<Lock size={17} color={c.text} opacity={0.38} />}
+            leftIcon={<Lock size={layout.captionSize + 4} color={c.text} opacity={0.38} />}
             rightElement={
               <Pressable
                 onPress={() => setShowPwd(!showPwd)}
                 accessibilityLabel={showPwd ? 'Hide password' : 'Show password'}
                 accessibilityRole="button"
-                style={{ padding: 4 }}
+                style={{ padding: layout.pad.xs }}
               >
-                {showPwd ? <EyeOff size={17} color={c.text} opacity={0.38} /> : <Eye size={17} color={c.text} opacity={0.38} />}
+                {showPwd
+                  ? <EyeOff size={layout.captionSize + 4} color={c.text} opacity={0.38} />
+                  : <Eye    size={layout.captionSize + 4} color={c.text} opacity={0.38} />}
               </Pressable>
             }
           />
 
           {error ? (
-            <Text style={{ color: '#DC2626', fontSize: 13, marginBottom: 10, lineHeight: 18 }}>{error}</Text>
+            <Text style={{
+              color: '#DC2626',
+              fontSize: layout.captionSize,
+              marginBottom: layout.pad.sm,
+              lineHeight: layout.captionSize * 1.5,
+            }}>{error}</Text>
           ) : null}
 
-          <NeuButton label="Sign In" onPress={handleSignIn} loading={loading} fullWidth style={{ marginTop: 4 }} />
+          <NeuButton label="Sign In" onPress={handleSignIn} loading={loading} fullWidth style={{ marginTop: layout.pad.xs }} />
         </NeuCard>
 
-        <View style={{ flexDirection: 'row', justifyContent: 'center', marginTop: 16, gap: 4 }}>
-          <Text style={{ color: c.text, opacity: 0.5, fontSize: 13 }}>{"Don't have an account?"}</Text>
+        {/* Register link — gap replaces hardcoded marginTop: 16 */}
+        <View style={{ flexDirection: 'row', justifyContent: 'center', marginTop: layout.pad.lg, gap: layout.pad.xs }}>
+          <Text style={{ color: c.text, opacity: 0.5, fontSize: layout.captionSize }}>{"Don't have an account?"}</Text>
           <Pressable onPress={() => router.push('/(auth)/sign-up')} accessibilityLabel="Register a new account" accessibilityRole="button">
-            <Text style={{ color: c.primary, fontWeight: '700', fontSize: 13 }}>Register</Text>
+            <Text style={{ color: c.primary, fontWeight: '700', fontSize: layout.captionSize }}>Register</Text>
           </Pressable>
         </View>
 
-        <View style={{ height: 16 }} />
+        {/* Bottom breathing room */}
+        <View style={{ height: layout.pad.lg }} />
       </ScrollView>
     </KeyboardAvoidingView>
   );

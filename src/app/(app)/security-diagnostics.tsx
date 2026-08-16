@@ -244,7 +244,6 @@ function DiagnosticsContent() {
       <ScrollView
         style={{ flex: 1 }}
         contentContainerStyle={{ paddingTop: 16, paddingBottom: layout.scrollBottom() }}
-        contentInsetAdjustmentBehavior="automatic"
       >
         {/* ── Module registration proof ──────────────────────────────── */}
         <View style={sectionPad}>

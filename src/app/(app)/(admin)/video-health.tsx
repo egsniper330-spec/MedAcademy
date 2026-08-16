@@ -428,7 +428,7 @@ export default function VideoHealthScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: c.base }}>
-      <ScrollView contentInsetAdjustmentBehavior="automatic"
+      <ScrollView
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />}
         style={{ flex: 1 }}>
         <View style={{ padding: layout.screenPx, gap: 16, paddingBottom: layout.scrollBottom() }}>

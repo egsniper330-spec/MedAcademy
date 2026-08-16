@@ -136,7 +136,6 @@ export default function LoginHistory() {
           renderItem={renderItem}
           contentContainerStyle={{ paddingHorizontal: layout.screenPx, paddingBottom: layout.scrollBottom() }}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />}
-          contentInsetAdjustmentBehavior="automatic"
         />
       )}
     </View>

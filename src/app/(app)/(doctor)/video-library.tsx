@@ -431,7 +431,6 @@ export default function VideoLibraryScreen() {
           keyExtractor={(item) => item.id}
           renderItem={renderItem}
           contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: layout.scrollBottom() }}
-          contentInsetAdjustmentBehavior="automatic"
           showsVerticalScrollIndicator={false}
           ListEmptyComponent={
             <View style={{ alignItems: 'center', justifyContent: 'center', gap: 16, paddingTop: 80 }}>

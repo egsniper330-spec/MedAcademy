@@ -250,7 +250,9 @@ function doctorOf(item: CourseItem): { id: string; full_name: string } | null {
   );
 
   return (
-    <>
+    // Root View sets the neumorphic background — without this the system
+    // default (white in light mode) bleeds through behind the FlatList.
+    <View style={{ flex: 1, backgroundColor: c.base }}>
       <FlatList
         data={displayList}
         keyExtractor={item => item.id}
@@ -258,7 +260,6 @@ function doctorOf(item: CourseItem): { id: string; full_name: string } | null {
         ListHeaderComponent={ListHeader}
         ListEmptyComponent={ListEmpty}
         contentContainerStyle={{ paddingHorizontal: layout.screenPx, paddingBottom: layout.scrollBottom() }}
-        contentInsetAdjustmentBehavior="automatic"
         keyboardShouldPersistTaps="handled"
         keyboardDismissMode="on-drag"
         refreshControl={
@@ -272,6 +273,6 @@ function doctorOf(item: CourseItem): { id: string; full_name: string } | null {
         contact={subscribeContact}
         onClose={() => setSubscribeVisible(false)}
       />
-    </>
+    </View>
   );
 }

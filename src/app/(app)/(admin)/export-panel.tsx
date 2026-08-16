@@ -217,7 +217,8 @@ export default function ExportPanel() {
   };
 
   return (
-    <ScrollView style={{ flex: 1, backgroundColor: c.base }} contentInsetAdjustmentBehavior="automatic">
+    <ScrollView style={{ flex: 1, backgroundColor: c.base }}
+          contentContainerStyle={{ paddingBottom: layout.scrollBottom() }}>
       <View style={{ padding: layout.screenPx }}>
         <PageHeader title="Export Center" subtitle="Download CSV reports for any subsystem" accentColor="#D97706" />
 

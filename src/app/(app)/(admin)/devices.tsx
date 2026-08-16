@@ -504,7 +504,7 @@ export default function AdminDevices() {
   return (
     <View style={{ flex: 1, backgroundColor: c.base }}>
       <ScrollView
-        contentInsetAdjustmentBehavior="automatic"
+        contentContainerStyle={{ paddingBottom: layout.scrollBottom() }}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />}
       >
         <View style={{ padding: layout.screenPx, paddingTop: 0 }}>

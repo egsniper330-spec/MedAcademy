@@ -177,7 +177,6 @@ export default function SecurityDashboard() {
       <ScrollView
         contentContainerStyle={{ padding: layout.screenPx, gap: layout.sectionGap, paddingBottom: layout.scrollBottom() }}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />}
-        contentInsetAdjustmentBehavior="automatic"
       >
         {/* Day Filter + Export */}
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: layout.pad.sm, flexWrap: 'wrap' }}>

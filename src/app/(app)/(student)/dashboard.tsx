@@ -292,7 +292,6 @@ export default function StudentDashboard() {
       />
     <ScrollView
       style={{ flex: 1, backgroundColor: c.base }}
-      contentInsetAdjustmentBehavior="automatic"
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />}
     >
       {/* DashboardHeader owns its safe-area top padding — no paddingTop on outer View */}

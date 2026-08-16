@@ -154,7 +154,6 @@ export default function CourseDetail() {
 
   return (
     <ScrollView style={{ flex: 1, backgroundColor: c.base }} contentContainerStyle={{ paddingBottom: layout.scrollBottom() }}
-      contentInsetAdjustmentBehavior="automatic"
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}>
 
       {/* Cover image — aspect ratio stays correct on landscape/tablet */}

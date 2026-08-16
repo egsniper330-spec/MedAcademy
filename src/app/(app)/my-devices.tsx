@@ -121,7 +121,6 @@ export default function MyDevices() {
   return (
     <View style={{ flex: 1, backgroundColor: c.base }}>
       <ScrollView
-        contentInsetAdjustmentBehavior="automatic"
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />}
       >
         <View style={{ padding: layout.screenPx, paddingTop: 12 }}>

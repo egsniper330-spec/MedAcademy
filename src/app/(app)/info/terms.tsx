@@ -56,7 +56,6 @@ export default function TermsPage() {
   return (
     <ScrollView
       style={{ flex: 1, backgroundColor: c.base }}
-      contentInsetAdjustmentBehavior="automatic"
       contentContainerStyle={{ padding: layout.screenPx, paddingBottom: layout.scrollBottom() }}
     >
       <PageHeader title="Terms & Conditions" showBack />

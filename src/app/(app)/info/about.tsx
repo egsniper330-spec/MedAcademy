@@ -37,7 +37,6 @@ export default function AboutPage() {
   return (
     <ScrollView
       style={{ flex: 1, backgroundColor: c.base }}
-      contentInsetAdjustmentBehavior="automatic"
       contentContainerStyle={{ padding: layout.screenPx, paddingBottom: layout.scrollBottom() }}
     >
       <PageHeader title="About Us" showBack />

@@ -777,7 +777,7 @@ export default function LessonEditor() {
           TAB: VIDEO
       ══════════════════════════════════════════════════════════════════════ */}
       {tab === 'video' && (
-        <ScrollView contentInsetAdjustmentBehavior="automatic" keyboardShouldPersistTaps="handled"
+        <ScrollView keyboardShouldPersistTaps="handled"
           contentContainerStyle={{ padding: layout.screenPx, gap: 16, paddingBottom: layout.scrollBottom() }}>
 
           {/* ── Live upload / processing status card ─────────────────────── */}
@@ -1334,7 +1334,6 @@ export default function LessonEditor() {
           <FlatList
             data={materials}
             keyExtractor={m => m.id}
-            contentInsetAdjustmentBehavior="automatic"
             contentContainerStyle={{ padding: layout.screenPx, paddingTop: 4, gap: 10, paddingBottom: layout.scrollBottom() }}
             ListEmptyComponent={
               <View style={{ alignItems: 'center', paddingVertical: 60 }}>
@@ -1422,7 +1421,7 @@ export default function LessonEditor() {
           TAB: SETTINGS
       ══════════════════════════════════════════════════════════════════════ */}
       {tab === 'settings' && (
-        <ScrollView contentInsetAdjustmentBehavior="automatic" keyboardShouldPersistTaps="handled"
+        <ScrollView keyboardShouldPersistTaps="handled"
           contentContainerStyle={{ padding: layout.screenPx, gap: 16, paddingBottom: layout.scrollBottom() }}>
           <Text style={{ fontSize: 16, fontWeight: '800', color: c.text, opacity: 0.7 }}>Lesson Access</Text>
 

@@ -156,7 +156,7 @@ export default function ContentProtectionPolicyScreen() {
   );
 
   return (
-    <ScrollView style={{ flex: 1, backgroundColor: c.base }} contentInsetAdjustmentBehavior="automatic">
+    <ScrollView style={{ flex: 1, backgroundColor: c.base }}>
       <PageHeader title="Content Protection" subtitle="Configure screenshot & recording policies" />
 
       <View style={{ padding: layout.screenPx, gap: 16 }}>

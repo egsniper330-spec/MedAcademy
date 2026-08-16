@@ -273,7 +273,8 @@ export default function AcademicManagement() {
 
   return (
     <View style={{ flex: 1, backgroundColor: c.base }}>
-      <ScrollView contentInsetAdjustmentBehavior="automatic"
+      <ScrollView
+          contentContainerStyle={{ paddingBottom: layout.scrollBottom() }}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />}>
         <View style={{ padding: layout.screenPx }}>
           <PageHeader title="Academic Structure" subtitle="Manage universities, faculties and levels" />

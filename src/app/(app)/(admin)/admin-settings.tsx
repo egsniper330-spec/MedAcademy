@@ -10,7 +10,8 @@ export default function AdminSettingsScreen() {
   const c = (useColorScheme() === 'dark' ? neuColors.dark : neuColors.light);
   const layout = useLayout();
   return (
-    <ScrollView style={{ flex: 1, backgroundColor: c.base }} contentInsetAdjustmentBehavior="automatic">
+    <ScrollView style={{ flex: 1, backgroundColor: c.base }}
+          contentContainerStyle={{ paddingBottom: layout.scrollBottom() }}>
       <View style={{ padding: layout.screenPx }}>
         <PageHeader title="Settings" subtitle="Admin configuration" />
         <Text style={{ color: c.text, opacity: 0.4, textAlign: 'center', marginTop: 60 }}>
