@@ -121,17 +121,32 @@ export async function resolveEmailFromIdentifier(identifier: string): Promise<st
       // Re-throw network-level errors so the sign-in handler can show the real
       // message ("Network request failed") instead of the misleading
       // "No account found for this email or phone number".
-      // Only swallow application-level errors (e.g. function not found — that
-      // would be a misconfiguration, not a transient network failure).
+      //
+      // A network/transport error has no HTTP status and no PGRST error code.
+      // supabase-js wraps XHR/fetch failures as:
+      //   { message: "Network request failed" | "Failed to fetch" | ..., code: undefined }
+      // Application errors from PostgREST have numeric HTTP status codes and
+      // PGRST-prefixed error codes (e.g. "PGRST116", "42501").
+      // RPC-not-found returns HTTP 404 with code "PGRST202".
+      //
+      // Detection logic:
+      //   - message contains known network-failure strings  → network error → throw
+      //   - error has no code AND no HTTP status            → fetch failed  → throw
+      //   - error has a PGRST code or numeric HTTP status   → app error     → swallow (return null)
       console.error('[resolveEmailFromIdentifier] RPC error:', error.message, '| code:', error.code);
-      const networkError =
-        error.message.toLowerCase().includes('network') ||
-        error.message.toLowerCase().includes('failed to fetch') ||
-        error.message.toLowerCase().includes('timeout') ||
-        // PostgREST / supabase-js wraps fetch errors with code 'PGRST' prefix
-        // or FetchError name; a missing function returns code '404' / 'PGRST301'
-        (error.code !== undefined && !String(error.code).startsWith('PGRST') && error.code !== '404');
-      if (networkError) throw error;
+      const msg = error.message?.toLowerCase() ?? '';
+      const isNetworkMessage =
+        msg.includes('network') ||
+        msg.includes('failed to fetch') ||
+        msg.includes('timeout') ||
+        msg.includes('connection') ||
+        msg.includes('network request failed');
+      const hasPgrstCode =
+        error.code !== undefined &&
+        error.code !== null &&
+        (String(error.code).startsWith('PGRST') || /^\d{3}$/.test(String(error.code)));
+      const isNetworkError = isNetworkMessage || !hasPgrstCode;
+      if (isNetworkError) throw error;
       return null;
     }
     return data ?? null;

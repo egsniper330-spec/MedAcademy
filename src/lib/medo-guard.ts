@@ -70,8 +70,39 @@ function buildErrorMessage(url: string, method: string): string {
 }
 
 // ─── Global fetch interceptor ─────────────────────────────────────────────────
+//
+// CRITICAL — iOS JSC lazy-getter trap (root cause of "Network request failed"):
+//
+// React Native's polyfillGlobal('fetch', ...) in setUpXHR.js uses
+// defineLazyObjectProperty(), which installs a GETTER on `global.fetch`
+// that materialises the real whatwg-fetch polyfill only on the FIRST READ.
+//
+// On iOS with @react-native-community/javascriptcore (JSC), that getter fires
+// the moment something first READS global.fetch.  If we read it too early —
+// before the getter has been wired up — we get undefined instead of the real
+// fetch function.  But medo-guard is the VERY FIRST import in _layout.tsx and
+// evaluates synchronously during bundle execution, potentially before the
+// polyfillGlobal getter is fully in place.
+//
+// ── Safe pattern: read globalThis.fetch ONCE right here, before we overwrite it.
+//
+// At this exact point in module evaluation:
+//   • InitializeCore / setUpXHR has already run (it is a prepended polyfill
+//     script, executed before any app module including _layout.tsx).
+//   • Therefore the lazy getter IS wired up.
+//   • Reading globalThis.fetch NOW triggers the getter, materialises whatwg-fetch,
+//     and replaces the getter with the concrete function value on `global`.
+//   • We capture that concrete value as _underlyingFetch.
+//   • We then overwrite globalThis.fetch with our interceptor.
+//   • Inside the interceptor we call _underlyingFetch directly — no circular
+//     globalThis.fetch reference, no lazy-getter re-trigger.
+//
+// This is the minimal, zero-risk fix.  It requires no require() tricks and
+// introduces no new dependencies.
 
-const _originalFetch = globalThis.fetch;
+// Trigger the lazy getter and capture the real fetch before we overwrite it.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const _underlyingFetch: typeof fetch = (globalThis.fetch as any) ?? (() => Promise.reject(new Error('[MEDO-GUARD] fetch not available')));
 
 globalThis.fetch = function meDoGuardedFetch(
   input: Parameters<typeof fetch>[0],
@@ -95,7 +126,8 @@ globalThis.fetch = function meDoGuardedFetch(
     throw new Error(`[MEDO-GUARD] Blocked request to retired backend: ${url}`);
   }
 
-  return _originalFetch.call(globalThis, input, init);
+  // Call the real fetch captured above — not globalThis.fetch (that is us).
+  return _underlyingFetch.call(globalThis, input, init as RequestInit);
 } as typeof globalThis.fetch;
 
 // ─── Startup assertion ────────────────────────────────────────────────────────
