@@ -217,6 +217,30 @@ function withLucideResolver(config) {
   return { ...config, resolver: { ...config.resolver, resolveRequest } };
 }
 
+// ─── tasks/ blockList — prevent Metro from bundling any task/working files ────
+// The tasks/ directory holds historical working copies and diagnostic archives
+// from previous fix sessions. Some of these files contain imports that no
+// longer resolve (e.g. @/lib/diagnostics). Excluding the entire tasks/ tree
+// from the bundle graph ensures Metro never attempts to resolve them.
+function withTasksBlockList(config) {
+  const TASKS_RE = new RegExp(
+    path.join(__dirname, 'tasks').replace(/\\/g, '\\\\') + '.*'
+  );
+  const existing = config.resolver?.blockList;
+  const existingList = existing
+    ? Array.isArray(existing)
+      ? existing
+      : [existing]
+    : [];
+  return {
+    ...config,
+    resolver: {
+      ...config.resolver,
+      blockList: [...existingList, TASKS_RE],
+    },
+  };
+}
+
 // ─── @/ path alias resolver ───────────────────────────────────────────────────
 // Resolves "@/foo/bar" → "<projectRoot>/src/foo/bar" at the Metro resolver level.
 //
@@ -325,6 +349,7 @@ module.exports = async function (metroDefaults) {
   config = withPlatformStubs(config);
   config = withLucideResolver(config);
   config = withWasmSupport(config);
+  config = withTasksBlockList(config);
   config = withAtAliasResolver(config);
 
   // NativeWind: processes global.css and inlines Tailwind at build time.
