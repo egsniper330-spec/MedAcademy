@@ -44,10 +44,6 @@ import "../global.css";
 // This runs once when the root layout module is first evaluated.
 assertMeDoBlocked();
 
-// ── DIAGNOSTIC: instrument this module's evaluation ───────────────────────────
-import { diag, diagError } from '@/lib/diagnostics';
-diag('LAYOUT', '_layout.tsx module evaluated — JS runtime is alive');
-
 /**
  * ForceUpdateGate — rendered at the ROOT level, above ALL navigation.
  *
@@ -168,29 +164,22 @@ function RootScreenCapture() {
   // See detailed explanation in the comment block above.
   const { isLoading } = useSession();
 
-  // DIAG: track every render of RootScreenCapture
-  diag('SC', 'RootScreenCapture render', `isLoading=${isLoading} isSuperAdmin=${isSuperAdmin}`);
-
   // Apply / release based on Super Admin status.
   // Gated on !isLoading so the first native frame is already presented before
   // we reparent keyWindow.layer into the UITextField secure sublayer.
   useEffect(() => {
     if (process.env.EXPO_OS === 'web') return;
     if (isLoading) {
-      diag('SC', 'ROOT_SC_KEY effect — isLoading=true SKIPPED (gate active)');
       return;
     }
-    diag('SC', `ROOT_SC_KEY effect FIRING`, `isSuperAdmin=${isSuperAdmin}`);
     if (isSuperAdmin) {
       // Super Admin: release the root-level lock so they can screenshot freely
       ScreenCaptureLib.allowScreenCaptureAsync(ROOT_SC_KEY)
-        .then(() => diag('SC', 'ROOT_SC_KEY allowScreenCaptureAsync RESOLVED'))
-        .catch((e) => diagError('ERR', 'ROOT_SC_KEY allowScreenCaptureAsync FAILED', e));
+        .catch(() => {});
     } else {
       // Normal user (including unauthenticated): protection must be active
       ScreenCaptureLib.preventScreenCaptureAsync(ROOT_SC_KEY)
-        .then(() => diag('SC', 'ROOT_SC_KEY preventScreenCaptureAsync RESOLVED'))
-        .catch((e) => diagError('ERR', 'ROOT_SC_KEY preventScreenCaptureAsync FAILED', e));
+        .catch(() => {});
     }
   }, [isSuperAdmin, isLoading]);
 
@@ -217,19 +206,13 @@ function RootScreenCapture() {
     let timer: ReturnType<typeof setTimeout> | null = null;
     const sub = AppState.addEventListener('change', (nextState) => {
       if (nextState === 'active') {
-        diag('SC', 'ROOT_SC_KEY AppState active — scheduling setTimeout(0)');
         if (timer !== null) clearTimeout(timer);
         timer = setTimeout(() => {
           timer = null;
-          diag('SC', `ROOT_SC_KEY AppState setTimeout(0) FIRED`, `isSuperAdmin=${isSuperAdminRef.current}`);
           if (isSuperAdminRef.current) {
-            ScreenCaptureLib.allowScreenCaptureAsync(ROOT_SC_KEY)
-              .then(() => diag('SC', 'ROOT_SC_KEY AppState allow RESOLVED'))
-              .catch((e) => diagError('ERR', 'ROOT_SC_KEY AppState allow FAILED', e));
+            ScreenCaptureLib.allowScreenCaptureAsync(ROOT_SC_KEY).catch(() => {});
           } else {
-            ScreenCaptureLib.preventScreenCaptureAsync(ROOT_SC_KEY)
-              .then(() => diag('SC', 'ROOT_SC_KEY AppState prevent RESOLVED'))
-              .catch((e) => diagError('ERR', 'ROOT_SC_KEY AppState prevent FAILED', e));
+            ScreenCaptureLib.preventScreenCaptureAsync(ROOT_SC_KEY).catch(() => {});
           }
         }, 0);
       }
@@ -267,14 +250,6 @@ function RootLayoutNav() {
     <Stack screenOptions={{ headerShown: false }}>
       {/* index is ALWAYS in the route table — serves as loading screen and landing page */}
       <Stack.Screen name="index" />
-      {/*
-       * ── /diag — standalone diagnostic screen ─────────────────────────────
-       * Registered OUTSIDE all Stack.Protected guards.
-       * Accessible via deep link: medacademy:///diag
-       * Renders even when SessionProvider / SecurityProvider cause a black screen.
-       * Remove once diagnosis is complete.
-       */}
-      <Stack.Screen name="diag" options={{ title: 'Diagnostics', headerShown: true }} />
       {/* Public routes (sign-in, sign-up, etc.) — active only when not logged in */}
       <Stack.Protected guard={!session && !isLoading}>
         <Stack.Screen name="(auth)" />
@@ -288,14 +263,10 @@ function RootLayoutNav() {
 }
 
 const RootLayout: React.FC = () => {
-  // DIAG: RootLayout component body executing = React has bootstrapped.
-  diag('LAYOUT', 'RootLayout component executing');
-
   // Make the Android system navigation bar fully transparent so React Navigation
   // can render the tab bar edge-to-edge and apply its own safe-area padding.
   // This works in tandem with android.navigationBarColor = "#00000000" in app.json.
   useEffect(() => {
-    diag('LAYOUT', 'RootLayout mount useEffect fired');
     if (process.env.EXPO_OS === 'android') {
       NavigationBar.setPositionAsync('absolute');
       NavigationBar.setBackgroundColorAsync('#00000000');
@@ -327,11 +298,6 @@ const RootLayout: React.FC = () => {
             </ForceUpdateGate>
           </SecurityProvider>
         </SessionProvider>
-        {/*
-         * ── DIAGNOSTIC OVERLAY REMOVED (v3) ──────────────────────────────────
-         * Use medacademy:///diag deep link to access the diagnostic screen.
-         * DiagScreen React overlay was not visible when the React tree was black.
-         */}
       </GestureHandlerRootView>
     </SafeAreaProvider>
   );
