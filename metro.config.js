@@ -274,20 +274,27 @@ function withWasmSupport(config) {
 module.exports = async function (metroDefaults) {
   let config = getDefaultConfig(__dirname);
 
-  // ─── pnpm + inotify fix ─────────────────────────────────────────────────────
-  // The container has a hard inotify limit of ~15 925 watches but node_modules
-  // contains >18 000 directories.  The .pnpm store is excluded from watchman
-  // via .watchmanconfig (ignore_dirs: node_modules/.pnpm) to prevent the
-  // "inotify watches exhausted" poison state.  We compensate by:
-  //   1. Adding node_modules/.pnpm to Metro's watchFolders so Metro still
-  //      resolves real package files there via its crawl (not inotify-watch).
-  //   2. Setting useWatchman: true so Metro NEVER falls back to FallbackWatcher
-  //      or NativeWatcher — both of which open one inotify fd per directory and
-  //      immediately exhaust the limit.
+  // ─── pnpm + inotify fix (conditional — pnpm-only environments) ─────────────
+  // When installed with pnpm, node_modules/.pnpm exists and contains the actual
+  // package files. Metro must crawl it so resolution works, but the directory
+  // must be excluded from watchman (via .watchmanconfig ignore_dirs) to avoid
+  // exhausting the container's inotify watch limit (~15 925 watches vs >18 000
+  // directories in the pnpm store).
+  //
+  // When installed with npm (e.g. GitHub Actions CI), node_modules/.pnpm does
+  // NOT exist. Adding a non-existent path to watchFolders causes Metro to call
+  // fs.stat() on it during transformer construction, which throws:
+  //   ENOENT: no such file or directory, stat 'node_modules/.pnpm'
+  // crashing the entire "Bundle React Native code and images" Xcode phase.
+  //
+  // FIX: Only add node_modules/.pnpm to watchFolders when it actually exists.
+  // useWatchman: true is kept unconditionally — it has no downside on npm
+  // installs and still prevents inotify exhaustion on pnpm environments.
   const pnpmStore = path.join(__dirname, 'node_modules/.pnpm');
+  const extraWatchFolders = fs.existsSync(pnpmStore) ? [pnpmStore] : [];
   config = {
     ...config,
-    watchFolders: [...(config.watchFolders || []), pnpmStore],
+    watchFolders: [...(config.watchFolders || []), ...extraWatchFolders],
     resolver: {
       ...config.resolver,
       useWatchman: true,

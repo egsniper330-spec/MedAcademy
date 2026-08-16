@@ -1,62 +1,82 @@
-# CHANGES — Lock File Sync for fast-text-encoding
+# CHANGES — Metro watchFolders: Conditional .pnpm Path
 
 ## Problem
 
-`npm ci` failed on CI because `package-lock.json` was not regenerated after
-`fast-text-encoding@^1.0.6` was added to `package.json`.
-
-`npm ci` requires that `package-lock.json` is consistent with `package.json`.
-When a dependency is present in `package.json` but its resolved entry is missing
-from `package-lock.json`, npm ci exits with:
+GitHub Actions iOS build fails during the **"Bundle React Native code and images"**
+Xcode phase with:
 
 ```
-npm error `npm ci` can only install packages when your package.json and
-package-lock.json or npm-shrinkwrap.json are in sync.
+Error "ENOENT" reading contents of ".../node_modules/.pnpm", skipping.
+Failed to construct transformer: Error: ENOENT: no such file or directory,
+  stat '.../node_modules/.pnpm'
+  errno: -2, code: 'ENOENT', path: '.../node_modules/.pnpm'
 ```
+
+Metro aborts immediately, the JS bundle is never written, and Xcode fails the
+build.
 
 ## Root Cause
 
-The package was previously installed using **pnpm** (which writes to
-`pnpm-lock.yaml` only). The CI workflow uses `npm ci` which reads
-`package-lock.json` exclusively. The `package-lock.json` did not contain
-the resolved entry for `fast-text-encoding`.
+`metro.config.js` unconditionally added `node_modules/.pnpm` to
+`config.watchFolders`:
+
+```js
+const pnpmStore = path.join(__dirname, 'node_modules/.pnpm');
+config = {
+  ...config,
+  watchFolders: [...(config.watchFolders || []), pnpmStore],   // ← always added
+  ...
+};
+```
+
+`node_modules/.pnpm` is **pnpm-specific** — it only exists when the project is
+installed with pnpm (e.g. local development). The GitHub Actions workflow uses
+`npm ci`, which creates a flat `node_modules/` layout with no `.pnpm`
+subdirectory.
+
+When Metro initialises its file system, it calls `fs.stat()` on every path in
+`watchFolders`. On a non-existent path this throws `ENOENT`, which propagates as
+a fatal error during transformer construction — before a single module is
+resolved.
 
 ## Fix
 
-Ran `npm install --package-lock-only --ignore-scripts` to regenerate
-`package-lock.json` from `package.json` without modifying `node_modules`.
+Only add `node_modules/.pnpm` to `watchFolders` when the directory actually
+exists on disk:
 
-This added the following entry to `package-lock.json`:
-
-```json
-"node_modules/fast-text-encoding": {
-  "version": "1.0.6",
-  "resolved": "https://registry.npmjs.org/fast-text-encoding/-/fast-text-encoding-1.0.6.tgz",
-  "integrity": "sha512-VhXlQgj9ioXCqGstD37E/HBeqEGV/qOD/kmbVG8h5xKBYvM1L3lR1Zn4555cQ8GkYbJa8aJSipLPndE1k6zK2w==",
-  "license": "Apache-2.0"
-}
+```js
+const pnpmStore = path.join(__dirname, 'node_modules/.pnpm');
+const extraWatchFolders = fs.existsSync(pnpmStore) ? [pnpmStore] : [];
+config = {
+  ...config,
+  watchFolders: [...(config.watchFolders || []), ...extraWatchFolders],
+  resolver: { ...config.resolver, useWatchman: true },
+};
 ```
 
-The integrity hash matches the npm registry exactly (`npm view fast-text-encoding@1.0.6 dist.integrity`).
+`fs` is already imported at the top of the file (`const fs = require('fs')`).
+`useWatchman: true` is kept unconditionally — it has no downside on npm and
+still prevents inotify exhaustion in pnpm environments.
 
 ## Verification
 
 ```
-# Clean install from lockfile only
-rm -rf node_modules
-npm ci --ignore-scripts          → exit 0 ✓
+# npm env (CI): .pnpm does not exist
+node -e "fs.existsSync('node_modules/.pnpm')"  →  false
+extraWatchFolders = []   →  Metro never stats .pnpm  →  no ENOENT  ✓
 
-# Package loads correctly
-node -e "require('fast-text-encoding'); console.log(typeof global.TextEncoder)"
-→ function ✓
+# pnpm env (local dev): .pnpm exists
+node -e "fs.existsSync('node_modules/.pnpm')"  →  true
+extraWatchFolders = ['node_modules/.pnpm']  →  Metro crawls pnpm store  ✓
 ```
 
 ## Files Changed
 
 | File | Change |
 |------|--------|
-| `package-lock.json` | Regenerated via `npm install --package-lock-only` to include `fast-text-encoding@1.0.6` |
+| `metro.config.js` | Lines 277–302: `watchFolders` now uses `fs.existsSync` guard before including `node_modules/.pnpm` |
 
-**No other files were modified.**
-The TextEncoder polyfill (`src/polyfills/text-encoding.js`) and
-`metro.config.js` are unchanged.
+**No other files modified.** All previous fixes preserved:
+- TextEncoder polyfill (`serializer.polyfillModuleNames`)
+- JSC/Hermes configuration — unchanged
+- All resolver stubs (cssInterop, platformStubs, lucide, @/ alias, wasm)
