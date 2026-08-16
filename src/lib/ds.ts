@@ -1,12 +1,13 @@
 /**
- * ds.ts — MedAcademy Adaptive Design System v3
+ * ds.ts — MedAcademy Adaptive Design System v4
  * ─────────────────────────────────────────────
  * Production-grade adaptive layout engine used by Netflix, WhatsApp, Google.
  *
- * Three scale axes:
- *   1. dp-scale   → screen logical width / 390 reference
- *   2. density    → PixelRatio.get()  — hairlines on hi-DPI
- *   3. fontScale  → PixelRatio.getFontScale() — system large-text
+ * Four scale axes:
+ *   1. dp-scale    → screen logical width / 390 reference
+ *   2. density     → PixelRatio.get()  — hairlines on hi-DPI
+ *   3. fontScale   → PixelRatio.getFontScale() — system large-text
+ *   4. fluid lerp  → lerp(min, max, t) — continuous interpolation (no breakpoints)
  *
  * Device class system (replaces per-screen width checks):
  *   compact   < 360dp  — small phones (SE, legacy Android)
@@ -17,6 +18,9 @@
  *   desktop  >= 1024dp — large tablets, web
  *
  * Key exports:
+ *   lerp(a, b, t)  → continuous linear interpolation (Netflix / Apple Music pattern)
+ *   fluidSpace(w)  → fluid spacing that interpolates between screen sizes
+ *   fluidFont(w)   → fluid font size that interpolates between screen sizes
  *   useAdaptive()  → device class + all adaptive tokens (use this in all screens)
  *   useLayout()    → useAdaptive() + live safe-area insets (THE one hook per screen)
  *   ContentContainer → max-width centering component for tablet/desktop
@@ -27,6 +31,8 @@
  *   • Never call useSafeAreaInsets() in screen files — use useLayout()
  *   • Never check `width > 768` in screen files — use layout.deviceClass
  *   • Never hardcode KeyboardAvoidingView — use AdaptiveScreen
+ *   • Never write `padding: 24` — write `layout.screenPx` or `spacing.xxl`
+ *   • Fluid values (lerp) preferred over step-function breakpoints
  */
 
 import { useWindowDimensions, PixelRatio, Easing } from 'react-native';
@@ -277,6 +283,74 @@ export const border = {
   heavy: 3,
 } as const;
 
+// ─── 7d. Fluid interpolation helpers ────────────────────────────────────────
+/**
+ * lerp — linear interpolation (the Netflix / Apple Music "continuous scaling" pattern).
+ *
+ * Replaces if/else breakpoint ladders. A value is calculated continuously
+ * between `a` (at t=0) and `b` (at t=1) as `t` changes.
+ *
+ * Usage:
+ *   // Pad that grows from 14dp (320dp screen) to 24dp (768dp screen):
+ *   const pad = lerp(14, 24, normalize(shortSide, 320, 768));
+ */
+export function lerp(a: number, b: number, t: number): number {
+  return a + (b - a) * Math.min(1, Math.max(0, t));
+}
+
+/**
+ * normalize — maps `value` from [min, max] → [0, 1] for use with lerp().
+ *
+ * Usage:
+ *   const t = normalize(shortSide, 320, 768);  // 0 at 320dp, 1 at 768dp
+ */
+export function normalize(value: number, min: number, max: number): number {
+  return Math.min(1, Math.max(0, (value - min) / (max - min)));
+}
+
+/**
+ * fluidSpace — continuously scales a spacing value between compact and expanded.
+ *
+ * Unlike `if isTablet then 32 else 16`, this produces values like 17, 18, 19…
+ * giving a smooth visual rhythm on every screen size.
+ *
+ * @param base     dp value at 390dp reference (most phones)
+ * @param w        current screen shortSide in dp
+ * @param minScale clamp floor (default 0.82 — small phones get 82% of base)
+ * @param maxScale clamp ceiling (default 1.45 — large tablets get 145% of base)
+ */
+export function fluidSpace(base: number, w: number, minScale = 0.82, maxScale = 1.45): number {
+  const t = normalize(w, 320, 1024);
+  const scale = lerp(minScale, maxScale, t);
+  return Math.round(base * scale);
+}
+
+/**
+ * fluidFont — continuously scales font sizes.
+ *
+ * Produces smooth type scaling across all screen widths.
+ * Respects the system fontScale multiplier (accessibility large text).
+ *
+ * @param base       base font size in dp at 390dp reference
+ * @param w          screen shortSide in dp
+ * @param fontScale  PixelRatio.getFontScale()
+ * @param minPt      minimum dp clamp (prevent unreadable tiny text)
+ * @param maxPt      maximum dp clamp (prevent oversized text on large displays)
+ */
+export function fluidFont(
+  base: number,
+  w: number,
+  fontScale: number,
+  minPt: number,
+  maxPt: number,
+): number {
+  // Screen-width factor: linear from 0.88 (320dp) to 1.12 (768dp)
+  const widthFactor = lerp(0.88, 1.12, normalize(w, 320, 768));
+  // Apply system font scale, capped at 1.3× to prevent extreme large-text layouts
+  const scaled = base * widthFactor * Math.min(fontScale, 1.3);
+  return Math.round(Math.min(maxPt, Math.max(minPt, scaled)));
+}
+
 // ─── 8. Breakpoints — Material Design 3 / adaptive window classes ────────────
 // Mirrors Google's adaptive layout breakpoints used in Gmail, Drive, Maps.
 // Use deviceClass from useAdaptive() — never check raw width in screen files.
@@ -479,24 +553,39 @@ export function useAdaptive() {
   const fontScale = useMemo(() => PixelRatio.getFontScale(), []);
   const density   = useMemo(() => PixelRatio.get(), []);
 
-  // Horizontal content padding — inset from screen edge for cards/lists
-  const screenPx = useMemo(() => isTablet
-    ? spacing.xxxl
-    : isLarge
-      ? spacing.hero
-      : Math.round(spacing.xl * dpScale),
-  [isTablet, isLarge, dpScale]);
+  // Horizontal content padding — inset from screen edge for cards/lists.
+  //
+  // Uses fluidSpace() for continuous interpolation instead of step-function breakpoints.
+  // This is what Netflix, Apple Music, and Instagram do on every screen size:
+  // the padding grows smoothly as the screen widens — no sudden jumps.
+  //
+  //   320dp (iPhone SE 1st): ~13dp
+  //   390dp (iPhone 14):      16dp  ← baseline
+  //   430dp (iPhone 15 Pro Max): 18dp
+  //   600dp (foldable inner): 22dp
+  //   768dp (iPad):           28dp
+  //   1024dp (iPad Pro):      38dp
+  const screenPx = useMemo(
+    () => Math.round(fluidSpace(spacing.lg, short, 0.82, 2.4)),
+    [short],
+  );
 
   // Landscape: reduce vertical padding to preserve content space
   const screenPy = isLandscape
     ? spacing.sm
     : isTablet ? spacing.xxl : spacing.xl;
 
-  // Responsive font sizes — fontScale-aware, clamped
-  const clampFont = useMemo(() => (base: number, min: number, max: number) =>
-    Math.min(max, Math.max(min, Math.round(
-      base * (isSmall ? 0.95 : isTablet ? 1.05 : 1) * Math.min(fontScale, 1.25)
-    ))), [isSmall, isTablet, fontScale]);
+  // Responsive font sizes — fluid (not breakpoint-step), fontScale-aware, clamped.
+  //
+  // Uses fluidFont() which continuously scales between minPt and maxPt as the
+  // screen width grows. This matches how Apple Music, Netflix, Instagram rhythm:
+  //   compact phone (320dp): smaller text
+  //   Pro Max / Ultra (430dp): slightly larger
+  //   Tablet (768dp): properly larger
+  //   No sudden jumps between sizes.
+  const clampFont = useMemo(() => (base: number, min: number, max: number) => {
+    return fluidFont(base, short, fontScale, min, max);
+  }, [short, fontScale]);
 
   // Max content width — prevents full-stretch on tablets (Netflix / Google pattern)
   const maxContentWidth = useMemo(() => contentMaxWidth[deviceClass], [deviceClass]);
@@ -532,21 +621,80 @@ export function useAdaptive() {
     cardPx: isTablet ? spacing.xl : spacing.lg,
     cardPy: isTablet ? spacing.lg : spacing.md,
     sectionGap: isTablet ? spacing.xxl : isLandscape ? spacing.md : spacing.xl,
-    itemGap: isTablet ? spacing.md : spacing.sm,
+    // Item gap: large phones get a touch more breathing room (WhatsApp / Apple Music pattern)
+    itemGap: isTablet ? spacing.md : isLarge ? spacing.sm + 2 : spacing.sm,
     cardRadius: isTablet ? radius.xl : radius.lg,
     gridCols,
-    headerBtnSize: isTablet ? iconContainer.lg.width : iconContainer.md.width,
+    // Touch targets: 48pt on large phones/tablets (Apple HIG recommends ≥44pt, 48pt on large)
+    headerBtnSize: (isTablet || isLarge) ? iconContainer.lg.width : iconContainer.md.width,
 
-    // ── Typography ───────────────────────────────────────────────────────
-    titleSize:   clampFont(isTablet ? typography.h1.fontSize : typography.h2.fontSize, 17, 32),
-    headingSize: clampFont(typography.h3.fontSize, 14, 22),
-    bodySize:    clampFont(typography.body.fontSize, 12, 18),
-    captionSize: clampFont(typography.caption.fontSize, 10, 14),
-    tabLabelSize: clampFont(typography.tabLabel.fontSize, 9, 12),
+    // ── Adaptive touch target — fluid between 44pt (small) and 52pt (tablet) ─
+    // HIG min: 44pt. MD3 recommended: 48pt. We use 44–52 range continuously.
+    touchTarget: Math.round(fluidSpace(44, short, 1.0, 1.18)),
+
+    // ── Tab bar height — fluid (compact → tablet: 52 → 68) ──────────────
+    // Nav bar must provide enough vertical space for icon + label + home indicator.
+    tabBarHeight: Math.round(fluidSpace(56, short, 0.93, 1.21)),
+
+    // ── Modal / dialog widths ────────────────────────────────────────────
+    // On phones: full-width sheet (use '100%' via `undefined`).
+    // On tablets/foldables: constrained modal so it doesn't span full screen.
+    // Matches iOS sheet, Android bottom-sheet, Google Docs dialog patterns.
+    modalWidth: isTablet
+      ? Math.min(520, width * 0.85)
+      : isExpanded
+        ? Math.min(460, width * 0.90)
+        : undefined,                         // phones → full width
+    dialogWidth: isTablet
+      ? Math.min(460, width * 0.75)
+      : isExpanded
+        ? Math.min(400, width * 0.85)
+        : width * 0.92,                      // phones → 92% width
+
+    // ── Card image height — fluid (never hardcode 200 in a screen file) ──
+    // Aspect-ratio driven: ~16:9 image at the current screen width.
+    // cardImageHeight = (width - 2*screenPx) * (9/16), clamped to a sane range.
+    cardImageHeight: Math.round(
+      Math.min(320, Math.max(140, (width - screenPx * 2) * (9 / 16)))
+    ),
+
+    // ── Hero icon container (for landing / empty state / auth screens) ───
+    // Fluid from 72dp (compact) to 104dp (tablet).
+    heroIconSize: Math.round(fluidSpace(88, short, 0.82, 1.18)),
+    heroIconRadius: Math.round(fluidSpace(28, short, 0.82, 1.18)),
+
+    // ── Typography ─────────────────────────────────────────────────────────
+    // Fluid font sizes — continuously scale with screen width using fluidFont().
+    // No device-class step-function — same algorithm Netflix / Apple Music use.
+    titleSize:   clampFont(isTablet ? typography.h1.fontSize : typography.h2.fontSize, 17, 34),
+    headingSize: clampFont(typography.h3.fontSize, 14, 24),
+    bodySize:    clampFont(typography.body.fontSize, 12, 19),
+    captionSize: clampFont(typography.caption.fontSize, 10, 15),
+    tabLabelSize: clampFont(typography.tabLabel.fontSize, 9, 13),
+
+    // ── Fluid spacing helpers — use in screens instead of hardcoded numbers ──
+    // These replace `paddingHorizontal: 24` with `layout.pad.lg` etc.
+    // All values scale continuously with screen width.
+    pad: {
+      /** ~4–6dp across devices */
+      xs:   Math.round(fluidSpace(spacing.xs,   short, 0.85, 1.15)),
+      /** ~7–10dp */
+      sm:   Math.round(fluidSpace(spacing.sm,   short, 0.85, 1.20)),
+      /** ~10–15dp */
+      md:   Math.round(fluidSpace(spacing.md,   short, 0.85, 1.20)),
+      /** ~14–22dp — standard list/card padding */
+      lg:   Math.round(fluidSpace(spacing.lg,   short, 0.86, 1.25)),
+      /** ~17–28dp — section internal padding */
+      xl:   Math.round(fluidSpace(spacing.xl,   short, 0.86, 1.30)),
+      /** ~20–34dp — section gaps, modal padding */
+      xxl:  Math.round(fluidSpace(spacing.xxl,  short, 0.86, 1.35)),
+      /** ~28–44dp — large section gap */
+      xxxl: Math.round(fluidSpace(spacing.xxxl, short, 0.86, 1.40)),
+    },
   }), [
     deviceClass, isCompact, isStandard, isLarge, isExpanded,
     isTablet, isDesktop, isLandscape, isSmall,
-    width, height, dpScale, fontScale, density,
+    width, height, short, dpScale, fontScale, density,
     screenPx, screenPy, maxContentWidth, gridCols, clampFont,
   ]);
 }
@@ -582,7 +730,7 @@ export function useLayout() {
   const adapt  = useAdaptive();
 
   const headerTop    = safeTop(insets.top);
-  const headerLeft   = safeLeft(insets.left  ?? 0, adapt.isTablet);
+  const headerLeft   = safeLeft(insets.left  ?? 0, adapt?.isTablet ?? false);
   const headerRight  = safeRight(insets.right ?? 0);
   const pageBottom   = safeBottom(insets.bottom, 0);
   const scrollBottom = useMemo(
@@ -590,29 +738,42 @@ export function useLayout() {
     [insets.bottom],
   );
 
-  return useMemo(() => ({
-    ...adapt,
-    insets,
+  return useMemo(() => {
+    // Defensive guard: adapt should always be defined (useAdaptive returns a useMemo),
+    // but during the React concurrent-mode unmount pass a screen can re-render with
+    // a stale/empty adapt object. Ensure pad always exists so layout.pad.xxl never
+    // throws "undefined is not an object" on native (JSC / Hermes).
+    const safePad = adapt?.pad ?? {
+      xs: spacing.xs, sm: spacing.sm, md: spacing.md,
+      lg: spacing.lg, xl: spacing.xl, xxl: spacing.xxl, xxxl: spacing.xxxl,
+    };
+    const safeAdapt = adapt ?? {} as ReturnType<typeof useAdaptive>;
 
-    // ── Header padding ────────────────────────────────────────────────────
-    headerTop,
-    headerLeft,
-    headerRight,
-    headerBottom: spacing.md,
-    headerPadding: {
-      paddingTop:    headerTop,
-      paddingBottom: spacing.md,
-      paddingLeft:   headerLeft,
-      paddingRight:  headerRight,
-    } as const,
+    return {
+      ...safeAdapt,
+      pad: safePad,
+      insets,
 
-    // ── Scroll / page bottom ──────────────────────────────────────────────
-    pageBottom,
-    scrollBottom,
+      // ── Header padding ────────────────────────────────────────────────────
+      headerTop,
+      headerLeft,
+      headerRight,
+      headerBottom: spacing.md,
+      headerPadding: {
+        paddingTop:    headerTop,
+        paddingBottom: spacing.md,
+        paddingLeft:   headerLeft,
+        paddingRight:  headerRight,
+      } as const,
 
-    // ── Content padding shorthand ─────────────────────────────────────────
-    contentPadding: {
-      paddingHorizontal: adapt.screenPx,
-    } as const,
-  }), [adapt, insets, headerTop, headerLeft, headerRight, pageBottom, scrollBottom]);
+      // ── Scroll / page bottom ──────────────────────────────────────────────
+      pageBottom,
+      scrollBottom,
+
+      // ── Content padding shorthand ─────────────────────────────────────────
+      contentPadding: {
+        paddingHorizontal: (adapt?.screenPx ?? spacing.lg),
+      } as const,
+    };
+  }, [adapt, insets, headerTop, headerLeft, headerRight, pageBottom, scrollBottom]);
 }

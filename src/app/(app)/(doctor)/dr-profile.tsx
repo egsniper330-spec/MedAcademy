@@ -8,7 +8,7 @@
  * Earnings is a standalone bottom-nav tab (dr-earnings.tsx).
  */
 
-import { useState, useCallback, useMemo } from 'react';
+import { useState, useCallback, useMemo, useEffect } from 'react';
 import {
   View, Text, ScrollView, useColorScheme, Pressable,
   ActivityIndicator, RefreshControl, TextInput, Switch, Modal,
@@ -344,7 +344,8 @@ function GlobalPriceCard({ doctorId, c, onRecalculate }: {
     setLoading(false);
   }, [doctorId]);
 
-  useMemo(() => { (async () => load())(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  // useEffect (not useMemo) — side effects must not run during the render pass
+  useEffect(() => { (async () => load())(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const saveGlobal = async (price: number | null) => {
     if (!settings) return;
@@ -519,7 +520,8 @@ function StudentProfileModal({ tx, doctorId, onClose, onAction, c }: {
     setLoading(false);
   }, [tx.student_id, doctorId]);
 
-  useMemo(() => { (async () => loadProfile())(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  // useEffect (not useMemo) — side effects must not run during the render pass
+  useEffect(() => { (async () => loadProfile())(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleAction = async (
     action: 'suspend' | 'restore' | 'remove',
@@ -973,7 +975,8 @@ function EarningsTab({ doctorId, earningsEnabled, c }: { // eslint-disable-line 
     setLoading(false);
   }, [doctorId]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  useMemo(() => { (async () => load())(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  // useEffect (not useMemo) — side effects must not run during the render pass
+  useEffect(() => { (async () => load())(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const onRefresh = async () => {
     setRefreshing(true);

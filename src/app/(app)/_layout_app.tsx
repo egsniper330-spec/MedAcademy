@@ -123,7 +123,7 @@ function AppLayoutNav() {
       reset();
       void check().then((result) => {
         if (result.blocksLogin) {
-          router.replace('/(app)/security-warning' as RelativePathString);
+          router.replace('/(auth)/security-warning' as RelativePathString);
         }
       });
     });
@@ -139,7 +139,7 @@ function AppLayoutNav() {
     if (!onNewBlockingThreat) return;
     const unsub = onNewBlockingThreat((result) => {
       if (result.blocksLogin) {
-        router.replace('/(app)/security-warning' as RelativePathString);
+        router.replace('/(auth)/security-warning' as RelativePathString);
       }
     });
     return unsub;
@@ -208,8 +208,6 @@ function AppLayoutNav() {
       <Stack.Screen name="user-activity" />
       <Stack.Screen name="archived-courses" />
       <Stack.Screen name="force-password-change" />
-      <Stack.Screen name="security-warning" />
-      <Stack.Screen name="account-suspended" />
     </Stack>
   );
 }
