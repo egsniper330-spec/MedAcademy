@@ -1,0 +1,18 @@
+
+> medacademy@2.0.1 start
+> expo start --localhost
+
+env: load .env.local .env
+env: export EXPO_PUBLIC_APP_ID EXPO_PUBLIC_APP_SCHEME EXPO_PUBLIC_SUPABASE_ANON_KEY EXPO_PUBLIC_SUPABASE_URL
+Starting project at D:\v3
+Starting Metro Bundler
+
+Waiting on http://localhost:8081
+Logs for your project will appear below.
+Web node_modules\expo-router\entry.js ░░░░░░░░░░░░░░░░  0.0% (0/1)
+Web node_modules\expo-router\entry.js ▓▓▓░░░░░░░░░░░░░ 21.4% (314/679)
+Web node_modules\expo-router\entry.js ▓▓▓▓▓▓▓▓▓░░░░░░░ 58.3% ( 821/1076)
+Web node_modules\expo-router\entry.js ▓▓▓▓▓▓▓▓▓▓▓░░░░░ 72.3% (1307/1537)
+Web node_modules\expo-router\entry.js ▓▓▓▓▓▓▓▓▓▓▓▓░░░░ 77.6% (1646/3581)
+Web Bundled 17539ms node_modules\expo-router\entry.js (3890 modules)
+ LOG  [web] Logs will appear in the browser console
