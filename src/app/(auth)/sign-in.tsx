@@ -55,16 +55,50 @@ export default function SignIn() {
   const identifierType = detectIdentifierType(identifier);
   const IdentIcon = identifierType === 'phone' ? Phone : Mail;
 
+  // ── TEMP-DIAG (iOS auth investigation — remove after root cause confirmed) ──
+  // Logs every boundary of the sign-in chain with platform + timings + full error
+  // detail (name/message/code/status/cause/first stack line) so the REAL runtime
+  // failure on iOS is captured instead of a generic message.
+  const _diagT0 = Date.now();
+  const _diag = (stage: string, info?: Record<string, unknown>) => {
+    console.log('[SIGNIN-DIAG]', JSON.stringify({
+      platform: process.env.EXPO_OS ?? 'unknown',
+      stage,
+      elapsedMs: Date.now() - _diagT0,
+      ...(info ?? {}),
+    }));
+  };
+  const _diagErr = (stage: string, err: unknown) => {
+    const e = (err ?? {}) as { name?: string; message?: string; code?: string; status?: number; cause?: unknown };
+    const stack0 = err instanceof Error ? (err.stack?.split('\n')[1]?.trim() ?? 'n/a') : 'n/a';
+    console.log('[SIGNIN-DIAG-ERR]', JSON.stringify({
+      platform: process.env.EXPO_OS ?? 'unknown',
+      stage,
+      elapsedMs: Date.now() - _diagT0,
+      name:    e?.name    ?? 'n/a',
+      message: e?.message ?? String(err ?? 'n/a'),
+      code:    e?.code    ?? 'n/a',
+      status:  e?.status  ?? 'n/a',
+      cause:   e?.cause instanceof Error ? `${e.cause.name}: ${e.cause.message}` : String(e?.cause ?? 'n/a'),
+      stack0,
+    }));
+  };
+
   const handleSignIn = async () => {
     const trimmed = identifier.trim();
     if (!trimmed || !password) { setError('Email or phone number and password are required.'); return; }
     setLoading(true);
     setError('');
+    _diag('start', { urlPresent: !!process.env.EXPO_PUBLIC_SUPABASE_URL, anonPresent: !!process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY });
 
     try {
       // Step 1: Run security checks BEFORE creating any session
+      _diag('install-id-before');
       const installationId = await getInstallationId();
+      _diag('install-id-after', { hasId: !!installationId });
+      _diag('security-before');
       const secResult = await check(installationId);
+      _diag('security-after', { blocksLogin: secResult.blocksLogin, riskScore: secResult.riskScore });
 
       // If policy blocks login, show security warning screen immediately
       if (secResult.blocksLogin) {
@@ -82,7 +116,9 @@ export default function SignIn() {
       }
 
       // Step 2: Resolve to email
+      _diag('lookup-before');
       const email = await resolveEmailFromIdentifier(trimmed);
+      _diag('lookup-after', { found: !!email });
       if (!email) {
         setError('No account found for this email or phone number.');
         setLoading(false);
@@ -90,11 +126,13 @@ export default function SignIn() {
       }
 
       // Step 3: PRE-LOGIN device check — BEFORE creating any Supabase session
+      _diag('precheck-before');
       const { data: checkData, error: checkError } = await supabase
         .rpc('pre_login_device_check', {
           p_email: email,
           p_installation_id: installationId,
         });
+      _diag('precheck-after', { allowed: checkData?.allowed ?? null, checkErr: checkError?.message ?? null });
 
       if (checkError) {
         // Non-fatal: allow login attempt if the check itself fails (network issue, etc.)
@@ -107,9 +145,12 @@ export default function SignIn() {
       }
 
       // Step 4: Create auth session (only after device check passes)
+      _diag('signin-before', { email });
       const signInStart = Date.now();
       const { data, error: authError } = await supabase.auth.signInWithPassword({ email, password });
       const signInMs = Date.now() - signInStart;
+      _diag('signin-after', { elapsedMs: signInMs, hasSession: !!data?.session });
+      if (authError) _diagErr('signin-error', authError);
 
       if (authError) {
         const msg = authError.message ?? '';
@@ -161,6 +202,7 @@ export default function SignIn() {
       const fingerprint = buildFingerprint();
       const deviceName  = [Device.modelName, Device.osName].filter(Boolean).join(' ') || 'Unknown Device';
 
+      _diag('register-device-before');
       try {
         const result = await registerDevice({
           fingerprint,
@@ -197,7 +239,9 @@ export default function SignIn() {
       } catch (devErr: unknown) {
         const msg = devErr instanceof Error ? devErr.message : String(devErr);
         console.error('[SignIn] registerDevice EXCEPTION (device not registered!):', msg, devErr);
+        _diagErr('register-device-exception', devErr);
       }
+      _diag('register-device-after');
 
       // Step 6: Show security warning if threats detected but login is allowed
       if (secResult.hasWarnings && secResult.threats.length > 0) {
@@ -218,6 +262,7 @@ export default function SignIn() {
 
       // SessionProvider + layout handle routing by role.
     } catch (e: unknown) {
+      _diagErr('handleSignIn-catch', e);
       const errMsg = (e as Error)?.message ?? 'Sign-in failed. Please try again.';
 
       // Surface network failures with a clear, actionable message.
