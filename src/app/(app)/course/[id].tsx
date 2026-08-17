@@ -152,7 +152,8 @@ export default function CourseDetail() {
     </View>
   );
 
-  return (
+  // ── TEMP-DIAG: find the View receiving a string child (Unexpected text node) ──
+  const _renderTree = (
     <ScrollView style={{ flex: 1, backgroundColor: c.base }} contentContainerStyle={{ paddingBottom: layout.scrollBottom() }}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}>
 
@@ -182,7 +183,7 @@ export default function CourseDetail() {
 
       <View style={{ padding: layout.screenPx, gap: 16 }}>
         {/* Archived banner */}
-        {course.archived_at && (
+        {course.archived_at ? (
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10,
             paddingHorizontal: 14, paddingVertical: 10, borderRadius: 14,
             backgroundColor: '#D9770618', borderWidth: 1, borderColor: '#D9770630' }}>
@@ -194,44 +195,44 @@ export default function CourseDetail() {
               </Text>
             </View>
           </View>
-        )}
+        ) : null}
 
         {/* Title + difficulty */}
         <View style={{ gap: 8 }}>
           <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 8 }}>
             <Text style={{ flex: 1, fontSize: 22, fontWeight: '800', color: c.text }}>{course.title}</Text>
-            {course.difficulty && (
+            {course.difficulty ? (
               <View style={{ paddingHorizontal: 10, paddingVertical: 4, borderRadius: 20,
                 backgroundColor: `${DIFFICULTY_COLORS[course.difficulty] ?? c.primary}18` }}>
                 <Text style={{ fontSize: 11, fontWeight: '700', color: DIFFICULTY_COLORS[course.difficulty] ?? c.primary, textTransform: 'capitalize' }}>
                   {course.difficulty.replace('_', ' ')}
                 </Text>
               </View>
-            )}
+            ) : null}
           </View>
 
           {/* Meta row */}
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 14 }}>
-            {course.instructor_name && (
+            {course.instructor_name ? (
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
                 <GraduationCap size={13} color={c.primary} />
                 <Text style={{ fontSize: 13, color: c.text, opacity: 0.6 }}>{course.instructor_name}</Text>
               </View>
-            )}
-            {course.language && (
+            ) : null}
+            {course.language ? (
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
                 <Globe size={13} color={c.primary} />
                 <Text style={{ fontSize: 13, color: c.text, opacity: 0.6 }}>{course.language}</Text>
               </View>
-            )}
-            {course.estimated_duration_hours && (
+            ) : null}
+            {course.estimated_duration_hours ? (
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
                 <Clock size={13} color={c.primary} />
                 <Text style={{ fontSize: 13, color: c.text, opacity: 0.6 }}>
                   {totalStudyMin > 0 ? formatStudyTime(totalStudyMin) : `${course.estimated_duration_hours}h`}
                 </Text>
               </View>
-            )}
+            ) : null}
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
               <BookOpen size={13} color={c.primary} />
               <Text style={{ fontSize: 13, color: c.text, opacity: 0.6 }}>{allLessons.length} lessons</Text>
@@ -301,21 +302,21 @@ export default function CourseDetail() {
         )}
 
         {/* Short description */}
-        {course.short_description && (
+        {course.short_description ? (
           <Text style={{ fontSize: 14, color: c.text, opacity: 0.65, lineHeight: 22 }}>
             {course.short_description}
           </Text>
-        )}
+        ) : null}
 
         {/* Full description */}
-        {course.full_description && course.full_description !== course.short_description && (
+        {course.full_description && course.full_description !== course.short_description ? (
           <NeuCard>
             <Text style={{ fontSize: 15, fontWeight: '700', color: c.text, marginBottom: 8 }}>About This Course</Text>
             <Text style={{ fontSize: 14, color: c.text, opacity: 0.65, lineHeight: 22 }}>
               {course.full_description}
             </Text>
           </NeuCard>
-        )}
+        ) : null}
 
         {/* Course features */}
         <NeuCard style={{ gap: 10 }}>
@@ -481,11 +482,11 @@ export default function CourseDetail() {
         })}
 
         {/* Subscribe — shows contact sheet with doctor's configured methods */}
-        {!isSubscribed && (course.whatsapp || course.telegram || course.phone) && (
+        {!isSubscribed && !!(course.whatsapp || course.telegram || course.phone) ? (
           <NeuButton label="Subscribe" variant="primary"
             icon={<MessageCircle size={16} color="#fff" />}
             onPress={() => setShowContact(true)} fullWidth />
-        )}
+        ) : null}
       </View>
 
       <ContactSheet
@@ -496,6 +497,36 @@ export default function CourseDetail() {
       />
     </ScrollView>
   );
+
+  if (__DEV__) {
+    try {
+      const _walk = (node: any, depth: number) => {
+        if (!node || typeof node !== 'object') return;
+        if (Array.isArray(node)) { node.forEach((n: any) => _walk(n, depth)); return; }
+        if (typeof node !== 'object' || typeof node.type !== 'object' && typeof node.type !== 'string') { return; }
+        const tag = typeof node.type === 'string' ? node.type : (node.type?.displayName || node.type?.name || (node.type?.render?.name || 'wrapped'));
+        if (node.props?.children !== undefined) {
+          const kids = Array.isArray(node.props.children) ? node.props.children : [node.props.children];
+          for (const k of kids) {
+            if (typeof k === 'string' && k.length === 0) {
+              const st = node.props?.style;
+              console.log('[TEXTNODE-DIAG] EMPTY-STRING child under element: ' + tag + ' depth=' + depth +
+                ' style=' + JSON.stringify(st)?.slice(0, 160) + ' key=' + String(node.key ?? 'none'));
+            } else if (typeof k === 'string' && k.trim() === ',') {
+              console.log('[TEXTNODE-DIAG] COMMA child under element: ' + tag + ' depth=' + depth);
+            }
+          }
+        }
+        if (node.props?.children !== undefined) _walk(node.props.children, depth + 1);
+      };
+      _walk(_renderTree, 0);
+      console.log('[TEXTNODE-DIAG] walker completed');
+    } catch (e) {
+      console.log('[TEXTNODE-DIAG] walker threw:', String(e));
+    }
+  }
+  // ── /TEMP-DIAG ──
+  return _renderTree;
 }
 
 function FeatureRow({ icon: Icon, color, label }: { icon: any; color: string; label: string }) {
