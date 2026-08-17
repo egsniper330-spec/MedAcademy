@@ -171,7 +171,10 @@ function AppLayoutNav() {
     if (role === 'student') router.replace('/(app)/(student)/dashboard' as RelativePathString);
     else if (role === 'doctor') router.replace('/(app)/(doctor)/dr-overview' as RelativePathString);
     else if (role === 'admin') router.replace('/(app)/(admin)/admin-overview' as RelativePathString);
-    else if (role === 'super_admin') router.replace('/(app)/(superadmin)/sa-overview' as RelativePathString);
+    else if (role === 'super_admin') {
+      // TEMP-DIAG: redirect disabled to reproduce 'Unexpected text node' on /course/[id]
+      // router.replace('/(app)/(superadmin)/sa-overview' as RelativePathString);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [profile, isProfileLoading]);
 

@@ -154,7 +154,7 @@
       "eas": {}
     },
     "experiments": {
-      "typedRoutes": true
+      "typedRoutes": false
     }
   }
 }

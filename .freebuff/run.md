@@ -14,10 +14,15 @@ Expo SDK 55 / React Native 0.83 app. Web preview is served by Metro via `expo st
 ## 2. Run the server
 
 ```bash
-npm run start -- --localhost
+EXPO_NO_TYPED_ROUTES=1 npm run start -- --localhost
 # or
-pnpm start -- --localhost
+EXPO_NO_TYPED_ROUTES=1 pnpm start -- --localhost
 ```
+
+`EXPO_NO_TYPED_ROUTES=1` disables the typed-routes file watcher: on Windows it crashes
+Metro whenever a route file changes (`TypeError: The "to" argument must be of type string`
+in `@expo/router-server/src/typed-routes`), killing the dev server mid-session. The env
+var only affects the dev server — typed routes in app.json and production builds are untouched.
 
 Metro binds to port **8081** by default (`--localhost` keeps it loopback-only, which is
 required for the Freebuff preview). The web app is served at http://localhost:8081/ — no
