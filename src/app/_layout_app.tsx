@@ -1,0 +1,228 @@
+import { useEffect, useRef } from 'react';
+import { Stack, useRouter } from 'expo-router';
+import { AppState, View } from 'react-native';
+// Fix: import JS wrapper module directly (not requireOptionalNativeModule).
+// requireOptionalNativeModule returns the raw native proxy which only has
+// .preventScreenCapture() / .allowScreenCapture() (no key arg, no async wrapper).
+// The keyed public API preventScreenCaptureAsync(key) / allowScreenCaptureAsync(key)
+// are JS-level functions in ScreenCapture.js — undefined on the proxy →
+// TypeError: undefined is not a function → fatal Android crash.
+import * as ScreenCaptureLib from 'expo-screen-capture';
+import { useSession } from '@/ctx';
+import { useProfileStore } from '@/lib/store';
+import { getProfile } from '@/lib/api';
+import { UploadFAB } from '@/components/VideoUploadQueue';
+import { useSecurity } from '@/lib/SecurityContext';
+import type { RelativePathString } from 'expo-router';
+import { diag, diagError } from '@/lib/diagnostics';
+
+
+// Roles that can upload videos and need the floating upload queue FAB.
+const UPLOAD_ROLES = new Set(['doctor', 'admin', 'super_admin']);
+
+// FLAG_SECURE key for the authenticated app shell.
+// Applied at layout level so every screen inside (app)/ is protected,
+// not just lesson/[id].tsx. The lesson screen adds its own keyed lock
+// ('lesson') for the violation-reporting layer on top of this one.
+// Root _layout.tsx also holds 'root-shell' which covers auth screens.
+const APP_SC_KEY = 'app-shell';
+
+function AppLayoutNav() {
+  const { session } = useSession();
+  const { profile, isProfileLoading, setProfile, setProfileLoading, clearProfile } = useProfileStore();
+  const router = useRouter();
+  const hasNavigated = useRef(false);
+  // Guard: role-based redirect must only fire ONCE after login.
+  // Any later store update (e.g. profile refresh from the Profile screen)
+  // must NOT re-trigger the redirect or the user gets kicked back to dashboard.
+  //
+  // SESSION ISOLATION CONTRACT
+  // ─────────────────────────────────────────────────────────────────────────
+  // When session?.user is null (signed-out):
+  //   • clearProfile() resets profile→null AND isProfileLoading→true
+  //   • hasNavigated.current is reset to false
+  //   • The Stack.Protected guard={!!session} in the root layout unmounts
+  //     the entire (app) route group, wiping all navigator state.
+  // When a NEW session arrives (different user):
+  //   • getProfile() is called with the new user's ID
+  //   • setProfile() fires → isProfileLoading:false + profile set
+  //   • The redirect effect sees hasNavigated.current=false and fires once
+  //     with the correct new role → correct dashboard is pushed
+  // ─────────────────────────────────────────────────────────────────────────
+
+  const { check, reset, onNewBlockingThreat, isSuperAdmin } = useSecurity();
+
+  // ── App-shell FLAG_SECURE ──────────────────────────────────────────────────
+  // Activates Android FLAG_SECURE for ALL screens inside (app)/, blocking
+  // screenshots and screen recording across the entire authenticated session.
+  // Super Admin bypass: release this lock so SA can screenshot in their
+  // administrative capacity. The root 'root-shell' lock is separately managed.
+  // The lesson screen adds a second keyed lock ('lesson') for its
+  // violation-reporting overlay — both locks must be released before the OS
+  // permits capture again, so the lesson lock acts as belt-and-suspenders.
+  //
+  // iOS TIMING FIX — setTimeout(0) async tick:
+  // On iOS with New Architecture (Fabric/JSI), useEffects fire synchronously
+  // within the same React commit that mounts (app)/_layout. This commit is
+  // triggered by the same state update that sets isLoading=false in SessionProvider.
+  // Both events land in the same main-thread run-loop cycle, meaning
+  // preventScreenCapture() runs before the first CATransaction.flush()
+  // has presented the initial frame to the display compositor.
+  //
+  // When preventScreenshots() runs at that moment, it calls
+  // keyWindow.layer.removeFromSuperlayer() and then reparents keyWindow.layer
+  // into UITextField's private off-screen CALayer. The iOS display compositor
+  // never receives the first frame → black screen.
+  //
+  // A single setTimeout(0) defers the call to the NEXT main-thread run-loop
+  // iteration, by which point the initial CATransaction has already flushed and
+  // the window layer is properly registered with the compositor. The reparenting
+  // then works correctly and content stays visible.
+  //
+  // Android: FLAG_SECURE sets a SurfaceView flag — it never reparents the window
+  // layer and is unaffected by this timing issue. The Android path is unchanged.
+  useEffect(() => {
+    if (process.env.EXPO_OS === 'web') return;
+    let cancelled = false;
+    diag('APP_SC', `APP_SC_KEY effect SCHEDULED setTimeout(0)`, `isSuperAdmin=${isSuperAdmin}`);
+    const timer = setTimeout(() => {
+      if (cancelled) return;
+      diag('APP_SC', `APP_SC_KEY setTimeout(0) FIRED`, `isSuperAdmin=${isSuperAdmin}`);
+      if (isSuperAdmin) {
+        // Verified Super Admin: release the app-shell lock
+        ScreenCaptureLib.allowScreenCaptureAsync(APP_SC_KEY)
+          .then(() => diag('APP_SC', 'APP_SC_KEY allowScreenCaptureAsync RESOLVED'))
+          .catch((e) => diagError('ERR', 'APP_SC_KEY allowScreenCaptureAsync FAILED', e));
+      } else {
+        ScreenCaptureLib.preventScreenCaptureAsync(APP_SC_KEY)
+          .then(() => diag('APP_SC', 'APP_SC_KEY preventScreenCaptureAsync RESOLVED'))
+          .catch((e) => diagError('ERR', 'APP_SC_KEY preventScreenCaptureAsync FAILED', e));
+      }
+    }, 0);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+      ScreenCaptureLib.allowScreenCaptureAsync(APP_SC_KEY).catch(() => {});
+    };
+  }, [isSuperAdmin]);
+
+  // ── Background → foreground re-check ──────────────────────────────────────
+  // Re-run all security checks when the app returns from background so that
+  // newly-enabled Developer Options / ADB / VPN are caught immediately.
+  // Uses AppState (not useFocusEffect) because this layout is never unmounted.
+  const appStateRef = useRef(AppState.currentState);
+  useEffect(() => {
+    if (process.env.EXPO_OS === 'web') return;
+    const sub = AppState.addEventListener('change', (nextState) => {
+      const wasBackground =
+        appStateRef.current === 'background' || appStateRef.current === 'inactive';
+      const isForeground = nextState === 'active';
+      appStateRef.current = nextState;
+      if (!wasBackground || !isForeground) return;
+      // Invalidate cache so checks run fresh, then re-evaluate.
+      reset();
+      void check().then((result) => {
+        if (result.blocksLogin) {
+          router.replace('/(auth)/security-warning' as RelativePathString);
+        }
+      });
+    });
+    return () => sub.remove();
+  }, [check, reset, router]);
+
+  // ── Continuous monitoring → forced redirect ────────────────────────────────
+  // Subscribe to SecurityContext's periodic-check callback so that VPN / Developer
+  // Options detected WHILE THE APP IS OPEN (not just on foreground resume) trigger
+  // an immediate redirect to the security-warning screen.
+  useEffect(() => {
+    if (process.env.EXPO_OS === 'web') return;
+    if (!onNewBlockingThreat) return;
+    const unsub = onNewBlockingThreat((result) => {
+      if (result.blocksLogin) {
+        router.replace('/(auth)/security-warning' as RelativePathString);
+      }
+    });
+    return unsub;
+  }, [onNewBlockingThreat, router]);
+
+  useEffect(() => {
+    if (!session?.user) {
+      clearProfile();
+      hasNavigated.current = false;
+      return;
+    }
+    (async () => {
+      setProfileLoading(true);
+      try {
+        const p = await getProfile(session.user.id);
+        setProfile(p as any);
+      } catch (err) {
+        // Profile load failure is intentionally non-fatal — the session is still
+        // valid. Log the error so it appears in the timeline but do NOT sign out.
+        console.error('[AppLayout] getProfile FAILED (non-fatal, keeping session):', err);
+      } finally {
+        setProfileLoading(false);
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session?.user?.id]);
+
+  // ── Role-based redirect ────────────────────────────────────────────────────
+  useEffect(() => {
+    // Skip if still loading, no profile, or already redirected this session
+    if (isProfileLoading || !profile || hasNavigated.current) return;
+    hasNavigated.current = true;
+    const role = profile.role;
+    // If student was created by doctor → force password change first
+    if ((profile as any).force_password_change) {
+      router.replace('/(app)/force-password-change' as RelativePathString);
+      return;
+    }
+    if (role === 'student') router.replace('/(app)/(student)/dashboard' as RelativePathString);
+    else if (role === 'doctor') router.replace('/(app)/(doctor)/dr-overview' as RelativePathString);
+    else if (role === 'admin') router.replace('/(app)/(admin)/admin-overview' as RelativePathString);
+    else if (role === 'super_admin') router.replace('/(app)/(superadmin)/sa-overview' as RelativePathString);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [profile, isProfileLoading]);
+
+  // CRITICAL: Stack MUST always render unconditionally — same principle as root _layout.tsx.
+  // Returning a spinner here unmounts the Stack navigator on every profile-load cycle,
+  // destroying all navigation state and causing blank screens / Unmatched Route errors.
+  // The index.tsx spinner covers the visual loading gap instead.
+  return (
+    <Stack screenOptions={{ headerShown: false }}>
+      <Stack.Screen name="(student)" />
+      <Stack.Screen name="(doctor)" />
+      <Stack.Screen name="(admin)" />
+      <Stack.Screen name="(superadmin)" />
+      <Stack.Screen name="course/[id]" />
+      <Stack.Screen name="lesson/[id]" />
+      <Stack.Screen name="course-builder" />
+      <Stack.Screen name="lesson-editor" />
+      <Stack.Screen name="edit-profile" />
+      <Stack.Screen name="notifications" />
+      <Stack.Screen name="security" />
+      <Stack.Screen name="security-diagnostics" />
+      <Stack.Screen name="my-devices" />
+      <Stack.Screen name="login-history" />
+      <Stack.Screen name="user-activity" />
+      <Stack.Screen name="archived-courses" />
+      <Stack.Screen name="force-password-change" />
+    </Stack>
+  );
+}
+
+export default function AppLayout() {
+  const { profile } = useProfileStore();
+  const canUpload = !!profile && UPLOAD_ROLES.has(profile.role);
+
+  return (
+    <View style={{ flex: 1 }}>
+      <AppLayoutNav />
+      {/* Upload queue FAB — only mounted for roles that can upload videos.
+          Lives here (not root layout) so it never appears on auth/login screens,
+          and persists across course-builder & lesson-editor Stack pushes. */}
+      {canUpload && <UploadFAB />}
+    </View>
+  );
+}
