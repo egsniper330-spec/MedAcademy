@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useRef, useState } from 'react';
 import { AppState } from 'react-native';
-import { Session, RealtimeChannel } from '@supabase/supabase-js';
+import type { Session, RealtimeChannel } from '@/client/types';
 import * as SecureStore from 'expo-secure-store';
 
 import { supabase } from '@/client/supabase';

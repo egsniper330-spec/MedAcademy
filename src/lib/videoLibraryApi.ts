@@ -70,7 +70,7 @@ export async function getMyVideoLibrary(
   if (!data) return [];
 
   // Attach lesson_count via a separate aggregation query
-  const assetIds = data.map((a) => a.id);
+  const assetIds = data.map((a: { id: string }) => a.id);
   if (assetIds.length === 0) return data as VideoAsset[];
 
   const { data: counts } = await supabase

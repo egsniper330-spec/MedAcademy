@@ -215,7 +215,6 @@ function permissionLabel(type: PermissionType): string {
   switch (type) {
     case 'camera':        return 'Camera';
     case 'mediaLibrary':  return 'Photo Library';
-    case 'video':         return 'Video Library';
     case 'notifications': return 'Notifications';
     case 'microphone':    return 'Microphone';
   }
@@ -231,10 +230,6 @@ function PermissionIcon({ type, color }: { type: PermissionType; color: string }
     case 'mediaLibrary': {
       const { ImageIcon } = require('lucide-react-native');
       return <ImageIcon size={34} color={color} />;
-    }
-    case 'video': {
-      const { Video } = require('lucide-react-native');
-      return <Video size={34} color={color} />;
     }
     case 'notifications': {
       const { Bell } = require('lucide-react-native');

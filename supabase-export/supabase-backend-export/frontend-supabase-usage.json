@@ -1,0 +1,229 @@
+{
+  "generated": "2026-07-13",
+  "project": "MedAcademy (Expo React Native)",
+  "supabase_client_file": "src/lib/supabase.ts",
+  "api_module": "src/lib/api.ts",
+  "env_vars": [
+    {
+      "name": "EXPO_PUBLIC_SUPABASE_URL",
+      "value_exportable": true,
+      "used_in": [
+        "src/lib/api.ts",
+        "src/lib/medo-guard.ts"
+      ]
+    },
+    {
+      "name": "EXPO_PUBLIC_SUPABASE_ANON_KEY",
+      "value_exportable": true,
+      "used_in": [
+        "src/lib/api.ts"
+      ]
+    },
+    {
+      "name": "EXPO_PUBLIC_APP_ID",
+      "value_exportable": true,
+      "value": "medacademy",
+      "used_in": [
+        "src/lib/backend/supabase-adapter.ts"
+      ]
+    },
+    {
+      "name": "EXPO_PUBLIC_APP_SCHEME",
+      "value_exportable": true,
+      "value": "medacademy",
+      "used_in": [
+        "app config"
+      ]
+    }
+  ],
+  "auth_methods_used": [
+    "signInWithPassword",
+    "signUp",
+    "signOut",
+    "getSession",
+    "getUser",
+    "onAuthStateChange",
+    "refreshSession",
+    "resetPasswordForEmail",
+    "setSession",
+    "updateUser",
+    "verifyOtp",
+    "signInWithOAuth"
+  ],
+  "tables_queried_from_frontend": [
+    "academic_levels",
+    "activation_codes",
+    "activation_codes_summary",
+    "activation_ledger_view",
+    "analytics_events",
+    "app_branding",
+    "app_pages",
+    "audit_logs",
+    "categories",
+    "code_batches",
+    "content_protection_policies",
+    "content_protection_violations",
+    "course_lifecycle_logs",
+    "courses",
+    "course_templates",
+    "crash_logs",
+    "credit_daily_stats",
+    "credit_ledger_view",
+    "credits",
+    "credits_summary",
+    "credit_transactions",
+    "devices",
+    "device_stats",
+    "doctor_credit_summary",
+    "doctor_earnings_events",
+    "doctor_earnings_transactions",
+    "doctor_payout_requests",
+    "doctor_pricing_history",
+    "enrollments",
+    "faculties",
+    "feature_flags",
+    "fraud_flags",
+    "lesson_materials",
+    "lesson_progress",
+    "lessons",
+    "maintenance_whitelist",
+    "notifications",
+    "platform_earnings_resets",
+    "profiles",
+    "revenue_analytics",
+    "sections",
+    "security_events",
+    "security_policies",
+    "security_vpn_whitelist",
+    "support_settings",
+    "system_config",
+    "universities",
+    "upload_audit_logs",
+    "upload_sessions",
+    "video_assets",
+    "video_daily_health_reports",
+    "video_health_alerts",
+    "video_provider_config",
+    "video_providers",
+    "video_uploads"
+  ],
+  "storage_buckets_accessed": [
+    "course-images",
+    "lesson-materials",
+    "user-avatars"
+  ],
+  "rpcs_called_from_frontend": [
+    "admin_reset_violations",
+    "archive_course",
+    "create_course_audited",
+    "duplicate_course",
+    "get_archive_analytics",
+    "get_archived_courses",
+    "get_chunk_upload_state",
+    "get_course_delete_stats",
+    "get_course_progress",
+    "get_deletion_stats",
+    "get_doctor_activity_stats",
+    "get_doctor_credit_transactions",
+    "get_doctor_earnings_dashboard",
+    "get_doctor_student_profile",
+    "get_doctor_students",
+    "get_email_by_phone",
+    "get_enum_values_bulk",
+    "get_lesson_video_state",
+    "get_my_credits_balance",
+    "get_orphan_deletion_records",
+    "get_risky_devices",
+    "get_security_stats",
+    "get_security_version",
+    "get_teacher_provider_permissions",
+    "get_trash_list",
+    "get_trash_stats",
+    "get_user_activity",
+    "get_user_profile_summary",
+    "get_video_asset_usage",
+    "grant_course_access",
+    "lookup_user_by_identifier",
+    "mark_deletion_repaired",
+    "mark_lesson_video_missing",
+    "permanently_delete_course",
+    "pre_login_device_check",
+    "publish_course",
+    "recalculate_doctor_earnings",
+    "recover_stale_upload_sessions",
+    "redeem_activation_code",
+    "remove_course_enrollment",
+    "remove_student_and_record_earnings",
+    "reset_doctor_earnings",
+    "reset_platform_earnings",
+    "reset_user_password_by_admin",
+    "restore_course",
+    "run_db_audit",
+    "search_audit_logs",
+    "set_doctor_credit_price",
+    "set_enrollment_assigned_price",
+    "set_user_role",
+    "set_user_status",
+    "unpublish_course",
+    "update_course_audited",
+    "upsert_teacher_provider_permission",
+    "write_audit_log"
+  ],
+  "edge_functions_invoked": [
+    "admin-doctor-earnings",
+    "admin-enrollment",
+    "admin-update-email",
+    "block-user",
+    "device-binding",
+    "get-security-config",
+    "get-security-version",
+    "get-signed-url",
+    "impersonate",
+    "process-violation",
+    "provider-health",
+    "restore-account",
+    "security-logger",
+    "student-operations",
+    "system-health",
+    "vdocipher-otp",
+    "verify-app-integrity",
+    "verify-play-integrity",
+    "video-health-scan"
+  ],
+  "direct_edge_function_http_calls": [
+    {
+      "function": "video-upload-chunk",
+      "url_pattern": "${EXPO_PUBLIC_SUPABASE_URL}/functions/v1/video-upload-chunk",
+      "method": "POST",
+      "source": "src/lib/api.ts:2397"
+    }
+  ],
+  "realtime_subscriptions": [
+    {
+      "table": "notifications",
+      "event": "INSERT",
+      "purpose": "Live notification delivery"
+    },
+    {
+      "table": "video_uploads",
+      "event": "UPDATE",
+      "purpose": "Video processing status updates"
+    },
+    {
+      "table": "upload_sessions",
+      "event": "UPDATE",
+      "purpose": "Upload progress tracking"
+    }
+  ],
+  "key_source_files": [
+    "src/lib/api.ts \u2014 main Supabase API layer (2500+ lines)",
+    "src/lib/supabase.ts \u2014 client initialization",
+    "src/lib/backend/supabase-adapter.ts \u2014 backend adapter",
+    "src/lib/medo-guard.ts \u2014 URL/project validation guard",
+    "src/lib/security.ts \u2014 client-side security checks",
+    "src/lib/securityConfigService.ts \u2014 fetch + cache security config",
+    "src/lib/useContentProtection.ts \u2014 screenshot/recording hooks",
+    "src/lib/videoUploadEngine.ts \u2014 chunked video upload engine",
+    "src/lib/useScreenCapture.ts \u2014 screen capture detection"
+  ]
+}

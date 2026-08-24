@@ -856,10 +856,13 @@ export default function AdminCodes() {
     setAssigning(true); setAssignError('');
     try {
       const { data: { session } } = await supabase.auth.getSession();
-      const res = await fetch(`${process.env.EXPO_PUBLIC_SUPABASE_URL}/functions/v1/activation-codes`, {
+      const API_BASE =
+        process.env.EXPO_PUBLIC_PHP_API_URL ||
+        process.env.EXPO_PUBLIC_SUPABASE_URL?.replace(/\/?$/, '/backend/public/index.php') || '';
+      const res = await fetch(`${API_BASE}/activation-codes/assign`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session?.access_token}` },
-        body: JSON.stringify({ action: 'assign', target_user_id: assignTarget.id, course_id: assignCourse }),
+        body: JSON.stringify({ target_user_id: assignTarget.id, course_id: assignCourse }),
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error ?? 'Failed to assign code.');

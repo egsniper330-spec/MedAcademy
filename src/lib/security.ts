@@ -245,7 +245,7 @@ async function getVpnWhitelist(): Promise<string[]> {
   if (vpnWhitelist.length && Date.now() < vpnWhitelistExpiry) return vpnWhitelist;
   try {
     const { data } = await supabase.from('security_vpn_whitelist').select('name');
-    vpnWhitelist = (data ?? []).map((r) => r.name.toLowerCase());
+    vpnWhitelist = (data ?? []).map((r: { name: string }) => r.name.toLowerCase());
     vpnWhitelistExpiry = Date.now() + POLICY_TTL_MS;
     return vpnWhitelist;
   } catch {
@@ -618,12 +618,13 @@ async function detectSSLPinning(): Promise<SecurityThreat | null> {
       return null;
     }
 
-    // Step 2: probe the Supabase REST API — the native pinner validates this TLS connection.
-    // Use the health endpoint (no auth required, tiny response).
-    const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL ?? '';
-    if (!supabaseUrl) return null; // misconfigured — skip
+    // Step 2: probe the PHP backend API — the native pinner validates this TLS connection.
+    // Use the base URL (no auth required, tiny response).
+    const phpApiUrl = process.env.EXPO_PUBLIC_PHP_API_URL ||
+      (process.env.EXPO_PUBLIC_SUPABASE_URL ?? '').replace(/\/?$/, '/backend/public/index.php');
+    if (!phpApiUrl) return null; // misconfigured — skip
 
-    const probeUrl = `${supabaseUrl}/rest/v1/?apikey=${process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? ''}`;
+    const probeUrl = phpApiUrl;
 
     let probeOk = false;
     try {

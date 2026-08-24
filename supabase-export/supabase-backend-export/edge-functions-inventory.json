@@ -1,0 +1,744 @@
+{
+  "generated": "2026-07-13",
+  "runtime": "Deno (Supabase Edge Runtime)",
+  "total": 42,
+  "shared_modules": [
+    "auth.ts",
+    "enums.ts",
+    "phone.ts",
+    "provider-check.ts"
+  ],
+  "functions": [
+    {
+      "name": "admin-doctor-earnings",
+      "method": "POST",
+      "auth": "required",
+      "role": "admin",
+      "purpose": "Admin manages doctor earnings \u2014 view, reset, adjust",
+      "tables": [
+        "doctor_earnings_events",
+        "doctor_earnings_transactions",
+        "profiles",
+        "credits"
+      ],
+      "env": [
+        "SUPABASE_URL",
+        "SERVICE_ROLE_KEY"
+      ],
+      "called_from": "frontend invoke"
+    },
+    {
+      "name": "admin-enrollment",
+      "method": "POST",
+      "auth": "required",
+      "role": "admin",
+      "purpose": "Admin enroll/unenroll students in courses",
+      "tables": [
+        "enrollments",
+        "credits",
+        "credit_transactions",
+        "audit_logs"
+      ],
+      "env": [
+        "SUPABASE_URL",
+        "SERVICE_ROLE_KEY"
+      ],
+      "called_from": "frontend invoke"
+    },
+    {
+      "name": "admin-update-email",
+      "method": "POST",
+      "auth": "required",
+      "role": "admin",
+      "purpose": "Admin changes user email address",
+      "tables": [
+        "profiles",
+        "audit_logs"
+      ],
+      "env": [
+        "SUPABASE_URL",
+        "SERVICE_ROLE_KEY"
+      ],
+      "called_from": "frontend invoke"
+    },
+    {
+      "name": "block-user",
+      "method": "POST",
+      "auth": "required",
+      "role": "admin",
+      "purpose": "Block/unblock a user account",
+      "tables": [
+        "profiles",
+        "devices",
+        "audit_logs"
+      ],
+      "env": [
+        "SUPABASE_URL",
+        "SERVICE_ROLE_KEY"
+      ],
+      "called_from": "frontend invoke"
+    },
+    {
+      "name": "bootstrap-super-admin",
+      "method": "POST",
+      "auth": "none",
+      "role": "none",
+      "purpose": "One-time super-admin bootstrap (requires BOOTSTRAP_SECRET)",
+      "tables": [
+        "profiles",
+        "auth.users"
+      ],
+      "env": [
+        "SUPABASE_URL",
+        "SUPABASE_SERVICE_ROLE_KEY",
+        "BOOTSTRAP_SECRET"
+      ],
+      "called_from": "one-time setup"
+    },
+    {
+      "name": "bulk-user-ops",
+      "method": "POST",
+      "auth": "required",
+      "role": "admin",
+      "purpose": "Bulk user operations: suspend, restore, reset password, delete",
+      "tables": [
+        "profiles",
+        "devices",
+        "audit_logs"
+      ],
+      "env": [
+        "SUPABASE_URL",
+        "SERVICE_ROLE_KEY",
+        "SITE_URL"
+      ],
+      "called_from": "admin panel"
+    },
+    {
+      "name": "delete-course",
+      "method": "DELETE",
+      "auth": "required",
+      "role": "doctor/admin",
+      "purpose": "Delete course and associated VdoCipher videos",
+      "tables": [
+        "courses",
+        "lessons",
+        "video_uploads",
+        "video_assets"
+      ],
+      "env": [
+        "SUPABASE_URL",
+        "SERVICE_ROLE_KEY",
+        "VDOCIPHER_API_SECRET"
+      ],
+      "called_from": "doctor/admin panel"
+    },
+    {
+      "name": "delete-lesson",
+      "method": "DELETE",
+      "auth": "required",
+      "role": "doctor/admin",
+      "purpose": "Delete lesson and its VdoCipher video",
+      "tables": [
+        "lessons",
+        "video_uploads",
+        "video_assets"
+      ],
+      "env": [
+        "SUPABASE_URL",
+        "SERVICE_ROLE_KEY",
+        "VDOCIPHER_API_SECRET"
+      ],
+      "called_from": "doctor/admin panel"
+    },
+    {
+      "name": "delete-user",
+      "method": "DELETE",
+      "auth": "required",
+      "role": "admin",
+      "purpose": "Permanently delete user, their data, and VdoCipher videos",
+      "tables": [
+        "profiles",
+        "devices",
+        "enrollments",
+        "credits",
+        "video_uploads",
+        "audit_logs"
+      ],
+      "env": [
+        "SUPABASE_URL",
+        "SERVICE_ROLE_KEY",
+        "VDOCIPHER_API_SECRET"
+      ],
+      "called_from": "admin panel"
+    },
+    {
+      "name": "device-binding",
+      "method": "POST",
+      "auth": "required",
+      "role": "authenticated",
+      "purpose": "Register/verify/update device binding for current user",
+      "tables": [
+        "devices",
+        "profiles",
+        "security_events"
+      ],
+      "env": [
+        "SUPABASE_URL",
+        "SERVICE_ROLE_KEY"
+      ],
+      "called_from": "frontend invoke (login)"
+    },
+    {
+      "name": "get-security-config",
+      "method": "GET",
+      "auth": "required",
+      "role": "authenticated",
+      "purpose": "Return current security policy config for client",
+      "tables": [
+        "security_policies",
+        "content_protection_policies",
+        "system_config"
+      ],
+      "env": [
+        "SUPABASE_URL",
+        "SERVICE_ROLE_KEY"
+      ],
+      "called_from": "frontend (startup)"
+    },
+    {
+      "name": "get-security-version",
+      "method": "GET",
+      "auth": "required",
+      "role": "authenticated",
+      "purpose": "Return version hash of security config",
+      "tables": [
+        "security_policies"
+      ],
+      "env": [
+        "SUPABASE_URL",
+        "SERVICE_ROLE_KEY"
+      ],
+      "called_from": "frontend invoke, RPC"
+    },
+    {
+      "name": "get-signed-url",
+      "method": "POST",
+      "auth": "required",
+      "role": "authenticated",
+      "purpose": "Generate signed storage URL for private files",
+      "tables": [],
+      "env": [
+        "SUPABASE_URL",
+        "SERVICE_ROLE_KEY"
+      ],
+      "called_from": "frontend invoke"
+    },
+    {
+      "name": "impersonate",
+      "method": "POST",
+      "auth": "required",
+      "role": "super_admin",
+      "purpose": "Generate impersonation session for a user",
+      "tables": [
+        "profiles",
+        "audit_logs"
+      ],
+      "env": [
+        "SUPABASE_URL",
+        "SERVICE_ROLE_KEY"
+      ],
+      "called_from": "admin panel"
+    },
+    {
+      "name": "process-violation",
+      "method": "POST",
+      "auth": "required",
+      "role": "authenticated",
+      "purpose": "Process content protection violation (screenshot/recording)",
+      "tables": [
+        "content_protection_violations",
+        "content_protection_policies",
+        "devices",
+        "audit_logs"
+      ],
+      "env": [
+        "SUPABASE_URL",
+        "SERVICE_ROLE_KEY"
+      ],
+      "called_from": "frontend invoke"
+    },
+    {
+      "name": "provider-health",
+      "method": "GET",
+      "auth": "required",
+      "role": "admin",
+      "purpose": "Check VdoCipher API health/connectivity",
+      "tables": [],
+      "env": [
+        "SUPABASE_URL",
+        "SERVICE_ROLE_KEY",
+        "VDOCIPHER_API_SECRET"
+      ],
+      "called_from": "admin panel"
+    },
+    {
+      "name": "restore-account",
+      "method": "POST",
+      "auth": "required",
+      "role": "admin",
+      "purpose": "Restore trashed/suspended user account",
+      "tables": [
+        "profiles",
+        "audit_logs"
+      ],
+      "env": [
+        "SUPABASE_URL",
+        "SERVICE_ROLE_KEY"
+      ],
+      "called_from": "admin panel"
+    },
+    {
+      "name": "security-logger",
+      "method": "POST",
+      "auth": "required",
+      "role": "authenticated",
+      "purpose": "Log security detection event from mobile client",
+      "tables": [
+        "security_events",
+        "devices",
+        "audit_logs"
+      ],
+      "env": [
+        "SUPABASE_URL",
+        "SERVICE_ROLE_KEY"
+      ],
+      "called_from": "frontend invoke"
+    },
+    {
+      "name": "student-operations",
+      "method": "POST",
+      "auth": "required",
+      "role": "doctor",
+      "purpose": "Doctor creates/assigns students and course access",
+      "tables": [
+        "profiles",
+        "enrollments",
+        "credits",
+        "audit_logs"
+      ],
+      "env": [
+        "SUPABASE_URL",
+        "SERVICE_ROLE_KEY"
+      ],
+      "called_from": "doctor panel"
+    },
+    {
+      "name": "system-health",
+      "method": "GET",
+      "auth": "required",
+      "role": "admin",
+      "purpose": "Run system-wide health checks (DB, VdoCipher, storage)",
+      "tables": [
+        "profiles",
+        "credits",
+        "enrollments",
+        "courses",
+        "video_uploads"
+      ],
+      "env": [
+        "SUPABASE_URL",
+        "SERVICE_ROLE_KEY"
+      ],
+      "called_from": "admin panel"
+    },
+    {
+      "name": "trash-cleanup",
+      "method": "POST",
+      "auth": "cron",
+      "role": "service",
+      "purpose": "Scheduled job: purge expired trashed users, clean stale sessions",
+      "tables": [
+        "profiles",
+        "upload_sessions",
+        "audit_logs"
+      ],
+      "env": [
+        "SUPABASE_URL",
+        "SERVICE_ROLE_KEY",
+        "CRON_SECRET"
+      ],
+      "schedule": "pg_cron daily",
+      "called_from": "pg_cron / pg_net"
+    },
+    {
+      "name": "trash-user",
+      "method": "POST",
+      "auth": "required",
+      "role": "admin",
+      "purpose": "Soft-delete (trash) a user account",
+      "tables": [
+        "profiles",
+        "audit_logs"
+      ],
+      "env": [
+        "SUPABASE_URL",
+        "SERVICE_ROLE_KEY"
+      ],
+      "called_from": "admin panel"
+    },
+    {
+      "name": "vdocipher-debug-creds",
+      "method": "GET",
+      "auth": "required",
+      "role": "super_admin",
+      "purpose": "Debug endpoint: verify VdoCipher credentials",
+      "tables": [],
+      "env": [
+        "SUPABASE_URL",
+        "SERVICE_ROLE_KEY",
+        "VDOCIPHER_API_SECRET"
+      ],
+      "called_from": "admin debug"
+    },
+    {
+      "name": "vdocipher-delete-video",
+      "method": "DELETE",
+      "auth": "required",
+      "role": "doctor/admin",
+      "purpose": "Delete a specific VdoCipher video by video_id",
+      "tables": [
+        "video_assets",
+        "video_uploads",
+        "lessons"
+      ],
+      "env": [
+        "SUPABASE_URL",
+        "SERVICE_ROLE_KEY",
+        "VDOCIPHER_API_SECRET"
+      ],
+      "called_from": "doctor panel, delete-lesson"
+    },
+    {
+      "name": "vdocipher-orphan-cleanup",
+      "method": "POST",
+      "auth": "required",
+      "role": "admin",
+      "purpose": "Delete VdoCipher videos not linked to any lesson",
+      "tables": [
+        "video_assets",
+        "video_uploads",
+        "lessons"
+      ],
+      "env": [
+        "SUPABASE_URL",
+        "SERVICE_ROLE_KEY",
+        "VDOCIPHER_API_SECRET"
+      ],
+      "called_from": "admin maintenance"
+    },
+    {
+      "name": "vdocipher-otp",
+      "method": "POST",
+      "auth": "required",
+      "role": "authenticated",
+      "purpose": "Generate VdoCipher OTP for video playback; handles VdoCipher webhooks",
+      "tables": [
+        "enrollments",
+        "lessons",
+        "video_uploads",
+        "security_events"
+      ],
+      "env": [
+        "SUPABASE_URL",
+        "SERVICE_ROLE_KEY",
+        "VDOCIPHER_API_SECRET",
+        "APP_DOMAIN",
+        "VDOCIPHER_WEBHOOK_SECRET"
+      ],
+      "external_api": "https://dev.vdocipher.com/api/videos/{id}/otp",
+      "called_from": "frontend invoke"
+    },
+    {
+      "name": "vdocipher-upload-init",
+      "method": "POST",
+      "auth": "required",
+      "role": "doctor",
+      "purpose": "Initialize VdoCipher upload, return upload credentials",
+      "tables": [
+        "video_uploads",
+        "upload_sessions"
+      ],
+      "env": [
+        "SUPABASE_URL",
+        "SERVICE_ROLE_KEY",
+        "VDOCIPHER_API_SECRET"
+      ],
+      "external_api": "https://dev.vdocipher.com/api/videos",
+      "called_from": "doctor upload flow"
+    },
+    {
+      "name": "vdocipher-upload-status",
+      "method": "GET",
+      "auth": "required",
+      "role": "doctor",
+      "purpose": "Poll VdoCipher video processing status",
+      "tables": [
+        "video_uploads",
+        "video_assets"
+      ],
+      "env": [
+        "SUPABASE_URL",
+        "SERVICE_ROLE_KEY",
+        "VDOCIPHER_API_SECRET"
+      ],
+      "external_api": "https://dev.vdocipher.com/api/videos/{id}",
+      "called_from": "doctor upload flow"
+    },
+    {
+      "name": "verify-app-integrity",
+      "method": "POST",
+      "auth": "required",
+      "role": "authenticated",
+      "purpose": "Verify iOS/Android app signature integrity",
+      "tables": [
+        "security_events",
+        "devices"
+      ],
+      "env": [
+        "SUPABASE_URL",
+        "SERVICE_ROLE_KEY"
+      ],
+      "called_from": "frontend invoke (startup)"
+    },
+    {
+      "name": "verify-play-integrity",
+      "method": "POST",
+      "auth": "required",
+      "role": "authenticated",
+      "purpose": "Verify Google Play Integrity API token",
+      "tables": [
+        "security_events",
+        "devices"
+      ],
+      "env": [
+        "SUPABASE_URL",
+        "SUPABASE_SERVICE_ROLE_KEY",
+        "GOOGLE_PLAY_INTEGRITY_DECRYPTION_KEY",
+        "GOOGLE_PLAY_INTEGRITY_VERIFICATION_KEY"
+      ],
+      "external_api": "Google Play Integrity API",
+      "called_from": "frontend invoke (Android)"
+    },
+    {
+      "name": "video-assemble-upload",
+      "method": "POST",
+      "auth": "required",
+      "role": "doctor",
+      "purpose": "Assemble multi-chunk video upload, finalize in storage+VdoCipher",
+      "tables": [
+        "upload_sessions",
+        "video_uploads",
+        "video_assets",
+        "lessons"
+      ],
+      "env": [
+        "SUPABASE_URL",
+        "SERVICE_ROLE_KEY",
+        "VDOCIPHER_API_SECRET"
+      ],
+      "called_from": "doctor upload flow"
+    },
+    {
+      "name": "video-daily-health",
+      "method": "POST",
+      "auth": "cron",
+      "role": "service",
+      "purpose": "Scheduled: check all VdoCipher videos health, write reports",
+      "tables": [
+        "video_daily_health_reports",
+        "video_health_alerts",
+        "lessons",
+        "video_assets"
+      ],
+      "env": [
+        "SUPABASE_URL",
+        "SERVICE_ROLE_KEY",
+        "VDOCIPHER_API_SECRET"
+      ],
+      "schedule": "pg_cron daily",
+      "called_from": "pg_cron"
+    },
+    {
+      "name": "video-health-scan",
+      "method": "POST",
+      "auth": "required",
+      "role": "admin",
+      "purpose": "On-demand full video health scan",
+      "tables": [
+        "video_daily_health_reports",
+        "video_health_alerts",
+        "lessons",
+        "video_assets"
+      ],
+      "env": [
+        "SUPABASE_URL",
+        "SERVICE_ROLE_KEY",
+        "VDOCIPHER_API_SECRET"
+      ],
+      "called_from": "frontend invoke"
+    },
+    {
+      "name": "video-upload-chunk",
+      "method": "POST",
+      "auth": "required",
+      "role": "doctor",
+      "purpose": "Upload a single chunk of a video file to Supabase storage",
+      "tables": [
+        "upload_sessions"
+      ],
+      "env": [
+        "SUPABASE_URL",
+        "SERVICE_ROLE_KEY",
+        "SUPABASE_ANON_KEY"
+      ],
+      "called_from": "direct HTTP (api.ts)"
+    },
+    {
+      "name": "activation-codes",
+      "method": "POST",
+      "auth": "required",
+      "role": "admin/doctor",
+      "purpose": "Full activation code lifecycle: create, batch_create, assign, deactivate, reactivate, delete_code, disable_batch, enable_batch, soft_delete_batch, clone_batch, bulk_delete, bulk_disable, bulk_enable",
+      "tables": [
+        "activation_codes",
+        "code_batches",
+        "fraud_flags",
+        "audit_logs",
+        "profiles"
+      ],
+      "env": [
+        "SUPABASE_URL",
+        "SERVICE_ROLE_KEY"
+      ],
+      "called_from": "admin panel"
+    },
+    {
+      "name": "auth-probe",
+      "method": "GET/POST",
+      "auth": "none",
+      "role": "diagnostic",
+      "purpose": "DIAGNOSTIC ONLY \u2014 tests Supabase Auth listUsers() and createUser() in isolation. Should be deleted after debugging.",
+      "tables": [],
+      "env": [
+        "SUPABASE_URL",
+        "SUPABASE_SERVICE_ROLE_KEY",
+        "SERVICE_ROLE_KEY"
+      ],
+      "called_from": "debug only"
+    },
+    {
+      "name": "change-password",
+      "method": "POST",
+      "auth": "required",
+      "role": "self/admin/super_admin",
+      "purpose": "Change own or another user's password. Bumps security_version, updates device last_active_at to prevent false device-limit errors after password change.",
+      "tables": [
+        "devices",
+        "audit_logs",
+        "profiles"
+      ],
+      "env": [
+        "SUPABASE_URL",
+        "SERVICE_ROLE_KEY"
+      ],
+      "called_from": "frontend invoke, admin panel"
+    },
+    {
+      "name": "credits",
+      "method": "POST",
+      "auth": "required",
+      "role": "admin",
+      "purpose": "Admin credit operations: allocate, refund, revoke (reverse), bulk ops. Fraud-flags large allocations (>500 credits).",
+      "tables": [
+        "credits",
+        "credit_transactions",
+        "fraud_flags",
+        "audit_logs",
+        "profiles"
+      ],
+      "env": [
+        "SUPABASE_URL",
+        "SERVICE_ROLE_KEY"
+      ],
+      "called_from": "admin panel"
+    },
+    {
+      "name": "upload-patch",
+      "method": "POST",
+      "auth": "none (or implicit)",
+      "role": "service",
+      "purpose": "Receives raw ZIP body, stores in patch-uploads storage bucket, returns 24-hour signed URL. Used for OTA patch delivery.",
+      "tables": [],
+      "storage_buckets": [
+        "patch-uploads"
+      ],
+      "env": [
+        "SUPABASE_URL",
+        "SUPABASE_SERVICE_ROLE_KEY"
+      ],
+      "called_from": "deployment/CI pipeline"
+    },
+    {
+      "name": "user-lookup",
+      "method": "POST",
+      "auth": "required",
+      "role": "doctor/admin/super_admin",
+      "purpose": "Universal user search by email, phone, user_id, or name. Used internally by credits, activation-codes, and admin search.",
+      "tables": [
+        "profiles"
+      ],
+      "env": [
+        "SUPABASE_URL",
+        "SERVICE_ROLE_KEY"
+      ],
+      "called_from": "admin panel, other edge fns"
+    },
+    {
+      "name": "user-management",
+      "method": "POST",
+      "auth": "required",
+      "role": "admin/super_admin",
+      "purpose": "Create users with any role (student, doctor, assistant, admin, super_admin). Role-gated: admins can create up to admin, only super_admin can create super_admin.",
+      "tables": [
+        "profiles",
+        "audit_logs",
+        "devices"
+      ],
+      "env": [
+        "SUPABASE_URL",
+        "SERVICE_ROLE_KEY"
+      ],
+      "called_from": "admin panel"
+    },
+    {
+      "name": "verify-app-integrity",
+      "method": "POST",
+      "auth": "required",
+      "role": "authenticated",
+      "purpose": "iOS DeviceCheck + Android Play Integrity app attestation. Source NOT on disk \u2014 deployed separately or removed. Frontend still invokes it.",
+      "tables": [
+        "security_events",
+        "devices"
+      ],
+      "env": [
+        "SUPABASE_URL",
+        "SERVICE_ROLE_KEY"
+      ],
+      "called_from": "frontend invoke (startup)",
+      "note": "NOT FOUND ON DISK \u2014 deployed independently or deleted from repo. Frontend in security.ts still invokes it."
+    }
+  ],
+  "additional_storage_buckets_discovered": [
+    "patch-uploads (used by upload-patch Edge Function)"
+  ]
+}

@@ -17,7 +17,9 @@
 import { supabaseAdapter } from './supabase-adapter';
 import type { BackendAdapter } from './types';
 
-// Active backend adapter — change this single line to switch providers
+// Active backend adapter — uses PHP backend via src/client/php.ts
+// The supabaseAdapter wraps the PHP client (exported as `supabase` from src/client/supabase.ts)
+// All calls route to the PHP REST API instead of Supabase.
 export const backend: BackendAdapter = supabaseAdapter;
 
 // Re-export types so consumers don't need to import from the types file

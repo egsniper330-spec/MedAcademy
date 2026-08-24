@@ -130,8 +130,8 @@ export default function ExportPanel() {
           .order('created_at', { ascending: false })
           .limit(2000);
         if (error) throw new Error(error.message);
-        return (data ?? []).map(r => {
-          const row = r as Record<string, unknown>;
+        return (data ?? []).map((r: Record<string, unknown>) => {
+          const row = r;
           return {
             ...row,
             old_values: row.old_values ? JSON.stringify(row.old_values) : '',
@@ -158,9 +158,9 @@ export default function ExportPanel() {
             .select('id, email, role, status, created_at')
             .eq('status', 'suspended').limit(500),
         ]);
-        const events  = (eventsRes.data  ?? []).map(r => ({ ...r as Record<string, unknown>, _type: 'security_event' }));
-        const devices = (devicesRes.data ?? []).map(r => ({ ...r as Record<string, unknown>, _type: 'blocked_device' }));
-        const accts   = (profilesRes.data ?? []).map(r => ({ ...r as Record<string, unknown>, _type: 'suspended_account' }));
+        const events  = (eventsRes.data  ?? []).map((r: Record<string, unknown>) => ({ ...r, _type: 'security_event' }));
+        const devices = (devicesRes.data ?? []).map((r: Record<string, unknown>) => ({ ...r, _type: 'blocked_device' }));
+        const accts   = (profilesRes.data ?? []).map((r: Record<string, unknown>) => ({ ...r, _type: 'suspended_account' }));
         return [...events, ...devices, ...accts];
       },
     },

@@ -1,0 +1,114 @@
+{
+  "generated": "2026-07-13",
+  "project": "MedAcademy",
+  "supabase_project": "xdvjwfuqipatkpimejcb",
+  "auth_users_summary": {
+    "total": 14,
+    "email_confirmed": 14,
+    "phone_confirmed": 11,
+    "banned": 1,
+    "active_last_30_days": 12,
+    "providers": {
+      "email": 13,
+      "phone": 1
+    }
+  },
+  "auth_configuration": {
+    "email_auth": {
+      "enabled": true,
+      "confirm_email": true,
+      "double_confirm_changes": true,
+      "secure_password_change": true,
+      "minimum_password_length": 6,
+      "password_requirements": "min 6 chars"
+    },
+    "phone_auth": {
+      "enabled": true,
+      "otp_length": 6,
+      "otp_expiry_seconds": 60,
+      "provider": "twilio_verify_or_supabase_default",
+      "sms_autoconfirm": false
+    },
+    "oauth_providers": {
+      "configured": [],
+      "note": "OAuth providers (Google, Apple) referenced in code via signInWithOAuth but NOT confirmed active in Supabase dashboard"
+    },
+    "jwt_configuration": {
+      "jwt_expiry_seconds": 3600,
+      "refresh_token_rotation": true,
+      "session_timebox_enabled": false,
+      "note": "Supabase manages JWT secret — NOT EXPORTABLE"
+    },
+    "signup_behavior": {
+      "signups_enabled": true,
+      "controlled_by_feature_flag": "registration (feature_flags table)",
+      "new_user_default_role": "student",
+      "profile_created_by": "handle_new_user() trigger on auth.users INSERT",
+      "credits_created_by": "handle_new_user() trigger on auth.users INSERT"
+    },
+    "email_templates": {
+      "note": "Supabase-managed — not exportable as files",
+      "types": ["confirmation","password_reset","magic_link","change_email"],
+      "custom_redirect_urls": ["https://medacademy.app/reset-password","${SITE_URL}/reset-password"]
+    },
+    "mfa": {
+      "totp_enabled": false,
+      "sms_enabled": false,
+      "note": "MFA NOT enabled in this project"
+    }
+  },
+  "user_profile_mapping": {
+    "description": "auth.users ↔ public.profiles is a strict 1:1 relationship",
+    "join_key": "auth.users.id = public.profiles.id",
+    "created_by": "TRIGGER on_auth_user_created → public.handle_new_user() fires on EVERY auth.users INSERT",
+    "handle_new_user_creates": [
+      "public.profiles row (id = auth.users.id, role = 'student', status = 'active')",
+      "public.credits row (user_id = auth.users.id, balance = 0)"
+    ],
+    "profile_columns_from_signup": ["full_name (from raw_user_meta_data)","phone","email"],
+    "role_management": "public.profiles.role — managed by admin RPCs set_user_role()",
+    "deletion_cascade": "ON DELETE CASCADE from auth.users → profiles, devices, enrollments, credits, notifications"
+  },
+  "auth_tables": {
+    "schema": "auth",
+    "tables": [
+      "users", "identities", "sessions", "refresh_tokens", "mfa_factors",
+      "mfa_amr_claims", "mfa_challenges", "audit_log_entries", "flow_state",
+      "one_time_tokens", "saml_providers", "saml_relay_states", "sso_domains",
+      "sso_providers", "instances", "schema_migrations"
+    ],
+    "exportable": false,
+    "reason": "Supabase-managed auth schema — not directly exportable. User records available via Supabase Dashboard or service_role API"
+  },
+  "password_export_status": {
+    "plaintext_passwords": "NOT EXPORTABLE — never stored in plaintext",
+    "password_hashes": "NOT ACCESSIBLE via SQL — stored in auth.users.encrypted_password using bcrypt format ($2a$10$...) but Supabase does NOT expose this column via the API or SQL editor",
+    "bcrypt_compatibility": "If hashes WERE accessible, the $2a$10$ bcrypt format IS compatible with PHP password_verify() — PHP's password_verify() supports $2a$, $2b$, $2y$ prefixes",
+    "migration_recommendation": "Users must reset passwords on migration OR use Supabase Admin API to export hashes if Supabase provides a data export feature in your plan"
+  },
+  "auth_triggers": [
+    {
+      "name": "on_auth_user_created",
+      "table": "auth.users",
+      "event": "INSERT",
+      "timing": "AFTER",
+      "function": "public.handle_new_user()",
+      "purpose": "Create public.profiles + public.credits row for every new auth user"
+    },
+    {
+      "name": "on_auth_user_deleted",
+      "table": "auth.users",
+      "event": "DELETE",
+      "timing": "AFTER",
+      "function": "public.handle_user_deleted()",
+      "purpose": "Cleanup hook — cascade deletes handled by FK ON DELETE CASCADE"
+    }
+  ],
+  "admin_auth_functions": [
+    "reset_user_password_by_admin() — SECURITY DEFINER RPC",
+    "admin-update-email — Edge Function (uses service_role to call auth.admin.updateUserById)",
+    "bootstrap-super-admin — Edge Function (creates initial admin via auth.admin.createUser)",
+    "bulk-user-ops — Edge Function (bulk password reset, uses auth.admin.generateLink)",
+    "impersonate — Edge Function (generates impersonation session token)"
+  ]
+}
