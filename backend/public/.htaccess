@@ -1,0 +1,22 @@
+# MedAcademy PHP API — front-controller rewrite (Apache / cPanel)
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+
+    # If the request is for a real file or directory (e.g. /storage/public/...),
+    # serve it directly; everything else goes to the front controller.
+    RewriteCond %{REQUEST_FILENAME} !-f
+    RewriteCond %{REQUEST_FILENAME} !-d
+    RewriteRule ^ index.php [QSA,L]
+</IfModule>
+
+# Never serve the app's own config, logs, or dotfiles
+<FilesMatch "^(\.env|\.env\.example|config\.php)$">
+    Require all denied
+</FilesMatch>
+
+# Basic hardening
+<IfModule mod_headers.c>
+    Header set X-Content-Type-Options "nosniff"
+    Header set X-Frame-Options "DENY"
+    Header set Referrer-Policy "no-referrer"
+</IfModule>

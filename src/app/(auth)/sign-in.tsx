@@ -144,10 +144,23 @@ export default function SignIn() {
         return;
       }
 
-      // Step 4: Create auth session (only after device check passes)
+      // Step 4: Create auth session (only after device check passes).
+      // Compute the device metadata ONCE here so the same fingerprint is sent
+      // at login and reused for the post-login device registration below.
+      const deviceMeta = {
+        installation_id:   installationId,
+        device_fingerprint: buildFingerprint(),
+        device_name:       [Device.modelName, Device.osName].filter(Boolean).join(' ') || 'Unknown Device',
+        platform:          process.env.EXPO_OS ?? 'unknown',
+        device_model:      Device.modelName    ?? undefined,
+        os:                Device.osName       ?? undefined,
+        os_version:        Device.osVersion    ?? undefined,
+        app_version:       Constants.expoConfig?.version ?? undefined,
+        manufacturer:      Device.manufacturer ?? undefined,
+      };
       _diag('signin-before', { email });
       const signInStart = Date.now();
-      const { data, error: authError } = await supabase.auth.signInWithPassword({ email, password });
+      const { data, error: authError } = await supabase.auth.signInWithPassword({ email, password, ...deviceMeta });
       const signInMs = Date.now() - signInStart;
       _diag('signin-after', { elapsedMs: signInMs, hasSession: !!data?.session });
       if (authError) _diagErr('signin-error', authError);
@@ -198,9 +211,8 @@ export default function SignIn() {
       }
 
       // Step 5: Register / update device record (now we have a valid session)
-      const platform    = process.env.EXPO_OS ?? 'unknown';
-      const fingerprint = buildFingerprint();
-      const deviceName  = [Device.modelName, Device.osName].filter(Boolean).join(' ') || 'Unknown Device';
+      // Reuse the exact same fingerprint/metadata that was sent at login.
+      const { platform, device_fingerprint: fingerprint, device_name: deviceName } = deviceMeta;
 
       _diag('register-device-before');
       try {
@@ -209,11 +221,11 @@ export default function SignIn() {
           installation_id: installationId,
           device_name:     deviceName,
           platform,
-          device_model:    Device.modelName    ?? undefined,
-          os:              Device.osName       ?? undefined,
-          os_version:      Device.osVersion    ?? undefined,
-          app_version:     Constants.expoConfig?.version ?? undefined,
-          manufacturer:    Device.manufacturer ?? undefined,
+          device_model:    deviceMeta.device_model,
+          os:              deviceMeta.os,
+          os_version:      deviceMeta.os_version,
+          app_version:     deviceMeta.app_version,
+          manufacturer:    deviceMeta.manufacturer,
         });
 
         if (result?.error) {

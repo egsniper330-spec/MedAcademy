@@ -7,137 +7,15 @@ env: export EXPO_PUBLIC_APP_ID EXPO_PUBLIC_APP_SCHEME EXPO_PUBLIC_SUPABASE_ANON_
 Starting project at D:\v3
 Starting Metro Bundler
 
-TypeScript: The tsconfig.json#include property has been updated
 Waiting on http://localhost:8081
 Logs for your project will appear below.
 Web node_modules\expo-router\entry.js ░░░░░░░░░░░░░░░░  0.0% (0/1)
-Web node_modules\expo-router\entry.js ▓▓▓▓▓▓▓▓▓▓░░░░░░ 68.1% (1218/1491)
-Web Bundled 6353ms node_modules\expo-router\entry.js (3890 modules)
+Web node_modules\expo-router\entry.js ▓▓▓▓▓▓▓▓░░░░░░░░ 53.2% (688/943)
+Web node_modules\expo-router\entry.js ▓▓▓▓▓▓▓▓▓▓▓░░░░░ 69.0% (1017/1224)
+Web node_modules\expo-router\entry.js ▓▓▓▓▓▓▓▓▓▓▓▓░░░░ 78.8% (1457/1663)
+Web node_modules\expo-router\entry.js ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓░ 99.9% (3803/3803)
+Web Bundled 14611ms node_modules\expo-router\entry.js (3803 modules)
  LOG  [web] Logs will appear in the browser console
 Web node_modules\expo-router\entry.js ░░░░░░░░░░░░░░░░  0.0% (0/1)
-Web Bundled 118ms node_modules\expo-router\entry.js (1 module)
- LOG  [web] Logs will appear in the browser console
- ERROR  SyntaxError: D:\v3\src\app\(app)\course\[id].tsx: Unexpected token, expected ":" (198:9)
-
-  196 |             </View>
-  197 |           </View>
-> 198 |         )}
-      |          ^
-  199 |
-  200 |         {/* Title + difficulty */}
-  201 |         <View style={{ gap: 8 }}>
-    at constructor (D:\v3\node_modules\@babel\parser\lib\index.js:365:19)
-    at TypeScriptParserMixin.raise (D:\v3\node_modules\@babel\parser\lib\index.js:6616:19)
-    at TypeScriptParserMixin.unexpected (D:\v3\node_modules\@babel\parser\lib\index.js:6636:16)
-    at TypeScriptParserMixin.expect (D:\v3\node_modules\@babel\parser\lib\index.js:6916:12)
-    at TypeScriptParserMixin.parseConditional (D:\v3\node_modules\@babel\parser\lib\index.js:10909:12)
-    at TypeScriptParserMixin.parseConditional (D:\v3\node_modules\@babel\parser\lib\index.js:9620:18)
-    at TypeScriptParserMixin.parseMaybeConditional (D:\v3\node_modules\@babel\parser\lib\index.js:10902:17)
-    at TypeScriptParserMixin.parseMaybeAssign (D:\v3\node_modules\@babel\parser\lib\index.js:10848:21)
-    at TypeScriptParserMixin.parseMaybeAssign (D:\v3\node_modules\@babel\parser\lib\index.js:9803:20)
-    at TypeScriptParserMixin.parseExpressionBase (D:\v3\node_modules\@babel\parser\lib\index.js:10801:23)
-    at D:\v3\node_modules\@babel\parser\lib\index.js:10797:39
-    at TypeScriptParserMixin.allowInAnd (D:\v3\node_modules\@babel\parser\lib\index.js:12443:12)
-    at TypeScriptParserMixin.parseExpression (D:\v3\node_modules\@babel\parser\lib\index.js:10797:17)
-    at TypeScriptParserMixin.jsxParseExpressionContainer (D:\v3\node_modules\@babel\parser\lib\index.js:4644:31)
-    at TypeScriptParserMixin.jsxParseElementAt (D:\v3\node_modules\@babel\parser\lib\index.js:4723:36)
-    at TypeScriptParserMixin.jsxParseElementAt (D:\v3\node_modules\@babel\parser\lib\index.js:4710:32)
-    at TypeScriptParserMixin.jsxParseElement (D:\v3\node_modules\@babel\parser\lib\index.js:4761:17)
-    at TypeScriptParserMixin.parseExprAtom (D:\v3\node_modules\@babel\parser\lib\index.js:4771:19)
-    at TypeScriptParserMixin.parseExprSubscripts (D:\v3\node_modules\@babel\parser\lib\index.js:11098:23)
-    at TypeScriptParserMixin.parseUpdate (D:\v3\node_modules\@babel\parser\lib\index.js:11083:21)
-    at TypeScriptParserMixin.parseMaybeUnary (D:\v3\node_modules\@babel\parser\lib\index.js:11063:23)
-    at TypeScriptParserMixin.parseMaybeUnary (D:\v3\node_modules\@babel\parser\lib\index.js:9854:18)
-    at TypeScriptParserMixin.parseMaybeUnaryOrPrivate (D:\v3\node_modules\@babel\parser\lib\index.js:10916:61)
-    at TypeScriptParserMixin.parseExprOps (D:\v3\node_modules\@babel\parser\lib\index.js:10921:23)
-    at TypeScriptParserMixin.parseMaybeConditional (D:\v3\node_modules\@babel\parser\lib\index.js:10898:23)
-    at TypeScriptParserMixin.parseMaybeAssign (D:\v3\node_modules\@babel\parser\lib\index.js:10848:21)
-    at D:\v3\node_modules\@babel\parser\lib\index.js:9792:39
-    at TypeScriptParserMixin.tryParse (D:\v3\node_modules\@babel\parser\lib\index.js:6924:20)
-    at TypeScriptParserMixin.parseMaybeAssign (D:\v3\node_modules\@babel\parser\lib\index.js:9792:18)
-    at D:\v3\node_modules\@babel\parser\lib\index.js:10817:39
-    at TypeScriptParserMixin.allowInAnd (D:\v3\node_modules\@babel\parser\lib\index.js:12443:12)
-    at TypeScriptParserMixin.parseMaybeAssignAllowIn (D:\v3\node_modules\@babel\parser\lib\index.js:10817:17)
-    at TypeScriptParserMixin.parseMaybeAssignAllowInOrVoidPattern (D:\v3\node_modules\@babel\parser\lib\index.js:12510:17)
-    at TypeScriptParserMixin.parseParenAndDistinguishExpression (D:\v3\node_modules\@babel\parser\lib\index.js:11692:28)
-    at TypeScriptParserMixin.parseExprAtom (D:\v3\node_modules\@babel\parser\lib\index.js:11348:23)
-    at TypeScriptParserMixin.parseExprAtom (D:\v3\node_modules\@babel\parser\lib\index.js:4776:20)
-    at TypeScriptParserMixin.parseExprSubscripts (D:\v3\node_modules\@babel\parser\lib\index.js:11098:23)
-    at TypeScriptParserMixin.parseUpdate (D:\v3\node_modules\@babel\parser\lib\index.js:11083:21)
-    at TypeScriptParserMixin.parseMaybeUnary (D:\v3\node_modules\@babel\parser\lib\index.js:11063:23)
-    at TypeScriptParserMixin.parseMaybeUnary (D:\v3\node_modules\@babel\parser\lib\index.js:9854:18)
-    at TypeScriptParserMixin.parseMaybeUnaryOrPrivate (D:\v3\node_modules\@babel\parser\lib\index.js:10916:61)
-    at TypeScriptParserMixin.parseExprOps (D:\v3\node_modules\@babel\parser\lib\index.js:10921:23)
-    at TypeScriptParserMixin.parseMaybeConditional (D:\v3\node_modules\@babel\parser\lib\index.js:10898:23)
-    at TypeScriptParserMixin.parseMaybeAssign (D:\v3\node_modules\@babel\parser\lib\index.js:10848:21)
-    at TypeScriptParserMixin.parseMaybeAssign (D:\v3\node_modules\@babel\parser\lib\index.js:9803:20)
-    at D:\v3\node_modules\@babel\parser\lib\index.js:10817:39
-    at TypeScriptParserMixin.allowInAnd (D:\v3\node_modules\@babel\parser\lib\index.js:12438:16)
-    at TypeScriptParserMixin.parseMaybeAssignAllowIn (D:\v3\node_modules\@babel\parser\lib\index.js:10817:17)
-    at TypeScriptParserMixin.parseVar (D:\v3\node_modules\@babel\parser\lib\index.js:13401:91)
-    at TypeScriptParserMixin.parseVarStatement (D:\v3\node_modules\@babel\parser\lib\index.js:13247:10)
- ERROR  SyntaxError: D:\v3\src\app\(app)\course\[id].tsx: Unexpected token, expected ":" (319:9)
-
-  317 |             </Text>
-  318 |           </NeuCard>
-> 319 |         )}
-      |          ^
-  320 |
-  321 |         {/* Course features */}
-  322 |         <NeuCard style={{ gap: 10 }}>
-    at constructor (D:\v3\node_modules\@babel\parser\lib\index.js:365:19)
-    at TypeScriptParserMixin.raise (D:\v3\node_modules\@babel\parser\lib\index.js:6616:19)
-    at TypeScriptParserMixin.unexpected (D:\v3\node_modules\@babel\parser\lib\index.js:6636:16)
-    at TypeScriptParserMixin.expect (D:\v3\node_modules\@babel\parser\lib\index.js:6916:12)
-    at TypeScriptParserMixin.parseConditional (D:\v3\node_modules\@babel\parser\lib\index.js:10909:12)
-    at TypeScriptParserMixin.parseConditional (D:\v3\node_modules\@babel\parser\lib\index.js:9620:18)
-    at TypeScriptParserMixin.parseMaybeConditional (D:\v3\node_modules\@babel\parser\lib\index.js:10902:17)
-    at TypeScriptParserMixin.parseMaybeAssign (D:\v3\node_modules\@babel\parser\lib\index.js:10848:21)
-    at TypeScriptParserMixin.parseMaybeAssign (D:\v3\node_modules\@babel\parser\lib\index.js:9803:20)
-    at TypeScriptParserMixin.parseExpressionBase (D:\v3\node_modules\@babel\parser\lib\index.js:10801:23)
-    at D:\v3\node_modules\@babel\parser\lib\index.js:10797:39
-    at TypeScriptParserMixin.allowInAnd (D:\v3\node_modules\@babel\parser\lib\index.js:12443:12)
-    at TypeScriptParserMixin.parseExpression (D:\v3\node_modules\@babel\parser\lib\index.js:10797:17)
-    at TypeScriptParserMixin.jsxParseExpressionContainer (D:\v3\node_modules\@babel\parser\lib\index.js:4644:31)
-    at TypeScriptParserMixin.jsxParseElementAt (D:\v3\node_modules\@babel\parser\lib\index.js:4723:36)
-    at TypeScriptParserMixin.jsxParseElementAt (D:\v3\node_modules\@babel\parser\lib\index.js:4710:32)
-    at TypeScriptParserMixin.jsxParseElement (D:\v3\node_modules\@babel\parser\lib\index.js:4761:17)
-    at TypeScriptParserMixin.parseExprAtom (D:\v3\node_modules\@babel\parser\lib\index.js:4771:19)
-    at TypeScriptParserMixin.parseExprSubscripts (D:\v3\node_modules\@babel\parser\lib\index.js:11098:23)
-    at TypeScriptParserMixin.parseUpdate (D:\v3\node_modules\@babel\parser\lib\index.js:11083:21)
-    at TypeScriptParserMixin.parseMaybeUnary (D:\v3\node_modules\@babel\parser\lib\index.js:11063:23)
-    at TypeScriptParserMixin.parseMaybeUnary (D:\v3\node_modules\@babel\parser\lib\index.js:9854:18)
-    at TypeScriptParserMixin.parseMaybeUnaryOrPrivate (D:\v3\node_modules\@babel\parser\lib\index.js:10916:61)
-    at TypeScriptParserMixin.parseExprOps (D:\v3\node_modules\@babel\parser\lib\index.js:10921:23)
-    at TypeScriptParserMixin.parseMaybeConditional (D:\v3\node_modules\@babel\parser\lib\index.js:10898:23)
-    at TypeScriptParserMixin.parseMaybeAssign (D:\v3\node_modules\@babel\parser\lib\index.js:10848:21)
-    at D:\v3\node_modules\@babel\parser\lib\index.js:9792:39
-    at TypeScriptParserMixin.tryParse (D:\v3\node_modules\@babel\parser\lib\index.js:6924:20)
-    at TypeScriptParserMixin.parseMaybeAssign (D:\v3\node_modules\@babel\parser\lib\index.js:9792:18)
-    at D:\v3\node_modules\@babel\parser\lib\index.js:10817:39
-    at TypeScriptParserMixin.allowInAnd (D:\v3\node_modules\@babel\parser\lib\index.js:12443:12)
-    at TypeScriptParserMixin.parseMaybeAssignAllowIn (D:\v3\node_modules\@babel\parser\lib\index.js:10817:17)
-    at TypeScriptParserMixin.parseMaybeAssignAllowInOrVoidPattern (D:\v3\node_modules\@babel\parser\lib\index.js:12510:17)
-    at TypeScriptParserMixin.parseParenAndDistinguishExpression (D:\v3\node_modules\@babel\parser\lib\index.js:11692:28)
-    at TypeScriptParserMixin.parseExprAtom (D:\v3\node_modules\@babel\parser\lib\index.js:11348:23)
-    at TypeScriptParserMixin.parseExprAtom (D:\v3\node_modules\@babel\parser\lib\index.js:4776:20)
-    at TypeScriptParserMixin.parseExprSubscripts (D:\v3\node_modules\@babel\parser\lib\index.js:11098:23)
-    at TypeScriptParserMixin.parseUpdate (D:\v3\node_modules\@babel\parser\lib\index.js:11083:21)
-    at TypeScriptParserMixin.parseMaybeUnary (D:\v3\node_modules\@babel\parser\lib\index.js:11063:23)
-    at TypeScriptParserMixin.parseMaybeUnary (D:\v3\node_modules\@babel\parser\lib\index.js:9854:18)
-    at TypeScriptParserMixin.parseMaybeUnaryOrPrivate (D:\v3\node_modules\@babel\parser\lib\index.js:10916:61)
-    at TypeScriptParserMixin.parseExprOps (D:\v3\node_modules\@babel\parser\lib\index.js:10921:23)
-    at TypeScriptParserMixin.parseMaybeConditional (D:\v3\node_modules\@babel\parser\lib\index.js:10898:23)
-    at TypeScriptParserMixin.parseMaybeAssign (D:\v3\node_modules\@babel\parser\lib\index.js:10848:21)
-    at TypeScriptParserMixin.parseMaybeAssign (D:\v3\node_modules\@babel\parser\lib\index.js:9803:20)
-    at D:\v3\node_modules\@babel\parser\lib\index.js:10817:39
-    at TypeScriptParserMixin.allowInAnd (D:\v3\node_modules\@babel\parser\lib\index.js:12438:16)
-    at TypeScriptParserMixin.parseMaybeAssignAllowIn (D:\v3\node_modules\@babel\parser\lib\index.js:10817:17)
-    at TypeScriptParserMixin.parseVar (D:\v3\node_modules\@babel\parser\lib\index.js:13401:91)
-    at TypeScriptParserMixin.parseVarStatement (D:\v3\node_modules\@babel\parser\lib\index.js:13247:10)
-Web node_modules\expo-router\entry.js ░░░░░░░░░░░░░░░░  0.0% (0/1)
-Web Bundled 185ms node_modules\expo-router\entry.js (1 module)
- LOG  [web] Logs will appear in the browser console
-Web node_modules\expo-router\entry.js ░░░░░░░░░░░░░░░░  0.0% (0/1)
-Web Bundled 197ms node_modules\expo-router\entry.js (1 module)
+Web Bundled 356ms node_modules\expo-router\entry.js (1 module)
  LOG  [web] Logs will appear in the browser console

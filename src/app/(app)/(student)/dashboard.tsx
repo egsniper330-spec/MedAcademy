@@ -55,8 +55,12 @@ export default function StudentDashboard() {
   const [filters, setFilters] = useState<FilterState>({ category: null, teacher: null, priceType: 'all' });
 
   const loadData = useCallback(async () => {
-    if (!profile) return;
+    // The guard lives INSIDE try so `setLoading(false)` always runs: if the
+    // profile store is empty (e.g. the profile fetch failed non-fatally), the
+    // screen must still exit the loading state and render the empty states
+    // instead of spinning forever.
     try {
+      if (!profile) { setLoading(false); return; }
       const [subs, count, courses, cats] = await Promise.all([
         getMySubscriptions(profile.id),
         getUnreadNotificationCount(profile.id),

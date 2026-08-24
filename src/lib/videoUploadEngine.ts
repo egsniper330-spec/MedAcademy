@@ -483,7 +483,7 @@ export async function getDoctorStorageStats(doctorId: string): Promise<DoctorSto
   if (!data || data.length === 0) {
     return { totalVideos: 0, totalBytes: 0, avgFileSizeBytes: 0, largestFileSizeBytes: 0, largestFileName: '' };
   }
-  const totalBytes = data.reduce((s, r: any) => s + (r.file_size ?? 0), 0);
+  const totalBytes = data.reduce((s: number, r: { file_size: number | null }) => s + (r.file_size ?? 0), 0);
   const largest = data.reduce((a: any, b: any) => (b.file_size > a.file_size ? b : a), data[0] as any);
   return {
     totalVideos: data.length,

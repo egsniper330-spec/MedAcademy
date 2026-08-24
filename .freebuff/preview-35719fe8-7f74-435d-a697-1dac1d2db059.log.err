@@ -31,3 +31,4 @@ The following packages should be updated for best compatibility with the install
   react-native-worklets@0.7.2 - expected version: 0.7.4
   @expo/metro-runtime@55.0.11 - expected version: ~55.0.12
 Your project may not work correctly until you install the expected versions of the packages.
+^C

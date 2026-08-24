@@ -51,46 +51,11 @@ export async function invokeEdgeFunction<T = unknown>(
   const headers: Record<string, string> = {};
   if (idempotencyKey) headers['x-idempotency-key'] = idempotencyKey;
 
-  // For GET requests build a query-string URL via raw fetch (supabase-js always POSTs).
+  // Route ALL requests through the PHP backend client (POST and GET)
   if (method === 'GET') {
-    const qs = new URLSearchParams(
-      Object.entries(body).reduce<Record<string, string>>((acc, [k, v]) => {
-        if (v !== undefined && v !== null) acc[k] = String(v);
-        return acc;
-      }, {})
-    ).toString();
-    const { data: { session } } = await supabase.auth.getSession();
-    const url = `${process.env.EXPO_PUBLIC_SUPABASE_URL}/functions/v1/${name}?${qs}`;
-    // Use globalThis.fetch (medo-guard-patched) — same reference used by
-    // the supabase client — to avoid iOS JSC bare-fetch resolution issues.
-    const res = await globalThis.fetch(url, {
-      method: 'GET',
-      headers: {
-        Authorization: `Bearer ${session?.access_token ?? ''}`,
-        apikey: process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? '',
-        ...headers,
-      },
-    });
-    const text = await res.text();
-    let parsed: T;
-    try { parsed = JSON.parse(text); } catch { throw new Error(text || `HTTP ${res.status}`); }
-    if (!res.ok) {
-      const e = parsed as { message?: string; error?: string; code?: string };
-      throw new Error(e.message ?? e.error ?? e.code ?? `HTTP ${res.status}`);
-    }
-    if (parsed && typeof parsed === 'object') {
-      const d = parsed as Record<string, unknown>;
-      if ('error' in d && typeof d.error === 'string' && d.error) {
-        throw new Error(d.error);
-      }
-      if (d.success === false) {
-        const errMsg = (typeof d.message === 'string' && d.message)
-          || (typeof d.code === 'string' && d.code)
-          || 'Operation failed';
-        throw new Error(errMsg);
-      }
-    }
-    return parsed;
+    const { data, error } = await supabase.functions.invoke<T>(name, { body, method: 'GET', headers });
+    if (error) throw new Error(error.message);
+    return data as T;
   }
 
   // ── POST path ─────────────────────────────────────────────────────────────
@@ -215,7 +180,7 @@ export async function getProfile(userId: string) {
     const meta = user.user_metadata ?? {};
     // Normalize phone to E.164 — mirrors what the handle_new_user DB trigger does,
     // so profiles created via this fallback path also get phone_e164 populated.
-    const rawPhone: string | null = meta.phone ?? null;
+    const rawPhone: string | null = (meta.phone as string | null) ?? null;
     const phoneE164 = rawPhone ? (normalizePhoneE164(rawPhone) ?? rawPhone) : null;
     const { data: created, error: createErr } = await supabase
       .from('profiles')
@@ -2394,10 +2359,12 @@ export async function uploadVideoChunk(params: {
   const token = session.data.session?.access_token;
   if (!token) throw new Error('Not authenticated');
 
-  const url = `${process.env.EXPO_PUBLIC_SUPABASE_URL}/functions/v1/video-upload-chunk`;
+  // Route through PHP backend instead of Supabase Edge Function
+  const API_BASE =
+    process.env.EXPO_PUBLIC_PHP_API_URL ||
+    process.env.EXPO_PUBLIC_SUPABASE_URL?.replace(/\/?$/, '/backend/public/index.php') || '';
+  const url = `${API_BASE}/video/chunk`;
   // Use expo/fetch — global fetch cannot send ArrayBuffer bodies on iOS/Android
-  // (throws "Load failed" before the request leaves the device).
-  // expo/fetch is the correct cross-platform binary-safe fetch for Expo SDK 55.
   const body: ArrayBuffer = (chunkData instanceof Uint8Array ? chunkData : new Uint8Array(chunkData)).buffer as ArrayBuffer;
 
   const response = await expoFetch(url, {
@@ -2405,7 +2372,6 @@ export async function uploadVideoChunk(params: {
     headers: {
       'Content-Type':   'application/octet-stream',
       'Authorization':  `Bearer ${token}`,
-      'apikey':         process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? '',
       'x-upload-id':    uploadId,
       'x-chunk-index':  String(chunkIndex),
       'x-total-chunks': String(totalChunks),
@@ -3030,7 +2996,7 @@ export async function getMaintenanceConfig() {
     .in('key', ['maintenance_enabled', 'maintenance_message']);
   if (error) throw error;
   const cfg: Record<string, unknown> = {};
-  (data ?? []).forEach(row => { cfg[row.key] = row.value; });
+  (data ?? []).forEach((row: { key: string; value: unknown }) => { cfg[row.key] = row.value; });
   return {
     enabled: cfg.maintenance_enabled === true || cfg.maintenance_enabled === 'true',
     message: (cfg.maintenance_message as string) ?? 'We are currently performing maintenance.',
@@ -3077,7 +3043,7 @@ export async function getPricingSettings() {
     .in('key', ['credit_price', 'activation_code_price']);
   if (error) throw error;
   const cfg: Record<string, unknown> = {};
-  (data ?? []).forEach(row => { cfg[row.key] = row.value; });
+  (data ?? []).forEach((row: { key: string; value: unknown }) => { cfg[row.key] = row.value; });
   return {
     creditPrice: (cfg.credit_price as { amount: number; currency: string }) ?? { amount: 10, currency: 'EGP' },
     activationCodePrice: (cfg.activation_code_price as { amount: number; currency: string }) ?? { amount: 25, currency: 'EGP' },
@@ -3213,7 +3179,7 @@ export async function sendBroadcastNotification(payload: {
       .select('student_id')
       .eq('course_id', payload.target_course_id);
     if (enrollErr) throw enrollErr;
-    userIds = (enrollments ?? []).map(e => e.student_id);
+    userIds = (enrollments ?? []).map((e: { student_id: string }) => e.student_id);
   } else {
     let userQuery = supabase.from('profiles').select('id');
     if (payload.target_type === 'role' && payload.target_role) {
@@ -3227,7 +3193,7 @@ export async function sendBroadcastNotification(payload: {
     }
     const { data: users, error: usersErr } = await userQuery.limit(500);
     if (usersErr) throw usersErr;
-    userIds = (users ?? []).map(u => u.id);
+    userIds = (users ?? []).map((u: { id: string }) => u.id);
   }
 
   const inserts = userIds.map(uid => ({
@@ -3368,13 +3334,13 @@ export async function getRevenueStats() {
   const thisYear = new Date(now.getFullYear(), 0, 1).toISOString();
 
   const txns = creditTx.data ?? [];
-  const totalCreditsAllocated = txns.reduce((sum, t) => sum + (t.amount ?? 0), 0);
+  const totalCreditsAllocated = txns.reduce((sum: number, t: { amount: number | null }) => sum + (t.amount ?? 0), 0);
   const monthlyCredits = txns
-    .filter(t => t.created_at >= thisMonth)
-    .reduce((sum, t) => sum + (t.amount ?? 0), 0);
+    .filter((t: { created_at: string; amount: number | null }) => t.created_at >= thisMonth)
+    .reduce((sum: number, t: { amount: number | null }) => sum + (t.amount ?? 0), 0);
   const yearlyCredits = txns
-    .filter(t => t.created_at >= thisYear)
-    .reduce((sum, t) => sum + (t.amount ?? 0), 0);
+    .filter((t: { created_at: string; amount: number | null }) => t.created_at >= thisYear)
+    .reduce((sum: number, t: { amount: number | null }) => sum + (t.amount ?? 0), 0);
 
   const unitPrice = pricing.creditPrice.amount;
   return {
@@ -3430,13 +3396,13 @@ export async function getPlatformEarningsStats(): Promise<PlatformEarningsStats>
   const unitPrice = pricing.creditPrice.amount;
   const lastReset = (resetRows.data ?? [])[0] ?? null;
 
-  const totalCredits = txns.reduce((s, t) => s + (t.amount ?? 0), 0);
+  const totalCredits = txns.reduce((s: number, t: { amount: number | null }) => s + (t.amount ?? 0), 0);
   const totalEarningsAllTime = totalCredits * unitPrice;
 
   const creditsAfterReset = lastReset
     ? txns
-        .filter(t => t.created_at > lastReset.reset_at)
-        .reduce((s, t) => s + (t.amount ?? 0), 0)
+        .filter((t: { created_at: string; amount: number | null }) => t.created_at > lastReset.reset_at)
+        .reduce((s: number, t: { amount: number | null }) => s + (t.amount ?? 0), 0)
     : totalCredits;
 
   return {
@@ -3521,7 +3487,9 @@ export async function getCreditLedgerStats() {
   const remTypes = ['deduction', 'expiry'];
 
   const sum = (arr: typeof allTx, types: string[]) =>
-    arr.filter(t => types.includes(t.transaction_type)).reduce((s, t) => s + (t.amount ?? 0), 0);
+    arr
+      .filter((t: { transaction_type: string; amount: number | null }) => types.includes(t.transaction_type))
+      .reduce((s: number, t: { transaction_type: string; amount: number | null }) => s + (t.amount ?? 0), 0);
 
   return {
     total_tx:       allTx.length,
@@ -3614,12 +3582,12 @@ export async function getActivationLedgerStats() {
 
   return {
     total:          allCodes.length,
-    used:           allCodes.filter(c => c.status === 'used').length,
-    active:         allCodes.filter(c => c.status === 'active').length,
-    expired:        allCodes.filter(c => c.status === 'expired').length,
-    disabled:       allCodes.filter(c => ['disabled', 'deactivated'].includes(c.status)).length,
+    used:           allCodes.filter((c: { status: string }) => c.status === 'used').length,
+    active:         allCodes.filter((c: { status: string }) => c.status === 'active').length,
+    expired:        allCodes.filter((c: { status: string }) => c.status === 'expired').length,
+    disabled:       allCodes.filter((c: { status: string }) => ['disabled', 'deactivated'].includes(c.status)).length,
     today_generated: todayCodes.length,
-    today_used:     todayCodes.filter(c => c.status === 'used').length,
+    today_used:     todayCodes.filter((c: { status: string }) => c.status === 'used').length,
   };
 }
 
@@ -3816,10 +3784,10 @@ export async function getCourseActivationStats(courseId: string) {
   const rows = data ?? [];
   return {
     total:    rows.length,
-    used:     rows.filter(r => r.status === 'used').length,
-    active:   rows.filter(r => r.status === 'active').length,
-    expired:  rows.filter(r => r.status === 'expired').length,
-    disabled: rows.filter(r => ['disabled','deactivated'].includes(r.status)).length,
+    used:     rows.filter((r: { status: string }) => r.status === 'used').length,
+    active:   rows.filter((r: { status: string }) => r.status === 'active').length,
+    expired:  rows.filter((r: { status: string }) => r.status === 'expired').length,
+    disabled: rows.filter((r: { status: string }) => ['disabled','deactivated'].includes(r.status)).length,
   };
 }
 
