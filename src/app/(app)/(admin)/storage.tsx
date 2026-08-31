@@ -1,6 +1,6 @@
 /**
  * Storage Monitor — Admin & Super Admin
- * Shows Supabase Storage bucket info and usage.
+ * Shows PHP filesystem storage bucket info and usage.
  */
 import React, { useCallback, useState } from 'react';
 import {
@@ -43,8 +43,9 @@ export default function StorageMonitorScreen() {
     <ScrollView style={{ flex: 1, backgroundColor: c.base }}
           contentContainerStyle={{ paddingBottom: layout.scrollBottom() }}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />}>
-      <View style={{ padding: layout.screenPx }}>
-        <PageHeader title="Storage Monitor" subtitle="Supabase Storage + VdoCipher usage" accentColor="#2DA8FF" />
+      <PageHeader title="Storage Monitor" subtitle="PHP storage + VdoCipher usage" accentColor="#2DA8FF" />
+
+      <View style={{ paddingHorizontal: layout.screenPx }}>
 
         {loading ? <ActivityIndicator color={c.primary} style={{ marginTop: 40 }} /> : stats && (
           <>
@@ -80,7 +81,7 @@ export default function StorageMonitorScreen() {
                   <Film size={18} color="#7C3AED" />
                 </View>
                 <View style={{ flex: 1 }}>
-                  <Text style={{ fontSize: 14, fontWeight: '700', color: c.text }}>Plyr (Supabase Storage)</Text>
+                  <Text style={{ fontSize: 14, fontWeight: '700', color: c.text }}>PHP media storage</Text>
                   <Text style={{ fontSize: 12, color: c.text, opacity: 0.5 }}>Active uploads only (excludes failed/canceled)</Text>
                 </View>
                 <Text style={{ fontSize: 15, fontWeight: '800', color: '#7C3AED' }}>
@@ -113,7 +114,7 @@ export default function StorageMonitorScreen() {
                 </View>
                 <View style={{ flex: 1 }}>
                   <Text style={{ fontSize: 14, fontWeight: '700', color: c.text }}>Total Local Storage</Text>
-                  <Text style={{ fontSize: 12, color: c.text, opacity: 0.5 }}>Supabase-hosted files</Text>
+                  <Text style={{ fontSize: 12, color: c.text, opacity: 0.5 }}>PHP-hosted files</Text>
                 </View>
                 <Text style={{ fontSize: 15, fontWeight: '800', color: c.primary }}>
                   {formatBytes(stats.totalLocalBytes ?? 0)}

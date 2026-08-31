@@ -103,8 +103,9 @@ export default function ReportsScreen() {
   return (
     <ScrollView style={{ flex: 1, backgroundColor: c.base }}
           contentContainerStyle={{ paddingBottom: layout.scrollBottom() }}>
-      <View style={{ padding: layout.screenPx }}>
-        <PageHeader title="Reports" subtitle="Export platform data as CSV" accentColor="#7C3AED" />
+      <PageHeader title="Reports" subtitle="Export platform data as CSV" accentColor="#7C3AED" />
+
+      <View style={{ paddingHorizontal: layout.screenPx }}>
 
         {/* Report Type Selection */}
         <Text style={{ fontSize: 13, fontWeight: '700', color: c.text, opacity: 0.6, marginBottom: 12, textTransform: 'uppercase', letterSpacing: 0.8 }}>

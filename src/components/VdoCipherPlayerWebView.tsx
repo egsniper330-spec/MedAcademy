@@ -18,7 +18,7 @@
  *      Rendered INSIDE the VdoCipher player iframe by VdoCipher's own engine.
  *      Survives all fullscreen modes including Safari iOS native player because
  *      it is part of the video stream itself.
- *      Configured in: supabase/functions/vdocipher-otp/index.ts
+ *      Configured in the PHP backend video OTP controller
  *
  *   2. useFullscreenWatermark (DOM hook) — pure-DOM <div> managed outside React.
  *      In normal mode: position:absolute child of the player container.

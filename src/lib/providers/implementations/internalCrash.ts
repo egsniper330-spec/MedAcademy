@@ -1,8 +1,8 @@
 /**
  * implementations/internalCrash.ts
- * Internal crash reporting — logs to console and Supabase.
+ * Internal crash reporting — logs to console and the PHP crash-log table.
  */
-import { supabase } from '@/client/supabase';
+import { backendClient } from '@/client/backendClient';
 import type { CrashProvider, CrashBreadcrumb, CrashContext } from '../crashProvider';
 
 class InternalCrashProvider implements CrashProvider {
@@ -17,7 +17,7 @@ class InternalCrashProvider implements CrashProvider {
     const stack   = error instanceof Error ? error.stack : undefined;
     const id = `crash-${Date.now()}`;
     console.error('[CrashProvider]', message, stack);
-    await supabase.from('crash_logs').insert({
+    await backendClient.from('crash_logs').insert({
       error_message: message,
       stack_trace: stack,
       context: { ...this.userContext, ...context },

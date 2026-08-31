@@ -24,7 +24,7 @@ import {
 } from '@/lib/api';
 import { parseError } from '@/lib/parseError';
 import { useToast } from '@/components/Toast';
-import { supabase } from '@/client/supabase';
+import { backendClient } from '@/client/backendClient';
 
 interface DeviceManagerSheetProps {
   visible: boolean;
@@ -47,7 +47,7 @@ export function DeviceManagerSheet({ visible, onClose, userId, userName }: Devic
   const [limitInput, setLimitInput]     = useState('');
   const [showLimitInput, setShowLimitInput] = useState(false);
 
-  // Keep a ref so Realtime callback can read latest devices without closure staleness
+  // Keep a ref so Polling callback can read latest devices without closure staleness
   const devicesRef = useRef<DeviceRecord[]>([]);
   useEffect(() => { devicesRef.current = devices; }, [devices]);
 
@@ -71,27 +71,27 @@ export function DeviceManagerSheet({ visible, onClose, userId, userName }: Devic
   // Load when sheet opens
   useEffect(() => { if (visible) load(); }, [visible, load]);
 
-  // ── Realtime: live device updates while sheet is open ──────────────────────
+  // ── Polling: live device updates while sheet is open ──────────────────────
   // INSERT → new device registered (e.g. user just logged in on a new device)
   // UPDATE → status/trust_level changed (block, logout, revoke, etc.)
   useEffect(() => {
     if (!visible || !userId) return;
-    const channel = supabase
-      .channel(`device_sheet_${userId}`)
+    const channel = backendClient
+      .poll(`device_sheet_${userId}`)
       .on(
-        'postgres_changes',
+        'php_polling',
         { event: 'INSERT', schema: 'public', table: 'devices', filter: `user_id=eq.${userId}` },
         (payload) => {
           const newDev = payload.new as DeviceRecord;
           setDevices(prev => {
-            // Avoid duplicates (Realtime can occasionally deliver twice)
+            // Avoid duplicates (Polling can occasionally deliver twice)
             if (prev.some(d => d.id === newDev.id)) return prev;
             return [newDev, ...prev];
           });
         }
       )
       .on(
-        'postgres_changes',
+        'php_polling',
         { event: 'UPDATE', schema: 'public', table: 'devices', filter: `user_id=eq.${userId}` },
         (payload) => {
           const updated = payload.new as DeviceRecord;
@@ -99,7 +99,7 @@ export function DeviceManagerSheet({ visible, onClose, userId, userName }: Devic
         }
       )
       .on(
-        'postgres_changes',
+        'php_polling',
         { event: 'DELETE', schema: 'public', table: 'devices', filter: `user_id=eq.${userId}` },
         (payload) => {
           const deleted = payload.old as { id: string };
@@ -108,7 +108,7 @@ export function DeviceManagerSheet({ visible, onClose, userId, userName }: Devic
       )
       .subscribe();
 
-    return () => { supabase.removeChannel(channel); };
+    return () => { backendClient.removePoller(channel); };
   }, [visible, userId]);
 
   const handle = async (key: string, fn: () => Promise<unknown>, successMsg: string) => {

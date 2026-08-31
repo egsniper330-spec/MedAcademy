@@ -6,7 +6,7 @@ import {
 import { useRouter } from 'expo-router';
 import { Mail, Lock, User, Phone, Eye, EyeOff, ChevronDown, Building2, GraduationCap, BookOpen, Search } from 'lucide-react-native';
 import { BrandLogo } from '@/components/BrandLogo';
-import { supabase } from '@/client/supabase';
+import { backendClient } from '@/client/backendClient';
 import { getUniversities, getFaculties, getAcademicLevels } from '@/lib/api';
 import { NeuCard } from '@/components/NeuCard';
 import { NeuButton } from '@/components/NeuButton';
@@ -324,10 +324,10 @@ export default function SignUp() {
     // ── Server-side uniqueness pre-check ──────────────────────────────────────
     // Calls a SECURITY DEFINER RPC so we can safely check auth.users (email)
     // and profiles (phone_e164) without RLS blocking the lookup.
-    // This prevents the raw "Database error saving new user" Supabase Auth
+    // This prevents the raw "Database error saving new user" backend error
     // error from ever reaching the user.
     try {
-      const { data: conflicts, error: rpcErr } = await supabase.rpc(
+      const { data: conflicts, error: rpcErr } = await backendClient.rpc(
         'check_registration_conflicts',
         { p_email: email.trim().toLowerCase(), p_phone_e164: normalizedPhone }
       );
@@ -360,9 +360,9 @@ export default function SignUp() {
       // Non-fatal: continue to signUp; errors will be sanitized below
     }
 
-    // ── Supabase Auth registration ────────────────────────────────────────────
+    // ── PHP backend registration ──────────────────────────────────────────────
     // Role is always 'student' on self-registration — only admins can promote
-    const { error: authError } = await supabase.auth.signUp({
+    const { error: authError } = await backendClient.auth.signUp({
       email: email.trim().toLowerCase(),
       password,
       options: {
@@ -380,7 +380,7 @@ export default function SignUp() {
     });
 
     if (authError) {
-      // Sanitize raw Supabase/PostgreSQL errors — never expose internals
+      // Sanitize raw backend/database errors — never expose internals
       const msg = authError.message ?? '';
       if (
         msg.toLowerCase().includes('database error') ||

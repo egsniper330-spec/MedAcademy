@@ -463,6 +463,7 @@ export default function LessonEditor() {
       id: taskId,
       lessonId: lesson!.id,
       courseId,
+      doctorId: profile?.id,
       fileUri: file.uri,
       fileName: file.name,
       fileSize: file.size ?? 0,

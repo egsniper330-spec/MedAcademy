@@ -128,7 +128,9 @@ $router->post('/video/otp', [VideoController::class, 'otp'], $auth);
 $router->post('/video/upload-init', [VideoController::class, 'uploadInit'], $auth);
 $router->post('/video/upload-status', [VideoController::class, 'uploadStatus'], $auth);
 $router->post('/video/delete', [VideoController::class, 'delete'], $auth);
+$router->post('/video/cancel-upload', [VideoController::class, 'cancelUpload'], $auth + ['role' => ['doctor', 'admin', 'super_admin']]);
 $router->post('/video/assets', [VideoController::class, 'assets'], $auth);
+$router->post('/video/assets/delete', [VideoController::class, 'deleteAsset'], $auth + ['role' => ['doctor', 'admin', 'super_admin']]);
 $router->post('/video/webhook', [VideoController::class, 'webhook']);
 $router->post('/video/chunk', [VideoController::class, 'uploadChunk'], $auth);
 $router->post('/video/assemble', [VideoController::class, 'assembleUpload'], $auth + ['role' => ['doctor', 'admin', 'super_admin']]);
@@ -142,9 +144,11 @@ $router->post('/integrity/play', [IntegrityController::class, 'playIntegrity'], 
 $router->post('/integrity/app', [IntegrityController::class, 'appIntegrity'], $auth);
 
 // ---- Storage ---------------------------------------------------------------
+$router->get('/storage/buckets', [StorageController::class, 'buckets'], $auth);
 $router->get('/storage/signed-url', [StorageController::class, 'signedUrl'], $auth);
 $router->post('/storage/signed-url', [StorageController::class, 'signedUrl'], $auth); // EF get-signed-url POSTs a JSON body
 $router->get('/storage/signed', [StorageController::class, 'signedFile']);
+$router->get('/storage/public/{bucket}/{path*}', [StorageController::class, 'publicFile']);
 $router->post('/storage/upload', [StorageController::class, 'upload'], $auth);
 $router->post('/storage/delete', [StorageController::class, 'delete'], $auth);
 
@@ -179,23 +183,27 @@ $router->get('/analytics/trash-stats', [AnalyticsController::class, 'trashStats'
 $router->get('/analytics/deletion-stats', [AnalyticsController::class, 'deletionStats'], $auth + ['role' => ['admin', 'super_admin']]);
 $router->get('/analytics/archive-analytics', [AnalyticsController::class, 'archiveAnalytics'], $auth + ['role' => ['admin', 'super_admin']]);
 $router->get('/analytics/archived-courses', [AnalyticsController::class, 'archivedCourses'], $auth + ['role' => ['admin', 'super_admin']]);
-$router->get('/analytics/course-delete-stats/{id}', [AnalyticsController::class, 'courseDeleteStats'], $auth + ['role' => ['admin', 'super_admin']]);
+$router->get('/analytics/course-delete-stats/{id}', [AnalyticsController::class, 'courseDeleteStats'], $auth); // owner-aware: admins + the owning doctor
 $router->get('/analytics/risky-devices', [AnalyticsController::class, 'riskyDevices'], $auth + ['role' => ['admin', 'super_admin']]);
-$router->get('/analytics/video-asset-usage', [AnalyticsController::class, 'videoAssetUsage'], $auth + ['role' => ['admin', 'super_admin']]);
+$router->get('/analytics/video-asset-usage', [AnalyticsController::class, 'videoAssetUsage'], $auth); // ownership enforced in controller (doctors may query their own assets)
 $router->post('/analytics/db-audit', [AnalyticsController::class, 'dbAudit'], $auth + ['role' => ['admin', 'super_admin']]);
 $router->post('/analytics/recalculate-earnings/{doctorId}', [AnalyticsController::class, 'recalculateEarnings'], $auth + ['role' => ['admin', 'super_admin']]);
 $router->post('/analytics/reset-doctor-earnings/{doctorId}', [AnalyticsController::class, 'resetDoctorEarnings'], $auth + ['role' => ['admin', 'super_admin']]);
 $router->post('/analytics/reset-platform-earnings', [AnalyticsController::class, 'resetPlatformEarnings'], $auth + ['role' => ['super_admin']]);
 
-// ---- Generic Data API (Supabase .from() compatibility) ----------------------
+// ---- Generic Data API (legacy query contract over PHP/MySQL) ----------------
 $router->get('/api/{table}', [DataController::class, 'select'], $auth);
 $router->post('/api/{table}', [DataController::class, 'insert'], $auth);
 $router->patch('/api/{table}', [DataController::class, 'update'], $auth);
 $router->delete('/api/{table}', [DataController::class, 'delete'], $auth);
 
-// ---- RPCs (PostgreSQL function equivalents) ---------------------------------
+// ---- Named backend actions ---------------------------------------------------
 // User RPCs
-$router->post('/rpc/get-email-by-phone', [RpcController::class, 'getEmailByPhone'], $auth + ['role' => ['doctor', 'admin', 'super_admin']]);
+// Pre-login phone → email resolution. Original Supabase function was SECURITY
+// DEFINER and GRANTed to anon so the sign-in screen can resolve a phone number
+// to an email BEFORE authentication (see 00039/00062/00061/00074). It returns
+// only an email address, never profile data — safe to expose anonymously.
+$router->post('/rpc/get-email-by-phone', [RpcController::class, 'getEmailByPhone']);
 
 // Doctor RPCs
 $router->get('/rpc/doctor-activity-stats/{doctorId}', [RpcController::class, 'doctorActivityStats'], $auth + ['role' => ['doctor', 'admin', 'super_admin']]);

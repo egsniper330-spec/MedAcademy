@@ -2,7 +2,7 @@
  * /diag — Standalone diagnostic screen.
  *
  * CRITICAL DESIGN RULE: This file MUST NOT import anything from:
- *   @/ctx, @/lib/SecurityContext, @/lib/store, @/client/supabase,
+ *   @/ctx, @/lib/SecurityContext, @/lib/store, @/client/backendClient,
  *   or any component that transitively imports those.
  *
  * The screen is registered as a BARE Stack.Screen in the root _layout.tsx

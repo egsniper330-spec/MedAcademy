@@ -133,11 +133,15 @@ export default function RevenueDashboard() {
     <ScrollView style={{ flex: 1, backgroundColor: c.base }}
           contentContainerStyle={{ paddingBottom: layout.scrollBottom() }}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />}>
-      <View style={{ padding: layout.screenPx }}>
-        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20, marginTop: 8 }}>
-          <PageHeader title="Revenue Dashboard" subtitle={`Platform earnings · ${currencyCfg.code}`} accentColor="#16A34A" />
+      {/* Header row sits OUTSIDE the inner padding view so it can own its own horizontal padding */}
+      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+        <PageHeader title="Revenue Dashboard" subtitle={`Platform earnings · ${currencyCfg.code}`} accentColor="#16A34A" />
+        <View style={{ marginRight: layout.screenPx }}>
           <NeuButton label="Pricing" icon={<Edit2 size={14} color={c.primary} />} onPress={() => setPricingModal(true)} variant="secondary" style={{ paddingHorizontal: 16 }} />
         </View>
+      </View>
+
+      <View style={{ paddingHorizontal: layout.screenPx }}>
 
         {loading ? <ActivityIndicator color={c.primary} style={{ marginTop: 40 }} /> : stats && (
           <>

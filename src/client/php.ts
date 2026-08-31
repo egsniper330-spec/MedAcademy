@@ -1,32 +1,40 @@
 // ─────────────────────────────────────────────────────────────────────────────
-// PHP Backend Client — Drop-in replacement for Supabase JS client
+// PHP Backend Client — authoritative application API client
 //
-// Preserves the same API surface: .from(), .rpc(), .functions.invoke(),
-// .auth.*, .storage.from(). All calls route to the PHP REST API.
+// Preserves the existing application API surface while routing every call to PHP.
 //
-// Usage (identical to Supabase):
-//   import { supabase } from '@/client/supabase';
-//   const { data, error } = await supabase.from('courses').select('*');
-//   const { data } = await supabase.rpc('get_my_credits_balance');
-//   await supabase.functions.invoke('device-binding', { body: {...} });
+// Usage:
+//   import { backendClient } from '@/client/backendClient';
+//   const { data, error } = await backendClient.from('courses').select('*');
+//   const { data } = await backendClient.rpc('get_my_credits_balance');
+//   await backendClient.functions.invoke('device-binding', { body: {...} });
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { getInstallationId, getStoredDeviceFingerprint } from '@/lib/installationId';
 
 // ── Config ──────────────────────────────────────────────────────────────────
 
-const API_BASE: string =
-  process.env.EXPO_PUBLIC_PHP_API_URL ||
-  process.env.EXPO_PUBLIC_SUPABASE_URL?.replace(/\/?$/, '/backend/public/index.php') ||
-  'https://placeholder.example.com/backend/public/index.php';
+const API_BASE: string = (() => {
+  const configured = process.env.EXPO_PUBLIC_PHP_API_URL?.trim();
+  if (!configured) {
+    throw new Error(
+      '[BackendConfig] EXPO_PUBLIC_PHP_API_URL is required. ' +
+      'Configure it as https://api.medacademy.eu.cc/backend/public/index.php.'
+    );
+  }
+  return configured.replace(/\/$/, '');
+})();
+
+/** The sole application API base; configuration fails closed when missing. */
+export const backendApiBase = API_BASE;
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
 function getToken(): string | null {
   try {
-    // Read from SecureStore via the chunked format used by supabase-adapter
+    // Read the PHP session stored by the web/native session adapter
     if (typeof localStorage !== 'undefined') {
-      const raw = localStorage.getItem('sb-auth-token');
+      const raw = localStorage.getItem(AUTH_KEY) ?? localStorage.getItem(LEGACY_AUTH_KEY);
       if (raw) {
         const parsed = JSON.parse(raw);
         return parsed?.access_token ?? parsed?.current_session?.access_token ?? null;
@@ -153,7 +161,7 @@ async function apiFetchOnce<T = unknown>(
   }
 }
 
-// ── Query Builder (chainable like Supabase) ─────────────────────────────────
+// ── Query Builder (chainable application data client) ────────────────────────
 
 type FilterOp = 'eq' | 'neq' | 'gt' | 'gte' | 'lt' | 'lte' | 'like' | 'ilike' | 'in' | 'is' | 'contains' | 'contained_by' | 'overlaps';
 
@@ -180,10 +188,25 @@ class QueryBuilder<T = any> {
   private _count: string | null = null;
   private _head: boolean = false;
   private _onConflict: string | null = null;
+  private _returning: boolean = false;
 
   constructor(table: string) { this._table = table; }
 
-  select(columns: string = '*', opts?: { count?: string; head?: boolean }): this { this._method = 'select'; this._columns = columns; if (opts?.count) this._count = opts.count; if (opts?.head) this._head = true; return this; }
+  select(columns: string = '*', opts?: { count?: string; head?: boolean }): this {
+    // The compatibility builder allows .insert(...).select() / .update(...).select() — the write
+    // happens AND the affected row(s) are returned. If a write method was set
+    // first, keep it (so POST/PATCH is sent) and mark that the caller wants
+    // rows back; a bare .select() with no prior write is a plain read.
+    if (this._method !== 'insert' && this._method !== 'update' && this._method !== 'upsert') {
+      this._method = 'select';
+    } else {
+      this._returning = true;
+    }
+    this._columns = columns;
+    if (opts?.count) this._count = opts.count;
+    if (opts?.head) this._head = true;
+    return this;
+  }
   insert(data: unknown): this { this._method = 'insert'; this._body = data; return this; }
   update(data: unknown): this { this._method = 'update'; this._body = data; return this; }
   upsert(data: unknown, opts?: { onConflict?: string; ignoreDuplicates?: boolean }): this { this._method = 'upsert'; this._body = data; if (opts?.onConflict) this._onConflict = opts.onConflict; return this; }
@@ -238,7 +261,7 @@ class QueryBuilder<T = any> {
 
   private async _execute(): Promise<{ data: T | null; error: { message: string; code?: string; status?: number } | null; count: number | null }> {
     const params = new URLSearchParams();
-    if (this._method === 'select') {
+    if (this._method === 'select' || this._returning) {
       params.set('select', this._columns);
     }
     for (const f of this._filters) {
@@ -297,25 +320,31 @@ interface AuthSession {
   user: AuthUser;
 }
 
-const AUTH_KEY = 'sb-auth-token';
+const AUTH_KEY = 'php-auth-token';
+const LEGACY_AUTH_KEY = 'sb-auth-token';
 
 function storeSession(session: AuthSession): void {
   try { localStorage.setItem(AUTH_KEY, JSON.stringify(session)); } catch { /* ignore */ }
 }
 
 function clearSession(): void {
-  try { localStorage.removeItem(AUTH_KEY); } catch { /* ignore */ }
+  try {
+    localStorage.removeItem(AUTH_KEY);
+    localStorage.removeItem(LEGACY_AUTH_KEY);
+  } catch { /* ignore */ }
 }
 
 function getStoredSession(): AuthSession | null {
   try {
-    const raw = localStorage.getItem(AUTH_KEY);
+    const raw = localStorage.getItem(AUTH_KEY) ?? localStorage.getItem(LEGACY_AUTH_KEY);
     if (!raw) return null;
-    return JSON.parse(raw) as AuthSession;
+    const session = JSON.parse(raw) as AuthSession;
+    if (!localStorage.getItem(AUTH_KEY)) localStorage.setItem(AUTH_KEY, JSON.stringify(session));
+    return session;
   } catch { return null; }
 }
 
-// Auth methods match Supabase auth API exactly
+// Auth methods preserve the existing frontend contract while calling PHP
 const authMethods = {
   getSession: async () => {
     const session = getStoredSession();
@@ -325,9 +354,12 @@ const authMethods = {
   getUser: async () => {
     const session = getStoredSession();
     if (!session) return { data: { user: null }, error: null };
-    const res = await apiFetch<AuthUser>('/auth/me');
+    // The backend returns { user: {...} }; unwrap it so callers receive the
+    // established { data: { user } } contract (user.id must be the user
+    // object itself, not the response envelope).
+    const res = await apiFetch<{ user: AuthUser | null }>('/auth/me');
     if (res.error || !res.data) return { data: { user: null }, error: res.error };
-    return { data: { user: res.data }, error: null };
+    return { data: { user: res.data.user ?? null }, error: null };
   },
 
   signInWithPassword: async ({ email, password, ...device }: {
@@ -463,7 +495,7 @@ const authMethods = {
     return { data: { session, user: d.user }, error: null };
   },
 
-  // Matches Supabase onAuthStateChange — returns { data: { subscription: { unsubscribe } } }
+  // Poll-based auth state listener; the PHP backend remains authoritative
   onAuthStateChange: (callback: (event: string, session: AuthSession | null) => void) => {
     let lastToken = getToken();
     const interval = setInterval(() => {
@@ -477,9 +509,6 @@ const authMethods = {
     return { data: { subscription: { unsubscribe: () => clearInterval(interval) } } };
   },
 
-  signInWithOAuth: async ({ provider }: { provider: string }): Promise<{ data: { url: string; provider: string } | null; error: { message: string; code?: string } | null }> => {
-    return { data: { url: '', provider }, error: null };
-  },
 };
 
 // ── Storage ─────────────────────────────────────────────────────────────────
@@ -499,31 +528,32 @@ function createStorageBucket(bucket: string) {
           method: 'POST', headers, body: formData,
         });
         const data = await res.json();
-        if (!res.ok) return { error: { message: data.error ?? `HTTP ${res.status}` } };
+        if (!res.ok) {
+          const detail = typeof data?.error === 'object' ? data.error?.message : data?.error;
+          return { error: { message: detail ?? data?.message ?? `HTTP ${res.status}`, status: res.status } };
+        }
         return { error: null as { message: string; code?: string } | null };
       } catch (e: unknown) {
         return { error: { message: e instanceof Error ? e.message : String(e) } };
       }
     },
     getPublicUrl: (path: string) => {
-      // Public buckets are served directly by the web server (see
-      // StorageService::publicUrl) — NOT via the HMAC-signed private endpoint.
-      const publicUrl = `${API_BASE}/storage/public/${encodeURIComponent(bucket)}/${encodeURIComponent(path)}`;
+      // Public buckets are served directly by the API host, not through the
+      // front-controller path or the HMAC-signed private-file endpoint.
+      const apiUrl = new URL(API_BASE);
+      const rootPath = apiUrl.pathname
+        .replace(/\/backend\/public\/index\.php\/?$/, '')
+        .replace(/\/$/, '');
+      const publicPath = path.split('/').map(encodeURIComponent).join('/');
+      const publicUrl = `${apiUrl.origin}${rootPath}/storage/public/${encodeURIComponent(bucket)}/${publicPath}`;
       return { data: { publicUrl }, publicUrl };
     },
-    remove: async (paths: string[]): Promise<{ error: { message: string; code?: string } | null }> => {
+    remove: async (paths: string[]): Promise<{ error: { message: string; code?: string; status?: number } | null }> => {
       for (const p of paths) {
-        await apiFetch('/storage/delete', { method: 'POST', body: { bucket, path: p } });
+        const result = await apiFetch('/storage/delete', { method: 'POST', body: { bucket, path: p } });
+        if (result.error) return { error: result.error };
       }
       return { error: null };
-    },
-    move: async (from: string, to: string): Promise<{ error: { message: string; code?: string } | null; data: { path: string } }> => {
-      await apiFetch('/storage/move', { method: 'POST', body: { bucket, from, to } });
-      return { error: null, data: { path: to } };
-    },
-    copy: async (from: string, to: string): Promise<{ error: { message: string; code?: string } | null; data: { path: string } }> => {
-      await apiFetch('/storage/copy', { method: 'POST', body: { bucket, from, to } });
-      return { error: null, data: { path: to } };
     },
     createSignedUrl: async (path: string, expiresIn: number): Promise<{ data: { signedUrl: string } | null; error: { message: string; code?: string } | null }> => {
       const res = await apiFetch<{ signed_url?: string; signedUrl?: string }>('/storage/signed-url', {
@@ -531,15 +561,6 @@ function createStorageBucket(bucket: string) {
       });
       if (res.error) return { data: null, error: res.error };
       return { data: { signedUrl: res.data?.signed_url ?? res.data?.signedUrl ?? '' }, error: null };
-    },
-    list: async (prefix?: string, opts?: { search?: string }): Promise<{ data: Array<{ name: string; metadata: { size?: number; mimetype?: string; eTag?: string } | null; updated_at?: string; created_at?: string }> | null; error: { message: string; code?: string } | null }> => {
-      const params = new URLSearchParams();
-      if (prefix) params.set('prefix', prefix);
-      if (opts?.search) params.set('search', opts.search);
-      const qs = params.toString();
-      const res = await apiFetch<Array<{ name: string; metadata: { size?: number; mimetype?: string; eTag?: string } | null; updated_at?: string; created_at?: string }>>(`/storage/list?bucket=${bucket}${qs ? '&' + qs : ''}`);
-      if (res.error) return { data: null, error: res.error };
-      return { data: res.data ?? [], error: null };
     },
   };
 }
@@ -550,7 +571,7 @@ const EDGE_FUNCTION_MAP: Record<string, string> = {
   'admin-doctor-earnings':  '/analytics/doctor-earnings',
   'admin-enrollment':       '/admin/enrollment',
   'admin-update-email':     '/admin/update-email',
-  'block-user':             '/admin/users/block',
+  'block-user':             '/admin/users/{id}/block',
   'device-binding':         '/device-binding',
   'get-security-config':    '/security/config',
   'get-security-version':   '/security/version',
@@ -558,7 +579,7 @@ const EDGE_FUNCTION_MAP: Record<string, string> = {
   'impersonate':            '/auth/impersonate',
   'process-violation':      '/security/violations',
   'provider-health':        '/provider-health',
-  'restore-account':        '/admin/users/restore',
+  'restore-account':        '/admin/users/{id}/restore',
   'security-logger':        '/security/events',
   'student-operations':     '/student-operations',
   'system-health':          '/system-health',
@@ -569,6 +590,7 @@ const EDGE_FUNCTION_MAP: Record<string, string> = {
   'vdocipher-upload-init':  '/video/upload-init',
   'vdocipher-upload-status':'/video/upload-status',
   'vdocipher-delete-video': '/video/delete',
+  'vdocipher-cancel-upload': '/video/cancel-upload',
   'video-assemble-upload':  '/video/assemble',
   'delete-lesson':          '/lessons/{id}/delete',
   'bulk-user-ops':          '/admin/bulk-user-ops',
@@ -743,6 +765,7 @@ const RPC_MAP: Record<string, string> = {
   'get_user_activity':                '/analytics/user-activity/{id}',
   'get_user_profile_summary':         '/analytics/user-profile/{id}',
   'get_video_asset_usage':            '/analytics/video-asset-usage',
+  'delete_video_asset':               '/video/assets/delete',
   'grant_course_access':              '/courses/grant-access',
   'lookup_user_by_identifier':        '/admin/user-lookup',
   'mark_deletion_repaired':           '/rpc/mark-deletion-repaired',
@@ -796,7 +819,7 @@ const RPC_PATH_ALIASES: Record<string, Record<string, string>> = {
 const RPC_KEY_RENAMES: Record<string, Record<string, string>> = {
   'set_user_role':                       { p_new_role: 'role' },
   'set_user_status':                     { p_new_status: 'status' },
-  'get_chunk_upload_state':              { p_upload_id: 'session_id' },
+  'get_chunk_upload_state':              { p_upload_id: 'upload_id' },
   'reset_user_password_by_admin':        { p_target_id: 'user_id' },
   'upsert_teacher_provider_permission':  { p_provider_key: 'provider', p_is_enabled: 'enabled' },
   'set_doctor_credit_price':             { p_new_price: 'price' },
@@ -890,21 +913,21 @@ async function rpc<T = any>(
   return { data: res.data, error: res.error };
 }
 
-// ── Realtime (polling-based) ────────────────────────────────────────────────
+// ── Change polling (intentional replacement for push subscriptions) ──────────
 
-type RealtimeCallback = (payload: { eventType: string; new: any; old: any }) => void;
+type PollingCallback = (payload: { eventType: string; new: any; old: any }) => void;
 
-function createChannel(_name: string) {
-  const listeners: Array<{ table: string; event: string; callback: RealtimeCallback }> = [];
+function createPoller(_name: string) {
+  const listeners: Array<{ table: string; event: string; callback: PollingCallback }> = [];
   const intervals: ReturnType<typeof setInterval>[] = [];
 
-  const channelObj = {
-    on(event: string, opts: { event?: string; table?: string; schema?: string; filter?: string }, callback: RealtimeCallback) {
+  const poller = {
+    on(event: string, opts: { event?: string; table?: string; schema?: string; filter?: string }, callback: PollingCallback) {
       const tableName = opts.table ?? _name;
       const eventType = opts.event ?? event;
       listeners.push({ table: tableName, event: eventType, callback });
 
-      // Poll-based realtime simulation
+      // Intentional PHP polling replacement for the former push subscription
       let lastCheck = Date.now();
       const interval = setInterval(async () => {
         try {
@@ -921,21 +944,21 @@ function createChannel(_name: string) {
         } catch { /* ignore polling errors */ }
       }, 5000); // Poll every 5 seconds
       intervals.push(interval);
-      return channelObj;
+      return poller;
     },
 
-    subscribe(_callback?: (state: string) => void) { if (_callback) _callback('SUBSCRIBED'); return channelObj; },
+    subscribe(_callback?: (state: string) => void) { if (_callback) _callback('SUBSCRIBED'); return poller; },
     unsubscribe() {
       intervals.forEach(clearInterval);
       return Promise.resolve('ok');
     },
   };
-  return channelObj;
+  return poller;
 }
 
 // ── Composed Client ─────────────────────────────────────────────────────────
 
-export const supabase = {
+export const backendClient = {
   // Data operations
   from<T = any>(table: string): QueryBuilder<T> {
     return new QueryBuilder<T>(table);
@@ -957,18 +980,17 @@ export const supabase = {
     },
   },
 
-  // Edge Functions
+  // Named server actions routed to PHP controllers
   functions: {
     invoke: invokeFunction,
   },
 
-  // Realtime (polling-based)
-  channel(name: string) { return createChannel(name); },
+  // Polling subscriptions for device/revocation updates
+  poll(name: string) { return createPoller(name); },
 
-  // Remove channel
-  removeChannel(channel: { unsubscribe: () => Promise<string> }) {
-    return channel.unsubscribe();
+  removePoller(poller: { unsubscribe: () => Promise<string> }) {
+    return poller.unsubscribe();
   },
 
-  removeAllChannels() { return Promise.resolve(); },
+  removeAllPollers() { return Promise.resolve(); },
 };

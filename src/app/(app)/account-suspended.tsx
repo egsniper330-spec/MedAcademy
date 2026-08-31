@@ -7,7 +7,7 @@ import React from 'react';
 import { View, Text, ScrollView, Pressable, Linking, useColorScheme } from 'react-native';
 import { router } from 'expo-router';
 import { ShieldOff, AlertTriangle, Smartphone, LogOut, Phone } from 'lucide-react-native';
-import { supabase } from '@/client/supabase';
+import { backendClient } from '@/client/backendClient';
 // Add useLayout import
 import { neuColors, neuFlatStyle, useLayout } from '@/lib/neu';
 import { NeuButton } from '@/components/NeuButton';
@@ -26,7 +26,7 @@ export default function AccountBlockedScreen() {
     // Stack.Protected in the root layout will navigate to sign-in once
     // session becomes null. The explicit router.replace is kept as a
     // belt-and-suspenders fallback in case the auth state change is delayed.
-    await supabase.auth.signOut({ scope: 'local' });
+    await backendClient.auth.signOut({ scope: 'local' });
     console.log('[AUTH] account-suspended logout completed', `duration=${Date.now() - _t0}ms`);
     router.replace('/(auth)/sign-in');
   };

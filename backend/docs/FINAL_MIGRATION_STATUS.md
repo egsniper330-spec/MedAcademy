@@ -88,10 +88,10 @@
 | `@supabase/supabase-js` (imports) | 0 | RESOLVED — removed |
 | `@supabase/supabase-js` (comments) | 2 | Documentation only |
 | `supabase.co` (runtime URLs) | 0 | RESOLVED |
-| `supabase.co` (medo-guard allowlist) | 3 | Intentional — env var validation |
+| `supabase.co` (removed) | 0 | RESOLVED — medo-guard removed |
 | `EXPO_PUBLIC_SUPABASE_URL` (runtime) | 0 | RESOLVED — all route to PHP backend |
 | `EXPO_PUBLIC_SUPABASE_URL` (php.ts fallback) | 1 | Intentional — derives PHP backend URL |
-| `EXPO_PUBLIC_SUPABASE_URL` (medo-guard) | 5 | Intentional — security env var check |
+| `EXPO_PUBLIC_SUPABASE_URL` (removed) | 0 | RESOLVED — medo-guard removed |
 | `EXPO_PUBLIC_SUPABASE_URL` (diagnostic) | 2 | Intentional — logging only |
 | `EXPO_PUBLIC_SUPABASE_URL` (supabase.ts) | 1 | Documentation only |
 | `functions/v1` | 1 | Documentation — UI text in admin panel |
@@ -179,5 +179,5 @@ cd ~/medacademy-api && php scripts/regression-test.php
 
 # 5. Set environment variables
 # EXPO_PUBLIC_PHP_API_URL=https://yourdomain.com/backend/public/index.php
-# EXPO_PUBLIC_SUPABASE_URL=<keep for backward compatibility, used by medo-guard>
+# EXPO_PUBLIC_SUPABASE_URL=<removed — no longer needed>
 ```

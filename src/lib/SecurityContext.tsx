@@ -14,11 +14,11 @@
  *   - After network reconnect (NWPathMonitor — iOS / NetInfo — Android)
  *   - After an app update is detected (build number change on active)
  *
- * Super Admin bypass (session-scoped):
- *   - When the backend-verified profile role is 'super_admin', all security
- *     enforcement is disabled for that session only.
+ * Super Admin bypass (session-scoped):   *   - When the backend-verified profile role is 'super_admin', all security
+   *     enforcement is disabled for that session only.
+
  *   - The bypass is NEVER stored in persistent storage and is NEVER derived
- *     from a client-side variable alone — it requires a valid Supabase session
+ *     from a client-side variable alone — it requires a valid PHP backend session
  *     AND a profile row whose role column equals 'super_admin'.
  *   - On logout, session expiry, or any auth change the bypass is automatically
  *     cleared because the profile store is also cleared.
@@ -142,7 +142,7 @@ export function SecurityProvider({ children }: { children: React.ReactNode }) {
   const { session } = useSession();
 
   // ── Super Admin bypass ────────────────────────────────────────────────────
-  // Authoritative role comes from the backend-loaded profile (Supabase DB row),
+  // Authoritative role comes from the backend-loaded profile,
   // never from session JWT user_metadata or any client-side variable.
   // The profile is loaded by (app)/_layout.tsx via getProfile() and stored in
   // useProfileStore. It is null when no session exists (profile is cleared on

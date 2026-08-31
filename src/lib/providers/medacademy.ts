@@ -3,11 +3,11 @@
  * MedAcademy Video Provider
  *
  * Implements VideoProvider using VdoCipher internally.
- * NO code outside this file or Edge Functions should reference VdoCipher.
+ * NO code outside this file or PHP actions should reference VdoCipher.
  * All UI/API shows "MedAcademy Video" branding only.
  */
 
-import { supabase } from '@/client/supabase';
+import { backendClient } from '@/client/backendClient';
 import type {
   VideoProvider, ProviderInfo, PlaybackToken, UploadTicket,
   VideoMetadata, HealthCheckResult, ProviderHealthStatus, WebhookEvent,
@@ -24,8 +24,8 @@ class MedAcademyVideoProvider implements VideoProvider {
 
   /**
    * Generate a secure playback token.
-   * Calls the server-side Edge Function — secrets never leave the server.
-   * userId is extracted from the JWT by requireAuth() in the Edge Function;
+   * Calls the server-side PHP action — secrets never leave the server.
+   * userId is extracted from the JWT by requireAuth() in the PHP action;
    * the body only needs video_id and lesson_id (for enrollment / draft guards).
    */
   async generatePlaybackToken(
@@ -33,7 +33,7 @@ class MedAcademyVideoProvider implements VideoProvider {
     _userId: string,
     options?: { lessonId?: string; domain?: string },
   ): Promise<PlaybackToken> {
-    const { data, error } = await supabase.functions.invoke('vdocipher-otp', {
+    const { data, error } = await backendClient.functions.invoke('vdocipher-otp', {
       body: {
         video_id:  providerVideoId,
         lesson_id: options?.lessonId ?? null,
@@ -52,7 +52,7 @@ class MedAcademyVideoProvider implements VideoProvider {
     mimeType?: string;
     fileSizeBytes?: number;
   }): Promise<UploadTicket> {
-    const { data, error } = await supabase.functions.invoke('video-health-scan', {
+    const { data, error } = await backendClient.functions.invoke('video-health-scan', {
       body: { action: 'create_upload_ticket', ...options },
     });
     if (error) throw new Error(`Upload ticket failed: ${error.message}`);
@@ -60,14 +60,14 @@ class MedAcademyVideoProvider implements VideoProvider {
   }
 
   async deleteVideo(providerVideoId: string): Promise<void> {
-    const { error } = await supabase.functions.invoke('video-health-scan', {
+    const { error } = await backendClient.functions.invoke('video-health-scan', {
       body: { action: 'delete_video', provider_video_id: providerVideoId },
     });
     if (error) throw new Error(`Delete failed: ${error.message}`);
   }
 
   async getMetadata(providerVideoId: string): Promise<VideoMetadata> {
-    const { data, error } = await supabase.functions.invoke('video-health-scan', {
+    const { data, error } = await backendClient.functions.invoke('video-health-scan', {
       body: { action: 'get_metadata', provider_video_id: providerVideoId },
     });
     if (error) throw new Error(`Metadata fetch failed: ${error.message}`);
@@ -80,7 +80,7 @@ class MedAcademyVideoProvider implements VideoProvider {
   }
 
   async retryProcessing(providerVideoId: string): Promise<void> {
-    const { error } = await supabase.functions.invoke('video-health-scan', {
+    const { error } = await backendClient.functions.invoke('video-health-scan', {
       body: { action: 'retry_processing', provider_video_id: providerVideoId },
     });
     if (error) throw new Error(`Retry failed: ${error.message}`);
@@ -96,7 +96,7 @@ class MedAcademyVideoProvider implements VideoProvider {
   }
 
   async healthCheck(providerVideoId: string): Promise<HealthCheckResult> {
-    const { data, error } = await supabase.functions.invoke('video-health-scan', {
+    const { data, error } = await backendClient.functions.invoke('video-health-scan', {
       body: { action: 'health_check', provider_video_id: providerVideoId },
     });
     if (error) throw new Error(`Health check failed: ${error.message}`);
@@ -105,7 +105,7 @@ class MedAcademyVideoProvider implements VideoProvider {
 
   async checkProviderHealth(): Promise<ProviderHealthStatus> {
     try {
-      const { data, error } = await supabase.functions.invoke('video-health-scan', {
+      const { data, error } = await backendClient.functions.invoke('video-health-scan', {
         body: { action: 'provider_health' },
       });
       if (error) return 'degraded';
@@ -119,7 +119,7 @@ class MedAcademyVideoProvider implements VideoProvider {
     rawBody: string,
     headers: Record<string, string>,
   ): Promise<WebhookEvent | null> {
-    // Webhook verification is handled server-side in the Edge Function
+    // Webhook verification is handled server-side in the PHP action
     // This client-side stub is a no-op
     return null;
   }

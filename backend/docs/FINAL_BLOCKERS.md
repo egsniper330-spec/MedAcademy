@@ -43,7 +43,7 @@
 | # | Severity | Component | Description | Action Required |
 |---|----------|-----------|-------------|----------------|
 | 1 | LOW | Realtime polling | 3 subscriptions use 5s polling instead of real-time push | Acceptable for admin device management + session revocation |
-| 2 | LOW | medo-guard URLs | `supabase.co` in domain allowlist + error messages | Intentional — validates env var correctness. Update error messages when ready. |
+| 2 | LOW | (removed) | medo-guard URLs were removed | RESOLVED — medo-guard deleted |
 | 3 | LOW | video-settings UI text | `/functions/v1/vdocipher-otp/webhook` displayed as webhook URL description | Update UI text to reference PHP webhook URL |
 | 4 | LOW | `@supabase/supabase-js` in package.json | Package still installed | Keep for type compatibility; tree-shaken in production builds |
 

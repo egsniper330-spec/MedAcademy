@@ -69,7 +69,7 @@ export const STATIC_SECURITY = {
      *
      * This is a static value: changing the package name requires a new app.
      * Set as EXPO_PUBLIC_ANDROID_PACKAGE_NAME in .env.production.
-     * Mirror this value in the Supabase secret ANDROID_PACKAGE_NAME.
+     * Configure the corresponding server-side Android package setting.
      */
     androidPackageName: env('EXPO_PUBLIC_ANDROID_PACKAGE_NAME', true),
   },

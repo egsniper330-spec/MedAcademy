@@ -7,7 +7,7 @@ import React from 'react';
 import { View, Text, ScrollView, Pressable, Linking, useColorScheme } from 'react-native';
 import { router } from 'expo-router';
 import { ShieldOff, AlertTriangle, Smartphone, LogOut, Phone } from 'lucide-react-native';
-import { supabase } from '@/client/supabase';
+import { backendClient } from '@/client/backendClient';
 import { neuColors, neuFlatStyle } from '@/lib/neu';
 import { NeuButton } from '@/components/NeuButton';
 
@@ -17,7 +17,7 @@ export default function AccountBlockedScreen() {
   const flat = neuFlatStyle(isDark);
 
   const handleLogout = async () => {
-    await supabase.auth.signOut();
+    await backendClient.auth.signOut();
     router.replace('/(auth)/sign-in');
   };
 

@@ -17,9 +17,9 @@ const path = require('path');
 const root = process.cwd();
 const inv = JSON.parse(fs.readFileSync(path.join(root, 'backend/scripts/schema-inventory.json'), 'utf8'));
 const tableMap = new Map(inv.tables.map((t) => [t.name, new Set(t.columns.map((c) => c.name))]));
-// `users` is the GoTrue auth.users equivalent defined in schema.sql
+// `users` is the auth users table defined in schema.sql
 // (backend/scripts/generate-mysql-schema.mjs → USERS_TABLE) — it has no
-// CREATE TABLE in supabase/migrations, so add it manually here.
+// CREATE TABLE in the migration scripts, so add it manually here.
 tableMap.set('users', new Set([
   'id', 'aud', 'role', 'email', 'phone', 'encrypted_password', 'email_confirmed_at',
   'phone_confirmed_at', 'confirmation_token', 'recovery_token', 'email_change_token_new',

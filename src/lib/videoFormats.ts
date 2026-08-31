@@ -30,7 +30,7 @@ export const ACCEPTED_VIDEO_MIMES = new Set([
   'video/ogg',             // .ogv
   'video/x-flv',           // .flv
   'video/x-ms-wmv',        // .wmv
-  // Supabase Storage sometimes sniffs these for binary uploads:
+  // The PHP storage layer sometimes sniffs these for binary uploads:
   'application/octet-stream',
 ]);
 
@@ -201,7 +201,7 @@ export function validateVideoFile(
 
 /**
  * Given a reported MIME and file name, return the best MIME to use when
- * uploading to Supabase Storage.  Prefers the reported MIME when valid,
+ * uploading to PHP storage. Prefers the reported MIME when valid,
  * falls back to the extension-derived MIME, and finally to 'video/mp4'.
  */
 export function resolveUploadMime(

@@ -14,7 +14,7 @@ import {
   RotateCcw, Layers, FileText,
 } from 'lucide-react-native';
 import { useRouter } from 'expo-router';
-import { supabase } from '@/client/supabase';
+import { backendClient } from '@/client/backendClient';
 import { NeuCard } from '@/components/NeuCard';
 import { neuColors, neuFlatStyle, neuPressedStyle } from '@/lib/neu';
 import { formatBytes } from '@/lib/videoUploadEngine';
@@ -80,7 +80,7 @@ export function VideoHealthDetails({ upload, visible, onClose, onScanComplete }:
   const loadAuditLogs = useCallback(async () => {
     if (!upload?.id || auditLogs) return;
     setLoadingAudit(true);
-    const { data } = await supabase
+    const { data } = await backendClient
       .from('upload_audit_logs')
       .select('id, event, details, created_at')
       .eq('upload_id', upload.id)
@@ -95,7 +95,7 @@ export function VideoHealthDetails({ upload, visible, onClose, onScanComplete }:
     setScanning(true);
     setScanResult(null);
     try {
-      const { data, error } = await supabase.functions.invoke('video-health-scan', {
+      const { data, error } = await backendClient.functions.invoke('video-health-scan', {
         body: { action: 'scan_one', upload_id: upload.id },
       });
       if (error) throw error;
@@ -109,7 +109,7 @@ export function VideoHealthDetails({ upload, visible, onClose, onScanComplete }:
 
   const handleRegenerateThumbnail = async () => {
     if (!upload?.id) return;
-    await supabase.functions.invoke('video-health-scan', {
+    await backendClient.functions.invoke('video-health-scan', {
       body: {
         action: 'regenerate_thumbnail',
         upload_id: upload.id,

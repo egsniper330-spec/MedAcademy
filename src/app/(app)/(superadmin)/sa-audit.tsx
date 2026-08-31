@@ -472,28 +472,29 @@ export default function SAaudit() {
   return (
     <View style={{ flex: 1, backgroundColor: c.base }}>
 
-      {/* ── Header ─────────────────────────────────────────────────────── */}
-      <View style={{ paddingHorizontal: layout.screenPx, paddingTop: 20, paddingBottom: 8 }}>
-        <PageHeader
-          title="Audit Trail"
-          subtitle="Complete administrative activity log"
-          accentColor="#DC2626"
-          rightAction={
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-              {totalCount > 0 && (
-                <View style={{ backgroundColor: `${c.primary}15`, borderRadius: 10, paddingHorizontal: 10, paddingVertical: 4 }}>
-                  <Text style={{ fontSize: 12, fontWeight: '700', color: c.primary }}>{totalCount.toLocaleString('en-US')} entries</Text>
-                </View>
-              )}
-              <Pressable
-                onPress={() => setShowFilters(v => !v)}
-                style={{ padding: 8, backgroundColor: showFilters ? `${c.primary}18` : 'transparent', borderRadius: 10 }}
-              >
-                <Filter size={18} color={showFilters ? c.primary : c.text} opacity={showFilters ? 1 : 0.5} />
-              </Pressable>
-            </View>
-          }
-        />
+      {/* PageHeader sits OUTSIDE the inner padding view so it can own its own horizontal padding */}
+      <PageHeader
+        title="Audit Trail"
+        subtitle="Complete administrative activity log"
+        accentColor="#DC2626"
+        rightAction={
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+            {totalCount > 0 && (
+              <View style={{ backgroundColor: `${c.primary}15`, borderRadius: 10, paddingHorizontal: 10, paddingVertical: 4 }}>
+                <Text style={{ fontSize: 12, fontWeight: '700', color: c.primary }}>{totalCount.toLocaleString('en-US')} entries</Text>
+              </View>
+            )}
+            <Pressable
+              onPress={() => setShowFilters(v => !v)}
+              style={{ padding: 8, backgroundColor: showFilters ? `${c.primary}18` : 'transparent', borderRadius: 10 }}
+            >
+              <Filter size={18} color={showFilters ? c.primary : c.text} opacity={showFilters ? 1 : 0.5} />
+            </Pressable>
+          </View>
+        }
+      />
+
+      <View style={{ paddingHorizontal: layout.screenPx, paddingTop: 8, paddingBottom: 8 }}>
 
         {/* ── Category chips ─────────────────────────────────────────── */}
         <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 10 }}>

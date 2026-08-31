@@ -114,8 +114,9 @@ export default function AdminCreditsScreen() {
       <ScrollView
           contentContainerStyle={{ paddingBottom: layout.scrollBottom() }}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />}>
-        <View style={{ padding: layout.screenPx }}>
           <PageHeader title="Credit Management" subtitle="Add & remove doctor credits" accentColor="#7C3AED" />
+
+        <View style={{ paddingHorizontal: layout.screenPx }}>
 
           {/* Search */}
           <TextInput

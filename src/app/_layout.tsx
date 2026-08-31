@@ -2,7 +2,7 @@
 // Installs the global fetch interceptor that hard-blocks any request to the
 // retired backend (itrcmypbgqyaseexwvks).  Any forgotten dependency
 // will throw immediately with a full diagnostic instead of silently succeeding.
-import { assertMeDoBlocked } from '@/lib/medo-guard';
+import { assertBackendConfigured } from '@/lib/backend-config-guard';
 
 import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { Stack } from 'expo-router';
@@ -40,9 +40,8 @@ import { ForceUpdateScreen } from '@/components/ForceUpdateScreen';
 import { useForceUpdate } from '@/lib/useForceUpdate';
 import "../global.css";
 
-// Assert the active project is xdvjwfuqipatkpimejcb at startup.
-// This runs once when the root layout module is first evaluated.
-assertMeDoBlocked();
+// Fail clearly when the authoritative PHP API is not configured.
+assertBackendConfigured();
 
 /**
  * ForceUpdateGate — rendered at the ROOT level, above ALL navigation.

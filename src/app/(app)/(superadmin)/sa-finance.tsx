@@ -93,12 +93,10 @@ export default function SAFinance() {
       style={{ flex: 1, backgroundColor: c.base }}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />}
     >
-      <View style={{ padding: layout.screenPx }}>
+      {/* PageHeader sits OUTSIDE the inner padding view so it can own its own horizontal padding */}
+      <PageHeader title="Finance" subtitle="Revenue, ledger & analytics" accentColor="#16A34A" rightAction={<Bell />} />
 
-        {/* ── Header ──────────────────────────────────────────────────── */}
-        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6, marginTop: 8 }}>
-          <PageHeader title="Finance" subtitle="Revenue, ledger & analytics" accentColor="#16A34A" rightAction={<Bell />} />
-        </View>
+      <View style={{ paddingHorizontal: layout.screenPx }}>
 
         {/* ── KPI strip ───────────────────────────────────────────────── */}
         {loading ? (
@@ -125,25 +123,25 @@ export default function SAFinance() {
 
         {/* ── Platform Revenue ─────────────────────────────────────────── */}
         <SectionLabel title="Platform Revenue" c={c} />
-        <NavItem icon={DollarSign}  label="Revenue Dashboard"   description="All-time earnings, pricing & payouts"     color="#16A34A" path="/(app)/(superadmin)/revenue"           badge="LIVE" isDark={isDark} c={c} />
-        <NavItem icon={TrendingUp}  label="Revenue Analytics"   description="Revenue trends and breakdowns"            color="#2DA8FF" path="/(app)/(admin)/revenue-analytics"       isDark={isDark} c={c} />
-        <NavItem icon={Globe}       label="Currency Settings"   description="Platform default currency configuration"   color="#D97706" path="/(app)/(superadmin)/currency"           isDark={isDark} c={c} />
+        <NavItem icon={DollarSign}  label="Revenue Dashboard"   description="All-time earnings, pricing & payouts"     color="#16A34A" path="/revenue"           badge="LIVE" isDark={isDark} c={c} />
+        <NavItem icon={TrendingUp}  label="Revenue Analytics"   description="Revenue trends and breakdowns"            color="#2DA8FF" path="/revenue-analytics"       isDark={isDark} c={c} />
+        <NavItem icon={Globe}       label="Currency Settings"   description="Platform default currency configuration"   color="#D97706" path="/currency"           isDark={isDark} c={c} />
 
         {/* ── Credits ──────────────────────────────────────────────────── */}
         <SectionLabel title="Credits" c={c} />
-        <NavItem icon={CreditCard}  label="Credits"             description="Manage, history & analytics in one place"  color="#7C3AED" path="/(app)/(superadmin)/sa-credits"          isDark={isDark} c={c} />
-        <NavItem icon={UsersRound}  label="Bulk Credits"        description="Mass credit allocation to doctors"         color="#16A34A" path="/(app)/(admin)/bulk-credits"              isDark={isDark} c={c} />
+        <NavItem icon={CreditCard}  label="Credits"             description="Manage, history & analytics in one place"  color="#7C3AED" path="/sa-credits"          isDark={isDark} c={c} />
+        <NavItem icon={UsersRound}  label="Bulk Credits"        description="Mass credit allocation to doctors"         color="#16A34A" path="/bulk-credits"              isDark={isDark} c={c} />
 
         {/* ── Activation Codes ─────────────────────────────────────────── */}
         <SectionLabel title="Activation Codes" c={c} />
-        <NavItem icon={FileText}    label="Codes Manager"       description="All codes: active, used, expired"          color="#D97706" path="/(app)/(admin)/codes"                    isDark={isDark} c={c} />
-        <NavItem icon={Hash}        label="Code History"        description="Activation code usage history"             color="#6B7280" path="/(app)/(admin)/code-history"             isDark={isDark} c={c} />
+        <NavItem icon={FileText}    label="Codes Manager"       description="All codes: active, used, expired"          color="#D97706" path="/codes"                    isDark={isDark} c={c} />
+        <NavItem icon={Hash}        label="Code History"        description="Activation code usage history"             color="#6B7280" path="/code-history"             isDark={isDark} c={c} />
 
 
         {/* ── Operations & Alerts ──────────────────────────────────────── */}
         <SectionLabel title="Operations" c={c} />
-        <NavItem icon={AlertTriangle} label="Fraud Alerts"      description="Suspicious transactions & anomalies"       color="#DC2626" path="/(app)/(admin)/fraud-alerts"             isDark={isDark} c={c} />
-        <NavItem icon={Download}    label="Export Center"       description="Export financial data as CSV"              color="#6B7280" path="/(app)/(admin)/export-panel"              isDark={isDark} c={c} />
+        <NavItem icon={AlertTriangle} label="Fraud Alerts"      description="Suspicious transactions & anomalies"       color="#DC2626" path="/fraud-alerts"             isDark={isDark} c={c} />
+        <NavItem icon={Download}    label="Export Center"       description="Export financial data as CSV"              color="#6B7280" path="/export-panel"              isDark={isDark} c={c} />
 
         <View style={{ height: 32 }} />
       </View>

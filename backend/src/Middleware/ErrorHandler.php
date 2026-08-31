@@ -41,7 +41,8 @@ final class ErrorHandler
                     'previous' => $e->getPrevious()->getMessage(),
                 ]);
             }
-            Response::error($e->getMessage(), $e->status, 'api_error', $e->errors);
+            $meta = Config::isDebug() ? self::debugMeta($e) : [];
+            Response::error($e->getMessage(), $e->status, 'api_error', $e->errors, $meta);
         }
 
         $logger->error('Unhandled exception', [
@@ -52,10 +53,23 @@ final class ErrorHandler
             'trace' => self::shortTrace($e),
         ]);
 
-        if (Config::isProduction()) {
-            Response::error('Internal server error', 500, 'internal_error');
+        if (Config::isDebug()) {
+            Response::error($e->getMessage(), 500, 'internal_error', [], self::debugMeta($e));
         }
-        Response::error($e->getMessage(), 500, 'internal_error');
+        Response::error('Internal server error', 500, 'internal_error');
+    }
+
+    /**
+     * Debug-only exception metadata. NEVER surfaced when APP_DEBUG=false.
+     * Only non-secret fields are included: class name, file path, line number.
+     */
+    private static function debugMeta(Throwable $e): array
+    {
+        return [
+            'exception' => get_class($e),
+            'file' => $e->getFile(),
+            'line' => $e->getLine(),
+        ];
     }
 
     private static function shortTrace(Throwable $e): array

@@ -86,8 +86,10 @@ export default function EditProfile() {
 
   return (
     <KeyboardAvoidingView behavior={process.env.EXPO_OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1, backgroundColor: c.base }}>
-      <ScrollView contentContainerStyle={{ flexGrow: 1, padding: 24, paddingTop: 0 }} keyboardShouldPersistTaps="handled">
+      <ScrollView contentContainerStyle={{ flexGrow: 1, paddingTop: 0 }} keyboardShouldPersistTaps="handled">
         <PageHeader title="Edit Profile" showBack />
+
+      <View style={{ paddingHorizontal: 24 }}>
 
         {/* Avatar */}
         <View style={{ alignItems: 'center', marginBottom: 28 }}>
@@ -178,6 +180,7 @@ export default function EditProfile() {
             Permanently embedded as a forensic watermark in every video you watch. Cannot be changed.
           </Text>
         </NeuCard>
+      </View>
       </ScrollView>
     </KeyboardAvoidingView>
   );

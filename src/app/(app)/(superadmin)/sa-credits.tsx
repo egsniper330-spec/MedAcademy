@@ -661,7 +661,7 @@ const router = useRouter();
 
               {/* Parties */}
               {[
-                { label: 'Doctor', value: selected.doctor_name, sub: selected.doctor_email, icon: <User size={14} color={c.primary} />, onPress: () => { setSelected(null); router.push('/(app)/(superadmin)/sa-users' as RelativePathString); } },
+                { label: 'Doctor', value: selected.doctor_name, sub: selected.doctor_email, icon: <User size={14} color={c.primary} />, onPress: () => { setSelected(null); router.push('/sa-users' as RelativePathString); } },
                 { label: 'Performed By', value: selActorName, sub: selActorRole, icon: <CheckCircle size={14} color="#16A34A" />, onPress: null },
                 { label: 'Student', value: selected.student_name, sub: null, icon: <User size={14} color="#7C3AED" />, onPress: null },
                 { label: 'Course', value: selected.course_title, sub: null, icon: <BookOpen size={14} color="#D97706" />, onPress: null },
@@ -695,7 +695,7 @@ const router = useRouter();
               <View style={{ marginTop: 14, gap: 4 }}>
                 <Text style={{ fontSize: 10, color: c.text, opacity: 0.3 }}>TX: {selected.id}</Text>
                 {selected.audit_log_id && (
-                  <Pressable onPress={() => { setSelected(null); router.push('/(app)/(superadmin)/sa-audit' as RelativePathString); }}>
+                  <Pressable onPress={() => { setSelected(null); router.push('/sa-audit' as RelativePathString); }}>
                     <Text style={{ fontSize: 10, color: c.primary, opacity: 0.7 }}>→ View Audit Log</Text>
                   </Pressable>
                 )}

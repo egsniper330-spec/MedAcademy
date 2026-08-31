@@ -7,7 +7,7 @@ import {
   View, Text, TextInput, Pressable, ActivityIndicator, useColorScheme,
 } from 'react-native';
 import { Search, X, Mail, Phone, Hash, User } from 'lucide-react-native';
-import { supabase } from '@/client/supabase';
+import { backendClient } from '@/client/backendClient';
 import { detectIdentifierType } from '@/lib/identifier';
 import { displayPhoneNational } from '@/lib/phone';
 import { neuColors } from '@/lib/neu';
@@ -66,7 +66,7 @@ export function UserSearchInput({
     setSearched(false);
 
     try {
-      const { data, error } = await supabase.rpc('lookup_user_by_identifier', {
+      const { data, error } = await backendClient.rpc('lookup_user_by_identifier', {
         p_identifier: trimmed,
       });
 

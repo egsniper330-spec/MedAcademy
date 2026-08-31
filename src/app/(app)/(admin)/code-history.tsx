@@ -147,12 +147,14 @@ export default function CodeHistoryScreen() {
         contentContainerStyle={{ paddingBottom: layout.scrollBottom() }}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />}
         ListHeaderComponent={
-          <View style={{ padding: layout.screenPx, paddingTop: 8 }}>
+          <>
+            {/* PageHeader sits OUTSIDE the inner padding view so it can own its own horizontal padding */}
+            <PageHeader title="Code Ledger" subtitle={`Immutable — ${rows.length} codes`} accentColor="#D97706" />
+
+            <View style={{ paddingHorizontal: layout.screenPx, paddingTop: 8 }}>
             {/* Header */}
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 20 }}>
-              <View style={{ flex: 1 }}>
-                <PageHeader title="Code Ledger" subtitle={`Immutable — ${rows.length} codes`} accentColor="#D97706" />
-              </View>
+              <View style={{ flex: 1 }} />
               <Pressable onPress={() => setShowFilters(v => !v)}
                 style={{ width: 38, height: 38, borderRadius: 12, backgroundColor: showFilters ? c.primary : c.base, alignItems: 'center', justifyContent: 'center',
                   shadowColor: c.shadowDark, shadowOffset: { width: 2, height: 2 }, shadowOpacity: 0.5, shadowRadius: 5 }}>
@@ -212,6 +214,7 @@ export default function CodeHistoryScreen() {
 
             {loading && <ActivityIndicator size="large" color={c.primary} style={{ marginTop: 40 }} />}
           </View>
+          </>
         }
         renderItem={({ item: row }) => {
           const color = statusColor(row.status);

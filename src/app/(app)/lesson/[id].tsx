@@ -7,7 +7,7 @@ import {
   Lock, Paperclip, Play, ShieldAlert, X,
 } from 'lucide-react-native';
 import { getLessonById, upsertLessonProgress, getMySubscriptions, getMaterialSignedUrl, getLessonPdfSignedUrl } from '@/lib/api';
-import { supabase } from '@/client/supabase';
+import { backendClient } from '@/client/backendClient';
 import { useProfileStore } from '@/lib/store';
 import { NeuCard } from '@/components/NeuCard';
 import { NeuButton } from '@/components/NeuButton';
@@ -149,7 +149,7 @@ export default function LessonPlayer() {
       }
       // Load persisted completion + resume position from DB on every focus
       if (profile?.id) {
-        const { data: prog } = await supabase
+        const { data: prog } = await backendClient
           .from('lesson_progress')
           .select('completed, watch_position_seconds')
           .eq('student_id', profile.id)

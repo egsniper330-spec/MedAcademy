@@ -9,12 +9,12 @@ use MedAcademy\Http\ApiException;
 use MedAcademy\Utils\Config;
 
 /**
- * Filesystem storage replacing Supabase Storage.
+ * Filesystem storage for the PHP/MySQL application.
  *
- *   storage/public/   — public files (served by the web server directly)
+ *   storage/public/   — public files (served through the public-file route or web server)
  *   storage/private/  — private files, served ONLY through signed URLs
  *                       generated here after the same authorisation checks
- *                       the get-signed-url Edge Function enforced.
+ *                       used by the PHP storage API.
  *
  * Buckets (from 00002_create_storage_buckets.sql):
  *   avatars, course-images, lesson-pdfs, lesson-materials, app-assets,
@@ -44,6 +44,11 @@ final class StorageService
     public function publicUrl(string $bucket, string $path): string
     {
         return rtrim(Config::string('APP_URL'), '/') . '/storage/public/' . $this->bucketPath($bucket, $path);
+    }
+
+    public function publicFilePath(string $bucket, string $path): string
+    {
+        return $this->publicDir . '/' . $this->bucketPath($bucket, $path);
     }
 
     /**
@@ -76,7 +81,7 @@ final class StorageService
     /**
      * Time-limited signed URL for a private object. The signature is an HMAC
      * over path+expiry using a server-side secret; the URL is consumed by a
-     * small PHP endpoint (see routes: GET /storage/object) that validates it.
+     * small PHP endpoint (see routes: GET /storage/signed) that validates it.
      */
     public function signedUrl(string $bucket, string $path, ?int $ttl = null): string
     {

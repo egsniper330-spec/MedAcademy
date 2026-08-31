@@ -103,8 +103,9 @@ export default function MaintenanceModeScreen() {
     <ScrollView style={{ flex: 1, backgroundColor: c.base }}
           contentContainerStyle={{ paddingBottom: layout.scrollBottom() }}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />}>
-      <View style={{ padding: layout.screenPx }}>
-        <PageHeader title="Maintenance Mode" subtitle="Control platform availability" accentColor="#DC2626" />
+      <PageHeader title="Maintenance Mode" subtitle="Control platform availability" accentColor="#DC2626" />
+
+      <View style={{ paddingHorizontal: layout.screenPx }}>
 
         {loading ? <ActivityIndicator color={c.primary} style={{ marginTop: 40 }} /> : (
           <>

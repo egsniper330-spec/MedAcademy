@@ -21,7 +21,7 @@ import {
   Eye, EyeOff, FileText, Shield, HeartHandshake, Info, Camera,
 } from 'lucide-react-native';
 import type { RelativePathString } from 'expo-router';
-import { supabase } from '@/client/supabase';
+import { backendClient } from '@/client/backendClient';
 import { useProfileStore } from '@/lib/store';
 import {
   getProfile, getMySubscriptions, updateProfile,
@@ -354,11 +354,11 @@ export default function StudentProfile() {
       const { fetch: expoFetch } = await import('expo/fetch');
       const response = await expoFetch(uri);
       const buffer   = await response.arrayBuffer();
-      const { error: upErr } = await supabase.storage
+      const { error: upErr } = await backendClient.storage
         .from('user-avatars')
         .upload(path, buffer, { upsert: true, contentType: asset.mimeType ?? `image/${ext}` });
       if (upErr) throw upErr;
-      const { data: { publicUrl } } = supabase.storage.from('user-avatars').getPublicUrl(path);
+      const { data: { publicUrl } } = backendClient.storage.from('user-avatars').getPublicUrl(path);
       const updated = await updateProfile(profile.id, { avatar_url: publicUrl });
       setProfile({ ...profile, ...(updated as any) });
       showToast({ type: 'success', message: 'Avatar updated!' });
@@ -375,7 +375,7 @@ export default function StudentProfile() {
     if (!profile?.id) { setDataLoading(false); return; }
     setDataLoading(true);
     try {
-      const { data: { user } } = await supabase.auth.getUser();
+      const { data: { user } } = await backendClient.auth.getUser();
       if (user) {
         const freshProfile = await getProfile(user.id);
         if (freshProfile) setProfile(freshProfile as any);
@@ -457,10 +457,10 @@ export default function StudentProfile() {
   const handleLogout = async () => {
     setShowLogout(false);
     // Eagerly wipe the profile store so no stale role data remains visible
-    // while supabase.auth.signOut() completes and the new session initialises.
+    // while backendClient.auth.signOut() completes and the new session initialises.
     const { clearProfile } = useProfileStore.getState();
     clearProfile();
-    await supabase.auth.signOut();
+    await backendClient.auth.signOut();
   };
 
   const completedCount = subscriptions.filter(s => s.completed_at).length;

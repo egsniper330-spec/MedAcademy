@@ -32,7 +32,7 @@ import { getPublicEmail, getAllUsers, updateUserStatus, blockUser, unblockUser, 
   demoteDoctor, demoteAdminToStudent, trashUser, undoTrash, bulkUserOps,
   enableUnlimitedDevices, disableUnlimitedDevices, getLoginHistory,
 } from '@/lib/api';
-import { supabase } from '@/client/supabase';
+import { backendClient } from '@/client/backendClient';
 import { useDebounce } from '@/lib/useDebounce';
 import { useActionLoading } from '@/lib/useActionLoading';
 import { logAndParse, parseError } from '@/lib/parseError';
@@ -160,7 +160,7 @@ export default function SAUsers() {
     if (!trimmed) { loadData(); return; }
     setSearching(true);
     try {
-      const { data } = await supabase.rpc('lookup_user_by_identifier', { p_identifier: trimmed });
+      const { data } = await backendClient.rpc('lookup_user_by_identifier', { p_identifier: trimmed });
       const role = activeTab === 'all' ? undefined : activeTab;
       setUsers(role ? (data ?? []).filter((u: any) => u.role === role) : (data ?? []));
     } catch (_) {}
@@ -222,7 +222,7 @@ export default function SAUsers() {
       setHistoryLoading(false);
       return;
     }
-    if (key === 'earnings') { setMenuVisible(false); router.push(`/(app)/(superadmin)/sa-doctor-earnings?doctor_id=${id}&doctor_name=${encodeURIComponent(selectedUser?.full_name ?? '')}` as RelativePathString); return; }
+    if (key === 'earnings') { setMenuVisible(false); router.push(`/sa-doctor-earnings?doctor_id=${id}&doctor_name=${encodeURIComponent(selectedUser?.full_name ?? '')}` as RelativePathString); return; }
     if (key === 'audit')    { setMenuVisible(false); router.push(`/(app)/user-activity?user_id=${id}&user_name=${encodeURIComponent(selectedUser?.full_name ?? 'User')}` as RelativePathString); return; }
 
     const actionMap: Partial<Record<ActionKey, () => Promise<void>>> = {
@@ -296,36 +296,35 @@ export default function SAUsers() {
       <ScrollView
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />}
       >
-        <View style={{ padding: layout.screenPx }}>
-          {/* Header */}
-          <View style={{ marginBottom: 20, marginTop: 8 }}>
-            <PageHeader
-              title="Users"
-              subtitle="All platform members"
-              accentColor={c.primary}
-              rightAction={
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                  <Pressable
-                    onPress={() => setBulkMode(m => !m)}
-                    style={[neuFlatStyle(isDark), { paddingHorizontal: 12, paddingVertical: 8, borderRadius: 10 }]}
-                  >
-                    <Text style={{ fontSize: 12, fontWeight: '700', color: bulkMode ? c.primary : c.text }}>
-                      {bulkMode ? 'Done' : 'Select'}
-                    </Text>
-                  </Pressable>
-                  <Pressable
-                    onPress={() => setCreateVisible(true)}
-                    style={[neuFlatStyle(isDark), {
-                      width: 36, height: 36, borderRadius: 10,
-                      alignItems: 'center', justifyContent: 'center',
-                    }]}
-                  >
-                    <UserPlus size={18} color={c.primary} />
-                  </Pressable>
-                </View>
-              }
-            />
-          </View>
+          {/* PageHeader sits OUTSIDE the inner padding view so it can own its own horizontal padding */}
+          <PageHeader
+            title="Users"
+            subtitle="All platform members"
+            accentColor={c.primary}
+            rightAction={
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                <Pressable
+                  onPress={() => setBulkMode(m => !m)}
+                  style={[neuFlatStyle(isDark), { paddingHorizontal: 12, paddingVertical: 8, borderRadius: 10 }]}
+                >
+                  <Text style={{ fontSize: 12, fontWeight: '700', color: bulkMode ? c.primary : c.text }}>
+                    {bulkMode ? 'Done' : 'Select'}
+                  </Text>
+                </Pressable>
+                <Pressable
+                  onPress={() => setCreateVisible(true)}
+                  style={[neuFlatStyle(isDark), {
+                    width: 36, height: 36, borderRadius: 10,
+                    alignItems: 'center', justifyContent: 'center',
+                  }]}
+                >
+                  <UserPlus size={18} color={c.primary} />
+                </Pressable>
+              </View>
+            }
+          />
+
+        <View style={{ paddingHorizontal: layout.screenPx }}>
 
           {/* Undo toast */}
           {undoInfo && (

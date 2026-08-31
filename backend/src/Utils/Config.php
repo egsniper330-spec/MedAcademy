@@ -65,4 +65,14 @@ final class Config
     {
         return self::string('APP_ENV', 'production') === 'production';
     }
+
+    /**
+     * Debug mode is controlled by APP_DEBUG (default false). When true, the
+     * error handler includes the real exception class/message/file/line in
+     * JSON responses. Never enabled in production deployments.
+     */
+    public static function isDebug(): bool
+    {
+        return self::bool('APP_DEBUG', false);
+    }
 }

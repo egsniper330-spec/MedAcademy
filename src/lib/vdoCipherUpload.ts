@@ -35,7 +35,7 @@
 import { File as FSFile, Paths as FSPaths } from 'expo-file-system';
 // Legacy API — copyAsync correctly handles content:// source URIs on Android
 import { copyAsync, readAsStringAsync, EncodingType } from 'expo-file-system/legacy';
-import { uploadVideoChunk } from './api';
+import { uploadVideoChunkWithProgress } from './uploadVideoChunkXhr';
 import { setAbortController, removeAbortController } from './uploadQueueStore';
 
 /**
@@ -129,9 +129,10 @@ export async function uploadVideoInChunks(params: ChunkedUploadParams): Promise<
       chunkData = base64ToUint8Array(b64);
     }
 
-    const chunkUploadStart = Date.now();
-
-    const result = await uploadVideoChunk({
+    // Per-chunk progress: bytes loaded/total for this chunk. This enables
+    // continuous byte-level progress instead of only updating after each chunk.
+    const bytesBeforeChunk = i * chunkSizeBytes;
+    const result = await uploadVideoChunkWithProgress({
       uploadId,
       chunkIndex:  i,
       totalChunks,
@@ -139,12 +140,27 @@ export async function uploadVideoInChunks(params: ChunkedUploadParams): Promise<
       fileName,
       mimeType,
       signal: ac.signal,
+      onChunkProgress: (loaded) => {
+        // total bytes uploaded so far = previous chunks + in-flight bytes of current chunk
+        const cumulative = Math.min(bytesBeforeChunk + loaded, fileSize);
+        const totalElapsedMs  = Math.max(1, Date.now() - uploadStart);
+        const overallSpeedBps = (cumulative / totalElapsedMs) * 1000;
+        const remainingBytes  = fileSize - cumulative;
+        const etaSeconds     = overallSpeedBps > 0 ? Math.round(remainingBytes / overallSpeedBps) : 0;
+
+        onProgress?.({
+          chunksCompleted: i,
+          totalChunks,
+          bytesUploaded:   cumulative,
+          speedBps:        Math.round(overallSpeedBps),
+          etaSeconds,
+          assemblyTriggered: false,
+        });
+      },
     });
 
-    const chunkElapsedMs = Math.max(1, Date.now() - chunkUploadStart);
-    speedBps = Math.round((thisChunkBytes / chunkElapsedMs) * 1000);
-
-    bytesUploadedSoFar += thisChunkBytes;
+    // Finalize this chunk's contribution after successful upload
+    bytesUploadedSoFar = Math.min((i + 1) * chunkSizeBytes, fileSize);
     assemblyTriggered = result.assembly_triggered;
 
     const totalElapsedMs  = Math.max(1, Date.now() - uploadStart);
@@ -338,7 +354,7 @@ export async function uploadToVdoCipherS3(params: VdoCipherUploadParams): Promis
  * Stabilise a file URI for multi-step pipelines on Android.
  *
  * Android `content://` URIs are one-time grants scoped to the DocumentPicker
- * transaction. If the app performs an async network call (e.g. Supabase Storage
+ * transaction. If the app performs an async network call (e.g. PHP storage
  * upload) between picking the file and calling uploadToVdoCipherS3, the OS may
  * revoke the grant → XHR streams 0 bytes → S3 returns "No content provided".
  *

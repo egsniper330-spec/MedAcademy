@@ -51,8 +51,9 @@ export default function SuperAdminConfig() {
     <ScrollView style={{ flex: 1, backgroundColor: c.base }}
           contentContainerStyle={{ paddingBottom: layout.scrollBottom() }}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />}>
-      <View style={{ padding: layout.screenPx }}>
-        <PageHeader title="System Configuration" subtitle="Manage platform-wide settings" />
+      <PageHeader title="System Configuration" subtitle="Manage platform-wide settings" />
+
+      <View style={{ paddingHorizontal: layout.screenPx }}>
 
         {loading ? <ActivityIndicator color={c.primary} style={{ marginTop: 40 }} /> : (
           configs.length === 0 ? (

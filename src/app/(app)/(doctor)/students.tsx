@@ -428,12 +428,13 @@ export default function DoctorStudents() {
       <ScrollView
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />}
       >
-        <View style={{ padding: layout.screenPx }}>
           <PageHeader
             title="Students"
             subtitle={`${enrollments.length} total · ${credits?.remaining ?? 0} credits remaining`}
             accentColor={c.primary}
           />
+
+        <View style={{ paddingHorizontal: layout.screenPx }}>
 
           {/* Action buttons row */}
           <View style={{ flexDirection: 'row', gap: 10, marginBottom: 20 }}>

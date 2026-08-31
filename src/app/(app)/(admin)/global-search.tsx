@@ -32,7 +32,7 @@ import { useDebounce } from '@/lib/useDebounce';
 import { friendlyError } from '@/lib/validation';
 import { PageHeader } from '@/components/PageHeader';
 import { useImpersonationStore } from '@/lib/store';
-import { supabase } from '@/client/supabase';
+import { backendClient } from '@/client/backendClient';
 import { CourseThumbnail } from '@/components/CourseThumbnail';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
@@ -226,12 +226,12 @@ export default function GlobalSearchScreen() {
           showToast({ type: 'success', message: `${user.full_name} promoted to Doctor.` });
           break;
         case 'unlimited_devices':
-          await supabase.from('profiles').update({ max_devices: null }).eq('id', user.id);
+          await backendClient.from('profiles').update({ max_devices: null }).eq('id', user.id);
           setDrawerUser({ ...user, max_devices: null });
           showToast({ type: 'success', message: 'Unlimited devices granted.' });
           break;
         case 'limit_devices':
-          await supabase.from('profiles').update({ max_devices: 2 }).eq('id', user.id);
+          await backendClient.from('profiles').update({ max_devices: 2 }).eq('id', user.id);
           setDrawerUser({ ...user, max_devices: 2 });
           showToast({ type: 'success', message: 'Device limit set to 2.' });
           break;
@@ -239,7 +239,7 @@ export default function GlobalSearchScreen() {
           setDeleteModalVisible(true);
           break;
         case 'impersonate': {
-          const { data: { session } } = await supabase.auth.getSession();
+          const { data: { session } } = await backendClient.auth.getSession();
           if (!session) break;
           startImpersonation(
             session.access_token,
@@ -800,8 +800,9 @@ export default function GlobalSearchScreen() {
   return (
     <View style={{ flex: 1, backgroundColor: c.base }}>
       <ScrollView contentContainerStyle={{ paddingBottom: layout.scrollBottom() }}>
-        <View style={{ padding: layout.screenPx }}>
           <PageHeader title="Global Search" subtitle="Search users, courses, academic entities" accentColor={c.primary} />
+
+        <View style={{ paddingHorizontal: layout.screenPx }}>
 
           {/* Search bar */}
           <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>

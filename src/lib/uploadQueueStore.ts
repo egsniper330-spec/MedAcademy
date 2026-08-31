@@ -129,12 +129,16 @@ export const useUploadQueueStore = create<UploadQueueState>()(
       // On rehydration, mark any mid-upload tasks as 'recovering'
       onRehydrateStorage: () => (state) => {
         if (!state) return;
-        state.tasks = state.tasks.map((t) => {
-          if (t.status === 'uploading' || t.status === 'paused' || t.status === 'waiting') {
-            return { ...t, status: 'recovering' as UploadStatus };
-          }
-          return t;
-        });
+        // The queue is for active/recoverable work only. Completed and canceled
+        // records are persisted by the backend/history, never rehydrated here.
+        state.tasks = state.tasks
+          .filter((t) => t.status !== 'ready' && t.status !== 'canceled')
+          .map((t) => {
+            if (t.status === 'uploading' || t.status === 'paused' || t.status === 'waiting') {
+              return { ...t, status: 'recovering' as UploadStatus };
+            }
+            return t;
+          });
       },
     },
   ),

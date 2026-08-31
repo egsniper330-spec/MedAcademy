@@ -123,9 +123,10 @@ export default function MyDevices() {
       <ScrollView
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />}
       >
-        <View style={{ padding: layout.screenPx, paddingTop: 12 }}>
           {/* Back navigation header */}
           <PageHeader title="My Devices" subtitle="Manage your registered devices" showBack />
+
+        <View style={{ paddingHorizontal: layout.screenPx, paddingTop: 12 }}>
 
           {/* Device icon + history button row */}
           <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 20 }}>

@@ -14,7 +14,7 @@ import {
   Shield, Camera, Video, AlertTriangle, RotateCcw, Save,
   ChevronDown, Info,
 } from 'lucide-react-native';
-import { supabase } from '@/client/supabase';
+import { backendClient } from '@/client/backendClient';
 import { NeuCard } from '@/components/NeuCard';
 import { NeuButton } from '@/components/NeuButton';
 import { neuColors, useLayout, neuFlatStyle, safeBottom } from '@/lib/neu';
@@ -117,7 +117,7 @@ export default function ContentProtectionPolicyScreen() {
 
   const loadPolicy = useCallback(async () => {
     setLoading(true);
-    const { data } = await supabase
+    const { data } = await backendClient
       .from('content_protection_policies')
       .select('*')
       .eq('id', '00000000-0000-0000-0000-000000000001')
@@ -130,7 +130,7 @@ export default function ContentProtectionPolicyScreen() {
 
   const handleSave = async () => {
     setSaving(true); setError(''); setSaved(false);
-    const { error: err } = await supabase
+    const { error: err } = await backendClient
       .from('content_protection_policies')
       .update({ ...policy, updated_at: new Date().toISOString() })
       .eq('id', '00000000-0000-0000-0000-000000000001');

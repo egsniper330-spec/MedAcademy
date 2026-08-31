@@ -14,7 +14,7 @@ import {
   BarChart2, ShieldCheck, ShieldAlert, RotateCcw, ExternalLink,
 } from 'lucide-react-native';
 import { PageHeader } from '@/components/PageHeader';
-import { supabase } from '@/client/supabase';
+import { backendClient } from '@/client/backendClient';
 import { NeuCard } from '@/components/NeuCard';
 import { neuColors, neuFlatStyle, neuPressedStyle, useLayout } from '@/lib/neu';
 import { formatBytes } from '@/lib/videoUploadEngine';
@@ -62,7 +62,7 @@ export default function VideoMonitorScreen() {
   const load = useCallback(async () => {
     try {
       const [{ data: uploadData }, { data: auditData }] = await Promise.all([
-        supabase
+        backendClient
           .from('video_uploads')
           .select(`id, file_name, file_size, mime_type, status, bytes_uploaded,
                    upload_speed_bps, error_message, retry_count, storage_path,
@@ -73,7 +73,7 @@ export default function VideoMonitorScreen() {
                    course:courses(id, title)`)
           .order('created_at', { ascending: false })
           .limit(200),
-        supabase
+        backendClient
           .from('upload_audit_logs')
           .select(`id, event, details, created_at, upload:video_uploads(file_name)`)
           .order('created_at', { ascending: false })
@@ -89,13 +89,13 @@ export default function VideoMonitorScreen() {
   const onRefresh = async () => { setRefreshing(true); await load(); setRefreshing(false); };
 
   const handleDelete = async (uploadId: string, storagePath: string | null) => {
-    if (storagePath) await supabase.storage.from('lesson-materials').remove([storagePath]);
-    await supabase.from('video_uploads').delete().eq('id', uploadId);
+    if (storagePath) await backendClient.storage.from('lesson-materials').remove([storagePath]);
+    await backendClient.from('video_uploads').delete().eq('id', uploadId);
     setUploads((u) => u.filter((x) => x.id !== uploadId));
   };
 
   const handleRetry = async (uploadId: string) => {
-    await supabase.from('video_uploads').update({
+    await backendClient.from('video_uploads').update({
       status: 'waiting', error_message: null,
       verification_status: 'pending', verification_error: null,
     }).eq('id', uploadId);

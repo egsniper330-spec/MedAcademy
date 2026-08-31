@@ -13,7 +13,7 @@ import { User, Search, AlertTriangle, LogIn } from 'lucide-react-native';
 import { PageHeader } from '@/components/PageHeader';
 import { useFocusEffect } from 'expo-router';
 import { searchUsers, getAuditLogs } from '@/lib/api';
-import { supabase } from '@/client/supabase';
+import { backendClient } from '@/client/backendClient';
 import { NeuCard } from '@/components/NeuCard';
 import { NeuButton } from '@/components/NeuButton';
 import { useToast } from '@/components/Toast';
@@ -67,20 +67,20 @@ export default function ImpersonationScreen() {
     setImpersonating(targetUser.id);
     try {
       // Save current session tokens BEFORE switching
-      const { data: { session: currentSession } } = await supabase.auth.getSession();
+      const { data: { session: currentSession } } = await backendClient.auth.getSession();
       if (!currentSession) throw new Error('No active session to save.');
 
       const originalAccessToken  = currentSession.access_token;
       const originalRefreshToken = currentSession.refresh_token;
-      const { data: { user: currentUser } } = await supabase.auth.getUser();
+      const { data: { user: currentUser } } = await backendClient.auth.getUser();
       const originalEmail = currentUser?.email ?? null;
 
       // Get current admin profile role
-      const { data: profile } = await supabase.from('profiles').select('role').eq('id', currentUser!.id).single();
+      const { data: profile } = await backendClient.from('profiles').select('role').eq('id', currentUser!.id).single();
       const originalRole = (profile?.role ?? 'admin') as UserRole;
 
       // Call the impersonate Edge Function
-      const { data, error } = await supabase.functions.invoke('impersonate', {
+      const { data, error } = await backendClient.functions.invoke('impersonate', {
         body: { target_user_id: targetUser.id },
       });
 
@@ -92,7 +92,7 @@ export default function ImpersonationScreen() {
       if (!data?.email_otp || !data?.email) throw new Error('No impersonation token returned from server.');
 
       // Exchange OTP for a real session
-      const { data: sessionData, error: verifyErr } = await supabase.auth.verifyOtp({
+      const { data: sessionData, error: verifyErr } = await backendClient.auth.verifyOtp({
         email: data.email,
         token: data.email_otp,
         type: 'magiclink',
@@ -131,8 +131,9 @@ export default function ImpersonationScreen() {
 
   return (
     <ScrollView style={{ flex: 1, backgroundColor: c.base }}>
-      <View style={{ padding: layout.screenPx }}>
-        <PageHeader title="Impersonation" subtitle="Log in as another user" accentColor="#D97706" />
+      <PageHeader title="Impersonation" subtitle="Log in as another user" accentColor="#D97706" />
+
+      <View style={{ paddingHorizontal: layout.screenPx }}>
 
         <NeuCard style={{ marginBottom: 20, padding: 14, flexDirection: 'row', gap: 10 }}>
           <AlertTriangle size={18} color="#D97706" />

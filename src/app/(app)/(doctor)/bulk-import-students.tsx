@@ -204,8 +204,10 @@ Jane Smith,jane@example.com,,Cairo University,Medicine,Level 2,,none`;
 
   return (
     <View style={{ flex: 1, backgroundColor: c.base }}>
-      <ScrollView contentContainerStyle={{ padding: layout.screenPx, gap: 16, paddingBottom: layout.scrollBottom() }}>
+      <ScrollView>
         <PageHeader title="Bulk Import Students" subtitle="Upload CSV to create multiple students" />
+
+      <View style={{ paddingHorizontal: layout.screenPx, gap: 16, paddingBottom: layout.scrollBottom() }}>
 
         {/* ── UPLOAD ─────────────────────────────────────────────────── */}
         {phase === 'upload' && (
@@ -331,6 +333,7 @@ Jane Smith,jane@example.com,,Cairo University,Medicine,Level 2,,none`;
             </View>
           </>
         )}
+      </View>
       </ScrollView>
     </View>
   );

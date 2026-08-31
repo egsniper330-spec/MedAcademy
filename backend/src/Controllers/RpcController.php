@@ -7,6 +7,7 @@ namespace MedAcademy\Controllers;
 use MedAcademy\Database\Database;
 use MedAcademy\Http\ApiException;
 use MedAcademy\Http\Request;
+use MedAcademy\Http\Response;
 use MedAcademy\Services\AuditService;
 use MedAcademy\Utils\Uuid;
 
@@ -74,12 +75,56 @@ final class RpcController
             throw new ApiException(422, 'phone is required');
         }
 
+        // Normalize to E.164 first (any format works), then fall back to the
+        // raw value — mirrors the original normalize_phone_e164() + the v69 raw
+        // phone fallback in the Supabase function. Excludes trashed/deleted
+        // accounts like the v74 version.
+        $e164 = $this->normalizePhoneE164($phone);
+        $lookups = array_values(array_unique(array_filter([$e164, $phone])));
+        $ph = implode(',', array_fill(0, count($lookups), '?'));
+
         $row = Database::instance()->row(
-            'SELECT email FROM users WHERE phone = ? LIMIT 1',
-            [$phone]
+            "SELECT u.email
+               FROM users u
+               JOIN profiles p ON p.id = u.id
+              WHERE (u.phone IN ({$ph}) OR p.phone_e164 IN ({$ph}) OR p.phone IN ({$ph}))
+                AND p.status NOT IN ('trashed', 'deleted')
+              LIMIT 1",
+            array_merge($lookups, $lookups, $lookups)
         );
 
-        return ['email' => $row['email'] ?? null];
+        // Original RPC RETURNS TEXT — a bare email string (or null), not an
+        // object. The frontend reads the RPC result directly as the email
+        // (`data ?? null`). Response::json exits; the return is unreachable
+        // but keeps the array return type.
+        Response::json($row['email'] ?? null);
+        return [];
+    }
+
+    /**
+     * E.164 phone normalization — mirrors the Supabase normalize_phone_e164().
+     * Accepts: +201020182886, 00201020182886, 01020182886, 201020182886,
+     * and bare 10-digit (or shorter) local formats → +20 (Egypt).
+     */
+    private function normalizePhoneE164(string $phone): ?string
+    {
+        $raw = preg_replace('/[\s\-()]/', '', $phone);
+        if ($raw === '') {
+            return null;
+        }
+        if (preg_match('/^\+[1-9]\d{6,14}$/', $raw)) {
+            return $raw;
+        }
+        if (preg_match('/^00([1-9]\d{6,14})$/', $raw, $m)) {
+            return '+' . $m[1];
+        }
+        if (preg_match('/^0([1-9]\d{9})$/', $raw, $m)) {
+            return '+20' . $m[1];
+        }
+        if (preg_match('/^([1-9]\d{9})$/', $raw, $m)) {
+            return '+20' . $m[1];
+        }
+        return null;
     }
 
     /**
@@ -94,7 +139,7 @@ final class RpcController
 
         $db = Database::instance();
         $courseCount = (int) $db->value(
-            'SELECT COUNT(*) FROM courses WHERE doctor_id = ? AND is_deleted = 0',
+            'SELECT COUNT(*) FROM courses WHERE doctor_id = ? AND permanently_deleted = 0',
             [$doctorId], 0
         );
         $studentCount = (int) $db->value(
@@ -234,26 +279,46 @@ final class RpcController
         $data = $request->json();
         $userId = $request->user['id'];
 
-        $title = trim((string) ($data['title'] ?? ''));
-        $description = trim((string) ($data['description'] ?? ''));
-        $categoryId = $data['category_id'] ?? null;
-        $difficulty = (string) ($data['difficulty'] ?? 'beginner');
-        $creditPrice = (int) ($data['credit_price'] ?? 1);
+        // The frontend sends p_payload: { title, description, ... }.
+        // After the PHP client strips the p_ prefix, we receive
+        // { payload: { title, ... } }.  Unwrap to match the original PG
+        // contract create_course_audited(p_payload jsonb).
+        $payload = $data['payload'] ?? $data;
+
+        $title = trim((string) ($payload['title'] ?? ''));
+        $description = trim((string) ($payload['description'] ?? ''));
+        $categoryId = $payload['category_id'] ?? null;
+        $difficulty = (string) ($payload['difficulty'] ?? 'beginner');
+        $priceEgp = $payload['price_egp'] ?? $payload['credit_price'] ?? 1;
+        // Owner is ALWAYS the authenticated user — never trust a client-supplied
+        // doctor_id (the requirement: derive the owner from the session).
+        $doctorId = $userId;
+        $status = (string) ($payload['status'] ?? 'draft');
 
         if ($title === '') {
             throw new ApiException(422, 'title is required');
         }
 
-        $courseId = Uuid::v4();
         $db = Database::instance();
+
+        // Snapshot the doctor's current profile name so legacy consumers that
+        // read courses.instructor_name keep working; the student UI prefers the
+        // live profiles.full_name via the doctor relation.
+        $doctorName = $db->value(
+            'SELECT full_name FROM profiles WHERE id = ? LIMIT 1',
+            [$userId],
+            null
+        );
+
+        $courseId = Uuid::v4();
 
         $db->beginTransaction();
         try {
             $db->query(
-                'INSERT INTO courses (id, title, description, category_id, difficulty, credit_price,
-                     doctor_id, status, is_deleted, created_at, updated_at)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, UTC_TIMESTAMP(6), UTC_TIMESTAMP(6))',
-                [$courseId, $title, $description, $categoryId, $difficulty, $creditPrice, $userId, 'draft']
+                'INSERT INTO courses (id, title, description, category_id, difficulty, price_egp,
+                     doctor_id, status, instructor_name, created_at, updated_at)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP(6), UTC_TIMESTAMP(6))',
+                [$courseId, $title, $description, $categoryId, $difficulty, $priceEgp, $doctorId, $status, $doctorName]
             );
 
             AuditService::write($userId, 'course_created', [
@@ -267,7 +332,9 @@ final class RpcController
             throw $e;
         }
 
-        return ['course_id' => $courseId];
+        // Return { id, title } to match the original PG contract
+        // RETURN jsonb_build_object('id', v_id, 'title', v_course.title)
+        return ['id' => $courseId, 'title' => $title];
     }
 
     /**
@@ -279,6 +346,10 @@ final class RpcController
         $data = $request->json();
         $userId = $request->user['id'];
 
+        // Unwrap p_updates (after p_ strip: 'updates') to match the original PG contract
+        // update_course_audited(p_course_id uuid, p_updates jsonb)
+        $updates = $data['updates'] ?? $data;
+
         if ($courseId === '') {
             throw new ApiException(422, 'course_id is required');
         }
@@ -289,16 +360,33 @@ final class RpcController
             throw new ApiException(404, 'Course not found');
         }
 
-        $allowed = ['title', 'description', 'category_id', 'difficulty', 'credit_price', 'status', 'thumbnail_url'];
+        // All columns the course builder auto-saves and that exist on the
+        // `courses` table. Short description, instructor, language, university/
+        // faculty, contact info and settings toggles must persist — previously
+        // they were silently dropped because the allowlist was too narrow.
+        $allowed = [
+            'title', 'description', 'short_description', 'full_description',
+            'category_id', 'difficulty', 'price_egp', 'status',
+            'thumbnail_url', 'cover_url', 'image_url', 'language',
+            'instructor_name', 'university_id', 'faculty_id', 'academic_level_id',
+            'use_default_contact', 'whatsapp', 'telegram', 'phone', 'facebook',
+            'tags', 'sequential_learning', 'free_preview',
+            'certificate_enabled', 'subscription_required', 'activation_code_required',
+        ];
         $sets = [];
         $params = [];
         $changes = [];
 
         foreach ($allowed as $col) {
-            if (array_key_exists($col, $data)) {
+            if (array_key_exists($col, $updates)) {
+                $value = $updates[$col];
+                // JSON columns: encode arrays/objects (MySQL rejects raw arrays)
+                if (in_array($col, ['tags'], true) && is_array($value)) {
+                    $value = json_encode($value, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+                }
                 $sets[] = '`' . $col . '` = ?';
-                $params[] = $data[$col];
-                $changes[$col] = $data[$col];
+                $params[] = $value;
+                $changes[$col] = $updates[$col];
             }
         }
 
@@ -402,6 +490,10 @@ final class RpcController
 
         $db = Database::instance();
 
+        // Capture the previous price BEFORE the UPDATE so the history row
+        // records old_value/new_value correctly.
+        $oldPrice = (int) $db->value('SELECT credit_selling_price FROM profiles WHERE id = ?', [$doctorId], 0);
+
         $db->beginTransaction();
         try {
             $db->query(
@@ -410,9 +502,9 @@ final class RpcController
             );
 
             $db->insert(
-                'INSERT INTO doctor_pricing_history (id, doctor_id, old_price, new_price, changed_by, created_at)
-                 VALUES (?, ?, (SELECT credit_selling_price FROM profiles WHERE id = ?), ?, ?, UTC_TIMESTAMP(6))',
-                [Uuid::v4(), $doctorId, $doctorId, $price, $userId]
+                'INSERT INTO doctor_pricing_history (id, doctor_id, changed_by, field_name, old_value, new_value, created_at)
+                 VALUES (?, ?, ?, ?, ?, ?, UTC_TIMESTAMP(6))',
+                [Uuid::v4(), $doctorId, $userId, 'credit_selling_price', (string) $oldPrice, (string) $price]
             );
 
             AuditService::write($userId, 'permission_changed', [
@@ -584,34 +676,27 @@ final class RpcController
         }
 
         $db = Database::instance();
-        $lesson = $db->row('SELECT id, video_id, video_status FROM lessons WHERE id = ?', [$lessonId]);
+        $lesson = $db->row(
+            'SELECT id, course_id, video_id, video_status, video_upload_id, video_asset_id,
+                    video_thumbnail_url, video_duration_seconds
+               FROM lessons WHERE id = ?',
+            [$lessonId]
+        );
 
         if ($lesson === null) {
             throw new ApiException(404, 'Lesson not found');
         }
 
-        $videoUpload = null;
-        if (!empty($lesson['video_id'])) {
-            $videoUpload = $db->row(
-                'SELECT id, vdo_cipher_video_id, status, processing_status, upload_status,
-                        file_size_bytes, duration_seconds, created_at
-                 FROM video_uploads WHERE vdo_cipher_video_id = ? OR id = ?',
-                [$lesson['video_id'], $lesson['video_id']]
-            );
-        }
-
-        $videoAssets = $db->select(
-            'SELECT id, video_id, video_url, thumbnail_url, file_size_bytes, duration_seconds
-             FROM video_assets WHERE lesson_id = ?',
-            [$lessonId]
-        );
-
+        // Response shape matches the frontend getLessonVideoState() contract.
         return [
             'lesson_id' => $lessonId,
             'video_id' => $lesson['video_id'] ?? null,
             'video_status' => $lesson['video_status'] ?? null,
-            'upload' => $videoUpload,
-            'assets' => $videoAssets ?? [],
+            'video_upload_id' => $lesson['video_upload_id'] ?? null,
+            'has_video' => !empty($lesson['video_id']),
+            'is_missing' => ($lesson['video_status'] ?? '') === 'missing',
+            'thumbnail_url' => $lesson['video_thumbnail_url'] ?? null,
+            'duration_seconds' => $lesson['video_duration_seconds'] ?? null,
         ];
     }
 
@@ -798,22 +883,32 @@ final class RpcController
      */
     public function getChunkUploadState(Request $request): array
     {
-        $sessionId = Uuid::normalize((string) ($request->query('session_id', $request->params['sessionId'] ?? '')));
+        // `upload_id` is the video_uploads.id. Param is named upload_id (not
+        // session_id) because cPanel's WAF blocks the literal `session_id`
+        // query parameter with an HTML 403 before the request reaches PHP.
+        $sessionId = Uuid::normalize((string) ($request->query('upload_id', $request->query('session_id', $request->params['sessionId'] ?? ''))));
         if ($sessionId === '') {
             throw new ApiException(422, 'session_id is required');
         }
         $db = Database::instance();
-        $session = $db->row(
+        // The chunk upload flow is tracked on video_uploads (the original
+        // Edge Function contract); upload_sessions is a legacy/cleanup-only
+        // table that is never written by the upload pipeline.
+        $upload = $db->row(
             'SELECT id, status, total_chunks, chunks_completed, chunk_size_bytes,
                     bytes_uploaded, file_name, file_size, mime_type,
-                    created_at, updated_at
-               FROM upload_sessions WHERE id = ?',
+                    assembly_triggered, doctor_id, created_at, updated_at
+               FROM video_uploads WHERE id = ?',
             [$sessionId]
         );
-        if ($session === null) {
+        if ($upload === null) {
             throw new ApiException(404, 'Upload session not found');
         }
-        return ['session' => $session];
+        $role = $request->user['role'] ?? '';
+        if (!in_array($role, ['admin', 'super_admin'], true) && $upload['doctor_id'] !== $request->user['id']) {
+            throw new ApiException(404, 'Upload session not found');
+        }
+        return ['session' => $upload];
     }
 
     /**

@@ -73,49 +73,47 @@ export default function SAReports() {
 
   return (
     <ScrollView style={{ flex: 1, backgroundColor: c.base }}>
-      <View style={{ padding: layout.screenPx }}>
+      {/* PageHeader sits OUTSIDE the inner padding view so it can own its own horizontal padding */}
+      <PageHeader title="Reports & Logs" subtitle="Audit, security & exports" accentColor="#7C3AED" rightAction={<Bell />} />
 
-        {/* ── Header ──────────────────────────────────────────────────── */}
-        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6, marginTop: 8 }}>
-          <PageHeader title="Reports & Logs" subtitle="Audit, security & exports" accentColor="#7C3AED" rightAction={<Bell />} />
-        </View>
+      <View style={{ paddingHorizontal: layout.screenPx }}>
 
         {/* ── Reports & Exports ────────────────────────────────────────── */}
         <SectionLabel title="Reports & Exports" c={c} />
-        <NavItem icon={FileText}     label="Reports"              description="Platform activity and usage reports"       color="#7C3AED" path="/(app)/(admin)/reports"                c={c} isDark={isDark} />
-        <NavItem icon={Download}     label="Export Center"        description="Export any data as CSV / Excel"            color="#D97706" path="/(app)/(admin)/export-panel"            c={c} isDark={isDark} />
-        <NavItem icon={Upload}       label="Bulk Import"          description="Import users and course data in bulk"      color="#0EA5E9" path="/(app)/(admin)/bulk-import"             c={c} isDark={isDark} />
+        <NavItem icon={FileText}     label="Reports"              description="Platform activity and usage reports"       color="#7C3AED" path="/reports"                c={c} isDark={isDark} />
+        <NavItem icon={Download}     label="Export Center"        description="Export any data as CSV / Excel"            color="#D97706" path="/export-panel"            c={c} isDark={isDark} />
+        <NavItem icon={Upload}       label="Bulk Import"          description="Import users and course data in bulk"      color="#0EA5E9" path="/bulk-import"             c={c} isDark={isDark} />
 
         {/* ── Analytics ────────────────────────────────────────────────── */}
         <SectionLabel title="Analytics" c={c} />
-        <NavItem icon={Activity}     label="Platform Analytics"   description="Full metrics & platform trends"            color="#16A34A" path="/(app)/(superadmin)/sa-analytics"      c={c} isDark={isDark} />
-        <NavItem icon={TrendingUp}   label="Credits"               description="Credit management & history"                color={c.primary} path="/(app)/(superadmin)/sa-credits"    c={c} isDark={isDark} />
-        <NavItem icon={BarChart2}    label="Revenue Analytics"    description="Revenue trends and breakdowns"              color="#2DA8FF" path="/(app)/(admin)/revenue-analytics"     c={c} isDark={isDark} />
+        <NavItem icon={Activity}     label="Platform Analytics"   description="Full metrics & platform trends"            color="#16A34A" path="/sa-analytics"      c={c} isDark={isDark} />
+        <NavItem icon={TrendingUp}   label="Credits"               description="Credit management & history"                color={c.primary} path="/sa-credits"    c={c} isDark={isDark} />
+        <NavItem icon={BarChart2}    label="Revenue Analytics"    description="Revenue trends and breakdowns"              color="#2DA8FF" path="/revenue-analytics"     c={c} isDark={isDark} />
 
         {/* ── Audit Logs ───────────────────────────────────────────────── */}
         <SectionLabel title="Audit Logs" c={c} />
-        <NavItem icon={Shield}       label="Audit Trail"          description="Full admin action audit log"               color="#DC2626" path="/(app)/(superadmin)/sa-audit"          c={c} isDark={isDark} badge="LIVE" />
-        <NavItem icon={Database}     label="DB Audit"             description="Low-level database audit trail"            color="#D97706" path="/(app)/(admin)/db-audit"               c={c} isDark={isDark} />
-        <NavItem icon={ClipboardList} label="Course Activations"  description="Timeline of course activation events"      color="#7C3AED" path="/(app)/(admin)/course-activation-timeline" c={c} isDark={isDark} />
+        <NavItem icon={Shield}       label="Audit Trail"          description="Full admin action audit log"               color="#DC2626" path="/sa-audit"          c={c} isDark={isDark} badge="LIVE" />
+        <NavItem icon={Database}     label="DB Audit"             description="Low-level database audit trail"            color="#D97706" path="/db-audit"               c={c} isDark={isDark} />
+        <NavItem icon={ClipboardList} label="Course Activations"  description="Timeline of course activation events"      color="#7C3AED" path="/course-activation-timeline" c={c} isDark={isDark} />
 
         {/* ── Security ─────────────────────────────────────────────────── */}
         <SectionLabel title="Security" c={c} />
-        <NavItem icon={ShieldAlert}  label="Security Dashboard"   description="Login attempts, threats & active sessions" color="#EF4444" path="/(app)/(superadmin)/sec-dashboard"    c={c} isDark={isDark} />
-        <NavItem icon={ShieldCheck}  label="Security Policies"    description="Rate limits, IP rules & access controls"   color="#8B5CF6" path="/(app)/(superadmin)/sec-policies"     c={c} isDark={isDark} />
-        <NavItem icon={ShieldX}      label="Security Diagnostics" description="Detailed security event logs"              color="#6B7280" path="/(app)/(superadmin)/sec-diag"         c={c} isDark={isDark} />
+        <NavItem icon={ShieldAlert}  label="Security Dashboard"   description="Login attempts, threats & active sessions" color="#EF4444" path="/sec-dashboard"    c={c} isDark={isDark} />
+        <NavItem icon={ShieldCheck}  label="Security Policies"    description="Rate limits, IP rules & access controls"   color="#8B5CF6" path="/sec-policies"     c={c} isDark={isDark} />
+        <NavItem icon={ShieldX}      label="Security Diagnostics" description="Detailed security event logs"              color="#6B7280" path="/sec-diag"         c={c} isDark={isDark} />
 
         {/* ── Content & Violations ─────────────────────────────────────── */}
         <SectionLabel title="Content & Violations" c={c} />
-        <NavItem icon={Eye}          label="Content Protection"   description="Screenshot & recording prevention"         color="#EF4444" path="/(app)/(superadmin)/content-protection" c={c} isDark={isDark} />
-        <NavItem icon={AlertOctagon} label="Violation Management" description="Policy violations and offences log"        color="#D97706" path="/(app)/(superadmin)/violation-management" c={c} isDark={isDark} />
-        <NavItem icon={AlertTriangle} label="Fraud Alerts"        description="Suspicious activity detection"             color="#DC2626" path="/(app)/(admin)/fraud-alerts"            c={c} isDark={isDark} />
+        <NavItem icon={Eye}          label="Content Protection"   description="Screenshot & recording prevention"         color="#EF4444" path="/content-protection" c={c} isDark={isDark} />
+        <NavItem icon={AlertOctagon} label="Violation Management" description="Policy violations and offences log"        color="#D97706" path="/violation-management" c={c} isDark={isDark} />
+        <NavItem icon={AlertTriangle} label="Fraud Alerts"        description="Suspicious activity detection"             color="#DC2626" path="/fraud-alerts"            c={c} isDark={isDark} />
 
         {/* ── Admin Tools ──────────────────────────────────────────────── */}
         <SectionLabel title="Admin Tools" c={c} />
-        <NavItem icon={Search}       label="Global Search"        description="Search users, courses, transactions"       color={c.primary} path="/(app)/(admin)/global-search"        c={c} isDark={isDark} />
-        <NavItem icon={HeartHandshake} label="Impersonation"      description="Log in as any user for debugging"          color="#D97706" path="/(app)/(superadmin)/impersonation"     c={c} isDark={isDark} />
-        <NavItem icon={Trash2}       label="Trash Bin"            description="Restore or permanently delete items"       color="#EF4444" path="/(app)/(superadmin)/trash-bin"         c={c} isDark={isDark} />
-        <NavItem icon={Lock}         label="Delete Permissions"   description="Control which data can be deleted"         color="#7C3AED" path="/(app)/(superadmin)/delete-permissions" c={c} isDark={isDark} />
+        <NavItem icon={Search}       label="Global Search"        description="Search users, courses, transactions"       color={c.primary} path="/global-search"        c={c} isDark={isDark} />
+        <NavItem icon={HeartHandshake} label="Impersonation"      description="Log in as any user for debugging"          color="#D97706" path="/impersonation"     c={c} isDark={isDark} />
+        <NavItem icon={Trash2}       label="Trash Bin"            description="Restore or permanently delete items"       color="#EF4444" path="/trash-bin"         c={c} isDark={isDark} />
+        <NavItem icon={Lock}         label="Delete Permissions"   description="Control which data can be deleted"         color="#7C3AED" path="/delete-permissions" c={c} isDark={isDark} />
 
         <View style={{ height: 32 }} />
       </View>

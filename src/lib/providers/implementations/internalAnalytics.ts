@@ -1,8 +1,8 @@
 /**
  * implementations/internalAnalytics.ts
- * Internal analytics implementation — logs events to Supabase.
+ * Internal analytics implementation — logs events to the PHP analytics table.
  */
-import { supabase } from '@/client/supabase';
+import { backendClient } from '@/client/backendClient';
 import type { AnalyticsProvider, AnalyticsEvent, UserTraits } from '../analyticsProvider';
 
 class InternalAnalyticsProvider implements AnalyticsProvider {
@@ -10,7 +10,7 @@ class InternalAnalyticsProvider implements AnalyticsProvider {
   readonly displayName = 'Internal Analytics';
 
   async track(userId: string, event: AnalyticsEvent): Promise<void> {
-    await supabase.from('analytics_events').insert({
+    await backendClient.from('analytics_events').insert({
       user_id: userId,
       event_name: event.name,
       properties: event.properties ?? {},
@@ -19,7 +19,7 @@ class InternalAnalyticsProvider implements AnalyticsProvider {
   }
 
   async identify(userId: string, traits: UserTraits): Promise<void> {
-    await supabase.from('profiles').update({
+    await backendClient.from('profiles').update({
       analytics_traits: traits,
     }).eq('id', userId).then(() => {});
   }

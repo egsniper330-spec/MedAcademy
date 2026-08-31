@@ -44,7 +44,7 @@
 
 import Constants from 'expo-constants';
 import * as SecureStore from 'expo-secure-store';
-import { supabase } from '@/client/supabase';
+import { backendClient } from '@/client/backendClient';
 import {
   getNativeSecurityFlags,
   requestPlayIntegrityToken,
@@ -210,25 +210,14 @@ const DEFAULT_POLICIES: Record<DetectionType, PolicyAction> = {
 };
 
 export async function getSecurityPolicies(): Promise<Record<DetectionType, PolicyAction>> {
+  // Policy rows are administrator configuration and are intentionally not
+  // exposed through the generic data API to Doctor/Student sessions. Those
+  // sessions use the bundled fail-secure policy defaults; the Super Admin
+  // policy screen remains the authorized management surface.
   if (cachedPolicies && Date.now() < policyCacheExpiry) return cachedPolicies;
-  try {
-    const { data, error } = await supabase
-      .from('security_policies')
-      .select('detection_type, action, enabled')
-      .order('detection_type');
-    if (error || !data) return DEFAULT_POLICIES;
-    const map = { ...DEFAULT_POLICIES };
-    for (const row of data) {
-      map[row.detection_type as DetectionType] = row.enabled
-        ? (row.action as PolicyAction)
-        : 'log_only';
-    }
-    cachedPolicies = map;
-    policyCacheExpiry = Date.now() + POLICY_TTL_MS;
-    return map;
-  } catch {
-    return DEFAULT_POLICIES;
-  }
+  cachedPolicies = { ...DEFAULT_POLICIES };
+  policyCacheExpiry = Date.now() + POLICY_TTL_MS;
+  return cachedPolicies;
 }
 
 export function invalidatePolicyCache() {
@@ -244,7 +233,7 @@ let vpnWhitelistExpiry = 0;
 async function getVpnWhitelist(): Promise<string[]> {
   if (vpnWhitelist.length && Date.now() < vpnWhitelistExpiry) return vpnWhitelist;
   try {
-    const { data } = await supabase.from('security_vpn_whitelist').select('name');
+    const { data } = await backendClient.from('security_vpn_whitelist').select('name');
     vpnWhitelist = (data ?? []).map((r: { name: string }) => r.name.toLowerCase());
     vpnWhitelistExpiry = Date.now() + POLICY_TTL_MS;
     return vpnWhitelist;
@@ -581,7 +570,7 @@ async function detectXposed(): Promise<SecurityThreat | null> {
  * the native OkHttp CertificatePinner (Android) and URLSessionDelegate (iOS).
  * What this detector does:
  *
- *   1. Fire a probe request to the Supabase API with a known-good CORS endpoint.
+ *   1. Fire a probe request to the PHP API with a known-good CORS endpoint.
  *   2. If the native pin layer rejects the certificate, the fetch will throw a
  *      network error (ERR_CERT_AUTHORITY_INVALID / NSURLErrorServerCertificateUntrusted).
  *   3. Distinguish a pin failure from a genuine offline state by also checking
@@ -620,9 +609,8 @@ async function detectSSLPinning(): Promise<SecurityThreat | null> {
 
     // Step 2: probe the PHP backend API — the native pinner validates this TLS connection.
     // Use the base URL (no auth required, tiny response).
-    const phpApiUrl = process.env.EXPO_PUBLIC_PHP_API_URL ||
-      (process.env.EXPO_PUBLIC_SUPABASE_URL ?? '').replace(/\/?$/, '/backend/public/index.php');
-    if (!phpApiUrl) return null; // misconfigured — skip
+    const phpApiUrl = process.env.EXPO_PUBLIC_PHP_API_URL?.trim();
+    if (!phpApiUrl) return null; // configuration guard reports this separately
 
     const probeUrl = phpApiUrl;
 
@@ -633,7 +621,7 @@ async function detectSSLPinning(): Promise<SecurityThreat | null> {
       // Use globalThis.fetch explicitly — NOT bare `fetch`.
       // On iOS JSC, bare `fetch` in module scope can resolve to undefined if the
       // lazy getter hasn't fired yet.  globalThis.fetch is always the live value
-      // (medo-guard + whatwg-fetch polyfill) at the time this async function runs.
+      // (backend configuration guard + whatwg-fetch polyfill) at the time this async function runs.
       const res = await globalThis.fetch(probeUrl, {
         method: 'GET',
         signal: controller.signal,
@@ -835,7 +823,7 @@ export async function runPlayIntegrityCheck(): Promise<SecurityThreat | null> {
     }
 
     // 1. Get a fresh nonce from our backend (prevents replay attacks)
-    const { data: nonceData, error: nonceErr } = await supabase.functions.invoke('verify-play-integrity', {
+    const { data: nonceData, error: nonceErr } = await backendClient.functions.invoke('verify-play-integrity', {
       body: { action: 'get_nonce' },
     });
     if (nonceErr || !nonceData?.nonce) return null;
@@ -850,7 +838,7 @@ export async function runPlayIntegrityCheck(): Promise<SecurityThreat | null> {
     }
 
     // 3. Server-side verification — client NEVER interprets verdict
-    const { data: verifyData, error: verifyErr } = await supabase.functions.invoke('verify-play-integrity', {
+    const { data: verifyData, error: verifyErr } = await backendClient.functions.invoke('verify-play-integrity', {
       body: { action: 'verify', token, nonce: _piNonce },
     });
     if (verifyErr) return null;
@@ -934,7 +922,7 @@ async function runAppAttestCheck(): Promise<SecurityThreat | null> {
       }
 
       // 2b. Get server challenge
-      const { data: nonceData, error: nonceErr } = await supabase.functions.invoke('verify-app-integrity', {
+      const { data: nonceData, error: nonceErr } = await backendClient.functions.invoke('verify-app-integrity', {
         body: { action: 'get_challenge', platform: 'ios' },
       });
       if (nonceErr || !nonceData?.challenge) return null; // Backend unavailable → non-blocking
@@ -943,7 +931,7 @@ async function runAppAttestCheck(): Promise<SecurityThreat | null> {
 
       // 2c. Attest key on first use (server stores the public key once)
       if (!_appAttestKeyPersisted) {
-        const { error: attestErr } = await supabase.functions.invoke('verify-app-integrity', {
+        const { error: attestErr } = await backendClient.functions.invoke('verify-app-integrity', {
           body: { action: 'attest_key', keyId: _appAttestKeyId, challenge, platform: 'ios' },
         });
         if (attestErr) {
@@ -981,7 +969,7 @@ async function runAppAttestCheck(): Promise<SecurityThreat | null> {
       if (!assertion) return null;
 
       // 2e. Server-side assertion verification
-      const { data: verifyData, error: verifyErr } = await supabase.functions.invoke('verify-app-integrity', {
+      const { data: verifyData, error: verifyErr } = await backendClient.functions.invoke('verify-app-integrity', {
         body: { action: 'verify_assertion', keyId: _appAttestKeyId, assertion, challenge, platform: 'ios' },
       });
       if (verifyErr) return null; // Transient server issue — non-blocking
@@ -1013,7 +1001,7 @@ async function runAppAttestCheck(): Promise<SecurityThreat | null> {
 
     if (!dcToken) return null;
 
-    const { data: dcData, error: dcErr } = await supabase.functions.invoke('verify-app-integrity', {
+    const { data: dcData, error: dcErr } = await backendClient.functions.invoke('verify-app-integrity', {
       body: { action: 'verify_device_check', token: dcToken, platform: 'ios' },
     });
     if (dcErr) return null;
@@ -1148,7 +1136,7 @@ interface LogSecurityEventOptions {
 
 export async function logSecurityEvent(opts: LogSecurityEventOptions): Promise<void> {
   try {
-    await supabase.functions.invoke('security-logger', {
+    await backendClient.functions.invoke('security-logger', {
       body: {
         event_type:       opts.eventType,
         detection_method: opts.detectionMethod,
@@ -1185,6 +1173,6 @@ export async function logThreats(
     };
   });
   try {
-    await supabase.functions.invoke('security-logger', { body: events });
+    await backendClient.functions.invoke('security-logger', { body: events });
   } catch { /* silently fail */ }
 }

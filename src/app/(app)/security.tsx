@@ -48,8 +48,10 @@ export default function SecurityCenter() {
 
   return (
     <KeyboardAvoidingView behavior="padding" style={{ flex: 1, backgroundColor: c.base }}>
-      <ScrollView contentContainerStyle={{ flexGrow: 1, padding: 24, paddingTop: 0 }} keyboardShouldPersistTaps="handled">
+      <ScrollView contentContainerStyle={{ flexGrow: 1, paddingTop: 0 }} keyboardShouldPersistTaps="handled">
         <PageHeader title="Security Center" subtitle="Password & account security" showBack />
+
+      <View style={{ paddingHorizontal: 24 }}>
 
         {/* Account Security Info */}
         <NeuCard style={{ marginBottom: 20, padding: 20 }}>
@@ -123,6 +125,7 @@ export default function SecurityCenter() {
 
           <NeuButton label="Update Password" onPress={handleChangePassword} loading={saving} fullWidth />
         </NeuCard>
+      </View>
       </ScrollView>
     </KeyboardAvoidingView>
   );

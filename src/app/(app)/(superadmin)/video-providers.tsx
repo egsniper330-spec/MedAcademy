@@ -163,8 +163,9 @@ export default function VideoProvidersScreen() {
       style={{ flex: 1, backgroundColor: c.base }}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />}
     >
-      <View style={{ padding: layout.screenPx, gap: 20 }}>
-        <PageHeader title="Video Providers" subtitle="Control upload providers globally and per teacher" />
+      <PageHeader title="Video Providers" subtitle="Control upload providers globally and per teacher" />
+
+      <View style={{ paddingHorizontal: layout.screenPx, gap: 20 }}>
 
         {/* Warning banner when all providers off */}
         {allDisabled && (

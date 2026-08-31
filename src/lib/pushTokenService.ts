@@ -59,7 +59,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Notifications from 'expo-notifications';
 import * as Network from 'expo-network';
 import { Platform } from 'react-native';
-import { supabase } from '@/client/supabase';
+import { backendClient } from '@/client/backendClient';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -94,7 +94,7 @@ async function persistTokenToServer(
   installationId: string,
 ): Promise<boolean> {
   try {
-    const { error } = await supabase.functions.invoke('device-binding', {
+    const { error } = await backendClient.functions.invoke('device-binding', {
       body: { action: 'update_push_token', push_token: token, installation_id: installationId },
     });
     if (error) {
@@ -110,7 +110,7 @@ async function persistTokenToServer(
 
 async function clearTokenOnServer(installationId: string): Promise<void> {
   try {
-    await supabase.functions.invoke('device-binding', {
+    await backendClient.functions.invoke('device-binding', {
       body: { action: 'update_push_token', push_token: null, installation_id: installationId },
     });
   } catch { /* non-fatal */ }
@@ -199,7 +199,7 @@ export async function registerPushToken(installationId: string): Promise<void> {
 
 /**
  * Remove the push token for this device from the server.
- * Call before supabase.auth.signOut() while the session is still valid.
+ * Call before backendClient.auth.signOut() while the session is still valid.
  *
  * @param installationId  Stable device ID from getInstallationId()
  */

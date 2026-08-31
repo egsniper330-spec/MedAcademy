@@ -13,7 +13,7 @@ import {
   getDeletePermissions, saveDeletePermissions,
   type DeletePermissions,
 } from '@/lib/api';
-import { supabase } from '@/client/supabase';
+import { backendClient } from '@/client/backendClient';
 import { NeuCard } from '@/components/NeuCard';
 import { NeuButton } from '@/components/NeuButton';
 import { useToast } from '@/components/Toast';
@@ -52,7 +52,7 @@ export default function DeletePermissionsScreen() {
   const [refreshing,setRefreshing]= useState(false);
 
   const loadAdmins = useCallback(async () => {
-    const { data, error } = await supabase
+    const { data, error } = await backendClient
       .from('profiles')
       .select('id, full_name, email, role, delete_permissions')
       .eq('role', 'admin')

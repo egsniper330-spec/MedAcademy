@@ -16,8 +16,7 @@
       },
       "env": {
         "EXPO_PUBLIC_APP_ID": "app-czyg340mpc75",
-        "EXPO_PUBLIC_SUPABASE_URL": "https://xdvjwfuqipatkpimejcb.supabase.co",
-        "EXPO_PUBLIC_SUPABASE_ANON_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inhkdmp3ZnVxaXBhdGtwaW1lamNiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM5NzA2MzQsImV4cCI6MjA5OTU0NjYzNH0.QMTGKiInyYK8kJjrpS39wg7b_gBWhhCbeAUFJJv5neM"
+        "EXPO_PUBLIC_PHP_API_URL": "https://api.medacademy.eu.cc/backend/public/index.php"
       }
     },
     "development-device": {
@@ -31,8 +30,7 @@
       },
       "env": {
         "EXPO_PUBLIC_APP_ID": "app-czyg340mpc75",
-        "EXPO_PUBLIC_SUPABASE_URL": "https://xdvjwfuqipatkpimejcb.supabase.co",
-        "EXPO_PUBLIC_SUPABASE_ANON_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inhkdmp3ZnVxaXBhdGtwaW1lamNiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM5NzA2MzQsImV4cCI6MjA5OTU0NjYzNH0.QMTGKiInyYK8kJjrpS39wg7b_gBWhhCbeAUFJJv5neM"
+        "EXPO_PUBLIC_PHP_API_URL": "https://api.medacademy.eu.cc/backend/public/index.php"
       }
     },
     "release-apk": {
@@ -43,8 +41,7 @@
       },
       "env": {
         "EXPO_PUBLIC_APP_ID": "app-czyg340mpc75",
-        "EXPO_PUBLIC_SUPABASE_URL": "https://xdvjwfuqipatkpimejcb.supabase.co",
-        "EXPO_PUBLIC_SUPABASE_ANON_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inhkdmp3ZnVxaXBhdGtwaW1lamNiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM5NzA2MzQsImV4cCI6MjA5OTU0NjYzNH0.QMTGKiInyYK8kJjrpS39wg7b_gBWhhCbeAUFJJv5neM"
+        "EXPO_PUBLIC_PHP_API_URL": "https://api.medacademy.eu.cc/backend/public/index.php"
       }
     },
     "preview": {
@@ -54,8 +51,7 @@
       },
       "env": {
         "EXPO_PUBLIC_APP_ID": "app-czyg340mpc75",
-        "EXPO_PUBLIC_SUPABASE_URL": "https://xdvjwfuqipatkpimejcb.supabase.co",
-        "EXPO_PUBLIC_SUPABASE_ANON_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inhkdmp3ZnVxaXBhdGtwaW1lamNiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM5NzA2MzQsImV4cCI6MjA5OTU0NjYzNH0.QMTGKiInyYK8kJjrpS39wg7b_gBWhhCbeAUFJJv5neM"
+        "EXPO_PUBLIC_PHP_API_URL": "https://api.medacademy.eu.cc/backend/public/index.php"
       }
     },
     "production": {
@@ -65,8 +61,7 @@
       },
       "env": {
         "EXPO_PUBLIC_APP_ID": "app-czyg340mpc75",
-        "EXPO_PUBLIC_SUPABASE_URL": "https://xdvjwfuqipatkpimejcb.supabase.co",
-        "EXPO_PUBLIC_SUPABASE_ANON_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inhkdmp3ZnVxaXBhdGtwaW1lamNiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM5NzA2MzQsImV4cCI6MjA5OTU0NjYzNH0.QMTGKiInyYK8kJjrpS39wg7b_gBWhhCbeAUFJJv5neM"
+        "EXPO_PUBLIC_PHP_API_URL": "https://api.medacademy.eu.cc/backend/public/index.php"
       }
     }
   },

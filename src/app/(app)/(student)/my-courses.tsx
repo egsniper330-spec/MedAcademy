@@ -43,8 +43,9 @@ export default function MyCourses() {
       style={{ flex: 1, backgroundColor: c.base }}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />}
     >
-      <View style={{ padding: layout.screenPx }}>
-        <PageHeader title="My Courses" subtitle="Your subscribed courses" />
+      <PageHeader title="My Courses" subtitle="Your subscribed courses" />
+
+      <View style={{ paddingHorizontal: layout.screenPx }}>
 
         {/* Search */}
         <View style={{ marginBottom: 12 }}>

@@ -12,7 +12,7 @@ import { neuColors, useLayout, neuFlatStyle, safeBottom } from '@/lib/neu';
 import { NeuButton } from '@/components/NeuButton';
 import { PageHeader } from '@/components/PageHeader';
 import { useToast } from '@/components/Toast';
-import { supabase } from '@/client/supabase';
+import { backendClient } from '@/client/backendClient';
 import { invalidatePolicyCache } from '@/lib/security';
 import { friendlyError } from '@/lib/validation';
 
@@ -75,8 +75,8 @@ export default function SecurityPoliciesScreen() {
 
   const load = useCallback(async () => {
     const [polRes, wlRes] = await Promise.all([
-      supabase.from('security_policies').select('*').order('detection_type'),
-      supabase.from('security_vpn_whitelist').select('*').order('created_at'),
+      backendClient.from('security_policies').select('*').order('detection_type'),
+      backendClient.from('security_vpn_whitelist').select('*').order('created_at'),
     ]);
     if (polRes.data) setPolicies(polRes.data as Policy[]);
     if (wlRes.data)  setWhitelist(wlRes.data as VpnWhitelist[]);
@@ -96,7 +96,7 @@ export default function SecurityPoliciesScreen() {
         id: p.id, action: p.action, enabled: p.enabled, updated_at: new Date().toISOString(),
       }));
       for (const u of updates) {
-        const { error } = await supabase.from('security_policies').update({
+        const { error } = await backendClient.from('security_policies').update({
           action: u.action, enabled: u.enabled, updated_at: u.updated_at,
         }).eq('id', u.id);
         if (error) throw error;
@@ -114,7 +114,7 @@ export default function SecurityPoliciesScreen() {
     if (!newVpnName.trim()) return;
     setAddingVpn(true);
     try {
-      const { data, error } = await supabase.from('security_vpn_whitelist')
+      const { data, error } = await backendClient.from('security_vpn_whitelist')
         .insert({ name: newVpnName.trim() }).select().maybeSingle();
       if (error) throw error;
       if (data) setWhitelist((prev) => [...prev, data as VpnWhitelist]);
@@ -130,7 +130,7 @@ export default function SecurityPoliciesScreen() {
 
   const handleRemoveVpn = async (id: string) => {
     try {
-      const { error } = await supabase.from('security_vpn_whitelist').delete().eq('id', id);
+      const { error } = await backendClient.from('security_vpn_whitelist').delete().eq('id', id);
       if (error) throw error;
       setWhitelist((prev) => prev.filter((v) => v.id !== id));
       invalidatePolicyCache();

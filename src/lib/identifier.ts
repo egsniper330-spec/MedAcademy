@@ -2,7 +2,7 @@
 // Shared utilities for identifier detection and phone normalization.
 // Used by sign-in, registration, user-search, credits, and admin screens.
 
-import { supabase } from '@/client/supabase';
+import { backendClient } from '@/client/backendClient';
 
 export type IdentifierType = 'email' | 'phone' | 'user_id' | 'name';
 
@@ -72,11 +72,10 @@ export function getLookupMethod(identifier: string): string {
 
 /**
  * Given an email, phone, or user_id: return the email address to use for
- * Supabase Auth sign-in.  For phone-based lookup we call the
- * `get_email_by_phone` RPC (SECURITY DEFINER, callable by anon) which
- * bypasses RLS.  Querying profiles directly would fail because all
- * RLS policies on profiles require `authenticated` role — but at
- * sign-in time the user is not yet authenticated (anon role).
+ * PHP authentication. For phone-based lookup we call the
+ * `get_email_by_phone` endpoint, which is intentionally callable before
+ * authentication and returns only the matching email. Querying profiles
+ * directly before login would be unauthorized.
  */
 export async function resolveEmailFromIdentifier(identifier: string): Promise<string | null> {
   const type = detectIdentifierType(identifier);
@@ -85,13 +84,13 @@ export async function resolveEmailFromIdentifier(identifier: string): Promise<st
 
   if (type === 'user_id') {
     // user_id lookup also needs to bypass RLS — use service-level RPC
-    const { data } = await supabase
+    const { data } = await backendClient
       .rpc('get_email_by_phone', { p_phone: identifier.trim() });
     // user_id is not a phone; fall back to direct query (runs as anon — may fail,
     // but user_id sign-in is admin-only so user is already authenticated)
     if (data) return data;
     // Direct query fallback (authenticated context only)
-    const { data: row } = await supabase
+    const { data: row } = await backendClient
       .from('profiles')
       .select('email')
       .eq('id', identifier.trim())
@@ -115,7 +114,7 @@ export async function resolveEmailFromIdentifier(identifier: string): Promise<st
     // input still works because the RPC tries both.
     const e164 = normalizePhoneE164(identifier.trim());
     const lookupPhone = e164 ?? identifier.trim();   // never skip the RPC call
-    const { data, error } = await supabase
+    const { data, error } = await backendClient
       .rpc('get_email_by_phone', { p_phone: lookupPhone });
     if (error) {
       // Re-throw network-level errors so the sign-in handler can show the real
@@ -123,7 +122,7 @@ export async function resolveEmailFromIdentifier(identifier: string): Promise<st
       // "No account found for this email or phone number".
       //
       // A network/transport error has no HTTP status and no PGRST error code.
-      // supabase-js wraps XHR/fetch failures as:
+      // backendClient-js wraps XHR/fetch failures as:
       //   { message: "Network request failed" | "Failed to fetch" | ..., code: undefined }
       // Application errors from PostgREST have numeric HTTP status codes and
       // PGRST-prefixed error codes (e.g. "PGRST116", "42501").
@@ -161,7 +160,7 @@ export async function resolveEmailFromIdentifier(identifier: string): Promise<st
     if (/^[\+]?[0-9]+$/.test(rawTrimmed)) {
       const e164 = normalizePhoneE164(rawTrimmed);
       const lookupPhone = e164 ?? rawTrimmed;
-      const { data } = await supabase
+      const { data } = await backendClient
         .rpc('get_email_by_phone', { p_phone: lookupPhone });
       if (data) return data;
     }

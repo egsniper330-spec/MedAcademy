@@ -1,7 +1,7 @@
 /**
  * storageProvider.ts
  * Storage Provider Interface
- * Current: Supabase Storage
+ * Current: PHP filesystem storage
  * Future: AWS S3, Cloudflare R2, GCS, Azure Blob, MinIO
  */
 
@@ -36,23 +36,11 @@ export interface StorageProvider {
   /** Delete multiple files */
   deleteMany(bucket: string, paths: string[]): Promise<void>;
 
-  /** Move a file to a new path */
-  move(bucket: string, fromPath: string, toPath: string): Promise<void>;
-
-  /** Copy a file */
-  copy(bucket: string, fromPath: string, toPath: string): Promise<void>;
-
   /** Get a public URL (no expiry) */
   getPublicUrl(bucket: string, path: string): string;
 
   /** Get a signed URL with expiry */
   getSignedUrl(bucket: string, path: string, expiresInSeconds: number): Promise<string>;
-
-  /** Get file metadata */
-  getMetadata(bucket: string, path: string): Promise<StorageFileMetadata>;
-
-  /** List files in a directory */
-  list(bucket: string, prefix?: string): Promise<StorageFileMetadata[]>;
 
   /** Check provider health */
   checkHealth(): Promise<ProviderHealthStatus>;

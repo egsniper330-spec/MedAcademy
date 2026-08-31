@@ -11,7 +11,7 @@
  */
 
 import { useEffect, useState } from 'react';
-import { supabase } from '@/client/supabase';
+import { backendClient } from '@/client/backendClient';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -45,7 +45,7 @@ export function invalidateCurrencyCache() {
 export async function fetchCurrencyConfig(): Promise<CurrencyConfig> {
   if (_cached) return _cached;
   try {
-    const { data } = await supabase
+    const { data } = await backendClient
       .from('system_config')
       .select('value')
       .eq('key', 'platform_currency')
@@ -59,7 +59,7 @@ export async function fetchCurrencyConfig(): Promise<CurrencyConfig> {
 }
 
 export async function saveCurrencyConfig(config: CurrencyConfig): Promise<void> {
-  await supabase
+  await backendClient
     .from('system_config')
     .upsert({ key: 'platform_currency', value: config as unknown as Record<string, unknown> });
   _cached = config;

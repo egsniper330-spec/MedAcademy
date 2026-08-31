@@ -162,20 +162,48 @@ final class AdminController
     public function restoreUser(Request $request): array
     {
         $userId = \MedAcademy\Utils\Uuid::normalize((string) $request->params['id']);
-        $oldStatus = Database::instance()->value(
-            "SELECT pre_trash_status FROM profiles WHERE id = ? AND status IN ('trashed','deleted','blocked')",
+        $db = Database::instance();
+
+        // Check if user is trashed
+        $profile = $db->row(
+            "SELECT id, status, email FROM profiles WHERE id = ? AND status IN ('trashed','deleted','blocked')",
             [$userId]
         );
-        if ($oldStatus === null) {
+        if ($profile === null) {
             throw new ApiException(404, 'Trashed user not found');
         }
-        Database::instance()->query(
-            'UPDATE profiles SET status = ?, pre_trash_status = NULL, trashed_at = NULL,
+
+        // Determine restore status: try pre_trash_status, fall back to 'active'
+        $restoreStatus = 'active';
+        try {
+            $pts = $db->value('SELECT pre_trash_status FROM profiles WHERE id = ?', [$userId]);
+            if ($pts && $pts !== 'trashed' && $pts !== 'deleted' && $pts !== 'blocked') {
+                $restoreStatus = $pts;
+            }
+        } catch (\Throwable $e) {
+            // Column doesn't exist — use 'active'
+        }
+
+        // Check email conflict: another active account might have taken this email
+        $emailConflict = $db->value(
+            "SELECT id FROM profiles WHERE email = ? AND id != ? AND status NOT IN ('trashed','deleted','blocked')",
+            [$profile['email'], $userId]
+        );
+        if ($emailConflict !== null) {
+            throw new ApiException(409, 'Cannot restore: email is already used by another active account');
+        }
+
+        $db->query(
+            'UPDATE profiles SET status = ?, trashed_at = NULL,
                     trash_expires_at = NULL, is_suspended = 0, suspension_reason = NULL,
                     updated_at = UTC_TIMESTAMP(6)
               WHERE id = ?',
-            [$oldStatus, $userId]
+            [$restoreStatus, $userId]
         );
+
+        // Restore the original email in the users table (undo tombstone)
+        $db->query('UPDATE users SET email = ? WHERE id = ?', [$profile['email'], $userId]);
+
         AuditService::write($request->user['id'], 'user_activated', ['user_id' => $userId, 'action' => 'restore']);
         return ['success' => true];
     }
@@ -236,7 +264,7 @@ final class AdminController
     {
         $db = Database::instance();
         return [
-            'users' => (int) $db->value('SELECT COUNT(*) FROM profiles'),
+            'users' => (int) $db->value("SELECT COUNT(*) FROM profiles WHERE status NOT IN ('trashed','deleted')"),
             'doctors' => (int) $db->value("SELECT COUNT(*) FROM profiles WHERE role IN ('doctor','admin','super_admin')"),
             'courses' => (int) $db->value("SELECT COUNT(*) FROM courses WHERE status = 'published'"),
             'enrollments' => (int) $db->value('SELECT COUNT(*) FROM enrollments'),
@@ -454,13 +482,7 @@ final class AdminController
         $db = Database::instance();
         foreach ($userIds as $userId) {
             try {
-                // Delete from dependent tables first
-                $db->query('DELETE FROM devices WHERE user_id = ?', [$userId]);
-                $db->query('DELETE FROM enrollments WHERE student_id = ?', [$userId]);
-                $db->query('DELETE FROM notifications WHERE user_id = ?', [$userId]);
-                $db->query('DELETE FROM credits WHERE doctor_id = ?', [$userId]);
-                $db->query('DELETE FROM profiles WHERE id = ?', [$userId]);
-                $db->query('DELETE FROM users WHERE id = ?', [$userId]);
+                $this->hardDeleteUser($db, $userId);
                 $success++;
             } catch (\Throwable $e) {
                 $failed++;
@@ -727,25 +749,9 @@ final class AdminController
             }
         }
 
-        // 2. DB cascade delete
+        // 2. DB cascade delete via shared helper (transaction-safe)
         $db->transaction(function (Database $db) use ($targetUserId) {
-            $db->query('DELETE FROM devices WHERE user_id = ?', [$targetUserId]);
-            $db->query('DELETE FROM push_tokens WHERE user_id = ?', [$targetUserId]);
-            $db->query('DELETE FROM refresh_tokens WHERE user_id = ?', [$targetUserId]);
-            $db->query('DELETE FROM notifications WHERE user_id = ?', [$targetUserId]);
-            $db->query('DELETE FROM login_history WHERE user_id = ?', [$targetUserId]);
-            $db->query('DELETE FROM security_events WHERE user_id = ?', [$targetUserId]);
-            $db->query('DELETE FROM content_protection_violations WHERE user_id = ?', [$targetUserId]);
-            $db->query('DELETE FROM fraud_flags WHERE doctor_id = ?', [$targetUserId]);
-            $db->query('DELETE FROM analytics_events WHERE user_id = ?', [$targetUserId]);
-            $db->query('DELETE FROM crash_logs WHERE user_id = ?', [$targetUserId]);
-            $db->query('DELETE FROM lesson_progress WHERE student_id = ?', [$targetUserId]);
-            $db->query('DELETE FROM enrollments WHERE student_id = ?', [$targetUserId]);
-            $db->query('DELETE FROM credits WHERE doctor_id = ?', [$targetUserId]);
-            $db->query('DELETE FROM credit_transactions WHERE doctor_id = ?', [$targetUserId]);
-            $db->query('DELETE FROM activation_codes WHERE used_by = ? OR created_by = ?', [$targetUserId, $targetUserId]);
-            $db->query('DELETE FROM profiles WHERE id = ?', [$targetUserId]);
-            $db->query('DELETE FROM users WHERE id = ?', [$targetUserId]);
+            $this->hardDeleteUser($db, $targetUserId);
         });
 
         // 3. VdoCipher cleanup (best-effort)
@@ -768,7 +774,7 @@ final class AdminController
             }
         }
 
-        AuditService::write($request->user['id'], 'user_permanently_deleted', [
+        AuditService::write($request->user['id'], 'user_hard_deleted', [
             'target_user_id' => $targetUserId,
             'target_name' => $target['full_name'],
             'target_role' => $target['role'],
@@ -894,7 +900,15 @@ final class AdminController
         }
 
         $db = Database::instance();
-        $existing = $db->value('SELECT COUNT(*) FROM profiles WHERE email = ?', [$email], 0);
+        // Only reject if an ACTIVE (non-trashed) account uses this email.
+        // Trashed accounts have their users.email tombstoned, so the unique
+        // constraint on users.email is already satisfied.  profiles.email retains
+        // the original address for restore-reference, but we must not block
+        // re-creation of a new account with the same email.
+        $existing = $db->value(
+            "SELECT COUNT(*) FROM profiles WHERE email = ? AND status NOT IN ('trashed','deleted')",
+            [$email], 0
+        );
         if ($existing > 0) {
             throw new ApiException(409, 'An account with this email already exists');
         }
@@ -938,7 +952,7 @@ final class AdminController
             //    INSERT (that would collide with the trigger's row on the
             //    primary key). The phone_e164 write syncs users.phone back
             //    via trg_sync_auth_phone_on_profile_update.
-            $watermarkId = \MedAcademy\Auth\SessionManager::generateWatermarkId();
+            $watermarkId = (new AuthService())->nextWatermarkId();
             $db->query(
                 'UPDATE profiles
                     SET email = ?, full_name = ?, phone = ?, phone_e164 = ?,
@@ -958,7 +972,7 @@ final class AdminController
             );
         });
 
-        AuditService::write($request->user['id'], 'user_created_by_admin', [
+        AuditService::write($request->user['id'], 'user_created', [
             'new_user_id' => $userId,
             'email' => $email,
             'role' => $role,
@@ -987,20 +1001,7 @@ final class AdminController
         foreach ($trashedUsers as $user) {
             try {
                 $userId = $user['id'];
-                $db->query('DELETE FROM devices WHERE user_id = ?', [$userId]);
-                $db->query('DELETE FROM login_history WHERE user_id = ?', [$userId]);
-                $db->query('DELETE FROM notifications WHERE user_id = ?', [$userId]);
-                $db->query('DELETE FROM content_protection_violations WHERE user_id = ?', [$userId]);
-                $db->query('DELETE FROM security_events WHERE user_id = ?', [$userId]);
-                $db->query('DELETE FROM credits WHERE doctor_id = ?', [$userId]);
-                $db->query('DELETE FROM credit_transactions WHERE doctor_id = ?', [$userId]);
-                $db->query('DELETE FROM enrollments WHERE student_id = ?', [$userId]);
-                $db->query(
-                    'UPDATE audit_logs SET user_id = NULL, actor_id = NULL, details = ? WHERE user_id = ? OR actor_id = ?',
-                    [json_encode(['anonymized' => true, 'reason' => 'trash_cleanup']), $userId, $userId]
-                );
-                $db->query('DELETE FROM profiles WHERE id = ?', [$userId]);
-                $db->query('DELETE FROM users WHERE id = ?', [$userId]);
+                $this->hardDeleteUser($db, $userId);
                 $deleted++;
             } catch (\Throwable $e) {
                 $failed++;
@@ -1013,7 +1014,86 @@ final class AdminController
               WHERE status = 'uploading' AND updated_at < DATE_SUB(UTC_TIMESTAMP(6), INTERVAL 24 HOUR)"
         );
 
-        AuditService::write($request->user['id'], 'trash_cleanup_manual', ['deleted' => $deleted, 'failed' => $failed]);
+        AuditService::write($request->user['id'], 'trash_emptied', ['deleted' => $deleted, 'failed' => $failed]);
         return ['deleted' => $deleted, 'failed' => $failed];
+    }
+
+    // ================================================================
+    // SHARED PERMANENT DELETION HELPER
+    // ================================================================
+
+    /**
+     * Permanently delete a user and all dependent records.
+     * Must be called inside a transaction (or the caller handles tx).
+     * Handles all FK constraints via explicit deletes + audit anonymization.
+     */
+    private function hardDeleteUser(Database $db, string $userId): void
+    {
+        // Determine which tables exist so we skip missing ones safely.
+        // Once a query fails inside a MySQL transaction the entire
+        // transaction aborts, so we MUST check before issuing any DML.
+        $existingTables = [];
+        $rows = $db->select(
+            "SELECT table_name FROM information_schema.tables
+              WHERE table_schema = DATABASE()"
+        );
+        foreach ($rows as $r) {
+            $existingTables[$r['table_name']] = true;
+        }
+        $has = fn(string $t) => isset($existingTables[$t]);
+
+        // Anonymize audit logs (preserve record, remove user reference)
+        if ($has('audit_logs')) {
+            $db->query(
+                'UPDATE audit_logs SET user_id = NULL, actor_id = NULL,
+                        details = JSON_SET(COALESCE(details, JSON_OBJECT()), "$.anonymized", true)
+                  WHERE user_id = ? OR actor_id = ?',
+                [$userId, $userId]
+            );
+        }
+
+        // Explicitly delete dependent child records (only if table exists)
+        $deletes = [
+            ['devices',           'user_id'],
+            ['push_tokens',       'user_id'],
+            ['refresh_tokens',    'user_id'],
+            ['notifications',     'user_id'],
+            ['login_history',     'user_id'],
+            ['security_events',   'user_id'],
+            ['content_protection_violations', 'user_id'],
+            ['analytics_events',  'user_id'],
+            ['crash_logs',        'user_id'],
+            ['lesson_progress',   'student_id'],
+            ['enrollments',       'student_id'],
+            ['credits',           'doctor_id'],
+            ['idempotency_keys',  'user_id'],
+        ];
+        foreach ($deletes as [$table, $col]) {
+            if ($has($table)) {
+                $db->query("DELETE FROM `{$table}` WHERE `{$col}` = ?", [$userId]);
+            }
+        }
+
+        // Multi-column deletes (table + compound WHERE)
+        if ($has('fraud_flags')) {
+            $db->query('DELETE FROM fraud_flags WHERE doctor_id = ? OR resolved_by = ?', [$userId, $userId]);
+        }
+        if ($has('credit_transactions')) {
+            $db->query('DELETE FROM credit_transactions WHERE doctor_id = ? OR student_id = ?', [$userId, $userId]);
+        }
+        if ($has('activation_codes')) {
+            $db->query('DELETE FROM activation_codes WHERE used_by = ? OR created_by = ?', [$userId, $userId]);
+        }
+        if ($has('code_batches')) {
+            $db->query('DELETE FROM code_batches WHERE created_by = ?', [$userId]);
+        }
+        if ($has('assistant_permissions')) {
+            $db->query('DELETE FROM assistant_permissions WHERE assistant_id = ?', [$userId]);
+        }
+
+        // Remaining FKs (courses.archived_by, courses.restored_by, etc.)
+        // are handled by ON DELETE SET NULL from migration 007.
+        $db->query('DELETE FROM profiles WHERE id = ?', [$userId]);
+        $db->query('DELETE FROM users WHERE id = ?', [$userId]);
     }
 }

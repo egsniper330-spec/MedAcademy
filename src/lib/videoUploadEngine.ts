@@ -3,16 +3,16 @@
  * Upload engine for the VdoCipher-only video pipeline:
  *  - Multi-stage status lifecycle: upload → process → encode → stream → ready
  *  - Thumbnail generation via expo-video-thumbnails (native) / canvas (web)
- *  - Thumbnail storage in Supabase `course-images` (public bucket)
+ *  - Thumbnail storage in the PHP `course-images` public bucket
  *  - Pre-upload file analysis (size, estimated time, connection recommendation)
- *  - Replace-video flow (VdoCipher-only, no Supabase Storage for video files)
+ *  - Replace-video flow (VdoCipher-only, no PHP storage for video files)
  *
- * Video files are uploaded directly to VdoCipher S3 — Supabase Storage is NOT
+ * Video files are uploaded directly to VdoCipher S3 — PHP storage is NOT
  * used for video files. PDFs and other lesson materials continue to use
- * Supabase Storage via api.ts (lesson-materials bucket) — do not modify those.
+ * PHP storage via api.ts (lesson-materials bucket) — do not modify those.
  */
 
-import { supabase } from '@/client/supabase';
+import { backendClient } from '@/client/backendClient';
 import { upsertVideoAsset } from '@/lib/videoLibraryApi';
 
 export type UploadStatus =
@@ -57,8 +57,9 @@ export interface FileAnalysis {
 
 export interface UploadTask {
   id: string;
-  lessonId: string;
-  courseId: string;
+  lessonId: string | null;
+  courseId: string | null;
+  doctorId?: string;           // Owner doctor — set at creation, used for video_assets upsert
   fileUri: string;
   fileName: string;
   fileSize: number;
@@ -235,7 +236,7 @@ export async function uploadThumbnailToStorage(
     const blob = await resp.blob();
     const storagePath = `thumbnails/${courseId}/${lessonId}/${uploadId}.jpg`;
 
-    const { error } = await supabase.storage
+    const { error } = await backendClient.storage
       .from(THUMB_BUCKET)
       .upload(storagePath, blob as any, { contentType: 'image/jpeg', upsert: true });
 
@@ -246,7 +247,7 @@ export async function uploadThumbnailToStorage(
       return null;
     }
     // course-images is a public bucket — getPublicUrl() works correctly here
-    const { data } = supabase.storage.from(THUMB_BUCKET).getPublicUrl(storagePath);
+    const { data } = backendClient.storage.from(THUMB_BUCKET).getPublicUrl(storagePath);
     return { storagePath, publicUrl: data.publicUrl };
   } catch (e) {
     if (__DEV__) console.error('[uploadThumbnailToStorage] exception', e);
@@ -255,13 +256,14 @@ export async function uploadThumbnailToStorage(
 }
 
 // ─── DB helpers ──────────────────────────────────────────────────────────────
-export async function createUploadRecord(task: Omit<UploadTask, '_xhr' | '_pausedAt'>): Promise<string> {
-  const { data, error } = await supabase
+export async function createUploadRecord(task: Omit<UploadTask, '_xhr' | '_pausedAt' | '_abortController'>): Promise<string> {
+  const { data, error } = await backendClient
     .from('video_uploads')
     .insert({
       id: task.id,
-      lesson_id: task.lessonId,
-      course_id: task.courseId,
+      lesson_id: task.lessonId ?? null,
+      course_id: task.courseId ?? null,
+      ...(task.doctorId ? { doctor_id: task.doctorId } : {}),
       file_name: task.fileName,
       file_size: task.fileSize,
       mime_type: task.mimeType,
@@ -295,19 +297,22 @@ export async function updateUploadRecord(id: string, patch: Partial<{
   file_analysis: Record<string, unknown>;
   provider_video_id: string;       // VdoCipher video ID — stored for cleanup queries
 }>): Promise<void> {
-  await supabase.from('video_uploads').update(patch).eq('id', id);
+  const { error } = await backendClient.from('video_uploads').update(patch).eq('id', id);
+  if (error) throw error;
 }
 
 /** Clear all video references from a lesson — sets it back to "No Video" state. */
 export async function clearLessonVideoRef(lessonId: string): Promise<void> {
-  await supabase.from('lessons').update({
+  const { error } = await backendClient.from('lessons').update({
     video_id:               null,
+    video_asset_id:         null,
     video_status:           'none',
     video_upload_id:        null,
     video_thumbnail_url:    null,
     video_duration_seconds: null,
     updated_at:             new Date().toISOString(),
   }).eq('id', lessonId);
+  if (error) throw error;
 }
 
 export async function insertAuditLog(
@@ -315,11 +320,11 @@ export async function insertAuditLog(
   event: string,
   details?: Record<string, unknown>,
 ): Promise<void> {
-  await supabase.from('upload_audit_logs').insert({ upload_id: uploadId, event, details });
+  await backendClient.from('upload_audit_logs').insert({ upload_id: uploadId, event, details });
 }
 
 export async function updateLessonVideoStatus(
-  lessonId: string,
+  lessonId: string | null,
   videoUploadId: string,
   videoStatus: UploadStatus,
   patch?: Partial<{
@@ -327,6 +332,7 @@ export async function updateLessonVideoStatus(
     video_title: string;
     video_thumbnail_url: string;
     video_duration_seconds: number;
+    doctorId?: string;           // Caller-provided owner — avoids extra DB round-trip
   }>,
 ): Promise<void> {
   // ── Sync video_assets when the upload becomes ready ──────────────────────
@@ -334,51 +340,73 @@ export async function updateLessonVideoStatus(
   // upload pipeline marks a video 'ready', we upsert the asset record and
   // wire video_asset_id on the lesson so it is reusable from the library.
   if (videoStatus === 'ready' && patch?.video_id) {
-    try {
-      // Resolve the owning doctor from the lesson → course → doctor_id chain
-      const { data: lessonRow } = await supabase
-        .from('lessons')
-        .select('course_id, courses!inner(doctor_id)')
-        .eq('id', lessonId)
-        .single();
+      // Resolve the owning doctor. Priority:
+      //   1. Caller-provided doctorId (avoids extra DB round-trip)
+      //   2. From lessons → courses.doctor_id join
+      //   3. From video_uploads.doctor_id (set by PHP enforceOwnerOnWrite)
+      let doctorId: string | undefined = patch.doctorId;
 
-      const doctorId = (lessonRow as any)?.courses?.doctor_id as string | undefined;
-      if (doctorId) {
-        // Get file_size from video_uploads for the asset record
-        const { data: uploadRow } = await supabase
+      if (!doctorId && lessonId) {
+        const { data: lessonRow } = await backendClient
+          .from('lessons')
+          .select('course_id, courses!inner(doctor_id)')
+          .eq('id', lessonId)
+          .single();
+        doctorId = (lessonRow as any)?.courses?.doctor_id as string | undefined;
+      }
+
+      if (!doctorId) {
+        const { data: uploadRow } = await backendClient
           .from('video_uploads')
-          .select('file_size')
+          .select('doctor_id')
           .eq('id', videoUploadId)
-          .maybeSingle();
+          .single();
+        doctorId = (uploadRow as any)?.doctor_id as string | undefined;
+      }
 
-        const asset = await upsertVideoAsset({
-          doctorId,
-          providerVideoId:  patch.video_id,
-          title:            patch.video_title ?? '',
-          durationSeconds:  patch.video_duration_seconds ?? null,
-          fileSizeBytes:    (uploadRow as any)?.file_size ?? null,
-          thumbnailUrl:     patch.video_thumbnail_url ?? null,
-          status:           'ready',
-          uploadId:         videoUploadId,
-        });
+      // video_assets requires a valid doctor_id — throw instead of silently
+      // skipping, so the pipeline marks the upload as failed rather than
+      // removing it from the queue while no library entry exists.
+      if (!doctorId) {
+        throw new Error(
+          `[updateLessonVideoStatus] Cannot create video_asset: doctor_id ` +
+          `not found for upload ${videoUploadId}` +
+          (lessonId ? ` (lesson ${lessonId})` : ' (library upload)'),
+        );
+      }
 
-        // Wire the FK so library lookups work immediately
-        await supabase.from('lessons').update({
+      const { data: uploadRow } = await backendClient
+        .from('video_uploads')
+        .select('file_size, file_name')
+        .eq('id', videoUploadId)
+        .maybeSingle();
+      const asset = await upsertVideoAsset({
+        doctorId,
+        providerVideoId: patch.video_id,
+        title: patch.video_title ?? (uploadRow as any)?.file_name ?? '',
+        durationSeconds: patch.video_duration_seconds ?? null,
+        fileSizeBytes: (uploadRow as any)?.file_size ?? null,
+        thumbnailUrl: patch.video_thumbnail_url ?? null,
+        status: 'ready',
+        uploadId: videoUploadId,
+      });
+
+      if (lessonId) {
+        const { error: assetLinkError } = await backendClient.from('lessons').update({
           video_asset_id: asset.id,
         }).eq('id', lessonId);
+        if (assetLinkError) throw assetLinkError;
       }
-    } catch (assetErr) {
-      // Non-fatal: lesson update below still proceeds
-      if (__DEV__) console.warn('[updateLessonVideoStatus] video_assets upsert failed (non-fatal)', assetErr);
-    }
   }
 
-  await supabase.from('lessons').update({
+  if (!lessonId) return;
+  const { error } = await backendClient.from('lessons').update({
     video_upload_id: videoUploadId,
     video_status: videoStatus,
     updated_at: new Date().toISOString(),
     ...patch,
   }).eq('id', lessonId);
+  if (error) throw error;
 }
 
 // ─── Duplicate detection ──────────────────────────────────────────────────────
@@ -387,7 +415,7 @@ export async function checkDuplicateVideo(
   fileName: string,
   fileSizeBytes: number,
 ): Promise<{ isDuplicate: boolean; existingLessonTitle?: string; existingUploadId?: string }> {
-  const { data } = await supabase
+  const { data } = await backendClient
     .from('video_uploads')
     .select('id, file_name, file_size, lesson_id, lesson:lessons(title)')
     .eq('course_id', courseId)
@@ -415,7 +443,7 @@ export interface PublishBlocker {
 }
 
 export async function getCoursePublishBlockers(courseId: string): Promise<PublishBlocker[]> {
-  const { data, error } = await supabase
+  const { data, error } = await backendClient
     .from('lessons')
     .select('id, title, video_status, video_type, video_id, youtube_video_id')
     .eq('course_id', courseId);
@@ -474,7 +502,7 @@ export interface DoctorStorageStats {
 }
 
 export async function getDoctorStorageStats(doctorId: string): Promise<DoctorStorageStats> {
-  const { data } = await supabase
+  const { data } = await backendClient
     .from('video_uploads')
     .select('file_size, file_name')
     .eq('doctor_id', doctorId)
@@ -501,8 +529,8 @@ export type UploadErrorLayer =
   | '[RN]'                      // React Native client code
   | '[EF:video-upload-chunk]'   // Edge Function: video-upload-chunk
   | '[EF:video-assemble-upload]'// Edge Function: video-assemble-upload
-  | '[Storage]'                 // Supabase Storage (chunk bucket)
-  | '[DB]'                      // Supabase Database (RPC / table update)
+  | '[Storage]'                 // PHP storage (chunk bucket)
+  |'[DB]'                     // PHP/MySQL API (RPC / table update)
   | '[VdoCipher]';              // VdoCipher API (encoding / polling)
 
 // ─── User-friendly error sanitization ────────────────────────────────────────

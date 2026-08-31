@@ -1,7 +1,7 @@
 /**
  * analyticsProvider.ts
  * Analytics Provider Interface
- * Current: Internal (Supabase-backed)
+ * Current: Internal PHP-backed analytics
  * Future: Firebase Analytics, PostHog, Mixpanel, Amplitude
  */
 

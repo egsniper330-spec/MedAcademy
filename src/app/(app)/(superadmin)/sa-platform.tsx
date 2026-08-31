@@ -76,64 +76,62 @@ export default function SAPlatform() {
   return (
     <ScrollView style={{ flex: 1, backgroundColor: c.base }}
           contentContainerStyle={{ paddingBottom: layout.scrollBottom() }}>
-      <View style={{ padding: layout.screenPx }}>
+      {/* PageHeader sits OUTSIDE the inner padding view so it can own its own horizontal padding */}
+      <PageHeader title="Platform" subtitle="All settings & integrations" accentColor="#6B7280" rightAction={<Bell />} />
 
-        {/* ── Header ──────────────────────────────────────────────────── */}
-        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6, marginTop: 8 }}>
-          <PageHeader title="Platform" subtitle="All settings & integrations" accentColor="#6B7280" rightAction={<Bell />} />
-        </View>
+      <View style={{ paddingHorizontal: layout.screenPx }}>
 
         {/* ── Appearance & Content ─────────────────────────────────────── */}
         <SectionLabel title="Appearance & Content" c={c} />
-        <NavItem icon={Paintbrush}  label="Branding"           description="Logo, colours, platform identity"          color="#7C3AED" path="/(app)/(superadmin)/branding"           c={c} isDark={isDark} />
-        <NavItem icon={FileText}    label="CMS Pages"          description="Static content and landing pages"          color="#16A34A" path="/(app)/(admin)/cms"                    c={c} isDark={isDark} />
+        <NavItem icon={Paintbrush}  label="Branding"           description="Logo, colours, platform identity"          color="#7C3AED" path="/branding"           c={c} isDark={isDark} />
+        <NavItem icon={FileText}    label="CMS Pages"          description="Static content and landing pages"          color="#16A34A" path="/cms"                    c={c} isDark={isDark} />
 
         {/* ── Feature Control ──────────────────────────────────────────── */}
         <SectionLabel title="Feature Control" c={c} />
-        <NavItem icon={Flag}        label="Feature Flags"      description="Toggle experimental features on/off"       color="#D97706" path="/(app)/(superadmin)/feature-flags"      c={c} isDark={isDark} badge="BETA" />
-        <NavItem icon={Wrench}      label="Maintenance Mode"   description="Enable / disable platform maintenance"     color="#DC2626" path="/(app)/(superadmin)/maintenance"         c={c} isDark={isDark} />
-        <NavItem icon={Settings}    label="System Config"      description="Global environment configuration"          color="#6B7280" path="/(app)/(superadmin)/config"              c={c} isDark={isDark} />
+        <NavItem icon={Flag}        label="Feature Flags"      description="Toggle experimental features on/off"       color="#D97706" path="/feature-flags"      c={c} isDark={isDark} badge="BETA" />
+        <NavItem icon={Wrench}      label="Maintenance Mode"   description="Enable / disable platform maintenance"     color="#DC2626" path="/maintenance"         c={c} isDark={isDark} />
+        <NavItem icon={Settings}    label="System Config"      description="Global environment configuration"          color="#6B7280" path="/config"              c={c} isDark={isDark} />
 
         {/* ── Integrations ─────────────────────────────────────────────── */}
         <SectionLabel title="Integrations" c={c} />
-        <NavItem icon={Layers}      label="System Providers"   description="Payment, storage, email providers"        color="#059669" path="/(app)/(admin)/system-providers"         c={c} isDark={isDark} />
-        <NavItem icon={Video}       label="Video Providers"    description="CDN and video platform settings"          color="#7C3AED" path="/(app)/(superadmin)/video-providers"     c={c} isDark={isDark} />
-        <NavItem icon={Coins}       label="Currency Settings"  description="Platform default currency"                color="#D97706" path="/(app)/(superadmin)/currency"             c={c} isDark={isDark} />
+        <NavItem icon={Layers}      label="System Providers"   description="Payment, storage, email providers"        color="#059669" path="/system-providers"         c={c} isDark={isDark} />
+        <NavItem icon={Video}       label="Video Providers"    description="CDN and video platform settings"          color="#7C3AED" path="/video-providers"     c={c} isDark={isDark} />
+        <NavItem icon={Coins}       label="Currency Settings"  description="Platform default currency"                color="#D97706" path="/currency"             c={c} isDark={isDark} />
 
         {/* ── Content Protection ───────────────────────────────────────── */}
         <SectionLabel title="Content Protection" c={c} />
-        <NavItem icon={Eye}         label="Watermark / DRM"    description="Screenshot & recording prevention"        color="#DC2626" path="/(app)/(superadmin)/content-protection"  c={c} isDark={isDark} badge="DRM" />
-        <NavItem icon={MonitorDot}  label="Video Monitor"      description="Live video health & delivery status"      color="#2DA8FF" path="/(app)/(admin)/video-monitor"             c={c} isDark={isDark} />
-        <NavItem icon={HeartPulse}  label="Video Health"       description="Processing errors & quality checks"       color="#16A34A" path="/(app)/(admin)/video-health"              c={c} isDark={isDark} />
-        <NavItem icon={Settings}    label="Video Settings"     description="Player config, quality & encoding"        color="#6B7280" path="/(app)/(admin)/video-settings"            c={c} isDark={isDark} />
-        <NavItem icon={HardDrive}   label="Storage"            description="Bucket usage, cleanup & monitoring"       color="#2DA8FF" path="/(app)/(admin)/storage"                  c={c} isDark={isDark} />
+        <NavItem icon={Eye}         label="Watermark / DRM"    description="Screenshot & recording prevention"        color="#DC2626" path="/content-protection"  c={c} isDark={isDark} badge="DRM" />
+        <NavItem icon={MonitorDot}  label="Video Monitor"      description="Live video health & delivery status"      color="#2DA8FF" path="/video-monitor"             c={c} isDark={isDark} />
+        <NavItem icon={HeartPulse}  label="Video Health"       description="Processing errors & quality checks"       color="#16A34A" path="/video-health"              c={c} isDark={isDark} />
+        <NavItem icon={Settings}    label="Video Settings"     description="Player config, quality & encoding"        color="#6B7280" path="/video-settings"            c={c} isDark={isDark} />
+        <NavItem icon={HardDrive}   label="Storage"            description="Bucket usage, cleanup & monitoring"       color="#2DA8FF" path="/storage"                  c={c} isDark={isDark} />
 
         {/* ── Security ─────────────────────────────────────────────────── */}
         <SectionLabel title="Security" c={c} />
-        <NavItem icon={ShieldAlert} label="Security Dashboard"  description="Login attempts, threats & alerts"        color="#EF4444" path="/(app)/(superadmin)/sec-dashboard"       c={c} isDark={isDark} />
-        <NavItem icon={ShieldCheck} label="Security Policies"   description="Rate limits and access control rules"    color="#DC2626" path="/(app)/(superadmin)/sec-policies"        c={c} isDark={isDark} />
-        <NavItem icon={ShieldX}     label="Security Diagnostics" description="Detailed security event logs"          color="#9B1C1C" path="/(app)/(superadmin)/sec-diag"            c={c} isDark={isDark} />
-        <NavItem icon={AlertOctagon} label="Violation Management" description="Policy violations and offences"       color="#D97706" path="/(app)/(superadmin)/violation-management" c={c} isDark={isDark} />
+        <NavItem icon={ShieldAlert} label="Security Dashboard"  description="Login attempts, threats & alerts"        color="#EF4444" path="/sec-dashboard"       c={c} isDark={isDark} />
+        <NavItem icon={ShieldCheck} label="Security Policies"   description="Rate limits and access control rules"    color="#DC2626" path="/sec-policies"        c={c} isDark={isDark} />
+        <NavItem icon={ShieldX}     label="Security Diagnostics" description="Detailed security event logs"          color="#9B1C1C" path="/sec-diag"            c={c} isDark={isDark} />
+        <NavItem icon={AlertOctagon} label="Violation Management" description="Policy violations and offences"       color="#D97706" path="/violation-management" c={c} isDark={isDark} />
 
         {/* ── User Management ──────────────────────────────────────────── */}
         <SectionLabel title="User Management" c={c} />
-        <NavItem icon={UserCog}       label="Admin Management"  description="Super-admin and admin accounts"          color="#EF4444" path="/(app)/(superadmin)/sa-users"              c={c} isDark={isDark} />
-        <NavItem icon={HeartHandshake} label="Impersonation"   description="Log in as any user for debugging"        color="#2DA8FF" path="/(app)/(superadmin)/impersonation"       c={c} isDark={isDark} />
-        <NavItem icon={Smartphone}    label="Device Management" description="User device limits & revocation"        color="#16A34A" path="/(app)/(admin)/devices"                  c={c} isDark={isDark} />
+        <NavItem icon={UserCog}       label="Admin Management"  description="Super-admin and admin accounts"          color="#EF4444" path="/sa-users"              c={c} isDark={isDark} />
+        <NavItem icon={HeartHandshake} label="Impersonation"   description="Log in as any user for debugging"        color="#2DA8FF" path="/impersonation"       c={c} isDark={isDark} />
+        <NavItem icon={Smartphone}    label="Device Management" description="User device limits & revocation"        color="#16A34A" path="/devices"                  c={c} isDark={isDark} />
 
         {/* ── Academic & Operations ────────────────────────────────────── */}
         <SectionLabel title="Academic & Operations" c={c} />
-        <NavItem icon={GraduationCap} label="Academic Structure" description="Universities, faculties, levels"        color="#2DA8FF" path="/(app)/(admin)/academic"                c={c} isDark={isDark} />
-        <NavItem icon={UserPlus}      label="Enrollment Manager" description="Manual course enrollments"             color="#0EA5E9" path="/(app)/(admin)/enrollment-manager"       c={c} isDark={isDark} />
-        <NavItem icon={Ticket}        label="Activation Codes"   description="Generate & manage course codes"        color="#D97706" path="/(app)/(admin)/codes"                    c={c} isDark={isDark} />
-        <NavItem icon={Megaphone}     label="Notifications"      description="Broadcast & send platform messages"    color="#D97706" path="/(app)/(admin)/notifications-center"     c={c} isDark={isDark} />
-        <NavItem icon={Upload}        label="Bulk Import"        description="Import users and course data"          color="#16A34A" path="/(app)/(admin)/bulk-import"              c={c} isDark={isDark} />
-        <NavItem icon={Database}      label="DB Audit"           description="Low-level database audit trail"        color="#D97706" path="/(app)/(admin)/db-audit"                c={c} isDark={isDark} />
+        <NavItem icon={GraduationCap} label="Academic Structure" description="Universities, faculties, levels"        color="#2DA8FF" path="/academic"                c={c} isDark={isDark} />
+        <NavItem icon={UserPlus}      label="Enrollment Manager" description="Manual course enrollments"             color="#0EA5E9" path="/enrollment-manager"       c={c} isDark={isDark} />
+        <NavItem icon={Ticket}        label="Activation Codes"   description="Generate & manage course codes"        color="#D97706" path="/codes"                    c={c} isDark={isDark} />
+        <NavItem icon={Megaphone}     label="Notifications"      description="Broadcast & send platform messages"    color="#D97706" path="/notifications-center"     c={c} isDark={isDark} />
+        <NavItem icon={Upload}        label="Bulk Import"        description="Import users and course data"          color="#16A34A" path="/bulk-import"              c={c} isDark={isDark} />
+        <NavItem icon={Database}      label="DB Audit"           description="Low-level database audit trail"        color="#D97706" path="/db-audit"                c={c} isDark={isDark} />
 
         {/* ── Cleanup ──────────────────────────────────────────────────── */}
         <SectionLabel title="Cleanup & Permissions" c={c} />
-        <NavItem icon={Trash2}        label="Trash Bin"          description="Restore or permanently delete items"   color="#DC2626" path="/(app)/(superadmin)/trash-bin"           c={c} isDark={isDark} />
-        <NavItem icon={Lock}          label="Delete Permissions" description="Control what data can be deleted"      color="#9B1C1C" path="/(app)/(superadmin)/delete-permissions"   c={c} isDark={isDark} />
+        <NavItem icon={Trash2}        label="Trash Bin"          description="Restore or permanently delete items"   color="#DC2626" path="/trash-bin"           c={c} isDark={isDark} />
+        <NavItem icon={Lock}          label="Delete Permissions" description="Control what data can be deleted"      color="#9B1C1C" path="/delete-permissions"   c={c} isDark={isDark} />
 
         <View style={{ height: 32 }} />
       </View>

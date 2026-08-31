@@ -30,10 +30,10 @@ import {
 } from './registry';
 
 // ── Implementations ───────────────────────────────────────────────────────────
-import { supabaseStorageProvider }     from './implementations/supabaseStorage';
+import { backendStorageProvider }      from './implementations/phpStorage';
 import { expoNotificationProvider }    from './implementations/expoNotifications';
-import { supabaseAuthProvider }        from './implementations/supabaseAuth';
-import { postgresSearchProvider }      from './implementations/postgresSearch';
+import { backendAuthProvider }         from './implementations/phpAuth';
+import { phpSearchProvider }           from './implementations/phpSearch';
 import { internalAnalyticsProvider }   from './implementations/internalAnalytics';
 import { internalCrashProvider }       from './implementations/internalCrash';
 import {
@@ -50,12 +50,12 @@ registerVideoLegacy(medAcademyProvider);
 registerVideoProvider(medAcademyProvider as any);
 
 // Active providers (current implementations)
-registerStorageProvider(supabaseStorageProvider);
+registerStorageProvider(backendStorageProvider);
 registerNotificationProvider(expoNotificationProvider);
-registerAuthProvider(supabaseAuthProvider);
+registerAuthProvider(backendAuthProvider);
 registerAnalyticsProvider(internalAnalyticsProvider);
 registerCrashProvider(internalCrashProvider);
-registerSearchProvider(postgresSearchProvider);
+registerSearchProvider(phpSearchProvider);
 
 // Stub providers (future — configure credentials to activate)
 registerEmailProvider(stubEmailProvider);

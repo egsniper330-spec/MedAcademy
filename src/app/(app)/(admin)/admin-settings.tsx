@@ -12,8 +12,9 @@ export default function AdminSettingsScreen() {
   return (
     <ScrollView style={{ flex: 1, backgroundColor: c.base }}
           contentContainerStyle={{ paddingBottom: layout.scrollBottom() }}>
-      <View style={{ padding: layout.screenPx }}>
-        <PageHeader title="Settings" subtitle="Admin configuration" />
+      <PageHeader title="Settings" subtitle="Admin configuration" />
+
+      <View style={{ paddingHorizontal: layout.screenPx }}>
         <Text style={{ color: c.text, opacity: 0.4, textAlign: 'center', marginTop: 60 }}>
           Settings panel coming soon
         </Text>

@@ -48,11 +48,14 @@ const PROGUARD_RULES = `
 # ── Our SecurityModule — must survive reflection calls from RN bridge ─────────
 -keep class com.medacademy.security.** { *; }
 
+# ── Our UploadBridge / ForegroundUploadService — must survive reflection + RN bridge ──
+-keep class com.medacademy.upload.** { *; }
+
 # ── Expo / React Native modules that use reflection ──────────────────────────
 -keep class expo.modules.** { *; }
 -keep class com.google.android.** { *; }
 
-# ── Supabase / OkHttp / Ktor — keep network classes ─────────────────────────
+# ── PHP API / OkHttp / Ktor — keep network classes ─────────────────────────
 -keep class okhttp3.** { *; }
 -keep class okio.** { *; }
 -keep interface okhttp3.** { *; }

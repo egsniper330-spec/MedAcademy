@@ -147,9 +147,9 @@ export default function RevenueAnalyticsScreen() {
       contentContainerStyle={{ paddingBottom: layout.scrollBottom() }}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />}
     >
-      <View style={{ padding: layout.screenPx }}>
-        {/* Header */}
-        <PageHeader title="Revenue Analytics" subtitle={pricing ? `Credit: ${pricing.creditPrice.currency} ${pricing.creditPrice.amount} · Code: ${pricing.activationCodePrice.amount}` : 'Financial dashboard'} accentColor="#16A34A" />
+      <PageHeader title="Revenue Analytics" subtitle={pricing ? `Credit: ${pricing.creditPrice.currency} ${pricing.creditPrice.amount} · Code: ${pricing.activationCodePrice.amount}` : 'Financial dashboard'} accentColor="#16A34A" />
+
+      <View style={{ paddingHorizontal: layout.screenPx }}>
 
         {loading && <ActivityIndicator size="large" color={c.primary} style={{ marginVertical: 40 }} />}
 

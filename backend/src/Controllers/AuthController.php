@@ -188,19 +188,33 @@ final class AuthController
         }
 
         $retentionDays = (int) $db->value('SELECT retention_days FROM trash_config LIMIT 1', [], 30);
+        $previousStatus = $profile['status'];
 
+        // Store previous status in pre_trash_status if column exists,
+        // otherwise store it only in the audit log for restore reference.
         $db->query(
             "UPDATE profiles SET
                 status = 'trashed',
-                pre_trash_status = ?,
                 trashed_at = UTC_TIMESTAMP(6),
                 trash_expires_at = DATE_ADD(UTC_TIMESTAMP(6), INTERVAL ? DAY),
                 trashed_by = ?,
                 trash_reason = ?,
                 updated_at = UTC_TIMESTAMP(6)
               WHERE id = ?",
-            [$profile['status'], $retentionDays, $actorId, $reason, $targetUserId]
+            [$retentionDays, $actorId, $reason, $targetUserId]
         );
+        // Best-effort: write pre_trash_status if column exists (non-fatal if missing)
+        try {
+            $db->query('UPDATE profiles SET pre_trash_status = ? WHERE id = ?',
+                [$previousStatus, $targetUserId]);
+        } catch (\Throwable $e) {
+            // Column does not exist — previous status preserved in audit log
+        }
+
+        // Tombstone the email in the users table to free it for reuse.
+        // The original email is preserved in profiles.email for restore reference.
+        $tombstone = 'trashed-' . substr($targetUserId, 0, 8) . '@deleted.medacademy';
+        $db->query('UPDATE users SET email = ? WHERE id = ?', [$tombstone, $targetUserId]);
 
         // Bump security version to invalidate sessions
         (new AuthService())->bumpSecurityVersion($targetUserId, $actorId);
@@ -208,6 +222,7 @@ final class AuthController
         AuditService::write($actorId, 'user_trashed', [
             'target_user_id' => $targetUserId,
             'target_role' => $profile['role'],
+            'previous_status' => $previousStatus,
             'reason' => $reason,
         ]);
 

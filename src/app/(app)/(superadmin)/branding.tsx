@@ -70,8 +70,9 @@ export default function BrandingScreen() {
     <ScrollView style={{ flex: 1, backgroundColor: c.base }}
           contentContainerStyle={{ paddingBottom: layout.scrollBottom() }}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />}>
-      <View style={{ padding: layout.screenPx }}>
-        <PageHeader title="Branding" subtitle="Customize platform appearance" accentColor="#7C3AED" />
+      <PageHeader title="Branding" subtitle="Customize platform appearance" accentColor="#7C3AED" />
+
+      <View style={{ paddingHorizontal: layout.screenPx }}>
 
         {success && (
           <NeuCard style={{ marginBottom: 16, padding: 14, backgroundColor: '#16A34A18' }}>

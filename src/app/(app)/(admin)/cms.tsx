@@ -65,8 +65,9 @@ export default function CMSPagesScreen() {
     <ScrollView style={{ flex: 1, backgroundColor: c.base }}
           contentContainerStyle={{ paddingBottom: layout.scrollBottom() }}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />}>
-      <View style={{ padding: layout.screenPx }}>
-        <PageHeader title="CMS Pages" subtitle="Edit platform content pages" accentColor="#16A34A" />
+      <PageHeader title="CMS Pages" subtitle="Edit platform content pages" accentColor="#16A34A" />
+
+      <View style={{ paddingHorizontal: layout.screenPx }}>
 
         {loading ? <ActivityIndicator color={c.primary} style={{ marginTop: 40 }} /> : (
           pages.map(page => {

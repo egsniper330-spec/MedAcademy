@@ -10,7 +10,7 @@ import { NeuCard } from '@/components/NeuCard';
 import { NeuButton } from '@/components/NeuButton';
 import { useToast } from '@/components/Toast';
 import { neuColors, useLayout } from '@/lib/neu';
-import { supabase } from '@/client/supabase';
+import { backendClient } from '@/client/backendClient';
 import { getContactDisplay } from '@/lib/api';
 
 type FraudFlag = {
@@ -53,7 +53,7 @@ export default function FraudAlertsScreen() {
 
   const load = useCallback(async () => {
     try {
-      const { data } = await supabase
+      const { data } = await backendClient
         .from('fraud_flags')
         .select('*, doctor:profiles!fraud_flags_doctor_id_fkey(full_name, email)')
         .order('created_at', { ascending: false })
@@ -69,7 +69,7 @@ export default function FraudAlertsScreen() {
   const resolve = async (flag: FraudFlag) => {
     setResolvingId(flag.id);
     try {
-      const { error } = await supabase.from('fraud_flags')
+      const { error } = await backendClient.from('fraud_flags')
         .update({ resolved: true, resolved_at: new Date().toISOString() })
         .eq('id', flag.id);
       if (error) throw error;
@@ -90,8 +90,9 @@ export default function FraudAlertsScreen() {
       contentContainerStyle={{ paddingBottom: layout.scrollBottom() }}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />}
     >
-      <View style={{ padding: layout.screenPx }}>
-        <PageHeader title="Fraud Alerts" subtitle="Platform anomaly detection" accentColor="#DC2626" />
+      <PageHeader title="Fraud Alerts" subtitle="Platform anomaly detection" accentColor="#DC2626" />
+
+      <View style={{ paddingHorizontal: layout.screenPx }}>
 
         {/* Summary bar */}
         <NeuCard style={{ padding: 16, marginBottom: 16, flexDirection: 'row', alignItems: 'center', gap: 12 }}>
