@@ -369,6 +369,20 @@ final class VdoCipherService
     }
 
     /**
+     * Check if a VdoCipher video still exists at the provider.
+     * Uses GET /videos/{videoId} — returns true if 200, false if 404.
+     * Used to detect orphaned local assets before deletion.
+     */
+    public function providerExists(string $videoId): bool
+    {
+        if (!$this->isConfigured() || $videoId === '') {
+            return false;
+        }
+        $res = $this->request('GET', '/videos/' . rawurlencode($videoId));
+        return (int) $res['status'] === 200;
+    }
+
+    /**
      * Delete a VdoCipher video and (optionally) clear the lesson reference.
      * Mirrors the original vdocipher-delete-video Edge Function.
      */
@@ -377,8 +391,26 @@ final class VdoCipherService
         if (!$this->isConfigured()) {
             throw new ApiException(500, 'Video service not configured');
         }
-        $res = $this->request('DELETE', '/videos/' . rawurlencode($videoId));
+        // Official VdoCipher API: DELETE /videos?videos={video_id}
+        // The query parameter name is 'videos' (plural), not 'id'.
+        $res = $this->request('DELETE', '/videos?videos=' . rawurlencode($videoId));
         $vdoStatus = (int) $res['status'];
+        // VdoCipher deletion is idempotent: a missing provider resource is
+        // already in the desired state and must not block local cleanup.
+        $providerDeleted = ($vdoStatus >= 200 && $vdoStatus < 300) || $vdoStatus === 404;
+
+        // Log VdoCipher deletion result (redact API secret, never log credentials)
+        if (!$providerDeleted) {
+            \MedAcademy\Services\AuditService::write(
+                'system',
+                'vdocipher_delete_failed',
+                [
+                    'video_id' => $videoId,
+                    'http_status' => $vdoStatus,
+                    'response_body' => mb_substr($res['body'] ?? '', 0, 500),
+                ]
+            );
+        }
 
         $cleared = false;
         if ($clearLesson && $lessonId !== null && $lessonId !== '') {
@@ -392,9 +424,10 @@ final class VdoCipherService
         }
 
         return [
-            'success' => $vdoStatus < 400,
-            'vdo_deleted' => $vdoStatus < 400,
-            'vdo_error' => $vdoStatus >= 400 ? ('VdoCipher delete failed (upstream ' . $vdoStatus . ')') : null,
+            'success' => $providerDeleted,
+            'vdo_deleted' => $providerDeleted,
+            'vdo_status' => $vdoStatus,
+            'vdo_error' => $providerDeleted ? null : ('VdoCipher delete failed (upstream ' . $vdoStatus . ')'),
             'lesson_cleared' => $cleared,
         ];
     }
@@ -404,6 +437,7 @@ final class VdoCipherService
         $ch = curl_init($this->apiBase . $path);
         $headers = [
             'Authorization: Apisecret ' . $this->apiSecret,
+            'Accept: application/json',
             'Content-Type: application/json',
         ];
         curl_setopt_array($ch, [
@@ -416,8 +450,16 @@ final class VdoCipherService
             curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($body, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE));
         }
         $raw = curl_exec($ch);
+        $curlError = curl_error($ch);
         $status = (int) curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
         curl_close($ch);
+        if ($curlError !== '') {
+            \MedAcademy\Services\AuditService::write(
+                'system',
+                'vdoapi_curl_error',
+                ['method' => $method, 'path' => $path, 'error' => $curlError, 'status' => $status]
+            );
+        }
         return ['status' => $status, 'body' => is_string($raw) ? $raw : ''];
     }
 }

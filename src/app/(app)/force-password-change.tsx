@@ -11,7 +11,7 @@ import {
 import { useRouter } from 'expo-router';
 import type { RelativePathString } from 'expo-router';
 import { Lock, Eye, EyeOff, ShieldCheck } from 'lucide-react-native';
-import { supabase } from '@/client/supabase';
+import { backendClient } from '@/client/backendClient';
 import { neuColors, neuFlatStyle, useLayout, safeBottom } from '@/lib/neu';
 import { NeuCard } from '@/components/NeuCard';
 import { NeuButton } from '@/components/NeuButton';
@@ -57,25 +57,25 @@ export default function ForcePasswordChangeScreen() {
       const userEmail = profile?.email;
       if (!userEmail) throw new Error('Session error. Please log in again.');
 
-      const { error: signInErr } = await supabase.auth.signInWithPassword({
+      const { error: signInErr } = await backendClient.auth.signInWithPassword({
         email: userEmail,
         password: currentPass,
       });
       if (signInErr) throw new Error('Incorrect current password. Please try again.');
 
       // 2. Update to new password
-      const { error: updateErr } = await supabase.auth.updateUser({ password: newPass });
+      const { error: updateErr } = await backendClient.auth.updateUser({ password: newPass });
       if (updateErr) throw updateErr;
 
       // 3. Clear force_password_change flag on profile
-      const { error: profileErr } = await supabase
+      const { error: profileErr } = await backendClient
         .from('profiles')
         .update({ force_password_change: false })
         .eq('id', profile?.id ?? '');
       if (profileErr) console.warn('[ForcePasswordChange] Failed to clear flag:', profileErr);
 
       // 4. Write audit log (non-blocking — fire and forget)
-      void supabase.from('audit_logs').insert({
+      void backendClient.from('audit_logs').insert({
         actor_id: profile?.id,
         action: 'password_changed_first_login',
         resource_type: 'profile',

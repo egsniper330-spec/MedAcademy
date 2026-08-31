@@ -1,8 +1,7 @@
 /**
  * authProvider.ts
  * Auth Provider Interface
- * Current: Supabase Auth
- * Future: Firebase Auth, Auth0, Clerk, Keycloak, Custom JWT
+ * Current: PHP JWT Auth
  */
 
 export interface AuthUser {
@@ -30,9 +29,6 @@ export interface AuthProvider {
 
   /** Sign in with phone OTP */
   loginWithPhone(phone: string, otp: string): Promise<AuthSession>;
-
-  /** Sign in with OAuth provider */
-  loginWithOAuth(provider: string): Promise<AuthSession>;
 
   /** Sign out */
   logout(): Promise<void>;

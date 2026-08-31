@@ -26,7 +26,7 @@ type CourseItem = {
   whatsapp?: string | null;
   telegram?: string | null;
   phone?: string | null;
-  // Supabase PostgREST returns a joined row as an array for !fkey joins;
+  // The PHP data adapter preserves joined rows as arrays for legacy relation shapes;
   // we normalise to a single object via doctorOf() below.
   doctor?: {
     id: string;
@@ -189,13 +189,15 @@ function doctorOf(item: CourseItem): { id: string; full_name: string } | null {
   };
 
   const ListHeader = (
-    <View style={{ paddingHorizontal: layout.screenPx, paddingTop: 12 }}>
+    <>
       <PageHeader
         title="Courses"
         subtitle={isSearching
           ? `Searching all published courses…`
           : `${FEATURED_LIMIT} recently published`}
       />
+
+    <View style={{ paddingHorizontal: layout.screenPx, paddingTop: 12 }}>
 
       {/* Search bar */}
       <View style={{ marginBottom: 12 }}>
@@ -226,6 +228,7 @@ function doctorOf(item: CourseItem): { id: string; full_name: string } | null {
         </Text>
       )}
     </View>
+    </>
   );
 
   const ListEmpty = (

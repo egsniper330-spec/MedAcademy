@@ -7,7 +7,7 @@
  * navigator tree is blank due to the suspected preventScreenCapture race).
  *
  * Key design decisions:
- *  • Uses zero Supabase / auth / navigation dependencies — pure React Native
+ *  • Uses zero backend / auth / navigation dependencies — pure React Native
  *  • No ScreenCapture calls — must not interfere with what we are diagnosing
  *  • Reads from DiagnosticStore's in-memory ring on a 250 ms poll
  *  • On first mount also loads the PREVIOUS session's persisted log

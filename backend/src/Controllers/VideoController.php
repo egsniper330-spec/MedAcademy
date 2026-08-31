@@ -64,8 +64,223 @@ final class VideoController
             throw new ApiException(400, 'video_id is required');
         }
         $lessonId = (string) ($request->json()['lesson_id'] ?? '');
+        $uploadId = (string) ($request->json()['upload_id'] ?? '');
         $clearLesson = (bool) ($request->json()['clear_lesson'] ?? false);
+        $this->assertProviderOwnership($request, $videoId, $lessonId, $uploadId);
         return $this->video->deleteVideo($videoId, $lessonId, $clearLesson);
+    }
+
+    /**
+     * POST /video/cancel-upload — cancel an owned upload and clean up its
+     * provider resource when one has already been created.
+     *
+     * The local upload row is retained as a cancelled audit/retry record. This
+     * makes a failed provider cleanup visible and idempotently retryable.
+     */
+    public function cancelUpload(Request $request): array
+    {
+        $uploadId = (string) ($request->json()['upload_id'] ?? '');
+        if ($uploadId === '') {
+            throw new ApiException(400, 'upload_id is required');
+        }
+
+        $db = Database::instance();
+        $upload = $db->row(
+            'SELECT id, doctor_id, lesson_id, provider_video_id, status
+               FROM video_uploads WHERE id = ?',
+            [$uploadId]
+        );
+        if ($upload === null) {
+            throw new ApiException(404, 'Upload not found');
+        }
+        $role = $request->user['role'] ?? '';
+        if (!in_array($role, ['admin', 'super_admin'], true) && $upload['doctor_id'] !== $request->user['id']) {
+            throw new ApiException(403, 'You do not own this upload');
+        }
+
+        $providerVideoId = trim((string) ($upload['provider_video_id'] ?? ''));
+        $lessonId = (string) ($upload['lesson_id'] ?? '');
+
+        // Remove temporary chunks immediately. The upload row remains as a
+        // cancelled audit record so a failed provider cleanup can be retried.
+        $this->cleanupChunkFiles($uploadId);
+
+        // First make the local lesson safe. A cancelled upload must never leave
+        // a lesson pointing at a provider video that is being cleaned up.
+        $db->transaction(function (Database $tx) use ($uploadId, $lessonId, $providerVideoId): void {
+            if ($lessonId !== '') {
+                // Detach the cancelled video from the lesson. If the lesson
+                // was published, it must become draft because it no longer has
+                // a required video asset.
+                $tx->query(
+                    "UPDATE lessons SET
+                        video_asset_id = NULL,
+                        video_id = NULL,
+                        video_type = 'vdocipher',
+                        video_status = IF(status = 'published', 'draft', 'none'),
+                        status = IF(status = 'published', 'draft', status),
+                        video_upload_id = NULL,
+                        video_playback_id = NULL,
+                        video_thumbnail_url = NULL,
+                        video_duration_seconds = NULL,
+                        updated_at = UTC_TIMESTAMP(6)
+                     WHERE id = ? AND (video_upload_id = ? OR (? <> '' AND video_id = ?))",
+                    [$lessonId, $uploadId, $providerVideoId, $providerVideoId]
+                );
+            }
+            $tx->query(
+                "UPDATE video_uploads SET status = 'canceled', error_message = NULL,
+                        updated_at = UTC_TIMESTAMP(6)
+                 WHERE id = ?",
+                [$uploadId]
+            );
+        });
+
+        if ($providerVideoId === '') {
+            return ['success' => true, 'canceled' => true, 'vdo_deleted' => true, 'provider_video_id' => null];
+        }
+
+        $providerResult = $this->video->deleteVideo($providerVideoId);
+        if (!$providerResult['vdo_deleted']) {
+            $message = $providerResult['vdo_error'] ?? 'Provider cleanup failed';
+            $db->query(
+                "UPDATE video_uploads SET error_message = ?, updated_at = UTC_TIMESTAMP(6) WHERE id = ?",
+                ['Provider cleanup pending: ' . $message, $uploadId]
+            );
+            throw new ApiException(502, 'Upload was cancelled locally, but the VdoCipher resource could not be cleaned up. Retry cancellation.');
+        }
+
+        return [
+            'success' => true,
+            'canceled' => true,
+            'vdo_deleted' => true,
+            'provider_video_id' => $providerVideoId,
+        ];
+    }
+
+    /**
+     * POST /video/assets/delete — permanently remove an owned library asset.
+     * All lesson references are detached in the same local transaction. The
+     * transaction is rolled back if VdoCipher deletion fails, so the library
+     * never claims a permanent deletion that did not happen upstream.
+     */
+    public function deleteAsset(Request $request): array
+    {
+        $assetId = (string) ($request->json()['asset_id'] ?? '');
+        if ($assetId === '') {
+            throw new ApiException(400, 'asset_id is required');
+        }
+
+        $db = Database::instance();
+        $asset = $db->row(
+            'SELECT id, doctor_id, provider_video_id FROM video_assets WHERE id = ?',
+            [$assetId]
+        );
+        if ($asset === null) {
+            throw new ApiException(404, 'Video asset not found');
+        }
+        $role = $request->user['role'] ?? '';
+        if (!in_array($role, ['admin', 'super_admin'], true) && $asset['doctor_id'] !== $request->user['id']) {
+            throw new ApiException(403, 'You do not own this video asset');
+        }
+
+        $providerVideoId = trim((string) $asset['provider_video_id']);
+        $providerExists = $providerVideoId !== '' && $this->video->providerExists($providerVideoId);
+
+        $usageRows = $db->select(
+            'SELECT l.id AS lesson_id, l.title AS lesson_title, c.id AS course_id, c.title AS course_title
+               FROM lessons l
+               JOIN courses c ON c.id = l.course_id
+              WHERE l.video_asset_id = ? OR (? <> \'\' AND l.video_id = ?)
+              ORDER BY l.created_at ASC',
+            [$assetId, $providerVideoId, $providerVideoId]
+        );
+
+        $db->begin();
+        try {
+            // Detach both the FK and legacy provider ID. This covers lessons
+            // created before video_asset_id was introduced.
+            //
+            // IMPORTANT: When a published lesson loses its video, automatically
+            // demote it to draft — a published lesson MUST NOT remain published
+            // without its required video asset.
+            $db->query(
+                "UPDATE lessons SET
+                    video_asset_id = NULL,
+                    video_id = NULL,
+                    video_type = 'vdocipher',
+                    video_status = IF(status = 'published', 'draft', video_status),
+                    status = IF(status = 'published', 'draft', status),
+                    video_upload_id = NULL,
+                    video_playback_id = NULL,
+                    video_thumbnail_url = NULL,
+                    video_duration_seconds = NULL,
+                    updated_at = UTC_TIMESTAMP(6)
+                 WHERE video_asset_id = ? OR (? <> '' AND video_id = ?)",
+                [$assetId, $providerVideoId, $providerVideoId]
+            );
+
+            // Only attempt VdoCipher DELETE if the provider video actually exists.
+            // For orphaned assets (provider video already deleted externally),
+            // skip the DELETE to avoid rolling back local cleanup.
+            $providerDeleted = true;
+            if ($providerExists) {
+                $providerResult = $this->video->deleteVideo($providerVideoId);
+                $providerDeleted = $providerResult['vdo_deleted'];
+                if (!$providerDeleted) {
+                    $db->rollback();
+                    throw new ApiException(502, $providerResult['vdo_error'] ?? 'VdoCipher deletion failed');
+                }
+            }
+
+            $db->query('DELETE FROM video_assets WHERE id = ? AND doctor_id = ?', [$assetId, $asset['doctor_id']]);
+            // Keep upload history for audit, but prevent it from being treated
+            // as an active/ready upload after the provider asset is gone.
+            $db->query(
+                "UPDATE video_uploads SET status = 'canceled', archived_at = UTC_TIMESTAMP(6),
+                        error_message = 'Video asset deleted by owner', updated_at = UTC_TIMESTAMP(6)
+                 WHERE doctor_id = ? AND provider_video_id = ?",
+                [$asset['doctor_id'], $providerVideoId]
+            );
+            $db->commit();
+        } catch (\Throwable $e) {
+            $db->rollback();
+            throw $e;
+        }
+
+        // Find which lessons were published (now auto-drafted) for the audit log.
+        $draftedLessons = [];
+        foreach ($usageRows as $u) {
+            $row = $db->row(
+                'SELECT status FROM lessons WHERE id = ?',
+                [$u['lesson_id']]
+            );
+            // After the UPDATE, status is now 'draft' if it was 'published'.
+            // We can detect this by checking if the original video was the lesson's video
+            // — but simpler: just report all affected lessons since they were all cleared.
+            $draftedLessons[] = [
+                'lesson_id' => $u['lesson_id'],
+                'lesson_title' => $u['lesson_title'],
+                'course_id' => $u['course_id'],
+                'course_title' => $u['course_title'],
+            ];
+        }
+
+        AuditService::write($request->user['id'], 'video_deleted', [
+            'asset_id' => $assetId,
+            'provider_video_id' => $providerVideoId,
+            'lesson_count' => count($usageRows),
+            'affected_lessons' => $draftedLessons,
+        ]);
+
+        return [
+            'success' => true,
+            'deleted' => true,
+            'vdo_deleted' => true,
+            'asset_id' => $assetId,
+            'lesson_count' => count($usageRows),
+            'affected_lessons' => $draftedLessons,
+        ];
     }
 
     public function assets(Request $request): array
@@ -139,87 +354,103 @@ final class VideoController
         $uploadId = $_SERVER['HTTP_X_UPLOAD_ID'] ?? '';
         $chunkIndex = (int) ($_SERVER['HTTP_X_CHUNK_INDEX'] ?? -1);
         $totalChunks = (int) ($_SERVER['HTTP_X_TOTAL_CHUNKS'] ?? 0);
-        $chunkSize = (int) ($_SERVER['HTTP_X_CHUNK_SIZE'] ?? 0);
         $fileName = $_SERVER['HTTP_X_FILE_NAME'] ?? 'unknown';
         $mimeType = $_SERVER['HTTP_X_MIME_TYPE'] ?? 'video/mp4';
 
-        if ($uploadId === '') {
-            Response::json(['error' => 'x-upload-id header is required'], 400);
+        if ($uploadId === '' || $chunkIndex < 0 || $totalChunks < 1) {
+            Response::json(['error' => 'Missing or invalid headers: x-upload-id, x-chunk-index, x-total-chunks'], 400);
+            return;
+        }
+        if ($chunkIndex >= $totalChunks) {
+            Response::json(['error' => "chunkIndex {$chunkIndex} out of range [0, " . ($totalChunks - 1) . ']'], 400);
             return;
         }
 
         $db = Database::instance();
-        $session = $db->row(
-            "SELECT us.*, vu.id AS video_upload_id, vu.doctor_id, vu.lesson_id, vu.course_id
-             FROM upload_sessions us
-             JOIN video_uploads vu ON vu.id = us.upload_id
-             WHERE us.id = ? AND us.status = 'uploading'",
+        $upload = $db->row(
+            'SELECT id, doctor_id, lesson_id, course_id, status, chunks_completed, total_chunks,
+                    assembly_triggered, bytes_uploaded, file_name, file_size, mime_type
+               FROM video_uploads WHERE id = ?',
             [$uploadId]
         );
 
-        if ($session === null) {
-            Response::json(['error' => 'Upload session not found or not active'], 404);
+        if ($upload === null) {
+            Response::json(['error' => 'Upload record not found'], 404);
             return;
         }
 
-        // Verify ownership
-        if ($session['doctor_id'] !== $request->user['id']) {
-            Response::json(['error' => 'Not authorized'], 403);
+        // Verify ownership (admins may manage any upload; doctors only their own)
+        $role = $request->user['role'] ?? '';
+        if (!in_array($role, ['admin', 'super_admin'], true) && $upload['doctor_id'] !== $request->user['id']) {
+            Response::json(['error' => 'You do not own this upload'], 403);
+            return;
+        }
+
+        if ((string) ($upload['status'] ?? '') === 'canceled') {
+            Response::json(['error' => 'Upload has been canceled'], 409);
+            return;
+        }
+
+        // Already assembling — idempotent success (matches original EF behaviour)
+        if ((int) $upload['assembly_triggered'] === 1) {
+            Response::json([
+                'received' => (int) $upload['chunks_completed'],
+                'total' => max((int) $upload['total_chunks'], $totalChunks),
+                'assembly_triggered' => true,
+            ]);
             return;
         }
 
         $chunkData = file_get_contents('php://input');
         if ($chunkData === false || strlen($chunkData) === 0) {
-            Response::json(['error' => 'No chunk data received'], 400);
+            Response::json(['error' => 'Empty chunk body'], 400);
             return;
         }
 
-        // Store chunk to temp directory
+        // Store chunk to temp directory (idempotent overwrite — retries are safe)
         $chunkDir = sys_get_temp_dir() . '/medacademy_chunks/' . $uploadId;
         if (!is_dir($chunkDir)) {
             mkdir($chunkDir, 0755, true);
         }
         $chunkPath = $chunkDir . "/chunk_{$chunkIndex}";
+        $alreadyStored = is_file($chunkPath);
         file_put_contents($chunkPath, $chunkData);
 
-        // Update progress
-        $chunksCompleted = (int) $db->value(
-            'SELECT COUNT(*) FROM upload_sessions WHERE id = ?', [$uploadId], 0
+        // Atomically track progress. A re-uploaded chunk (retry) must not
+        // inflate the counters, so only increment when it is genuinely new.
+        if (!$alreadyStored) {
+            $db->query(
+                'UPDATE video_uploads SET
+                    chunks_completed = chunks_completed + 1,
+                    total_chunks = GREATEST(total_chunks, ?),
+                    bytes_uploaded = bytes_uploaded + ?,
+                    updated_at = UTC_TIMESTAMP(6)
+                  WHERE id = ?',
+                [$totalChunks, strlen($chunkData), $uploadId]
+            );
+            $db->insert(
+                'INSERT INTO upload_audit_logs (id, upload_id, actor_id, event, details, created_at)
+                 VALUES (?, ?, ?, ?, ?, UTC_TIMESTAMP(6))',
+                [
+                    Uuid::v4(), $uploadId, $request->user['id'],
+                    'chunk_received',
+                    json_encode(['chunk_index' => $chunkIndex, 'size' => strlen($chunkData)], JSON_UNESCAPED_SLASHES),
+                ]
+            );
+        }
+
+        $newCount = (int) $db->value(
+            'SELECT chunks_completed FROM video_uploads WHERE id = ?',
+            [$uploadId],
+            0
         );
 
-        $db->query(
-            'UPDATE upload_sessions SET
-                upload_offset = upload_offset + ?,
-                updated_at = UTC_TIMESTAMP(6),
-                last_heartbeat = UTC_TIMESTAMP(6)
-              WHERE id = ?',
-            [strlen($chunkData), $uploadId]
-        );
-
-        $db->query(
-            'UPDATE video_uploads SET
-                chunks_completed = chunks_completed + 1,
-                bytes_uploaded = bytes_uploaded + ?,
-                updated_at = UTC_TIMESTAMP(6)
-              WHERE id = ?',
-            [strlen($chunkData), $session['video_upload_id']]
-        );
-
-        // Log chunk received
-        $db->insert(
-            'INSERT INTO upload_audit_logs (id, upload_id, actor_id, event, details, created_at)
-             VALUES (?, ?, ?, ?, ?, UTC_TIMESTAMP(6))',
-            [
-                Uuid::v4(), $session['video_upload_id'], $request->user['id'],
-                'chunk_received',
-                json_encode(['chunk_index' => $chunkIndex, 'size' => strlen($chunkData)], JSON_UNESCAPED_SLASHES),
-            ]
-        );
-
+        // Response shape matches the original video-upload-chunk Edge Function
+        // and what the frontend uploadVideoChunk() consumes.
         Response::json([
-            'success' => true,
-            'chunk_index' => $chunkIndex,
-            'bytes_received' => strlen($chunkData),
+            'received' => $newCount,
+            'total' => max($totalChunks, (int) $upload['total_chunks']),
+            'assembly_triggered' => false,
         ]);
     }
 
@@ -236,38 +467,40 @@ final class VideoController
         }
 
         $db = Database::instance();
-        $session = $db->row(
-            "SELECT us.*, vu.id AS video_upload_id, vu.doctor_id, vu.lesson_id, vu.course_id,
-                    vu.file_name, vu.file_size, vu.mime_type, vu.status AS upload_status,
-                    vu.provider_video_id AS vu_provider_video_id
-             FROM upload_sessions us
-             JOIN video_uploads vu ON vu.id = us.upload_id
-             WHERE us.id = ?",
+        $upload = $db->row(
+            'SELECT * FROM video_uploads WHERE id = ?',
             [$uploadId]
         );
 
-        if ($session === null) {
-            throw new ApiException(404, 'Upload session not found');
+        if ($upload === null) {
+            throw new ApiException(404, 'Upload record not found');
         }
 
-        if ($session['doctor_id'] !== $request->user['id']) {
+        $role = $request->user['role'] ?? '';
+        if (!in_array($role, ['admin', 'super_admin'], true) && $upload['doctor_id'] !== $request->user['id']) {
             throw new ApiException(403, 'Not authorized');
         }
+        if ((string) ($upload['status'] ?? '') === 'canceled') {
+            throw new ApiException(409, 'Upload has been canceled');
+        }
 
-        // ── Idempotent return: already processing/ready with a provider video id ──
-        $existingVdoId = $session['vu_provider_video_id'] ?? $session['provider_video_id'] ?? null;
-        $currentStatus = (string) ($session['upload_status'] ?? '');
-        if ($existingVdoId !== null && $existingVdoId !== ''
-            && in_array($currentStatus, ['processing', 'encoding', 'ready', 'generating_streams'], true)) {
+        // ── Idempotent return: a provider resource already exists ─────────────
+        // The browser may retry this request after receiving a transport error
+        // even though VdoCipher accepted the upload. Never create a second
+        // provider resource; return the retained ID and let polling/finalization
+        // continue from the existing state.
+        $existingVdoId = trim((string) ($upload['provider_video_id'] ?? ''));
+        $currentStatus = (string) ($upload['status'] ?? '');
+        if ($existingVdoId !== '' && $currentStatus !== 'canceled') {
             return [
-                'status' => $currentStatus === 'ready' ? 'ready' : 'processing',
+                'status' => in_array($currentStatus, ['ready'], true) ? 'ready' : 'processing',
                 'video_id' => $existingVdoId,
                 'skipped_upload' => true,
             ];
         }
 
-        $videoUploadId = $session['video_upload_id'];
-        $lessonId = $session['lesson_id'] ?? null;
+        $videoUploadId = $upload['id'];
+        $lessonId = $upload['lesson_id'] ?? null;
 
         $db->insert(
             'INSERT INTO upload_audit_logs (id, upload_id, actor_id, event, details, created_at)
@@ -317,7 +550,9 @@ final class VideoController
                     "UPDATE video_uploads SET status = 'failed', assembly_error = ?, updated_at = UTC_TIMESTAMP(6) WHERE id = ?",
                     [$errMsg, $videoUploadId]
                 );
+                if ($lessonId !== null && $lessonId !== '') {
                 $db->query("UPDATE lessons SET video_status = 'failed' WHERE id = ?", [$lessonId]);
+            }
                 throw new ApiException(502, $errMsg);
             }
             $chunkData = file_get_contents($chunkPath);
@@ -332,8 +567,8 @@ final class VideoController
         fclose($fh);
 
         // ── Step 2: create the VdoCipher video entry (title from file name) ───
-        $fileName = (string) ($body['file_name'] ?? $session['file_name'] ?? 'Untitled');
-        $mimeType = (string) ($body['mime_type'] ?? $session['mime_type'] ?? 'video/mp4');
+        $fileName = (string) ($body['file_name'] ?? $upload['file_name'] ?? 'Untitled');
+        $mimeType = (string) ($body['mime_type'] ?? $upload['mime_type'] ?? 'video/mp4');
         $title = preg_replace('/\.[^.]+$/', '', $fileName);
         $title = trim((string) preg_replace('/[_-]+/', ' ', $title));
         $title = mb_substr($title, 0, 200);
@@ -349,33 +584,77 @@ final class VideoController
                 "UPDATE video_uploads SET status = 'failed', assembly_error = ?, updated_at = UTC_TIMESTAMP(6) WHERE id = ?",
                 [$e->getMessage(), $videoUploadId]
             );
-            $db->query("UPDATE lessons SET video_status = 'failed' WHERE id = ?", [$lessonId]);
+            if ($lessonId !== null && $lessonId !== '') {
+                $db->query("UPDATE lessons SET video_status = 'failed' WHERE id = ?", [$lessonId]);
+            }
             throw $e;
         }
         $vdoVideoId = $created['videoId'];
         $clientPayload = is_array($created['clientPayload']) ? $created['clientPayload'] : [];
+
+        // Cancellation can race provider creation. Re-read the row before any
+        // S3 transfer; if it was canceled, delete the just-created provider
+        // resource and never attach it to the lesson.
+        $latestStatus = (string) $db->value('SELECT status FROM video_uploads WHERE id = ?', [$videoUploadId], '');
+        if ($latestStatus === 'canceled') {
+            $cleanup = $this->video->deleteVideo($vdoVideoId);
+            @unlink($fullPath);
+            if (!$cleanup['vdo_deleted']) {
+                $db->query("UPDATE video_uploads SET provider_video_id = ?, error_message = ?, updated_at = UTC_TIMESTAMP(6) WHERE id = ?", [$vdoVideoId, 'Provider cleanup pending after cancellation', $videoUploadId]);
+                throw new ApiException(502, 'Upload was canceled, but the provider resource could not be cleaned up.');
+            }
+            throw new ApiException(409, 'Upload was canceled before provider transfer');
+        }
 
         // Persist the provider id immediately for deduplication
         $db->query(
             "UPDATE video_uploads SET provider_video_id = ?, updated_at = UTC_TIMESTAMP(6) WHERE id = ?",
             [$vdoVideoId, $videoUploadId]
         );
-        $db->query(
-            "UPDATE lessons SET video_id = ?, video_status = 'uploading' WHERE id = ?",
-            [$vdoVideoId, $lessonId]
-        );
+        if ($lessonId !== null && $lessonId !== '') {
+            $db->query(
+                "UPDATE lessons SET video_id = ?, video_status = 'uploading' WHERE id = ?",
+                [$vdoVideoId, $lessonId]
+            );
+        }
 
         // ── Step 3: POST the assembled file to VdoCipher's S3 endpoint ────────
+        $latestStatus = (string) $db->value('SELECT status FROM video_uploads WHERE id = ?', [$videoUploadId], '');
+        if ($latestStatus === 'canceled') {
+            $cleanup = $this->video->deleteVideo($vdoVideoId);
+            @unlink($fullPath);
+            if (!$cleanup['vdo_deleted']) {
+                $db->query("UPDATE video_uploads SET error_message = ?, updated_at = UTC_TIMESTAMP(6) WHERE id = ?", ['Provider cleanup pending after cancellation', $videoUploadId]);
+                throw new ApiException(502, 'Upload was canceled, but the provider resource could not be cleaned up.');
+            }
+            throw new ApiException(409, 'Upload was canceled before provider transfer');
+        }
         $s3Status = $this->video->uploadToS3($clientPayload, $fullPath, basename($fileName), $mimeType);
         @unlink($fullPath);
 
+        $latestStatus = (string) $db->value('SELECT status FROM video_uploads WHERE id = ?', [$videoUploadId], '');
+        if ($latestStatus === 'canceled') {
+            $cleanup = $this->video->deleteVideo($vdoVideoId);
+            if (!$cleanup['vdo_deleted']) {
+                $db->query("UPDATE video_uploads SET error_message = ?, updated_at = UTC_TIMESTAMP(6) WHERE id = ?", ['Provider cleanup pending after cancellation', $videoUploadId]);
+                throw new ApiException(502, 'Upload was canceled, but the provider resource could not be cleaned up.');
+            }
+            throw new ApiException(409, 'Upload was canceled during provider transfer');
+        }
+
         if ($s3Status !== 201) {
             $errMsg = 'S3 upload rejected — HTTP ' . $s3Status;
+            $cleanup = $this->video->deleteVideo($vdoVideoId);
+            if (!$cleanup['vdo_deleted']) {
+                $errMsg .= '; provider cleanup pending';
+            }
             $db->query(
-                "UPDATE video_uploads SET status = 'failed', assembly_error = ?, updated_at = UTC_TIMESTAMP(6) WHERE id = ?",
-                [$errMsg, $videoUploadId]
+                "UPDATE video_uploads SET status = 'failed', provider_video_id = ?, assembly_error = ?, updated_at = UTC_TIMESTAMP(6) WHERE id = ?",
+                [$vdoVideoId, $errMsg, $videoUploadId]
             );
-            $db->query("UPDATE lessons SET video_status = 'failed' WHERE id = ?", [$lessonId]);
+            if ($lessonId !== null && $lessonId !== '') {
+                $db->query("UPDATE lessons SET video_status = 'failed' WHERE id = ?", [$lessonId]);
+            }
             $db->insert(
                 'INSERT INTO upload_audit_logs (id, upload_id, actor_id, event, details, created_at)
                  VALUES (?, ?, ?, ?, ?, UTC_TIMESTAMP(6))',
@@ -398,14 +677,12 @@ final class VideoController
               WHERE id = ?",
             [$videoUploadId]
         );
-        $db->query(
-            "UPDATE lessons SET video_id = ?, video_status = 'processing' WHERE id = ?",
-            [$vdoVideoId, $lessonId]
-        );
-        $db->query(
-            "UPDATE upload_sessions SET status = 'assembling', provider_video_id = ?, updated_at = UTC_TIMESTAMP(6) WHERE id = ?",
-            [$vdoVideoId, $uploadId]
-        );
+        if ($lessonId !== null && $lessonId !== '') {
+            $db->query(
+                "UPDATE lessons SET video_id = ?, video_status = 'processing' WHERE id = ?",
+                [$vdoVideoId, $lessonId]
+            );
+        }
         $db->insert(
             'INSERT INTO upload_audit_logs (id, upload_id, actor_id, event, details, created_at)
              VALUES (?, ?, ?, ?, ?, UTC_TIMESTAMP(6))',
@@ -578,6 +855,52 @@ final class VideoController
         }
     }
 
+    private function assertProviderOwnership(Request $request, string $videoId, string $lessonId = '', string $uploadId = ''): void
+    {
+        $role = $request->user['role'] ?? '';
+        if (in_array($role, ['admin', 'super_admin'], true)) {
+            return;
+        }
+
+        $userId = $request->user['id'] ?? '';
+        $db = Database::instance();
+        $owned = $db->value(
+            'SELECT 1 FROM video_assets WHERE provider_video_id = ? AND doctor_id = ? LIMIT 1',
+            [$videoId, $userId],
+            null
+        );
+        if ($owned === null && $uploadId !== '') {
+            $owned = $db->value(
+                'SELECT 1 FROM video_uploads WHERE id = ? AND provider_video_id = ? AND doctor_id = ? LIMIT 1',
+                [$uploadId, $videoId, $userId],
+                null
+            );
+        }
+        if ($owned === null && $lessonId !== '') {
+            $owned = $db->value(
+                'SELECT 1 FROM lessons l JOIN courses c ON c.id = l.course_id
+                  WHERE l.id = ? AND l.video_id = ? AND c.doctor_id = ? LIMIT 1',
+                [$lessonId, $videoId, $userId],
+                null
+            );
+        }
+        if ($owned === null) {
+            throw new ApiException(403, 'You do not own this video');
+        }
+    }
+
+    private function cleanupChunkFiles(string $uploadId): void
+    {
+        $chunkDir = sys_get_temp_dir() . '/medacademy_chunks/' . $uploadId;
+        if (!is_dir($chunkDir)) {
+            return;
+        }
+        foreach (glob($chunkDir . '/chunk_*') ?: [] as $path) {
+            @unlink($path);
+        }
+        @rmdir($chunkDir);
+    }
+
     private function verifyHmac(string $data, string $expectedSignature, string $secret): bool
     {
         $expectedHash = hash_hmac('sha256', $data, $secret);
@@ -640,7 +963,9 @@ final class VideoController
                 continue;
             }
             try {
-                $ch = curl_init('https://dev.vdocipher.com/api/videos/' . rawurlencode($video['provider_video_id']));
+                // Official VdoCipher API: DELETE /videos?videos={video_id}
+                // The query parameter name is 'videos' (plural), not 'id'.
+                $ch = curl_init('https://dev.vdocipher.com/api/videos?videos=' . rawurlencode($video['provider_video_id']));
                 curl_setopt_array($ch, [
                     CURLOPT_DELETE => true,
                     CURLOPT_HTTPHEADER => ['Authorization: Apisecret ' . $apiSecret, 'Accept: application/json'],

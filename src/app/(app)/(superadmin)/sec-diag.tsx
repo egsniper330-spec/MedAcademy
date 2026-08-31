@@ -10,7 +10,7 @@ import {
   MapPin, Code, Layers, Wrench, Cpu, Fingerprint,
 } from 'lucide-react-native';
 import { getAuditLogs, getAllUsers } from '@/lib/api';
-import { supabase } from '@/client/supabase';
+import { backendClient } from '@/client/backendClient';
 import { NeuCard } from '@/components/NeuCard';
 import { neuColors, useLayout } from '@/lib/neu';
 import { PageHeader } from '@/components/PageHeader';
@@ -68,7 +68,7 @@ export default function SuperAdminSecurity() {
       const [auditData, usersData, deviceCountsRes] = await Promise.all([
         getAuditLogs(50),
         getAllUsers(),
-        supabase
+        backendClient
           .from('devices')
           .select('user_id')
           .then(({ data }) => {

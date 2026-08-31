@@ -1,6 +1,11 @@
 -- MedAcademy MySQL schema — split files for phpMyAdmin import.
 -- Primary method: cPanel Terminal -> mysql -u USER -p DB < backend/database/schema.sql
 -- See backend/NAMECHEAP_DEPLOYMENT.md step 7.
+--
+-- For phpMyAdmin: the SQL tab supports DELIMITER automatically in recent
+-- versions (4.x/5.x, "Allow the use of delimiters" is on by default). If your
+-- phpMyAdmin complains about BEGIN/END, import via the cPanel Terminal method
+-- instead.
 
 TRIGGERS (ported from PostgreSQL trigger functions in supabase/migrations)
 -- ---------------------------------------------------------------------------
@@ -13,17 +18,22 @@ DELIMITER $$
 
 -- 1. Auto-create profile row when a user account is created
 --    (PG: handle_new_user / on_auth_user_created)
+--    watermark_id is set to UUID() so the INSERT never fails on the NOT NULL
+--    UNIQUE column (the app's register/admin flows overwrite it with the
+--    sequential watermark immediately afterwards). email uses COALESCE to
+--    satisfy NOT NULL for phone-only accounts (the app writes '' too).
 DROP TRIGGER IF EXISTS trg_on_auth_user_created $$
 CREATE TRIGGER trg_on_auth_user_created
 AFTER INSERT ON `users`
 FOR EACH ROW
 BEGIN
-  INSERT INTO `profiles` (`id`, `email`, `full_name`, `role`)
+  INSERT INTO `profiles` (`id`, `email`, `full_name`, `role`, `watermark_id`)
   VALUES (
     NEW.`id`,
-    NEW.`email`,
+    COALESCE(NEW.`email`, ''),
     COALESCE(JSON_UNQUOTE(JSON_EXTRACT(NEW.`raw_user_meta_data`, '$.full_name')), ''),
-    COALESCE(JSON_UNQUOTE(JSON_EXTRACT(NEW.`raw_user_meta_data`, '$.role')), 'student')
+    COALESCE(JSON_UNQUOTE(JSON_EXTRACT(NEW.`raw_user_meta_data`, '$.role')), 'student'),
+    UUID()
   );
 END $$
 
@@ -221,6 +231,13 @@ FOR EACH ROW SET NEW.`updated_at` = CURRENT_TIMESTAMP(6) $$
 
 -- 9. Phone sync between users and profiles
 --    (PG: sync_auth_phone_on_new_user, sync_auth_phone_on_profile_update)
+--    NOTE: this sync is REQUIRED by the application — AuthService::register()
+--    and AdminController::userManagement() deliberately omit users.phone from
+--    their INSERT (inserting users.phone would fire trigger -> UPDATE profiles
+--    -> fires this trigger -> UPDATE users -> MySQL Error 1442) and instead
+--    UPDATE profiles.phone_e164, whose trigger writes users.phone back.
+--    `NOT (OLD.x <=> NEW.x)` is the MySQL equivalent of PG's IS DISTINCT FROM
+--    (the PG-only `IS DISTINCT FROM` syntax broke phpMyAdmin imports).
 DROP TRIGGER IF EXISTS trg_sync_auth_phone_on_new_user $$
 CREATE TRIGGER trg_sync_auth_phone_on_new_user
 AFTER INSERT ON `users`
@@ -238,7 +255,7 @@ CREATE TRIGGER trg_sync_auth_phone_on_profile_update
 AFTER UPDATE ON `profiles`
 FOR EACH ROW
 BEGIN
-  IF NEW.`phone_e164` IS NOT NULL AND NEW.`phone_e164` <> '' AND OLD.`phone_e164` IS DISTINCT FROM NEW.`phone_e164` THEN
+  IF NEW.`phone_e164` IS NOT NULL AND NEW.`phone_e164` <> '' AND NOT (OLD.`phone_e164` <=> NEW.`phone_e164`) THEN
     UPDATE `users` SET `phone` = NEW.`phone_e164` WHERE `id` = NEW.`id`;
   END IF;
 END $$

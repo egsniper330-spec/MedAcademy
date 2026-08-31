@@ -123,7 +123,7 @@ function AppLayoutNav() {
       reset();
       void check().then((result) => {
         if (result.blocksLogin) {
-          router.replace('/(auth)/security-warning' as RelativePathString);
+          router.replace('/security-warning' as RelativePathString);
         }
       });
     });
@@ -139,7 +139,7 @@ function AppLayoutNav() {
     if (!onNewBlockingThreat) return;
     const unsub = onNewBlockingThreat((result) => {
       if (result.blocksLogin) {
-        router.replace('/(auth)/security-warning' as RelativePathString);
+        router.replace('/security-warning' as RelativePathString);
       }
     });
     return unsub;
@@ -175,13 +175,13 @@ function AppLayoutNav() {
     const role = profile.role;
     // If student was created by doctor → force password change first
     if ((profile as any).force_password_change) {
-      router.replace('/(app)/force-password-change' as RelativePathString);
+      router.replace('/force-password-change' as RelativePathString);
       return;
     }
-    if (role === 'student') router.replace('/(app)/(student)/dashboard' as RelativePathString);
-    else if (role === 'doctor') router.replace('/(app)/(doctor)/dr-overview' as RelativePathString);
-    else if (role === 'admin') router.replace('/(app)/(admin)/admin-overview' as RelativePathString);
-    else if (role === 'super_admin') router.replace('/(app)/(superadmin)/sa-overview' as RelativePathString);
+    if (role === 'student') router.replace('/dashboard' as RelativePathString);
+    else if (role === 'doctor') router.replace('/dr-overview' as RelativePathString);
+    else if (role === 'admin') router.replace('/admin-overview' as RelativePathString);
+    else if (role === 'super_admin') router.replace('/sa-overview' as RelativePathString);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [profile, isProfileLoading]);
 

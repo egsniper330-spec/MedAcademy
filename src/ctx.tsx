@@ -1,9 +1,9 @@
 import { createContext, useContext, useEffect, useRef, useState } from 'react';
 import { AppState } from 'react-native';
-import type { Session, RealtimeChannel } from '@/client/types';
+import type { Session, PollingChannel } from '@/client/types';
 import * as SecureStore from 'expo-secure-store';
 
-import { supabase } from '@/client/supabase';
+import { backendClient } from '@/client/backendClient';
 import { getInstallationId, getStoredDeviceFingerprint, clearDeviceFingerprint } from '@/lib/installationId';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -59,7 +59,7 @@ async function clearStoredSecurityVersion(userId: string): Promise<void> {
 type SessionContextType = { session: Session | null; isLoading: boolean };
 const SessionContext = createContext<SessionContextType>({ session: null, isLoading: true });
 
-// ── Grace window after SIGNED_IN / INITIAL_SESSION ───────────────────────────
+// ── Grace window after sign-in / restored-session events ──────────────────────
 // Suppresses all checkRevocation calls for this many ms after a sign-in event.
 // Rationale: get_security_version seeding and storeDeviceFingerprint are both
 // async fire-and-forget. If checkRevocation runs first it sees storedVersion=0
@@ -77,8 +77,8 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
   // Non-zero = SIGNED_IN or INITIAL_SESSION fired this process lifetime.
   // Zero     = no auth event yet (safe to check immediately on a restored session).
   const lastSignedInAtRef  = useRef<number>(0);
-  const realtimeChannelRef = useRef<RealtimeChannel | null>(null);
-  const realtimeUserIdRef  = useRef<string | null>(null);
+  const pollingChannelRef = useRef<PollingChannel | null>(null);
+  const pollingUserIdRef  = useRef<string | null>(null);
 
   // ── forceSignOut ──────────────────────────────────────────────────────────
   const forceSignOutRef = useRef(async (reason: string) => {
@@ -95,11 +95,11 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       authLog(`forceSignOut: clearing credentials userId=${userId ?? 'none'}`);
       if (userId) await clearStoredSecurityVersion(userId);
       await clearDeviceFingerprint();
-      const { error } = await supabase.auth.signOut();
+      const { error } = await backendClient.auth.signOut();
       if (error) {
-        authLog(`forceSignOut: supabase.auth.signOut() ERROR: ${error.message}`);
+        authLog(`forceSignOut: backendClient.auth.signOut() ERROR: ${error.message}`);
       } else {
-        authLog('forceSignOut: supabase.auth.signOut() SUCCESS → SIGNED_OUT event will follow');
+        authLog('forceSignOut: backendClient.auth.signOut() SUCCESS → SIGNED_OUT event will follow');
       }
     } finally {
       revokingRef.current = false;
@@ -133,7 +133,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       ]);
       authLog(`checkRevocation: storedVersion=${storedVersion} fingerprint=${fingerprint ?? 'NONE'} installationId=${installationId}`);
 
-      const { data: fnData, error: fnError } = await supabase.functions.invoke('device-binding', {
+      const { data: fnData, error: fnError } = await backendClient.functions.invoke('device-binding', {
         body: {
           action:                  'check_authorization',
           fingerprint:             fingerprint ?? undefined,
@@ -144,7 +144,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
 
       if (fnError) {
         authLog(`checkRevocation: Edge Function error — falling back to RPC: ${fnError.message}`);
-        const { data: rpcData, error: rpcError } = await supabase.rpc('get_security_version');
+        const { data: rpcData, error: rpcError } = await backendClient.rpc('get_security_version');
         if (rpcError) { authLog(`checkRevocation: RPC fallback error: ${rpcError.message}`); return; }
         const serverVer = Number(rpcData ?? 0);
         authLog(`checkRevocation: RPC fallback serverVersion=${serverVer} storedVersion=${storedVersion}`);
@@ -176,11 +176,11 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       authLog('getSession: START');
       let s: Session | null = null;
       try {
-        const { data } = await supabase.auth.getSession();
+        const { data } = await backendClient.auth.getSession();
         s = data.session;
         authLog(`getSession: DONE user=${s?.user?.id ?? 'none'} expires_at=${s?.expires_at ?? 'n/a'} has_access_token=${!!s?.access_token} has_refresh_token=${!!s?.refresh_token}`);
       } catch (err) {
-        // getSession() should never throw (supabase-js returns {data, error}), but if
+        // getSession() should never throw (backendClient-js returns {data, error}), but if
         // the network layer rejects (e.g. completely unreachable host on first network
         // call), we must still resolve isLoading so the UI renders instead of staying
         // black.
@@ -216,13 +216,13 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
     })();
 
     // ── 2. Auth state listener ────────────────────────────────────────────────
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, s) => {
+    const { data: { subscription } } = backendClient.auth.onAuthStateChange((event, s) => {
       authLog(`onAuthStateChange: event=${event} user=${s?.user?.id ?? 'none'} expires_at=${s?.expires_at ?? 'n/a'} has_access_token=${!!s?.access_token} has_refresh_token=${!!s?.refresh_token}`);
       setSession(s);
       sessionRef.current = s;
 
       // FIX: also treat INITIAL_SESSION as a sign-in for grace-window purposes.
-      // On web/reload Supabase emits INITIAL_SESSION (not SIGNED_IN) when a
+      // On web/reload the session listener emits INITIAL_SESSION when a
       // session already exists — without this guard the grace window never
       // activates and checkRevocation fires immediately from getSession() above.
       if ((event === 'SIGNED_IN' || event === 'INITIAL_SESSION') && s) {
@@ -232,7 +232,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
         // Seed security_version from server baseline.
         (async () => {
           try {
-            const { data, error } = await supabase.rpc('get_security_version');
+            const { data, error } = await backendClient.rpc('get_security_version');
             if (error) {
               authLog(`${event}: get_security_version RPC ERROR: ${error.message}`);
             } else if (data != null) {
@@ -259,55 +259,55 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       }
     });
 
-    // ── 3. Realtime — single deduplicated subscription ────────────────────────
-    const subscribeRealtime = (userId: string) => {
-      if (realtimeUserIdRef.current === userId && realtimeChannelRef.current) {
-        authLog(`Realtime: already subscribed for user=${userId}, skipping duplicate`);
+    // ── 3. Polling — single deduplicated subscription ────────────────────────
+    const subscribePolling = (userId: string) => {
+      if (pollingUserIdRef.current === userId && pollingChannelRef.current) {
+        authLog(`Polling: already subscribed for user=${userId}, skipping duplicate`);
         return;
       }
-      if (realtimeChannelRef.current) {
-        supabase.removeChannel(realtimeChannelRef.current);
-        realtimeChannelRef.current = null;
-        realtimeUserIdRef.current  = null;
+      if (pollingChannelRef.current) {
+        backendClient.removePoller(pollingChannelRef.current);
+        pollingChannelRef.current = null;
+        pollingUserIdRef.current  = null;
       }
-      authLog(`Realtime: subscribing for user=${userId}`);
-      realtimeChannelRef.current = supabase
-        .channel(`revocation:${userId}`)
-        .on('postgres_changes',
+      authLog(`Polling: subscribing for user=${userId}`);
+      pollingChannelRef.current = backendClient
+        .poll(`revocation:${userId}`)
+        .on('php_polling',
           { event: 'UPDATE', schema: 'public', table: 'profiles', filter: `id=eq.${userId}` },
           (payload) => {
             const newVer = payload.new?.security_version as number | undefined;
-            authLog(`Realtime profiles UPDATE: new security_version=${newVer}`);
-            checkRevocationRef.current(sessionRef.current, 'realtime_profiles_update');
+            authLog(`Polling profiles UPDATE: new security_version=${newVer}`);
+            checkRevocationRef.current(sessionRef.current, 'polling_profiles_update');
           })
-        .on('postgres_changes',
+        .on('php_polling',
           { event: 'UPDATE', schema: 'public', table: 'devices', filter: `user_id=eq.${userId}` },
           (payload) => {
             const tl = payload.new?.trust_level as string | undefined;
             const st = payload.new?.status     as string | undefined;
-            authLog(`Realtime devices UPDATE: trust_level=${tl} status=${st}`);
+            authLog(`Polling devices UPDATE: trust_level=${tl} status=${st}`);
             if (tl === 'revoked' || st === 'logged_out') {
-              checkRevocationRef.current(sessionRef.current, 'realtime_devices_update');
+              checkRevocationRef.current(sessionRef.current, 'polling_devices_update');
             }
           })
-        .subscribe((state) => { authLog(`Realtime channel state: ${state}`); });
-      realtimeUserIdRef.current = userId;
+        .subscribe((state) => { authLog(`Polling channel state: ${state}`); });
+      pollingUserIdRef.current = userId;
     };
 
-    const { data: { subscription: realtimeSub } } = supabase.auth.onAuthStateChange((event, s) => {
-      if (event === 'SIGNED_IN' && s?.user?.id) subscribeRealtime(s.user.id);
-      if (event === 'INITIAL_SESSION' && s?.user?.id) subscribeRealtime(s.user.id);
+    const { data: { subscription: pollingAuthSub } } = backendClient.auth.onAuthStateChange((event, s) => {
+      if (event === 'SIGNED_IN' && s?.user?.id) subscribePolling(s.user.id);
+      if (event === 'INITIAL_SESSION' && s?.user?.id) subscribePolling(s.user.id);
       if (event === 'SIGNED_OUT') {
-        if (realtimeChannelRef.current) {
-          supabase.removeChannel(realtimeChannelRef.current);
-          realtimeChannelRef.current = null;
-          realtimeUserIdRef.current  = null;
+        if (pollingChannelRef.current) {
+          backendClient.removePoller(pollingChannelRef.current);
+          pollingChannelRef.current = null;
+          pollingUserIdRef.current  = null;
         }
       }
     });
     // NOTE: The extra getSession() call that was here has been removed.
     // It was redundant (the IIFE above already calls getSession and the
-    // INITIAL_SESSION event above covers restored sessions for realtime),
+    // INITIAL_SESSION event above covers restored sessions for polling),
     // and it introduced a race: a second navigator.lock acquisition could
     // resolve after SIGNED_IN but before registerDevice + storeDeviceFingerprint
     // completed, causing a stale-fingerprint check_authorization call.
@@ -320,13 +320,13 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
 
     // ── 5. App foreground handler ─────────────────────────────────────────────
     // Non-fatal on refreshSession error — transient network errors must NOT
-    // sign the user out. Supabase autoRefreshToken handles retries.
+    // sign the user out. The PHP refresh endpoint handles token rotation.
     const appStateSubscription = AppState.addEventListener('change', (nextState) => {
       if (appState.current.match(/inactive|background/) && nextState === 'active') {
         authLog('app foregrounded — refreshSession + revocation check');
         (async () => {
           if (process.env.EXPO_OS !== 'web') {
-            const { error, data } = await supabase.auth.refreshSession();
+            const { error, data } = await backendClient.auth.refreshSession();
             if (error) {
               authLog(`foreground refreshSession error (non-fatal, skipping check): ${error.message}`);
               return;
@@ -334,7 +334,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
             authLog(`foreground refreshSession OK expires_at=${data.session?.expires_at ?? 'n/a'}`);
             await checkRevocationRef.current(data.session, 'foreground_refresh');
           } else {
-            const { data: { session: s } } = await supabase.auth.getSession();
+            const { data: { session: s } } = await backendClient.auth.getSession();
             await checkRevocationRef.current(s, 'foreground_web');
           }
         })();
@@ -345,8 +345,8 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
     return () => {
       authLog('SessionProvider: unmounting — cleaning up listeners');
       subscription.unsubscribe();
-      realtimeSub.unsubscribe();
-      if (realtimeChannelRef.current) supabase.removeChannel(realtimeChannelRef.current);
+      pollingAuthSub.unsubscribe();
+      if (pollingChannelRef.current) backendClient.removePoller(pollingChannelRef.current);
       appStateSubscription.remove();
       clearInterval(pollInterval);
     };

@@ -14,7 +14,7 @@
 //     at org.gradle.toolchains.foojay.DistributionsKt...
 //
 //   This crash happens at project configuration time — before any compilation —
-//   which is why MEDO's build fails instantly with "Packaging failed".
+//   which is why CI builds fail instantly with "Packaging failed".
 //
 //   Gradle 8.13 is fully compatible with foojay 0.8.0 and with all other
 //   plugins used by this project. This plugin pins the wrapper so prebuild
@@ -47,13 +47,13 @@ const WRAPPER_CONTENT = [
 //   react.internal.disableJavaVersionAlignment — tells JdkConfiguratorUtils.kt
 //     to skip calling kotlinExtension.jvmToolchain(17) on every Kotlin subproject.
 //     Without this, Gradle's Foojay Disco provisioner tries to download JDK 17
-//     over the network, timing out on MEDO's restricted build server.
+//     over the network, timing out on restricted CI build servers.
 //
 //   org.gradle.java.installations.auto-provisioning=false — belt-and-suspenders:
 //     prevents Gradle itself from auto-provisioning a JDK even if some other
 //     toolchain spec slips through.
 //
-//   org.gradle.daemon=false — MEDO/CI builds run in ephemeral containers; the
+//   org.gradle.daemon=false — CI builds run in ephemeral containers; the
 //     Gradle daemon provides no speedup there and can cause stale-process issues.
 const GRADLE_PROPS_ADDITIONS = [
   '',
@@ -61,7 +61,7 @@ const GRADLE_PROPS_ADDITIONS = [
   'react.internal.disableJavaVersionAlignment=true',
   '# Disable Gradle auto-provisioning as belt-and-suspenders.',
   'org.gradle.java.installations.auto-provisioning=false',
-  '# Disable Gradle daemon for ephemeral CI/MEDO containers.',
+  '# Disable Gradle daemon for ephemeral CI containers.',
   'org.gradle.daemon=false',
 ].join('\n');
 

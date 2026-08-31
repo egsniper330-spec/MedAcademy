@@ -1,7 +1,7 @@
 /**
  * SA Support Settings — Super Admin can configure support contact methods
  * (Phone, WhatsApp, Telegram) that appear on the user-facing security/blocked screen.
- * Settings are saved to the `support_settings` Supabase table with RLS enforced.
+ * Settings are saved to the PHP `support_settings` table with backend authorization enforced.
  */
 import React, { useCallback, useState } from 'react';
 import {
@@ -262,11 +262,12 @@ export default function SaSupportSettings() {
       style={{ flex: 1, backgroundColor: c.base }}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />}
     >
-      <View style={{ padding: layout.screenPx, paddingBottom: layout.scrollBottom() + layout.pad.xl }}>
-        <PageHeader
-          title="Support Settings"
-          subtitle="Configure contact methods shown to users on the security/blocked screen"
-        />
+      <PageHeader
+        title="Support Settings"
+        subtitle="Configure contact methods shown to users on the security/blocked screen"
+      />
+
+      <View style={{ paddingHorizontal: layout.screenPx, paddingBottom: layout.scrollBottom() + layout.pad.xl }}>
 
         {error && (
           <View style={{

@@ -127,10 +127,20 @@ final class CourseController
             throw new ApiException(422, 'title is required');
         }
         $id = Uuid::v4();
+        // The course owner is the authenticated doctor (never client-supplied).
+        // Snapshot the doctor's current profile name into instructor_name so
+        // legacy consumers that read the snapshot keep working; the student UI
+        // prefers the live profiles.full_name via the doctor relation.
+        $doctorName = Database::instance()->value(
+            'SELECT full_name FROM profiles WHERE id = ? LIMIT 1',
+            [$request->user['id']],
+            null
+        );
         Database::instance()->insert(
             'INSERT INTO courses (id, doctor_id, title, description, short_description, full_description,
-                                  status, language, difficulty, credits_required, created_at, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP(6), UTC_TIMESTAMP(6))',
+                                  status, language, difficulty, credits_required, instructor_name,
+                                  created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP(6), UTC_TIMESTAMP(6))',
             [
                 $id,
                 $request->user['id'],
@@ -142,6 +152,7 @@ final class CourseController
                 (string) ($data['language'] ?? 'arabic'),
                 (string) ($data['difficulty'] ?? 'all_levels'),
                 (int) ($data['credits_required'] ?? 1),
+                $doctorName,
             ]
         );
         AuditService::write($request->user['id'], 'course_created', ['course_id' => $id, 'title' => $title]);
@@ -223,29 +234,120 @@ final class CourseController
     // ================================================================
 
     /**
-     * POST /courses/{id}/publish — publish course (draft → published).
+     * POST /courses/{id}/publish — publish or republish the latest saved course tree.
+     *
+     * The latest successful `published` lifecycle log is the existing publish
+     * marker. Pending changes are derived from updated_at across the course,
+     * sections, lessons, and lesson materials; no snapshot table is needed.
      */
     public function publish(Request $request): array
     {
         $id = Uuid::normalize((string) $request->params['id']);
         $this->assertCourseOwner($request, $id);
 
-        $course = Database::instance()->row('SELECT status, title FROM courses WHERE id = ?', [$id]);
+        $db = Database::instance();
+        $course = $db->row(
+            'SELECT status, title, doctor_id, use_default_contact, whatsapp, telegram, facebook, phone, updated_at FROM courses WHERE id = ?',
+            [$id]
+        );
         if ($course === null) {
             throw new ApiException(404, 'Course not found');
         }
-        if ($course['status'] === 'published') {
-            throw new ApiException(409, 'Course is already published');
+
+        $lastPublishedAt = $db->value(
+            "SELECT created_at FROM course_lifecycle_logs
+              WHERE course_id = ? AND action IN ('published', 'republished', 'updated_and_published')
+              ORDER BY created_at DESC LIMIT 1",
+            [$id],
+            null
+        );
+        $latestTreeChange = $db->value(
+            "SELECT MAX(changed_at) FROM (
+                SELECT updated_at AS changed_at FROM courses WHERE id = ?
+                UNION ALL
+                SELECT updated_at FROM sections WHERE course_id = ?
+                UNION ALL
+                SELECT updated_at FROM lessons WHERE course_id = ?
+                UNION ALL
+                SELECT lm.updated_at FROM lesson_materials lm
+                JOIN lessons l ON l.id = lm.lesson_id
+                WHERE l.course_id = ?
+            ) changes",
+            [$id, $id, $id, $id],
+            null
+        );
+        $hasPendingChanges = $lastPublishedAt === null || $latestTreeChange === null
+            || strtotime((string) $latestTreeChange) > strtotime((string) $lastPublishedAt);
+        $wasPublished = $course['status'] === 'published';
+        $action = $wasPublished && !$hasPendingChanges ? 'already_published' : ($wasPublished ? 'updated' : 'published');
+        if ($action === 'already_published') {
+            return ['success' => true, 'status' => 'published', 'action' => $action];
         }
 
-        Database::instance()->query(
-            "UPDATE courses SET status = 'published', updated_at = UTC_TIMESTAMP(6) WHERE id = ?",
-            [$id]
-        );
+        // ── Resolve the course's effective contact information ────────────
+        // When the course uses the doctor's default contact (use_default_contact
+        // = true), copy the doctor's CURRENT default contact into the course
+        // row. This satisfies chk_courses_c0 legitimately (a published course
+        // must carry at least one contact method) instead of failing the UPDATE.
+        // When the course has its own explicit contact info, it is preserved.
+        $whatsapp = $course['whatsapp'];
+        $telegram = $course['telegram'];
+        $facebook = $course['facebook'];
+        $phone    = $course['phone'];
 
-        $this->logLifecycle($id, $course['title'], 'published', $request->user['id']);
-        AuditService::write($request->user['id'], 'course_published', ['course_id' => $id]);
-        return ['success' => true];
+        if ((int) $course['use_default_contact'] === 1) {
+            $doctor = $db->row(
+                'SELECT contact_whatsapp, contact_telegram, contact_phone, phone, phone_e164 FROM profiles WHERE id = ?',
+                [$course['doctor_id']]
+            );
+            if ($doctor !== null) {
+                $whatsapp = $doctor['contact_whatsapp'] ?? null;
+                $telegram = $doctor['contact_telegram'] ?? null;
+                // Older/current profiles may store their default phone in the
+                // account phone column rather than contact_phone. Treat that
+                // authenticated profile phone as the default contact without
+                // weakening chk_courses_c0 or accepting client-supplied data.
+                $phone = $doctor['contact_phone']
+                    ?? $doctor['phone_e164']
+                    ?? $doctor['phone']
+                    ?? null;
+            }
+        }
+
+        $hasContact = !empty(trim((string) $whatsapp))
+            || !empty(trim((string) $telegram))
+            || !empty(trim((string) $facebook))
+            || !empty(trim((string) $phone));
+
+        if (!$hasContact) {
+            throw new ApiException(422, 'A contact method is required to publish. Add your default contact in Profile or set course-specific contact information.');
+        }
+
+        if ((int) $course['use_default_contact'] === 1) {
+            $db->query(
+                'UPDATE courses SET status = ?, whatsapp = ?, telegram = ?, phone = ?, updated_at = UTC_TIMESTAMP(6) WHERE id = ?',
+                [
+                    'published',
+                    $whatsapp !== null && trim((string) $whatsapp) !== '' ? $whatsapp : null,
+                    $telegram !== null && trim((string) $telegram) !== '' ? $telegram : null,
+                    $phone    !== null && trim((string) $phone)    !== '' ? $phone    : null,
+                    $id,
+                ]
+            );
+        } else {
+            $db->query(
+                "UPDATE courses SET status = 'published', updated_at = UTC_TIMESTAMP(6) WHERE id = ?",
+                [$id]
+            );
+        }
+
+        $lifecycleAction = $wasPublished ? 'updated_and_published' : 'published';
+        $this->logLifecycle($id, $course['title'], $lifecycleAction, $request->user['id']);
+        AuditService::write($request->user['id'], 'course_published', [
+            'course_id' => $id,
+            'action' => $action,
+        ]);
+        return ['success' => true, 'status' => 'published', 'action' => $action];
     }
 
     /**
@@ -314,7 +416,12 @@ final class CourseController
         $videosDeleted = $db->value('SELECT COUNT(*) FROM video_uploads WHERE course_id = ?', [$id], 0);
         $storageFreed = (int) $db->value('SELECT COALESCE(SUM(file_size), 0) FROM video_uploads WHERE course_id = ?', [$id], 0);
 
-        $db->transaction(function (Database $db) use ($id) {
+        // Log the lifecycle event INSIDE the transaction and BEFORE the course
+        // row is deleted: course_lifecycle_logs.course_id references courses.id
+        // (ON DELETE SET NULL), so an insert after the DELETE would violate the
+        // FK and fail the whole request even though the deletion succeeded.
+        $db->transaction(function (Database $db) use ($id, $course, $request) {
+            $this->logLifecycle($id, $course['title'] ?? '', 'permanently_deleted', $request->user['id']);
             $db->query('DELETE FROM lesson_materials WHERE lesson_id IN (SELECT id FROM lessons WHERE course_id = ?)', [$id]);
             $db->query('DELETE FROM video_uploads WHERE course_id = ?', [$id]);
             $db->query('DELETE FROM lessons WHERE course_id = ?', [$id]);
@@ -324,7 +431,6 @@ final class CourseController
             $db->query('DELETE FROM courses WHERE id = ?', [$id]);
         });
 
-        $this->logLifecycle($id, $course['title'] ?? '', 'permanently_deleted', $request->user['id']);
         AuditService::write($request->user['id'], 'course_deleted', [
             'course_id' => $id,
             'lessons_deleted' => $lessonsDeleted,

@@ -147,10 +147,9 @@ Supabase is effectively "offline" because:
 |-----------|------|---------------|
 | `@supabase/supabase-js` (comment) | supabase.ts:5 | Documentation |
 | `@supabase/supabase-js` (comment) | types.ts:2 | Documentation |
-| `supabase.co` (allowlist) | medo-guard.ts:31-32 | Intentional env var validation |
-| `supabase.co` (error msg) | medo-guard.ts:162 | Documentation |
+| `supabase.co` (removed) | medo-guard.ts | Removed — no longer needed |
 | `EXPO_PUBLIC_SUPABASE_URL` (fallback) | php.ts:16 | Config derivation (→ PHP URL) |
-| `EXPO_PUBLIC_SUPABASE_URL` (medo-guard) | medo-guard.ts:140-177 | Intentional security check |
+| `EXPO_PUBLIC_SUPABASE_URL` (removed) | medo-guard.ts | Removed — no longer needed |
 | `EXPO_PUBLIC_SUPABASE_URL` (diagnostic) | sign-in.tsx:92 | Logging only |
 | `EXPO_PUBLIC_SUPABASE_URL` (construct PHP URL) | codes.tsx:861, api.ts:2365 | Builds PHP backend URL |
 | `EXPO_PUBLIC_SUPABASE_URL` (TLS probe) | security.ts:624 | Builds PHP backend URL |

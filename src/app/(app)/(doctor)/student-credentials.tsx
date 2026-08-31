@@ -155,8 +155,10 @@ export default function StudentCredentialsScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: c.base }}>
-      <ScrollView contentContainerStyle={{ padding: layout.screenPx, gap: 16, paddingBottom: layout.scrollBottom() }}>
+      <ScrollView>
         <PageHeader title="Student Created" onBack={handleDone} />
+
+      <View style={{ paddingHorizontal: layout.screenPx, gap: 16, paddingBottom: layout.scrollBottom() }}>
 
         {/* Success banner */}
         <View style={[flat, { borderRadius: 20, padding: 24, alignItems: 'center', gap: 12 }]}>
@@ -239,6 +241,7 @@ export default function StudentCredentialsScreen() {
         </View>
 
         <NeuButton label="Done" onPress={handleDone} icon={<ArrowRight size={16} color="#fff" />} />
+      </View>
       </ScrollView>
     </View>
   );

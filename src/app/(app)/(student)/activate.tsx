@@ -40,14 +40,13 @@ export default function ActivateCode() {
       <ScrollView
         contentContainerStyle={{
           flexGrow: 1,
-          padding: 24,
-          paddingTop: Math.max(insets.top + 16, 40),
           paddingBottom: Math.max(insets.bottom + 16, 32),
         }}
         keyboardShouldPersistTaps="handled"
       >
         <PageHeader title="Activation Code" subtitle="Enter your code to unlock a course" />
 
+      <View style={{ paddingHorizontal: 24, paddingTop: Math.max(insets.top + 16, 40) - 20 }}>
 
         {success ? (
           <NeuCard radius={22} style={{ alignItems: 'center', padding: 36 }}>
@@ -87,6 +86,7 @@ export default function ActivateCode() {
             <NeuButton label="Activate" onPress={handleRedeem} loading={loading} fullWidth />
           </NeuCard>
         )}
+      </View>
       </ScrollView>
     </KeyboardAvoidingView>
   );

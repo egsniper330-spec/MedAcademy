@@ -8,9 +8,10 @@ use MedAcademy\Database\Database;
 use MedAcademy\Http\Request;
 use MedAcademy\Http\Response;
 use MedAcademy\Http\ApiException;
+use MedAcademy\Utils\Uuid;
 
 /**
- * Generic data controller — handles Supabase-compatible `.from('table')` queries.
+ * Generic data controller — handles the app's legacy chainable query contract.
  *
  * SECURITY:
  * - Table allowlist enforced
@@ -20,7 +21,7 @@ use MedAcademy\Http\ApiException;
  * - Mass assignment prevented for sensitive columns
  * - All values use parameterized queries
  *
- * SUPABASE-COMPAT:
+ * LEGACY QUERY CONTRACT:
  * - Embedded relations (`alias:table!fk(cols)` / `table(cols)`) are resolved
  *   with LEFT JOINs (many-to-one) and batched child queries (one-to-many).
  * - PostgREST filter syntax (`col=eq.val`, `col=not.is.null`, `or=(...)`) is parsed.
@@ -46,7 +47,7 @@ class DataController
         'devices', 'doctor_credit_summary', 'doctor_earnings_events',
         'doctor_earnings_transactions', 'doctor_payout_requests',
         'doctor_pricing_history', 'enrollments', 'fraud_flags',
-        'lesson_materials', 'lesson_progress', 'lessons',
+        'lesson_materials', 'lesson_pdfs', 'lesson_progress', 'lessons',
         'maintenance_whitelist', 'notifications', 'platform_earnings_resets',
         'profiles', 'provider_audit_log', 'revenue_analytics', 'sections',
         'security_events', 'security_policies', 'security_vpn_whitelist',
@@ -82,14 +83,20 @@ class DataController
      * rows where the given column equals their own user id.
      */
     private const SELF_SCOPE = [
-        'profiles'            => 'id',
-        'notifications'       => 'user_id',
-        'lesson_progress'     => 'student_id',
-        'credits'             => 'doctor_id',
-        'credit_transactions' => 'doctor_id',
-        'devices'             => 'user_id',
-        'video_uploads'       => 'doctor_id',
-        'video_assets'        => 'doctor_id',
+        'profiles'                   => 'id',
+        'notifications'              => 'user_id',
+        'lesson_progress'            => 'student_id',
+        'credits'                    => 'doctor_id',
+        'credit_transactions'        => 'doctor_id',
+        'devices'                    => 'user_id',
+        'video_uploads'              => 'doctor_id',
+        'video_assets'               => 'doctor_id',
+        // Earnings tables: a doctor may read their own records; admins keep
+        // full access (they bypass the scope in ownerScope/assertAccess).
+        'doctor_earnings_events'     => 'doctor_id',
+        'doctor_earnings_transactions' => 'doctor_id',
+        'doctor_payout_requests'     => 'doctor_id',
+        'doctor_pricing_history'     => 'doctor_id',
     ];
 
     /**
@@ -110,8 +117,84 @@ class DataController
     /** Valid MySQL identifier pattern — prevents SQL injection in column/table names */
     private const IDENTIFIER_REGEX = '/^[a-zA-Z_][a-zA-Z0-9_]*$/';
 
+    /**
+     * MySQL JSON columns per table (derived from backend/database/schema.sql).
+     * These are returned by PDO as raw strings; the frontend contract (PostgREST/
+     * Supabase) delivers them as decoded JSON values, so we decode them here.
+     */
+    private const JSON_COLUMNS = [
+        'users'                    => ['raw_app_meta_data', 'raw_user_meta_data'],
+        'profiles'                 => ['suspension_device', 'delete_permissions'],
+        'courses'                  => ['tags'],
+        'video_uploads'            => ['file_analysis', 'provider_metadata'],
+        'audit_logs'               => ['details', 'old_values', 'new_values'],
+        'system_config'            => ['value'],
+        'idempotency_keys'         => ['result'],
+        'fraud_flags'              => ['details'],
+        'course_templates'         => ['template_data'],
+        'upload_audit_logs'        => ['details'],
+        'video_health_scans'       => ['checks'],
+        'video_health_alerts'      => ['metadata'],
+        'video_provider_config'    => ['config'],
+        'video_daily_health_reports'=> ['details'],
+        'provider_registry'        => ['config', 'capabilities'],
+        'provider_audit_log'       => ['metadata'],
+        'subscription_timeline'    => ['event_data'],
+        'bulk_import_jobs'         => ['rows', 'errors'],
+        'security_events'          => ['metadata'],
+        'deletion_records'         => ['verification', 'error_details'],
+        'security_config'          => ['extras', 'expected_cert_sha256s'],
+        'crash_logs'               => ['device_info'],
+        'analytics_events'         => ['event_data'],
+    ];
+
     /** @var array<string,string[]> per-request cache of table column lists */
     private array $columnCache = [];
+
+    /**
+     * Decode MySQL JSON columns into native PHP values (matches the PostgREST
+     * contract: jsonb/text[] come back as arrays/objects, not strings).
+     */
+    private function decodeJsonRow(array $row, string $table): array
+    {
+        foreach (self::JSON_COLUMNS[$table] ?? [] as $col) {
+            if (array_key_exists($col, $row) && is_string($row[$col]) && $row[$col] !== '') {
+                $decoded = json_decode($row[$col], true);
+                if (json_last_error() === JSON_ERROR_NONE) {
+                    $row[$col] = $decoded;
+                }
+            }
+        }
+        return $row;
+    }
+
+    /**
+     * Normalize JSON-column writes for PDO/MySQL.
+     *
+     * The frontend contract accepts native arrays/objects, while PDO binds
+     * scalar values. Encode structured values once here, and preserve strings
+     * that are already valid JSON. This keeps MySQL json_valid() constraints
+     * meaningful instead of weakening them or passing "Array" to PDO.
+     */
+    private function encodeJsonValue(string $table, string $column, mixed $value): mixed
+    {
+        if (!in_array($column, self::JSON_COLUMNS[$table] ?? [], true) || $value === null) {
+            return $value;
+        }
+
+        if (is_string($value)) {
+            json_decode($value, true);
+            if (json_last_error() === JSON_ERROR_NONE) {
+                return $value;
+            }
+        }
+
+        $encoded = json_encode($value, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+        if ($encoded === false) {
+            throw new ApiException(422, "Invalid JSON value for {$table}.{$column}");
+        }
+        return $encoded;
+    }
 
     /**
      * SELECT from table — GET /api/{table}?select=*&col=val&order=col.asc&limit=10
@@ -123,7 +206,7 @@ class DataController
         $this->assertAccess($table, $request);
 
         $db = Database::instance();
-        $params = $request->query();
+        $params = $request->queryParams();
         $userId = $request->user['id'] ?? null;
 
         $selectRaw = $params['select'] ?? '*';
@@ -145,17 +228,41 @@ class DataController
         [$mainCols, $joins] = $this->buildMainSelect($table, $parsed);
         [$where, $bindings] = $this->buildWhere($table, $params, $request, $userId);
 
+        // ── Internal id injection ─────────────────────────────────────────
+        // The response tree is keyed by the main row's `id` (and one-to-many
+        // children attach to it), so a select that omits `id` (e.g.
+        // select=full_name) used to drop every row and return []. Query the
+        // id internally (inside the SELECT projection — never appended after
+        // the FROM clause, which would be parsed as a table reference) and
+        // strip it from the response afterward, so the output still matches
+        // exactly what the caller requested.
+        $plainCols = $parsed['plain'] ?? [];
+        $stripId = $plainCols !== []
+            && !in_array('*', $plainCols, true)
+            && !in_array('id', $plainCols, true);
+        if ($stripId) {
+            $mainCols .= ", `{$table}`.`id`";
+        }
+
         $sql = "SELECT {$mainCols} FROM `{$table}`";
         if ($joins) $sql .= ' ' . implode(' ', $joins);
         if ($where) $sql .= " WHERE {$where}";
 
-        // ORDER BY — validate column name
+        // ORDER BY — prefix with table name when JOINs exist to avoid
+        // ambiguity (MySQL error 1052). Validate the column exists on the
+        // requested table; skip silently if it doesn't (MySQL error 1054).
         if (!empty($params['order'])) {
             $orderParts = explode('.', $params['order']);
             $orderCol = $this->sanitizeIdentifier($orderParts[0]);
             $this->assertValidIdentifier($orderCol, 'order column');
             $orderDir = ($orderParts[1] ?? 'asc') === 'desc' ? 'DESC' : 'ASC';
-            $sql .= " ORDER BY `{$orderCol}` {$orderDir}";
+            // Check column exists on the main table (avoids 1054)
+            $tableCols = $this->tableColumns($table);
+            if (in_array($orderCol, $tableCols, true)) {
+                // Prefix with table name to disambiguate when JOINs are present
+                $sql .= " ORDER BY `{$table}`.`{$orderCol}` {$orderDir}";
+            }
+            // If column doesn't exist, skip ORDER BY silently (no 500)
         }
 
         // LIMIT / OFFSET — cast to int (prevents injection)
@@ -166,7 +273,7 @@ class DataController
             $sql .= " OFFSET " . max(0, (int) $params['offset']);
         }
 
-        $rows = $db->select($sql, $bindings);
+        $rows = array_map(fn(array $r) => $this->decodeJsonRow($r, $table), $db->select($sql, $bindings));
 
         // ---- One-to-many child queries (batched, ordered) ----
         $oneToMany = [];
@@ -223,8 +330,13 @@ class DataController
                 foreach ($levelData[$rel['parentRelIndex']] as &$parents) {
                     foreach ($parents as &$parentRow) {
                         $childId = $parentRow['id'] ?? null;
-                        if ($childId !== null && isset($levelData[$i][$childId])) {
-                            $parentRow[$rel['alias']] = array_values($levelData[$i][$childId]);
+                        if ($childId !== null) {
+                            // Always expose the relation as an array — even when
+                            // the parent has no children (Supabase returns [] for
+                            // an empty one-to-many, never undefined).
+                            $parentRow[$rel['alias']] = isset($levelData[$i][$childId])
+                                ? array_values($levelData[$i][$childId])
+                                : [];
                         }
                     }
                     unset($parentRow);
@@ -234,6 +346,16 @@ class DataController
         }
 
         $result = array_values($tree);
+
+        // Strip the internally injected id so the response reflects exactly
+        // the caller's requested select (Supabase contract: only the requested
+        // columns are returned).
+        if ($stripId) {
+            foreach ($result as &$row) {
+                unset($row['id']);
+            }
+            unset($row);
+        }
 
         // Many-to-one relation reshaping (aliased flat columns → nested objects)
         $manyToOne = [];
@@ -247,6 +369,12 @@ class DataController
                     foreach ($row as $k => $v) {
                         if (str_starts_with($k, $prefix)) {
                             $col = substr($k, strlen($prefix));
+                            // Decode JSON columns coming from the joined table
+                            if (in_array($col, self::JSON_COLUMNS[$rel['table']] ?? [], true)
+                                && is_string($v) && $v !== '') {
+                                $decoded = json_decode($v, true);
+                                if (json_last_error() === JSON_ERROR_NONE) $v = $decoded;
+                            }
                             $nested[$col] = $v;
                             if ($v !== null) $any = true;
                             unset($row[$k]);
@@ -283,10 +411,27 @@ class DataController
             if (!is_array($row)) throw new ApiException(422, 'Each row must be an object');
 
             // Remove protected columns (mass assignment prevention)
-            $row = $this->filterProtectedColumns($row);
+            $row = $this->filterProtectedColumns($row, $table);
 
             // RLS-equivalent owner enforcement on INSERT
             $row = $this->enforceOwnerOnWrite($table, $row, $request);
+
+            foreach ($row as $column => $value) {
+                $row[$column] = $this->encodeJsonValue($table, $column, $value);
+            }
+
+            $onConflict = $request->queryParams()['on_conflict'] ?? null;
+            $hasOnConflict = is_string($onConflict) && $onConflict !== '';
+
+            // Ensure a PK id exists so insert().select() callers receive the
+            // real row back (Supabase returns the representation on insert).
+            // All allowed tables use `id` CHAR(36) as PK. SKIPPED for
+            // on_conflict upserts: a fresh row gets its id from the DB default
+            // and an existing row must keep its own id (never overwrite a PK
+            // through the ON DUPLICATE KEY UPDATE clause).
+            if (!$hasOnConflict && !array_key_exists('id', $row)) {
+                $row['id'] = Uuid::v4();
+            }
 
             $cols = array_keys($row);
             foreach ($cols as $col) {
@@ -298,12 +443,12 @@ class DataController
             $bind = array_values($row);
 
             // on_conflict=col1,col2 → upsert (INSERT ... ON DUPLICATE KEY UPDATE)
-            $onConflict = $request->query()['on_conflict'] ?? null;
-            if (is_string($onConflict) && $onConflict !== '') {
+            if ($hasOnConflict) {
                 $dupCols = array_map('trim', explode(',', $onConflict));
                 $updateParts = [];
                 foreach ($cols as $c) {
                     if (in_array($c, $dupCols, true)) continue; // conflict keys keep their value
+                    if ($c === 'id') continue; // never reassign the PK via upsert
                     $updateParts[] = "`{$c}` = VALUES(`{$c}`)";
                 }
                 if ($updateParts) {
@@ -312,7 +457,35 @@ class DataController
             }
 
             $db->query($sql, $bind);
-            $inserted[] = $row;
+
+            // Return the ACTUAL row (with DB defaults like created_at) so
+            // callers chaining .select()/.single() get a usable object.
+            $saved = null;
+            if (array_key_exists('id', $row)) {
+                $saved = $db->row("SELECT * FROM `{$table}` WHERE `id` = ?", [$row['id']]);
+                if ($saved) $saved = $this->decodeJsonRow($saved, $table);
+            } elseif ($hasOnConflict) {
+                // Upsert — re-select by the conflict columns (works for both a
+                // freshly inserted row and a pre-existing row).
+                $dupCols = array_map('trim', explode(',', $onConflict));
+                $where = [];
+                $selBind = [];
+                foreach ($dupCols as $dc) {
+                    $dc = $this->sanitizeIdentifier($dc);
+                    if (array_key_exists($dc, $row)) {
+                        $where[] = "`{$dc}` = ?";
+                        $selBind[] = $row[$dc];
+                    }
+                }
+                if ($where) {
+                    $saved = $db->row(
+                        "SELECT * FROM `{$table}` WHERE " . implode(' AND ', $where) . " LIMIT 1",
+                        $selBind
+                    );
+                    if ($saved) $saved = $this->decodeJsonRow($saved, $table);
+                }
+            }
+            $inserted[] = $saved ?? $row;
         }
 
         Response::json(array_is_list($body) ? $inserted : $inserted[0], 201);
@@ -332,35 +505,45 @@ class DataController
         if (!$body || !is_array($body)) throw new ApiException(422, 'Request body with update fields required');
 
         // Remove protected columns (mass assignment prevention)
-        $body = $this->filterProtectedColumns($body);
+        $body = $this->filterProtectedColumns($body, $table);
+
+        foreach ($body as $column => $value) {
+            $body[$column] = $this->encodeJsonValue($table, $column, $value);
+        }
 
         $userId = $request->user['id'] ?? null;
-        [$where, $bindings] = $this->buildWhere($table, $request->query(), $request, $userId);
+        [$where, $whereBindings] = $this->buildWhere($table, $request->queryParams(), $request, $userId);
 
         if (!$where) throw new ApiException(422, 'WHERE conditions required (use query params)');
 
         $setClauses = [];
+        $setBindings = [];
         foreach ($body as $col => $val) {
             $col = $this->sanitizeIdentifier($col);
             $this->assertValidIdentifier($col, 'column');
             $setClauses[] = "`{$col}` = ?";
-            $bindings[] = $val;
+            $setBindings[] = $val;
         }
+
+        // Bindings order: SET values first (they correspond to SET ?),
+        // then WHERE values (they correspond to WHERE ?).
+        $bindings = array_merge($setBindings, $whereBindings);
 
         $sql = "UPDATE `{$table}` SET " . implode(', ', $setClauses) . " WHERE {$where}";
         $db = Database::instance();
         $db->query($sql, $bindings);
 
         // `.update(...).select()` — return the affected rows in Supabase shape
-        $selectRaw = $request->query()['select'] ?? null;
+        $selectRaw = $request->queryParams()['select'] ?? null;
         if ($selectRaw) {
-            $params = $request->query();
+            $params = $request->queryParams();
             $params['select'] = $selectRaw;
             $selWhere = $params;
             unset($selWhere['order'], $selWhere['limit'], $selWhere['offset'], $selWhere['select']);
             [$w2, $b2] = $this->buildWhere($table, $selWhere, $request, $userId);
             $limit = isset($params['limit']) ? ' LIMIT ' . max(0, (int) $params['limit']) : '';
             $rows = $db->select("SELECT * FROM `{$table}`" . ($w2 ? " WHERE {$w2}" : '') . $limit, $b2);
+            $rows = array_map(fn(array $r) => $this->decodeJsonRow($r, $table), $rows);
             Response::json($rows);
             return;
         }
@@ -379,12 +562,32 @@ class DataController
         $this->assertAccess($table, $request);
 
         $userId = $request->user['id'] ?? null;
-        [$where, $bindings] = $this->buildWhere($table, $request->query(), $request, $userId);
+        [$where, $bindings] = $this->buildWhere($table, $request->queryParams(), $request, $userId);
 
         if (!$where) throw new ApiException(422, 'WHERE conditions required');
 
-        $sql = "DELETE FROM `{$table}` WHERE {$where}";
         $db = Database::instance();
+
+        // Library delete protection: never allow removing a video_assets row
+        // that lessons still reference — that would silently break courses.
+        // The frontend guard (deleteVideoAsset) checks this first and shows a
+        // friendly dialog; this is the server-side safety net for direct calls.
+        if ($table === 'video_assets') {
+            $used = (int) $db->value(
+                "SELECT COUNT(*) FROM lessons
+                  WHERE video_asset_id IN (SELECT id FROM `video_assets` WHERE {$where})",
+                $bindings,
+                0
+            );
+            if ($used > 0) {
+                throw new ApiException(
+                    409,
+                    "Cannot delete: this video is used by {$used} lesson(s). Remove it from those lessons first."
+                );
+            }
+        }
+
+        $sql = "DELETE FROM `{$table}` WHERE {$where}";
         $db->query($sql, $bindings);
         Response::json(['success' => true]);
     }
@@ -536,11 +739,13 @@ class DataController
             $op = 'eq';
             $neg = false;
             $val = $value;
-            if (is_string($value) && preg_match('/^(.+?)\.(not\.)?(eq|neq|gt|gte|lt|lte|like|ilike|in|is|contains)\.(.+)$/', $value, $m)) {
-                $col = $m[1];
-                $op = $m[3];
-                $neg = $m[2] !== '';
-                $val = $m[4];
+            // PostgREST filter syntax on the VALUE: `col=op.value` (one dot),
+            // e.g. `archived_at=is.null`, `id=eq.<uuid>`, `status=neq.archived`.
+            // The column is the query key; only the operator+value live in the value.
+            if (is_string($value) && preg_match('/^(not\.)?(eq|neq|gt|gte|lt|lte|like|ilike|in|is|contains)\.(.+)$/', $value, $m)) {
+                $neg = $m[1] !== '';
+                $op = $m[2];
+                $val = $m[3];
             }
 
             $col = $this->sanitizeIdentifier($col);
@@ -580,6 +785,13 @@ class DataController
         };
 
         if ($op === 'in') {
+            // Strip PostgREST grouping parens: `in.(a,b,c)`
+            if (is_string($val)) {
+                $val = trim($val);
+                if (str_starts_with($val, '(') && str_ends_with($val, ')')) {
+                    $val = substr($val, 1, -1);
+                }
+            }
             $vals = is_array($val) ? $val : array_map('trim', explode(',', $val));
             $placeholders = implode(',', array_fill(0, count($vals), '?'));
             $sql = "{$qualifiedCol} IN ({$placeholders})";
@@ -810,7 +1022,7 @@ class DataController
         }
     }
 
-    /** Fetch child rows for a one-to-many rel, ordered by order_index. */
+    /** Fetch child rows for a one-to-many rel, ordered by order_index + created_at if available. */
     private function fetchChildren(Database $db, array $rel, array $parentIds): array
     {
         if ($parentIds === []) return [];
@@ -819,9 +1031,15 @@ class DataController
         $cols = implode(', ', array_map(static fn($c) => "`{$c}`", $rel['cols']));
         $sql = "SELECT {$cols} FROM `{$rel['table']}` WHERE `{$rel['fkCol']}` IN ({$placeholders})";
         if (in_array('order_index', $rel['cols'], true)) {
-            $sql .= " ORDER BY `order_index` ASC, `created_at` ASC";
+            $orderBy = " ORDER BY `order_index` ASC";
+            // Only add created_at if the table has that column
+            $childCols = $this->tableColumns($rel['table']);
+            if (in_array('created_at', $childCols, true)) {
+                $orderBy .= ", `created_at` ASC";
+            }
+            $sql .= $orderBy;
         }
-        return $db->select($sql, $parentIds);
+        return array_map(fn(array $r) => $this->decodeJsonRow($r, $rel['table']), $db->select($sql, $parentIds));
     }
 
     // ── Existing helpers ────────────────────────────────────────────────────
@@ -861,9 +1079,17 @@ class DataController
         return str_replace(['`', '"', "'", ' '], '', $input);
     }
 
-    private function filterProtectedColumns(array $row): array
+    private function filterProtectedColumns(array $row, string $table = ''): array
     {
-        foreach (self::PROTECTED_COLUMNS as $col) {
+        $protected = self::PROTECTED_COLUMNS;
+        // The 'status' column is protected globally to prevent profile privilege
+        // escalation, but it is legitimately changeable on other tables (e.g.
+        // lessons draft/published workflow). Allow it when the target table is
+        // not profiles.
+        if ($table !== 'profiles') {
+            $protected = array_diff($protected, ['status']);
+        }
+        foreach ($protected as $col) {
             unset($row[$col]);
         }
         return $row;

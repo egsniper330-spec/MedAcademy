@@ -8,19 +8,19 @@
 //   const url = backend.storage.getPublicUrl('avatars', 'user/avatar.png');
 //
 // TO SWAP PROVIDERS:
-//   1. Implement a new adapter in backend/adapters/<provider>-adapter.ts
+//   1. Implement a new adapter in lib/backend/adapters/<provider>-adapter.ts
 //      following the BackendAdapter interface from backend/types.ts
-//   2. Replace `supabaseAdapter` with your new adapter below
+//   2. Replace `phpBackendAdapter` with your new adapter below
 //   3. No application or domain code needs to change
 // ─────────────────────────────────────────────────────────────────────────────
 
-import { supabaseAdapter } from './supabase-adapter';
+import { phpBackendAdapter } from './php-adapter';
 import type { BackendAdapter } from './types';
 
 // Active backend adapter — uses PHP backend via src/client/php.ts
-// The supabaseAdapter wraps the PHP client (exported as `supabase` from src/client/supabase.ts)
-// All calls route to the PHP REST API instead of Supabase.
-export const backend: BackendAdapter = supabaseAdapter;
+// The PHP adapter wraps the authoritative backend client.
+// All calls route to the authoritative PHP REST API.
+export const backend: BackendAdapter = phpBackendAdapter;
 
 // Re-export types so consumers don't need to import from the types file
 export type {

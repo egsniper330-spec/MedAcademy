@@ -73,25 +73,25 @@ export default function SAAnalytics() {
     {
       title: 'System Health',
       items: [
-        { icon: Activity,   label: 'System Health',     description: 'Database, auth, storage status',     color: '#16A34A', path: '/(app)/(superadmin)/health' },
-        { icon: HeartPulse, label: 'Video Health',      description: 'Video processing pipeline status',   color: '#2DA8FF', path: '/(app)/(superadmin)/sa-video-health' },
-        { icon: Video,      label: 'Video Monitor',     description: 'Live video upload and stream stats', color: '#7C3AED', path: '/(app)/(superadmin)/sa-video-monitor' },
-        { icon: Database,   label: 'Storage Monitor',   description: 'Bucket usage and file metrics',      color: '#2DA8FF', path: '/(app)/(superadmin)/sa-storage' },
-        { icon: Zap,        label: 'Video Settings',    description: 'Encoding and provider config',       color: '#7C3AED', path: '/(app)/(superadmin)/sa-video-settings' },
+        { icon: Activity,   label: 'System Health',     description: 'Database, auth, storage status',     color: '#16A34A', path: '/health' },
+        { icon: HeartPulse, label: 'Video Health',      description: 'Video processing pipeline status',   color: '#2DA8FF', path: '/sa-video-health' },
+        { icon: Video,      label: 'Video Monitor',     description: 'Live video upload and stream stats', color: '#7C3AED', path: '/sa-video-monitor' },
+        { icon: Database,   label: 'Storage Monitor',   description: 'Bucket usage and file metrics',      color: '#2DA8FF', path: '/sa-storage' },
+        { icon: Zap,        label: 'Video Settings',    description: 'Encoding and provider config',       color: '#7C3AED', path: '/sa-video-settings' },
       ],
     },
     {
       title: 'Financial Analytics',
       items: [
-        { icon: TrendingUp,    label: 'Revenue Analytics', description: 'Revenue trends over time',        color: '#16A34A', path: '/(app)/(superadmin)/sa-revenue-analytics' },
-        { icon: CreditCard,    label: 'Credits',           description: 'Credit management & history',     color: '#7C3AED', path: '/(app)/(superadmin)/sa-credits' },
-        { icon: AlertTriangle, label: 'Fraud Alerts',      description: 'Suspicious activity & anomalies', color: '#DC2626', path: '/(app)/(superadmin)/sa-fraud-alerts' },
+        { icon: TrendingUp,    label: 'Revenue Analytics', description: 'Revenue trends over time',        color: '#16A34A', path: '/sa-revenue-analytics' },
+        { icon: CreditCard,    label: 'Credits',           description: 'Credit management & history',     color: '#7C3AED', path: '/sa-credits' },
+        { icon: AlertTriangle, label: 'Fraud Alerts',      description: 'Suspicious activity & anomalies', color: '#DC2626', path: '/sa-fraud-alerts' },
       ],
     },
     {
       title: 'Operations',
       items: [
-        { icon: Ticket, label: 'Activation Codes', description: 'Active, used, expired codes summary', color: '#D97706', path: '/(app)/(superadmin)/sa-codes' },
+        { icon: Ticket, label: 'Activation Codes', description: 'Active, used, expired codes summary', color: '#D97706', path: '/sa-codes' },
       ],
     },
   ];
@@ -102,11 +102,10 @@ export default function SAAnalytics() {
       contentContainerStyle={{ paddingBottom: layout.scrollBottom() }}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />}
     >
-      <View style={{ padding: layout.screenPx }}>
-        {/* Header */}
-        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20, marginTop: 8 }}>
-          <PageHeader title="Analytics" subtitle="Platform metrics & health" accentColor={c.primary} rightAction={<Bell />} />
-        </View>
+      {/* PageHeader sits OUTSIDE the inner padding view so it can own its own horizontal padding */}
+      <PageHeader title="Analytics" subtitle="Platform metrics & health" accentColor={c.primary} rightAction={<Bell />} />
+
+      <View style={{ paddingHorizontal: layout.screenPx }}>
 
         {/* Live stats */}
         {loading ? (

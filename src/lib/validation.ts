@@ -73,7 +73,7 @@ const ERROR_MAP: Array<[RegExp, string]> = [
 ];
 
 /**
- * Maps raw Supabase/network errors to user-friendly messages.
+ * Maps raw backend/network errors to user-friendly messages.
  * Falls back to a generic message if no pattern matches.
  *
  * NOTE on SQL_KEYWORDS: "delete" and "index" are intentionally excluded.

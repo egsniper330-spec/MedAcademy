@@ -1,6 +1,5 @@
 // ─────────────────────────────────────────────────────────────────────────────
-// Type definitions matching @supabase/supabase-js for compatibility
-// These replace the Supabase types after migration to PHP backend.
+// Shared session and polling contracts for the PHP-backed application client.
 // ─────────────────────────────────────────────────────────────────────────────
 
 export interface Session {
@@ -21,12 +20,12 @@ export interface Session {
   };
 }
 
-export interface RealtimeChannel {
+export interface PollingChannel {
   on(
     event: string,
     opts: { event?: string; table?: string; schema?: string; filter?: string },
     callback: (payload: { eventType: string; new: unknown; old: unknown }) => void
-  ): RealtimeChannel;
-  subscribe(callback?: (status: string) => void): RealtimeChannel;
+  ): PollingChannel;
+  subscribe(callback?: (status: string) => void): PollingChannel;
   unsubscribe(): Promise<string>;
 }

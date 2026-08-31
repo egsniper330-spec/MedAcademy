@@ -32,7 +32,7 @@ import {
   bulkEnableActivationCodes, getCourses, getContactDisplay, getCodeBatches,
   getActivationLedger, invokeEdgeFunction, batchCreateActivationCodes,
 } from '@/lib/api';
-import { supabase } from '@/client/supabase';
+import { backendApiBase, backendClient } from '@/client/backendClient';
 import { validateRequired, friendlyError } from '@/lib/validation';
 import { useDebounce } from '@/lib/useDebounce';
 import {
@@ -855,11 +855,8 @@ export default function AdminCodes() {
     if (!assignTarget || !assignCourse) { setAssignError('Select a user and a course.'); return; }
     setAssigning(true); setAssignError('');
     try {
-      const { data: { session } } = await supabase.auth.getSession();
-      const API_BASE =
-        process.env.EXPO_PUBLIC_PHP_API_URL ||
-        process.env.EXPO_PUBLIC_SUPABASE_URL?.replace(/\/?$/, '/backend/public/index.php') || '';
-      const res = await fetch(`${API_BASE}/activation-codes/assign`, {
+      const { data: { session } } = await backendClient.auth.getSession();
+      const res = await fetch(`${backendApiBase}/activation-codes/assign`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session?.access_token}` },
         body: JSON.stringify({ target_user_id: assignTarget.id, course_id: assignCourse }),
@@ -964,11 +961,10 @@ export default function AdminCodes() {
   return (
     <View style={{ flex: 1, backgroundColor: c.base }}>
       {/* ── Header ─────────────────────────────────────────────────────── */}
-      <View style={{ paddingHorizontal: layout.screenPx, paddingTop: 16, paddingBottom: 0 }}>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 14 }}>
-          <View style={{ flex: 1 }}>
-            <PageHeader title="Activation Codes" subtitle="Generate & manage codes" />
-          </View>
+      {/* PageHeader sits OUTSIDE the inner padding view so it can own its own horizontal padding */}
+      <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+        <PageHeader title="Activation Codes" subtitle="Generate & manage codes" />
+        <View style={{ flexDirection: 'row', gap: 10, marginRight: layout.screenPx }}>
           <Pressable onPress={() => { setShowAssign(true); setAssignError(''); }}
             style={{ width: 42, height: 42, borderRadius: 13, backgroundColor: '#16A34A',
               alignItems: 'center', justifyContent: 'center' }}>
@@ -980,6 +976,9 @@ export default function AdminCodes() {
             <Plus size={22} color="#fff" />
           </Pressable>
         </View>
+      </View>
+
+      <View style={{ paddingHorizontal: layout.screenPx }}>
 
         {/* Tab switcher */}
         <View style={{ flexDirection: 'row', gap: 10, marginBottom: 14 }}>

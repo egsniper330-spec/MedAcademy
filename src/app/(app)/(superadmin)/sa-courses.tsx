@@ -443,14 +443,14 @@ export default function SACourses() {
         style={{ flex: 1 }}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />}
       >
-        <View style={{ padding: layout.screenPx }}>
-
-          {/* ── Header ──────────────────────────────────────────────────── */}
+          {/* PageHeader sits OUTSIDE the inner padding view so it can own its own horizontal padding */}
           <PageHeader
             title="Courses"
             subtitle={`${counts.all} total · ${counts.published} published`}
             accentColor={c.primary}
           />
+
+        <View style={{ paddingHorizontal: layout.screenPx }}>
 
           {/* ── Search bar ──────────────────────────────────────────────── */}
           <View style={[

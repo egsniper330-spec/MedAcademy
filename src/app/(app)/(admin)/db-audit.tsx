@@ -12,7 +12,7 @@ import {
   Database, AlertTriangle, CheckCircle, RefreshCw,
   Trash2, ShieldCheck, Table, BarChart2,
 } from 'lucide-react-native';
-import { supabase } from '@/client/supabase';
+import { backendClient } from '@/client/backendClient';
 import { NeuCard } from '@/components/NeuCard';
 import { NeuButton } from '@/components/NeuButton';
 import { neuColors, useLayout } from '@/lib/neu';
@@ -69,7 +69,7 @@ export default function DbAuditPanel() {
   const [repairing,   setRepairing]   = useState(false);
 
   const loadAudit = useCallback(async () => {
-    const { data, error } = await supabase.rpc('run_db_audit');
+    const { data, error } = await backendClient.rpc('run_db_audit');
     if (!error && data) setAudit(data as AuditResult);
     setLoading(false);
   }, []);
@@ -97,14 +97,14 @@ export default function DbAuditPanel() {
     const log: string[] = [];
     try {
       // Refresh stale table statistics (ANALYZE)
-      const { error: analyzeError } = await supabase.rpc('run_db_audit');
+      const { error: analyzeError } = await backendClient.rpc('run_db_audit');
       if (analyzeError) throw analyzeError;
       log.push('✓ Table statistics refreshed (ANALYZE)');
 
       // Re-check after repair
       await loadAudit();
       log.push('✓ Audit re-run complete');
-      log.push('ℹ Data-deleting repairs require manual review in Supabase Studio');
+      log.push('ℹ Data-deleting repairs require manual review in the PHP/MySQL administration workflow');
     } catch (e) {
       log.push(`✗ Error: ${e instanceof Error ? e.message : String(e)}`);
     } finally {
@@ -121,8 +121,9 @@ export default function DbAuditPanel() {
       contentContainerStyle={{ paddingBottom: layout.scrollBottom() }}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />}
     >
-      <View style={{ padding: layout.screenPx }}>
-        <PageHeader title="Database Audit" subtitle="Integrity checks, orphans, duplicates & broken FKs" accentColor="#7C3AED" />
+      <PageHeader title="Database Audit" subtitle="Integrity checks, orphans, duplicates & broken FKs" accentColor="#7C3AED" />
+
+      <View style={{ paddingHorizontal: layout.screenPx }}>
 
         {/* ── Action Buttons ─────────────────────────────────────────────── */}
         <View style={{ flexDirection: 'row', gap: 10, marginBottom: 20 }}>

@@ -19,7 +19,7 @@ import {
   restoreUser, runTrashCleanup, bulkUserOps,
   type TrashItem, type TrashStats, type TrashConfig,
 } from '@/lib/api';
-import { supabase } from '@/client/supabase';
+import { backendClient } from '@/client/backendClient';
 import { DeleteAccountModal } from '@/components/DeleteAccountModal';
 import { NeuCard } from '@/components/NeuCard';
 import { NeuButton } from '@/components/NeuButton';
@@ -157,6 +157,7 @@ export default function TrashBin() {
   const [config,          setConfig]          = useState<TrashConfig | null>(null);
   const [total,           setTotal]           = useState(0);
   const [loading,         setLoading]         = useState(true);
+  const [loadError,       setLoadError]       = useState<string | null>(null);
   const [refreshing,      setRefreshing]      = useState(false);
   const [loadingMore,     setLoadingMore]     = useState(false);
   const [hasMore,         setHasMore]         = useState(true);
@@ -181,22 +182,30 @@ export default function TrashBin() {
   // ── Initial / refresh load ─────────────────────────────────────────────────
   const loadFirst = useCallback(async (role: string) => {
     offsetRef.current = 0;
-    const [list, s, cfg, { data: { user } }] = await Promise.all([
-      getTrashList({ role: role || undefined, limit: PAGE_SIZE, offset: 0 }),
-      getTrashStats().catch(() => null),
-      getTrashConfig().catch(() => null),
-      supabase.auth.getUser(),
-    ]);
-    const fetched = list.items ?? [];
-    setItems(fetched);
-    setTotal(list.total ?? 0);
-    setHasMore(fetched.length === PAGE_SIZE);
-    offsetRef.current = fetched.length;
-    setStats(s);
-    setConfig(cfg);
-    if (cfg) setSelectedRetention(cfg.custom_days ?? cfg.retention_days);
-    if (user) setCurrentActorId(user.id);
-    setLoading(false);
+    setLoadError(null);
+    try {
+      const [list, s, cfg, { data: { user } }] = await Promise.all([
+        getTrashList({ role: role || undefined, limit: PAGE_SIZE, offset: 0 }),
+        getTrashStats().catch((e: any) => { console.warn('trashStats failed:', e); return null; }),
+        getTrashConfig().catch((e: any) => { console.warn('trashConfig failed:', e); return null; }),
+        backendClient.auth.getUser().catch(() => ({ data: { user: null } })),
+      ]);
+      const fetched = list.items ?? [];
+      setItems(fetched);
+      setTotal(list.total ?? 0);
+      setHasMore(fetched.length === PAGE_SIZE);
+      offsetRef.current = fetched.length;
+      setStats(s);
+      setConfig(cfg);
+      if (cfg) setSelectedRetention(cfg.custom_days ?? cfg.retention_days);
+      if (user) setCurrentActorId(user.id);
+    } catch (e: any) {
+      const msg = e?.message ?? String(e);
+      console.error('Trash Bin load failed:', msg);
+      setLoadError(msg);
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
   useFocusEffect(useCallback(() => {
@@ -564,9 +573,22 @@ export default function TrashBin() {
     </View>
   ), [c, loadingMore, hasMore, items.length, cleanupLoading, filtered.length, handleCleanup, handleExport]);
 
+  // ── Error state ────────────────────────────────────────────────────────────
+  const ListError = useMemo(() => (
+    loadError ? (
+      <View style={{ paddingHorizontal: layout.screenPx }}>
+        <NeuCard style={{ padding: 32, alignItems: 'center' }}>
+          <AlertTriangle size={32} color="#EF4444" />
+          <Text style={{ fontSize: 14, color: '#EF4444', marginTop: 12, fontWeight: '600' }}>Failed to load Trash Bin</Text>
+          <Text style={{ fontSize: 12, color: c.text, opacity: 0.5, marginTop: 6, textAlign: 'center' }}>{loadError}</Text>
+        </NeuCard>
+      </View>
+    ) : null
+  ), [loadError, c, layout.screenPx]);
+
   // ── Empty state ───────────────────────────────────────────────────────────
   const ListEmpty = useMemo(() => (
-    loading ? null : (
+    loading || loadError ? null : (
       <View style={{ paddingHorizontal: layout.screenPx }}>
         <NeuCard style={{ padding: 32, alignItems: 'center' }}>
           <Trash2 size={32} color={`${c.text}30`} />
@@ -574,7 +596,7 @@ export default function TrashBin() {
         </NeuCard>
       </View>
     )
-  ), [loading, c]);
+  ), [loading, loadError, c, layout.screenPx]);
 
   return (
     <View style={{ flex: 1, backgroundColor: c.base }}>
@@ -595,7 +617,7 @@ export default function TrashBin() {
           // Header + Footer + Empty
           ListHeaderComponent={ListHeader}
           ListFooterComponent={ListFooter}
-          ListEmptyComponent={ListEmpty}
+          ListEmptyComponent={loadError ? ListError : ListEmpty}
           // Pull-to-refresh
           refreshControl={
             <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />

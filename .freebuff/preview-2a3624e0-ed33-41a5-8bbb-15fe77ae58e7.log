@@ -1,0 +1,9 @@
+
+> medacademy@2.0.1 start
+> expo start --localhost
+
+env: load .env.local .env
+env: export EXPO_PUBLIC_APP_ID EXPO_PUBLIC_APP_SCHEME
+Starting project at D:\v3
+Starting Metro Bundler
+

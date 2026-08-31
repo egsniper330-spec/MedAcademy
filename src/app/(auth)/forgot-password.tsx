@@ -14,7 +14,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Mail } from 'lucide-react-native';
-import { supabase } from '@/client/supabase';
+import { backendClient } from '@/client/backendClient';
 import { NeuCard } from '@/components/NeuCard';
 import { NeuButton } from '@/components/NeuButton';
 import { BrandLogo } from '@/components/BrandLogo';
@@ -36,7 +36,7 @@ export default function ForgotPassword() {
     if (!email.trim()) { setError('Please enter your email.'); return; }
     setLoading(true);
     setError('');
-    const { error: resetError } = await supabase.auth.resetPasswordForEmail(email.trim().toLowerCase());
+    const { error: resetError } = await backendClient.auth.resetPasswordForEmail(email.trim().toLowerCase());
     if (resetError) { setError(resetError.message); setLoading(false); return; }
     setSent(true);
     setLoading(false);

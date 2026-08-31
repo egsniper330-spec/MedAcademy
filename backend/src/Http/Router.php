@@ -130,8 +130,8 @@ final class Router
     private function match(string $pattern, string $path): ?array
     {
         $regex = preg_replace_callback(
-            '/\{([a-zA-Z_][a-zA-Z0-9_]*)\}/',
-            static fn (array $m) => '(?P<' . $m[1] . '>[^/]+)',
+            '/\{([a-zA-Z_][a-zA-Z0-9_]*)(\*)?\}/',
+            static fn (array $m) => ($m[2] ?? '') === '*' ? '(?P<' . $m[1] . '>.+)' : '(?P<' . $m[1] . '>[^/]+)',
             $pattern
         );
         if ($regex === null) {

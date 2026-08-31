@@ -14,7 +14,7 @@ import {
   ShieldOff, RotateCcw, UserCheck, AlertTriangle,
   Camera, Video, Filter, Search, ChevronDown,
 } from 'lucide-react-native';
-import { supabase } from '@/client/supabase';
+import { backendClient } from '@/client/backendClient';
 import { NeuCard } from '@/components/NeuCard';
 import { neuColors, useLayout, neuFlatStyle, safeBottom } from '@/lib/neu';
 import { PageHeader } from '@/components/PageHeader';
@@ -66,7 +66,7 @@ export default function ViolationManagementScreen() {
 
   const loadViolations = useCallback(async () => {
     setLoading(true);
-    const { data } = await supabase
+    const { data } = await backendClient
       .from('content_protection_violations')
       .select(`
         id, user_id, violation_type, strike_count, action_taken,
@@ -106,15 +106,15 @@ export default function ViolationManagementScreen() {
     setActing(userId + action); setActionMsg('');
     try {
       if (action === 'remove_suspension' || action === 'restore_all') {
-        const { error } = await supabase.functions.invoke('restore-account', {
+        const { error } = await backendClient.functions.invoke('restore-account', {
           body: { target_user_id: userId, reset_violations: action === 'restore_all' },
         });
         if (error) throw new Error(await error?.context?.text?.() ?? error.message);
       } else if (action === 'reset_violations') {
-        const { error } = await supabase.rpc('admin_reset_violations', { target_user_id: userId });
+        const { error } = await backendClient.rpc('admin_reset_violations', { target_user_id: userId });
         if (error) throw error;
       } else if (action === 'clear_strikes') {
-        const { error } = await supabase
+        const { error } = await backendClient
           .from('profiles')
           .update({ strike_count: 0, updated_at: new Date().toISOString() })
           .eq('id', userId);

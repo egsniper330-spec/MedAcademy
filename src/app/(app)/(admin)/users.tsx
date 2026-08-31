@@ -14,7 +14,7 @@ import {
   getLoginHistory, enableUnlimitedDevices, disableUnlimitedDevices,
   trashUser, undoTrash, bulkUserOps,
 } from '@/lib/api';
-import { supabase } from '@/client/supabase';
+import { backendClient } from '@/client/backendClient';
 import { NeuCard } from '@/components/NeuCard';
 import { NeuButton } from '@/components/NeuButton';
 import { ResponsiveModal } from '@/components/ResponsiveModal';
@@ -262,7 +262,7 @@ export default function AdminUsers() {
     }
 
     // Check phone uniqueness before hitting the EF
-    const { data: existingPhone } = await supabase
+    const { data: existingPhone } = await backendClient
       .from('profiles').select('id').eq('phone_e164', e164).maybeSingle();
     if (existingPhone) {
       setFieldErrors(prev => ({ ...prev, nationalPhone: 'This phone number is already registered.' }));
@@ -306,7 +306,7 @@ export default function AdminUsers() {
     if (!trimmed) { loadData(); return; }
     setSearching(true);
     try {
-      const { data } = await supabase.rpc('lookup_user_by_identifier', { p_identifier: trimmed });
+      const { data } = await backendClient.rpc('lookup_user_by_identifier', { p_identifier: trimmed });
       let results: any[] = data ?? [];
       if (roleFilter) results = results.filter(u => u.role === roleFilter);
       if (statusFilter) results = results.filter(u => u.status === statusFilter);
@@ -444,25 +444,24 @@ export default function AdminUsers() {
       <ScrollView
           contentContainerStyle={{ paddingBottom: layout.scrollBottom() }}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />}>
-        <View style={{ padding: layout.screenPx }}>
-          {/* Header + Add User + Bulk toggle */}
-          <View style={{ marginBottom: 16, marginTop: 8 }}>
-            <PageHeader
-              title="User Management"
-              subtitle="All platform users"
-              rightAction={
-                <View style={{ flexDirection: 'row', gap: 8 }}>
-                  <Pressable
-                    onPress={() => { setBulkMode(b => !b); setSelected(new Set()); }}
-                    style={{ width: 38, height: 38, borderRadius: 10, backgroundColor: bulkMode ? `${c.primary}25` : `${c.text}10`, alignItems: 'center', justifyContent: 'center' }}
-                  >
-                    <CheckSquare size={18} color={bulkMode ? c.primary : `${c.text}70`} />
-                  </Pressable>
-                  <NeuButton label="Add User" icon={<UserPlus size={15} color="#fff" />} onPress={openCreateModal} style={{ paddingHorizontal: 14 }} />
-                </View>
-              }
-            />
-          </View>
+          {/* PageHeader sits OUTSIDE the inner padding view so it can own its own horizontal padding */}
+          <PageHeader
+            title="User Management"
+            subtitle="All platform users"
+            rightAction={
+              <View style={{ flexDirection: 'row', gap: 8 }}>
+                <Pressable
+                  onPress={() => { setBulkMode(b => !b); setSelected(new Set()); }}
+                  style={{ width: 38, height: 38, borderRadius: 10, backgroundColor: bulkMode ? `${c.primary}25` : `${c.text}10`, alignItems: 'center', justifyContent: 'center' }}
+                >
+                  <CheckSquare size={18} color={bulkMode ? c.primary : `${c.text}70`} />
+                </Pressable>
+                <NeuButton label="Add User" icon={<UserPlus size={15} color="#fff" />} onPress={openCreateModal} style={{ paddingHorizontal: 14 }} />
+              </View>
+            }
+          />
+
+        <View style={{ paddingHorizontal: layout.screenPx }}>
 
           {/* Undo-trash banner */}
           {undoInfo && (

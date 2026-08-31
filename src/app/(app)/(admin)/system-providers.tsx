@@ -18,7 +18,7 @@ import {
   Eye, EyeOff,
 } from 'lucide-react-native';
 import { neuColors, useLayout, neuFlatStyle, safeBottom } from '@/lib/neu';
-import { supabase } from '@/client/supabase';
+import { backendClient } from '@/client/backendClient';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 interface ProviderRow {
@@ -115,7 +115,7 @@ function ProviderCard({
   const handleSaveConfig = async () => {
     setSaving(true); setConfigMsg('');
     try {
-      const { error } = await supabase.functions.invoke('provider-health', {
+      const { error } = await backendClient.functions.invoke('provider-health', {
         body: {
           action: 'update_config',
           provider_key: provider.provider_key,
@@ -134,7 +134,7 @@ function ProviderCard({
   const handleTestConnection = async () => {
     setTesting(true); setConfigMsg('');
     try {
-      const { data, error } = await supabase.functions.invoke('provider-health', {
+      const { data, error } = await backendClient.functions.invoke('provider-health', {
         body: { action: 'check_one', provider_key: provider.provider_key },
       });
       if (error) throw error;
@@ -148,7 +148,7 @@ function ProviderCard({
   const handleRotateSecret = async () => {
     setRotating(true); setConfigMsg('');
     try {
-      const { error } = await supabase.functions.invoke('provider-health', {
+      const { error } = await backendClient.functions.invoke('provider-health', {
         body: { action: 'rotate_secret', provider_key: provider.provider_key },
       });
       if (error) throw error;
@@ -411,7 +411,7 @@ export default function SystemProvidersScreen() {
   const [lastScan, setLastScan] = useState<string | null>(null);
 
   const load = useCallback(async () => {
-    const { data } = await supabase.functions.invoke('provider-health', {
+    const { data } = await backendClient.functions.invoke('provider-health', {
       body: { action: 'list' },
     });
     if (data?.providers) {
@@ -432,7 +432,7 @@ export default function SystemProvidersScreen() {
 
   const handleScanAll = async () => {
     setScanningAll(true);
-    await supabase.functions.invoke('provider-health', { body: { action: 'check_all' } });
+    await backendClient.functions.invoke('provider-health', { body: { action: 'check_all' } });
     setLastScan(new Date().toISOString());
     await load();
     setScanningAll(false);
@@ -440,7 +440,7 @@ export default function SystemProvidersScreen() {
 
   const handleCheckOne = async (providerKey: string) => {
     setChecking(providerKey);
-    await supabase.functions.invoke('provider-health', {
+    await backendClient.functions.invoke('provider-health', {
       body: { action: 'check_one', provider_key: providerKey },
     });
     await load();
@@ -452,7 +452,7 @@ export default function SystemProvidersScreen() {
     setProviders((prev) =>
       prev.map((p) => p.provider_key === providerKey ? { ...p, is_active: !currentlyActive } : p)
     );
-    const { error } = await supabase
+    const { error } = await backendClient
       .from('video_provider_config')
       .update({ is_active: !currentlyActive })
       .eq('provider_key', providerKey);

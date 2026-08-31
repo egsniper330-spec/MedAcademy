@@ -3,19 +3,16 @@
 > expo start --localhost
 
 env: load .env.local .env
-env: export EXPO_PUBLIC_APP_ID EXPO_PUBLIC_APP_SCHEME EXPO_PUBLIC_SUPABASE_ANON_KEY EXPO_PUBLIC_SUPABASE_URL
+env: export EXPO_PUBLIC_APP_ID EXPO_PUBLIC_APP_SCHEME
 Starting project at D:\v3
 Starting Metro Bundler
 
 Waiting on http://localhost:8081
 Logs for your project will appear below.
 Web node_modules\expo-router\entry.js ░░░░░░░░░░░░░░░░  0.0% (0/1)
-Web node_modules\expo-router\entry.js ▓▓▓▓▓▓▓▓░░░░░░░░ 53.2% (688/943)
-Web node_modules\expo-router\entry.js ▓▓▓▓▓▓▓▓▓▓▓░░░░░ 69.0% (1017/1224)
-Web node_modules\expo-router\entry.js ▓▓▓▓▓▓▓▓▓▓▓▓░░░░ 78.8% (1457/1663)
-Web node_modules\expo-router\entry.js ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓░ 99.9% (3803/3803)
-Web Bundled 14611ms node_modules\expo-router\entry.js (3803 modules)
+Web node_modules\expo-router\entry.js ▓▓▓▓▓▓▓▓▓▓░░░░░░ 67.3% (1049/1318)
+Web Bundled 6268ms node_modules\expo-router\entry.js (3821 modules)
  LOG  [web] Logs will appear in the browser console
 Web node_modules\expo-router\entry.js ░░░░░░░░░░░░░░░░  0.0% (0/1)
-Web Bundled 356ms node_modules\expo-router\entry.js (1 module)
+Web Bundled 231ms node_modules\expo-router\entry.js (1 module)
  LOG  [web] Logs will appear in the browser console

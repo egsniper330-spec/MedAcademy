@@ -303,8 +303,10 @@ export default function CreateStudentScreen() {
   return (
     <View style={{ flex: 1, backgroundColor: c.base }}>
       <KeyboardAvoidingView behavior={process.env.EXPO_OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1 }}>
-        <ScrollView contentContainerStyle={{ padding: layout.screenPx, gap: 16, paddingBottom: layout.scrollBottom() }} keyboardShouldPersistTaps="handled">
+        <ScrollView keyboardShouldPersistTaps="handled">
           <PageHeader title="Create Student" subtitle={step === 1 ? 'Step 1 of 2 — Student Info' : 'Step 2 of 2 — Creation Mode'} />
+
+        <View style={{ paddingHorizontal: layout.screenPx, gap: 16, paddingBottom: layout.scrollBottom() }}>
 
           {/* Step indicator */}
           <View style={{ flexDirection: 'row', gap: 8, marginBottom: 4 }}>
@@ -470,6 +472,7 @@ export default function CreateStudentScreen() {
               </View>
             </>
           )}
+        </View>
         </ScrollView>
       </KeyboardAvoidingView>
 

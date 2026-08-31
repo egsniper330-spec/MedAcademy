@@ -6,7 +6,7 @@ import {
 import { useRouter } from 'expo-router';
 import type { RelativePathString } from 'expo-router';
 import { Mail, Phone, Lock, Eye, EyeOff } from 'lucide-react-native';
-import { supabase } from '@/client/supabase';
+import { backendClient } from '@/client/backendClient';
 import { NeuCard } from '@/components/NeuCard';
 import { NeuButton } from '@/components/NeuButton';
 import { BrandLogo } from '@/components/BrandLogo';
@@ -89,7 +89,7 @@ export default function SignIn() {
     if (!trimmed || !password) { setError('Email or phone number and password are required.'); return; }
     setLoading(true);
     setError('');
-    _diag('start', { urlPresent: !!process.env.EXPO_PUBLIC_SUPABASE_URL, anonPresent: !!process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY });
+    _diag('start', { apiBasePresent: !!process.env.EXPO_PUBLIC_PHP_API_URL });
 
     try {
       // Step 1: Run security checks BEFORE creating any session
@@ -125,9 +125,9 @@ export default function SignIn() {
         return;
       }
 
-      // Step 3: PRE-LOGIN device check — BEFORE creating any Supabase session
+      // Step 3: PRE-LOGIN device check — BEFORE creating any PHP session
       _diag('precheck-before');
-      const { data: checkData, error: checkError } = await supabase
+      const { data: checkData, error: checkError } = await backendClient
         .rpc('pre_login_device_check', {
           p_email: email,
           p_installation_id: installationId,
@@ -160,7 +160,7 @@ export default function SignIn() {
       };
       _diag('signin-before', { email });
       const signInStart = Date.now();
-      const { data, error: authError } = await supabase.auth.signInWithPassword({ email, password, ...deviceMeta });
+      const { data, error: authError } = await backendClient.auth.signInWithPassword({ email, password, ...deviceMeta });
       const signInMs = Date.now() - signInStart;
       _diag('signin-after', { elapsedMs: signInMs, hasSession: !!data?.session });
       if (authError) _diagErr('signin-error', authError);
@@ -191,7 +191,7 @@ export default function SignIn() {
         }
 
         if (/banned/i.test(msg)) {
-          const { data: profileCheck } = await supabase
+          const { data: profileCheck } = await backendClient
             .from('profiles')
             .select('status')
             .eq('email', email.toLowerCase().trim())
@@ -231,14 +231,14 @@ export default function SignIn() {
         if (result?.error) {
           if (result.limit_reached) {
             setError(result.error as string);
-            await supabase.auth.signOut();
+            await backendClient.auth.signOut();
             setLoading(false);
             return;
           }
           if (result.device_blocked) {
             console.error('[SignIn] BLOCKED DEVICE — signing out immediately. device_id:', result.device_id);
             setError(result.error as string);
-            await supabase.auth.signOut();
+            await backendClient.auth.signOut();
             setLoading(false);
             return;
           }
@@ -258,7 +258,13 @@ export default function SignIn() {
       // Step 6: Show security warning if threats detected but login is allowed
       if (secResult.hasWarnings && secResult.threats.length > 0) {
         const userRole = data.user?.user_metadata?.role ?? 'student';
-        const dashboardPath = `/(app)/(${userRole === 'super_admin' ? 'superadmin' : userRole})/dashboard` as RelativePathString;
+        const dashboardPath = userRole === 'super_admin'
+          ?'/sa-overview'
+          : userRole === 'doctor'
+            ?'/dr-overview'
+            : userRole === 'admin'
+              ?'/admin-overview'
+              :'/dashboard';
         router.push({
           pathname: '/(auth)/security-warning' as RelativePathString,
           params: {

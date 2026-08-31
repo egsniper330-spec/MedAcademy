@@ -4,7 +4,7 @@
  * All notification sends go through this — never call Expo Push API directly.
  * Token registration / permission handling stays in the app; this handles delivery.
  */
-import { supabase } from '@/client/supabase';
+import { backendClient } from '@/client/backendClient';
 import type {
   NotificationProvider, NotificationPayload,
   NotificationReceipt, ScheduledNotification,
@@ -69,7 +69,7 @@ class ExpoNotificationProvider implements NotificationProvider {
 
   async sendToTopic(topic: string, payload: NotificationPayload): Promise<NotificationReceipt> {
     // Expo doesn't have native topics — look up tokens subscribed to this topic
-    const { data: devices } = await supabase
+    const { data: devices } = await backendClient
       .from('devices')
       .select('push_token')
       .eq('notification_topic', topic)
@@ -80,7 +80,7 @@ class ExpoNotificationProvider implements NotificationProvider {
   }
 
   async broadcast(payload: NotificationPayload): Promise<NotificationReceipt> {
-    const { data: devices } = await supabase
+    const { data: devices } = await backendClient
       .from('devices')
       .select('push_token')
       .not('push_token', 'is', null)
@@ -91,8 +91,8 @@ class ExpoNotificationProvider implements NotificationProvider {
   }
 
   async schedule(_token: string, _notification: ScheduledNotification): Promise<string> {
-    // Expo doesn't support server-side scheduling — use Supabase cron + Edge Function pattern
-    console.warn('[ExpoNotificationProvider] schedule() not implemented server-side. Use Supabase cron.');
+    // Expo doesn't support server-side scheduling — use a PHP scheduler or explicit server-side job
+    console.warn('[ExpoNotificationProvider] schedule() is not implemented server-side; configure a PHP/cPanel scheduler if needed.');
     return `scheduled-${Date.now()}`;
   }
 

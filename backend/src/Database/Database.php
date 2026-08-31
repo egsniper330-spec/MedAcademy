@@ -111,6 +111,17 @@ final class Database
         $this->pdo()->beginTransaction();
     }
 
+    /**
+     * Alias of begin() using PDO's method name. Controllers written against
+     * the PDO API (e.g. RpcController) call beginTransaction()/commit()/
+     * rollBack(); commit() and rollBack() resolve to the methods above (PHP
+     * method names are case-insensitive), this completes the set.
+     */
+    public function beginTransaction(): void
+    {
+        $this->pdo()->beginTransaction();
+    }
+
     public function commit(): void
     {
         $this->pdo()->commit();

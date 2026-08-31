@@ -99,9 +99,10 @@ export default function LoginHistory() {
 
   return (
     <View style={{ flex: 1, backgroundColor: c.base }}>
-      <View style={{ padding: layout.screenPx, paddingTop: 0 }}>
         {/* Header */}
         <PageHeader title="Login History" subtitle={userName ?? undefined} showBack />
+
+      <View style={{ paddingHorizontal: layout.screenPx, paddingTop: 0 }}>
 
         {/* Summary stats */}
         {!loading && history.length > 0 && (

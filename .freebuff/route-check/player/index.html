@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Player</title>
+  <link rel="stylesheet" href="./plyr.css" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { width: 100%; height: 100%; background: #000; overflow: hidden; }
+    .plyr { width: 100%; height: 100%; }
+  </style>
+</head>
+<body>
+  <!--
+    Official Plyr YouTube element.
+    data-plyr-embed-id is set at runtime by player.js from the ?v= URL param.
+    Plyr creates and manages the YouTube iframe internally.
+  -->
+  <div data-plyr-provider="youtube" data-plyr-embed-id="" id="player"></div>
+
+  <script src="./plyr.js"></script>
+  <script src="./player.js"></script>
+</body>
+</html>

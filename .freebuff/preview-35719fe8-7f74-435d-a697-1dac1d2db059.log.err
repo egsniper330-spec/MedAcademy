@@ -1,34 +1,34 @@
 npm warn Unknown project config "node-linker". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.
 The following packages should be updated for best compatibility with the installed expo version:
   babel-preset-expo@55.0.6 - expected version: ~55.0.8
-  expo@55.0.6 - expected version: ~55.0.29
-  expo-asset@55.0.18 - expected version: ~55.0.19
-  expo-audio@55.0.6 - expected version: ~55.0.17
-  expo-build-properties@55.0.16 - expected version: ~55.0.17
-  expo-clipboard@55.0.15 - expected version: ~55.0.16
-  expo-crypto@55.0.17 - expected version: ~55.0.18
-  expo-device@55.0.19 - expected version: ~55.0.20
-  expo-document-picker@55.0.15 - expected version: ~55.0.16
-  expo-file-system@55.0.24 - expected version: ~55.0.25
-  expo-haptics@55.0.16 - expected version: ~55.0.17
-  expo-image-picker@55.0.22 - expected version: ~55.0.23
-  expo-linear-gradient@55.0.16 - expected version: ~55.0.17
+  expo@55.0.6 - expected version: ~55.0.31
+  expo-asset@55.0.18 - expected version: ~55.0.20
+  expo-audio@55.0.6 - expected version: ~55.0.18
+  expo-background-task@57.0.14 - expected version: ~55.0.22
+  expo-build-properties@55.0.16 - expected version: ~55.0.18
+  expo-clipboard@55.0.15 - expected version: ~55.0.17
+  expo-crypto@55.0.17 - expected version: ~55.0.19
+  expo-device@55.0.19 - expected version: ~55.0.21
+  expo-document-picker@55.0.15 - expected version: ~55.0.17
+  expo-file-system@55.0.24 - expected version: ~55.0.26
+  expo-haptics@55.0.16 - expected version: ~55.0.18
+  expo-image-picker@55.0.22 - expected version: ~55.0.24
+  expo-linear-gradient@55.0.16 - expected version: ~55.0.18
   expo-linking@55.0.16 - expected version: ~55.0.17
-  expo-media-library@55.0.19 - expected version: ~55.0.20
-  expo-navigation-bar@55.0.15 - expected version: ~55.0.16
-  expo-network@55.0.16 - expected version: ~55.0.17
-  expo-notifications@55.0.25 - expected version: ~55.0.26
+  expo-media-library@55.0.19 - expected version: ~55.0.21
+  expo-navigation-bar@55.0.15 - expected version: ~55.0.17
+  expo-network@55.0.16 - expected version: ~55.0.18
+  expo-notifications@55.0.25 - expected version: ~55.0.27
   expo-router@55.0.5 - expected version: ~55.0.18
-  expo-screen-capture@55.0.16 - expected version: ~55.0.17
-  expo-secure-store@55.0.16 - expected version: ~55.0.17
-  expo-sharing@55.0.22 - expected version: ~55.0.23
-  expo-sqlite@55.0.18 - expected version: ~55.0.19
-  expo-system-ui@55.0.20 - expected version: ~55.0.21
-  expo-video@55.0.5 - expected version: ~55.0.20
-  expo-video-thumbnails@55.0.17 - expected version: ~55.0.18
-  expo-web-browser@55.0.18 - expected version: ~55.0.19
+  expo-screen-capture@55.0.16 - expected version: ~55.0.18
+  expo-secure-store@55.0.16 - expected version: ~55.0.18
+  expo-sharing@55.0.22 - expected version: ~55.0.24
+  expo-sqlite@55.0.18 - expected version: ~55.0.20
+  expo-system-ui@55.0.20 - expected version: ~55.0.22
+  expo-video@55.0.5 - expected version: ~55.0.21
+  expo-video-thumbnails@55.0.17 - expected version: ~55.0.19
+  expo-web-browser@55.0.18 - expected version: ~55.0.20
   react-native@0.83.2 - expected version: 0.83.10
   react-native-worklets@0.7.2 - expected version: 0.7.4
   @expo/metro-runtime@55.0.11 - expected version: ~55.0.12
 Your project may not work correctly until you install the expected versions of the packages.
-^C

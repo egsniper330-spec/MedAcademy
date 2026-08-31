@@ -46,18 +46,14 @@ jobs:
     env:
       # EXPO_PUBLIC_* vars are baked into the Metro JS bundle at xcodebuild time —
       # NOT just at prebuild time.  The placeholder values used previously were
-      # embedded into the bundle and caused assertMeDoBlocked() to throw at runtime
-      # (black screen on first launch).
+      # embedded into the bundle and caused runtime crashes (black screen on first launch).
       #
       # All three are now pulled from GitHub Secrets so the real project credentials
       # are available during Metro bundling (which runs inside xcodebuild, step 7).
       #
-      # Required GitHub Secrets (Settings → Secrets → Actions):
-      #   EXPO_PUBLIC_SUPABASE_URL      = https://xdvjwfuqipatkpimejcb.supabase.co
-      #   EXPO_PUBLIC_SUPABASE_ANON_KEY = <project anon key>
+      # The PHP API base is public configuration, not a credential.
       EXPO_PUBLIC_APP_ID: app-czyg340mpc75
-      EXPO_PUBLIC_SUPABASE_URL: ${{ secrets.EXPO_PUBLIC_SUPABASE_URL }}
-      EXPO_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_ANON_KEY }}
+      EXPO_PUBLIC_PHP_API_URL: https://api.medacademy.eu.cc/backend/public/index.php
 
     steps:
       # -------------------------------------------------------------------------

@@ -15,7 +15,7 @@ import {
 } from 'lucide-react-native';
 import { PageHeader } from '@/components/PageHeader';
 import { NeuCard } from '@/components/NeuCard';
-import { supabase } from '@/client/supabase';
+import { backendClient } from '@/client/backendClient';
 import { neuColors, useLayout, neuFlatStyle, neuPressedStyle, safeBottom } from '@/lib/neu';
 import { formatBytes } from '@/lib/videoUploadEngine';
 
@@ -45,18 +45,18 @@ export default function VideoSettingsScreen() {
 
   const load = useCallback(async () => {
     const [{ data: prov }, { data: plyrUploads }, { data: vdoLessons }] = await Promise.all([
-      supabase
+      backendClient
         .from('video_provider_config')
         .select('*')
         .eq('is_default', true)
         .maybeSingle(),
       // Plyr: only active (non-deleted, non-failed, non-canceled) uploads
-      supabase
+      backendClient
         .from('video_uploads')
         .select('status, file_size')
         .in('status', ['ready', 'uploading', 'processing', 'encoding', 'verifying', 'waiting']),
       // VdoCipher: lessons that have a vdocipher video set and are not deleted
-      supabase
+      backendClient
         .from('lessons')
         .select('id, video_type, video_id')
         .eq('video_type', 'vdocipher')
@@ -81,7 +81,7 @@ export default function VideoSettingsScreen() {
   const handlePingProvider = async () => {
     setPinging(true);
     setPingResult(null);
-    const { data, error } = await supabase.functions.invoke('video-health-scan', {
+    const { data, error } = await backendClient.functions.invoke('video-health-scan', {
       body: { action: 'provider_health' },
     });
     if (error) setPingResult(`Error: ${error.message}`);

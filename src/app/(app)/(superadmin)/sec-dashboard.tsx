@@ -14,7 +14,7 @@ import { NeuCard } from '@/components/NeuCard';
 import { NeuButton } from '@/components/NeuButton';
 import { PageHeader } from '@/components/PageHeader';
 import { useToast } from '@/components/Toast';
-import { supabase } from '@/client/supabase';
+import { backendClient } from '@/client/backendClient';
 import { friendlyError } from '@/lib/validation';
 import { Share } from 'react-native';
 
@@ -93,12 +93,12 @@ export default function SecurityDashboard() {
       const startDate = new Date(Date.now() - days * 24 * 3600 * 1000).toISOString();
 
       const [statsRes, devicesRes, eventsRes] = await Promise.all([
-        supabase.rpc('get_security_stats', {
+        backendClient.rpc('get_security_stats', {
           p_start_date: startDate,
           p_end_date: new Date().toISOString(),
         }),
-        supabase.rpc('get_risky_devices', { p_min_score: 20, p_limit: 20, p_offset: 0 }),
-        supabase
+        backendClient.rpc('get_risky_devices', { p_min_score: 20, p_limit: 20, p_offset: 0 }),
+        backendClient
           .from('security_events')
           .select('*, profiles(full_name, email)')
           .order('created_at', { ascending: false })

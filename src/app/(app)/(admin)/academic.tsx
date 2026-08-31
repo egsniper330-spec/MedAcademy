@@ -276,8 +276,9 @@ export default function AcademicManagement() {
       <ScrollView
           contentContainerStyle={{ paddingBottom: layout.scrollBottom() }}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />}>
-        <View style={{ padding: layout.screenPx }}>
           <PageHeader title="Academic Structure" subtitle="Manage universities, faculties and levels" />
+
+        <View style={{ paddingHorizontal: layout.screenPx }}>
 
           {/* Tab bar */}
           <View style={{ flexDirection: 'row', gap: 8, marginBottom: 20 }}>

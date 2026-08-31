@@ -85,9 +85,9 @@ export default function CurrencySettings() {
       contentContainerStyle={{ paddingBottom: layout.scrollBottom() }}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />}
     >
-      <View style={{ padding: layout.screenPx }}>
-        {/* Header */}
-        <PageHeader title="Platform Currency" subtitle="Configure how prices are displayed" accentColor="#D97706" />
+      <PageHeader title="Platform Currency" subtitle="Configure how prices are displayed" accentColor="#D97706" />
+
+      <View style={{ paddingHorizontal: layout.screenPx }}>
 
         {loading ? (
           <ActivityIndicator color={c.primary} style={{ marginTop: 40 }} />

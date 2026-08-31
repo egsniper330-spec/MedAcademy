@@ -10,7 +10,7 @@
  *   - Delete (with protection when lessons use the video)
  *   - Rename
  */
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator, FlatList, KeyboardAvoidingView, Modal,
   Pressable, ScrollView, Text, TextInput, useColorScheme, View,
@@ -19,12 +19,18 @@ import { Image } from 'expo-image';
 import { useFocusEffect } from 'expo-router';
 import {
   BookOpen, ChevronDown, ChevronUp, Clock, Edit2, Film, RefreshCw,
-  Search, SortAsc, SortDesc, Trash2, X,
+  Search, SortAsc, SortDesc, Trash2, X, Upload,
 } from 'lucide-react-native';
 import { neuColors, useLayout, neuFlatStyle, neuPressedStyle, safeTop, safeLeft, safeRight, safeBottom , zIndex} from '@/lib/neu';
 import { NeuCard } from '@/components/NeuCard';
 import { useToast } from '@/components/Toast';
+import { useProfileStore } from '@/lib/store';
 import { friendlyError } from '@/lib/validation';
+import * as DocumentPicker from 'expo-document-picker';
+import { randomUUID } from 'expo-crypto';
+import { useUploadQueueStore } from '@/lib/uploadQueueStore';
+import { createUploadRecord } from '@/lib/videoUploadEngine';
+import { resolveUploadMime, validateVideoFile } from '@/lib/videoFormats';
 import {
   deleteVideoAsset, getMyVideoLibrary, getVideoAssetUsage,
   updateVideoAsset,
@@ -67,6 +73,9 @@ export default function VideoLibraryScreen() {
   const insets = layout.insets;
   const c = isDark ? neuColors.dark : neuColors.light;
   const { showToast } = useToast();
+  const { addTask, setQueueVisible } = useUploadQueueStore();
+  const profile = useProfileStore((s) => s.profile);
+  const [uploadingVideo, setUploadingVideo] = useState(false);
 
   const [assets, setAssets] = useState<VideoAsset[]>([]);
   const [loading, setLoading] = useState(true);
@@ -83,11 +92,13 @@ export default function VideoLibraryScreen() {
   const [renameTitle, setRenameTitle] = useState('');
   const [renameSaving, setRenameSaving] = useState(false);
 
-  // Delete protection modal
-  const [deleteBlocked, setDeleteBlocked] = useState<{
+  // Permanent deletion requires an explicit confirmation after the current
+  // usage list has been loaded.
+  const [deleteConfirm, setDeleteConfirm] = useState<{
     asset: VideoAsset;
     usages: VideoAssetUsage[];
   } | null>(null);
+  const [deleteSaving, setDeleteSaving] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -101,6 +112,70 @@ export default function VideoLibraryScreen() {
   }, [search, statusFilter, sortBy, sortDir]);
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
+
+  // Re-fetch library when any upload reaches 'ready' — the new video should
+  // appear immediately without requiring the user to leave and re-enter.
+  // Track which task IDs have ever reached 'ready' so we refresh exactly
+  // once per completed upload — not on every task patch, not on mount.
+  const readyIdsRef = useRef(new Set<string>());
+  const tasks = useUploadQueueStore((s) => s.tasks);
+  useEffect(() => {
+    const currentReadyIds = new Set(
+      tasks.filter((t) => t.status === 'ready').map((t) => t.id),
+    );
+    // Find newly completed uploads (in current but not in previous set)
+    let hasNewReady = false;
+    for (const id of currentReadyIds) {
+      if (!readyIdsRef.current.has(id)) {
+        hasNewReady = true;
+        break;
+      }
+    }
+    if (hasNewReady) {
+      load();
+    }
+    readyIdsRef.current = currentReadyIds;
+  }, [tasks, load]);
+
+  const handleUploadVideo = async () => {
+    if (uploadingVideo) return;
+    try {
+      const result = await DocumentPicker.getDocumentAsync({ type: ['video/*'], multiple: false });
+      if (result.canceled || !result.assets?.[0]) return;
+      const file = result.assets[0];
+      const validation = validateVideoFile(file.name, file.mimeType, file.size ?? 0);
+      if (!validation.ok) {
+        showToast({ type: 'error', message: validation.error?.message ?? 'Invalid video file.' });
+        return;
+      }
+      setUploadingVideo(true);
+      const task = {
+        id: randomUUID(),
+        lessonId: null,
+        courseId: null,
+        doctorId: profile?.id,
+        fileUri: file.uri,
+        fileName: file.name,
+        fileSize: file.size ?? 0,
+        mimeType: resolveUploadMime(file.name, file.mimeType),
+        status: 'waiting' as const,
+        progress: 0,
+        bytesUploaded: 0,
+        speedBps: 0,
+        etaSeconds: 0,
+        retryCount: 0,
+        createdAt: Date.now(),
+      };
+      await createUploadRecord(task);
+      addTask(task);
+      setQueueVisible(true);
+      showToast({ type: 'success', message: `Queued: ${file.name}` });
+    } catch (e) {
+      showToast({ type: 'error', message: friendlyError(e, 'Could not queue video.') });
+    } finally {
+      setUploadingVideo(false);
+    }
+  };
 
   const toggleUsage = async (asset: VideoAsset) => {
     if (expandedUsage[asset.id]) {
@@ -116,13 +191,33 @@ export default function VideoLibraryScreen() {
   };
 
   const handleDelete = async (asset: VideoAsset) => {
-    const result = await deleteVideoAsset(asset.id);
-    if (result.deleted) {
-      setAssets(prev => prev.filter(a => a.id !== asset.id));
-      showToast({ type: 'success', message: 'Video deleted.' });
-    } else {
-      setDeleteBlocked({ asset, usages: result.usages });
+    try {
+      const usages = await getVideoAssetUsage(asset.id);
+      setDeleteConfirm({ asset, usages });
+    } catch (e) {
+      showToast({ type: 'error', message: friendlyError(e, 'Could not inspect video usage.') });
     }
+  };
+
+  const confirmDelete = async () => {
+    if (!deleteConfirm) return;
+    setDeleteSaving(true);
+    try {
+      const result = await deleteVideoAsset(deleteConfirm.asset.id);
+      if (!result.deleted) throw new Error('The video was not deleted.');
+      setAssets(prev => prev.filter(a => a.id !== deleteConfirm.asset.id));
+      setDeleteConfirm(null);
+      const affected = result.affected_lessons ?? [];
+      if (affected.length > 0) {
+        const lessonNames = affected.map(l => l.lesson_title).join(', ');
+        showToast({ type: 'info', message: `Video deleted. ${affected.length} lesson(s) changed to Draft: ${lessonNames}` });
+      } else {
+        showToast({ type: 'success', message: 'Video permanently deleted from library and VdoCipher.' });
+      }
+    } catch (e) {
+      showToast({ type: 'error', message: friendlyError(e, 'Permanent video deletion failed. Nothing was removed.') });
+    }
+    setDeleteSaving(false);
   };
 
   const handleRename = async () => {
@@ -291,54 +386,68 @@ export default function VideoLibraryScreen() {
         </View>
       </Modal>
 
-      {/* ── Delete-blocked modal ── */}
-      <Modal visible={!!deleteBlocked} transparent animationType="fade" onRequestClose={() => setDeleteBlocked(null)}>
+      {/* ── Permanent deletion confirmation ── */}
+      <Modal visible={!!deleteConfirm} transparent animationType="fade" onRequestClose={() => setDeleteConfirm(null)}>
         <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
-          <View style={[neuFlatStyle(isDark), { width: '100%', maxWidth: 400, borderRadius: 22, padding: 24, gap: 16 }]}>
+          <View style={[neuFlatStyle(isDark), { width: '100%', maxWidth: 420, borderRadius: 22, padding: 24, gap: 16 }]}>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
               <View style={{ width: 40, height: 40, borderRadius: 12, backgroundColor: '#DC262618', alignItems: 'center', justifyContent: 'center' }}>
                 <Trash2 size={20} color="#DC2626" />
               </View>
               <View style={{ flex: 1 }}>
-                <Text style={{ fontSize: 16, fontWeight: '800', color: '#DC2626' }}>Cannot Delete</Text>
+                <Text style={{ fontSize: 16, fontWeight: '800', color: '#DC2626' }}>Delete Video Permanently?</Text>
                 <Text style={{ fontSize: 12, color: c.text, opacity: 0.55, marginTop: 2 }}>
-                  This video is used in {deleteBlocked?.usages.length} {(deleteBlocked?.usages.length ?? 0) === 1 ? 'lesson' : 'lessons'}.
+                  Used in {deleteConfirm?.usages.length ?? 0} {(deleteConfirm?.usages.length ?? 0) === 1 ? 'lesson' : 'lessons'}.
                 </Text>
               </View>
             </View>
-
-            <Text style={{ fontSize: 13, color: c.text, opacity: 0.65, lineHeight: 19 }}>
-              Remove the video from all lessons listed below before deleting it from your library.
+            <Text style={{ fontSize: 13, color: c.text, opacity: 0.7, lineHeight: 19 }}>
+              This removes the video from every listed lesson and permanently deletes the VdoCipher resource. Published lessons that lose their video will be automatically set to Draft.
             </Text>
-
-            <View style={{ gap: 8, maxHeight: 220 }}>
-              <ScrollView showsVerticalScrollIndicator={false}>
-                {(deleteBlocked?.usages ?? []).map((u) => (
-                  <View key={u.lesson_id} style={[neuPressedStyle(isDark), { borderRadius: 10, padding: 10, marginBottom: 6, flexDirection: 'row', alignItems: 'center', gap: 8 }]}>
-                    <Film size={12} color={c.primary} />
-                    <View style={{ flex: 1 }}>
-                      <Text style={{ fontSize: 12, fontWeight: '700', color: c.text }} numberOfLines={1}>{u.lesson_title}</Text>
-                      <Text style={{ fontSize: 11, color: c.text, opacity: 0.45 }} numberOfLines={1}>{u.course_title}</Text>
-                    </View>
+            <ScrollView showsVerticalScrollIndicator={false} style={{ maxHeight: 220 }}>
+              {(deleteConfirm?.usages ?? []).map((u) => (
+                <View key={u.lesson_id} style={[neuPressedStyle(isDark), { borderRadius: 10, padding: 10, marginBottom: 6, flexDirection: 'row', alignItems: 'center', gap: 8 }]}>
+                  <Film size={12} color={c.primary} />
+                  <View style={{ flex: 1 }}>
+                    <Text style={{ fontSize: 12, fontWeight: '700', color: c.text }} numberOfLines={1}>{u.lesson_title}</Text>
+                    <Text style={{ fontSize: 11, color: c.text, opacity: 0.45 }} numberOfLines={1}>{u.course_title}</Text>
                   </View>
-                ))}
-              </ScrollView>
+                </View>
+              ))}
+              {(deleteConfirm?.usages.length ?? 0) === 0 && (
+                <Text style={{ fontSize: 12, color: c.text, opacity: 0.5, textAlign: 'center', padding: 10 }}>Not used in any lesson.</Text>
+              )}
+            </ScrollView>
+            <View style={{ flexDirection: 'row', gap: 12 }}>
+              <Pressable onPress={() => setDeleteConfirm(null)} disabled={deleteSaving}
+                style={[neuFlatStyle(isDark), { flex: 1, padding: 13, borderRadius: 14, alignItems: 'center' }]}>
+                <Text style={{ fontSize: 14, fontWeight: '700', color: c.text, opacity: 0.65 }}>Keep Video</Text>
+              </Pressable>
+              <Pressable onPress={confirmDelete} disabled={deleteSaving}
+                style={{ flex: 1, padding: 13, borderRadius: 14, alignItems: 'center', justifyContent: 'center', backgroundColor: '#DC2626', flexDirection: 'row', gap: 8 }}>
+                {deleteSaving && <ActivityIndicator size="small" color="#fff" />}
+                <Text style={{ fontSize: 14, fontWeight: '700', color: '#fff' }}>Delete Permanently</Text>
+              </Pressable>
             </View>
-
-            <Pressable onPress={() => setDeleteBlocked(null)}
-              style={{ padding: 13, borderRadius: 14, alignItems: 'center', backgroundColor: c.primary }}>
-              <Text style={{ fontSize: 14, fontWeight: '700', color: '#fff' }}>Got it</Text>
-            </Pressable>
           </View>
         </View>
       </Modal>
 
       {/* ── Header — spacing from headerTokens (EDGE_PAD=4, BREATHING=8) ── */}
-      <View style={{ paddingTop: layout.headerTop, paddingLeft: layout.headerLeft, paddingRight: layout.headerRight, paddingBottom: 12 }}>
-        <Text style={{ fontSize: 24, fontWeight: '800', color: c.text }}>Video Library</Text>
-        <Text style={{ fontSize: 13, color: c.text, opacity: 0.45, marginTop: 4 }}>
-          One upload, reusable across any lesson
-        </Text>
+      <View style={{ paddingTop: layout.headerTop, paddingLeft: layout.headerLeft, paddingRight: layout.headerRight, paddingBottom: 12, flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+        <View style={{ flex: 1 }}>
+          <Text style={{ fontSize: 24, fontWeight: '800', color: c.text }}>Video Library</Text>
+          <Text style={{ fontSize: 13, color: c.text, opacity: 0.45, marginTop: 4 }}>
+            One upload, reusable across any lesson
+          </Text>
+        </View>
+        <Pressable
+          onPress={handleUploadVideo}
+          disabled={uploadingVideo}
+          style={{ backgroundColor: c.primary, borderRadius: 14, paddingHorizontal: 14, paddingVertical: 11, flexDirection: 'row', alignItems: 'center', gap: 7 }}>
+          {uploadingVideo ? <ActivityIndicator size="small" color="#fff" /> : <Upload size={16} color="#fff" />}
+          <Text style={{ color: '#fff', fontSize: 13, fontWeight: '800' }}>Upload Video</Text>
+        </Pressable>
       </View>
 
       {/* ── Search + Sort ── */}

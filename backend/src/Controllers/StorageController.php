@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MedAcademy\Controllers;
 
+use MedAcademy\Database\Database;
 use MedAcademy\Http\ApiException;
 use MedAcademy\Http\Request;
 use MedAcademy\Http\Response;
@@ -18,6 +19,19 @@ final class StorageController
 
     public function __construct(private readonly StorageService $storage = new StorageService())
     {
+    }
+
+    /** Return bucket metadata only; file contents and private paths remain protected. */
+    public function buckets(Request $request): array
+    {
+        return array_map(
+            static fn (string $name): array => [
+                'id' => $name,
+                'name' => $name,
+                'public' => in_array($name, self::PUBLIC_BUCKETS, true),
+            ],
+            [...self::PUBLIC_BUCKETS, ...self::PRIVATE_BUCKETS]
+        );
     }
 
     public function signedUrl(Request $request): array
@@ -40,6 +54,22 @@ final class StorageController
         return ['signed_url' => $this->storage->signedUrl($bucket, $normalised, $expiresIn)];
     }
 
+    /** Stream a public object after validating its bucket and path. */
+    public function publicFile(Request $request): never
+    {
+        $bucket = (string) ($request->params['bucket'] ?? '');
+        $path = $this->normalisePath(rawurldecode((string) ($request->params['path'] ?? '')));
+        if (!in_array($bucket, self::PUBLIC_BUCKETS, true) || $path === '') {
+            Response::error('Public file not found', 404, 'not_found');
+        }
+        $file = $this->storage->publicFilePath($bucket, $path);
+        if (!is_file($file)) {
+            Response::error('Public file not found', 404, 'not_found');
+        }
+        $mime = mime_content_type($file) ?: 'application/octet-stream';
+        Response::raw((string) file_get_contents($file), 200, $mime, ['Cache-Control' => 'public, max-age=31536000, immutable']);
+    }
+
     /**
      * GET /storage/signed?bucket=..&path=..&expires=..&sig=..
      * Validates the HMAC signature and streams the file. Public route —
@@ -48,7 +78,10 @@ final class StorageController
     public function signedFile(Request $request): never
     {
         $bucket = (string) ($request->query('bucket', ''));
-        $path = (string) ($request->query('path', ''));
+        $path = $this->normalisePath((string) ($request->query('path', '')));
+        if (!in_array($bucket, self::PRIVATE_BUCKETS, true) || $path === '' || str_contains($path, '..')) {
+            Response::error('File not found', 404, 'not_found');
+        }
         $expires = (int) $request->query('expires', 0);
         $sig = (string) ($request->query('sig', ''));
 
@@ -71,8 +104,8 @@ final class StorageController
 
     public function upload(Request $request): array
     {
-        // The Supabase-compatible client sends multipart form fields (bucket,
-        // path, file) — NOT a JSON body. Read from $_POST first, JSON fallback.
+        // The backend client sends multipart form fields (bucket, path, file).
+        // Read from $_POST first, JSON fallback for non-browser callers.
         $bucket = (string) ($_POST['bucket'] ?? $request->json()['bucket'] ?? '');
         $path = (string) ($_POST['path'] ?? $request->json()['path'] ?? $request->json()['file_name'] ?? '');
         if (!in_array($bucket, [...self::PUBLIC_BUCKETS, ...self::PRIVATE_BUCKETS], true)) {
@@ -84,20 +117,22 @@ final class StorageController
             throw new ApiException(400, 'file is required');
         }
 
-        // doctor/admin uploads only for content buckets
-        $role = $request->user['role'];
-        $contentBuckets = ['course-images', 'course-covers', 'lesson-thumbnails', 'lesson-materials', 'lesson-pdfs', 'video-chunks'];
-        if (in_array($bucket, $contentBuckets, true) && !in_array($role, ['doctor', 'admin', 'super_admin'], true)) {
-            throw new ApiException(403, 'Not authorized to upload to this bucket');
-        }
-
-        // Honour the client-supplied path (the caller stores it in the DB and
-        // later fetches by it). Only fall back to a generated path when absent.
+        // Only fall back to a generated path when absent. Generated uploads
+        // are scoped under the authenticated user and remain non-public unless
+        // the caller explicitly selected an existing content path.
         $dest = trim($path);
         if ($dest === '') {
             $ext = pathinfo((string) ($_POST['file_name'] ?? $request->json()['file_name'] ?? ''), PATHINFO_EXTENSION);
-            $dest = date('Y/m/d') . '/' . Uuid::v4() . ($ext !== '' ? '.' . $ext : '');
+            $dest = 'users/' . $request->user['id'] . '/' . date('Y/m/d') . '/' . Uuid::v4() . ($ext !== '' ? '.' . $ext : '');
         }
+
+        // Storage ownership is derived from the authenticated user and the
+        // existing course/profile rows; client-supplied IDs are only selectors.
+        $role = (string) $request->user['role'];
+        if (!$this->canWritePath((string) $request->user['id'], $role, $bucket, $dest)) {
+            throw new ApiException(403, 'Not authorized to upload to this storage path');
+        }
+
         $public = in_array($bucket, self::PUBLIC_BUCKETS, true);
         $this->storage->putFile($bucket, $dest, (string) $file['tmp_name'], $public);
 
@@ -110,10 +145,60 @@ final class StorageController
     public function delete(Request $request): array
     {
         $bucket = (string) ($request->json()['bucket'] ?? '');
-        $path = (string) ($request->json()['path'] ?? '');
+        $path = $this->normalisePath((string) ($request->json()['path'] ?? ''));
+        if (!in_array($bucket, [...self::PUBLIC_BUCKETS, ...self::PRIVATE_BUCKETS], true) || $path === '') {
+            throw new ApiException(400, 'bucket and path are required');
+        }
+        $role = (string) $request->user['role'];
+        if (!$this->canWritePath((string) $request->user['id'], $role, $bucket, $path)) {
+            throw new ApiException(403, 'Not authorized to delete this storage path');
+        }
         $public = in_array($bucket, self::PUBLIC_BUCKETS, true);
         $this->storage->delete($bucket, $path, $public);
         return ['success' => true];
+    }
+
+    private function canWritePath(string $userId, string $role, string $bucket, string $path): bool
+    {
+        if (in_array($role, ['admin', 'super_admin'], true)) {
+            return true;
+        }
+        if (!in_array($role, ['doctor', 'student'], true)) {
+            return false;
+        }
+
+        $segments = explode('/', trim($this->normalisePath($path), '/'));
+        if ($bucket === 'avatars' || $bucket === 'user-avatars') {
+            $candidatePaths = [$segments[0] ?? '', $segments[1] ?? ''];
+            foreach ($candidatePaths as $candidate) {
+                $candidateId = (string) preg_replace('/\\.[^.]+$/', '', $candidate);
+                if ($candidateId !== '' && hash_equals($userId, $candidateId)) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        if (in_array($bucket, ['course-images', 'course-covers'], true)) {
+            $courseId = $segments[0] ?? '';
+            return $courseId !== '' && (bool) Database::instance()->value(
+                'SELECT COUNT(*) FROM courses WHERE id = ? AND doctor_id = ?',
+                [$courseId, $userId],
+                0
+            );
+        }
+
+        if (in_array($bucket, ['lesson-thumbnails', 'lesson-materials', 'lesson-pdfs'], true)) {
+            $courseId = $segments[0] ?? '';
+            $lessonId = $segments[1] ?? '';
+            return $courseId !== '' && $lessonId !== '' && (bool) Database::instance()->value(
+                'SELECT COUNT(*) FROM lessons l JOIN courses c ON c.id = l.course_id WHERE l.id = ? AND l.course_id = ? AND c.doctor_id = ?',
+                [$lessonId, $courseId, $userId],
+                0
+            );
+        }
+
+        return false;
     }
 
     private function normalisePath(string $input): string

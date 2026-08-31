@@ -43,8 +43,9 @@ export default function DoctorCredits() {
   return (
     <ScrollView style={{ flex: 1, backgroundColor: c.base }}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />}>
-      <View style={{ padding: layout.screenPx }}>
-        <PageHeader title="My Credits" subtitle="Credit balance & history" accentColor={c.primary} />
+      <PageHeader title="My Credits" subtitle="Credit balance & history" accentColor={c.primary} />
+
+      <View style={{ paddingHorizontal: layout.screenPx }}>
 
         {loading ? <ActivityIndicator color={c.primary} style={{ marginTop: 40 }} /> : (
           <>

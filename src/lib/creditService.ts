@@ -2,7 +2,7 @@
  * creditService — Single Source of Truth for the Credits system.
  *
  * ALL balance reads and mutations MUST go through this module.
- * No screen may call Supabase directly for credit data.
+ * No screen may bypass the PHP credit service for credit data.
  *
  * Architecture:
  *   Read  balance  → get_my_credits_balance RPC (SECURITY DEFINER, reads own row)
@@ -16,7 +16,7 @@
  *   All consumers get the same cached value within the TTL window.
  */
 
-import { supabase } from '@/client/supabase';
+import { backendClient } from '@/client/backendClient';
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -85,7 +85,7 @@ export async function getCreditBalance(): Promise<CreditBalance> {
   if (_inflightPromise) return _inflightPromise;
 
   _inflightPromise = (async (): Promise<CreditBalance> => {
-    const { data, error } = await supabase.rpc('get_my_credits_balance');
+    const { data, error } = await backendClient.rpc('get_my_credits_balance');
     if (error) throw error;
     const bal = data as CreditBalance;
     _cachedBalance = bal;
@@ -110,7 +110,7 @@ export async function refreshCreditBalance(): Promise<CreditBalance> {
  * Not cached — always fresh, so history is never stale.
  */
 export async function getCreditHistory(limit = 200): Promise<CreditTransaction[]> {
-  const { data, error } = await supabase.rpc('get_doctor_credit_transactions', {
+  const { data, error } = await backendClient.rpc('get_doctor_credit_transactions', {
     p_limit: limit,
   });
   if (error) throw error;

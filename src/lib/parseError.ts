@@ -1,6 +1,6 @@
 /**
  * parseError — production-safe error extractor.
- * Converts ANY thrown value (Error, Supabase PostgRESTError, plain string,
+ * Converts ANY thrown value (Error, backend error envelope, plain string,
  * unknown object) into a human-readable string.
  * Never returns "[object Object]".
  */
@@ -12,7 +12,7 @@ export function parseError(err: unknown, fallback = 'Something went wrong. Pleas
   // Standard Error object
   if (err instanceof Error) return friendlyError(err, fallback);
 
-  // Supabase PostgREST errors arrive as { message, details, hint, code }
+  // Backend/API errors may arrive as { message, details, hint, code }
   if (typeof err === 'object') {
     const e = err as Record<string, unknown>;
     const msg =

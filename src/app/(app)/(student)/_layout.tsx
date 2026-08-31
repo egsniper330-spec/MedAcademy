@@ -5,6 +5,7 @@ import { LayoutDashboard, Compass, BookOpen, UserCircle } from 'lucide-react-nat
 import { neuColors } from '@/lib/neu';
 import { DrawerProvider } from '@/components/DrawerContext';
 import DrawerNav from '@/components/DrawerNav';
+import ResponsiveTabBar from '@/components/ResponsiveTabBar';
 
 function StudentTabs() {
   const scheme = useColorScheme();
@@ -14,24 +15,25 @@ function StudentTabs() {
   return (
     <Tabs
       initialRouteName="dashboard"
+      tabBar={(props) => (
+        <ResponsiveTabBar
+          {...props}
+          activeTintColor={c.primary}
+          inactiveTintColor={`${c.text}44`}
+          labelStyle={{ fontSize: 10, fontWeight: '700', letterSpacing: 0.2, marginTop: 2 }}
+          style={{
+            backgroundColor: c.base,
+            borderTopWidth: 0,
+            shadowColor: c.shadowDark,
+            shadowOffset: { width: 0, height: -4 },
+            shadowOpacity: 0.45,
+            shadowRadius: 12,
+            elevation: 16,
+          }}
+        />
+      )}
       screenOptions={{
         headerShown: false,
-        // No paddingTop — React Navigation + SafeAreaProvider handles bottom
-        // inset automatically. Fixed paddingTop causes icon/label misalignment
-        // across device sizes.
-        tabBarStyle: {
-          backgroundColor: c.base,
-          borderTopWidth: 0,
-          shadowColor: c.shadowDark,
-          shadowOffset: { width: 0, height: -4 },
-          shadowOpacity: 0.45,
-          shadowRadius: 12,
-          elevation: 16,
-        },
-        tabBarActiveTintColor: c.primary,
-        tabBarInactiveTintColor: `${c.text}44`,
-        tabBarLabelStyle: { fontSize: 10, fontWeight: '700', letterSpacing: 0.2, marginTop: 2 },
-        tabBarIconStyle: { marginBottom: 0 },
       }}
     >
       <Tabs.Screen name="dashboard"  options={{ title: 'Home',       tabBarIcon: ({ color, size }) => <LayoutDashboard size={size - 2} color={color} /> }} />

@@ -5,7 +5,7 @@
  * Single source of truth for all PostgreSQL enum values used in the app.
  * NEVER write raw enum strings in component/API code — import from here.
  *
- * Mirror: supabase/functions/_shared/enums.ts (backend copy — must stay in sync)
+ * Shared enum values mirrored by the PHP backend.
  * DB:     public schema pg_enum values
  * ════════════════════════════════════════════════════════════════════════════
  */

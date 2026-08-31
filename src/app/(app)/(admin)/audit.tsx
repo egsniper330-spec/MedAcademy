@@ -362,8 +362,10 @@ export default function AdminAudit() {
 
   return (
     <View style={{ flex: 1, backgroundColor: c.base }}>
-      {/* Header */}
-      <View style={{ paddingHorizontal: layout.screenPx, paddingTop: 20, paddingBottom: 8 }}>
+      {/* PageHeader sits OUTSIDE the inner padding view so it can own its own horizontal padding */}
+      <PageHeader title="Audit Logs" subtitle="Security & activity trail" accentColor="#DC2626" />
+
+      <View style={{ paddingHorizontal: layout.screenPx, paddingTop: 8, paddingBottom: 8 }}>
         <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
           <View />
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
@@ -378,8 +380,6 @@ export default function AdminAudit() {
             </Pressable>
           </View>
         </View>
-
-        <PageHeader title="Audit Logs" subtitle="Security & activity trail" accentColor="#DC2626" />
 
         {/* Category chips */}
         <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 10 }}>

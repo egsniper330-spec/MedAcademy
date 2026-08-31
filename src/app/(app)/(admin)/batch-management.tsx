@@ -122,10 +122,12 @@ export default function BatchManagementScreen() {
         contentContainerStyle={{ paddingBottom: layout.scrollBottom() }}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />}
         ListHeaderComponent={
-          <View style={{ padding: layout.screenPx, paddingTop: 8 }}>
+          <>
             <PageHeader title="Batch Manager" subtitle={`${batches.length} batches`} accentColor="#D97706" />
-            {loading && <ActivityIndicator size="large" color={c.primary} style={{ marginTop: 40 }} />}
-          </View>
+            <View style={{ paddingHorizontal: layout.screenPx, paddingTop: 8 }}>
+              {loading && <ActivityIndicator size="large" color={c.primary} style={{ marginTop: 40 }} />}
+            </View>
+          </>
         }
         renderItem={({ item: batch }) => {
           const isExpanded = expandedId === batch.id;

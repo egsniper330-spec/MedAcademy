@@ -193,7 +193,7 @@ export default function SecurityWarningScreen() {
 
   const riskScore   = parseInt(params.riskScore ?? '0', 10);
   const blocksLogin = params.blocksLogin === 'true';
-  const redirect    = params.redirect ?? '/(app)/(student)/dashboard';
+  const redirect    = params.redirect ?? '/dashboard';
 
   // Support contact state
   const [support, setSupport]             = useState<SupportSettings | null>(null);

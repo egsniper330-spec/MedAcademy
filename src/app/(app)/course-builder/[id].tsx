@@ -206,7 +206,6 @@ export default function CourseBuilder() {
   const [universityId, setUniversityId] = useState('');
   const [facultyId, setFacultyId] = useState('');
   const [language, setLanguage] = useState('Arabic');
-  const [instructorName, setInstructorName] = useState('');
   const [status, setStatus] = useState<'draft' | 'published'>('draft');
 
   // ── Price field (EGP)
@@ -229,7 +228,6 @@ export default function CourseBuilder() {
     title, description: fullDesc, short_description: shortDesc, full_description: fullDesc,
     university_id: universityId || undefined,
     faculty_id: facultyId || undefined, language,
-    instructor_name: instructorName,
     sequential_learning: sequential, free_preview: freePreview,
     certificate_enabled: certificate, subscription_required: subscriptionRequired,
     price_egp: parseFloat(priceEgp) || 0,
@@ -277,7 +275,6 @@ export default function CourseBuilder() {
       setUniversityId(data.university_id ?? '');
       setFacultyId(data.faculty_id ?? '');
       setLanguage(data.language ?? 'Arabic');
-      setInstructorName(data.instructor_name ?? '');
       setStatus(data.status === 'published' ? 'published' : 'draft');
       setIsArchived(!!data.archived_at);
       setSequential(data.sequential_learning ?? false);
@@ -597,9 +594,14 @@ export default function CourseBuilder() {
     setPublishing(true);
     try {
       const resolvedId = await ensureCourse();
-      await publishCourse(resolvedId);
+      const result = await publishCourse(resolvedId);
       setStatus('published');
-      showToast({ type: 'success', message: 'Course published!' });
+      const message = result.action === 'already_published'
+        ? 'Course already published. No new changes to publish.'
+        : result.action === 'updated'
+          ? 'Course updated and published successfully.'
+          : 'Course published successfully.';
+      showToast({ type: 'success', message });
     } catch (e) { showToast({ type: 'error', message: friendlyError(e, 'Publish failed.') }); }
     setPublishing(false);
   };
@@ -915,11 +917,6 @@ export default function CourseBuilder() {
             <PickerRow value={language}
               options={LANGUAGES.map(l => ({ value: l, label: l }))}
               placeholder="Language" onChange={setLanguage} isDark={isDark} c={c} />
-          </Field>
-
-          {/* Instructor */}
-          <Field label="Instructor Name">
-            <NeuInput value={instructorName} onChangeText={setInstructorName} placeholder="e.g. Dr. Ahmed Ali" isDark={isDark} c={c} />
           </Field>
 
           {/* Price (EGP) */}

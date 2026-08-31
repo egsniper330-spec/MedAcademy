@@ -6,7 +6,7 @@ import { View, Text, Pressable, useColorScheme } from 'react-native';
 import { LogOut, UserCheck } from 'lucide-react-native';
 import { useRouter } from 'expo-router';
 import { useImpersonationStore, useProfileStore } from '@/lib/store';
-import { supabase } from '@/client/supabase';
+import { backendClient } from '@/client/backendClient';
 
 export function ImpersonationBanner() {
   const { impersonation, endImpersonation } = useImpersonationStore();
@@ -20,25 +20,25 @@ export function ImpersonationBanner() {
   const handleReturn = async () => {
     if (!impersonation.originalAccessToken || !impersonation.originalRefreshToken) {
       // Fallback: just sign out
-      await supabase.auth.signOut();
+      await backendClient.auth.signOut();
       endImpersonation();
       clearProfile();
       return;
     }
     // Restore original session using stored tokens
-    const { error } = await supabase.auth.setSession({
+    const { error } = await backendClient.auth.setSession({
       access_token: impersonation.originalAccessToken,
       refresh_token: impersonation.originalRefreshToken,
     });
     if (error) {
       // If stored token expired, sign out cleanly
-      await supabase.auth.signOut();
+      await backendClient.auth.signOut();
     }
     endImpersonation();
     clearProfile();
     // Navigate to the correct dashboard based on original role
     const role = impersonation.originalRole;
-    if (role === 'super_admin') router.replace('/(app)/(superadmin)/sa-overview' as any);
+    if (role === 'super_admin') router.replace('/sa-overview' as any);
     else if (role === 'admin') router.replace('/(app)/(admin)/admin-overview' as any);
     else router.replace('/(app)/(doctor)/dr-overview' as any);
   };

@@ -33,10 +33,20 @@ final class Request
         $this->query = $_GET;
         $this->headers = self::extractHeaders();
         $raw = file_get_contents('php://input') ?: '';
-        $this->body = Json::decode($raw);
+        $contentType = strtolower((string) ($this->headers['content-type'] ?? ''));
+        // Only parse structured bodies. Raw binary payloads (e.g. octet-stream
+        // video chunks) must stay untouched — the consuming controller reads
+        // php://input directly. Without this guard, every binary POST 400s
+        // with "Invalid JSON body" before the route handler runs.
+        $isJson = str_contains($contentType, 'json') || $contentType === '';
+        if ($isJson) {
+            $this->body = Json::decode($raw);
+        } else {
+            $this->body = [];
+        }
         if ($this->body === []) {
             // allow form-encoded for tooling convenience
-            if (($this->headers['content-type'] ?? '') === 'application/x-www-form-urlencoded') {
+            if ($contentType === 'application/x-www-form-urlencoded') {
                 $this->body = $_POST;
             }
         }
@@ -102,6 +112,18 @@ final class Request
     public function query(string $key, mixed $default = null): mixed
     {
         return $this->query[$key] ?? $default;
+    }
+
+    /**
+     * All raw query-string parameters (the full parsed $_GET array).
+     * Used by the generic DataController to implement Supabase-style
+     * select/order/limit/offset/count/head and filter parameters.
+     *
+     * @return array<string,mixed>
+     */
+    public function queryParams(): array
+    {
+        return $this->query;
     }
 
     public function clientIp(): string

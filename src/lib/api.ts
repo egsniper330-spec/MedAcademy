@@ -1,16 +1,13 @@
 import { fetch as expoFetch } from 'expo/fetch';
-import { supabase } from '@/client/supabase';
+import { backendApiBase, backendClient } from '@/client/backendClient';
 import { normalizePhoneE164 } from '@/lib/identifier';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // SECURITY BOUNDARY
 // ─────────────────────────────────────────────────────────────────────────────
-// READ operations  → direct Supabase queries (anon key, RLS enforced)
-// WRITE operations → SECURITY DEFINER DB functions via .rpc()
-// PRIVILEGED ops   → Edge Functions (service role, server-side only)
-//
-// NEVER call Edge Functions directly — always via invokeEdgeFunction() below.
-// NEVER put SERVICE_ROLE_KEY, DB_PASSWORD, or VDOCIPHER_API_SECRET in this file.
+// READ/WRITE operations route through the PHP API and its server-side
+// authorization checks. Named server actions are invoked through the backend
+// client; secrets never leave the server.
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
@@ -53,13 +50,13 @@ export async function invokeEdgeFunction<T = unknown>(
 
   // Route ALL requests through the PHP backend client (POST and GET)
   if (method === 'GET') {
-    const { data, error } = await supabase.functions.invoke<T>(name, { body, method: 'GET', headers });
+    const { data, error } = await backendClient.functions.invoke<T>(name, { body, method: 'GET', headers });
     if (error) throw new Error(error.message);
     return data as T;
   }
 
   // ── POST path ─────────────────────────────────────────────────────────────
-  const { data, error } = await supabase.functions.invoke(name, {
+  const { data, error } = await backendClient.functions.invoke(name, {
     body,
     method: 'POST',
     headers,
@@ -165,7 +162,7 @@ export function getContactDisplay(
 }
 
 export async function getProfile(userId: string) {
-  const { data, error } = await supabase
+  const { data, error } = await backendClient
     .from('profiles')
     .select(PROFILE_SELECT)
     .eq('id', userId)
@@ -174,7 +171,7 @@ export async function getProfile(userId: string) {
 
   // Auto-create a skeleton profile if the DB trigger hasn't fired yet
   if (!data) {
-    const { data: { user }, error: userErr } = await supabase.auth.getUser();
+    const { data: { user }, error: userErr } = await backendClient.auth.getUser();
     if (userErr) throw userErr;
     if (!user) return null;
     const meta = user.user_metadata ?? {};
@@ -182,7 +179,7 @@ export async function getProfile(userId: string) {
     // so profiles created via this fallback path also get phone_e164 populated.
     const rawPhone: string | null = (meta.phone as string | null) ?? null;
     const phoneE164 = rawPhone ? (normalizePhoneE164(rawPhone) ?? rawPhone) : null;
-    const { data: created, error: createErr } = await supabase
+    const { data: created, error: createErr } = await backendClient
       .from('profiles')
       .insert({
         id: user.id,
@@ -222,13 +219,13 @@ export async function updateProfile(
   }>
 ) {
   // Fetch current profile for old-values comparison before applying update
-  const { data: oldProfile } = await supabase
+  const { data: oldProfile } = await backendClient
     .from('profiles')
     .select('full_name, avatar_url, profile_email, phone')
     .eq('id', userId)
     .single();
 
-  const { data, error } = await supabase
+  const { data, error } = await backendClient
     .from('profiles')
     .update({ ...updates, updated_at: new Date().toISOString() })
     .eq('id', userId)
@@ -263,9 +260,9 @@ export async function updateProfile(
     // Non-blocking: fire-and-forget. Use the (p_actor_id, p_action, p_details) overload.
     void (async () => {
       try {
-        await supabase.rpc('write_audit_log', {
+        await backendClient.rpc('write_audit_log', {
           p_actor_id:      userId,
-          p_action:        action as Parameters<typeof supabase.rpc>[1] extends { p_action: infer A } ? A : string,
+          p_action:        action as Parameters<typeof backendClient.rpc>[1] extends { p_action: infer A } ? A : string,
           p_resource_type: 'profile',
           p_resource_id:   userId,
           p_details: {
@@ -392,7 +389,7 @@ export async function getDoctorEarningsDashboard(
     courseRows: [], transactions: [], timePoints: [],
   };
 
-  const { data: events, error: evErr } = await supabase
+  const { data: events, error: evErr } = await backendClient
     .from('doctor_earnings_events')
     .select('id, course_id, student_id, transaction_type, earnings_amount, notes, created_at, student_name_snapshot, course_name_snapshot, student_email_snapshot, student_phone_snapshot, student_watermark_snapshot, price_snapshot, pricing_mode')
     .eq('doctor_id', doctorId)
@@ -406,8 +403,8 @@ export async function getDoctorEarningsDashboard(
   const studentIds = [...new Set(evArr.map(e => e.student_id).filter(Boolean))] as string[];
 
   const [courseRes, profileRes] = await Promise.all([
-    supabase.from('courses').select('id, title').in('id', courseIds),
-    supabase.from('profiles').select('id, full_name, phone, profile_email, email, avatar_url, status').in('id', studentIds),
+    backendClient.from('courses').select('id, title').in('id', courseIds),
+    backendClient.from('profiles').select('id, full_name, phone, profile_email, email, avatar_url, status').in('id', studentIds),
   ]);
 
   const courseMap:  Record<string, string> = {};
@@ -603,7 +600,7 @@ export async function getDoctorStudentProfile(
   doctorId: string,
   studentId: string,
 ): Promise<DoctorStudentProfile | null> {
-  const { data, error } = await supabase.rpc('get_doctor_student_profile', {
+  const { data, error } = await backendClient.rpc('get_doctor_student_profile', {
     p_doctor_id:  doctorId,
     p_student_id: studentId,
   });
@@ -645,7 +642,7 @@ export async function getDoctorStudentProfile(
 export async function getDoctorPricingSettings(
   doctorId: string,
 ): Promise<DoctorPricingSettings> {
-  const { data, error } = await supabase
+  const { data, error } = await backendClient
     .from('profiles')
     .select('doctor_global_price')
     .eq('id', doctorId)
@@ -666,7 +663,7 @@ export async function setDoctorGlobalPrice(
   doctorId: string,
   globalPrice: number,
 ): Promise<void> {
-  const { error } = await supabase
+  const { error } = await backendClient
     .from('profiles')
     .update({ doctor_global_price: globalPrice })
     .eq('id', doctorId);
@@ -691,7 +688,7 @@ export async function setEnrollmentAssignedPrice(
   enrollmentId: string,
   price: number | null,
 ): Promise<{ corrections: number }> {
-  const { data, error } = await supabase.rpc('set_enrollment_assigned_price', {
+  const { data, error } = await backendClient.rpc('set_enrollment_assigned_price', {
     p_enrollment_id: enrollmentId,
     p_price:         price,
   });
@@ -709,7 +706,7 @@ export async function setEnrollmentAssignedPrice(
 export async function recalculateDoctorEarnings(
   doctorId: string,
 ): Promise<{ corrections: number }> {
-  const { data, error } = await supabase.rpc('recalculate_doctor_earnings', {
+  const { data, error } = await backendClient.rpc('recalculate_doctor_earnings', {
     p_doctor_id: doctorId,
   });
   if (error) throw error;
@@ -725,7 +722,7 @@ export async function recalculateDoctorEarnings(
 export async function resetDoctorEarnings(
   doctorId: string,
 ): Promise<{ deleted: number; rebuilt: number }> {
-  const { data, error } = await supabase.rpc('reset_doctor_earnings', {
+  const { data, error } = await backendClient.rpc('reset_doctor_earnings', {
     p_doctor_id: doctorId,
   });
   if (error) throw error;
@@ -738,7 +735,7 @@ export async function resetDoctorEarnings(
 export async function suspendStudentCourseAccess(
   enrollmentId: string,
 ): Promise<void> {
-  const { error } = await supabase
+  const { error } = await backendClient
     .from('enrollments')
     .update({ status: 'suspended' })
     .eq('id', enrollmentId);
@@ -751,7 +748,7 @@ export async function suspendStudentCourseAccess(
 export async function restoreStudentCourseAccess(
   enrollmentId: string,
 ): Promise<void> {
-  const { error } = await supabase
+  const { error } = await backendClient
     .from('enrollments')
     .update({ status: 'active' })
     .eq('id', enrollmentId);
@@ -769,7 +766,7 @@ export async function removeStudentFromCourseWithRefund(params: {
   studentNameSnapshot: string;
   courseNameSnapshot:  string;
 }): Promise<void> {
-  const { data, error } = await supabase.rpc('remove_student_and_record_earnings', {
+  const { data, error } = await backendClient.rpc('remove_student_and_record_earnings', {
     p_enrollment_id: params.enrollmentId,
     p_doctor_id:     params.doctorId,
     p_student_name:  params.studentNameSnapshot,
@@ -791,7 +788,7 @@ export async function getDoctorContactInfo(doctorId: string): Promise<{
   contact_telegram: string | null;
   contact_phone:    string | null;
 }> {
-  const { data, error } = await supabase
+  const { data, error } = await backendClient
     .from('profiles')
     .select('contact_whatsapp, contact_telegram, contact_phone')
     .eq('id', doctorId)
@@ -839,13 +836,13 @@ export interface DoctorEarningsData {
  */
 export async function getDoctorEarningsData(doctorId: string): Promise<DoctorEarningsData> {
   const [txRes, payRes] = await Promise.all([
-    supabase
+    backendClient
       .from('doctor_earnings_transactions')
       .select('*, course:courses(title), student:profiles!doctor_earnings_transactions_student_id_fkey(full_name)')
       .eq('doctor_id', doctorId)
       .order('created_at', { ascending: false })
       .limit(100),
-    supabase
+    backendClient
       .from('doctor_payout_requests')
       .select('*')
       .eq('doctor_id', doctorId)
@@ -897,7 +894,7 @@ export async function submitPayoutRequest(doctorId: string, payload: {
   method: string;
   notes?: string;
 }): Promise<void> {
-  const { error } = await supabase.from('doctor_payout_requests').insert({
+  const { error } = await backendClient.from('doctor_payout_requests').insert({
     doctor_id:  doctorId,
     amount_egp: payload.amount_egp,
     method:     payload.method,
@@ -908,36 +905,53 @@ export async function submitPayoutRequest(doctorId: string, payload: {
 }
 
 export async function getAllUsers(role?: string, status?: string) {
-  // Join credits for doctors so user cards can display Allocated/Consumed/Remaining
-  // without additional per-row requests (no N+1).
-  const select = role === 'doctor' || !role
-    ? '*, credits:credits(allocated,consumed,remaining)'
-    : '*';
-  let query = supabase
+  let query = backendClient
     .from('profiles')
-    .select(select)
+    .select('*')
     .order('created_at', { ascending: false })
     .limit(200);
   if (role) query = query.eq('role', role);
-  if (status) query = query.eq('status', status);
+  if (status) {
+    query = query.eq('status', status);
+  } else {
+    // Exclude trashed users from the normal users list by default
+    query = query.neq('status', 'trashed');
+  }
   const { data, error } = await query;
   if (error) throw error;
-  // Flatten the 1-to-1 credits join (Supabase returns it as an array)
-  return (data ?? []).map((u: any) => {
-    if (u.role !== 'doctor') return u;
-    const cr = Array.isArray(u.credits) ? u.credits[0] : u.credits;
-    return {
-      ...u,
-      credits_allocated: cr?.allocated ?? 0,
-      credits_consumed:  cr?.consumed  ?? 0,
-      credits_balance:   cr?.remaining ?? 0,
-    };
-  });
+  // Fetch credits for doctors separately to avoid Supabase-style nested join
+  // which causes 500 errors on the PHP backend.
+  const users = data ?? [];
+  const doctorIds = users.filter((u: any) => u.role === 'doctor').map((u: any) => u.id);
+  if (doctorIds.length > 0) {
+    try {
+      const { data: credits } = await backendClient
+        .from('credits')
+        .select('doctor_id, allocated, consumed, remaining')
+        .in('doctor_id', doctorIds);
+      const creditsMap = new Map<string, any>();
+      (credits ?? []).forEach((c: any) => creditsMap.set(c.doctor_id, c));
+      return users.map((u: any) => {
+        if (u.role !== 'doctor') return u;
+        const cr = creditsMap.get(u.id);
+        return {
+          ...u,
+          credits_allocated: cr?.allocated ?? 0,
+          credits_consumed:  cr?.consumed  ?? 0,
+          credits_balance:   cr?.remaining ?? 0,
+        };
+      });
+    } catch (_) {
+      // Credits fetch failed — return users without credit data
+      return users;
+    }
+  }
+  return users;
 }
 
 // ── Universal user search (name / email / phone / user_id) ────────────────────
 export async function searchUsers(identifier: string) {
-  const { data, error } = await supabase.rpc('lookup_user_by_identifier', {
+  const { data, error } = await backendClient.rpc('lookup_user_by_identifier', {
     p_identifier: identifier.trim(),
   });
   if (error) throw error;
@@ -948,7 +962,7 @@ export async function searchUsers(identifier: string) {
 
 export async function searchCourses(q: string) {
   const like = `%${q.trim().replace(/\s+/g, '%')}%`;
-  const { data, error } = await supabase
+  const { data, error } = await backendClient
     .from('courses')
     .select('id, title, short_description, image_url, status, price_egp, doctor_id, doctor:profiles!courses_doctor_id_fkey(id,full_name)')
     .or(`title.ilike.${like},short_description.ilike.${like}`)
@@ -960,7 +974,7 @@ export async function searchCourses(q: string) {
 
 export async function searchUniversities(q: string) {
   const like = `%${q.trim().replace(/\s+/g, '%')}%`;
-  const { data, error } = await supabase
+  const { data, error } = await backendClient
     .from('universities')
     .select('*')
     .ilike('name', like)
@@ -972,7 +986,7 @@ export async function searchUniversities(q: string) {
 
 export async function searchFaculties(q: string) {
   const like = `%${q.trim().replace(/\s+/g, '%')}%`;
-  const { data, error } = await supabase
+  const { data, error } = await backendClient
     .from('faculties')
     .select('*, university:universities(id,name)')
     .ilike('name', like)
@@ -984,7 +998,7 @@ export async function searchFaculties(q: string) {
 
 export async function searchAcademicLevels(q: string) {
   const like = `%${q.trim().replace(/\s+/g, '%')}%`;
-  const { data, error } = await supabase
+  const { data, error } = await backendClient
     .from('academic_levels')
     .select('*, faculty:faculties(id,name)')
     .ilike('name', like)
@@ -1052,7 +1066,7 @@ export async function createManagedUser(payload: CreateUserPayload): Promise<{ u
 
 /** Generic role setter — handles ALL transitions with no prior-role checks. */
 export async function setUserRole(userId: string, newRole: 'student' | 'doctor' | 'admin') {
-  const { error } = await supabase.rpc('set_user_role', {
+  const { error } = await backendClient.rpc('set_user_role', {
     p_user_id:  userId,
     p_new_role: newRole,
   });
@@ -1070,7 +1084,7 @@ export async function demoteDoctor(doctorId: string) {
 
 export async function updateUserStatus(userId: string, status: 'active' | 'suspended' | 'blocked') {
   // Use the audited RPC so every status change is logged with actor + description
-  const { error } = await supabase.rpc('set_user_status', {
+  const { error } = await backendClient.rpc('set_user_status', {
     p_user_id: userId,
     p_status:  status,
   });
@@ -1093,14 +1107,14 @@ export async function activateUser(userId: string) {
  * Routed through the block-user Edge Function — uses service role on the server.
  */
 export async function blockUser(targetUserId: string): Promise<void> {
-  const { data, error } = await supabase.functions.invoke('block-user', {
-    body: { target_user_id: targetUserId, action: 'block' },
+  // Use the set-status RPC which revokes tokens and is compatible with all
+  // production backend versions (the dedicated /block endpoint may reference
+  // columns not yet deployed).
+  const { error } = await backendClient.rpc('set_user_status', {
+    p_user_id: targetUserId,
+    p_status: 'suspended',
   });
-  if (error) {
-    const msg = await (error as any)?.context?.text?.().catch(() => error.message);
-    throw new Error(msg ?? 'Failed to block user.');
-  }
-  if ((data as any)?.error) throw new Error((data as any).error);
+  if (error) throw new Error(error.message ?? 'Failed to block user.');
 }
 
 /**
@@ -1108,14 +1122,11 @@ export async function blockUser(targetUserId: string): Promise<void> {
  * Does NOT auto-login; user must sign in fresh.
  */
 export async function unblockUser(targetUserId: string): Promise<void> {
-  const { data, error } = await supabase.functions.invoke('block-user', {
-    body: { target_user_id: targetUserId, action: 'unblock' },
+  const { error } = await backendClient.rpc('set_user_status', {
+    p_user_id: targetUserId,
+    p_status: 'active',
   });
-  if (error) {
-    const msg = await (error as any)?.context?.text?.().catch(() => error.message);
-    throw new Error(msg ?? 'Failed to unblock user.');
-  }
-  if ((data as any)?.error) throw new Error((data as any).error);
+  if (error) throw new Error(error.message ?? 'Failed to unblock user.');
 }
 
 export interface DeletePreflight {
@@ -1150,19 +1161,19 @@ export async function deleteUser(userId: string, reason?: string): Promise<void>
  * @deprecated Use changeAdminPassword() for direct password change instead.
  */
 export async function resetUserPassword(targetUserId: string) {
-  const { data: profile, error: profileErr } = await supabase
+  const { data: profile, error: profileErr } = await backendClient
     .from('profiles')
     .select('email')
     .eq('id', targetUserId)
     .single();
   if (profileErr || !profile?.email) throw new Error('Could not find user email.');
 
-  const { error } = await supabase.auth.resetPasswordForEmail(profile.email);
+  const { error } = await backendClient.auth.resetPasswordForEmail(profile.email);
   if (error) throw error;
 
   // Write audit log (non-blocking — do not fail the reset if audit fails)
   Promise.resolve(
-    supabase.rpc('reset_user_password_by_admin', { p_target_id: targetUserId })
+    backendClient.rpc('reset_user_password_by_admin', { p_target_id: targetUserId })
   ).catch(() => {});
 }
 
@@ -1304,7 +1315,7 @@ export async function getLoginHistory(targetUserId?: string) {
 // ── Courses — reads direct, writes via SECURITY DEFINER RLS ──────────────────
 export async function getCourses(options?: { doctorId?: string; status?: string }) {
   // getCourses select updated to include price_egp
-  let query = supabase
+  let query = backendClient
     .from('courses')
     .select('*, price_egp, doctor:profiles!courses_doctor_id_fkey(id,full_name,avatar_url), category:categories(id,name)')
     .order('created_at', { ascending: false })
@@ -1321,7 +1332,7 @@ export async function getCourses(options?: { doctorId?: string; status?: string 
 
 /** Returns all published courses with doctor + category info. Used by student explore/search. */
 export async function getPublishedCourses() {
-  const { data, error } = await supabase
+  const { data, error } = await backendClient
     .from('courses')
     .select('id, title, short_description, image_url, thumbnail_url, price_egp, activation_code_required, doctor:profiles!courses_doctor_id_fkey(id,full_name), category:categories(id,name)')
     .eq('status', 'published')
@@ -1332,7 +1343,7 @@ export async function getPublishedCourses() {
 }
 
 export async function getCourseById(courseId: string) {
-  const { data, error } = await supabase
+  const { data, error } = await backendClient
     .from('courses')
     .select(`
       *,
@@ -1403,12 +1414,12 @@ export interface CourseBuilderPayload {
 
 export async function createCourse(payload: CourseBuilderPayload & CourseContactPayload) {
   // Use audited RPC so every course creation is logged with actor info
-  const { data, error } = await supabase.rpc('create_course_audited', {
+  const { data, error } = await backendClient.rpc('create_course_audited', {
     p_payload: payload as unknown as Record<string, unknown>,
   });
   if (error) throw error;
   // RPC returns { id, title } — fetch the full record for callers that need it
-  const { data: course, error: fetchErr } = await supabase
+  const { data: course, error: fetchErr } = await backendClient
     .from('courses')
     .select('*')
     .eq('id', (data as any).id)
@@ -1422,13 +1433,13 @@ export async function updateCourse(
   updates: Partial<CourseBuilderPayload & CourseContactPayload>
 ) {
   // Use audited RPC for full audit trail; falls back to direct update for non-audited fields (e.g. image_url only)
-  const { error: rpcErr } = await supabase.rpc('update_course_audited', {
+  const { error: rpcErr } = await backendClient.rpc('update_course_audited', {
     p_course_id: courseId,
     p_updates:   updates as unknown as Record<string, unknown>,
   });
   if (rpcErr) throw rpcErr;
   // Return current state of the course for callers that use the return value
-  const { data, error } = await supabase
+  const { data, error } = await backendClient
     .from('courses')
     .select('*')
     .eq('id', courseId)
@@ -1437,15 +1448,16 @@ export async function updateCourse(
   return data;
 }
 
-/** Publish a course — audited via SECURITY DEFINER RPC. */
-export async function publishCourse(courseId: string): Promise<void> {
-  const { error } = await supabase.rpc('publish_course', { p_course_id: courseId });
+/** Publish or republish a course; returns the backend lifecycle action. */
+export async function publishCourse(courseId: string): Promise<{ status: string; action: 'published' | 'updated' | 'already_published' }> {
+  const { data, error } = await backendClient.rpc('publish_course', { p_course_id: courseId });
   if (error) throw error;
+  return (data ?? { status: 'published', action: 'published' }) as { status: string; action: 'published' | 'updated' | 'already_published' };
 }
 
 /** Unpublish/hide a course — audited via SECURITY DEFINER RPC. */
 export async function unpublishCourse(courseId: string): Promise<void> {
-  const { error } = await supabase.rpc('unpublish_course', { p_course_id: courseId });
+  const { error } = await backendClient.rpc('unpublish_course', { p_course_id: courseId });
   if (error) throw error;
 }
 
@@ -1474,14 +1486,14 @@ export async function getCourseDeleteStats(courseId: string): Promise<{
   attachment_count: number;
   code_count: number;
 }> {
-  const { data, error } = await supabase.rpc('get_course_delete_stats', { p_course_id: courseId });
+  const { data, error } = await backendClient.rpc('get_course_delete_stats', { p_course_id: courseId });
   if (error) throw error;
   return data as any;
 }
 
 // ── Sections ──────────────────────────────────────────────────────────────────
 export async function createSection(courseId: string, title: string, orderIndex: number) {
-  const { data, error } = await supabase
+  const { data, error } = await backendClient
     .from('sections')
     .insert({ course_id: courseId, title, order_index: orderIndex })
     .select()
@@ -1491,7 +1503,7 @@ export async function createSection(courseId: string, title: string, orderIndex:
 }
 
 export async function updateSection(sectionId: string, updates: { title?: string; order_index?: number; description?: string }) {
-  const { data, error } = await supabase
+  const { data, error } = await backendClient
     .from('sections')
     .update({ ...updates, updated_at: new Date().toISOString() })
     .eq('id', sectionId)
@@ -1502,7 +1514,7 @@ export async function updateSection(sectionId: string, updates: { title?: string
 }
 
 export async function deleteSection(sectionId: string) {
-  const { error } = await supabase.from('sections').delete().eq('id', sectionId);
+  const { error } = await backendClient.from('sections').delete().eq('id', sectionId);
   if (error) throw error;
 }
 
@@ -1510,7 +1522,7 @@ export async function deleteSection(sectionId: string) {
 export async function reorderSections(courseId: string, orderedIds: string[]) {
   await Promise.all(
     orderedIds.map((id, idx) =>
-      supabase.from('sections').update({ order_index: idx }).eq('id', id).eq('course_id', courseId)
+      backendClient.from('sections').update({ order_index: idx }).eq('id', id).eq('course_id', courseId)
     )
   );
 }
@@ -1522,9 +1534,9 @@ export async function getLessonById(lessonId: string, role?: string) {
   // this client-side filter is a second layer to prevent accidental exposure
   // if RLS is ever misconfigured, and to return null (→ 404 UI) promptly.
   //
-  // IMPORTANT: Supabase query builders are IMMUTABLE — each chained method
+  // IMPORTANT: the application query builder is immutable — each chained method
   // returns a NEW object. We must reassign `let query` after each `.eq()` call.
-  let query = supabase
+  let query = backendClient
     .from('lessons')
     .select('*, section:sections(id,course_id,title), lesson_pdfs(*), lesson_materials(*), video_asset_id')
     .eq('id', lessonId);
@@ -1565,20 +1577,20 @@ export interface LessonBuilderPayload {
 }
 
 export async function createLesson(payload: LessonBuilderPayload) {
-  const { data, error } = await supabase.from('lessons').insert(payload).select().single();
+  const { data, error } = await backendClient.from('lessons').insert(payload).select().single();
   if (error) throw error;
   return data;
 }
 
 export async function updateLesson(lessonId: string, updates: Partial<LessonBuilderPayload>) {
-  const { data, error } = await supabase
+  const { data, error } = await backendClient
     .from('lessons')
     .update({ ...updates, updated_at: new Date().toISOString() })
     .eq('id', lessonId)
     .select()
     .single();
   if (error) throw error;
-  // Guard against the silent-failure case: Supabase can return (error=null,
+  // Guard against the silent-failure case: a backend can return (error=null,
   // data=null) when the UPDATE matched 0 rows — e.g. the row was deleted, the
   // lesson ID is wrong, or an RLS policy matched on the old row but blocked the
   // RETURNING clause on the new row.  Without this guard, callers would see a
@@ -1598,17 +1610,17 @@ export async function deleteLesson(lessonId: string, reason?: string) {
 export async function reorderLessons(sectionId: string, orderedIds: string[]) {
   await Promise.all(
     orderedIds.map((id, idx) =>
-      supabase.from('lessons').update({ order_index: idx }).eq('id', id).eq('section_id', sectionId)
+      backendClient.from('lessons').update({ order_index: idx }).eq('id', id).eq('section_id', sectionId)
     )
   );
 }
 
 /** Duplicate a lesson (without materials) into the same section. */
 export async function duplicateLesson(lessonId: string, newOrderIndex: number) {
-  const { data: src, error: fe } = await supabase.from('lessons').select('*').eq('id', lessonId).single();
+  const { data: src, error: fe } = await backendClient.from('lessons').select('*').eq('id', lessonId).single();
   if (fe) throw fe;
   const { id: _id, created_at: _c, updated_at: _u, ...rest } = src;
-  const { data, error } = await supabase
+  const { data, error } = await backendClient
     .from('lessons')
     .insert({ ...rest, title: `${rest.title} (Copy)`, order_index: newOrderIndex, status: 'draft' })
     .select()
@@ -1638,9 +1650,9 @@ export async function replaceLessonMaterialFile(
     courseId, lessonId, fileUri, fileName, mimeType,
   );
   // Delete old file from storage (best-effort)
-  await supabase.storage.from('lesson-materials').remove([oldStoragePath]).catch(() => null);
+  await backendClient.storage.from('lesson-materials').remove([oldStoragePath]).catch(() => null);
   // Update DB record
-  const { data, error } = await supabase
+  const { data, error } = await backendClient
     .from('lesson_materials')
     .update({
       file_name: fileName,
@@ -1673,7 +1685,7 @@ export interface LessonMaterialPayload {
 }
 
 export async function getLessonMaterials(lessonId: string) {
-  const { data, error } = await supabase
+  const { data, error } = await backendClient
     .from('lesson_materials')
     .select('*')
     .eq('lesson_id', lessonId)
@@ -1683,21 +1695,21 @@ export async function getLessonMaterials(lessonId: string) {
 }
 
 export async function createLessonMaterial(payload: LessonMaterialPayload) {
-  const { data, error } = await supabase.from('lesson_materials').insert(payload).select().single();
+  const { data, error } = await backendClient.from('lesson_materials').insert(payload).select().single();
   if (error) throw error;
   return data;
 }
 
 export async function updateLessonMaterial(id: string, updates: Partial<{ file_name: string; download_enabled: boolean; preview_enabled: boolean; order_index: number }>) {
-  const { data, error } = await supabase.from('lesson_materials').update({ ...updates, updated_at: new Date().toISOString() }).eq('id', id).select().single();
+  const { data, error } = await backendClient.from('lesson_materials').update({ ...updates, updated_at: new Date().toISOString() }).eq('id', id).select().single();
   if (error) throw error;
   return data;
 }
 
 export async function deleteLessonMaterial(id: string, storagePath: string) {
   // Remove from storage first
-  await supabase.storage.from('lesson-materials').remove([storagePath]);
-  const { error } = await supabase.from('lesson_materials').delete().eq('id', id);
+  await backendClient.storage.from('lesson-materials').remove([storagePath]);
+  const { error } = await backendClient.from('lesson_materials').delete().eq('id', id);
   if (error) throw error;
 }
 
@@ -1706,7 +1718,7 @@ export async function deleteLessonMaterial(id: string, storagePath: string) {
 /**
  * Upload (or replace) the cover image for a course.
  * Uses a unique timestamped filename per upload so the public URL changes
- * each time — this is required because Supabase CDN caches by URL, so
+ * each time — this is required because the public storage layer caches by URL, so
  * reusing the same path (upsert) serves the old cached image even after
  * the Storage object is replaced.
  *
@@ -1732,12 +1744,12 @@ export async function uploadCourseCover(
   const resp = await fetch(fileUri);
   const blob = await resp.blob();
 
-  const { error: upErr } = await supabase.storage
+  const { error: upErr } = await backendClient.storage
     .from('course-images')
     .upload(storagePath, blob, { contentType: mimeType, upsert: false });
   if (upErr) throw upErr;
 
-  const { data: urlData } = supabase.storage.from('course-images').getPublicUrl(storagePath);
+  const { data: urlData } = backendClient.storage.from('course-images').getPublicUrl(storagePath);
   const publicUrl = urlData.publicUrl;
 
   // Persist new URL to DB before deleting old file
@@ -1749,7 +1761,7 @@ export async function uploadCourseCover(
     const idx = previousUrl.indexOf(marker);
     if (idx !== -1) {
       const oldPath = previousUrl.slice(idx + marker.length).split('?')[0];
-      await supabase.storage.from('course-images').remove([oldPath]).catch(() => {});
+      await backendClient.storage.from('course-images').remove([oldPath]).catch(() => {});
     }
   }
 
@@ -1769,7 +1781,7 @@ export async function removeCourseCover(courseId: string, currentUrl: string): P
     const idx = currentUrl.indexOf(marker);
     if (idx !== -1) {
       const storagePath = currentUrl.slice(idx + marker.length).split('?')[0];
-      await supabase.storage.from('course-images').remove([storagePath]);
+      await backendClient.storage.from('course-images').remove([storagePath]);
     }
   } catch (_) { /* best-effort */ }
 }
@@ -1780,7 +1792,7 @@ export async function removeCourseCover(courseId: string, currentUrl: string): P
  *  ─────────────────
  *  The `lesson-materials` bucket is PRIVATE (public: false).  Calling
  *  getPublicUrl() on a private bucket generates a /object/public/... URL that
- *  Supabase Storage immediately rejects with "Bucket not found" because public
+ *  the PHP storage layer rejects with "Bucket not found" because public
  *  access is disabled.  We store only the storage_path and generate a fresh
  *  signed URL at open-time via getMaterialSignedUrl().
  */
@@ -1797,7 +1809,7 @@ export async function uploadLessonMaterial(
   const resp = await fetch(fileUri);
   const blob = await resp.blob();
 
-  const { error: upErr } = await supabase.storage
+  const { error: upErr } = await backendClient.storage
     .from('lesson-materials')
     .upload(storagePath, blob, { contentType: mimeType, upsert: false });
   if (upErr) throw upErr;
@@ -1810,19 +1822,10 @@ export async function uploadLessonMaterial(
 
 // ── Private Storage — Signed URL helpers ─────────────────────────────────────
 //
-// WHY EDGE FUNCTION:
-//   Both `lesson-materials` and `lesson-pdfs` buckets are private (public:false).
-//   Supabase Storage's createSignedUrl endpoint checks the SELECT RLS policy
-//   using the caller's JWT role. On React Native, the Supabase JS client uses
-//   expo-sqlite localStorage shim for session persistence; if the session is
-//   not yet hydrated when the Storage API call is made, the request runs as
-//   the `anon` role, which has no SELECT policy on either bucket → AccessDenied.
-//
-//   Solution: route through the `get-signed-url` Edge Function, which:
-//     1. Validates the caller's JWT explicitly (requireAuth)
-//     2. Applies authorisation logic server-side
-//     3. Calls createSignedUrl using the service_role key (bypasses RLS on the
-//        storage API itself, so the call always succeeds for authorised users)
+// PRIVATE STORAGE:
+//   Both `lesson-materials` and `lesson-pdfs` buckets are private.
+//   The PHP signed-file endpoint validates the caller's JWT and applies the
+//   storage ownership rules before issuing a short-lived URL.
 
 /** Generate a 1-hour signed URL for a private lesson-materials file.
  *
@@ -1853,7 +1856,7 @@ export async function getLessonPdfSignedUrl(fileUrlOrPath: string): Promise<stri
 
 // ── Lesson Progress ───────────────────────────────────────────────────────────
 export async function getLessonProgress(studentId: string, courseId: string) {
-  const { data, error } = await supabase
+  const { data, error } = await backendClient
     .from('lesson_progress')
     .select('*')
     .eq('student_id', studentId)
@@ -1870,7 +1873,7 @@ export async function upsertLessonProgress(payload: {
   watch_position_seconds: number;
   completed: boolean;
 }) {
-  const { error } = await supabase
+  const { error } = await backendClient
     .from('lesson_progress')
     .upsert({ ...payload, last_watched_at: new Date().toISOString() }, { onConflict: 'student_id,lesson_id' });
   if (error) throw error;
@@ -1882,19 +1885,19 @@ export async function upsertLessonProgress(payload: {
 
 /** Live credit balance — uses the get_my_credits_balance RPC (SECURITY DEFINER). Never returns null. */
 export async function getLiveCreditBalance(): Promise<{ allocated: number; consumed: number; remaining: number }> {
-  const { data, error } = await supabase.rpc('get_my_credits_balance');
+  const { data, error } = await backendClient.rpc('get_my_credits_balance');
   if (error) throw error;
   return data as { allocated: number; consumed: number; remaining: number };
 }
 
 export async function getMyCredits(doctorId: string) {
-  const { data, error } = await supabase.from('credits').select('*').eq('doctor_id', doctorId).maybeSingle();
+  const { data, error } = await backendClient.from('credits').select('*').eq('doctor_id', doctorId).maybeSingle();
   if (error) throw error;
   return data;
 }
 
 export async function getCreditTransactions(doctorId: string) {
-  const { data, error } = await supabase
+  const { data, error } = await backendClient
     .from('credit_transactions')
     .select('*, course:courses!credit_transactions_course_id_fkey(title), student:profiles!credit_transactions_student_id_fkey(full_name)')
     .eq('doctor_id', doctorId)
@@ -1924,7 +1927,7 @@ export async function refundCredits(
 }
 
 export async function getAllCredits() {
-  const { data, error } = await supabase
+  const { data, error } = await backendClient
     .from('credits')
     .select('*, doctor:profiles!credits_doctor_id_fkey(id,full_name,email)')
     .order('updated_at', { ascending: false })
@@ -1941,7 +1944,7 @@ export async function grantCourseAccess(
   courseId: string,
   idempotencyKey?: string
 ) {
-  const { data, error } = await supabase.rpc('grant_course_access', {
+  const { data, error } = await backendClient.rpc('grant_course_access', {
     p_student_id: studentId,
     p_course_id: courseId,
     p_idempotency_key: idempotencyKey ?? null,
@@ -1952,7 +1955,7 @@ export async function grantCourseAccess(
 
 // getSubscribedStudents — returns students subscribed to a given course
 export async function getSubscribedStudents(courseId: string) {
-  const { data, error } = await supabase
+  const { data, error } = await backendClient
     .from('enrollments')
     .select('*, student:profiles!enrollments_student_id_fkey(id,full_name,email,phone)')
     .eq('course_id', courseId)
@@ -1970,16 +1973,16 @@ export async function getDoctorStudentEnrollments(doctorId: string) {
   // used .eq('courses.doctor_id') [wrong alias] + .order('created_at') [wrong
   // column — enrollments has enrolled_at] which caused a silent PostgREST error
   // returning an empty array for every doctor.
-  const { data, error } = await supabase.rpc('get_doctor_students', { p_doctor_id: doctorId });
+  const { data, error } = await backendClient.rpc('get_doctor_students', { p_doctor_id: doctorId });
   if (error) throw error;
-  // RPC returns a jsonb array; supabase-js wraps scalar RPCs as { data: value }
+  // RPC returns a jsonb array; backendClient-js wraps scalar RPCs as { data: value }
   const rows: any[] = Array.isArray(data) ? data : [];
   return rows;
 }
 
 /** Suspend a student's course subscription (doctor or admin only). */
 export async function suspendCourseSubscription(enrollmentId: string) {
-  const { error } = await supabase
+  const { error } = await backendClient
     .from('enrollments')
     .update({ status: 'suspended', updated_at: new Date().toISOString() })
     .eq('id', enrollmentId);
@@ -1988,7 +1991,7 @@ export async function suspendCourseSubscription(enrollmentId: string) {
 
 /** Resume a suspended course subscription. */
 export async function resumeCourseSubscription(enrollmentId: string) {
-  const { error } = await supabase
+  const { error } = await backendClient
     .from('enrollments')
     .update({ status: 'active', updated_at: new Date().toISOString() })
     .eq('id', enrollmentId);
@@ -2000,9 +2003,9 @@ export async function resumeCourseSubscription(enrollmentId: string) {
  *  client-side .delete() returned 200 with 0 rows affected (RLS blocked it),
  *  making the student re-appear on every refresh. */
 export async function removeStudentFromCourse(enrollmentId: string) {
-  const { data, error } = await supabase.rpc('remove_course_enrollment', {
+  const { data, error } = await backendClient.rpc('remove_course_enrollment', {
     p_enrollment_id: enrollmentId,
-    p_doctor_id: (await supabase.auth.getUser()).data.user?.id ?? '',
+    p_doctor_id: (await backendClient.auth.getUser()).data.user?.id ?? '',
   });
   if (error) throw error;
   return data;
@@ -2088,7 +2091,7 @@ export async function enrollStudentViaCode(code: string) {
   // Legacy: code-only enroll without creating a student or specifying course.
   // The old path used a direct RPC (redeem_activation_code) which the caller
   // passes to. Keep this path for the existing "Via Code" tab in add-student modal.
-  const { data, error } = await supabase.rpc('redeem_activation_code', {
+  const { data, error } = await backendClient.rpc('redeem_activation_code', {
     p_code: code.trim().toUpperCase(),
   });
   if (error) throw error;
@@ -2105,7 +2108,7 @@ export const getEnrolledStudents = getSubscribedStudents;
  * Does NOT return all courses — keeps the initial load fast.
  */
 export async function getFeaturedCourses(limit = 10) {
-  const { data, error } = await supabase
+  const { data, error } = await backendClient
     .from('courses')
     .select('id, title, description, image_url, price_egp, whatsapp, telegram, phone, use_default_contact, doctor:profiles!courses_doctor_id_fkey(id,full_name,contact_whatsapp,contact_telegram,contact_phone), category:categories(id,name)')
     .eq('status', 'published')
@@ -2122,7 +2125,7 @@ export async function getFeaturedCourses(limit = 10) {
 export async function searchAllPublishedCourses(query: string) {
   const q = query.trim().toLowerCase();
   if (!q) return [];
-  const { data, error } = await supabase
+  const { data, error } = await backendClient
     .from('courses')
     .select('id, title, description, image_url, price_egp, whatsapp, telegram, phone, use_default_contact, doctor:profiles!courses_doctor_id_fkey(id,full_name,contact_whatsapp,contact_telegram,contact_phone), category:categories(id,name)')
     .eq('status', 'published')
@@ -2135,7 +2138,7 @@ export async function searchAllPublishedCourses(query: string) {
 
 // getMySubscriptions — returns the calling student's subscribed courses
 export async function getMySubscriptions(studentId: string) {
-  const { data, error } = await supabase
+  const { data, error } = await backendClient
     .from('enrollments')
     .select('*, course:courses!enrollments_course_id_fkey(*, doctor:profiles!courses_doctor_id_fkey(id,full_name), category:categories(id,name))')
     .eq('student_id', studentId)
@@ -2155,7 +2158,7 @@ export async function getActivationCodes() {
   // Limit to 200 rows and exclude batched codes (batch_id IS NULL) to prevent
   // the JOIN query from timing out when large batches exist in the table.
   // Per-batch code rows are loaded on demand via getActivationLedger({ batchId }).
-  const { data, error } = await supabase
+  const { data, error } = await backendClient
     .from('activation_codes')
     .select('*, course:courses!activation_codes_course_id_fkey(title), used_by_profile:profiles!activation_codes_used_by_fkey(full_name)')
     .is('batch_id', null)
@@ -2233,7 +2236,7 @@ export async function bulkEnableActivationCodes(codeIds: string[]) {
 
 export async function redeemActivationCode(code: string) {
   // SECURITY DEFINER DB function: row-locked, rate-limited, single-redemption guaranteed
-  const { data, error } = await supabase.rpc('redeem_activation_code', { p_code: code });
+  const { data, error } = await backendClient.rpc('redeem_activation_code', { p_code: code });
   if (error) throw error;
   return data;
 }
@@ -2294,8 +2297,8 @@ export async function deleteVdoCipherVideo(
     reason?: string;
     clearLesson?: boolean;
   },
-): Promise<{ success: boolean; vdo_deleted: boolean; vdo_error?: string }> {
-  return invokeEdgeFunction<{ success: boolean; vdo_deleted: boolean; vdo_error?: string }>(
+): Promise<{ success: boolean; vdo_deleted: boolean; vdo_error?: string; vdo_status?: number }> {
+  return invokeEdgeFunction<{ success: boolean; vdo_deleted: boolean; vdo_error?: string; vdo_status?: number }>(
     'vdocipher-delete-video',
     {
       video_id:     videoId,
@@ -2305,6 +2308,15 @@ export async function deleteVdoCipherVideo(
       clear_lesson: opts?.clearLesson ?? false,
     },
   );
+}
+
+export async function cancelVdoCipherUpload(uploadId: string): Promise<{
+  success: boolean;
+  canceled: boolean;
+  vdo_deleted: boolean;
+  provider_video_id?: string | null;
+}> {
+  return invokeEdgeFunction('vdocipher-cancel-upload', { upload_id: uploadId });
 }
 
 // ── Chunked Video Upload — API helpers ────────────────────────────────────────
@@ -2321,7 +2333,7 @@ export async function getChunkUploadState(uploadId: string): Promise<{
   assembly_triggered: boolean;
   status: string;
 } | null> {
-  const { data, error } = await supabase.rpc('get_chunk_upload_state', { p_upload_id: uploadId });
+  const { data, error } = await backendClient.rpc('get_chunk_upload_state', { p_upload_id: uploadId });
   if (error || !data || data.length === 0) return null;
   return data[0] as {
     total_chunks: number;
@@ -2355,15 +2367,12 @@ export async function uploadVideoChunk(params: {
 }): Promise<{ received: number; total: number; assembly_triggered: boolean }> {
   const { uploadId, chunkIndex, totalChunks, chunkData, fileName, mimeType, signal } = params;
 
-  const session = await supabase.auth.getSession();
+  const session = await backendClient.auth.getSession();
   const token = session.data.session?.access_token;
   if (!token) throw new Error('Not authenticated');
 
-  // Route through PHP backend instead of Supabase Edge Function
-  const API_BASE =
-    process.env.EXPO_PUBLIC_PHP_API_URL ||
-    process.env.EXPO_PUBLIC_SUPABASE_URL?.replace(/\/?$/, '/backend/public/index.php') || '';
-  const url = `${API_BASE}/video/chunk`;
+  // Route through the PHP backend action
+  const url = `${backendApiBase}/video/chunk`;
   // Use expo/fetch — global fetch cannot send ArrayBuffer bodies on iOS/Android
   const body: ArrayBuffer = (chunkData instanceof Uint8Array ? chunkData : new Uint8Array(chunkData)).buffer as ArrayBuffer;
 
@@ -2387,8 +2396,20 @@ export async function uploadVideoChunk(params: {
     const errText = await response.text().catch(() => '');
     let errMsg = `HTTP ${response.status}`;
     try {
-      const parsed = JSON.parse(errText) as { error?: string };
-      if (parsed.error) errMsg = parsed.error;
+      const parsed = JSON.parse(errText) as { error?: unknown };
+      const err = parsed?.error;
+      if (typeof err === 'string') {
+        errMsg = err;
+      } else if (err && typeof err === 'object') {
+        // Backend envelope: { error: { message, code, ... } } — surface the
+        // real message instead of the object stringifying to "[object Object]".
+        const e = err as { message?: unknown; error?: unknown };
+        errMsg = typeof e.message === 'string'
+          ? e.message
+          : (typeof e.error === 'string' ? e.error : JSON.stringify(err));
+      } else if (errText) {
+        errMsg = errText;
+      }
     } catch { errMsg = errText || errMsg; }
     throw new Error(`Chunk ${chunkIndex} upload failed: ${errMsg}`);
   }
@@ -2442,7 +2463,7 @@ export async function getVdoCipherVideoStatus(videoId: string) {
 
 // ── Notifications ─────────────────────────────────────────────────────────────
 export async function getNotifications(userId: string) {
-  const { data, error } = await supabase
+  const { data, error } = await backendClient
     .from('notifications')
     .select('*')
     .eq('user_id', userId)
@@ -2453,7 +2474,7 @@ export async function getNotifications(userId: string) {
 }
 
 export async function markNotificationRead(notificationId: string) {
-  const { error } = await supabase
+  const { error } = await backendClient
     .from('notifications')
     .update({ is_read: true })
     .eq('id', notificationId);
@@ -2461,12 +2482,12 @@ export async function markNotificationRead(notificationId: string) {
 }
 
 export async function deleteNotification(notificationId: string) {
-  const { error } = await supabase.from('notifications').delete().eq('id', notificationId);
+  const { error } = await backendClient.from('notifications').delete().eq('id', notificationId);
   if (error) throw error;
 }
 
 export async function getUnreadNotificationCount(userId: string) {
-  const { count, error } = await supabase
+  const { count, error } = await backendClient
     .from('notifications')
     .select('id', { count: 'exact', head: true })
     .eq('user_id', userId)
@@ -2479,7 +2500,7 @@ export async function getUnreadNotificationCount(userId: string) {
 // Writes are blocked for clients (migration 00004).
 // Only SECURITY DEFINER functions and the service role can write audit logs.
 export async function getAuditLogs(limit = 100) {
-  const { data, error } = await supabase
+  const { data, error } = await backendClient
     .from('audit_logs')
     .select('*, actor:profiles!audit_logs_actor_id_fkey(full_name,email,role)')
     .order('created_at', { ascending: false })
@@ -2534,7 +2555,7 @@ export async function getAuditTrail(filters: AuditTrailFilters = {}): Promise<{
     filters.resourceSearch ??
     null;
 
-  const { data, error } = await supabase.rpc('search_audit_logs', {
+  const { data, error } = await backendClient.rpc('search_audit_logs', {
     p_search:        combinedSearch,
     p_action_filter: null,
     p_category:      filters.category      ?? null,
@@ -2554,21 +2575,21 @@ export async function getAuditTrail(filters: AuditTrailFilters = {}): Promise<{
 
 // ── Categories ────────────────────────────────────────────────────────────────
 export async function getCategories() {
-  const { data, error } = await supabase.from('categories').select('*').order('name');
+  const { data, error } = await backendClient.from('categories').select('*').order('name');
   if (error) throw error;
   return data ?? [];
 }
 
 // ── System Config ─────────────────────────────────────────────────────────────
 export async function getSystemConfig() {
-  const { data, error } = await supabase.from('system_config').select('*');
+  const { data, error } = await backendClient.from('system_config').select('*');
   if (error) throw error;
   return data ?? [];
 }
 
 export async function upsertSystemConfig(key: string, value: unknown) {
-  const { data: { user } } = await supabase.auth.getUser();
-  const { error } = await supabase
+  const { data: { user } } = await backendClient.auth.getUser();
+  const { error } = await backendClient
     .from('system_config')
     .upsert({ key, value, updated_by: user!.id, updated_at: new Date().toISOString() }, { onConflict: 'key' });
   if (error) throw error;
@@ -2590,7 +2611,7 @@ export interface SupportSettings {
 
 /** Fetch all support contact entries from the support_settings table. */
 export async function getSupportSettings(): Promise<SupportSettings> {
-  const { data, error } = await supabase
+  const { data, error } = await backendClient
     .from('support_settings')
     .select('key, value, label, enabled');
   if (error) throw error;
@@ -2612,8 +2633,8 @@ export async function upsertSupportSetting(
   key: 'phone' | 'whatsapp' | 'telegram',
   entry: Partial<SupportContactEntry>,
 ) {
-  const { data: { user } } = await supabase.auth.getUser();
-  const { error } = await supabase
+  const { data: { user } } = await backendClient.auth.getUser();
+  const { error } = await backendClient
     .from('support_settings')
     .upsert(
       { key, ...entry, updated_by: user?.id, updated_at: new Date().toISOString() },
@@ -2625,11 +2646,11 @@ export async function upsertSupportSetting(
 
 export async function getAdminStats() {
   const [users, courses, codes, students, doctors] = await Promise.all([
-    supabase.from('profiles').select('id', { count: 'exact', head: true }),
-    supabase.from('courses').select('id', { count: 'exact', head: true }),
-    supabase.from('activation_codes').select('id', { count: 'exact', head: true }).eq('status', 'active'),
-    supabase.from('profiles').select('id', { count: 'exact', head: true }).eq('role', 'student'),
-    supabase.from('profiles').select('id', { count: 'exact', head: true }).eq('role', 'doctor'),
+    backendClient.from('profiles').select('id', { count: 'exact', head: true }),
+    backendClient.from('courses').select('id', { count: 'exact', head: true }),
+    backendClient.from('activation_codes').select('id', { count: 'exact', head: true }).eq('status', 'active'),
+    backendClient.from('profiles').select('id', { count: 'exact', head: true }).eq('role', 'student'),
+    backendClient.from('profiles').select('id', { count: 'exact', head: true }).eq('role', 'doctor'),
   ]);
   return {
     totalUsers: users.count ?? 0,
@@ -2642,7 +2663,7 @@ export async function getAdminStats() {
 
 // ── Universities ──────────────────────────────────────────────────────────────
 export async function getUniversities() {
-  const { data, error } = await supabase
+  const { data, error } = await backendClient
     .from('universities')
     .select('*')
     .order('name', { ascending: true });
@@ -2651,7 +2672,7 @@ export async function getUniversities() {
 }
 
 export async function createUniversity(name: string) {
-  const { data, error } = await supabase
+  const { data, error } = await backendClient
     .from('universities')
     .insert({ name: name.trim() })
     .select()
@@ -2661,7 +2682,7 @@ export async function createUniversity(name: string) {
 }
 
 export async function updateUniversity(id: string, updates: Partial<{ name: string; is_active: boolean }>) {
-  const { data, error } = await supabase
+  const { data, error } = await backendClient
     .from('universities')
     .update({ ...updates, updated_at: new Date().toISOString() })
     .eq('id', id)
@@ -2672,13 +2693,13 @@ export async function updateUniversity(id: string, updates: Partial<{ name: stri
 }
 
 export async function deleteUniversity(id: string) {
-  const { error } = await supabase.from('universities').delete().eq('id', id);
+  const { error } = await backendClient.from('universities').delete().eq('id', id);
   if (error) throw error;
 }
 
 // ── Faculties ─────────────────────────────────────────────────────────────────
 export async function getFaculties(universityId?: string) {
-  let query = supabase
+  let query = backendClient
     .from('faculties')
     .select('*, university:universities(id,name)')
     .order('name', { ascending: true });
@@ -2689,7 +2710,7 @@ export async function getFaculties(universityId?: string) {
 }
 
 export async function createFaculty(universityId: string, name: string) {
-  const { data, error } = await supabase
+  const { data, error } = await backendClient
     .from('faculties')
     .insert({ university_id: universityId, name: name.trim() })
     .select()
@@ -2699,7 +2720,7 @@ export async function createFaculty(universityId: string, name: string) {
 }
 
 export async function updateFaculty(id: string, updates: Partial<{ name: string; is_active: boolean }>) {
-  const { data, error } = await supabase
+  const { data, error } = await backendClient
     .from('faculties')
     .update({ ...updates, updated_at: new Date().toISOString() })
     .eq('id', id)
@@ -2710,13 +2731,13 @@ export async function updateFaculty(id: string, updates: Partial<{ name: string;
 }
 
 export async function deleteFaculty(id: string) {
-  const { error } = await supabase.from('faculties').delete().eq('id', id);
+  const { error } = await backendClient.from('faculties').delete().eq('id', id);
   if (error) throw error;
 }
 
 // ── Academic Levels ───────────────────────────────────────────────────────────
 export async function getAcademicLevels(facultyId: string) {
-  const { data, error } = await supabase
+  const { data, error } = await backendClient
     .from('academic_levels')
     .select('*')
     .eq('faculty_id', facultyId)
@@ -2726,7 +2747,7 @@ export async function getAcademicLevels(facultyId: string) {
 }
 
 export async function getAllAcademicLevels() {
-  const { data, error } = await supabase
+  const { data, error } = await backendClient
     .from('academic_levels')
     .select('*, faculty:faculties(id,name)')
     .order('display_order', { ascending: true });
@@ -2735,7 +2756,7 @@ export async function getAllAcademicLevels() {
 }
 
 export async function createAcademicLevel(facultyId: string, name: string, displayOrder: number) {
-  const { data, error } = await supabase
+  const { data, error } = await backendClient
     .from('academic_levels')
     .insert({ faculty_id: facultyId, name: name.trim(), display_order: displayOrder })
     .select()
@@ -2748,7 +2769,7 @@ export async function updateAcademicLevel(
   id: string,
   updates: Partial<{ name: string; display_order: number; is_active: boolean; faculty_id: string }>
 ) {
-  const { data, error } = await supabase
+  const { data, error } = await backendClient
     .from('academic_levels')
     .update({ ...updates, updated_at: new Date().toISOString() })
     .eq('id', id)
@@ -2759,7 +2780,7 @@ export async function updateAcademicLevel(
 }
 
 export async function deleteAcademicLevel(id: string) {
-  const { error } = await supabase.from('academic_levels').delete().eq('id', id);
+  const { error } = await backendClient.from('academic_levels').delete().eq('id', id);
   if (error) throw error;
 }
 
@@ -2775,18 +2796,18 @@ export async function getSuperAdminStats() {
     publishedCourses, draftCourses,
     devices, credits, codes,
   ] = await Promise.all([
-    supabase.from('profiles').select('id', { count: 'exact', head: true }).eq('role', 'student'),
-    supabase.from('profiles').select('id', { count: 'exact', head: true }).eq('role', 'doctor'),
-    supabase.from('profiles').select('id', { count: 'exact', head: true }).eq('role', 'admin'),
-    supabase.from('profiles').select('id', { count: 'exact', head: true }).eq('role', 'super_admin'),
-    supabase.from('universities').select('id', { count: 'exact', head: true }),
-    supabase.from('faculties').select('id', { count: 'exact', head: true }),
-    supabase.from('academic_levels').select('id', { count: 'exact', head: true }),
-    supabase.from('courses').select('id', { count: 'exact', head: true }).eq('status', 'published'),
-    supabase.from('courses').select('id', { count: 'exact', head: true }).eq('status', 'draft'),
-    supabase.from('device_stats').select('*').single(),
-    supabase.from('credits_summary').select('*').single(),
-    supabase.from('activation_codes_summary').select('*').single(),
+    backendClient.from('profiles').select('id', { count: 'exact', head: true }).eq('role', 'student').neq('status', 'trashed'),
+    backendClient.from('profiles').select('id', { count: 'exact', head: true }).eq('role', 'doctor').neq('status', 'trashed'),
+    backendClient.from('profiles').select('id', { count: 'exact', head: true }).eq('role', 'admin').neq('status', 'trashed'),
+    backendClient.from('profiles').select('id', { count: 'exact', head: true }).eq('role', 'super_admin').neq('status', 'trashed'),
+    backendClient.from('universities').select('id', { count: 'exact', head: true }),
+    backendClient.from('faculties').select('id', { count: 'exact', head: true }),
+    backendClient.from('academic_levels').select('id', { count: 'exact', head: true }),
+    backendClient.from('courses').select('id', { count: 'exact', head: true }).eq('status', 'published'),
+    backendClient.from('courses').select('id', { count: 'exact', head: true }).eq('status', 'draft'),
+    backendClient.from('device_stats').select('*').single(),
+    backendClient.from('credits_summary').select('*').single(),
+    backendClient.from('activation_codes_summary').select('*').single(),
   ]);
 
   const totalUsers = (students.count ?? 0) + (doctors.count ?? 0) + (admins.count ?? 0) + (superAdmins.count ?? 0);
@@ -2842,7 +2863,7 @@ export interface TeacherWithPermissions {
 
 /** Fetch all global video providers (super_admin / authenticated read). */
 export async function getVideoProviders(): Promise<VideoProvider[]> {
-  const { data, error } = await supabase
+  const { data, error } = await backendClient
     .from('video_providers')
     .select('*')
     .order('provider_key');
@@ -2855,8 +2876,8 @@ export async function setGlobalProviderEnabled(
   providerKey: string,
   enabled: boolean,
 ): Promise<void> {
-  const { data: { user } } = await supabase.auth.getUser();
-  const { error } = await supabase
+  const { data: { user } } = await backendClient.auth.getUser();
+  const { error } = await backendClient
     .from('video_providers')
     .update({ is_globally_enabled: enabled, updated_by: user?.id, updated_at: new Date().toISOString() })
     .eq('provider_key', providerKey);
@@ -2865,7 +2886,7 @@ export async function setGlobalProviderEnabled(
 
 /** Fetch resolved provider permissions for the calling user (doctor). */
 export async function getMyProviderPermissions(): Promise<TeacherProviderPermission[]> {
-  const { data, error } = await supabase.rpc('get_teacher_provider_permissions');
+  const { data, error } = await backendClient.rpc('get_teacher_provider_permissions');
   if (error) throw error;
   return Array.isArray(data) ? data : [];
 }
@@ -2874,7 +2895,7 @@ export async function getMyProviderPermissions(): Promise<TeacherProviderPermiss
 export async function getTeacherProviderPermissionsById(
   teacherId: string,
 ): Promise<TeacherProviderPermission[]> {
-  const { data, error } = await supabase.rpc('get_teacher_provider_permissions', {
+  const { data, error } = await backendClient.rpc('get_teacher_provider_permissions', {
     p_teacher_id: teacherId,
   });
   if (error) throw error;
@@ -2887,7 +2908,7 @@ export async function setTeacherProviderPermission(
   providerKey: string,
   enabled: boolean,
 ): Promise<void> {
-  const { error } = await supabase.rpc('upsert_teacher_provider_permission', {
+  const { error } = await backendClient.rpc('upsert_teacher_provider_permission', {
     p_teacher_id: teacherId,
     p_provider_key: providerKey,
     p_is_enabled: enabled,
@@ -2899,7 +2920,7 @@ export async function setTeacherProviderPermission(
 export async function getDoctorsForProviderMgmt(): Promise<
   Array<{ id: string; full_name: string; email: string }>
 > {
-  const { data, error } = await supabase
+  const { data, error } = await backendClient
     .from('profiles')
     .select('id, full_name, email')
     .eq('role', 'doctor')
@@ -2910,7 +2931,7 @@ export async function getDoctorsForProviderMgmt(): Promise<
 
 // ── Feature Flags ─────────────────────────────────────────────────────────────
 export async function getFeatureFlags() {
-  const { data, error } = await supabase
+  const { data, error } = await backendClient
     .from('feature_flags')
     .select('*')
     .order('key');
@@ -2919,8 +2940,8 @@ export async function getFeatureFlags() {
 }
 
 export async function toggleFeatureFlag(key: string, enabled: boolean) {
-  const { data: { user } } = await supabase.auth.getUser();
-  const { error } = await supabase
+  const { data: { user } } = await backendClient.auth.getUser();
+  const { error } = await backendClient
     .from('feature_flags')
     .update({ enabled, updated_by: user?.id, updated_at: new Date().toISOString() })
     .eq('key', key);
@@ -2929,7 +2950,7 @@ export async function toggleFeatureFlag(key: string, enabled: boolean) {
 
 // ── Branding ──────────────────────────────────────────────────────────────────
 export async function getBranding() {
-  const { data, error } = await supabase
+  const { data, error } = await backendClient
     .from('app_branding')
     .select('*')
     .eq('id', '00000000-0000-0000-0000-000000000001')
@@ -2945,8 +2966,8 @@ export async function updateBranding(updates: Partial<{
   youtube_url: string; telegram_url: string; whatsapp_url: string;
   website_url: string; support_email: string;
 }>) {
-  const { data: { user } } = await supabase.auth.getUser();
-  const { data, error } = await supabase
+  const { data: { user } } = await backendClient.auth.getUser();
+  const { data, error } = await backendClient
     .from('app_branding')
     .update({ ...updates, updated_by: user?.id, updated_at: new Date().toISOString() })
     .eq('id', '00000000-0000-0000-0000-000000000001')
@@ -2958,7 +2979,7 @@ export async function updateBranding(updates: Partial<{
 
 // ── CMS Pages ─────────────────────────────────────────────────────────────────
 export async function getCMSPages() {
-  const { data, error } = await supabase
+  const { data, error } = await backendClient
     .from('app_pages')
     .select('*')
     .order('key');
@@ -2967,7 +2988,7 @@ export async function getCMSPages() {
 }
 
 export async function getCMSPage(key: string) {
-  const { data, error } = await supabase
+  const { data, error } = await backendClient
     .from('app_pages')
     .select('*')
     .eq('key', key)
@@ -2977,8 +2998,8 @@ export async function getCMSPage(key: string) {
 }
 
 export async function updateCMSPage(key: string, updates: { title?: string; content?: string; published?: boolean }) {
-  const { data: { user } } = await supabase.auth.getUser();
-  const { data, error } = await supabase
+  const { data: { user } } = await backendClient.auth.getUser();
+  const { data, error } = await backendClient
     .from('app_pages')
     .update({ ...updates, updated_by: user?.id, updated_at: new Date().toISOString() })
     .eq('key', key)
@@ -2990,7 +3011,7 @@ export async function updateCMSPage(key: string, updates: { title?: string; cont
 
 // ── Maintenance Mode ──────────────────────────────────────────────────────────
 export async function getMaintenanceConfig() {
-  const { data, error } = await supabase
+  const { data, error } = await backendClient
     .from('system_config')
     .select('key, value')
     .in('key', ['maintenance_enabled', 'maintenance_message']);
@@ -3011,7 +3032,7 @@ export async function setMaintenanceMode(enabled: boolean, message?: string) {
 }
 
 export async function getMaintenanceWhitelist() {
-  const { data, error } = await supabase
+  const { data, error } = await backendClient
     .from('maintenance_whitelist')
     .select('*, profile:profiles!maintenance_whitelist_user_id_fkey(id,full_name,email,role,phone_e164)')
     .order('added_at', { ascending: false });
@@ -3020,15 +3041,15 @@ export async function getMaintenanceWhitelist() {
 }
 
 export async function addToMaintenanceWhitelist(userId: string) {
-  const { data: { user } } = await supabase.auth.getUser();
-  const { error } = await supabase
+  const { data: { user } } = await backendClient.auth.getUser();
+  const { error } = await backendClient
     .from('maintenance_whitelist')
     .upsert({ user_id: userId, added_by: user?.id }, { onConflict: 'user_id' });
   if (error) throw error;
 }
 
 export async function removeFromMaintenanceWhitelist(userId: string) {
-  const { error } = await supabase
+  const { error } = await backendClient
     .from('maintenance_whitelist')
     .delete()
     .eq('user_id', userId);
@@ -3037,7 +3058,7 @@ export async function removeFromMaintenanceWhitelist(userId: string) {
 
 // ── Pricing ───────────────────────────────────────────────────────────────────
 export async function getPricingSettings() {
-  const { data, error } = await supabase
+  const { data, error } = await backendClient
     .from('system_config')
     .select('key, value')
     .in('key', ['credit_price', 'activation_code_price']);
@@ -3066,7 +3087,7 @@ export async function setDoctorCreditPrice(
   actorName?: string,
   actorRole?: string,
 ): Promise<void> {
-  const { error } = await supabase.rpc('set_doctor_credit_price', {
+  const { error } = await backendClient.rpc('set_doctor_credit_price', {
     p_doctor_id:  doctorId,
     p_new_price:  newPrice,
     p_actor_id:   actorId  ?? null,
@@ -3081,7 +3102,7 @@ export async function setDoctorCoursePrice(
   courseId: string,
   newPrice: number,
 ): Promise<void> {
-  const { error } = await supabase
+  const { error } = await backendClient
     .from('courses')
     .update({ price_egp: newPrice })
     .eq('id', courseId);
@@ -3103,26 +3124,40 @@ export interface DoctorActivityStats {
 
 /** Returns aggregated activity stats for a single doctor. */
 export async function getDoctorActivityStats(doctorId: string): Promise<DoctorActivityStats | null> {
-  const { data, error } = await supabase.rpc('get_doctor_activity_stats', { p_doctor_id: doctorId });
+  const { data, error } = await backendClient.rpc('get_doctor_activity_stats', { p_doctor_id: doctorId });
   if (error) throw error;
   return data as DoctorActivityStats | null;
 }
 
 // ── Doctor Management (Admin/SA) ──────────────────────────────────────────────
 export async function getDoctors(options?: { status?: string }) {
-  // credits table columns: id, doctor_id, allocated, consumed, remaining, updated_at
-  // (no 'total_allocated' column — use 'allocated')
-  let q = supabase
+  // Fetch doctors without nested joins (PHP backend doesn't support Supabase-style joins)
+  let q = backendClient
     .from('profiles')
-    .select('*, university:universities(id,name), faculty:faculties(id,name), credits:credits(remaining,allocated,consumed)')
+    .select('*')
     .eq('role', 'doctor')
     .order('full_name');
   if (options?.status) q = q.eq('status', options.status);
   const { data, error } = await q;
   if (error) throw error;
-  // credits is a 1-to-1 join returned as an array; flatten for convenience
+
+  // Fetch credits separately for these doctors
+  const doctorIds = (data ?? []).map((d: any) => d.id);
+  let creditsMap: Record<string, any> = {};
+  if (doctorIds.length > 0) {
+    try {
+      const { data: creditsData } = await backendClient
+        .from('credits')
+        .select('doctor_id, remaining, allocated, consumed')
+        .in('doctor_id', doctorIds);
+      if (creditsData) {
+        for (const cr of creditsData) creditsMap[cr.doctor_id] = cr;
+      }
+    } catch (_) { /* credits fetch failed — use zeros */ }
+  }
+
   return (data ?? []).map((d: any) => {
-    const cr = Array.isArray(d.credits) ? d.credits[0] : d.credits;
+    const cr = creditsMap[d.id];
     return {
       ...d,
       credits_balance: cr?.remaining ?? 0,
@@ -3152,12 +3187,12 @@ export async function sendBroadcastNotification(payload: {
   target_course_id?: string;
   target_user_id?: string;
 }) {
-  const { data: { user } } = await supabase.auth.getUser();
+  const { data: { user } } = await backendClient.auth.getUser();
   if (!user) throw new Error('Not authenticated');
 
   // For individual target
   if (payload.target_type === 'individual' && payload.target_user_id) {
-    const { error } = await supabase.from('notifications').insert({
+    const { error } = await backendClient.from('notifications').insert({
       user_id: payload.target_user_id,
       title: payload.title,
       body: payload.body,
@@ -3174,14 +3209,14 @@ export async function sendBroadcastNotification(payload: {
 
   if (payload.target_type === 'course' && payload.target_course_id) {
     // Students enrolled in the selected course
-    const { data: enrollments, error: enrollErr } = await supabase
+    const { data: enrollments, error: enrollErr } = await backendClient
       .from('enrollments')
       .select('student_id')
       .eq('course_id', payload.target_course_id);
     if (enrollErr) throw enrollErr;
     userIds = (enrollments ?? []).map((e: { student_id: string }) => e.student_id);
   } else {
-    let userQuery = supabase.from('profiles').select('id');
+    let userQuery = backendClient.from('profiles').select('id');
     if (payload.target_type === 'role' && payload.target_role) {
       userQuery = userQuery.eq('role', payload.target_role);
     } else if (payload.target_type === 'university' && payload.target_university_id) {
@@ -3210,13 +3245,13 @@ export async function sendBroadcastNotification(payload: {
   }));
 
   if (inserts.length === 0) return;
-  const { error } = await supabase.from('notifications').insert(inserts);
+  const { error } = await backendClient.from('notifications').insert(inserts);
   if (error) throw error;
 }
 
 export async function getSentNotifications(limit = 50) {
-  const { data: { user } } = await supabase.auth.getUser();
-  const { data, error } = await supabase
+  const { data: { user } } = await backendClient.auth.getUser();
+  const { data, error } = await backendClient
     .from('notifications')
     .select('*')
     .eq('sent_by', user?.id ?? '')
@@ -3233,7 +3268,7 @@ export async function getReportData(type: string, from?: string, to?: string) {
 
   switch (type) {
     case 'credits': {
-      const { data, error } = await supabase
+      const { data, error } = await backendClient
         .from('credit_transactions')
         .select('*, doctor:profiles!credit_transactions_doctor_id_fkey(full_name,email)')
         .gte('created_at', fromDate)
@@ -3244,7 +3279,7 @@ export async function getReportData(type: string, from?: string, to?: string) {
       return data ?? [];
     }
     case 'activation': {
-      const { data, error } = await supabase
+      const { data, error } = await backendClient
         .from('activation_codes')
         .select('*, course:courses(title), redeemed_by:profiles!activation_codes_redeemed_by_fkey(full_name,email)')
         .gte('created_at', fromDate)
@@ -3255,7 +3290,7 @@ export async function getReportData(type: string, from?: string, to?: string) {
       return data ?? [];
     }
     case 'users': {
-      const { data, error } = await supabase
+      const { data, error } = await backendClient
         .from('profiles')
         .select('id,full_name,email,phone_e164,role,status,created_at,university:universities(name),faculty:faculties(name)')
         .gte('created_at', fromDate)
@@ -3278,14 +3313,14 @@ export async function getStorageStats() {
       { data: plyrUploads },
       { data: vdoLessons },
     ] = await Promise.all([
-      supabase.storage.listBuckets(),
+      backendClient.storage.listBuckets(),
       // Plyr: active uploads only (exclude failed/canceled/deleted)
-      supabase
+      backendClient
         .from('video_uploads')
         .select('file_size, provider')
         .in('status', ['ready', 'uploading', 'processing', 'encoding', 'verifying', 'waiting']),
       // VdoCipher: lessons with vdocipher video set
-      supabase
+      backendClient
         .from('lessons')
         .select('id, video_type')
         .eq('video_type', 'vdocipher')
@@ -3321,7 +3356,7 @@ export async function getStorageStats() {
 export async function getRevenueStats() {
   const [pricing, creditTx] = await Promise.all([
     getPricingSettings(),
-    supabase
+    backendClient
       .from('credit_transactions')
       .select('amount, created_at, transaction_type')
       .in('transaction_type', ['allocation', 'grant_admin', 'grant_super_admin'])
@@ -3379,13 +3414,13 @@ export interface PlatformEarningsStats {
 export async function getPlatformEarningsStats(): Promise<PlatformEarningsStats> {
   const [pricing, creditTx, resetRows] = await Promise.all([
     getPricingSettings(),
-    supabase
+    backendClient
       .from('credit_transactions')
       .select('amount, created_at, transaction_type')
       .in('transaction_type', ['allocation', 'grant_admin', 'grant_super_admin'])
       .order('created_at', { ascending: false })
       .limit(5000),
-    supabase
+    backendClient
       .from('platform_earnings_resets')
       .select('id, reset_at, earnings_before, reset_by_email')
       .order('reset_at', { ascending: false })
@@ -3422,7 +3457,7 @@ export async function resetPlatformEarnings(
   earningsBefore: number,
   adminEmail: string,
 ): Promise<string> {
-  const { data, error } = await supabase.rpc('reset_platform_earnings', {
+  const { data, error } = await backendClient.rpc('reset_platform_earnings', {
     p_earnings_before: earningsBefore,
     p_admin_email:     adminEmail,
     p_note:            null,
@@ -3446,7 +3481,7 @@ export async function getCreditLedger(opts?: {
   limit?: number;
   offset?: number;
 }) {
-  let q = supabase
+  let q = backendClient
     .from('credit_ledger_view')
     .select('*')
     .order('created_at', { ascending: false })
@@ -3471,10 +3506,10 @@ export async function getCreditLedgerStats() {
   const todayIso = today.toISOString();
 
   const [all, todayRows] = await Promise.all([
-    supabase
+    backendClient
       .from('credit_transactions')
       .select('transaction_type, amount'),
-    supabase
+    backendClient
       .from('credit_transactions')
       .select('transaction_type, amount')
       .gte('created_at', todayIso),
@@ -3505,7 +3540,7 @@ export async function getCreditLedgerStats() {
 
 /** Doctor credit timeline — from doctor_credit_summary view */
 export async function getDoctorCreditSummary(doctorId?: string) {
-  let q = supabase.from('doctor_credit_summary').select('*');
+  let q = backendClient.from('doctor_credit_summary').select('*');
   if (doctorId) q = q.eq('id', doctorId);
   const { data, error } = await q;
   if (error) throw error;
@@ -3516,7 +3551,7 @@ export async function getDoctorCreditSummary(doctorId?: string) {
 export async function getCreditDailyStats(days = 30) {
   const from = new Date();
   from.setDate(from.getDate() - days);
-  const { data, error } = await supabase
+  const { data, error } = await backendClient
     .from('credit_daily_stats')
     .select('*')
     .gte('day', from.toISOString().slice(0, 10))
@@ -3527,7 +3562,7 @@ export async function getCreditDailyStats(days = 30) {
 
 /** Top doctors by credits balance */
 export async function getTopDoctorsByCredits(limit = 10) {
-  const { data, error } = await supabase
+  const { data, error } = await backendClient
     .from('doctor_credit_summary')
     .select('*')
     .order('current_balance', { ascending: false })
@@ -3547,7 +3582,7 @@ export async function getActivationLedger(opts?: {
   limit?: number;
   offset?: number;
 }) {
-  let q = supabase
+  let q = backendClient
     .from('activation_ledger_view')
     .select('*')
     .order('created_at', { ascending: false })
@@ -3573,8 +3608,8 @@ export async function getActivationLedgerStats() {
   const todayIso = today.toISOString();
 
   const [all, todayRows] = await Promise.all([
-    supabase.from('activation_codes').select('status'),
-    supabase.from('activation_codes').select('status').gte('created_at', todayIso),
+    backendClient.from('activation_codes').select('status'),
+    backendClient.from('activation_codes').select('status').gte('created_at', todayIso),
   ]);
 
   const allCodes   = all.data ?? [];
@@ -3593,7 +3628,7 @@ export async function getActivationLedgerStats() {
 
 /** Batch list with counts */
 export async function getCodeBatches() {
-  const { data, error } = await supabase
+  const { data, error } = await backendClient
     .from('code_batches')
     .select('*, course:courses!code_batches_course_id_fkey(title), creator:profiles!code_batches_created_by_fkey(full_name, role)')
     .order('created_at', { ascending: false })
@@ -3604,7 +3639,7 @@ export async function getCodeBatches() {
 
 /** Most activated courses (by used activation codes) */
 export async function getMostActivatedCourses(limit = 5) {
-  const { data, error } = await supabase
+  const { data, error } = await backendClient
     .from('activation_codes')
     .select('course_id, course:courses!activation_codes_course_id_fkey(title)')
     .eq('status', 'used')
@@ -3625,7 +3660,7 @@ export async function getMostActivatedCourses(limit = 5) {
 
 /** Fraud flags — unresolved only */
 export async function getFraudFlags(resolved = false) {
-  const { data, error } = await supabase
+  const { data, error } = await backendClient
     .from('fraud_flags')
     .select('*, doctor:profiles!fraud_flags_doctor_id_fkey(full_name)')
     .eq('resolved', resolved)
@@ -3637,7 +3672,7 @@ export async function getFraudFlags(resolved = false) {
 
 /** Resolve a fraud flag */
 export async function resolveFraudFlag(flagId: string) {
-  const { error } = await supabase
+  const { error } = await backendClient
     .from('fraud_flags')
     .update({ resolved: true, resolved_at: new Date().toISOString() })
     .eq('id', flagId);
@@ -3648,7 +3683,7 @@ export async function resolveFraudFlag(flagId: string) {
 export async function getRevenueAnalytics(opts?: {
   from?: string; to?: string; adminId?: string; doctorId?: string; limit?: number;
 }) {
-  let q = supabase
+  let q = backendClient
     .from('revenue_analytics')
     .select('*')
     .order('day', { ascending: false })
@@ -3664,7 +3699,7 @@ export async function getRevenueAnalytics(opts?: {
 
 /** Low credit threshold from system_config */
 export async function getLowCreditThreshold(): Promise<number> {
-  const { data } = await supabase
+  const { data } = await backendClient
     .from('system_config')
     .select('value')
     .eq('key', 'low_credit_threshold')
@@ -3674,7 +3709,7 @@ export async function getLowCreditThreshold(): Promise<number> {
 
 /** Update low credit threshold */
 export async function setLowCreditThreshold(amount: number) {
-  const { error } = await supabase
+  const { error } = await backendClient
     .from('system_config')
     .update({ value: { amount } })
     .eq('key', 'low_credit_threshold');
@@ -3698,7 +3733,7 @@ export async function demoteAdminToStudent(adminId: string) {
 
 /** Get activity timeline for a user (audit + login events) */
 export async function getUserActivityTimeline(userId: string, limit = 50) {
-  const { data, error } = await supabase
+  const { data, error } = await backendClient
     .from('audit_logs')
     .select('*')
     .eq('user_id', userId)
@@ -3724,7 +3759,7 @@ export interface UserProfileSummary {
 }
 
 export async function getUserProfileSummary(userId: string): Promise<UserProfileSummary | null> {
-  const { data, error } = await supabase.rpc('get_user_profile_summary', { p_user_id: userId });
+  const { data, error } = await backendClient.rpc('get_user_profile_summary', { p_user_id: userId });
   if (error) throw error;
   return data as UserProfileSummary | null;
 }
@@ -3759,7 +3794,7 @@ export async function getUserActivity(opts: {
   limit?:     number;
   offset?:    number;
 }): Promise<{ entries: UserActivityEntry[]; totalCount: number }> {
-  const { data, error } = await supabase.rpc('get_user_activity', {
+  const { data, error } = await backendClient.rpc('get_user_activity', {
     p_user_id:   opts.userId,
     p_category:  opts.category  ?? null,
     p_search:    opts.search    ?? null,
@@ -3776,7 +3811,7 @@ export async function getUserActivity(opts: {
 
 /** Course activation stats — for the course timeline */
 export async function getCourseActivationStats(courseId: string) {
-  const { data, error } = await supabase
+  const { data, error } = await backendClient
     .from('activation_codes')
     .select('status')
     .eq('course_id', courseId);
@@ -3809,7 +3844,7 @@ export async function getCourseProgress(
   studentId: string,
   courseId: string
 ): Promise<CourseProgressResult> {
-  const { data, error } = await supabase.rpc('get_course_progress', {
+  const { data, error } = await backendClient.rpc('get_course_progress', {
     p_student_id: studentId,
     p_course_id: courseId,
   });
@@ -3825,7 +3860,7 @@ export async function getCourseProgress(
 export type DownloadPermission = 'allow' | 'preview_only' | 'hidden' | 'disabled';
 
 export async function updateMaterialPermission(id: string, permission: DownloadPermission) {
-  const { data, error } = await supabase
+  const { data, error } = await backendClient
     .from('lesson_materials')
     .update({ permission, updated_at: new Date().toISOString() })
     .eq('id', id)
@@ -3841,7 +3876,7 @@ export async function duplicateCourse(
   doctorId: string,
   newTitle?: string
 ): Promise<string> {
-  const { data, error } = await supabase.rpc('duplicate_course', {
+  const { data, error } = await backendClient.rpc('duplicate_course', {
     p_source_id:     courseId,
     p_target_doctor: doctorId,
     p_new_title:     newTitle ?? null,
@@ -3863,7 +3898,7 @@ export interface CourseTemplate {
 }
 
 export async function getCourseTemplates(doctorId: string): Promise<CourseTemplate[]> {
-  const { data, error } = await supabase
+  const { data, error } = await backendClient
     .from('course_templates')
     .select('*')
     .or(`doctor_id.eq.${doctorId},is_public.eq.true`)
@@ -3878,7 +3913,7 @@ export async function saveCourseAsTemplate(
   templateTitle: string
 ): Promise<CourseTemplate> {
   // Pull course + sections + lessons to embed in template_data
-  const { data: course, error: ce } = await supabase
+  const { data: course, error: ce } = await backendClient
     .from('courses')
     .select('*, sections(*, lessons(*))')
     .eq('id', courseId)
@@ -3898,7 +3933,7 @@ export async function saveCourseAsTemplate(
     })),
   };
 
-  const { data, error } = await supabase
+  const { data, error } = await backendClient
     .from('course_templates')
     .insert({
       doctor_id: doctorId,
@@ -3913,7 +3948,7 @@ export async function saveCourseAsTemplate(
 }
 
 export async function deleteCourseTemplate(templateId: string) {
-  const { error } = await supabase.from('course_templates').delete().eq('id', templateId);
+  const { error } = await backendClient.from('course_templates').delete().eq('id', templateId);
   if (error) throw error;
 }
 
@@ -3922,7 +3957,7 @@ export async function createCourseFromTemplate(
   doctorId: string
 ): Promise<string> {
   // Load template
-  const { data: tmpl, error: te } = await supabase
+  const { data: tmpl, error: te } = await backendClient
     .from('course_templates')
     .select('*')
     .eq('id', templateId)
@@ -3933,7 +3968,7 @@ export async function createCourseFromTemplate(
   const c = td?.course ?? {};
 
   // Create course
-  const { data: newCourse, error: nce } = await supabase
+  const { data: newCourse, error: nce } = await backendClient
     .from('courses')
     .insert({
       title: `${c.title ?? 'Untitled'} (from template)`,
@@ -3955,14 +3990,14 @@ export async function createCourseFromTemplate(
 
   // Create sections + lessons
   for (const sec of td?.sections ?? []) {
-    const { data: newSec, error: se } = await supabase
+    const { data: newSec, error: se } = await backendClient
       .from('sections')
       .insert({ course_id: courseId, title: sec.title, description: sec.description, order_index: sec.order_index })
       .select()
       .single();
     if (se) throw se;
     for (const les of sec.lessons ?? []) {
-      await supabase.from('lessons').insert({
+      await backendClient.from('lessons').insert({
         section_id: (newSec as any).id,
         course_id: courseId,
         title: les.title,
@@ -4001,7 +4036,7 @@ export async function bulkCreateLessonsFromFiles(
     video_type: 'vdocipher' as const,
     // external_url removed — only direct MedAcademy uploads are supported
   }));
-  const { data, error } = await supabase
+  const { data, error } = await backendClient
     .from('lessons')
     .insert(lessonPayloads)
     .select();
@@ -4027,7 +4062,7 @@ export async function bulkAttachMaterials(
     permission: 'allow' as DownloadPermission,
     order_index: startOrderIndex + i,
   }));
-  const { data, error } = await supabase.from('lesson_materials').insert(payloads).select();
+  const { data, error } = await backendClient.from('lesson_materials').insert(payloads).select();
   if (error) throw error;
   return data ?? [];
 }
@@ -4081,7 +4116,7 @@ export async function archiveCourse(
   actorRole: string,
   reason?: string
 ) {
-  const { error } = await supabase.rpc('archive_course', {
+  const { error } = await backendClient.rpc('archive_course', {
     p_course_id: courseId,
     p_actor_id: actorId,
     p_actor_role: actorRole,
@@ -4096,7 +4131,7 @@ export async function restoreCourse(
   actorId: string,
   actorRole: string
 ) {
-  const { error } = await supabase.rpc('restore_course', {
+  const { error } = await backendClient.rpc('restore_course', {
     p_course_id: courseId,
     p_actor_id: actorId,
     p_actor_role: actorRole,
@@ -4106,7 +4141,7 @@ export async function restoreCourse(
 
 // ── Permanently Delete Course (Super Admin only) ───────────────────────────────
 export async function permanentlyDeleteCourse(courseId: string, actorId: string) {
-  const { error } = await supabase.rpc('permanently_delete_course', {
+  const { error } = await backendClient.rpc('permanently_delete_course', {
     p_course_id: courseId,
     p_actor_id: actorId,
   });
@@ -4133,7 +4168,7 @@ export async function getArchivedCourses(
   actorRole: string,
   doctorId?: string
 ): Promise<ArchivedCourse[]> {
-  const { data, error } = await supabase.rpc('get_archived_courses', {
+  const { data, error } = await backendClient.rpc('get_archived_courses', {
     p_actor_id: actorId,
     p_actor_role: actorRole,
     p_doctor_id: doctorId ?? null,
@@ -4156,7 +4191,7 @@ export interface ArchiveAnalytics {
 }
 
 export async function getArchiveAnalytics(): Promise<ArchiveAnalytics> {
-  const { data, error } = await supabase.rpc('get_archive_analytics');
+  const { data, error } = await backendClient.rpc('get_archive_analytics');
   if (error) throw error;
   const row = data?.[0] ?? { total_archived: 0, total_restored: 0, total_deleted: 0, recent_archives: null };
   return row as ArchiveAnalytics;
@@ -4180,7 +4215,7 @@ export interface CourseLifecycleLog {
 }
 
 export async function getCourseLifecycleLogs(limit = 100): Promise<CourseLifecycleLog[]> {
-  const { data, error } = await supabase
+  const { data, error } = await backendClient
     .from('course_lifecycle_logs')
     .select('*')
     .order('created_at', { ascending: false })
@@ -4195,7 +4230,7 @@ export async function getCoursesWithArchived(options?: {
   status?: string;
   includeArchived?: boolean;
 }) {
-  let query = supabase
+  let query = backendClient
     .from('courses')
     .select('*, doctor:profiles!courses_doctor_id_fkey(id,full_name,avatar_url), category:categories(id,name)')
     .order('created_at', { ascending: false })
@@ -4298,23 +4333,81 @@ export async function bulkUserOps(
 }
 
 export async function getTrashList(opts?: { role?: string; limit?: number; offset?: number }): Promise<TrashListResult> {
-  const { data, error } = await supabase.rpc('get_trash_list', {
-    p_role:   opts?.role   ?? null,
-    p_limit:  opts?.limit  ?? 50,
-    p_offset: opts?.offset ?? 0,
-  });
+  const limit = opts?.limit ?? 50;
+  const offset = opts?.offset ?? 0;
+  const role = opts?.role;
+
+  // Use the generic /api/profiles endpoint which works reliably.
+  // The dedicated /analytics/trash-list endpoint has a MariaDB LIMIT/OFFSET
+  // type-binding bug that causes a500 until the backend is redeployed.
+  let query = backendClient
+    .from('profiles')
+    .select('id, full_name, email, phone_e164, role, status, trashed_at, trash_expires_at, trash_reason, pre_trash_status')
+    .eq('status', 'trashed')
+    .order('trashed_at', { ascending: false })
+    .limit(limit);
+
+  if (role) {
+    query = query.eq('role', role);
+  }
+
+  // Use range for offset pagination
+  query = query.range(offset, offset + limit - 1);
+
+  const { data, error } = await query;
   if (error) throw error;
-  return (data ?? { items: [], total: 0 }) as TrashListResult;
+
+  const now = Date.now();
+  const items: TrashItem[] = ((data as any[]) ?? []).map((row: any) => {
+    const expiresAt = row.trash_expires_at ? new Date(row.trash_expires_at).getTime() : now;
+    const daysRemaining = Math.max(0, Math.ceil((expiresAt - now) / (1000 * 60 * 60 * 24)));
+    return {
+      id: row.id,
+      full_name: row.full_name ?? '',
+      email: row.email ?? '',
+      phone_e164: row.phone_e164 ?? null,
+      role: row.role ?? 'student',
+      trashed_at: row.trashed_at ?? '',
+      trash_expires_at: row.trash_expires_at ?? '',
+      trash_reason: row.trash_reason ?? null,
+      pre_trash_status: row.pre_trash_status ?? 'active',
+      trashed_by_name: row.trashed_by_name ?? null,
+      days_remaining: daysRemaining,
+    };
+  });
+
+  // Get total count via a separate count query
+  const { count } = await backendClient
+    .from('profiles')
+    .select('id', { count: 'exact', head: true })
+    .eq('status', 'trashed')
+    .then((r: any) => r);
+
+  return { items, total: count ?? items.length };
 }
 
 export async function getTrashStats(): Promise<TrashStats> {
-  const { data, error } = await supabase.rpc('get_trash_stats');
-  if (error) throw error;
-  return data as TrashStats;
+  const now = new Date();
+  const nowISO = now.toISOString();
+  const threeDaysOut = new Date(now.getTime() + 3 * 86400000).toISOString();
+
+  const [totalRes, soonRes, expiredRes] = await Promise.all([
+    backendClient.from('profiles').select('id', { count: 'exact', head: true }).eq('status', 'trashed'),
+    backendClient.from('profiles').select('id', { count: 'exact', head: true }).eq('status', 'trashed').lte('trash_expires_at', threeDaysOut).gt('trash_expires_at', nowISO),
+    backendClient.from('profiles').select('id', { count: 'exact', head: true }).eq('status', 'trashed').lte('trash_expires_at', nowISO),
+  ]);
+
+  return {
+    total_trashed: totalRes.count ?? 0,
+    expiring_soon: soonRes.count ?? 0,
+    expired: expiredRes.count ?? 0,
+    by_role: { student: 0, doctor: 0, admin: 0, super_admin: 0 },
+    recently_restored: null,
+  };
 }
 
 export async function getTrashConfig(): Promise<TrashConfig> {
-  const { data, error } = await supabase
+  const { data, error } = await backendClient
     .from('trash_config').select('*')
     .order('updated_at', { ascending: false }).limit(1).single();
   if (error) throw error;
@@ -4322,13 +4415,13 @@ export async function getTrashConfig(): Promise<TrashConfig> {
 }
 
 export async function saveTrashConfig(retentionDays: number, customDays?: number): Promise<void> {
-  const { data: existing } = await supabase.from('trash_config').select('id').limit(1).single();
+  const { data: existing } = await backendClient.from('trash_config').select('id').limit(1).single();
   const payload = { retention_days: retentionDays, custom_days: customDays ?? null, updated_at: new Date().toISOString() };
   if (existing?.id) {
-    const { error } = await supabase.from('trash_config').update(payload).eq('id', existing.id);
+    const { error } = await backendClient.from('trash_config').update(payload).eq('id', existing.id);
     if (error) throw error;
   } else {
-    const { error } = await supabase.from('trash_config').insert(payload);
+    const { error } = await backendClient.from('trash_config').insert(payload);
     if (error) throw error;
   }
 }
@@ -4338,7 +4431,7 @@ export async function runTrashCleanup() {
 }
 
 export async function getDeletePermissions(adminId: string): Promise<DeletePermissions> {
-  const { data, error } = await supabase.from('profiles').select('delete_permissions').eq('id', adminId).single();
+  const { data, error } = await backendClient.from('profiles').select('delete_permissions').eq('id', adminId).single();
   if (error) throw error;
   const defaults: DeletePermissions = {
     can_delete_students: true, can_delete_doctors: false, can_delete_admins: false,
@@ -4348,7 +4441,7 @@ export async function getDeletePermissions(adminId: string): Promise<DeletePermi
 }
 
 export async function saveDeletePermissions(adminId: string, perms: DeletePermissions): Promise<void> {
-  const { error } = await supabase.from('profiles').update({ delete_permissions: perms }).eq('id', adminId);
+  const { error } = await backendClient.from('profiles').update({ delete_permissions: perms }).eq('id', adminId);
   if (error) throw error;
 }
 
@@ -4356,7 +4449,7 @@ export async function saveDeletePermissions(adminId: string, perms: DeletePermis
 // Called every 15 s while an upload is active. Orphan-cleanup skips sessions
 // whose last_heartbeat is within the last 60 s.
 export async function pingUploadSessionHeartbeat(uploadId: string): Promise<void> {
-  await supabase
+  await backendClient
     .from('upload_sessions')
     .update({ last_heartbeat: new Date().toISOString() })
     .eq('upload_id', uploadId);
@@ -4374,7 +4467,7 @@ export async function recoverStaleUploadSessions(staleThresholdSeconds = 60): Pr
   last_heartbeat: string | null;
   created_at: string;
 }>> {
-  const { data, error } = await supabase.rpc('recover_stale_upload_sessions', {
+  const { data, error } = await backendClient.rpc('recover_stale_upload_sessions', {
     p_stale_threshold_seconds: staleThresholdSeconds,
   });
   if (error) {
@@ -4396,7 +4489,7 @@ export async function getLessonVideoState(lessonId: string): Promise<{
   thumbnail_url: string | null;
   duration_seconds: number | null;
 } | null> {
-  const { data, error } = await supabase.rpc('get_lesson_video_state', { p_lesson_id: lessonId });
+  const { data, error } = await backendClient.rpc('get_lesson_video_state', { p_lesson_id: lessonId });
   if (error) {
     console.warn('[getLessonVideoState] RPC failed:', error.message);
     return null;
@@ -4407,7 +4500,7 @@ export async function getLessonVideoState(lessonId: string): Promise<{
 // ── Mark lesson video missing ─────────────────────────────────────────────────
 // Called by the consistency-audit when VdoCipher confirms the asset is gone.
 export async function markLessonVideoMissing(lessonId: string): Promise<void> {
-  await supabase.rpc('mark_lesson_video_missing', { p_lesson_id: lessonId });
+  await backendClient.rpc('mark_lesson_video_missing', { p_lesson_id: lessonId });
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -4482,7 +4575,7 @@ export async function adminEnrollUser(
   courseId: string,
   visibilityLevel: EnrollmentVisibility = 'all',
 ): Promise<AdminEnrollResult> {
-  const { data, error } = await supabase.functions.invoke('admin-enrollment', {
+  const { data, error } = await backendClient.functions.invoke('admin-enrollment', {
     body: {
       action: 'enroll',
       student_id: studentId,
@@ -4502,7 +4595,7 @@ export async function adminSetEnrollmentVisibility(
   enrollmentId: string,
   visibilityLevel: EnrollmentVisibility,
 ): Promise<void> {
-  const { data, error } = await supabase.functions.invoke('admin-enrollment', {
+  const { data, error } = await backendClient.functions.invoke('admin-enrollment', {
     body: { action: 'set_hidden', enrollment_id: enrollmentId, visibility_level: visibilityLevel },
   });
   if (error) {
@@ -4514,7 +4607,7 @@ export async function adminSetEnrollmentVisibility(
 
 /** Remove any enrollment (admin/super_admin only). */
 export async function adminRemoveEnrollment(enrollmentId: string): Promise<void> {
-  const { data, error } = await supabase.functions.invoke('admin-enrollment', {
+  const { data, error } = await backendClient.functions.invoke('admin-enrollment', {
     body: { action: 'remove', enrollment_id: enrollmentId },
   });
   if (error) {
@@ -4563,7 +4656,7 @@ export interface DoctorPricingHistoryRow {
 export async function getAdminDoctorEarningsDashboard(
   doctorId: string,
 ): Promise<AdminDoctorEarningsDashboard> {
-  const { data, error } = await supabase.rpc('get_doctor_earnings_dashboard', {
+  const { data, error } = await backendClient.rpc('get_doctor_earnings_dashboard', {
     p_doctor_id: doctorId,
   });
   if (error) throw error;
@@ -4576,7 +4669,7 @@ export async function setDoctorEarningsSettings(
   customPricingEnabled: boolean,
   earningsMode: 'credit' | 'course',
 ): Promise<void> {
-  const { error } = await supabase.functions.invoke('admin-doctor-earnings', {
+  const { error } = await backendClient.functions.invoke('admin-doctor-earnings', {
     body: { action: 'update_settings', doctor_id: doctorId, custom_pricing_enabled: customPricingEnabled, earnings_mode: earningsMode },
   });
   if (error) throw error;
@@ -4587,7 +4680,7 @@ export async function getDoctorPricingHistory(
   doctorId: string,
   limit = 50,
 ): Promise<DoctorPricingHistoryRow[]> {
-  const { data, error } = await supabase
+  const { data, error } = await backendClient
     .from('doctor_pricing_history')
     .select('id, field_name, old_value, new_value, changed_by, changer:profiles!doctor_pricing_history_changed_by_fkey(full_name), created_at')
     .eq('doctor_id', doctorId)
@@ -4611,7 +4704,7 @@ export async function getDoctorPricingHistory(
 export async function searchUsersForEnrollment(
   query: string,
 ): Promise<AdminUserSearchResult[]> {
-  const { data, error } = await supabase.functions.invoke('admin-enrollment', {
+  const { data, error } = await backendClient.functions.invoke('admin-enrollment', {
     body: { action: 'search', query },
   });
   if (error) {
@@ -4623,7 +4716,7 @@ export async function searchUsersForEnrollment(
 
 /** Get all courses for the admin enrollment picker. */
 export async function getAdminAllCourses(): Promise<AdminCourse[]> {
-  const { data, error } = await supabase.functions.invoke('admin-enrollment', {
+  const { data, error } = await backendClient.functions.invoke('admin-enrollment', {
     body: { action: 'courses' },
   });
   if (error) {
@@ -4637,7 +4730,7 @@ export async function getAdminAllCourses(): Promise<AdminCourse[]> {
 export async function getAdminCourseEnrollments(
   courseId: string,
 ): Promise<AdminEnrollmentRow[]> {
-  const { data, error } = await supabase.functions.invoke('admin-enrollment', {
+  const { data, error } = await backendClient.functions.invoke('admin-enrollment', {
     body: { action: 'enrollments', course_id: courseId },
   });
   if (error) {
@@ -4648,11 +4741,11 @@ export async function getAdminCourseEnrollments(
 }
 
 /**
- * Super-admin-only: update a user's email in both Supabase Auth and the profiles table.
+ * Super-admin-only: update a user's email in the PHP auth store and profiles table.
  * Routed through the admin-update-email Edge Function — never uses the service role on the client.
  */
 export async function updateUserEmail(targetUserId: string, newEmail: string): Promise<void> {
-  const { data, error } = await supabase.functions.invoke('admin-update-email', {
+  const { data, error } = await backendClient.functions.invoke('admin-update-email', {
     body: { target_user_id: targetUserId, new_email: newEmail },
   });
   if (error) {

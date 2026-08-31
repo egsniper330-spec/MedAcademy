@@ -3,7 +3,7 @@
  * ─────────────────────────────────────────────────────────────────────────────
  * All five values are derived at runtime from app.json (injected by Expo's
  * Constants module) so they always reflect the current build — even when the
- * MEDO platform sync-writes a new version string into app.json before packaging.
+ * The CI platform sync-writes a new version string into app.json before packaging.
  *
  * DO NOT hardcode version strings here — the platform updates app.json
  * version automatically on every sync (1.0.714, 1.0.715, …) and a hardcoded

@@ -19,22 +19,31 @@ final class Response
         exit;
     }
 
-    public static function raw(string $body, int $status = 200, string $contentType = 'application/octet-stream'): never
+    public static function raw(string $body, int $status = 200, string $contentType = 'application/octet-stream', array $headers = []): never
     {
         http_response_code($status);
         header('Content-Type: ' . $contentType);
+        foreach ($headers as $k => $v) {
+            header($k . ': ' . $v);
+        }
         echo $body;
         exit;
     }
 
     /**
      * Consistent error envelope: {"error": {"message": ..., "code": ..., "errors": [...]}}
+     *
+     * $meta merges extra key/value pairs into the error object (used in debug
+     * mode to surface exception class/file/line without changing the envelope).
      */
-    public static function error(string $message, int $status = 400, string $code = 'error', array $errors = []): never
+    public static function error(string $message, int $status = 400, string $code = 'error', array $errors = [], array $meta = []): never
     {
         $payload = ['error' => ['message' => $message, 'code' => $code]];
         if ($errors !== []) {
             $payload['error']['errors'] = $errors;
+        }
+        foreach ($meta as $k => $v) {
+            $payload['error'][$k] = $v;
         }
         self::json($payload, $status);
     }

@@ -148,7 +148,8 @@
       "./plugins/withSecurityModule",
       "./plugins/withProguardRules",
       "./plugins/withDynamicVersions",
-      "./plugins/withGradleWrapper"
+      "./plugins/withGradleWrapper",
+      "./plugins/withNativeUpload"
     ],
     "extra": {
       "eas": {}

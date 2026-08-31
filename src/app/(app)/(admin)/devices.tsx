@@ -2,7 +2,7 @@
  * Admin Device Management — full enterprise device control panel.
  * Per-account device listing, block/unblock, logout, delete, limit config, reset, history.
  *
- * REALTIME: subscribes to `devices` table INSERT+UPDATE events so newly
+ * PHP polling: checks the devices table every five seconds so newly
  * registered devices appear instantly without any manual refresh.
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -28,7 +28,7 @@ import { ResponsiveModal } from '@/components/ResponsiveModal';
 import { neuColors, neuFlatStyle, useLayout } from '@/lib/neu'
 import { PageHeader } from '@/components/PageHeader';
 import { getPublicEmail } from '@/lib/api';
-import { supabase } from '@/client/supabase';
+import { backendClient } from '@/client/backendClient';
 
 const LIMIT_OPTIONS: Array<{ label: string; value: number | null }> = [
   { label: '1 Device', value: 1 },
@@ -46,7 +46,7 @@ type UserRow = {
   role: string;
   max_devices?: number | null;
   // Pre-loaded from DB so the header shows correct count before the row is expanded.
-  // Updated optimistically by the Realtime INSERT handler.
+  // Updated optimistically by the Polling INSERT handler.
   device_count?: number;
 };
 
@@ -107,7 +107,7 @@ export default function AdminDevices() {
   const [errorMsg, setErrorMsg] = useState('');
   const [selectedLimit, setSelectedLimit] = useState<number | null>(1);
 
-  // Keep a ref to the current map so Realtime callbacks can read it without
+  // Keep a ref to the current map so Polling callbacks can read it without
   // going stale inside the subscription closure.
   const deviceMapRef = useRef(userDeviceMap);
   useEffect(() => { deviceMapRef.current = userDeviceMap; }, [userDeviceMap]);
@@ -120,10 +120,10 @@ export default function AdminDevices() {
       // correct number even before the user row is expanded — previously it
       // always showed 0 because activeCount was derived from the lazy-loaded
       // deviceData which isn't fetched until expand.
-      const { data: profileLimits } = await supabase
+      const { data: profileLimits } = await backendClient
         .from('profiles')
         .select('id,max_devices');
-      const { data: deviceCounts } = await supabase
+      const { data: deviceCounts } = await backendClient
         .from('devices')
         .select('user_id')
         .neq('status', 'logged_out'); // count active+blocked (not logged-out)
@@ -153,7 +153,7 @@ export default function AdminDevices() {
     loadUsers();
   }, [loadUsers]));
 
-  // ── Realtime subscription ────────────────────────────────────────────────────
+  // ── Polling subscription ────────────────────────────────────────────────────
   // Listens for INSERT and UPDATE events on the `devices` table.
   // INSERT → new device just registered (e.g. fresh login):
   //   1. Bump device_count on the user row so the header badge updates immediately.
@@ -161,10 +161,10 @@ export default function AdminDevices() {
   // UPDATE → existing device changed (status, trust_level, last_active_at, etc.):
   //   patch the matching record in-place so block/logout changes are live.
   useEffect(() => {
-    const channel = supabase
-      .channel('admin_devices_realtime')
+    const channel = backendClient
+      .poll('admin_devices_polling')
       .on(
-        'postgres_changes',
+        'php_polling',
         { event: 'INSERT', schema: 'public', table: 'devices' },
         (payload) => {
           const newDevice = payload.new as DeviceRecord & { user_id: string };
@@ -190,7 +190,7 @@ export default function AdminDevices() {
         }
       )
       .on(
-        'postgres_changes',
+        'php_polling',
         { event: 'UPDATE', schema: 'public', table: 'devices' },
         (payload) => {
           const updated = payload.new as DeviceRecord & { user_id: string };
@@ -210,7 +210,7 @@ export default function AdminDevices() {
       )
       .subscribe();
 
-    return () => { supabase.removeChannel(channel); };
+    return () => { backendClient.removePoller(channel); };
   }, []);
 
   // Full refresh: reload user list + clear all cached device maps so they
@@ -507,8 +507,7 @@ export default function AdminDevices() {
         contentContainerStyle={{ paddingBottom: layout.scrollBottom() }}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />}
       >
-        <View style={{ padding: layout.screenPx, paddingTop: 0 }}>
-          {/* Header */}
+          {/* PageHeader sits OUTSIDE the inner padding view so it can own its own horizontal padding */}
           <PageHeader
             title="Device Management"
             subtitle={`${users.length} accounts`}
@@ -533,6 +532,8 @@ export default function AdminDevices() {
               </Pressable>
             }
           />
+
+        <View style={{ paddingHorizontal: layout.screenPx }}>
 
           {/* Search */}
           <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: c.base, borderRadius: 14, paddingHorizontal: 14, paddingVertical: 12, marginBottom: 16, minWidth: 0, ...Platform.select({ ios: { shadowColor: c.shadowDark, shadowOffset: { width: 2, height: 2 }, shadowOpacity: 0.5, shadowRadius: 6 }, android: { elevation: 3 } }) }}>

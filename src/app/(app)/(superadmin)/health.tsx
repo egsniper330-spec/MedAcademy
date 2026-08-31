@@ -11,7 +11,7 @@ import {
   Smartphone, AlertTriangle, Wrench, ChevronDown, ChevronUp,
 } from 'lucide-react-native';
 import { getAdminStats } from '@/lib/api';
-import { supabase } from '@/client/supabase';
+import { backendClient } from '@/client/backendClient';
 import { NeuCard } from '@/components/NeuCard';
 import { NeuButton } from '@/components/NeuButton';
 import { neuColors, neuFlatStyle, useLayout } from '@/lib/neu'
@@ -68,7 +68,7 @@ export default function SuperAdminHealth() {
 
     const dbStart = Date.now();
     try {
-      await supabase.from('profiles').select('id', { count: 'exact', head: true });
+      await backendClient.from('profiles').select('id', { count: 'exact', head: true });
       results.push({ name: 'Database', status: 'healthy', latency: Date.now() - dbStart, icon: Database, color: '#16A34A' });
     } catch {
       results.push({ name: 'Database', status: 'down', icon: Database, color: '#DC2626' });
@@ -76,7 +76,7 @@ export default function SuperAdminHealth() {
 
     const authStart = Date.now();
     try {
-      await supabase.auth.getSession();
+      await backendClient.auth.getSession();
       results.push({ name: 'Authentication', status: 'healthy', latency: Date.now() - authStart, icon: Users, color: '#16A34A' });
     } catch {
       results.push({ name: 'Authentication', status: 'down', icon: Users, color: '#DC2626' });
@@ -84,19 +84,19 @@ export default function SuperAdminHealth() {
 
     const storStart = Date.now();
     try {
-      await supabase.storage.listBuckets();
+      await backendClient.storage.listBuckets();
       results.push({ name: 'Storage', status: 'healthy', latency: Date.now() - storStart, icon: Server, color: '#16A34A' });
     } catch {
       results.push({ name: 'Storage', status: 'degraded', icon: Server, color: '#D97706' });
     }
 
     results.push({ name: 'Edge Functions', status: 'healthy', latency: 0, icon: Activity, color: '#16A34A' });
-    results.push({ name: 'Realtime',       status: 'healthy', latency: 0, icon: RefreshCw, color: '#16A34A' });
+    results.push({ name: 'Security polling', status: 'healthy', latency: 5000, icon: RefreshCw, color: '#16A34A' });
     setServices(results);
   }, []);
 
   const loadDeletionStats = useCallback(async () => {
-    const { data, error } = await supabase.rpc('get_deletion_stats');
+    const { data, error } = await backendClient.rpc('get_deletion_stats');
     if (!error && data) setDeletionStats(data as DeletionStats);
   }, []);
 
@@ -117,13 +117,13 @@ export default function SuperAdminHealth() {
     setRepairing(true);
     try {
       // Fetch orphaned records and mark them repaired
-      const { data: orphans } = await supabase.rpc('get_orphan_deletion_records');
+      const { data: orphans } = await backendClient.rpc('get_orphan_deletion_records');
       if (!orphans || orphans.length === 0) {
         showToast({ type: 'success', message: 'No orphans found — everything is clean.' });
         return;
       }
       await Promise.all(
-        orphans.map((r: any) => supabase.rpc('mark_deletion_repaired', { p_record_id: r.id }))
+        orphans.map((r: any) => backendClient.rpc('mark_deletion_repaired', { p_record_id: r.id }))
       );
       await loadDeletionStats();
       showToast({ type: 'success', message: `Repaired ${orphans.length} orphan record(s).` });

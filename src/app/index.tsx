@@ -19,8 +19,9 @@ export default function LandingScreen() {
   useEffect(() => {
     if (isLoading) return;
     if (session) {
-      // Session exists — navigate into protected area (AppLayout handles role redirect)
-      router.replace('/(app)/(student)/dashboard' as any);
+      // Enter the authenticated shell without assuming a student route.
+      // AppLayout resolves the backend-verified role and redirects once the profile loads.
+      router.replace('/sa-overview' as any);
     }
     // No session → remain on this screen (Sign In / Create Account buttons shown below)
     // eslint-disable-next-line react-hooks/exhaustive-deps

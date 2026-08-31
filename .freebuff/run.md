@@ -4,12 +4,11 @@ Expo SDK 55 / React Native 0.83 app. Web preview is served by Metro via `expo st
 
 ## 1. Reproduce the uncommitted artifacts
 
-- `.env.local` — copy from the main checkout (or from `.env.local.template` and fill in
-  `EXPO_PUBLIC_SUPABASE_URL` / `EXPO_PUBLIC_SUPABASE_ANON_KEY`). Never commit; gitignored.
+- `.env.local` — copy from the main checkout (or from `.env.example` and set
+  `EXPO_PUBLIC_PHP_API_URL`). Never commit; gitignored.
 - **`EXPO_PUBLIC_PHP_API_URL` is required.** The app has been migrated off Supabase:
-  `src/client/php.ts` resolves the API base from `EXPO_PUBLIC_PHP_API_URL` first and falls
-  back to `EXPO_PUBLIC_SUPABASE_URL + '/backend/public/index.php'` (wrong — points at
-  supabase.co) if it's unset. Add it to `.env.local`, e.g.
+  `src/client/php.ts` resolves the API base only from `EXPO_PUBLIC_PHP_API_URL` and fails
+  clearly if it's unset. Add it to `.env.local`, e.g.
   `EXPO_PUBLIC_PHP_API_URL=https://api.medacademy.eu.cc/backend/public/index.php`, or set
   it in the environment when launching the server (see below).
 - `node_modules/` — install with the project's package manager (`npm install`, or `pnpm install`;
@@ -41,7 +40,7 @@ Notes:
 - On Windows, start it detached so it outlives the shell, e.g.:
 
   ```powershell
-  powershell -NoProfile -Command "(Start-Process -FilePath 'npm.cmd' -ArgumentList 'run','start','--','--localhost' -WorkingDirectory 'D:\v3' -RedirectStandardOutput '<log>' -RedirectStandardError '<log>.err' -WindowStyle Hidden -PassThru).Id"
+  powershell -NoProfile -Command "$env:EXPO_NO_TYPED_ROUTES='1'; $env:EXPO_PUBLIC_PHP_API_URL='https://api.medacademy.eu.cc/backend/public/index.php'; (Start-Process -FilePath 'npm.cmd' -ArgumentList 'run','start','--','--localhost' -WorkingDirectory 'D:\v3' -RedirectStandardOutput 'D:\v3\.freebuff\preview-35719fe8-7f74-435d-a697-1dac1d2db059.log' -RedirectStandardError 'D:\v3\.freebuff\preview-35719fe8-7f74-435d-a697-1dac1d2db059.log.err' -WindowStyle Hidden -PassThru).Id"
   ```
 
   stdout and stderr must go to DIFFERENT files.
@@ -56,5 +55,13 @@ Notes:
   powershell -NoProfile -Command "Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = 'cmd /c D:\v3\.freebuff\start-preview.cmd' }"
   ```
 
-  Then poll `http://localhost:8081/` until it returns `200` (Metro takes ~15–30s to boot).
+  Then poll the port until it returns `200` (Metro takes ~15–30s to boot).
 - Confirm it is healthy: `curl -s -o /dev/null -w "%{http_code}" http://localhost:8081/` → `200`.
+
+**Port alternatives:** If port 8081 is already held by another thread's preview, pick a
+free port (e.g. 8082) and pass `--port 8082` to the start command. The web app will be
+served at `http://localhost:8082/` instead.
+
+**Setting env vars via WMI:** The `Start-Process` approach above expands PowerShell
+variables inline. When launching via `cmd /c` (WMI / launcher script), use `set` syntax:
+`cmd /c set EXPO_NO_TYPED_ROUTES=1 && set EXPO_PUBLIC_PHP_API_URL=... && cd /d D:\v3 && npm.cmd run start -- --localhost --port 8082 > log 2> log.err`

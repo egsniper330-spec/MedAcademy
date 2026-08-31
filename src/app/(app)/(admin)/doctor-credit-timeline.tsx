@@ -64,7 +64,7 @@ export default function DoctorCreditTimelineScreen() {
   // Super Admins get routed to the dedicated SA earnings page (identical data, read-only UI).
   // Admins continue to the admin earnings page (which also has settings editing).
   const earningsPath = currentUser?.role === 'super_admin'
-    ? `/(app)/(superadmin)/sa-doctor-earnings?doctor_id=${doctor_id}&doctor_name=${encodeURIComponent(doctor_name ?? '')}`
+    ? `/sa-doctor-earnings?doctor_id=${doctor_id}&doctor_name=${encodeURIComponent(doctor_name ?? '')}`
     : `/(app)/(admin)/doctor-earnings?doctor_id=${doctor_id}&doctor_name=${encodeURIComponent(doctor_name ?? '')}`;
 
   const [loading, setLoading]           = useState(true);
@@ -179,8 +179,9 @@ export default function DoctorCreditTimelineScreen() {
       contentContainerStyle={{ paddingBottom: layout.scrollBottom() }}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />}
     >
-      <View style={{ padding: layout.screenPx }}>
-        <PageHeader title={doctor_name ?? 'Doctor Timeline'} subtitle={`Credit history · ${txRows.length} transactions`} accentColor={c.primary} />
+      <PageHeader title={doctor_name ?? 'Doctor Timeline'} subtitle={`Credit history · ${txRows.length} transactions`} accentColor={c.primary} />
+
+      <View style={{ paddingHorizontal: layout.screenPx }}>
 
         {loading && <ActivityIndicator size="large" color={c.primary} style={{ marginVertical: 40 }} />}
 

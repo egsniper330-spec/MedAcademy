@@ -115,13 +115,11 @@ export default function ArchivedCoursesScreen() {
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}>
 
         {/* Header */}
-        <View style={{ paddingTop: 0, paddingHorizontal: 20, paddingBottom: 8 }}>
           <PageHeader
             title="Archived Courses"
             subtitle={`${courses.length} archived · visible only to staff`}
             showBack
           />
-        </View>
 
         {/* Info banner */}
         <View style={{ marginHorizontal: 20, marginBottom: 12, flexDirection: 'row', alignItems: 'flex-start', gap: 10,

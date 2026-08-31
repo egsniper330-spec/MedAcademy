@@ -81,8 +81,9 @@ export default function NotificationsCenterScreen() {
     <ScrollView style={{ flex: 1, backgroundColor: c.base }}
           contentContainerStyle={{ paddingBottom: layout.scrollBottom() }}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />}>
-      <View style={{ padding: layout.screenPx }}>
-        <PageHeader title="Notification Center" subtitle="Send messages to users" accentColor="#D97706" />
+      <PageHeader title="Notification Center" subtitle="Send messages to users" accentColor="#D97706" />
+
+      <View style={{ paddingHorizontal: layout.screenPx }}>
 
         {/* Compose */}
         <NeuCard style={{ padding: 18, marginBottom: 20 }}>

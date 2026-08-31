@@ -2,7 +2,7 @@ import { useCallback, useState } from 'react';
 import { View, Text, ScrollView, useColorScheme, Pressable, RefreshControl, TextInput, ActivityIndicator, Modal } from 'react-native';
 import { Image } from 'expo-image';
 import { useFocusEffect, useRouter } from 'expo-router';
-import { Plus, BookOpen, Search, Archive, Clock, Users, ChevronRight, GraduationCap, MoreVertical, Trash2, Pencil, AlertTriangle } from 'lucide-react-native';
+import { Plus, BookOpen, Search, Archive, Clock, Users, ChevronRight, GraduationCap, MoreVertical, Trash2, Pencil, AlertTriangle, FileText, Globe } from 'lucide-react-native';
 import { DashboardHeader } from '@/components/DashboardHeader';
 import { useProfileStore } from '@/lib/store';
 import { getCoursesWithArchived, createCourse, deleteCourseWithCleanup, getCourseDeleteStats } from '@/lib/api';
@@ -35,7 +35,7 @@ export default function DoctorCourses() {
   const [refreshing, setRefreshing] = useState(false);
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
-  const [includeArchived, setIncludeArchived] = useState(false);
+  const [statusFilter, setStatusFilter] = useState<'draft' | 'published'>('draft');
   const { showToast } = useToast();
 
   // ── Options menu ─────────────────────────────────────────────────────────────
@@ -51,11 +51,12 @@ export default function DoctorCourses() {
   const loadData = useCallback(async () => {
     if (!profile) return;
     try {
-      const data = await getCoursesWithArchived({ doctorId: profile.id, includeArchived });
+      // Server-side status filter (draft / published) + archived excluded by default.
+      const data = await getCoursesWithArchived({ doctorId: profile.id, status: statusFilter });
       setCourses(data);
     } catch {}
     setLoading(false);
-  }, [profile, includeArchived]);
+  }, [profile, statusFilter]);
 
   useFocusEffect(useCallback(() => { setLoading(true); loadData(); }, [loadData]));
   const onRefresh = async () => { setRefreshing(true); await loadData(); setRefreshing(false); };
@@ -152,7 +153,7 @@ export default function DoctorCourses() {
           }
         />
 
-        {/* Search + Archive toggle */}
+        {/* Search + status filter tabs */}
         <View style={{ paddingHorizontal: layout.screenPx, marginBottom: 16, gap: 10 }}>
           <View style={[{ borderRadius: 14, flexDirection: 'row', alignItems: 'center', paddingHorizontal: 14, gap: 10, minWidth: 0 },
             { backgroundColor: c.base, shadowColor: c.shadowDark, shadowOffset: { width: 3, height: 3 }, shadowOpacity: 0.6, shadowRadius: 8, elevation: 3 }]}>
@@ -161,15 +162,26 @@ export default function DoctorCourses() {
               placeholderTextColor={`${c.text}55`}
               style={{ flex: 1, minWidth: 0, fontSize: 14, color: c.text, paddingVertical: 12 }} />
           </View>
-          <Pressable onPress={() => setIncludeArchived(v => !v)}
-            style={{ flexDirection: 'row', alignItems: 'center', gap: 8, alignSelf: 'flex-start',
-              paddingHorizontal: 12, paddingVertical: 7, borderRadius: 10,
-              backgroundColor: includeArchived ? '#D9770618' : `${c.text}08` }}>
-            <Archive size={13} color={includeArchived ? '#D97706' : c.text} opacity={includeArchived ? 1 : 0.4} />
-            <Text style={{ fontSize: 12, fontWeight: '700', color: includeArchived ? '#D97706' : c.text, opacity: includeArchived ? 1 : 0.45 }}>
-              Include Archived
-            </Text>
-          </Pressable>
+
+          {/* Segmented status filter — Drafts / Published */}
+          <View style={{ flexDirection: 'row', backgroundColor: `${c.text}08`, borderRadius: 12, padding: 3, gap: 3 }}>
+            {(['draft', 'published'] as const).map(status => {
+              const active = statusFilter === status;
+              const activeColor = status === 'draft' ? '#D97706' : '#16A34A';
+              const Icon = status === 'draft' ? FileText : Globe;
+              return (
+                <Pressable key={status} onPress={() => setStatusFilter(status)}
+                  style={{ flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6,
+                    paddingVertical: 9, borderRadius: 9,
+                    backgroundColor: active ? activeColor : 'transparent' }}>
+                  <Icon size={13} color={active ? '#fff' : c.text} opacity={active ? 1 : 0.45} />
+                  <Text style={{ fontSize: 13, fontWeight: '700', color: active ? '#fff' : c.text, opacity: active ? 1 : 0.55 }}>
+                    {status === 'draft' ? 'Drafts' : 'Published'}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
         </View>
 
         {/* Course list */}
@@ -182,9 +194,11 @@ export default function DoctorCourses() {
             <View style={{ paddingVertical: 60, alignItems: 'center', gap: 12 }}>
               <BookOpen size={48} color={c.primary} opacity={0.2} />
               <Text style={{ fontSize: 16, color: c.text, opacity: 0.4 }}>
-                {query ? 'No matching courses' : 'No courses yet'}
+                {query
+                  ? 'No matching courses'
+                  : statusFilter === 'draft' ? 'No draft courses yet' : 'No published courses yet'}
               </Text>
-              {!query && (
+              {!query && statusFilter === 'draft' && (
                 <NeuButton label="Create First Course" onPress={handleNewCourse} loading={creating} />
               )}
             </View>

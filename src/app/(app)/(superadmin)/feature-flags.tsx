@@ -56,9 +56,9 @@ export default function FeatureFlagsScreen() {
     <ScrollView style={{ flex: 1, backgroundColor: c.base }}
           contentContainerStyle={{ paddingBottom: layout.scrollBottom() }}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />}>
-      <View style={{ padding: layout.screenPx }}>
-        <PageHeader title="Feature Flags" subtitle="Toggle platform capabilities" />
+      <PageHeader title="Feature Flags" subtitle="Toggle platform capabilities" />
 
+      <View style={{ paddingHorizontal: layout.screenPx }}>
 
         <NeuCard style={{ marginBottom: 20, padding: 14, flexDirection: 'row', alignItems: 'center', gap: 10 }}>
           <RefreshCw size={16} color={c.primary} />

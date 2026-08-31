@@ -131,13 +131,26 @@ final class AnalyticsController
     {
         $limit = min((int) $request->query('limit', 50), 200);
         $offset = max((int) $request->query('offset', 0), 0);
+        $role = $request->query('role');
 
-        $users = Database::instance()->select(
-            "SELECT id, full_name, email, phone, role, status, pre_trash_status,
+        $db = Database::instance();
+
+        // Build query — only select columns guaranteed to exist on all environments
+        $where = "status = 'trashed'";
+        $params = [];
+        if ($role && in_array($role, ['student', 'doctor', 'admin', 'super_admin'], true)) {
+            $where .= ' AND role = ?';
+            $params[] = $role;
+        }
+
+        // LIMIT/OFFSET are cast to int above, so inline them to avoid
+        // PDO quoting them as strings (MariaDB requires numeric LIMIT/OFFSET).
+        $users = $db->select(
+            "SELECT id, full_name, email, phone, role, status,
                     trashed_at, trash_expires_at, trash_reason
-             FROM profiles WHERE status = 'trashed'
-             ORDER BY trashed_at DESC LIMIT ? OFFSET ?",
-            [$limit, $offset]
+             FROM profiles WHERE {$where}
+             ORDER BY trashed_at DESC LIMIT {$limit} OFFSET {$offset}",
+            $params
         );
 
         $total = (int) Database::instance()->value(
@@ -174,7 +187,7 @@ final class AnalyticsController
             'trashed_users' => (int) $db->value("SELECT COUNT(*) FROM profiles WHERE status = 'trashed'", [], 0),
             'deleted_users' => (int) $db->value("SELECT COUNT(*) FROM profiles WHERE status = 'deleted'", [], 0),
             'blocked_users' => (int) $db->value("SELECT COUNT(*) FROM profiles WHERE status = 'blocked'", [], 0),
-            'total_courses' => (int) $db->value("SELECT COUNT(*) FROM courses WHERE is_deleted = 1", [], 0),
+            'total_courses' => (int) $db->value("SELECT COUNT(*) FROM courses WHERE permanently_deleted = 1", [], 0),
             'total_devices' => (int) $db->value("SELECT COUNT(*) FROM devices", [], 0),
         ];
     }
@@ -212,26 +225,70 @@ final class AnalyticsController
 
     /**
      * GET /analytics/course-delete-stats/{id} — deletion dependency stats.
+     * Mirrors the original PG function get_course_delete_stats so the Doctor
+     * delete-confirmation dialog receives the same contract.
+     *
+     * Authorization: admins/super_admins may view any course; a doctor may
+     * only view their own course's stats (the course is still a draft here,
+     * so only the owner can reach the delete flow).
      */
     public function courseDeleteStats(Request $request): array
     {
         $courseId = \MedAcademy\Utils\Uuid::normalize((string) $request->params['id']);
         $db = Database::instance();
+        $role = $request->user['role'] ?? '';
 
-        $lessons = (int) $db->value('SELECT COUNT(*) FROM lessons WHERE course_id = ?', [$courseId], 0);
-        $enrollments = (int) $db->value('SELECT COUNT(*) FROM enrollments WHERE course_id = ?', [$courseId], 0);
-        $videos = (int) $db->value('SELECT COUNT(*) FROM video_uploads WHERE course_id = ?', [$courseId], 0);
-        $materials = (int) $db->value(
-            "SELECT COUNT(*) FROM lesson_materials WHERE lesson_id IN (SELECT id FROM lessons WHERE course_id = ?)",
-            [$courseId], 0
+        if (!in_array($role, ['admin', 'super_admin'], true)) {
+            $owner = $db->value('SELECT doctor_id FROM courses WHERE id = ?', [$courseId]);
+            if ($owner !== ($request->user['id'] ?? null)) {
+                throw new ApiException(403, 'Not authorized for this course');
+            }
+        }
+
+        $course = $db->row(
+            'SELECT id, title, doctor_id, created_at, updated_at FROM courses WHERE id = ?',
+            [$courseId]
         );
+        if ($course === null) {
+            throw new ApiException(404, 'Course not found');
+        }
+
+        $lessonIds = array_column($db->select('SELECT id FROM lessons WHERE course_id = ?', [$courseId]), 'id');
+
+        $doctorName = $db->value('SELECT full_name FROM profiles WHERE id = ?', [$course['doctor_id']], '');
+
+        $sectionCount = (int) $db->value('SELECT COUNT(*) FROM sections WHERE course_id = ?', [$courseId], 0);
+        $lessonCount  = (int) $db->value('SELECT COUNT(*) FROM lessons WHERE course_id = ?', [$courseId], 0);
+        $enrollCount  = (int) $db->value('SELECT COUNT(*) FROM enrollments WHERE course_id = ?', [$courseId], 0);
+        $codeCount    = (int) $db->value('SELECT COUNT(*) FROM activation_codes WHERE course_id = ?', [$courseId], 0);
+        $videoCount   = (int) $db->value('SELECT COUNT(*) FROM video_uploads WHERE course_id = ?', [$courseId], 0);
+
+        $pdfCount = 0;
+        $materialCount = 0;
+        if ($lessonIds !== []) {
+            $placeholders = implode(',', array_fill(0, count($lessonIds), '?'));
+            $pdfCount = (int) $db->value(
+                "SELECT COUNT(*) FROM lesson_pdfs WHERE lesson_id IN ({$placeholders})",
+                $lessonIds, 0
+            );
+            $materialCount = (int) $db->value(
+                "SELECT COUNT(*) FROM lesson_materials WHERE lesson_id IN ({$placeholders})",
+                $lessonIds, 0
+            );
+        }
 
         return [
-            'course_id' => $courseId,
-            'lessons' => $lessons,
-            'enrollments' => $enrollments,
-            'videos' => $videos,
-            'materials' => $materials,
+            'title'            => $course['title'],
+            'doctor_name'      => (string) $doctorName,
+            'created_at'       => $course['created_at'],
+            'updated_at'       => $course['updated_at'] ?? $course['created_at'],
+            'enrolled_count'   => $enrollCount,
+            'section_count'    => $sectionCount,
+            'lesson_count'     => $lessonCount,
+            'video_count'      => $videoCount,
+            'pdf_count'        => $pdfCount,
+            'attachment_count' => $materialCount,
+            'code_count'       => $codeCount,
         ];
     }
 
@@ -258,18 +315,55 @@ final class AnalyticsController
     /**
      * GET /analytics/video-asset-usage — VdoCipher storage usage summary.
      */
+    /**
+     * GET /analytics/video-asset-usage — usage of a library video.
+     *
+     * Frontend contract (get_video_asset_usage RPC):
+     *   ?asset_id=<video_assets.id> → [{ lesson_id, lesson_title, course_id, course_title }]
+     *
+     * Ownership is enforced server-side: a doctor may only query usage of their
+     * OWN library videos; admins may query any. When no asset_id is supplied the
+     * legacy admin totals contract is preserved (admins only).
+     */
     public function videoAssetUsage(Request $request): array
     {
         $db = Database::instance();
-        $totalAssets = (int) $db->value('SELECT COUNT(*) FROM video_assets', [], 0);
-        $totalSize = (int) $db->value('SELECT COALESCE(SUM(file_size_bytes), 0) FROM video_assets', [], 0);
-        $totalDuration = (int) $db->value('SELECT COALESCE(SUM(duration_seconds), 0) FROM video_assets', [], 0);
+        $assetId = Uuid::normalize((string) ($request->query('asset_id', $request->query('p_asset_id', ''))));
+        $role = $request->user['role'] ?? '';
+        $isAdmin = in_array($role, ['admin', 'super_admin'], true);
 
-        return [
-            'total_assets' => $totalAssets,
-            'total_size_bytes' => $totalSize,
-            'total_duration_seconds' => $totalDuration,
-        ];
+        if ($assetId === '') {
+            // Legacy admin totals (no per-asset filter).
+            if (!$isAdmin) {
+                throw new ApiException(403, 'Not authorized');
+            }
+            $totalAssets = (int) $db->value('SELECT COUNT(*) FROM video_assets', [], 0);
+            $totalSize = (int) $db->value('SELECT COALESCE(SUM(file_size_bytes), 0) FROM video_assets', [], 0);
+            $totalDuration = (int) $db->value('SELECT COALESCE(SUM(duration_seconds), 0) FROM video_assets', [], 0);
+
+            return [
+                'total_assets' => $totalAssets,
+                'total_size_bytes' => $totalSize,
+                'total_duration_seconds' => $totalDuration,
+            ];
+        }
+
+        $asset = $db->row('SELECT id, doctor_id FROM video_assets WHERE id = ?', [$assetId]);
+        if ($asset === null) {
+            throw new ApiException(404, 'Video asset not found');
+        }
+        if (!$isAdmin && $asset['doctor_id'] !== $request->user['id']) {
+            throw new ApiException(403, 'Not authorized');
+        }
+
+        return $db->select(
+            'SELECT l.id AS lesson_id, l.title AS lesson_title, c.id AS course_id, c.title AS course_title
+               FROM lessons l
+               JOIN courses c ON c.id = l.course_id
+              WHERE l.video_asset_id = ?
+              ORDER BY l.created_at ASC',
+            [$assetId]
+        ) ?? [];
     }
 
     /**

@@ -32,7 +32,7 @@
  */
 
 import * as SecureStore from 'expo-secure-store';
-import { supabase } from '@/client/supabase';
+import { backendClient } from '@/client/backendClient';
 import { STATIC_SECURITY } from '@/config/security';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -300,7 +300,7 @@ export function isSecurityConfigFresh(): boolean {
  */
 export async function checkRemoteSecurityVersion(): Promise<number | null> {
   try {
-    const { data, error } = await supabase.functions.invoke('get-security-version');
+    const { data, error } = await backendClient.functions.invoke('get-security-version');
     if (error || !data) return null;
     const v = (data as Record<string, unknown>).security_version;
     return typeof v === 'number' && v > 0 ? Math.floor(v) : null;
@@ -363,7 +363,7 @@ export async function checkAndRefreshSecurityConfig(): Promise<DynamicSecurityCo
 export async function loadSecurityConfig(): Promise<DynamicSecurityConfig> {
   // ── Try server ────────────────────────────────────────────────────────────
   try {
-    const { data, error } = await supabase.functions.invoke('get-security-config');
+    const { data, error } = await backendClient.functions.invoke('get-security-config');
     if (!error && data) {
       const validated = validateServerResponse(data);
       if (validated) {

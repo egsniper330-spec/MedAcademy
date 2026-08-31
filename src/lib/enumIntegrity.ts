@@ -10,7 +10,7 @@
  * ════════════════════════════════════════════════════════════════════════════
  */
 
-import { supabase } from '@/client/supabase';
+import { backendClient } from '@/client/backendClient';
 import {
   DB_ENUM_NAMES,
   FRONTEND_ENUM_REGISTRY,
@@ -43,7 +43,7 @@ export interface EnumIntegrityReport {
 
 /** Fetch all enum values for every DB_ENUM_NAME from PostgreSQL */
 export async function fetchDbEnumValues(): Promise<Record<DbEnumName, string[]>> {
-  const { data, error } = await supabase.rpc('get_enum_values_bulk', {
+  const { data, error } = await backendClient.rpc('get_enum_values_bulk', {
     p_enum_names: DB_ENUM_NAMES as unknown as string[],
   });
 

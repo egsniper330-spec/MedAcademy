@@ -11,7 +11,7 @@ import * as ImagePicker from 'expo-image-picker';
 import { Camera, RefreshCw, Upload, Check, X } from 'lucide-react-native';
 import { NeuCard } from '@/components/NeuCard';
 import { neuColors, neuFlatStyle, neuPressedStyle } from '@/lib/neu';
-import { supabase } from '@/client/supabase';
+import { backendClient } from '@/client/backendClient';
 import { updateUploadRecord, updateLessonVideoStatus, insertAuditLog } from '@/lib/videoUploadEngine';
 import { usePermission } from '@/hooks/usePermission';
 import { PermissionRationaleModal } from '@/components/PermissionRationaleModal';
@@ -51,7 +51,7 @@ export function VideoThumbnailCard({
       thumbnail_url: url,
       ...(storagePath ? { thumbnail_storage_path: storagePath } : {}),
     });
-    await supabase.from('lessons').update({ video_thumbnail_url: url }).eq('id', lessonId);
+    await backendClient.from('lessons').update({ video_thumbnail_url: url }).eq('id', lessonId);
     await insertAuditLog(uploadId, 'thumbnail_replaced');
     setShowActions(false);
   };
@@ -72,11 +72,11 @@ export function VideoThumbnailCard({
       const resp = await expoFetch(result.assets[0].uri);
       const blob = await resp.blob();
       const storagePath = `thumbnails/${courseId}/${lessonId}/${uploadId}_custom.jpg`;
-      const { error } = await supabase.storage.from(BUCKET).upload(storagePath, blob as any, {
+      const { error } = await backendClient.storage.from(BUCKET).upload(storagePath, blob as any, {
         contentType: 'image/jpeg', upsert: true,
       });
       if (!error) {
-        const { data } = supabase.storage.from(BUCKET).getPublicUrl(storagePath);
+        const { data } = backendClient.storage.from(BUCKET).getPublicUrl(storagePath);
         await updateThumb(data.publicUrl, storagePath);
       }
     } catch (_) {}

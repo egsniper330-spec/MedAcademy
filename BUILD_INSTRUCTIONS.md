@@ -310,4 +310,4 @@ TypeError: Cannot read properties of null (reading 'path')
 The fix passes the main app PBXGroup UUID as the third argument:
 `addSourceFile(filePath, { target }, mainGroupKey)` — routing through `addFile()`
 which directly calls `addToPbxGroup()` without the broken path-correction logic.
-This was the root cause of the "Packaging failed. Medo has rolled back." error.
+This was the root cause of the "Packaging failed" error.

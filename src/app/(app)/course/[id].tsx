@@ -213,10 +213,10 @@ export default function CourseDetail() {
 
           {/* Meta row */}
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 14 }}>
-            {course.instructor_name ? (
+            {(course.doctor?.full_name ?? course.instructor_name) ? (
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
                 <GraduationCap size={13} color={c.primary} />
-                <Text style={{ fontSize: 13, color: c.text, opacity: 0.6 }}>{course.instructor_name}</Text>
+                <Text style={{ fontSize: 13, color: c.text, opacity: 0.6 }}>{course.doctor?.full_name ?? course.instructor_name}</Text>
               </View>
             ) : null}
             {course.language ? (

@@ -17,7 +17,7 @@ import {
 import { PageHeader } from '@/components/PageHeader';
 import { NeuCard } from '@/components/NeuCard';
 import { VideoHealthDetails } from '@/components/VideoHealthDetails';
-import { supabase } from '@/client/supabase';
+import { backendClient } from '@/client/backendClient';
 import { neuColors, useLayout, neuFlatStyle, neuPressedStyle, safeBottom } from '@/lib/neu';
 import { formatBytes } from '@/lib/videoUploadEngine';
 import { exportCSV } from '@/lib/exportUtils';
@@ -200,7 +200,7 @@ export default function VideoHealthScreen() {
     try {
       const [{ data: uploadData }, { data: vdoLessons }, { data: report }, { data: provider }] = await Promise.all([
         // Plyr / upload-based videos
-        supabase
+        backendClient
           .from('video_uploads')
           .select(`id, file_name, file_size, mime_type, status, bytes_uploaded,
                    error_message, retry_count, storage_path, public_url,
@@ -215,7 +215,7 @@ export default function VideoHealthScreen() {
           .order('created_at', { ascending: false })
           .limit(500),
         // VdoCipher videos stored directly in lessons (no video_upload row)
-        supabase
+        backendClient
           .from('lessons')
           .select('id, title, video_type, video_id, video_status, created_at, course:courses(id, title)')
           .eq('video_type', 'vdocipher')
@@ -224,13 +224,13 @@ export default function VideoHealthScreen() {
           .is('deleted_at', null)
           .order('created_at', { ascending: false })
           .limit(500),
-        supabase
+        backendClient
           .from('video_daily_health_reports')
           .select('*')
           .order('report_date', { ascending: false })
           .limit(1)
           .maybeSingle(),
-        supabase
+        backendClient
           .from('video_provider_config')
           .select('*')
           .eq('is_default', true)
@@ -280,7 +280,7 @@ export default function VideoHealthScreen() {
 
   const loadAlerts = useCallback(async () => {
     setLoadingAlerts(true);
-    const { data } = await supabase
+    const { data } = await backendClient
       .from('video_health_alerts')
       .select(`*, upload:video_uploads(file_name, lesson:lessons(title), course:courses(title))`)
       .eq('resolved', false)
@@ -339,7 +339,7 @@ export default function VideoHealthScreen() {
     setScanning(true);
     setScanAllProgress('Starting scan…');
     try {
-      const { data, error } = await supabase.functions.invoke('video-health-scan', {
+      const { data, error } = await backendClient.functions.invoke('video-health-scan', {
         body: { action: 'scan_all' },
       });
       if (error) throw error;
@@ -355,7 +355,7 @@ export default function VideoHealthScreen() {
 
   // ── Scan single ────────────────────────────────────────────────────────────
   const handleScanOne = async (uploadId: string) => {
-    await supabase.functions.invoke('video-health-scan', {
+    await backendClient.functions.invoke('video-health-scan', {
       body: { action: 'scan_one', upload_id: uploadId },
     });
     await load();
@@ -363,8 +363,8 @@ export default function VideoHealthScreen() {
 
   // ── Delete ─────────────────────────────────────────────────────────────────
   const handleDelete = async (uploadId: string, storagePath: string | null) => {
-    if (storagePath) await supabase.storage.from('lesson-materials').remove([storagePath]);
-    await supabase.from('video_uploads').delete().eq('id', uploadId);
+    if (storagePath) await backendClient.storage.from('lesson-materials').remove([storagePath]);
+    await backendClient.from('video_uploads').delete().eq('id', uploadId);
     setUploads((u) => u.filter((x) => x.id !== uploadId));
     setSelectedIds((s) => { s.delete(uploadId); return new Set(s); });
   };
@@ -372,7 +372,7 @@ export default function VideoHealthScreen() {
   // ── Bulk actions ───────────────────────────────────────────────────────────
   const handleBulkRetry = async () => {
     for (const id of selectedIds) {
-      await supabase.from('video_uploads').update({
+      await backendClient.from('video_uploads').update({
         status: 'waiting', error_message: null, verification_status: 'pending',
       }).eq('id', id);
     }
@@ -393,7 +393,7 @@ export default function VideoHealthScreen() {
   };
 
   const handleResolveAlert = async (alertId: string) => {
-    await supabase.from('video_health_alerts').update({
+    await backendClient.from('video_health_alerts').update({
       resolved: true, resolved_at: new Date().toISOString(),
     }).eq('id', alertId);
     setAlerts((a) => a.filter((x) => x.id !== alertId));

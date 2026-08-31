@@ -17,7 +17,7 @@
  * Must come from SecurityContext.isSuperAdmin (backend-verified profile role).
  */
 import { useEffect, useRef, useState, useCallback } from 'react';
-import { supabase } from '@/client/supabase';
+import { backendClient } from '@/client/backendClient';
 import { getInstallationId } from '@/lib/installationId';
 import {
   isNativeScreenBeingRecorded,
@@ -70,7 +70,7 @@ export function useContentProtection(
   // ── Fetch policy warning message once ─────────────────────────────────────
   useEffect(() => {
     (async () => {
-      const { data } = await supabase
+      const { data } = await backendClient
         .from('content_protection_policies')
         .select('warning_message')
         .eq('id', '00000000-0000-0000-0000-000000000001')
@@ -87,13 +87,13 @@ export function useContentProtection(
     type: 'screenshot_detected' | 'screen_recording_detected',
   ) => {
     try {
-      const { data: { user } } = await supabase.auth.getUser();
+      const { data: { user } } = await backendClient.auth.getUser();
       if (!user) return;
 
       const installId = await getInstallationId();
       const platform  = process.env.EXPO_OS ?? 'unknown';
 
-      const { data, error } = await supabase.functions.invoke('process-violation', {
+      const { data, error } = await backendClient.functions.invoke('process-violation', {
         body: {
           user_id:          user.id,
           violation_type:   type,
@@ -128,7 +128,7 @@ export function useContentProtection(
         return;
       }
       if (action === 'logout' || action === 'suspend' || action === 'ban') {
-        await supabase.auth.signOut({ scope: 'global' });
+        await backendClient.auth.signOut({ scope: 'global' });
       }
     } catch (err) {
       if (__DEV__) console.warn('[ContentProtection] reportViolation:', err);

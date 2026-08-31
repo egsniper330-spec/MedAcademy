@@ -2,14 +2,14 @@
 // plugins/ is excluded from oxlint via .eslintignore.
 //
 // withDynamicVersions — ensures iOS and Android version strings always match
-// the app.json that MEDO updates before every build.
+// the app.json that the CI platform updates before every build.
 //
 // STRATEGY (v3 — gradle.properties approach):
 //   Previous attempts injected a Groovy JsonSlurper block into build.gradle.
-//   That caused failures on MEDO's build server due to:
+//   That caused failures on CI build servers due to:
 //     - import statement position (must precede all other statements in strict Gradle)
 //     - UTF-8 box-drawing characters in comments breaking non-UTF-8 build locales
-//     - rootDir path assumption being wrong in MEDO's sandbox layout
+//     - rootDir path assumption being wrong in CI sandbox layout
 //
 //   New approach:
 //     Android: write APP_VERSION_NAME and APP_VERSION_CODE into gradle.properties

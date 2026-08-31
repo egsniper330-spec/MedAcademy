@@ -5,6 +5,7 @@ import { LayoutDashboard, BookOpen, Users, TrendingUp, UserCircle } from 'lucide
 import { neuColors } from '@/lib/neu';
 import { DrawerProvider } from '@/components/DrawerContext';
 import DrawerNav from '@/components/DrawerNav';
+import ResponsiveTabBar from '@/components/ResponsiveTabBar';
 
 /**
  * Doctor tab layout.
@@ -25,27 +26,25 @@ function DoctorTabs() {
   return (
     <Tabs
       initialRouteName="dr-overview"
+      tabBar={(props) => (
+        <ResponsiveTabBar
+          {...props}
+          activeTintColor={c.primary}
+          inactiveTintColor={`${c.text}44`}
+          labelStyle={{ fontSize: 10, fontWeight: '700', letterSpacing: 0.2, marginTop: 2 }}
+          style={{
+            backgroundColor: c.base,
+            borderTopWidth: 0,
+            shadowColor: c.shadowDark,
+            shadowOffset: { width: 0, height: -4 },
+            shadowOpacity: 0.45,
+            shadowRadius: 12,
+            elevation: 16,
+          }}
+        />
+      )}
       screenOptions={{
         headerShown: false,
-        // DO NOT set height or paddingBottom manually — React Navigation + SafeAreaProvider
-        // handles the bottom inset automatically via the native window insets API.
-        tabBarStyle: {
-          backgroundColor: c.base,
-          borderTopWidth: 0,
-          // No paddingTop here — React Navigation + SafeAreaProvider manages
-          // bottom inset automatically via native window insets. A fixed
-          // paddingTop: 8 pushes icons/labels down on tall phones and causes
-          // label clipping on small screens.
-          shadowColor: c.shadowDark,
-          shadowOffset: { width: 0, height: -4 },
-          shadowOpacity: 0.45,
-          shadowRadius: 12,
-          elevation: 16,
-        },
-        tabBarActiveTintColor: c.primary,
-        tabBarInactiveTintColor: `${c.text}44`,
-        tabBarLabelStyle: { fontSize: 10, fontWeight: '700', letterSpacing: 0.2, marginTop: 2 },
-        tabBarIconStyle: { marginBottom: 0 },
       }}
     >
       {/* ── Visible tabs ── */}

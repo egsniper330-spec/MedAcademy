@@ -282,7 +282,7 @@ export function EditUserDialog({
           ) : (
             <NeuCard style={{ padding: 12, marginBottom: 14 }}>
               <Text style={{ fontSize: 14, color: c.text }}>{email || '—'}</Text>
-              <Text style={{ fontSize: 11, color: c.text, opacity: 0.4, marginTop: 3 }}>Email changes require user verification. Use the Supabase dashboard for force-change.</Text>
+              <Text style={{ fontSize: 11, color: c.text, opacity: 0.4, marginTop: 3 }}>Email changes require user verification. Use the administrator email-change workflow.</Text>
             </NeuCard>
           )}
         </>

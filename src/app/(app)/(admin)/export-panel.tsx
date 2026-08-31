@@ -12,7 +12,7 @@ import {
   Download, FileText, CreditCard, Shield, Activity,
   CheckCircle, AlertTriangle,
 } from 'lucide-react-native';
-import { supabase } from '@/client/supabase';
+import { backendClient } from '@/client/backendClient';
 import { NeuCard } from '@/components/NeuCard';
 import { NeuButton } from '@/components/NeuButton';
 import { neuColors, useLayout } from '@/lib/neu';
@@ -76,7 +76,7 @@ export default function ExportPanel() {
       icon: Activity,
       color: '#16A34A',
       fetchRows: async () => {
-        const { data } = await supabase.functions.invoke('system-health', { method: 'GET' });
+        const { data } = await backendClient.functions.invoke('system-health', { method: 'GET' });
         if (!data) return [];
         const d = data as Record<string, unknown>;
         const subs = d.subsystems as Record<string, Record<string, unknown>> ?? {};
@@ -99,7 +99,7 @@ export default function ExportPanel() {
       icon: CreditCard,
       color: '#D97706',
       fetchRows: async () => {
-        const { data, error } = await supabase
+        const { data, error } = await backendClient
           .from('credit_transactions')
           .select(`
             id, transaction_id, doctor_id, transaction_type,
@@ -119,7 +119,7 @@ export default function ExportPanel() {
       icon: FileText,
       color: '#6366F1',
       fetchRows: async () => {
-        const { data, error } = await supabase
+        const { data, error } = await backendClient
           .from('audit_logs')
           .select(`
             id, transaction_id, actor_id, user_id,
@@ -148,13 +148,13 @@ export default function ExportPanel() {
       color: '#DC2626',
       fetchRows: async () => {
         const [eventsRes, devicesRes, profilesRes] = await Promise.all([
-          supabase.from('security_events')
+          backendClient.from('security_events')
             .select('id, user_id, event_type, risk_score, device_id, ip_address, created_at')
             .order('created_at', { ascending: false }).limit(1000),
-          supabase.from('devices')
+          backendClient.from('devices')
             .select('id, user_id, installation_id, platform, status, block_reason, blocked_at')
             .eq('status', 'blocked').limit(500),
-          supabase.from('profiles')
+          backendClient.from('profiles')
             .select('id, email, role, status, created_at')
             .eq('status', 'suspended').limit(500),
         ]);
@@ -171,7 +171,7 @@ export default function ExportPanel() {
       icon: Download,
       color: '#7C3AED',
       fetchRows: async () => {
-        const { data, error } = await supabase.rpc('run_db_audit');
+        const { data, error } = await backendClient.rpc('run_db_audit');
         if (error) throw new Error(error.message);
         const d = data as Record<string, unknown>;
         const db = d.database as Record<string, unknown> ?? {};
@@ -219,8 +219,9 @@ export default function ExportPanel() {
   return (
     <ScrollView style={{ flex: 1, backgroundColor: c.base }}
           contentContainerStyle={{ paddingBottom: layout.scrollBottom() }}>
-      <View style={{ padding: layout.screenPx }}>
-        <PageHeader title="Export Center" subtitle="Download CSV reports for any subsystem" accentColor="#D97706" />
+      <PageHeader title="Export Center" subtitle="Download CSV reports for any subsystem" accentColor="#D97706" />
+
+      <View style={{ paddingHorizontal: layout.screenPx }}>
 
         <NeuCard style={{ padding: 14, marginBottom: 20, flexDirection: 'row', gap: 10, alignItems: 'center' }}>
           <Download size={18} color={c.primary} />

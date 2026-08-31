@@ -2,9 +2,8 @@
 // Backend Abstraction — Contracts
 //
 // The application layer depends ONLY on these interfaces.
-// Swapping the backend provider (Supabase → Firebase / Appwrite / custom)
-// requires implementing a new adapter in backend/adapters/ and updating
-// backend/index.ts — no application code changes needed.
+// Swapping the backend provider requires implementing another adapter and
+// updating backend/index.ts; application code does not change.
 // ─────────────────────────────────────────────────────────────────────────────
 
 export interface AuthUser {
