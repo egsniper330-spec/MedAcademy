@@ -31,6 +31,7 @@ import NetInfo from '@react-native-community/netinfo';
 import Constants from 'expo-constants';
 import {
   runSecurityChecks, logThreats, getSecurityPolicies, clearAppAttestKey,
+  invalidatePolicyCache, SECURITY_UNVERIFIED_WEIGHT,
   type SecurityCheckResult, type SecurityThreat,
   type DetectionType, type PolicyAction,
 } from '@/lib/security';
@@ -65,6 +66,12 @@ interface SecurityContextValue {
   blocksLogin: boolean;
   blocksVideo: boolean;
   hasWarnings: boolean;
+  /**
+   * TRUE while the latest evaluation is not yet confirmed (initial session
+   * start, or a foreground re-check forced by reset()). Consumers MUST treat
+   * UNKNOWN as BLOCKED — see the fail-closed contract below.
+   */
+  evaluating:  boolean;
   /**
    * True when the currently authenticated session belongs to a verified Super Admin.
    * Derived from the backend-loaded profile role ('super_admin') — never from
@@ -108,9 +115,40 @@ const SUPERADMIN_BYPASS_RESULT: SecurityCheckResult = {
   hasWarnings: false,
 };
 
+// ── Fail-closed UNKNOWN result ──────────────────────────────────────────────
+// Served while the latest security evaluation has not yet CONFIRMED a verdict
+// (fresh session start, or a foreground re-check after reset()). Deliberately
+// NOT the all-clear: an attacker must never be able to reach "UNKNOWN →
+// ALLOWED". The SecurityGate treats a non-empty threatTypes marker as blocked
+// so the overlay remains mounted for the entire evaluation window.
+//
+// STATE-SYNC FIX: the sentinel event is 'security_unverified' — an honest
+// "the check is running" state. The previous sentinel reused 'tamper_detected',
+// so EVERY cold start briefly (and, combined with the gate's never-cleared
+// sticky set, PERMANENTLY) displayed "App Integrity Compromised — install the
+// original release" on the OFFICIAL APK: the exact false positive observed on
+// the physical device. This sentinel never reaches the backend logger (only
+// completed evaluations are logged) and never masquerades as a device finding.
+const BLOCKING_UNKNOWN_RESULT: SecurityCheckResult = {
+  threats: [{ type: 'security_unverified', detectionMethod: 'Security evaluation in progress (fail-closed)', detected: true }],
+  riskScore:   SECURITY_UNVERIFIED_WEIGHT,
+  policies:    {} as Record<DetectionType, PolicyAction>,
+  blocksLogin: true,
+  blocksVideo: true,
+  hasWarnings: false,
+};
+
 const SecurityContext = createContext<SecurityContextValue>({
   result:      null,
   checking:    false,
+  /**
+   * FAIL-CLOSED: during evaluation (fresh session, or foreground re-check) the
+   * context still serves the LAST VERDICT (or a blocking default when none
+   * exists) instead of an all-clear. The SecurityGate overlay therefore stays
+   * mounted through a foreground re-check and cannot be defeated by the
+   * reset→recheck gap (the BLOCKED → UNKNOWN → ALLOWED race).
+   */
+  evaluating:  false,
   threats:     [],
   riskScore:   0,
   blocksLogin: false,
@@ -126,7 +164,28 @@ const SecurityContext = createContext<SecurityContextValue>({
 export function SecurityProvider({ children }: { children: React.ReactNode }) {
   const [result, setResult]     = useState<SecurityCheckResult | null>(null);
   const [checking, setChecking] = useState(false);
+  const [evaluating, setEvaluating] = useState(false);
   const checkRef           = useRef(false);
+  // ── Probe generation guard (stale-result race fix) ─────────────────────────
+  // Multiple entry points (periodic tick, foreground transition, network
+  // change, native VPN callback, pre-video re-validation) can start security
+  // checks concurrently. Without ordering, an OLDER slow check (e.g. a probe
+  // that spends its full timeout on a weak network) could land AFTER a newer
+  // successful one and overwrite the fresh verdict with stale findings — the
+  // classic "failure result after successful result" race. Every runner tags
+  // its invocation with a monotonically increasing generation; only the
+  // newest generation is allowed to publish its result.
+  const checkGenRef = useRef(0);
+  const runGuardedCheck = useCallback(async (): Promise<SecurityCheckResult | null> => {
+    const gen = ++checkGenRef.current;
+    const r = await runSecurityChecks();
+    if (gen !== checkGenRef.current) {
+      if (__DEV__) console.log('[SecurityContext] discarding stale security result (gen superseded)');
+      return null;
+    }
+    return r;
+  }, []);
+
   const intervalRef        = useRef<ReturnType<typeof setInterval> | null>(null);
   const configTimerRef     = useRef<ReturnType<typeof setInterval> | null>(null);
   const appActiveRef       = useRef(true);
@@ -171,28 +230,56 @@ export function SecurityProvider({ children }: { children: React.ReactNode }) {
     }
     if (checkRef.current) {
       console.log('[SecurityContext][Stage-6] check() skipped — already in progress, returning cached result');
-      return result ?? DEFAULT_RESULT;
+      return result ?? BLOCKING_UNKNOWN_RESULT;
     }
     checkRef.current = true;
     setChecking(true);
+    setEvaluating(true);
     console.log('[SecurityContext][Stage-6] check() ▶ starting runSecurityChecks()');
     try {
-      const r = await runSecurityChecks();
+      const r = await runGuardedCheck();
+      if (!r) {
+        // A newer check superseded this one — do NOT publish; the newer result
+        // (already landed or about to land) is authoritative.
+        return result ?? BLOCKING_UNKNOWN_RESULT;
+      }
       console.log('[SecurityContext][Stage-6] setResult() with threats=', r.threats.map(t => t.type).join(',') || 'none',
         'blocksLogin=', r.blocksLogin, 'blocksVideo=', r.blocksVideo, 'riskScore=', r.riskScore);
       setResult(r);
       // Track whether a VPN threat is currently active for stale-state monitoring
       hasActiveVpnThreat.current = r.threats.some(t => t.type === 'vpn_detected');
-      void logThreats(r.threats, r.policies, r.riskScore, deviceId);
+      void logThreats(r.threats, r.policies, r.riskScore, deviceId, r.evidence);
       return r;
     } catch (e) {
-      console.error('[SecurityContext][Stage-6] ❌ runSecurityChecks() threw — falling back to DEFAULT_RESULT:', e);
-      const fallback = { ...DEFAULT_RESULT, policies: await getSecurityPolicies() };
-      setResult(fallback);
-      return fallback;
+      console.error('[SecurityContext][Stage-6] ❌ runSecurityChecks() threw — serving FAIL-CLOSED unverified result:', e);
+      // FAIL-CLOSED FIX: the previous fallback spread DEFAULT_RESULT — an
+      // ALL-CLEAR served whenever the evaluation itself threw (error → SAFE,
+      // explicitly forbidden). The unverified-blocking sentinel keeps the app
+      // locked until a completed evaluation proves the device safe; the
+      // periodic/foreground re-checks recover it automatically (no restart).
+      try {
+        const policies = await getSecurityPolicies();
+        const fallback: SecurityCheckResult = {
+          threats: [{ type: 'security_unverified', detectionMethod: 'Security evaluation failed (fail-closed)', detected: true }],
+          riskScore:   SECURITY_UNVERIFIED_WEIGHT,
+          policies,
+          blocksLogin: true,
+          blocksVideo: true,
+          hasWarnings: false,
+        };
+        setResult(fallback);
+        return fallback;
+      } catch {
+        // getSecurityPolicies has its own fail-secure fallback and does not
+        // reject in practice; this belt-and-suspenders branch keeps the same
+        // contract without a policies map.
+        setResult(BLOCKING_UNKNOWN_RESULT);
+        return BLOCKING_UNKNOWN_RESULT;
+      }
     } finally {
       checkRef.current = false;
       setChecking(false);
+      setEvaluating(false);
     }
   }, [isSuperAdmin, result]);
 
@@ -208,9 +295,15 @@ export function SecurityProvider({ children }: { children: React.ReactNode }) {
       return false;
     }
     try {
-      const r = await runSecurityChecks();
+      const r = await runGuardedCheck();
+      if (!r) {
+        // A newer check superseded this pre-video revalidation — publish
+        // nothing; the newer verdict is authoritative. Fail-closed callers
+        // re-check via the gate's live blocksVideo mirror either way.
+        return false;
+      }
       setResult(r);
-      void logThreats(r.threats, r.policies, r.riskScore);
+      void logThreats(r.threats, r.policies, r.riskScore, undefined, r.evidence);
       // Fire blocking callbacks for both login-blocking and video-blocking threats
       // so _layout.tsx can redirect even when checkBeforeVideo is the trigger.
       if (r.blocksLogin || r.blocksVideo) blockingCbsRef.current.forEach((cb) => cb(r));
@@ -218,11 +311,16 @@ export function SecurityProvider({ children }: { children: React.ReactNode }) {
     } catch {
       return false; // fail-open for non-security errors (network down etc.)
     }
-  }, [isSuperAdmin]);
+  }, [isSuperAdmin, runGuardedCheck]);
 
   const reset = useCallback(() => {
-    setResult(null);
+    // FAIL-CLOSED reset: the previous verdict is retained (NOT nulled) so the
+    // gate stays mounted while the fresh check runs. checkRef is force-cleared
+    // so an in-flight/hung check cannot silently swallow this re-check, and
+    // evaluating gates consumers on "UNKNOWN until verified" semantics.
     checkRef.current = false;
+    setChecking(true);
+    setEvaluating(true);
   }, []);
 
   const onNewBlockingThreat = useCallback((cb: (r: SecurityCheckResult) => void) => {
@@ -256,8 +354,18 @@ export function SecurityProvider({ children }: { children: React.ReactNode }) {
       if (configTimerRef.current){ clearInterval(configTimerRef.current); configTimerRef.current = null; }
       void invalidateSecurityConfig();
       void clearAppAttestKey();
+      // Server policy + VPN whitelist caches are session-scoped: drop them on
+      // logout/account switch so the next session re-fetches authoritative
+      // policy instead of reusing the previous account's 5-min cache window.
+      invalidatePolicyCache();
       return;
     }
+
+    // ── Initial check at session start ─────────────────────────────────────
+    // The scheduler below only fires on the 30s tick / state transitions; run
+    // one full check immediately when a session appears so authenticated
+    // monitoring is established from second zero (not after the first tick).
+    void runPeriodicCheckRef.current();
 
     // ── runPeriodicCheck ──────────────────────────────────────────────────────
     // Defined inside the effect so it closes over the current isSuperAdmin value.
@@ -273,11 +381,12 @@ export function SecurityProvider({ children }: { children: React.ReactNode }) {
         return;
       }
       try {
-        const r = await runSecurityChecks();
+        const r = await runGuardedCheck();
+        if (!r) return; // superseded by a newer check — newer result is authoritative
         setResult(r);
         // Update VPN threat tracking so foreground re-checks are scheduled correctly
         hasActiveVpnThreat.current = r.threats.some(t => t.type === 'vpn_detected');
-        void logThreats(r.threats, r.policies, r.riskScore);
+        void logThreats(r.threats, r.policies, r.riskScore, undefined, r.evidence);
         if (r.blocksLogin || r.blocksVideo) {
           blockingCbsRef.current.forEach((cb) => cb(r));
         }
@@ -402,12 +511,13 @@ export function SecurityProvider({ children }: { children: React.ReactNode }) {
 
   // When Super Admin bypass is active, always expose a clean zero-threat result
   // regardless of what runSecurityChecks() may have returned previously.
-  const r = isSuperAdmin ? SUPERADMIN_BYPASS_RESULT : (result ?? DEFAULT_RESULT);
+  const r = isSuperAdmin ? SUPERADMIN_BYPASS_RESULT : (result ?? BLOCKING_UNKNOWN_RESULT);
 
   return (
     <SecurityContext.Provider value={{
       result:              isSuperAdmin ? SUPERADMIN_BYPASS_RESULT : result,
       checking,
+      evaluating,
       threats:             r.threats,
       riskScore:           r.riskScore,
       blocksLogin:         r.blocksLogin,

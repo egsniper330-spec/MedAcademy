@@ -9,6 +9,8 @@ use MedAcademy\Http\ApiException;
 use MedAcademy\Http\Request;
 use MedAcademy\Http\Response;
 use MedAcademy\Services\AuditService;
+use MedAcademy\Services\IntegrityService;
+use MedAcademy\Services\SecurityEvidenceService;
 use MedAcademy\Utils\Config;
 use MedAcademy\Utils\Uuid;
 use MedAcademy\Video\VdoCipherService;
@@ -39,10 +41,83 @@ final class VideoController
         if ($videoId === '') {
             throw new ApiException(400, 'video_id is required');
         }
+
+        // ── SERVER-SIDE APP-INTEGRITY POLICY (protected playback) ────────
+        // Client VPN/root/tamper gates are UX only and patchable in a
+        // modified APK; they are NOT an authorization boundary. When an
+        // operator sets the vdo_otp tier to "enforce", playback requires a
+        // Google-verified Play Integrity verdict bound to this user +
+        // action + the X-Integrity-Hash header (IntegrityService). The
+        // default "log_only" tier records telemetry without blocking.
+        IntegrityService::assertActionAllowed(
+            (string) $request->user['id'],
+            'vdo_otp',
+            $request->header(IntegrityService::HEADER),
+            $request->clientIp()
+        );
+
+        // ── SERVER-SIDE DEVICE-EVIDENCE POLICY (independent second gate) ──
+ // Keystore-signed, challenge-bound evidence (SecurityEvidenceService).
+ // Composes with the integrity gate above; neither replaces the other.
+ SecurityEvidenceService::assertEvidenceAllowed(
+     (string) $request->user['id'],
+     'vdo_otp',
+     $request->header(SecurityEvidenceService::EVIDENCE_HEADER),
+     $request->clientIp()
+ );
+
+        // ── SERVER-SIDE CLIENT-RISK POLICY (independent third gate) ──────
+ // Backend's OWN risk view from the security_events the client has
+ // reported (Part 3/40: the client verdict is never authorization). // Default tier is log_only; an operator flips vdo_otp to "enforce" in
+ // security_config.extras.client_risk when their fleet data supports it.
+        (new \MedAcademy\Services\SecurityRiskService())
+            ->assertRiskAllowed((string) $request->user['id'], 'vdo_otp');
+
         return $this->video->otp($request->user['id'], $videoId, $lessonId, $request->clientIp());
     }
 
+    /**
+     * OFFLINE DOWNLOAD AUTHORIZATION — POST /video/offline-authorize.
+     *
+     * The offline twin of otp(): identical server-side gates (integrity,
+     * device evidence, client-risk) and identical content entitlement rules
+     * inside VdoCipherService::offlineAuthorize(). Issues ONLY otp +
+     * playbackInfo + rental metadata; the VdoCipher API secret never leaves
+     * the server and the DRM-protected media is fetched by the official
+     * VdoCipher SDK on the device. Security-relevant denials are audited by
+     * the individual gates; successful authorization is audited inside the
+     * service (video_download_authorized).
+     */
+    public function offlineAuthorize(Request $request): array
+    {
+        $videoId = (string) ($request->json()['video_id'] ?? '');
+        $lessonId = isset($request->json()['lesson_id']) ? (string) $request->json()['lesson_id'] : null;
+        if ($videoId === '') {
+            throw new ApiException(400, 'video_id is required');
+        }
+
+        IntegrityService::assertActionAllowed(
+            (string) $request->user['id'],
+            'vdo_otp',
+            $request->header(IntegrityService::HEADER),
+            $request->clientIp()
+        );
+
+        SecurityEvidenceService::assertEvidenceAllowed(
+            (string) $request->user['id'],
+            'vdo_otp',
+            $request->header(SecurityEvidenceService::EVIDENCE_HEADER),
+            $request->clientIp()
+        );
+
+        (new \MedAcademy\Services\SecurityRiskService())
+            ->assertRiskAllowed((string) $request->user['id'], 'vdo_otp');
+
+        return $this->video->offlineAuthorize($request->user['id'], $videoId, $lessonId, $request->clientIp());
+    }
+
     public function uploadInit(Request $request): array
+
     {
         return $this->video->uploadInit($request->user['id'], $request->json());
     }

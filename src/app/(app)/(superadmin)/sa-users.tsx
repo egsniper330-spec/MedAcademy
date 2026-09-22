@@ -26,7 +26,7 @@ import { DeleteAccountModal } from '@/components/DeleteAccountModal';
 import { ChangePasswordModal } from '@/components/ChangePasswordModal';
 import { useToast } from '@/components/Toast';
 import { CreateUserModal } from '@/components/CreateUserModal';
-import { neuColors, neuFlatStyle, useLayout } from '@/lib/neu'
+import { neuColors, neuFlatStyle, useLayout, safeBottom } from '@/lib/neu'
 import { displayPhoneNational } from '@/lib/phone';
 import { getPublicEmail, getAllUsers, updateUserStatus, blockUser, unblockUser, promoteToDoctor, promoteToAdmin,
   demoteDoctor, demoteAdminToStudent, trashUser, undoTrash, bulkUserOps,
@@ -294,7 +294,7 @@ export default function SAUsers() {
   return (
     <View style={{ flex: 1, backgroundColor: c.base }}>
       <ScrollView
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />} contentContainerStyle={{ paddingBottom: safeBottom(layout.insets.bottom) }}
       >
           {/* PageHeader sits OUTSIDE the inner padding view so it can own its own horizontal padding */}
           <PageHeader

@@ -22,18 +22,38 @@ DELIMITER $$
 --    UNIQUE column (the app's register/admin flows overwrite it with the
 --    sequential watermark immediately afterwards). email uses COALESCE to
 --    satisfy NOT NULL for phone-only accounts (the app writes '' too).
+--    public_user_id (MED-####) is drawn atomically from public_user_id_seq —
+--    requires migration 009 (or schema.sql) to have created + seeded that table.
 DROP TRIGGER IF EXISTS trg_on_auth_user_created $$
 CREATE TRIGGER trg_on_auth_user_created
 AFTER INSERT ON `users`
 FOR EACH ROW
 BEGIN
-  INSERT INTO `profiles` (`id`, `email`, `full_name`, `role`, `watermark_id`)
+  DECLARE v_num BIGINT;
+  DECLARE v_pub VARCHAR(20);
+
+  -- Atomic sequential draw (LAST_INSERT_ID trick: safe under concurrency).
+  -- v_num is BIGINT so the value can never pass through a DECIMAL — the exact
+  -- bug class that once produced 'MED-1.00' style corrupted values.
+  UPDATE public_user_id_seq SET next_val = LAST_INSERT_ID(next_val + 1) WHERE id = 1;
+  SET v_num = LAST_INSERT_ID();
+
+  -- Enforce the 4-digit contract: fail loudly instead of producing MED-10000.
+  IF v_num > 9999 THEN
+    SIGNAL SQLSTATE '45000'
+      SET MESSAGE_TEXT = 'public_user_id exhausted: 4-digit range MED-0001..MED-9999 is full';
+  END IF;
+
+  SET v_pub = CONCAT('MED-', LPAD(v_num, 4, '0'));
+
+  INSERT INTO `profiles` (`id`, `email`, `full_name`, `role`, `watermark_id`, `public_user_id`)
   VALUES (
     NEW.`id`,
     COALESCE(NEW.`email`, ''),
     COALESCE(JSON_UNQUOTE(JSON_EXTRACT(NEW.`raw_user_meta_data`, '$.full_name')), ''),
     COALESCE(JSON_UNQUOTE(JSON_EXTRACT(NEW.`raw_user_meta_data`, '$.role')), 'student'),
-    UUID()
+    UUID(),
+    v_pub
   );
 END $$
 
@@ -261,13 +281,16 @@ BEGIN
 END $$
 
 -- 10. Default academic levels per faculty (PG: trg_default_levels)
+-- NOTE: academic_levels' ordering column is `display_order` (schema.sql) —
+-- NOT `order_index` (which belongs to sections/lessons). Inserting into a
+-- non-existent column here fails the whole faculty INSERT (SQLSTATE 42S22).
 DROP TRIGGER IF EXISTS trg_default_levels $$
 CREATE TRIGGER trg_default_levels
 AFTER INSERT ON `faculties`
 FOR EACH ROW
 BEGIN
   IF (SELECT COUNT(*) FROM `academic_levels` WHERE `faculty_id` = NEW.`id`) = 0 THEN
-    INSERT INTO `academic_levels` (`faculty_id`, `name`, `order_index`) VALUES
+    INSERT INTO `academic_levels` (`faculty_id`, `name`, `display_order`) VALUES
       (NEW.`id`, '1st Year', 1),
       (NEW.`id`, '2nd Year', 2),
       (NEW.`id`, '3rd Year', 3),

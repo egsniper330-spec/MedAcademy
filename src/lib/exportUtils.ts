@@ -14,7 +14,7 @@ export function sanitizeFilename(name: string): string {
 }
 
 /**
- * Build an export filename: "<BatchName> - YYYY-MM-DD"
+ * Build an export filename: "<Name> - YYYY-MM-DD"
  * so files never collide and are always human-readable.
  */
 export function buildExportFilename(batchLabel: string | null | undefined): string {
@@ -25,26 +25,9 @@ export function buildExportFilename(batchLabel: string | null | undefined): stri
 }
 
 // ── Column presets ─────────────────────────────────────────────────────────
-export const CODE_COLUMNS = [
-  'code', 'status', 'course_title', 'created_by_name',
-  'used_by_name', 'used_at', 'expires_at', 'batch_label', 'notes', 'created_at',
-];
-
 export const CREDIT_COLUMNS = [
   'created_at', 'transaction_type', 'amount', 'balance_before', 'balance_after',
   'doctor_name', 'doctor_email', 'performed_by_name', 'reason', 'notes',
-];
-
-/** Human-readable column definitions for batch code exports */
-export const BATCH_CODE_COLUMNS: { key: string; header: string }[] = [
-  { key: 'code',         header: 'Activation Code'   },
-  { key: 'course_title', header: 'Course'             },
-  { key: 'batch_label',  header: 'Batch Name'         },
-  { key: 'status',       header: 'Status'             },
-  { key: 'uses_count',   header: 'Activations Used'   },
-  { key: 'max_uses',     header: 'Activation Limit'   },
-  { key: 'expires_at',   header: 'Expiration Date'    },
-  { key: 'created_at',   header: 'Created Date'       },
 ];
 
 // ── CSV export ─────────────────────────────────────────────────────────────
@@ -95,10 +78,10 @@ export async function exportXLSX(
   if (!rows.length) return;
 
   const wb  = new ExcelJS.Workbook();
-  wb.creator = 'Activation Codes System';
+  wb.creator = 'MedAcademy Export';
   wb.created = new Date();
 
-  const ws  = wb.addWorksheet('Codes');
+  const ws  = wb.addWorksheet('Export');
 
   // Header row
   ws.columns = columns.map(col => ({

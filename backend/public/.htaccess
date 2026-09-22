@@ -14,6 +14,17 @@
     Require all denied
 </FilesMatch>
 
+# Never serve runtime logs or private storage from the web (the app root is
+# the document root on some hosts, so these files would otherwise be exposed)
+<FilesMatch "\.(log|lock)$">
+    Require all denied
+</FilesMatch>
+
+# Deny everything under storage/private when mod_rewrite handles the request
+<IfModule mod_rewrite.c>
+    RewriteRule ^storage/private/ - [F,L]
+</IfModule>
+
 # Basic hardening
 <IfModule mod_headers.c>
     Header set X-Content-Type-Options "nosniff"

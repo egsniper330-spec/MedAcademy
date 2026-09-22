@@ -161,6 +161,14 @@ final class RpcController
 
     /**
      * get_doctor_credit_transactions — Paginated credit transactions for a doctor.
+     *
+     * • Doctors may only read their OWN history; admins/super admins may read
+     *   any doctor's (mirrors VideoController's ownership model).
+     * • LIMIT/OFFSET are clamped ints interpolated into SQL — PDO emulated
+     *   prepares bind them as strings and MariaDB rejects "LIMIT '5'".
+     * • Selects the real schema columns (notes — NOT description, which does
+     *   not exist) plus balance_before/balance_after and course/student names
+     *   for the UI.
      */
     public function doctorCreditTransactions(Request $request): array
     {
@@ -169,18 +177,26 @@ final class RpcController
             throw new ApiException(422, 'doctor_id is required');
         }
 
-        $limit = min(max((int) ($request->query('limit', '50')), 1), 200);
+        $role = $request->user['role'] ?? '';
+        if (!in_array($role, ['admin', 'super_admin'], true) && $doctorId !== $request->user['id']) {
+            throw new ApiException(403, 'You may only view your own credit history');
+        }
+
+        $limit  = min(max((int) ($request->query('limit', '50')), 1), 200);
         $offset = max((int) ($request->query('offset', '0')), 0);
 
         $db = Database::instance();
         $transactions = $db->select(
-            'SELECT id, doctor_id, student_id, course_id, amount, transaction_type,
-                    description, created_at
-             FROM credit_transactions
-             WHERE doctor_id = ?
-             ORDER BY created_at DESC
-             LIMIT ? OFFSET ?',
-            [$doctorId, $limit, $offset]
+            "SELECT ct.id, ct.doctor_id, ct.student_id, ct.course_id, ct.amount,
+                    ct.transaction_type, ct.notes, ct.balance_before, ct.balance_after,
+                    ct.created_at, c.title AS course_title, p.full_name AS student_name
+             FROM credit_transactions ct
+             LEFT JOIN courses c  ON c.id = ct.course_id
+             LEFT JOIN profiles p ON p.id = ct.student_id
+             WHERE ct.doctor_id = ?
+             ORDER BY ct.created_at DESC
+             LIMIT {$limit} OFFSET {$offset}",
+            [$doctorId]
         );
 
         return ['transactions' => $transactions ?? []];
@@ -360,10 +376,15 @@ final class RpcController
             throw new ApiException(404, 'Course not found');
         }
 
-        // All columns the course builder auto-saves and that exist on the
-        // `courses` table. Short description, instructor, language, university/
-        // faculty, contact info and settings toggles must persist — previously
-        // they were silently dropped because the allowlist was too narrow.
+        // OWNERSHIP ENFORCEMENT (server-side): a doctor may only update courses
+        // they own. Without this check any doctor token could mutate another
+        // doctor's course (title, price, status...) by calling the RPC directly.
+        // Admins/super_admins retain full access.
+        $callerRole = (string) ($request->user['role'] ?? '');
+        if (!in_array($callerRole, ['admin', 'super_admin'], true)
+            && (string) $course['doctor_id'] !== $userId) {
+            throw new ApiException(403, 'Not authorized for this course');
+        }
         $allowed = [
             'title', 'description', 'short_description', 'full_description',
             'category_id', 'difficulty', 'price_egp', 'status',
@@ -371,7 +392,7 @@ final class RpcController
             'instructor_name', 'university_id', 'faculty_id', 'academic_level_id',
             'use_default_contact', 'whatsapp', 'telegram', 'phone', 'facebook',
             'tags', 'sequential_learning', 'free_preview',
-            'certificate_enabled', 'subscription_required', 'activation_code_required',
+            'certificate_enabled', 'subscription_required',
         ];
         $sets = [];
         $params = [];
@@ -534,10 +555,40 @@ final class RpcController
             throw new ApiException(422, 'enrollment_id is required');
         }
 
+        // SERVER-SIDE PRICING GUARDS: price is server-validated (never trusted
+        // from the client) and the caller must own the enrollment's course.
+        // Without the ownership check any doctor token could rewrite the
+        // assigned price on ANY enrollment in the platform.
+        if ($price < 0 || $price > 1_000_000) {
+            throw new ApiException(422, 'price must be between 0 and 1,000,000');
+        }
+
+        $db = Database::instance();
+        $callerRole = (string) ($request->user['role'] ?? '');
+        $enrollment = $db->row(
+            'SELECT e.id, c.doctor_id
+               FROM enrollments e
+               JOIN courses c ON c.id = e.course_id
+              WHERE e.id = ?',
+            [$enrollmentId]
+        );
+        if ($enrollment === null) {
+            throw new ApiException(404, 'Enrollment not found');
+        }
+        if (!in_array($callerRole, ['admin', 'super_admin'], true)
+            && (string) $enrollment['doctor_id'] !== $request->user['id']) {
+            throw new ApiException(403, 'Not authorized for this enrollment');
+        }
+
         Database::instance()->query(
             'UPDATE enrollments SET assigned_price = ?, updated_at = UTC_TIMESTAMP(6) WHERE id = ?',
             [$price, $enrollmentId]
         );
+
+        AuditService::write($request->user['id'], 'enrollment_visibility_changed', [
+            'enrollment_id' => $enrollmentId,
+                'assigned_price' => $price,
+        ]);
 
         return ['success' => true];
     }
@@ -816,15 +867,18 @@ final class RpcController
 
         $db->beginTransaction();
         try {
-            // Reset violation count in content_protection_violations
+            // Reset violation strike counts in content_protection_violations.
+            // This table only has strike_count (no is_suspended or updated_at columns).
             $db->query(
                 'UPDATE content_protection_violations
-                 SET strike_count = 0, is_suspended = 0, updated_at = UTC_TIMESTAMP(6)
+                 SET strike_count = 0
                  WHERE user_id = ?',
                 [$targetUserId]
             );
 
-            // Reset in profiles if column exists
+            // Reset violation counters and suspension flag in profiles.
+            // profiles.is_suspended tracks whether the account is suspended;
+            // violation_count / strike_count track cumulative violations.
             $db->query(
                 'UPDATE profiles
                  SET violation_count = 0, strike_count = 0, is_suspended = 0,
@@ -849,28 +903,82 @@ final class RpcController
 
     /**
      * recover_stale_upload_sessions — Reset stale in-progress upload sessions.
+     *
+     * Returns the affected session rows (upload_id, lesson_id, status, …) so the
+     * client can reconcile its local queue. The frontend expects an ARRAY of
+     * session rows — never return a bare object here.
      */
     public function recoverStaleUploadSessions(Request $request): array
     {
         $db = Database::instance();
 
-        // Reset sessions that have been in progress for more than 24 hours
-        $result = $db->query(
-            "UPDATE upload_sessions
-             SET status = 'expired', updated_at = UTC_TIMESTAMP(6)
-             WHERE status = 'in_progress'
-               AND created_at < DATE_SUB(UTC_TIMESTAMP(6), INTERVAL 24 HOUR)"
+        // The Doctor client's launch recovery scan calls this RPC for its own
+        // uploads (the "task not in queue" branch writes to the returned rows'
+        // upload/lesson records). Ownership flows upload_sessions.upload_id →
+        // video_uploads.doctor_id (upload_sessions has no owner column), so:
+        //   - non-staff callers (doctor) are strictly scoped to their OWN
+        //     sessions — their scan can never touch another doctor's uploads;
+        //   - admin/super_admin keep the original global maintenance sweep.
+        $role = (string) ($request->user['role'] ?? '');
+        $isStaff = in_array($role, ['admin', 'super_admin'], true);
+        $ownerId = (string) ($request->user['id'] ?? '');
+
+        // Client contract: p_stale_threshold_seconds = max heartbeat age for a
+        // session to still count as live. Honor it instead of the port's
+        // hardcoded 24h (a crashed upload should be recoverable, not lost for
+        // a day). Defaults to the original 24h when the param is absent —
+        // e.g. admin tooling that predates the param.
+        $body = $request->json();
+        $threshold = filter_var(
+            $body['stale_threshold_seconds'] ?? 86400,
+            FILTER_VALIDATE_INT,
+            ['options' => ['default' => 86400, 'min_range' => 30]]
+        );
+        if ($threshold === false) {
+            $threshold = 86400;
+        }
+
+        $ownerJoin = $isStaff
+            ? ''
+            : ' INNER JOIN video_uploads vu ON vu.id = us.upload_id AND vu.doctor_id = ?';
+        $ownerParams = $isStaff ? [] : [$ownerId];
+
+        // Select the stale sessions FIRST (in_progress past the heartbeat
+        // threshold), then expire them — the client reconciles from the rows.
+        $stale = $db->select(
+            "SELECT us.id AS session_id, us.upload_id, us.lesson_id, us.course_id,
+                    us.provider_video_id, us.status, us.last_heartbeat, us.created_at
+             FROM upload_sessions us{$ownerJoin}
+             WHERE us.status = 'in_progress'
+               AND us.created_at < DATE_SUB(UTC_TIMESTAMP(6), INTERVAL {$threshold} SECOND)"
+            . ($isStaff
+                ? ''
+                : ' AND (us.last_heartbeat IS NULL OR us.last_heartbeat < DATE_SUB(UTC_TIMESTAMP(6), INTERVAL 60 SECOND))'),
+            $ownerParams
         );
 
-        $recovered = $result->rowCount();
+        if (!empty($stale)) {
+            // Expire exactly the rows returned (scoped join re-applied) so a
+            // doctor's scan can never flip another doctor's session status.
+            $db->query(
+                "UPDATE upload_sessions us{$ownerJoin}
+                 SET us.status = 'expired', us.updated_at = UTC_TIMESTAMP(6)
+                 WHERE us.status = 'in_progress'
+                   AND us.created_at < DATE_SUB(UTC_TIMESTAMP(6), INTERVAL {$threshold} SECOND)"
+                . ($isStaff
+                    ? ''
+                    : ' AND (us.last_heartbeat IS NULL OR us.last_heartbeat < DATE_SUB(UTC_TIMESTAMP(6), INTERVAL 60 SECOND))'),
+                $ownerParams
+            );
+        }
 
         AuditService::write(
             $request->user['id'] ?? 'system',
             'system_health_check',
-            ['action' => 'recover_stale_upload_sessions', 'recovered' => $recovered]
+            ['action' => 'recover_stale_upload_sessions', 'recovered' => count($stale), 'scoped_to' => $isStaff ? 'all' : $ownerId]
         );
 
-        return ['recovered' => $recovered];
+        return $stale;
     }
 
     // ================================================================
@@ -936,12 +1044,24 @@ final class RpcController
 
         // Get course doctor for credit refund
         $course = $db->row('SELECT doctor_id FROM courses WHERE id = ?', [$courseId]);
-        $creditCost = $enrollment['credit_cost'] ?? 1;
+        $creditCost = (int) ($enrollment['credit_cost'] ?? 0);
+
+        // OWNERSHIP ENFORCEMENT (server-side): non-staff callers may only
+        // remove enrollments on courses they own.
+        $callerRole = (string) ($request->user['role'] ?? '');
+        if (!in_array($callerRole, ['admin', 'super_admin'], true)
+            && (!$course || (string) $course['doctor_id'] !== $request->user['id'])) {
+            throw new ApiException(403, 'Not authorized for this enrollment');
+        }
 
         $db->transaction(function (Database $db) use ($enrollment, $courseId, $studentId, $creditCost, $course, $request) {
             $db->query('DELETE FROM enrollments WHERE id = ?', [$enrollment['id']]);
 
             if ($course && $creditCost > 0) {
+                // Refund the consuming doctor and write a 'restoration' ledger
+                // row — 'refund' violates chk_credit_transactions_transaction_type
+                // (allocation/consumption/deduction/restoration), which made this
+                // whole transaction roll back and the endpoint return a 500.
                 $db->query(
                     'UPDATE credits SET remaining = remaining + ?, updated_at = UTC_TIMESTAMP(6)
                       WHERE doctor_id = ?',
@@ -950,7 +1070,7 @@ final class RpcController
                 $db->insert(
                     'INSERT INTO credit_transactions (id, doctor_id, transaction_type, amount, course_id, student_id, performed_by, notes, created_at)
                      VALUES (?, ?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP(6))',
-                    [Uuid::v4(), $course['doctor_id'], 'refund', $creditCost, $courseId, $studentId, $request->user['id'], 'Admin removed enrollment']
+                    [Uuid::v4(), $course['doctor_id'], 'restoration', $creditCost, $courseId, $studentId, $request->user['id'], 'Enrollment removed — credit restored']
                 );
             }
         });
@@ -985,6 +1105,20 @@ final class RpcController
         );
         if ($enrollment === null) {
             throw new ApiException(404, 'Enrollment not found');
+        }
+
+        // OWNERSHIP ENFORCEMENT (server-side): the caller must own the course
+        // (or be staff). Without this, any doctor token could remove ANY
+        // student's enrollment platform-wide and forge earnings events.
+        $courseDoctor = $db->value(
+            'SELECT doctor_id FROM courses WHERE id = ?',
+            [$courseId],
+            ''
+        );
+        $callerRole = (string) ($request->user['role'] ?? '');
+        if (!in_array($callerRole, ['admin', 'super_admin'], true)
+            && (string) $courseDoctor !== $request->user['id']) {
+            throw new ApiException(403, 'Not authorized for this enrollment');
         }
 
         $db->transaction(function (Database $db) use ($enrollment, $studentId, $courseId, $request) {

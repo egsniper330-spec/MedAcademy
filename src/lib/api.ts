@@ -1,6 +1,7 @@
 import { fetch as expoFetch } from 'expo/fetch';
 import { backendApiBase, backendClient } from '@/client/backendClient';
 import { normalizePhoneE164 } from '@/lib/identifier';
+import { buildProtectedCallHeaders } from '@/lib/deviceKey';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // SECURITY BOUNDARY
@@ -43,9 +44,10 @@ export async function invokeEdgeFunction<T = unknown>(
   name: string,
   body: Record<string, unknown>,
   idempotencyKey?: string,
-  method: 'POST' | 'GET' = 'POST'
+  method: 'POST' | 'GET' = 'POST',
+  securityHeaders?: Record<string, string>
 ): Promise<T> {
-  const headers: Record<string, string> = {};
+  const headers: Record<string, string> = { ...(securityHeaders ?? {}) };
   if (idempotencyKey) headers['x-idempotency-key'] = idempotencyKey;
 
   // Route ALL requests through the PHP backend client (POST and GET)
@@ -113,7 +115,7 @@ export async function invokeEdgeFunction<T = unknown>(
 // ── Profiles ──────────────────────────────────────────────────────────────────
 // phone_e164 and phone_national are included so every profile object carries
 // all three phone representations — required for search, display, and uniqueness checks.
-const PROFILE_SELECT = 'id, email, profile_email, full_name, phone, phone_e164, phone_national, phone_country_code, role, status, watermark_id, avatar_url, created_at, updated_at, university_id, faculty_id, academic_level_id, contact_whatsapp, contact_telegram, contact_phone, earnings_enabled, doctor_global_price, university:universities(id,name), faculty:faculties(id,name), academic_level:academic_levels(id,name)';
+const PROFILE_SELECT = 'id, public_user_id, email, profile_email, full_name, phone, phone_e164, phone_national, phone_country_code, role, status, watermark_id, avatar_url, created_at, updated_at, university_id, faculty_id, academic_level_id, contact_whatsapp, contact_telegram, contact_phone, earnings_enabled, doctor_global_price, university:universities(id,name), faculty:faculties(id,name), academic_level:academic_levels(id,name)';
 
 // ── Email helpers ─────────────────────────────────────────────────────────────
 
@@ -351,6 +353,8 @@ export interface DoctorStudentProfile {
   email:        string | null;
   avatar_url:   string | null;
   watermark_id: string | null;
+  /** Canonical Public User ID (MED-0001) — the user-facing identifier. */
+  public_user_id: string | null;
   created_at:   string | null;
   /** 'active' | 'suspended' | 'trashed' — used to determine isDeleted in modal */
   account_status: string;
@@ -632,6 +636,7 @@ export async function getDoctorStudentProfile(
     email:          d.email        ?? null,
     avatar_url:     d.avatar_url   ?? null,
     watermark_id:   d.watermark_id ?? null,
+    public_user_id: d.public_user_id ?? null,
     created_at:     d.created_at   ?? null,
     account_status: d.account_status ?? 'active',
     enrollments,
@@ -955,7 +960,15 @@ export async function searchUsers(identifier: string) {
     p_identifier: identifier.trim(),
   });
   if (error) throw error;
-  return data ?? [];
+  // The PHP backend (/admin/user-lookup) returns { users: [...] } while the old
+  // Supabase RPC returned a bare array. Unwrap the envelope so every consumer
+  // (impersonation, global search, sa-users, maintenance, doctor students)
+  // always receives an array — the shape drift silently broke them all.
+  if (Array.isArray(data)) return data;
+  if (data && typeof data === 'object' && Array.isArray((data as any).users)) {
+    return (data as any).users as any[];
+  }
+  return [];
 }
 
 // ── Server-side search helpers — ILIKE on DB instead of client-side filter ────
@@ -1020,21 +1033,6 @@ export async function allocateCreditsToUser(
     identifier,
     amount,
     notes,
-  }, idempotencyKey);
-}
-
-// ── Assign activation code to a user by email / phone / user_id ───────────────
-export async function assignActivationCode(
-  courseId: string,
-  identifier: string,    // email, phone, or user_id
-  expiresAt?: string,
-  idempotencyKey?: string
-) {
-  return invokeEdgeFunction('activation-codes', {
-    action: 'assign',
-    course_id: courseId,
-    identifier,
-    expires_at: expiresAt ?? null,
   }, idempotencyKey);
 }
 
@@ -1238,9 +1236,16 @@ export async function registerDevice(opts: {
   manufacturer?: string;
   installation_id?: string;
 }) {
+  const body = { action: 'register', ...opts };
+  // Protected operation (device_bind): carries both security layers when
+  // available. The fingerprint is already in the body — reuse it directly.
+  const securityHeaders = await buildProtectedCallHeaders('device_bind', body, opts.fingerprint).catch(() => ({}));
   return invokeEdgeFunction<{ device_id?: string; status?: string; error?: string; limit_reached?: boolean; device_blocked?: boolean }>(
     'device-binding',
-    { action: 'register', ...opts }
+    body,
+    undefined,
+    'POST',
+    securityHeaders
   );
 }
 
@@ -1334,7 +1339,7 @@ export async function getCourses(options?: { doctorId?: string; status?: string 
 export async function getPublishedCourses() {
   const { data, error } = await backendClient
     .from('courses')
-    .select('id, title, short_description, image_url, thumbnail_url, price_egp, activation_code_required, doctor:profiles!courses_doctor_id_fkey(id,full_name), category:categories(id,name)')
+    .select('id, title, short_description, image_url, thumbnail_url, price_egp, doctor:profiles!courses_doctor_id_fkey(id,full_name), category:categories(id,name)')
     .eq('status', 'published')
     .order('created_at', { ascending: false })
     .limit(200);
@@ -1917,6 +1922,92 @@ export async function allocateCredits(
   return invokeEdgeFunction('credits', { action: 'allocate', doctor_id: doctorId, amount, notes }, idempotencyKey);
 }
 
+// ── Redeem Codes (Credit Redeem Code — credit top-up ONLY) ───────────────────
+
+export interface RedeemCode {
+  id: string;
+  code: string;
+  credit_amount: number;
+  assigned_doctor_id: string | null;
+  assigned_doctor_name: string | null;
+  assigned_doctor_public_id: string | null;
+  status: 'unused' | 'redeemed' | 'expired' | 'revoked';
+  redeemed_by: string | null;
+  redeemed_by_name: string | null;
+  redeemed_by_public_id: string | null;
+  redeemed_at: string | null;
+  created_at: string;
+  expires_at: string | null;
+  revoked_at: string | null;
+}
+
+/**
+ * Super Admin — create Credit Redeem Code(s). Codes are generated server-side.
+ * `quantity` > 1 triggers ATOMIC bulk creation: `quantity` SEPARATE codes,
+ * each worth `credit_amount` (10 × 50 → ten independent 50-credit codes, 500
+ * total potential). The whole batch either fully commits or fully rolls back.
+ */
+export async function createRedeemCode(input: {
+  credit_amount: number;
+  quantity?: number;
+  assigned_doctor_id?: string | null;
+  expires_at?: string | null;
+}): Promise<{
+  success: boolean;
+  count?: number;
+  total_credit_value?: number;
+  redeem_codes?: RedeemCode[];
+  redeem_code: RedeemCode;
+}> {
+  return invokeEdgeFunction('redeem-codes', {
+    credit_amount: input.credit_amount,
+    quantity: input.quantity ?? 1,
+    assigned_doctor_id: input.assigned_doctor_id ?? null,
+    expires_at: input.expires_at ?? null,
+  });
+}
+
+/** Super Admin — list Redeem Codes with optional status filter + search. */
+export async function getRedeemCodes(params?: { status?: string; search?: string; limit?: number }) {
+  return invokeEdgeFunction('redeem-codes', {
+    status: params?.status ?? 'all',
+    search: params?.search ?? '',
+    limit: params?.limit ?? 200,
+  }, undefined, 'GET');
+}
+
+/**
+ * Super Admin — revoke an UNUSED Redeem Code = PERMANENT DELETE.
+ * The row is removed from credit_redeem_codes; an audit entry preserves the
+ * code string + amount so the code can never be redeemed or reused.
+ * Redeemed codes are refused by the backend (financial history is kept).
+ */
+export async function revokeRedeemCode(codeId: string, reason?: string) {
+  return invokeEdgeFunction('redeem-code-revoke', { code_id: codeId, reason: reason ?? '' });
+}
+
+/**
+ * Super Admin — archive a REDEEMED Redeem Code ("Remove" in the UI).
+ * Hides it from the active list via archived_at while KEEPING the row (and
+ * its linked credit_transaction) for accounting. The code can never be
+ * redeemed again either way.
+ */
+export async function archiveRedeemCode(codeId: string) {
+  return invokeEdgeFunction('redeem-code-archive', { code_id: codeId });
+}
+
+/**
+ * Doctor — redeem a Credit Redeem Code into the doctor's existing credit balance.
+ * Protected financial action: carries both security layers when available
+ * (X-Integrity-Hash + X-Security-Evidence/Signature). The SERVER decides what
+ * an unevidenced call may do — these headers can never grant anything alone.
+ */
+export async function redeemCreditCode(rawCode: string) {
+  const body = { code: rawCode };
+  const securityHeaders = await buildProtectedCallHeaders('redeem', body).catch(() => ({}));
+  return invokeEdgeFunction('redeem-code-redeem', body, undefined, 'POST', securityHeaders);
+}
+
 export async function refundCredits(
   doctorId: string,
   amount: number,
@@ -1980,20 +2071,28 @@ export async function getDoctorStudentEnrollments(doctorId: string) {
   return rows;
 }
 
-/** Suspend a student's course subscription (doctor or admin only). */
+/** Suspend a student's course subscription (doctor or admin only).
+ *
+ *  Only `status` is sent: the enrollments table has NO updated_at column
+ *  (verified in backend/database/schema.sql) — sending one produced
+ *  "Unknown column 'updated_at'" → 500 → "Action failed" on every suspend.
+ *  Owner-scoping is enforced server-side by DataController::ownerScope
+ *  (the UPDATE can only match enrollments whose course belongs to the
+ *  calling doctor), so cross-doctor suspension is impossible.
+ */
 export async function suspendCourseSubscription(enrollmentId: string) {
   const { error } = await backendClient
     .from('enrollments')
-    .update({ status: 'suspended', updated_at: new Date().toISOString() })
+    .update({ status: 'suspended' })
     .eq('id', enrollmentId);
   if (error) throw error;
 }
 
-/** Resume a suspended course subscription. */
+/** Resume a suspended course subscription. Same no-updated_at rule as suspend. */
 export async function resumeCourseSubscription(enrollmentId: string) {
   const { error } = await backendClient
     .from('enrollments')
-    .update({ status: 'active', updated_at: new Date().toISOString() })
+    .update({ status: 'active' })
     .eq('id', enrollmentId);
   if (error) throw error;
 }
@@ -2020,9 +2119,7 @@ export async function removeStudentFromCourse(enrollmentId: string) {
 export type StudentOpMode =
   | 'create_only'
   | 'create_and_enroll_credits'
-  | 'create_and_enroll_code'
-  | 'enroll_existing_credits'
-  | 'enroll_existing_code';
+  | 'enroll_existing_credits';
 
 export interface StudentOpResult {
   success: boolean;
@@ -2041,8 +2138,8 @@ export interface StudentOpResult {
 }
 
 /**
- * Unified student operation — single atomic EF call for all create/enroll modes.
- * Replaces createStudentByDoctor + enrollStudentViaCredits + enrollStudentViaCode.
+ * Unified student operation — single atomic call for all create/enroll modes.
+ * Replaces createStudentByDoctor + enrollStudentViaCredits.
  */
 export async function processStudentOperation(params: {
   mode: StudentOpMode;
@@ -2054,11 +2151,10 @@ export async function processStudentOperation(params: {
   university_id?: string;
   faculty_id?: string;
   academic_level_id?: string;
-  // Existing student (modes D/E)
+  // Existing student (mode D)
   student_id?: string;
-  // Activation fields (modes B/C/D/E)
+  // Activation fields (modes B/D)
   course_id?: string;
-  activation_code?: string;
 }): Promise<StudentOpResult> {
   return invokeEdgeFunction<StudentOpResult>('student-operations', params as unknown as Record<string, unknown>);
 }
@@ -2084,18 +2180,6 @@ export async function enrollStudentViaCredits(studentId: string, courseId: strin
     student_id: studentId,
     course_id: courseId,
   });
-}
-
-/** @deprecated Use processStudentOperation with mode='enroll_existing_code' */
-export async function enrollStudentViaCode(code: string) {
-  // Legacy: code-only enroll without creating a student or specifying course.
-  // The old path used a direct RPC (redeem_activation_code) which the caller
-  // passes to. Keep this path for the existing "Via Code" tab in add-student modal.
-  const { data, error } = await backendClient.rpc('redeem_activation_code', {
-    p_code: code.trim().toUpperCase(),
-  });
-  if (error) throw error;
-  return data;
 }
 
 // @deprecated Use getSubscribedStudents — kept for backward compatibility
@@ -2150,97 +2234,6 @@ export async function getMySubscriptions(studentId: string) {
 // @deprecated Use getMySubscriptions — kept for backward compatibility
 export const getMyCourses = getMySubscriptions;
 
-// ── Activation Codes — writes via Edge Function ───────────────────────────────
-// Direct INSERT is blocked in RLS (migration 00004).
-// Redemption uses SECURITY DEFINER DB function for atomic row-level locking.
-
-export async function getActivationCodes() {
-  // Limit to 200 rows and exclude batched codes (batch_id IS NULL) to prevent
-  // the JOIN query from timing out when large batches exist in the table.
-  // Per-batch code rows are loaded on demand via getActivationLedger({ batchId }).
-  const { data, error } = await backendClient
-    .from('activation_codes')
-    .select('*, course:courses!activation_codes_course_id_fkey(title), used_by_profile:profiles!activation_codes_used_by_fkey(full_name)')
-    .is('batch_id', null)
-    .order('created_at', { ascending: false })
-    .limit(200);
-  if (error) throw error;
-  return data ?? [];
-}
-
-export async function createActivationCode(
-  courseId: string,
-  expiresAt?: string,
-  idempotencyKey?: string
-) {
-  // Routed through Edge Function — generates code server-side
-  return invokeEdgeFunction(
-    'activation-codes',
-    { action: 'create', course_id: courseId, expires_at: expiresAt ?? null },
-    idempotencyKey
-  );
-}
-
-export async function batchCreateActivationCodes(
-  courseId: string,
-  count: number,
-  opts?: {
-    expiresAt?: string;
-    batchLabel?: string;
-    notes?: string;
-    prefix?: string;
-    maxUses?: number | 'unlimited';
-  },
-  idempotencyKey?: string
-) {
-  return invokeEdgeFunction(
-    'activation-codes',
-    {
-      action: 'batch_create',
-      course_id: courseId,
-      count,
-      expires_at: opts?.expiresAt ?? null,
-      batch_label: opts?.batchLabel ?? null,
-      notes: opts?.notes ?? null,
-      prefix: opts?.prefix ?? null,
-      max_uses: opts?.maxUses === 'unlimited' ? null : (opts?.maxUses ?? null),
-    },
-    idempotencyKey
-  );
-}
-
-export async function deleteActivationCode(codeId: string) {
-  return invokeEdgeFunction('activation-codes', { action: 'delete_code', code_id: codeId });
-}
-
-export async function deactivateActivationCode(codeId: string) {
-  // action name matches EF handler: 'deactivate' (not 'deactivate_code')
-  return invokeEdgeFunction('activation-codes', { action: 'deactivate', code_id: codeId });
-}
-
-export async function reactivateActivationCode(codeId: string) {
-  return invokeEdgeFunction('activation-codes', { action: 'reactivate', code_id: codeId });
-}
-
-export async function bulkDeleteActivationCodes(codeIds: string[]) {
-  return invokeEdgeFunction('activation-codes', { action: 'bulk_delete', code_ids: codeIds });
-}
-
-export async function bulkDisableActivationCodes(codeIds: string[]) {
-  return invokeEdgeFunction('activation-codes', { action: 'bulk_disable', code_ids: codeIds });
-}
-
-export async function bulkEnableActivationCodes(codeIds: string[]) {
-  return invokeEdgeFunction('activation-codes', { action: 'bulk_enable', code_ids: codeIds });
-}
-
-export async function redeemActivationCode(code: string) {
-  // SECURITY DEFINER DB function: row-locked, rate-limited, single-redemption guaranteed
-  const { data, error } = await backendClient.rpc('redeem_activation_code', { p_code: code });
-  if (error) throw error;
-  return data;
-}
-
 // ── Password Management — via Edge Function ───────────────────────────────────
 // Self-service: pass only newPassword (changes caller's own password)
 // Admin change: pass targetUserId + newPassword (role hierarchy enforced server-side)
@@ -2257,9 +2250,43 @@ export async function changePassword(newPassword: string, targetUserId?: string,
 // VDOCIPHER_API_SECRET never leaves the server.
 // Returns { otp, playbackInfo } for the VdoCipher player.
 export async function getVideoPlaybackToken(videoId: string, lessonId?: string) {
+  // Protected playback: carries the security-evidence headers (X-Integrity-Hash
+  // + device-key evidence) for the 'vdo_otp' action so the SERVER-side gates
+  // (IntegrityService.assertActionAllowed / SecurityEvidenceService.
+  // assertEvidenceAllowed) can enforce their configured tiers. A modified
+  // client that strips these headers gains nothing — the server decides what
+  // an unevidenced call may do (log_only vs enforce), never the client.
+  const body = { video_id: videoId, lesson_id: lessonId ?? null };
+  const securityHeaders = await buildProtectedCallHeaders('vdo_otp', body).catch(() => ({}));
   return invokeEdgeFunction<{ otp: string; playbackInfo: string }>(
     'vdocipher-otp',
-    { video_id: videoId, lesson_id: lessonId ?? null }
+    body,
+    undefined,
+    'POST',
+    securityHeaders
+  );
+}
+
+// ── Offline Download Authorization — the offline twin of getVideoPlaybackToken ──
+// Same server-side gates (integrity / device-evidence / client-risk) + the same
+// content entitlement rules run inside VdoCipherService::offlineAuthorize(). The
+// server embeds a finite rental window into the download OTP (licenseValidty);
+// the VdoCipher API secret NEVER leaves the server. The client receives only
+// otp + playbackInfo + rental metadata, exactly as for streaming.
+export async function getOfflineDownloadToken(videoId: string, lessonId?: string) {
+  const body = { video_id: videoId, lesson_id: lessonId ?? null };
+  const securityHeaders = await buildProtectedCallHeaders('vdo_otp', body).catch(() => ({}));
+  return invokeEdgeFunction<{
+    otp: string;
+    playbackInfo: string;
+    rentalHours: number;
+    expiresAt: string;
+  }>(
+    'vdocipher-offline-authorize',
+    body,
+    undefined,
+    'POST',
+    securityHeaders
   );
 }
 
@@ -2566,7 +2593,17 @@ export async function getAuditTrail(filters: AuditTrailFilters = {}): Promise<{
     p_offset:        filters.offset        ?? 0,
   });
   if (error) throw error;
-  const rows = (data ?? []) as AuditTrailEntry[];
+  // Contract (RpcController::searchAuditLogs): returns { logs: [...] } — an
+  // OBJECT wrapper, not the array the old cast assumed. Normalize at this
+  // single boundary (same bug class as getUserActivity/drawerAuditLogs).
+  const payload = data as { logs?: unknown } | AuditTrailEntry[] | null;
+  const rows = (
+    Array.isArray(payload)
+      ? payload
+      : payload !== null && typeof payload === 'object' && Array.isArray((payload as { logs?: unknown }).logs)
+        ? (payload as { logs: AuditTrailEntry[] }).logs
+        : []
+  ) as AuditTrailEntry[];
   return {
     entries: rows,
     totalCount: rows[0]?.total_count ?? 0,
@@ -2580,19 +2617,160 @@ export async function getCategories() {
   return data ?? [];
 }
 
-// ── System Config ─────────────────────────────────────────────────────────────
-export async function getSystemConfig() {
-  const { data, error } = await backendClient.from('system_config').select('*');
-  if (error) throw error;
-  return data ?? [];
+// ── System Diagnostics (Super Admin) ─────────────────────────────────────────
+// Safe infrastructure health checks performed SERVER-SIDE. The backend never
+// returns secret values — only presence metadata ("configured": true) and
+// sanitized error classifications. See backend SystemDiagnosticsService.
+
+export type SystemServiceStatus =
+  | 'healthy' | 'warning' | 'unavailable' | 'misconfigured'
+  | 'authentication_failed' | 'timeout' | 'unknown';
+
+export interface ServiceDiagnostic {
+  id: string;
+  name: string;
+  category: string;
+  status: SystemServiceStatus;
+  message: string;
+  errorCode?: string | null;
+  httpStatus?: number | null;
+  latencyMs?: number | null;
+  lastChecked: string;
+  checks: Record<string, string>;
+  recommendedAction?: string | null;
+  exceptionDetail?: string;
+  meta?: Record<string, unknown>;
 }
 
-export async function upsertSystemConfig(key: string, value: unknown) {
-  const { data: { user } } = await backendClient.auth.getUser();
-  const { error } = await backendClient
-    .from('system_config')
-    .upsert({ key, value, updated_by: user!.id, updated_at: new Date().toISOString() }, { onConflict: 'key' });
-  if (error) throw error;
+export interface SystemDiagnosticsReport {
+  id: string;
+  generatedAt: string;
+  results: ServiceDiagnostic[];
+  summary: Record<string, number>;
+}
+
+/** Full scan of every registered service dependency (Super Admin only). */
+export async function runSystemDiagnostics(): Promise<SystemDiagnosticsReport> {
+  const { data, error } = await backendClient.functions.invoke<SystemDiagnosticsReport>('system-diagnostics', {
+    method: 'GET',
+  });
+  if (error) throw new Error(error.message);
+  return data as SystemDiagnosticsReport;
+}
+
+/** Re-check a single service by id without re-running the whole scan. */
+export async function runSystemDiagnosticOne(id: string): Promise<ServiceDiagnostic> {
+  const { data, error } = await backendClient.functions.invoke<ServiceDiagnostic>('system-diagnostics-one', {
+    body: { id },
+    method: 'GET',
+  });
+  if (error) throw new Error(error.message);
+  return data as ServiceDiagnostic;
+}
+
+// ── App Update Enforcement (Super Admin) ──────────────────────────────────────
+
+export interface AppUpdateConfig {
+  platform: 'android' | 'ios';
+  enabled: boolean;
+  latest_version_name: string;
+  latest_version_code: number;
+  minimum_version_code: number;
+  update_mode: 'FORCED' | 'OPTIONAL';
+  update_url: string;
+  release_notes: string | null;
+  updated_by_name?: string | null;
+  updated_at?: string | null;
+}
+
+/**
+ * THE APP-UPDATES CONTRACT (root-cause fix for "Route not found:
+ * GET /admin/app-updates/android"): the backend exposes
+ *   GET /admin/app-updates           → { platforms: [...] }  (both platforms)
+ *   PUT /admin/app-updates/{platform} → validated upsert (camelCase input keys:
+ *       latestVersion, latestVersionCode, minimumVersionCode, updateMode,
+ *       updateUrl, releaseNotes, enabled)
+ * The previous wrappers called an invented per-platform GET route with a POST
+ * save using snake_case keys — neither exists server-side.
+ * Payload normalization (wrapper→per-platform row) lives at THIS boundary.
+ */
+export function normalizeAppUpdatePlatformRow(
+  row: unknown,
+  platform: 'android' | 'ios'
+): AppUpdateConfig {
+  const r = (row && typeof row === 'object' ? row : {}) as Record<string, unknown>;
+  if (r.exists === false || r.enabled === undefined) {
+    // Backend's "no row yet" placeholder: { platform, enabled: false, exists: false }
+    return {
+      platform,
+      enabled: false,
+      latest_version_name: '',
+      latest_version_code: 0,
+      minimum_version_code: 0,
+      update_mode: 'FORCED',
+      update_url: '',
+      release_notes: null,
+    };
+  }
+  return {
+    platform,
+    enabled: r.enabled === true,
+    latest_version_name: String(r.latestVersion ?? ''),
+    latest_version_code: Number(r.latestVersionCode ?? 0),
+    minimum_version_code: Number(r.minimumVersionCode ?? 0),
+    update_mode: r.updateMode === 'OPTIONAL' ? 'OPTIONAL' : 'FORCED',
+    update_url: String(r.updateUrl ?? ''),
+    release_notes: (r.releaseNotes as string | null) ?? null,
+    updated_at: (r.updatedAt as string | null) ?? null,
+  };
+}
+
+/** Fetch the update configuration for a platform (Super Admin only). */
+export async function getAppUpdateConfig(platform: 'android' | 'ios'): Promise<AppUpdateConfig> {
+  const { data, error } = await backendClient.functions.invoke<{ platforms?: unknown[] }>(
+    'get-app-update-config',
+    {},
+  );
+  if (error) throw new Error(error.message);
+  const row = Array.isArray(data?.platforms)
+    ? data.platforms.find((p) => (p as { platform?: string })?.platform === platform)
+    : undefined;
+  if (!row) throw new Error(`No update configuration returned for ${platform}.`);
+  return normalizeAppUpdatePlatformRow(row, platform);
+}
+
+export interface AppUpdateConfigInput {
+  enabled: boolean;
+  latestVersionName: string;
+  latestVersionCode: number;
+  minimumVersionCode: number;
+  updateMode: 'FORCED' | 'OPTIONAL';
+  updateUrl: string;
+  releaseNotes: string;
+}
+
+/**
+ * Save the update configuration for a platform (Super Admin only).
+ * PUT /admin/app-updates/{platform} with the service's camelCase input keys;
+ * the backend re-validates (min ≤ latest, positive ints, https URL, enums).
+ */
+export async function setAppUpdateConfig(
+  platform: 'android' | 'ios',
+  input: AppUpdateConfigInput
+): Promise<{ ok: boolean; error?: string }> {
+  const { error } = await backendClient.functions.invoke('set-app-update-config', {
+    body: {
+      enabled: input.enabled,
+      latestVersion: input.latestVersionName,
+      latestVersionCode: input.latestVersionCode,
+      minimumVersionCode: input.minimumVersionCode,
+      updateMode: input.updateMode,
+      updateUrl: input.updateUrl,
+      releaseNotes: input.releaseNotes,
+    },
+  });
+  if (error) return { ok: false, error: error.message };
+  return { ok: true };
 }
 
 // ── Support Settings ──────────────────────────────────────────────────────────
@@ -2645,10 +2823,9 @@ export async function upsertSupportSetting(
 
 
 export async function getAdminStats() {
-  const [users, courses, codes, students, doctors] = await Promise.all([
+  const [users, courses, students, doctors] = await Promise.all([
     backendClient.from('profiles').select('id', { count: 'exact', head: true }),
     backendClient.from('courses').select('id', { count: 'exact', head: true }),
-    backendClient.from('activation_codes').select('id', { count: 'exact', head: true }).eq('status', 'active'),
     backendClient.from('profiles').select('id', { count: 'exact', head: true }).eq('role', 'student'),
     backendClient.from('profiles').select('id', { count: 'exact', head: true }).eq('role', 'doctor'),
   ]);
@@ -2657,7 +2834,6 @@ export async function getAdminStats() {
     totalStudents: students.count ?? 0,
     totalDoctors: doctors.count ?? 0,
     totalCourses: courses.count ?? 0,
-    totalActiveCodes: codes.count ?? 0,
   };
 }
 
@@ -2794,7 +2970,7 @@ export async function getSuperAdminStats() {
     students, doctors, admins, superAdmins,
     universities, faculties, levels,
     publishedCourses, draftCourses,
-    devices, credits, codes,
+    devices, credits,
   ] = await Promise.all([
     backendClient.from('profiles').select('id', { count: 'exact', head: true }).eq('role', 'student').neq('status', 'trashed'),
     backendClient.from('profiles').select('id', { count: 'exact', head: true }).eq('role', 'doctor').neq('status', 'trashed'),
@@ -2807,7 +2983,6 @@ export async function getSuperAdminStats() {
     backendClient.from('courses').select('id', { count: 'exact', head: true }).eq('status', 'draft'),
     backendClient.from('device_stats').select('*').single(),
     backendClient.from('credits_summary').select('*').single(),
-    backendClient.from('activation_codes_summary').select('*').single(),
   ]);
 
   const totalUsers = (students.count ?? 0) + (doctors.count ?? 0) + (admins.count ?? 0) + (superAdmins.count ?? 0);
@@ -2828,11 +3003,6 @@ export async function getSuperAdminStats() {
     totalCredits:      Number((credits.data as any)?.total_credits ?? 0),
     usedCredits:       Number((credits.data as any)?.used_credits ?? 0),
     remainingCredits:  Number((credits.data as any)?.remaining_credits ?? 0),
-    activeCodes:       Number((codes.data as any)?.active_codes ?? 0),
-    usedCodes:         Number((codes.data as any)?.used_codes ?? 0),
-    disabledCodes:     Number((codes.data as any)?.disabled_codes ?? 0),
-    expiredCodes:      Number((codes.data as any)?.expired_codes ?? 0),
-    totalCodes:        Number((codes.data as any)?.total_codes ?? 0),
   };
 }
 
@@ -3009,26 +3179,43 @@ export async function updateCMSPage(key: string, updates: { title?: string; cont
   return data;
 }
 
-// ── Maintenance Mode ──────────────────────────────────────────────────────────
-export async function getMaintenanceConfig() {
-  const { data, error } = await backendClient
+/**
+ * Internal writer for the `system_config` key/value store. Used by Maintenance
+ * Mode and Pricing — the System Config *screen* was removed, but this
+ * underlying configuration functionality must remain available.
+ */
+async function upsertSystemConfig(key: string, value: unknown) {
+  const { data: { user } } = await backendClient.auth.getUser();
+  const { error } = await backendClient
     .from('system_config')
-    .select('key, value')
-    .in('key', ['maintenance_enabled', 'maintenance_message']);
+    .upsert({ key, value, updated_by: user!.id, updated_at: new Date().toISOString() }, { onConflict: 'key' });
   if (error) throw error;
-  const cfg: Record<string, unknown> = {};
-  (data ?? []).forEach((row: { key: string; value: unknown }) => { cfg[row.key] = row.value; });
+}
+
+// ── Maintenance Mode (server-authoritative) ───────────────────────────────
+// Reads/writes go through the DEDICATED endpoints (MaintenanceController):
+//   GET  /maintenance        — public status (gate-exempt, no auth needed)
+//   GET  /admin/maintenance  — SA status + whitelist count
+//   POST /admin/maintenance  — SA toggle { enabled, message? }
+// The old implementation wrote raw system_config rows through the generic
+// Data API that NOTHING enforced server-side — the toggle was UI-only.
+export async function getMaintenanceConfig(): Promise<{ enabled: boolean; message: string }> {
+  const { data, error } = await backendClient.functions.invoke<{ enabled?: boolean; message?: string }>(
+    'get-maintenance-status',
+    {},
+  );
+  if (error || !data) throw new Error(error?.message ?? 'Failed to load maintenance status.');
   return {
-    enabled: cfg.maintenance_enabled === true || cfg.maintenance_enabled === 'true',
-    message: (cfg.maintenance_message as string) ?? 'We are currently performing maintenance.',
+    enabled: data.enabled === true,
+    message: typeof data.message === 'string' && data.message.trim() ? data.message : 'We are currently performing maintenance.',
   };
 }
 
-export async function setMaintenanceMode(enabled: boolean, message?: string) {
-  await Promise.all([
-    upsertSystemConfig('maintenance_enabled', enabled),
-    ...(message !== undefined ? [upsertSystemConfig('maintenance_message', message)] : []),
-  ]);
+export async function setMaintenanceMode(enabled: boolean, message?: string): Promise<void> {
+  const { error } = await backendClient.functions.invoke('set-maintenance-mode', {
+    body: { enabled, ...(message !== undefined ? { message } : {}) },
+  });
+  if (error) throw new Error(error.message);
 }
 
 export async function getMaintenanceWhitelist() {
@@ -3061,21 +3248,17 @@ export async function getPricingSettings() {
   const { data, error } = await backendClient
     .from('system_config')
     .select('key, value')
-    .in('key', ['credit_price', 'activation_code_price']);
+    .in('key', ['credit_price']);
   if (error) throw error;
   const cfg: Record<string, unknown> = {};
   (data ?? []).forEach((row: { key: string; value: unknown }) => { cfg[row.key] = row.value; });
   return {
     creditPrice: (cfg.credit_price as { amount: number; currency: string }) ?? { amount: 10, currency: 'EGP' },
-    activationCodePrice: (cfg.activation_code_price as { amount: number; currency: string }) ?? { amount: 25, currency: 'EGP' },
   };
 }
 
-export async function updatePricingSettings(creditAmount: number, codeAmount: number, currency = 'EGP') {
-  await Promise.all([
-    upsertSystemConfig('credit_price', { amount: creditAmount, currency }),
-    upsertSystemConfig('activation_code_price', { amount: codeAmount, currency }),
-  ]);
+export async function updatePricingSettings(creditAmount: number, currency = 'EGP') {
+  await upsertSystemConfig('credit_price', { amount: creditAmount, currency });
 }
 
 /** Set a doctor's individual credit selling price.
@@ -3278,17 +3461,6 @@ export async function getReportData(type: string, from?: string, to?: string) {
       if (error) throw error;
       return data ?? [];
     }
-    case 'activation': {
-      const { data, error } = await backendClient
-        .from('activation_codes')
-        .select('*, course:courses(title), redeemed_by:profiles!activation_codes_redeemed_by_fkey(full_name,email)')
-        .gte('created_at', fromDate)
-        .lte('created_at', toDate)
-        .order('created_at', { ascending: false })
-        .limit(500);
-      if (error) throw error;
-      return data ?? [];
-    }
     case 'users': {
       const { data, error } = await backendClient
         .from('profiles')
@@ -3384,7 +3556,6 @@ export async function getRevenueStats() {
     yearlyRevenue: yearlyCredits * unitPrice,
     currency: pricing.creditPrice.currency,
     creditPrice: unitPrice,
-    activationCodePrice: pricing.activationCodePrice.amount,
   };
 }
 
@@ -3571,93 +3742,6 @@ export async function getTopDoctorsByCredits(limit = 10) {
   return data ?? [];
 }
 
-/** Full activation code ledger from the denormalized view */
-export async function getActivationLedger(opts?: {
-  status?: string;
-  courseId?: string;
-  createdBy?: string;
-  batchId?: string;
-  from?: string;
-  to?: string;
-  limit?: number;
-  offset?: number;
-}) {
-  let q = backendClient
-    .from('activation_ledger_view')
-    .select('*')
-    .order('created_at', { ascending: false })
-    .limit(opts?.limit ?? 2000);
-
-  if (opts?.offset) q = q.range(opts.offset, opts.offset + (opts.limit ?? 2000) - 1);
-  if (opts?.status)    q = q.eq('status',     opts.status);
-  if (opts?.courseId)  q = q.eq('course_id',  opts.courseId);
-  if (opts?.createdBy) q = q.eq('created_by', opts.createdBy);
-  if (opts?.batchId)   q = q.eq('batch_id',   opts.batchId);
-  if (opts?.from)      q = q.gte('created_at', opts.from);
-  if (opts?.to)        q = q.lte('created_at', opts.to);
-
-  const { data, error } = await q;
-  if (error) throw error;
-  return data ?? [];
-}
-
-/** Summary stats for the activation code ledger dashboard widgets */
-export async function getActivationLedgerStats() {
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const todayIso = today.toISOString();
-
-  const [all, todayRows] = await Promise.all([
-    backendClient.from('activation_codes').select('status'),
-    backendClient.from('activation_codes').select('status').gte('created_at', todayIso),
-  ]);
-
-  const allCodes   = all.data ?? [];
-  const todayCodes = todayRows.data ?? [];
-
-  return {
-    total:          allCodes.length,
-    used:           allCodes.filter((c: { status: string }) => c.status === 'used').length,
-    active:         allCodes.filter((c: { status: string }) => c.status === 'active').length,
-    expired:        allCodes.filter((c: { status: string }) => c.status === 'expired').length,
-    disabled:       allCodes.filter((c: { status: string }) => ['disabled', 'deactivated'].includes(c.status)).length,
-    today_generated: todayCodes.length,
-    today_used:     todayCodes.filter((c: { status: string }) => c.status === 'used').length,
-  };
-}
-
-/** Batch list with counts */
-export async function getCodeBatches() {
-  const { data, error } = await backendClient
-    .from('code_batches')
-    .select('*, course:courses!code_batches_course_id_fkey(title), creator:profiles!code_batches_created_by_fkey(full_name, role)')
-    .order('created_at', { ascending: false })
-    .limit(500);
-  if (error) throw error;
-  return data ?? [];
-}
-
-/** Most activated courses (by used activation codes) */
-export async function getMostActivatedCourses(limit = 5) {
-  const { data, error } = await backendClient
-    .from('activation_codes')
-    .select('course_id, course:courses!activation_codes_course_id_fkey(title)')
-    .eq('status', 'used')
-    .limit(5000);
-  if (error) throw error;
-
-  const counts: Record<string, { title: string; count: number }> = {};
-  for (const row of (data ?? [])) {
-    const key = row.course_id;
-    if (!counts[key]) counts[key] = { title: (row.course as any)?.title ?? key, count: 0 };
-    counts[key].count++;
-  }
-  return Object.entries(counts)
-    .sort(([, a], [, b]) => b.count - a.count)
-    .slice(0, limit)
-    .map(([id, v]) => ({ course_id: id, ...v }));
-}
-
 /** Fraud flags — unresolved only */
 export async function getFraudFlags(resolved = false) {
   const { data, error } = await backendClient
@@ -3761,7 +3845,15 @@ export interface UserProfileSummary {
 export async function getUserProfileSummary(userId: string): Promise<UserProfileSummary | null> {
   const { data, error } = await backendClient.rpc('get_user_profile_summary', { p_user_id: userId });
   if (error) throw error;
-  return data as UserProfileSummary | null;
+  // Contract (AnalyticsController::userProfile): GET /analytics/user-profile/{id}
+  // returns a WRAPPER object { profile, credits, devices, enrollments } — NOT
+  // the flat summary row. Unwrap at this boundary (same shape-bug class as
+  // getUserActivity/drawerAuditLogs); a missing wrapper.profile → null.
+  const payload = data as { profile?: UserProfileSummary | null } | UserProfileSummary | null;
+  if (payload !== null && typeof payload === 'object' && 'profile' in payload) {
+    return (payload as { profile: UserProfileSummary | null }).profile ?? null;
+  }
+  return (payload as UserProfileSummary | null) ?? null;
 }
 
 export interface UserActivityEntry {
@@ -3805,25 +3897,48 @@ export async function getUserActivity(opts: {
     p_offset:    opts.offset    ?? 0,
   });
   if (error) throw error;
-  const rows = (data ?? []) as UserActivityEntry[];
-  return { entries: rows, totalCount: rows[0]?.total_count ?? 0 };
+  return normalizeUserActivityResponse(data);
 }
 
-/** Course activation stats — for the course timeline */
-export async function getCourseActivationStats(courseId: string) {
-  const { data, error } = await backendClient
-    .from('activation_codes')
-    .select('status')
-    .eq('course_id', courseId);
-  if (error) throw error;
-  const rows = data ?? [];
-  return {
-    total:    rows.length,
-    used:     rows.filter((r: { status: string }) => r.status === 'used').length,
-    active:   rows.filter((r: { status: string }) => r.status === 'active').length,
-    expired:  rows.filter((r: { status: string }) => r.status === 'expired').length,
-    disabled: rows.filter((r: { status: string }) => ['disabled','deactivated'].includes(r.status)).length,
-  };
+/**
+ * THE get_user_activity CONTRACT (root-cause fix for the Global Search crash
+ * "drawerAuditLogs.slice is not a function"):
+ *
+ * `get_user_activity` maps to GET /analytics/user-activity/{id}, whose PHP
+ * controller returns an OBJECT — { recent_audit: [...], recent_security:
+ * [...], devices: [...] } — NOT an array (AnalyticsController::userActivity).
+ * The previous code cast that object to UserActivityEntry[] and callers did
+ * setDrawerAuditLogs(entries) → a plain object reached component state →
+ * .slice() crashed the Super Admin Global Search screen.
+ *
+ * This normalizer is the ONE boundary where the server shape becomes the
+ * documented frontend contract (UserActivityEntry[]): the drawer's audit
+ * stream is the `recent_audit` rows. A missing/malformed payload yields an
+ * empty array — never an object — so every consumer can rely on Array
+ * methods. (Network/HTTP failures still THROW above; only shape anomalies
+ * normalize to [].)
+ */
+export function normalizeUserActivityResponse(data: unknown): { entries: UserActivityEntry[]; totalCount: number } {
+  if (Array.isArray(data)) {
+    // Legacy shape: some deployments returned the raw rows array.
+    return { entries: data as UserActivityEntry[], totalCount: (data[0] as UserActivityEntry | undefined)?.total_count ?? 0 };
+  }
+  if (data !== null && typeof data === 'object') {
+    const obj = data as { entries?: unknown; total_count?: unknown; recent_audit?: unknown; recent_security?: unknown };
+    // Current contract (AnalyticsController::userActivity): paginated unified
+    // { entries: [...], total_count: n } — every row carries action/log_status
+    // (COALESCE'd server-side), so consumers can rely on the field contract.
+    if (Array.isArray(obj.entries)) {
+      return { entries: obj.entries as UserActivityEntry[], totalCount: Number(obj.total_count ?? obj.entries.length) };
+    }
+    const audit = Array.isArray(obj.recent_audit)
+      ? obj.recent_audit
+      : Array.isArray(obj.recent_security)
+        ? obj.recent_security
+        : [];
+    return { entries: audit as UserActivityEntry[], totalCount: audit.length };
+  }
+  return { entries: [], totalCount: 0 };
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -3980,7 +4095,6 @@ export async function createCourseFromTemplate(
       certificate_enabled: c.certificate_enabled,
       subscription_required: c.subscription_required,
       price_egp: c.price_egp,
-      activation_code_required: c.activation_code_required,
       doctor_id: doctorId, status: 'draft',
     })
     .select()
@@ -4474,7 +4588,14 @@ export async function recoverStaleUploadSessions(staleThresholdSeconds = 60): Pr
     console.warn('[recoverStaleUploadSessions] RPC failed:', error.message);
     return [];
   }
-  return data ?? [];
+  // Contract guard: the RPC must return an array of session rows. Older
+  // backends returned { recovered: n } — treat any non-array as "nothing to
+  // recover" instead of crashing the recovery scan with a TypeError.
+  if (!Array.isArray(data)) {
+    if (__DEV__) console.warn('[recoverStaleUploadSessions] unexpected RPC shape (non-array) — treating as empty');
+    return [];
+  }
+  return data;
 }
 
 // ── Lesson video state ────────────────────────────────────────────────────────
@@ -4564,6 +4685,8 @@ export interface AdminUserSearchResult {
   role: string;
   status: string;
   watermark_id: string | null;
+  /** Canonical Public User ID (MED-0001) — the user-facing identifier. */
+  public_user_id: string | null;
   avatar_url: string | null;
 }
 
@@ -4584,8 +4707,8 @@ export async function adminEnrollUser(
     },
   });
   if (error) {
-    const msg = await error?.context?.text?.().catch(() => error.message);
-    throw new Error(msg ?? 'Enrollment failed');
+    const msg = error.message;
+    throw new Error(msg || 'Enrollment failed');
   }
   return data as AdminEnrollResult;
 }
@@ -4599,8 +4722,8 @@ export async function adminSetEnrollmentVisibility(
     body: { action: 'set_hidden', enrollment_id: enrollmentId, visibility_level: visibilityLevel },
   });
   if (error) {
-    const msg = await error?.context?.text?.().catch(() => error.message);
-    throw new Error(msg ?? 'Set visibility failed');
+    const msg = error.message;
+    throw new Error(msg || 'Set visibility failed');
   }
   if (!(data as any)?.success) throw new Error('Set visibility failed');
 }
@@ -4611,8 +4734,8 @@ export async function adminRemoveEnrollment(enrollmentId: string): Promise<void>
     body: { action: 'remove', enrollment_id: enrollmentId },
   });
   if (error) {
-    const msg = await error?.context?.text?.().catch(() => error.message);
-    throw new Error(msg ?? 'Remove failed');
+    const msg = error.message;
+    throw new Error(msg || 'Remove failed');
   }
   if (!(data as any)?.success) throw new Error('Remove failed');
 }
@@ -4708,8 +4831,8 @@ export async function searchUsersForEnrollment(
     body: { action: 'search', query },
   });
   if (error) {
-    const msg = await error?.context?.text?.().catch(() => error.message);
-    throw new Error(msg ?? 'Search failed');
+    const msg = error.message;
+    throw new Error(msg || 'Search failed');
   }
   return Array.isArray((data as any)?.users) ? (data as any).users : [];
 }
@@ -4720,8 +4843,8 @@ export async function getAdminAllCourses(): Promise<AdminCourse[]> {
     body: { action: 'courses' },
   });
   if (error) {
-    const msg = await error?.context?.text?.().catch(() => error.message);
-    throw new Error(msg ?? 'Failed to load courses');
+    const msg = error.message;
+    throw new Error(msg || 'Failed to load courses');
   }
   return Array.isArray((data as any)?.courses) ? (data as any).courses : [];
 }
@@ -4734,8 +4857,8 @@ export async function getAdminCourseEnrollments(
     body: { action: 'enrollments', course_id: courseId },
   });
   if (error) {
-    const msg = await error?.context?.text?.().catch(() => error.message);
-    throw new Error(msg ?? 'Failed to load enrollments');
+    const msg = error.message;
+    throw new Error(msg || 'Failed to load enrollments');
   }
   return Array.isArray((data as any)?.enrollments) ? (data as any).enrollments : [];
 }
@@ -4749,8 +4872,12 @@ export async function updateUserEmail(targetUserId: string, newEmail: string): P
     body: { target_user_id: targetUserId, new_email: newEmail },
   });
   if (error) {
-    const msg = await error?.context?.text?.().catch(() => error.message);
-    throw new Error(msg ?? 'Failed to update email.');
+    // The PHP client's error object always carries `message` (it does NOT have
+    // the Supabase-era `context.text()` response reader — reading it here used
+    // to short-circuit to undefined, collapsing every server error
+    // (409 duplicate / 422 invalid / 403 forbidden) into the generic
+    // "Failed to update email." fallback).
+    throw new Error(error.message || 'Failed to update email.');
   }
   if ((data as any)?.error) {
     throw new Error((data as any).error);

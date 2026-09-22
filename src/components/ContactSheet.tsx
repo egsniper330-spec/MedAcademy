@@ -10,7 +10,7 @@
  */
 import { useEffect, useState } from 'react';
 import {
-  View, Text, Pressable, Modal, Linking, useColorScheme,
+  View, Text, Pressable, Linking, useColorScheme,
   Platform, StyleSheet, useWindowDimensions,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -19,6 +19,7 @@ import Animated, {
 } from 'react-native-reanimated';
 import { X } from 'lucide-react-native';
 import { neuColors } from '@/lib/neu';
+import { PortalOverlay } from '@/components/PortalOverlay';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -168,12 +169,11 @@ export function ContactSheet({ visible, onClose, courseTitle, contact }: Contact
   if (!visible) return null;
 
   return (
-    <Modal
+    <PortalOverlay
       visible={visible}
-      transparent
-      animationType="none"
-      statusBarTranslucent
       onRequestClose={onClose}
+      variant="none"
+      withBackdrop={false}
     >
       {/* Backdrop */}
       <Animated.View
@@ -229,7 +229,7 @@ export function ContactSheet({ visible, onClose, courseTitle, contact }: Contact
           </View>
         </View>
       </Animated.View>
-    </Modal>
+    </PortalOverlay>
   );
 }
 

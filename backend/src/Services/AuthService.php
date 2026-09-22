@@ -363,6 +363,55 @@ final class AuthService
     }
 
     // -----------------------------------------------------------------------
+    // Public User ID (MED-####) — canonical normalization + lookup
+    // -----------------------------------------------------------------------
+    /**
+     * Normalize a user-supplied Public User ID to its canonical "MED-####"
+     * form, or return null when the input is not an ID-shaped query.
+     *
+     * Accepts: "MED-0001", "med-0001", "Med-0001", "MED0001", "med0001",
+     *          " 0001 ", "1", "0001". Rejects: emails, names, phones.
+     */
+    public static function normalizePublicUserId(string $input): ?string
+    {
+        $s = strtoupper(trim($input));
+        if ($s === '') {
+            return null;
+        }
+        // Strip an optional leading "MED" + optional separator(s)
+        $digits = preg_replace('/^(MED)?[-_\s]*/', '', $s);
+        if ($digits === null || $digits === '' || !ctype_digit($digits)) {
+            return null;
+        }
+        return 'MED-' . str_pad($digits, 4, '0', STR_PAD_LEFT);
+    }
+
+    /**
+     * Find exactly one user by canonical Public User ID. Returns the profiles
+     * row (including the internal UUID id) or null. Never matches partially —
+     * the ID is a unique identifier, not a search string.
+     */
+    public function findByPublicUserId(string $input): ?array
+    {
+        $canonical = self::normalizePublicUserId($input);
+        if ($canonical === null) {
+            return null;
+        }
+        try {
+            return Database::instance()->row(
+                'SELECT id, email, phone, phone_e164, full_name, role, status, avatar_url, watermark_id, public_user_id
+                   FROM profiles WHERE public_user_id = ? LIMIT 1',
+                [$canonical]
+            );
+        } catch (\Throwable $e) {
+            // Migration 009 not applied yet (public_user_id column missing).
+            // Degrade gracefully — login/lookup must never break on a
+            // not-yet-migrated database; ID search simply becomes a no-op.
+            return null;
+        }
+    }
+
+    // -----------------------------------------------------------------------
     // Identifier resolution (get_email_by_phone / lookup_user_by_identifier)
     // -----------------------------------------------------------------------
     public function resolveIdentifier(string $identifier): ?array
@@ -373,6 +422,20 @@ final class AuthService
         }
         $db = Database::instance();
         $email = strtolower($identifier);
+
+        // Public User ID (MED-####) — resolve via canonical normalization first
+        $byPublicId = $this->findByPublicUserId($identifier);
+        if ($byPublicId !== null) {
+            return $db->row(
+                "SELECT u.id, u.email, u.phone, u.encrypted_password,
+                        p.role, p.status, p.security_version, p.email AS profile_email
+                   FROM users u
+                   JOIN profiles p ON p.id = u.id
+                  WHERE u.id = ?
+                  LIMIT 1",
+                [$byPublicId['id']]
+            );
+        }
 
         $row = $db->row(
             "SELECT u.id, u.email, u.phone, u.encrypted_password,
@@ -451,7 +514,8 @@ final class AuthService
         }
 
         $count = (int) $db->value(
-            "SELECT COUNT(*) FROM devices WHERE user_id = ? AND status <> 'blocked'",
+            "SELECT COUNT(*) FROM devices
+              WHERE user_id = ? AND status NOT IN ('blocked','logged_out') AND trust_level <> 'revoked'",
             [$userId],
             0
         );
@@ -652,7 +716,7 @@ final class AuthService
     public function publicUser(string $userId): array
     {
         $row = Database::instance()->row(
-            'SELECT id, email, phone, phone_e164, full_name, role, status, avatar_url, watermark_id
+            'SELECT id, email, phone, phone_e164, full_name, role, status, avatar_url, watermark_id, public_user_id
                FROM profiles WHERE id = ?',
             [$userId]
         );

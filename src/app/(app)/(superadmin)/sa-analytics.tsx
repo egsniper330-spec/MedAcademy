@@ -1,7 +1,7 @@
 /**
  * sa-analytics.tsx — Super Admin Analytics hub
  * Groups: System Health, Video Health, Video Monitor, Storage Monitor,
- *         Credit Analytics, Revenue Analytics, Fraud Alerts, Activation Codes
+ *         Credit Analytics, Revenue Analytics, Fraud Alerts
  */
 import { useCallback, useState } from 'react';
 import {
@@ -14,12 +14,11 @@ import {
   Activity, Video, HeartPulse, Database, TrendingUp,
   DollarSign, AlertTriangle, Zap, ChevronRight,
   GraduationCap, BookOpen, Users, Stethoscope, UserCog,
-  CreditCard, Ticket,
-} from 'lucide-react-native';
+  CreditCard,} from 'lucide-react-native';
 import { PageHeader } from '@/components/PageHeader';
 import { NeuCard } from '@/components/NeuCard';
 import { StatCard } from '@/components/StatCard';
-import { neuColors, useLayout } from '@/lib/neu';
+import { neuColors, useLayout, safeBottom } from '@/lib/neu';
 import { getSuperAdminStats } from '@/lib/api';
 import Bell from '@/components/Bell';
 
@@ -90,17 +89,14 @@ export default function SAAnalytics() {
     },
     {
       title: 'Operations',
-      items: [
-        { icon: Ticket, label: 'Activation Codes', description: 'Active, used, expired codes summary', color: '#D97706', path: '/sa-codes' },
-      ],
+      items: [],
     },
   ];
 
   return (
     <ScrollView
       style={{ flex: 1, backgroundColor: c.base }}
-      contentContainerStyle={{ paddingBottom: layout.scrollBottom() }}
-      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />}
+      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />} contentContainerStyle={{ paddingBottom: safeBottom(layout.insets.bottom) }}
     >
       {/* PageHeader sits OUTSIDE the inner padding view so it can own its own horizontal padding */}
       <PageHeader title="Analytics" subtitle="Platform metrics & health" accentColor={c.primary} rightAction={<Bell />} />
@@ -121,7 +117,6 @@ export default function SAAnalytics() {
               <StatCard label="Courses"     value={stats.totalCourses}    icon={<BookOpen size={16} color="#fff" />}      color={c.primary} />
               <StatCard label="Published"   value={stats.publishedCourses} icon={<BookOpen size={16} color="#fff" />}    color="#2DA8FF" />
               <StatCard label="Total Credits" value={stats.totalCredits}  icon={<CreditCard size={16} color="#fff" />}   color="#16A34A" />
-              <StatCard label="Active Codes"  value={stats.activeCodes}   icon={<Ticket size={16} color="#fff" />}       color="#D97706" />
             </View>
 
             {/* Courses breakdown */}

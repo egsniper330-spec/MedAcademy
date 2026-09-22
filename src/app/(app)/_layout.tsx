@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import { Stack, useRouter } from 'expo-router';
+import { Stack, useRouter, usePathname } from 'expo-router';
 import { AppState, View } from 'react-native';
 // Fix: import JS wrapper module directly (not requireOptionalNativeModule).
 // requireOptionalNativeModule returns the raw native proxy which only has
@@ -11,8 +11,10 @@ import * as ScreenCaptureLib from 'expo-screen-capture';
 import { useSession } from '@/ctx';
 import { useProfileStore } from '@/lib/store';
 import { getProfile } from '@/lib/api';
+import { refreshAccountState, handleRefreshOutcome } from '@/lib/accountRefresh';
 import { UploadFAB } from '@/components/VideoUploadQueue';
 import { useSecurity } from '@/lib/SecurityContext';
+import { SecurityGate } from '@/app/(app)/security-gate';
 import type { RelativePathString } from 'expo-router';
 // Roles that can upload videos and need the floating upload queue FAB.
 const UPLOAD_ROLES = new Set(['doctor', 'admin', 'super_admin']);
@@ -47,7 +49,12 @@ function AppLayoutNav() {
   //     with the correct new role → correct dashboard is pushed
   // ─────────────────────────────────────────────────────────────────────────
 
-  const { check, reset, onNewBlockingThreat, isSuperAdmin } = useSecurity();
+  // reset() no longer called on foreground: nulling the verdict during the
+  // re-check created the BLOCKED→UNKNOWN→ALLOWED window (see AppState handler
+  // below). check() alone re-validates with native-state reads — policies use
+  // a short 5-min TTL cache by design; VPN/native flags are read fresh every
+  // call, so stale-cached "safe" results cannot persist here.
+  const { check, onNewBlockingThreat, isSuperAdmin } = useSecurity();
 
   // ── App-shell FLAG_SECURE ──────────────────────────────────────────────────
   // Activates Android FLAG_SECURE for ALL screens inside (app)/, blocking
@@ -109,16 +116,28 @@ function AppLayoutNav() {
       const isForeground = nextState === 'active';
       appStateRef.current = nextState;
       if (!wasBackground || !isForeground) return;
-      // Invalidate cache so checks run fresh, then re-evaluate.
-      reset();
+      // RACE-CONDITION FIX: do NOT reset() the verdict here. The previous
+      // reset() nulled the authoritative result for the entire duration of the
+      // fresh check — consumers fell back to an all-clear default, the gate
+      // unmounted, and the app was briefly fully usable under an ACTIVE
+      // security condition (Home → reopen → 2–3s unprotected window).
+      // Fail-closed instead: the LAST VERDICT stays mounted while check()
+      // re-runs with cached-state invalidation inside runSecurityChecks()
+      // (detectors re-read native state every call). The gate now renders
+      // BLOCKED → CHECKING/BLOCKED → SAFE-or-BLOCKED — never BLOCKED → ALLOWED.
       void check().then((result) => {
-        if (result.blocksLogin) {
+        // ALL blocking threats are enforced by the central SecurityGate overlay
+        // (non-dismissible, auto-unlocking). Do NOT navigate to security-warning
+        // for them — without the blocksLogin param that screen rendered in
+        // warn-mode WITH "Continue Anyway", a bypass of a block_login policy.
+        // Non-blocking warnings (hasWarnings only) still route there.
+        if (result.hasWarnings && !result.blocksLogin) {
           router.replace('/security-warning' as RelativePathString);
         }
       });
     });
     return () => sub.remove();
-  }, [check, reset, router]);
+  }, [check, router]);
 
   // ── Continuous monitoring → forced redirect ────────────────────────────────
   // Subscribe to SecurityContext's periodic-check callback so that VPN / Developer
@@ -128,8 +147,11 @@ function AppLayoutNav() {
     if (process.env.EXPO_OS === 'web') return;
     if (!onNewBlockingThreat) return;
     const unsub = onNewBlockingThreat((result) => {
-      if (result.blocksLogin) {
-        router.replace('/security-warning' as RelativePathString);
+      // ALL blocking threats are enforced by the central SecurityGate overlay
+      // (non-dismissible, auto-unlocking) — never routed to the dismissible
+      // security-warning screen.
+      if (result.hasWarnings && !result.blocksLogin) {
+        router.replace('/security-warning' as any);
       }
     });
     return unsub;
@@ -145,10 +167,48 @@ function AppLayoutNav() {
       setProfileLoading(true);
       try {
         const p = await getProfile(session.user.id);
+        // Defensive: a profile row missing both role AND status cannot drive
+        // any role decision — treat as an error, not as "loaded with no role".
+        if (p && !p.role && !p.status) {
+          throw new Error('profile row incomplete (no role/status)');
+        }
         setProfile(p as any);
+        // SERVER-AUTHORITATIVE ROLE/STATUS SYNC: immediately after the
+        // cold-start load, refresh against the server (single-flight,
+        // offline-skipped). Catches USER→ADMIN / ADMIN→USER changes that
+        // happened while this session was signed in, and ACTIVE→BLOCKED that
+        // happened between sessions.
+        void refreshAccountState(session.user.id, { reason: 'shell_cold_start' }).then((outcome) => {
+          void handleRefreshOutcome(outcome, { userId: session.user.id });
+        });
       } catch (err) {
-        // Profile load failure is intentionally non-fatal — the session is still
-        // valid. Log the error so it appears in the timeline but do NOT sign out.
+        // ── BLOCKED ACCOUNT — terminal state, never a spinner ────────────
+        // AuthMiddleware rejects EVERY authenticated call from a
+        // suspended/blocked account with HTTP 403 code 'account_suspended';
+        // getProfile surfaces that by THROWING { message, code, status }.
+        // The previous code swallowed it as "non-fatal" with profile=null →
+        // the role-redirect guard blocked on !profile → the (app)/index
+        // spinner ran FOREVER on a blocked cold start (device-proven).
+        // Match the server's blocked verdict VERBATIM — a network failure
+        // (no status), a 5xx, or a timeout is NEVER a block.
+        const e = err as { code?: string; status?: number; message?: string } | null;
+        if (
+          e && typeof e === 'object' &&
+          (e.code === 'account_suspended' ||
+            (e.status === 403 && /suspended|blocked/i.test(String(e.message ?? ''))))
+        ) {
+          setProfileLoading(false);
+          // Session is PRESERVED — the account-suspended screen's Logout
+          // performs the real sign-out; a BLOCKED→ACTIVE unblock then
+          // refreshes back to normal without re-login.
+          router.replace('/account-suspended' as RelativePathString);
+          return;
+        }
+        // All other failures are intentionally non-fatal — the session is
+        // still valid. Network failures must NOT sign the user out (offline
+        // startup contract); the profile simply stays as-is (null on true
+        // cold start with no cache — recovered by the authoritative refresh
+        // once connectivity returns, or by the foreground trigger).
         console.error('[AppLayout] getProfile FAILED (non-fatal, keeping session):', err);
       } finally {
         setProfileLoading(false);
@@ -157,11 +217,19 @@ function AppLayoutNav() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session?.user?.id]);
 
+  const pathname = usePathname();
+
   // ── Role-based redirect ────────────────────────────────────────────────────
   useEffect(() => {
     // Skip if still loading, no profile, or already redirected this session
     if (isProfileLoading || !profile || hasNavigated.current) return;
     hasNavigated.current = true;
+    // OFFLINE COLD LAUNCH: the root router may land directly on the Offline
+    // Library (offline + valid session + security SAFE). That route is a
+    // legitimate destination INSIDE this shell — the role redirect must not
+    // evict it to the dashboard the moment the profile resolves (which
+    // un-did the offline cold launch on real devices and web deep links).
+    if (pathname?.startsWith('/offline-')) return;
     const role = profile.role;
     // If student was created by doctor → force password change first
     if ((profile as any).force_password_change) {
@@ -181,6 +249,9 @@ function AppLayoutNav() {
   // The index.tsx spinner covers the visual loading gap instead.
   return (
     <Stack screenOptions={{ headerShown: false }}>
+      {/* Role-neutral entry — AppLayoutNav's role redirect replaces it with the
+          correct dashboard as soon as the backend-verified profile resolves. */}
+      <Stack.Screen name="index" />
       <Stack.Screen name="(student)" />
       <Stack.Screen name="(doctor)" />
       <Stack.Screen name="(admin)" />
@@ -197,6 +268,8 @@ function AppLayoutNav() {
       <Stack.Screen name="login-history" />
       <Stack.Screen name="user-activity" />
       <Stack.Screen name="archived-courses" />
+      <Stack.Screen name="offline-library" />
+      <Stack.Screen name="offline-course" />
       <Stack.Screen name="force-password-change" />
       <Stack.Screen name="security-warning" />
       <Stack.Screen name="account-suspended" />
@@ -215,6 +288,15 @@ export default function AppLayout() {
           Lives here (not root layout) so it never appears on auth/login screens,
           and persists across course-builder & lesson-editor Stack pushes. */}
       {canUpload && <UploadFAB />}
+      {/* ── Central security gate (ALL mandatory blocks) ────────────────────
+          Rendered ABOVE the entire authenticated Stack + FAB whenever a
+          blocking threat is live: VPN, Developer Options, ADB, attached
+          debugger, root, Frida/Xposed/Magisk, tamper, etc. Inline overlay
+          (not a route): the hardware back button, deep links, and route
+          navigation cannot go "around" it; it disappears automatically when
+          the underlying condition clears and SecurityContext re-evaluates.
+          See security-gate.tsx. */}
+      <SecurityGate />
     </View>
   );
 }

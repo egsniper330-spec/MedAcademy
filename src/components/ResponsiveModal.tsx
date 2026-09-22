@@ -1,40 +1,66 @@
 /**
  * ResponsiveModal — Single reusable modal for the entire app.
  *
- * Behaviour:
- * • Phone portrait/landscape → bottom-sheet, rounded top corners, slides up.
- *   Height capped to (screenH – safeTop – handle) so it never overflows in
- *   landscape where available height is very short.
- * • Tablet / Web → centred dialog, max-width 680, respects all four insets.
- * • Keyboard-aware: KAV with platform-correct offset so the focused field is
- *   never hidden behind the software keyboard on iOS or Android.
- * • Safe-area insets respected on every device:
- *   – bottom: home-indicator / gesture bar / Android nav bar
- *   – top:    used by KAV offset on iOS; Android uses 0
- *   – left/right: applied to dialog on landscape iPad
- * • Dismiss: tap backdrop · X button · Android back-button (onRequestClose)
- * • Dirty guard: when isDirty=true shows "Unsaved changes" confirmation.
- * • RTL: all Text renders correctly; flexDirection is 'row' so mirrors on RTL.
- * • Accessibility: title up to 2 lines (no adjustsFontSizeToFit crushing text
- *   at large system font sizes).
+ * PRESENTATION ARCHITECTURE (read before modifying):
+ * ─────────────────────────────────────────────────────────────────────────
+ * ONE presentation on EVERY platform — a centred responsive dialog card.
+ * There is deliberately NO phone "bottom sheet" branch any more: physical
+ * Android devices showed the sheet variant as cramped, small-text, and
+ * geometrically unstable (dead bands, footer hugging the nav bar), while
+ * web/tablet showed a centred card. Per the product decision, phones now
+ * render the SAME centred card as web/tablet — one geometry, one code path,
+ * no divergence between Preview and device.
+ *
+ * Overlay content is presented through the app's SINGLE main window via
+ * <PortalOverlay> (@rn-primitives/portal → root PortalHost). It must NOT be
+ * switched back to React Native's <Modal>: RN's Android Modal renders every
+ * open/close cycle as a native dialog WINDOW, and on RN 0.83 + New
+ * Architecture + edge-to-edge the window show/dismiss race produces
+ * duplicated, stacked, flickering windows.
+ *
+ * Geometry (single owner per concern — no double padding anywhere):
+ * • WIDTH   : min(screenW × 0.92, 680) — 8% total side margins on phones,
+ *             capped for tablets/desktop. Purely screen-relative: no device
+ *             classes, no magic per-model numbers.
+ * • HEIGHT  : maxH = screenH − insets.top − insets.bottom − kbInset − 16.
+ *             The ONLY owner of safe-area + keyboard clearance is this cap
+ *             plus the centering wrapper's identical padding. The card can
+ *             never extend behind the status bar, nav bar, or keyboard.
+ * • CENTER  : wrapper (flex:1) pads top/bottom by the same insets+kb and
+ *             centres the card. Short modals hug their content; long modals
+ *             are capped at maxH and scroll internally with the footer pinned.
+ * • KEYBOARD: computed inset (keyboardDidShow/DidHide − window shrink) on
+ *             iOS AND Android — correct under every soft-input mode
+ *             (adjustResize: window shrinks → inset ≈ 0; adjustPan/Nothing:
+ *             window unchanged → inset = keyboard height). Web: no listeners.
+ * • BODY    : ScrollView flexGrow:0 + flexShrink:1 — hugs short content
+ *             unconditionally (no RN-default flexGrow:1 blank band), scrolls
+ *             only when content exceeds the cap.
+ * • TYPE    : header uses the app's fluid tokens (layout.headingSize /
+ *             captionSize); body padding uses layout.pad.lg — scales with
+ *             device size and respects the OS font scale via clampFont.
+ *
+ * Behaviour: dismiss via backdrop tap · X button · Android back button.
+ * Dirty guard: isDirty=true shows an "Unsaved changes" confirmation first.
+ * RTL + accessibility: title/subtitle wrap to 2 lines.
  */
 
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
-  Modal,
   View,
   Text,
   Pressable,
   ScrollView,
-  KeyboardAvoidingView,
+  Keyboard,
   useWindowDimensions,
   useColorScheme,
   StyleSheet,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { X, AlertTriangle } from 'lucide-react-native';
-import { neuColors } from '@/lib/neu';
+import { neuColors, useLayout } from '@/lib/neu';
 import { NeuButton } from '@/components/NeuButton';
+import { PortalOverlay } from '@/components/PortalOverlay';
 
 export interface ResponsiveModalProps {
   visible: boolean;
@@ -68,23 +94,38 @@ export function ResponsiveModal({
   const c = isDark ? neuColors.dark : neuColors.light;
   const { height: screenH, width: screenW } = useWindowDimensions();
   const insets = useSafeAreaInsets();
-  const isWeb = process.env.EXPO_OS === 'web';
-  const isIOS = process.env.EXPO_OS === 'ios';
-  const isTablet = screenW >= 768;
+  // Fluid layout/typography tokens: paddings and type inside the dialog come
+  // from the app's single responsive token source so they scale with device
+  // size (and OS font scale) instead of fixed pixel constants.
+  const layout = useLayout();
 
   const [confirmDiscard, setConfirmDiscard] = useState(false);
 
-  // ── Safe-area-aware height cap ─────────────────────────────────────────────
-  // Subtract top safe area so the sheet never starts behind the Dynamic Island /
-  // notch — critical in landscape where insets.top can be 50+ dp.
-  // Phone: 92 % of usable height.  Tablet: 88 %.
-  const usableH = screenH - insets.top;
-  const maxH = usableH * (isTablet ? 0.88 : 0.92);
-
-  // KAV offset: on iOS the KAV needs to know the height of persistent system UI
-  // above the modal so it shifts up by exactly the right amount.
-  // On Android KAV behavior="height" does not use keyboardVerticalOffset.
-  const kavOffset = isIOS ? insets.top : 0;
+  // ── Computed keyboard inset (iOS + Android; web has no soft keyboard) ─────
+  //   inset = keyboardHeight − (window height already lost to the keyboard)
+  // Correct under EVERY soft-input mode without device-specific values:
+  // adjustResize (window shrinks by kb → inset ≈ 0, no double-shift),
+  // adjustPan/adjustNothing (window unchanged → inset = full kb height).
+  // The inset is applied in exactly ONE place each for the height cap and the
+  // centering padding — never both cumulatively (single-owner rule).
+  const isWeb = process.env.EXPO_OS === 'web';
+  const [kbInset, setKbInset] = useState(0);
+  const winHRef = useRef(screenH);
+  winHRef.current = screenH;
+  const baseWinHRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (isWeb) return;
+    const show = Keyboard.addListener('keyboardDidShow', (e) => {
+      if (baseWinHRef.current == null) baseWinHRef.current = winHRef.current;
+      const shrank = Math.max(0, baseWinHRef.current - winHRef.current);
+      setKbInset(Math.max(0, e.endCoordinates.height - shrank));
+    });
+    const hide = Keyboard.addListener('keyboardDidHide', () => {
+      baseWinHRef.current = null;
+      setKbInset(0);
+    });
+    return () => { show.remove(); hide.remove(); };
+  }, [isWeb]);
 
   // Intercept close: if form is dirty, show confirmation first
   const handleClose = () => {
@@ -95,150 +136,82 @@ export function ResponsiveModal({
     }
   };
 
-  // ── Web / Tablet: centred dialog ───────────────────────────────────────────
-  if (isWeb || isTablet) {
-    // On landscape iPad the usable width excludes left+right insets (home bar area)
-    const dialogW = Math.min(screenW - Math.max(32, insets.left + insets.right + 32), 680);
-    return (
-      <>
-        <Modal
-          visible={visible}
-          transparent
-          animationType="fade"
-          onRequestClose={handleClose}
-          statusBarTranslucent
-        >
-          <KeyboardAvoidingView
-            behavior={isWeb ? undefined : (isIOS ? 'padding' : 'height')}
-            keyboardVerticalOffset={kavOffset}
-            style={styles.fullFlex}
-          >
-            {/* Backdrop — tap to dismiss */}
-            <Pressable
-              onPress={handleClose}
-              style={[styles.backdrop, { backgroundColor: '#00000066' }]}
-            >
-              {/* Dialog card — stop tap propagation */}
-              <Pressable onPress={e => e.stopPropagation()}>
-                <View
-                  style={{
-                    width: dialogW,
-                    maxHeight: maxH,
-                    backgroundColor: c.base,
-                    borderRadius: 24,
-                    overflow: 'hidden',
-                    ...shadowStyle(c),
-                  }}
-                >
-                  {/* Header */}
-                  <ModalHeader icon={icon} title={title} subtitle={subtitle} onClose={handleClose} c={c} />
+  // ── Geometry (all platforms) ──────────────────────────────────────────────
+  // Width: 92 % of the viewport (8 % total side margins), capped at 680 for
+  // tablets/desktop. Screen-relative — identical behaviour from small phones
+  // to desktop, no device-class branching.
+  const dialogW = Math.min(screenW * 0.92, 680);
+  // Height cap: the ONLY owner of status-bar / nav-bar / keyboard clearance.
+  // The centering wrapper below pads by exactly the same amounts, so the card
+  // fits the padded area with ≥8dp breathing on every edge.
+  const vertBreathing = 8;
+  const maxH = Math.max(
+    200,
+    screenH - insets.top - insets.bottom - kbInset - vertBreathing * 2,
+  );
 
-                  {/* Scrollable body */}
-                  <ScrollView
-                    keyboardShouldPersistTaps="handled"
-                    contentContainerStyle={{ padding: 24, paddingTop: 8 }}
-                    showsVerticalScrollIndicator={false}
-                  >
-                    {children}
-                  </ScrollView>
-
-                  {/* Sticky footer */}
-                  {footer && (
-                    <View style={[styles.footer, { backgroundColor: c.base, paddingBottom: Math.max(insets.bottom, 16) }]}>
-                      {footer}
-                    </View>
-                  )}
-                </View>
-              </Pressable>
-            </Pressable>
-          </KeyboardAvoidingView>
-        </Modal>
-
-        <DiscardConfirmModal
-          visible={confirmDiscard}
-          onKeep={() => setConfirmDiscard(false)}
-          onDiscard={() => { setConfirmDiscard(false); onClose(); }}
-          c={c}
-        />
-      </>
-    );
-  }
-
-  // ── Phone: bottom sheet ────────────────────────────────────────────────────
-  //
-  // Architecture:
-  //   Modal (flex:1, statusBarTranslucent)
-  //   └─ KAV (flex:1) — shifts sheet up when keyboard opens
-  //      ├─ Backdrop Pressable (flex:1) — fills space ABOVE the sheet; tapping dismisses
-  //      └─ Sheet Pressable wrapper (no flex) — stops backdrop tap reaching sheet
-  //         └─ Sheet View (maxHeight capped, overflow:hidden)
-  //
-  // This structure ensures:
-  //   • The backdrop is always interactable — no View blocks it.
-  //   • The sheet never exceeds usable height even in landscape.
-  //   • KAV shifts the WHOLE sheet up on keyboard open.
   return (
     <>
-      <Modal
-        visible={visible}
-        transparent
-        animationType="slide"
-        onRequestClose={handleClose}
-        statusBarTranslucent
-      >
-        <KeyboardAvoidingView
-          behavior={isIOS ? 'padding' : 'height'}
-          keyboardVerticalOffset={kavOffset}
-          style={styles.fullFlex}
+      <PortalOverlay visible={visible} onRequestClose={handleClose} variant="dialog">
+        {/* Centering host — single owner of safe-area + keyboard clearance.
+            flex:1 fills the portal layer; the card centres inside the padded
+            content box and can never overlap system UI or the keyboard. */}
+        <View
+          style={[
+            styles.host,
+            {
+              paddingTop: insets.top + vertBreathing,
+              paddingBottom: insets.bottom + vertBreathing + kbInset,
+            },
+          ]}
+          pointerEvents="box-none"
         >
-          {/* Backdrop — flex:1 fills the remaining space above the sheet */}
-          <Pressable
-            onPress={handleClose}
-            style={[styles.fullFlex, { backgroundColor: '#00000066' }]}
-          />
-
-          {/* Sheet — sits at bottom of KAV, does NOT use flex:1 */}
-          <Pressable onPress={e => e.stopPropagation()}>
+          <Pressable onPress={e => e.stopPropagation()} style={{ width: dialogW, maxHeight: maxH }}>
             <View
               style={{
-                backgroundColor: c.base,
-                borderTopLeftRadius: 28,
-                borderTopRightRadius: 28,
                 width: '100%',
-                maxHeight: maxH,
+                maxHeight: '100%',
+                backgroundColor: c.base,
+                borderRadius: 24,
                 overflow: 'hidden',
                 ...shadowStyle(c),
               }}
             >
-              {/* Swipe handle */}
-              <View style={styles.handle}>
-                <View style={{ width: 36, height: 4, borderRadius: 2, backgroundColor: `${c.text}25` }} />
-              </View>
-
               {/* Header */}
               <ModalHeader icon={icon} title={title} subtitle={subtitle} onClose={handleClose} c={c} />
 
-              {/* Scrollable body — flex:1 so it grows inside the capped sheet */}
+              {/* Scrollable body — flexGrow:0 is the content-sizing guarantee:
+                  RN's ScrollView defaults to flexGrow:1 on its outer container,
+                  so any spare space the Android layout pass leaves becomes a
+                  blank band between the body and the footer. flexGrow:0 makes
+                  the card hug its content unconditionally; flexShrink:1 lets
+                  this exact view scroll when a long form exceeds maxH — short
+                  dialogs stay compact, long dialogs scroll with the footer
+                  pinned. */}
               <ScrollView
                 keyboardShouldPersistTaps="handled"
-                contentContainerStyle={{ padding: 20, paddingTop: 4 }}
+                style={{ flexGrow: 0, flexShrink: 1 }}
+                contentContainerStyle={{
+                  padding: layout.pad.lg,
+                  paddingTop: 8,
+                  paddingBottom: 16,
+                }}
                 showsVerticalScrollIndicator={false}
                 bounces
               >
                 {children}
-                {/* Extra breathing room so the last field clears the sticky footer */}
-                {footer && <View style={{ height: 16 }} />}
               </ScrollView>
 
-          {/* Sticky footer — home-indicator / gesture-nav aware */}
+              {/* Sticky footer — inside the card; clearance is owned by the
+                  host padding above, so the footer never hugs the nav bar. */}
               {footer && (
                 <View
                   style={[
                     styles.footer,
                     {
                       backgroundColor: c.base,
-                      // Math.max: at minimum 20 dp breathing room; on tall iPhones it's insets.bottom (~34)
-                      paddingBottom: Math.max(insets.bottom + 4, 20),
+                      paddingTop: 12,
+                      paddingHorizontal: layout.pad.lg,
                       borderTopWidth: StyleSheet.hairlineWidth,
                       borderTopColor: `${c.text}15`,
                     },
@@ -247,14 +220,10 @@ export function ResponsiveModal({
                   {footer}
                 </View>
               )}
-              {/* When there is no footer, still pad for home indicator / gesture bar */}
-              {!footer && insets.bottom > 0 && (
-                <View style={{ height: insets.bottom }} />
-              )}
             </View>
           </Pressable>
-        </KeyboardAvoidingView>
-      </Modal>
+        </View>
+      </PortalOverlay>
 
       <DiscardConfirmModal
         visible={confirmDiscard}
@@ -277,8 +246,11 @@ function ModalHeader({
   onClose: () => void;
   c: typeof neuColors.light;
 }) {
+  // Fluid typography tokens: scale with device size + OS font scale
+  // (clampFont over typography.h3 / typography.caption).
+  const layout = useLayout();
   return (
-    <View style={styles.header}>
+    <View style={[styles.header, { paddingHorizontal: layout.pad.lg }]}>
       <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1, gap: 10 }}>
         {icon && (
           <View style={{ width: 40, height: 40, borderRadius: 12, alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
@@ -286,16 +258,16 @@ function ModalHeader({
           </View>
         )}
         <View style={{ flex: 1, minWidth: 0 }}>
-          {/* numberOfLines={2} supports long translated titles and large system fonts */}
+          {/* numberOfLines={2} supports long translated titles and large system font sizes */}
           <Text
-            style={{ fontSize: 18, fontWeight: '800', color: (c as any).text, lineHeight: 23 }}
+            style={{ fontSize: layout.headingSize, fontWeight: '800', color: (c as any).text, lineHeight: Math.round(layout.headingSize * 1.28) }}
             numberOfLines={2}
           >
             {title}
           </Text>
           {subtitle ? (
             <Text
-              style={{ fontSize: 12, color: (c as any).text, opacity: 0.45, marginTop: 1, lineHeight: 17 }}
+              style={{ fontSize: layout.captionSize + 1, color: (c as any).text, opacity: 0.55, marginTop: 2, lineHeight: Math.round((layout.captionSize + 1) * 1.4) }}
               numberOfLines={2}
             >
               {subtitle}
@@ -319,7 +291,9 @@ function ModalHeader({
   );
 }
 
-/** Unsaved-changes confirmation — centred dialog, tablet-safe */
+/** Unsaved-changes confirmation — centred dialog.
+ *  Also portal-based: renders in the same window, stacked ABOVE the dialog
+ *  (later portal registration renders later in the shared PortalHost). */
 function DiscardConfirmModal({
   visible, onKeep, onDiscard, c,
 }: {
@@ -330,32 +304,22 @@ function DiscardConfirmModal({
 }) {
   const { width: screenW } = useWindowDimensions();
   const insets = useSafeAreaInsets();
-  // Caps to 400 dp max and ensures horizontal margins on any screen width
-  const cardW = Math.min(screenW - Math.max(40, insets.left + insets.right + 40), 400);
+  const layout = useLayout();
+  // Same width rule as the main dialog: 92 % viewport, capped.
+  const cardW = Math.min(screenW * 0.92, 400);
 
   return (
-    <Modal visible={visible} transparent animationType="fade" statusBarTranslucent onRequestClose={onKeep}>
-      <Pressable
-        onPress={onKeep}
-        style={[
-          styles.backdrop,
-          {
-            backgroundColor: '#00000080',
-            justifyContent: 'center',
-            alignItems: 'center',
-            paddingHorizontal: 20,
-            // Ensure card is not hidden behind home indicator / nav bar
-            paddingBottom: Math.max(insets.bottom, 16),
-            paddingTop: Math.max(insets.top, 16),
-          },
-        ]}
+    <PortalOverlay visible={visible} onRequestClose={onKeep} variant="dialog" backdropColor="#00000080">
+      <View
+        style={[styles.host, { paddingTop: insets.top + 8, paddingBottom: insets.bottom + 8 }]}
+        pointerEvents="box-none"
       >
-        <Pressable onPress={e => e.stopPropagation()}>
+        <Pressable onPress={e => e.stopPropagation()} style={{ width: cardW }}>
           <View style={{
             backgroundColor: (c as any).base,
             borderRadius: 24,
             padding: 24,
-            width: cardW,
+            width: '100%',
             shadowColor: (c as any).shadowDark,
             shadowOffset: { width: 0, height: 8 },
             shadowOpacity: 0.3,
@@ -371,10 +335,10 @@ function DiscardConfirmModal({
               }}>
                 <AlertTriangle size={26} color="#F59E0B" />
               </View>
-              <Text style={{ fontSize: 18, fontWeight: '800', color: (c as any).text, textAlign: 'center' }}>
+              <Text style={{ fontSize: layout.headingSize, fontWeight: '800', color: (c as any).text, textAlign: 'center' }}>
                 Unsaved Changes
               </Text>
-              <Text style={{ fontSize: 14, color: (c as any).text, opacity: 0.55, textAlign: 'center', marginTop: 6, lineHeight: 20 }}>
+              <Text style={{ fontSize: layout.bodySize, color: (c as any).text, opacity: 0.55, textAlign: 'center', marginTop: 6, lineHeight: Math.round(layout.bodySize * 1.5) }}>
                 You have unsaved changes.{'\n'}Leave without saving?
               </Text>
             </View>
@@ -384,26 +348,20 @@ function DiscardConfirmModal({
             </View>
           </View>
         </Pressable>
-      </Pressable>
-    </Modal>
+      </View>
+    </PortalOverlay>
   );
 }
 
-// ── Styles & helpers ───────────────────────────────────────────────────────────
+// ── Styles & helpers ─────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
-  fullFlex: {
-    flex: 1,
-  },
-  backdrop: {
-    flex: 1,
+  // Centering host: fills the portal layer, centres its child. Safe-area and
+  // keyboard padding are supplied inline by the caller (single owner).
+  host: {
+    ...StyleSheet.absoluteFillObject,
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  handle: {
-    alignItems: 'center',
-    paddingTop: 10,
-    paddingBottom: 4,
   },
   header: {
     flexDirection: 'row',
@@ -416,13 +374,14 @@ const styles = StyleSheet.create({
   footer: {
     paddingHorizontal: 20,
     paddingTop: 12,
+    paddingBottom: 12,
   },
 });
 
 function shadowStyle(c: { shadowDark: string }) {
   return {
     shadowColor: c.shadowDark,
-    shadowOffset: { width: 0, height: -4 },
+    shadowOffset: { width: 0, height: 8 },
     shadowOpacity: 0.35,
     shadowRadius: 20,
     elevation: 16,

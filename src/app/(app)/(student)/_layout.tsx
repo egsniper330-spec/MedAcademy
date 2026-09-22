@@ -40,7 +40,6 @@ function StudentTabs() {
       <Tabs.Screen name="explore"    options={{ title: 'Explore',    tabBarIcon: ({ color, size }) => <Compass size={size - 2} color={color} /> }} />
       <Tabs.Screen name="my-courses" options={{ title: 'My Courses', tabBarIcon: ({ color, size }) => <BookOpen size={size - 2} color={color} /> }} />
       <Tabs.Screen name="profile"    options={{ title: 'Profile',    tabBarIcon: ({ color, size }) => <UserCircle size={size - 2} color={color} /> }} />
-      <Tabs.Screen name="activate"   options={{ href: null, title: 'Activate' }} />
     </Tabs>
   );
 }

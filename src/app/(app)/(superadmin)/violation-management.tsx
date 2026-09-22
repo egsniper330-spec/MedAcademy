@@ -283,7 +283,7 @@ export default function ViolationManagementScreen() {
           data={filtered}
           keyExtractor={(item) => item.id}
           renderItem={renderItem}
-          contentContainerStyle={{ padding: 16, gap: 12, paddingBottom: layout.scrollBottom() }}
+          contentContainerStyle={{ padding: 16, gap: 12 }}
         />
       )}
     </View>

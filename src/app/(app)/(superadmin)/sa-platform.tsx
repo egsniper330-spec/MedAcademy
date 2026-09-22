@@ -8,15 +8,15 @@ import { View, Text, ScrollView, Pressable, useColorScheme } from 'react-native'
 import { useRouter } from 'expo-router';
 import type { RelativePathString } from 'expo-router';
 import {
-  Flag, Paintbrush, Wrench, Settings, Layers, Video, Coins,
+  Activity, Flag, Paintbrush, Wrench, Settings, Layers, Video, Coins,
   GraduationCap, Smartphone, UserPlus, ChevronRight,
-  Ticket, FileText, Megaphone, ShieldAlert, ShieldCheck,
+  FileText, Megaphone, ShieldAlert, ShieldCheck,
   ShieldX, AlertOctagon, Trash2, Lock, Eye, HeartPulse,
   MonitorDot, HardDrive, Shield, UserCog, HeartHandshake,
   Upload, Database, SquareCode,
 } from 'lucide-react-native';
 import { PageHeader } from '@/components/PageHeader';
-import { neuColors, neuFlatStyle, neuPressedStyle, useLayout } from '@/lib/neu';
+import { neuColors, neuFlatStyle, neuPressedStyle, useLayout, safeBottom } from '@/lib/neu';
 import Bell from '@/components/Bell';
 
 // ── Nav item with neumorphic press ─────────────────────────────────────────
@@ -74,8 +74,7 @@ export default function SAPlatform() {
   const layout = useLayout();
 
   return (
-    <ScrollView style={{ flex: 1, backgroundColor: c.base }}
-          contentContainerStyle={{ paddingBottom: layout.scrollBottom() }}>
+    <ScrollView style={{ flex: 1, backgroundColor: c.base }} contentContainerStyle={{ paddingBottom: safeBottom(layout.insets.bottom) }}>
       {/* PageHeader sits OUTSIDE the inner padding view so it can own its own horizontal padding */}
       <PageHeader title="Platform" subtitle="All settings & integrations" accentColor="#6B7280" rightAction={<Bell />} />
 
@@ -90,11 +89,10 @@ export default function SAPlatform() {
         <SectionLabel title="Feature Control" c={c} />
         <NavItem icon={Flag}        label="Feature Flags"      description="Toggle experimental features on/off"       color="#D97706" path="/feature-flags"      c={c} isDark={isDark} badge="BETA" />
         <NavItem icon={Wrench}      label="Maintenance Mode"   description="Enable / disable platform maintenance"     color="#DC2626" path="/maintenance"         c={c} isDark={isDark} />
-        <NavItem icon={Settings}    label="System Config"      description="Global environment configuration"          color="#6B7280" path="/config"              c={c} isDark={isDark} />
 
         {/* ── Integrations ─────────────────────────────────────────────── */}
         <SectionLabel title="Integrations" c={c} />
-        <NavItem icon={Layers}      label="System Providers"   description="Payment, storage, email providers"        color="#059669" path="/system-providers"         c={c} isDark={isDark} />
+        <NavItem icon={Activity}    label="System Diagnostics" description="Database, DRM, email & storage health"     color="#059669" path="/system-providers"         c={c} isDark={isDark} />
         <NavItem icon={Video}       label="Video Providers"    description="CDN and video platform settings"          color="#7C3AED" path="/video-providers"     c={c} isDark={isDark} />
         <NavItem icon={Coins}       label="Currency Settings"  description="Platform default currency"                color="#D97706" path="/currency"             c={c} isDark={isDark} />
 
@@ -123,7 +121,6 @@ export default function SAPlatform() {
         <SectionLabel title="Academic & Operations" c={c} />
         <NavItem icon={GraduationCap} label="Academic Structure" description="Universities, faculties, levels"        color="#2DA8FF" path="/academic"                c={c} isDark={isDark} />
         <NavItem icon={UserPlus}      label="Enrollment Manager" description="Manual course enrollments"             color="#0EA5E9" path="/enrollment-manager"       c={c} isDark={isDark} />
-        <NavItem icon={Ticket}        label="Activation Codes"   description="Generate & manage course codes"        color="#D97706" path="/codes"                    c={c} isDark={isDark} />
         <NavItem icon={Megaphone}     label="Notifications"      description="Broadcast & send platform messages"    color="#D97706" path="/notifications-center"     c={c} isDark={isDark} />
         <NavItem icon={Upload}        label="Bulk Import"        description="Import users and course data"          color="#16A34A" path="/bulk-import"              c={c} isDark={isDark} />
         <NavItem icon={Database}      label="DB Audit"           description="Low-level database audit trail"        color="#D97706" path="/db-audit"                c={c} isDark={isDark} />

@@ -864,7 +864,7 @@ export default function CourseBuilder() {
       ══════════════════════════════════════════════════════════════════════ */}
       {tab === 'info' && (
         <ScrollView keyboardShouldPersistTaps="handled"
-          contentContainerStyle={{ padding: layout.screenPx, gap: 16, paddingBottom: layout.scrollBottom() }}>
+          contentContainerStyle={{ padding: layout.screenPx, gap: 16 }}>
 
           {/* Title */}
           <Field label="Course Title *">
@@ -1103,7 +1103,7 @@ export default function CourseBuilder() {
           <FlatList
             data={filteredSections}
             keyExtractor={s => s.id}
-            contentContainerStyle={{ padding: layout.screenPx, paddingTop: 4, paddingBottom: layout.scrollBottom(), gap: 12 }}
+            contentContainerStyle={{ padding: layout.screenPx, paddingTop: 4, gap: 12 }}
             ListEmptyComponent={
               <View style={{ alignItems: 'center', paddingVertical: 60 }}>
                 <Layers size={44} color={c.primary} opacity={0.2} />
@@ -1399,7 +1399,7 @@ export default function CourseBuilder() {
       ══════════════════════════════════════════════════════════════════════ */}
       {tab === 'settings' && (
         <ScrollView keyboardShouldPersistTaps="handled"
-          contentContainerStyle={{ padding: layout.screenPx, gap: 16, paddingBottom: layout.scrollBottom() }}>
+          contentContainerStyle={{ padding: layout.screenPx, gap: 16 }}>
           <Text style={{ fontSize: 16, fontWeight: '800', color: c.text, opacity: 0.7 }}>Learning & Access</Text>
 
           <ToggleRow label="Sequential Learning" sub="Students must complete lessons in order"

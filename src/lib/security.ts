@@ -43,11 +43,19 @@
  */
 
 import Constants from 'expo-constants';
+import {
+  classifySslProbe,
+  isSslProbeSecurityFinding,
+  type SslProbeFailureCategory,
+} from './securityStateModel';
 import * as SecureStore from 'expo-secure-store';
 import { backendClient } from '@/client/backendClient';
 import {
   getNativeSecurityFlags,
+  getNativeSecurityFlagsSync,
+  wasLastSecurityFlagsCallUnavailable,
   requestPlayIntegrityToken,
+  type NativeSecurityFlags,
   isNativeVPNDetected,
   isNativeProxyDetected,
   generateAppAttestKey,
@@ -59,7 +67,10 @@ import {
   APP_ATTEST_UNSUPPORTED,
   DEVICE_CHECK_UNSUPPORTED,
 } from '@/lib/nativeSecurity';
-import { getSecurityGuards } from '@/lib/securityConfigService';
+import { getSecurityGuards, getSecurityConfig } from '@/lib/securityConfigService';
+// PURE state model (no react-native/expo imports) — risk scoring + policy
+// evaluation are delegated there so they are unit-testable with plain node.
+import { computeRiskScorePure, evaluateSecurityResult } from './securityStateModel';
 
 // SecureStore key for persisting the App Attest keyId across sessions.
 // WHEN_UNLOCKED_THIS_DEVICE_ONLY: never migrated to another device, never iCloud-synced,
@@ -96,7 +107,29 @@ export type SecurityEventType =
   | 'app_integrity_compromised'
   | 'developer_options_enabled'
   | 'adb_enabled'
-  | 'debugger_attached';
+  | 'debugger_attached'
+  // Observability-only (P4): reported when native detection could not run so
+  // a fail-safe default is never mistaken for a measured-clean state.
+  // Server treats it as a plain log event — never escalates strikes.
+  | 'detection_unavailable'
+  // Fail-closed SENTINEL (state-sync fix): served ONLY while a security
+  // evaluation has not yet completed (cold start, or an evaluation that
+  // threw). It is a client-side state marker, NOT a device finding — it is
+  // never produced by a detector, never logged to the backend, and never
+  // presented as "App Integrity Compromised" (the previous 'tamper_detected'
+  // sentinel mislabeled every cold start as an integrity failure — the exact
+  // false positive observed on the physical device). The gate copy for this
+  // event says the check is re-running; it clears as soon as a real
+  // evaluation completes (SecurityContext check() finally-block + gate
+  // sticky-clear transition).
+  | 'security_unverified'
+  // CONNECTION PROBE OBSERVABILITY (misclassification fix): emitted when the
+  // connection-security probe could not VERIFY the pinned origin but the
+  // failure is NOT evidence of a TLS/pin mismatch — timeout, network error,
+  // server error, or inconclusive. Weight 0, never blocking: weak internet is
+  // a reachability state, not a proven security violation. A REAL pin
+  // mismatch still emits 'ssl_pinning_failure' exactly as before.
+  | 'connection_probe_degraded';
 
 export type PolicyAction = 'log_only' | 'warn_only' | 'block_video' | 'block_login';
 
@@ -105,6 +138,7 @@ export type DetectionType =
   | 'vpn'
   | 'proxy'
   | 'ssl_pinning'
+  | 'connection_probe'
   | 'debug'
   | 'developer_options'
   | 'screenshot'
@@ -137,6 +171,26 @@ export interface SecurityCheckResult {
   blocksLogin: boolean;
   blocksVideo: boolean;
   hasWarnings: boolean;
+  /**
+   * Evidence-quality metadata accompanying this check (distinguishes
+   * "verified against pin" from "check unavailable", records distribution
+   * telemetry, etc.). Observability only — never adds to the risk score.
+   */
+  evidence?:   SecurityEvidence;
+}
+
+/** Evidence-quality + distribution telemetry attached to a security check. */
+export interface SecurityEvidence {
+  /** Installing package if the platform reports one (may legitimately be null). */
+  installerSource?:          string | null;
+  /** True when a pinned expected cert SHA-256 is configured in the build. */
+  expectedCertConfigured?:   boolean;
+  /** SHA-256 fingerprint of the current signing cert (public material). */
+  signatureSha256?:          string | null;
+  /** Installed non-self packages holding SYSTEM_ALERT_WINDOW (capability count — NOT a threat). */
+  overlayCapableAppsCount?:  number;
+  /** True when the native batch call could not run — flags are defaults, not measurements. */
+  detectionUnavailable?:     boolean;
 }
 
 // ─── Risk Score Weights ───────────────────────────────────────────────────────
@@ -162,7 +216,24 @@ const WEIGHTS: Record<SecurityEventType, number> = {
   overlay_detected:          15,
   screen_recording_detected: 10,
   screenshot_detected:        5,
+  // Observability-only event (native module unavailable). Never a threat on
+  // its own — reported for coverage-gap visibility, weight 0.
+  detection_unavailable:      0,
+  // Fail-closed sentinel (see type union above). Small non-zero weight so a
+  // blocked-during-evaluation screen never reads "Risk Score: 0"; the BLOCK
+  // itself comes from SecurityContext's explicit blocksLogin/blocksVideo on
+  // the sentinel result, never from this weight.
+  security_unverified:       10,
+  // Connection-probe observability (misclassification fix): a timeout/network
+  // failure to the pinned origin is NOT a security violation. Weight 0 and
+  // log-only policy — the app does NOT block on weak connectivity. A genuine
+  // pin mismatch (TLS identity rejected while the origin answered) remains a
+  // blocking ssl_pinning_failure.
+  connection_probe_degraded:  0,
 };
+
+/** Weight of the fail-closed sentinel — used by SecurityContext's sentinel results. */
+export const SECURITY_UNVERIFIED_WEIGHT: number = WEIGHTS.security_unverified;
 
 // Detection type → event type mapping
 const DETECTION_TO_EVENT: Record<DetectionType, SecurityEventType[]> = {
@@ -170,8 +241,12 @@ const DETECTION_TO_EVENT: Record<DetectionType, SecurityEventType[]> = {
   vpn:               ['vpn_detected'],
   proxy:             ['proxy_detected'],
   ssl_pinning:       ['ssl_pinning_failure'],
-  debug:             ['debug_detected'],
-  developer_options: ['developer_options_enabled', 'adb_enabled', 'debugger_attached'],
+  // Probe OBSERVABILITY rides its own bucket — NOT ssl_pinning — so a
+  // timeout/network failure can never inherit ssl_pinning's block_login
+  // action (policy decides blocking; the weight alone is not the guard).
+  connection_probe:  ['connection_probe_degraded'],
+  debug:             ['debug_detected', 'debugger_attached'],
+  developer_options: ['developer_options_enabled', 'adb_enabled'],
   screenshot:        ['screenshot_detected'],
   screen_recording:  ['screen_recording_detected'],
   app_integrity:     ['app_integrity_compromised'],
@@ -183,6 +258,17 @@ const DETECTION_TO_EVENT: Record<DetectionType, SecurityEventType[]> = {
   play_integrity:    ['play_integrity_failed'],
   app_attest:        ['app_attest_failed'],
 };
+// NOTE (Developer-Options blocking policy): the four Android debug-state
+// DETECTORS stay technically separate — developer_options_enabled (inert
+// toggle), adb_enabled (USB debugging), debugger_attached (live debugger),
+// debug_detected (test-only build) — so the backend event trail records
+// exactly which surface is present. They are deliberately NOT separate
+// POLICY buckets: `debug_adb`/`debug_options` do not exist in the production
+// security_policies CHECK constraint (chk_security_policies_detection_type)
+// and the owner requires ALL debug states to block. Evidence events map:
+//   developer_options → developer_options_enabled + adb_enabled
+//   debug             → debug_detected + debugger_attached
+// both buckets are block_login (server security_policies authoritative).
 
 // ─── Policy Cache ─────────────────────────────────────────────────────────────
 
@@ -195,8 +281,18 @@ const DEFAULT_POLICIES: Record<DetectionType, PolicyAction> = {
   vpn:               'block_login',
   proxy:             'warn_only',
   ssl_pinning:       'block_login',
+  // Probe observability: a degraded/timeout connection probe is logged, never
+  // blocks — a REAL pin mismatch (ssl_pinning_failure above) keeps blocking.
+  connection_probe:  'log_only',
   debug:             'block_login',
   developer_options: 'block_login',
+  // MANDATORY SECURITY BLOCK (owner requirement): Developer Options — the
+  // inert toggle itself — blocks login and locks the authenticated app via
+  // the central SecurityGate until disabled. ADB/debugger states map into
+  // the same blocking buckets (see DETECTION_TO_EVENT note). The detector
+  // keeps the four states technically separate for the event trail; the
+  // POLICY is uniform block_login. Server security_policies is authoritative;
+  // this is the fail-secure fallback when the server is unreachable.
   screenshot:        'log_only',
   screen_recording:  'block_video',
   app_integrity:     'warn_only',
@@ -210,11 +306,62 @@ const DEFAULT_POLICIES: Record<DetectionType, PolicyAction> = {
 };
 
 export async function getSecurityPolicies(): Promise<Record<DetectionType, PolicyAction>> {
-  // Policy rows are administrator configuration and are intentionally not
-  // exposed through the generic data API to Doctor/Student sessions. Those
-  // sessions use the bundled fail-secure policy defaults; the Super Admin
-  // policy screen remains the authorized management surface.
+  // SERVER-SIDE POLICY SOURCE: /security/policies serves the authoritative
+  // security_policies table (validated allowlist of detection types + actions
+  // — no arbitrary config). Fail-secure: on fetch error the bundled safe
+  // defaults are used and cached briefly, never an empty/permissive map.
   if (cachedPolicies && Date.now() < policyCacheExpiry) return cachedPolicies;
+  // OFFLINE FAST-PATH: with no connectivity the fetch can only burn its full
+  // timeout before hitting the SAME fail-secure fallback below. Skip straight
+  // to it — the network-reconnect listener invalidates and refetches the
+  // moment connectivity returns. No permissive default is introduced: the
+  // fallback IS the bundled safe policy set.
+  if (process.env.EXPO_OS !== 'web') {
+    try {
+      const Network = await import('expo-network');
+      const st = await Network.getNetworkStateAsync();
+      if (!(st.isConnected && st.isInternetReachable !== false)) {
+        cachedPolicies = { ...DEFAULT_POLICIES };
+        policyCacheExpiry = Date.now() + POLICY_TTL_MS;
+        return cachedPolicies;
+      }
+    } catch { /* state unavailable → attempt the fetch as before */ }
+  }
+  try {
+    const { data } = await withTimeout(
+      backendClient.functions.invoke('get-security-policies', { method: 'GET' }),
+      DETECTOR_TIMEOUT_MS,
+      () => ({ data: null, error: null }),
+    );
+    const rows = (data as { policies?: Record<string, { action?: string; enabled?: boolean }> } | null)?.policies;
+    if (rows && typeof rows === 'object') {
+      const VALID_ACTIONS: PolicyAction[] = ['log_only', 'warn_only', 'block_video', 'block_login'];
+      const merged = { ...DEFAULT_POLICIES } as Record<DetectionType, PolicyAction>;
+      let sawAny = false;
+      for (const [type, row] of Object.entries(rows)) {
+        if (!(type in merged)) continue; // strict allowlist — unknown types ignored
+        if (!row || typeof row !== 'object') continue;
+        if (row.enabled === false) {
+          // Disabled detection: downgraded to log_only, never removed
+          merged[type as DetectionType] = 'log_only';
+          sawAny = true;
+          continue;
+        }
+        const action = row.action as PolicyAction | undefined;
+        if (action && VALID_ACTIONS.includes(action)) {
+          merged[type as DetectionType] = action;
+          sawAny = true;
+        }
+      }
+      if (sawAny) {
+        cachedPolicies = merged;
+        policyCacheExpiry = Date.now() + POLICY_TTL_MS;
+        return cachedPolicies;
+      }
+    }
+  } catch {
+    // Server unreachable → keep fail-secure defaults below
+  }
   cachedPolicies = { ...DEFAULT_POLICIES };
   policyCacheExpiry = Date.now() + POLICY_TTL_MS;
   return cachedPolicies;
@@ -223,23 +370,62 @@ export async function getSecurityPolicies(): Promise<Record<DetectionType, Polic
 export function invalidatePolicyCache() {
   cachedPolicies = null;
   policyCacheExpiry = 0;
+  vpnWhitelist = [];
+  vpnWhitelistExpiry = 0;
+  vpnWhitelistFetched = false;
 }
 
 // ─── VPN Whitelist Cache ──────────────────────────────────────────────────────
 
 let vpnWhitelist: string[] = [];
 let vpnWhitelistExpiry = 0;
+// Distinguishes "whitelist is genuinely empty" from "never fetched / fetch failed"
+// so a transient failure cannot blank out a configured whitelist.
+let vpnWhitelistFetched = false;
 
 async function getVpnWhitelist(): Promise<string[]> {
-  if (vpnWhitelist.length && Date.now() < vpnWhitelistExpiry) return vpnWhitelist;
+  if (vpnWhitelistFetched && Date.now() < vpnWhitelistExpiry) return vpnWhitelist;
   try {
-    const { data } = await backendClient.from('security_vpn_whitelist').select('name');
-    vpnWhitelist = (data ?? []).map((r: { name: string }) => r.name.toLowerCase());
+    // Network-bound: bound the fetch so a hung request cannot stall the
+    // security pipeline (on timeout → empty list → detection stays active).
+    const { data } = await withTimeout(
+      backendClient.functions.invoke('get-security-policies', { method: 'GET' }),
+      DETECTOR_TIMEOUT_MS,
+      () => ({ data: null, error: null }),
+    );
+    const list = (data as { vpn_whitelist?: unknown } | null)?.vpn_whitelist;
+    vpnWhitelist = Array.isArray(list)
+      ? list.filter((n): n is string => typeof n === 'string').map((n) => n.toLowerCase())
+      : [];
+    vpnWhitelistFetched = true;
     vpnWhitelistExpiry = Date.now() + POLICY_TTL_MS;
     return vpnWhitelist;
   } catch {
     return [];
   }
+}
+
+// ─── Fail-closed timeout helper ────────────────────────────────────────────
+// SECURITY INARIANT: a hung detector (network fetch with no OS-level timeout,
+// native promise that never settles) must never stall the security pipeline —
+// a stalled pipeline used to hold the checkRef mutex forever and silently
+// swallow every VPN/foreground re-check (verified root cause of the
+// "VPN only detected after restart" incident).
+// On timeout the detector resolves to its fail-safe value (null = no threat,
+// server defaults = fail-secure policy) so the check cycle always completes.
+const DETECTOR_TIMEOUT_MS = 10_000;
+
+function withTimeout<T>(p: Promise<T>, ms: number, onTimeout: () => T): Promise<T> {
+  return new Promise<T>((resolve) => {
+    let settled = false;
+    const timer = setTimeout(() => {
+      if (!settled) { settled = true; resolve(onTimeout()); }
+    }, ms);
+    p.then(
+      (v) => { if (!settled) { settled = true; clearTimeout(timer); resolve(v); } },
+      () => { if (!settled) { settled = true; clearTimeout(timer); resolve(onTimeout()); } },
+    );
+  });
 }
 
 // ─── Phase 1 Detectors ───────────────────────────────────────────────────────
@@ -334,15 +520,60 @@ async function detectVPN(): Promise<SecurityThreat | null> {
 
     // Android — native SecurityModule: ConnectivityManager TRANSPORT_VPN +
     // NetworkInterface name scan (tun/vpn/ppp/ipsec). Correctly excludes WiFi/cellular.
+    //
+    // Part 1 redesign — the decision is a MULTI-SIGNAL evaluation, not a
+    // single framework boolean. Known Smali bypasses patch exactly one
+    // method (hasTransport / isUp / the interface-name compare); each of
+    // those now leaves contradictory evidence in an INDEPENDENT plane:
+    //   • vpnState   — native aggregate model: 'on' | 'off' | 'suspicious'
+    //                  ('suspicious' = callback observed a VPN the sensors
+    //                  no longer find — i.e. active suppression) | 'unknown'
+    //   • netNative  — C++ read of the KERNEL interface/route tables
+    //                  (/proc/net/dev, /proc/net/route). A userspace hook
+    //                  faking the framework APIs does not edit these.
+    //   • coreRasp   — C++ /proc/self/maps hook-library + injected-thread
+    //                  evidence (an instrumentation framework present).
+    // Positive signal from ANY plane → threat. A patched boolean with all
+    // other planes reporting 'on' still blocks.
     const flags = await getNativeSecurityFlags();
-    console.log('[SecurityCheck][VPN] Android: raw vpnDetected =', flags.vpnDetected,
-      '| decision =', flags.vpnDetected ? '🔴 BLOCK' : '✅ PASS');
-    if (!flags.vpnDetected) return null;
-    return {
-      type: 'vpn_detected',
-      detectionMethod: 'VPN Connection detected',
-      detected: true,
-    };
+    const netTunnels = Number(flags.netNativeTunnelIfaces ?? 0);
+    const vpnState = typeof flags.vpnState === 'string' ? flags.vpnState : 'unknown';
+    if (!wasLastSecurityFlagsCallUnavailable()) {
+      console.log('[SecurityCheck][VPN] Android: raw vpnDetected =', flags.vpnDetected,
+        '| vpnState =', vpnState,
+        '| netTunnels =', netTunnels,
+        '| decision =', flags.vpnDetected ? '🔴 BLOCK' : '✅ PASS');
+    } else {
+      // Fail-safe visibility: native module missing/error → flags are defaults,
+      // NOT a measurement. Never silently treat as "confirmed safe".
+      console.warn('[SecurityCheck][VPN] Android: native module UNAVAILABLE — VPN state UNKNOWN (fail-safe default)');
+    }
+
+    // Signal A: the framework plane (transport + interface names).
+    if (flags.vpnDetected) {
+      return { type: 'vpn_detected', detectionMethod: 'VPN Connection detected', detected: true };
+    }
+    // Signal B: native aggregate model — 'on' (sensor agreement) and
+    // 'suspicious' (callback saw a VPN that sensors deny = suppression)
+    // both block; only an explicit 'off' passes here. 'unknown' is left to
+    // the policy layer (does not block on its own; logged as evidence).
+    if (vpnState === 'on' || vpnState === 'suspicious') {
+      return {
+        type: 'vpn_detected',
+        detectionMethod: `VPN detected (native aggregate: ${vpnState})`,
+        detected: true,
+      };
+    }
+    // Signal C: kernel-plane tunnel interfaces with an active default route
+    // through one of them — independent of every framework API.
+    if (netTunnels > 0 && flags.netNativeRouteTunnel === true) {
+      return {
+        type: 'vpn_detected',
+        detectionMethod: `VPN detected (kernel tunnel interface x${netTunnels})`,
+        detected: true,
+      };
+    }
+    return null;
   } catch (e) {
     if (__DEV__) {
       console.log('[SecurityCheck][VPN] exception:', e);
@@ -353,7 +584,12 @@ async function detectVPN(): Promise<SecurityThreat | null> {
 
 /**
  * Proxy detection.
- * Android: environment variable scan (http_proxy / https_proxy / all_proxy).
+ * Android: native SecurityModule three-tier probe — JVM system proxy properties
+ *          (http.proxyHost/https.proxyHost/socksProxyHost — what ProxySelector
+ *          actually honors), ProxySelector.select() on the live API origin, and
+ *          LinkProperties.httpProxy (API 29+). The previous JS env-var scan
+ *          (globalThis.http_proxy) is dead code on Android app processes —
+ *          those properties live on the JVM, not in JS.
  * iOS:     IOSSecurityModule: CFNetworkCopySystemProxySettings (HTTP/HTTPS/SOCKS).
  */
 async function detectProxy(): Promise<SecurityThreat | null> {
@@ -369,17 +605,15 @@ async function detectProxy(): Promise<SecurityThreat | null> {
       return { type: 'proxy_detected', detectionMethod: 'Proxy connection detected', detected: true };
     }
 
-    // Android: environment variable scan
-    const httpProxy  = (globalThis as Record<string, unknown>)['http_proxy']  as string | undefined;
-    const httpsProxy = (globalThis as Record<string, unknown>)['https_proxy'] as string | undefined;
-    const allProxy   = (globalThis as Record<string, unknown>)['all_proxy']   as string | undefined;
-    const found = !!(httpProxy || httpsProxy || allProxy);
+    // Android: native three-tier probe (see SecurityModule.detectProxy).
+    // Proxy policy default is warn_only — imperfect detection must never lock
+    // users out; it reports evidence to the backend where policy is applied.
+    const flags = await getNativeSecurityFlags();
     if (__DEV__) {
-      console.log('[SecurityCheck][Proxy] Android proxyDetected=', found,
-        '| http_proxy=', httpProxy, 'https_proxy=', httpsProxy, 'all_proxy=', allProxy);
+      console.log('[SecurityCheck][Proxy] Android proxyDetected=', flags.proxyDetected);
     }
-    if (!found) return null;
-    return { type: 'proxy_detected', detectionMethod: 'Proxy connection detected', detected: true };
+    if (!flags.proxyDetected) return null;
+    return { type: 'proxy_detected', detectionMethod: 'Proxy configuration detected', detected: true };
   } catch (e) {
     if (__DEV__) {
       console.log('[SecurityCheck][Proxy] exception:', e);
@@ -444,30 +678,41 @@ async function detectDeveloperOptions(): Promise<SecurityThreat | null> {
         console.log('[SecurityCheck][DevOptions] iOS debuggerAttached=', flags.debuggerAttached);
       }
       if (!flags.debuggerAttached) return null;
+      // FIX (event-accurate mapping): this branch detects a LIVE DEBUGGER
+      // (sysctl kinfo_proc P_TRACED). It previously emitted
+      // developer_options_enabled — the wrong event — which mislabeled the
+      // condition in the audit trail and gate UI. debugger_attached is the
+      // accurate event type; it maps into the same blocking `debug` bucket,
+      // so the security policy is unchanged.
       return {
-        type: 'developer_options_enabled',
+        type: 'debugger_attached',
         detectionMethod: 'Debugger attached',
         detected: true,
       };
     }
 
     // Android
+    // DETECTION vs POLICY (owner-mandated model): the four Android debug
+    // states are detected as DISTINCT event types — developer_options_enabled,
+    // adb_enabled, debugger_attached, debug_detected (test-only build) — so
+    // the backend audit trail records exactly which surface is present. ALL
+    // FOUR are MANDATORY security blocks per the owner's security policy:
+    // they map into the block_login policy buckets (developer_options / debug)
+    // and lock the app behind the central SecurityGate until cleared.
     const flags = await getNativeSecurityFlags();
-    const active: string[] = [];
-    if (flags.developerOptionsEnabled) active.push('Developer Options enabled');
-    if (flags.adbEnabled)              active.push('USB Debugging (ADB) enabled');
-    if (flags.debuggerAttached)        active.push('Debugger attached');
-    if (flags.testOnlyBuild)           active.push('test-only build flag');
-    if (__DEV__) {
-      console.log('[SecurityCheck][DevOptions] Android checks=', active.join(', ') || 'none');
+    if (flags.debuggerAttached) {
+      return { type: 'debugger_attached', detectionMethod: 'Debugger attached', detected: true };
     }
-    if (active.length === 0) return null;
-    // Build a clean user-facing label — never expose raw method names
-    const label = flags.developerOptionsEnabled ? 'Developer options enabled'
-      : flags.adbEnabled ? 'USB debugging enabled'
-      : flags.debuggerAttached ? 'Debugger attached'
-      : 'Developer mode active';
-    return { type: 'developer_options_enabled', detectionMethod: label, detected: true };
+    if (flags.adbEnabled) {
+      return { type: 'adb_enabled', detectionMethod: 'USB debugging (ADB) enabled', detected: true };
+    }
+    if (flags.developerOptionsEnabled) {
+      return { type: 'developer_options_enabled', detectionMethod: 'Developer options enabled', detected: true };
+    }
+    if (flags.testOnlyBuild) {
+      return { type: 'debug_detected', detectionMethod: 'test-only build flag', detected: true };
+    }
+    return null;
   } catch (e) {
     if (__DEV__) {
       console.log('[SecurityCheck][DevOptions] exception:', e);
@@ -504,14 +749,51 @@ async function detectScreenRecording(): Promise<SecurityThreat | null> {
   }
 }
 
+/**
+ * App-integrity evaluation (Part 6/7 hardening).
+ *
+ * Package identity: PackageManager must report the OFFICIAL application id
+ * (com.medacademy.app). A repackaged APK installed under a different package
+ * name fails here regardless of its signing certificate.
+ *
+ * Signing identity: the native layer compares the APK's signing cert SHA-256
+ * against the build-injected production pin (BuildConfig.EXPECTED_CERT_SHA256,
+ * direct reference — R8 keeps it). signatureValid=false means re-signed or
+ * tampered; expectedCertConfigured=false means no pin in this build (dev) —
+ * the check is then UNAVAILABLE, never a verdict.
+ *
+ * This remains evidence + a local UX gate, NOT the authorization boundary:
+ * the same findings travel to the backend via security events and the
+ * device-evidence flow, where binary-integrity baselines are enforced.
+ */
 function detectAppIntegrity(): SecurityThreat | null {
   try {
     if (process.env.EXPO_OS === 'web') return null;
-    if (__DEV__) {
-      console.log('[SecurityCheck][AppIntegrity] __DEV__=true');
-      return { type: 'app_integrity_compromised', detectionMethod: 'App integrity check failed', detected: true };
+    const flags = getNativeSecurityFlagsSync();
+    const issues: string[] = [];
+
+    // 1. Package identity (Part 6).
+    if (typeof flags.packageIdentityValid === 'boolean' && !flags.packageIdentityValid) {
+      issues.push('package identity mismatch');
     }
-    return null;
+    // 2. Signing certificate against the build-time pin (Part 6).
+    if (flags.expectedCertConfigured === true && flags.signatureValid === false) {
+      issues.push('signing certificate mismatch');
+    }
+    // 3. Native anti-tamper (dex/lib presence, distribution-aware).
+    if (flags.tampered === true) {
+      issues.push('binary tampering');
+    }
+
+    if (issues.length === 0) return null;
+    if (__DEV__) {
+      console.log('[SecurityCheck][AppIntegrity] findings:', issues.join('; '));
+    }
+    return {
+      type: 'app_integrity_compromised',
+      detectionMethod: `App integrity check failed (${issues.join('; ')})`,
+      detected: true,
+    };
   } catch { return null; }
 }
 
@@ -597,61 +879,93 @@ async function detectSSLPinning(): Promise<SecurityThreat | null> {
   // In DEV / Expo Go the native pinner is not loaded — skip to avoid false positives
   if (__DEV__) return null;
 
+  const probeStart = Date.now();
   try {
-    // Step 1: check network connectivity so we don't false-positive when offline
+    // Step 1: connectivity gate — genuinely offline is NOT a security finding
+    // (offline behavior is owned by the offline policy architecture).
     const Network = await import('expo-network');
     const state = await Network.getNetworkStateAsync();
     const isConnected = state.isConnected && state.isInternetReachable;
     if (!isConnected) {
-      // Device is offline; cannot distinguish pin fail from no network — non-blocking
       return null;
     }
 
-    // Step 2: probe the PHP backend API — the native pinner validates this TLS connection.
-    // Use the base URL (no auth required, tiny response).
+    // Step 2: probe the pinned origin (the PHP backend — TLS validated by the
+    // platform/native pinning layer where wired).
     const phpApiUrl = process.env.EXPO_PUBLIC_PHP_API_URL?.trim();
     if (!phpApiUrl) return null; // configuration guard reports this separately
 
-    const probeUrl = phpApiUrl;
-
-    let probeOk = false;
-    try {
+    const fetchWithTimeout = async (url: string, ms: number, method: 'GET' | 'HEAD') => {
       const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 8000);
-      // Use globalThis.fetch explicitly — NOT bare `fetch`.
-      // On iOS JSC, bare `fetch` in module scope can resolve to undefined if the
-      // lazy getter hasn't fired yet.  globalThis.fetch is always the live value
-      // (backend configuration guard + whatwg-fetch polyfill) at the time this async function runs.
-      const res = await globalThis.fetch(probeUrl, {
-        method: 'GET',
-        signal: controller.signal,
-      });
-      clearTimeout(timeout);
-      // Any HTTP response (even 4xx) means TLS handshook — pin passed
-      probeOk = res.status > 0;
-    } catch {
-      // fetch threw — could be: (a) certificate pin rejected, (b) transient network glitch.
-      // Distinguish by trying a well-known HTTPS host that is NOT pinned.
+      const timer = setTimeout(() => controller.abort(), ms);
       try {
-        const fallbackController = new AbortController();
-        const fallbackTimeout = setTimeout(() => fallbackController.abort(), 5000);
-        await globalThis.fetch('https://www.apple.com/library/test/success.html', {
-          method: 'HEAD',
-          signal: fallbackController.signal,
-        });
-        clearTimeout(fallbackTimeout);
-        // Fallback succeeded → device is online but our pinned host failed → PIN MISMATCH
-        probeOk = false;
+        // globalThis.fetch explicitly — bare `fetch` can be undefined in iOS JSC
+        // module scope before the lazy getter fires.
+        return await globalThis.fetch(url, { method, signal: controller.signal });
+      } finally {
+        clearTimeout(timer);
+      }
+    };
+
+    let originOk = false;
+    let originCategory: SslProbeFailureCategory = 'none';
+    let originHttpStatus = -1;
+    try {
+      const res = await fetchWithTimeout(phpApiUrl, 8000, 'GET');
+      originHttpStatus = res.status;
+      // Any HTTP response (even 4xx) means TLS handshook — identity accepted.
+      originOk = res.status > 0;
+      if (!originOk) originCategory = 'http_error';
+    } catch (e: unknown) {
+      // Classify the failure: abort() → timeout; TypeError → network/DNS;
+      // anything else → unknown. NOTE: on Android no native pin enforcement
+      // is wired today, so a fetch-level rejection here cannot be a pin
+      // mismatch — it is reachability. If a native pinner is later wired and
+      // rejects a TLS identity, surface it as category 'tls_rejected' and
+      // this classifier will emit the real ssl_pinning_failure.
+      const msg = e instanceof Error ? `${e.name}: ${e.message}` : String(e);
+      originCategory = /abort/i.test(msg) ? 'timeout' : /network|dns|failed to fetch|connect/i.test(msg) ? 'network_error' : 'unknown';
+    }
+
+    // Step 3: only when the ORIGIN failed do we probe an unpinned control host
+    // to distinguish "device offline/degraded network" from "origin-specific
+    // failure". The control host is a global CDN — reachable under conditions
+    // where a single distant origin is not, so this NO LONGER proves a pin
+    // mismatch; it only proves the device has SOME internet.
+    let controlOk: boolean | null = null;
+    if (!originOk) {
+      try {
+        await fetchWithTimeout('https://www.apple.com/library/test/success.html', 5000, 'HEAD');
+        controlOk = true;
       } catch {
-        // Both probes failed → device appears offline → non-blocking
-        return null;
+        controlOk = false;
       }
     }
 
-    if (!probeOk) {
+    const outcome = classifySslProbe(originOk, controlOk, originCategory);
+    const elapsed = Date.now() - probeStart;
+
+    if (__DEV__) {
+      console.log('[SecurityCheck][SSLPinning] outcome=', outcome, 'category=', originCategory,
+        'httpStatus=', originHttpStatus, 'control=', controlOk, 'elapsedMs=', elapsed);
+    }
+
+    if (isSslProbeSecurityFinding(outcome)) {
       return {
         type: 'ssl_pinning_failure',
-        detectionMethod: 'SSL/TLS certificate mismatch detected',
+        detectionMethod: 'TLS identity of the API server was rejected by certificate pinning',
+        detected: true,
+      };
+    }
+
+    if (outcome !== 'pin_verified') {
+      // OBSERVABILITY ONLY (weight 0, never blocking): log the degradation with
+      // its category so diagnostics can answer "timeout vs network error vs
+      // server failure". Contains no secrets and no technical exposure to the
+      // student UI (the gate only renders blocking findings).
+      return {
+        type: 'connection_probe_degraded',
+        detectionMethod: `Connection check inconclusive (${originCategory})`,
         detected: true,
       };
     }
@@ -707,8 +1021,16 @@ async function detectOverlay(): Promise<SecurityThreat | null> {
 }
 
 /**
- * Signature + tamper detection.
- * Android: cert SHA-256 vs trusted fingerprints + installer source + native lib presence.
+ * Signature + tamper detection — distribution-aware.
+ *
+ * Android: cert SHA-256 vs trusted fingerprints (server-supplied via
+ *          security_config.expected_cert_sha256s, with a static bootstrap
+ *          fallback) + native lib presence. Installer source is DISTRIBUTION
+ *          TELEMETRY ONLY by default: this app is distributed as a direct-
+ *          downloaded release APK, so a null/non-Play installer is NOT tamper
+ *          evidence. Admins can enable a server-controlled strict mode by
+ *          setting extras.require_play_installer=true in security_config —
+ *          intended for a future Play-only production rollout.
  * iOS:     IOSSecurityModule: MachO magic byte check + embedded.mobileprovision presence.
  *          (iOS code signing is enforced by the OS; this is a belt-and-suspenders layer.)
  */
@@ -730,12 +1052,18 @@ async function detectTamper(): Promise<SecurityThreat | null> {
     // Android
     const flags = await getNativeSecurityFlags();
     const { SIGNATURE_CHECK_READY, TRUSTED_CERTS } = getSecurityGuards();
+    const requirePlayInstaller =
+      getSecurityConfig().extras?.require_play_installer === true;
     if (__DEV__) {
       console.log('[SecurityCheck][Tamper] Android signatureValid=', flags.signatureValid, '| tampered=', flags.tampered,
-        '| sigCheckReady=', SIGNATURE_CHECK_READY, '| trustedCerts=', TRUSTED_CERTS.length);
+        '| sigCheckReady=', SIGNATURE_CHECK_READY, '| trustedCerts=', TRUSTED_CERTS.length,
+        '| requirePlayInstaller=', requirePlayInstaller, '| installerSource=', flags.installerSource ?? null,
+        '| expectedCertConfigured=', flags.expectedCertConfigured ?? false);
     }
 
     // Signature check: pass only when runtime cert matches ANY trusted fingerprint.
+    // UNAVAILABLE when no fingerprint is configured anywhere — that state is
+    // surfaced as evidence (expectedCertConfigured=false), never as a failure.
     if (SIGNATURE_CHECK_READY && TRUSTED_CERTS.length > 0) {
       if (!flags.signatureValid) {
         return { type: 'signature_invalid', detectionMethod: 'App signature verification failed', detected: true };
@@ -744,6 +1072,19 @@ async function detectTamper(): Promise<SecurityThreat | null> {
 
     if (flags.tampered) {
       return { type: 'tamper_detected', detectionMethod: 'App integrity check failed', detected: true };
+    }
+
+    // Server-controlled strict mode ONLY (see detectTamper doc above).
+    // Default OFF: direct-download distribution must never read as tampering.
+    if (requirePlayInstaller) {
+      const installer = flags.installerSource ?? null;
+      if (installer !== 'com.android.vending') {
+        return {
+          type: 'tamper_detected',
+          detectionMethod: 'App not installed from an approved store (strict installer policy)',
+          detected: true,
+        };
+      }
     }
 
     return null;
@@ -822,14 +1163,17 @@ export async function runPlayIntegrityCheck(): Promise<SecurityThreat | null> {
       };
     }
 
-    // 1. Get a fresh nonce from our backend (prevents replay attacks)
+    // 1. Request-hash challenge from our backend (single-use, 5-min TTL,
+    //    bound to this user; the generic action covers the security-gate UX
+    //    check — protected endpoints use action-scoped challenges).
     const { data: nonceData, error: nonceErr } = await backendClient.functions.invoke('verify-play-integrity', {
-      body: { action: 'get_nonce' },
+      body: { action: 'get_nonce', protected_action: 'generic' },
     });
-    if (nonceErr || !nonceData?.nonce) return null;
-    _piNonce = nonceData.nonce as string;
+    if (nonceErr || !nonceData?.request_hash) return null;
+    _piNonce = nonceData.request_hash as string;
 
-    // 2. Request token from Play Integrity API (native)
+    // 2. Request token from Play Integrity API (native; the hash becomes
+    //    Google-signed requestDetails.requestHash)
     const token = await requestPlayIntegrityToken(_piNonce);
     if (!token) {
       _piResult = true;
@@ -837,9 +1181,11 @@ export async function runPlayIntegrityCheck(): Promise<SecurityThreat | null> {
       return null;
     }
 
-    // 3. Server-side verification — client NEVER interprets verdict
+    // 3. Server-side verification — client NEVER interprets verdict. The
+    //    backend decodes via Google (fail-closed) and persists a verdict row
+    //    bound to (user, action, request_hash).
     const { data: verifyData, error: verifyErr } = await backendClient.functions.invoke('verify-play-integrity', {
-      body: { action: 'verify', token, nonce: _piNonce },
+      body: { action: 'verify', token, request_hash: _piNonce },
     });
     if (verifyErr) return null;
 
@@ -1035,8 +1381,11 @@ export async function clearAppAttestKey(): Promise<void> {
 // ─── Risk Score Calculator ────────────────────────────────────────────────────
 
 export function computeRiskScore(threats: SecurityThreat[]): number {
-  const total = threats.filter((t) => t.detected).reduce((sum, t) => sum + (WEIGHTS[t.type] ?? 0), 0);
-  return Math.min(100, total);
+  // Delegates to the PURE model (securityStateModel.ts) so the risk formula
+  // is unit-testable. Semantics unchanged: Σ weights of detected threats,
+  // clamped to 0..100. Risk score is INFORMATIONAL — the block decision is
+  // policy-driven (evaluateSecurityResult), never score-driven.
+  return computeRiskScorePure(threats, WEIGHTS);
 }
 
 // ─── Full Security Check ──────────────────────────────────────────────────────
@@ -1044,6 +1393,30 @@ export function computeRiskScore(threats: SecurityThreat[]): number {
 export async function runSecurityChecks(): Promise<SecurityCheckResult> {
   if (__DEV__) {
     console.log('[SecurityCheck][runSecurityChecks] ▶ starting all checks on platform=', process.env.EXPO_OS);
+  }
+
+  // ── OFFLINE FAST-PATH (genuine-offline detection only — no policy change) ──
+  // A genuinely offline device cannot complete the NETWORK-bound detectors
+  // (Play Integrity nonce/verdict; server policy fetch). Those checks already
+  // resolve to "no threat" on network failure — but only after their full
+  // network timeouts, which held the fail-closed startup gate up for ~10–20s
+  // before Offline Mode appeared. Skipping them WHEN THE DEVICE IS GENUINELY
+  // OFFLINE is honest: they cannot produce evidence offline either way, and
+  // the connectivity-restore listener re-runs the full pipeline the moment
+  // the network returns. EVERY LOCAL detector (root, emulator, mock location,
+  // developer options, USB debugging, debugger, frida/xposed/magisk, overlay,
+  // screen recording, tamper/signature) still runs — genuine violations still
+  // block offline exactly as online.
+  let genuinelyOffline = false;
+  if (process.env.EXPO_OS !== 'web') {
+    try {
+      const Network = await import('expo-network');
+      const st = await Network.getNetworkStateAsync();
+      genuinelyOffline = !(st.isConnected && st.isInternetReachable !== false);
+    } catch { /* unreachable state → assume online (full pipeline) */ }
+    if (__DEV__ && genuinelyOffline) {
+      console.log('[SecurityCheck][runSecurityChecks] device genuinely offline — skipping network-bound detectors (local detectors still run)');
+    }
   }
 
   // Warm up the native flag batch cache ONCE so every detector re-uses it
@@ -1064,20 +1437,27 @@ export async function runSecurityChecks(): Promise<SecurityCheckResult> {
     fridaThreat, xposedThreat, magiskThreat, overlayThreat, tamperThreat,
     mockLocThreat, piThreat, sslThreat,
   ] = await Promise.all([
-    detectRootJailbreak(),
-    detectVPN(),
-    detectProxy(),
-    detectDebug(),
-    detectDeveloperOptions(),
-    detectScreenRecording(),
-    detectFrida(),
-    detectXposed(),
-    detectMagisk(),
-    detectOverlay(),
-    detectTamper(),
-    detectMockLocation(),
-    runPlayIntegrityCheck(),
-    detectSSLPinning(),
+    // Every detector is individually bounded (DETECTOR_TIMEOUT_MS): a single
+    // hung native/network call can no longer stall the whole pipeline. A timed-
+    // out detector resolves to its fail-safe value (null = no threat from that
+    // detector this cycle) so the check always completes and the mutex below
+    // (SecurityContext checkRef) is always released.
+    withTimeout(detectRootJailbreak(),        DETECTOR_TIMEOUT_MS, () => null),
+    withTimeout(detectVPN(),                  DETECTOR_TIMEOUT_MS, () => null),
+    withTimeout(detectProxy(),                DETECTOR_TIMEOUT_MS, () => null),
+    withTimeout(detectDebug(),                DETECTOR_TIMEOUT_MS, () => null),
+    withTimeout(detectDeveloperOptions(),     DETECTOR_TIMEOUT_MS, () => null),
+    withTimeout(detectScreenRecording(),      DETECTOR_TIMEOUT_MS, () => null),
+    withTimeout(detectFrida(),                DETECTOR_TIMEOUT_MS, () => null),
+    withTimeout(detectXposed(),               DETECTOR_TIMEOUT_MS, () => null),
+    withTimeout(detectMagisk(),               DETECTOR_TIMEOUT_MS, () => null),
+    withTimeout(detectOverlay(),              DETECTOR_TIMEOUT_MS, () => null),
+    withTimeout(detectTamper(),               DETECTOR_TIMEOUT_MS, () => null),
+    withTimeout(detectMockLocation(),         DETECTOR_TIMEOUT_MS, () => null),
+    // Play Integrity is entirely network-bound (backend nonce → Google API).
+    // Offline it can only burn its timeouts before returning null anyway.
+    withTimeout(genuinelyOffline ? Promise.resolve(null) : runPlayIntegrityCheck(), DETECTOR_TIMEOUT_MS, () => null),
+    withTimeout(detectSSLPinning(),           DETECTOR_TIMEOUT_MS, () => null),
   ]);
   const integrityThreat = detectAppIntegrity();
 
@@ -1104,21 +1484,54 @@ export async function runSecurityChecks(): Promise<SecurityCheckResult> {
     console.log('[SecurityCheck][runSecurityChecks] riskScore=', riskScore);
   }
 
-  let blocksLogin  = false;
-  let blocksVideo  = false;
-  let hasWarnings  = false;
+  // ── Evidence-quality metadata (observability — never scored) ───────────────
+  // Distinguishes "verified" from "unavailable" and carries distribution
+  // telemetry so the backend can audit evidence quality per event.
+  const evidence: SecurityEvidence = {
+    installerSource:         rawFlags?.installerSource ?? undefined,
+    expectedCertConfigured:  rawFlags?.expectedCertConfigured ?? false,
+    signatureSha256:         rawFlags?.signatureSha256 ?? undefined,
+    overlayCapableAppsCount: rawFlags?.overlayCapableAppsCount ?? undefined,
+    detectionUnavailable:    wasLastSecurityFlagsCallUnavailable(),
+  };
 
-  for (const threat of allThreats) {
-    const detectionType = (Object.entries(DETECTION_TO_EVENT) as [DetectionType, SecurityEventType[]][])
-      .find(([, events]) => events.includes(threat.type))?.[0];
-    if (!detectionType) continue;
-    const action = policies[detectionType];
-    if (action === 'block_login') blocksLogin = true;
-    if (action === 'block_video') blocksVideo = true;
-    if (action === 'warn_only')   hasWarnings = true;
+  // Delegates the AUTHORITATIVE policy evaluation to the PURE model
+  // (securityStateModel.ts) so the findings → policy → state transition is
+  // unit-tested (tests/securityStateModel.test.cjs). Semantics unchanged:
+  // OR-composition over per-finding policy actions — blocked while ANY
+  // blocking finding is live, recoverable when a fresh evaluation finds none.
+  const verdict = evaluateSecurityResult({
+    threats: allThreats,
+    policies,
+    detectionToEvent: DETECTION_TO_EVENT,
+    weights: WEIGHTS,
+  });
+  const { blocksLogin, blocksVideo, hasWarnings } = verdict;
+
+  // ── P4: report detection degradation for observability ────────────────────
+  // When the native batch was unavailable, the flags above are fail-safe
+  // defaults, NOT measurements. Fire-and-forget a 'detection_unavailable'
+  // event (server: log_only, never escalates) at most once per session so
+  // admins can see coverage gaps without risking user lockout.
+  if (wasLastSecurityFlagsCallUnavailable() && process.env.EXPO_OS !== 'web') {
+    void reportDetectionUnavailableOnce();
   }
 
-  return { threats: allThreats, riskScore, policies, blocksLogin, blocksVideo, hasWarnings };
+  return { threats: allThreats, riskScore, policies, blocksLogin, blocksVideo, hasWarnings, evidence };
+}
+
+// Once-per-session guard for detection_unavailable telemetry.
+let _detectionUnavailableReported = false;
+function reportDetectionUnavailableOnce(): void {
+  if (_detectionUnavailableReported) return;
+  _detectionUnavailableReported = true;
+  void logSecurityEvent({
+    eventType: 'detection_unavailable',
+    detectionMethod: 'Native security module unavailable — flags are fail-safe defaults, not measurements',
+    policyAction: 'log_only',
+    riskScore: 0,
+    metadata: { platform: process.env.EXPO_OS, dev: __DEV__ === true },
+  }).catch(() => { /* never block user flow */ });
 }
 
 // ─── Security Event Logger ────────────────────────────────────────────────────
@@ -1156,6 +1569,7 @@ export async function logThreats(
   policies: Record<DetectionType, PolicyAction>,
   riskScore: number,
   deviceId?: string,
+  evidence?: SecurityEvidence,
 ): Promise<void> {
   if (!threats.length) return;
   const events = threats.map((t) => {
@@ -1170,6 +1584,15 @@ export async function logThreats(
       device_id:        deviceId,
       platform:         process.env.EXPO_OS,
       app_version:      Constants.expoConfig?.version,
+      // Evidence-quality metadata: lets the backend tell "measured clean with
+      // pin" apart from "check unavailable" and audit distribution telemetry.
+      metadata: {
+        expected_cert_configured:   evidence?.expectedCertConfigured ?? null,
+        signature_sha256:           evidence?.signatureSha256 ?? null,
+        installer_source:           evidence?.installerSource ?? null,
+        overlay_capable_apps_count: evidence?.overlayCapableAppsCount ?? null,
+        detection_unavailable:      evidence?.detectionUnavailable ?? false,
+      },
     };
   });
   try {

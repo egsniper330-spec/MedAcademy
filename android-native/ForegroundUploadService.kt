@@ -304,7 +304,7 @@ class ForegroundUploadService : Service() {
         try {
             // Resolve the file URI to a readable file path
             val file = resolveFile(fileUriStr)
-            if (!file.exists() || file.length() == 0) {
+            if (!file.exists() || file.length() == 0L) {
                 emitError(uploadId, "File not found or empty: $fileUriStr")
                 return
             }
@@ -389,7 +389,7 @@ class ForegroundUploadService : Service() {
                 } else 0
 
                 emitProgress(uploadId, chunkIndex + 1, totalChunks, bytesUploaded, fileSize, progress)
-                updateNotification(uploadId, fileName, progress)
+                updateNotification(uploadId, fileName, progress, bytesUploaded, fileSize)
 
                 Log.d(TAG, "Chunk $chunkIndex/$totalChunks uploaded (${bytesUploaded}/${fileSize})")
 
@@ -532,7 +532,10 @@ class ForegroundUploadService : Service() {
         }
     }
 
-    private fun buildNotification(uploadId: String, text: String, progress: Int): Notification {
+    private fun buildNotification(
+        uploadId: String, text: String, progress: Int,
+        bytesUploaded: Long = 0, totalBytes: Long = 0,
+    ): Notification {
         // Tap notification → open the app (this is the minimal intent)
         val launchIntent = packageManager.getLaunchIntentForPackage(packageName)
         val pendingIntent = PendingIntent.getActivity(
@@ -540,19 +543,34 @@ class ForegroundUploadService : Service() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
 
+        val body = if (totalBytes > 0) {
+            val uploadedMB = bytesUploaded / (1024 * 1024)
+            val totalMB = totalBytes / (1024 * 1024)
+            "$text\n${uploadedMB} MB / ${totalMB} MB — $progress%"
+        } else {
+            "$text — $progress%"
+        }
+
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(android.R.drawable.stat_sys_upload)
-            .setContentTitle("Uploading video…")
-            .setContentText(text)
+            .setContentTitle("MedAcademy — Uploading video")
+            .setContentText(body)
             .setOngoing(true)
             .setContentIntent(pendingIntent)
             .setProgress(100, progress, false)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(body))
             .build()
     }
 
-    private fun updateNotification(uploadId: String, fileName: String, progress: Int) {
+    private fun updateNotification(
+        uploadId: String, fileName: String, progress: Int,
+        bytesUploaded: Long = 0, totalBytes: Long = 0,
+    ) {
         val nm = getSystemService(NotificationManager::class.java)
-        val notification = buildNotification(uploadId, "$fileName — $progress%", progress)
+        val notification = buildNotification(
+            uploadId, "Uploading $fileName", progress,
+            bytesUploaded, totalBytes,
+        )
         nm.notify(NOTIFICATION_ID, notification)
     }
 
@@ -645,7 +663,7 @@ class ForegroundUploadService : Service() {
                             // Convert nested JSONObject to WritableMap
                             val nested = com.facebook.react.bridge.Arguments.createMap()
                             for (k in value.keys()) {
-                                when (v = value.get(k)) {
+                                when (val v = value.get(k)) {
                                     is String -> nested.putString(k, v)
                                     is Int -> nested.putInt(k, v)
                                     is Long -> nested.putDouble(k, v.toDouble())

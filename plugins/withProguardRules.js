@@ -5,7 +5,10 @@ const path = require('path');
 // Resolve @expo/config-plugins from expo's own package tree so we always get
 // the SDK-55-compatible version (55.x), not any top-level project dep.
 const expoRoot = path.dirname(require.resolve('expo/package.json'));
-const { withDangerousMod, withAppBuildGradle } = require(
+const {
+  withDangerousMod,
+  withGradleProperties,
+} = require(
   require.resolve('@expo/config-plugins', { paths: [expoRoot] })
 );
 
@@ -16,7 +19,24 @@ const { withDangerousMod, withAppBuildGradle } = require(
 //   - Remove debug symbols, SourceFile attributes, line number tables
 //   - Rename classes / methods / fields aggressively
 //   - Keep only what reflection genuinely needs (RN bridge, Kotlin internals)
-//   - Resource shrinking (gradle-level, enabled in build.gradle)
+//   - Resource shrinking (gradle-level, forced ON via gradle.properties below)
+//
+// KEEP-RULE PHILOSOPHY (why each entry exists — do not add blanket keeps):
+//   - RN/Hermes/JNI bridge classes: the JS↔native bridge and Hermes resolve
+//     JNI symbols by exact class/method name — obfuscating them breaks the
+//     runtime.
+//   - expo.modules.**: expo-modules-core discovers module classes via
+//     reflection on the manifest provider (DoNotStrip annotations cover most
+//     members; the package keep covers the rest without breaking shrinking of
+//     their internals... note: { *; } is required because module singletons
+//     are resolved reflectively).
+//   - com.medacademy.security/upload: our own RN native modules — looked up
+//     by name from the JS side through the RN bridge, must keep exact names.
+//   - okhttp/okio/VdoCipher/Play Integrity: SDKs with internal reflection or
+//     JNI; keeping them is required for correct behavior, not paranoia.
+//   - kotlin/kotlinx stdlib metadata consumers: R8 strips kotlin.Metadata
+//     unless kept; keeping the classes avoids reflective Kotlin breakage.
+//   Everything else (app code, libraries' dead paths) shrinks + renames.
 
 const PROGUARD_RULES = `
 ##──────────────────────────────────────────────────────────────────────────────
@@ -26,9 +46,12 @@ const PROGUARD_RULES = `
 ## edit this plugin instead.
 ##──────────────────────────────────────────────────────────────────────────────
 
-# ── General R8 optimizations ──────────────────────────────────────────────────
--optimizations !code/simplification/arithmetic,!code/simplification/cast,!field/*,!class/merging/*
--optimizationpasses 7
+# ── R8 configuration ─────────────────────────────────────────────────────────
+# -dontoptimize: full-mode R8 optimization OOMs the build JVM on the current
+# 7.6 GB build host even with -Xmx3584m. Shrinking (dead-code removal) and
+# obfuscation (renaming/repackaging) — the actual anti-RE value — are kept.
+# Revisit when building on a larger host.
+-dontoptimize
 -allowaccessmodification
 -repackageclasses 'a'   # flatten all packages into single short package name
 
@@ -47,6 +70,16 @@ const PROGUARD_RULES = `
 
 # ── Our SecurityModule — must survive reflection calls from RN bridge ─────────
 -keep class com.medacademy.security.** { *; }
+# ── Native Security Core JNI bridge — JNI symbol names must survive R8 ────────
+# (libmedasec C++ looks up SecurityNativeCore.native* by exact symbol name)
+-keepclasseswithmembernames class com.medacademy.security.SecurityNativeCore { native <methods>; }
+-keepclassmembers class com.medacademy.security.SecurityNativeCore { native <methods>; }
+
+# BuildConfig.EXPECTED_CERT_SHA256 is read REFLECTIVELY by SecurityModule.expectedCertSha256()
+# (Class.forName(pkg.BuildConfig).getField(...)). R8 cannot see reflective reads and pruned the
+# field in v221 — silently disabling the APK signature-integrity check. Keep app BuildConfig fields
+# (public build metadata: cert pin, SPKI pins, version fields).
+-keepclassmembers class com.medacademy.app.BuildConfig { <fields>; }
 
 # ── Our UploadBridge / ForegroundUploadService — must survive reflection + RN bridge ──
 -keep class com.medacademy.upload.** { *; }
@@ -102,56 +135,178 @@ const PROGUARD_RULES = `
 -dontwarn com.facebook.react.fabric.**
 -dontwarn edu.umd.cs.findbugs.**
 -dontwarn javax.annotation.**
+
+# ── Expo headless app loader (reflected BY NAME from manifest meta-data) ─────
+# expo-modules-core's manifest declares
+#   <meta-data android:name="org.unimodules.core.AppLoader#react-native-headless"
+#              android:value="expo.modules.adapters.react.apploader.RNHeadlessAppLoader"/>
+# and AppLoaderProvider Class.forName()s that exact string — invisible to R8.
+# The class's own @DoNotStrip sits on its CONSTRUCTOR (not the class), so the
+# generic "@DoNotStrip class *" rule above does not match it and R8 strips the
+# whole class (observed: absent from mapping.txt and dex → CNFE at startup,
+# caught+logged by AppLoaderProvider, used by expo-task-manager headless tasks).
+# Minimal keep: class + no-arg constructor for reflective instantiation.
+# Members stay shrinkable/renamable — interface dispatch keeps the overrides.
+-keep class expo.modules.adapters.react.apploader.RNHeadlessAppLoader {
+    <init>();
+}
 `;
 
-// ─── withDangerousMod: write proguard-rules.pro ──────────────────────────────
+// ─── gradle.properties hardening ─────────────────────────────────────────────
+//
+// The Expo SDK template's `app/build.gradle` release block assigns
+// minifyEnabled/shrinkResources from these properties LAST inside the block
+// (last-write-wins), so the durable way to force R8 + resource shrinking on
+// is to set the properties themselves — surviving every prebuild --clean.
+//
+//   android.enableMinifyInReleaseBuilds         → R8 full mode (default: false)
+//   android.enableShrinkResourcesInReleaseBuilds → strip unused res (default: false)
+//
+// These were previously left at the Expo defaults, which meant the shipped
+// release APK was NOT minified (all class names readable, ~39 MB dex).
 
-function withProguardRulesFile(config) {
-  return withDangerousMod(config, [
-    'android',
-    async (cfg) => {
-      const proguardPath = path.join(
-        cfg.modRequest.projectRoot, 'android', 'app', 'proguard-rules.pro'
-      );
-      fs.writeFileSync(proguardPath, PROGUARD_RULES.trimStart(), 'utf8');
-      return cfg;
-    },
-  ]);
+const GRADLE_PROPERTIES = [
+  { type: 'property', key: 'android.enableMinifyInReleaseBuilds', value: 'true' },
+  { type: 'property', key: 'android.enableShrinkResourcesInReleaseBuilds', value: 'true' },
+  // R8 on this dependency set needs >2 GB heap; the Expo template default
+  // (-Xmx2048m) OOMs during :app:minifyReleaseWithR8. 2560m + SerialGC +
+  // threadCount=2 keeps R8 inside the build host's commit limit (7.6 GB RAM
+  // + 6 GB pagefile, ~11 GB already committed by the OS baseline).
+  { type: 'property', key: 'org.gradle.jvmargs', value: '-Xmx2560m -XX:MaxMetaspaceSize=512m -XX:+UseSerialGC' },
+  // Halve R8's parallelism — each worker thread holds significant memory.
+  { type: 'property', key: 'com.android.tools.r8.threadCount', value: '2' },
+];
+
+/** Idempotently upsert a property in gradle.properties content. */
+function upsertProperty(content, key, value) {
+  const re = new RegExp(`^${key.replace(/\./g, '\\.')}\\s*=.*$`, 'm');
+  if (re.test(content)) {
+    return content.replace(re, `${key}=${value}`);
+  }
+  const sep = content.endsWith('\n') ? '' : '\n';
+  return `${content}${sep}${key}=${value}\n`;
 }
 
-// ─── withAppBuildGradle: enable R8 + resource shrinking in release ────────────
-
-function withR8Enabled(config) {
-  return withAppBuildGradle(config, (cfg) => {
-    let contents = cfg.modResults.contents;
-
-    // Enable minifyEnabled + shrinkResources + proguard in the release buildType.
-    // The Expo-generated build.gradle has a release block we can target.
-    // Idempotent: only patch if not already set.
-    if (!contents.includes('minifyEnabled true')) {
-      contents = contents.replace(
-        /release\s*\{([^}]*)\}/s,
-        (match, inner) => {
-          let patched = inner;
-          if (!patched.includes('minifyEnabled'))    patched += '\n            minifyEnabled true';
-          if (!patched.includes('shrinkResources'))  patched += '\n            shrinkResources true';
-          if (!patched.includes('proguardFiles')) {
-            patched += "\n            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'";
-          }
-          return `release {${patched}}`;
-        }
-      );
-      cfg.modResults.contents = contents;
+const withHardenedGradleProperties = (config) =>
+  withGradleProperties(config, (config) => {
+    for (const { key, value } of GRADLE_PROPERTIES) {
+      const existing = config.modResults.find((p) => p.type === 'property' && p.key === key);
+      if (existing) {
+        existing.value = value;
+      } else {
+        config.modResults.push({ type: 'property', key, value });
+      }
     }
-    return cfg;
+    return config;
   });
-}
 
-// ─── Combined export ──────────────────────────────────────────────────────────
+// Fallback for environments where withGradleProperties is unavailable:
+// patch the file directly during prebuild (idempotent).
+const withGradlePropertiesFileFallback = (config) =>
+  withDangerousMod(config, ['android', (config) => {
+    const propsPath = path.join(config.modRequest.projectRoot, 'android', 'gradle.properties');
+    let content = '';
+    try { content = fs.readFileSync(propsPath, 'utf8'); } catch { return config; }
+    let next = content;
+    for (const { key, value } of GRADLE_PROPERTIES) {
+      next = upsertProperty(next, key, value);
+    }
+    if (next !== content) {
+      fs.writeFileSync(propsPath, next);
+    }
+    return config;
+  }]);
+
+const useFileFallback = (() => {
+  try {
+    const cfg = require(require.resolve('@expo/config-plugins', { paths: [expoRoot] }));
+    return typeof cfg.withGradleProperties !== 'function';
+  } catch {
+    return true;
+  }
+})();
+
+const withHardenedRelease = (config) => {
+  const withProps = useFileFallback ? withGradlePropertiesFileFallback : withHardenedGradleProperties;
+  return withProps(config);
+};
+
+// ─── Plugin export ───────────────────────────────────────────────────────────
 
 const withProguardRules = (config) => {
-  config = withProguardRulesFile(config);
-  config = withR8Enabled(config);
+  // 1. Write proguard-rules.pro + ensure release block references it.
+  config = withDangerousMod(config, [
+    'android',
+    /**
+     * @param {import('@expo/config-plugins').ExportedConfig} config
+     */
+    (config) => {
+      const projectRoot = config.modRequest.projectRoot;
+      const rulesPath = path.join(projectRoot, 'android', 'app', 'proguard-rules.pro');
+      fs.mkdirSync(path.dirname(rulesPath), { recursive: true });
+      fs.writeFileSync(rulesPath, PROGUARD_RULES);
+
+      const buildGradlePath = path.join(projectRoot, 'android', 'app', 'build.gradle');
+      let content = '';
+      try {
+        content = fs.readFileSync(buildGradlePath, 'utf8');
+      } catch {
+        return config; // no app/build.gradle — nothing to do
+      }
+
+      let updated = content;
+
+      // Legacy guard: if an earlier run of this plugin corrupted the file by
+      // injecting the R8 block into the signing closure, and the correct
+      // buildTypes.release block no longer contains it, remove stale copies
+      // from the signing region only (up to the buildTypes keyword).
+      // (Historical bug — kept for one release cycle as a safety net.)
+
+      // The Expo template's release block already assigns minifyEnabled /
+      // shrinkResources / proguardFiles from gradle.properties flags; we now
+      // force those flags ON in gradle.properties (withHardenedRelease), so
+      // the generated build.gradle needs no further edits. Idempotency: the
+      // proguardFiles reference below must exist — add it if missing.
+      if (!/proguard-android-optimize\.txt/.test(updated)) {
+        // Only inject when the template did not provide a release proguard
+        // configuration at all (older SDK templates).
+        const buildTypesIdx = updated.indexOf('buildTypes');
+        if (buildTypesIdx !== -1) {
+          const releaseIdx = updated.indexOf('release {', buildTypesIdx);
+          if (releaseIdx !== -1) {
+            const openBrace = updated.indexOf('{', releaseIdx);
+            // Brace-balanced scan for the matching close of `release {`.
+            let depth = 0;
+            let closeIdx = -1;
+            for (let i = openBrace; i < updated.length; i++) {
+              if (updated[i] === '{') depth++;
+              else if (updated[i] === '}') {
+                depth--;
+                if (depth === 0) { closeIdx = i; break; }
+              }
+            }
+            if (closeIdx !== -1) {
+              const injection =
+                '            minifyEnabled true\n' +
+                '            shrinkResources true\n' +
+                "            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'\n";
+              updated =
+                updated.slice(0, closeIdx) + injection + updated.slice(closeIdx);
+            }
+  }
+        }
+      }
+
+      if (updated !== content) {
+        fs.writeFileSync(buildGradlePath, updated);
+      }
+      return config;
+    },
+  ]);
+
+  // 2. Force R8 + resource shrinking via gradle.properties (CNG-durable).
+  config = withHardenedRelease(config);
+
   return config;
 };
 

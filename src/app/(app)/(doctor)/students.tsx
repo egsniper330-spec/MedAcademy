@@ -5,7 +5,7 @@ import {
 } from 'react-native';
 import { useFocusEffect, useRouter, RelativePathString } from 'expo-router';
 import {
-  Users, Search, UserPlus, BookOpen, Ban, Play, Trash2, Eye, Key, CreditCard, X,
+  Users, Search, UserPlus, BookOpen, Ban, Play, Trash2, Eye, CreditCard, X,
   Clock, GraduationCap, ChevronRight, CheckCircle, PlusCircle, Upload, Fingerprint, Copy,
 } from 'lucide-react-native';
 import * as Clipboard from 'expo-clipboard';
@@ -13,7 +13,7 @@ import { useProfileStore } from '@/lib/store';
 import { PageHeader } from '@/components/PageHeader';
 import {
   getCourses, getDoctorStudentEnrollments,
-  enrollStudentViaCode, suspendCourseSubscription, resumeCourseSubscription,
+  suspendCourseSubscription, resumeCourseSubscription,
   removeStudentFromCourseWithRefund, searchUsers, processStudentOperation,
 } from '@/lib/api';
 import { getCreditBalance, invalidateCreditCache } from '@/lib/creditService';
@@ -22,12 +22,12 @@ import { NeuCard } from '@/components/NeuCard';
 import { NeuButton } from '@/components/NeuButton';
 import { ResponsiveModal } from '@/components/ResponsiveModal';
 import { useToast } from '@/components/Toast';
-import { neuColors, useLayout } from '@/lib/neu';
+import { neuColors, useLayout, safeBottom } from '@/lib/neu';
 import { displayPhoneNational } from '@/lib/phone';
 import { getContactDisplay, getPublicEmail } from '@/lib/api';
 import { friendlyError } from '@/lib/validation';
 
-type EnrollMethod = 'code' | 'credits' | null;
+type EnrollMethod = 'credits' | null;
 type ActionType   = 'suspend' | 'resume' | 'remove' | 'profile' | null;
 type TabKey       = 'all' | 'by_course' | 'active' | 'suspended' | 'recent';
 
@@ -72,11 +72,6 @@ export default function DoctorStudents() {
   const [modalCourses,    setModalCourses]    = useState<any[]>([]);
   const [modalCoursesLoading, setModalCoursesLoading] = useState(false);
 
-  // Enroll via Code
-  const [codeInput,   setCodeInput]   = useState('');
-  const [codeLoading, setCodeLoading] = useState(false);
-  const [codeError,   setCodeError]   = useState('');
-
   // Enroll via Credits
   const [creditEmail,         setCreditEmail]         = useState('');
   const [creditSearchResults, setCreditSearchResults] = useState<any[]>([]);
@@ -118,7 +113,7 @@ export default function DoctorStudents() {
     return !q || s.full_name?.toLowerCase().includes(q) || s.email?.toLowerCase().includes(q)
       || s.phone?.includes(q) || e.course?.title?.toLowerCase().includes(q)
       || s.university?.name?.toLowerCase().includes(q) || s.faculty?.name?.toLowerCase().includes(q)
-      || s.watermark_id?.toLowerCase().includes(q);
+      || s.public_user_id?.toLowerCase().includes(q);
   }), [enrollments, q]);
 
   const activeEnrollments    = useMemo(() => allFiltered.filter(e => e.status === 'active'),    [allFiltered]);
@@ -152,19 +147,6 @@ export default function DoctorStudents() {
     }
     setModalCoursesLoading(false);
   }, [profile]);
-
-  // ── Enroll via Code ───────────────────────────────────────────────────────────
-  const handleEnrollCode = async () => {
-    if (!codeInput.trim()) return;
-    setCodeLoading(true); setCodeError('');
-    try {
-      await enrollStudentViaCode(codeInput);
-      showToast({ type: 'success', message: 'Student enrolled via activation code.' });
-      resetAddModal();
-      await loadData();
-    } catch (e) { setCodeError(friendlyError(e, 'Invalid or already used code.')); }
-    setCodeLoading(false);
-  };
 
   // ── Enroll via Credits ────────────────────────────────────────────────────────
   const handleSearchStudent = async () => {
@@ -233,7 +215,6 @@ export default function DoctorStudents() {
 
   const resetAddModal = () => {
     setAddModal(false); setEnrollMethod(null);
-    setCodeInput(''); setCodeError('');
     setCreditEmail(''); setCreditStudent(null); setCreditCourse('');
     setCreditSearchResults([]); setCreditError(''); setCreditStep(1);
   };
@@ -259,33 +240,31 @@ export default function DoctorStudents() {
               </View>
             </View>
             <Text style={{ fontSize: 11, color: c.text, opacity: 0.5 }} numberOfLines={1}>{getContactDisplay(s)}</Text>
-            {/* ID — visible to doctor for enrolled students only */}
-            {s?.watermark_id && (
+            {/* ID — stored Public User ID (MED-XXXX), visible to doctor for enrolled students only */}
+            {Boolean(s?.public_user_id) && (
               <Pressable
-                onPress={() => { void Clipboard.setStringAsync(s.watermark_id); showToast({ type: 'success', message: 'ID copied.' }); }}
+                onPress={() => { void Clipboard.setStringAsync(s.public_user_id); showToast({ type: 'success', message: 'ID copied.' }); }}
                 style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 3 }}
               >
                 <Fingerprint size={11} color={c.primary} opacity={0.7} />
-                <Text style={{ fontSize: 11, fontWeight: '700', color: c.primary, opacity: 0.8, letterSpacing: 0.8, fontVariant: ['tabular-nums'] }}>{s.watermark_id}</Text>
+                <Text style={{ fontSize: 11, fontWeight: '700', color: c.primary, opacity: 0.8, letterSpacing: 0.8, fontVariant: ['tabular-nums'] }}>{s.public_user_id}</Text>
                 <Copy size={10} color={c.primary} opacity={0.5} />
               </Pressable>
             )}
-            {showCourse && enrollment.course?.title && (
+            {showCourse && Boolean(enrollment.course?.title) && (
               <Text style={{ fontSize: 11, color: c.primary, opacity: 0.8, marginTop: 2 }} numberOfLines={1}>{enrollment.course.title}</Text>
             )}
             <View style={{ flexDirection: 'row', gap: 12, marginTop: 6 }}>
-              {s?.university?.name && (
+              {Boolean(s?.university?.name) && (
                 <Text style={{ fontSize: 10, color: c.text, opacity: 0.4 }} numberOfLines={1}>{s.university.name}</Text>
               )}
               <Text style={{ fontSize: 10, color: c.text, opacity: 0.35 }}>
                 {new Date(enrollment.enrolled_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
               </Text>
-              {enrollment.activation_method && (
+              {Boolean(enrollment.activation_method) && (
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3 }}>
-                  {enrollment.activation_method === 'code'
-                    ? <Key size={9} color={c.text} opacity={0.3} />
-                    : <CreditCard size={9} color={c.text} opacity={0.3} />}
-                  <Text style={{ fontSize: 10, color: c.text, opacity: 0.3 }}>{enrollment.activation_method}</Text>
+                  <CreditCard size={9} color={c.text} opacity={0.3} />
+                  <Text style={{ fontSize: 10, color: c.text, opacity: 0.3 }}>{enrollment.activation_method === 'credits' ? 'credits' : enrollment.activation_method}</Text>
                 </View>
               )}
             </View>
@@ -332,6 +311,7 @@ export default function DoctorStudents() {
     // BY COURSE
     if (activeTab === 'by_course') {
       if (courseGroups.length === 0) return <EmptyState label="No courses with students" />;
+
       return courseGroups.map(({ course, items }) => {
         const open = expandCourse === course.id;
         return (
@@ -391,12 +371,10 @@ export default function DoctorStudents() {
                   <Text style={{ fontSize: 10, color: c.text, opacity: 0.4 }}>
                     Added {new Date(e.enrolled_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
                   </Text>
-                  {e.activation_method && (
+                  {Boolean(e.activation_method) && (
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3 }}>
-                      {e.activation_method === 'code'
-                        ? <Key size={9} color={c.text} opacity={0.3} />
-                        : <CreditCard size={9} color={c.text} opacity={0.3} />}
-                      <Text style={{ fontSize: 10, color: c.text, opacity: 0.3 }}>{e.activation_method}</Text>
+                      <CreditCard size={9} color={c.text} opacity={0.3} />
+                      <Text style={{ fontSize: 10, color: c.text, opacity: 0.3 }}>{e.activation_method === 'credits' ? 'credits' : e.activation_method}</Text>
                     </View>
                   )}
                 </View>
@@ -426,7 +404,7 @@ export default function DoctorStudents() {
   return (
     <View style={{ flex: 1, backgroundColor: c.base }}>
       <ScrollView
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />} contentContainerStyle={{ paddingBottom: safeBottom(layout.insets.bottom) }}
       >
           <PageHeader
             title="Students"
@@ -519,17 +497,6 @@ export default function DoctorStudents() {
             <Text style={{ fontSize: 14, color: c.text, opacity: 0.6, textAlign: 'center', marginBottom: 8 }}>
               Choose enrollment method
             </Text>
-            <Pressable onPress={() => setEnrollMethod('code')}>
-              <NeuCard style={{ flexDirection: 'row', alignItems: 'center', gap: 14, padding: 18 }}>
-                <View style={{ width: 42, height: 42, borderRadius: 14, backgroundColor: `${c.primary}18`, alignItems: 'center', justifyContent: 'center' }}>
-                  <Key size={20} color={c.primary} />
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={{ fontSize: 14, fontWeight: '700', color: c.text }}>Add via Activation Code</Text>
-                  <Text style={{ fontSize: 12, color: c.text, opacity: 0.5, marginTop: 2 }}>Student gets enrolled using a one-time code</Text>
-                </View>
-              </NeuCard>
-            </Pressable>
             <Pressable onPress={() => setEnrollMethod('credits')}>
               <NeuCard style={{ flexDirection: 'row', alignItems: 'center', gap: 14, padding: 18 }}>
                 <View style={{ width: 42, height: 42, borderRadius: 14, backgroundColor: '#16A34A18', alignItems: 'center', justifyContent: 'center' }}>
@@ -541,30 +508,6 @@ export default function DoctorStudents() {
                 </View>
               </NeuCard>
             </Pressable>
-          </View>
-        )}
-
-        {/* ── Enroll via Code ── */}
-        {enrollMethod === 'code' && (
-          <View style={{ gap: 14 }}>
-            <Pressable onPress={() => setEnrollMethod(null)} style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 4 }}>
-              <X size={14} color={c.text} opacity={0.4} />
-              <Text style={{ fontSize: 12, color: c.text, opacity: 0.5 }}>Back</Text>
-            </Pressable>
-            <Text style={{ fontSize: 13, color: c.text, opacity: 0.6 }}>Enter the activation code to enroll a student:</Text>
-            <TextInput
-              placeholder="Activation Code"
-              placeholderTextColor={`${c.text}50`}
-              value={codeInput}
-              onChangeText={setCodeInput}
-              autoCapitalize="characters"
-              style={{ backgroundColor: c.base, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 13, fontSize: 15, color: c.text, fontWeight: '700', letterSpacing: 2,
-                minWidth: 0,
-                shadowColor: c.shadowDark, shadowOffset: { width: 2, height: 2 }, shadowOpacity: 0.5, shadowRadius: 5 }}
-            />
-            {codeError ? <Text style={{ fontSize: 12, color: '#DC2626' }}>{codeError}</Text> : null}
-            <NeuButton label={codeLoading ? 'Enrolling…' : 'Enroll Student'} onPress={handleEnrollCode}
-              loading={codeLoading} disabled={!codeInput.trim()} />
           </View>
         )}
 
@@ -603,12 +546,12 @@ export default function DoctorStudents() {
                       <GraduationCap size={18} color={c.primary} />
                       <View style={{ flex: 1 }}>
                         <Text style={{ fontSize: 13, fontWeight: '600', color: c.text }}>{s.full_name}</Text>
-                  <Text style={{ fontSize: 11, color: c.text, opacity: 0.5 }}>{getContactDisplay(s)}</Text>
-                      </View>
-                    </NeuCard>
-                  </Pressable>
-                ))}
-              </>
+                        <Text style={{ fontSize: 11, color: c.text, opacity: 0.5 }}>{getContactDisplay(s)}</Text>
+                        </View>
+                      </NeuCard>
+                    </Pressable>
+                  ))}
+                </>
             )}
 
             {/* Step 2: Select course */}
@@ -687,13 +630,14 @@ export default function DoctorStudents() {
       </ResponsiveModal>
 
       {/* ── Student profile modal ─────────────────────────────────────────────── */}
-      <ResponsiveModal
-        visible={!!actionTarget && actionType === 'profile'}
-        onClose={() => { setActionTarget(null); setActionType(null); }}
-        title="Student Profile"
-      >
-        {actionTarget && actionType === 'profile' && (() => {
-          const s = actionTarget.student;
+        <ResponsiveModal
+          visible={!!actionTarget && actionType === 'profile'}
+          onClose={() => { setActionTarget(null); setActionType(null); }}
+          title="Student Profile"
+        >
+          {actionTarget && actionType === 'profile' && (() => {
+            const s = actionTarget.student;
+
           // Phone: prefer formatted national → e164 → legacy phone column
           const phoneDisplay = s?.phone_national
             ? displayPhoneNational(s.phone_e164 ?? s.phone_national)
@@ -718,7 +662,7 @@ export default function DoctorStudents() {
             { label: 'Full Name',      value: s?.full_name ?? '—' },
             { label: 'Email',          value: getPublicEmail(s) ?? '—' },
             { label: 'Phone Number',   value: phoneDisplay ?? 'Not Available', highlight: !phoneDisplay },
-            { label: 'ID',             value: s?.watermark_id ?? 'Not Available', highlight: !s?.watermark_id, mono: true, copyable: !!s?.watermark_id },
+            { label: 'ID',             value: s?.public_user_id ?? 'Not Available', highlight: !s?.public_user_id, mono: true, copyable: !!s?.public_user_id },
             { label: 'Account Status', value: accountStatus ?? '—' },
             { label: 'Registered',     value: registeredDate ?? '—' },
           ];

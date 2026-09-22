@@ -43,11 +43,11 @@ export function DashboardHeader({ roleLabel, greeting, rightActions }: Dashboard
       alignItems: 'center',
       paddingTop: topPad,
       paddingBottom: spacing.md,
-      paddingLeft: leftPad,
+      paddingLeft: leftPad + spacing.sm,
       paddingRight: rightPad,
     }}>
-      {/* Hamburger — sits at safeArea.hEdge from safe-area edge */}
-      <HamburgerButton />
+      {/* Transparent visual treatment; the 40dp control plus hit slop remains tappable. */}
+      <HamburgerButton plain />
 
       {/* Title stack — gap from button */}
       <View style={{ flex: 1, marginLeft: spacing.sm + spacing.xs }}>
@@ -86,4 +86,3 @@ export function DashboardHeader({ roleLabel, greeting, rightActions }: Dashboard
     </View>
   );
 }
-

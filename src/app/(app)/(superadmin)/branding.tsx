@@ -4,7 +4,7 @@
  */
 import { useCallback, useState } from 'react';
 import {
-  View, Text, ScrollView, TextInput, ActivityIndicator,
+  View, Text, ScrollView, TextInput,
   RefreshControl, useColorScheme,
 } from 'react-native';
 import { useFocusEffect } from 'expo-router';
@@ -13,7 +13,11 @@ import { PageHeader } from '@/components/PageHeader';
 import { getBranding, updateBranding } from '@/lib/api';
 import { NeuCard } from '@/components/NeuCard';
 import { NeuButton } from '@/components/NeuButton';
-import { neuColors, useLayout } from '@/lib/neu';
+import { LoadingState, ErrorState } from '@/components/ScreenState';
+import { EmptyState } from '@/components/EmptyState';
+import { useToast } from '@/components/Toast';
+import { neuColors, useLayout, safeBottom } from '@/lib/neu';
+import { friendlyError } from '@/lib/validation';
 
 export default function BrandingScreen() {
   const scheme = useColorScheme();
@@ -23,16 +27,27 @@ export default function BrandingScreen() {
 
   const [brand, setBrand] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<unknown>(null);
   const [saving, setSaving] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [success, setSuccess] = useState(false);
+  const { showToast } = useToast();
 
+  // Terminal-state contract: LOADING → (ERROR | EMPTY | CONTENT). A failed
+  // fetch NEVER renders as an empty screen — it renders ErrorState with retry.
   const load = useCallback(async () => {
-    try { setBrand(await getBranding()); } catch (_) {}
-    setLoading(false);
+    setLoading(true);
+    setError(null);
+    try {
+      setBrand(await getBranding());
+    } catch (e) {
+      setError(e);
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
-  useFocusEffect(useCallback(() => { setLoading(true); load(); }, [load]));
+  useFocusEffect(useCallback(() => { load(); }, [load]));
   const onRefresh = async () => { setRefreshing(true); await load(); setRefreshing(false); };
 
   const set = (key: string, value: string) => setBrand((prev: any) => ({ ...prev, [key]: value }));
@@ -52,7 +67,9 @@ export default function BrandingScreen() {
       setBrand(updated);
       setSuccess(true);
       setTimeout(() => setSuccess(false), 2500);
-    } catch (_) {}
+    } catch (e) {
+      showToast({ type: 'error', message: friendlyError(e, 'Failed to save branding.') });
+    }
     setSaving(false);
   };
 
@@ -68,8 +85,7 @@ export default function BrandingScreen() {
 
   return (
     <ScrollView style={{ flex: 1, backgroundColor: c.base }}
-          contentContainerStyle={{ paddingBottom: layout.scrollBottom() }}
-      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />}>
+      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />} contentContainerStyle={{ paddingBottom: safeBottom(layout.insets.bottom) }}>
       <PageHeader title="Branding" subtitle="Customize platform appearance" accentColor="#7C3AED" />
 
       <View style={{ paddingHorizontal: layout.screenPx }}>
@@ -80,7 +96,16 @@ export default function BrandingScreen() {
           </NeuCard>
         )}
 
-        {loading ? <ActivityIndicator color={c.primary} style={{ marginTop: 40 }} /> : brand && (
+        {loading ? <LoadingState label="Loading branding…" /> : error ? (
+          <ErrorState error={error} onRetry={load} />
+        ) : !brand ? (
+          <EmptyState
+            icon={<Palette size={40} color={c.primary} />}
+            title="Branding unavailable"
+            description="The server returned no branding record."
+            action={{ label: 'Retry', onPress: load }}
+          />
+        ) : (
           <>
             {/* App Identity */}
             <NeuCard style={{ marginBottom: 16, padding: 18 }}>

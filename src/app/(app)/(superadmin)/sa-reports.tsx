@@ -11,10 +11,10 @@ import {
   FileText, Shield, ShieldAlert, ShieldCheck, ShieldX, BarChart2,
   Upload, Download, Search, HeartHandshake, Trash2, Lock,
   AlertOctagon, AlertTriangle, Eye, Database, ChevronRight,
-  TrendingUp, ClipboardList, Activity,
+  TrendingUp, Activity,
 } from 'lucide-react-native';
 import { PageHeader } from '@/components/PageHeader';
-import { neuColors, neuFlatStyle, neuPressedStyle, useLayout } from '@/lib/neu';
+import { neuColors, neuFlatStyle, neuPressedStyle, useLayout, safeBottom } from '@/lib/neu';
 import Bell from '@/components/Bell';
 
 // ── Nav item ───────────────────────────────────────────────────────────────
@@ -72,7 +72,7 @@ export default function SAReports() {
   const layout = useLayout();
 
   return (
-    <ScrollView style={{ flex: 1, backgroundColor: c.base }}>
+    <ScrollView style={{ flex: 1, backgroundColor: c.base }} contentContainerStyle={{ paddingBottom: safeBottom(layout.insets.bottom) }}>
       {/* PageHeader sits OUTSIDE the inner padding view so it can own its own horizontal padding */}
       <PageHeader title="Reports & Logs" subtitle="Audit, security & exports" accentColor="#7C3AED" rightAction={<Bell />} />
 
@@ -94,7 +94,6 @@ export default function SAReports() {
         <SectionLabel title="Audit Logs" c={c} />
         <NavItem icon={Shield}       label="Audit Trail"          description="Full admin action audit log"               color="#DC2626" path="/sa-audit"          c={c} isDark={isDark} badge="LIVE" />
         <NavItem icon={Database}     label="DB Audit"             description="Low-level database audit trail"            color="#D97706" path="/db-audit"               c={c} isDark={isDark} />
-        <NavItem icon={ClipboardList} label="Course Activations"  description="Timeline of course activation events"      color="#7C3AED" path="/course-activation-timeline" c={c} isDark={isDark} />
 
         {/* ── Security ─────────────────────────────────────────────────── */}
         <SectionLabel title="Security" c={c} />

@@ -175,7 +175,7 @@ export default function SecurityDashboard() {
     <View style={{ flex: 1, backgroundColor: c.base }}>
       <PageHeader title="Security Dashboard" />
       <ScrollView
-        contentContainerStyle={{ padding: layout.screenPx, gap: layout.sectionGap, paddingBottom: layout.scrollBottom() }}
+        contentContainerStyle={{ padding: layout.screenPx, gap: layout.sectionGap }}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />}
       >
         {/* Day Filter + Export */}

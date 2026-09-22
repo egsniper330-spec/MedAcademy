@@ -61,7 +61,6 @@ function NotificationsContent() {
         contentContainerStyle={{
           padding: 20,
           paddingTop: 8,
-          paddingBottom: layout.scrollBottom(),
         }}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />}
       >

@@ -15,7 +15,7 @@ import { View, Text, Pressable, useColorScheme } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { ArrowLeft } from 'lucide-react-native';
-import { neuColors, neuMicroStyle, useNeuSpacing } from '@/lib/neu';
+import { neuColors, useNeuSpacing } from '@/lib/neu';
 import { spacing, iconContainer, iconSize, typography, safeArea, safeTop, safeLeft, safeRight } from '@/lib/ds';
 import HamburgerButton from '@/components/HamburgerButton';
 import { useDrawer } from '@/components/DrawerContext';
@@ -58,29 +58,32 @@ export function PageHeader({
       alignItems: 'center',
       paddingTop: topPad,
       paddingBottom: spacing.md,
-      paddingLeft: leftPad,
+      paddingLeft: leftPad + spacing.sm,
       paddingRight: rightPad,
     }}>
       {/* ── Left control ── */}
       {showBack ? (
+        // Integrated back button: the icon IS the control (touch target comes
+        // from the fixed 40dp box + hitSlop, not a visible container). The old
+        // raised-chrome icon container (base-fill + border = the "white box")
+        // is gone — every stack-pushed header now reads `←  Title`, matching
+        // the app's standard header pattern on all pages.
         <Pressable
           onPress={handleBack}
           hitSlop={spacing.sm}
           accessibilityLabel="Go back"
           accessibilityRole="button"
           style={{
-            ...iconContainer.md,
+            width: iconContainer.md.width,
+            height: iconContainer.md.height,
             marginRight: spacing.sm + spacing.xs,
             alignItems: 'center', justifyContent: 'center',
-            ...neuMicroStyle(isDark),
           }}
         >
           <ArrowLeft size={iconSize.lg} color={c.text} opacity={0.75} />
         </Pressable>
       ) : showHamburger ? (
-        <View style={{ marginRight: spacing.sm + spacing.xs }}>
-          <HamburgerButton />
-        </View>
+        <HamburgerButton plain />
       ) : null}
 
       {/* ── Title block ── */}
@@ -91,6 +94,7 @@ export function PageHeader({
             fontWeight: '800',
             color: accentColor ?? c.text,
             lineHeight: sp.isTablet ? typography.h1.lineHeight : typography.h2.lineHeight,
+            marginLeft: spacing.sm + spacing.xs,
           }}
           numberOfLines={1}
         >

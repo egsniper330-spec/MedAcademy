@@ -56,7 +56,7 @@ export default function PrivacyPage() {
   return (
     <ScrollView
       style={{ flex: 1, backgroundColor: c.base }}
-      contentContainerStyle={{ padding: layout.screenPx, paddingBottom: layout.scrollBottom() }}
+      contentContainerStyle={{ padding: layout.screenPx }}
     >
       <PageHeader title="Privacy Policy" showBack />
 

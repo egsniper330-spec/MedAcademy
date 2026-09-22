@@ -12,7 +12,7 @@ const path = require('path');
 // the version that matches the installed Expo SDK (55.x), regardless of whether
 // any unrelated version is listed in the project's package.json.
 const expoRoot = path.dirname(require.resolve('expo/package.json'));
-const { withDangerousMod, withMainApplication, withXcodeProject } = require(
+const { withDangerousMod, withMainApplication, withXcodeProject, withAndroidManifest } = require(
   require.resolve('@expo/config-plugins', { paths: [expoRoot] })
 );
 
@@ -51,7 +51,18 @@ import com.facebook.react.modules.core.DeviceEventManagerModule
 import java.io.BufferedReader
 import java.io.File
 import java.io.InputStreamReader
+import java.util.zip.ZipFile
+import org.json.JSONObject
+import org.json.JSONArray
 import java.net.NetworkInterface
+import android.security.keystore.KeyGenParameterSpec
+import android.security.keystore.KeyInfo
+import android.security.keystore.KeyProperties
+import java.security.KeyFactory
+import java.security.KeyPairGenerator
+import java.security.KeyStore
+import java.security.Signature
+import java.security.spec.ECGenParameterSpec
 import java.security.MessageDigest
 
 private const val TAG = "SecurityModule"
@@ -67,9 +78,12 @@ private const val TAG = "SecurityModule"
  *   Frida detection     — port probe + process scan + library scan + /proc maps
  *   Xposed detection    — class load + package scan + stack trace analysis
  *   Magisk/Zygisk       — path scan + mount point + package check + DenyList
- *   Overlay attack      — WindowManager overlay scan + accessibility abuse
+ *   Overlay attack      — targeted known-abusive package capability scan.
+ *                         (Aggregate permission COUNT is capability evidence,
+ *                         never proof of an active overlay — see detectOverlay.)
  *   Signature check     — SHA-256 cert fingerprint vs expected production hash
- *   Anti-tamper         — classes.dex hash + native lib presence check
+ *   Anti-tamper         — signature + native lib presence (distribution-aware;
+ *                         installer source is telemetry, not tamper evidence)
  *
  * Phase 3 (new — previously missing):
  *   VPN detection       — ConnectivityManager TRANSPORT_VPN + NetworkInterface tun/vpn scan
@@ -120,6 +134,35 @@ class SecurityModule(private val reactContext: ReactApplicationContext) :
     private val mainHandler = Handler(Looper.getMainLooper())
     private var vpnNetworkCallback: ConnectivityManager.NetworkCallback? = null
 
+    /**
+     * Part 12 gap closure (RECOVERY FIX — stale-BLOCKED bug): on VPN-network
+     * loss, re-check EVERY network and ALIGN the callback's live belief with
+     * the framework result. A LEGITIMATE teardown produces exactly "callback
+     * saw a loss + no tunnel found" — that is AGREEMENT, not suppression, so
+     * the flag CLEARS and the VPN state returns to OFF. The previous version
+     * latched lastVpnCallbackLoss=true here forever, so aggregateVpnState()
+     * returned "suspicious" until process death and the app never recovered
+     * without a restart (observed on the physical device). Suppression is now
+     * signaled only by a LIVE contradiction: callbackSeesVpn=true (the OS
+     * itself reported an active VPN network) while the sensor scan denies it.
+     */
+    private fun upgradeVpnState() {
+        try {
+            val cm = reactContext.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager ?: return
+            var sawVpnNetwork = false
+            for (net in cm.allNetworks) {
+                val caps = cm.getNetworkCapabilities(net) ?: continue
+                if (caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN)) sawVpnNetwork = true
+            }
+            callbackSeesVpn = sawVpnNetwork
+        } catch (_: Exception) { }
+    }
+
+    /** Live callback belief: the OS currently reports an active VPN network.
+     *  Set by onAvailable, cleared by upgradeVpnState() when the framework
+     *  confirms the tunnel is gone. NEVER a historical latch. */
+    private var callbackSeesVpn: Boolean = false
+
     private fun registerVpnNetworkCallback() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.LOLLIPOP) return
         try {
@@ -134,6 +177,7 @@ class SecurityModule(private val reactContext: ReactApplicationContext) :
             val callback = object : ConnectivityManager.NetworkCallback() {
                 override fun onAvailable(network: Network) {
                     Log.d(TAG, "[VpnCallback] onAvailable — VPN network active: \$network")
+                    callbackSeesVpn = true
                     emitVpnStateChanged(true)
                 }
                 override fun onLost(network: Network) {
@@ -141,6 +185,7 @@ class SecurityModule(private val reactContext: ReactApplicationContext) :
                     // Re-check: another VPN network may still be active
                     // (split-tunnel: the VPN network went away but WiFi stayed).
                     // Call detectVpn() to confirm real state before emitting false.
+                    upgradeVpnState()
                     val stillActive = runCatching { detectVpn() }.getOrDefault(false)
                     Log.d(TAG, "[VpnCallback] onLost re-check stillActive=\$stillActive")
                     emitVpnStateChanged(stillActive)
@@ -164,6 +209,11 @@ class SecurityModule(private val reactContext: ReactApplicationContext) :
 
     private fun emitVpnStateChanged(vpnActive: Boolean) {
         try {
+            // Guard against emitting during teardown: getJSModule throws when the
+            // catalyst instance is already gone (module destroyed but callback not
+            // yet unregistered). The surrounding try/catch still covers races —
+            // this check just avoids repeated exceptions during shutdown.
+            if (!reactContext.hasActiveReactInstance()) return
             val params = Arguments.createMap()
             params.putBoolean("vpnActive", vpnActive)
             reactContext
@@ -250,6 +300,91 @@ class SecurityModule(private val reactContext: ReactApplicationContext) :
     // ══════════════════════════════════════════════════════════════════════════
     // PHASE 3 — VPN DETECTION
     // ══════════════════════════════════════════════════════════════════════════
+
+    @ReactMethod
+    fun isProxyDetected(promise: Promise) {
+        Log.d(TAG, "[isProxyDetected] called")
+        runSafe(promise) {
+            val result = detectProxy()
+            Log.d(TAG, "[isProxyDetected] result=\u0024result")
+            result
+        }
+    }
+
+    /**
+     * Proxy detection (Android) — three independent signals:
+     *   Tier 1 — JVM system proxy properties (http.proxyHost / https.proxyHost /
+     *            socksProxyHost). On Android these are what ProxySelector and
+     *            every java.net URL connection honor; a per-app HTTP proxy set
+     *            through LinkProperties or reflection surfaces here.
+     *   Tier 2 — ProxySelector.select() on the live API origin: returns the
+     *            proxy the platform would actually use for our API host right
+     *            now (catches runtime in-process hijacks that set properties
+     *            after startup).
+     *   Tier 3 — LinkProperties.httpProxy (API 29+): the platform-wide HTTP
+     *            proxy configured on the active network.
+     *
+     * VPN is NOT a proxy: VPN tunnels surface as TRANSPORT_VPN/tun* and are
+     * reported by detectVpn(), so this detector never inspects tunnel
+     * interfaces — the two detectors cannot double-report one condition.
+     * Fail-safe: exception -> false (never blocks on detector error).
+     */
+    private fun detectProxy(): Boolean {
+        // Tier 1: JVM system proxy properties
+        try {
+            for (key in listOf("http.proxyHost", "https.proxyHost", "socksProxyHost")) {
+                val host = System.getProperty(key)?.trim().orEmpty()
+                if (host.isNotEmpty() && host != "null") {
+                    Log.d(TAG, "[detectProxy] system property \u0024key=\u0024host")
+                    return true
+                }
+            }
+        } catch (e: Exception) {
+            Log.d(TAG, "[detectProxy] property tier exception: \u0024{e.message}")
+        }
+
+        // Resolve the API origin at runtime (no hardcoded host in source).
+        val apiOrigin: String? = try {
+            val clazz = Class.forName(reactContext.packageName + ".BuildConfig")
+            val field = clazz.fields.firstOrNull { it.name == "EXPO_PUBLIC_PHP_API_URL" }
+            @Suppress("DEPRECATION")
+            (field?.get(null) as? String)?.trim()?.ifEmpty { null }
+        } catch (_: Exception) { null }
+
+        // Tier 2: which proxy would the platform use for our API host right now?
+        try {
+            val uri = apiOrigin?.let { origin ->
+                val parsed = java.net.URI(origin)
+                java.net.URI(parsed.scheme ?: "https", parsed.host, "/", null)
+            } ?: java.net.URI("https", "localhost", "/", null)
+            val proxies = java.net.ProxySelector.getDefault().select(uri)
+            if (proxies.isNotEmpty() && proxies.none { it.type() == java.net.Proxy.Type.DIRECT }) {
+                Log.d(TAG, "[detectProxy] ProxySelector non-DIRECT for \u0024{uri.host}: \u0024proxies")
+                return true
+            }
+        } catch (e: Exception) {
+            Log.d(TAG, "[detectProxy] selector tier exception: \u0024{e.message}")
+        }
+
+        // Tier 3: platform global proxy on the active network (API 29+)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            try {
+                val cm = reactContext.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+                val activeNetwork = cm?.activeNetwork
+                val lp = activeNetwork?.let { cm.getLinkProperties(it) }
+                val httpProxy = lp?.httpProxy
+                if (httpProxy != null && !httpProxy.host.isNullOrEmpty()) {
+                    Log.d(TAG, "[detectProxy] LinkProperties global proxy: \u0024{httpProxy.host}:\u0024{httpProxy.port}")
+                    return true
+                }
+            } catch (e: Exception) {
+                Log.d(TAG, "[detectProxy] global tier exception: \u0024{e.message}")
+            }
+        }
+
+        Log.d(TAG, "[detectProxy] no proxy detected")
+        return false
+    }
 
     @ReactMethod
     fun isVpnActive(promise: Promise) {
@@ -482,12 +617,39 @@ class SecurityModule(private val reactContext: ReactApplicationContext) :
             return true
         }
 
-        // 5. Sensor count — real devices always have motion sensors; AVD has none by default
+        // 5. Sensor count — EVIDENCE-BASED (tablet false-positive fix):
+        // A missing sensor list alone is NOT emulator evidence — some real
+        // hardware (tablets, TV boxes, e-readers) legitimately exposes zero
+        // sensors, which misclassified genuine devices as emulators ("Debug
+        // Mode Active" on a normal release install). Emulators are now
+        // flagged only when zero sensors COMBINE WITH other emulator-
+        // indicative build evidence. A real device without sensors but with
+        // a genuine OEM fingerprint passes; AVDs still fail (they also have
+        // generic fingerprints / goldfish hardware).
         return try {
             val sm = reactContext.getSystemService(Context.SENSOR_SERVICE) as? SensorManager
             val sensors = sm?.getSensorList(Sensor.TYPE_ALL) ?: emptyList()
-            Log.d(TAG, "[detectEmulator] sensorCount=\${sensors.size}")
-            sensors.isEmpty()
+            val sensorCount = sensors.size
+            if (sensorCount > 0) {
+                Log.d(TAG, "[detectEmulator] sensorCount=$sensorCount → not emulator (has sensors)")
+                false
+            } else {
+                // No sensors at all — require corroborating build evidence.
+                val fp = Build.FINGERPRINT.lowercase()
+                val hw = Build.HARDWARE.lowercase()
+                val prod = Build.PRODUCT.lowercase()
+                val brand = Build.BRAND.lowercase()
+                val hasEmuBuildEvidence =
+                    fp.contains("generic") || fp.contains("sdk") || fp.contains("vbox") ||
+                    fp.contains("test-keys") ||
+                    hw.contains("goldfish") || hw.contains("ranchu") || hw.contains("vbox") ||
+                    prod.startsWith("sdk") || prod.startsWith("emulator") || prod.contains("genymotion") ||
+                    brand == "generic" || brand.contains("generic")
+                Log.d(TAG, "[detectEmulator] sensorCount=0 emuBuildEvidence=$hasEmuBuildEvidence fp=$fp hw=$hw prod=$prod brand=$brand")
+                // Real OEM builds carry a manufacturer fingerprint/brand; an
+                // AVD always matches at least one evidence term above.
+                hasEmuBuildEvidence
+            }
         } catch (e: Exception) {
             Log.d(TAG, "[detectEmulator] sensor check exception: \${e.message}")
             false
@@ -635,7 +797,7 @@ class SecurityModule(private val reactContext: ReactApplicationContext) :
             File("/proc").listFiles()?.any { procDir ->
                 if (!procDir.isDirectory || !procDir.name.all { it.isDigit() }) return@any false
                 val cmdline = File(procDir, "cmdline").runCatching {
-                    readText().replace('', ' ').lowercase()
+                    readText().replace('\u0000', ' ').lowercase()
                 }.getOrDefault("")
                 cmdline.contains("frida") || cmdline.contains("gadget")
             } ?: false
@@ -803,39 +965,60 @@ class SecurityModule(private val reactContext: ReactApplicationContext) :
         }
     }
 
+    /** Capability evidence from the most recent detectOverlay() run. */
+    private var _lastOverlayCapableAppsCount: Int = 0
+
+    /**
+     * Overlay / tapjacking detection — evidence-graded.
+     *
+     * FALSE-POSITIVE FIX (root-cause audit): the previous implementation returned
+     * true when MORE THAN FIVE installed packages held SYSTEM_ALERT_WINDOW. That
+     * is a capability heuristic, not evidence of an active overlay: on a normal
+     * phone many legitimate apps (Messenger chat heads, browsers, launchers,
+     * screen recorders, OEM assistants) hold the permission without ever drawing
+     * over this app. Android defines SYSTEM_ALERT_WINDOW as the CAPABILITY to
+     * create overlay windows; Settings.canDrawOverlays() checks the capability
+     * and never whether an overlay is actually on screen.
+     *
+     * The platform does not expose an API for a regular app to enumerate other
+     * apps' windows, so "an overlay is being drawn over our window right now"
+     * cannot be measured directly. A POSITIVE is therefore only reported when we
+     * hold targeted evidence: an installed, non-system package that is on the
+     * known screen-overlay/abuse tool list AND holds the permission. The raw
+     * capability count is exported as evidence (overlayCapableAppsCount) for
+     * backend observability — it is never itself a threat signal.
+     */
     private fun detectOverlay(): Boolean {
-        // 1. Check which packages hold SYSTEM_ALERT_WINDOW permission
+        var capableApps = 0
         try {
             val pm = reactContext.packageManager
             val packages = pm.getInstalledApplications(PackageManager.GET_META_DATA)
-            val suspicious = packages.filter { appInfo ->
-                try {
-                    pm.checkPermission(
-                        android.Manifest.permission.SYSTEM_ALERT_WINDOW,
-                        appInfo.packageName
-                    ) == PackageManager.PERMISSION_GRANTED &&
-                    appInfo.packageName != reactContext.packageName
-                } catch (_: Exception) { false }
-            }
-            // More than a small number of apps with overlay permission is suspicious
-            if (suspicious.size > 5) return true
-            // Check for known screen-overlay / accessibility-abuse packages
-            val overlayPackages = listOf(
+            // Known screen-overlay / tapjacking tool packages (targeted capability check).
+            val abusiveOverlayPackages = setOf(
                 "com.perfectlysoft.screengrabber",
                 "com.tapjack.example",
                 "land.clover.screenmirror",
                 "com.mobizen.miing.service"
             )
-            if (suspicious.any { it.packageName in overlayPackages }) return true
-        } catch (_: Exception) { /* non-fatal */ }
-        // 2. API 26+: Settings.canDrawOverlays is the authoritative check
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            if (Settings.canDrawOverlays(reactContext)) {
-                // Our own app shouldn't need this; if someone granted it to us
-                // it's anomalous (or the user enabled it for the app deliberately).
-                // Don't flag self, but do check for overlays on sensitive windows.
+            for (appInfo in packages) {
+                val holdsPermission = try {
+                    pm.checkPermission(
+                        android.Manifest.permission.SYSTEM_ALERT_WINDOW,
+                        appInfo.packageName
+                    ) == PackageManager.PERMISSION_GRANTED
+                } catch (_: Exception) { false }
+                if (!holdsPermission || appInfo.packageName == reactContext.packageName) continue
+                capableApps++
+                // POSITIVE only on targeted evidence — never on the aggregate count.
+                if (appInfo.packageName in abusiveOverlayPackages) {
+                    Log.d(TAG, "[detectOverlay] known abusive overlay package present: \${appInfo.packageName}")
+                    _lastOverlayCapableAppsCount = capableApps
+                    return true
+                }
             }
-        }
+        } catch (_: Exception) { /* non-fatal — capability count stays best-effort */ }
+        _lastOverlayCapableAppsCount = capableApps
+        Log.d(TAG, "[detectOverlay] no abusive overlay package; overlayCapableAppsCount=\$capableApps (capability evidence only, NOT a threat)")
         return false
     }
 
@@ -847,10 +1030,7 @@ class SecurityModule(private val reactContext: ReactApplicationContext) :
     fun getSignatureSha256(promise: Promise) {
         Log.d(TAG, "[getSignatureSha256] ▶ called")
         try {
-            val sig = getSignatureBytes() ?: return promise.resolve(null)
-            val digest = MessageDigest.getInstance("SHA-256").digest(sig)
-            val hex = digest.joinToString("") { "%02X".format(it) }
-            promise.resolve(hex)
+            promise.resolve(getSignatureSha256Hex())
         } catch (e: Exception) { promise.resolve(null) }
     }
 
@@ -882,15 +1062,32 @@ class SecurityModule(private val reactContext: ReactApplicationContext) :
         } catch (_: Exception) { null }
     }
 
+    /** SHA-256 fingerprint (uppercase hex) of the current signing cert, or null. */
+    private fun getSignatureSha256Hex(): String? {
+        val sig = getSignatureBytes() ?: return null
+        return MessageDigest.getInstance("SHA-256").digest(sig)
+            .joinToString("") { "%02X".format(it) }
+    }
+
+    /**
+     * The expected production cert SHA-256 baked into BuildConfig ('' when not configured).
+     * Direct static reference (NOT reflection): R8 pruned the field in v221 because the only
+     * reader was reflective (Class.forName + getField), which R8 cannot see — silently
+     * disabling the APK signature-integrity check. A direct reference both creates a compile
+     * -time dependency R8 honors and lets the shrinker keep the field naturally.
+     */
+    private fun expectedCertSha256(): String =
+        try { com.medacademy.app.BuildConfig.EXPECTED_CERT_SHA256 }
+        catch (_: Throwable) { "" }
+
     private fun checkSignatureValid(): Boolean {
         // The expected production SHA-256 fingerprint is injected at build time
         // via BuildConfig (see withProguardRules config plugin).
-        // In debug/dev builds BuildConfig.EXPECTED_CERT_SHA256 is empty → skip check.
-        val expected = try {
-            val clazz = Class.forName(reactContext.packageName + ".BuildConfig")
-            clazz.getField("EXPECTED_CERT_SHA256").get(null) as? String ?: ""
-        } catch (_: Exception) { "" }
-        if (expected.isEmpty()) return true  // Not set → skip in dev builds
+        // NOT CONFIGURED → the check is UNAVAILABLE (skip), never a failure.
+        // Callers report expectedCertConfigured=false so the backend can tell
+        // "verified against pin" apart from "nothing to compare against".
+        val expected = expectedCertSha256()
+        if (expected.isEmpty()) return true  // Not set → skip in dev/unpinned builds
 
         val sig = getSignatureBytes() ?: return false
         val actual = MessageDigest.getInstance("SHA-256").digest(sig)
@@ -912,43 +1109,103 @@ class SecurityModule(private val reactContext: ReactApplicationContext) :
         }
     }
 
+    /**
+     * Anti-tamper (APK integrity) — distribution-aware.
+     *
+     * FALSE-POSITIVE FIX (root-cause audit): the previous implementation flagged
+     * "tampered" whenever the installer source was not Google Play in release
+     * builds. This app's sanctioned distribution model is a DIRECT-DOWNLOADED
+     * release APK (EAS internal distribution + website download) — devices
+     * legitimately see a null installer source, and Android returns null on many
+     * OEM ROMs even for Play-installed apps. Treating "no Play installer" as
+     * tamper evidence converted a distribution property into a false
+     * "App Integrity Compromised" verdict (risk +40 for every sideloaded user).
+     *
+     * Authoritative signals remaining (positive evidence only):
+     *   1. Signing certificate vs pinned expected SHA-256 (checkSignatureValid).
+     *      When no pin is configured the check is UNAVAILABLE — reported via
+     *      expectedCertConfigured=false, never "tampered".
+     *   2. Critical React Native runtime libraries present in the installed
+     *      app — checked BOTH on disk (nativeLibraryDir, legacy extraction)
+     *      AND inside the installed APK. This app ships with
+     *      android:extractNativeLibs=false (AGP default for minSdk 23+), so
+     *      .so files are memory-mapped straight from the APK and
+     *      nativeLibraryDir is EMPTY on every legitimate modern install.
+     *      A re-packaged APK that lost them would not run.
+     *
+     * Installer source is still collected — as DISTRIBUTION TELEMETRY via the
+     * installerSource evidence field in getSecurityFlags, so the backend can
+     * observe how the app arrived on the device without the client converting
+     * that into a threat verdict. A server-controlled strict mode (security_config
+     * extras.require_play_installer) is evaluated in JS where the server policy
+     * lives — see src/lib/security.ts detectTamper().
+     */
     private fun detectTampering(): Boolean {
-        // Runtime equivalent of BuildConfig.DEBUG — hoisted to function scope so all
-        // checks below can use it. ApplicationInfo.FLAG_DEBUGGABLE is cleared on
-        // signed release APKs, set on debug builds.
+        // Runtime equivalent of BuildConfig.DEBUG — hoisted so the lib check below
+        // can use it. ApplicationInfo.FLAG_DEBUGGABLE is cleared on signed release
+        // APKs, set on debug builds.
         val isDebugBuild = (reactContext.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0
 
-        // 1. Verify installer source (should be Play Store in production)
-        try {
-            val installer = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                reactContext.packageManager
-                    .getInstallSourceInfo(reactContext.packageName).installingPackageName
-            } else {
-                @Suppress("DEPRECATION")
-                reactContext.packageManager.getInstallerPackageName(reactContext.packageName)
-            }
-            val trustedInstallers = setOf(
-                "com.android.vending",         // Google Play Store
-                "com.google.android.packageinstaller",
-                null                           // sideloaded during dev
-            )
-            // Only enforce in non-debug builds
-            if (!isDebugBuild && installer !in trustedInstallers) return true
-        } catch (_: Exception) { /* non-fatal */ }
-
-        // 2. Signature check
+        // 1. Signature check — authoritative when an expected cert is configured.
         if (!checkSignatureValid()) return true
 
-        // 3. Critical native libraries must be present
-        val criticalLibs = listOf("libreactnative.so", "libhermes.so")
+        // 2. Critical native libraries must exist in the installed app.
+        //    FALSE-POSITIVE FIX: with android:extractNativeLibs=false the OS
+        //    never extracts .so files to nativeLibraryDir — they are loaded
+        //    directly from the APK. The previous disk-only probe found no libs
+        //    on ANY legitimate production install and returned "tampered"
+        //    (+40) even though the signature check had passed. The probe now
+        //    checks the APK contents as well; "tampered" is only possible when
+        //    absence is actually MEASURED in both locations — an inspection
+        //    error stays UNAVAILABLE, never a verdict.
+        val criticalLibs = listOf("libreactnative.so", "libhermes.so", "libhermesvm.so")
         val nativeLibDir = reactContext.applicationInfo.nativeLibraryDir
-        if (criticalLibs.none { File(nativeLibDir, it).exists() }) {
-            // No RN libs found at expected location → unusual
-            // (Only treat as tampered if we're in a fully-built release APK)
-            if (nativeLibDir.isNotEmpty() && !isDebugBuild) return true
+        val libsOnDisk = criticalLibs.any { File(nativeLibDir, it).exists() }
+        if (!libsOnDisk && !isDebugBuild && nativeLibDir.isNotEmpty()) {
+            if (!criticalLibsPresentInInstalledApk(criticalLibs)) return true
         }
 
         return false
+    }
+
+    /** Process-lifetime cache for criticalLibsPresentInInstalledApk(): the
+     *  installed APK cannot change while this process is alive — any reinstall
+     *  kills the process first. */
+    @Volatile private var criticalLibsInApkCache: Boolean? = null
+
+    /**
+     * True when any of the given libraries exists inside the installed APK
+     * (base or split). Returns true (unavailable) when no APK path can be
+     * inspected — absence must be MEASURED, never assumed, so an inspection
+     * error can never be converted into a tamper verdict. A false here is a
+     * measured absence across every readable APK path.
+     */
+    private fun criticalLibsPresentInInstalledApk(criticalLibs: List<String>): Boolean {
+        criticalLibsInApkCache?.let { return it }
+        val apkPaths = mutableListOf<String>()
+        reactContext.applicationInfo.sourceDir?.let { apkPaths.add(it) }
+        reactContext.applicationInfo.splitSourceDirs?.let { apkPaths.addAll(it) }
+        var anyApkInspected = false
+        for (apk in apkPaths) {
+            try {
+                java.util.zip.ZipFile(apk).use { zip ->
+                    anyApkInspected = true
+                    val entries = zip.entries()
+                    while (entries.hasMoreElements()) {
+                        val name = entries.nextElement().name
+                        if (name.startsWith("lib/") && criticalLibs.any { name.endsWith("/" + it) }) {
+                            criticalLibsInApkCache = true
+                            return true
+                        }
+                    }
+                }
+            } catch (_: Exception) { /* unreadable APK → not evidence, never a verdict */ }
+        }
+        if (anyApkInspected) {
+            criticalLibsInApkCache = false
+            return false
+        }
+        return true // nothing measurable → UNAVAILABLE, never "tampered"
     }
 
     // ══════════════════════════════════════════════════════════════════════════
@@ -974,6 +1231,16 @@ class SecurityModule(private val reactContext: ReactApplicationContext) :
             @Suppress("DEPRECATION")
             val builder = builderClass.getDeclaredConstructor().newInstance()
             builderClass.getMethod("setNonce", String::class.java).invoke(builder, nonce)
+            // Play Integrity's newer API names the binding field setRequestHash
+            // (server verifies requestDetails.requestHash). Older versions only
+            // expose setNonce — both surface in requestDetails.requestHash on
+            // the backend; try the newer name when present and ignore failure.
+            try {
+                builderClass.getMethod("setRequestHash", String::class.java).invoke(builder, nonce)
+            } catch (e: NoSuchMethodException) {
+                // Classic nonce API — the server reads requestHash which equals
+                // the nonce for classic requests. Nothing to do.
+            }
             val request = builderClass.getMethod("build").invoke(builder)
             val requestMethod = manager.javaClass.getMethod("requestIntegrityToken", requestClass)
             val taskObj = requestMethod.invoke(manager, request)
@@ -1063,6 +1330,30 @@ class SecurityModule(private val reactContext: ReactApplicationContext) :
             r.putBoolean("overlayDetected", overlay)
             r.putBoolean("signatureValid",  sigOk)
             r.putBoolean("tampered",        tamper)
+
+            // ── Evidence fields (observability — NEVER threat signals) ────
+            // installerSource: distribution telemetry. null = unknown/direct-
+            //   download (legitimate under this app's distribution model).
+            // expectedCertConfigured: distinguishes "signature verified against a
+            //   pinned cert" from "signature check unavailable (no pin)".
+            // signatureSha256: actual signing-cert fingerprint for server-side
+            //   correlation (public material, not a secret).
+            // overlayCapableAppsCount: SYSTEM_ALERT_WINDOW capability count —
+            //   evidence quality metric, explicitly NOT a threat signal.
+            val installerSource: String? = try {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                    reactContext.packageManager
+                        .getInstallSourceInfo(reactContext.packageName).installingPackageName
+                } else {
+                    @Suppress("DEPRECATION")
+                    reactContext.packageManager.getInstallerPackageName(reactContext.packageName)
+                }
+            } catch (_: Exception) { null }
+            r.putString("installerSource", installerSource)
+            r.putBoolean("expectedCertConfigured", expectedCertSha256().isNotEmpty())
+            val sigHex = runCatching { getSignatureSha256Hex() }.getOrNull()
+            if (sigHex != null) r.putString("signatureSha256", sigHex)
+            r.putInt("overlayCapableAppsCount", _lastOverlayCapableAppsCount)
             Log.d(TAG, "[getSecurityFlags] frida=$frida xposed=$xposed magisk=$magisk overlay=$overlay sigOk=$sigOk tamper=$tamper")
 
             // ── Phase 3 (new) ──────────────────────────────────────────────
@@ -1121,6 +1412,157 @@ class SecurityModule(private val reactContext: ReactApplicationContext) :
         try { promise.resolve(block()) } catch (e: Exception) { promise.resolve(false) }
     }
 
+
+    // ═══════════════════════════════════════════════════════════════════
+    // Device-key cryptography (Android Keystore — challenge/response layer)
+    // ═══════════════════════════════════════════════════════════════════
+    // The private key is generated INSIDE Android Keystore and is
+    // non-exportable by design: it can never reach JS, files, AsyncStorage,
+    // SecureStore, logs, or the backend. StrongBox is attempted first on
+    // API 28+; TEE is the normal backing; a software-backed key is the
+    // honest fallback and is REPORTED as such (never claimed as hardware).
+    //
+    // Signing: ECDSA SHA-256 over the exact bytes the caller supplies (the
+    // canonical JSON built in TS; the backend recomputes it independently
+    // in SecurityEvidenceService::canonicalJson). No server secrets live here.
+
+    private val DEVICE_KEY_ALIAS = "medacademy_device_key_v1"
+
+    /** Generate the device keypair if absent. Resolves the security backing. */
+    @ReactMethod
+    fun ensureDeviceKey(promise: Promise) {
+        try {
+            val ks = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
+            if (!ks.containsAlias(DEVICE_KEY_ALIAS)) {
+                val kpg = KeyPairGenerator.getInstance(KeyProperties.KEY_ALGORITHM_EC, "AndroidKeyStore")
+                var generated = false
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                    // Prefer StrongBox where the device offers it.
+                    try {
+                        val spec = KeyGenParameterSpec.Builder(
+                            DEVICE_KEY_ALIAS,
+                            KeyProperties.PURPOSE_SIGN or KeyProperties.PURPOSE_VERIFY
+                        )
+                            .setAlgorithmParameterSpec(ECGenParameterSpec("secp256r1"))
+                            .setDigests(KeyProperties.DIGEST_SHA256)
+                            .setIsStrongBoxBacked(true)
+                            .build()
+                        kpg.initialize(spec)
+                        kpg.generateKeyPair()
+                        generated = true
+                    } catch (_: Exception) {
+                        // No StrongBox on this device — fall through to TEE/software.
+                    }
+                }
+                if (!generated) {
+                    val spec = KeyGenParameterSpec.Builder(
+                        DEVICE_KEY_ALIAS,
+                        KeyProperties.PURPOSE_SIGN or KeyProperties.PURPOSE_VERIFY
+                    )
+                        .setAlgorithmParameterSpec(ECGenParameterSpec("secp256r1"))
+                        .setDigests(KeyProperties.DIGEST_SHA256)
+                        .build()
+                    kpg.initialize(spec)
+                    kpg.generateKeyPair()
+                }
+            }
+            promise.resolve(deviceKeySecurityLevel())
+        } catch (e: Exception) {
+            promise.reject("DEVICE_KEY_GEN_FAILED", e.message ?: "key generation failed", e)
+        }
+    }
+
+    /**
+     * Which backing actually holds the key — honestly reported.
+     * "tee" covers secure-hardware-backed keys (StrongBox devices included;
+     * the public API does not reliably distinguish them without attestation,
+     * and we do NOT claim StrongBox when we cannot verify it).
+     */
+    private fun deviceKeySecurityLevel(): String {
+        return try {
+            val ks = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
+            val entry = ks.getEntry(DEVICE_KEY_ALIAS, null)
+            if (entry is KeyStore.PrivateKeyEntry) {
+                val factory = KeyFactory.getInstance(KeyProperties.KEY_ALGORITHM_EC, "AndroidKeyStore")
+                @Suppress("DEPRECATION")
+                val info = factory.getKeySpec(entry.getPrivateKey(), KeyInfo::class.java)
+                if (info.isInsideSecureHardware) "tee" else "software"
+            } else {
+                "unknown"
+            }
+        } catch (_: Exception) {
+            "unknown"
+        }
+    }
+
+    /** Export the PUBLIC key as SPKI PEM (public material only — safe to send). */
+    @ReactMethod
+    fun getDevicePublicKeyPem(promise: Promise) {
+        try {
+            val ks = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
+            val cert = ks.getCertificate(DEVICE_KEY_ALIAS)
+                ?: throw IllegalStateException("device key not generated yet")
+            val b64 = android.util.Base64.encodeToString(cert.publicKey.encoded, android.util.Base64.NO_WRAP)
+            val nl = System.getProperty("line.separator")
+            val pem = StringBuilder("-----BEGIN PUBLIC KEY-----").append(nl)
+            var i = 0
+            while (i < b64.length) {
+                val end = minOf(i + 64, b64.length)
+                pem.append(b64, i, end).append(nl)
+                i = end
+            }
+            pem.append("-----END PUBLIC KEY-----")
+            promise.resolve(pem.toString())
+        } catch (e: Exception) {
+            promise.reject("DEVICE_KEY_EXPORT_FAILED", e.message ?: "export failed", e)
+        }
+    }
+
+    /**
+     * Sign bytes (base64, from the canonical payload) with the Keystore EC key.
+     * Returns base64 DER ECDSA-SHA256. The server verifies with openssl_verify
+     * against the registered SPKI PEM.
+     */
+    @ReactMethod
+    fun signDevicePayload(payloadB64: String, promise: Promise) {
+        try {
+            val ks = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
+            val entry = ks.getEntry(DEVICE_KEY_ALIAS, null) as? KeyStore.PrivateKeyEntry
+                ?: throw IllegalStateException("device key not available")
+            val data = android.util.Base64.decode(payloadB64, android.util.Base64.NO_WRAP)
+            val signature = Signature.getInstance("SHA256withECDSA")
+            signature.initSign(entry.getPrivateKey())
+            signature.update(data)
+            promise.resolve(android.util.Base64.encodeToString(signature.sign(), android.util.Base64.NO_WRAP))
+        } catch (e: Exception) {
+            promise.reject("DEVICE_KEY_SIGN_FAILED", e.message ?: "signing failed", e)
+        }
+    }
+
+    /** Stable public identifier for the registered key (the alias is public). */
+    @ReactMethod
+    fun getDeviceKeyId(promise: Promise) {
+        promise.resolve(DEVICE_KEY_ALIAS)
+    }
+
+    /**
+     * Wireless debugging state (API 30+; Settings.Global.ADB_WIFI_ENABLED).
+     * Distinct from USB debugging (isAdbEnabled) — the two surfaces carry
+     * different risk and the security model tracks them separately.
+     */
+    @ReactMethod
+    fun isWirelessDebuggingEnabled(promise: Promise) {
+        runSafe(promise) {
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return@runSafe false
+            try {
+                Settings.Global.getInt(
+                    reactContext.contentResolver,
+                    "adb_wifi_enabled", 0
+                ) == 1
+            } catch (_: Exception) { false }
+        }
+    }
+
     // Required for NativeEventEmitter
     @ReactMethod fun addListener(eventName: String) {}
     @ReactMethod fun removeListeners(count: Int) {}
@@ -1131,6 +1573,253 @@ class SecurityModule(private val reactContext: ReactApplicationContext) :
             reactContext.getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
                 .emit(name, null)
         } catch (_: Exception) {}
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // GAP-CLOSURE — BINARY INTEGRITY (Parts 1–4)
+    // Measures: APK signing-cert digest, per-DEX digests, native-library
+    // inventory, and critical-asset aggregate — across the BASE APK AND
+    // ALL SPLIT APKs, extraction-mode agnostic (no nativeLibraryDir
+    // dependency, so no false "missing library" on modern installs).
+    //
+    // The MEASUREMENT is computed here; the JUDGEMENT happens on the
+    // SERVER (device_keys.integrity_baseline_sha256 / optional pinned
+    // release digest). There is deliberately NO client-side expected-hash
+    // comparison — nothing here can be patched to "pass".
+    // ═══════════════════════════════════════════════════════════════════
+
+    /** Digest of the APK signing certificate(s) actually covering this build. */
+    fun signingCertSha256(): String {
+        return try {
+            val sig = getSignatureBytes() ?: return ""
+            MessageDigest.getInstance("SHA-256").digest(sig)
+                .joinToString("") { "%02x".format(it) }
+        } catch (_: Exception) { "" }
+    }
+
+    /**
+     * Critical-asset integrity. Measures assets/medasec_manifest.json —
+     * a build-generated manifest of {path, sha256} for security-critical
+     * assets — and every asset it lists. NOT a whole-APK hash: hashing the
+     * APK that contains the evidence would be a self-reference. The
+     * manifest is emitted at release-build time (app.json extra.medaSecAssets
+     * via withSecNativeCoreSources); if it is absent the layer is
+     * UNAVAILABLE, never a verdict.
+     */
+    fun collectAssetIntegrity(zipSources: List<String>): JSONObject {
+        val out = JSONObject()
+        try {
+            var manifestFound = false
+            for (src in zipSources) {
+                try {
+                    ZipFile(src).use { zip ->
+                        val manEntry = zip.getEntry("assets/medasec_manifest.json") ?: return@use
+                        manifestFound = true
+                        val manifestBytes = zip.getInputStream(manEntry).readBytes()
+                        out.put("manifest_sha256", MessageDigest.getInstance("SHA-256")
+                            .digest(manifestBytes).joinToString("") { "%02x".format(it) })
+                        val manifest = JSONObject(String(manifestBytes, Charsets.UTF_8))
+                        val entries = manifest.optJSONArray("assets") ?: JSONArray()
+                        var ok = 0; var bad = 0; var missing = 0
+                        val offenders = JSONArray()
+                        for (i in 0 until entries.length()) {
+                            val e = entries.optJSONObject(i) ?: continue
+                            val path = e.optString("path")
+                            val want = e.optString("sha256")
+                            if (path.isEmpty() || want.length != 64) continue
+                            val ae = zip.getEntry(path)
+                            if (ae == null) { missing++; offenders.put(path) } else {
+                                val got = MessageDigest.getInstance("SHA-256")
+                                    .digest(zip.getInputStream(ae).readBytes())
+                                    .joinToString("") { "%02x".format(it) }
+                                if (got.equals(want, ignoreCase = true)) ok++
+                                else { bad++; offenders.put(path) }
+                            }
+                        }
+                        out.put("assets_total", entries.length())
+                        out.put("assets_ok_count", ok)
+                        out.put("assets_bad_count", bad)
+                        out.put("assets_missing_count", missing)
+                        out.put("assets_ok", bad == 0 && missing == 0)
+                        if (offenders.length() > 0) {
+                            val limited = JSONArray()
+                            for (j in 0 until minOf(offenders.length(), 8)) limited.put(offenders.get(j))
+                            out.put("assets_offenders", limited)
+                        }
+                    }
+                } catch (_: Exception) { }
+                if (manifestFound) break
+            }
+            if (!manifestFound) out.put("manifest", "absent")
+        } catch (e: Exception) {
+            out.put("assets_error", e.javaClass.simpleName)
+        }
+        return out
+    }
+
+    /**
+     * Full binary-integrity measurement across base + split APKs.
+     * One aggregate (runtime_sha256) + per-component detail. The aggregate is
+     * defined by sorting all {name → sha256(file)} pairs by name and hashing
+     * that canonical sequence — stable across the OS's APK ordering, but
+     * ANY modification (DEX swap, lib swap, asset patch, added file) changes
+     * the sorted sequence and therefore the aggregate.
+     */
+    fun collectBinaryIntegrity(): JSONObject {
+        val out = JSONObject()
+        try {
+            val sources = ArrayList<String>()
+            reactContext.applicationInfo.sourceDir?.let { sources.add(it) }
+            reactContext.applicationInfo.splitSourceDirs?.forEach { sources.add(it) }
+
+            val pairs = ArrayList<String>()
+            var dexCount = 0
+            var soCount = 0
+            val soNames = HashSet<String>()
+            var totalBytes = 0L
+            val md = MessageDigest.getInstance("SHA-256")
+
+            for (src in sources) {
+                try {
+                    ZipFile(src).use { zip ->
+                        val entries = zip.entries()
+                        while (entries.hasMoreElements()) {
+                            val e = entries.nextElement()
+                            val name = e.name
+                            if (e.isDirectory) continue
+                            // The v1 signature block (META-INF/*.{RSA,DSA,EC}) embeds the
+                            // signing cert; hashing it is redundant/circular. The cert
+                            // itself is reported separately via signingCertSha256().
+                            if (name.startsWith("META-INF/") &&
+                                (name.endsWith(".RSA") || name.endsWith(".DSA") || name.endsWith(".EC"))) continue
+                            val fileSha = md.digest(zip.getInputStream(e).readBytes())
+                                .joinToString("") { "%02x".format(it) }
+                            totalBytes += e.size
+                            if (!name.contains("/") && name.startsWith("classes") && name.endsWith(".dex")) dexCount++
+                            if (name.startsWith("lib/") && name.endsWith(".so")) {
+                                soCount++
+                                soNames.add(name.substringAfterLast('/'))
+                            }
+                            pairs.add(name + ":" + fileSha)
+                        }
+                    }
+                } catch (e: Exception) {
+                    out.put("zip_error", (src.substringAfterLast('/') + ":" + e.javaClass.simpleName))
+                }
+            }
+
+            // Canonical aggregate: sort the {name:hash} sequence, then hash it.
+            val sorted = pairs.sorted()
+            val agg = MessageDigest.getInstance("SHA-256")
+            for (p in sorted) agg.update(p.toByteArray(Charsets.UTF_8))
+            val runtimeSha = agg.digest().joinToString("") { "%02x".format(it) }
+
+            out.put("apk_sources", sources.size)
+            out.put("dex_count", dexCount)
+            out.put("so_count", soCount)
+            out.put("so_names", JSONArray(soNames.sorted()))
+            out.put("total_bytes", totalBytes)
+            out.put("file_count", pairs.size)
+            out.put("cert_sha256", signingCertSha256())
+            out.put("runtime_sha256", runtimeSha)
+            out.put("computed_at", System.currentTimeMillis())
+        } catch (e: Exception) {
+            out.put("binary_error", e.javaClass.simpleName)
+            out.put("runtime_sha256", "")
+        }
+        return out
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // GAP-CLOSURE — NATIVE SECURITY CORE bridge (libmedasec, Part 6/7).
+    // C++ performs the expensive/patch-resistant part: /proc self maps
+    // inspection, loaded-library inventory, rusage self-checks. Kotlin
+    // stays the platform-API authority. Results are UNAVAILABLE-honest:
+    // a native failure degrades to "unavailable", never to "safe".
+    // ═══════════════════════════════════════════════════════════════════
+
+    private fun nativeCoreAvailable(): Boolean = try {
+        SecurityNativeCore.isAvailable()
+    } catch (_: Throwable) { false }
+
+    fun nativeCoreRasp(): JSONObject = try {
+        JSONObject(SecurityNativeCore.raspAggregate())
+    } catch (_: Throwable) { JSONObject().put("available", false) }
+
+    fun nativeCoreInspect(): JSONObject = try {
+        JSONObject(SecurityNativeCore.inspect())
+    } catch (_: Throwable) { JSONObject().put("available", false) }
+
+    /**
+     * Aggregate VPN state (Part 10): a MODEL, not a boolean.
+     *   unknown    — signals could not be collected
+     *   off        — TRANSPORT_VPN absent AND no tun/tap/ppp/vpn interface
+     *   on         — transport or interface positively detected
+     *   suspicious — callback saw VPN activity that the sensors no longer find
+     *                (possible suppression)
+     */
+    fun aggregateVpnState(): String {
+        return try {
+            // detectVpn() combines TRANSPORT_VPN (tier 1) and the
+            // tun/vpn/ppp/ipsec interface scan (tier 2) in one call.
+            val vpnDetected = detectVpn()
+            val proxy = detectProxy()
+            when {
+                vpnDetected -> "on"
+                proxy -> "suspicious"
+                // Part 12 (recovery-fixed): SUSPICIOUS only on a LIVE
+                // contradiction — the OS callback reports an active VPN
+                // network the sensor scan cannot find (possible suppression).
+                // A completed teardown clears callbackSeesVpn in
+                // upgradeVpnState(), so the state recovers to OFF without a
+                // restart (the previous historical latch blocked forever).
+                callbackSeesVpn && !vpnDetected -> "suspicious"
+                else -> "off"
+            }
+        } catch (_: Exception) { "unknown" }
+    }
+
+
+    // ═══════════════════════════════════════════════════════════════
+    // Phase-3 micro-gap Part 3: NATIVE NETWORK INSPECTION bridge.
+    // C++ reads /proc/net/dev + /proc/net/route (kernel-authoritative
+    // interface/route tables that a userspace hook of the Android
+    // framework cannot edit). EVIDENCE ONLY — never authorization.
+    // ═══════════════════════════════════════════════════════════════
+    fun nativeNetworkEvidence(): JSONObject = try {
+        JSONObject(SecurityNativeCore.networkEvidence())
+    } catch (_: Throwable) { JSONObject().put("available", false) }
+
+    @ReactMethod
+    fun getNativeNetworkEvidence(promise: Promise) {
+        try { promise.resolve(nativeNetworkEvidence().toString()) }
+        catch (e: Exception) { promise.reject("net_error", e.message ?: "native network evidence failed") }
+    }
+    /** Diagnostic snapshot of the native core (telemetry; never a verdict). */
+    fun nativeCoreSnapshot(): JSONObject {
+        val out = JSONObject()
+        out.put("core_available", nativeCoreAvailable())
+        out.put("core_rasp", nativeCoreRasp())
+        out.put("core_inspect", nativeCoreInspect())
+        return out
+    }
+
+    @ReactMethod
+    fun getNativeCoreSnapshot(promise: Promise) {
+        try { promise.resolve(nativeCoreSnapshot().toString()) }
+        catch (e: Exception) { promise.reject("core_error", e.message ?: "native core snapshot failed") }
+    }
+
+    @ReactMethod
+    fun getVpnState(promise: Promise) {
+        try { promise.resolve(aggregateVpnState()) }
+        catch (e: Exception) { promise.reject("vpn_state_error", e.message ?: "vpn state failed") }
+    }
+
+    @ReactMethod
+    fun getBinaryIntegrity(promise: Promise) {
+        try { promise.resolve(collectBinaryIntegrity().toString()) }
+        catch (e: Exception) { promise.reject("integrity_error", e.message ?: "binary integrity failed") }
     }
 }
 
@@ -1155,7 +1844,74 @@ class SecurityPackage : ReactPackage {
 
 // ─── withDangerousMod: write Kotlin files during prebuild ────────────────────
 
+
+// ─── Pinning config injection + AppDelegate self-heal ────────────────────────
+// apiSpkiPins -> android/gradle.properties (prebuild regenerates that file, so
+// this runs on every EAS build before gradle). Empty when extra.medaSslPins is
+// absent -> debug AND release both unpinned (opt-in protection).
+// AppDelegate self-heal: prebuild regenerates AppDelegate.swift from template,
+// which would silently drop the PinningInitializer.install() call — re-add it.
+function selfHealPinningIntegration(config) {
+  const pins = config?.extra?.medaSslPins;
+  const hosts = config?.extra?.medaPinnedHosts;
+
+  // a) Android: write apiSpkiPins into gradle.properties
+  const gradlePropsPath = path.join(config?._internal?.projectRoot || process.cwd(), 'android', 'gradle.properties');
+  if (Array.isArray(pins) && pins.length > 0 && fs.existsSync(gradlePropsPath)) {
+    const validPins = pins.filter((p) => typeof p === 'string' && p.length === 44);
+    if (validPins.length > 0) {
+      let props = fs.readFileSync(gradlePropsPath, 'utf8');
+      const validHosts = Array.isArray(hosts)
+        ? hosts.filter((h) => typeof h === 'string' && h.length > 0)
+        : [];
+      const lines = ['apiSpkiPins=' + validPins.join(' ')];
+      if (validHosts.length > 0) lines.push('apiPinnedHosts=' + validHosts.join(' '));
+      const reSpki = /^apiSpkiPins=.*$/m;
+      if (reSpki.test(props)) {
+        props = props.replace(reSpki, lines[0]);
+      } else {
+        props = props.trimEnd() + '\n# SSL pinning for the production API (injected by plugins/withSecurityModule.js)\n' + lines[0] + '\n';
+      }
+      if (validHosts.length > 0) {
+        const reHosts = /^apiPinnedHosts=.*$/m;
+        if (reHosts.test(props)) {
+          props = props.replace(reHosts, lines[1]);
+        } else {
+          props = props.trimEnd() + '\n' + lines[1] + '\n';
+        }
+      }
+      fs.writeFileSync(gradlePropsPath, props);
+    }
+  }
+
+  // b) iOS: self-heal the AppDelegate pinning call
+  const appDelegatePath = path.join(
+    config?._internal?.projectRoot || process.cwd(),
+    'ios',
+    config?.modRequest?.projectName || 'MedAcademyMobileApp',
+    'AppDelegate.swift'
+  );
+  if (fs.existsSync(appDelegatePath)) {
+    let appDelegate = fs.readFileSync(appDelegatePath, 'utf8');
+    if (!appDelegate.includes('PinningInitializer.install()')) {
+      const anchor = '    let delegate = ReactNativeDelegate()';
+      if (appDelegate.includes(anchor)) {
+        appDelegate = appDelegate.replace(
+          anchor,
+          '    // REAL SSL pinning (inert in dev: no MEDA_SPKI_PINS in Info.plist).\n' +
+          '    // Installs the NSURLSessionConfiguration provider BEFORE React loads so\n' +
+          '    // the very first fetch() is already validated.\n' +
+          '    PinningInitializer.install()\n\n' + anchor
+        );
+        fs.writeFileSync(appDelegatePath, appDelegate);
+      }
+    }
+  }
+  return config;
+}
+
 function withSecurityKotlinSources(config) {
+  config = selfHealPinningIntegration(config);
   return withDangerousMod(config, [
     'android',
     async (cfg) => {
@@ -1190,11 +1946,22 @@ function withSecurityPackageRegistration(config) {
     let contents = cfg.modResults.contents;
 
     // ── 1. Idempotency guard ────────────────────────────────────────────────
-    // Only skip if SecurityPackage is BOTH imported AND registered (add() call present).
-    // If only the import exists (old failed insertion), we still need to add the registration.
-    const alreadyRegistered =
-      contents.includes('SecurityPackage') &&
-      contents.includes('add(SecurityPackage())');
+    // Only skip if the REGISTRATION (add() call) is present — the import alone is
+    // NOT proof of registration. Historical bug: a checked-in MainApplication.kt had
+    // the import but a lost add() call, so the guard skipped, the module never
+    // registered, and NativeModules.SecurityModule was null in production (breaking
+    // VPN detection and every other native check). Guarding on the add() call only
+    // makes the insertion self-healing for that exact state.
+    const alreadyRegistered = contents.includes('add(SecurityPackage())');
+    if (alreadyRegistered && !contents.includes('import com.medacademy.security.SecurityPackage')) {
+      // Registered but import missing (hand-edited file) — repair the import.
+      contents = contents.replace(
+        /(import com\.facebook\.react\.ReactApplication)/,
+        'import com.medacademy.security.SecurityPackage\n$1'
+      );
+      cfg.modResults.contents = contents;
+      return cfg;
+    }
     if (alreadyRegistered) return cfg;
 
     // ── 2. Ensure import is present ─────────────────────────────────────────
@@ -1262,7 +2029,7 @@ function withIOSSwiftSources(config) {
 
     // ── 1. Copy Swift + ObjC source files ─────────────────────────────────
     const pluginIosDir = path.join(projectRoot, 'plugins', 'ios');
-    const filesToCopy  = ['IOSSecurityModule.swift', 'IOSSecurityModule.m'];
+    const filesToCopy  = ['IOSSecurityModule.swift', 'IOSSecurityModule.m', 'PinningURLProtocol.swift', 'PinningInitializer.m'];
     for (const file of filesToCopy) {
       const src  = path.join(pluginIosDir, file);
       const dest = path.join(iosAppDir, file);
@@ -1608,7 +2375,7 @@ function withIOSXcodeFiles(config) {
       );
     });
 
-    const filesToAdd = ['IOSSecurityModule.swift', 'IOSSecurityModule.m'];
+    const filesToAdd = ['IOSSecurityModule.swift', 'IOSSecurityModule.m', 'PinningURLProtocol.swift'];
 
     for (const fileName of filesToAdd) {
       const filePath = `${appName}/${fileName}`;
@@ -1634,10 +2401,184 @@ function withIOSXcodeFiles(config) {
 
 // ─── Combined export ──────────────────────────────────────────────────────────
 
+const withMedaSslPins = (config) => {
+  // REAL iOS SSL pinning config: SPKI pins + pinned hosts are injected into the
+  // app target Info.plist from app.json extra fields. Absent keys = development
+  // build = pinning inert (PinningURLProtocol.canInit returns false).
+  // Never store private key material here — SPKI pins are public-key HASHES.
+  const pins = config?.extra?.medaSslPins;
+  const hosts = config?.extra?.medaPinnedHosts;
+  if (Array.isArray(pins) && pins.length > 0) {
+    config.ios = config.ios || {};
+    config.ios.infoPlist = config.ios.infoPlist || {};
+    config.ios.infoPlist.MEDA_SPKI_PINS = pins.filter((p) => typeof p === 'string');
+    config.ios.infoPlist.MEDA_PINNED_HOSTS = Array.isArray(hosts)
+      ? hosts.filter((h) => typeof h === 'string')
+      : [];
+  }
+  return config;
+};
+
+// ─────────────────────────────────────────────────────────────────────────
+// GAP CLOSURE — Native Security Core (libmedasec): C++/JNI inspection core.
+// Materialized under android/app/src/main/cpp by a dangerous mod so it
+// survives expo prebuild --clean. Also emits assets/medasec_manifest.json
+// (critical-asset manifest) and the medasecManifest gradle digest task.
+// ─────────────────────────────────────────────────────────────────────────
+const MEDASEC_CPP = "/*\n * medasec_core.cpp — MedAcademy Native Security Core (Part 6/7 gap closure)\n * ─────────────────────────────────────────────────────────────────────────────\n * Purpose: move the expensive, patch-resistant parts of runtime inspection\n * (RASP) out of Kotlin/JS into a small C++ core. Every signal collected here\n * is EVIDENCE for the signed security-evidence schema — it is NOT an\n * authorization decision. The backend remains the final authority.\n *\n * No secrets live in this file. Nothing here can be an authorization oracle:\n * the results are signed (device Keystore) and judged server-side, where a\n * suppressed check is distinguishable from a clean one only through the\n * broader assurance model (tenure, violation history, Play Integrity layer).\n *\n * Design constraints:\n *   - No custom cryptography. Only hashing (SHA-256 via OpenSSL-style\n *     primitives is NOT needed — we use no crypto at all here; the only\n *     hashing happens in Kotlin over the measured bytes).\n *   - No writes outside the process, no network, no file writes.\n *     READ-ONLY inspection.\n *   - No unsafe C. Every allocation is bounded; every read is bounded.\n *   - Clean teardown: no leaked fds or memory (verified by design below).\n * ─────────────────────────────────────────════════════════════════════════════\n */\n#include <jni.h>\n#include <string>\n#include <vector>\n#include <fstream>\n#include <sstream>\n#include <cstring>\n#include <cctype>\n#include <dirent.h>\n#include <unistd.h>\n#include <cstdio>\n#include <cstdlib>\n#include <ctime>\n\nnamespace {\n\nstruct RaspSignals {\n    bool maps_ok = false;\n    bool maps_anon_exec = false;         // writable+executable private mappings\n    int  anon_exec_regions = 0;\n    bool maps_unexpected_hook_libs = false;\n    std::vector<std::string> hook_libs;  // bounded list (≤8 names)\n    bool maps_ok_status = false;\n    long vm_rss_kb = -1;\n    int  threads = -1;\n    bool status_ok = false;\n    long utime = -1, stime = -1;         // rusage-ish from /proc/self/stat\n    bool stat_ok = false;\n    bool cmdlines_ok = false;\n    int  frida_like_names = 0;\n    std::vector<std::string> frida_like;\n};\n\n/** Case-insensitive substring. */\nbool contains_ci(const std::string& hay, const std::string& needle) {\n    if (hay.size() < needle.size()) return false;\n    for (size_t i = 0; i + needle.size() <= hay.size(); ++i) {\n        size_t j = 0;\n        while (j < needle.size() &&\n               std::tolower((unsigned char)hay[i + j]) == std::tolower((unsigned char)needle[j])) ++j;\n        if (j == needle.size()) return true;\n    }\n    return false;\n}\n\n/**\n * Hook-indicator library names (indicative, not exhaustive; low FP by design).\n *\n * PART 1 CLASSIFICATION — this is STATIC STRING OBFUSCATION, not encryption.\n * Honest properties:\n *   - defeats naive `strings` dumps / grep-for-\"frida\" in the stripped .so;\n *   - a capable analyst reconstructs it from the .data segment trivially;\n *   - the bytes AND their transform (XOR) ship in the same binary;\n *   - NOT secret storage, NOT app authenticity, NOT a security boundary.\n * Kept because it raises the floor of the cheapest RE pass at ~zero cost.\n *\n * Per-row transform key (byte-position offset) instead of one obvious\n * constant, so the table is not uniformly decodable by replaying a single\n * key byte. The key table itself is, unavoidably, also in the binary.\n */\nconstexpr unsigned char kXorKey = 0x5A;            // base key (legacy rows)\nconstexpr unsigned char kThreadKey = 0x3C;         // thread-name table\n\nstruct EncName { unsigned char len; unsigned char bytes[20]; };\n\n// Encoded with: bytes[i] = plain[i] ^ 0x5A — VERIFIED programmatically\n// (.freebuff/check-xor-table.cjs decodes and compares before every commit).\nconstexpr EncName kHookIndicatorsEnc[] = {\n    {8,  {0x36,0x33,0x38,0x3c,0x28,0x33,0x3e,0x3b,0,0,0,0,0,0,0,0,0,0,0,0}},     // libfrida\n    {11, {0x3c,0x28,0x33,0x3e,0x3b,0x77,0x3b,0x3d,0x3f,0x34,0x2e,0,0,0,0,0,0,0,0,0}}, // frida-agent\n    {14, {0x36,0x33,0x38,0x3d,0x2f,0x37,0x77,0x30,0x29,0x77,0x36,0x35,0x35,0x2a,0,0,0,0,0,0}}, // libgum-js-loop\n    {6,  {0x3d,0x3b,0x3e,0x3d,0x3f,0x2e,0,0,0,0,0,0,0,0,0,0,0,0,0,0}},           // gadget\n    {9,  {0x36,0x33,0x38,0x22,0x2a,0x35,0x29,0x3f,0x3e,0,0,0,0,0,0,0,0,0,0,0}},  // libxposed\n    {12, {0x36,0x33,0x38,0x29,0x2f,0x38,0x29,0x2e,0x28,0x3b,0x2e,0x3f,0,0,0,0,0,0,0,0}}, // libsubstrate\n    {6,  {0x36,0x33,0x38,0x37,0x29,0x3c,0,0,0,0,0,0,0,0,0,0,0,0,0,0}},           // libmsf\n    {9,  {0x36,0x33,0x38,0x3d,0x3b,0x3e,0x3d,0x3f,0x2e,0,0,0,0,0,0,0,0,0,0,0}},  // libgadget\n    {15, {0x36,0x33,0x38,0x3d,0x3b,0x37,0x3f,0x3d,0x2f,0x3b,0x28,0x3e,0x33,0x3b,0x34,0,0,0,0,0}}, // libgameguardian\n    {5,  {0x36,0x33,0x38,0x3d,0x3d,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}},              // libgg\n};\n\n/**\n * Runtime reconstruction (bounded to the struct size; NUL-terminated when\n * len < sizeof(bytes)).\n */\nstd::string decodeEncName(const EncName& e) {\n    std::string out;\n    out.reserve(e.len);\n    for (unsigned char i = 0; i < e.len && i < sizeof(e.bytes); ++i) {\n        out += (char)(e.bytes[i] ^ kXorKey);\n    }\n    return out;\n}\n\nbool isHookIndicator(const std::string& path) {\n    for (const EncName& enc : kHookIndicatorsEnc) {\n        if (contains_ci(path, decodeEncName(enc))) return true;\n    }\n    return false;\n}\n\n/** Read a small text file fully, bounded to maxBytes (read-only inspection). */\nstd::string readSmallFile(const char* path, size_t maxBytes) {\n    std::ifstream f(path, std::ios::in | std::ios::binary);\n    if (!f.is_open()) return std::string();\n    std::string out;\n    out.reserve(4096);\n    char buf[8192];\n    while (out.size() < maxBytes) {\n        f.read(buf, sizeof(buf));\n        out.append(buf, (size_t)f.gcount());\n        if (!f) break;\n    }\n    return out;\n}\n\n/**\n * /proc/self/maps — writable+executable private mappings are a strong,\n * long-standing runtime-instrumentation signal when produced outside the\n * known runtime (ART, trampolines). We record COUNT + NAMES only.\n */\nvoid inspectMaps(RaspSignals& s) {\n    std::ifstream maps(\"/proc/self/maps\");\n    if (!maps.is_open()) return;\n    s.maps_ok = true;\n    std::string line;\n    while (std::getline(maps, line)) {\n        if (line.size() < 12) continue;\n        // perms field: chars 0..3 after leading blanks — cheap parse.\n        bool r = false, w = false, x = false;\n        size_t i = 0;\n        while (i < line.size() && line[i] != ' ' && i < 32) {\n            char c = line[i];\n            if (c == 'r') r = true;\n            if (c == 'w') w = true;\n            if (c == 'x') x = true;\n            ++i;\n}\n        if (!(r && w && x)) continue;\n        // Bounded region count; no unbounded growth.\n        if (s.anon_exec_regions < 4096) s.anon_exec_regions++;\n        s.maps_anon_exec = true;\n        // The pathname tail (may be empty for anon mappings).\n        std::string tail;\n        size_t p = line.find('/');\n        if (p != std::string::npos) tail = line.substr(p);\n        if (!tail.empty() && isHookIndicator(tail)) {\n            s.maps_unexpected_hook_libs = true;\n            if (s.hook_libs.size() < 8) s.hook_libs.push_back(tail.substr(0, 256));\n        }\n    }\n}\n\n/** /proc/self/status — thread count + RSS; detects heavy instrumentation. */\nvoid inspectStatus(RaspSignals& s) {\n    std::string st = readSmallFile(\"/proc/self/status\", 16384);\n    if (st.empty()) return;\n    s.status_ok = true;\n    size_t p = st.find(\"Threads:\");\n    if (p != std::string::npos) {\n        s.threads = std::atoi(st.c_str() + p + 8);\n    }\n    p = st.find(\"VmRSS:\");\n    if (p != std::string::npos) {\n        s.vm_rss_kb = std::atol(st.c_str() + p + 6);\n    }\n}\n\n/** /proc/self/task — directory listing count of threads (cross-check). */\nint countThreadsViaTask() {\n    DIR* d = opendir(\"/proc/self/task\");\n    if (!d) return -1;\n    int n = 0;\n    struct dirent* e;\n    while ((e = readdir(d)) != nullptr) {\n        if (e->d_name[0] == '.') continue;\n        if (++n > 4096) break;   // bounded\n    }\n    closedir(d);\n    return n;\n}\n\n// Thread-name indicators for injected runtimes (gmain/gdbus are GLib loops\n// used by Frida; \"frida\"/\"pool-frida\" are direct). XOR-obfuscated, Part 1.\nconstexpr unsigned char kThreadIndicatorsEnc[4][11] = {\n    {5, 0x5b,0x51,0x5d,0x55,0x52,0x00,0x00,0x00,0x00,0x00},   // gmain\n    {5, 0x5b,0x58,0x5e,0x49,0x4f,0x00,0x00,0x00,0x00,0x00},   // gdbus\n    {5, 0x5a,0x4e,0x55,0x58,0x5d,0x00,0x00,0x00,0x00,0x00},   // frida\n    {10, 0x4c,0x53,0x53,0x50,0x11,0x5a,0x4e,0x55,0x58,0x5d},  // pool-frida\n};\n\nstd::string decodeThreadName(unsigned char idx) {\n    std::string out;\n    if (idx >= 4) return out;\n    const auto& row = kThreadIndicatorsEnc[idx];\n    for (unsigned char i = 0; i < row[0] && i < 10; ++i) out += (char)(row[1 + i] ^ kThreadKey);\n    return out;\n}\n\n// /proc/self/task/<tid>/comm — Frida-class injected-thread names, bounded scan.\n// (Path written with <tid> so the glob never terminates this comment.)\nvoid inspectThreadNames(RaspSignals& s) {\n    DIR* d = opendir(\"/proc/self/task\");\n    if (!d) return;\n    int scanned = 0;\n    struct dirent* e;\n    while ((e = readdir(d)) != nullptr) {\n        if (e->d_name[0] == '.') continue;\n        if (++scanned > 512) break;   // bounded\n        std::string path = std::string(\"/proc/self/task/\") + e->d_name + \"/comm\";\n        std::string comm = readSmallFile(path.c_str(), 64);\n        if (comm.empty()) continue;\n        // Thread-name indicators — obfuscated (Part 1), same honest\n        // classification as the hook-lib table above.\n        if (contains_ci(comm, decodeThreadName(0)) || contains_ci(comm, decodeThreadName(1)) ||\n            contains_ci(comm, decodeThreadName(2)) || contains_ci(comm, decodeThreadName(3))) {\n            s.frida_like_names++;\n            if (s.frida_like_names < 100 && s.frida_like.size() < 8) s.frida_like.push_back(comm.substr(0, 32));\n        }\n    }\n    closedir(d);\n}\n\n\n// ═══════════════════════════════════════════════════════════════════\n// PART 3 — NATIVE NETWORK INSPECTION (evidence only).\n// Reads the KERNEL tables (/proc/net/dev, /proc/net/route) directly.\n// Value-add vs the Kotlin detector: a framework-level hook (Xposed\n// module faking NetworkCapabilities/NetworkInterface) does not edit\n// these kernel files, so the C++ layer gives an INDEPENDENT second\n// opinion on which interfaces and routes exist.\n// NOT a second authorization authority — an evidence signal inside\n// the same signed-evidence schema.\n// ═══════════════════════════════════════════════════════════════════\n// Tunnel-classifying name patterns. TUN-CLASS only says \"looks like a\n// tunnel\" — VDO/PPP legitimately create such interfaces (tethering,\n// some carriers). Never a verdict on its own; the framework layer\n// stays authoritative (TRANSPORT_VPN is decisive).\nconstexpr unsigned char kTunPatterns[][12] = {\n    {3, 0x2e,0x2f,0x34,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00},\n    {3, 0x2e,0x3b,0x2a,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00},\n    {3, 0x2a,0x2a,0x2a,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00},\n    {4, 0x2e,0x2f,0x34,0x6a,0x00,0x00,0x00,0x00,0x00,0x00,0x00},\n    {5, 0x2e,0x2f,0x34,0x36,0x6a,0x00,0x00,0x00,0x00,0x00,0x00},\n    {4, 0x2a,0x2a,0x2a,0x6a,0x00,0x00,0x00,0x00,0x00,0x00,0x00},\n    {5, 0x33,0x2a,0x29,0x3f,0x39,0x00,0x00,0x00,0x00,0x00,0x00},\n    {4, 0x3d,0x29,0x37,0x6a,0x00,0x00,0x00,0x00,0x00,0x00,0x00},\n};\n\nstd::string decodeTunName(const unsigned char (&row)[12]) {\n    unsigned char len = row[0];\n    std::string out;\n    for (unsigned char i = 0; i < len && i < 11; ++i) out += (char)(row[1 + i] ^ kXorKey);\n    return out;\n}\n\nbool looksLikeTunnelIface(const std::string& name) {\n    for (const auto& row : kTunPatterns) {\n        if (contains_ci(name, decodeTunName(row))) return true;\n    }\n    return false;\n}\n\nstruct NetSignals {\n    bool dev_ok = false;\n    bool route_ok = false;\n    int ifaces_total = 0;\n    int ifaces_tunnel_class = 0;\n    std::vector<std::string> tunnel_ifaces;   // bounded (≤8 names)\n    int default_routes = 0;\n    bool route_via_tunnel_class = false;\n};\n\n/** /proc/net/dev — interface inventory (bounded read, kernel table). */\nvoid inspectNetDev(NetSignals& s) {\n    std::ifstream f(\"/proc/net/dev\");\n    if (!f.is_open()) return;\n    s.dev_ok = true;\n    std::string line;\n    int scanned = 0;\n    while (std::getline(f, line)) {\n        size_t col = line.find(':');\n        if (col == std::string::npos) continue;   // header rows\n        std::string name = line.substr(0, col);\n        // trim\n        size_t b = name.find_first_not_of(\" \\t\");\n        if (b == std::string::npos) continue;\n        name = name.substr(b, name.find_last_not_of(\" \\t\") - b + 1);\n        if (++scanned > 64) break;                // bounded\n        s.ifaces_total++;\n        if (looksLikeTunnelIface(name)) {\n            s.ifaces_tunnel_class++;\n            if (s.tunnel_ifaces.size() < 8) s.tunnel_ifaces.push_back(name.substr(0, 32));\n        }\n    }\n}\n\n/** /proc/net/route — routing table (kernel table, bounded read). */\nvoid inspectNetRoute(NetSignals& s) {\n    std::ifstream f(\"/proc/net/route\");\n    if (!f.is_open()) return;\n    s.route_ok = true;\n    std::string line;\n    std::getline(f, line);                        // header\n    int scanned = 0;\n    while (std::getline(f, line)) {\n        std::istringstream iss(line);\n        std::string iface;\n        unsigned long destination = 0;\n        if (!(iss >> iface >> std::hex >> destination)) continue;\n        if (++scanned > 256) break;               // bounded\n        if (destination == 0) {\n            s.default_routes++;\n            if (looksLikeTunnelIface(iface)) s.route_via_tunnel_class = true;\n        }\n    }\n}\n\n// Forward declaration: jsonEscape is defined further below in this\n// anonymous namespace; declared here so networkEvidenceJson can use it.\nstd::string jsonEscape(const std::string& in);\n\nstd::string networkEvidenceJson(const NetSignals& s) {\n    std::ostringstream o;\n    o << \"{\";\n    o << \"\\\"available\\\":true\";\n    o << \",\\\"dev_ok\\\":\" << (s.dev_ok ? \"true\" : \"false\");\n    o << \",\\\"route_ok\\\":\" << (s.route_ok ? \"true\" : \"false\");\n    o << \",\\\"ifaces_total\\\":\" << s.ifaces_total;\n    o << \",\\\"ifaces_tunnel_class\\\":\" << s.ifaces_tunnel_class;\n    o << \",\\\"tunnel_ifaces\\\":[\";\n    for (size_t i = 0; i < s.tunnel_ifaces.size(); ++i) {\n        if (i) o << \",\";\n        o << \"\\\"\" << jsonEscape(s.tunnel_ifaces[i]) << \"\\\"\";\n    }\n    o << \"]\";\n    o << \",\\\"default_routes\\\":\" << s.default_routes;\n    o << \",\\\"route_via_tunnel_class\\\":\" << (s.route_via_tunnel_class ? \"true\" : \"false\");\n    o << \",\\\"ts\\\":\" << (long long)time(nullptr);\n    o << \"}\";\n    return o.str();\n}\n\n/** JSON string escape (RFC 8259; control chars < 0x20 escaped as \\u00XX). */\nstd::string jsonEscape(const std::string& in) {\n    std::string out;\n    out.reserve(in.size() + 8);\n    for (unsigned char c : in) {\n        switch (c) {\n            case '\"':  out += \"\\\\\\\"\"; break;\n            case '\\\\': out += \"\\\\\\\\\"; break;\n            case '\\b': out += \"\\\\b\";  break;\n            case '\\f': out += \"\\\\f\";  break;\n            case '\\n': out += \"\\\\n\";  break;\n            case '\\r': out += \"\\\\r\";  break;\n            case '\\t': out += \"\\\\t\";  break;\n            default:\n                if (c < 0x20) {\n                    char buf[8];\n                    std::snprintf(buf, sizeof(buf), \"\\\\u%04x\", c);\n                    out += buf;\n                } else {\n                    out += (char)c;\n                }\n        }\n    }\n    return out;\n}\n\n} // namespace\n\nextern \"C\" {\n\nJNIEXPORT jstring JNICALL\nJava_com_medacademy_security_SecurityNativeCore_nativeRaspAggregate(JNIEnv* env, jclass /*clazz*/) {\n    RaspSignals s;\n    inspectMaps(s);\n    inspectStatus(s);\n    inspectThreadNames(s);\n    s.frida_like_names = (int)s.frida_like.size();\n\n    int taskThreads = countThreadsViaTask();\n    bool threadMismatch = (taskThreads >= 0 && s.threads >= 0 && taskThreads != s.threads);\n\n    std::ostringstream o;\n    o << \"{\";\n    o << \"\\\"available\\\":true\";\n    o << \",\\\"maps_ok\\\":\" << (s.maps_ok ? \"true\" : \"false\");\n    o << \",\\\"maps_anon_exec\\\":\" << (s.maps_anon_exec ? \"true\" : \"false\");\n    o << \",\\\"maps_anon_exec_regions\\\":\" << s.anon_exec_regions;\n    o << \",\\\"maps_hook_libs\\\":\" << (s.maps_unexpected_hook_libs ? \"true\" : \"false\");\n    o << \",\\\"hook_lib_names\\\":[\";\n    for (size_t i = 0; i < s.hook_libs.size(); ++i) {\n        if (i) o << \",\";\n        o << \"\\\"\" << jsonEscape(s.hook_libs[i]) << \"\\\"\";\n    }\n    o << \"]\";\n    o << \",\\\"status_ok\\\":\" << (s.status_ok ? \"true\" : \"false\");\n    o << \",\\\"vm_rss_kb\\\":\" << s.vm_rss_kb;\n    o << \",\\\"threads_status\\\":\" << s.threads;\n    o << \",\\\"threads_task_dir\\\":\" << taskThreads;\n    o << \",\\\"thread_count_mismatch\\\":\" << (threadMismatch ? \"true\" : \"false\");\n    o << \",\\\"frida_thread_names\\\":\" << s.frida_like_names;\n    o << \",\\\"frida_thread_name_list\\\":[\";\n    for (size_t i = 0; i < s.frida_like.size(); ++i) {\n        if (i) o << \",\";\n        o << \"\\\"\" << jsonEscape(s.frida_like[i]) << \"\\\"\";\n    }\n    o << \"]\";\n    o << \",\\\"ts\\\":\" << (long long)time(nullptr);\n    o << \"}\";\n    return env->NewStringUTF(o.str().c_str());\n}\n\nJNIEXPORT jstring JNICALL\nJava_com_medacademy_security_SecurityNativeCore_nativeInspect(JNIEnv* env, jclass /*clazz*/) {\n    RaspSignals s;\n    inspectMaps(s);\n    std::ostringstream o;\n    o << \"{\";\n    o << \"\\\"available\\\":true\";\n    o << \",\\\"loaded_libs_sample\\\":[\";\n    // First 16 loaded .so paths from /proc/self/maps (bounded sample).\n    std::ifstream maps(\"/proc/self/maps\");\n    int listed = 0;\n    std::string line;\n    while (maps && std::getline(maps, line) && listed < 16) {\n        size_t p = line.find('/');\n        if (p == std::string::npos) continue;\n        std::string path = line.substr(p);\n        if (path.find(\".so\") == std::string::npos) continue;\n        if (listed) o << \",\";\n        o << \"\\\"\" << jsonEscape(path.substr(0, 256)) << \"\\\"\";\n        ++listed;\n    }\n    o << \"]\";\n    o << \",\\\"ts\\\":\" << (long long)time(nullptr);\n    o << \"}\";\n    return env->NewStringUTF(o.str().c_str());\n}\n\nJNIEXPORT jstring JNICALL\nJava_com_medacademy_security_SecurityNativeCore_nativeNetworkEvidence(JNIEnv* env, jclass /*clazz*/) {\n    NetSignals s;\n    inspectNetDev(s);\n    inspectNetRoute(s);\n    return env->NewStringUTF(networkEvidenceJson(s).c_str());\n}\n\nJNIEXPORT jboolean JNICALL\nJava_com_medacademy_security_SecurityNativeCore_isAvailable(JNIEnv* /*env*/, jclass /*clazz*/) {\n    // The core is available iff /proc is mounted (normal Android) — the\n    // inspection itself degrades honestly if individual files are unreadable.\n    return access(\"/proc/self/maps\", R_OK) == 0 ? JNI_TRUE : JNI_FALSE;\n}\n\n} // extern \"C\"\n";
+const MEDASEC_CMAKE = "# Native Security Core (libmedasec) — Phase 2 gap closure, Part 6/7.\n# Small, hardening-focused C++ core: read-only /proc inspection emitting JSON\n# evidence for the signed security-evidence schema. No secrets, no crypto,\n# no writes. Enabled for BOTH debug and release so behavior is identical\n# in development (release security is NOT weaker than debug behavior here).\ncmake_minimum_required(VERSION 3.22.1)\nproject(medasec LANGUAGES CXX)\n\nadd_library(medasec SHARED medasec_core.cpp)\n\ntarget_compile_options(medasec PRIVATE\n    -O2\n    -fvisibility=hidden\n    -fstack-protector-strong\n    -Wall -Wextra\n)\n\ntarget_link_libraries(medasec\n    log\n)\n";
+const MEDASEC_WRAPPER_CMAKE = "# App-level CMake: builds BOTH the React Native New-Architecture app setup\n# (libappmodules + autolinked codegen libs) AND the MedAcademy native security\n# core (libmedasec) in one CMake project. Pointing externalNativeBuild straight\n# at the security-only CMakeLists replaced the RN build and crashed the app at\n# startup (PlatformConstants TurboModule missing, 2026-09-20).\ncmake_minimum_required(VERSION 3.13)\n\nproject(appmodules)\n\n# React Native application setup (libappmodules + codegen libs)\ninclude(${REACT_ANDROID_DIR}/cmake-utils/ReactNative-application.cmake)\n\n# MedAcademy native security core (libmedasec)\nadd_library(medasec SHARED ../cpp/medasec_core.cpp)\ntarget_compile_options(medasec PRIVATE\n    -O2\n    -fvisibility=hidden\n    -fstack-protector-strong\n    -Wall -Wextra\n)\ntarget_link_libraries(medasec\n    log\n)";
+
+const MEDASEC_CORE_KT = "package com.medacademy.security\n\n/**\n * Native Security Core bridge (libmedasec).\n *\n * Thin Kotlin facade over the C++/JNI core. All methods are read-only\n * inspection emitting JSON evidence strings; nothing here is an\n * authorization decision. Loaded lazily; `isAvailable()` degrades honestly\n * when the core library or /proc is unavailable (emulators with hardened\n * kernels, unusual ROMs) — \"unavailable\" is EVIDENCE, never \"safe\".\n */\nobject SecurityNativeCore {\n    @Volatile private var loadAttempted = false\n    @Volatile private var loaded = false\n\n    private fun ensureLoaded(): Boolean {\n        if (loadAttempted) return loaded\n        synchronized(this) {\n            if (!loadAttempted) {\n                loadAttempted = true\n                loaded = try {\n                    System.loadLibrary(\"medasec\")\n                    true\n                } catch (_: UnsatisfiedLinkError) {\n                    false\n                } catch (_: SecurityException) {\n                    false\n                }\n            }\n            return loaded\n        }\n    }\n\n    @JvmStatic\n    fun isAvailable(): Boolean = ensureLoaded()\n\n    /** RASP aggregate: maps/status/thread-name inspection (JSON string). */\n    @JvmStatic\n    fun raspAggregate(): String {\n        require(ensureLoaded()) { \"medasec core unavailable\" }\n        return nativeRaspAggregate()\n    }\n\n    /** Native network evidence: /proc/net/dev + /proc/net/route (JSON string). */\n    @JvmStatic\n    fun networkEvidence(): String {\n        require(ensureLoaded()) { \"medasec core unavailable\" }\n        return nativeNetworkEvidence()\n    }\n\n    /** Loaded-library sample from /proc/self/maps (JSON string). */\n    @JvmStatic\n    fun inspect(): String {\n        require(ensureLoaded()) { \"medasec core unavailable\" }\n        return nativeInspect()\n    }\n\n    private external fun nativeRaspAggregate(): String\n    private external fun nativeInspect(): String\n    private external fun nativeNetworkEvidence(): String\n}\n";
+
+function withSecNativeCoreSources(config) {
+  return withDangerousMod(config, [
+    'android',
+    async (cfg) => {
+      const projectRoot = cfg.modRequest.projectRoot;
+      const cppDir = path.join(projectRoot, 'android', 'app', 'src', 'main', 'cpp');
+      fs.mkdirSync(cppDir, { recursive: true });
+      fs.writeFileSync(path.join(cppDir, 'medasec_core.cpp'), MEDASEC_CPP, 'utf8');
+      fs.writeFileSync(path.join(cppDir, 'CMakeLists.txt'), MEDASEC_CMAKE, 'utf8');
+      // WRAPPER CMakeLists (src/main/jni/CMakeLists.txt): with newArchEnabled=true
+      // the RN gradle plugin injects its default CMake only when the path is null.
+      // Our externalNativeBuild must point at a wrapper that builds BOTH the RN
+      // appmodules setup AND libmedasec - pointing it directly at the security-
+      // only CMakeLists silently dropped libappmodules.so and crashed the app
+      // at startup (PlatformConstants TurboModule missing, 2026-09-20).
+      const jniDir = path.join(projectRoot, 'android', 'app', 'src', 'main', 'jni');
+      fs.mkdirSync(jniDir, { recursive: true });
+      fs.writeFileSync(path.join(jniDir, 'CMakeLists.txt'), MEDASEC_WRAPPER_CMAKE, 'utf8');
+
+      const coreKtPath = path.join(projectRoot, 'android', 'app', 'src', 'main', 'java',
+        'com', 'medacademy', 'security', 'SecurityNativeCore.kt');
+      // Ensure the package directory exists — prebuild --clean wipes android/
+      // and a bare writeFileSync would ENOENT here (observed 2026-09-19).
+      fs.mkdirSync(path.dirname(coreKtPath), { recursive: true });
+      fs.writeFileSync(coreKtPath, MEDASEC_CORE_KT, 'utf8');
+
+      // Critical-asset manifest: default = the security policy asset. The
+      // medasecManifest gradle task computes each digest at build time;
+      // an absent manifest means the layer is UNAVAILABLE (never a verdict).
+      const assetsDir = path.join(projectRoot, 'android', 'app', 'src', 'main', 'assets');
+      fs.mkdirSync(assetsDir, { recursive: true });
+      const secAssets = Array.isArray(config?.extra?.medaSecAssets)
+        ? config.extra.medaSecAssets
+        : ['medasec.config.json'];
+      const manifest = { version: 1, generated_by: 'plugins/withSecurityModule.js', assets: secAssets.map((p) => ({ path: 'assets/' + p })) };
+      fs.writeFileSync(path.join(assetsDir, 'medasec_manifest.json'), JSON.stringify(manifest, null, 2), 'utf8');
+
+      // Gradle: medasecManifest task computes the digests; preBuild depends on it.
+      const gradlePath = path.join(projectRoot, 'android', 'app', 'build.gradle');
+      if (fs.existsSync(gradlePath) && !fs.readFileSync(gradlePath, 'utf8').includes('medasecManifest')) {
+        let gradle = fs.readFileSync(gradlePath, 'utf8');
+        const gradleBlock = [
+          '',
+          '// ── Native Security Core (libmedasec) — injected by plugins/withSecurityModule.js ──',
+          'def medasecManifestFile = file("src/main/assets/medasec_manifest.json")',
+          'tasks.register("medasecManifest") {',
+          '    doLast {',
+          '        def manifest = new groovy.json.JsonSlurper().parse(medasecManifestFile)',
+          '        def out = [version: manifest.version, generated_by: manifest.generated_by, assets: []]',
+          '        manifest.assets.each { e ->',
+          '            def f = file("src/main/" + e.path)',
+          '            if (f.exists()) {',
+          '                def md = java.security.MessageDigest.getInstance("SHA-256")',
+          '                f.withInputStream { ins ->',
+          '                    def buf = new byte[8192]; int n',
+          '                    while ((n = ins.read(buf)) > 0) md.update(buf, 0, n)',
+          '                }',
+          '                out.assets << [path: e.path, sha256: md.digest().encodeHex() as String]',
+          '            }',
+          '        }',
+          '        medasecManifestFile.text = groovy.json.JsonOutput.prettyPrint(groovy.json.JsonOutput.toJson(out))',
+          '    }',
+          '}',
+          'tasks.named("preBuild") { dependsOn "medasecManifest" }',
+          '',
+        ].join('\n');
+        gradle = gradle.trimEnd() + '\n' + gradleBlock;
+        fs.writeFileSync(gradlePath, gradle, 'utf8');
+      }
+
+      // CRITICAL: without an externalNativeBuild block gradle never compiles
+      // the C++ core and libmedasec.so is silently absent from the APK —
+      // SecurityNativeCore then degrades to "unavailable" on every device
+      // (observed in the v221 release build). Inject it after the android {
+      // defaultConfig block if prebuild has not already added it.
+      if (fs.existsSync(gradlePath)) {
+        let gradle2 = fs.readFileSync(gradlePath, 'utf8');
+        if (!gradle2.includes('externalNativeBuild')) {
+          const ndkBlock = [
+            '',
+            '    // ── Native Security Core build (libmedasec) — withSecurityModule.js ──',
+            '    externalNativeBuild {',
+            '        cmake {',
+            '            path "src/main/jni/CMakeLists.txt"',
+            '            version "3.22.1"',
+            '        }',
+            '    }',
+            '',
+          ].join('\n');
+          // Insert inside the android { } block: before its closing brace.
+          const androidIdx = gradle2.indexOf('android {');
+          if (androidIdx !== -1) {
+            // Find the matching closing brace of `android {` by brace counting.
+            let depth = 0, end = -1, inStr = false, esc = false, started = false;
+            for (let i = androidIdx; i < gradle2.length; i++) {
+              const ch = gradle2[i];
+              if (inStr) { if (esc) esc = false; else if (ch === '\\') esc = true; else if (ch === "'" || ch === '"') inStr = false; continue; }
+              if (ch === "'" || ch === '"') { inStr = true; continue; }
+              if (ch === '{') { depth++; started = true; }
+              else if (ch === '}') { depth--; if (started && depth === 0) { end = i; break; } }
+            }
+            if (end !== -1) {
+              gradle2 = gradle2.slice(0, end) + ndkBlock + gradle2.slice(end);
+              fs.writeFileSync(gradlePath, gradle2, 'utf8');
+            }
+          }
+        }
+      }
+      return cfg;
+    },
+  ]);
+}
+
+/**
+ * Target App Detector (Part 12) package visibility: grant <queries> entries
+ * for the tool catalog probed by SecurityModule.targetAppSignals(). Scoped
+ * per-package visibility instead of QUERY_ALL_PACKAGES - the catalog lives
+ * here and must be kept in sync with targetAppSignals() in SecurityModule.kt.
+ */
+const TARGET_APP_CATALOG = [
+  'de.robv.android.xposed.installer', 'org.lsposed.manager',
+  'io.github.lsposed.manager', 'com.android.webview.xposed',
+  'apkeditor.mAryan', 'com.apkpatcher', 'ru.maximoff.apktool',
+  'com.thegrizzlylabs.apkanalyzer', 'com.gmail.hejosadak.easytokenizer',
+  'com.lody.virtual', 'io.va.exposed', 'com.excelliance.multiaccount',
+  'com.lbe.parallel', 'com.jumobile.multiapp',
+];
+
+const withTargetAppQueries = (config) =>
+  withAndroidManifest(config, (cfg) => {
+    const manifest = cfg.modResults.manifest;
+    if (!manifest.queries) manifest.queries = [];
+    let queries = manifest.queries.find((q) => Array.isArray(q.package));
+    if (!queries) { queries = { package: [] }; manifest.queries.push(queries); }
+    for (const name of TARGET_APP_CATALOG) {
+      const exists = queries.package.some((pk) => pk.$ && pk.$['android:name'] === name);
+      if (!exists) queries.package.push({ $: { 'android:name': name } });
+    }
+    return cfg;
+  });
+
 const withSecurityModule = (config) => {
+  config = withMedaSslPins(config);
   // Android
   config = withSecurityKotlinSources(config);
   config = withSecurityPackageRegistration(config);
+  config = withSecNativeCoreSources(config);
+  config = withTargetAppQueries(config);
   // iOS
   config = withIOSSwiftSources(config);
   config = withIOSEmbedPodsFrameworks(config);

@@ -6,7 +6,7 @@ import { useCallback, useState, useMemo } from 'react';
 import {
   View, Text, FlatList, TextInput, Pressable,
   ActivityIndicator, RefreshControl, useColorScheme,
-  KeyboardAvoidingView, ScrollView,
+  ScrollView,
 } from 'react-native';
 import { useFocusEffect } from 'expo-router';
 import { PageHeader } from '@/components/PageHeader';
@@ -18,7 +18,7 @@ import { NeuCard } from '@/components/NeuCard';
 import { NeuButton } from '@/components/NeuButton';
 import { ResponsiveModal } from '@/components/ResponsiveModal';
 import { useToast } from '@/components/Toast';
-import { neuColors, useLayout } from '@/lib/neu';
+import { neuColors, useLayout, safeBottom } from '@/lib/neu';
 import { getDoctors, invokeEdgeFunction } from '@/lib/api';
 import { useDebounce } from '@/lib/useDebounce';
 import { getPublicEmail } from '@/lib/api';
@@ -131,7 +131,6 @@ export default function BulkCreditsScreen() {
       <FlatList
         data={filtered}
         keyExtractor={item => item.id}
-        contentContainerStyle={{ paddingBottom: layout.scrollBottom() }}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />}
         ListHeaderComponent={
           <>
@@ -195,7 +194,7 @@ export default function BulkCreditsScreen() {
                   </View>
                   <View style={{ alignItems: 'flex-end' }}>
                     <Text style={{ fontSize: 16, fontWeight: '800', color: '#16A34A' }}>
-                      {doc.credits?.remaining ?? 0}
+                      {doc.credits_balance ?? 0}
                     </Text>
                     <Text style={{ fontSize: 10, color: c.text, opacity: 0.4 }}>balance</Text>
                   </View>
@@ -209,18 +208,17 @@ export default function BulkCreditsScreen() {
             <Users size={40} color={c.primary} opacity={0.2} />
             <Text style={{ color: c.text, opacity: 0.4, marginTop: 16 }}>No doctors found</Text>
           </View>
-        ) : null}
+        ) : null} contentContainerStyle={{ paddingBottom: safeBottom(layout.insets.bottom) }}
       />
 
       {/* Operation Modal */}
       <ResponsiveModal visible={opModal} onClose={() => setOpModal(false)}
         title={opType === 'add' ? `Add Credits to ${selected.size} Doctors` : `Remove Credits from ${selected.size} Doctors`}>
-        <KeyboardAvoidingView behavior={process.env.EXPO_OS === 'ios' ? 'padding' : 'height'}>
-          <Text style={{ fontSize: 13, color: c.text, opacity: 0.5, marginBottom: 16 }}>
-            {opType === 'add'
-              ? 'The same amount will be added to all selected doctors.'
-              : 'Credits will be revoked via a reverse transaction. History is preserved.'}
-          </Text>
+        <Text style={{ fontSize: 13, color: c.text, opacity: 0.5, marginBottom: 16 }}>
+          {opType === 'add'
+            ? 'The same amount will be added to all selected doctors.'
+            : 'Credits will be revoked via a reverse transaction. History is preserved.'}
+        </Text>
           <Text style={{ fontSize: 12, fontWeight: '600', color: c.text, marginBottom: 6 }}>Amount *</Text>
           <TextInput value={amount} onChangeText={setAmount} placeholder="e.g. 50"
             keyboardType="numeric" placeholderTextColor={`${c.text}40`} style={[inp, { minWidth: 0 }]} />
@@ -241,7 +239,6 @@ export default function BulkCreditsScreen() {
             style={{ backgroundColor: opType === 'add' ? '#16A34A' : '#DC2626' }}
           />
           <NeuButton label="Cancel" onPress={() => setOpModal(false)} variant="secondary" style={{ marginTop: 8 }} />
-        </KeyboardAvoidingView>
       </ResponsiveModal>
 
       {/* Results Modal */}

@@ -24,23 +24,7 @@
 -- ===========================================================================
 
 -- ===========================================================================
--- 1. activation_codes_summary  (PG 00017 — SINGLE row across all codes)
---    Frontend: admin dashboard -> .select('*').single() reads
---    active_codes / used_codes / disabled_codes / expired_codes / total_codes
--- ===========================================================================
-DROP VIEW IF EXISTS `activation_codes_summary`;
-CREATE VIEW `activation_codes_summary` AS
-SELECT
-  SUM(CASE WHEN status = 'active'  AND (expires_at IS NULL OR expires_at > CURRENT_TIMESTAMP) THEN 1 ELSE 0 END) AS active_codes,
-  SUM(CASE WHEN status = 'used' THEN 1 ELSE 0 END) AS used_codes,
-  SUM(CASE WHEN status = 'deactivated' THEN 1 ELSE 0 END) AS disabled_codes,
-  SUM(CASE WHEN status = 'active' AND expires_at IS NOT NULL AND expires_at <= CURRENT_TIMESTAMP THEN 1 ELSE 0 END) AS expired_codes,
-  COUNT(*) AS total_codes
-FROM activation_codes;
-
--- ===========================================================================
--- 2. credit_ledger_view  (PG 00036 — one row per credit transaction)
---    Frontend: getCreditLedger() filters doctor_id / performed_by / created_at
+-- 1. credit_ledger_view  (PG 00036 — one row per credit transaction)
 -- ===========================================================================
 DROP VIEW IF EXISTS `credit_ledger_view`;
 CREATE VIEW `credit_ledger_view` AS
@@ -174,43 +158,6 @@ SELECT
   COALESCE(SUM(consumed),           0) AS used_credits,
   COALESCE(SUM(allocated - consumed), 0) AS remaining_credits
 FROM credits;
-
--- ===========================================================================
--- 7. activation_ledger_view  (PG 00036 — one row per activation code)
---    Frontend: getActivationLedger() filters status / course_id / created_by /
---    batch_id, orders created_at. NOTE: no credit_amount column (the PG view
---    never had one — this also removes the second ac.credit_amount #1054).
--- ===========================================================================
-DROP VIEW IF EXISTS `activation_ledger_view`;
-CREATE VIEW `activation_ledger_view` AS
-SELECT
-  ac.id,
-  ac.code,
-  ac.status,
-  ac.created_at,
-  ac.expires_at,
-  ac.used_at,
-  ac.notes,
-  ac.identifier,
-  ac.device_info,
-  ac.batch_id,
-  ac.batch_label,
-  ac.disabled_at,
-  ac.course_id,
-  c.title        AS course_title,
-  ac.created_by,
-  cr.full_name   AS created_by_name,
-  cr.role        AS created_by_role,
-  ac.used_by,
-  u.full_name    AS used_by_name,
-  u.email        AS used_by_email,
-  ac.disabled_by,
-  db.full_name   AS disabled_by_name
-FROM activation_codes ac
-LEFT JOIN courses  c  ON c.id  = ac.course_id
-LEFT JOIN profiles cr ON cr.id = ac.created_by
-LEFT JOIN profiles u  ON u.id  = ac.used_by
-LEFT JOIN profiles db ON db.id = ac.disabled_by;
 
 -- ===========================================================================
 -- 8. device_stats  (PG 00017 — SINGLE row across all devices)

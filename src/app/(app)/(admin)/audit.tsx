@@ -8,7 +8,7 @@ import {
   Shield, Search, X, Filter, ChevronDown, ChevronUp,
   CheckCircle, XCircle, AlertTriangle,
   User, BookOpen, DollarSign, LogIn, Lock, RefreshCw,
-  Users, UserCheck, Code, Settings, Smartphone, ArrowUpDown, Clock,
+  Users, UserCheck, Settings, Smartphone, ArrowUpDown, Clock,
 } from 'lucide-react-native';
 import { getAuditTrail, AuditTrailEntry } from '@/lib/api';
 import { NeuCard } from '@/components/NeuCard';
@@ -28,7 +28,6 @@ const CATEGORIES: CategoryFilter[] = [
   { key: 'doctor',   label: 'Doctor',       icon: UserCheck,   color: '#2DA8FF' },
   { key: 'student',  label: 'Student',      icon: Users,       color: '#2563EB' },
   { key: 'courses',  label: 'Courses',      icon: BookOpen,    color: '#D97706' },
-  { key: 'codes',    label: 'Codes',        icon: Code,        color: '#16A34A' },
   { key: 'auth',     label: 'Auth',         icon: LogIn,       color: '#DC2626' },
   { key: 'finance',  label: 'Finance',      icon: DollarSign,  color: '#065F46' },
   { key: 'platform', label: 'Platform',     icon: Settings,    color: '#0F766E' },
@@ -68,7 +67,6 @@ function actionIcon(action: string, color: string, size = 17) {
   if (a.includes('course') || a.includes('lesson')) return <BookOpen size={size} color={color} />;
   if (a.includes('credit') || a.includes('earn') || a.includes('payment')) return <DollarSign size={size} color={color} />;
   if (a.includes('login') || a.includes('logout') || a.includes('auth') || a.includes('session')) return <LogIn size={size} color={color} />;
-  if (a.includes('code')) return <Code size={size} color={color} />;
   if (a.includes('setting') || a.includes('platform') || a.includes('config')) return <Settings size={size} color={color} />;
   if (a.includes('security') || a.includes('lock') || a.includes('password')) return <Lock size={size} color={color} />;
   return <User size={size} color={color} />;
@@ -434,7 +432,7 @@ export default function AdminAudit() {
         <FlatList
           data={entries}
           keyExtractor={item => item.id}
-          contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: layout.scrollBottom() }}
+          contentContainerStyle={{ paddingHorizontal: 16 }}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />}
           onEndReached={loadMore}
           onEndReachedThreshold={0.3}

@@ -17,7 +17,7 @@ import { backendClient } from '@/client/backendClient';
 import { NeuCard } from '@/components/NeuCard';
 import { NeuButton } from '@/components/NeuButton';
 import { useToast } from '@/components/Toast';
-import { neuColors, neuFlatStyle, useLayout } from '@/lib/neu'
+import { neuColors, neuFlatStyle, useLayout, safeBottom } from '@/lib/neu'
 import { logAndParse } from '@/lib/parseError';
 
 const PERM_LABELS: Array<{ key: keyof DeletePermissions; label: string; desc: string; danger?: boolean }> = [
@@ -167,7 +167,7 @@ export default function DeletePermissionsScreen() {
 
   return (
     <ScrollView style={{ flex: 1, backgroundColor: c.base }}
-      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />}>
+      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />} contentContainerStyle={{ paddingBottom: safeBottom(layout.insets.bottom) }}>
       <View style={{ padding: layout.screenPx }}>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 4, marginTop: 8 }}>
           <Shield size={22} color={c.primary} />
@@ -189,7 +189,7 @@ export default function DeletePermissionsScreen() {
             data={admins}
             keyExtractor={a => a.id}
             renderItem={renderAdmin}
-            scrollEnabled={false}
+            scrollEnabled={false} contentContainerStyle={{ paddingBottom: safeBottom(layout.insets.bottom) }}
           />
         )}
       </View>

@@ -98,13 +98,12 @@ export async function checkPermission(type: PermissionType): Promise<PermissionR
       return { status: normalise(status), canAskAgain };
     }
     case 'microphone': {
-      // expo-av / expo-audio not installed yet — microphone permission
-      // will be wired when audio recording screens are added.
-      // The try/catch safely no-ops when the module is absent.
+      // expo-audio (installed) exposes recording-permission APIs. The try/catch
+      // safely no-ops when the native module is unavailable (e.g. web).
       try {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const { Audio } = require('expo-av') as any;
-        const { status, canAskAgain } = await Audio.getPermissionsAsync();
+        const Audio = require('expo-audio') as any;
+        const { status, canAskAgain } = await Audio.getRecordingPermissionsAsync();
         return { status: normalise(status as string), canAskAgain: canAskAgain as boolean };
       } catch {
         return { status: 'unavailable', canAskAgain: false };
@@ -144,8 +143,8 @@ export async function requestPermission(type: PermissionType): Promise<Permissio
     case 'microphone': {
       try {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const { Audio } = require('expo-av') as any;
-        const { status, canAskAgain } = await Audio.requestPermissionsAsync();
+        const Audio = require('expo-audio') as any;
+        const { status, canAskAgain } = await Audio.requestRecordingPermissionsAsync();
         return { status: normalise(status as string), canAskAgain: canAskAgain as boolean };
       } catch {
         return { status: 'unavailable', canAskAgain: false };

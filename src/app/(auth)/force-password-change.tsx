@@ -103,7 +103,6 @@ export default function ForcePasswordChangeScreen() {
           contentContainerStyle={{
             paddingHorizontal: layout.screenPx,
             paddingTop: layout.pad.xxl,
-            paddingBottom: layout.scrollBottom(),
             gap: layout.pad.lg,
             justifyContent: 'center',
             flexGrow: 1,

@@ -456,7 +456,7 @@ function StudentProfileModal({ tx, doctorId, onClose, onAction, c }: {
             </Pressable>
           </View>
 
-          <ScrollView contentContainerStyle={{ paddingHorizontal: layout.screenPx, paddingBottom: layout.scrollBottom() }}>
+          <ScrollView contentContainerStyle={{ paddingHorizontal: layout.screenPx }}>
             {loading ? (
               <ActivityIndicator color={c.primary} style={{ marginVertical: 48 }} />
             ) : (
@@ -933,7 +933,6 @@ export default function DoctorEarnings() {
     <ScrollView
       style={{ flex: 1, backgroundColor: c.base }}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />}
-      contentContainerStyle={{ paddingBottom: layout.scrollBottom() }}
     >
       <DashboardHeader
         roleLabel="Doctor revenue · independent pricing · EGP"

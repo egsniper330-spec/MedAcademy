@@ -12,7 +12,7 @@ import {
 import { getAuditLogs, getAllUsers } from '@/lib/api';
 import { backendClient } from '@/client/backendClient';
 import { NeuCard } from '@/components/NeuCard';
-import { neuColors, useLayout } from '@/lib/neu';
+import { neuColors, useLayout, safeBottom } from '@/lib/neu';
 import { PageHeader } from '@/components/PageHeader';
 import { getNativeSecurityFlags, type NativeSecurityFlags } from '@/lib/nativeSecurity';
 
@@ -138,8 +138,7 @@ export default function SuperAdminSecurity() {
   return (
     <ScrollView
       style={{ flex: 1, backgroundColor: c.base }}
-      contentContainerStyle={{ paddingBottom: layout.scrollBottom() }}
-      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />}
+      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />} contentContainerStyle={{ paddingBottom: safeBottom(layout.insets.bottom) }}
     >
       <View style={{ padding: layout.screenPx }}>
         <Text style={{ fontSize: 24, fontWeight: '800', color: c.text, marginBottom: 4, marginTop: 8 }}>

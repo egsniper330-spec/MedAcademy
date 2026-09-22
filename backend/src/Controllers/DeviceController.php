@@ -9,6 +9,8 @@ use MedAcademy\Http\ApiException;
 use MedAcademy\Http\Request;
 use MedAcademy\Services\AuditService;
 use MedAcademy\Services\AuthService;
+use MedAcademy\Services\IntegrityService;
+use MedAcademy\Services\SecurityEvidenceService;
 use MedAcademy\Services\SecurityService;
 use MedAcademy\Utils\Uuid;
 
@@ -40,6 +42,28 @@ final class DeviceController
         $action = (string) ($body['action'] ?? '');
         $userId = $request->user['id'];
         $role = $request->user['role'];
+
+        // ── SERVER-SIDE APP-INTEGRITY POLICY (device binding claim) ──────
+        // (Re-)registering a device binding is a protected operation: a
+        // tampered APK must not refresh its binding unchallenged. The
+        // enforcement tier is operator-controlled via security_config.
+        if ($action === 'register') {
+            IntegrityService::assertActionAllowed(
+                (string) $userId,
+                'device_bind',
+                $request->header(IntegrityService::HEADER),
+                $request->clientIp()
+            );
+
+            // ── SERVER-SIDE DEVICE-EVIDENCE POLICY (independent second gate) ──
+     // Keystore-signed, challenge-bound evidence (SecurityEvidenceService).
+     SecurityEvidenceService::assertEvidenceAllowed(
+         (string) $userId,
+         'device_bind',
+         $request->header(SecurityEvidenceService::EVIDENCE_HEADER),
+         $request->clientIp()
+     );
+        }
 
         return match ($action) {
             'register' => $this->register($request, $body, $userId),
@@ -290,27 +314,70 @@ final class DeviceController
             throw new ApiException(400, 'target_user_id is required');
         }
 
-        Database::instance()->query(
-            "UPDATE devices SET status = 'logged_out', trust_level = 'revoked',
-                    revoked_at = UTC_TIMESTAMP(6), revoked_reason = ?
-              WHERE user_id = ?",
-            [$reason, $targetUserId]
-        );
-
-        $this->authService->bumpSecurityVersion($targetUserId, $userId);
-
-        // Notify
+        // -------------------------------------------------------------------
+        // Reset All = SESSION RESET + DEVICE-REGISTRATION RESET (atomic).
+        //
+        // Soft-marking devices (status='logged_out', trust_level='revoked') is
+        // NOT enough: the device rows survive and keep counting against the
+        // device limit / "already active on another authorized device" check,
+        // so a new device cannot register after a reset. Hard delete is the
+        // architecture's own semantics for clearing a registration (the
+        // single-device `delete_device` action does exactly that), and it
+        // guarantees the authoritative count query returns 0 for the target
+        // user regardless of which status filters it applies.
+        //
+        // Historical/audit data is preserved: login_history, audit_logs and
+        // notifications are separate tables and are not touched here.
+        // -------------------------------------------------------------------
+        $db = Database::instance();
+        $db->beginTransaction();
         try {
-            Database::instance()->insert(
-                "INSERT INTO notifications (id, user_id, title, body, notification_type, is_read, created_at)
-                 VALUES (?, ?, ?, ?, 'security', 0, UTC_TIMESTAMP(6))",
-                [Uuid::v4(), $targetUserId, 'Device Reset', 'Your registered device has been reset by an administrator. Please sign in again.']
+            // A. Revoke every active refresh token so old devices cannot
+            //    refresh after the reset (do this explicitly — do not rely
+            //    on the FK ON DELETE SET NULL, which only detaches the
+            //    device_id without revoking the token).
+            $db->query(
+                "UPDATE refresh_tokens SET revoked_at = UTC_TIMESTAMP(6), revoked_reason = ?
+                  WHERE user_id = ? AND revoked_at IS NULL",
+                ['admin_device_reset', $targetUserId]
             );
-        } catch (\Throwable) {
+
+            // B. Remove ALL device registrations for the target user.
+            //    Scope: user_id = target only. push_tokens rows cascade via
+            //    fk_push_tokens_device_id; refresh_tokens.device_id is set
+            //    NULL via fk_refresh_tokens_device_id.
+            $stmt = $db->query('DELETE FROM devices WHERE user_id = ?', [$targetUserId]);
+            $devicesDeleted = $stmt->rowCount();
+
+            // C. Bump the target user's security version: invalidates every
+            //    still-circulating JWT for that user and revokes any refresh
+            //    tokens missed above. Scoped to profiles.id = targetUserId.
+            $this->authService->bumpSecurityVersion($targetUserId, $userId);
+
+            // D. Notify
+            try {
+                $db->insert(
+                    "INSERT INTO notifications (id, user_id, title, body, notification_type, is_read, created_at)
+                     VALUES (?, ?, ?, ?, 'security', 0, UTC_TIMESTAMP(6))",
+                    [Uuid::v4(), $targetUserId, 'Device Reset', 'Your registered device has been reset by an administrator. Please sign in again.']
+                );
+            } catch (\Throwable) {
+            }
+
+            // E. Audit (inside the transaction so it commits atomically)
+            AuditService::write($userId, 'device_reset', [
+                'target_user_id' => $targetUserId,
+                'reason' => $reason,
+                'devices_deleted' => $devicesDeleted,
+            ]);
+
+            $db->commit();
+        } catch (\Throwable $e) {
+            $db->rollBack();
+            throw $e;
         }
 
-        AuditService::write($userId, 'device_reset', ['target_user_id' => $targetUserId, 'reason' => $reason]);
-        return ['success' => true];
+        return ['success' => true, 'devices_deleted' => $devicesDeleted];
     }
 
     private function forceLogout(array $body, string $userId, string $role): array
@@ -388,7 +455,7 @@ final class DeviceController
     private function checkAuthorization(array $body, string $userId): array
     {
         $db = Database::instance();
-        $profile = $db->row('SELECT security_version, status FROM profiles WHERE id = ?', [$userId]);
+        $profile = $db->row('SELECT security_version, status, role FROM profiles WHERE id = ?', [$userId]);
         if ($profile === null) {
             return ['authorized' => false, 'reason' => 'user_not_found', 'security_version' => 0];
         }
@@ -396,7 +463,10 @@ final class DeviceController
         $currentVersion = (int) ($profile['security_version'] ?? 0);
         $clientVersion = (int) ($body['stored_security_version'] ?? 0);
 
-        if ($profile['status'] === 'blocked') {
+        if (in_array($profile['status'], ['blocked', 'suspended'], true)) {
+            // account_blocked/suspended = server-authoritative stop. The client
+            // maps 'account_blocked' to the account-suspended screen (session
+            // preserved; Logout there performs the real sign-out).
             return ['authorized' => false, 'reason' => 'account_blocked', 'security_version' => $currentVersion];
         }
 
@@ -437,7 +507,12 @@ final class DeviceController
             }
         }
 
-        return ['authorized' => true, 'security_version' => $currentVersion];
+        // Server-authoritative ROLE drift: the client's session token may carry
+        // a stale role claim (access tokens live JWT_ACCESS_TTL_SECONDS). The
+        // client reconciles by refreshing its profile (accountRefresh) WITHOUT
+        // a logout — so include the fresh role in every verdict (the profile
+        // row was already read above; no extra query needed).
+        return ['authorized' => true, 'security_version' => $currentVersion, 'role' => (string) ($profile['role'] ?? '')];
     }
 
     private function getLoginHistory(array $body, string $userId, string $role): array

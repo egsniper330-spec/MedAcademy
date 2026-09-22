@@ -75,14 +75,23 @@ const STATUS_COLOR: Record<string, string> = {
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-function actionLabel(a: string) {
-  return a.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+function actionLabel(a: string | null | undefined) {
+  // THE ROOT-CAUSE GUARD: the unified timeline feeds this label builder from
+  // TWO backends tables — audit rows carry `action`, but legacy/edge shapes
+  // (security_events rows, partial legacy payloads) could arrive with action
+  // undefined, and `undefined.split()` crashed the WHOLE UserAuditLogs screen
+  // ("Cannot read properties of undefined (reading 'replace')" surfaced in the
+  // RN CSS-interop frame because styled-text interpolation crashed first).
+  // The backend now COALESCEs action server-side; this stays as the boundary
+  // guarantee for older deployments.
+  const s = (a ?? '').toString();
+  return s.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ') || 'Event';
 }
 
-function actionColor(action: string, status: string): string {
+function actionColor(action: string | null | undefined, status: string | null | undefined): string {
   if (status === 'failed')  return '#DC2626';
   if (status === 'warning') return '#D97706';
-  const a = action.toLowerCase();
+  const a = (action ?? '').toString().toLowerCase();
   if (a.includes('delete') || a.includes('suspend') || a.includes('revoke') || a.includes('reject') || a.includes('block')) return '#DC2626';
   if (a.includes('create') || a.includes('grant') || a.includes('activate') || a.includes('approve') || a.includes('publish') || a.includes('enroll') || a.includes('redeem') || a.includes('unblock')) return '#16A34A';
   if (a.includes('update') || a.includes('edit') || a.includes('change') || a.includes('reset') || a.includes('replace')) return '#D97706';
@@ -94,8 +103,10 @@ function actionColor(action: string, status: string): string {
   return '#7C3AED';
 }
 
-function formatTs(iso: string): string {
+function formatTs(iso: string | null | undefined): string {
+  if (!iso) return '—';
   const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '—';
   return d.toLocaleDateString('en-US', { day: '2-digit', month: 'short', year: 'numeric' })
     + '  '
     + d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
@@ -153,7 +164,7 @@ function ProfileHeader({ profile, c }: { profile: UserProfileSummary; c: typeof 
       <View style={{ flexDirection: 'row', gap: layout.pad.sm, flexWrap: 'wrap', marginBottom: layout.pad.md }}>
         <View style={{ backgroundColor: `${roleColor}18`, borderRadius: layout.cardRadius / 1.5, paddingHorizontal: layout.pad.md, paddingVertical: layout.pad.xs + 1 }}>
           <Text style={{ fontSize: layout.captionSize + 1, fontWeight: '700', color: roleColor, textTransform: 'capitalize' }}>
-            {profile.role.replace(/_/g, ' ')}
+            {(profile.role ?? 'user').replace(/_/g, ' ')}
           </Text>
         </View>
         <View style={{ backgroundColor: `${statusColor}18`, borderRadius: layout.cardRadius / 1.5, paddingHorizontal: layout.pad.md, paddingVertical: layout.pad.xs + 1 }}>
@@ -361,6 +372,7 @@ export default function UserAuditLogs() {
   const [loading,     setLoading]     = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [refreshing,  setRefreshing]  = useState(false);
+  const [loadError,   setLoadError]   = useState(false);
 
   // Filters
   const [search,     setSearch]     = useState('');
@@ -400,7 +412,13 @@ export default function UserAuditLogs() {
         offset.current += rows.length;
       }
       setTotalCount(count);
-    } catch (_) {}
+      setLoadError(false);
+    } catch (_) {
+      // Deterministic terminal error state (never a blank screen, never a
+      // silent empty list): the FlatList shows the retry UI below.
+      setLoadError(true);
+      if (reset) setEntries([]);
+    }
   }, [userId]);
 
   const reload = useCallback(async () => {
@@ -593,11 +611,28 @@ export default function UserAuditLogs() {
       {/* ── Content ──────────────────────────────────────────────────── */}
       {loading ? (
         <ActivityIndicator color={c.primary} size="large" style={{ marginTop: layout.sectionGap * 2 }} />
+      ) : loadError && entries.length === 0 ? (
+        <View style={{ alignItems: 'center', paddingVertical: layout.sectionGap * 3, paddingHorizontal: layout.screenPx }}>
+          <Text style={{ fontSize: layout.bodySize + 2, fontWeight: '700', color: c.text, opacity: 0.6 }}>
+            Unable to load audit logs
+          </Text>
+          <Text style={{ fontSize: layout.bodySize, color: c.text, opacity: 0.35, marginTop: layout.pad.sm, textAlign: 'center' }}>
+            Check your connection and try again.
+          </Text>
+          <Pressable
+            onPress={() => { setLoading(true); reload(); }}
+            style={{ marginTop: layout.pad.lg, backgroundColor: `${c.primary}18`, borderRadius: layout.cardRadius, paddingHorizontal: layout.pad.lg, paddingVertical: layout.pad.sm }}
+            accessibilityRole="button"
+            accessibilityLabel="Retry loading audit logs"
+          >
+            <Text style={{ color: c.primary, fontWeight: '700', fontSize: layout.bodySize }}>Retry</Text>
+          </Pressable>
+        </View>
       ) : (
         <FlatList
           data={entries}
           keyExtractor={item => item.id}
-          contentContainerStyle={{ paddingHorizontal: layout.screenPx, paddingTop: layout.pad.md, paddingBottom: layout.scrollBottom() }}
+          contentContainerStyle={{ paddingHorizontal: layout.screenPx, paddingTop: layout.pad.md }}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />}
           onEndReached={loadMore}
           onEndReachedThreshold={0.3}

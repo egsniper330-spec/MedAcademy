@@ -12,11 +12,11 @@ import { useFocusEffect, useRouter } from 'expo-router';
 import type { RelativePathString } from 'expo-router';
 import {
   DollarSign, TrendingUp, CreditCard, BarChart2,
-  AlertTriangle, Hash, UsersRound, FileText, ChevronRight,
+  AlertTriangle, UsersRound, ChevronRight,
   Coins, Download, Stethoscope, Globe, ClipboardList,
 } from 'lucide-react-native';
 import { PageHeader } from '@/components/PageHeader';
-import { neuColors, neuFlatStyle, neuPressedStyle, useLayout } from '@/lib/neu';
+import { neuColors, neuFlatStyle, neuPressedStyle, useLayout, safeBottom } from '@/lib/neu';
 import { getRevenueStats } from '@/lib/api';
 import { useCurrencyConfig } from '@/lib/currency';
 import Bell from '@/components/Bell';
@@ -91,7 +91,7 @@ export default function SAFinance() {
   return (
     <ScrollView
       style={{ flex: 1, backgroundColor: c.base }}
-      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />}
+      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />} contentContainerStyle={{ paddingBottom: safeBottom(layout.insets.bottom) }}
     >
       {/* PageHeader sits OUTSIDE the inner padding view so it can own its own horizontal padding */}
       <PageHeader title="Finance" subtitle="Revenue, ledger & analytics" accentColor="#16A34A" rightAction={<Bell />} />
@@ -131,12 +131,6 @@ export default function SAFinance() {
         <SectionLabel title="Credits" c={c} />
         <NavItem icon={CreditCard}  label="Credits"             description="Manage, history & analytics in one place"  color="#7C3AED" path="/sa-credits"          isDark={isDark} c={c} />
         <NavItem icon={UsersRound}  label="Bulk Credits"        description="Mass credit allocation to doctors"         color="#16A34A" path="/bulk-credits"              isDark={isDark} c={c} />
-
-        {/* ── Activation Codes ─────────────────────────────────────────── */}
-        <SectionLabel title="Activation Codes" c={c} />
-        <NavItem icon={FileText}    label="Codes Manager"       description="All codes: active, used, expired"          color="#D97706" path="/codes"                    isDark={isDark} c={c} />
-        <NavItem icon={Hash}        label="Code History"        description="Activation code usage history"             color="#6B7280" path="/code-history"             isDark={isDark} c={c} />
-
 
         {/* ── Operations & Alerts ──────────────────────────────────────── */}
         <SectionLabel title="Operations" c={c} />

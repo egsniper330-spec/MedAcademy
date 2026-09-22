@@ -1,598 +1,330 @@
 /**
- * system-providers.tsx
- * Super Admin — System Providers screen
- * Displays all registered providers with health status, last check, capabilities.
- * Allows on-demand health check per provider or all at once.
+ * System Diagnostics (formerly "System Providers") — Super Admin only.
+ *
+ * Scans the backend's real service dependencies (database, VdoCipher, SMTP,
+ * storage, JWT, update policy, PHP runtime) via GET /admin/system/diagnostics
+ * and renders safe, sanitized results. Secrets NEVER reach this screen — the
+ * backend only sends presence metadata ("configured": true) and classified
+ * error codes. See backend/src/Services/SystemDiagnosticsService.php.
+ *
+ * Layout contract: PageHeader owns the safe-area top inset; Scan All lives
+ * INSIDE the content area (never overlays the header); summary chips wrap;
+ * every card uses flex so it fits phones and tablets without fixed widths.
  */
 import { useCallback, useState } from 'react';
 import {
-  View, Text, ScrollView, Pressable, RefreshControl,
-  ActivityIndicator, useColorScheme, TextInput,
+  View, Text, ScrollView, ActivityIndicator, RefreshControl, useColorScheme, Pressable,
 } from 'react-native';
 import { useFocusEffect } from 'expo-router';
 import {
-  RefreshCw, CheckCircle, AlertTriangle, WifiOff,
-  Wrench, HelpCircle, Video, HardDrive, Bell, Mail,
-  MessageSquare, CreditCard, Lock, BarChart2, Bug,
-  Search, Sparkles, ChevronDown, ChevronUp, Zap,
-  Eye, EyeOff,
+  RefreshCw, Database, Video, Mail, HardDrive, ShieldCheck,
+  Smartphone, Server, Layers, AlertTriangle,
 } from 'lucide-react-native';
-import { neuColors, useLayout, neuFlatStyle, safeBottom } from '@/lib/neu';
-import { backendClient } from '@/client/backendClient';
+import { PageHeader } from '@/components/PageHeader';
+import { runSystemDiagnostics, runSystemDiagnosticOne } from '@/lib/api';
+import type { ServiceDiagnostic, SystemDiagnosticsReport, SystemServiceStatus } from '@/lib/api';
+import { LoadingState, ErrorState } from '@/components/ScreenState';
+import { EmptyState } from '@/components/EmptyState';
+import { NeuCard } from '@/components/NeuCard';
+import { NeuButton } from '@/components/NeuButton';
+import { neuColors, useLayout, safeBottom } from '@/lib/neu';
 
-// ── Types ─────────────────────────────────────────────────────────────────────
-interface ProviderRow {
-  id: string;
-  category: string;
-  provider_key: string;
-  display_name: string;
-  is_active: boolean;
-  is_default: boolean;
-  status: 'healthy' | 'warning' | 'offline' | 'maintenance' | 'unknown';
-  status_message?: string;
-  last_health_check?: string;
-  version?: string;
-  capabilities: string[];
-  config: Record<string, unknown>;
-}
-
-// ── Category metadata ─────────────────────────────────────────────────────────
-const CATEGORY_META: Record<string, { label: string; icon: any; color: string }> = {
-  video:        { label: 'Video',         icon: Video,        color: '#7C3AED' },
-  storage:      { label: 'Storage',       icon: HardDrive,    color: '#2DA8FF' },
-  notification: { label: 'Notifications', icon: Bell,         color: '#D97706' },
-  email:        { label: 'Email',         icon: Mail,         color: '#059669' },
-  sms:          { label: 'SMS',           icon: MessageSquare,color: '#DC2626' },
-  payment:      { label: 'Payment',       icon: CreditCard,   color: '#7C3AED' },
-  auth:         { label: 'Auth',          icon: Lock,         color: '#1E90FF' },
-  analytics:    { label: 'Analytics',     icon: BarChart2,    color: '#2DA8FF' },
-  crash:        { label: 'Crash Reports', icon: Bug,          color: '#DC2626' },
-  search:       { label: 'Search',        icon: Search,       color: '#059669' },
-  ai:           { label: 'AI',            icon: Sparkles,     color: '#D97706' },
+const STATUS_COLORS: Record<SystemServiceStatus, string> = {
+  healthy: '#16A34A',
+  warning: '#D97706',
+  timeout: '#D97706',
+  unavailable: '#DC2626',
+  authentication_failed: '#DC2626',
+  misconfigured: '#B45309',
+  unknown: '#6B7280',
 };
 
-const STATUS_META: Record<string, { label: string; icon: any; color: string }> = {
-  healthy:     { label: 'Healthy',     icon: CheckCircle,   color: '#059669' },
-  warning:     { label: 'Warning',     icon: AlertTriangle, color: '#D97706' },
-  offline:     { label: 'Offline',     icon: WifiOff,       color: '#DC2626' },
-  maintenance: { label: 'Maintenance', icon: Wrench,        color: '#7C3AED' },
-  unknown:     { label: 'Unknown',     icon: HelpCircle,    color: '#6B7280' },
+const STATUS_LABELS: Record<SystemServiceStatus, string> = {
+  healthy: 'Healthy',
+  warning: 'Warning',
+  timeout: 'Timeout',
+  unavailable: 'Offline',
+  authentication_failed: 'Authentication Failed',
+  misconfigured: 'Misconfigured',
+  unknown: 'Unknown',
 };
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
-function timeAgo(iso?: string): string {
-  if (!iso) return 'Never';
-  const diff = Date.now() - new Date(iso).getTime();
-  const m = Math.floor(diff / 60000);
-  if (m < 1) return 'Just now';
-  if (m < 60) return `${m}m ago`;
-  const h = Math.floor(m / 60);
-  if (h < 24) return `${h}h ago`;
-  return `${Math.floor(h / 24)}d ago`;
-}
+const CATEGORY_ICONS: Record<string, React.ElementType> = {
+  Infrastructure: Database,
+  'Video / DRM': Video,
+  Notifications: Mail,
+  Security: ShieldCheck,
+  Platform: Smartphone,
+};
 
-// ── Components ────────────────────────────────────────────────────────────────
-function StatusBadge({ status, isDark }: { status: string; isDark: boolean }) {
-  const meta = STATUS_META[status] ?? STATUS_META.unknown;
-  const Icon = meta.icon;
-  return (
-    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingVertical: 3,
-      backgroundColor: `${meta.color}18`, borderRadius: 20, borderWidth: 1, borderColor: `${meta.color}30` }}>
-      <Icon size={11} color={meta.color} />
-      <Text style={{ fontSize: 11, fontWeight: '700', color: meta.color }}>{meta.label}</Text>
-    </View>
-  );
-}
+const CHECK_COLORS: Record<string, string> = {
+  passed: '#16A34A',
+  configured: '#16A34A',
+  failed: '#DC2626',
+  warning: '#D97706',
+  'not tested': '#9CA3AF',
+  'not configured': '#D97706',
+  'n/a': '#9CA3AF',
+};
 
-function ProviderCard({
-  provider, isDark, onCheck, checking, onToggleActive,
-}: {
-  provider: ProviderRow;
-  isDark: boolean;
-  onCheck: (key: string) => void;
-  checking: boolean;
-  onToggleActive: (key: string, current: boolean) => Promise<void>;
-}) {
-  const c = isDark ? neuColors.dark : neuColors.light;
-  const [expanded, setExpanded] = useState(false);
-  const [configMode, setConfigMode] = useState(false);
-  const [apiKey, setApiKey] = useState('');
-  const [webhook, setWebhook] = useState('');
-  const [showKey, setShowKey] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [testing, setTesting] = useState(false);
-  const [rotating, setRotating] = useState(false);
-  const [toggling, setToggling] = useState(false);
-  const [configMsg, setConfigMsg] = useState('');
-  const catMeta = CATEGORY_META[provider.category];
-
-  const handleToggleActive = async () => {
-    setToggling(true); setConfigMsg('');
-    await onToggleActive(provider.provider_key, provider.is_active);
-    setToggling(false);
-  };
-
-  const handleSaveConfig = async () => {
-    setSaving(true); setConfigMsg('');
-    try {
-      const { error } = await backendClient.functions.invoke('provider-health', {
-        body: {
-          action: 'update_config',
-          provider_key: provider.provider_key,
-          api_key: apiKey || undefined,
-          webhook: webhook || undefined,
-        },
-      });
-      if (error) throw error;
-      setConfigMsg('✅ Config saved.');
-    } catch {
-      setConfigMsg('❌ Save failed.');
-    }
-    setSaving(false);
-  };
-
-  const handleTestConnection = async () => {
-    setTesting(true); setConfigMsg('');
-    try {
-      const { data, error } = await backendClient.functions.invoke('provider-health', {
-        body: { action: 'check_one', provider_key: provider.provider_key },
-      });
-      if (error) throw error;
-      setConfigMsg(data?.status === 'healthy' ? '✅ Connection healthy.' : `⚠️ Status: ${data?.status ?? 'unknown'}`);
-    } catch {
-      setConfigMsg('❌ Connection test failed.');
-    }
-    setTesting(false);
-  };
-
-  const handleRotateSecret = async () => {
-    setRotating(true); setConfigMsg('');
-    try {
-      const { error } = await backendClient.functions.invoke('provider-health', {
-        body: { action: 'rotate_secret', provider_key: provider.provider_key },
-      });
-      if (error) throw error;
-      setApiKey('');
-      setConfigMsg('✅ Secret rotated. Enter new API key.');
-    } catch {
-      setConfigMsg('❌ Rotate failed.');
-    }
-    setRotating(false);
-  };
-
-  const inp = {
-    backgroundColor: isDark ? '#1a1a2e' : '#f0f0f5',
-    borderRadius: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    fontSize: 13 as const,
-    color: c.text,
-  };
-
-  return (
-    <View style={[neuFlatStyle(isDark), {
-      borderRadius: 14, marginBottom: 10,
-      borderLeftWidth: 3,
-      borderLeftColor: provider.is_active ? (catMeta?.color ?? c.primary) : `${c.text}33`,
-      opacity: provider.is_active ? 1 : 0.6,
-    }]}>
-      {/* Header row */}
-      <Pressable
-        onPress={() => setExpanded((e) => !e)}
-        style={{ flexDirection: 'row', alignItems: 'center', padding: 14, gap: 10 }}
-      >
-        <View style={{ width: 34, height: 34, borderRadius: 10, backgroundColor: `${catMeta?.color ?? c.primary}18`,
-          alignItems: 'center', justifyContent: 'center' }}>
-          {catMeta && <catMeta.icon size={17} color={catMeta.color} />}
-        </View>
-        <View style={{ flex: 1 }}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-            <Text style={{ fontSize: 14, fontWeight: '700', color: c.text }}>{provider.display_name}</Text>
-            {provider.is_default && (
-              <View style={{ paddingHorizontal: 6, paddingVertical: 1, backgroundColor: `${c.primary}18`,
-                borderRadius: 8, borderWidth: 1, borderColor: `${c.primary}30` }}>
-                <Text style={{ fontSize: 9, fontWeight: '800', color: c.primary, textTransform: 'uppercase' }}>DEFAULT</Text>
-              </View>
-            )}
-          </View>
-          <Text style={{ fontSize: 11, color: `${c.text}70`, marginTop: 1 }}>
-            Last checked: {timeAgo(provider.last_health_check)}
-          </Text>
-        </View>
-        <StatusBadge status={provider.status} isDark={isDark} />
-        {expanded ? <ChevronUp size={16} color={`${c.text}60`} /> : <ChevronDown size={16} color={`${c.text}60`} />}
-      </Pressable>
-
-      {/* Expanded details */}
-      {expanded && (
-        <View style={{ paddingHorizontal: 14, paddingBottom: 14, gap: 10 }}>
-          {/* Status message */}
-          {provider.status_message && (
-            <View style={{ padding: 8, backgroundColor: `${c.text}08`, borderRadius: 8 }}>
-              <Text style={{ fontSize: 12, color: `${c.text}80` }}>{provider.status_message}</Text>
-            </View>
-          )}
-
-          {/* Capabilities */}
-          {provider.capabilities?.length > 0 && (
-            <View>
-              <Text style={{ fontSize: 11, fontWeight: '700', color: `${c.text}70`, marginBottom: 4, textTransform: 'uppercase', letterSpacing: 0.5 }}>
-                Capabilities
-              </Text>
-              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 4 }}>
-                {provider.capabilities.map((cap) => (
-                  <View key={cap} style={{ paddingHorizontal: 7, paddingVertical: 2,
-                    backgroundColor: `${c.primary}12`, borderRadius: 6, borderWidth: 1, borderColor: `${c.primary}20` }}>
-                    <Text style={{ fontSize: 10, fontWeight: '600', color: c.primary }}>{cap}</Text>
-                  </View>
-                ))}
-              </View>
-            </View>
-          )}
-
-          {/* Action row: Check + Configure */}
-          <View style={{ flexDirection: 'row', gap: 8 }}>
-            <Pressable
-              onPress={() => onCheck(provider.provider_key)}
-              disabled={checking}
-              style={{ flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5,
-                paddingVertical: 8, backgroundColor: `${c.primary}15`, borderRadius: 10,
-                borderWidth: 1, borderColor: `${c.primary}25`, opacity: checking ? 0.5 : 1 }}
-            >
-              {checking ? <ActivityIndicator size={12} color={c.primary} /> : <RefreshCw size={12} color={c.primary} />}
-              <Text style={{ fontSize: 12, fontWeight: '700', color: c.primary }}>Check Now</Text>
-            </Pressable>
-            <Pressable
-              onPress={() => { setConfigMode(m => !m); setConfigMsg(''); }}
-              style={{ flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5,
-                paddingVertical: 8, backgroundColor: configMode ? `#D9770618` : `${c.text}0A`,
-                borderRadius: 10, borderWidth: 1, borderColor: configMode ? '#D97706' : `${c.text}18` }}
-            >
-              <Wrench size={12} color={configMode ? '#D97706' : `${c.text}80`} />
-              <Text style={{ fontSize: 12, fontWeight: '700', color: configMode ? '#D97706' : `${c.text}80` }}>
-                {configMode ? 'Close Config' : 'Configure'}
-              </Text>
-            </Pressable>
-          </View>
-
-          {/* Config panel */}
-          {configMode && (
-            <View style={{ backgroundColor: `${c.text}06`, borderRadius: 12, padding: 14, gap: 10, borderWidth: 1, borderColor: `${c.text}12` }}>
-              <Text style={{ fontSize: 12, fontWeight: '800', color: c.text, opacity: 0.6, textTransform: 'uppercase', letterSpacing: 0.7 }}>
-                Configuration · {provider.display_name}
-              </Text>
-
-              {/* API Key */}
-              <View>
-                <Text style={{ fontSize: 11, fontWeight: '700', color: `${c.text}60`, marginBottom: 5 }}>API Key / Secret</Text>
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                  <TextInput
-                    value={apiKey}
-                    onChangeText={setApiKey}
-                    secureTextEntry={!showKey}
-                    placeholder="Enter API key (leave blank to keep existing)…"
-                    placeholderTextColor={`${c.text}40`}
-                    style={{ ...inp, flex: 1, minWidth: 0 }}
-                    autoCapitalize="none"
-                    autoCorrect={false}
-                  />
-                  <Pressable onPress={() => setShowKey(s => !s)}
-                    style={{ width: 36, height: 36, borderRadius: 9, backgroundColor: `${c.text}0F`, alignItems: 'center', justifyContent: 'center' }}>
-                    {showKey
-                      ? <EyeOff size={15} color={`${c.text}70`} />
-                      : <Eye size={15} color={`${c.text}70`} />}
-                  </Pressable>
-                </View>
-              </View>
-
-              {/* Webhook */}
-              <View>
-                <Text style={{ fontSize: 11, fontWeight: '700', color: `${c.text}60`, marginBottom: 5 }}>Webhook URL (optional)</Text>
-                <TextInput
-                  value={webhook}
-                  onChangeText={setWebhook}
-                  placeholder="https://…"
-                  placeholderTextColor={`${c.text}40`}
-                  style={{ ...inp, minWidth: 0 }}
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                  keyboardType="url"
-                />
-              </View>
-
-              {/* Activation toggle */}
-              <Pressable
-                onPress={handleToggleActive}
-                disabled={toggling}
-                style={{
-                  flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-                  paddingVertical: 10, paddingHorizontal: 12,
-                  backgroundColor: provider.is_active ? '#16A34A10' : '#DC262610',
-                  borderRadius: 10, borderWidth: 1,
-                  borderColor: provider.is_active ? '#16A34A30' : '#DC262630',
-                }}
-              >
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                  {toggling
-                    ? <ActivityIndicator size={14} color={provider.is_active ? '#16A34A' : '#DC2626'} />
-                    : <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: provider.is_active ? '#16A34A' : '#DC2626' }} />}
-                  <Text style={{ fontSize: 13, fontWeight: '700', color: provider.is_active ? '#16A34A' : '#DC2626' }}>
-                    {provider.is_active ? '🟢 Enabled' : '🔴 Disabled'}
-                  </Text>
-                </View>
-                <View style={{
-                  width: 44, height: 24, borderRadius: 12, justifyContent: 'center', paddingHorizontal: 2,
-                  backgroundColor: provider.is_active ? '#16A34A' : `${c.text}30`,
-                }}>
-                  <View style={{
-                    width: 20, height: 20, borderRadius: 10, backgroundColor: '#fff',
-                    alignSelf: provider.is_active ? 'flex-end' : 'flex-start',
-                  }} />
-                </View>
-              </Pressable>
-
-              {/* Action buttons */}
-              <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
-                <Pressable onPress={handleSaveConfig} disabled={saving}
-                  style={{ flex: 1, minWidth: 90, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5, paddingVertical: 9, backgroundColor: '#16A34A18', borderRadius: 10, borderWidth: 1, borderColor: '#16A34A30' }}>
-                  {saving ? <ActivityIndicator size={12} color="#16A34A" /> : <CheckCircle size={13} color="#16A34A" />}
-                  <Text style={{ fontSize: 12, fontWeight: '700', color: '#16A34A' }}>Save</Text>
-                </Pressable>
-                <Pressable onPress={handleTestConnection} disabled={testing}
-                  style={{ flex: 1, minWidth: 90, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5, paddingVertical: 9, backgroundColor: `${c.primary}15`, borderRadius: 10, borderWidth: 1, borderColor: `${c.primary}25` }}>
-                  {testing ? <ActivityIndicator size={12} color={c.primary} /> : <Zap size={13} color={c.primary} />}
-                  <Text style={{ fontSize: 12, fontWeight: '700', color: c.primary }}>Test</Text>
-                </Pressable>
-                <Pressable onPress={handleRotateSecret} disabled={rotating}
-                  style={{ flex: 1, minWidth: 90, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5, paddingVertical: 9, backgroundColor: '#D9770618', borderRadius: 10, borderWidth: 1, borderColor: '#D9770630' }}>
-                  {rotating ? <ActivityIndicator size={12} color="#D97706" /> : <RefreshCw size={13} color="#D97706" />}
-                  <Text style={{ fontSize: 12, fontWeight: '700', color: '#D97706' }}>Rotate</Text>
-                </Pressable>
-              </View>
-
-              {/* Feedback message */}
-              {configMsg ? <Text style={{ fontSize: 12, fontWeight: '600', color: configMsg.startsWith('✅') ? '#16A34A' : '#DC2626' }}>{configMsg}</Text> : null}
-
-              {/* Provider key (read-only) */}
-              <Text style={{ fontSize: 10, color: `${c.text}40`, fontFamily: 'monospace' }}>key: {provider.provider_key}</Text>
-            </View>
-          )}
-        </View>
-      )}
-    </View>
-  );
-}
-
-// ── Summary stats ─────────────────────────────────────────────────────────────
-function SummaryBar({ providers, isDark }: { providers: ProviderRow[]; isDark: boolean }) {
-  const c = isDark ? neuColors.dark : neuColors.light;
-  const healthy  = providers.filter((p) => p.is_active && p.status === 'healthy').length;
-  const warning  = providers.filter((p) => p.is_active && p.status === 'warning').length;
-  const offline  = providers.filter((p) => p.is_active && p.status === 'offline').length;
-  const unknown  = providers.filter((p) => p.is_active && p.status === 'unknown').length;
-  const total    = providers.filter((p) => p.is_active).length;
-
-  const tiles = [
-    { label: 'Active',   value: total,   color: c.primary },
-    { label: 'Healthy',  value: healthy,  color: '#059669' },
-    { label: 'Warning',  value: warning,  color: '#D97706' },
-    { label: 'Offline',  value: offline,  color: '#DC2626' },
-    { label: 'Unknown',  value: unknown,  color: '#6B7280' },
-  ];
-
-  return (
-    <View style={{ flexDirection: 'row', gap: 8, marginBottom: 16 }}>
-      {tiles.map(({ label, value, color }) => (
-        <View key={label} style={[neuFlatStyle(isDark), {
-          flex: 1, borderRadius: 12, paddingVertical: 10, alignItems: 'center',
-        }]}>
-          <Text style={{ fontSize: 20, fontWeight: '800', color }}>{value}</Text>
-          <Text style={{ fontSize: 10, color: `${c.text}70`, marginTop: 1, fontWeight: '600' }}>{label}</Text>
-        </View>
-      ))}
-    </View>
-  );
-}
-
-// ── Main Screen ───────────────────────────────────────────────────────────────
-export default function SystemProvidersScreen() {
+export default function SystemDiagnosticsScreen() {
   const scheme = useColorScheme();
   const isDark = scheme === 'dark';
   const c = isDark ? neuColors.dark : neuColors.light;
   const layout = useLayout();
-  const insets = layout.insets;
 
-  const [providers, setProviders] = useState<ProviderRow[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [report, setReport] = useState<SystemDiagnosticsReport | null>(null);
+  const [phase, setPhase] = useState<'loading' | 'error' | 'success'>('loading');
+  const [error, setError] = useState<unknown>(null);
+  const [scanning, setScanning] = useState(false);
+  const [checkingId, setCheckingId] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
-  const [scanningAll, setScanningAll] = useState(false);
-  const [checking, setChecking] = useState<string | null>(null);
-  const [activeCategory, setActiveCategory] = useState<string>('all');
-  const [lastScan, setLastScan] = useState<string | null>(null);
 
-  const load = useCallback(async () => {
-    const { data } = await backendClient.functions.invoke('provider-health', {
-      body: { action: 'list' },
-    });
-    if (data?.providers) {
-      // parse capabilities from JSON strings if needed
-      const rows = data.providers.map((p: any) => ({
-        ...p,
-        capabilities: Array.isArray(p.capabilities)
-          ? p.capabilities
-          : (typeof p.capabilities === 'string' ? JSON.parse(p.capabilities) : []),
-      }));
-      setProviders(rows);
+  const scan = useCallback(async () => {
+    setScanning(true);
+    setError(null);
+    try {
+      setReport(await runSystemDiagnostics());
+      setPhase('success');
+    } catch (e) {
+      setError(e);
+      setPhase('error');
     }
-    setLoading(false);
-    setRefreshing(false);
+    setScanning(false);
   }, []);
 
-  useFocusEffect(useCallback(() => { load(); }, [load]));
+  // Initial scan on first focus; pull-to-refresh and Scan All re-use it.
+  useFocusEffect(useCallback(() => { void scan(); }, [scan]));
 
-  const handleScanAll = async () => {
-    setScanningAll(true);
-    await backendClient.functions.invoke('provider-health', { body: { action: 'check_all' } });
-    setLastScan(new Date().toISOString());
-    await load();
-    setScanningAll(false);
-  };
+  const onRefresh = async () => { setRefreshing(true); await scan(); setRefreshing(false); };
 
-  const handleCheckOne = async (providerKey: string) => {
-    setChecking(providerKey);
-    await backendClient.functions.invoke('provider-health', {
-      body: { action: 'check_one', provider_key: providerKey },
-    });
-    await load();
-    setChecking(null);
-  };
-
-  const handleToggleActive = async (providerKey: string, currentlyActive: boolean) => {
-    // Optimistic UI update
-    setProviders((prev) =>
-      prev.map((p) => p.provider_key === providerKey ? { ...p, is_active: !currentlyActive } : p)
-    );
-    const { error } = await backendClient
-      .from('video_provider_config')
-      .update({ is_active: !currentlyActive })
-      .eq('provider_key', providerKey);
-    if (error) {
-      // Revert on failure
-      setProviders((prev) =>
-        prev.map((p) => p.provider_key === providerKey ? { ...p, is_active: currentlyActive } : p)
-      );
+  /** Individual service re-check — splices the fresh result into the report. */
+  const checkOne = async (id: string) => {
+    setCheckingId(id);
+    try {
+      const fresh = await runSystemDiagnosticOne(id);
+      setReport(prev => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          generatedAt: fresh.lastChecked,
+          results: prev.results.map(r => (r.id === id ? fresh : r)),
+        };
+      });
+    } catch {
+      // Per-service failure keeps the previous result visible — the card is
+      // refreshed by a full re-scan if needed. Silent-by-design would hide the
+      // error, so surface it via a status nudge instead:
+      setReport(prev => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          results: prev.results.map(r => (
+            r.id === id
+              ? { ...r, message: 'Re-check failed — the request could not be completed. Run Scan All.', status: 'unknown' as SystemServiceStatus }
+              : r
+          )),
+        };
+      });
     }
+    setCheckingId(null);
   };
 
-  const categories = ['all', ...Array.from(new Set(providers.map((p) => p.category))).sort()];
-  const filtered = activeCategory === 'all'
-    ? providers
-    : providers.filter((p) => p.category === activeCategory);
+  const fmtTime = (iso?: string) => {
+    if (!iso) return '—';
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return iso;
+    return d.toLocaleString();
+  };
 
-  // Group by category
-  const grouped: Record<string, ProviderRow[]> = {};
-  for (const p of filtered) {
-    if (!grouped[p.category]) grouped[p.category] = [];
-    grouped[p.category].push(p);
-  }
+  const results = report?.results ?? [];
+  const summary = report?.summary ?? {};
 
   return (
-    <View style={{ flex: 1, backgroundColor: c.base }}>
-      {/* Header */}
-      <View style={{ paddingTop: 0, paddingHorizontal: layout.screenPx, paddingBottom: 12 }}>
-        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-            <Zap size={22} color={c.primary} />
-            <Text style={{ fontSize: 22, fontWeight: '800', color: c.text }}>System Providers</Text>
-          </View>
-          <Pressable
-            onPress={handleScanAll}
-            disabled={scanningAll}
-            style={{ flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 14, paddingVertical: 8,
-              backgroundColor: c.primary, borderRadius: 10, opacity: scanningAll ? 0.7 : 1 }}
-          >
-            {scanningAll
-              ? <ActivityIndicator size={14} color="#fff" />
-              : <RefreshCw size={14} color="#fff" />}
-            <Text style={{ fontSize: 12, fontWeight: '700', color: '#fff' }}>
-              {scanningAll ? 'Scanning…' : 'Scan All'}
+    <ScrollView
+      style={{ flex: 1, backgroundColor: c.base }}
+      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />}
+      contentContainerStyle={{ paddingBottom: safeBottom(layout.insets.bottom) }}
+    >
+      <PageHeader title="System Diagnostics" subtitle="API, database & service health" accentColor="#059669" />
+
+      <View style={{ paddingHorizontal: layout.screenPx }}>
+
+        {phase === 'loading' ? (
+          <LoadingState label="Scanning backend services…" />
+        ) : phase === 'error' ? (
+          <ErrorState error={error} onRetry={scan} />
+        ) : results.length === 0 ? (
+          <EmptyState
+            icon={<Layers size={40} color={c.primary} />}
+            title="No services registered"
+            description="The backend did not report any diagnostic services."
+            action={{ label: 'Scan Again', onPress: scan }}
+          />
+        ) : (
+          <>
+            {/* Scan All — inside the content area, never over the header */}
+            <View style={{ marginTop: 14, marginBottom: 10 }}>
+              <NeuButton
+                label={scanning ? 'Scanning…' : 'Scan All Services'}
+                onPress={scan}
+                loading={scanning}
+                icon={<RefreshCw size={16} color="#fff" />}
+                fullWidth
+              />
+            </View>
+
+            <Text style={{ fontSize: 12, color: c.text, opacity: 0.5, marginBottom: 14 }}>
+              Last checked: {fmtTime(report?.generatedAt)}
             </Text>
-          </Pressable>
+
+            {/* Summary chips — wrap naturally on small screens */}
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 18 }}>
+              {Object.entries(summary).filter(([, n]) => n > 0).map(([status, n]) => {
+                const color = STATUS_COLORS[status as SystemServiceStatus] ?? '#6B7280';
+                return (
+                  <View
+                    key={status}
+                    style={{ flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: `${color}14`, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 7 }}
+                  >
+                    <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: color }} />
+                    <Text style={{ fontSize: 12, fontWeight: '700', color }}>
+                      {n} {STATUS_LABELS[status as SystemServiceStatus] ?? status}
+                    </Text>
+                  </View>
+                );
+              })}
+            </View>
+
+            {/* Service cards */}
+            {results.map(service => (
+              <ServiceCard
+                key={service.id}
+                service={service}
+                c={c}
+                checking={checkingId === service.id}
+                onCheckAgain={() => checkOne(service.id)}
+              />
+            ))}
+          </>
+        )}
+
+        <View style={{ height: 24 }} />
+      </View>
+    </ScrollView>
+  );
+}
+
+// ── One service card ─────────────────────────────────────────────────────────
+
+function ServiceCard({
+  service, c, checking, onCheckAgain,
+}: {
+  service: ServiceDiagnostic;
+  c: typeof neuColors.light;
+  checking: boolean;
+  onCheckAgain: () => void;
+}) {
+  const statusColor = STATUS_COLORS[service.status] ?? '#6B7280';
+  const Icon = CATEGORY_ICONS[service.category] ?? Layers;
+  const checkEntries = Object.entries(service.checks ?? {});
+
+  return (
+    <NeuCard style={{ marginBottom: 14, padding: 16 }}>
+      {/* Title row */}
+      <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+        <View style={{ width: 42, height: 42, borderRadius: 13, backgroundColor: `${statusColor}16`, alignItems: 'center', justifyContent: 'center', marginRight: 12 }}>
+          <Icon size={20} color={statusColor} />
         </View>
-        <Text style={{ fontSize: 13, color: `${c.text}70` }}>
-          {`Provider Abstraction Layer · ${providers.length} providers registered${lastScan ? ` · Last scan ${timeAgo(lastScan)}` : ''}`}
-        </Text>
+        <View style={{ flex: 1, minWidth: 0 }}>
+          <Text style={{ fontSize: 15, fontWeight: '700', color: c.text }} numberOfLines={2}>
+            {service.name}
+          </Text>
+          <Text style={{ fontSize: 11, color: c.text, opacity: 0.45, marginTop: 1 }}>{service.category}</Text>
+        </View>
+        {/* Status pill — never overlaps the name (own row on narrow cards) */}
+        <View style={{ backgroundColor: `${statusColor}18`, borderRadius: 10, paddingHorizontal: 10, paddingVertical: 5, marginLeft: 8 }}>
+          <Text style={{ fontSize: 11, fontWeight: '800', color: statusColor }} numberOfLines={1}>
+            ● {STATUS_LABELS[service.status] ?? service.status}
+          </Text>
+        </View>
       </View>
 
-      {/* Category filter tabs */}
-      <ScrollView horizontal showsHorizontalScrollIndicator={false}
-        contentContainerStyle={{ paddingHorizontal: layout.screenPx, gap: 8, paddingBottom: 12 }}>
-        {categories.map((cat) => {
-          const meta = CATEGORY_META[cat];
-          const isActive = activeCategory === cat;
-          return (
-            <Pressable
-              key={cat}
-              onPress={() => setActiveCategory(cat)}
-              style={{ flexDirection: 'row', alignItems: 'center', gap: 5,
-                paddingHorizontal: 12, paddingVertical: 6,
-                backgroundColor: isActive ? c.primary : `${c.text}10`,
-                borderRadius: 20, borderWidth: 1,
-                borderColor: isActive ? c.primary : `${c.text}20` }}
-            >
-              {meta && <meta.icon size={12} color={isActive ? '#fff' : `${c.text}80`} />}
-              <Text style={{ fontSize: 12, fontWeight: '700',
-                color: isActive ? '#fff' : `${c.text}80`,
-                textTransform: 'capitalize' }}>{cat}</Text>
-            </Pressable>
-          );
-        })}
-      </ScrollView>
-
-      {loading ? (
-        <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
-          <ActivityIndicator size="large" color={c.primary} />
-          <Text style={{ marginTop: 12, color: `${c.text}70`, fontSize: 14 }}>Loading providers…</Text>
-        </View>
-      ) : (
-        <ScrollView
-          contentContainerStyle={{ paddingHorizontal: layout.screenPx, paddingBottom: layout.scrollBottom() }}
-          refreshControl={
-            <RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(); }}
-              tintColor={c.primary} />
-          }
-        >
-          <SummaryBar providers={providers} isDark={isDark} />
-
-          {Object.entries(grouped).map(([category, rows]) => {
-            const meta = CATEGORY_META[category];
+      {/* Checks grid — wraps to multiple rows on small screens */}
+      {checkEntries.length > 0 && (
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 14 }}>
+          {checkEntries.map(([name, verdict]) => {
+            const color = CHECK_COLORS[verdict] ?? '#6B7280';
             return (
-              <View key={category} style={{ marginBottom: 20 }}>
-                {/* Category header */}
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 10 }}>
-                  {meta && (
-                    <View style={{ width: 28, height: 28, borderRadius: 8,
-                      backgroundColor: `${meta.color}18`, alignItems: 'center', justifyContent: 'center' }}>
-                      <meta.icon size={14} color={meta.color} />
-                    </View>
-                  )}
-                  <Text style={{ fontSize: 13, fontWeight: '800', color: c.text, textTransform: 'uppercase', letterSpacing: 0.8 }}>
-                    {meta?.label ?? category}
-                  </Text>
-                  <View style={{ flex: 1, height: 1, backgroundColor: `${c.text}15` }} />
-                  <Text style={{ fontSize: 11, color: `${c.text}50` }}>{rows.length}</Text>
-                </View>
-
-                {rows.map((p) => (
-                  <ProviderCard
-                    key={p.id}
-                    provider={p}
-                    isDark={isDark}
-                    onCheck={handleCheckOne}
-                    checking={checking === p.provider_key}
-                    onToggleActive={handleToggleActive}
-                  />
-                ))}
+              <View
+                key={name}
+                style={{ flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: `${c.text}08`, borderRadius: 9, paddingHorizontal: 10, paddingVertical: 6 }}
+              >
+                <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: color }} />
+                <Text style={{ fontSize: 11, fontWeight: '600', color: c.text, opacity: 0.75 }}>{name}</Text>
+                <Text style={{ fontSize: 11, fontWeight: '800', color }}>{verdict}</Text>
               </View>
             );
           })}
-
-          {/* Architecture note */}
-          <View style={[neuFlatStyle(isDark), { borderRadius: 14, padding: 16, gap: 6 }]}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-              <Zap size={16} color={c.accent} />
-              <Text style={{ fontSize: 13, fontWeight: '800', color: c.text }}>Provider Abstraction Layer</Text>
-            </View>
-            <Text style={{ fontSize: 12, color: `${c.text}70`, lineHeight: 18 }}>
-              All platform services communicate through internal provider interfaces. Switching providers
-              requires only a single registration change — no database, UI, or business logic changes needed.
-            </Text>
-            <Text style={{ fontSize: 11, color: `${c.text}50`, marginTop: 4 }}>
-              Secrets are stored server-side only. No credentials are exposed to the client.
-            </Text>
-          </View>
-        </ScrollView>
+        </View>
       )}
-    </View>
+
+      {/* Message */}
+      {service.message !== '' && (
+        <Text style={{ fontSize: 12.5, color: c.text, opacity: 0.65, marginTop: 12, lineHeight: 18 }}>
+          {service.message}
+        </Text>
+      )}
+
+      {/* Classification + metadata — wraps, never overflows */}
+      {(service.errorCode || service.httpStatus != null || service.latencyMs != null) && (
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 10 }}>
+          {service.errorCode ? (
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: '#DC262612', borderRadius: 8, paddingHorizontal: 8, paddingVertical: 4 }}>
+              <AlertTriangle size={11} color="#DC2626" />
+              <Text style={{ fontSize: 10.5, fontWeight: '800', color: '#DC2626' }}>{service.errorCode}</Text>
+            </View>
+          ) : null}
+          {service.httpStatus != null && (
+            <View style={{ backgroundColor: `${c.text}0A`, borderRadius: 8, paddingHorizontal: 8, paddingVertical: 4 }}>
+              <Text style={{ fontSize: 10.5, fontWeight: '700', color: c.text, opacity: 0.6 }}>HTTP {service.httpStatus}</Text>
+            </View>
+          )}
+          {service.latencyMs != null && (
+            <View style={{ backgroundColor: `${c.text}0A`, borderRadius: 8, paddingHorizontal: 8, paddingVertical: 4 }}>
+              <Text style={{ fontSize: 10.5, fontWeight: '700', color: c.text, opacity: 0.6 }}>{service.latencyMs} ms</Text>
+            </View>
+          )}
+        </View>
+      )}
+
+      {/* Recommended action */}
+      {service.recommendedAction ? (
+        <View style={{ marginTop: 10, backgroundColor: `${c.primary}0C`, borderRadius: 10, padding: 10 }}>
+          <Text style={{ fontSize: 12, color: c.primary, fontWeight: '600', lineHeight: 17 }}>
+            {service.recommendedAction}
+          </Text>
+        </View>
+      ) : null}
+
+      {/* Footer: timestamp + per-service re-check */}
+      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 12, paddingTop: 10, borderTopWidth: 1, borderTopColor: `${c.text}0C` }}>
+        <Text style={{ fontSize: 10.5, color: c.text, opacity: 0.4, flex: 1, minWidth: 0 }} numberOfLines={1}>
+          {fmtChecked(service.lastChecked)}
+        </Text>
+        {checking ? (
+          <ActivityIndicator size="small" color={c.primary} />
+        ) : (
+          <Pressable hitSlop={6} onPress={onCheckAgain} style={{ paddingHorizontal: 8, paddingVertical: 4 }}>
+            <Text style={{ fontSize: 12, fontWeight: '700', color: c.primary }}>Check Again</Text>
+          </Pressable>
+        )}
+      </View>
+    </NeuCard>
   );
+}
+
+function fmtChecked(iso: string): string {
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? iso : `Checked ${d.toLocaleTimeString()}`;
 }

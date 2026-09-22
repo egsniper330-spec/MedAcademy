@@ -27,7 +27,7 @@ import { DeleteAccountModal } from '@/components/DeleteAccountModal';
 import { displayPhoneNational } from '@/lib/phone';
 import { NeuCard } from '@/components/NeuCard';
 import { useToast } from '@/components/Toast';
-import { neuColors, useLayout, animation, zIndex } from '@/lib/neu';
+import { neuColors, useLayout, animation, zIndex, safeBottom } from '@/lib/neu';
 import { useDebounce } from '@/lib/useDebounce';
 import { friendlyError } from '@/lib/validation';
 import { PageHeader } from '@/components/PageHeader';
@@ -245,6 +245,7 @@ export default function GlobalSearchScreen() {
             session.access_token,
             session.refresh_token,
             session.user.email ?? '',
+            session.user.id,
             (session.user.user_metadata?.role ?? 'admin') as import('@/lib/store').UserRole,
             user.full_name ?? '',
             user.role as import('@/lib/store').UserRole,
@@ -439,8 +440,8 @@ export default function GlobalSearchScreen() {
               ))}
             </View>
             {/* ID — shown for student accounts */}
-            {user.watermark_id && user.role === 'student' && (
-              <WatermarkBadge watermarkId={user.watermark_id} c={c} />
+            {user.public_user_id && user.role === 'student' && (
+              <WatermarkBadge watermarkId={user.public_user_id} c={c} />
             )}
             {/* Recent audit */}
             <Text style={{ fontSize: 13, fontWeight: '700', color: c.text, opacity: 0.5, textTransform: 'uppercase', letterSpacing: 0.5 }}>Recent Activity</Text>
@@ -460,8 +461,8 @@ export default function GlobalSearchScreen() {
         return (
           <View style={{ gap: 8 }}>
             {/* ID — highlighted at top for admin use */}
-            {user.watermark_id && (
-              <WatermarkBadge watermarkId={user.watermark_id} c={c} />
+            {user.public_user_id && (
+              <WatermarkBadge watermarkId={user.public_user_id} c={c} />
             )}
             {[
               { label: 'Full Name', value: user.full_name },
@@ -799,7 +800,7 @@ export default function GlobalSearchScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: c.base }}>
-      <ScrollView contentContainerStyle={{ paddingBottom: layout.scrollBottom() }}>
+      <ScrollView>
           <PageHeader title="Global Search" subtitle="Search users, courses, academic entities" accentColor={c.primary} />
 
         <View style={{ paddingHorizontal: layout.screenPx }}>
@@ -904,7 +905,7 @@ export default function GlobalSearchScreen() {
             </ScrollView>
 
             {/* Tab body */}
-            <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 18, paddingBottom: layout.scrollBottom() }}>
+            <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 18, paddingBottom: safeBottom(layout.insets.bottom) }}>
               {renderDrawerContent()}
             </ScrollView>
           </Animated.View>

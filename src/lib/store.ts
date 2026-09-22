@@ -14,6 +14,8 @@ export interface Profile {
   role: UserRole;
   status: 'active' | 'suspended' | 'pending' | 'trashed';
   watermark_id: string;
+  /** Public human-readable ID (MED-0001) — the ONLY user-facing user identifier. */
+  public_user_id?: string | null;
   avatar_url: string | null;
   created_at: string;
   university_id: string | null;
@@ -57,6 +59,9 @@ export interface ImpersonationState {
   originalAccessToken: string | null;
   originalRefreshToken: string | null;
   originalEmail: string | null;
+  // Actor's user id — needed so stopping impersonation can restore the ACTOR's
+  // persisted identity, not the target's (the auth client persists token+user).
+  originalUserId: string | null;
   originalRole: UserRole | null;
   targetName: string | null;
   targetRole: UserRole | null;
@@ -68,6 +73,7 @@ interface ImpersonationStore {
     originalAccessToken: string,
     originalRefreshToken: string,
     originalEmail: string,
+    originalUserId: string,
     originalRole: UserRole,
     targetName: string,
     targetRole: UserRole,
@@ -80,6 +86,7 @@ const IMPERSONATION_DEFAULT: ImpersonationState = {
   originalAccessToken: null,
   originalRefreshToken: null,
   originalEmail: null,
+  originalUserId: null,
   originalRole: null,
   targetName: null,
   targetRole: null,
@@ -87,7 +94,7 @@ const IMPERSONATION_DEFAULT: ImpersonationState = {
 
 export const useImpersonationStore = create<ImpersonationStore>((set) => ({
   impersonation: IMPERSONATION_DEFAULT,
-  startImpersonation: (originalAccessToken, originalRefreshToken, originalEmail, originalRole, targetName, targetRole) =>
-    set({ impersonation: { active: true, originalAccessToken, originalRefreshToken, originalEmail, originalRole, targetName, targetRole } }),
+  startImpersonation: (originalAccessToken, originalRefreshToken, originalEmail, originalUserId, originalRole, targetName, targetRole) =>
+    set({ impersonation: { active: true, originalAccessToken, originalRefreshToken, originalEmail, originalUserId, originalRole, targetName, targetRole } }),
   endImpersonation: () => set({ impersonation: IMPERSONATION_DEFAULT }),
 }));

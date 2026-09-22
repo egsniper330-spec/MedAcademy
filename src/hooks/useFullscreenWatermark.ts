@@ -85,11 +85,14 @@ interface WatermarkConfig {
 const WM_EL_ID   = 'vdo-wm-fs';
 const WM_ST_ID   = 'vdo-wm-fs-style';
 
-/** 9-slot grid — [xFraction, yFraction], inset ~12% from every edge (≥24 px safe margin) */
+/**
+ * 9-slot grid — VERBATIM from the Plyr watermark (playerScript.ts G table,
+ * 8% inset) — the watermark source of truth shared by every player.
+ */
 const GRID: [number, number][] = [
-  [0.12, 0.12], [0.42, 0.10], [0.72, 0.12],
-  [0.08, 0.45], [0.38, 0.45], [0.68, 0.45],
-  [0.12, 0.78], [0.42, 0.76], [0.72, 0.78],
+  [0.08, 0.08], [0.42, 0.08], [0.72, 0.08],
+  [0.04, 0.42], [0.35, 0.42], [0.68, 0.42],
+  [0.08, 0.74], [0.42, 0.74], [0.72, 0.74],
 ];
 
 // ─── Hook ──────────────────────────────────────────────────────────────────────
@@ -157,11 +160,11 @@ export function useFullscreenWatermark(
           'pointer-events:none;',
           'user-select:none;',
           '-webkit-user-select:none;',
-          'max-width:min(360px,68%);',
+          'max-width:min(320px,55%);',
           'opacity:0;',
           'transform:translate3d(0,0,0);',
           'line-height:1.4;',
-          'font-family:"Inter","Manrope",-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;',
+          'font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;',
           'transition:transform 0.6s ease,opacity 0.6s ease;',
           'will-change:transform,opacity;',
         '}',
@@ -170,10 +173,11 @@ export function useFullscreenWatermark(
         // Single-line label span: "NAME • WM-NNNN"
         `#${WM_EL_ID} .wm-label{`,
           'display:block;',
-          'font-size:15px;font-weight:500;letter-spacing:0.04em;',
+          // PLYR PARITY typography: 13px / 600 / 0.3px tracking (playerScript.ts)
+          'font-size:13px;font-weight:600;letter-spacing:0.3px;',
           'white-space:nowrap;overflow:hidden;text-overflow:ellipsis;',
-          'color:#F2F4F7;',
-          'text-shadow:0 1px 5px rgba(0,0,0,0.85),0 0 12px rgba(0,0,0,0.5);',
+          'color:#fff;',
+          'text-shadow:0 1px 4px rgba(0,0,0,0.95),0 0 10px rgba(0,0,0,0.7);',
           '-webkit-font-smoothing:antialiased;',
         '}',
       ].join('');
@@ -217,7 +221,7 @@ export function useFullscreenWatermark(
           const slot = nextSlot();
           const deg  = rnd(-3, 3);
           elRef.current.style.transform = mkTransform(slot, deg);
-          elRef.current.style.opacity   = rnd(0.28, 0.35).toFixed(2);
+          elRef.current.style.opacity   = rnd(0.38, 0.58).toFixed(2);
         });
       });
     }
@@ -230,14 +234,14 @@ export function useFullscreenWatermark(
       const slot = nextSlot();
       const deg  = rnd(-3, 3);
       el.style.transform = mkTransform(slot, deg);
-      el.style.opacity   = rnd(0.28, 0.35).toFixed(2);
+      el.style.opacity   = rnd(0.38, 0.58).toFixed(2);
     }
 
     function scheduleTick() {
       timerRef.current = setTimeout(() => {
         move();
         scheduleTick();
-      }, rnd(20_000, 30_000));
+      }, rnd(30_000, 60_000));
     }
 
     // ── Fullscreen transition ──────────────────────────────────────────────
@@ -278,7 +282,7 @@ export function useFullscreenWatermark(
         const slot = nextSlot();
         const deg  = rnd(-3, 3);
         el.style.transform = mkTransform(slot, deg);
-        el.style.opacity   = rnd(0.45, 0.60).toFixed(2);
+        el.style.opacity   = rnd(0.38, 0.58).toFixed(2);
       } else {
         // ── Exiting fullscreen ───────────────────────────────────────────
         el.classList.remove('fs-active'); // back to position:absolute

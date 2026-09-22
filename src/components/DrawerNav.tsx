@@ -11,7 +11,7 @@ import {
   useColorScheme, Platform, useWindowDimensions,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
+import { useRouter, usePathname } from 'expo-router';
 import type { RelativePathString } from 'expo-router';
 import {
   LayoutDashboard, BookOpen, Bell, Settings, LogOut, Users,
@@ -22,11 +22,12 @@ import {
   BarChart2, CreditCard, ClipboardList, HeartPulse, Zap, ShieldAlert,
   Upload, UserPlus, Flag, Paintbrush, Globe, Trash2, Eye,
   ShieldCheck, ShieldX, ReceiptText, AlertOctagon,
-  MonitorDot, HardDrive, Download, SquareCode, HeartHandshake,
-  Info, Mail,
+  MonitorDot, HardDrive, Download, DownloadCloud, SquareCode, HeartHandshake,
+  Info, Mail, CloudUpload,
 } from 'lucide-react-native';
 import { backendClient } from '@/client/backendClient';
 import { useProfileStore } from '@/lib/store';
+import { useConnectivity } from '@/lib/offlineTransition';
 import { neuColors, neuMicroStyle } from '@/lib/neu';
 import { spacing, radius, typography, iconContainer, safeBottom } from '@/lib/ds';
 import { useDrawer } from './DrawerContext';
@@ -74,7 +75,7 @@ function getNavSections(role: string, c: typeof neuColors.light, earningsEnabled
         items: [
           { icon: LayoutDashboard, label: 'Dashboard',     path: '/dashboard', color: c.primary  },
           { icon: BookOpen,        label: 'My Courses',    path: '/my-courses', color: '#7C3AED' },
-          { icon: Ticket,          label: 'Activate Code', path: '/activate',   color: '#D97706' },
+          { icon: DownloadCloud,   label: 'Offline Videos', path: '/offline-library', color: '#0EA5E9' },
           { icon: Bell,            label: 'Notifications', path: '/notifications',         color: c.primary },
           { icon: User,            label: 'Profile',       path: '/profile',    color: '#16A34A' },
           { icon: Info,            label: 'About Us',      path: '/info/about',           color: '#2DA8FF' },
@@ -122,7 +123,6 @@ function getNavSections(role: string, c: typeof neuColors.light, earningsEnabled
       {
         title: 'Operations',
         items: [
-          { icon: Ticket, label: 'Activation Codes', path: '/codes', color: '#D97706' },
           { icon: DollarSign, label: 'Credits', path: '/admin-credits', color: '#16A34A' },
           { icon: Video,      label: 'Video Monitor',  path: '/video-monitor',  color: '#7C3AED' },
           { icon: HeartPulse, label: 'Video Health',   path: '/video-health',   color: '#2DA8FF' },
@@ -134,7 +134,6 @@ function getNavSections(role: string, c: typeof neuColors.light, earningsEnabled
         items: [
           { icon: BarChart2,     label: 'Ledger Dashboard',  path: '/ledger-dashboard',  color: c.primary  },
           { icon: CreditCard,   label: 'Credit History',     path: '/credit-history',    color: '#16A34A'  },
-          { icon: ClipboardList,label: 'Code History',       path: '/code-history',      color: '#D97706'  },
           { icon: UsersRound,   label: 'Bulk Credits',       path: '/bulk-credits',      color: '#16A34A'  },
           { icon: Upload,       label: 'Bulk Import',        path: '/bulk-import',       color: '#0EA5E9'  },
         ],
@@ -167,97 +166,88 @@ function getNavSections(role: string, c: typeof neuColors.light, earningsEnabled
     ];
   }
 
-  // ── super_admin ────────────────────────────────────────────────────────────
+  // ── super_admin ────────────────────────────────────────────────────────
+  // IA (consolidated): the previous drawer listed ~45 flat items across 7
+  // sections. Related features now live behind HUB screens; the drawer keeps
+  // high-frequency destinations plus the hubs. Every destination remains
+  // reachable — routes are unchanged, only the menu structure changed.
+  //
+  //   Dashboard: Overview, Analytics (top-level, high frequency)
+  //   Users & Access hub → /sa-platform (Users & Access section)
+  //   Finance & Credits hub → /sa-finance (Revenue + Credits sections)
+  //   Content & Media hub → /sa-content (10 content screens)
+  //   Monitoring & Health → /health, /sa-video-monitor, /sa-audit, reports
+  //   Platform & Settings hub → /sa-platform (everything else)
   return [
     {
       title: 'Dashboard',
       items: [
-        { icon: LayoutDashboard, label: 'Overview',          path: '/sa-overview',  color: c.primary },
-        { icon: Activity,        label: 'Analytics',         path: '/sa-analytics', color: '#16A34A' },
-        { icon: HeartPulse,      label: 'System Health',     path: '/health',       color: '#DC2626' },
+        { icon: LayoutDashboard, label: 'Overview',      path: '/sa-overview',  color: c.primary },
+        { icon: Activity,        label: 'Analytics',     path: '/sa-analytics', color: '#16A34A' },
+        { icon: Users,           label: 'All Users',     path: '/sa-users',     color: c.primary },
       ],
     },
     {
-      title: 'Management',
+      title: 'Operations',
       items: [
-        { icon: Users,         label: 'All Users',            path: '/sa-users',           color: c.primary   },
-        { icon: GraduationCap, label: 'Academic Structure',   path: '/sa-academic',           color: '#2DA8FF'   },
-        { icon: BookOpen,      label: 'Courses',              path: '/sa-courses',            color: '#7C3AED'   },
-        { icon: UserPlus,      label: 'Enrollment Manager',   path: '/sa-enrollment-manager', color: '#0EA5E9'   },
-        { icon: Smartphone,    label: 'Device Management',    path: '/sa-devices',            color: '#D97706'   },
-        { icon: HeartHandshake,label: 'Impersonation',        path: '/impersonation',         color: '#2DA8FF'   },
-      ],
-    },
-    {
-      title: 'Revenue',
-      items: [
-        { icon: DollarSign,   label: 'Platform Revenue',    path: '/revenue',                   color: '#16A34A'  },
-        { icon: TrendingUp,   label: 'Revenue Analytics',  path: '/sa-revenue-analytics',      color: '#2DA8FF'  },
-        { icon: Globe,        label: 'Currency Settings',  path: '/currency',                  color: '#2DA8FF'  },
-        { icon: AlertTriangle,label: 'Fraud Alerts',       path: '/sa-fraud-alerts',           color: '#DC2626'  },
-        { icon: ReceiptText,  label: 'SA Finance Hub',     path: '/sa-finance',                color: '#6B7280'  },
-      ],
-    },
-    {
-      title: 'Credits',
-      items: [
-        { icon: CreditCard,   label: 'Credits',            path: '/sa-credits',                color: '#7C3AED'  },
-        { icon: UsersRound,   label: 'Bulk Credits',       path: '/sa-bulk-credits',           color: '#16A34A'  },
-        { icon: Hash,         label: 'Activation Codes',   path: '/sa-codes',                  color: '#D97706'  },
-        { icon: ClipboardList,label: 'Code History',       path: '/sa-code-history',           color: '#6B7280'  },
-      ],
-    },
-    {
-      title: 'Content',
-      items: [
-        { icon: Video,    label: 'Video Library',      path: '/sa-video-library',      color: '#7C3AED'  },
-        { icon: Eye,      label: 'Watermark / DRM',    path: '/content-protection',    color: '#DC2626'  },
-        { icon: Layers,   label: 'Video Providers',    path: '/video-providers',       color: '#2DA8FF'  },
-        { icon: MonitorDot,label: 'Video Monitor',     path: '/sa-video-monitor',      color: '#7C3AED'  },
-        { icon: HeartPulse,label: 'Video Health',      path: '/sa-video-health',       color: '#16A34A'  },
-        { icon: Settings, label: 'Video Settings',     path: '/sa-video-settings',     color: '#6B7280'  },
-        { icon: HardDrive, label: 'Storage',           path: '/sa-storage',            color: '#2DA8FF'  },
-        { icon: FileText, label: 'CMS Pages',          path: '/sa-cms',                color: '#16A34A'  },
-        { icon: Paintbrush,label: 'Branding',          path: '/branding',              color: '#7C3AED'  },
+        { icon: DollarSign,    label: 'Finance & Credits',  path: '/sa-finance',      color: '#16A34A'  },
+        { icon: Ticket,        label: 'Redeem Codes',       path: '/sa-redeem-codes', color: '#7C3AED'  },
+        { icon: Video,         label: 'Content & Media',    path: '/sa-content',      color: '#7C3AED'  },
+        { icon: GraduationCap, label: 'Academic Structure', path: '/sa-academic',     color: '#2DA8FF'  },
       ],
     },
     {
       title: 'Monitoring',
       items: [
-        { icon: BarChart2,    label: 'Analytics Hub',         path: '/sa-analytics',              color: '#16A34A'  },
-        { icon: FileText,     label: 'Reports',               path: '/sa-reports',                color: '#7C3AED'  },
-        { icon: Shield,       label: 'Audit Trail',           path: '/sa-audit',                  color: '#DC2626'  },
-        { icon: Database,     label: 'DB Audit',              path: '/sa-db-audit',               color: '#D97706'  },
-        { icon: Download,     label: 'Export Panel',          path: '/sa-export-panel',           color: '#6B7280'  },
+        { icon: HeartPulse,   label: 'System Health',      path: '/health',             color: '#DC2626'  },
+        { icon: MonitorDot,   label: 'Video Monitor',      path: '/sa-video-monitor',   color: '#2DA8FF'  },
+        { icon: ShieldAlert,  label: 'Security Dashboard', path: '/sec-dashboard',      color: '#EF4444'  },
+        { icon: Shield,       label: 'Audit Trail',        path: '/sa-audit',           color: '#DC2626'  },
+        { icon: FileText,     label: 'Reports & Export',   path: '/sa-reports',         color: '#7C3AED'  },
       ],
     },
     {
-      title: 'Platform',
+      title: 'Platform & Settings',
       items: [
-        { icon: Megaphone,  label: 'Notifications',        path: '/sa-notifications-center',  color: '#D97706'  },
-        { icon: ShieldAlert,label: 'Security Dashboard',   path: '/sec-dashboard',             color: '#EF4444'  },
-        { icon: ShieldCheck,label: 'Security Policies',    path: '/sec-policies',              color: '#DC2626'  },
-        { icon: ShieldX,    label: 'Security Logs',        path: '/sec-diag',                  color: '#9B1C1C'  },
-        { icon: AlertOctagon,label: 'Violation Management',path: '/violation-management',      color: '#D97706'  },
-        { icon: Settings,   label: 'Platform Settings',    path: '/sa-platform',               color: '#6B7280'  },
-        { icon: Zap,        label: 'System Config',        path: '/config',                    color: '#2DA8FF'  },
-        { icon: HeartHandshake, label: 'Support Settings', path: '/sa-support-settings',       color: '#22C55E'  },
-        { icon: Flag,       label: 'Feature Flags',        path: '/feature-flags',             color: '#7C3AED'  },
-        { icon: Wrench,     label: 'Maintenance',          path: '/maintenance',               color: '#D97706'  },
-        { icon: SquareCode, label: 'System Providers',     path: '/sa-system-providers',       color: '#2DA8FF'  },
-        { icon: Upload,     label: 'Bulk Import',          path: '/sa-bulk-import',            color: '#16A34A'  },
-        { icon: Trash2,     label: 'Trash Bin',            path: '/trash-bin',                 color: '#DC2626'  },
-        { icon: Lock,       label: 'Delete Permissions',   path: '/delete-permissions',        color: '#9B1C1C'  },
-        { icon: Search,     label: 'Global Search',        path: '/sa-global-search',          color: c.primary  },
-        { icon: User,       label: 'Edit Profile',         path: '/edit-profile',              color: '#7C3AED'  },
-        { icon: Lock,       label: 'My Security',          path: '/security',                               color: '#DC2626'  },
+        { icon: Settings,     label: 'Platform Settings', path: '/sa-platform',       color: '#6B7280'  },
+        { icon: CloudUpload,  label: 'App Updates',       path: '/app-updates',       color: '#0EA5E9'  },
+        { icon: Search,       label: 'Global Search',     path: '/sa-global-search',  color: c.primary  },
+        { icon: User,         label: 'Edit Profile',      path: '/edit-profile',      color: '#7C3AED'  },
+        { icon: Lock,         label: 'My Security',       path: '/security',          color: '#DC2626'  },
       ],
     },
   ];
 }
 
-// ── Nav item row ──────────────────────────────────────────────────────────────
-function NavItem({ item, onPress, c }: { item: NavItemType; onPress: () => void; c: typeof neuColors.light }) {
+// ── Global connectivity badge (drawer header) ───────────────────────────────
+function ConnectivityBadge({ isDark, c }: { isDark: boolean; c: typeof neuColors.light }) {
+  const online = useConnectivity();
+  const isOnline = online === true;
+  const isOffline = online === false;
+  const bg = isOffline ? '#FFB0201F' : isOnline ? '#22C55E1F' : isDark ? 'rgba(255,255,255,0.05)' : 'rgba(8,26,53,0.05)';
+  const fg = isOffline ? '#FFB020' : isOnline ? '#22C55E' : c.text;
+  const label = isOffline ? 'Offline' : isOnline ? 'Online' : 'Checking…';
+  return (
+    <View
+      accessibilityLabel={`Connection status: ${label}`}
+      style={{
+        alignSelf: 'flex-start',
+        flexDirection: 'row', alignItems: 'center', gap: 6,
+        marginHorizontal: spacing.lg - spacing.xs,
+        marginTop: 2, marginBottom: spacing.md - spacing.xs,
+        paddingHorizontal: 10, paddingVertical: 5,
+        borderRadius: radius.full,
+        backgroundColor: bg,
+      }}
+    >
+      <View style={{ width: 7, height: 7, borderRadius: radius.full, backgroundColor: fg, opacity: online === null ? 0.4 : 1 }} />
+      <Text style={{ fontSize: 11, fontWeight: '800', color: fg, letterSpacing: 0.4, textTransform: 'uppercase' }}>{label}</Text>
+    </View>
+  );
+}
+
+// ── Nav item row ──────────────────────────────────────────────────────────
+function NavItem({ item, onPress, c, active }: { item: NavItemType; onPress: () => void; c: typeof neuColors.light; active?: boolean }) {
   const [pressed, setPressed] = useState(false);
   return (
     <Pressable
@@ -271,7 +261,9 @@ function NavItem({ item, onPress, c }: { item: NavItemType; onPress: () => void;
         paddingHorizontal: spacing.lg, paddingVertical: spacing.sm + spacing.xs,
         marginHorizontal: spacing.sm, marginBottom: 1,
         borderRadius: radius.md,
-        backgroundColor: pressed ? `${item.color ?? c.primary}18` : 'transparent',
+        backgroundColor: active
+          ? `${item.color ?? c.primary}1F`
+          : pressed ? `${item.color ?? c.primary}18` : 'transparent',
       }}
     >
       <View style={{
@@ -282,6 +274,20 @@ function NavItem({ item, onPress, c }: { item: NavItemType; onPress: () => void;
         <item.icon size={iconContainer.xs.width / 2 + 2} color={item.color ?? c.primary} />
       </View>
       <Text style={{ flex: 1, ...typography.labelSm, color: c.text }}>{item.label}</Text>
+      {!!item.badge && item.badge > 0 && (
+        <View
+          accessibilityLabel={`${item.badge} items`}
+          style={{
+            minWidth: 20, height: 20, borderRadius: radius.full,
+            paddingHorizontal: 6, alignItems: 'center', justifyContent: 'center',
+            backgroundColor: `${item.color ?? c.primary}26`,
+          }}
+        >
+          <Text style={{ fontSize: 11, fontWeight: '800', color: item.color ?? c.primary }}>
+            {item.badge > 99 ? '99+' : item.badge}
+          </Text>
+        </View>
+      )}
       <ChevronRight size={iconContainer.xs.width / 2} color={`${c.text}33`} />
     </Pressable>
   );
@@ -318,6 +324,7 @@ export default function DrawerNav() {
   const c = isDark ? neuColors.dark : neuColors.light;
   const { profile } = useProfileStore();
   const router = useRouter();
+  const pathname = usePathname();
   const insets = useSafeAreaInsets();
 
   // Responsive drawer width: wider on tablets/iPads, standard on phones
@@ -327,8 +334,20 @@ export default function DrawerNav() {
 
   const slideAnim = useRef(new Animated.Value(-DRAWER_WIDTH)).current;
   const overlayAnim = useRef(new Animated.Value(0)).current;
+  // Track whether the component should remain mounted during close animation.
+  // Without this, the component unmounts instantly on close (return null below)
+  // and the overlay fade-out is cut short, creating a visual "two layers" effect
+  // where the drawer appears to float without its dark backdrop.
+  const [shouldRender, setShouldRender] = useState(isOpen);
+  const shouldRenderRef = useRef(shouldRender);
+  shouldRenderRef.current = shouldRender;
 
   useEffect(() => {
+    if (isOpen) {
+      setShouldRender(true);
+      overlayAnim.setValue(0);
+      slideAnim.setValue(-DRAWER_WIDTH);
+    }
     Animated.parallel([
       Animated.spring(slideAnim, {
         toValue: isOpen ? 0 : -DRAWER_WIDTH,
@@ -338,10 +357,17 @@ export default function DrawerNav() {
       }),
       Animated.timing(overlayAnim, {
         toValue: isOpen ? 1 : 0,
-        duration: 250,
+        // Match the spring's settling time (~400ms) so overlay and drawer
+        // panel close in sync — eliminates the "two layers" visual artifact.
+        duration: 400,
         useNativeDriver: true,
       }),
-    ]).start();
+    ]).start(({ finished }) => {
+      // After the close animation finishes, allow the component to unmount.
+      if (finished && !isOpen && shouldRenderRef.current) {
+        setShouldRender(false);
+      }
+    });
   }, [isOpen, slideAnim, overlayAnim]);
 
   const navigate = (path: string) => {
@@ -433,7 +459,13 @@ export default function DrawerNav() {
 
   const role = (profile?.role ?? 'student') as import('@/lib/enums').UserRole;
   const earningsEnabled = !!(profile as any)?.earnings_enabled;
-  const sections = getNavSections(role, c, earningsEnabled);
+  const baseSections = getNavSections(role, c, earningsEnabled);
+
+  // Offline Videos drawer item is a PLAIN navigation row (UI decision): no
+  // numeric badge. Download counts remain available internally via
+  // offlineVideoService for the library/management screens — only the drawer
+  // indicator was removed.
+  const sections = baseSections;
 
   const roleBadgeColor: Record<import('@/lib/enums').UserRole, string> = {
     student:     '#7C3AED',
@@ -451,7 +483,10 @@ export default function DrawerNav() {
     super_admin: 'Super Admin',
   };
 
-  if (!isOpen && Platform.OS !== 'web') return null;
+  // Keep the component mounted during the close animation so the overlay
+  // fade-out completes visually before unmounting. Once shouldRender is false
+  // (set by the animation start callback above), the component unmounts cleanly.
+  if (!shouldRender && Platform.OS !== 'web') return null;
 
   return (
     <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 999, pointerEvents: isOpen ? 'auto' : 'none' }}>
@@ -589,6 +624,10 @@ export default function DrawerNav() {
               </View>
             </View>
 
+            {/* Zone B2 — Global connectivity indicator: always visible, reactive.
+                Online ↔ Offline flips live via NetInfo (no app restart). */}
+            <ConnectivityBadge isDark={isDark} c={c} />
+
             {/* Zone C — Hairline divider */}
             <View style={{
               marginHorizontal: spacing.xl,
@@ -617,7 +656,15 @@ export default function DrawerNav() {
                   </Text>
                 )}
                 {section.items.map(item => (
-                  <NavItem key={item.path} item={item} onPress={() => navigate(item.path)} c={c} />
+                  <NavItem
+                    key={item.path}
+                    item={item}
+                    onPress={() => navigate(item.path)}
+                    c={c}
+                    // Active-route highlight: Offline Videos stays highlighted
+                    // on both /offline-library and /offline-course.
+                    active={pathname === item.path || (item.path === '/offline-library' && pathname?.startsWith('/offline-'))}
+                  />
                 ))}
               </View>
             ))}

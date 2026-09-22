@@ -11,16 +11,17 @@ import {
   FileText, ChevronRight, TrendingUp, HardDrive,
   Flag, Shield, Wrench, Megaphone, Coins, Activity,
   AlertOctagon, UserPlus, Paintbrush, Database, ShieldAlert,
-  SquareCode, Trash2, Video, MonitorDot, Globe, Settings, Zap,
+  SquareCode, Trash2, Video, MonitorDot, Globe, Settings,
 } from 'lucide-react-native';
 import { useProfileStore } from '@/lib/store';
 import { getSuperAdminStats } from '@/lib/api';
 import { getFirstName } from '@/lib/utils';
-import { neuColors, neuFlatStyle, neuPressedStyle, useLayout } from '@/lib/neu';
+import { neuColors, neuFlatStyle, neuPressedStyle, useLayout, safeBottom } from '@/lib/neu';
 import { DashboardHeader } from '@/components/DashboardHeader';
 import Bell from '@/components/Bell';
 import { useNotificationPermission } from '@/hooks/useNotificationPermission';
 import { PermissionRationaleModal } from '@/components/PermissionRationaleModal';
+import { QuickActionBtn } from '@/components/QuickActionBtn';
 
 // ── KPI Card ─────────────────────────────────────────────────────────────────
 function KpiCard({
@@ -54,7 +55,12 @@ function KpiCard({
   );
 
   if (!path) return (
-    <View style={{ flex: 1, minWidth: '46%', marginBottom: layout.itemGap, marginRight: layout.itemGap }}>{inner}</View>
+    // flexBasis (not flex:1/flexBasis:0) — Yoga on Android collapses wrapped-row
+    // line heights when children have flexBasis 0% + percentage minWidth, which
+    // made rows overlap and stretch. flexBasis '46%' gives every card a real
+    // hypothetical size; flexGrow equalises widths and `gap` on the row handles
+    // both axes of spacing.
+    <View style={{ flexGrow: 1, flexBasis: '46%' }}>{inner}</View>
   );
   return (
     <Pressable
@@ -63,46 +69,16 @@ function KpiCard({
       onPress={() => router.push(path as RelativePathString)}
       accessibilityLabel={`${label}: ${value}`}
       accessibilityRole="button"
-      style={{ flex: 1, minWidth: '46%', marginBottom: layout.itemGap, marginRight: layout.itemGap }}
+      style={{ flexGrow: 1, flexBasis: '46%' }}
     >
       {inner}
     </Pressable>
   );
 }
 
-// ── Quick Action Button ───────────────────────────────────────────────────────
-function QuickActionBtn({
-  icon: Icon, label, color, path, c, isDark,
-}: {
-  icon: React.ElementType; label: string; color: string;
-  path: string; c: typeof neuColors.light; isDark: boolean;
-}) {
-  const router  = useRouter();
-  const layout  = useLayout();
-  const btnSz   = layout.touchTarget + 10;
-  const iconInner = Math.round(btnSz * 0.42);
-  const [pressed, setPressed] = useState(false);
-  return (
-    <Pressable
-      onPressIn={() => setPressed(true)}
-      onPressOut={() => setPressed(false)}
-      onPress={() => router.push(path as RelativePathString)}
-      accessibilityLabel={label}
-      accessibilityRole="button"
-      style={{ width: '22%', alignItems: 'center', marginBottom: layout.pad.md }}
-    >
-      <View style={[
-        pressed ? neuPressedStyle(isDark) : neuFlatStyle(isDark),
-        { width: btnSz, height: btnSz, borderRadius: layout.cardRadius, alignItems: 'center', justifyContent: 'center', marginBottom: layout.pad.xs },
-      ]}>
-        <Icon size={iconInner} color={color} />
-      </View>
-      <Text style={{ fontSize: layout.captionSize - 1, fontWeight: '700', color: c.text, opacity: 0.65, textAlign: 'center' }} numberOfLines={2}>{label}</Text>
-    </Pressable>
-  );
-}
+// ── Quick Action Button (shared component — see src/components/QuickActionBtn.tsx) ─
 
-// ── Nav Hub Row ───────────────────────────────────────────────────────────────
+// ── Nav Hub Row ───────────────────────────────────────────────────────────────────
 function HubRow({
   icon: Icon, label, description, color, path, badge, c, isDark,
 }: {
@@ -260,7 +236,6 @@ export default function SuperAdminDashboard() {
         { icon: Flag,        label: 'Feature Flags',    description: 'Toggle platform features',        color: '#7C3AED',  path: '/feature-flags' },
         { icon: Paintbrush,  label: 'Branding',         description: 'Logo, colours & identity',        color: '#D97706',  path: '/branding' },
         { icon: Wrench,      label: 'Maintenance',      description: 'Mode & system operations',        color: '#6B7280',  path: '/maintenance' },
-        { icon: Zap,         label: 'System Config',    description: 'Environment & platform config',   color: '#2DA8FF',  path: '/config' },
         { icon: Globe,       label: 'Currency',         description: 'Global currency settings',        color: '#16A34A',  path: '/currency' },
         { icon: Trash2,      label: 'Trash Bin',        description: 'Deleted item recovery',           color: '#DC2626',  path: '/trash-bin' },
       ],
@@ -270,7 +245,7 @@ export default function SuperAdminDashboard() {
   return (
     <ScrollView
       style={{ flex: 1, backgroundColor: c.base }}
-      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />}
+      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />} contentContainerStyle={{ paddingBottom: safeBottom(layout.insets.bottom) }}
     >
       <DashboardHeader
         roleLabel="Super Admin"
@@ -304,15 +279,15 @@ export default function SuperAdminDashboard() {
         ) : stats && (
           <>
             <SectionLabel label="Users & Platform" c={c} />
-            <View style={{ flexDirection: 'row', flexWrap: 'wrap', marginRight: -layout.itemGap }}>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: layout.itemGap }}>
               <KpiCard label="Total Doctors"   value={stats.totalDoctors}   icon={Stethoscope}    color="#16A34A" path="/sa-users"       c={c} isDark={isDark} />
               <KpiCard label="Total Students"  value={stats.totalStudents}  icon={GraduationCap}  color="#7C3AED" path="/sa-users"       c={c} isDark={isDark} />
               <KpiCard label="Total Courses"   value={stats.totalCourses}   icon={BookOpen}       color="#2DA8FF" path="/global-search"       c={c} isDark={isDark} />
-              <KpiCard label="Active Codes"    value={stats.activeCodes}    icon={Ticket}         color="#D97706" path="/codes"               c={c} isDark={isDark} />
+              <KpiCard label="Total Devices"   value={stats.totalDevices}   icon={UserCog}        color="#D97706" path="/sa-devices"       c={c} isDark={isDark} />
             </View>
 
             <SectionLabel label="Revenue & Operations" c={c} />
-            <View style={{ flexDirection: 'row', flexWrap: 'wrap', marginRight: -layout.itemGap }}>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: layout.itemGap }}>
               <KpiCard label="Total Credits"    value={stats.totalCredits.toLocaleString('en-US')}  icon={CreditCard}  color="#16A34A" path="/sa-credits"    c={c} isDark={isDark} />
               <KpiCard label="Used Credits"     value={stats.usedCredits.toLocaleString('en-US')}   icon={Coins}       color="#D97706" path="/sa-credits"      c={c} isDark={isDark} />
               <KpiCard label="Published"        value={stats.publishedCourses}               icon={BookOpen}    color="#2DA8FF" path="/global-search"       c={c} isDark={isDark} />
@@ -320,39 +295,13 @@ export default function SuperAdminDashboard() {
             </View>
 
             <SectionLabel label="System Snapshot" c={c} />
-            <View style={{ flexDirection: 'row', flexWrap: 'wrap', marginRight: -layout.itemGap }}>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: layout.itemGap }}>
               <KpiCard label="Universities"    value={stats.totalUniversities}  icon={GraduationCap}  color="#2DA8FF" path="/academic"     c={c} isDark={isDark} />
               <KpiCard label="Faculties"       value={stats.totalFaculties}     icon={BookOpen}       color="#7C3AED" path="/academic"     c={c} isDark={isDark} />
               <KpiCard label="Admin Staff"     value={stats.totalAdmins}        icon={UserCog}        color="#EF4444" path="/sa-users"  c={c} isDark={isDark} />
               <KpiCard label="Total Users"     value={stats.totalUsers}         icon={Users}          color={c.primary} path="/sa-users" c={c} isDark={isDark} />
             </View>
 
-            {/* ── Codes breakdown ────────────────────────────────────────── */}
-            <View style={[neuFlatStyle(isDark), { borderRadius: layout.cardRadius, padding: layout.cardPx, marginTop: layout.pad.xs, marginBottom: layout.itemGap }]}>
-              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: layout.pad.md }}>
-                <Text style={{ fontSize: layout.bodySize, fontWeight: '800', color: c.text }}>Activation Codes</Text>
-                <Pressable
-                  onPress={() => router.push('/sa-codes' as RelativePathString)}
-                  accessibilityLabel="View all activation codes"
-                  accessibilityRole="button"
-                >
-                  <Text style={{ fontSize: layout.captionSize + 1, color: c.primary, fontWeight: '700' }}>View all</Text>
-                </Pressable>
-              </View>
-              <View style={{ flexDirection: 'row', justifyContent: 'space-around' }}>
-                {[
-                  { label: 'Active',   value: stats.activeCodes,   color: '#16A34A' },
-                  { label: 'Used',     value: stats.usedCodes,     color: c.primary },
-                  { label: 'Disabled', value: stats.disabledCodes, color: '#DC2626' },
-                  { label: 'Expired',  value: stats.expiredCodes,  color: '#D97706' },
-                ].map(s => (
-                  <View key={s.label} style={{ alignItems: 'center' }}>
-                    <Text style={{ fontSize: layout.titleSize, fontWeight: '900', color: s.color }}>{s.value}</Text>
-                    <Text style={{ fontSize: layout.captionSize, color: c.text, opacity: 0.5, marginTop: 2 }}>{s.label}</Text>
-                  </View>
-                ))}
-              </View>
-            </View>
           </>
         )}
 
@@ -378,7 +327,7 @@ export default function SuperAdminDashboard() {
 
         {/* ── Platform status ──────────────────────────────────────────── */}
         <SectionLabel label="Platform Status" c={c} />
-        <View style={[neuFlatStyle(isDark), { borderRadius: layout.cardRadius, padding: layout.cardPx, marginBottom: layout.scrollBottom() }]}>
+        <View style={[neuFlatStyle(isDark), { borderRadius: layout.cardRadius, padding: layout.cardPx,  }]}>
           {[
             { label: 'Database',       status: 'Operational', color: '#16A34A' },
             { label: 'Authentication', status: 'Active',      color: '#16A34A' },

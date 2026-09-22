@@ -5,9 +5,19 @@
  *
  * Rules:
  *  • Never request on first launch / before login.
- *  • Request exactly once — tracked by AsyncStorage key.
+ *  • Request exactly once — tracked by an AsyncStorage key.
  *  • If denied, app continues working normally (push token won't be registered).
  *  • If permanently blocked, silently skip (no nagging).
+ *
+ * ANDROID 13+ NOTE (the bug this fixes):
+ *  expo-notifications maps "notifications are not enabled" to status='denied'.
+ *  On a FRESH Android 13+ install the OS dialog has never been shown, so
+ *  areNotificationsEnabled() is false → status reads 'denied' WITH
+ *  canAskAgain=true. That state is ASKABLE, not permanently denied — the old
+ *  code treated every 'denied' as final, marked the permission as asked, and
+ *  the OS notification dialog never appeared on Android 13+. The askable
+ *  'denied' state must fall through to the rationale modal → OS dialog.
+ *  Permanent denial is 'denied' + canAskAgain=false (or 'blocked').
  *
  * Usage (call inside the dashboard/home screen after successful navigation):
  *   const { triggerNotificationPermission, showRationale,
@@ -47,20 +57,40 @@ export function useNotificationPermission() {
     const alreadyAsked = await AsyncStorage.getItem(NOTIF_ASKED_KEY);
     if (alreadyAsked) return;
 
-    // Already granted (user may have enabled it in Settings) — just register token
-    const { status } = await Notifications.getPermissionsAsync();
+    // Ask the authoritative native status.
+    //   granted                          → user already allowed (e.g. re-enabled
+    //                                      in Settings) — just mark asked; push
+    //                                      registration happens in the login flow.
+    //   denied  + canAskAgain=true       → ASKABLE (fresh Android 13+ install, or
+    //                                      a previous soft denial) — show the
+    //                                      rationale modal; confirming it triggers
+    //                                      the real OS dialog.
+    //   denied  + canAskAgain=false      → permanently denied — mark asked, no nag.
+    //   blocked / undetermined-else      → treat as permanently denied.
+    const { status, canAskAgain } = await Notifications.getPermissionsAsync();
+
     if (status === 'granted') {
       await AsyncStorage.setItem(NOTIF_ASKED_KEY, '1');
       return;
     }
 
-    // Permanently denied — don't nag
-    if (status === 'denied') {
+    // getPermissionsAsync's non-granted union is UNDETERMINED | DENIED. In both
+    // states canAskAgain is the authoritative askability signal: fresh Android
+    // 13+ installs and soft denials report canAskAgain=true (ASKABLE — the old
+    // code missed this and never showed the OS dialog); permanent denial
+    // reports canAskAgain=false.
+    const askable = canAskAgain;
+
+    if (!askable) {
+      // Permanently denied — never nag again.
       await AsyncStorage.setItem(NOTIF_ASKED_KEY, '1');
       return;
     }
 
-    // Show rationale modal (will trigger OS dialog when user confirms)
+    // Askable — show the rationale modal once. Confirming it calls
+    // base.confirmRequest() → Notifications.requestPermissionsAsync() → the OS
+    // dialog on Android 13+ / the iOS authorization prompt. If the user then
+    // denies permanently, usePermission flips to the isBlocked → Settings path.
     await AsyncStorage.setItem(NOTIF_ASKED_KEY, '1');
     base.setShowRationale(true);
   };

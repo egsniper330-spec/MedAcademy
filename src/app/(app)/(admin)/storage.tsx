@@ -13,7 +13,7 @@ import { PageHeader } from '@/components/PageHeader';
 import { getStorageStats } from '@/lib/api';
 import { formatBytes } from '@/lib/videoUploadEngine';
 import { NeuCard } from '@/components/NeuCard';
-import { neuColors, useLayout } from '@/lib/neu';
+import { neuColors, useLayout, safeBottom } from '@/lib/neu';
 
 const BUCKET_ICONS: Record<string, React.ElementType> = {
   videos: Film, images: Image, avatars: Image, documents: FileText,
@@ -41,8 +41,7 @@ export default function StorageMonitorScreen() {
 
   return (
     <ScrollView style={{ flex: 1, backgroundColor: c.base }}
-          contentContainerStyle={{ paddingBottom: layout.scrollBottom() }}
-      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />}>
+      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />} contentContainerStyle={{ paddingBottom: safeBottom(layout.insets.bottom) }}>
       <PageHeader title="Storage Monitor" subtitle="PHP storage + VdoCipher usage" accentColor="#2DA8FF" />
 
       <View style={{ paddingHorizontal: layout.screenPx }}>

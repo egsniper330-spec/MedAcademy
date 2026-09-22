@@ -10,7 +10,7 @@
 
 import { useEffect, useRef } from 'react';
 import {
-  Animated, FlatList, Modal, Pressable, Text, useColorScheme, View,
+  Animated, FlatList, Pressable, Text, useColorScheme, View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
@@ -18,6 +18,7 @@ import {
   Clock, Loader, Film, X, Trash2,
 } from 'lucide-react-native';
 import { neuColors, neuFlatStyle, neuPressedStyle } from '@/lib/neu';
+import { PortalOverlay } from '@/components/PortalOverlay';
 import {
   useUploadNotificationStore,
   type UploadNotification,
@@ -162,7 +163,7 @@ function NotificationPanel({
   if (!visible) return null;
 
   return (
-    <Modal visible transparent animationType="none" onRequestClose={onClose}>
+    <PortalOverlay visible onRequestClose={onClose} variant="none" withBackdrop={false}>
       {/* Backdrop */}
       <Pressable
         style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.35)' }}
@@ -255,7 +256,7 @@ function NotificationPanel({
           />
         )}
       </Animated.View>
-    </Modal>
+    </PortalOverlay>
   );
 }
 

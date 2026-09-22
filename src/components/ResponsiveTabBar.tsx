@@ -84,8 +84,14 @@ export default function ResponsiveTabBar({
   }
 
   // ── Press handler ──────────────────────────────────────────────────────
+  // IMPORTANT: Use route.name for navigation, NOT route.key.
+  // On web, Expo Router / React Navigation generates route keys with content
+  // hashes (e.g. "sa-users-WQvPVpgVuEyYNeNBOW7"). Passing a hashed key to
+  // navigation.navigate() fails because it matches neither the internal route
+  // key (which has a navigator prefix) nor the screen name (which has no hash).
+  // route.key is still used for emit targets (event routing by key is correct).
   const handlePress = useCallback(
-    (routeKey: string, routeIndex: number) => {
+    (routeKey: string, routeIndex: number, routeName: string) => {
       const event = navigation.emit({
         type: 'tabPress',
         target: routeKey,
@@ -93,7 +99,7 @@ export default function ResponsiveTabBar({
       });
 
       if (activeIndex !== routeIndex && !event.defaultPrevented) {
-        navigation.navigate(routeKey);
+        navigation.navigate(routeName);
       }
     },
     [navigation, activeIndex],
@@ -106,9 +112,26 @@ export default function ResponsiveTabBar({
     [navigation],
   );
 
-  // ── Render ─────────────────────────────────────────────────────────────
+  // ── Render ─────────────────────────────────────────────────────────
+  // Bottom padding: on devices with a gesture bar / 3-button nav the OS inset
+  // governs (bar content sits above the system UI). On inset-less surfaces
+  // (web preview, desktop) insets.bottom = 0, so a minimum floor keeps the
+  // labels from clipping flush against the screen edge. Math.max guarantees
+  // the floor never SHRINKS a real device's inset — it only fills the gap.
+  // ── Render ─────────────────────────────────────────────────────────
+  // This tab bar is the SINGLE source of truth for all bottom spacing.
+  // Screen-level paddingBottom should NOT be added — this component handles
+  // the full safe-area + breathing room for all roles.
+  //
+  // Bottom padding: on devices with a gesture bar / 3-button nav the OS inset
+  // governs (bar content sits above the system UI). On inset-less surfaces
+  // (web preview, desktop) insets.bottom = 0, so a minimum floor keeps the
+  // labels from clipping flush against the screen edge.
+  //
+  // Top padding: breathing room between screen content and the tab bar.
+  const bottomPad = Math.max(insets.bottom, MIN_BOTTOM_PAD);
   return (
-    <View style={[styles.tabBar, tabBarStyleProp, { paddingBottom: insets.bottom }]}>
+    <View style={[styles.tabBar, tabBarStyleProp, { paddingTop: TOP_BREATHING, paddingBottom: bottomPad, minHeight: MIN_BAR_HEIGHT + bottomPad }]}>
       {visibleRoutes.map(({ route, descriptor, index }) => {
         const isFocused = activeIndex === index;
         const options = descriptor.options;
@@ -119,7 +142,7 @@ export default function ResponsiveTabBar({
           <Pressable
             key={route.key}
             style={styles.tabItem}
-            onPress={() => handlePress(route.key, index)}
+            onPress={() => handlePress(route.key, index, route.name)}
             onLongPress={() => handleLongPress(route.key)}
             accessibilityLabel={options.tabBarAccessibilityLabel ?? label}
             accessibilityRole="button"
@@ -155,6 +178,18 @@ export default function ResponsiveTabBar({
     </View>
   );
 }
+
+/* ── Layout floors ──────────────────────────────────────────────────
+ * MIN_BOTTOM_PAD: comfortable clearance below tab labels on surfaces that
+ *   report no safe-area inset (web/desktop). Real device insets (34dp gesture
+ *   bar, 48dp 3-button nav) always exceed this and govern instead.
+ * MIN_BAR_HEIGHT: tap-target height for the icon+label cluster itself
+ *   (Material/HIG minimum ~48dp) before the bottom padding is added.
+ * TOP_BREATHING: gap between screen content and top edge of tab bar.
+ */
+const MIN_BOTTOM_PAD = 12;
+const MIN_BAR_HEIGHT = 48;
+const TOP_BREATHING = 8;
 
 const styles = StyleSheet.create({
   tabBar: {

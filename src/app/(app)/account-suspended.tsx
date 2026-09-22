@@ -44,7 +44,6 @@ export default function AccountBlockedScreen() {
         justifyContent: 'center',
         paddingHorizontal: layout.screenPx,
         paddingTop: layout.pad.xxl,
-        paddingBottom: layout.scrollBottom(),
         gap: layout.pad.sm,
       }}
     >

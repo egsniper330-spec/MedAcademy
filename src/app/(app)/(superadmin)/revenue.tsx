@@ -1,6 +1,6 @@
 /**
  * Revenue Dashboard — Super Admin only
- * Revenue from credits & activation codes; pricing settings.
+ * Revenue from credits; pricing settings.
  * Currency is loaded from platform_currency system_config (default: EGP / ج.م).
  */
 import { useCallback, useState } from 'react';
@@ -20,7 +20,7 @@ import { NeuCard } from '@/components/NeuCard';
 import { NeuButton } from '@/components/NeuButton';
 import { ResponsiveModal } from '@/components/ResponsiveModal';
 import { useToast } from '@/components/Toast';
-import { neuColors, useLayout } from '@/lib/neu';
+import { neuColors, useLayout, safeBottom } from '@/lib/neu';
 import { useCurrencyConfig } from '@/lib/currency';
 import { friendlyError } from '@/lib/validation';
 import { useProfileStore } from '@/lib/store';
@@ -49,7 +49,6 @@ export default function RevenueDashboard() {
   const [refreshing, setRefreshing] = useState(false);
   const [pricingModal, setPricingModal] = useState(false);
   const [creditPrice, setCreditPrice] = useState('10');
-  const [codePrice, setCodePrice] = useState('25');
   const [saving, setSaving] = useState(false);
 
   // Platform Earnings Reset state
@@ -63,7 +62,6 @@ export default function RevenueDashboard() {
       const data = await getRevenueStats();
       setStats(data);
       setCreditPrice(String(data.creditPrice));
-      setCodePrice(String(data.activationCodePrice));
     } catch (_) {}
     setLoading(false);
   }, []);
@@ -91,7 +89,7 @@ export default function RevenueDashboard() {
   const handleSavePricing = async () => {
     setSaving(true);
     try {
-      await updatePricingSettings(Number(creditPrice), Number(codePrice), currencyCfg.code);
+      await updatePricingSettings(Number(creditPrice), currencyCfg.code);
       await load();
       setPricingModal(false);
       showToast({ type: 'success', message: 'Pricing settings saved.' });
@@ -131,15 +129,17 @@ export default function RevenueDashboard() {
 
   return (
     <ScrollView style={{ flex: 1, backgroundColor: c.base }}
-          contentContainerStyle={{ paddingBottom: layout.scrollBottom() }}
-      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />}>
-      {/* Header row sits OUTSIDE the inner padding view so it can own its own horizontal padding */}
-      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-        <PageHeader title="Revenue Dashboard" subtitle={`Platform earnings · ${currencyCfg.code}`} accentColor="#16A34A" />
-        <View style={{ marginRight: layout.screenPx }}>
+      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />} contentContainerStyle={{ paddingBottom: safeBottom(layout.insets.bottom) }}>
+      {/* PageHeader owns horizontal padding; Pricing action via rightAction aligns
+          to the trailing edge with proper spacing on every width. */}
+      <PageHeader
+        title="Revenue Dashboard"
+        subtitle={`Platform earnings · ${currencyCfg.code}`}
+        accentColor="#16A34A"
+        rightAction={
           <NeuButton label="Pricing" icon={<Edit2 size={14} color={c.primary} />} onPress={() => setPricingModal(true)} variant="secondary" style={{ paddingHorizontal: 16 }} />
-        </View>
-      </View>
+        }
+      />
 
       <View style={{ paddingHorizontal: layout.screenPx }}>
 
@@ -168,9 +168,8 @@ export default function RevenueDashboard() {
 
             {/* Pricing Info */}
             <Text style={{ fontSize: 16, fontWeight: '700', color: c.text, marginBottom: 14 }}>Pricing Configuration</Text>
-            {[
+            {            [
               { label: 'Credit Price', value: fmt(stats.creditPrice), color: c.primary, desc: 'Per credit allocated to doctors' },
-              { label: 'Activation Code Price', value: fmt(stats.activationCodePrice), color: '#7C3AED', desc: 'Per activation code created' },
             ].map(item => (
               <NeuCard key={item.label} style={{ marginBottom: 12, padding: 16, flexDirection: 'row', alignItems: 'center' }}>
                 <View style={{ width: 44, height: 44, borderRadius: 14, backgroundColor: `${item.color}18`, alignItems: 'center', justifyContent: 'center', marginRight: 14 }}>
@@ -187,7 +186,7 @@ export default function RevenueDashboard() {
             <NeuCard style={{ marginTop: 8, padding: 16 }}>
               <Text style={{ fontSize: 14, fontWeight: '700', color: c.text, marginBottom: 8 }}>Revenue Formula</Text>
               <Text style={{ fontSize: 13, color: c.text, opacity: 0.6, lineHeight: 22 }}>
-                {'Total Revenue = Credits Sold × '}{fmt(stats.creditPrice)}{'\n\nRevenue is calculated based on credits allocated to doctors and activation codes issued.'}
+                {'Total Revenue = Credits Sold × '}{fmt(stats.creditPrice)}{'\n\nRevenue is calculated based on credits allocated to doctors.'}
               </Text>
             </NeuCard>
           </>
@@ -280,11 +279,7 @@ export default function RevenueDashboard() {
         <Text style={{ fontSize: 11, fontWeight: '700', color: c.text, opacity: 0.5, marginBottom: 6, textTransform: 'uppercase' }}>
           Credit Price ({currencyCfg.code})
         </Text>
-        <TextInput value={creditPrice} onChangeText={setCreditPrice} style={{ ...inp, minWidth: 0, marginBottom: 16 }} keyboardType="decimal-pad" />
-        <Text style={{ fontSize: 11, fontWeight: '700', color: c.text, opacity: 0.5, marginBottom: 6, textTransform: 'uppercase' }}>
-          Activation Code Price ({currencyCfg.code})
-        </Text>
-        <TextInput value={codePrice} onChangeText={setCodePrice} style={{ ...inp, minWidth: 0 }} keyboardType="decimal-pad" />
+        <TextInput value={creditPrice} onChangeText={setCreditPrice} style={{ ...inp, minWidth: 0 }} keyboardType="decimal-pad" />
       </ResponsiveModal>
 
       {/* Reset confirmation dialog */}

@@ -1,7 +1,7 @@
 /**
  * Bulk Import Students — Doctor flow
  * Parses a CSV/plain-text upload with columns:
- *   name, phone, email, university, faculty, academic_level, course, activation_method
+ *   name, phone, email, university, faculty, academic_level, course, enrollment_method
  * Creates each student row-by-row, deducts credits where needed.
  */
 import React, { useState } from 'react';
@@ -46,7 +46,7 @@ interface ImportRow {
   faculty: string;
   academic_level: string;
   course: string;
-  activation_method: string;
+  enrollment_method: string;
 }
 
 interface ImportResult extends ImportRow {
@@ -78,7 +78,7 @@ export default function BulkImportStudentsScreen() {
     total:    results.length,
     success:  results.filter(r => r.status === 'success').length,
     failed:   results.filter(r => r.status === 'failed').length,
-    credits:  results.filter(r => r.status === 'success' && r.activation_method?.toLowerCase() === 'credits').length,
+    credits:  results.filter(r => r.status === 'success' && r.enrollment_method?.toLowerCase() === 'credits').length,
   };
 
   // ── Pick + parse CSV ──────────────────────────────────────────────────────
@@ -116,7 +116,7 @@ export default function BulkImportStudentsScreen() {
         faculty:           cols[idx('faculty')] ?? '',
         academic_level:    cols[idx('academic_level')] ?? '',
         course:            cols[idx('course')] ?? '',
-        activation_method: cols[idx('activation_method')] ?? 'none',
+        enrollment_method: cols[idx('enrollment_method') >= 0 ? idx('enrollment_method') : idx('activation_method')] ?? 'none',
       });
     }
     if (!parsed.length) { setError('No data rows found in CSV.'); return; }
@@ -155,7 +155,7 @@ export default function BulkImportStudentsScreen() {
         if (!result?.user_id) throw new Error('Account creation failed.');
 
         // Enroll via credits if requested
-        const method = row.activation_method?.toLowerCase();
+        const method = (row.enrollment_method || '').toLowerCase();
         if (method === 'credits' && row.course) {
           const courseId = coursesMap[row.course.toLowerCase()];
           if (!courseId) throw new Error(`Course not found: "${row.course}"`);
@@ -198,7 +198,7 @@ export default function BulkImportStudentsScreen() {
   };
 
   // ── Template CSV ──────────────────────────────────────────────────────────
-  const TEMPLATE = `name,email,phone,university,faculty,academic_level,course,activation_method
+  const TEMPLATE = `name,email,phone,university,faculty,academic_level,course,enrollment_method
 John Doe,john@example.com,+1234567890,Cairo University,Medicine,Level 1,Anatomy 101,credits
 Jane Smith,jane@example.com,,Cairo University,Medicine,Level 2,,none`;
 
@@ -207,7 +207,7 @@ Jane Smith,jane@example.com,,Cairo University,Medicine,Level 2,,none`;
       <ScrollView>
         <PageHeader title="Bulk Import Students" subtitle="Upload CSV to create multiple students" />
 
-      <View style={{ paddingHorizontal: layout.screenPx, gap: 16, paddingBottom: layout.scrollBottom() }}>
+      <View style={{ paddingHorizontal: layout.screenPx, gap: 16 }}>
 
         {/* ── UPLOAD ─────────────────────────────────────────────────── */}
         {phase === 'upload' && (
@@ -216,10 +216,10 @@ Jane Smith,jane@example.com,,Cairo University,Medicine,Level 2,,none`;
               <Text style={{ fontSize: 16, fontWeight: '700', color: c.text, marginBottom: 8 }}>CSV File Format</Text>
               <Text style={{ fontSize: 13, color: `${c.text}88`, marginBottom: 12 }}>
                 Upload a CSV with the following columns:{'\n'}
-                <Text style={{ fontWeight: '600' }}>name, email, phone, university, faculty, academic_level, course, activation_method</Text>
+                <Text style={{ fontWeight: '600' }}>name, email, phone, university, faculty, academic_level, course, enrollment_method</Text>
               </Text>
               <Text style={{ fontSize: 12, color: `${c.text}66`, fontFamily: 'monospace' }}>
-                {'activation_method: "credits" | "none"'}
+                {'enrollment_method: "credits" | "none"'}
               </Text>
             </NeuCard>
 
@@ -264,7 +264,7 @@ Jane Smith,jane@example.com,,Cairo University,Medicine,Level 2,,none`;
                   <Text style={{ fontSize: 14, fontWeight: '600', color: c.text }}>{row.name}</Text>
                   <Text style={{ fontSize: 12, color: `${c.text}77` }}>
                     {[row.email, row.phone].filter(Boolean).join(' · ')}
-                    {row.course ? ` → ${row.course} (${row.activation_method})` : ''}
+                    {row.course ? ` → ${row.course} (${row.enrollment_method})` : ''}
                   </Text>
                 </View>
               ))}

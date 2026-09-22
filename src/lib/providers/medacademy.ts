@@ -8,6 +8,7 @@
  */
 
 import { backendClient } from '@/client/backendClient';
+import { buildProtectedCallHeaders } from '@/lib/deviceKey';
 import type {
   VideoProvider, ProviderInfo, PlaybackToken, UploadTicket,
   VideoMetadata, HealthCheckResult, ProviderHealthStatus, WebhookEvent,
@@ -33,11 +34,21 @@ class MedAcademyVideoProvider implements VideoProvider {
     _userId: string,
     options?: { lessonId?: string; domain?: string },
   ): Promise<PlaybackToken> {
+    // ── Server-bound security headers (both layers, best-effort) ──────────
+    // Layer 1: X-Integrity-Hash — Google-verified APK genuineness.
+    // Layer 2: X-Security-Evidence/Signature — Keystore-signed, challenge-
+    // bound device evidence covering THIS exact request body.
+    // A tampered client can skip both — the SERVER decides (per its
+    // security_config tiers) whether an unproven call may proceed.
+    const body = {
+      video_id:  providerVideoId,
+      lesson_id: options?.lessonId ?? null,
+    };
+    const headers = await buildProtectedCallHeaders('vdo_otp', body).catch(() => undefined);
+
     const { data, error } = await backendClient.functions.invoke('vdocipher-otp', {
-      body: {
-        video_id:  providerVideoId,
-        lesson_id: options?.lessonId ?? null,
-      },
+      body,
+      headers: headers && Object.keys(headers).length > 0 ? headers : undefined,
     });
     if (error) throw new Error(`Playback token failed: ${error.message}`);
     return { otp: data.otp, playbackInfo: data.playbackInfo };

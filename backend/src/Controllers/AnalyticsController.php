@@ -57,37 +57,199 @@ final class AnalyticsController
     }
 
     /**
-     * GET /analytics/user-activity/{id} — user recent activity summary.
+     * GET /analytics/user-activity/{id} — a user's activity timeline.
+     *
+     * THE CONTRACT (proven against the RN UserAuditLogs screen): the response
+     * is a paginated array of UNIFIED activity rows. The previous shape —
+     * three separate raw arrays with only (id, action, details, created_at)
+     * — made the screen crash (security rows have no `action` → undefined
+     * passed to actionLabel/split) and silently ignored every filter param.
+     * The screen still renders legacy wrapper payloads through
+     * normalizeUserActivityResponse() (api.ts), so old deployments keep working.
+     *
+     * Query params (all optional): category, search, direction ('by'|'on'),
+ * date_from, date_to, limit (≤100), offset.
      */
     public function userActivity(Request $request): array
     {
         $userId = \MedAcademy\Utils\Uuid::normalize((string) $request->params['id']);
         $db = Database::instance();
+        $q = $request->queryParams();
 
-        $recentAudit = $db->select(
-            "SELECT id, action, details, created_at FROM audit_logs
-             WHERE user_id = ? OR actor_id = ?
-             ORDER BY created_at DESC LIMIT 20",
-            [$userId, $userId]
-        );
+        $limit  = min(100, max(1, (int) ($q['limit'] ?? 50)));
+        $offset = max(0, (int) ($q['offset'] ?? 0));
+        $category = strtolower(trim((string) ($q['category'] ?? '')));
+        $search   = trim((string) ($q['search'] ?? ''));
+        $direction = strtolower(trim((string) ($q['direction'] ?? '')));
+        $dateFrom = trim((string) ($q['date_from'] ?? ''));
+        $dateTo   = trim((string) ($q['date_to'] ?? ''));
 
-        $recentSecurity = $db->select(
-            "SELECT id, event_type, platform, created_at FROM security_events
-             WHERE user_id = ?
-             ORDER BY created_at DESC LIMIT 20",
-            [$userId]
-        );
+        // ---- Build the unified query over audit_logs (+ optional security_events)
+        $selectAudit = "SELECT a.id, 'audit' AS entry_kind, a.action, a.action AS event_type,
+                a.description, a.target_name, a.actor_id, p.full_name AS actor_name,
+                p.role AS actor_role, a.log_status, a.resource_type, a.resource_id,
+                a.ip_address, a.created_at, NULL AS risk_score, NULL AS platform
+             FROM audit_logs a
+             LEFT JOIN profiles p ON p.id = a.actor_id
+             WHERE (a.user_id = ? OR a.actor_id = ?)";
+        $selectSecurity = null;
+        // First two bindings: the shared user scope (used by BOTH legs of the
+        // UNION when present — PDO positional params cannot be reused).
+        $params = [$userId, $userId];
 
-        $devices = $db->select(
-            "SELECT id, device_name, platform, status, last_active_at FROM devices
-             WHERE user_id = ? ORDER BY last_active_at DESC LIMIT 10",
-            [$userId]
-        );
+        if ($category === 'security') {
+            // Security category = the user's security_events only.
+            $selectAudit = "SELECT s.id, 'security' AS entry_kind, COALESCE(s.event_type, 'security_event') AS action,
+                    s.event_type, NULL AS description, NULL AS target_name, s.user_id AS actor_id,
+                    NULL AS actor_name, NULL AS actor_role,
+                    CASE COALESCE(s.policy_action, '') WHEN 'block' THEN 'failed' WHEN 'warn' THEN 'warning' ELSE 'success' END AS log_status,
+                    'security_event' AS resource_type, s.device_id AS resource_id,
+                    s.ip_address, s.created_at, s.risk_score, s.platform
+                 FROM security_events s
+                 WHERE (s.user_id = ?)";
+            $params = [$userId];
+        } elseif ($category === '') {
+            // Unified timeline: audit + security events merged.
+            $selectSecurity = "SELECT s.id, 'security' AS entry_kind, COALESCE(s.event_type, 'security_event') AS action,
+                    s.event_type, NULL AS description, NULL AS target_name, s.user_id AS actor_id,
+                    NULL AS actor_name, NULL AS actor_role,
+                    CASE COALESCE(s.policy_action, '') WHEN 'block' THEN 'failed' WHEN 'warn' THEN 'warning' ELSE 'success' END AS log_status,
+                    'security_event' AS resource_type, s.device_id AS resource_id,
+                    s.ip_address, s.created_at, s.risk_score, s.platform
+                 FROM security_events s
+                 WHERE (s.user_id = ?)";
+            // $params stays [user, user]: leg 1 consumes one, leg 2 the other.
+        }
+
+        // ---- Filter fragments. PDO positional params bind in SQL order, so
+        // each leg needs its OWN copy of every binding. The SEARCH fragment is
+        // per-leg: WHERE cannot reference SELECT aliases, and the security leg
+        // has no action/description/target_name columns (its real column is
+        // event_type). Date fragments are shared (created_at exists on both).
+        $searchAuditFrag = '';
+        $searchSecFrag   = '';
+        $searchAuditParams = [];
+        $searchSecParams   = [];
+        if ($search !== '') {
+            $like = '%' . $search . '%';
+            $searchAuditFrag = " AND (action LIKE ? OR COALESCE(description, '') LIKE ? OR COALESCE(target_name, '') LIKE ?)";
+            array_push($searchAuditParams, $like, $like, $like);
+            $searchSecFrag = ' AND COALESCE(event_type, \'\') LIKE ?';
+            $searchSecParams[] = $like;
+        }
+        // direction: 'by' → only rows the user ACTED (actor_id); 'on' → only
+        // rows that target the user (user_id). Default: both.
+        $directionFrag = '';
+        $directionParams = [];
+        if ($direction === 'by') {
+            $directionFrag = ' AND actor_id = ?';
+            $directionParams[] = $userId;
+        } elseif ($direction === 'on') {
+            $directionFrag = ' AND user_id = ?';
+            $directionParams[] = $userId;
+        }
+        $dateFrag = '';
+        $dateParams = [];
+        if ($dateFrom !== '') {
+            $dateFrag .= ' AND created_at >= ?';
+            $dateParams[] = $dateFrom;
+        }
+        if ($dateTo !== '') {
+            $dateFrag .= ' AND created_at <= ?';
+            $dateParams[] = $dateTo;
+        }
+        $whereExtraAudit = $searchAuditFrag . $directionFrag . $dateFrag;
+        $whereExtraSec   = $searchSecFrag . $directionFrag . $dateFrag;
+        $extraAuditParams = array_merge($searchAuditParams, $directionParams, $dateParams);
+        $extraSecParams   = array_merge($searchSecParams, $directionParams, $dateParams);
+
+        $orderBy = ' ORDER BY created_at DESC';
+        $limitSql = " LIMIT {$limit} OFFSET {$offset}";
+
+        // ---- Category mapping for audit rows (audit-only paths). $categoryWhere
+        // applies ONLY to the audit leg (security rows are never category-matched;
+        // 'security' category swaps the whole leg above).
+        $categoryWhere = '';
+        $categoryParams = [];
+        if ($category !== '' && $category !== 'security') {
+            $map = [
+                'auth'    => ['login', 'logout', 'register', 'password_reset', 'password_changed', 'phone_login', 'failed_login', 'password_changed_by_admin', 'password_changed_first_login', 'temp_password_generated', 'session_revoked', 'reset_token'],
+                'profile' => ['profile_name_changed', 'profile_avatar_changed', 'profile_email_changed', 'profile_phone_changed', 'profile_updated', 'name_changed', 'avatar_changed', 'avatar_updated', 'email_changed'],
+                'devices' => ['device_reset', 'device_force_logout', 'device_blocked', 'device_unblocked', 'device_registered', 'device_limit_changed', 'device_revoked', 'device_removed', 'device_reset_by_admin', 'device_logout_all', 'limit_changed', 'unlimited_enabled', 'unlimited_disabled', 'unlimited_devices_enabled', 'unlimited_devices_disabled', 'bulk_device_reset', 'bulk_reset_devices'],
+                'courses' => ['course_created', 'course_updated', 'course_deleted', 'course_published', 'course_unpublished', 'course_archived', 'course_restored', 'course_price_changed', 'course_hidden', 'lesson_created', 'lesson_updated', 'lesson_deleted', 'video_uploaded', 'video_replaced', 'video_deleted', 'pdf_uploaded', 'pdf_deleted'],
+                'purchases' => ['credit_allocated', 'credit_consumed', 'credit_deducted', 'credit_refunded', 'credit_expired', 'credits_added', 'credits_removed', 'code_created', 'code_redeemed', 'code_deactivated', 'code_deleted', 'code_activated', 'code_disabled', 'code_expired', 'redeem_code_created', 'redeem_code_redeemed', 'redeem_code_revoked', 'enrollment_created', 'enrollment_removed'], 'admin_actions' => [
+                    'platform_settings_changed', 'security_policy_changed', 'settings_changed', 'revenue_settings_changed', 'earnings_settings_changed', 'update_earnings_settings', 'credit_price_changed', 'custom_pricing_enabled', 'custom_pricing_disabled', 'provider_changed', 'system_health_check', 'impersonation_started', 'impersonation_ended', 'bulk_trash', 'bulk_restore', 'bulk_permanent_delete', 'bulk_suspend', 'bulk_unsuspend', 'bulk_reset_password', 'admin_updated', 'admin_created', 'admin_deleted', 'notification_sent', 'platform_earnings_reset', 'earnings_reset', 'undo_delete', 'trash_emptied', 'deletion_verification_failed'],
+                'roles'   => ['role_changed', 'role_changed_to_doctor', 'role_changed_to_admin', 'role_changed_to_super_admin', 'role_changed_to_student', 'permission_changed', 'doctor_approved', 'doctor_rejected', 'doctor_created', 'user_created', 'student_created_by_doctor', 'student_bulk_imported', 'admin_created', 'super_admin_created', 'initial_super_admin_created'],
+                'blocking' => ['user_suspended', 'user_blocked', 'user_unblocked', 'user_trashed', 'user_restored', 'user_deleted', 'user_hard_deleted', 'account_restored', 'account_permanently_deleted', 'user_activated'],
+                'system'  => ['security_event', 'root_detected', 'jailbreak_detected', 'vpn_detected', 'proxy_detected', 'ssl_pinning_failure', 'screenshot_detected', 'screen_recording_detected', 'debug_detected', 'frida_detected', 'xposed_detected', 'app_integrity_compromised'],
+            ];
+            $actions = $map[$category] ?? null;
+            if ($actions !== null) {
+                $placeholders = implode(',', array_fill(0, count($actions), '?'));
+                $categoryWhere = " AND action IN ({$placeholders})";
+                $categoryParams = $actions;
+            } else {
+                // Unknown category → match nothing rather than silently ignoring the filter.
+                $categoryWhere = ' AND 1=0';
+            }
+        }
+
+        if ($selectSecurity !== null) {
+            // ---- UNION path: audit leg binds [user, user] + audit extras,
+            // security leg binds [user] + its own extras (separate placeholders).
+            $auditLeg   = $selectAudit . $categoryWhere . $whereExtraAudit;
+            $secLeg     = $selectSecurity . $whereExtraSec;
+            $auditParams   = array_merge([$userId, $userId], $categoryParams, $extraAuditParams);
+            $secParams     = array_merge([$userId], $extraSecParams);
+            $pageSql   = " LIMIT {$limit} OFFSET {$offset}";
+
+            $rows = $db->select(
+                "SELECT * FROM ((" . $auditLeg . $orderBy . $pageSql . ")"
+                . " UNION ALL (" . $secLeg . $orderBy . $pageSql . ")) u"
+                . " ORDER BY u.created_at DESC LIMIT {$limit} OFFSET {$offset}",
+                array_merge($auditParams, $secParams)
+            );
+
+            // Count: same union without pagination.
+            $countRows = $db->select(
+                "SELECT (SELECT COUNT(*) FROM (" . $auditLeg . ") t1) AS c1,"
+                . " (SELECT COUNT(*) FROM (" . $secLeg . ") t2) AS c2",
+                array_merge($auditParams, $secParams)
+            );
+            $total = (int) ($countRows[0]['c1'] ?? 0) + (int) ($countRows[0]['c2'] ?? 0);
+        } else {
+            $whereSql = $selectAudit . $categoryWhere . $whereExtraAudit;
+            $rows = $db->select($whereSql . $orderBy . $limitSql, array_merge($params, $categoryParams, $extraAuditParams));
+            $countRows = $db->select("SELECT COUNT(*) AS c FROM (" . $whereSql . ") t", array_merge($params, $categoryParams, $extraAuditParams));
+            $total = (int) ($countRows[0]['c'] ?? 0);
+        }
+
+        $entries = array_map(static function (array $r): array {
+            return [
+                'id'            => (string) $r['id'],
+                'entry_kind'    => (string) $r['entry_kind'],
+                'action'        => (string) ($r['action'] ?? 'unknown'),
+                'event_type'    => $r['event_type'] ?? null,
+                'description'   => $r['description'] ?? null,
+                'target_name'   => $r['target_name'] ?? null,
+                'actor_id'      => $r['actor_id'] ?? null,
+                'actor_name'    => $r['actor_name'] ?? null,
+                'actor_role'    => $r['actor_role'] ?? null,
+                'log_status'    => (string) ($r['log_status'] ?? 'success'),
+                'resource_type' => $r['resource_type'] ?? null,
+                'resource_id'   => $r['resource_id'] ?? null,
+                'ip_address'    => $r['ip_address'] ?? null,
+                'risk_score'    => $r['risk_score'] !== null ? (int) $r['risk_score'] : null,
+                'platform'      => $r['platform'] ?? null,
+                'created_at'    => (string) $r['created_at'],
+            ];
+        }, $rows ?? []);
 
         return [
-            'recent_audit' => $recentAudit ?? [],
-            'recent_security' => $recentSecurity ?? [],
-            'devices' => $devices ?? [],
+            'entries'     => $entries,
+            'total_count' => $total,
+            'limit'       => $limit,
+            'offset'      => $offset,
         ];
     }
 
@@ -260,7 +422,6 @@ final class AnalyticsController
         $sectionCount = (int) $db->value('SELECT COUNT(*) FROM sections WHERE course_id = ?', [$courseId], 0);
         $lessonCount  = (int) $db->value('SELECT COUNT(*) FROM lessons WHERE course_id = ?', [$courseId], 0);
         $enrollCount  = (int) $db->value('SELECT COUNT(*) FROM enrollments WHERE course_id = ?', [$courseId], 0);
-        $codeCount    = (int) $db->value('SELECT COUNT(*) FROM activation_codes WHERE course_id = ?', [$courseId], 0);
         $videoCount   = (int) $db->value('SELECT COUNT(*) FROM video_uploads WHERE course_id = ?', [$courseId], 0);
 
         $pdfCount = 0;
@@ -288,7 +449,6 @@ final class AnalyticsController
             'video_count'      => $videoCount,
             'pdf_count'        => $pdfCount,
             'attachment_count' => $materialCount,
-            'code_count'       => $codeCount,
         ];
     }
 

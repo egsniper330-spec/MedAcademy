@@ -33,6 +33,15 @@ $logger = \MedAcademy\Utils\Logger::instance();
 $request = \MedAcademy\Http\Request::capture();
 
 // ---------------------------------------------------------------------------
+// Maintenance gate (server-authoritative)
+// ---------------------------------------------------------------------------
+// When a Super Admin enables Maintenance Mode, every non-exempt request
+// receives HTTP 503 maintenance_mode BEFORE routing. Exemptions are
+// server-authorized (public auth/health prefixes, the status endpoint, the
+// SA's own management routes, and the verified super_admin/whitelist role).
+(new \MedAcademy\Middleware\MaintenanceMiddleware())->handle($request);
+
+// ---------------------------------------------------------------------------
 // Routes
 // ---------------------------------------------------------------------------
 $router = new \MedAcademy\Http\Router($request, $logger);

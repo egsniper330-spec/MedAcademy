@@ -49,6 +49,42 @@ export interface NativeSecurityFlags {
   proxyDetected?:          boolean;
   dylibInjectionDetected?: boolean;
   bundleTampered?:         boolean;
+  // ── Evidence fields (Android) — observability only, NEVER threat signals ──
+  /**
+   * Installing package (distribution telemetry). null/undefined = unknown or
+   * direct-download — legitimate under this app's direct-APK distribution
+   * model. Must not be interpreted as tampering.
+   */
+  installerSource?:         string | null;
+  /** True when a pinned expected cert SHA-256 is baked into the build. When
+   *  false the native signature check is UNAVAILABLE (skipped), not passed. */
+  expectedCertConfigured?: boolean;
+  /** SHA-256 fingerprint of the current signing cert (public material). */
+  signatureSha256?:        string | null;
+  /** Count of installed non-self packages holding SYSTEM_ALERT_WINDOW.
+   *  Capability evidence only — a high count is NOT an active overlay. */
+  overlayCapableAppsCount?: number;
+  // ── Phase 4 signal plane (Part 1 redesign + Part 6/12) ────────────────────
+  /** Native aggregate VPN model: 'on' | 'off' | 'suspicious' | 'unknown'.
+   *  'suspicious' = callback observed a VPN that point sensors no longer
+   *  find — treated as possible suppression, never as off. */
+  vpnState?:               string;
+  /** C++ libmedasec core loaded and inspecting /proc (evidence quality flag). */
+  coreAvailable?:          boolean;
+  /** Hook-framework libraries found in /proc/self/maps (Frida/Xposed class). */
+  coreHookLibs?:           boolean;
+  /** Injected runtimes named like Frida worker threads. */
+  coreFridaThreads?:       number;
+  /** /proc/self/status thread count disagrees with /proc/task enumeration. */
+  coreThreadMismatch?:     boolean;
+  /** Kernel-plane tunnel-class interface count (/proc/net/dev via C++). */
+  netNativeTunnelIfaces?:  number;
+  /** Kernel routing table has a default route via a tunnel-class interface. */
+  netNativeRouteTunnel?:   boolean;
+  /** Tampering/tooling packages found from the visibility-scoped catalog. */
+  tamperToolPackages?:     number;
+  /** True when PackageManager confirms the OFFICIAL application id at runtime. */
+  packageIdentityValid?:   boolean;
 }
 
 const SAFE_FLAGS: NativeSecurityFlags = {
@@ -68,6 +104,16 @@ const SAFE_FLAGS: NativeSecurityFlags = {
   rootDetected:         false,
   emulatorDetected:     false,
   mockLocationDetected: false,
+  // Phase 4 signal plane defaults (unknown/unavailable ≠ safe; policy decides)
+  vpnState: 'unknown',
+  coreAvailable: false,
+  coreHookLibs: false,
+  coreFridaThreads: 0,
+  coreThreadMismatch: false,
+  netNativeTunnelIfaces: 0,
+  netNativeRouteTunnel: false,
+  tamperToolPackages: 0,
+  packageIdentityValid: true,
   // iOS extras default to safe
   jailbreakDetected:       false,
   proxyDetected:           false,
@@ -95,50 +141,80 @@ function getIOSModule(): typeof NativeModules['IOSSecurityModule'] | null {
 // ─── Batch API (preferred — single bridge crossing) ───────────────────────────
 
 /**
+ * True when the LAST getNativeSecurityFlags() call actually reached a native
+ * module and got a real result. False when the module was missing or the call
+ * threw — i.e. the returned flags are fail-safe defaults, NOT measurements.
+ *
+ * Fail-safe contract: callers that enforce security decisions MUST consult this
+ * flag; a false here means "detection unavailable", which is a distinct state
+ * from "confirmed safe". It does NOT auto-block (a transient native error must
+ * never lock out legitimate users), but it must be reported so admins can see
+ * coverage gaps instead of silently trusting all-green dashboards.
+ */
+let _lastFlagsCallUnavailable = false;
+export function wasLastSecurityFlagsCallUnavailable(): boolean {
+  return _lastFlagsCallUnavailable;
+}
+
+/** Last successfully measured flags (SAFE_FLAGS until the first native call
+ *  completes). Lets synchronous evaluators (detectAppIntegrity) read the
+ *  measurement their calling cycle already made without a second native
+ *  round-trip. The async getNativeSecurityFlags() refreshes this cache. */
+let _lastMeasuredFlags: NativeSecurityFlags = { ...SAFE_FLAGS };
+export function getNativeSecurityFlagsSync(): NativeSecurityFlags {
+  return _lastMeasuredFlags;
+}
+
+/**
  * Returns ALL security flags in one native call.
- * Falls back to SAFE_FLAGS if the module is unavailable.
+ * Falls back to SAFE_FLAGS if the module is unavailable — and records the
+ * degradation in wasLastSecurityFlagsCallUnavailable() so callers can tell
+ * "measured clean" apart from "could not measure".
  * Works on both Android (SecurityModule) and iOS (IOSSecurityModule).
  */
 export async function getNativeSecurityFlags(): Promise<NativeSecurityFlags> {
   if (Platform.OS === 'android') {
     const mod = getModule();
-    console.log('[NativeSecurity][Stage-2] getModule() =>', mod ? '✓ module found' : '✗ NULL — SecurityModule not compiled/registered');
     if (!mod) {
-      console.warn('[NativeSecurity][Stage-2] ❌ Module is null — returning SAFE_FLAGS. All detectors will report false. Check native compile errors.');
+      _lastFlagsCallUnavailable = true;
+      console.warn('[NativeSecurity][Stage-2] ❌ Module is null — returning SAFE_FLAGS (detection UNAVAILABLE, not measured). Check native registration.');
       return SAFE_FLAGS;
     }
     try {
-      console.log('[NativeSecurity][Stage-2] Calling mod.getSecurityFlags()…');
       const flags = await mod.getSecurityFlags() as NativeSecurityFlags;
-      console.log('[NativeSecurity][Stage-5] JS received native response:', JSON.stringify(flags));
+      _lastFlagsCallUnavailable = false;
       const merged = { ...SAFE_FLAGS, ...flags };
-      console.log('[NativeSecurity][Stage-5] After SAFE_FLAGS merge (should be identical):', JSON.stringify(merged));
+      _lastMeasuredFlags = merged;
       return merged;
     } catch (e) {
-      console.error('[NativeSecurity][Stage-2] ❌ getSecurityFlags() threw:', e, '— returning SAFE_FLAGS');
+      _lastFlagsCallUnavailable = true;
+      console.error('[NativeSecurity][Stage-2] ❌ getSecurityFlags() threw:', e, '— returning SAFE_FLAGS (detection UNAVAILABLE, not measured)');
       return SAFE_FLAGS;
     }
   }
 
   if (Platform.OS === 'ios') {
     const mod = getIOSModule();
-    console.log('[NativeSecurity][Stage-2] getIOSModule() =>', mod ? '✓ iOS module found' : '✗ NULL — IOSSecurityModule not registered');
     if (!mod) {
-      console.warn('[NativeSecurity][Stage-2] ❌ iOS module null — returning SAFE_FLAGS');
+      _lastFlagsCallUnavailable = true;
+      console.warn('[NativeSecurity][Stage-2] ❌ iOS module null — returning SAFE_FLAGS (detection UNAVAILABLE)');
       return SAFE_FLAGS;
     }
     try {
       const flags = await mod.getSecurityFlags() as NativeSecurityFlags;
-      console.log('[NativeSecurity][Stage-5] iOS JS received native response:', JSON.stringify(flags));
+      _lastFlagsCallUnavailable = false;
       const merged = { ...SAFE_FLAGS, ...flags };
       return merged;
     } catch (e) {
-      console.error('[NativeSecurity][Stage-2] ❌ iOS getSecurityFlags() threw:', e, '— returning SAFE_FLAGS');
+      _lastFlagsCallUnavailable = true;
+      console.error('[NativeSecurity][Stage-2] ❌ iOS getSecurityFlags() threw:', e, '— returning SAFE_FLAGS (detection UNAVAILABLE)');
       return SAFE_FLAGS;
     }
   }
 
-  console.log('[NativeSecurity][Stage-2] Platform is web — returning SAFE_FLAGS');
+  // Web: no native module by design — this is the SUPPORTED platform behavior,
+  // not a degradation. Availability stays false so callers skip enforcement.
+  _lastFlagsCallUnavailable = true;
   return SAFE_FLAGS;
 }
 

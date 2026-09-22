@@ -8,7 +8,7 @@ to this backend yet.
 ```
 React Native / Web
       ↓ HTTPS + JWT
-https://api.medacademy.eu.cc   (public/ → index.php front controller)
+https://api.medacademy.site   (public/ → index.php front controller)
       ↓
 PHP 8 REST API (PDO prepared statements)
       ↓
@@ -22,7 +22,7 @@ Filesystem storage + VdoCipher + SMTP/FCM/APNs
 ```
 backend/
   public/            web root — index.php + .htaccess (cPanel: point the
-                     api.medacademy.eu.cc document root here)
+                     api.medacademy.site document root here)
   src/
     Controllers/     HTTP endpoints (thin)
     Services/        business logic (Auth, Security, Audit, ...)
@@ -46,7 +46,7 @@ backend/
 ## Deployment (cPanel)
 
 1. Upload the `backend/` directory (excluding `.env`, `storage/logs`).
-2. In cPanel → **Domains**, create `api.medacademy.eu.cc` with document root
+2. In cPanel → **Domains**, create `api.medacademy.site` with document root
    pointing at `backend/public`.
 3. Copy `.env.example` → `.env` and fill in real values (DB creds from the
    MySQL database/user you created; generate `JWT_SECRET` with
@@ -55,7 +55,7 @@ backend/
    ```bash
    mysql -u medacademy_user -p medacademy < backend/database/schema.sql
    ```
-5. Confirm routing works: `curl https://api.medacademy.eu.cc/health`.
+5. Confirm routing works: `curl https://api.medacademy.site/health`.
 
 No Composer, Node, Docker, or long-running processes are required.
 
@@ -73,7 +73,7 @@ node backend/scripts/validate-mysql-schema.js  # parse-check every statement (My
 
 **Step-by-step manual cPanel instructions: `NAMECHEAP_DEPLOYMENT.md`**
 (phpMyAdmin/Terminal import, document root, permissions, .env, SSL,
-troubleshooting). Deployment smoke test: `GET https://api.medacademy.eu.cc/api/health`
+troubleshooting). Deployment smoke test: `GET https://api.medacademy.site/api/health`
 (no auth, no secrets in the response). Server-side CLI diagnostics:
 `php backend/scripts/server-selfcheck.php`.
 

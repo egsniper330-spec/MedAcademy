@@ -5,7 +5,7 @@ import { useFocusEffect, useRouter } from 'expo-router';
 import { useProfileStore } from '@/lib/store';
 import { getMySubscriptions } from '@/lib/api';
 import { CourseCard } from '@/components/CourseCard';
-import { neuColors, useLayout } from '@/lib/neu';
+import { neuColors, useLayout, safeBottom } from '@/lib/neu';
 import type { RelativePathString } from 'expo-router';
 import { NeuSearchBar } from '@/components/NeuInputRow';
 
@@ -41,7 +41,7 @@ export default function MyCourses() {
   return (
     <ScrollView
       style={{ flex: 1, backgroundColor: c.base }}
-      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />}
+      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />} contentContainerStyle={{ paddingBottom: safeBottom(layout.insets.bottom) }}
     >
       <PageHeader title="My Courses" subtitle="Your subscribed courses" />
 

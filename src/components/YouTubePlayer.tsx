@@ -14,11 +14,12 @@
  *     Player logic from src/lib/plyr/playerScript.ts.
  *
  * ── Watermark ────────────────────────────────────────────────────────────────
- *   TWO layers:
- *   1. In-HTML watermark — injected by player.js inside the Plyr container.
- *      Survives Plyr CSS fullscreen on both web and native WebView.
- *   2. React Native overlay (VideoWatermark) — visible in normal mode and
- *      inside the fullscreen Modal.
+ *   EXACTLY ONE instance per active player: the in-HTML watermark injected by
+ *   the player script inside the Plyr container (survives fullscreen on both
+ *   web and native WebView). A former second RN overlay (VideoWatermark)
+ *   rendered on top of it in normal mode — the "duplicate/broken watermark" —
+ *   and was removed. The fullscreen Modal plays the same in-HTML watermark in
+ *   its own WebView, so no RN overlay is needed there either.
  *
  * ── Fullscreen (native) ───────────────────────────────────────────────────────
  *   The Modal IS the fullscreen experience. Architecture:
@@ -54,10 +55,15 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type React from 'react';
 import ReactDOM from 'react-dom';
 import { Modal, Platform, Pressable, StatusBar, Text, View } from 'react-native';
+import * as ScreenOrientation from 'expo-screen-orientation';
 import { WebView, type WebViewMessageEvent } from 'react-native-webview';
-import { VideoWatermark, type VideoWatermarkProps } from './VideoWatermark';
+import type { VideoWatermarkProps } from './VideoWatermark';
 import { PLAYER_SCRIPT } from '../lib/plyr/playerScript';
 import { PLYR_CSS, PLYR_JS } from '../lib/plyr/plyrBundle';
+import {
+  enterFullscreenSystemUi,
+  exitFullscreenSystemUi,
+} from '../lib/fullscreenSystemUi';
 
 // ─── Public props ─────────────────────────────────────────────────────────────
 
@@ -72,9 +78,16 @@ export interface YouTubePlayerProps {
   onEnd?: () => void;
   onError?: (message: string) => void;
   /**
-   * Identity watermark rendered above the player.
-   * Rendered as two layers: in-HTML (survives fullscreen) + RN overlay.
-   * Does not modify the YouTube iframe.
+   * SECURITY GATE (fullscreen boundary): consulted right before the native
+   * fullscreen Modal mounts. Resolve/return false → fullscreen is refused
+   * (the request is swallowed). Resolve/return true → allowed. Throwing also
+   * refuses. Fail-closed.
+   */
+  shouldAllowFullscreen?: () => Promise<boolean> | boolean;
+  /**
+   * Identity watermark rendered INSIDE the player surface — one in-HTML
+   * overlay injected by the player script (exactly one instance per active
+   * player). Does not modify the YouTube iframe.
    */
   watermark?: VideoWatermarkProps;
   /**
@@ -86,24 +99,40 @@ export interface YouTubePlayerProps {
 
 // ─── URL normalization ────────────────────────────────────────────────────────
 
+/**
+ * Extract a validated 11-character YouTube video ID from a bare ID or any
+ * standard YouTube URL format (watch, youtu.be, embed, shorts, live, m./music.
+ * hosts, youtube-nocookie). Returns '' when the input is not a recognizable
+ * YouTube video reference — callers must not pass arbitrary strings to the
+ * embed (a garbage ID only produces a YouTube "invalid parameter" error).
+ */
 export function extractYouTubeVideoId(input: string): string {
-  if (!input) return input;
+  if (!input) return '';
   const trimmed = input.trim();
+  // Bare 11-character video ID
   if (/^[A-Za-z0-9_-]{11}$/.test(trimmed)) return trimmed;
   try {
     const url = new URL(trimmed);
-    if (url.hostname === 'youtu.be') {
+    const host = url.hostname.replace(/^www\./, '').toLowerCase();
+    const isYouTubeHost =
+      host === 'youtube.com' ||
+      host === 'm.youtube.com' ||
+      host === 'music.youtube.com' ||
+      host === 'youtube-nocookie.com' ||
+      host === 'youtu.be';
+    if (!isYouTubeHost) return '';
+    if (host === 'youtu.be') {
       const id = url.pathname.slice(1).split('/')[0];
-      if (id) return id;
+      if (/^[A-Za-z0-9_-]{11}$/.test(id)) return id;
     }
     const v = url.searchParams.get('v');
-    if (v) return v;
-    const pathMatch = url.pathname.match(/\/(?:embed|shorts|v)\/([A-Za-z0-9_-]{11})/);
+    if (v && /^[A-Za-z0-9_-]{11}$/.test(v)) return v;
+    const pathMatch = url.pathname.match(/\/(?:embed|shorts|v|live)\/([A-Za-z0-9_-]{11})/);
     if (pathMatch) return pathMatch[1];
   } catch {
-    // Not a valid URL — bare ID passthrough.
+    // Not a valid URL — fall through to the empty rejection below.
   }
-  return trimmed;
+  return '';
 }
 
 // ─── Native HTML builder ──────────────────────────────────────────────────────
@@ -168,6 +197,7 @@ export function YouTubePlayer({
   onError,
   watermark,
   onFullscreen,
+  shouldAllowFullscreen,
 }: YouTubePlayerProps) {
   const videoId = extractYouTubeVideoId(rawVideoId);
 
@@ -192,6 +222,7 @@ export function YouTubePlayer({
       onError={onError}
       watermark={watermark}
       onFullscreen={onFullscreen}
+      shouldAllowFullscreen={shouldAllowFullscreen}
     />
   );
 
@@ -213,6 +244,14 @@ interface SubProps {
   onError?: (msg: string) => void;
   watermark?: VideoWatermarkProps;
   onFullscreen?: (active: boolean) => void;
+  /**
+   * SECURITY GATE (fullscreen boundary): called immediately before the
+   * fullscreen Modal mounts. Return true → block (no Modal, no escape hatch).
+   * Fail-closed: an omitted gate blocks nothing (gateless surfaces are
+   * non-protected by design, e.g. marketing embeds); the lesson screen ALWAYS
+   * supplies one. An exception thrown by the gate also blocks.
+   */
+  shouldAllowFullscreen?: () => Promise<boolean> | boolean;
 }
 
 // ─── Web sub-component ────────────────────────────────────────────────────────
@@ -350,8 +389,18 @@ function YouTubePlayerNative({
   onError,
   watermark,
   onFullscreen,
+  shouldAllowFullscreen,
 }: SubProps) {
   const [isFullscreen, setIsFullscreen] = useState(false);
+
+  // Live gate handle: the message handler below is registered once (stable
+  // deps), so it reads the CURRENT gate function through a ref instead of a
+  // captured stale closure. A gate mounted after the player (e.g. the
+  // SecurityGate appearing over an open lesson) is therefore honored.
+  const securityGateRef = useRef<(() => Promise<boolean> | boolean) | null>(null);
+  useEffect(() => {
+    securityGateRef.current = shouldAllowFullscreen ?? null;
+  }, [shouldAllowFullscreen]);
 
   // Shared playback-position tracker — updated by whichever WebView is active.
   const lastTimeRef      = useRef(resumePosition);
@@ -413,10 +462,30 @@ function YouTubePlayerNative({
           break;
         case 'yt:fullscreen':
           if (msg.active) {
-            // Snapshot inline play/pause state before the Modal mounts.
-            modalPlayingRef.current = inlinePlayingRef.current;
-            setIsFullscreen(true);
-            onFullscreen?.(true);
+            // ── SECURITY GATE AT THE FULLSCREEN BOUNDARY ─────────────────
+            // The fullscreen Modal is a top-level RN surface rendered ABOVE
+            // the SecurityGate overlay, so it must independently re-validate
+            // the authoritative security verdict before mounting. A gate that
+            // appears while this handler runs must not be defeated by a
+            // fullscreen transition that races it. Fail-closed: if the check
+            // throws or returns true, the Modal never mounts — the Plyr
+            // fullscreen click is consumed with no visual escape hatch.
+            (async () => {
+              try {
+                if (securityGateRef.current) {
+                  const allowed = await securityGateRef.current();
+                  if (!allowed) return; // blocked → swallow fullscreen request
+                } else if (shouldAllowFullscreen) {
+                  return; // gate supplied but not yet wired → fail-closed
+                }
+              } catch {
+                return; // evaluation error → fail-closed, no fullscreen
+              }
+              // Snapshot inline play/pause state before the Modal mounts.
+              modalPlayingRef.current = inlinePlayingRef.current;
+              setIsFullscreen(true);
+              onFullscreen?.(true);
+            })();
           }
           break;
       }
@@ -463,6 +532,13 @@ function YouTubePlayerNative({
     setIsFullscreen(false);
     onFullscreen?.(false);
 
+    // Return the device to the app's normal portrait orientation as the Modal
+    // closes. app.json locks the activity to portrait, so this restores the
+    // exact pre-fullscreen state; on rotation-lock devices the lock remains
+    // honored by the OS. Synchronous with the Modal hide — no timers.
+    ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP)
+      .catch(() => {});
+
     // Defer the inject until after the Modal unmounts and the inline WebView
     // is in the foreground again (next event-loop tick is sufficient).
     setTimeout(() => {
@@ -478,6 +554,35 @@ function YouTubePlayerNative({
       inlineWvRef.current?.injectJavaScript(js);
     }, 50);
   }, [onFullscreen]);
+
+  // ── Orientation lifecycle (native) ────────────────────────────────────────
+  // The fullscreen Modal IS the fullscreen experience, so the device rotates
+  // with it: landscape while the Modal is visible, portrait once closed.
+  // Effect keyed on isFullscreen — no timers, no delays; the lock is applied
+  // synchronously on state transitions. app.json keeps the app portrait at
+  // all other times.
+  useEffect(() => {
+    if (Platform.OS === 'web' || !isFullscreen) return;
+    ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE)
+      .catch(() => {});
+  }, [isFullscreen]);
+
+  // ── System bars (Issue 5) ──────────────────────────────────────────────────
+  // RN's Android Modal mirrors the ACTIVITY window's system-bar visibility
+  // into its own Dialog window (syncSystemBarsVisibility in
+  // ReactModalHostView.kt), so hiding the bars only on the Modal window has
+  // no effect — the activity window must hide them. Back/Home/Recents were
+  // therefore still visible over the video. While fullscreen: hide the nav
+  // bar (expo-navigation-bar → activity window) and the status bar
+  // (<StatusBar hidden> below). Every exit path unmounts the Modal, which
+  // runs this cleanup AND pops the StatusBar stack — both restore together.
+  useEffect(() => {
+    if (Platform.OS === 'web' || !isFullscreen) return;
+    void enterFullscreenSystemUi();
+    return () => {
+      void exitFullscreenSystemUi();
+    };
+  }, [isFullscreen]);
 
   // ── Modal HTML — memoized for the lifetime of the fullscreen session ────────
   // Built once when isFullscreen first becomes true; never rebuilt during the
@@ -521,7 +626,6 @@ function YouTubePlayerNative({
           showsHorizontalScrollIndicator={false}
           showsVerticalScrollIndicator={false}
         />
-        {watermark && <VideoWatermark {...watermark} />}
       </View>
 
       {/* ── Fullscreen Modal ─────────────────────────────────────────── */}
@@ -535,8 +639,24 @@ function YouTubePlayerNative({
         onShow={() => {}}
       >
         <StatusBar hidden />
-        <View style={{ flex: 1, backgroundColor: '#000' }}>
-          {/* Modal player — Plyr fullscreen button absent (hideFullscreen=true) */}
+        {/* Fullscreen wrapper — positioned + z-raised so the in-HTML watermark
+            (position:absolute inside the WebView HTML) is not clipped to the
+            WebView's layout bounds; it must span the whole landscape screen.
+            The wrapper sits above the WebView without intercepting touches:
+            the WebView and close button remain its hit-testable children. */}
+        <View
+          style={{
+            position: 'absolute',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            zIndex: 2,
+          }}
+        >
+          {/* Modal player — Plyr fullscreen button absent (hideFullscreen=true).
+              The in-HTML watermark plays inside this WebView — exactly one
+              watermark instance, spanning the full landscape screen. */}
           <WebView
             source={{ html: modalHtml, baseUrl: 'https://medacademy.app' }}
             style={{ flex: 1, backgroundColor: '#000' }}
@@ -551,9 +671,6 @@ function YouTubePlayerNative({
             showsHorizontalScrollIndicator={false}
             showsVerticalScrollIndicator={false}
           />
-
-          {/* Watermark overlay inside the Modal */}
-          {watermark && <VideoWatermark {...watermark} />}
 
           {/* ── Native close button ─────────────────────────────────── */}
           {/* Always visible; large touch target; works on iOS and Android */}

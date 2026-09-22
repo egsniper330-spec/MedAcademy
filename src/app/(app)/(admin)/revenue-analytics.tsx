@@ -1,6 +1,6 @@
 /**
  * Revenue Analytics — full financial dashboard.
- * Revenue from credits and activation codes, per-day/month/year, per-doctor/admin/course.
+ * Revenue from credits, per-day/month/year, per-doctor/admin/course.
  */
 import { useCallback, useState } from 'react';
 import {
@@ -14,12 +14,11 @@ import {
   DollarSign, TrendingUp, Calendar, Award, BookOpen, ArrowRight,
 } from 'lucide-react-native';
 import { NeuCard } from '@/components/NeuCard';
-import { neuColors, useLayout } from '@/lib/neu';
-import { getPricingSettings, getCreditLedger, getActivationLedgerStats } from '@/lib/api';
+import { neuColors, useLayout, safeBottom } from '@/lib/neu';
+import { getPricingSettings, getCreditLedger } from '@/lib/api';
 
 type PricingSettings = {
   creditPrice: { amount: number; currency: string };
-  activationCodePrice: { amount: number; currency: string };
 };
 
 export default function RevenueAnalyticsScreen() {
@@ -33,18 +32,15 @@ export default function RevenueAnalyticsScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [pricing, setPricing]       = useState<PricingSettings | null>(null);
   const [txRows, setTxRows]         = useState<any[]>([]);
-  const [codeStats, setCodeStats]   = useState<any>(null);
 
   const load = useCallback(async () => {
     try {
-      const [p, rows, cs] = await Promise.all([
+      const [p, rows] = await Promise.all([
         getPricingSettings(),
         getCreditLedger(),
-        getActivationLedgerStats(),
       ]);
       setPricing(p as PricingSettings);
       setTxRows(rows);
-      setCodeStats(cs);
     } catch (_) {}
     setLoading(false);
   }, []);
@@ -71,10 +67,6 @@ export default function RevenueAnalyticsScreen() {
     const todayRevenue   = revRows.filter(t => t.created_at.startsWith(todayStr)).reduce((s, t) => s + t.amount * cPrice, 0);
     const monthRevenue   = revRows.filter(t => t.created_at.startsWith(monthStr)).reduce((s, t) => s + t.amount * cPrice, 0);
     const yearRevenue    = revRows.filter(t => t.created_at.startsWith(yearStr)).reduce((s, t) => s + t.amount * cPrice, 0);
-
-    // Code revenue
-    const codeRev = pricing.activationCodePrice.amount;
-    const codeTotal = (codeStats?.total ?? 0) * codeRev;
 
     // Per doctor
     const byDoctor: Record<string, { name: string; revenue: number }> = {};
@@ -110,8 +102,8 @@ export default function RevenueAnalyticsScreen() {
     const monthlyVals = months.map(m => monthlyCounts[m]);
     const maxMonthly = Math.max(...monthlyVals, 1);
 
-    return { totalRevenue, todayRevenue, monthRevenue, yearRevenue, codeTotal,
-      lifetimeRevenue: totalRevenue + codeTotal, cur,
+    return { totalRevenue, todayRevenue, monthRevenue, yearRevenue,
+      lifetimeRevenue: totalRevenue, cur,
       topDoctors, topAdmins, topCourses, months, monthlyVals, maxMonthly };
   })();
 
@@ -144,10 +136,9 @@ export default function RevenueAnalyticsScreen() {
   return (
     <ScrollView
       style={{ flex: 1, backgroundColor: c.base }}
-      contentContainerStyle={{ paddingBottom: layout.scrollBottom() }}
-      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />}
+      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />} contentContainerStyle={{ paddingBottom: safeBottom(layout.insets.bottom) }}
     >
-      <PageHeader title="Revenue Analytics" subtitle={pricing ? `Credit: ${pricing.creditPrice.currency} ${pricing.creditPrice.amount} · Code: ${pricing.activationCodePrice.amount}` : 'Financial dashboard'} accentColor="#16A34A" />
+      <PageHeader title="Revenue Analytics" subtitle={pricing ? `Credit: ${pricing.creditPrice.currency} ${pricing.creditPrice.amount}` : 'Financial dashboard'} accentColor="#16A34A" />
 
       <View style={{ paddingHorizontal: layout.screenPx }}>
 
@@ -162,7 +153,6 @@ export default function RevenueAnalyticsScreen() {
               <KpiCard label="Revenue from Credits" value={fmt(metrics.totalRevenue, metrics.cur)} color={c.primary} sub="credits only" />
             </View>
             <View style={{ flexDirection: 'row', gap: 10, marginBottom: 10, flexWrap: 'wrap' }}>
-              <KpiCard label="Revenue from Codes" value={fmt(metrics.codeTotal, metrics.cur)} color="#D97706" />
               <KpiCard label="Today"              value={fmt(metrics.todayRevenue, metrics.cur)} color="#2DA8FF" />
             </View>
             <View style={{ flexDirection: 'row', gap: 10, marginBottom: 20, flexWrap: 'wrap' }}>
@@ -256,12 +246,6 @@ export default function RevenueAnalyticsScreen() {
                 <Text style={{ fontSize: 13, color: c.text }}>Per Credit</Text>
                 <Text style={{ fontSize: 13, fontWeight: '700', color: '#16A34A' }}>
                   {metrics.cur} {pricing?.creditPrice.amount}
-                </Text>
-              </View>
-              <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 8 }}>
-                <Text style={{ fontSize: 13, color: c.text }}>Per Activation Code</Text>
-                <Text style={{ fontSize: 13, fontWeight: '700', color: '#D97706' }}>
-                  {metrics.cur} {pricing?.activationCodePrice.amount}
                 </Text>
               </View>
               <Pressable onPress={() => router.push('/(app)/(admin)/settings' as RelativePathString)}

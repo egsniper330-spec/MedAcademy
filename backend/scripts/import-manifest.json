@@ -16,8 +16,6 @@
     { "table": "lesson_progress", "file": "exports/lesson_progress.csv" },
     { "table": "credits", "file": "exports/credits.csv" },
     { "table": "credit_transactions", "file": "exports/credit_transactions.csv" },
-    { "table": "activation_codes", "file": "exports/activation_codes.csv" },
-    { "table": "code_batches", "file": "exports/code_batches.csv" },
     { "table": "notifications", "file": "exports/notifications.csv" },
     { "table": "assistant_permissions", "file": "exports/assistant_permissions.csv" },
     { "table": "system_config", "file": "exports/system_config.csv" },

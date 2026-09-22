@@ -1,11 +1,13 @@
 import { useCallback, useState } from 'react';
-import { View, Text, ScrollView, useColorScheme, Pressable, RefreshControl, TextInput, ActivityIndicator, Modal } from 'react-native';
+import { View, Text, ScrollView, StyleSheet, useColorScheme, Pressable, RefreshControl, TextInput, ActivityIndicator, useWindowDimensions } from 'react-native';
 import { Image } from 'expo-image';
 import { useFocusEffect, useRouter } from 'expo-router';
-import { Plus, BookOpen, Search, Archive, Clock, Users, ChevronRight, GraduationCap, MoreVertical, Trash2, Pencil, AlertTriangle, FileText, Globe } from 'lucide-react-native';
+import { Plus, BookOpen, Search, Archive, Clock, Users, ChevronRight, GraduationCap, MoreVertical, Trash2, Pencil, AlertTriangle, FileText, Globe, Eye, LayoutGrid } from 'lucide-react-native';
+import { PortalOverlay } from '@/components/PortalOverlay';
 import { DashboardHeader } from '@/components/DashboardHeader';
 import { useProfileStore } from '@/lib/store';
 import { getCoursesWithArchived, createCourse, deleteCourseWithCleanup, getCourseDeleteStats } from '@/lib/api';
+import { startPreviewAsStudent, stopPreviewAsStudent } from '@/lib/previewAsStudent';
 import { NeuCard } from '@/components/NeuCard';
 import { NeuButton } from '@/components/NeuButton';
 import { useToast } from '@/components/Toast';
@@ -25,6 +27,7 @@ export default function DoctorCourses() {
   const isDark = scheme === 'dark';
   const c = isDark ? neuColors.dark : neuColors.light;
   const layout = useLayout();
+  const { width: screenW } = useWindowDimensions();
   const insets = layout.insets;
   const { profile } = useProfileStore();
   const router = useRouter();
@@ -35,7 +38,7 @@ export default function DoctorCourses() {
   const [refreshing, setRefreshing] = useState(false);
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
-  const [statusFilter, setStatusFilter] = useState<'draft' | 'published'>('draft');
+  const [statusFilter, setStatusFilter] = useState<'all' | 'draft' | 'published'>('all');
   const { showToast } = useToast();
 
   // ── Options menu ─────────────────────────────────────────────────────────────
@@ -52,8 +55,21 @@ export default function DoctorCourses() {
     if (!profile) return;
     try {
       // Server-side status filter (draft / published) + archived excluded by default.
-      const data = await getCoursesWithArchived({ doctorId: profile.id, status: statusFilter });
-      setCourses(data);
+      // 'all' fetches everything and sorts published-first client-side (the API's
+      // single-column ORDER BY can't express status-grouped ordering).
+      const data = await getCoursesWithArchived({ doctorId: profile.id, status: statusFilter === 'all' ? undefined : statusFilter });
+      const sorted = statusFilter === 'all'
+        ? [...data].sort((a: any, b: any) => {
+            if (a.status === b.status) {
+              // Within a group: most recently updated/created first
+              const ta = a.updated_at ?? a.created_at ?? '';
+              const tb = b.updated_at ?? b.created_at ?? '';
+              return tb.localeCompare(ta);
+            }
+            return a.status === 'published' ? -1 : 1; // published before drafts
+          })
+        : data;
+      setCourses(sorted);
     } catch {}
     setLoading(false);
   }, [profile, statusFilter]);
@@ -101,6 +117,17 @@ export default function DoctorCourses() {
     router.push(`/(app)/course-builder/${menuCourse.id}` as RelativePathString);
   };
 
+  // "Preview as Student" — see exactly what an enrolled student sees for this
+  // course. Uses the student-facing course screen with student fetch semantics;
+  // the doctor's role/JWT is untouched. Only one preview session at a time.
+  const handlePreviewAsStudent = () => {
+    if (!menuCourse) return;
+    stopPreviewAsStudent();
+    startPreviewAsStudent(menuCourse.id);
+    closeMenu();
+    router.push(`/(app)/course/${menuCourse.id}` as RelativePathString);
+  };
+
   // Open delete confirmation: fetch stats first
   const handleOpenDelete = async () => {
     if (!menuCourse) return;
@@ -113,7 +140,7 @@ export default function DoctorCourses() {
       const stats = await getCourseDeleteStats(target.id);
       setDeleteStats(stats);
     } catch {
-      setDeleteStats({ title: target.title, enrolled_count: '?', lesson_count: '?', video_count: '?', attachment_count: '?', code_count: '?' });
+      setDeleteStats({ title: target.title, enrolled_count: '?', lesson_count: '?', video_count: '?', attachment_count: '?' });
     }
     setStatsLoading(false);
   };
@@ -163,12 +190,12 @@ export default function DoctorCourses() {
               style={{ flex: 1, minWidth: 0, fontSize: 14, color: c.text, paddingVertical: 12 }} />
           </View>
 
-          {/* Segmented status filter — Drafts / Published */}
+          {/* Segmented status filter — All (published first) / Drafts / Published */}
           <View style={{ flexDirection: 'row', backgroundColor: `${c.text}08`, borderRadius: 12, padding: 3, gap: 3 }}>
-            {(['draft', 'published'] as const).map(status => {
+            {(['all', 'draft', 'published'] as const).map(status => {
               const active = statusFilter === status;
-              const activeColor = status === 'draft' ? '#D97706' : '#16A34A';
-              const Icon = status === 'draft' ? FileText : Globe;
+              const activeColor = status === 'draft' ? '#D97706' : status === 'published' ? '#16A34A' : c.primary;
+              const Icon = status === 'draft' ? FileText : status === 'published' ? Globe : LayoutGrid;
               return (
                 <Pressable key={status} onPress={() => setStatusFilter(status)}
                   style={{ flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6,
@@ -176,7 +203,7 @@ export default function DoctorCourses() {
                     backgroundColor: active ? activeColor : 'transparent' }}>
                   <Icon size={13} color={active ? '#fff' : c.text} opacity={active ? 1 : 0.45} />
                   <Text style={{ fontSize: 13, fontWeight: '700', color: active ? '#fff' : c.text, opacity: active ? 1 : 0.55 }}>
-                    {status === 'draft' ? 'Drafts' : 'Published'}
+                    {status === 'all' ? 'All' : status === 'draft' ? 'Drafts' : 'Published'}
                   </Text>
                 </Pressable>
               );
@@ -185,7 +212,7 @@ export default function DoctorCourses() {
         </View>
 
         {/* Course list */}
-        <View style={{ paddingHorizontal: layout.screenPx, gap: 14, paddingBottom: layout.scrollBottom() }}>
+        <View style={{ paddingHorizontal: layout.screenPx, gap: 14 }}>
           {loading ? (
             <View style={{ paddingVertical: 60, alignItems: 'center' }}>
               <ActivityIndicator color={c.primary} />
@@ -196,9 +223,9 @@ export default function DoctorCourses() {
               <Text style={{ fontSize: 16, color: c.text, opacity: 0.4 }}>
                 {query
                   ? 'No matching courses'
-                  : statusFilter === 'draft' ? 'No draft courses yet' : 'No published courses yet'}
+                  : statusFilter === 'draft' ? 'No draft courses yet' : statusFilter === 'published' ? 'No published courses yet' : 'No courses yet'}
               </Text>
-              {!query && statusFilter === 'draft' && (
+              {!query && (statusFilter === 'draft' || statusFilter === 'all') && (
                 <NeuButton label="Create First Course" onPress={handleNewCourse} loading={creating} />
               )}
             </View>
@@ -239,6 +266,8 @@ export default function DoctorCourses() {
                         </View>
                         {/* ⋮ options menu */}
                         <Pressable onPress={() => openMenu(course)}
+                          accessibilityRole="button"
+                          accessibilityLabel={`Course options for ${course.title}`}
                           style={{ padding: 4, borderRadius: 8, backgroundColor: `${c.text}08` }}>
                           <MoreVertical size={16} color={c.text} opacity={0.5} />
                         </Pressable>
@@ -330,29 +359,28 @@ export default function DoctorCourses() {
         on the sheet itself to clear the nav-bar on every device.
         Fix: added statusBarTranslucent so the scrim covers the Android status bar.
       */}
-      <Modal visible={menuVisible} transparent animationType="fade" statusBarTranslucent onRequestClose={closeMenu}>
-        <Pressable
-          style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.35)', justifyContent: 'flex-end' }}
-          onPress={closeMenu}
+      <PortalOverlay visible={menuVisible} variant="dialog" backdropColor="rgba(0,0,0,0.35)" onRequestClose={closeMenu}>
+        <View
+          style={{
+            ...StyleSheet.absoluteFillObject,
+            alignItems: 'center',
+            justifyContent: 'center',
+            paddingTop: insets.top + 8,
+            paddingBottom: insets.bottom + 8,
+          }}
+          pointerEvents="box-none"
         >
-          <Pressable onPress={e => e.stopPropagation()}>
-            <View style={{
-              backgroundColor: c.base,
-              borderTopLeftRadius: 20,
-              borderTopRightRadius: 20,
-              overflow: 'hidden',
-              // Clears Android nav-bar (gesture or 3-button) and iPhone home indicator
-              paddingBottom: Math.max(insets.bottom, 16),
-              shadowColor: '#000',
-              shadowOffset: { width: 0, height: -4 },
-              shadowOpacity: 0.14,
-              shadowRadius: 20,
-              elevation: 12,
-            }}>
-              {/* Drag handle */}
-              <View style={{ alignItems: 'center', paddingTop: 10, paddingBottom: 4 }}>
-                <View style={{ width: 36, height: 4, borderRadius: 2, backgroundColor: `${c.text}20` }} />
-              </View>
+        <View style={{
+          backgroundColor: c.base,
+          borderRadius: 20,
+          overflow: 'hidden',
+          width: Math.min(screenW * 0.92, 360),
+          shadowColor: '#000',
+          shadowOffset: { width: 0, height: 8 },
+          shadowOpacity: 0.14,
+          shadowRadius: 20,
+          elevation: 12,
+        }}>
               {/* Course name header */}
               <View style={{ padding: 18, borderBottomWidth: 1, borderBottomColor: `${c.text}10` }}>
                 <Text style={{ fontSize: 14, fontWeight: '700', color: c.text }} numberOfLines={1}>
@@ -366,24 +394,38 @@ export default function DoctorCourses() {
                 <Pencil size={18} color={c.primary} />
                 <Text style={{ fontSize: 15, fontWeight: '600', color: c.text }}>Edit Course</Text>
               </Pressable>
+              {/* Preview as Student — opens the student-facing course screen */}
+              <Pressable onPress={handlePreviewAsStudent}
+                style={{ flexDirection: 'row', alignItems: 'center', gap: 14, padding: 18,
+                  borderBottomWidth: 1, borderBottomColor: `${c.text}08` }}>
+                <Eye size={18} color="#7C3AED" />
+                <View style={{ flex: 1 }}>
+                  <Text style={{ fontSize: 15, fontWeight: '600', color: c.text }}>Preview as Student</Text>
+                  <Text style={{ fontSize: 11, color: c.text, opacity: 0.5 }}>
+                    See this course as an enrolled student does
+                  </Text>
+                </View>
+              </Pressable>
               {/* Delete */}
               <Pressable onPress={handleOpenDelete}
                 style={{ flexDirection: 'row', alignItems: 'center', gap: 14, padding: 18 }}>
                 <Trash2 size={18} color="#DC2626" />
                 <Text style={{ fontSize: 15, fontWeight: '600', color: '#DC2626' }}>Delete Course</Text>
               </Pressable>
-            </View>
-          </Pressable>
-        </Pressable>
-      </Modal>
+        </View>
+        </View>
+      </PortalOverlay>
 
       {/* ── Delete confirmation modal ───────────────────────────────────────────── */}
       {/* Fix: added statusBarTranslucent so scrim covers the Android status bar */}
-      <Modal visible={!!deleteTarget} transparent animationType="slide" statusBarTranslucent onRequestClose={() => { if (!deleteLoading) { setDeleteTarget(null); setDeleteStats(null); } }}>
-        <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'flex-end' }}>
-          <View style={{ backgroundColor: c.base, borderTopLeftRadius: 24, borderTopRightRadius: 24,
-            padding: 24, paddingBottom: layout.scrollBottom(), gap: 20,
-            shadowColor: '#000', shadowOffset: { width: 0, height: -4 }, shadowOpacity: 0.15, shadowRadius: 20, elevation: 16 }}>
+      <PortalOverlay visible={!!deleteTarget} variant="dialog" backdropColor="rgba(0,0,0,0.45)" onRequestClose={() => { if (!deleteLoading) { setDeleteTarget(null); setDeleteStats(null); } }}>
+          <View style={{ ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center',
+            paddingTop: insets.top + 8, paddingBottom: insets.bottom + 8 }}
+            pointerEvents="box-none">
+          <ScrollView style={{ width: Math.min(screenW * 0.92, 480), maxHeight: '100%', flexGrow: 0, flexShrink: 1 }}>
+          <View style={{ backgroundColor: c.base, borderRadius: 24,
+            padding: 24, gap: 20,
+            shadowColor: '#000', shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.15, shadowRadius: 20, elevation: 16 }}>
 
             {/* Warning header */}
             <View style={{ alignItems: 'center', gap: 10 }}>
@@ -415,7 +457,6 @@ export default function DoctorCourses() {
                   ['Videos',           deleteStats.video_count],
                   ['PDFs',             deleteStats.pdf_count],
                   ['Attachments',      deleteStats.attachment_count],
-                  ['Activation codes', deleteStats.code_count],
                 ] as [string, string | number][]).map(([label, value]) => (
                   <View key={label} style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
                     <Text style={{ fontSize: 13, color: c.text, opacity: 0.55 }}>{label}</Text>
@@ -431,7 +472,7 @@ export default function DoctorCourses() {
             <View style={{ backgroundColor: '#DC262610', borderRadius: 12, padding: 14, flexDirection: 'row', gap: 10 }}>
               <AlertTriangle size={15} color="#DC2626" style={{ marginTop: 1 }} />
               <Text style={{ flex: 1, fontSize: 12, lineHeight: 18, color: '#DC2626', fontWeight: '500' }}>
-                This action permanently deletes this course and all associated lessons, videos, attachments, activation codes and subscriptions. This cannot be undone.
+                This action permanently deletes this course and all associated lessons, videos, attachments and subscriptions. This cannot be undone.
               </Text>
             </View>
 
@@ -455,8 +496,9 @@ export default function DoctorCourses() {
               </Pressable>
             </View>
           </View>
-        </View>
-      </Modal>
+          </ScrollView>
+          </View>
+      </PortalOverlay>
     </>
   );
 }

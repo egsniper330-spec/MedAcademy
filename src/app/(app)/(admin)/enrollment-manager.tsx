@@ -408,7 +408,7 @@ export default function EnrollmentManager() {
     >
       <PageHeader title="Enrollment Manager" />
       <ScrollView
-        contentContainerStyle={{ padding: 16, paddingBottom: layout.scrollBottom() }}
+        contentContainerStyle={{ padding: 16 }}
         keyboardShouldPersistTaps="handled"
       >
         {/* Tab bar */}

@@ -69,7 +69,7 @@ final class VdoCipherService
 
         $db = Database::instance();
         $profile = $db->row(
-            'SELECT role, full_name, watermark_id FROM profiles WHERE id = ?',
+            'SELECT role, full_name, watermark_id, public_user_id FROM profiles WHERE id = ?',
             [$userId]
         );
         if ($profile === null) {
@@ -77,6 +77,16 @@ final class VdoCipherService
         }
         $role = $profile['role'];
         $isPrivileged = in_array($role, ['doctor', 'admin', 'super_admin'], true);
+
+        // SERVER-SIDE CONTENT GATE: students MUST identify the lesson. Without
+        // it there is no way to verify enrollment/published state, so issuing an
+        // OTP would let any student token play ANY provider video (draft,
+        // unpublished, or another doctor's content) by calling /video/otp with
+        // only video_id. The app always sends lesson_id; a request without one
+        // from a non-privileged role is treated as unauthorized.
+        if (!$isPrivileged && ($lessonId === null || $lessonId === '')) {
+            throw new ApiException(403, 'This lesson is not available');
+        }
 
         $lesson = null;
         if ($lessonId !== null && $lessonId !== '') {
@@ -111,7 +121,13 @@ final class VdoCipherService
         // Dynamic watermark for students only
         if (!$isPrivileged && $profile) {
             $name = trim((string) $profile['full_name']);
-            $wmId = trim((string) $profile['watermark_id']);
+            // Watermark identifier value: the canonical Public User ID
+            // (MED-####). Falls back to the legacy watermark_id only when the
+            // public ID is not yet assigned (pre-migration rows).
+            $wmId = trim((string) ($profile['public_user_id'] ?? ''));
+            if ($wmId === '') {
+                $wmId = trim((string) $profile['watermark_id']);
+            }
             if ($name !== '' && $wmId !== '') {
                 $payload['annotate'] = $this->buildAnnotate($name, $wmId);
             }
@@ -141,6 +157,161 @@ final class VdoCipherService
         ], $ipAddress);
 
         return ['otp' => $data['otp'] ?? null, 'playbackInfo' => $data['playbackInfo'] ?? null];
+    }
+
+    /**
+     * OFFLINE DOWNLOAD AUTHORIZATION (official VdoCipher offline flow).
+     *
+     * Identical server-side policy to otp() (entitlement/published/enrollment,
+     * watermark), plus the OFFLINE-specific policy: the download-OTP embeds a
+     * finite offline license (rental duration) so a downloaded copy always
+     * expires — permanent offline copies are never issued. The rental duration
+     * is operator policy (security_config.extras.offline_rental_hours, default
+     * 2160h = 90 days) — never hardcoded in the client. The API secret never leaves the
+     * server; the client receives only otp + playbackInfo, exactly as for
+     * streaming.
+     *
+     * IMPORTANT (account capability): the VdoCipher ACCOUNT must have offline
+     * downloads enabled for getDownloadOptions() to return options on the
+     * device. That is a dashboard/plan capability — if it is disabled, this
+     * endpoint still works and the CLIENT surfaces VdoCipher's specific error
+     * honestly (the capability cannot be enabled from code).
+     */
+    public function offlineAuthorize(
+        string $userId,
+        string $videoId,
+        ?string $lessonId,
+        ?string $ipAddress = null
+    ): array {
+        if (!$this->isConfigured()) {
+            throw new ApiException(500, 'Video service not configured');
+        }
+
+        $db = Database::instance();
+        $profile = $db->row(
+            'SELECT role, full_name, watermark_id, public_user_id FROM profiles WHERE id = ?',
+            [$userId]
+        );
+        if ($profile === null) {
+            throw new ApiException(401, 'Account not found');
+        }
+        $role = $profile['role'];
+        $isPrivileged = in_array($role, ['doctor', 'admin', 'super_admin'], true);
+
+        // SAME content gate as otp(): students MUST identify the lesson; the
+        // lesson must match the video, be published, and the student enrolled.
+        // A download OTP is a playback OTP — no weaker entitlement rules.
+        if (!$isPrivileged && ($lessonId === null || $lessonId === '')) {
+            throw new ApiException(403, 'This lesson is not available');
+        }
+
+        $lesson = null;
+        if ($lessonId !== null && $lessonId !== '') {
+            $lesson = $db->row(
+                'SELECT course_id, video_id, status FROM lessons WHERE id = ? AND video_id = ?',
+                [$lessonId, $videoId]
+            );
+            if ($lesson === null) {
+                throw new ApiException($isPrivileged ? 404 : 403, $isPrivileged ? 'Lesson not found' : 'This lesson is not available');
+            }
+            if (!$isPrivileged && $lesson['status'] !== 'published') {
+                throw new ApiException(403, 'This lesson is not available');
+            }
+            if (!$isPrivileged) {
+                $enrolled = $db->value(
+                    'SELECT COUNT(*) FROM enrollments WHERE student_id = ? AND course_id = ?',
+                    [$userId, $lesson['course_id']],
+                    0
+                );
+                if (!$enrolled) {
+                    throw new ApiException(403, 'Not enrolled in this course');
+                }
+            }
+        }
+
+        // ── Offline rental policy (finite licenses, operator-configurable) ──
+        // security_config.extras.offline_rental_hours = int hours
+        // (default 90 * 24 = 2160 hours = 90 days). The live DB row OVERRIDES
+        // this default when present — an operator-set value always wins.
+        // The VdoCipher offline license is bound to the OTP, so the expiry
+        // travels with the downloaded media and is enforced by the DRM layer
+        // at playback — not by client clocks.
+        $rentalHours = 90 * 24; // 90 days / 3 months — still FINITE, never unlimited
+        try {
+            $row = $db->row(
+                'SELECT extras FROM security_config WHERE is_active = 1 ORDER BY created_at DESC LIMIT 1'
+            );
+            $extras = $row !== null ? json_decode((string) $row['extras'], true) : null;
+            if (is_array($extras) && isset($extras['offline_rental_hours'])) {
+                $h = (int) $extras['offline_rental_hours'];
+                if ($h > 0 && $h <= 24 * 365) {
+                    $rentalHours = $h;
+                }
+            }
+        } catch (\Throwable) {
+            // policy row unavailable → keep the safe default
+        }
+
+        $payload = [];
+        $appDomain = Config::string('APP_URL');
+        if ($appDomain !== '') {
+            $payload['whitelisthref'] = $appDomain;
+        }
+
+        // Dynamic watermark for students — SAME policy as streaming OTPs.
+        if (!$isPrivileged && $profile) {
+            $name = trim((string) $profile['full_name']);
+            $wmId = trim((string) ($profile['public_user_id'] ?? ''));
+            if ($wmId === '') {
+                $wmId = trim((string) $profile['watermark_id']);
+            }
+            if ($name !== '' && $wmId !== '') {
+                $payload['annotate'] = $this->buildAnnotate($name, $wmId);
+            }
+        }
+
+        // OFFLINE LICENSE (official VdoCipher offline-OTP contract): the OTP
+        // must carry licenseRules = {"canPersist":true,"rentalDuration":<sec>}
+        // as a SERIALIZED JSON STRING for the license server to grant a
+        // persistent (offline) Widevine license. Without canPersist the
+        // license server rejects the persistent-license request at download
+        // time ("License creation failed", HTTP 403). The rental window is
+        // enforced by the DRM license itself — expires fully offline.
+        $payload['licenseRules'] = json_encode([
+            'canPersist'     => true,
+            'rentalDuration' => $rentalHours * 3600,
+        ]);
+
+        $res = $this->request('POST', '/videos/' . rawurlencode($videoId) . '/otp', $payload);
+        $status = (int) $res['status'];
+        $body = $res['body'];
+
+        if ($status >= 400) {
+            $errDetail = '';
+            $decoded = json_decode($body, true);
+            if (is_array($decoded)) {
+                $errDetail = $decoded['message'] ?? $decoded['error'] ?? json_encode($decoded);
+            }
+            throw new ApiException(502, 'Failed to generate offline download token (upstream ' . $status . ')' . ($errDetail ? ': ' . $errDetail : ''));
+        }
+        $data = json_decode($body, true);
+        if (!is_array($data)) {
+            throw new ApiException(502, 'Invalid response from video service');
+        }
+
+        \MedAcademy\Services\AuditService::write($userId, 'security_event', [
+            'event' => 'video_download_authorized',
+            'video_id' => $videoId,
+            'lesson_id' => $lessonId,
+            'rental_hours' => $rentalHours,
+        ], $ipAddress);
+
+        return [
+            'otp'         => $data['otp'] ?? null,
+            'playbackInfo'=> $data['playbackInfo'] ?? null,
+            'rentalHours' => $rentalHours,
+            'expiresAt'   => gmdate('c', time() + $rentalHours * 3600),
+        ];
     }
 
     public function uploadInit(string $userId, array $data): array

@@ -1,6 +1,6 @@
 /**
  * Student Credentials — shown after doctor successfully creates a student account.
- * Displays: student info, temp password, assigned course (if any), activation method.
+ * Displays: student info, temp password, assigned course (if any), enrollment method.
  * Actions: Copy Credentials, Share, Done (returns to students list).
  */
 /**
@@ -18,7 +18,7 @@ import { View, Text, ScrollView, Pressable, Share, useColorScheme } from 'react-
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import {
   CheckCircle, Copy, Share2, ArrowRight,
-  User, Mail, Phone, Lock, BookOpen, CreditCard, Ticket,
+  User, Mail, Phone, Lock, BookOpen, CreditCard,
 } from 'lucide-react-native';
 import * as Clipboard from 'expo-clipboard';
 import { neuColors, useLayout, neuFlatStyle, safeBottom } from '@/lib/neu';
@@ -87,7 +87,7 @@ export default function StudentCredentialsScreen() {
 
     if (course_name) lines.push(`Course:   ${course_name}`);
     if (activation_method && activation_method !== 'account_only') {
-      lines.push(`Method:   ${activation_method === 'credits' ? 'Doctor Credits' : 'Activation Code'}`);
+      lines.push(`Method:   Doctor Credits`);
     }
     if (remaining_credits && activation_method === 'credits') {
       lines.push(`Remaining Credits: ${remaining_credits}`);
@@ -120,7 +120,6 @@ export default function StudentCredentialsScreen() {
 
   const methodLabel =
     activation_method === 'credits' ? 'Doctor Credits'
-    : activation_method === 'code'  ? 'Activation Code'
     : 'Account Only';
 
   // ── Credential rows ─────────────────────────────────────────────────────────
@@ -147,7 +146,7 @@ export default function StudentCredentialsScreen() {
 
   if (course_name) rows.push([BookOpen, 'Course', course_name]);
   if (activation_method && activation_method !== 'account_only') {
-    rows.push([activation_method === 'credits' ? CreditCard : Ticket, 'Method', methodLabel]);
+    rows.push([CreditCard, 'Method', methodLabel]);
   }
   if (activation_method === 'credits' && remaining_credits) {
     rows.push([CreditCard, 'Remaining Credits', `${remaining_credits} Credits`]);
@@ -158,7 +157,7 @@ export default function StudentCredentialsScreen() {
       <ScrollView>
         <PageHeader title="Student Created" onBack={handleDone} />
 
-      <View style={{ paddingHorizontal: layout.screenPx, gap: 16, paddingBottom: layout.scrollBottom() }}>
+      <View style={{ paddingHorizontal: layout.screenPx, gap: 16 }}>
 
         {/* Success banner */}
         <View style={[flat, { borderRadius: 20, padding: 24, alignItems: 'center', gap: 12 }]}>

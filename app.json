@@ -51,7 +51,7 @@
         "backgroundColor": "#081A35"
       },
       "predictiveBackGestureEnabled": false,
-      "versionCode": 220,
+      "versionCode": 221,
       "package": "com.medacademy.app",
       "softwareKeyboardLayoutMode": "resize"
     },
@@ -116,7 +116,7 @@
         {
           "photosPermission": "Allow MedAcademy to access your photos.",
           "savePhotosPermission": "Allow MedAcademy to save media to your library.",
-          "isAccessMediaLocationEnabled": true
+          "granularPermissions": []
         }
       ],
       [
@@ -146,13 +146,24 @@
       ],
       "./plugins/withIosJsc",
       "./plugins/withSecurityModule",
+      "./plugins/withProductionSigning",
       "./plugins/withProguardRules",
       "./plugins/withDynamicVersions",
       "./plugins/withGradleWrapper",
-      "./plugins/withNativeUpload"
+      "./plugins/withNativeUpload",
+      "./plugins/withPrivacyPermissions"
     ],
     "extra": {
-      "eas": {}
+      "eas": {},
+      "medaPinnedHosts": [
+        "api.medacademy.site"
+      ],
+      "medaSslPins": [
+        "YgE8xZrTDWipiJkwnrLtxhuvJ/hgbAALB0GeAm+Lsqs=",
+        "nWN7PSep5XDQdge5zK24CnCRXHr3KvzhKEGxsdqCX9E=",
+        "exJsXfd7uQJtSDAE50zO2o1ZAtdicaEFOcI+bXWX/Z4=",
+        "0FKBVxnyd4Jq8v8ST+3sjO+WoB7PLBEpSdixbHE1L4g="
+      ]
     },
     "experiments": {
       "typedRoutes": false

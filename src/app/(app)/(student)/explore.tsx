@@ -262,7 +262,7 @@ function doctorOf(item: CourseItem): { id: string; full_name: string } | null {
         renderItem={renderItem}
         ListHeaderComponent={ListHeader}
         ListEmptyComponent={ListEmpty}
-        contentContainerStyle={{ paddingHorizontal: layout.screenPx, paddingBottom: layout.scrollBottom() }}
+        contentContainerStyle={{ paddingHorizontal: layout.screenPx }}
         keyboardShouldPersistTaps="handled"
         keyboardDismissMode="on-drag"
         refreshControl={

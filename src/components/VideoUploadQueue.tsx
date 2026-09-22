@@ -6,8 +6,9 @@
 
 import { useEffect, useRef } from 'react';
 import {
-  Animated, FlatList, Image, Modal, Pressable, Text, useColorScheme, View,
+  Animated, Easing, FlatList, Image, Pressable, StyleSheet, Text, useColorScheme, View, useWindowDimensions,
 } from 'react-native';
+import { PortalOverlay } from '@/components/PortalOverlay';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   Upload, X, Pause, Play, RefreshCw, Trash2,
@@ -48,13 +49,40 @@ const STAGE_PROGRESS: Record<string, number> = {
 };
 
 // ─── Animated progress bar ────────────────────────────────────────────────────
-function ProgressBar({ pct, color, isDark, lyt }: { pct: number; color: string; isDark: boolean; lyt: QueueLayout }) {
+function ProgressBar({ pct, color, isDark, lyt, indeterminate }: { pct: number; color: string; isDark: boolean; lyt: QueueLayout; indeterminate?: boolean }) {
   const anim = useRef(new Animated.Value(pct)).current;
+  // Indeterminate mode: post-upload stages (processing/encoding/streams/verify)
+  // have NO provider-side byte progress — instead of a frozen, misleading
+  // percentage bar, animate a looping sweep. Same track/height/colors as the
+  // determinate bar (visual design preserved).
+  const sweep = useRef(new Animated.Value(0)).current;
   useEffect(() => {
+    if (indeterminate) {
+      const loop = Animated.loop(
+        Animated.sequence([
+          Animated.timing(sweep, { toValue: 1, duration: 1100, easing: Easing.inOut(Easing.quad), useNativeDriver: false }),
+          Animated.timing(sweep, { toValue: 0, duration: 1100, easing: Easing.inOut(Easing.quad), useNativeDriver: false }),
+        ]),
+      );
+      loop.start();
+      return () => loop.stop();
+    }
     Animated.timing(anim, { toValue: pct, duration: 250, useNativeDriver: false }).start();
-  }, [pct]);
+  }, [pct, indeterminate]);
   // Bar height: pad.xs + 1 → fluid ~5–9dp (was hardcoded 7)
   const barH = lyt.pad.xs + 1;
+  if (indeterminate) {
+    return (
+      <View style={{ height: barH, borderRadius: barH / 2, overflow: 'hidden',
+        ...neuPressedStyle(isDark), backgroundColor: isDark ? '#1a1a2e' : '#e8ecf0' }}>
+        <Animated.View style={{
+          height: '100%', borderRadius: barH / 2, backgroundColor: color,
+          width: '38%',
+          marginLeft: sweep.interpolate({ inputRange: [0, 1], outputRange: ['-38%', '100%'] }),
+        }} />
+      </View>
+    );
+  }
   return (
     <View style={{ height: barH, borderRadius: barH / 2, overflow: 'hidden',
       ...neuPressedStyle(isDark), backgroundColor: isDark ? '#1a1a2e' : '#e8ecf0' }}>
@@ -240,9 +268,13 @@ function UploadItemCard({ task, isDark, lyt }: { task: UploadTask; isDark: boole
         </View>
       </View>
 
-      {/* Progress bar */}
-      {(isActive || isPaused || task.status === 'resuming' || isProcessing || isVerifying) && (
+      {/* Progress bar — indeterminate sweep for post-upload stages (no byte
+          progress exists from the provider); determinate bytes bar otherwise. */}
+      {(isActive || isPaused || task.status === 'resuming') && (
         <ProgressBar pct={displayPct} color={cfg.color} isDark={isDark} lyt={lyt} />
+      )}
+      {(isProcessing || isVerifying) && (
+        <ProgressBar pct={displayPct} color={cfg.color} isDark={isDark} lyt={lyt} indeterminate />
       )}
       {isReady && <ProgressBar pct={100} color="#16A34A" isDark={isDark} lyt={lyt} />}
 
@@ -343,9 +375,8 @@ function RecoveryDialog({ isDark, lyt }: { isDark: boolean; lyt: QueueLayout }) 
   const dialogMaxW = lyt.modalWidth ?? lyt.width - lyt.screenPx * 2;
 
   return (
-    <Modal visible transparent animationType="fade">
-      <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)',
-        justifyContent: 'center', alignItems: 'center', paddingHorizontal: lyt.screenPx }}>
+    <PortalOverlay visible onRequestClose={() => setShowRecoveryDialog(false)} variant="dialog" backdropColor="rgba(0,0,0,0.5)">
+      <View style={{ width: '100%', alignItems: 'center', paddingHorizontal: lyt.screenPx }}>
         <View style={[neuFlatStyle(isDark), {
           borderRadius: lyt.cardRadius * 1.2,
           padding: lyt.cardPx * 1.1,
@@ -401,7 +432,7 @@ function RecoveryDialog({ isDark, lyt }: { isDark: boolean; lyt: QueueLayout }) 
           </View>
         </View>
       </View>
-    </Modal>
+    </PortalOverlay>
   );
 }
 
@@ -573,20 +604,27 @@ export function VideoUploadQueuePanel({ visible, onClose }: { visible: boolean; 
   const lyt = useLayout();
   const insets = useSafeAreaInsets();
   const { tasks } = useUploadQueueStore();
+  const { width: screenW } = useWindowDimensions();
 
-  // Bottom padding: use real inset so home indicator / gesture bar / Android nav
-  // bar are always cleared — never rely on a hardcoded pageBottom alone.
-  const sheetPaddingBottom = Math.max(insets.bottom + lyt.pad.md, lyt.pageBottom);
-
+  // Centered dialog presentation (consistent with ResponsiveModal): the host
+  // owns safe-area clearance (single owner — no double padding), the card is
+  // width-capped and internally scrollable via FlatList.
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <View style={{ flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.35)' }}>
+    <PortalOverlay visible={visible} onRequestClose={onClose} variant="dialog" backdropColor="rgba(0,0,0,0.35)">
+        <View style={[{
+          ...StyleSheet.absoluteFillObject,
+          alignItems: 'center',
+          justifyContent: 'center',
+          paddingTop: insets.top + 8,
+          paddingBottom: insets.bottom + 8,
+        }]}
+          pointerEvents="box-none">
         <View style={[{
           backgroundColor: c.base,
-          borderTopLeftRadius: lyt.cardRadius * 1.5,
-          borderTopRightRadius: lyt.cardRadius * 1.5,
-          maxHeight: '85%',
-          paddingBottom: sheetPaddingBottom,
+          borderRadius: lyt.cardRadius * 1.5,
+          width: Math.min(screenW * 0.92, 560),
+          maxHeight: '100%',
+          overflow: 'hidden',
         }, neuFlatStyle(isDark)]}>
           <QueueHeader isDark={isDark} onClose={onClose} lyt={lyt} />
           <BulkActions isDark={isDark} lyt={lyt} />
@@ -611,7 +649,7 @@ export function VideoUploadQueuePanel({ visible, onClose }: { visible: boolean; 
             />
           )}
         </View>
-      </View>
-    </Modal>
+        </View>
+    </PortalOverlay>
   );
 }

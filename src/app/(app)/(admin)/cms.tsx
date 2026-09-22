@@ -5,7 +5,7 @@
 import { useCallback, useState } from 'react';
 import { PageHeader } from '@/components/PageHeader';
 import {
-  View, Text, ScrollView, TextInput, ActivityIndicator,
+  View, Text, ScrollView, TextInput,
   RefreshControl, useColorScheme, Pressable,
 } from 'react-native';
 import { useFocusEffect } from 'expo-router';
@@ -13,7 +13,11 @@ import { FileText, Edit3, Check, ChevronRight, ChevronDown } from 'lucide-react-
 import { getCMSPages, updateCMSPage } from '@/lib/api';
 import { NeuCard } from '@/components/NeuCard';
 import { NeuButton } from '@/components/NeuButton';
-import { neuColors, useLayout } from '@/lib/neu';
+import { LoadingState, ErrorState } from '@/components/ScreenState';
+import { EmptyState } from '@/components/EmptyState';
+import { useToast } from '@/components/Toast';
+import { neuColors, useLayout, safeBottom } from '@/lib/neu';
+import { friendlyError } from '@/lib/validation';
 
 const PAGE_COLORS: Record<string, string> = {
   about_us: '#1E90FF', contact_us: '#16A34A', privacy_policy: '#7C3AED', terms_conditions: '#D97706',
@@ -24,27 +28,35 @@ export default function CMSPagesScreen() {
   const isDark = scheme === 'dark';
   const c = isDark ? neuColors.dark : neuColors.light;
   const layout = useLayout();
+  const { showToast } = useToast();
 
   const [pages, setPages] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<unknown>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [editing, setEditing] = useState<Record<string, { title: string; content: string }>>({});
   const [saving, setSaving] = useState<string | null>(null);
   const [saved, setSaved] = useState<string | null>(null);
 
+  // Terminal-state contract: LOADING → (ERROR | EMPTY | CONTENT).
   const load = useCallback(async () => {
+    setLoading(true);
+    setError(null);
     try {
       const data = await getCMSPages();
       setPages(data);
       const ed: Record<string, { title: string; content: string }> = {};
       data.forEach((p: any) => { ed[p.key] = { title: p.title, content: p.content }; });
       setEditing(ed);
-    } catch (_) {}
-    setLoading(false);
+    } catch (e) {
+      setError(e);
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
-  useFocusEffect(useCallback(() => { setLoading(true); load(); }, [load]));
+  useFocusEffect(useCallback(() => { load(); }, [load]));
   const onRefresh = async () => { setRefreshing(true); await load(); setRefreshing(false); };
 
   const handleSave = async (key: string) => {
@@ -55,7 +67,9 @@ export default function CMSPagesScreen() {
       await updateCMSPage(key, payload);
       setSaved(key);
       setTimeout(() => setSaved(null), 2500);
-    } catch (_) {}
+    } catch (e) {
+      showToast({ type: 'error', message: friendlyError(e, 'Failed to save page.') });
+    }
     setSaving(null);
   };
 
@@ -63,13 +77,23 @@ export default function CMSPagesScreen() {
 
   return (
     <ScrollView style={{ flex: 1, backgroundColor: c.base }}
-          contentContainerStyle={{ paddingBottom: layout.scrollBottom() }}
-      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />}>
+      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />} contentContainerStyle={{ paddingBottom: safeBottom(layout.insets.bottom) }}>
       <PageHeader title="CMS Pages" subtitle="Edit platform content pages" accentColor="#16A34A" />
 
       <View style={{ paddingHorizontal: layout.screenPx }}>
 
-        {loading ? <ActivityIndicator color={c.primary} style={{ marginTop: 40 }} /> : (
+        {loading ? (
+          <LoadingState label="Loading CMS pages…" />
+        ) : error ? (
+          <ErrorState error={error} onRetry={load} />
+        ) : pages.length === 0 ? (
+          <EmptyState
+            icon={<FileText size={40} color={c.primary} />}
+            title="No CMS pages"
+            description="The server returned no CMS page content."
+            action={{ label: 'Refresh', onPress: load }}
+          />
+        ) : (
           pages.map(page => {
             const color = PAGE_COLORS[page.key] ?? c.primary;
             const isOpen = expanded === page.key;

@@ -6,9 +6,15 @@ import { useDrawer } from './DrawerContext';
 
 interface Props {
   color?: string;
+  /**
+   * Plain variant — no raised box (background/border/shadow). Used inside
+   * compact page headers where the button should read as part of the header
+   * row, not as a separate card. Touch target and behaviour are unchanged.
+   */
+  plain?: boolean;
 }
 
-export default function HamburgerButton({ color }: Props) {
+export default function HamburgerButton({ color, plain = false }: Props) {
   const { openDrawer } = useDrawer();
   const scheme = useColorScheme();
   const isDark = scheme === 'dark';
@@ -17,10 +23,24 @@ export default function HamburgerButton({ color }: Props) {
 
   const base = {
     ...iconContainer.md,
-    backgroundColor: c.base,
+    backgroundColor: plain ? 'transparent' : c.base,
     alignItems: 'center' as const,
     justifyContent: 'center' as const,
   };
+
+  if (plain) {
+    return (
+      <Pressable
+        onPress={openDrawer}
+        hitSlop={12}
+        accessibilityLabel="Open navigation menu"
+        accessibilityRole="button"
+        style={base}
+      >
+        <Menu size={iconSize.md} color={iconColor} />
+      </Pressable>
+    );
+  }
 
   return (
     <Pressable
@@ -38,7 +58,6 @@ export default function HamburgerButton({ color }: Props) {
         },
         android: {
           ...base,
-          // elevation:0 avoids Android material tint "white layer" on neumorphic base.
           elevation: 0,
           borderWidth: 1,
           borderColor: isDark ? 'rgba(255,255,255,0.07)' : 'rgba(160,185,215,0.55)',

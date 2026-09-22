@@ -15,7 +15,7 @@ import {
 import { backendClient } from '@/client/backendClient';
 import { NeuCard } from '@/components/NeuCard';
 import { NeuButton } from '@/components/NeuButton';
-import { neuColors, useLayout } from '@/lib/neu';
+import { neuColors, useLayout, safeBottom } from '@/lib/neu';
 import { PageHeader } from '@/components/PageHeader';
 
 interface AuditResult {
@@ -25,7 +25,6 @@ interface AuditResult {
   negative_balances:       number;
   orphan_enrollments:      number;
   orphan_lessons:          number;
-  duplicate_codes:         number;
   duplicate_transactions:  number;
   broken_fks:              number;
   total_issues:            number;
@@ -44,7 +43,6 @@ const ISSUE_CFG = [
   { key: 'negative_balances',      label: 'Negative Credit Balances',     icon: AlertTriangle, risk: 'high'   },
   { key: 'orphan_enrollments',     label: 'Orphan Enrollments',           icon: Trash2,        risk: 'medium' },
   { key: 'orphan_lessons',         label: 'Orphan Lessons',               icon: Trash2,        risk: 'medium' },
-  { key: 'duplicate_codes',        label: 'Duplicate Activation Codes',   icon: AlertTriangle, risk: 'medium' },
   { key: 'duplicate_transactions', label: 'Duplicate Transactions',       icon: AlertTriangle, risk: 'high'   },
   { key: 'broken_fks',             label: 'Broken Foreign Keys',          icon: Database,      risk: 'high'   },
 ];
@@ -118,8 +116,7 @@ export default function DbAuditPanel() {
   return (
     <ScrollView
       style={{ flex: 1, backgroundColor: c.base }}
-      contentContainerStyle={{ paddingBottom: layout.scrollBottom() }}
-      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />}
+      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />} contentContainerStyle={{ paddingBottom: safeBottom(layout.insets.bottom) }}
     >
       <PageHeader title="Database Audit" subtitle="Integrity checks, orphans, duplicates & broken FKs" accentColor="#7C3AED" />
 

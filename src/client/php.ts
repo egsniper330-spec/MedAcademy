@@ -10,7 +10,10 @@
 //   await backendClient.functions.invoke('device-binding', { body: {...} });
 // ─────────────────────────────────────────────────────────────────────────────
 
+import * as SecureStore from 'expo-secure-store';
 import { getInstallationId, getStoredDeviceFingerprint } from '@/lib/installationId';
+import Constants from 'expo-constants';
+import { Platform as RNPlatform } from 'react-native';
 
 // ── Config ──────────────────────────────────────────────────────────────────
 
@@ -19,7 +22,7 @@ const API_BASE: string = (() => {
   if (!configured) {
     throw new Error(
       '[BackendConfig] EXPO_PUBLIC_PHP_API_URL is required. ' +
-      'Configure it as https://api.medacademy.eu.cc/backend/public/index.php.'
+      'Configure it as https://api.medacademy.site/backend/public/index.php.'
     );
   }
   return configured.replace(/\/$/, '');
@@ -28,12 +31,18 @@ const API_BASE: string = (() => {
 /** The sole application API base; configuration fails closed when missing. */
 export const backendApiBase = API_BASE;
 
+/** Raw JSON fetch against the PHP backend (single choke point; injects app
+ *  identity headers and intercepts HTTP 426 UPDATE_REQUIRED globally). */
+export { apiFetch };
+
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
 function getToken(): string | null {
+  // Fast path: read from in-memory cache (always up-to-date after storeSession/clearSession).
+  if (_cachedSession?.access_token) return _cachedSession.access_token;
+  // Fallback: localStorage (web / Expo dev).
   try {
-    // Read the PHP session stored by the web/native session adapter
-    if (typeof localStorage !== 'undefined') {
+    if (_hasLocalStorage()) {
       const raw = localStorage.getItem(AUTH_KEY) ?? localStorage.getItem(LEGACY_AUTH_KEY);
       if (raw) {
         const parsed = JSON.parse(raw);
@@ -42,6 +51,25 @@ function getToken(): string | null {
     }
   } catch { /* ignore */ }
   return null;
+}
+
+// ── Auth diagnostics ────────────────────────────────────────────────────────
+// Safe state-transition logging for diagnosing unexpected logouts. NEVER logs
+// access tokens, refresh tokens, passwords, or response bodies — only the
+// transition name, outcome, and (for refresh) the HTTP status class. Active in
+// all builds but terse enough to be useful in production logs.
+function authStateLog(event: string, detail?: string): void {
+  try {
+    console.log(`[AUTH_STATE] ${event}${detail ? ` — ${detail}` : ''}`);
+  } catch { /* logging must never break auth */ }
+}
+
+function classifyHttpStatus(status: number | undefined): string {
+  if (status == null) return 'no_status(network)';
+  if (status === 401 || status === 403) return `definitive_auth(${status})`;
+  if (status === 400 || status === 422) return `definitive_request(${status})`;
+  if (status >= 500) return `temporary_server(${status})`;
+  return `other(${status})`;
 }
 
 // Single-flight access-token refresh: concurrent 401s share ONE refresh
@@ -65,7 +93,11 @@ function shouldAutoRefresh(path: string): boolean {
 }
 
 async function refreshAccessToken(): Promise<boolean> {
-  if (refreshPromise) return refreshPromise;
+  if (refreshPromise) {
+    authStateLog('AUTH_REFRESH_START', 'joining in-flight refresh (single-flight)');
+    return refreshPromise;
+  }
+  authStateLog('AUTH_REFRESH_START');
   refreshPromise = (async (): Promise<boolean> => {
     const stored = getStoredSession();
     if (!stored?.refresh_token) return false;
@@ -75,15 +107,23 @@ async function refreshAccessToken(): Promise<boolean> {
     });
     const s = res.data?.session;
     if (res.error || !s?.access_token || !s.refresh_token) {
-      // Only invalidate the stored session on a definitive auth failure from
-      // the refresh endpoint (expired/revoked/invalid refresh token). A
-      // transient network error (no HTTP status) must NOT log the user out.
+      // Only invalidate the stored session on a DEFINITIVE auth failure from
+      // the refresh endpoint: 401 (expired/revoked/invalid refresh token),
+      // 400/422 (malformed), or 403 (account suspended/blocked — the only 403
+      // AuthService::refresh() throws). A transient network error (no HTTP
+      // status) or a 5xx server error must NOT log the user out.
       const status = res.error?.status;
-      if (status === 401 || status === 400 || status === 422) clearSession();
+      if (status === 401 || status === 400 || status === 422 || status === 403) {
+        authStateLog('AUTH_REFRESH_DEFINITIVE_FAILURE', `${classifyHttpStatus(status)} → clearing local session`);
+        await clearSession();
+      } else {
+        authStateLog('AUTH_NETWORK_FAILURE', `${classifyHttpStatus(status)} → session PRESERVED`);
+      }
       return false;
     }
     // Persist the rotated pair; the `user` object is unchanged.
-    storeSession({ access_token: s.access_token, refresh_token: s.refresh_token, user: stored.user });
+    await storeSession({ access_token: s.access_token, refresh_token: s.refresh_token, user: stored.user });
+    authStateLog('AUTH_REFRESH_SUCCESS');
     return true;
   })().finally(() => { refreshPromise = null; });
   return refreshPromise;
@@ -117,6 +157,22 @@ async function apiFetchOnce<T = unknown>(
   const token = getToken();
   if (token) headers['Authorization'] = `Bearer ${token}`;
 
+  // App-identity headers — consumed by the server-side forced-update
+  // enforcement (AuthMiddleware). Old versions get HTTP 426 on every
+  // protected call regardless of any client UI.
+  //
+  // NATIVE-ONLY: custom headers trigger CORS preflights, and the deployed
+  // allowlist does not include these names — on web every request would fail
+  // its preflight and the whole SPA could not talk to the API. The server
+  // defaults to a non-android platform when the header is absent, so the web
+  // client is correctly evaluated against the web/ios update config; native
+  // apps are unaffected by CORS and always send the headers.
+  if (RNPlatform.OS !== 'web') {
+    headers['X-App-Platform'] = RNPlatform.OS === 'android' ? 'android' : 'ios';
+    const appVersionCode = Constants.expoConfig?.android?.versionCode ?? 0;
+    if (appVersionCode > 0) headers['X-App-Version-Code'] = String(appVersionCode);
+  }
+
   // 30s request timeout — a hung request must never leave a screen in an
   // eternal loading state (e.g. the dashboard's Promise.all).
   const controller = new AbortController();
@@ -134,10 +190,43 @@ async function apiFetchOnce<T = unknown>(
 
     if (!res.ok) {
       const errObj = typeof parsed === 'object' && parsed !== null ? parsed as Record<string, unknown> : {};
+      const inner426 = (errObj.error && typeof errObj.error === 'object')
+        ? errObj.error as Record<string, unknown>
+        : null;
+      // Server-side forced-update enforcement (HTTP 426): the backend has
+      // authoritatively decided this version is unsupported. Flip the update
+      // gate immediately — no client state can keep protected UI alive.
+      if (res.status === 426 && (errObj.code === 'UPDATE_REQUIRED' || inner426?.code === 'UPDATE_REQUIRED')) {
+        void import('@/lib/updateConfigService').then(({ emitUpdateRejection }) =>
+          emitUpdateRejection({
+            latestVersion: inner426?.latestVersion,
+            latestVersionCode: inner426?.latestVersionCode,
+            minimumVersionCode: inner426?.minimumVersionCode,
+            updateUrl: inner426?.updateUrl,
+            updateMode: inner426?.updateMode,
+          })
+        );
+      }
       // PHP backend error envelope: { error: { message, code } } (or flat { message })
       const inner = (errObj.error && typeof errObj.error === 'object')
         ? errObj.error as Record<string, unknown>
         : null;
+      // Server-side MAINTENANCE gate (HTTP 503 maintenance_mode): the backend
+      // has authoritatively blocked this route while maintenance is ON. This is
+      // a DISTINCT state — never a logout, never a generic network error, never
+      // offline (the server REACHED us to say so). The maintenance service
+      // renders the full-screen maintenance UI and auto-recovers when the
+      // backend reports maintenance disabled again.
+      const innerCode = (errObj.code as string | undefined) ?? (inner?.code as string | undefined);
+      if (res.status === 503 && (innerCode === 'maintenance_mode' || errObj.maintenance != null)) {
+        const maintenanceMeta = ((inner?.maintenance ?? errObj.maintenance ?? {}) as Record<string, unknown>);
+        void import('@/lib/maintenanceService').then(({ notifyMaintenance503 }) =>
+          notifyMaintenance503({
+            message: (inner?.message as string) ?? (errObj.message as string) ?? 'MedAcademy is temporarily unavailable while we perform maintenance.',
+            retryAfter: typeof maintenanceMeta.retryAfter === 'number' ? maintenanceMeta.retryAfter : 300,
+          })
+        );
+      }
       return {
         data: null,
         error: {
@@ -155,6 +244,7 @@ async function apiFetchOnce<T = unknown>(
     return { data: parsed as T, error: null };
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : String(e);
+    authStateLog('AUTH_NETWORK_FAILURE', msg.includes('AbortError') ? 'request timed out (30s) — no session impact' : msg);
     return { data: null, error: { message: msg.includes('AbortError') ? 'Request timed out' : msg } };
   } finally {
     clearTimeout(timer);
@@ -322,31 +412,172 @@ interface AuthSession {
 
 const AUTH_KEY = 'php-auth-token';
 const LEGACY_AUTH_KEY = 'sb-auth-token';
+const SECURE_STORE_KEY = 'php-auth-session';
+/** Diagnostic threshold: a SecureStore read slower than this is logged (never truncated). */
+const HYDRATION_TIMEOUT_MS = 3_000;
+/** Hard cap for a genuinely HUNG native bridge — startup must remain bounded. */
+const HYDRATION_HARD_CAP_MS = 10_000;
 
-function storeSession(session: AuthSession): void {
-  try { localStorage.setItem(AUTH_KEY, JSON.stringify(session)); } catch { /* ignore */ }
+// ── Compact session format for SecureStore (stays under 2KB) ─────────────────
+// SecureStore has a 2KB value limit. A full AuthSession with long JWTs and
+// large user_metadata could exceed it. The compact format stores only what is
+// needed to reconstruct the session on restore; the full AuthSession is kept
+// in the in-memory cache for runtime use.
+interface CompactSession {
+  at: string;                          // access_token
+  rt: string;                          // refresh_token
+  uid: string;                         // user.id
+  email: string | null;                // user.email
+  phone: string | null;                // user.phone
+  meta?: Record<string, unknown>;      // user.user_metadata
+  app?: Record<string, unknown>;       // user.app_metadata
 }
 
-function clearSession(): void {
+function _toCompact(s: AuthSession): CompactSession {
+  return {
+    at: s.access_token,
+    rt: s.refresh_token,
+    uid: s.user.id,
+    email: s.user.email,
+    phone: s.user.phone,
+    meta: s.user.user_metadata,
+    app: s.user.app_metadata,
+  };
+}
+
+function _fromCompact(c: CompactSession): AuthSession {
+  return {
+    access_token: c.at,
+    refresh_token: c.rt,
+    user: {
+      id: c.uid,
+      email: c.email,
+      phone: c.phone,
+      user_metadata: c.meta,
+      app_metadata: c.app,
+    },
+  };
+}
+
+// ── In-memory session cache + SecureStore persistence ────────────────────────
+// Synchronous reads (getToken, getStoredSession) hit _cachedSession.
+// Writes (storeSession, clearSession) update the cache AND persist to
+// SecureStore (native) and/or localStorage (web/dev) for cross-restart survival.
+// On module load, _hydrateFromSecureStore() populates the cache from disk.
+let _cachedSession: AuthSession | null = null;
+
+function _hasLocalStorage(): boolean {
+  try { return typeof localStorage !== 'undefined' && typeof localStorage.setItem === 'function'; } catch { return false; }
+}
+
+function _isNative(): boolean {
+  return process.env.EXPO_OS !== 'web';
+}
+
+/** Hydrate the in-memory cache from SecureStore on app start. */
+async function _hydrateFromSecureStore(): Promise<void> {
+  if (!_isNative()) return;
   try {
-    localStorage.removeItem(AUTH_KEY);
-    localStorage.removeItem(LEGACY_AUTH_KEY);
+    const raw = await SecureStore.getItemAsync(SECURE_STORE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      // Backward compat: old format stored full AuthSession; new format uses CompactSession.
+      _cachedSession = (parsed.at != null) ? _fromCompact(parsed as CompactSession) : (parsed as AuthSession);
+    }
   } catch { /* ignore */ }
 }
 
+/**
+ * Hydration — AUTHORITATIVE, never truncated by a short timer.
+ *
+ * THE OFFLINE-LOGIN BUG (root cause, state/order — not a UI guess):
+ * the previous implementation raced the SecureStore read against a 3-second
+ * timeout and let the TIMEOUT resolve as silent success. On a slow cold start
+ * (cold native bridge, disk contention, first unlock after boot) the local
+ * read legitimately takes longer than 3s; getSession() then resolved with
+ * session=null AND isLoading=false, the root Stack.Protected guard mounted the
+ * (auth) group, and a fully-authenticated user landed on LOGIN. Offline there
+ * is no way back (login cannot succeed without a network), and the late real
+ * read was discarded because nothing re-ran the initial session load.
+ *
+ * New contract: getSession() awaits the REAL read. The 3s timer is diagnostic
+ * only; the hard cap exists solely so a genuinely HUNG native bridge cannot
+ * hang startup forever (10s → resolve → unreadable session → login is then
+ * genuinely correct because no session can be read). A late read that lands
+ * after a cap-truncated first getSession() still self-heals: the poll-based
+ * onAuthStateChange listener observes the token appear and emits SIGNED_IN.
+ *
+ * This path performs NO network I/O (SecureStore is local) — a network
+ * failure can never reach it, let alone be treated as a logout.
+ */
+function _hydrateWithTimeout(): Promise<void> {
+  let settled = false;
+  const read = _hydrateFromSecureStore().finally(() => { settled = true; });
+  setTimeout(() => {
+    if (!settled && !_cachedSession) {
+      authStateLog('AUTH_HYDRATION_SLOW', `SecureStore read >${HYDRATION_TIMEOUT_MS}ms — still authoritative, waiting (offline login bug guard)`);
+    }
+  }, HYDRATION_TIMEOUT_MS);
+  const hungBridgeCap = new Promise<void>((resolve) => setTimeout(resolve, HYDRATION_HARD_CAP_MS));
+  return Promise.race([read, hungBridgeCap]);
+}
+
+// Kick off hydration immediately at module load. getSession() awaits this.
+const _hydrationDone: Promise<void> = _hydrateWithTimeout();
+
+async function storeSession(session: AuthSession): Promise<void> {
+  _cachedSession = session;
+  // Persist to localStorage (web/dev fallback)
+  if (_hasLocalStorage()) {
+    try { localStorage.setItem(AUTH_KEY, JSON.stringify(session)); } catch { /* ignore */ }
+  }
+  // Persist to SecureStore (native production) — await to guarantee persistence.
+  if (_isNative()) {
+    try {
+      const compact = JSON.stringify(_toCompact(session));
+      await SecureStore.setItemAsync(SECURE_STORE_KEY, compact);
+    } catch { /* SecureStore full/inaccessible — non-fatal, in-memory cache is authoritative */ }
+  }
+}
+
+async function clearSession(): Promise<void> {
+  authStateLog('AUTH_SESSION_CLEARED');
+  _cachedSession = null;
+  if (_hasLocalStorage()) {
+    try {
+      localStorage.removeItem(AUTH_KEY);
+      localStorage.removeItem(LEGACY_AUTH_KEY);
+    } catch { /* ignore */ }
+  }
+  if (_isNative()) {
+    try {
+      await SecureStore.deleteItemAsync(SECURE_STORE_KEY);
+    } catch { /* ignore */ }
+  }
+}
+
 function getStoredSession(): AuthSession | null {
-  try {
-    const raw = localStorage.getItem(AUTH_KEY) ?? localStorage.getItem(LEGACY_AUTH_KEY);
-    if (!raw) return null;
-    const session = JSON.parse(raw) as AuthSession;
-    if (!localStorage.getItem(AUTH_KEY)) localStorage.setItem(AUTH_KEY, JSON.stringify(session));
-    return session;
-  } catch { return null; }
+  // In-memory cache is always checked first.
+  if (_cachedSession) return _cachedSession;
+  // Fallback: read from localStorage (works on web / Expo dev).
+  if (_hasLocalStorage()) {
+    try {
+      const raw = localStorage.getItem(AUTH_KEY) ?? localStorage.getItem(LEGACY_AUTH_KEY);
+      if (!raw) return null;
+      const session = JSON.parse(raw) as AuthSession;
+      _cachedSession = session;
+      return session;
+    } catch { return null; }
+  }
+  return null;
 }
 
 // Auth methods preserve the existing frontend contract while calling PHP
 const authMethods = {
   getSession: async () => {
+    // Ensure SecureStore hydration has completed before reading the cache.
+    // On first call this waits for _hydrateFromSecureStore(); subsequent calls resolve instantly.
+    await _hydrationDone;
     const session = getStoredSession();
     return { data: { session }, error: null };
   },
@@ -402,7 +633,7 @@ const authMethods = {
     if (res.error) return { data: { session: null, user: null }, error: res.error };
     const d = res.data!;
     const session: AuthSession = { access_token: d.session.access_token, refresh_token: d.session.refresh_token, user: d.user };
-    storeSession(session);
+    await storeSession(session);
     return { data: { session, user: d.user }, error: null };
   },
 
@@ -422,11 +653,12 @@ const authMethods = {
     const d = res.data!;
     if (!d.session) return { data: { session: null, user: d.user }, error: null };
     const session: AuthSession = { access_token: d.session.access_token, refresh_token: d.session.refresh_token, user: d.user };
-    storeSession(session);
+    await storeSession(session);
     return { data: { session, user: d.user }, error: null };
   },
 
   signOut: async ({ scope }: { scope?: string } = {}): Promise<{ error: { message: string; code?: string } | null }> => {
+    authStateLog('AUTH_EXPLICIT_LOGOUT', `scope=${scope ?? 'global'}`);
     if (scope !== 'local') {
       // 'global' or default: notify the server to revoke the refresh token so
       // the session cannot be re-established after logout.
@@ -436,7 +668,7 @@ const authMethods = {
         body: session?.refresh_token ? { refresh_token: session.refresh_token } : {},
       });
     }
-    clearSession();
+    await clearSession();
     return { error: null };
   },
 
@@ -457,14 +689,40 @@ const authMethods = {
   refreshSession: async (opts?: { refresh_token?: string }) => {
     const stored = getStoredSession();
     if (!stored) return { data: { session: null }, error: null };
-    // Use the provided refresh_token or the stored one
-    const refreshToken = opts?.refresh_token ?? stored.refresh_token;
+    // Default path (foreground resume, etc.): share the SINGLE-FLIGHT refresh
+    // lock used by the 401 interceptor. Refresh tokens ROTATE on every use — if
+    // the foreground handler and a concurrent 401-triggered refresh both POST the
+    // same pre-rotation token, the backend rotates it on the first call and
+    // rejects the second with 401, which would clear a perfectly valid session.
+    // refreshAccessToken() guarantees exactly one refresh request at a time and
+    // already implements the correct failure handling: definitive auth failures
+    // (401/400/422) clear the session; network errors / timeouts / server errors
+    // preserve it (the former unconditional clearSession() here was the root
+    // cause of the "logged out after a short period" bug).
+    if (!opts?.refresh_token) {
+      const ok = await refreshAccessToken();
+      if (!ok) {
+        // refreshAccessToken() already cleared the session on a definitive auth
+        // failure and preserved it on a transient network error. Surface an error
+        // so callers (foreground handler) treat this as non-fatal and do NOT
+        // clear again.
+        return { data: { session: getStoredSession() }, error: { message: 'refresh failed' } };
+      }
+      return { data: { session: getStoredSession() }, error: null };
+    }
+    // Explicit-token path (legacy provider adapter only) keeps its own POST and
+    // the same definitive-vs-transient failure handling.
     const res = await apiFetch<{ session: { access_token: string; refresh_token: string } }>('/auth/refresh', {
       method: 'POST',
-      body: { refresh_token: refreshToken },
+      body: { refresh_token: opts.refresh_token },
     });
     if (res.error || !res.data) {
-      clearSession();
+      const status = res.error?.status;
+      // 403 = account suspended/blocked (only 403 AuthService::refresh() throws)
+      // — definitive. Network errors / 5xx preserve the session.
+      if (status === 401 || status === 400 || status === 422 || status === 403) {
+        await clearSession();
+      }
       return { data: { session: null }, error: res.error };
     }
     const s = res.data.session;
@@ -473,14 +731,16 @@ const authMethods = {
       refresh_token: s.refresh_token,
       user: stored.user,
     };
-    storeSession(session);
+    await storeSession(session);
     return { data: { session }, error: null };
   },
 
-  setSession: async (session: { access_token: string; expires_at?: number; refresh_token?: string }) => {
+  setSession: async (session: { access_token: string; expires_at?: number; refresh_token?: string; user?: AuthUser }) => {
+    // Optional `user` override: impersonation swaps the session to a DIFFERENT
+    // user, so the stored user identity must be replaced, not reused.
     const existing = getStoredSession();
-    const user = existing?.user ?? { id: '', email: null, phone: null };
-    storeSession({ access_token: session.access_token, refresh_token: existing?.refresh_token ?? '', user });
+    const user = session.user ?? existing?.user ?? { id: '', email: null, phone: null };
+    await storeSession({ access_token: session.access_token, refresh_token: session.refresh_token ?? existing?.refresh_token ?? '', user });
     return { error: null };
   },
 
@@ -491,7 +751,7 @@ const authMethods = {
     if (res.error) return { data: { session: null, user: null }, error: res.error };
     const d = res.data!;
     const session: AuthSession = { access_token: d.session.access_token, refresh_token: d.session.refresh_token, user: d.user };
-    storeSession(session);
+    await storeSession(session);
     return { data: { session, user: d.user }, error: null };
   },
 
@@ -568,12 +828,17 @@ function createStorageBucket(bucket: string) {
 // ── Functions ───────────────────────────────────────────────────────────────
 
 const EDGE_FUNCTION_MAP: Record<string, string> = {
+  'redeem-codes':           '/redeem-codes',
+  'redeem-code-redeem':     '/redeem-codes/redeem',
   'admin-doctor-earnings':  '/analytics/doctor-earnings',
   'admin-enrollment':       '/admin/enrollment',
   'admin-update-email':     '/admin/update-email',
   'block-user':             '/admin/users/{id}/block',
   'device-binding':         '/device-binding',
   'get-security-config':    '/security/config',
+  'get-app-update-config':  '/admin/app-updates',
+  'set-app-update-config':  '/admin/app-updates/{platform}',
+  'get-security-policies':  '/security/policies',
   'get-security-version':   '/security/version',
   'get-signed-url':         '/storage/signed-url',
   'impersonate':            '/auth/impersonate',
@@ -581,9 +846,18 @@ const EDGE_FUNCTION_MAP: Record<string, string> = {
   'provider-health':        '/provider-health',
   'restore-account':        '/admin/users/{id}/restore',
   'security-logger':        '/security/events',
+  'security-evidence-key':  '/security/device-key',
+  'security-evidence-challenge': '/security/challenge',
+  'security-evidence-verify':    '/security/evidence',
+  'security-evidence-revoke':    '/security/device-keys/{id}/revoke',
   'student-operations':     '/student-operations',
   'system-health':          '/system-health',
+  'system-diagnostics':     '/admin/system/diagnostics',
+  'system-diagnostics-one': '/admin/system/diagnostics/{id}',
+  'get-maintenance-status': '/maintenance',
+  'set-maintenance-mode':   '/admin/maintenance',
   'vdocipher-otp':          '/video/otp',
+  'vdocipher-offline-authorize': '/video/offline-authorize',
   'verify-app-integrity':   '/integrity/app',
   'verify-play-integrity':  '/integrity/play',
   'video-health-scan':      '/video/health-scan',
@@ -596,9 +870,7 @@ const EDGE_FUNCTION_MAP: Record<string, string> = {
   'bulk-user-ops':          '/admin/bulk-user-ops',
   'trash-cleanup':          '/admin/trash-cleanup',
   'user-management':        '/admin/user-management',
-};
-
-// Multi-action Edge Functions (original EF dispatches on body.action)
+};// Multi-action Edge Functions (original EF dispatches on body.action)
 const EDGE_ACTION_MAP: Record<string, Record<string, string>> = {
   'credits': {
     allocate:       '/credits/allocate',
@@ -606,23 +878,12 @@ const EDGE_ACTION_MAP: Record<string, Record<string, string>> = {
     revoke:         '/credits/revoke',
     refund:         '/credits/refund',
   },
-  'activation-codes': {
-    batch_create:    '/activation-codes/batch-create',
-    clone_batch:     '/activation-codes/clone-batch',
-    deactivate:      '/activation-codes/deactivate',
-    reactivate:      '/activation-codes/reactivate',
-    bulk_delete:     '/activation-codes/bulk-delete',
-    bulk_disable:    '/activation-codes/deactivate',
-    bulk_enable:     '/activation-codes/reactivate',
-    disable_batch:   '/activation-codes/deactivate',
-    enable_batch:    '/activation-codes/reactivate',
-    hard_delete_batch: '/activation-codes/bulk-delete',
-    delete_code:     '/activation-codes/bulk-delete',
-  },
 };
 
 // Edge Functions whose PHP routes are GET-only (config/version/health probes)
-const GET_FUNCTIONS = new Set(['get-security-config', 'get-security-version', 'provider-health']);
+const GET_FUNCTIONS = new Set(['get-security-config', 'get-security-policies', 'get-security-version', 'provider-health', 'get-app-update-config', 'system-diagnostics', 'system-diagnostics-one', 'get-maintenance-status']);
+// Edge Functions whose PHP routes REQUIRE PUT (the upsert contract)
+const FORCE_PUT_FUNCTIONS = new Set(['set-app-update-config']);
 // Edge Functions whose PHP routes are POST-only regardless of the caller's
 // requested method (the original vdocipher-upload-status EF used GET; the PHP
 // route /video/upload-status accepts POST with a JSON body).
@@ -632,7 +893,9 @@ async function invokeFunction<T = any>(
   name: string,
   opts: { body?: unknown; method?: string; headers?: Record<string, string> } = {}
 ): Promise<{ data: T | null; error: { message: string; context?: { text: () => Promise<string> } } | null }> {
-  const method = FORCE_POST_FUNCTIONS.has(name) ? 'POST' : (opts.method ?? (GET_FUNCTIONS.has(name) ? 'GET' : 'POST'));
+  const method = FORCE_PUT_FUNCTIONS.has(name)
+    ? 'PUT'
+    : FORCE_POST_FUNCTIONS.has(name) ? 'POST' : (opts.method ?? (GET_FUNCTIONS.has(name) ? 'GET' : 'POST'));
   const payload = (opts.body ?? {}) as Record<string, unknown>;
 
   // 1. Resolve the PHP route (static map, action dispatch, or special cases)
@@ -642,6 +905,13 @@ async function invokeFunction<T = any>(
     route = EDGE_ACTION_MAP[name][payload.action] ?? undefined;
   }
 
+  if (name === 'restore-account') {
+    // restore-account sends target_user_id but the PHP route uses {id}
+    if (typeof payload.target_user_id === 'string') {
+      payload.id = payload.target_user_id;
+      delete payload.target_user_id;
+    }
+  }
   if (name === 'change-password') {
     // Admin changes another user's password → admin endpoint; self-service → user endpoint
     route = payload.target_user_id ? '/auth/admin/change-password' : '/auth/change-password';
@@ -660,6 +930,16 @@ async function invokeFunction<T = any>(
     if (typeof payload.lesson_id === 'string') payload.id = payload.lesson_id;
     delete payload.lesson_id;
   }
+  if (name === 'set-app-update-config') {
+    // PUT /admin/app-updates/{platform}: the route token is literally
+    // `{platform}` (Router extracts params by token name), so the payload key
+    // must STAY `platform`. Mapping it to `id` here used to delete the only
+    // source of the token → every save failed with
+    // "Missing route parameter: platform".
+    if (typeof payload.platform !== 'string' || payload.platform === '') {
+      return { data: null, error: { message: 'set-app-update-config requires a platform (android|ios)' } };
+    }
+  }
   if (name === 'trash-user') {
     // trash-user EF: trash → POST /users/{id}/trash; action:'restore' → /admin/users/{id}/restore
     if (typeof payload.target_user_id === 'string') {
@@ -668,6 +948,12 @@ async function invokeFunction<T = any>(
     }
     route = payload.action === 'restore' ? '/admin/users/{id}/restore' : '/users/{id}/trash';
     delete payload.action;
+  }
+  if (name === 'redeem-code-revoke' || name === 'redeem-code-archive') {
+    // revoke/archive send code_id but the PHP routes use {id}
+    if (typeof payload.code_id === 'string') payload.id = payload.code_id;
+    delete payload.code_id;
+    route = name === 'redeem-code-revoke' ? '/redeem-codes/{id}/revoke' : '/redeem-codes/{id}/archive';
   }
 
   if (!route) {
@@ -693,14 +979,6 @@ async function invokeFunction<T = any>(
       create_user: 'student', create_doctor: 'doctor', create_admin: 'admin', create_super_admin: 'super_admin',
     };
     if (typeof payload.action === 'string' && roleMap[payload.action]) payload.role = roleMap[payload.action];
-    delete payload.action;
-  }
-  if (name === 'activation-codes') {
-    if (payload.action === 'delete_code' && payload.code_id != null && !Array.isArray(payload.code_ids)) {
-      // Single hard delete → bulk-delete with one id (PHP bulk-delete is the only hard-delete route)
-      payload.code_ids = [payload.code_id];
-      delete payload.code_id;
-    }
     delete payload.action;
   }
   if (name === 'credits') {
@@ -775,7 +1053,6 @@ const RPC_MAP: Record<string, string> = {
   'publish_course':                   '/courses/{id}/publish',
   'recalculate_doctor_earnings':      '/analytics/recalculate-earnings/{doctorId}',
   'recover_stale_upload_sessions':    '/rpc/recover-stale-upload-sessions',
-  'redeem_activation_code':           '/activation-codes/redeem',
   'remove_course_enrollment':         '/rpc/remove-course-enrollment',
   'remove_student_and_record_earnings': '/rpc/remove-student-and-record-earnings',
   'reset_doctor_earnings':            '/analytics/reset-doctor-earnings/{doctorId}',

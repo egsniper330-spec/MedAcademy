@@ -5,6 +5,15 @@ import * as SecureStore from 'expo-secure-store';
 
 import { backendClient } from '@/client/backendClient';
 import { getInstallationId, getStoredDeviceFingerprint, clearDeviceFingerprint } from '@/lib/installationId';
+import { invalidateCreditCache } from '@/lib/creditService';
+import { resetOfflineLibraryForAccountSwitch } from '@/lib/offlineVideoService';
+import { useProfileStore } from '@/lib/store';
+import { UserRole, type UserRole as UserRoleType } from '@/lib/enums';
+import {
+  setUploadQueueSessionProvider,
+  migrateLegacyQueue,
+  useUploadQueueStore,
+} from '@/lib/uploadQueueStore';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // AUTH TIMELINE LOGGER — silent in production, active only in __DEV__ builds
@@ -55,6 +64,25 @@ async function clearStoredSecurityVersion(userId: string): Promise<void> {
   } catch (_) {}
 }
 
+/** Read the authoritative profiles.security_version for a user — the exact column
+ *  check_authorization compares against. Returns null when the row cannot be read
+ *  (network/server failure) so callers PRESERVE the session instead of guessing. */
+async function fetchProfileSecurityVersion(userId: string): Promise<number | null> {
+  try {
+    const { data, error } = await backendClient
+      .from('profiles')
+      .select('security_version')
+      .eq('id', userId)
+      .maybeSingle();
+    if (error || data == null) return null;
+    const raw = (data as { security_version?: unknown } | null)?.security_version;
+    const v = Number(raw);
+    return Number.isFinite(v) ? v : null;
+  } catch {
+    return null;
+  }
+}
+
 // ── Types ─────────────────────────────────────────────────────────────────────
 type SessionContextType = { session: Session | null; isLoading: boolean };
 const SessionContext = createContext<SessionContextType>({ session: null, isLoading: true });
@@ -79,6 +107,17 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
   const lastSignedInAtRef  = useRef<number>(0);
   const pollingChannelRef = useRef<PollingChannel | null>(null);
   const pollingUserIdRef  = useRef<string | null>(null);
+  // Tracks whether profiles.security_version was successfully stored for the
+  // CURRENT sign-in / restored session. When unconfirmed, a server-side
+  // "security_version_changed" verdict can be caused by OUR OWN failed seed
+  // (transient network error at login) rather than a genuine revocation — so
+  // checkRevocation re-reads the authoritative profile row and re-checks
+  // device trust instead of force-signing-out a still-valid session.
+  const seedRef            = useRef<{ confirmed: boolean; userId: string | null }>({ confirmed: false, userId: null });
+  // Last user id seen by the auth listener — used to detect ACCOUNT SWITCHES so
+  // per-account in-memory caches (credit balance TTL cache) are invalidated and
+  // the new account can never inherit the previous account's data.
+  const lastAccountUidRef  = useRef<string | null>(null);
 
   // ── forceSignOut ──────────────────────────────────────────────────────────
   const forceSignOutRef = useRef(async (reason: string) => {
@@ -125,6 +164,10 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       }
     }
 
+    // Confirmed = we (or the server) have verified the stored version equals the
+    // authoritative profiles.security_version for THIS session.
+    const seedConfirmed = seedRef.current.confirmed && seedRef.current.userId === userId;
+
     try {
       const [storedVersion, fingerprint, installationId] = await Promise.all([
         getStoredSecurityVersion(userId),
@@ -133,36 +176,112 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       ]);
       authLog(`checkRevocation: storedVersion=${storedVersion} fingerprint=${fingerprint ?? 'NONE'} installationId=${installationId}`);
 
-      const { data: fnData, error: fnError } = await backendClient.functions.invoke('device-binding', {
-        body: {
-          action:                  'check_authorization',
-          fingerprint:             fingerprint ?? undefined,
-          installation_id:         installationId,
-          stored_security_version: storedVersion,
-        },
-      });
+      const invokeAuthCheck = async (storedVer: number) => {
+        const { data, error } = await backendClient.functions.invoke('device-binding', {
+          body: {
+            action:                  'check_authorization',
+            fingerprint:             fingerprint ?? undefined,
+            installation_id:         installationId,
+            stored_security_version: storedVer,
+          },
+        });
+        return { data: data as { authorized?: boolean; reason?: string; security_version?: number } | null, error };
+      };
 
-      if (fnError) {
-        authLog(`checkRevocation: Edge Function error — falling back to RPC: ${fnError.message}`);
-        const { data: rpcData, error: rpcError } = await backendClient.rpc('get_security_version');
-        if (rpcError) { authLog(`checkRevocation: RPC fallback error: ${rpcError.message}`); return; }
-        const serverVer = Number(rpcData ?? 0);
-        authLog(`checkRevocation: RPC fallback serverVersion=${serverVer} storedVersion=${storedVersion}`);
-        if (serverVer !== storedVersion) {
-          authLog(`checkRevocation: ❌ version MISMATCH via RPC → forceSignOut`);
-          await forceSignOutRef.current('rpc_version_mismatch');
+      const primary = await invokeAuthCheck(storedVersion);
+
+      // ── Primary path: server verdict received ──────────────────────────────
+      if (!primary.error) {
+        const fn = primary.data;
+        authLog(`checkRevocation: response authorized=${fn?.authorized} reason=${fn?.reason ?? 'none'} server_version=${fn?.security_version}`);
+
+        // ── Server-authoritative ROLE reconciliation (no logout) ────────────
+        // check_authorization now returns the FRESH profile role. When it
+        // differs from the locally cached profile, publish it into the profile
+        // store: every role consumer (guards, drawer, admin features)
+        // re-renders from server truth — USER↔ADMIN changes now propagate
+        // within one revocation poll instead of requiring logout/login.
+        const freshRole = (primary.data as { role?: string } | null)?.role;
+        if (
+          typeof freshRole === 'string' &&
+          (Object.values(UserRole) as string[]).includes(freshRole)
+        ) {
+          const p = useProfileStore.getState().profile;
+          if (p && p.role !== freshRole) {
+            authLog(`checkRevocation: ROLE DRIFT ${String(p.role)} → ${freshRole} (server-authoritative, no logout)`);
+            invalidateCreditCache();
+            useProfileStore.getState().setProfile({ ...p, role: freshRole as UserRoleType });
+          }
         }
+
+        if (fn?.authorized === false) {
+          // Self-heal: when the stored version was never confirmed for this
+          // session (post-login seed failed on a transient network error), a
+          // "security_version_changed" verdict can be caused by OUR stale value
+          // rather than a real revocation. Re-read the authoritative profile row
+          // and re-check once with the corrected version. Genuine revocations are
+          // still caught because check_authorization independently verifies
+          // account status + device trust (blocked/revoked) on the corrected check.
+          if (fn.reason === 'security_version_changed' && !seedConfirmed) {
+            authLog('checkRevocation: security_version_changed but seed NOT confirmed — self-healing');
+            const serverVer = await fetchProfileSecurityVersion(userId);
+            if (serverVer === null) {
+              authLog('checkRevocation: self-heal profile read FAILED (non-fatal) — preserving session');
+              return;
+            }
+            await setStoredSecurityVersion(userId, serverVer);
+            authLog(`checkRevocation: self-heal stored ${storedVersion} → ${serverVer}, re-checking`);
+            const retry = await invokeAuthCheck(serverVer);
+            if (retry.error) {
+              authLog(`checkRevocation: self-heal re-check ERROR (non-fatal) — preserving session: ${retry.error.message}`);
+              return;
+            }
+            if (retry.data?.authorized === false) {
+              authLog(`checkRevocation: ❌ still REVOKED after self-heal reason="${retry.data.reason}" → forceSignOut`);
+              await forceSignOutRef.current(`revoked:${retry.data.reason ?? 'unknown'}`);
+              return;
+            }
+            seedRef.current = { confirmed: true, userId };
+            authLog('checkRevocation: ✅ self-healed — session is valid (device trust confirmed)');
+            return;
+          }
+          authLog(`checkRevocation: ❌ REVOKED reason="${fn.reason}" → forceSignOut`);
+          await forceSignOutRef.current(`revoked:${fn.reason ?? 'unknown'}`);
+          return;
+        }
+        // Server explicitly confirmed stored version + device trust → seed confirmed.
+        seedRef.current = { confirmed: true, userId };
+        authLog('checkRevocation: ✅ authorized=true — session is valid');
         return;
       }
 
-      authLog(`checkRevocation: response authorized=${fnData?.authorized} reason=${fnData?.reason ?? 'none'} server_version=${fnData?.security_version}`);
-
-      if (fnData?.authorized === false) {
-        authLog(`checkRevocation: ❌ REVOKED reason="${fnData?.reason}" → forceSignOut`);
-        await forceSignOutRef.current(`revoked:${fnData?.reason ?? 'unknown'}`);
+      // ── Fallback path: device-binding unreachable/errored ──────────────────
+      // The version MUST come from the user's own profiles.security_version row —
+      // the exact column check_authorization compares against. The legacy
+      // get_security_version RPC maps to /security/version (GLOBAL config version),
+      // a different value that made every poll report a mismatch.
+      authLog(`checkRevocation: device-binding error — falling back to profile read: ${primary.error.message}`);
+      const serverVer = await fetchProfileSecurityVersion(userId);
+      if (serverVer === null) {
+        authLog('checkRevocation: fallback profile read FAILED (network) — preserving session');
         return;
       }
-      authLog('checkRevocation: ✅ authorized=true — session is valid');
+      authLog(`checkRevocation: fallback serverVersion=${serverVer} storedVersion=${storedVersion} seedConfirmed=${seedConfirmed}`);
+      if (serverVer !== storedVersion) {
+        if (!seedConfirmed) {
+          // Our own failed seed explains the gap — adopt the authoritative value;
+          // the next successful device-binding check verifies device trust.
+          await setStoredSecurityVersion(userId, serverVer);
+          seedRef.current = { confirmed: true, userId };
+          authLog(`checkRevocation: fallback mismatch with unconfirmed seed → stored ${storedVersion} → ${serverVer}, session preserved`);
+          return;
+        }
+        authLog('checkRevocation: ❌ version MISMATCH via fallback → forceSignOut');
+        await forceSignOutRef.current('rpc_version_mismatch');
+        return;
+      }
+      seedRef.current = { confirmed: true, userId };
+      authLog('checkRevocation: ✅ fallback versions match — session is valid');
     } catch (err) {
       authLog(`checkRevocation: unexpected error (non-fatal): ${err}`);
     }
@@ -229,19 +348,78 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
         lastSignedInAtRef.current = Date.now();
         authLog(`${event}: grace window started at ${lastSignedInAtRef.current}`);
 
-        // Seed security_version from server baseline.
+        // ── Per-account cache isolation ────────────────────────────────────
+        // When a DIFFERENT account signs in during this process lifetime,
+        // every per-account in-memory cache must be dropped so the new
+        // account never sees the previous account's data (e.g. the credit
+        // balance TTL cache would otherwise hand Doctor B Doctor A's 120
+        // credits for up to 30 s). Same-account INITIAL_SESSION (web reload)
+        // is a no-op.
+        if (lastAccountUidRef.current && lastAccountUidRef.current !== s.user.id) {
+          authLog(`account switch detected ${lastAccountUidRef.current.slice(0, 8)}… → ${s.user.id.slice(0, 8)}… — invalidating per-account caches`);
+          invalidateCreditCache();
+        }
+        lastAccountUidRef.current = s.user.id;
+
+        // ── Upload-queue account scoping ────────────────────────────────────
+        // Point the queue's ownership provider at the live session, then
+        // reconcile the persisted queue for THIS account:
+        //   • SIGNED_IN with a DIFFERENT user than the loaded queue → the old
+        //     account's in-memory tasks are dropped (its persisted state stays
+        //     under its own scoped key) and the new account's queue hydrates.
+        //   • Legacy global-key tasks are migrated once and stamped with the
+        //     current owner so pre-ownership installs don't lose data.
+        setUploadQueueSessionProvider(() => {
+          try {
+            const s = backendClient.auth.getSession?.();
+            // getSession may be async on some adapters — read the stored session
+            // synchronously through the same key the client uses.
+            if (s && typeof (s as any).then !== 'function') {
+              return (s as any)?.data?.session?.user?.id ?? null;
+            }
+          } catch { /* fall through */ }
+          return null;
+        });
         (async () => {
           try {
-            const { data, error } = await backendClient.rpc('get_security_version');
-            if (error) {
-              authLog(`${event}: get_security_version RPC ERROR: ${error.message}`);
-            } else if (data != null) {
-              await setStoredSecurityVersion(s.user.id, Number(data));
-              authLog(`${event}: seeded security_version=${data} for user=${s.user.id}`);
+            const session = await backendClient.auth.getSession();
+            const uid = session?.data?.session?.user?.id ?? null;
+            setUploadQueueSessionProvider(() => uid);
+            await migrateLegacyQueue(uid);
+            const queue = useUploadQueueStore.getState();
+            if (queue.ownerUserId && uid && queue.ownerUserId !== uid) {
+              // Different account signed in — drop the previous account's
+              // in-memory queue (its persisted state remains under its key).
+              queue.clearForAccountSwitch();
+            } else if (!queue.ownerUserId && uid) {
+              // Same account re-login (or first sign-in): rehydrate THIS
+              // account's persisted queue by forcing a persist re-read.
+              useUploadQueueStore.persist.rehydrate();
             }
-          } catch (err) {
-            authLog(`${event}: get_security_version failed (non-fatal): ${err}`);
+            if (uid) useUploadQueueStore.setState({ ownerUserId: uid });
+          } catch (e) {
+            if (__DEV__) console.warn('[ctx] upload-queue account scoping failed (non-fatal):', e);
           }
+        })();
+
+        // Mark the version seed UNCONFIRMED for this sign-in, then seed from the
+        // user's OWN profiles.security_version row — the exact column
+        // check_authorization compares against. The legacy get_security_version RPC
+        // hits /security/version (GLOBAL config version), which can differ from the
+        // per-user profile version (e.g. after a device reset) — seeding the wrong
+        // source made every poll report a mismatch and sign the user out ~36s after
+        // login. If this fetch fails (transient network error) the seed stays
+        // unconfirmed and checkRevocation self-heals instead of force-signing-out.
+        seedRef.current = { confirmed: false, userId: s.user.id };
+        (async () => {
+          const ver = await fetchProfileSecurityVersion(s.user.id);
+          if (ver === null) {
+            authLog(`${event}: get_security_version failed (non-fatal) — seed unconfirmed`);
+            return;
+          }
+          await setStoredSecurityVersion(s.user.id, ver);
+          seedRef.current = { confirmed: true, userId: s.user.id };
+          authLog(`${event}: seeded security_version=${ver} for user=${s.user.id}`);
         })();
       }
 
@@ -252,6 +430,27 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       if (event === 'SIGNED_OUT') {
         authLog('SIGNED_OUT: session cleared — redirecting to login');
         lastSignedInAtRef.current = 0;
+        seedRef.current = { confirmed: false, userId: null };
+        // The next sign-in must never inherit this account's cached data.
+        invalidateCreditCache();
+        // Offline-library account isolation: drop the in-memory download
+        // library so a subsequent login hydrates fresh (persisted rows are
+        // owner-scoped and re-filter by the new user on hydration; DRM
+        // licenses remain device-bound in the VdoCipher registry).
+        resetOfflineLibraryForAccountSwitch();
+        lastAccountUidRef.current = null;
+
+        // ── Upload-queue account scoping ────────────────────────────────────
+        // Deactivate the ownership provider FIRST so any in-flight async
+        // callback that resolves after logout is rejected by the store's
+        // cross-account guards, then drop the in-memory queue. The previous
+        // account's persisted tasks remain under their own scoped key.
+        setUploadQueueSessionProvider(() => null);
+        try {
+          useUploadQueueStore.getState().clearForAccountSwitch();
+        } catch (e) {
+          if (__DEV__) console.warn('[ctx] upload-queue clear on sign-out failed (non-fatal):', e);
+        }
       }
 
       if (event === 'USER_UPDATED') {

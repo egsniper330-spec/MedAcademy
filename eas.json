@@ -16,7 +16,7 @@
       },
       "env": {
         "EXPO_PUBLIC_APP_ID": "app-czyg340mpc75",
-        "EXPO_PUBLIC_PHP_API_URL": "https://api.medacademy.eu.cc/backend/public/index.php"
+        "EXPO_PUBLIC_PHP_API_URL": "https://api.medacademy.site/backend/public/index.php"
       }
     },
     "development-device": {
@@ -30,7 +30,7 @@
       },
       "env": {
         "EXPO_PUBLIC_APP_ID": "app-czyg340mpc75",
-        "EXPO_PUBLIC_PHP_API_URL": "https://api.medacademy.eu.cc/backend/public/index.php"
+        "EXPO_PUBLIC_PHP_API_URL": "https://api.medacademy.site/backend/public/index.php"
       }
     },
     "release-apk": {
@@ -41,7 +41,7 @@
       },
       "env": {
         "EXPO_PUBLIC_APP_ID": "app-czyg340mpc75",
-        "EXPO_PUBLIC_PHP_API_URL": "https://api.medacademy.eu.cc/backend/public/index.php"
+        "EXPO_PUBLIC_PHP_API_URL": "https://api.medacademy.site/backend/public/index.php"
       }
     },
     "preview": {
@@ -51,7 +51,7 @@
       },
       "env": {
         "EXPO_PUBLIC_APP_ID": "app-czyg340mpc75",
-        "EXPO_PUBLIC_PHP_API_URL": "https://api.medacademy.eu.cc/backend/public/index.php"
+        "EXPO_PUBLIC_PHP_API_URL": "https://api.medacademy.site/backend/public/index.php"
       }
     },
     "production": {
@@ -61,7 +61,7 @@
       },
       "env": {
         "EXPO_PUBLIC_APP_ID": "app-czyg340mpc75",
-        "EXPO_PUBLIC_PHP_API_URL": "https://api.medacademy.eu.cc/backend/public/index.php"
+        "EXPO_PUBLIC_PHP_API_URL": "https://api.medacademy.site/backend/public/index.php"
       }
     }
   },

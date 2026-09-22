@@ -220,18 +220,21 @@ export default function VideoMonitorScreen() {
 
   return (
     <ScrollView style={{ flex: 1, backgroundColor: c.base }}
-          contentContainerStyle={{ paddingBottom: layout.scrollBottom() }}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />}>
       <View style={{ padding: layout.screenPx, gap: 16 }}>
 
-        {/* Header */}
-        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 8 }}>
-          <PageHeader title="Video Monitor" subtitle={`${uploads.length} uploads tracked`} accentColor="#7C3AED" />
-          <Pressable onPress={onRefresh}
-            style={[neuFlatStyle(isDark), { width: 40, height: 40, borderRadius: 13, alignItems: 'center', justifyContent: 'center' }]}>
-            <RefreshCw size={18} color={c.primary} />
-          </Pressable>
-        </View>
+        {/* Header — action via rightAction so it aligns to the trailing edge */}
+        <PageHeader
+          title="Video Monitor"
+          subtitle={`${uploads.length} uploads tracked`}
+          accentColor="#7C3AED"
+          rightAction={
+            <Pressable onPress={onRefresh}
+              style={[neuFlatStyle(isDark), { width: 40, height: 40, borderRadius: 13, alignItems: 'center', justifyContent: 'center' }]}>
+              <RefreshCw size={18} color={c.primary} />
+            </Pressable>
+          }
+        />
 
         {/* Storage summary */}
         <NeuCard style={[neuFlatStyle(isDark), { borderRadius: 16, padding: 14, flexDirection: 'row', alignItems: 'center', gap: 12 }]}>

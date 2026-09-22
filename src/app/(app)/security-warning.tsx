@@ -41,6 +41,7 @@ const THREAT_META: Record<string, {
   app_attest_failed:         { label: 'Device Integrity Check Failed',description: 'Your device failed a security integrity check.',                         icon: ShieldAlert },
   screen_recording_detected: { label: 'Screen Recording Active',      description: 'Your screen is currently being recorded or mirrored.',                   icon: Bug },
   screenshot_detected:       { label: 'Screenshot Taken',             description: 'A screenshot was captured while the app was active.',                    icon: Bug },
+  security_unverified:       { label: 'Security Check Incomplete',    description: 'The security evaluation could not complete. The app will re-verify automatically.', icon: Bug },
 };
 
 // ─── Contact chooser helpers ──────────────────────────────────────────────────
@@ -257,7 +258,6 @@ export default function SecurityWarningScreen() {
         contentContainerStyle={{
           paddingHorizontal: layout.screenPx,
           paddingTop: layout.pad.xxl,
-          paddingBottom: layout.scrollBottom(),
           gap: layout.pad.lg,
         }}
       >

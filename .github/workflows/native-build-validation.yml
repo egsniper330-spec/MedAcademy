@@ -135,7 +135,7 @@ jobs:
         run: npx expo prebuild --platform android --clean --no-install
         env:
           EXPO_PUBLIC_APP_ID: app-czyg340mpc75
-          EXPO_PUBLIC_PHP_API_URL: https://api.medacademy.eu.cc/backend/public/index.php
+          EXPO_PUBLIC_PHP_API_URL: https://api.medacademy.site/backend/public/index.php
 
       - name: Verify SecurityModule.kt was generated
         run: |
@@ -244,7 +244,7 @@ jobs:
         run: npx expo prebuild --platform ios --clean --no-install
         env:
           EXPO_PUBLIC_APP_ID: app-czyg340mpc75
-          EXPO_PUBLIC_PHP_API_URL: https://api.medacademy.eu.cc/backend/public/index.php
+          EXPO_PUBLIC_PHP_API_URL: https://api.medacademy.site/backend/public/index.php
 
       - name: Verify IOSSecurityModule.swift was copied to Xcode project
         run: |

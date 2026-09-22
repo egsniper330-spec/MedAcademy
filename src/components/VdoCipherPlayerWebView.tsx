@@ -28,10 +28,10 @@
  *      Handles: Chrome, Firefox, Edge, Safari macOS (webkitfullscreenchange).
  *      See: src/hooks/useFullscreenWatermark.ts
  *
- *   3. ForensicWatermarkOverlay (Reanimated) — kept for normal (non-fullscreen)
- *      mode as a belt-and-suspenders overlay with smooth entrance animation.
- *      Does NOT survive fullscreen (by design — layer 2 covers that path).
- *      See: src/components/ForensicWatermarkOverlay.tsx
+ *   3. (removed) The old ForensicWatermarkOverlay RN layer rendered a SECOND
+ *      moving watermark on top of the in-HTML one — the "two inconsistent
+ *      watermarks" — and is removed. Exactly ONE watermark per player,
+ *      same as the Plyr/YouTube player.
  *
  * ── Safari iPhone ────────────────────────────────────────────────────────────
  *   Safari on iOS can switch to the native AVPlayerViewController for fullscreen.
@@ -49,7 +49,6 @@ import { getVideoPlaybackToken } from '@/lib/api';
 import { neuColors } from '@/lib/neu';
 import { WebView } from 'react-native-webview';
 import { buildWatermarkInjection } from '@/lib/watermarkInjection';
-import { ForensicWatermarkOverlay } from '@/components/ForensicWatermarkOverlay';
 import { useFullscreenWatermark } from '@/hooks/useFullscreenWatermark';
 import type { VdoCipherPlayerProps } from '@/components/VdoCipherPlayer';
 
@@ -160,6 +159,30 @@ export function VdoCipherPlayerWebView({
     return () => { cancelled = true; };
   }, [videoId, lessonId]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // ── Web: container measurement via ResizeObserver ───────────────────────
+  // onLayout does NOT fire reliably on RN-Web for this container. It is kept
+  // for the (unused-elsewhere) layout measurement contract; the single
+  // in-HTML watermark re-measures its wrapper on every move instead.
+  // to unmount it (invisible watermark). The observer reports the real box
+  // once mounted and on every viewport change (responsive requirement).
+  // NOTE: declared at top level — conditional calls would break Rules of Hooks.
+  useEffect(() => {
+    if (process.env.EXPO_OS !== 'web' || !playerUrl) return;
+    const el = containerRef.current;
+    if (!el) return;
+    const update = () => {
+      const r = el.getBoundingClientRect();
+      if (r.width > 0 && r.height > 0) {
+        setContainerW(r.width);
+        setContainerH(r.height);
+      }
+    };
+    update();
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [playerUrl]);
+
   // ── Native WebView → React Native message bridge ──────────────────────────
   const handleNativeMessage = useCallback((event: any) => {
     try {
@@ -254,15 +277,12 @@ export function VdoCipherPlayerWebView({
           webkit-playsinline="true"
           onLoad={() => onReady?.()}
         />
-        {/* ForensicWatermarkOverlay: normal-mode belt-and-suspenders layer */}
-        {watermarkId && (
-          <ForensicWatermarkOverlay
-            watermarkId={watermarkId}
-            watermarkName={watermarkName}
-            containerWidth={containerW}
-            containerHeight={containerH}
-          />
-        )}
+        {/* Watermark: the in-HTML injection (watermarkInjection.ts) is the
+            SINGLE watermark for this player — exactly one instance, same
+            architecture as the Plyr/YouTube player (its source of truth).
+            The old belt-and-suspenders RN overlay rendered a SECOND moving
+            watermark on top of it (the "two watermarks / inconsistent look");
+            it is removed. Tamper recovery stays in the injected script. */}
       </View>
     );
   }

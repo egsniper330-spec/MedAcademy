@@ -174,7 +174,6 @@ export default function ContactPage() {
       style={{ flex: 1, backgroundColor: c.base }}
       contentContainerStyle={{
         padding: layout.screenPx,
-        paddingBottom: layout.scrollBottom(),
       }}
     >
       <PageHeader title="Contact Us" showBack />

@@ -9,6 +9,7 @@ import { useCreditBalance } from '@/lib/useCreditBalance';
 import { getFirstName } from '@/lib/utils';
 import { NeuCard } from '@/components/NeuCard';
 import { StatCard } from '@/components/StatCard';
+import { QuickActionBtn } from '@/components/QuickActionBtn';
 import { neuColors, useLayout, neuMicroStyle, safeBottom } from '@/lib/neu';
 import { CourseThumbnail } from '@/components/CourseThumbnail';
 import type { RelativePathString } from 'expo-router';
@@ -108,7 +109,7 @@ export default function DoctorDashboard() {
           </Pressable>
         }
       />
-      <View style={{ paddingHorizontal: layout.screenPx, paddingBottom: layout.scrollBottom() }}>
+      <View style={{ paddingHorizontal: layout.screenPx }}>
 
         {/* 7-tile KPI Grid */}
         <View style={{ flexDirection: 'row', flexWrap: 'wrap', marginBottom: layout.sectionGap }}>
@@ -121,28 +122,26 @@ export default function DoctorDashboard() {
           <StatCard label="Published"           value={courses.filter(cr => cr.status === 'published').length} icon={<TrendingUp size={layout.captionSize + 2} color="#fff" />} color="#6366F1" />
         </View>
 
-        {/* Quick Actions */}
+        {/* Quick Actions — shared tile component (fixed-square icon box; the
+            previous flexGrow wrap-row variant stretched into tall rectangles
+            on Android). */}
         <Text style={{ fontSize: layout.bodySize + 1, fontWeight: '800', color: c.text, marginBottom: layout.pad.md }}>Quick Actions</Text>
-        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: layout.itemGap, marginBottom: layout.sectionGap }}>
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', marginBottom: layout.sectionGap }}>
           {[
-            { label: 'My Courses', icon: <BookOpen size={Math.round(layout.touchTarget * 0.5)} color={c.primary} />, color: c.primary, route: '/(app)/(doctor)/courses' },
-            { label: 'Students',   icon: <Users size={Math.round(layout.touchTarget * 0.5)} color="#7C3AED" />,       color: '#7C3AED', route: '/(app)/(doctor)/students' },
-            { label: 'Archived',   icon: <Archive size={Math.round(layout.touchTarget * 0.5)} color="#D97706" />,     color: '#D97706', route: '/(app)/archived-courses' },
-            { label: 'Alerts',     icon: <Bell size={Math.round(layout.touchTarget * 0.5)} color="#2DA8FF" />,         color: '#2DA8FF', route: '/(app)/notifications' },
+            { label: 'My Courses', icon: BookOpen,  color: c.primary, route: '/(app)/(doctor)/courses' },
+            { label: 'Students',   icon: Users,     color: '#7C3AED', route: '/(app)/(doctor)/students' },
+            { label: 'Archived',   icon: Archive,   color: '#D97706', route: '/(app)/archived-courses' },
+            { label: 'Alerts',     icon: Bell,      color: '#2DA8FF', route: '/(app)/notifications' },
           ].map(({ label, icon, color, route }) => (
-            <NeuCard
+            <QuickActionBtn
               key={label}
-              pressable
-              onPress={() => router.push(route as RelativePathString)}
-              style={{ alignItems: 'center', paddingVertical: layout.pad.md, paddingHorizontal: layout.pad.sm, width: '22%', flexGrow: 1 }}
-            >
-              <View style={{ width: layout.touchTarget, height: layout.touchTarget, borderRadius: layout.cardRadius, backgroundColor: `${color}18`, alignItems: 'center', justifyContent: 'center', marginBottom: layout.pad.sm }}>
-                {icon}
-              </View>
-              <Text numberOfLines={2} style={{ fontSize: layout.captionSize, fontWeight: '600', color: c.text, textAlign: 'center', lineHeight: layout.captionSize * 1.4 }}>
-                {label}
-              </Text>
-            </NeuCard>
+              icon={icon}
+              label={label}
+              color={color}
+              path={route}
+              c={c}
+              isDark={isDark}
+            />
           ))}
         </View>
 

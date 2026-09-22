@@ -5,7 +5,7 @@
 import { useState, useCallback } from 'react';
 import {
   View, Text, ScrollView, useColorScheme, Pressable,
-  ActivityIndicator, RefreshControl, Modal, TextInput, KeyboardAvoidingView,
+  ActivityIndicator, RefreshControl, Modal, TextInput,
   useWindowDimensions,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -41,11 +41,16 @@ import { usePermission } from '@/hooks/usePermission';
 import { PermissionRationaleModal } from '@/components/PermissionRationaleModal';
 
 // ─── ID card ─────────────────────────────────────────────────────────────────
-function WatermarkCard({ watermarkId, c }: { watermarkId: string | null; c: typeof neuColors.light }) {
+// Displays the PUBLIC USER ID (MED-####) — the canonical user-facing identifier.
+// The internal numeric/legacy watermark_id must never be shown here.
+function WatermarkCard({ publicUserId, c }: { publicUserId: string | null; c: typeof neuColors.light }) {
   const [copied, setCopied] = useState(false);
+  if (!publicUserId && __DEV__) {
+    console.warn('[Profile] public_user_id missing from profile payload — check backend PUBLIC_COLS/profile select.');
+  }
   const handleCopy = () => {
-    if (!watermarkId) return;
-    void Clipboard.setStringAsync(watermarkId);
+    if (!publicUserId) return;
+    void Clipboard.setStringAsync(publicUserId);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
@@ -60,12 +65,12 @@ function WatermarkCard({ watermarkId, c }: { watermarkId: string | null; c: type
             ID
           </Text>
           <Text style={{ fontSize: 18, fontWeight: '800', color: c.primary, letterSpacing: 1.5, marginTop: 2, fontVariant: ['tabular-nums'] }}>
-            {watermarkId ?? '—'}
+            {publicUserId ?? '—'}
           </Text>
         </View>
         <Pressable
           onPress={handleCopy}
-          accessibilityLabel={copied ? 'Watermark ID copied' : 'Copy watermark ID'}
+          accessibilityLabel={copied ? 'User ID copied' : 'Copy user ID'}
           accessibilityRole="button"
           style={{
             flexDirection: 'row', alignItems: 'center', gap: 5,
@@ -481,7 +486,6 @@ export default function StudentProfile() {
     <ScrollView
       style={{ flex: 1, backgroundColor: c.base }}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />}
-      contentContainerStyle={{ paddingBottom: layout.scrollBottom() }}
     >
       <View style={{ padding: layout.screenPx }}>
         <PermissionRationaleModal
@@ -534,7 +538,7 @@ export default function StudentProfile() {
 
         {/* ── ID ───────────────────────────────────────────────────── */}
         <SectionLabel label="ID" color={c.text} />
-        <WatermarkCard watermarkId={(profile as any)?.watermark_id ?? null} c={c} />
+        <WatermarkCard publicUserId={(profile as any)?.public_user_id ?? null} c={c} />
 
         {/* ── Account info ─────────────────────────────────────────── */}
         <SectionLabel label="Account Information" color={c.text} />
@@ -682,8 +686,8 @@ export default function StudentProfile() {
           </View>
         }
       >
-        <KeyboardAvoidingView behavior={process.env.EXPO_OS === 'ios' ? 'padding' : 'height'}>
-          <Text style={{ fontSize: 11, fontWeight: '700', color: c.text, opacity: 0.5, textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 6 }}>Full Name</Text>
+        
+          <Text style={{ fontSize: layout.captionSize + 1, fontWeight: '700', color: c.text, opacity: 0.55, textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 6 }}>Full Name</Text>
           <NeuInputRow
             c={c}
             value={editName}
@@ -691,7 +695,7 @@ export default function StudentProfile() {
             placeholder="Your full name"
             leftIcon={<User size={16} color={c.text} opacity={0.4} />}
           />
-          <Text style={{ fontSize: 11, fontWeight: '700', color: c.text, opacity: 0.5, textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 6 }}>Email</Text>
+          <Text style={{ fontSize: layout.captionSize + 1, fontWeight: '700', color: c.text, opacity: 0.55, textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 6 }}>Email</Text>
           <NeuInputRow
             c={c}
             value={editEmail}
@@ -702,7 +706,7 @@ export default function StudentProfile() {
             autoCorrect={false}
             leftIcon={<Mail size={16} color={c.text} opacity={0.4} />}
           />
-          <Text style={{ fontSize: 11, color: c.text, opacity: 0.4, marginBottom: 12, marginTop: -10, lineHeight: 16 }}>
+          <Text style={{ fontSize: layout.captionSize, color: c.text, opacity: 0.45, marginBottom: 12, lineHeight: Math.round(layout.captionSize * 1.4) }}>
             Your login method stays unchanged.
           </Text>
           {editError ? (
@@ -711,7 +715,7 @@ export default function StudentProfile() {
               <Text style={{ color: '#DC2626', fontSize: 13, marginLeft: 6, flex: 1 }}>{editError}</Text>
             </View>
           ) : null}
-        </KeyboardAvoidingView>
+        
       </ResponsiveModal>
 
       {/* ── Change Password Modal ─────────────────────────────────── */}
@@ -728,7 +732,7 @@ export default function StudentProfile() {
           ) : undefined
         }
       >
-        <KeyboardAvoidingView behavior={process.env.EXPO_OS === 'ios' ? 'padding' : 'height'}>
+        
           {pwdSuccess ? (
             <View style={{ alignItems: 'center', paddingVertical: 12, gap: 10 }}>
               <CheckCircle size={44} color="#16A34A" />
@@ -736,7 +740,7 @@ export default function StudentProfile() {
             </View>
           ) : (
             <>
-              <Text style={{ fontSize: 11, fontWeight: '700', color: c.text, opacity: 0.5, textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 6 }}>New Password</Text>
+              <Text style={{ fontSize: layout.captionSize + 1, fontWeight: '700', color: c.text, opacity: 0.55, textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 6 }}>New Password</Text>
               <NeuInputRow
                 c={c}
                 value={newPwd}
@@ -767,7 +771,7 @@ export default function StudentProfile() {
               ) : null}
             </>
           )}
-        </KeyboardAvoidingView>
+        
       </ResponsiveModal>
 
       {/* ── Academic Edit Bottom Sheet ────────────────────────────── */}

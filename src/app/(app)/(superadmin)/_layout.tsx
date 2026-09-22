@@ -50,12 +50,14 @@ function SuperAdminTabs() {
 
       {/* ── Drawer-only screens — hidden from tab bar ── */}
       {/* SA-native */}
+      <Tabs.Screen name="sa-content"             options={{ tabBarButton: () => null, title: 'Content & Media' }} />
       <Tabs.Screen name="sa-reports"             options={{ tabBarButton: () => null, title: 'Reports & Logs' }} />
+      <Tabs.Screen name="sa-redeem-codes"         options={{ tabBarButton: () => null, title: 'Redeem Codes' }} />
       <Tabs.Screen name="sa-audit"               options={{ tabBarButton: () => null, title: 'Audit Trail' }} />
 
       <Tabs.Screen name="health"                 options={{ tabBarButton: () => null, title: 'System Health' }} />
-      <Tabs.Screen name="config"                 options={{ tabBarButton: () => null, title: 'System Config' }} />
       <Tabs.Screen name="sec-dashboard"          options={{ tabBarButton: () => null, title: 'Security Dashboard' }} />
+      <Tabs.Screen name="app-updates"            options={{ tabBarButton: () => null, title: 'App Updates' }} />
       <Tabs.Screen name="feature-flags"          options={{ tabBarButton: () => null, title: 'Feature Flags' }} />
       <Tabs.Screen name="maintenance"            options={{ tabBarButton: () => null, title: 'Maintenance' }} />
       <Tabs.Screen name="branding"               options={{ tabBarButton: () => null, title: 'Branding' }} />
@@ -76,9 +78,6 @@ function SuperAdminTabs() {
       <Tabs.Screen name="sa-bulk-credits"           options={{ tabBarButton: () => null, title: 'Bulk Credits' }} />
       <Tabs.Screen name="sa-bulk-import"            options={{ tabBarButton: () => null, title: 'Bulk Import' }} />
       <Tabs.Screen name="sa-cms"                    options={{ tabBarButton: () => null, title: 'CMS Pages' }} />
-      <Tabs.Screen name="sa-code-history"           options={{ tabBarButton: () => null, title: 'Code History' }} />
-      <Tabs.Screen name="sa-codes"                  options={{ tabBarButton: () => null, title: 'Activation Codes' }} />
-      <Tabs.Screen name="sa-course-activation-timeline" options={{ tabBarButton: () => null, title: 'Course Activation' }} />
       <Tabs.Screen name="sa-db-audit"               options={{ tabBarButton: () => null, title: 'DB Audit' }} />
       <Tabs.Screen name="sa-devices"                options={{ tabBarButton: () => null, title: 'Device Management' }} />
       <Tabs.Screen name="sa-doctor-credit-timeline" options={{ tabBarButton: () => null, title: 'Doctor Credit Timeline' }} />
@@ -90,7 +89,7 @@ function SuperAdminTabs() {
       <Tabs.Screen name="sa-notifications-center"   options={{ tabBarButton: () => null, title: 'Notifications' }} />
       <Tabs.Screen name="sa-revenue-analytics"      options={{ tabBarButton: () => null, title: 'Revenue Analytics' }} />
       <Tabs.Screen name="sa-storage"                options={{ tabBarButton: () => null, title: 'Storage' }} />
-      <Tabs.Screen name="sa-system-providers"       options={{ tabBarButton: () => null, title: 'System Providers' }} />
+      <Tabs.Screen name="sa-system-providers"       options={{ tabBarButton: () => null, title: 'System Diagnostics' }} />
       <Tabs.Screen name="sa-video-health"           options={{ tabBarButton: () => null, title: 'Video Health' }} />
       <Tabs.Screen name="sa-video-monitor"          options={{ tabBarButton: () => null, title: 'Video Monitor' }} />
       <Tabs.Screen name="sa-video-settings"         options={{ tabBarButton: () => null, title: 'Video Settings' }} />
@@ -98,7 +97,6 @@ function SuperAdminTabs() {
       <Tabs.Screen name="sa-video-library"          options={{ tabBarButton: () => null, title: 'Video Library' }} />
       {/* Wrapper re-exports from admin shell — hidden from tab bar */}
       <Tabs.Screen name="sa-admin-credits"          options={{ tabBarButton: () => null, title: 'Admin Credits' }} />
-      <Tabs.Screen name="sa-batch-management"       options={{ tabBarButton: () => null, title: 'Batch Management' }} />
       <Tabs.Screen name="sa-support-settings"       options={{ tabBarButton: () => null, title: 'Support Settings' }} />
     </Tabs>
   );

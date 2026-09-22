@@ -15,7 +15,7 @@ import {
 import { NeuCard } from '@/components/NeuCard';
 import { PageHeader } from '@/components/PageHeader';
 import { NeuButton } from '@/components/NeuButton';
-import { neuColors, useLayout } from '@/lib/neu';
+import { neuColors, useLayout, safeBottom } from '@/lib/neu';
 import { getCreditLedger, getDoctorCreditSummary, getDoctorActivityStats, getProfile } from '@/lib/api';
 import type { DoctorActivityStats } from '@/lib/api';
 import { useProfileStore } from '@/lib/store';
@@ -176,8 +176,7 @@ export default function DoctorCreditTimelineScreen() {
   return (
     <ScrollView
       style={{ flex: 1, backgroundColor: c.base }}
-      contentContainerStyle={{ paddingBottom: layout.scrollBottom() }}
-      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />}
+      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />} contentContainerStyle={{ paddingBottom: safeBottom(layout.insets.bottom) }}
     >
       <PageHeader title={doctor_name ?? 'Doctor Timeline'} subtitle={`Credit history · ${txRows.length} transactions`} accentColor={c.primary} />
 

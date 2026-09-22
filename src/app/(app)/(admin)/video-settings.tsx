@@ -99,7 +99,7 @@ export default function VideoSettingsScreen() {
     <View style={{ flex: 1, backgroundColor: c.base }}>
       <ScrollView
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />}
-        contentContainerStyle={{ padding: layout.screenPx, gap: 16, paddingBottom: layout.scrollBottom() }}>
+        contentContainerStyle={{ padding: layout.screenPx, gap: 16 }}>
 
         <View style={{ marginTop: 8 }}>
           <PageHeader title="Video Settings" subtitle="Provider & health configuration" accentColor="#7C3AED" />

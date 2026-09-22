@@ -250,7 +250,6 @@ function DeleteModal({
               ['Lessons',           stats.lesson_count],
               ['Videos',            stats.video_count],
               ['Attachments',       stats.attachment_count],
-              ['Activation Codes',  stats.code_count],
             ].map(([label, val]) => (
               <View key={label as string} style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
                 <Text style={{ fontSize: 13, color: `${c.text}77` }}>{label}</Text>

@@ -1,0 +1,9 @@
+# Deny all web access — logs are for the application only.
+# (The front controller and CLI scripts read them from the filesystem.)
+<IfModule mod_authz_core.c>
+    Require all denied
+</IfModule>
+<IfModule !mod_authz_core.c>
+    Order allow,deny
+    Deny from all
+</IfModule>

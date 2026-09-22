@@ -5,6 +5,7 @@ import { useFocusEffect, useRouter, useLocalSearchParams } from 'expo-router';
 import {
   ArrowLeft, BookOpen, Calendar, ChevronDown, ChevronRight, Clock, GraduationCap,
   Globe, Tag, Play, Lock, MessageCircle, CheckCircle, Paperclip, Archive,
+  Eye, X,
 } from 'lucide-react-native';
 import { getCourseById, getCourseProgress, getLessonProgress, getMySubscriptions, calcCourseDuration, calcRemainingTime, calcCompletedTime, formatStudyTime } from '@/lib/api';
 import { useProfileStore } from '@/lib/store';
@@ -13,6 +14,7 @@ import { NeuButton } from '@/components/NeuButton';
 import { CourseProgressBar } from '@/components/CourseProgressBar';
 import { ContactSheet } from '@/components/ContactSheet';
 import { neuColors, useLayout, safeTop, safeLeft, safeBottom } from '@/lib/neu';
+import { isPreviewingCourse, stopPreviewAsStudent } from '@/lib/previewAsStudent';
 import type { RelativePathString } from 'expo-router';
 
 // Enable LayoutAnimation on Android
@@ -59,10 +61,14 @@ export default function CourseDetail() {
   );
   const [showContact, setShowContact] = useState(false);
 
+  // "Preview as Student" — session-scoped flag; true only for the course the
+  // doctor explicitly started previewing from My Courses.
+  const previewMode = isPreviewingCourse(id);
+
   const loadData = useCallback(async () => {
     if (!id) return;
     try {
-      const isStudent = profile?.role === 'student';
+      const isStudent = profile?.role === 'student' || isPreviewingCourse(id);
       const [courseData, prog] = await Promise.all([
         getCourseById(id),
         profile ? getLessonProgress(profile.id, id) : Promise.resolve([]),
@@ -86,9 +92,9 @@ export default function CourseDetail() {
       }
     } catch {}
     setLoading(false);
-  }, [id, profile]);
+  }, [id, profile]); // isPreviewingCourse read live — preview toggles re-render via previewMode state below
 
-  useFocusEffect(useCallback(() => { setLoading(true); loadData(); }, [loadData]));
+  useFocusEffect(useCallback(() => { setLoading(true); loadData(); }, [loadData, previewMode]));
   const onRefresh = async () => { setRefreshing(true); await loadData(); setRefreshing(false); };
 
   // Persist expanded state to session cache whenever it changes
@@ -115,7 +121,7 @@ export default function CourseDetail() {
     });
   };
 
-  const isStudent = profile?.role === 'student';
+  const isStudent = profile?.role === 'student' || previewMode;
 
   const completedIds = new Set(progress.filter((p: any) => p.completed).map((p: any) => p.lesson_id));
   // Defense-in-depth: strip draft lessons from every student-facing derived value.
@@ -133,9 +139,15 @@ export default function CourseDetail() {
   const completedMin = calcCompletedTime(course?.sections ?? [], completedIds);
 
   // For sequential learning: lesson is locked if a previous lesson is not completed
-  const isLessonLocked = (lesson: any, lessonIdx: number, section: any) => {
+  const isLessonLocked = (lesson: any, lessonIdx: number, section: any, contentUnlocked: boolean) => {
+    // Subscription gate first: a non-subscribed visitor (student, not preview)
+    // only ever gets free-preview lessons. Content owners (doctor/admin) and
+    // "Preview as Student" sessions are always unlocked — the doctor must be
+    // able to open their own lessons even though the student-only subscription
+    // lookup reports "not subscribed" (the exact bug that left a doctor's own
+    // course page permanently locked).
+    if (!contentUnlocked) return !lesson.is_preview;
     if (!course?.sequential_learning) return false;
-    if (!isSubscribed) return !lesson.is_preview;
     if (lessonIdx === 0) return false;
     const prev = (section.lessons ?? [])[lessonIdx - 1];
     return prev && !completedIds.has(prev.id);
@@ -152,9 +164,9 @@ export default function CourseDetail() {
     </View>
   );
 
-  // ── TEMP-DIAG: find the View receiving a string child (Unexpected text node) ──
-  const _renderTree = (
-    <ScrollView style={{ flex: 1, backgroundColor: c.base }} contentContainerStyle={{ paddingBottom: layout.scrollBottom() }}
+  const renderTree = (
+    <ScrollView style={{ flex: 1, backgroundColor: c.base }}
+      contentContainerStyle={{ paddingBottom: safeBottom(layout.insets.bottom) }}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}>
 
       {/* Cover image — aspect ratio stays correct on landscape/tablet */}
@@ -196,6 +208,26 @@ export default function CourseDetail() {
             </View>
           </View>
         ) : null}
+
+        {/* ── Preview-as-Student banner (doctors previewing their own course) ── */}
+        {previewMode && (
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10,
+            paddingHorizontal: 14, paddingVertical: 10, borderRadius: 14,
+            backgroundColor: '#7C3AED18', borderWidth: 1, borderColor: '#7C3AED30' }}>
+            <Eye size={15} color="#7C3AED" />
+            <View style={{ flex: 1 }}>
+              <Text style={{ fontSize: 13, fontWeight: '700', color: '#7C3AED' }}>Preview as Student</Text>
+              <Text style={{ fontSize: 11, color: '#7C3AED', opacity: 0.75 }}>
+                You are seeing this course exactly as an enrolled student does. Draft lessons are hidden.
+              </Text>
+            </View>
+            <Pressable onPress={() => { stopPreviewAsStudent(); router.replace(`/(app)/course/${id}` as RelativePathString); }}
+              hitSlop={8} accessibilityRole="button" accessibilityLabel="Exit student preview"
+              style={{ width: 30, height: 30, borderRadius: 10, backgroundColor: '#7C3AED22', alignItems: 'center', justifyContent: 'center' }}>
+              <X size={15} color="#7C3AED" />
+            </Pressable>
+          </View>
+        )}
 
         {/* Title + difficulty */}
         <View style={{ gap: 8 }}>
@@ -406,7 +438,12 @@ export default function CourseDetail() {
                   {sectionLessons.map((lesson: any, lIdx: number) => {
                     const isCompleted = completedIds.has(lesson.id);
                     const isScheduled = lesson.status === 'scheduled';
-                    const locked = isLessonLocked(lesson, lIdx, section) || (!isSubscribed && !lesson.is_preview);
+                    // Content unlocked for: subscribed students, non-student roles
+                    // (doctor/admin/SA own or manage content), and Preview-as-Student.
+                    // NOTE: deliberately NOT `isStudent` — a non-subscribed real
+                    // student must stay locked to free-preview lessons (Subscribe funnel).
+                    const contentUnlocked = isSubscribed || previewMode || (!!profile && profile.role !== 'student');
+                    const locked = isLessonLocked(lesson, lIdx, section, contentUnlocked) || (!contentUnlocked && !lesson.is_preview);
                     const canAccess = !locked && !isScheduled;
                     const scheduledDate = isScheduled && lesson.scheduled_at
                       ? new Date(lesson.scheduled_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
@@ -481,8 +518,10 @@ export default function CourseDetail() {
           );
         })}
 
-        {/* Subscribe — shows contact sheet with doctor's configured methods */}
-        {!isSubscribed && !!(course.whatsapp || course.telegram || course.phone) ? (
+        {/* Subscribe — shows contact sheet with doctor's configured methods.
+            Hidden during "Preview as Student": the doctor is not actually a
+            subscriber and must not be offered the student purchase flow. */}
+        {!previewMode && !isSubscribed && !!(course.whatsapp || course.telegram || course.phone) ? (
           <NeuButton label="Subscribe" variant="primary"
             icon={<MessageCircle size={16} color="#fff" />}
             onPress={() => setShowContact(true)} fullWidth />
@@ -498,35 +537,7 @@ export default function CourseDetail() {
     </ScrollView>
   );
 
-  if (__DEV__) {
-    try {
-      const _walk = (node: any, depth: number) => {
-        if (!node || typeof node !== 'object') return;
-        if (Array.isArray(node)) { node.forEach((n: any) => _walk(n, depth)); return; }
-        if (typeof node !== 'object' || typeof node.type !== 'object' && typeof node.type !== 'string') { return; }
-        const tag = typeof node.type === 'string' ? node.type : (node.type?.displayName || node.type?.name || (node.type?.render?.name || 'wrapped'));
-        if (node.props?.children !== undefined) {
-          const kids = Array.isArray(node.props.children) ? node.props.children : [node.props.children];
-          for (const k of kids) {
-            if (typeof k === 'string' && k.length === 0) {
-              const st = node.props?.style;
-              console.log('[TEXTNODE-DIAG] EMPTY-STRING child under element: ' + tag + ' depth=' + depth +
-                ' style=' + JSON.stringify(st)?.slice(0, 160) + ' key=' + String(node.key ?? 'none'));
-            } else if (typeof k === 'string' && k.trim() === ',') {
-              console.log('[TEXTNODE-DIAG] COMMA child under element: ' + tag + ' depth=' + depth);
-            }
-          }
-        }
-        if (node.props?.children !== undefined) _walk(node.props.children, depth + 1);
-      };
-      _walk(_renderTree, 0);
-      console.log('[TEXTNODE-DIAG] walker completed');
-    } catch (e) {
-      console.log('[TEXTNODE-DIAG] walker threw:', String(e));
-    }
-  }
-  // ── /TEMP-DIAG ──
-  return _renderTree;
+  return renderTree;
 }
 
 function FeatureRow({ icon: Icon, color, label }: { icon: any; color: string; label: string }) {

@@ -18,6 +18,17 @@ expo-env.d.ts
 *.key
 *.mobileprovision
 
+# ── Android RELEASE SIGNING — secrets, NEVER commit ─────────────────────────
+# The production keystore itself lives OUTSIDE the repo (~/.medacademy/).
+# These patterns protect against anyone copying it or its credential files
+# into the project tree.
+gradle.properties.local
+expected-cert-sha256.local
+signing.properties
+medacademy-release.keystore*
+*release*.jks
+*.local
+
 # Metro
 .metro-health-check*
 
@@ -58,9 +69,3 @@ output.tar.gz
 .metro-cache/
 package.json.*
 .sync
-history/*.json
-.claude/
-/.skills
-/tasks
-package.json.[0-9]*
-.native-wind-cache

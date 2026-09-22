@@ -22,7 +22,7 @@ const SECTIONS = [
   },
   {
     heading: '4. Subscriptions & Access',
-    body: 'Course access is granted through activation codes or direct enrollment. Access is personal and non-transferable. Completed or expired subscriptions do not entitle the user to a refund unless explicitly stated.',
+    body: 'Course access is granted through enrollment by a Doctor or platform administrator. Access is personal and non-transferable. Completed or expired subscriptions do not entitle the user to a refund unless explicitly stated.',
   },
   {
     heading: '5. Prohibited Conduct',
@@ -56,7 +56,7 @@ export default function TermsPage() {
   return (
     <ScrollView
       style={{ flex: 1, backgroundColor: c.base }}
-      contentContainerStyle={{ padding: layout.screenPx, paddingBottom: layout.scrollBottom() }}
+      contentContainerStyle={{ padding: layout.screenPx }}
     >
       <PageHeader title="Terms & Conditions" showBack />
 

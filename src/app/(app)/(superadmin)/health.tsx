@@ -14,7 +14,7 @@ import { getAdminStats } from '@/lib/api';
 import { backendClient } from '@/client/backendClient';
 import { NeuCard } from '@/components/NeuCard';
 import { NeuButton } from '@/components/NeuButton';
-import { neuColors, neuFlatStyle, useLayout } from '@/lib/neu'
+import { neuColors, neuFlatStyle, useLayout, safeBottom } from '@/lib/neu'
 import { useToast } from '@/components/Toast';
 import { logAndParse } from '@/lib/parseError';
 
@@ -143,7 +143,7 @@ export default function SuperAdminHealth() {
   return (
     <ScrollView
       style={{ flex: 1, backgroundColor: c.base }}
-      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />}
+      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />} contentContainerStyle={{ paddingBottom: safeBottom(layout.insets.bottom) }}
     >
       <DashboardHeader
         roleLabel="Real-time platform health monitoring"

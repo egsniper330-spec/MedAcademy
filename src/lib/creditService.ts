@@ -87,7 +87,17 @@ export async function getCreditBalance(): Promise<CreditBalance> {
   _inflightPromise = (async (): Promise<CreditBalance> => {
     const { data, error } = await backendClient.rpc('get_my_credits_balance');
     if (error) throw error;
-    const bal = data as CreditBalance;
+    // PHP route /credits/me returns { credits: { allocated, consumed, remaining } } —
+    // unwrap the envelope. (Older Supabase RPC returned the row flat; accept both.)
+    const raw = (data as { credits?: Partial<CreditBalance> } | null)?.credits ?? data;
+    const bal: CreditBalance = {
+      allocated: Number(raw?.allocated ?? 0),
+      consumed: Number(raw?.consumed ?? 0),
+      remaining: Number(raw?.remaining ?? 0),
+      total_allocated: Number(raw?.allocated ?? 0),
+      used: Number(raw?.consumed ?? 0),
+      updated_at: raw?.updated_at,
+    };
     _cachedBalance = bal;
     _cacheTimestamp = Date.now();
     _inflightPromise = null;
@@ -106,15 +116,25 @@ export async function refreshCreditBalance(): Promise<CreditBalance> {
 // ── Transactions / History ─────────────────────────────────────────────────────
 
 /**
- * Fetch the calling doctor's credit transaction history (newest first).
- * Not cached — always fresh, so history is never stale.
+ * Fetch the CALLING user's credit transaction history (newest first).
+ *
+ * The PHP RPC route is /rpc/doctor-credit-transactions/{doctorId} — the path
+ * parameter is REQUIRED by the client's route template. It defaults to the
+ * authenticated session's own user id so a screen can never accidentally
+ * query another account's history; the backend additionally authorizes that
+ * the caller may read the requested doctor's rows.
  */
 export async function getCreditHistory(limit = 200): Promise<CreditTransaction[]> {
+  const { data: sessionData } = await backendClient.auth.getSession();
+  const userId = sessionData?.session?.user?.id ?? '';
   const { data, error } = await backendClient.rpc('get_doctor_credit_transactions', {
+    p_doctor_id: userId,
     p_limit: limit,
   });
   if (error) throw error;
-  return (data ?? []) as CreditTransaction[];
+  // PHP returns { transactions: [...] } — unwrap the envelope (accept flat array too).
+  const rows = Array.isArray(data) ? data : (data as { transactions?: unknown[] } | null)?.transactions;
+  return (rows ?? []) as CreditTransaction[];
 }
 
 // ── Enrollment (atomic) ────────────────────────────────────────────────────────

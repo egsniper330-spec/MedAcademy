@@ -14,7 +14,7 @@ import {
   RotateCcw, Pencil, History, ChevronRight, Info, Infinity,
 } from 'lucide-react-native';
 import { getMyDevices, logoutDevice, renameDevice, DeviceRecord } from '@/lib/api';
-import { neuColors, useLayout, neuFlatStyle, neuMicroStyle } from '@/lib/neu';
+import { neuColors, useLayout, neuFlatStyle, neuMicroStyle, safeBottom } from '@/lib/neu';
 import { NeuCard } from '@/components/NeuCard';
 import { NeuButton } from '@/components/NeuButton';
 import { ResponsiveModal } from '@/components/ResponsiveModal';
@@ -121,7 +121,7 @@ export default function MyDevices() {
   return (
     <View style={{ flex: 1, backgroundColor: c.base }}>
       <ScrollView
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />} contentContainerStyle={{ paddingBottom: safeBottom(layout.insets.bottom) }}
       >
           {/* Back navigation header */}
           <PageHeader title="My Devices" subtitle="Manage your registered devices" showBack />

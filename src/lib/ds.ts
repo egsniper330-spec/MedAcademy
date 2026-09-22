@@ -427,20 +427,27 @@ export const safeArea = {
    * Breathing room between OS status bar bottom and first content pixel.
    * Added ON TOP of insets.top — never replace insets.top with this.
    */
-  topBreathing: 8,
+  topBreathing: 12,
   /**
-   * Minimum top padding floor for simulators/web (insets.top = 0).
+   * Minimum top padding floor for inset-less surfaces (web preview, desktop
+   * browser, windowed apps where insets.top = 0).
    * Math.max(insets.top + safeArea.topBreathing, safeArea.topMin)
+   *
+   * 44dp ≈ the natural clearance below a status bar — keeps headers from
+   * hugging the top edge on devices that report no inset. Real phones with a
+   * status bar never hit this floor (insets.top ≈ 24–59 governs).
    */
-  topMin: 24,
+  topMin: 44,
   /**
    * Breathing room added to insets.bottom (above home indicator / gesture bar).
    */
-  bottomBreathing: 8,
+  bottomBreathing: 12,
   /**
-   * Minimum bottom inset floor.
+   * Minimum bottom inset floor — inset-less surfaces (web/desktop) and
+   * 3-button-nav devices that report 0 still need clearance below the last
+   * card so content never appears glued to the bottom navigation.
    */
-  bottomMin: 16,
+  bottomMin: 24,
   /**
    * Page-level horizontal edge padding (button to screen edge).
    * This is the edge distance for interactive controls.

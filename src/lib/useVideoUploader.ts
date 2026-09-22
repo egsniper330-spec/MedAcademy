@@ -37,6 +37,7 @@ import {
   getVdoCipherVideoStatus,
   pingUploadSessionHeartbeat,
   recoverStaleUploadSessions,
+  getLessonVideoState,
   getChunkUploadState,
   triggerChunkAssembly,
   deleteVdoCipherVideo,
@@ -52,6 +53,7 @@ import {
   showUploadCompleteNotification,
   showUploadFailedNotification,
   showProcessingTimeoutNotification,
+  cancelNativeAliveCheck,
 } from './backgroundUploadService';
 import {
   isNativeUploadAvailable,
@@ -63,6 +65,7 @@ import {
   getRefreshTokenForNative,
   type NativeUploadEvent,
 } from './nativeUploadBridge';
+import { currentQueueUserId } from './uploadQueueStore';
 
 const POLL_INTERVAL_MS = 5_000;          // check every 5 s
 const POLL_TIMEOUT_MS  = 10 * 60 * 1000; // 10-minute hard deadline per requirement
@@ -78,6 +81,16 @@ const POLL_TIMEOUT_MS  = 10 * 60 * 1000; // 10-minute hard deadline per requirem
 // The first instance to evaluate the useEffect adds the id and calls startUpload;
 // subsequent instances see it already present and bail immediately.
 const globalProcessingSet = new Set<string>();
+
+// Account-isolation checkpoint: returns true only while the task still exists
+// for the CURRENT session and isn't canceled. A vanished task means the owner
+// logged out, the account switched, or the user removed it — the pipeline must
+// stop at the next checkpoint instead of continuing backend work under a
+// different account's token.
+function taskAlive(id: string): boolean {
+  const t = useUploadQueueStore.getState().getTask(id);
+  return !!t && t.status !== 'canceled';
+}
 
 // ─── Step 4: poll VdoCipher until encoding is complete ───────────────────────
 async function pollVdoCipherReady(
@@ -211,10 +224,30 @@ export function useVideoUploader() {
     if (recoveryChecked) return;
     setRecoveryChecked(true);
 
+    // Account-isolation: capture the owner at scan start. If the account
+    // switches while the async DB scan below is in flight, its results must
+    // NOT be committed into the new account's queue.
+    const scanOwner = currentQueueUserId();
+
     (async () => {
-      // 1. Local queue recovery (existing logic — catches in-memory stale tasks)
+      // 0. Wait for the persisted queue to finish rehydrating. The store is
+      // created before hydration resolves, so running the scans against the
+      // not-yet-loaded (empty) task list would miss post-restart tasks.
+      if (!useUploadQueueStore.persist.hasHydrated()) {
+        await new Promise<void>((resolve) => {
+          const unsub = useUploadQueueStore.persist.onFinishHydration(() => {
+            unsub();
+            resolve();
+          });
+        });
+      }
+
+      // 1. Local queue recovery (existing logic — catches in-memory stale tasks).
+      // Tasks that already reached the provider (vdoCipherVideoId set) are NOT
+      // byte-recovery candidates — reconciliation below owns them ("Resume"
+      // would needlessly re-upload a fully transferred file).
       const localRecoverable = useUploadQueueStore.getState().tasks.filter(
-        (t) => t.status === 'recovering',
+        (t) => t.status === 'recovering' && !t.vdoCipherVideoId,
       );
       if (localRecoverable.length > 0) {
         setShowRecoveryDialog(true);
@@ -224,10 +257,85 @@ export function useVideoUploader() {
         });
       }
 
+      // 1.5 Post-upload reconciliation — self-heal tasks stranded between
+      // "encoding" and "ready". If a finalization sequence was interrupted
+      // (crash/reload/transient write failure) the lesson may already be
+      // durably READY while the local task still says processing/encoding.
+      // The lesson row is the AUTHORITATIVE source for the handoff outcome:
+      //   - lesson video_status = 'ready'  → task is final → mark task 'ready'
+      //     (idempotent; matches the pipeline's post-lesson ordering).
+      //   - lesson video_status in the pre-handoff set AND the provider asset
+      //     reports 'ready'                → finalization never completed →
+      //     route through retryProcessing (guarded) instead of a dead-end.
+      //   - otherwise                       → leave for lock recovery / user.
+      const postUpload = useUploadQueueStore.getState().tasks.filter(
+        (t) =>
+          ['processing', 'encoding', 'generating_streams', 'verifying'].includes(t.status) ||
+          // Post-restart stranded tasks: rehydration maps mid-flight statuses to
+          // 'recovering', but a task that already reached the provider (assembly
+          // returned a video id) has NO bytes left to resume — its correct path
+          // is processing reconciliation, not a chunk re-upload via "Resume".
+          (t.status === 'recovering' && !!t.vdoCipherVideoId),
+      );
+      for (const t of postUpload) {
+        try {
+          if (!t.lessonId) continue;
+          const lessonState = await getLessonVideoState(t.lessonId);
+          if (!lessonState) continue;
+          if (lessonState.video_status === 'ready' && lessonState.video_upload_id === t.id) {
+            // Authoritative handoff already happened — task must be terminal.
+            updateTask(t.id, { status: 'ready', progress: 100, verificationStatus: 'passed' });
+            await insertAuditLog(t.id, 'reconciliation_task_finalized', {
+              lesson_status: lessonState.video_status, provider_video_id: lessonState.video_id,
+            });
+            continue;
+          }
+          if (
+            lessonState.video_status === 'ready' &&
+            lessonState.video_upload_id !== t.id
+          ) {
+            // Lesson is final but linked to a DIFFERENT upload — this task was
+            // superseded (e.g. the video was replaced). It must not linger in
+            // the active queue forever; 'canceled' is honest and removable.
+            updateTask(t.id, {
+              status: 'canceled',
+              errorMessage: 'Superseded: the lesson now uses a different video.',
+            });
+            await insertAuditLog(t.id, 'reconciliation_task_superseded', {
+              lesson_status: lessonState.video_status,
+              current_video_upload_id: lessonState.video_upload_id,
+            });
+            continue;
+          }
+          const PRE_HANDOFF = new Set(['none', 'uploading', 'processing', 'encoding', 'timeout']);
+          if (
+            PRE_HANDOFF.has(lessonState.video_status) &&
+            t.vdoCipherVideoId &&
+            lessonState.video_upload_id === t.id
+          ) {
+            // Encoding may already be finished provider-side; retryProcessing
+            // polls the provider and finalizes (idempotent) or marks timeout.
+            updateTask(t.id, { status: 'encoding', errorMessage: undefined });
+            retryProcessing(t.id).catch(() => {});
+          }
+        } catch (e) {
+          if (__DEV__) console.warn('[uploadLockRecovery] post-upload reconciliation failed (non-fatal)', {
+            taskId: t.id, error: e instanceof Error ? e.message : String(e),
+          });
+        }
+      }
+
       // 2. DB-level lock recovery — catches sessions surviving app restart
+      //    (scoped to the owning account's session — see scanOwner guard below)
       try {
         const staleSessions = await recoverStaleUploadSessions(60);
         if (staleSessions.length === 0) return;
+
+        // Account switched during the scan → abandon results entirely.
+        if (scanOwner && currentQueueUserId() !== scanOwner) {
+          if (__DEV__) console.warn('[uploadLockRecovery] account switched during scan — discarding results');
+          return;
+        }
 
         const queueState = useUploadQueueStore.getState();
         const activeStatuses = new Set(['uploading', 'processing', 'encoding', 'waiting', 'paused']);
@@ -279,6 +387,13 @@ export function useVideoUploader() {
   useEffect(() => {
     const waiting = tasks.find((t) => t.status === 'waiting');
     if (!waiting || globalProcessingSet.has(waiting.id)) return;
+    // Account-isolation guard: never drive a task owned by a different
+    // account than the currently-authenticated session.
+    const sessionUser = currentQueueUserId();
+    if (sessionUser && waiting.ownerUserId && waiting.ownerUserId !== sessionUser) {
+      if (__DEV__) console.warn('[useVideoUploader] skipping cross-account task', { id: waiting.id });
+      return;
+    }
     globalProcessingSet.add(waiting.id);
     startUpload(waiting);
   }, [tasks]);
@@ -320,7 +435,9 @@ export function useVideoUploader() {
     // Release the processing slot before going async into the pipeline
     globalProcessingSet.delete(id);
 
-    // Run the chunked VdoCipher pipeline
+    // Run the chunked VdoCipher pipeline. Fire-and-forget, but an unhandled
+    // rejection here would silently kill the task's state machine (stuck at
+    // whatever stage it reached) — catch and route to markFailed.
     runVdoCipherPipeline({
       id, courseId, lessonId,
       doctorId: task.doctorId,
@@ -328,6 +445,10 @@ export function useVideoUploader() {
       fileName,
       mimeType,
       fileSize: fileSize ?? 0,
+    }).catch(async (e) => {
+      if (!taskAlive(id)) return;
+      const techMsg = logUploadError('[EF:pipeline]', 'Unexpected pipeline error', e, { uploadId: id });
+      await markFailed(id, lessonId, techMsg, 'pipeline', '[EF:pipeline]').catch(() => {});
     });
   };
 
@@ -422,8 +543,21 @@ export function useVideoUploader() {
           // Wait for native upload completion via events
           await new Promise<void>((resolve, reject) => {
             const unsubscribe = onNativeUploadEvent(id, (event: NativeUploadEvent) => {
+              // Stale-callback guard: if the account switched while this
+              // native upload was in flight, its events must not mutate the
+              // new account's queue state. The native service keeps running
+              // (server-side ownership is unchanged); we simply stop listening.
+              const sessionUser = currentQueueUserId();
+              const taskOwner = useUploadQueueStore.getState().getTask(id)?.ownerUserId;
+              if (sessionUser && taskOwner && taskOwner !== sessionUser) {
+                unsubscribe();
+                resolve(); // treat as ended — no error, no state mutation
+                return;
+              }
               switch (event.event) {
                 case 'progress': {
+                  // Native service is alive — cancel the alive-check timer
+                  cancelNativeAliveCheck(id);
                   const chunkPct = event.totalChunks > 0 ? event.chunksCompleted / event.totalChunks : 0;
                   const displayPct = 2 + Math.round(chunkPct * 63);
                   updateTask(id, {
@@ -445,10 +579,12 @@ export function useVideoUploader() {
                   break;
                 }
                 case 'complete':
+                  cancelNativeAliveCheck(id);
                   unsubscribe();
                   resolve();
                   break;
                 case 'error':
+                  cancelNativeAliveCheck(id);
                   unsubscribe();
                   reject(new Error(event.message));
                   break;
@@ -568,7 +704,7 @@ export function useVideoUploader() {
       await insertAuditLog(id, 'assembly_completed', { vdoVideoId });
 
     } catch (e: any) {
-      if (useUploadQueueStore.getState().getTask(id)?.status === 'canceled') return;
+      if (!taskAlive(id)) return;
       const techMsg = logUploadError('[EF:video-assemble-upload]', 'Assembly / S3 stream failed', e, {
         uploadId: id,
       });
@@ -599,7 +735,7 @@ export function useVideoUploader() {
       vdoPoster   = result.poster;
 
     } catch (e: any) {
-      if (useUploadQueueStore.getState().getTask(id)?.status === 'canceled') return;
+      if (!taskAlive(id)) return;
       const techMsg = logUploadError('[VdoCipher]', 'Encoding / polling failed', e, {
         uploadId: id, vdoVideoId,
       });
@@ -638,33 +774,58 @@ export function useVideoUploader() {
       } catch (thumbErr) {
         if (__DEV__) console.warn('[runVdoCipherPipeline] thumbnail generation failed (non-fatal)', thumbErr);
       }
-    }
+    }    if (!taskAlive(id)) return;
 
-    if (useUploadQueueStore.getState().getTask(id)?.status === 'canceled') return;
     updateTask(id, { progress: 95 });
 
-    // ── STEP 5: Persist the usable lesson/asset relationship first. The queue
-    // item is removed only after this and the upload record's ready transition
-    // both succeed, so a ready badge always represents durable application data.
-    await updateLessonVideoStatus(lessonId, id, 'ready', {
-      video_id: vdoVideoId,
-      doctorId,
-      ...(finalDuration ? { video_duration_seconds: finalDuration } : {}),
-      ...(thumbnailUrl   ? { video_thumbnail_url: thumbnailUrl }    : {}),
-    });
-    await updateUploadRecord(id, {
-      status: 'ready',
-      provider_video_id: vdoVideoId,
-      ready_at: new Date().toISOString(),
-      verification_status: 'passed',
-      verified_at: new Date().toISOString(),
-    });
-    await insertAuditLog(id, 'ready', { vdoVideoId });
+    // ── STEP 5: Persist the usable lesson/asset relationship, then surface the
+    // queue 'ready' badge. These writes are guarded as a unit: if the lesson
+    // finalization SUCCEEDS, the queue task MUST reach a terminal state even if
+    // a later housekeeping write (upload record / audit log) throws — otherwise
+    // the lesson would show "Video Uploaded" while the queue sits at
+    // "Encoding…" forever (the stale-queue bug). Transient failures BEFORE the
+    // lesson write still route to markFailed/markTimeout as before.
+    try {
+      await updateLessonVideoStatus(lessonId, id, 'ready', {
+        video_id: vdoVideoId,
+        doctorId,
+        ...(finalDuration ? { video_duration_seconds: finalDuration } : {}),
+        ...(thumbnailUrl   ? { video_thumbnail_url: thumbnailUrl }    : {}),
+      });
+    } catch (e: any) {
+      if (!taskAlive(id)) return;
+      const techMsg = logUploadError('[EF:lesson-finalize]', 'Lesson finalization failed', e, {
+        uploadId: id, vdoVideoId,
+      });
+      await markFailed(id, lessonId, techMsg, 'lesson_finalize', '[EF:lesson-finalize]', vdoVideoId);
+      return;
+    }
+
+    // Lesson row is durably READY from here on — the provider asset is linked.
+    // Drive the queue to its terminal state FIRST (synchronous, cannot fail),
+    // then attempt the remaining housekeeping writes defensively.
     updateTask(id, { status: 'ready', progress: 100, verificationStatus: 'passed' });
     pushNotification({
       uploadId: id, type: 'video_ready', fileName,
       message: 'Your video is ready.',
     });
+    useUploadQueueStore.getState().incrementUnread();
+    try {
+      await updateUploadRecord(id, {
+        status: 'ready',
+        provider_video_id: vdoVideoId,
+        ready_at: new Date().toISOString(),
+        verification_status: 'passed',
+        verified_at: new Date().toISOString(),
+      });
+      await insertAuditLog(id, 'ready', { vdoVideoId });
+    } catch (e) {
+      // Non-fatal: the authoritative lesson/asset state is READY; a failed
+      // housekeeping write must not strand the queue task at "Encoding…".
+      if (__DEV__) console.warn('[runVdoCipherPipeline] housekeeping write failed after ready (non-fatal)', {
+        uploadId: id, error: e instanceof Error ? e.message : String(e),
+      });
+    }
     // Stop foreground service and show system-level completion notification
     await stopForegroundServiceIfPossible();
     await showUploadCompleteNotification(id, fileName);
@@ -862,21 +1023,39 @@ export function useVideoUploader() {
     }
 
     // Mark ready only after the lesson/asset relationship is durable.
+    // Same guarded sequence as the main pipeline: once the lesson write
+    // succeeds, the queue MUST reach its terminal state even if a later
+    // housekeeping write throws — never strand the task at "Encoding…".
     if (useUploadQueueStore.getState().getTask(taskId)?.status === 'canceled') return;
-    await updateLessonVideoStatus(lessonId, taskId, 'ready', {
-      video_id: vdoCipherVideoId,
-      doctorId,
-      ...(vdoDuration ? { video_duration_seconds: vdoDuration } : {}),
-      ...(vdoPoster   ? { video_thumbnail_url: vdoPoster }      : {}),
-    });
-    await updateUploadRecord(taskId, { status: 'ready', provider_video_id: vdoCipherVideoId, ready_at: new Date().toISOString() });
-    await insertAuditLog(taskId, 'ready', { vdoCipherVideoId, via: 'retry_processing' });
+    try {
+      await updateLessonVideoStatus(lessonId, taskId, 'ready', {
+        video_id: vdoCipherVideoId,
+        doctorId,
+        ...(vdoDuration ? { video_duration_seconds: vdoDuration } : {}),
+        ...(vdoPoster   ? { video_thumbnail_url: vdoPoster }      : {}),
+      });
+    } catch (e: any) {
+      if (useUploadQueueStore.getState().getTask(taskId)?.status === 'canceled') return;
+      const techMsg = logUploadError('[EF:lesson-finalize]', 'Lesson finalization failed (retry processing)', e, {
+        taskId, vdoCipherVideoId,
+      });
+      await markFailed(taskId, lessonId, techMsg, 'lesson_finalize', '[EF:lesson-finalize]', vdoCipherVideoId);
+      return;
+    }
     updateTask(taskId, { status: 'ready', progress: 100 });
     pushNotification({
       uploadId: taskId, type: 'video_ready', fileName: task.fileName,
       message: 'Your video is ready.',
     });
     useUploadQueueStore.getState().incrementUnread();
+    try {
+      await updateUploadRecord(taskId, { status: 'ready', provider_video_id: vdoCipherVideoId, ready_at: new Date().toISOString() });
+      await insertAuditLog(taskId, 'ready', { vdoCipherVideoId, via: 'retry_processing' });
+    } catch (e) {
+      if (__DEV__) console.warn('[retryProcessing] housekeeping write failed after ready (non-fatal)', {
+        taskId, error: e instanceof Error ? e.message : String(e),
+      });
+    }
     // Do not removeTask here — let the user see the Ready state.
   };
 

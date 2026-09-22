@@ -59,12 +59,12 @@ interface DiagState {
 const DETECTOR_META: Record<string, { label: string; apiExplain: string; falseOnStock: boolean; restricted?: boolean; restrictedReason?: string }> = {
   developerOptionsEnabled: {
     label: 'Developer Options',
-    apiExplain: 'Settings.Global.DEVELOPMENT_SETTINGS_ENABLED — reads the Settings DB integer. Returns true when the user has toggled "Developer Options" in Settings → About Phone → 7× build-number taps. Always false on a factory-reset device with no dev options enabled.',
+    apiExplain: 'Settings.Global.DEVELOPMENT_SETTINGS_ENABLED — reads the Settings DB integer. Returns true when the user has toggled "Developer Options" in Settings → About Phone → 7× build-number taps. Always false on a factory-reset device with no dev options enabled. POLICY: MANDATORY BLOCK — the toggle alone blocks login and locks the app via the central SecurityGate (developer_options bucket → block_login, weight 25). USB debugging/ADB and attached-debugger states map into the same blocking policy buckets (debug/developer_options) and are recorded as distinct event types in the audit trail.',
     falseOnStock: true,
   },
   adbEnabled: {
     label: 'USB Debugging (ADB)',
-    apiExplain: 'Settings.Global.ADB_ENABLED — reads the Settings DB integer. Returns true only when "USB Debugging" is explicitly enabled inside Developer Options. Requires Developer Options to be on first.',
+    apiExplain: 'Settings.Global.ADB_ENABLED — reads the Settings DB integer. Returns true only when "USB Debugging" is explicitly enabled inside Developer Options. Requires Developer Options to be on first. POLICY: MANDATORY BLOCK — adb_enabled maps into the developer_options blocking bucket → block_login (active attack surface). Wireless debugging (Android 11+) is an ADB transport and is covered by this same flag.',
     falseOnStock: true,
   },
   debuggerAttached: {
@@ -119,10 +119,10 @@ const DETECTOR_META: Record<string, { label: string; apiExplain: string; falseOn
   },
   overlayDetected: {
     label: 'Overlay / Tapjacking',
-    apiExplain: 'Checks which installed packages hold SYSTEM_ALERT_WINDOW permission (>5 suspicious). RESTRICTED: getRunningAppProcesses() and BIND_ACCESSIBILITY_SERVICE enumeration are blocked on Android 11+ for third-party apps. This check is a best-effort heuristic only.',
+    apiExplain: 'Targeted capability scan: flags an installed package ONLY when it is on the known screen-overlay/abuse tool list AND holds SYSTEM_ALERT_WINDOW. The aggregate count of overlay-capable apps is exported as evidence (overlayCapableAppsCount) but is NEVER itself a threat — Android defines SYSTEM_ALERT_WINDOW as a capability, and legitimate apps (chat heads, browsers, launchers) hold it without drawing over this app. Active overlay windows of other apps cannot be enumerated by a regular app on Android 11+.',
     falseOnStock: true,
     restricted: true,
-    restrictedReason: 'Android 11+ blocks getRunningAppProcesses() for apps not in the same UID group. Overlay enumeration requires BIND_ACCESSIBILITY_SERVICE which the app does not hold. Detection is package-permission-based only — a sophisticated attacker can bypass by not holding the permission globally.',
+    restrictedReason: 'Android 11+ blocks getRunningAppProcesses() for apps not in the same UID group. Active overlay enumeration requires BIND_ACCESSIBILITY_SERVICE which the app does not hold. Detection is targeted package-capability based only — a sophisticated attacker can bypass by not holding the permission globally.',
   },
   signatureValid: {
     label: 'App Signature Valid',
@@ -131,7 +131,7 @@ const DETECTOR_META: Record<string, { label: string; apiExplain: string; falseOn
   },
   tampered: {
     label: 'App Tampered / Repackaged',
-    apiExplain: '3 checks: (1) installer package name must be com.android.vending (Play Store) in release builds, (2) signature SHA-256 must match expected fingerprint, (3) critical native libs (libreactnative.so or libhermes.so) must be present in nativeLibraryDir. In debug builds check (1) is skipped (installer = null is allowed).',
+    apiExplain: '2 authoritative checks: (1) signature SHA-256 must match the expected fingerprint when one is pinned (BuildConfig.EXPECTED_CERT_SHA256 / security_config.expected_cert_sha256s — when no pin is configured the check is UNAVAILABLE, not passed), (2) critical native libs (libreactnative.so / libhermes.so / libhermesvm.so) must exist in the installed app — probed on disk (nativeLibraryDir) AND inside the installed APK, because android:extractNativeLibs=false means .so files load straight from the APK and nativeLibraryDir is empty on modern installs. Installer source is distribution telemetry only (this app ships as a direct-download APK); a server-controlled strict mode (security_config extras.require_play_installer=true) can re-enable installer enforcement for a Play-only rollout.',
     falseOnStock: false,
   },
 };
@@ -243,7 +243,7 @@ function DiagnosticsContent() {
 
       <ScrollView
         style={{ flex: 1 }}
-        contentContainerStyle={{ paddingTop: 16, paddingBottom: layout.scrollBottom() }}
+        contentContainerStyle={{ paddingTop: 16 }}
       >
         {/* ── Module registration proof ──────────────────────────────── */}
         <View style={sectionPad}>
@@ -406,8 +406,8 @@ function DiagnosticsContent() {
           <NeuCard style={{ padding: 16, marginBottom: 8 }}>
             {[
               {
-                title: 'Overlay Detection — getRunningAppProcesses()',
-                body: 'Android 11+ (API 30+): apps can only see their own processes and selected system processes. Third-party overlay apps are invisible. No workaround exists without BIND_ACCESSIBILITY_SERVICE or a privileged system permission.',
+                title: 'Overlay Detection — active window enumeration',
+                body: 'Android 11+ (API 30+): apps can only see their own processes and selected system processes, and no public API exposes other apps\' active overlay windows. Capability counting was removed as a threat signal — it false-positived on normal devices. Only targeted known-abuse package detection remains, plus a capability-count evidence metric.',
               },
               {
                 title: 'Root Detection — /proc/self/status TracerPid',

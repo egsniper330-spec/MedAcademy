@@ -23,7 +23,7 @@ import { EditUserDialog } from '@/components/EditUserDialog';
 import { DeviceManagerSheet } from '@/components/DeviceManagerSheet';
 import { BulkSelectBar, type BulkAction } from '@/components/BulkSelectBar';
 import { useToast } from '@/components/Toast';
-import { neuColors, neuFlatStyle, useLayout } from '@/lib/neu'
+import { neuColors, neuFlatStyle, useLayout, safeBottom } from '@/lib/neu'
 import { validateEmail, validateRequired, validatePasswordSimple, validateMatch } from '@/lib/validation';
 import { parseError, logAndParse } from '@/lib/parseError';
 import { useActionLoading } from '@/lib/useActionLoading';
@@ -41,6 +41,7 @@ const STATUS_FILTERS = ['', UserStatus.ACTIVE, UserStatus.SUSPENDED];
 function AdminCountryPicker({ value, onChange, c }: { value: Country; onChange: (c: Country) => void; c: typeof neuColors.light }) {
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState('');
+  const layout = useLayout();
   const filtered = search.trim()
     ? COUNTRIES.filter(ct =>
         ct.name.toLowerCase().includes(search.toLowerCase()) ||
@@ -81,7 +82,7 @@ function AdminCountryPicker({ value, onChange, c }: { value: Country; onChange: 
                   <Text style={{ flex: 1, fontSize: 14, color: c.text, fontWeight: item.iso === value.iso ? '700' : '400' }} numberOfLines={1}>{item.name}</Text>
                   <Text style={{ fontSize: 13, color: c.primary, fontWeight: '600' }}>{item.callingCode}</Text>
                 </Pressable>
-              )}
+              )} contentContainerStyle={{ paddingBottom: safeBottom(layout.insets.bottom) }}
             />
           </Pressable>
         </Pressable>
@@ -429,7 +430,7 @@ export default function AdminUsers() {
   );
   const dropList = (items: any[], selected: string, onSelect: (id: string) => void) => (
     <View style={{ backgroundColor: c.base, borderRadius: 12, marginBottom: 14, shadowColor: c.shadowDark, shadowOffset: { width: 2, height: 2 }, shadowOpacity: 0.5, shadowRadius: 5, maxHeight: 180, overflow: 'hidden' }}>
-      <ScrollView nestedScrollEnabled keyboardShouldPersistTaps="handled">
+      <ScrollView nestedScrollEnabled keyboardShouldPersistTaps="handled" contentContainerStyle={{ paddingBottom: safeBottom(layout.insets.bottom) }}>
         {items.map(item => (
           <Pressable key={item.id} onPress={() => onSelect(item.id)} style={{ paddingHorizontal: 14, paddingVertical: 11, backgroundColor: selected === item.id ? `${c.primary}18` : 'transparent', borderBottomWidth: 0.5, borderBottomColor: `${c.text}12` }}>
             <Text style={{ fontSize: 14, color: selected === item.id ? c.primary : c.text, fontWeight: selected === item.id ? '700' : '400' }}>{item.name}</Text>
@@ -442,8 +443,7 @@ export default function AdminUsers() {
   return (
     <View style={{ flex: 1, backgroundColor: c.base }}>
       <ScrollView
-          contentContainerStyle={{ paddingBottom: layout.scrollBottom() }}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />}>
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />} contentContainerStyle={{ paddingBottom: safeBottom(layout.insets.bottom) }}>
           {/* PageHeader sits OUTSIDE the inner padding view so it can own its own horizontal padding */}
           <PageHeader
             title="User Management"

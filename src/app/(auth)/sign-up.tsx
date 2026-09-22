@@ -438,7 +438,6 @@ export default function SignUp() {
           // screenPx: fluid horizontal gutter replaces hardcoded padding:24
           paddingHorizontal: layout.screenPx,
           paddingTop: layout.headerTop,
-          paddingBottom: layout.scrollBottom(),
           gap: layout.pad.sm,
         }}
         keyboardShouldPersistTaps="handled"

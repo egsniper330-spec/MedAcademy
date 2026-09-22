@@ -25,10 +25,13 @@ export function ImpersonationBanner() {
       clearProfile();
       return;
     }
-    // Restore original session using stored tokens
+    // Restore original session using stored tokens. The ACTOR's user id must
+    // be passed explicitly — setSession persists the user identity alongside
+    // the tokens, and the current persisted identity is the TARGET's.
     const { error } = await backendClient.auth.setSession({
       access_token: impersonation.originalAccessToken,
       refresh_token: impersonation.originalRefreshToken,
+      user: { id: impersonation.originalUserId, email: impersonation.originalEmail, phone: null } as any,
     });
     if (error) {
       // If stored token expired, sign out cleanly

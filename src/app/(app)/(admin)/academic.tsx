@@ -19,7 +19,7 @@ import { NeuCard } from '@/components/NeuCard';
 import { NeuButton } from '@/components/NeuButton';
 import { ResponsiveModal } from '@/components/ResponsiveModal';
 import { useToast } from '@/components/Toast';
-import { neuColors, useLayout } from '@/lib/neu';
+import { neuColors, useLayout, safeBottom } from '@/lib/neu';
 import { validateRequired, friendlyError } from '@/lib/validation';
 
 type Tab = 'universities' | 'faculties' | 'levels';
@@ -274,8 +274,7 @@ export default function AcademicManagement() {
   return (
     <View style={{ flex: 1, backgroundColor: c.base }}>
       <ScrollView
-          contentContainerStyle={{ paddingBottom: layout.scrollBottom() }}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />}>
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />} contentContainerStyle={{ paddingBottom: safeBottom(layout.insets.bottom) }}>
           <PageHeader title="Academic Structure" subtitle="Manage universities, faculties and levels" />
 
         <View style={{ paddingHorizontal: layout.screenPx }}>

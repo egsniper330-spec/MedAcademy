@@ -17,9 +17,10 @@ import {
 } from '@/lib/api';
 import { NeuCard } from '@/components/NeuCard';
 import { NeuButton } from '@/components/NeuButton';
+import { LoadingState, ErrorState } from '@/components/ScreenState';
 import { ResponsiveModal } from '@/components/ResponsiveModal';
 import { useToast } from '@/components/Toast';
-import { neuColors, useLayout } from '@/lib/neu';
+import { neuColors, useLayout, safeBottom } from '@/lib/neu';
 import { useDebounce } from '@/lib/useDebounce';
 import { friendlyError } from '@/lib/validation';
 
@@ -34,6 +35,7 @@ export default function MaintenanceModeScreen() {
   const [message, setMessage] = useState('');
   const [whitelist, setWhitelist] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<unknown>(null);
   const [saving, setSaving] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
 
@@ -45,17 +47,24 @@ export default function MaintenanceModeScreen() {
   const [searching, setSearching] = useState(false);
   const [adding, setAdding] = useState(false);
 
+  // Terminal-state contract: LOADING → (ERROR | CONTENT). A failed fetch
+  // never renders as a blank screen — it renders ErrorState with retry.
   const load = useCallback(async () => {
+    setLoading(true);
+    setError(null);
     try {
       const [cfg, wl] = await Promise.all([getMaintenanceConfig(), getMaintenanceWhitelist()]);
       setEnabled(cfg.enabled);
       setMessage(cfg.message);
       setWhitelist(wl);
-    } catch (_) {}
-    setLoading(false);
+    } catch (e) {
+      setError(e);
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
-  useFocusEffect(useCallback(() => { setLoading(true); load(); }, [load]));
+  useFocusEffect(useCallback(() => { load(); }, [load]));
   const onRefresh = async () => { setRefreshing(true); await load(); setRefreshing(false); };
 
   const handleSave = async () => {
@@ -72,7 +81,11 @@ export default function MaintenanceModeScreen() {
   const handleSearch = async () => {
     if (!debouncedSearch.trim()) return;
     setSearching(true);
-    try { setSearchResults(await searchUsers(debouncedSearch)); } catch (_) {}
+    try {
+      setSearchResults(await searchUsers(debouncedSearch));
+    } catch (e) {
+      showToast({ type: 'error', message: friendlyError(e, 'User search failed.') });
+    }
     setSearching(false);
   };
 
@@ -94,20 +107,23 @@ export default function MaintenanceModeScreen() {
     try {
       await removeFromMaintenanceWhitelist(userId);
       setWhitelist(prev => prev.filter(w => w.user_id !== userId));
-    } catch (_) {}
+    } catch (e) {
+      showToast({ type: 'error', message: friendlyError(e, 'Failed to remove user.') });
+    }
   };
 
   const inp = { backgroundColor: c.base, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, shadowColor: c.shadowDark, shadowOffset: { width: 2, height: 2 }, shadowOpacity: 0.55, shadowRadius: 5 };
 
   return (
     <ScrollView style={{ flex: 1, backgroundColor: c.base }}
-          contentContainerStyle={{ paddingBottom: layout.scrollBottom() }}
-      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />}>
+      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />} contentContainerStyle={{ paddingBottom: safeBottom(layout.insets.bottom) }}>
       <PageHeader title="Maintenance Mode" subtitle="Control platform availability" accentColor="#DC2626" />
 
       <View style={{ paddingHorizontal: layout.screenPx }}>
 
-        {loading ? <ActivityIndicator color={c.primary} style={{ marginTop: 40 }} /> : (
+        {loading ? <LoadingState label="Loading maintenance settings…" /> : error ? (
+          <ErrorState error={error} onRetry={load} />
+        ) : (
           <>
             {/* Status toggle */}
             <NeuCard style={{ marginBottom: 16, padding: 18 }}>

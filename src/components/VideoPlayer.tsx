@@ -17,7 +17,7 @@
  */
 
 import { VdoCipherPlayer } from '@/components/VdoCipherPlayer';
-import { YouTubePlayer } from '@/components/YouTubePlayer';
+import { YouTubePlayer, extractYouTubeVideoId } from '@/components/YouTubePlayer';
 
 // ─── Shared props interface ───────────────────────────────────────────────────
 
@@ -48,6 +48,11 @@ export interface VideoPlayerProps {
   /** Called when the player enters/exits fullscreen — used by the lesson screen
    *  to hide all non-video content for a YouTube-style fullscreen experience. */
   onFullscreen?: (active: boolean) => void;
+  /**
+   * SECURITY GATE (fullscreen boundary) — forwarded to the provider player.
+   * Consulted before any fullscreen surface mounts; false/throw refuses.
+   */
+  shouldAllowFullscreen?: () => Promise<boolean> | boolean;
 }
 
 // ─── Router ───────────────────────────────────────────────────────────────────
@@ -65,15 +70,19 @@ export function VideoPlayer({
   onEnd,
   onError,
   onFullscreen,
+  shouldAllowFullscreen,
 }: VideoPlayerProps) {
-  if (videoType === 'youtube' && youtubeVideoId) {
+  // youtubeVideoId must be a validated 11-char ID; garbage strings would only
+  // render a YouTube "invalid parameter" error inside the embed.
+  const validatedYoutubeId = extractYouTubeVideoId(youtubeVideoId ?? '');
+  if (videoType === 'youtube' && validatedYoutubeId) {
     const ytWatermark =
       watermarkName && watermarkId
         ? { name: watermarkName, studentId: watermarkId }
         : undefined;
     return (
       <YouTubePlayer
-        videoId={youtubeVideoId}
+        videoId={validatedYoutubeId}
         resumePosition={resumePosition}
         watermark={ytWatermark}
         onReady={onReady}
@@ -81,6 +90,7 @@ export function VideoPlayer({
         onEnd={onEnd}
         onError={onError}
         onFullscreen={onFullscreen}
+        shouldAllowFullscreen={shouldAllowFullscreen}
       />
     );
   }
@@ -97,6 +107,7 @@ export function VideoPlayer({
         onProgress={(currentTime, duration) => onProgress?.(currentTime, duration)}
         onEnd={onEnd}
         onError={onError}
+        shouldAllowFullscreen={shouldAllowFullscreen}
       />
     );
   }

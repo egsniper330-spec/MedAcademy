@@ -37,11 +37,68 @@ final class SecurityController
         return $this->security->version();
     }
 
+    /**
+     * GET /security/policies — per-detection enforcement policies + VPN
+     * whitelist names, from the authoritative DB tables.
+     *
+     * Server-side policy of record: security_policies (one row per detection
+     * type) and security_vpn_whitelist. Exposed to ANY authenticated session:
+     * rows contain only action/enabled/name fields — no secrets, no user data.
+     * Previously the client fetched the whitelist through the generic data API,
+     * which is admin-only → every Doctor/Student got a 403 and the whitelist
+     * feature silently never applied.
+     */
+    public function policies(Request $request): array
+    {
+        $db = Database::instance();
+
+        $rows = $db->select(
+            'SELECT detection_type, action, enabled FROM security_policies'
+        );
+        $policies = [];
+        foreach ($rows ?? [] as $r) {
+            $policies[(string) $r['detection_type']] = [
+                'action'  => (string) $r['action'],
+                'enabled' => (bool) $r['enabled'],
+            ];
+        }
+
+        $vpnWhitelist = array_map(
+            static fn (array $r): string => strtolower((string) $r['name']),
+            $db->select('SELECT name FROM security_vpn_whitelist') ?? []
+        );
+
+        return [
+            'policies'      => $policies,
+            'vpn_whitelist' => $vpnWhitelist,
+        ];
+    }
+
     public function reportEvent(Request $request): array
     {
         try {
-            $this->security->logEvent($request->user['id'], $request->json());
-            return ['success' => true];
+            $body = $request->json();
+
+            // Batch support: the app's logThreats() posts an ARRAY of events (one
+            // per detected threat) in a single request. Accept both shapes so the
+            // batched evidence pipeline actually persists every event — previously
+            // the array was coerced to a string and every batch failed at the DB.
+            $events = [];
+            if (array_is_list($body)) {
+                foreach ($body as $item) {
+                    if (is_array($item)) {
+                        $events[] = $item;
+                    }
+                }
+            } else {
+                $events[] = $body;
+            }
+
+            foreach ($events as $event) {
+                $this->security->logEvent($request->user['id'], $event);
+            }
+
+            return ['success' => true, 'recorded' => count($events)];
         } catch (\PDOException $e) {
             $sqlState = $e->getCode();
             $msg = $e->getMessage();

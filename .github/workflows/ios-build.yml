@@ -53,7 +53,7 @@ jobs:
       #
       # The PHP API base is public configuration, not a credential.
       EXPO_PUBLIC_APP_ID: app-czyg340mpc75
-      EXPO_PUBLIC_PHP_API_URL: https://api.medacademy.eu.cc/backend/public/index.php
+      EXPO_PUBLIC_PHP_API_URL: https://api.medacademy.site/backend/public/index.php
 
     steps:
       # -------------------------------------------------------------------------

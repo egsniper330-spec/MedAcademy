@@ -4,338 +4,134 @@ declare(strict_types=1);
 
 namespace MedAcademy\Controllers;
 
-use MedAcademy\Database\Database;
 use MedAcademy\Http\ApiException;
 use MedAcademy\Http\Request;
-use MedAcademy\Services\AuditService;
-use MedAcademy\Services\SecurityService;
-use MedAcademy\Utils\Config;
-use MedAcademy\Utils\Uuid;
+use MedAcademy\Services\IntegrityService;
 
 /**
- * IntegrityController — PHP equivalents of verify-play-integrity and verify-app-integrity.
+ * IntegrityController — PHP endpoints for the Play Integrity flow.
  *
- * verify-play-integrity: Android Play Integrity API verification.
- * verify-app-integrity: iOS DeviceCheck / App Attest verification (RECONSTRUCTED).
+ * POST /integrity/play
+ *   action=get_nonce            → { request_hash, action, expires_in }
+ *   action=verify (token, …)    → { passed, verdict, request_hash }
+ *
+ * POST /integrity/app (iOS App Attest / DeviceCheck)
+ *   action=get_nonce            → challenge for the iOS assertion flow
+ *   action=verify               → server-side verification (see notes)
+ *
+ * SECURITY: the server is the only judge of integrity. Every validation
+ * (requestHash binding, package name, app/device verdicts, signing
+ * certificate digest) happens in IntegrityService against Google's decoded
+ * payload. There are NO fail-open "NOT_CONFIGURED = passed" paths left —
+ * without server credentials the flow fails closed (503), because a
+ * tampered client must never be able to switch verification off by
+ * controlling its environment.
+ *
+ * LEGACY COMPATIBILITY: the original client called verify with { token,
+ * nonce }. That flow verified nothing binding and failed open; it is kept
+ * only as an explicit, logged rejection so stale clients get a clear
+ * signal instead of a silent pass.
  */
 final class IntegrityController
 {
-    private const VDO_CIPHER_API = 'https://playintegrity.googleapis.com';
-
-    /**
-     * POST /integrity/play — verify Play Integrity token.
-     *
-     * Actions:
-     *   get_nonce — generate server nonce (5-min TTL)
-     *   verify    — verify token against Google API
-     */
     public function playIntegrity(Request $request): array
     {
         $body = $request->json();
         $action = (string) ($body['action'] ?? '');
-        $userId = $request->user['id'] ?? null;
+        $userId = (string) $request->user['id'];
 
         return match ($action) {
-            'get_nonce' => $this->getPlayNonce($userId),
-            'verify' => $this->verifyPlayToken($body, $userId, $request->clientIp()),
-            default => throw new ApiException(422, 'Invalid action'),
+            'get_nonce' => $this->getChallenge($body, $userId),
+            'verify'    => $this->verify($body, $userId, $request),
+            default     => throw new ApiException(422, 'Invalid action'),
         };
     }
 
-    private function getPlayNonce(?string $userId): array
+    /**
+     * Issue a request-hash challenge. The client MUST pass the protected
+     * action key it intends to perform (vdo_otp, redeem, device_bind, …) so
+     * the verdict can be bound to that action server-side.
+     */
+    private function getChallenge(array $body, string $userId): array
     {
-        $nonce = $this->generateNonce();
-        $expiresAt = date('Y-m-d H:i:s', time() + 300); // 5 minutes
+        $action = (string) ($body['protected_action'] ?? $body['action_key'] ?? 'generic');
 
-        Database::instance()->insert(
-            'INSERT INTO play_integrity_nonces (id, nonce, user_id, expires_at, created_at)
-             VALUES (?, ?, ?, ?, UTC_TIMESTAMP(6))',
-            [Uuid::v4(), $nonce, $userId, $expiresAt]
-        );
+        // Whitelist known action keys; anything unknown is recorded as
+        // "generic" so a client cannot invent privileged action names.
+        $known = array_keys(IntegrityService::policy()['actions']);
+        if (!in_array($action, $known, true)) {
+            $action = 'generic';
+        }
 
-        return ['nonce' => $nonce];
+        $challenge = IntegrityService::issueChallenge($userId, $action);
+        // Legacy alias: the pre-request-hash client read `nonce`.
+        $challenge['nonce'] = $challenge['request_hash'];
+        return $challenge;
     }
 
-    private function verifyPlayToken(array $body, ?string $userId, string $ipAddress): array
+    private function verify(array $body, string $userId, Request $request): array
     {
         $token = (string) ($body['token'] ?? '');
-        $nonce = (string) ($body['nonce'] ?? '');
 
-        if ($token === '' || $nonce === '') {
-            throw new ApiException(422, 'token and nonce are required');
+        // New binding flow: the hash the client gave the Play Integrity API.
+        $requestHash = (string) ($body['request_hash'] ?? $body['nonce'] ?? '');
+
+        if ($token === '' || $requestHash === '') {
+            throw new ApiException(422, 'token and request_hash are required');
         }
 
-        $db = Database::instance();
-
-        // 1. Validate nonce (single-use, non-expired)
-        $nonceRow = $db->row(
-            "SELECT id FROM play_integrity_nonces WHERE nonce = ? AND expires_at > UTC_TIMESTAMP(6) LIMIT 1",
-            [$nonce]
+        return IntegrityService::verifyToken(
+            $userId,
+            $token,
+            $requestHash,
+            $request->clientIp()
         );
-        if ($nonceRow === null) {
-            return ['passed' => false, 'verdict' => 'NONCE_INVALID_OR_EXPIRED'];
-        }
-
-        // Delete nonce immediately (single-use)
-        $db->query('DELETE FROM play_integrity_nonces WHERE id = ?', [$nonceRow['id']]);
-
-        // 2. Check if Play Integrity is configured
-        $projectNumber = Config::string('GOOGLE_CLOUD_PROJECT_NUMBER', '');
-        $packageName = Config::string('ANDROID_PACKAGE_NAME', '');
-
-        if ($projectNumber === '' || $packageName === '') {
-            // Not configured — non-blocking, return passed
-            $this->logPlayIntegrityEvent($userId, true, 'NOT_CONFIGURED', $ipAddress);
-            return ['passed' => true, 'verdict' => 'NOT_CONFIGURED'];
-        }
-
-        // 3. Verify with Google Play Integrity API
-        $serviceAccountJson = Config::string('GOOGLE_SERVICE_ACCOUNT_JSON', '');
-
-        if ($serviceAccountJson !== '') {
-            $result = $this->verifyWithServiceAccount($token, $packageName, $serviceAccountJson);
-        } else {
-            // No service account — non-blocking fallback
-            $result = ['passed' => true, 'verdict' => 'NO_SERVICE_ACCOUNT', 'details' => []];
-        }
-
-        // 4. Log the result
-        $this->logPlayIntegrityEvent($userId, $result['passed'], $result['verdict'], $ipAddress);
-
-        return [
-            'passed' => $result['passed'],
-            'verdict' => $result['verdict'],
-        ];
     }
 
-    private function verifyWithServiceAccount(string $token, string $packageName, string $serviceAccountJson): array
-    {
-        $sa = json_decode($serviceAccountJson, true);
-        if (!is_array($sa) || empty($sa['client_email']) || empty($sa['private_key'])) {
-            return ['passed' => false, 'verdict' => 'INVALID_SERVICE_ACCOUNT'];
-        }
-
-        // Get Google access token
-        $accessToken = $this->getGoogleAccessToken($sa);
-        if ($accessToken === null) {
-            return ['passed' => false, 'verdict' => 'TOKEN_EXCHANGE_FAILED'];
-        }
-
-        // Call Play Integrity API
-        $url = self::VDO_CIPHER_API . "/v1/{$packageName}:decodeIntegrityToken";
-        $ch = curl_init($url);
-        curl_setopt_array($ch, [
-            CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_POST => true,
-            CURLOPT_POSTFIELDS => json_encode(['integrity_token' => $token]),
-            CURLOPT_HTTPHEADER => [
-                "Authorization: Bearer {$accessToken}",
-                'Content-Type: application/json',
-            ],
-            CURLOPT_TIMEOUT => 15,
-        ]);
-        $response = curl_exec($ch);
-        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        $error = curl_error($ch);
-        curl_close($ch);
-
-        if ($httpCode !== 200 || $response === false) {
-            return ['passed' => false, 'verdict' => 'GOOGLE_API_ERROR', 'details' => ['http' => $httpCode, 'error' => $error]];
-        }
-
-        $data = json_decode($response, true);
-        if (!is_array($data) || empty($data['tokenPayloadExternal'])) {
-            return ['passed' => false, 'verdict' => 'INVALID_TOKEN'];
-        }
-
-        $payload = $data['tokenPayloadExternal'];
-        $appVerdict = $payload['appIntegrity']['appRecognitionVerdict'] ?? '';
-        $deviceVerdict = $payload['deviceIntegrity']['deviceRecognitionVerdict'] ?? [];
-        $licVerdict = $payload['accountDetails']['appLicensingVerdict'] ?? '';
-
-        $passed = in_array($appVerdict, ['PLAY_RECOGNIZED', 'UNRECOGNIZED_VERSION'])
-            && (in_array('MEETS_DEVICE_INTEGRITY', $deviceVerdict) || in_array('MEETS_BASIC_INTEGRITY', $deviceVerdict))
-            && in_array($licVerdict, ['LICENSED', 'UNEVALUATED']);
-
-        $verdict = implode(',', array_filter([$appVerdict, implode(';', $deviceVerdict), $licVerdict]));
-
-        return [
-            'passed' => $passed,
-            'verdict' => $verdict,
-            'details' => ['appVerdict' => $appVerdict, 'deviceVerdict' => $deviceVerdict, 'licVerdict' => $licVerdict],
-        ];
-    }
-
-    private function getGoogleAccessToken(array $serviceAccount): ?string
-    {
-        $now = time();
-        $header = $this->base64url(json_encode(['alg' => 'RS256', 'typ' => 'JWT']));
-        $payload = $this->base64url(json_encode([
-            'iss' => $serviceAccount['client_email'],
-            'scope' => 'https://www.googleapis.com/auth/playintegrity',
-            'aud' => 'https://oauth2.googleapis.com/token',
-            'exp' => $now + 3600,
-            'iat' => $now,
-        ]));
-
-        $signingInput = "{$header}.{$payload}";
-
-        $key = openssl_pkey_get_private($serviceAccount['private_key']);
-        if ($key === false) {
-            return null;
-        }
-
-        $signature = '';
-        openssl_sign($signingInput, $signature, $key, OPENSSL_ALGO_SHA256);
-        openssl_pkey_free($key);
-
-        $jwt = "{$signingInput}." . $this->base64url($signature);
-
-        $ch = curl_init('https://oauth2.googleapis.com/token');
-        curl_setopt_array($ch, [
-            CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_POST => true,
-            CURLOPT_POSTFIELDS => http_build_query([
-                'grant_type' => 'urn:ietf:params:oauth:grant-type:jwt-bearer',
-                'assertion' => $jwt,
-            ]),
-            CURLOPT_TIMEOUT => 10,
-        ]);
-        $response = curl_exec($ch);
-        curl_close($ch);
-
-        $data = json_decode($response, true);
-        return $data['access_token'] ?? null;
-    }
-
-    private function logPlayIntegrityEvent(?string $userId, bool $passed, string $verdict, string $ipAddress): void
-    {
-        try {
-            (new SecurityService())->logEvent($userId ?? '00000000-0000-0000-0000-000000000000', [
-                'event_type' => $passed ? 'play_integrity_passed' : 'play_integrity_failed',
-                'detection_method' => "Play Integrity API: {$verdict}",
-                'policy_action' => $passed ? 'log_only' : 'block_login',
-                'risk_score' => $passed ? 0 : 30,
-                'platform' => 'android',
-                'ip_address' => $ipAddress,
-            ]);
-        } catch (\Throwable) {
-            // Non-fatal
-        }
-    }
+    // ─────────────────────────────────────────────────────────────────────────
+    // iOS App Attest / DeviceCheck
+    // ─────────────────────────────────────────────────────────────────────────
 
     /**
-     * POST /integrity/app — iOS DeviceCheck / App Attest verification.
+     * App Attest — verified authorization requires the backend to validate
+     * the attestation object and per-request assertions against Apple's
+     * servers (App Attest attestation + assertion endpoints) and to bind the
+     * assertion counter/challenge to the protected request.
      *
-     * NOTE: This is a RECONSTRUCTED implementation. The original verify-app-integrity
-     * Edge Function source was not found in the export. Behavior reconstructed from:
-     *   - frontend-supabase-usage.json (frontend calls verify-app-integrity)
-     *   - security_config table (expected_cert_sha256s)
-     *   - database schema (security_events, security_config)
-     *   - iOS DeviceCheck API documentation
-     *
-     * Expected request:
-     *   { action: "get_nonce" } → returns nonce
-     *   { action: "verify", token: string, nonce: string } → returns { passed: boolean }
-     *
-     * Security model:
-     *   - Requires valid JWT (optional for get_nonce, required for verify)
-     *   - Nonce is single-use with 5-minute TTL
-     *   - Token is verified server-side (Apple DeviceCheck API)
-     *   - Client receives only pass/fail
+     * Until Apple Developer credentials are configured, verification fails
+     * CLOSED (503) — the previous "received the token, pass it" behavior was
+     * a false sense of security and is removed. The challenge endpoint stays
+     * available so clients can be wired to the real flow when credentials
+     * land.
      */
     public function appIntegrity(Request $request): array
     {
         $body = $request->json();
         $action = (string) ($body['action'] ?? '');
-        $userId = $request->user['id'] ?? null;
+        $userId = (string) $request->user['id'];
 
         return match ($action) {
-            'get_nonce' => $this->getAppNonce($userId),
-            'verify' => $this->verifyAppToken($body, $userId, $request),
+            // Challenge for the iOS assertion flow — returns under both the
+            // historical `challenge` key and the request-hash name.
+            'get_nonce', 'get_challenge' => self::issueIosChallenge($userId),
+            // Attestation + assertion verification require Apple server-side
+            // validation (App Attest attestation/assertion endpoints) with
+            // Apple Developer credentials. Until configured these fail
+            // CLOSED with an explicit status — the previous "received the
+            // token, pass it" behavior was a false sense of security. The
+            // iOS client treats any error here as non-blocking skip.
+            'attest_key', 'verify_assertion', 'verify' => throw new ApiException(
+                503,
+                'App Attest server verification is not configured'
+            ),
             default => throw new ApiException(422, 'Invalid action'),
         };
     }
 
-    private function getAppNonce(?string $userId): array
+    /** @return array{challenge:string, request_hash:string} */
+    private static function issueIosChallenge(string $userId): array
     {
-        $nonce = $this->generateNonce();
-        $expiresAt = date('Y-m-d H:i:s', time() + 300);
-
-        Database::instance()->insert(
-            'INSERT INTO play_integrity_nonces (id, nonce, user_id, expires_at, created_at)
-             VALUES (?, ?, ?, ?, UTC_TIMESTAMP(6))',
-            [Uuid::v4(), $nonce, $userId, $expiresAt]
-        );
-
-        return ['nonce' => $nonce];
-    }
-
-    private function verifyAppToken(array $body, ?string $userId, Request $request): array
-    {
-        $token = (string) ($body['token'] ?? '');
-        $nonce = (string) ($body['nonce'] ?? '');
-        $platform = (string) ($body['platform'] ?? 'ios');
-
-        if ($token === '' || $nonce === '') {
-            throw new ApiException(422, 'token and nonce are required');
-        }
-
-        $db = Database::instance();
-
-        // 1. Validate nonce
-        $nonceRow = $db->row(
-            "SELECT id FROM play_integrity_nonces WHERE nonce = ? AND expires_at > UTC_TIMESTAMP(6) LIMIT 1",
-            [$nonce]
-        );
-        if ($nonceRow === null) {
-            return ['passed' => false, 'verdict' => 'NONCE_INVALID_OR_EXPIRED'];
-        }
-
-        $db->query('DELETE FROM play_integrity_nonces WHERE id = ?', [$nonceRow['id']]);
-
-        // 2. Check if Apple DeviceCheck is configured
-        $appleKeyId = Config::string('APPLE_DEVICE_CHECK_KEY_ID', '');
-        $appleTeamId = Config::string('APPLE_TEAM_ID', '');
-        $appleP8Key = Config::string('APPLE_DEVICE_CHECK_P8_KEY', '');
-
-        if ($appleKeyId === '' || $appleTeamId === '' || $appleP8Key === '') {
-            // Not configured — non-blocking
-            (new SecurityService())->logEvent($userId ?? '00000000-0000-0000-0000-000000000000', [
-                'event_type' => 'app_integrity_compromised',
-                'detection_method' => 'DeviceCheck not configured — non-blocking',
-                'policy_action' => 'log_only',
-                'platform' => $platform,
-                'ip_address' => $request->clientIp(),
-            ]);
-            return ['passed' => true, 'verdict' => 'NOT_CONFIGURED'];
-        }
-
-        // 3. For production: verify with Apple DeviceCheck API
-        // This requires a server-to-server JWT to Apple's API
-        // For now, log the attempt and return passed (non-blocking)
-        // The actual Apple DeviceCheck verification should be implemented
-        // when the Apple Developer credentials are available
-
-        (new SecurityService())->logEvent($userId ?? '00000000-0000-0000-0000-000000000000', [
-            'event_type' => 'play_integrity_passed',
-            'detection_method' => "DeviceCheck token received on {$platform}",
-            'policy_action' => 'log_only',
-            'platform' => $platform,
-            'ip_address' => $request->clientIp(),
-        ]);
-
-        return ['passed' => true, 'verdict' => 'DEVICECHECK_RECEIVED'];
-    }
-
-    private function generateNonce(): string
-    {
-        $bytes = random_bytes(32);
-        return rtrim(strtr(base64_encode($bytes), '+/', '-_'), '=');
-    }
-
-    private function base64url(string $data): string
-    {
-        return rtrim(strtr(base64_encode($data), '+/', '-_'), '=');
+        $c = IntegrityService::issueChallenge($userId, 'ios_attest');
+        return ['challenge' => $c['request_hash'], 'request_hash' => $c['request_hash']];
     }
 }

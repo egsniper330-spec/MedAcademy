@@ -305,14 +305,6 @@ export default function StudentDashboard() {
         rightActions={
           <>
             <Pressable
-              onPress={() => router.push('/(app)/(student)/activate' as RelativePathString)}
-              accessibilityLabel="Activate course code"
-              accessibilityRole="button"
-              style={[{ width: layout.touchTarget + 2, height: layout.touchTarget + 2, borderRadius: layout.cardRadius, alignItems: 'center', justifyContent: 'center' }, neuMicroStyle(isDark)]}
-            >
-              <Key size={Math.round((layout.touchTarget + 2) * 0.4)} color={c.accent} />
-            </Pressable>
-            <Pressable
               onPress={() => router.push('/(app)/notifications' as RelativePathString)}
               accessibilityLabel={unreadCount > 0 ? `Notifications, ${unreadCount} unread` : 'Notifications'}
               accessibilityRole="button"
@@ -409,7 +401,7 @@ export default function StudentDashboard() {
       {loading ? (
         <ActivityIndicator color={c.primary} style={{ marginTop: 40 }} />
       ) : (
-        <View style={{ paddingHorizontal: layout.screenPx, paddingTop: layout.pad.md, paddingBottom: layout.scrollBottom() }}>
+        <View style={{ paddingHorizontal: layout.screenPx, paddingTop: layout.pad.md }}>
 
           {/* ── My Courses ───────────────────────────────────────────────── */}
           <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: layout.pad.md }}>

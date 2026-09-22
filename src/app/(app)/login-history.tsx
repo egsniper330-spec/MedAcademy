@@ -135,7 +135,7 @@ export default function LoginHistory() {
           data={history}
           keyExtractor={item => item.id}
           renderItem={renderItem}
-          contentContainerStyle={{ paddingHorizontal: layout.screenPx, paddingBottom: layout.scrollBottom() }}
+          contentContainerStyle={{ paddingHorizontal: layout.screenPx }}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />}
         />
       )}

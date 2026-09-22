@@ -104,7 +104,6 @@ export default function ForcePasswordChangeScreen() {
             paddingHorizontal: layout.screenPx,
             // headerTop accounts for status bar + Dynamic Island/notch + breathing room
             paddingTop: layout.headerTop,
-            paddingBottom: layout.scrollBottom(),
             gap: layout.pad.lg,
             justifyContent: 'center',
             flexGrow: 1,

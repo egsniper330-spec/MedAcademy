@@ -35,7 +35,7 @@ export default function EditProfile() {
   const [wmCopied, setWmCopied] = useState(false);
 
   const handleCopyWatermark = () => {
-    const wm = profile?.watermark_id;
+    const wm = profile?.public_user_id;
     if (!wm) return;
     void Clipboard.setStringAsync(wm);
     setWmCopied(true);
@@ -165,7 +165,7 @@ export default function EditProfile() {
             <View style={{ flex: 1 }}>
               <Text style={{ fontSize: 11, fontWeight: '700', color: c.text, opacity: 0.4, textTransform: 'uppercase', letterSpacing: 0.9 }}>ID</Text>
               <Text style={{ fontSize: 17, fontWeight: '800', color: c.primary, letterSpacing: 1.4, marginTop: 1, fontVariant: ['tabular-nums'] }}>
-                {profile?.watermark_id ?? '—'}
+                {profile?.public_user_id ?? '—'}
               </Text>
             </View>
             <Pressable

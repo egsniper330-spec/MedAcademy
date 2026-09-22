@@ -78,11 +78,16 @@ function uploadStatusLabel(status: string): string {
 type VideoType = 'vdocipher' | 'coming_soon' | 'youtube';
 type LessonTab = 'video' | 'materials' | 'settings';
 
-/** Extract the 11-char YouTube video ID from any standard YouTube URL format. */
+/**
+ * Extract the 11-char YouTube video ID from any standard YouTube URL format.
+ * Mirrors extractYouTubeVideoId in YouTubePlayer.tsx (watch, youtu.be, embed,
+ * shorts, live, m./music. hosts, youtube-nocookie) so what the editor accepts
+ * is exactly what the player will validate and play.
+ */
 function extractYouTubeId(input: string): string | null {
   const trimmed = input.trim();
   const match = trimmed.match(
-    /(?:youtube\.com\/(?:watch\?v=|embed\/|shorts\/)|youtu\.be\/)([a-zA-Z0-9_-]{11})/,
+    /(?:youtube(?:-nocookie)?\.com\/(?:watch\?(?:[a-z_]+=[^&]*&)*v=|embed\/|shorts\/|live\/|v\/)|youtu\.be\/)([a-zA-Z0-9_-]{11})/,
   );
   if (match) return match[1];
   // Plain 11-char ID
@@ -461,6 +466,7 @@ export default function LessonEditor() {
     const taskId = randomUUID();
     const task = {
       id: taskId,
+      ownerUserId: profile?.id,
       lessonId: lesson!.id,
       courseId,
       doctorId: profile?.id,
@@ -779,7 +785,7 @@ export default function LessonEditor() {
       ══════════════════════════════════════════════════════════════════════ */}
       {tab === 'video' && (
         <ScrollView keyboardShouldPersistTaps="handled"
-          contentContainerStyle={{ padding: layout.screenPx, gap: 16, paddingBottom: layout.scrollBottom() }}>
+          contentContainerStyle={{ padding: layout.screenPx, gap: 16 }}>
 
           {/* ── Live upload / processing status card ─────────────────────── */}
           {activeTask && (
@@ -1261,6 +1267,8 @@ export default function LessonEditor() {
                   'https://youtu.be/VIDEO_ID',
                   'https://youtube.com/watch?v=VIDEO_ID',
                   'https://youtube.com/embed/VIDEO_ID',
+                  'https://youtube.com/shorts/VIDEO_ID',
+                  'https://youtube.com/live/VIDEO_ID',
                   'VIDEO_ID (11 characters)',
                 ].map((fmt) => (
                   <Text key={fmt} style={{ fontSize: 11, color: c.text, opacity: 0.4 }}>{fmt}</Text>
@@ -1335,7 +1343,7 @@ export default function LessonEditor() {
           <FlatList
             data={materials}
             keyExtractor={m => m.id}
-            contentContainerStyle={{ padding: layout.screenPx, paddingTop: 4, gap: 10, paddingBottom: layout.scrollBottom() }}
+            contentContainerStyle={{ padding: layout.screenPx, paddingTop: 4, gap: 10 }}
             ListEmptyComponent={
               <View style={{ alignItems: 'center', paddingVertical: 60 }}>
                 <Paperclip size={44} color={c.primary} opacity={0.2} />
@@ -1423,7 +1431,7 @@ export default function LessonEditor() {
       ══════════════════════════════════════════════════════════════════════ */}
       {tab === 'settings' && (
         <ScrollView keyboardShouldPersistTaps="handled"
-          contentContainerStyle={{ padding: layout.screenPx, gap: 16, paddingBottom: layout.scrollBottom() }}>
+          contentContainerStyle={{ padding: layout.screenPx, gap: 16 }}>
           <Text style={{ fontSize: 16, fontWeight: '800', color: c.text, opacity: 0.7 }}>Lesson Access</Text>
 
           <SettingToggle

@@ -157,11 +157,12 @@ export function buildWatermarkInjection(
   var WM_ID='${safeId}';
   var WM_NAME='${safeName}';
 
-  /* 9-slot grid [xFrac, yFrac] — inset ~12% from every edge (≥24 px safe margin) */
+  /* 9-slot grid [xFrac, yFrac] — VERBATIM from the Plyr watermark
+     (playerScript.ts G table, 8% inset) — the source of truth. */
   var G=[
-    [0.12,0.12],[0.42,0.10],[0.72,0.12],
-    [0.08,0.45],[0.38,0.45],[0.68,0.45],
-    [0.12,0.78],[0.42,0.76],[0.72,0.78]
+    [0.08,0.08],[0.42,0.08],[0.72,0.08],
+    [0.04,0.42],[0.35,0.42],[0.68,0.42],
+    [0.08,0.74],[0.42,0.74],[0.72,0.74]
   ];
   var cur=-1;
 
@@ -198,38 +199,31 @@ export function buildWatermarkInjection(
         'user-select:none;',
         '-webkit-user-select:none;',
         'line-height:1.4;',
-        'max-width:min(360px,68vw);',
+        'max-width:min(320px,55%);',
         'overflow:visible;',
-        /* Compositor-only transition — zero layout cost */
-        'transition:transform 1.3s cubic-bezier(.34,1.56,.64,1),opacity 0.8s ease;',
+        /* Compositor-only transition — PLYR PARITY: 0.6s ease (Plyr CSS).
+           The watermark GLIDES while staying visible — no pulse animation,
+           no hide gap (opacity is re-drawn per move from the Plyr band). */
+        'transition:transform 0.6s ease,opacity 0.6s ease;',
         'will-change:transform,opacity;',
-        /* CSS animation handles opacity variation — zero JS per frame */
-        'animation:__fwmPulse 12s ease-in-out infinite;',
         'opacity:0;',
         'transform:translate3d(0,0,0);',
       '}',
       '#'+EL_ID+' span{',
         'display:block;',
-        'color:#F2F4F7;',
-        /* System sans-serif stack — Inter/Manrope/SF Pro/Roboto as available */
-        'font-family:"Inter","Manrope",-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;',
-        'font-size:15px;',
-        'font-weight:500;',
-        'letter-spacing:0.04em;',
+        'color:#fff;',
+        /* System sans-serif stack — same as Plyr watermark */
+        'font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;',
+        /* PLYR PARITY typography: 13px / 600 / 0.3px tracking */
+        'font-size:13px;',
+        'font-weight:600;',
+        'letter-spacing:0.3px;',
         'white-space:nowrap;',
-        'text-shadow:0 1px 5px rgba(0,0,0,.85),0 0 12px rgba(0,0,0,.5);',
+        'overflow:hidden;',
+        'text-overflow:ellipsis;',
+        'text-shadow:0 1px 4px rgba(0,0,0,0.95),0 0 10px rgba(0,0,0,0.7);',
         '-webkit-font-smoothing:antialiased;',
       '}',
-      /* Single-line combined label — no .fwm-n / .fwm-i split */
-      /* Opacity + subtle pulse — pure CSS compositor animation */
-      '@keyframes __fwmPulse{',
-        '0%  {opacity:.28;}',
-        '20% {opacity:.34;}',
-        '45% {opacity:.30;}',
-        '65% {opacity:.35;}',
-        '85% {opacity:.29;}',
-        '100%{opacity:.28;}',
-      '}'
     ].join('');
     (document.head||document.documentElement).appendChild(s);
   }
@@ -261,8 +255,10 @@ export function buildWatermarkInjection(
         if(!_el)return;
         var slot=nxtSlot();
         var deg=rnd(-3,3).toFixed(1);
-        _el.style.transform='translate3d('+Math.round(slot[0]*_vw)+'px,'+Math.round(slot[1]*_vh)+'px,0)';
-        _el.style.opacity=rnd(0.28,0.35).toFixed(2);
+        /* Plyr move: glide (CSS transition) to slot + rotation jitter +
+           opacity re-drawn from the Plyr band 0.38–0.58 — stays visible. */
+        _el.style.transform=slotTransform(slot,deg);
+        _el.style.opacity=rnd(0.38,0.58).toFixed(2);
       });
     });
   }
@@ -272,13 +268,15 @@ export function buildWatermarkInjection(
   function move(){
     if(!_el||!_el.parentNode){recover();return;}
     var slot=nxtSlot();
-    _el.style.transform=slotTransform(slot,'0');
-    _el.style.opacity=rnd(0.28,0.35).toFixed(2);
+    var deg=rnd(-3,3).toFixed(1);
+    _el.style.transform=slotTransform(slot,deg);
+    /* Plyr band */
+    _el.style.opacity=rnd(0.38,0.58).toFixed(2);
   }
 
-  /* ── Self-rescheduling move timer (20–30 s) ── */
+  /* ── Self-rescheduling move timer — PLYR PARITY: 30–60 s ── */
   function scheduleTick(){
-    _tmr=setTimeout(function(){move();scheduleTick();},rnd(20000,30000));
+    _tmr=setTimeout(function(){move();scheduleTick();},rnd(30000,60000));
   }
 
   /* ── Lightweight tamper check — no getComputedStyle, no querySelectorAll ── */

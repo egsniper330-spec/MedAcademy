@@ -13,7 +13,7 @@ import { Coins, Save, RefreshCw } from 'lucide-react-native';
 import { PageHeader } from '@/components/PageHeader';
 import { NeuCard } from '@/components/NeuCard';
 import { NeuButton } from '@/components/NeuButton';
-import { neuColors, useLayout } from '@/lib/neu';
+import { neuColors, useLayout, safeBottom } from '@/lib/neu';
 import {
   fetchCurrencyConfig, saveCurrencyConfig, invalidateCurrencyCache,
   formatCurrency, DEFAULT_CURRENCY, type CurrencyConfig,
@@ -82,8 +82,7 @@ export default function CurrencySettings() {
   return (
     <ScrollView
       style={{ flex: 1, backgroundColor: c.base }}
-      contentContainerStyle={{ paddingBottom: layout.scrollBottom() }}
-      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />}
+      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />} contentContainerStyle={{ paddingBottom: safeBottom(layout.insets.bottom) }}
     >
       <PageHeader title="Platform Currency" subtitle="Configure how prices are displayed" accentColor="#D97706" />
 

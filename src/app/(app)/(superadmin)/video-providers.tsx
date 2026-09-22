@@ -13,7 +13,7 @@ import { Video, Users, Globe, Lock, Unlock, AlertTriangle, Search, ChevronDown, 
 import { PageHeader } from '@/components/PageHeader';
 import { NeuCard } from '@/components/NeuCard';
 import { useToast } from '@/components/Toast';
-import { neuColors, useLayout } from '@/lib/neu';
+import { neuColors, useLayout, safeBottom } from '@/lib/neu';
 import {
   getVideoProviders, setGlobalProviderEnabled,
   getDoctorsForProviderMgmt, getTeacherProviderPermissionsById,
@@ -161,7 +161,7 @@ export default function VideoProvidersScreen() {
   return (
     <ScrollView
       style={{ flex: 1, backgroundColor: c.base }}
-      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />}
+      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />} contentContainerStyle={{ paddingBottom: safeBottom(layout.insets.bottom) }}
     >
       <PageHeader title="Video Providers" subtitle="Control upload providers globally and per teacher" />
 

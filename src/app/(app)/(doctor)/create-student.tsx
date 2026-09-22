@@ -1,8 +1,8 @@
 /**
  * Create Student — Doctor flow
  * Step 1: Student info (name, email/phone, academic, temp password)
- * Step 2: Mode — Account Only  OR  Account + Activate Course
- *   Mode B sub-steps: pick course → pick method (Code or Credits) → confirm
+ * Step 2: Mode — Account Only  OR  Account + Enroll in Course
+ *   Mode B sub-steps: pick course → method (Credits) → confirm
  */
 import React, { useState, useCallback, useEffect } from 'react';
 import {
@@ -13,7 +13,7 @@ import { useRouter, RelativePathString } from 'expo-router';
 import {
   User, Mail, Phone, Lock, Eye, EyeOff,
   Building2, GraduationCap, BookOpen, ChevronDown,
-  CreditCard, Ticket, CheckCircle, ArrowLeft, ArrowRight,
+  CreditCard, CheckCircle, ArrowLeft, ArrowRight,
 } from 'lucide-react-native';
 import { useProfileStore } from '@/lib/store';
 import { neuColors, useLayout, neuFlatStyle, safeBottom , zIndex} from '@/lib/neu';
@@ -159,13 +159,11 @@ export default function CreateStudentScreen() {
   const [openPicker,      setOpenPicker]      = useState<'uni' | 'fac' | 'lvl' | null>(null);
 
   // ── Step 2 fields ─────────────────────────────────────────────────────────
-  type Mode = 'account_only' | 'activate';
-  type Method = 'credits' | 'code';
+  type Mode = 'account_only' | 'enroll';
   const [mode,             setMode]             = useState<Mode | null>(null);
   const [courses,          setCourses]          = useState<PickerOption[]>([]);
   const [courseId,         setCourseId]         = useState('');
-  const [method,           setMethod]           = useState<Method | null>(null);
-  const [activCode,        setActivCode]        = useState('');
+  const [method,           setMethod]           = useState<'credits' | null>(null);
   // creditBal: always from creditService — same source as every other screen
   const [creditBal,        setCreditBal]        = useState<CreditBalance | null>(null);
   const [openCoursePicker, setOpenCoursePicker] = useState(false);
@@ -237,19 +235,17 @@ export default function CreateStudentScreen() {
   // ── Submit — ONE atomic EF call for everything ────────────────────────────────
   const handleConfirm = async () => {
     if (!mode) { setError('Please choose a creation mode.'); return; }
-    if (mode === 'activate') {
+    if (mode === 'enroll') {
       if (!courseId) { setError('Please select a course.'); return; }
-      if (!method)   { setError('Please choose an activation method.'); return; }
-      if (method === 'code' && !activCode.trim()) { setError('Please enter an activation code.'); return; }
+      if (!method)   { setError('Please choose an enrollment method.'); return; }
       if (method === 'credits' && (creditBal?.remaining ?? 0) < 1) { setError('Insufficient credits.'); return; }
     }
     setLoading(true); setError('');
     try {
       // Determine mode for the unified Edge Function
-      type SOMode = 'create_only' | 'create_and_enroll_credits' | 'create_and_enroll_code';
+      type SOMode = 'create_only' | 'create_and_enroll_credits';
       let opMode: SOMode = 'create_only';
-      if (mode === 'activate' && method === 'credits') opMode = 'create_and_enroll_credits';
-      if (mode === 'activate' && method === 'code')    opMode = 'create_and_enroll_code';
+      if (mode === 'enroll' && method === 'credits') opMode = 'create_and_enroll_credits';
 
       // Single atomic call: student-operations EF handles everything in one transaction.
       // On any failure (credits, profile, enrollment) the EF rolls back completely.
@@ -264,7 +260,6 @@ export default function CreateStudentScreen() {
         faculty_id:        faculty?.id,
         academic_level_id: academicLevel?.id,
         course_id:         courseId || undefined,
-        activation_code:   method === 'code' ? activCode.trim().toUpperCase() : undefined,
       });
 
       if (!result?.student_id) throw new Error('Student creation failed.');
@@ -287,7 +282,7 @@ export default function CreateStudentScreen() {
           phone:             result.phone ?? '',          // display phone (local format)
           login_type:        result.login_type ?? 'email',
           temp_password:     tempPass,
-          course_name:       mode === 'activate' ? (courses.find(co => co.id === courseId)?.name ?? '') : '',
+          course_name:       mode === 'enroll' ? (courses.find(co => co.id === courseId)?.name ?? '') : '',
           activation_method: opMode === 'create_only' ? 'account_only' : (method ?? 'credits'),
           remaining_credits: String(remainingAfter),
         },
@@ -306,7 +301,7 @@ export default function CreateStudentScreen() {
         <ScrollView keyboardShouldPersistTaps="handled">
           <PageHeader title="Create Student" subtitle={step === 1 ? 'Step 1 of 2 — Student Info' : 'Step 2 of 2 — Creation Mode'} />
 
-        <View style={{ paddingHorizontal: layout.screenPx, gap: 16, paddingBottom: layout.scrollBottom() }}>
+        <View style={{ paddingHorizontal: layout.screenPx, gap: 16 }}>
 
           {/* Step indicator */}
           <View style={{ flexDirection: 'row', gap: 8, marginBottom: 4 }}>
@@ -370,24 +365,24 @@ export default function CreateStudentScreen() {
             <>
               <NeuCard>
                 <Text style={{ fontSize: 16, fontWeight: '700', color: c.text, marginBottom: 14 }}>Choose Creation Mode</Text>
-                {(['account_only', 'activate'] as Mode[]).map(m => (
+                {(['account_only', 'enroll'] as Mode[]).map(m => (
                   <Pressable key={m} onPress={() => { setMode(m); setError(''); }}
                     style={[flat, { borderRadius: 16, padding: 16, marginBottom: 12,
                       borderWidth: mode === m ? 2 : 0, borderColor: c.primary }]}>
                     <Text style={{ fontSize: 15, fontWeight: '700', color: c.text }}>
-                      {m === 'account_only' ? '📋  Create Account Only' : '🎓  Create Account + Activate Course'}
+                      {m === 'account_only' ? '📋  Create Account Only' : '🎓  Create Account + Enroll Course'}
                     </Text>
                     <Text style={{ fontSize: 13, color: `${c.text}88`, marginTop: 4 }}>
                       {m === 'account_only'
                         ? 'No course assigned. No credits consumed.'
-                        : 'Assign a course immediately via activation code or credits.'}
+                        : 'Assign a course immediately via Doctor Credits.'}
                     </Text>
                   </Pressable>
                 ))}
               </NeuCard>
 
-              {/* Course + method (only when activate mode chosen) */}
-              {mode === 'activate' && (
+              {/* Course + method (only when enroll mode chosen) */}
+              {mode === 'enroll' && (
                 <>
                   <NeuCard>
                     <Text style={{ fontSize: 15, fontWeight: '700', color: c.text, marginBottom: 12 }}>Select Course</Text>
@@ -401,15 +396,15 @@ export default function CreateStudentScreen() {
 
                   {courseId && (
                     <NeuCard>
-                      <Text style={{ fontSize: 15, fontWeight: '700', color: c.text, marginBottom: 12 }}>Activation Method</Text>
-                      {(['credits', 'code'] as Method[]).map(m => (
+                      <Text style={{ fontSize: 15, fontWeight: '700', color: c.text, marginBottom: 12 }}>Enrollment Method</Text>
+                      {(['credits'] as const).map(m => (
                         <Pressable key={m} onPress={() => setMethod(m)}
                           style={[flat, { borderRadius: 16, padding: 14, marginBottom: 10,
                             borderWidth: method === m ? 2 : 0, borderColor: c.primary, flexDirection: 'row', alignItems: 'center', gap: 12 }]}>
-                          {m === 'credits' ? <CreditCard size={20} color={c.primary} /> : <Ticket size={20} color={c.primary} />}
+                          <CreditCard size={20} color={c.primary} />
                           <View style={{ flex: 1 }}>
                             <Text style={{ fontSize: 15, fontWeight: '600', color: c.text }}>
-                              {m === 'credits' ? 'Doctor Credits' : 'Activation Code'}
+                              Doctor Credits
                             </Text>
                             {m === 'credits' && (
                               <Text style={{ fontSize: 13, color: `${c.text}88` }}>
@@ -421,15 +416,15 @@ export default function CreateStudentScreen() {
                         </Pressable>
                       ))}
 
-                      {method === 'code' && (
+                      {method === 'credits' && (
                         <View style={[flat, { borderRadius: 16, flexDirection: 'row', alignItems: 'center', paddingHorizontal: 14, paddingVertical: 4, marginTop: 8 }]}>
-                          <Ticket size={18} color={c.primary} />
+                          <CreditCard size={18} color={c.primary} />
                           <TextInput
                             style={{ flex: 1, minWidth: 0, fontSize: 15, color: c.text, paddingVertical: 0, paddingHorizontal: 10 }}
-                            placeholder="Activation Code"
+                            placeholder="Doctor Credits"
                             placeholderTextColor={`${c.text}66`}
-                            value={activCode}
-                            onChangeText={t => setActivCode(t.toUpperCase())}
+                            value="1"
+                            editable={false}
                             autoCapitalize="characters"
                             autoCorrect={false}
                           />
@@ -448,10 +443,10 @@ export default function CreateStudentScreen() {
                     ['Student', fullName],
                     ['Email', email || '—'],
                     ['Phone', phone || '—'],
-                    ['Mode', mode === 'account_only' ? 'Account Only' : 'Account + Activate'],
-                    ...(mode === 'activate' && courseId ? [
+                    ['Mode', mode === 'account_only' ? 'Account Only' : 'Account + Course Enrollment'],
+                    ...(mode === 'enroll' && courseId ? [
                       ['Course', selectedCourse?.name ?? ''],
-                      ['Method', method === 'credits' ? 'Doctor Credits (1 credit)' : 'Activation Code'],
+                      ['Method', method === 'credits' ? 'Doctor Credits (1 credit)' : '—'],
                     ] : []),
                   ] as [string, string][]).map(([lbl, val]) => (
                     <View key={lbl} style={{ flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 4 }}>

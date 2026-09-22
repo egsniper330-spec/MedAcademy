@@ -15,7 +15,7 @@ export function assertBackendConfigured(): void {
   if (!value) {
     throw new Error(
       '[BackendConfig] EXPO_PUBLIC_PHP_API_URL is required. ' +
-      'Set it to https://api.medacademy.eu.cc/backend/public/index.php.'
+      'Set it to https://api.medacademy.site/backend/public/index.php.'
     );
   }
 

@@ -21,7 +21,7 @@ import { NeuCard } from '@/components/NeuCard';
 import { NeuButton } from '@/components/NeuButton';
 import { ResponsiveModal } from '@/components/ResponsiveModal';
 import { useToast } from '@/components/Toast';
-import { neuColors, useLayout } from '@/lib/neu';
+import { neuColors, useLayout, safeBottom } from '@/lib/neu';
 import {
   getDoctors, allocateCredits, refundCredits, getCreditTransactions,
   getCreditLedger, getCreditLedgerStats, getCreditDailyStats, getTopDoctorsByCredits,
@@ -192,8 +192,7 @@ const { showToast } = useToast();
     <>
       <KeyboardAvoidingView behavior={process.env.EXPO_OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1 }}>
         <ScrollView
-          contentContainerStyle={{ paddingBottom: layout.scrollBottom() }}
-          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />} contentContainerStyle={{ paddingBottom: safeBottom(layout.insets.bottom) }}
         >
           <View style={{ padding: layout.screenPx }}>
             {/* Search */}
@@ -409,7 +408,6 @@ const router = useRouter();
       <FlatList
         data={filtered}
         keyExtractor={item => item.id}
-        contentContainerStyle={{ paddingBottom: layout.scrollBottom() }}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />}
         ListHeaderComponent={
           <View style={{ padding: layout.screenPx, paddingTop: 8 }}>
@@ -608,7 +606,7 @@ const router = useRouter();
             <CreditCard size={38} color={c.primary} opacity={0.2} />
             <Text style={{ color: c.text, opacity: 0.4, marginTop: 16 }}>No transactions found</Text>
           </View>
-        ) : null}
+        ) : null} contentContainerStyle={{ paddingBottom: safeBottom(layout.insets.bottom) }}
       />
 
       {/* Transaction Detail Modal */}

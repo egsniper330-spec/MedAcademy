@@ -1,0 +1,9 @@
+# Deny all web access — private files must only be reachable through
+# the signed-URL front-controller route (/storage/signed), never statically.
+<IfModule mod_authz_core.c>
+    Require all denied
+</IfModule>
+<IfModule !mod_authz_core.c>
+    Order allow,deny
+    Deny from all
+</IfModule>

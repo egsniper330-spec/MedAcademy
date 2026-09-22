@@ -12,12 +12,11 @@ import { PageHeader } from '@/components/PageHeader';
 import { getReportData, getArchiveAnalytics, getCourseLifecycleLogs, formatStudyTime } from '@/lib/api';
 import { NeuCard } from '@/components/NeuCard';
 import { NeuButton } from '@/components/NeuButton';
-import { neuColors, useLayout } from '@/lib/neu';
+import { neuColors, useLayout, safeBottom } from '@/lib/neu';
 
 const REPORT_TYPES = [
   { key: 'users',      label: 'User Report',            icon: Users,      color: '#1E90FF', desc: 'All registered users with roles and universities' },
   { key: 'credits',    label: 'Credit Transactions',    icon: CreditCard, color: '#16A34A', desc: 'Doctor credit allocations and consumption' },
-  { key: 'activation', label: 'Activation Code Report', icon: Ticket,     color: '#D97706', desc: 'All codes with usage, creators and redeemers' },
   { key: 'archive',    label: 'Archive Analytics',      icon: Archive,    color: '#7C3AED', desc: 'Archived, restored and deleted course events' },
 ];
 
@@ -101,8 +100,7 @@ export default function ReportsScreen() {
   };
 
   return (
-    <ScrollView style={{ flex: 1, backgroundColor: c.base }}
-          contentContainerStyle={{ paddingBottom: layout.scrollBottom() }}>
+    <ScrollView style={{ flex: 1, backgroundColor: c.base }} contentContainerStyle={{ paddingBottom: safeBottom(layout.insets.bottom) }}>
       <PageHeader title="Reports" subtitle="Export platform data as CSV" accentColor="#7C3AED" />
 
       <View style={{ paddingHorizontal: layout.screenPx }}>

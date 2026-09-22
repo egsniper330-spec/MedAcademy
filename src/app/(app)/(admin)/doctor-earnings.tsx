@@ -23,7 +23,7 @@ import { NeuCard } from '@/components/NeuCard';
 import { NeuButton } from '@/components/NeuButton';
 import { PageHeader } from '@/components/PageHeader';
 import { ResponsiveModal } from '@/components/ResponsiveModal';
-import { neuColors, useLayout } from '@/lib/neu';
+import { neuColors, useLayout, safeBottom } from '@/lib/neu';
 import { useToast } from '@/components/Toast';
 import {
   getAdminDoctorEarningsDashboard,
@@ -181,8 +181,7 @@ export default function DoctorEarningsScreen() {
   return (
     <View style={{ flex: 1, backgroundColor: c.base }}>
       <ScrollView
-        contentContainerStyle={{ paddingBottom: layout.scrollBottom() }}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />} contentContainerStyle={{ paddingBottom: safeBottom(layout.insets.bottom) }}
       >
         <View style={{ padding: layout.screenPx, gap: 16 }}>
 

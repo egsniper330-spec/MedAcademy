@@ -610,7 +610,7 @@ export default function TrashBin() {
           keyExtractor={i => i.id}
           renderItem={renderItem}
           extraData={extraData}
-          contentContainerStyle={{ paddingHorizontal: layout.screenPx, paddingBottom: layout.scrollBottom() }}
+          contentContainerStyle={{ paddingHorizontal: layout.screenPx }}
           // Pagination
           onEndReached={loadMore}
           onEndReachedThreshold={0.4}

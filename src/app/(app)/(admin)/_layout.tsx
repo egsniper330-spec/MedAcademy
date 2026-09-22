@@ -39,7 +39,6 @@ function AdminTabs() {
       <Tabs.Screen name="admin-overview"       options={{ title: 'Dashboard', tabBarIcon: ({ color, size }) => <LayoutDashboard size={size} color={color} /> }} />
       <Tabs.Screen name="users"                options={{ title: 'Users',     tabBarIcon: ({ color, size }) => <Users size={size} color={color} /> }} />
       <Tabs.Screen name="devices"              options={{ title: 'Devices',   tabBarIcon: ({ color, size }) => <Smartphone size={size} color={color} /> }} />
-      <Tabs.Screen name="codes"                options={{ title: 'Codes',     tabBarIcon: ({ color, size }) => <Ticket size={size} color={color} /> }} />
       <Tabs.Screen name="academic"             options={{ title: 'Academic',  tabBarIcon: ({ color, size }) => <GraduationCap size={size} color={color} /> }} />
       <Tabs.Screen name="audit"                options={{ title: 'Audit',     tabBarIcon: ({ color, size }) => <Shield size={size} color={color} /> }} />
       {/* Drawer-only screens */}
@@ -53,15 +52,13 @@ function AdminTabs() {
       <Tabs.Screen name="video-settings"       options={{ href: null, title: 'Video Settings' }} />
       <Tabs.Screen name="cms"                  options={{ href: null, title: 'CMS Pages' }} />
       <Tabs.Screen name="admin-credits"        options={{ href: null, title: 'Credits' }} />
-      <Tabs.Screen name="code-history"         options={{ href: null, title: 'Code History' }} />
 
       <Tabs.Screen name="bulk-credits"                 options={{ href: null, title: 'Bulk Credits' }} />
       <Tabs.Screen name="revenue-analytics"            options={{ href: null, title: 'Revenue Analytics' }} />
       <Tabs.Screen name="doctor-earnings"             options={{ href: null, title: 'Doctor Earnings' }} />
       <Tabs.Screen name="doctor-credit-timeline"       options={{ href: null, title: 'Doctor Timeline' }} />
-      <Tabs.Screen name="course-activation-timeline"   options={{ href: null, title: 'Course Timeline' }} />
       <Tabs.Screen name="admin-settings"               options={{ href: null, title: 'Settings' }} />
-      <Tabs.Screen name="system-providers"              options={{ href: null, title: 'System Providers' }} />
+      <Tabs.Screen name="system-providers"              options={{ href: null, title: 'System Diagnostics' }} />
       {/* v68: Production Hardening screens */}
       <Tabs.Screen name="export-panel"                  options={{ href: null, title: 'Export Center' }} />
       {/* v149: Admin enrollment management */}

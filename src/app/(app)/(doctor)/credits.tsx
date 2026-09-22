@@ -1,11 +1,16 @@
 import { useCallback, useState } from 'react';
-import { View, Text, ScrollView, useColorScheme, RefreshControl, ActivityIndicator } from 'react-native';
+import { View, Text, ScrollView, TextInput, useColorScheme, RefreshControl, ActivityIndicator } from 'react-native';
 import { useFocusEffect } from 'expo-router';
-import { CreditCard, TrendingUp, TrendingDown, Clock } from 'lucide-react-native';
+import { CreditCard, TrendingUp, TrendingDown, Clock, Ticket } from 'lucide-react-native';
 import { useCreditBalance } from '@/lib/useCreditBalance';
-import { getCreditHistory, type CreditTransaction } from '@/lib/creditService';
+import { getCreditHistory, invalidateCreditCache, type CreditTransaction } from '@/lib/creditService';
+import { redeemCreditCode } from '@/lib/api';
+import { friendlyError } from '@/lib/validation';
 import { NeuCard } from '@/components/NeuCard';
-import { neuColors, useLayout } from '@/lib/neu';
+import { NeuButton } from '@/components/NeuButton';
+import { ResponsiveModal } from '@/components/ResponsiveModal';
+import { useToast } from '@/components/Toast';
+import { neuColors, useLayout, safeBottom } from '@/lib/neu';
 import { PageHeader } from '@/components/PageHeader';
 
 export default function DoctorCredits() {
@@ -13,12 +18,42 @@ export default function DoctorCredits() {
   const isDark = scheme === 'dark';
   const c = isDark ? neuColors.dark : neuColors.light;
   const layout = useLayout();
+  const { showToast } = useToast();
 
   // ── Single source of truth: creditService via hook ──────────────────────────
   const { balance: credits, loading: balLoading, refresh: refreshBalance } = useCreditBalance();
   const [transactions, setTransactions] = useState<CreditTransaction[]>([]);
   const [txLoading, setTxLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+
+  // ── Redeem Code ──────────────────────────────────────────────────────────────
+  const [redeemModal, setRedeemModal] = useState(false);
+  const [codeInput, setCodeInput] = useState('');
+  const [redeeming, setRedeeming] = useState(false);
+
+  const handleRedeem = async () => {
+    const code = codeInput.trim();
+    if (code === '') {
+      showToast({ type: 'error', message: 'Enter a redeem code.' });
+      return;
+    }
+    setRedeeming(true);
+    try {
+      // Backend is the sole authority: it validates the code, adds the
+      // credits to the existing balance atomically and returns the amount.
+      const res = await redeemCreditCode(code);
+      const amount = Number((res as { amount?: number })?.amount ?? 0);
+      showToast({ type: 'success', message: `${amount} Credits added successfully.` });
+      setRedeemModal(false);
+      setCodeInput('');
+      // Refresh authoritative balance + history from the backend (never optimistic).
+      invalidateCreditCache();
+      await Promise.all([refreshBalance(), loadHistory()]);
+    } catch (e) {
+      showToast({ type: 'error', message: friendlyError(e, 'Could not redeem the code. Please try again.') });
+    }
+    setRedeeming(false);
+  };
 
   const loadHistory = useCallback(async () => {
     setTxLoading(true);
@@ -42,10 +77,25 @@ export default function DoctorCredits() {
 
   return (
     <ScrollView style={{ flex: 1, backgroundColor: c.base }}
-      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />}>
+      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />} contentContainerStyle={{ paddingBottom: safeBottom(layout.insets.bottom) }}>
       <PageHeader title="My Credits" subtitle="Credit balance & history" accentColor={c.primary} />
 
       <View style={{ paddingHorizontal: layout.screenPx }}>
+
+        {/* Redeem Code entry point */}
+        <NeuCard
+          style={{ marginBottom: 16, padding: 14, flexDirection: 'row', alignItems: 'center', gap: 12 }}
+        >
+          <View style={{ width: 38, height: 38, borderRadius: 12, backgroundColor: `${c.primary}15`,
+            alignItems: 'center', justifyContent: 'center' }}>
+            <Ticket size={18} color={c.primary} />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={{ fontSize: 14, fontWeight: '700', color: c.text }}>Redeem Code</Text>
+            <Text style={{ fontSize: 11, color: c.text, opacity: 0.5 }}>Add credits with a redeem code</Text>
+          </View>
+          <NeuButton label="Enter Code" onPress={() => setRedeemModal(true)} style={{ minWidth: 110 }} />
+        </NeuCard>
 
         {loading ? <ActivityIndicator color={c.primary} style={{ marginTop: 40 }} /> : (
           <>
@@ -113,6 +163,32 @@ export default function DoctorCredits() {
           </>
         )}
       </View>
+
+      {/* Redeem Code modal */}
+      <ResponsiveModal
+        visible={redeemModal} onClose={() => setRedeemModal(false)}
+        title="Redeem Code"
+        subtitle="Enter the code to add credits"
+        icon={<Ticket size={18} color={c.primary} />}
+        footer={
+          <View style={{ flexDirection: 'row', gap: 12 }}>
+            <NeuButton label="Cancel" onPress={() => setRedeemModal(false)} variant="secondary" style={{ flex: 1 }} />
+            <NeuButton label="Redeem" onPress={handleRedeem} loading={redeeming} disabled={redeeming} style={{ flex: 1 }} />
+          </View>
+        }
+      >
+        <TextInput
+          value={codeInput} onChangeText={setCodeInput}
+          placeholder="MED-XXXX-XXXX-XXXX" placeholderTextColor={`${c.text}55`}
+          autoCapitalize="characters" autoCorrect={false}
+          style={{ backgroundColor: c.base, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12,
+            shadowColor: c.shadowDark, shadowOffset: { width: 2, height: 2 }, shadowOpacity: 0.55, shadowRadius: 5,
+            fontSize: 16, fontWeight: '700', letterSpacing: 1, color: c.text, textAlign: 'center' }}
+        />
+        <Text style={{ fontSize: 11, color: c.text, opacity: 0.4, marginTop: 10, textAlign: 'center' }}>
+          Credits are added to your existing balance after the server confirms the code.
+        </Text>
+      </ResponsiveModal>
     </ScrollView>
   );
 }

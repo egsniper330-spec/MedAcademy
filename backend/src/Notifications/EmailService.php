@@ -15,7 +15,7 @@ final class EmailService
 {
     public static function send(string $to, string $subject, string $htmlBody): bool
     {
-        $from = Config::string('MAIL_FROM', 'noreply@medacademy.eu.cc');
+        $from = Config::string('MAIL_FROM', 'noreply@medacademy.site');
         $fromName = Config::string('MAIL_FROM_NAME', 'MedAcademy');
 
         if (Config::string('SMTP_HOST') !== '') {

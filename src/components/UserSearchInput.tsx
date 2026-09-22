@@ -1,6 +1,6 @@
 // src/components/UserSearchInput.tsx
 // Universal user search input — finds users by name, email, phone, or user_id.
-// Used by credits, activation codes, course grant, and user management screens.
+// Used by credits, course grant, and user management screens.
 
 import { useState, useCallback } from 'react';
 import {
@@ -22,6 +22,7 @@ export interface SearchedUser {
   role: string;
   status: string;
   watermark_id: string;
+  public_user_id?: string | null;
   qr_code_id: string;
 }
 
@@ -37,7 +38,7 @@ interface Props {
 export function UserSearchInput({
   onSelect,
   onClear,
-  placeholder = 'Name, email, phone, or user ID…',
+  placeholder = 'Name, email, phone, or User ID (e.g. MED-0001)…',
   allowedRoles,
   excludeIds = [],
   label = 'Find User',
@@ -194,9 +195,14 @@ export function UserSearchInput({
                   <Text style={{ fontSize: 12, color: c.text, opacity: 0.5 }} numberOfLines={1}>
                     {user.email}
                   </Text>
-                  {user.phone_e164 && (
-                    <Text style={{ fontSize: 11, color: c.text, opacity: 0.45 }}>{displayPhoneNational(user.phone_e164)}</Text>
-                  )}
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                    {!!user.public_user_id && (
+                      <Text style={{ fontSize: 11, fontWeight: '700', color: c.text, opacity: 0.55, letterSpacing: 0.5 }}>{user.public_user_id}</Text>
+                    )}
+                    {user.phone_e164 && (
+                      <Text style={{ fontSize: 11, color: c.text, opacity: 0.45 }}>{displayPhoneNational(user.phone_e164)}</Text>
+                    )}
+                  </View>
                 </View>
                 <View style={{
                   backgroundColor: roleColor(user.role) + '20',

@@ -287,7 +287,7 @@ export default function ContentProtectionPolicyScreen() {
         )}
 
         {/* Actions */}
-        <View style={{ flexDirection: 'row', gap: 12, paddingBottom: layout.scrollBottom() }}>
+        <View style={{ flexDirection: 'row', gap: 12 }}>
           <Pressable
             onPress={() => { setPolicy(DEFAULTS); setSaved(false); }}
             style={[flat, { flex: 1, borderRadius: 14, paddingVertical: 14, alignItems: 'center', flexDirection: 'row', justifyContent: 'center', gap: 8 }]}

@@ -29,6 +29,13 @@ use MedAcademy\Utils\Uuid;
  */
 class DataController
 {
+    /** Deployment marker — bump this when DataController.php changes. If a
+     *  request error ever references RUNTIME_VERSION, the executing file is
+     *  this one; if production errors keep referencing old behavior while this
+     *  constant is absent from the live file, the running code is NOT this
+     *  file (wrong upload path, duplicate checkout, or OPcache staleness). */
+    public const RUNTIME_VERSION = '2026-09-14.2';
+
     /** Tables readable by any authenticated user */
     private const PUBLIC_TABLES = [
         'academic_levels', 'app_branding', 'app_pages', 'categories',
@@ -39,8 +46,7 @@ class DataController
 
     /** Tables readable only by admin/super_admin */
     private const ADMIN_TABLES = [
-        'activation_codes', 'activation_codes_summary', 'activation_ledger_view',
-        'analytics_events', 'audit_logs', 'code_batches',
+        'analytics_events', 'audit_logs',
         'content_protection_violations', 'course_lifecycle_logs', 'courses',
         'crash_logs', 'credit_daily_stats', 'credit_ledger_view',
         'credit_transactions', 'credits', 'credits_summary', 'device_stats',
@@ -61,7 +67,6 @@ class DataController
 
     /** Tables that are read-only via this controller (INSERT/UPDATE/DELETE blocked) */
     private const READ_ONLY_TABLES = [
-        'activation_codes_summary', 'activation_ledger_view',
         'credit_daily_stats', 'credit_ledger_view', 'credits_summary',
         'device_stats', 'doctor_credit_summary', 'revenue_analytics',
         'course_lifecycle_logs', 'audit_logs', 'upload_audit_logs',
@@ -69,6 +74,22 @@ class DataController
         'doctor_earnings_events', 'doctor_earnings_transactions',
         'doctor_payout_requests', 'doctor_pricing_history',
         'video_daily_health_reports', 'video_health_alerts',
+    ];
+
+    /**
+     * Tables ANY authenticated user could previously WRITE through the generic
+     * Data API although they hold platform-wide configuration. Reads stay
+     * public (clients need feature/currency/maintenance config); writes MUST
+     * go through their dedicated Super-Admin-only controllers:
+     *   system_config  → MaintenanceController (/admin/maintenance) and the
+     *                    pricing/currency admin endpoints
+     *   feature_flags  → FeatureFlagsController
+     * Without this, any authenticated account could flip maintenance off (or
+     * rewrite pricing) with a direct PATCH /api/system_config — a privilege
+     * escalation that would silently defeat Maintenance Mode enforcement.
+     */
+    private const WRITE_ADMIN_ONLY_TABLES = [
+        'system_config', 'feature_flags',
     ];
 
     /** Columns that must never be set via the generic API (prevents mass assignment) */
@@ -396,7 +417,7 @@ class DataController
     {
         $table = $this->extractTableFromPath($request);
         $this->assertAllowed($table, 'write');
-        $this->assertNotReadOnly($table);
+        $this->assertNotReadOnly($table, $request);
         $this->assertAccess($table, $request);
 
         $body = $request->json();
@@ -498,7 +519,7 @@ class DataController
     {
         $table = $this->extractTableFromPath($request);
         $this->assertAllowed($table, 'write');
-        $this->assertNotReadOnly($table);
+        $this->assertNotReadOnly($table, $request);
         $this->assertAccess($table, $request);
 
         $body = $request->json();
@@ -558,7 +579,7 @@ class DataController
     {
         $table = $this->extractTableFromPath($request);
         $this->assertAllowed($table, 'write');
-        $this->assertNotReadOnly($table);
+        $this->assertNotReadOnly($table, $request);
         $this->assertAccess($table, $request);
 
         $userId = $request->user['id'] ?? null;
@@ -631,11 +652,46 @@ class DataController
             return ["`{$table}`.`{$col}` = ?", [$userId]];
         }
         if (in_array($table, self::COURSE_OWNER_SCOPE, true)) {
+            // Reads (GET) may include published-course content so STUDENTS can
+            // access it; every write (POST/PATCH/PUT/DELETE) stays owner-only.
+            //
+            // BUG FIX (student lesson 404): the old scope for sections/lessons/
+            // lesson_materials was doctor-only on ALL methods. The student course
+            // page lists lessons through the unscooped embedded tree
+            // (fetchChildren), but opening a lesson runs a direct
+            // GET /lessons?id=eq.<uuid> through buildWhere() → the doctor-only
+            // EXISTS never matched a student's own id → 0 rows → the app showed
+            // "This lesson is not available" for every published lesson.
+            // Mirrors the courses branch (owner OR published on read).
+            $isRead = $request->method() === 'GET';
             if ($table === 'courses') {
-                // owner OR published (students browse published; doctors see own)
-                return ["(`courses`.`doctor_id` = ? OR `courses`.`status` = 'published')", [$userId]];
+                if ($isRead) {
+                    // owner OR published (students browse published; doctors see own)
+                    return ["(`courses`.`doctor_id` = ? OR `courses`.`status` = 'published')", [$userId]];
+                }
+                // Writes are owner-only. (The old code applied the published-OR
+                // scope on ALL methods, letting any authenticated user UPDATE a
+                // published course — privilege escalation.)
+                return ['`courses`.`doctor_id` = ?', [$userId]];
             }
             // sections/lessons/lesson_materials all carry course_id
+            if ($isRead) {
+                $scopeSql = "EXISTS (SELECT 1 FROM `courses` c WHERE c.id = `{$table}`.`course_id` AND (c.doctor_id = ? OR c.status = 'published'))";
+                // BINDING FIX (HY093 'placeholders=3, bindings=4'): the scope SQL
+                // has exactly ONE placeholder (c.doctor_id = ?) — the published
+                // check is a string literal, NOT a bound parameter. The previous
+                // code supplied [$userId, $userId], an extra unmatched binding,
+                // so every non-admin lessons/sections/lesson_materials GET died
+                // with PDO HY093. One placeholder → one binding, in order.
+                $scopeBindings = [$userId];
+                // Defense-in-depth (restores the documented RLS contract):
+                // students must only receive PUBLISHED lessons, regardless of
+                // the caller's filters.
+                if ($table === 'lessons' && $role === 'student') {
+                    $scopeSql .= " AND `{$table}`.`status` = 'published'";
+                }
+                return [$scopeSql, $scopeBindings];
+            }
             return [
                 "EXISTS (SELECT 1 FROM `courses` c WHERE c.id = `{$table}`.`course_id` AND c.doctor_id = ?)",
                 [$userId],
@@ -762,7 +818,29 @@ class DataController
             $bindings = array_merge($bindings, $scopeBindings);
         }
 
-        return [implode(' AND ', $where), $bindings];
+        $whereSql = implode(' AND ', $where);
+
+        // ── Fail-fast runtime guard ───────────────────────────────────────
+        // A placeholder/binding count mismatch surfaces as PDO HY093 ("Invalid
+        // parameter number") with NO indication of which table/query caused it
+        // — it cost us a production incident. Count both sides here and fail
+        // with an explicit, secret-free diagnostic instead.
+        $phCount = preg_match_all('/\?/', $whereSql);
+        if ($phCount !== count($bindings)) {
+            error_log(sprintf(
+                '[DataController][BINDING-MISMATCH] table=%s placeholders=%d bindings=%d scope=%s',
+                $table,
+                $phCount,
+                count($bindings),
+                $scopeSql !== ''
+            ));
+            throw new ApiException(
+                500,
+                "Query assembly mismatch for table '{$table}' (placeholders={$phCount}, bindings=" . count($bindings) . ', v=' . self::RUNTIME_VERSION . ')'
+            );
+        }
+
+        return [$whereSql, $bindings];
     }
 
     /**
@@ -1060,10 +1138,18 @@ class DataController
         }
     }
 
-    private function assertNotReadOnly(string $table): void
+    private function assertNotReadOnly(string $table, ?Request $request = null): void
     {
         if (in_array($table, self::READ_ONLY_TABLES, true)) {
             throw new ApiException(403, "Table '{$table}' is read-only");
+        }
+        // Platform-wide configuration tables: writes only via their dedicated
+        // Super-Admin controllers (see WRITE_ADMIN_ONLY_TABLES).
+        if (in_array($table, self::WRITE_ADMIN_ONLY_TABLES, true)) {
+            $role = $request->user['role'] ?? '';
+            if ($role !== 'super_admin') {
+                throw new ApiException(403, "Table '{$table}' can only be modified by Super Admin");
+            }
         }
     }
 

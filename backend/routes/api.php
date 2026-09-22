@@ -10,13 +10,18 @@ use MedAcademy\Controllers\CreditController;
 use MedAcademy\Controllers\DeviceController;
 use MedAcademy\Controllers\HealthController;
 use MedAcademy\Controllers\IntegrityController;
+use MedAcademy\Controllers\MaintenanceController;
 use MedAcademy\Controllers\NotificationController;
 use MedAcademy\Controllers\SecurityController;
+use MedAcademy\Controllers\SecurityEvidenceController;
 use MedAcademy\Controllers\StudentController;
 use MedAcademy\Controllers\RpcController;
+use MedAcademy\Controllers\RedeemCodeController;
 use MedAcademy\Controllers\DataController;
 use MedAcademy\Controllers\StorageController;
+use MedAcademy\Controllers\SystemDiagnosticsController;
 use MedAcademy\Controllers\UserController;
+use MedAcademy\Controllers\UpdateConfigController;
 use MedAcademy\Controllers\VideoController;
 
 /*
@@ -36,6 +41,22 @@ $router->get('/provider-health', [HealthController::class, 'providerHealth']);
 $router->post('/auth/register', [AuthController::class, 'register']);
 $router->post('/auth/login', [AuthController::class, 'login']);
 $router->post('/auth/refresh', [AuthController::class, 'refresh']);
+
+// ---- Maintenance Mode (server-authoritative) -------------------------------
+// The gate in index.php blocks non-exempt requests when maintenance is ON.
+// These routes are exempt so the client can (a) discover the state and
+// (b) a Super Admin can turn it back OFF:
+$router->get('/maintenance', [MaintenanceController::class, 'status']);
+$router->get('/admin/maintenance', [MaintenanceController::class, 'adminStatus'], $auth + ['role' => ['super_admin']]);
+$router->post('/admin/maintenance', [MaintenanceController::class, 'update'], $auth + ['role' => ['super_admin']]);
+
+// ---- App update enforcement -------------------------------------------------
+// GET /app/version is PUBLIC and intentionally NOT subject to the update gate:
+// an old client must always be able to learn its update URL. The admin pair is
+// Super-Admin-only (route-level role, same convention as /auth/impersonate).
+$router->get('/app/version', [UpdateConfigController::class, 'version']);
+$router->get('/admin/app-updates', [UpdateConfigController::class, 'adminIndex'], $auth + ['role' => ['super_admin']]);
+$router->put('/admin/app-updates/{platform}', [UpdateConfigController::class, 'adminUpdate'], $auth + ['role' => ['super_admin']]);
 $router->post('/auth/logout', [AuthController::class, 'logout'], $auth);
 $router->post('/auth/forgot-password', [AuthController::class, 'forgotPassword']);
 $router->post('/auth/reset-password', [AuthController::class, 'resetPassword']);
@@ -92,7 +113,7 @@ $router->get('/universities', [CourseController::class, 'universities'], $auth);
 $router->get('/universities/{id}/faculties', [CourseController::class, 'faculties'], $auth);
 $router->get('/faculties/{id}/levels', [CourseController::class, 'academicLevels'], $auth);
 
-// ---- Credits / activation codes ---------------------------------------------
+// ---- Credits -----------------------------------------------------------------
 $router->get('/credits/me', [CreditController::class, 'me'], $auth);
 $router->get('/credits/transactions', [CreditController::class, 'transactions'], $auth);
 $router->post('/credits/allocate', [CreditController::class, 'allocate'], $auth + ['role' => ['admin', 'super_admin']]);
@@ -101,14 +122,12 @@ $router->post('/credits/revoke', [CreditController::class, 'revoke'], $auth + ['
 $router->post('/credits/bulk-allocate', [CreditController::class, 'bulkAllocate'], $auth + ['role' => ['admin', 'super_admin']]);
 $router->get('/credits/doctor/{id}', [CreditController::class, 'doctorEarnings'], $auth + ['role' => ['admin', 'super_admin']]);
 
-$router->post('/activation-codes/redeem', [CreditController::class, 'redeem'], $auth);
-$router->post('/activation-codes', [CreditController::class, 'createCodes'], $auth + ['role' => ['admin', 'super_admin']]);
-$router->post('/activation-codes/assign', [CreditController::class, 'assignCode'], $auth + ['role' => ['admin', 'super_admin']]);
-$router->post('/activation-codes/batch-create', [CreditController::class, 'batchCreateCodes'], $auth + ['role' => ['admin', 'super_admin']]);
-$router->post('/activation-codes/deactivate', [CreditController::class, 'deactivateCode'], $auth + ['role' => ['admin', 'super_admin']]);
-$router->post('/activation-codes/reactivate', [CreditController::class, 'reactivateCode'], $auth + ['role' => ['admin', 'super_admin']]);
-$router->post('/activation-codes/bulk-delete', [CreditController::class, 'bulkDeleteCodes'], $auth + ['role' => ['admin', 'super_admin']]);
-$router->post('/activation-codes/clone-batch', [CreditController::class, 'cloneBatch'], $auth + ['role' => ['admin', 'super_admin']]);
+// ---- Redeem Codes (Credit Redeem Code — credit top-up ONLY) -----------------
+$router->post('/redeem-codes',              [RedeemCodeController::class, 'create'], $auth + ['role' => ['super_admin']]);
+$router->get('/redeem-codes',               [RedeemCodeController::class, 'list'],   $auth + ['role' => ['super_admin']]);
+$router->post('/redeem-codes/redeem',       [RedeemCodeController::class, 'redeem'], $auth + ['role' => ['doctor']]);
+$router->post('/redeem-codes/{id}/revoke',  [RedeemCodeController::class, 'revoke'], $auth + ['role' => ['super_admin']]);
+$router->post('/redeem-codes/{id}/archive', [RedeemCodeController::class, 'archive'], $auth + ['role' => ['super_admin']]);
 
 // ---- Notifications ----------------------------------------------------------
 $router->get('/notifications', [NotificationController::class, 'index'], $auth);
@@ -116,6 +135,7 @@ $router->post('/notifications/read', [NotificationController::class, 'markRead']
 
 // ---- Security ---------------------------------------------------------------
 $router->get('/security/config', [SecurityController::class, 'config'], $auth);
+$router->get('/security/policies', [SecurityController::class, 'policies'], $auth);
 $router->get('/security/version', [SecurityController::class, 'version'], $auth);
 $router->post('/security/events', [SecurityController::class, 'reportEvent'], $auth);
 $router->post('/security/violations', [SecurityController::class, 'reportViolation'], $auth);
@@ -123,8 +143,19 @@ $router->post('/security/bump-version/{id}', [SecurityController::class, 'bumpVe
 $router->post('/security/devices/{id}/block', [SecurityController::class, 'blockDevice'], $auth + ['role' => ['admin', 'super_admin']]);
 $router->post('/security/devices/{id}/unblock', [SecurityController::class, 'unblockDevice'], $auth + ['role' => ['admin', 'super_admin']]);
 
+// ---- Device-key + signed-evidence flow (server is the final authority) ------
+// The client is a sensor + evidence producer: it registers the PUBLIC half of
+// an Android Keystore key, receives single-use server-issued challenges bound
+// to (user, device, session, action, request_hash), signs canonical evidence,
+// and the backend verifies everything itself. See SecurityEvidenceService.
+$router->post('/security/device-key', [SecurityEvidenceController::class, 'registerKey'], $auth);
+$router->post('/security/challenge', [SecurityEvidenceController::class, 'challenge'], $auth);
+$router->post('/security/evidence', [SecurityEvidenceController::class, 'submit'], $auth);
+$router->post('/security/device-keys/{id}/revoke', [SecurityEvidenceController::class, 'revokeKey'], $auth);
+
 // ---- Video (VdoCipher) -----------------------------------------------------
 $router->post('/video/otp', [VideoController::class, 'otp'], $auth);
+$router->post('/video/offline-authorize', [VideoController::class, 'offlineAuthorize'], $auth);
 $router->post('/video/upload-init', [VideoController::class, 'uploadInit'], $auth);
 $router->post('/video/upload-status', [VideoController::class, 'uploadStatus'], $auth);
 $router->post('/video/delete', [VideoController::class, 'delete'], $auth);
@@ -135,7 +166,7 @@ $router->post('/video/webhook', [VideoController::class, 'webhook']);
 $router->post('/video/chunk', [VideoController::class, 'uploadChunk'], $auth);
 $router->post('/video/assemble', [VideoController::class, 'assembleUpload'], $auth + ['role' => ['doctor', 'admin', 'super_admin']]);
 $router->post('/video/health-scan', [VideoController::class, 'healthScan'], $auth + ['role' => ['admin', 'super_admin']]);
-$router->post('/video/upload-patch', [VideoController::class, 'uploadPatch']);
+$router->post('/video/upload-patch', [VideoController::class, 'uploadPatch'], $auth + ['role' => ['super_admin']]);
 $router->post('/video/orphan-cleanup', [VideoController::class, 'orphanCleanup'], $auth + ['role' => ['admin', 'super_admin']]);
 $router->post('/lessons/{id}/delete', [CourseController::class, 'deleteLesson'], $auth + ['role' => ['doctor', 'admin', 'super_admin']]);
 
@@ -191,6 +222,12 @@ $router->post('/analytics/recalculate-earnings/{doctorId}', [AnalyticsController
 $router->post('/analytics/reset-doctor-earnings/{doctorId}', [AnalyticsController::class, 'resetDoctorEarnings'], $auth + ['role' => ['admin', 'super_admin']]);
 $router->post('/analytics/reset-platform-earnings', [AnalyticsController::class, 'resetPlatformEarnings'], $auth + ['role' => ['super_admin']]);
 
+// ---- System diagnostics (Super Admin) --------------------------------------
+// Safe, sanitized infrastructure checks. NEVER returns secret values — only
+// presence metadata. See SystemDiagnosticsService for the redaction contract.
+$router->get('/admin/system/diagnostics', [SystemDiagnosticsController::class, 'scan'], $auth + ['role' => ['super_admin']]);
+$router->get('/admin/system/diagnostics/{id}', [SystemDiagnosticsController::class, 'checkOne'], $auth + ['role' => ['super_admin']]);
+
 // ---- Generic Data API (legacy query contract over PHP/MySQL) ----------------
 $router->get('/api/{table}', [DataController::class, 'select'], $auth);
 $router->post('/api/{table}', [DataController::class, 'insert'], $auth);
@@ -240,7 +277,9 @@ $router->get('/rpc/search-audit-logs', [RpcController::class, 'searchAuditLogs']
 
 // Admin violation/device RPCs
 $router->post('/rpc/admin-reset-violations', [RpcController::class, 'adminResetViolations'], $auth + ['role' => ['admin', 'super_admin']]);
-$router->post('/rpc/recover-stale-upload-sessions', [RpcController::class, 'recoverStaleUploadSessions'], $auth + ['role' => ['admin', 'super_admin']]);
+// Doctor's launch recovery scan calls this for its own stale sessions (the
+// handler owner-scopes non-staff callers); admin/super_admin get the global sweep.
+$router->post('/rpc/recover-stale-upload-sessions', [RpcController::class, 'recoverStaleUploadSessions'], $auth + ['role' => ['doctor', 'admin', 'super_admin']]);
 
 // Remaining missing RPC equivalents
 $router->get('/rpc/chunk-upload-state', [RpcController::class, 'getChunkUploadState'], $auth);

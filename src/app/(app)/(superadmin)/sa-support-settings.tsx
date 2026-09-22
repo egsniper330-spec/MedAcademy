@@ -15,7 +15,7 @@ import { NeuCard } from '@/components/NeuCard';
 import { NeuButton } from '@/components/NeuButton';
 import { getSupportSettings, upsertSupportSetting } from '@/lib/api';
 import type { SupportSettings, SupportContactEntry } from '@/lib/api';
-import { neuColors, neuFlatStyle, useLayout } from '@/lib/neu';
+import { neuColors, neuFlatStyle, useLayout, safeBottom } from '@/lib/neu';
 
 // ─── Per-key metadata ────────────────────────────────────────────────────────
 type ContactKey = 'phone' | 'whatsapp' | 'telegram';
@@ -260,14 +260,14 @@ export default function SaSupportSettings() {
   return (
     <ScrollView
       style={{ flex: 1, backgroundColor: c.base }}
-      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />}
+      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />} contentContainerStyle={{ paddingBottom: safeBottom(layout.insets.bottom) }}
     >
       <PageHeader
         title="Support Settings"
         subtitle="Configure contact methods shown to users on the security/blocked screen"
       />
 
-      <View style={{ paddingHorizontal: layout.screenPx, paddingBottom: layout.scrollBottom() + layout.pad.xl }}>
+      <View style={{ paddingHorizontal: layout.screenPx + layout.pad.xl }}>
 
         {error && (
           <View style={{

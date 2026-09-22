@@ -11,7 +11,7 @@
  *   videoId        — YouTube video ID (required)
  *   resumeAt       — Resume position in seconds (default 0)
  *   watermarkName  — Watermark student name (optional)
- *   watermarkId    — Watermark student ID, WM-NNNN format (optional)
+ *   watermarkId    — Watermark identifier from public_user_id, MED-#### format (optional)
  *   hideFullscreen — When true, removes the fullscreen button (modal mode)
  *
  * postMessage protocol (player → host):
@@ -50,9 +50,15 @@
  *   • One element, never removed or recreated during normal playback.
  *   • Repositioned every 30–60 s via transform:translate3d() only — no top/left
  *     changes, no reflow, compositor-only update.
- *   • Smooth transition (600 ms ease) applied in the injected <style>.
- *   • MutationObserver watches for removal/tampering; recover() recreates and
- *     restarts the timer only when tampered — never during normal playback.
+ *   • Smooth transition (600 ms ease) applied in the injected <style>. *   • MutationObserver watches for removal/tampering; recover() recreates and
+ *   restarts the timer only when tampered — never during normal playback.
+ *
+ * ── Tap-to-toggle policy (IMPORTANT) ────────────────────────────────────────
+ *   clickToPlay is false: tapping the video area never toggles playback.
+ *   Play/Pause is controlled exclusively by Plyr's Play/Pause control.
+ *   Do NOT add tap interceptors / transparent buttons over the video surface —
+ *   an earlier version had one (fixiOSTapToToggle) and it caused the
+ *   tap-anywhere-pauses bug plus YouTube's title/channel HUD appearing on tap.
  */
 export const PLAYER_SCRIPT = `
 (function () {
@@ -110,17 +116,36 @@ export const PLAYER_SCRIPT = `
       return G[n];
     }
 
-    // Viewport captured once at mount — no layout reads in the timer callback.
-    var _vw = 0, _vh = 0;
+    // Viewport + element sizes captured per move (transform/opacity writes
+    // never invalidate layout, so these offsetWidth/Height reads are cheap and
+    // always clean — and re-reading each move keeps the watermark correct if
+    // the player resizes, e.g. pseudo-fullscreen on web).
+    var _vw = 0, _vh = 0, _ew = 0, _eh = 0;
     function captureVP() {
       var w = document.querySelector('.plyr__video-wrapper') || document.querySelector('.plyr');
       _vw = (w && w.offsetWidth)  || window.innerWidth  || 320;
       _vh = (w && w.offsetHeight) || window.innerHeight || 180;
+      if (_el) {
+        _ew = _el.offsetWidth  || 0;
+        _eh = _el.offsetHeight || 0;
+      }
     }
 
+    // Position the element's top-left corner so the WHOLE element stays inside
+    // the wrapper (≥6 % inset). Raw slot fractions can exceed the wrapper on
+    // narrow players (0.72 * vw + text width > vw) — that clipped the
+    // watermark at right/bottom slots.
     function mkTransform(slot, deg) {
-      return 'translate3d(' + Math.round(slot[0] * _vw) + 'px,' +
-                              Math.round(slot[1] * _vh) + 'px,0) rotate(' + deg + 'deg)';
+      var inset = Math.round(Math.min(_vw, _vh) * 0.06);
+      var x = Math.min(
+        Math.round(slot[0] * _vw),
+        Math.max(inset, _vw - _ew - inset),
+      );
+      var y = Math.min(
+        Math.round(slot[1] * _vh),
+        Math.max(inset, _vh - _eh - inset),
+      );
+      return 'translate3d(' + x + 'px,' + y + 'px,0) rotate(' + deg + 'deg)';
     }
 
     // ── Inject transition <style> once ─────────────────────────────────────
@@ -199,6 +224,7 @@ export const PLAYER_SCRIPT = `
       requestAnimationFrame(function () {
         requestAnimationFrame(function () {
           if (!_el) return;
+          captureVP(); // element now exists — measure it for clamped positioning
           var slot = nxtSlot();
           var deg  = rnd(-3, 3).toFixed(1);
           _el.style.transform = mkTransform(slot, deg);
@@ -211,6 +237,7 @@ export const PLAYER_SCRIPT = `
     var _tmr = null;
     function move() {
       if (!_el || !_el.parentNode) { recover(); return; }
+      captureVP(); // re-measure wrapper + element (resize-safe, layout-clean)
       var slot = nxtSlot();
       var deg  = rnd(-3, 3).toFixed(1);
       _el.style.transform = mkTransform(slot, deg);
@@ -283,127 +310,21 @@ export const PLAYER_SCRIPT = `
     watch();
   }
 
-  // ── CSS: suppress residual YouTube overlays that params cannot remove ────
+  // ── Tap-to-toggle policy ───────────────────────────────────────────────────
   //
-  //  Even with controls=0 some YouTube clients still paint branding elements
-  //  over the iframe surface — notably:
-  //    • .ytp-chrome-top        : title bar + channel name + watch-on-YouTube
-  //    • .ytp-watermark         : YouTube watermark logo (bottom-right corner)
-  //    • .ytp-pause-overlay     : "More videos" panel on pause
-  //    • .ytp-endscreen-content : end-screen recommendations after video ends
-  //    • .ytp-ce-element        : in-video suggested-video cards
-  //    • .ytp-share-button-*    : share button cluster
+  // REMOVED: the former fixiOSTapToToggle() transparent <button> interceptor.
+  // It covered the video area at z-index:1 and called player.togglePlay() on
+  // every tap — i.e. a second, tap-anywhere play/pause mechanism ALONGSIDE
+  // Plyr's own controls. That violated the one-authoritative-mechanism rule:
+  // random video-area taps paused/resumed playback and summoned YouTube's
+  // title/channel HUD (its pause/overlay state machine). This fix was written
+  // for iOS Safari's legacy 300 ms tap delay and click-on-<div> limitations;
+  // inside WKWebView/Android WebView the 300 ms delay does not apply, and
+  // clicks on the wrapper reach Plyr's own clickToPlay handler directly.
   //
-  //  Because the iframe is cross-origin we cannot inject CSS into it directly.
-  //  However, WKWebView on iOS and WebView on Android run the inner iframe JS
-  //  in the same process as the outer page, so a <style> injected into the
-  //  PARENT document plus pointer-events:none on the iframe ensures that even
-  //  if YouTube paints those elements they are invisible and non-interactive.
-  //
-  //  For the inner iframe content: injecting into document (outer page) only
-  //  hides elements at the outer level.  The actual YT iframe DOM is sandboxed.
-  //  The real suppression comes from the API params (controls=0, fs=0, rel=0).
-  //  The CSS below is a belt-and-suspenders fallback for any outer-level bleed.
-  //
-  function suppressYouTubeUI() {
-    if (document.getElementById('plyr-yt-suppress')) return;
-    var s = document.createElement('style');
-    s.id = 'plyr-yt-suppress';
-    // These selectors target elements YouTube injects into the outer page or
-    // into accessible iframe shadow content on some WebView versions.
-    s.textContent = [
-      // Outer-page YouTube overlays (some WebView builds render these outside
-      // the iframe boundary)
-      '.ytp-chrome-top,.ytp-chrome-top-buttons,.ytp-title-channel-logo',
-      ',.ytp-title,.ytp-title-link,.ytp-title-text',
-      ',.ytp-watermark,.ytp-youtube-button',
-      ',.ytp-pause-overlay,.ytp-pause-overlay-container',
-      ',.ytp-endscreen-content,.ytp-ce-element',
-      ',.ytp-share-button,.ytp-share-button-visible',
-      ',.ytp-spinner',
-      // "Watch on YouTube" hover badge
-      ',.ytp-cued-thumbnail-overlay-duration',
-      // Info / annotation cards
-      ',.ytp-cards-teaser,.iv-branding',
-      '{display:none!important;opacity:0!important;pointer-events:none!important}',
-    ].join('');
-    (document.head || document.documentElement).appendChild(s);
-  }
-
-  // ── iOS Safari tap-to-play/pause fix ──────────────────────────────────────
-  //
-  // Three compounding issues make Plyr's center play/pause unreliable on iOS
-  // Safari and WKWebView.  All three must be addressed together:
-  //
-  //  1. 300 ms tap delay
-  //     iOS Safari delays click events ~300 ms for double-tap-to-zoom detection.
-  //     Without touch-action:manipulation every tap on the video area stalls
-  //     before Plyr sees it, making the button appear to "miss."
-  //
-  //  2. click events not dispatched to <div> on iOS Safari
-  //     iOS Safari only fires click on interactive elements or <div>/<span>
-  //     with cursor:pointer.  Plyr's .plyr__video-embed is a plain <div>.
-  //     When playing, .plyr__control--overlaid is hidden (visibility:hidden),
-  //     so taps fall to .plyr__video-embed — iOS Safari never fires click on it
-  //     and Plyr's togglePlay handler is never reached.
-  //
-  //  3. YouTube <iframe> absorbs unhandled touches
-  //     Once issues 1 & 2 block Plyr, the touch reaches the cross-origin iframe.
-  //     YouTube handles it through its own state machine, bypassing Plyr entirely.
-  //
-  // Fix:
-  //  A. CSS — touch-action:manipulation eliminates the 300 ms delay; cursor:pointer
-  //     on wrapper divs enables click dispatch on iOS Safari.
-  //  B. Transparent <button> at z-index:1 inside .plyr__video-wrapper.
-  //       • Above the iframe (no z-index) → intercepts taps before they reach it.
-  //       • Below .plyr__control--overlaid (~z-index 2) → big play button unchanged.
-  //       • Below #plyr-watermark (z-index:9999, pointer-events:none) → unaffected.
-  //       • <button> always receives click on iOS Safari — no cursor:pointer needed.
-  //       • stopPropagation() prevents Plyr's container handler double-toggling.
-  //
-  function fixiOSTapToToggle() {
-    // Part A — CSS
-    var style = document.createElement('style');
-    style.textContent = [
-      '.plyr,.plyr *{touch-action:manipulation;}',
-      '.plyr__video-wrapper,.plyr__video-embed{cursor:pointer;}',
-      '.plyr__video-wrapper,.plyr__video-embed,.plyr__control{-webkit-tap-highlight-color:transparent;}',
-    ].join('');
-    document.head.appendChild(style);
-
-    // Part B — transparent button interceptor
-    var wrapper = document.querySelector('.plyr__video-wrapper') ||
-                  document.querySelector('.plyr') ||
-                  document.body;
-    if (window.getComputedStyle(wrapper).position === 'static') {
-      wrapper.style.position = 'relative';
-    }
-
-    var tapBtn = document.createElement('button');
-    tapBtn.id = 'plyr-tap-toggle';
-    tapBtn.setAttribute('aria-hidden', 'true');
-    tapBtn.setAttribute('tabindex', '-1');
-    tapBtn.style.cssText = [
-      'position:absolute',
-      'top:0', 'left:0', 'right:0', 'bottom:0',
-      'width:100%', 'height:100%',
-      'background:transparent',
-      'border:none',
-      'padding:0', 'margin:0',
-      'cursor:pointer',
-      'z-index:1',
-      'outline:none',
-      '-webkit-tap-highlight-color:transparent',
-      'touch-action:manipulation',
-    ].join(';');
-
-    tapBtn.addEventListener('click', function (e) {
-      e.stopPropagation();
-      if (player) { player.togglePlay(); }
-    });
-
-    wrapper.appendChild(tapBtn);
-  }
+  // Policy: Play/Pause via Plyr's controls ONLY. clickToPlay:false below makes
+  // video-area taps inert by configuration — no interceptors, no overlays, no
+  // YouTube-DOM/CSS manipulation.
 
   // ── Plyr init ──────────────────────────────────────────────────────────────
   //   hideFullscreen=true  → modal mode: no fullscreen button, fullscreen API
@@ -424,13 +345,28 @@ export const PLAYER_SCRIPT = `
     // 'quality' omitted: HTML5-only, no effect on YouTube embeds.
     settings: ['captions', 'speed'],
     speed: { selected: 1, options: [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2, 4] },
-    // fullscreen.enabled=false prevents Plyr from attempting browser fullscreen
-    // in both modes. The button is still rendered for the inline player (it is
-    // in the controls array above); we just prevent Plyr from calling
-    // requestFullscreen() — our capture listener owns that interaction.
-    fullscreen: { enabled: false, fallback: false, iosNative: false },
+    // fullscreen.enabled + fallback MUST both be true on native:
+    // Plyr gates the fullscreen BUTTON with the CSS rule
+    //   .plyr--fullscreen-enabled [data-plyr=fullscreen] { display:inline-block }
+    // and that class is only applied when enabled && supported — where
+    // supported = native Fullscreen API OR config.fullscreen.fallback.
+    // With enabled:false the button is permanently display:none in the
+    // Android WebView (no Fullscreen API for cross-origin iframes there),
+    // which was the "Plyr has no fullscreen" bug.
+    //
+    // Plyr still never ENTERS browser fullscreen on native: the capture-phase
+    // click interceptor below stops the click before Plyr's bubble-phase
+    // handler and posts yt:fullscreen to RN — the RN Modal is the fullscreen
+    // experience. fallback:true only makes the button VISIBLE and keeps
+    // Plyr's state machine happy; enterfullscreen is never reached.
+    fullscreen: { enabled: true, fallback: true, iosNative: false },
     playsinline: true,
-    // ── YouTube iframe API parameters ──────────────────────────────────────
+    // Play/Pause via the Play/Pause control ONLY. Documented Plyr option —
+    // true would toggle playback whenever the video container is clicked,
+    // which is exactly the "tapping the video pauses/resumes" complaint.
+    clickToPlay: false,
+    // ── YouTube iframe API parameters (verified against developers.google.com/
+    // youtube/player_parameters — current supported set) ────────────────────
     // NOTE: Plyr 3.7.8 hardcodes controls/disablekb/playsinline from its own
     // logic in playerVars assembly; those keys in this object are merged after
     // Plyr's base so they are effectively redundant — kept for documentation.
@@ -456,17 +392,28 @@ export const PLAYER_SCRIPT = `
     // disablekb=1      : Plyr owns keyboard events.
     // fs=0             : disable YouTube's own fullscreen button.
     // iv_load_policy=3 : suppress annotation overlays.
-    // modestbranding=1 : DEPRECATED — YouTube ignores since 2023.
-    // rel=0            : same-channel end-screen suggestions only.
+    // rel=0            : end-screen suggestions limited to same channel — the
+    //                    maximum reduction YouTube supports since Sept 2018.
     // playsinline=1    : inline playback; prevents iOS native fullscreen.
+    // color='white'    : SUPPORTED param — progress-bar accent white instead of
+    //                    YouTube red. Visible wherever YouTube paints its own
+    //                    bar (e.g. pre-play title states); Plyr's own bar is
+    //                    styled by PLYR_CSS.
+    // hl='en'          : SUPPORTED param — deterministic interface language for
+    //                    player tooltips/menus instead of locale-dependent.
+    //
+    // REJECTED as deprecated (verified in official revision history):
+    //   modestbranding (deprecated Aug 15 2023, "no effect"), showinfo (2018),
+    //   autohide (2015), theme (2015). Sending them is dead weight.
     youtube: {
       controls:        0,
       disablekb:       1,
       fs:              0,
       iv_load_policy:  3,
-      modestbranding:  1,
       rel:             0,
       playsinline:     1,
+      color:           'white',
+      hl:              'en',
       noCookie:        false,
       origin:          'https://medacademy.app',
     },
@@ -479,9 +426,7 @@ export const PLAYER_SCRIPT = `
 
   player.on('ready', function () {
     if (resumeAt > 0) player.currentTime = resumeAt;
-    suppressYouTubeUI();
     injectWatermark(wmName, wmId);
-    fixiOSTapToToggle();
 
     send({ type: 'yt:ready' });
 

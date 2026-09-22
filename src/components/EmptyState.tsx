@@ -8,7 +8,7 @@
  *   <EmptyState
  *     icon={<BookOpen size={48} color={c.primary} />}
  *     title="No courses yet"
- *     description="Activate a code or explore the catalog to get started."
+ *     description="Explore the catalog to get started."
  *     action={{ label: 'Explore Courses', onPress: () => router.push('/explore') }}
  *   />
  */

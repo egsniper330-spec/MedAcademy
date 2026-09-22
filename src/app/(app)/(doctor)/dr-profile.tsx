@@ -12,7 +12,7 @@ import { useState, useCallback, useMemo, useEffect } from 'react';
 import {
   View, Text, ScrollView, useColorScheme, Pressable,
   ActivityIndicator, RefreshControl, TextInput, Switch, Modal,
-  KeyboardAvoidingView, useWindowDimensions,
+  useWindowDimensions,
 } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
 import { useFocusEffect, useRouter } from 'expo-router';
@@ -561,7 +561,9 @@ function StudentProfileModal({ tx, doctorId, onClose, onAction, c }: {
   const displayName  = studentProfile?.full_name    ?? tx.student_name               ?? '—';
   const displayPhone = studentProfile?.phone        ?? tx.student_phone_snapshot     ?? tx.student_phone  ?? '—';
   const displayEmail = studentProfile?.email        ?? tx.student_email_snapshot     ?? tx.student_email  ?? '—';
-  const displayWmk   = studentProfile?.watermark_id ?? tx.student_watermark_snapshot ?? '—';
+  // Public User ID (MED-####) is the user-facing identifier; the legacy
+  // watermark snapshot is only a fallback for historical transaction records.
+  const displayWmk   = studentProfile?.public_user_id ?? tx.student_watermark_snapshot ?? '—';
   const displayJoin  = (!isDeleted && studentProfile?.created_at) ? studentProfile.created_at : null;
 
   const hasSuspended       = (studentProfile?.enrollments ?? []).some(e => e.status === 'suspended');
@@ -580,7 +582,6 @@ function StudentProfileModal({ tx, doctorId, onClose, onAction, c }: {
           // within the visible viewport — critical on landscape and small phones.
           maxHeight: layout.insets ? (layout.height - layout.insets.top) * 0.92 : '92%',
           width: '100%',
-          paddingBottom: layout.scrollBottom(),
         }}>
           <View style={{ alignItems: 'center', paddingTop: 12 }}>
             <View style={{ width: 40, height: 4, borderRadius: 2, backgroundColor: `${c.text}20` }} />
@@ -620,7 +621,7 @@ function StudentProfileModal({ tx, doctorId, onClose, onAction, c }: {
             </Pressable>
           </View>
 
-          <ScrollView contentContainerStyle={{ paddingHorizontal: layout.screenPx, paddingBottom: layout.scrollBottom() }}>
+          <ScrollView contentContainerStyle={{ paddingHorizontal: layout.screenPx }}>
             {loading ? <ActivityIndicator color={c.primary} style={{ marginVertical: 48 }} /> : (
               <>
                 {isDeleted && (
@@ -647,7 +648,7 @@ function StudentProfileModal({ tx, doctorId, onClose, onAction, c }: {
                     { icon: <Users size={14} color={c.primary} />,    label: 'Full Name',    value: displayName  },
                     { icon: <Phone size={14} color={c.primary} />,    label: 'Phone',        value: displayPhone },
                     { icon: <Mail size={14} color={c.primary} />,     label: 'Email',        value: displayEmail },
-                    { icon: <Hash size={14} color={c.primary} />,     label: 'Watermark ID', value: displayWmk   },
+                    { icon: <Hash size={14} color={c.primary} />,     label: 'User ID',      value: displayWmk   },
                   ].map(r => (
                     <View key={r.label} style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
                       <View style={{ width: 30, height: 30, borderRadius: 9, backgroundColor: `${c.primary}12`,
@@ -859,7 +860,7 @@ function useContactEdit(profile: any, setProfile: (p: any) => void) {
         </View>
       }
     >
-      <KeyboardAvoidingView behavior={process.env.EXPO_OS === 'ios' ? 'padding' : 'height'}>
+      
         <Text style={{ fontSize: 13, color: c.text, opacity: 0.5, marginBottom: 16, lineHeight: 19 }}>
           These become the default contact methods for all your courses. Each field is optional.
         </Text>
@@ -910,19 +911,24 @@ function useContactEdit(profile: any, setProfile: (p: any) => void) {
         {error ? (
           <Text style={{ fontSize: 13, color: '#DC2626', marginTop: 8 }}>{error}</Text>
         ) : null}
-      </KeyboardAvoidingView>
+      
     </ResponsiveModal>
   );
 
   return { openEdit, modal };
 }
 
-// ─── Forensic Watermark ID card ───────────────────────────────────────────────
-function WatermarkCard({ watermarkId, c }: { watermarkId: string | null; c: typeof neuColors.light }) {
+// ─── Public User ID card ───────────────────────────────────────────────────
+// Displays the PUBLIC USER ID (MED-####) — the canonical user-facing identifier.
+// The internal legacy watermark_id must never be shown here.
+function WatermarkCard({ publicUserId, c }: { publicUserId: string | null; c: typeof neuColors.light }) {
   const [copied, setCopied] = useState(false);
+  if (!publicUserId && __DEV__) {
+    console.warn('[DrProfile] public_user_id missing from profile payload — check backend PUBLIC_COLS/profile select.');
+  }
   const handleCopy = () => {
-    if (!watermarkId) return;
-    void Clipboard.setStringAsync(watermarkId);
+    if (!publicUserId) return;
+    void Clipboard.setStringAsync(publicUserId);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
@@ -934,10 +940,10 @@ function WatermarkCard({ watermarkId, c }: { watermarkId: string | null; c: type
         </View>
         <View style={{ flex: 1 }}>
           <Text style={{ fontSize: 11, fontWeight: '700', color: c.text, opacity: 0.4, textTransform: 'uppercase', letterSpacing: 0.9 }}>
-            Forensic Watermark ID
+            User ID
           </Text>
           <Text style={{ fontSize: 18, fontWeight: '800', color: c.primary, letterSpacing: 1.5, marginTop: 2, fontVariant: ['tabular-nums'] }}>
-            {watermarkId ?? '—'}
+            {publicUserId ?? '—'}
           </Text>
         </View>
         <Pressable
@@ -1026,7 +1032,7 @@ function EarningsTab({ doctorId, earningsEnabled, c }: { // eslint-disable-line 
     <ScrollView
       style={{ flex: 1, backgroundColor: c.base }}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />}
-      contentContainerStyle={{ padding: layout.screenPx, paddingBottom: layout.scrollBottom() }}
+      contentContainerStyle={{ padding: layout.screenPx }}
     >
       {/* ── Stat cards ───────────────────────────────────────────────── */}
       <EarnSL label="Overview" c={c} />
@@ -1309,7 +1315,7 @@ export default function DoctorProfile() {
     <ScrollView
       style={{ flex: 1, backgroundColor: c.base }}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />}
-      contentContainerStyle={{ padding: layout.screenPx, paddingBottom: layout.scrollBottom() }}
+      contentContainerStyle={{ padding: layout.screenPx }}
     >
       {/* Stats row */}
       <SectionLabel label="Overview" color={c.text} />
@@ -1333,7 +1339,7 @@ export default function DoctorProfile() {
 
       {/* Watermark */}
       <SectionLabel label="Forensic Watermark ID" color={c.text} />
-      <WatermarkCard watermarkId={(profile as any)?.watermark_id ?? null} c={c} />
+      <WatermarkCard publicUserId={(profile as any)?.public_user_id ?? null} c={c} />
 
       {/* Account info */}
       <SectionLabel label="Account Information" color={c.text} />
@@ -1419,7 +1425,7 @@ export default function DoctorProfile() {
     return (
       <ScrollView
         style={{ flex: 1, backgroundColor: c.base }}
-        contentContainerStyle={{ padding: layout.screenPx, paddingBottom: layout.scrollBottom() }}
+        contentContainerStyle={{ padding: layout.screenPx }}
       >
         {/* ── Edit Profile ───────────────────────────────────────────── */}
         <SectionLabel label="Profile" color={c.text} />
@@ -1485,7 +1491,7 @@ export default function DoctorProfile() {
             </View>
           }
         >
-          <KeyboardAvoidingView behavior={process.env.EXPO_OS === 'ios' ? 'padding' : 'height'}>
+          
             <Text style={{ fontSize: 11, fontWeight: '700', color: c.text, opacity: 0.5, textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 6 }}>Full Name</Text>
             <NeuInputRow
               c={c}
@@ -1514,7 +1520,7 @@ export default function DoctorProfile() {
                 <Text style={{ color: '#DC2626', fontSize: 13, marginLeft: 6, flex: 1 }}>{editError}</Text>
               </View>
             ) : null}
-          </KeyboardAvoidingView>
+          
         </ResponsiveModal>
 
         {/* ── Change Password Modal ──────────────────────────────────── */}
@@ -1531,7 +1537,7 @@ export default function DoctorProfile() {
             ) : undefined
           }
         >
-          <KeyboardAvoidingView behavior={process.env.EXPO_OS === 'ios' ? 'padding' : 'height'}>
+          
             {pwdSuccess ? (
               <View style={{ alignItems: 'center', paddingVertical: 12, gap: 10 }}>
                 <CheckCircle size={44} color="#16A34A" />
@@ -1571,7 +1577,7 @@ export default function DoctorProfile() {
                 ) : null}
               </>
             )}
-          </KeyboardAvoidingView>
+          
         </ResponsiveModal>
       </ScrollView>
     );

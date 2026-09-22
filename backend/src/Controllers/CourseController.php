@@ -194,12 +194,23 @@ final class CourseController
         $studentId = $request->user['id'];
 
         $course = Database::instance()->row(
-            'SELECT id, status, subscription_required FROM courses WHERE id = ?',
+            'SELECT id, status, price_egp FROM courses WHERE id = ?',
             [$courseId]
         );
         if ($course === null || $course['status'] !== 'published') {
             throw new ApiException(404, 'Course not found');
         }
+
+        // SERVER-SIDE ENFORCEMENT: enrollment is a PAID operation (credits).
+        // The creditless self-enroll path would let any student token create
+        // free enrollments on ANY published course by calling this endpoint
+        // directly — bypassing grant_course_access' atomic deduction entirely.
+        // Free courses (price 0) may still self-enroll.
+        $price = (int) ($course['price_egp'] ?? 0);
+        if ($price > 0) {
+            throw new ApiException(402, 'This course requires enrollment through the app (credit activation)');
+        }
+
         $already = (bool) Database::instance()->value(
             'SELECT COUNT(*) FROM enrollments WHERE student_id = ? AND course_id = ?',
             [$studentId, $courseId], 0
@@ -212,7 +223,7 @@ final class CourseController
              VALUES (?, ?, ?, ?, UTC_TIMESTAMP(6))',
             [Uuid::v4(), $studentId, $courseId, 'active']
         );
-        AuditService::write($studentId, 'enrollment_created', ['course_id' => $courseId, 'method' => 'direct']);
+        AuditService::write($studentId, 'enrollment_created', ['course_id' => $courseId, 'method' => 'direct_free']);
         return ['success' => true];
     }
 
@@ -426,7 +437,6 @@ final class CourseController
             $db->query('DELETE FROM video_uploads WHERE course_id = ?', [$id]);
             $db->query('DELETE FROM lessons WHERE course_id = ?', [$id]);
             $db->query('DELETE FROM sections WHERE course_id = ?', [$id]);
-            $db->query('DELETE FROM activation_codes WHERE course_id = ?', [$id]);
             $db->query('DELETE FROM enrollments WHERE course_id = ?', [$id]);
             $db->query('DELETE FROM courses WHERE id = ?', [$id]);
         });
@@ -564,8 +574,8 @@ final class CourseController
         }
 
         $db->insert(
-            'INSERT INTO enrollments (id, student_id, course_id, enrolled_by, enrollment_method, status, enrolled_at, created_at)
-             VALUES (?, ?, ?, ?, ?, ?, UTC_TIMESTAMP(6), UTC_TIMESTAMP(6))',
+            'INSERT INTO enrollments (id, student_id, course_id, enrolled_by, enrollment_method, status, enrolled_at)
+             VALUES (?, ?, ?, ?, ?, ?, UTC_TIMESTAMP(6))',
             [Uuid::v4(), $studentId, $courseId, $request->user['id'], 'admin_grant', 'active']
         );
 

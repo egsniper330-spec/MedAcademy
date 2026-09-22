@@ -25,7 +25,7 @@ import {
 import { NeuCard } from '@/components/NeuCard';
 import { NeuButton } from '@/components/NeuButton';
 import { ResponsiveModal } from '@/components/ResponsiveModal';
-import { neuColors, neuFlatStyle, useLayout } from '@/lib/neu'
+import { neuColors, neuFlatStyle, useLayout, safeBottom } from '@/lib/neu'
 import { PageHeader } from '@/components/PageHeader';
 import { getPublicEmail } from '@/lib/api';
 import { backendClient } from '@/client/backendClient';
@@ -504,8 +504,7 @@ export default function AdminDevices() {
   return (
     <View style={{ flex: 1, backgroundColor: c.base }}>
       <ScrollView
-        contentContainerStyle={{ paddingBottom: layout.scrollBottom() }}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />} contentContainerStyle={{ paddingBottom: safeBottom(layout.insets.bottom) }}
       >
           {/* PageHeader sits OUTSIDE the inner padding view so it can own its own horizontal padding */}
           <PageHeader

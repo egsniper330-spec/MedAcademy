@@ -70,6 +70,17 @@ const ERROR_MAP: Array<[RegExp, string]> = [
   [/permission.*denied|not.*authorized/i, 'You do not have permission to perform this action.'],
   [/foreign.*key.*violation/i,        'Referenced record no longer exists.'],
   [/not.*null.*violation/i,           'One or more required fields are missing.'],
+  // MySQL (PHP backend) duplicate-entry phrasing — same friendly mapping as
+  // the PG "duplicate key" patterns above.
+  [/duplicate entry/i,                'This value already exists.'],
+  // Student-operations business errors (StudentController::mapPdoError + guard
+  // clauses). Mapped by exact message so the doctor sees the REAL cause instead
+  // of a misleading "check your credit balance" fallback.
+  [/insufficient credits/i,           'Insufficient credits. Allocate credits to your account first.'],
+  [/already enrolled/i,               'This student is already enrolled in this course.'],
+  [/course could not be found/i,      'The selected course could not be found. Please pick the course again.'],
+  [/student account could not be found/i, 'The selected student account could not be found. Please search for the student again.'],
+  [/operation could not be completed/i, 'The operation could not be completed. Please try again.'],
 ];
 
 /**
@@ -98,7 +109,12 @@ export function friendlyError(error: unknown, fallback = 'Something went wrong. 
   //   - Contain canonical PG error phrases that are never user-facing
   const PG_CODE    = /\b[0-9]{5}\b/;
   const PG_PHRASE  = /violates (foreign key|unique|check|not-null) constraint|duplicate key value|null value in column|invalid input (syntax|value) for type|relation .+ does not exist|column .+ of relation|operator does not exist|division by zero/i;
-  if (PG_CODE.test(msg) || PG_PHRASE.test(msg)) return fallback;
+  // MySQL/PDO internals (PHP backend) — never surface raw SQL to users.
+  // Matches SQLSTATE[42S22], "Unknown column", "Integrity constraint violation",
+  // "in 'INSERT INTO'", "in 'field list'" etc. Business messages never contain
+  // these; genuine conflicts are mapped earlier (see ERROR_MAP).
+  const SQL_INTERNAL = /SQLSTATE\[|Unknown column|Integrity constraint violation|in 'INSERT INTO'|in 'field list'|in 'where clause'|Table .* doesn't exist/i;
+  if (PG_CODE.test(msg) || PG_PHRASE.test(msg) || SQL_INTERNAL.test(msg)) return fallback;
   // Surface messages under 400 chars that passed all filters
   if (msg.length < 400) return msg;
   return fallback;

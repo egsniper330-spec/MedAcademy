@@ -8,6 +8,7 @@ use MedAcademy\Auth\Jwt;
 use MedAcademy\Database\Database;
 use MedAcademy\Http\ApiException;
 use MedAcademy\Http\Request;
+use MedAcademy\Services\AppUpdateService;
 
 /**
  * Authenticates the request from the Bearer access token and enforces:
@@ -69,6 +70,28 @@ final class AuthMiddleware
         // Role enforcement
         if (!empty($options['role']) && !in_array($profile['role'], $options['role'], true)) {
             throw new ApiException(403, 'Forbidden: requires role ' . implode(' or ', $options['role']));
+        }
+
+        // ── App update enforcement (server-side version floor) ──────────────
+        // The client identifies itself with X-App-Platform / X-App-Version-Code
+        // on every API call. A version BELOW the configured minimum_version_code
+        // receives HTTP 426 UPDATE_REQUIRED on EVERY authenticated route —
+        // patching the client UI cannot bypass it, and the client's own
+        // apiFetch converts it into a global "update required" state.
+        // Super Admins are exempt (they must be able to reach the App Updates
+        // screen from any build to fix a bad configuration). Clients that omit
+        // the headers (legacy builds predating this feature, web, tooling) are
+        // treated as "version unknown" and NOT blocked — the remote
+        // config/forced-update screen remains the first-line gate for them.
+        $svc = new AppUpdateService();
+        $verdict = $svc->evaluate(
+            $request->header('x-app-platform'),
+            $request->header('x-app-version-code') !== null
+                ? (int) $request->header('x-app-version-code')
+                : null
+        );
+        if ($verdict !== null && $profile['role'] !== 'super_admin') {
+            throw new ApiException(426, $verdict['message'], 'UPDATE_REQUIRED');
         }
 
         // Assistant permission enforcement

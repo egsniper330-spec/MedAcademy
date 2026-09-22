@@ -31,7 +31,14 @@ final class SessionManager
         ], $accessTtl);
 
         $refreshToken = bin2hex(random_bytes(48));
-        $refreshTtl = Config::int('JWT_REFRESH_TTL_SECONDS', 2592000);
+        // Rolling session window: rotation (rotate()) issues a FRESH token with a
+        // full new TTL on every successful refresh, so this value is the maximum
+        // INACTIVITY period, not a hard session death. 365 days means a registered
+        // device stays logged in for the lifetime of its registration as long as
+        // the app is opened at least once a year. Revocation paths (admin logout,
+        // Reset All, device block, security_version bump) are unaffected and still
+        // kill sessions immediately.
+        $refreshTtl = Config::int('JWT_REFRESH_TTL_SECONDS', 31536000);
 
         Database::instance()->insert(
             'INSERT INTO refresh_tokens (id, user_id, device_id, token_hash, expires_at, created_at)

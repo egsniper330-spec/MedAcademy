@@ -248,7 +248,7 @@ final class AuthController
         }
 
         $db = Database::instance();
-        $target = $db->row('SELECT id, email, role, full_name FROM profiles WHERE id = ?', [$targetUserId]);
+        $target = $db->row('SELECT id, email, role, full_name, security_version FROM profiles WHERE id = ?', [$targetUserId]);
         if ($target === null) {
             throw new ApiException(404, 'User not found');
         }
@@ -260,8 +260,18 @@ final class AuthController
             throw new ApiException(400, 'Cannot impersonate yourself');
         }
 
-        // Generate a temporary session token for the target user
-        $session = (new \MedAcademy\Auth\SessionManager())->issue($targetUserId, $target['role'], 0);
+        // Generate a temporary session for the TARGET user. The 4th argument
+        // (deviceId) is contract-valid as null: the impersonated session is not
+        // bound to the ACTOR's device (revoking the actor's device must not kill
+        // the target session), and register() uses the same null shape when no
+        // device is registered. security_version is the TARGET's current value —
+        // AuthMiddleware rejects tokens whose sv is lower than the profile's.
+        $session = (new \MedAcademy\Auth\SessionManager())->issue(
+            $targetUserId,
+            $target['role'],
+            (int) $target['security_version'],
+            null
+        );
 
         AuditService::write($actorId, 'impersonation_started', [
             'target_user_id' => $targetUserId,

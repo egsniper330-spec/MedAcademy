@@ -15,7 +15,7 @@ import {
 import { backendClient } from '@/client/backendClient';
 import { NeuCard } from '@/components/NeuCard';
 import { NeuButton } from '@/components/NeuButton';
-import { neuColors, useLayout } from '@/lib/neu';
+import { neuColors, useLayout, safeBottom } from '@/lib/neu';
 import { PageHeader } from '@/components/PageHeader';
 
 // ─── CSV helpers ──────────────────────────────────────────────────────────────
@@ -217,8 +217,7 @@ export default function ExportPanel() {
   };
 
   return (
-    <ScrollView style={{ flex: 1, backgroundColor: c.base }}
-          contentContainerStyle={{ paddingBottom: layout.scrollBottom() }}>
+    <ScrollView style={{ flex: 1, backgroundColor: c.base }} contentContainerStyle={{ paddingBottom: safeBottom(layout.insets.bottom) }}>
       <PageHeader title="Export Center" subtitle="Download CSV reports for any subsystem" accentColor="#D97706" />
 
       <View style={{ paddingHorizontal: layout.screenPx }}>

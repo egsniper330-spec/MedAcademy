@@ -145,7 +145,7 @@ export default function ArchivedCoursesScreen() {
           </View>
         </View>
 
-        <View style={{ paddingHorizontal: 20, gap: 14, paddingBottom: layout.scrollBottom() }}>
+        <View style={{ paddingHorizontal: 20, gap: 14 }}>
           {loading ? (
             <View style={{ paddingVertical: 60, alignItems: 'center' }}>
               <ActivityIndicator color={c.primary} />
@@ -245,7 +245,7 @@ export default function ArchivedCoursesScreen() {
             </View>
             <Text style={{ fontSize: 13, color: c.text, opacity: 0.55, lineHeight: 20, marginBottom: 6 }}>
               <Text style={{ fontWeight: '700', color: c.text }}>{showRestoreConfirm?.title}</Text>
-              {'\n\n'}The course will immediately return to the public catalog, search results, and new subscriptions. All lessons, videos, student progress, analytics, and activation codes are preserved.
+              {'\n\n'}The course will immediately return to the public catalog, search results, and new subscriptions. All lessons, videos, student progress, and analytics are preserved.
             </Text>
             <View style={{ flexDirection: 'row', gap: 10, marginTop: 16 }}>
               <Pressable onPress={() => setShowRestoreConfirm(null)}
@@ -292,7 +292,7 @@ export default function ArchivedCoursesScreen() {
                   borderRadius: 12, backgroundColor: '#DC262610', borderWidth: 1, borderColor: '#DC262625' }}>
                   <AlertTriangle size={14} color="#DC2626" style={{ marginTop: 1 }} />
                   <Text style={{ flex: 1, fontSize: 12, color: '#DC2626', lineHeight: 18, fontWeight: '600' }}>
-                    This action is irreversible. All lessons, videos, student progress, analytics, activation codes, and history will be permanently destroyed and cannot be recovered.
+                    This action is irreversible. All lessons, videos, student progress, analytics, and history will be permanently destroyed and cannot be recovered.
                   </Text>
                 </View>
               </View>

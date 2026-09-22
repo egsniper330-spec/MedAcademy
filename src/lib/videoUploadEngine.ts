@@ -57,6 +57,9 @@ export interface FileAnalysis {
 
 export interface UploadTask {
   id: string;
+  /** Authenticated account that owns this task (internal user UUID).
+   *  Set by uploadQueueStore.addTask from the live session — never display-only. */
+  ownerUserId?: string;
   lessonId: string | null;
   courseId: string | null;
   doctorId?: string;           // Owner doctor — set at creation, used for video_assets upsert
@@ -400,11 +403,17 @@ export async function updateLessonVideoStatus(
   }
 
   if (!lessonId) return;
+  // `doctorId` is an internal routing hint consumed by the video_assets upsert
+  // above — it is NOT a lessons column. Spreading it into the lessons PATCH
+  // previously 500'd the ENTIRE finalization with SQLSTATE[42S22] Unknown
+  // column 'doctorId' in 'SET' — after the VdoCipher upload and the asset
+  // upsert had already succeeded, stranding the queue at "Encoding…".
+  const { doctorId: _doctorIdHint, ...lessonPatch } = patch ?? {};
   const { error } = await backendClient.from('lessons').update({
     video_upload_id: videoUploadId,
     video_status: videoStatus,
     updated_at: new Date().toISOString(),
-    ...patch,
+    ...lessonPatch,
   }).eq('id', lessonId);
   if (error) throw error;
 }
@@ -529,6 +538,8 @@ export type UploadErrorLayer =
   | '[RN]'                      // React Native client code
   | '[EF:video-upload-chunk]'   // Edge Function: video-upload-chunk
   | '[EF:video-assemble-upload]'// Edge Function: video-assemble-upload
+  | '[EF:lesson-finalize]'      // Lesson/asset finalization writes (STEP 5)
+  | '[EF:pipeline]'             // Uncaught pipeline-level error
   | '[Storage]'                 // PHP storage (chunk bucket)
   |'[DB]'                     // PHP/MySQL API (RPC / table update)
   | '[VdoCipher]';              // VdoCipher API (encoding / polling)
@@ -617,9 +628,23 @@ export function logUploadError(
   err: unknown,
   extra?: Record<string, unknown>,
 ): string {
-  const msg = err instanceof Error
-    ? `${err.message}${err.stack ? `\n${err.stack}` : ''}`
-    : String(err ?? 'Unknown error');
+  // Serialization fix: the data client rejects failed requests with a PLAIN
+  // PostgREST-style object ({ message, code, status }) — NOT an Error instance.
+  // String(plainObject) → "[object Object]", which erased the real server
+  // message from every upload-pipeline failure log. Normalize explicitly.
+  let msg: string;
+  if (err instanceof Error) {
+    msg = `${err.message}${err.stack ? `\n${err.stack}` : ''}`;
+  } else if (err && typeof err === 'object') {
+    const e = err as Record<string, unknown>;
+    const inner = e.error && typeof e.error === 'object' ? (e.error as Record<string, unknown>).message : undefined;
+    const m = (typeof e.message === 'string' && e.message) || (typeof inner === 'string' && inner) || null;
+    const status = typeof e.status === 'number' ? ` (HTTP ${e.status})` : '';
+    msg = m ?? JSON.stringify(err).slice(0, 500);
+    if (status) msg += status;
+  } else {
+    msg = String(err ?? 'Unknown error');
+  }
 
   const fullMsg = `${layer} ${step}: ${msg}`;
   if (__DEV__) console.error(fullMsg, extra ?? {});

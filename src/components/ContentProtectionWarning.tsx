@@ -6,7 +6,8 @@
  * and an Acknowledge button to resume the lesson.
  */
 import React from 'react';
-import { View, Text, Modal, Pressable, useColorScheme } from 'react-native';
+import { View, Text, Pressable, useColorScheme } from 'react-native';
+import { PortalOverlay } from '@/components/PortalOverlay';
 import { AlertTriangle, ShieldX } from 'lucide-react-native';
 import { neuColors, neuFlatStyle } from '@/lib/neu';
 
@@ -23,8 +24,8 @@ export function ContentProtectionWarning({ visible, warningMessage, strikeCount,
   const flat = neuFlatStyle(isDark);
 
   return (
-    <Modal visible={visible} transparent animationType="fade" statusBarTranslucent>
-      <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 24, backgroundColor: 'rgba(0,0,0,0.75)' }}>
+    <PortalOverlay visible={visible} variant="dialog" backdropColor="rgba(0,0,0,0.75)">
+      <View style={{ width: '100%', alignItems: 'center', paddingHorizontal: 24 }}>
         <View style={[flat, { borderRadius: 24, padding: 24, gap: 16, width: '100%', maxWidth: 400 }]}>
           {/* Icon */}
           <View style={{ alignItems: 'center' }}>
@@ -73,6 +74,6 @@ export function ContentProtectionWarning({ visible, warningMessage, strikeCount,
           </Pressable>
         </View>
       </View>
-    </Modal>
+    </PortalOverlay>
   );
 }

@@ -8,6 +8,12 @@
       ],
       "vdocipher-rn-bridge": [
         "./src/types/vdocipher-rn-bridge"
+      ],
+      "expo-modules-core": [
+        "./node_modules/expo/node_modules/expo-modules-core"
+      ],
+      "expo-modules-core/*": [
+        "./node_modules/expo/node_modules/expo-modules-core/*"
       ]
     }
   },

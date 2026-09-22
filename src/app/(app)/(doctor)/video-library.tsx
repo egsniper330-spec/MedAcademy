@@ -151,6 +151,7 @@ export default function VideoLibraryScreen() {
       setUploadingVideo(true);
       const task = {
         id: randomUUID(),
+        ownerUserId: profile?.id,
         lessonId: null,
         courseId: null,
         doctorId: profile?.id,
@@ -539,7 +540,7 @@ export default function VideoLibraryScreen() {
           data={assets}
           keyExtractor={(item) => item.id}
           renderItem={renderItem}
-          contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: layout.scrollBottom() }}
+          contentContainerStyle={{ paddingHorizontal: 16 }}
           showsVerticalScrollIndicator={false}
           ListEmptyComponent={
             <View style={{ alignItems: 'center', justifyContent: 'center', gap: 16, paddingTop: 80 }}>

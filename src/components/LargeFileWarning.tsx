@@ -4,7 +4,8 @@
  * and recommended connection. Doctor can proceed or cancel.
  */
 
-import { Modal, Pressable, Text, useColorScheme, View, ScrollView, useWindowDimensions } from 'react-native';
+import { Pressable, Text, useColorScheme, View, ScrollView, useWindowDimensions } from 'react-native';
+import { PortalOverlay } from '@/components/PortalOverlay';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { AlertTriangle, Wifi, Clock, HardDrive, X } from 'lucide-react-native';
 import { NeuCard } from '@/components/NeuCard';
@@ -52,11 +53,9 @@ export function LargeFileWarning({ visible, analysis, fileName, onProceed, onCan
   const cardMaxH = screenH - Math.max(insets.top, 32) - Math.max(insets.bottom, 32) - 40;
 
   return (
-    <Modal visible={visible} transparent animationType="fade" statusBarTranslucent>
+    <PortalOverlay visible={visible} variant="dialog" backdropColor="rgba(0,0,0,0.5)">
       <View style={{
-        flex: 1,
-        backgroundColor: 'rgba(0,0,0,0.5)',
-        justifyContent: 'center',
+        width: '100%',
         alignItems: 'center',
         paddingHorizontal: Math.max(insets.left + 20, 20),
         paddingTop: Math.max(insets.top, 20),
@@ -125,6 +124,6 @@ export function LargeFileWarning({ visible, analysis, fileName, onProceed, onCan
           </ScrollView>
         </NeuCard>
       </View>
-    </Modal>
+    </PortalOverlay>
   );
 }

@@ -1,17 +1,19 @@
-import { useCallback, useRef, useState } from 'react';
-import { View, Text, ScrollView, useColorScheme, Pressable, ActivityIndicator, Modal, Platform, useWindowDimensions } from 'react-native';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { View, Text, ScrollView, useColorScheme, Pressable, ActivityIndicator, Platform, useWindowDimensions } from 'react-native';
+import { PortalOverlay } from '@/components/PortalOverlay';
 import { Image } from 'expo-image';
 import { useFocusEffect, useRouter, useLocalSearchParams } from 'expo-router';
 import {
-  ArrowLeft, CheckCircle, Clock, Download, Eye, FileText, Film,
-  Lock, Paperclip, Play, ShieldAlert, X,
+  ArrowLeft, Check, CheckCircle, Clock, Download, Eye, FileText, Film,
+  Lock, Paperclip, Pause, Play, RefreshCw, ShieldAlert, X,
 } from 'lucide-react-native';
-import { getLessonById, upsertLessonProgress, getMySubscriptions, getMaterialSignedUrl, getLessonPdfSignedUrl } from '@/lib/api';
+import { getLessonById, upsertLessonProgress, getMySubscriptions, getMaterialSignedUrl, getLessonPdfSignedUrl, getCourseById } from '@/lib/api';
 import { backendClient } from '@/client/backendClient';
 import { useProfileStore } from '@/lib/store';
+import { isPreviewStudent } from '@/lib/previewAsStudent';
 import { NeuCard } from '@/components/NeuCard';
 import { NeuButton } from '@/components/NeuButton';
-import { neuColors, useLayout, neuFlatStyle, safeTop, safeLeft, safeRight } from '@/lib/neu';
+import { neuColors, useLayout, neuFlatStyle, safeTop, safeLeft, safeRight, safeBottom } from '@/lib/neu';
 // expo-file-system v55: legacy sub-path exports createDownloadResumable
 // (real progress callbacks) + documentDirectory/cacheDirectory string constants
 import {
@@ -24,11 +26,24 @@ import {
 import * as Sharing from 'expo-sharing';
 import * as MediaLibrary from 'expo-media-library';
 import { useSecurity } from '@/lib/SecurityContext';
+import {
+  deleteOfflineVideo, getOfflineVideos, hydrateOfflineLibrary, isOfflineVideoExpired,
+  pauseOfflineVideo, resumeOfflineVideo, safeDisplayTitle,
+  startOfflineDownload, subscribeOfflineVideos, type OfflineVideoEntry,
+} from '@/lib/offlineVideoService';
 import { useScreenCapture } from '@/lib/useScreenCapture';
 import { useContentProtection } from '@/lib/useContentProtection';
 import { ContentProtectionWarning } from '@/components/ContentProtectionWarning';
 import { RecordingBlockedOverlay } from '@/components/RecordingBlockedOverlay';
 import { VideoPlayer } from '@/components/VideoPlayer';
+
+/** Byte label for the download-progress line (Android-only official fields). */
+function fmtBytesLocal(n: number): string {
+  if (!Number.isFinite(n) || n <= 0) return '';
+  const mb = n / (1024 * 1024);
+  if (mb >= 1024) return `${(mb / 1024).toFixed(2)} GB`;
+  return `${mb.toFixed(1)} MB`;
+}
 
 const FILE_ICONS: Record<string, { icon: any; color: string }> = {
   'application/pdf': { icon: FileText, color: '#DC2626' },
@@ -85,7 +100,7 @@ export default function LessonPlayer() {
   const router = useRouter();
   const { id } = useLocalSearchParams<{ id: string }>();
   const { profile } = useProfileStore();
-  const { blocksVideo, hasWarnings, riskScore, threats, isSuperAdmin } = useSecurity();
+  const { blocksVideo, hasWarnings, riskScore, threats, isSuperAdmin, checkBeforeVideo } = useSecurity();
 
   // Enable screenshot/recording protection while this screen is mounted.
   // Super Admin bypass: SA sessions are exempt — they can screenshot/record freely.
@@ -108,6 +123,7 @@ export default function LessonPlayer() {
   } = useContentProtection(true, pauseVideo, isSuperAdmin);
 
   const [lesson, setLesson] = useState<any>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [markingComplete, setMarkingComplete] = useState(false);
   const [completed, setCompleted] = useState(false);
@@ -134,9 +150,13 @@ export default function LessonPlayer() {
   const loadData = useCallback(async () => {
     if (!id) return;
     try {
-      const data = await getLessonById(id, profile?.role ?? undefined);
-      // Students must never see draft lessons — treat as not-found.
-      if (profile?.role === 'student' && data?.status !== 'published') {
+      setLoadError(null);
+      // "Preview as Student": doctors exercise the exact student fetch path —
+      // the same scoped GET, the same published-only client filter — so any
+      // student-only authorization bug reproduces in the preview.
+      const data = await getLessonById(id, profile?.role === 'student' || isPreviewStudent() ? 'student' : profile?.role ?? undefined);
+      // Students (and previews) must never see draft lessons — treat as not-found.
+      if ((profile?.role === 'student' || isPreviewStudent()) && data?.status !== 'published') {
         setLesson(null);
         setLoading(false);
         return;
@@ -146,6 +166,10 @@ export default function LessonPlayer() {
       if (profile?.role === 'student' && data.section?.course_id) {
         const subs = await getMySubscriptions(profile.id);
         setIsSubscribed(subs.some((s: any) => s.course_id === data.section.course_id));
+      } else if (isPreviewStudent()) {
+        // Preview: the doctor plays through the privileged OTP path; treat as
+        // subscribed so the player is reachable, without any backend change.
+        setIsSubscribed(true);
       }
       // Load persisted completion + resume position from DB on every focus
       if (profile?.id) {
@@ -158,7 +182,16 @@ export default function LessonPlayer() {
         setCompleted(prog?.completed === true);
         setResumePosition(prog?.watch_position_seconds ?? 0);
       }
-    } catch {}
+    } catch (e: any) {
+      // The silent catch here previously turned EVERY fetch failure — including
+      // server 500s like the deployed ownerScope PDO binding bug — into the
+      // generic "Lesson not found" screen, hiding the real cause.
+      // Surface it (message only; never tokens/PII) so failures are diagnosable.
+      const msg = e?.message ?? String(e ?? 'Unknown error');
+      console.error('[lesson] getLessonById failed:', msg);
+      setLoadError(msg);
+      setLesson(null);
+    }
     setLoading(false);
   }, [id, profile]);
 
@@ -169,8 +202,23 @@ export default function LessonPlayer() {
     const isVdo = lesson?.video_type === 'vdocipher' && isVdoCipherVideoId(lesson.video_id);
     const isYt  = lesson?.video_type === 'youtube' && !!lesson.youtube_video_id;
     if (!isVdo && !isYt) return;
-    // Pre-video security check: re-run native checks before granting access.
-    // This catches Developer Options / ADB / recording that started after login.
+    // ── SECURITY GATE AT THE CONTENT BOUNDARY (fail-closed) ───────────────
+    // The authoritative SecurityContext verdict must explicitly say SAFE
+    // before any player is created. UNKNOWN (evaluation in progress / result
+    // not yet confirmed) = BLOCKED — a hung or slow check can never open a
+    // playback window. The UI render path also re-checks blocksVideo below,
+    // and YouTubePlayer independently re-validates before its fullscreen
+    // Modal mounts (defense in depth at every boundary).
+    if (!isSuperAdmin) {
+      if (blocksVideo) return;
+      try {
+        const blocked = await checkBeforeVideo();
+        if (blocked) return;
+      } catch {
+        return; // fail-closed: evaluation error never opens playback
+      }
+    }
+    // Pre-video native re-check: catches recording that started after login.
     if (process.env.EXPO_OS === 'android') {
       const { getNativeSecurityFlags } = await import('@/lib/nativeSecurity');
       const flags = await getNativeSecurityFlags();
@@ -180,7 +228,114 @@ export default function LessonPlayer() {
       }
     }
     setPlayerVisible(true);
-  }, [lesson]);
+  }, [lesson, isSuperAdmin, blocksVideo, checkBeforeVideo]);
+
+  // ── OFFLINE DOWNLOAD (official VdoCipher DRM flow) ─────────────────────
+  // Backend /video/offline-authorize runs the SAME gates as playback OTP
+  // MedAcademy course title for the offline metadata — persisted at authorize
+  // time so the Offline Library groups under the real course name (online
+  // fetch; harmless offline where it stays null → generic grouping label).
+  const [courseTitle, setCourseTitle] = useState<string | null>(null);
+  // Course IMAGE + section title are persisted at authorize time so the
+  // Offline Library shows the SAME course image as the online course.
+  const [courseImageUrl, setCourseImageUrl] = useState<string | null>(null);
+  useEffect(() => {
+    const cid = lesson?.section?.course_id;
+    if (!cid) { setCourseTitle(null); setCourseImageUrl(null); return; }
+    let alive = true;
+    void (async () => {
+      try {
+        const c = (await getCourseById(cid)) as any;
+        if (alive) {
+          setCourseTitle(c?.title ?? null);
+          setCourseImageUrl(c?.image_url ?? c?.cover_url ?? c?.thumbnail_url ?? null);
+        }
+      } catch { if (alive) { setCourseTitle(null); setCourseImageUrl(null); } }
+    })();
+    return () => { alive = false; };
+  }, [lesson?.section?.course_id]);
+
+  // (auth/entitlement/security) and issues a finite rental license. The SDK
+  // then fetches DRM-protected media; progress/complete/fail flow through
+  // offlineVideoService into the Offline Library. Security gate first.
+  const [offlineBusy, setOfflineBusy] = useState(false);
+  const [offlineMsg, setOfflineMsg] = useState<string | null>(null);
+  // Live state machine for the Download button — reconciled from the
+  // authoritative offlineVideoService (SDK events + MedAcademy metadata),
+  // not from a snapshot taken at mount.
+  const [dlEntry, setDlEntry] = useState<OfflineVideoEntry | null>(null);
+  const handleDownloadForOffline = useCallback(async () => {
+    if (!profile || !lesson) return;
+    if (lesson.video_type !== 'vdocipher' || !isVdoCipherVideoId(lesson.video_id)) return;
+    if (!isSuperAdmin) {
+      if (blocksVideo) return;
+      try {
+        const blocked = await checkBeforeVideo();
+        if (blocked) return;
+      } catch { return; }
+    }
+    setOfflineBusy(true);
+    setOfflineMsg(null);
+    try {
+      const res = await startOfflineDownload({
+        userId: profile.id,
+        videoId: lesson.video_id,
+        lessonId: lesson.id,
+        courseId: lesson.section?.course_id ?? null,
+        // MedAcademy course/lesson metadata persisted NOW (authorize time) so
+        // the Offline Library renders its own titles/images — never VdoCipher
+        // names or internal ids. courseImageUrl = the online course's image.
+        courseName: courseTitle,
+        courseImageUrl,
+        sectionTitle: (lesson.section as any)?.title ?? null,
+        title: safeDisplayTitle({
+          lessonTitle: lesson.title,
+          title: lesson.video_title,
+        }),
+        lessonTitle: lesson.title,
+        lessonThumbnailUrl: lesson.video_thumbnail ?? null,
+        lessonOrder: typeof lesson.order_index === 'number' ? lesson.order_index : null,
+      });
+      setOfflineMsg(res.ok
+        ? 'Downloading — track progress here or in Offline Videos.'
+        : (res.error || 'Could not start the download.'));
+    } catch (e:any) {
+      setOfflineMsg(e?.message ?? 'Could not start the download.');
+    } finally {
+      setOfflineBusy(false);
+    }
+  }, [profile, lesson, isSuperAdmin, blocksVideo, checkBeforeVideo, courseTitle]);
+
+  // Authoritative download state for THIS lesson: live subscription to the
+  // offlineVideoService store (SDK events + MedAcademy metadata) — the button
+  // reacts to queued/downloading/completed/failed without remounting.
+  useEffect(() => {
+    if (!lesson) return;
+    let mounted = true;
+    const pick = (list: OfflineVideoEntry[]) => {
+      if (!mounted) return;
+      setDlEntry(list.find((e) => e.meta.lessonId === lesson.id) ?? null);
+    };
+    pick(getOfflineVideos());
+    void hydrateOfflineLibrary(profile?.id ?? '').catch(() => {});
+    const unsub = subscribeOfflineVideos(pick);
+    return () => { mounted = false; unsub(); };
+  }, [lesson?.id, profile?.id]);
+
+  // Cancel an in-flight/queued download (official remove; metadata dropped).
+  const handleCancelDownload = useCallback(() => {
+    if (!dlEntry) return;
+    void deleteOfflineVideo(dlEntry.meta.mediaId);
+    setOfflineMsg(null);
+  }, [dlEntry]);
+
+  // EXPIRED → [Redownload]: drop the stale local row (official remove), then
+  // run the normal authorize+download flow for a fresh finite rental license.
+  const handleRedownload = useCallback(async () => {
+    if (dlEntry) await deleteOfflineVideo(dlEntry.meta.mediaId);
+    setDlEntry(null);
+    await handleDownloadForOffline();
+  }, [dlEntry, handleDownloadForOffline]);
 
   // Progress tick from player → keep watch-position ref current (no re-render)
   const handleVideoProgress = useCallback((currentTime: number) => {
@@ -347,13 +502,31 @@ export default function LessonPlayer() {
     </View>
   );
   if (!lesson) return (
-    <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: c.base, gap: 8 }}>
-      <Text style={{ fontSize: 16, fontWeight: '700', color: c.text }}>
-        {profile?.role === 'student' ? 'This lesson is not available.' : 'Lesson not found'}
+    <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: c.base, gap: 8, padding: 24 }}>
+      <Text style={{ fontSize: 16, fontWeight: '700', color: c.text, textAlign: 'center' }}>
+        {loadError
+          ? 'Failed to load the lesson'
+          : profile?.role === 'student' || isPreviewStudent()
+            ? 'This lesson is not available.'
+            : 'Lesson not found'}
       </Text>
-      <Text style={{ fontSize: 13, color: c.text, opacity: 0.45 }}>
-        {profile?.role === 'student' ? 'It may have been removed or is not yet published.' : ''}
-      </Text>
+      {loadError ? (
+        <Text style={{ fontSize: 13, color: c.text, opacity: 0.5, textAlign: 'center' }} numberOfLines={4}>
+          {loadError}
+        </Text>
+      ) : (
+        <Text style={{ fontSize: 13, color: c.text, opacity: 0.45, textAlign: 'center' }}>
+          {profile?.role === 'student' || isPreviewStudent() ? 'It may have been removed or is not yet published.' : ''}
+        </Text>
+      )}
+      {/* Retry — the fetch is idempotent (plain GET); no side effects. */}
+      <Pressable
+        onPress={() => { setLoading(true); loadData(); }}
+        accessibilityRole="button"
+        accessibilityLabel="Retry loading lesson"
+        style={{ marginTop: 8, paddingHorizontal: 22, paddingVertical: 10, borderRadius: 12, backgroundColor: `${c.primary}15` }}>
+        <Text style={{ fontSize: 14, fontWeight: '700', color: c.primary }}>Retry</Text>
+      </Pressable>
     </View>
   );
 
@@ -362,8 +535,7 @@ export default function LessonPlayer() {
     : lesson.duration_seconds ? Math.floor(lesson.duration_seconds / 60) : null;
 
   return (
-    <ScrollView style={{ flex: 1, backgroundColor: c.base }}
-          contentContainerStyle={{ paddingBottom: layout.scrollBottom() }}>
+    <ScrollView style={{ flex: 1, backgroundColor: c.base }} contentContainerStyle={{ paddingBottom: safeBottom(layout.insets.bottom) }}>
       {/* ── iOS Screen Recording block overlay (absolute, covers video area) ── */}
       {recordingActive && (
         <RecordingBlockedOverlay />
@@ -378,17 +550,17 @@ export default function LessonPlayer() {
       />
 
       {/* ── Download progress modal ─────────────────────────────────────── */}
-      <Modal
+      <PortalOverlay
         visible={downloadState.visible}
-        transparent
-        animationType="fade"
+        variant="dialog"
+        backdropColor="rgba(0,0,0,0.45)"
         onRequestClose={() => {
           if (downloadState.status !== 'downloading') {
             setDownloadState(prev => ({ ...prev, visible: false }));
           }
         }}
       >
-        <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
+        <View style={{ width: '100%', alignItems: 'center', padding: 24 }}>
           <View style={{
             backgroundColor: c.base, borderRadius: 24, padding: 24, width: Math.min(screenWidth - 48, 420), gap: 16,
             shadowColor: c.shadowDark, shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.3, shadowRadius: 20,
@@ -458,7 +630,7 @@ export default function LessonPlayer() {
             )}
           </View>
         </View>
-      </Modal>
+      </PortalOverlay>
       {/* Header — spacing from headerTokens (EDGE_PAD=4, BREATHING=8) */}
       <View style={{ paddingTop: layout.headerTop, paddingLeft: layout.headerLeft, paddingRight: layout.headerRight, paddingBottom: 12, flexDirection: 'row', alignItems: 'center' }}>
         <Pressable onPress={() => router.back()}
@@ -574,11 +746,32 @@ export default function LessonPlayer() {
                 youtubeVideoId={lesson.youtube_video_id}
                 lessonId={lesson.id}
                 resumePosition={resumePosition}
-                watermarkId={profile?.watermark_id ?? undefined}
-                watermarkName={profile?.role === 'student' ? (profile?.full_name ?? undefined) : undefined}
+                // Watermark identity: the product's public-facing identifier
+                // (MED-#### public_user_id, shown on profile screens as the
+                // forensic Watermark ID) with the legacy WM id as fallback.
+                // Never an internal DB id, never a token.
+                watermarkId={profile?.public_user_id ?? profile?.watermark_id ?? undefined}
+                // Viewer display name for ALL roles — a doctor previewing their
+                // own content must also see the watermark (it previously only
+                // rendered for students, leaving doctor sessions unwatermarked).
+                watermarkName={profile?.full_name ?? undefined}
                 onProgress={handleVideoProgress}
                 onEnd={handleVideoEnd}
                 onFullscreen={setIsFullscreen}
+                // SECURITY GATE (fullscreen boundary): the fullscreen Modal is
+                // a top-level surface rendered ABOVE the SecurityGate overlay,
+                // so it re-validates the authoritative verdict itself before
+                // mounting. Fail-closed: blocked state, in-flight evaluation,
+                // or a thrown error all refuse fullscreen.
+                shouldAllowFullscreen={async () => {
+                  if (isSuperAdmin) return true;
+                  if (blocksVideo) return false;
+                  try {
+                    return !(await checkBeforeVideo());
+                  } catch {
+                    return false;
+                  }
+                }}
               />
             ) : (
               // ── Thumbnail / placeholder — tap to load ─────────────────────
@@ -606,11 +799,122 @@ export default function LessonPlayer() {
                 )}
               </Pressable>
             )}
-            {/* VdoCipher-only: show stored video title if it is not an internal filename */}
-            {lesson.video_type === 'vdocipher' && lesson.video_title && !isInternalFilename(lesson.video_title) && isVdoCipherVideoId(lesson.video_id) && (
+            {/* VdoCipher-only: show stored video title if it is not an internal filename.
+                NOTE: `!!lesson.video_title` — an empty-string title would otherwise
+                short-circuit this && chain to '' which React renders as a raw text
+                node inside a <View> ("Unexpected text node" warning). */}
+            {lesson.video_type === 'vdocipher' && !!lesson.video_title && !isInternalFilename(lesson.video_title) && isVdoCipherVideoId(lesson.video_id) && (
               <View style={{ padding: 14 }}>
-                <Text style={{ fontSize: 14, fontWeight: '600', color: c.text }}>{lesson.video_title}</Text>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                  <Text style={{ fontSize: 14, fontWeight: '600', color: c.text, flex: 1 }} numberOfLines={2}>{lesson.video_title}</Text>
+                  {/* ── Download button state machine (authoritative SDK state) ── */}
+                  {(() => {
+                    const expired = dlEntry ? isOfflineVideoExpired(dlEntry) : false;
+                    const phase = dlEntry?.phase;
+                    const pill = (bg: string) => ({
+                      flexDirection: 'row' as const, alignItems: 'center' as const, gap: 6,
+                      paddingHorizontal: 12, paddingVertical: 8, borderRadius: 12, backgroundColor: bg,
+                    });
+                    const busy = offlineBusy;
+                    if (dlEntry && expired) {
+                      return (
+                        <Pressable onPress={handleRedownload} disabled={busy} accessibilityRole="button" accessibilityLabel="Redownload expired video" style={pill('#FFB02022')}>
+                          <RefreshCw size={15} color="#FFB020" />
+                          <Text style={{ fontSize: 12, fontWeight: '700', color: '#FFB020' }}>Redownload</Text>
+                        </Pressable>
+                      );
+                    }
+                    if (phase === 'completed') {
+                      return (
+                        <Pressable
+                          onPress={() => router.push(dlEntry?.meta.courseId
+                            ? { pathname: '/offline-course', params: { courseId: dlEntry.meta.courseId } }
+                            : '/offline-library')}
+                          accessibilityRole="button"
+                          accessibilityLabel="Watch offline"
+                          style={pill('#22C55E1F')}
+                        >
+                          <Check size={15} color="#22C55E" />
+                          <Text style={{ fontSize: 12, fontWeight: '700', color: '#22C55E' }}>Watch Offline</Text>
+                        </Pressable>
+                      );
+                    }
+                    if (phase === 'downloading') {
+                      return (
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                          <Pressable onPress={() => void pauseOfflineVideo(dlEntry!.meta.mediaId)} accessibilityRole="button" accessibilityLabel="Pause download" style={pill(`${c.primary}22`)}>
+                            <Pause size={15} color={c.text} />
+                            <Text style={{ fontSize: 12, fontWeight: '700', color: c.text }}>{Math.round(dlEntry!.progress)}%</Text>
+                          </Pressable>
+                          <Pressable onPress={handleCancelDownload} accessibilityRole="button" accessibilityLabel="Cancel download" style={pill(`${c.text}14`)}>
+                            <X size={14} color={c.text} />
+                            <Text style={{ fontSize: 12, fontWeight: '700', color: c.text }}>Cancel</Text>
+                          </Pressable>
+                        </View>
+                      );
+                    }
+                    if (phase === 'pending' || phase === 'authorizing') {
+                      return (
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                          <View style={pill(`${c.primary}22`)}>
+                            <Download size={15} color={c.text} />
+                            <Text style={{ fontSize: 12, fontWeight: '700', color: c.text }}>Queued…</Text>
+                          </View>
+                          <Pressable onPress={handleCancelDownload} accessibilityRole="button" accessibilityLabel="Cancel download" style={pill(`${c.text}14`)}>
+                            <X size={14} color={c.text} />
+                            <Text style={{ fontSize: 12, fontWeight: '700', color: c.text }}>Cancel</Text>
+                          </Pressable>
+                        </View>
+                      );
+                    }
+                    if (phase === 'failed') {
+                      return (
+                        <Pressable onPress={() => void resumeOfflineVideo(dlEntry!.meta.mediaId)} accessibilityRole="button" accessibilityLabel="Retry download" style={pill('#FF5A5A1F')}>
+                          <RefreshCw size={15} color="#FF5A5A" />
+                          <Text style={{ fontSize: 12, fontWeight: '700', color: '#FF5A5A' }}>Retry</Text>
+                        </Pressable>
+                      );
+                    }
+                    return (
+                      <Pressable onPress={handleDownloadForOffline} disabled={busy} accessibilityRole="button" accessibilityLabel="Download for offline playback" style={pill(busy ? `${c.primary}33` : `${c.primary}22`)}>
+                        <Download size={15} color={c.text} />
+                        <Text style={{ fontSize: 12, fontWeight: '700', color: c.text }}>{busy ? 'Starting…' : 'Download'}</Text>
+                      </Pressable>
+                    );
+                  })()}
+                </View>
+
+                {/* In-flight progress details: percentage, bytes (Android only —
+                    official SDK byte fields; never faked on iOS), pause/cancel. */}
+                {dlEntry?.phase === 'downloading' && (
+                  <View style={{ marginTop: 10 }}>
+                    <View style={{ height: 6, borderRadius: 3, backgroundColor: `${c.text}14`, overflow: 'hidden' }}>
+                      <View style={{ height: 6, borderRadius: 3, backgroundColor: c.primary, width: `${Math.max(3, Math.min(100, dlEntry.progress))}%` }} />
+                    </View>
+                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 4 }}>
+                      <Text style={{ fontSize: 11, color: c.text, opacity: 0.5 }}>
+                        {Math.round(dlEntry.progress)}%
+                        {Platform.OS === 'android' && dlEntry.totalSizeBytes
+                          ? ` · ${fmtBytesLocal(dlEntry.bytesDownloaded)} / ${fmtBytesLocal(dlEntry.totalSizeBytes)}`
+                          : ''}
+                      </Text>
+                    </View>
+                  </View>
+                )}
+                {!!dlEntry?.lastError && dlEntry.phase === 'failed' && (
+                  <Text style={{ fontSize: 11, color: '#FF5A5A', marginTop: 6 }} numberOfLines={2}>{dlEntry.lastError}</Text>
+                )}
+                {dlEntry && dlEntry.phase === 'completed' && !isOfflineVideoExpired(dlEntry) && (
+                  <Text style={{ fontSize: 11, color: c.text, opacity: 0.45, marginTop: 6 }}>
+                    Downloaded — available in Offline Videos until the license expires.
+                  </Text>
+                )}
               </View>
+            )}
+            {!!offlineMsg && (
+              <Text style={{ paddingHorizontal: 14, paddingBottom: 12, fontSize: 12, color: c.text, opacity: 0.6 }} numberOfLines={3}>
+                {offlineMsg}
+              </Text>
             )}
           </NeuCard>
         )}
@@ -639,7 +943,7 @@ export default function LessonPlayer() {
         )}
 
         {/* ── Lesson Notes ── */}
-        {!isFullscreen && lesson.notes && (
+        {!isFullscreen && !!lesson.notes && (
           <NeuCard>
             <Text style={{ fontSize: 15, fontWeight: '700', color: c.text, marginBottom: 8 }}>Lesson Notes</Text>
             <Text style={{ fontSize: 14, color: c.text, opacity: 0.65, lineHeight: 22 }}>{lesson.notes}</Text>

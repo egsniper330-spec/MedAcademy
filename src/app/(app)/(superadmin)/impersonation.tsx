@@ -17,7 +17,7 @@ import { backendClient } from '@/client/backendClient';
 import { NeuCard } from '@/components/NeuCard';
 import { NeuButton } from '@/components/NeuButton';
 import { useToast } from '@/components/Toast';
-import { neuColors, useLayout } from '@/lib/neu';
+import { neuColors, useLayout, safeBottom } from '@/lib/neu';
 import { friendlyError } from '@/lib/validation';
 import { useDebounce } from '@/lib/useDebounce';
 import { useImpersonationStore, useProfileStore, type UserRole } from '@/lib/store';
@@ -107,6 +107,7 @@ export default function ImpersonationScreen() {
         originalAccessToken,
         originalRefreshToken,
         originalEmail ?? '',
+        currentUser!.id,
         originalRole,
         targetUser.full_name,
         targetUser.role as UserRole,
@@ -130,7 +131,7 @@ export default function ImpersonationScreen() {
   };
 
   return (
-    <ScrollView style={{ flex: 1, backgroundColor: c.base }}>
+    <ScrollView style={{ flex: 1, backgroundColor: c.base }} contentContainerStyle={{ paddingBottom: safeBottom(layout.insets.bottom) }}>
       <PageHeader title="Impersonation" subtitle="Log in as another user" accentColor="#D97706" />
 
       <View style={{ paddingHorizontal: layout.screenPx }}>
@@ -175,9 +176,14 @@ export default function ImpersonationScreen() {
                     <View style={{ flex: 1 }}>
                       <Text style={{ fontSize: 15, fontWeight: '700', color: c.text }}>{user.full_name}</Text>
                       <Text style={{ fontSize: 12, color: c.text, opacity: 0.5 }}>{user.email}</Text>
-                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 4 }}>
-                        <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: roleColor }} />
-                        <Text style={{ fontSize: 11, fontWeight: '700', color: roleColor }}>{user.role?.replace('_', ' ')}</Text>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 4, flexWrap: 'wrap' }}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                          <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: roleColor }} />
+                          <Text style={{ fontSize: 11, fontWeight: '700', color: roleColor }}>{user.role?.replace('_', ' ')}</Text>
+                        </View>
+                        {!!user.public_user_id && (
+                          <Text style={{ fontSize: 11, fontWeight: '700', color: c.text, opacity: 0.55, letterSpacing: 0.5 }}>{user.public_user_id}</Text>
+                        )}
                       </View>
                     </View>
                     <Pressable

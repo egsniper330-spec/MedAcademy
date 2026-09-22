@@ -108,6 +108,7 @@ CREATE TABLE IF NOT EXISTS `profiles` (
   `role` VARCHAR(16) DEFAULT 'student' NOT NULL COMMENT 'pg_default: ''student''',
   `status` VARCHAR(16) DEFAULT 'active' NOT NULL COMMENT 'pg_default: ''active''',
   `watermark_id` VARCHAR(64) NOT NULL UNIQUE COMMENT 'app-generated via watermark sequence table; pg_default: public.next_watermark_id()',
+  `public_user_id` VARCHAR(20) DEFAULT 'MED-0000' NOT NULL COMMENT 'public human-readable ID (MED-####) assigned by trg_on_auth_user_created; unique',
   `avatar_url` TEXT,
   `created_at` DATETIME(6) DEFAULT CURRENT_TIMESTAMP NOT NULL COMMENT 'pg_default: now()',
   `updated_at` DATETIME(6) DEFAULT CURRENT_TIMESTAMP NOT NULL COMMENT 'pg_default: now()',
@@ -235,7 +236,6 @@ CREATE TABLE IF NOT EXISTS `courses` (
   `certificate_enabled` TINYINT(1) DEFAULT 0 NOT NULL COMMENT 'pg_default: false',
   `subscription_required` TINYINT(1) DEFAULT 1 NOT NULL COMMENT 'pg_default: true',
   `credits_required` INT DEFAULT 1 NOT NULL COMMENT 'pg_default: 1',
-  `activation_code_required` TINYINT(1) DEFAULT 0 NOT NULL COMMENT 'pg_default: false',
   `total_sections` INT DEFAULT 0 NOT NULL COMMENT 'pg_default: 0',
   `archived_at` DATETIME(6),
   `archived_by` CHAR(36),
@@ -412,7 +412,7 @@ CREATE TABLE IF NOT EXISTS `enrollments` (
   `progress_percent` INT DEFAULT 0 NOT NULL COMMENT 'pg_default: 0',
   `last_lesson_id` CHAR(36),
   `enrolled_by` CHAR(36),
-  `enrollment_method` TEXT DEFAULT ('activation_code') NOT NULL COMMENT 'pg_default: ''activation_code''',
+  `enrollment_method` TEXT DEFAULT ('doctor_created') NOT NULL COMMENT 'historical audit column: original PG default was ''activation_code'' — legacy system removed',
   `status` VARCHAR(191) DEFAULT 'active' NOT NULL COMMENT 'pg_default: ''active''',
   `activation_method` VARCHAR(64) GENERATED ALWAYS AS (`enrollment_method`) STORED COMMENT 'pg: GENERATED ALWAYS AS (enrollment_method) STORED',
   `hidden_from_instructor` TINYINT(1) DEFAULT 0 NOT NULL COMMENT 'pg_default: false',
@@ -522,60 +522,37 @@ CREATE TABLE IF NOT EXISTS `credit_transactions` (
   CONSTRAINT `fk_credit_transactions_admin_id` FOREIGN KEY (`admin_id`) REFERENCES `profiles` (`id`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 -- ===========================================================================
--- TABLE: code_batches
--- ===========================================================================
-CREATE TABLE IF NOT EXISTS `code_batches` (
-  `id` CHAR(36) DEFAULT (UUID()) COMMENT 'pg_default: gen_random_uuid()',
-  `label` TEXT,
-  `credit_amount` INT DEFAULT 0 NOT NULL COMMENT 'pg_default: 0',
-  `course_id` CHAR(36) NOT NULL,
-  `created_by` CHAR(36),
-  `total_count` INT DEFAULT 0 NOT NULL COMMENT 'pg_default: 0',
-  `used_count` INT DEFAULT 0 NOT NULL COMMENT 'pg_default: 0',
-  `expired_count` INT DEFAULT 0 NOT NULL COMMENT 'pg_default: 0',
-  `disabled_count` INT DEFAULT 0 NOT NULL COMMENT 'pg_default: 0',
-  `expires_at` DATETIME(6),
-  `notes` TEXT,
-  `created_at` DATETIME(6) DEFAULT CURRENT_TIMESTAMP NOT NULL COMMENT 'pg_default: now()',
-  `prefix` TEXT,
-  `max_uses` INT,
-  PRIMARY KEY (`id`),
-  CONSTRAINT `fk_code_batches_course_id` FOREIGN KEY (`course_id`) REFERENCES `courses` (`id`) ON DELETE CASCADE,
-  CONSTRAINT `fk_code_batches_created_by` FOREIGN KEY (`created_by`) REFERENCES `profiles` (`id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
--- ===========================================================================
--- TABLE: activation_codes
--- ===========================================================================
-CREATE TABLE IF NOT EXISTS `activation_codes` (
-  `id` CHAR(36) DEFAULT (UUID()) COMMENT 'pg_default: gen_random_uuid()',
-  `code` VARCHAR(64) NOT NULL UNIQUE,
-  `course_id` CHAR(36) NOT NULL,
-  `status` VARCHAR(16) DEFAULT 'active' NOT NULL COMMENT 'pg_default: ''active''',
-  `expires_at` DATETIME(6),
-  `used_by` CHAR(36),
-  `used_at` DATETIME(6),
-  `created_by` CHAR(36),
-  `created_at` DATETIME(6) DEFAULT CURRENT_TIMESTAMP NOT NULL COMMENT 'pg_default: now()',
-  `batch_id` CHAR(36),
-  `batch_label` TEXT,
-  `notes` TEXT,
-  `identifier` TEXT,
-  `device_info` TEXT,
-  `disabled_by` CHAR(36),
-  `disabled_at` DATETIME(6),
-  `max_uses` INT,
-  `uses_count` INT DEFAULT 0 NOT NULL COMMENT 'pg_default: 0',
-  `credit_amount` INT DEFAULT 1 NOT NULL COMMENT 'pg_default: 1',
-  PRIMARY KEY (`id`),
-  CONSTRAINT `fk_activation_codes_used_by` FOREIGN KEY (`used_by`) REFERENCES `profiles` (`id`) ON DELETE SET NULL,
-  CONSTRAINT `fk_activation_codes_batch_id` FOREIGN KEY (`batch_id`) REFERENCES `code_batches` (`id`) ON DELETE CASCADE,
-  CONSTRAINT `fk_activation_codes_course_id` FOREIGN KEY (`course_id`) REFERENCES `courses` (`id`) ON DELETE CASCADE,
-  CONSTRAINT `fk_activation_codes_created_by` FOREIGN KEY (`created_by`) REFERENCES `profiles` (`id`),
-  CONSTRAINT `fk_activation_codes_disabled_by` FOREIGN KEY (`disabled_by`) REFERENCES `profiles` (`id`) ON DELETE SET NULL
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
--- ===========================================================================
 -- TABLE: notifications
 -- ===========================================================================
+CREATE TABLE IF NOT EXISTS `credit_redeem_codes` (
+  `id`                 CHAR(36) NOT NULL,
+  `code`               VARCHAR(20) NOT NULL,
+  `credit_amount`      INT UNSIGNED NOT NULL,
+  `assigned_doctor_id` CHAR(36) NULL DEFAULT NULL,
+  `status`             VARCHAR(16) DEFAULT 'unused' NOT NULL,
+  `redeemed_by`        CHAR(36) NULL DEFAULT NULL,
+  `redeemed_at`        DATETIME(6) NULL DEFAULT NULL,
+  `created_by`         CHAR(36) NULL DEFAULT NULL,
+  `created_at`         DATETIME(6) DEFAULT CURRENT_TIMESTAMP(6) NOT NULL,
+  `expires_at`         DATETIME(6) NULL DEFAULT NULL,
+  `revoked_at`         DATETIME(6) NULL DEFAULT NULL,
+  `revoked_by`         CHAR(36) NULL DEFAULT NULL,
+  `archived_at`        DATETIME(6) NULL DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_credit_redeem_codes_code` (`code`),
+  KEY `idx_crc_status` (`status`),
+  KEY `idx_credit_redeem_codes_archived_at` (`archived_at`),
+  KEY `idx_crc_assigned_doctor` (`assigned_doctor_id`),
+  KEY `idx_crc_redeemed_by` (`redeemed_by`),
+  CONSTRAINT `fk_crc_assigned_doctor` FOREIGN KEY (`assigned_doctor_id`) REFERENCES `profiles` (`id`) ON DELETE SET NULL,
+  CONSTRAINT `fk_crc_redeemed_by`     FOREIGN KEY (`redeemed_by`)     REFERENCES `profiles` (`id`) ON DELETE SET NULL,
+  CONSTRAINT `fk_crc_created_by`      FOREIGN KEY (`created_by`)      REFERENCES `profiles` (`id`) ON DELETE SET NULL,
+  CONSTRAINT `fk_crc_revoked_by`      FOREIGN KEY (`revoked_by`)      REFERENCES `profiles` (`id`) ON DELETE SET NULL,
+  CONSTRAINT `chk_crc_amount_positive` CHECK (`credit_amount` > 0),
+  CONSTRAINT `chk_crc_status` CHECK (`status` IN ('unused','redeemed','expired','revoked'))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+  COMMENT='Credit Redeem Code — super admin mints, doctors redeem for credit top-up (credit top-up ONLY, never course activation)';
+
 CREATE TABLE IF NOT EXISTS `notifications` (
   `id` CHAR(36) DEFAULT (UUID()) COMMENT 'pg_default: gen_random_uuid()',
   `user_id` CHAR(36) NOT NULL,
@@ -1007,6 +984,84 @@ CREATE TABLE IF NOT EXISTS `bulk_import_jobs` (
   CONSTRAINT `fk_bulk_import_jobs_doctor_id` FOREIGN KEY (`doctor_id`) REFERENCES `profiles` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 -- ===========================================================================
+-- TABLE: device_keys (Keystore challenge/response evidence layer — migration 018)
+-- ===========================================================================
+CREATE TABLE IF NOT EXISTS `device_keys` (
+  `id` CHAR(36) DEFAULT (UUID()) COMMENT 'pg_default: gen_random_uuid()',
+  `user_id` CHAR(36) NOT NULL,
+  `device_id` CHAR(36) NULL,
+  `device_fingerprint` VARCHAR(191) NOT NULL,
+  `key_id` VARCHAR(64) NOT NULL,
+  `public_key_pem` TEXT NOT NULL,
+  `keystore_security` VARCHAR(32) NOT NULL DEFAULT 'unknown',
+  `status` VARCHAR(16) NOT NULL DEFAULT 'active',
+  `verified_at` DATETIME(6) NULL COMMENT 'server-side promotion: key tenure + account/device state verified (migration 019)',
+  `verification_note` VARCHAR(191) NULL,
+  `integrity_baseline_sha256` CHAR(64) NULL COMMENT 'server-anchored binary digest (migration 020)',
+  `integrity_last_sha256` CHAR(64) NULL,
+  `integrity_last_at` DATETIME(6) NULL,
+  `counter` BIGINT UNSIGNED NOT NULL DEFAULT 0,
+  `registered_at` DATETIME(6) DEFAULT CURRENT_TIMESTAMP NOT NULL,
+  `last_used_at` DATETIME(6) NULL,
+  `revoked_at` DATETIME(6) NULL,
+  `revoked_reason` VARCHAR(191) NULL,
+  `revoked_by` CHAR(36) NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_device_keys_user_key` (`user_id`, `key_id`),
+  KEY `idx_device_keys_fingerprint` (`device_fingerprint`),
+  KEY `idx_device_keys_status` (`status`),
+  CONSTRAINT `fk_device_keys_user` FOREIGN KEY (`user_id`) REFERENCES `profiles` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_device_keys_revoked_by` FOREIGN KEY (`revoked_by`) REFERENCES `profiles` (`id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ===========================================================================
+-- TABLE: security_challenges (server-issued single-use challenges — migration 018)
+-- ===========================================================================
+CREATE TABLE IF NOT EXISTS `security_challenges` (
+  `id` CHAR(36) DEFAULT (UUID()) COMMENT 'pg_default: gen_random_uuid()',
+  `challenge` CHAR(64) NOT NULL,
+  `user_id` CHAR(36) NOT NULL,
+  `device_id` CHAR(36) NULL,
+  `device_fingerprint` VARCHAR(191) NULL,
+  `session_id` VARCHAR(64) NULL,
+  `action` VARCHAR(64) NOT NULL,
+  `request_hash` CHAR(64) NULL,
+  `counter_at_issue` BIGINT UNSIGNED NOT NULL DEFAULT 0,
+  `consumed_at` DATETIME(6) NULL,
+  `expires_at` DATETIME(6) NOT NULL,
+  `created_at` DATETIME(6) DEFAULT CURRENT_TIMESTAMP NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_security_challenges_challenge` (`challenge`),
+  KEY `idx_sec_challenges_lookup` (`user_id`, `action`, `expires_at`),
+  KEY `idx_sec_challenges_expiry` (`expires_at`),
+  CONSTRAINT `fk_sec_challenges_user` FOREIGN KEY (`user_id`) REFERENCES `profiles` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ===========================================================================
+-- TABLE: security_evidence (assurance decisions from verified evidence — 018)
+-- ===========================================================================
+CREATE TABLE IF NOT EXISTS `security_evidence` (
+  `id` CHAR(36) DEFAULT (UUID()) COMMENT 'pg_default: gen_random_uuid()',
+  `user_id` CHAR(36) NOT NULL,
+  `device_key_id` CHAR(36) NULL,
+  `challenge_id` CHAR(36) NULL,
+  `action` VARCHAR(64) NOT NULL,
+  `assurance` VARCHAR(16) NOT NULL DEFAULT 'UNKNOWN',
+  `integrity_state` VARCHAR(16) NULL COMMENT 'ok | rejected | absent | unavailable (migration 020)',
+  `passed` TINYINT(1) NOT NULL DEFAULT 0,
+  `reason` VARCHAR(191) NULL,
+  `evidence_json` JSON NULL,
+  `assurance_detail` JSON NULL,
+  `ip_address` VARCHAR(45) NULL,
+  `created_at` DATETIME(6) DEFAULT CURRENT_TIMESTAMP NOT NULL,
+  `expires_at` DATETIME(6) NOT NULL,
+  PRIMARY KEY (`id`),
+  KEY `idx_sec_evidence_lookup` (`user_id`, `action`, `passed`, `expires_at`),
+  KEY `idx_sec_evidence_challenge` (`challenge_id`),
+  CONSTRAINT `fk_sec_evidence_user` FOREIGN KEY (`user_id`) REFERENCES `profiles` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ===========================================================================
 -- TABLE: security_events
 -- ===========================================================================
 CREATE TABLE IF NOT EXISTS `security_events` (
@@ -1298,10 +1353,40 @@ CREATE TABLE IF NOT EXISTS `play_integrity_nonces` (
   `id` CHAR(36) DEFAULT (UUID()) COMMENT 'pg_default: gen_random_uuid()',
   `nonce` VARCHAR(191) NOT NULL UNIQUE,
   `user_id` CHAR(36),
+  `request_hash` CHAR(64) NULL COMMENT 'mig017: server-issued challenge hash bound into the Play Integrity token',
+  `action` VARCHAR(64) NULL COMMENT 'mig017: protected action the challenge authorizes (vdo_otp/redeem/device_bind/…)',
   `created_at` DATETIME(6) DEFAULT CURRENT_TIMESTAMP NOT NULL COMMENT 'pg_default: now()',
   `expires_at` DATETIME(6) NOT NULL,
+  `consumed_at` DATETIME(6) NULL COMMENT 'mig017: set when the challenge is verified (single-use)',
   PRIMARY KEY (`id`),
+  KEY `idx_pi_nonces_request_hash` (`request_hash`),
   CONSTRAINT `fk_play_integrity_nonces_user_id` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ===========================================================================
+-- TABLE: play_integrity_verdicts (mig017 — Google-verified verdict cache)
+-- ===========================================================================
+-- Rows are written ONLY by the backend after decoding a Play Integrity token
+-- via Google's decodeIntegrityToken API and validating requestPackageName,
+-- requestHash, app/device verdicts and the signing-cert digest. Protected
+-- endpoints look rows up by (user_id, request_hash, action, passed=1,
+-- expires_at > now) — a client can never fabricate or reuse one.
+-- ===========================================================================
+CREATE TABLE IF NOT EXISTS `play_integrity_verdicts` (
+  `id` CHAR(36) DEFAULT (UUID()) COMMENT 'pg_default: gen_random_uuid()',
+  `user_id` CHAR(36) NOT NULL COMMENT 'owning session user (binding part 1)',
+  `request_hash` CHAR(64) NOT NULL COMMENT 'server-issued challenge hash (binding part 2)',
+  `action` VARCHAR(64) NOT NULL COMMENT 'protected action this verdict authorizes (binding part 3)',
+  `passed` TINYINT(1) DEFAULT 0 NOT NULL COMMENT 'Google-verified pass',
+  `verdict` TEXT NULL COMMENT 'raw verdict summary for audit (app;device;cert)',
+  `cert_sha256` VARCHAR(64) NULL COMMENT 'signing-cert digest reported by Google (lowercase hex, no colons)',
+  `ip_address` VARCHAR(45) NULL,
+  `created_at` DATETIME(6) DEFAULT CURRENT_TIMESTAMP NOT NULL COMMENT 'pg_default: now()',
+  `expires_at` DATETIME(6) NOT NULL COMMENT 'verdict TTL — protected endpoints reject stale verdicts',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_pi_verdicts_hash` (`request_hash`),
+  KEY `idx_pi_verdicts_lookup` (`user_id`, `action`, `passed`, `expires_at`),
+  CONSTRAINT `fk_pi_verdicts_user_id` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 -- ===========================================================================
 -- TABLE: security_config
@@ -1338,12 +1423,11 @@ ALTER TABLE `courses` ADD CONSTRAINT `chk_courses_status` CHECK (`status` IN ('d
 ALTER TABLE `courses` ADD CONSTRAINT `chk_courses_difficulty` CHECK (`difficulty` IN ('beginner', 'intermediate', 'advanced', 'all_levels'));
 ALTER TABLE `lessons` ADD CONSTRAINT `chk_lessons_status` CHECK (`status` IN ('draft', 'published', 'hidden', 'scheduled', 'archived'));
 ALTER TABLE `lessons` ADD CONSTRAINT `chk_lessons_video_type` CHECK (`video_type` IN ('vdocipher', 'coming_soon', 'youtube'));
-ALTER TABLE `audit_logs` ADD CONSTRAINT `chk_audit_logs_action` CHECK (`action` IN ('login', 'logout', 'register', 'password_reset', 'course_created', 'course_updated', 'course_deleted', 'lesson_created', 'lesson_updated', 'lesson_deleted', 'video_uploaded', 'pdf_uploaded', 'pdf_deleted', 'credit_allocated', 'credit_consumed', 'credit_deducted', 'code_created', 'code_redeemed', 'code_deactivated', 'device_reset', 'device_force_logout', 'role_changed', 'permission_changed', 'user_suspended', 'user_activated', 'enrollment_created', 'security_event', 'initial_super_admin_created', 'password_changed', 'phone_login', 'user_searched', 'user_created', 'admin_created', 'super_admin_created', 'device_blocked', 'device_unblocked', 'device_registered', 'limit_changed', 'unlimited_enabled', 'unlimited_disabled', 'device_logout_all', 'device_revoked', 'user_deleted', 'student_created_by_doctor', 'student_bulk_imported', 'course_assigned_by_doctor', 'credit_consumed_by_doctor', 'temp_password_generated', 'password_changed_first_login', 'root_detected', 'jailbreak_detected', 'vpn_detected', 'proxy_detected', 'ssl_pinning_failure', 'screenshot_detected', 'screen_recording_detected', 'debug_detected', 'frida_detected', 'xposed_detected', 'app_integrity_compromised', 'security_policy_changed', 'user_trashed', 'user_restored', 'bulk_trash', 'bulk_restore', 'user_hard_deleted', 'bulk_permanent_delete', 'device_removed', 'undo_delete', 'trash_emptied', 'system_health_check', 'provider_changed', 'device_limit_changed', 'unlimited_devices_enabled', 'unlimited_devices_disabled', 'bulk_suspend', 'bulk_unsuspend', 'bulk_reset_devices', 'bulk_reset_password', 'account_restored', 'deletion_verification_failed', 'impersonation_started', 'impersonation_ended', 'code_deleted', 'video_play', 'video_play_failed', 'credit_refunded', 'credit_expired', 'subscription_created', 'subscription_removed', 'subscription_restored', 'profile_updated', 'avatar_updated', 'settings_changed', 'enrollment_created_by_admin', 'enrollment_removed_by_admin', 'enrollment_hidden_flag_set', 'enrollment_visibility_changed', 'account_permanently_deleted', 'platform_earnings_reset', 'doctor_approved', 'doctor_rejected', 'video_replaced', 'video_deleted', 'course_published', 'course_unpublished', 'category_created', 'category_updated', 'category_deleted', 'university_created', 'university_updated', 'university_deleted', 'notification_sent', 'admin_updated', 'admin_deleted', 'earnings_reset', 'activation_code_created', 'activation_code_used', 'course_archived', 'course_restored', 'course_price_changed', 'instructor_changed', 'thumbnail_changed', 'credits_added', 'credits_removed', 'enrollment_removed', 'password_reset_by_admin', 'email_changed', 'name_changed', 'avatar_changed', 'device_reset_by_admin', 'platform_settings_changed', 'code_activated', 'code_disabled', 'code_expired', 'custom_pricing_enabled', 'custom_pricing_disabled', 'earnings_settings_changed', 'revenue_settings_changed', 'update_earnings_settings', 'credit_price_changed', 'course_hidden', 'failed_login', 'session_revoked', 'bulk_device_reset', 'profile_name_changed', 'profile_avatar_changed', 'profile_email_changed', 'profile_phone_changed', 'doctor_created', 'role_changed_to_doctor', 'role_changed_to_admin', 'role_changed_to_super_admin', 'role_changed_to_student', 'password_changed_by_admin', 'user_blocked', 'user_unblocked'));
+ALTER TABLE `audit_logs` ADD CONSTRAINT `chk_audit_logs_action` CHECK (`action` IN ('login', 'logout', 'register', 'password_reset', 'course_created', 'course_updated', 'course_deleted', 'lesson_created', 'lesson_updated', 'lesson_deleted', 'video_uploaded', 'pdf_uploaded', 'pdf_deleted', 'credit_allocated', 'credit_consumed', 'credit_deducted', 'code_created', 'code_redeemed', 'code_deactivated', 'device_reset', 'device_force_logout', 'role_changed', 'permission_changed', 'user_suspended', 'user_activated', 'enrollment_created', 'security_event', 'initial_super_admin_created', 'password_changed', 'phone_login', 'user_searched', 'user_created', 'admin_created', 'super_admin_created', 'device_blocked', 'device_unblocked', 'device_registered', 'limit_changed', 'unlimited_enabled', 'unlimited_disabled', 'device_logout_all', 'device_revoked', 'user_deleted', 'student_created_by_doctor', 'student_bulk_imported', 'course_assigned_by_doctor', 'credit_consumed_by_doctor', 'temp_password_generated', 'password_changed_first_login', 'root_detected', 'jailbreak_detected', 'vpn_detected', 'proxy_detected', 'ssl_pinning_failure', 'screenshot_detected', 'screen_recording_detected', 'debug_detected', 'frida_detected', 'xposed_detected', 'app_integrity_compromised', 'security_policy_changed', 'user_trashed', 'user_restored', 'bulk_trash', 'bulk_restore', 'user_hard_deleted', 'bulk_permanent_delete', 'device_removed', 'undo_delete', 'trash_emptied', 'system_health_check', 'provider_changed', 'device_limit_changed', 'unlimited_devices_enabled', 'unlimited_devices_disabled', 'bulk_suspend', 'bulk_unsuspend', 'bulk_reset_devices', 'bulk_reset_password', 'account_restored', 'deletion_verification_failed', 'impersonation_started', 'impersonation_ended', 'code_deleted', 'video_play', 'video_play_failed', 'credit_refunded', 'credit_expired', 'subscription_created', 'subscription_removed', 'subscription_restored', 'profile_updated', 'avatar_updated', 'settings_changed', 'enrollment_created_by_admin', 'enrollment_removed_by_admin', 'enrollment_hidden_flag_set', 'enrollment_visibility_changed', 'account_permanently_deleted', 'platform_earnings_reset', 'doctor_approved', 'doctor_rejected', 'video_replaced', 'video_deleted', 'course_published', 'course_unpublished', 'category_created', 'category_updated', 'category_deleted', 'university_created', 'university_updated', 'university_deleted', 'notification_sent', 'admin_updated', 'admin_deleted', 'earnings_reset', 'activation_code_created', 'activation_code_used', 'course_archived', 'course_restored', 'course_price_changed', 'instructor_changed', 'thumbnail_changed', 'credits_added', 'credits_removed', 'enrollment_removed', 'password_reset_by_admin', 'email_changed', 'name_changed', 'avatar_changed', 'device_reset_by_admin', 'platform_settings_changed', 'code_activated', 'code_disabled', 'code_expired', 'custom_pricing_enabled', 'custom_pricing_disabled', 'earnings_settings_changed', 'revenue_settings_changed', 'update_earnings_settings', 'credit_price_changed', 'course_hidden', 'failed_login', 'session_revoked', 'bulk_device_reset', 'profile_name_changed', 'profile_avatar_changed', 'profile_email_changed', 'profile_phone_changed', 'doctor_created', 'role_changed_to_doctor', 'role_changed_to_admin', 'role_changed_to_super_admin', 'role_changed_to_student', 'password_changed_by_admin', 'user_blocked', 'user_unblocked', 'redeem_code_created', 'redeem_code_redeemed', 'redeem_code_revoked'));
 ALTER TABLE `credit_transactions` ADD CONSTRAINT `chk_credit_transactions_transaction_type` CHECK (`transaction_type` IN ('allocation', 'consumption', 'deduction', 'restoration'));
-ALTER TABLE `activation_codes` ADD CONSTRAINT `chk_activation_codes_status` CHECK (`status` IN ('active', 'used', 'expired', 'deactivated'));
 ALTER TABLE `notifications` ADD CONSTRAINT `chk_notifications_notification_type` CHECK (`notification_type` IN ('info', 'course', 'system', 'security', 'admin_broadcast', 'announcement', 'maintenance', 'broadcast'));
 ALTER TABLE `lesson_materials` ADD CONSTRAINT `chk_lesson_materials_permission` CHECK (`permission` IN ('allow', 'preview_only', 'hidden', 'disabled'));
-ALTER TABLE `security_events` ADD CONSTRAINT `chk_security_events_event_type` CHECK (`event_type` IN ('root_detected', 'jailbreak_detected', 'vpn_detected', 'proxy_detected', 'ssl_pinning_failure', 'screenshot_detected', 'screen_recording_detected', 'debug_detected', 'frida_detected', 'xposed_detected', 'app_integrity_compromised', 'developer_options_enabled', 'adb_enabled', 'debugger_attached', 'magisk_detected', 'overlay_detected', 'signature_invalid', 'tamper_detected', 'play_integrity_failed', 'play_integrity_passed'));
+ALTER TABLE `security_events` ADD CONSTRAINT `chk_security_events_event_type` CHECK (`event_type` IN ('root_detected', 'jailbreak_detected', 'vpn_detected', 'proxy_detected', 'ssl_pinning_failure', 'screenshot_detected', 'screen_recording_detected', 'debug_detected', 'frida_detected', 'xposed_detected', 'app_integrity_compromised', 'developer_options_enabled', 'adb_enabled', 'debugger_attached', 'magisk_detected', 'overlay_detected', 'signature_invalid', 'tamper_detected', 'play_integrity_failed', 'play_integrity_passed', 'detection_unavailable', 'app_attest_failed', 'security_evidence_verified', 'security_evidence_rejected', 'security_evidence_enforcement_failed'));
 ALTER TABLE `security_events` ADD CONSTRAINT `chk_security_events_policy_action` CHECK (`policy_action` IN ('log_only', 'warn_only', 'block_video', 'block_login'));
 ALTER TABLE `security_policies` ADD CONSTRAINT `chk_security_policies_detection_type` CHECK (`detection_type` IN ('root_jailbreak', 'vpn', 'proxy', 'ssl_pinning', 'debug', 'screenshot', 'screen_recording', 'app_integrity', 'developer_options', 'frida', 'xposed', 'magisk', 'overlay', 'tamper', 'play_integrity'));
 ALTER TABLE `security_policies` ADD CONSTRAINT `chk_security_policies_action` CHECK (`action` IN ('log_only', 'warn_only', 'block_video', 'block_login'));
@@ -1372,8 +1456,6 @@ CREATE INDEX `idx_enrollments_student_id` ON `enrollments` (`student_id`);
 CREATE INDEX `idx_enrollments_course_id` ON `enrollments` (`course_id`);
 CREATE INDEX `idx_lesson_progress_student_id` ON `lesson_progress` (`student_id`);
 CREATE INDEX `idx_credit_transactions_doctor_id` ON `credit_transactions` (`doctor_id`);
-CREATE INDEX `idx_activation_codes_code` ON `activation_codes` (`code`);
-CREATE INDEX `idx_activation_codes_course_id` ON `activation_codes` (`course_id`);
 CREATE INDEX `idx_notifications_user_id` ON `notifications` (`user_id`);
 CREATE INDEX `idx_audit_logs_user_id` ON `audit_logs` (`user_id`);
 CREATE INDEX `idx_audit_logs_created_at` ON `audit_logs` (`created_at`);
@@ -1407,15 +1489,6 @@ CREATE INDEX `idx_credit_tx_student` ON `credit_transactions` (`student_id`);
 CREATE INDEX `idx_credit_tx_course` ON `credit_transactions` (`course_id`);
 CREATE INDEX `idx_credit_tx_batch` ON `credit_transactions` (`batch_id`);
 CREATE INDEX `idx_credit_tx_audit` ON `credit_transactions` (`audit_log_id`);
-CREATE INDEX `idx_codes_status` ON `activation_codes` (`status`);
-CREATE INDEX `idx_codes_created_at` ON `activation_codes` (`created_at`);
-CREATE INDEX `idx_codes_used_at` ON `activation_codes` (`used_at`);
-CREATE INDEX `idx_codes_batch_id` ON `activation_codes` (`batch_id`);
-CREATE INDEX `idx_codes_used_by` ON `activation_codes` (`used_by`);
-CREATE INDEX `idx_codes_expires_at` ON `activation_codes` (`expires_at`);
-CREATE INDEX `idx_code_batches_course` ON `code_batches` (`course_id`);
-CREATE INDEX `idx_code_batches_creator` ON `code_batches` (`created_by`);
-CREATE INDEX `idx_code_batches_created` ON `code_batches` (`created_at`);
 CREATE INDEX `idx_fraud_flags_doctor` ON `fraud_flags` (`doctor_id`);
 CREATE INDEX `idx_fraud_flags_resolved` ON `fraud_flags` (`resolved`);
 CREATE INDEX `idx_fraud_flags_created` ON `fraud_flags` (`created_at`);
@@ -1527,7 +1600,6 @@ CREATE INDEX `idx_dpr_doctor_id` ON `doctor_payout_requests` (`doctor_id`);
 CREATE INDEX `idx_courses_doctor_id` ON `courses` (`doctor_id`);
 CREATE INDEX `idx_courses_status` ON `courses` (`status`);
 CREATE INDEX `idx_courses_category_id` ON `courses` (`category_id`);
-CREATE INDEX `idx_activation_codes_used_by` ON `activation_codes` (`used_by`);
 CREATE INDEX `idx_notifications_created_at` ON `notifications` (`created_at`);
 CREATE INDEX `idx_notifications_user_read` ON `notifications` (`user_id`, `is_read`);
 CREATE INDEX `idx_lesson_progress_lesson_id` ON `lesson_progress` (`lesson_id`);
@@ -1565,13 +1637,31 @@ CREATE TRIGGER trg_on_auth_user_created
 AFTER INSERT ON `users`
 FOR EACH ROW
 BEGIN
-  INSERT INTO `profiles` (`id`, `email`, `full_name`, `role`, `watermark_id`)
+  DECLARE v_num BIGINT;
+  DECLARE v_pub VARCHAR(20);
+
+  -- Atomic sequential draw (LAST_INSERT_ID trick: safe under concurrency).
+  -- v_num is BIGINT so the value can never pass through a DECIMAL — the exact
+  -- bug class that once produced 'MED-1.00' style corrupted values.
+  UPDATE public_user_id_seq SET next_val = LAST_INSERT_ID(next_val + 1) WHERE id = 1;
+  SET v_num = LAST_INSERT_ID();
+
+  -- Enforce the 4-digit contract: fail loudly instead of producing MED-10000.
+  IF v_num > 9999 THEN
+    SIGNAL SQLSTATE '45000'
+      SET MESSAGE_TEXT = 'public_user_id exhausted: 4-digit range MED-0001..MED-9999 is full';
+  END IF;
+
+  SET v_pub = CONCAT('MED-', LPAD(v_num, 4, '0'));
+
+  INSERT INTO `profiles` (`id`, `email`, `full_name`, `role`, `watermark_id`, `public_user_id`)
   VALUES (
     NEW.`id`,
     COALESCE(NEW.`email`, ''),
     COALESCE(JSON_UNQUOTE(JSON_EXTRACT(NEW.`raw_user_meta_data`, '$.full_name')), ''),
     COALESCE(JSON_UNQUOTE(JSON_EXTRACT(NEW.`raw_user_meta_data`, '$.role')), 'student'),
-    UUID()
+    UUID(),
+    v_pub
   );
 END $$
 
@@ -1792,13 +1882,16 @@ BEGIN
 END $$
 
 -- 10. Default academic levels per faculty (PG: trg_default_levels)
+-- NOTE: academic_levels' ordering column is `display_order` (schema.sql) —
+-- NOT `order_index` (which belongs to sections/lessons). Inserting into a
+-- non-existent column here fails the whole faculty INSERT (SQLSTATE 42S22).
 DROP TRIGGER IF EXISTS trg_default_levels $$
 CREATE TRIGGER trg_default_levels
 AFTER INSERT ON `faculties`
 FOR EACH ROW
 BEGIN
   IF (SELECT COUNT(*) FROM `academic_levels` WHERE `faculty_id` = NEW.`id`) = 0 THEN
-    INSERT INTO `academic_levels` (`faculty_id`, `name`, `order_index`) VALUES
+    INSERT INTO `academic_levels` (`faculty_id`, `name`, `display_order`) VALUES
       (NEW.`id`, '1st Year', 1),
       (NEW.`id`, '2nd Year', 2),
       (NEW.`id`, '3rd Year', 3),
@@ -1903,6 +1996,15 @@ CREATE TABLE IF NOT EXISTS `watermark_seq` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 INSERT IGNORE INTO `watermark_seq` (`id`, `next_val`) VALUES (1, 1);
+
+-- public_user_id_seq — sequential PUBLIC USER ID generator (MED-#### format).
+-- Drawn atomically by trg_on_auth_user_created via LAST_INSERT_ID(next_val+1).
+CREATE TABLE IF NOT EXISTS `public_user_id_seq` (
+  `id` TINYINT NOT NULL PRIMARY KEY,
+  `next_val` BIGINT NOT NULL DEFAULT 1
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+INSERT IGNORE INTO `public_user_id_seq` (`id`, `next_val`) VALUES (1, 1);
 
 -- ─────────────────────────────────────────────────────────────────────────────
 -- support_settings — support channel configuration (phone, telegram, whatsapp)

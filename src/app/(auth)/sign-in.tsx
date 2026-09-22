@@ -323,7 +323,6 @@ export default function SignIn() {
           // screenPx: fluid horizontal gutter (14–40dp). Replaces hardcoded 24.
           paddingHorizontal: layout.screenPx,
           paddingTop: layout.headerTop,
-          paddingBottom: layout.scrollBottom(),
         }}
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}

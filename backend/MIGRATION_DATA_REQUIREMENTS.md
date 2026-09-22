@@ -26,7 +26,7 @@ table column names.
 | 7 | `sections`, `lessons`, `lesson_pdfs`, `lesson_materials` | LMS content | keep `video_id` (VdoCipher) and storage paths |
 | 8 | `enrollments`, `lesson_progress` | enrollments + progress | |
 | 9 | `credits`, `credit_transactions` | doctor credits | |
-| 10 | `activation_codes`, `code_batches` | activation codes | |
+| 10 | ~~`activation_codes`, `code_batches`~~ | **Removed** — legacy Activation Code system dropped (migration 011). Do NOT export/import; historical enrollments live in `enrollments` and are imported at step 8 | |
 | 11 | `notifications` | user notifications | |
 | 12 | `assistant_permissions` | assistant ACLs | |
 | 13 | `system_config`, `feature_flags`, `app_branding`, `app_pages`, `maintenance_whitelist` | config/branding | |

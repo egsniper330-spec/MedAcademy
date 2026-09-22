@@ -18,9 +18,7 @@ use MedAcademy\Utils\Uuid;
  * Modes:
  *   create_only               → create user + profile + audit
  *   create_and_enroll_credits → A + lock credits + enroll + deduct
- *   create_and_enroll_code    → A + validate code + enroll + redeem
  *   enroll_existing_credits   → existing student + credits
- *   enroll_existing_code      → existing student + code
  */
 final class StudentController
 {
@@ -47,7 +45,7 @@ final class StudentController
             throw new ApiException(422, 'mode is required');
         }
 
-        $needsNewStudent = in_array($mode, ['create_only', 'create_and_enroll_credits', 'create_and_enroll_code'], true);
+        $needsNewStudent = in_array($mode, ['create_only', 'create_and_enroll_credits'], true);
         $needsActivation = $mode !== 'create_only';
 
         // Validation
@@ -67,14 +65,17 @@ final class StudentController
             }
         }
 
-        if (!$needsNewStudent && empty($body['student_id'])) {
-            throw new ApiException(422, 'student_id is required');
+        if (!$needsNewStudent) {
+            if (empty($body['student_id'])) {
+                throw new ApiException(422, 'student_id is required');
+            }
+            // Validate BEFORE any FK insert: a garbage identifier would otherwise
+            // reach the enrollments FK and surface as a raw SQL 500 instead of a
+            // clear 422. Frontend always passes profiles.id (internal UUID).
+            Uuid::normalize((string) $body['student_id']);
         }
         if ($needsActivation && empty($body['course_id'])) {
             throw new ApiException(422, 'course_id is required');
-        }
-        if (in_array($mode, ['create_and_enroll_code', 'enroll_existing_code'], true) && empty($body['activation_code'])) {
-            throw new ApiException(422, 'activation_code is required');
         }
 
         $newUserId = null;
@@ -150,8 +151,11 @@ final class StudentController
                     // Credits path: deduct from doctor, enroll student
                     $db = Database::instance();
                     $db->transaction(function (Database $db) use ($actorId, $studentId, $courseId) {
-                        // Check doctor has enough credits
-                        $credits = $db->row('SELECT remaining FROM credits WHERE doctor_id = ?', [$actorId]);
+                        // Check doctor has enough credits — FOR UPDATE locks the row
+                        // until COMMIT so two concurrent enrollments can never both
+                        // pass this check and drive the balance negative (the
+                        // chk_credits_c0 CHECK would abort the second transaction).
+                        $credits = $db->row('SELECT remaining FROM credits WHERE doctor_id = ? FOR UPDATE', [$actorId]);
                         if ($credits === null || (int) $credits['remaining'] <= 0) {
                             throw new ApiException(422, 'Insufficient credits');
                         }
@@ -162,42 +166,32 @@ final class StudentController
                             [$actorId]
                         );
 
-                        // Record transaction
+                        // Record transaction (course_id feeds trg_earnings_on_consumption
+                        // so the doctor's earnings snapshot resolves course-level pricing)
                         $db->insert(
-                            'INSERT INTO credit_transactions (id, doctor_id, transaction_type, amount, student_id, performed_by, created_at)
-                             VALUES (?, ?, ?, 1, ?, ?, UTC_TIMESTAMP(6))',
-                            [Uuid::v4(), $actorId, 'consumption', $studentId, $actorId]
+                            'INSERT INTO credit_transactions (id, doctor_id, transaction_type, amount, course_id, student_id, performed_by, created_at)
+                             VALUES (?, ?, ?, 1, ?, ?, ?, UTC_TIMESTAMP(6))',
+                            [Uuid::v4(), $actorId, 'consumption', $courseId, $studentId, $actorId]
                         );
 
-                        // Enroll
-                        $db->insert(
-                            'INSERT IGNORE INTO enrollments (id, student_id, course_id, enrolled_by, enrollment_method, created_at)
-                             VALUES (?, ?, ?, ?, ?, UTC_TIMESTAMP(6))',
-                            [Uuid::v4(), $studentId, $courseId, $actorId, 'doctor_created']
+                        // Enroll — explicit duplicate check FIRST: INSERT IGNORE would
+                        // swallow the enrollments unique-key violation AFTER the credit
+                        // was already deducted (silently consuming a credit with no
+                        // enrollment). The schema column is `enrolled_at` — enrollments
+                        // has NO `created_at`; using it failed every credits-path
+                        // enrollment with SQLSTATE 42S22 even with sufficient balance
+                        // (the reported Add-Student / enrollment bug).
+                        $already = (int) $db->value(
+                            'SELECT COUNT(*) FROM enrollments WHERE student_id = ? AND course_id = ?',
+                            [$studentId, $courseId], 0
                         );
-                    });
-                } else {
-                    // Code path: validate and redeem activation code
-                    $code = strtoupper(trim((string) ($body['activation_code'] ?? '')));
-                    $db = Database::instance();
-
-                    $db->transaction(function (Database $db) use ($code, $studentId, $courseId) {
-                        $codeRow = $db->row('SELECT * FROM activation_codes WHERE code = ? AND status = ? FOR UPDATE', [$code, 'active']);
-                        if ($codeRow === null) {
-                            throw new ApiException(422, 'Code not found or already used');
+                        if ($already > 0) {
+                            throw new ApiException(409, 'This student is already enrolled in this course');
                         }
-
-                        // Mark code as used
-                        $db->query(
-                            "UPDATE activation_codes SET status = 'used', used_by = ?, used_at = UTC_TIMESTAMP(6) WHERE id = ?",
-                            [$studentId, $codeRow['id']]
-                        );
-
-                        // Enroll
                         $db->insert(
-                            'INSERT IGNORE INTO enrollments (id, student_id, course_id, enrolled_by, enrollment_method, created_at)
-                             VALUES (?, ?, ?, ?, ?, UTC_TIMESTAMP(6))',
-                            [Uuid::v4(), $studentId, $courseId, $actorId, 'activation_code']
+                            'INSERT INTO enrollments (id, student_id, course_id, enrolled_by, enrollment_method, status, enrolled_at)
+                             VALUES (?, ?, ?, ?, ?, ?, UTC_TIMESTAMP(6))',
+                            [Uuid::v4(), $studentId, $courseId, $actorId, 'doctor_created', 'active']
                         );
                     });
                 }
@@ -214,16 +208,50 @@ final class StudentController
                 'mode' => $mode,
                 'student_id' => $studentId,
             ];
+        } catch (\PDOException $e) {
+            // Raw SQL failures must reach the client as precise business errors —
+            // never as SQLSTATE internals. The compensating delete still runs so
+            // a half-created student account never survives a failed operation.
+            $this->rollbackNewUser($newUserId);
+            throw self::mapPdoError($e);
         } catch (\Throwable $e) {
-            // Rollback: delete newly-created auth user
-            if ($newUserId !== null) {
-                try {
-                    Database::instance()->query('DELETE FROM users WHERE id = ?', [$newUserId]);
-                } catch (\Throwable) {
-                }
-            }
+            $this->rollbackNewUser($newUserId);
             throw $e;
         }
+    }
+
+    /** Compensating delete of a partially created student account. */
+    private function rollbackNewUser(?string $newUserId): void
+    {
+        if ($newUserId === null) {
+            return;
+        }
+        try {
+            Database::instance()->query('DELETE FROM users WHERE id = ?', [$newUserId]);
+        } catch (\Throwable) {
+            // The profiles row cascades from users; nothing else to unwind.
+        }
+    }
+
+    /** Translate enrollment-path PDO failures into precise, user-safe ApiExceptions. */
+    private static function mapPdoError(\PDOException $e): ApiException
+    {
+        $msg = $e->getMessage();
+        if (str_contains($msg, '1062') && str_contains($msg, 'enrollments')) {
+            // Concurrent duplicate request that slipped past the pre-check —
+            // the enrollments UNIQUE(student_id, course_id) constraint caught it.
+            return new ApiException(409, 'This student is already enrolled in this course', 'already_enrolled', $e);
+        }
+        if (str_contains($msg, 'fk_enrollments_course_id')) {
+            return new ApiException(422, 'The selected course could not be found. Please pick the course again.', 'course_not_found', $e);
+        }
+        if (str_contains($msg, 'fk_enrollments_student_id') || str_contains($msg, 'fk_credit_transactions_student_id')) {
+            return new ApiException(422, 'The selected student account could not be found. Please search for the student again.', 'student_not_found', $e);
+        }
+        if (str_contains($msg, 'chk_credits_c0')) {
+            return new ApiException(422, 'Insufficient credits', 'insufficient_credits', $e);
+        }
+        return new ApiException(500, 'The operation could not be completed. Please try again.', 'operation_failed', $e);
     }
 
     private function normalizePhoneE164(string $phone): ?string

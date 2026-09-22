@@ -298,6 +298,21 @@ function withWasmSupport(config) {
 module.exports = async function (metroDefaults) {
   let config = getDefaultConfig(__dirname);
 
+  // ─── Worker cap for release bundling on memory-constrained hosts ─────────────
+  // Metro's default worker count on this 8-CPU machine is ~6; each worker is a
+  // separate node process committing several hundred MB. Combined with the
+  // Gradle JVM this exhausted the host's commit limit (13.2 GB) during release
+  // bundling → V8 "FATAL ERROR: Zone Allocation failed" mid-graph. 2 workers
+  // keeps the transform pipeline within budget on this 7.6 GB host. (1 is NOT
+  // viable: in-band transforms push the parent past V8's heap ceiling →
+  // 0xC0000409 abort at the minify peak. 2 + NODE_OPTIONS=3072 is the only
+  // combination that has completed this graph on this machine; occasional
+  // commit-pressure "DataCloneError" retries are handled by the launcher.)
+  // Dev servers (NODE_ENV != production) are unaffected.
+  if (process.env.NODE_ENV === 'production' && !config.maxWorkers) {
+    config = { ...config, maxWorkers: 2 };
+  }
+
   // ─── pnpm + inotify fix (conditional — pnpm-only environments) ─────────────
   // When installed with pnpm, node_modules/.pnpm exists and contains the actual
   // package files. Metro must crawl it so resolution works, but the directory

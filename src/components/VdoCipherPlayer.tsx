@@ -41,6 +41,14 @@ export interface VdoCipherPlayerProps {
   onProgress?: (currentTime: number, duration: number) => void;
   onEnd?: () => void;
   onError?: (message: string) => void;
+  /**
+   * SECURITY GATE (fullscreen boundary) — consulted immediately before the
+   * fullscreen Modal mounts. false/throw refuses fullscreen (fail-closed).
+   * The Modal renders above the SecurityGate overlay, so it must re-validate
+   * the authoritative verdict itself; a stale boolean from player-creation
+   * time is never trusted.
+   */
+  shouldAllowFullscreen?: () => Promise<boolean> | boolean;
 }
 
 // ─── Router ───────────────────────────────────────────────────────────────────

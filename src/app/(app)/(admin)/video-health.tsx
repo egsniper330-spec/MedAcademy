@@ -431,26 +431,30 @@ export default function VideoHealthScreen() {
       <ScrollView
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />}
         style={{ flex: 1 }}>
-        <View style={{ padding: layout.screenPx, gap: 16, paddingBottom: layout.scrollBottom() }}>
+        <View style={{ padding: layout.screenPx, gap: 16 }}>
 
-          {/* Header */}
-          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 8 }}>
-            <PageHeader title="Video Health" subtitle={`Platform health monitor`} accentColor="#2DA8FF" />
-            <View style={{ flexDirection: 'row', gap: 8 }}>
-              <Pressable onPress={onRefresh}
-                style={[neuFlatStyle(isDark), { width: 38, height: 38, borderRadius: 11, alignItems: 'center', justifyContent: 'center' }]}>
-                <RefreshCw size={16} color={c.primary} />
-              </Pressable>
-              <Pressable onPress={handleScanAll} disabled={scanning}
-                style={[neuPressedStyle(isDark), { paddingHorizontal: 14, paddingVertical: 9, borderRadius: 11,
-                  flexDirection: 'row', gap: 6, alignItems: 'center', backgroundColor: scanning ? `${c.primary}40` : c.primary }]}>
-                {scanning ? <ActivityIndicator size={13} color="#fff" /> : <ShieldCheck size={13} color="#fff" />}
-                <Text style={{ fontSize: 12, fontWeight: '800', color: '#fff' }}>
-                  {scanning ? 'Scanning…' : 'Scan All'}
-                </Text>
-              </Pressable>
-            </View>
-          </View>
+          {/* Header — actions via rightAction so they align to the trailing edge */}
+          <PageHeader
+            title="Video Health"
+            subtitle="Platform health monitor"
+            accentColor="#2DA8FF"
+            rightAction={
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                <Pressable onPress={onRefresh}
+                  style={[neuFlatStyle(isDark), { width: 38, height: 38, borderRadius: 11, alignItems: 'center', justifyContent: 'center' }]}>
+                  <RefreshCw size={16} color={c.primary} />
+                </Pressable>
+                <Pressable onPress={handleScanAll} disabled={scanning}
+                  style={[neuPressedStyle(isDark), { paddingHorizontal: 14, paddingVertical: 9, borderRadius: 11,
+                    flexDirection: 'row', gap: 6, alignItems: 'center', backgroundColor: scanning ? `${c.primary}40` : c.primary }]}>
+                  {scanning ? <ActivityIndicator size={13} color="#fff" /> : <ShieldCheck size={13} color="#fff" />}
+                  <Text style={{ fontSize: 12, fontWeight: '800', color: '#fff' }}>
+                    {scanning ? 'Scanning…' : 'Scan All'}
+                  </Text>
+                </Pressable>
+              </View>
+            }
+          />
 
           {/* Scan progress */}
           {scanAllProgress && (

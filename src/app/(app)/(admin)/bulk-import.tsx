@@ -16,7 +16,7 @@ import { createManagedUser, getUniversities, getFaculties, getAcademicLevels, ty
 import { NeuCard } from '@/components/NeuCard';
 import { NeuButton } from '@/components/NeuButton';
 import { useToast } from '@/components/Toast';
-import { neuColors, neuFlatStyle, useLayout } from '@/lib/neu'
+import { neuColors, neuFlatStyle, useLayout, safeBottom } from '@/lib/neu'
 
 type ImportRole = 'student' | 'doctor' | 'admin';
 
@@ -173,8 +173,7 @@ export default function BulkImportScreen() {
   const skipped   = results.filter(r => r.status === 'skipped').length;
 
   return (
-    <ScrollView style={{ flex: 1, backgroundColor: c.base }}
-          contentContainerStyle={{ paddingBottom: layout.scrollBottom() }}>
+    <ScrollView style={{ flex: 1, backgroundColor: c.base }} contentContainerStyle={{ paddingBottom: safeBottom(layout.insets.bottom) }}>
       <View style={{ padding: layout.screenPx }}>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 4, marginTop: 8 }}>
           <Upload size={22} color={c.primary} />

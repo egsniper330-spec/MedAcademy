@@ -12,7 +12,9 @@ import { Flag, RefreshCw } from 'lucide-react-native';
 import { PageHeader } from '@/components/PageHeader';
 import { getFeatureFlags, toggleFeatureFlag } from '@/lib/api';
 import { NeuCard } from '@/components/NeuCard';
-import { neuColors, useLayout } from '@/lib/neu';
+import { LoadingState, ErrorState } from '@/components/ScreenState';
+import { EmptyState } from '@/components/EmptyState';
+import { neuColors, useLayout, safeBottom } from '@/lib/neu';
 
 export default function FeatureFlagsScreen() {
   const scheme = useColorScheme();
@@ -22,15 +24,24 @@ export default function FeatureFlagsScreen() {
 
   const [flags, setFlags] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<unknown>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [saving, setSaving] = useState<string | null>(null);
 
+  // Terminal-state contract: LOADING → (ERROR | EMPTY | CONTENT).
   const load = useCallback(async () => {
-    try { setFlags(await getFeatureFlags()); } catch (_) {}
-    setLoading(false);
+    setLoading(true);
+    setError(null);
+    try {
+      setFlags(await getFeatureFlags());
+    } catch (e) {
+      setError(e);
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
-  useFocusEffect(useCallback(() => { setLoading(true); load(); }, [load]));
+  useFocusEffect(useCallback(() => { load(); }, [load]));
   const onRefresh = async () => { setRefreshing(true); await load(); setRefreshing(false); };
 
   const handleToggle = async (key: string, current: boolean) => {
@@ -47,15 +58,14 @@ export default function FeatureFlagsScreen() {
 
   const categoryColors: Record<string, string> = {
     registration: '#16A34A', login: '#1E90FF', credits: '#D97706',
-    activation_codes: '#7C3AED', subscriptions: '#6B7280',
+    subscriptions: '#6B7280',
     course_creation: '#2DA8FF', notifications: '#D97706',
     maintenance_mode: '#DC2626', video_uploads: '#7C3AED',
   };
 
   return (
     <ScrollView style={{ flex: 1, backgroundColor: c.base }}
-          contentContainerStyle={{ paddingBottom: layout.scrollBottom() }}
-      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />}>
+      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />} contentContainerStyle={{ paddingBottom: safeBottom(layout.insets.bottom) }}>
       <PageHeader title="Feature Flags" subtitle="Toggle platform capabilities" />
 
       <View style={{ paddingHorizontal: layout.screenPx }}>
@@ -67,7 +77,16 @@ export default function FeatureFlagsScreen() {
           </Text>
         </NeuCard>
 
-        {loading ? <ActivityIndicator color={c.primary} style={{ marginTop: 40 }} /> : (
+        {loading ? <LoadingState label="Loading feature flags…" /> : error ? (
+          <ErrorState error={error} onRetry={load} />
+        ) : flags.length === 0 ? (
+          <EmptyState
+            icon={<Flag size={40} color={c.primary} />}
+            title="No feature flags"
+            description="The server returned no feature flags."
+            action={{ label: 'Refresh', onPress: load }}
+          />
+        ) : (
           flags.map(flag => {
             const color = categoryColors[flag.key] ?? c.primary;
             return (

@@ -7,7 +7,7 @@
 
 set -euo pipefail
 
-API_URL="${EXPO_PUBLIC_PHP_API_URL:-https://api.medacademy.eu.cc/backend/public/index.php}"
+API_URL="${EXPO_PUBLIC_PHP_API_URL:-https://api.medacademy.site/backend/public/index.php}"
 
 printf '%s\n' "MedAcademy PHP deployment target: $API_URL"
 printf '%s\n' "1. Upload the changed backend/ files through cPanel's approved deployment workflow."

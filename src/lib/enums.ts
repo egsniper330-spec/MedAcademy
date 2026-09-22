@@ -140,18 +140,6 @@ export const CreditTransactionType = {
 } as const;
 export type CreditTransactionType = typeof CreditTransactionType[keyof typeof CreditTransactionType];
 
-// ── activation_code_status ────────────────────────────────────────────────────
-export const ActivationCodeStatus = {
-  ACTIVE:      'active',
-  USED:        'used',
-  EXPIRED:     'expired',
-  DEACTIVATED: 'deactivated',
-  DISABLED:    'disabled',
-  DELETED:     'deleted',
-  RESERVED:    'reserved',
-} as const;
-export type ActivationCodeStatus = typeof ActivationCodeStatus[keyof typeof ActivationCodeStatus];
-
 // ── difficulty_level ──────────────────────────────────────────────────────────
 export const DifficultyLevel = {
   BEGINNER:     'beginner',
@@ -337,8 +325,6 @@ export const AuditAction = {
   ADMIN_UPDATED:                'admin_updated',
   ADMIN_DELETED:                'admin_deleted',
   EARNINGS_RESET:               'earnings_reset',
-  ACTIVATION_CODE_CREATED:      'activation_code_created',
-  ACTIVATION_CODE_USED:         'activation_code_used',
 } as const;
 export type AuditAction = typeof AuditAction[keyof typeof AuditAction];
 
@@ -353,7 +339,6 @@ export function enumValues<T extends Record<string, string>>(e: T): string[] {
 
 /** All enum names that map to PostgreSQL types — used by EnumHealthCheck screen */
 export const DB_ENUM_NAMES = [
-  'activation_code_status',
   'audit_action',
   'content_protection_action',
   'course_status',
@@ -376,7 +361,6 @@ export type DbEnumName = typeof DB_ENUM_NAMES[number];
 
 /** Frontend enum registry keyed by DB enum name — used for health check diffing */
 export const FRONTEND_ENUM_REGISTRY: Record<DbEnumName, Record<string, string>> = {
-  activation_code_status:      ActivationCodeStatus,
   audit_action:                AuditAction,
   content_protection_action:   ContentProtectionAction,
   course_status:               CourseStatus,

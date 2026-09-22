@@ -36,8 +36,13 @@ import { ToastProvider } from '@/components/Toast';
 import { ImpersonationBanner } from '@/components/ImpersonationBanner';
 import { SecurityProvider, useSecurity } from '@/lib/SecurityContext';
 import { SecureAppOverlay } from '@/components/SecureAppOverlay';
-import { ForceUpdateScreen } from '@/components/ForceUpdateScreen';
-import { useForceUpdate } from '@/lib/useForceUpdate';
+import ForceUpdateScreen from '@/components/ForceUpdateScreen';
+import { useUpdate } from '@/lib/useForceUpdate';
+import { initUpdateLifecycle } from '@/lib/updateConfigService';
+import { initOfflineTransitions } from '@/lib/offlineTransition';
+import { initAccountRefreshLifecycle } from '@/lib/accountRefresh';
+import { MaintenanceGate } from '@/components/MaintenanceGate';
+import { wireMaintenanceLifecycle } from '@/lib/maintenanceService';
 import "../global.css";
 
 // Fail clearly when the authoritative PHP API is not configured.
@@ -49,46 +54,52 @@ assertBackendConfigured();
  * Execution order guarantees:
  *   ForceUpdateGate > authentication > home > course loading > video playback
  *
- * Hard block (isForceUpdateRequired):
- *   • Replaces the entire screen — Stack navigator is never rendered.
- *   • Android Back button is intercepted by ForceUpdateScreen.
- *   • No navigation, auth, or content is accessible.
+ * Authoritative state comes from updateConfigService (versionCode comparison
+ * + server-side HTTP 426 interception). This UI is NOT the security boundary —
+ * the backend rejects unsupported versions on every protected call.
  *
- * Soft update (isSoftUpdateAvailable):
- *   • The banner is rendered ABOVE the Stack navigator.
- *   • The user can dismiss it once per session; the app remains fully usable.
- *   • On foreground resume the hook re-evaluates; if still applicable the
- *     dismissed state is reset so the banner reappears after a full restart.
+ * Hard block (UPDATE_REQUIRED, mode FORCED, or UNKNOWN during the fail-closed
+ * startup check):
+ *   • Replaces the entire screen — Stack navigator is never rendered.
+ *   • No navigation, auth, or content is accessible.
+ *   • Re-checks on every foreground return; a block never auto-clears — only
+ *     an explicit successful evaluation can clear it.
+ *
+ * Soft update (UPDATE_REQUIRED, mode OPTIONAL):
+ *   • Dismissible banner above the Stack navigator; app stays usable.
+ *   • FORCED is the production default; OPTIONAL exists for staged rollouts.
  */
 function ForceUpdateGate({ children }: { children: React.ReactNode }) {
-  const updateState = useForceUpdate();
-  const [softDismissed, setSoftDismissed] = useState(false);
+  const update = useUpdate();
 
-  const onDismissSoft = useCallback(() => {
-    setSoftDismissed(true);
+  // Wire the remote-check lifecycle exactly once (cold start + foreground),
+  // plus the online⇄offline transition service (update-policy refresh,
+  // security-policy invalidation and download reconciliation on reconnect).
+  useEffect(() => {
+    const un1 = initUpdateLifecycle();
+    const un2 = initOfflineTransitions();
+    const un3 = initAccountRefreshLifecycle(); // foreground + reconnect triggers
+    const un4 = wireMaintenanceLifecycle();    // cold start + foreground probe of /maintenance
+    return () => { un1(); un2(); un3(); un4(); };
   }, []);
 
-  // ── Hard block ────────────────────────────────────────────────────────────
-  if (updateState.isForceUpdateRequired) {
-    return (
-      <ForceUpdateScreen
-        {...updateState}
-        soft={false}
-      />
-    );
+  // ── Hard block / fail-closed checking wall ─────────────────────────────────
+  const hardBlocked =
+    update.verdict === 'UPDATE_REQUIRED' ||
+    (update.verdict === 'UNKNOWN' && update.evaluating);
+
+  if (hardBlocked) {
+    return <ForceUpdateScreen />;
   }
 
   // ── Normal + optional soft banner ─────────────────────────────────────────
+  const softAvailable = update.verdict === 'UPDATE_REQUIRED' && update.mode === 'OPTIONAL';
   return (
     <View style={{ flex: 1 }}>
       {children}
-      {updateState.isSoftUpdateAvailable && !softDismissed && (
+      {softAvailable && (
         <View style={{ position: 'absolute', bottom: 0, left: 0, right: 0 }}>
-          <ForceUpdateScreen
-            {...updateState}
-            soft
-            onDismiss={onDismissSoft}
-          />
+          <ForceUpdateScreen />
         </View>
       )}
     </View>
@@ -284,16 +295,20 @@ const RootLayout: React.FC = () => {
             <RootScreenCapture />
             {/* ForceUpdateGate wraps ALL content — runs before auth, before navigation */}
             <ForceUpdateGate>
-              <ToastProvider>
-                <View style={{ flex: 1 }}>
-                  {/* Impersonation banner — shown above everything when Login As is active */}
-                  <ImpersonationBanner />
-                  <RootLayoutNav />
-                </View>
-                {/* Recent Apps protection: opaque overlay on inactive/background */}
-                <SecureAppOverlay />
-                <PortalHost />
-              </ToastProvider>
+              {/* MaintenanceGate: server-authoritative 503 maintenance state —
+                  above navigation, below the update gate. Never shown offline. */}
+              <MaintenanceGate>
+                <ToastProvider>
+                  <View style={{ flex: 1 }}>
+                    {/* Impersonation banner — shown above everything when Login As is active */}
+                    <ImpersonationBanner />
+                    <RootLayoutNav />
+                  </View>
+                  {/* Recent Apps protection: opaque overlay on inactive/background */}
+                  <SecureAppOverlay />
+                  <PortalHost />
+                </ToastProvider>
+              </MaintenanceGate>
             </ForceUpdateGate>
           </SecurityProvider>
         </SessionProvider>

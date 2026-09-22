@@ -556,8 +556,8 @@ final class AdminController
 
         $enrollmentId = Uuid::v4();
         $db->insert(
-            "INSERT INTO enrollments (id, student_id, course_id, enrolled_by, enrollment_method, visibility_level, status, enrolled_at, created_at)
-             VALUES (?, ?, ?, ?, ?, ?, 'active', UTC_TIMESTAMP(6), UTC_TIMESTAMP(6))",
+            "INSERT INTO enrollments (id, student_id, course_id, enrolled_by, enrollment_method, visibility_level, status, enrolled_at)
+             VALUES (?, ?, ?, ?, ?, ?, 'active', UTC_TIMESTAMP(6))",
             [$enrollmentId, $studentId, $courseId, $actorId, 'admin_enrolled', $visibility]
         );
 
@@ -598,21 +598,27 @@ final class AdminController
         $db = Database::instance();
         $like = '%' . $query . '%';
 
+        // Public User ID (MED-####) — canonical normalization + exact match first.
+        $byPublicId = (new AuthService())->findByPublicUserId($query);
+        if ($byPublicId !== null) {
+            return ['users' => [$byPublicId]];
+        }
+
         // UUID exact match
         if (preg_match('/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i', $query)) {
             $users = $db->select(
-                'SELECT id, full_name, email, phone, phone_e164, role, status, watermark_id, avatar_url FROM profiles WHERE id = ? LIMIT 1',
+                'SELECT id, full_name, email, phone, phone_e164, role, status, watermark_id, public_user_id, avatar_url FROM profiles WHERE id = ? LIMIT 1',
                 [$query]
             );
             return ['users' => $users ?? []];
         }
 
         $users = $db->select(
-            "SELECT id, full_name, email, phone, phone_e164, role, status, watermark_id, avatar_url
+            "SELECT id, full_name, email, phone, phone_e164, role, status, watermark_id, public_user_id, avatar_url
                FROM profiles
-              WHERE full_name LIKE ? OR email LIKE ? OR phone LIKE ? OR phone_e164 LIKE ? OR watermark_id LIKE ?
+              WHERE full_name LIKE ? OR email LIKE ? OR phone LIKE ? OR phone_e164 LIKE ? OR watermark_id LIKE ? OR public_user_id LIKE ?
               ORDER BY full_name ASC LIMIT 20",
-            [$like, $like, $like, $like, $like]
+            [$like, $like, $like, $like, $like, $like]
         );
 
         return ['users' => $users ?? []];
@@ -859,15 +865,25 @@ final class AdminController
         }
 
         $db = Database::instance();
+
+        // Public User ID (MED-####) — exact match after canonical normalization.
+        // Accepts MED-0001 / med-0001 / MED0001 / 0001. Tried first so an ID
+        // search can never be diluted by LIKE matches.
+        $auth = new AuthService();
+        $byPublicId = $auth->findByPublicUserId($identifier);
+        if ($byPublicId !== null) {
+            return ['users' => [$byPublicId]];
+        }
+
         $results = $db->select(
-            'SELECT id, full_name, email, phone, role, status, avatar_url
+            'SELECT id, full_name, email, phone, phone_e164, role, status, avatar_url, watermark_id, public_user_id
                FROM profiles
-              WHERE email LIKE ?
-                 OR phone LIKE ?
+              WHERE LOWER(email) LIKE LOWER(?)
+                 OR phone LIKE ? OR phone_e164 LIKE ?
                  OR full_name LIKE ?
                  OR id = ?
               LIMIT 20',
-            ['%' . $identifier . '%', '%' . $identifier . '%', '%' . $identifier . '%', $identifier]
+            ['%' . $identifier . '%', '%' . $identifier . '%', '%' . $identifier . '%', '%' . $identifier . '%', $identifier]
         );
 
         return ['users' => $results];
@@ -1080,12 +1096,6 @@ final class AdminController
         }
         if ($has('credit_transactions')) {
             $db->query('DELETE FROM credit_transactions WHERE doctor_id = ? OR student_id = ?', [$userId, $userId]);
-        }
-        if ($has('activation_codes')) {
-            $db->query('DELETE FROM activation_codes WHERE used_by = ? OR created_by = ?', [$userId, $userId]);
-        }
-        if ($has('code_batches')) {
-            $db->query('DELETE FROM code_batches WHERE created_by = ?', [$userId]);
         }
         if ($has('assistant_permissions')) {
             $db->query('DELETE FROM assistant_permissions WHERE assistant_id = ?', [$userId]);

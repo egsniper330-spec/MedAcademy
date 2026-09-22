@@ -42,7 +42,30 @@ final class ErrorHandler
                 ]);
             }
             $meta = Config::isDebug() ? self::debugMeta($e) : [];
-            Response::error($e->getMessage(), $e->status, 'api_error', $e->errors, $meta);
+            // App update enforcement (HTTP 426): enrich the error body with the
+            // platform's update payload so the client can render the forced-
+            // update screen directly from the rejected response —
+            // { error: { code: UPDATE_REQUIRED, latestVersion, latestVersionCode,
+            //            minimumVersionCode, updateUrl, updateMode } }.
+            $code = 'api_error';
+            if ($e->status === 426 && $request !== null) {
+                $code = 'UPDATE_REQUIRED';
+                try {
+                    $svc = new \MedAcademy\Services\AppUpdateService();
+                    $vc = $request->header('x-app-version-code');
+                    $verdict = $svc->evaluate(
+                        $request->header('x-app-platform'),
+                        $vc !== null ? (int) $vc : null
+                    );
+                    if ($verdict !== null) {
+                        unset($verdict['message'], $verdict['code']);
+                        $meta = array_merge($meta, $verdict);
+                    }
+                } catch (\Throwable) {
+                    // never let meta construction mask the 426 itself
+                }
+            }
+            Response::error($e->getMessage(), $e->status, $code, $e->errors, $meta);
         }
 
         $logger->error('Unhandled exception', [

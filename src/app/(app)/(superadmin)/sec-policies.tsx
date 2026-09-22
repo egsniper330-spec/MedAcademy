@@ -152,7 +152,7 @@ export default function SecurityPoliciesScreen() {
     <View style={{ flex: 1, backgroundColor: c.base }}>
       <PageHeader title="Security Policies" />
       <ScrollView
-        contentContainerStyle={{ padding: layout.screenPx, gap: layout.sectionGap, paddingBottom: layout.scrollBottom() }}
+        contentContainerStyle={{ padding: layout.screenPx, gap: layout.sectionGap }}
       >
         {/* Intro */}
         <View style={[flat, {

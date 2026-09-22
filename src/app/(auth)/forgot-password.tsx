@@ -100,7 +100,7 @@ export default function ForgotPassword() {
               SECURITY NOTE (hidden from UI per design decision):
               Resetting the password via resetPasswordForEmail only changes the auth credential.
               It does NOT affect: trusted device, device binding, login history, credits,
-              activation codes, course enrollments, or video progress.
+              course enrollments, or video progress.
             */}
 
             <NeuButton

@@ -4,14 +4,13 @@
 import { View, Text, ScrollView, useColorScheme } from 'react-native';
 import { PageHeader } from '@/components/PageHeader';
 import { Settings } from 'lucide-react-native';
-import { neuColors, useLayout } from '@/lib/neu';
+import { neuColors, useLayout, safeBottom } from '@/lib/neu';
 
 export default function AdminSettingsScreen() {
   const c = (useColorScheme() === 'dark' ? neuColors.dark : neuColors.light);
   const layout = useLayout();
   return (
-    <ScrollView style={{ flex: 1, backgroundColor: c.base }}
-          contentContainerStyle={{ paddingBottom: layout.scrollBottom() }}>
+    <ScrollView style={{ flex: 1, backgroundColor: c.base }} contentContainerStyle={{ paddingBottom: safeBottom(layout.insets.bottom) }}>
       <PageHeader title="Settings" subtitle="Admin configuration" />
 
       <View style={{ paddingHorizontal: layout.screenPx }}>

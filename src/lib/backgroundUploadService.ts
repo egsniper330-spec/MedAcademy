@@ -22,7 +22,7 @@
 import { Platform, AppState, AppStateStatus } from 'react-native';
 import * as Notifications from 'expo-notifications';
 import { type UploadTask, type UploadStatus } from './videoUploadEngine';
-import { useUploadQueueStore } from './uploadQueueStore';
+import { useUploadQueueStore, currentQueueUserId } from './uploadQueueStore';
 
 // ── Constants ────────────────────────────────────────────────────────────────
 const NOTIFICATION_CHANNEL_ID = 'video-upload';
@@ -34,6 +34,13 @@ let _isForegroundServiceActive = false;
 let _activeUploadCount = 0;
 let _appStateSubscription: any = null;
 let _initialized = false;
+
+// Timeout (ms) after foregrounding before we check if native uploads are stale.
+// If no native progress events arrive within this window, the native service
+// may have been killed by the OS, and we need to start recovery.
+const NATIVE_ALIVE_CHECK_MS = 30_000;
+// Map uploadId → setTimeout handle, so we can cancel if events arrive.
+const _aliveCheckTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
 // ── Notifications Setup ──────────────────────────────────────────────────────
 
@@ -103,11 +110,32 @@ function stopAppStateMonitoring(): void {
 
 /**
  * Called when the app returns to foreground.
- * Checks for interrupted uploads and triggers recovery.
+ *
+ * IMPORTANT: On Android, the native ForegroundUploadService may still be
+ * actively uploading chunks. Marking tasks as 'recovering' would trigger
+ * useVideoUploader to start a DUPLICATE upload — the root cause of the
+ * 12 MB restart/reset bug.
+ *
+ * Strategy:
+ *   - 'uploading'/'resuming' → leave alone. The native service is likely
+ *     still running and will emit progress/complete events. If the native
+ *     service has silently died, useVideoUploader's mount reconciliation
+ *     (which queries server-side chunk state) will catch it.
+ *   - 'processing'/'encoding' → leave alone. VdoCipher polling or assembly
+ *     may still be in progress.
+ *   - 'paused' → leave alone. User explicitly paused.
+ *   - 'recovering' → already being handled by useVideoUploader.
  */
 async function handleAppForegrounded(): Promise<void> {
+  // Account-isolation: if no authenticated account is active (signed out, or
+  // between logout/login), do not schedule recovery for any task — the store
+  // is empty and any native events for a prior account must not be re-driven.
+  if (!currentQueueUserId()) {
+    await stopForegroundServiceIfPossible();
+    return;
+  }
   const tasks = useUploadQueueStore.getState().tasks;
-  const interrupted = tasks.filter(
+  const active = tasks.filter(
     (t) =>
       t.status === 'uploading' ||
       t.status === 'processing' ||
@@ -116,36 +144,103 @@ async function handleAppForegrounded(): Promise<void> {
       t.status === 'resuming'
   );
 
-  if (interrupted.length > 0) {
-    // Mark interrupted uploads as recoverable so the upload hook can resume them
-    for (const task of interrupted) {
-      if (task.status === 'uploading' || task.status === 'resuming') {
-        useUploadQueueStore.getState().updateTask(task.id, {
-          status: 'recovering',
-        });
-      }
+  if (__DEV__ && active.length > 0) {
+    console.log('[BGUpload] App foregrounded — active tasks:',
+      active.map((t) => ({ id: t.id, status: t.status, progress: t.progress })));
+  }
+
+  // DO NOT blindly mark tasks as 'recovering'.
+  // The native Android service may still be uploading chunks, and marking
+  // the task as 'recovering' would cause useVideoUploader to start a
+  // duplicate upload, resulting in the 12 MB restart/reset bug.
+  //
+  // Instead, rely on:
+  //   1. Native upload events (progress/complete/error) to update task state.
+  //   2. useVideoUploader's mount-time reconciliation to check server-side
+  //      chunk state and resume from the correct position if needed.
+  //
+  // The only exception: if we can definitively determine the native upload
+  // is dead (e.g., service was killed by OS), mark for recovery. For now,
+  // we let the mount-time check handle this.
+
+  // Schedule alive-check timers: if no native progress events arrive within
+  // NATIVE_ALIVE_CHECK_MS, the native service may have been killed by the OS.
+  // In that case, mark the task as 'recovering' so useVideoUploader can resume.
+  for (const task of active) {
+    if (task.status === 'uploading' || task.status === 'resuming') {
+      scheduleNativeAliveCheck(task.id, task.lessonId ?? null);
     }
   }
 
-  // Stop foreground service since we're back in foreground
+  // Stop foreground JS notification since we're back in foreground
+  // (native Kotlin service manages its own notification independently)
   await stopForegroundServiceIfPossible();
+}
+
+/**
+ * Schedule a check: if no native progress event arrives for this uploadId
+ * within NATIVE_ALIVE_CHECK_MS, the native service may be dead.
+ * Mark the task as 'recovering' so useVideoUploader can resume from
+ * server-side chunk state.
+ *
+ * If a native event DOES arrive, cancel the timer.
+ */
+function scheduleNativeAliveCheck(uploadId: string, lessonId: string | null): void {
+  // Cancel any existing timer for this uploadId
+  cancelNativeAliveCheck(uploadId);
+
+  const timer = setTimeout(() => {
+    _aliveCheckTimers.delete(uploadId);
+
+    // Check if the task is still in 'uploading' state — if native events
+    // already updated it, this check is a no-op.
+    const task = useUploadQueueStore.getState().getTask(uploadId);
+    if (!task) return;
+
+    if (task.status === 'uploading' || task.status === 'resuming') {
+      if (__DEV__) {
+        console.log('[BGUpload] Native alive-check: no events received — marking as recovering',
+          { uploadId, status: task.status });
+      }
+      useUploadQueueStore.getState().updateTask(uploadId, {
+        status: 'recovering',
+      });
+    }
+  }, NATIVE_ALIVE_CHECK_MS);
+
+  _aliveCheckTimers.set(uploadId, timer);
+}
+
+/**
+ * Cancel the alive-check timer for an upload (called when a native event arrives).
+ */
+export function cancelNativeAliveCheck(uploadId: string): void {
+  const timer = _aliveCheckTimers.get(uploadId);
+  if (timer) {
+    clearTimeout(timer);
+    _aliveCheckTimers.delete(uploadId);
+  }
 }
 
 // ── Foreground Service ───────────────────────────────────────────────────────
 
 /**
- * Start the Android foreground service for background uploads.
- * On iOS, this shows a persistent notification but doesn't truly background the JS.
- * On web, this is a no-op.
+ * Start the foreground upload notification.
+ *
+ * On Android: the native ForegroundUploadService.kt manages its own foreground
+ * notification independently. We do NOT create a duplicate JS notification here.
+ * On iOS: the native BackgroundUploadHandler manages its own UNUserNotification.
+ * On Web: we use expo-notifications to show a persistent banner.
  */
 export async function startForegroundServiceIfPossible(
   uploadTask: UploadTask
 ): Promise<void> {
   _activeUploadCount++;
 
-  if (Platform.OS === 'android') {
+  // On Android/iOS, the native service manages its own notification.
+  // Only show JS notification on web where no native service exists.
+  if (Platform.OS === 'web') {
     try {
-      // Show persistent notification (serves as foreground service indicator)
       await Notifications.scheduleNotificationAsync({
         identifier: FOREGROUND_SERVICE_NOTIFICATION_ID,
         content: {
@@ -153,41 +248,17 @@ export async function startForegroundServiceIfPossible(
           body: `${uploadTask.fileName} — ${uploadTask.progress}%`,
           data: { uploadId: uploadTask.id, type: 'foreground_upload' },
           sound: false,
-          ...(Platform.OS === 'android'
-            ? {
-                channelId: NOTIFICATION_CHANNEL_ID,
-                priority: Notifications.AndroidNotificationPriority.LOW,
-              }
-            : {}),
         },
-        trigger: null, // Show immediately
+        trigger: null,
       });
-
       _isForegroundServiceActive = true;
-
-      if (__DEV__) {
-        console.log('[BGUpload] Foreground service notification started', {
-          uploadId: uploadTask.id,
-          fileName: uploadTask.fileName,
-        });
-      }
     } catch (e) {
-      if (__DEV__) {
-        console.warn('[BGUpload] Failed to start foreground notification', e);
-      }
+      if (__DEV__) console.warn('[BGUpload] Failed to start foreground notification', e);
     }
   }
-
-  // On iOS, register for extended background execution time
-  if (Platform.OS === 'ios') {
-    // iOS doesn't have a true foreground service for JS, but we can
-    // request additional background execution time when the app is backgrounded.
-    // The actual upload will continue for ~30s, then pause and resume on foreground.
-  }
-}
-
-/**
+}/**
  * Update the foreground service notification with current upload progress.
+ * On Android/iOS, native service manages its own — skip here.
  */
 export async function updateForegroundServiceNotification(
   uploadId: string,
@@ -195,6 +266,9 @@ export async function updateForegroundServiceNotification(
   progress: number,
   status: UploadStatus
 ): Promise<void> {
+  // Native services (Android ForegroundUploadService, iOS BackgroundUploadHandler)
+  // manage their own notifications. Only update on web.
+  if (Platform.OS !== 'web') return;
   if (!_isForegroundServiceActive) return;
 
   const statusLabels: Record<string, string> = {
@@ -215,31 +289,30 @@ export async function updateForegroundServiceNotification(
         body: `${fileName} — ${progress}%`,
         data: { uploadId, type: 'foreground_upload' },
         sound: false,
-        ...(Platform.OS === 'android'
-          ? {
-              channelId: NOTIFICATION_CHANNEL_ID,
-              priority: Notifications.AndroidNotificationPriority.LOW,
-            }
-          : {}),
       },
       trigger: null,
     });
   } catch (e) {
-    // Non-fatal — notification update failed
-    if (__DEV__) {
-      console.warn('[BGUpload] Failed to update foreground notification', e);
-    }
+    if (__DEV__) console.warn('[BGUpload] Failed to update foreground notification', e);
   }
 }
 
 /**
  * Stop the foreground service notification.
+ * On Android/iOS, native service manages its own — skip here.
  */
 export async function stopForegroundServiceIfPossible(): Promise<void> {
   _activeUploadCount = Math.max(0, _activeUploadCount - 1);
 
   // Only stop if no active uploads remain
   if (_activeUploadCount > 0) return;
+
+  // Native services (Android/iOS) manage their own notification lifecycle.
+  // Only dismiss on web.
+  if (Platform.OS !== 'web') {
+    _isForegroundServiceActive = false;
+    return;
+  }
 
   if (_isForegroundServiceActive) {
     try {
