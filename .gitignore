@@ -71,3 +71,6 @@ package.json.*
 .sync
 
 .freebuff/
+
+# local git-history backup (never commit)
+.git-backup/
