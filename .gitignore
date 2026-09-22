@@ -69,3 +69,5 @@ output.tar.gz
 .metro-cache/
 package.json.*
 .sync
+
+.freebuff/
