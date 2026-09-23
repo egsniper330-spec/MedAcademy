@@ -165,6 +165,53 @@ function ForceUpdateGate({ children }: { children: React.ReactNode }) {
  */
 const ROOT_SC_KEY = 'root-shell';
 
+/**
+ * useFirstFramePresented — true only once the UI thread has committed AND
+ * presented at least one real frame.
+ *
+ * Two requestAnimationFrame ticks (the double-rAF convention already used by
+ * useFullscreenWatermark / watermarkInjection) guarantee the first commit has
+ * been flushed by the UI thread; the trailing setTimeout(0) then defers past
+ * the CATransaction that presents it.
+ *
+ * WHY THIS EXISTS — the launch black screen:
+ * `isLoading` alone is NOT sufficient evidence that a frame has been presented.
+ * At cold start the FIRST root UI is now the fail-closed update wall
+ * (ForceUpdateGate: verdict UNKNOWN + evaluating), and the two inputs race:
+ *   • isLoading ← getSession(), a LOCAL SecureStore read → resolves in a few ms;
+ *   • the update wall  ← a NETWORK call to /app/version → hundreds of ms later.
+ * So `isLoading` flips false while the first frames are still being presented,
+ * and the un-deferred preventScreenCaptureAsync() below would call
+ * keyWindow.layer.removeFromSuperlayer() + reparent into the secure UITextField
+ * sublayer in that same run-loop iteration: the app renders into an off-screen
+ * buffer, the display receives nothing, and the screen stays BLACK even though
+ * JS keeps running (the wall then unmounts, the shell mounts — into a detached
+ * window). Deferring until a frame is actually presented is what the sibling
+ * call sites in this file and in (app)/_layout.tsx already do.
+ */
+function useFirstFramePresented(): boolean {
+  const [presented, setPresented] = useState(false);
+  useEffect(() => {
+    if (process.env.EXPO_OS === 'web') {
+      setPresented(true);
+      return;
+    }
+    let raf2 = 0;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const raf1 = requestAnimationFrame(() => {
+      raf2 = requestAnimationFrame(() => {
+        timer = setTimeout(() => setPresented(true), 0);
+      });
+    });
+    return () => {
+      if (raf1) cancelAnimationFrame(raf1);
+      if (raf2) cancelAnimationFrame(raf2);
+      if (timer !== null) clearTimeout(timer);
+    };
+  }, []);
+  return presented;
+}
+
 function RootScreenCapture() {
   const { isSuperAdmin } = useSecurity();
   const isSuperAdminRef = useRef(isSuperAdmin);
@@ -175,24 +222,33 @@ function RootScreenCapture() {
   // See detailed explanation in the comment block above.
   const { isLoading } = useSession();
 
+  // A frame must have been PRESENTED before we reparent the window layer
+  // (see useFirstFramePresented — the launch-timing half of this contract).
+  const framePresented = useFirstFramePresented();
+
   // Apply / release based on Super Admin status.
-  // Gated on !isLoading so the first native frame is already presented before
-  // we reparent keyWindow.layer into the UITextField secure sublayer.
+  // Gated on !isLoading AND a presented first frame, and the native call itself
+  // is deferred to the next run-loop iteration (setTimeout(0)) — exactly like
+  // the AppState re-apply path below — so the reparent can never land in the
+  // same iteration as the CATransaction that presents the frame.
   useEffect(() => {
     if (process.env.EXPO_OS === 'web') return;
-    if (isLoading) {
+    if (isLoading || !framePresented) {
       return;
     }
-    if (isSuperAdmin) {
-      // Super Admin: release the root-level lock so they can screenshot freely
-      ScreenCaptureLib.allowScreenCaptureAsync(ROOT_SC_KEY)
-        .catch(() => {});
-    } else {
-      // Normal user (including unauthenticated): protection must be active
-      ScreenCaptureLib.preventScreenCaptureAsync(ROOT_SC_KEY)
-        .catch(() => {});
-    }
-  }, [isSuperAdmin, isLoading]);
+    const timer = setTimeout(() => {
+      if (isSuperAdmin) {
+        // Super Admin: release the root-level lock so they can screenshot freely
+        ScreenCaptureLib.allowScreenCaptureAsync(ROOT_SC_KEY)
+          .catch(() => {});
+      } else {
+        // Normal user (including unauthenticated): protection must be active
+        ScreenCaptureLib.preventScreenCaptureAsync(ROOT_SC_KEY)
+          .catch(() => {});
+      }
+    }, 0);
+    return () => clearTimeout(timer);
+  }, [isSuperAdmin, isLoading, framePresented]);
 
   // Re-apply on every foreground transition — iOS may reset the protection state
   // across background/foreground cycles (particularly on older iOS versions).
