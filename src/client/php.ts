@@ -14,6 +14,7 @@ import * as SecureStore from 'expo-secure-store';
 import { getInstallationId, getStoredDeviceFingerprint } from '@/lib/installationId';
 import Constants from 'expo-constants';
 import { Platform as RNPlatform } from 'react-native';
+import { setMaintenanceControlFlowActive, isMaintenanceControlFlowActive } from '@/lib/maintenanceStateModel';
 
 // ── Config ──────────────────────────────────────────────────────────────────
 
@@ -218,13 +219,25 @@ async function apiFetchOnce<T = unknown>(
       // renders the full-screen maintenance UI and auto-recovers when the
       // backend reports maintenance disabled again.
       const innerCode = (errObj.code as string | undefined) ?? (inner?.code as string | undefined);
-      if (res.status === 503 && (innerCode === 'maintenance_mode' || errObj.maintenance != null)) {
+      if (res.status === 503 && (innerCode === 'maintenance_mode' || errObj.maintenance != null || inner?.maintenance != null)) {
         const maintenanceMeta = ((inner?.maintenance ?? errObj.maintenance ?? {}) as Record<string, unknown>);
+        // SYNCHRONOUS canary arm (pure module, static import): the caller's
+        // catch block runs before any dynamic import could resolve, so the
+        // expected-control-flow flag must be set HERE — isExpectedMaintenanceError
+        // is already true when getProfile / RPC callers log their error.
+        setMaintenanceControlFlowActive(true);
         void import('@/lib/maintenanceService').then(({ notifyMaintenance503 }) =>
-          notifyMaintenance503({
-            message: (inner?.message as string) ?? (errObj.message as string) ?? 'MedAcademy is temporarily unavailable while we perform maintenance.',
-            retryAfter: typeof maintenanceMeta.retryAfter === 'number' ? maintenanceMeta.retryAfter : 300,
-          })
+          notifyMaintenance503(
+            {
+              message: (inner?.message as string) ?? (errObj.message as string) ?? 'MedAcademy is temporarily unavailable while we perform maintenance.',
+              retryAfter: typeof maintenanceMeta.retryAfter === 'number' ? maintenanceMeta.retryAfter : 300,
+            },
+            // Session context lets the service consult the SERVER-computed
+            // exemption evidence (GET /maintenance/whoami): a verified
+            // super_admin / whitelisted identity keeps using the app — the
+            // gate never mounts for them. Never a client-declared role.
+            { hasSession: !!getStoredSession()?.access_token },
+          )
         );
       }
       return {
@@ -1204,10 +1217,23 @@ function createPoller(_name: string) {
       const eventType = opts.event ?? event;
       listeners.push({ table: tableName, event: eventType, callback });
 
-      // Intentional PHP polling replacement for the former push subscription
+      // Intentional PHP polling replacement for the former push subscription.
+      // MAINTENANCE REQUEST-STORM GUARD: while the server-authoritative
+      // maintenance verdict is active, these authenticated pollers can ONLY
+      // receive 503 maintenance_mode (the gate blocks /api/*). Polling every
+      // 5s into a guaranteed refusal is a request storm against a struggling
+      // server. The canary check pauses the cycle; the maintenance service's
+      // own silent recovery poll (plus the epoch re-bootstrap) covers revival,
+      // and for verified-exempt identities (SA/whitelist) the gate exempts
+      // their requests so the poll never pauses for them.
       let lastCheck = Date.now();
-      const interval = setInterval(async () => {
+      const tick = async () => {
         try {
+          // Pause while the maintenance gate is up (request-storm guard). The
+          // flag reflects the SERVER's verdict; a verified-exempt identity
+          // (SA/whitelist) never publishes the UI verdict, so their pollers
+          // keep running and simply succeed against the exempted gate.
+          if (isMaintenanceControlFlowActive()) return; // paused, silent
           const res = await apiFetch<unknown[]>(`/api/${tableName}?order=created_at.desc&limit=5`);
           if (res.data && Array.isArray(res.data)) {
             for (const row of res.data) {
@@ -1219,7 +1245,8 @@ function createPoller(_name: string) {
             lastCheck = Date.now();
           }
         } catch { /* ignore polling errors */ }
-      }, 5000); // Poll every 5 seconds
+      };
+      const interval = setInterval(tick, 5000); // Poll every 5 seconds
       intervals.push(interval);
       return poller;
     },

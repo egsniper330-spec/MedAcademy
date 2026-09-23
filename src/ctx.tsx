@@ -7,6 +7,7 @@ import { backendClient } from '@/client/backendClient';
 import { getInstallationId, getStoredDeviceFingerprint, clearDeviceFingerprint } from '@/lib/installationId';
 import { invalidateCreditCache } from '@/lib/creditService';
 import { resetOfflineLibraryForAccountSwitch } from '@/lib/offlineVideoService';
+import { isExpectedMaintenanceError } from '@/lib/maintenanceStateModel';
 import { useProfileStore } from '@/lib/store';
 import { UserRole, type UserRole as UserRoleType } from '@/lib/enums';
 import {
@@ -190,6 +191,18 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
 
       const primary = await invokeAuthCheck(storedVersion);
 
+      // ── MAINTENANCE: expected control flow, verdict simply UNKNOWN ─────────
+      // A non-exempt user's device-binding check legitimately receives 503
+      // maintenance_mode while the gate is up. That is NOT a revocation, NOT a
+      // security violation, and NOT a network failure — the session is valid
+      // and stays untouched. The gate overlay owns the UI; the next poll after
+      // recovery re-establishes the verdict. (Verified-exempt identities —
+      // SA/whitelist — never receive the 503 and flow through normally.)
+      if (isExpectedMaintenanceError(primary.error)) {
+        authLog('checkRevocation: skipped — maintenance gate active (expected)');
+        return;
+      }
+
       // ── Primary path: server verdict received ──────────────────────────────
       if (!primary.error) {
         const fn = primary.data;
@@ -261,6 +274,14 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       // get_security_version RPC maps to /security/version (GLOBAL config version),
       // a different value that made every poll report a mismatch.
       authLog(`checkRevocation: device-binding error — falling back to profile read: ${primary.error.message}`);
+      // MAINTENANCE: while the gate is up a non-exempt user's profile read can
+      // only return 503 maintenance_mode. That is expected control flow — the
+      // session is valid and the revocation verdict is simply UNKNOWN; never
+      // treat it as a revocation signal (and stay quiet in __DEV__ logs).
+      if (isExpectedMaintenanceError(primary.error)) {
+        authLog('checkRevocation: skipped — maintenance gate active (expected)');
+        return;
+      }
       const serverVer = await fetchProfileSecurityVersion(userId);
       if (serverVer === null) {
         authLog('checkRevocation: fallback profile read FAILED (network) — preserving session');
@@ -321,6 +342,13 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
 
       setSession(s);
       sessionRef.current = s;
+      // Bind the maintenance exemption-evidence identity to THIS session user
+      // (null on sign-out). The service caches GET /maintenance/whoami answers
+      // per bound id — an account switch invalidates prior evidence, so a
+      // demoted/un-whitelisted identity can never inherit a bypass.
+      import('@/lib/maintenanceService').then(({ setMaintenanceExemptionUserId }) =>
+        setMaintenanceExemptionUserId(s?.user?.id ?? null)
+      );
       setIsLoading(false);
       authLog('setIsLoading(false)');
 
@@ -339,6 +367,11 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       authLog(`onAuthStateChange: event=${event} user=${s?.user?.id ?? 'none'} expires_at=${s?.expires_at ?? 'n/a'} has_access_token=${!!s?.access_token} has_refresh_token=${!!s?.refresh_token}`);
       setSession(s);
       sessionRef.current = s;
+      // Rebind maintenance exemption evidence to the NEW identity (account
+      // switch) — previous evidence is void across accounts.
+      import('@/lib/maintenanceService').then(({ setMaintenanceExemptionUserId }) =>
+        setMaintenanceExemptionUserId(s?.user?.id ?? null)
+      );
 
       // FIX: also treat INITIAL_SESSION as a sign-in for grace-window purposes.
       // On web/reload the session listener emits INITIAL_SESSION when a

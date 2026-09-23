@@ -1,10 +1,11 @@
 /**
  * startupStateModel.ts — PURE cold-start routing state machine.
  *
- * ⚠️ NO IMPORTS (mirrors securityStateModel.ts). This module must stay
- * dependency-free (no react-native, no expo, no network, no storage) so it
- * compiles standalone and is unit-tested with plain node
- * (tests/securityStateModel.test.cjs). Runtime consumer: src/app/index.tsx.
+ * ⚠️ NO PLATFORM IMPORTS (mirrors securityStateModel.ts). This module must
+ * stay dependency-free (no react-native, no expo, no network, no storage) so
+ * it compiles standalone and is unit-tested with plain node. The ONLY allowed
+ * import is the sibling PURE classifier maintenanceStateModel (same harness
+ * set). Runtime consumers: src/app/index.tsx, src/lib/accountRefresh.ts.
  *
  * ─── THE BUG THIS MODEL FIXES ────────────────────────────────────────────────
  * Cold start with the internet OFF used to route a fully-authenticated user to
@@ -88,6 +89,11 @@ export interface StartupInputs {
  *  'offline'    → authenticated Offline Mode (Offline Library)
  */
 export type StartupRoute = 'spinner' | 'login' | 'online' | 'offline';
+
+// Sibling PURE model — the single typed maintenance classifier. Still
+// dependency-free in the platform sense (no react-native/expo/network), so
+// the standalone state-build harness compiles this module unchanged.
+import { isMaintenanceError } from './maintenanceStateModel';
 
 /**
  * The authoritative cold-start routing decision.
@@ -290,8 +296,10 @@ export function classifyProfileRefresh(
   // about this account. It must not classify as network_error (which screens
   // may render as a plain fetch failure) — the MaintenanceGate owns the UI.
   // The maintenanceService interceptor already flipped the global state from
-  // the same response; here we just avoid mis-classification.
-  if (status === 503 && (code === 'maintenance_mode' || /maintenance/i.test(msg))) {
+  // the same response; here we just avoid mis-classification. Delegates to
+  // the SINGLE typed classifier (maintenanceStateModel.isMaintenanceError) so
+  // exactness lives in exactly one place — a plain 5xx never matches.
+  if (isMaintenanceError(err)) {
     return 'maintenance';
   }
   // Genuine blocked verdict ONLY: the server's explicit code (or its exact

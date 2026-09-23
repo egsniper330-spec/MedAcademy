@@ -2,6 +2,7 @@ import { fetch as expoFetch } from 'expo/fetch';
 import { backendApiBase, backendClient } from '@/client/backendClient';
 import { normalizePhoneE164 } from '@/lib/identifier';
 import { buildProtectedCallHeaders } from '@/lib/deviceKey';
+import { isMaintenanceError } from '@/lib/maintenanceStateModel';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // SECURITY BOUNDARY
@@ -610,7 +611,11 @@ export async function getDoctorStudentProfile(
   });
 
   if (error) {
-    console.warn('[getDoctorStudentProfile] RPC error:', error.message);
+    // Expected control flow while the server maintenance gate is up — never a
+    // red console warning (see maintenanceStateModel.isMaintenanceError).
+    if (!isMaintenanceError(error)) {
+      console.warn('[getDoctorStudentProfile] RPC error:', error.message);
+    }
     return null;
   }
 

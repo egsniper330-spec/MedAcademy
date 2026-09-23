@@ -3,6 +3,7 @@
 // Used by sign-in, registration, user-search, credits, and admin screens.
 
 import { backendClient } from '@/client/backendClient';
+import { isMaintenanceError } from '@/lib/maintenanceStateModel';
 
 export type IdentifierType = 'email' | 'phone' | 'user_id' | 'name';
 
@@ -132,6 +133,15 @@ export async function resolveEmailFromIdentifier(identifier: string): Promise<st
       //   - message contains known network-failure strings  → network error → throw
       //   - error has no code AND no HTTP status            → fetch failed  → throw
       //   - error has a PGRST code or numeric HTTP status   → app error     → swallow (return null)
+      // ── MAINTENANCE: expected control flow, never a red console error ──
+      // The sign-in identifier lookup legitimately receives 503
+      // maintenance_mode while the gate is up (the PHP route is now exempt
+      // server-side; old deployed builds may still return it). Classify via
+      // the single typed classifier, surface the network-style error path the
+      // sign-in handler already renders cleanly, and stay SILENT in console.
+      if (isMaintenanceError(error)) {
+        throw error;
+      }
       console.error('[resolveEmailFromIdentifier] RPC error:', error.message, '| code:', error.code);
       const msg = error.message?.toLowerCase() ?? '';
       const isNetworkMessage =

@@ -11,6 +11,7 @@ use MedAcademy\Controllers\DeviceController;
 use MedAcademy\Controllers\HealthController;
 use MedAcademy\Controllers\IntegrityController;
 use MedAcademy\Controllers\MaintenanceController;
+use MedAcademy\Middleware\MaintenanceMiddleware;
 use MedAcademy\Controllers\NotificationController;
 use MedAcademy\Controllers\SecurityController;
 use MedAcademy\Controllers\SecurityEvidenceController;
@@ -44,9 +45,12 @@ $router->post('/auth/refresh', [AuthController::class, 'refresh']);
 
 // ---- Maintenance Mode (server-authoritative) -------------------------------
 // The gate in index.php blocks non-exempt requests when maintenance is ON.
-// These routes are exempt so the client can (a) discover the state and
-// (b) a Super Admin can turn it back OFF:
+// These routes are exempt so the client can (a) discover the state, (b) ask
+// whether the SERVER considers the current identity exempt (whoami — the
+// answer is computed from the verified profile row, never client-declared),
+// and (c) a Super Admin can turn it back OFF:
 $router->get('/maintenance', [MaintenanceController::class, 'status']);
+$router->get('/maintenance/whoami', [MaintenanceMiddleware::class, 'whoami']);
 $router->get('/admin/maintenance', [MaintenanceController::class, 'adminStatus'], $auth + ['role' => ['super_admin']]);
 $router->post('/admin/maintenance', [MaintenanceController::class, 'update'], $auth + ['role' => ['super_admin']]);
 

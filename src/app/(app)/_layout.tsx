@@ -12,6 +12,8 @@ import { useSession } from '@/ctx';
 import { useProfileStore } from '@/lib/store';
 import { getProfile } from '@/lib/api';
 import { refreshAccountState, handleRefreshOutcome } from '@/lib/accountRefresh';
+import { isExpectedMaintenanceError } from '@/lib/maintenanceStateModel';
+import { maintenanceEpoch } from '@/components/MaintenanceGate';
 import { UploadFAB } from '@/components/VideoUploadQueue';
 import { useSecurity } from '@/lib/SecurityContext';
 import { SecurityGate } from '@/app/(app)/security-gate';
@@ -204,6 +206,18 @@ function AppLayoutNav() {
           router.replace('/account-suspended' as RelativePathString);
           return;
         }
+        // ── MAINTENANCE (expected control flow, NOT an application failure) ──
+        // While the server-side gate is up, getProfile legitimately receives
+        // 503 maintenance_mode. The single typed classifier decides — the
+        // session is untouched, no navigation, NO red console error, no toast.
+        // The MaintenanceGate overlay owns the UI and its silent recovery
+        // re-runs this bootstrap when maintenance ends.
+        if (isExpectedMaintenanceError(err as { status?: number; code?: string; message?: string })) {
+          if (__DEV__) {
+            console.log('[AppLayout] getProfile deferred — maintenance gate active (expected)');
+          }
+          return;
+        }
         // All other failures are intentionally non-fatal — the session is
         // still valid. Network failures must NOT sign the user out (offline
         // startup contract); the profile simply stays as-is (null on true
@@ -242,6 +256,32 @@ function AppLayoutNav() {
     else if (role === 'super_admin') router.replace('/sa-overview' as RelativePathString);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [profile, isProfileLoading]);
+
+  // ── MAINTENANCE RECOVERY RE-BOOTSTRAP (epoch-driven, silent) ──────────────
+  // When MaintenanceGate recovers (server says maintenance OFF), the epoch
+  // bumps and this effect re-runs the NORMAL server-authoritative bootstrap
+  // (getProfile + refreshAccountState). This is what makes whitelist
+  // add/remove effective immediately — the next request re-evaluates the
+  // server gate — and it restores the app WITHOUT restart or re-login. When
+  // the user has no session, the root Stack.Protected guards handle routing.
+  const epoch = maintenanceEpoch();
+  useEffect(() => {
+    if (epoch === 0) return; // no recovery has happened yet
+    const uid = session?.user?.id;
+    if (!uid) return;
+    (async () => {
+      try {
+        const p = await getProfile(uid);
+        if (p && (p.role || p.status)) setProfile(p as any);
+      } catch {
+        // Non-fatal: the foreground/connectivity lifecycle retries quietly.
+      }
+      void refreshAccountState(uid, { reason: 'maintenance_recovered' }).then((outcome) => {
+        void handleRefreshOutcome(outcome, { userId: uid });
+      });
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [epoch]);
 
   // CRITICAL: Stack MUST always render unconditionally — same principle as root _layout.tsx.
   // Returning a spinner here unmounts the Stack navigator on every profile-load cycle,

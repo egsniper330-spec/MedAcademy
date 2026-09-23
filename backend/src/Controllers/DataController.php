@@ -90,6 +90,11 @@ class DataController
      */
     private const WRITE_ADMIN_ONLY_TABLES = [
         'system_config', 'feature_flags',
+        // Whitelist self-service is a MAINTENANCE-BYPASS GRANT: if any
+        // authenticated user could POST/PATCH/DELETE here, every user could
+        // grant themselves immunity from the maintenance gate. SA management
+        // goes through MaintenanceController-adjacent dedicated APIs only.
+        'maintenance_whitelist',
     ];
 
     /** Columns that must never be set via the generic API (prevents mass assignment) */

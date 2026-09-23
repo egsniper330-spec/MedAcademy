@@ -1,29 +1,66 @@
 /**
  * MaintenanceGate — rendered at the ROOT level (inside ForceUpdateGate).
  *
- * Shows a full-screen MAINTENANCE page when the server-authoritative verdict
- * is MAINTENANCE, and automatically recovers (re-renders the app) when the
- * maintenance service polls GET /maintenance and the backend reports
- * enabled=false. Never shows for offline, never logs out, never blocks
- * security checks.
+ * UX CONTRACT (the "Checking availability…" bug):
+ * The screen is STATIC the moment it appears — icon, title, server message,
+ * "Please try again later." NO spinner, NO "Checking availability…" text, no
+ * retry UI. Recovery polling happens invisibly in the background
+ * (maintenanceService.probeMaintenanceStatus); the ONLY visible change is the
+ * transition back to the normal app when the server reports maintenance OFF.
+ *
+ * ─── RECOVERY (epoch-based, no restart/re-login) ─────────────────────────────
+ * When the gate is mounted, a maintenance epoch is active. On transition back
+ * to NORMAL with a session still present, maintenanceEpoch() increments and
+ * the shell re-runs its normal server-authoritative bootstrap (profile
+ * refresh, revocation poll — see (app)/_layout.tsx). Whitelist add/remove is
+ * therefore effective immediately: the next server request re-evaluates the
+ * gate per-request; the client never caches a bypass.
+ *
+ * Offline while the screen is up: probes skip (NetInfo) and the UI stays
+ * exactly as-is; when connectivity returns the poll resumes silently.
  */
 
-import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, ActivityIndicator, ScrollView } from 'react-native';
+import React, { useEffect } from 'react';
+import { View, Text, StyleSheet, ScrollView } from 'react-native';
 import { useColorScheme } from 'react-native';
 import { Wrench } from 'lucide-react-native';
-import { subscribeMaintenance } from '@/lib/maintenanceService';
+import {
+  subscribeMaintenance,
+  getMaintenanceVerdict,
+} from '@/lib/maintenanceService';
 import { neuColors, useLayout } from '@/lib/neu';
 import { DEFAULT_MAINTENANCE_MESSAGE } from '@/lib/maintenanceStateModel';
 
+/** Bumped every time a MAINTENANCE→NORMAL recovery completes. */
+let recoveryEpoch = 0;
+export function maintenanceEpoch(): number {
+  return recoveryEpoch;
+}
+
 export function MaintenanceGate({ children }: { children: React.ReactNode }) {
-  const [verdict, setVerdict] = useState<{ state: string; message?: string; retryAfter?: number }>({ state: 'NORMAL' });
+  const [verdict, setVerdict] = React.useState(getMaintenanceVerdict());
   const scheme = useColorScheme();
   const isDark = scheme === 'dark';
   const c = isDark ? neuColors.dark : neuColors.light;
   const layout = useLayout();
 
-  useEffect(() => subscribeMaintenance((v) => setVerdict(v)), []);
+  // Silent recovery → re-bootstrap the authenticated shell. The epoch bumps
+  // ONLY on a real transition (subscribeMaintenance's initial callback fires
+  // with the CURRENT verdict — counting it would re-bootstrap on mount), and
+  // (app)/_layout re-runs its normal server-authoritative bootstrap when it
+  // changes. Whitelist changes take effect without restart or re-login.
+  useEffect(
+    () =>
+      subscribeMaintenance((v) => {
+        setVerdict((prev) => {
+          if (prev.state === 'MAINTENANCE' && v.state === 'NORMAL') {
+            recoveryEpoch += 1;
+          }
+          return v;
+        });
+      }),
+    []
+  );
 
   if (verdict.state !== 'MAINTENANCE') {
     return <>{children}</>;
@@ -40,12 +77,6 @@ export function MaintenanceGate({ children }: { children: React.ReactNode }) {
           {verdict.message?.trim() || DEFAULT_MAINTENANCE_MESSAGE}
         </Text>
         <Text style={[styles.sub, { color: c.text }]}>Please try again later.</Text>
-        <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: layout.pad.lg }}>
-          <ActivityIndicator size="small" color={c.primary} />
-          <Text style={{ color: c.text, opacity: 0.5, marginLeft: layout.pad.sm, fontSize: layout.captionSize }}>
-            Checking availability…
-          </Text>
-        </View>
       </ScrollView>
     </View>
   );

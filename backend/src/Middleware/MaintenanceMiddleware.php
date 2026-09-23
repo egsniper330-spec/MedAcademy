@@ -40,7 +40,15 @@ final class MaintenanceMiddleware
         '/auth/login', '/auth/refresh', '/auth/logout', '/auth/lookup',
         '/auth/pre-login-check', '/auth/forgot-password', '/auth/reset-password',
         '/auth/register',
+        // Phone→email resolution runs BEFORE authentication on the sign-in
+        // screen. During maintenance it must still resolve the identifier so
+        // the Super Admin can SIGN IN (login itself is exempt) instead of the
+        // sign-in form dying with an unexplained RPC error. The endpoint
+        // returns only an email address (no profile data), so the exposure is
+        // the same as when maintenance is off.
+        '/rpc/get-email-by-phone',
         '/maintenance',            // status read + SA management (POST/PUT/DELETE under it)
+        '/admin/maintenance',      // SA management view (GET) — role re-checked by AuthMiddleware
         '/admin/app-updates',      // SA can fix a bad update config while maintenance is on
         '/app/version',            // update discovery must keep working
     ];
@@ -62,7 +70,8 @@ final class MaintenanceMiddleware
         // request. AuthMiddleware runs later (inside the router), so at this
         // point the bearer token is decoded WITHOUT trusting any client header
         // for the role — the profile row is read from the database here.
-        $svc = MaintenanceService::tracked(...$this->verifiedIdentity($request));
+        [$role, $userId] = $this->verifiedIdentity($request);
+        $svc = MaintenanceService::tracked($role, $userId);
 
         if (!$svc->blocks()) {
             return;
@@ -88,6 +97,27 @@ final class MaintenanceMiddleware
                 ],
             ]
         );
+    }
+
+    /**
+     * GET /maintenance/whoami — used by an ALREADY-AUTHENTICATED client that
+     * was mid-session when maintenance was switched on. The client asks "does
+     * the gate exempt ME?" and receives a server-side answer computed from the
+     * verified profile row — never from any client-declared role. The response
+     * is static per identity+config (no PII), so it is safe to expose on the
+     * already-public /maintenance prefix. Anonymous callers simply get
+     * exempt=false, which the client treats as "stay on the maintenance screen".
+     */
+    public static function whoami(Request $request): array
+    {
+        [$role, $userId] = (new self())->verifiedIdentity($request);
+        $svc = MaintenanceService::tracked($role, $userId);
+        $cfg = $svc->config();
+        return [
+            'maintenance' => (bool) $cfg['enabled'],
+            'exempt'      => $cfg['enabled'] ? $svc->isExempt() : true,
+            'retryAfter'  => MaintenanceService::DEFAULT_RETRY_AFTER,
+        ];
     }
 
     /**
