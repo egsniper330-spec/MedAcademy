@@ -175,8 +175,30 @@ console.log('── Client: verdict model + silent recovery ──');
 
   // Status payload → verdict (recovery + keep message).
   ok(model.verdictFromStatus({ enabled: false }).state === 'NORMAL', 'client (19): enabled=false → NORMAL (recover to the app)');
-  const m2 = model.verdictFromStatus({ enabled: true, message: 'Back soon', retryAfter: 60 });
-  ok(m2.state === 'MAINTENANCE' && m2.message === 'Back soon', 'client: status enabled=true keeps MAINTENANCE + custom message');
+  const m2 = model.verdictFromStatus({ enabled: true, message: 'Back soon', retryAfter: 60 }, true);
+  ok(m2.state === 'MAINTENANCE' && m2.message === 'Back soon', 'client: status enabled=true + session keeps MAINTENANCE + custom message');
+  const m2u = model.verdictFromStatus({ enabled: true, message: 'Back soon', retryAfter: 60 }, false);
+  ok(m2u.state === 'MAINTENANCE_AUTH_AVAILABLE' && m2u.message === 'Back soon', 'client: status enabled=true + no session → AUTH_AVAILABLE (Login reachable)');
+
+  // ── FRESH-INSTALL / AUTH-AVAILABILITY MATRIX (scenarios A–I) ──
+  // B: maintenance ON + NO session → AUTH_AVAILABLE variant (Login stays reachable).
+  const freshB = model.verdictFromStatus({ enabled: true, message: 'Down', retryAfter: 60 }, false);
+  ok(freshB.state === 'MAINTENANCE_AUTH_AVAILABLE' && freshB.message === 'Down',
+    'fresh (B): unauthenticated device → MAINTENANCE_AUTH_AVAILABLE (Login never covered)');
+  // E: maintenance ON + authenticated normal user → full COVER_ALL verdict.
+  const freshE = model.verdictFromStatus({ enabled: true, message: 'Down' }, true);
+  ok(freshE.state === 'MAINTENANCE', 'fresh (E): authenticated non-exempt user → full MAINTENANCE gate');
+  ok(model.gateVisibilityForSession(freshB, false) === 'AUTH_SHELL_ONLY', 'fresh (B): visibility rule → AUTH_SHELL_ONLY without a session');
+  ok(model.gateVisibilityForSession(freshE, true) === 'COVER_ALL', 'fresh (E): visibility rule → COVER_ALL with a session');
+  // C/D: re-evaluation clears the gate ONLY with server-verified exemption.
+  ok(model.shouldKeepShellMountedBehindGate(true, true) === true, 'fresh (C,D): server-verified SA/whitelisted → normal app after login');
+  ok(model.shouldKeepShellMountedBehindGate(true, false) === false, 'fresh (E): normal user after login → stays gated (client role can never bypass)');
+  // I: recovery fires on the server's explicit enabled=false for BOTH variants.
+  ok(model.shouldClearMaintenanceOnStatusProbe(freshE, false) === true, 'fresh (I): MAINTENANCE + enabled=false → clear (silent recovery)');
+  ok(model.shouldClearMaintenanceOnStatusProbe(freshB, false) === true, 'fresh (I): AUTH_AVAILABLE + enabled=false → clear');
+  ok(model.shouldClearMaintenanceOnStatusProbe(freshE, true) === false, 'fresh: enabled=true never clears (still under maintenance)');
+  ok(model.shouldClearMaintenanceOnStatusProbe(freshE, undefined) === false, 'fresh: missing status never clears (fail closed)');
+  ok(model.shouldClearMaintenanceOnStatusProbe({ state: 'NORMAL' }, false) === false, 'fresh: NORMAL + enabled=false is a no-op (no spurious events)');
 
   // Probe failures NEVER end maintenance (18, 21: silent stability).
   const cur = model.verdictFrom503({ message: 'x' });
@@ -242,6 +264,17 @@ console.log('── Client: call-site wiring (structural) ──');
   // A: exemption evidence is server-derived and identity-bound.
   ok(/maintenance\/whoami/.test(svc), 'client (A): exemption evidence fetched from /maintenance/whoami (server-computed)');
   ok(/setMaintenanceExemptionUserId/.test(ctx), 'client (A): session provider binds evidence to the CURRENT identity (no cross-account reuse)');
+
+  // ── FRESH-INSTALL WIRING (structural) ──
+  // Gate consults the REAL session (never a client role) and yields to Login.
+  ok(/useSession\(\)/.test(gate), 'fresh: MaintenanceGate reads the REAL auth session (context from the auth pipeline)');
+  ok(/gateVisibilityForSession\(/.test(gate), 'fresh: gate visibility decided by the pure session rule (no ad-hoc checks)');
+  // Session lifecycle drives re-evaluation (C/D/E close the lockout paths).
+  ok(/reevaluateMaintenanceAfterAuth/.test(rootLayout) && /SessionMaintenanceBinder/.test(rootLayout),
+    'fresh (C,D,E): session provider triggers authenticated re-evaluation on sign-in/restore');
+  ok(/backendClient\.auth\.getSession\(\)/.test(svc), 'fresh: service derives hasSession from the REAL auth pipeline (never a client role)');
+  ok(/whoami/.test(svc) && /fetchExemptionEvidence\(getExemptionUserId\(\)\)/.test(svc),
+    'fresh (C,D): re-evaluation consults the server-computed exemption evidence');
 
   // Whitelist management UI untouched (SA screen keeps its flows).
   const sa = read('src/app/(app)/(superadmin)/maintenance.tsx');

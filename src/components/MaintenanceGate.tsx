@@ -28,8 +28,12 @@ import {
   subscribeMaintenance,
   getMaintenanceVerdict,
 } from '@/lib/maintenanceService';
+import { useSession } from '@/ctx';
 import { neuColors, useLayout } from '@/lib/neu';
-import { DEFAULT_MAINTENANCE_MESSAGE } from '@/lib/maintenanceStateModel';
+import {
+  DEFAULT_MAINTENANCE_MESSAGE,
+  gateVisibilityForSession,
+} from '@/lib/maintenanceStateModel';
 
 /** Bumped every time a MAINTENANCE→NORMAL recovery completes. */
 let recoveryEpoch = 0;
@@ -39,6 +43,11 @@ export function maintenanceEpoch(): number {
 
 export function MaintenanceGate({ children }: { children: React.ReactNode }) {
   const [verdict, setVerdict] = React.useState(getMaintenanceVerdict());
+  // REAL session state from the auth pipeline (SessionProvider). While it is
+  // still RESTORING, the gate renders nothing (no cover over Login) — a
+  // maintenance verdict computed during restore gets re-rendered by the
+  // subscription once isLoading resolves with the true session state.
+  const { session, isLoading } = useSession();
   const scheme = useColorScheme();
   const isDark = scheme === 'dark';
   const c = isDark ? neuColors.dark : neuColors.light;
@@ -62,7 +71,15 @@ export function MaintenanceGate({ children }: { children: React.ReactNode }) {
     []
   );
 
-  if (verdict.state !== 'MAINTENANCE') {
+  // NO session → Login must stay reachable. The MAINTENANCE_AUTH_AVAILABLE
+  // verdict renders NOTHING here: the authenticated shell owns the product
+  // notice, and the sign-in flow itself is never covered by the gate.
+  // (Visibility decision is the pure gateVisibilityForSession rule.)
+  if (
+    verdict.state !== 'MAINTENANCE' ||
+    gateVisibilityForSession(verdict, !!session) === 'AUTH_SHELL_ONLY' ||
+    isLoading
+  ) {
     return <>{children}</>;
   }
 

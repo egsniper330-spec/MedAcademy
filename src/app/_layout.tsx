@@ -42,6 +42,7 @@ import { initUpdateLifecycle } from '@/lib/updateConfigService';
 import { initOfflineTransitions } from '@/lib/offlineTransition';
 import { initAccountRefreshLifecycle } from '@/lib/accountRefresh';
 import { MaintenanceGate } from '@/components/MaintenanceGate';
+import { reevaluateMaintenanceAfterAuth } from '@/lib/maintenanceService';
 import { wireMaintenanceLifecycle } from '@/lib/maintenanceService';
 import "../global.css";
 
@@ -288,9 +289,9 @@ const RootLayout: React.FC = () => {
     // SafeAreaProvider MUST be at root — provides insets to every useSafeAreaInsets()
     // call throughout the entire app. Without it, insets.top/bottom return 0 on Android.
     <SafeAreaProvider>
-      <GestureHandlerRootView style={{ flex: 1 }}>
-        <SessionProvider>
-          <SecurityProvider>
+      <GestureHandlerRootView style={{ flex: 1 }}>          <SessionProvider>
+            <SessionMaintenanceBinder />
+            <SecurityProvider>
             {/* RootScreenCapture: iOS screenshot protection from app launch (before login) */}
             <RootScreenCapture />
             {/* ForceUpdateGate wraps ALL content — runs before auth, before navigation */}
@@ -316,5 +317,21 @@ const RootLayout: React.FC = () => {
     </SafeAreaProvider>
   );
 };
+
+// Binds the AUTH lifecycle to maintenance re-evaluation: the moment a session
+// becomes present (restore or fresh login), the service re-decides the
+// verdict with the SERVER-computed exemption evidence. This is what lets a
+// freshly installed Super Admin sign in while maintenance is ON and land in
+// the normal app (no 503 ever reaches them, so nothing else would clear the
+// verdict), and what upgrades the unauthenticated AUTH_AVAILABLE verdict to
+// the full gate for a just-signed-in normal user.
+function SessionMaintenanceBinder() {
+  const { session, isLoading } = useSession();
+  useEffect(() => {
+    if (isLoading) return; // decide only with the real session state
+    if (session) void reevaluateMaintenanceAfterAuth();
+  }, [session?.user?.id, isLoading]);
+  return null;
+}
 
 export default RootLayout;

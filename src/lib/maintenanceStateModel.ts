@@ -14,7 +14,8 @@
 
 export type MaintenanceVerdict =
   | { state: 'NORMAL' }
-  | { state: 'MAINTENANCE'; message: string; retryAfter: number };
+  | { state: 'MAINTENANCE'; message: string; retryAfter: number }
+  | { state: 'MAINTENANCE_AUTH_AVAILABLE'; message: string; retryAfter: number };
 
 /** The 503 error body contract (error.code === 'maintenance_mode'). */
 export interface Maintenance503Body {
@@ -142,6 +143,38 @@ export function isMaintenance503(status: number, body: Maintenance503Body | null
   return body?.maintenance?.enabled === true;
 }
 
+/**
+ * UNAUTHENTICATED visibility rule (pure decision) — the fresh-install fix.
+ *
+ * Maintenance is an availability restriction for the PRODUCT, not a lock over
+ * AUTHENTICATION. A visitor without a server-issued session must always be
+ * able to reach the sign-in flow, so an unauthenticated device shows the
+ * maintenance notice only where a signed-in user would (the authenticated
+ * shell), never as a full-screen cover over Login.
+ */
+export function gateVisibilityForSession(
+  verdict: MaintenanceVerdict,
+  hasSession: boolean
+): 'COVER_ALL' | 'AUTH_SHELL_ONLY' {
+  return hasSession ? 'COVER_ALL' : 'AUTH_SHELL_ONLY';
+}
+
+/**
+ * MAINTENANCE→NORMAL recovery with an EXEMPT identity that never saw a 503.
+ * A fresh-logged-in super_admin/whitelisted user receives no maintenance 503s
+ * (the server exempts their requests), so the only trigger for restoring the
+ * normal app is the public status probe reporting enabled=false.
+ */
+export function shouldClearMaintenanceOnStatusProbe(
+  current: MaintenanceVerdict,
+  statusEnabled: boolean | undefined
+): boolean {
+  return (
+    (current.state === 'MAINTENANCE' || current.state === 'MAINTENANCE_AUTH_AVAILABLE') &&
+    statusEnabled === false
+  );
+}
+
 /** Build the verdict from a confirmed maintenance 503 body. */
 export function verdictFrom503(body: Maintenance503Body | null): MaintenanceVerdict {
   const meta = body?.maintenance ?? {};
@@ -155,10 +188,12 @@ export function verdictFrom503(body: Maintenance503Body | null): MaintenanceVerd
 }
 
 /** Build the verdict from the GET /maintenance status payload. */
-export function verdictFromStatus(payload: { enabled?: boolean; message?: string; retryAfter?: number } | null | undefined): MaintenanceVerdict {
+export function verdictFromStatus(
+  payload: { enabled?: boolean; message?: string; retryAfter?: number } | null | undefined,
+  hasSession = false
+): MaintenanceVerdict {
   if (payload?.enabled === true) {
-    return {
-      state: 'MAINTENANCE',
+    const base = {
       message:
         (typeof payload.message === 'string' && payload.message.trim()) || DEFAULT_MAINTENANCE_MESSAGE,
       retryAfter:
@@ -166,6 +201,11 @@ export function verdictFromStatus(payload: { enabled?: boolean; message?: string
           ? payload.retryAfter
           : DEFAULT_RETRY_AFTER,
     };
+    // Unauthenticated device: Login must stay reachable — never cover it.
+    if (!hasSession) {
+      return { state: 'MAINTENANCE_AUTH_AVAILABLE', ...base };
+    }
+    return { state: 'MAINTENANCE', ...base };
   }
   return { state: 'NORMAL' };
 }
@@ -189,9 +229,10 @@ export function nextVerdictAfterProbe(
   current: MaintenanceVerdict,
   probeOk: boolean,
   payload: { enabled?: boolean; message?: string; retryAfter?: number } | null,
+  hasSession = false,
 ): MaintenanceVerdict {
   if (!probeOk) return current;
-  return verdictFromStatus(payload);
+  return verdictFromStatus(payload, hasSession);
 }
 
 /**

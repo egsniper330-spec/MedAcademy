@@ -48,11 +48,13 @@ import {
   isMaintenanceError,
   maintenancePollIntervalMs,
   shouldNotifyVerdictChange,
+  shouldClearMaintenanceOnStatusProbe,
   nextProbeDelayMs,
   setMaintenanceControlFlowActive,
   type MaintenanceVerdict,
 } from './maintenanceStateModel';
 import NetInfo from '@react-native-community/netinfo';
+import { backendClient } from '@/client/php';
 
 type Listener = (v: MaintenanceVerdict) => void;
 
@@ -167,7 +169,7 @@ export function notifyMaintenance503(
 ): void {
   const next = verdictFrom503(body);
   // The synchronous canary (pure module) is armed by php.ts BEFORE this call —
-  // every caller's catch block already sees expected-control-flow. The
+  // every caller's catch block already see expected-control-flow. The
   // module-level flag mirrors it for the poller guard and recovery logic.
   maintenanceActive = true;
 
@@ -182,6 +184,9 @@ export function notifyMaintenance503(
       // its pollers must keep running and no maintenance screen may mount.
       return;
     }
+    // A 503 only ever arrives for an AUTHENTICATED non-exempt caller (the
+    // server exempts the auth endpoints), so the COVER_ALL verdict is correct
+    // here by construction.
     publish(next);
   })();
 }
@@ -218,8 +223,34 @@ export async function probeMaintenanceStatus(): Promise<void> {
       // the state via notifyMaintenance503 in that case. Here a *successful*
       // response (gate exempted the route) decides recovery.
       if (res.error) return; // transient failure → keep current state, poll retries
-      const next = nextVerdictAfterProbe(current, true, res.data);
-      if (next.state === 'NORMAL' && current.state === 'MAINTENANCE') {
+      // Session-aware verdict: an unauthenticated device gets
+      // MAINTENANCE_AUTH_AVAILABLE (Login stays reachable), an authenticated
+      // non-exempt user gets the COVER_ALL MAINTENANCE verdict. The session
+      // state comes from the real auth pipeline (php.ts's stored session).
+      const hasSession = !!(await backendClient.auth.getSession()).data?.session?.access_token;
+      const next = nextVerdictAfterProbe(current, true, res.data, hasSession);
+      if (hasSession && (next.state === 'MAINTENANCE' || next.state === 'MAINTENANCE_AUTH_AVAILABLE')) {
+        // RACE + FOREGROUND GUARD: a server-verified exempt identity (fresh or
+        // restored SA/whitelisted session) must never be pushed under the gate
+        // by this probe — not even transiently — because the probe can resolve
+        // AFTER the sign-in re-evaluation (reevaluateMaintenanceAfterAuth) and
+        // would otherwise override its NORMAL verdict. Evidence is
+        // server-computed (whoami) and TTL-cached; fail-closed on error.
+        const exempt = await fetchExemptionEvidence(getExemptionUserId());
+        if (exempt) {
+          if (current.state !== 'NORMAL') {
+            maintenanceActive = false;
+            probeAttempt = 0;
+            publish({ state: 'NORMAL' });
+          }
+          return;
+        }
+      }
+      // Recovery fires ONLY on the server's explicit enabled=false (never a
+      // probe failure) — for any current maintenance variant. This is the
+      // ONLY exit for a fresh-logged-in SA/whitelisted user (they receive no
+      // 503s, so no notifyMaintenance503 path could ever clear their state).
+      if (shouldClearMaintenanceOnStatusProbe(current, res.data?.enabled)) {
         // Maintenance ENDED. Clear the canary first, then publish. The gate's
         // recovery effect re-runs the normal server-authoritative bootstrap
         // (profile refresh, revocation poll) — whitelist changes take effect
@@ -237,6 +268,42 @@ export async function probeMaintenanceStatus(): Promise<void> {
     }
   })();
   return probePromise;
+}
+
+/**
+ * AUTHENTICATED RE-EVALUATION — called by the session provider when a session
+ * becomes present (restore or fresh login). Two lockout paths close here:
+ *
+ *   1. Fresh SA/whitelisted login while MAINTENANCE is active: the verdict is
+ *      re-decided with the SERVER-computed exemption evidence
+ *      (GET /maintenance/whoami — never a client-declared role). An exempt
+ *      identity returns to the normal app immediately.
+ *   2. The unauthenticated MAINTENANCE_AUTH_AVAILABLE verdict (Login visible)
+ *      is re-classified to the full MAINTENANCE verdict once a session exists,
+ *      so a non-exempt user who just signed in lands on the maintenance
+ *      screen instead of the app.
+ */
+export async function reevaluateMaintenanceAfterAuth(): Promise<void> {
+  const stored = (await backendClient.auth.getSession()).data?.session;
+  const hasSession = !!stored?.access_token;
+  if (!hasSession) return; // signed out → nothing to re-decide
+  if (current.state !== 'MAINTENANCE' && current.state !== 'MAINTENANCE_AUTH_AVAILABLE') return;
+
+  const exempt = await fetchExemptionEvidence(getExemptionUserId());
+  if (exempt) {
+    maintenanceActive = false;
+    probeAttempt = 0;
+    publish({ state: 'NORMAL' });
+    return;
+  }
+  // Non-exempt authenticated user: upgrade the AUTH_AVAILABLE variant to the
+  // full gate. Reuse the stored message/retryAfter (same server verdict).
+  const v = current as { message?: string; retryAfter?: number };
+  publish({
+    state: 'MAINTENANCE',
+    message: v.message ?? '',
+    retryAfter: v.retryAfter ?? 300,
+  });
 }
 
 /** Cold-start / foreground entry point (wired from app/_layout.tsx). */
@@ -276,4 +343,9 @@ export function __resetMaintenanceForTests(): void {
   exemptionCache = null;
   exemptionUserId = null;
   if (pollTimer != null) { clearTimeout(pollTimer); pollTimer = null; }
+}
+
+/** Test seam: inspect the raw current verdict (incl. AUTH_AVAILABLE variant). */
+export function __maintenanceVerdictForTests(): MaintenanceVerdict {
+  return current;
 }
