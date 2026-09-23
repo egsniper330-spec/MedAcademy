@@ -385,12 +385,20 @@ jobs:
         run: |
           set -euo pipefail
 
-          EXJSRT="node_modules/expo-modules-core/ios/JSI/EXJavaScriptRuntime.mm"
+          # Resolve EXJavaScriptRuntime.mm wherever expo-modules-core landed in
+          # node_modules (root OR nested under expo/ — npm hoisting differs per
+          # lockfile; run #95 failed because only the nested copy exists).
+          # Prefer the shallowest copy so pod headers and this patch agree.
+          EXJSRT=$(find node_modules -path "*/expo-modules-core/ios/JSI/EXJavaScriptRuntime.mm" \
+            -not -path "*/node_modules/*/node_modules/*/node_modules/*" 2>/dev/null \
+            | sort -t/ -k2 | awk '{print length, $0}' | sort -n | head -1 | cut -d' ' -f2-)
 
-          if [ ! -f "$EXJSRT" ]; then
-            echo "FAIL: $EXJSRT not found"
+          if [ -z "$EXJSRT" ] || [ ! -f "$EXJSRT" ]; then
+            echo "FAIL: EXJavaScriptRuntime.mm not found anywhere under node_modules"
+            find node_modules -maxdepth 4 -type d -name 'expo-modules-core' 2>/dev/null
             exit 1
           fi
+          echo "Resolved EXJavaScriptRuntime.mm: $EXJSRT"
 
           echo "--- EXJavaScriptRuntime.mm BEFORE patch (lines 8-14) ---"
           sed -n '8,14p' "$EXJSRT"
