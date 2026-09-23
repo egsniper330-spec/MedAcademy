@@ -32,9 +32,7 @@
 extern void RCTSetCustomNSURLSessionConfigurationProvider(
     NSURLSessionConfiguration * (^provider)(void));
 
-@interface PinningInitializer : NSObject
-+ (void)install;
-@end
+#import "PinningInitializer.h"
 
 @implementation PinningInitializer
 

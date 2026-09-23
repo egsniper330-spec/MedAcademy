@@ -2029,7 +2029,7 @@ function withIOSSwiftSources(config) {
 
     // ── 1. Copy Swift + ObjC source files ─────────────────────────────────
     const pluginIosDir = path.join(projectRoot, 'plugins', 'ios');
-    const filesToCopy  = ['IOSSecurityModule.swift', 'IOSSecurityModule.m', 'PinningURLProtocol.swift', 'PinningInitializer.m'];
+    const filesToCopy  = ['IOSSecurityModule.swift', 'IOSSecurityModule.m', 'PinningURLProtocol.swift', 'PinningInitializer.m', 'PinningInitializer.h'];
     for (const file of filesToCopy) {
       const src  = path.join(pluginIosDir, file);
       const dest = path.join(iosAppDir, file);
@@ -2090,6 +2090,12 @@ function withIOSSwiftSources(config) {
       '// build config by the withIOSSwiftSources plugin) allows the React module\'s',
       '// umbrella header to include system headers without a compile error.',
       '@import React;',
+      '',
+      '// PinningInitializer (implemented in PinningInitializer.m, copied to this',
+      '// same directory) bootstraps SSL pinning before React loads. Its class',
+      '// interface must be visible to Swift because AppDelegate.swift calls',
+      '// PinningInitializer.install() from didFinishLaunching.',
+      '#import "PinningInitializer.h"',
       '',
     ].join('\n');
 
@@ -2375,7 +2381,11 @@ function withIOSXcodeFiles(config) {
       );
     });
 
-    const filesToAdd = ['IOSSecurityModule.swift', 'IOSSecurityModule.m', 'PinningURLProtocol.swift'];
+    // PinningInitializer.m MUST be registered as a compile source: AppDelegate.swift
+    // calls PinningInitializer.install(), so its ObjC implementation has to be
+    // compiled and linked into the app binary (and its header is imported by the
+    // bridging header so Swift can see the class).
+    const filesToAdd = ['IOSSecurityModule.swift', 'IOSSecurityModule.m', 'PinningURLProtocol.swift', 'PinningInitializer.m'];
 
     for (const fileName of filesToAdd) {
       const filePath = `${appName}/${fileName}`;

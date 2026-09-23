@@ -1,4 +1,4 @@
-// Rewrites plugins/ios/PinningURLProtocol.swift as a real NSURLProtocol subclass.
+// Rewrites plugins/ios/PinningURLProtocol.swift as a real URLProtocol subclass.
 //
 // WHY NSURLProtocol (not an auth-challenge delegate): RN's production iOS
 // network handler (Libraries/Network/RCTHTTPRequestHandler.mm) creates its
@@ -10,8 +10,13 @@
 // an inner pinned URLSession that we own (with a challenge delegate); all other
 // traffic passes through untouched (zero false-positive surface).
 import Foundation
+import CryptoKit
 
-final class PinningURLProtocol: NSURLProtocol, URLSessionDataDelegate {
+// ObjC name is pinned so PinningInitializer.m can locate the class at runtime
+// via NSClassFromString("PinningURLProtocol") (a Swift class's default ObjC
+// name is mangled; @objc(...) keeps it stable).
+@objc(PinningURLProtocol)
+final class PinningURLProtocol: URLProtocol, URLSessionDataDelegate {
 
     private static let pinsKey = "MEDA_SPKI_PINS"
 
@@ -52,19 +57,22 @@ final class PinningURLProtocol: NSURLProtocol, URLSessionDataDelegate {
 
     // MARK: - NSURLProtocol plumbing
 
-    static func canInit(with request: URLRequest) -> Bool {
+    // URLProtocol overrides its canInit/canonicalRequest class methods (ObjC
+    // class methods — dynamically dispatched, hence the `override class func`).
+    override class func canInit(with request: URLRequest) -> Bool {
         guard !pins.isEmpty else { return false }               // dev/unpinned build: inert
         guard request.url?.scheme?.lowercased() == "https" else { return false }
         guard let host = request.url?.host?.lowercased() else { return false }
         return pinnedHosts.contains(host)
     }
 
-    static func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
 
     override func startLoading() {
         let innerConfig = URLSessionConfiguration.ephemeral
         // Guard against re-entrancy: the inner session must NOT consult us again.
-        innerConfig.protocolClasses = (innerConfig.protocolClasses ?? []).filter { $0 != type(of: self) }
+        innerConfig.protocolClasses = (innerConfig.protocolClasses ?? [])
+            .filter { ($0 as? PinningURLProtocol.Type) == nil }
         innerConfig.httpShouldSetCookies = false
         let inner = URLSession(configuration: innerConfig, delegate: self, delegateQueue: nil)
         innerSession = inner
@@ -151,10 +159,7 @@ final class PinningURLProtocol: NSURLProtocol, URLSessionDataDelegate {
         }
     }
 
-    func urlSession(_ session: URLSession, task: URLSessionTask,
-                    didSendBodyData bytesSent: Int64, totalBytesSent: Int64,
-                    totalBytesExpectedToSend: Int64) {
-        client?.urlProtocol(self, didSendBodyData: totalBytesSent,
-                            totalBytesExpectedToSend: totalBytesExpectedToSend)
-    }
+    // NOTE: no upload-progress forwarding — URLProtocolClient has no member for
+    // it, and the hosting session (RN's) already reports didSendBodyData for
+    // tasks served through this protocol.
 }
