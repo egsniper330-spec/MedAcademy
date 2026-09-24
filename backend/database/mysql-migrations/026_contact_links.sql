@@ -1,0 +1,55 @@
+-- ============================================================================
+-- Migration 026 — Contact Us link list (structured, server-managed)
+-- ============================================================================
+-- WHY
+--   `app_branding` carries one FIXED column per contact channel
+--   (contact_email, contact_phone, whatsapp_url, telegram_url, website_url,
+--   facebook_url, instagram_url, twitter_url, youtube_url, linkedin_url).
+--   That works for editing those specific channels, but it cannot express:
+--     * a link that does not have a column (e.g. a second Instagram account,
+--       a support portal, a TikTok page),
+--     * ordering,
+--     * disabling a link without deleting its destination,
+--     * adding a new channel type without a schema change.
+--
+--   `contact_links` adds a generic, ordered list next to those columns. The
+--   existing columns are UNTOUCHED and keep working (Contact Us renders the
+--   configured list first, then the legacy fixed channels that have a value),
+--   so nothing that works today regresses.
+--
+-- SHAPE (validated server-side by PlatformController::sanitizeContactLinks)
+--   [
+--     { "platform": "whatsapp", "label": "WhatsApp",
+--       "url": "https://wa.me/201234567890", "enabled": true },
+--     ...
+--   ]
+--   * platform ∈ whatsapp | telegram | facebook | instagram | twitter |
+--                website | email | phone   (extensible — stored as a stable key)
+--   * label    — friendly display text shown to users (never the raw URL)
+--   * url      — the RAW destination: http(s) for web platforms, a bare email
+--                for `email`, a bare phone number for `phone`. The client adds
+--                mailto:/tel: when opening, which is why a javascript:/data:
+--                payload can never be stored or rendered.
+--   * enabled  — disabled rows stay stored but are not returned to the app
+--   * list order is the display order
+--
+-- SAFETY
+--   * Additive only: one column, deterministic default. No existing column,
+--     index, constraint, row or trigger is modified.
+--   * Existing production rows are preserved; they receive '[]' (meaning
+--     "no custom links yet"), and Contact Us then shows exactly what it shows
+--     today. Nothing is deleted or blanked.
+--   * Plain data only — no executable content is ever stored here.
+--
+-- IDEMPOTENCE
+--   MySQL has no `ADD COLUMN IF NOT EXISTS`. Re-running this file after it has
+--   been applied fails with ERROR 1060 (duplicate column) and changes nothing —
+--   that is the expected, safe outcome; skip the file in that case.
+--
+-- APPLY ON api.medacademy.site:
+--   mysql -u <user> -p <db> < 026_contact_links.sql
+-- ============================================================================
+
+ALTER TABLE `app_branding`
+  ADD COLUMN `contact_links` JSON DEFAULT ('[]') NOT NULL
+  COMMENT 'Ordered Contact Us links: [{platform,label,url,enabled}] — validated server-side, never HTML';

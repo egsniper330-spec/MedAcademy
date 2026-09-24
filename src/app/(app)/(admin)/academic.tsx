@@ -62,7 +62,7 @@ function InputModal({
 }
 
 // ─── Main screen ─────────────────────────────────────────────────────────────
-export default function AcademicManagement() {
+export default function AcademicManagement({ backTo }: { backTo?: string } = {}) {
   const scheme = useColorScheme();
   const isDark = scheme === 'dark';
   const c = isDark ? neuColors.dark : neuColors.light;
@@ -275,7 +275,12 @@ export default function AcademicManagement() {
     <View style={{ flex: 1, backgroundColor: c.base }}>
       <ScrollView
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />} contentContainerStyle={{ paddingBottom: safeBottom(layout.insets.bottom) }}>
-          <PageHeader title="Academic Structure" subtitle="Manage universities, faculties and levels" />
+          <PageHeader
+            title="Academic Structure"
+            subtitle="Manage universities, faculties and levels"
+            showBack
+            backFallback={backTo ?? '/admin-overview'}
+          />
 
         <View style={{ paddingHorizontal: layout.screenPx }}>
 

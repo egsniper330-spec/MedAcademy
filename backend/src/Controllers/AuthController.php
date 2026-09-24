@@ -9,6 +9,7 @@ use MedAcademy\Database\Database;
 use MedAcademy\Http\ApiException;
 use MedAcademy\Http\Request;
 use MedAcademy\Services\AuthService;
+use MedAcademy\Services\FeatureFlagService;
 use MedAcademy\Services\AuditService;
 use MedAcademy\Utils\Uuid;
 use MedAcademy\Validation\Validator;
@@ -234,6 +235,11 @@ final class AuthController
      */
     public function impersonate(Request $request): array
     {
+        // Feature kill switch (Super Admin only capability, so no SA exemption:
+        // the flag exists precisely to disable this action). It can never lock
+        // anyone out — the console and account recovery do not depend on it.
+        (new FeatureFlagService())->assertEnabled('impersonation', $request);
+
         $body = $request->json();
         $targetUserId = (string) ($body['target_user_id'] ?? '');
         $actorId = $request->user['id'];

@@ -7,6 +7,7 @@ namespace MedAcademy\Controllers;
 use MedAcademy\Http\ApiException;
 use MedAcademy\Http\Request;
 use MedAcademy\Services\AuthService;
+use MedAcademy\Services\FeatureFlagService;
 use MedAcademy\Services\SecurityService;
 
 final class SecurityController
@@ -133,6 +134,9 @@ final class SecurityController
 
     public function blockDevice(Request $request): array
     {
+        // Device-management kill switch (same policy as the admin reset path).
+        (new FeatureFlagService())->assertEnabled('device_management', $request);
+
         $deviceId = \MedAcademy\Utils\Uuid::normalize((string) $request->params['id']);
         $reason = isset($request->json()['reason']) ? (string) $request->json()['reason'] : null;
         $this->security->blockDevice($deviceId, $request->user['id'], $reason);

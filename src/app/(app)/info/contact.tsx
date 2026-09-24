@@ -19,8 +19,25 @@ import { getBranding } from '@/lib/api';
 import { useCmsSections } from '@/lib/cmsContent';
 import {
   Mail, Phone, Globe, MessageCircle, Send,
-  HeartHandshake, ChevronRight,
+  HeartHandshake, ChevronRight, Camera, Hash, Users, Link2,
 } from 'lucide-react-native';
+import { parseContactLinks, contactLinkHref } from '@/lib/branding';
+
+/**
+ * Presentation for each admin-configured link platform (CMS → Contact Us).
+ * Users only ever see the friendly label + this description; the destination
+ * stays in code (privacy contract at the top of this file).
+ */
+const LINK_META: Record<string, { icon: React.ElementType; color: string; description: string }> = {
+  whatsapp:  { icon: MessageCircle, color: '#16A34A', description: 'Chat with us on WhatsApp.' },
+  telegram:  { icon: Send,          color: '#2DA8FF', description: 'Message us on Telegram.' },
+  facebook:  { icon: Users,         color: '#1877F2', description: 'Visit our Facebook page.' },
+  instagram: { icon: Camera,        color: '#E1306C', description: 'Follow us on Instagram.' },
+  twitter:   { icon: Hash,          color: '#0F172A', description: 'Follow us on X.' },
+  website:   { icon: Globe,         color: '#6B7280', description: 'Visit our official website.' },
+  email:     { icon: Mail,          color: '#DC2626', description: 'Send us an email.' },
+  phone:     { icon: Phone,         color: '#0EA5E9', description: 'Call this number.' },
+};
 
 // ── Contact channel definition ────────────────────────────────────────────────
 type ContactItem = {
@@ -119,7 +136,27 @@ export default function ContactPage() {
   // Build channels — real values live here, descriptions shown in UI instead.
   const contacts: ContactItem[] = [];
 
-  if (branding?.contact_email) {
+  // ── Admin-configured links (Super Admin → CMS Pages → Contact Us) ──────────
+  // Pushed FIRST so the operator's chosen order is exactly what users see.
+  // A disabled link stays saved on the server but is never rendered here, and
+  // a bad destination degrades to a harmless no-op instead of crashing the tap.
+  const customLinks = parseContactLinks((branding as any)?.contact_links).filter(l => l.enabled);
+  for (const link of customLinks) {
+    const meta = LINK_META[link.platform] ?? { icon: Link2, color: c.primary, description: 'Tap to open.' };
+    const href = contactLinkHref(link);
+    contacts.push({
+      icon: meta.icon,
+      color: meta.color,
+      label: link.label,
+      description: meta.description,
+      onPress: () => { void Linking.openURL(href).catch(() => {}); },
+    });
+  }
+  // Platforms already covered by a configured link — the legacy fixed channels
+  // below must not duplicate them.
+  const configured = new Set(customLinks.map(l => l.platform));
+
+  if (branding?.contact_email && !configured.has('email')) {
     contacts.push({
       icon: Mail, color: '#DC2626',
       label: 'Email',
@@ -127,7 +164,7 @@ export default function ContactPage() {
       onPress: () => Linking.openURL(`mailto:${branding.contact_email}`),
     });
   }
-  if (branding?.support_email && branding.support_email !== branding.contact_email) {
+  if (branding?.support_email && branding.support_email !== branding.contact_email && !configured.has('email')) {
     contacts.push({
       icon: Mail, color: '#7C3AED',
       label: 'Support Email',
@@ -135,7 +172,7 @@ export default function ContactPage() {
       onPress: () => Linking.openURL(`mailto:${branding.support_email}`),
     });
   }
-  if (branding?.contact_phone) {
+  if (branding?.contact_phone && !configured.has('phone')) {
     contacts.push({
       icon: Phone, color: '#16A34A',
       label: 'Phone',
@@ -143,7 +180,7 @@ export default function ContactPage() {
       onPress: () => Linking.openURL(`tel:${branding.contact_phone}`),
     });
   }
-  if (branding?.whatsapp_url) {
+  if (branding?.whatsapp_url && !configured.has('whatsapp')) {
     const raw  = branding.whatsapp_url as string;
     const href = raw.startsWith('http') ? raw : `https://wa.me/${raw.replace(/\D/g, '')}`;
     contacts.push({
@@ -153,7 +190,7 @@ export default function ContactPage() {
       onPress: () => Linking.openURL(href),
     });
   }
-  if (branding?.telegram_url) {
+  if (branding?.telegram_url && !configured.has('telegram')) {
     const raw  = branding.telegram_url as string;
     const href = raw.startsWith('http') ? raw : `https://t.me/${raw.replace('@', '')}`;
     contacts.push({
@@ -163,7 +200,7 @@ export default function ContactPage() {
       onPress: () => Linking.openURL(href),
     });
   }
-  if (branding?.website_url) {
+  if (branding?.website_url && !configured.has('website')) {
     contacts.push({
       icon: Globe, color: c.primary,
       label: 'Website',

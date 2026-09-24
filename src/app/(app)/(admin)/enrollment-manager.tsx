@@ -259,7 +259,7 @@ function EnrollmentRow({ row, isSuperAdmin, onRemove, onVisibilityChange, changi
 }
 
 // ─── Main screen ──────────────────────────────────────────────────────────────
-export default function EnrollmentManager() {
+export default function EnrollmentManager({ backTo }: { backTo?: string } = {}) {
   const scheme = useColorScheme();
   const isDark = scheme === 'dark';
   const c = isDark ? neuColors.dark : neuColors.light;
@@ -406,7 +406,11 @@ export default function EnrollmentManager() {
       behavior={process.env.EXPO_OS === 'ios' ? 'padding' : 'height'}
       style={{ flex: 1, backgroundColor: c.base }}
     >
-      <PageHeader title="Enrollment Manager" />
+      <PageHeader
+        title="Enrollment Manager"
+        showBack
+        backFallback={backTo ?? '/admin-overview'}
+      />
       <ScrollView
         contentContainerStyle={{ padding: 16 }}
         keyboardShouldPersistTaps="handled"

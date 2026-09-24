@@ -240,7 +240,7 @@ export default function ViolationManagementScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: c.base }}>
-      <PageHeader title="Violations" subtitle="Content protection violation logs" />
+      <PageHeader title="Violations" subtitle="Content protection violation logs" showBack backFallback="/sa-platform" />
 
       {/* Search + filters */}
       <View style={{ paddingHorizontal: 16, paddingBottom: 8, gap: 10 }}>

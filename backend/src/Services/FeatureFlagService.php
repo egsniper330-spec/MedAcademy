@@ -139,6 +139,80 @@ final class FeatureFlagService
             'default'     => true,
             'superadmin_exempt' => true,
         ],
+        'course_editing' => [
+            'label'       => 'Course Editing',
+            'description' => 'Allow editing an existing course. Enforced on PATCH /courses/{id}. Course content, lessons and enrollments are never modified by the flag itself.',
+            'category'    => 'courses',
+            'default'     => true,
+            'superadmin_exempt' => true,
+        ],
+
+        // ── Video kill switches ──────────────────────────────────────────────
+        // Separate from the per-provider policy (Video Providers console): these
+        // stop the AUTHORIZATION step itself, which is the only reliable
+        // server-side lever for a playback incident. Existing offline downloads
+        // and DRM licences are never revoked or deleted by either flag.
+        'video_playback' => [
+            'label'       => 'Video Playback',
+            'description' => 'Master switch for obtaining video authorization. Enforced on POST /video/otp and POST /video/offline-authorize. Already-downloaded offline videos keep working; re-enabling restores playback immediately.',
+            'category'    => 'video',
+            'default'     => true,
+            'superadmin_exempt' => true,
+        ],
+        'video_offline_downloads' => [
+            'label'       => 'Offline Video Downloads',
+            'description' => 'Allow NEW offline downloads. Enforced on POST /video/offline-authorize only — online playback is unaffected and existing downloads are never deleted or corrupted.',
+            'category'    => 'video',
+            'default'     => true,
+            'superadmin_exempt' => true,
+        ],
+
+        // ── Administration surfaces ──────────────────────────────────────────
+        'impersonation' => [
+            'label'       => 'Impersonation',
+            'description' => 'Allow Super Admin to sign in as another user. Enforced on POST /auth/impersonate. Sessions are unaffected; re-enabling restores the capability.',
+            'category'    => 'admin',
+            'default'     => true,
+            // Deliberately NOT exempt: the flag would do nothing for its only
+            // possible caller, and it cannot lock anyone out of the console
+            // (this page and account recovery never depend on it).
+            'superadmin_exempt' => false,
+        ],
+        'device_management' => [
+            'label'       => 'Device Management',
+            'description' => 'Allow admins to block or reset a user\' device. Enforced on POST /security/devices/{id}/block and POST /admin/users/{id}/devices/reset. No device rows or sessions are deleted, so re-enabling restores prior state.',
+            'category'    => 'admin',
+            'default'     => true,
+            'superadmin_exempt' => true,
+        ],
+        'db_audit' => [
+            'label'       => 'Database Audit',
+            'description' => 'Allow running the low-level database audit. Enforced on POST /analytics/db-audit. Read-only diagnostics — no data is written, changed or removed.',
+            'category'    => 'admin',
+            'default'     => true,
+            'superadmin_exempt' => true,
+        ],
+        'trash_cleanup' => [
+            'label'       => 'Trash Cleanup',
+            'description' => 'Allow permanently purging expired trash. Enforced on POST /admin/trash-cleanup. This is the ONLY irreversibly destructive admin operation, so it has its own kill switch; restore and inspection keep working when it is off.',
+            'category'    => 'admin',
+            'default'     => true,
+            'superadmin_exempt' => true,
+        ],
+        'violation_management' => [
+            'label'       => 'Violation Management',
+            'description' => 'Allow resetting a user\'s content-protection violation count. Enforced on POST /rpc/admin-reset-violations. Recording violations is never blocked — only the clearing of strikes is gated.',
+            'category'    => 'admin',
+            'default'     => true,
+            'superadmin_exempt' => true,
+        ],
+        'video_monitoring' => [
+            'label'       => 'Video Health Scans',
+            'description' => 'Allow running video health scans. Enforced on POST /video/health-scan. Refusal-only: playback, uploads and stored scan history are untouched.',
+            'category'    => 'video',
+            'default'     => true,
+            'superadmin_exempt' => true,
+        ],
     ];
 
     /** Per-process cache of the resolved state (shared by all instances). */

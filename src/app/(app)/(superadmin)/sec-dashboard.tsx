@@ -173,7 +173,7 @@ export default function SecurityDashboard() {
 
   return (
     <View style={{ flex: 1, backgroundColor: c.base }}>
-      <PageHeader title="Security Dashboard" />
+      <PageHeader title="Security Dashboard" showBack backFallback="/sa-platform" />
       <ScrollView
         contentContainerStyle={{ padding: layout.screenPx, gap: layout.sectionGap }}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />}

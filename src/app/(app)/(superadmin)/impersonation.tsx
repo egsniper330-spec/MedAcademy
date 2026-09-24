@@ -132,7 +132,7 @@ export default function ImpersonationScreen() {
 
   return (
     <ScrollView style={{ flex: 1, backgroundColor: c.base }} contentContainerStyle={{ paddingBottom: safeBottom(layout.insets.bottom) }}>
-      <PageHeader title="Impersonation" subtitle="Log in as another user" accentColor="#D97706" />
+      <PageHeader title="Impersonation" subtitle="Log in as another user" accentColor="#D97706" showBack backFallback="/sa-platform" />
 
       <View style={{ paddingHorizontal: layout.screenPx }}>
 

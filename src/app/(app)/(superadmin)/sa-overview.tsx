@@ -296,8 +296,8 @@ export default function SuperAdminDashboard() {
 
             <SectionLabel label="System Snapshot" c={c} />
             <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: layout.itemGap }}>
-              <KpiCard label="Universities"    value={stats.totalUniversities}  icon={GraduationCap}  color="#2DA8FF" path="/academic"     c={c} isDark={isDark} />
-              <KpiCard label="Faculties"       value={stats.totalFaculties}     icon={BookOpen}       color="#7C3AED" path="/academic"     c={c} isDark={isDark} />
+              <KpiCard label="Universities"    value={stats.totalUniversities}  icon={GraduationCap}  color="#2DA8FF" path="/sa-academic"     c={c} isDark={isDark} />
+              <KpiCard label="Faculties"       value={stats.totalFaculties}     icon={BookOpen}       color="#7C3AED" path="/sa-academic"     c={c} isDark={isDark} />
               <KpiCard label="Admin Staff"     value={stats.totalAdmins}        icon={UserCog}        color="#EF4444" path="/sa-users"  c={c} isDark={isDark} />
               <KpiCard label="Total Users"     value={stats.totalUsers}         icon={Users}          color={c.primary} path="/sa-users" c={c} isDark={isDark} />
             </View>

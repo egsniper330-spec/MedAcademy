@@ -9,6 +9,7 @@ use MedAcademy\Http\ApiException;
 use MedAcademy\Http\Request;
 use MedAcademy\Http\Response;
 use MedAcademy\Services\AuditService;
+use MedAcademy\Services\FeatureFlagService;
 use MedAcademy\Services\IntegrityService;
 use MedAcademy\Services\SecurityEvidenceService;
 use MedAcademy\Services\VideoProviderPolicyService;
@@ -31,8 +32,10 @@ use MedAcademy\Video\VdoCipherService;
  */
 final class VideoController
 {
-    public function __construct(private readonly VdoCipherService $video = new VdoCipherService())
-    {
+    public function __construct(
+        private readonly VdoCipherService $video = new VdoCipherService(),
+        private readonly FeatureFlagService $flags = new FeatureFlagService()
+    ) {
     }
 
     public function otp(Request $request): array
@@ -42,6 +45,11 @@ final class VideoController
         if ($videoId === '') {
             throw new ApiException(400, 'video_id is required');
         }
+
+        // ── FEATURE KILL SWITCH ──────────────────────────────────────────
+        // Stops NEW authorization for everyone (except Super Admin, who must
+        // stay able to verify the platform) without having to ship a build.
+        $this->flags->assertEnabled('video_playback', $request);
 
         // ── PROVIDER AVAILABILITY POLICY (pure availability layer) ───────
         // Runs BEFORE the security gates only so a policy-refused user never
@@ -109,6 +117,13 @@ final class VideoController
         if ($videoId === '') {
             throw new ApiException(400, 'video_id is required');
         }
+
+        // ── FEATURE KILL SWITCHES (playback + new downloads) ─────────────
+        // Both must pass. They gate only the ISSUE of a new authorization; an
+        // existing offline download keeps playing because nothing stored is
+        // ever touched here.
+        $this->flags->assertEnabled('video_playback', $request);
+        $this->flags->assertEnabled('video_offline_downloads', $request);
 
         // ── PROVIDER AVAILABILITY POLICY (same layer as otp()) ───────────
         // No NEW online or offline VdoCipher authorization while the provider
@@ -824,6 +839,9 @@ final class VideoController
      */
     public function healthScan(Request $request): array
     {
+        // Diagnostics kill switch — read-only scan, nothing stored is touched.
+        $this->flags->assertEnabled('video_monitoring', $request);
+
         $body = $request->json();
         $uploadId = isset($body['upload_id']) ? (string) $body['upload_id'] : null;
         $actorId = $request->user['id'];

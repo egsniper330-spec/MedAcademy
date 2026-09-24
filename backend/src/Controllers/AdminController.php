@@ -211,6 +211,10 @@ final class AdminController
 
     public function resetDevices(Request $request): array
     {
+        // Device-management kill switch: refusals only — no device row is
+        // deleted, so re-enabling restores prior state.
+        (new FeatureFlagService())->assertEnabled('device_management', $request);
+
         $userId = \MedAcademy\Utils\Uuid::normalize((string) $request->params['id']);
         Database::instance()->query(
             "UPDATE devices SET status = 'logged_out', trust_level = 'revoked',
@@ -1009,6 +1013,10 @@ final class AdminController
      */
     public function runTrashCleanup(Request $request): array
     {
+        // The only irreversible admin operation — its own kill switch. Refusing
+        // here deletes nothing, so switching the flag off can never lose data.
+        (new FeatureFlagService())->assertEnabled('trash_cleanup', $request);
+
         $db = Database::instance();
         $deleted = 0;
         $failed = 0;

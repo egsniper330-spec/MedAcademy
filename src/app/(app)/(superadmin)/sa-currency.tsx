@@ -8,5 +8,5 @@
 import CurrencySettings from '@/app/(app)/(superadmin)/currency';
 
 export default function SuperAdminCurrency() {
-  return <CurrencySettings backTo="/sa-platform" />;
+  return <CurrencySettings backTo="/sa-finance" />;
 }

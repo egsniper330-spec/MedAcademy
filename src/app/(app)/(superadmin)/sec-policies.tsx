@@ -150,7 +150,7 @@ export default function SecurityPoliciesScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: c.base }}>
-      <PageHeader title="Security Policies" />
+      <PageHeader title="Security Policies" showBack backFallback="/sa-platform" />
       <ScrollView
         contentContainerStyle={{ padding: layout.screenPx, gap: layout.sectionGap }}
       >

@@ -13,6 +13,7 @@ import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system';
 import { fetch } from 'expo/fetch';
 import { createManagedUser, getUniversities, getFaculties, getAcademicLevels, type CreateUserPayload } from '@/lib/api';
+import { PageHeader } from '@/components/PageHeader';
 import { NeuCard } from '@/components/NeuCard';
 import { NeuButton } from '@/components/NeuButton';
 import { useToast } from '@/components/Toast';
@@ -55,7 +56,7 @@ function parseCSV(text: string): string[][] {
   );
 }
 
-export default function BulkImportScreen() {
+export default function BulkImportScreen({ backTo }: { backTo?: string } = {}) {
   const scheme = useColorScheme();
   const isDark = scheme === 'dark';
   const c    = isDark ? neuColors.dark : neuColors.light;
@@ -174,11 +175,15 @@ export default function BulkImportScreen() {
 
   return (
     <ScrollView style={{ flex: 1, backgroundColor: c.base }} contentContainerStyle={{ paddingBottom: safeBottom(layout.insets.bottom) }}>
+      <PageHeader
+        title="Bulk Import"
+        subtitle="Import users from CSV"
+        accentColor={c.primary}
+        showBack
+        backFallback={backTo ?? '/admin-overview'}
+      />
+
       <View style={{ padding: layout.screenPx }}>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 4, marginTop: 8 }}>
-          <Upload size={22} color={c.primary} />
-          <Text style={{ fontSize: 24, fontWeight: '800', color: c.text }}>Bulk Import</Text>
-        </View>
         <Text style={{ fontSize: 13, color: c.text, opacity: 0.5, marginBottom: 20 }}>
           Import users from CSV. Download the template, fill it in, then upload.
         </Text>

@@ -409,17 +409,21 @@ function read(rel) {
   const hub = read('src/app/(app)/(superadmin)/sa-platform.tsx');
   ok(/path="\/sa-cms"/.test(hub) && /path="\/sa-system-providers"/.test(hub),
     'nav: Platform hub links stay inside the Super Admin shell');
-  ok(/onBack=\{\(\) => router\.push\('\/sa-platform'\)\}/.test(read('src/app/(app)/(superadmin)/video-providers.tsx')),
-    'nav: Video Providers header has the explicit ← Platform action');
-  // Multi-hub screens: every Platform child MUST default backTo="/sa-platform".
-  for (const [route, file] of [
-    ['sa-currency', 'src/app/(app)/(superadmin)/sa-currency.tsx'],
-    ['sa-content-protection', 'src/app/(app)/(superadmin)/sa-content-protection.tsx'],
-    ['sa-video-monitor', 'src/app/(app)/(superadmin)/sa-video-monitor.tsx'],
+  // Video Providers is reachable from both /sa-platform and /sa-content, so the
+  // arrow pops the real parent and falls back to Platform when there is none.
+  const vp = read('src/app/(app)/(superadmin)/video-providers.tsx');
+  ok(/showBack\n/.test(vp) && /backFallback="\/sa-platform"/.test(vp),
+    'nav: Video Providers header has an explicit back action (fallback ← Platform)');
+  // Multi-hub wrappers: each one declares the hub that actually lists it, so a
+  // no-history entry never dead-ends on an unrelated section.
+  for (const [route, file, target] of [
+    ['sa-currency', 'src/app/(app)/(superadmin)/sa-currency.tsx', '/sa-finance'],
+    ['sa-content-protection', 'src/app/(app)/(superadmin)/sa-content-protection.tsx', '/sa-content'],
+    ['sa-video-monitor', 'src/app/(app)/(superadmin)/sa-video-monitor.tsx', '/sa-platform'],
   ]) {
     const w = read(file);
-    ok(new RegExp(`backTo="\\/sa-platform"`).test(w),
-      `nav: ${route} wrapper passes the Platform back target`);
+    ok(new RegExp(`backTo="${target}"`).test(w),
+      `nav: ${route} wrapper falls back to ${target}`);
   }
   for (const f of [
     'src/app/(app)/(superadmin)/currency.tsx',
@@ -429,8 +433,13 @@ function read(rel) {
     const src = read(f);
     ok(/\{ backTo\?: string \} = \{\}/.test(src),
       `nav: ${f.split('/').pop()} accepts an optional backTo prop`);
-    ok(/showBack=\{!!backTo\}/.test(src),
-      `nav: ${f.split('/').pop()} derives the back arrow from backTo`);
+    // The back arrow is always present on these detail pages; `backTo` supplies
+    // the terminal fallback used only when there is no history to pop, so a
+    // multi-hub entry still returns to the hub that actually pushed the screen.
+    ok(/showBack\n/.test(src),
+      `nav: ${f.split('/').pop()} always renders the back arrow`);
+    ok(/backFallback=\{backTo \?\?/.test(src),
+      `nav: ${f.split('/').pop()} uses backTo as the terminal back fallback`);
   }
   // Hub ↔ child contract: every hub path with an sa- wrapper resolves to that wrapper.
   {

@@ -19,7 +19,6 @@ import {
   View, Text, ScrollView, Switch, ActivityIndicator,
   RefreshControl, useColorScheme, TextInput, Pressable,
 } from 'react-native';
-import { useRouter } from 'expo-router';
 import { useFocusEffect } from 'expo-router';
 import { Video, Users, Globe, Lock, AlertTriangle, Search, ChevronDown, ChevronUp } from 'lucide-react-native';
 import { PageHeader } from '@/components/PageHeader';
@@ -68,7 +67,6 @@ export default function VideoProvidersScreen() {
   const c = isDark ? neuColors.dark : neuColors.light;
   const layout = useLayout();
   const { showToast } = useToast();
-  const router = useRouter();
 
   const [providers, setProviders] = useState<VideoProvider[]>([]);
   const [doctors, setDoctors] = useState<DoctorRow[]>([]);
@@ -331,7 +329,7 @@ export default function VideoProvidersScreen() {
         title="Video Providers"
         subtitle="Player availability globally and per doctor"
         showBack
-        onBack={() => router.push('/sa-platform')}
+        backFallback="/sa-platform"
       />
 
       <View style={{ paddingHorizontal: layout.screenPx, gap: 20 }}>

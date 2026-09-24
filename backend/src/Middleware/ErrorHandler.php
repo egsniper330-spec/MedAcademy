@@ -73,6 +73,17 @@ final class ErrorHandler
                 $code = 'feature_disabled';
                 $meta = array_merge($meta, ['feature' => $e->feature]);
             }
+            // Route handler mismatch (HTTP 500, thrown by the Router's dispatch
+            // guard): the route resolves but the loaded controller does not
+            // implement its method. This is the signature of a PARTIAL DEPLOY
+            // (newer routes/api.php + older controller file) and used to be
+            // rendered as an anonymous internal_error. Naming the handler makes
+            // the deployment fault diagnosable from the response alone; it is
+            // still a hard 500 and no policy is bypassed.
+            if ($e instanceof \MedAcademy\Http\HandlerUnavailableException) {
+                $code = 'handler_unavailable';
+                $meta = array_merge($meta, ['handler' => $e->handler]);
+            }
 
             Response::error($e->getMessage(), $e->status, $code, $e->errors, $meta);
         }

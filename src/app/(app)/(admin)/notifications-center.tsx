@@ -27,7 +27,7 @@ const TARGET_TYPES = [
 
 const ROLES = ['student','doctor','admin'];
 
-export default function NotificationsCenterScreen() {
+export default function NotificationsCenterScreen({ backTo }: { backTo?: string } = {}) {
   const scheme = useColorScheme();
   const isDark = scheme === 'dark';
   const c = isDark ? neuColors.dark : neuColors.light;
@@ -80,7 +80,13 @@ export default function NotificationsCenterScreen() {
   return (
     <ScrollView style={{ flex: 1, backgroundColor: c.base }}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />} contentContainerStyle={{ paddingBottom: safeBottom(layout.insets.bottom) }}>
-      <PageHeader title="Notification Center" subtitle="Send messages to users" accentColor="#D97706" />
+      <PageHeader
+        title="Notification Center"
+        subtitle="Send messages to users"
+        accentColor="#D97706"
+        showBack
+        backFallback={backTo ?? '/admin-overview'}
+      />
 
       <View style={{ paddingHorizontal: layout.screenPx }}>
 

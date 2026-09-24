@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MedAcademy\Http;
 
+use MedAcademy\Http\HandlerUnavailableException;
 use MedAcademy\Middleware\AuthMiddleware;
 use MedAcademy\Utils\Logger;
 
@@ -63,7 +64,29 @@ final class Router
     {
         if (is_array($handler)) {
             [$class, $methodName] = $handler;
-            $handler = static function (Request $request) use ($class, $methodName): mixed {
+            $handler = function (Request $request) use ($class, $methodName): mixed {
+                // A route may only reach a handler this deployment actually
+                // implements. Without this check a partial upload (newer
+                // routes/api.php + older controller file) raised a raw
+                // `Call to undefined method` Error, which ErrorHandler can only
+                // render as an anonymous `internal_error` 500 — indistinguishable
+                // from a real bug inside the handler.
+                //
+                // The check runs at DISPATCH, not registration: a mismatched
+                // file must fail the one affected route, never the whole API.
+                if (!class_exists($class) || !method_exists($class, $methodName)) {
+                    $this->logger->error('Route handler unavailable', [
+                        'handler' => $class . '::' . $methodName,
+                        'class_exists' => class_exists($class),
+                        'method_exists' => method_exists($class, $methodName),
+                        'path' => $request->path(),
+                    ]);
+                    throw new HandlerUnavailableException(
+                        $class . '::' . $methodName,
+                        $class,
+                        $methodName
+                    );
+                }
                 $controller = new $class();
                 return $controller->$methodName($request);
             };

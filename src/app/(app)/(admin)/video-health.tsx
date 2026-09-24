@@ -172,7 +172,7 @@ function VideoRow({
 }
 
 // ─── Main screen ───────────────────────────────────────────────────────────────
-export default function VideoHealthScreen() {
+export default function VideoHealthScreen({ backTo }: { backTo?: string } = {}) {
   const scheme = useColorScheme();
   const isDark = scheme === 'dark';
   const c = isDark ? neuColors.dark : neuColors.light;
@@ -438,6 +438,8 @@ export default function VideoHealthScreen() {
             title="Video Health"
             subtitle="Platform health monitor"
             accentColor="#2DA8FF"
+            showBack
+            backFallback={backTo ?? '/admin-overview'}
             rightAction={
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
                 <Pressable onPress={onRefresh}

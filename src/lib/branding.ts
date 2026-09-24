@@ -23,6 +23,79 @@
 import { useEffect, useState } from 'react';
 import { apiFetch } from '@/client/backendClient';
 
+/**
+ * One entry of the server-managed Contact Us link list.
+ *
+ * `platform` is a stable machine key (not display text), so new link types can
+ * be added server-side without migrating stored rows. `url` is the RAW
+ * destination: http(s) for web platforms, a bare email address for `email`, a
+ * bare phone number for `phone` — see contactLinkHref() for how it is opened.
+ */
+export type ContactLink = {
+  platform: string;
+  label: string;
+  url: string;
+  enabled: boolean;
+};
+
+/** Supported presets (mirror of PlatformController::CONTACT_LINK_PLATFORMS). */
+export const CONTACT_LINK_PRESETS: Array<{ key: string; label: string }> = [
+  { key: 'whatsapp',  label: 'WhatsApp' },
+  { key: 'telegram',  label: 'Telegram' },
+  { key: 'facebook',  label: 'Facebook' },
+  { key: 'instagram', label: 'Instagram' },
+  { key: 'twitter',   label: 'X / Twitter' },
+  { key: 'website',   label: 'Website' },
+  { key: 'email',     label: 'Email' },
+  { key: 'phone',     label: 'Phone' },
+];
+
+/**
+ * Parse a stored contact_links value (array, or JSON string from the DB) into
+ * a safe list. NEVER throws and silently drops malformed entries so a bad row
+ * can never break the Contact Us screen.
+ */
+export function parseContactLinks(raw: unknown): ContactLink[] {
+  let list: unknown = raw;
+  if (typeof raw === 'string') {
+    try { list = JSON.parse(raw); } catch { return []; }
+  }
+  if (!Array.isArray(list)) return [];
+  const out: ContactLink[] = [];
+  for (const item of list) {
+    if (!item || typeof item !== 'object') continue;
+    const row = item as Record<string, unknown>;
+    const platform = typeof row.platform === 'string' ? row.platform.toLowerCase().trim() : '';
+    const url      = typeof row.url === 'string' ? row.url.trim() : '';
+    if (platform === '' || url === '') continue;
+    const label = typeof row.label === 'string' && row.label.trim() !== ''
+      ? row.label.trim()
+      : platform.charAt(0).toUpperCase() + platform.slice(1);
+    out.push({
+      platform,
+      label,
+      url,
+      enabled: row.enabled === undefined ? true : !!row.enabled,
+    });
+  }
+  return out;
+}
+
+/**
+ * Build the URL handed to Linking.openURL(). `mailto:`/`tel:` are added here,
+ * NOT typed by the admin, so a `javascript:`/`data:` destination can never be
+ * produced by the editor.
+ */
+export function contactLinkHref(link: ContactLink): string {
+  if (link.platform === 'email') {
+    return /^mailto:/i.test(link.url) ? link.url : `mailto:${link.url}`;
+  }
+  if (link.platform === 'phone') {
+    return /^tel:/i.test(link.url) ? link.url : `tel:${link.url.replace(/[^0-9+]/g, '')}`;
+  }
+  return link.url;
+}
+
 export type Branding = {
   id?: string;
   app_name: string;
@@ -41,6 +114,7 @@ export type Branding = {
   whatsapp_url: string;
   twitter_url: string;
   linkedin_url: string;
+  contact_links: ContactLink[];
   updated_at?: string | null;
 };
 
@@ -62,6 +136,7 @@ export const DEFAULT_BRANDING: Branding = {
   whatsapp_url: '',
   twitter_url: '',
   linkedin_url: '',
+  contact_links: [],
 };
 
 const TTL_MS = 60_000;
@@ -81,6 +156,9 @@ export function normalizeBranding(raw: unknown): Branding {
       (out as Record<string, unknown>)[key as string] = value;
     }
   }
+  // Structured list: arrives as an array (or a JSON string straight from the
+  // DB). Parsed defensively so one malformed entry cannot break a screen.
+  out.contact_links = parseContactLinks(row.contact_links);
   return out;
 }
 

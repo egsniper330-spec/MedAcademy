@@ -7,8 +7,8 @@ import {
   View, Text, ScrollView, useColorScheme, Pressable,
   RefreshControl, ActivityIndicator, FlatList,
 } from 'react-native';
-import { useFocusEffect } from 'expo-router';
-import { Shield, ChevronDown, ChevronUp, Save, UserCog, RefreshCw } from 'lucide-react-native';
+import { useFocusEffect, useRouter } from 'expo-router';
+import { Shield, ChevronDown, ChevronUp, Save, UserCog, RefreshCw, ArrowLeft } from 'lucide-react-native';
 import {
   getDeletePermissions, saveDeletePermissions,
   type DeletePermissions,
@@ -43,6 +43,7 @@ export default function DeletePermissionsScreen() {
   const layout = useLayout();
   const flat = neuFlatStyle(isDark);
   const { showToast } = useToast();
+  const router = useRouter();
 
   const [admins,    setAdmins]    = useState<AdminProfile[]>([]);
   const [permsMap,  setPermsMap]  = useState<Record<string, DeletePermissions>>({});
@@ -170,6 +171,15 @@ export default function DeletePermissionsScreen() {
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />} contentContainerStyle={{ paddingBottom: safeBottom(layout.insets.bottom) }}>
       <View style={{ padding: layout.screenPx }}>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 4, marginTop: 8 }}>
+          <Pressable
+            onPress={() => { if (router.canGoBack()) router.back(); else router.push('/(app)/(superadmin)/sa-overview' as never); }}
+            hitSlop={8}
+            accessibilityLabel="Go back"
+            accessibilityRole="button"
+            style={{ width: 36, height: 36, alignItems: 'center', justifyContent: 'center', marginLeft: -6 }}
+          >
+            <ArrowLeft size={20} color={c.text} opacity={0.75} />
+          </Pressable>
           <Shield size={22} color={c.primary} />
           <Text style={{ fontSize: 24, fontWeight: '800', color: c.text }}>Delete Permissions</Text>
         </View>

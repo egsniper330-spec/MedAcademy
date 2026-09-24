@@ -88,7 +88,7 @@ function RoleBadge({ role, c }: { role: string; c: typeof neuColors.light }) {
   );
 }
 
-export default function AdminDevices() {
+export default function AdminDevices({ backTo }: { backTo?: string } = {}) {
   const scheme = useColorScheme();
   const isDark = scheme === 'dark';
   const c = isDark ? neuColors.dark : neuColors.light;
@@ -511,6 +511,8 @@ export default function AdminDevices() {
             title="Device Management"
             subtitle={`${users.length} accounts`}
             accentColor={c.primary}
+            showBack
+            backFallback={backTo ?? '/admin-overview'}
             rightAction={
               <Pressable
                 onPress={onRefresh}

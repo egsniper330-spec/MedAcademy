@@ -53,7 +53,7 @@ const RISK_COLOR: Record<string, string> = {
   low:    '#16A34A',
 };
 
-export default function DbAuditPanel() {
+export default function DbAuditPanel({ backTo }: { backTo?: string } = {}) {
   const scheme = useColorScheme();
   const isDark  = scheme === 'dark';
   const c       = isDark ? neuColors.dark : neuColors.light;
@@ -118,7 +118,13 @@ export default function DbAuditPanel() {
       style={{ flex: 1, backgroundColor: c.base }}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />} contentContainerStyle={{ paddingBottom: safeBottom(layout.insets.bottom) }}
     >
-      <PageHeader title="Database Audit" subtitle="Integrity checks, orphans, duplicates & broken FKs" accentColor="#7C3AED" />
+      <PageHeader
+        title="Database Audit"
+        subtitle="Integrity checks, orphans, duplicates & broken FKs"
+        accentColor="#7C3AED"
+        showBack
+        backFallback={backTo ?? '/admin-overview'}
+      />
 
       <View style={{ paddingHorizontal: layout.screenPx }}>
 

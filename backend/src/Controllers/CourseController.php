@@ -171,6 +171,9 @@ final class CourseController
 
     public function update(Request $request): array
     {
+        // Kill switch: stop edits platform-wide without touching stored data.
+        $this->flags->assertEnabled('course_editing', $request);
+
         $id = Uuid::normalize((string) $request->params['id']);
         $this->assertCourseOwner($request, $id);
         $data = $request->json();

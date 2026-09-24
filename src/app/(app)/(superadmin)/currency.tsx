@@ -11,7 +11,6 @@ import {
 import { useFocusEffect } from 'expo-router';
 import { Coins, Save, RefreshCw } from 'lucide-react-native';
 import { PageHeader } from '@/components/PageHeader';
-import { useRouter } from 'expo-router';
 import { NeuCard } from '@/components/NeuCard';
 import { NeuButton } from '@/components/NeuButton';
 import { neuColors, useLayout, safeBottom } from '@/lib/neu';
@@ -21,7 +20,6 @@ import {
 } from '@/lib/currency';
 
 export default function CurrencySettings({ backTo }: { backTo?: string } = {}) {
-  const router = useRouter();
   const scheme = useColorScheme();
   const isDark = scheme === 'dark';
   const c = isDark ? neuColors.dark : neuColors.light;
@@ -90,8 +88,8 @@ export default function CurrencySettings({ backTo }: { backTo?: string } = {}) {
         title="Platform Currency"
         subtitle="Configure how prices are displayed"
         accentColor="#D97706"
-        showBack={!!backTo}
-        onBack={backTo ? () => router.push(backTo as never) : undefined}
+        showBack
+        backFallback={backTo ?? '/sa-finance'}
       />
 
       <View style={{ paddingHorizontal: layout.screenPx }}>

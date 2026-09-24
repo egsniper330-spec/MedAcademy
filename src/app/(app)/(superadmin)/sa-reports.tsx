@@ -82,7 +82,7 @@ export default function SAReports() {
         <SectionLabel title="Reports & Exports" c={c} />
         <NavItem icon={FileText}     label="Reports"              description="Platform activity and usage reports"       color="#7C3AED" path="/reports"                c={c} isDark={isDark} />
         <NavItem icon={Download}     label="Export Center"        description="Export any data as CSV / Excel"            color="#D97706" path="/export-panel"            c={c} isDark={isDark} />
-        <NavItem icon={Upload}       label="Bulk Import"          description="Import users and course data in bulk"      color="#0EA5E9" path="/bulk-import"             c={c} isDark={isDark} />
+        <NavItem icon={Upload}       label="Bulk Import"          description="Import users and course data in bulk"      color="#0EA5E9" path="/sa-bulk-import"             c={c} isDark={isDark} />
 
         {/* ── Analytics ────────────────────────────────────────────────── */}
         <SectionLabel title="Analytics" c={c} />
@@ -93,7 +93,7 @@ export default function SAReports() {
         {/* ── Audit Logs ───────────────────────────────────────────────── */}
         <SectionLabel title="Audit Logs" c={c} />
         <NavItem icon={Shield}       label="Audit Trail"          description="Full admin action audit log"               color="#DC2626" path="/sa-audit"          c={c} isDark={isDark} badge="LIVE" />
-        <NavItem icon={Database}     label="DB Audit"             description="Low-level database audit trail"            color="#D97706" path="/db-audit"               c={c} isDark={isDark} />
+        <NavItem icon={Database}     label="DB Audit"             description="Low-level database audit trail"            color="#D97706" path="/sa-db-audit"               c={c} isDark={isDark} />
 
         {/* ── Security ─────────────────────────────────────────────────── */}
         <SectionLabel title="Security" c={c} />

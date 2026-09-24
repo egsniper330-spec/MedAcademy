@@ -7,9 +7,9 @@ import {
   View, Text, ScrollView, useColorScheme, Pressable,
   RefreshControl, ActivityIndicator, TextInput, FlatList,
 } from 'react-native';
-import { useFocusEffect } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 import {
-  Trash2, RotateCcw, X, Search, Settings,
+  Trash2, RotateCcw, X, Search, Settings, ArrowLeft,
   Clock, Users, ChevronDown, AlertTriangle, Download,
   Stethoscope, UserCog, GraduationCap, ShieldAlert, Zap,
   CheckCircle, XCircle, Filter,
@@ -151,6 +151,7 @@ export default function TrashBin() {
   const c    = isDark ? neuColors.dark : neuColors.light;
   const flat = neuFlatStyle(isDark);
   const { showToast } = useToast();
+  const router = useRouter();
 
   const [items,           setItems]           = useState<TrashItem[]>([]);
   const [stats,           setStats]           = useState<TrashStats | null>(null);
@@ -413,8 +414,17 @@ export default function TrashBin() {
   // ── ListHeaderComponent (all UI above the list) ───────────────────────────
   const ListHeader = useMemo(() => (
     <View style={{ padding: layout.screenPx, paddingBottom: 0 }}>
-      {/* Header */}
+      {/* Header — back row + trailing config toggle */}
       <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 4, marginTop: 8, gap: 10 }}>
+        <Pressable
+          onPress={() => { if (router.canGoBack()) router.back(); else router.push('/(app)/(superadmin)/sa-overview' as never); }}
+          hitSlop={8}
+          accessibilityLabel="Go back"
+          accessibilityRole="button"
+          style={{ width: 36, height: 36, alignItems: 'center', justifyContent: 'center' }}
+        >
+          <ArrowLeft size={20} color={c.text} opacity={0.75} />
+        </Pressable>
         <Trash2 size={22} color="#EF4444" />
         <Text style={{ fontSize: 24, fontWeight: '800', color: c.text, flex: 1 }}>Trash Bin</Text>
         <Pressable onPress={() => setConfigOpen(o => !o)} style={{ width: 36, height: 36, borderRadius: 10, backgroundColor: `${c.primary}15`, alignItems: 'center', justifyContent: 'center' }}>

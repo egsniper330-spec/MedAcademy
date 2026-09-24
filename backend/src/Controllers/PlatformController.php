@@ -64,6 +64,7 @@ final class PlatformController
         'whatsapp_url'    => '',
         'twitter_url'     => '',
         'linkedin_url'    => '',
+        'contact_links'   => '[]',
     ];
 
     /**
@@ -74,7 +75,17 @@ final class PlatformController
         'app_name', 'logo_url', 'splash_logo_url', 'primary_color', 'secondary_color',
         'contact_email', 'contact_phone', 'support_email', 'website_url',
         'facebook_url', 'instagram_url', 'youtube_url', 'telegram_url',
-        'whatsapp_url', 'twitter_url', 'linkedin_url',
+        'whatsapp_url', 'twitter_url', 'linkedin_url', 'contact_links',
+    ];
+
+    /**
+     * Platform presets the Contact Links editor may use. Stored as stable
+     * machine keys (never display text), so new link types can be added later
+     * without touching stored rows.
+     */
+    public const CONTACT_LINK_PLATFORMS = [
+        'whatsapp', 'telegram', 'facebook', 'instagram',
+        'twitter', 'website', 'email', 'phone',
     ];
 
     /**
@@ -116,6 +127,15 @@ final class PlatformController
         foreach ($body as $key => $value) {
             if (!in_array($key, self::BRANDING_COLUMNS, true)) {
                 throw new ApiException(422, "Field '{$key}' is not editable", 'unknown_branding_field');
+            }
+            if ($key === 'contact_links') {
+                // Structured list — validated below, stored as JSON. Never raw
+                // HTML: the client renders plain text labels + a destination URL.
+                $updates[$key] = (string) json_encode(
+                    self::sanitizeContactLinks($value),
+                    JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE
+                );
+                continue;
             }
             if ($value !== null && !is_string($value) && !is_int($value) && !is_float($value)) {
                 throw new ApiException(422, "Field '{$key}' must be a string", 'invalid_branding_value');
@@ -174,6 +194,9 @@ final class PlatformController
             }
         }
         foreach (self::BRANDING_COLUMNS as $key) {
+            if ($key === 'contact_links') {
+                continue; // structured JSON list — validated by sanitizeContactLinks()
+            }
             if (isset($updates[$key]) && is_string($updates[$key]) && mb_strlen($updates[$key]) > 500) {
                 throw new ApiException(422, "{$key} is limited to 500 characters", 'invalid_branding_value');
             }
@@ -225,7 +248,97 @@ final class PlatformController
             $out[$key] = ($value === null || $value === '') ? $default : (string) $value;
         }
         $out['updated_at'] = $row['updated_at'] ?? null;
+        $out['contact_links'] = self::decodeContactLinks($row['contact_links'] ?? null);
         return $out;
+    }
+
+    /**
+     * Validate + normalise the Contact Us link list.
+     *
+     * Storage contract (mirrored by src/lib/branding.ts):
+     *   `url` is the RAW destination the admin typed — an http(s) URL for web
+     *   platforms, a BARE email address for `email`, a BARE phone number for
+     *   `phone`. The client adds `mailto:`/`tel:` when opening, so no scheme
+     *   ever comes from an admin and no `javascript:`/`data:` payload can be
+     *   stored or rendered.
+     */
+    public static function sanitizeContactLinks(mixed $raw): array
+    {
+        if ($raw === null || $raw === '') {
+            return [];
+        }
+        if (is_string($raw)) {
+            $decoded = json_decode($raw, true);
+            $raw = is_array($decoded) ? $decoded : [];
+        }
+        if (!is_array($raw)) {
+            throw new ApiException(422, 'contact_links must be a list of links', 'invalid_branding_value');
+        }
+        if (count($raw) > 20) {
+            throw new ApiException(422, 'contact_links is limited to 20 links', 'invalid_branding_value');
+        }
+
+        $out = [];
+        foreach (array_values($raw) as $item) {
+            if (!is_array($item)) {
+                throw new ApiException(422, 'Each contact link must be an object', 'invalid_branding_value');
+            }
+            $platform = strtolower(trim((string) ($item['platform'] ?? '')));
+            if (!in_array($platform, self::CONTACT_LINK_PLATFORMS, true)) {
+                throw new ApiException(422, "Unsupported contact link platform '{$platform}'", 'invalid_branding_value');
+            }
+            $label = trim((string) ($item['label'] ?? ''));
+            if ($label === '') {
+                $label = ucfirst($platform);
+            }
+            if (mb_strlen($label) > 60) {
+                throw new ApiException(422, 'A contact link label is limited to 60 characters', 'invalid_branding_value');
+            }
+            $url = trim((string) ($item['url'] ?? ''));
+            if ($url === '') {
+                throw new ApiException(422, "Contact link '{$label}' needs a destination", 'invalid_branding_value');
+            }
+            if (mb_strlen($url) > 500) {
+                throw new ApiException(422, 'A contact link destination is limited to 500 characters', 'invalid_branding_value');
+            }
+
+            if ($platform === 'email') {
+                $bare = (string) preg_replace('#^mailto:#i', '', $url);
+                if (!filter_var($bare, FILTER_VALIDATE_EMAIL)) {
+                    throw new ApiException(422, "Contact link '{$label}' must be a valid email address", 'invalid_branding_value');
+                }
+                $url = $bare;
+            } elseif ($platform === 'phone') {
+                $bare = (string) preg_replace('#^tel:#i', '', $url);
+                if (!preg_match('/^\+?[0-9 ()\-]{6,20}$/', $bare)) {
+                    throw new ApiException(422, "Contact link '{$label}' must be a valid phone number", 'invalid_branding_value');
+                }
+                $url = $bare;
+            } elseif (!preg_match('#^https?://#i', $url)) {
+                throw new ApiException(422, "Contact link '{$label}' must start with http:// or https://", 'invalid_branding_value');
+            }
+
+            $out[] = [
+                'platform' => $platform,
+                'label'    => $label,
+                'url'      => $url,
+                'enabled'  => !array_key_exists('enabled', $item) || (bool) $item['enabled'],
+            ];
+        }
+        return $out;
+    }
+
+    /**
+     * Decode stored contact_links for the read path. NEVER throws: a malformed
+     * stored value degrades to an empty list instead of breaking the screen.
+     */
+    public static function decodeContactLinks(mixed $raw): array
+    {
+        try {
+            return self::sanitizeContactLinks($raw);
+        } catch (ApiException) {
+            return [];
+        }
     }
 
     // ── CMS pages ────────────────────────────────────────────────────────────

@@ -8,6 +8,7 @@ use MedAcademy\Database\Database;
 use MedAcademy\Http\ApiException;
 use MedAcademy\Http\Request;
 use MedAcademy\Services\AuditService;
+use MedAcademy\Services\FeatureFlagService;
 use MedAcademy\Utils\Uuid;
 
 /**
@@ -531,6 +532,10 @@ final class AnalyticsController
      */
     public function dbAudit(Request $request): array
     {
+        // Read-only diagnostics — gated so a runaway audit can be stopped
+        // remotely; it writes nothing, so disabling loses no data.
+        (new FeatureFlagService())->assertEnabled('db_audit', $request);
+
         $db = Database::instance();
         $results = [];
 

@@ -228,8 +228,8 @@ export default function VideoMonitorScreen({ backTo }: { backTo?: string } = {})
           title="Video Monitor"
           subtitle={`${uploads.length} uploads tracked`}
           accentColor="#7C3AED"
-          showBack={!!backTo}
-          onBack={backTo ? () => router.push(backTo as never) : undefined}
+          showBack
+          backFallback={backTo ?? '/sa-content'}
           rightAction={
             <Pressable onPress={onRefresh}
               style={[neuFlatStyle(isDark), { width: 40, height: 40, borderRadius: 13, alignItems: 'center', justifyContent: 'center' }]}>

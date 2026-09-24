@@ -29,7 +29,7 @@ const HEALTH_CFG: Record<HealthStatus, { label: string; color: string; Icon: any
   unknown:     { label: 'Unknown',     color: '#6B7280', Icon: Clock },
 };
 
-export default function VideoSettingsScreen() {
+export default function VideoSettingsScreen({ backTo }: { backTo?: string } = {}) {
   const scheme = useColorScheme();
   const isDark = scheme === 'dark';
   const c = isDark ? neuColors.dark : neuColors.light;
@@ -102,7 +102,13 @@ export default function VideoSettingsScreen() {
         contentContainerStyle={{ padding: layout.screenPx, gap: 16 }}>
 
         <View style={{ marginTop: 8 }}>
-          <PageHeader title="Video Settings" subtitle="Provider & health configuration" accentColor="#7C3AED" />
+          <PageHeader
+            title="Video Settings"
+            subtitle="Provider & health configuration"
+            accentColor="#7C3AED"
+            showBack
+            backFallback={backTo ?? '/admin-overview'}
+          />
         </View>
 
         {loading ? (

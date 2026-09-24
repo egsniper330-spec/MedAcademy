@@ -26,11 +26,18 @@ interface PageHeaderProps {
   accentColor?: string;
   showBack?: boolean;
   onBack?: () => void;
+  /**
+   * Route used when there is nothing to pop (e.g. a hidden tab screen entered
+   * straight from the drawer, where `router.back()` would be a no-op). Lets
+   * detail pages shared by several hubs declare a safe terminal fallback
+   * instead of hardcoding a possibly-wrong parent in `onBack`.
+   */
+  backFallback?: string;
   rightAction?: React.ReactNode;
 }
 
 export function PageHeader({
-  title, subtitle, accentColor, showBack = false, onBack, rightAction,
+  title, subtitle, accentColor, showBack = false, onBack, backFallback, rightAction,
 }: PageHeaderProps) {
   const scheme    = useColorScheme();
   const isDark    = scheme === 'dark';
@@ -43,7 +50,8 @@ export function PageHeader({
 
   const handleBack = () => {
     if (onBack) { onBack(); return; }
-    if (router.canGoBack()) router.back();
+    if (router.canGoBack()) { router.back(); return; }
+    if (backFallback) router.push(backFallback as never);
   };
 
   const showHamburger = !showBack && insideDrawer;

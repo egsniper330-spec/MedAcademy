@@ -100,9 +100,9 @@ export default function SAPlatform() {
         <SectionLabel title="Content Protection" c={c} />
         <NavItem icon={Eye}         label="Watermark / DRM"    description="Screenshot & recording prevention"        color="#DC2626" path="/sa-content-protection"  c={c} isDark={isDark} badge="DRM" />
         <NavItem icon={MonitorDot}  label="Video Monitor"      description="Live video health & delivery status"      color="#2DA8FF" path="/sa-video-monitor"             c={c} isDark={isDark} />
-        <NavItem icon={HeartPulse}  label="Video Health"       description="Processing errors & quality checks"       color="#16A34A" path="/video-health"              c={c} isDark={isDark} />
-        <NavItem icon={Settings}    label="Video Settings"     description="Player config, quality & encoding"        color="#6B7280" path="/video-settings"            c={c} isDark={isDark} />
-        <NavItem icon={HardDrive}   label="Storage"            description="Bucket usage, cleanup & monitoring"       color="#2DA8FF" path="/storage"                  c={c} isDark={isDark} />
+        <NavItem icon={HeartPulse}  label="Video Health"       description="Processing errors & quality checks"       color="#16A34A" path="/sa-video-health"              c={c} isDark={isDark} />
+        <NavItem icon={Settings}    label="Video Settings"     description="Player config, quality & encoding"        color="#6B7280" path="/sa-video-settings"            c={c} isDark={isDark} />
+        <NavItem icon={HardDrive}   label="Storage"            description="Bucket usage, cleanup & monitoring"       color="#2DA8FF" path="/sa-storage"                  c={c} isDark={isDark} />
 
         {/* ── Security ─────────────────────────────────────────────────── */}
         <SectionLabel title="Security" c={c} />

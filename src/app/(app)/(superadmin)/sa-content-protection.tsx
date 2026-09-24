@@ -8,5 +8,5 @@
 import ContentProtectionPolicyScreen from '@/app/(app)/(superadmin)/content-protection';
 
 export default function SuperAdminContentProtection() {
-  return <ContentProtectionPolicyScreen backTo="/sa-platform" />;
+  return <ContentProtectionPolicyScreen backTo="/sa-content" />;
 }

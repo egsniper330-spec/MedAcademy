@@ -3218,6 +3218,8 @@ export async function updateBranding(updates: Partial<{
   contact_phone: string; facebook_url: string; instagram_url: string;
   youtube_url: string; telegram_url: string; whatsapp_url: string;
   website_url: string; support_email: string;
+  /** Ordered Contact Us links — validated server-side, stored as JSON. */
+  contact_links: Array<{ platform: string; label: string; url: string; enabled: boolean }>;
 }>) {
   const { data, error } = await apiFetch<{ branding: Record<string, unknown> | null }>(
     '/platform/branding',

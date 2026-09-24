@@ -19,7 +19,7 @@ const BUCKET_ICONS: Record<string, React.ElementType> = {
   videos: Film, images: Image, avatars: Image, documents: FileText,
 };
 
-export default function StorageMonitorScreen() {
+export default function StorageMonitorScreen({ backTo }: { backTo?: string } = {}) {
   const scheme = useColorScheme();
   const isDark = scheme === 'dark';
   const c = isDark ? neuColors.dark : neuColors.light;
@@ -42,7 +42,13 @@ export default function StorageMonitorScreen() {
   return (
     <ScrollView style={{ flex: 1, backgroundColor: c.base }}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />} contentContainerStyle={{ paddingBottom: safeBottom(layout.insets.bottom) }}>
-      <PageHeader title="Storage Monitor" subtitle="PHP storage + VdoCipher usage" accentColor="#2DA8FF" />
+      <PageHeader
+        title="Storage Monitor"
+        subtitle="PHP storage + VdoCipher usage"
+        accentColor="#2DA8FF"
+        showBack
+        backFallback={backTo ?? '/admin-overview'}
+      />
 
       <View style={{ paddingHorizontal: layout.screenPx }}>
 

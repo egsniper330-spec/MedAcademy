@@ -909,6 +909,10 @@ final class RpcController
      */
     public function adminResetViolations(Request $request): array
     {
+        // Gate only the CLEARING of strikes; reporting a violation is never
+        // blocked by a flag, so content protection keeps working when this is off.
+        $this->flags->assertEnabled('violation_management', $request);
+
         $targetUserId = Uuid::normalize((string) ($request->json()['user_id'] ?? ''));
         $actorId = $request->user['id'];
 

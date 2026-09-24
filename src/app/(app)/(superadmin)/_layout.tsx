@@ -75,9 +75,11 @@ function SuperAdminTabs() {
       {/* Admin-shell pages re-hosted inside SA shell (wrappers in this dir) */}
       <Tabs.Screen name="sa-academic"               options={{ tabBarButton: () => null, title: 'Academic Structure' }} />
       <Tabs.Screen name="sa-credits"               options={{ tabBarButton: () => null, title: 'Credits' }} />
+      <Tabs.Screen name="sa-currency"               options={{ tabBarButton: () => null, title: 'Currency Settings' }} />
       <Tabs.Screen name="sa-bulk-credits"           options={{ tabBarButton: () => null, title: 'Bulk Credits' }} />
       <Tabs.Screen name="sa-bulk-import"            options={{ tabBarButton: () => null, title: 'Bulk Import' }} />
       <Tabs.Screen name="sa-cms"                    options={{ tabBarButton: () => null, title: 'CMS Pages' }} />
+      <Tabs.Screen name="sa-content-protection"     options={{ tabBarButton: () => null, title: 'Watermark / DRM' }} />
       <Tabs.Screen name="sa-db-audit"               options={{ tabBarButton: () => null, title: 'DB Audit' }} />
       <Tabs.Screen name="sa-devices"                options={{ tabBarButton: () => null, title: 'Device Management' }} />
       <Tabs.Screen name="sa-doctor-credit-timeline" options={{ tabBarButton: () => null, title: 'Doctor Credit Timeline' }} />

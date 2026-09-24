@@ -3,7 +3,7 @@ import {
   View, Text, ScrollView, useColorScheme,
   RefreshControl, ActivityIndicator, Pressable,
 } from 'react-native';
-import { useFocusEffect } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 import {
   ShieldAlert, Eye, Lock, AlertTriangle, CheckCircle,
   ShieldCheck, ShieldX, RefreshCw, Wifi, Bug, Smartphone,
@@ -14,6 +14,7 @@ import { backendClient } from '@/client/backendClient';
 import { NeuCard } from '@/components/NeuCard';
 import { neuColors, useLayout, safeBottom } from '@/lib/neu';
 import { PageHeader } from '@/components/PageHeader';
+import { ArrowLeft } from 'lucide-react-native';
 import { getNativeSecurityFlags, type NativeSecurityFlags } from '@/lib/nativeSecurity';
 
 function isSecurityEvent(action: string = '') {
@@ -51,6 +52,7 @@ export default function SuperAdminSecurity() {
   const isDark = scheme === 'dark';
   const c = isDark ? neuColors.dark : neuColors.light;
   const layout = useLayout();
+  const router = useRouter();
 
   const [logs, setLogs]                         = useState<any[]>([]);
   const [suspendedCount, setSuspendedCount]     = useState(0);
@@ -141,9 +143,13 @@ export default function SuperAdminSecurity() {
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />} contentContainerStyle={{ paddingBottom: safeBottom(layout.insets.bottom) }}
     >
       <View style={{ padding: layout.screenPx }}>
-        <Text style={{ fontSize: 24, fontWeight: '800', color: c.text, marginBottom: 4, marginTop: 8 }}>
-          Security Diagnostics
-        </Text>
+        {/* PageHeader-style back row — replaces the former title-only header */}
+        <PageHeader
+          title="Security Diagnostics"
+          subtitle="Detailed security event logs"
+          showBack
+          onBack={() => { if (router.canGoBack()) router.back(); else router.push('/(app)/(superadmin)/sa-overview' as never); }}
+        />
         <Text style={{ fontSize: 13, color: c.text, opacity: 0.5, marginBottom: 20 }}>
           Platform security overview and threat analysis
         </Text>

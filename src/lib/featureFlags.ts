@@ -37,6 +37,16 @@ export const FEATURE_FLAG_DEFAULTS: Record<string, boolean> = {
   doctor_credit_refunds: true,
   user_management: true,
   student_enrollment_credits: true,
+  // Third-pass registry — video kill switches + administration surfaces.
+  course_editing: true,
+  video_playback: true,
+  video_offline_downloads: true,
+  impersonation: true,
+  device_management: true,
+  db_audit: true,
+  trash_cleanup: true,
+  violation_management: true,
+  video_monitoring: true,
 };
 
 export type FeatureFlag = {
