@@ -6,6 +6,7 @@ import { NeuButton } from '@/components/NeuButton';
 import { neuColors } from '@/lib/neu';
 import { useSession } from '@/ctx';
 import { resolveStartupRoute, type StartupRoute } from '@/lib/startupStateModel';
+import { useBranding } from '@/lib/branding';
 import NetInfo from '@react-native-community/netinfo';
 
 /**
@@ -42,6 +43,10 @@ export default function LandingScreen() {
   const c = isDark ? neuColors.dark : neuColors.light;
   const router = useRouter();
   const { session, isLoading } = useSession();
+  // Server-managed platform identity (Super Admin → Platform → Branding).
+  // Falls back to the built-in defaults on failure — this screen renders
+  // identically whether or not the branding API is reachable.
+  const branding = useBranding();
 
   // Connectivity tri-state mirroring offlineTransition.useConnectivity exactly
   // (isConnected && isInternetReachable !== false). null = not yet determined.
@@ -100,7 +105,7 @@ export default function LandingScreen() {
         }}>
           <ShieldPlus size={44} color="#fff" />
         </View>
-        <Text style={{ fontSize: 34, fontWeight: '800', color: c.text, letterSpacing: -0.5 }}>MedAcademy</Text>
+        <Text style={{ fontSize: 34, fontWeight: '800', color: c.text, letterSpacing: -0.5 }}>{branding.app_name}</Text>
         <Text style={{ fontSize: 16, color: c.text, opacity: 0.55, marginTop: 6, textAlign: 'center' }}>
           Best Educational Platform
         </Text>

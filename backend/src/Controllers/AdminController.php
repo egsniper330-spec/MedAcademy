@@ -11,6 +11,7 @@ use MedAcademy\Http\ApiException;
 use MedAcademy\Http\Request;
 use MedAcademy\Services\AuthService;
 use MedAcademy\Services\AuditService;
+use MedAcademy\Services\FeatureFlagService;
 use MedAcademy\Utils\Uuid;
 
 /**
@@ -895,6 +896,10 @@ final class AdminController
      */
     public function userManagement(Request $request): array
     {
+        // Feature flag: user_management — availability gate BEFORE any account
+        // is created. Existing users/roles are never affected by this flag.
+        (new FeatureFlagService())->assertEnabledFor('user_management', $request);
+
         $body = $request->json();
         $email = trim((string) ($body['email'] ?? ''));
         $fullName = trim((string) ($body['full_name'] ?? ''));

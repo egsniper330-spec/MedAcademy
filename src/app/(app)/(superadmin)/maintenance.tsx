@@ -7,7 +7,7 @@ import {
   View, Text, ScrollView, Switch, TextInput, ActivityIndicator,
   RefreshControl, useColorScheme, Pressable,
 } from 'react-native';
-import { useFocusEffect } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 import { Wrench, Plus, Trash2, UserCheck, AlertTriangle } from 'lucide-react-native';
 import { PageHeader } from '@/components/PageHeader';
 import {
@@ -29,6 +29,7 @@ export default function MaintenanceModeScreen() {
   const isDark = scheme === 'dark';
   const c = isDark ? neuColors.dark : neuColors.light;
   const layout = useLayout();
+  const router = useRouter();
   const { showToast } = useToast();
 
   const [enabled, setEnabled] = useState(false);
@@ -117,7 +118,13 @@ export default function MaintenanceModeScreen() {
   return (
     <ScrollView style={{ flex: 1, backgroundColor: c.base }}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />} contentContainerStyle={{ paddingBottom: safeBottom(layout.insets.bottom) }}>
-      <PageHeader title="Maintenance Mode" subtitle="Control platform availability" accentColor="#DC2626" />
+      <PageHeader
+        title="Maintenance Mode"
+        subtitle="Control platform availability"
+        accentColor="#DC2626"
+        showBack
+        onBack={() => router.push('/sa-platform')}
+      />
 
       <View style={{ paddingHorizontal: layout.screenPx }}>
 

@@ -3,6 +3,7 @@
  */
 import { ScrollView, View, Text, useColorScheme } from 'react-native';
 import { PageHeader } from '@/components/PageHeader';
+import { useCmsSections } from '@/lib/cmsContent';
 import { NeuCard } from '@/components/NeuCard';
 import { neuColors, useLayout, safeBottom } from '@/lib/neu';
 import { FileText } from 'lucide-react-native';
@@ -50,6 +51,10 @@ export default function TermsPage() {
   const isDark = useColorScheme() === 'dark';
   const c = isDark ? neuColors.dark : neuColors.light;
   const layout = useLayout();
+  // Server-managed content (Super Admin → Platform → CMS Pages). Falls back to
+  // SECTIONS below whenever no body has been written, so this page is never
+  // blank and never depends on CMS availability.
+  const sections = useCmsSections('terms_conditions', SECTIONS);
   const iconSz  = layout.heroIconSize;
   const iconInner = Math.round(iconSz * 0.5);
 
@@ -79,7 +84,7 @@ export default function TermsPage() {
         </Text>
       </View>
 
-      {SECTIONS.map((section, i) => (
+      {sections.map((section, i) => (
         <NeuCard key={i} radius={layout.cardRadius} style={{ padding: layout.cardPx, marginBottom: layout.itemGap }}>
           <Text style={{
             fontSize: layout.captionSize + 1, fontWeight: '800', color: c.primary,

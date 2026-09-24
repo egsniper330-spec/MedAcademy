@@ -9,6 +9,8 @@ use MedAcademy\Http\ApiException;
 use MedAcademy\Http\Request;
 use MedAcademy\Http\Response;
 use MedAcademy\Services\AuditService;
+use MedAcademy\Services\FeatureFlagService;
+use MedAcademy\Services\VideoProviderPolicyService;
 use MedAcademy\Utils\Uuid;
 
 /**
@@ -26,6 +28,11 @@ use MedAcademy\Utils\Uuid;
  */
 final class RpcController
 {
+    public function __construct(
+        private readonly FeatureFlagService $flags = new FeatureFlagService()
+    ) {
+    }
+
     /**
      * check_registration_conflicts — anon-callable pre-registration check.
      * Port of 00132: returns a single row (email_taken, phone_taken) without
@@ -207,6 +214,11 @@ final class RpcController
      */
     public function doctorEarningsDashboard(Request $request): array
     {
+        // Feature flag: doctor_earnings — the doctor-facing earnings surface.
+        // READ-ONLY gate: nothing is recalculated, hidden or deleted; the
+        // dashboard simply refuses to render while the capability is off.
+        $this->flags->assertEnabled('doctor_earnings', $request);
+
         $doctorId = Uuid::normalize((string) ($request->params['doctorId'] ?? $request->json()['doctor_id'] ?? ''));
         if ($doctorId === '') {
             throw new ApiException(422, 'doctor_id is required');
@@ -594,57 +606,98 @@ final class RpcController
     }
 
     /**
-     * upsert_teacher_provider_permission — Grant/revoke video provider access for teacher.
+     * upsert_teacher_provider_permission — THREE-STATE per-doctor provider
+     * override. This is the ROOT-CAUSE FIX for the Video Providers page's
+     * "Internal server error": the previous implementation queried the
+     * video_provider_config health/config registry (provider_key UNIQUE,
+     * NO teacher_id / enabled columns), so every call died with an SQL
+     * "Unknown column" → HTTP 500. The correct table is
+     * teacher_provider_permissions (teacher_id, provider_key, is_enabled).
+     *
+     * Body: teacher_id, provider, enabled(bool) — plus optional
+     * mode('inherit'|'enabled'|'disabled') for the SA console. enabled=false
+     * means EXPLICITLY DISABLED (global ON stays blocked for this doctor);
+     * mode='inherit' removes the row so the global default applies again.
+     * Registry-validated provider keys; audited.
      */
     public function upsertTeacherProviderPermission(Request $request): array
     {
         $teacherId = Uuid::normalize((string) ($request->json()['teacher_id'] ?? ''));
         $provider = trim((string) ($request->json()['provider'] ?? ''));
+        $mode = trim((string) ($request->json()['mode'] ?? ''));
         $enabled = (bool) ($request->json()['enabled'] ?? true);
 
         if ($teacherId === '' || $provider === '') {
             throw new ApiException(422, 'teacher_id and provider are required');
         }
 
-        $db = Database::instance();
-        $existing = $db->row(
-            'SELECT id FROM video_provider_config WHERE teacher_id = ? AND provider = ?',
-            [$teacherId, $provider]
-        );
-
-        if ($existing) {
-            $db->query(
-                'UPDATE video_provider_config SET enabled = ?, updated_at = UTC_TIMESTAMP(6) WHERE id = ?',
-                [$enabled ? 1 : 0, $existing['id']]
-            );
-        } else {
-            $db->insert(
-                'INSERT INTO video_provider_config (id, teacher_id, provider, enabled, created_at, updated_at)
-                 VALUES (?, ?, ?, ?, UTC_TIMESTAMP(6), UTC_TIMESTAMP(6))',
-                [Uuid::v4(), $teacherId, $provider, $enabled ? 1 : 0]
-            );
+        // Legacy boolean callers (enabled true/false) map to enabled/disabled;
+        // the SA console sends mode='inherit' to clear an explicit override.
+        if ($mode === '') {
+            $mode = $enabled ? 'enabled' : 'disabled';
         }
+
+        VideoProviderPolicyService::setOverride($teacherId, $provider, $mode);
+
+        AuditService::write(
+            (string) ($request->user['id'] ?? ''),
+            'video_provider_doctor_override_updated',
+            [
+                'teacher_id' => $teacherId,
+                'provider'   => $provider,
+                'mode'       => $mode,
+            ],
+            $request->clientIp()
+        );
 
         return ['success' => true];
     }
 
     /**
-     * get_teacher_provider_permissions — Returns video provider access for a teacher.
+     * get_teacher_provider_permissions — Effective provider state for a
+     * teacher (root-cause fix as above): resolved from
+     * teacher_provider_permissions overrides + video_providers globals via
+     * VideoProviderPolicyService, with the three states (inherit/enabled/
+     * disabled) AND the effective decision. Response shape stays compatible
+     * with the previous contract (permissions[]) while adding the fields the
+     * Video Providers console renders. No caller-identifiable data beyond the
+     * policy itself.
      */
     public function getTeacherProviderPermissions(Request $request): array
     {
+        $role = (string) ($request->user['role'] ?? '');
         $teacherId = Uuid::normalize((string) ($request->json()['teacher_id'] ?? $request->query('teacher_id', '')));
 
+        // ROOT-CAUSE FIX (doctor-side gating never worked): the doctor-side
+        // client calls this WITHOUT teacher_id to resolve its own effective
+        // policy — the previous code 422'd on the empty value. Default to the
+        // CALLING user; non-admin callers are always forced to self so a
+        // doctor can never read another account's policy rows.
         if ($teacherId === '') {
-            throw new ApiException(422, 'teacher_id is required');
+            $teacherId = (string) ($request->user['id'] ?? '');
+        } elseif (!in_array($role, ['admin', 'super_admin'], true)) {
+            $teacherId = (string) ($request->user['id'] ?? '');
         }
 
-        $permissions = Database::instance()->select(
-            'SELECT provider, enabled FROM video_provider_config WHERE teacher_id = ?',
-            [$teacherId]
+        if ($teacherId === '') {
+            throw new ApiException(401, 'Authentication required');
+        }
+
+        $effective = VideoProviderPolicyService::effectiveForTeacher($teacherId);
+
+        $permissions = array_map(
+            static fn(array $p): array => [
+                'provider_key'   => $p['provider_key'],
+                'display_name'   => $p['display_name'],
+                'global_enabled' => $p['global_enabled'],
+                'override'       => $p['override'],
+                'teacher_enabled' => $p['teacher_enabled'],
+                'final_enabled'  => $p['effective'],
+            ],
+            $effective
         );
 
-        return ['permissions' => $permissions ?? []];
+        return ['permissions' => $permissions];
     }
 
     /**

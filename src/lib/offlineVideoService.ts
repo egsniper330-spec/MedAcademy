@@ -58,6 +58,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import VdoDownload from 'vdocipher-rn-bridge/downloads';
 import type { DownloadStatus, Track } from 'vdocipher-rn-bridge/type';
 import { getOfflineDownloadToken } from './api';
+import { describeProviderError } from './videoProviderPolicy';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -436,7 +437,9 @@ export async function startOfflineDownload(p: StartDownloadParams): Promise<Star
   try {
     token = await getOfflineDownloadToken(p.videoId, p.lessonId);
   } catch (e) {
-    const msg = e instanceof Error ? e.message : 'Authorization failed';
+    // A provider-policy refusal (video_provider_disabled) surfaces as the
+    // friendly availability message; every other error keeps its own text.
+    const msg = describeProviderError(e);
     return { ok: false, error: msg, kind: 'auth' };
   }
 

@@ -5,11 +5,13 @@ import { useEffect, useRef } from 'react';
 import { ScrollView, View, Text, useColorScheme, Animated } from 'react-native';
 import { PageHeader } from '@/components/PageHeader';
 import { NeuCard } from '@/components/NeuCard';
+import { useCmsSections } from '@/lib/cmsContent';
 import { BrandLogo } from '@/components/BrandLogo';
 import { neuColors, useLayout, safeBottom } from '@/lib/neu';
 import { useEntranceAnim } from '@/lib/motion';
 import { Stethoscope, BookOpen, ShieldCheck, Zap, FlaskConical } from 'lucide-react-native';
 import { BUILD_ID, BUILD_VERSION_NAME, BUILD_VERSION_CODE, BUILD_APP_NAME, BUILD_TIMESTAMP } from '@/lib/buildMarker';
+import { useBranding } from '@/lib/branding';
 
 const PILLARS = [
   { icon: BookOpen,     color: '#7C3AED', label: 'Expert-Led Content',     desc: 'Courses crafted by verified medical professionals with real clinical experience.' },
@@ -22,6 +24,10 @@ export default function AboutPage() {
   const isDark = useColorScheme() === 'dark';
   const c = isDark ? neuColors.dark : neuColors.light;
   const layout = useLayout();
+  const branding = useBranding(); // server-managed display name (fails safe)
+  // Optional server-managed About text (Super Admin → Platform → CMS Pages).
+  // Empty body → nothing extra is rendered and the bundled copy stands alone.
+  const aboutSections = useCmsSections('about_us', []);
 
   const entrance = useEntranceAnim({ delay: 80, offsetY: 18, duration: 550 });
 
@@ -168,9 +174,30 @@ export default function AboutPage() {
           Our Mission
         </Text>
         <Text style={{ fontSize: layout.bodySize + 1, color: c.text, opacity: 0.75, lineHeight: (layout.bodySize + 1) * 1.6 }}>
-          MedAcademy was built to bridge the gap between medical theory and real-world clinical practice. We partner with leading doctors and specialists to deliver structured, high-quality, mobile-first courses that fit the demanding schedule of medical students.
+          {`${branding.app_name} was built to bridge the gap between medical theory and real-world clinical practice. We partner with leading doctors and specialists to deliver structured, high-quality, mobile-first courses that fit the demanding schedule of medical students.`}
         </Text>
       </NeuCard>
+
+      {/* Server-managed About text — rendered only when a body exists, so the
+          screen never depends on CMS availability. Plain text only. */}
+      {aboutSections.length > 0 && (
+        <NeuCard radius={layout.cardRadius} style={{ padding: layout.cardPx, marginBottom: layout.sectionGap }}>
+          {aboutSections.map((section, i) => (
+            <View key={i} style={{ marginBottom: i === aboutSections.length - 1 ? 0 : layout.pad.md }}>
+              {section.heading !== '' && (
+                <Text style={{ fontSize: layout.captionSize, fontWeight: '800', color: c.primary, marginBottom: layout.pad.sm, textTransform: 'uppercase', letterSpacing: 1 }}>
+                  {section.heading}
+                </Text>
+              )}
+              {section.body !== '' && (
+                <Text style={{ fontSize: layout.bodySize, color: c.text, opacity: 0.7, lineHeight: layout.bodySize * 1.6 }}>
+                  {section.body}
+                </Text>
+              )}
+            </View>
+          ))}
+        </NeuCard>
+      )}
 
       {/* Pillars */}
       <Text style={{ fontSize: layout.captionSize, fontWeight: '700', color: c.text, opacity: 0.4, textTransform: 'uppercase', letterSpacing: 1.2, marginBottom: layout.pad.md }}>
@@ -198,7 +225,7 @@ export default function AboutPage() {
       {/* Footer note */}
       <NeuCard radius={layout.cardRadius} style={{ padding: layout.cardPx, alignItems: 'center' }}>
         <Text style={{ fontSize: layout.captionSize + 1, color: c.text, opacity: 0.5, textAlign: 'center', lineHeight: (layout.captionSize + 1) * 1.6 }}>
-          MedAcademy is continuously evolving.{'\n'}Thank you for being part of our community.
+          {`${branding.app_name} is continuously evolving.`}{'\n'}Thank you for being part of our community.
         </Text>
       </NeuCard>
     </ScrollView>

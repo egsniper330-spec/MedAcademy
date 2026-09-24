@@ -29,7 +29,7 @@ import * as NavigationBar from 'expo-navigation-bar';
 // native method, so it is safe even on platforms where the native module is
 // not linked (the function throws UnavailabilityError, which we .catch()).
 // On web, we guard with process.env.EXPO_OS === 'web' before calling anything.
-import * as ScreenCaptureLib from 'expo-screen-capture';
+import * as ScreenCaptureLib from '@/lib/screenCaptureGuard';
 
 import { SessionProvider, useSession } from '@/ctx';
 import { ToastProvider } from '@/components/Toast';
@@ -345,7 +345,13 @@ const RootLayout: React.FC = () => {
     // SafeAreaProvider MUST be at root — provides insets to every useSafeAreaInsets()
     // call throughout the entire app. Without it, insets.top/bottom return 0 on Android.
     <SafeAreaProvider>
-      <GestureHandlerRootView style={{ flex: 1 }}>          <SessionProvider>
+      {/* NOTE: keep the child on its own line. JSX whitespace that sits on a
+          single line is preserved by Babel as a literal text child, and React
+          Native throws "Unexpected text node: … A text node cannot be a child
+          of a <View>." — the whitespace prints as nothing, which is how this
+          surfaced on device. A newline-containing run is stripped instead. */}
+      <GestureHandlerRootView style={{ flex: 1 }}>
+        <SessionProvider>
             <SessionMaintenanceBinder />
             <SecurityProvider>
             {/* RootScreenCapture: iOS screenshot protection from app launch (before login) */}

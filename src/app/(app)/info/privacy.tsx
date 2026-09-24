@@ -3,6 +3,7 @@
  */
 import { ScrollView, View, Text, useColorScheme } from 'react-native';
 import { PageHeader } from '@/components/PageHeader';
+import { useCmsSections } from '@/lib/cmsContent';
 import { NeuCard } from '@/components/NeuCard';
 import { neuColors, useLayout, safeBottom } from '@/lib/neu';
 import { Shield } from 'lucide-react-native';
@@ -50,6 +51,9 @@ export default function PrivacyPage() {
   const isDark = useColorScheme() === 'dark';
   const c = isDark ? neuColors.dark : neuColors.light;
   const layout = useLayout();
+  // Server-managed content (Super Admin → Platform → CMS Pages), with the
+  // bundled SECTIONS as the fallback whenever no body has been written.
+  const sections = useCmsSections('privacy_policy', SECTIONS);
   const iconSz  = layout.heroIconSize;
   const iconInner = Math.round(iconSz * 0.5);
 
@@ -79,7 +83,7 @@ export default function PrivacyPage() {
         </Text>
       </View>
 
-      {SECTIONS.map((section, i) => (
+      {sections.map((section, i) => (
         <NeuCard key={i} radius={layout.cardRadius} style={{ padding: layout.cardPx, marginBottom: layout.itemGap }}>
           <Text style={{
             fontSize: layout.captionSize + 1, fontWeight: '800', color: c.primary,

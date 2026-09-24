@@ -65,6 +65,15 @@ final class ErrorHandler
                     // never let meta construction mask the 426 itself
                 }
             }
+            // Feature flags (HTTP 403 from FeatureFlagService::assertEnabled):
+            // the refusal carries its own code + the flag key so the client can
+            // treat "this capability is switched off" as a distinct state
+            // (never confused with a permission error or a maintenance window).
+            if ($e instanceof \MedAcademy\Http\FeatureDisabledException) {
+                $code = 'feature_disabled';
+                $meta = array_merge($meta, ['feature' => $e->feature]);
+            }
+
             Response::error($e->getMessage(), $e->status, $code, $e->errors, $meta);
         }
 

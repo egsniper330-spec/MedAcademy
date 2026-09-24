@@ -8,6 +8,7 @@ use MedAcademy\Database\Database;
 use MedAcademy\Http\ApiException;
 use MedAcademy\Http\Request;
 use MedAcademy\Services\AuditService;
+use MedAcademy\Services\FeatureFlagService;
 use MedAcademy\Services\IntegrityService;
 use MedAcademy\Services\SecurityEvidenceService;
 use MedAcademy\Utils\Uuid;
@@ -31,6 +32,11 @@ use PDOException;
  */
 final class RedeemCodeController
 {
+    public function __construct(
+        private readonly FeatureFlagService $flags = new FeatureFlagService()
+    ) {
+    }
+
     /** Code alphabet — no 0/O/1/I/L so hand-typed codes are unambiguous. */
     private const CODE_ALPHABET = '23456789ABCDEFGHJKMNPQRSTUVWXYZ';
 
@@ -341,6 +347,10 @@ final class RedeemCodeController
     // ─────────────────────────────────────────────────────────────────────
     public function redeem(Request $request): array
     {
+        // Feature flag: redeem_codes — availability gate BEFORE any code is
+        // looked up or consumed. Codes/balances are never modified by the flag.
+        $this->flags->assertEnabledFor('redeem_codes', $request);
+
         // ── SERVER-SIDE APP-INTEGRITY POLICY (protected financial action) ──
         // A tampered APK must not be able to redeem codes; enforcement tier
         // is operator-controlled (security_config.extras.play_integrity).

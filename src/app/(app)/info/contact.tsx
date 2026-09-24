@@ -6,7 +6,7 @@
  * URLs) are intentionally NEVER rendered in the UI. Each channel shows only
  * a friendly label + description. All real values are kept in code only.
  */
-import { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   ScrollView, View, Text, useColorScheme, Pressable,
   ActivityIndicator, Linking, Animated,
@@ -16,6 +16,7 @@ import { NeuCard } from '@/components/NeuCard';
 import { neuColors, useLayout, neuMicroStyle, safeBottom } from '@/lib/neu';
 import { usePressAnim, useEntranceAnim } from '@/lib/motion';
 import { getBranding } from '@/lib/api';
+import { useCmsSections } from '@/lib/cmsContent';
 import {
   Mail, Phone, Globe, MessageCircle, Send,
   HeartHandshake, ChevronRight,
@@ -104,6 +105,11 @@ export default function ContactPage() {
   const layout = useLayout();
 
   const [branding, setBranding] = useState<any>(null);
+  // Server-managed intro text (Super Admin → Platform → CMS Pages → Contact
+  // Us). Falls back to the bundled copy while loading / when unset.
+  const intro = useCmsSections('contact_us', [
+    { heading: '', body: 'Need help? Choose one of the contact methods below and we\'ll be happy to assist you.' },
+  ]);
   const [loading, setLoading]   = useState(true);
 
   // Hero icon fade-in
@@ -212,7 +218,10 @@ export default function ContactPage() {
           textAlign: 'center', lineHeight: (layout.captionSize + 1) * 1.55,
           paddingHorizontal: layout.screenPx,
         }}>
-          Need help? Choose one of the contact methods below{'\n'}and we'll be happy to assist you.
+          {intro
+            .map((section, i) => (section.heading !== '' ? `${section.heading}: ${section.body}` : section.body).trim())
+            .filter((part) => part !== '')
+            .join('\n')}
         </Text>
       </Animated.View>
 

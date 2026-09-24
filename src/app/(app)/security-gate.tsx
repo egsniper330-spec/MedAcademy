@@ -38,7 +38,7 @@
 
 import React, { useEffect, useRef } from 'react';
 import { View, Text, StyleSheet, BackHandler, ActivityIndicator, useColorScheme, ScrollView } from 'react-native';
-import * as ScreenCaptureLib from 'expo-screen-capture';
+import * as ScreenCaptureLib from '@/lib/screenCaptureGuard';
 import { ShieldAlert, WifiOff } from 'lucide-react-native';
 import { neuColors, useLayout } from '@/lib/neu';
 import { useSecurity } from '@/lib/SecurityContext';

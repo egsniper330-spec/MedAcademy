@@ -15,7 +15,7 @@ import { useCallback, useState } from 'react';
 import {
   View, Text, ScrollView, ActivityIndicator, RefreshControl, useColorScheme, Pressable,
 } from 'react-native';
-import { useFocusEffect } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 import {
   RefreshCw, Database, Video, Mail, HardDrive, ShieldCheck,
   Smartphone, Server, Layers, AlertTriangle,
@@ -67,7 +67,13 @@ const CHECK_COLORS: Record<string, string> = {
   'n/a': '#9CA3AF',
 };
 
-export default function SystemDiagnosticsScreen() {
+/**
+ * Shared by the Admin shell and the Super Admin shell.
+ * `backTo` renders the explicit platform back arrow when opened from the
+ * Super Admin → Platform hub (the SA shell has no stack to pop).
+ */
+export default function SystemDiagnosticsScreen({ backTo }: { backTo?: string } = {}) {
+  const router = useRouter();
   const scheme = useColorScheme();
   const isDark = scheme === 'dark';
   const c = isDark ? neuColors.dark : neuColors.light;
@@ -146,7 +152,13 @@ export default function SystemDiagnosticsScreen() {
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />}
       contentContainerStyle={{ paddingBottom: safeBottom(layout.insets.bottom) }}
     >
-      <PageHeader title="System Diagnostics" subtitle="API, database & service health" accentColor="#059669" />
+      <PageHeader
+        title="System Diagnostics"
+        subtitle="API, database & service health"
+        accentColor="#059669"
+        showBack={!!backTo}
+        onBack={backTo ? () => router.push(backTo as never) : undefined}
+      />
 
       <View style={{ paddingHorizontal: layout.screenPx }}>
 

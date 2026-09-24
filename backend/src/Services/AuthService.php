@@ -29,8 +29,10 @@ final class AuthService
 {
     private SessionManager $sessions;
 
-    public function __construct(?SessionManager $sessions = null)
-    {
+    public function __construct(
+        ?SessionManager $sessions = null,
+        private readonly FeatureFlagService $flags = new FeatureFlagService()
+    ) {
         $this->sessions = $sessions ?? new SessionManager();
     }
 
@@ -40,6 +42,11 @@ final class AuthService
     public function register(Request $request, array $data): array
     {
         $this->rateLimit('register:' . $request->clientIp(), Config::int('RATE_LIMIT_REGISTER_PER_HOUR', 10), 3600);
+
+        // Feature flag: user_registration — refused BEFORE any row is created
+        // (403 feature_disabled). Availability policy only: it never relaxes
+        // authentication, account-status or security checks.
+        $this->flags->assertEnabled('user_registration', $request);
 
         $email = strtolower(trim((string) ($data['email'] ?? '')));
         $phone = trim((string) ($data['phone'] ?? ''));
@@ -198,6 +205,17 @@ final class AuthService
             throw new ApiException(401, 'Invalid login credentials');
         }
 
+        // ── Feature flag: user_login ────────────────────────────────────────
+        // Evaluated AFTER the credentials are verified and AFTER the account
+        // status policy above (a suspended/blocked account is refused whatever
+        // this flag says) and BEFORE a session is issued. The role comes from
+        // the authenticated account row — never a client-supplied value — and
+        // Super Admin sign-in is never blocked, so whoever disabled the flag
+        // can always sign in and switch it back on.
+        if (($account['role'] ?? '') !== 'super_admin') {
+            $this->flags->assertEnabled('user_login', $request);
+        }
+
         // device pre-login check (pre_login_device_check port)
         $deviceData = $this->devicePayload($request, $data);
         $installationId = $deviceData['installation_id'] ?? null;
@@ -258,6 +276,10 @@ final class AuthService
     public function forgotPassword(Request $request, array $data): array
     {
         $identifier = trim((string) ($data['identifier'] ?? ''));
+        // Feature flag: password_reset — enforced BEFORE any token exists and
+        // before any identifier-existence probe. Authenticated password
+        // changes (changePassword) are never gated by this flag.
+        $this->flags->assertEnabled('password_reset', $request);
         $account = $this->resolveIdentifier($identifier);
         // Always return success (do not leak which identifiers exist).
         if ($account === null) {

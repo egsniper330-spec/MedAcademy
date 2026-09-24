@@ -44,7 +44,7 @@ const VERIFICATION_MAP: Record<string, { label: string; color: string; Icon: any
   skipped:  { label: 'Skipped',     color: '#9CA3AF', Icon: Clock },
 };
 
-export default function VideoMonitorScreen() {
+export default function VideoMonitorScreen({ backTo }: { backTo?: string } = {}) {
   const scheme = useColorScheme();
   const isDark = scheme === 'dark';
   const c = isDark ? neuColors.dark : neuColors.light;
@@ -228,6 +228,8 @@ export default function VideoMonitorScreen() {
           title="Video Monitor"
           subtitle={`${uploads.length} uploads tracked`}
           accentColor="#7C3AED"
+          showBack={!!backTo}
+          onBack={backTo ? () => router.push(backTo as never) : undefined}
           rightAction={
             <Pressable onPress={onRefresh}
               style={[neuFlatStyle(isDark), { width: 40, height: 40, borderRadius: 13, alignItems: 'center', justifyContent: 'center' }]}>

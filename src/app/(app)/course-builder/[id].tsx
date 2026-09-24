@@ -48,6 +48,7 @@ import { useUploadQueueStore } from '@/lib/uploadQueueStore';
 import type { RelativePathString } from 'expo-router';
 import { usePermission } from '@/hooks/usePermission';
 import { PermissionRationaleModal } from '@/components/PermissionRationaleModal';
+import { isFeatureEnabled } from '@/lib/featureFlags';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 type Tab = 'info' | 'structure' | 'settings';
@@ -545,6 +546,12 @@ export default function CourseBuilder() {
   };
 
   const handlePublish = async () => {
+    // Feature flag: doctor_course_publishing. UI reflection only — the server
+    // refuses the publish itself (403 feature_disabled) when the flag is off.
+    if (!isFeatureEnabled('doctor_course_publishing')) {
+      showToast({ type: 'error', message: 'Publishing is temporarily unavailable.' });
+      return;
+    }
     const freshData = courseId ? await getCourseById(courseId).catch(() => null) : null;
     const freshSections: any[] = freshData?.sections ?? sections;
     const freshUseDefault = freshData ? (freshData.use_default_contact !== false) : useDefaultContact;
@@ -757,8 +764,8 @@ export default function CourseBuilder() {
               <Save size={15} color={c.primary} />
               <Text style={{ fontSize: 13, fontWeight: '700', color: c.primary }}>Save</Text>
             </Pressable>
-            <Pressable onPress={handlePublish} disabled={publishing}
-              style={{ paddingHorizontal: 14, paddingVertical: 11, borderRadius: 12, height: 44,
+            <Pressable onPress={handlePublish} disabled={publishing || !isFeatureEnabled('doctor_course_publishing')}
+              style={{ paddingHorizontal: 14, paddingVertical: 11, borderRadius: 12, height: 44, opacity: isFeatureEnabled('doctor_course_publishing') ? 1 : 0.5,
                 backgroundColor: status === 'published' ? '#16A34A' : c.primary,
                 flexDirection: 'row', alignItems: 'center', gap: 6 }}>
               {publishing ? <ActivityIndicator size="small" color="#fff" /> : <Check size={15} color="#fff" />}
@@ -776,8 +783,8 @@ export default function CourseBuilder() {
               style={[neuFlatStyle(isDark), { width: 44, height: 44, borderRadius: 12, alignItems: 'center', justifyContent: 'center' }]}>
               <Save size={17} color={c.primary} />
             </Pressable>
-            <Pressable onPress={handlePublish} disabled={publishing}
-              style={{ paddingHorizontal: 12, paddingVertical: 11, borderRadius: 12, height: 44,
+            <Pressable onPress={handlePublish} disabled={publishing || !isFeatureEnabled('doctor_course_publishing')}
+              style={{ paddingHorizontal: 12, paddingVertical: 11, borderRadius: 12, height: 44, opacity: isFeatureEnabled('doctor_course_publishing') ? 1 : 0.5,
                 backgroundColor: status === 'published' ? '#16A34A' : c.primary,
                 flexDirection: 'row', alignItems: 'center', gap: 5 }}>
               {publishing

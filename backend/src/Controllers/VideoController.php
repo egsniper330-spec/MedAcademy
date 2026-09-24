@@ -11,6 +11,7 @@ use MedAcademy\Http\Response;
 use MedAcademy\Services\AuditService;
 use MedAcademy\Services\IntegrityService;
 use MedAcademy\Services\SecurityEvidenceService;
+use MedAcademy\Services\VideoProviderPolicyService;
 use MedAcademy\Utils\Config;
 use MedAcademy\Utils\Uuid;
 use MedAcademy\Video\VdoCipherService;
@@ -40,6 +41,19 @@ final class VideoController
         $lessonId = isset($request->json()['lesson_id']) ? (string) $request->json()['lesson_id'] : null;
         if ($videoId === '') {
             throw new ApiException(400, 'video_id is required');
+        }
+
+        // ── PROVIDER AVAILABILITY POLICY (pure availability layer) ───────
+        // Runs BEFORE the security gates only so a policy-refused user never
+        // reaches them; the security gates themselves are untouched and keep
+        // winning for anyone who passes. Super Admin always bypasses: an
+        // administrator must never be locked out of administrating VdoCipher
+        // content (mirrors FeatureFlagService's SA exemption on login).
+        if (($request->user['role'] ?? '') !== 'super_admin') {
+            VideoProviderPolicyService::assertProviderAllowed(
+                (string) $request->user['id'],
+                'vdocipher'
+            );
         }
 
         // ── SERVER-SIDE APP-INTEGRITY POLICY (protected playback) ────────
@@ -96,6 +110,17 @@ final class VideoController
             throw new ApiException(400, 'video_id is required');
         }
 
+        // ── PROVIDER AVAILABILITY POLICY (same layer as otp()) ───────────
+        // No NEW online or offline VdoCipher authorization while the provider
+        // is disabled for this doctor. Existing DRM downloads are untouched:
+        // this gate never deletes, corrupts or revokes already-issued content.
+        if (($request->user['role'] ?? '') !== 'super_admin') {
+            VideoProviderPolicyService::assertProviderAllowed(
+                (string) $request->user['id'],
+                'vdocipher'
+            );
+        }
+
         IntegrityService::assertActionAllowed(
             (string) $request->user['id'],
             'vdo_otp',
@@ -119,6 +144,16 @@ final class VideoController
     public function uploadInit(Request $request): array
 
     {
+        // ── PROVIDER AVAILABILITY POLICY (upload path) ──────────────────
+        // No NEW VdoCipher upload session while the provider is disabled for
+        // this doctor (super_admin exempt). In-flight sessions/heartbeats are
+        // unaffected: uploadStatus/assemble/delete are NOT gated.
+        if (($request->user['role'] ?? '') !== 'super_admin') {
+            VideoProviderPolicyService::assertProviderAllowed(
+                (string) $request->user['id'],
+                'vdocipher'
+            );
+        }
         return $this->video->uploadInit($request->user['id'], $request->json());
     }
 

@@ -10,6 +10,7 @@ use MedAcademy\Http\ApiException;
 use MedAcademy\Http\Request;
 use MedAcademy\Services\AuthService;
 use MedAcademy\Services\AuditService;
+use MedAcademy\Services\FeatureFlagService;
 use MedAcademy\Utils\Uuid;
 
 /**
@@ -23,7 +24,8 @@ use MedAcademy\Utils\Uuid;
 final class StudentController
 {
     public function __construct(
-        private readonly AuthService $authService = new AuthService()
+        private readonly AuthService $authService = new AuthService(),
+        private readonly FeatureFlagService $flags = new FeatureFlagService()
     ) {
     }
 
@@ -47,6 +49,17 @@ final class StudentController
 
         $needsNewStudent = in_array($mode, ['create_only', 'create_and_enroll_credits'], true);
         $needsActivation = $mode !== 'create_only';
+
+        // ── Feature flags (availability policy, evaluated before any write) ─
+        //   user_management             → creating a NEW student account
+        //   student_enrollment_credits  → consuming credits to enroll
+        // Existing enrollments/accounts are never modified by these flags.
+        if ($needsNewStudent) {
+            $this->flags->assertEnabledFor('user_management', $request);
+        }
+        if ($needsActivation) {
+            $this->flags->assertEnabledFor('student_enrollment_credits', $request);
+        }
 
         // Validation
         if ($needsNewStudent) {

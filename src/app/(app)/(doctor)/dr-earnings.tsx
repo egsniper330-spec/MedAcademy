@@ -43,6 +43,7 @@ import { NeuCard } from '@/components/NeuCard';
 import { useToast } from '@/components/Toast';
 import { neuColors, useLayout, safeBottom } from '@/lib/neu';
 import { DashboardHeader } from '@/components/DashboardHeader';
+import { isFeatureEnabled } from '@/lib/featureFlags';
 
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -945,6 +946,23 @@ export default function DoctorEarnings() {
       />
       <View style={{ padding: layout.screenPx, paddingTop: 0 }}>
 
+        {/* Platform flag: doctor_earnings (Super Admin control). UI reflection
+            only — the server refuses the earnings RPC (403 feature_disabled).
+            Takes precedence over the personal toggle, and re-enabling the flag
+            restores this screen instantly; no data is ever modified. */}
+        {!isFeatureEnabled('doctor_earnings') ? (
+          <View style={{ alignItems: 'center', paddingVertical: 52, gap: 16 }}>
+            <NeuCard radius={24} style={{ width: 72, height: 72, alignItems: 'center', justifyContent: 'center' }}>
+              <DollarSign size={32} color={`${c.text}30`} />
+            </NeuCard>
+            <View style={{ alignItems: 'center', gap: 8 }}>
+              <Text style={{ fontSize: 17, fontWeight: '800', color: c.text, opacity: 0.4 }}>Earnings Temporarily Unavailable</Text>
+              <Text style={{ fontSize: 13, color: c.text, opacity: 0.25, textAlign: 'center', maxWidth: 260, lineHeight: 20 }}>
+                The platform operator has temporarily disabled the earnings area. Your balances and history are safe and will reappear when it is re-enabled.
+              </Text>
+            </View>
+          </View>
+        ) : (<>
         {/* Toggle */}
         <EarningsToggleCard enabled={earningsEnabled} toggling={toggling} onToggle={handleToggle} c={c} />
 
@@ -1036,6 +1054,8 @@ export default function DoctorEarnings() {
               )}
             </NeuCard>
           </>
+        )}
+        </>
         )}
       </View>
 

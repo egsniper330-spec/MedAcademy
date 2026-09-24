@@ -8,7 +8,7 @@ import {
   View, Text, ScrollView, TextInput,
   RefreshControl, useColorScheme, Pressable,
 } from 'react-native';
-import { useFocusEffect } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 import { FileText, Edit3, Check, ChevronRight, ChevronDown } from 'lucide-react-native';
 import { getCMSPages, updateCMSPage } from '@/lib/api';
 import { NeuCard } from '@/components/NeuCard';
@@ -23,7 +23,16 @@ const PAGE_COLORS: Record<string, string> = {
   about_us: '#1E90FF', contact_us: '#16A34A', privacy_policy: '#7C3AED', terms_conditions: '#D97706',
 };
 
-export default function CMSPagesScreen() {
+/**
+ * Shared by the Admin shell and the Super Admin shell.
+ *
+ * `backTo` renders the platform back arrow when the screen is opened from the
+ * Super Admin → Platform hub (the SA shell renders screens as TABS, so there is
+ * no stack to pop — the arrow navigates to the hub explicitly). In the Admin
+ * shell the screen keeps its normal header (hamburger).
+ */
+export default function CMSPagesScreen({ backTo }: { backTo?: string } = {}) {
+  const router = useRouter();
   const scheme = useColorScheme();
   const isDark = scheme === 'dark';
   const c = isDark ? neuColors.dark : neuColors.light;
@@ -59,16 +68,40 @@ export default function CMSPagesScreen() {
   useFocusEffect(useCallback(() => { load(); }, [load]));
   const onRefresh = async () => { setRefreshing(true); await load(); setRefreshing(false); };
 
+  // The save endpoint returns the full page list, so the row state (including
+  // the "Built-in default" badge) updates without a full reload flash.
+  const applyPages = (next: unknown) => {
+    if (!Array.isArray(next) || next.length === 0) return;
+    setPages(next as any[]);
+    const ed: Record<string, { title: string; content: string }> = {};
+    (next as any[]).forEach((p: any) => { ed[p.key] = { title: p.title, content: p.content ?? '' }; });
+    setEditing(ed);
+  };
+
   const handleSave = async (key: string) => {
     const payload = editing[key];
     if (!payload) return;
     setSaving(key);
     try {
-      await updateCMSPage(key, payload);
+      applyPages(await updateCMSPage(key, payload));
       setSaved(key);
       setTimeout(() => setSaved(null), 2500);
     } catch (e) {
       showToast({ type: 'error', message: friendlyError(e, 'Failed to save page.') });
+    }
+    setSaving(null);
+  };
+
+  // Restore the app's built-in text for a page: an EMPTY body means "render the
+  // bundled copy", so this never leaves a page blank and never loses the legal
+  // text the app ships with.
+  const handleRestoreDefault = async (key: string) => {
+    setSaving(key);
+    try {
+      applyPages(await updateCMSPage(key, { content: '' }));
+      showToast({ type: 'success', message: 'Built-in text restored.' });
+    } catch (e) {
+      showToast({ type: 'error', message: friendlyError(e, 'Failed to restore the built-in text.') });
     }
     setSaving(null);
   };
@@ -78,7 +111,13 @@ export default function CMSPagesScreen() {
   return (
     <ScrollView style={{ flex: 1, backgroundColor: c.base }}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />} contentContainerStyle={{ paddingBottom: safeBottom(layout.insets.bottom) }}>
-      <PageHeader title="CMS Pages" subtitle="Edit platform content pages" accentColor="#16A34A" />
+      <PageHeader
+        title="CMS Pages"
+        subtitle="Edit platform content pages"
+        accentColor="#16A34A"
+        showBack={!!backTo}
+        onBack={backTo ? () => router.push(backTo as never) : undefined}
+      />
 
       <View style={{ paddingHorizontal: layout.screenPx }}>
 
@@ -113,6 +152,11 @@ export default function CMSPagesScreen() {
                       <Text style={{ fontSize: 11, fontWeight: '600', color: page.published ? '#16A34A' : '#DC2626' }}>
                         {page.published ? 'Published' : 'Draft'}
                       </Text>
+                      {page.using_builtin && (
+                        <View style={{ backgroundColor: `${c.text}14`, borderRadius: 8, paddingHorizontal: 6, paddingVertical: 2 }}>
+                          <Text style={{ fontSize: 10, fontWeight: '800', color: c.text, opacity: 0.6 }}>BUILT-IN TEXT</Text>
+                        </View>
+                      )}
                     </View>
                   </View>
                   {saved === page.key ? (
@@ -132,7 +176,10 @@ export default function CMSPagesScreen() {
                       onChangeText={v => setEditing(prev => ({ ...prev, [page.key]: { ...prev[page.key], title: v } }))}
                       style={{ ...inp, minWidth: 0, marginBottom: 14 }}
                     />
-                    <Text style={{ fontSize: 11, fontWeight: '700', color: c.text, opacity: 0.5, marginBottom: 6, textTransform: 'uppercase' }}>Content (Markdown supported)</Text>
+                    <Text style={{ fontSize: 11, fontWeight: '700', color: c.text, opacity: 0.5, marginBottom: 6, textTransform: 'uppercase' }}>Content</Text>
+                    <Text style={{ fontSize: 11, color: c.text, opacity: 0.45, marginBottom: 8, lineHeight: 16 }}>
+                      Plain text — no HTML. Lines starting with ## become section headings. Leave empty to keep the app's built-in text.
+                    </Text>
                     <View style={{ ...inp, minWidth: 0, marginBottom: 16 }}>
                       <TextInput
                         value={draft.content}
@@ -152,6 +199,17 @@ export default function CMSPagesScreen() {
                       loading={saving === page.key}
                       fullWidth
                     />
+                    {!page.using_builtin && (
+                      <Pressable
+                        onPress={() => handleRestoreDefault(page.key)}
+                        disabled={saving === page.key}
+                        style={{ marginTop: 10, paddingVertical: 10, alignItems: 'center' }}
+                      >
+                        <Text style={{ fontSize: 12, fontWeight: '700', color: c.primary }}>
+                          Restore built-in text
+                        </Text>
+                      </Pressable>
+                    )}
                   </View>
                 )}
               </NeuCard>

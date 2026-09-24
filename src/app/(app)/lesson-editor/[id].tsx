@@ -858,14 +858,21 @@ export default function LessonEditor() {
 
           {/* Video Source Selector */}
           <Field label="Video Source">
-            {/* Provider permission gate: show notice when all upload providers are blocked */}
+            {/* Provider availability gate — driven by the server's effective
+                policy (VideoProviderPolicyService via getMyProviderPermissions),
+                which now also answers for doctors (root-cause fix). Disabled
+                providers are hidden from selection; the backend re-enforces
+                every authorization, so hiding is UX, never the enforcement. */}
             {(() => {
               const allBlocked = providerPerms.length > 0 && providerPerms.every(p => !p.final_enabled);
               const vdoCipherPerm = providerPerms.find(p => p.provider_key === 'vdocipher');
+              const plyrPerm = providerPerms.find(p => p.provider_key === 'plyr');
               const vdoCipherBlocked = vdoCipherPerm ? !vdoCipherPerm.final_enabled : false;
-              const vdoCipherDisabledMsg = vdoCipherPerm && !vdoCipherPerm.global_enabled
-                ? 'VdoCipher uploads are currently disabled by the administrator.'
-                : 'VdoCipher uploads have been disabled for your account.';
+              const plyrBlocked = plyrPerm ? !plyrPerm.final_enabled : false;
+              const blockedMsg = (perm: typeof vdoCipherPerm, name: string) =>
+                perm && !perm.global_enabled
+                  ? `${name} is currently disabled by the administrator.`
+                  : `${name} has been disabled for your account.`;
               return (
                 <>
                   {allBlocked && (
@@ -880,8 +887,11 @@ export default function LessonEditor() {
                     {VIDEO_TYPES.map(vt => {
                       const Icon = vt.icon;
                       const selected = videoType === vt.value;
-                      // Gate: hide vdocipher button when provider is blocked
+                      // Gate: hide a provider's button when its policy blocks
+                      // this account (plyr → YouTube path, vdocipher → DRM path;
+                      // 'coming_soon' is not a provider and stays untouched).
                       if (vt.value === 'vdocipher' && vdoCipherBlocked) return null;
+                      if (vt.value === 'youtube' && plyrBlocked) return null;
                       return (
                         <Pressable key={vt.value} onPress={() => setVideoType(vt.value)}
                           style={[
@@ -898,7 +908,12 @@ export default function LessonEditor() {
                   </View>
                   {vdoCipherBlocked && (
                     <Text style={{ marginTop: 6, fontSize: 12, color: '#D97706' }}>
-                      {vdoCipherDisabledMsg}
+                      {blockedMsg(vdoCipherPerm, 'VdoCipher')}
+                    </Text>
+                  )}
+                  {plyrBlocked && !allBlocked && (
+                    <Text style={{ marginTop: 6, fontSize: 12, color: '#D97706' }}>
+                      {blockedMsg(plyrPerm, 'YouTube video')}
                     </Text>
                   )}
                 </>

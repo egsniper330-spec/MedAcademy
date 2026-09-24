@@ -19,6 +19,7 @@ import { NeuCard } from '@/components/NeuCard';
 import { NeuButton } from '@/components/NeuButton';
 import { neuColors, useLayout, neuFlatStyle, safeBottom } from '@/lib/neu';
 import { PageHeader } from '@/components/PageHeader';
+import { useRouter } from 'expo-router';
 
 type CPAction = 'warn_only' | 'strike_system' | 'auto_logout' | 'auto_suspend';
 type StrikeAction = 'warning' | 'logout' | 'suspend' | 'ban';
@@ -102,7 +103,8 @@ function ActionPicker({ label, value, options, optionLabels, onChange, isDark }:
   );
 }
 
-export default function ContentProtectionPolicyScreen() {
+export default function ContentProtectionPolicyScreen({ backTo }: { backTo?: string } = {}) {
+  const router = useRouter();
   const isDark = useColorScheme() === 'dark';
   const c = isDark ? neuColors.dark : neuColors.light;
   const layout = useLayout();
@@ -157,7 +159,12 @@ export default function ContentProtectionPolicyScreen() {
 
   return (
     <ScrollView style={{ flex: 1, backgroundColor: c.base }}>
-      <PageHeader title="Content Protection" subtitle="Configure screenshot & recording policies" />
+      <PageHeader
+        title="Content Protection"
+        subtitle="Configure screenshot & recording policies"
+        showBack={!!backTo}
+        onBack={backTo ? () => router.push(backTo as never) : undefined}
+      />
 
       <View style={{ padding: layout.screenPx, gap: 16 }}>
         {/* ── Detection Policies ── */}

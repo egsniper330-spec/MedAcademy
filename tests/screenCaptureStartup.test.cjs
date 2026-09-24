@@ -133,12 +133,144 @@ function read(rel) {
     'app shell: APP_SC_KEY reparent stays INSIDE setTimeout(0) (deferral contract preserved)');
 }
 
-console.log('──────────────────────────────────────────────');
-if (failed === 0) {
-  console.log(`RESULT: ${passed} passed, 0 failed`);
-  console.log('ALL SCREEN-CAPTURE STARTUP TESTS PASSED');
-} else {
-  console.log(`RESULT: ${passed} passed, ${failed} failed`);
-  for (const f of failures) console.log('  FAILED: ' + f);
-  process.exit(1);
+// ─── Behavioral: the guard module (keyed ref-counting over the native module) ──
+// Proves the two native-defect invariants the structural section pins by shape:
+//   1. the native reparent runs AT MOST ONCE while any lock is held (no clobber
+//      of the saved originalParent), and
+//   2. a native restore runs only when the LAST genuinely-locked key is released
+//      (stray releases never tear down another owner's protection).
+{
+  const babel = require('@babel/core');
+  const outDir = path.join(ROOT, '.freebuff', 'scguard-test');
+  fs.rmSync(outDir, { recursive: true, force: true });
+  fs.mkdirSync(outDir, { recursive: true });
+
+  const stubPath = path.join(outDir, 'expo-sc-stub.js').replace(/\\/g, '/');
+  fs.writeFileSync(stubPath, `
+    const calls = { prevent: 0, allow: 0, failPrevent: false };
+    async function preventScreenCaptureAsync(key = 'default') {
+      if (calls.failPrevent) throw new Error('native unavailable');
+      calls.prevent += 1;
+    }
+    async function allowScreenCaptureAsync(key = 'default') { calls.allow += 1; }
+    async function isAvailableAsync() { return true; }
+    async function getPermissionsAsync() { return { granted: true, expires: 'never', canAskAgain: true, status: 'granted' }; }
+    async function requestPermissionsAsync() { return getPermissionsAsync(); }
+    async function enableAppSwitcherProtectionAsync() {}
+    async function disableAppSwitcherProtectionAsync() {}
+    function addScreenshotListener() { return { remove() {} }; }
+    function removeScreenshotListener() {}
+    function useScreenshotListener() {}
+    const PermissionStatus = { GRANTED: 'granted' };
+    module.exports = {
+      calls, preventScreenCaptureAsync, allowScreenCaptureAsync, isAvailableAsync,
+      getPermissionsAsync, requestPermissionsAsync, enableAppSwitcherProtectionAsync,
+      disableAppSwitcherProtectionAsync, addScreenshotListener, removeScreenshotListener,
+      useScreenshotListener, usePermissions: () => [getPermissionsAsync(), requestPermissionsAsync],
+      PermissionStatus,
+    };
+  `);
+
+  const compile = () => {
+    const src = read('src/lib/screenCaptureGuard.ts');
+    const out = babel.transformSync(src, {
+      filename: 'screenCaptureGuard.ts',
+      configFile: false, babelrc: false,
+      plugins: [
+        [require('@babel/plugin-transform-typescript'), { isTSX: false, allExtensions: true }],
+        require('@babel/plugin-transform-modules-commonjs'),
+      ],
+    }).code.replace(/require\("expo-screen-capture"\)/g, 'require("' + stubPath + '")');
+    const file = path.join(outDir, 'screenCaptureGuard.js');
+    fs.writeFileSync(file, out);
+    delete require.cache[file]; // fresh module state per scenario
+    delete require.cache[stubPath];
+    const guard = require(file);
+    const stub = require(stubPath);
+    stub.calls.prevent = 0; stub.calls.allow = 0; stub.calls.failPrevent = false;
+    return { guard, stub };
+  };
+  const tick = () => new Promise((r) => setTimeout(r, 0));
+
+  (async () => {
+    // Scenario 1 — multi-key lifecycle: exactly one native prevent, restore only
+    // when the last key is released.
+    {
+      const { guard, stub } = compile();
+      await guard.preventScreenCaptureAsync('root-shell'); await tick();
+      await guard.preventScreenCaptureAsync('app-shell');  await tick();
+      ok(stub.calls.prevent === 1,
+        'guard: two different keys → native preventScreenshots ran ONCE (originalParent never clobbered)');
+      await guard.allowScreenCaptureAsync('root-shell'); await tick();
+      ok(stub.calls.allow === 0,
+        'guard: releasing one of two keys does NOT restore (other lock still holds)');
+      await guard.allowScreenCaptureAsync('app-shell'); await tick();
+      ok(stub.calls.allow === 1,
+        'guard: releasing the LAST key triggers exactly one native restore');
+    }
+
+    // Scenario 2 — stray release: an allow for a key that never prevented must
+    // not touch the native module at all.
+    {
+      const { guard, stub } = compile();
+      await guard.allowScreenCaptureAsync('ghost-key'); await tick();
+      ok(stub.calls.allow === 0,
+        'guard: stray release (key never taken) never invokes the native restore');
+    }
+
+    // Scenario 3 — failed native prevent: the key must not be considered locked;
+    // its release must not fire a native allow, and a later key can take the lock.
+    {
+      const { guard, stub } = compile();
+      stub.calls.failPrevent = true;
+      let threw = false;
+      try { await guard.preventScreenCaptureAsync('root-shell'); await tick(); }
+      catch { threw = true; }
+      ok(threw, 'guard: native prevent failure propagates to the caller');
+      stub.calls.failPrevent = false;
+      await guard.allowScreenCaptureAsync('root-shell'); await tick();
+      ok(stub.calls.allow === 0 && stub.calls.prevent === 0,
+        'guard: no native restore after a failed prevent (key never held the lock)');
+      await guard.preventScreenCaptureAsync('app-shell'); await tick();
+      ok(stub.calls.prevent === 1,
+        'guard: a later key takes the native lock after an earlier failure');
+    }
+
+    // Scenario 4 — re-prevent after full release: native lock re-acquired.
+    {
+      const { guard, stub } = compile();
+      await guard.preventScreenCaptureAsync('lesson'); await tick();
+      await guard.allowScreenCaptureAsync('lesson'); await tick();
+      await guard.preventScreenCaptureAsync('lesson'); await tick();
+      ok(stub.calls.prevent === 2 && stub.calls.allow === 1,
+        'guard: prevent → allow → prevent re-acquires the native lock (2 prevents, 1 allow)');
+    }
+
+    // Scenario 5 — idempotent per key (double prevent from the same owner).
+    {
+      const { guard, stub } = compile();
+      await guard.preventScreenCaptureAsync('root-shell'); await tick();
+      await guard.preventScreenCaptureAsync('root-shell'); await tick();
+      ok(stub.calls.prevent === 1, 'guard: same-key double prevent is idempotent');
+    }
+
+    fs.rmSync(outDir, { recursive: true, force: true });
+    summary();
+  })().catch((e) => {
+    ok(false, 'guard: behavioral suite crashed — ' + e.message);
+    summary();
+  });
+  return; // summary printed by the async completion
+}
+
+function summary() {
+  console.log('──────────────────────────────────────────────');
+  if (failed === 0) {
+    console.log(`RESULT: ${passed} passed, 0 failed`);
+    console.log('ALL SCREEN-CAPTURE STARTUP TESTS PASSED');
+  } else {
+    console.log(`RESULT: ${passed} passed, ${failed} failed`);
+    for (const f of failures) console.log('  FAILED: ' + f);
+    process.exit(1);
+  }
 }

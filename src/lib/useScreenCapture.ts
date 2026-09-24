@@ -25,7 +25,7 @@ import { useEffect } from 'react';
 // The JS module itself guards every native call with availability checks
 // (`if (!ExpoScreenCapture.preventScreenCapture)`), so it is safe even when
 // the native module is unavailable.
-import * as ScreenCaptureLib from 'expo-screen-capture';
+import * as ScreenCaptureLib from '@/lib/screenCaptureGuard';
 import { logSecurityEvent } from '@/lib/security';
 
 // Stable key — distinct from useContentProtection's 'lesson' key so the two

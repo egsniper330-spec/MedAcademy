@@ -145,7 +145,7 @@ export function useContentProtection(
     let cleanup: (() => void) | undefined;
     (async () => {
       try {
-        const SC = await import('expo-screen-capture');
+        const SC = await import('@/lib/screenCaptureGuard');
         await SC.preventScreenCaptureAsync('lesson');
         cleanup = () => { SC.allowScreenCaptureAsync('lesson').catch(() => {}); };
       } catch (e) {
@@ -231,7 +231,7 @@ export function useContentProtection(
     let expoSub: { remove: () => void } | null = null;
     (async () => {
       try {
-        const SC = await import('expo-screen-capture');
+        const SC = await import('@/lib/screenCaptureGuard');
         expoSub = SC.addScreenshotListener(async () => {
           if (!isMounted.current) return;
           setScreenshotDetected(true);

@@ -34,7 +34,7 @@ class DataController
      *  this one; if production errors keep referencing old behavior while this
      *  constant is absent from the live file, the running code is NOT this
      *  file (wrong upload path, duplicate checkout, or OPcache staleness). */
-    public const RUNTIME_VERSION = '2026-09-14.2';
+    public const RUNTIME_VERSION = '2026-09-24.1';
 
     /** Tables readable by any authenticated user */
     private const PUBLIC_TABLES = [
@@ -90,6 +90,12 @@ class DataController
      */
     private const WRITE_ADMIN_ONLY_TABLES = [
         'system_config', 'feature_flags',
+        // Platform identity + published content are Super-Admin-managed. They are
+        // readable by every authenticated client (branding/legal text is needed
+        // app-wide) but a direct PATCH could otherwise rewrite the platform's
+        // identity and its Terms/Privacy text. Writes go through
+        // PlatformController (/platform/branding, /platform/pages/{key}).
+        'app_branding', 'app_pages',
         // Whitelist self-service is a MAINTENANCE-BYPASS GRANT: if any
         // authenticated user could POST/PATCH/DELETE here, every user could
         // grant themselves immunity from the maintenance gate. SA management
@@ -428,6 +434,27 @@ class DataController
         $body = $request->json();
         if (!$body) throw new ApiException(422, 'Request body is required');
 
+        // ── VIDEO PROVIDER AVAILABILITY (Plyr path) ────────────────────────
+        // Same availability gate as update(): a doctor with Plyr disabled
+        // cannot CREATE a lesson already assigned to the YouTube/Plyr path.
+        if ($table === 'lessons' && ($request->user['role'] ?? '') !== 'super_admin') {
+            $rowsCheck = array_is_list($body) ? $body : [$body];
+            foreach ($rowsCheck as $rowCheck) {
+                if (!is_array($rowCheck) || !array_key_exists('video_type', $rowCheck)) {
+                    continue;
+                }
+                $provider = \MedAcademy\Services\VideoProviderPolicyService::providerForVideoType(
+                    is_string($rowCheck['video_type']) ? $rowCheck['video_type'] : null
+                );
+                if ($provider !== null) {
+                    \MedAcademy\Services\VideoProviderPolicyService::assertProviderAllowed(
+                        (string) ($request->user['id'] ?? ''),
+                        $provider
+                    );
+                }
+            }
+        }
+
         // Support single row or array of rows
         $rows = array_is_list($body) ? $body : [$body];
         $db = Database::instance();
@@ -529,6 +556,44 @@ class DataController
 
         $body = $request->json();
         if (!$body || !is_array($body)) throw new ApiException(422, 'Request body with update fields required');
+
+        // ── VIDEO PROVIDER AVAILABILITY (Plyr path) ────────────────────────
+        // The ONLY server-side control point where a doctor CHANGES a lesson's
+        // video provider (the lesson editor PATCHes video_type). Enforced only
+        // when the write actually CHANGES the assignment: editing any other
+        // field of an existing YouTube lesson must never be blocked by the
+        // provider policy (existing content stays intact and editable).
+        // Super Admin is exempt (administration of any content must remain
+        // possible). Playback of already-assigned videos stays with the player
+        // code and its own security stack.
+        if ($table === 'lessons' && is_array($body) && array_key_exists('video_type', $body)
+            && ($request->user['role'] ?? '') !== 'super_admin'
+        ) {
+            $provider = \MedAcademy\Services\VideoProviderPolicyService::providerForVideoType(
+                is_string($body['video_type']) ? $body['video_type'] : null
+            );
+            if ($provider !== null) {
+                // Current assignment: the update is filtered by id=… in the
+                // normal editor flow; without it (bulk rewrite) treat as a
+                // change and enforce.
+                $lessonId = (string) ($request->queryParams()['id'] ?? '');
+                $currentType = null;
+                if (preg_match('/^[0-9a-fA-F-]{36}$/', $lessonId)) {
+                    $row = Database::instance()->value(
+                        'SELECT video_type FROM `lessons` WHERE `id` = ? LIMIT 1',
+                        [$lessonId]
+                    );
+                    $currentType = is_string($row) ? $row : null;
+                }
+                $currentProvider = \MedAcademy\Services\VideoProviderPolicyService::providerForVideoType($currentType);
+                if ($currentProvider !== $provider) {
+                    \MedAcademy\Services\VideoProviderPolicyService::assertProviderAllowed(
+                        (string) ($request->user['id'] ?? ''),
+                        $provider
+                    );
+                }
+            }
+        }
 
         // Remove protected columns (mass assignment prevention)
         $body = $this->filterProtectedColumns($body, $table);

@@ -7,7 +7,7 @@ import { AppState, View } from 'react-native';
 // The keyed public API preventScreenCaptureAsync(key) / allowScreenCaptureAsync(key)
 // are JS-level functions in ScreenCapture.js — undefined on the proxy →
 // TypeError: undefined is not a function → fatal Android crash.
-import * as ScreenCaptureLib from 'expo-screen-capture';
+import * as ScreenCaptureLib from '@/lib/screenCaptureGuard';
 import { useSession } from '@/ctx';
 import { useProfileStore } from '@/lib/store';
 import { getProfile } from '@/lib/api';

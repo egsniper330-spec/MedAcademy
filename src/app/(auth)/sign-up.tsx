@@ -12,8 +12,10 @@ import { NeuCard } from '@/components/NeuCard';
 import { NeuButton } from '@/components/NeuButton';
 import { neuColors, useLayout, safeTop, safeBottom } from '@/lib/neu';
 import { normalizePhoneE164 } from '@/lib/identifier';
+import { useBranding } from '@/lib/branding';
 import { COUNTRIES, DEFAULT_COUNTRY, buildE164, validateNationalNumber, type Country } from '@/lib/phone';
 import { NeuInputRow } from '@/components/NeuInputRow';
+import { isFeatureEnabled } from '@/lib/featureFlags';
 
 interface PickerOption { id: string; name: string; }
 
@@ -218,6 +220,7 @@ function CountryCodePicker({
 // ─── Main Registration Screen ─────────────────────────────────────────────────
 
 export default function SignUp() {
+  const branding = useBranding(); // server-managed display name (fails safe to defaults)
   const scheme = useColorScheme();
   const isDark = scheme === 'dark';
   const c = isDark ? neuColors.dark : neuColors.light;
@@ -301,6 +304,12 @@ export default function SignUp() {
   };
 
   const handleSignUp = async () => {
+    // Feature flag: user_registration. UI reflection only — the server refuses
+    // the registration itself (403 feature_disabled) when the flag is off.
+    if (!isFeatureEnabled('user_registration')) {
+      setError('Registration is temporarily unavailable. Please try again later.');
+      return;
+    }
     // Clear all errors on each attempt
     setError('');
     setEmailError('');
@@ -450,7 +459,7 @@ export default function SignUp() {
             Create Account
           </Text>
           <Text style={{ fontSize: layout.bodySize, color: c.text, opacity: 0.55, marginTop: layout.pad.xs }}>
-            Join MedAcademy today
+            {`Join ${branding.app_name} today`}
           </Text>
         </View>
 
@@ -575,7 +584,13 @@ export default function SignUp() {
             <Text style={{ color: '#DC2626', fontSize: layout.bodySize - 1, marginBottom: layout.pad.md }}>{error}</Text>
           ) : null}
 
-          <NeuButton label="Create Account" onPress={handleSignUp} loading={loading} fullWidth />
+          <NeuButton
+            label="Create Account"
+            onPress={handleSignUp}
+            loading={loading}
+            disabled={!isFeatureEnabled('user_registration')}
+            fullWidth
+          />
         </NeuCard>
 
         {/* Sign-in link */}

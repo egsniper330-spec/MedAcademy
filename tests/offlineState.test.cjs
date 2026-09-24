@@ -671,7 +671,7 @@ console.log('──────────────────────�
   const sysDiagScreen = fs.readFileSync(path.join(ROOT, 'src/app/(app)/(admin)/system-providers.tsx'), 'utf8').replace(/\r/g, '');
   assert(/runSystemDiagnostics\(\)/.test(sysDiagScreen), 'System Diagnostics screen runs the real backend scan');
   assert(/runSystemDiagnosticOne/.test(sysDiagScreen), 'System Diagnostics supports single-service re-check');
-  assert(/PageHeader title="System Diagnostics"/.test(sysDiagScreen), 'screen retitled System Diagnostics (old System Providers presentation gone)');
+  assert(/<PageHeader\s+title="System Diagnostics"/.test(sysDiagScreen), 'screen retitled System Diagnostics (old System Providers presentation gone)');
   assert(!/Provider Abstraction Layer/.test(sysDiagScreen), 'obsolete Provider Abstraction Layer presentation removed');
   assert(/setScanning\(true\)/.test(sysDiagScreen) && /setScanning\(false\)/.test(sysDiagScreen), 'Scan All has a bounded scanning state');
   assert(/sa-system-providers/.test(saLayoutSrc), 'System Diagnostics route resolves for Super Admin');

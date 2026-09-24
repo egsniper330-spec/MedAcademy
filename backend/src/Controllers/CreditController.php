@@ -8,6 +8,7 @@ use MedAcademy\Database\Database;
 use MedAcademy\Http\ApiException;
 use MedAcademy\Http\Request;
 use MedAcademy\Services\AuditService;
+use MedAcademy\Services\FeatureFlagService;
 use MedAcademy\Utils\Uuid;
 
 /**
@@ -23,6 +24,11 @@ use MedAcademy\Utils\Uuid;
  */
 final class CreditController
 {
+    public function __construct(
+        private readonly FeatureFlagService $flags = new FeatureFlagService()
+    ) {
+    }
+
     public function me(Request $request): array
     {
         $row = Database::instance()->row(
@@ -88,6 +94,10 @@ final class CreditController
      */
     public function refund(Request $request): array
     {
+        // Feature flag: doctor_credit_refunds — availability gate BEFORE any
+        // ledger mutation. Balances/history are never touched by the flag.
+        $this->flags->assertEnabledFor('doctor_credit_refunds', $request);
+
         $body = $request->json();
         $doctorId = Uuid::normalize((string) ($body['doctor_id'] ?? ''));
         $amount = (int) ($body['amount'] ?? 0);
@@ -240,6 +250,11 @@ final class CreditController
      */
     public function doctorEarnings(Request $request): array
     {
+        // Feature flag: doctor_earnings — hides the earnings view while the
+        // capability is switched off. READ-ONLY gate: no balance, transaction or
+        // historical record is ever modified by disabling this flag.
+        $this->flags->assertEnabled('doctor_earnings', $request);
+
         $doctorId = Uuid::normalize((string) $request->params['id']);
         $db = Database::instance();
 

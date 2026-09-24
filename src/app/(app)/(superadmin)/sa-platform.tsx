@@ -83,23 +83,23 @@ export default function SAPlatform() {
         {/* ── Appearance & Content ─────────────────────────────────────── */}
         <SectionLabel title="Appearance & Content" c={c} />
         <NavItem icon={Paintbrush}  label="Branding"           description="Logo, colours, platform identity"          color="#7C3AED" path="/branding"           c={c} isDark={isDark} />
-        <NavItem icon={FileText}    label="CMS Pages"          description="Static content and landing pages"          color="#16A34A" path="/cms"                    c={c} isDark={isDark} />
+        <NavItem icon={FileText}    label="CMS Pages"          description="Static content and landing pages"          color="#16A34A" path="/sa-cms"                 c={c} isDark={isDark} />
 
         {/* ── Feature Control ──────────────────────────────────────────── */}
         <SectionLabel title="Feature Control" c={c} />
-        <NavItem icon={Flag}        label="Feature Flags"      description="Toggle experimental features on/off"       color="#D97706" path="/feature-flags"      c={c} isDark={isDark} badge="BETA" />
+        <NavItem icon={Flag}        label="Feature Flags"      description="Enable / disable platform capabilities"     color="#D97706" path="/feature-flags"      c={c} isDark={isDark} />
         <NavItem icon={Wrench}      label="Maintenance Mode"   description="Enable / disable platform maintenance"     color="#DC2626" path="/maintenance"         c={c} isDark={isDark} />
 
         {/* ── Integrations ─────────────────────────────────────────────── */}
         <SectionLabel title="Integrations" c={c} />
-        <NavItem icon={Activity}    label="System Diagnostics" description="Database, DRM, email & storage health"     color="#059669" path="/system-providers"         c={c} isDark={isDark} />
+        <NavItem icon={Activity}    label="System Diagnostics" description="Database, DRM, email & storage health"     color="#059669" path="/sa-system-providers"      c={c} isDark={isDark} />
         <NavItem icon={Video}       label="Video Providers"    description="CDN and video platform settings"          color="#7C3AED" path="/video-providers"     c={c} isDark={isDark} />
-        <NavItem icon={Coins}       label="Currency Settings"  description="Platform default currency"                color="#D97706" path="/currency"             c={c} isDark={isDark} />
+        <NavItem icon={Coins}       label="Currency Settings"  description="Platform default currency"                color="#D97706" path="/sa-currency"             c={c} isDark={isDark} />
 
         {/* ── Content Protection ───────────────────────────────────────── */}
         <SectionLabel title="Content Protection" c={c} />
-        <NavItem icon={Eye}         label="Watermark / DRM"    description="Screenshot & recording prevention"        color="#DC2626" path="/content-protection"  c={c} isDark={isDark} badge="DRM" />
-        <NavItem icon={MonitorDot}  label="Video Monitor"      description="Live video health & delivery status"      color="#2DA8FF" path="/video-monitor"             c={c} isDark={isDark} />
+        <NavItem icon={Eye}         label="Watermark / DRM"    description="Screenshot & recording prevention"        color="#DC2626" path="/sa-content-protection"  c={c} isDark={isDark} badge="DRM" />
+        <NavItem icon={MonitorDot}  label="Video Monitor"      description="Live video health & delivery status"      color="#2DA8FF" path="/sa-video-monitor"             c={c} isDark={isDark} />
         <NavItem icon={HeartPulse}  label="Video Health"       description="Processing errors & quality checks"       color="#16A34A" path="/video-health"              c={c} isDark={isDark} />
         <NavItem icon={Settings}    label="Video Settings"     description="Player config, quality & encoding"        color="#6B7280" path="/video-settings"            c={c} isDark={isDark} />
         <NavItem icon={HardDrive}   label="Storage"            description="Bucket usage, cleanup & monitoring"       color="#2DA8FF" path="/storage"                  c={c} isDark={isDark} />
@@ -115,15 +115,15 @@ export default function SAPlatform() {
         <SectionLabel title="User Management" c={c} />
         <NavItem icon={UserCog}       label="Admin Management"  description="Super-admin and admin accounts"          color="#EF4444" path="/sa-users"              c={c} isDark={isDark} />
         <NavItem icon={HeartHandshake} label="Impersonation"   description="Log in as any user for debugging"        color="#2DA8FF" path="/impersonation"       c={c} isDark={isDark} />
-        <NavItem icon={Smartphone}    label="Device Management" description="User device limits & revocation"        color="#16A34A" path="/devices"                  c={c} isDark={isDark} />
+        <NavItem icon={Smartphone}    label="Device Management" description="User device limits & revocation"        color="#16A34A" path="/sa-devices"              c={c} isDark={isDark} />
 
         {/* ── Academic & Operations ────────────────────────────────────── */}
         <SectionLabel title="Academic & Operations" c={c} />
-        <NavItem icon={GraduationCap} label="Academic Structure" description="Universities, faculties, levels"        color="#2DA8FF" path="/academic"                c={c} isDark={isDark} />
-        <NavItem icon={UserPlus}      label="Enrollment Manager" description="Manual course enrollments"             color="#0EA5E9" path="/enrollment-manager"       c={c} isDark={isDark} />
-        <NavItem icon={Megaphone}     label="Notifications"      description="Broadcast & send platform messages"    color="#D97706" path="/notifications-center"     c={c} isDark={isDark} />
-        <NavItem icon={Upload}        label="Bulk Import"        description="Import users and course data"          color="#16A34A" path="/bulk-import"              c={c} isDark={isDark} />
-        <NavItem icon={Database}      label="DB Audit"           description="Low-level database audit trail"        color="#D97706" path="/db-audit"                c={c} isDark={isDark} />
+        <NavItem icon={GraduationCap} label="Academic Structure" description="Universities, faculties, levels"        color="#2DA8FF" path="/sa-academic"             c={c} isDark={isDark} />
+        <NavItem icon={UserPlus}      label="Enrollment Manager" description="Manual course enrollments"             color="#0EA5E9" path="/sa-enrollment-manager"    c={c} isDark={isDark} />
+        <NavItem icon={Megaphone}     label="Notifications"      description="Broadcast & send platform messages"    color="#D97706" path="/sa-notifications-center"  c={c} isDark={isDark} />
+        <NavItem icon={Upload}        label="Bulk Import"        description="Import users and course data"          color="#16A34A" path="/sa-bulk-import"           c={c} isDark={isDark} />
+        <NavItem icon={Database}      label="DB Audit"           description="Low-level database audit trail"        color="#D97706" path="/sa-db-audit"              c={c} isDark={isDark} />
 
         {/* ── Cleanup ──────────────────────────────────────────────────── */}
         <SectionLabel title="Cleanup & Permissions" c={c} />

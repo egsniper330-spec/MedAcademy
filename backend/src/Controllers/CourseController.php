@@ -8,6 +8,7 @@ use MedAcademy\Database\Database;
 use MedAcademy\Http\ApiException;
 use MedAcademy\Http\Request;
 use MedAcademy\Services\AuditService;
+use MedAcademy\Services\FeatureFlagService;
 use MedAcademy\Utils\Uuid;
 
 /**
@@ -29,6 +30,11 @@ use MedAcademy\Utils\Uuid;
  */
 final class CourseController
 {
+    public function __construct(
+        private readonly FeatureFlagService $flags = new FeatureFlagService()
+    ) {
+    }
+
     public function index(Request $request): array
     {
         $userId = $request->user['id'];
@@ -121,6 +127,10 @@ final class CourseController
 
     public function create(Request $request): array
     {
+        // Feature flag: course_creation — server-side enforcement (403
+        // feature_disabled). Existing courses are untouched.
+        $this->flags->assertEnabled('course_creation', $request);
+
         $data = $request->json();
         $title = trim((string) ($data['title'] ?? ''));
         if ($title === '') {
@@ -190,6 +200,9 @@ final class CourseController
 
     public function enroll(Request $request): array
     {
+        // Feature flag: course_enrollment — server-side enforcement.
+        $this->flags->assertEnabled('course_enrollment', $request);
+
         $courseId = Uuid::normalize((string) $request->params['id']);
         $studentId = $request->user['id'];
 
@@ -253,6 +266,11 @@ final class CourseController
      */
     public function publish(Request $request): array
     {
+        // Feature flag: doctor_course_publishing — refused BEFORE any write, so
+        // existing published courses and drafts keep their exact state and
+        // re-enabling the flag restores publishing.
+        $this->flags->assertEnabled('doctor_course_publishing', $request);
+
         $id = Uuid::normalize((string) $request->params['id']);
         $this->assertCourseOwner($request, $id);
 

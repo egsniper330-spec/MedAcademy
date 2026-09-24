@@ -13,6 +13,7 @@ use MedAcademy\Controllers\IntegrityController;
 use MedAcademy\Controllers\MaintenanceController;
 use MedAcademy\Middleware\MaintenanceMiddleware;
 use MedAcademy\Controllers\NotificationController;
+use MedAcademy\Controllers\PlatformController;
 use MedAcademy\Controllers\SecurityController;
 use MedAcademy\Controllers\SecurityEvidenceController;
 use MedAcademy\Controllers\StudentController;
@@ -24,6 +25,7 @@ use MedAcademy\Controllers\SystemDiagnosticsController;
 use MedAcademy\Controllers\UserController;
 use MedAcademy\Controllers\UpdateConfigController;
 use MedAcademy\Controllers\VideoController;
+use MedAcademy\Controllers\VideoProviderController;
 
 /*
  * MedAcademy REST API route table — 95+ routes.
@@ -61,6 +63,19 @@ $router->post('/admin/maintenance', [MaintenanceController::class, 'update'], $a
 $router->get('/app/version', [UpdateConfigController::class, 'version']);
 $router->get('/admin/app-updates', [UpdateConfigController::class, 'adminIndex'], $auth + ['role' => ['super_admin']]);
 $router->put('/admin/app-updates/{platform}', [UpdateConfigController::class, 'adminUpdate'], $auth + ['role' => ['super_admin']]);
+
+// ── Platform control centre — Branding / CMS pages / Feature flags ──────────
+// Reads are authenticated (the app is fully behind auth); every WRITE is
+// Super Admin only, registry/whitelist validated, and audited. These endpoints
+// create their rows on demand so a fresh platform shows real, editable content
+// instead of empty screens.
+$router->get('/platform/branding', [PlatformController::class, 'branding'], $auth);
+$router->put('/platform/branding', [PlatformController::class, 'updateBranding'], $auth + ['role' => ['super_admin']]);
+$router->get('/platform/pages', [PlatformController::class, 'pages'], $auth);
+$router->put('/platform/pages/{key}', [PlatformController::class, 'updatePage'], $auth + ['role' => ['super_admin']]);
+$router->get('/platform/feature-flags', [PlatformController::class, 'featureFlags'], $auth);
+$router->put('/platform/feature-flags/{key}', [PlatformController::class, 'updateFeatureFlag'], $auth + ['role' => ['super_admin']]);
+$router->put('/platform/feature-flags/{key}/user/{userId}', [PlatformController::class, 'updateFeatureFlagForUser'], $auth + ['role' => ['super_admin']]);
 $router->post('/auth/logout', [AuthController::class, 'logout'], $auth);
 $router->post('/auth/forgot-password', [AuthController::class, 'forgotPassword']);
 $router->post('/auth/reset-password', [AuthController::class, 'resetPassword']);
@@ -170,6 +185,15 @@ $router->post('/video/webhook', [VideoController::class, 'webhook']);
 $router->post('/video/chunk', [VideoController::class, 'uploadChunk'], $auth);
 $router->post('/video/assemble', [VideoController::class, 'assembleUpload'], $auth + ['role' => ['doctor', 'admin', 'super_admin']]);
 $router->post('/video/health-scan', [VideoController::class, 'healthScan'], $auth + ['role' => ['admin', 'super_admin']]);
+
+// ---- Video Provider Control Center (Super Admin) ----------------------------
+// Global availability + per-doctor three-state overrides over the REAL
+// providers (plyr, vdocipher). Writes audited (video_provider_global_updated /
+// video_provider_doctor_override_updated); reads expose only policy state.
+$router->get('/video-providers', [VideoProviderController::class, 'index'], $auth + ['role' => ['super_admin']]);
+$router->put('/video-providers/{key}/global', [VideoProviderController::class, 'setGlobal'], $auth + ['role' => ['super_admin']]);
+$router->get('/video-providers/teachers/{id}', [VideoProviderController::class, 'teacher'], $auth + ['role' => ['super_admin']]);
+$router->put('/video-providers/teachers/{id}', [VideoProviderController::class, 'setTeacher'], $auth + ['role' => ['super_admin']]);
 $router->post('/video/upload-patch', [VideoController::class, 'uploadPatch'], $auth + ['role' => ['super_admin']]);
 $router->post('/video/orphan-cleanup', [VideoController::class, 'orphanCleanup'], $auth + ['role' => ['admin', 'super_admin']]);
 $router->post('/lessons/{id}/delete', [CourseController::class, 'deleteLesson'], $auth + ['role' => ['doctor', 'admin', 'super_admin']]);

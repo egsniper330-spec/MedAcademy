@@ -1,5 +1,7 @@
 import { fetch as expoFetch } from 'expo/fetch';
-import { backendApiBase, backendClient } from '@/client/backendClient';
+import { apiFetch, backendApiBase, backendClient } from '@/client/backendClient';
+import { invalidateBranding } from '@/lib/branding';
+import { invalidateFeatureFlags } from '@/lib/featureFlags';
 import { normalizePhoneE164 } from '@/lib/identifier';
 import { buildProtectedCallHeaders } from '@/lib/deviceKey';
 import { isMaintenanceError } from '@/lib/maintenanceStateModel';
@@ -79,10 +81,23 @@ export async function invokeEdgeFunction<T = unknown>(
         if (rawBody) {
           try {
             const parsed = JSON.parse(rawBody) as Record<string, unknown>;
-            if (typeof parsed.message === 'string' && parsed.message) msg = parsed.message;
-            else if (typeof parsed.error === 'string' && parsed.error) msg = parsed.error;
-            else msg = rawBody;
-            if (typeof parsed.code    === 'string') errCode    = parsed.code;
+            // PHP error envelope: { error: { message, code, … } } — the inner
+            // object carries the friendly message and the machine-readable
+            // code (e.g. video_provider_disabled). Flat shapes stay supported.
+            const innerErr = (parsed.error && typeof parsed.error === 'object')
+              ? parsed.error as Record<string, unknown>
+              : null;
+            if (innerErr && typeof innerErr.message === 'string' && innerErr.message) {
+              msg = innerErr.message;
+            } else if (typeof parsed.message === 'string' && parsed.message) {
+              msg = parsed.message;
+            } else if (typeof parsed.error === 'string' && parsed.error) {
+              msg = parsed.error;
+            } else {
+              msg = rawBody;
+            }
+            if (typeof parsed.code === 'string') errCode = parsed.code;
+            if (innerErr && typeof innerErr.code === 'string') errCode = innerErr.code;
             if (typeof parsed.details === 'string') errDetails = parsed.details;
           } catch {
             msg = rawBody;
@@ -3012,19 +3027,28 @@ export async function getSuperAdminStats() {
 }
 
 // ── Video Provider Management ─────────────────────────────────────────────────
+// Served by VideoProviderController (GET /video-providers, PUT .../global,
+// GET|PUT /video-providers/teachers/{id}). The ROOT-CAUSE FIX for the
+// "Internal server error" on the old screen: the previous RPCs queried the
+// video_provider_config health registry (no teacher_id/enabled columns) and
+// died with SQL "Unknown column" → HTTP 500. All policy reads/writes now go
+// through the dedicated Super-Admin-only endpoints over the REAL tables
+// (video_providers + teacher_provider_permissions) with the three-state
+// override contract; see src/lib/videoProviderPolicy.ts for the decision rule.
 
 export interface VideoProvider {
   id: string;
   provider_key: string;
   display_name: string;
   is_globally_enabled: boolean;
-  updated_at: string;
+  updated_at: string | null;
 }
 
 export interface TeacherProviderPermission {
   provider_key: string;
   display_name: string;
   global_enabled: boolean;
+  override: 'inherit' | 'enabled' | 'disabled';
   teacher_enabled: boolean;
   final_enabled: boolean;
 }
@@ -3036,102 +3060,156 @@ export interface TeacherWithPermissions {
   permissions: TeacherProviderPermission[];
 }
 
-/** Fetch all global video providers (super_admin / authenticated read). */
-export async function getVideoProviders(): Promise<VideoProvider[]> {
-  const { data, error } = await backendClient
-    .from('video_providers')
-    .select('*')
-    .order('provider_key');
+/** Global registry + doctor directory (Super Admin console). */
+export async function getVideoProviders(search = ''): Promise<{
+  providers: VideoProvider[];
+  doctors: Array<{ id: string; full_name: string; email: string }>;
+}> {
+  const qs = search ? `?search=${encodeURIComponent(search)}` : '';
+  const { data, error } = await apiFetch<{
+    providers: VideoProvider[];
+    doctors: Array<{ id: string; full_name: string; email: string }>;
+  }>(`/video-providers${qs}`);
   if (error) throw error;
-  return Array.isArray(data) ? data : [];
+  return {
+    providers: data?.providers ?? [],
+    doctors: data?.doctors ?? [],
+  };
 }
 
-/** Toggle a global provider on/off (super_admin only). */
-export async function setGlobalProviderEnabled(
-  providerKey: string,
-  enabled: boolean,
-): Promise<void> {
-  const { data: { user } } = await backendClient.auth.getUser();
-  const { error } = await backendClient
-    .from('video_providers')
-    .update({ is_globally_enabled: enabled, updated_by: user?.id, updated_at: new Date().toISOString() })
-    .eq('provider_key', providerKey);
+/** Set a provider's GLOBAL default (Super Admin only). */
+export async function setGlobalProviderEnabled(providerKey: string, enabled: boolean): Promise<void> {
+  const { error } = await apiFetch(`/video-providers/${encodeURIComponent(providerKey)}/global`, {
+    method: 'PUT',
+    body: { enabled },
+  });
   if (error) throw error;
 }
 
-/** Fetch resolved provider permissions for the calling user (doctor). */
+/**
+ * Effective three-state provider rows for the CALLING user (doctor-side gate).
+ * The backend defaults an omitted teacher_id to the authenticated account and
+ * forces non-admins to self.
+ */
 export async function getMyProviderPermissions(): Promise<TeacherProviderPermission[]> {
-  const { data, error } = await backendClient.rpc('get_teacher_provider_permissions');
+  const { data, error } = await apiFetch<{ permissions: TeacherProviderPermission[] }>(
+    '/rpc/teacher-provider-permissions',
+  );
   if (error) throw error;
-  return Array.isArray(data) ? data : [];
+  return data?.permissions ?? [];
 }
 
-/** Fetch resolved provider permissions for a specific teacher (super_admin only). */
+/** Effective three-state provider rows for one doctor (Super Admin console). */
 export async function getTeacherProviderPermissionsById(
   teacherId: string,
 ): Promise<TeacherProviderPermission[]> {
-  const { data, error } = await backendClient.rpc('get_teacher_provider_permissions', {
-    p_teacher_id: teacherId,
-  });
+  const { data, error } = await apiFetch<{ permissions: TeacherProviderPermission[] }>(
+    `/video-providers/teachers/${encodeURIComponent(teacherId)}`,
+  );
   if (error) throw error;
-  return Array.isArray(data) ? data : [];
+  return data?.permissions ?? [];
 }
 
-/** Upsert a teacher-level provider permission (super_admin only). */
+/**
+ * Write a per-doctor THREE-STATE override (Super Admin only):
+ *   'inherit'  → remove the override, global default applies again
+ *   'enabled'  → explicitly allow (even when globally OFF)
+ *   'disabled' → explicitly block (even when globally ON)
+ */
+export async function setTeacherProviderOverride(
+  teacherId: string,
+  providerKey: string,
+  mode: 'inherit' | 'enabled' | 'disabled',
+): Promise<void> {
+  const { error } = await apiFetch(`/video-providers/teachers/${encodeURIComponent(teacherId)}`, {
+    method: 'PUT',
+    body: { provider: providerKey, mode },
+  });
+  if (error) throw error;
+}
+
+/** Legacy boolean wrapper kept for existing callers (maps to enabled/disabled). */
 export async function setTeacherProviderPermission(
   teacherId: string,
   providerKey: string,
   enabled: boolean,
 ): Promise<void> {
-  const { error } = await backendClient.rpc('upsert_teacher_provider_permission', {
-    p_teacher_id: teacherId,
-    p_provider_key: providerKey,
-    p_is_enabled: enabled,
-  });
-  if (error) throw error;
-}
-
-/** List all doctors for super_admin video provider management. */
-export async function getDoctorsForProviderMgmt(): Promise<
-  Array<{ id: string; full_name: string; email: string }>
-> {
-  const { data, error } = await backendClient
-    .from('profiles')
-    .select('id, full_name, email')
-    .eq('role', 'doctor')
-    .order('full_name');
-  if (error) throw error;
-  return Array.isArray(data) ? data : [];
+  await setTeacherProviderOverride(teacherId, providerKey, enabled ? 'enabled' : 'disabled');
 }
 
 // ── Feature Flags ─────────────────────────────────────────────────────────────
+// Served by PlatformController (GET /platform/feature-flags). The endpoint
+// creates any missing row from the SERVER-side registry, so the screen lists the
+// real flag set instead of an empty table, and writes are registry-validated
+// (unknown key → 422) and Super Admin only. Enforcement itself is always
+// server-side — see FeatureFlagService::assertEnabled() call sites.
 export async function getFeatureFlags() {
-  const { data, error } = await backendClient
-    .from('feature_flags')
-    .select('*')
-    .order('key');
+  const { data, error } = await apiFetch<{ flags: unknown[] }>('/platform/feature-flags');
   if (error) throw error;
-  return data ?? [];
+  return (data?.flags ?? []) as Array<{
+    key: string; label: string; description?: string; category: string;
+    enabled: boolean; is_default?: boolean; overrides?: number;
+    override?: 'inherit' | 'enabled' | 'disabled'; user_effective?: boolean;
+  }>;
 }
 
 export async function toggleFeatureFlag(key: string, enabled: boolean) {
-  const { data: { user } } = await backendClient.auth.getUser();
-  const { error } = await backendClient
-    .from('feature_flags')
-    .update({ enabled, updated_by: user?.id, updated_at: new Date().toISOString() })
-    .eq('key', key);
+  const { data, error } = await apiFetch<{ flag: unknown; flags: unknown[] }>(
+    `/platform/feature-flags/${encodeURIComponent(key)}`,
+    { method: 'PUT', body: { enabled } }
+  );
   if (error) throw error;
+  // Reflect the change in the app-wide cache immediately (no restart, no relogin).
+  invalidateFeatureFlags();
+  return data?.flags ?? [];
+}
+
+/**
+ * Flags view for ONE target user (Super Admin console): registry metadata +
+ * global state + the three-state override (inherit/enabled/disabled) and the
+ * effective state for that user.
+ */
+export async function getFeatureFlagsForUser(userId: string) {
+  const { data, error } = await apiFetch<{ flags: unknown[] }>(
+    `/platform/feature-flags?user_id=${encodeURIComponent(userId)}`,
+  );
+  if (error) throw error;
+  return (data?.flags ?? []) as Array<{
+    key: string; label: string; description?: string; category: string;
+    enabled: boolean; is_default?: boolean; overrides?: number;
+    override?: 'inherit' | 'enabled' | 'disabled'; user_effective?: boolean;
+  }>;
+}
+
+/**
+ * Write a per-user THREE-STATE feature override (Super Admin only):
+ *   'inherit'  → remove the override (global state applies again)
+ *   'enabled'  → explicitly allow for this user
+ *   'disabled' → explicitly block for this user (kill switch per account)
+ */
+export async function setFeatureFlagOverride(userId: string, key: string, mode: 'inherit' | 'enabled' | 'disabled') {
+  const { data, error } = await apiFetch<{ flags: unknown[] }>(
+    `/platform/feature-flags/${encodeURIComponent(key)}/user/${encodeURIComponent(userId)}`,
+    { method: 'PUT', body: { mode } }
+  );
+  if (error) throw error;
+  invalidateFeatureFlags();
+  return (data?.flags ?? []) as Array<{
+    key: string; label: string; description?: string; category: string;
+    enabled: boolean; is_default?: boolean; overrides?: number;
+    override?: 'inherit' | 'enabled' | 'disabled'; user_effective?: boolean;
+  }>;
 }
 
 // ── Branding ──────────────────────────────────────────────────────────────────
+// Served by PlatformController (GET/PUT /platform/branding). GET guarantees the
+// platform identity row exists (created with the server's defaults), which is
+// why the screen can never report "Branding unavailable" just because nobody
+// has saved branding yet.
 export async function getBranding() {
-  const { data, error } = await backendClient
-    .from('app_branding')
-    .select('*')
-    .eq('id', '00000000-0000-0000-0000-000000000001')
-    .single();
+  const { data, error } = await apiFetch<{ branding: Record<string, unknown> | null }>('/platform/branding');
   if (error) throw error;
-  return data;
+  return data?.branding ?? null;
 }
 
 export async function updateBranding(updates: Partial<{
@@ -3141,47 +3219,39 @@ export async function updateBranding(updates: Partial<{
   youtube_url: string; telegram_url: string; whatsapp_url: string;
   website_url: string; support_email: string;
 }>) {
-  const { data: { user } } = await backendClient.auth.getUser();
-  const { data, error } = await backendClient
-    .from('app_branding')
-    .update({ ...updates, updated_by: user?.id, updated_at: new Date().toISOString() })
-    .eq('id', '00000000-0000-0000-0000-000000000001')
-    .select()
-    .single();
+  const { data, error } = await apiFetch<{ branding: Record<string, unknown> | null }>(
+    '/platform/branding',
+    { method: 'PUT', body: updates }
+  );
   if (error) throw error;
-  return data;
+  invalidateBranding();
+  return data?.branding ?? null;
 }
 
 // ── CMS Pages ─────────────────────────────────────────────────────────────────
+// Served by PlatformController (GET /platform/pages, PUT /platform/pages/{key}).
+// GET guarantees one row per page the app renders, so the screen lists editable
+// pages instead of "No CMS pages". An EMPTY `content` means "the app renders its
+// bundled text" — clearing a body is therefore a valid "restore built-in"
+// action, and seeding can never replace published legal copy with a stub.
 export async function getCMSPages() {
-  const { data, error } = await backendClient
-    .from('app_pages')
-    .select('*')
-    .order('key');
+  const { data, error } = await apiFetch<{ pages: unknown[] }>('/platform/pages');
   if (error) throw error;
-  return data ?? [];
+  return data?.pages ?? [];
 }
 
 export async function getCMSPage(key: string) {
-  const { data, error } = await backendClient
-    .from('app_pages')
-    .select('*')
-    .eq('key', key)
-    .single();
-  if (error) throw error;
-  return data;
+  const pages = await getCMSPages();
+  return pages.find((p: unknown) => (p as { key?: string })?.key === key) ?? null;
 }
 
 export async function updateCMSPage(key: string, updates: { title?: string; content?: string; published?: boolean }) {
-  const { data: { user } } = await backendClient.auth.getUser();
-  const { data, error } = await backendClient
-    .from('app_pages')
-    .update({ ...updates, updated_by: user?.id, updated_at: new Date().toISOString() })
-    .eq('key', key)
-    .select()
-    .single();
+  const { data, error } = await apiFetch<{ pages: unknown[] }>(
+    `/platform/pages/${encodeURIComponent(key)}`,
+    { method: 'PUT', body: updates }
+  );
   if (error) throw error;
-  return data;
+  return data?.pages ?? [];
 }
 
 /**

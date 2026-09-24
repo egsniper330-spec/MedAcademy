@@ -13,6 +13,7 @@ import { BrandLogo } from '@/components/BrandLogo';
 import { neuColors, useLayout, safeTop, safeBottom } from '@/lib/neu';
 import { detectIdentifierType, resolveEmailFromIdentifier } from '@/lib/identifier';
 import { registerDevice } from '@/lib/api';
+import { useBranding } from '@/lib/branding';
 import { getInstallationId, storeDeviceFingerprint } from '@/lib/installationId';
 import { registerPushToken } from '@/lib/pushTokenService';
 import * as Device from 'expo-device';
@@ -43,6 +44,7 @@ export default function SignIn() {
   const insets = layout.insets;
   const { check } = useSecurity();
 
+  const branding = useBranding(); // server-managed display name (fails safe to defaults)
   const [identifier, setIdentifier] = useState('');
   const [password, setPassword] = useState('');
   const [showPwd, setShowPwd] = useState(false);
@@ -345,7 +347,7 @@ export default function SignIn() {
             textAlign: 'center',
             lineHeight: layout.captionSize * 1.5,
           }}>
-            Sign in to your MedAcademy account
+            {`Sign in to your ${branding.app_name} account`}
           </Text>
         </View>
 

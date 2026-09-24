@@ -7,14 +7,14 @@ import {
   View, Text, ScrollView, TextInput,
   RefreshControl, useColorScheme,
 } from 'react-native';
-import { useFocusEffect } from 'expo-router';
-import { Star, Palette, Link, Mail, Phone } from 'lucide-react-native';
+import { useFocusEffect, useRouter } from 'expo-router';
+import { Star, Palette, Link, Mail, Phone, Info } from 'lucide-react-native';
 import { PageHeader } from '@/components/PageHeader';
 import { getBranding, updateBranding } from '@/lib/api';
+import { DEFAULT_BRANDING, invalidateBranding } from '@/lib/branding';
 import { NeuCard } from '@/components/NeuCard';
 import { NeuButton } from '@/components/NeuButton';
 import { LoadingState, ErrorState } from '@/components/ScreenState';
-import { EmptyState } from '@/components/EmptyState';
 import { useToast } from '@/components/Toast';
 import { neuColors, useLayout, safeBottom } from '@/lib/neu';
 import { friendlyError } from '@/lib/validation';
@@ -24,8 +24,12 @@ export default function BrandingScreen() {
   const isDark = scheme === 'dark';
   const c = isDark ? neuColors.dark : neuColors.light;
   const layout = useLayout();
+  const router = useRouter();
 
-  const [brand, setBrand] = useState<any>(null);
+  // Seeded with the platform defaults: the server ALWAYS returns a branding
+  // record (GET /platform/branding creates it), so "Branding unavailable" is no
+  // longer a reachable state — the form is editable from the first visit.
+  const [brand, setBrand] = useState<any>(DEFAULT_BRANDING);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<unknown>(null);
   const [saving, setSaving] = useState(false);
@@ -39,7 +43,7 @@ export default function BrandingScreen() {
     setLoading(true);
     setError(null);
     try {
-      setBrand(await getBranding());
+      setBrand((await getBranding()) ?? DEFAULT_BRANDING);
     } catch (e) {
       setError(e);
     } finally {
@@ -64,7 +68,8 @@ export default function BrandingScreen() {
         youtube_url: brand.youtube_url, telegram_url: brand.telegram_url,
         whatsapp_url: brand.whatsapp_url, website_url: brand.website_url,
       });
-      setBrand(updated);
+      setBrand(updated ?? brand);
+      invalidateBranding(); // other screens pick the new identity up immediately
       setSuccess(true);
       setTimeout(() => setSuccess(false), 2500);
     } catch (e) {
@@ -86,7 +91,13 @@ export default function BrandingScreen() {
   return (
     <ScrollView style={{ flex: 1, backgroundColor: c.base }}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />} contentContainerStyle={{ paddingBottom: safeBottom(layout.insets.bottom) }}>
-      <PageHeader title="Branding" subtitle="Customize platform appearance" accentColor="#7C3AED" />
+      <PageHeader
+        title="Branding"
+        subtitle="Customize platform appearance"
+        accentColor="#7C3AED"
+        showBack
+        onBack={() => router.push('/sa-platform')}
+      />
 
       <View style={{ paddingHorizontal: layout.screenPx }}>
 
@@ -98,13 +109,6 @@ export default function BrandingScreen() {
 
         {loading ? <LoadingState label="Loading branding…" /> : error ? (
           <ErrorState error={error} onRetry={load} />
-        ) : !brand ? (
-          <EmptyState
-            icon={<Palette size={40} color={c.primary} />}
-            title="Branding unavailable"
-            description="The server returned no branding record."
-            action={{ label: 'Retry', onPress: load }}
-          />
         ) : (
           <>
             {/* App Identity */}
@@ -166,6 +170,20 @@ export default function BrandingScreen() {
                   <TextInput value={brand[key] ?? ''} onChangeText={v => set(key, v)} style={{ ...inp }} autoCapitalize="none" placeholder="https://" placeholderTextColor={`${c.text}55`} />
                 </View>
               ))}
+            </NeuCard>
+
+            {/* What this screen can and cannot change — stated instead of
+                silently missing, so the boundary is never a surprise. */}
+            <NeuCard style={{ marginBottom: 20, padding: 14 }}>
+              <View style={{ flexDirection: 'row', gap: 10 }}>
+                <Info size={16} color={c.primary} />
+                <Text style={{ flex: 1, fontSize: 12, lineHeight: 17, color: c.text, opacity: 0.6 }}>
+                  The display name, logo and colours here are used by the app UI (landing screen,
+                  About, Contact and headers). The name shown under the installed icon, the bundle
+                  identifier and the API domain are part of the compiled build and cannot be
+                  changed at runtime.
+                </Text>
+              </View>
             </NeuCard>
 
             <NeuButton label="Save Branding" onPress={handleSave} loading={saving} fullWidth />
