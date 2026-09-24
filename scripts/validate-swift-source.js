@@ -281,15 +281,26 @@ function crossCheckBridgingHeader(swiftRel, mRel) {
 
   if (!swiftContent || !mContent) return;
 
+  // Comment-aware extraction: full-line `//` comments and `/* */` blocks are
+  // blanked so documented examples (e.g. a commented-out RCT_EXTERN_METHOD
+  // sample in the header notes) are never mistaken for live declarations.
+  const stripComments = (content) =>
+    content
+      .replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, ' '))
+      .split('\n')
+      .map((l) => (/^\s*\/\//.test(l) ? '' : l))
+      .join('\n');
+
   console.log(`\n  ── Cross-check: ${path.basename(swiftRel)} ↔ ${path.basename(mRel)} ───`);
 
-  // Extract RCT_EXTERN_METHOD names from .m
-  const externMethods = [...mContent.matchAll(/RCT_EXTERN_METHOD\s*\((\w+)/g)].map(m => m[1]);
+  // Extract RCT_EXTERN_METHOD names from .m (comments stripped)
+  const externMethods = [...stripComments(mContent).matchAll(/RCT_EXTERN_METHOD\s*\((\w+)/g)].map(m => m[1]);
 
-  // Extract @objc(name:...) function names from .swift
-  const objcFuncs = [...swiftContent.matchAll(/@objc\((\w+)/g)].map(m => m[1]);
+  // Extract @objc(name:...) function names from .swift (comments stripped)
+  const strippedSwift = stripComments(swiftContent);
+  const objcFuncs = [...strippedSwift.matchAll(/@objc\((\w+)/g)].map(m => m[1]);
   // Also detect func NAME( with @objc annotation above
-  const swiftFuncs = [...swiftContent.matchAll(/func\s+(\w+)\s*\(/g)].map(m => m[1]);
+  const swiftFuncs = [...strippedSwift.matchAll(/func\s+(\w+)\s*\(/g)].map(m => m[1]);
 
   let crossFail = false;
   for (const ext of externMethods) {
