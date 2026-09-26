@@ -369,42 +369,65 @@ final class AppReleaseService
 
     /**
      * Feed the published release into the EXISTING update-gate config so the
-     * ForceUpdate system's authoritative record matches production. The
-     * update mode is preserved from the previous config (policy is separate
-     * from releases). Prerequisite: migration 021 applied.
+     * ForceUpdate system's authoritative record matches production.
+     *
+     * Publishing ARMS the gate for this platform (this is what makes a
+     * published release actually detected by installed clients):
+     *   • latest_version_*  ← the published release's identity/URL/notes
+     *   • minimum_version_code ← raised to the release's build number when a
+     *     valid build number exists (never lowered — the floor is monotonic);
+     *     the Super Admin can still set an explicit lower floor via the
+     *     App Updates policy editor afterwards.
+     *   • is_enabled ← 1 (a published production release is the product's
+     *     authoritative "this is what clients must run"); the Super Admin can
+     *     still disable the platform's gate via the policy editor kill switch.
+     *   • update_mode is preserved from the previous config when one exists
+     *     (policy is separate from releases); new rows default to FORCED.
+     *
+     * Prerequisite: migration 021 applied.
      */
     private function promoteToUpdateConfig(string $platform, array $release, string $actorId): void
     {
         try {
             $row = Database::instance()->row(
-                'SELECT update_mode, is_enabled FROM app_update_config WHERE platform = ?',
+                'SELECT update_mode FROM app_update_config WHERE platform = ?',
                 [$platform]
             );
             $mode = $row !== null ? (string) $row['update_mode'] : 'FORCED';
-            $enabled = $row !== null ? (int) $row['is_enabled'] : 1;
             $code = (int) ($platform === 'android'
                 ? ($release['android_version_code'] ?? 0)
                 : ($release['ios_build_number'] ?? 0));
+
+            // Monotonic floor: raise minimum to this build when valid, never
+            // lower an existing higher floor (rollbacks must not un-block).
+            $existingMin = Database::instance()->value(
+                'SELECT minimum_version_code FROM app_update_config WHERE platform = ?',
+                [$platform],
+                0
+            );
+            $newMin = $code > 0 ? max((int) $existingMin, $code) : 0;
 
             Database::instance()->query(
                 'INSERT INTO app_update_config
                     (platform, latest_version_name, latest_version_code, minimum_version_code,
                      update_mode, update_url, release_notes, is_enabled, updated_by)
-                 VALUES (?, ?, ?, 0, ?, ?, ?, ?, ?)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?)
                  ON DUPLICATE KEY UPDATE
                     latest_version_name  = VALUES(latest_version_name),
                     latest_version_code  = VALUES(latest_version_code),
+                    minimum_version_code = GREATEST(app_update_config.minimum_version_code, VALUES(minimum_version_code)),
                     update_url           = VALUES(update_url),
                     release_notes        = VALUES(release_notes),
+                    is_enabled           = 1,
                     updated_by           = VALUES(updated_by)',
                 [
                     $platform,
                     (string) $release['version'],
                     $code > 0 ? $code : 0,
+                    $newMin,
                     $mode,
                     (string) $release['download_url'],
                     (string) ($release['release_notes'] ?? ''),
-                    $enabled ? 1 : 0,
                     $actorId,
                 ]
             );

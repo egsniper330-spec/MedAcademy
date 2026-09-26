@@ -35,7 +35,8 @@ final class UpdateConfigController
         $header = $request->header('x-app-platform');
         $platform = $header !== null && trim($header) !== ''
             ? strtolower(trim($header))
-            : 'android';
+            : 'web'; // header-less callers are web/dev runtimes, not android
+
 
         return $this->updates->publicPayload($platform);
     }

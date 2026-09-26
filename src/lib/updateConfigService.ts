@@ -35,6 +35,9 @@ import Constants from 'expo-constants';
 import { Platform as RNPlatform, AppState, Linking } from 'react-native';
 import { apiFetch } from '@/client/php';
 import { backendApiBase } from '@/client/php';
+// Authoritative NATIVE installed identity (Android versionCode AND iOS
+// CFBundleVersion via Application.nativeBuildVersion — never JS config alone).
+import { getInstalledBuildNumber as getNativeBuildNumber, getInstalledVersionName as getNativeVersionName, getAppPlatform } from './appIdentity';
 // PURE verdict model (no react-native/expo imports) — the versionCode
 // comparison is delegated there so it is unit-testable with plain node.
 import { evaluateUpdateVerdict, evaluateOfflineUpdatePolicy } from './securityStateModel';
@@ -76,11 +79,8 @@ export interface UpdateState {
 
 // ─── Installed identity (from the native build, not JS config) ────────────────
 
-const INSTALLED_NAME = (Constants.expoConfig?.version ?? '1.0.0').trim();
-const INSTALLED_CODE =
-  RNPlatform.OS === 'android'
-    ? (Constants.expoConfig?.android?.versionCode ?? 0)
-    : 0;
+const INSTALLED_NAME = getNativeVersionName();
+const INSTALLED_CODE = getNativeBuildNumber();
 
 export function getInstalledVersionCode(): number {
   return INSTALLED_CODE;
@@ -89,7 +89,7 @@ export function getInstalledVersionName(): string {
   return INSTALLED_NAME;
 }
 export function getPlatform(): string {
-  return RNPlatform.OS === 'android' ? 'android' : 'ios';
+  return getAppPlatform();
 }
 
 // ─── Global 426 interception state ────────────────────────────────────────────
@@ -216,8 +216,7 @@ export async function checkAppUpdate(): Promise<UpdateState> {
     // and the server falls back to its non-android default).
     const nativeHeaders: Record<string, string> = RNPlatform.OS === 'web'
       ? {}
-      : { 'X-App-Platform': getPlatform(), 'X-App-Version-Code': String(INSTALLED_CODE) };
-    const res = await apiFetch<RemoteUpdateConfig>('/app/version', {
+      : { 'X-App-Platform': getPlatform(), 'X-App-Version-Code': String(INSTALLED_CODE) };    const res = await apiFetch<RemoteUpdateConfig>('/app/version', {
       method: 'GET',
       headers: nativeHeaders,
     });
@@ -255,7 +254,9 @@ export async function checkAppUpdate(): Promise<UpdateState> {
   }
 }
 
-/** Applies an explicit server verdict (and persists it for offline use). */
+/**
+ * Applies an explicit server verdict (and persists it for offline use).
+ */
 function applyRemoteConfig(cfg: RemoteUpdateConfig): void {
   // Feature disabled server-side → not enforced (kill switch).
   if (!cfg.enabled) {
@@ -279,6 +280,14 @@ function applyRemoteConfig(cfg: RemoteUpdateConfig): void {
   //   installed < minimum                          → UPDATE_REQUIRED
   // The updateMode drives the UX (blocking page vs dismissible banner);
   // it does NOT change the verdict.
+  //
+  // CACHE GUARD: a cached verdict is bound to the installed build that
+  // confirmed it. After the user updates, the NEW build must re-evaluate —
+  // a stale cached UPDATE_REQUIRED (or SUPPORTED) for a different build is
+  // discarded, so the fresh native build resolves via the live check and the
+  // full-screen page disappears exactly when the new build is confirmed.
+  const cachedForThisBuild =
+    cachedPolicyVerdict !== null && cachedPolicyInstalledCode === INSTALLED_CODE;
   const verdict = evaluateUpdateVerdict({
     enabled: true,
     minimumVersionCode: minCode,
@@ -299,10 +308,15 @@ function applyRemoteConfig(cfg: RemoteUpdateConfig): void {
   });
 
   // OFFLINE CACHE: persist every explicit server verdict so a later offline
-  // cold launch honors the last known policy instead of guessing.
+  // cold launch honors the last known policy instead of guessing. Bound to
+  // the installed build that confirmed it (see the cache guard above).
+  const verdictFinal = verdict === 'UPDATE_REQUIRED' ? 'UPDATE_REQUIRED' : 'SUPPORTED';
+  cachedPolicyVerdict = verdictFinal;
+  cachedPolicyInstalledCode = INSTALLED_CODE;
   void persistCachedUpdatePolicy({
-    verdict: verdict === 'UPDATE_REQUIRED' ? 'UPDATE_REQUIRED' : 'SUPPORTED',
+    verdict: verdictFinal,
     minimumVersionCode: minCode,
+    installedVersionCode: INSTALLED_CODE,
     confirmedAt: Date.now(),
   });
 }
@@ -318,12 +332,22 @@ function applyRemoteConfig(cfg: RemoteUpdateConfig): void {
 //  • offline + no/invalid cache → SUPPORTED with reason 'no_cached_policy'
 //    — "network unavailable" is NOT an update requirement. The server-side
 //    426 gate remains the authority once any request does go out.
+//
+// Cache v2: every entry is bound to the installed build that confirmed it
+// (installedVersionCode). After the user installs the update, the NEW build
+// discards the old cache entry entirely and re-evaluates from the live
+// server — the full-screen page disappears exactly when the new build is
+// confirmed, never earlier and never through a stale cache path.
 
-const UPDATE_POLICY_CACHE_KEY = '@medacademy/update_policy_cache_v1';
+let cachedPolicyVerdict: 'SUPPORTED' | 'UPDATE_REQUIRED' | null = null;
+let cachedPolicyInstalledCode = 0;
+
+const UPDATE_POLICY_CACHE_KEY = '@medacademy/update_policy_cache_v2';
 
 async function persistCachedUpdatePolicy(entry: {
   verdict: 'SUPPORTED' | 'UPDATE_REQUIRED';
   minimumVersionCode: number;
+  installedVersionCode: number;
   confirmedAt: number;
 } | null): Promise<void> {
   try {
@@ -361,14 +385,23 @@ export async function applyCachedUpdatePolicyOffline(): Promise<void> {
     const cached = JSON.parse(raw) as {
       verdict?: unknown;
       minimumVersionCode?: unknown;
+      installedVersionCode?: unknown;
       confirmedAt?: unknown;
     } | null;
+    // The cached verdict is only meaningful for the build that confirmed it.
+    // A different installed build (the user updated) must re-evaluate live.
+    const cacheValid =
+      cached !== null && typeof cached === 'object' &&
+      (cached.verdict === 'SUPPORTED' || cached.verdict === 'UPDATE_REQUIRED') &&
+      typeof cached.minimumVersionCode === 'number' &&
+      typeof cached.installedVersionCode === 'number' &&
+      typeof cached.confirmedAt === 'number' &&
+      cached.installedVersionCode === INSTALLED_CODE;
     const decision = evaluateOfflineUpdatePolicy(
-      cached && typeof cached === 'object' &&
-        (cached.verdict === 'SUPPORTED' || cached.verdict === 'UPDATE_REQUIRED') &&
-        typeof cached.minimumVersionCode === 'number' &&
-        typeof cached.confirmedAt === 'number'
-        ? { verdict: cached.verdict, minimumVersionCode: cached.minimumVersionCode, confirmedAt: cached.confirmedAt }
+      cacheValid
+        ? { verdict: cached.verdict as 'SUPPORTED' | 'UPDATE_REQUIRED',
+            minimumVersionCode: cached.minimumVersionCode as number,
+            confirmedAt: cached.confirmedAt as number }
         : null,
       Date.now()
     );

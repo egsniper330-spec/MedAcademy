@@ -226,6 +226,7 @@ final class AppUpdateService
             'minimumVersionCode'=> $min,
             'updateUrl'         => (string) $row['update_url'],
             'updateMode'        => (string) $row['update_mode'],
+            'releaseNotes'      => $row['release_notes'] !== null ? (string) $row['release_notes'] : null,
         ];
     }
 

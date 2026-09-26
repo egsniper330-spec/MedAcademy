@@ -144,10 +144,12 @@ console.log('── Part A2: backend release service (structural) ──');
     'audit: all five release events written via AuditService');
   ok(/promoteToUpdateConfig/.test(svc) && /app_update_config/.test(svc),
     'gate integration: publish promotes the release into app_update_config (ForceUpdate source)');
-  ok(/update_mode, is_enabled FROM app_update_config/.test(svc),
-    'gate integration: policy (mode/enabled) preserved from the existing config');
-  ok(/minimum_version_code[\s\S]{0,80}VALUES|, 0, \?/.test(svc) || /VALUES \(\?, \?, \?, 0, \?/.test(svc),
-    'gate integration: minimum floor never silently moved by a publish (stays operator-controlled)');
+  ok(/update_mode FROM app_update_config/.test(svc),
+    'gate integration: update_mode preserved from the existing config (enabled/bundle identity comes from the release)');
+  ok(/GREATEST\(app_update_config\.minimum_version_code, VALUES\(minimum_version_code\)\)/.test(svc),
+    'gate integration: publish raises the minimum floor monotonically (never lowers it — rollbacks keep clients blocked)');
+  ok(/is_enabled\s*=\s*1/.test(svc),
+    'gate integration: publish enables the platform gate (a published release IS the authoritative floor)');
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -201,7 +203,7 @@ console.log('── Part A4: ForceUpdateGate integration ──');
   ok(/evaluateUpdateVerdict/.test(gate), 'gate: verdict model unchanged (versionCode authoritative)');
   ok(/X-App-Platform|X-App-Version-Code/.test(gate) || /x-app-platform/i.test(gate),
     'gate: platform/versionCode headers intact (server-side 426 enforcement)');
-  ok(/nativeApplicationVersion|expoConfig\?\.version/.test(gate),
+  ok(/nativeApplicationVersion|from '\.\/appIdentity'/.test(gate),
     'gate: installed version from the native build source');
   ok(/getInstalledVersionCode|getInstalledVersionName/.test(gate),
     'gate: runtime accessors for installed version/versionCode');

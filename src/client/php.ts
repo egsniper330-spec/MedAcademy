@@ -12,7 +12,7 @@
 
 import * as SecureStore from 'expo-secure-store';
 import { getInstallationId, getStoredDeviceFingerprint } from '@/lib/installationId';
-import Constants from 'expo-constants';
+import { getInstalledBuildNumber } from '@/lib/appIdentity';
 import { Platform as RNPlatform } from 'react-native';
 import { setMaintenanceControlFlowActive, isMaintenanceControlFlowActive } from '@/lib/maintenanceStateModel';
 
@@ -187,7 +187,10 @@ async function apiFetchOnce<T = unknown>(
   // apps are unaffected by CORS and always send the headers.
   if (RNPlatform.OS !== 'web') {
     headers['X-App-Platform'] = RNPlatform.OS === 'android' ? 'android' : 'ios';
-    const appVersionCode = Constants.expoConfig?.android?.versionCode ?? 0;
+    // The build number comes from the NATIVE app identity (Android versionCode
+    // AND iOS CFBundleVersion — previously iOS never sent this header, so the
+    // server-side 426 floor could never evaluate iOS clients at all).
+    const appVersionCode = getInstalledBuildNumber();
     if (appVersionCode > 0) headers['X-App-Version-Code'] = String(appVersionCode);
   }
 

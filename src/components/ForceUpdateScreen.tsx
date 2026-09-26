@@ -14,6 +14,7 @@
 import React, { useState } from 'react';
 import {
   ActivityIndicator,
+  Image,
   Linking,
   Pressable,
   ScrollView,
@@ -24,6 +25,9 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { useUpdate } from '@/lib/useForceUpdate';
+
+// MedAcademy brand mark (same asset the OS uses for the app icon).
+const LOGO = require('../../assets/icon.png');
 
 // MedAcademy palette (matches the security-gate styling conventions).
 const C = {
@@ -113,6 +117,7 @@ export default function ForceUpdateScreen(): React.JSX.Element {
         // No gesture dismiss, no backdoor, no skip.
       >
         <View style={styles.hero}>
+          <Image source={LOGO} style={styles.logo} resizeMode="contain" />
           <View style={styles.badgeRow}>
             <View style={[styles.badge, forced ? styles.badgeForced : styles.badgeOptional]}>
               <Text style={styles.badgeText}>{forced ? 'UPDATE REQUIRED' : 'OPTIONAL UPDATE'}</Text>
@@ -136,12 +141,17 @@ export default function ForceUpdateScreen(): React.JSX.Element {
         <View style={styles.card}>
           <View style={styles.row}>
             <Text style={styles.rowLabel}>Current version</Text>
-            <Text style={styles.rowValue}>{update.installedVersionName}</Text>
+            <Text style={styles.rowValue}>
+              {update.installedVersionName || '—'}
+              {update.installedVersionCode > 0 ? ` (build ${update.installedVersionCode})` : ''}
+            </Text>
           </View>
           <View style={[styles.row, styles.rowLast]}>
             <Text style={styles.rowLabel}>Latest version</Text>
             <Text style={[styles.rowValue, styles.rowValueAccent]}>
-              {update.latestVersionName || '—'}
+              {update.latestVersionName
+                ? `${update.latestVersionName}${update.latestVersionCode > 0 ? ` (build ${update.latestVersionCode})` : ''}`
+                : '—'}
             </Text>
           </View>
         </View>
@@ -207,6 +217,10 @@ const styles = StyleSheet.create({
   checkingTitle: { color: C.text, fontSize: 17, fontWeight: '600', marginTop: 18, textAlign: 'center' },
   checkingSub: { color: C.sub, fontSize: 13, marginTop: 8, textAlign: 'center', lineHeight: 19 },
   hero: { marginTop: 28, marginBottom: 20 },
+  logo: {
+    width: 84, height: 84, borderRadius: 20, marginBottom: 18,
+    backgroundColor: C.card, borderWidth: 1, borderColor: C.border,
+  },
   badgeRow: { flexDirection: 'row', gap: 8, marginBottom: 14, flexWrap: 'wrap' },
   badge: {
     paddingHorizontal: 10, paddingVertical: 5, borderRadius: 999,
