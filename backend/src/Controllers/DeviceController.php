@@ -497,8 +497,18 @@ final class DeviceController
                     );
                 }
 
+                // device_not_found is a DATA-CONSISTENCY gap, not an authorized
+                // revocation: the devices row can be missing because admin_reset
+                // deleted ALL rows for the user (the user re-logged in on another
+                // device but this device's re-registration failed), because a
+                // login-time registerDevice() failed transiently, or because the
+                // stored fingerprint drifted (OS/app update). None of those is a
+                // security decision, so it must NOT force a logout — the caller
+                // self-heals by re-registering. Genuinely revoked devices still
+                // stop here when the row EXISTS with status='blocked' or
+                // trust_level='revoked' (handled below), so enforcement is intact.
                 if ($device === null) {
-                    return ['authorized' => false, 'reason' => 'device_not_found', 'security_version' => $currentVersion];
+                    return ['authorized' => true, 'reason' => 'device_not_registered_self_heal', 'security_version' => $currentVersion];
                 }
 
                 if ($device['status'] === 'blocked' || $device['trust_level'] === 'revoked') {
