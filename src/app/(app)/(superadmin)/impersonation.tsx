@@ -1,26 +1,29 @@
 /**
- * Impersonation — Super Admin only
- * Log in as another user via a server-generated magic link.
- * Every impersonation is recorded in audit_logs.
+ * Impersonation — Super Admin only.
+ * Starts a real impersonation session: the backend issues a session pair for
+ * the TARGET user (`{ session, target }`), the client stores the ORIGINAL
+ * Super-Admin tokens in the impersonation store, then swaps the active auth
+ * session to the target. The persistent ImpersonationBanner restores the
+ * original session on exit (server-audited via POST /auth/impersonation/end).
+ * Every attempt (start success/failure/end) is recorded in audit_logs.
  */
 import { useCallback, useState } from 'react';
 import {
   View, Text, ScrollView, TextInput, ActivityIndicator,
   useColorScheme, Pressable,
 } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useRouter, useFocusEffect } from 'expo-router';
 import { User, Search, AlertTriangle, LogIn } from 'lucide-react-native';
 import { PageHeader } from '@/components/PageHeader';
-import { useFocusEffect } from 'expo-router';
 import { searchUsers, getAuditLogs } from '@/lib/api';
-import { backendClient } from '@/client/backendClient';
+import { startImpersonationSession } from '@/lib/impersonationService';
 import { NeuCard } from '@/components/NeuCard';
 import { NeuButton } from '@/components/NeuButton';
 import { useToast } from '@/components/Toast';
 import { neuColors, useLayout, safeBottom } from '@/lib/neu';
 import { friendlyError } from '@/lib/validation';
 import { useDebounce } from '@/lib/useDebounce';
-import { useImpersonationStore, useProfileStore, type UserRole } from '@/lib/store';
+import { useImpersonationStore } from '@/lib/store';
 
 const ROLE_COLORS: Record<string, string> = {
   student: '#7C3AED', doctor: '#16A34A',
@@ -34,8 +37,7 @@ export default function ImpersonationScreen() {
   const layout = useLayout();
   const router = useRouter();
   const { showToast } = useToast();
-  const { startImpersonation } = useImpersonationStore();
-  const { clearProfile } = useProfileStore();
+  const { impersonation } = useImpersonationStore();
 
   const [query, setQuery] = useState('');
   const debouncedQuery = useDebounce(query, 300);
@@ -44,17 +46,19 @@ export default function ImpersonationScreen() {
   const [recentLogs, setRecentLogs] = useState<any[]>([]);
   const [logsLoaded, setLogsLoaded] = useState(false);
   const [impersonating, setImpersonating] = useState<string | null>(null);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   const handleSearch = async () => {
     if (!query.trim()) return;
     setSearching(true);
-    try { setResults(await searchUsers(query)); } catch (_) {}
+    try { setResults(await searchUsers(query)); }
+    catch (e) { showToast({ type: 'error', message: friendlyError(e, 'Search failed.') }); }
     setSearching(false);
   };
 
   const loadLogs = useCallback(async () => {
     try {
-      const logs = await getAuditLogs(20);
+      const logs = await getAuditLogs(50);
       setRecentLogs(logs.filter((l: any) => l.action?.includes('impersonat')));
       setLogsLoaded(true);
     } catch (_) {}
@@ -65,62 +69,36 @@ export default function ImpersonationScreen() {
   const handleImpersonate = async (targetUser: any) => {
     if (targetUser.role === 'super_admin') return;
     setImpersonating(targetUser.id);
+    setErrorMsg(null);
     try {
-      // Save current session tokens BEFORE switching
-      const { data: { session: currentSession } } = await backendClient.auth.getSession();
-      if (!currentSession) throw new Error('No active session to save.');
-
-      const originalAccessToken  = currentSession.access_token;
-      const originalRefreshToken = currentSession.refresh_token;
-      const { data: { user: currentUser } } = await backendClient.auth.getUser();
-      const originalEmail = currentUser?.email ?? null;
-
-      // Get current admin profile role
-      const { data: profile } = await backendClient.from('profiles').select('role').eq('id', currentUser!.id).single();
-      const originalRole = (profile?.role ?? 'admin') as UserRole;
-
-      // Call the impersonate Edge Function
-      const { data, error } = await backendClient.functions.invoke('impersonate', {
-        body: { target_user_id: targetUser.id },
-      });
-
-      if (error) {
-        const msg = await error?.context?.text?.().catch(() => error.message);
-        throw new Error(msg || error.message);
-      }
-
-      if (!data?.email_otp || !data?.email) throw new Error('No impersonation token returned from server.');
-
-      // Exchange OTP for a real session
-      const { data: sessionData, error: verifyErr } = await backendClient.auth.verifyOtp({
-        email: data.email,
-        token: data.email_otp,
-        type: 'magiclink',
-      });
-
-      if (verifyErr || !sessionData?.session) {
-        throw new Error(verifyErr?.message ?? 'Could not exchange token for session.');
-      }
-
-      // Store original session in impersonation store + clear cached profile
-      startImpersonation(
-        originalAccessToken,
-        originalRefreshToken,
-        originalEmail ?? '',
-        currentUser!.id,
-        originalRole,
-        targetUser.full_name,
-        targetUser.role as UserRole,
-      );
-      clearProfile();
+      // REAL session swap: backend issues the target's session pair, the
+      // service preserves the original Super-Admin tokens and switches the
+      // live auth context. Throws a structured error on any failure —
+      // success is NEVER faked.
+      await startImpersonationSession(targetUser.id, targetUser.full_name, targetUser.role);
 
       showToast({ type: 'success', message: `Now logged in as ${targetUser.full_name}.` });
       await loadLogs();
 
-      // Navigate to app root — layout will redirect to correct dashboard
-      router.replace('/' as any);
-    } catch (e) {
-      showToast({ type: 'error', message: friendlyError(e, 'Impersonation failed.') });
+      // startImpersonationSession has ALREADY confirmed the target's profile
+      // loaded (it resolves only after that). Navigate directly to the
+      // target's role dashboard — the generic '/' route relies on the layout's
+      // one-shot role redirect, which is consumed by earlier navigations and
+      // left the preview stuck on the index spinner.
+      const dest = targetUser.role === 'doctor'
+        ? '/dr-overview'
+        : targetUser.role === 'admin'
+          ? '/admin-overview'
+          : targetUser.role === 'super_admin'
+            ? '/sa-overview'
+            : '/dashboard';
+      router.replace(dest as never);
+    } catch (e: any) {
+      // Structured error surfaced verbatim (403/404/422/5xx messages are
+      // produced by the backend contract) — no swallowed failures.
+      const msg = friendlyError(e, 'Impersonation failed.');
+      setErrorMsg(msg);
+      showToast({ type: 'error', message: msg });
     }
     setImpersonating(null);
   };
@@ -136,10 +114,19 @@ export default function ImpersonationScreen() {
 
       <View style={{ paddingHorizontal: layout.screenPx }}>
 
+        {impersonation.active && (
+          <NeuCard style={{ marginBottom: 16, padding: 14, flexDirection: 'row', gap: 10 }}>
+            <User size={18} color="#1E90FF" />
+            <Text style={{ flex: 1, fontSize: 12, color: c.text, fontWeight: '600' }}>
+              Currently impersonating {impersonation.targetName}. Use the yellow banner at the top of the app to return to your account.
+            </Text>
+          </NeuCard>
+        )}
+
         <NeuCard style={{ marginBottom: 20, padding: 14, flexDirection: 'row', gap: 10 }}>
           <AlertTriangle size={18} color="#D97706" />
           <Text style={{ flex: 1, fontSize: 12, color: '#D97706', fontWeight: '600', lineHeight: 18 }}>
-            All impersonation sessions are recorded in Audit Logs. You cannot impersonate other Super Admins.
+            All impersonation sessions are recorded in Audit Logs. You cannot impersonate Super Admins or suspended accounts.
           </Text>
         </NeuCard>
 
@@ -153,11 +140,23 @@ export default function ImpersonationScreen() {
             value={query} onChangeText={setQuery} onSubmitEditing={handleSearch}
             placeholder="Name, email, phone or user ID..."
             placeholderTextColor={`${c.text}55`}
+            accessibilityLabel="Search users to impersonate"
             style={{ flex: 1, minWidth: 0, fontSize: 14, color: c.text }}
           />
           {searching && <ActivityIndicator size="small" color={c.primary} />}
         </View>
         <NeuButton label="Search" onPress={handleSearch} loading={searching} fullWidth style={{ marginBottom: 20 }} />
+
+        {/* Structured error state — the real failure reason, never a fake success */}
+        {errorMsg && (
+          <NeuCard style={{ marginBottom: 20, padding: 14, flexDirection: 'row', gap: 10, borderWidth: 1, borderColor: '#DC262655' }}>
+            <AlertTriangle size={18} color="#DC2626" />
+            <View style={{ flex: 1 }}>
+              <Text style={{ fontSize: 13, fontWeight: '700', color: '#DC2626' }}>Impersonation failed</Text>
+              <Text style={{ fontSize: 12, color: c.text, opacity: 0.7, marginTop: 2 }}>{errorMsg}</Text>
+            </View>
+          </NeuCard>
+        )}
 
         {/* Results */}
         {results.length > 0 && (
@@ -188,7 +187,11 @@ export default function ImpersonationScreen() {
                     </View>
                     <Pressable
                       onPress={() => !blocked && !impersonating && handleImpersonate(user)}
-                      style={{ width: 42, height: 42, borderRadius: 13, backgroundColor: blocked ? `${c.text}10` : `${c.primary}18`, alignItems: 'center', justifyContent: 'center' }}>
+                      disabled={blocked || !!impersonating}
+                      accessibilityRole="button"
+                      accessibilityLabel={blocked ? `Cannot impersonate ${user.full_name}` : `Impersonate ${user.full_name}`}
+                      style={{ width: 42, height: 42, borderRadius: 13, backgroundColor: blocked ? `${c.text}10` : `${c.primary}18`, alignItems: 'center', justifyContent: 'center' }}
+                    >
                       {isLoading
                         ? <ActivityIndicator size="small" color={c.primary} />
                         : <LogIn size={18} color={blocked ? `${c.text}33` : c.primary} />}
@@ -216,9 +219,11 @@ export default function ImpersonationScreen() {
           )}
           {recentLogs.map(log => (
             <NeuCard key={log.id} style={{ marginBottom: 10, padding: 14 }}>
-              <Text style={{ fontSize: 13, fontWeight: '700', color: c.text }}>{log.action?.replace(/_/g, ' ')}</Text>
+              <Text style={{ fontSize: 13, fontWeight: '700', color: log.action === 'impersonation_failed' ? '#DC2626' : c.text }}>
+                {log.action?.replace(/_/g, ' ')}
+              </Text>
               <Text style={{ fontSize: 12, color: c.text, opacity: 0.5, marginTop: 3 }}>
-                {log.details?.target_name ?? 'Unknown'} ({log.details?.target_role ?? ''}) • {new Date(log.created_at).toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true })}
+                {log.details?.target_name ?? log.details?.reason ?? 'Unknown'}{log.details?.target_role ? ` (${log.details.target_role})` : ''} • {new Date(log.created_at).toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true })}
               </Text>
             </NeuCard>
           ))}

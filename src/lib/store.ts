@@ -92,9 +92,54 @@ const IMPERSONATION_DEFAULT: ImpersonationState = {
   targetRole: null,
 };
 
+// ── Web-reload persistence (sessionStorage snapshot) ─────────────────────────
+// A web page reload wipes this in-memory store while the TARGET's auth session
+// survives in localStorage — without a snapshot the banner disappears and the
+// restore context is lost, stranding the Super Admin inside the target
+// account. The snapshot lives in sessionStorage: tab-scoped, dies with the
+// tab, never written to disk, web-only (native has no reload; process death
+// clears all memory and session together, so there is nothing to re-arm).
+const IMPERSONATION_SNAPSHOT_KEY = 'medacademy-impersonation-snapshot';
+
+function writeImpersonationSnapshot(state: ImpersonationState): void {
+  if (process.env.EXPO_OS !== 'web') return;
+  try { sessionStorage.setItem(IMPERSONATION_SNAPSHOT_KEY, JSON.stringify(state)); } catch { /* private mode */ }
+}
+
+function readImpersonationSnapshot(): ImpersonationState | null {
+  if (process.env.EXPO_OS !== 'web') return null;
+  try {
+    const raw = sessionStorage.getItem(IMPERSONATION_SNAPSHOT_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as ImpersonationState;
+    return parsed?.active && parsed.originalAccessToken ? parsed : null;
+  } catch { return null; }
+}
+
+function clearImpersonationSnapshot(): void {
+  if (process.env.EXPO_OS !== 'web') return;
+  try { sessionStorage.removeItem(IMPERSONATION_SNAPSHOT_KEY); } catch { /* ignore */ }
+}
+
+/** Peek the persisted snapshot (web only) — used by the boot re-arm in impersonationService. */
+export function peekImpersonationSnapshot(): ImpersonationState | null {
+  return readImpersonationSnapshot();
+}
+
+/** Drop the persisted snapshot (web only) — called when the re-arm detects the impersonation is over. */
+export function dropImpersonationSnapshot(): void {
+  clearImpersonationSnapshot();
+}
+
 export const useImpersonationStore = create<ImpersonationStore>((set) => ({
   impersonation: IMPERSONATION_DEFAULT,
-  startImpersonation: (originalAccessToken, originalRefreshToken, originalEmail, originalUserId, originalRole, targetName, targetRole) =>
-    set({ impersonation: { active: true, originalAccessToken, originalRefreshToken, originalEmail, originalUserId, originalRole, targetName, targetRole } }),
-  endImpersonation: () => set({ impersonation: IMPERSONATION_DEFAULT }),
+  startImpersonation: (originalAccessToken, originalRefreshToken, originalEmail, originalUserId, originalRole, targetName, targetRole) => {
+    const impersonation: ImpersonationState = { active: true, originalAccessToken, originalRefreshToken, originalEmail, originalUserId, originalRole, targetName, targetRole };
+    set({ impersonation });
+    writeImpersonationSnapshot(impersonation);
+  },
+  endImpersonation: () => {
+    set({ impersonation: IMPERSONATION_DEFAULT });
+    clearImpersonationSnapshot();
+  },
 }));

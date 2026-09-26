@@ -32,6 +32,12 @@ final class VdoCipherService
         return $this->apiSecret !== '' && $this->apiSecret !== 'CHANGE_ME';
     }
 
+    /** Public read-only check for callers deciding policy on unknown remote state. */
+    public function providerConfigured(): bool
+    {
+        return $this->isConfigured();
+    }
+
     /**
      * Build the annotate watermark (JSON-stringified string — required by the
      * VdoCipher API; numeric fields as strings; color 0xRRGGBB).
@@ -91,11 +97,18 @@ final class VdoCipherService
         $lesson = null;
         if ($lessonId !== null && $lessonId !== '') {
             $lesson = $db->row(
-                'SELECT course_id, video_id, status FROM lessons WHERE id = ? AND video_id = ?',
+                'SELECT course_id, video_id, status, video_status FROM lessons WHERE id = ? AND video_id = ?',
                 [$lessonId, $videoId]
             );
             if ($lesson === null) {
                 throw new ApiException($isPrivileged ? 404 : 403, $isPrivileged ? 'Lesson not found' : 'This lesson is not available');
+            }
+            // PLAYBACK SAFETY (sync contract): a lesson whose video was proven
+            // deleted from VdoCipher (library sync / markLessonVideoMissing)
+            // must never reach the OTP endpoint — return a clear, stable
+            // "unavailable" instead of an upstream 404 wrapped in a 502.
+            if (($lesson['video_status'] ?? '') === 'missing') {
+                throw new ApiException(410, 'This video is no longer available');
             }
             if (!$isPrivileged && $lesson['status'] !== 'published') {
                 throw new ApiException(403, 'This lesson is not available');
@@ -208,11 +221,16 @@ final class VdoCipherService
         $lesson = null;
         if ($lessonId !== null && $lessonId !== '') {
             $lesson = $db->row(
-                'SELECT course_id, video_id, status FROM lessons WHERE id = ? AND video_id = ?',
+                'SELECT course_id, video_id, status, video_status FROM lessons WHERE id = ? AND video_id = ?',
                 [$lessonId, $videoId]
             );
             if ($lesson === null) {
                 throw new ApiException($isPrivileged ? 404 : 403, $isPrivileged ? 'Lesson not found' : 'This lesson is not available');
+            }
+            // PLAYBACK SAFETY (sync contract): same remotely-deleted gate as
+            // otp() — a download OTP is a playback OTP, no weaker rules.
+            if (($lesson['video_status'] ?? '') === 'missing') {
+                throw new ApiException(410, 'This video is no longer available');
             }
             if (!$isPrivileged && $lesson['status'] !== 'published') {
                 throw new ApiException(403, 'This lesson is not available');
@@ -541,16 +559,112 @@ final class VdoCipherService
 
     /**
      * Check if a VdoCipher video still exists at the provider.
-     * Uses GET /videos/{videoId} — returns true if 200, false if 404.
-     * Used to detect orphaned local assets before deletion.
+     * Uses GET /videos/{videoId}.
+     *
+     * ERROR-SAFE (Video Library sync contract): only an HTTP 404 proves the
+     * asset is gone. A network failure, timeout, auth failure or 5xx returns
+     * status 'error' — callers MUST treat that as UNKNOWN, never as deleted.
+     * (The previous boolean form collapsed all of these into "false", which
+     * let a transient outage orphan live VdoCipher assets.)
+     *
+     * @return array{status: 'exists'|'missing'|'error', http_status: int}
+     */
+    public function verifyRemote(string $videoId): array
+    {
+        if ($videoId === '') {
+            return ['status' => 'error', 'http_status' => 0];
+        }
+        if (!$this->isConfigured()) {
+            return ['status' => 'error', 'http_status' => 0];
+        }
+        $res = $this->request('GET', '/videos/' . rawurlencode($videoId));
+        $http = (int) $res['status'];
+        if ($http === 200) {
+            return ['status' => 'exists', 'http_status' => $http];
+        }
+        if ($http === 404) {
+            return ['status' => 'missing', 'http_status' => $http];
+        }
+        // 401/403/429/5xx/timeout(curl reports 0)/malformed → UNKNOWN.
+        return ['status' => 'error', 'http_status' => $http];
+    }
+
+    /**
+     * LEGACY boolean wrapper (deleteAsset orphan check). Kept for callers
+     * that only need a yes/no and handle errors separately — new sync code
+     * must use verifyRemote(). True only when provably present; false for
+     * missing AND unknown (callers decide policy per case).
      */
     public function providerExists(string $videoId): bool
     {
-        if (!$this->isConfigured() || $videoId === '') {
-            return false;
+        return $this->verifyRemote($videoId)['status'] === 'exists';
+    }
+
+    /**
+     * List the ENTIRE remote VdoCipher library using the official paginated
+     * listing API (GET /videos?page=N&limit=M).
+     * https://www.vdocipher.com/docs/server/videomanagement/listing/
+     *
+     * Follows every page until exhaustion (or the safety cap) so a large
+     * library is never truncated at the first page — the exact failure that
+     * produced stale Video Library entries. Memory stays bounded: only the
+     * video IDs (+ minimal metadata) are retained.
+     *
+     * @param int $pageLimit  page size (VdoCipher max 100)
+     * @param int $maxPages   safety cap (100 pages × 100 = 10k videos)
+     * @return array{status:'ok'|'error', http_status:int, videos:array<string,array>, total:int|null, pages:int, error:?string}
+     *         videos maps videoId => ['title'=>?string,'duration'=>?int,'status'=>?string]
+     */
+    public function listAllVideos(int $pageLimit = 100, int $maxPages = 100): array
+    {
+        $videos = [];
+        $total = null;
+        $pagesFetched = 0;
+        if (!$this->isConfigured()) {
+            return ['status' => 'error', 'http_status' => 0, 'videos' => [], 'total' => null, 'pages' => 0, 'error' => 'not_configured'];
         }
-        $res = $this->request('GET', '/videos/' . rawurlencode($videoId));
-        return (int) $res['status'] === 200;
+        $pageLimit = max(1, min(100, $pageLimit));
+        for ($page = 1; $page <= $maxPages; $page++) {
+            $res = $this->request('GET', '/videos?page=' . $page . '&limit=' . $pageLimit);
+            $http = (int) $res['status'];
+            if ($http === 429) {
+                // Rate limited mid-listing: report partial success as an error
+                // so the caller can retry later — never treat as complete.
+                return ['status' => 'error', 'http_status' => $http, 'videos' => $videos, 'total' => $total, 'pages' => $pagesFetched, 'error' => 'rate_limited'];
+            }
+            if ($http >= 400) {
+                return ['status' => 'error', 'http_status' => $http, 'videos' => $videos, 'total' => $total, 'pages' => $pagesFetched, 'error' => 'upstream_' . $http];
+            }
+            $body = json_decode($res['body'], true);
+            if (!is_array($body)) {
+                return ['status' => 'error', 'http_status' => $http, 'videos' => $videos, 'total' => $total, 'pages' => $pagesFetched, 'error' => 'malformed_response'];
+            }
+            // VdoCipher listing shape: { "videos": [...], "count": N, "limit": L, "page": P }
+            // (older responses may be a bare array — array_is_list() needs
+            // PHP 8.1, and this backend targets 8.0, so use keys())
+            $rows = $body['videos'] ?? (($body === [] || array_keys($body) === range(0, count($body) - 1)) ? $body : []);
+            if (isset($body['count']) && is_numeric($body['count'])) {
+                $total = (int) $body['count'];
+            }
+            $pagesFetched++;
+            $rowIds = [];
+            foreach ($rows as $row) {
+                if (!is_array($row)) continue;
+                $id = (string) ($row['videoId'] ?? $row['id'] ?? '');
+                if ($id === '') continue;
+                $rowIds[] = $id;
+                $videos[$id] = [
+                    'title' => isset($row['title']) ? (string) $row['title'] : null,
+                    'duration' => isset($row['length']) && is_numeric($row['length']) ? (int) $row['length'] : null,
+                    'status' => isset($row['status']) ? (string) $row['status'] : null,
+                ];
+            }
+            // Stop when a short/empty page means we have everything.
+            if (count($rowIds) < $pageLimit) {
+                break;
+            }
+        }
+        return ['status' => 'ok', 'http_status' => 200, 'videos' => $videos, 'total' => $total, 'pages' => $pagesFetched, 'error' => null];
     }
 
     /**

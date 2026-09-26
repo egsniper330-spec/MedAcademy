@@ -284,10 +284,14 @@ final class RpcController
             'SELECT id, device_name, platform, status, last_active_at FROM devices WHERE user_id = ?',
             [$studentId]
         );
+        // Doctor-facing student profile: visibility policy applied in SQL —
+        // 'admin_only'/'super_admin_only' enrollments never reach a doctor.
         $enrollments = $db->select(
-            'SELECT e.id, e.course_id, e.enrolled_at, e.status, c.title AS course_title
+            "SELECT e.id, e.course_id, e.enrolled_at, e.status, c.title AS course_title
              FROM enrollments e JOIN courses c ON c.id = e.course_id
-             WHERE e.student_id = ? ORDER BY e.enrolled_at DESC',
+             WHERE e.student_id = ?
+               AND (e.visibility_level = 'all' OR e.visibility_level IS NULL)
+             ORDER BY e.enrolled_at DESC",
             [$studentId]
         );
 

@@ -10,9 +10,11 @@ import {
 } from 'react-native';
 import {
   Download, FileText, CreditCard, Shield, Activity,
-  CheckCircle, AlertTriangle,
+  CheckCircle, AlertTriangle, Users, BookOpen, GraduationCap, Database,
 } from 'lucide-react-native';
 import { backendClient } from '@/client/backendClient';
+import { bulkDataExport, type BulkExportType } from '@/lib/api';
+import { useProfileStore } from '@/lib/store';
 import { NeuCard } from '@/components/NeuCard';
 import { NeuButton } from '@/components/NeuButton';
 import { neuColors, useLayout, safeBottom } from '@/lib/neu';
@@ -199,6 +201,44 @@ export default function ExportPanel() {
     },
   ];
 
+  // ── Bulk Data Export (Super Admin only; enforced server-side) ──────────
+  const { profile } = useProfileStore();
+  const isSuperAdmin = profile?.role === 'super_admin';
+
+  const BULK_EXPORTS: Array<{ type: BulkExportType; label: string; description: string; icon: typeof Users; color: string }> = [
+    { type: 'users',              label: 'Users',              description: 'All active accounts: name, email, phone, role, status, public ID', icon: Users,          color: '#6366F1' },
+    { type: 'courses',            label: 'Courses',            description: 'Title, status, price, instructor, dates',                           icon: BookOpen,       color: '#0EA5E9' },
+    { type: 'enrollments',        label: 'Enrollments',        description: 'Student, course, method, visibility, enrollment date',              icon: GraduationCap,  color: '#16A34A' },
+    { type: 'academic_structure', label: 'Academic Structure', description: 'Universities → faculties → academic levels',                        icon: Database,       color: '#D97706' },
+  ];
+  const [bulkStatus, setBulkStatus] = useState<Record<string, 'idle' | 'loading' | 'done' | 'error'>>({});
+  const [bulkErrors, setBulkErrors] = useState<Record<string, string>>({});
+  const [bulkCount, setBulkCount] = useState<Record<string, number>>({});
+
+  const doBulkExport = async (type: BulkExportType) => {
+    setBulkStatus(prev => ({ ...prev, [type]: 'loading' }));
+    setBulkErrors(prev => ({ ...prev, [type]: '' }));
+    try {
+      // Server returns the allow-listed rows (audited server-side); CSV is
+      // serialized locally so web + native share the identical code path.
+      const result = await bulkDataExport(type);
+      setBulkCount(prev => ({ ...prev, [type]: result.count }));
+      if (result.rows.length === 0) {
+        // Empty result is a SUCCESS state with an honest message — not an error.
+        setBulkStatus(prev => ({ ...prev, [type]: 'done' }));
+        return;
+      }
+      const csv = toCsv(result.rows);
+      const filename = `bulk_${type}_${new Date().toISOString().slice(0, 10)}.csv`;
+      await shareText(csv, filename, 'text/csv');
+      setBulkStatus(prev => ({ ...prev, [type]: 'done' }));
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      setBulkErrors(prev => ({ ...prev, [type]: msg }));
+      setBulkStatus(prev => ({ ...prev, [type]: 'error' }));
+    }
+  };
+
   const doExport = async (cfg: ExportConfig) => {
     setStatus(prev => ({ ...prev, [cfg.id]: 'loading' }));
     setErrors(prev => ({ ...prev, [cfg.id]: '' }));
@@ -229,6 +269,58 @@ export default function ExportPanel() {
             On Web, the file downloads directly.
           </Text>
         </NeuCard>
+
+        {/* ── Bulk Data Export (Super Admin) ─────────────────────────── */}
+        {isSuperAdmin && (
+          <>
+            <Text style={{ fontSize: 16, fontWeight: '800', color: c.text, marginTop: 8, marginBottom: 12 }}>
+              Bulk Data Export
+            </Text>
+            <NeuCard style={{ padding: 14, marginBottom: 14, flexDirection: 'row', gap: 10, alignItems: 'center' }}>
+              <Shield size={16} color="#D97706" />
+              <Text style={{ fontSize: 12, color: c.text, opacity: 0.65, flex: 1 }}>
+                Server-side allow-listed columns only — never passwords, tokens or secrets.
+                Every export is recorded in the audit log.
+              </Text>
+            </NeuCard>
+            {BULK_EXPORTS.map(cfg => {
+              const s = bulkStatus[cfg.type] ?? 'idle';
+              const err = bulkErrors[cfg.type];
+              const Icon = cfg.icon;
+              return (
+                <NeuCard key={cfg.type} style={{ marginBottom: 14, padding: 18 }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 12 }}>
+                    <View style={{ width: 44, height: 44, borderRadius: 14, backgroundColor: `${cfg.color}18`, alignItems: 'center', justifyContent: 'center' }}>
+                      <Icon size={20} color={cfg.color} />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={{ fontSize: 15, fontWeight: '700', color: c.text }}>{cfg.label}</Text>
+                      <Text style={{ fontSize: 12, color: c.text, opacity: 0.45, marginTop: 2 }}>
+                        {cfg.description}
+                      </Text>
+                    </View>
+                    {s === 'done' && <CheckCircle size={20} color="#16A34A" />}
+                    {s === 'error' && <AlertTriangle size={20} color="#DC2626" />}
+                  </View>
+                  {err && <Text style={{ fontSize: 12, color: '#DC2626', marginBottom: 10 }}>⚠ {err}</Text>}
+                  {s === 'done' && (
+                    <Text style={{ fontSize: 12, color: '#16A34A', marginBottom: 10 }}>
+                      ✓ Ready{bulkCount[cfg.type] != null ? ` — ${bulkCount[cfg.type]} row(s)` : ''}{bulkCount[cfg.type] === 0 ? ' (no data to export)' : ' — check downloads / share sheet'}
+                    </Text>
+                  )}
+                  <NeuButton
+                    label={s === 'loading' ? 'Preparing export…' : 'Export CSV'}
+                    onPress={() => doBulkExport(cfg.type)}
+                    loading={s === 'loading'}
+                    variant="secondary"
+                    fullWidth
+                    icon={<Download size={14} color={c.text} />}
+                  />
+                </NeuCard>
+              );
+            })}
+          </>
+        )}
 
         {EXPORTS.map((cfg) => {
           const s    = status[cfg.id] ?? 'idle';

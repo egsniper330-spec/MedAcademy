@@ -141,6 +141,51 @@ export function nextStickyTypes(
   return []; // completed evaluation, nothing blocking → recover
 }
 
+// ─── Gate visibility phase (pending ≠ blocked — startup-flash fix) ──────────
+
+/**
+ * The three visibility phases of the SecurityGate overlay.
+ *
+ *   pending   — no COMPLETED evaluation exists yet (cold start, or an
+ *               evaluation that has not landed). The gate MUST NOT mount:
+ *               the normal startup/loading experience stays visible while
+ *               checks run silently in the background.
+ *   unlocked  — a completed evaluation found nothing blocking.
+ *   blocked   — a policy-confirmed blocking condition is live (or a
+ *               previously-verified block is being re-validated). The gate
+ *               mounts and stays mounted.
+ *
+ * THE AUTHORITATIVE CONTRACT (startup-flash fix):
+ *   CHECKING / UNKNOWN  ≠  BLOCKED
+ *   NETWORK ERROR       ≠  BLOCKED
+ *   OFFLINE             ≠  BLOCKED
+ * Only an actual policy decision on a COMPLETED evaluation produces
+ * 'blocked'. The previous behavior served a synthetic blocking sentinel
+ * ("security_unverified", risk 10) as the global result whenever no verdict
+ * existed, which mounted the full violation page on EVERY cold start until
+ * the first check completed — the UNKNOWN → BLOCKED → SAFE false transition.
+ *
+ * Fail-closed ordering: a live/sticky block WINS over any pending state —
+ * a re-check in flight never flashes a temporary all-clear over a verified
+ * block (the BLOCKED → CHECKING → TEMP-ALLOWED race stays closed).
+ */
+export type GatePhase = 'pending' | 'unlocked' | 'blocked';
+
+export function resolveGatePhase(input: {
+  /** A COMPLETED evaluation verdict exists (never true before the first one). */
+  hasVerdict: boolean;
+  /** An evaluation is currently in flight. */
+  evaluating: boolean;
+  /** The latest completed/last-served result blocks login with findings. */
+  liveBlocking: boolean;
+  /** Number of sticky (previously-verified) blocking event types held by the gate. */
+  stickyCount: number;
+}): GatePhase {
+  if (input.liveBlocking || input.stickyCount > 0) return 'blocked';
+  if (!input.hasVerdict || input.evaluating) return 'pending';
+  return 'unlocked';
+}
+
 // ─── Update verdict (versionCode is authoritative; names never compared) ─────
 
 export interface UpdateVerdictPure {

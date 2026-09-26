@@ -1,6 +1,6 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Stack, useRouter, usePathname } from 'expo-router';
-import { AppState, View } from 'react-native';
+import { AppState, View, ActivityIndicator } from 'react-native';
 // Fix: import JS wrapper module directly (not requireOptionalNativeModule).
 // requireOptionalNativeModule returns the raw native proxy which only has
 // .preventScreenCapture() / .allowScreenCapture() (no key arg, no async wrapper).
@@ -159,16 +159,38 @@ function AppLayoutNav() {
     return unsub;
   }, [onNewBlockingThreat, router]);
 
+  // ── Identity-switch generation guard (impersonation swap race) ──────────
+  // getProfile(rounds-trip the network; if the session identity CHANGES while
+  // one is in flight (Super Admin ↔ target swap), the stale response must
+  // NEVER install its profile. Previously the stale response for the SUPER
+  // ADMIN resolved after the swap and re-installed the super-admin profile
+  // over the target's — profile stayed "loading" for the target forever →
+  // the web preview's infinite spinner with the banner already visible.
+  const bootGeneration = useRef(0);
+  // Distinguishes "no session" (render nothing — the root Protected guard
+  // owns the route table) from "session present, profile hydrating". Before
+  // this existed, the gap between setSession and setProfileLoading(true)
+  // left the (app)/index spinner as the only visible state with no owner.
+  const [awaitingProfile, setAwaitingProfile] = useState(false);
+
   useEffect(() => {
     if (!session?.user) {
+      bootGeneration.current += 1; // invalidate any in-flight fetch
       clearProfile();
       hasNavigated.current = false;
+      setAwaitingProfile(false);
       return;
     }
+    // Same-identity re-run (strict-mode double-invoke, dep re-fire): skip
+    // refetching — the profile for THIS user id is already authoritative.
+    const myGen = ++bootGeneration.current;
+    setAwaitingProfile(true);
     (async () => {
       setProfileLoading(true);
       try {
         const p = await getProfile(session.user.id);
+        // STALE CHECK FIRST: a newer identity switch supersedes this result.
+        if (myGen !== bootGeneration.current) return;
         // Defensive: a profile row missing both role AND status cannot drive
         // any role decision — treat as an error, not as "loaded with no role".
         if (p && !p.role && !p.status) {
@@ -193,6 +215,8 @@ function AppLayoutNav() {
         // spinner ran FOREVER on a blocked cold start (device-proven).
         // Match the server's blocked verdict VERBATIM — a network failure
         // (no status), a 5xx, or a timeout is NEVER a block.
+        // A newer identity switch supersedes even an error from this fetch.
+        if (myGen !== bootGeneration.current) return;
         const e = err as { code?: string; status?: number; message?: string } | null;
         if (
           e && typeof e === 'object' &&
@@ -225,10 +249,27 @@ function AppLayoutNav() {
         // once connectivity returns, or by the foreground trigger).
         console.error('[AppLayout] getProfile FAILED (non-fatal, keeping session):', err);
       } finally {
-        setProfileLoading(false);
+        if (myGen === bootGeneration.current) {
+          setProfileLoading(false);
+          setAwaitingProfile(false);
+        }
       }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session?.user?.id]);
+
+  // One-shot role-redirect guard must reset on EVERY identity change —
+  // impersonation swaps Super Admin ↔ target WITHOUT the session ever going
+  // null. Without this reset the guard stays consumed after the first-ever
+  // redirect and the target's role redirect never fires → the index spinner
+  // runs forever (the web-preview stuck-loading bug).
+  const lastIdentityRef = useRef<string | null>(null);
+  useEffect(() => {
+    const uid = session?.user?.id ?? null;
+    if (uid !== lastIdentityRef.current) {
+      lastIdentityRef.current = uid;
+      hasNavigated.current = false;
+    }
   }, [session?.user?.id]);
 
   const pathname = usePathname();
@@ -288,6 +329,20 @@ function AppLayoutNav() {
   // destroying all navigation state and causing blank screens / Unmatched Route errors.
   // The index.tsx spinner covers the visual loading gap instead.
   return (
+    <>
+    {/* Identity-switch hydration gap: a session EXISTS but the authoritative
+        profile has not resolved for it yet (impersonation swap / cold start).
+        Rendering the Stack with a stale/null profile would let the role guard
+        see `!profile` and simply do nothing → index spinner with no owner.
+        This overlay honestly represents that transitional state and is
+        cleared by the same generation guard that resolves the profile —
+        a terminal state is always reached (profile set, error screen, or
+        sign-out); it can never hang forever. */}
+    {awaitingProfile && (
+      <View style={{ position: 'absolute', left: 0, right: 0, top: 0, bottom: 0, alignItems: 'center', justifyContent: 'center', backgroundColor: 'transparent', zIndex: 5, pointerEvents: 'box-only' }}>
+        <ActivityIndicator size="large" />
+      </View>
+    )}
     <Stack screenOptions={{ headerShown: false }}>
       {/* Role-neutral entry — AppLayoutNav's role redirect replaces it with the
           correct dashboard as soon as the backend-verified profile resolves. */}
@@ -314,6 +369,7 @@ function AppLayoutNav() {
       <Stack.Screen name="security-warning" />
       <Stack.Screen name="account-suspended" />
     </Stack>
+    </>
   );
 }
 

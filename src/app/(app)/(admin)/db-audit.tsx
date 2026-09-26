@@ -1,6 +1,22 @@
 /**
- * db-audit.tsx  — v68
- * Database Audit Panel: detect inconsistencies + auto-repair interface.
+ * db-audit.tsx — Database Integrity Audit (v70)
+ *
+ * DISTINCT FROM System Diagnostics: System Diagnostics = live health of
+ * configured services (DB connectivity, SMTP, VdoCipher, JWT...). THIS panel
+ * = one-shot DATA-INTEGRITY audit of the database CONTENT: orphan rows,
+ * negative credit balances and per-table row counts. It runs the real
+ * POST /analytics/db-audit (admin/super_admin, feature-flag gated).
+ *
+ * CONTRACT (AnalyticsController::dbAudit):
+ *   { audit: {
+ *       orphan_profiles, orphan_enrollments, orphan_credits, orphan_courses,
+ *       negative_balances,
+ *       row_counts: { profiles, users, courses, enrollments, credits,
+ *                     devices, lessons, audit_logs } } }
+ * The previous UI rendered fields the backend never returns
+ * (duplicate_enrollments, duplicate_devices, duplicate_transactions,
+ * broken_fks, database.*) — all permanently zero. Fixed by rendering the
+ * REAL contract only.
  */
 import { useState, useCallback } from 'react';
 import {
@@ -10,7 +26,7 @@ import {
 import { useFocusEffect } from 'expo-router';
 import {
   Database, AlertTriangle, CheckCircle, RefreshCw,
-  Trash2, ShieldCheck, Table, BarChart2,
+  Trash2, UserX, CreditCard, BookOpen,
 } from 'lucide-react-native';
 import { backendClient } from '@/client/backendClient';
 import { NeuCard } from '@/components/NeuCard';
@@ -18,34 +34,24 @@ import { NeuButton } from '@/components/NeuButton';
 import { neuColors, useLayout, safeBottom } from '@/lib/neu';
 import { PageHeader } from '@/components/PageHeader';
 
-interface AuditResult {
-  checked_at: string;
-  duplicate_enrollments:   number;
-  duplicate_devices:       number;
-  negative_balances:       number;
-  orphan_enrollments:      number;
-  orphan_lessons:          number;
-  duplicate_transactions:  number;
-  broken_fks:              number;
-  total_issues:            number;
-  database: {
-    total_tables:   number;
-    total_indexes:  number;
-    size_bytes:     number;
-    size_pretty:    string;
-    largest_tables: Array<{ table_name: string; size_pretty: string; row_count: number }>;
-  };
+interface DbAuditResult {
+  orphan_profiles: number;
+  orphan_enrollments: number;
+  orphan_credits: number;
+  orphan_courses: number;
+  negative_balances: number;
+  row_counts: Record<string, number>;
 }
 
+const ROW_COUNT_TABLES = ['profiles', 'users', 'courses', 'enrollments', 'credits', 'devices', 'lessons', 'audit_logs'];
+
 const ISSUE_CFG = [
-  { key: 'duplicate_enrollments',  label: 'Duplicate Active Enrollments', icon: Table,         risk: 'high'   },
-  { key: 'duplicate_devices',      label: 'Duplicate Installation IDs',   icon: ShieldCheck,   risk: 'high'   },
-  { key: 'negative_balances',      label: 'Negative Credit Balances',     icon: AlertTriangle, risk: 'high'   },
-  { key: 'orphan_enrollments',     label: 'Orphan Enrollments',           icon: Trash2,        risk: 'medium' },
-  { key: 'orphan_lessons',         label: 'Orphan Lessons',               icon: Trash2,        risk: 'medium' },
-  { key: 'duplicate_transactions', label: 'Duplicate Transactions',       icon: AlertTriangle, risk: 'high'   },
-  { key: 'broken_fks',             label: 'Broken Foreign Keys',          icon: Database,      risk: 'high'   },
-];
+  { key: 'orphan_profiles',     label: 'Profiles without a user record', icon: UserX,      risk: 'high'   },
+  { key: 'orphan_enrollments',  label: 'Enrollments without a student',  icon: Trash2,     risk: 'high'   },
+  { key: 'orphan_credits',      label: 'Credit rows without an owner',   icon: CreditCard, risk: 'medium' },
+  { key: 'orphan_courses',      label: 'Courses without an instructor',  icon: BookOpen,   risk: 'medium' },
+  { key: 'negative_balances',   label: 'Negative credit balances',       icon: AlertTriangle, risk: 'high' },
+] as const;
 
 const RISK_COLOR: Record<string, string> = {
   high:   '#DC2626',
@@ -53,27 +59,34 @@ const RISK_COLOR: Record<string, string> = {
   low:    '#16A34A',
 };
 
+type LoadState = 'loading' | 'ready' | 'error';
+
 export default function DbAuditPanel({ backTo }: { backTo?: string } = {}) {
   const scheme = useColorScheme();
   const isDark  = scheme === 'dark';
   const c       = isDark ? neuColors.dark : neuColors.light;
   const layout = useLayout();
 
-  const [audit,       setAudit]       = useState<AuditResult | null>(null);
-  const [loading,     setLoading]     = useState(true);
+  const [audit,       setAudit]       = useState<DbAuditResult | null>(null);
+  const [state,       setState]       = useState<LoadState>('loading');
   const [refreshing,  setRefreshing]  = useState(false);
   const [running,     setRunning]     = useState(false);
   const [repairLog,   setRepairLog]   = useState<string[]>([]);
   const [repairing,   setRepairing]   = useState(false);
 
-  const loadAudit = useCallback(async () => {
+  const loadAudit = useCallback(async (): Promise<DbAuditResult | null> => {
     const { data, error } = await backendClient.rpc('run_db_audit');
-    if (!error && data) setAudit(data as AuditResult);
-    setLoading(false);
+    if (error || !data) { setState('error'); return null; }
+    // The backend nests the result under `audit`.
+    const result = (data as { audit?: DbAuditResult }).audit ?? null;
+    if (!result) { setState('error'); return null; }
+    setAudit(result);
+    setState('ready');
+    return result;
   }, []);
 
   useFocusEffect(useCallback(() => {
-    setLoading(true);
+    setState('loading');
     (async () => { await loadAudit(); })();
   }, [loadAudit]));
 
@@ -89,20 +102,36 @@ export default function DbAuditPanel({ backTo }: { backTo?: string } = {}) {
     setRunning(false);
   };
 
-  // Auto-repair: safe repairs only (cache/stats refresh, no data deletion)
-  const runAutoRepair = async () => {
+  // Re-check: a REAL second audit run compared against the first. The previous
+  // "Auto-Repair" only re-ran the audit and logged fabricated success lines —
+  // now it reports honest before/after issue totals (this audit is read-only;
+  // repairs of found issues are a manual DBA workflow, stated plainly).
+  const runRecheck = async () => {
     setRepairing(true);
     const log: string[] = [];
     try {
-      // Refresh stale table statistics (ANALYZE)
-      const { error: analyzeError } = await backendClient.rpc('run_db_audit');
-      if (analyzeError) throw analyzeError;
-      log.push('✓ Table statistics refreshed (ANALYZE)');
-
-      // Re-check after repair
-      await loadAudit();
-      log.push('✓ Audit re-run complete');
-      log.push('ℹ Data-deleting repairs require manual review in the PHP/MySQL administration workflow');
+      const before = audit
+        ? audit.orphan_profiles + audit.orphan_enrollments + audit.orphan_credits
+          + audit.orphan_courses + audit.negative_balances
+        : null;
+      log.push('• Running integrity audit…');
+      const after = await loadAudit();
+      const afterTotal = after
+        ? after.orphan_profiles + after.orphan_enrollments + after.orphan_credits
+          + after.orphan_courses + after.negative_balances
+        : null;
+      if (afterTotal === null) {
+        log.push('✗ Re-check failed — audit could not complete.');
+      } else if (before !== null && afterTotal > before) {
+        log.push(`✗ Issue count INCREASED: ${before} → ${afterTotal}. Investigate recent changes.`);
+      } else if (before !== null && afterTotal < before) {
+        log.push(`✓ Issue count decreased: ${before} → ${afterTotal}.`);
+      } else if (before !== null && afterTotal === before) {
+        log.push(`✓ Re-check complete — issue count unchanged (${afterTotal}).`);
+      } else {
+        log.push(afterTotal === 0 ? '✓ Re-check complete — no integrity issues found.' : `• Re-check complete — ${afterTotal} issue(s) present.`);
+      }
+      log.push('ℹ This audit is read-only. Repairing orphaned/negative rows is a manual database-administration task.');
     } catch (e) {
       log.push(`✗ Error: ${e instanceof Error ? e.message : String(e)}`);
     } finally {
@@ -111,7 +140,10 @@ export default function DbAuditPanel({ backTo }: { backTo?: string } = {}) {
     }
   };
 
-  const totalIssues = audit?.total_issues ?? 0;
+  const totalIssues = audit
+    ? audit.orphan_profiles + audit.orphan_enrollments + audit.orphan_credits
+      + audit.orphan_courses + audit.negative_balances
+    : 0;
 
   return (
     <ScrollView
@@ -119,8 +151,8 @@ export default function DbAuditPanel({ backTo }: { backTo?: string } = {}) {
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />} contentContainerStyle={{ paddingBottom: safeBottom(layout.insets.bottom) }}
     >
       <PageHeader
-        title="Database Audit"
-        subtitle="Integrity checks, orphans, duplicates & broken FKs"
+        title="Database Integrity"
+        subtitle="Orphan rows, negative balances & table sizes"
         accentColor="#7C3AED"
         showBack
         backFallback={backTo ?? '/admin-overview'}
@@ -132,7 +164,7 @@ export default function DbAuditPanel({ backTo }: { backTo?: string } = {}) {
         <View style={{ flexDirection: 'row', gap: 10, marginBottom: 20 }}>
           <View style={{ flex: 1 }}>
             <NeuButton
-              label={running ? 'Scanning…' : '▶  Run DB Audit'}
+              label={running ? 'Scanning…' : '▶  Run Audit'}
               onPress={runFullAudit}
               loading={running}
               variant="primary"
@@ -141,8 +173,8 @@ export default function DbAuditPanel({ backTo }: { backTo?: string } = {}) {
           </View>
           <View style={{ flex: 1 }}>
             <NeuButton
-              label={repairing ? 'Repairing…' : '⚙  Auto-Repair'}
-              onPress={runAutoRepair}
+              label={repairing ? 'Re-checking…' : '⟳  Re-check'}
+              onPress={runRecheck}
               loading={repairing}
               variant="secondary"
               fullWidth
@@ -150,14 +182,17 @@ export default function DbAuditPanel({ backTo }: { backTo?: string } = {}) {
           </View>
         </View>
 
-        {loading ? (
+        {state === 'loading' ? (
           <ActivityIndicator color={c.primary} size="large" style={{ marginTop: 40 }} />
-        ) : !audit ? (
+        ) : state === 'error' ? (
           <NeuCard style={{ padding: 30, alignItems: 'center' }}>
-            <Database size={40} color={`${c.primary}55`} />
-            <Text style={{ fontSize: 14, color: c.text, opacity: 0.5, marginTop: 12 }}>No audit data available</Text>
+            <AlertTriangle size={40} color="#DC2626" />
+            <Text style={{ fontSize: 14, fontWeight: '600', color: c.text, marginTop: 12 }}>Unable to run the integrity audit</Text>
+            <Text style={{ fontSize: 12, color: c.text, opacity: 0.5, marginTop: 6, textAlign: 'center' }}>
+              The audit endpoint returned an error. Pull to refresh or tap "Run Audit" to retry.
+            </Text>
           </NeuCard>
-        ) : (
+        ) : audit ? (
           <>
             {/* ── Issue Summary Banner ──────────────────────────────────────── */}
             <NeuCard style={{ padding: layout.screenPx, marginBottom: 20, flexDirection: 'row', alignItems: 'center', gap: 16 }}>
@@ -176,30 +211,15 @@ export default function DbAuditPanel({ backTo }: { backTo?: string } = {}) {
                   {totalIssues === 0 ? 'Database is Clean' : `${totalIssues} Issue${totalIssues > 1 ? 's' : ''} Detected`}
                 </Text>
                 <Text style={{ fontSize: 12, color: c.text, opacity: 0.45, marginTop: 3 }}>
-                  Checked: {new Date(audit.checked_at).toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true })}
+                  Data-integrity audit — for live service health use System Diagnostics
                 </Text>
               </View>
             </NeuCard>
 
-            {/* ── Database Info ──────────────────────────────────────────────── */}
-            <Text style={{ fontSize: 16, fontWeight: '700', color: c.text, marginBottom: 12 }}>Database Info</Text>
-            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginBottom: 20 }}>
-              {[
-                { label: 'Tables',  value: audit.database.total_tables,  color: c.primary },
-                { label: 'Indexes', value: audit.database.total_indexes, color: '#7C3AED' },
-                { label: 'DB Size', value: audit.database.size_pretty,  color: '#D97706' },
-              ].map(({ label, value, color }) => (
-                <NeuCard key={label} style={{ flex: 1, alignItems: 'center', padding: 14 }}>
-                  <Text style={{ fontSize: 18, fontWeight: '800', color }}>{value}</Text>
-                  <Text style={{ fontSize: 11, color: c.text, opacity: 0.5, marginTop: 3 }}>{label}</Text>
-                </NeuCard>
-              ))}
-            </View>
-
             {/* ── Issue Checklist ───────────────────────────────────────────── */}
             <Text style={{ fontSize: 16, fontWeight: '700', color: c.text, marginBottom: 12 }}>Issue Checklist</Text>
             {ISSUE_CFG.map(({ key, label, icon: Icon, risk }) => {
-              const count = (audit as unknown as Record<string, number>)[key] ?? 0;
+              const count = audit[key] ?? 0;
               const color = count > 0 ? RISK_COLOR[risk] : '#16A34A';
               return (
                 <NeuCard key={key} style={{ marginBottom: 8, padding: 14, flexDirection: 'row', alignItems: 'center', gap: 12 }}>
@@ -229,43 +249,35 @@ export default function DbAuditPanel({ backTo }: { backTo?: string } = {}) {
               );
             })}
 
-            {/* ── Largest Tables ────────────────────────────────────────────── */}
-            {audit.database.largest_tables?.length > 0 && (
-              <>
-                <Text style={{ fontSize: 16, fontWeight: '700', color: c.text, marginTop: 8, marginBottom: 12 }}>
-                  Largest Tables
-                </Text>
-                <NeuCard style={{ padding: 16, marginBottom: 20 }}>
-                  {audit.database.largest_tables.map((t, i) => (
-                    <View key={t.table_name} style={{
-                      flexDirection: 'row', justifyContent: 'space-between',
-                      paddingVertical: 8,
-                      borderBottomWidth: i < audit.database.largest_tables.length - 1 ? 1 : 0,
-                      borderBottomColor: `${c.text}08`,
-                    }}>
-                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                        <Text style={{ fontSize: 13, color: c.text, opacity: 0.4, width: 20 }}>{i + 1}</Text>
-                        <Text style={{ fontSize: 13, fontWeight: '600', color: c.text }}>{t.table_name}</Text>
-                      </View>
-                      <View style={{ alignItems: 'flex-end' }}>
-                        <Text style={{ fontSize: 13, fontWeight: '700', color: c.primary }}>{t.size_pretty}</Text>
-                        <Text style={{ fontSize: 11, color: c.text, opacity: 0.4 }}>{(t.row_count ?? 0).toLocaleString('en-US') } rows</Text>
-                      </View>
-                    </View>
-                  ))}
-                </NeuCard>
-              </>
-            )}
+            {/* ── Table Row Counts ──────────────────────────────────────────── */}
+            <Text style={{ fontSize: 16, fontWeight: '700', color: c.text, marginTop: 8, marginBottom: 12 }}>
+              Table Row Counts
+            </Text>
+            <NeuCard style={{ padding: 16, marginBottom: 20 }}>
+              {ROW_COUNT_TABLES.map((t, i) => (
+                <View key={t} style={{
+                  flexDirection: 'row', justifyContent: 'space-between',
+                  paddingVertical: 8,
+                  borderBottomWidth: i < ROW_COUNT_TABLES.length - 1 ? 1 : 0,
+                  borderBottomColor: `${c.text}08`,
+                }}>
+                  <Text style={{ fontSize: 13, fontWeight: '600', color: c.text }}>{t}</Text>
+                  <Text style={{ fontSize: 13, fontWeight: '700', color: c.primary }}>
+                    {(audit.row_counts?.[t] ?? 0).toLocaleString('en-US')}
+                  </Text>
+                </View>
+              ))}
+            </NeuCard>
 
-            {/* ── Auto-Repair Log ───────────────────────────────────────────── */}
+            {/* ── Re-check Log ──────────────────────────────────────────────── */}
             {repairLog.length > 0 && (
               <>
                 <Text style={{ fontSize: 16, fontWeight: '700', color: c.text, marginBottom: 12 }}>
-                  Repair Log
+                  Re-check Log
                 </Text>
                 <NeuCard style={{ padding: 16, marginBottom: 20 }}>
                   {repairLog.map((line, i) => (
-                    <Text key={i} style={{ fontSize: 13, color: line.startsWith('✗') ? '#DC2626' : line.startsWith('ℹ') ? c.primary : '#16A34A', marginBottom: 6 }}>
+                    <Text key={`${i}-${line.slice(0, 12)}`} style={{ fontSize: 13, color: line.startsWith('✗') ? '#DC2626' : line.startsWith('ℹ') ? c.primary : '#16A34A', marginBottom: 6 }}>
                       {line}
                     </Text>
                   ))}
@@ -273,7 +285,7 @@ export default function DbAuditPanel({ backTo }: { backTo?: string } = {}) {
               </>
             )}
           </>
-        )}
+        ) : null}
       </View>
     </ScrollView>
   );

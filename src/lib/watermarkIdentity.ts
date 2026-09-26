@@ -63,3 +63,20 @@ export function resolveWatermarkIdentity(
 export function watermarkLabel(identity: WatermarkIdentity): string {
   return identity.name ? `${identity.name} • ${identity.id}` : identity.id;
 }
+
+/**
+ * A bare numeric token (e.g. "16") is indistinguishable from an internal DB
+ * id — it is NEVER a public watermark identity. Legacy watermark tokens are
+ * hex (AuthService::nextWatermarkId), and the canonical public identity is
+ * MED-####, so an all-digit token is either dirty data or an internal id.
+ * Player rendering is unchanged (players render whatever resolveWatermarkIdentity
+ * resolves); identity DISPLAYS (Security Center) use this stricter filter so a
+ * raw internal/legacy numeric can never be shown as the user's watermark ID.
+ */
+export function isPublicWatermarkToken(id: string): boolean {
+  const v = id.trim();
+  if (v === '') return false;
+  if (/^\d+$/.test(v)) return false; // bare numeric → internal id, never public
+  if (looksLikeUuid(v)) return false;
+  return true;
+}

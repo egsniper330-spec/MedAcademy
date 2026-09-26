@@ -517,8 +517,9 @@ final class AdminController
         $actorId = $request->user['id'];
 
         return match ($action) {
-            'enroll' => $this->adminEnrollStudent($body, $actorId),
-            'remove' => $this->adminRemoveEnrollment($body, $actorId),
+            'enroll' => $this->adminEnrollStudent($body, $actorId, (string) $request->user['role']),
+            'remove' => $this->adminRemoveEnrollment($body, $actorId, $request),
+            'set_hidden' => $this->adminSetEnrollmentVisibility($body, $request),
             'search' => $this->adminSearchUsers($body),
             'courses' => $this->adminListCourses(),
             'enrollments' => $this->adminListEnrollments($body),
@@ -526,7 +527,7 @@ final class AdminController
         };
     }
 
-    private function adminEnrollStudent(array $body, string $actorId): array
+    private function adminEnrollStudent(array $body, string $actorId, string $actorRole): array
     {
         $studentId = (string) ($body['student_id'] ?? '');
         $courseId = (string) ($body['course_id'] ?? '');
@@ -534,6 +535,17 @@ final class AdminController
 
         if ($studentId === '' || $courseId === '') {
             throw new ApiException(422, 'student_id and course_id are required');
+        }
+
+        // SERVER-SIDE VISIBILITY POLICY: only super_admin may create a hidden
+        // (admin_only / super_admin_only) enrollment. A regular admin sending
+        // visibility_level in the body is silently downgraded to 'all' — the
+        // value is never trusted from the client.
+        if (!in_array($visibility, ['all', 'admin_only', 'super_admin_only'], true)) {
+            $visibility = 'all';
+        }
+        if ($actorRole !== 'super_admin') {
+            $visibility = 'all';
         }
 
         $db = Database::instance();
@@ -569,12 +581,13 @@ final class AdminController
         AuditService::write($actorId, 'enrollment_created_by_admin', [
             'student_id' => $studentId,
             'course_id' => $courseId,
+            'visibility_level' => $visibility,
         ]);
 
-        return ['success' => true, 'enrollment_id' => $enrollmentId, 'message' => 'User enrolled successfully.'];
+        return ['success' => true, 'enrollment_id' => $enrollmentId, 'visibility_level' => $visibility, 'message' => 'User enrolled successfully.'];
     }
 
-    private function adminRemoveEnrollment(array $body, string $actorId): array
+    private function adminRemoveEnrollment(array $body, string $actorId, Request $request): array
     {
         $enrollmentId = (string) ($body['enrollment_id'] ?? '');
         if ($enrollmentId === '') {
@@ -582,15 +595,67 @@ final class AdminController
         }
 
         $db = Database::instance();
-        $enrollment = $db->row('SELECT id FROM enrollments WHERE id = ?', [$enrollmentId]);
+        $enrollment = $db->row('SELECT id, visibility_level, enrollment_method FROM enrollments WHERE id = ?', [$enrollmentId]);
         if ($enrollment === null) {
             throw new ApiException(404, 'Enrollment not found');
         }
 
+        // A hidden (super-admin-managed) enrollment can only be removed by the
+        // Super Admin. Regular admins get a structured 403 — never a silent OK.
+        $isSuperAdmin = (string) $request->user['role'] === 'super_admin';
+        if (!$isSuperAdmin && ($enrollment['visibility_level'] ?? 'all') !== 'all') {
+            throw new ApiException(403, 'This enrollment is Super-Admin managed. Only a Super Admin can remove it.');
+        }
+
         $db->query('DELETE FROM enrollments WHERE id = ?', [$enrollmentId]);
-        AuditService::write($actorId, 'enrollment_removed_by_admin', ['enrollment_id' => $enrollmentId]);
+        AuditService::write($actorId, 'enrollment_removed_by_admin', [
+            'enrollment_id' => $enrollmentId,
+            'visibility_level' => $enrollment['visibility_level'] ?? null,
+        ]);
 
         return ['success' => true, 'message' => 'Enrollment removed successfully.'];
+    }
+
+    /**
+     * action=set_hidden — SUPER ADMIN ONLY. Sets visibility_level on an
+     * existing enrollment ('all' | 'admin_only' | 'super_admin_only').
+     * Regular admins receive a structured 403.
+     */
+    private function adminSetEnrollmentVisibility(array $body, Request $request): array
+    {
+        if ((string) $request->user['role'] !== 'super_admin') {
+            throw new ApiException(403, 'Only Super Admin can change enrollment visibility');
+        }
+
+        $enrollmentId = (string) ($body['enrollment_id'] ?? '');
+        $visibility = (string) ($body['visibility_level'] ?? '');
+        if ($enrollmentId === '' || $visibility === '') {
+            throw new ApiException(422, 'enrollment_id and visibility_level are required');
+        }
+        if (!in_array($visibility, ['all', 'admin_only', 'super_admin_only'], true)) {
+            throw new ApiException(422, 'Invalid visibility_level');
+        }
+
+        $db = Database::instance();
+        $enrollment = $db->row('SELECT id, visibility_level FROM enrollments WHERE id = ?', [$enrollmentId]);
+        if ($enrollment === null) {
+            throw new ApiException(404, 'Enrollment not found');
+        }
+        if (($enrollment['visibility_level'] ?? 'all') === $visibility) {
+            return ['success' => true, 'message' => 'Visibility already set.']; // idempotent
+        }
+
+        $db->query(
+            'UPDATE enrollments SET visibility_level = ?, updated_at = UTC_TIMESTAMP(6) WHERE id = ?',
+            [$visibility, $enrollmentId]
+        );
+        AuditService::write($request->user['id'], 'enrollment_hidden_flag_set', [
+            'enrollment_id' => $enrollmentId,
+            'old_visibility' => $enrollment['visibility_level'] ?? 'all',
+            'new_visibility' => $visibility,
+        ]);
+
+        return ['success' => true, 'visibility_level' => $visibility, 'message' => 'Visibility updated.'];
     }
 
     private function adminSearchUsers(array $body): array
@@ -632,12 +697,22 @@ final class AdminController
     private function adminListCourses(): array
     {
         $courses = Database::instance()->select(
-            "SELECT c.id, c.title, c.status, p.full_name AS doctor_name
+            "SELECT c.id, c.title, c.status, p.id AS doctor_id, p.full_name AS doctor_name
                FROM courses c
                LEFT JOIN profiles p ON p.id = c.doctor_id
               ORDER BY c.title ASC LIMIT 500"
         );
-        return ['courses' => $courses ?? []];
+        // The Enrollment Manager screen expects the legacy Edge-Function shape:
+        // a nested `doctor` object (not flat doctor_name columns).
+        return ['courses' => array_map(static function (array $row): array {
+            $doctorId = $row['doctor_id'] ?? null;
+            $doctorName = $row['doctor_name'] ?? null;
+            unset($row['doctor_id'], $row['doctor_name']);
+            $row['doctor'] = $doctorId !== null && $doctorName !== null
+                ? ['id' => $doctorId, 'full_name' => $doctorName]
+                : null;
+            return $row;
+        }, $courses ?? [])];
     }
 
     private function adminListEnrollments(array $body): array
@@ -648,8 +723,9 @@ final class AdminController
         }
 
         $enrollments = Database::instance()->select(
-            "SELECT e.id, e.student_id, e.course_id, e.enrolled_at, e.visibility_level, e.enrollment_method,
-                    p.full_name, p.email, p.watermark_id
+            "SELECT e.id, e.student_id, e.course_id, e.enrolled_at, e.status,
+                    e.enrolled_by, e.visibility_level, e.enrollment_method,
+                    p.full_name, p.email, p.profile_email, p.role
                FROM enrollments e
                LEFT JOIN profiles p ON p.id = e.student_id
               WHERE e.course_id = ?
@@ -657,7 +733,24 @@ final class AdminController
             [$courseId]
         );
 
-        return ['enrollments' => $enrollments ?? []];
+        // Nested `student` object — the shape AdminEnrollmentRow consumers render.
+        return ['enrollments' => array_map(static function (array $row): array {
+            $studentId = $row['student_id'] ?? null;
+            $name = $row['full_name'] ?? null;
+            unset($row['full_name'], $row['email'], $row['profile_email'], $row['role']);
+            $row['student'] = $studentId !== null && $name !== null
+                ? [
+                    'id' => $studentId,
+                    'full_name' => $name,
+                    'email' => $row['email'] ?? null,
+                    'profile_email' => $row['profile_email'] ?? null,
+                    'role' => $row['role'] ?? 'student',
+                    'watermark_id' => null,
+                ]
+                : null;
+            unset($row['email'], $row['profile_email']);
+            return $row;
+        }, $enrollments ?? [])];
     }
 
     // ================================================================
@@ -911,6 +1004,16 @@ final class AdminController
         $phone = $body['phone'] ?? null;
         $password = (string) ($body['password'] ?? '');
 
+        // Optional academic-structure placement. Accepts EITHER the resolved
+        // ids (bulk-import UI path) OR the plain names (CSV path) — names are
+        // matched case-insensitively server-side so the client never guesses.
+        $universityId   = trim((string) ($body['university_id'] ?? ''));
+        $facultyId      = trim((string) ($body['faculty_id'] ?? ''));
+        $academicLevelId = trim((string) ($body['academic_level_id'] ?? ''));
+        $universityName = trim((string) ($body['university'] ?? ''));
+        $facultyName    = trim((string) ($body['faculty'] ?? ''));
+        $levelName      = trim((string) ($body['level'] ?? ''));
+
         if ($email === '' || $fullName === '') {
             throw new ApiException(422, 'email and full_name are required');
         }
@@ -942,6 +1045,45 @@ final class AdminController
         $userId = Uuid::v4();
         $hashedPassword = $password !== '' ? \MedAcademy\Auth\Password::hash($password) : null;
 
+        // Resolve academic-structure names → ids (server-side, case-insensitive,
+        // exact match on the display name; unknown names are reported, never
+        // guessed). Only applied to students — the profile placement fields are
+        // a student concept in this product.
+        if ($role === 'student') {
+            if ($universityId === '' && $universityName !== '') {
+                $universityId = (string) ($db->value(
+                    'SELECT id FROM universities WHERE LOWER(name) = LOWER(?) LIMIT 1', [$universityName], ''
+                ) ?? '');
+                if ($universityId === '') {
+                    throw new ApiException(422, "Unknown university: {$universityName}");
+                }
+            }
+            if ($facultyId === '' && $facultyName !== '') {
+                $facultySql = 'SELECT id FROM faculties WHERE LOWER(name) = LOWER(?)';
+                $facultyParams = [$facultyName];
+                if ($universityId !== '') {
+                    $facultySql .= ' AND university_id = ?';
+                    $facultyParams[] = $universityId;
+                }
+                $facultyId = (string) ($db->value($facultySql . ' LIMIT 1', $facultyParams, '') ?? '');
+                if ($facultyId === '') {
+                    throw new ApiException(422, "Unknown faculty: {$facultyName}");
+                }
+            }
+            if ($academicLevelId === '' && $levelName !== '') {
+                $levelSql = 'SELECT id FROM academic_levels WHERE LOWER(name) = LOWER(?)';
+                $levelParams = [$levelName];
+                if ($facultyId !== '') {
+                    $levelSql .= ' AND faculty_id = ?';
+                    $levelParams[] = $facultyId;
+                }
+                $academicLevelId = (string) ($db->value($levelSql . ' LIMIT 1', $levelParams, '') ?? '');
+                if ($academicLevelId === '') {
+                    throw new ApiException(422, "Unknown academic level: {$levelName}");
+                }
+            }
+        }
+
         // Phone uniqueness pre-check (mirrors /auth/register) so a duplicate
         // phone surfaces as a clean 409, not a raw constraint 500.
         $phoneE164 = null;
@@ -953,7 +1095,7 @@ final class AdminController
             }
         }
 
-        $db->transaction(function (Database $db) use ($userId, $email, $fullName, $phone, $phoneE164, $role, $hashedPassword, $request) {
+        $db->transaction(function (Database $db) use ($userId, $email, $fullName, $phone, $phoneE164, $role, $hashedPassword, $request, $universityId, $facultyId, $academicLevelId) {
             // 1. Create the auth user. `phone` is intentionally NOT inserted
             //    here: inserting users.phone fires trg_sync_auth_phone_on_new_user
             //    → UPDATE profiles → fires trg_sync_auth_phone_on_profile_update
@@ -982,9 +1124,14 @@ final class AdminController
                 'UPDATE profiles
                     SET email = ?, full_name = ?, phone = ?, phone_e164 = ?,
                         role = ?, status = ?, watermark_id = ?,
+                        university_id = ?, faculty_id = ?, academic_level_id = ?,
                         updated_at = UTC_TIMESTAMP(6)
                   WHERE id = ?',
-                [$email, $fullName, $phone, $phoneE164, $role, 'active', $watermarkId, $userId]
+                [$email, $fullName, $phone, $phoneE164, $role, 'active', $watermarkId,
+                 $universityId !== '' ? $universityId : null,
+                 $facultyId !== '' ? $facultyId : null,
+                 $academicLevelId !== '' ? $academicLevelId : null,
+                 $userId]
             );
 
             // 3. Credits row (idempotent — the doctor-credits trigger may
@@ -1004,6 +1151,122 @@ final class AdminController
         ]);
 
         return ['success' => true, 'user_id' => $userId];
+    }
+
+    /**
+     * POST /admin/data-export — Super-Admin-only bulk data export.
+     *
+     * Returns a bounded JSON row set for the requested entity; the client
+     * serializes to CSV locally (works identically on web/native, no server
+     * file storage, no unbounded memory — the row cap guards both sides).
+     *
+     * SECURITY CONTRACT:
+     *  • Route middleware + in-controller super_admin check (defense in depth).
+     *  • An explicit per-type column allow-list — passwords / tokens / hashes /
+     *    secrets can never leak even if the underlying table gains columns.
+     *  • Every export is audited (actor, type, row count) via data_exported.
+     */
+    public function dataExport(Request $request): array
+    {
+        if ((string) $request->user['role'] !== 'super_admin') {
+            throw new ApiException(403, 'Only Super Admin can export data');
+        }
+
+        $body = $request->json();
+        $type = (string) ($body['type'] ?? '');
+        // Bounded export: the UI caps at this too. Prevents unbounded memory
+        // and keeps the response well under any proxy body limit.
+        $limit = min(max((int) ($body['limit'] ?? 5000), 1), 10000);
+
+        // Column allow-lists per export type. Deliberately EXCLUDES:
+        // encrypted_password, tokens, security columns, watermark internals.
+        $schemas = [
+            'users' => [
+                'table' => 'profiles',
+                'where' => "status NOT IN ('trashed','deleted')",
+                'params' => [],
+                'columns' => 'id, full_name, email, profile_email, phone, phone_e164, role, status, public_user_id, created_at',
+                'order' => 'created_at DESC',
+            ],
+            'courses' => [
+                'table' => 'courses',
+                'where' => 'permanently_deleted = 0',
+                'params' => [],
+                'columns' => 'id, title, status, price, doctor_id, created_at, published_at',
+                'order' => 'created_at DESC',
+            ],
+            'enrollments' => [
+                'table' => 'enrollments',
+                'where' => '1=1',
+                'params' => [],
+                'columns' => 'e.id, e.status, e.enrollment_method, e.visibility_level, e.enrolled_at,
+                              s.full_name AS student_name, s.email AS student_email, s.public_user_id AS student_public_id,
+                              c.title AS course_title, c.id AS course_id,
+                              a.full_name AS enrolled_by_name',
+                'order' => 'e.enrolled_at DESC',
+            ],
+            'academic_structure' => [
+                'table' => 'universities',
+                'where' => '1=1',
+                'params' => [],
+                'columns' => 'u.id, u.name AS university, f.name AS faculty, al.name AS academic_level, al.id AS academic_level_id',
+                'order' => 'u.name, f.name, al.name',
+            ],
+        ];
+
+        if (!isset($schemas[$type])) {
+            throw new ApiException(422, "Unknown export type: {$type}");
+        }
+        $schema = $schemas[$type];
+
+        $sql = "SELECT {$schema['columns']} FROM `{$schema['table']}` ";
+        $params = $schema['params'];
+        switch ($type) {
+            case 'users':
+                $sql .= "WHERE {$schema['where']} ORDER BY {$schema['order']} LIMIT {$limit}";
+                break;
+            case 'courses':
+                $sql .= "WHERE {$schema['where']} ORDER BY {$schema['order']} LIMIT {$limit}";
+                break;
+            case 'enrollments':
+                $sql .= 'LEFT JOIN profiles s ON s.id = e.student_id
+                         LEFT JOIN courses c ON c.id = e.course_id
+                         LEFT JOIN profiles a ON a.id = e.enrolled_by';
+                $sql .= " WHERE e.student_id IN (SELECT id FROM profiles WHERE status NOT IN ('trashed','deleted'))";
+                $sql .= " ORDER BY {$schema['order']} LIMIT {$limit}";
+                break;
+            case 'academic_structure':
+                $sql .= 'u
+                         LEFT JOIN faculties f ON f.university_id = u.id
+                         LEFT JOIN academic_levels al ON al.faculty_id = f.id';
+                $sql .= " ORDER BY {$schema['order']} LIMIT {$limit}";
+                break;
+        }
+
+        // enrollments/academic_structure queries start FROM a renamed first
+        // table — normalize the FROM clause per type.
+        if ($type === 'enrollments') {
+            $sql = "SELECT {$schema['columns']} FROM enrollments e
+                    LEFT JOIN profiles s ON s.id = e.student_id
+                    LEFT JOIN courses c ON c.id = e.course_id
+                    LEFT JOIN profiles a ON a.id = e.enrolled_by
+                    WHERE e.student_id IN (SELECT id FROM profiles WHERE status NOT IN ('trashed','deleted'))
+                    ORDER BY e.enrolled_at DESC LIMIT {$limit}";
+        } elseif ($type === 'academic_structure') {
+            $sql = "SELECT {$schema['columns']} FROM universities u
+                    LEFT JOIN faculties f ON f.university_id = u.id
+                    LEFT JOIN academic_levels al ON al.faculty_id = f.id
+                    ORDER BY u.name, f.name, al.name LIMIT {$limit}";
+        }
+
+        $rows = Database::instance()->select($sql, $params) ?? [];
+
+        AuditService::write($request->user['id'], 'data_exported', [
+            'export_type' => $type,
+            'row_count' => count($rows),
+        ]);
+
+        return ['type' => $type, 'count' => count($rows), 'rows' => $rows];
     }
 
     /**

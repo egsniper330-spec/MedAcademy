@@ -41,6 +41,7 @@ export const FEATURE_FLAG_DEFAULTS: Record<string, boolean> = {
   course_editing: true,
   video_playback: true,
   video_offline_downloads: true,
+  video_library_sync: true,
   impersonation: true,
   device_management: true,
   db_audit: true,

@@ -3,10 +3,12 @@ import { View, Text, ScrollView, useColorScheme, Pressable, KeyboardAvoidingView
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { ArrowLeft, Lock, Shield, Eye, EyeOff, CheckCircle, AlertCircle } from 'lucide-react-native';
+import * as Clipboard from 'expo-clipboard';
 import { PageHeader } from '@/components/PageHeader';
 import { useProfileStore } from '@/lib/store';
 import { changePassword } from '@/lib/api';
 import { getContactDisplay } from '@/lib/api';
+import { resolveWatermarkIdentity, isPublicWatermarkToken } from '@/lib/watermarkIdentity';
 import { NeuCard } from '@/components/NeuCard';
 import { NeuButton } from '@/components/NeuButton';
 import { neuColors } from '@/lib/neu';
@@ -26,6 +28,15 @@ export default function SecurityCenter() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState(false);
+  // CANONICAL public watermark identity (MED-####) — the exact source the
+  // video/PDF watermark renderers use. Never the DB id, never the legacy
+  // watermark token column (which held opaque values like "16").
+  const resolved = resolveWatermarkIdentity(profile);
+  // Display-only strictness: a bare numeric legacy token is indistinguishable
+  // from an internal id, so the Security Center shows the not-applicable/
+  // unassigned state instead of echoing it back.
+  const wmIdentity = resolved && isPublicWatermarkToken(resolved.id) ? resolved : null;
+  const [wmCopied, setWmCopied] = useState(false);
 
   const handleChangePassword = async () => {
     if (newPassword.length < 8) { setError('Password must be at least 8 characters.'); return; }
@@ -70,17 +81,44 @@ export default function SecurityCenter() {
           </View>
         </NeuCard>
 
-        {/* Watermark ID */}
+        {/* Watermark ID — the CANONICAL public identity (MED-####), the exact
+            same source the real video/PDF watermark renders (see
+            watermarkIdentity.ts). NEVER the internal DB id or the legacy
+            watermark token column (which held opaque values like "16"). */}
         <NeuCard style={{ marginBottom: 20, padding: 18 }}>
           <Text style={{ fontSize: 14, fontWeight: '700', color: c.text, marginBottom: 6 }}>Your Watermark ID</Text>
           <Text style={{ fontSize: 12, color: c.text, opacity: 0.55, marginBottom: 10, lineHeight: 18 }}>
-            This unique ID is embedded in all video and PDF content you view, ensuring content integrity and tracking.
+            This ID is used to identify your account in protected video and PDF content.
           </Text>
-          <View style={{ backgroundColor: `${c.primary}12`, borderRadius: 10, padding: 12 }}>
-            <Text style={{ fontSize: 14, fontWeight: '700', color: c.primary, fontFamily: 'monospace', letterSpacing: 1 }}>
-              {profile?.watermark_id ?? 'N/A'}
-            </Text>
-          </View>
+          {wmIdentity ? (
+            <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: `${c.primary}12`, borderRadius: 10, padding: 12, gap: 10 }}>
+              <Text style={{ fontSize: 14, fontWeight: '700', color: c.primary, fontFamily: 'monospace', letterSpacing: 1, flexShrink: 1 }} numberOfLines={1}>
+                {wmIdentity.id}
+              </Text>
+              <Pressable
+                onPress={async () => {
+                  await Clipboard.setStringAsync(wmIdentity.id);
+                  setWmCopied(true);
+                  setTimeout(() => setWmCopied(false), 1500);
+                }}
+                accessibilityRole="button"
+                accessibilityLabel="Copy watermark ID"
+                style={{ paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8, backgroundColor: `${c.primary}1A` }}>
+                <Text style={{ fontSize: 11, fontWeight: '700', color: c.primary }}>
+                  {wmCopied ? 'Copied ✓' : 'Copy'}
+                </Text>
+              </Pressable>
+            </View>
+          ) : (
+            <View style={{ backgroundColor: `${c.text}0A`, borderRadius: 10, padding: 12 }}>
+              <Text style={{ fontSize: 13, fontWeight: '600', color: c.text, opacity: 0.6 }}>
+                {profile?.role === 'super_admin' ? 'Not applicable — administrator accounts do not participate in content watermarking.' : 'Watermark identity not yet assigned.'}
+              </Text>
+            </View>
+          )}
+          <Text style={{ fontSize: 10, color: c.text, opacity: 0.4, marginTop: 8 }}>
+            Read-only — assigned by the system, shown identically inside watermarked content.
+          </Text>
         </NeuCard>
 
         {/* Change Password */}

@@ -18,7 +18,7 @@ import {
 import { Image } from 'expo-image';
 import { useFocusEffect } from 'expo-router';
 import {
-  BookOpen, ChevronDown, ChevronUp, Clock, Edit2, Film, RefreshCw,
+  BookOpen, ChevronDown, ChevronUp, Clock, CloudOff, Edit2, Film, RefreshCw,
   Search, SortAsc, SortDesc, Trash2, X, Upload,
 } from 'lucide-react-native';
 import { neuColors, useLayout, neuFlatStyle, neuPressedStyle, safeTop, safeLeft, safeRight, safeBottom , zIndex} from '@/lib/neu';
@@ -33,6 +33,7 @@ import { createUploadRecord } from '@/lib/videoUploadEngine';
 import { resolveUploadMime, validateVideoFile } from '@/lib/videoFormats';
 import {
   deleteVideoAsset, getMyVideoLibrary, getVideoAssetUsage,
+  syncVideoLibraryWithVdoCipher,
   updateVideoAsset,
   type LibraryFilters, type VideoAsset, type VideoAssetUsage,
 } from '@/lib/videoLibraryApi';
@@ -53,10 +54,11 @@ function formatDate(iso: string): string {
 }
 
 const STATUS_FILTERS = [
-  { value: 'all',        label: 'All' },
-  { value: 'ready',      label: 'Ready' },
-  { value: 'processing', label: 'Processing' },
-  { value: 'failed',     label: 'Failed' },
+  { value: 'all',              label: 'All' },
+  { value: 'ready',            label: 'Ready' },
+  { value: 'processing',       label: 'Processing' },
+  { value: 'failed',           label: 'Failed' },
+  { value: 'remotely_deleted', label: 'Deleted on VdoCipher' },
 ] as const;
 
 const SORT_OPTIONS = [
@@ -99,6 +101,12 @@ export default function VideoLibraryScreen() {
     usages: VideoAssetUsage[];
   } | null>(null);
   const [deleteSaving, setDeleteSaving] = useState(false);
+
+  // ── VdoCipher ↔ library reconciliation (Super Admin / Admin) ──
+  // Detects videos deleted from the VdoCipher Dashboard and duplicates.
+  const canSync = profile?.role === 'super_admin' || profile?.role === 'admin';
+  const [syncing, setSyncing] = useState(false);
+  const [syncSummary, setSyncSummary] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -221,6 +229,34 @@ export default function VideoLibraryScreen() {
     setDeleteSaving(false);
   };
 
+  // ── Sync VdoCipher (Super Admin / Admin) ──────────────────────────
+  // Remote-first reconciliation: proven-missing assets are flagged
+  // remotely_deleted so they never render as available; a listing failure
+  // leaves the library untouched and surfaces an error.
+  const handleSync = async () => {
+    if (syncing) return;
+    setSyncing(true);
+    setSyncSummary(null);
+    try {
+      const s = await syncVideoLibraryWithVdoCipher(true);
+      if (s.status === 'ok') {
+        setSyncSummary(
+          `Last synchronized: ${new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}` +
+          ` · ${s.remote_videos} remote · ${s.marked_unavailable} removed · ${s.reconciled} reconciled`,
+        );
+        await load();
+        showToast({ type: 'success', message: 'Video library synchronized with VdoCipher.' });
+      } else {
+        setSyncSummary(null);
+        showToast({ type: 'error', message: s.error ?? 'Sync failed — library left unchanged. Nothing was marked deleted.' });
+      }
+    } catch (e) {
+      setSyncSummary(null);
+      showToast({ type: 'error', message: friendlyError(e, 'Sync failed — library left unchanged.') });
+    }
+    setSyncing(false);
+  };
+
   const handleRename = async () => {
     if (!renameAsset || !renameTitle.trim()) return;
     setRenameSaving(true);
@@ -240,7 +276,9 @@ export default function VideoLibraryScreen() {
       case 'ready':      return '#16A34A';
       case 'processing': return '#D97706';
       case 'failed':     return '#DC2626';
-      case 'missing':    return '#EF4444';
+      case 'missing':
+      case 'remotely_deleted': return '#EF4444';
+      case 'duplicate_removed': return '#9CA3AF';
       default:           return c.text;
     }
   };
@@ -275,7 +313,7 @@ export default function VideoLibraryScreen() {
             <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
               <View style={{ backgroundColor: `${statusColor(item.status)}18`, paddingHorizontal: 7, paddingVertical: 2, borderRadius: 6 }}>
                 <Text style={{ fontSize: 10, fontWeight: '700', color: statusColor(item.status) }}>
-                  {item.status.charAt(0).toUpperCase() + item.status.slice(1)}
+                  {item.status === 'remotely_deleted' ? 'Deleted on VdoCipher' : item.status.charAt(0).toUpperCase() + item.status.slice(1)}
                 </Text>
               </View>
               <Text style={{ fontSize: 11, color: c.text, opacity: 0.45 }}>{formatBytes(item.file_size_bytes)}</Text>
@@ -288,6 +326,23 @@ export default function VideoLibraryScreen() {
             </Text>
           </View>
         </View>
+
+        {/* ── Unavailable notice: proven-deleted remotely → cannot be used ── */}
+        {item.status === 'remotely_deleted' && (
+          <View style={{ paddingHorizontal: 12, paddingVertical: 9, borderTopWidth: 1, borderTopColor: `${c.text}10`, flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+            <CloudOff size={13} color="#EF4444" />
+            <Text style={{ fontSize: 11, color: '#EF4444', flex: 1 }}>
+              This video was deleted from VdoCipher. It can no longer be attached or played. Use Sync VdoCipher to clean up.
+            </Text>
+            <Pressable
+              onPress={() => handleDelete(item)}
+              accessibilityRole="button"
+              accessibilityLabel="Remove unavailable video from library"
+              style={{ paddingHorizontal: 10, paddingVertical: 5, borderRadius: 9, backgroundColor: '#EF444418' }}>
+              <Text style={{ fontSize: 11, fontWeight: '700', color: '#EF4444' }}>Remove</Text>
+            </Pressable>
+          </View>
+        )}
 
         {/* ── Action row ── */}
         <View style={{ flexDirection: 'row', borderTopWidth: 1, borderTopColor: `${c.text}10` }}>
@@ -442,6 +497,21 @@ export default function VideoLibraryScreen() {
             One upload, reusable across any lesson
           </Text>
         </View>
+        {canSync && (
+          <Pressable
+            onPress={handleSync}
+            disabled={syncing}
+            accessibilityRole="button"
+            accessibilityLabel="Sync library with VdoCipher"
+            style={{ backgroundColor: syncing ? `${c.primary}66` : c.primary, borderRadius: 14, paddingHorizontal: 14, paddingVertical: 11, flexDirection: 'row', alignItems: 'center', gap: 7 }}>
+            {syncing
+              ? <ActivityIndicator size="small" color="#fff" />
+              : <RefreshCw size={16} color="#fff" />}
+            <Text style={{ color: '#fff', fontSize: 13, fontWeight: '800' }}>
+              {syncing ? 'Syncing…' : 'Sync VdoCipher'}
+            </Text>
+          </Pressable>
+        )}
         <Pressable
           onPress={handleUploadVideo}
           disabled={uploadingVideo}
@@ -450,6 +520,19 @@ export default function VideoLibraryScreen() {
           <Text style={{ color: '#fff', fontSize: 13, fontWeight: '800' }}>Upload Video</Text>
         </Pressable>
       </View>
+
+      {/* ── Sync status banner ── */}
+      {syncing && (
+        <View style={{ marginHorizontal: 16, marginBottom: 10, padding: 12, borderRadius: 14, flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: `${c.primary}14` }}>
+          <ActivityIndicator size="small" color={c.primary} />
+          <Text style={{ fontSize: 13, color: c.text, opacity: 0.7 }}>Syncing video library with VdoCipher…</Text>
+        </View>
+      )}
+      {!syncing && syncSummary && (
+        <View style={{ marginHorizontal: 16, marginBottom: 10, padding: 12, borderRadius: 14, backgroundColor: `${c.primary}0D` }}>
+          <Text style={{ fontSize: 12, color: c.text, opacity: 0.55 }}>{syncSummary}</Text>
+        </View>
+      )}
 
       {/* ── Search + Sort ── */}
       <View style={{ paddingHorizontal: 16, paddingBottom: 10, flexDirection: 'row', gap: 10 }}>

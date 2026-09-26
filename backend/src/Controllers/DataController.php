@@ -768,9 +768,22 @@ class DataController
             ];
         }
         if ($table === self::ENROLLMENT_SCOPE) {
+            $role = $request->user['role'] ?? '';
+            // Visibility policy — rows tagged by a Super Admin as hidden are
+            // filtered in SQL so no client can bypass them via the generic
+            // table API. 'admin_only' hides from doctors; 'super_admin_only'
+            // hides from doctors AND admins. Students always see their own.
+            $visibilitySql = '';
+            $visibilityBindings = [];
+            if ($role === 'doctor') {
+                $visibilitySql = " AND (`enrollments`.`visibility_level` = 'all' OR `enrollments`.`visibility_level` IS NULL)";
+            } elseif ($role === 'admin') {
+                $visibilitySql = " AND (`enrollments`.`visibility_level` IN ('all', 'admin_only') OR `enrollments`.`visibility_level` IS NULL)";
+            }
             return [
-                "(`enrollments`.`student_id` = ? OR EXISTS (SELECT 1 FROM `courses` c WHERE c.id = `enrollments`.`course_id` AND c.doctor_id = ?))",
-                [$userId, $userId],
+                "(`enrollments`.`student_id` = ? OR EXISTS (SELECT 1 FROM `courses` c WHERE c.id = `enrollments`.`course_id` AND c.doctor_id = ?))"
+                    . $visibilitySql,
+                [$userId, $userId, ...$visibilityBindings],
             ];
         }
         return ['', []];

@@ -35,6 +35,7 @@ import {
   type SecurityCheckResult, type SecurityThreat,
   type DetectionType, type PolicyAction,
 } from '@/lib/security';
+import { resolveGatePhase, type GatePhase } from '@/lib/securityStateModel';
 import {
   checkAndRefreshSecurityConfig,
   prewarmSecurityConfig,
@@ -68,10 +69,26 @@ interface SecurityContextValue {
   hasWarnings: boolean;
   /**
    * TRUE while the latest evaluation is not yet confirmed (initial session
-   * start, or a foreground re-check forced by reset()). Consumers MUST treat
-   * UNKNOWN as BLOCKED — see the fail-closed contract below.
+   * start, or a foreground re-check forced by reset()).
+   *
+   * STARTUP-FLASH CONTRACT (fixed): pending evaluation is NOT a violation.
+   * The global context serves the NEUTRAL start-up result (no threats, no
+   * blocks) until a COMPLETED evaluation lands, so no consumer can render a
+   * "Security Block Active" page from an unverified state. The fail-closed
+   * UNKNOWN sentinel survives ONLY as the return value of check() for
+   * caller-scoped sensitive actions (login, pre-video re-validation), where
+   * an in-flight evaluation must keep the ACTION gated — never as global UI
+   * state.
    */
   evaluating:  boolean;
+  /**
+   * TRUE once at least one COMPLETED evaluation has been published for this
+   * session (or Super Admin bypass is active). Drives the gate's phase
+   * (resolveGatePhase): no verdict → 'pending' → the gate never mounts.
+   */
+  hasVerdict:  boolean;
+  /** Authoritative gate visibility phase (pending ≠ blocked). */
+  phase:       GatePhase;
   /**
    * True when the currently authenticated session belongs to a verified Super Admin.
    * Derived from the backend-loaded profile role ('super_admin') — never from
@@ -115,20 +132,19 @@ const SUPERADMIN_BYPASS_RESULT: SecurityCheckResult = {
   hasWarnings: false,
 };
 
-// ── Fail-closed UNKNOWN result ──────────────────────────────────────────────
-// Served while the latest security evaluation has not yet CONFIRMED a verdict
-// (fresh session start, or a foreground re-check after reset()). Deliberately
-// NOT the all-clear: an attacker must never be able to reach "UNKNOWN →
-// ALLOWED". The SecurityGate treats a non-empty threatTypes marker as blocked
-// so the overlay remains mounted for the entire evaluation window.
+// ── Fail-closed UNKNOWN result (CALLER-SCOPED) ──────────────────────────────
+// Returned BY check() to the CALLER while the evaluation it triggered has not
+// CONFIRMED a verdict (fresh login, superseded check). Deliberately NOT the
+// all-clear: an attacker must never reach "UNKNOWN → sensitive action
+// allowed". This result is NEVER published as global context state — the
+// startup-flash fix removed exactly that publication, which used to mount the
+// "Security Block Active / Risk Score: 10" page on every cold start.
 //
-// STATE-SYNC FIX: the sentinel event is 'security_unverified' — an honest
-// "the check is running" state. The previous sentinel reused 'tamper_detected',
-// so EVERY cold start briefly (and, combined with the gate's never-cleared
-// sticky set, PERMANENTLY) displayed "App Integrity Compromised — install the
-// original release" on the OFFICIAL APK: the exact false positive observed on
-// the physical device. This sentinel never reaches the backend logger (only
-// completed evaluations are logged) and never masquerades as a device finding.
+// STATE-SYNC FIX (historical): the sentinel event is 'security_unverified' —
+// an honest "the check is running" state. The previous sentinel reused
+// 'tamper_detected', so EVERY cold start briefly displayed "App Integrity
+// Compromised" on the OFFICIAL APK. It never reaches the backend logger and
+// never masquerades as a device finding.
 const BLOCKING_UNKNOWN_RESULT: SecurityCheckResult = {
   threats: [{ type: 'security_unverified', detectionMethod: 'Security evaluation in progress (fail-closed)', detected: true }],
   riskScore:   SECURITY_UNVERIFIED_WEIGHT,
@@ -138,17 +154,36 @@ const BLOCKING_UNKNOWN_RESULT: SecurityCheckResult = {
   hasWarnings: false,
 };
 
+// ── Neutral start-up result (global pre-verdict state) ───────────────────────
+// Served app-wide while NO completed evaluation exists (cold start, login
+// screen). Deliberately NOT blocking: an evaluation in progress is not a
+// security violation, and showing "Security Block Active / Risk Score: 10"
+// during ordinary startup was the reported bug. Sensitive actions stay
+// independently gated: sign-in calls check() (whose caller-scoped fallback IS
+// fail-closed) and every video surface re-validates via checkBeforeVideo().
+const NEUTRAL_STARTUP_RESULT: SecurityCheckResult = {
+  threats:     [],
+  riskScore:   0,
+  policies:    {} as Record<DetectionType, PolicyAction>,
+  blocksLogin: false,
+  blocksVideo: false,
+  hasWarnings: false,
+};
+
 const SecurityContext = createContext<SecurityContextValue>({
   result:      null,
   checking:    false,
   /**
-   * FAIL-CLOSED: during evaluation (fresh session, or foreground re-check) the
-   * context still serves the LAST VERDICT (or a blocking default when none
-   * exists) instead of an all-clear. The SecurityGate overlay therefore stays
-   * mounted through a foreground re-check and cannot be defeated by the
-   * reset→recheck gap (the BLOCKED → UNKNOWN → ALLOWED race).
+   * STARTUP-FLASH CONTRACT: during evaluation (fresh session, foreground
+   * re-check) the context serves the LAST VERDICT when one exists, or the
+   * NEUTRAL start-up result when none does — never a synthetic violation.
+   * A verified block is held by the gate's sticky set (nextStickyTypes), so
+   * the BLOCKED → CHECKING → TEMP-ALLOWED race stays closed WITHOUT
+   * fabricating a global blocking sentinel for unverified states.
    */
   evaluating:  false,
+  hasVerdict:  false,
+  phase:       'pending',
   threats:     [],
   riskScore:   0,
   blocksLogin: false,
@@ -251,12 +286,19 @@ export function SecurityProvider({ children }: { children: React.ReactNode }) {
       void logThreats(r.threats, r.policies, r.riskScore, deviceId, r.evidence);
       return r;
     } catch (e) {
-      console.error('[SecurityContext][Stage-6] ❌ runSecurityChecks() threw — serving FAIL-CLOSED unverified result:', e);
-      // FAIL-CLOSED FIX: the previous fallback spread DEFAULT_RESULT — an
-      // ALL-CLEAR served whenever the evaluation itself threw (error → SAFE,
-      // explicitly forbidden). The unverified-blocking sentinel keeps the app
-      // locked until a completed evaluation proves the device safe; the
-      // periodic/foreground re-checks recover it automatically (no restart).
+      console.error('[SecurityContext][Stage-6] ❌ runSecurityChecks() threw — keeping last verdict, caller gets fail-closed fallback:', e);
+      // STARTUP-FLASH + NETWORK-ERROR CONTRACT:
+      //   • A thrown evaluation (backend timeout, transient network failure,
+      //     detector crash) is a FAILURE STATE, not a security violation — it
+      //     must NOT be published globally as a synthetic block.
+      //   • The LAST COMPLETED verdict stays authoritative (if a previous
+      //     evaluation proved the device safe, the app stays unlocked; if it
+      //     proved a violation, the gate's sticky set keeps the block mounted).
+      //   • The CALLER still receives the fail-closed sentinel so a sensitive
+      //     action racing this failed evaluation stays gated — without any
+      //     user-facing "Security Block Active" page being fabricated.
+      //   • The periodic/foreground triggers re-run the evaluation, so a
+      //     transient failure recovers automatically when the next check lands.
       try {
         const policies = await getSecurityPolicies();
         const fallback: SecurityCheckResult = {
@@ -267,13 +309,11 @@ export function SecurityProvider({ children }: { children: React.ReactNode }) {
           blocksVideo: true,
           hasWarnings: false,
         };
-        setResult(fallback);
         return fallback;
       } catch {
         // getSecurityPolicies has its own fail-secure fallback and does not
         // reject in practice; this belt-and-suspenders branch keeps the same
         // contract without a policies map.
-        setResult(BLOCKING_UNKNOWN_RESULT);
         return BLOCKING_UNKNOWN_RESULT;
       }
     } finally {
@@ -511,13 +551,31 @@ export function SecurityProvider({ children }: { children: React.ReactNode }) {
 
   // When Super Admin bypass is active, always expose a clean zero-threat result
   // regardless of what runSecurityChecks() may have returned previously.
-  const r = isSuperAdmin ? SUPERADMIN_BYPASS_RESULT : (result ?? BLOCKING_UNKNOWN_RESULT);
+  // Otherwise serve the LAST COMPLETED verdict; while none exists (cold start,
+  // login screen) serve the NEUTRAL start-up result — NOT a synthetic block.
+  // STARTUP-FLASH FIX: this line used to serve BLOCKING_UNKNOWN_RESULT
+  // ("security_unverified", risk 10, blocksLogin) as the GLOBAL result before
+  // the first evaluation landed, which mounted the "Security Block Active"
+  // page on every startup. The sentinel now lives only as check()'s
+  // caller-scoped fallback (sensitive actions), never as global UI state.
+  const r = isSuperAdmin
+    ? SUPERADMIN_BYPASS_RESULT
+    : (result ?? NEUTRAL_STARTUP_RESULT);
+  const hasVerdict = isSuperAdmin || result !== null;
+  const phase: GatePhase = resolveGatePhase({
+    hasVerdict,
+    evaluating,
+    liveBlocking:  r.blocksLogin && r.threats.length > 0,
+    stickyCount:   0,
+  });
 
   return (
     <SecurityContext.Provider value={{
       result:              isSuperAdmin ? SUPERADMIN_BYPASS_RESULT : result,
       checking,
       evaluating,
+      hasVerdict,
+      phase,
       threats:             r.threats,
       riskScore:           r.riskScore,
       blocksLogin:         r.blocksLogin,

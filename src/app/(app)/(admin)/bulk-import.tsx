@@ -50,10 +50,40 @@ const STUDENT_TEMPLATE = 'full_name,email,phone,password,university,faculty,leve
 const DOCTOR_TEMPLATE  = 'full_name,email,phone,password\nDr. Jane Smith,jane@example.com,+1234567890,Pass@123\n';
 const ADMIN_TEMPLATE   = 'full_name,email,phone,password\nAdmin User,admin@example.com,+1234567890,Pass@123\n';
 
+// RFC-4180-style CSV parser: quoted cells containing commas/newlines/escaped
+// quotes ("") are handled correctly. The old split(',') corrupted names like
+// "Doe, John" and shifted every following column.
 function parseCSV(text: string): string[][] {
-  return text.trim().split('\n').map(line =>
-    line.split(',').map(cell => cell.trim().replace(/^"|"$/g, ''))
-  );
+  const rows: string[][] = [];
+  let row: string[] = [];
+  let cell = '';
+  let inQuotes = false;
+  const src = text.trim();
+  for (let i = 0; i < src.length; i++) {
+    const ch = src[i];
+    if (inQuotes) {
+      if (ch === '"') {
+        if (src[i + 1] === '"') { cell += '"'; i++; } // escaped quote
+        else inQuotes = false;
+      } else {
+        cell += ch;
+      }
+    } else if (ch === '"') {
+      inQuotes = true;
+    } else if (ch === ',') {
+      row.push(cell.trim()); cell = '';
+    } else if (ch === '\n' || ch === '\r') {
+      if (ch === '\r' && src[i + 1] === '\n') i++;
+      row.push(cell.trim()); cell = '';
+      if (row.some(c => c !== '')) rows.push(row);
+      row = [];
+    } else {
+      cell += ch;
+    }
+  }
+  row.push(cell.trim());
+  if (row.some(c => c !== '')) rows.push(row);
+  return rows;
 }
 
 export default function BulkImportScreen({ backTo }: { backTo?: string } = {}) {
@@ -130,6 +160,7 @@ export default function BulkImportScreen({ backTo }: { backTo?: string } = {}) {
       const row = rows[i];
       try {
         if (!row.full_name || !row.email || !row.password) throw new Error('Missing required fields (full_name, email, password)');
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(row.email)) throw new Error(`Invalid email format: ${row.email}`);
         const actionMap: Record<string, CreateUserPayload['action']> = {
           student: 'create_user',
           doctor:  'create_doctor',
@@ -141,9 +172,13 @@ export default function BulkImportScreen({ backTo }: { backTo?: string } = {}) {
           email:     row.email,
           phone:     row.phone || undefined,
           password:  row.password,
-          university_id:    undefined,
-          faculty_id:       undefined,
-          academic_level_id: undefined,
+          // Academic placement (students): the CSV's university/faculty/level
+          // NAMES are sent through — the backend resolves them to ids
+          // server-side and reports unknown values as a 422 per-row failure
+          // (previously parsed but silently dropped).
+          university: role === 'student' ? (row.university || undefined) : undefined,
+          faculty:    role === 'student' ? (row.faculty || undefined) : undefined,
+          level:      role === 'student' ? (row.level || undefined) : undefined,
         });
         out.push({ index: row.index, full_name: row.full_name, email: row.email, status: 'success' });
       } catch (e: any) {

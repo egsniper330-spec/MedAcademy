@@ -674,7 +674,7 @@ console.log('──────────────────────�
   assert(/<PageHeader\s+title="System Diagnostics"/.test(sysDiagScreen), 'screen retitled System Diagnostics (old System Providers presentation gone)');
   assert(!/Provider Abstraction Layer/.test(sysDiagScreen), 'obsolete Provider Abstraction Layer presentation removed');
   assert(/setScanning\(true\)/.test(sysDiagScreen) && /setScanning\(false\)/.test(sysDiagScreen), 'Scan All has a bounded scanning state');
-  assert(/sa-system-providers/.test(saLayoutSrc), 'System Diagnostics route resolves for Super Admin');
+  assert(/sa-system-providers/.test(fs.readFileSync(path.join(ROOT, 'src/lib/nativeTabRegistry.tsx'), 'utf8')), 'System Diagnostics route resolves for Super Admin');
   // 6. Client transport wiring.
   const phpSrc = fs.readFileSync(path.join(ROOT, 'src/client/php.ts'), 'utf8').replace(/\r/g, '');
   assert(/'system-diagnostics':\s*'\/admin\/system\/diagnostics',/.test(phpSrc), 'php.ts maps system-diagnostics to the PHP route');

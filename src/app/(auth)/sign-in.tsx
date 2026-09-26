@@ -44,7 +44,7 @@ export default function SignIn() {
   const insets = layout.insets;
   const { check } = useSecurity();
 
-  const branding = useBranding(); // server-managed display name (fails safe to defaults)
+  const { branding } = useBranding(); // server-managed display name (fails safe to defaults)
   const [identifier, setIdentifier] = useState('');
   const [password, setPassword] = useState('');
   const [showPwd, setShowPwd] = useState(false);

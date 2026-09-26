@@ -166,6 +166,13 @@ final class FeatureFlagService
             'default'     => true,
             'superadmin_exempt' => true,
         ],
+        'video_library_sync' => [
+            'label'       => 'Video Library Sync',
+            'description' => 'Super Admin reconciliation of the Video Library with VdoCipher (remotely deleted / duplicate repair). Enforced on POST /video/sync-library. A disabled flag blocks new syncs only — it never marks anything deleted.',
+            'category'    => 'video',
+            'default'     => true,
+            'superadmin_exempt' => true,
+        ],
 
         // ── Administration surfaces ──────────────────────────────────────────
         'impersonation' => [

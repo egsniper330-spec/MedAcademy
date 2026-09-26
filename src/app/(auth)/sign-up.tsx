@@ -220,7 +220,7 @@ function CountryCodePicker({
 // ─── Main Registration Screen ─────────────────────────────────────────────────
 
 export default function SignUp() {
-  const branding = useBranding(); // server-managed display name (fails safe to defaults)
+  const { branding } = useBranding(); // server-managed display name (fails safe to defaults)
   const scheme = useColorScheme();
   const isDark = scheme === 'dark';
   const c = isDark ? neuColors.dark : neuColors.light;

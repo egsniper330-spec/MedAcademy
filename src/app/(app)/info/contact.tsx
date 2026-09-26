@@ -1,62 +1,91 @@
 /**
- * Contact Us — pulls live branding data for email/phone/WhatsApp/website,
- * with tap-to-open actions for each channel.
+ * Contact Us — MedAcademy identity + Super-Admin-configured contact links.
  *
- * PRIVACY CONTRACT: raw contact details (phone numbers, email addresses,
- * URLs) are intentionally NEVER rendered in the UI. Each channel shows only
- * a friendly label + description. All real values are kept in code only.
+ * DATA FLOW (all live, nothing hardcoded):
+ *   Platform → Branding          → logo_url, legacy channels (email/phone/…)
+ *   Platform → CMS → Contact Us  → intro text (built-in fallback when unset)
+ *   Platform → Branding          → contact_links[] (platform/label/url/enabled)
+ *
+ * LOADING CONTRACT (infinite-spinner fix): the previous implementation
+ * initialised `loading=true` and NEVER fetched branding (setLoading was never
+ * called) — the page spun forever for every user. The screen now always
+ * reaches a terminal state:
+ *   • loaded  → logo + intro + contact link rows
+ *   • empty   → friendly card when no channel is configured
+ *   • error   → "Unable to load Contact Us" + Retry (branding fetch failed)
+ * A CMS/branding failure is a data problem, never a security/auth problem:
+ * the session is untouched and the user is never redirected to Login.
+ *
+ * PRIVACY CONTRACT: raw destinations are never rendered. Each row shows the
+ * friendly label + description from the platform registry; the URL only goes
+ * to Linking.openURL() (safety-checked by isSafeContactHref()).
  */
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState } from 'react';
 import {
   ScrollView, View, Text, useColorScheme, Pressable,
-  ActivityIndicator, Linking, Animated,
+  ActivityIndicator, Linking, Animated, Image,
 } from 'react-native';
 import { PageHeader } from '@/components/PageHeader';
 import { NeuCard } from '@/components/NeuCard';
-import { neuColors, useLayout, neuMicroStyle, safeBottom } from '@/lib/neu';
+import { BrandLogo } from '@/components/BrandLogo';
+import { neuColors, useLayout } from '@/lib/neu';
 import { usePressAnim, useEntranceAnim } from '@/lib/motion';
-import { getBranding } from '@/lib/api';
 import { useCmsSections } from '@/lib/cmsContent';
 import {
-  Mail, Phone, Globe, MessageCircle, Send,
-  HeartHandshake, ChevronRight, Camera, Hash, Users, Link2,
-} from 'lucide-react-native';
-import { parseContactLinks, contactLinkHref } from '@/lib/branding';
-
-/**
- * Presentation for each admin-configured link platform (CMS → Contact Us).
- * Users only ever see the friendly label + this description; the destination
- * stays in code (privacy contract at the top of this file).
- */
-const LINK_META: Record<string, { icon: React.ElementType; color: string; description: string }> = {
-  whatsapp:  { icon: MessageCircle, color: '#16A34A', description: 'Chat with us on WhatsApp.' },
-  telegram:  { icon: Send,          color: '#2DA8FF', description: 'Message us on Telegram.' },
-  facebook:  { icon: Users,         color: '#1877F2', description: 'Visit our Facebook page.' },
-  instagram: { icon: Camera,        color: '#E1306C', description: 'Follow us on Instagram.' },
-  twitter:   { icon: Hash,          color: '#0F172A', description: 'Follow us on X.' },
-  website:   { icon: Globe,         color: '#6B7280', description: 'Visit our official website.' },
-  email:     { icon: Mail,          color: '#DC2626', description: 'Send us an email.' },
-  phone:     { icon: Phone,         color: '#0EA5E9', description: 'Call this number.' },
-};
+  useBranding, parseContactLinks, contactLinkHref, isSafeContactHref,
+  platformDef, platformIcon,
+} from '@/lib/branding';
+import { HeartHandshake, ChevronRight, RefreshCw, Link2, AlertTriangle } from 'lucide-react-native';
 
 // ── Contact channel definition ────────────────────────────────────────────────
 type ContactItem = {
-  icon: React.ElementType;
-  color: string;
+  /** Stable platform key (registry id) — the row's React key. */
+  platform: string;
+  /** Admin-configured label, or the registry default. */
   label: string;
-  /** Friendly one-liner shown in place of the raw value. Never the actual URL/number. */
+  /** Registry description (never the raw URL). */
   description: string;
   onPress: () => void;
 };
 
+/** Remote-logo row with graceful failure — a bad logo never blanks the page. */
+function BrandHeaderLogo({ remoteUrl, size }: { remoteUrl?: string; size: number }) {
+  const [state, setState] = useState<'remote' | 'fallback' | 'done' | 'error'>(
+    remoteUrl ? 'remote' : 'fallback',
+  );
+
+  // Remote logo failed / invalid → bundled full logo (same identity source as
+  // the rest of the app). If even the bundle is somehow unavailable, the
+  // HeartHandshake mark keeps the header presentable.
+  if (state === 'fallback') return <BrandLogo size={size} />;
+  if (state === 'error') {
+    return (
+      <View style={{ width: size * 3, height: size, alignItems: 'center', justifyContent: 'center' }}>
+        <BrandLogo variant="monogram" size={size} />
+      </View>
+    );
+  }
+  return (
+    <Image
+      source={{ uri: remoteUrl }}
+      style={{ width: size * 3, height: size }}
+      resizeMode="contain"
+      onLoad={() => setState('done')}
+      onError={() => setState('fallback')}
+    />
+  );
+}
+
 // ── Animated contact card ─────────────────────────────────────────────────────
-function ContactCard({ item }: { item: ContactItem; index: number }) {
+function ContactCard({ item }: { item: ContactItem }) {
   const isDark = useColorScheme() === 'dark';
   const c = isDark ? neuColors.dark : neuColors.light;
   const layout = useLayout();
 
+  const def = platformDef(item.platform);
+  const Icon = platformIcon(item.platform);
   const press = usePressAnim();
-  const iconSz   = layout.touchTarget + 8;
+  const iconSz    = layout.touchTarget + 8;
   const iconInner = Math.round(iconSz * 0.46);
 
   return (
@@ -66,22 +95,22 @@ function ContactCard({ item }: { item: ContactItem; index: number }) {
         onPressIn={press.onPressIn}
         onPressOut={press.onPressOut}
         accessibilityRole="button"
-        accessibilityLabel={item.label}
+        accessibilityLabel={`${item.label} — ${item.description}`}
       >
         <NeuCard radius={layout.cardRadius} style={{ flexDirection: 'row', alignItems: 'center', padding: layout.cardPx, gap: layout.pad.md }}>
 
-          {/* Icon badge */}
+          {/* Platform icon badge — color + glyph from the registry */}
           <View style={{
             width: iconSz, height: iconSz,
             borderRadius: layout.heroIconRadius / 1.5,
-            backgroundColor: `${item.color}15`,
+            backgroundColor: `${def.color}15`,
             alignItems: 'center', justifyContent: 'center',
             flexShrink: 0,
           }}>
-            <item.icon size={iconInner} color={item.color} />
+            <Icon size={iconInner} color={def.color} />
           </View>
 
-          {/* Label + description */}
+          {/* Label + description — the destination itself is NEVER rendered */}
           <View style={{ flex: 1, gap: 3 }}>
             <Text style={{
               fontSize: layout.bodySize + 1, fontWeight: '800',
@@ -102,11 +131,11 @@ function ContactCard({ item }: { item: ContactItem; index: number }) {
             flexDirection: 'row', alignItems: 'center', gap: 2,
             paddingHorizontal: layout.pad.sm + 2, paddingVertical: layout.pad.xs + 2,
             borderRadius: layout.cardRadius / 1.5,
-            backgroundColor: `${item.color}14`,
+            backgroundColor: `${def.color}14`,
             flexShrink: 0,
           }}>
-            <Text style={{ fontSize: layout.captionSize, fontWeight: '700', color: item.color }}>Open</Text>
-            <ChevronRight size={layout.captionSize + 1} color={item.color} strokeWidth={2.5} />
+            <Text style={{ fontSize: layout.captionSize, fontWeight: '700', color: def.color }}>Open</Text>
+            <ChevronRight size={layout.captionSize + 1} color={def.color} strokeWidth={2.5} />
           </View>
 
         </NeuCard>
@@ -121,166 +150,189 @@ export default function ContactPage() {
   const c = isDark ? neuColors.dark : neuColors.light;
   const layout = useLayout();
 
-  const [branding, setBranding] = useState<any>(null);
+  // Branding (logo, legacy channels, contact_links) + fetch status for the
+  // terminal error state. refresh() is the Retry action.
+  const { branding, status: brandingStatus, refresh } = useBranding();
+  const [retrying, setRetrying] = useState(false);
+
   // Server-managed intro text (Super Admin → Platform → CMS Pages → Contact
   // Us). Falls back to the bundled copy while loading / when unset.
   const intro = useCmsSections('contact_us', [
-    { heading: '', body: 'Need help? Choose one of the contact methods below and we\'ll be happy to assist you.' },
+    { heading: '', body: 'If you need help, contact us through one of the channels below.' },
   ]);
-  const [loading, setLoading]   = useState(true);
 
-  // Hero icon fade-in
+  // Hero entrance
   const heroEntrance = useEntranceAnim({ offsetY: 12, duration: 460 });
 
+  const introText = intro
+    .map((section, i) => (section.heading !== '' ? `${section.heading}: ${section.body}` : section.body).trim())
+    .filter((part) => part !== '')
+    .join('\n');
 
-  // Build channels — real values live here, descriptions shown in UI instead.
+  // ── Build the channel list ────────────────────────────────────────────────
+  // 1) Admin-configured links first, in the admin's order. Disabled links stay
+  //    saved on the server but are never rendered. A destination that fails the
+  //    safety check is refused here (defense in depth — the backend already
+  //    rejects such values at save time).
   const contacts: ContactItem[] = [];
-
-  // ── Admin-configured links (Super Admin → CMS Pages → Contact Us) ──────────
-  // Pushed FIRST so the operator's chosen order is exactly what users see.
-  // A disabled link stays saved on the server but is never rendered here, and
-  // a bad destination degrades to a harmless no-op instead of crashing the tap.
-  const customLinks = parseContactLinks((branding as any)?.contact_links).filter(l => l.enabled);
+  const customLinks = parseContactLinks((branding as unknown as Record<string, unknown>)?.contact_links)
+    .filter((l) => l.enabled);
   for (const link of customLinks) {
-    const meta = LINK_META[link.platform] ?? { icon: Link2, color: c.primary, description: 'Tap to open.' };
     const href = contactLinkHref(link);
+    if (!isSafeContactHref(href)) continue; // malformed/dangerous URL → never rendered
     contacts.push({
-      icon: meta.icon,
-      color: meta.color,
+      platform: link.platform,
       label: link.label,
-      description: meta.description,
-      onPress: () => { void Linking.openURL(href).catch(() => {}); },
+      description: platformDef(link.platform).description,
+      onPress: () => {
+        if (!isSafeContactHref(href)) return;
+        void Linking.openURL(href).catch(() => {});
+      },
     });
   }
-  // Platforms already covered by a configured link — the legacy fixed channels
-  // below must not duplicate them.
-  const configured = new Set(customLinks.map(l => l.platform));
 
-  if (branding?.contact_email && !configured.has('email')) {
-    contacts.push({
-      icon: Mail, color: '#DC2626',
-      label: 'Email',
-      description: 'Send us an email and we\'ll reply shortly.',
-      onPress: () => Linking.openURL(`mailto:${branding.contact_email}`),
-    });
+  // 2) Legacy branding channels — only for platforms NOT covered above, so
+  //    nothing is ever shown twice (configured link = authoritative entry).
+  //    Legacy DB values are never deleted; they simply yield to newer config.
+  const configured = new Set(customLinks.map((l) => l.platform));
+  const b = branding as unknown as Record<string, unknown>;
+  const legacy: ContactItem[] = [];
+  if (b?.contact_email && !configured.has('email')) {
+    legacy.push({ platform: 'email', label: 'Email', description: platformDef('email').description, onPress: () => { void Linking.openURL(`mailto:${b.contact_email}`).catch(() => {}); } });
   }
-  if (branding?.support_email && branding.support_email !== branding.contact_email && !configured.has('email')) {
-    contacts.push({
-      icon: Mail, color: '#7C3AED',
-      label: 'Support Email',
-      description: 'Reach our technical support team.',
-      onPress: () => Linking.openURL(`mailto:${branding.support_email}`),
-    });
+  if (b?.contact_phone && !configured.has('phone')) {
+    legacy.push({ platform: 'phone', label: 'Phone', description: platformDef('phone').description, onPress: () => { void Linking.openURL(`tel:${b.contact_phone}`).catch(() => {}); } });
   }
-  if (branding?.contact_phone && !configured.has('phone')) {
-    contacts.push({
-      icon: Phone, color: '#16A34A',
-      label: 'Phone',
-      description: 'Call our support line directly.',
-      onPress: () => Linking.openURL(`tel:${branding.contact_phone}`),
-    });
+  if (b?.whatsapp_url && !configured.has('whatsapp')) {
+    const raw = String(b.whatsapp_url);
+    const href = /^https?:\/\//i.test(raw) ? raw : `https://wa.me/${String(raw).replace(/\D/g, '')}`;
+    legacy.push({ platform: 'whatsapp', label: 'WhatsApp', description: platformDef('whatsapp').description, onPress: () => { void Linking.openURL(href).catch(() => {}); } });
   }
-  if (branding?.whatsapp_url && !configured.has('whatsapp')) {
-    const raw  = branding.whatsapp_url as string;
-    const href = raw.startsWith('http') ? raw : `https://wa.me/${raw.replace(/\D/g, '')}`;
-    contacts.push({
-      icon: MessageCircle, color: '#16A34A',
-      label: 'WhatsApp',
-      description: 'Chat with us on WhatsApp.',
-      onPress: () => Linking.openURL(href),
-    });
+  if (b?.telegram_url && !configured.has('telegram')) {
+    const raw = String(b.telegram_url);
+    const href = /^https?:\/\//i.test(raw) ? raw : `https://t.me/${String(raw).replace('@', '')}`;
+    legacy.push({ platform: 'telegram', label: 'Telegram', description: platformDef('telegram').description, onPress: () => { void Linking.openURL(href).catch(() => {}); } });
   }
-  if (branding?.telegram_url && !configured.has('telegram')) {
-    const raw  = branding.telegram_url as string;
-    const href = raw.startsWith('http') ? raw : `https://t.me/${raw.replace('@', '')}`;
-    contacts.push({
-      icon: Send, color: '#2DA8FF',
-      label: 'Telegram',
-      description: 'Join our Telegram channel for updates.',
-      onPress: () => Linking.openURL(href),
-    });
+  if (b?.website_url && !configured.has('website')) {
+    legacy.push({ platform: 'website', label: 'Website', description: platformDef('website').description, onPress: () => { void Linking.openURL(String(b.website_url)).catch(() => {}); } });
   }
-  if (branding?.website_url && !configured.has('website')) {
-    contacts.push({
-      icon: Globe, color: c.primary,
-      label: 'Website',
-      description: 'Visit our official website.',
-      onPress: () => Linking.openURL(branding.website_url),
-    });
-  }
+  contacts.push(...legacy);
 
   const heroIconSz  = layout.heroIconSize * 1.1;
-  const heroInnerSz = Math.round(heroIconSz * 0.48);
+
+  const runRetry = () => {
+    setRetrying(true);
+    refresh();
+    // The hook re-fetches; clear the retry spinner on the next tick regardless
+    // of outcome — status flips to ok/error and the correct state renders.
+    setTimeout(() => setRetrying(false), 400);
+  };
+
+  const loaded = brandingStatus === 'ok';
 
   return (
     <ScrollView
       style={{ flex: 1, backgroundColor: c.base }}
       contentContainerStyle={{
         padding: layout.screenPx,
+        paddingBottom: layout.insets.bottom + layout.screenPx,
       }}
     >
       <PageHeader title="Contact Us" showBack />
 
-      {/* ── Hero ─────────────────────────────────────────────────────────── */}
-      <Animated.View style={{
-        alignItems: 'center',
-        marginBottom: layout.sectionGap,
-        marginTop: layout.pad.xs,
-        ...heroEntrance.style,
-      }}>
-        {/* Neumorphic circular icon */}
-        <View style={{
-          width: heroIconSz, height: heroIconSz,
-          borderRadius: heroIconSz / 2,
-          alignItems: 'center', justifyContent: 'center',
-          marginBottom: layout.pad.lg,
-          ...neuMicroStyle(isDark),
-        }}>
-          <HeartHandshake size={heroInnerSz} color={c.primary} />
-        </View>
-
-        <Text style={{ fontSize: layout.titleSize * 0.85, fontWeight: '800', color: c.text, marginBottom: layout.pad.sm }}>
-          Contact Us
-        </Text>
-
-        {/* Accent divider */}
-        <View style={{
-          width: layout.pad.xxl, height: 3, borderRadius: 2,
-          backgroundColor: c.primary, opacity: 0.55,
-          marginBottom: layout.pad.md,
-        }} />
-
-        <Text style={{
-          fontSize: layout.captionSize + 1, color: c.text, opacity: 0.5,
-          textAlign: 'center', lineHeight: (layout.captionSize + 1) * 1.55,
-          paddingHorizontal: layout.screenPx,
-        }}>
-          {intro
-            .map((section, i) => (section.heading !== '' ? `${section.heading}: ${section.body}` : section.body).trim())
-            .filter((part) => part !== '')
-            .join('\n')}
-        </Text>
-      </Animated.View>
-
-      {/* ── Content ──────────────────────────────────────────────────────── */}
-      {loading ? (
-        <ActivityIndicator color={c.primary} style={{ marginVertical: layout.sectionGap * 2 }} />
-      ) : contacts.length === 0 ? (
+      {/* ── Error state — branding fetch failed (Retry; never redirects to login) ── */}
+      {!loaded ? (
         <NeuCard radius={layout.cardRadius} style={{ padding: layout.cardPx * 2, alignItems: 'center', gap: layout.pad.md }}>
-          <HeartHandshake size={layout.heroIconSize} color={c.primary} opacity={0.22} />
-          <Text style={{ fontSize: layout.bodySize + 1, fontWeight: '700', color: c.text, opacity: 0.5, textAlign: 'center' }}>
-            Contact details are not yet configured.
+          <View style={{
+            width: layout.heroIconSize, height: layout.heroIconSize,
+            borderRadius: layout.heroIconSize / 2, backgroundColor: '#EF444418',
+            alignItems: 'center', justifyContent: 'center',
+          }}>
+            <AlertTriangle size={Math.round(layout.heroIconSize * 0.5)} color="#EF4444" />
+          </View>
+          <Text style={{ fontSize: layout.bodySize + 1, fontWeight: '800', color: c.text, textAlign: 'center' }}>
+            Unable to load Contact Us
           </Text>
-          <Text style={{ fontSize: layout.captionSize, color: c.text, opacity: 0.35, textAlign: 'center' }}>
-            Please check back soon.
+          <Text style={{ fontSize: layout.captionSize, color: c.text, opacity: 0.5, textAlign: 'center' }}>
+            Please check your connection and try again.
           </Text>
+          <Pressable
+            onPress={runRetry}
+            disabled={retrying}
+            accessibilityRole="button"
+            accessibilityLabel="Retry loading Contact Us"
+            style={{
+              flexDirection: 'row', alignItems: 'center', gap: 8,
+              paddingHorizontal: layout.pad.lg, paddingVertical: layout.pad.md,
+              borderRadius: layout.cardRadius, backgroundColor: c.primary,
+              opacity: retrying ? 0.6 : 1,
+            }}
+          >
+            {retrying
+              ? <ActivityIndicator size="small" color="#FFFFFF" />
+              : <RefreshCw size={layout.captionSize + 4} color="#FFFFFF" />}
+            <Text style={{ fontSize: layout.bodySize, fontWeight: '700', color: '#FFFFFF' }}>
+              Retry
+            </Text>
+          </Pressable>
         </NeuCard>
       ) : (
-        <View style={{ gap: layout.itemGap }}>
-          {contacts.map((item, i) => (
-            <ContactCard key={i} item={item} index={i} />
-          ))}
-        </View>
+        <>
+
+          {/* ── Hero: logo + title + CMS intro ─────────────────────────────── */}
+          <Animated.View style={{
+            alignItems: 'center',
+            marginBottom: layout.sectionGap,
+            marginTop: layout.pad.xs,
+            ...heroEntrance.style,
+          }}>
+            {/* Platform logo — bundled identity, remote override if configured.
+                Explicit dimensions on the network image (RN requirement); a
+                failed/invalid logo degrades to the bundled logo and never
+                blanks the page or blocks the links below. */}
+            <View style={{ marginBottom: layout.pad.lg }}>
+              <BrandHeaderLogo remoteUrl={(b?.logo_url as string) || undefined} size={layout.touchTarget * 1.6} />
+            </View>
+
+            <Text style={{ fontSize: layout.titleSize * 0.85, fontWeight: '800', color: c.text, marginBottom: layout.pad.sm }}>
+              Contact Us
+            </Text>
+
+            {/* Accent divider */}
+            <View style={{
+              width: layout.pad.xxl, height: 3, borderRadius: 2,
+              backgroundColor: c.primary, opacity: 0.55,
+              marginBottom: layout.pad.md,
+            }} />
+
+            <Text style={{
+              fontSize: layout.captionSize + 1, color: c.text, opacity: 0.5,
+              textAlign: 'center', lineHeight: (layout.captionSize + 1) * 1.55,
+              paddingHorizontal: layout.screenPx,
+            }}>
+              {introText}
+            </Text>
+          </Animated.View>
+
+          {/* ── Content: loaded list / empty state ─────────────────────────── */}
+          {contacts.length === 0 ? (
+            <NeuCard radius={layout.cardRadius} style={{ padding: layout.cardPx * 2, alignItems: 'center', gap: layout.pad.md }}>
+              <HeartHandshake size={layout.heroIconSize} color={c.primary} opacity={0.22} />
+              <Text style={{ fontSize: layout.bodySize + 1, fontWeight: '700', color: c.text, opacity: 0.5, textAlign: 'center' }}>
+                Contact details are not yet configured.
+              </Text>
+              <Text style={{ fontSize: layout.captionSize, color: c.text, opacity: 0.35, textAlign: 'center' }}>
+                Please check back soon.
+              </Text>
+            </NeuCard>
+          ) : (
+            <View style={{ gap: layout.itemGap }}>
+              {contacts.map((item) => (
+                <ContactCard key={item.platform} item={item} />
+              ))}
+            </View>
+          )}
+        </>
       )}
     </ScrollView>
   );

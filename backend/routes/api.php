@@ -23,6 +23,7 @@ use MedAcademy\Controllers\DataController;
 use MedAcademy\Controllers\StorageController;
 use MedAcademy\Controllers\SystemDiagnosticsController;
 use MedAcademy\Controllers\UserController;
+use MedAcademy\Controllers\AppReleaseController;
 use MedAcademy\Controllers\UpdateConfigController;
 use MedAcademy\Controllers\VideoController;
 use MedAcademy\Controllers\VideoProviderController;
@@ -63,6 +64,15 @@ $router->post('/admin/maintenance', [MaintenanceController::class, 'update'], $a
 $router->get('/app/version', [UpdateConfigController::class, 'version']);
 $router->get('/admin/app-updates', [UpdateConfigController::class, 'adminIndex'], $auth + ['role' => ['super_admin']]);
 $router->put('/admin/app-updates/{platform}', [UpdateConfigController::class, 'adminUpdate'], $auth + ['role' => ['super_admin']]);
+// Production release lifecycle — drafts never touch production; publish/rollback
+// are the ONLY production-changing actions. Super Admin enforced twice
+// (route gate + controller check).
+$router->get('/admin/app-releases', [AppReleaseController::class, 'index'], $auth + ['role' => ['super_admin']]);
+$router->post('/admin/app-releases', [AppReleaseController::class, 'create'], $auth + ['role' => ['super_admin']]);
+$router->put('/admin/app-releases/{id}', [AppReleaseController::class, 'update'], $auth + ['role' => ['super_admin']]);
+$router->post('/admin/app-releases/{id}/publish', [AppReleaseController::class, 'publish'], $auth + ['role' => ['super_admin']]);
+$router->post('/admin/app-releases/{id}/rollback', [AppReleaseController::class, 'rollback'], $auth + ['role' => ['super_admin']]);
+$router->post('/admin/app-releases/{id}/archive', [AppReleaseController::class, 'archive'], $auth + ['role' => ['super_admin']]);
 
 // ── Platform control centre — Branding / CMS pages / Feature flags ──────────
 // Reads are authenticated (the app is fully behind auth); every WRITE is
@@ -103,6 +113,8 @@ $router->post('/users/{id}/trash', [AuthController::class, 'trashUser'], $auth +
 
 // ---- Impersonate ------------------------------------------------------------
 $router->post('/auth/impersonate', [AuthController::class, 'impersonate'], $auth + ['role' => ['super_admin']]);
+// Called with the TARGET's session (the impersonated context) to audit the end.
+$router->post('/auth/impersonation/end', [AuthController::class, 'endImpersonation'], $auth);
 
 // ---- Users (profiles) -------------------------------------------------------
 $router->get('/users/me', [UserController::class, 'me'], $auth);
@@ -196,6 +208,9 @@ $router->get('/video-providers/teachers/{id}', [VideoProviderController::class, 
 $router->put('/video-providers/teachers/{id}', [VideoProviderController::class, 'setTeacher'], $auth + ['role' => ['super_admin']]);
 $router->post('/video/upload-patch', [VideoController::class, 'uploadPatch'], $auth + ['role' => ['super_admin']]);
 $router->post('/video/orphan-cleanup', [VideoController::class, 'orphanCleanup'], $auth + ['role' => ['admin', 'super_admin']]);
+// VdoCipher ↔ Video Library reconciliation (paginated remote listing →
+// missing/duplicate repair). Super Admin only — destructive reconciliation.
+$router->post('/video/sync-library', [VideoController::class, 'syncLibrary'], $auth + ['role' => ['super_admin']]);
 $router->post('/lessons/{id}/delete', [CourseController::class, 'deleteLesson'], $auth + ['role' => ['doctor', 'admin', 'super_admin']]);
 
 // ---- Integrity (Play Integrity / App Integrity) -----------------------------
@@ -232,6 +247,7 @@ $router->post('/admin/delete-user', [AdminController::class, 'deleteUser'], $aut
 $router->get('/admin/delete-user/preflight', [AdminController::class, 'deleteUserPreflight'], $auth + ['role' => ['admin', 'super_admin']]);
 $router->post('/admin/user-lookup', [AdminController::class, 'userLookup'], $auth + ['role' => ['doctor', 'admin', 'super_admin']]);
 $router->post('/admin/user-management', [AdminController::class, 'userManagement'], $auth + ['role' => ['admin', 'super_admin']]);
+$router->post('/admin/data-export', [AdminController::class, 'dataExport'], $auth + ['role' => ['super_admin']]);
 
 // ---- Analytics / RPCs -------------------------------------------------------
 $router->get('/analytics/security-stats', [AnalyticsController::class, 'securityStats'], $auth + ['role' => ['admin', 'super_admin']]);

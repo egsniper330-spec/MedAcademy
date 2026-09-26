@@ -78,6 +78,11 @@ function classifyHttpStatus(status: number | undefined): string {
 // one would fail with an already-used token).
 let refreshPromise: Promise<boolean> | null = null;
 
+// The ONE registered auth-state listener (SessionProvider). Set synchronously
+// by onAuthStateChange so setSession() can emit identity changes immediately
+// instead of waiting for the 2s poll sample (see setSession below).
+let _authListener: ((event: string, session: AuthSession | null) => void) | null = null;
+
 // Endpoints that legitimately return 401 without a usable access token (bad
 // credentials / no account) or that must never trigger the refresh flow
 // (refresh/logout would recurse into themselves).
@@ -122,8 +127,20 @@ async function refreshAccessToken(): Promise<boolean> {
       }
       return false;
     }
-    // Persist the rotated pair; the `user` object is unchanged.
-    await storeSession({ access_token: s.access_token, refresh_token: s.refresh_token, user: stored.user });
+    // Persist the rotated pair — UNLESS the stored session changed identity
+    // while the refresh was in flight (impersonation swap): the rotated pair
+    // belongs to the OLD identity, and storing it would clobber the freshly
+    // installed TARGET session (the web-preview stuck-loading bug). In that
+    // case the refresh result is simply discarded; the new session's own
+    // lifecycle takes over. The `user` object is likewise re-read at
+    // completion time so a same-identity rotation can never resurrect a
+    // stale user object.
+    const current = getStoredSession();
+    if (current && current.access_token !== stored.access_token) {
+      authStateLog('AUTH_REFRESH_DISCARDED', 'session identity changed mid-refresh (impersonation swap) — result discarded');
+      return false;
+    }
+    await storeSession({ access_token: s.access_token, refresh_token: s.refresh_token, user: current?.user ?? stored.user });
     authStateLog('AUTH_REFRESH_SUCCESS');
     return true;
   })().finally(() => { refreshPromise = null; });
@@ -753,7 +770,20 @@ const authMethods = {
     // user, so the stored user identity must be replaced, not reused.
     const existing = getStoredSession();
     const user = session.user ?? existing?.user ?? { id: '', email: null, phone: null };
+    const prev = _cachedSession;
     await storeSession({ access_token: session.access_token, refresh_token: session.refresh_token ?? existing?.refresh_token ?? '', user });
+    // Emit auth-state transitions SYNCHRONOUSLY when the identity actually
+    // changed. The poll-based onAuthStateChange listener samples the token every
+    // 2s; a setSession→bootstrap→poll-sample race let the OLD session's own
+    // bootstrap (getProfile for the super admin, fired on the previous SIGNED_IN)
+    // resolve AFTER the swap and re-install the super-admin profile over the
+    // target's — the web preview's stuck-spinner. Immediate emission makes the
+    // SessionProvider's setSession() happen in the same task as the swap, so the
+    // (app) layout effect (keyed on session.user.id) re-bootstraps for the
+    // target deterministically. A no-op setSession (same token) emits nothing.
+    if (_authListener && (!prev || prev.access_token !== session.access_token || prev.user?.id !== user.id)) {
+      try { _authListener(session.access_token ? 'SIGNED_IN' : 'SIGNED_OUT', getStoredSession()); } catch { /* listener errors are non-fatal */ }
+    }
     return { error: null };
   },
 
@@ -768,9 +798,21 @@ const authMethods = {
     return { data: { session, user: d.user }, error: null };
   },
 
-  // Poll-based auth state listener; the PHP backend remains authoritative
+  // Poll-based auth state listener; the PHP backend remains authoritative.
+  // The token SAMPLE interval stays 2s as the safety net, but identity changes
+  // made through setSession() are emitted synchronously (see _authListener) so
+  // impersonation swaps propagate in the same task. The poll can no longer
+  // double-emit the same transition: it samples the token and only fires when
+  // it differs from the last token it SAW — since setSession already updated
+  // lastToken via the immediate emission, the next sample is a no-op.
   onAuthStateChange: (callback: (event: string, session: AuthSession | null) => void) => {
     let lastToken = getToken();
+    _authListener = (event, s) => {
+      const t = s?.access_token ?? null;
+      if (t === lastToken) return; // de-dup vs the poll's last-seen token
+      lastToken = t;
+      callback(event, s);
+    };
     const interval = setInterval(() => {
       const current = getToken();
       if (current !== lastToken) {
@@ -779,7 +821,7 @@ const authMethods = {
         callback(current ? 'SIGNED_IN' : 'SIGNED_OUT', s);
       }
     }, 2000);
-    return { data: { subscription: { unsubscribe: () => clearInterval(interval) } } };
+    return { data: { subscription: { unsubscribe: () => { clearInterval(interval); _authListener = null; } } } };
   },
 
 };
@@ -845,6 +887,7 @@ const EDGE_FUNCTION_MAP: Record<string, string> = {
   'redeem-code-redeem':     '/redeem-codes/redeem',
   'admin-doctor-earnings':  '/analytics/doctor-earnings',
   'admin-enrollment':       '/admin/enrollment',
+  'admin-data-export':      '/admin/data-export',
   'admin-update-email':     '/admin/update-email',
   'block-user':             '/admin/users/{id}/block',
   'device-binding':         '/device-binding',
@@ -855,6 +898,7 @@ const EDGE_FUNCTION_MAP: Record<string, string> = {
   'get-security-version':   '/security/version',
   'get-signed-url':         '/storage/signed-url',
   'impersonate':            '/auth/impersonate',
+  'impersonation-end':      '/auth/impersonation/end',
   'process-violation':      '/security/violations',
   'provider-health':        '/provider-health',
   'restore-account':        '/admin/users/{id}/restore',
@@ -1057,6 +1101,7 @@ const RPC_MAP: Record<string, string> = {
   'get_user_profile_summary':         '/analytics/user-profile/{id}',
   'get_video_asset_usage':            '/analytics/video-asset-usage',
   'delete_video_asset':               '/video/assets/delete',
+  'sync_vdocipher_library':           '/video/sync-library',
   'grant_course_access':              '/courses/grant-access',
   'lookup_user_by_identifier':        '/admin/user-lookup',
   'mark_deletion_repaired':           '/rpc/mark-deletion-repaired',
@@ -1142,6 +1187,7 @@ const GET_RPCS = new Set([
   'get_user_activity',
   'get_user_profile_summary',
   'get_video_asset_usage',
+  'sync_vdocipher_library',
   'search_audit_logs',
 ]);
 

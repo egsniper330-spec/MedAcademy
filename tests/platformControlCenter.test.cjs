@@ -147,8 +147,8 @@ const LISTED_PAGES = [
 
   // Every route file in the SA shell must be registered as a hidden tab, or
   // expo-router renders it as a stray tab with a raw route name.
-  const layout = read('src/app/(app)/(superadmin)/_layout.tsx');
-  const registered = new Set([...layout.matchAll(/name="([a-z-]+)"/g)].map(m => m[1]));
+  const layout = read('src/lib/nativeTabRegistry.tsx'); // registration lives in the shared registry
+  const registered = new Set([...layout.matchAll(/name:\s*'([a-z0-9-]+)'/g)].map(m => m[1]));
   const saFiles = walk('src/app/(app)/(superadmin)')
     .filter(f => /\.tsx$/.test(f) && !/_layout/.test(f))
     .map(f => path.basename(f, '.tsx'));
@@ -335,14 +335,18 @@ const LISTED_PAGES = [
     'contact: invalid destinations block the save with a visible error');
 
   const contact = read('src/app/(app)/info/contact.tsx');
-  ok(/parseContactLinks\(\(branding as any\)\?\.contact_links\)\.filter\(l => l\.enabled\)/.test(contact),
+  ok(/\.filter\(\(l\) => l\.enabled\)/.test(contact),
     'contact: the user screen renders only ENABLED configured links');
   ok(/contactLinkHref\(link\)/.test(contact), 'contact: tapping builds the href through the shared helper');
-  ok(/Linking\.openURL\(href\)\.catch\(\(\) => \{\}\)/.test(contact),
+  ok(/isSafeContactHref/.test(contact),
+    'contact: hrefs are safety-checked before rendering/opening (js/data/file/intent refused)');
+  ok(/void Linking\.openURL\(href\)\.catch\(\(\) => \{\}\)/.test(contact),
     'contact: an unavailable destination fails silently instead of crashing');
-  ok(/const configured = new Set\(customLinks\.map\(l => l\.platform\)\)/.test(contact),
+  ok(/const configured = new Set\(customLinks\.map\(\(l\) => l\.platform\)\)/.test(contact),
     'contact: legacy fixed channels are skipped when a configured link covers the platform');
   ok(/label: link\.label/.test(contact), 'contact: users see the friendly label (not the raw URL)');
+  ok(/Unable to load Contact Us/.test(contact) && /Retry/.test(contact),
+    'contact: genuine fetch failure reaches a terminal error state with Retry (no infinite spinner)');
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

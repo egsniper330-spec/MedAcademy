@@ -1073,6 +1073,10 @@ export interface CreateUserPayload {
   university_id?: string;
   faculty_id?: string;
   academic_level_id?: string;
+  /** Bulk-import CSV path: plain NAMES resolved to ids server-side. */
+  university?: string;
+  faculty?: string;
+  level?: string;
   status?: 'active' | 'suspended';
 }
 
@@ -2793,7 +2797,93 @@ export async function setAppUpdateConfig(
   return { ok: true };
 }
 
-// ── Support Settings ──────────────────────────────────────────────────────────
+// ── App release management (Super Admin) — mig028 ─────────────────────────
+// Production release lifecycle: draft/ready releases NEVER change Current
+// Production; only publish()/rollback() do (server-enforced, audited).
+export interface AppRelease {
+  id: string;
+  platform: 'android' | 'ios';
+  version: string; // canonical, NO v prefix
+  android_version_code: number | null;
+  ios_build_number: number | null;
+  download_url: string | null;
+  release_notes: string | null;
+  status: 'draft' | 'ready' | 'published' | 'archived';
+  published_at: string | null;
+  published_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AppReleasesOverview {
+  platforms: {
+    android: { current: AppRelease | null; history: AppRelease[] };
+    ios: { current: AppRelease | null; history: AppRelease[] };
+  };
+}
+
+export interface AppReleaseInput {
+  platform: 'android' | 'ios';
+  version: string;
+  android_version_code?: number | null;
+  ios_build_number?: number | null;
+  download_url?: string;
+  release_notes?: string;
+  status?: 'draft' | 'ready';
+}
+
+function parseApiError(e: unknown, fallback: string): string {
+  if (e && typeof e === 'object') {
+    const anyE = e as { message?: unknown; error?: { message?: unknown } };
+    if (typeof anyE.message === 'string' && anyE.message) return anyE.message;
+    if (typeof anyE.error?.message === 'string' && anyE.error.message) return anyE.error.message;
+  }
+  return fallback;
+}
+
+/** Current production + release history for both platforms (Super Admin). */
+export async function getAppReleasesOverview(): Promise<AppReleasesOverview> {
+  const { data, error } = await apiFetch<AppReleasesOverview>('/admin/app-releases', { method: 'GET' });
+  if (error) throw new Error(parseApiError(error, 'Failed to load releases'));
+  return data ?? { platforms: { android: { current: null, history: [] }, ios: { current: null, history: [] } } };
+}
+
+/** Create a draft/ready release. NEVER changes Current Production. */
+export async function createAppRelease(input: AppReleaseInput): Promise<AppRelease> {
+  const { data, error } = await apiFetch<AppRelease>('/admin/app-releases', { method: 'POST', body: input });
+  if (error) throw new Error(parseApiError(error, 'Failed to create release'));
+  return data as AppRelease;
+}
+
+/** Edit a draft/ready release. NEVER changes Current Production. */
+export async function updateAppRelease(id: string, input: Partial<AppReleaseInput>): Promise<AppRelease> {
+  const { data, error } = await apiFetch<AppRelease>(`/admin/app-releases/${id}`, { method: 'PUT', body: input });
+  if (error) throw new Error(parseApiError(error, 'Failed to update release'));
+  return data as AppRelease;
+}
+
+/** THE production-changing action: publish (or rollback via its endpoint). */
+export async function publishAppRelease(id: string): Promise<AppRelease> {
+  const { data, error } = await apiFetch<AppRelease>(`/admin/app-releases/${id}/publish`, { method: 'POST' });
+  if (error) throw new Error(parseApiError(error, 'Failed to publish release'));
+  return data as AppRelease;
+}
+
+/** Rollback: re-activate a previous production release (audited, non-destructive). */
+export async function rollbackAppRelease(id: string): Promise<AppRelease> {
+  const { data, error } = await apiFetch<AppRelease>(`/admin/app-releases/${id}/rollback`, { method: 'POST' });
+  if (error) throw new Error(parseApiError(error, 'Failed to roll back release'));
+  return data as AppRelease;
+}
+
+/** Archive a draft/ready release. */
+export async function archiveAppRelease(id: string): Promise<AppRelease> {
+  const { data, error } = await apiFetch<AppRelease>(`/admin/app-releases/${id}/archive`, { method: 'POST' });
+  if (error) throw new Error(parseApiError(error, 'Failed to archive release'));
+  return data as AppRelease;
+}
+
+// ── Support Settings ────────────────────────────────────────────────────────
 
 export interface SupportContactEntry {
   value:   string;
@@ -4938,6 +5028,34 @@ export async function getAdminCourseEnrollments(
     throw new Error(msg || 'Failed to load enrollments');
   }
   return Array.isArray((data as any)?.enrollments) ? (data as any).enrollments : [];
+}
+
+// ── Bulk Data Export (super_admin only, server-audited) ───────────────────
+
+export interface BulkExportResult {
+  type: string;
+  count: number;
+  rows: Record<string, unknown>[];
+}
+
+export type BulkExportType = 'users' | 'courses' | 'enrollments' | 'academic_structure';
+
+/**
+ * Super-Admin-only bulk export. The backend returns a bounded, column-
+ * allow-listed row set (no passwords/tokens/secrets — enforced server-side)
+ * and writes a `data_exported` audit event with the actor and row count.
+ */
+export async function bulkDataExport(
+  type: BulkExportType,
+  limit = 5000,
+): Promise<BulkExportResult> {
+  const { data, error } = await backendClient.functions.invoke('admin-data-export', {
+    body: { type, limit },
+  });
+  if (error) throw new Error(error.message || 'Export failed');
+  const result = data as BulkExportResult | null;
+  if (!result || !Array.isArray(result.rows)) throw new Error('Export returned an invalid payload');
+  return result;
 }
 
 /**

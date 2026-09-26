@@ -20,13 +20,30 @@ export interface VideoAsset {
   duration_seconds: number | null;
   file_size_bytes: number | null;
   thumbnail_url: string | null;
-  status: 'processing' | 'ready' | 'failed' | 'missing';
+  status: 'processing' | 'ready' | 'failed' | 'missing' | 'remotely_deleted' | 'duplicate_removed';
   upload_id: string | null;
+  remote_status?: 'exists' | 'missing' | 'unknown' | null; // mig027 — last verified remote existence
+  remote_synced_at?: string | null;                        // mig027 — when it was verified
   created_at: string;
   updated_at: string;
   // Computed by the query — not a real column
   lesson_count?: number;
   course_count?: number;
+}
+
+export interface VideoLibrarySyncSummary {
+  status: 'ok' | 'error';
+  scanned_local: number;
+  remote_videos: number;
+  remote_pages?: number;
+  missing_remote: number;
+  marked_unavailable: number;
+  duplicates: number;
+  reconciled: number;
+  unknown_verification?: number;
+  errors: number;
+  error?: string;
+  http_status?: number;
 }
 
 export interface VideoAssetUsage {
@@ -247,4 +264,19 @@ export async function deleteVideoAsset(assetId: string): Promise<DeleteAssetResu
   });
   if (error) throw error;
   return (data ?? { deleted: false }) as DeleteAssetResult;
+}
+
+// ── VdoCipher ↔ Video Library reconciliation (Super Admin) ─────────────────
+// POST /video/sync-library: verifies every VdoCipher-backed asset still exists
+// remotely (paginated official listing API), marks proven-missing assets
+// remotely_deleted, detects/consolidates duplicates by VdoCipher video ID.
+// A remote listing failure never marks anything deleted (error-safe).
+export async function syncVideoLibraryWithVdoCipher(
+  repairDuplicates = true,
+): Promise<VideoLibrarySyncSummary> {
+  const { data, error } = await backendClient.rpc('sync_vdocipher_library', {
+    repair_duplicates: repairDuplicates,
+  });
+  if (error) throw error;
+  return (data ?? { status: 'error', error: 'No response' }) as VideoLibrarySyncSummary;
 }

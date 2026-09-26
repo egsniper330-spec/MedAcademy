@@ -205,7 +205,12 @@ function read(rel) {
   const stubPath = path.join(outDir, 'transport-stub.js').replace(/\\/g, '/');
   fs.writeFileSync(stubPath,
     "let handler = async () => ({ data: null, error: null });\n" +
-    "module.exports = { apiFetch: (...a) => handler(...a), __setHandler: (fn) => { handler = fn; } };\n");
+    "const lucideCache = {};\n" +
+    "module.exports = {\n" +
+    "  apiFetch: (...a) => handler(...a),\n" +
+    "  __setHandler: (fn) => { handler = fn; },\n" +
+    "  lucideStub: new Proxy({}, { get: (_t, name) => (lucideCache[name] ??= function Icon() { return null; }) }),\n" +
+    "};\n");
 
   const compile = (rel, modName) => {
     const src = read(rel);
@@ -219,7 +224,10 @@ function read(rel) {
       ],
     }).code
       .replace(/require\("\@\/client\/backendClient"\)/g, 'require("' + stubPath + '")')
-      .replace(/require\("\@\/client\/php"\)/g, 'require("' + stubPath + '")');
+      .replace(/require\("\@\/client\/php"\)/g, 'require("' + stubPath + '")')
+      // branding.ts renders platform icons (lucide-react-native) — not
+      // loadable in plain node; the test only exercises the data contract.
+      .replace(/require\("lucide-react-native"\)/g, 'require("' + stubPath + '").lucideStub');
     const file = path.join(outDir, modName + '.js');
     fs.writeFileSync(file, out);
     return require(file);
@@ -255,12 +263,12 @@ function read(rel) {
       const transport = require(stubPath);
       transport.__setHandler(async () => ({ data: { branding: { app_name: 'CustomName' } }, error: null }));
       const live = await branding.fetchBrandingSafe(true);
-      ok(live !== undefined && live.app_name === 'CustomName',
+      ok(live !== undefined && live.branding.app_name === 'CustomName',
         'client branding: successful fetch adopts the server identity');
       transport.__setHandler(async () => { throw new Error('network down'); });
       const afterFail = await branding.fetchBrandingSafe(true);
-      ok(afterFail !== undefined && afterFail.app_name === 'CustomName' && afterFail.primary_color === '#1565C0',
-        'client branding: failed fetch serves last known state, never undefined');
+      ok(afterFail !== undefined && afterFail.branding.app_name === 'CustomName' && afterFail.branding.primary_color === '#1565C0' && afterFail.status === 'error',
+        'client branding: failed fetch serves last known state + status error, never undefined');
     } catch (e) {
       ok(false, 'client branding: module compiled/executed — ' + e.message);
     }

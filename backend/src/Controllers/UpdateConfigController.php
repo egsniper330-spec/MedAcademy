@@ -43,6 +43,10 @@ final class UpdateConfigController
     public function adminIndex(Request $request): array
     {
         $all = $this->updates->allConfigs();
+        // mig028 integration: app_releases.publish() promotes its values into
+        // app_update_config, so this admin view reflects the PUBLISHED
+        // production release — a draft/ready release never appears here.
+        // (Rows without a release history keep their manually-set values.)
         $out = [];
         foreach (AppUpdateService::PLATFORMS as $p) {
             $row = $all !== null ? ($all[$p] ?? null) : null;

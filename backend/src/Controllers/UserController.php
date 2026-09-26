@@ -104,6 +104,18 @@ final class UserController
              LEFT JOIN academic_levels al  ON al.id = p.academic_level_id
                  WHERE c.doctor_id = ?";
         $params = [$doctorId];
+        // SERVER-SIDE VISIBILITY POLICY (enrollments.visibility_level):
+        //   'all'              → visible to everyone
+        //   'admin_only'       → visible to Admin + Super Admin (hidden from doctors)
+        //   'super_admin_only' → visible to Super Admin only (hidden from doctors AND admins)
+        // The filter is applied in SQL — hidden rows never leave the server,
+        // so the policy cannot be bypassed by calling the API directly.
+        $callerRole = (string) ($request->user['role'] ?? 'doctor');
+        if ($callerRole === 'doctor') {
+            $sql .= " AND (e.visibility_level = 'all' OR e.visibility_level IS NULL)";
+        } elseif ($callerRole === 'admin') {
+            $sql .= " AND (e.visibility_level IN ('all', 'admin_only') OR e.visibility_level IS NULL)";
+        }
         if ($search !== '') {
             $sql .= " AND (p.full_name LIKE ? OR p.email LIKE ? OR p.phone_e164 LIKE ?)";
             $like = '%' . $search . '%';

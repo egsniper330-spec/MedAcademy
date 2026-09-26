@@ -34,6 +34,7 @@ import * as ScreenCaptureLib from '@/lib/screenCaptureGuard';
 import { SessionProvider, useSession } from '@/ctx';
 import { ToastProvider } from '@/components/Toast';
 import { ImpersonationBanner } from '@/components/ImpersonationBanner';
+import { rearmImpersonationAfterReload } from '@/lib/impersonationService';
 import { SecurityProvider, useSecurity } from '@/lib/SecurityContext';
 import { SecureAppOverlay } from '@/components/SecureAppOverlay';
 import ForceUpdateScreen from '@/components/ForceUpdateScreen';
@@ -330,6 +331,13 @@ function RootLayoutNav() {
 }
 
 const RootLayout: React.FC = () => {
+  // WEB-RELOAD RE-ARM: a browser reload keeps the target's persisted session
+  // but wipes the in-memory impersonation store. Restore banner + Exit context
+  // from the tab-scoped sessionStorage snapshot (no-op on native). Once.
+  useEffect(() => {
+    rearmImpersonationAfterReload();
+  }, []);
+
   // Make the Android system navigation bar fully transparent so React Navigation
   // can render the tab bar edge-to-edge and apply its own safe-area padding.
   // This works in tandem with android.navigationBarColor = "#00000000" in app.json.

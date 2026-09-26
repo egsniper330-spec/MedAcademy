@@ -310,7 +310,21 @@ final class VideoController
         }
 
         $providerVideoId = trim((string) $asset['provider_video_id']);
-        $providerExists = $providerVideoId !== '' && $this->video->providerExists($providerVideoId);
+        // ── STRICT remote state (Video Library sync contract) ──────────
+        // Only an HTTP 404 proves the asset is gone remotely. A timeout, 5xx
+        // or auth failure is UNKNOWN — the old providerExists() boolean
+        // collapsed all of these into "false" and the orphan branch then
+        // deleted the local row while the VdoCipher asset survived →
+        // orphaned remote assets. Unconfigured secret now blocks too.
+        $remoteState = 'unknown';
+        if ($providerVideoId === '') {
+            $remoteState = 'absent'; // pre-provider row: nothing to clean remotely
+        } else {
+            $remoteState = $this->video->verifyRemote($providerVideoId)['status']; // 'exists'|'missing'|'error'
+            if ($remoteState === 'error' && !$this->video->providerConfigured()) {
+                $remoteState = 'absent'; // no credentials → nothing remote to delete
+            }
+        }
 
         $usageRows = $db->select(
             'SELECT l.id AS lesson_id, l.title AS lesson_title, c.id AS course_id, c.title AS course_title
@@ -345,18 +359,36 @@ final class VideoController
                 [$assetId, $providerVideoId, $providerVideoId]
             );
 
-            // Only attempt VdoCipher DELETE if the provider video actually exists.
-            // For orphaned assets (provider video already deleted externally),
-            // skip the DELETE to avoid rolling back local cleanup.
-            $providerDeleted = true;
-            if ($providerExists) {
+            // REMOTE-FIRST deletion with verified state semantics:
+            //   exists  → DELETE remotely; failure rolls back the local
+            //             transaction and surfaces a structured error —
+            //             the library never claims a deletion that did
+            //             not happen upstream (retryable).
+            //   missing → remote deletion already satisfied (idempotent);
+            //             proceed with local cleanup. Also record a
+            //             remotely_deleted audit trail for the sync to
+            //             reconcile.
+            //   error   → UNKNOWN remote state — do NOT claim deletion and
+            //             do NOT orphan the remote asset; abort so the
+            //             doctor can retry when VdoCipher recovers.
+            if ($remoteState === 'exists') {
                 $providerResult = $this->video->deleteVideo($providerVideoId);
                 $providerDeleted = $providerResult['vdo_deleted'];
                 if (!$providerDeleted) {
                     $db->rollback();
                     throw new ApiException(502, $providerResult['vdo_error'] ?? 'VdoCipher deletion failed');
                 }
+            } elseif ($remoteState === 'missing') {
+                AuditService::write($request->user['id'], 'video_remote_missing', [
+                    'asset_id' => $assetId,
+                    'provider_video_id' => $providerVideoId,
+                    'outcome' => 'already_gone_at_delete_time',
+                ]);
+            } elseif ($remoteState === 'error') {
+                $db->rollback();
+                throw new ApiException(502, 'VdoCipher is unreachable — the video was NOT deleted. Please retry in a moment.');
             }
+            // remoteState 'absent' → no provider resource associated.
 
             $db->query('DELETE FROM video_assets WHERE id = ? AND doctor_id = ?', [$assetId, $asset['doctor_id']]);
             // Keep upload history for audit, but prevent it from being treated
@@ -1120,5 +1152,29 @@ final class VideoController
         ]);
 
         return ['deleted' => $deleted, 'failed' => $failed, 'total' => count($orphanVideos)];
+    }
+
+    /**
+     * POST /video/sync-library — VdoCipher ↔ Video Library reconciliation.
+     *
+     * Super Admin-only. Fetches the ENTIRE remote VdoCipher library via the
+     * official paginated listing API, verifies every VdoCipher-backed local
+     * asset still exists remotely, marks proven-missing assets
+     * remotely_deleted (with lessons flagged via the established 'missing'
+     * convention), detects/consolidates duplicate local records for the same
+     * VdoCipher video ID, and returns a structured summary.
+     *
+     * ERROR CONTRACT: a VdoCipher timeout/5xx/429/auth failure ABORTS the
+     * sync with local data untouched — a temporary network failure is never
+     * interpreted as a remote deletion.
+     */
+    public function syncLibrary(Request $request): array
+    {
+        // ── FEATURE KILL SWITCH (same model as playback/offline gates) ──
+        $this->flags->assertEnabled('video_library_sync', $request);
+
+        $repair = (bool) ($request->json()['repair_duplicates'] ?? true);
+        $sync = new \MedAcademy\Services\VideoLibrarySyncService($this->video);
+        return $sync->syncLibrary((string) $request->user['id'], $repair);
     }
 }

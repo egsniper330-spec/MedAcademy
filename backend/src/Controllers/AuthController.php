@@ -254,16 +254,34 @@ final class AuthController
         }
 
         $db = Database::instance();
-        $target = $db->row('SELECT id, email, role, full_name, security_version FROM profiles WHERE id = ?', [$targetUserId]);
+        $target = $db->row('SELECT id, email, role, full_name, status, security_version FROM profiles WHERE id = ?', [$targetUserId]);
         if ($target === null) {
+            AuditService::write($actorId, 'impersonation_failed', [
+                'target_user_id' => $targetUserId,
+                'reason' => 'target_not_found',
+            ]);
             throw new ApiException(404, 'User not found');
         }
 
         if ($target['role'] === 'super_admin') {
+            AuditService::write($actorId, 'impersonation_failed', [
+                'target_user_id' => $targetUserId,
+                'reason' => 'target_is_super_admin',
+            ]);
             throw new ApiException(403, 'Cannot impersonate Super Admin accounts');
         }
         if ($actorId === $targetUserId) {
             throw new ApiException(400, 'Cannot impersonate yourself');
+        }
+
+        // A suspended/blocked target must not gain a fresh session through
+        // impersonation — the account-status policy is preserved.
+        if (in_array((string) $target['status'], ['suspended', 'blocked', 'trashed', 'deleted'], true)) {
+            AuditService::write($actorId, 'impersonation_failed', [
+                'target_user_id' => $targetUserId,
+                'reason' => 'target_status_' . (string) $target['status'],
+            ]);
+            throw new ApiException(403, 'Cannot impersonate a ' . (string) $target['status'] . ' account');
         }
 
         // Generate a temporary session for the TARGET user. The 4th argument
@@ -290,5 +308,58 @@ final class AuthController
             'session' => $session,
             'target' => $target,
         ];
+    }
+
+    /**
+     * POST /auth/impersonation/end — explicit, server-audited end of an
+     * impersonation session. MUST be called with the TARGET's (now-current)
+     * access token — the impersonated context is the authenticated caller.
+     * The client then restores its own stored original session tokens (which
+     * the target user can never read), so no secret material crosses the wire.
+     */
+    public function endImpersonation(Request $request): array
+    {
+        $userId = (string) $request->user['id']; // the TARGET while impersonating
+        $db = Database::instance();
+
+        // Latest impersonation_started whose TARGET is the current caller.
+        // (impersonation_started is written with the ORIGINAL Super Admin as
+        // actor and the target recorded in details — matching on the target id
+        // is what makes this correct from the impersonated side.)
+        $start = $db->row(
+            "SELECT id FROM audit_logs
+              WHERE action = 'impersonation_started'
+                AND JSON_UNQUOTE(JSON_EXTRACT(details, '$.target_user_id')) = ?
+              ORDER BY created_at DESC LIMIT 1",
+            [$userId]
+        );
+
+        $alreadyEnded = false;
+        if ($start !== null) {
+            $endedCount = (int) $db->value(
+                "SELECT COUNT(*) FROM audit_logs
+                  WHERE action = 'impersonation_ended'
+                    AND JSON_UNQUOTE(JSON_EXTRACT(details, '$.start_log_id')) = ?",
+                [(string) $start['id']], 0
+            );
+            $alreadyEnded = $endedCount > 0;
+        }
+
+        if ($start === null || $alreadyEnded) {
+            // Nothing to end — not a hard error (the client is restoring its
+            // session regardless), but the attempt is audited so a repeated
+            // end-call or a forged one is visible.
+            AuditService::write($userId, 'impersonation_failed', [
+                'reason' => 'end_without_active_session',
+            ]);
+            return ['success' => false, 'message' => 'No active impersonation session.'];
+        }
+
+        AuditService::write($userId, 'impersonation_ended', [
+            'target_user_id' => $userId,
+            'start_log_id' => (string) $start['id'],
+        ]);
+
+        return ['success' => true];
     }
 }

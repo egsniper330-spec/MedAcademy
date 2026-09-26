@@ -24,7 +24,7 @@ export default function AboutPage() {
   const isDark = useColorScheme() === 'dark';
   const c = isDark ? neuColors.dark : neuColors.light;
   const layout = useLayout();
-  const branding = useBranding(); // server-managed display name (fails safe)
+  const { branding } = useBranding(); // server-managed display name (fails safe)
   // Optional server-managed About text (Super Admin → Platform → CMS Pages).
   // Empty body → nothing extra is rendered and the bundled copy stands alone.
   const aboutSections = useCmsSections('about_us', []);

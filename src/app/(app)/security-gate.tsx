@@ -42,7 +42,7 @@ import * as ScreenCaptureLib from '@/lib/screenCaptureGuard';
 import { ShieldAlert, WifiOff } from 'lucide-react-native';
 import { neuColors, useLayout } from '@/lib/neu';
 import { useSecurity } from '@/lib/SecurityContext';
-import { nextStickyTypes } from '@/lib/securityStateModel';
+import { nextStickyTypes, resolveGatePhase } from '@/lib/securityStateModel';
 
 /**
  * User-facing copy per blocking event. ROOT-CAUSE FIX (event-accurate gate
@@ -109,7 +109,7 @@ function gateFindings(types: string[]): GateFinding[] {
 }
 
 export function SecurityGate() {
-  const { threats, riskScore, blocksLogin, checking, onNewBlockingThreat } = useSecurity();
+  const { threats, riskScore, blocksLogin, checking, evaluating, hasVerdict, onNewBlockingThreat } = useSecurity();
   const scheme = useColorScheme();
   const isDark = scheme === 'dark';
   const c = isDark ? neuColors.dark : neuColors.light;
@@ -124,7 +124,7 @@ export function SecurityGate() {
   const gateTypesRef = useRef<string[]>([]);
   const liveBlocking = blocksLogin && threats.length > 0;
   const stickyTypes = nextStickyTypes(gateTypesRef.current, {
-    checking,
+    checking:        checking || evaluating,
     liveBlocking,
     liveThreatTypes: threats.map((t) => t.type),
   });
@@ -144,13 +144,22 @@ export function SecurityGate() {
     return () => unsub?.();
   }, [onNewBlockingThreat]);
 
-  // Gate condition: EITHER the live result blocks (server-configured policy,
-  // client fallback identical) OR a previously-verified blocking state is
-  // still being re-validated. Pure warn_only threats (hasWarnings without
-  // blocksLogin) do NOT gate — they surface on the security-warning screen.
-  const blocking = liveBlocking || stickyTypes.length > 0;
+  // Gate condition (AUTHORITATIVE PHASE — resolveGatePhase in the pure state
+  // model): 'blocked' requires a policy-confirmed blocking condition — the
+  // live verdict OR a previously-verified sticky block. Pending/unknown
+  // evaluation states are NEVER blocking: with no completed verdict the phase
+  // is 'pending' and the gate does not mount. Pure warn_only threats
+  // (hasWarnings without blocksLogin) do NOT gate — they surface on the
+  // security-warning screen.
+  const phase = resolveGatePhase({
+    hasVerdict,
+    evaluating:   evaluating || checking,
+    liveBlocking,
+    stickyCount:  stickyTypes.length,
+  });
+  const blocking = phase === 'blocked';
   const types = liveBlocking ? threats.map((t) => t.type) : stickyTypes;
-  const revalidating = !liveBlocking && checking;
+  const revalidating = !liveBlocking && (checking || evaluating);
   const findings = gateFindings(types);
 
   // Defensive belt-and-suspenders: while the gate is shown, block the Android
@@ -238,12 +247,17 @@ export function SecurityGate() {
         </View>
 
         {/* Risk score — informational telemetry from the same authoritative
-            result that drives the findings (never an independent decision). */}
-        <View style={[styles.pill, { backgroundColor: '#EF444418' }]}>
-          <Text style={{ fontSize: layout.captionSize, fontWeight: '700', color: '#EF4444' }}>
-            Risk Score: {riskScore}
-          </Text>
-        </View>
+            result that drives the findings (never an independent decision).
+            Rendered ONLY from a completed verdict (hasVerdict): the
+            fail-closed sentinel's weight can no longer surface here as a
+            fake "Risk Score: 10" — pending states never mount this page. */}
+        {hasVerdict && (
+          <View style={[styles.pill, { backgroundColor: '#EF444418' }]}>
+            <Text style={{ fontSize: layout.captionSize, fontWeight: '700', color: '#EF4444' }}>
+              Risk Score: {riskScore}
+            </Text>
+          </View>
+        )}
 
         {/* Fail-closed visibility: while a re-check re-validates a previously
             verified block (or the sentinel is live), say so — the user is

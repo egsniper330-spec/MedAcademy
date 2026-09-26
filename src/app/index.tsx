@@ -46,7 +46,7 @@ export default function LandingScreen() {
   // Server-managed platform identity (Super Admin → Platform → Branding).
   // Falls back to the built-in defaults on failure — this screen renders
   // identically whether or not the branding API is reachable.
-  const branding = useBranding();
+  const { branding } = useBranding();
 
   // Connectivity tri-state mirroring offlineTransition.useConnectivity exactly
   // (isConnected && isInternetReachable !== false). null = not yet determined.
