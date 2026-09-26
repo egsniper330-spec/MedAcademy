@@ -1,13 +1,14 @@
 import { useCallback, useMemo, useState } from 'react';
 import {
   View, Text, ScrollView, useColorScheme, RefreshControl,
-  ActivityIndicator, TextInput, Pressable, Alert, Linking, Switch,
+  ActivityIndicator, TextInput, Pressable, Linking, Switch,
 } from 'react-native';
 import { useFocusEffect } from 'expo-router';
 import {
   CheckCircle2, CloudUpload, History, Package, Rocket, Undo2, Archive,
 } from 'lucide-react-native';
 import { PageHeader } from '@/components/PageHeader';
+import { ConfirmDialog, type ConfirmDialogRequest } from '@/components/ConfirmDialog';
 import {
   getAppReleasesOverview, createAppRelease, updateAppRelease,
   publishAppRelease, rollbackAppRelease, archiveAppRelease,
@@ -96,6 +97,14 @@ export default function SuperAdminAppUpdates() {
   const [saving, setSaving] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [flash, setFlash] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  // Set when the form is editing an existing draft (its id) instead of creating.
+  const [editingId, setEditingId] = useState<string | null>(null);
+  // Cross-platform confirm dialog state. Alert.alert is a SILENT NO-OP on
+  // react-native-web — gating Publish/Archive/Rollback behind it made those
+  // buttons look completely frozen on web (callback never ran, no feedback).
+  const [confirm, setConfirm] = useState<ConfirmDialogRequest | null>(null);
+  const [confirmBusy, setConfirmBusy] = useState(false);
 
   const set = <K extends keyof FormState>(k: K, v: FormState[K]): void =>
     setForm((p) => ({ ...p, [k]: v }));
@@ -132,7 +141,7 @@ export default function SuperAdminAppUpdates() {
     useCallback(() => {
       let alive = true;
       load().catch((e) => {
-        if (alive) Alert.alert('Load failed', e instanceof Error ? e.message : 'Failed to load releases');
+        if (alive) showError(e instanceof Error ? e.message : 'Failed to load releases');
       }).finally(() => { if (alive) setLoading(false); });
       return () => { alive = false; };
     }, [load])
@@ -172,104 +181,144 @@ export default function SuperAdminAppUpdates() {
   }, [form, formPlatform]);
 
   const showFlash = (msg: string): void => {
+    setError(null);
     setFlash(msg);
     setTimeout(() => setFlash(null), 3000);
+  };
+
+  /**
+   * THE visible-failure rule: every failed action surfaces an inline,
+   * actionable error banner. Never swallowed, never Alert-only (Alert.alert
+   * is a silent no-op on react-native-web → the frozen-buttons bug).
+   */
+  const showError = (msg: string): void => {
+    setFlash(null);
+    setError(msg.length > 300 ? `${msg.slice(0, 300)}…` : msg);
+  };
+
+  /** Wrap a mutation for the confirm dialog: busy-lock, cleanup, then close. */
+  const runConfirmed = (
+    spec: Omit<ConfirmDialogRequest, 'loading'>,
+  ): void => {
+    setConfirm({
+      ...spec,
+      onConfirm: async () => {
+        setConfirmBusy(true);
+        try {
+          await spec.onConfirm();
+        } finally {
+          setConfirmBusy(false);
+          setConfirm(null);
+        }
+      },
+    });
   };
 
   // ── Actions ─────────────────────────────────────────────────────────────
   const onSaveDraft = async (): Promise<void> => {
     const version = normalizeSemanticVersion(form.version);
-    if (!version) { Alert.alert('Invalid version', 'Enter a semantic version like 1.1.0.'); return; }
+    if (!version) { showError('Invalid version: enter a semantic version like 1.1.0.'); return; }
     setSaving(true);
     try {
-      await createAppRelease({
-        platform: formPlatform,
+      if (editingId) {
+        // Editing an existing draft/ready release — update it in place.
+        // NEVER touches Current Production (server-enforced in updateRelease).
+        await updateAppRelease(editingId, {
+          platform: formPlatform,
+          version,
+          android_version_code: formPlatform === 'android' && form.androidBuild.trim() ? Number(form.androidBuild.trim()) : null,
+          ios_build_number: formPlatform === 'ios' && form.iosBuild.trim() ? Number(form.iosBuild.trim()) : null,
+          download_url: (formPlatform === 'android' ? form.androidUrl : form.iosUrl).trim() || undefined,
+          release_notes: form.releaseNotes.trim() || undefined,
+        });
+        showFlash(`Release v${version} updated — Current Production is unchanged until you publish it.`);
+      } else {
+        await createAppRelease({
+          platform: formPlatform,
         version,
         android_version_code: formPlatform === 'android' && form.androidBuild.trim() ? Number(form.androidBuild.trim()) : null,
         ios_build_number: formPlatform === 'ios' && form.iosBuild.trim() ? Number(form.iosBuild.trim()) : null,
         download_url: (formPlatform === 'android' ? form.androidUrl : form.iosUrl).trim() || undefined,
-        release_notes: form.releaseNotes.trim() || undefined,
-        status: 'ready',
-      });
+          release_notes: form.releaseNotes.trim() || undefined,
+          status: 'ready',
+        });
+        showFlash(`Release v${version} saved — Current Production is unchanged until you publish it.`);
+      }
       setForm(EMPTY_FORM);
-      showFlash(`Release v${version} saved — Current Production is unchanged until you publish it.`);
+      setEditingId(null);
       await load();
     } catch (e) {
-      Alert.alert('Save failed', e instanceof Error ? e.message : 'Unknown error');
+      showError(e instanceof Error ? e.message : 'Failed to save the release.');
     }
     setSaving(false);
   };
 
   const onPublish = (r: AppRelease & { _plat: Platform }): void => {
     if (!r.download_url) {
-      Alert.alert('Download URL required', `Set a download URL for v${r.version} before publishing.`);
+      showError(`Download URL required: set a download URL for v${r.version} before publishing.`);
       return;
     }
-    Alert.alert(
-      'Publish to production?',
-      `Current Production becomes ${displayVersion(r.version)} (${r._plat}). This is the ONLY action that changes production.`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Publish',
-          style: 'default',
-          onPress: async () => {
-            setBusyId(r.id);
-            try {
-              await publishAppRelease(r.id);
-              showFlash(`v${r.version} is now the Current Production release for ${r._plat}.`);
-              await load();
-            } catch (e) {
-              Alert.alert('Publish failed', e instanceof Error ? e.message : 'Unknown error');
-            }
-            setBusyId(null);
-          },
-        },
-      ]
-    );
-  };
-
-  const onRollback = (r: AppRelease & { _plat: Platform }): void => {
-    Alert.alert(
-      'Roll back production?',
-      `Current Production for ${r._plat} becomes ${displayVersion(r.version)} again. History is preserved.`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Roll Back',
-          onPress: async () => {
-            setBusyId(r.id);
-            try {
-              await rollbackAppRelease(r.id);
-              showFlash(`Production rolled back to v${r.version} for ${r._plat}.`);
-              await load();
-            } catch (e) {
-              Alert.alert('Rollback failed', e instanceof Error ? e.message : 'Unknown error');
-            }
-            setBusyId(null);
-          },
-        },
-      ]
-    );
-  };
-
-  const onArchive = (r: AppRelease): void => {
-    Alert.alert('Archive release?', `v${r.version} (${r.platform}) will be archived. History is preserved.`, [
-      { text: 'Cancel', style: 'cancel' },
+    runConfirmed(
       {
-        text: 'Archive',
-        onPress: async () => {
+        title: 'Publish to production?',
+        message: `Current Production becomes ${displayVersion(r.version)} (${r._plat}). This is the ONLY action that changes production.`,
+        confirmLabel: 'Publish',
+        onConfirm: async () => {
           setBusyId(r.id);
           try {
-            await archiveAppRelease(r.id);
+            await publishAppRelease(r.id);
+            showFlash(`v${r.version} is now the Current Production release for ${r._plat}.`);
             await load();
           } catch (e) {
-            Alert.alert('Archive failed', e instanceof Error ? e.message : 'Unknown error');
+            showError(e instanceof Error ? e.message : 'Publish failed.');
           }
           setBusyId(null);
         },
       },
-    ]);
+    );
+  };
+
+  const onRollback = (r: AppRelease & { _plat: Platform }): void => {
+    runConfirmed(
+      {
+        title: 'Roll back production?',
+        message: `Current Production for ${r._plat} becomes ${displayVersion(r.version)} again. History is preserved.`,
+        confirmLabel: 'Roll Back',
+        onConfirm: async () => {
+          setBusyId(r.id);
+          try {
+            await rollbackAppRelease(r.id);
+            showFlash(`Production rolled back to v${r.version} for ${r._plat}.`);
+            await load();
+          } catch (e) {
+            showError(e instanceof Error ? e.message : 'Rollback failed.');
+          }
+          setBusyId(null);
+        },
+      },
+    );
+  };
+
+  const onArchive = (r: AppRelease): void => {
+    runConfirmed(
+      {
+        title: 'Archive release?',
+        message: `v${r.version} (${r.platform}) will be archived. History is preserved.`,
+        confirmLabel: 'Archive',
+        destructive: true,
+        onConfirm: async () => {
+          setBusyId(r.id);
+          try {
+            await archiveAppRelease(r.id);
+            showFlash(`v${r.version} (${r.platform}) archived.`);
+            await load();
+          } catch (e) {
+            showError(e instanceof Error ? e.message : 'Archive failed.');
+          }
+          setBusyId(null);
+        },
+      },
+    );
   };
 
   // ── Enforcement policy (existing gate config) — save per platform ──────
@@ -277,31 +326,57 @@ export default function SuperAdminAppUpdates() {
     const pol = policy[p];
     const min = Number(pol.minimumVersionCode);
     const latest = Number(pol.latestVersionCode);
-    if (!Number.isInteger(min) || min < 0) { Alert.alert('Invalid policy', 'Minimum supported version code must be a non-negative integer.'); return; }
-    if (!Number.isInteger(latest) || latest <= 0) { Alert.alert('Invalid policy', 'Latest version code must be a positive integer.'); return; }
-    if (min > latest) { Alert.alert('Invalid policy', 'Minimum supported code cannot exceed the latest code.'); return; }
-    if (pol.enabled && pol.updateUrl && !/^https:\/\//i.test(pol.updateUrl.trim())) { Alert.alert('Invalid policy', 'Update URL must be a valid https:// URL.'); return; }
+    if (!Number.isInteger(min) || min < 0) { showError('Invalid policy: minimum supported version code must be a non-negative integer.'); return; }
+    if (!Number.isInteger(latest) || latest <= 0) { showError('Invalid policy: latest version code must be a positive integer.'); return; }
+    if (min > latest) { showError('Invalid policy: minimum supported code cannot exceed the latest code.'); return; }
+    if (pol.enabled && pol.updateUrl && !/^https:\/\//i.test(pol.updateUrl.trim())) { showError('Invalid policy: update URL must be a valid https:// URL.'); return; }
     setPolicy((prev) => ({ ...prev, [p]: { ...prev[p], saving: true } }));
-    const r = await setAppUpdateConfig(p, {
-      enabled: pol.enabled,
-      latestVersionName: pol.latestVersionName.trim() || `1.0.0`,
-      latestVersionCode: latest,
-      minimumVersionCode: min,
-      updateMode: pol.updateMode,
-      updateUrl: pol.updateUrl.trim() || 'https://medacademy.site/app/download',
-      releaseNotes: '',
-    });
-    setPolicy((prev) => ({ ...prev, [p]: { ...prev[p], saving: false } }));
-    if (!r.ok) {
-      Alert.alert('Save failed', r.error ?? 'Unknown error');
-      return;
+    try {
+      const r = await setAppUpdateConfig(p, {
+        enabled: pol.enabled,
+        latestVersionName: pol.latestVersionName.trim() || `1.0.0`,
+        latestVersionCode: latest,
+        minimumVersionCode: min,
+        updateMode: pol.updateMode,
+        updateUrl: pol.updateUrl.trim() || 'https://medacademy.site/app/download',
+        releaseNotes: '',
+      });
+      if (!r.ok) {
+        showError(r.error ?? 'Unknown error while saving the policy.');
+        return;
+      }
+      showFlash(`${p} enforcement policy saved (mode ${pol.updateMode}, floor ${min}).`);
+      // Re-read server state so the form reflects what actually persisted.
+      try {
+        const cfg = await getAppUpdateConfig(p);
+        setPolicy((prev) => ({
+          ...prev,
+          [p]: {
+            ...prev[p],
+            enabled: cfg.enabled,
+            updateMode: cfg.update_mode === 'OPTIONAL' ? 'OPTIONAL' : 'FORCED',
+            minimumVersionCode: cfg.minimum_version_code != null ? String(cfg.minimum_version_code) : '',
+            latestVersionName: cfg.latest_version_name ?? '',
+            latestVersionCode: cfg.latest_version_code != null ? String(cfg.latest_version_code) : '',
+            updateUrl: cfg.update_url ?? '',
+          },
+        }));
+      } catch { /* the save succeeded; the re-read is best-effort */ }
+    } catch (e) {
+      showError(e instanceof Error ? e.message : 'Failed to save the policy.');
+    } finally {
+      // ALWAYS reset — the old code left `saving` stuck true on any rejection,
+      // permanently disabling the Save button (frozen-button cause #2).
+      setPolicy((prev) => ({ ...prev, [p]: { ...prev[p], saving: false } }));
     }
-    showFlash(`${p} enforcement policy saved (mode ${pol.updateMode}, floor ${min}).`);
   };
 
   const onEditPending = (r: AppRelease & { _plat: Platform }): void => {
     // Load a pending release into the form for editing (drafts are mutable;
-    // published rows are immutable server-side).
+    // published rows are immutable server-side). editingId switches the Save
+    // button from createAppRelease to updateAppRelease — the old code always
+    // CREATED, so "editing" a draft silently produced a duplicate release.
+    setEditingId(r.id);
     setFormPlatform(r._plat);
     setForm({
       platform: r._plat,
@@ -363,7 +438,10 @@ export default function SuperAdminAppUpdates() {
         </View>
         {PLATFORMS.map((p) => {
           const cur = renderProductionCard(p);
-          const prev = data?.platforms[p].history.find((h) => h.status === 'archived');
+          // "Previous" must be a release that was ACTUALLY in production —
+          // an archived never-published draft (e.g. an abandoned draft) is
+          // not a previous production version.
+          const prev = data?.platforms[p].history.find((h) => h.status === 'archived' && h.published_at);
           return (
             <NeuCard key={p} style={{ marginBottom: 10, padding: 14 }}>
               <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
@@ -591,11 +669,23 @@ export default function SuperAdminAppUpdates() {
           ) : null}
 
           <NeuButton
-            label={saving ? 'Saving…' : 'Save Draft'}
-            onPress={onSaveDraft}
+            label={saving ? 'Saving…' : editingId ? 'Save Changes' : 'Save Draft'}
+            onPress={() => void onSaveDraft()}
             disabled={saving || !normalizeSemanticVersion(form.version) || !!formError}
             loading={saving}
           />
+          {editingId ? (
+            <Pressable
+              onPress={() => { setEditingId(null); setForm(EMPTY_FORM); }}
+              accessibilityRole="button"
+              accessibilityLabel="Cancel editing this release"
+              style={{ alignSelf: 'center', paddingVertical: 4, paddingHorizontal: 10 }}
+            >
+              <Text style={{ color: c.primary, fontSize: 12, fontWeight: '700' }}>
+                Cancel editing (new draft instead)
+              </Text>
+            </Pressable>
+          ) : null}
           <Text style={{ color: `${c.text}66`, fontSize: 11, textAlign: 'center', lineHeight: 16 }}>
             Saving a draft NEVER changes Current Production.{'\n'}
             Production changes only when you publish below.
@@ -730,11 +820,24 @@ export default function SuperAdminAppUpdates() {
           );
         })}
 
+        {/* ════════════════ SERVER-AUTHORITATIVE FEEDBACK ════════════════ */}
+        {error ? (
+          <NeuCard style={{ padding: 12, borderColor: '#EF4444' }}>
+            <Text style={{ color: '#EF4444', fontSize: 12, fontWeight: '700' }}>⚠ {error}</Text>
+          </NeuCard>
+        ) : null}
+
         {flash ? (
           <NeuCard style={{ padding: 12, borderColor: '#16A34A' }}>
             <Text style={{ color: '#16A34A', fontSize: 12, fontWeight: '700' }}>✓ {flash}</Text>
           </NeuCard>
         ) : null}
+
+        <ConfirmDialog
+          visible={confirm !== null}
+          request={confirm ? { ...confirm, loading: confirmBusy } : null}
+          onClose={() => setConfirm(null)}
+        />
 
         <Text style={{ color: `${c.text}55`, fontSize: 11, marginTop: 12, textAlign: 'center', lineHeight: 16 }}>
           The production version NEVER changes automatically — not by editing{'\n'}

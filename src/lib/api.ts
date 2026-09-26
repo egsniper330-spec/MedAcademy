@@ -2784,6 +2784,11 @@ export async function setAppUpdateConfig(
 ): Promise<{ ok: boolean; error?: string }> {
   const { error } = await backendClient.functions.invoke('set-app-update-config', {
     body: {
+      // CRITICAL: `platform` MUST be in the body. The PHP route is literally
+      // /admin/app-updates/{platform} — invokeFunction resolves the {platform}
+      // route token from payload.platform. Omitting it 422s EVERY save with
+      // "Missing route parameter: platform" (the frozen Save-Policy buttons).
+      platform,
       enabled: input.enabled,
       latestVersion: input.latestVersionName,
       latestVersionCode: input.latestVersionCode,
