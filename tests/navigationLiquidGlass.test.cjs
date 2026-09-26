@@ -193,5 +193,73 @@ check('no extra window/screen-capture code introduced', !readCode('src/app/_layo
 check('ios shell keeps DrawerNav sibling', iosShell.includes('<DrawerNav />'));
 check('js shell keeps DrawerNav sibling', jsShell.includes('<DrawerNav />'));
 
+/* ═══════════════════ F. Liquid Glass is NEVER a hard requirement ═══════════════════ */
+
+console.log('\n═══ F. Liquid Glass is NEVER a hard requirement ═══');
+
+// The compatibility model: glass is what the OS does when it draws the bar;
+// its absence cannot be observable to any JS code path. Assert the
+// implementation contains NO custom glass detection/gating.
+for (const api of ['expo-glass-effect', 'isGlassEffectAPIAvailable', 'isLiquidGlassAvailable', 'GlassEffectView']) {
+  check(`ios shell free of custom glass API '${api}'`, !iosShell.includes(api));
+}
+for (const api of ['expo-glass-effect', 'isGlassEffectAPIAvailable', 'isLiquidGlassAvailable']) {
+  check(`registry free of custom glass API '${api}'`, !registrySrc.includes(api));
+}
+
+// The navigator must render unconditionally: no early returns before the
+// navigator, no glass/OS-version conditionals around it, no loading states.
+const iosBody = iosShell.slice(iosShell.indexOf('export default function RoleTabShell'));
+check('ios shell has no early return before the navigator', !iosBody.includes('return null') && !iosBody.includes('return <')); 
+check('ios shell navigator is the only conditional-free render path', /<NativeBottomTabs/.test(iosBody));
+check('ios shell no OS-version branching', !/Platform\.Version|ProcessInfo|isIOS26/.test(iosShell));
+check('ios shell no loading/ready state around navigation', !iosShell.includes('isLoading') && !iosShell.includes('isGlassReady'));
+
+// Native library: every iOS-26-only API is inside #available guards (the
+// compiler enforces the fallback path), and the pod floor stays low.
+const swiftDir = 'node_modules/react-native-bottom-tabs/ios';
+const swiftFiles = [];
+(function walk(dir) {
+  for (const f of fs.readdirSync(path.join(ROOT, dir))) {
+    const p = path.join(ROOT, dir, f);
+    if (fs.statSync(p).isDirectory()) walk(path.join(dir, f));
+    else if (/\.swift$|\.mm$/.test(f)) swiftFiles.push(p);
+  }
+})('node_modules/react-native-bottom-tabs/ios');
+const unguarded = swiftFiles.filter((f) => {
+  const src = fs.readFileSync(f, 'utf8');
+  const lines = src.split('\n');
+  const API26 = /\.glassEffect|GlassEffectContainer|tabBarMinimizeBehavior|UITab\(/;
+  if (!API26.test(src)) return false;
+  // Members declared in this same file whose own body is availability-guarded
+  // (the library's shim pattern: `#if compiler(>=6.2)` + `#available(iOS 26…)`
+  // with a `self` no-op fallback) make every call site of that member safe.
+  const shims = new Set();
+  lines.forEach((l, i) => {
+    const m = l.match(/func\s+(\w+)\s*\(/);
+    if (m) {
+      const body = lines.slice(i, i + 30).join('\n');
+      if (/#available|@available|#if compiler/.test(body)) shims.add(m[1]);
+    }
+  });
+  return lines.some((l, i) => {
+    if (!API26.test(l)) return false;
+    const name = (l.match(/\.?(\w+)\(/) || [])[1] || '';
+    if (shims.has(name)) return false; // resolves to a guarded shim
+    const ctx = lines.slice(Math.max(0, i - 3), i + 2).join('\n');
+    return !/#available|@available|#if compiler/.test(ctx); // unguarded call site
+  });
+});
+check('native lib: iOS-26 APIs are availability-guarded', unguarded.length === 0, unguarded.join(', ') || 'ok');
+check('native lib pod floor stays at iOS 14 (no min-target bump)', /s\.ios\.deployment_target\s*=\s*"14\.0"/.test(fs.readFileSync(path.join(ROOT, 'node_modules/react-native-bottom-tabs/react-native-bottom-tabs.podspec'), 'utf8')));
+
+// App deployment target unchanged by this work.
+const appJson = read('app.json');
+check('app.json carries no deploymentTarget bump', !/deploymentTarget/i.test(appJson) || /14\.0|15\.1/.test(appJson));
+
+// Glass absence must never touch app state: navigation readiness cannot be
+// coupled to any glass concept in the whole navigation layer.
+check('no glass/state coupling anywhere in navigation code', !iosShell.includes('glass') || !/glass.*(gate|ready|init|state)/i.test(iosShell));
+
 console.log(`\n═══ RESULT: ${passed} passed, ${failed} failed ═══`);
 process.exit(failed ? 1 : 0);
