@@ -101,8 +101,36 @@ const withGradleWrapper = (config) => {
       const gradlePropsFile = path.join(projectRoot, 'gradle.properties');
       if (fs.existsSync(gradlePropsFile)) {
         let contents = fs.readFileSync(gradlePropsFile, 'utf8');
-        // Idempotent: only append if not already present
-        if (!contents.includes('react.internal.disableJavaVersionAlignment')) {
+        // Idempotent: only append if not already present.
+        // Dedupe pass: earlier versions of this plugin appended on every
+        // prebuild, leaving multiple duplicate blocks in generated
+        // gradle.properties (observed: 5 copies). Strip repeats first so the
+        // generated file converges to exactly one block regardless of history.
+        const marker = 'react.internal.disableJavaVersionAlignment=true';
+        const firstIdx = contents.indexOf(marker);
+        if (firstIdx >= 0) {
+          // Keep everything up to and including the FIRST block, then drop any
+          // subsequent re-appended blocks (comment lines + the three props).
+          const head = contents.slice(0, firstIdx);
+          const tail = contents.slice(firstIdx);
+          const blockEnd = tail.indexOf('org.gradle.daemon=false');
+          if (blockEnd >= 0) {
+            const keepBlock = tail.slice(0, blockEnd + 'org.gradle.daemon=false'.length);
+            let rest = tail.slice(blockEnd + 'org.gradle.daemon=false'.length);
+            // Remove every later occurrence of the three property lines.
+            rest = rest
+              .split('\n')
+              .filter((l) =>
+                !l.includes('react.internal.disableJavaVersionAlignment') &&
+                !l.includes('org.gradle.java.installations.auto-provisioning') &&
+                !/^org\.gradle\.daemon=false\s*$/.test(l.trim())
+              )
+              .join('\n');
+            contents = head + keepBlock + rest;
+            fs.writeFileSync(gradlePropsFile, contents, 'utf8');
+            console.log('[withGradleWrapper] Deduped toolchain-disable block in gradle.properties');
+          }
+        } else {
           contents += GRADLE_PROPS_ADDITIONS;
           fs.writeFileSync(gradlePropsFile, contents, 'utf8');
           console.log(

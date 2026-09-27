@@ -7,7 +7,7 @@
     "android": "expo run:android",
     "ios": "expo run:ios",
     "web": "expo start --web",
-    "lint": "devkit-lint",
+    "lint": "eslint .",
     "test:state": "node .freebuff/run-state-tests.cjs",
     "validate:kotlin": "node scripts/validate-kotlin-template.js",
     "validate:swift": "node scripts/validate-swift-source.js",

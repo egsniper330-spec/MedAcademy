@@ -172,6 +172,7 @@ function withIosUploadSource(config) {
       // Find the main source directory (usually ios/MedAcademy/)
       const appName = cfg.modResults?.expoConfig?.name || 'MedAcademy';
       const iosAppDir = path.join(iosDir, appName);
+      let targetDir;
       if (!fs.existsSync(iosAppDir)) {
         // Try finding the actual app directory
         const iosDirs = fs.readdirSync(iosDir).filter(d => {
@@ -183,9 +184,9 @@ function withIosUploadSource(config) {
           return cfg;
         }
         // Use the first non-Pods directory
-        var targetDir = path.join(iosDir, iosDirs[0]);
+        targetDir = path.join(iosDir, iosDirs[0]);
       } else {
-        var targetDir = iosAppDir;
+        targetDir = iosAppDir;
       }
 
       // Copy Swift source files

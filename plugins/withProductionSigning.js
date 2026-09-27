@@ -122,8 +122,8 @@ function withProductionSigning(config) {
         `                expectedCert = certFile.text.trim()`,
         `            }`,
         `        }`,
-        `        buildConfigField "String", "EXPECTED_CERT_SHA256", "\\"${expectedCert.trim()}\\"`,
-        `        buildConfigField "String", "API_SPKI_PINS", "\\"\\"\\"\"\\"`,
+        '        buildConfigField "String", "EXPECTED_CERT_SHA256", "\\"${expectedCert.trim()}\\""',
+        '        buildConfigField "String", "API_SPKI_PINS", "\\"\\""',
       ].join('\n');
       if (c.includes(anchor)) {
         c = c.replace(anchor, anchor + '\n' + injection);

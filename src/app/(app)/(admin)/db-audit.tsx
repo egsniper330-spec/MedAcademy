@@ -189,7 +189,7 @@ export default function DbAuditPanel({ backTo }: { backTo?: string } = {}) {
             <AlertTriangle size={40} color="#DC2626" />
             <Text style={{ fontSize: 14, fontWeight: '600', color: c.text, marginTop: 12 }}>Unable to run the integrity audit</Text>
             <Text style={{ fontSize: 12, color: c.text, opacity: 0.5, marginTop: 6, textAlign: 'center' }}>
-              The audit endpoint returned an error. Pull to refresh or tap "Run Audit" to retry.
+              The audit endpoint returned an error. Pull to refresh or tap &quot;Run Audit&quot; to retry.
             </Text>
           </NeuCard>
         ) : audit ? (

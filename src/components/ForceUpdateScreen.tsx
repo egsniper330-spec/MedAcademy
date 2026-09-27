@@ -158,7 +158,7 @@ export default function ForceUpdateScreen(): React.JSX.Element {
 
         {update.releaseNotes ? (
           <View style={styles.card}>
-            <Text style={styles.notesTitle}>What's new</Text>
+            <Text style={styles.notesTitle}>What&apos;s new</Text>
             <Text style={styles.notes}>{update.releaseNotes}</Text>
           </View>
         ) : null}

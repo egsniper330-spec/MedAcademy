@@ -1,8 +1,8 @@
 "use strict";
-var import_expo = require("expo");
-var import_react_native = require("react-native");
-var import_web_stub_dialog = require("./web-stub-dialog");
-var import_i18n = require("./i18n");
+let import_expo = require("expo");
+let import_react_native = require("react-native");
+let import_web_stub_dialog = require("./web-stub-dialog");
+let import_i18n = require("./i18n");
 if (import_react_native.Platform.OS !== "web" && !(0, import_expo.isRunningInExpoGo)()) {
   module.exports = require("expo-haptics");
 } else {
@@ -27,7 +27,7 @@ if (import_react_native.Platform.OS !== "web" && !(0, import_expo.isRunningInExp
     }
     return { ok: true, errors: [] };
   };
-  var validateImpactStyle2 = validateImpactStyle, validateNotificationType2 = validateNotificationType;
+  let validateImpactStyle2 = validateImpactStyle, validateNotificationType2 = validateNotificationType;
   const ImpactFeedbackStyle = {
     Light: "light",
     Medium: "medium",

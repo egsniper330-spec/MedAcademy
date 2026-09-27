@@ -87,7 +87,7 @@ function NotificationsContent() {
               No Notifications Yet
             </Text>
             <Text style={{ fontSize: 14, color: c.text, opacity: 0.45, textAlign: 'center', lineHeight: 22 }}>
-              You're all caught up.{'\n'}New notifications will appear here.
+              You&apos;re all caught up.{'\n'}New notifications will appear here.
             </Text>
           </View>
 

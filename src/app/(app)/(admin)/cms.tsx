@@ -438,7 +438,7 @@ export default function CMSPagesScreen({ backTo }: { backTo?: string } = {}) {
                     />
                     <Text style={{ fontSize: 11, fontWeight: '700', color: c.text, opacity: 0.5, marginBottom: 6, textTransform: 'uppercase' }}>Content</Text>
                     <Text style={{ fontSize: 11, color: c.text, opacity: 0.45, marginBottom: 8, lineHeight: 16 }}>
-                      Plain text — no HTML. Lines starting with ## become section headings. Leave empty to keep the app's built-in text.
+                      Plain text — no HTML. Lines starting with ## become section headings. Leave empty to keep the app&apos;s built-in text.
                     </Text>
                     <View style={{ ...inp, minWidth: 0, marginBottom: 16 }}>
                       <TextInput

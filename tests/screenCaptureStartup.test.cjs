@@ -260,7 +260,6 @@ function read(rel) {
     ok(false, 'guard: behavioral suite crashed — ' + e.message);
     summary();
   });
-  return; // summary printed by the async completion
 }
 
 function summary() {

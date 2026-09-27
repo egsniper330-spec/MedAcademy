@@ -1,7 +1,7 @@
 "use strict";
-var import_react_native = require("react-native");
-var import_web_stub_dialog = require("./web-stub-dialog");
-var import_i18n = require("./i18n");
+let import_react_native = require("react-native");
+let import_web_stub_dialog = require("./web-stub-dialog");
+let import_i18n = require("./i18n");
 if (import_react_native.Platform.OS !== "web") {
   module.exports = require("expo-file-system/legacy");
 } else {
@@ -30,7 +30,7 @@ if (import_react_native.Platform.OS !== "web") {
   }, truncate = function(s, max = 60) {
     return s.length > max ? s.slice(0, max) + "\u2026" : s;
   };
-  var showFileSystemDialog2 = showFileSystemDialog, validateString2 = validateString, validateRemoteUrl2 = validateRemoteUrl, truncate2 = truncate;
+  let showFileSystemDialog2 = showFileSystemDialog, validateString2 = validateString, validateRemoteUrl2 = validateRemoteUrl, truncate2 = truncate;
   const cacheDirectory = "cache:/";
   const documentDirectory = "document:/";
   const bundleDirectory = "bundle:/";

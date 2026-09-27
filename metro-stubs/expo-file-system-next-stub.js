@@ -1,7 +1,7 @@
 "use strict";
-var import_react_native = require("react-native");
-var import_web_stub_dialog = require("./web-stub-dialog");
-var import_i18n = require("./i18n");
+let import_react_native = require("react-native");
+let import_web_stub_dialog = require("./web-stub-dialog");
+let import_i18n = require("./i18n");
 if (import_react_native.Platform.OS !== "web") {
   module.exports = require("expo-file-system");
 } else {
@@ -21,7 +21,7 @@ if (import_react_native.Platform.OS !== "web") {
     parts.pop();
     return parts.join("/") || "/";
   };
-  var joinUris2 = joinUris, uriBasename2 = uriBasename, uriDirname2 = uriDirname;
+  let joinUris2 = joinUris, uriBasename2 = uriBasename, uriDirname2 = uriDirname;
   console.warn("[devkit] expo-file-system-next-stub loaded (web)");
   class Directory {
     constructor(...uris) {

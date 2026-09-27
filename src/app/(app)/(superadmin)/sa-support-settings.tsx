@@ -291,7 +291,7 @@ export default function SaSupportSettings() {
               <Text style={{ flex: 1, fontSize: layout.captionSize, color: `${c.text}88`, lineHeight: layout.captionSize * 1.6 }}>
                 Enabled contact methods will appear on the security warning screen when a user is blocked from logging in.
                 If only one method is enabled, it will open directly. If multiple are enabled, the user will see a chooser.
-                If none are enabled, users will see a "Support not configured" message.
+                If none are enabled, users will see a &quot;Support not configured&quot; message.
               </Text>
             </NeuCard>
 

@@ -1,8 +1,8 @@
 "use strict";
-var import_expo = require("expo");
-var import_react_native = require("react-native");
-var import_web_stub_dialog = require("./web-stub-dialog");
-var import_i18n = require("./i18n");
+let import_expo = require("expo");
+let import_react_native = require("react-native");
+let import_web_stub_dialog = require("./web-stub-dialog");
+let import_i18n = require("./i18n");
 if (import_react_native.Platform.OS !== "web" && !(0, import_expo.isRunningInExpoGo)()) {
   module.exports = require("expo-notifications");
 } else {
@@ -105,7 +105,7 @@ if (import_react_native.Platform.OS !== "web" && !(0, import_expo.isRunningInExp
     }
     return { ok: errors.length === 0, errors };
   };
-  var showDetailedAlert2 = showDetailedAlert, formatScheduleRequest2 = formatScheduleRequest, validateScheduleRequest2 = validateScheduleRequest, validateChannel2 = validateChannel;
+  let showDetailedAlert2 = showDetailedAlert, formatScheduleRequest2 = formatScheduleRequest, validateScheduleRequest2 = validateScheduleRequest, validateChannel2 = validateChannel;
   const DENIED_PERMISSION = {
     status: "denied",
     granted: false,

@@ -277,7 +277,7 @@ function DiagnosticsContent() {
 
             {!state.moduleFound && (
               <Text style={{ fontSize: 13, color: '#EF4444', lineHeight: 20 }}>
-                Module is null. This means SecurityModule was not compiled into the APK. Most likely cause: SecurityModule.kt contains a compile error (null byte, syntax error) OR SecurityPackage was not added to PackageList in MainApplication.kt. Check `adb logcat | grep -i "SecurityModule"` after a fresh build.
+                Module is null. This means SecurityModule was not compiled into the APK. Most likely cause: SecurityModule.kt contains a compile error (null byte, syntax error) OR SecurityPackage was not added to PackageList in MainApplication.kt. Check `adb logcat | grep -i &quot;SecurityModule&quot;` after a fresh build.
               </Text>
             )}
           </NeuCard>

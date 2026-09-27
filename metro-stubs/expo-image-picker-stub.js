@@ -1,6 +1,6 @@
 "use strict";
-var import_react_native = require("react-native");
-var import_i18n = require("./i18n");
+let import_react_native = require("react-native");
+let import_i18n = require("./i18n");
 function isDesktopBrowser() {
   if (typeof navigator === "undefined") return false;
   const ua = navigator.userAgent;

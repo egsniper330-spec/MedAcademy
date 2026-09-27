@@ -1,7 +1,7 @@
 "use strict";
-var import_react_native = require("react-native");
-var import_web_stub_dialog = require("./web-stub-dialog");
-var import_i18n = require("./i18n");
+let import_react_native = require("react-native");
+let import_web_stub_dialog = require("./web-stub-dialog");
+let import_i18n = require("./i18n");
 if (import_react_native.Platform.OS !== "web") {
   module.exports = require("expo-calendar");
 } else {
@@ -56,7 +56,7 @@ if (import_react_native.Platform.OS !== "web") {
     const getPermission = useCallback(async () => GRANTED_PERMISSION, []);
     return [permission, requestPermission, getPermission];
   };
-  var createStubCalendar2 = createStubCalendar, showCalendarAlert2 = showCalendarAlert, validateId2 = validateId, validateDate2 = validateDate, formatDateArg2 = formatDateArg, useCalendarPermissions2 = useCalendarPermissions, useRemindersPermissions2 = useRemindersPermissions;
+  let createStubCalendar2 = createStubCalendar, showCalendarAlert2 = showCalendarAlert, validateId2 = validateId, validateDate2 = validateDate, formatDateArg2 = formatDateArg, useCalendarPermissions2 = useCalendarPermissions, useRemindersPermissions2 = useRemindersPermissions;
   const GRANTED_PERMISSION = {
     status: "granted",
     granted: true,

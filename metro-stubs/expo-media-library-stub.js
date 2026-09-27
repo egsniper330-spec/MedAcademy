@@ -1,8 +1,8 @@
 "use strict";
-var import_react_native = require("react-native");
-var import_expo = require("expo");
-var import_web_stub_dialog = require("./web-stub-dialog");
-var import_i18n = require("./i18n");
+let import_react_native = require("react-native");
+let import_expo = require("expo");
+let import_web_stub_dialog = require("./web-stub-dialog");
+let import_i18n = require("./i18n");
 if (import_react_native.Platform.OS !== "web" && !(0, import_expo.isRunningInExpoGo)()) {
   module.exports = require("expo-media-library");
 } else {
@@ -46,7 +46,7 @@ if (import_react_native.Platform.OS !== "web" && !(0, import_expo.isRunningInExp
     const getPermission = useCallback(async () => permission, [permission]);
     return [permission, requestPermission, getPermission];
   };
-  var showMediaLibraryAlert2 = showMediaLibraryAlert, validateUri2 = validateUri, usePermissions2 = usePermissions;
+  let showMediaLibraryAlert2 = showMediaLibraryAlert, validateUri2 = validateUri, usePermissions2 = usePermissions;
   const UNDETERMINED_PERMISSION = {
     status: "undetermined",
     granted: false,
