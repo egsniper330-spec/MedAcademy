@@ -359,17 +359,32 @@ jobs:
             echo "❌ SecurityPackage.kt not found in artifact"
             exit 1
           fi
-          # Create stub interfaces so kotlinc can resolve ReactPackage without Android SDK
-          cat > /tmp/stubs.kt << 'EOF'
+          # Stub the React Native surface the package file references, so
+          # kotlinc can resolve it without the Android SDK. IMPORTANT: Kotlin
+          # allows only ONE package declaration per file, so each package gets
+          # its own stub file. SecurityModule is stubbed too — the real one is
+          # not in the artifact (it imports android.* classes); this job checks
+          # the PACKAGE file's syntax/structure, not the module implementation.
+          mkdir -p /tmp/stubs/com/facebook/react
+          cat > /tmp/stubs/RNStubs1.kt << 'EOF'
           package com.facebook.react
           interface ReactPackage
+          EOF
+          cat > /tmp/stubs/RNStubs2.kt << 'EOF'
           package com.facebook.react.bridge
           interface NativeModule
           class ReactApplicationContext
+          EOF
+          cat > /tmp/stubs/RNStubs3.kt << 'EOF'
           package com.facebook.react.uimanager
           interface ViewManager<T, S>
           EOF
-          kotlinc /tmp/stubs.kt "$PKGFILE" -include-runtime -d /tmp/sec-package.jar 2>&1 \
+          cat > /tmp/stubs/SecurityModuleStub.kt << 'EOF'
+          package com.medacademy.security
+          class SecurityModule(private val ctx: com.facebook.react.bridge.ReactApplicationContext)
+          EOF
+          kotlinc /tmp/stubs/RNStubs1.kt /tmp/stubs/RNStubs2.kt /tmp/stubs/RNStubs3.kt \
+            /tmp/stubs/SecurityModuleStub.kt "$PKGFILE" -include-runtime -d /tmp/sec-package.jar 2>&1 \
             | tee /tmp/kotlin-compile.log
           if grep -qE '^.*error:' /tmp/kotlin-compile.log; then
             echo "❌ Kotlin compile error in SecurityPackage.kt"

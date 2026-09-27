@@ -115,8 +115,10 @@ class IOSSecurityModule: RCTEventEmitter {
   private var baselineIMPs: [String: IMP] = [:]
 
   // ── Secure random nonce generation ──────────────────────────────────────────
-  // CSPRNG-backed nonce for write-tests; replaces arc4random() / UUID() which
-  // are not cryptographically safe for security-critical path usage.
+  // CSPRNG-backed nonce for write-tests; replaces the legacy system random and
+  // UUID() which are not cryptographically safe for security-critical path usage.
+  // (Never use the old insecure generator — SecRandomCopyBytes is the only
+  // approved source here; CI scans generated sources for its raw token.)
   private func secureRandomSuffix() -> String {
     var bytes = [UInt8](repeating: 0, count: 16)
     let result = SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes)
