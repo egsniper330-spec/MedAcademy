@@ -360,52 +360,61 @@ jobs:
             exit 1
           fi
           # Stub the React Native surface the package file references, so
-          # kotlinc can resolve it without the Android SDK. IMPORTANT: Kotlin
-          # allows only ONE package declaration per file, so each package gets
-          # its own stub file. The stub signatures mirror the real RN 0.8x
-          # interfaces — SecurityPackage.kt OVERRIDES these methods, so stubs
-          # without matching members would fail with "overrides nothing".
-          # SecurityModule is stubbed as a NativeModule — the real one is not
-          # in the artifact (it imports android.* classes); this job checks
-          # the PACKAGE file's syntax/structure, not the module implementation.
+          # kotlinc can resolve it without the Android SDK. IMPORTANT:
+          #  1. Kotlin allows only ONE package declaration per file — one stub
+          #     file per package.
+          #  2. YAML block scalars indent every line of this run block; heredoc
+          #     bodies inherit that indent, and Kotlin requires `package` at
+          #     column 0. So each stub is written with `sed` stripping the
+          #     YAML/script indent (the indented `EOF` terminators would never
+          #     close a plain heredoc — GitHub runner shells do NOT use <<-).
+          #  3. Stub signatures mirror the real RN interfaces —
+          #     SecurityPackage.kt OVERRIDES these members; SecurityModule is
+          #     stubbed as a NativeModule (the real one imports android.* and
+          #     is not part of this artifact; this job checks the PACKAGE file).
+          # The '@_EOF_' marker is unique so it can never collide with content.
           mkdir -p /tmp/stubs
-          cat > /tmp/stubs/RNStubs1.kt << 'EOF'
-          package com.facebook.react
-
+          STUB1='package com.facebook.react
+          
           import com.facebook.react.bridge.NativeModule
           import com.facebook.react.bridge.ReactApplicationContext
           import com.facebook.react.uimanager.ViewManager
-
+          
           interface ReactPackage {
               fun createNativeModules(ctx: ReactApplicationContext): List<NativeModule>
               fun createViewManagers(ctx: ReactApplicationContext): List<ViewManager<*, *>>
-          }
-          EOF
-          cat > /tmp/stubs/RNStubs2.kt << 'EOF'
-          package com.facebook.react.bridge
-
+          }'
+          STUB2='package com.facebook.react.bridge
+          
           interface NativeModule {
               fun getName(): String
               fun invalidate()
           }
-          class ReactApplicationContext
-          EOF
-          cat > /tmp/stubs/RNStubs3.kt << 'EOF'
-          package com.facebook.react.uimanager
-
-          interface ViewManager<T, S>
-          EOF
-          cat > /tmp/stubs/SecurityModuleStub.kt << 'EOF'
-          package com.medacademy.security
-
+          class ReactApplicationContext'
+          STUB3='package com.facebook.react.uimanager
+          
+          interface ViewManager<T, S>'
+          STUB4='package com.medacademy.security
+          
           import com.facebook.react.bridge.NativeModule
           import com.facebook.react.bridge.ReactApplicationContext
-
+          
           class SecurityModule(private val ctx: ReactApplicationContext) : NativeModule {
               override fun getName(): String = "SecurityModule"
               override fun invalidate() {}
-          }
-          EOF
+          }'
+          # YAML block-scalar indent is 10 spaces inside this run block;
+          # single-quoted vars above keep literal newlines. Write with the
+          # indent stripped from line starts (blank lines stay blank).
+          printf '%s\n' "$STUB1" | sed -e 's/^          //' > /tmp/stubs/RNStubs1.kt
+          printf '%s\n' "$STUB2" | sed -e 's/^          //' > /tmp/stubs/RNStubs2.kt
+          printf '%s\n' "$STUB3" | sed -e 's/^          //' > /tmp/stubs/RNStubs3.kt
+          printf '%s\n' "$STUB4" | sed -e 's/^          //' > /tmp/stubs/SecurityModuleStub.kt
+          echo "── stub files as written (verify column-0 package lines) ──"
+          head -1 /tmp/stubs/RNStubs1.kt
+          head -1 /tmp/stubs/RNStubs2.kt
+          head -1 /tmp/stubs/RNStubs3.kt
+          head -1 /tmp/stubs/SecurityModuleStub.kt
           kotlinc /tmp/stubs/RNStubs1.kt /tmp/stubs/RNStubs2.kt /tmp/stubs/RNStubs3.kt \
             /tmp/stubs/SecurityModuleStub.kt "$PKGFILE" -include-runtime -d /tmp/sec-package.jar 2>&1 \
             | tee /tmp/kotlin-compile.log
