@@ -53,28 +53,28 @@ function walk(dir, out = []) {
 // ─────────────────────────────────────────────────────────────────────────────
 // [label, file, whether it is a top-level tab root that intentionally keeps ☰]
 const LISTED_PAGES = [
-  ['System Diagnostics',   'src/app/(app)/(admin)/system-providers.tsx', false],
-  ['Video Providers',      'src/app/(app)/(superadmin)/video-providers.tsx', false],
-  ['Currency Settings',    'src/app/(app)/(superadmin)/currency.tsx', false],
-  ['Content Protection',   'src/app/(app)/(superadmin)/content-protection.tsx', false],
-  ['Watermark / DRM',      'src/app/(app)/(superadmin)/content-protection.tsx', false],
-  ['Video Monitor',        'src/app/(app)/(admin)/video-monitor.tsx', false],
-  ['Video Health',         'src/app/(app)/(admin)/video-health.tsx', false],
-  ['Video Settings',       'src/app/(app)/(admin)/video-settings.tsx', false],
-  ['Storage',              'src/app/(app)/(admin)/storage.tsx', false],
-  ['Security Dashboard',   'src/app/(app)/(superadmin)/sec-dashboard.tsx', false],
-  ['Security Policies',    'src/app/(app)/(superadmin)/sec-policies.tsx', false],
-  ['Security Diagnostics', 'src/app/(app)/(superadmin)/sec-diag.tsx', false],
-  ['Violation Management', 'src/app/(app)/(superadmin)/violation-management.tsx', false],
-  ['Impersonation',        'src/app/(app)/(superadmin)/impersonation.tsx', false],
+  ['System Diagnostics',   'src/app/(app)/(hubs)/system-providers.tsx', false],
+  ['Video Providers',      'src/app/(app)/(hubs)/video-providers.tsx', false],
+  ['Currency Settings',    'src/app/(app)/(hubs)/currency.tsx', false],
+  ['Content Protection',   'src/app/(app)/(hubs)/content-protection.tsx', false],
+  ['Watermark / DRM',      'src/app/(app)/(hubs)/content-protection.tsx', false],
+  ['Video Monitor',        'src/app/(app)/(hubs)/video-monitor.tsx', false],
+  ['Video Health',         'src/app/(app)/(hubs)/video-health.tsx', false],
+  ['Video Settings',       'src/app/(app)/(hubs)/video-settings.tsx', false],
+  ['Storage',              'src/app/(app)/(hubs)/storage.tsx', false],
+  ['Security Dashboard',   'src/app/(app)/(hubs)/sec-dashboard.tsx', false],
+  ['Security Policies',    'src/app/(app)/(hubs)/sec-policies.tsx', false],
+  ['Security Diagnostics', 'src/app/(app)/(hubs)/sec-diag.tsx', false],
+  ['Violation Management', 'src/app/(app)/(hubs)/violation-management.tsx', false],
+  ['Impersonation',        'src/app/(app)/(hubs)/impersonation.tsx', false],
   ['Device Management',    'src/app/(app)/(admin)/devices.tsx', false],
   ['Academic Structure',   'src/app/(app)/(admin)/academic.tsx', false],
-  ['Enrollment Manager',   'src/app/(app)/(admin)/enrollment-manager.tsx', false],
-  ['Notifications',        'src/app/(app)/(admin)/notifications-center.tsx', false],
-  ['Bulk Import',          'src/app/(app)/(admin)/bulk-import.tsx', false],
-  ['DB Audit',             'src/app/(app)/(admin)/db-audit.tsx', false],
-  ['Trash Bin',            'src/app/(app)/(superadmin)/trash-bin.tsx', false],
-  ['Delete Permissions',   'src/app/(app)/(superadmin)/delete-permissions.tsx', false],
+  ['Enrollment Manager',   'src/app/(app)/(hubs)/enrollment-manager.tsx', false],
+  ['Notifications',        'src/app/(app)/(hubs)/notifications-center.tsx', false],
+  ['Bulk Import',          'src/app/(app)/(hubs)/bulk-import.tsx', false],
+  ['DB Audit',             'src/app/(app)/(hubs)/db-audit.tsx', false],
+  ['Trash Bin',            'src/app/(app)/(hubs)/trash-bin.tsx', false],
+  ['Delete Permissions',   'src/app/(app)/(hubs)/delete-permissions.tsx', false],
   // Real top-level tab that RECEIVES the "Admin Management" hub link. It is the
   // Users root, so it deliberately keeps the drawer (hamburger) — documented.
   ['Admin Management (Users tab root)', 'src/app/(app)/(superadmin)/sa-users.tsx', true],
@@ -127,7 +127,7 @@ const LISTED_PAGES = [
     'sa-video-monitor.tsx': "backTo=\"/sa-platform\"",
   };
   for (const [file, expected] of Object.entries(wrapperMap)) {
-    const rel = `src/app/(app)/(superadmin)/${file}`;
+    const rel = `src/app/(app)/(hubs)/${file}`;
     ok(exists(rel) && read(rel).includes(expected), `nav: wrapper ${file} passes ${expected}`);
   }
 
@@ -145,15 +145,19 @@ const LISTED_PAGES = [
     }
   }
 
-  // Every route file in the SA shell must be registered as a hidden tab, or
-  // expo-router renders it as a stray tab with a raw route name.
-  const layout = read('src/lib/nativeTabRegistry.tsx'); // registration lives in the shared registry
-  const registered = new Set([...layout.matchAll(/name:\s*'([a-z0-9-]+)'/g)].map(m => m[1]));
+  // 2026-09-28 architecture fix: SA route files split — visible tabs remain
+  // in the role group; drawer-only screens moved to (hubs). Invariant:
+  // every SA route name is either a registry entry or a (hubs) screen file.
   const saFiles = walk('src/app/(app)/(superadmin)')
     .filter(f => /\.tsx$/.test(f) && !/_layout/.test(f))
     .map(f => path.basename(f, '.tsx'));
+  const registered = new Set(
+    [...read('src/lib/nativeTabRegistry.tsx').matchAll(/name:\s*'([a-z0-9-]+)'/g)].map(m => m[1])
+  );
+  const hubsFiles = new Set(fs.readdirSync(path.join(ROOT, 'src/app/(app)/(hubs)'))
+    .filter(f => /\.tsx$/.test(f)).map(f => path.basename(f, '.tsx')));
   for (const name of saFiles) {
-    ok(registered.has(name), `nav: SA route "${name}" is registered as a hidden tab`);
+    ok(registered.has(name) || hubsFiles.has(name), `nav: SA route "${name}" resolves (registry entry or hubs screen)`);
   }
 }
 
@@ -319,7 +323,7 @@ const LISTED_PAGES = [
   ok(/contact_links: Array<\{ platform: string; label: string; url: string; enabled: boolean \}>;/.test(api),
     'contact: the branding API accepts the structured list');
 
-  const cms = read('src/app/(app)/(admin)/cms.tsx');
+  const cms = read('src/app/(app)/(hubs)/cms.tsx');
   ok(/function ContactLinksEditor/.test(cms), 'contact: the CMS editor renders a Contact Links section');
   ok(/page\.key === 'contact_us'/.test(cms), 'contact: the section is attached to the Contact Us page');
   ok(/Add Link/.test(cms), 'contact: "Add Link" exists');
@@ -440,7 +444,7 @@ const LISTED_PAGES = [
 
   // React key warning — every JSX list in FeatureFlagsScreen must be keyed by a
   // stable identifier from the data (never an index or Math.random()).
-  const screen = read('src/app/(app)/(superadmin)/feature-flags.tsx');
+  const screen = read('src/app/(app)/(hubs)/feature-flags.tsx');
   // Take a generous window after each .map( — enough to cover the JSX it returns
   // regardless of whether the callback closes with ))} or })}.
   // Extract each `.map(...)` callback by matching parentheses, then keep only

@@ -21,6 +21,8 @@ import NetInfo from '@react-native-community/netinfo';
 import { checkAppUpdate } from './updateConfigService';
 import { resyncOfflineLibrary } from './offlineVideoService';
 import { invalidatePolicyCache } from './security';
+import { revalidateOfflineEntitlements } from './offlineEntitlement';
+import { useProfileStore } from './store';
 
 type Handler = () => void;
 const onlineHandlers = new Set<Handler>();
@@ -69,6 +71,19 @@ async function handleTransition(online: boolean): Promise<void> {
     void checkAppUpdate();
     // 3. Download metadata reconciliation against the DRM registry.
     void resyncOfflineLibrary();
+    // 3b. SERVER-AUTHORITATIVE ENTITLEMENT REVALIDATION — an admin removing
+    //     the enrollment (or trashing the course) while the user was offline
+    //     must remove the offline downloads as soon as connectivity returns.
+    //     Fail-open by design (see offlineEntitlement.ts): any network/auth
+    //     error deletes NOTHING — only an authoritative server verdict does.
+    {
+      const { profile } = useProfileStore.getState();
+      const uid = profile?.id;
+      if (uid) {
+        void revalidateOfflineEntitlements({ userId: uid, role: profile?.role })
+          .catch(() => { /* never let cleanup errors break the transition */ });
+      }
+    }
     // 4. App-level handlers (session re-validation is handled by the existing
     //    401 auto-refresh in php.ts on the next request; handlers can add more).
     for (const h of onlineHandlers) {

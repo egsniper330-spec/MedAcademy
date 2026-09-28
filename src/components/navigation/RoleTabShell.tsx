@@ -93,16 +93,20 @@ export default function RoleTabShell({ tabs, initialRouteName, jsIconShrink }: R
           )}
           screenOptions={{ headerShown: false }}
         >
-          {tabs.map((tab) => (
+          {tabs
+            // Drawer-only screens are NOT tab scenes on any platform: they
+            // live in the (hubs) Stack group (JS-owned history, MedAcademy
+            // back button). Parity with RoleTabShell.ios.tsx — registering
+            // them here would put their switches into the tab navigator's
+            // history (visible via `backBehavior`) instead of the app stack.
+            .filter((tab) => tab.hidden !== true)
+            .map((tab) => (
             <Tabs.Screen
               key={tab.name}
               name={tab.name}
               options={{
                 title: tab.title,
-                href: tab.hidden ? null : undefined,
-                tabBarIcon: tab.hidden
-                  ? undefined
-                  : ({ color, size }: { color: string; size: number }) => {
+                tabBarIcon: ({ color, size }: { color: string; size: number }) => {
                       const Icon = lucideIcon(tab.icon);
                       return <Icon size={jsIconShrink ? size - 2 : size} color={color} />;
                     },

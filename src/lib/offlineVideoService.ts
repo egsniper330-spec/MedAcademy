@@ -401,6 +401,47 @@ export function selectDownloadTracks(availableTracks: Track[]): { selections: nu
   return { selections, platform: isAndroid ? 'android' : 'ios' };
 }
 
+// ─── Pure helpers (unit-tested; platform-safe) ────────────────────────────────
+
+/**
+ * Official getDownloadOptions params builder: customPlayerId is an OPTIONAL
+ * official parameter (docs: "We can also pass the customPlayerId along with
+ * the otp and playbackInfo which should be applied to the downloaded video").
+ * The backend supplies it ONLY when the operator's VdoCipher account needs a
+ * specific player profile for downloadable renditions; absent → exactly the
+ * previous behavior (account default player).
+ */
+export function buildOfflineOptionParams(
+  token: { otp: string; playbackInfo: string; customPlayerId?: string | null }
+): { otp: string; playbackInfo: string; customPlayerId?: string } {
+  const base = { otp: token.otp, playbackInfo: token.playbackInfo };
+  const pid = typeof token.customPlayerId === 'string' ? token.customPlayerId.trim() : '';
+  return pid ? { ...base, customPlayerId: pid } : base;
+}
+
+export type OfflineLoadErrorKind = 'expired' | 'incomplete_media' | 'renderer' | 'drm_state' | 'other';
+
+/**
+ * Classifies an SDK load-error code (VdoCipher Android error-code table,
+ * also used by the RN bridge on Android; iOS surfaces its own strings):
+ *   6187               → DRM keys expired (rental window finished)
+ *   6102 / 5160 / 5161 → offline media incomplete/missing (play attempted
+ *                        on a download that never truly completed, or its
+ *                        files were removed outside the app)
+ *   6120 / 6122 / 6101 → renderer / secure-decoder failures (documented as
+ *                        "much more common" with >1 VdoPlayer instance)
+ *   6157/6161/6166/6172/6177/6181/6190/6196 → Widevine CDM state errors
+ */
+export function classifyOfflineLoadError(code: number | string | null | undefined): OfflineLoadErrorKind {
+  const n = typeof code === 'string' ? Number.parseInt(code, 10) : code;
+  if (typeof n !== 'number' || !Number.isFinite(n)) return 'other';
+  if (n === 6187) return 'expired';
+  if (n === 6102 || n === 5160 || n === 5161) return 'incomplete_media';
+  if (n === 6120 || n === 6122 || n === 6101) return 'renderer';
+  if (n === 6157 || n === 6161 || n === 6166 || n === 6172 || n === 6177 || n === 6181 || n === 6190 || n === 6196) return 'drm_state';
+  return 'other';
+}
+
 // ─── Download orchestration ───────────────────────────────────────────────────
 
 export interface StartDownloadParams {
@@ -443,15 +484,17 @@ export async function startOfflineDownload(p: StartDownloadParams): Promise<Star
     return { ok: false, error: msg, kind: 'auth' };
   }
 
-  // 2) Official options fetch — the SDK exchanges our OTP with VdoCipher
+  // 2) Official options fetch — the SDK exchanges our OTP with VdoCipher.
+  //    customPlayerId passes through only when the backend issues one.
   let optionsResult: Awaited<ReturnType<typeof VdoDownload.getDownloadOptions>>;
   try {
-    optionsResult = await VdoDownload.getDownloadOptions({
-      otp: token.otp,
-      playbackInfo: token.playbackInfo,
-    });
+    optionsResult = await VdoDownload.getDownloadOptions(buildOfflineOptionParams(token));
   } catch (e: unknown) {
-    const err = e as { errorMsg?: string; errorCode?: number };
+    const err = e as { errorMsg?: string; errorCode?: number | string; httpStatusCode?: number };
+    // Sanitized diagnostics (NO otp/playbackInfo/tokens — code+message only).
+    console.info(
+      `[offline-dl] options failed code=${String(err?.errorCode ?? '?')} http=${String(err?.httpStatusCode ?? '?')} msg="${String(err?.errorMsg ?? '?')}" platform=${Platform.OS}`
+    );
     // Honest capability surfacing: most commonly the VdoCipher ACCOUNT does
     // not have offline downloads enabled (dashboard/plan capability — cannot
     // be enabled from code). Surface the SDK's own description verbatim.
@@ -465,10 +508,21 @@ export async function startOfflineDownload(p: StartDownloadParams): Promise<Star
   const mediaId = optionsResult.downloadOptions.mediaId;
 
   // 3) Official track selection + enqueue (indices; platform rules above)
-  const { selections } = selectDownloadTracks(optionsResult.downloadOptions.availableTracks);
+  const availableTracks = optionsResult.downloadOptions.availableTracks ?? [];
+  const { selections } = selectDownloadTracks(availableTracks);
+  // Sanitized track inventory (safe fields only) — makes "Tracks Not Found"-
+  // class failures diagnosable from device logs without exposing credentials.
+  console.info(
+    `[offline-dl] options ok mediaId=${mediaId} tracks=${availableTracks.length}` +
+      availableTracks
+        .map((t: { type?: string; bitrate?: number; language?: string }, i: number) => ` #${i}:${t.type}${typeof t.bitrate === 'number' && t.bitrate > 0 ? `@${t.bitrate}` : ''}${t.language ? `/${t.language}` : ''}`)
+        .join('')
+  );
   if (!selections.length) {
+    console.info(`[offline-dl] enqueue refused platform=${Platform.OS} reason=no-usable-tracks`);
     return { ok: false, error: 'No downloadable tracks were provided for this video.', kind: 'options' };
   }
+  console.info(`[offline-dl] enqueue mediaId=${mediaId} selections=[${selections.join(',')}] platform=${Platform.OS}`);
   try {
     await optionsResult.enqueue({ selections });
   } catch (e: unknown) {
@@ -585,6 +639,52 @@ function ensureDownloadListeners(): void {
 export async function deleteOfflineVideo(mediaId: string): Promise<void> {
   try { await VdoDownload.remove([mediaId]); } catch { /* tombstone regardless */ }
   removeEntry(mediaId);
+}
+
+/**
+ * NATIVE-STATE RECONCILIATION for ONE media (playback-time safety net).
+ *
+ * Called by the offline player when the SDK refuses to load an offline asset
+ * (e.g. 6102 "Internal Database Error" = play attempted on a download that is
+ * not actually complete, or 6120-class renderer errors). The SDK registry is
+ * the authority for what DRM media exists; a local row claiming 'completed'
+ * while the native state disagrees is reconciled here so the UI immediately
+ * stops offering playback (docs: "You can only load videos which completed
+ * successfully... use query filters to only show play option on completed
+ * downloads").
+ *
+ * Returns the authoritative verdict:
+ *   'completed'      → native registry confirms a completed download
+ *   'not_completed'  → native registry contradicts the local 'completed' row
+ *                      (local row reconciled to the native state)
+ *   'unknown'        → registry unreachable/media absent (row removed when it
+ *                      claimed completed — media deleted outside the app)
+ */
+export async function reconcileOfflineMediaState(mediaId: string): Promise<'completed' | 'not_completed' | 'unknown'> {
+  let native: DownloadStatus | undefined;
+  try {
+    const statuses: DownloadStatus[] = await VdoDownload.query({ mediaId: [mediaId], status: [] });
+    native = statuses.find((s: DownloadStatus) => s.mediaInfo.mediaId === mediaId);
+  } catch { return 'unknown'; }
+  if (!native) {
+    const e = (cache ?? []).find((x) => x.meta.mediaId === mediaId);
+    if (e && e.phase === 'completed') removeEntry(mediaId);
+    return 'unknown';
+  }
+  if (native.status === 'completed') return 'completed';
+  const e = (cache ?? []).find((x) => x.meta.mediaId === mediaId);
+  if (e && e.phase === 'completed') {
+    applyEntry({
+      ...e,
+      phase: mapNativeStatus(native.status, 'failed'),
+      progress: typeof native.downloadPercent === 'number' ? native.downloadPercent : e.progress,
+      bytesDownloaded: native.bytesDownloaded ?? e.bytesDownloaded,
+      totalSizeBytes: native.totalSizeBytes ?? e.totalSizeBytes,
+      lastError: native.reasonDescription || 'Download is not complete on this device.',
+      updatedAt: Date.now(),
+    });
+  }
+  return 'not_completed';
 }
 
 /**

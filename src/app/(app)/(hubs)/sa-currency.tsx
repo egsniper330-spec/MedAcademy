@@ -5,7 +5,7 @@
  * passing `backTo` gives the screen the explicit "← Platform" header action
  * required by the Platform hub contract, without a second navigation system.
  */
-import CurrencySettings from '@/app/(app)/(superadmin)/currency';
+import CurrencySettings from '@/app/(app)/(hubs)/currency';
 
 export default function SuperAdminCurrency() {
   return <CurrencySettings backTo="/sa-finance" />;

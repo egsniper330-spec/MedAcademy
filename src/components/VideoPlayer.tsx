@@ -50,7 +50,7 @@ export interface VideoPlayerProps {
   onFullscreen?: (active: boolean) => void;
   /**
    * SECURITY GATE (fullscreen boundary) — forwarded to the provider player.
-   * Consulted before any fullscreen surface mounts; false/throw refuses.
+   * Consulted before any fullscreen expansion; false/throw refuses.
    */
   shouldAllowFullscreen?: () => Promise<boolean> | boolean;
 }
@@ -107,6 +107,7 @@ export function VideoPlayer({
         onProgress={(currentTime, duration) => onProgress?.(currentTime, duration)}
         onEnd={onEnd}
         onError={onError}
+        onFullscreen={onFullscreen}
         shouldAllowFullscreen={shouldAllowFullscreen}
       />
     );

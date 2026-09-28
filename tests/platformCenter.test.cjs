@@ -404,14 +404,14 @@ function read(rel) {
 
 // ─── Frontend: Platform child-page back navigation ─────────────────────────────
 {
-  ok(/showBack\n?\s*onBack=\{\(\) => router\.push\('\/sa-platform'\)\}/.test(read('src/app/(app)/(superadmin)/branding.tsx')),
+  ok(/showBack\n?\s*onBack=\{\(\) => router\.push\('\/sa-platform'\)\}/.test(read('src/app/(app)/(hubs)/branding.tsx')),
     'nav: Branding header has the explicit ← Platform action');
-  ok(/onBack=\{\(\) => router\.push\('\/sa-platform'\)\}/.test(read('src/app/(app)/(superadmin)/maintenance.tsx')),
+  ok(/onBack=\{\(\) => router\.push\('\/sa-platform'\)\}/.test(read('src/app/(app)/(hubs)/maintenance.tsx')),
     'nav: Maintenance header has the explicit ← Platform action');
-  ok(/onBack=\{\(\) => router\.push\('\/sa-platform'\)\}/.test(read('src/app/(app)/(superadmin)/feature-flags.tsx')),
+  ok(/onBack=\{\(\) => router\.push\('\/sa-platform'\)\}/.test(read('src/app/(app)/(hubs)/feature-flags.tsx')),
     'nav: Feature Flags header has the explicit ← Platform action');
-  const saCms = read('src/app/(app)/(superadmin)/sa-cms.tsx');
-  const saDiag = read('src/app/(app)/(superadmin)/sa-system-providers.tsx');
+  const saCms = read('src/app/(app)/(hubs)/sa-cms.tsx');
+  const saDiag = read('src/app/(app)/(hubs)/sa-system-providers.tsx');
   ok(/backTo="\/sa-platform"/.test(saCms) && /backTo="\/sa-platform"/.test(saDiag),
     'nav: shared CMS/Diagnostics screens receive the Platform back target in the SA shell');
   const hub = read('src/app/(app)/(superadmin)/sa-platform.tsx');
@@ -419,24 +419,24 @@ function read(rel) {
     'nav: Platform hub links stay inside the Super Admin shell');
   // Video Providers is reachable from both /sa-platform and /sa-content, so the
   // arrow pops the real parent and falls back to Platform when there is none.
-  const vp = read('src/app/(app)/(superadmin)/video-providers.tsx');
+  const vp = read('src/app/(app)/(hubs)/video-providers.tsx');
   ok(/showBack\n/.test(vp) && /backFallback="\/sa-platform"/.test(vp),
     'nav: Video Providers header has an explicit back action (fallback ← Platform)');
   // Multi-hub wrappers: each one declares the hub that actually lists it, so a
   // no-history entry never dead-ends on an unrelated section.
   for (const [route, file, target] of [
-    ['sa-currency', 'src/app/(app)/(superadmin)/sa-currency.tsx', '/sa-finance'],
-    ['sa-content-protection', 'src/app/(app)/(superadmin)/sa-content-protection.tsx', '/sa-content'],
-    ['sa-video-monitor', 'src/app/(app)/(superadmin)/sa-video-monitor.tsx', '/sa-platform'],
+    ['sa-currency', 'src/app/(app)/(hubs)/sa-currency.tsx', '/sa-finance'],
+    ['sa-content-protection', 'src/app/(app)/(hubs)/sa-content-protection.tsx', '/sa-content'],
+    ['sa-video-monitor', 'src/app/(app)/(hubs)/sa-video-monitor.tsx', '/sa-platform'],
   ]) {
     const w = read(file);
     ok(new RegExp(`backTo="${target}"`).test(w),
       `nav: ${route} wrapper falls back to ${target}`);
   }
   for (const f of [
-    'src/app/(app)/(superadmin)/currency.tsx',
-    'src/app/(app)/(superadmin)/content-protection.tsx',
-    'src/app/(app)/(admin)/video-monitor.tsx',
+    'src/app/(app)/(hubs)/currency.tsx',
+    'src/app/(app)/(hubs)/content-protection.tsx',
+    'src/app/(app)/(hubs)/video-monitor.tsx',
   ]) {
     const src = read(f);
     ok(/\{ backTo\?: string \} = \{\}/.test(src),
@@ -455,7 +455,8 @@ function read(rel) {
     ok(m.length >= 5, 'nav: Platform hub links >= 5 SA-shell routes');
     for (const raw of m) {
       const route = raw.match(/"(\/sa-[a-z-]+)"/)[1].slice(1);
-      ok(read(`src/app/(app)/(superadmin)/${route}.tsx`).length > 0,
+      const resolved = ["(hubs)", "(superadmin)", "(admin)", "(doctor)"].some((g) => fs.existsSync("src/app/(app)/" + g + "/" + route + ".tsx"));
+      ok(resolved,
         `nav: hub route ${route} resolves to an SA-shell screen`);
     }
   }

@@ -6,7 +6,7 @@
  * back arrow (used only when there is no history to pop, e.g. drawer entry).
  * Normal entry from a hub pops back to the hub that pushed it.
  */
-import VideoHealthScreen from '@/app/(app)/(admin)/video-health';
+import VideoHealthScreen from '@/app/(app)/(hubs)/video-health';
 
 export default function SuperAdminVideoHealth() {
   return <VideoHealthScreen backTo="/sa-content" />;

@@ -36,7 +36,7 @@ function assert(cond, msg) {
 }
 function section(name) { console.log('-- ' + name + ' --'); }
 
-const screen = read('src/app/(app)/(superadmin)/app-updates.tsx');
+const screen = read('src/app/(app)/(hubs)/app-updates.tsx');
 const api = read('src/lib/api.ts');
 const phpClient = read('src/client/php.ts');
 const routes = read('backend/routes/api.php');

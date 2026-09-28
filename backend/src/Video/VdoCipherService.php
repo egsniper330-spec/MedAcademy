@@ -39,25 +39,16 @@ final class VdoCipherService
     }
 
     /**
-     * Build the annotate watermark (JSON-stringified string — required by the
-     * VdoCipher API; numeric fields as strings; color 0xRRGGBB).
+     * SERVER-SIDE ANNOTATE WATERMARK — REMOVED (2026-09).
+     *
+     * VdoCipher's stream annotation previously burned "NAME\nID: MED-####"
+     * into the video, which appeared alongside the app's canonical client
+     * overlay "NAME • MED-####" (watermarkIdentity.ts + NativeWatermarkOverlay
+     * / the Plyr in-HTML overlay) — the reported duplicate watermark. The
+     * client overlay is the single watermark for every platform (VdoCipher
+     * online, VdoCipher offline, Plyr/YouTube): same identity, same format,
+     * same forensic purpose. Keep NO annotate payload in any OTP.
      */
-    public function buildAnnotate(string $fullName, string $watermarkId): string
-    {
-        $idLine = trim($watermarkId) !== '' ? 'ID: ' . trim($watermarkId) : '';
-        $lines = array_filter([trim($fullName), $idLine]);
-        $text = implode("\n", $lines);
-        $annotations = [[
-            'type' => 'rtext',
-            'text' => $text,
-            'color' => '0xFFFFFF',
-            'alpha' => '0.45',
-            'size' => '18',
-            'interval' => '25000',
-            'skip' => '2000',
-        ]];
-        return json_encode($annotations, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
-    }
 
     /**
      * Generate a playback OTP for a lesson video.
@@ -131,20 +122,8 @@ final class VdoCipherService
             $payload['whitelisthref'] = $appDomain;
         }
 
-        // Dynamic watermark for students only
-        if (!$isPrivileged && $profile) {
-            $name = trim((string) $profile['full_name']);
-            // Watermark identifier value: the canonical Public User ID
-            // (MED-####). Falls back to the legacy watermark_id only when the
-            // public ID is not yet assigned (pre-migration rows).
-            $wmId = trim((string) ($profile['public_user_id'] ?? ''));
-            if ($wmId === '') {
-                $wmId = trim((string) $profile['watermark_id']);
-            }
-            if ($name !== '' && $wmId !== '') {
-                $payload['annotate'] = $this->buildAnnotate($name, $wmId);
-            }
-        }
+        // NO 'annotate' payload: the client overlay (Name • MED-####) is the
+        // single watermark. See the class-level note on buildAnnotate removal.
 
         $res = $this->request('POST', '/videos/' . rawurlencode($videoId) . '/otp', $payload);
         $status = (int) $res['status'];
@@ -276,17 +255,8 @@ final class VdoCipherService
             $payload['whitelisthref'] = $appDomain;
         }
 
-        // Dynamic watermark for students — SAME policy as streaming OTPs.
-        if (!$isPrivileged && $profile) {
-            $name = trim((string) $profile['full_name']);
-            $wmId = trim((string) ($profile['public_user_id'] ?? ''));
-            if ($wmId === '') {
-                $wmId = trim((string) $profile['watermark_id']);
-            }
-            if ($name !== '' && $wmId !== '') {
-                $payload['annotate'] = $this->buildAnnotate($name, $wmId);
-            }
-        }
+        // NO 'annotate' payload: the client overlay (Name • MED-####) is the
+        // single watermark, online and offline alike.
 
         // OFFLINE LICENSE (official VdoCipher offline-OTP contract): the OTP
         // must carry licenseRules = {"canPersist":true,"rentalDuration":<sec>}
@@ -329,6 +299,12 @@ final class VdoCipherService
             'playbackInfo'=> $data['playbackInfo'] ?? null,
             'rentalHours' => $rentalHours,
             'expiresAt'   => gmdate('c', time() + $rentalHours * 3600),
+            // OPTIONAL official parameter (VdoCipher RN offline docs: "We can
+            // also pass the customPlayerId along with the otp and playbackInfo
+            // which should be applied to the downloaded video"). Null unless
+            // the operator configures it — the account default player is used
+            // otherwise, exactly as before. Never a secret.
+            'customPlayerId' => Config::string('VDO_CUSTOM_PLAYER_ID'),
         ];
     }
 

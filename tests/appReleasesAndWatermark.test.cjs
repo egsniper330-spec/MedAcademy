@@ -196,7 +196,7 @@ console.log('── Part A4: ForceUpdateGate integration ──');
 {
   const gate = read('src/lib/updateConfigService.ts');
   const api = read('src/lib/api.ts');
-  const screen = read('src/app/(app)/(superadmin)/app-updates.tsx');
+  const screen = read('src/app/(app)/(hubs)/app-updates.tsx');
 
   // The gate keeps consuming the versionCode-based config (now fed by the
   // published release) — untouched comparison contract.

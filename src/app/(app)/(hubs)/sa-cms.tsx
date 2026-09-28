@@ -5,7 +5,7 @@
  * passing `backTo` gives the screen the explicit "← Platform" header action
  * required by the Platform hub contract, without a second navigation system.
  */
-import CMSPagesScreen from '@/app/(app)/(admin)/cms';
+import CMSPagesScreen from '@/app/(app)/(hubs)/cms';
 
 export default function SuperAdminCMSPages() {
   return <CMSPagesScreen backTo="/sa-platform" />;

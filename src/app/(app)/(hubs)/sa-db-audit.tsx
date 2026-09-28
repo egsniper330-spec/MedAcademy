@@ -4,7 +4,7 @@
  * `backTo` is the terminal fallback for the header back arrow when there is no
  * history to pop; hub entry pops back to the pushing hub.
  */
-import DbAuditPanel from '@/app/(app)/(admin)/db-audit';
+import DbAuditPanel from '@/app/(app)/(hubs)/db-audit';
 
 export default function SuperAdminDbAudit() {
   return <DbAuditPanel backTo="/sa-platform" />;

@@ -1,58 +1,62 @@
 /**
  * VdoCipherPlayerNativeAdapter.native.tsx
  *
- * Phase 1 — Native SDK adapter for Android and iOS.
- * Replaces the WebView player with VdoPlayerView from vdocipher-rn-bridge.
+ * Native SDK adapter for Android and iOS — ONE VdoPlayerView for the whole
+ * watch session.
  *
  * Metro resolves this file in preference to VdoCipherPlayerNativeAdapter.tsx
  * on Android and iOS, while the bare .tsx stub is used on Web.
  *
  * ── Public API ──────────────────────────────────────────────────────────────
  * Identical to the original VdoCipherPlayer props — lesson screens require
- * no changes.
+ * no changes (onFullscreen is now actually forwarded).
+ *
+ * ── FULLSCREEN + ROTATION (root-cause architecture) ─────────────────────────
+ * Fullscreen is IN-PLACE expansion of the SAME VdoPlayerView inside the SAME
+ * activity/window — NOT a Modal. The previous Modal created a SECOND native
+ * window (Dialog) hosting a SECOND VdoPlayerView: on rotation that window's
+ * surface was destroyed/recreated around a still-running decoder → black
+ * video with live audio (VdoCipher error 6120 territory; the docs
+ * specifically warn that >1 VdoPlayer instance makes renderer errors far
+ * more common). In-place expansion has no second window and no second
+ * player: MainActivity's manifest configChanges
+ * (orientation|screenSize|screenLayout|…) keeps the activity alive, RN
+ * re-measures the container, and the SDK resizes its own surface within it.
+ * ONE player instance → no remount, no seek/state restoration between
+ * inline ↔ fullscreen (position is continuous by construction), no surface
+ * teardown, no duplicate DRM session, and audio/video can never
+ * desynchronize across rotation.
+ *
+ * Orientation is locked LANDSCAPE while fullscreen, PORTRAIT_UP otherwise —
+ * synchronized in one useEffect keyed on isFullscreen. app.json keeps the
+ * app portrait at all other times.
+ *
+ * ── Fullscreen entry per platform ───────────────────────────────────────────
+ * • Android: the SDK's native control bar provides the fullscreen button;
+ *   tapping it fires onEnterFullscreen → we expand the same instance.
+ *   The SDK's exit control fires onExitFullscreen → we collapse.
+ * • iOS: the SDK does NOT surface a fullscreen control in the native bridge
+ *   (verified on device — no button renders), so an APP-LEVEL expand button
+ *   (top-right, ≥44 pt) is rendered over the player. It runs the same
+ *   security gate and expands the same instance. A back-arrow control
+ *   (both platforms, in fullscreen) and Android hardware back collapse it.
+ *
+ * ── Security ────────────────────────────────────────────────────────────────
+ * Fullscreen entry re-validates the authoritative SecurityContext verdict
+ * (shouldAllowFullscreen — fail-closed). While fullscreen, a NEW violation
+ * re-closes it via the live-gate mirror below. Screen capture protection
+ * (app-shell FLAG_SECURE lock) is untouched; the watermark overlay lives
+ * INSIDE the expanding container so it is visible in both modes.
  *
  * ── Event mapping ───────────────────────────────────────────────────────────
- * VdoPlayerView event     → VdoCipherPlayerProps callback
- * ─────────────────────── ─────────────────────────────────────────────────
- * onLoaded                → onReady()
- * onProgress(ms)          → onProgress(currentTimeSec, durationSec)
- * onMediaEnded            → onEnd()
- * onLoadError             → onError(message)
- * onEnterFullscreen       → internal state (native SDK manages fullscreen UI)
- * onExitFullscreen        → internal state
- *
- * ── Unit conversion ─────────────────────────────────────────────────────────
- * The VdoCipher native SDK reports all times in milliseconds.
- * The existing public API (and lesson screen) expects seconds.
- * All times are divided by 1000 before being forwarded to callbacks.
- *
- * ── Duration tracking ───────────────────────────────────────────────────────
- * Duration is captured from mediaInfo.duration in the onLoaded event and
- * stored in a ref. Every subsequent onProgress tick forwards the cached
- * duration so callers always receive (currentTimeSec, durationSec).
- *
- * ── Watermark ───────────────────────────────────────────────────────────────
- * Phase 2 — NativeWatermarkOverlay is rendered as a sibling View above
- * VdoPlayerView.  It uses Reanimated to move a translucent pill across a
- * 9-slot grid every 12–20 s without any React re-renders.
- *
- * VdoCipher's own server-side watermark feature is NOT replaced by this
- * overlay; both can be active simultaneously.
- *
- * ── Fullscreen ──────────────────────────────────────────────────────────────
- * VdoPlayerView with showNativeControls=true handles fullscreen natively —
- * the user taps the fullscreen button in the native control bar.
- * No additional RN code is needed.
- *
- * ── Resume position ─────────────────────────────────────────────────────────
- * enableAutoResume=true is passed in EmbedInfo. This activates VdoCipher's
- * server-side resume feature (requires it to be enabled on the VdoCipher
- * dashboard). Client-side seek-to-position is a Phase 3 addition.
+ * onLoaded → onReady(); onProgress(ms) → onProgress(sec, dur); onMediaEnded →
+ * onEnd(); onLoadError → onError(message).
  */
 
 import { useRef, useState, useCallback, useEffect, useMemo } from 'react';
-import { Modal, Pressable, StatusBar, Text, View, ActivityIndicator, useColorScheme } from 'react-native';
+import { BackHandler, Platform, Pressable, StatusBar, Text, View, ActivityIndicator, useColorScheme } from 'react-native';
 import * as ScreenOrientation from 'expo-screen-orientation';
+import { ArrowLeft, Maximize2 } from 'lucide-react-native';
 import { VdoPlayerView } from 'vdocipher-rn-bridge';
 import { getVideoPlaybackToken } from '@/lib/api';
 import { neuColors } from '@/lib/neu';
@@ -64,28 +68,36 @@ import {
   exitFullscreenSystemUi,
 } from '@/lib/fullscreenSystemUi';
 
-// ─── Container style — matches the WebView player exactly ────────────────────
+// ─── Container styles ─────────────────────────────────────────────────────────
 //
-// position:'relative' + overflow:'hidden' are both required:
-//   • position:'relative'  — makes this the containing block for the
-//                            NativeWatermarkOverlay (position:'absolute')
-//   • overflow:'hidden'    — clips the absolute overlay to the card's
-//                            rounded-corner bounds in normal (non-fullscreen)
-//                            mode, preventing the watermark pill from
-//                            escaping into the surrounding scroll content
+// INLINE (normal): 16:9 block in the page flow.
+//   • position:'relative' — containing block for the NativeWatermarkOverlay
+//     (position:'absolute'), keeping the watermark clipped to the player
+//     frame (with overflow:'hidden') in normal mode.
+//   • overflow:'hidden' — clips the watermark pill to the card's rounded
+//     bounds; irrelevant in fullscreen (the container IS the screen then,
+//     and its own inset clamps apply).
 //
-// Without these, the overlay's absolute position is resolved against the
-// nearest ancestor that has position set, which may be the ScrollView or
-// screen root — causing the watermark to appear outside or far below the
-// player frame in normal mode, while fullscreen (which takes over the full
-// system window) renders correctly because it has its own stacking context.
+// FULLSCREEN: absolute-fill of the SCREEN ROOT (the lesson screen hosts this
+// component as a direct child of its root View) — same window, same player
+// instance, same decoder surface. Rotation only re-measures the container.
 
-const containerStyle = {
+const INLINE_STYLE = {
   width:      '100%' as const,
   aspectRatio: 16 / 9,
   backgroundColor: '#000',
   position:   'relative' as const,
   overflow:   'hidden'   as const,
+};
+
+const FULLSCREEN_STYLE = {
+  position: 'absolute' as const,
+  top: 0,
+  left: 0,
+  right: 0,
+  bottom: 0,
+  zIndex: 100,
+  backgroundColor: '#000' as const,
 };
 
 // ─── Component ────────────────────────────────────────────────────────────────
@@ -99,6 +111,7 @@ export function VdoCipherPlayerNativeAdapter({
   onProgress,
   onEnd,
   onError,
+  onFullscreen,
   shouldAllowFullscreen,
 }: VdoCipherPlayerProps) {
   const isDark = useColorScheme() === 'dark';
@@ -124,51 +137,17 @@ export function VdoCipherPlayerNativeAdapter({
   const durationSecRef = useRef(0);
 
   // ── Fullscreen state — the SINGLE owner of fullscreen + orientation ───────
-  // The SDK's native-controls fullscreen button emits onVdoEnterFullscreen /
-  // onVdoExitFullscreen and expects the HOST APP to provide the fullscreen UI
-  // (the bridge's own setFullscreen command path is not used here). Without a
-  // handler the SDK expanded inside the portrait 16:9 container only — the
-  // "fullscreen stays portrait" bug.
-  //
-  // Architecture (mirrors the proven YouTubePlayer native pattern):
-  //   • enter event / our close button / Android back → Modal fullscreen
-  //     with a second VdoPlayerView (same otp/playbackInfo — resume synced
-  //     by seeking the inline player on close).
-  //   • Orientation is locked LANDSCAPE while isFullscreen, PORTRAIT_UP
-  //     otherwise — synchronized in one useEffect keyed on isFullscreen.
-  //     No timers; app.json keeps the app portrait at all other times.
-  //   • The application watermark overlay renders INSIDE the Modal over the
-  //     player; the server-side annotate watermark lives in the stream and
-  //     is unaffected.
+  // The same VdoPlayerView instance stays mounted through every transition;
+  // only the container style toggles between INLINE_STYLE and FULLSCREEN_STYLE.
   const [isFullscreen, setIsFullscreen] = useState(false);
-  const inlinePlayerRef = useRef<any>(null);
-  const modalLastTimeMsRef = useRef(0);
-  const modalPlayingRef = useRef(false);
-  const inlinePlayingRef = useRef(false);
 
-  // Live gate mirror: while the fullscreen Modal is open, a NEW security
-  // violation (e.g. VPN enabled mid-playback) must close it. The authoritative
-  // store flips `blocksVideo`; we read it through a ref that the lesson screen's
-  // shouldAllowFullscreen callback captures, so we reuse its fail-closed
-  // evaluation each render instead of duplicating policy logic here.
-  const [fullscreenGateOpen, setFullscreenGateOpen] = useState<boolean | null>(null);
-  const gateCheckInFlightRef = useRef(false);
+  // Forward enter/exit to the host screen (contract: host may hide non-video
+  // chrome; with the pinned-player layout this is cosmetic redundancy).
   useEffect(() => {
-    if (!isFullscreen || !shouldAllowFullscreen || gateCheckInFlightRef.current) return;
-    gateCheckInFlightRef.current = true;
-    Promise.resolve()
-      .then(() => shouldAllowFullscreen())
-      .then((ok) => setFullscreenGateOpen(ok !== false))
-      .catch(() => setFullscreenGateOpen(false))
-      .finally(() => { gateCheckInFlightRef.current = false; });
-  }, [isFullscreen, shouldAllowFullscreen]);
-  useEffect(() => {
-    if (isFullscreen && fullscreenGateOpen === false) {
-      handleCloseFullscreenRef.current?.();
-      setFullscreenGateOpen(null);
-    }
-  }, [isFullscreen, fullscreenGateOpen]);
+    onFullscreen?.(isFullscreen);
+  }, [isFullscreen, onFullscreen]);
 
+  // ── Orientation lock — landscape in fullscreen, portrait otherwise ────────
   useEffect(() => {
     if (isFullscreen) {
       ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE).catch(() => {});
@@ -177,18 +156,37 @@ export function VdoCipherPlayerNativeAdapter({
     }
   }, [isFullscreen]);
 
-  // ── System bars (Issue 5 — same mechanism as the Plyr player) ──────────────
-  // RN's Android Modal mirrors the ACTIVITY window's system-bar visibility
-  // into its Dialog window (syncSystemBarsVisibility in ReactModalHostView.kt),
-  // so Back/Home/Recents stayed visible over the fullscreen video. Hide them
-  // on the activity window while fullscreen; restore on every exit path —
-  // Modal unmount runs the cleanup and pops the <StatusBar hidden> stack.
+  // ── System bars while fullscreen (same controller as the offline player) ──
   useEffect(() => {
     if (!isFullscreen) return;
     void enterFullscreenSystemUi();
     return () => {
       void exitFullscreenSystemUi();
     };
+  }, [isFullscreen]);
+
+  // ── SECURITY: live gate mirror while fullscreen ────────────────────────────
+  // A NEW security violation (e.g. VPN enabled mid-playback) must collapse
+  // fullscreen. We re-run the host-supplied authoritative gate on an interval
+  // — the same fail-closed callback used at entry — and exit when it refuses.
+  const shouldAllowRef = useRef(shouldAllowFullscreen);
+  shouldAllowRef.current = shouldAllowFullscreen;
+  useEffect(() => {
+    if (!isFullscreen) return;
+    let cancelled = false;
+    const recheck = async () => {
+      const gate = shouldAllowRef.current;
+      if (!gate) return; // gateless surface (never the lesson screen)
+      try {
+        const ok = await gate();
+        if (!cancelled && ok === false) setIsFullscreen(false);
+      } catch {
+        if (!cancelled) setIsFullscreen(false); // evaluation error → fail-closed
+      }
+    };
+    const iv = setInterval(recheck, 5000);
+    void recheck();
+    return () => { cancelled = true; clearInterval(iv); };
   }, [isFullscreen]);
 
   // ── Fetch OTP on mount (identical flow to WebView player) ────────────────
@@ -238,74 +236,10 @@ export function VdoCipherPlayerNativeAdapter({
     onProgress?.(currentTimeSec, durationSecRef.current);
   }, [onProgress]);
 
-  // Modal-player progress (ms) — tracked for resume-on-close.
-  const handleModalProgress = useCallback((event: any) => {
-    const ms = event?.currentTime ?? 0;
-    if (ms > 0) modalLastTimeMsRef.current = ms;
-    onProgress?.(ms / 1000, durationSecRef.current);
-  }, [onProgress]);
-
-  // Play/pause tracking for both instances (playWhenReady is the source of
-  // truth for whether audio should be running after a transition).
-  const handleInlineStateChanged = useCallback((event: any) => {
-    if (event && typeof event.playWhenReady === 'boolean') {
-      inlinePlayingRef.current = event.playWhenReady;
-    }
-  }, []);
-  const handleModalStateChanged = useCallback((event: any) => {
-    if (event && typeof event.playWhenReady === 'boolean') {
-      modalPlayingRef.current = event.playWhenReady;
-    }
-  }, []);
-
   // onMediaEnded fires when playback reaches the end.
   const handleMediaEnded = useCallback((_event: any) => {
     onEnd?.();
   }, [onEnd]);
-
-  // ── Fullscreen lifecycle handlers ─────────────────────────────────────────
-  // Inline player's native fullscreen button → open the fullscreen Modal.
-  const handleInlineEnterFullscreen = useCallback(async () => {
-    // SECURITY GATE — fail-closed: blocked state, in-flight evaluation, or a
-    // thrown error all refuse fullscreen. The Modal renders above the
-    // SecurityGate overlay, so it must never mount from a stale decision.
-    if (shouldAllowFullscreen) {
-      try {
-        if (!(await shouldAllowFullscreen())) return;
-      } catch {
-        return;
-      }
-    }
-    modalLastTimeMsRef.current = 0;
-    modalPlayingRef.current = false;
-    setIsFullscreen(true);
-    // Pause the inline instance while the Modal player takes over — prevents
-    // double audio and lets VdoCipher's server-side resume persist a current
-    // position for the Modal mount.
-    try { inlinePlayerRef.current?.pause(); } catch (_) {}
-  }, []);
-
-  // Shared close path: Modal close button, Android back (onRequestClose), and
-  // the Modal player's exit-fullscreen control all route here. Restores the
-  // inline player to the exact position/play state the user left.
-  const handleCloseFullscreen = useCallback(() => {
-    const seekMs = modalLastTimeMsRef.current;
-    const wasPlaying = modalPlayingRef.current;
-    setIsFullscreen(false);
-    try {
-      if (seekMs > 0) inlinePlayerRef.current?.seek(seekMs);
-      if (wasPlaying) { inlinePlayerRef.current?.play(); } else { inlinePlayerRef.current?.pause(); }
-    } catch (_) {}
-  }, []);
-  // Late-bound ref: the gate-close effect above runs before this callback is
-  // defined in the render sequence — it reads the ref, not the binding.
-  const handleCloseFullscreenRef = useRef<typeof handleCloseFullscreen | null>(null);
-  handleCloseFullscreenRef.current = handleCloseFullscreen;
-
-  // Modal player's own fullscreen-exit control → leave fullscreen.
-  const handleModalExitFullscreen = useCallback(() => {
-    handleCloseFullscreen();
-  }, [handleCloseFullscreen]);
 
   // onLoadError fires when the SDK fails to load the media.
   const handleLoadError = useCallback((event: any) => {
@@ -316,10 +250,48 @@ export function VdoCipherPlayerNativeAdapter({
     onError?.(msg);
   }, [onError]);
 
+  // ── Fullscreen enter/exit (SAME player instance both ways) ────────────────
+  const enterFullscreen = useCallback(async () => {
+    // SECURITY GATE — fail-closed: blocked state, in-flight evaluation, or a
+    // thrown error all refuse fullscreen.
+    if (shouldAllowFullscreen) {
+      try {
+        if (!(await shouldAllowFullscreen())) return;
+      } catch {
+        return;
+      }
+    }
+    setIsFullscreen(true);
+  }, [shouldAllowFullscreen]);
+
+  const exitFullscreen = useCallback(() => {
+    setIsFullscreen(false);
+  }, []);
+
+  // SDK fullscreen events (Android native controls; no-ops on iOS where the
+  // SDK renders no fullscreen button — our app-level control drives entry).
+  const handleSdkEnterFullscreen = useCallback(() => {
+    void enterFullscreen();
+  }, [enterFullscreen]);
+  const handleSdkExitFullscreen = useCallback(() => {
+    exitFullscreen();
+  }, [exitFullscreen]);
+
+  // Android hardware back collapses fullscreen (in-place → BackHandler, not
+  // Modal onRequestClose).
+  useEffect(() => {
+    if (!isFullscreen || Platform.OS !== 'android') return;
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      exitFullscreen();
+      return true;
+    });
+    return () => sub.remove();
+  }, [isFullscreen, exitFullscreen]);
+
   // ── Loading ───────────────────────────────────────────────────────────────
   if (loading) {
     return (
-      <View style={[containerStyle, { alignItems: 'center', justifyContent: 'center', gap: 10 }]}>
+      <View style={[INLINE_STYLE, { alignItems: 'center', justifyContent: 'center', gap: 10 }]}>
         <ActivityIndicator color={c.primary} size="large" />
         <Text style={{ fontSize: 13, color: c.text, opacity: 0.5 }}>Loading player…</Text>
       </View>
@@ -329,7 +301,7 @@ export function VdoCipherPlayerNativeAdapter({
   // ── Error ─────────────────────────────────────────────────────────────────
   if (error || !otp || !playbackInfo) {
     return (
-      <View style={[containerStyle, {
+      <View style={[INLINE_STYLE, {
         backgroundColor: '#0A0A0A',
         alignItems: 'center',
         justifyContent: 'center',
@@ -346,114 +318,96 @@ export function VdoCipherPlayerNativeAdapter({
     );
   }
 
-  // ── Native SDK player ─────────────────────────────────────────────────────
+  // ── Native SDK player — ONE instance for the whole session ────────────────
   //
   // embedInfo.enableAutoResume=true activates VdoCipher's server-side resume
   // feature so the SDK automatically seeks to the last saved position on load.
-  // (Requires the feature to be enabled in the VdoCipher dashboard settings.)
-  //
-  // showNativeControls=true renders VdoCipher's built-in control bar including
-  // play/pause, seek bar, quality selector, and fullscreen button.
-  //
-  // autoPlay=true mirrors the original WebView behaviour where playback starts
-  // immediately after the player is ready.
+  // showNativeControls=true renders VdoCipher's built-in control bar
+  // (play/pause, seek, quality, and — on Android — the fullscreen button).
+  // autoPlay=true mirrors the original WebView behaviour.
 
   return (
-    <>
-      <View style={containerStyle}>
-        <VdoPlayerView
-          ref={inlinePlayerRef}
-          embedInfo={{
-            otp,
-            playbackInfo,
-            enableAutoResume: true,
-          }}
-          showNativeControls
-          autoPlay
-          style={{ flex: 1 }}
-          onLoaded={handleLoaded}
-          onProgress={handleProgress}
-          onPlayerStateChanged={handleInlineStateChanged}
-          onMediaEnded={handleMediaEnded}
-          onLoadError={handleLoadError}
-          onEnterFullscreen={handleInlineEnterFullscreen}
+    <View style={isFullscreen ? FULLSCREEN_STYLE : INLINE_STYLE}>
+      {isFullscreen && <StatusBar hidden />}
+      <VdoPlayerView
+        embedInfo={{
+          otp,
+          playbackInfo,
+          enableAutoResume: true,
+        }}
+        showNativeControls
+        autoPlay
+        style={{ flex: 1 }}
+        onLoaded={handleLoaded}
+        onProgress={handleProgress}
+        onMediaEnded={handleMediaEnded}
+        onLoadError={handleLoadError}
+        onEnterFullscreen={handleSdkEnterFullscreen}
+        onExitFullscreen={handleSdkExitFullscreen}
+      />
+      {/* Application watermark — Plyr-parity overlay (the ONLY client-side
+          watermark; the server-side annotate watermark was removed from the
+          OTP). Lives INSIDE the expanding container → visible and correctly
+          positioned in normal AND fullscreen (re-clamps on resize). */}
+      {identity && (
+        <NativeWatermarkOverlay
+          watermarkId={identity.id}
+          watermarkName={identity.name ?? undefined}
         />
-        {/* Phase 2 — application-level watermark overlay.
-            Rendered AFTER VdoPlayerView in the tree so it paints above it.
-            pointerEvents="none" is enforced inside NativeWatermarkOverlay.
-            VdoCipher's server-side watermark (embedInfo) remains unaffected.
-            Requires watermarkId; watermarkName is optional (ID-only mode if absent). */}
-        {identity && (
-          <NativeWatermarkOverlay
-            watermarkId={identity.id}
-            watermarkName={identity.name ?? undefined}
-          />
-        )}
-      </View>
+      )}
 
-      {/* ── Fullscreen Modal ──────────────────────────────────────────────────
-          The Modal IS the fullscreen experience (same architecture as the
-          Plyr player). Orientation is locked landscape for its lifetime by
-          the isFullscreen effect above. The application watermark overlay
-          renders inside, above the player; the server-side annotate
-          watermark is part of the DRM stream and always present. Exit paths:
-          ✕ button, Android back (onRequestClose), and the player's own
-          exit-fullscreen control (onExitFullscreen) — all route through
-          handleCloseFullscreen, which seeks the inline player to the last
-          modal position and restores its play/pause state. */}
-      <Modal
-        visible={isFullscreen && fullscreenGateOpen !== false}
-        animationType="fade"
-        statusBarTranslucent
-        supportedOrientations={['portrait', 'landscape', 'landscape-left', 'landscape-right']}
-        onRequestClose={handleCloseFullscreen}
-      >
-        <StatusBar hidden />
-        <View style={{ flex: 1, backgroundColor: '#000' }}>
-          <VdoPlayerView
-            embedInfo={{
-              otp,
-              playbackInfo,
-              enableAutoResume: true,
-            }}
-            showNativeControls
-            style={{ flex: 1 }}
-            onProgress={handleModalProgress}
-            onPlayerStateChanged={handleModalStateChanged}
-            onMediaEnded={handleMediaEnded}
-            onLoadError={handleLoadError}
-            onExitFullscreen={handleModalExitFullscreen}
-          />
-          {identity && (
-            <NativeWatermarkOverlay
-              watermarkId={identity.id}
-              watermarkName={identity.name ?? undefined}
-            />
-          )}
+      {/* iOS app-level ENTER-fullscreen control — the SDK's native bridge
+          renders no fullscreen button on iOS (device-verified), so the app
+          provides one over the same player instance. Android relies on the
+          SDK's control-bar button. ≥44 pt touch target. */}
+      {!isFullscreen && Platform.OS === 'ios' && (
+        <Pressable
+          onPress={() => void enterFullscreen()}
+          style={{
+            position: 'absolute',
+            top: 10,
+            right: 10,
+            width: 44,
+            height: 44,
+            borderRadius: 22,
+            backgroundColor: 'rgba(0,0,0,0.45)',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 20,
+          }}
+          accessibilityLabel="Enter fullscreen"
+          accessibilityRole="button"
+          hitSlop={{ top: 8, right: 8, bottom: 8, left: 8 }}
+        >
+          <Maximize2 size={20} color="#fff" />
+        </Pressable>
+      )}
 
-          {/* Native close button — always visible, large touch target */}
-          <Pressable
-            onPress={handleCloseFullscreen}
-            style={{
-              position: 'absolute',
-              top: 12,
-              right: 12,
-              width: 44,
-              height: 44,
-              borderRadius: 22,
-              backgroundColor: 'rgba(0,0,0,0.55)',
-              alignItems: 'center',
-              justifyContent: 'center',
-              zIndex: 999,
-            }}
-            accessibilityLabel="Exit fullscreen"
-            accessibilityRole="button"
-            hitSlop={{ top: 8, right: 8, bottom: 8, left: 8 }}
-          >
-            <Text style={{ color: '#fff', fontSize: 18, lineHeight: 20, fontWeight: '600' }}>✕</Text>
-          </Pressable>
-        </View>
-      </Modal>
-    </>
+      {/* EXIT-fullscreen control (both platforms) — same language as the
+          offline player's back arrow. Collapses the SAME instance back into
+          the portrait layout; playback continues uninterrupted. */}
+      {isFullscreen && (
+        <Pressable
+          onPress={exitFullscreen}
+          style={{
+            position: 'absolute',
+            top: 12,
+            left: 12,
+            width: 44,
+            height: 44,
+            borderRadius: 22,
+            backgroundColor: '#00000080',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 999,
+          }}
+          accessibilityLabel="Exit fullscreen"
+          accessibilityRole="button"
+          hitSlop={{ top: 8, right: 8, bottom: 8, left: 8 }}
+        >
+          <ArrowLeft size={22} color="#fff" />
+        </Pressable>
+      )}
+    </View>
   );
 }

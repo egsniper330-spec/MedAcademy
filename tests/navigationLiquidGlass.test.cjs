@@ -151,13 +151,20 @@ check('ios shell no fake glass (no BlurView)', !iosShell.includes('BlurView'));
 check('ios shell no forced bar background', !/backgroundColor:\s*c\.base[^}]*tabBar/i.test(iosShell));
 check('ios shell no lucide import (no JS icon layer)', !iosShell.includes('lucide-react-native'));
 check('ios shell SF Symbol icons', iosShell.includes('sfSymbol'));
-check('ios shell tabBarItemHidden for drawer routes', iosShell.includes('tabBarItemHidden'));
+// 2026-09-28 architecture fix: drawer-only screens are NO LONGER tab scenes
+// on iOS (they moved to the (hubs) Stack group). The old tabBarItemHidden
+// registration was the root cause of iOS 26's system back affordance walking
+// tab-scene history (duplicate back button, wrong destination). Pinned by
+// tests/navigationOwnership.test.cjs.
+check('ios shell EXCLUDES drawer-only screens from the native tab navigator (no tabBarItemHidden)', !iosShell.includes('tabBarItemHidden') && /\.filter\(\(tab\) => tab\.hidden !== true\)/.test(iosShell));
 check('ios shell sidebarAdaptable=false (bottom bar on iPad)', /sidebarAdaptable=\{false\}/.test(iosShell));
 check('ios shell no minimizeBehavior (native default kept)', !iosShell.includes('minimizeBehavior'));
 
 check('js shell still uses expo-router Tabs', jsShell.includes('Tabs') && jsShell.includes('ResponsiveTabBar'));
 check('js shell no native-tabs import', !jsShell.includes('@bottom-tabs') && !jsShell.includes('NativeTabsNavigator'));
-check('js shell preserves href null for drawer routes', jsShell.includes('href: tab.hidden ? null : undefined'));
+// 2026-09-28 architecture fix: drawer-only screens are Stack screens in the
+// (hubs) group on every platform — href:null registration removed for parity.
+check('js shell EXCLUDES drawer-only screens from the JS tab navigator (no href:null scenes)', !jsShell.includes('href: tab.hidden ? null : undefined') && /\.filter\(\(tab\) => tab\.hidden !== true\)/.test(jsShell));
 
 for (const [role, code] of Object.entries(layouts)) {
   check(`${role} layout thin (registry-driven)`, code.includes('_TAB') && code.includes('RoleTabShell') && code.length < 700, `len=${code.length}`);

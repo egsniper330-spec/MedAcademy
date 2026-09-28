@@ -5,7 +5,7 @@
  *
  * ── Architecture ─────────────────────────────────────────────────────────────
  *   Web (Expo web):
- *     <iframe src="/player/index.html?v=ID&t=SECONDS&wname=...&wid=..." />
+ *     <iframe src="/player/index.html?v=ID&t=SECONDS&wname=...&wid=...&fs=0|1" />
  *     Static files served from public/player/ — no CDN, works offline.
  *
  *   Native (iOS / Android):
@@ -18,22 +18,27 @@
  *   the player script inside the Plyr container (survives fullscreen on both
  *   web and native WebView). A former second RN overlay (VideoWatermark)
  *   rendered on top of it in normal mode — the "duplicate/broken watermark" —
- *   and was removed. The fullscreen Modal plays the same in-HTML watermark in
- *   its own WebView, so no RN overlay is needed there either.
+ *   and was removed. The in-HTML watermark is the canonical renderer.
  *
- * ── Fullscreen (native) ───────────────────────────────────────────────────────
- *   The Modal IS the fullscreen experience. Architecture:
+ * ── Fullscreen (native) — IN-PLACE, single WebView ───────────────────────────
+ *   The SAME WebView instance that plays inline expands to fill the screen —
+ *   no Modal, no second window, no second WebView. The previous Modal
+ *   architecture (a second native Dialog window + a second WebView re-creating
+ *   the Plyr player) was the root cause of the rotation black screen: on
+ *   rotation the Dialog surface was torn down/recreated around a running
+ *   media pipeline. In-place expansion has none of that — rotation only
+ *   re-measures the container; the WebView, the Plyr instance, playback
+ *   position, and the in-HTML watermark all survive untouched (position is
+ *   continuous by construction — nothing to seek or restore).
  *
- *     Inline player  ─(enterfullscreen)→  Modal opens, new WebView plays
- *     Modal WebView  ─(hideFullscreen=true)→  no Plyr fullscreen button
- *     Close button   ─(press)→  capture time + state → close Modal → seek inline
+ *     Plyr fullscreen button  ─(capture-phase intercept)→ yt:fullscreen msg
+ *     RN toggles the SAME container between inline and absolute-fill.
+ *     The same button toggles exit; a back-arrow control and Android
+ *     hardware back also collapse it.
  *
- *   The Modal WebView receives hideFullscreen=true in __PLAYER_CONFIG__, which
- *   removes the Plyr fullscreen button and disables Plyr's fullscreen API
- *   entirely — preventing a double-fullscreen state (Modal + Plyr CSS).
- *
- *   Exit is handled by a native close button (top-right) — works on both
- *   iOS and Android. Android back button also dismisses via onRequestClose.
+ *   Orientation is locked LANDSCAPE while fullscreen, PORTRAIT_UP otherwise
+ *   (effect keyed on isFullscreen — no timers). app.json keeps the app
+ *   portrait at all other times.
  *
  * ── postMessage protocol (player → host) ─────────────────────────────────────
  *   { type: 'yt:ready' }
@@ -42,7 +47,7 @@
  *   { type: 'yt:paused' }
  *   { type: 'yt:ended',      currentTime: number, duration: number }
  *   { type: 'yt:error',      message: string }
- *   { type: 'yt:fullscreen', active: boolean }   ← inline player only
+ *   { type: 'yt:fullscreen', active: true }      ← intercept only (entry ask)
  *
  * ── YouTube title note ───────────────────────────────────────────────────────
  *   YouTube's pre-roll title overlay cannot be suppressed via embed parameters
@@ -54,8 +59,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type React from 'react';
 import ReactDOM from 'react-dom';
-import { Modal, Platform, Pressable, StatusBar, Text, View } from 'react-native';
+import { BackHandler, Platform, Pressable, StatusBar, Text, View } from 'react-native';
 import * as ScreenOrientation from 'expo-screen-orientation';
+import { ArrowLeft } from 'lucide-react-native';
 import { WebView, type WebViewMessageEvent } from 'react-native-webview';
 import type { VideoWatermarkProps } from './VideoWatermark';
 import { PLAYER_SCRIPT } from '../lib/plyr/playerScript';
@@ -78,8 +84,8 @@ export interface YouTubePlayerProps {
   onEnd?: () => void;
   onError?: (message: string) => void;
   /**
-   * SECURITY GATE (fullscreen boundary): consulted right before the native
-   * fullscreen Modal mounts. Resolve/return false → fullscreen is refused
+   * SECURITY GATE (fullscreen boundary): consulted right before the in-place
+   * fullscreen expansion. Resolve/return false → fullscreen is refused
    * (the request is swallowed). Resolve/return true → allowed. Throwing also
    * refuses. Fail-closed.
    */
@@ -246,10 +252,10 @@ interface SubProps {
   onFullscreen?: (active: boolean) => void;
   /**
    * SECURITY GATE (fullscreen boundary): called immediately before the
-   * fullscreen Modal mounts. Return true → block (no Modal, no escape hatch).
-   * Fail-closed: an omitted gate blocks nothing (gateless surfaces are
-   * non-protected by design, e.g. marketing embeds); the lesson screen ALWAYS
-   * supplies one. An exception thrown by the gate also blocks.
+   * in-place fullscreen expansion. Return true → block (no expansion, no
+   * escape hatch). Fail-closed: an omitted gate blocks nothing (gateless
+   * surfaces are non-protected by design, e.g. marketing embeds); the lesson
+   * screen ALWAYS supplies one. An exception thrown by the gate also blocks.
    */
   shouldAllowFullscreen?: () => Promise<boolean> | boolean;
 }
@@ -359,26 +365,25 @@ function YouTubePlayerWeb({
   );
 }
 
-// ─── Native sub-component ─────────────────────────────────────────────────────
+// ─── Native sub-component — ONE WebView for the whole session ────────────────
 //
-// Fullscreen architecture:
-//   • Inline player has the Plyr fullscreen button (hideFullscreen=false).
-//     Tapping it fires enterfullscreen → postMessage yt:fullscreen:true → Modal opens.
-//   • Modal player has hideFullscreen=true:
-//       – The Plyr fullscreen button is absent (removed from controls array).
-//       – Plyr's fullscreen API is disabled (fullscreen.enabled=false).
-//       – The Modal itself IS the fullscreen experience.
-//   • A native RN close button (top-right) dismisses the Modal on both iOS & Android.
-//   • Android back button also works via onRequestClose.
+// Fullscreen architecture (in-place, root-cause fix for rotation black screen):
+//   • The inline WebView is NEVER remounted. Its container toggles between a
+//     16:9 block and absolute-fill of the screen root. No Modal, no second
+//     window, no second WebView — rotation only re-measures the container.
+//   • Entry trigger: Plyr's own fullscreen button (the player script
+//     intercepts the click in the capture phase and posts yt:fullscreen).
+//     The gate runs first; a refusal swallows the request.
+//   • Exit paths: the same Plyr button (toggle), the app back-arrow control,
+//     and Android hardware back.
+//   • Playback position is continuous by construction — the WebView keeps
+//     playing through every transition; nothing to seek or restore.
 //
-// State sync on close:
-//   yt:progress messages from the Modal WebView update lastTimeRef continuously.
-//   yt:playing / yt:paused messages update modalPlayingRef.
-//   On close: inline WebView is seeked to lastTimeRef and play/pause restored.
-//
-// Cleanup:
-//   Modal visible=false → React unmounts Modal children (including WebView).
-//   All WebView listeners are released; no dangling intervals or timers.
+// State handling:
+//   lastTimeRef tracks progress continuously (single WebView → single stream).
+//   inlineHtml is memoized so the WebView's source prop NEVER changes identity
+//   between renders — a new HTML string would reload the WebView and tear
+//   down the Plyr instance mid-playback (must not happen on any state change).
 
 function YouTubePlayerNative({
   videoId,
@@ -402,21 +407,15 @@ function YouTubePlayerNative({
     securityGateRef.current = shouldAllowFullscreen ?? null;
   }, [shouldAllowFullscreen]);
 
-  // Shared playback-position tracker — updated by whichever WebView is active.
+  // Shared playback-position tracker — updated by the single WebView.
   const lastTimeRef      = useRef(resumePosition);
-  // Play/pause state of the INLINE player — captured when fullscreen is entered
-  // so the Modal starts in the correct play/pause state.
-  const inlinePlayingRef = useRef(false);
-  // Play/pause state of the MODAL player — used to restore inline on close.
-  const modalPlayingRef  = useRef(false);
-  const inlineWvRef      = useRef<WebView>(null);
+  const wvRef            = useRef<WebView>(null);
 
-  // ── Inline HTML (normal mode) ───────────────────────────────────────────────
-  // Memoized so the WebView's source prop never changes identity between renders.
-  // Without memo, setIsFullscreen(true) triggers a re-render that produces a new
-  // HTML string, causing the WebView to reload and tear down the Plyr instance
-  // just as the Modal is opening — resulting in a blank inline player on close.
-  const inlineHtml = useMemo(
+  // ── Player HTML (memoized for the lifetime of the WebView) ─────────────────
+  // NEVER rebuild after mount: any identity change in the source prop reloads
+  // the WebView (hard player teardown). Deps: video identity + watermark +
+  // initial resume only.
+  const playerHtml = useMemo(
     () => buildNativeHtml({
       videoId,
       resumeAt:      resumePosition,
@@ -437,7 +436,39 @@ function YouTubePlayerNative({
     [onProgress],
   );
 
-  const onInlineMessage = useCallback(
+  // ── Fullscreen enter/exit (SAME WebView instance both ways) ─────────────────
+  const exitFullscreen = useCallback(() => {
+    setIsFullscreen(false);
+  }, []);
+
+  const enterFullscreen = useCallback(async () => {
+    // ── SECURITY GATE AT THE FULLSCREEN BOUNDARY ─────────────────────────────
+    // The fullscreen container is an in-place expansion rendered by the SAME
+    // screen, but it must still re-validate the authoritative security verdict
+    // before expanding. Fail-closed: refused gate, gate wired-but-undefined,
+    // or a thrown evaluation error all swallow the request.
+    try {
+      const gate = securityGateRef.current;
+      if (gate) {
+        const allowed = await gate();
+        if (!allowed) return; // blocked → swallow fullscreen request
+      } else if (shouldAllowFullscreen) {
+        return; // gate supplied but not yet wired → fail-closed
+      }
+    } catch {
+      return; // evaluation error → fail-closed, no fullscreen
+    }
+    setIsFullscreen(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Live isFullscreen mirror for the stable message handler (declared before
+  // onMessage so the closure never touches an uninitialized binding).
+  const isFullscreenRef = useRef(isFullscreen);
+  isFullscreenRef.current = isFullscreen;
+
+  // ── WebView message handler (single stream from the single player) ─────────
+  const onMessage = useCallback(
     (event: WebViewMessageEvent) => {
       const msg = parsePlayerMessage(event.nativeEvent.data);
       if (!msg) return;
@@ -449,10 +480,8 @@ function YouTubePlayerNative({
           handleProgress(msg.currentTime ?? 0, msg.duration ?? 0);
           break;
         case 'yt:playing':
-          inlinePlayingRef.current = true;
           break;
         case 'yt:paused':
-          inlinePlayingRef.current = false;
           break;
         case 'yt:ended':
           onEnd?.();
@@ -461,121 +490,44 @@ function YouTubePlayerNative({
           onError?.(msg.message ?? 'Playback error');
           break;
         case 'yt:fullscreen':
+          // Entry ask from the Plyr fullscreen button (capture-phase intercept
+          // in the player script). The same button toggles exit while
+          // fullscreen, so an active:true message inside fullscreen collapses.
           if (msg.active) {
-            // ── SECURITY GATE AT THE FULLSCREEN BOUNDARY ─────────────────
-            // The fullscreen Modal is a top-level RN surface rendered ABOVE
-            // the SecurityGate overlay, so it must independently re-validate
-            // the authoritative security verdict before mounting. A gate that
-            // appears while this handler runs must not be defeated by a
-            // fullscreen transition that races it. Fail-closed: if the check
-            // throws or returns true, the Modal never mounts — the Plyr
-            // fullscreen click is consumed with no visual escape hatch.
-            (async () => {
-              try {
-                if (securityGateRef.current) {
-                  const allowed = await securityGateRef.current();
-                  if (!allowed) return; // blocked → swallow fullscreen request
-                } else if (shouldAllowFullscreen) {
-                  return; // gate supplied but not yet wired → fail-closed
-                }
-              } catch {
-                return; // evaluation error → fail-closed, no fullscreen
-              }
-              // Snapshot inline play/pause state before the Modal mounts.
-              modalPlayingRef.current = inlinePlayingRef.current;
-              setIsFullscreen(true);
-              onFullscreen?.(true);
-            })();
+            if (isFullscreenRef.current) {
+              exitFullscreen();
+            } else {
+              void enterFullscreen();
+            }
           }
           break;
       }
     },
-    [onReady, handleProgress, onEnd, onError, onFullscreen],
+    [onReady, handleProgress, onEnd, onError, enterFullscreen, exitFullscreen],
   );
 
-  // ── Modal WebView message handler ──────────────────────────────────────────
-  // No yt:fullscreen handling here — the Modal has no fullscreen button.
-  const onModalMessage = useCallback(
-    (event: WebViewMessageEvent) => {
-      const msg = parsePlayerMessage(event.nativeEvent.data);
-      if (!msg) return;
-      switch (msg.type) {
-        case 'yt:progress':
-          handleProgress(msg.currentTime ?? 0, msg.duration ?? 0);
-          break;
-        case 'yt:playing':
-          modalPlayingRef.current = true;
-          break;
-        case 'yt:paused':
-          modalPlayingRef.current = false;
-          break;
-        case 'yt:ended':
-          onEnd?.();
-          break;
-        case 'yt:error':
-          onError?.(msg.message ?? 'Playback error');
-          break;
-      }
-    },
-    [handleProgress, onEnd, onError],
-  );
-
-  // ── Close handler — used by both the native button and onRequestClose ───────
-  // 1. Capture the last known time (already in lastTimeRef via onModalMessage).
-  // 2. Close the Modal (unmounts Modal WebView → no memory leak).
-  // 3. Seek the inline WebView to the captured position.
-  // 4. Restore play/pause state.
-  const handleClose = useCallback(() => {
-    const seekTime = lastTimeRef.current;
-    const wasPlaying = modalPlayingRef.current;
-
-    setIsFullscreen(false);
-    onFullscreen?.(false);
-
-    // Return the device to the app's normal portrait orientation as the Modal
-    // closes. app.json locks the activity to portrait, so this restores the
-    // exact pre-fullscreen state; on rotation-lock devices the lock remains
-    // honored by the OS. Synchronous with the Modal hide — no timers.
-    ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP)
-      .catch(() => {});
-
-    // Defer the inject until after the Modal unmounts and the inline WebView
-    // is in the foreground again (next event-loop tick is sufficient).
-    setTimeout(() => {
-      const js = [
-        `if(window.__plyr){`,
-        `  window.__plyr.currentTime=${seekTime};`,
-        wasPlaying
-          ? `  window.__plyr.play().catch(function(){});`
-          : `  window.__plyr.pause();`,
-        `}`,
-        `true;`,
-      ].join('');
-      inlineWvRef.current?.injectJavaScript(js);
-    }, 50);
-  }, [onFullscreen]);
-
-  // ── Orientation lifecycle (native) ────────────────────────────────────────
-  // The fullscreen Modal IS the fullscreen experience, so the device rotates
-  // with it: landscape while the Modal is visible, portrait once closed.
-  // Effect keyed on isFullscreen — no timers, no delays; the lock is applied
-  // synchronously on state transitions. app.json keeps the app portrait at
-  // all other times.
+  // Forward enter/exit to the host screen (host may hide non-video chrome).
   useEffect(() => {
-    if (Platform.OS === 'web' || !isFullscreen) return;
+    onFullscreen?.(isFullscreen);
+  }, [isFullscreen, onFullscreen]);
+
+  // ── Orientation lifecycle ──────────────────────────────────────────────────
+  // LANDSCAPE while fullscreen, PORTRAIT_UP otherwise — effect keyed on
+  // isFullscreen, applied synchronously on state transitions. app.json keeps
+  // the app portrait at all other times. The single WebView survives the
+  // rotation; nothing is torn down or reloaded.
+  useEffect(() => {
+    if (Platform.OS === 'web' || !isFullscreen) {
+      return;
+    }
     ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE)
       .catch(() => {});
   }, [isFullscreen]);
 
   // ── System bars (Issue 5) ──────────────────────────────────────────────────
-  // RN's Android Modal mirrors the ACTIVITY window's system-bar visibility
-  // into its own Dialog window (syncSystemBarsVisibility in
-  // ReactModalHostView.kt), so hiding the bars only on the Modal window has
-  // no effect — the activity window must hide them. Back/Home/Recents were
-  // therefore still visible over the video. While fullscreen: hide the nav
-  // bar (expo-navigation-bar → activity window) and the status bar
-  // (<StatusBar hidden> below). Every exit path unmounts the Modal, which
-  // runs this cleanup AND pops the StatusBar stack — both restore together.
+  // While fullscreen: hide the nav bar (expo-navigation-bar → activity window)
+  // and the status bar (<StatusBar hidden> below). Every exit path runs the
+  // cleanup — both restore together.
   useEffect(() => {
     if (Platform.OS === 'web' || !isFullscreen) return;
     void enterFullscreenSystemUi();
@@ -584,120 +536,80 @@ function YouTubePlayerNative({
     };
   }, [isFullscreen]);
 
-  // ── Modal HTML — memoized for the lifetime of the fullscreen session ────────
-  // Built once when isFullscreen first becomes true; never rebuilt during the
-  // session. Without useMemo, any state change in YouTubePlayerNative (e.g. a
-  // future re-render triggered by onProgress) would rebuild the HTML string and
-  // hand a new object to the WebView source prop, causing a hard reload of the
-  // entire player mid-playback.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  const modalHtml = useMemo(
-    () => buildNativeHtml({
-      videoId,
-      resumeAt:       lastTimeRef.current,
-      watermarkName:  watermark?.name,
-      watermarkId:    watermark?.studentId,
-      hideFullscreen: true,
-    }),
-    // Deps: only re-build when a new fullscreen session starts (isFullscreen
-    // toggles true) or the video itself changes. lastTimeRef is intentionally
-    // NOT a dep — it is a ref, not state; we read its value at the moment the
-    // memo runs (when isFullscreen becomes true).
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [isFullscreen, videoId, watermark?.name, watermark?.studentId],
-  );
+  // ── Android hardware back collapses fullscreen ─────────────────────────────
+  useEffect(() => {
+    if (Platform.OS !== 'android' || !isFullscreen) return;
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      exitFullscreen();
+      return true;
+    });
+    return () => sub.remove();
+  }, [isFullscreen, exitFullscreen]);
 
   return (
-    <>
-      {/* ── Inline player ───────────────────────────────────────────── */}
-      <View style={{ width: '100%', aspectRatio: 16 / 9, backgroundColor: '#000', position: 'relative' }}>
-        <WebView
-          ref={inlineWvRef}
-          source={{ html: inlineHtml, baseUrl: 'https://medacademy.app' }}
-          style={{ flex: 1, backgroundColor: '#000' }}
-          allowsInlineMediaPlayback
-          mediaPlaybackRequiresUserAction={false}
-          allowsFullscreenVideo
-          javaScriptEnabled
-          domStorageEnabled
-          originWhitelist={['*']}
-          onMessage={onInlineMessage}
-          scrollEnabled={false}
-          showsHorizontalScrollIndicator={false}
-          showsVerticalScrollIndicator={false}
-        />
-      </View>
+    // In-place fullscreen container: when fullscreen, absolute-fill of the
+    // SCREEN ROOT (the lesson screen hosts this player as a direct child of
+    // its root View) — same window, same WebView, same Plyr instance, same
+    // in-HTML watermark. Rotation only re-measures the container.
+    <View
+      style={
+        isFullscreen
+          ? {
+              position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
+              zIndex: 100, backgroundColor: '#000',
+            }
+          : {
+              width: '100%', aspectRatio: 16 / 9, backgroundColor: '#000',
+              position: 'relative', overflow: 'hidden',
+            }
+      }
+    >
+      {isFullscreen && <StatusBar hidden />}
+      <WebView
+        ref={wvRef}
+        source={{ html: playerHtml, baseUrl: 'https://medacademy.app' }}
+        style={{ flex: 1, backgroundColor: '#000' }}
+        allowsInlineMediaPlayback
+        mediaPlaybackRequiresUserAction={false}
+        // No native WebView fullscreen path can engage: Plyr never calls
+        // requestFullscreen (capture-phase intercept), and the WebChromeClient
+        // fullscreen support is disabled outright — RN owns fullscreen.
+        allowsFullscreenVideo={false}
+        javaScriptEnabled
+        domStorageEnabled
+        originWhitelist={['*']}
+        onMessage={onMessage}
+        scrollEnabled={false}
+        showsHorizontalScrollIndicator={false}
+        showsVerticalScrollIndicator={false}
+      />
 
-      {/* ── Fullscreen Modal ─────────────────────────────────────────── */}
-      {/* visible=false unmounts children → Modal WebView is destroyed, no leak */}
-      <Modal
-        visible={isFullscreen}
-        animationType="fade"
-        statusBarTranslucent
-        supportedOrientations={['portrait', 'landscape', 'landscape-left', 'landscape-right']}
-        onRequestClose={handleClose}
-        onShow={() => {}}
-      >
-        <StatusBar hidden />
-        {/* Fullscreen wrapper — positioned + z-raised so the in-HTML watermark
-            (position:absolute inside the WebView HTML) is not clipped to the
-            WebView's layout bounds; it must span the whole landscape screen.
-            The wrapper sits above the WebView without intercepting touches:
-            the WebView and close button remain its hit-testable children. */}
-        <View
+      {/* EXIT-fullscreen control — back-arrow (same language as the VdoCipher
+          and offline players). The Plyr fullscreen button ALSO exits (toggle
+          in the message handler); this control guarantees a visible exit on
+          both platforms. ≥44 pt touch target. */}
+      {isFullscreen && (
+        <Pressable
+          onPress={exitFullscreen}
           style={{
             position: 'absolute',
-            top: 0,
-            left: 0,
-            right: 0,
-            bottom: 0,
-            zIndex: 2,
+            top: 12,
+            left: 12,
+            width: 44,
+            height: 44,
+            borderRadius: 22,
+            backgroundColor: '#00000080',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 999,
           }}
+          accessibilityLabel="Exit fullscreen"
+          accessibilityRole="button"
+          hitSlop={{ top: 8, right: 8, bottom: 8, left: 8 }}
         >
-          {/* Modal player — Plyr fullscreen button absent (hideFullscreen=true).
-              The in-HTML watermark plays inside this WebView — exactly one
-              watermark instance, spanning the full landscape screen. */}
-          <WebView
-            source={{ html: modalHtml, baseUrl: 'https://medacademy.app' }}
-            style={{ flex: 1, backgroundColor: '#000' }}
-            allowsInlineMediaPlayback
-            mediaPlaybackRequiresUserAction={false}
-            allowsFullscreenVideo={false}
-            javaScriptEnabled
-            domStorageEnabled
-            originWhitelist={['*']}
-            onMessage={onModalMessage}
-            scrollEnabled={false}
-            showsHorizontalScrollIndicator={false}
-            showsVerticalScrollIndicator={false}
-          />
-
-          {/* ── Native close button ─────────────────────────────────── */}
-          {/* Always visible; large touch target; works on iOS and Android */}
-          <Pressable
-            onPress={handleClose}
-            style={{
-              position: 'absolute',
-              top: 12,
-              right: 12,
-              width: 44,
-              height: 44,
-              borderRadius: 22,
-              backgroundColor: 'rgba(0,0,0,0.55)',
-              alignItems: 'center',
-              justifyContent: 'center',
-              zIndex: 999,
-            }}
-            accessibilityLabel="Exit fullscreen"
-            accessibilityRole="button"
-            hitSlop={{ top: 8, right: 8, bottom: 8, left: 8 }}
-          >
-            <Text style={{ color: '#fff', fontSize: 18, lineHeight: 20, fontWeight: '600' }}>
-              ✕
-            </Text>
-          </Pressable>
-        </View>
-      </Modal>
-    </>
+          <ArrowLeft size={22} color="#fff" />
+        </Pressable>
+      )}
+    </View>
   );
 }

@@ -70,7 +70,7 @@ function extractAndRunFunction(relFile, fnName, argList) {
 // ═══════════════════════════════════════════════════════════════════════════
 console.log('═══ 1. DB AUDIT — contract fix, honest re-check, rename ═══');
 {
-  const screen = readCode('src/app/(app)/(admin)/db-audit.tsx');
+  const screen = readCode('src/app/(app)/(hubs)/db-audit.tsx');
 
   // Phantom fields removed: the backend DbAuditController returns
   // { orphan_*, negative_balances, row_counts } — NOT duplicate_*/broken_fks/database.
@@ -87,7 +87,7 @@ console.log('═══ 1. DB AUDIT — contract fix, honest re-check, rename ═
      'db-audit interface matches the real backend response shape');
 
   // Honest re-check: real before/after comparison, no fabricated repair log.
-  ok(/Issue count INCREASED|Issue count decreased|issue count unchanged/.test(read('src/app/(app)/(admin)/db-audit.tsx')),
+  ok(/Issue count INCREASED|Issue count decreased|issue count unchanged/.test(read('src/app/(app)/(hubs)/db-audit.tsx')),
      're-check reports honest before/after issue totals');
   ok(!/Repair (completed|applied) successfully/.test(screen),
      'no fabricated "repair completed" log lines remain');
@@ -168,7 +168,7 @@ console.log('═══ 3. BULK IMPORT — RFC-4180 parser (REAL execution) + aca
   // TypeScript, i.e. a REAL newline in the runtime string — which is exactly
   // the data the RFC-4180 parser must survive.
   const parsed = extractAndRunFunction(
-    'src/app/(app)/(admin)/bulk-import.tsx', 'parseCSV',
+    'src/app/(app)/(hubs)/bulk-import.tsx', 'parseCSV',
     `'full_name,email,phone,role,notes\\n' +` +
     `'"Doe, John",j@x.com,0100,student,"Line1\\nLine2"\\n' +` +
     `'\"Ann \"\"Q\"\" B\",b@x.com,0200,doctor,plain\\n' +` +
@@ -187,7 +187,7 @@ console.log('═══ 3. BULK IMPORT — RFC-4180 parser (REAL execution) + aca
   ok(parsed[3][0] === 'Cara', 'trailing row without newline still parsed');
 
   // Academic columns are no longer silently dropped — they flow into the payload.
-  const screen = read('src/app/(app)/(admin)/bulk-import.tsx');
+  const screen = read('src/app/(app)/(hubs)/bulk-import.tsx');
   ok(/university/.test(screen) && /faculty/.test(screen) && /level/.test(screen),
      'academic columns (university/faculty/level) are read from the CSV');
   ok(/academic placing|academic placement|university_id|faculty_id/i.test(screen),
@@ -225,7 +225,7 @@ console.log('═══ 4. BULK EXPORT — audited, SA-only, allow-listed, no sec
      'bulkDataExport API wrapper exists');
 
   // UI: role-gated section, CSV, empty-result handled honestly, no secrets.
-  const panel = read('src/app/(app)/(admin)/export-panel.tsx');
+  const panel = read('src/app/(app)/(hubs)/export-panel.tsx');
   ok(/isSuperAdmin/.test(panel) && /super_admin/.test(panel),
      'bulk export section is Super-Admin-gated in the UI');
   ok(/Server-side allow-listed columns only/.test(panel),
@@ -315,7 +315,7 @@ console.log('═══ 5. IMPERSONATION — real contract, session swap, banner 
      'php.ts maps impersonation-end → /auth/impersonation/end');
 
   // Screen: structured error surfaced verbatim, success toast only on real success.
-  const screen = read('src/app/(app)/(superadmin)/impersonation.tsx');
+  const screen = read('src/app/(app)/(hubs)/impersonation.tsx');
   ok(/friendlyError\(e, 'Impersonation failed\.'\)/.test(screen),
      'screen surfaces the structured backend error verbatim');
   ok(/startImpersonationSession/.test(screen) && /router\.replace/.test(screen),

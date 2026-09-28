@@ -220,8 +220,8 @@ function read(rel) {
 {
   const api = read('src/lib/videoLibraryApi.ts');
   const php = read('src/client/php.ts');
-  const screen = read('src/app/(app)/(doctor)/video-library.tsx');
-  const saScreen = read('src/app/(app)/(superadmin)/sa-video-library.tsx');
+  const screen = read('src/app/(app)/(hubs)/video-library.tsx');
+  const saScreen = read('src/app/(app)/(hubs)/sa-video-library.tsx');
 
   // API layer
   ok(/sync_vdocipher_library/.test(php) && /'\/video\/sync-library'/.test(php),
@@ -250,7 +250,7 @@ function read(rel) {
   // Remove routes through the same audited, idempotent server flow.
   ok(/onPress=\{\(\) => handleDelete\(item\)\}/.test(screen),
     'UI: Remove on an unavailable row goes through the real deletion flow (idempotent)');
-  ok(/export \{ default \} from '@\/app\/\(app\)\/\(doctor\)\/video-library';/.test(saScreen),
+  ok(/export \{ default \} from '@\/app\/\(app\)\/\(hubs\)\/video-library';/.test(saScreen),
     'UI: SA video-library route shares the same library screen (single source)');
 
   // Upload idempotency (I): the per-doctor unique index guards INSERTs

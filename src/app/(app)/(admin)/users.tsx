@@ -9,7 +9,7 @@ import { Search, Users, MoreVertical, Phone, Mail, UserPlus, Eye, EyeOff, Chevro
 import { displayPhoneNational } from '@/lib/phone';
 import { normalizePhoneE164 } from '@/lib/identifier';
 import {
-  getAllUsers, updateUserStatus, blockUser, unblockUser, setUserRole, deleteUser, createManagedUser,
+  getAllUsers, updateUserStatus, setUserRole, deleteUser, createManagedUser,
   getUniversities, getFaculties, getAcademicLevels,
   getLoginHistory, enableUnlimitedDevices, disableUnlimitedDevices,
   trashUser, undoTrash, bulkUserOps,
@@ -27,6 +27,7 @@ import { neuColors, neuFlatStyle, useLayout, safeBottom } from '@/lib/neu'
 import { validateEmail, validateRequired, validatePasswordSimple, validateMatch } from '@/lib/validation';
 import { parseError, logAndParse } from '@/lib/parseError';
 import { useActionLoading } from '@/lib/useActionLoading';
+import { ConfirmDialog, type ConfirmDialogRequest } from '@/components/ConfirmDialog';
 import { useDebounce } from '@/lib/useDebounce';
 import { DeleteAccountModal } from '@/components/DeleteAccountModal';
 import { ChangePasswordModal } from '@/components/ChangePasswordModal';
@@ -98,8 +99,13 @@ function actionsForRole(user: any): ActionKey[] {
   const deviceAction: ActionKey = isUnlimited ? 'limited_devices' : 'unlimited_devices';
   const base: ActionKey[] = ['edit', 'change_password', deviceAction, 'devices', 'login_history', 'audit'];
   if (role === 'doctor') base.push('timeline');
-  if (user?.status === 'blocked') base.splice(1, 0, 'unblock');
-  else                            base.splice(1, 0, 'block');
+  // Status action mirrors the SERVER-authoritative account status (same
+  // mapping as the Super Admin Users screen):
+  //   blocked   → Unblock · suspended → Unsuspend (manual or security
+  //   violation — both write status='suspended') · otherwise → Suspend.
+  if (user?.status === 'blocked')        base.splice(1, 0, 'unblock');
+  else if (user?.status === 'suspended') base.splice(1, 0, 'unsuspend');
+  else                                   base.splice(1, 0, 'suspend');
   if (role === 'student')        base.push('promote_doctor', 'promote_admin');
   if (role === 'doctor')         base.push('promote_admin', 'demote_student');
   if (role === 'admin')          base.push('demote_doctor', 'demote_student');
@@ -318,9 +324,69 @@ export default function AdminUsers() {
 
   const openMenu = (user: any) => { setSelectedUser(user); setMenuVisible(true); };
 
+  // Cross-platform confirm (works on iOS/Android/Web — Alert.alert is a
+  // silent no-op on web). Suspend family only; other actions unchanged.
+  const [confirm, setConfirm] = useState<ConfirmDialogRequest | null>(null);
+
   const handleAction = async (key: ActionKey) => {
     if (!selectedUser) return;
     const id = selectedUser.id;
+
+    if (key === 'unsuspend' || key === 'unblock') {
+      setMenuVisible(false);
+      const name = selectedUser?.full_name ?? 'User';
+      setConfirm({
+        title: key === 'unsuspend' ? 'Unsuspend user?' : 'Unblock user?',
+        message: `${name} will be restored to active status and can sign in again. Existing security policies stay fully enforced.`,
+        confirmLabel: key === 'unsuspend' ? 'Unsuspend' : 'Unblock',
+        onConfirm: async () => {
+          const ok = await run(key, async () => {
+            try {
+              // Server-authoritative: update local state ONLY on success.
+              await updateUserStatus(id, 'active');
+              setUsers(p => p.map(u => u.id === id ? { ...u, status: 'active' } : u));
+              setSelectedUser((p: any) => p ? { ...p, status: 'active' } : null);
+              showToast({ type: 'success', message: key === 'unsuspend' ? 'User unsuspended.' : 'User unblocked.' });
+              return true;
+            } catch (e) {
+              // Failure → the user stays suspended in the UI; retry allowed.
+              showToast({ type: 'error', message: logAndParse(e, key) });
+              return false;
+            }
+          });
+          setConfirm(null);
+          if (ok) setMenuVisible(false);
+        },
+      });
+      return;
+    }
+    if (key === 'suspend' || key === 'block') {
+      setMenuVisible(false);
+      const name = selectedUser?.full_name ?? 'User';
+      setConfirm({
+        title: key === 'suspend' ? 'Suspend user?' : 'Block user?',
+        message: `${name} will be ${key === 'suspend' ? 'suspended' : 'blocked'} immediately and signed out of all devices.`,
+        confirmLabel: key === 'suspend' ? 'Suspend' : 'Block',
+        destructive: true,
+        onConfirm: async () => {
+          const ok = await run(key, async () => {
+            try {
+              await updateUserStatus(id, 'suspended');
+              setUsers(p => p.map(u => u.id === id ? { ...u, status: 'suspended' } : u));
+              setSelectedUser((p: any) => p ? { ...p, status: 'suspended' } : null);
+              showToast({ type: 'success', message: key === 'suspend' ? 'User suspended.' : 'User blocked.' });
+              return true;
+            } catch (e) {
+              showToast({ type: 'error', message: logAndParse(e, key) });
+              return false;
+            }
+          });
+          setConfirm(null);
+          if (ok) setMenuVisible(false);
+        },
+      });
+      return;
+    }
 
     if (key === 'change_password') { setMenuVisible(false); setChangePwVisible(true); return; }
     if (key === 'edit')    { setMenuVisible(false); setEditVisible(true);   return; }
@@ -357,8 +423,13 @@ export default function AdminUsers() {
     }
 
     const actionMap: Partial<Record<ActionKey, () => Promise<void>>> = {
-      block:          async () => { await blockUser(id);   setUsers(p => p.map(u => u.id === id ? { ...u, status: 'blocked' } : u)); setSelectedUser((p: any) => p ? { ...p, status: 'blocked' } : null); showToast({ type: 'success', message: 'User blocked.' }); },
-      unblock:        async () => { await unblockUser(id); setUsers(p => p.map(u => u.id === id ? { ...u, status: 'active'  } : u)); setSelectedUser((p: any) => p ? { ...p, status: 'active'  } : null); showToast({ type: 'success', message: 'User unblocked.' }); },
+      // Suspend family — local state mirrors the EXACT status the backend
+      // persisted (updateUserStatus → set_user_status RPC), eliminating the
+      // old blockUser/unblockUser 'blocked'-label drift.
+      suspend:        async () => { await updateUserStatus(id, 'suspended'); setUsers(p => p.map(u => u.id === id ? { ...u, status: 'suspended' } : u)); setSelectedUser((p: any) => p ? { ...p, status: 'suspended' } : null); showToast({ type: 'success', message: 'User suspended.' }); },
+      unsuspend:      async () => { await updateUserStatus(id, 'active');    setUsers(p => p.map(u => u.id === id ? { ...u, status: 'active' } : u));    setSelectedUser((p: any) => p ? { ...p, status: 'active' } : null);    showToast({ type: 'success', message: 'User unsuspended.' }); },
+      block:          async () => { await updateUserStatus(id, 'suspended'); setUsers(p => p.map(u => u.id === id ? { ...u, status: 'suspended' } : u)); setSelectedUser((p: any) => p ? { ...p, status: 'suspended' } : null); showToast({ type: 'success', message: 'User blocked.' }); },
+      unblock:        async () => { await updateUserStatus(id, 'active');    setUsers(p => p.map(u => u.id === id ? { ...u, status: 'active' } : u));    setSelectedUser((p: any) => p ? { ...p, status: 'active' } : null);    showToast({ type: 'success', message: 'User unblocked.' }); },
       promote_doctor: async () => { await setUserRole(id, 'doctor');  setUsers(p => p.map(u => u.id === id ? { ...u, role: 'doctor' }  : u)); setSelectedUser((p: any) => p ? { ...p, role: 'doctor' }  : null); showToast({ type: 'success', message: 'Promoted to Doctor.' }); },
       promote_admin:  async () => { await setUserRole(id, 'admin');   setUsers(p => p.map(u => u.id === id ? { ...u, role: 'admin' }   : u)); setSelectedUser((p: any) => p ? { ...p, role: 'admin' }   : null); showToast({ type: 'success', message: 'Promoted to Admin.' }); },
       demote_student: async () => { await setUserRole(id, 'student'); setUsers(p => p.map(u => u.id === id ? { ...u, role: 'student' } : u)); setSelectedUser((p: any) => p ? { ...p, role: 'student' } : null); showToast({ type: 'success', message: 'Demoted to Student.' }); },
@@ -630,6 +701,13 @@ export default function AdminUsers() {
         visible={deleteConfirm}
         onClose={() => setDeleteConfirm(false)}
         onDeleted={handleDeleted}
+      />
+
+      {/* Suspend / Unsuspend confirmation (cross-platform) */}
+      <ConfirmDialog
+        visible={!!confirm}
+        request={confirm}
+        onClose={() => setConfirm(null)}
       />
 
       {/* ── Login History ── */}

@@ -277,7 +277,7 @@ console.log('── Client: call-site wiring (structural) ──');
     'fresh (C,D): re-evaluation consults the server-computed exemption evidence');
 
   // Whitelist management UI untouched (SA screen keeps its flows).
-  const sa = read('src/app/(app)/(superadmin)/maintenance.tsx');
+  const sa = read('src/app/(app)/(hubs)/maintenance.tsx');
   ok(/addToMaintenanceWhitelist|removeFromMaintenanceWhitelist/.test(sa), 'client (I): SA whitelist management flows preserved');
 }
 

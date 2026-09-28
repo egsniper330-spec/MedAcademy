@@ -24,6 +24,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { NeuButton } from '@/components/NeuButton';
 import { useUpdate } from '@/lib/useForceUpdate';
 
 // MedAcademy brand mark (same asset the OS uses for the app icon).
@@ -37,7 +38,6 @@ const C = {
   text: '#E6EDF7',
   sub: '#8FA3C0',
   accent: '#3B82F6',
-  accentPress: '#2D6FD2',
   ok: '#22C55E',
   warn: '#F59E0B',
   err: '#EF4444',
@@ -175,22 +175,23 @@ export default function ForceUpdateScreen(): React.JSX.Element {
           </View>
         ) : null}
 
-        <Pressable
-          style={({ pressed }) => [
-            styles.primaryBtn,
-            pressed && { backgroundColor: C.accentPress },
-          ]}
+        {/* PRIMARY CTA — the exact shared component the Login screen's
+            "Sign In" button uses: NeuButton variant="primary" + fullWidth.
+            Design-token background (neuColors.primary), white label
+            typography, neumorphic press feedback, haptics — visually
+            identical to Sign In. fullWidth centers it across the scroll
+            content by construction on every device class/orientation;
+            paddingVertical (spacing.md) + label line height give a ~48pt
+            touch target (≥44pt accessibility minimum). The accessible name
+            is the label itself: "Update Now". */}
+        <NeuButton
+          label="Update Now"
           onPress={onPrimary}
-          disabled={launching}
-          accessibilityRole="button"
-          accessibilityLabel="Update now"
-        >
-          {launching ? (
-            <ActivityIndicator color="#fff" />
-          ) : (
-            <Text style={styles.primaryBtnText}>Update Now</Text>
-          )}
-        </Pressable>
+          loading={launching}
+          variant="primary"
+          fullWidth
+          style={styles.primaryBtn}
+        />
 
         <Text style={styles.hint}>
           {forced
@@ -250,11 +251,7 @@ const styles = StyleSheet.create({
   errorTitle: { color: C.err, fontSize: 13, fontWeight: '700', marginBottom: 4 },
   errorText: { color: C.text, fontSize: 14, lineHeight: 20 },
   errorUrl: { color: C.sub, fontSize: 12, marginTop: 6 },
-  primaryBtn: {
-    backgroundColor: C.accent, borderRadius: 14, paddingVertical: 16,
-    alignItems: 'center', marginTop: 8,
-  },
-  primaryBtnText: { color: '#fff', fontSize: 16, fontWeight: '800', letterSpacing: 0.2 },
+  primaryBtn: { marginTop: 8 },
   hint: { color: C.sub, fontSize: 12, textAlign: 'center', marginTop: 14, lineHeight: 18 },
   recheckBtn: { alignSelf: 'center', padding: 12, marginTop: 4 },
   recheckText: { color: C.sub, fontSize: 13, fontWeight: '600' },

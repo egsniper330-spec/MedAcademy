@@ -42,12 +42,16 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  ActivityIndicator, BackHandler, Pressable, StatusBar, Text, View,
+  ActivityIndicator, BackHandler, Platform, Pressable, StatusBar, Text, View,
 } from 'react-native';
 import * as ScreenOrientation from 'expo-screen-orientation';
-import { ArrowLeft } from 'lucide-react-native';
+import { ArrowLeft, Maximize2 } from 'lucide-react-native';
 import { VdoPlayerView } from 'vdocipher-rn-bridge';
-import { isOfflineVideoExpired } from '@/lib/offlineVideoService';
+import {
+  isOfflineVideoExpired,
+  classifyOfflineLoadError,
+  reconcileOfflineMediaState,
+} from '@/lib/offlineVideoService';
 import { resolveWatermarkIdentity } from '@/lib/watermarkIdentity';
 import { NativeWatermarkOverlay } from '@/components/NativeWatermarkOverlay';
 import {
@@ -119,13 +123,35 @@ export function OfflineVideoPlayer({ entry, shouldAllowPlayback, watermarkId, wa
     };
   }, [isFullscreen]);
 
-  const handleLoadError = useCallback((e: { errorDescription?: { errorMsg?: string; errorCode?: number } }) => {
-    // Official DRM errors (e.g. 6187 = expired offline license) map to a clear
-    // user-facing expiration state; everything else is a generic DRM error.
+  const handleLoadError = useCallback((e: { errorDescription?: { errorMsg?: string; errorCode?: number | string } }) => {
+    // Official DRM errors (VdoCipher error-code table): 6187 = expired rental
+    // license; 6102/5160/5161 = offline media not complete/present; 6120-class
+    // = renderer/secure-decoder (documented to correlate with >1 VdoPlayer
+    // instance); 6157-class = Widevine CDM state. Map each to an honest user
+    // message, and reconcile our local state against the SDK registry when the
+    // SDK says the media is not (or no longer) a completed download.
     const code = e?.errorDescription?.errorCode;
-    const msg = e?.errorDescription?.errorMsg || 'Offline playback failed.';
-    setError({ message: msg, expired: code === 6187 });
-  }, []);
+    const raw = e?.errorDescription?.errorMsg || 'Offline playback failed.';
+    const kind = classifyOfflineLoadError(code);
+    console.info(
+      `[offline-play] load error code=${String(code ?? '?')} kind=${kind} mediaId=${entry.meta.mediaId}`
+    );
+    if (kind === 'incomplete_media') {
+      void reconcileOfflineMediaState(entry.meta.mediaId);
+    }
+    setError({
+      message:
+        kind === 'expired' ? 'The offline rental license has expired.'
+        : kind === 'incomplete_media'
+          ? 'This download is not complete on this device. Delete it and download again while online.'
+          : kind === 'renderer'
+            ? `${raw} (code ${String(code)}). Close and reopen the app — if it persists, make sure no other video is playing in the app and try again.`
+            : kind === 'drm_state'
+              ? `${raw} (code ${String(code)}). Close and reopen the app to reset the DRM module, then try again.`
+              : raw,
+      expired: kind === 'expired',
+    });
+  }, [entry.meta.mediaId]);
 
   // ── Fullscreen enter/exit (same player instance both ways) ────────────────
   const enterFullscreen = useCallback(async () => {
@@ -154,6 +180,31 @@ export function OfflineVideoPlayer({ entry, shouldAllowPlayback, watermarkId, wa
     return () => sub.remove();
   }, [isFullscreen, exitFullscreen]);
 
+  // PLAYBACK-TIME COMPLETION GUARD (docs: only completed downloads may load;
+  // a non-completed load is the documented cause of database/renderer errors).
+  // Runs when a playing session starts: if the native SDK registry does not
+  // confirm a completed download, the player surfaces the honest retry
+  // message instead of attempting a doomed DRM load.
+  const mediaId = entry.meta.mediaId;
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const verdict = await reconcileOfflineMediaState(mediaId);
+      if (cancelled) return;
+      if (verdict === 'not_completed') {
+        setError({
+          message: 'This download is not complete on this device. Delete it and download again while online.',
+          expired: false,
+        });
+      }
+      // 'unknown' (registry unreachable) → keep local state; DRM still gates
+      // the actual load. 'completed' → proceed silently.
+    })();
+    return () => { cancelled = true; };
+  }, [mediaId]);
+
+  // ── Early-exit surfaces AFTER all hooks (hooks order is render-stable) ────
+  // ── Early-exit surfaces AFTER all hooks (hooks order is render-stable) ────
   if (expired) {
     return (
       <OfflinePlayerMessage
@@ -227,6 +278,22 @@ export function OfflineVideoPlayer({ entry, shouldAllowPlayback, watermarkId, wa
           positioned in normal AND fullscreen (re-clamps on resize). */}
       {identity && (
         <NativeWatermarkOverlay watermarkId={identity.id} watermarkName={identity.name ?? undefined} />
+      )}
+      {/* iOS app-level ENTER-fullscreen control — the SDK's native bridge
+          renders no fullscreen button on iOS (device-verified), so the app
+          provides one over the same player instance. Android relies on the
+          SDK's control-bar button. ≥44 pt touch target. Same gate as the
+          SDK path (enterFullscreen runs the authoritative revalidation). */}
+      {!isFullscreen && !error && !gateDenied && Platform.OS === 'ios' && (
+        <Pressable
+          onPress={() => void enterFullscreen()}
+          style={{ position: 'absolute', top: 10, right: 10, width: 44, height: 44, borderRadius: 22, backgroundColor: 'rgba(0,0,0,0.45)', alignItems: 'center', justifyContent: 'center', zIndex: 20 }}
+          accessibilityLabel="Enter fullscreen"
+          accessibilityRole="button"
+          hitSlop={{ top: 8, right: 8, bottom: 8, left: 8 }}
+        >
+          <Maximize2 size={20} color="#fff" />
+        </Pressable>
       )}
       {/* Fullscreen back control — integrated, no ✕/Close text (same language
           as the app's header back buttons). Collapses back to the portrait

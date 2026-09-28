@@ -5,7 +5,7 @@
  * passing `backTo` gives the screen the explicit "← Platform" header action
  * required by the Platform hub contract, without a second navigation system.
  */
-import VideoMonitorScreen from '@/app/(app)/(admin)/video-monitor';
+import VideoMonitorScreen from '@/app/(app)/(hubs)/video-monitor';
 
 export default function SuperAdminVideoMonitor() {
   return <VideoMonitorScreen backTo="/sa-platform" />;

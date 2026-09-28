@@ -143,7 +143,11 @@ final class AdminController
             ]);
         }
         (new SessionManager())->revokeAllForUser($userId, 'status_changed:' . $status);
-        AuditService::write($actor, 'user_suspended', ['user_id' => $userId, 'status' => $status]);
+        // Audit the DIRECTION: user_suspended when restricting, user_activated
+        // when restoring (suspend→active is an Unsuspend). Both values exist in
+        // the audit_logs action CHECK enum — no migration required.
+        $auditAction = $status === 'active' ? 'user_activated' : 'user_suspended';
+        AuditService::write($actor, $auditAction, ['user_id' => $userId, 'status' => $status]);
         return ['success' => true];
     }
 

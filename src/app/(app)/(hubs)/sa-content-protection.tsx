@@ -5,7 +5,7 @@
  * passing `backTo` gives the screen the explicit "← Platform" header action
  * required by the Platform hub contract, without a second navigation system.
  */
-import ContentProtectionPolicyScreen from '@/app/(app)/(superadmin)/content-protection';
+import ContentProtectionPolicyScreen from '@/app/(app)/(hubs)/content-protection';
 
 export default function SuperAdminContentProtection() {
   return <ContentProtectionPolicyScreen backTo="/sa-content" />;

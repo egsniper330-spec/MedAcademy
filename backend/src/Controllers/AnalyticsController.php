@@ -25,16 +25,64 @@ final class AnalyticsController
 {
     /**
      * GET /analytics/security-stats — aggregated security event statistics.
+     *
+     * FRONTEND CONTRACT (get_security_stats RPC → SecurityStats):
+     *   { total_events, root_jailbreak, vpn, proxy, ssl_pinning, screenshot,
+     *     screen_recording, debug, app_integrity, recent_events_24h,
+     *     by_type, by_platform, policies }
+     *
+     * Optional window params: p_start_date / p_end_date (ISO-8601). When absent
+     * the aggregation covers the full table (legacy behavior). The per-category
+     * counters are additive over the same window; by_type/by_platform/policies
+     * remain global snapshots for compatibility with existing consumers.
      */
     public function securityStats(Request $request): array
     {
         $db = Database::instance();
+        $q = $request->queryParams();
 
-        $totalEvents = (int) $db->value('SELECT COUNT(*) FROM security_events', [], 0);
+        $startDate = trim((string) ($q['start_date'] ?? ''));
+        $endDate   = trim((string) ($q['end_date'] ?? ''));
+        $windowSql  = '';
+        $windowBind = [];
+        if ($startDate !== '' && $endDate !== '') {
+            $windowSql = ' WHERE created_at BETWEEN ? AND ?';
+            $windowBind = [$startDate, $endDate];
+        }
+
+        $totalEvents = (int) $db->value(
+            "SELECT COUNT(*) FROM security_events{$windowSql}", $windowBind, 0
+        );
         $recentEvents = (int) $db->value(
             "SELECT COUNT(*) FROM security_events WHERE created_at >= DATE_SUB(UTC_TIMESTAMP(6), INTERVAL 24 HOUR)",
             [], 0
         );
+
+        // Per-category counters over the requested window (additive keys — the
+        // dashboard's SecurityStats interface). COUNT(CASE…) keeps this a single
+        // round-trip; unknown event types simply fall through to 0.
+        $categories = [
+            'root_jailbreak'  => ["'root_detected','jailbreak_detected'"],
+            'vpn'             => ["'vpn_detected'"],
+            'proxy'           => ["'proxy_detected'"],
+            'ssl_pinning'     => ["'ssl_pinning_failure'"],
+            'screenshot'      => ["'screenshot_detected'"],
+            'screen_recording'=> ["'screen_recording_detected'"],
+            'debug'           => ["'debug_detected','debugger_attached','developer_options_enabled','adb_enabled'"],
+            'app_integrity'   => ["'app_integrity_compromised','signature_invalid','tamper_detected','frida_detected','xposed_detected','magisk_detected'"],
+        ];
+        $categorySql = [];
+        foreach ($categories as $key => $types) {
+            $categorySql[] = "SUM(CASE WHEN event_type IN ({$types[0]}) THEN 1 ELSE 0 END) AS `{$key}`";
+        }
+        $catRow = $db->row(
+            'SELECT ' . implode(', ', $categorySql) . " FROM security_events{$windowSql}",
+            $windowBind
+        ) ?? [];
+        $counters = [];
+        foreach (array_keys($categories) as $key) {
+            $counters[$key] = (int) ($catRow[$key] ?? 0);
+        }
 
         $byType = $db->select(
             "SELECT event_type, COUNT(*) as count FROM security_events
@@ -49,11 +97,12 @@ final class AnalyticsController
         $policies = $db->select('SELECT detection_type, action, enabled FROM security_policies ORDER BY detection_type');
 
         return [
-            'total_events' => $totalEvents,
+            'total_events'      => $totalEvents,
             'recent_events_24h' => $recentEvents,
-            'by_type' => $byType ?? [],
-            'by_platform' => $byPlatform ?? [],
-            'policies' => $policies ?? [],
+            ...$counters,
+            'by_type'           => $byType ?? [],
+            'by_platform'       => $byPlatform ?? [],
+            'policies'          => $policies ?? [],
         ];
     }
 
@@ -455,22 +504,122 @@ final class AnalyticsController
 
     /**
      * GET /analytics/risky-devices — devices flagged by security events.
+     *
+     * FRONTEND CONTRACT (get_risky_devices RPC → RiskyDevice[]):
+     *   { risky_devices: [{ device_id, user_id, user_name, user_email,
+     *                       max_risk_score, event_types, last_seen, platform }] }
+     *
+     * The previous shape — { devices: [{ id, device_name, last_active_at, ... }] }
+     * — both wrapped the list in an object AND used different field names than
+     * the original Supabase RPC. The dashboard stored the wrapper as the array
+     * and crashed with "riskyDevices.map is not a function" (2026-09). Field
+     * names follow the original get_risky_devices SQL contract so every client
+     * of this RPC sees one canonical shape.
+     *
+     * Optional params: p_min_score (default 20), p_limit (default 20, cap 50),
+     * p_offset. Only events with a device_id are considered; risk classification
+     * mirrors the security policy weights (see SecurityService).
      */
     public function riskyDevices(Request $request): array
     {
-        $devices = Database::instance()->select(
-            "SELECT d.id, d.user_id, d.device_name, d.platform, d.status, d.last_active_at,
-                    p.full_name AS user_name
-             FROM devices d
-             JOIN profiles p ON p.id = d.user_id
-             WHERE d.id IN (
-                 SELECT DISTINCT se.device_id FROM security_events se
-                 WHERE se.event_type IN ('root_detected', 'jailbreak_detected', 'frida_detected', 'xposed_detected', 'magisk_detected')
-                   AND se.device_id IS NOT NULL
-             )
-             ORDER BY d.last_active_at DESC LIMIT 50"
-        );
-        return ['devices' => $devices ?? []];
+        $db = Database::instance();
+        $q = $request->queryParams();
+
+        $minScore = max(0, (int) ($q['min_score'] ?? 20));
+        $limit    = min(50, max(1, (int) ($q['limit'] ?? 20)));
+        $offset   = max(0, (int) ($q['offset'] ?? 0));
+
+        // Risk weights per event_type — aligned with the security policy
+        // severity tiers (critical/high). Unknown event types contribute 0.
+        $weights = [
+            'root_detected'                => 100,
+            'jailbreak_detected'           => 100,
+            'frida_detected'               => 90,
+            'xposed_detected'              => 90,
+            'magisk_detected'              => 90,
+            'app_integrity_compromised'    => 80,
+            'signature_invalid'            => 80,
+            'tamper_detected'              => 80,
+            'ssl_pinning_failure'          => 60,
+            'debugger_attached'            => 40,
+            'debug_detected'               => 40,
+            'developer_options_enabled'    => 30,
+            'adb_enabled'                  => 30,
+            'overlay_detected'             => 30,
+            'vpn_detected'                 => 25,
+            'proxy_detected'               => 25,
+            'screenshot_detected'          => 20,
+            'screen_recording_detected'    => 30,
+            'play_integrity_failed'        => 50,
+            'app_attest_failed'            => 50,
+            'detection_unavailable'        => 10,
+        ];
+
+        // Aggregate per device: max risk score + distinct event types.
+        $rows = $db->select(
+            "SELECT se.device_id, se.event_type, MAX(se.risk_score) AS native_score
+               FROM security_events se
+              WHERE se.device_id IS NOT NULL
+              GROUP BY se.device_id, se.event_type"
+        ) ?? [];
+
+        if ($rows === []) {
+            return ['risky_devices' => []];
+        }
+
+        // Fold events into per-device aggregates in PHP (portable across the
+        // MySQL versions this backend targets; the row count is bounded by the
+        // number of flagged devices × event types).
+        $perDevice = [];
+        foreach ($rows as $row) {
+            $deviceId = (string) $row['device_id'];
+            if (!isset($perDevice[$deviceId])) {
+                $perDevice[$deviceId] = ['score' => 0, 'types' => []];
+            }
+            $etype = (string) $row['event_type'];
+            $perDevice[$deviceId]['types'][$etype] = true;
+            $weighted = (int) ($weights[$etype] ?? 0);
+            $native = (int) ($row['native_score'] ?? 0);
+            $score = max($weighted, $native);
+            if ($score > $perDevice[$deviceId]['score']) {
+                $perDevice[$deviceId]['score'] = $score;
+            }
+        }
+
+        // Rank, filter by the min score, paginate — all before the profile join
+        // so only the devices actually returned hit the database.
+        usort($perDevice, static fn (array $a, array $b): int => $b['score'] <=> $a['score']);
+        $ranked = array_filter($perDevice, static fn (array $d): bool => $d['score'] >= $minScore);
+        $page = array_slice($ranked, $offset, $limit, true);
+        if ($page === []) {
+            return ['risky_devices' => []];
+        }
+
+        $deviceIds = array_keys($page);
+        $placeholders = implode(',', array_fill(0, count($deviceIds), '?'));
+        $devices = $db->select(
+            "SELECT d.id AS device_id, d.user_id, p.full_name AS user_name,
+                    p.email AS user_email, d.platform, d.last_active_at AS last_seen
+               FROM devices d
+               JOIN profiles p ON p.id = d.user_id
+              WHERE d.id IN ({$placeholders})",
+            $deviceIds
+        ) ?? [];
+
+        $out = [];
+        foreach ($devices as $dev) {
+            $deviceId = (string) $dev['device_id'];
+            $agg = $page[$deviceId] ?? null;
+            if ($agg === null) continue;
+            $dev['max_risk_score'] = $agg['score'];
+            $dev['event_types'] = array_keys($agg['types']);
+            $out[] = $dev;
+        }
+
+        // Preserve the risk ranking after the SQL join.
+        usort($out, static fn (array $a, array $b): int => $b['max_risk_score'] <=> $a['max_risk_score']);
+
+        return ['risky_devices' => $out];
     }
 
     /**

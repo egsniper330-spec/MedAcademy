@@ -28,7 +28,7 @@ import { useToast } from '@/components/Toast';
 import { CreateUserModal } from '@/components/CreateUserModal';
 import { neuColors, neuFlatStyle, useLayout, safeBottom } from '@/lib/neu'
 import { displayPhoneNational } from '@/lib/phone';
-import { getPublicEmail, getAllUsers, updateUserStatus, blockUser, unblockUser, promoteToDoctor, promoteToAdmin,
+import { getPublicEmail, getAllUsers, updateUserStatus, promoteToDoctor, promoteToAdmin,
   demoteDoctor, demoteAdminToStudent, trashUser, undoTrash, bulkUserOps,
   enableUnlimitedDevices, disableUnlimitedDevices, getLoginHistory,
 } from '@/lib/api';
@@ -37,6 +37,7 @@ import { useDebounce } from '@/lib/useDebounce';
 import { useActionLoading } from '@/lib/useActionLoading';
 import { logAndParse, parseError } from '@/lib/parseError';
 import { ResponsiveModal } from '@/components/ResponsiveModal';
+import { ConfirmDialog, type ConfirmDialogRequest } from '@/components/ConfirmDialog';
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -62,8 +63,16 @@ function actionsForUser(user: any): ActionKey[] {
   // change_password replaces reset_password email flow
   const base: ActionKey[] = ['edit', 'change_password', deviceAction, 'devices', 'login_history', 'audit'];
   if (role === 'doctor') base.push('earnings');
-  if (user?.status === 'blocked') base.splice(1, 0, 'unblock');
-  else                            base.splice(1, 0, 'block');
+  // Status action mirrors the SERVER-authoritative account status:
+  //   blocked   → Unblock (legacy blocked flow)
+  //   suspended → Unsuspend (manual OR security-violation suspension — the
+  //               security system writes status='suspended', so ONE action
+  //               covers both; re-violation re-suspends via policy)
+  //   otherwise → Suspend
+  // Exactly one of the pair is ever shown.
+  if (user?.status === 'blocked')        base.splice(1, 0, 'unblock');
+  else if (user?.status === 'suspended') base.splice(1, 0, 'unsuspend');
+  else                                   base.splice(1, 0, 'suspend');
   if (role === 'student') { base.push('promote_doctor', 'promote_admin'); }
   if (role === 'doctor')  { base.push('promote_admin', 'demote_student'); }
   if (role === 'admin')   { base.push('demote_doctor', 'demote_student'); }
@@ -196,9 +205,71 @@ export default function SAUsers() {
 
   const openMenu = (user: any) => { setSelectedUser(user); setMenuVisible(true); };
 
+  // Cross-platform confirm (ConfirmDialog works on iOS/Android/Web —
+  // Alert.alert is a silent no-op on web). Suspend family only; other
+  // actions keep their existing flows.
+  const [confirm, setConfirm] = useState<ConfirmDialogRequest | null>(null);
+
   const handleAction = async (key: ActionKey) => {
     if (!selectedUser) return;
     const id = selectedUser.id;
+
+    if (key === 'unsuspend' || key === 'unblock') {
+      setMenuVisible(false);
+      const name = selectedUser?.full_name ?? 'User';
+      setConfirm({
+        title: key === 'unsuspend' ? 'Unsuspend user?' : 'Unblock user?',
+        message: `${name} will be restored to active status and can sign in again. Existing security policies stay fully enforced.`,
+        confirmLabel: key === 'unsuspend' ? 'Unsuspend' : 'Unblock',
+        onConfirm: async () => {
+          const ok = await run(key, async () => {
+            try {
+              // Server-authoritative: send status='active' (the same RPC the
+              // backend audits); update local state ONLY on success.
+              await updateUserStatus(id, 'active');
+              setUsers(p => p.map(u => u.id === id ? { ...u, status: 'active' } : u));
+              setSelectedUser((p: any) => p ? { ...p, status: 'active' } : null);
+              showToast({ type: 'success', message: key === 'unsuspend' ? 'User unsuspended.' : 'User unblocked.' });
+              return true;
+            } catch (e) {
+              // Failure → user stays suspended in the UI (no optimistic flip).
+              showToast({ type: 'error', message: logAndParse(e, key) });
+              return false;
+            }
+          });
+          setConfirm(null);
+          if (ok) setMenuVisible(false);
+        },
+      });
+      return;
+    }
+    if (key === 'suspend' || key === 'block') {
+      setMenuVisible(false);
+      const name = selectedUser?.full_name ?? 'User';
+      setConfirm({
+        title: key === 'suspend' ? 'Suspend user?' : 'Block user?',
+        message: `${name} will be ${key === 'suspend' ? 'suspended' : 'blocked'} immediately and signed out of all devices.`,
+        confirmLabel: key === 'suspend' ? 'Suspend' : 'Block',
+        destructive: true,
+        onConfirm: async () => {
+          const ok = await run(key, async () => {
+            try {
+              await updateUserStatus(id, 'suspended');
+              setUsers(p => p.map(u => u.id === id ? { ...u, status: 'suspended' } : u));
+              setSelectedUser((p: any) => p ? { ...p, status: 'suspended' } : null);
+              showToast({ type: 'success', message: key === 'suspend' ? 'User suspended.' : 'User blocked.' });
+              return true;
+            } catch (e) {
+              showToast({ type: 'error', message: logAndParse(e, key) });
+              return false;
+            }
+          });
+          setConfirm(null);
+          if (ok) setMenuVisible(false);
+        },
+      });
+      return;
+    }
 
     if (key === 'change_password') { setMenuVisible(false); setChangePwVisible(true); return; }
     if (key === 'edit')    { setMenuVisible(false); setEditVisible(true); return; }
@@ -226,8 +297,16 @@ export default function SAUsers() {
     if (key === 'audit')    { setMenuVisible(false); router.push(`/(app)/user-activity?user_id=${id}&user_name=${encodeURIComponent(selectedUser?.full_name ?? 'User')}` as RelativePathString); return; }
 
     const actionMap: Partial<Record<ActionKey, () => Promise<void>>> = {
-      block:              async () => { await blockUser(id); setUsers(p => p.map(u => u.id === id ? { ...u, status: 'blocked' } : u)); showToast({ type: 'success', message: 'User blocked.' }); },
-      unblock:            async () => { await unblockUser(id); setUsers(p => p.map(u => u.id === id ? { ...u, status: 'active' } : u)); showToast({ type: 'success', message: 'User unblocked.' }); },
+      // Suspend family — the optimistic local update uses the SAME status the
+      // backend actually persisted (updateUserStatus → set_user_status →
+      // POST /admin/users/{id}/status), so UI and server can never drift.
+      // blockUser()/unblockUser() send 'suspended'/'active' but their names
+      // historically mislabel the local state as 'blocked' — that mismatch is
+      // what made suspended users show "Block" again after refresh.
+      suspend:            async () => { await updateUserStatus(id, 'suspended'); setUsers(p => p.map(u => u.id === id ? { ...u, status: 'suspended' } : u)); showToast({ type: 'success', message: 'User suspended.' }); },
+      unsuspend:          async () => { await updateUserStatus(id, 'active');    setUsers(p => p.map(u => u.id === id ? { ...u, status: 'active' } : u)); showToast({ type: 'success', message: 'User unsuspended.' }); },
+      block:              async () => { await updateUserStatus(id, 'suspended'); setUsers(p => p.map(u => u.id === id ? { ...u, status: 'suspended' } : u)); showToast({ type: 'success', message: 'User blocked.' }); },
+      unblock:            async () => { await updateUserStatus(id, 'active');    setUsers(p => p.map(u => u.id === id ? { ...u, status: 'active' } : u)); showToast({ type: 'success', message: 'User unblocked.' }); },
       promote_doctor:     async () => { await promoteToDoctor(id); setUsers(p => p.filter(u => u.id !== id)); showToast({ type: 'success', message: 'Promoted to Doctor.' }); setMenuVisible(false); },
       promote_admin:      async () => { await promoteToAdmin(id);  setUsers(p => p.filter(u => u.id !== id)); showToast({ type: 'success', message: 'Promoted to Admin.' });  setMenuVisible(false); },
       demote_doctor:      async () => { await promoteToDoctor(id); setUsers(p => p.filter(u => u.id !== id)); showToast({ type: 'success', message: 'Demoted to Doctor.' }); setMenuVisible(false); },
@@ -581,6 +660,13 @@ export default function SAUsers() {
         visible={deleteConfirm}
         onClose={() => setDeleteConfirm(false)}
         onDeleted={handleDeleted}
+      />
+
+      {/* Suspend / Unsuspend confirmation (cross-platform) */}
+      <ConfirmDialog
+        visible={!!confirm}
+        request={confirm}
+        onClose={() => setConfirm(null)}
       />
 
       {/* Login history */}

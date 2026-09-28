@@ -184,7 +184,7 @@ console.log('═══ E. service: confirmed success + atomic A→B + rollback �
      'expired-original fallback signs out cleanly (no half-restored state)');
 
   // The screen navigates by TARGET role (no reliance on the consumed guard).
-  const screen = readCode('src/app/(app)/(superadmin)/impersonation.tsx');
+  const screen = readCode('src/app/(app)/(hubs)/impersonation.tsx');
   ok(/targetUser\.role === 'doctor'/.test(screen) && /dr-overview/.test(screen),
      'screen navigates to the TARGET role dashboard after confirmed success');
   ok(/startImpersonationSession/.test(screen) && screen.indexOf('startImpersonationSession') < screen.indexOf('router.replace'),

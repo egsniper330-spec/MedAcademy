@@ -12,37 +12,41 @@
  * width:"100%" inside the padded container, and the scroll area respects
  * Safe Area → Header → Content → Bottom Safe Area.
  *
- * VISUAL PASS: elevated NeuCards, real thumbnails (or token-based fallback),
- * typography hierarchy via the design system, a dedicated "Downloading"
- * section with per-lesson progress (Android bytes / iOS percent only —
- * official SDK values, never invented), and "Downloaded Courses" cards.
+ * DESIGN (reference-matched): "DOWNLOADED COURSES" section — one clean card
+ * per course (circular course image, title, optional subtle video count,
+ * real completion progress bar with %, right chevron). No expiry/DRM/
+ * technical noise on the card. Contextual empty space below the cards
+ * ("No other downloaded courses" / true-empty state) with a soft cloud-
+ * folder illustration. Dark mode is a first-class surface (elevated dark
+ * cards, adapted illustration), not an inversion.
  *
  * SECURITY: unchanged — lives inside (app)/ under the authoritative gate;
  * playback re-validates via checkBeforeVideo and the live blocksVideo mirror
- * closes the player if a blocking finding appears mid-playback.
+ * closes the player if a blocking finding appears mid-playback. Additionally
+ * (entitlement): while ONLINE, a refresh revalidates course access against
+ * the authoritative backend and deletes downloads for revoked courses —
+ * network failures NEVER delete (fail-open, see offlineEntitlement.ts).
  *
  * TITLE HYGIENE: every rendered title passes safeDisplayTitle(); raw
  * VdoCipher filenames/mediaIds can never reach the screen.
  *
- * PARITY: one shared RN surface for Android + iOS. Byte counts render on
- * Android only (official SDK fields); iOS shows percent/state — never faked.
+ * PARITY: one shared RN surface for Android + iOS.
  */
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator, Alert, Image, LayoutAnimation, Platform, Pressable,
-  RefreshControl, ScrollView, StyleSheet, Text, View,
+  RefreshControl, ScrollView, StyleSheet, Text, View, useColorScheme,
 } from 'react-native';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
-  ArrowLeft, BookOpen, CalendarClock, Check, DownloadCloud, Folder, Pause, Play, RefreshCw,
-  Trash2, TriangleAlert, X,
+  ArrowLeft, ChevronRight, Pause, Play, RefreshCw,
+  TriangleAlert, X,
 } from 'lucide-react-native';
-import { useColorScheme } from 'react-native';
 import {
-  neuColors, useNeuSpacing, spacing, radius, typography,
-  safeBottom, neuMicroStyle, neuFlatStyle,
+  neuColors, useNeuSpacing, spacing, radius,
+  safeBottom, neuFlatStyle,
 } from '@/lib/neu';
 import { ConnectivityPill } from '@/components/ConnectivityPill';
 import { useConnectivity } from '@/lib/offlineTransition';
@@ -51,7 +55,6 @@ import { useProfileStore } from '@/lib/store';
 import {
   deleteOfflineVideo,
   exportOfflineCourseGroups,
-  getOfflineVideos,
   hydrateOfflineLibrary,
   isOfflineVideoExpired,
   pauseOfflineVideo,
@@ -61,6 +64,7 @@ import {
   subscribeOfflineVideos,
   type OfflineVideoEntry,
 } from '@/lib/offlineVideoService';
+import { revalidateOfflineEntitlements } from '@/lib/offlineEntitlement';
 import { OfflineVideoPlayer } from '@/components/OfflineVideoPlayer';
 import { resolveWatermarkIdentity } from '@/lib/watermarkIdentity';
 import { useSecurity } from '@/lib/SecurityContext';
@@ -69,6 +73,9 @@ import { DrawerProvider } from '@/components/DrawerContext';
 import DrawerNav from '@/components/DrawerNav';
 import NetInfo from '@react-native-community/netinfo';
 
+/** Muted secondary text for both themes (gray-blue in light, steel-blue in dark). */
+const MUTED = { light: '#5A6B85', dark: '#8FA3BD' } as const;
+
 function fmtBytes(n: number): string {
   if (!Number.isFinite(n) || n <= 0) return '';
   const mb = n / (1024 * 1024);
@@ -76,6 +83,7 @@ function fmtBytes(n: number): string {
   return `${mb.toFixed(1)} MB`;
 }
 
+/** Relative rental-expiry line — used ONLY on the player screen (never on the course cards). */
 function fmtExpiry(iso: string): string | null {
   const t = Date.parse(iso);
   if (!Number.isFinite(t)) return null;
@@ -107,7 +115,10 @@ function OfflineLibraryContent() {
   const router = useRouter();
   const scheme = useColorScheme();
   const isDark = scheme === 'dark';
-  const colors = isDark ? neuColors.dark : neuColors.light;
+  const colors = {
+    ...(isDark ? neuColors.dark : neuColors.light),
+    textMuted: isDark ? MUTED.dark : MUTED.light,
+  };
   const sp = useNeuSpacing();
   const insets = useSafeAreaInsets();
   const online = useConnectivity();
@@ -128,8 +139,11 @@ function OfflineLibraryContent() {
   const [playing, setPlaying] = useState<OfflineVideoEntry | null>(null);
   const [refreshing, setRefreshing] = useState(false);
 
+  // One authoritative account id for hydration + revalidation (account-switch
+  // safe: the id string is the dep, not the profile object identity).
+  const userId = session?.user?.id ?? profile?.id ?? null;
+
   useEffect(() => {
-    const userId = session?.user?.id ?? profile?.id;
     if (!userId) return;
     let mounted = true;
     void hydrateOfflineLibrary(userId).then((list) => {
@@ -137,7 +151,7 @@ function OfflineLibraryContent() {
     });
     const unsub = subscribeOfflineVideos((list) => { if (mounted) setEntries(list); });
     return () => { mounted = false; unsub(); };
-  }, [profile?.id]);
+  }, [userId]);
 
   useFocusEffect(
     useCallback(() => {
@@ -145,11 +159,21 @@ function OfflineLibraryContent() {
       void (async () => {
         try {
           const st = await NetInfo.fetch();
-          if (alive && st.isConnected) void resyncOfflineLibrary();
+          if (alive && st.isConnected) {
+            // Metadata reconciliation first (authoritative DRM registry),
+            // then entitlement revalidation (authoritative access state).
+            // Deletion happens ONLY on an authoritative verdict — a network
+            // failure deletes nothing (fail-open).
+            void resyncOfflineLibrary();
+            const uid = userId;
+            if (uid) {
+              void revalidateOfflineEntitlements({ userId: uid, role: profile?.role });
+            }
+          }
         } catch { /* offline — local state is authoritative */ }
       })();
       return () => { alive = false; };
-    }, [])
+    }, [userId, profile?.role])
   );
 
   const { downloading, failed, courses } = useMemo(() => {
@@ -180,11 +204,17 @@ function OfflineLibraryContent() {
     void (async () => {
       try {
         const st = await NetInfo.fetch();
-        if (st.isConnected) await resyncOfflineLibrary();
-      } catch { /* ignore */ }
+        if (st.isConnected) {
+          await resyncOfflineLibrary();
+          const uid = userId;
+          if (uid) {
+            await revalidateOfflineEntitlements({ userId: uid, role: profile?.role });
+          }
+        }
+      } catch { /* ignore — fail-open by contract */ }
       setRefreshing(false);
     })();
-  }, []);
+  }, [userId, profile?.role]);
 
   const confirmDelete = useCallback((e: OfflineVideoEntry) => {
     Alert.alert(
@@ -203,16 +233,6 @@ function OfflineLibraryContent() {
       ]
     );
   }, []);
-
-  const startPlayback = useCallback((e: OfflineVideoEntry) => {
-    if (isOfflineVideoExpired(e)) {
-      Alert.alert('Download expired', 'The offline license has expired. Reconnect and download again.');
-      return;
-    }
-    setPlaying(e);
-  }, []);
-
-  const screenPad = [safeLeftPad(sp), sp.screenPx, safeRightPad(sp), 0] as const;
 
   if (playing) {
     const playTitle = safeDisplayTitle(playing.meta);
@@ -254,6 +274,13 @@ function OfflineLibraryContent() {
     );
   }
 
+  // Empty-space copy: contextual when downloads exist, true-empty otherwise.
+  const hasDownloads = courses.length > 0 || downloading.length > 0 || failed.length > 0;
+  const emptyTitle = hasDownloads ? 'No other downloaded courses' : 'No downloaded courses';
+  const emptyBody = hasDownloads
+    ? `You currently have ${courses.length} downloaded course${courses.length === 1 ? '' : 's'}.\nAny additional downloaded courses will appear here.`
+    : 'Downloaded videos will appear here for quick offline access.';
+
   return (
     <View style={[styles.root, { backgroundColor: colors.base }]}>
       {/* Normal MedAcademy header: hamburger + title + connectivity pill */}
@@ -281,7 +308,7 @@ function OfflineLibraryContent() {
             {/* ── DOWNLOADING section (real SDK state; debug-look removed) ── */}
             {downloading.length > 0 && (
               <View style={{ marginBottom: sp.sectionGap }}>
-                <Text style={[styles.sectionTitle, { color: colors.text }]}>Downloading</Text>
+                <Text style={[styles.sectionTitle, { color: colors.textMuted }]}>DOWNLOADING</Text>
                 {downloading.map((e) => {
                   const title = safeDisplayTitle(e.meta);
                   const bytesLabel = Platform.OS === 'android'
@@ -295,16 +322,16 @@ function OfflineLibraryContent() {
                       <View style={{ flex: 1, minWidth: 0 }}>
                         <Text style={{ color: colors.text, fontWeight: '800', fontSize: 15 }} numberOfLines={2}>{title}</Text>
                         {!!e.meta.courseName && (
-                          <Text style={{ color: colors.text, opacity: 0.5, fontSize: 12, marginTop: 1 }} numberOfLines={1}>{e.meta.courseName}</Text>
+                          <Text style={{ color: colors.textMuted, fontSize: 12, marginTop: 1 }} numberOfLines={1}>{e.meta.courseName}</Text>
                         )}
                         <Text style={{ color: colors.primary, fontSize: 12.5, fontWeight: '700', marginTop: 6 }}>
                           {e.phase === 'pending' || e.phase === 'authorizing' ? 'Queued…' : `Downloading… ${Math.round(e.progress)}%`}
                         </Text>
-                        <View style={[styles.progressTrack, { backgroundColor: isDark ? '#ffffff22' : '#00000014' }]}>
+                        <View style={[styles.progressTrack, { backgroundColor: isDark ? '#ffffff1f' : '#1E90FF1a' }]}>
                           <View style={[styles.progressFill, { width: `${Math.max(e.phase === 'pending' ? 2 : 4, Math.min(100, e.progress))}%` }]} />
                         </View>
                         <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 6, gap: 8 }}>
-                          <Text style={{ color: colors.text, opacity: 0.45, fontSize: 11 }} numberOfLines={1}>
+                          <Text style={{ color: colors.textMuted, fontSize: 11 }} numberOfLines={1}>
                             {/* Android: official byte fields. iOS: percent only — never faked. */}
                             {bytesLabel || (e.phase === 'pending' ? 'Waiting for the download to start' : `${Math.round(e.progress)}%`)}
                           </Text>
@@ -312,7 +339,7 @@ function OfflineLibraryContent() {
                             {e.phase === 'downloading' && (
                               <Pressable
                                 onPress={() => void pauseOfflineVideo(e.meta.mediaId)}
-                                style={[styles.chip, { backgroundColor: `${colors.text}14` }]}
+                                style={[styles.chip, { backgroundColor: isDark ? '#ffffff14' : `${colors.text}0f` }]}
                                 accessibilityRole="button"
                                 accessibilityLabel={`Pause ${title}`}
                               >
@@ -322,7 +349,7 @@ function OfflineLibraryContent() {
                             )}
                             <Pressable
                               onPress={() => confirmDelete(e)}
-                              style={[styles.chip, { backgroundColor: '#FF5A5A18' }]}
+                              style={[styles.chip, { backgroundColor: isDark ? '#FF5A5A22' : '#FF5A5A14' }]}
                               accessibilityRole="button"
                               accessibilityLabel={`Cancel ${title}`}
                             >
@@ -341,12 +368,12 @@ function OfflineLibraryContent() {
             {/* ── FAILED section (retry) ── */}
             {failed.length > 0 && (
               <View style={{ marginBottom: sp.sectionGap }}>
-                <Text style={[styles.sectionTitle, { color: colors.text }]}>Needs attention</Text>
+                <Text style={[styles.sectionTitle, { color: colors.textMuted }]}>NEEDS ATTENTION</Text>
                 {failed.map((e) => {
                   const title = safeDisplayTitle(e.meta);
                   return (
                     <View key={e.meta.mediaId} style={[styles.dlCard, neuFlatStyle(isDark), { borderRadius: sp.cardRadius }]}>
-                      <View style={[styles.failIcon, { backgroundColor: '#FF5A5A18' }]}>
+                      <View style={[styles.failIcon, { backgroundColor: isDark ? '#FF5A5A22' : '#FF5A5A14' }]}>
                         <TriangleAlert size={18} color="#FF5A5A" />
                       </View>
                       <View style={{ flex: 1, minWidth: 0 }}>
@@ -357,12 +384,12 @@ function OfflineLibraryContent() {
                       </View>
                       <Pressable
                         onPress={() => void retryOfflineVideo(e.meta.mediaId)}
-                        style={[styles.chip, { backgroundColor: '#1E90FF22' }]}
+                        style={[styles.chip, { backgroundColor: isDark ? '#1E90FF26' : '#1E90FF1a' }]}
                         accessibilityRole="button"
                         accessibilityLabel={`Retry ${title}`}
                       >
-                        <RefreshCw size={13} color="#1E90FF" />
-                        <Text style={{ color: '#1E90FF', fontSize: 11.5, fontWeight: '800' }}>Retry</Text>
+                        <RefreshCw size={13} color={colors.primary} />
+                        <Text style={{ color: colors.primary, fontSize: 11.5, fontWeight: '800' }}>Retry</Text>
                       </Pressable>
                     </View>
                   );
@@ -370,10 +397,10 @@ function OfflineLibraryContent() {
               </View>
             )}
 
-            {/* ── DOWNLOADED COURSES ── */}
-            {courses.length > 0 ? (
+            {/* ── DOWNLOADED COURSES — reference-matched cards ── */}
+            {courses.length > 0 && (
               <View>
-                <Text style={[styles.sectionTitle, { color: colors.text }]}>Downloaded Courses</Text>
+                <Text style={[styles.sectionTitle, { color: colors.textMuted }]}>DOWNLOADED COURSES</Text>
                 {courses.map((g) => {
                   // Course image: the SAME MedAcademy course image the online
                   // course uses (persisted at authorize time). Lesson thumbnail
@@ -382,13 +409,6 @@ function OfflineLibraryContent() {
                     ?? g.lessons.find((e) => !!e.meta.lessonThumbnailUrl)?.meta.lessonThumbnailUrl
                     ?? null;
                   const count = g.completedCount;
-                  // Earliest rental expiry among this course's downloads.
-                  const expiries = g.lessons
-                    .map((e) => Date.parse(e.meta.expiresAt))
-                    .filter((t) => Number.isFinite(t));
-                  const expiryLine = expiries.length
-                    ? fmtExpiry(new Date(Math.min(...expiries)).toISOString())
-                    : null;
                   return (
                     <Pressable
                       key={g.courseId}
@@ -396,13 +416,13 @@ function OfflineLibraryContent() {
                       style={({ pressed }) => [
                         styles.courseCard,
                         neuFlatStyle(isDark),
-                        { borderRadius: sp.cardRadius, opacity: pressed ? 0.93 : 1 },
+                        { borderRadius: sp.cardRadius, opacity: pressed ? 0.95 : 1 },
                       ]}
                       accessibilityRole="button"
                       accessibilityLabel={`Open offline course ${g.courseName}`}
                     >
-                      {/* CIRCULAR course image — same image as the online course */}
-                      <View style={styles.courseAvatarWrap}>
+                      {/* LEFT: circular course image (same image as online) */}
+                      <View style={[styles.courseAvatarWrap, { backgroundColor: isDark ? '#1E90FF26' : '#1E90FF14' }]}>
                         {courseImg ? (
                           <Image source={{ uri: courseImg }} style={styles.courseAvatar} resizeMode="cover" />
                         ) : (
@@ -413,72 +433,48 @@ function OfflineLibraryContent() {
                           </View>
                         )}
                       </View>
+
+                      {/* RIGHT: grouped course header + progress */}
                       <View style={{ flex: 1, minWidth: 0 }}>
-                        {/* courseName is MedAcademy's own metadata — never a VdoCipher name.
-                            No chevron: the whole card is the tap target (Issue: the stray
-                            mid-card arrow is removed at the root — nothing floats). */}
-                        <Text style={{ color: colors.text, fontWeight: '800', fontSize: 16 }} numberOfLines={2}>
-                          {g.courseName}
-                        </Text>
-                        <Text style={{ color: colors.text, opacity: 0.55, fontSize: 12.5, marginTop: 2 }} numberOfLines={1}>
-                          {count} video{count === 1 ? '' : 's'} downloaded
-                        </Text>
-                        {!!expiryLine && (
-                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 3 }}>
-                            <CalendarClock size={12} color={`${colors.text}66`} />
-                            <Text style={{ color: colors.text, opacity: 0.45, fontSize: 11.5 }} numberOfLines={1}>
-                              {expiryLine}
-                            </Text>
-                          </View>
-                        )}
-                        {/* Bottom metadata row — honest counts only: we can only
-                            ever know what is actually on the device. */}
-                        <View style={[styles.courseMetaRow, { borderTopColor: isDark ? '#ffffff14' : '#00000010' }]}>
-                          <Folder size={13} color={`${colors.text}66`} />
-                          <Text style={{ color: colors.text, opacity: 0.55, fontSize: 12, fontWeight: '600' }}>
-                            {g.progressPercent >= 100
-                              ? `${count}/${count} videos downloaded`
-                              : `${count} video${count === 1 ? '' : 's'} downloaded`}
+                        <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 8 }}>
+                          <Text style={[styles.courseTitle, { color: colors.text }]} numberOfLines={2}>
+                            {g.courseName}
                           </Text>
-                          {g.progressPercent >= 100 ? (
-                            <Text style={{ color: '#16A34A', fontSize: 12, fontWeight: '800', marginLeft: 'auto' }}>
-                              {g.progressPercent}%
-                            </Text>
-                          ) : (
-                            <View style={[styles.miniTrack, { backgroundColor: isDark ? '#ffffff22' : '#00000014' }]}>
-                              <View style={[styles.miniFill, { width: `${Math.max(4, Math.min(100, g.progressPercent))}%` }]} />
-                            </View>
-                          )}
+                          {/* Right chevron — subtle affordance, never competes */}
+                          <View style={styles.chevronWrap}>
+                            <ChevronRight size={18} color={isDark ? '#ffffff55' : '#0F2A5C33'} />
+                          </View>
+                        </View>
+                        {/* Subtle count — only when genuinely useful. No
+                            "1/1" redundancy; expiry/DRM noise never shown. */}
+                        {count > 0 && (
+                          <Text style={[styles.countLine, { color: colors.textMuted }]} numberOfLines={1}>
+                            {count} video{count === 1 ? '' : 's'} downloaded
+                          </Text>
+                        )}
+                        {/* REAL completion progress (reference design) — honest
+                            value from the SDK/metadata; never decorative. */}
+                        <View style={styles.progressRow}>
+                          <View style={[styles.progressTrack, { backgroundColor: isDark ? '#ffffff1f' : '#1E90FF1a' }]}>
+                            <View style={[styles.progressFill, { width: `${Math.max(count > 0 ? 6 : 0, Math.min(100, g.progressPercent))}%` }]} />
+                          </View>
+                          <Text style={[styles.progressPct, { color: colors.primary }]}>{g.progressPercent}%</Text>
                         </View>
                       </View>
                     </Pressable>
                   );
                 })}
-                <Text style={{ color: colors.text, opacity: 0.35, fontSize: 11.5, textAlign: 'center', marginTop: spacing.lg }}>
-                  Downloads stay on this device only. Deleting a download never affects the online course.
-                </Text>
               </View>
-            ) : downloading.length === 0 && failed.length === 0 ? (
-              /* ── EMPTY STATE ── */
-              <View style={[styles.emptyCard, neuFlatStyle(isDark), { borderRadius: sp.cardRadius }]}>
-                <View style={[styles.emptyIconWrap, { backgroundColor: isDark ? '#ffffff14' : '#1E90FF18' }]}>
-                  <DownloadCloud size={40} color={colors.primary} />
-                </View>
-                <Text style={[styles.emptyTitle, { color: colors.text }]}>No offline videos yet</Text>
-                <Text style={[styles.emptyBody, { color: colors.text }]}>
-                  Download your lectures to watch them without an internet connection.
-                </Text>
-                <Pressable
-                  onPress={() => router.push('/my-courses')}
-                  style={[styles.browseBtn, { backgroundColor: colors.primary }]}
-                  accessibilityRole="button"
-                  accessibilityLabel="Browse my courses"
-                >
-                  <BookOpen size={16} color={isDark ? '#071628' : '#FFFFFF'} />
-                  <Text style={{ color: isDark ? '#071628' : '#FFFFFF', fontWeight: '800', fontSize: 14 }}>Browse My Courses</Text>
-                </Pressable>
+            )}
+
+            {/* ── EMPTY / LOW-DENSITY SPACE (reference illustration) ── */}
+            {(!hasDownloads || courses.length > 0) && (
+              <View style={styles.emptySpace}>
+                <CloudFolderArt isDark={isDark} />
+                <Text style={[styles.emptyTitle, { color: colors.text }]}>{emptyTitle}</Text>
+                <Text style={[styles.emptyBody, { color: colors.textMuted }]}>{emptyBody}</Text>
               </View>
-            ) : null}
+            )}
           </View>
         </ScrollView>
       )}
@@ -486,20 +482,36 @@ function OfflineLibraryContent() {
   );
 }
 
-// Inset-aware horizontal padding (notch / display-cutout aware on both
-// platforms) — never a hardcoded left offset.
-function safeLeftPad(sp: ReturnType<typeof useNeuSpacing>): number {
-  return sp.isTablet ? spacing.sm : 0;
-}
-function safeRightPad(sp: ReturnType<typeof useNeuSpacing>): number {
-  return sp.isTablet ? spacing.sm : 0;
+/**
+ * Soft cloud + folder + play illustration (pure vector — theme-adaptive,
+ * scales with the design system, disappears on no screen).
+ */
+function CloudFolderArt({ isDark }: { isDark: boolean }) {
+  const cloud = isDark ? '#20344d' : '#e8f0fb';
+  const cloudDeep = isDark ? '#2a4162' : '#d7e6fa';
+  const folder = isDark ? '#3f6ea8' : '#8ab6f0';
+  const folderDark = isDark ? '#33598a' : '#6ea3ec';
+  const play = isDark ? '#7db4f5' : '#3d8bff';
+  return (
+    <View style={styles.artWrap} pointerEvents="none" accessibilityLabel="No additional downloads illustration">
+      <View style={[styles.artCloud, { backgroundColor: cloud }]} />
+      <View style={[styles.artCloudDeep, { backgroundColor: cloudDeep }]} />
+      <View style={[styles.artFolderBody, { backgroundColor: folder }]} />
+      <View style={[styles.artFolderTab, { backgroundColor: folderDark }]} />
+      <View style={styles.artPlay}>
+        <Play size={16} color={play} fill={play} />
+      </View>
+      <View style={[styles.artSpark1, { backgroundColor: play }]} />
+      <View style={[styles.artSpark2, { backgroundColor: play }]} />
+    </View>
+  );
 }
 
 const styles = StyleSheet.create({
   root: { flex: 1 },
   sectionTitle: {
     fontSize: 13, fontWeight: '800', letterSpacing: 1.1, textTransform: 'uppercase',
-    opacity: 0.45, marginBottom: spacing.sm, marginTop: spacing.sm,
+    marginBottom: spacing.sm, marginTop: spacing.md,
   },
   dlCard: {
     flexDirection: 'row', gap: 12, padding: spacing.lg, marginBottom: spacing.md,
@@ -511,23 +523,37 @@ const styles = StyleSheet.create({
     flexDirection: 'row', gap: 14, padding: spacing.lg, marginBottom: spacing.md,
     alignItems: 'center',
   },
-  courseAvatarWrap: { width: 56, height: 56, borderRadius: 28, overflow: 'hidden', backgroundColor: '#00000010' },
-  courseAvatar: { width: '100%', height: '100%', borderRadius: 28 },
-  courseAvatarFallback: { alignItems: 'center', justifyContent: 'center', backgroundColor: '#1E90FF18' },
-  courseAvatarInitial: { fontSize: 20, fontWeight: '800', letterSpacing: 0.5 },
-  courseMetaRow: {
-    flexDirection: 'row', alignItems: 'center', gap: 6,
-    marginTop: 10, paddingTop: 9, borderTopWidth: StyleSheet.hairlineWidth,
-  },
-  miniTrack: { height: 4, borderRadius: 2, overflow: 'hidden', flex: 1, marginLeft: 8 },
-  miniFill: { height: 4, borderRadius: 2, backgroundColor: '#1E90FF' },
-  progressTrack: { height: 6, borderRadius: 3, overflow: 'hidden' },
-  progressFill: { height: 6, borderRadius: 3, backgroundColor: '#1E90FF' },
+  courseAvatarWrap: { width: 64, height: 64, borderRadius: 32, overflow: 'hidden' },
+  courseAvatar: { width: '100%', height: '100%', borderRadius: 32 },
+  courseAvatarFallback: { alignItems: 'center', justifyContent: 'center' },
+  courseAvatarInitial: { fontSize: 22, fontWeight: '800', letterSpacing: 0.5 },
+  courseTitle: { flex: 1, fontWeight: '800', fontSize: 16.5, letterSpacing: 0.1 },
+  chevronWrap: { paddingTop: 2 },
+  countLine: { fontSize: 12.5, marginTop: 3 },
+  progressRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 10 },
+  progressTrack: { height: 8, borderRadius: 4, overflow: 'hidden', flex: 1 },
+  progressFill: { height: 8, borderRadius: 4, backgroundColor: '#1E90FF' },
+  progressPct: { fontSize: 13.5, fontWeight: '800', minWidth: 44, textAlign: 'right' },
   chip: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 10, paddingVertical: 7, borderRadius: 999 },
-  emptyCard: { padding: spacing.xxl, marginTop: spacing.md, alignItems: 'center', gap: 12 },
-  emptyIconWrap: { width: 76, height: 76, borderRadius: 38, alignItems: 'center', justifyContent: 'center', marginBottom: 4 },
+  emptySpace: { alignItems: 'center', paddingTop: spacing.xl, paddingBottom: spacing.xxl },
+  artWrap: { width: 190, height: 150, marginBottom: spacing.lg },
+  artCloud: { position: 'absolute', width: 170, height: 110, borderRadius: 55, top: 20, left: 10 },
+  artCloudDeep: { position: 'absolute', width: 120, height: 78, borderRadius: 39, top: 52, left: 38 },
+  artFolderBody: {
+    position: 'absolute', width: 84, height: 60, borderRadius: 10, top: 58, left: 56,
+    transform: [{ rotate: '-6deg' }],
+  },
+  artFolderTab: {
+    position: 'absolute', width: 34, height: 12, borderTopLeftRadius: 6, borderTopRightRadius: 6,
+    top: 50, left: 58, transform: [{ rotate: '-6deg' }],
+  },
+  artPlay: {
+    position: 'absolute', top: 76, left: 90, width: 26, height: 26, borderRadius: 13,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  artSpark1: { position: 'absolute', width: 3, height: 12, borderRadius: 2, top: 30, left: 96, transform: [{ rotate: '18deg' }] },
+  artSpark2: { position: 'absolute', width: 3, height: 9, borderRadius: 2, top: 26, left: 110, transform: [{ rotate: '40deg' }] },
   emptyTitle: { fontSize: 19, fontWeight: '800', textAlign: 'center' },
-  emptyBody: { fontSize: 13.5, textAlign: 'center', lineHeight: 20, opacity: 0.65, maxWidth: 280 },
-  browseBtn: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 20, paddingVertical: 12, borderRadius: 14, marginTop: 6 },
+  emptyBody: { fontSize: 13.5, textAlign: 'center', lineHeight: 21, marginTop: 8, maxWidth: 320 },
   playerHeader: { flexDirection: 'row', alignItems: 'center', paddingBottom: 10 },
 });

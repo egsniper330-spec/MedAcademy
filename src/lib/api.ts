@@ -2305,6 +2305,8 @@ export async function getOfflineDownloadToken(videoId: string, lessonId?: string
     playbackInfo: string;
     rentalHours: number;
     expiresAt: string;
+    /** Optional official download parameter — present only when the operator configures VDO_CUSTOM_PLAYER_ID on the backend. */
+    customPlayerId?: string | null;
   }>(
     'vdocipher-offline-authorize',
     body,

@@ -56,7 +56,7 @@ function compileModule(name, code) {
 // ── 1. Phase machine ──────────────────────────────────────────────────────────
 console.log('── Offline download phase machine ──');
 {
-  const svcSrc = fs.readFileSync(path.join(ROOT, 'src/lib/offlineVideoService.ts'), 'utf8');
+  const svcSrc = fs.readFileSync(path.join(ROOT, 'src/lib/offlineVideoService.ts'), 'utf8').replace(/\r/g, '');
   const phaseSection = extractPureSection(
     svcSrc,
     '/** Pure transition table',
@@ -88,7 +88,7 @@ console.log('── Offline download phase machine ──');
 // ── 2. Track selection parity ────────────────────────────────────────────────
 console.log('── Track selection parity ──');
 {
-  const svcSrc = fs.readFileSync(path.join(ROOT, 'src/lib/offlineVideoService.ts'), 'utf8');
+  const svcSrc = fs.readFileSync(path.join(ROOT, 'src/lib/offlineVideoService.ts'), 'utf8').replace(/\r/g, '');
   const selSection = extractPureSection(
     svcSrc,
     'export function selectDownloadTracks',
@@ -134,7 +134,7 @@ console.log('── Track selection parity ──');
 // ── 3. Expiry model ───────────────────────────────────────────────────────────
 console.log('── Rental expiry (single source of truth: server-issued expiresAt) ──');
 {
-  const svcSrc = fs.readFileSync(path.join(ROOT, 'src/lib/offlineVideoService.ts'), 'utf8');
+  const svcSrc = fs.readFileSync(path.join(ROOT, 'src/lib/offlineVideoService.ts'), 'utf8').replace(/\r/g, '');
   const expSection = extractPureSection(
     svcSrc,
     'export function isOfflineVideoExpired',
@@ -202,7 +202,7 @@ console.log('── Offline update-policy cache ──');
 // ── 5. Raw VdoCipher filename/title ban (UI title hygiene) ────────────────────
 console.log('── Raw VdoCipher title ban (safeDisplayTitle) ──');
 {
-  const svcSrc = fs.readFileSync(path.join(ROOT, 'src/lib/offlineVideoService.ts'), 'utf8');
+  const svcSrc = fs.readFileSync(path.join(ROOT, 'src/lib/offlineVideoService.ts'), 'utf8').replace(/\r/g, '');
   const titleSection = extractPureSection(
     svcSrc,
     '/**\n * VdoCipher media often arrives titled',
@@ -235,7 +235,7 @@ console.log('── Raw VdoCipher title ban (safeDisplayTitle) ──');
 // ── 6. Course grouping (library cards) ────────────────────────────────────────
 console.log('── Course grouping ──');
 {
-  const svcSrc = fs.readFileSync(path.join(ROOT, 'src/lib/offlineVideoService.ts'), 'utf8');
+  const svcSrc = fs.readFileSync(path.join(ROOT, 'src/lib/offlineVideoService.ts'), 'utf8').replace(/\r/g, '');
   const groupSection = extractPureSection(
     svcSrc,
     'export interface OfflineCourseGroup',
@@ -337,12 +337,17 @@ console.log('── Course grouping ──');
     'rental config must be bounded (rejects zero/negative/infinite durations)'
   );
 
-  // 4. Client surface: the download flow passes ONLY otp+playbackInfo to the
-  //    official SDK; no client-side license rules, no extension path.
-  const client = fs.readFileSync('src/lib/offlineVideoService.ts', 'utf8');
+  // 4. Client surface: the download flow passes otp+playbackInfo (+ the
+  //    optional official customPlayerId when the backend issues one) through
+  //    buildOfflineOptionParams; no client-side license rules, no extension path.
+  const client = fs.readFileSync('src/lib/offlineVideoService.ts', 'utf8').replace(/\r/g, '');
   assert(
-    /VdoDownload\.getDownloadOptions\(\{\s*otp: token\.otp,\s*playbackInfo: token\.playbackInfo,\s*\}\)/.test(client),
-    'client must pass only otp+playbackInfo to the official getDownloadOptions'
+    /VdoDownload\.getDownloadOptions\(buildOfflineOptionParams\(token\)\)/.test(client),
+    'client passes the official params via buildOfflineOptionParams(token) to getDownloadOptions'
+  );
+  assert(
+    /otp: token\.otp,\s*playbackInfo: token\.playbackInfo/.test(client),
+    'params carry exactly otp+playbackInfo (customPlayerId only when server-issued)'
   );
   assert(
     !/canPersist|rentalDuration|licenseRules/.test(client),
@@ -417,7 +422,7 @@ console.log('── Fullscreen rotation (in-place expansion, single player insta
 // ── 9. Offline metadata model (course image + section/chapter titles) ────────
 console.log('── Offline metadata model (course image / chapters) ──');
 {
-  const svcSrc = fs.readFileSync(path.join(ROOT, 'src/lib/offlineVideoService.ts'), 'utf8');
+  const svcSrc = fs.readFileSync(path.join(ROOT, 'src/lib/offlineVideoService.ts'), 'utf8').replace(/\r/g, '');
   assert(/courseImageUrl: string \| null;/.test(svcSrc), 'meta persists courseImageUrl (same image as online course)');
   assert(/sectionTitle: string \| null;/.test(svcSrc), 'meta persists sectionTitle (chapter structure)');
   assert(/courseImageUrl: p\.courseImageUrl \?\? null,/.test(svcSrc), 'authorize-time persist: courseImageUrl');
@@ -440,7 +445,7 @@ console.log('── Rental duration (backend 90-day policy) ──');
   assert(!/licenseValidty/.test(php), 'legacy misspelled payload never returns');
   assert(/offline_rental_hours/.test(php), 'operator DB override path preserved');
   // Client renders the server-issued expiry only — no client-side fake.
-  const svc = fs.readFileSync(path.join(ROOT, 'src/lib/offlineVideoService.ts'), 'utf8');
+  const svc = fs.readFileSync(path.join(ROOT, 'src/lib/offlineVideoService.ts'), 'utf8').replace(/\r/g, '');
   assert(/expiresAt: token\.expiresAt,/.test(svc), 'client expiry comes from the server token (single source of truth)');
   assert(!/86400 \* 90|\+ 90 \* 24/.test(svc), 'no client-side 90-day fabrication');
 }
@@ -454,9 +459,12 @@ console.log('── Watch-screen SafeArea + header integration ──');
   assert(/Math\.max\(insets\.top, 8\) \+ 6/.test(libSrc), 'library watch header uses SafeArea inset (no fixed offset)');
   assert(/Math\.max\(insets\.top, 8\) \+ 6/.test(courseSrc), 'course watch header uses SafeArea inset (no fixed offset)');
   assert(!/playerHeader.*paddingTop: 12\b/.test(libSrc.replace(/\r/g, '')), 'no fixed 12px top offset on the watch header');
-  // Issue 8 (this pass): the course-card chevron is REMOVED entirely — the
-  // whole card is the tap target; nothing floats mid-page.
-  assert(!/ChevronRight/.test(libSrc.replace(/\r/g, '')), 'no chevron anywhere on the offline course card (removed per Issue 8)');
+  // Issue 8 (superseded by the 2026-09 reference redesign): the course card
+  // now carries a SUBTLE right chevron as an affordance, while the whole
+  // card remains the tap target. Guard both properties.
+  assert(/ChevronRight/.test(libSrc.replace(/\r/g, '')), 'offline course card shows a right-chevron affordance (reference redesign)');
+  // The chevron must never be a standalone pressable (whole card = tap target).
+  assert(!/Pressable[^>]*accessibilityLabel="Open course"/.test(libSrc), 'chevron is not a competing tap target (whole card opens the course)');
   // Issue 5: the shared back button renders WITHOUT container chrome.
   const phSrc = fs.readFileSync(path.join(ROOT, 'src/components/PageHeader.tsx'), 'utf8');
   const backBlock = phSrc.slice(phSrc.indexOf('{showBack ?'), phSrc.indexOf('showHamburger ?'));
@@ -654,10 +662,10 @@ console.log('──────────────────────�
   assert(!/export (async )?function getSystemConfig/.test(apiSrc2), 'getSystemConfig removed');
   // 3. Platform sub-pages have terminal states - never a blank screen.
   const platformPages = [
-    'src/app/(app)/(superadmin)/branding.tsx',
-    'src/app/(app)/(superadmin)/feature-flags.tsx',
-    'src/app/(app)/(admin)/cms.tsx',
-    'src/app/(app)/(superadmin)/maintenance.tsx',
+    'src/app/(app)/(hubs)/branding.tsx',
+    'src/app/(app)/(hubs)/feature-flags.tsx',
+    'src/app/(app)/(hubs)/cms.tsx',
+    'src/app/(app)/(hubs)/maintenance.tsx',
   ];
   for (const p of platformPages) {
     const s = fs.readFileSync(path.join(ROOT, p), 'utf8').replace(/\r/g, '');
@@ -666,9 +674,9 @@ console.log('──────────────────────�
     assert(!/catch \(_\) \{\}/.test(s), p + ' has no swallowed fetch errors (blank-screen bug class)');
   }
   // 4. CMS re-export chain intact for Super Admin.
-  assert(fs.existsSync(path.join(ROOT, 'src/app/(app)/(superadmin)/sa-cms.tsx')), 'sa-cms re-export exists');
+  assert(fs.existsSync(path.join(ROOT, 'src/app/(app)/(hubs)/sa-cms.tsx')), 'sa-cms re-export exists');
   // 5. System Diagnostics: route, client wiring, screen.
-  const sysDiagScreen = fs.readFileSync(path.join(ROOT, 'src/app/(app)/(admin)/system-providers.tsx'), 'utf8').replace(/\r/g, '');
+  const sysDiagScreen = fs.readFileSync(path.join(ROOT, 'src/app/(app)/(hubs)/system-providers.tsx'), 'utf8').replace(/\r/g, '');
   assert(/runSystemDiagnostics\(\)/.test(sysDiagScreen), 'System Diagnostics screen runs the real backend scan');
   assert(/runSystemDiagnosticOne/.test(sysDiagScreen), 'System Diagnostics supports single-service re-check');
   assert(/<PageHeader\s+title="System Diagnostics"/.test(sysDiagScreen), 'screen retitled System Diagnostics (old System Providers presentation gone)');

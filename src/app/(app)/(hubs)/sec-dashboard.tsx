@@ -71,6 +71,36 @@ const EVENT_META: Record<string, { label: string; color: string; icon: React.Com
 
 const DAYS_OPTIONS = [7, 14, 30, 90];
 
+/**
+ * Server contract guards — canonical shapes pinned at the API boundary.
+ *
+ * The 2026-09 crash (`riskyDevices.map is not a function`) came from storing
+ * the RPC envelope payload (`{ risky_devices: [...] }`) directly as the array
+ * state. These guards fail loud on non-array data instead of silently
+ * coercing errors into empty lists — a failed call must surface as an error,
+ * never as "no risky devices".
+ */
+const asRiskyDevices = (payload: unknown): RiskyDevice[] => {
+  if (!Array.isArray(payload)) {
+    throw new Error('Malformed risky-devices response from server.');
+  }
+  return payload as RiskyDevice[];
+};
+
+const asSecurityEvents = (payload: unknown): SecurityEvent[] => {
+  if (!Array.isArray(payload)) {
+    throw new Error('Malformed security-events response from server.');
+  }
+  return payload as SecurityEvent[];
+};
+
+const asSecurityStats = (payload: unknown): SecurityStats => {
+  if (typeof payload !== 'object' || payload === null || Array.isArray(payload)) {
+    throw new Error('Malformed security-stats response from server.');
+  }
+  return payload as SecurityStats;
+};
+
 export default function SecurityDashboard() {
   const scheme = useColorScheme();
   const isDark = scheme === 'dark';
@@ -84,6 +114,7 @@ export default function SecurityDashboard() {
   const [stats, setStats]           = useState<SecurityStats | null>(null);
   const [riskyDevices, setRiskyDevices] = useState<RiskyDevice[]>([]);
   const [recentEvents, setRecentEvents] = useState<SecurityEvent[]>([]);
+  const [loadError, setLoadError]   = useState<string | null>(null);
   const [loading, setLoading]       = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [days, setDays]             = useState(30);
@@ -105,11 +136,38 @@ export default function SecurityDashboard() {
           .limit(50),
       ]);
 
-      if (statsRes.data)   setStats(statsRes.data as SecurityStats);
-      if (devicesRes.data) setRiskyDevices(devicesRes.data as RiskyDevice[]);
-      if (eventsRes.data)  setRecentEvents(eventsRes.data as SecurityEvent[]);
+      // Collect contract/API failures per source — a failure in one section
+      // must never be masked as "empty" (and vice versa: empty is only ever a
+      // SUCCESS state).
+      const errors: string[] = [];
+      if (statsRes.error) {
+        errors.push(statsRes.error.message || 'Failed to load security stats.');
+      } else {
+        setStats(asSecurityStats(statsRes.data));
+      }
+      if (devicesRes.error) {
+        errors.push(devicesRes.error.message || 'Failed to load risky devices.');
+      } else {
+        setRiskyDevices(asRiskyDevices((devicesRes.data as { risky_devices?: unknown } | null)?.risky_devices));
+      }
+      if (eventsRes.error) {
+        errors.push(eventsRes.error.message || 'Failed to load security events.');
+      } else {
+        setRecentEvents(asSecurityEvents(eventsRes.data));
+      }
+
+      if (errors.length > 0) {
+        setLoadError(errors[0]);
+        showToast({ type: 'error', message: errors[0] });
+      } else {
+        setLoadError(null);
+      }
     } catch (e) {
-      showToast({ type: 'error', message: friendlyError(e, 'Failed to load security data.') });
+      // Normalizer contract violations land here — the state stays untouched
+      // (previous server truth remains on screen) and the failure is visible.
+      const msg = e instanceof Error ? e.message : friendlyError(e, 'Failed to load security data.');
+      setLoadError(msg);
+      showToast({ type: 'error', message: msg });
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -178,6 +236,15 @@ export default function SecurityDashboard() {
         contentContainerStyle={{ padding: layout.screenPx, gap: layout.sectionGap }}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />}
       >
+        {loadError && (
+          <View style={[flat, { borderRadius: layout.cardRadius, padding: layout.cardPx, flexDirection: 'row', alignItems: 'center', gap: layout.pad.sm }]}>
+            <AlertTriangle size={layout.bodySize} color="#EF4444" />
+            <Text style={{ flex: 1, fontSize: layout.captionSize, color: '#EF4444', fontWeight: '600' }}>
+              {loadError} Pull to refresh to retry.
+            </Text>
+          </View>
+        )}
+
         {/* Day Filter + Export */}
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: layout.pad.sm, flexWrap: 'wrap' }}>
           <Filter size={layout.bodySize} color={`${c.text}77`} />

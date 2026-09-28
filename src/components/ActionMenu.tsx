@@ -14,7 +14,7 @@ import {
 } from 'lucide-react-native';
 
 export type ActionKey =
-  | 'edit' | 'block' | 'unblock' | 'reset_password' | 'change_password'
+  | 'edit' | 'block' | 'unblock' | 'suspend' | 'unsuspend' | 'reset_password' | 'change_password'
   | 'promote_doctor' | 'promote_admin'
   | 'demote_student' | 'demote_doctor'
   | 'delete'
@@ -58,6 +58,10 @@ export function ActionMenu({
     { key: 'edit',             label: 'Edit Profile',             icon: <Edit3 size={18} />,           color: c.primary },
     { key: 'unblock',          label: 'Unblock',                  icon: <UserCheck size={18} />,       color: '#16A34A' },
     { key: 'block',            label: 'Block',                    icon: <UserX size={18} />,           color: '#DC2626', danger: true },
+    // SUSPENDED → UNSUSPEND (restores account access; security suspension
+    // included — see actionsForUser/actionsForRole in the Users screens).
+    { key: 'unsuspend',        label: 'Unsuspend',                icon: <UserCheck size={18} />,       color: '#16A34A' },
+    { key: 'suspend',          label: 'Suspend',                  icon: <UserX size={18} />,           color: '#D97706', danger: true },
     { key: 'reset_password',   label: 'Reset Password (Email)',   icon: <KeyRound size={18} />,        color: '#7C3AED' },
     { key: 'change_password',  label: 'Change Password',          icon: <KeyRound size={18} />,        color: '#7C3AED' },
     { key: 'promote_doctor',   label: 'Promote → Doctor',         icon: <ArrowUpCircle size={18} />,   color: '#16A34A' },
@@ -130,6 +134,8 @@ function renderIcon(key: ActionKey, color: string) {
     case 'edit':             return <Edit3 {...props} />;
     case 'unblock':          return <UserCheck {...props} />;
     case 'block':            return <UserX {...props} />;
+    case 'unsuspend':        return <UserCheck {...props} />;
+    case 'suspend':          return <UserX {...props} />;
     case 'reset_password':   return <KeyRound {...props} />;
     case 'change_password':  return <KeyRound {...props} />;
     case 'promote_doctor':   return <ArrowUpCircle {...props} />;

@@ -17,10 +17,14 @@
  *  • Others → unchanged JS `Tabs` + ResponsiveTabBar. On web the custom
  *             `tabBar` prop is already a no-op (web renders DrawerNav only).
  *
- * Routes: every route file in the role directory is registered from the
- * shared registry — visible items AND `tabBarItemHidden` drawer-only ones —
- * so navigation is unchanged on every platform. DrawerNav remains a sibling
- * of the navigator (outside the tab scenes), exactly as before.
+ * Routes: ONLY the role's visible bar tabs are registered. Drawer-only
+ * screens intentionally do NOT participate in the native tab navigator —
+ * on iOS 26 the system back affordance walks the native tab history, which
+ * previously included those hidden-scene switches (More → Platform →
+ * Devices) and produced a duplicate back button landing on the wrong
+ * screen. They now live in the (hubs) Stack group (JS-owned history) —
+ * see (hubs)/_layout.tsx. DrawerNav remains a sibling of the navigator
+ * (outside the tab scenes), exactly as before.
  */
 import { View, useColorScheme } from 'react-native';
 import { createNativeBottomTabNavigator } from '@bottom-tabs/react-navigation';
@@ -53,6 +57,12 @@ export default function RoleTabShell({ tabs, initialRouteName }: RoleTabShellPro
       <View style={{ flex: 1, backgroundColor: c.base }}>
         <NativeBottomTabs
           initialRouteName={initialRouteName}
+          // Back within the tab navigator follows the ACTUAL visit order of
+          // the visible tabs (tab switching never fabricates stack history —
+          // duplicates are dropped), so any native back affordance stays in
+          // sync with MedAcademy navigation instead of jumping to an
+          // arbitrary previously-mounted scene.
+          backBehavior="history"
           tabBarActiveTintColor={c.primary}
           // Inactive items: same text/50 mix the JS bar uses (`c.text + '44'`).
           tabBarInactiveTintColor={`${c.text}66`}
@@ -63,18 +73,20 @@ export default function RoleTabShell({ tabs, initialRouteName }: RoleTabShellPro
           // from the content behind the bar. Older iOS gets the native
           // translucent default. No fake glass approximation anywhere.
         >
-          {tabs.map((tab) => (
+          {tabs
+            // Drawer-only screens are NOT native tab scenes (see file header):
+            // registering them lets iOS 26's system back affordance walk
+            // tab-scene history (duplicate back button, wrong destination).
+            .filter((tab) => tab.hidden !== true)
+            .map((tab) => (
             <NativeBottomTabs.Screen
               key={tab.name}
               name={tab.name}
               options={{
                 title: tab.title,
-                // Drawer-only: no bar item, route stays mounted + navigable
-                // (same contract as the original `href: null` screens).
-                tabBarItemHidden: tab.hidden === true,
                 // Native SF Symbol icon — the system renders
                 // selected/unselected states; no duplicated icon layer.
-                tabBarIcon: tab.hidden ? undefined : () => ({ sfSymbol: tab.sfSymbol! }),
+                tabBarIcon: () => ({ sfSymbol: tab.sfSymbol! }),
               }}
             />
           ))}
