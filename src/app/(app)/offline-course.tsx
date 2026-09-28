@@ -86,6 +86,34 @@ function courseInitials(name: string): string {
   return words.map((w) => w[0]?.toUpperCase() ?? '').join('') || 'MV';
 }
 
+/**
+ * Circular course avatar with honest failure handling (same as the library
+ * screen): a dead/missing image degrades to the initials fallback instead of
+ * a permanently blank circle.
+ */
+function CourseAvatar({ uri, fallbackInitial, fallbackColor }: {
+  uri: string;
+  fallbackInitial: string;
+  fallbackColor: string;
+}) {
+  const [failed, setFailed] = useState(false);
+  if (failed) {
+    return (
+      <View style={[styles.courseAvatar, styles.courseAvatarFallback]}>
+        <Text style={[styles.courseAvatarInitial, { color: fallbackColor }]}>{fallbackInitial}</Text>
+      </View>
+    );
+  }
+  return (
+    <Image
+      source={{ uri }}
+      style={styles.courseAvatar}
+      resizeMode="cover"
+      onError={() => setFailed(true)}
+    />
+  );
+}
+
 const STATE_LABEL: Record<OfflineVideoEntry['phase'], string> = {
   authorizing: 'Preparing…',
   pending: 'Queued',
@@ -246,9 +274,7 @@ function OfflineCourseContent() {
     );
   }
 
-  const courseImg = group.courseImageUrl
-    ?? group.lessons.find((e) => !!e.meta.lessonThumbnailUrl)?.meta.lessonThumbnailUrl
-    ?? null;
+  const courseImg = group.courseImage;
   const expiries = group.lessons
     .map((e) => Date.parse(e.meta.expiresAt))
     .filter((t) => Number.isFinite(t));
@@ -273,7 +299,11 @@ function OfflineCourseContent() {
         <View style={[styles.courseHeader, { paddingHorizontal: sp.screenPx }]}>
           <View style={styles.courseAvatarWrap}>
             {courseImg ? (
-              <Image source={{ uri: courseImg }} style={styles.courseAvatar} resizeMode="cover" />
+              <CourseAvatar
+                uri={courseImg}
+                fallbackInitial={courseInitials(group.courseName)}
+                fallbackColor={colors.primary}
+              />
             ) : (
               <View style={[styles.courseAvatar, styles.courseAvatarFallback]}>
                 <Text style={[styles.courseAvatarInitial, { color: colors.primary }]}>

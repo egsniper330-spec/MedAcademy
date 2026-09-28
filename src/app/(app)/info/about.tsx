@@ -1,16 +1,18 @@
 /**
- * About Us — static info page + build verification marker
+ * About Us — static info page (hero, mission, CMS copy, pillars, footer).
+ *
+ * NOTE: no build/debug marker is rendered here — internal build metadata
+ * (expo version/versionCode/buildNumber) stays available to update,
+ * diagnostics and integrity systems but is never shown to end users.
  */
-import { useEffect, useRef } from 'react';
 import { ScrollView, View, Text, useColorScheme, Animated } from 'react-native';
 import { PageHeader } from '@/components/PageHeader';
 import { NeuCard } from '@/components/NeuCard';
 import { useCmsSections } from '@/lib/cmsContent';
 import { BrandLogo } from '@/components/BrandLogo';
-import { neuColors, useLayout, safeBottom } from '@/lib/neu';
+import { neuColors, useLayout } from '@/lib/neu';
 import { useEntranceAnim } from '@/lib/motion';
-import { Stethoscope, BookOpen, ShieldCheck, Zap, FlaskConical } from 'lucide-react-native';
-import { BUILD_ID, BUILD_VERSION_NAME, BUILD_VERSION_CODE, BUILD_APP_NAME, BUILD_TIMESTAMP } from '@/lib/buildMarker';
+import { Stethoscope, BookOpen, ShieldCheck, Zap } from 'lucide-react-native';
 import { useBranding } from '@/lib/branding';
 
 const PILLARS = [
@@ -46,42 +48,6 @@ export default function AboutPage() {
       contentContainerStyle={{ padding: layout.screenPx }}
     >
       <PageHeader title="About Us" showBack />
-
-      {/* ── Build Verification Banner ──────────────────────────────────────── */}
-      <NeuCard
-        radius={layout.cardRadius}
-        style={{
-          padding: layout.cardPx,
-          marginBottom: layout.sectionGap,
-          borderWidth: 1.5,
-          borderColor: '#D97706',
-          backgroundColor: isDark ? 'rgba(217,119,6,0.10)' : 'rgba(255,237,213,0.85)',
-        }}
-      >
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: layout.pad.sm, marginBottom: layout.pad.md }}>
-          <FlaskConical size={layout.bodySize + 2} color="#D97706" />
-          <Text style={{ fontSize: layout.captionSize, fontWeight: '800', color: '#D97706', textTransform: 'uppercase', letterSpacing: 1.2 }}>
-            Build Verification Marker
-          </Text>
-        </View>
-        {[
-          ['BUILD_ID',      BUILD_ID],
-          ['Version Name',  BUILD_VERSION_NAME],
-          ['Version Code',  String(BUILD_VERSION_CODE)],
-          ['App Name',      BUILD_APP_NAME],
-          ['Build Date',    BUILD_TIMESTAMP],
-        ].map(([label, value]) => (
-          <View key={label} style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4 }}>
-            <Text style={{ fontSize: layout.captionSize, color: c.text, opacity: 0.55, fontWeight: '600', flex: 1 }}>{label}</Text>
-            <Text style={{ fontSize: layout.captionSize, color: '#D97706', fontWeight: '700', flex: 2, textAlign: 'right' }} selectable>
-              {value}
-            </Text>
-          </View>
-        ))}
-        <Text style={{ fontSize: layout.captionSize - 1, color: c.text, opacity: 0.4, marginTop: layout.pad.sm, textAlign: 'center' }}>
-          If this panel is absent from the APK, packaging used a stale snapshot.
-        </Text>
-      </NeuCard>
 
       {/* ── Hero ─────────────────────────────────────────────────────────── */}
       <Animated.View

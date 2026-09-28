@@ -17,6 +17,7 @@ use MedAcademy\Controllers\PlatformController;
 use MedAcademy\Controllers\SecurityController;
 use MedAcademy\Controllers\SecurityEvidenceController;
 use MedAcademy\Controllers\StudentController;
+use MedAcademy\Controllers\StudentBulkController;
 use MedAcademy\Controllers\RpcController;
 use MedAcademy\Controllers\RedeemCodeController;
 use MedAcademy\Controllers\DataController;
@@ -107,6 +108,9 @@ $router->post('/device-binding', [DeviceController::class, 'handle'], $auth);
 
 // ---- Student operations -----------------------------------------------------
 $router->post('/student-operations', [StudentController::class, 'handle'], $auth + ['role' => ['doctor', 'admin', 'super_admin']]);
+
+// ---- Bulk student actions (same per-row authorization as individual actions) ----
+$router->post('/students/bulk-action', [StudentBulkController::class, 'handle'], $auth + ['role' => ['doctor', 'admin', 'super_admin']]);
 
 // ---- Trash / restore --------------------------------------------------------
 $router->post('/users/{id}/trash', [AuthController::class, 'trashUser'], $auth + ['role' => ['admin', 'super_admin']]);
@@ -209,8 +213,10 @@ $router->put('/video-providers/teachers/{id}', [VideoProviderController::class, 
 $router->post('/video/upload-patch', [VideoController::class, 'uploadPatch'], $auth + ['role' => ['super_admin']]);
 $router->post('/video/orphan-cleanup', [VideoController::class, 'orphanCleanup'], $auth + ['role' => ['admin', 'super_admin']]);
 // VdoCipher ↔ Video Library reconciliation (paginated remote listing →
-// missing/duplicate repair). Super Admin only — destructive reconciliation.
-$router->post('/video/sync-library', [VideoController::class, 'syncLibrary'], $auth + ['role' => ['super_admin']]);
+// missing/duplicate repair). Admin: whole platform; Doctor: their own library
+// (scope clamped server-side) — doctors must be able to reconcile their own
+// library against VdoCipher without a Super Admin round-trip.
+$router->post('/video/sync-library', [VideoController::class, 'syncLibrary'], $auth + ['role' => ['doctor', 'admin', 'super_admin']]);
 $router->post('/lessons/{id}/delete', [CourseController::class, 'deleteLesson'], $auth + ['role' => ['doctor', 'admin', 'super_admin']]);
 
 // ---- Integrity (Play Integrity / App Integrity) -----------------------------

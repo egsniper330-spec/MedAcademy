@@ -85,6 +85,10 @@ final class SystemDiagnosticsController
             'httpStatus', 'latencyMs', 'lastChecked', 'checks',
             'recommendedAction', 'exceptionDetail', 'generatedAt',
             'results', 'summary', 'meta',
+            // Per-stage check labels inside the checks map (safe enum values:
+            // passed/failed/not tested) so the UI can show WHERE a failure
+            // happened. Without these the recursion strips the map to [].
+            'configuration', 'connectivity', 'authentication', 'api', 'query',
         ];
     }
 }

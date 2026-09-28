@@ -2183,6 +2183,36 @@ export async function processStudentOperation(params: {
   return invokeEdgeFunction<StudentOpResult>('student-operations', params as unknown as Record<string, unknown>);
 }
 
+/**
+ * BULK STUDENT ACTIONS — backend-authoritative batch execution of the same
+ * per-enrollment actions the Students screen offers individually.
+ *
+ * The backend (StudentBulkController) re-resolves every id against the
+ * caller's real scope (doctor → own courses + visibility policy; admin/SA →
+ * platform-wide), rejects out-of-scope ids per-row, executes rows
+ * independently, writes one summary audit event, and returns exact per-row
+ * results — so the UI can report "9 succeeded, 1 failed" truthfully.
+ */
+export interface BulkStudentActionResult {
+  success: boolean;
+  action: 'suspend' | 'resume' | 'remove';
+  requested: number;
+  succeeded: number;
+  skipped: number;
+  failed: number;
+  results: { id: string; status: 'succeeded' | 'skipped' | 'failed'; reason?: string }[];
+}
+
+export async function bulkStudentAction(params: {
+  enrollmentIds: string[];
+  action: 'suspend' | 'resume' | 'remove';
+}): Promise<BulkStudentActionResult> {
+  return invokeEdgeFunction<BulkStudentActionResult>('student-bulk-action', {
+    enrollment_ids: params.enrollmentIds,
+    action: params.action,
+  });
+}
+
 /** @deprecated Use processStudentOperation with mode='create_only' */
 export async function createStudentByDoctor(params: {
   full_name: string;

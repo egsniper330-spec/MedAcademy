@@ -7,6 +7,7 @@ import { useFocusEffect, useRouter, RelativePathString } from 'expo-router';
 import {
   Users, Search, UserPlus, BookOpen, Ban, Play, Trash2, Eye, CreditCard, X,
   Clock, GraduationCap, ChevronRight, CheckCircle, PlusCircle, Upload, Fingerprint, Copy,
+  Check, ListChecks,
 } from 'lucide-react-native';
 import * as Clipboard from 'expo-clipboard';
 import { useProfileStore } from '@/lib/store';
@@ -15,6 +16,7 @@ import {
   getCourses, getDoctorStudentEnrollments,
   suspendCourseSubscription, resumeCourseSubscription,
   removeStudentFromCourseWithRefund, searchUsers, processStudentOperation,
+  bulkStudentAction, type BulkStudentActionResult,
 } from '@/lib/api';
 import { getCreditBalance, invalidateCreditCache } from '@/lib/creditService';
 import { useCreditBalance } from '@/lib/useCreditBalance';
@@ -30,6 +32,7 @@ import { friendlyError } from '@/lib/validation';
 type EnrollMethod = 'credits' | null;
 type ActionType   = 'suspend' | 'resume' | 'remove' | 'profile' | null;
 type TabKey       = 'all' | 'by_course' | 'active' | 'suspended' | 'recent';
+type BulkAction   = 'suspend' | 'resume' | 'remove';
 
 const STATUS_COLOR: Record<string, string> = {
   active: '#16A34A', suspended: '#D97706', pending: '#6B7280', expired: '#DC2626',
@@ -86,6 +89,14 @@ export default function DoctorStudents() {
   const [actionTarget,  setActionTarget]  = useState<any>(null);
   const [actionType,    setActionType]    = useState<ActionType>(null);
   const [actionLoading, setActionLoading] = useState(false);
+
+  // ── Bulk selection mode (backend-authoritative actions; see bulkStudentAction) ─
+  const [selectMode,    setSelectMode]    = useState(false);
+  const [selected,      setSelected]      = useState<Set<string>>(new Set());
+  const [bulkMenu,      setBulkMenu]      = useState(false);
+  const [bulkConfirm,   setBulkConfirm]   = useState<BulkAction | null>(null);
+  const [bulkResult,    setBulkResult]    = useState<BulkStudentActionResult | null>(null);
+  const [bulkExecuting, setBulkExecuting] = useState(false);
 
   // ── Load ──────────────────────────────────────────────────────────────────────
   const loadData = useCallback(async () => {
@@ -213,6 +224,56 @@ export default function DoctorStudents() {
 
   const openAction = (enrollment: any, type: ActionType) => { setActionTarget(enrollment); setActionType(type); };
 
+  // ── Bulk selection helpers ────────────────────────────────────────────────────
+  // "All visible" means the CURRENT tab's rendered list — never the whole
+  // database (this screen has no server-side pagination; the tab content IS
+  // the page, so visible == matching students and no false claim is made).
+  const visibleEnrollments = useMemo(() => {
+    switch (activeTab) {
+      case 'all':       return allFiltered;
+      case 'active':    return activeEnrollments;
+      case 'suspended': return suspendedEnrollments;
+      case 'recent':    return recentEnrollments.slice(0, 30);
+      case 'by_course': return courseGroups.flatMap(g => g.items);
+      default:          return [];
+    }
+  }, [activeTab, allFiltered, activeEnrollments, suspendedEnrollments, recentEnrollments, courseGroups]);
+
+  const toggleSelect = useCallback((id: string) => {
+    setSelected(prev => { const next = new Set(prev); if (next.has(id)) next.delete(id); else next.add(id); return next; });
+  }, []);
+  const selectAllVisible = useCallback(() => setSelected(new Set(visibleEnrollments.map(e => e.id))), [visibleEnrollments]);
+  const exitSelectMode = useCallback(() => {
+    setSelectMode(false); setSelected(new Set()); setBulkMenu(false);
+    setBulkConfirm(null); setBulkResult(null); setBulkExecuting(false);
+  }, []);
+
+  // Authorization-derived menu state (mirrors the per-card buttons: Suspend
+  // only applies to active rows, Resume only to suspended rows — same rules
+  // the individual buttons use; the backend independently re-checks each row).
+  const selectedActiveCount    = useMemo(() => enrollments.filter(e => selected.has(e.id) && e.status === 'active').length, [enrollments, selected]);
+  const selectedSuspendedCount = useMemo(() => enrollments.filter(e => selected.has(e.id) && e.status === 'suspended').length, [enrollments, selected]);
+
+  const executeBulk = useCallback(async (action: BulkAction) => {
+    if (!action || bulkExecuting || selected.size === 0) return;
+    setBulkExecuting(true);
+    setBulkConfirm(null);
+    try {
+      // One backend call — the server authorizes every id against the real
+      // scope and returns exact per-row results. Never per-student fan-out.
+      const res = await bulkStudentAction({ enrollmentIds: [...selected], action });
+      setBulkResult(res);
+      if (res.succeeded > 0) {
+        if (action === 'remove') invalidateCreditCache();
+        await loadData();
+      }
+    } catch (e) {
+      showToast({ type: 'error', message: friendlyError(e, 'Bulk action failed.') });
+      setBulkResult(null);
+    }
+    setBulkExecuting(false);
+  }, [bulkExecuting, selected, loadData, showToast]);
+
   const resetAddModal = () => {
     setAddModal(false); setEnrollMethod(null);
     setCreditEmail(''); setCreditStudent(null); setCreditCourse('');
@@ -223,9 +284,34 @@ export default function DoctorStudents() {
   const renderEnrollmentCard = (enrollment: any, showCourse = true) => {
     const s = enrollment.student;
     const statusColor = STATUS_COLOR[enrollment.status] ?? '#6B7280';
+    const isSelected = selected.has(enrollment.id);
     return (
-      <NeuCard key={enrollment.id} style={{ marginBottom: 10, padding: 16 }}>
+      <Pressable
+        key={enrollment.id}
+        disabled={!selectMode}
+        onPress={() => toggleSelect(enrollment.id)}
+        accessibilityRole={selectMode ? 'checkbox' : undefined}
+        accessibilityState={selectMode ? { checked: isSelected } : undefined}
+        accessibilityLabel={selectMode ? `Select ${s?.full_name ?? 'student'}` : undefined}
+      >
+      <NeuCard style={{
+        marginBottom: 10, padding: 16,
+        // Subtle selected state — same card, clearly marked (no redesign).
+        ...(selectMode && isSelected ? { borderWidth: 1.5, borderColor: c.primary } : {}),
+      }}>
         <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 12 }}>
+          {/* Selection checkbox — compact, only in Select mode */}
+          {selectMode && (
+            <View style={{
+              width: 22, height: 22, borderRadius: 7, marginTop: 2,
+              borderWidth: 1.5,
+              borderColor: isSelected ? c.primary : `${c.text}30`,
+              backgroundColor: isSelected ? c.primary : 'transparent',
+              alignItems: 'center', justifyContent: 'center',
+            }}>
+              {isSelected && <Check size={14} color="#fff" strokeWidth={3} />}
+            </View>
+          )}
           {/* Avatar */}
           <View style={{ width: 42, height: 42, borderRadius: 14, backgroundColor: `${c.primary}18`, alignItems: 'center', justifyContent: 'center' }}>
             <Text style={{ fontSize: 15, fontWeight: '800', color: c.primary }}>{s?.full_name?.[0]?.toUpperCase() ?? '?'}</Text>
@@ -271,7 +357,8 @@ export default function DoctorStudents() {
           </View>
         </View>
 
-        {/* Actions row */}
+        {/* Actions row — hidden in Select mode (bulk actions replace them) */}
+        {!selectMode && (
         <View style={{ flexDirection: 'row', gap: 6, marginTop: 12 }}>
           <Pressable onPress={() => openAction(enrollment, 'profile')}
             style={{ flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 4, paddingVertical: 7, borderRadius: 10, backgroundColor: `${c.primary}12` }}>
@@ -293,7 +380,9 @@ export default function DoctorStudents() {
             <Trash2 size={13} color="#DC2626" />
           </Pressable>
         </View>
+        )}
       </NeuCard>
+      </Pressable>
     );
   };
 
@@ -434,6 +523,100 @@ export default function DoctorStudents() {
               </NeuCard>
             </Pressable>
           </View>
+
+          {/* Select mode toggle — compact, native to the row above */}
+          {!selectMode ? (
+            <Pressable
+              onPress={() => setSelectMode(true)}
+              accessibilityRole="button"
+              accessibilityLabel="Select students for bulk actions"
+              style={{ alignSelf: 'flex-start', flexDirection: 'row', alignItems: 'center', gap: 6,
+                paddingHorizontal: 12, paddingVertical: 7, borderRadius: 10,
+                backgroundColor: `${c.primary}12`, marginBottom: 12 }}>
+              <ListChecks size={14} color={c.primary} />
+              <Text style={{ fontSize: 12.5, fontWeight: '700', color: c.primary }}>Select</Text>
+            </Pressable>
+          ) : (
+            /* Selection action bar — appears only when at least one is selected */
+            <View style={{ marginBottom: 12, gap: 10 }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                <Pressable
+                  onPress={selectAllVisible}
+                  accessibilityRole="button"
+                  accessibilityLabel="Select all visible students"
+                  style={{ flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 10, paddingVertical: 7,
+                    borderRadius: 10, backgroundColor: `${c.primary}12` }}>
+                  <CheckCircle size={13} color={c.primary} />
+                  <Text style={{ fontSize: 12, fontWeight: '700', color: c.primary }}>All visible</Text>
+                </Pressable>
+                <Pressable
+                  onPress={() => setSelected(new Set())}
+                  accessibilityRole="button"
+                  accessibilityLabel="Clear selection"
+                  style={{ paddingHorizontal: 10, paddingVertical: 7, borderRadius: 10, backgroundColor: `${c.text}0d` }}>
+                  <Text style={{ fontSize: 12, fontWeight: '700', color: c.text, opacity: 0.6 }}>Clear</Text>
+                </Pressable>
+                <Text style={{ fontSize: 12.5, fontWeight: '700', color: c.text, flex: 1, textAlign: 'right' }}>
+                  {selected.size} selected
+                </Text>
+                <Pressable
+                  onPress={exitSelectMode}
+                  accessibilityRole="button"
+                  accessibilityLabel="Exit select mode"
+                  style={{ paddingHorizontal: 10, paddingVertical: 7, borderRadius: 10, backgroundColor: `${c.text}0d` }}>
+                  <X size={14} color={c.text} opacity={0.6} />
+                </Pressable>
+              </View>
+              {/* Bulk Actions — only when ≥1 selected. Options mirror the
+                  individual-card authorization (Suspend for active rows,
+                  Resume for suspended rows, Remove always offered individually). */}
+              {selected.size > 0 && (
+                <View>
+                  <Pressable
+                    onPress={() => setBulkMenu(v => !v)}
+                    accessibilityRole="button"
+                    accessibilityLabel="Open bulk actions"
+                    style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
+                      paddingVertical: 12, borderRadius: 12, backgroundColor: c.primary }}>
+                    <ListChecks size={16} color="#fff" />
+                    <Text style={{ fontSize: 14, fontWeight: '800', color: '#fff' }}>
+                      Bulk Actions ({selected.size})
+                    </Text>
+                  </Pressable>
+                  {bulkMenu && (
+                    <View style={{ gap: 8, marginTop: 8 }}>
+                      {selectedActiveCount > 0 && (
+                        <Pressable onPress={() => setBulkConfirm('suspend')}
+                          style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 11, paddingHorizontal: 14,
+                            borderRadius: 12, backgroundColor: '#D9770618' }}>
+                          <Ban size={15} color="#D97706" />
+                          <Text style={{ fontSize: 13, fontWeight: '700', color: '#D97706' }}>
+                            Suspend{selectedActiveCount < selected.size ? ` (${selectedActiveCount} active)` : ''}
+                          </Text>
+                        </Pressable>
+                      )}
+                      {selectedSuspendedCount > 0 && (
+                        <Pressable onPress={() => setBulkConfirm('resume')}
+                          style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 11, paddingHorizontal: 14,
+                            borderRadius: 12, backgroundColor: '#16A34A18' }}>
+                          <Play size={15} color="#16A34A" />
+                          <Text style={{ fontSize: 13, fontWeight: '700', color: '#16A34A' }}>
+                            Resume{selectedSuspendedCount < selected.size ? ` (${selectedSuspendedCount} suspended)` : ''}
+                          </Text>
+                        </Pressable>
+                      )}
+                      <Pressable onPress={() => setBulkConfirm('remove')}
+                        style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 11, paddingHorizontal: 14,
+                          borderRadius: 12, backgroundColor: '#DC262618' }}>
+                        <Trash2 size={15} color="#DC2626" />
+                        <Text style={{ fontSize: 13, fontWeight: '700', color: '#DC2626' }}>Remove from course</Text>
+                      </Pressable>
+                    </View>
+                  )}
+                </View>
+              )}
+            </View>
+          )}
 
           {/* Search bar */}
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 16,
@@ -728,6 +911,72 @@ export default function DoctorStudents() {
             </View>
           );
         })()}
+      </ResponsiveModal>
+
+      {/* ── Bulk confirmation modal — destructive actions never single-tap ──── */}
+      <ResponsiveModal
+        visible={bulkConfirm !== null && bulkResult === null}
+        onClose={() => setBulkConfirm(null)}
+        title={bulkConfirm === 'suspend' ? 'Suspend students' : bulkConfirm === 'resume' ? 'Resume students' : 'Remove students'}
+      >
+        {bulkConfirm !== null && (
+          <View style={{ gap: 16 }}>
+            <Text style={{ fontSize: 14, color: c.text, opacity: 0.7, textAlign: 'center' }}>
+              {bulkConfirm === 'suspend'
+                ? `This will suspend the selected students. (${selectedActiveCount} of ${selected.size} selected are active)`
+                : bulkConfirm === 'resume'
+                ? `This will resume the selected students. (${selectedSuspendedCount} of ${selected.size} selected are suspended)`
+                : `This will permanently remove ${selected.size} selected enrollment${selected.size === 1 ? '' : 's'} from their courses and adjust earnings. This action cannot be easily undone.`}
+            </Text>
+            <View style={{ gap: 8 }}>
+              <NeuButton
+                label={bulkExecuting ? 'Processing…' : bulkConfirm === 'suspend' ? `Suspend ${selectedActiveCount || selected.size}` : bulkConfirm === 'resume' ? `Resume ${selectedSuspendedCount || selected.size}` : `Remove ${selected.size}`}
+                onPress={() => void executeBulk(bulkConfirm)}
+                loading={bulkExecuting}
+                disabled={bulkExecuting}
+                style={{ backgroundColor: bulkConfirm === 'remove' ? '#DC2626' : bulkConfirm === 'suspend' ? '#D97706' : '#16A34A' }}
+              />
+              <Pressable onPress={() => setBulkConfirm(null)} disabled={bulkExecuting}
+                style={{ paddingVertical: 10, alignItems: 'center' }}>
+                <Text style={{ fontSize: 13, fontWeight: '600', color: c.text, opacity: 0.55 }}>Cancel</Text>
+              </Pressable>
+            </View>
+          </View>
+        )}
+      </ResponsiveModal>
+
+      {/* ── Bulk result modal — accurate per-row outcome, never a false total ── */}
+      <ResponsiveModal
+        visible={bulkResult !== null}
+        onClose={() => { setBulkResult(null); setBulkConfirm(null); }}
+        title="Bulk action result"
+      >
+        {bulkResult && (
+          <View style={{ gap: 14 }}>
+            <Text style={{ fontSize: 15, fontWeight: '700', color: c.text, textAlign: 'center' }}>
+              {bulkResult.succeeded} succeeded
+              {bulkResult.failed > 0 ? `, ${bulkResult.failed} failed` : ''}
+              {bulkResult.skipped > 0 ? `, ${bulkResult.skipped} skipped` : ''}
+            </Text>
+            {bulkResult.failed > 0 && (
+              <View style={{ gap: 6 }}>
+                {bulkResult.results.filter(r => r.status === 'failed').map(r => {
+                  const enrollment = enrollments.find(e => e.id === r.id);
+                  const name = enrollment?.student?.full_name ?? r.id.slice(0, 8);
+                  return (
+                    <View key={r.id} style={{ flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: `${c.text}08` }}>
+                      <Text style={{ fontSize: 13, color: c.text }} numberOfLines={1}>{name}</Text>
+                      <Text style={{ fontSize: 12, color: '#DC2626', fontWeight: '600' }}>
+                        {r.reason === 'not_authorized' ? 'Not authorized' : r.reason === 'not_found' ? 'Not found' : 'Failed'}
+                      </Text>
+                    </View>
+                  );
+                })}
+              </View>
+            )}
+            <NeuButton label="Done" onPress={() => { setBulkResult(null); setBulkConfirm(null); }} />
+          </View>
+        )}
       </ResponsiveModal>
     </View>
   );

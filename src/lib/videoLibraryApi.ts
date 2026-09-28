@@ -37,7 +37,10 @@ export interface VideoLibrarySyncSummary {
   remote_videos: number;
   remote_pages?: number;
   missing_remote: number;
-  marked_unavailable: number;
+  /** Actual local video records removed during this sync (new contract). */
+  removed?: number;
+  /** @deprecated pre-removal contract; equals `removed` on newer backends. */
+  marked_unavailable?: number;
   duplicates: number;
   reconciled: number;
   unknown_verification?: number;
@@ -87,9 +90,15 @@ export async function getMyVideoLibrary(
   if (error) throw error;
   if (!data) return [];
 
+  // Defensive filter: the sync now REMOVES locally any video confirmed
+  // deleted on VdoCipher (no user-facing remotely-deleted state exists).
+  // Any legacy 'remotely_deleted' row that somehow predates that change is
+  // hidden from the library rather than rendered with a warning card.
+  const active = (data as VideoAsset[]).filter((a) => a.status !== 'remotely_deleted');
+
   // Attach lesson_count via a separate aggregation query
-  const assetIds = data.map((a: { id: string }) => a.id);
-  if (assetIds.length === 0) return data as VideoAsset[];
+  const assetIds = active.map((a: { id: string }) => a.id);
+  if (assetIds.length === 0) return active;
 
   const { data: counts } = await backendClient
     .from('lessons')
@@ -111,7 +120,7 @@ export async function getMyVideoLibrary(
     }
   }
 
-  return (data as VideoAsset[]).map((a) => ({
+  return active.map((a) => ({
     ...a,
     lesson_count: countMap[a.id] ?? 0,
     course_count: courseCountMap[a.id] ?? 0,
@@ -266,16 +275,22 @@ export async function deleteVideoAsset(assetId: string): Promise<DeleteAssetResu
   return (data ?? { deleted: false }) as DeleteAssetResult;
 }
 
-// ── VdoCipher ↔ Video Library reconciliation (Super Admin) ─────────────────
+// ── VdoCipher ↔ Video Library reconciliation ───────────────────────────────
 // POST /video/sync-library: verifies every VdoCipher-backed asset still exists
 // remotely (paginated official listing API), marks proven-missing assets
 // remotely_deleted, detects/consolidates duplicates by VdoCipher video ID.
 // A remote listing failure never marks anything deleted (error-safe).
+//
+// scope: 'all' (admins — whole platform) | 'mine' (doctors — their own
+// library; the server clamps the scope for non-admin callers regardless of
+// what is sent here, so this parameter is a request, never a privilege).
 export async function syncVideoLibraryWithVdoCipher(
   repairDuplicates = true,
+  scope: 'all' | 'mine' = 'all',
 ): Promise<VideoLibrarySyncSummary> {
   const { data, error } = await backendClient.rpc('sync_vdocipher_library', {
     repair_duplicates: repairDuplicates,
+    ...(scope === 'mine' ? { scope } : {}),
   });
   if (error) throw error;
   return (data ?? { status: 'error', error: 'No response' }) as VideoLibrarySyncSummary;

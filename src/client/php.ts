@@ -911,6 +911,7 @@ const EDGE_FUNCTION_MAP: Record<string, string> = {
   'security-evidence-verify':    '/security/evidence',
   'security-evidence-revoke':    '/security/device-keys/{id}/revoke',
   'student-operations':     '/student-operations',
+  'student-bulk-action':    '/students/bulk-action',
   'system-health':          '/system-health',
   'system-diagnostics':     '/admin/system/diagnostics',
   'system-diagnostics-one': '/admin/system/diagnostics/{id}',
@@ -1190,7 +1191,6 @@ const GET_RPCS = new Set([
   'get_user_activity',
   'get_user_profile_summary',
   'get_video_asset_usage',
-  'sync_vdocipher_library',
   'search_audit_logs',
 ]);
 

@@ -257,7 +257,17 @@ class DataController
         }
 
         // ---- Main query (plain columns + many-to-one joins) ----
-        [$mainCols, $joins] = $this->buildMainSelect($table, $parsed);
+        [$mainCols, $joins] = $this->buildMainSelect(
+            $table,
+            $parsed,
+            // COURSE VISIBILITY ENFORCEMENT (server-side): a student's embedded
+            // courses (e.g. enrollments → course in My Courses) must resolve to
+            // NULL unless the course is published. The JOIN condition itself is
+            // scoped, so an unpublished course can never leak through an embed
+            // even though the enrollment row remains (unpublish ≠ unenroll).
+            // Staff roles embed courses unrestricted (course management).
+            (($request->user['role'] ?? '') === 'student')
+        );
         [$where, $bindings] = $this->buildWhere($table, $params, $request, $userId);
 
         // ── Internal id injection ─────────────────────────────────────────
@@ -330,7 +340,7 @@ class DataController
         $prevKeyCol = null;
         foreach ($oneToMany as $i => $rel) {
             if (empty($parentIds)) break;
-            $childRows = $this->fetchChildren($db, $rel, $parentIds);
+            $childRows = $this->fetchChildren($db, $rel, $parentIds, (string) ($request->user['role'] ?? ''));
             $keyed = [];
             foreach ($childRows as $child) {
                 $pid = $child[$rel['fkCol']] ?? null;
@@ -1124,7 +1134,14 @@ class DataController
      * Build main SELECT projection + many-to-one JOINs.
      * @return array{0: string, 1: string[]} [projectionSql, joins[]]
      */
-    private function buildMainSelect(string $table, array $parsed): array
+    /**
+     * Build the main SELECT projection + many-to-one JOINs.
+     *
+     * $hideUnpublishedCourses (students only): every many-to-one embed of
+     * `courses` gains `AND alias.status = 'published'` in its JOIN condition,
+     * so an unpublished course arrives as NULL instead of leaking its columns.
+     */
+    private function buildMainSelect(string $table, array $parsed, bool $hideUnpublishedCourses = false): array
     {
         $joins = [];
         $projections = [];
@@ -1145,7 +1162,13 @@ class DataController
         foreach ($parsed['manyToOne'] as $rel) {
             $alias = "__r{$i}";
             $this->assertAllowed($rel['table'], 'read');
-            $joins[] = "LEFT JOIN `{$rel['table']}` AS `{$alias}` ON `{$alias}`.`id` = `{$table}`.`{$rel['fkCol']}`";
+            $joinCond = "`{$alias}`.`id` = `{$table}`.`{$rel['fkCol']}`";
+            if ($hideUnpublishedCourses && $rel['table'] === 'courses') {
+                // Student embeds only ever resolve PUBLISHED courses (string
+                // literal, not a bound parameter — mirrors the ownerScope style).
+                $joinCond .= " AND `{$alias}`.`status` = 'published'";
+            }
+            $joins[] = "LEFT JOIN `{$rel['table']}` AS `{$alias}` ON {$joinCond}";
             foreach ($rel['cols'] as $col) {
                 $projections[] = "`{$alias}`.`{$col}` AS `{$alias}__{$col}`";
             }
@@ -1184,13 +1207,20 @@ class DataController
     }
 
     /** Fetch child rows for a one-to-many rel, ordered by order_index + created_at if available. */
-    private function fetchChildren(Database $db, array $rel, array $parentIds): array
+    private function fetchChildren(Database $db, array $rel, array $parentIds, string $viewerRole = ''): array
     {
         if ($parentIds === []) return [];
         $this->assertAllowed($rel['table'], 'read');
         $placeholders = implode(',', array_fill(0, count($parentIds), '?'));
         $cols = implode(', ', array_map(static fn($c) => "`{$c}`", $rel['cols']));
         $sql = "SELECT {$cols} FROM `{$rel['table']}` WHERE `{$rel['fkCol']}` IN ({$placeholders})";
+        // Defense-in-depth (mirrors the direct-GET ownerScope contract):
+        // a student's embedded lesson tree (course → sections → lessons in
+        // getCourseById) only ever resolves PUBLISHED lessons, regardless of
+        // the caller's select shape.
+        if ($rel['table'] === 'lessons' && $viewerRole === 'student') {
+            $sql .= " AND `{$rel['table']}`.`status` = 'published'";
+        }
         if (in_array('order_index', $rel['cols'], true)) {
             $orderBy = " ORDER BY `order_index` ASC";
             // Only add created_at if the table has that column

@@ -564,7 +564,17 @@ export default function LessonPlayer() {
     <>
         {/* ── Video Player — provider-routed (VdoCipher or YouTube) ── */}
         {!blocksVideo && (lesson.video_type === 'vdocipher' || lesson.video_type === 'youtube') && (
-          <NeuCard style={{ padding: 0 }}>
+          /* FULLSCREEN EXPANSION TARGET — this card is the player's direct
+             parent, so IT receives the absolute-fill style when fullscreen
+             (style-only: same card, same player instance, no remount).
+             Yoga positions absolute children against the DIRECT parent, so
+             expanding the adapter alone would only fill this card — that
+             parent/child mismatch was the split-screen bug. */
+          <NeuCard
+            style={isFullscreen
+              ? { padding: 0, position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 100, backgroundColor: '#000', borderRadius: 0 }
+              : { padding: 0 }}
+          >
             {playerVisible ? (
               // ── Inline player — replaces thumbnail once Play is tapped ─────
               <VideoPlayer
@@ -655,9 +665,20 @@ export default function LessonPlayer() {
                     if (phase === 'completed') {
                       return (
                         <Pressable
-                          onPress={() => router.push(dlEntry?.meta.courseId
-                            ? { pathname: '/offline-course', params: { courseId: dlEntry.meta.courseId } }
-                            : '/offline-library')}
+                          onPress={() => {
+                            // 6120 ROOT-CAUSE GUARD: the online VdoCipher player
+                            // is still mounted behind this navigation. VdoCipher
+                            // documents error 6120 (renderer error) as much more
+                            // common with >1 VdoPlayer instance — mounting the
+                            // offline player while this one holds its decoder
+                            // surface is exactly that scenario. Tear the online
+                            // player down FIRST so exactly ONE VdoPlayer exists
+                            // for the offline playback session.
+                            setPlayerVisible(false);
+                            router.push(dlEntry?.meta.courseId
+                              ? { pathname: '/offline-course', params: { courseId: dlEntry.meta.courseId } }
+                              : '/offline-library');
+                          }}
                           accessibilityRole="button"
                           accessibilityLabel="Watch offline"
                           style={pill('#22C55E1F')}
@@ -848,10 +869,23 @@ export default function LessonPlayer() {
       </PortalOverlay>
       {isPinnedPlayer ? (
         <>
-          {headerBlock}
+          {/* FULLSCREEN (in-place, ONE player instance): the player's own
+              container expands to absolute-fill of this screen root — it
+              simply COVERS the header/content below (they stay mounted so
+              the player is never remounted and playback position is kept).
+              Hiding the header here is style-only; nothing is unmounted. */}
+          {!isFullscreen && headerBlock}
           {playerSection}
-          <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: safeBottom(layout.insets.bottom) }}>
-            <View style={{ padding: layout.screenPx, gap: 16 }}>
+          <ScrollView
+            style={isFullscreen
+              ? { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 100, backgroundColor: '#000' }
+              : { flex: 1 }}
+            contentContainerStyle={isFullscreen
+              ? { flex: 1 }
+              : { paddingBottom: safeBottom(layout.insets.bottom) }}
+            scrollEnabled={!isFullscreen}
+          >
+            <View style={isFullscreen ? { flex: 1 } : { padding: layout.screenPx, gap: 16 }}>
 
         {/* Lesson meta — BUG#1: status badge hidden from students */}
         <NeuCard>
@@ -1088,9 +1122,17 @@ export default function LessonPlayer() {
           </ScrollView>
         </>
       ) : (
-        <ScrollView style={{ flex: 1, backgroundColor: c.base }} contentContainerStyle={{ paddingBottom: safeBottom(layout.insets.bottom) }}>
-          {headerBlock}
-          <View style={{ padding: layout.screenPx, gap: 16 }}>
+        <ScrollView
+          style={isFullscreen
+            ? { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 100, backgroundColor: '#000' }
+            : { flex: 1, backgroundColor: c.base }}
+          contentContainerStyle={isFullscreen
+            ? { flex: 1 }
+            : { paddingBottom: safeBottom(layout.insets.bottom) }}
+          scrollEnabled={!isFullscreen}
+        >
+          {!isFullscreen && headerBlock}
+          <View style={isFullscreen ? { flex: 1 } : { padding: layout.screenPx, gap: 16 }}>
 
         {/* Lesson meta — BUG#1: status badge hidden from students */}
         <NeuCard>

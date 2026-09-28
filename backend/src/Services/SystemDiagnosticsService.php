@@ -166,9 +166,12 @@ final class SystemDiagnosticsService
         }
 
         $started = microtime(true);
-        // Safe authenticated probe: list videos with pageSize=1. Proves DNS,
+        // Safe authenticated probe: list videos (page 1, size 1). Proves DNS,
         // TLS, connectivity, authentication AND response shape in one call.
-        [$status, $body, $curlErr, $curlErrNo] = $this->http($apiBase . '/videos?pageSize=1', [
+        // Shape note (verified live 2026-09): the listing returns
+        // { "rows": [...], "count": N } — older API versions returned
+        // { "videos": [...] } or a bare array; all three are valid.
+        [$status, $body, $curlErr, $curlErrNo] = $this->http($apiBase . '/videos?page=1&limit=1', [
             'Authorization: Apisecret ' . $apiSecret,
             'Accept: application/json',
         ]);
@@ -219,7 +222,13 @@ final class SystemDiagnosticsService
         }
 
         $decoded = json_decode($body, true);
-        if (!is_array($decoded) || !array_key_exists('videos', $decoded)) {
+        // Accept every listing shape VdoCipher has used: {rows,count} (current),
+        // {videos,...} (legacy), or a bare array. Non-JSON bodies (HTML/error
+        // pages, redirects) fail json_decode and land here as invalid.
+        $isListShape = is_array($decoded)
+            && (isset($decoded['rows']) || isset($decoded['videos'])
+                || ($decoded !== [] && array_keys($decoded) === range(0, count($decoded) - 1)));
+        if (!$isListShape) {
             return $this->result('vdocipher', 'VdoCipher', 'Video / DRM', self::STATUS_WARNING, [
                 'checks'   => ['configuration' => 'passed', 'connectivity' => 'passed', 'authentication' => 'passed', 'api' => 'failed'],
                 'message'  => 'VdoCipher responded with an unexpected payload shape.',

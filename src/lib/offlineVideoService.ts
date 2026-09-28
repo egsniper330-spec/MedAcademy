@@ -57,6 +57,7 @@ import { Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import VdoDownload from 'vdocipher-rn-bridge/downloads';
 import type { DownloadStatus, Track } from 'vdocipher-rn-bridge/type';
+import * as FileSystem from 'expo-file-system/legacy';
 import { getOfflineDownloadToken } from './api';
 import { describeProviderError } from './videoProviderPolicy';
 
@@ -81,6 +82,11 @@ export interface OfflineVideoMeta {
   courseName: string | null;
   /** MedAcademy course image (same image the online course uses) */
   courseImageUrl: string | null;
+  /** Offline-safe copy of the course image cached on-device at download
+   *  time (native only). Rendered BEFORE courseImageUrl so the circular
+   *  course thumbnail still works with zero connectivity. Optional so
+   *  metadata persisted by earlier builds hydrates unchanged. */
+  courseImageUrlLocal?: string | null;
   /** MedAcademy chapter/section title persisted at authorize time */
   sectionTitle: string | null;
   /** MedAcademy lesson video thumbnail (postercard) captured at authorize time */
@@ -188,6 +194,11 @@ export interface OfflineCourseGroup {
   courseName: string;
   /** MedAcademy course image (the online course's own image when known) */
   courseImageUrl: string | null;
+  /** Best course image to render: on-device cached copy first (works
+   *  offline), then the remote URL, then a lesson thumbnail. Screens still
+   *  fall back to initials via the Image onError handler (a URL can be
+   *  broken server-side — e.g. legacy rows whose file no longer exists). */
+  courseImage: string | null;
   lessons: OfflineVideoEntry[];
   completedCount: number;
   activeCount: number;
@@ -205,7 +216,14 @@ export interface OfflineCourseGroup {
 export function exportOfflineCourseGroups(entries: OfflineVideoEntry[]): OfflineCourseGroup[] {
   const byCourse = new Map<string, OfflineVideoEntry[]>();
   for (const e of entries) {
-    const key = e.meta.courseId || '__nocourse__';
+    // courseId is persisted at authorize time. LEGACY rows downloaded before
+    // that metadata existed carry courseId=null; grouping them under one key
+    // VISUALLY MERGED distinct courses into a single card (the reported bug).
+    // They are still separable by the persisted courseName — use it as the
+    // fallback key so legacy downloads of different courses render as their
+    // own independent cards. Entries with neither remain in a shared bucket.
+    const key = e.meta.courseId
+      || (e.meta.courseName?.trim() ? `name:${e.meta.courseName.trim()}` : '__nocourse__');
     const list = byCourse.get(key);
     if (list) list.push(e);
     else byCourse.set(key, [e]);
@@ -222,10 +240,20 @@ export function exportOfflineCourseGroups(entries: OfflineVideoEntry[]): Offline
     const failedCount = ordered.filter((e) => e.phase === 'failed').length;
     const activeCount = ordered.filter((e) => e.phase === 'downloading' || e.phase === 'pending' || e.phase === 'authorizing').length;
     const progressSum = ordered.reduce((acc, e) => acc + (e.phase === 'completed' ? 100 : Math.max(0, Math.min(100, e.progress))), 0);
+    // Course image resolution order (offline-first):
+    //   1. on-device cached copy (works with zero connectivity)
+    //   2. the remote MedAcademy course image (works online)
+    //   3. a lesson thumbnail (secondary)
+    //   null → the screens render their initials fallback.
+    const courseImage = ordered.find((e) => !!e.meta.courseImageUrlLocal)?.meta.courseImageUrlLocal
+      ?? ordered.find((e) => !!e.meta.courseImageUrl)?.meta.courseImageUrl
+      ?? ordered.find((e) => !!e.meta.lessonThumbnailUrl)?.meta.lessonThumbnailUrl
+      ?? null;
     groups.push({
       courseId,
       courseName: ordered.find((e) => !!e.meta.courseName)?.meta.courseName ?? 'My Downloads',
       courseImageUrl: ordered.find((e) => !!e.meta.courseImageUrl)?.meta.courseImageUrl ?? null,
+      courseImage,
       lessons: ordered,
       completedCount,
       activeCount,
@@ -468,6 +496,36 @@ export type StartDownloadResult =
   | { ok: false; error: string; kind: 'auth' | 'options' | 'enqueue' };
 
 /**
+ * Offline-safe course-image cache (native only).
+ *
+ * The course thumbnail is a REMOTE MedAcademy storage URL. Without caching,
+ * the Offline Library's circular course image renders blank the moment the
+ * device is offline (RN `<Image>` cannot fetch it) — plus legacy rows whose
+ * server file no longer exists 404 even online. At download time we copy the
+ * image into the app's document directory (a stable on-device file:// URI)
+ * and persist that path alongside the metadata. Rendering order becomes:
+ * cached local file → remote URL → initials fallback. Best-effort by design:
+ * a failed cache write NEVER blocks or fails the download itself, and web
+ * (no documentDirectory) keeps using the remote URL.
+ */
+async function cacheCourseImage(
+  url: string | null | undefined,
+  mediaId: string,
+): Promise<string | null> {
+  if (!url || Platform.OS === 'web') return null;
+  try {
+    const dir = `${FileSystem.documentDirectory ?? ''}course-images`.replace(/\/$/, '');
+    await FileSystem.makeDirectoryAsync(dir, { intermediates: true }).catch(() => {});
+    const ext = /\.png(?:$|\?)/i.test(url) ? 'png' : /\.webp(?:$|\?)/i.test(url) ? 'webp' : 'jpg';
+    const dest = `${dir}/${mediaId}.${ext}`;
+    const res = await FileSystem.downloadAsync(url, dest);
+    return res?.status === 200 && res.uri ? res.uri : null;
+  } catch {
+    return null; // offline/URL-dead/cache-full → remote URL + initials fallback still apply
+  }
+}
+
+/**
  * Full offline download flow for ONE lesson video:
  *   backend authorize → official getDownloadOptions → enqueue → live events.
  * Official VdoCipher API only; no custom download/encryption anywhere.
@@ -530,7 +588,11 @@ export async function startOfflineDownload(p: StartDownloadParams): Promise<Star
     return { ok: false, error: err?.msg || err?.exception || 'Could not start the download.', kind: 'enqueue' };
   }
 
-  // 4) Persist metadata + install official event listeners
+  // 4) Persist metadata + install official event listeners.
+  //    Cache the course image on-device FIRST (best-effort) so the Offline
+  //    Library's circular thumbnail works offline and survives server-side
+  //    file cleanup. Never blocks the download on failure.
+  const courseImageUrlLocal = await cacheCourseImage(p.courseImageUrl ?? null, mediaId);
   applyEntry({
     meta: {
       mediaId,
@@ -538,6 +600,7 @@ export async function startOfflineDownload(p: StartDownloadParams): Promise<Star
       courseId: p.courseId,
       courseName: p.courseName,
       courseImageUrl: p.courseImageUrl ?? null,
+      courseImageUrlLocal,
       sectionTitle: p.sectionTitle ?? null,
       title: p.title,
       lessonTitle: p.lessonTitle ?? p.title,

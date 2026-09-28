@@ -27,19 +27,24 @@
  * teardown, no duplicate DRM session, and audio/video can never
  * desynchronize across rotation.
  *
- * Orientation is locked LANDSCAPE while fullscreen, PORTRAIT_UP otherwise —
- * synchronized in one useEffect keyed on isFullscreen. app.json keeps the
- * app portrait at all other times.
+ * Orientation: ANDROID locks LANDSCAPE while fullscreen, PORTRAIT_UP
+ * otherwise (one useEffect keyed on isFullscreen). iOS is NEVER locked —
+ * the device orientation is left exactly as the user holds it and the
+ * system Rotation Lock is always respected; only the layout adapts.
  *
  * ── Fullscreen entry per platform ───────────────────────────────────────────
  * • Android: the SDK's native control bar provides the fullscreen button;
  *   tapping it fires onEnterFullscreen → we expand the same instance.
  *   The SDK's exit control fires onExitFullscreen → we collapse.
- * • iOS: the SDK does NOT surface a fullscreen control in the native bridge
- *   (verified on device — no button renders), so an APP-LEVEL expand button
- *   (top-right, ≥44 pt) is rendered over the player. It runs the same
- *   security gate and expands the same instance. A back-arrow control
- *   (both platforms, in fullscreen) and Android hardware back collapse it.
+ * • iOS (fixed): the SDK control bar DOES render a fullscreen button since
+ *   bridge 2.9.4 (didTapEnterFullScreen → onEnterFullscreen). It is the ONE
+ *   enter control and is mapped into the app's single fullscreen state —
+ *   the app-level duplicate button was REMOVED (two competing fullscreen
+ *   systems produced the duplicated buttons and the split-screen UI).
+ *   Fullscreen NEVER changes the device orientation on iOS: Portrait stays
+ *   Portrait, Landscape stays Landscape, Rotation Lock is never bypassed.
+ * Exit: the SDK's exit control and the safe-area-aware back arrow both call
+ *   the same exitFullscreen(); Android hardware back collapses it.
  *
  * ── Security ────────────────────────────────────────────────────────────────
  * Fullscreen entry re-validates the authoritative SecurityContext verdict
@@ -56,7 +61,8 @@
 import { useRef, useState, useCallback, useEffect, useMemo } from 'react';
 import { BackHandler, Platform, Pressable, StatusBar, Text, View, ActivityIndicator, useColorScheme } from 'react-native';
 import * as ScreenOrientation from 'expo-screen-orientation';
-import { ArrowLeft, Maximize2 } from 'lucide-react-native';
+import { ArrowLeft } from 'lucide-react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { VdoPlayerView } from 'vdocipher-rn-bridge';
 import { getVideoPlaybackToken } from '@/lib/api';
 import { neuColors } from '@/lib/neu';
@@ -116,6 +122,7 @@ export function VdoCipherPlayerNativeAdapter({
 }: VdoCipherPlayerProps) {
   const isDark = useColorScheme() === 'dark';
   const c = isDark ? neuColors.dark : neuColors.light;
+  const insets = useSafeAreaInsets();
 
   // WATERMARK IDENTITY — the ONE authoritative resolver (shared with offline).
   // Public MED-#### id only; a UUID in the id slot is dirty data and renders
@@ -147,8 +154,17 @@ export function VdoCipherPlayerNativeAdapter({
     onFullscreen?.(isFullscreen);
   }, [isFullscreen, onFullscreen]);
 
-  // ── Orientation lock — landscape in fullscreen, portrait otherwise ────────
+  // ── Orientation — Android-only locks; iOS is NEVER locked ─────────────────
+  // iOS (the bug fixed here): NO orientation API is touched at all. Entering
+  // fullscreen keeps whatever orientation the user is currently in (Portrait
+  // stays Portrait, Landscape stays Landscape), the system Rotation Lock is
+  // never overridden, and the app's supported orientations (app.json) govern.
+  // The absolute-fill container simply re-measures to the window it gets.
+  // Android: landscape while fullscreen, portrait otherwise (unchanged — the
+  // in-place expansion + manifest configChanges keep the ONE player instance
+  // alive through rotation; this is the 6120-safe path).
   useEffect(() => {
+    if (Platform.OS !== 'android') return;
     if (isFullscreen) {
       ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE).catch(() => {});
     } else {
@@ -268,8 +284,10 @@ export function VdoCipherPlayerNativeAdapter({
     setIsFullscreen(false);
   }, []);
 
-  // SDK fullscreen events (Android native controls; no-ops on iOS where the
-  // SDK renders no fullscreen button — our app-level control drives entry).
+  // SDK fullscreen events — THE single fullscreen control on both platforms.
+  // The SDK control-bar button (Android always; iOS since bridge 2.9.4) fires
+  // these; both are mapped into the ONE isFullscreen state. Entry re-runs the
+  // security gate; there is no second, app-level enter control.
   const handleSdkEnterFullscreen = useCallback(() => {
     void enterFullscreen();
   }, [enterFullscreen]);
@@ -356,42 +374,27 @@ export function VdoCipherPlayerNativeAdapter({
         />
       )}
 
-      {/* iOS app-level ENTER-fullscreen control — the SDK's native bridge
-          renders no fullscreen button on iOS (device-verified), so the app
-          provides one over the same player instance. Android relies on the
-          SDK's control-bar button. ≥44 pt touch target. */}
-      {!isFullscreen && Platform.OS === 'ios' && (
-        <Pressable
-          onPress={() => void enterFullscreen()}
-          style={{
-            position: 'absolute',
-            top: 10,
-            right: 10,
-            width: 44,
-            height: 44,
-            borderRadius: 22,
-            backgroundColor: 'rgba(0,0,0,0.45)',
-            alignItems: 'center',
-            justifyContent: 'center',
-            zIndex: 20,
-          }}
-          accessibilityLabel="Enter fullscreen"
-          accessibilityRole="button"
-          hitSlop={{ top: 8, right: 8, bottom: 8, left: 8 }}
-        >
-          <Maximize2 size={20} color="#fff" />
-        </Pressable>
-      )}
+      {/* SINGLE FULLSCREEN CONTROL — the SDK's own control-bar fullscreen
+          button (iOS ≥ bridge 2.9.4 renders one via didTapEnterFullScreen;
+          Android always did). It fires onEnterFullscreen above, which is
+          mapped into the ONE app fullscreen state. No app-level duplicate
+          enter button is rendered: the previous app-level expand control
+          created a SECOND fullscreen system on iOS (two opposite buttons,
+          and its expansion raced the native presentation → split UI).
+          Exit paths: the SDK's exit control AND the back arrow below — both
+          call the same exitFullscreen(). */}
 
-      {/* EXIT-fullscreen control (both platforms) — same language as the
-          offline player's back arrow. Collapses the SAME instance back into
-          the portrait layout; playback continues uninterrupted. */}
+      {/* EXIT-fullscreen control (both platforms) — the single app-level exit
+          affordance, safe-area aware so it never sits under the Dynamic
+          Island or overlaps the status area. Collapses the SAME instance
+          back into the inline layout; playback continues uninterrupted
+          (same player, same position, no recreation). */}
       {isFullscreen && (
         <Pressable
           onPress={exitFullscreen}
           style={{
             position: 'absolute',
-            top: 12,
+            top: Math.max(12, insets.top + 8),
             left: 12,
             width: 44,
             height: 44,

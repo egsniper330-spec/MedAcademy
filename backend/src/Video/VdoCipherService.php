@@ -113,6 +113,20 @@ final class VdoCipherService
                 if (!$enrolled) {
                     throw new ApiException(403, 'Not enrolled in this course');
                 }
+                // COURSE VISIBILITY GATE: enrollment alone is not access. If the
+                // parent course is not currently published, a student must not
+                // receive NEW playback/download authorization even with an
+                // active enrollment (unpublish hides the course; the enrollment
+                // row is preserved for when it returns). Staff bypass: doctors/
+                // admins keep managing their (unpublished) content.
+                $courseStatus = $db->value(
+                    'SELECT status FROM courses WHERE id = ?',
+                    [$lesson['course_id']],
+                    ''
+                );
+                if ($courseStatus !== 'published') {
+                    throw new ApiException(403, 'This course is not available');
+                }
             }
         }
 
@@ -222,6 +236,17 @@ final class VdoCipherService
                 );
                 if (!$enrolled) {
                     throw new ApiException(403, 'Not enrolled in this course');
+                }
+                // COURSE VISIBILITY GATE (offline twin): identical rule to
+                // otp() — an enrollment row alone is not access while the
+                // parent course is unpublished. No NEW download authorization.
+                $courseStatus = $db->value(
+                    'SELECT status FROM courses WHERE id = ?',
+                    [$lesson['course_id']],
+                    ''
+                );
+                if ($courseStatus !== 'published') {
+                    throw new ApiException(403, 'This course is not available');
                 }
             }
         }
@@ -615,10 +640,19 @@ final class VdoCipherService
             if (!is_array($body)) {
                 return ['status' => 'error', 'http_status' => $http, 'videos' => $videos, 'total' => $total, 'pages' => $pagesFetched, 'error' => 'malformed_response'];
             }
-            // VdoCipher listing shape: { "videos": [...], "count": N, "limit": L, "page": P }
-            // (older responses may be a bare array — array_is_list() needs
-            // PHP 8.1, and this backend targets 8.0, so use keys())
-            $rows = $body['videos'] ?? (($body === [] || array_keys($body) === range(0, count($body) - 1)) ? $body : []);
+            // VdoCipher listing shape (verified live 2026-09): { "rows": [...], "count": N }.
+            // Older API versions returned { "videos": [...], "count": ... } or a
+            // bare array — all three are accepted so an API-side schema change
+            // can never make a healthy library look empty (the empty-remote
+            // bug class: sync then marks every local asset missing).
+            $rows = [];
+            if (isset($body['rows']) && is_array($body['rows'])) {
+                $rows = $body['rows'];
+            } elseif (isset($body['videos']) && is_array($body['videos'])) {
+                $rows = $body['videos'];
+            } elseif ($body !== [] && array_keys($body) === range(0, count($body) - 1)) {
+                $rows = $body; // legacy bare-array response
+            }
             if (isset($body['count']) && is_numeric($body['count'])) {
                 $total = (int) $body['count'];
             }

@@ -70,11 +70,48 @@ console.log('── Online VdoCipher adapter: ONE native player instance, in-pla
     // The mount must instead live inside a style-toggled container.
     ok(/style=\{isFullscreen\s*\?/.test(s), 'online adapter: player container style toggles inline ↔ fullscreen');
   }
-  ok(/expo-screen-orientation/.test(s), 'online adapter: orientation locking used for fullscreen');
+  ok(/expo-screen-orientation/.test(s), 'online adapter: orientation locking used for fullscreen (Android path)');
   ok(/shouldAllowFullscreen/.test(s), 'online adapter: security gate re-validated at fullscreen entry');
-  // App-level fullscreen control present (iOS had no SDK fullscreen button).
-  ok(/aria-label="Enter fullscreen"|accessibilityLabel="Enter fullscreen"/.test(s) ||
-     /Enter fullscreen/.test(s), 'online adapter: app-level Enter fullscreen control rendered');
+}
+
+console.log('── iOS fullscreen contract: ONE control, NO forced landscape, no second presentation ──');
+for (const p of [ONLINE_ADAPTER, OFFLINE_PLAYER]) {
+  const s = read(p);
+
+  // (1) Exactly ONE enter control: the SDK control-bar button (both platforms
+  // since bridge 2.9.4) via onEnterFullscreen. The app must NOT render its own
+  // duplicate enter button (the old Maximize2 overlay created a second
+  // fullscreen system → two opposite buttons + split-screen UI).
+  ok(!/Maximize2/.test(s), `${p}: no app-level duplicate enter-fullscreen button (Maximize2 removed)`);
+  ok(!/accessibilityLabel="Enter fullscreen"/.test(s), `${p}: no second "Enter fullscreen" control rendered by the app`);
+  ok(/onEnterFullscreen=\{/.test(s), `${p}: SDK fullscreen event is mapped into the app state (single control path)`);
+
+  // (2) iOS NEVER calls any orientation API — Portrait stays Portrait,
+  // Landscape stays Landscape, system Rotation Lock is never overridden.
+  // Structural pin: every lockAsync call must sit behind the Android guard.
+  const guards = (s.match(/Platform\.OS !== 'android'/g) || []).length;
+  ok(guards >= 1, `${p}: orientation locks are Android-gated (iOS never locked)`);
+  const firstLock = s.indexOf('ScreenOrientation.lockAsync');
+  const lastGuardBeforeLock = s.lastIndexOf("Platform.OS !== 'android'", firstLock);
+  ok(firstLock === -1 || (lastGuardBeforeLock !== -1 && s.indexOf('useEffect', Math.max(0, lastGuardBeforeLock - 200)) < firstLock),
+    `${p}: no lockAsync is reachable on iOS (guard precedes every lock)`);
+  ok(!/unlockAsync/.test(s), `${p}: no unlockAsync (no forced-rotation bypass)`);
+
+  // (3) ONE fullscreen state — no parallel native/modal fullscreen systems.
+  ok((s.match(/useState\(false\)/g) || []).length >= 1 && /isFullscreen/.test(s), `${p}: single isFullscreen state`);
+  ok(!/nativeFullscreen|modalFullscreen|isNativeFullscreen/.test(s), `${p}: no parallel native/modal fullscreen state`);
+
+  // (4) No native second presentation: enterFullscreenV2 must never be called
+  // (it drives the SDK's own enterFullscreen() → a second fullscreen system
+  // racing the app's in-place expansion).
+  ok(!/enterFullscreenV2/.test(s), `${p}: enterFullscreenV2 never called (no second native presentation)`);
+
+  // (5) Safe-area exit control (never under the Dynamic Island / status area).
+  ok(/insets\.top/.test(s), `${p}: fullscreen exit control offset respects safe-area insets`);
+
+  // (6) Same player through the transition (style-toggled container, no remount).
+  ok((s.match(/<VdoPlayerView/g) || []).length === 1 && !/key=\{[^}]*isFullscreen/.test(s),
+    `${p}: ONE VdoPlayerView, never remounted by fullscreen state`);
 }
 
 console.log('── Offline VdoCipher player: ONE native player instance, in-place ──');
@@ -117,6 +154,18 @@ console.log('── Lesson screen: pinned-player layout (fullscreen covers the s
   ok(playerIdx !== -1 && scrollIdx !== -1 && playerIdx < scrollIdx,
     'lesson: <VideoPlayer> is rendered outside (before) any <ScrollView>');
   ok(!/fullscreen Modal/i.test(s), 'lesson: stale "fullscreen Modal" references removed');
+
+  // SPLIT-SCREEN FIX pin: the absolute-fill style is applied at the HOST
+  // ancestor (the player's direct-parent NeuCard) — Yoga positions absolute
+  // children against their DIRECT parent, so expanding only the adapter's own
+  // container would fill just the 16:9 card (header + card + black void).
+  ok(/position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 100/.test(s),
+    'lesson: player host card receives the absolute-fill style when fullscreen (split-screen fix)');
+  // The host expansion is style-only: content stays mounted (hidden via
+  // conditional JSX is NOT allowed for the player itself — only the header
+  // row is conditionally rendered, which does not contain the player).
+  ok(/scrollEnabled=\{!isFullscreen\}/.test(s),
+    'lesson: scroll frozen while fullscreen (style-only host expansion, no remount)');
 }
 
 console.log('── Props plumbing: gate + onFullscreen forwarded through wrappers ──');

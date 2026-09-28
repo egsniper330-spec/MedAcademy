@@ -27,10 +27,14 @@
  *   surface within it. ONE player instance for the whole watch session →
  *   no remount, no seek/state restoration, no surface teardown, and audio/
  *   video can never desynchronize across rotation.
- * • Orientation is locked LANDSCAPE while fullscreen, PORTRAIT_UP otherwise
- *   (same as the online player). Exiting fullscreen (back arrow, Android
- *   back, the SDK's exit-fullscreen control) collapses back into the
- *   portrait layout with playback continuing uninterrupted.
+ * • Orientation: ANDROID locks LANDSCAPE while fullscreen, PORTRAIT_UP
+ *   otherwise. iOS is NEVER locked — fullscreen keeps whatever orientation
+ *   the user is currently in (Portrait stays Portrait, Landscape stays
+ *   Landscape), the system Rotation Lock is never overridden, and the
+ *   device is never force-rotated; only the layout adapts (the absolute-
+ *   fill container re-measures to whatever window it gets).
+ * • Exit: the SDK's exit control and the safe-area-aware back arrow both
+ *   call the same exitFullscreen(); Android hardware back collapses it.
  * • DRM ERRORS: an expired/invalid offline license surfaces a clear error
  *   (6187 → expiration UX); playback never silently retries into an online
  *   path.
@@ -45,7 +49,8 @@ import {
   ActivityIndicator, BackHandler, Platform, Pressable, StatusBar, Text, View,
 } from 'react-native';
 import * as ScreenOrientation from 'expo-screen-orientation';
-import { ArrowLeft, Maximize2 } from 'lucide-react-native';
+import { ArrowLeft } from 'lucide-react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { VdoPlayerView } from 'vdocipher-rn-bridge';
 import {
   isOfflineVideoExpired,
@@ -71,6 +76,7 @@ export function OfflineVideoPlayer({ entry, shouldAllowPlayback, watermarkId, wa
   const [error, setError] = useState<PlayerError | null>(null);
   const [ready, setReady] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const insets = useSafeAreaInsets();
 
   // ── WATERMARK IDENTITY — one authoritative resolution ─────────────────────
   // Explicit props (the screens pass the profile-derived public id) win;
@@ -102,11 +108,13 @@ export function OfflineVideoPlayer({ entry, shouldAllowPlayback, watermarkId, wa
     return () => { cancelled = true; };
   }, [shouldAllowPlayback]);
 
-  // ── Fullscreen orientation lock ────────────────────────────────────────────
-  // LANDSCAPE while fullscreen, PORTRAIT_UP otherwise. The single in-place
-  // player instance survives the rotation; the activity's configChanges
-  // (manifest) keeps the window alive and the SDK resizes its own surface.
+  // ── Orientation — Android-only locks; iOS is NEVER locked ──────────────
+  // Fullscreen must not rotate the device or bypass Rotation Lock on iOS.
+  // Android: landscape while fullscreen, portrait otherwise (unchanged —
+  // the manifest configChanges + in-place expansion keep the ONE player
+  // instance alive through rotation).
   useEffect(() => {
+    if (Platform.OS !== 'android') return;
     if (isFullscreen) {
       ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE).catch(() => {});
     } else {
@@ -279,29 +287,20 @@ export function OfflineVideoPlayer({ entry, shouldAllowPlayback, watermarkId, wa
       {identity && (
         <NativeWatermarkOverlay watermarkId={identity.id} watermarkName={identity.name ?? undefined} />
       )}
-      {/* iOS app-level ENTER-fullscreen control — the SDK's native bridge
-          renders no fullscreen button on iOS (device-verified), so the app
-          provides one over the same player instance. Android relies on the
-          SDK's control-bar button. ≥44 pt touch target. Same gate as the
-          SDK path (enterFullscreen runs the authoritative revalidation). */}
-      {!isFullscreen && !error && !gateDenied && Platform.OS === 'ios' && (
-        <Pressable
-          onPress={() => void enterFullscreen()}
-          style={{ position: 'absolute', top: 10, right: 10, width: 44, height: 44, borderRadius: 22, backgroundColor: 'rgba(0,0,0,0.45)', alignItems: 'center', justifyContent: 'center', zIndex: 20 }}
-          accessibilityLabel="Enter fullscreen"
-          accessibilityRole="button"
-          hitSlop={{ top: 8, right: 8, bottom: 8, left: 8 }}
-        >
-          <Maximize2 size={20} color="#fff" />
-        </Pressable>
-      )}
-      {/* Fullscreen back control — integrated, no ✕/Close text (same language
-          as the app's header back buttons). Collapses back to the portrait
-          layout; playback continues in the same player instance. */}
+      {/* SINGLE FULLSCREEN CONTROL — the SDK control bar's own fullscreen
+          button (Android always; iOS since bridge 2.9.4 via
+          didTapEnterFullScreen) fires onEnterFullscreen above, which maps
+          into the ONE app fullscreen state (gate re-validated at entry).
+          The former app-level expand button was a SECOND fullscreen
+          system on iOS — duplicate opposite buttons + split UI — removed. */}
+      {/* Fullscreen back control — the single app-level EXIT affordance,
+          safe-area aware so it never sits under the Dynamic Island/status
+          area. Collapses back to the inline layout; playback continues in
+          the same player instance (no recreation, position preserved). */}
       {isFullscreen && (
         <Pressable
           onPress={exitFullscreen}
-          style={{ position: 'absolute', top: 12, left: 12, width: 44, height: 44, borderRadius: 22, backgroundColor: '#00000080', alignItems: 'center', justifyContent: 'center', zIndex: 999 }}
+          style={{ position: 'absolute', top: Math.max(12, insets.top + 8), left: 12, width: 44, height: 44, borderRadius: 22, backgroundColor: '#00000080', alignItems: 'center', justifyContent: 'center', zIndex: 999 }}
           accessibilityRole="button"
           accessibilityLabel="Exit fullscreen"
           hitSlop={{ top: 8, right: 8, bottom: 8, left: 8 }}

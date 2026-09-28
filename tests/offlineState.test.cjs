@@ -248,7 +248,7 @@ console.log('── Course grouping ──');
       lessonTitle: string; courseName: string | null; lessonThumbnailUrl: string | null;
       lessonOrder: number | null; userId: string; rentalHours: number | null;
       expiresAt: string; authorizedAt: number; durationSec: number | null; posterUrl: string | null;
-      courseImageUrl: string | null; sectionTitle: string | null;
+      courseImageUrl: string | null; courseImageUrlLocal?: string | null; sectionTitle: string | null;
     }
     interface OfflineVideoEntry { meta: OfflineVideoMeta; phase: OfflineDownloadPhase; progress: number;
       bytesDownloaded: number; totalSizeBytes: number | null; lastError: string | null; updatedAt: number; }
@@ -292,9 +292,33 @@ console.log('── Course grouping ──');
   assert(g3.length === 1 && g3[0].courseId === '__nocourse__' && g3[0].courseName === 'My Downloads',
     'entries without course metadata → generic "My Downloads" group');
 
+  // LEGACY-MERGE REGRESSION: old rows (courseId=null, courseName set) must
+  // NOT collapse into one shared card — different courses stay independent.
+  const gLegacy = group([
+    mkE('p', null, 'PV Course', 'completed', 1, 100),
+    mkE('q', null, 'Test', 'completed', 1, 100),
+    mkE('r', null, 'PV Course', 'completed', 2, 100),
+  ]);
+  assert(gLegacy.length === 2, 'legacy null-courseId rows with different courseNames → separate cards (no merged list)');
+  const pv = gLegacy.find((g) => g.courseName === 'PV Course');
+  assert(!!pv && pv.lessons.length === 2, 'legacy rows of the same course still group together');
+  assert(gLegacy.every((g) => g.courseId.startsWith('name:')), 'legacy groups keyed by name: prefix');
+
   // Course name comes from MedAcademy metadata only
   const g4 = group([mkE('q', 'c9', 'Cardiology', 'completed', 1, 100)]);
   assert(g4[0].courseName === 'Cardiology', 'courseName from MedAcademy metadata');
+
+  // Offline-safe course image resolution: local cached copy wins
+  const gImg = group([
+    { ...mkE('i', 'cA', 'Imaging', 'completed', 1, 100), meta: { ...mkE('i', 'cA', 'Imaging', 'completed', 1, 100).meta,
+      courseImageUrl: 'https://x/remote.jpg', courseImageUrlLocal: 'file:///docs/course-images/i.jpg', lessonThumbnailUrl: 'https://x/lesson.jpg' } },
+  ]);
+  assert(gImg[0].courseImage === 'file:///docs/course-images/i.jpg', 'courseImage prefers the on-device cached copy (works offline)');
+  const gImgNoLocal = group([
+    { ...mkE('j', 'cB', 'Imaging2', 'completed', 1, 100), meta: { ...mkE('j', 'cB', 'Imaging2', 'completed', 1, 100).meta,
+      courseImageUrl: 'https://x/remote.jpg', lessonThumbnailUrl: 'https://x/lesson.jpg' } },
+  ]);
+  assert(gImgNoLocal[0].courseImage === 'https://x/remote.jpg', 'no cached copy → remote course image');
 }
 
 // ── VdoCipher offline-OTP payload contract (regression for the 403 fix) ───

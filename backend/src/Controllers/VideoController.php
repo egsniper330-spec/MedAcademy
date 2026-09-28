@@ -1157,7 +1157,10 @@ final class VideoController
     /**
      * POST /video/sync-library — VdoCipher ↔ Video Library reconciliation.
      *
-     * Super Admin-only. Fetches the ENTIRE remote VdoCipher library via the
+     * Admin → full-account reconciliation; Doctor → their own library only
+     * (scope='mine', enforced server-side — the client cannot widen it).
+     *
+     * Fetches the ENTIRE remote VdoCipher library via the
      * official paginated listing API, verifies every VdoCipher-backed local
      * asset still exists remotely, marks proven-missing assets
      * remotely_deleted (with lessons flagged via the established 'missing'
@@ -1174,7 +1177,17 @@ final class VideoController
         $this->flags->assertEnabled('video_library_sync', $request);
 
         $repair = (bool) ($request->json()['repair_duplicates'] ?? true);
+        $scope  = (string) ($request->json()['scope'] ?? 'all');
+        if (!in_array($scope, ['all', 'mine'], true)) {
+            throw new ApiException(422, "Invalid scope '{$scope}' — expected 'all' or 'mine'");
+        }
+        // Authorization: doctors may only reconcile their OWN library. The
+        // scope is clamped server-side so a tampered client body can never
+        // widen a doctor's pass to the whole platform.
+        if (!in_array($request->user['role'], ['admin', 'super_admin'], true)) {
+            $scope = 'mine';
+        }
         $sync = new \MedAcademy\Services\VideoLibrarySyncService($this->video);
-        return $sync->syncLibrary((string) $request->user['id'], $repair);
+        return $sync->syncLibrary((string) $request->user['id'], $repair, $scope);
     }
 }

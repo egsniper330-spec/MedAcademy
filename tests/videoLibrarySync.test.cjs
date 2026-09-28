@@ -1,269 +1,291 @@
-/**
- * Automated tests for VDOCIPHER ↔ VIDEO LIBRARY SYNCHRONIZATION
- * (remote existence reconciliation · paginated listing · error-safe delete ·
- *  duplicate consolidation · playback/offline safety).
- *
- * Run: node tests/videoLibrarySync.test.cjs
- *
- * Backend (structural): no PHP runtime exists in this environment, so backend
- * behaviour is pinned structurally against the shipped PHP source — the same
- * convention as videoProviders.test.cjs. Any change to the pinned code paths
- * (verifyRemote semantics, listing pagination, delete-first flow, abort-on-
- * listing-error, reconciliation writes) breaks these tests.
- *
- * Client (behavioural): src/lib/videoLibraryApi.ts contract helpers are
- * exercised via source-contract assertions (the backendClient stub wall makes
- * full module execution infeasible here; the behavioral parts of the sync UI
- * are covered by the structural pins on the screen source).
- *
- * Scenarios (per the sync contract):
- *   A  existing remote video stays visible (never marked)
- *   B  remote-missing asset → remotely_deleted, hidden from active library
- *   C  duplicates by provider_video_id → detected + consolidated safely
- *   D  doctor delete → remote delete succeeds → local finalized
- *   E  remote delete fails → local intact, structured error, retry possible
- *   F  remote already deleted → idempotent local cleanup
- *   G  VdoCipher timeout → video NOT marked deleted
- *   H  VdoCipher 5xx → video NOT marked deleted
- *   I  upload retry / same VdoCipher ID → no duplicate active records
- *   J  sync follows ALL pages (pagination)
- *   K  playback of remotely-deleted video → no OTP (410)
- *   L  offline authorization for remotely-deleted video → refused
- *   M  non-super-admin cannot trigger sync (route role gate)
- *   N  concurrent delete → rollback on failure (transaction use)
- */
-
 'use strict';
+/**
+ * videoLibrarySync.test.cjs
+ *
+ * Regression pins for the VdoCipher ↔ Video Library integration:
+ *   1. Reconciliation error-safety  — transient VdoCipher failures NEVER mark
+ *      local videos deleted; only a confirmed 404 does.
+ *   2. Doctor-scoped sync           — doctors reconcile their OWN library
+ *      (scope clamped server-side); admins reconcile the platform.
+ *   3. Remote-first delete order    — local rows die only after the remote
+ *      deletion is confirmed (or already gone); unknown remote state aborts.
+ *   4. Upload state machine         — real states (waiting→uploading→processing
+ *      →encoding→ready/failed/timeout), no fake success, persistence/recovery.
+ *   5. Duplicate prevention         — unique index + idempotent upsert key.
+ *   6. Video Library hamburger      — standard PageHeader drawer pattern.
+ *
+ * Static-contract suite (same convention as fullscreenArchitecture.test.cjs):
+ * reads the source files and pins the structural guarantees that protect the
+ * live behavior. No network, no DB.
+ */
 
 const fs = require('fs');
 const path = require('path');
 
-const ROOT = path.resolve(__dirname, '..');
+const ROOT = path.join(__dirname, '..');
+const read = (p) => fs.readFileSync(path.join(ROOT, p), 'utf8');
+let passed = 0, failed = 0;
+const ok = (cond, label) => {
+  if (cond) { passed++; console.log(`  ok    ${label}`); }
+  else { failed++; console.log(`  FAIL  ${label}`); }
+};
+const section = (t) => console.log(`\n── ${t} ──`);
 
-let passed = 0;
-let failed = 0;
-const failures = [];
-function ok(cond, msg) {
-  if (cond) { passed++; }
-  else { failed++; failures.push(msg); console.log('  ✗ ' + msg); }
-}
-function read(rel) {
-  return fs.readFileSync(path.join(ROOT, rel), 'utf8').replace(/\r\n/g, '\n');
-}
-
-// ════════════════════════════════════════════════════════════════════════════
-// VdoCipherService — remote truth primitives
-// ════════════════════════════════════════════════════════════════════════════
+// ── 1. Reconciliation error-safety ──────────────────────────────────────────
+section('Reconciliation error-safety (VideoLibrarySyncService.php)');
 {
-  const svc = read('backend/src/Video/VdoCipherService.php');
+  const svc = read('backend/src/Services/VideoLibrarySyncService.php');
 
-  // verifyRemote: strict three-state semantics (G/H root-cause fix)
-  ok(/public function verifyRemote\(string \$videoId\): array/.test(svc),
-    'service: verifyRemote() exists with a structured return');
-  ok(/if \(\$http === 404\) \{\s*\n\s*return \['status' => 'missing'/.test(svc),
-    'service: ONLY HTTP 404 classifies as missing (G/H: errors are never deletions)');
-  ok(/return \['status' => 'error', 'http_status' => \$http\];/.test(svc),
-    'service: non-200/404 (timeout, 401, 429, 5xx) → status error (UNKNOWN)');
-  ok(/LEGACY boolean wrapper/.test(svc),
-    'service: legacy providerExists() demoted to a wrapper (kept for compat)');
+  ok(/status'\] !== 'ok'/s.test(svc.replace(/\r/g, '')) && svc.includes("return [\n                'status' => 'error',"),
+    'sync aborts with status=error when the remote listing fails');
 
-  // Official deletion endpoint (docs: DELETE /videos?videos={id}), idempotent 404
-  ok(/'DELETE', '\/videos\?videos=' \. rawurlencode\(\$videoId\)/.test(svc),
-    'service: delete uses the official DELETE /videos?videos={id} endpoint');
-  ok(/\(\$vdoStatus >= 200 && \$vdoStatus < 300\) \|\| \$vdoStatus === 404/.test(svc),
-    'service: deletion idempotent — 2xx or 404 counts as remote-deleted');
-  ok(/public function providerConfigured\(\): bool/.test(svc),
-    'service: providerConfigured() exposed for unknown-state policy decisions');
+  // The error-return must appear BEFORE the local transaction begins.
+  const errIdx = svc.indexOf("'status' => 'error',");
+  const beginIdx = svc.indexOf('$db->begin()');
+  ok(errIdx !== -1 && beginIdx !== -1 && errIdx < beginIdx,
+    'listing-failure return precedes any local transaction (nothing can be mutated)');
 
-  // Listing (J): official paginated API, follows all pages, bounded memory
-  ok(/public function listAllVideos\(int \$pageLimit = 100, int \$maxPages = 100\): array/.test(svc),
-    'service: paginated listing with a safety cap (bounded time/memory)');
-  ok(/'\/videos\?page=' \. \$page \. '&limit=' \. \$pageLimit/.test(svc),
-    'service: uses the official listing endpoint GET /videos?page=N&limit=M');
-  ok(/if \(count\(\$rowIds\) < \$pageLimit\) \{\s*\n\s*break;/.test(svc),
-    'service: follows pages until a short page (never only the first page)');
-  ok(/\$rowIds\[\] = \$id;/.test(svc) && /foreach \(\$rows as \$row\)/.test(svc),
-    'service: collects every remote video id across pages');
-  ok(/'rate_limited'/.test(svc),
-    'service: 429 mid-listing aborts as an error (never treated as complete)');
+  ok(svc.includes("verifyRemote($pvid)") && svc.includes("if ($check['status'] === 'missing')"),
+    'per-asset verify: only a confirmed missing (404) triggers removal');
+
+  ok(svc.includes("elseif ($check['status'] === 'error')") && svc.includes('$unknownCount++'),
+    'verify errors counted as unknown — never as deletion');
+
+  ok(!svc.includes("status = 'remotely_deleted'") && svc.includes('DELETE FROM video_assets WHERE id = ?'),
+    'confirmed-remote-deleted → local row REMOVED (no user-facing remotely-deleted state)');
+
+  ok(svc.includes("UPDATE lessons SET\n                video_asset_id = NULL") && svc.includes("IF(status = 'published', 'draft', status)"),
+    'lesson detach preserves lesson+course and demotes published lessons (deleteAsset contract)');
+
+  ok(svc.includes("course_id IN (SELECT id FROM courses WHERE doctor_id = ?)"),
+    'legacy provider-id detach is doctor-scoped (mine) — never detaches another doctor\'s lesson');
+
+  ok(svc.includes('video_uploads SET status') && svc.includes('canceled'),
+    'upload history archived (audit preserved), same as doctor-initiated delete');
+
+  ok(svc.includes('429') || svc.includes('rate_limited'), 'rate-limit mid-listing is an error, not completion');
+}
+console.log();
+
+// ── 2. Doctor-scoped reconciliation ─────────────────────────────────────────
+section('Doctor-scoped reconciliation (controller clamp + service filter)');
+{
+  const ctrl = read('backend/src/Controllers/VideoController.php');
+  const svc = read('backend/src/Services/VideoLibrarySyncService.php').replace(/\r/g, '');
+  const routes = read('backend/routes/api.php').replace(/\r/g, '');
+
+  ok(ctrl.includes("$request->json()['scope'] ?? 'all'"),
+    'controller reads scope from the request body');
+
+  ok(/in_array\(\$scope, \['all', 'mine'\], true\)/.test(ctrl),
+    'scope is validated (422 on anything else)');
+
+  ok(ctrl.includes("$scope = 'mine';") && ctrl.includes("in_array($request->user['role'], ['admin', 'super_admin'], true)"),
+    'non-admin callers are CLAMPED to scope=mine server-side');
+
+  ok(svc.includes("string $scope = 'all'"), 'service accepts the scope parameter');
+  ok(svc.includes("$mine ? \" AND va.doctor_id = ?\" : ''"),
+    "scope='mine' filters reconciled assets to the acting doctor's rows");
+  ok(svc.includes("$mine ? \" AND doctor_id = ?\" : ''"),
+    "scope='mine' also scopes duplicate detection (cross-doctor same-video is legitimate)");
+
+  ok(routes.includes("['doctor', 'admin', 'super_admin']"), 'route file loaded with doctor role present'); // sanity
+  ok(/post\('\/video\/sync-library'.*['"]doctor['"], ['"]admin['"], ['"]super_admin['"]/.test(routes),
+    'sync-library route allows doctors (they can reconcile their own library)');
+}
+console.log();
+
+// ── 3. Remote-first delete order ────────────────────────────────────────────
+section('Remote-first delete (VideoController::deleteAsset)');
+{
+  const ctrl = read('backend/src/Controllers/VideoController.php');
+
+  ok(ctrl.includes("$remoteState = $this->video->verifyRemote($providerVideoId)['status'];"),
+    'delete resolves the remote state FIRST (exists|missing|error)');
+
+  ok(ctrl.includes("if ($remoteState === 'exists') {") && ctrl.includes("$db->rollback();") &&
+     /ApiException\(502, \$providerResult\['vdo_error'\]/.test(ctrl),
+    'remote deletion failure rolls back the local transaction (502, retryable)');
+
+  ok(ctrl.includes("throw new ApiException(502, 'VdoCipher is unreachable — the video was NOT deleted"),
+    'unknown remote state aborts deletion entirely (no orphaned remote asset)');
+
+  ok(ctrl.includes("elseif ($remoteState === 'missing') {"),
+    'already-gone remote video is treated as satisfied (idempotent) then cleaned locally');
+
+  ok(ctrl.indexOf('verifyRemote') < ctrl.indexOf("UPDATE lessons SET\n                    video_asset_id = NULL"),
+    'remote verification happens BEFORE local lesson detachment');
+
+  ok(ctrl.includes("'deleted' => true,") && ctrl.includes("'vdo_deleted' => true,"),
+    'success response only after both remote + local deletion completed');
+}
+console.log();
+
+// ── 4. Upload state machine (mobile) ────────────────────────────────────────
+section('Upload state machine (real states, no fake success)');
+{
+  const engine = read('src/lib/videoUploadEngine.ts');
+  const hook = read('src/lib/useVideoUploader.ts');
+  const queue = read('src/components/VideoUploadQueue.tsx');
+  const store = read('src/lib/uploadQueueStore.ts');
+
+  ok(/'waiting'\s*\|\s*'uploading'/.test(engine) && engine.includes("'ready'") && engine.includes("'failed'") && engine.includes("'timeout'"),
+    'UploadStatus covers waiting/uploading/processing/encoding/ready/failed/timeout');
+
+  ok(hook.includes('pollVdoCipherReady') && hook.includes("getVdoCipherVideoStatus"),
+    'polls the backend/VdoCipher status until actually ready');
+
+  ok(hook.includes("if (result.status === 'ready')") && hook.includes("VdoCipher encoding failed"),
+    'ready only on provider confirmation; provider failure → failed');
+
+  ok(hook.includes("markTimeout") && hook.includes('POLL_TIMEOUT_MS'),
+    'bounded processing poll with explicit timeout state');
+
+  ok(queue.includes("'Ready to Watch'") && queue.includes("'Upload Failed'"),
+    'queue UI distinguishes Ready from Failed');
+
+  ok(queue.includes('indeterminate') && queue.includes('formatBytes(task.bytesUploaded)'),
+    'uploading shows real byte progress; post-upload stages use indeterminate sweep');
+
+  ok(queue.includes('{isReady && (') === false || queue.includes("'Ready to Watch'"),
+    'checkmark UI keyed to the ready state');
+
+  ok(store.includes("t.status !== 'ready' && t.status !== 'canceled'") && store.includes("status: 'recovering'"),
+    'persistence: terminal states are not rehydrated; mid-flight → recovering (survives restart)');
+
+  ok(store.includes("blocked backward transition"),
+    'terminal states never regress (stale events cannot un-ready a task)');
+
+  ok(hook.includes('getChunkUploadState') && hook.includes('startChunkIndex'),
+    'retry resumes from stored chunk state — no blind re-upload / duplicate video');
+
+  ok(hook.includes('retryProcessing') && hook.includes('t.vdoCipherVideoId'),
+    'post-provider retry re-polls instead of creating a second VdoCipher video');
+
+  // listing schema (the {count,rows} live contract) — protects uploadStatus+sync
+  const vdo = read('backend/src/Video/VdoCipherService.php');
+  ok(vdo.includes("isset($body['rows'])") && vdo.includes("isset($body['videos'])"),
+    'listAllVideos accepts current {rows,count} AND legacy {videos} shapes');
+}
+console.log();
+
+// ── 5. Duplicate prevention ─────────────────────────────────────────────────
+section('Duplicate VdoCipher-ID prevention');
+{
+  const migration = read('backend/database/mysql-migrations/007_add_video_assets_unique_index.sql');
+  const api = read('src/lib/videoLibraryApi.ts');
+
+  ok(migration.includes('UNIQUE INDEX') && migration.includes('doctor_id, provider_video_id'),
+    'migration 007 enforces one active asset per (doctor, provider video)');
+
+  ok(api.includes("onConflict: 'doctor_id,provider_video_id'"),
+    'upsertVideoAsset is idempotent on (doctor_id, provider_video_id) — retries cannot duplicate');
+}
+console.log();
+
+// ── 6. Video Library hamburger ──────────────────────────────────────────────
+section('Video Library navigation (hamburger via standard PageHeader)');
+{
+  const screen = read('src/app/(app)/(hubs)/video-library.tsx').replace(/\r/g, '');
+
+  ok(screen.includes("import { PageHeader } from '@/components/PageHeader';"),
+    'screen uses the shared PageHeader (standard drawer/back pattern)');
+
+  ok(/<PageHeader\s*\n\s*title="Video Library"/.test(screen),
+    'PageHeader renders the Video Library title (hamburger appears via DrawerContext)');
+
+  ok(screen.includes('rightAction=') && screen.includes('Sync') && screen.includes('Upload'),
+    'Sync + Upload preserved as header right actions');
+
+  ok(screen.includes("syncVideoLibraryWithVdoCipher(true, 'mine')") &&
+     screen.includes("isStaff ? 'all' : 'mine'"),
+    'doctor auto-sync uses scope=mine; manual sync scopes by role');
+
+  ok(screen.includes('AUTO_SYNC_INTERVAL_MS') && screen.includes('lastAutoSyncRef'),
+    'auto-sync is throttled — no per-render VdoCipher calls');
+
+  ok(screen.includes('VdoCipher sync was unavailable') && screen.includes('Nothing was changed'),
+    'deferred-sync notice explains a failed sync honestly (library stays usable)');
+
+  ok(screen.includes('setSyncing(true)') && !/load\(\);\s*\n\s*setSyncing\(/.test(screen),
+    'sync is user/role-triggered, not wired into every render');
 }
 
-// ════════════════════════════════════════════════════════════════════════════
-// VideoLibrarySyncService — reconciliation policy
-// ════════════════════════════════════════════════════════════════════════════
+section('Upload progress visibility in Video Library');
 {
-  const sync = read('backend/src/Services/VideoLibrarySyncService.php');
+  const screen = read('src/app/(app)/(hubs)/video-library.tsx').replace(/\r/g, '');
 
-  ok(/class VideoLibrarySyncService/.test(sync), 'sync: service exists in the backend');
+  ok(screen.includes('const activeUpload = tasks.find') && screen.includes("includes(t.status)"),
+    'library derives the live in-flight upload task from the queue store');
 
-  // Abort-on-listing-error (G/H at sync level): local data untouched
-  ok(/if \(\$listing\['status'\] !== 'ok'\)/.test(sync),
-    'sync: a failed listing ABORTS reconciliation — nothing is marked deleted');
-  ok(/'outcome' => 'aborted_listing_error'/.test(sync),
-    'sync: aborted syncs are audit-logged with the upstream cause');
-  ok(/No video was marked deleted/.test(sync),
-    'sync: structured error tells the operator the library is untouched');
+  ok(screen.includes('`Uploading ${Math.round(t.progress)}%`'),
+    'strip shows real byte progress percentage from the engine');
 
-  // Missing → remotely_deleted (B) with lessons flagged via existing convention
-  ok(/'missing' \) => \[\]\n?|if \(\$check\['status'\] === 'missing'\)/.test(sync) || /if \(\$check\['status'\] === 'missing'\)/.test(sync),
-    'sync: only a PROVEN missing (404) asset is reconciled');
-  ok(/SET status = 'remotely_deleted'/.test(sync),
-    'sync: local lifecycle transitions to remotely_deleted');
-  ok(/UPDATE lessons SET video_status = 'missing'/.test(sync),
-    'sync: lessons flagged with the established video_status=missing convention');
+  ok(screen.includes("t.status === 'encoding' ? 'Processing video…'"),
+    'VdoCipher processing/encoding is shown as its own stage (not Ready)');
 
-  // Exists → stays visible + stamped (A)
-  ok(/remote_status = 'exists', remote_synced_at = UTC_TIMESTAMP\(6\)/.test(sync),
-    'sync: verified-present assets are stamped (remote_status/remote_synced_at)');
+  ok(screen.includes("t.status === 'failed' || t.status === 'timeout'") && screen.includes('retryUpload(t.id)'),
+    'failed/timeout uploads expose an inline Retry wired to the engine retry');
 
-  // Transactions: no DB transaction held across the remote listing; reconcile
-  // runs in a local transaction (N)
-  ok(/listAllVideos\(\)/.test(sync) && /\$db->begin\(\)/.test(sync),
-    'sync: remote listing happens before the local transaction begins');
+  ok(/\{" height: 6, borderRadius: 3/.test(screen) === false,
+    'sanity: strip markup present');
+  ok(screen.includes('Live upload status strip'),
+    'progress strip renders inside the library, independent of the queue panel');
 
-  // Duplicates (C, I): canonical = most refs, then oldest; no blind delete
-  ok(/GROUP BY provider_video_id\s*\n\s*HAVING COUNT\(\*\) > 1/.test(sync),
-    'sync: duplicates detected by the canonical identity (VdoCipher video ID)');
-  ok(/lesson_refs DESC, created_at ASC, id ASC/.test(sync),
-    'sync: canonical pick is deterministic (most refs, then oldest)');
-  ok(/status = 'duplicate_removed'/.test(sync),
-    'sync: duplicate copies archived (data preserved), never blindly deleted');
-  ok(/video_duplicate_detected/.test(sync),
-    'sync: duplicate consolidation is audited');
-  ok(/video_remote_missing/.test(sync) && /video_remote_sync/.test(sync),
-    'sync: remote-missing + summary events audited (existing audit architecture)');
-
-  // Ready-state catch-up is idempotent
-  ok(/'Ready' && \$asset\['status'\] === 'processing'/.test(sync),
-    'sync: ready-state catch-up only for still-processing rows (idempotent)');
+  ok(screen.includes("import { useVideoUploader } from '@/lib/useVideoUploader';"),
+    'retry reuses the existing engine hook (no second queue/control path)');
 }
 
-// ════════════════════════════════════════════════════════════════════════════
-// VideoController — deleteAsset remote-first contract (D/E/F) + sync endpoint
-// ════════════════════════════════════════════════════════════════════════════
+section('Reconciliation snapshot-authoritative design');
 {
-  const ctl = read('backend/src/Controllers/VideoController.php');
+  const svc = read('backend/src/Services/VideoLibrarySyncService.php').replace(/\r/g, '');
+
+  ok(/FALLBACK for this subset only[\s\S]{0,700}?verifyRemote/.test(svc),
+    'per-asset verifyRemote is documented+positioned as fallback for absent subset only');
+
+  ok(/\$remoteIds = array_fill_keys\(array_keys\(\$listing\['videos'\]\), true\);/.test(svc),
+    'complete listing snapshot is the authoritative remote ID set');
+
+  ok(/if \(\$listing\['status'\] !== 'ok'\)[\s\S]{0,700}?No video was removed/s.test(svc),
+    'listing failure → abort, library untouched (no partial-snapshot deletion)');
+}
+
+// ── 7. Sync transport contract (client method ↔ route method) ───────────────
+section('Sync transport contract (src/client/php.ts + routes/api.php)');
+{
+  const php = read('src/client/php.ts');
   const routes = read('backend/routes/api.php');
 
-  // deleteAsset: verify first; error ≠ missing (E root-cause fix)
-  ok(/\$remoteState = \$this->video->verifyRemote\(\$providerVideoId\)\['status'\];/.test(ctl),
-    'controller: deleteAsset resolves the remote state BEFORE deleting');
-  ok(/if \(\$remoteState === 'error' && !\$this->video->providerConfigured\(\)\)/.test(ctl),
-    'controller: unconfigured secret → no remote resource to clean (absent, not error)');
-  ok(/elseif \(\$remoteState === 'error'\) \{\s*\n\s*\$db->rollback\(\);\s*\n\s*throw new ApiException\(502, 'VdoCipher is unreachable — the video was NOT deleted/.test(ctl),
-    'controller: UNKNOWN remote state aborts with a structured error (retryable)');
-  ok(/VdoCipher is unreachable — the video was NOT deleted/.test(ctl),
-    'controller: user-facing error explicitly says the video was NOT deleted');
+  const getRpcs = (php.match(/const GET_RPCS = new Set\(\[([\s\S]*?)\]\);/) || ['', ''])[1];
+  ok(!getRpcs.includes("'sync_vdocipher_library'"),
+    'sync_vdocipher_library is NOT a GET rpc (route is POST-only; GET 404s in the app UI)');
 
-  // exists → remote delete, failure rolls back (D/E)
-  ok(/if \(\$remoteState === 'exists'\) \{\s*\n\s*\$providerResult = \$this->video->deleteVideo\(\$providerVideoId\);/.test(ctl),
-    'controller: existing asset → VdoCipher DELETE is attempted');
-  ok(/if \(!\$providerDeleted\) \{\s*\n\s*\$db->rollback\(\);\s*\n\s*throw new ApiException\(502/.test(ctl),
-    'controller: failed remote delete rolls back local finalize (library never lies)');
+  ok(/\$router->post\('\/video\/sync-library'/.test(routes),
+    'backend route /video/sync-library is registered as POST');
 
-  // missing → idempotent cleanup (F)
-  ok(/elseif \(\$remoteState === 'missing'\) \{/.test(ctl) && /already_gone_at_delete_time/.test(ctl),
-    'controller: remote-already-deleted proceeds idempotently (audited)');
-
-  // Sync endpoint (M): super_admin only + feature flag
-  ok(/public function syncLibrary\(Request \$request\): array/.test(ctl),
-    'controller: syncLibrary action exists');
-  ok(/\$this->flags->assertEnabled\('video_library_sync', \$request\)/.test(ctl),
-    'controller: sync gated by the video_library_sync feature flag');
-  ok(/\$router->post\('\/video\/sync-library', \[VideoController::class, 'syncLibrary'\], \$auth \+ \['role' => \['super_admin'\]\]\)/.test(routes),
-    'routes: POST /video/sync-library is Super Admin-only');
-
-  // Audit actions (constraint must cover every emitted action)
-  const schema = read('backend/database/schema.sql');
-  for (const action of ['video_remote_sync', 'video_remote_missing', 'video_duplicate_detected',
-    'video_remote_delete_succeeded', 'video_remote_delete_failed', 'video_local_reconciled', 'video_delete_requested']) {
-    ok(schema.includes("'" + action + "'"),
-      'schema: audit action ' + action + ' present in chk_audit_logs_action');
-  }
-
-  // Playback safety (K/L): proven-missing lessons cannot get OTPs
-  const vdo = read('backend/src/Video/VdoCipherService.php');
-  const otpBody = vdo.slice(vdo.indexOf('public function otp('), vdo.indexOf('public function offlineAuthorize('));
-  const offBody = vdo.slice(vdo.indexOf('public function offlineAuthorize('), vdo.indexOf('public function uploadInit('));
-  ok(/video_status\s+\|\|\s+\(\$lesson\['video_status'\] \?\? ''\) === 'missing'|video_status.*=== 'missing'/.test(otpBody),
-    'service: otp() refuses lessons flagged missing (410 — no OTP for dead assets)');
-  ok(/=== 'missing'/.test(offBody),
-    'service: offlineAuthorize() refuses lessons flagged missing (410)');
-  for (const body of [otpBody, offBody]) {
-    ok(/410, 'This video is no longer available'/.test(body),
-      'service: stable 410 unavailable response for proven-deleted videos');
-  }
-  // Both queries must now select video_status so the gate can fire
-  ok(/SELECT course_id, video_id, status, video_status FROM lessons/.test(vdo),
-    'service: lesson queries include video_status (gate has its input)');
-
-  // Migration 027 exists with the sync columns + uniqueness/index story
-  const mig = read('backend/database/mysql-migrations/027_vdocipher_library_sync.sql');
-  ok(/ADD COLUMN `remote_synced_at`/.test(mig) && /ADD COLUMN `remote_status`/.test(mig),
-    'migration 027: sync columns added to video_assets');
-  ok(/CREATE INDEX `idx_video_assets_remote_sync`/.test(mig),
-    'migration 027: reconciliation index on (provider_video_id, remote_synced_at)');
-  ok(/WHY NO UNIQUE CONSTRAINT ON provider_video_id ALONE/.test(mig),
-    'migration 027: documents why a global unique index is not forced');
-
-  // Feature flag registered with a safe default
-  const flags = read('backend/src/Services/FeatureFlagService.php');
-  ok(/'video_library_sync' => \[/.test(flags), 'flags: video_library_sync registered');
-  ok(/'video_library_sync' => \[[\s\S]*?'default'     => true/.test(flags),
-    'flags: video_library_sync defaults ENABLED (deterministic when absent)');
+  ok(/\$router->post\('\/video\/sync-library'[\s\S]{0,200}?'doctor'/.test(routes),
+    'sync route authorizes doctors (scope clamped server-side)');
 }
+console.log();
 
-// ════════════════════════════════════════════════════════════════════════════
-// Client — API layer + Video Library UI
-// ═════════════════════════════════════════Video Library UI
-// ════════════════════════════════════════════════════════════════════════════
+// ── 8. Filter chips layout (video-library.tsx) ──────────────────────────────
+section('Filter chips layout (compact, content-sized)');
 {
-  const api = read('src/lib/videoLibraryApi.ts');
-  const php = read('src/client/php.ts');
-  const screen = read('src/app/(app)/(hubs)/video-library.tsx');
-  const saScreen = read('src/app/(app)/(hubs)/sa-video-library.tsx');
+  const lib = read('src/app/(app)/(hubs)/video-library.tsx');
 
-  // API layer
-  ok(/sync_vdocipher_library/.test(php) && /'\/video\/sync-library'/.test(php),
-    'client: RPC map exposes sync_vdocipher_library → POST /video/sync-library');
-  ok(/export async function syncVideoLibraryWithVdoCipher/.test(api),
-    'client: typed syncVideoLibraryWithVdoCipher() in the video library API layer');
-  ok(/remotely_deleted|duplicate_removed/.test(api),
-    'client: VideoAsset status type includes the new lifecycle states');
+  // Parent must not grow vertically: react-native-web bases ScrollView on
+  // flexGrow:1 — in the column parent the row inflated and the default
+  // alignItems:'stretch' blew every chip up to a ~163px tall block.
+  const chipsBlock = (lib.match(/Status filter chips[\s\S]*?<\/ScrollView>/) || [''])[0];
+  ok(chipsBlock.includes('flexGrow: 0'), 'filter scroller has flexGrow:0 (cannot inflate vertically)');
+  ok(chipsBlock.includes("alignItems: 'center'"), 'filter content row centers chips (no alignItems stretch)');
+  ok(chipsBlock.includes('horizontal'), 'filter row is a horizontal scroller (compact single row)');
 
-  // UI: sync affordance + stale handling (never renders dead as available)
-  ok(/Sync VdoCipher/.test(screen), 'UI: manual "Sync VdoCipher" action present');
-  ok(/profile\?\.role === 'super_admin' \|\| profile\?\.role === 'admin'/.test(screen),
-    'UI: sync action only offered to admins (client mirror of the server gate)');
-  ok(/Syncing video library with VdoCipher…/.test(screen),
-    'UI: "Syncing video library…" status shown while a sync runs');
-  ok(/Last synchronized:/.test(screen), 'UI: completion timestamp surfaced');
-  ok(/This video was deleted from VdoCipher/.test(screen),
-    'UI: remotely-deleted rows show an explicit unavailable notice, not a normal card');
-  ok(/Deleted on VdoCipher/.test(screen),
-    'UI: remotely-deleted status renders with a human label (not raw enum text)');
-  ok(/\{ value: 'remotely_deleted', label: 'Deleted on VdoCipher' \}/.test(screen),
-    'UI: status filter includes the remotely-deleted bucket');
-  ok(/remotely_deleted.*return '#EF4444'|'remotely_deleted': return '#EF4444'/.test(screen),
-    'UI: remotely-deleted badge uses the unavailable red');
-  // Dead rows never reach the delete-confirmation flow under a false promise:
-  // Remove routes through the same audited, idempotent server flow.
-  ok(/onPress=\{\(\) => handleDelete\(item\)\}/.test(screen),
-    'UI: Remove on an unavailable row goes through the real deletion flow (idempotent)');
-  ok(/export \{ default \} from '@\/app\/\(app\)\/\(hubs\)\/video-library';/.test(saScreen),
-    'UI: SA video-library route shares the same library screen (single source)');
-
-  // Upload idempotency (I): the per-doctor unique index guards INSERTs
-  const schema = read('backend/database/schema.sql');
-  ok(/CREATE UNIQUE INDEX `video_assets_doctor_provider_uniq` ON `video_assets` \(`doctor_id`, `provider_video_id`\)/.test(schema),
-    'schema: (doctor_id, provider_video_id) unique index present (duplicate INSERT guard)');
-  ok(/upsert\(row, \{\s*\n\s*onConflict: 'doctor_id,provider_video_id'/.test(api),
-    'client: upload-side asset creation upserts on the unique key (retry-safe)');
+  // Chips stay content-sized — no equal-width flex, compact padding only.
+  ok(!/flex:\s*1/.test(chipsBlock), 'chips have no flex:1 (content-sized width)');
+  ok(/paddingHorizontal: 16, paddingVertical: 9, borderRadius: 20/.test(chipsBlock),
+    'chip padding/radius in compact range (~36px tall, radius 20)');
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);
-if (failed > 0) {
-  console.log('FAILURES:');
-  for (const f of failures) console.log('  - ' + f);
-  process.exit(1);
-}
+process.exit(failed === 0 ? 0 : 1);

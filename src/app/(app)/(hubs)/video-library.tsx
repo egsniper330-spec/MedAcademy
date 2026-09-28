@@ -21,7 +21,8 @@ import {
   BookOpen, ChevronDown, ChevronUp, Clock, CloudOff, Edit2, Film, RefreshCw,
   Search, SortAsc, SortDesc, Trash2, X, Upload,
 } from 'lucide-react-native';
-import { neuColors, useLayout, neuFlatStyle, neuPressedStyle, safeTop, safeLeft, safeRight, safeBottom , zIndex} from '@/lib/neu';
+import { neuColors, useLayout, neuFlatStyle, neuPressedStyle, safeBottom, zIndex } from '@/lib/neu';
+import { PageHeader } from '@/components/PageHeader';
 import { NeuCard } from '@/components/NeuCard';
 import { useToast } from '@/components/Toast';
 import { useProfileStore } from '@/lib/store';
@@ -29,7 +30,8 @@ import { friendlyError } from '@/lib/validation';
 import * as DocumentPicker from 'expo-document-picker';
 import { randomUUID } from 'expo-crypto';
 import { useUploadQueueStore } from '@/lib/uploadQueueStore';
-import { createUploadRecord } from '@/lib/videoUploadEngine';
+import { createUploadRecord, type UploadTask } from '@/lib/videoUploadEngine';
+import { useVideoUploader } from '@/lib/useVideoUploader';
 import { resolveUploadMime, validateVideoFile } from '@/lib/videoFormats';
 import {
   deleteVideoAsset, getMyVideoLibrary, getVideoAssetUsage,
@@ -37,6 +39,10 @@ import {
   updateVideoAsset,
   type LibraryFilters, type VideoAsset, type VideoAssetUsage,
 } from '@/lib/videoLibraryApi';
+
+// At most one automatic reconciliation per focused session per interval.
+// A screen focus must never trigger a VdoCipher API call storm (rate limits).
+const AUTO_SYNC_INTERVAL_MS = 5 * 60 * 1000;
 
 function formatDuration(sec: number | null): string {
   if (!sec || sec <= 0) return '—';
@@ -58,8 +64,7 @@ const STATUS_FILTERS = [
   { value: 'ready',            label: 'Ready' },
   { value: 'processing',       label: 'Processing' },
   { value: 'failed',           label: 'Failed' },
-  { value: 'remotely_deleted', label: 'Deleted on VdoCipher' },
-] as const;
+]
 
 const SORT_OPTIONS = [
   { value: 'created_at',       label: 'Date' },
@@ -76,6 +81,7 @@ export default function VideoLibraryScreen() {
   const c = isDark ? neuColors.dark : neuColors.light;
   const { showToast } = useToast();
   const { addTask, setQueueVisible } = useUploadQueueStore();
+  const { retryUpload } = useVideoUploader();
   const profile = useProfileStore((s) => s.profile);
   const [uploadingVideo, setUploadingVideo] = useState(false);
 
@@ -102,11 +108,18 @@ export default function VideoLibraryScreen() {
   } | null>(null);
   const [deleteSaving, setDeleteSaving] = useState(false);
 
-  // ── VdoCipher ↔ library reconciliation (Super Admin / Admin) ──
+  // ── VdoCipher ↔ library reconciliation ──
   // Detects videos deleted from the VdoCipher Dashboard and duplicates.
-  const canSync = profile?.role === 'super_admin' || profile?.role === 'admin';
+  // Admins reconcile the whole platform; DOCTORS reconcile their own library
+  // (scope='mine', enforced server-side) — both roles get the Sync control.
+  const isStaff = profile?.role === 'super_admin' || profile?.role === 'admin';
+  const canSync = !!profile && (isStaff || profile.role === 'doctor');
   const [syncing, setSyncing] = useState(false);
   const [syncSummary, setSyncSummary] = useState<string | null>(null);
+  const [syncFailed, setSyncFailed] = useState(false);
+
+  // Throttle: at most one auto-sync per 5 minutes per mounted session.
+  const lastAutoSyncRef = useRef(0);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -119,7 +132,36 @@ export default function VideoLibraryScreen() {
     setLoading(false);
   }, [search, statusFilter, sortBy, sortDir]);
 
-  useFocusEffect(useCallback(() => { load(); }, [load]));
+  // ── Doctor auto-reconciliation on screen focus ──
+  // Doctors don't have a maintenance window; their library must reconcile
+  // itself when they open it (throttled). Admins keep the manual Sync button
+  // flow. Failure is non-blocking: the library stays usable with last-known
+  // state and the deferred-sync note below explains what happened.
+  useFocusEffect(useCallback(() => {
+    load();
+    if (!isStaff && canSync) {
+      const now = Date.now();
+      if (now - lastAutoSyncRef.current > AUTO_SYNC_INTERVAL_MS) {
+        lastAutoSyncRef.current = now;
+        syncVideoLibraryWithVdoCipher(true, 'mine')
+          .then((s) => {
+            if (s.status === 'ok') {
+              setSyncFailed(false);
+              setSyncSummary(
+                `Synchronized ${new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}` +
+                ` · ${s.remote_videos} remote · ${s.removed ?? s.marked_unavailable ?? 0} removed`,
+              );
+              // Re-fetch: confirmed-remotely-deleted videos are removed by
+              // the sync itself, so the library must reflect the cleanup.
+              load();
+            } else {
+              setSyncFailed(true);
+            }
+          })
+          .catch(() => setSyncFailed(true));
+      }
+    }
+  }, [load, isStaff, canSync]));
 
   // Re-fetch library when any upload reaches 'ready' — the new video should
   // appear immediately without requiring the user to leave and re-enter.
@@ -127,6 +169,13 @@ export default function VideoLibraryScreen() {
   // once per completed upload — not on every task patch, not on mount.
   const readyIdsRef = useRef(new Set<string>());
   const tasks = useUploadQueueStore((s) => s.tasks);
+
+  // Live upload status, surfaced directly in the library (not only in the
+  // global queue panel): the most recent non-terminal task first.
+  const activeUpload = tasks.find((t) =>
+    ['waiting', 'uploading', 'paused', 'resuming', 'processing', 'encoding', 'generating_streams', 'verifying', 'recovering'].includes(t.status),
+  ) ?? null;
+  const recentFailed = tasks.find((t) => t.status === 'failed' || t.status === 'timeout') ?? null;
   useEffect(() => {
     const currentReadyIds = new Set(
       tasks.filter((t) => t.status === 'ready').map((t) => t.id),
@@ -231,27 +280,31 @@ export default function VideoLibraryScreen() {
 
   // ── Sync VdoCipher (Super Admin / Admin) ──────────────────────────
   // Remote-first reconciliation: proven-missing assets are flagged
-  // remotely_deleted so they never render as available; a listing failure
-  // leaves the library untouched and surfaces an error.
+  // Remote-first reconciliation: locally-confirmed-deleted videos are
+  // REMOVED by the sync itself (no intermediate user-facing state); a
+  // listing failure leaves the library untouched and surfaces an error.
   const handleSync = async () => {
     if (syncing) return;
     setSyncing(true);
     setSyncSummary(null);
+    setSyncFailed(false);
     try {
-      const s = await syncVideoLibraryWithVdoCipher(true);
+      const s = await syncVideoLibraryWithVdoCipher(true, isStaff ? 'all' : 'mine');
       if (s.status === 'ok') {
         setSyncSummary(
           `Last synchronized: ${new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}` +
-          ` · ${s.remote_videos} remote · ${s.marked_unavailable} removed · ${s.reconciled} reconciled`,
+          ` · ${s.remote_videos} remote · ${s.removed ?? s.marked_unavailable ?? 0} removed · ${s.reconciled} reconciled`,
         );
         await load();
         showToast({ type: 'success', message: 'Video library synchronized with VdoCipher.' });
       } else {
         setSyncSummary(null);
+        setSyncFailed(true);
         showToast({ type: 'error', message: s.error ?? 'Sync failed — library left unchanged. Nothing was marked deleted.' });
       }
     } catch (e) {
       setSyncSummary(null);
+      setSyncFailed(true);
       showToast({ type: 'error', message: friendlyError(e, 'Sync failed — library left unchanged.') });
     }
     setSyncing(false);
@@ -277,7 +330,7 @@ export default function VideoLibraryScreen() {
       case 'processing': return '#D97706';
       case 'failed':     return '#DC2626';
       case 'missing':
-      case 'remotely_deleted': return '#EF4444';
+      case 'remotely_deleted': return '#EF4444'; // legacy rows are filtered out client-side
       case 'duplicate_removed': return '#9CA3AF';
       default:           return c.text;
     }
@@ -313,7 +366,7 @@ export default function VideoLibraryScreen() {
             <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
               <View style={{ backgroundColor: `${statusColor(item.status)}18`, paddingHorizontal: 7, paddingVertical: 2, borderRadius: 6 }}>
                 <Text style={{ fontSize: 10, fontWeight: '700', color: statusColor(item.status) }}>
-                  {item.status === 'remotely_deleted' ? 'Deleted on VdoCipher' : item.status.charAt(0).toUpperCase() + item.status.slice(1)}
+                  {item.status.charAt(0).toUpperCase() + item.status.slice(1)}
                 </Text>
               </View>
               <Text style={{ fontSize: 11, color: c.text, opacity: 0.45 }}>{formatBytes(item.file_size_bytes)}</Text>
@@ -327,22 +380,8 @@ export default function VideoLibraryScreen() {
           </View>
         </View>
 
-        {/* ── Unavailable notice: proven-deleted remotely → cannot be used ── */}
-        {item.status === 'remotely_deleted' && (
-          <View style={{ paddingHorizontal: 12, paddingVertical: 9, borderTopWidth: 1, borderTopColor: `${c.text}10`, flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-            <CloudOff size={13} color="#EF4444" />
-            <Text style={{ fontSize: 11, color: '#EF4444', flex: 1 }}>
-              This video was deleted from VdoCipher. It can no longer be attached or played. Use Sync VdoCipher to clean up.
-            </Text>
-            <Pressable
-              onPress={() => handleDelete(item)}
-              accessibilityRole="button"
-              accessibilityLabel="Remove unavailable video from library"
-              style={{ paddingHorizontal: 10, paddingVertical: 5, borderRadius: 9, backgroundColor: '#EF444418' }}>
-              <Text style={{ fontSize: 11, fontWeight: '700', color: '#EF4444' }}>Remove</Text>
-            </Pressable>
-          </View>
-        )}
+        {/* Sync removes confirmed-remotely-deleted videos automatically —
+            there is no user-facing "deleted remotely" card/button anymore. */}
 
         {/* ── Action row ── */}
         <View style={{ flexDirection: 'row', borderTopWidth: 1, borderTopColor: `${c.text}10` }}>
@@ -489,37 +528,39 @@ export default function VideoLibraryScreen() {
         </View>
       </Modal>
 
-      {/* ── Header — spacing from headerTokens (EDGE_PAD=4, BREATHING=8) ── */}
-      <View style={{ paddingTop: layout.headerTop, paddingLeft: layout.headerLeft, paddingRight: layout.headerRight, paddingBottom: 12, flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-        <View style={{ flex: 1 }}>
-          <Text style={{ fontSize: 24, fontWeight: '800', color: c.text }}>Video Library</Text>
-          <Text style={{ fontSize: 13, color: c.text, opacity: 0.45, marginTop: 4 }}>
-            One upload, reusable across any lesson
-          </Text>
-        </View>
-        {canSync && (
-          <Pressable
-            onPress={handleSync}
-            disabled={syncing}
-            accessibilityRole="button"
-            accessibilityLabel="Sync library with VdoCipher"
-            style={{ backgroundColor: syncing ? `${c.primary}66` : c.primary, borderRadius: 14, paddingHorizontal: 14, paddingVertical: 11, flexDirection: 'row', alignItems: 'center', gap: 7 }}>
-            {syncing
-              ? <ActivityIndicator size="small" color="#fff" />
-              : <RefreshCw size={16} color="#fff" />}
-            <Text style={{ color: '#fff', fontSize: 13, fontWeight: '800' }}>
-              {syncing ? 'Syncing…' : 'Sync VdoCipher'}
-            </Text>
-          </Pressable>
-        )}
-        <Pressable
-          onPress={handleUploadVideo}
-          disabled={uploadingVideo}
-          style={{ backgroundColor: c.primary, borderRadius: 14, paddingHorizontal: 14, paddingVertical: 11, flexDirection: 'row', alignItems: 'center', gap: 7 }}>
-          {uploadingVideo ? <ActivityIndicator size="small" color="#fff" /> : <Upload size={16} color="#fff" />}
-          <Text style={{ color: '#fff', fontSize: 13, fontWeight: '800' }}>Upload Video</Text>
-        </Pressable>
-      </View>
+      {/* ── Header — standard PageHeader: hamburger (drawer), title, right actions.
+          Replaces the old custom title row which had no hamburger, breaking the
+          drawer-navigation pattern every other hub/root page follows. ── */}
+      <PageHeader
+        title="Video Library"
+        subtitle="One upload, reusable across any lesson"
+        rightAction={
+          <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center' }}>
+            {canSync && (
+              <Pressable
+                onPress={handleSync}
+                disabled={syncing}
+                accessibilityRole="button"
+                accessibilityLabel="Sync library with VdoCipher"
+                style={{ backgroundColor: syncing ? `${c.primary}66` : c.primary, borderRadius: 14, paddingHorizontal: 12, paddingVertical: 10, flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                {syncing
+                  ? <ActivityIndicator size="small" color="#fff" />
+                  : <RefreshCw size={15} color="#fff" />}
+                <Text style={{ color: '#fff', fontSize: 12, fontWeight: '800' }}>
+                  {syncing ? 'Syncing…' : 'Sync'}
+                </Text>
+              </Pressable>
+            )}
+            <Pressable
+              onPress={handleUploadVideo}
+              disabled={uploadingVideo}
+              style={{ backgroundColor: c.primary, borderRadius: 14, paddingHorizontal: 12, paddingVertical: 10, flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+              {uploadingVideo ? <ActivityIndicator size="small" color="#fff" /> : <Upload size={15} color="#fff" />}
+              <Text style={{ color: '#fff', fontSize: 12, fontWeight: '800' }}>Upload</Text>
+            </Pressable>
+          </View>
+        }
+      />
 
       {/* ── Sync status banner ── */}
       {syncing && (
@@ -528,6 +569,57 @@ export default function VideoLibraryScreen() {
           <Text style={{ fontSize: 13, color: c.text, opacity: 0.7 }}>Syncing video library with VdoCipher…</Text>
         </View>
       )}
+      {!syncing && syncFailed && (
+        <View style={{ marginHorizontal: 16, marginBottom: 10, padding: 12, borderRadius: 14, flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#D9770612' }}>
+          <CloudOff size={13} color="#D97706" />
+          <Text style={{ fontSize: 12, color: '#92400E', flex: 1 }}>
+            VdoCipher sync was unavailable — showing last known state. Nothing was changed.
+          </Text>
+          <Pressable onPress={handleSync} disabled={syncing} hitSlop={6}>
+            <Text style={{ fontSize: 12, fontWeight: '700', color: '#D97706' }}>Retry</Text>
+          </Pressable>
+        </View>
+      )}
+      {/* ── Live upload status strip (engine state, shown even when the queue panel is closed) ── */}
+      {(activeUpload || recentFailed) && (() => {
+        const t: UploadTask = (activeUpload ?? recentFailed) as UploadTask;
+        const stageLabel =
+          t.status === 'waiting' ? 'Preparing…' :
+          t.status === 'uploading' || t.status === 'resuming' ? `Uploading ${Math.round(t.progress)}%` :
+          t.status === 'paused' ? `Paused — ${Math.round(t.progress)}% uploaded` :
+          t.status === 'processing' ? 'Processing…' :
+          t.status === 'encoding' ? 'Processing video…' :
+          t.status === 'generating_streams' ? 'Processing video…' :
+          t.status === 'verifying' ? 'Verifying…' :
+          t.status === 'recovering' ? 'Restoring upload…' :
+          t.status === 'timeout' ? 'Processing timed out' : 'Upload failed';
+        const failed = t.status === 'failed' || t.status === 'timeout';
+        const indeterminate = ['waiting', 'processing', 'encoding', 'generating_streams', 'verifying', 'recovering'].includes(t.status);
+        return (
+          <View style={{ marginHorizontal: 16, marginBottom: 10, padding: 12, borderRadius: 14, backgroundColor: failed ? '#DC262612' : `${c.primary}14`, gap: 8 }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+              <Text numberOfLines={1} style={{ fontSize: 13, fontWeight: '800', color: failed ? '#B91C1C' : c.text, flex: 1 }}>
+                {t.fileName}
+              </Text>
+              <Text style={{ fontSize: 12, fontWeight: '700', color: failed ? '#B91C1C' : c.text, opacity: 0.75 }}>
+                {stageLabel}
+              </Text>
+            </View>
+            {failed
+              ? (
+                <Pressable onPress={() => retryUpload(t.id)} hitSlop={6} style={{ alignSelf: 'flex-start', borderRadius: 10, paddingHorizontal: 12, paddingVertical: 6, backgroundColor: '#DC262618' }}>
+                  <Text style={{ fontSize: 12, fontWeight: '800', color: '#B91C1C' }}>Retry upload</Text>
+                </Pressable>
+              )
+              : (
+                <View style={{ height: 6, borderRadius: 3, backgroundColor: `${c.text}14`, overflow: 'hidden' }}>
+                  <View style={{ height: 6, borderRadius: 3, width: indeterminate ? '40%' : `${Math.min(100, Math.max(2, t.progress))}%`, backgroundColor: c.primary, opacity: indeterminate ? 0.5 : 1 }} />
+                </View>
+              )}
+          </View>
+        );
+      })()}
+
       {!syncing && syncSummary && (
         <View style={{ marginHorizontal: 16, marginBottom: 10, padding: 12, borderRadius: 14, backgroundColor: `${c.primary}0D` }}>
           <Text style={{ fontSize: 12, color: c.text, opacity: 0.55 }}>{syncSummary}</Text>
@@ -593,10 +685,16 @@ export default function VideoLibraryScreen() {
       </View>
 
       {/* ── Status filter chips ── */}
+      {/* COMPACT CHIPS: the scroller must NOT grow vertically (react-native-web
+          bases ScrollView on flexGrow:1 — in a column parent that made the row
+          inflate and alignItems:'stretch' blew every chip up to a tall block).
+          flexGrow:0 shrinks the scroller to its content height; the content
+          row centers its chips so they stay content-sized (~36px). */}
       <ScrollView
         horizontal
         showsHorizontalScrollIndicator={false}
-        contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 12, gap: 8, flexDirection: 'row' }}>
+        style={{ flexGrow: 0, flexShrink: 0 }}
+        contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 12, gap: 8, flexDirection: 'row', alignItems: 'center' }}>
         {STATUS_FILTERS.map(f => (
           <Pressable
             key={f.value}

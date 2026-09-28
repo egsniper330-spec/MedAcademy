@@ -17,7 +17,9 @@
  * real completion progress bar with %, right chevron). No expiry/DRM/
  * technical noise on the card. Contextual empty space below the cards
  * ("No other downloaded courses" / true-empty state) with a soft cloud-
- * folder illustration. Dark mode is a first-class surface (elevated dark
+ * folder illustration. TRUE-EMPTY (zero downloads of any kind) centers the
+ * empty state vertically in the available content area; the contextual
+ * space below existing cards keeps its normal top-aligned flow. Dark mode is a first-class surface (elevated dark
  * cards, adapted illustration), not an inversion.
  *
  * SECURITY: unchanged — lives inside (app)/ under the authoritative gate;
@@ -98,6 +100,35 @@ function courseInitials(name: string): string {
   const words = (name || '').trim().split(/\s+/).filter(Boolean).slice(0, 2);
   if (!words.length) return 'MV';
   return words.map((w) => w[0]?.toUpperCase() ?? '').join('') || 'MV';
+}
+
+/**
+ * Circular course avatar with honest failure handling: renders the image
+ * until it fails (dead URL / missing file / offline fetch error), then swaps
+ * to the initials fallback. Without this, a broken source renders a blank
+ * circle forever (the reported "thumbnail saved but not displayed" symptom).
+ */
+function CourseAvatar({ uri, fallbackInitial, fallbackColor }: {
+  uri: string;
+  fallbackInitial: string;
+  fallbackColor: string;
+}) {
+  const [failed, setFailed] = useState(false);
+  if (failed) {
+    return (
+      <View style={[styles.courseAvatar, styles.courseAvatarFallback]}>
+        <Text style={[styles.courseAvatarInitial, { color: fallbackColor }]}>{fallbackInitial}</Text>
+      </View>
+    );
+  }
+  return (
+    <Image
+      source={{ uri }}
+      style={styles.courseAvatar}
+      resizeMode="cover"
+      onError={() => setFailed(true)}
+    />
+  );
 }
 
 export default function OfflineLibraryScreen() {
@@ -295,12 +326,29 @@ function OfflineLibraryContent() {
         </View>
       ) : (
         <ScrollView
-          contentContainerStyle={{
-            paddingBottom: safeBottom(0, spacing.xxl),
-            paddingHorizontal: 0,
-          }}
+          contentContainerStyle={[
+            {
+              paddingBottom: safeBottom(0, spacing.xxl),
+              paddingHorizontal: 0,
+            },
+            // TRUE-EMPTY CENTERING: with zero downloads the container grows to
+            // fill the available content area and centers its only child, so
+            // the empty state sits mid-screen on every device/orientation
+            // (flex-based — no hardcoded screen heights). With ANY content
+            // present the container keeps its natural height and the list
+            // stays top-aligned under the header.
+            !hasDownloads && { flexGrow: 1, justifyContent: 'center' },
+          ]}
           style={{ flex: 1 }}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.text} />}
+          onLayout={() => {
+            // E) COMPLETION-RECONCILIATION SAFETY NET: if the local store said
+            // 100% while the SDK registry disagreed, the player/play screens
+            // already reconciled and flipped the row out of 'completed'. The
+            // moment that happens the library may need a re-fetch; drive it
+            // from the entries subscription instead — nothing to do here.
+            // Kept as a no-op layout hook to preserve scroll metrics timing.
+          }}
           showsVerticalScrollIndicator={false}
         >
           <View style={{ paddingHorizontal: sp.screenPx }}>
@@ -402,12 +450,12 @@ function OfflineLibraryContent() {
               <View>
                 <Text style={[styles.sectionTitle, { color: colors.textMuted }]}>DOWNLOADED COURSES</Text>
                 {courses.map((g) => {
-                  // Course image: the SAME MedAcademy course image the online
-                  // course uses (persisted at authorize time). Lesson thumbnail
-                  // is a secondary fallback; initials are the last resort.
-                  const courseImg = g.courseImageUrl
-                    ?? g.lessons.find((e) => !!e.meta.lessonThumbnailUrl)?.meta.lessonThumbnailUrl
-                    ?? null;
+                  // Course image: on-device cached copy → remote URL → lesson
+                  // thumbnail (resolution done in exportOfflineCourseGroups).
+                  // `thumbFailed` catches rows whose URL is dead server-side:
+                  // the card degrades to the initials fallback instead of
+                  // rendering a permanently blank circle.
+                  const courseImg = g.courseImage;
                   const count = g.completedCount;
                   return (
                     <Pressable
@@ -424,7 +472,11 @@ function OfflineLibraryContent() {
                       {/* LEFT: circular course image (same image as online) */}
                       <View style={[styles.courseAvatarWrap, { backgroundColor: isDark ? '#1E90FF26' : '#1E90FF14' }]}>
                         {courseImg ? (
-                          <Image source={{ uri: courseImg }} style={styles.courseAvatar} resizeMode="cover" />
+                          <CourseAvatar
+                            uri={courseImg}
+                            fallbackInitial={courseInitials(g.courseName)}
+                            fallbackColor={colors.primary}
+                          />
                         ) : (
                           <View style={[styles.courseAvatar, styles.courseAvatarFallback]}>
                             <Text style={[styles.courseAvatarInitial, { color: colors.primary }]}>
@@ -469,7 +521,7 @@ function OfflineLibraryContent() {
 
             {/* ── EMPTY / LOW-DENSITY SPACE (reference illustration) ── */}
             {(!hasDownloads || courses.length > 0) && (
-              <View style={styles.emptySpace}>
+              <View style={[styles.emptySpace, !hasDownloads && styles.emptySpaceCentered]}>
                 <CloudFolderArt isDark={isDark} />
                 <Text style={[styles.emptyTitle, { color: colors.text }]}>{emptyTitle}</Text>
                 <Text style={[styles.emptyBody, { color: colors.textMuted }]}>{emptyBody}</Text>
@@ -536,6 +588,8 @@ const styles = StyleSheet.create({
   progressPct: { fontSize: 13.5, fontWeight: '800', minWidth: 44, textAlign: 'right' },
   chip: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 10, paddingVertical: 7, borderRadius: 999 },
   emptySpace: { alignItems: 'center', paddingTop: spacing.xl, paddingBottom: spacing.xxl },
+  /** True-empty variant: the container's centering owns the vertical spacing. */
+  emptySpaceCentered: { paddingTop: 0, paddingBottom: 0 },
   artWrap: { width: 190, height: 150, marginBottom: spacing.lg },
   artCloud: { position: 'absolute', width: 170, height: 110, borderRadius: 55, top: 20, left: 10 },
   artCloudDeep: { position: 'absolute', width: 120, height: 78, borderRadius: 39, top: 52, left: 38 },
