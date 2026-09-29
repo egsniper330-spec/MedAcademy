@@ -28,8 +28,10 @@
  *   • Move every 30–60 s, random per tick (Plyr `scheduleTick`).
  *   • Clamp: whole element stays inside the player with ≥6 % inset
  *     (Plyr `mkTransform`).
- *   • Typography: #fff, 13 px, weight 600, letterSpacing 0.3, two-layer
- *     text shadow, single line with ellipsis, max width min(320 px, 55 %).
+ *   • Typography: #fff, 15 px (WATERMARK_FONT_PX — Plyr's 13 px raised
+ *     ~15 % per product request for readability), weight 600,
+ *     letterSpacing 0.3, two-layer text shadow, single line with ellipsis,
+ *     max width min(320 px, 55 %).
  *   • Label format: `NAME • ID` (U+2022 bullet), or just `ID` when no name.
  *   • NO security pulse, NO hide gap, NO full fade-out — watermark is
  *     always on screen somewhere.
@@ -58,6 +60,13 @@ export const WATERMARK_OPACITY_INIT_MAX = 0.56; // Plyr mount()
 export const WATERMARK_INSET_FRACTION = 0.06; // Plyr mkTransform ≥6 % inset
 export const WATERMARK_MAX_WIDTH_CAP  = 320;  // Plyr max-width:min(320px,55%)
 export const WATERMARK_MAX_WIDTH_FRAC = 0.55;
+/**
+ * Watermark font size in px — the ONE canonical size for every renderer
+ * (Plyr in-HTML, VdoCipher WebView injection, fullscreen DOM hook, native
+ * overlay). Plyr shipped 13px; raised to 15px (+~15%) per product request
+ * for readability. Change it HERE only — every renderer interpolates it.
+ */
+export const WATERMARK_FONT_PX = 15;
 
 // ─── Random helpers (same semantics as Plyr) ──────────────────────────────────
 export function wmRand(min: number, max: number): number {

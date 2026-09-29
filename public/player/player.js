@@ -128,7 +128,7 @@
       ].join(';');
       if (name) {
         _nEl = document.createElement('div');
-        _nEl.style.cssText = 'font-size:13px;font-weight:600;letter-spacing:0.3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:#fff;text-shadow:0 1px 4px rgba(0,0,0,0.95),0 0 10px rgba(0,0,0,0.7);';
+        _nEl.style.cssText = 'font-size:15px;font-weight:600;letter-spacing:0.3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:#fff;text-shadow:0 1px 4px rgba(0,0,0,0.95),0 0 10px rgba(0,0,0,0.7);';
         _nEl.textContent = name;
         d.appendChild(_nEl);
       }

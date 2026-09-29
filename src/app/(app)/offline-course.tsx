@@ -117,6 +117,8 @@ function CourseAvatar({ uri, fallbackInitial, fallbackColor }: {
 const STATE_LABEL: Record<OfflineVideoEntry['phase'], string> = {
   authorizing: 'Preparing…',
   pending: 'Queued',
+  processing: 'Processing',
+  paused: 'Paused',
   downloading: 'Downloading',
   completed: 'Downloaded',
   failed: 'Failed',

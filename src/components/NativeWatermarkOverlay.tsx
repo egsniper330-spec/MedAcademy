@@ -51,6 +51,7 @@ import {
   WATERMARK_GLIDE_MS,
   WATERMARK_MAX_WIDTH_CAP,
   WATERMARK_MAX_WIDTH_FRAC,
+  WATERMARK_FONT_PX,
   wmNextSlotIndex,
   wmRandomRotation,
   wmRandomOpacity,
@@ -203,8 +204,9 @@ export function NativeWatermarkOverlay({
 }
 
 // ─── Static styles — Plyr typography (playerScript.ts buildEl) ────────────────
-//   color #fff · 13px · weight 600 · letterSpacing 0.3 · single line ellipsis
-//   two-layer text shadow · no background (text floats over video)
+//   color #fff · WATERMARK_FONT_PX (15px) · weight 600 · letterSpacing 0.3 ·
+//   single line ellipsis · two-layer text shadow · no background (text floats
+//   over video). Size comes from nativeWatermarkConfig — the canonical source.
 
 const styles = {
   overlay: {
@@ -214,7 +216,9 @@ const styles = {
   },
   wmText: {
     color:           '#fff',
-    fontSize:        13,
+    // Canonical size from nativeWatermarkConfig (Plyr 13px → 15px for
+    // readability). Do NOT hardcode here — the config is the single source.
+    fontSize:        WATERMARK_FONT_PX,
     fontWeight:     '600' as const,
     letterSpacing:   0.3,
     textShadowColor:  'rgba(0,0,0,0.95)',

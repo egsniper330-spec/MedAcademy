@@ -72,6 +72,7 @@
  */
 
 import { useEffect, useRef } from 'react';
+import { WATERMARK_FONT_PX } from '@/lib/nativeWatermarkConfig';
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
 
@@ -173,8 +174,11 @@ export function useFullscreenWatermark(
         // Single-line label span: "NAME • WM-NNNN"
         `#${WM_EL_ID} .wm-label{`,
           'display:block;',
-          // PLYR PARITY typography: 13px / 600 / 0.3px tracking (playerScript.ts)
-          'font-size:13px;font-weight:600;letter-spacing:0.3px;',
+          // PLYR PARITY typography: size from the canonical WATERMARK_FONT_PX
+          // (Plyr's 13px raised to 15px for readability — see config) / 600 /
+          // 0.3px tracking (playerScript.ts). String concatenation is safe
+          // here: this element is a real TS array, not a template literal.
+          'font-size:' + WATERMARK_FONT_PX + 'px;font-weight:600;letter-spacing:0.3px;',
           'white-space:nowrap;overflow:hidden;text-overflow:ellipsis;',
           'color:#fff;',
           'text-shadow:0 1px 4px rgba(0,0,0,0.95),0 0 10px rgba(0,0,0,0.7);',

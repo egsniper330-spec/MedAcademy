@@ -36,11 +36,13 @@
  *     The same button toggles exit; a back-arrow control and Android
  *     hardware back also collapse it.
  *
- *   Orientation is locked LANDSCAPE while fullscreen, PORTRAIT_UP otherwise
- *   (effect keyed on isFullscreen — no timers). app.json keeps the app
- *   portrait at all other times.
+ *   Responsive rotation (no forced orientation): entering fullscreen keeps
+ *   the current orientation; the absolute-fill container re-measures to
+ *   whatever window the OS gives it — portrait stays portrait, landscape
+ *   stays landscape, and a physical rotation while fullscreen re-measures
+ *   the SAME WebView in place.
  *
- * ── postMessage protocol (player → host) ─────────────────────────────────────
+ * ── postMessage protocol (player → host) ────────────────────────────────────
  *   { type: 'yt:ready' }
  *   { type: 'yt:progress',   currentTime: number, duration: number }
  *   { type: 'yt:playing' }
@@ -273,7 +275,7 @@ interface SubProps {
 
 function YouTubePlayerWeb({
   videoId,
-  resumePosition,
+  resumePosition: initialResume,
   onReady,
   onProgress,
   onEnd,
@@ -281,10 +283,15 @@ function YouTubePlayerWeb({
   watermark,
   onFullscreen,
 }: SubProps) {
+  // RESUME LATCH: the initial resume position is captured ONCE per mount —
+  // the iframe src (and its key identity) must NEVER change mid-session or
+  // the player fully reloads (blank surface + position reset). Parent
+  // re-renders pass a moving resumePosition; only the latched value is used.
+  const resumeLatched = useRef(initialResume);
   const wmParams = watermark
     ? `&wname=${encodeURIComponent(watermark.name)}&wid=${encodeURIComponent(watermark.studentId)}`
     : '';
-  const src = `/player/index.html?v=${encodeURIComponent(videoId)}&t=${resumePosition}${wmParams}`;
+  const src = `/player/index.html?v=${encodeURIComponent(videoId)}&t=${resumeLatched.current}${wmParams}`;
 
   // CSS pseudo-fullscreen — used when document.fullscreenEnabled = false inside
   // the iframe chain (e.g. platform sandbox nesting). Expands the player to cover
@@ -387,7 +394,7 @@ function YouTubePlayerWeb({
 
 function YouTubePlayerNative({
   videoId,
-  resumePosition,
+  resumePosition: initialResume,
   onReady,
   onProgress,
   onEnd,
@@ -408,23 +415,26 @@ function YouTubePlayerNative({
   }, [shouldAllowFullscreen]);
 
   // Shared playback-position tracker — updated by the single WebView.
-  const lastTimeRef      = useRef(resumePosition);
+  const lastTimeRef      = useRef(initialResume);
   const wvRef            = useRef<WebView>(null);
 
   // ── Player HTML (memoized for the lifetime of the WebView) ─────────────────
   // NEVER rebuild after mount: any identity change in the source prop reloads
   // the WebView (hard player teardown). Deps: video identity + watermark +
   // initial resume only.
+  // resumePosition is LATCHED to its initial value so the memo can never
+  // fire mid-session (an identity change reloads the WebView — the blank
+  // fullscreen surface class of bug) even if a host passes a moving value.
+  const resumeLatched = useRef(initialResume);
   const playerHtml = useMemo(
     () => buildNativeHtml({
       videoId,
-      resumeAt:      resumePosition,
+      resumeAt:      resumeLatched.current,
       watermarkName: watermark?.name,
       watermarkId:   watermark?.studentId,
       hideFullscreen: false,
     }),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [videoId, resumePosition, watermark?.name, watermark?.studentId],
+    [videoId, watermark?.name, watermark?.studentId],
   );
 
   // ── Progress tracking ───────────────────────────────────────────────────────
@@ -511,17 +521,23 @@ function YouTubePlayerNative({
     onFullscreen?.(isFullscreen);
   }, [isFullscreen, onFullscreen]);
 
-  // ── Orientation lifecycle ──────────────────────────────────────────────────
-  // LANDSCAPE while fullscreen, PORTRAIT_UP otherwise — effect keyed on
-  // isFullscreen, applied synchronously on state transitions. app.json keeps
-  // the app portrait at all other times. The single WebView survives the
-  // rotation; nothing is torn down or reloaded.
+  // ── Orientation: responsive on iOS, Android landscape contract preserved ──
+  // iOS: NO orientation API is touched. Entering fullscreen keeps the current
+  // orientation (portrait stays portrait, landscape stays landscape), the
+  // system Rotation Lock is never overridden, and a physical rotation while
+  // fullscreen re-measures the SAME WebView container in place (app.json
+  // now declares all iPhone orientations — the OS, not this code, rotates).
+  // Android: the existing landscape fullscreen contract is preserved — the
+  // Android Plyr fullscreen is DESIGNED for landscape (and PORTRAIT_UP is
+  // restored on exit), so removing the lock would regress Android fullscreen.
   useEffect(() => {
-    if (Platform.OS === 'web' || !isFullscreen) {
-      return;
-    }
+    if (Platform.OS !== 'android' || !isFullscreen) return;
     ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE)
       .catch(() => {});
+    return () => {
+      ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP)
+        .catch(() => {});
+    };
   }, [isFullscreen]);
 
   // ── System bars (Issue 5) ──────────────────────────────────────────────────

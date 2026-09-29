@@ -64,6 +64,7 @@ import * as ScreenOrientation from 'expo-screen-orientation';
 import { ArrowLeft } from 'lucide-react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { VdoPlayerView } from 'vdocipher-rn-bridge';
+import { playerSessionMount, playerSessionUnmount } from '@/lib/vdoPlayerSession';
 import { getVideoPlaybackToken } from '@/lib/api';
 import { neuColors } from '@/lib/neu';
 import type { VdoCipherPlayerProps } from '@/components/VdoCipherPlayer';
@@ -108,6 +109,18 @@ const FULLSCREEN_STYLE = {
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
+
+/** DEV-ONLY session scope: registers the mounted native player ONLY while the
+ *  real VdoPlayerView tree is rendered (early-exit loading/error paths never
+ *  count). Release builds: playerSession* are no-ops. */
+function VdoSessionScope({ tag, children }: { tag: string; children: React.ReactNode }) {
+  useEffect(() => {
+    playerSessionMount(tag);
+    return () => playerSessionUnmount(tag);
+  }, [tag]);
+  return <>{children}</>;
+}
+
 export function VdoCipherPlayerNativeAdapter({
   videoId,
   lessonId,
@@ -134,6 +147,14 @@ export function VdoCipherPlayerNativeAdapter({
     ),
     [watermarkId, watermarkName]
   );
+
+  // ── DEV-ONLY player-session observability (6120 evidence gathering) ──────
+  // Real native mount/unmount counts — release builds are no-ops. The online
+  // player unmounts on screen blur (lesson screen), so this must read exactly
+  // one active session at any time. A concurrent mount (e.g. an offline
+  // player) prints an explicit warning naming every live session.
+  const sessionTag = `vdo-online-${videoId.slice(0, 8)}`;
+
 
   const [otp, setOtp]               = useState<string | null>(null);
   const [playbackInfo, setPlaybackInfo] = useState<string | null>(null);
@@ -345,6 +366,7 @@ export function VdoCipherPlayerNativeAdapter({
   // autoPlay=true mirrors the original WebView behaviour.
 
   return (
+    <VdoSessionScope tag={sessionTag}>
     <View style={isFullscreen ? FULLSCREEN_STYLE : INLINE_STYLE}>
       {isFullscreen && <StatusBar hidden />}
       <VdoPlayerView
@@ -412,5 +434,6 @@ export function VdoCipherPlayerNativeAdapter({
         </Pressable>
       )}
     </View>
+    </VdoSessionScope>
   );
 }

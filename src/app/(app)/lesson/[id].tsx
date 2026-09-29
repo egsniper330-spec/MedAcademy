@@ -28,7 +28,8 @@ import * as MediaLibrary from 'expo-media-library';
 import { useSecurity } from '@/lib/SecurityContext';
 import {
   deleteOfflineVideo, getOfflineVideos, hydrateOfflineLibrary, isOfflineVideoExpired,
-  pauseOfflineVideo, resumeOfflineVideo, safeDisplayTitle,
+  pauseOfflineVideo,
+  syncOfflineEntry, resumeOfflineVideo, safeDisplayTitle,
   startOfflineDownload, subscribeOfflineVideos, type OfflineVideoEntry,
 } from '@/lib/offlineVideoService';
 import { useScreenCapture } from '@/lib/useScreenCapture';
@@ -322,6 +323,30 @@ export default function LessonPlayer() {
     return () => { mounted = false; unsub(); };
   }, [lesson?.id, profile?.id]);
 
+  // 6120 SAFETY: an online native player must NEVER survive navigation into
+  // offline playback. The player is unmount-gated behind playerVisible; hiding
+  // it on screen-blur guarantees ZERO online VdoPlayerView instances while any
+  // offline watch screen (or any other screen) is in front. Playback position
+  // is already persisted continuously by onProgress, and enableAutoResume
+  // seeks back on the next play — nothing is lost by unmounting here.
+  useFocusEffect(
+    useCallback(() => {
+      return () => { setPlayerVisible(false); };
+    }, []),
+  );
+
+  // SDK RECONCILE ON FOCUS: the Lesson row must observe the SAME authoritative
+  // state the Offline Library sees. Early native events can fire before the
+  // listeners/row exist (or while the screen was navigated away); one official
+  // VdoDownload.query on every focus re-syncs the row — no timers, no faking.
+  useEffect(() => {
+    const mid = dlEntry?.meta.mediaId;
+    if (!mid) return;
+    let cancelled = false;
+    void syncOfflineEntry(mid).catch(() => {});
+    return () => { cancelled = true; void cancelled; };
+  }, [dlEntry?.meta.mediaId]);
+
   // Cancel an in-flight/queued download (official remove; metadata dropped).
   const handleCancelDownload = useCallback(() => {
     if (!dlEntry) return;
@@ -569,10 +594,19 @@ export default function LessonPlayer() {
              (style-only: same card, same player instance, no remount).
              Yoga positions absolute children against the DIRECT parent, so
              expanding the adapter alone would only fill this card — that
-             parent/child mismatch was the split-screen bug. */
+             parent/child mismatch was the split-screen bug.
+
+             WATERMARK LAYERING: the card is also the watermark's ancestor —
+             when fullscreen it must win the sibling z-order against the
+             content ScrollView below, or the content's opaque black layer
+             paints OVER the card and buries the RN watermark overlay (the
+             video stays visible only via its higher native layer → the
+             "video plays but watermark disappears" bug). zIndex 110 > 10:
+             exactly ONE player system, no second watermark — the SAME
+             canonical overlay simply stays above every sibling. */
           <NeuCard
             style={isFullscreen
-              ? { padding: 0, position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 100, backgroundColor: '#000', borderRadius: 0 }
+              ? { padding: 0, position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 110, backgroundColor: '#000', borderRadius: 0 }
               : { padding: 0 }}
           >
             {playerVisible ? (
@@ -688,6 +722,28 @@ export default function LessonPlayer() {
                         </Pressable>
                       );
                     }
+                    if (phase === 'paused') {
+                      return (
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                          <Pressable onPress={() => void resumeOfflineVideo(dlEntry!.meta.mediaId)} accessibilityRole="button" accessibilityLabel="Resume download" style={pill(`${c.primary}22`)}>
+                            <Download size={15} color={c.text} />
+                            <Text style={{ fontSize: 12, fontWeight: '700', color: c.text }}>Resume</Text>
+                          </Pressable>
+                          <Pressable onPress={handleCancelDownload} accessibilityRole="button" accessibilityLabel="Cancel download" style={pill(`${c.text}14`)}>
+                            <X size={14} color={c.text} />
+                            <Text style={{ fontSize: 12, fontWeight: '700', color: c.text }}>Cancel</Text>
+                          </Pressable>
+                        </View>
+                      );
+                    }
+                    if (phase === 'processing') {
+                      return (
+                        <View style={pill(`${c.primary}22`)}>
+                          <Download size={15} color={c.text} />
+                          <Text style={{ fontSize: 12, fontWeight: '700', color: c.text }}>Processing…</Text>
+                        </View>
+                      );
+                    }
                     if (phase === 'downloading') {
                       return (
                         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
@@ -735,7 +791,7 @@ export default function LessonPlayer() {
 
                 {/* In-flight progress details: percentage, bytes (Android only —
                     official SDK byte fields; never faked on iOS), pause/cancel. */}
-                {dlEntry?.phase === 'downloading' && (
+                {(dlEntry?.phase === 'downloading' || dlEntry?.phase === 'paused') && (
                   <View style={{ marginTop: 10 }}>
                     <View style={{ height: 6, borderRadius: 3, backgroundColor: `${c.text}14`, overflow: 'hidden' }}>
                       <View style={{ height: 6, borderRadius: 3, backgroundColor: c.primary, width: `${Math.max(3, Math.min(100, dlEntry.progress))}%` }} />
@@ -1124,7 +1180,7 @@ export default function LessonPlayer() {
       ) : (
         <ScrollView
           style={isFullscreen
-            ? { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 100, backgroundColor: '#000' }
+            ? { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 10, backgroundColor: '#000' }
             : { flex: 1, backgroundColor: c.base }}
           contentContainerStyle={isFullscreen
             ? { flex: 1 }

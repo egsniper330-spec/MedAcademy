@@ -65,8 +65,10 @@ import { describeProviderError } from './videoProviderPolicy';
 
 export type OfflineDownloadPhase =
   | 'authorizing'   // backend offline-authorize in flight (transient)
-  | 'pending'       // enqueued with VdoCipher, queued/starting/paused
+  | 'pending'       // enqueued with VdoCipher, queued/starting (paused maps to 'paused')
   | 'downloading'
+  | 'processing'    // native post-download finalization (real SDK state — shown, never faked)
+  | 'paused'        // native PAUSED download status (official SDK state)
   | 'completed'
   | 'failed';
 
@@ -396,8 +398,9 @@ function mapNativeStatus(native: string, fallback: OfflineDownloadPhase): Offlin
     case 'completed':  return 'completed';
     case 'failed':     return 'failed';
     case 'downloading': return 'downloading';
-    case 'pending':
-    case 'paused':     return 'pending';
+    case 'processing': return 'processing'; // native finalization state — surfaced honestly
+    case 'paused':     return 'paused';     // user paused via the SDK's own lifecycle
+    case 'pending':    return 'pending';
     default:           return fallback;
   }
 }
@@ -570,12 +573,26 @@ export async function startOfflineDownload(p: StartDownloadParams): Promise<Star
   const { selections } = selectDownloadTracks(availableTracks);
   // Sanitized track inventory (safe fields only) — makes "Tracks Not Found"-
   // class failures diagnosable from device logs without exposing credentials.
+  // The video/audio CENSUS is the decisive diagnostic: VdoCipher returns zero
+  // downloadable video renditions when the ACCOUNT/MEDIA lacks offline
+  // (FairPlay/Widevine) renditions — a dashboard-side configuration state,
+  // not a client parsing failure. This line makes that unmistakable.
+  const videoTracks = availableTracks.filter((t: { type?: string }) => t.type === 'video').length;
+  const audioTracks = availableTracks.filter((t: { type?: string }) => t.type === 'audio').length;
   console.info(
-    `[offline-dl] options ok mediaId=${mediaId} tracks=${availableTracks.length}` +
+    `[offline-dl] options ok mediaId=${mediaId} tracks=${availableTracks.length} video=${videoTracks} audio=${audioTracks} platform=${Platform.OS}` +
       availableTracks
         .map((t: { type?: string; bitrate?: number; language?: string }, i: number) => ` #${i}:${t.type}${typeof t.bitrate === 'number' && t.bitrate > 0 ? `@${t.bitrate}` : ''}${t.language ? `/${t.language}` : ''}`)
         .join('')
   );
+  if (videoTracks === 0) {
+    console.info(
+      `[offline-dl] ZERO VIDEO TRACKS mediaId=${mediaId} — VdoCipher returned no downloadable video ` +
+        `rendition. With a freshly processed video this is an ACCOUNT/MEDIA CONFIGURATION condition ` +
+        `(offline/FairPlay renditions are enabled dashboard-side), not a client failure. ` +
+        `The honest refusal below is intentional; no track data is invented.`
+    );
+  }
   if (!selections.length) {
     console.info(`[offline-dl] enqueue refused platform=${Platform.OS} reason=no-usable-tracks`);
     return { ok: false, error: 'No downloadable tracks were provided for this video.', kind: 'options' };
@@ -588,11 +605,17 @@ export async function startOfflineDownload(p: StartDownloadParams): Promise<Star
     return { ok: false, error: err?.msg || err?.exception || 'Could not start the download.', kind: 'enqueue' };
   }
 
-  // 4) Persist metadata + install official event listeners.
-  //    Cache the course image on-device FIRST (best-effort) so the Offline
-  //    Library's circular thumbnail works offline and survives server-side
-  //    file cleanup. Never blocks the download on failure.
-  const courseImageUrlLocal = await cacheCourseImage(p.courseImageUrl ?? null, mediaId);
+  // 4) Install official event listeners BEFORE creating the row: any native
+  //    event fired between enqueue and applyEntry (onQueued / early onChanged,
+  //    or even onCompleted for a tiny file) must be observable, not dropped.
+  //    patch() no-ops while the row is absent, and listeners read `cache`
+  //    live — so ordering listeners first is sufficient and race-free.
+  ensureDownloadListeners();
+
+  // 4b) Persist metadata. NOTE: the course-image cache runs AFTER applyEntry
+  //     (fire-and-forget) — awaiting this network download here previously
+  //     delayed the row's creation by seconds, during which the Lesson row
+  //     showed a stale "Queued…" and early SDK events had no row to land on.
   applyEntry({
     meta: {
       mediaId,
@@ -600,7 +623,6 @@ export async function startOfflineDownload(p: StartDownloadParams): Promise<Star
       courseId: p.courseId,
       courseName: p.courseName,
       courseImageUrl: p.courseImageUrl ?? null,
-      courseImageUrlLocal,
       sectionTitle: p.sectionTitle ?? null,
       title: p.title,
       lessonTitle: p.lessonTitle ?? p.title,
@@ -614,6 +636,8 @@ export async function startOfflineDownload(p: StartDownloadParams): Promise<Star
         ? Math.round(optionsResult.downloadOptions.mediaInfo.duration / 1000)
         : null,
       posterUrl: null,
+      // courseImageUrlLocal is patched in AFTER the fire-and-forget image
+      // cache resolves (patchOfflineEntryMeta) — never blocks the row.
     },
     phase: 'pending',
     progress: 0,
@@ -622,24 +646,45 @@ export async function startOfflineDownload(p: StartDownloadParams): Promise<Star
     lastError: null,
     updatedAt: Date.now(),
   });
-  ensureDownloadListeners();
+  void cacheCourseImage(p.courseImageUrl ?? null, mediaId)
+    .then((local) => { if (local) patchOfflineEntryMeta(mediaId, { courseImageUrlLocal: local }); })
+    .catch(() => { /* best-effort only */ });
   return { ok: true, mediaId };
+}
+
+/** Merge-only metadata patch (never touches phase/progress): used for
+ *  best-effort post-entry enrichments (e.g. the cached course image). */
+export function patchOfflineEntryMeta(
+  mediaId: string,
+  meta: Partial<OfflineVideoMeta>,
+): void {
+  if (!cache) return;
+  const e = cache.find((x) => x.meta.mediaId === mediaId);
+  if (!e) return;
+  applyEntry({ ...e, meta: { ...e.meta, ...meta }, updatedAt: Date.now() });
 }
 
 // ─── Official event listeners (installed once per JS session) ─────────────────
 
 let listenersInstalled = false;
+
+/** Apply a mutation to one cached row (no-op when the row is not in cache).
+ *  Module-scope so BOTH the official event listeners and the one-shot
+ *  syncOfflineEntry() reconcile share the exact same write path. */
+function patch(
+  mediaId: string,
+  mutate: (e: OfflineVideoEntry) => OfflineVideoEntry | null,
+): void {
+  if (!cache) return;
+  const e = cache.find((x) => x.meta.mediaId === mediaId);
+  if (!e) return;
+  const next = mutate(e);
+  if (next) applyEntry(next);
+}
+
 function ensureDownloadListeners(): void {
   if (listenersInstalled) return;
   listenersInstalled = true;
-
-  const patch = (mediaId: string, mutate: (e: OfflineVideoEntry) => OfflineVideoEntry | null): void => {
-    if (!cache) return;
-    const e = cache.find((x) => x.meta.mediaId === mediaId);
-    if (!e) return;
-    const next = mutate(e);
-    if (next) applyEntry(next);
-  };
 
   // Each addEventListener returns an unregister function (official API);
   // we intentionally listen for the whole JS session (module singleton —
@@ -652,6 +697,11 @@ function ensureDownloadListeners(): void {
   });
   VdoDownload.addEventListener('onChanged', (mediaId: string, status: DownloadStatus) => {
     patch(mediaId, (e) => {
+      // `processing` is a REAL native post-download state — surface it honestly
+      // instead of folding it into 'downloading' (which shows a fake percent).
+      if (status.status === 'processing') {
+        return { ...e, phase: 'processing' as OfflineDownloadPhase, lastError: null, updatedAt: Date.now() };
+      }
       const phase = nextPhase(e.phase, 'progress');
       if (!phase) return null;
       return {
@@ -807,6 +857,44 @@ export function getPlayableOfflineVideos(): OfflineVideoEntry[] {
 }
 
 /** Called when connectivity returns: reconcile metadata with the SDK registry. */
+/**
+ * One-shot authoritative reconcile for a SINGLE mediaId (official query()).
+ *
+ * Why this exists: the Offline Library self-heals via resyncOfflineLibrary(),
+ * but the Lesson screen previously never queried the SDK — so a row stranded
+ * by a dropped early event (or an event that fired before listeners/row
+ * existed) stayed "Queued…" forever while the Offline Library showed the
+ * truth. Screens call this on focus/return; it is idempotent and safe when
+ * the SDK is unavailable ('unknown' → local state preserved, nothing faked).
+ */
+export async function syncOfflineEntry(mediaId: string): Promise<OfflineVideoEntry | null> {
+  const before = (cache ?? []).find((x) => x.meta.mediaId === mediaId) ?? null;
+  try {
+    const statuses: DownloadStatus[] = await VdoDownload.query({ mediaId: [mediaId], status: [] });
+    const n = statuses.find((s) => s.mediaInfo.mediaId === mediaId);
+    if (!n) return before; // registry has nothing for it → keep local state
+    patch(mediaId, () => ({
+      ...before!,
+      meta: {
+        ...before!.meta,
+        posterUrl: n.poster || before!.meta.posterUrl,
+        durationSec: n.mediaInfo?.duration
+          ? Math.round(n.mediaInfo.duration / 1000)
+          : before!.meta.durationSec,
+      },
+      phase: mapNativeStatus(n.status, before!.phase),
+      progress: typeof n.downloadPercent === 'number' ? n.downloadPercent : before!.progress,
+      bytesDownloaded: n.bytesDownloaded ?? before!.bytesDownloaded,
+      totalSizeBytes: n.totalSizeBytes ?? before!.totalSizeBytes,
+      lastError: n.status === 'failed' ? (n.reasonDescription || before!.lastError) : null,
+      updatedAt: Date.now(),
+    }));
+    return (cache ?? []).find((x) => x.meta.mediaId === mediaId) ?? before;
+  } catch {
+    return before; // SDK unreachable → untouched local state
+  }
+}
+
 export async function resyncOfflineLibrary(): Promise<void> {
   if (!hydrated) return;
   let nativeStatuses: DownloadStatus[] = [];

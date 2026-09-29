@@ -114,6 +114,56 @@ for (const p of [ONLINE_ADAPTER, OFFLINE_PLAYER]) {
     `${p}: ONE VdoPlayerView, never remounted by fullscreen state`);
 }
 
+console.log('── Responsive rotation: NO forced orientation on iOS, OS-driven rotation allowed ──');
+{
+  // (1) app.json pins the iPhone supported orientations via ios.infoPlist —
+  // this wins over the abstract "orientation" property in Expo's prebuild
+  // (createInfoPlistPluginWithPropertyGuard respects an explicit infoPlist
+  // value and only warns). Portrait-only made the app UNABLE to rotate even
+  // with Rotation Lock off — the stuck-portrait root cause.
+  const appJson = JSON.parse(read('app.json'));
+  const orients = appJson.expo?.ios?.infoPlist?.UISupportedInterfaceOrientations;
+  ok(Array.isArray(orients) && orients.includes('UIInterfaceOrientationLandscapeLeft') && orients.includes('UIInterfaceOrientationLandscapeRight'),
+    'app.json: iPhone supports landscape orientations (responsive rotation possible at all)');
+  ok(orients.includes('UIInterfaceOrientationPortrait'), 'app.json: portrait still supported (entering fullscreen never rotates)');
+  ok(appJson.expo.orientation === 'portrait', 'app.json: abstract orientation stays portrait (Android + iPad unaffected)');
+
+  // (2) No player may force a rotation on iOS. Structural pin: every
+  // lockAsync must be guarded by Platform.OS !== 'android' (or unconditional
+  // Android-only restore semantics), and NO fullscreen enter path may lock
+  // LANDSCAPE unconditionally.
+  for (const p of [ONLINE_ADAPTER, OFFLINE_PLAYER, PLYR_PLAYER]) {
+    const s = read(p);
+    if (!/ScreenOrientation/.test(s)) continue; // fully responsive player
+    const firstLock = s.indexOf('ScreenOrientation.lockAsync');
+    const guard = s.lastIndexOf("Platform.OS !== 'android'", firstLock);
+    ok(guard !== -1 && guard < firstLock, `${p}: every orientation lock is Android-gated (iOS never locked)`);
+  }
+
+  // (3) No player forces landscape on iOS by any other means: no
+  // unlockAsync (forced-rotation bypass) anywhere.
+  for (const p of [ONLINE_ADAPTER, OFFLINE_PLAYER, PLYR_PLAYER]) {
+    ok(!/unlockAsync/.test(read(p)), `${p}: no unlockAsync (no forced rotation)`);
+  }
+
+  // (4) The online + offline players keep pure style-toggled containers —
+  // the SAME instance re-measures when the OS rotates (no remount, no
+  // Modal, no second window).
+  for (const p of [ONLINE_ADAPTER, OFFLINE_PLAYER]) {
+    const s = read(p);
+    ok(/FULLSCREEN_STYLE|position: 'absolute'/.test(s) && !/key=\{[^}]*isFullscreen/.test(s),
+      `${p}: absolute-fill container is style-toggled (rotation only re-measures)`);
+  }
+
+  // (5) Android Plyr contract: LANDSCAPE while fullscreen, PORTRAIT_UP
+  // restored on exit (Android-gated only).
+  {
+    const s = read(PLYR_PLAYER);
+    ok(/Platform\.OS !== 'android' \|\| !isFullscreen/.test(s), 'Plyr: orientation effect Android-gated');
+    ok(/OrientationLock\.LANDSCAPE/.test(s) && /OrientationLock\.PORTRAIT_UP/.test(s), 'Plyr: Android landscape contract with PORTRAIT_UP restore');
+  }
+}
+
 console.log('── Offline VdoCipher player: ONE native player instance, in-place ──');
 {
   const s = read(OFFLINE_PLAYER);
@@ -136,6 +186,13 @@ console.log('── Plyr/YouTube player: ONE WebView instance, in-place fullscre
     'YouTubePlayer.tsx: exactly one <WebView> JSX mount (no second modal WebView)');
   ok(!/modalHtml/.test(s), 'YouTubePlayer.tsx: old modal-only HTML document removed');
   ok(!/key=\{[^}]*isFullscreen/.test(s), 'YouTubePlayer.tsx: WebView key must not depend on isFullscreen');
+  // RESUME-LATCH pin: the WebView source identity must never change mid-session
+  // (an identity change reloads the WebView — blank surface + position reset).
+  // Both sub-components latch resumePosition to its initial value and the memo
+  // deps exclude it.
+  ok(/resumePosition: initialResume/.test(s), 'YouTubePlayer.tsx: resumePosition is latched to its initial value');
+  ok(/resumeLatched\.current/.test(s), 'YouTubePlayer.tsx: player source uses the latched resume value');
+  ok(!/resumeAt:\s*resumePosition/.test(s), 'YouTubePlayer.tsx: playerHtml memo no longer consumes the moving prop');
   ok(/isFullscreen/.test(s) && /position:\s*'absolute'/.test(s),
     'YouTubePlayer.tsx: fullscreen toggles the WebView container in place');
 }
@@ -159,8 +216,22 @@ console.log('── Lesson screen: pinned-player layout (fullscreen covers the s
   // ancestor (the player's direct-parent NeuCard) — Yoga positions absolute
   // children against their DIRECT parent, so expanding only the adapter's own
   // container would fill just the 16:9 card (header + card + black void).
-  ok(/position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 100/.test(s),
+  ok(/position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 110/.test(s),
     'lesson: player host card receives the absolute-fill style when fullscreen (split-screen fix)');
+  // WATERMARK LAYERING pin: the fullscreen content ScrollView must sit at a
+  // STRICTLY LOWER z than the player host card. An equal-zIndex sibling tie
+  // let the opaque content layer paint OVER the player container — the video
+  // stayed visible (native layer wins) but the RN watermark overlay was
+  // buried → "watermark disappears in fullscreen". Both fullscreen
+  // ScrollViews must carry zIndex 10 (or lower).
+  {
+    const sv = s.match(/<ScrollView[\s\S]{0,400}?style=\{isFullscreen\s*\?[^}]*\}/g) || [];
+    ok(sv.length >= 2, 'lesson: both fullscreen ScrollViews found for the z-order pin');
+    for (const block of sv) {
+      const m = block.match(/zIndex:\s*(\d+)/);
+      ok(m && parseInt(m[1], 10) < 110, `lesson: fullscreen content layer z (${m ? m[1] : 'none'}) < player host z 110 (watermark must stay above content)`);
+    }
+  }
   // The host expansion is style-only: content stays mounted (hidden via
   // conditional JSX is NOT allowed for the player itself — only the header
   // row is conditionally rendered, which does not contain the player).
@@ -228,6 +299,28 @@ console.log('── Security surfaces untouched ──');
     'Android manifest: activity survives rotation (in-place fullscreen prerequisite)');
   ok(/FLAG_SECURE|setFlags/.test(read('src/lib/nativeSecurity.ts') || '') ||
      exists('src/lib/nativeSecurity.ts'), 'native security lib present');
+}
+
+console.log('── DEV player-session observability: ONE mounted VdoPlayer invariant ──');
+{
+  const SESSION = 'src/lib/vdoPlayerSession.ts';
+  ok(exists(SESSION), 'vdoPlayerSession.ts: dev-only mount counter exists');
+  const ss = read(SESSION);
+  ok(/__DEV__/.test(ss), 'vdoPlayerSession: counters are dev-only no-ops in release builds');
+  ok(/playerSessionMount/.test(ss) && /playerSessionUnmount/.test(ss), 'vdoPlayerSession: mount/unmount API present');
+  const on = read(ONLINE_ADAPTER);
+  const off = read(OFFLINE_PLAYER);
+  ok(/VdoSessionScope/.test(on), 'online adapter: real player tree wrapped in a session scope');
+  ok(/VdoSessionScope/.test(off), 'offline player: real player tree wrapped in a session scope');
+  // Scopes must wrap the ACTUAL player render (after early-exit loading/error
+  // paths), not the component mount — otherwise loading states inflate counts.
+  ok(on.indexOf('function VdoSessionScope') < on.indexOf('<VdoSessionScope tag'), 'online adapter: scope defined before use');
+  ok(off.indexOf('function VdoSessionScope') < off.indexOf('<VdoSessionScope tag'), 'offline player: scope defined before use');
+  // The lesson screen must unmount the ONLINE player on blur so offline
+  // playback never starts with a second live native player (6120 evidence).
+  const lesson = read(LESSON);
+  ok(/useFocusEffect[\s\S]{0,220}setPlayerVisible\(false\)/.test(lesson),
+    'lesson: online player unmounts on screen blur (no second live VdoPlayer during offline playback)');
 }
 
 console.log('──────────────────────────────────────────────');

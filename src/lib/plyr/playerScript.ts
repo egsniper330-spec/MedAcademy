@@ -60,6 +60,8 @@
  *   an earlier version had one (fixiOSTapToToggle) and it caused the
  *   tap-anywhere-pauses bug plus YouTube's title/channel HUD appearing on tap.
  */
+import { WATERMARK_FONT_PX } from '@/lib/nativeWatermarkConfig';
+
 export const PLAYER_SCRIPT = `
 (function () {
   'use strict';
@@ -193,7 +195,7 @@ export const PLAYER_SCRIPT = `
       // Single-line format: "NAME • WM-NNNN"  (U+2022 bullet separator)
       _iEl = document.createElement('div');
       _iEl.style.cssText = [
-        'font-size:13px',
+        'font-size:${WATERMARK_FONT_PX}px',
         'font-weight:600',
         'letter-spacing:0.3px',
         'white-space:nowrap',

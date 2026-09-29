@@ -52,6 +52,7 @@ import * as ScreenOrientation from 'expo-screen-orientation';
 import { ArrowLeft } from 'lucide-react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { VdoPlayerView } from 'vdocipher-rn-bridge';
+import { playerSessionMount, playerSessionUnmount } from '@/lib/vdoPlayerSession';
 import {
   isOfflineVideoExpired,
   classifyOfflineLoadError,
@@ -68,6 +69,18 @@ import type { OfflineVideoPlayerProps } from './OfflineVideoPlayer.types';
 export type { OfflineVideoPlayerProps };
 
 type PlayerError = { message: string; expired: boolean };
+
+
+/** DEV-ONLY session scope: registers the mounted native player ONLY while the
+ *  real VdoPlayerView tree is rendered (early-exit expired/gate/error paths
+ *  never count). Release builds: playerSession* are no-ops. */
+function VdoSessionScope({ tag, children }: { tag: string; children: React.ReactNode }) {
+  useEffect(() => {
+    playerSessionMount(tag);
+    return () => playerSessionUnmount(tag);
+  }, [tag]);
+  return <>{children}</>;
+}
 
 export function OfflineVideoPlayer({ entry, shouldAllowPlayback, watermarkId, watermarkName, onClose }: OfflineVideoPlayerProps) {
   void onClose; // kept for API compatibility; collapse/close is owned by the host screen header
@@ -89,9 +102,14 @@ export function OfflineVideoPlayer({ entry, shouldAllowPlayback, watermarkId, wa
     [watermarkId, watermarkName]
   );
 
+
+
   // Server-issued rental window is authoritative for the pre-mount expiry
   // check (isExpired() is Android-only in the official SDK).
   const expired = useMemo(() => isOfflineVideoExpired(entry), [entry]);
+
+  // ── DEV-ONLY player-session observability (6120 evidence gathering) ──────
+  const sessionTag = `vdo-offline-${entry.meta.mediaId.slice(0, 8)}`;
 
   // ── Pre-mount security revalidation (fail-closed) ──────────────────────────
   useEffect(() => {
@@ -250,6 +268,7 @@ export function OfflineVideoPlayer({ entry, shouldAllowPlayback, watermarkId, wa
     // SAME VdoPlayerView instance, the SAME decoder surface. Rotation only
     // re-measures the container; nothing is torn down. When not fullscreen it
     // is the normal 16:9 block under the watch header.
+    <VdoSessionScope tag={sessionTag}>
     <View
       style={
         isFullscreen
@@ -309,6 +328,7 @@ export function OfflineVideoPlayer({ entry, shouldAllowPlayback, watermarkId, wa
         </Pressable>
       )}
     </View>
+    </VdoSessionScope>
   );
 }
 

@@ -1,3 +1,5 @@
+import { WATERMARK_FONT_PX } from './nativeWatermarkConfig';
+
 /**
  * watermarkInjection.ts
  *
@@ -214,8 +216,12 @@ export function buildWatermarkInjection(
         'color:#fff;',
         /* System sans-serif stack — same as Plyr watermark */
         'font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;',
-        /* PLYR PARITY typography: 13px / 600 / 0.3px tracking */
-        'font-size:13px;',
+        /* PLYR PARITY typography: size from the canonical WATERMARK_FONT_PX
+           (Plyr's 13px raised to 15px for readability — see config) / 600 /
+           0.3px tracking. Interpolated by TypeScript at build time (this
+           whole IIFE is an emitted template literal) — do NOT concatenate
+           inside it. */
+        'font-size:${WATERMARK_FONT_PX}px;',
         'font-weight:600;',
         'letter-spacing:0.3px;',
         'white-space:nowrap;',

@@ -17,6 +17,12 @@
         "aps-environment": "production"
       },
       "infoPlist": {
+        "UISupportedInterfaceOrientations": [
+          "UIInterfaceOrientationPortrait",
+          "UIInterfaceOrientationPortraitUpsideDown",
+          "UIInterfaceOrientationLandscapeLeft",
+          "UIInterfaceOrientationLandscapeRight"
+        ],
         "NSFaceIDUsageDescription": "Allow MedAcademy to use Face ID for secure login.",
         "NSCameraUsageDescription": "Allow MedAcademy to access your camera to take profile photos and course images.",
         "NSMicrophoneUsageDescription": "Allow MedAcademy to access your microphone to record audio messages and voice lectures.",

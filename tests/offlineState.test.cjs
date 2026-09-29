@@ -63,7 +63,7 @@ console.log('── Offline download phase machine ──');
     'function applyEntry'
   ).replace(/import[^\n]*\n/g, '');
   const types = `
-    type OfflineDownloadPhase = 'authorizing' | 'pending' | 'downloading' | 'completed' | 'failed';
+    type OfflineDownloadPhase = 'authorizing' | 'pending' | 'downloading' | 'processing' | 'paused' | 'completed' | 'failed';
   `;
   const mod = compileModule('phases', types + phaseSection);
   const nextPhase = mod.nextPhase;
@@ -83,6 +83,23 @@ console.log('── Offline download phase machine ──');
   // removed clears the row
   assert(nextPhase('completed', 'removed') === null, 'removed on completed → row dropped');
   assert(nextPhase('downloading', 'removed') === null, 'removed on downloading → row dropped');
+
+  // NATIVE-STATE HONESTY: 'processing' is a real SDK post-download state —
+  // mapped in the service (never folded into a fake percent 'downloading').
+  const svcSrc0 = fs.readFileSync(path.join(ROOT, 'src/lib/offlineVideoService.ts'), 'utf8').replace(/\r/g, '');
+  assert(/case 'processing':\s*return 'processing';/.test(svcSrc0), 'mapNativeStatus surfaces native processing honestly');
+  assert(/case 'paused':\s*return 'paused';/.test(svcSrc0), 'mapNativeStatus surfaces native paused honestly');
+  assert(/status\.status === 'processing'/.test(svcSrc0), 'onChanged maps native processing to the processing phase (no fake percent)');
+  // LISTENERS-BEFORE-ROW ORDER: events fired between enqueue and applyEntry
+  // must be observable — ensureDownloadListeners() must run BEFORE applyEntry
+  // in startOfflineDownload (the old order silently dropped early events →
+  // the "Queued…" forever bug).
+  {
+    const startFn = svcSrc0.slice(svcSrc0.indexOf('export async function startOfflineDownload'));
+    const li = startFn.indexOf('ensureDownloadListeners();');
+    const ai = startFn.indexOf('applyEntry({');
+    assert(li !== -1 && ai !== -1 && li < ai, 'startOfflineDownload installs download listeners BEFORE creating the row (no dropped early events)');
+  }
 }
 
 // ── 2. Track selection parity ────────────────────────────────────────────────
@@ -242,7 +259,7 @@ console.log('── Course grouping ──');
     'async function persist'
   );
   const types = `
-    type OfflineDownloadPhase = 'authorizing' | 'pending' | 'downloading' | 'completed' | 'failed';
+    type OfflineDownloadPhase = 'authorizing' | 'pending' | 'downloading' | 'processing' | 'paused' | 'completed' | 'failed';
     interface OfflineVideoMeta {
       mediaId: string; lessonId: string; courseId: string | null; title: string;
       lessonTitle: string; courseName: string | null; lessonThumbnailUrl: string | null;
@@ -541,7 +558,8 @@ console.log('── Focused fix pass (transition, card, drawer, About, watermark
     // Native overlay: glides while visible (never hides), clamped, Plyr typography.
     assert(!/withSequence/.test(wmSrc), 'no fade-teleport-fade sequence (Plyr glides, never hides)');
     assert(/wmClampPosition/.test(wmSrc), 'whole-element clamp (Plyr mkTransform) prevents edge clipping');
-    assert(/color:\s+'#fff'/.test(wmSrc) && /fontSize:\s+13,/.test(wmSrc) && /fontWeight:\s+'600'/.test(wmSrc), 'native typography = Plyr (13px/600/#fff)');
+    assert(/color:\s+'#fff'/.test(wmSrc) && /fontSize:\s+WATERMARK_FONT_PX,/.test(wmSrc) && /fontWeight:\s+'600'/.test(wmSrc), 'native typography = Plyr (WATERMARK_FONT_PX/600/#fff — single canonical size)');
+    assert(/WATERMARK_FONT_PX = 15/.test(cfgSrc), 'canonical watermark size = 15px (Plyr 13px + ~15% per product request)');
     // Web injection: Plyr parity in the VdoCipher WebView.
     const injSrc = cr(fs.readFileSync(path.join(ROOT, 'src/lib/watermarkInjection.ts'), 'utf8'));
     assert(/0\.08,0\.08/.test(injSrc) && /0\.72,0\.74/.test(injSrc), 'web injection uses the Plyr G table');
@@ -549,11 +567,12 @@ console.log('── Focused fix pass (transition, card, drawer, About, watermark
     assert(!/__fwmPulse/.test(injSrc.replace(/^[\s*\/]+/gm, '').replace(/\/\*[\s\S]*?\*\//g, '')) || !/animation:__fwmPulse/.test(injSrc), 'web injection pulse animation removed (Plyr parity)');
     assert(/rnd\(0\.38,0\.58\)/.test(injSrc), 'web injection opacity band = Plyr');
     assert(/rnd\(30000,60000\)/.test(injSrc), 'web injection interval = Plyr (30-60s)');
-    assert(/font-size:13px/.test(injSrc) && /font-weight:600/.test(injSrc), 'web injection typography = Plyr');
+    assert(/font-size:\$\{WATERMARK_FONT_PX\}px/.test(injSrc) && /font-weight:600/.test(injSrc), 'web injection typography = Plyr (size from WATERMARK_FONT_PX)');
     // Fullscreen DOM hook: same table/typography.
     const fsSrc = cr(fs.readFileSync(path.join(ROOT, 'src/hooks/useFullscreenWatermark.ts'), 'utf8'));
     assert(/0\.08, 0\.08/.test(fsSrc) && /0\.72, 0\.74/.test(fsSrc), 'fullscreen DOM hook uses the Plyr G table');
-    assert(/font-size:13px;font-weight:600/.test(fsSrc), 'fullscreen DOM hook typography = Plyr');
+    assert(/font-size:' \+ WATERMARK_FONT_PX \+ 'px;font-weight:600/.test(fsSrc), 'fullscreen DOM hook typography = Plyr (size from WATERMARK_FONT_PX)');
+    assert(!/font-size:13px/.test(injSrc) && !/font-size:13px/.test(fsSrc) && !/fontSize:\s+13,/.test(wmSrc), 'no renderer hardcodes the retired 13px');
     // Web VdoCipher player: exactly ONE watermark (the in-HTML injection);
     // the second RN overlay layer is removed.
     const wvSrc = cr(fs.readFileSync(path.join(ROOT, 'src/components/VdoCipherPlayerWebView.tsx'), 'utf8'));
