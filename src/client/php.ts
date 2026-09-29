@@ -15,6 +15,7 @@ import { getInstallationId, getStoredDeviceFingerprint } from '@/lib/installatio
 import { getInstalledBuildNumber } from '@/lib/appIdentity';
 import { Platform as RNPlatform } from 'react-native';
 import { setMaintenanceControlFlowActive, isMaintenanceControlFlowActive } from '@/lib/maintenanceStateModel';
+import { classifyAuthHttpStatus, shouldClearSession } from '@/lib/authFailureModel';
 
 // ── Config ──────────────────────────────────────────────────────────────────
 
@@ -119,11 +120,17 @@ async function refreshAccessToken(): Promise<boolean> {
       // AuthService::refresh() throws). A transient network error (no HTTP
       // status) or a 5xx server error must NOT log the user out.
       const status = res.error?.status;
-      if (status === 401 || status === 400 || status === 422 || status === 403) {
-        authStateLog('AUTH_REFRESH_DEFINITIVE_FAILURE', `${classifyHttpStatus(status)} → clearing local session`);
+      // Shared failure model (authFailureModel): identical behavior to the
+      // explicit list this replaced — 401/400/422/403 definitive → clear;
+      // network errors / timeouts / 5xx / 429 transient → PRESERVE — expressed
+      // through the ONE canonical vocabulary every session-terminating call
+      // site must consult.
+      const kind = classifyAuthHttpStatus(status);
+      if (shouldClearSession(kind)) {
+        authStateLog('AUTH_REFRESH_DEFINITIVE_FAILURE', `${kind} (${classifyHttpStatus(status)}) → clearing local session`);
         await clearSession();
       } else {
-        authStateLog('AUTH_NETWORK_FAILURE', `${classifyHttpStatus(status)} → session PRESERVED`);
+        authStateLog('AUTH_NETWORK_FAILURE', `${kind} (${classifyHttpStatus(status)}) → session PRESERVED`);
       }
       return false;
     }
@@ -752,8 +759,10 @@ const authMethods = {
     if (res.error || !res.data) {
       const status = res.error?.status;
       // 403 = account suspended/blocked (only 403 AuthService::refresh() throws)
-      // — definitive. Network errors / 5xx preserve the session.
-      if (status === 401 || status === 400 || status === 422 || status === 403) {
+      // — definitive. Network errors / 5xx preserve the session. (Shared model.)
+      const kind = classifyAuthHttpStatus(status);
+      if (shouldClearSession(kind)) {
+        authStateLog('AUTH_REFRESH_DEFINITIVE_FAILURE', `${kind} (explicit-token path) → clearing local session`);
         await clearSession();
       }
       return { data: { session: null }, error: res.error };

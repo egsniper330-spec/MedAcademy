@@ -135,9 +135,9 @@ console.log('── Sanitized diagnostics (no credential leakage) ──');
   assert(leaks.length === 0, 'offlineVideoService logs never contain otp/playbackInfo/secret/token: ' + JSON.stringify(leaks).slice(0, 200));
 
   // The enqueue/options diagnostics exist and carry only safe fields
-  assert(/\[offline-dl\] options ok mediaId=/.test(svcSrc), 'options-success diagnostic logs mediaId + track inventory (safe fields)');
+  assert(/\[offline-dl\] STAGE=native-getDownloadOptions OK mediaId=/.test(svcSrc), 'options-success diagnostic logs mediaId + track inventory (safe fields)');
   assert(/\[offline-dl\] enqueue mediaId=.*selections=/.test(svcSrc), 'enqueue diagnostic logs mediaId + selected indices');
-  assert(/\[offline-dl\] options failed code=/.test(svcSrc), 'options-failure diagnostic logs sanitized code/msg');
+  assert(/\[offline-dl\] STAGE=native-getDownloadOptions FAILED code=/.test(svcSrc), 'options-failure diagnostic logs sanitized code/msg (stage-tagged: iOS "Tracks Not Found" originates in the bridge, before JS)');
 
   const playerSrc = fs.readFileSync(path.join(ROOT, 'src/components/OfflineVideoPlayer.native.tsx'), 'utf8').replace(/\r/g, '');
   const playerLogs = playerSrc.match(/console\.(info|log|warn)[^;]*/g) || [];

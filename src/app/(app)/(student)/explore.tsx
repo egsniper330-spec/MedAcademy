@@ -7,6 +7,7 @@ import { useFocusEffect, useRouter } from 'expo-router';
 import { Search, X, BookOpen } from 'lucide-react-native';
 import { useProfileStore } from '@/lib/store';
 import { getFeaturedCourses, searchAllPublishedCourses, getMySubscriptions } from '@/lib/api';
+import { prefetchCourseImages, courseImageUrlsFrom } from '@/lib/imagePrefetch';
 import { CourseCard } from '@/components/CourseCard';
 import { SubscribeSheet, type SubscribeSheetContact } from '@/components/SubscribeSheet';
 import { PageHeader } from '@/components/PageHeader';
@@ -96,6 +97,7 @@ function doctorOf(item: CourseItem): { id: string; full_name: string } | null {
         profile ? getMySubscriptions(profile.id) : Promise.resolve([]),
       ]);
       setFeatured(courses as unknown as CourseItem[]);
+      prefetchCourseImages(courseImageUrlsFrom(courses));
 
       const ids = new Set<string>();
       const map: Record<string, 'active' | 'completed'> = {};

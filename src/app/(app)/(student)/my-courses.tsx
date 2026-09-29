@@ -4,6 +4,7 @@ import { View, Text, ScrollView, useColorScheme, RefreshControl } from 'react-na
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useProfileStore } from '@/lib/store';
 import { getMySubscriptions } from '@/lib/api';
+import { prefetchCourseImages, courseImageUrlsFrom } from '@/lib/imagePrefetch';
 import { CourseCard } from '@/components/CourseCard';
 import { neuColors, useLayout, safeBottom } from '@/lib/neu';
 import type { RelativePathString } from 'expo-router';
@@ -27,6 +28,7 @@ export default function MyCourses() {
     try {
       const data = await getMySubscriptions(profile.id);
       setSubscriptions(data);
+      prefetchCourseImages(courseImageUrlsFrom(data));
     } catch {}
   }, [profile]);
 

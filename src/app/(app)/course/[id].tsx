@@ -8,6 +8,7 @@ import {
   Eye, X,
 } from 'lucide-react-native';
 import { getCourseById, getCourseProgress, getLessonProgress, getMySubscriptions, calcCourseDuration, calcRemainingTime, calcCompletedTime, formatStudyTime } from '@/lib/api';
+import { prefetchCourseImages, courseImageUrlsFrom } from '@/lib/imagePrefetch';
 import { useProfileStore } from '@/lib/store';
 import { NeuCard } from '@/components/NeuCard';
 import { NeuButton } from '@/components/NeuButton';
@@ -75,6 +76,7 @@ export default function CourseDetail() {
       ]);
       setCourse(courseData);
       setProgress(prog);
+      if (courseData) prefetchCourseImages(courseImageUrlsFrom([courseData]));
       if (courseData?.sections?.length) {
         // Restore from session cache; only reset if no prior state exists for this course
         if (!_sectionStateCache.has(id!)) {

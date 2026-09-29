@@ -553,8 +553,14 @@ export async function startOfflineDownload(p: StartDownloadParams): Promise<Star
   } catch (e: unknown) {
     const err = e as { errorMsg?: string; errorCode?: number | string; httpStatusCode?: number };
     // Sanitized diagnostics (NO otp/playbackInfo/tokens — code+message only).
+    // STAGE = native getDownloadOptions. On iOS the bridge's VdoDownload.swift
+    // throws its literal "Tracks Not Found" error HERE — inside the closed
+    // SDK, after asset.getVideoQualities() returns zero — before any JS sees
+    // a track list. So msg="Tracks Not Found" at this stage is stage-proof
+    // that VdoCipher itself supplied zero downloadable renditions (case A/F:
+    // SDK/account-media level), NOT a JS filtering or parsing failure.
     console.info(
-      `[offline-dl] options failed code=${String(err?.errorCode ?? '?')} http=${String(err?.httpStatusCode ?? '?')} msg="${String(err?.errorMsg ?? '?')}" platform=${Platform.OS}`
+      `[offline-dl] STAGE=native-getDownloadOptions FAILED code=${String(err?.errorCode ?? '?')} http=${String(err?.httpStatusCode ?? '?')} msg="${String(err?.errorMsg ?? '?')}" platform=${Platform.OS}`
     );
     // Honest capability surfacing: most commonly the VdoCipher ACCOUNT does
     // not have offline downloads enabled (dashboard/plan capability — cannot
@@ -580,15 +586,15 @@ export async function startOfflineDownload(p: StartDownloadParams): Promise<Star
   const videoTracks = availableTracks.filter((t: { type?: string }) => t.type === 'video').length;
   const audioTracks = availableTracks.filter((t: { type?: string }) => t.type === 'audio').length;
   console.info(
-    `[offline-dl] options ok mediaId=${mediaId} tracks=${availableTracks.length} video=${videoTracks} audio=${audioTracks} platform=${Platform.OS}` +
+    `[offline-dl] STAGE=native-getDownloadOptions OK mediaId=${mediaId} tracks=${availableTracks.length} video=${videoTracks} audio=${audioTracks} platform=${Platform.OS}` +
       availableTracks
         .map((t: { type?: string; bitrate?: number; language?: string }, i: number) => ` #${i}:${t.type}${typeof t.bitrate === 'number' && t.bitrate > 0 ? `@${t.bitrate}` : ''}${t.language ? `/${t.language}` : ''}`)
         .join('')
   );
   if (videoTracks === 0) {
     console.info(
-      `[offline-dl] ZERO VIDEO TRACKS mediaId=${mediaId} — VdoCipher returned no downloadable video ` +
-        `rendition. With a freshly processed video this is an ACCOUNT/MEDIA CONFIGURATION condition ` +
+      `[offline-dl] STAGE=js-track-selection ZERO VIDEO TRACKS mediaId=${mediaId} — the SDK delivered an options payload with ` +
+        `no downloadable video rendition. With a freshly processed video this is an ACCOUNT/MEDIA CONFIGURATION condition ` +
         `(offline/FairPlay renditions are enabled dashboard-side), not a client failure. ` +
         `The honest refusal below is intentional; no track data is invented.`
     );

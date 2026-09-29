@@ -11,6 +11,7 @@ import {
   Search, SlidersHorizontal, ChevronRight, Play, X,
 } from 'lucide-react-native';
 import { useProfileStore } from '@/lib/store';
+import { prefetchCourseImages, courseImageUrlsFrom } from '@/lib/imagePrefetch';
 import {
   getMySubscriptions, getUnreadNotificationCount,
   getPublishedCourses, getCategories,
@@ -71,6 +72,9 @@ export default function StudentDashboard() {
       setUnreadCount(count);
       setAllCourses(courses);
       setCategories(cats);
+      // Warm the image cache the instant course data lands — cards render
+      // with their images instead of popping in late after login.
+      prefetchCourseImages(courseImageUrlsFrom(courses));
     } catch {}
     setLoading(false);
   }, [profile]);

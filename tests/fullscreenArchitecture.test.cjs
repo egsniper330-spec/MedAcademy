@@ -195,6 +195,17 @@ console.log('── Plyr/YouTube player: ONE WebView instance, in-place fullscre
   ok(!/resumeAt:\s*resumePosition/.test(s), 'YouTubePlayer.tsx: playerHtml memo no longer consumes the moving prop');
   ok(/isFullscreen/.test(s) && /position:\s*'absolute'/.test(s),
     'YouTubePlayer.tsx: fullscreen toggles the WebView container in place');
+  // iOS BLACK-FRAME guard (audio-continues-video-gone class): the WebView must
+  // stay COORDINATED through the fullscreen/rotation transition — never
+  // remounted, never display:none'd, and always a live flex child of the
+  // expanding container so its native frame never collapses to zero.
+  ok(!/display:\s*['"]none['"]/.test(s), 'Plyr: WebView never hidden via display:none (surface-loss class)');
+  ok(!/opacity:\s*0/.test(s), 'Plyr: WebView never faded via opacity:0 (surface-loss class)');
+  ok(/style=\{\{ flex: 1, backgroundColor: '#000' \}\}/.test(s),
+    'Plyr: WebView is a coordinated flex child of the fullscreen container (frame never zero-size)');
+  // Web branch: the iframe key is the LATCHED src — stable identity across
+  // pseudo-fullscreen and parent re-renders (no reload → no blank frame).
+  ok(/key=\{src\}/.test(s), 'Plyr web: iframe key is the latched src (identity-stable)');
 }
 
 console.log('── Lesson screen: pinned-player layout (fullscreen covers the screen) ──');
