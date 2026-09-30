@@ -650,8 +650,8 @@ console.log('── Account state sync (server-authoritative role/status) + Glob
     assert(fn({ recent_audit: 'nope' }).entries.length === 0, 'malformed recent_audit → []');
     // 4. .slice() on the result is always safe.
     assert(Array.isArray(fn({ recent_audit: [{ id: 'q', action: 'z' }] }).entries.slice(0, 3)), '.slice() safe on normalized entries');
-    // 5. search_audit_logs wrapper ({logs:[...]}) normalized in getAuditTrail.
-    assert(/logs/.test(apiSrc) && /Array\.isArray\(\(payload as \{ logs\?: unknown \}\)\.logs\)/.test(apiSrc.replace(/\(payload as \{ logs\?: unknown \}\)\.logs/g, '(payload as { logs?: unknown }).logs')), 'getAuditTrail normalizes the {logs:[...]} wrapper');
+    // 5. search_audit_logs wrapper ({logs:[...]}) parsed STRICTLY in getAuditTrail.
+    assert(/logs/.test(apiSrc) && /!Array\.isArray\(payload\.logs\)/.test(apiSrc), 'getAuditTrail strictly parses the {logs:[...]} wrapper (malformed → thrown error, never [])');
   }
 
   // ── Blocked account: terminal state, never infinite spinner ──────────────

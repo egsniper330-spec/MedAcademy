@@ -128,9 +128,13 @@ export function parseContactLinks(raw: unknown): ContactLink[] {
     const platform = typeof row.platform === 'string' ? row.platform.toLowerCase().trim() : '';
     const url      = typeof row.url === 'string' ? row.url.trim() : '';
     if (platform === '' || url === '') continue;
+    // Default label = the REGISTRY's canonical label for the platform
+    // ('WhatsApp', 'X / Twitter') — not a naive capitalization of the raw key
+    // ('Whatsapp', 'Twitter'). A non-empty stored label always wins: admins
+    // may customize it, but the DEFAULT identity follows the platform.
     const label = typeof row.label === 'string' && row.label.trim() !== ''
       ? row.label.trim()
-      : platform.charAt(0).toUpperCase() + platform.slice(1);
+      : CONTACT_PLATFORMS[platform]?.label ?? platform.charAt(0).toUpperCase() + platform.slice(1);
     out.push({
       platform,
       label,

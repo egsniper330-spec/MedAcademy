@@ -246,6 +246,75 @@ a:hover { text-decoration: underline; }
   width: 100%;
 }
 
+/* ── Contact page — simple vertical contact list ────────── */
+.contact-list {
+  display: flex;
+  flex-direction: column;
+  width: min(340px, 100%);
+  margin-inline: auto;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+
+/* One clickable row: [30px brand icon] Name — comfortable 58px height. */
+.contact-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-height: 58px;
+  padding: 0.7rem 1.2rem;
+  color: var(--text);
+  font-weight: 600;
+  font-size: 1.125rem; /* 18px — readable, same weight/style */
+  border-bottom: 1px solid var(--border);
+  transition: background 0.15s ease;
+}
+.contact-row:last-child { border-bottom: none; }
+.contact-row:hover {
+  background: hsl(210 100% 60% / 0.07);
+  text-decoration: none;
+}
+.contact-row:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: -2px;
+}
+
+/* Small colored platform icon — every dimension constrained so neither an
+   SVG's viewBox nor a raster logo's intrinsic size can inflate the render. */
+.contact-icon {
+  width: 30px;
+  height: 30px;
+  min-width: 30px;
+  max-width: 30px;
+  min-height: 30px;
+  max-height: 30px;
+  display: block;
+  flex-shrink: 0;
+  color: var(--primary); /* email glyph uses the MedAcademy blue */
+  overflow: hidden;
+}
+.contact-icon svg,
+.contact-icon img {
+  width: 30px;
+  height: 30px;
+  min-width: 30px;
+  max-width: 30px;
+  min-height: 30px;
+  max-height: 30px;
+  object-fit: contain;
+  display: block;
+}
+
+.contact-name { flex: 1; }
+
+@media (max-width: 720px) {
+  .contact-list { width: 100%; }
+  .contact-row { min-height: 56px; padding: 0.65rem 1rem; }
+}
+
 /* ── Footer ─────────────────────────────────────────── */
 .site-footer {
   border-top: 1px solid var(--border);

@@ -1,6 +1,6 @@
 /**
  * sa-analytics.tsx — Super Admin Analytics hub
- * Groups: System Health, Video Health, Video Monitor, Storage Monitor,
+ * Groups: System Health, Storage Monitor,
  *         Credit Analytics, Revenue Analytics, Fraud Alerts
  */
 import { useCallback, useState } from 'react';
@@ -73,8 +73,6 @@ export default function SAAnalytics() {
       title: 'System Health',
       items: [
         { icon: Activity,   label: 'System Health',     description: 'Database, auth, storage status',     color: '#16A34A', path: '/health' },
-        { icon: HeartPulse, label: 'Video Health',      description: 'Video processing pipeline status',   color: '#2DA8FF', path: '/sa-video-health' },
-        { icon: Video,      label: 'Video Monitor',     description: 'Live video upload and stream stats', color: '#7C3AED', path: '/sa-video-monitor' },
         { icon: Database,   label: 'Storage Monitor',   description: 'Bucket usage and file metrics',      color: '#2DA8FF', path: '/sa-storage' },
         { icon: Zap,        label: 'Video Settings',    description: 'Encoding and provider config',       color: '#7C3AED', path: '/sa-video-settings' },
       ],

@@ -214,7 +214,6 @@ export default function SuperAdminDashboard() {
       title: 'Content & Media',
       items: [
         { icon: Video,       label: 'Video Library',    description: 'Manage uploaded videos',          color: '#7C3AED',  path: '/sa-video-library' },
-        { icon: MonitorDot,  label: 'Video Monitor',    description: 'Live video health & status',      color: '#2DA8FF',  path: '/sa-video-monitor' },
         { icon: AlertOctagon,label: 'Watermark / DRM',  description: 'Content protection & forensics',  color: '#DC2626',  path: '/content-protection' },
         { icon: HardDrive,   label: 'Storage',          description: 'Bucket usage & cleanup',          color: '#6B7280',  path: '/sa-storage' },
       ],

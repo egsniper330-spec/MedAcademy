@@ -901,24 +901,64 @@ final class AdminController
     /**
      * POST /admin/audit-logs — write an audit log entry (write_audit_log RPC port).
      * Any authenticated user may write audit entries; reading is admin-only (GET route).
+     *
+     * Hardened: the caller can only ever audit AS THEMSELVES (a requested
+     * actor id must match the authenticated identity), the action must be a
+     * canonical audit_action token, and metadata is size-capped before the
+     * sanitizer runs — the endpoint can neither forge actors nor bloat the
+     * trail. Secrets are stripped inside AuditService::sanitizeDetails().
      */
     public function writeAuditLog(Request $request): array
     {
         $body = $request->json();
-        $actorId = (string) ($body['p_actor_id'] ?? $body['actor_id'] ?? $request->user['id'] ?? '');
-        $action = (string) ($body['p_action'] ?? $body['action'] ?? '');
+
+        $requestedActor = trim((string) ($body['p_actor_id'] ?? $body['actor_id'] ?? ''));
+        $authIdentity = (string) ($request->user['id'] ?? '');
+        if ($requestedActor !== '' && $authIdentity !== '' && $requestedActor !== $authIdentity) {
+            throw new ApiException(403, 'audit entries can only be written as the authenticated user');
+        }
+
+        $action = trim((string) ($body['p_action'] ?? $body['action'] ?? ''));
         if ($action === '') {
             throw new ApiException(422, 'p_action is required');
         }
+        if (preg_match('/^[a-z][a-z0-9_]{1,63}$/', $action) !== 1) {
+            throw new ApiException(422, 'p_action must be a canonical audit action token');
+        }
+
         $details = $body['p_details'] ?? $body['details'] ?? [];
         if (!is_array($details)) {
             $details = [];
         }
-        $details['resource_type'] = $body['p_resource_type'] ?? $body['resource_type'] ?? null;
-        $details['resource_id'] = $body['p_resource_id'] ?? $body['resource_id'] ?? null;
+        if (count($details) > 50) {
+            throw new ApiException(422, 'p_details exceeds the allowed size');
+        }
+        $details['resource_type'] = self::auditDetailString($body, ['p_resource_type', 'resource_type']);
+        $details['resource_id'] = self::auditDetailString($body, ['p_resource_id', 'resource_id']);
 
-        AuditService::write($actorId !== '' ? $actorId : null, $action, $details, $request->clientIp());
+        // user_id column = the SUBJECT of the event (client-supplied target);
+        // the ACTOR identity always resolves from the authenticated session,
+        // never from request input.
+        $subjectId = $requestedActor !== '' ? $requestedActor : null;
+        AuditService::write($subjectId, $action, $details, $request->clientIp(), $authIdentity !== '' ? $authIdentity : null);
         return ['success' => true];
+    }
+
+    /**
+     * Size-capped string extraction for audit resource fields.
+     *
+     * @param array<string,mixed> $body
+     * @param list<string> $keys
+     */
+    private static function auditDetailString(array $body, array $keys, int $maxLen = 191): ?string
+    {
+        foreach ($keys as $key) {
+            $v = $body[$key] ?? null;
+            if (is_scalar($v) && trim((string) $v) !== '') {
+                return mb_substr(trim((string) $v), 0, $maxLen);
+            }
+        }
+        return null;
     }
 
     /**

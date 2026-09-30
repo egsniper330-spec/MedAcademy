@@ -2649,20 +2649,18 @@ export async function getAuditTrail(filters: AuditTrailFilters = {}): Promise<{
     p_offset:        filters.offset        ?? 0,
   });
   if (error) throw error;
-  // Contract (RpcController::searchAuditLogs): returns { logs: [...] } — an
-  // OBJECT wrapper, not the array the old cast assumed. Normalize at this
-  // single boundary (same bug class as getUserActivity/drawerAuditLogs).
-  const payload = data as { logs?: unknown } | AuditTrailEntry[] | null;
-  const rows = (
-    Array.isArray(payload)
-      ? payload
-      : payload !== null && typeof payload === 'object' && Array.isArray((payload as { logs?: unknown }).logs)
-        ? (payload as { logs: AuditTrailEntry[] }).logs
-        : []
-  ) as AuditTrailEntry[];
+  // Contract (RpcController::searchAuditLogs): { logs: AuditTrailEntry[] }
+  // with entry[0].total_count carrying the filtered total. STRICT parse:
+  // any other shape is a broken API contract and must surface as an error —
+  // never silently coerced into an empty list.
+  const payload = data as { logs?: unknown } | null;
+  if (payload === null || typeof payload !== 'object' || !Array.isArray(payload.logs)) {
+    throw new Error('Malformed audit-trail response from server.');
+  }
+  const rows = payload.logs as AuditTrailEntry[];
   return {
     entries: rows,
-    totalCount: rows[0]?.total_count ?? 0,
+    totalCount: typeof rows[0]?.total_count === 'number' ? rows[0].total_count : rows.length,
   };
 }
 
@@ -3681,51 +3679,68 @@ export async function getReportData(type: string, from?: string, to?: string) {
   }
 }
 
-// ── Storage Stats ─────────────────────────────────────────────────────────────
-export async function getStorageStats() {
-  try {
-    const [
-      { data: buckets },
-      { data: plyrUploads },
-      { data: vdoLessons },
-    ] = await Promise.all([
-      backendClient.storage.listBuckets(),
-      // Plyr: active uploads only (exclude failed/canceled/deleted)
-      backendClient
-        .from('video_uploads')
-        .select('file_size, provider')
-        .in('status', ['ready', 'uploading', 'processing', 'encoding', 'verifying', 'waiting']),
-      // VdoCipher: lessons with vdocipher video set
-      backendClient
-        .from('lessons')
-        .select('id, video_type')
-        .eq('video_type', 'vdocipher')
-        .not('video_id', 'is', null)
-        .neq('video_id', '')
-        .is('deleted_at', null),
-    ]);
+// ── Real Storage Statistics (admin/SA — measured server-side) ─────────────────
+// GET /storage/stats: the backend measures the actual disk, the physical bytes
+// of every application upload directory and the MySQL database size at request
+// time. Sections the server could not measure come back ABSENT with a reason —
+// the UI renders "unavailable" with that reason, never a fabricated zero.
+export type RealStorageStats = {
+  disk: { total_bytes: number; free_bytes: number; used_bytes: number; used_pct: number } | null;
+  disk_unavailable_reason: string | null;
+  measured_root_label: string;
+  uploads: {
+    total_bytes: number;
+    buckets: Array<{ name: string; bytes: number; files: number }>;
+    public_dir_label: string;
+    private_dir_label: string;
+  };
+  database: {
+    total_bytes: number; table_count: number;
+    largest_tables: Array<{ name: string; bytes: number }>;
+  } | null;
+  database_unavailable_reason: string | null;
+  checked_at: string;
+};
 
-    const plyrBytes = (plyrUploads ?? []).reduce((s: number, u: any) => s + (u.file_size ?? 0), 0);
-    const vdoCount  = (vdoLessons ?? []).length;
+export async function getRealStorageStats(): Promise<RealStorageStats> {
+  const { data, error } = await apiFetch<RealStorageStats>('/storage/stats');
+  if (error) throw error;
+  return data as RealStorageStats;
+}
 
-    return {
-      buckets:      buckets ?? [],
-      totalBuckets: buckets?.length ?? 0,
-      plyrStorage:  plyrBytes,
-      vdoVideoCount: vdoCount,
-      // VdoCipher does not expose file size via this API;
-      // show count and note that size is managed by VdoCipher externally.
-      vdoStorageNote: 'Storage managed by VdoCipher (external)',
-      totalLocalBytes: plyrBytes,
-    };
-  } catch {
-    return {
-      buckets: [], totalBuckets: 0,
-      plyrStorage: 0, vdoVideoCount: 0,
-      vdoStorageNote: 'Storage managed by VdoCipher (external)',
-      totalLocalBytes: 0,
-    };
-  }
+// ── Authoritative VdoCipher status (Super Admin — live API diagnostics) ───────
+// GET /video/vdocipher-status: the backend calls the VdoCipher listing API with
+// the server-side secret and returns the REAL video count (provider-reported or
+// fully paginated), the labeled listing size, and the webhook contract. No
+// local-table counting, no secrets in the response.
+export type VdoCipherStatus = {
+  api: {
+    status: 'ok' | 'error';
+    http_status: number;
+    error: string | null;
+    video_count: number | null;
+    count_source: 'vdocipher_reported_total' | 'paginated_listing' | null;
+    pages_fetched: number;
+    listed_videos_size_bytes: number | null;
+    listed_videos_size_note?: string;
+    checked_at?: string;
+  };
+  webhook: {
+    endpoint_url: string;
+    method: string;
+    route_implemented: boolean;
+    signature_header: string;
+    secret_configured: boolean;
+    handled_events: Array<{ event: string; action: string }>;
+    unknown_events: string;
+    dashboard_verification: string;
+  };
+};
+
+export async function getVdoCipherStatus(): Promise<VdoCipherStatus> {
+  const { data, error } = await apiFetch<VdoCipherStatus>('/video/vdocipher-status');
+  if (error) throw error;
+  return data as VdoCipherStatus;
 }
 
 // ── Revenue Calculation ───────────────────────────────────────────────────────

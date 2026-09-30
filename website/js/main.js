@@ -2,6 +2,39 @@
 (function () {
   'use strict';
 
+  // ─────────────────────────────────────────────────────────────────
+  // CONTACT LINKS — the ONE place to edit the Contact Us destinations.
+  //
+  // These are PLACEHOLDER values. Replace each with the real MedAcademy
+  // account/number/handle; the contact page rows pick the values up
+  // automatically (matched by data-contact). Notes:
+  //   • WhatsApp: use the full international number with no “+”, spaces
+  //     or dashes, e.g. 'https://wa.me/201234567890'.
+  //   • Telegram: use the channel/username, e.g. 'https://t.me/medacademy'.
+  //   • Email: plain address — the mailto: link is built for you.
+  // The static hrefs in contact.html are kept identical so the page also
+  // works with JavaScript disabled.
+  // ─────────────────────────────────────────────────────────────────
+  var CONTACT_LINKS = {
+    facebook:  'https://facebook.com',
+    instagram: 'https://instagram.com',
+    whatsapp:  'https://wa.me/',
+    telegram:  'https://t.me/',
+    email:     'hello@medacademy.site', // built into mailto: below
+  };
+
+  document.querySelectorAll('.contact-row[data-contact]').forEach(function (row) {
+    var key = row.getAttribute('data-contact');
+    var value = CONTACT_LINKS[key];
+    if (!value) return;
+    if (key === 'email') {
+      row.setAttribute('href', 'mailto:' + value);
+      row.setAttribute('aria-label', 'Email MedAcademy at ' + value);
+    } else {
+      row.setAttribute('href', value);
+    }
+  });
+
   // Mobile navigation toggle
   var toggle = document.getElementById('navToggle');
   var nav = document.getElementById('mainNav');

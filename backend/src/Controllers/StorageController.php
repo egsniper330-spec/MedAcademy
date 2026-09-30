@@ -26,12 +26,153 @@ final class StorageController
     {
         return array_map(
             static fn (string $name): array => [
-                'id' => $name,
-                'name' => $name,
+                'id' => $name, 'name' => $name,
                 'public' => in_array($name, self::PUBLIC_BUCKETS, true),
             ],
             [...self::PUBLIC_BUCKETS, ...self::PRIVATE_BUCKETS]
         );
+    }
+
+    // ── Real storage statistics (Admin/Super Admin diagnostics) ─────────────
+    // Every number below is MEASURED at request time from the PHP app's own
+    // filesystem or the MySQL database — nothing is hardcoded, nothing is
+    // derived from database row counts pretending to be file sizes.
+
+    /** Aggregate a directory recursively. Bounded, app-owned paths only. */
+    private static function dirSize(string $dir): int
+    {
+        if (!is_dir($dir)) {
+            return 0;
+        }
+        $it = new \RecursiveIteratorIterator(
+            new \RecursiveDirectoryIterator($dir, \FilesystemIterator::SKIP_DOTS | \FilesystemIterator::CURRENT_AS_FILEINFO),
+            \RecursiveIteratorIterator::LEAVES_ONLY
+        );
+        $total = 0;
+        foreach ($it as $info) {
+            if ($info->isFile() && is_readable($info->getPathname())) {
+                $total += $info->getSize();
+            }
+        }
+        return $total;
+    }
+
+    /**
+     * GET /storage/stats — what the Storage Monitor renders.
+     *
+     * A section is present ONLY when it could actually be measured; failures
+     * carry a structured reason so the UI can show "unavailable" with a real
+     * cause instead of a fake zero. No credentials, no server paths beyond a
+     * short measured-root label.
+     */
+    public function stats(Request $request): array
+    {
+        $publicDir = $this->storage->publicDir();
+        $privateDir = $this->storage->privateDir();
+
+        // ── Hosting disk (the volume the application is deployed on) ──
+        $disk = null;
+        $reason = null;
+        try {
+            $total = @disk_total_space($publicDir);
+            $free = @disk_free_space($publicDir);
+            if (is_float($total) && $total > 0 && is_float($free) && $free >= 0) {
+                $disk = [
+                    'total_bytes' => (int) $total,
+                    'free_bytes' => (int) $free,
+                    'used_bytes' => (int) ($total - $free),
+                    'used_pct' => round((($total - $free) / $total) * 100, 1),
+                ];
+            } else {
+                $reason = 'filesystem_measurement_unavailable';
+            }
+        } catch (\Throwable) {
+            $reason = 'filesystem_measurement_unavailable';
+        }
+
+        // ── Application-owned upload directories (physical files) ──
+        $buckets = [];
+        $uploadsTotal = 0;
+        foreach ([
+            'avatars' => $publicDir . '/avatars',
+            'user-avatars' => $publicDir . '/user-avatars',
+            'course-images' => $publicDir . '/course-images',
+            'course-covers' => $publicDir . '/course-covers',
+            'lesson-thumbnails' => $publicDir . '/lesson-thumbnails',
+            'video-thumbnails' => $publicDir . '/video-thumbnails',
+            'app-assets' => $publicDir . '/app-assets',
+            'lesson-pdfs' => $privateDir . '/lesson-pdfs',
+            'lesson-materials' => $privateDir . '/lesson-materials',
+            'video-chunks' => $privateDir . '/video-chunks',
+            'video-uploads' => $privateDir . '/video-uploads',
+            'temp-uploads' => $privateDir . '/temp-uploads',
+            'patch-uploads' => $privateDir . '/patch-uploads',
+        ] as $name => $dir) {
+            if (!is_dir($dir)) {
+                $buckets[] = ['name' => $name, 'bytes' => 0, 'files' => 0];
+                continue;
+            }
+            $it = new \RecursiveIteratorIterator(
+                new \RecursiveDirectoryIterator($dir, \FilesystemIterator::SKIP_DOTS | \FilesystemIterator::CURRENT_AS_FILEINFO),
+                \RecursiveIteratorIterator::LEAVES_ONLY
+            );
+            $bytes = 0;
+            $files = 0;
+            foreach ($it as $info) {
+                if ($info->isFile() && is_readable($info->getPathname())) {
+                    $bytes += $info->getSize();
+                    $files++;
+                }
+            }
+            $buckets[] = ['name' => $name, 'bytes' => $bytes, 'files' => $files];
+            $uploadsTotal += $bytes;
+        }
+
+        // ── Database size (information_schema — same connection, same perms) ──
+        $db = null;
+        $dbReason = null;
+        try {
+            $row = Database::instance()->row(
+                "SELECT COUNT(*) AS table_count, COALESCE(SUM(data_length + index_length), 0) AS total_bytes
+                   FROM information_schema.TABLES WHERE table_schema = DATABASE()",
+                [],
+                ['table_count' => 0, 'total_bytes' => 0]
+            );
+            if (is_array($row) && isset($row['total_bytes'])) {
+                $largest = Database::instance()->select(
+                    "SELECT table_name AS name, (data_length + index_length) AS bytes
+                       FROM information_schema.TABLES WHERE table_schema = DATABASE()
+                       ORDER BY (data_length + index_length) DESC LIMIT 5"
+                );
+                $db = [
+                    'total_bytes' => (int) $row['total_bytes'],
+                    'table_count' => (int) ($row['table_count'] ?? 0),
+                    'largest_tables' => array_map(
+                        static fn (array $t): array => ['name' => (string) $t['name'], 'bytes' => (int) $t['bytes']],
+                        $largest
+                    ),
+                ];
+            } else {
+                $dbReason = 'database_measurement_unavailable';
+            }
+        } catch (\Throwable) {
+            $dbReason = 'database_measurement_unavailable';
+        }
+
+        return [
+            'disk' => $disk,
+            'disk_unavailable_reason' => $reason,
+            'measured_root_label' => 'application deployment volume (public storage root)',
+            'uploads' => [
+                'total_bytes' => $uploadsTotal,
+                'buckets' => $buckets,
+                'public_dir_label' => 'storage/public',
+                'private_dir_label' => 'storage/private',
+            ],
+            'database' => $db,
+            'database_unavailable_reason' => $dbReason,
+            'checked_at' => gmdate('c'),
+        ];
     }
 
     public function signedUrl(Request $request): array

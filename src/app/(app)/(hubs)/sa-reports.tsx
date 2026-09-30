@@ -1,16 +1,19 @@
 /**
  * sa-reports.tsx — Super Admin Reports & Logs hub
- * ALL monitoring, security, audit and admin-tool sub-pages exposed.
- * Nothing hidden — every route directly accessible.
+ * Report/analytics/monitoring surfaces ONLY: reports, exports, analytics,
+ * audit views, and security MONITORING. Platform-management/configuration
+ * features (impersonation, security policies, trash/delete permissions,
+ * bulk import, DB audit, violation management, security dashboard/
+ * diagnostics) live canonically in the Platform hub (sa-platform.tsx) —
+ * they are deliberately NOT duplicated here.
  */
 import { useState } from 'react';
 import { View, Text, ScrollView, Pressable, useColorScheme } from 'react-native';
 import { useRouter } from 'expo-router';
 import type { RelativePathString } from 'expo-router';
 import {
-  FileText, Shield, ShieldAlert, ShieldCheck, ShieldX, BarChart2,
-  Upload, Download, Search, HeartHandshake, Trash2, Lock,
-  AlertOctagon, AlertTriangle, Eye, Database, ChevronRight,
+  FileText, Shield, BarChart2,
+  Download, AlertTriangle, Eye, ChevronRight,
   TrendingUp, Activity,
 } from 'lucide-react-native';
 import { PageHeader } from '@/components/PageHeader';
@@ -82,7 +85,6 @@ export default function SAReports() {
         <SectionLabel title="Reports & Exports" c={c} />
         <NavItem icon={FileText}     label="Reports"              description="Platform activity and usage reports"       color="#7C3AED" path="/reports"                c={c} isDark={isDark} />
         <NavItem icon={Download}     label="Export Center"        description="Export any data as CSV / Excel"            color="#D97706" path="/export-panel"            c={c} isDark={isDark} />
-        <NavItem icon={Upload}       label="Bulk Import"          description="Import users and course data in bulk"      color="#0EA5E9" path="/sa-bulk-import"             c={c} isDark={isDark} />
 
         {/* ── Analytics ────────────────────────────────────────────────── */}
         <SectionLabel title="Analytics" c={c} />
@@ -90,31 +92,18 @@ export default function SAReports() {
         <NavItem icon={TrendingUp}   label="Credits"               description="Credit management & history"                color={c.primary} path="/sa-credits"    c={c} isDark={isDark} />
         <NavItem icon={BarChart2}    label="Revenue Analytics"    description="Revenue trends and breakdowns"              color="#2DA8FF" path="/revenue-analytics"     c={c} isDark={isDark} />
 
-        {/* ── Audit Logs ───────────────────────────────────────────────── */}
+                {/* ── Audit Logs ────────────────────────────────────────────── */}
         <SectionLabel title="Audit Logs" c={c} />
         <NavItem icon={Shield}       label="Audit Trail"          description="Full admin action audit log"               color="#DC2626" path="/sa-audit"          c={c} isDark={isDark} badge="LIVE" />
-        <NavItem icon={Database}     label="DB Audit"             description="Low-level database audit trail"            color="#D97706" path="/sa-db-audit"               c={c} isDark={isDark} />
 
-        {/* ── Security ─────────────────────────────────────────────────── */}
-        <SectionLabel title="Security" c={c} />
-        <NavItem icon={ShieldAlert}  label="Security Dashboard"   description="Login attempts, threats & active sessions" color="#EF4444" path="/sec-dashboard"    c={c} isDark={isDark} />
-        <NavItem icon={ShieldCheck}  label="Security Policies"    description="Rate limits, IP rules & access controls"   color="#8B5CF6" path="/sec-policies"     c={c} isDark={isDark} />
-        <NavItem icon={ShieldX}      label="Security Diagnostics" description="Detailed security event logs"              color="#6B7280" path="/sec-diag"         c={c} isDark={isDark} />
-
-        {/* ── Content & Violations ─────────────────────────────────────── */}
-        <SectionLabel title="Content & Violations" c={c} />
+        {/* ── Security Monitoring (read-only reporting surfaces) ───── */}
+        {/* Configuration surfaces (security dashboard/policies/diag,   */}
+        {/* violation management) are canonical in the Platform hub.    */}
+        <SectionLabel title="Security Monitoring" c={c} />
         <NavItem icon={Eye}          label="Content Protection"   description="Screenshot & recording prevention"         color="#EF4444" path="/content-protection" c={c} isDark={isDark} />
-        <NavItem icon={AlertOctagon} label="Violation Management" description="Policy violations and offences log"        color="#D97706" path="/violation-management" c={c} isDark={isDark} />
         <NavItem icon={AlertTriangle} label="Fraud Alerts"        description="Suspicious activity detection"             color="#DC2626" path="/fraud-alerts"            c={c} isDark={isDark} />
 
-        {/* ── Admin Tools ──────────────────────────────────────────────── */}
-        <SectionLabel title="Admin Tools" c={c} />
-        <NavItem icon={Search}       label="Global Search"        description="Search users, courses, transactions"       color={c.primary} path="/global-search"        c={c} isDark={isDark} />
-        <NavItem icon={HeartHandshake} label="Impersonation"      description="Log in as any user for debugging"          color="#D97706" path="/impersonation"     c={c} isDark={isDark} />
-        <NavItem icon={Trash2}       label="Trash Bin"            description="Restore or permanently delete items"       color="#EF4444" path="/trash-bin"         c={c} isDark={isDark} />
-        <NavItem icon={Lock}         label="Delete Permissions"   description="Control which data can be deleted"         color="#7C3AED" path="/delete-permissions" c={c} isDark={isDark} />
-
-        <View style={{ height: 32 }} />
+<View style={{ height: 32 }} />
       </View>
     </ScrollView>
   );

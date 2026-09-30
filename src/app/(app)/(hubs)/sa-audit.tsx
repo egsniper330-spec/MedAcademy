@@ -373,6 +373,7 @@ export default function SAaudit() {
   const [loading,     setLoading]    = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [refreshing,  setRefreshing] = useState(false);
+  const [loadError,   setLoadError]  = useState<string | null>(null);
 
   // Category + time + status filters
   const [category,    setCategory]   = useState('');
@@ -413,7 +414,19 @@ export default function SAaudit() {
       if (reset) { setEntries(rows); offset.current = rows.length; }
       else       { setEntries(prev => [...prev, ...rows]); offset.current += rows.length; }
       setTotalCount(count);
-    } catch (_) {}
+      setLoadError(null);
+    } catch (e) {
+      // Failure is explicit UI state — never silently converted to an empty
+      // trail (the old `catch (_) {}` made every API error read as "no logs").
+      // The backend diagnostic (e.g. "Invalid UUID: ''") is safe to surface to
+      // a Super Admin and is preserved — RPC rejections are plain objects.
+      const msg = e instanceof Error
+        ? e.message
+        : typeof e === 'object' && e !== null && typeof (e as { message?: unknown }).message === 'string'
+          ? (e as { message: string }).message
+          : 'Unable to load the audit trail.';
+      setLoadError(msg || 'Unable to load the audit trail.');
+    }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [category, logStatus, timeFilter]);
 
@@ -578,6 +591,25 @@ export default function SAaudit() {
       {/* ── List ───────────────────────────────────────────────────────── */}
       {loading ? (
         <ActivityIndicator color={c.primary} style={{ marginTop: 60 }} />
+      ) : loadError ? (
+        <View style={{ alignItems: 'center', paddingVertical: 60, paddingHorizontal: 32 }}>
+          <AlertTriangle size={52} color="#DC2626" style={{ marginBottom: 14 }} />
+          <Text style={{ fontSize: 16, fontWeight: '700', color: c.text }}>Unable to load the audit trail</Text>
+          <Text style={{ fontSize: 13, color: c.text, opacity: 0.5, marginTop: 8, textAlign: 'center' }}>
+            {loadError}
+          </Text>
+          <Pressable
+            onPress={() => { setLoadError(null); reload(); }}
+            style={{
+              marginTop: 20, paddingHorizontal: 28, paddingVertical: 10,
+              borderRadius: 999, backgroundColor: '#DC2626',
+            }}
+            accessibilityRole="button"
+            accessibilityLabel="Retry loading the audit trail"
+          >
+            <Text style={{ fontSize: 14, fontWeight: '700', color: '#FFFFFF' }}>Retry</Text>
+          </Pressable>
+        </View>
       ) : (
         <FlatList
           data={entries}

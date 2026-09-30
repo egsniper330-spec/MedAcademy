@@ -57,8 +57,6 @@ export default function AdminDashboard() {
     { icon: Smartphone, label: 'Devices',       color: '#D97706',  path: '/(app)/(admin)/devices' },
     { icon: Search,     label: 'Search',        color: '#2DA8FF',  path: '/(app)/(admin)/global-search' },
     { icon: Megaphone,  label: 'Notify',        color: '#D97706',  path: '/(app)/(admin)/notifications-center' },
-    { icon: Video,      label: 'Video Monitor',    color: '#7C3AED',  path: '/(app)/(admin)/video-monitor' },
-    { icon: Activity,   label: 'Video Health',     color: '#2DA8FF',  path: '/(app)/(admin)/video-health' },
     { icon: Layers,     label: 'System Diagnostics', color: '#059669',  path: '/(app)/(admin)/system-providers' },
     { icon: FileText,   label: 'CMS Pages',      color: '#16A34A',  path: '/(app)/(admin)/cms' },
     { icon: Database,   label: 'Storage',       color: '#2DA8FF',  path: '/(app)/(admin)/storage' },

@@ -8,6 +8,7 @@ use MedAcademy\Database\Database;
 use MedAcademy\Http\Request;
 use MedAcademy\Http\Response;
 use MedAcademy\Http\ApiException;
+use MedAcademy\Services\FeatureFlagService;
 use MedAcademy\Utils\Uuid;
 
 /**
@@ -34,7 +35,7 @@ class DataController
      *  this one; if production errors keep referencing old behavior while this
      *  constant is absent from the live file, the running code is NOT this
      *  file (wrong upload path, duplicate checkout, or OPcache staleness). */
-    public const RUNTIME_VERSION = '2026-09-24.1';
+    public const RUNTIME_VERSION = '2026-09-30.1';
 
     /** Tables readable by any authenticated user */
     private const PUBLIC_TABLES = [
@@ -64,6 +65,15 @@ class DataController
 
     /** All allowed tables (union of public + admin) */
     private const ALL_TABLES = [...self::PUBLIC_TABLES, ...self::ADMIN_TABLES];
+
+    /** Earnings tables - reads are gated by the doctor_earnings feature flag
+     *  for non-staff users (see assertFeatureFlags). The named endpoints
+     *  (RpcController::doctorEarningsDashboard, CreditController::doctorEarnings)
+     *  carry the same gate; this closes the generic-API bypass. */
+    private const EARNINGS_TABLES = [
+        'doctor_earnings_events', 'doctor_earnings_transactions',
+        'doctor_payout_requests', 'doctor_pricing_history',
+    ];
 
     /** Tables that are read-only via this controller (INSERT/UPDATE/DELETE blocked) */
     private const READ_ONLY_TABLES = [
@@ -236,6 +246,7 @@ class DataController
         $table = $this->extractTableFromPath($request);
         $this->assertAllowed($table, 'read');
         $this->assertAccess($table, $request);
+        $this->assertFeatureFlags($table, $request);
 
         $db = Database::instance();
         $params = $request->queryParams();
@@ -699,6 +710,31 @@ class DataController
      * Table-level access gate. Admin tables remain admin-only UNLESS the table
      * participates in row-level scoping (self-service / doctor-owner / published).
      */
+    /**
+     * Feature-flag enforcement at the DATA layer.
+     *
+     * The generic Data API is a read path of its own: gating only the named
+     * RPC/controller endpoints is NOT enough, because a page can fetch the
+     * same protected tables through this generic route (the Doctor Earnings
+     * bug: the flag blocked the RPC while the page read
+     * doctor_earnings_events directly here). Everything routed through this
+     * controller now honors the flag that owns the capability.
+     *
+     * assertEnabledFor (not assertEnabled): the doctor_earnings registry
+     * entry is superadmin_exempt - a Super Admin must keep full visibility -
+     * and per-user overrides (the controlled-rollout mechanism) must apply
+     * here exactly as on the named endpoints.
+     */
+    private function assertFeatureFlags(string $table, Request $request): void
+    {
+        if (in_array($request->user['role'] ?? '', ['admin', 'super_admin'], true)) {
+            return; // staff dashboards keep full access
+        }
+        if (in_array($table, self::EARNINGS_TABLES, true)) {
+            (new FeatureFlagService())->assertEnabledFor('doctor_earnings', $request);
+        }
+    }
+
     private function assertAccess(string $table, Request $request): void
     {
         if (in_array($table, self::PUBLIC_TABLES, true)) return;

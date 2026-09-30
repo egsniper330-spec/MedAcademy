@@ -440,6 +440,67 @@ final class VideoController
         ];
     }
 
+    /**
+     * GET /video/vdocipher-status — AUTHORITATIVE VdoCipher status (Super Admin).
+     *
+     * Every value is fetched LIVE from the VdoCipher API with the server-side
+     * secret. Nothing is counted from local tables; deleted remote assets can
+     * never inflate the number. A failed call is reported as failed — it is
+     * NEVER converted into a fake zero. The API secret never leaves the server
+     * and the response carries only sanitized diagnostics.
+     */
+    public function vdocipherStatus(Request $request): array
+    {
+        $listing = $this->video->listAllVideos(100, 100);
+
+        $api = [
+            'status' => $listing['status'],          // 'ok' | 'error'
+            'http_status' => $listing['http_status'],
+            'error' => $listing['error'],            // not_configured | rate_limited | upstream_NNN | malformed_response | null
+        ];
+        if ($listing['status'] === 'ok') {
+            // Authoritative count: VdoCipher's own total when provided,
+            // otherwise the fully paginated row count.
+            $api['video_count'] = $listing['total'] ?? count($listing['videos']);
+            $api['count_source'] = isset($listing['total']) ? 'vdocipher_reported_total' : 'paginated_listing';
+            $api['pages_fetched'] = $listing['pages'];
+            $api['checked_at'] = gmdate('c');
+            // Aggregate the size of exactly the videos VdoCipher returned.
+            // Labelled explicitly — this is NOT "account storage usage".
+            $totalBytes = 0;
+            foreach ($listing['videos'] as $v) {
+                if (isset($v['size']) && is_numeric($v['size'])) {
+                    $totalBytes += (int) $v['size'];
+                }
+            }
+            $api['listed_videos_size_bytes'] = $totalBytes;
+            $api['listed_videos_size_note'] = 'Total size of videos returned by the VdoCipher listing API';
+        } else {
+            $api['video_count'] = null;
+            $api['count_source'] = null;
+            $api['pages_fetched'] = $listing['pages'];
+            $api['listed_videos_size_bytes'] = null;
+        }
+
+        // ── Webhook contract — what MedAcademy actually implements ──
+        $appUrl = rtrim(Config::string('APP_URL'), '/');
+        $webhook = [
+            'endpoint_url' => $appUrl . '/api/video/webhook',
+            'method' => 'POST',
+            'route_implemented' => true,
+            'signature_header' => 'X-VdoCipher-Signature',
+            'secret_configured' => Config::string('VDOCIPHER_WEBHOOK_SECRET', '') !== '',
+            'handled_events' => [
+                ['event' => 'VIDEO_ENCODED / VIDEO_READY', 'action' => 'video_uploads + video_assets marked ready'],
+                ['event' => 'UPLOAD_COMPLETE', 'action' => 'upload session marked complete'],
+            ],
+            'unknown_events' => 'acknowledged (200) and ignored — idempotent by provider_video_id',
+            'dashboard_verification' => 'Webhook endpoint configured locally; VdoCipher Dashboard configuration could not be verified automatically.',
+        ];
+
+        return ['api' => $api, 'webhook' => $webhook];
+    }
+
     public function assets(Request $request): array
     {
         $userId = $request->user['id'];

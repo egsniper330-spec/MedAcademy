@@ -81,6 +81,21 @@ function ContactLinksEditor({
   const update = (index: number, patch: Partial<ContactLink>) =>
     setLinks(links.map((l, i) => (i === index ? { ...l, ...patch } : l)));
 
+  /**
+   * Selecting a platform is the canonical identity change: the key drives
+   * validation, persistence, the API response and the user-facing icon. The
+   * display label follows the platform ONLY when it is still untouched
+   * (blank, or another preset's default) — a genuinely customized label is
+   * preserved. This is the fix for 'selected Facebook → label stayed Website'.
+   */
+  const setPlatform = (index: number, def: { key: string; label: string }) => {
+    const link = links[index];
+    if (!link || link.platform === def.key) return;
+    const previousDefault = CONTACT_LINK_PRESETS.find(p => p.key === link.platform)?.label;
+    const autoFillLabel = link.label.trim() === '' || link.label === previousDefault;
+    update(index, autoFillLabel ? { platform: def.key, label: def.label } : { platform: def.key });
+  };
+
   const move = (index: number, delta: number) => {
     const target = index + delta;
     if (target < 0 || target >= links.length) return;
@@ -162,7 +177,7 @@ function ContactLinksEditor({
                   return (
                     <Pressable
                       key={p.key}
-                      onPress={() => update(index, { platform: p.key })}
+                      onPress={() => setPlatform(index, p)}
                       accessibilityLabel={`Set platform ${p.label}`}
                       accessibilityRole="button"
                       style={{

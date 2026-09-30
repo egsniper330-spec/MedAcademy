@@ -254,6 +254,70 @@ console.log('\n── Super Admin authorization (backend contract unchanged) ─
     'contact_links always returned as a valid array in the serializer',
   );
   check(/assertSuperAdmin\(\$request\)/.test(pc), 'backend asserts Super Admin on updateBranding');
+
+  // ── Platform identity contract (regression pins) ──
+  // Backend: the selected platform is the canonical identity — sanitize keeps
+  // it distinct from label, the allowlist matches the client registry 1:1, and
+  // an empty label derives from the platform (never hardcoded 'Website').
+  check(
+    /'platform' => \$platform/.test(pc),
+    'backend persists the selected platform as the canonical identity',
+  );
+  check(
+    /CONTACT_LINK_DEFAULT_LABELS\[\$platform\] \?\? ucfirst\(\$platform\)/.test(pc),
+    'backend derives the default label from the platform registry map (never a hardcoded label)',
+  );
+  check(
+    /\[\s*'whatsapp',\s*'telegram',\s*'facebook',\s*'instagram',\s*\s*'twitter',\s*'website',\s*'email',\s*'phone',\s*\]/.test(pc.replace(/\r/g, '')),
+    'backend CONTACT_LINK_PLATFORMS allowlist covers all 8 registry keys',
+  );
+  // CMS editor: selecting a platform goes through setPlatform(), which sets
+  // ONLY the platform key (plus the label auto-fill) —
+  // this is the 'selected Facebook → label became Website' regression guard.
+  const cms = src('src/app/(app)/(hubs)/cms.tsx');
+  check(
+    /onPress=\{\(\) => setPlatform\(index, p\)\}/.test(cms),
+    'CMS platform presets route through setPlatform (no blind label overwrite)',
+  );
+  check(
+    /autoFillLabel[\s\S]{0,400}\{ platform: def\.key, label: def\.label \} : \{ platform: def\.key \}/.test(cms),
+    'CMS derives the default label from the platform and preserves custom labels',
+  );
+  check(
+    /platform: 'website', label: 'Website', url: ''/.test(cms),
+    'new links start from the website preset (label matches its own platform)',
+  );
+  // Mobile Contact Us: icon comes from the platform key, never the label text.
+  const contactPage = src('src/app/(app)/info/contact.tsx');
+  check(
+    /platformDef\(item\.platform\)/.test(contactPage) && /platformIcon\(item\.platform\)/.test(contactPage),
+    'mobile Contact Us resolves icon/color from the platform key (no label matching)',
+  );
+  check(
+    !/label\.includes\(|label\.indexOf\(|label\.match\(/.test(contactPage),
+    'mobile Contact Us never infers the platform from label text',
+  );
+  // Live behaviour over REAL code: select → save → reload keeps the platform.
+  {
+    const picks = [
+      ['facebook', 'Facebook'], ['telegram', 'Telegram'], ['whatsapp', 'WhatsApp'],
+      ['instagram', 'Instagram'], ['email', 'Email'], ['phone', 'Phone'],
+      ['twitter', 'X / Twitter'], ['website', 'Website'],
+    ];
+    for (const [key, want] of picks) {
+      const stored = branding.parseContactLinks([
+        { platform: key, label: '', url: key === 'email' ? 'a@b.co' : key === 'phone' ? '+201000000000' : 'https://x.example', enabled: true },
+      ]);
+      check(stored.length === 1 && stored[0].platform === key && stored[0].label === want,
+        `platform '${key}' → default label '${want}' survives parse (save/reload)`);
+    }
+    // A custom label must NOT change the icon platform.
+    const custom = branding.parseContactLinks([
+      { platform: 'facebook', label: 'Our Facebook Page', url: 'https://facebook.com/x', enabled: true },
+    ]);
+    check(custom[0].platform === 'facebook' && custom[0].label === 'Our Facebook Page',
+      'custom label keeps the canonical platform (icon source unchanged)');
+  }
 }
 
 console.log(`\n═══ contactUs: ${passed} passed, ${failures.length} failed ═══`);

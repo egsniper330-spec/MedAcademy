@@ -1,7 +1,23 @@
 /**
  * video-settings.tsx
- * Video Provider Settings — Super Admin only
- * Shows current provider, health status, storage stats, API/webhook status.
+ * Video Settings — the AUTHORITATIVE VdoCipher status page (Super Admin).
+ *
+ * DATA CONTRACT (all live, nothing counted from local tables):
+ *   GET /video/vdocipher-status  → live VdoCipher listing (real count with
+ *   pagination), the labeled listing size, and the webhook contract.
+ *   GET /storage/buckets         → provider metadata only.
+ *
+ * Sections:
+ *   A. VdoCipher Connection — live API status, HTTP code, error class
+ *   B. Video Library        — authoritative video count + count source
+ *   C. Storage / Usage      — labeled "size of videos returned by VdoCipher"
+ *                             (NOT account storage usage)
+ *   D. Webhook              — canonical endpoint + verification honesty
+ *   E. Diagnostics          — refresh + last checked
+ *
+ * FAILURE CONTRACT: a failed VdoCipher call renders "Unavailable + reason"
+ * with the error class (auth/upstream 4xx/5xx/rate limit/malformed/config) —
+ * it is NEVER displayed as "0 videos".
  */
 import { useCallback, useState } from 'react';
 import {
@@ -10,238 +26,222 @@ import {
 } from 'react-native';
 import { useFocusEffect } from 'expo-router';
 import {
-  Activity, AlertTriangle, CheckCircle, Clock, HardDrive,
-  RefreshCw, Settings, ShieldCheck, Wifi, WifiOff, Zap,
+  Activity, AlertTriangle, CheckCircle, Clock, Film,
+  RefreshCw, ShieldCheck, WifiOff,
 } from 'lucide-react-native';
 import { PageHeader } from '@/components/PageHeader';
 import { NeuCard } from '@/components/NeuCard';
-import { backendClient } from '@/client/backendClient';
-import { neuColors, useLayout, neuFlatStyle, neuPressedStyle, safeBottom } from '@/lib/neu';
+import { neuColors, useLayout, neuFlatStyle, safeBottom } from '@/lib/neu';
 import { formatBytes } from '@/lib/videoUploadEngine';
+import { getVdoCipherStatus, type VdoCipherStatus } from '@/lib/api';
 
-type HealthStatus = 'online' | 'offline' | 'degraded' | 'maintenance' | 'unknown';
-
-const HEALTH_CFG: Record<HealthStatus, { label: string; color: string; Icon: any }> = {
-  online:      { label: 'Online',      color: '#16A34A', Icon: CheckCircle },
-  offline:     { label: 'Offline',     color: '#DC2626', Icon: WifiOff },
-  degraded:    { label: 'Degraded',    color: '#D97706', Icon: AlertTriangle },
-  maintenance: { label: 'Maintenance', color: '#7C3AED', Icon: Settings },
-  unknown:     { label: 'Unknown',     color: '#6B7280', Icon: Clock },
+const ERROR_REASONS: Record<string, string> = {
+  not_configured: 'VdoCipher API secret is not configured on the server.',
+  rate_limited: 'VdoCipher rate limit reached — try again shortly.',
+  malformed_response: 'VdoCipher returned a response the server could not parse.',
+  timeout: 'The VdoCipher API request timed out.',
 };
+
+function apiErrorReason(err: string | null, http: number): string {
+  if (!err) return 'VdoCipher API request failed.';
+  if (ERROR_REASONS[err]) return ERROR_REASONS[err];
+  if (err.startsWith('upstream_')) {
+    const code = err.replace('upstream_', '');
+    return `VdoCipher API returned HTTP ${code}.`;
+  }
+  return `VdoCipher API error: ${err}.`;
+}
+
+function Row({ label, value, warn }: { label: string; value: string; warn?: boolean }) {
+  const isDark = useColorScheme() === 'dark';
+  const c = isDark ? neuColors.dark : neuColors.light;
+  return (
+    <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: 12,
+      paddingVertical: 6, borderBottomWidth: 1, borderBottomColor: `${c.text}08` }}>
+      <Text style={{ fontSize: 12, color: c.text, opacity: 0.5 }}>{label}</Text>
+      <Text style={{ fontSize: 12, fontWeight: '600', color: warn ? '#D97706' : c.text, flexShrink: 1, textAlign: 'right' }}>
+        {value}
+      </Text>
+    </View>
+  );
+}
 
 export default function VideoSettingsScreen({ backTo }: { backTo?: string } = {}) {
   const scheme = useColorScheme();
   const isDark = scheme === 'dark';
   const c = isDark ? neuColors.dark : neuColors.light;
   const layout = useLayout();
-  const insets = layout.insets;
 
-  const [provider, setProvider] = useState<any>(null);
-  const [stats, setStats] = useState({ total: 0, ready: 0, storage: 0 });
+  const [status, setStatus] = useState<VdoCipherStatus | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [pinging, setPinging] = useState(false);
-  const [pingResult, setPingResult] = useState<string | null>(null);
+  const [lastChecked, setLastChecked] = useState<Date | null>(null);
 
   const load = useCallback(async () => {
-    const [{ data: prov }, { data: plyrUploads }, { data: vdoLessons }] = await Promise.all([
-      backendClient
-        .from('video_provider_config')
-        .select('*')
-        .eq('is_default', true)
-        .maybeSingle(),
-      // Plyr: only active (non-deleted, non-failed, non-canceled) uploads
-      backendClient
-        .from('video_uploads')
-        .select('status, file_size')
-        .in('status', ['ready', 'uploading', 'processing', 'encoding', 'verifying', 'waiting']),
-      // VdoCipher: lessons that have a vdocipher video set and are not deleted
-      backendClient
-        .from('lessons')
-        .select('id, video_type, video_id')
-        .eq('video_type', 'vdocipher')
-        .not('video_id', 'is', null)
-        .neq('video_id', '')
-        .is('deleted_at', null),
-    ]);
-    setProvider(prov);
-    const plyr = plyrUploads ?? [];
-    const vdo  = vdoLessons ?? [];
-    setStats({
-      total:   plyr.length + vdo.length,
-      ready:   plyr.filter((u: any) => u.status === 'ready').length + vdo.length,
-      storage: plyr.reduce((s: number, u: any) => s + (u.file_size ?? 0), 0),
-    });
+    setLoading(true);
+    setLoadError(null);
+    try {
+      setStatus(await getVdoCipherStatus());
+      setLastChecked(new Date());
+    } catch (e: any) {
+      setLoadError(e?.message ?? 'VdoCipher status could not be loaded.');
+    }
     setLoading(false);
   }, []);
 
-  useFocusEffect(useCallback(() => { setLoading(true); load(); }, [load]));
+  useFocusEffect(useCallback(() => { load(); }, [load]));
   const onRefresh = async () => { setRefreshing(true); await load(); setRefreshing(false); };
 
-  const handlePingProvider = async () => {
-    setPinging(true);
-    setPingResult(null);
-    const { data, error } = await backendClient.functions.invoke('video-health-scan', {
-      body: { action: 'provider_health' },
-    });
-    if (error) setPingResult(`Error: ${error.message}`);
-    else {
-      setPingResult(`Provider status: ${data?.status ?? 'unknown'}`);
-      await load();
-    }
-    setPinging(false);
-  };
+  const api = status?.api;
+  const webhook = status?.webhook;
+  const apiOk = api?.status === 'ok';
 
-  const healthKey: HealthStatus = (provider?.health_status as HealthStatus) ?? 'unknown';
-  const healthCfg = HEALTH_CFG[healthKey];
+  const connCfg = apiOk
+    ? { label: 'Online', color: '#16A34A', Icon: CheckCircle }
+    : api
+      ? { label: 'Unavailable', color: '#DC2626', Icon: WifiOff }
+      : { label: 'Unknown', color: '#6B7280', Icon: Clock };
 
   return (
     <View style={{ flex: 1, backgroundColor: c.base }}>
       <ScrollView
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />}
-        contentContainerStyle={{ padding: layout.screenPx, gap: 16 }}>
+        contentContainerStyle={{ padding: layout.screenPx, paddingBottom: safeBottom(layout.insets.bottom), gap: 16 }}>
 
         <View style={{ marginTop: 8 }}>
           <PageHeader
             title="Video Settings"
-            subtitle="Provider & health configuration"
+            subtitle="Authoritative VdoCipher status"
             accentColor="#7C3AED"
             showBack
             backFallback={backTo ?? '/admin-overview'}
+            rightAction={
+              <Pressable onPress={onRefresh} disabled={refreshing || loading}
+                style={[neuFlatStyle(isDark), { width: 38, height: 38, borderRadius: 11, alignItems: 'center', justifyContent: 'center' }]}>
+                {refreshing ? <ActivityIndicator size={15} color={c.primary} /> : <RefreshCw size={16} color={c.primary} />}
+              </Pressable>
+            }
           />
         </View>
 
         {loading ? (
           <ActivityIndicator color={c.primary} style={{ marginTop: 40 }} />
-        ) : (
+        ) : loadError ? (
+          <NeuCard style={[neuFlatStyle(isDark), { borderRadius: 16, padding: 24, alignItems: 'center', gap: 12 }]}>
+            <AlertTriangle size={28} color="#DC2626" />
+            <Text style={{ fontSize: 14, fontWeight: '800', color: c.text }}>Unable to load VdoCipher status</Text>
+            <Text style={{ fontSize: 12, color: c.text, opacity: 0.5, textAlign: 'center' }}>{loadError}</Text>
+            <Pressable onPress={load}
+              style={{ flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 16, paddingVertical: 10, borderRadius: 12, backgroundColor: c.primary }}>
+              <RefreshCw size={14} color="#fff" />
+              <Text style={{ fontSize: 13, fontWeight: '800', color: '#fff' }}>Retry</Text>
+            </Pressable>
+          </NeuCard>
+        ) : status && (
           <View style={{ gap: 14 }}>
 
-            {/* Current provider card */}
+            {/* ── A. VdoCipher Connection ─────────────────────────────── */}
             <NeuCard style={[neuFlatStyle(isDark), { borderRadius: 18, padding: 18, gap: 14 }]}>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-                <View style={{ width: 46, height: 46, borderRadius: 14, backgroundColor: `${c.primary}18`,
+                <View style={{ width: 46, height: 46, borderRadius: 14, backgroundColor: `${connCfg.color}18`,
                   alignItems: 'center', justifyContent: 'center' }}>
-                  <Zap size={22} color={c.primary} />
+                  <connCfg.Icon size={22} color={connCfg.color} />
                 </View>
                 <View style={{ flex: 1 }}>
-                  <Text style={{ fontSize: 15, fontWeight: '800', color: c.text }}>
-                    {provider?.display_name ?? 'MedAcademy Video'}
-                  </Text>
-                  <Text style={{ fontSize: 11, color: c.text, opacity: 0.45 }}>
-                    Current Video Provider
-                  </Text>
+                  <Text style={{ fontSize: 15, fontWeight: '800', color: c.text }}>VdoCipher API</Text>
+                  <Text style={{ fontSize: 11, color: c.text, opacity: 0.45 }}>Live connection status</Text>
                 </View>
-                <View style={{ backgroundColor: `${healthCfg.color}18`, borderRadius: 10,
-                  paddingHorizontal: 10, paddingVertical: 5,
-                  flexDirection: 'row', gap: 5, alignItems: 'center' }}>
-                  <healthCfg.Icon size={11} color={healthCfg.color} />
-                  <Text style={{ fontSize: 11, fontWeight: '800', color: healthCfg.color }}>
-                    {healthCfg.label}
-                  </Text>
+                <View style={{ backgroundColor: `${connCfg.color}18`, borderRadius: 10,
+                  paddingHorizontal: 10, paddingVertical: 5 }}>
+                  <Text style={{ fontSize: 11, fontWeight: '800', color: connCfg.color }}>{connCfg.label}</Text>
                 </View>
               </View>
+              <View>
+                <Row label="Listing request" value={apiOk ? `OK (HTTP ${api?.http_status})` : `Failed (HTTP ${api?.http_status || 'n/a'})`} warn={!apiOk} />
+                <Row label="Last successful check" value={api?.checked_at ? new Date(api.checked_at).toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true }) : 'Never (last request failed)'} warn={!apiOk} />
+                {!apiOk && <Row label="Reason" value={apiErrorReason(api?.error ?? null, api?.http_status ?? 0)} warn />}
+              </View>
+            </NeuCard>
 
-              {/* Ping */}
-              <Pressable onPress={handlePingProvider} disabled={pinging}
-                style={[pinging ? neuPressedStyle(isDark) : neuFlatStyle(isDark),
-                  { borderRadius: 12, padding: 12, flexDirection: 'row', gap: 8, alignItems: 'center', justifyContent: 'center' }]}>
-                {pinging ? <ActivityIndicator size={14} color={c.primary} /> : <Wifi size={14} color={c.primary} />}
-                <Text style={{ fontSize: 13, fontWeight: '700', color: c.primary }}>
-                  {pinging ? 'Pinging Provider…' : 'Ping Provider'}
-                </Text>
-              </Pressable>
-
-              {pingResult && (
-                <Text style={{ fontSize: 12, color: c.text, opacity: 0.6, textAlign: 'center' }}>
-                  {pingResult}
-                </Text>
+            {/* ── B. Video Library (authoritative count) ──────────────── */}
+            <NeuCard style={[neuFlatStyle(isDark), { borderRadius: 16, padding: 16, gap: 8 }]}>
+              <Text style={{ fontSize: 13, fontWeight: '800', color: c.text }}>Video Library</Text>
+              {apiOk && api?.video_count !== null && api?.video_count !== undefined ? (
+                <>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                    <Film size={18} color="#2DA8FF" />
+                    <Text style={{ fontSize: 30, fontWeight: '900', color: '#2DA8FF' }}>{api.video_count}</Text>
+                    <Text style={{ fontSize: 12, color: c.text, opacity: 0.5 }}>videos in the VdoCipher library</Text>
+                  </View>
+                  <Row label="Count source" value={api.count_source === 'vdocipher_reported_total' ? 'VdoCipher-reported total' : 'Fully paginated listing'} />
+                  <Row label="Pages fetched" value={String(api.pages_fetched)} />
+                  <Row label="Deleted VdoCipher assets" value="Excluded (live listing)" />
+                </>
+              ) : (
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 8 }}>
+                  <AlertTriangle size={14} color="#D97706" />
+                  <Text style={{ fontSize: 12, color: c.text, opacity: 0.55, flex: 1 }}>
+                    Video count unavailable — {apiErrorReason(api?.error ?? null, api?.http_status ?? 0)}
+                  </Text>
+                </View>
               )}
             </NeuCard>
 
-            {/* Provider details */}
-            <NeuCard style={[neuFlatStyle(isDark), { borderRadius: 16, padding: 16, gap: 10 }]}>
-              <Text style={{ fontSize: 13, fontWeight: '800', color: c.text }}>Provider Details</Text>
-              {[
-                { label: 'Provider Key',       value: provider?.provider_key ?? 'medacademy' },
-                { label: 'Streaming',          value: provider?.config?.supports_streaming ? 'Yes' : 'No' },
-                { label: 'DRM Protection',     value: provider?.config?.supports_drm ? 'Yes' : 'No' },
-                { label: 'Max File Size',      value: `${provider?.config?.max_file_size_gb ?? 5} GB` },
-                { label: 'API Status',         value: healthCfg.label },
-                { label: 'Last Health Check',  value: provider?.health_checked_at ? new Date(provider.health_checked_at).toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true }) : 'Never' },
-                { label: 'Last Sync',          value: provider?.last_sync_at ? new Date(provider.last_sync_at).toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true }) : 'Never' },
-              ].map(({ label, value }) => (
-                <View key={label} style={{ flexDirection: 'row', justifyContent: 'space-between',
-                  paddingVertical: 6, borderBottomWidth: 1, borderBottomColor: `${c.text}08` }}>
-                  <Text style={{ fontSize: 12, color: c.text, opacity: 0.5 }}>{label}</Text>
-                  <Text style={{ fontSize: 12, fontWeight: '600', color: c.text }}>{value}</Text>
+            {/* ── C. Storage / Usage (only real, clearly labeled metrics) ── */}
+            <NeuCard style={[neuFlatStyle(isDark), { borderRadius: 16, padding: 16, gap: 8 }]}>
+              <Text style={{ fontSize: 13, fontWeight: '800', color: c.text }}>Storage / Usage</Text>
+              {apiOk && api?.listed_videos_size_bytes !== null && api?.listed_videos_size_bytes !== undefined ? (
+                <>
+                  <Row label="Total size of videos returned by VdoCipher" value={formatBytes(api.listed_videos_size_bytes)} />
+                  <Text style={{ fontSize: 11, color: c.text, opacity: 0.4 }}>
+                    {api.listed_videos_size_note}
+                  </Text>
+                  <Row label="Account storage usage" value="Not available from VdoCipher API" warn />
+                </>
+              ) : (
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 8 }}>
+                  <AlertTriangle size={14} color="#D97706" />
+                  <Text style={{ fontSize: 12, color: c.text, opacity: 0.55, flex: 1 }}>
+                    Video size data unavailable — {apiErrorReason(api?.error ?? null, api?.http_status ?? 0)}
+                  </Text>
                 </View>
-              ))}
+              )}
             </NeuCard>
 
-            {/* Platform stats */}
-            <NeuCard style={[neuFlatStyle(isDark), { borderRadius: 16, padding: 16, gap: 10 }]}>
-              <Text style={{ fontSize: 13, fontWeight: '800', color: c.text }}>Platform Stats</Text>
-              <View style={{ flexDirection: 'row', gap: 10 }}>
-                {[
-                  { label: 'Total Videos', value: String(stats.total), color: '#2DA8FF', Icon: Activity },
-                  { label: 'Ready',        value: String(stats.ready), color: '#16A34A', Icon: CheckCircle },
-                  { label: 'Storage',      value: formatBytes(stats.storage), color: '#7C3AED', Icon: HardDrive },
-                ].map(({ label, value, color, Icon: Ic }) => (
-                  <NeuCard key={label} style={[neuFlatStyle(isDark),
-                    { flex: 1, borderRadius: 12, padding: 12, alignItems: 'center', gap: 5 }]}>
-                    <Ic size={16} color={color} />
-                    <Text style={{ fontSize: 18, fontWeight: '900', color }}>{value}</Text>
-                    <Text style={{ fontSize: 10, color: c.text, opacity: 0.4, textAlign: 'center' }}>{label}</Text>
-                  </NeuCard>
-                ))}
-              </View>
-            </NeuCard>
-
-            {/* Webhook info */}
-            <NeuCard style={[neuFlatStyle(isDark), { borderRadius: 16, padding: 16, gap: 10 }]}>
-              <Text style={{ fontSize: 13, fontWeight: '800', color: c.text }}>Webhook Configuration</Text>
+            {/* ── D. Webhook ──────────────────────────────────────────── */}
+            <NeuCard style={[neuFlatStyle(isDark), { borderRadius: 16, padding: 16, gap: 8 }]}>
+              <Text style={{ fontSize: 13, fontWeight: '800', color: c.text }}>Webhook</Text>
               <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center',
                 backgroundColor: '#2DA8FF18', padding: 10, borderRadius: 10 }}>
                 <ShieldCheck size={14} color="#2DA8FF" />
-                <Text style={{ fontSize: 12, color: '#2DA8FF', flex: 1 }}>
-                  Webhook endpoint: /functions/v1/vdocipher-otp/webhook
+                <Text style={{ fontSize: 12, color: '#2DA8FF', flex: 1 }} selectable>
+                  {webhook?.endpoint_url ?? '—'}
                 </Text>
               </View>
-              {[
-                'Processing Completed → video status updated',
-                'Upload Failed → alert created',
-                'Encoding Failed → alert + retry available',
-                'Thumbnail Ready → thumbnail_url stored',
-              ].map((item) => (
-                <View key={item} style={{ flexDirection: 'row', gap: 8 }}>
-                  <Activity size={12} color={`${c.text}50`} />
-                  <Text style={{ fontSize: 11, color: c.text, opacity: 0.5 }}>{item}</Text>
-                </View>
+              <Row label="Method" value={webhook?.method ?? 'POST'} />
+              <Row label="Signature verification" value={`${webhook?.signature_header ?? 'X-VdoCipher-Signature'} (HMAC)`} />
+              <Row label="Webhook secret configured on server" value={webhook?.secret_configured ? 'Yes' : 'No — events are rejected (501)'} warn={!webhook?.secret_configured} />
+              {webhook?.handled_events.map((e) => (
+                <Row key={e.event} label={e.event} value={e.action} />
               ))}
+              <Row label="Unknown events" value={webhook?.unknown_events ?? 'Acknowledged and ignored'} />
+              <Text style={{ fontSize: 11, color: '#D97706', opacity: 0.85 }}>
+                {webhook?.dashboard_verification}
+              </Text>
             </NeuCard>
 
-            {/* Future providers info */}
-            <NeuCard style={[neuFlatStyle(isDark), { borderRadius: 16, padding: 16, gap: 10 }]}>
-              <Text style={{ fontSize: 13, fontWeight: '800', color: c.text }}>Available Providers</Text>
-              {[
-                { name: 'MedAcademy Video', active: true,  color: '#16A34A' },
-                { name: 'Cloudflare Stream', active: false, color: '#D97706' },
-                { name: 'Mux',               active: false, color: '#D97706' },
-                { name: 'Bunny Stream',       active: false, color: '#D97706' },
-                { name: 'AWS MediaConvert',   active: false, color: '#D97706' },
-              ].map(({ name, active, color }) => (
-                <View key={name} style={[neuFlatStyle(isDark),
-                  { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
-                    borderRadius: 10, padding: 10 }]}>
-                  <Text style={{ fontSize: 13, fontWeight: '600', color: c.text }}>{name}</Text>
-                  <View style={{ backgroundColor: `${color}15`, borderRadius: 6,
-                    paddingHorizontal: 8, paddingVertical: 3 }}>
-                    <Text style={{ fontSize: 10, fontWeight: '800', color }}>
-                      {active ? 'ACTIVE' : 'FUTURE'}
-                    </Text>
-                  </View>
-                </View>
-              ))}
+            {/* ── E. Diagnostics footer ───────────────────────────────── */}
+            <NeuCard style={[neuFlatStyle(isDark), { borderRadius: 14, padding: 14, flexDirection: 'row', gap: 10, alignItems: 'center' }]}>
+              <Activity size={15} color={c.primary} />
+              <Text style={{ fontSize: 12, color: c.text, opacity: 0.55, flex: 1 }}>
+                All values are fetched live from the VdoCipher API at refresh — pull down or tap the refresh icon to re-check.
+              </Text>
+              {lastChecked && (
+                <Text style={{ fontSize: 11, color: c.text, opacity: 0.4 }}>
+                  Last checked: {lastChecked.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}
+                </Text>
+              )}
             </NeuCard>
 
           </View>

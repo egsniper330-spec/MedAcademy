@@ -103,4 +103,70 @@ function ok(cond, label) {
   ok(/riskyDevices\.map\(/.test(src), 'device list rendering preserved');
 }
 
+// ─── Backend: securityEvents() — the profiles-embed replacement ─────────────
+{
+  const src = read('backend/src/Controllers/AnalyticsController.php');
+
+  // Server-side identity join (many-to-one) instead of the generic-API embed.
+  ok(/LEFT JOIN profiles p ON p\.id = se\.user_id/.test(src),
+    'securityEvents() joins profiles via user_id server-side (no embed parser)');
+  ok(src.includes("$r['profiles'] = $user;"), 'securityEvents() emits the profiles{full_name,email} contract shape');
+  ok(/LIMIT 50/.test(src), 'securityEvents() caps the recent-events window');
+
+  // Authorization: admin/super_admin only.
+  const routes = read('backend/routes/api.php');
+  ok(/'\/analytics\/security-events', \[AnalyticsController::class, 'securityEvents'\], \$auth \+ \['role' => \['admin', 'super_admin'\]\]/.test(routes),
+    'security-events route is role-gated to admin + super_admin');
+
+  // Client wiring: the dashboard no longer embeds profiles via the Data API.
+  const dash = read('src/app/(app)/(hubs)/sec-dashboard.tsx');
+  ok(!dash.includes("profiles(full_name"), 'dashboard no longer uses the broken profiles embed');
+  ok(dash.includes("rpc('get_security_events'"), 'dashboard reads events via get_security_events RPC');
+  const client = read('src/client/php.ts');
+  ok(client.includes("'get_security_events':              '/analytics/security-events'"),
+    'client maps get_security_events → /analytics/security-events');
+  ok(/GET_RPCS = new Set\(\[[\s\S]*?'get_security_events'/.test(client), 'get_security_events is a GET rpc');
+}
+
+// ─── Security Policies admin plane (Option A — real policy management) ─────
+{
+  const ctrl = read('backend/src/Controllers/SecurityController.php');
+
+  // Root-cause regression guard: the 500 came from Database::instance()
+  // resolving to MedAcademy\Controllers\Database (no import).
+  ok(ctrl.includes('use MedAcademy\\Database\\Database;'),
+    'SecurityController imports MedAcademy\\Database\\Database (policies() cannot fatal)');
+
+  // SA-only routes, validated update, audited writes, mandatory-block guard.
+  const routes = read('backend/routes/api.php');
+  ok(/'\/admin\/security\/policies', \[SecurityController::class, 'adminPolicies'\], \$auth \+ \['role' => \['super_admin'\]\]/.test(routes),
+    'admin policies read route is super_admin only');
+  ok(/'\/admin\/security\/policies\/\{type\}', \[SecurityController::class, 'updatePolicy'\], \$auth \+ \['role' => \['super_admin'\]\]/.test(routes),
+    'admin policy update route is super_admin only (PUT {type})');
+  ok(/vpn-whitelist'/.test(routes) && /addVpnWhitelist/.test(routes) && /deleteVpnWhitelist/.test(routes),
+    'VPN whitelist management routes registered');
+
+  ok(/POLICY_TYPES = \[/.test(ctrl) && ctrl.includes("'play_integrity'"),
+    'policy types validated against the schema CHECK allowlist');
+  ok(/MANDATORY_BLOCK = \['developer_options', 'debug', 'tamper', 'play_integrity'\]/.test(ctrl),
+    'mandatory-block buckets pinned (migration 016 owner requirement)');
+  ok(/cannot be weakened/.test(ctrl), 'write path refuses weakening mandatory policies');
+  ok((ctrl.match(/AuditService::write/g) || []).length >= 3,
+    'every policy/whitelist mutation is audited');
+
+  // Client write plane goes through the SA endpoints (never the generic Data API).
+  const page = read('src/app/(app)/(hubs)/sec-policies.tsx');
+  ok(!page.includes("from('security_policies')"), 'policies page no longer PATCHes via the generic Data API');
+  ok(!page.includes("from('security_vpn_whitelist')"), 'policies page no longer writes the whitelist via the generic Data API');
+  ok(page.includes("admin-security-policy-update") && page.includes("method: 'PUT'"),
+    'policies page saves via the SA PUT endpoint');
+  ok(page.includes('MANDATORY_BLOCK'), 'policies page knows the mandatory-block set (UI parity)');
+  ok(page.includes('invalidatePolicyCache()'), 'policies page still invalidates the enforcement cache after save');
+  const client = read('src/client/php.ts');
+  ok(client.includes("'admin-security-policy-update':  '/admin/security/policies/{type}'"),
+    'client maps the SA policy update route');
+  ok(/FORCE_PUT_FUNCTIONS = new Set\(\['set-app-update-config', 'admin-security-policy-update'\]\)/.test(client),
+    'policy update enforces the PUT contract');
+}
+
 console.log(`\nsecurityDashboardContract: ${passed} guards passed`);

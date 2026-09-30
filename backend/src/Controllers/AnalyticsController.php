@@ -503,6 +503,65 @@ final class AnalyticsController
     }
 
     /**
+     * GET /analytics/security-events — recent security events with user
+     * identity resolved SERVER-SIDE (full_name/email via LEFT JOIN).
+     *
+     * FRONTEND CONTRACT (SecurityEvent[]):
+     *   [{ id, user_id, device_id, event_type, detection_method, policy_action,
+     *      risk_score, ip_address, platform, created_at,
+     *      profiles: { full_name, email } | null }]
+     *
+     * WHY THIS ENDPOINT EXISTS: the dashboard previously read security_events
+     * through the generic Data API with a PostgREST embed
+     * (select=*,profiles(full_name,email)). The PHP Data API's embed parser
+     * classifies an un-aliased relation as ONE-TO-MANY (child FK
+     * security_event_id — a column that does not exist on profiles), so the
+     * generated SQL referenced a non-existent column → SQLSTATE 42S22 →
+     * Internal Server Error on every dashboard load. The identity join is a
+     * many-to-one (security_events.user_id → profiles.id), expressed here
+     * directly instead of fighting the generic parser. Admin/super_admin only.
+     *
+     * Optional window params: start_date / end_date (ISO-8601, created_at).
+     */
+    public function securityEvents(Request $request): array
+    {
+        $db = Database::instance();
+        $q  = $request->queryParams();
+        $startDate = trim((string) ($q['start_date'] ?? ''));
+        $endDate   = trim((string) ($q['end_date'] ?? ''));
+
+        $windowSql  = '';
+        $windowBind = [];
+        if ($startDate !== '' && $endDate !== '') {
+            $windowSql  = ' WHERE created_at BETWEEN ? AND ?';
+            $windowBind = [$startDate, $endDate];
+        }
+
+        $rows = $db->select(
+            "SELECT se.id, se.user_id, se.device_id, se.event_type, se.detection_method,
+                    se.policy_action, se.risk_score, se.ip_address, se.platform, se.created_at,
+                    p.full_name AS p_full_name, p.email AS p_email
+             FROM security_events se
+             LEFT JOIN profiles p ON p.id = se.user_id
+             {$windowSql}
+             ORDER BY se.created_at DESC
+             LIMIT 50",
+            $windowBind
+        ) ?? [];
+
+        return array_map(static function (array $r): array {
+            $user = null;
+            if ($r['p_full_name'] !== null || $r['p_email'] !== null) {
+                $user = ['full_name' => $r['p_full_name'], 'email' => $r['p_email']];
+            }
+            unset($r['p_full_name'], $r['p_email']);
+            $r['profiles'] = $user;
+            $r['risk_score'] = (int) $r['risk_score'];
+            return $r;
+        }, $rows);
+    }
+
+    /**
      * GET /analytics/risky-devices — devices flagged by security events.
      *
      * FRONTEND CONTRACT (get_risky_devices RPC → RiskyDevice[]):

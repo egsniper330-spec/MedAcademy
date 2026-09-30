@@ -16,6 +16,34 @@ import { backendClient } from '@/client/backendClient';
 import { invalidatePolicyCache } from '@/lib/security';
 import { friendlyError } from '@/lib/validation';
 
+// ── Server contract (Super-Admin-only write plane) ─────────────────────────
+//
+// READ  GET  /admin/security/policies           → { policies[], vpn_whitelist[] }
+// WRITE PUT  /admin/security/policies/{type}    → { policy }  (action/enabled)
+// VPN   POST /admin/security/vpn-whitelist      → { entry }
+// VPN   DEL  /admin/security/vpn-whitelist/{id} → { ok: true }
+//
+// The write plane is Super-Admin-only at the route gate, validates the type
+// against the schema CHECK allowlist, refuses weakening the four
+// mandatory-block buckets (developer_options, debug, tamper, play_integrity),
+// stamps updated_by/added_by and writes an audit_logs row per change. The
+// ANY-authenticated read plane (/security/policies) remains the enforcement
+// source the clients consume — this page is its management surface.
+
+const MANDATORY_BLOCK: string[] = ['developer_options', 'debug', 'tamper', 'play_integrity'];
+
+/** Invoke the admin security endpoints through the functions bridge.
+ *  Route names map in src/client/php.ts EDGE_FUNCTION_MAP; the update route
+ *  fills {type} from the payload, the remove route fills {id}. */
+async function adminSecurity<T>(name: string, init?: { method?: string; body?: Record<string, unknown> }): Promise<T> {
+  const { data, error } = await backendClient.functions.invoke(name, {
+    method: init?.method,
+    ...(init?.body !== undefined ? { body: init.body } : {}),
+  } as { method?: string; body?: Record<string, unknown> });
+  if (error) throw error;
+  return data as T;
+}
+
 type PolicyAction = 'log_only' | 'warn_only' | 'block_video' | 'block_login';
 type DetectionType = 'root_jailbreak' | 'vpn' | 'proxy' | 'ssl_pinning' | 'debug' | 'screenshot' | 'screen_recording' | 'app_integrity';
 
@@ -74,14 +102,18 @@ export default function SecurityPoliciesScreen() {
   const [addingVpn, setAddingVpn]     = useState(false);
 
   const load = useCallback(async () => {
-    const [polRes, wlRes] = await Promise.all([
-      backendClient.from('security_policies').select('*').order('detection_type'),
-      backendClient.from('security_vpn_whitelist').select('*').order('created_at'),
-    ]);
-    if (polRes.data) setPolicies(polRes.data as Policy[]);
-    if (wlRes.data)  setWhitelist(wlRes.data as VpnWhitelist[]);
-    setLoading(false);
-  }, []);
+    try {
+      const res = await adminSecurity<{ policies: Policy[]; vpn_whitelist: VpnWhitelist[] }>('admin-security-policies', { method: 'GET' });
+      setPolicies(res.policies ?? []);
+      setWhitelist(res.vpn_whitelist ?? []);
+    } catch (e) {
+      // Visible, never swallowed: keep prior data (if any) and surface the
+      // failure so an SA never mistakes a failed load for an empty table.
+      showToast({ type: 'error', message: friendlyError(e, 'Unable to load security policies.') });
+    } finally {
+      setLoading(false);
+    }
+  }, [showToast]);
 
   useFocusEffect(useCallback(() => { void load(); }, [load]));
 
@@ -93,13 +125,15 @@ export default function SecurityPoliciesScreen() {
     setSaving(true);
     try {
       const updates = policies.map((p) => ({
-        id: p.id, action: p.action, enabled: p.enabled, updated_at: new Date().toISOString(),
+        type: p.detection_type, action: p.action, enabled: p.enabled,
       }));
       for (const u of updates) {
-        const { error } = await backendClient.from('security_policies').update({
-          action: u.action, enabled: u.enabled, updated_at: u.updated_at,
-        }).eq('id', u.id);
-        if (error) throw error;
+        // One bucket per call — the PUT contract validates and audits each
+        // change individually (mandatory-block buckets are refused 422).
+        await adminSecurity('admin-security-policy-update', {
+          method: 'PUT',
+          body: { type: u.type, action: u.action, enabled: u.enabled },
+        });
       }
       invalidatePolicyCache();
       showToast({ type: 'success', message: 'Security policies saved.' });
@@ -114,10 +148,11 @@ export default function SecurityPoliciesScreen() {
     if (!newVpnName.trim()) return;
     setAddingVpn(true);
     try {
-      const { data, error } = await backendClient.from('security_vpn_whitelist')
-        .insert({ name: newVpnName.trim() }).select().maybeSingle();
-      if (error) throw error;
-      if (data) setWhitelist((prev) => [...prev, data as VpnWhitelist]);
+      const { entry } = await adminSecurity<{ entry: VpnWhitelist }>('admin-security-vpn-add', {
+        method: 'POST',
+        body: { name: newVpnName.trim() },
+      });
+      if (entry) setWhitelist((prev) => [...prev, entry]);
       setNewVpnName('');
       invalidatePolicyCache();
       showToast({ type: 'success', message: 'VPN added to whitelist.' });
@@ -130,8 +165,10 @@ export default function SecurityPoliciesScreen() {
 
   const handleRemoveVpn = async (id: string) => {
     try {
-      const { error } = await backendClient.from('security_vpn_whitelist').delete().eq('id', id);
-      if (error) throw error;
+      await adminSecurity('admin-security-vpn-remove', {
+        method: 'DELETE',
+        body: { id },
+      });
       setWhitelist((prev) => prev.filter((v) => v.id !== id));
       invalidatePolicyCache();
       showToast({ type: 'success', message: 'VPN removed from whitelist.' });
@@ -170,6 +207,9 @@ export default function SecurityPoliciesScreen() {
           const meta = DETECTION_META[policy.detection_type];
           if (!meta) return null;
           const Icon = meta.icon;
+          // Mandatory security blocks (migration 016): the UI prevents the
+          // accidental attempt AND the server refuses it authoritatively (422).
+          const isMandatory = MANDATORY_BLOCK.includes(policy.detection_type);
           return (
             <View key={policy.id} style={[flat, { borderRadius: layout.cardRadius, padding: layout.cardPx, gap: layout.pad.md }]}>
               {/* Header */}
@@ -190,6 +230,7 @@ export default function SecurityPoliciesScreen() {
                   onValueChange={(v) => updateLocalPolicy(policy.id, 'enabled', v)}
                   trackColor={{ false: `${c.text}22`, true: `${c.primary}55` }}
                   thumbColor={policy.enabled ? c.primary : `${c.text}55`}
+                  disabled={isMandatory}
                 />
               </View>
               {/* Action selector */}
@@ -216,6 +257,11 @@ export default function SecurityPoliciesScreen() {
                     );
                   })}
                 </View>
+              )}
+              {isMandatory && (
+                <Text style={{ fontSize: layout.captionSize, color: '#F59E0B', fontWeight: '600' }}>
+                  Mandatory security block — cannot be weakened (server-enforced).
+                </Text>
               )}
               {!policy.enabled && (
                 <Text style={{ fontSize: layout.captionSize, color: `${c.text}55`, fontStyle: 'italic' }}>

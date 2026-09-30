@@ -89,6 +89,23 @@ final class PlatformController
     ];
 
     /**
+     * Canonical default label per platform — the server twin of the client
+     * registry (CONTACT_PLATFORMS in src/lib/branding.ts). Keep the two in
+     * sync: an empty stored label resolves to this, so the CMS, the API
+     * response and the mobile Contact Us page can never disagree.
+     */
+    public const CONTACT_LINK_DEFAULT_LABELS = [
+        'whatsapp'  => 'WhatsApp',
+        'telegram'  => 'Telegram',
+        'facebook'  => 'Facebook',
+        'instagram' => 'Instagram',
+        'twitter'   => 'X / Twitter',
+        'website'   => 'Website',
+        'email'     => 'Email',
+        'phone'     => 'Phone',
+    ];
+
+    /**
      * CMS pages that a real screen in the app renders. `builtin` marks pages
      * whose text ships inside the app (used whenever the stored body is empty).
      */
@@ -289,7 +306,10 @@ final class PlatformController
             }
             $label = trim((string) ($item['label'] ?? ''));
             if ($label === '') {
-                $label = ucfirst($platform);
+                // Canonical default label for the platform (mirrors the client
+                // registry in src/lib/branding.ts — NOT a naive ucfirst of the
+                // raw key, which produced 'Whatsapp'/'Twitter').
+                $label = self::CONTACT_LINK_DEFAULT_LABELS[$platform] ?? ucfirst($platform);
             }
             if (mb_strlen($label) > 60) {
                 throw new ApiException(422, 'A contact link label is limited to 60 characters', 'invalid_branding_value');

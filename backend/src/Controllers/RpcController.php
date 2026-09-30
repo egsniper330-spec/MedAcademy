@@ -863,47 +863,218 @@ final class RpcController
     }
 
     /**
-     * search_audit_logs — Filtered paginated audit log search.
+     * search_audit_logs — Filtered, paginated audit log search.
+     *
+     * Contract consumed by getAuditTrail() (src/lib/api.ts) and the Super
+     * Admin Audit Trail page (sa-audit.tsx):
+     *   { logs: AuditTrailEntry[] } where entry[0].total_count carries the
+     *   filtered total for pagination. Every optional filter param is sent
+     *   only when active, so ABSENT params must never be coerced into
+     *   invalid values (an earlier version normalized an empty user_id into
+     *   "Invalid UUID: ''" → HTTP 400 on every page load).
+     *
+     * Supported filters: search, action, user_id (actor/target), category
+     * (explicit action bucket), log_status, date_from/date_to (UTC,
+     * inclusive; ISO-8601 input normalized to MySQL datetime form). Only
+     * schema-listed columns are selectable, so newly added audit_logs
+     * columns can never leak into API responses.
+     *
+     * LIMIT/OFFSET are interpolated (never bound): the connection runs with
+     * PDO::ATTR_EMULATE_PREPARES, which quotes bound ints into `LIMIT '50'`
+     * — a MySQL syntax error. $limit/$offset are int-cast + clamped above,
+     * matching the AnalyticsController::userActivity() convention.
      */
+    private const AUDIT_LOG_COLUMNS = [
+        'id', 'user_id', 'actor_id', 'resource_type', 'resource_id',
+        'action', 'details', 'ip_address', 'created_at', 'target_name',
+        'description', 'log_status', 'actor_name', 'actor_email',
+        'actor_role', 'old_values', 'new_values', 'success',
+    ];
+
+    /**
+     * Explicit category → audit action buckets for search_audit_logs.
+     * Mirrors the canonical map in AnalyticsController::userActivity() and
+     * the filter chips of the Super Admin Audit Trail page, so every UI
+     * filter maps to a real, exhaustive action list. Unknown categories
+     * return null → the query matches nothing (fail-closed, never silently
+     * unfiltered).
+     */
+    private const AUDIT_CATEGORY_ACTIONS = [
+        'auth' => ['login', 'logout', 'register', 'password_reset', 'password_changed', 'phone_login', 'failed_login', 'password_changed_by_admin', 'password_changed_first_login', 'temp_password_generated', 'session_revoked', 'reset_token'],
+        'profile' => ['profile_name_changed', 'profile_avatar_changed', 'profile_email_changed', 'profile_phone_changed', 'profile_updated', 'name_changed', 'avatar_changed', 'avatar_updated', 'email_changed'],
+        'devices' => ['device_reset', 'device_force_logout', 'device_blocked', 'device_unblocked', 'device_registered', 'device_limit_changed', 'device_revoked', 'device_removed', 'device_reset_by_admin', 'device_logout_all', 'limit_changed', 'unlimited_enabled', 'unlimited_disabled', 'unlimited_devices_enabled', 'unlimited_devices_disabled', 'bulk_device_reset', 'bulk_reset_devices'],
+        'courses' => ['course_created', 'course_updated', 'course_deleted', 'course_published', 'course_unpublished', 'course_archived', 'course_restored', 'course_price_changed', 'course_hidden', 'lesson_created', 'lesson_updated', 'lesson_deleted', 'video_uploaded', 'video_replaced', 'video_deleted', 'pdf_uploaded', 'pdf_deleted'],
+        'purchases' => ['credit_allocated', 'credit_consumed', 'credit_deducted', 'credit_refunded', 'credit_expired', 'credits_added', 'credits_removed', 'code_created', 'code_redeemed', 'code_deactivated', 'code_deleted', 'code_activated', 'code_disabled', 'code_expired', 'redeem_code_created', 'redeem_code_redeemed', 'redeem_code_revoked', 'enrollment_created', 'enrollment_removed'],
+        'admin_actions' => ['platform_settings_changed', 'security_policy_changed', 'settings_changed', 'revenue_settings_changed', 'earnings_settings_changed', 'update_earnings_settings', 'credit_price_changed', 'custom_pricing_enabled', 'custom_pricing_disabled', 'provider_changed', 'system_health_check', 'impersonation_started', 'impersonation_ended', 'bulk_trash', 'bulk_restore', 'bulk_permanent_delete', 'bulk_suspend', 'bulk_unsuspend', 'bulk_reset_password', 'admin_updated', 'admin_created', 'admin_deleted', 'notification_sent', 'platform_earnings_reset', 'earnings_reset', 'undo_delete', 'trash_emptied', 'deletion_verification_failed', 'data_exported'],
+        'roles' => ['role_changed', 'role_changed_to_doctor', 'role_changed_to_admin', 'role_changed_to_super_admin', 'role_changed_to_student', 'permission_changed', 'doctor_approved', 'doctor_rejected', 'doctor_created', 'user_created', 'student_created_by_doctor', 'student_bulk_imported', 'admin_created', 'super_admin_created', 'initial_super_admin_created'],
+        'blocking' => ['user_suspended', 'user_blocked', 'user_unblocked', 'user_trashed', 'user_restored', 'user_deleted', 'user_hard_deleted', 'account_restored', 'account_permanently_deleted', 'user_activated'],
+        'users' => ['user_suspended', 'user_blocked', 'user_unblocked', 'user_trashed', 'user_restored', 'user_deleted', 'user_hard_deleted', 'account_restored', 'account_permanently_deleted', 'user_activated', 'user_created', 'admin_created', 'super_admin_created', 'initial_super_admin_created'],
+        'security' => ['security_event', 'root_detected', 'jailbreak_detected', 'vpn_detected', 'proxy_detected', 'ssl_pinning_failure', 'screenshot_detected', 'screen_recording_detected', 'debug_detected', 'frida_detected', 'xposed_detected', 'app_integrity_compromised', 'security_policy_changed', 'security_policy_update', 'security_vpn_whitelist_add', 'security_vpn_whitelist_remove'],
+        // Aliases for the sa-audit.tsx filter chips (doctor / student /
+        // platform / finance) so every visible filter maps to real rows.
+        'doctor' => ['doctor_approved', 'doctor_rejected', 'doctor_created', 'course_assigned_by_doctor', 'credit_consumed_by_doctor', 'student_created_by_doctor'],
+        'student' => ['student_created_by_doctor', 'student_bulk_imported', 'student_removed_from_course', 'students_bulk_action', 'enrollment_created', 'enrollment_removed', 'enrollment_created_by_admin', 'enrollment_removed_by_admin', 'enrollment_hidden_flag_set', 'enrollment_visibility_changed'],
+        'platform' => ['app_update_config_changed', 'release_created', 'release_updated', 'release_published', 'release_rollback', 'release_archived', 'video_provider_global_updated', 'video_provider_doctor_override_updated', 'feature_flag_override_updated', 'provider_changed', 'patch_uploaded', 'data_exported', 'notification_sent'],
+        'finance' => ['credit_allocated', 'credit_consumed', 'credit_deducted', 'credit_refunded', 'credit_expired', 'credits_added', 'credits_removed', 'code_created', 'code_redeemed', 'code_deactivated', 'code_deleted', 'code_activated', 'code_disabled', 'code_expired', 'redeem_code_created', 'redeem_code_redeemed', 'redeem_code_revoked', 'codes_batch_cloned', 'codes_batch_created', 'codes_bulk_deleted', 'codes_deactivated', 'codes_reactivated', 'earnings_settings_changed', 'revenue_settings_changed', 'update_earnings_settings', 'credit_price_changed', 'custom_pricing_enabled', 'custom_pricing_disabled', 'platform_earnings_reset', 'earnings_reset'],
+    ];
+
+    /**
+     * @return list<string>|null
+     */
+    private static function auditCategoryActions(string $category): ?array
+    {
+        return self::AUDIT_CATEGORY_ACTIONS[$category] ?? null;
+    }
+
+    /**
+     * Date filters arrive as ISO-8601 ("2026-09-30T00:00:00.000Z") from the
+     * client; MySQL DATETIME comparisons need "Y-m-d H:i:s". Anything already
+     * in SQL form passes through untouched; unparsable values fail closed by
+     * matching nothing (never an unfiltered query).
+     */
+    private static function normalizeAuditDateParam(string $value): string
+    {
+        if (preg_match('/^\\d{4}-\\d{2}-\\d{2}$/', $value) === 1) {
+            return $value . ' 00:00:00';
+        }
+        if (preg_match('/^\\d{4}-\\d{2}-\\d{2}[ T]\\d{2}:\\d{2}/', $value) === 1) {
+            return str_replace('T', ' ', substr($value, 0, 19));
+        }
+        $ts = \DateTimeImmutable::createFromFormat(
+            "Y-m-d\\TH:i:s.u\\Z",
+            $value,
+            new \DateTimeZone('UTC')
+        ) ?: \DateTimeImmutable::createFromFormat(
+            "Y-m-d\\TH:i:s\\Z",
+            $value,
+            new \DateTimeZone('UTC')
+        ) ?: \DateTimeImmutable::createFromFormat(
+            'Y-m-d\\TH:i:s.v\\Z',
+            $value,
+            new \DateTimeZone('UTC')
+        );
+        return $ts !== false
+            ? $ts->setTimezone(new \DateTimeZone('UTC'))->format('Y-m-d H:i:s')
+            : '1970-01-01 00:00:00';
+    }
+
     public function searchAuditLogs(Request $request): array
     {
         $search = trim((string) ($request->query('search', '')));
         $limit = min(max((int) $request->query('limit', '50'), 1), 200);
         $offset = max((int) $request->query('offset', '0'), 0);
         $action = trim((string) ($request->query('action', '')));
-        $userId = Uuid::normalize((string) ($request->query('user_id', '')));
+        $category = strtolower(trim((string) ($request->query('category', ''))));
+        $logStatus = strtolower(trim((string) ($request->query('log_status', ''))));
+        $dateFrom = trim((string) ($request->query('date_from', '')));
+        $dateTo = trim((string) ($request->query('date_to', '')));
+
+        $userIdRaw = trim((string) ($request->query('user_id', '')));
+        $userId = $userIdRaw !== '' ? Uuid::normalize($userIdRaw) : '';
 
         $db = Database::instance();
         $conditions = [];
         $params = [];
 
         if ($search !== '') {
-            $conditions[] = '(al.action LIKE ? OR al.details LIKE ? OR p.full_name LIKE ?)';
+            $conditions[] = '(al.action LIKE ? OR al.details LIKE ? OR COALESCE(al.actor_name, p.full_name) LIKE ? OR al.target_name LIKE ?)';
             $like = '%' . $search . '%';
-            array_push($params, $like, $like, $like);
+            array_push($params, $like, $like, $like, $like);
         }
         if ($action !== '') {
             $conditions[] = 'al.action = ?';
             $params[] = $action;
+        }
+        if ($category !== '') {
+            // Category = explicit action bucket, mirroring the canonical map in
+            // AnalyticsController::userActivity() and the sa-audit filter chips.
+            $actions = self::auditCategoryActions($category);
+            if ($actions === null) {
+                // Unknown category → match nothing rather than silently
+                // ignoring the filter.
+                $conditions[] = '1=0';
+            } else {
+                $placeholders = implode(',', array_fill(0, count($actions), '?'));
+                $conditions[] = "al.action IN ({$placeholders})";
+                array_push($params, ...$actions);
+            }
+        }
+        if ($logStatus !== '') {
+            $conditions[] = 'al.log_status = ?';
+            $params[] = $logStatus;
         }
         if ($userId !== '') {
             $conditions[] = '(al.user_id = ? OR al.actor_id = ?)';
             $params[] = $userId;
             $params[] = $userId;
         }
+        if ($dateFrom !== '') {
+            $conditions[] = 'al.created_at >= ?';
+            $params[] = self::normalizeAuditDateParam($dateFrom);
+        }
+        if ($dateTo !== '') {
+            $conditions[] = 'al.created_at <= ?';
+            $params[] = self::normalizeAuditDateParam($dateTo);
+        }
 
         $where = $conditions !== [] ? 'WHERE ' . implode(' AND ', $conditions) : '';
 
+        $columns = implode(', ', array_map(
+            static fn (string $c): string => 'al.' . $c,
+            self::AUDIT_LOG_COLUMNS
+        ));
+
+        // Count-then-page (same pattern as AnalyticsController::userActivity) —
+        // no window functions, safe on every MySQL/MariaDB version in use.
+        $total = (int) ($db->select(
+            "SELECT COUNT(*) AS c
+             FROM audit_logs al
+             LEFT JOIN profiles p ON p.id = al.actor_id
+             {$where}",
+            $params
+        )[0]['c'] ?? 0);
+
         $rows = $db->select(
-            "SELECT al.id, al.action, al.user_id, al.actor_id, al.details, al.created_at,
-                    p.full_name AS actor_name
+            "SELECT {$columns}
              FROM audit_logs al
              LEFT JOIN profiles p ON p.id = al.actor_id
              {$where}
-             ORDER BY al.created_at DESC
-             LIMIT ? OFFSET ?",
-            array_merge($params, [$limit, $offset])
+             ORDER BY al.created_at DESC, al.id DESC
+             LIMIT {$limit} OFFSET {$offset}",
+            $params
         );
+
+        foreach ($rows as &$row) {
+            $row['total_count'] = $total;
+            // JSON columns arrive as raw strings from PDO — decode to real
+            // structures so the frontend consumes typed objects, not text.
+            foreach (['details', 'old_values', 'new_values'] as $jsonCol) {
+                $raw = $row[$jsonCol] ?? null;
+                if (is_string($raw) && $raw !== '') {
+                    $decoded = json_decode($raw, true);
+                    $row[$jsonCol] = is_array($decoded) ? $decoded : null;
+                } elseif (!is_array($raw)) {
+                    $row[$jsonCol] = null;
+                }
+            }
+            // UTC_TIMESTAMP(6) yields "YYYY-MM-DD HH:MM:SS.ffffff"; ship strict
+            // ISO-8601 UTC so JS Date parsing and date filters stay exact.
+            if (isset($row['created_at']) && is_string($row['created_at'])) {
+                $ts = \DateTimeImmutable::createFromFormat(
+                    'Y-m-d H:i:s.u',
+                    $row['created_at'],
+                    new \DateTimeZone('UTC')
+                ) ?: \DateTimeImmutable::createFromFormat(
+                    'Y-m-d H:i:s',
+                    substr($row['created_at'], 0, 19),
+                    new \DateTimeZone('UTC')
+                );
+                $row['created_at'] = $ts !== false
+                    ? $ts->setTimezone(new \DateTimeZone('UTC'))->format('Y-m-d\\TH:i:s\\Z')
+                    : null;
+            }
+        }
+        unset($row);
 
         return ['logs' => $rows ?? []];
     }

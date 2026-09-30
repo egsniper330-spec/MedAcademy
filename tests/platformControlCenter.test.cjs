@@ -58,8 +58,6 @@ const LISTED_PAGES = [
   ['Currency Settings',    'src/app/(app)/(hubs)/currency.tsx', false],
   ['Content Protection',   'src/app/(app)/(hubs)/content-protection.tsx', false],
   ['Watermark / DRM',      'src/app/(app)/(hubs)/content-protection.tsx', false],
-  ['Video Monitor',        'src/app/(app)/(hubs)/video-monitor.tsx', false],
-  ['Video Health',         'src/app/(app)/(hubs)/video-health.tsx', false],
   ['Video Settings',       'src/app/(app)/(hubs)/video-settings.tsx', false],
   ['Storage',              'src/app/(app)/(hubs)/storage.tsx', false],
   ['Security Dashboard',   'src/app/(app)/(hubs)/sec-dashboard.tsx', false],
@@ -111,7 +109,6 @@ const LISTED_PAGES = [
   // SA-shell wrappers must hand the shared screens a terminal fallback, so a
   // drawer entry cannot dead-end.
   const wrapperMap = {
-    'sa-video-health.tsx': "backTo=\"/sa-content\"",
     'sa-video-settings.tsx': "backTo=\"/sa-content\"",
     'sa-storage.tsx': "backTo=\"/sa-content\"",
     'sa-devices.tsx': "backTo=\"/sa-platform\"",
@@ -124,7 +121,6 @@ const LISTED_PAGES = [
     'sa-system-providers.tsx': "backTo=\"/sa-platform\"",
     'sa-currency.tsx': "backTo=\"/sa-finance\"",
     'sa-content-protection.tsx': "backTo=\"/sa-content\"",
-    'sa-video-monitor.tsx': "backTo=\"/sa-platform\"",
   };
   for (const [file, expected] of Object.entries(wrapperMap)) {
     const rel = `src/app/(app)/(hubs)/${file}`;
@@ -133,8 +129,8 @@ const LISTED_PAGES = [
 
   // Hub links must stay inside the SA shell: pushing an (admin)-only route makes
   // the user fall out of the Super Admin tab bar (the reported bug).
-  const ADMIN_ONLY = ['video-health', 'video-settings', 'storage', 'devices', 'academic',
-    'enrollment-manager', 'notifications-center', 'bulk-import', 'db-audit', 'video-monitor',
+  const ADMIN_ONLY = ['video-settings', 'storage', 'devices', 'academic',
+    'enrollment-manager', 'notifications-center', 'bulk-import', 'db-audit',
     'cms', 'system-providers'];
   const hubFiles = walk('src/app/(app)/(superadmin)').filter(f => /sa-(overview|platform|content|reports|finance)\.tsx$/.test(f));
   for (const hub of hubFiles) {

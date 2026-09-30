@@ -56,12 +56,6 @@ function getNavSections(role: string, c: typeof neuColors.light, earningsEnabled
     ],
   };
 
-  const doctorBottom: NavSection = {
-    items: [
-      { icon: Bell, label: 'Notifications', path: '/notifications', color: c.primary },
-    ],
-  };
-
   const studentBottom: NavSection = {
     items: [
       { icon: Bell, label: 'Notifications', path: '/notifications', color: c.primary },
@@ -90,16 +84,19 @@ function getNavSections(role: string, c: typeof neuColors.light, earningsEnabled
       {
         title: 'Doctor',
         items: [
-          { icon: LayoutDashboard, label: 'Dashboard',  path: '/dr-overview',  color: c.primary  },
-          { icon: BookOpen,        label: 'My Courses', path: '/courses',       color: '#7C3AED'  },
-          { icon: Users,           label: 'Students',   path: '/students',      color: '#D97706'  },
-          { icon: TrendingUp,      label: 'Earnings',   path: '/dr-earnings',   color: '#16A34A'  },
-          { icon: Stethoscope,     label: 'Credits',    path: '/credits',       color: '#2DA8FF'  },
-          { icon: Video,           label: 'Video Library', path: '/video-library', color: '#0EA5E9'  },
-          { icon: User,            label: 'Profile',    path: '/dr-profile',    color: '#7C3AED'  },
+          // Canonical doctor navigation order — do not reorder casually:
+          // Dashboard, My Courses, Video Library, Students, Credits,
+          // Earnings, Notifications, Profile.
+          { icon: LayoutDashboard, label: 'Dashboard',      path: '/dr-overview',   color: c.primary  },
+          { icon: BookOpen,        label: 'My Courses',     path: '/courses',       color: '#7C3AED'  },
+          { icon: Video,           label: 'Video Library',  path: '/video-library', color: '#0EA5E9'  },
+          { icon: Users,           label: 'Students',       path: '/students',      color: '#D97706'  },
+          { icon: Stethoscope,     label: 'Credits',        path: '/credits',       color: '#2DA8FF'  },
+          { icon: TrendingUp,      label: 'Earnings',       path: '/dr-earnings',   color: '#16A34A'  },
+          { icon: Bell,            label: 'Notifications',  path: '/notifications', color: c.primary  },
+          { icon: User,            label: 'Profile',        path: '/dr-profile',    color: '#7C3AED'  },
         ],
       },
-      doctorBottom,
     ];
   }
 
@@ -124,8 +121,6 @@ function getNavSections(role: string, c: typeof neuColors.light, earningsEnabled
         title: 'Operations',
         items: [
           { icon: DollarSign, label: 'Credits', path: '/admin-credits', color: '#16A34A' },
-          { icon: Video,      label: 'Video Monitor',  path: '/video-monitor',  color: '#7C3AED' },
-          { icon: HeartPulse, label: 'Video Health',   path: '/video-health',   color: '#2DA8FF' },
           { icon: Database,   label: 'Storage Monitor',path: '/storage',        color: '#2DA8FF' },
         ],
       },
@@ -176,7 +171,7 @@ function getNavSections(role: string, c: typeof neuColors.light, earningsEnabled
   //   Users & Access hub → /sa-platform (Users & Access section)
   //   Finance & Credits hub → /sa-finance (Revenue + Credits sections)
   //   Content & Media hub → /sa-content (10 content screens)
-  //   Monitoring & Health → /health, /sa-video-monitor, /sa-audit, reports
+  //   Monitoring & Health → /health, /sa-audit, reports (video diagnostics consolidated in Video Settings)
   //   Platform & Settings hub → /sa-platform (everything else)
   return [
     {
@@ -200,7 +195,6 @@ function getNavSections(role: string, c: typeof neuColors.light, earningsEnabled
       title: 'Monitoring',
       items: [
         { icon: HeartPulse,   label: 'System Health',      path: '/health',             color: '#DC2626'  },
-        { icon: MonitorDot,   label: 'Video Monitor',      path: '/sa-video-monitor',   color: '#2DA8FF'  },
         { icon: ShieldAlert,  label: 'Security Dashboard', path: '/sec-dashboard',      color: '#EF4444'  },
         { icon: Shield,       label: 'Audit Trail',        path: '/sa-audit',           color: '#DC2626'  },
         { icon: FileText,     label: 'Reports & Export',   path: '/sa-reports',         color: '#7C3AED'  },

@@ -177,6 +177,16 @@ $router->post('/security/violations', [SecurityController::class, 'reportViolati
 $router->post('/security/bump-version/{id}', [SecurityController::class, 'bumpVersion'], $auth + ['role' => ['admin', 'super_admin']]);
 $router->post('/security/devices/{id}/block', [SecurityController::class, 'blockDevice'], $auth + ['role' => ['admin', 'super_admin']]);
 $router->post('/security/devices/{id}/unblock', [SecurityController::class, 'unblockDevice'], $auth + ['role' => ['admin', 'super_admin']]);
+// ── Security Policies management (Super Admin only) ────────────────────────
+// Server-authoritative policy administration: read the full rows for the SA
+// UI, update one detection bucket (validated against the schema CHECK
+// allowlist, audited, mandatory-block buckets refuse weakening), and manage
+// the VPN whitelist. GET /security/policies stays the ANY-authenticated
+// enforcement source — these are the WRITE plane.
+$router->get('/admin/security/policies', [SecurityController::class, 'adminPolicies'], $auth + ['role' => ['super_admin']]);
+$router->put('/admin/security/policies/{type}', [SecurityController::class, 'updatePolicy'], $auth + ['role' => ['super_admin']]);
+$router->post('/admin/security/vpn-whitelist', [SecurityController::class, 'addVpnWhitelist'], $auth + ['role' => ['super_admin']]);
+$router->delete('/admin/security/vpn-whitelist/{id}', [SecurityController::class, 'deleteVpnWhitelist'], $auth + ['role' => ['super_admin']]);
 
 // ---- Device-key + signed-evidence flow (server is the final authority) ------
 // The client is a sensor + evidence producer: it registers the PUBLIC half of
@@ -201,6 +211,9 @@ $router->post('/video/webhook', [VideoController::class, 'webhook']);
 $router->post('/video/chunk', [VideoController::class, 'uploadChunk'], $auth);
 $router->post('/video/assemble', [VideoController::class, 'assembleUpload'], $auth + ['role' => ['doctor', 'admin', 'super_admin']]);
 $router->post('/video/health-scan', [VideoController::class, 'healthScan'], $auth + ['role' => ['admin', 'super_admin']]);
+// Authoritative VdoCipher status (Super Admin): live API listing + webhook
+// contract diagnostics. Server-side API secret; sanitized response only.
+$router->get('/video/vdocipher-status', [VideoController::class, 'vdocipherStatus'], $auth + ['role' => ['super_admin']]);
 
 // ---- Video Provider Control Center (Super Admin) ----------------------------
 // Global availability + per-doctor three-state overrides over the REAL
@@ -225,6 +238,9 @@ $router->post('/integrity/app', [IntegrityController::class, 'appIntegrity'], $a
 
 // ---- Storage ---------------------------------------------------------------
 $router->get('/storage/buckets', [StorageController::class, 'buckets'], $auth);
+// Real storage statistics (Admin/Super Admin): measured disk, physical upload
+// sizes and database size. Read-only diagnostics — nothing is modified.
+$router->get('/storage/stats', [StorageController::class, 'stats'], $auth + ['role' => ['admin', 'super_admin']]);
 $router->get('/storage/signed-url', [StorageController::class, 'signedUrl'], $auth);
 $router->post('/storage/signed-url', [StorageController::class, 'signedUrl'], $auth); // EF get-signed-url POSTs a JSON body
 $router->get('/storage/signed', [StorageController::class, 'signedFile']);
@@ -266,6 +282,9 @@ $router->get('/analytics/archive-analytics', [AnalyticsController::class, 'archi
 $router->get('/analytics/archived-courses', [AnalyticsController::class, 'archivedCourses'], $auth + ['role' => ['admin', 'super_admin']]);
 $router->get('/analytics/course-delete-stats/{id}', [AnalyticsController::class, 'courseDeleteStats'], $auth); // owner-aware: admins + the owning doctor
 $router->get('/analytics/risky-devices', [AnalyticsController::class, 'riskyDevices'], $auth + ['role' => ['admin', 'super_admin']]);
+// Recent security events with server-side user-identity join (Security
+// Dashboard) — replaces the broken generic-API embed (see controller docblock).
+$router->get('/analytics/security-events', [AnalyticsController::class, 'securityEvents'], $auth + ['role' => ['admin', 'super_admin']]);
 $router->get('/analytics/video-asset-usage', [AnalyticsController::class, 'videoAssetUsage'], $auth); // ownership enforced in controller (doctors may query their own assets)
 $router->post('/analytics/db-audit', [AnalyticsController::class, 'dbAudit'], $auth + ['role' => ['admin', 'super_admin']]);
 $router->post('/analytics/recalculate-earnings/{doctorId}', [AnalyticsController::class, 'recalculateEarnings'], $auth + ['role' => ['admin', 'super_admin']]);

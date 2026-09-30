@@ -919,6 +919,13 @@ const EDGE_FUNCTION_MAP: Record<string, string> = {
   'get-app-update-config':  '/admin/app-updates',
   'set-app-update-config':  '/admin/app-updates/{platform}',
   'get-security-policies':  '/security/policies',
+  // Security Policies management (Super Admin only) — the SA UI's write plane
+  // over security_policies + security_vpn_whitelist. Update fills {type} from
+  // payload.type; remove fills {id}. PUT contract for the update.
+  'admin-security-policies':       '/admin/security/policies',
+  'admin-security-policy-update':  '/admin/security/policies/{type}',
+  'admin-security-vpn-add':        '/admin/security/vpn-whitelist',
+  'admin-security-vpn-remove':     '/admin/security/vpn-whitelist/{id}',
   'get-security-version':   '/security/version',
   'get-signed-url':         '/storage/signed-url',
   'impersonate':            '/auth/impersonate',
@@ -965,7 +972,7 @@ const EDGE_ACTION_MAP: Record<string, Record<string, string>> = {
 // Edge Functions whose PHP routes are GET-only (config/version/health probes)
 const GET_FUNCTIONS = new Set(['get-security-config', 'get-security-policies', 'get-security-version', 'provider-health', 'get-app-update-config', 'system-diagnostics', 'system-diagnostics-one', 'get-maintenance-status']);
 // Edge Functions whose PHP routes REQUIRE PUT (the upsert contract)
-const FORCE_PUT_FUNCTIONS = new Set(['set-app-update-config']);
+const FORCE_PUT_FUNCTIONS = new Set(['set-app-update-config', 'admin-security-policy-update']);
 // Edge Functions whose PHP routes are POST-only regardless of the caller's
 // requested method (the original vdocipher-upload-status EF used GET; the PHP
 // route /video/upload-status accepts POST with a JSON body).
@@ -1118,6 +1125,7 @@ const RPC_MAP: Record<string, string> = {
   'get_orphan_deletion_records':      '/rpc/orphan-deletion-records',
   'get_risky_devices':                '/analytics/risky-devices',
   'get_security_stats':               '/analytics/security-stats',
+  'get_security_events':              '/analytics/security-events',
   'get_security_version':             '/security/version',
   'get_teacher_provider_permissions': '/rpc/teacher-provider-permissions',
   'get_trash_list':                   '/analytics/trash-list',
@@ -1205,6 +1213,7 @@ const GET_RPCS = new Set([
   'get_orphan_deletion_records',
   'get_risky_devices',
   'get_security_stats',
+  'get_security_events',
   'get_security_version',
   'get_teacher_provider_permissions',
   'get_trash_list',

@@ -427,7 +427,6 @@ function read(rel) {
   for (const [route, file, target] of [
     ['sa-currency', 'src/app/(app)/(hubs)/sa-currency.tsx', '/sa-finance'],
     ['sa-content-protection', 'src/app/(app)/(hubs)/sa-content-protection.tsx', '/sa-content'],
-    ['sa-video-monitor', 'src/app/(app)/(hubs)/sa-video-monitor.tsx', '/sa-platform'],
   ]) {
     const w = read(file);
     ok(new RegExp(`backTo="${target}"`).test(w),
@@ -436,7 +435,6 @@ function read(rel) {
   for (const f of [
     'src/app/(app)/(hubs)/currency.tsx',
     'src/app/(app)/(hubs)/content-protection.tsx',
-    'src/app/(app)/(hubs)/video-monitor.tsx',
   ]) {
     const src = read(f);
     ok(/\{ backTo\?: string \} = \{\}/.test(src),

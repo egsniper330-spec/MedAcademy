@@ -129,11 +129,10 @@ export default function SecurityDashboard() {
           p_end_date: new Date().toISOString(),
         }),
         backendClient.rpc('get_risky_devices', { p_min_score: 20, p_limit: 20, p_offset: 0 }),
-        backendClient
-          .from('security_events')
-          .select('*, profiles(full_name, email)')
-          .order('created_at', { ascending: false })
-          .limit(50),
+        backendClient.rpc('get_security_events', {
+          p_start_date: startDate,
+          p_end_date: new Date().toISOString(),
+        }),
       ]);
 
       // Collect contract/API failures per source — a failure in one section

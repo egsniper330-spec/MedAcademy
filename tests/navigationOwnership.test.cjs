@@ -88,6 +88,30 @@ ok(/\.filter\(\(tab\) => tab\.hidden !== true\)/.test(jsShell), 'JS shell filter
 ok(!iosShell.includes('tabBarItemHidden'), 'iOS shell no longer uses tabBarItemHidden scene registration');
 ok(!jsShell.includes('href: tab.hidden ? null : undefined'), 'JS shell no longer registers href:null hidden scenes');
 
+console.log('── 3b. Doctor drawer canonical order ──');
+// The doctor drawer must present its main items in exactly this order.
+// Extracted from the real role-scoped block in DrawerNav.tsx so a reorder,
+// a new item, or an accidental student/admin/sa edit fails here loudly.
+const drawerNavSrc = read(path.join(ROOT, 'src', 'components', 'DrawerNav.tsx'));
+const doctorBlock = drawerNavSrc.match(/if \(role === 'doctor'\) \{[\s\S]*?\n  \}\n\n  if \(role === 'admin'\)/);
+ok(doctorBlock !== null, "role === 'doctor' block found in DrawerNav (role-scoped)");
+if (doctorBlock) {
+  const block = doctorBlock[0];
+  const EXPECTED_ORDER = [
+    'Dashboard', 'My Courses', 'Video Library', 'Students',
+    'Credits', 'Earnings', 'Notifications', 'Profile',
+  ];
+  const positions = EXPECTED_ORDER.map((label) => block.indexOf("label: '" + label + "'"));
+  ok(positions.every((p) => p >= 0), 'all 8 canonical doctor items present');
+  const inOrder = positions.every((p, i) => p >= 0 && (i === 0 || p > positions[i - 1]));
+  ok(inOrder, 'doctor drawer order: Dashboard → My Courses → Video Library → Students → Credits → Earnings → Notifications → Profile');
+  // Notifications lives in the main list now — no duplicate entry may remain.
+  const notifCount = (block.match(/label: 'Notifications'/g) || []).length;
+  ok(notifCount === 1, 'Notifications appears exactly once in the doctor drawer');
+  // Role scoping: student/admin/super_admin blocks untouched by the reorder.
+  ok(/if \(role === 'student'\) \{[\s\S]*?path: '\/profile'/.test(drawerNavSrc), 'student drawer block unchanged (role-scoped)');
+}
+
 console.log('── 4. (hubs) layout contract ──');
 const hubsLayout = read(path.join(HUBS, '_layout.tsx'));
 ok(/<Stack screenOptions=\{\{ headerShown: false \}\}/.test(hubsLayout), '(hubs) layout is a Stack with headerShown:false (JS-owned history)');
@@ -111,6 +135,44 @@ for (const route of ['sa-users', 'sa-finance', 'devices', 'users']) {
     fs.existsSync(path.join(APP, '(admin)', route + '.tsx'));
   ok(found, `/${route} still resolves as its role tab screen`);
 }
+
+console.log('── 7. Hub deduplication (Platform = canonical, Reports = report-focused) ──');
+// The Platform hub (sa-platform.tsx) is the canonical home for platform-
+// management/configuration features. The Reports & Export hub (sa-reports.tsx)
+// must NOT re-list them — one feature, one home.
+const reportsHub = read(path.join(HUBS, 'sa-reports.tsx'));
+const platformHub = read(path.join(APP, '(superadmin)', 'sa-platform.tsx'));
+
+// 7a. Confirmed duplicates must NEVER reappear in the Reports hub.
+for (const banned of [
+  'Impersonation',        // canonical: Platform → User Management
+  'Trash Bin',            // canonical: Platform → Cleanup & Permissions
+  'Delete Permissions',   // canonical: Platform → Cleanup & Permissions
+  'Bulk Import',          // canonical: Platform → Academic & Operations
+  'DB Audit',             // canonical: Platform → Academic & Operations
+  'Security Policies',    // canonical: Platform → Security (configuration)
+  'Security Diagnostics', // canonical: Platform → Security (configuration)
+  'Violation Management', // canonical: Platform → Security (configuration)
+  'Global Search',        // canonical: drawer → Platform & Settings
+]) {
+  ok(!reportsHub.includes(`label="${banned}"`), `Reports hub does not duplicate "${banned}"`);
+  ok(platformHub.includes(`label="${banned}"`) || banned === 'Global Search',
+    `Platform hub keeps canonical "${banned}"`);
+}
+
+// 7b. Report-focused surfaces must stay in the Reports hub.
+for (const kept of ['Reports"', 'Export Center', 'Platform Analytics', 'Revenue Analytics', 'Audit Trail', 'Fraud Alerts']) {
+  ok(reportsHub.includes(kept), `Reports hub retains report surface "${kept.replace('"', '')}"`);
+}
+
+// 7c. The Reports hub must not link configuration screens (same screen,
+// second navigation entry) even under a different label.
+for (const route of ['/violation-management', '/sec-policies', '/sec-dashboard', '/sec-diag', '/trash-bin', '/delete-permissions', '/impersonation', '/sa-bulk-import', '/sa-db-audit']) {
+  ok(!reportsHub.includes(`path="${route}"`), `Reports hub has no second entry pointing at ${route}`);
+}
+// Security Dashboard is monitoring, but Platform owns it (already linked there);
+// the Reports hub must not link it either.
+ok(!reportsHub.includes('path="/sec-dashboard"'), 'Reports hub has no second Security Dashboard entry');
 
 console.log(`\n${fail === 0 ? 'ALL PASS' : 'FAILURES PRESENT'} — ${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);

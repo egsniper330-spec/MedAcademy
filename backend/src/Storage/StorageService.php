@@ -51,6 +51,17 @@ final class StorageService
         return $this->publicDir . '/' . $this->bucketPath($bucket, $path);
     }
 
+    /** Absolute public/private roots — used by the storage statistics scan. */
+    public function publicDir(): string
+    {
+        return $this->publicDir;
+    }
+
+    public function privateDir(): string
+    {
+        return $this->privateDir;
+    }
+
     /**
      * Move an uploaded temp file into storage.
      * Returns the object path relative to the bucket.
