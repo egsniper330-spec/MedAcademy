@@ -334,6 +334,51 @@ console.log('── DEV player-session observability: ONE mounted VdoPlayer inva
     'lesson: online player unmounts on screen blur (no second live VdoPlayer during offline playback)');
 }
 
+console.log('── Native bridge patch: SDK fullscreen must never bury the RN watermark ──');
+{
+  const PATCH = 'patches/vdocipher-rn-bridge+2.0.1.patch';
+  ok(exists(PATCH), 'vdocipher-rn-bridge 2.0.1 patch exists (source-controlled bridge fix)');
+  const patch = read(PATCH);
+  // ANDROID: the bridge's FullscreenActionListener returning false = "not
+  // handled" → SDK DEFAULT fullscreen re-parents the video surface above the
+  // whole React tree (watermark buried). The patch makes RN the owner.
+  ok(patch.includes('ReactVdoPlayerUIView.java'), 'patch touches the Android new-arch player view');
+  ok(patch.includes('-            return false;') && patch.includes('+            return true;'),
+    'Android: SDK default fullscreen DISABLED — listener now reports "handled" (watermark stays above video)');
+  // iOS: the embedded VdoPlayerViewController view must be re-framed on every
+  // layout pass, or the video surface keeps its pre-rotation (portrait) frame.
+  ok(patch.includes('RCTVdoPlayerUIView.swift') && patch.includes('override func layoutSubviews()'),
+    'iOS: embedded player view re-framed on layout (video follows rotation)');
+  ok(patch.includes('vcView.frame = self.bounds'),
+    'iOS: re-frame target is the embedded VC view (portrait-locked surface fix)');
+  // iOS offline: zero-quality assets must NEVER be cached (the poisoned-cache
+  // "Tracks Not Found" defect) — evict + refuse-to-cache + stage telemetry.
+  ok(patch.includes('AssetList.swift') && patch.includes('getVideoQualities().isEmpty'),
+    'iOS offline: zero-quality assets are evicted / never cached');
+  ok(patch.includes('VdoDownload.swift') && patch.includes('stage=get_video_qualities'),
+    'iOS offline: get_video_qualities stage telemetry present (decisive evidence chain)');
+  ok(patch.includes('stage=native_asset_init') && patch.includes('stage=native_asset_cache'),
+    'iOS offline: asset-init/cache stage telemetry present');
+  // No credentials in telemetry.
+  ok(!patch.includes('playbackInfo:') || !/print\(.*(otp|playbackInfo|token)/i.test(patch.split('MEDACADEMY').join('')),
+    'telemetry logs no credentials');
+}
+
+console.log('── Plyr fullscreen surface diagnostics + identity stability ──');
+{
+  const YT = 'src/components/YouTubePlayer.tsx';
+  const yt = read(YT);
+  for (const tag of ['PLYR_FS_ENTER', 'PLYR_FS_EXIT', 'PLYR_FS_ORIENTATION', 'PLYR_FS_WEBVIEW_FRAME']) {
+    ok(yt.includes(tag), `Plyr: ${tag} diagnostic present (evidence chain, dev-only)`);
+  }
+  ok(/__DEV__/.test(yt), 'Plyr: diagnostics are dev-gated');
+  // Black-frame prevention pins: source identity must be stable across the
+  // fullscreen toggle (a source change reloads the WebView = blank surface).
+  ok(/resumeLatched/.test(yt), 'Plyr: resumePosition latched (no mid-session html rebuild)');
+  const web = read('src/components/YouTubePlayer.tsx');
+  ok(web.includes('key={src}'), 'Plyr web: key pinned to stable src identity');
+}
+
 console.log('──────────────────────────────────────────────');
 console.log(`RESULT: ${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

@@ -1,0 +1,126 @@
+diff --git a/node_modules/vdocipher-rn-bridge/android/src/main/java/com/vdocipher/rnbridge/ReactVdoPlayerUIView.java b/node_modules/vdocipher-rn-bridge/android/src/main/java/com/vdocipher/rnbridge/ReactVdoPlayerUIView.java
+index 6f5c9db..ced6aba 100644
+--- a/node_modules/vdocipher-rn-bridge/android/src/main/java/com/vdocipher/rnbridge/ReactVdoPlayerUIView.java
++++ b/node_modules/vdocipher-rn-bridge/android/src/main/java/com/vdocipher/rnbridge/ReactVdoPlayerUIView.java
+@@ -255,13 +255,24 @@ public class ReactVdoPlayerUIView extends LinearLayout implements LifecycleEvent
+     private void setFullscreenActionListener() {
+         fullscreenToggleListener = isFullscreen -> {
+ 
++            // MEDACADEMY PATCH (vdocipher-rn-bridge 2.0.1):
++            // Returning false tells the SDK the fullscreen action was NOT
++            // handled, so the SDK performs its DEFAULT fullscreen - which
++            // re-parents the video surface up to the Activity window, ABOVE
++            // the entire React Native tree. That buried the app's in-place
++            // fullscreen container and its watermark (video + rotation still
++            // worked, watermark vanished). Returning true means "handled":
++            // the SDK stays inside THIS view and the app's single fullscreen
++            // state (onEnterFullscreen/onExitFullscreen -> RN layout toggle)
++            // remains the only fullscreen system. The control bar still fires
++            // the enter/exit events and toggles its own icons.
+             if (isFullscreen) {
+                 eventEmitter.enterFullscreen();
+             } else {
+                 eventEmitter.exitFullscreen();
+             }
+ 
+-            return false;
++            return true;
+         };
+     }
+ 
+diff --git a/node_modules/vdocipher-rn-bridge/ios/AssetList.swift b/node_modules/vdocipher-rn-bridge/ios/AssetList.swift
+index 0d76ae8..6aba802 100644
+--- a/node_modules/vdocipher-rn-bridge/ios/AssetList.swift
++++ b/node_modules/vdocipher-rn-bridge/ios/AssetList.swift
+@@ -10,9 +10,20 @@ class AssetList {
+     func getAssetFor(videoId: String,
+                      playerId: String? = nil,
+                      completionHandler: @escaping (VdoAsset?, VdoError?) -> Void) {
+-        if let asset = self.assets.first(where: { $0.videoId == videoId }) {
+-            completionHandler(asset, nil)
+-            return
++        // MEDACADEMY PATCH (vdocipher-rn-bridge 2.0.1): a cached asset with
++        // zero video qualities is a POISONED entry - e.g. the media was still
++        // processing, or a transient entitlement failure produced an asset
++        // without renditions. Returning it forever made getDownloadOptions
++        // fail permanently with "Tracks Not Found" even after the cause
++        // cleared. Evict zero-quality entries so the asset is re-created.
++        if let idx = self.assets.firstIndex(where: { $0.videoId == videoId }) {
++            if self.assets[idx].getVideoQualities().isEmpty {
++                print("[offline-ios] stage=native_asset_cache mediaId=\(videoId) result=evicted reason=zero_video_tracks")
++                self.assets.remove(at: idx)
++            } else {
++                completionHandler(self.assets[idx], nil)
++                return
++            }
+         }
+         VdoAsset.createAsset(videoId: videoId, playerId: playerId) { asset, error in
+             guard let asset = asset else {
+@@ -20,6 +31,14 @@ class AssetList {
+                 completionHandler(nil, error)
+                 return
+             }
++            // MEDACADEMY PATCH: never cache a zero-quality asset - one
++            // transient empty result must not poison every later retry for
++            // this video during the app's lifetime.
++            if asset.getVideoQualities().isEmpty {
++                print("[offline-ios] stage=native_asset_init mediaId=\(videoId) result=success_but_zero_video_tracks not_cached")
++                completionHandler(asset, error)
++                return
++            }
+             self.assets.append(asset)
+             completionHandler(asset, error)
+         }
+diff --git a/node_modules/vdocipher-rn-bridge/ios/RCTVdoPlayerUIView.swift b/node_modules/vdocipher-rn-bridge/ios/RCTVdoPlayerUIView.swift
+index 28458c7..25c6b80 100644
+--- a/node_modules/vdocipher-rn-bridge/ios/RCTVdoPlayerUIView.swift
++++ b/node_modules/vdocipher-rn-bridge/ios/RCTVdoPlayerUIView.swift
+@@ -54,6 +54,22 @@ class RCTVdoPlayerUIView: VdoCipherRNView {
+         VdoCipher.getVdoPlayerViewController().view.isHidden = false
+         super.playerReadyToPlay()
+     }
++    // MEDACADEMY PATCH (vdocipher-rn-bridge 2.0.1):
++    // The embedded VdoPlayerViewController's view is framed ONCE in
++    // setUpPlayer and otherwise left to autoresizing. With the app's
++    // in-place fullscreen (RN owns fullscreen on iOS), rotating the device
++    // re-lays-out THIS view but the embedded VC's frame - and therefore
++    // the video surface - kept its portrait geometry: the app rotated
++    // while the video stayed portrait. Re-frame the VC view on every
++    // layout pass; same mechanism the old-arch view applies to its
++    // AVPlayerLayer in layoutSubviews.
++    override func layoutSubviews() {
++        super.layoutSubviews()
++        let vcView = VdoCipher.getVdoPlayerViewController().view
++        if vcView.superview === self {
++            vcView.frame = self.bounds
++        }
++    }
+     
+     func showActivityIndicator() {
+         guard let reactVC = self.reactViewController() else {
+diff --git a/node_modules/vdocipher-rn-bridge/ios/VdoDownload.swift b/node_modules/vdocipher-rn-bridge/ios/VdoDownload.swift
+index 2f2b947..43eace4 100644
+--- a/node_modules/vdocipher-rn-bridge/ios/VdoDownload.swift
++++ b/node_modules/vdocipher-rn-bridge/ios/VdoDownload.swift
+@@ -187,6 +187,9 @@ class VdoDownload: RCTEventEmitter {
+         AssetList.shared.getAssetFor(videoId: videoId, playerId: customPlayerId, completionHandler: { asset, err in
+             guard let asset = asset else {
+                 if let error = err {
++                    // MEDACADEMY PATCH: safe stage telemetry - mediaId/error
++                    // only, NEVER credentials (OTP/playbackInfo/tokens).
++                    print("[offline-ios] stage=native_asset_init mediaId=\(videoId) result=failure code=\(error.code) msg=\"\(error.message)\"")
+                     errorCallback([[Error_Keys.EVENT_PROP_ERROR_CODE.rawValue: error.code,
+                                     Error_Keys.EVENT_PROP_ERROR_MSG.rawValue: error.message] as [String : Any]])
+                 } else {
+@@ -196,6 +199,11 @@ class VdoDownload: RCTEventEmitter {
+                 return
+             }
+             let qualities = asset.getVideoQualities()
++            // MEDACADEMY PATCH: decisive stage proof - if this prints
++            // videoTracks=0 on a FRESHLY processed video, the SDK itself
++            // supplied zero renditions (account/media offline configuration),
++            // with the client integration fully ruled out.
++            print("[offline-ios] stage=get_video_qualities mediaId=\(videoId) result=\(qualities.count > 0 ? "success" : "failure") videoTracks=\(qualities.count)")
+             if qualities.count == 0 {
+                 errorCallback([[Error_Keys.EVENT_PROP_ERROR_CODE.rawValue: "-1",
+                                 Error_Keys.EVENT_PROP_ERROR_MSG.rawValue: "Tracks Not Found"]])

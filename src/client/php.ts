@@ -581,7 +581,19 @@ async function storeSession(session: AuthSession): Promise<void> {
 }
 
 async function clearSession(): Promise<void> {
-  authStateLog('AUTH_SESSION_CLEARED');
+  // MEDACADEMY PATCH: every session termination funnels through HERE. Logging
+  // the previous session's presence/age at the exact moment of teardown means
+  // the next field log names the terminator precisely: a genuine
+  // AUTH_EXPLICIT_LOGOUT / definitive-auth clear always has had clearSession()
+  // preceded by its reason log, while an unexpected HYDRATION-era wipe (the
+  // intermittent-logout suspect) shows prev=present with no preceding reason
+  // event in the same tick.
+  const _prev = getStoredSession();
+  authStateLog(
+    'AUTH_SESSION_CLEARED',
+    `prev=${_prev ? 'present' : 'none'}` +
+      (_prev?.expires_at ? ` prevExpiresIn=${Math.round((_prev.expires_at * 1000 - Date.now()) / 1000)}s` : ''),
+  );
   _cachedSession = null;
   if (_hasLocalStorage()) {
     try {

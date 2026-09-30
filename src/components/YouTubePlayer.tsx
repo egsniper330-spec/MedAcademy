@@ -61,7 +61,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type React from 'react';
 import ReactDOM from 'react-dom';
-import { BackHandler, Platform, Pressable, StatusBar, Text, View } from 'react-native';
+import { BackHandler, Dimensions, Platform, Pressable, StatusBar, Text, View, useWindowDimensions } from 'react-native';
 import * as ScreenOrientation from 'expo-screen-orientation';
 import { ArrowLeft } from 'lucide-react-native';
 import { WebView, type WebViewMessageEvent } from 'react-native-webview';
@@ -538,6 +538,60 @@ function YouTubePlayerNative({
       ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP)
         .catch(() => {});
     };
+  }, [isFullscreen]);
+
+  // ── PLYR_FS_* fullscreen surface diagnostics (DEV-ONLY, no-op in release) ──
+  // Evidence chain for the fullscreen black-frame report. Logs ONLY
+  // dimensions/state — never credentials, URLs, or tokens:
+  //   PLYR_FS_ENTER/EXIT      container + window dims at the transition
+  //   PLYR_FS_ORIENTATION     physical rotation while fullscreen
+  //   PLYR_FS_WEBVIEW_FRAME   the WebView's ACTUAL laid-out frame right
+  //                           after the transition settles (0×0 here would
+  //                           be the root cause of a black frame)
+  //   PLYR_FS_WEBVIEW_SOURCE  playerHtml identity across the toggle (a
+  //                           change would reload the WebView — the other
+  //                           black-frame candidate)
+  const windowDims = useWindowDimensions();
+  const fsProbeRef = useRef({ htmlIdentity: playerHtml });
+  useEffect(() => {
+    if (!isFullscreen) return;
+    fsProbeRef.current.htmlIdentity = playerHtml;
+    if (__DEV__) {
+      console.log(`[PLYR_FS_ENTER] container=${windowDims.width.toFixed(0)}x${windowDims.height.toFixed(0)} orientation=${windowDims.width > windowDims.height ? 'landscape' : 'portrait'}`);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isFullscreen]);
+  useEffect(() => {
+    if (isFullscreen) return;
+    if (__DEV__) {
+      const d = Dimensions.get('window');
+      console.log(`[PLYR_FS_EXIT] container=${d.width.toFixed(0)}x${d.height.toFixed(0)} sourceIdentityStable=${fsProbeRef.current.htmlIdentity === playerHtml}`);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isFullscreen]);
+  useEffect(() => {
+    if (Platform.OS === 'web' || !isFullscreen) return;
+    const sub = Dimensions.addEventListener('change', ({ window: w }) => {
+      if (__DEV__) {
+        console.log(`[PLYR_FS_ORIENTATION] container=${w.width.toFixed(0)}x${w.height.toFixed(0)} orientation=${w.width > w.height ? 'landscape' : 'portrait'}`);
+      }
+    });
+    return () => sub.remove();
+  }, [isFullscreen]);
+  useEffect(() => {
+    if (Platform.OS === 'web') return;
+    const t = setTimeout(() => {
+      if (!__DEV__ || !wvRef.current) return;
+      // WebView typings omit the RN host-instance measurement API — go
+      // through the minimal structural type (native views always have it).
+      const host = wvRef.current as unknown as {
+        measureInWindow: (cb: (x: number, y: number, w: number, h: number) => void) => void;
+      };
+      host.measureInWindow((x: number, y: number, w: number, h: number) => {
+        console.log(`[PLYR_FS_WEBVIEW_FRAME] webview=${w.toFixed(0)}x${h.toFixed(0)} at=(${x.toFixed(0)},${y.toFixed(0)}) fullscreen=${isFullscreen ? 'true' : 'false'}`);
+      });
+    }, 350);
+    return () => clearTimeout(t);
   }, [isFullscreen]);
 
   // ── System bars (Issue 5) ──────────────────────────────────────────────────
