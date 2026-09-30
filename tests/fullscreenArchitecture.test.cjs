@@ -377,6 +377,29 @@ console.log('── Plyr fullscreen surface diagnostics + identity stability ─
   ok(/resumeLatched/.test(yt), 'Plyr: resumePosition latched (no mid-session html rebuild)');
   const web = read('src/components/YouTubePlayer.tsx');
   ok(web.includes('key={src}'), 'Plyr web: key pinned to stable src identity');
+  // Surface-recovery architecture: in-page video nudge + host injection.
+  const ps = read('src/lib/plyr/playerScript.ts');
+  ok(ps.includes('__plyrSurfaceNudge') && ps.includes("querySelector('video')"),
+    'Plyr: in-page video surface nudge present (compositor re-allocation without reload)');
+  ok(/addEventListener\('resize'/.test(ps), 'Plyr: nudge auto-arms on in-page resize (fullscreen/rotation)');
+  ok(yt.includes('__plyrSurfaceNudge'), 'Plyr: host injects the nudge after fullscreen/rotation settles');
+  ok(yt.includes('rotationNudgeTimerRef'), 'Plyr: rotation-while-fullscreen nudge wired (timer cleaned up)');
+}
+
+console.log('── VdoCipher watermark geometry evidence chain ──');
+{
+  const ad = read('src/components/VdoCipherPlayerNativeAdapter.native.tsx');
+  for (const tag of ['VDO_WM_FULLSCREEN_CONTAINER', 'VDO_WM_OVERLAY_FRAME']) {
+    ok(ad.includes(tag), `VdoCipher: ${tag} geometry diagnostic present (dev-only)`);
+  }
+  // Watermark must remain INSIDE the fullscreen container (same hierarchy as
+  // VdoPlayerView) — it is a sibling rendered after the player, before the
+  // exit control, inside the SAME expanding View. This is the architecture
+  // guarantee that the watermark can never be orphaned in a old hierarchy.
+  const overlay = read('src/components/NativeWatermarkOverlay.tsx');
+  ok(overlay.includes('onContainerLayout'), 'Watermark: container-layout hook exists for geometry evidence');
+  ok(/position: 'absolute'/.test(overlay) && overlay.includes('pointerEvents="none"'),
+    'Watermark: absolute-fill + pointerEvents none (over video, never intercepts controls)');
 }
 
 console.log('──────────────────────────────────────────────');

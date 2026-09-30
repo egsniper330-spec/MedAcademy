@@ -65,6 +65,9 @@ import {
 export interface NativeWatermarkOverlayProps {
   watermarkId: string;
   watermarkName?: string;
+  /** DEV diagnostics: fired whenever the overlay container lays out (geometry
+   *  evidence chain — dimensions/state only). Optional; app code never needs it. */
+  onContainerLayout?: (e: LayoutChangeEvent) => void;
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
@@ -72,6 +75,7 @@ export interface NativeWatermarkOverlayProps {
 export function NativeWatermarkOverlay({
   watermarkId,
   watermarkName,
+  onContainerLayout,
 }: NativeWatermarkOverlayProps) {
   // Reanimated shared values — position is the top-left corner of the pill
   // (Plyr anchors top-left via translate3d from top:0/left:0).
@@ -189,7 +193,10 @@ export function NativeWatermarkOverlay({
     <View
       style={styles.overlay}
       pointerEvents="none"
-      onLayout={handleContainerLayout}
+      onLayout={(e) => {
+        handleContainerLayout(e);
+        onContainerLayout?.(e);
+      }}
     >
       <Animated.View
         style={[containerStyle, { maxWidth: maxPillWidth }]}

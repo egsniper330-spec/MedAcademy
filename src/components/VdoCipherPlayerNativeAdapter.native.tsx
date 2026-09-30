@@ -367,7 +367,17 @@ export function VdoCipherPlayerNativeAdapter({
 
   return (
     <VdoSessionScope tag={sessionTag}>
-    <View style={isFullscreen ? FULLSCREEN_STYLE : INLINE_STYLE}>
+    <View
+      style={isFullscreen ? FULLSCREEN_STYLE : INLINE_STYLE}
+      onLayout={__DEV__ ? (e) => {
+        // VDO_WM_FULLSCREEN_CONTAINER: the player/watermark container's ACTUAL
+        // laid-out frame. Fullscreen must equal the current window dims — a
+        // stale portrait frame is the iOS rotation failure signature; a 0×0
+        // or stale size explains a buried/absent watermark. Dimensions only.
+        const { width, height } = e.nativeEvent.layout;
+        console.log(`[VDO_WM_FULLSCREEN_CONTAINER] w=${width.toFixed(0)} h=${height.toFixed(0)} fullscreen=${isFullscreen ? 'true' : 'false'}`);
+      } : undefined}
+    >
       {isFullscreen && <StatusBar hidden />}
       <VdoPlayerView
         embedInfo={{
@@ -393,6 +403,16 @@ export function VdoCipherPlayerNativeAdapter({
         <NativeWatermarkOverlay
           watermarkId={identity.id}
           watermarkName={identity.name ?? undefined}
+          onContainerLayout={__DEV__ ? (e) => {
+            // VDO_WM_OVERLAY_FRAME: the watermark overlay's ACTUAL laid-out
+            // frame inside the SAME container as VdoPlayerView. In fullscreen
+            // this MUST equal the window (e.g. 393x852 portrait / 852x393
+            // landscape) — a stale portrait frame here means the overlay
+            // hierarchy did not follow the fullscreen expansion; 0×0 means
+            // the overlay's parent collapsed. Dimensions/state only.
+            const { width, height } = e.nativeEvent.layout;
+            console.log(`[VDO_WM_OVERLAY_FRAME] w=${width.toFixed(0)} h=${height.toFixed(0)} fullscreen=${isFullscreen ? 'true' : 'false'}`);
+          } : undefined}
         />
       )}
 

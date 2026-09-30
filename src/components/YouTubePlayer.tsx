@@ -553,6 +553,8 @@ function YouTubePlayerNative({
   //                           black-frame candidate)
   const windowDims = useWindowDimensions();
   const fsProbeRef = useRef({ htmlIdentity: playerHtml });
+  // Pending rotation surface-nudge timer (cleared on listener teardown).
+  const rotationNudgeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
     if (!isFullscreen) return;
     fsProbeRef.current.htmlIdentity = playerHtml;
@@ -581,17 +583,37 @@ function YouTubePlayerNative({
   useEffect(() => {
     if (Platform.OS === 'web') return;
     const t = setTimeout(() => {
-      if (!__DEV__ || !wvRef.current) return;
-      // WebView typings omit the RN host-instance measurement API — go
-      // through the minimal structural type (native views always have it).
+      if (!wvRef.current) return;
+      // WebView typings omit the RN host-instance APIs — go through the
+      // minimal structural type (native views always have them).
       const host = wvRef.current as unknown as {
         measureInWindow: (cb: (x: number, y: number, w: number, h: number) => void) => void;
+        injectJavaScript: (code: string) => void;
       };
       host.measureInWindow((x: number, y: number, w: number, h: number) => {
-        console.log(`[PLYR_FS_WEBVIEW_FRAME] webview=${w.toFixed(0)}x${h.toFixed(0)} at=(${x.toFixed(0)},${y.toFixed(0)}) fullscreen=${isFullscreen ? 'true' : 'false'}`);
+        if (__DEV__) {
+          console.log(`[PLYR_FS_WEBVIEW_FRAME] webview=${w.toFixed(0)}x${h.toFixed(0)} at=(${x.toFixed(0)},${y.toFixed(0)}) fullscreen=${isFullscreen ? 'true' : 'false'}`);
+        }
+        // Surface recovery: after EVERY fullscreen transition settles (and
+        // rotation, via the Dimensions listener below), nudge the in-page
+        // <video> so its compositor surface is re-allocated if the WebView
+        // resize dropped it (black-frame-with-audio signature). No-op when
+        // the surface is healthy. Empty ref is guarded in-page.
+        host.injectJavaScript('window.__plyrSurfaceNudge && window.__plyrSurfaceNudge(); true;');
       });
     }, 350);
     return () => clearTimeout(t);
+  }, [isFullscreen]);
+  // Rotation while fullscreen → nudge again (new frame → possible new surface)
+  useEffect(() => {
+    if (Platform.OS === 'web' || !isFullscreen) return;
+    const sub = Dimensions.addEventListener('change', () => {
+      const t2 = setTimeout(() => {
+        wvRef.current?.injectJavaScript('window.__plyrSurfaceNudge && window.__plyrSurfaceNudge(); true;');
+      }, 350);
+      rotationNudgeTimerRef.current = t2;
+    });
+    return () => { sub.remove(); if (rotationNudgeTimerRef.current) clearTimeout(rotationNudgeTimerRef.current); };
   }, [isFullscreen]);
 
   // ── System bars (Issue 5) ──────────────────────────────────────────────────

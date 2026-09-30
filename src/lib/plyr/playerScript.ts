@@ -312,6 +312,37 @@ export const PLAYER_SCRIPT = `
     watch();
   }
 
+  // ── Video-surface recovery (fullscreen/rotation black-frame fix) ──────────
+  //
+  // SYMPTOM (real devices, Android + iOS): entering host-controlled
+  // fullscreen rotates and keeps audio, but the video IMAGE goes black while
+  // the Plyr DOM (controls, watermark) keeps painting. That signature means
+  // the media element's compositing surface was dropped during the WebView's
+  // resize — the element is alive (audio continues) but its frames never
+  // reach the screen. Reloading would restart playback; instead, a 1-frame
+  // transform cycle on the <video> forces the compositor to reallocate the
+  // surface WITHOUT touching playback state.
+  //
+  // Arming: auto-runs on every debounced in-page 'resize' (fires exactly when
+  // the WebView frame changes — fullscreen enter/exit and rotation) and is
+  // callable from the host via injectJavaScript → window.__plyrSurfaceNudge()
+  // to cover launches where the resize event raced the surface teardown.
+  var _nudgeTimer = null;
+  function surfaceNudge() {
+    try {
+      var v = document.querySelector('video');
+      if (!v) return;
+      v.style.transform = 'translateZ(0)';
+      void v.offsetHeight; // force style/layout flush
+      requestAnimationFrame(function () { v.style.transform = ''; });
+    } catch (e) { /* never break playback for a diagnostic */ }
+  }
+  window.addEventListener('resize', function () {
+    if (_nudgeTimer) clearTimeout(_nudgeTimer);
+    _nudgeTimer = setTimeout(surfaceNudge, 250);
+  });
+  window.__plyrSurfaceNudge = surfaceNudge;
+
   // ── Tap-to-toggle policy ───────────────────────────────────────────────────
   //
   // REMOVED: the former fixiOSTapToToggle() transparent <button> interceptor.
