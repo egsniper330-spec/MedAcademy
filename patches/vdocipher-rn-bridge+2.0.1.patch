@@ -1,8 +1,20 @@
 diff --git a/node_modules/vdocipher-rn-bridge/android/src/main/java/com/vdocipher/rnbridge/ReactVdoPlayerUIView.java b/node_modules/vdocipher-rn-bridge/android/src/main/java/com/vdocipher/rnbridge/ReactVdoPlayerUIView.java
-index 6f5c9db..ced6aba 100644
+index 6f5c9db..8dc59f8 100644
 --- a/node_modules/vdocipher-rn-bridge/android/src/main/java/com/vdocipher/rnbridge/ReactVdoPlayerUIView.java
 +++ b/node_modules/vdocipher-rn-bridge/android/src/main/java/com/vdocipher/rnbridge/ReactVdoPlayerUIView.java
-@@ -255,13 +255,24 @@ public class ReactVdoPlayerUIView extends LinearLayout implements LifecycleEvent
+@@ -158,6 +158,11 @@
+                         vdoPlayerUIFragment.initialize(initializationListener);
+                         vdoPlayerUIFragment.setResizeMode(this.resizeMode);
+                         vdoPlayerUIFragment.setFullscreenActionListener(fullscreenToggleListener);
++                        // MEDACADEMY PATCH (single fullscreen control): hide the
++                        // SDK's OWN fullscreen controls so the app's canonical
++                        // in-place fullscreen is the only user-facing entry (see
++                        // hideSdkFullscreenControls below).
++                        scheduleHideSdkFullscreenControls();
+                     } catch(Exception e) {                        
+                         Log.e(TAG, Log.getStackTraceString(e));
+                     }
+@@ -255,16 +260,90 @@
      private void setFullscreenActionListener() {
          fullscreenToggleListener = isFullscreen -> {
  
@@ -22,17 +34,83 @@ index 6f5c9db..ced6aba 100644
              } else {
                  eventEmitter.exitFullscreen();
              }
- 
+     
 -            return false;
 +            return true;
          };
      }
  
++    // ── MEDACADEMY PATCH (single fullscreen control) ────────────────────
++    // WHY: the SDK's control-bar fullscreen button runs the SDK's OWN default
++    // fullscreen, which promotes the video surface ABOVE the React Native tree
++    // and buries the app's React Native watermark overlay (video and rotation
++    // keep working — only the watermark disappears). The fragment-level
++    // FullScreenActionListener set above is documented by the SDK as a MONITOR
++    // ("to monitor when video enters or exits fullscreen"), so returning true
++    // from it cannot suppress that default behaviour.
++    //
++    // WHAT: the SDK exposes no per-button control API (VdoPlayerUIFragment
++    // supports only handleBackPress and showControls — all-or-nothing), so the
++    // SDK's enter/exit fullscreen controls are hidden by their PUBLIC resource
++    // ids. This is a runtime visibility change only: the SDK binary, its control
++    // bar (play/seek/quality/speed/captions), fullscreen orientation handling
++    // and DRM are all untouched, and the app supplies the one fullscreen entry.
++    private void scheduleHideSdkFullscreenControls() {
++        // The control bar is inflated around the fragment view creation, so
++        // apply immediately and again shortly after (idempotent).
++        mainHandler.post(this::hideSdkFullscreenControls);
++        mainHandler.postDelayed(this::hideSdkFullscreenControls, 600);
++        mainHandler.postDelayed(this::hideSdkFullscreenControls, 2000);
++    }
++
++    private void hideSdkFullscreenControls() {
++        try {
++            if (vdoPlayerUIFragment == null) {
++                return;
++            }
++            View root = vdoPlayerUIFragment.getView();
++            if (root == null) {
++                return;
++            }
++            // Recursive walk: the enclosing control view's runtime id is not
++            // guaranteed to be vdo_player_control_view, so search the whole tree.
++            int enterId = com.vdocipher.aegis.R.id.vdo_enter_fullscreen;
++            int exitId = com.vdocipher.aegis.R.id.vdo_exit_fullscreen;
++            int hidden = 0;
++            java.util.ArrayDeque<View> queue = new java.util.ArrayDeque<>();
++            queue.add(root);
++            while (!queue.isEmpty()) {
++                View v = queue.poll();
++                if (v != root && (v.getId() == enterId || v.getId() == exitId)) {
++                    if (v.getVisibility() != View.GONE) {
++                        v.setVisibility(View.GONE);
++                    }
++                    v.setClickable(false);
++                    hidden++;
++                    continue; // the leaf controls hold nothing else to visit
++                }
++                if (v instanceof android.view.ViewGroup) {
++                    android.view.ViewGroup group = (android.view.ViewGroup) v;
++                    for (int i = 0; i < group.getChildCount(); i++) {
++                        queue.add(group.getChildAt(i));
++                    }
++                }
++            }
++            // Visibility evidence only — no user data, ids, or credentials.
++            Log.i(TAG, "[VDO_SDK_FS_HIDDEN] controlsHidden=" + hidden);
++        } catch (Exception e) {
++            Log.e(TAG, "hideSdkFullscreenControls: " + Log.getStackTraceString(e));
++        }
++    }
++
+     public void setResizeMode(String resizeModeName) {
+         if (resizeModeName != null && !resizeModeName.isEmpty()) {
+             this.resizeMode = resizeModeIntFromName(resizeModeName);
 diff --git a/node_modules/vdocipher-rn-bridge/ios/AssetList.swift b/node_modules/vdocipher-rn-bridge/ios/AssetList.swift
 index 0d76ae8..6aba802 100644
 --- a/node_modules/vdocipher-rn-bridge/ios/AssetList.swift
 +++ b/node_modules/vdocipher-rn-bridge/ios/AssetList.swift
-@@ -10,9 +10,20 @@ class AssetList {
+@@ -10,9 +10,20 @@
      func getAssetFor(videoId: String,
                       playerId: String? = nil,
                       completionHandler: @escaping (VdoAsset?, VdoError?) -> Void) {
@@ -56,7 +134,7 @@ index 0d76ae8..6aba802 100644
          }
          VdoAsset.createAsset(videoId: videoId, playerId: playerId) { asset, error in
              guard let asset = asset else {
-@@ -20,6 +31,14 @@ class AssetList {
+@@ -20,6 +31,14 @@
                  completionHandler(nil, error)
                  return
              }
@@ -75,7 +153,7 @@ diff --git a/node_modules/vdocipher-rn-bridge/ios/RCTVdoPlayerUIView.swift b/nod
 index 28458c7..25c6b80 100644
 --- a/node_modules/vdocipher-rn-bridge/ios/RCTVdoPlayerUIView.swift
 +++ b/node_modules/vdocipher-rn-bridge/ios/RCTVdoPlayerUIView.swift
-@@ -54,6 +54,22 @@ class RCTVdoPlayerUIView: VdoCipherRNView {
+@@ -54,6 +54,22 @@
          VdoCipher.getVdoPlayerViewController().view.isHidden = false
          super.playerReadyToPlay()
      }
@@ -102,7 +180,7 @@ diff --git a/node_modules/vdocipher-rn-bridge/ios/VdoDownload.swift b/node_modul
 index 2f2b947..43eace4 100644
 --- a/node_modules/vdocipher-rn-bridge/ios/VdoDownload.swift
 +++ b/node_modules/vdocipher-rn-bridge/ios/VdoDownload.swift
-@@ -187,6 +187,9 @@ class VdoDownload: RCTEventEmitter {
+@@ -187,6 +187,9 @@
          AssetList.shared.getAssetFor(videoId: videoId, playerId: customPlayerId, completionHandler: { asset, err in
              guard let asset = asset else {
                  if let error = err {
@@ -112,7 +190,7 @@ index 2f2b947..43eace4 100644
                      errorCallback([[Error_Keys.EVENT_PROP_ERROR_CODE.rawValue: error.code,
                                      Error_Keys.EVENT_PROP_ERROR_MSG.rawValue: error.message] as [String : Any]])
                  } else {
-@@ -196,6 +199,11 @@ class VdoDownload: RCTEventEmitter {
+@@ -196,6 +199,11 @@
                  return
              }
              let qualities = asset.getVideoQualities()

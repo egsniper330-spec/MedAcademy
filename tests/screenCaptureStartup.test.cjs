@@ -171,9 +171,24 @@ function read(rel) {
     };
   `);
 
+  // ── TEMPORARY DEBUG GATE (intentional, still disabled for the real-device
+  // debugging session): FLAG_SECURE is force-disabled in the shipped source,
+  // which makes the guard an early-return no-op. The behavioural scenarios
+  // below pin the PRODUCTION path, so the gate is neutralised in the compiled
+  // copy ONLY — while the shipped source keeps the documented single-constant
+  // restore point.
+  {
+    const guardSrc = read('src/lib/screenCaptureGuard.ts');
+    ok(/const FLAG_SECURE_DEBUG_DISABLED\s*=/.test(guardSrc),
+      'screenCaptureGuard: FLAG_SECURE debug gate is a single named constant (restore point)');
+    ok(/TEMPORARY DEBUG GATE/.test(guardSrc),
+      'screenCaptureGuard: debug gate is explicitly marked TEMPORARY DEBUG GATE');
+  }
+
   const compile = () => {
     const src = read('src/lib/screenCaptureGuard.ts');
-    const out = babel.transformSync(src, {
+    const prod = src.replace(/const FLAG_SECURE_DEBUG_DISABLED\s*=\s*true/, 'const FLAG_SECURE_DEBUG_DISABLED = false');
+    const out = babel.transformSync(prod, {
       filename: 'screenCaptureGuard.ts',
       configFile: false, babelrc: false,
       plugins: [

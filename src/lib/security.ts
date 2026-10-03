@@ -664,6 +664,25 @@ async function detectDebug(): Promise<SecurityThreat | null> {
 }
 
 /**
+ * ⚠️ TEMPORARY DEBUG GATE — AUTHORIZED REAL-DEVICE DEBUGGING SESSION ⚠️
+ * Owner-directed: Developer Options + USB Debugging detection are bypassed
+ * WHILE THIS FLAG IS true so ADB-based debugging works on the owner's
+ * physical Android tablet (fullscreen video investigation).
+ *
+ * SCOPE (exactly two flags — nothing else):
+ *   • developerOptionsEnabled  (dev-options toggle)
+ *   • adbEnabled               (USB debugging)
+ * debugger_attached / testOnlyBuild / VPN / root / Frida / Xposed / Magisk /
+ * tamper / signature / emulator / mock-location / overlay / screen-recording
+ * detection and ALL backend enforcement remain FULLY ACTIVE.
+ *
+ * The detector below and the native SecurityModule are UNCHANGED — restore
+ * by flipping this constant back to false (owner will request this).
+ * TODO(RESTORE): set DEBUG_DISABLE_DEV_OPTIONS_AND_ADB = false.
+ */
+const DEBUG_DISABLE_DEV_OPTIONS_AND_ADB = true;
+
+/**
  * Developer-options / debugger detection.
  * Android: SecurityModule (Developer Options flag, ADB, Debug.isDebuggerConnected).
  * iOS:     IOSSecurityModule: sysctl kinfo_proc P_TRACED flag.
@@ -671,6 +690,15 @@ async function detectDebug(): Promise<SecurityThreat | null> {
 async function detectDeveloperOptions(): Promise<SecurityThreat | null> {
   try {
     if (process.env.EXPO_OS === 'web') return null;
+
+    // TEMPORARY DEBUG GATE (see block comment above) — bypass ONLY the
+    // developer-options/ADB detections; every other check still runs.
+    if (DEBUG_DISABLE_DEV_OPTIONS_AND_ADB) {
+      if (__DEV__) {
+        console.log('[SecurityCheck][DevOptions] TEMPORARY DEBUG GATE active — developerOptions/adb bypassed for authorized device debugging');
+      }
+      return null;
+    }
 
     if (process.env.EXPO_OS === 'ios') {
       const flags = await getNativeSecurityFlags();
@@ -703,10 +731,13 @@ async function detectDeveloperOptions(): Promise<SecurityThreat | null> {
     if (flags.debuggerAttached) {
       return { type: 'debugger_attached', detectionMethod: 'Debugger attached', detected: true };
     }
-    if (flags.adbEnabled) {
+    // TEMPORARY DEBUG GATE — bypass ONLY these two detections while the
+    // authorized real-device debugging session is active. debuggerAttached
+    // and testOnlyBuild REMAIN ENFORCED (outside the authorized scope).
+    if (!DEBUG_DISABLE_DEV_OPTIONS_AND_ADB && flags.adbEnabled) {
       return { type: 'adb_enabled', detectionMethod: 'USB debugging (ADB) enabled', detected: true };
     }
-    if (flags.developerOptionsEnabled) {
+    if (!DEBUG_DISABLE_DEV_OPTIONS_AND_ADB && flags.developerOptionsEnabled) {
       return { type: 'developer_options_enabled', detectionMethod: 'Developer options enabled', detected: true };
     }
     if (flags.testOnlyBuild) {

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { View, Text, ScrollView, useColorScheme, Pressable, ActivityIndicator, Platform, useWindowDimensions } from 'react-native';
 import { PortalOverlay } from '@/components/PortalOverlay';
+import { useFullscreenWindowDims } from '@/lib/useFullscreenWindowDims';
 import { Image } from 'expo-image';
 import { useFocusEffect, useRouter, useLocalSearchParams } from 'expo-router';
 import {
@@ -138,6 +139,9 @@ export default function LessonPlayer() {
   // Fullscreen state — when true, all non-video lesson content is hidden so
   // the player fills the screen YouTube-style.
   const [isFullscreen, setIsFullscreen] = useState(false);
+  // Explicit fullscreen window pixels — the card/ScrollView fills below use
+  // concrete dimensions instead of edge-anchored fill (ancestor-collapse fix).
+  const fsWin = useFullscreenWindowDims(isFullscreen);
 
   // ── Download state ────────────────────────────────────────────────────────
   const [downloadState, setDownloadState] = useState<{
@@ -606,7 +610,7 @@ export default function LessonPlayer() {
              canonical overlay simply stays above every sibling. */
           <NeuCard
             style={isFullscreen
-              ? { padding: 0, position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 110, backgroundColor: '#000', borderRadius: 0 }
+              ? { padding: 0, position: 'absolute', top: 0, left: 0, width: fsWin.width, height: fsWin.height, zIndex: 110, backgroundColor: '#000', borderRadius: 0 }
               : { padding: 0 }}
           >
             {playerVisible ? (
@@ -934,14 +938,14 @@ export default function LessonPlayer() {
           {playerSection}
           <ScrollView
             style={isFullscreen
-              ? { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 100, backgroundColor: '#000' }
+              ? { position: 'absolute', top: 0, left: 0, width: fsWin.width, height: fsWin.height, zIndex: 100, backgroundColor: '#000' }
               : { flex: 1 }}
             contentContainerStyle={isFullscreen
-              ? { flex: 1 }
+              ? { width: fsWin.width, height: fsWin.height }
               : { paddingBottom: safeBottom(layout.insets.bottom) }}
             scrollEnabled={!isFullscreen}
           >
-            <View style={isFullscreen ? { flex: 1 } : { padding: layout.screenPx, gap: 16 }}>
+            <View style={isFullscreen ? { width: fsWin.width, height: fsWin.height } : { padding: layout.screenPx, gap: 16 }}>
 
         {/* Lesson meta — BUG#1: status badge hidden from students */}
         <NeuCard>

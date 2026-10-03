@@ -49,7 +49,7 @@ import {
   ActivityIndicator, BackHandler, Platform, Pressable, StatusBar, Text, View,
 } from 'react-native';
 import * as ScreenOrientation from 'expo-screen-orientation';
-import { ArrowLeft } from 'lucide-react-native';
+import { ArrowLeft, Maximize2 } from 'lucide-react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { VdoPlayerView } from 'vdocipher-rn-bridge';
 import { playerSessionMount, playerSessionUnmount } from '@/lib/vdoPlayerSession';
@@ -306,12 +306,26 @@ export function OfflineVideoPlayer({ entry, shouldAllowPlayback, watermarkId, wa
       {identity && (
         <NativeWatermarkOverlay watermarkId={identity.id} watermarkName={identity.name ?? undefined} />
       )}
-      {/* SINGLE FULLSCREEN CONTROL — the SDK control bar's own fullscreen
-          button (Android always; iOS since bridge 2.9.4 via
-          didTapEnterFullScreen) fires onEnterFullscreen above, which maps
-          into the ONE app fullscreen state (gate re-validated at entry).
-          The former app-level expand button was a SECOND fullscreen
-          system on iOS — duplicate opposite buttons + split UI — removed. */}
+      {/* SINGLE FULLSCREEN CONTROL — on Android the SDK control bar's own
+          fullscreen button is HIDDEN by the RN bridge (MEDACADEMY PATCH in
+          ReactVdoPlayerUIView.java), because that button runs the SDK's default
+          fullscreen and promotes the video surface above the React Native tree,
+          burying this component's watermark overlay. The app therefore renders
+          the one entry below, on the canonical path (security gate re-validated
+          at entry → in-place expansion of the SAME instance). On iOS the SDK's
+          own button stays as the only entry (the former app-level duplicate was
+          removed — it created two competing fullscreen systems). */}
+      {!isFullscreen && Platform.OS === 'android' && (
+        <Pressable
+          onPress={() => void enterFullscreen()}
+          accessibilityLabel="Enter fullscreen"
+          accessibilityRole="button"
+          hitSlop={{ top: 8, right: 8, bottom: 8, left: 8 }}
+          style={{ position: 'absolute', bottom: 12, right: 12, width: 44, height: 44, borderRadius: 22, backgroundColor: '#00000080', alignItems: 'center', justifyContent: 'center', zIndex: 50, elevation: 50 }}
+        >
+          <Maximize2 size={22} color="#fff" />
+        </Pressable>
+      )}
       {/* Fullscreen back control — the single app-level EXIT affordance,
           safe-area aware so it never sits under the Dynamic Island/status
           area. Collapses back to the inline layout; playback continues in

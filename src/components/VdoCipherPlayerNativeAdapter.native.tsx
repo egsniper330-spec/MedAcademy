@@ -61,9 +61,10 @@
 import { useRef, useState, useCallback, useEffect, useMemo } from 'react';
 import { BackHandler, Platform, Pressable, StatusBar, Text, View, ActivityIndicator, useColorScheme } from 'react-native';
 import * as ScreenOrientation from 'expo-screen-orientation';
-import { ArrowLeft } from 'lucide-react-native';
+import { ArrowLeft, Maximize2 } from 'lucide-react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { VdoPlayerView } from 'vdocipher-rn-bridge';
+import { useFullscreenWindowDims } from '@/lib/useFullscreenWindowDims';
 import { playerSessionMount, playerSessionUnmount } from '@/lib/vdoPlayerSession';
 import { getVideoPlaybackToken } from '@/lib/api';
 import { neuColors } from '@/lib/neu';
@@ -97,15 +98,33 @@ const INLINE_STYLE = {
   overflow:   'hidden'   as const,
 };
 
-const FULLSCREEN_STYLE = {
+// Log gate: dimensions/state-only watermark diagnostics (VDO_WM_*).
+// DEV builds only — the physical fullscreen/watermark investigation is closed,
+// so production builds do no diagnostic logging here (no overhead, no
+// PLYR_FS_*/VDO_WM_* noise). Set to `true` temporarily when a release build
+// needs an on-device evidence run, and flip it back before shipping.
+const RELEASE_DIAG = false;
+
+const FULLSCREEN_STYLE_BASE = {
   position: 'absolute' as const,
   top: 0,
   left: 0,
-  right: 0,
-  bottom: 0,
   zIndex: 100,
   backgroundColor: '#000' as const,
 };
+
+// Fullscreen style factory: CONCRETE window pixels instead of edge-anchored
+// fill. An absolute-fill chain collapses to height 0 if any ancestor lays out
+// at 0 during the enter+rotate churn — that collapse hid the RN watermark
+// overlay (button path) while the native SurfaceView kept drawing. Explicit
+// dimensions are ancestor-independent.
+function fullscreenStyle(win: { width: number; height: number }) {
+  return {
+    ...FULLSCREEN_STYLE_BASE,
+    width: win.width,
+    height: win.height,
+  };
+}
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
@@ -169,11 +188,33 @@ export function VdoCipherPlayerNativeAdapter({
   // only the container style toggles between INLINE_STYLE and FULLSCREEN_STYLE.
   const [isFullscreen, setIsFullscreen] = useState(false);
 
+  // Explicit window pixels for the fullscreen container (ancestor-collapse fix
+  // — same root cause as the Plyr fullscreen black frame).
+  const win = useFullscreenWindowDims(isFullscreen);
+
+  // ── ONE fullscreen entry (Android) ────────────────────────────────────────
+  // The VdoCipher SDK's own control-bar fullscreen button is now HIDDEN by the
+  // RN bridge (see the MEDACADEMY PATCH in ReactVdoPlayerUIView.java): that
+  // button runs the SDK's default fullscreen, which promotes the video surface
+  // above the React Native tree and buries this component's watermark overlay.
+  // The app therefore renders the single fullscreen entry below, wired to the
+  // canonical path (security gate + in-place expansion of the SAME instance).
+  // iOS keeps the SDK's own control-bar button as its only entry (the app-level
+  // duplicate was removed there earlier), so each platform has exactly one.
+
   // Forward enter/exit to the host screen (contract: host may hide non-video
   // chrome; with the pinned-player layout this is cosmetic redundancy).
   useEffect(() => {
     onFullscreen?.(isFullscreen);
   }, [isFullscreen, onFullscreen]);
+
+  // VDO_WM_MOUNT — release-safe lifecycle evidence: does the app watermark
+  // overlay stay MOUNTED (and with which public id) across the fullscreen
+  // transition? An unmount here would be the smoking gun for a disappearing
+  // watermark; a mount with a stale frame points at z-order/clipping instead.
+  useEffect(() => {
+    console.log(`[VDO_WM_MOUNT] mounted=${identity ? 'true' : 'false'} wmId=${identity ? identity.id : 'none'} fullscreen=${isFullscreen ? 'true' : 'false'}`);
+  }, [identity, isFullscreen]);
 
   // ── Orientation — Android-only locks; iOS is NEVER locked ─────────────────
   // iOS (the bug fixed here): NO orientation API is touched at all. Entering
@@ -368,15 +409,17 @@ export function VdoCipherPlayerNativeAdapter({
   return (
     <VdoSessionScope tag={sessionTag}>
     <View
-      style={isFullscreen ? FULLSCREEN_STYLE : INLINE_STYLE}
-      onLayout={__DEV__ ? (e) => {
+      style={isFullscreen ? fullscreenStyle(win) : INLINE_STYLE}
+      onLayout={(e) => {
         // VDO_WM_FULLSCREEN_CONTAINER: the player/watermark container's ACTUAL
         // laid-out frame. Fullscreen must equal the current window dims — a
         // stale portrait frame is the iOS rotation failure signature; a 0×0
         // or stale size explains a buried/absent watermark. Dimensions only.
         const { width, height } = e.nativeEvent.layout;
-        console.log(`[VDO_WM_FULLSCREEN_CONTAINER] w=${width.toFixed(0)} h=${height.toFixed(0)} fullscreen=${isFullscreen ? 'true' : 'false'}`);
-      } : undefined}
+        if (RELEASE_DIAG || __DEV__) {
+          console.log(`[VDO_WM_FULLSCREEN_CONTAINER] w=${width.toFixed(0)} h=${height.toFixed(0)} fullscreen=${isFullscreen ? 'true' : 'false'}`);
+        }
+      }}
     >
       {isFullscreen && <StatusBar hidden />}
       <VdoPlayerView
@@ -399,32 +442,72 @@ export function VdoCipherPlayerNativeAdapter({
           watermark; the server-side annotate watermark was removed from the
           OTP). Lives INSIDE the expanding container → visible and correctly
           positioned in normal AND fullscreen (re-clamps on resize). */}
+      {/* THE fullscreen control (Android) — the ONLY user-facing fullscreen
+          action: the SDK's own control-bar button is hidden by the bridge, so
+          its surface-promoting default fullscreen can never run. This calls
+          the canonical path (security gate → setIsFullscreen → explicit
+          window-pixel expansion of the SAME VdoPlayerView — no Modal, no second
+          window, no surface reparenting) with the watermark overlay inside it.
+          Rendered AFTER the native player so it wins the touch order, and it
+          stays visible while inline (reliability over the SDK's auto-hide). */}
+      {!isFullscreen && Platform.OS === 'android' && (
+        <Pressable
+          onPress={() => void enterFullscreen()}
+          accessibilityLabel="Enter fullscreen"
+          accessibilityRole="button"
+          hitSlop={{ top: 8, right: 8, bottom: 8, left: 8 }}
+          style={{
+            position: 'absolute',
+            bottom: 12,
+            right: 12,
+            width: 44,
+            height: 44,
+            borderRadius: 22,
+            backgroundColor: '#00000080',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 50,
+            elevation: 50,
+          }}
+        >
+          <Maximize2 size={22} color="#fff" />
+        </Pressable>
+      )}
+
       {identity && (
         <NativeWatermarkOverlay
           watermarkId={identity.id}
           watermarkName={identity.name ?? undefined}
-          onContainerLayout={__DEV__ ? (e) => {
+          debugProve={__DEV__}
+          onContainerLayout={(e) => {
             // VDO_WM_OVERLAY_FRAME: the watermark overlay's ACTUAL laid-out
             // frame inside the SAME container as VdoPlayerView. In fullscreen
-            // this MUST equal the window (e.g. 393x852 portrait / 852x393
+            // this MUST equal the window (e.g. 1200x1928 portrait / 1928x1200
             // landscape) — a stale portrait frame here means the overlay
             // hierarchy did not follow the fullscreen expansion; 0×0 means
             // the overlay's parent collapsed. Dimensions/state only.
             const { width, height } = e.nativeEvent.layout;
-            console.log(`[VDO_WM_OVERLAY_FRAME] w=${width.toFixed(0)} h=${height.toFixed(0)} fullscreen=${isFullscreen ? 'true' : 'false'}`);
-          } : undefined}
+            if (RELEASE_DIAG || __DEV__) {
+              console.log(`[VDO_WM_OVERLAY_FRAME] w=${width.toFixed(0)} h=${height.toFixed(0)} fullscreen=${isFullscreen ? 'true' : 'false'}`);
+            }
+          }}
         />
       )}
 
-      {/* SINGLE FULLSCREEN CONTROL — the SDK's own control-bar fullscreen
-          button (iOS ≥ bridge 2.9.4 renders one via didTapEnterFullScreen;
-          Android always did). It fires onEnterFullscreen above, which is
-          mapped into the ONE app fullscreen state. No app-level duplicate
-          enter button is rendered: the previous app-level expand control
-          created a SECOND fullscreen system on iOS (two opposite buttons,
-          and its expansion raced the native presentation → split UI).
-          Exit paths: the SDK's exit control AND the back arrow below — both
-          call the same exitFullscreen(). */}
+      {/* FULLSCREEN ENTRY — exactly one per platform (see the Android control
+          above):
+            • Android: the SDK's own control-bar button is HIDDEN by the RN
+              bridge (hideSdkFullscreenControls, shipped in the source-controlled
+              patch), because it runs the SDK's default fullscreen and promotes
+              the video surface above the React Native tree — which buries this
+              watermark. The app-level control above is the single entry.
+            • iOS: the SDK's own button remains the single entry (a previous
+              app-level duplicate created a SECOND fullscreen system — two
+              opposite buttons whose expansions raced the native presentation →
+              split UI). It fires onEnterFullscreen above, mapped into the ONE
+              app fullscreen state.
+          Exit paths below: the app back-arrow (both platforms) and, on iOS, the
+          SDK's exit control — all call the same exitFullscreen(). */}
 
       {/* EXIT-fullscreen control (both platforms) — the single app-level exit
           affordance, safe-area aware so it never sits under the Dynamic

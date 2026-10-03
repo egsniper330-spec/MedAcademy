@@ -68,6 +68,16 @@ export interface NativeWatermarkOverlayProps {
   /** DEV diagnostics: fired whenever the overlay container lays out (geometry
    *  evidence chain — dimensions/state only). Optional; app code never needs it. */
   onContainerLayout?: (e: LayoutChangeEvent) => void;
+  /** DEV-ONLY DEBUG PROOF: when true, the pill self-reports its absolute
+   *  window rectangle + opacity every 2s via measureInWindow. This is the
+   *  REAL view's native geometry — physical proof the watermark is on-screen
+   *  and visible without screenshots (which DRM secure surfaces block).
+   *  Dimensions/state only — no secrets.
+   *
+   *  NEVER runs in production: the effect below additionally requires __DEV__,
+   *  so a release build schedules no interval and does no measureInWindow work
+   *  regardless of what a caller passes. */
+  debugProve?: boolean;
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
@@ -76,6 +86,7 @@ export function NativeWatermarkOverlay({
   watermarkId,
   watermarkName,
   onContainerLayout,
+  debugProve = false,
 }: NativeWatermarkOverlayProps) {
   // Reanimated shared values — position is the top-left corner of the pill
   // (Plyr anchors top-left via translate3d from top:0/left:0).
@@ -152,6 +163,36 @@ export function NativeWatermarkOverlay({
   // Late-bound ref so the layout callback can trigger a fast move after resize.
   const scheduleMoveRef = useRef<((delayMs?: number) => void) | null>(null);
 
+  // Ref to the pill itself for the visibility self-proof (real host view).
+  const pillRef = useRef<Animated.View | null>(null);
+
+  // ── DEV-ONLY DEBUG PROOF — self-reporting visibility (no screenshots) ─────
+  // Every 2s the pill measures itself in WINDOW coordinates and reports its
+  // real on-screen rect + current opacity. A 'vis=yes' line is direct native
+  // evidence: the watermark view exists in the window at a non-zero rect
+  // within the Plyr opacity band — i.e. it is physically visible on screen.
+  //
+  // PRODUCTION GUARD: __DEV__ is statically false in release bundles, so this
+  // effect bails before creating the interval — no timer, no measureInWindow,
+  // no overhead — even if a caller passes debugProve={true}.
+  useEffect(() => {
+    if (!debugProve || !__DEV__) return;
+    const id = setInterval(() => {
+      const o = opacity.value;
+      const pill = pillRef.current;
+      const measure = (pill as unknown as { measureInWindow?: (cb: (x: number, y: number, w: number, h: number) => void) => void } | null)?.measureInWindow;
+      if (typeof measure !== 'function') {
+        console.log('[VDO_WM_PROVE] vis=NO reason=measure-unavailable');
+        return;
+      }
+      measure.call(pill, (x: number, y: number, w: number, h: number) => {
+        const visible = w > 0 && h > 0 && o >= 0.3; // Plyr band floor ~0.38
+        console.log(`[VDO_WM_PROVE] vis=${visible ? 'yes' : 'NO'} px=${Math.round(x)},${Math.round(y)} pw=${Math.round(w)}x${Math.round(h)} opacity=${o.toFixed(2)}`);
+      });
+    }, 2000);
+    return () => clearInterval(id);
+  }, [debugProve, opacity]);
+
   // ── Timer effect (Plyr scheduleTick) ──────────────────────────────────────
   useEffect(() => {
     if (!containerReady) return;
@@ -199,6 +240,7 @@ export function NativeWatermarkOverlay({
       }}
     >
       <Animated.View
+        ref={pillRef}
         style={[containerStyle, { maxWidth: maxPillWidth }]}
         onLayout={handlePillLayout}
       >

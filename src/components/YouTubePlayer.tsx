@@ -72,6 +72,7 @@ import {
   enterFullscreenSystemUi,
   exitFullscreenSystemUi,
 } from '../lib/fullscreenSystemUi';
+import { useFullscreenWindowDims } from '../lib/useFullscreenWindowDims';
 
 // ─── Public props ─────────────────────────────────────────────────────────────
 
@@ -477,6 +478,9 @@ function YouTubePlayerNative({
   const isFullscreenRef = useRef(isFullscreen);
   isFullscreenRef.current = isFullscreen;
 
+  // Explicit window pixels for the fullscreen container (ancestor-collapse fix).
+  const win = useFullscreenWindowDims(isFullscreen);
+
   // ── WebView message handler (single stream from the single player) ─────────
   const onMessage = useCallback(
     (event: WebViewMessageEvent) => {
@@ -498,6 +502,12 @@ function YouTubePlayerNative({
           break;
         case 'yt:error':
           onError?.(msg.message ?? 'Playback error');
+          break;
+        case 'yt:diag':
+          // Dimensions/state only — proves the embedded media element exists
+          // with a live on-page rect while the host reports a healthy frame
+          // (the compositor-surface-loss evidence chain).
+          console.log(`[PLYR_FS_MEDIA_ELEMENT] iframe=${(msg as any).iframe} iframeRect=${JSON.stringify((msg as any).iframeRect)} video=${(msg as any).video} videoRect=${JSON.stringify((msg as any).videoRect)} wm=${(msg as any).wm} doc=${(msg as any).docW}x${(msg as any).docH}`);
           break;
         case 'yt:fullscreen':
           // Entry ask from the Plyr fullscreen button (capture-phase intercept
@@ -555,17 +565,23 @@ function YouTubePlayerNative({
   const fsProbeRef = useRef({ htmlIdentity: playerHtml });
   // Pending rotation surface-nudge timer (cleared on listener teardown).
   const rotationNudgeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Log gates: dimensions/state-only fullscreen diagnostics (PLYR_FS_*).
+  // DEV builds only — the Plyr fullscreen investigation is closed, so
+  // production builds do no diagnostic logging here. Set to `true`
+  // temporarily when a release build needs an evidence run, and flip it back
+  // before shipping. WebView verbosity gates stay __DEV__-only.
+  const RELEASE_DIAG = false;
   useEffect(() => {
     if (!isFullscreen) return;
     fsProbeRef.current.htmlIdentity = playerHtml;
-    if (__DEV__) {
+    if (RELEASE_DIAG || __DEV__) {
       console.log(`[PLYR_FS_ENTER] container=${windowDims.width.toFixed(0)}x${windowDims.height.toFixed(0)} orientation=${windowDims.width > windowDims.height ? 'landscape' : 'portrait'}`);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isFullscreen]);
   useEffect(() => {
     if (isFullscreen) return;
-    if (__DEV__) {
+    if (RELEASE_DIAG || __DEV__) {
       const d = Dimensions.get('window');
       console.log(`[PLYR_FS_EXIT] container=${d.width.toFixed(0)}x${d.height.toFixed(0)} sourceIdentityStable=${fsProbeRef.current.htmlIdentity === playerHtml}`);
     }
@@ -574,7 +590,7 @@ function YouTubePlayerNative({
   useEffect(() => {
     if (Platform.OS === 'web' || !isFullscreen) return;
     const sub = Dimensions.addEventListener('change', ({ window: w }) => {
-      if (__DEV__) {
+      if (RELEASE_DIAG || __DEV__) {
         console.log(`[PLYR_FS_ORIENTATION] container=${w.width.toFixed(0)}x${w.height.toFixed(0)} orientation=${w.width > w.height ? 'landscape' : 'portrait'}`);
       }
     });
@@ -583,24 +599,38 @@ function YouTubePlayerNative({
   useEffect(() => {
     if (Platform.OS === 'web') return;
     const t = setTimeout(() => {
-      if (!wvRef.current) return;
-      // WebView typings omit the RN host-instance APIs — go through the
-      // minimal structural type (native views always have them).
-      const host = wvRef.current as unknown as {
-        measureInWindow: (cb: (x: number, y: number, w: number, h: number) => void) => void;
+      // react-native-webview exposes injectJavaScript on its ref, but NOT the
+      // RN host-view measurement methods (measureInWindow is a host-component
+      // API; the ref here is the WebView class instance). Calling it
+      // unconditionally crashed the app one frame after the player mounted
+      // (TypeError: undefined is not a function) — measurement is therefore
+      // OPTIONAL and the surface-recovery injection MUST NOT depend on it.
+      const wv = wvRef.current as unknown as {
         injectJavaScript: (code: string) => void;
-      };
-      host.measureInWindow((x: number, y: number, w: number, h: number) => {
-        if (__DEV__) {
-          console.log(`[PLYR_FS_WEBVIEW_FRAME] webview=${w.toFixed(0)}x${h.toFixed(0)} at=(${x.toFixed(0)},${y.toFixed(0)}) fullscreen=${isFullscreen ? 'true' : 'false'}`);
-        }
+        measureInWindow?: (cb: (x: number, y: number, w: number, h: number) => void) => void;
+      } | null;
+      if (!wv) return;
+      const inject = () => {
         // Surface recovery: after EVERY fullscreen transition settles (and
-        // rotation, via the Dimensions listener below), nudge the in-page
-        // <video> so its compositor surface is re-allocated if the WebView
-        // resize dropped it (black-frame-with-audio signature). No-op when
-        // the surface is healthy. Empty ref is guarded in-page.
-        host.injectJavaScript('window.__plyrSurfaceNudge && window.__plyrSurfaceNudge(); true;');
-      });
+        // rotation, via the Dimensions listener below), nudge the COMPOSITED
+        // media element (the YouTube iframe — see playerScript surfaceNudge)
+        // so its compositor surface is re-promoted if the WebView resize
+        // dropped it (black-frame-with-audio signature). No-op when healthy.
+        wv.injectJavaScript('window.__plyrSurfaceNudge && window.__plyrSurfaceNudge(); window.__plyrDiag && window.__plyrDiag(); true;');
+      };
+      if (typeof wv.measureInWindow === 'function') {
+        wv.measureInWindow((x: number, y: number, w: number, h: number) => {
+          if (RELEASE_DIAG || __DEV__) {
+            console.log(`[PLYR_FS_WEBVIEW_FRAME] webview=${w.toFixed(0)}x${h.toFixed(0)} at=(${x.toFixed(0)},${y.toFixed(0)}) fullscreen=${isFullscreen ? 'true' : 'false'}`);
+          }
+          inject();
+        });
+      } else {
+        if (RELEASE_DIAG || __DEV__) {
+          console.log(`[PLYR_FS_WEBVIEW_FRAME] webview=measure-unavailable fullscreen=${isFullscreen ? 'true' : 'false'}`);
+        }
+        inject();
+      }
     }, 350);
     return () => clearTimeout(t);
   }, [isFullscreen]);
@@ -647,7 +677,14 @@ function YouTubePlayerNative({
       style={
         isFullscreen
           ? {
-              position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
+              // Explicit pixel fill (TEMPORARY-style fix for fullscreen collapse):
+              // position:absolute + CONCRETE width/height. A pure edge-anchored
+              // fill resolves through every ancestor; if any ancestor lays out
+              // at height 0 during the enter+rotate churn the chain collapses
+              // to 0 (measured doc=1331x0 → black frame). Concrete dimensions
+              // are ancestor-independent.
+              position: 'absolute', top: 0, left: 0,
+              width: win.width, height: win.height,
               zIndex: 100, backgroundColor: '#000',
             }
           : {

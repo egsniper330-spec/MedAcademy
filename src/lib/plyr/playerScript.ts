@@ -85,6 +85,32 @@ export const PLAYER_SCRIPT = `
     }
   }
 
+  // Diagnostic reply channel (dimensions/state only — never URLs, tokens or
+  // credentials). The host asks via injectJavaScript(window.__plyrDiag());
+  // used to prove the embedded media element EXISTS and has a live rect
+  // inside the WebView when the host-side frame reports healthy but the
+  // video area renders black (compositor-surface loss signature).
+  window.__plyrDiag = function () {
+    try {
+      var f = document.querySelector('.plyr__video-embed iframe') || document.querySelector('iframe');
+      var v = document.querySelector('video');
+      var r = f ? f.getBoundingClientRect() : null;
+      var vr = v ? v.getBoundingClientRect() : null;
+      send({
+        type: 'yt:diag',
+        iframe: !!f,
+        iframeRect: r ? { x: r.x, y: r.y, w: r.width, h: r.height } : null,
+        video: !!v,
+        videoRect: vr ? { x: vr.x, y: vr.y, w: vr.width, h: vr.height } : null,
+        wm: !!document.getElementById('plyr-watermark'),
+        docW: document.documentElement.clientWidth,
+        docH: document.documentElement.clientHeight,
+      });
+    } catch (e) {
+      send({ type: 'yt:diag', error: String(e && e.message || e) });
+    }
+  };
+
   // ── Watermark — one element, never recreated, moves every 30–60 s ──────────
   //
   //  Architecture mirrors watermarkInjection.ts (VdoCipher WebView):
@@ -330,7 +356,17 @@ export const PLAYER_SCRIPT = `
   var _nudgeTimer = null;
   function surfaceNudge() {
     try {
-      var v = document.querySelector('video');
+      // TARGET THE COMPOSITED MEDIA ELEMENT. For YouTube embeds that element
+      // is the cross-origin IFRAME — the host document contains NO <video>
+      // element, so a 'video'-only selector always missed and the nudge was a
+      // silent no-op on Plyr (the black-frame bug persisted). The iframe is
+      // the host document's own element, so restyling it is allowed; a 1-frame
+      // transform cycle re-promotes its compositor layer without any
+      // navigation (playback state untouched). 'video' stays as the fallback
+      // for HTML5-media players.
+      var v = document.querySelector('.plyr__video-embed iframe') ||
+              document.querySelector('iframe') ||
+              document.querySelector('video');
       if (!v) return;
       v.style.transform = 'translateZ(0)';
       void v.offsetHeight; // force style/layout flush

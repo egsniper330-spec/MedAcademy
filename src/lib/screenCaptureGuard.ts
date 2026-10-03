@@ -95,6 +95,19 @@ function warnUnavailable(api: string) {
   }
 }
 
+// ═══ TEMPORARY DEBUG GATE — FLAG_SECURE / SCREEN-CAPTURE PROTECTION ═══
+// TEMPORARY DEBUG STATE: FLAG_SECURE (screenshot/recording blocking) is
+// DISABLED for the current real-device fullscreen debugging session so ADB
+// `screencap` can capture evidence. Developer Options and USB Debugging
+// detections are also temporarily disabled (see security.ts / deviceKey.ts
+// TEMPORARY DEBUG GATE). ALL other security protections remain active.
+// The protection architecture below is fully preserved — restore by deleting
+// the single early return in this gate and rebuilding.
+// TODO(RESTORE): remove this gate when the user explicitly asks to restore
+// screen-capture protection.
+const FLAG_SECURE_DEBUG_DISABLED = true; // TEMPORARY DEBUG GATE — flip to false to restore
+// ═══════════════════════════════════════════════════════════════════════
+
 /**
  * Keyed prevent. The FIRST key to arrive while no native lock is held performs
  * the native reparent; later keys only join the accounting set. Resolves once
@@ -102,6 +115,8 @@ function warnUnavailable(api: string) {
  * has been applied).
  */
 export async function preventScreenCaptureAsync(key = 'default'): Promise<void> {
+  // TEMPORARY DEBUG GATE: skip the native FLAG_SECURE activation entirely.
+  if (FLAG_SECURE_DEBUG_DISABLED) return;
   if (jsTags.has(key)) return; // idempotent per key
   jsTags.add(key);
   const first = nativeLocked.size === 0;
@@ -125,6 +140,12 @@ export async function preventScreenCaptureAsync(key = 'default'): Promise<void> 
  * are ignored — they can never tear down another owner's protection.
  */
 export async function allowScreenCaptureAsync(key = 'default'): Promise<void> {
+  // TEMPORARY DEBUG GATE: FLAG_SECURE is force-released while debugging.
+  if (FLAG_SECURE_DEBUG_DISABLED) {
+    jsTags.delete(key);
+    nativeLocked.delete(key);
+    return;
+  }
   jsTags.delete(key);
   if (!nativeLocked.has(key)) return; // stray release — never touched the native lock
   nativeLocked.delete(key);

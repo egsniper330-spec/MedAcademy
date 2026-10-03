@@ -400,5 +400,17 @@ module.exports = async function (metroDefaults) {
     }
   }
 
+  // ── Metro worker-pool cap (build-host stability, opt-in via env) ──────────
+  // On low-RAM Windows hosts the DEFAULT pool (one transform worker per CPU
+  // core) intermittently aborts the bundler node process (0xC0000409 — stack
+  // buffer overrun / 0xC0000374 — heap corruption) around 50% of the release
+  // bundle, failing `createBundleReleaseJsAndAssets`. Setting METRO_MAX_WORKERS
+  // (e.g. METRO_MAX_WORKERS=2) caps the pool. When unset, Metro's default is
+  // used unchanged — no behaviour change for normal builds.
+  const metroMaxWorkers = Number(process.env.METRO_MAX_WORKERS || 0);
+  if (Number.isFinite(metroMaxWorkers) && metroMaxWorkers > 0) {
+    config = { ...config, maxWorkers: metroMaxWorkers };
+  }
+
   return config;
 };

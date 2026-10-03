@@ -78,13 +78,24 @@ console.log('── iOS fullscreen contract: ONE control, NO forced landscape, n
 for (const p of [ONLINE_ADAPTER, OFFLINE_PLAYER]) {
   const s = read(p);
 
-  // (1) Exactly ONE enter control: the SDK control-bar button (both platforms
-  // since bridge 2.9.4) via onEnterFullscreen. The app must NOT render its own
-  // duplicate enter button (the old Maximize2 overlay created a second
-  // fullscreen system → two opposite buttons + split-screen UI).
-  ok(!/Maximize2/.test(s), `${p}: no app-level duplicate enter-fullscreen button (Maximize2 removed)`);
-  ok(!/accessibilityLabel="Enter fullscreen"/.test(s), `${p}: no second "Enter fullscreen" control rendered by the app`);
-  ok(/onEnterFullscreen=\{/.test(s), `${p}: SDK fullscreen event is mapped into the app state (single control path)`);
+  // (1) Exactly ONE user-facing fullscreen ENTRY per platform.
+  // Android: the SDK's own control-bar button is HIDDEN by the bridge (it runs
+  // the SDK default fullscreen, which promotes the surface above the RN tree and
+  // buries the watermark), so the app renders the single entry — and it MUST be
+  // wired to the canonical in-place path. iOS: the SDK's own button stays the
+  // single entry, so the app must not render a second one there.
+  const enterControls = (s.match(/accessibilityLabel="Enter fullscreen"/g) || []).length;
+  ok(enterControls === 1, `${p}: exactly ONE app-level enter-fullscreen control`);
+  ok(/!isFullscreen && Platform\.OS === 'android' && \([\s\S]{0,400}Enter fullscreen/.test(s),
+    `${p}: the app enter control is Android-only (iOS keeps the SDK button as its single entry)`);
+  ok(/onPress=\{\(\) => void enterFullscreen\(\)\}/.test(s),
+    `${p}: the app enter control calls the canonical enterFullscreen() (gated, in-place)`);
+  // Exactly ONE rendered Maximize2 element (the single enter control) plus its
+  // import — so 1 JSX usage, not 1 raw occurrence.
+  ok((s.match(/<Maximize2\b/g) || []).length === 1, `${p}: exactly one rendered Maximize2 icon (the single enter control)`);
+  ok(/import \{[^}]*\bMaximize2\b[^}]*\} from 'lucide-react-native'/.test(s),
+    `${p}: Maximize2 icon imported from lucide-react-native`);
+  ok(/onEnterFullscreen=\{/.test(s), `${p}: SDK fullscreen event still mapped into the app state (iOS path)`);
 
   // (2) iOS NEVER calls any orientation API — Portrait stays Portrait,
   // Landscape stays Landscape, system Rotation Lock is never overridden.
@@ -227,8 +238,14 @@ console.log('── Lesson screen: pinned-player layout (fullscreen covers the s
   // ancestor (the player's direct-parent NeuCard) — Yoga positions absolute
   // children against their DIRECT parent, so expanding only the adapter's own
   // container would fill just the 16:9 card (header + card + black void).
-  ok(/position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 110/.test(s),
-    'lesson: player host card receives the absolute-fill style when fullscreen (split-screen fix)');
+  // PIN UPDATED (explicit-pixel fullscreen fix): the card must expand to the
+  // FULL SCREEN when fullscreen. Edge-anchored absolute-fill collapses to
+  // height 0 when an ancestor transiently lays out at 0 during the
+  // enter+rotate churn (measured doc=1331x0 → black frame / vanished
+  // watermark). The fill now uses CONCRETE window dimensions, which are
+  // ancestor-independent. top:0/left:0 + explicit width/height + zIndex 110.
+  ok(/position: 'absolute', top: 0, left: 0, width: fsWin\.width, height: fsWin\.height, zIndex: 110/.test(s),
+    'lesson: player host card receives explicit-pixel fullscreen fill (ancestor-collapse fix)');
   // WATERMARK LAYERING pin: the fullscreen content ScrollView must sit at a
   // STRICTLY LOWER z than the player host card. An equal-zIndex sibling tie
   // let the opaque content layer paint OVER the player container — the video
@@ -362,6 +379,108 @@ console.log('── Native bridge patch: SDK fullscreen must never bury the RN w
   // No credentials in telemetry.
   ok(!patch.includes('playbackInfo:') || !/print\(.*(otp|playbackInfo|token)/i.test(patch.split('MEDACADEMY').join('')),
     'telemetry logs no credentials');
+}
+
+console.log('── Single fullscreen entry: the SDK\'s own fullscreen controls are hidden ──');
+{
+  // The app's canonical in-place fullscreen is the only path that keeps the
+  // watermark visible, so the SDK's own fullscreen button must never be
+  // reachable. Pins: the bridge hides BOTH of those controls surgically, the
+  // hide ships inside the source-controlled patch, the patch still parses with
+  // patch-package's own parser, and the app-level control remains the single
+  // fullscreen ownership path.
+  const BRIDGE =
+    'node_modules/vdocipher-rn-bridge/android/src/main/java/com/vdocipher/rnbridge/ReactVdoPlayerUIView.java';
+  const PATCH = 'patches/vdocipher-rn-bridge+2.0.1.patch';
+  ok(exists(BRIDGE), 'bridge player view present (hide lives where the controls are created)');
+  const b = read(BRIDGE);
+
+  // (1) A real method that is actually invoked where the control bar is created.
+  ok(/private\s+void\s+hideSdkFullscreenControls\s*\(/.test(b),
+    'bridge: hideSdkFullscreenControls() exists (not a comment-only mention)');
+  ok(/private\s+void\s+scheduleHideSdkFullscreenControls\s*\(/.test(b),
+    'bridge: scheduleHideSdkFullscreenControls() exists so the hide can be re-armed');
+  ok(/scheduleHideSdkFullscreenControls\(\)/.test(b),
+    'bridge: the hide is invoked where the fragment/control bar is created');
+
+  // (2) BOTH controls are handled, by their public resource ids.
+  const enterRefs = (b.match(/vdo_enter_fullscreen/g) || []).length;
+  const exitRefs  = (b.match(/vdo_exit_fullscreen/g) || []).length;
+  ok(enterRefs >= 1 && exitRefs >= 1,
+    `bridge: hides BOTH SDK fullscreen controls (enter id refs=${enterRefs}, exit id refs=${exitRefs})`);
+  ok(/getId\(\) == enterId \|\| v\.getId\(\) == exitId/.test(b),
+    'bridge: the visibility change is gated on the two fullscreen ids only');
+
+  // (3) SURGICAL: exactly one GONE application site in the whole file, controls
+  // explicitly kept enabled — play/seek/quality/captions are never touched.
+  const goneSites = (b.match(/setVisibility\s*\(\s*View\.GONE\s*\)/g) || []).length;
+  ok(goneSites === 1,
+    `bridge: exactly ONE GONE site (the two fullscreen ids) — found ${goneSites}`);
+  ok(/putBoolean\("showControls",\s*true\)/.test(b),
+    'bridge: SDK control bar still enabled (hide is per-button, not showControls=false)');
+  ok(!/showControls\s*=\s*false/.test(b),
+    'bridge: never disables the whole SDK control bar');
+
+  // (4) The hide ships in the source-controlled patch — a fresh install keeps it.
+  const bridgePatch = read(PATCH);
+  ok(exists(PATCH) && bridgePatch.includes('hideSdkFullscreenControls'),
+    'source-controlled bridge patch carries the hide (survives a fresh install)');
+  ok(bridgePatch.includes('vdo_enter_fullscreen') && bridgePatch.includes('vdo_exit_fullscreen'),
+    'patch: hides BOTH SDK fullscreen ids');
+  ok(/^\+.*setVisibility\(View\.GONE\)/m.test(bridgePatch),
+    'patch: adds the GONE call itself (not just the method signature)');
+  ok(/^\+.*scheduleHideSdkFullscreenControls\(\);/m.test(bridgePatch),
+    'patch: wires the hide into fragment/control-bar creation');
+
+  // (5) patch-package compatibility: standard unified diff with balanced,
+  // node_modules-relative headers (what `patch -p1` / patch-package reads).
+  const diffSections = (bridgePatch.match(/^diff --git a\/.+ b\/.+$/gm) || []);
+  ok(diffSections.length === 4,
+    `patch: exactly 4 file sections (1 Android + 3 iOS) — got ${diffSections.length}`);
+  const minusHeaders = (bridgePatch.match(/^--- a\/node_modules\/vdocipher-rn-bridge\//gm) || []);
+  const plusHeaders = (bridgePatch.match(/^\+\+\+ b\/node_modules\/vdocipher-rn-bridge\//gm) || []);
+  ok(minusHeaders.length === 4 && plusHeaders.length === 4,
+    `patch: balanced --- a/ +++ b/ headers on node_modules paths (-p1) — ${minusHeaders.length}/${plusHeaders.length}`);
+  ok(/^@@/m.test(bridgePatch), 'patch: hunk headers present');
+  // Parse it with patch-package's OWN parser — the exact code postinstall runs.
+  ok(exists('node_modules/patch-package/dist/patch/parse.js'),
+    'patch-package parser module available (postinstall dependency)');
+  try {
+    const { parsePatchFile } = require(path.join(ROOT, 'node_modules/patch-package/dist/patch/parse.js'));
+    const parsed = parsePatchFile(bridgePatch);
+    ok(Object.keys(parsed).length >= 4,
+      `patch-package parser accepts the patch (${Object.keys(parsed).length} files parsed)`);
+  } catch (e) {
+    ok(false, `patch-package parser rejects the patch: ${e.message}`);
+  }
+  // Existing iOS portions must remain untouched by the Android hide work.
+  for (const ios of ['ios/AssetList.swift', 'ios/RCTVdoPlayerUIView.swift', 'ios/VdoDownload.swift']) {
+    ok(bridgePatch.includes(ios), `patch: iOS portion intact — ${ios}`);
+  }
+
+  // (6) The app control is the SOLE fullscreen ownership path: no direct native
+  // fullscreen command that would bypass the canonical (gated, in-place) entry.
+  const on = read(ONLINE_ADAPTER);
+  const off = read(OFFLINE_PLAYER);
+  ok(!/enterFullscreenV2|dispatchViewManagerCommand/.test(on + off),
+    'players: no direct native fullscreen command (canonical enterFullscreen()/exitFullscreen() only)');
+  ok((on.match(/accessibilityLabel="Enter fullscreen"/g) || []).length === 1,
+    'online adapter: exactly ONE app-level fullscreen control');
+  ok((off.match(/accessibilityLabel="Enter fullscreen"/g) || []).length === 1,
+    'offline player: exactly ONE app-level fullscreen control');
+
+  // (7) The watermark self-proof must NEVER run in production.
+  ok(/debugProve=\{__DEV__\}/.test(on),
+    'online adapter: debugProve wired to __DEV__ (no prove loop in release)');
+  ok(!/debugProve=\{true\}/.test(on + off),
+    'players: no hard-coded debugProve={true} left');
+  const wmOverlay = read('src/components/NativeWatermarkOverlay.tsx');
+  ok(/if \(!debugProve \|\| !__DEV__\) return;/.test(wmOverlay),
+    'watermark: prove loop bails before scheduling in release builds (no interval, no measureInWindow)');
+  ok(/debugProve = false/.test(wmOverlay),
+    'watermark: debugProve defaults to off');
+  ok(!/RELEASE_DIAG\s*=\s*true/.test(on + read('src/components/YouTubePlayer.tsx')),
+    'release diagnostics dev-gated (RELEASE_DIAG=false — no console overhead in production)');
 }
 
 console.log('── Plyr fullscreen surface diagnostics + identity stability ──');

@@ -324,8 +324,17 @@ async function collectEvidenceFlags(): Promise<Record<string, unknown>> {
     out.xposed = flags.xposedDetected === true;
     out.emulator = flags.emulatorDetected === true;
     out.mock_location = flags.mockLocationDetected === true;
-    out.developer_options = flags.developerOptionsEnabled === true;
-    out.adb = flags.adbEnabled === true;
+    // ⚠️ TEMPORARY DEBUG GATE (authorized real-device debugging session —
+    // mirrors DEBUG_DISABLE_DEV_OPTIONS_AND_ADB in src/lib/security.ts):
+    // exactly these two evidence fields are force-cleared while the gate is
+    // active so the backend evidence bundle stays consistent with the client
+    // gate. Every other flag (vpn/root/magisk/frida/xposed/tamper/overlay/
+    // emulator/…) is reported honestly and unchanged.
+    // TODO(RESTORE): remove these two override lines when the owner restores
+    // developer-options/USB-debugging detection.
+    const DEBUG_DISABLE_DEV_OPTIONS_AND_ADB = true;
+    out.developer_options = DEBUG_DISABLE_DEV_OPTIONS_AND_ADB ? false : flags.developerOptionsEnabled === true;
+    out.adb               = DEBUG_DISABLE_DEV_OPTIONS_AND_ADB ? false : flags.adbEnabled === true;
     out.debugger = flags.debuggerAttached === true;
     out.test_only = flags.testOnlyBuild === true;
     out.tampered = flags.tampered === true;
