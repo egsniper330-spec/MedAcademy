@@ -16,6 +16,8 @@ import { getInstalledBuildNumber } from '@/lib/appIdentity';
 import { Platform as RNPlatform } from 'react-native';
 import { setMaintenanceControlFlowActive, isMaintenanceControlFlowActive } from '@/lib/maintenanceStateModel';
 import { classifyAuthHttpStatus, shouldClearSession } from '@/lib/authFailureModel';
+import { toUploadPart } from '@/lib/uploadPart';
+import { isSecurityLocked, registerProtectedAbort } from '@/lib/securityLock';
 
 // ── Config ──────────────────────────────────────────────────────────────────
 
@@ -92,6 +94,27 @@ const NO_AUTO_REFRESH_PREFIXES = [
   '/auth/logout', '/auth/forgot-password', '/auth/reset-password', '/auth/lookup',
 ];
 
+// ── CENTRAL SECURITY LOCK — transport exemption list ────────────────────────
+// While the security lock is active EVERY protected request is refused before
+// it reaches the network (and in-flight ones are aborted). A tiny allowlist
+// must still flow, or the app could neither report the violation nor recover:
+//   • /security/policies  — the security pipeline re-reads the authoritative
+//                           policy to EVALUATE recovery; blocking it would
+//                           deadlock the lock forever.
+//   • /security/events, /security/violations — the violation report is itself
+//                           security telemetry the backend audit needs.
+//   • /auth/logout        — a locked user must always be able to sign out.
+// NOTABLY ABSENT: /auth/refresh. Token rotation is protected activity and is
+// deliberately frozen while locked (see refreshAccessToken's guard).
+const LOCK_EXEMPT_PREFIXES = [
+  '/security/policies', '/security/config', '/security/events', '/security/violations',
+  '/auth/logout',
+];
+
+function isLockExempt(path: string): boolean {
+  return LOCK_EXEMPT_PREFIXES.some((p) => path.startsWith(p));
+}
+
 function shouldAutoRefresh(path: string): boolean {
   if (NO_AUTO_REFRESH_PREFIXES.some((p) => path.startsWith(p))) return false;
   // Only attempt a refresh when there is a stored session with a refresh token
@@ -106,6 +129,13 @@ async function refreshAccessToken(): Promise<boolean> {
   }
   authStateLog('AUTH_REFRESH_START');
   refreshPromise = (async (): Promise<boolean> => {
+    // SECURITY LOCK: token rotation is protected activity. While the lock is
+    // active we never mint new credentials — the rotation resumes when the
+    // lock clears (the caller re-runs its own flow at that point).
+    if (isSecurityLocked()) {
+      authStateLog('AUTH_REFRESH_DEFINITIVE_FAILURE', 'security lock active — refresh suppressed');
+      return false;
+    }
     const stored = getStoredSession();
     if (!stored?.refresh_token) return false;
     const res = await apiFetchOnce<{ session: { access_token: string; refresh_token: string } }>('/auth/refresh', {
@@ -201,10 +231,29 @@ async function apiFetchOnce<T = unknown>(
     if (appVersionCode > 0) headers['X-App-Version-Code'] = String(appVersionCode);
   }
 
+  // ── CENTRAL SECURITY LOCK (fail-closed gate) ──────────────────────────────
+  // Refuse the request BEFORE any network I/O while the lock is active. This
+  // is what makes "no new protected requests start while locked" true for
+  // every caller at once — retries, progress pings, background polls and
+  // token refreshes all funnel through this one choke point.
+  if (isSecurityLocked() && !isLockExempt(path)) {
+    return {
+      data: null,
+      error: {
+        message: 'Blocked by the active security lock — resolve the security issue to continue.',
+        code: 'SECURITY_LOCK',
+        status: 0,
+      },
+    };
+  }
+
   // 30s request timeout — a hung request must never leave a screen in an
   // eternal loading state (e.g. the dashboard's Promise.all).
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 30000);
+  // Register the controller so activating the lock aborts THIS request
+  // immediately (no waiting for the 30s timeout). Unregistered on settle.
+  const unregisterAbort = registerProtectedAbort(controller);
   try {
     const res = await globalThis.fetch(`${API_BASE}${path}`, {
       method,
@@ -284,9 +333,20 @@ async function apiFetchOnce<T = unknown>(
     return { data: parsed as T, error: null };
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : String(e);
+    // A lock-triggered abort is NOT a timeout and must never be surfaced as a
+    // network failure — it carries a distinct, stable code so UI/callers can
+    // tell containment apart from connectivity.
+    if (isSecurityLocked() && !isLockExempt(path)) {
+      authStateLog('AUTH_NETWORK_FAILURE', 'request aborted by security lock');
+      return {
+        data: null,
+        error: { message: 'Blocked by the active security lock.', code: 'SECURITY_LOCK', status: 0 },
+      };
+    }
     authStateLog('AUTH_NETWORK_FAILURE', msg.includes('AbortError') ? 'request timed out (30s) — no session impact' : msg);
     return { data: null, error: { message: msg.includes('AbortError') ? 'Request timed out' : msg } };
   } finally {
+    unregisterAbort();
     clearTimeout(timer);
   }
 }
@@ -854,11 +914,29 @@ const authMethods = {
 
 function createStorageBucket(bucket: string) {
   return {
-    upload: async (path: string, file: Blob | ArrayBuffer, opts?: { contentType?: string; upsert?: boolean; cacheControl?: string; metadata?: Record<string, unknown> }) => {
+    upload: async (path: string, file: Blob | ArrayBuffer | { uri: string; mimeType?: string; name?: string }, opts?: { contentType?: string; upsert?: boolean; cacheControl?: string; metadata?: Record<string, unknown> }) => {
       const formData = new FormData();
-      formData.append('file', file instanceof Blob ? file : new Blob([file]));
+      // React Native cannot create Blobs from ArrayBuffer/ArrayBufferView
+      // (BlobManager.createFromParts throws, and on iOS the invalid part
+      // crashes the app natively). The supported representation for local
+      // files is the { uri, name, type } descriptor, which the native
+      // networking layer streams from disk. toUploadPart() picks the correct
+      // representation per platform and rejects forbidden conversions
+      // loudly instead of producing the runtime error.
+      const part = toUploadPart(file, RNPlatform.OS);
+      if (part.kind === 'error') return { error: { message: part.message } };
+      if (part.kind === 'descriptor') {
+        formData.append('file', {
+          uri: part.value.uri,
+          name: part.value.name ?? path.split('/').pop() ?? 'upload.bin',
+          type: part.value.mimeType ?? opts?.contentType ?? 'application/octet-stream',
+        } as any); // RN FormData file descriptor (typed in RN's FormDataValue)
+      } else {
+        formData.append('file', part.value);
+      }
       formData.append('bucket', bucket);
       formData.append('path', path);
+      if (opts?.contentType) formData.append('content_type', opts.contentType);
       const token = getToken();
       const headers: Record<string, string> = {};
       if (token) headers['Authorization'] = `Bearer ${token}`;

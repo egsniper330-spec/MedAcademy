@@ -533,7 +533,10 @@ final class AnalyticsController
         $windowSql  = '';
         $windowBind = [];
         if ($startDate !== '' && $endDate !== '') {
-            $windowSql  = ' WHERE created_at BETWEEN ? AND ?';
+            // MUST qualify with the `se` alias: profiles also has created_at,
+            // so a bare column name is ambiguous (SQLSTATE 1052) once the
+            // JOIN is applied.
+            $windowSql  = ' WHERE se.created_at BETWEEN ? AND ?';
             $windowBind = [$startDate, $endDate];
         }
 

@@ -10,8 +10,11 @@
  * registered on every platform.
  */
 import RoleTabShell from '@/components/navigation/RoleTabShell';
+import { useRoleTabGuard } from '@/components/navigation/useRoleTabGuard';
 import { ADMIN_TABS } from '@/lib/nativeTabRegistry';
 
 export default function AdminTabLayout() {
+  // Admin group renders only for an authenticated admin (see useRoleTabGuard).
+  useRoleTabGuard('admin');
   return <RoleTabShell tabs={ADMIN_TABS} initialRouteName="admin-overview" />;
 }

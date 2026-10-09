@@ -126,10 +126,23 @@ final class Request
         return $this->query;
     }
 
+    /**
+     * Client IP used for rate limiting, audit trails and risk signals.
+     *
+     * TRUST POLICY: `X-Forwarded-For` and friends are DELIBERATELY ignored.
+     * Those headers are attacker-controlled on a direct-to-PHP deployment, so
+     * honouring them would let a client pick any bucket identity it likes and
+     * walk straight past a per-IP limit (or frame someone else's address).
+     * REMOTE_ADDR is the socket peer the web server actually accepted, which
+     * cannot be forged by the request.
+     *
+     * If this API is ever placed behind a reverse proxy, forwarded headers
+     * must only be honoured after explicitly validating that the immediate
+     * peer is a configured trusted proxy (and then taking the LAST untrusted
+     * hop) — never by default.
+     */
     public function clientIp(): string
     {
-        // trusted proxy headers must only be honoured behind a known proxy;
-        // for cPanel direct-PHP this is safe enough.
         return $_SERVER['REMOTE_ADDR'] ?? '0.0.0.0';
     }
 

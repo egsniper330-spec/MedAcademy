@@ -13,6 +13,7 @@ import { NeuButton } from '@/components/NeuButton';
 import { useToast } from '@/components/Toast';
 import { neuColors, useLayout, safeBottom } from '@/lib/neu';
 import { useDebounce } from '@/lib/useDebounce';
+import { useStaleWhileRevalidateFocus } from '@/lib/useStaleWhileRevalidateFocus';
 import type { RelativePathString } from 'expo-router';
 
 const DIFFICULTY_COLORS: Record<string, string> = {
@@ -74,7 +75,13 @@ export default function DoctorCourses() {
     setLoading(false);
   }, [profile, statusFilter]);
 
-  useFocusEffect(useCallback(() => { setLoading(true); loadData(); }, [loadData]));
+  // Stale-while-revalidate: the course list stays on screen and refreshes in
+  // the background on focus instead of collapsing to a full-screen spinner.
+  // hasContent() keeps the spinner for a genuinely empty first load.
+  useStaleWhileRevalidateFocus(loadData, {
+    setLoading,
+    hasContent: () => courses.length > 0,
+  });
   const onRefresh = async () => { setRefreshing(true); await loadData(); setRefreshing(false); };
 
   const filtered = courses.filter(course =>

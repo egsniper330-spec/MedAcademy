@@ -6,6 +6,7 @@ namespace MedAcademy\Services;
 
 use MedAcademy\Database\Database;
 use MedAcademy\Http\ApiException;
+use MedAcademy\Utils\Logger;
 
 /**
  * AppReleaseService — Super Admin production version management.
@@ -263,7 +264,13 @@ final class AppReleaseService
             if ($e instanceof ApiException) {
                 throw $e;
             }
-            throw new ApiException(500, 'Publish failed: ' . $e->getMessage());
+            // Internal detail (SQLSTATE, table names) stays server-side.
+            Logger::instance()->error('app release publish failed', [
+                'exception'  => get_class($e),
+                'detail'     => mb_substr((string) preg_replace('/(password|secret|token|api[_-]?key)\s*[:=]\s*\S+/i', '$1=[REDACTED]', $e->getMessage()), 0, 500),
+                'release_id' => $releaseId,
+            ]);
+            throw new ApiException(500, 'Publish failed', 'internal_error');
         }
 
         AuditService::write($actorId, 'release_published', [
@@ -316,7 +323,15 @@ final class AppReleaseService
             $db->commit();
         } catch (\Throwable $e) {
             $db->rollback();
-            throw new ApiException(500, 'Rollback failed: ' . $e->getMessage());
+            if ($e instanceof ApiException) {
+                throw $e;
+            }
+            Logger::instance()->error('app release rollback failed', [
+                'exception'  => get_class($e),
+                'detail'     => mb_substr((string) preg_replace('/(password|secret|token|api[_-]?key)\s*[:=]\s*\S+/i', '$1=[REDACTED]', $e->getMessage()), 0, 500),
+                'release_id' => $releaseId,
+            ]);
+            throw new ApiException(500, 'Rollback failed', 'internal_error');
         }
 
         AuditService::write($actorId, 'release_rollback', [

@@ -123,7 +123,14 @@ function withProductionSigning(config) {
         `            }`,
         `        }`,
         '        buildConfigField "String", "EXPECTED_CERT_SHA256", "\\"${expectedCert.trim()}\\""',
-        '        buildConfigField "String", "API_SPKI_PINS", "\\"\\""',
+        // API_SPKI_PINS previously shipped HARDCODED to an empty string even
+        // though android/gradle.properties carried the real apiSpkiPins list.
+        // Nothing read it, so it was pure misleading metadata (it looked like
+        // pinning was disabled). Android pinning is now enforced declaratively
+        // by the network security config (plugins/withNetworkSecurityConfig.js);
+        // this value is kept truthful so the build never claims the opposite of
+        // the shipped posture.
+        '        buildConfigField "String", "API_SPKI_PINS", "\\"${(findProperty(\'apiSpkiPins\') ?: \'\').toString()}\\""',
       ].join('\n');
       if (c.includes(anchor)) {
         c = c.replace(anchor, anchor + '\n' + injection);

@@ -1,7 +1,9 @@
 /**
  * SA Support Settings — Super Admin can configure support contact methods
- * (Phone, WhatsApp, Telegram) that appear on the user-facing security/blocked screen.
- * Settings are saved to the PHP `support_settings` table with backend authorization enforced.
+ * (Phone, WhatsApp, Telegram, Facebook, Instagram, Email, X/Twitter, Website)
+ * that appear on the user-facing security/blocked screen.
+ * Settings are saved to the PHP `support_settings` table via the audited
+ * /admin/support-settings endpoint with Super Admin authorization enforced.
  */
 import React, { useCallback, useState } from 'react';
 import {
@@ -9,44 +11,86 @@ import {
   useColorScheme, ActivityIndicator, RefreshControl,
 } from 'react-native';
 import { useFocusEffect } from 'expo-router';
-import { Phone, MessageCircle, Send, Save, Info, CheckCircle } from 'lucide-react-native';
+import {
+  Phone, MessageCircle, Send, Save, Info, CheckCircle,
+  Mail, Globe, AtSign, Link2, Megaphone,
+} from 'lucide-react-native';
 import { PageHeader } from '@/components/PageHeader';
 import { NeuCard } from '@/components/NeuCard';
 import { NeuButton } from '@/components/NeuButton';
-import { getSupportSettings, upsertSupportSetting } from '@/lib/api';
-import type { SupportSettings, SupportContactEntry } from '@/lib/api';
+import {
+  getSupportSettings, upsertSupportSetting,
+  type SupportSettings, type SupportContactEntry,
+  type SupportPlatformKey, SUPPORT_PLATFORM_ORDER,
+  SUPPORT_DEFAULT_LABELS, SUPPORT_ICONS,
+} from '@/lib/api';
 import { neuColors, neuFlatStyle, useLayout, safeBottom } from '@/lib/neu';
 
 // ─── Per-key metadata ────────────────────────────────────────────────────────
-type ContactKey = 'phone' | 'whatsapp' | 'telegram';
+type ContactKey = SupportPlatformKey;
 
 const CONTACT_META: Record<ContactKey, {
-  icon:        React.ComponentType<{ size: number; color: string }>;
-  title:       string;
+  title:            string;
   valuePlaceholder: string;
   labelPlaceholder: string;
-  hint:        string;
+  hint:             string;
+  keyboardType:     'default' | 'phone-pad' | 'email-address' | 'numeric',
 }> = {
   phone: {
-    icon:             Phone,
     title:            'Phone Support',
     valuePlaceholder: '+1 555 000 0000',
     labelPlaceholder: 'e.g. Phone Support',
-    hint:             'International format recommended (e.g. +1 555 000 0000).',
+    hint:             'International format recommended (e.g. +1 555 000 0000). Tapping opens the phone dialer.',
+    keyboardType: 'phone-pad',
   },
   whatsapp: {
-    icon:             MessageCircle,
     title:            'WhatsApp Support',
     valuePlaceholder: '+1 555 000 0000',
     labelPlaceholder: 'e.g. WhatsApp Support',
-    hint:             'Enter the phone number linked to the WhatsApp account.',
+    hint:             'Enter the phone number linked to the WhatsApp account. Tapping opens a WhatsApp chat.',
+    keyboardType: 'phone-pad',
   },
   telegram: {
-    icon:             Send,
     title:            'Telegram Support',
     valuePlaceholder: '@username or t.me/username',
     labelPlaceholder: 'e.g. Telegram Support',
-    hint:             'Enter a @username, t.me/username link, or full Telegram URL.',
+    hint:             'Enter a @username, t.me/username, or full Telegram URL. Tapping opens a Telegram chat.',
+    keyboardType: 'default',
+  },
+  facebook: {
+    title:            'Facebook Support',
+    valuePlaceholder: '@username or facebook.com/username',
+    labelPlaceholder: 'e.g. Facebook Support',
+    hint:             'Enter a @username, facebook.com/username, or full Facebook URL. Tapping opens Facebook.',
+    keyboardType: 'default',
+  },
+  instagram: {
+    title:            'Instagram Support',
+    valuePlaceholder: '@username or instagram.com/username',
+    labelPlaceholder: 'e.g. Instagram Support',
+    hint:             'Enter a @username, instagram.com/username, or full Instagram URL. Tapping opens Instagram.',
+    keyboardType: 'default',
+  },
+  email: {
+    title:            'Email Support',
+    valuePlaceholder: 'support@example.com',
+    labelPlaceholder: 'e.g. Email Support',
+    hint:             'Enter the support email address. Tapping opens the device email client.',
+    keyboardType: 'email-address',
+  },
+  x: {
+    title:            'X / Twitter Support',
+    valuePlaceholder: '@username or x.com/username',
+    labelPlaceholder: 'e.g. X / Twitter Support',
+    hint:             'Enter a @username, x.com/username, or full X/Twitter URL. Tapping opens X.',
+    keyboardType: 'default',
+  },
+  website: {
+    title:            'Website Support',
+    valuePlaceholder: 'https://example.com/support',
+    labelPlaceholder: 'e.g. Website Support',
+    hint:             'Enter a support website URL. Tapping opens the website in the browser.',
+    keyboardType: 'default',
   },
 };
 
@@ -60,25 +104,28 @@ interface ContactDraft {
 type DraftsState = Record<ContactKey, ContactDraft>;
 
 function defaultDrafts(): DraftsState {
-  return {
-    phone:    { value: '', label: 'Phone Support',    enabled: false },
-    whatsapp: { value: '', label: 'WhatsApp Support', enabled: false },
-    telegram: { value: '', label: 'Telegram Support', enabled: false },
-  };
+  return SUPPORT_PLATFORM_ORDER.reduce((acc, key) => {
+    acc[key] = {
+      value:   '',
+      label:   SUPPORT_DEFAULT_LABELS[key],
+      enabled: false,
+    };
+    return acc;
+  }, {} as DraftsState);
 }
 
 function settingsToDrafts(settings: SupportSettings): DraftsState {
   const d = defaultDrafts();
-  (Object.keys(d) as ContactKey[]).forEach(k => {
-    const entry: SupportContactEntry | undefined = settings[k];
+  for (const key of SUPPORT_PLATFORM_ORDER) {
+    const entry: SupportContactEntry | undefined = settings[key];
     if (entry) {
-      d[k] = {
+      d[key] = {
         value:   entry.value   ?? '',
-        label:   entry.label   ?? d[k].label,
+        label:   entry.label   ?? SUPPORT_DEFAULT_LABELS[key],
         enabled: entry.enabled ?? false,
       };
     }
-  });
+  }
   return d;
 }
 
@@ -101,7 +148,7 @@ function ContactCard({
   const flat   = neuFlatStyle(isDark);
   const layout = useLayout();
   const meta   = CONTACT_META[contactKey];
-  const Icon   = meta.icon;
+  const Icon   = SUPPORT_ICONS[contactKey];
 
   const inputStyle = {
     backgroundColor: c.base,
@@ -151,7 +198,7 @@ function ContactCard({
           placeholderTextColor={`${c.text}44`}
           autoCapitalize="none"
           autoCorrect={false}
-          keyboardType={contactKey === 'phone' || contactKey === 'whatsapp' ? 'phone-pad' : 'default'}
+          keyboardType={meta.keyboardType}
           style={inputStyle}
         />
       </View>

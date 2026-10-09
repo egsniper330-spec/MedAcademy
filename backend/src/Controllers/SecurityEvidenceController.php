@@ -7,6 +7,7 @@ namespace MedAcademy\Controllers;
 use MedAcademy\Database\Database;
 use MedAcademy\Http\ApiException;
 use MedAcademy\Http\Request;
+use MedAcademy\Services\RateLimitService;
 use MedAcademy\Services\SecurityEvidenceService;
 
 /**
@@ -34,6 +35,14 @@ final class SecurityEvidenceController
 {
     public function registerKey(Request $request): array
     {
+        // Throttle key registration/rotation: each call writes a device_keys
+        // row and can evict the previous key for this device.
+        RateLimitService::perAccount(
+            $request,
+            'security_device_key',
+            RateLimitService::deviceKeyPerAccountPerMinute(),
+            60
+        );
         $userId = (string) $request->user['id'];
         $body = $request->json();
 
@@ -65,6 +74,16 @@ final class SecurityEvidenceController
 
     public function challenge(Request $request): array
     {
+        // Challenge issuance is a state-creating operation (security_challenges
+        // rows with a TTL). Unthrottled, an authenticated client could grow
+        // that table without bound. Account-scoped so a shared carrier NAT
+        // can never make unrelated subscribers collide.
+        RateLimitService::perAccount(
+            $request,
+            'security_challenge',
+            RateLimitService::challengePerAccountPerMinute(),
+            60
+        );
         $userId = (string) $request->user['id'];
         $body = $request->json();
 
@@ -79,6 +98,15 @@ final class SecurityEvidenceController
 
     public function submit(Request $request): array
     {
+        // Evidence verification is the most expensive security endpoint
+        // (canonical JSON + ECDSA P-256 verification + a transactional
+        // decision write). Throttle by account before doing any of it.
+        RateLimitService::perAccount(
+            $request,
+            'security_evidence',
+            RateLimitService::evidencePerAccountPerMinute(),
+            60
+        );
         $userId = (string) $request->user['id'];
         $body = $request->json();
 

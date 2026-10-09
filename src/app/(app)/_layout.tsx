@@ -12,6 +12,7 @@ import { useSession } from '@/ctx';
 import { useProfileStore } from '@/lib/store';
 import { getProfile } from '@/lib/api';
 import { refreshAccountState, handleRefreshOutcome } from '@/lib/accountRefresh';
+import { ensureFeatureFlagsFresh } from '@/lib/featureFlags';
 import { isExpectedMaintenanceError } from '@/lib/maintenanceStateModel';
 import { maintenanceEpoch } from '@/components/MaintenanceGate';
 import { UploadFAB } from '@/components/VideoUploadQueue';
@@ -105,10 +106,14 @@ function AppLayoutNav() {
     };
   }, [isSuperAdmin]);
 
-  // ── Background → foreground re-check ──────────────────────────────────────
+  // ── Background → foreground re-check ────────────────────────────────────
   // Re-run all security checks when the app returns from background so that
   // newly-enabled Developer Options / ADB / VPN are caught immediately.
   // Uses AppState (not useFocusEffect) because this layout is never unmounted.
+  // FEATURE FLAGS: foreground resume is also the moment a Super Admin toggle
+  // may have landed while the user was away — hydrate flag state (fire-and-
+  // forget, offline-safe) so availability UIs (e.g. Doctor Earnings) track
+  // the server without a restart or reinstall.
   const appStateRef = useRef(AppState.currentState);
   useEffect(() => {
     if (process.env.EXPO_OS === 'web') return;
@@ -118,6 +123,7 @@ function AppLayoutNav() {
       const isForeground = nextState === 'active';
       appStateRef.current = nextState;
       if (!wasBackground || !isForeground) return;
+      ensureFeatureFlagsFresh();
       // RACE-CONDITION FIX: do NOT reset() the verdict here. The previous
       // reset() nulled the authoritative result for the entire duration of the
       // fresh check — consumers fell back to an all-clear default, the gate
@@ -197,14 +203,17 @@ function AppLayoutNav() {
           throw new Error('profile row incomplete (no role/status)');
         }
         setProfile(p as any);
-        // SERVER-AUTHORITATIVE ROLE/STATUS SYNC: immediately after the
-        // cold-start load, refresh against the server (single-flight,
-        // offline-skipped). Catches USER→ADMIN / ADMIN→USER changes that
-        // happened while this session was signed in, and ACTIVE→BLOCKED that
-        // happened between sessions.
+        // SERVER-AUTHORITATIVE ROLE/STATUS SYNC + FEATURE FLAG RE-HYDRATION:
+        // immediately after the cold-start load, refresh against the server
+        // (single-flight, offline-skipped). Catches USER→ADMIN / ADMIN→USER
+        // changes that happened while this session was signed in, and
+        // ACTIVE→BLOCKED that happened between sessions. ALSO flushes feature
+        // flag state so a Super Admin toggle made during the gap reaches the
+        // doctor's Earnings before the first render completes.
         void refreshAccountState(session.user.id, { reason: 'shell_cold_start' }).then((outcome) => {
           void handleRefreshOutcome(outcome, { userId: session.user.id });
         });
+        ensureFeatureFlagsFresh();
       } catch (err) {
         // ── BLOCKED ACCOUNT — terminal state, never a spinner ────────────
         // AuthMiddleware rejects EVERY authenticated call from a
@@ -310,6 +319,9 @@ function AppLayoutNav() {
     if (epoch === 0) return; // no recovery has happened yet
     const uid = session?.user?.id;
     if (!uid) return;
+    // Maintenance just lifted → re-read feature flags too (the gate window is
+    // exactly when a flag toggle can have been missed).
+    ensureFeatureFlagsFresh();
     (async () => {
       try {
         const p = await getProfile(uid);

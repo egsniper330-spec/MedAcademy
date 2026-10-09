@@ -192,14 +192,10 @@ function doctorOf(item: CourseItem): { id: string; full_name: string } | null {
 
   const ListHeader = (
     <>
-      <PageHeader
-        title="Courses"
-        subtitle={isSearching
-          ? `Searching all published courses…`
-          : `${FEATURED_LIMIT} recently published`}
-      />
-
-    <View style={{ paddingHorizontal: layout.screenPx, paddingTop: 12 }}>
+    {/* PageHeader lives OUTSIDE the padded FlatList (see render below) so the
+        hamburger/title stay on the app-wide safe-area edge grid; the FlatList
+        contentContainerStyle owns horizontal padding for everything else. */}
+    <View style={{ paddingTop: 12 }}>
 
       {/* Search bar */}
       <View style={{ marginBottom: 12 }}>
@@ -234,7 +230,7 @@ function doctorOf(item: CourseItem): { id: string; full_name: string } | null {
   );
 
   const ListEmpty = (
-    <View style={{ alignItems: 'center', paddingVertical: 60, paddingHorizontal: layout.screenPx }}>
+    <View style={{ alignItems: 'center', paddingVertical: 60 }}>
       {loadingFeatured && !isSearching
         ? <ActivityIndicator size="large" color={c.primary} />
         : (
@@ -258,6 +254,12 @@ function doctorOf(item: CourseItem): { id: string; full_name: string } | null {
     // Root View sets the neumorphic background — without this the system
     // default (white in light mode) bleeds through behind the FlatList.
     <View style={{ flex: 1, backgroundColor: c.base }}>
+      <PageHeader
+        title="Courses"
+        subtitle={isSearching
+          ? `Searching all published courses…`
+          : `${FEATURED_LIMIT} recently published`}
+      />
       <FlatList
         data={displayList}
         keyExtractor={item => item.id}

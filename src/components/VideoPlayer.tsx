@@ -53,6 +53,12 @@ export interface VideoPlayerProps {
    * Consulted before any fullscreen expansion; false/throw refuses.
    */
   shouldAllowFullscreen?: () => Promise<boolean> | boolean;
+  /**
+   * LIVE VERDICT (synchronous) — forwarded to the provider player so fullscreen
+   * entry is immediate; the gate above re-validates in parallel and a denial
+   * collapses fullscreen. Same contract as YouTubePlayerProps.fullscreenVerdictNow.
+   */
+  fullscreenVerdictNow?: () => boolean;
 }
 
 // ─── Router ───────────────────────────────────────────────────────────────────
@@ -71,6 +77,7 @@ export function VideoPlayer({
   onError,
   onFullscreen,
   shouldAllowFullscreen,
+  fullscreenVerdictNow,
 }: VideoPlayerProps) {
   // youtubeVideoId must be a validated 11-char ID; garbage strings would only
   // render a YouTube "invalid parameter" error inside the embed.
@@ -91,6 +98,7 @@ export function VideoPlayer({
         onError={onError}
         onFullscreen={onFullscreen}
         shouldAllowFullscreen={shouldAllowFullscreen}
+        fullscreenVerdictNow={fullscreenVerdictNow}
       />
     );
   }
@@ -109,6 +117,7 @@ export function VideoPlayer({
         onError={onError}
         onFullscreen={onFullscreen}
         shouldAllowFullscreen={shouldAllowFullscreen}
+        fullscreenVerdictNow={fullscreenVerdictNow}
       />
     );
   }

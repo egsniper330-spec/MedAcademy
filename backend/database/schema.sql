@@ -2040,16 +2040,23 @@ CREATE TABLE IF NOT EXISTS `public_user_id_seq` (
 INSERT IGNORE INTO `public_user_id_seq` (`id`, `next_val`) VALUES (1, 1);
 
 -- ─────────────────────────────────────────────────────────────────────────────
--- support_settings — support channel configuration (phone, telegram, whatsapp)
+-- support_settings — support channel configuration (phone, telegram, whatsapp,
+-- facebook, instagram, email, x, website). Canonical admin-configured support
+-- contacts shown to users on the security/blocked screen.
 -- ─────────────────────────────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS `support_settings` (
   `key` VARCHAR(50) NOT NULL,
   `value` VARCHAR(255) NOT NULL DEFAULT '',
   `label` VARCHAR(100) NULL,
   `enabled` TINYINT(1) NOT NULL DEFAULT 0,
+  `display_order` INT NOT NULL DEFAULT 0,
   `updated_by` CHAR(36) NULL,
   `updated_at` DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (`key`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Migration safety: if this table existed in an older schema without the column,
+-- add it so the seed INSERT can run on existing databases too.
+ALTER TABLE `support_settings` ADD COLUMN IF NOT EXISTS `display_order` INT NOT NULL DEFAULT 0 AFTER `enabled`;
 
 SET FOREIGN_KEY_CHECKS = 1;

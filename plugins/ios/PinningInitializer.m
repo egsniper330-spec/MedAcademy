@@ -22,6 +22,7 @@
 //    pinning only RESTRICTS which keys a trusted chain may carry.
 
 #import <Foundation/Foundation.h>
+#import <objc/runtime.h>
 
 #if __has_include(<React/RCTHTTPRequestHandler.h>)
 #import <React/RCTHTTPRequestHandler.h>
@@ -43,30 +44,79 @@ extern void RCTSetCustomNSURLSessionConfigurationProvider(
     return [pins isKindOfClass:[NSArray class]] && pins.count > 0;
 }
 
+/// The session configuration BOTH of the app's network stacks run on, with
+/// PinningURLProtocol prepended so first-party HTTPS origins are SPKI-validated.
+/// Shared by the React Native and expo/fetch providers below so the two can
+/// never drift apart.
+static NSURLSessionConfiguration *MEDA_pinnedConfiguration(void) {
+    NSURLSessionConfiguration *configuration = [NSURLSessionConfiguration defaultSessionConfiguration];
+    configuration.HTTPShouldSetCookies = YES;
+    configuration.HTTPCookieAcceptPolicy = NSHTTPCookieAcceptPolicyAlways;
+    configuration.HTTPCookieStorage = [NSHTTPCookieStorage sharedHTTPCookieStorage];
+    NSMutableArray *protocols = [NSMutableArray arrayWithArray:(configuration.protocolClasses ?: @[])];
+    Class pinningClass = NSClassFromString(@"PinningURLProtocol");
+    if (pinningClass && ![protocols containsObject:pinningClass]) {
+        [protocols insertObject:pinningClass atIndex:0];
+    }
+    configuration.protocolClasses = protocols;
+    return configuration;
+}
+
 + (void)install {
     if (![self pinsConfigured]) {
         // Development/unconfigured build: pinning stays completely inert.
         return;
     }
 
-    // 1. System-wide registration (covers non-RN default sessions too).
+    // 1. System-wide registration. NOTE: this only reaches NSURLConnection-era
+    //    clients — NSURLSession consults configuration.protocolClasses instead,
+    //    so this alone never pins anything in this app. Kept for completeness.
     [NSURLProtocol registerClass:NSClassFromString(@"PinningURLProtocol")];
 
-    // 2. Inject into the configuration RN's RCTHTTPRequestHandler will use for
-    //    ALL fetch() traffic. Clone the default config and prepend our protocol.
+    // 2. REACT NATIVE — covers globalThis.fetch (whatwg-fetch over XHR) and
+    //    XMLHttpRequest, i.e. every request issued by src/client/php.ts.
+    //    RCTHTTPRequestHandler applies the provider when it builds its session.
     RCTSetCustomNSURLSessionConfigurationProvider(^NSURLSessionConfiguration *(void) {
-        NSURLSessionConfiguration *configuration = [NSURLSessionConfiguration defaultSessionConfiguration];
-        configuration.HTTPShouldSetCookies = YES;
-        configuration.HTTPCookieAcceptPolicy = NSHTTPCookieAcceptPolicyAlways;
-        configuration.HTTPCookieStorage = [NSHTTPCookieStorage sharedHTTPCookieStorage];
-        NSMutableArray *protocols = [NSMutableArray arrayWithArray:(configuration.protocolClasses ?: @[])];
-        Class pinningClass = NSClassFromString(@"PinningURLProtocol");
-        if (pinningClass && ![protocols containsObject:pinningClass]) {
-            [protocols insertObject:pinningClass atIndex:0];
-        }
-        configuration.protocolClasses = protocols;
-        return configuration;
+        return MEDA_pinnedConfiguration();
     });
+
+    // 3. EXPO FETCH — expo/fetch (ExpoFetchModule) builds its OWN lazily-created
+    //    URLSession from URLSessionConfiguration.default and does NOT consult
+    //    RN's provider or the global URLProtocol registry. Without this, any
+    //    first-party request routed through `import { fetch } from 'expo/fetch'`
+    //    (e.g. uploadVideoChunk, which carries `Authorization: Bearer`) would
+    //    bypass pinning entirely and be readable by an interception proxy.
+    [self installExpoFetchProvider];
+}
+
+/// Installs the pinning configuration into expo/fetch via Expo's documented
+/// extension point (ExpoFetchCustomExtension.setCustomURLSessionConfigurationProvider).
+///
+/// Resolved through the ObjC runtime rather than a link-time symbol: the Expo
+/// pod is Swift, so a direct call would require importing its generated
+/// -Swift.h header (fragile across Expo upgrades). Runtime lookup degrades to a
+/// documented no-op if the class is ever renamed.
++ (void)installExpoFetchProvider {
+    Class cls = NSClassFromString(@"EXFetchCustomExtension");
+    SEL selector = NSSelectorFromString(@"setCustomURLSessionConfigurationProvider:");
+    if (cls == Nil || ![cls respondsToSelector:selector]) {
+        NSLog(@"[PinningInitializer] EXFetchCustomExtension not found — expo/fetch is NOT pinned");
+        return;
+    }
+
+    // expo/fetch's provider is typed `() -> URLSessionConfiguration?`; a block
+    // returning a non-null configuration is a valid implementation of it.
+    id provider = [^NSURLSessionConfiguration *(void) {
+        return MEDA_pinnedConfiguration();
+    } copy];
+
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Warc-performSelector-leaks"
+    // Returns void; nothing to leak. The ARC warning here is a false positive.
+    [cls performSelector:selector withObject:provider];
+#pragma clang diagnostic pop
+
+    NSLog(@"[PinningInitializer] expo/fetch pinned configuration installed");
 }
 
 @end

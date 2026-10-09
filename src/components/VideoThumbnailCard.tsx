@@ -68,11 +68,15 @@ export function VideoThumbnailCard({
     if (result.canceled || !result.assets?.[0]) return;
     setLoading(true);
     try {
-      const { fetch: expoFetch } = await import('expo/fetch');
-      const resp = await expoFetch(result.assets[0].uri);
-      const blob = await resp.blob();
+      // RN streams the local file from its URI — never construct a Blob from
+      // bytes on native (BlobManager rejects ArrayBuffer/ArrayBufferView, and
+      // expo/fetch's blob() is documented as unsupported by RN's constructor).
       const storagePath = `thumbnails/${courseId}/${lessonId}/${uploadId}_custom.jpg`;
-      const { error } = await backendClient.storage.from(BUCKET).upload(storagePath, blob as any, {
+      const { error } = await backendClient.storage.from(BUCKET).upload(storagePath, {
+        uri: result.assets[0].uri,
+        mimeType: 'image/jpeg',
+        name: 'thumbnail.jpg',
+      } as any, {
         contentType: 'image/jpeg', upsert: true,
       });
       if (!error) {

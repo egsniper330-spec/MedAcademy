@@ -168,7 +168,9 @@ function read(rel) {
   const credit = read('backend/src/Controllers/CreditController.php');
   ok(/assertEnabled\('doctor_earnings', \$request\)/.test(credit), 'enforced: doctor_earnings on CreditController::doctorEarnings');
   const rpc = read('backend/src/Controllers/RpcController.php');
-  ok(/assertEnabled\('doctor_earnings', \$request\)/.test(rpc), 'enforced: doctor_earnings on RpcController::doctorEarningsDashboard (doctor-facing)');
+  ok(/private function assertDoctorEarningsEnabled[\s\S]{0,700}?assertEnabledFor\('doctor_earnings', \$request\)/.test(rpc)
+    && /doctorEarningsDashboard[\s\S]{0,700}?assertDoctorEarningsEnabled\(\$request\)/.test(rpc),
+    'enforced: doctor_earnings on the doctor-facing earnings surfaces (RpcController helper)');
 
   // Generic data API can no longer rewrite identity/content behind the SA back.
   const data = read('backend/src/Controllers/DataController.php');

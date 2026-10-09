@@ -62,11 +62,14 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type React from 'react';
 import ReactDOM from 'react-dom';
 import { BackHandler, Dimensions, Platform, Pressable, StatusBar, Text, View, useWindowDimensions } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as ScreenOrientation from 'expo-screen-orientation';
 import { ArrowLeft } from 'lucide-react-native';
 import { WebView, type WebViewMessageEvent } from 'react-native-webview';
 import type { VideoWatermarkProps } from './VideoWatermark';
 import { PLAYER_SCRIPT } from '../lib/plyr/playerScript';
+import { useSecurityWebViewStop } from '../lib/useSecurityWebViewStop';
+import { beginFullscreenOrientation, releaseFullscreenOrientation } from '../lib/fullscreenOrientation';
 import { PLYR_CSS, PLYR_JS } from '../lib/plyr/plyrBundle';
 import {
   enterFullscreenSystemUi,
@@ -93,6 +96,21 @@ export interface YouTubePlayerProps {
    * refuses. Fail-closed.
    */
   shouldAllowFullscreen?: () => Promise<boolean> | boolean;
+  /**
+   * LIVE VERDICT (fullscreen latency): a SYNCHRONOUS read of the host's
+   * already-published security verdict (SecurityContext's blocksVideo, plus
+   * the Super Admin bypass).
+   *
+   * When supplied, fullscreen commits in the same frame as the user's tap and
+   * `shouldAllowFullscreen` is then re-evaluated in parallel — a denial
+   * collapses fullscreen immediately. Fullscreen is therefore never entered on
+   * an ALLOWING verdict that has not been produced by the authoritative
+   * pipeline, and a denied request still never expands.
+   *
+   * Omit it to keep the previous strictly-blocking behaviour (await the gate
+   * before anything visible changes).
+   */
+  fullscreenVerdictNow?: () => boolean;
   /**
    * Identity watermark rendered INSIDE the player surface — one in-HTML
    * overlay injected by the player script (exactly one instance per active
@@ -207,6 +225,7 @@ export function YouTubePlayer({
   watermark,
   onFullscreen,
   shouldAllowFullscreen,
+  fullscreenVerdictNow,
 }: YouTubePlayerProps) {
   const videoId = extractYouTubeVideoId(rawVideoId);
 
@@ -232,6 +251,7 @@ export function YouTubePlayer({
       watermark={watermark}
       onFullscreen={onFullscreen}
       shouldAllowFullscreen={shouldAllowFullscreen}
+      fullscreenVerdictNow={fullscreenVerdictNow}
     />
   );
 
@@ -261,6 +281,12 @@ interface SubProps {
    * screen ALWAYS supplies one. An exception thrown by the gate also blocks.
    */
   shouldAllowFullscreen?: () => Promise<boolean> | boolean;
+  /**
+   * SYNCHRONOUS live verdict — see YouTubePlayerProps.fullscreenVerdictNow.
+   * When supplied, entry is immediate and the async gate above re-validates in
+   * parallel (a denial collapses fullscreen).
+   */
+  fullscreenVerdictNow?: () => boolean;
 }
 
 // ─── Web sub-component ────────────────────────────────────────────────────────
@@ -403,8 +429,14 @@ function YouTubePlayerNative({
   watermark,
   onFullscreen,
   shouldAllowFullscreen,
+  fullscreenVerdictNow,
 }: SubProps) {
   const [isFullscreen, setIsFullscreen] = useState(false);
+
+  // Safe-area insets for the fullscreen exit control (same convention as the
+  // offline and VdoCipher players). Harness-wide SafeAreaProvider is mounted at
+  // the app root, so this is valid on every platform.
+  const insets = useSafeAreaInsets();
 
   // Live gate handle: the message handler below is registered once (stable
   // deps), so it reads the CURRENT gate function through a ref instead of a
@@ -415,9 +447,25 @@ function YouTubePlayerNative({
     securityGateRef.current = shouldAllowFullscreen ?? null;
   }, [shouldAllowFullscreen]);
 
+  // Live (synchronous) verdict for instant fullscreen entry — see
+  // YouTubePlayerProps.fullscreenVerdictNow. Read through a ref so the stable
+  // message handler never captures a stale closure.
+  const verdictNowRef = useRef<(() => boolean) | null>(null);
+  useEffect(() => {
+    verdictNowRef.current = fullscreenVerdictNow ?? null;
+  }, [fullscreenVerdictNow]);
+
   // Shared playback-position tracker — updated by the single WebView.
   const lastTimeRef      = useRef(initialResume);
   const wvRef            = useRef<WebView>(null);
+
+  //  Security-lock containment for THIS WebView player.
+  //  A react-native-webview instance has no native `pause()` method, so the
+  //  VdoPlayerView stopper cannot stop it. This registers a stopper that halts
+  //  loading, pauses the live Plyr instance (`window.__plyr`), and detaches any
+  //  cross-origin iframe player — so the video actually stops when the VPN lock
+  //  engages instead of continuing to play behind the security gate.
+  useSecurityWebViewStop(wvRef);
 
   // ── Player HTML (memoized for the lifetime of the WebView) ─────────────────
   // NEVER rebuild after mount: any identity change in the source prop reloads
@@ -453,6 +501,47 @@ function YouTubePlayerNative({
   }, []);
 
   const enterFullscreen = useCallback(async () => {
+    // ── ROTATION STARTS NOW, NOT AFTER THE VERDICT (latency fix) ─────────────
+    // The security evaluation below is network-bound (Play Integrity + policy
+    // fetch) and therefore takes hundreds of milliseconds on a real device.
+    // Requesting the rotation first lets the OS rotate WHILE that evaluation
+    // runs, instead of making the user wait for verdict THEN rotation.
+    beginFullscreenOrientation();
+
+    // ── INSTANT ENTRY ON THE LIVE VERDICT (fullscreen latency) ───────────────
+    // The host's PUBLISHED verdict (SecurityContext's live blocksVideo) is
+    // authoritative for entry, so fullscreen commits in the same frame as the
+    // tap. The network-bound fresh evaluation (checkBeforeVideo) then runs in
+    // PARALLEL and a denial COLLAPSES fullscreen immediately — enforcement is
+    // unchanged, only the ordering of "visible transition" vs "re-validation".
+    // Fail-closed both ways: a false/throwing verdict never expands, and a
+    // background denial always collapses.
+    const verdictNow = verdictNowRef.current;
+    if (verdictNow) {
+      let allowedNow = false;
+      try {
+        allowedNow = verdictNow() === true;
+      } catch {
+        allowedNow = false; // evaluation error → no fullscreen
+      }
+      if (!allowedNow) {
+        releaseFullscreenOrientation();
+        return;
+      }
+      setIsFullscreen(true);
+      const gateFn = securityGateRef.current;
+      if (!gateFn) return;
+      void (async () => {
+        try {
+          if (!(await gateFn())) setIsFullscreen(false); // verdict flipped → collapse now
+        } catch {
+          setIsFullscreen(false); // fail-closed: never stay fullscreen unverified
+        }
+      })();
+      return;
+    }
+
+    // ── FALLBACK (no sync verdict wired): previous blocking semantics ────────
     // ── SECURITY GATE AT THE FULLSCREEN BOUNDARY ─────────────────────────────
     // The fullscreen container is an in-place expansion rendered by the SAME
     // screen, but it must still re-validate the authoritative security verdict
@@ -462,11 +551,16 @@ function YouTubePlayerNative({
       const gate = securityGateRef.current;
       if (gate) {
         const allowed = await gate();
-        if (!allowed) return; // blocked → swallow fullscreen request
+        if (!allowed) {
+          releaseFullscreenOrientation(); // refused → never stay rotated
+          return; // blocked → swallow fullscreen request
+        }
       } else if (shouldAllowFullscreen) {
+        releaseFullscreenOrientation();
         return; // gate supplied but not yet wired → fail-closed
       }
     } catch {
+      releaseFullscreenOrientation();
       return; // evaluation error → fail-closed, no fullscreen
     }
     setIsFullscreen(true);
@@ -721,9 +815,14 @@ function YouTubePlayerNative({
         <Pressable
           onPress={exitFullscreen}
           style={{
+            // Safe-area aware, EXACTLY like the offline and VdoCipher players
+            // (shared convention): the fullscreen exit control sits at the
+            // SCREEN edge, so it must clear the status area/notch/Dynamic
+            // Island in portrait and the left cutout in landscape. The previous
+            // fixed top/left: 12 put it under the status area on iOS.
             position: 'absolute',
-            top: 12,
-            left: 12,
+            top: Math.max(12, insets.top + 8),
+            left: Math.max(12, insets.left + 8),
             width: 44,
             height: 44,
             borderRadius: 22,

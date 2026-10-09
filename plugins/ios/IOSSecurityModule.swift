@@ -274,6 +274,15 @@ class IOSSecurityModule: RCTEventEmitter {
         "signatureValid":          !bundleTampered,
         "tampered":                bundleTampered,
         "testOnlyBuild":           false,
+        // Evidence-quality field (observability — NEVER a threat signal).
+        // Mirrors Android's expectedCertConfigured, which reports whether a
+        // pin set is configured in THIS build. On iOS the analogous pin set is
+        // MEDA_SPKI_PINS (the SPKI hashes PinningURLProtocol enforces, written
+        // into Info.plist by withSecurityModule from app.json extra.medaSslPins).
+        // Without this the field was hardcoded absent on iOS, so every security
+        // event reported expected_cert_configured=false and made a genuinely
+        // pinned iOS build look unpinned in the backend audit trail.
+        "expectedCertConfigured":  Self.spkiPinsConfigured,
       ]
       resolve(flags)
 
@@ -290,6 +299,16 @@ class IOSSecurityModule: RCTEventEmitter {
   private func emitSecurityEvent(_ name: String, detail: String) {
     guard hasListeners else { return }
     sendEvent(withName: name, body: ["detail": detail, "ts": Date().timeIntervalSince1970])
+  }
+
+  /// True when this build actually carries SPKI pins, i.e. the native pinner
+  /// (PinningURLProtocol) is armed. Same Info.plist key the pinner itself reads,
+  /// so this can never disagree with real enforcement state.
+  private static var spkiPinsConfigured: Bool {
+    guard let pins = Bundle.main.object(forInfoDictionaryKey: "MEDA_SPKI_PINS") as? [String] else {
+      return false
+    }
+    return pins.contains { !$0.isEmpty }
   }
 
   // ────────────────────────────────────────────────────────────────────────────

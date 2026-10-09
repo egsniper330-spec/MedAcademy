@@ -28,7 +28,7 @@ export interface StorageProvider {
   readonly displayName: string;
 
   /** Upload a file — returns the storage path */
-  upload(bucket: string, path: string, data: Blob | ArrayBuffer, options?: StorageUploadOptions): Promise<string>;
+  upload(bucket: string, path: string, data: Blob | ArrayBuffer | import('@/lib/uploadPart').UploadFileDescriptor, options?: StorageUploadOptions): Promise<string>;
 
   /** Delete a file */
   delete(bucket: string, path: string): Promise<void>;

@@ -6,6 +6,8 @@
 // updating backend/index.ts; application code does not change.
 // ─────────────────────────────────────────────────────────────────────────────
 
+import type { UploadFileDescriptor } from '@/lib/uploadPart';
+
 export interface AuthUser {
   id: string;
   email: string | null;
@@ -33,8 +35,12 @@ export interface AuthAdapter {
 }
 
 export interface StorageAdapter {
-  /** Upload a file and return its public URL. */
-  upload(bucket: string, path: string, file: Blob | ArrayBuffer, contentType?: string): Promise<string>;
+  /**
+   * Upload a file and return its public URL.
+   * On native, pass the local-file descriptor { uri, mimeType?, name? } —
+   * React Native cannot construct Blobs from ArrayBuffer/ArrayBufferView.
+   */
+  upload(bucket: string, path: string, file: Blob | ArrayBuffer | UploadFileDescriptor, contentType?: string): Promise<string>;
   /** Return the public URL for a stored object. */
   getPublicUrl(bucket: string, path: string): string;
   /** Delete a stored object. */

@@ -107,7 +107,19 @@ declare module 'vdocipher-rn-bridge' {
   }
 
   // ── Component export ──────────────────────────────────────────────────────
+  //
+  // EXTENDED (security containment): the class component exposes documented
+  // INSTANCE methods (the real VdoPlayerView.tsx defines play/pause/seek via
+  // VdoPlayerCommands). They are needed so a mounted player can be PAUSED
+  // immediately when the central security lock engages — see
+  // src/lib/useSecurityPlaybackStop.ts. Only the two used methods are added;
+  // the rest of the public API stays intentionally undeclared.
 
-  export class VdoPlayerView extends React.Component<VdoPlayerViewProps> {}
+  export class VdoPlayerView extends React.Component<VdoPlayerViewProps> {
+    /** Pause playback (no-op if the player has not loaded). */
+    pause(): void;
+    /** Resume playback (no-op if the player has not loaded). */
+    play(): void;
+  }
   export default VdoPlayerView;
 }

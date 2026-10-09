@@ -150,7 +150,7 @@ function OfflineCourseContent() {
   const wmIdentity = useMemo(() => resolveWatermarkIdentity(profile), [profile]);
   // Live authoritative verdict — closes the player when a blocking finding
   // appears mid-playback (mirrors the online player's gate mirror).
-  const { blocksVideo, checkBeforeVideo } = useSecurity();
+  const { blocksVideo, checkBeforeVideo, securityLockHard } = useSecurity();
 
   const [entries, setEntries] = useState<OfflineVideoEntry[]>([]);
   const [loading, setLoading] = useState(true);
@@ -188,8 +188,11 @@ function OfflineCourseContent() {
   }, [group]);
 
   useEffect(() => {
-    if (playing && blocksVideo) setPlaying(null);
-  }, [playing, blocksVideo]);
+    // The security lock is the authoritative stop for ANY block (a VPN raises
+    // `block_login`, which never set blocksVideo) — the offline player must not
+    // survive behind the gate either.
+    if (playing && (blocksVideo || securityLockHard)) setPlaying(null);
+  }, [playing, blocksVideo, securityLockHard]);
 
   const confirmDelete = useCallback((e: OfflineVideoEntry) => {
     Alert.alert(
@@ -238,6 +241,7 @@ function OfflineCourseContent() {
           watermarkId={wmIdentity?.id}
           watermarkName={wmIdentity?.name ?? undefined}
           shouldAllowPlayback={async () => !(await checkBeforeVideo())}
+          fullscreenVerdictNow={() => !blocksVideo && !securityLockHard}
           onClose={() => setPlaying(null)}
         />
         <View style={{ padding: 16 }}>

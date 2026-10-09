@@ -11,6 +11,7 @@ import {
   Search, SlidersHorizontal, ChevronRight, Play, X,
 } from 'lucide-react-native';
 import { useProfileStore } from '@/lib/store';
+import { useStaleWhileRevalidateFocus } from '@/lib/useStaleWhileRevalidateFocus';
 import { prefetchCourseImages, courseImageUrlsFrom } from '@/lib/imagePrefetch';
 import {
   getMySubscriptions, getUnreadNotificationCount,
@@ -79,7 +80,15 @@ export default function StudentDashboard() {
     setLoading(false);
   }, [profile]);
 
-  useFocusEffect(useCallback(() => { setLoading(true); loadData(); }, [loadData]));
+  // Stale-while-revalidate: the FIRST visit shows the full-screen spinner,
+  // but every return to this screen refreshes in the background with the
+  // existing dashboard still mounted. Previously every focus did
+  // `setLoading(true)` + full refetch, so returning from any course/detail
+  // screen blanked the dashboard back to a spinner for a full request batch.
+  useStaleWhileRevalidateFocus(loadData, {
+    setLoading,
+    hasContent: () => allCourses.length > 0 || subscriptions.length > 0,
+  });
   const onRefresh = async () => { setRefreshing(true); await loadData(); setRefreshing(false); };
 
   // ── Notification permission — once after first login ──────────────────────

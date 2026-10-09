@@ -10,7 +10,9 @@ use MedAcademy\Http\Request;
 use MedAcademy\Services\AuthService;
 use MedAcademy\Services\AuditService;
 use MedAcademy\Services\FeatureFlagService;
+use MedAcademy\Services\RateLimitService;
 use MedAcademy\Services\SecurityService;
+use MedAcademy\Utils\Logger;
 
 final class SecurityController
 {
@@ -241,6 +243,16 @@ final class SecurityController
 
     public function reportEvent(Request $request): array
     {
+        // Telemetry flood control. The app batches one event per detected
+        // threat, so the ceiling is deliberately far above normal traffic —
+        // this only stops an authenticated client from writing unbounded rows
+        // into security_events. Account-scoped (shared-NAT safe).
+        RateLimitService::perAccount(
+            $request,
+            'security_events',
+            RateLimitService::securityEventsPerAccountPerMinute(),
+            60
+        );
         try {
             $body = $request->json();
 
@@ -260,33 +272,65 @@ final class SecurityController
             }
 
             foreach ($events as $event) {
+                // Server-observed identity wins over client-claimed values.
+                // `ip_address` would otherwise let a client write any address
+                // it likes into the audit trail, and `device_id` is already
+                // bound to this session by the JWT (issued at login), so the
+                // session's value is the authoritative one.
+                $event['ip_address'] = $request->clientIp();
+                $sessionDevice = (string) ($request->user['device_id'] ?? '');
+                if ($sessionDevice !== '') {
+                    $event['device_id'] = $sessionDevice;
+                }
                 $this->security->logEvent($request->user['id'], $event);
             }
 
             return ['success' => true, 'recorded' => count($events)];
-        } catch (\PDOException $e) {
-            $sqlState = $e->getCode();
-            $msg = $e->getMessage();
-            $msg = preg_replace('/password[:=]\s*\S+/i', 'password=[REDACTED]', $msg);
-            throw new \MedAcademy\Http\ApiException(500, 'DB error [' . $sqlState . ']: ' . $msg);
+        } catch (ApiException $e) {
+            // Deliberate API contract (validation/authorization) — re-throw
+            // untouched so its status and message stay exactly as designed.
+            throw $e;
         } catch (\Throwable $e) {
-            $cls = get_class($e);
-            throw new \MedAcademy\Http\ApiException(500, 'Exception [' . $cls . ']: ' . $e->getMessage());
+            self::logInternalFailure('security_events', $e, $request);
+            throw new ApiException(500, 'Unable to record security event', 'internal_error');
         }
+    }
+
+    /**
+     * Server-side-only detail for an internal failure.
+     *
+     * The client receives a fixed, generic message — SQLSTATE codes, table and
+     * column names, filesystem paths and stack traces never leave the server.
+     * The real exception is written to the protected application log with any
+     * credential-shaped value redacted first.
+     */
+    private static function logInternalFailure(string $scope, \Throwable $e, Request $request): void
+    {
+        $detail = (string) preg_replace(
+            '/(password|passwd|secret|token|api[_-]?key|authorization)\s*[:=]\s*\S+/i',
+            '$1=[REDACTED]',
+            $e->getMessage()
+        );
+        Logger::instance()->error('Internal failure: ' . $scope, [
+            'scope'     => $scope,
+            'exception' => get_class($e),
+            'detail'    => mb_substr($detail, 0, 500),
+            'file'      => basename($e->getFile()),
+            'line'      => $e->getLine(),
+            'user_id'   => (string) ($request->user['id'] ?? ''),
+            'ip'        => $request->clientIp(),
+        ]);
     }
 
     public function reportViolation(Request $request): array
     {
         try {
             return $this->security->processViolation($request->user['id'], $request->json());
-        } catch (\PDOException $e) {
-            $sqlState = $e->getCode();
-            $msg = $e->getMessage();
-            $msg = preg_replace('/password[:=]\s*\S+/i', 'password=[REDACTED]', $msg);
-            throw new \MedAcademy\Http\ApiException(500, 'DB error [' . $sqlState . ']: ' . $msg);
+        } catch (ApiException $e) {
+            throw $e;
         } catch (\Throwable $e) {
-            $cls = get_class($e);
-            throw new \MedAcademy\Http\ApiException(500, 'Exception [' . $cls . ']: ' . $e->getMessage());
+            self::logInternalFailure('security_violations', $e, $request);
+            throw new ApiException(500, 'Unable to record security violation', 'internal_error');
         }
     }
 

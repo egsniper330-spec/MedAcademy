@@ -109,11 +109,10 @@ export default function SecurityDashboard() {
   const insets = layout.insets;
   const flat = neuFlatStyle(isDark);
   const router = useRouter();
-  const { showToast } = useToast();
-
-  const [stats, setStats]           = useState<SecurityStats | null>(null);
-  const [riskyDevices, setRiskyDevices] = useState<RiskyDevice[]>([]);
-  const [recentEvents, setRecentEvents] = useState<SecurityEvent[]>([]);
+  const { showToast } = useToast();      const [stats, setStats]           = useState<SecurityStats | null>(null);
+      const [riskyDevices, setRiskyDevices] = useState<RiskyDevice[]>([]);
+      const [recentEvents, setRecentEvents] = useState<SecurityEvent[]>([]);
+      const [securityVersion, setSecurityVersion] = useState<number | null>(null);
   const [loadError, setLoadError]   = useState<string | null>(null);
   const [loading, setLoading]       = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -123,7 +122,7 @@ export default function SecurityDashboard() {
     try {
       const startDate = new Date(Date.now() - days * 24 * 3600 * 1000).toISOString();
 
-      const [statsRes, devicesRes, eventsRes] = await Promise.all([
+      const [statsRes, devicesRes, eventsRes, versionRes] = await Promise.all([
         backendClient.rpc('get_security_stats', {
           p_start_date: startDate,
           p_end_date: new Date().toISOString(),
@@ -133,6 +132,7 @@ export default function SecurityDashboard() {
           p_start_date: startDate,
           p_end_date: new Date().toISOString(),
         }),
+        backendClient.rpc('get_security_version', {}),
       ]);
 
       // Collect contract/API failures per source — a failure in one section
@@ -153,6 +153,14 @@ export default function SecurityDashboard() {
         errors.push(eventsRes.error.message || 'Failed to load security events.');
       } else {
         setRecentEvents(asSecurityEvents(eventsRes.data));
+      }
+      if (versionRes.error) {
+        errors.push(versionRes.error.message || 'Failed to load security version.');
+      } else {
+        const sv = versionRes.data && 'security_version' in versionRes.data
+          ? Number((versionRes.data as { security_version?: unknown }).security_version)
+          : null;
+        setSecurityVersion(Number.isFinite(sv) ? sv : null);
       }
 
       if (errors.length > 0) {
@@ -267,6 +275,14 @@ export default function SecurityDashboard() {
         </View>
 
         {/* Overview Stats */}
+        {securityVersion !== null && (
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: layout.pad.md, marginBottom: layout.pad.sm }}>
+            <ShieldCheck size={layout.bodySize} color="#16A34A" />
+            <Text style={{ fontSize: layout.captionSize, color: c.text, opacity: 0.5 }}>
+              Security config version: {securityVersion}
+            </Text>
+          </View>
+        )}
         <Text style={{ fontSize: layout.bodySize + 2, fontWeight: '700', color: c.text }}>
           Overview — Last {days} Days
         </Text>

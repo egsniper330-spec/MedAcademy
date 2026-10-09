@@ -225,10 +225,19 @@ console.log('\n── Doctor Earnings: backend enforcement ──');
     'staff roles keep full visibility (dashboards unaffected)');
   check(/use MedAcademy\\Services\\FeatureFlagService;/.test(dc), 'FeatureFlagService imported');
 
-  // Named endpoints keep their existing gates (regression guard).
+  // Named endpoints keep their gates (regression guard). Every doctor-facing
+  // earnings surface shares ONE helper so staff consoles keep working while a
+  // doctor is refused — see assertDoctorEarningsEnabled (assertEnabledFor).
   const rpc = src('backend/src/Controllers/RpcController.php');
-  check(/doctorEarningsDashboard[\s\S]{0,600}?assertEnabled\('doctor_earnings'/.test(rpc),
+  check(/private function assertDoctorEarningsEnabled[\s\S]{0,700}?assertEnabledFor\('doctor_earnings', \$request\)/.test(rpc),
+    'RpcController has the shared doctor_earnings gate helper (assertEnabledFor)');
+  check(/doctorEarningsDashboard[\s\S]{0,700}?assertDoctorEarningsEnabled\(\$request\)/.test(rpc),
     'RPC get_doctor_earnings_dashboard still gated');
+  check(/setEnrollmentAssignedPrice[\s\S]{0,500}?assertDoctorEarningsEnabled\(\$request\)/.test(rpc) &&
+    /removeStudentAndRecordEarnings[\s\S]{0,500}?assertDoctorEarningsEnabled\(\$request\)/.test(rpc) &&
+    /doctorCreditTransactions[\s\S]{0,500}?assertDoctorEarningsEnabled\(\$request\)/.test(rpc) &&
+    /doctorActivityStats[\s\S]{0,500}?assertDoctorEarningsEnabled\(\$request\)/.test(rpc),
+    'earnings ops paths gated too (pricing write, earnings-event write, credit history, activity stats)');
   const credit = src('backend/src/Controllers/CreditController.php');
   check(/doctorEarnings\(Request[\s\S]{0,600}?assertEnabled\('doctor_earnings'/.test(credit),
     'GET /credits/doctor/{id} still gated');
@@ -245,10 +254,16 @@ console.log('\n── Doctor Earnings: backend enforcement ──');
 
   // Frontend: page consumes a gated source + renders a clean disabled state.
   const drPage = src('src/app/(app)/(doctor)/dr-earnings.tsx');
-  check(/isFeatureEnabled\('doctor_earnings'\)/.test(drPage),
-    'doctor earnings page reflects the flag (hidden/disabled state when off)');
-  check(/Earnings Temporarily Unavailable/.test(drPage),
+  check(/useFeatureFlags\(\)/.test(drPage) && /flagEnabled\('doctor_earnings'\)/.test(drPage),
+    'doctor earnings page reflects the platform flag (unavailable state when off)');
+  check(/This feature is currently unavailable\./.test(drPage),
     'clean user-facing disabled state (no logout / suspension / maintenance misclassification)');
+  // The three surfaces that made the flag feel "not enforced" for a doctor:
+  // the drawer entry, the profile earnings card, and the ops endpoints.
+  check(/isFeatureEnabled\('doctor_earnings'\)/.test(src('src/components/DrawerNav.tsx')),
+    'drawer gates the doctor Earnings entry on the platform flag');
+  check(/isFeatureEnabled\('doctor_earnings'\)/.test(src('src/app/(app)/(doctor)/dr-profile.tsx')),
+    'profile earnings card honors the platform flag');
   const flags = src('src/lib/featureFlags.ts');
   check(/isFeatureDisabledError/.test(flags) && /feature_disabled/.test(flags),
     'client recognizes the structured feature_disabled refusal');

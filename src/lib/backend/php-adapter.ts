@@ -4,6 +4,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { backendClient } from '@/client/backendClient';
+import type { UploadFileDescriptor } from '@/lib/uploadPart';
 import type {
   AuthAdapter,
   AuthSession,
@@ -88,7 +89,7 @@ const phpAuth: AuthAdapter = {
 // ── Storage ───────────────────────────────────────────────────────────────────
 
 const phpStorage: StorageAdapter = {
-  async upload(bucket, path, file, contentType) {
+  async upload(bucket, path, file: Blob | ArrayBuffer | UploadFileDescriptor, contentType) {
     const { error } = await backendClient.storage
       .from(bucket)
       .upload(path, file, { contentType, upsert: true });

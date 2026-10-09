@@ -64,6 +64,8 @@ import {
   enterFullscreenSystemUi,
   exitFullscreenSystemUi,
 } from '@/lib/fullscreenSystemUi';
+import { beginFullscreenOrientation, releaseFullscreenOrientation } from '@/lib/fullscreenOrientation';
+import { useSecurityPlaybackStop } from '@/lib/useSecurityPlaybackStop';
 
 import type { OfflineVideoPlayerProps } from './OfflineVideoPlayer.types';
 export type { OfflineVideoPlayerProps };
@@ -82,7 +84,7 @@ function VdoSessionScope({ tag, children }: { tag: string; children: React.React
   return <>{children}</>;
 }
 
-export function OfflineVideoPlayer({ entry, shouldAllowPlayback, watermarkId, watermarkName, onClose }: OfflineVideoPlayerProps) {
+export function OfflineVideoPlayer({ entry, shouldAllowPlayback, fullscreenVerdictNow, watermarkId, watermarkName, onClose }: OfflineVideoPlayerProps) {
   void onClose; // kept for API compatibility; collapse/close is owned by the host screen header
 
   const [gateDenied, setGateDenied] = useState(false);
@@ -90,6 +92,11 @@ export function OfflineVideoPlayer({ entry, shouldAllowPlayback, watermarkId, wa
   const [ready, setReady] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const insets = useSafeAreaInsets();
+
+  // ── SECURITY CONTAINMENT: pause the native player the instant the central
+  // security lock engages (identical contract to the online adapter — see
+  // src/lib/useSecurityPlaybackStop.ts). */}
+  const playerRef = useSecurityPlaybackStop();
 
   // ── WATERMARK IDENTITY — one authoritative resolution ─────────────────────
   // Explicit props (the screens pass the profile-derived public id) win;
@@ -181,16 +188,47 @@ export function OfflineVideoPlayer({ entry, shouldAllowPlayback, watermarkId, wa
 
   // ── Fullscreen enter/exit (same player instance both ways) ────────────────
   const enterFullscreen = useCallback(async () => {
+    // ROTATION FIRST (latency fix, ordering only): the gate below is
+    // network-bound, so rotate while it evaluates instead of after it. A denial
+    // rolls the rotation back — fullscreen is still never committed unverified.
+    beginFullscreenOrientation();
+
+    // ── INSTANT ENTRY ON THE LIVE VERDICT (fullscreen latency) ───────────────
+    // Same contract as the online player: the host's PUBLISHED verdict decides
+    // entry synchronously; the authoritative gate then re-validates in parallel
+    // and a denial collapses fullscreen (and marks the gate denied) at once.
+    // Fail-closed both ways.
+    if (fullscreenVerdictNow) {
+      let allowedNow = false;
+      try {
+        allowedNow = fullscreenVerdictNow() === true;
+      } catch {
+        allowedNow = false;
+      }
+      if (!allowedNow) { releaseFullscreenOrientation(); setGateDenied(true); return; }
+      setIsFullscreen(true);
+      if (!shouldAllowPlayback) return;
+      void (async () => {
+        try {
+          if (!(await shouldAllowPlayback())) { setIsFullscreen(false); setGateDenied(true); }
+        } catch {
+          setIsFullscreen(false); setGateDenied(true); // fail-closed
+        }
+      })();
+      return;
+    }
+
+    // ── FALLBACK (no sync verdict wired): previous blocking semantics ────────
     // SECURITY: re-validate through the authoritative gate immediately before
     // entering fullscreen — never trust the mount-time result.
     if (shouldAllowPlayback) {
       try {
         const allowed = await shouldAllowPlayback();
-        if (!allowed) { setGateDenied(true); return; }
-      } catch { setGateDenied(true); return; }
+        if (!allowed) { releaseFullscreenOrientation(); setGateDenied(true); return; }
+      } catch { releaseFullscreenOrientation(); setGateDenied(true); return; }
     }
     setIsFullscreen(true);
-  }, [shouldAllowPlayback]);
+  }, [shouldAllowPlayback, fullscreenVerdictNow]);
 
   const exitFullscreen = useCallback(() => {
     setIsFullscreen(false);
@@ -288,7 +326,17 @@ export function OfflineVideoPlayer({ entry, shouldAllowPlayback, watermarkId, wa
           <ActivityIndicator size="large" color="#1E90FF" />
         </View>
       )}
+      {/* Native SDK control bar MUST stay enabled (full rationale in the online
+          adapter). It is the ONLY play/pause, timeline, drag-seek and ±10s
+          surface — this component only adds a fullscreen button and the
+          watermark. Disabling it makes the bridge render VdoPlayerSupportView
+          instead of VdoPlayerUIView (no controls at all) and turns the
+          per-button fullscreen hide into dead code, since that patch lives in
+          the controls-enabled view. The SDK's own fullscreen buttons stay
+          hidden per-button, so the bar cannot promote the surface above the
+          React Native tree or bury the watermark. */}
       <VdoPlayerView
+        ref={playerRef}
         embedInfo={offlineEmbedInfo}
         showNativeControls
         autoPlay
@@ -315,7 +363,7 @@ export function OfflineVideoPlayer({ entry, shouldAllowPlayback, watermarkId, wa
           at entry → in-place expansion of the SAME instance). On iOS the SDK's
           own button stays as the only entry (the former app-level duplicate was
           removed — it created two competing fullscreen systems). */}
-      {!isFullscreen && Platform.OS === 'android' && (
+      {!isFullscreen && Platform.OS !== 'ios' && (
         <Pressable
           onPress={() => void enterFullscreen()}
           accessibilityLabel="Enter fullscreen"
@@ -333,7 +381,7 @@ export function OfflineVideoPlayer({ entry, shouldAllowPlayback, watermarkId, wa
       {isFullscreen && (
         <Pressable
           onPress={exitFullscreen}
-          style={{ position: 'absolute', top: Math.max(12, insets.top + 8), left: 12, width: 44, height: 44, borderRadius: 22, backgroundColor: '#00000080', alignItems: 'center', justifyContent: 'center', zIndex: 999 }}
+          style={{ position: 'absolute', top: Math.max(12, insets.top + 8), left: Math.max(12, insets.left + 8), width: 44, height: 44, borderRadius: 22, backgroundColor: '#00000080', alignItems: 'center', justifyContent: 'center', zIndex: 999 }}
           accessibilityRole="button"
           accessibilityLabel="Exit fullscreen"
           hitSlop={{ top: 8, right: 8, bottom: 8, left: 8 }}

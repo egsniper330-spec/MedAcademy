@@ -217,15 +217,37 @@ function withLucideResolver(config) {
   return { ...config, resolver: { ...config.resolver, resolveRequest } };
 }
 
-// ─── tasks/ blockList — prevent Metro from bundling any task/working files ────
+// ─── Scratch-dir blockList — prevent Metro from bundling task/working files ──
 // The tasks/ directory holds historical working copies and diagnostic archives
 // from previous fix sessions. Some of these files contain imports that no
 // longer resolve (e.g. @/lib/diagnostics). Excluding the entire tasks/ tree
 // from the bundle graph ensures Metro never attempts to resolve them.
-function withTasksBlockList(config) {
-  const TASKS_RE = new RegExp(
-    path.join(__dirname, 'tasks').replace(/\\/g, '\\\\') + '.*'
-  );
+//
+// .freebuff/ holds agent scratch space (build launchers, logs, ADB dumps). It is
+// never part of the app and MUST be excluded for a second, harder reason: Metro's
+// DependencyGraph passes resolver.blockList down to metro-file-map as
+// `ignorePattern`, which the fallback (non-watchman) crawler tests BEFORE it
+// calls lstat. A single unreadable entry anywhere under a watched root aborts the
+// entire crawl — e.g. `lstat '.freebuff/launch-build.ps1'` returns errno -4094
+// (UV_UNKNOWN) on some Windows volumes, which takes down the whole dev server.
+// Blocking the directory keeps the crawler from ever reaching those entries.
+//
+// SEPARATOR NOTE: a path regex meant for both consumers MUST accept BOTH
+// separators. Metro's resolver tests these patterns against *native* paths
+// ("D:\\v3\\.freebuff\\x"), but metro-file-map's watcher runs them through
+// common.posixPathMatchesPattern(), which normalises the path to "/" first.
+// A backslash-only pattern therefore matches in the resolver and silently does
+// NOTHING in the watcher — and an inert pattern is fatal for .freebuff, because
+// the crawler will lstat() an entry it cannot read and abort the whole server.
+// Build the pattern from a posix path and emit [\\/] for every separator.
+function scratchDirRE(dir) {
+  const posix = path.join(__dirname, dir).replace(/\\/g, '/');
+  const escaped = posix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const bothSep = escaped.replace(/\//g, '[\\\\/]');
+  return new RegExp(bothSep + '($|[\\\\/].*)');
+}
+function withScratchBlockList(config) {
+  const scratchREs = ['tasks', '.freebuff'].map(scratchDirRE);
   const existing = config.resolver?.blockList;
   const existingList = existing
     ? Array.isArray(existing)
@@ -236,7 +258,7 @@ function withTasksBlockList(config) {
     ...config,
     resolver: {
       ...config.resolver,
-      blockList: [...existingList, TASKS_RE],
+      blockList: [...existingList, ...scratchREs],
     },
   };
 }
@@ -364,7 +386,7 @@ module.exports = async function (metroDefaults) {
   config = withPlatformStubs(config);
   config = withLucideResolver(config);
   config = withWasmSupport(config);
-  config = withTasksBlockList(config);
+  config = withScratchBlockList(config);
   config = withAtAliasResolver(config);
 
   // NativeWind: processes global.css and inlines Tailwind at build time.

@@ -337,6 +337,64 @@ func urlSession(_ session: URLSession, didReceive challenge: URLAuthenticationCh
 |---|---|
 | Apple App Attest / DeviceCheck APIs | Apple-managed infrastructure — no user-space pinning required or possible |
 | Apple CDNs (app updates, APNs) | System-managed by iOS — outside app control |
+| VdoCipher / YouTube / other media hosts | Third-party origins — applying MedAcademy's pins to them would break playback on their routine cert rotation |
+
+> **Note:** tables 5.1–5.4 document the legacy Supabase architecture. The
+> authoritative first-party API is now the PHP backend at
+> `https://api.medacademy.site`; see 5.6 for its actual pinning implementation.
+
+### 5.6 First-party SPKI pinning — real implementation and stack coverage
+
+**Source of truth:** `app.json` → `expo.extra.medaSslPins` (base64 SHA-256 of the
+SubjectPublicKeyInfo DER) and `expo.extra.medaPinnedHosts`.
+
+| Platform | Generated artifact | Enforced by |
+|---|---|---|
+| Android | `network_security_config.xml` (`plugins/withNetworkSecurityConfig.js`) | Platform TLS stack — no app code involved |
+| iOS | `MEDA_SPKI_PINS` / `MEDA_PINNED_HOSTS` in Info.plist (`plugins/withSecurityModule.js`) | `plugins/ios/PinningURLProtocol.swift` |
+
+**iOS network-stack coverage.** A pinning class is worthless unless it is
+installed on the stack that actually issues the request. `NSURLSession` consults
+`configuration.protocolClasses` only — the global `URLProtocol.registerClass`
+registry does **not** apply to it.
+
+| Stack | Used for | Pinned via |
+|---|---|---|
+| React Native `globalThis.fetch` / `XMLHttpRequest` (`src/client/php.ts`) | All auth, profile, course, enrollment, progress, OTP and security-event traffic | `RCTSetCustomNSURLSessionConfigurationProvider` |
+| `expo/fetch` (`ExpoFetchModule`) | `uploadVideoChunk` — carries `Authorization: Bearer` | `ExpoFetchCustomExtension.setCustomURLSessionConfigurationProvider` |
+| WKWebView / expo-image / media SDKs | Third-party or unauthenticated content | Intentionally not pinned (see 5.5) |
+
+Both providers build their configuration from the single shared
+`MEDA_pinnedConfiguration()` helper in `plugins/ios/PinningInitializer.m`, so
+they cannot drift apart. Coverage is locked down by
+`node tests/iosPinningCoverage.test.cjs`.
+
+**Failure behaviour.** Pinning only *restricts* a chain the system already
+trusts: `SecTrustEvaluateWithError` runs first, then the presented chain must
+carry a pinned SPKI. On mismatch the challenge is cancelled — the request fails
+and there is no fallback to an unpinned client. Dev builds carry no
+`MEDA_SPKI_PINS` and are entirely inert.
+
+### 5.7 Pin rotation and backup-pin maintenance
+
+- **Pins are public-key hashes, not certificates** — they change only when the
+  key changes, not on certificate reissue. No private material ships in the app.
+- **Pin the intermediates, not just the leaf.** Let's Encrypt reissues leaf
+  certificates every ~90 days but reuses the intermediate key, so pinning
+  `YR2` / `Root YR` keeps the app working across routine renewals.
+- **Never remove before adding.** Overlap order is mandatory:
+  1. Add the new pin to `expo.extra.medaSslPins` and ship a release.
+  2. Wait for that release to reach effectively all active users.
+  3. Only then remove the old pin in a later release.
+  Removing first pins an app to a key the server no longer uses — that is an
+  outage with no client-side recovery.
+- **Keep at least two valid pins** at all times (backup pin). `E2` in the
+  coverage suite enforces this.
+- **Never disable pinning on mismatch.** A mismatch is a security event, not a
+  configuration error to be worked around.
+- **Verify before shipping:** `node tests/certificatePinning.test.cjs` embeds the
+  real production chain and re-derives each configured pin from its SPKI DER
+  byte-for-byte. A wrong or expired pin fails there, not in production.
 
 ---
 

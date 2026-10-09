@@ -1,8 +1,8 @@
 diff --git a/node_modules/vdocipher-rn-bridge/android/src/main/java/com/vdocipher/rnbridge/ReactVdoPlayerUIView.java b/node_modules/vdocipher-rn-bridge/android/src/main/java/com/vdocipher/rnbridge/ReactVdoPlayerUIView.java
-index 6f5c9db..8dc59f8 100644
+index 6f5c9db..1a8ada4 100644
 --- a/node_modules/vdocipher-rn-bridge/android/src/main/java/com/vdocipher/rnbridge/ReactVdoPlayerUIView.java
 +++ b/node_modules/vdocipher-rn-bridge/android/src/main/java/com/vdocipher/rnbridge/ReactVdoPlayerUIView.java
-@@ -158,6 +158,11 @@
+@@ -158,6 +158,11 @@ public class ReactVdoPlayerUIView extends LinearLayout implements LifecycleEvent
                          vdoPlayerUIFragment.initialize(initializationListener);
                          vdoPlayerUIFragment.setResizeMode(this.resizeMode);
                          vdoPlayerUIFragment.setFullscreenActionListener(fullscreenToggleListener);
@@ -14,7 +14,7 @@ index 6f5c9db..8dc59f8 100644
                      } catch(Exception e) {                        
                          Log.e(TAG, Log.getStackTraceString(e));
                      }
-@@ -255,16 +260,90 @@
+@@ -255,16 +260,162 @@ public class ReactVdoPlayerUIView extends LinearLayout implements LifecycleEvent
      private void setFullscreenActionListener() {
          fullscreenToggleListener = isFullscreen -> {
  
@@ -55,12 +55,84 @@ index 6f5c9db..8dc59f8 100644
 +    // ids. This is a runtime visibility change only: the SDK binary, its control
 +    // bar (play/seek/quality/speed/captions), fullscreen orientation handling
 +    // and DRM are all untouched, and the app supplies the one fullscreen entry.
++    // ── MEDACADEMY PATCH (vdocipher-rn-bridge 2.0.1, SDK 1.29.9) ───────────
++    // WHY THE HIDE MUST BE RE-APPLIED, NOT MERELY SCHEDULED
++    //
++    // The original implementation ran the hide only three times (+0/+600/+2000ms
++    // after fragment init). That is NOT enough. The SDK re-runs its own
++    // updateFullscreenButtons() during PLAYER INIT — which happens once the media
++    // loads, i.e. typically AFTER the 2000ms shot — and that method unconditionally
++    // sets vdo_enter_fullscreen back to VISIBLE. The button then stayed visible for
++    // the rest of the session: the duplicate fullscreen control "came back", and
++    // tapping it did nothing.
++    //
++    // It does nothing because of the SDK's own wiring (verified against
++    // com.vdocipher.aegis:vdocipher-android:1.29.9): the control view's toggle
++    // early-returns when its FullScreenActionListener field is null, and NOTHING in
++    // the SDK — nor this bridge — ever calls that view's setFullscreenActionListener.
++    // The fragment-level listener this bridge sets is a MONITOR only: the fragment
++    // invokes it and POPs the return value without acting on it. So the SDK button
++    // is pure dead clutter sitting next to the app's single real fullscreen entry.
++    //
++    // A global-layout listener re-applies the hide on every layout pass of the
++    // window, so the SDK can never leave the button visible regardless of when it
++    // decides to re-show it. This is strictly a visibility change on two
++    // ImageButtons — no overlay, no touch interception, and play/seek/quality/
++    // speed/captions are untouched.
++    private final android.view.ViewTreeObserver.OnGlobalLayoutListener sdkFsHideRelayoutListener =
++            this::hideSdkFullscreenControls;
++
 +    private void scheduleHideSdkFullscreenControls() {
 +        // The control bar is inflated around the fragment view creation, so
 +        // apply immediately and again shortly after (idempotent).
 +        mainHandler.post(this::hideSdkFullscreenControls);
 +        mainHandler.postDelayed(this::hideSdkFullscreenControls, 600);
 +        mainHandler.postDelayed(this::hideSdkFullscreenControls, 2000);
++        // ...and keep re-applying it EVENT-DRIVEN for as long as the view is
++        // attached, so a later SDK re-show (player init, setFullscreenState, any
++        // subsequent layout pass) cannot bring the dead button back.
++        mainHandler.post(this::attachSdkFullscreenHideRelayoutListener);
++        mainHandler.postDelayed(this::attachSdkFullscreenHideRelayoutListener, 2000);
++    }
++
++    private void attachSdkFullscreenHideRelayoutListener() {
++        try {
++            if (vdoPlayerUIFragment == null) {
++                return;
++            }
++            View root = vdoPlayerUIFragment.getView();
++            if (root == null) {
++                return;
++            }
++            android.view.ViewTreeObserver observer = root.getViewTreeObserver();
++            if (!observer.isAlive()) {
++                return;
++            }
++            // Remove first so repeated attaches are idempotent (never stacked).
++            observer.removeOnGlobalLayoutListener(sdkFsHideRelayoutListener);
++            observer.addOnGlobalLayoutListener(sdkFsHideRelayoutListener);
++        } catch (Exception e) {
++            Log.e(TAG, "attachSdkFullscreenHideRelayoutListener: " + Log.getStackTraceString(e));
++        }
++    }
++
++    private void detachSdkFullscreenHideRelayoutListener() {
++        try {
++            if (vdoPlayerUIFragment == null) {
++                return;
++            }
++            View root = vdoPlayerUIFragment.getView();
++            if (root == null) {
++                return;
++            }
++            android.view.ViewTreeObserver observer = root.getViewTreeObserver();
++            if (!observer.isAlive()) {
++                return;
++            }
++            observer.removeOnGlobalLayoutListener(sdkFsHideRelayoutListener);
++        } catch (Exception e) {
++            Log.e(TAG, "detachSdkFullscreenHideRelayoutListener: " + Log.getStackTraceString(e));
++        }
 +    }
 +
 +    private void hideSdkFullscreenControls() {
@@ -106,6 +178,16 @@ index 6f5c9db..8dc59f8 100644
      public void setResizeMode(String resizeModeName) {
          if (resizeModeName != null && !resizeModeName.isEmpty()) {
              this.resizeMode = resizeModeIntFromName(resizeModeName);
+@@ -391,6 +542,9 @@ public class ReactVdoPlayerUIView extends LinearLayout implements LifecycleEvent
+     @Override
+     protected void onDetachedFromWindow() {
+         Log.d(TAG, "onDetachedFromWindow");
++        // MEDACADEMY PATCH: drop the global-layout listener so a recycled view
++        // cannot keep a stale reference alive.
++        detachSdkFullscreenHideRelayoutListener();
+         super.onDetachedFromWindow();
+     }
+ 
 diff --git a/node_modules/vdocipher-rn-bridge/ios/AssetList.swift b/node_modules/vdocipher-rn-bridge/ios/AssetList.swift
 index 0d76ae8..6aba802 100644
 --- a/node_modules/vdocipher-rn-bridge/ios/AssetList.swift

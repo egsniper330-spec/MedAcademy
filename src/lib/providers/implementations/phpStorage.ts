@@ -4,13 +4,14 @@
  * All storage calls in the app go through this provider abstraction.
  */
 import { backendClient } from '@/client/backendClient';
+import type { UploadFileDescriptor } from '@/lib/uploadPart';
 import type { StorageProvider, StorageUploadOptions } from '../storageProvider';
 
 class PhpStorageProvider implements StorageProvider {
   readonly providerKey = 'php_storage';
   readonly displayName = 'PHP Filesystem Storage';
 
-  async upload(bucket: string, path: string, data: Blob | ArrayBuffer, options?: StorageUploadOptions): Promise<string> {
+  async upload(bucket: string, path: string, data: Blob | ArrayBuffer | UploadFileDescriptor, options?: StorageUploadOptions): Promise<string> {
     const { error } = await backendClient.storage.from(bucket).upload(path, data, {
       contentType: options?.contentType,
       cacheControl: options?.cacheControl ?? '3600',

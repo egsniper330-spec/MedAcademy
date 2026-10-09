@@ -48,6 +48,7 @@ import { View, Text, ActivityIndicator, useColorScheme } from 'react-native';
 import { getVideoPlaybackToken } from '@/lib/api';
 import { neuColors } from '@/lib/neu';
 import { WebView } from 'react-native-webview';
+import { useSecurityWebViewStop, type StoppableWebView } from '@/lib/useSecurityWebViewStop';
 import { buildWatermarkInjection } from '@/lib/watermarkInjection';
 import { useFullscreenWatermark } from '@/hooks/useFullscreenWatermark';
 import type { VdoCipherPlayerProps } from '@/components/VdoCipherPlayer';
@@ -119,6 +120,22 @@ export function VdoCipherPlayerWebView({
   const [loading, setLoading]     = useState(true);
   const [error, setError]         = useState<string | null>(null);
 
+  // SECURITY CONTAINMENT: stop the WebView player the instant the central
+  // security lock engages (visible VdoCipher player behind the gate).
+  //
+  // ROOT-CAUSE NOTE: this player previously registered the NATIVE
+  // `useSecurityPlaybackStop()` stopper, whose callback calls the VdoPlayerView
+  // bridge method `pause()`. A react-native-webview instance has no `pause()`,
+  // so the stopper was a SILENT NO-OP — the lock engaged, the gate rose, and
+  // the embedded player kept playing behind it. This WebView-aware stopper
+  // halts loading and pauses/tears down the real player inside the document.
+  const playerWebViewRef = useRef<StoppableWebView | null>(null);
+  useSecurityWebViewStop(playerWebViewRef);
+
+  // TRUE when the OTP carries VdoCipher's burned-in MOVING watermark — the
+  // injected DOM watermark is then suppressed so exactly one watermark shows.
+  const [annotateApplied, setAnnotateApplied] = useState(false);
+
   // Web only — container ref for DOM watermark hook + Reanimated overlay dimensions.
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [containerW, setContainerW] = useState(0);
@@ -129,7 +146,7 @@ export function VdoCipherPlayerWebView({
   // re-parents itself into document.fullscreenElement on fullscreenchange.
   useFullscreenWatermark(
     containerRef,
-    watermarkId ? { watermarkId, watermarkName } : null,
+    annotateApplied ? null : watermarkId ? { watermarkId, watermarkName } : null,
     process.env.EXPO_OS === 'web' && !!watermarkId,
   );
 
@@ -141,7 +158,8 @@ export function VdoCipherPlayerWebView({
     setPlayerUrl(null);
     (async () => {
       try {
-        const { otp, playbackInfo } = await getVideoPlaybackToken(videoId, lessonId);
+        const { otp, playbackInfo, annotateApplied } = await getVideoPlaybackToken(videoId, lessonId);
+        if (!cancelled) setAnnotateApplied(annotateApplied === true);
         if (!cancelled) {
           const url = buildPlayerUrl(otp, playbackInfo);
           setPlayerUrl(url);
@@ -292,11 +310,18 @@ export function VdoCipherPlayerWebView({
   // forensic watermark overlay.  Previously called with NO arguments, which
   // meant buildWatermarkInjection() returned event-bridge-only code and the
   // watermark div was never created.
-  const eventBridgeScript = buildWatermarkInjection(watermarkId, watermarkName);
+  const eventBridgeScript = buildWatermarkInjection(
+    annotateApplied ? undefined : watermarkId,
+    annotateApplied ? undefined : watermarkName,
+  );
 
   return (
     <View style={containerStyleNative}>
       <WebView
+          ref={(node: any) => {
+            playerWebViewRef.current = node;
+            (window as any).__MEDA_WEBVIEW_PLAYER = node;
+          }}
         source={{ uri: playerUrl }}
         style={{ flex: 1, backgroundColor: '#000' }}
         injectedJavaScriptBeforeContentLoaded={eventBridgeScript}

@@ -6,6 +6,7 @@ namespace MedAcademy\Services;
 
 use MedAcademy\Database\Database;
 use MedAcademy\Http\ApiException;
+use MedAcademy\Utils\Logger;
 use MedAcademy\Utils\Uuid;
 
 /**
@@ -50,11 +51,83 @@ final class SecurityService
 
     /**
      * security-logger port: insert into security_events.
+     *
+     * TRUST MODEL — READ BEFORE CHANGING
+     * ──────────────────────────────────
+     * Every field of `$data` is TELEMETRY, and when this is called from
+     * `POST /security/events` it is entirely client-supplied. It is therefore
+     * normalized here and, more importantly, **never used to grant anything**:
+     *
+     *   • `policy_action` — display metadata for the Security Dashboard. No
+     *     code path reads it to decide whether a request may proceed.
+     *   • `risk_score`    — an input to SecurityRiskService::riskFor(), which
+     *     only ever sums the CALLER'S OWN recent events, and only when an
+     *     operator has explicitly enabled `client_risk` + set the action tier
+     *     to `enforce`. A forged score can at worst affect the forger.
+     *   • `event_type`    — used for display and for the same per-user risk
+     *     bucketing.
+     *
+     * Authorization, ownership, enrollment, feature flags and video
+     * entitlement are decided exclusively by server-side state — never by a
+     * value a client wrote into this table.
+     *
+     * Normalization exists to keep malformed input from turning into a DB
+     * error (column-length / CHECK violations) rather than to add trust: the
+     * schema limits are event_type VARCHAR(25), policy_action VARCHAR(16),
+     * risk_score INT.
      */
     public function logEvent(string $userId, array $data): void
     {
         $allowed = ['event_type', 'detection_method', 'policy_action', 'risk_score', 'device_id', 'platform', 'app_version', 'ip_address', 'metadata'];
         $row = array_intersect_key($data, array_flip($allowed));
+
+        // event_type — non-empty, ≤25 chars (schema limit).
+        $eventType = trim((string) ($row['event_type'] ?? ''));
+        if ($eventType === '') {
+            $eventType = 'screenshot_detected';
+        }
+        $eventType = mb_substr($eventType, 0, 25);
+
+        // policy_action — closed vocabulary. Anything outside the schema's
+        // documented values is discarded rather than persisted verbatim.
+        $policyAction = trim((string) ($row['policy_action'] ?? ''));
+        if (!in_array($policyAction, ['log_only', 'warn_only', 'block_video', 'block_login'], true)) {
+            $policyAction = null;
+        }
+
+        // risk_score — integer, clamped to 0..100 so a client cannot inject a
+        // negative value (discounting other events) or an absurd one.
+        $riskScore = null;
+        if (isset($row['risk_score']) && is_numeric($row['risk_score'])) {
+            $riskScore = max(0, min(100, (int) $row['risk_score']));
+        }
+
+        // Free-text fields — bounded so one request cannot write a huge blob
+        // (or trip a column length and turn telemetry into a 500). device_id is
+        // VARCHAR(191); platform/app_version are TEXT but are display-only.
+        $detectionMethod = isset($row['detection_method']) && $row['detection_method'] !== null
+            ? mb_substr((string) $row['detection_method'], 0, 1000)
+            : null;
+        $deviceId = isset($row['device_id']) && $row['device_id'] !== null
+            ? mb_substr((string) $row['device_id'], 0, 191)
+            : null;
+        $platform = isset($row['platform']) && $row['platform'] !== null
+            ? mb_substr((string) $row['platform'], 0, 64)
+            : null;
+        $appVersion = isset($row['app_version']) && $row['app_version'] !== null
+            ? mb_substr((string) $row['app_version'], 0, 64)
+            : null;
+        $ipAddress = isset($row['ip_address']) && $row['ip_address'] !== null
+            ? mb_substr((string) $row['ip_address'], 0, 64)
+            : null;
+        $metadata = null;
+        if (isset($row['metadata']) && is_array($row['metadata'])) {
+            // json_encode returns false on malformed UTF-8 / recursion — never
+            // let that reach the NOT NULL-ish path as a boolean.
+            $encoded = json_encode($row['metadata'], JSON_UNESCAPED_SLASHES);
+            $metadata = is_string($encoded) ? mb_substr($encoded, 0, 8000) : null;
+        }
+
         try {
             Database::instance()->insert(
                 'INSERT INTO security_events (id, user_id, event_type, detection_method, policy_action, risk_score, device_id, platform, app_version, ip_address, metadata, created_at)
@@ -62,25 +135,32 @@ final class SecurityService
                 [
                     Uuid::v4(),
                     $userId,
-                    (string) ($row['event_type'] ?? 'screenshot_detected'),
-                    $row['detection_method'] ?? null,
-                    $row['policy_action'] ?? null,
-                    isset($row['risk_score']) ? (int) $row['risk_score'] : null,
-                    $row['device_id'] ?? null,
-                    $row['platform'] ?? null,
-                    $row['app_version'] ?? null,
-                    $row['ip_address'] ?? null,
-                    isset($row['metadata']) && is_array($row['metadata']) ? json_encode($row['metadata'], JSON_UNESCAPED_SLASHES) : null,
+                    $eventType,
+                    $detectionMethod,
+                    $policyAction,
+                    $riskScore,
+                    $deviceId,
+                    $platform,
+                    $appVersion,
+                    $ipAddress,
+                    $metadata,
                 ]
             );
         } catch (\PDOException $e) {
-            // Surface the actual DB error safely — no secrets, no credentials.
-            $sqlState = $e->getCode();
-            $msg = $e->getMessage();
-            // Redact any accidental credential leaks in the message
-            $msg = preg_replace('/password[:=]\s*\S+/i', 'password=[REDACTED]', $msg);
-            $msg = preg_replace('/user[:=]\s*\S+/i', 'user=[REDACTED]', $msg);
-            throw new ApiException(500, 'DB error [' . $sqlState . ']: ' . $msg);
+            // NEVER surface DB internals to the client: SQLSTATE, table/column
+            // names and driver text stay in the protected server log only.
+            $detail = (string) preg_replace(
+                '/(password|passwd|secret|token|api[_-]?key|authorization)\s*[:=]\s*\S+/i',
+                '$1=[REDACTED]',
+                $e->getMessage()
+            );
+            Logger::instance()->error('security_events insert failed', [
+                'sql_state' => (string) $e->getCode(),
+                'detail'    => mb_substr($detail, 0, 500),
+                'user_id'   => $userId,
+                'event_type' => (string) ($row['event_type'] ?? ''),
+            ]);
+            throw new ApiException(500, 'Unable to record security event', 'internal_error');
         }
     }
 

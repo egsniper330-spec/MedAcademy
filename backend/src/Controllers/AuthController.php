@@ -10,6 +10,7 @@ use MedAcademy\Http\ApiException;
 use MedAcademy\Http\Request;
 use MedAcademy\Services\AuthService;
 use MedAcademy\Services\FeatureFlagService;
+use MedAcademy\Services\RateLimitService;
 use MedAcademy\Services\AuditService;
 use MedAcademy\Utils\Uuid;
 use MedAcademy\Validation\Validator;
@@ -121,12 +122,29 @@ final class AuthController
 
     public function lookup(Request $request): array
     {
+        // Public by necessity (pre-login), so bounded per IP: this endpoint
+        // answers "does this identifier exist and who is it", which is a bulk
+        // enumeration oracle without a ceiling.
+        RateLimitService::perIp(
+            $request,
+            'identifier_lookup',
+            RateLimitService::identifierLookupPerIpPerMinute(),
+            60
+        );
         $identifier = (string) ($request->json()['identifier'] ?? $request->query('identifier', ''));
         return $this->auth->lookupIdentifier($identifier);
     }
 
     public function preLoginCheck(Request $request): array
     {
+        // Same rationale as lookup(): required before authentication, reveals
+        // account existence + device-block state, therefore rate limited.
+        RateLimitService::perIp(
+            $request,
+            'identifier_lookup',
+            RateLimitService::identifierLookupPerIpPerMinute(),
+            60
+        );
         // Accept both the REST-style keys and the original RPC argument names
         // (p_email / p_installation_id) that the mobile app still sends.
         $json = $request->json();

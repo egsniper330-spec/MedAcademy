@@ -231,14 +231,15 @@ export default function ContactPage() {
   const loaded = brandingStatus === 'ok';
 
   return (
-    <ScrollView
-      style={{ flex: 1, backgroundColor: c.base }}
-      contentContainerStyle={{
-        padding: layout.screenPx,
-        paddingBottom: layout.insets.bottom + layout.screenPx,
-      }}
-    >
+    <View style={{ flex: 1, backgroundColor: c.base }}>
       <PageHeader title="Contact Us" showBack />
+      <ScrollView
+        style={{ flex: 1 }}
+        contentContainerStyle={{
+          padding: layout.screenPx,
+          paddingBottom: layout.insets.bottom + layout.screenPx,
+        }}
+      >
 
       {/* ── Error state — branding fetch failed (Retry; never redirects to login) ── */}
       {!loaded ? (
@@ -335,5 +336,6 @@ export default function ContactPage() {
         </>
       )}
     </ScrollView>
+    </View>
   );
 }

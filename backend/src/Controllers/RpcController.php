@@ -10,6 +10,7 @@ use MedAcademy\Http\Request;
 use MedAcademy\Http\Response;
 use MedAcademy\Services\AuditService;
 use MedAcademy\Services\FeatureFlagService;
+use MedAcademy\Services\RateLimitService;
 use MedAcademy\Services\VideoProviderPolicyService;
 use MedAcademy\Utils\Uuid;
 
@@ -44,6 +45,14 @@ final class RpcController
      */
     public function checkRegistrationConflicts(Request $request): array
     {
+        // Required before registration, hence unauthenticated — but it is an
+        // account-existence oracle, so cap it per IP.
+        RateLimitService::perIp(
+            $request,
+            'identifier_lookup',
+            RateLimitService::identifierLookupPerIpPerMinute(),
+            60
+        );
         $body = $request->json();
         $email = strtolower(trim((string) ($body['email'] ?? $body['p_email'] ?? '')));
         $phoneE164 = trim((string) ($body['phone_e164'] ?? $body['p_phone_e164'] ?? ''));
@@ -77,6 +86,17 @@ final class RpcController
      */
     public function getEmailByPhone(Request $request): array
     {
+        // PUBLIC by design — sign-in must resolve a phone number to the e-mail
+        // the PHP backend authenticates with BEFORE any credential exists
+        // (see src/lib/identifier.ts). That makes it a phone→e-mail oracle, so
+        // it is bounded per IP; without this a script could walk a number
+        // space and harvest addresses at will.
+        RateLimitService::perIp(
+            $request,
+            'identifier_lookup',
+            RateLimitService::identifierLookupPerIpPerMinute(),
+            60
+        );
         $phone = trim((string) ($request->json()['phone'] ?? $request->query('phone', '')));
         if ($phone === '') {
             throw new ApiException(422, 'phone is required');
@@ -139,6 +159,9 @@ final class RpcController
      */
     public function doctorActivityStats(Request $request): array
     {
+        // doctor_earnings gate: this is a doctor-facing revenue/pricing surface.
+        $this->assertDoctorEarningsEnabled($request);
+
         $doctorId = Uuid::normalize((string) ($request->params['doctorId'] ?? $request->json()['doctor_id'] ?? ''));
         if ($doctorId === '') {
             throw new ApiException(422, 'doctor_id is required');
@@ -179,6 +202,10 @@ final class RpcController
      */
     public function doctorCreditTransactions(Request $request): array
     {
+        // doctor_earnings gate: credit/earnings history is part of the
+        // doctor-facing earnings surface.
+        $this->assertDoctorEarningsEnabled($request);
+
         $doctorId = Uuid::normalize((string) ($request->params['doctorId'] ?? $request->json()['doctor_id'] ?? ''));
         if ($doctorId === '') {
             throw new ApiException(422, 'doctor_id is required');
@@ -210,6 +237,26 @@ final class RpcController
     }
 
     /**
+     * Doctor-facing EARNINGS surfaces share the Data API's gate
+     * (DataController::assertFeatureFlags): staff keep full visibility for
+     * their own consoles, while a DOCTOR receives the structured
+     * 403 { code: 'feature_disabled', feature: 'doctor_earnings' } refusal
+     * whenever the platform has switched the capability off.
+     *
+     * assertEnabledFor (NOT assertEnabled) so the per-user override mechanism
+     * (controlled rollout) is honored here exactly as on the generic read
+     * path. READ-ONLY policy: no balance, event or history row is ever
+     * modified by the flag itself.
+     */
+    private function assertDoctorEarningsEnabled(Request $request): void
+    {
+        if (in_array((string) ($request->user['role'] ?? ''), ['admin', 'super_admin'], true)) {
+            return; // staff dashboards keep full access
+        }
+        $this->flags->assertEnabledFor('doctor_earnings', $request);
+    }
+
+    /**
      * get_doctor_earnings_dashboard — Full earnings dashboard for a doctor.
      */
     public function doctorEarningsDashboard(Request $request): array
@@ -217,7 +264,7 @@ final class RpcController
         // Feature flag: doctor_earnings — the doctor-facing earnings surface.
         // READ-ONLY gate: nothing is recalculated, hidden or deleted; the
         // dashboard simply refuses to render while the capability is off.
-        $this->flags->assertEnabled('doctor_earnings', $request);
+        $this->assertDoctorEarningsEnabled($request);
 
         $doctorId = Uuid::normalize((string) ($request->params['doctorId'] ?? $request->json()['doctor_id'] ?? ''));
         if ($doctorId === '') {
@@ -253,6 +300,11 @@ final class RpcController
      */
     public function doctorStudentProfile(Request $request): array
     {
+        // doctor_earnings gate: this is the student profile modal used by the
+        // doctor earnings surface (it returns the doctor-side credits row for
+        // that student), so it is part of the gated capability.
+        $this->assertDoctorEarningsEnabled($request);
+
         $studentId = Uuid::normalize((string) ($request->json()['student_id'] ?? $request->query('student_id', '')));
         $doctorId = $request->user['id'];
 
@@ -274,16 +326,40 @@ final class RpcController
             throw new ApiException(403, 'No shared enrollment with this student');
         }
 
-        $profile = $db->row('SELECT * FROM profiles WHERE id = ?', [$studentId]);
+        // Explicit column allowlist — NOT `SELECT *`.
+        //
+        // This row is returned to a DOCTOR about ANOTHER user, so the response
+        // carries only what the doctor-facing UI reads (and what a legitimate
+        // instructor workflow needs). Excluded, deliberately:
+        //   • suspension metadata   (suspension_reason / suspension_at / suspension_device)
+        //   • prior phone value     (phone_original)
+        //   • trash internals       (trashed_* / pre_trash_status / delete_permissions)
+        //   • security internals    (security_version / force_password_change /
+        //                            violation_count / strike_count)
+        //   • finance configuration (credit_selling_price / earnings_* /
+        //                            doctor_global_price / doctor_pricing_mode /
+        //                            custom_pricing_enabled)
+        // The columns stay in the database and in the admin/staff paths that
+        // legitimately need them (see /admin/users/{id} and
+        // /analytics/user-profile/{id}, both super_admin/admin gated).
+        $profile = $db->row(
+            'SELECT id, email, full_name, phone, role, status, watermark_id, avatar_url,
+                    created_at, updated_at, doctor_id, university_id, faculty_id,
+                    academic_level_id, phone_country_code, phone_national, phone_e164,
+                    qr_code_id, max_devices, profile_email, is_suspended,
+                    contact_whatsapp, contact_telegram, contact_phone
+               FROM profiles WHERE id = ?',
+            [$studentId]
+        );
         if ($profile === null) {
             throw new ApiException(404, 'Student not found');
         }
 
-        $credits = $db->row('SELECT * FROM credits WHERE doctor_id = ?', [$studentId]);
-        $devices = $db->select(
-            'SELECT id, device_name, platform, status, last_active_at FROM devices WHERE user_id = ?',
-            [$studentId]
-        );
+        // NOTE: no `credits` and no `devices` block here. Neither is read by
+        // the doctor UI (getDoctorStudentProfile narrows the response to the
+        // profile fields + enrollments), the credits table is doctor-scoped
+        // (`doctor_id`) so it can never describe this student, and the device
+        // list is cross-user metadata the caller has no use for.
         // Doctor-facing student profile: visibility policy applied in SQL —
         // 'admin_only'/'super_admin_only' enrollments never reach a doctor.
         $enrollments = $db->select(
@@ -297,8 +373,6 @@ final class RpcController
 
         return [
             'profile' => $profile,
-            'credits' => $credits ?? ['allocated' => 0, 'consumed' => 0, 'remaining' => 0],
-            'devices' => $devices ?? [],
             'enrollments' => $enrollments ?? [],
         ];
     }
@@ -564,6 +638,10 @@ final class RpcController
      */
     public function setEnrollmentAssignedPrice(Request $request): array
     {
+        // doctor_earnings gate: changing the assigned (earnings) price is a
+        // write to the doctor's revenue configuration.
+        $this->assertDoctorEarningsEnabled($request);
+
         $enrollmentId = Uuid::normalize((string) ($request->json()['enrollment_id'] ?? ''));
         $price = (int) ($request->json()['price'] ?? 1);
 
@@ -1322,6 +1400,10 @@ final class RpcController
      */
     public function removeStudentAndRecordEarnings(Request $request): array
     {
+        // doctor_earnings gate: this path WRITES doctor_earnings_events
+        // (revenue), so it must be refused while the capability is off.
+        $this->assertDoctorEarningsEnabled($request);
+
         $body = $request->json();
         $studentId = Uuid::normalize((string) ($body['student_id'] ?? ''));
         $courseId = Uuid::normalize((string) ($body['course_id'] ?? ''));

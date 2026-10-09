@@ -7,6 +7,7 @@ namespace MedAcademy\Controllers;
 use MedAcademy\Http\ApiException;
 use MedAcademy\Http\Request;
 use MedAcademy\Services\IntegrityService;
+use MedAcademy\Services\RateLimitService;
 
 /**
  * IntegrityController — PHP endpoints for the Play Integrity flow.
@@ -36,6 +37,16 @@ final class IntegrityController
 {
     public function playIntegrity(Request $request): array
     {
+        // `verify` performs a server-to-Google token decode (network + quota);
+        // `get_nonce` writes a single-use challenge row. Both are state-creating
+        // or network-bound, so throttle per ACCOUNT — an IP-scoped ceiling would
+        // collide behind carrier NAT.
+        RateLimitService::perAccount(
+            $request,
+            'integrity_play',
+            RateLimitService::integrityPerAccountPerMinute(),
+            60
+        );
         $body = $request->json();
         $action = (string) ($body['action'] ?? '');
         $userId = (string) $request->user['id'];
@@ -106,6 +117,16 @@ final class IntegrityController
      */
     public function appIntegrity(Request $request): array
     {
+        // Same rationale as playIntegrity: challenge issuance writes state and
+        // (once Apple credentials land) assertion verification will be
+        // network-bound. Throttled now so the endpoint is safe the day the
+        // verification path is enabled.
+        RateLimitService::perAccount(
+            $request,
+            'integrity_app',
+            RateLimitService::integrityPerAccountPerMinute(),
+            60
+        );
         $body = $request->json();
         $action = (string) ($body['action'] ?? '');
         $userId = (string) $request->user['id'];

@@ -123,7 +123,7 @@ console.log('── Backend: authoritative maintenance decision (structural) ─
   // Whitelist writes are SA-only through the generic Data API.
   const dc = read('backend/src/Controllers/DataController.php');
   ok(
-    /'maintenance_whitelist',\s*\n\s*\];/s.test(dc),
+    /private const WRITE_ADMIN_ONLY_TABLES = \[[\s\S]{0,900}?'maintenance_whitelist'/.test(dc),
     'backend (D): maintenance_whitelist writes are restricted to super_admin via the generic Data API'
   );
 

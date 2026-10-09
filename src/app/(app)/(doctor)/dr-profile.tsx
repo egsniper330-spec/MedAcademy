@@ -32,8 +32,11 @@ import { validateRequired, friendlyError } from '@/lib/validation';
 import { isInternalEmail, changePassword } from '@/lib/api';
 import { backendClient } from '@/client/backendClient';
 import { useProfileStore } from '@/lib/store';
+import { isFeatureEnabled } from '@/lib/featureFlags';
+import { ProfilePhotoActions } from '@/components/ProfilePhotoActions';
+import { resolveImageMime, extFromMime, buildAvatarStoragePath, avatarFileName } from '@/lib/uploadPart';
 import {
-  getProfile, getCourses, getDoctorStudentEnrollments, getPublicEmail, updateProfile,
+  getProfile, getCourses, getDoctorStudentEnrollments, getPublicEmail, updateProfile, removeProfileAvatar,
   getDoctorEarningsDashboard, bucketEarningsTimeSeries,
   getDoctorStudentProfile, getDoctorPricingSettings, setDoctorGlobalPrice,
   suspendStudentCourseAccess, restoreStudentCourseAccess,
@@ -1210,16 +1213,18 @@ export default function DoctorProfile() {
     setAvatarUploading(true);
     try {
       const asset = result.assets[0];
-      const uri   = asset.uri;
-      const ext   = uri.split('.').pop()?.toLowerCase() ?? 'jpg';
-      const path  = `avatars/${profile.id}.${ext}`;
-      // Use expo/fetch (supports arrayBuffer on Android content:// URIs)
-      const { fetch: expoFetch } = await import('expo/fetch');
-      const response = await expoFetch(uri);
-      const buffer   = await response.arrayBuffer();
+      const mime  = resolveImageMime(asset.mimeType, asset.uri);
+      const ext   = extFromMime(mime);
+      // Unique path per upload (fresh URL → no stale CDN/browser cache) and
+      // scoped under the user id, which the backend requires for avatars.
+      const path  = buildAvatarStoragePath(profile.id, ext, Date.now());
+      // Upload the local file URI directly — RN streams it from disk.
+      // Never load the image into JS memory (no arrayBuffer/Blob needed).
       const { error: upErr } = await backendClient.storage
         .from('user-avatars')
-        .upload(path, buffer, { upsert: true, contentType: asset.mimeType ?? `image/${ext}` });
+        .upload(path, { uri: asset.uri, mimeType: mime, name: avatarFileName(ext) }, {
+          upsert: true, contentType: mime,
+        });
       if (upErr) throw upErr;
       const { data: { publicUrl } } = backendClient.storage.from('user-avatars').getPublicUrl(path);
       const updated = await updateProfile(profile.id, { avatar_url: publicUrl });
@@ -1231,16 +1236,43 @@ export default function DoctorProfile() {
     setAvatarUploading(false);
   };
 
+  // ── Avatar removal ────────────────────────────────────────────────────────
+  // Same contract as the student profile: clear profiles.avatar_url first
+  // (authoritative and persistent), then best-effort delete the storage
+  // object. A failure rethrows so the existing photo stays visible with a
+  // real error rather than silently blanking the avatar.
+  const [avatarRemoving, setAvatarRemoving] = useState(false);
+  const handleRemoveAvatar = async () => {
+    if (!profile?.id) return;
+    setAvatarRemoving(true);
+    try {
+      const current = profile.avatar_url;
+      await removeProfileAvatar(profile.id, current);
+      setProfile({ ...profile, avatar_url: null } as any);
+      showToast({ type: 'success', message: 'Profile photo removed.' });
+    } catch (e: any) {
+      showToast({ type: 'error', message: e?.message ?? 'Failed to remove profile photo.' });
+    }
+    setAvatarRemoving(false);
+  };
+
   // Earnings toggle
   const [earningsEnabled,  setEarningsEnabled]  = useState<boolean>(!!(profile as any)?.earnings_enabled);
   const [earningsToggling, setEarningsToggling] = useState(false);
+
+  // Platform capability (server-authoritative Super Admin flag). When the
+  // platform has doctor_earnings switched OFF the earnings system must not be
+  // operable from the profile either: the toggle is frozen and the dashboard
+  // link is withheld, mirroring the refusal the backend returns on every
+  // doctor-facing earnings call (403 feature_disabled).
+  const platformEarningsOn = isFeatureEnabled('doctor_earnings');
 
   const { showToast } = useToast();
   const { balance: credits, loading: credLoading, refresh: refreshCredits } = useCreditBalance();
   const { openEdit: openContactEdit, modal: contactModal } = useContactEdit(profile, setProfile);
 
   const handleEarningsToggle = async (value: boolean) => {
-    if (!profile?.id || earningsToggling) return;
+    if (!profile?.id || earningsToggling || !platformEarningsOn) return;
     setEarningsEnabled(value);
     setProfile({ ...profile, earnings_enabled: value } as any);
     setEarningsToggling(true);
@@ -1387,7 +1419,7 @@ export default function DoctorProfile() {
           </View>
           <Switch
             value={earningsEnabled} onValueChange={handleEarningsToggle}
-            disabled={earningsToggling}
+            disabled={earningsToggling || !platformEarningsOn}
             trackColor={{ false: `${c.text}20`, true: '#16A34A55' }}
             thumbColor={earningsEnabled ? '#16A34A' : `${c.text}66`}
           />
@@ -1401,7 +1433,12 @@ export default function DoctorProfile() {
           </Text>
           {earningsToggling && <ActivityIndicator size="small" color={c.primary} style={{ marginLeft: 4 }} />}
         </View>
-        {earningsEnabled && (
+        {!platformEarningsOn && (
+          <Text style={{ fontSize: 12, color: `${c.text}77`, marginTop: 10, lineHeight: 17 }}>
+            This feature is currently unavailable.
+          </Text>
+        )}
+        {earningsEnabled && platformEarningsOn && (
           <Pressable onPress={() => router.push('/(app)/(doctor)/dr-earnings' as RelativePathString)}
             style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
                      marginTop: 14, paddingTop: 14, borderTopWidth: 1, borderTopColor: `${c.text}08`, gap: 8 }}>
@@ -1596,29 +1633,16 @@ export default function DoctorProfile() {
       <View style={{ paddingTop: 20, paddingHorizontal: layout.screenPx, paddingBottom: 0,
                      backgroundColor: c.base }}>
         <View style={{ alignItems: 'center', marginBottom: 20 }}>
-          <Pressable onPress={handlePickAvatar} style={{ marginBottom: 12 }}>
-            <View style={{ width: 88, height: 88, borderRadius: 44,
-                           backgroundColor: `${c.primary}18`, alignItems: 'center', justifyContent: 'center',
-                           shadowColor: c.shadowDark, shadowOffset: { width: 4, height: 4 },
-                           shadowOpacity: 0.55, shadowRadius: 10 }}>
-              {avatarUploading ? (
-                <ActivityIndicator color={c.primary} />
-              ) : profile?.avatar_url ? (
-                <Image source={{ uri: profile.avatar_url }}
-                  style={{ width: 88, height: 88, borderRadius: 44 }} contentFit="cover" />
-              ) : (
-                <User size={40} color={c.primary} />
-              )}
-            </View>
-            <View style={{
-              position: 'absolute', bottom: 0, right: 0,
-              width: 26, height: 26, borderRadius: 13,
-              backgroundColor: c.primary, alignItems: 'center', justifyContent: 'center',
-              shadowColor: c.shadowDark, shadowOffset: { width: 2, height: 2 }, shadowOpacity: 0.4, shadowRadius: 4,
-            }}>
-              <Camera size={13} color="#fff" />
-            </View>
-          </Pressable>
+          <ProfilePhotoActions
+            avatarUrl={profile?.avatar_url}
+            c={c}
+            size={88}
+            marginBottom={12}
+            uploading={avatarUploading}
+            removing={avatarRemoving}
+            onPick={handlePickAvatar}
+            onRemove={handleRemoveAvatar}
+          />
           <Text style={{ fontSize: 20, fontWeight: '800', color: c.text }}>{profile?.full_name || '—'}</Text>
           <Text style={{ fontSize: 13, color: c.text, opacity: 0.45, marginTop: 3 }}>
             {firstName ? `Dr. ${firstName}` : 'Doctor'}

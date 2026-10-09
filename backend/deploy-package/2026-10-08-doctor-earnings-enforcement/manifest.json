@@ -1,0 +1,226 @@
+{
+  "package": "2026-10-08-doctor-earnings-enforcement",
+  "regenerated": "2026-10-09",
+  "purpose": "Doctor Earnings server-side enforcement (all six doctor-callable surfaces) PLUS the backend security-hardening pass: internal-error disclosure removed, cross-user profile response minimized, and rate limiting added to abuse-prone endpoints.",
+  "supersedes": "The original 2026-10-08 single-file artifact (RpcController.php only). Same target and same gate semantics; additional files carry the security-hardening changes from the same working tree.",
+  "target": {
+    "api_base": "https://api.medacademy.site",
+    "document_root": "backend/public",
+    "upload_root": "backend/"
+  },
+  "layout": "Package mirrors the server tree: src/<...> maps 1:1 onto backend/src/<...>.",
+  "files": {
+    "deploy": [
+      {
+        "local": "src/Controllers/RpcController.php",
+        "server_path": "backend/src/Controllers/RpcController.php",
+        "sha256": "9784d5bdde5c218d5e43b9f2fb9b09a3faf8248e82370793320e685decbb34a9",
+        "bytes": 67344,
+        "required": true,
+        "change": "Doctor Earnings gate on all six doctor-callable earnings surfaces; explicit column allowlist in doctorStudentProfile(); per-IP throttle on the two public identifier lookups.",
+        "source": "backend/src/Controllers/RpcController.php (byte-identical)"
+      },
+      {
+        "local": "src/Controllers/SecurityController.php",
+        "server_path": "backend/src/Controllers/SecurityController.php",
+        "sha256": "906511717d55928afcbf2562a113ce71b6b94a1488459f87098d19ee39e11ba3",
+        "bytes": 15023,
+        "required": true,
+        "change": "Stops returning SQLSTATE/driver text to clients (generic 500 + protected log); re-throws deliberate ApiExceptions; per-account throttle on /security/events; server-observed ip_address/device_id override client-claimed values.",
+        "source": "backend/src/Controllers/SecurityController.php (byte-identical)"
+      },
+      {
+        "local": "src/Controllers/SecurityEvidenceController.php",
+        "server_path": "backend/src/Controllers/SecurityEvidenceController.php",
+        "sha256": "936794ea32061dd6d9061a91bfcc0f481e1fe88ddfe156272ead8ef66c7d09d7",
+        "bytes": 6561,
+        "required": true,
+        "change": "Per-account throttles on device-key registration, challenge issuance and evidence submission.",
+        "source": "backend/src/Controllers/SecurityEvidenceController.php (byte-identical)"
+      },
+      {
+        "local": "src/Controllers/IntegrityController.php",
+        "server_path": "backend/src/Controllers/IntegrityController.php",
+        "sha256": "2404576fc26436f1c47f1b1c0a37142710309beb7bf73f4f727b720e588a052d",
+        "bytes": 6949,
+        "required": true,
+        "change": "Per-account throttles on Play Integrity and App Integrity actions (network-bound / state-creating).",
+        "source": "backend/src/Controllers/IntegrityController.php (byte-identical)"
+      },
+      {
+        "local": "src/Controllers/AuthController.php",
+        "server_path": "backend/src/Controllers/AuthController.php",
+        "sha256": "e6a03f00f3ac3b30c0a894cfbec0c5af21f6d7db36705db4554671a4bd2a47c7",
+        "bytes": 15317,
+        "required": true,
+        "change": "Per-IP throttles on the two public pre-login identifier endpoints.",
+        "source": "backend/src/Controllers/AuthController.php (byte-identical)"
+      },
+      {
+        "local": "src/Services/RateLimitService.php",
+        "server_path": "backend/src/Services/RateLimitService.php",
+        "sha256": "297a2b3a553a568e52d6721b148d4b4a06e1a7882198f8463dcc5a4ba4709e4a",
+        "bytes": 8052,
+        "required": true,
+        "change": "NEW FILE — shared fixed-window rate limiter (reuses the existing rate_limits table; no migration).",
+        "source": "backend/src/Services/RateLimitService.php (byte-identical)"
+      },
+      {
+        "local": "src/Services/AuthService.php",
+        "server_path": "backend/src/Services/AuthService.php",
+        "sha256": "ff792a62de51fe62d52b1eae275eaea4f1e58edaf5959e382a55eba7f9d425ba",
+        "bytes": 39324,
+        "required": true,
+        "change": "Throttles refresh, forgot-password (per-IP + per-hashed-identifier), reset-password and change-password; login/register delegate to RateLimitService with unchanged identifier+operation so live counters are not reset.",
+        "source": "backend/src/Services/AuthService.php (byte-identical)"
+      },
+      {
+        "local": "src/Services/SecurityService.php",
+        "server_path": "backend/src/Services/SecurityService.php",
+        "sha256": "8ae2378745295f6eef56050eed1ed352ef0dc24ec47b9c94ef52201935c55ae4",
+        "bytes": 15383,
+        "required": true,
+        "change": "Normalizes all client-supplied telemetry before insert (clamps risk_score 0..100, whitelists policy_action, bounds free-text, refuses non-array metadata) and stops leaking SQL internals on insert failure.",
+        "source": "backend/src/Services/SecurityService.php (byte-identical)"
+      },
+      {
+        "local": "src/Services/AppReleaseService.php",
+        "server_path": "backend/src/Services/AppReleaseService.php",
+        "sha256": "7e7e7c2e2e372b2dda1a61cbc9bf1c451f7fb0d5ed17242f83ce90eda4a002f7",
+        "bytes": 21161,
+        "required": true,
+        "change": "Publish/rollback failures return a generic message; real detail goes to the protected log with credential-shaped values redacted.",
+        "source": "backend/src/Services/AppReleaseService.php (byte-identical)"
+      },
+      {
+        "local": "src/Services/VideoLibrarySyncService.php",
+        "server_path": "backend/src/Services/VideoLibrarySyncService.php",
+        "sha256": "0360bb18e2443dcbf4bcb0863cfb87ed5aeba4ca467dd51b46994f6e4b0a20cc",
+        "bytes": 19061,
+        "required": true,
+        "change": "Local-reconciliation failure no longer returns driver text to a doctor-reachable route.",
+        "source": "backend/src/Services/VideoLibrarySyncService.php (byte-identical)"
+      }
+    ],
+    "deploy_optional": [
+      {
+        "local": "src/Http/Request.php",
+        "server_path": "backend/src/Http/Request.php",
+        "sha256": "86cb39c087c591072144267f305d4b3354409ecefb4afa9acc5cde9b25487aad",
+        "bytes": 5270,
+        "required": false,
+        "change": "Documentation only — records the clientIp() trust policy (REMOTE_ADDR, never X-Forwarded-For). No behaviour change.",
+        "source": "backend/src/Http/Request.php (byte-identical)"
+      }
+    ],
+    "rollback": [
+      {
+        "local": "rollback/src/Controllers/RpcController.php",
+        "server_path": "backend/src/Controllers/RpcController.php",
+        "sha256": "1d51ad8db52052a4a34b6b5886f844e5f0590b366ee6dbcfacc14630542af188",
+        "bytes": 63007,
+        "provenance": "git HEAD:backend/src/Controllers/RpcController.php (pre-change baseline)"
+      },
+      {
+        "local": "rollback/src/Controllers/SecurityController.php",
+        "server_path": "backend/src/Controllers/SecurityController.php",
+        "sha256": "f578e81d2c99e23d909de9d907609df72dbbc8f389206f155c9521d2d6f8acb8",
+        "bytes": 13007,
+        "provenance": "git HEAD:backend/src/Controllers/SecurityController.php (pre-change baseline)"
+      },
+      {
+        "local": "rollback/src/Controllers/SecurityEvidenceController.php",
+        "server_path": "backend/src/Controllers/SecurityEvidenceController.php",
+        "sha256": "4ca5c161f83500c013703ee0cea3b0dbeb5e52b9f719964aa1ecd7697d0e2748",
+        "bytes": 5325,
+        "provenance": "git HEAD:backend/src/Controllers/SecurityEvidenceController.php (pre-change baseline)"
+      },
+      {
+        "local": "rollback/src/Controllers/IntegrityController.php",
+        "server_path": "backend/src/Controllers/IntegrityController.php",
+        "sha256": "22228549185a7f53d3b5b3d32ce1338f7270fbc53f0b14a63d127c1e9eb591ca",
+        "bytes": 5998,
+        "provenance": "git HEAD:backend/src/Controllers/IntegrityController.php (pre-change baseline)"
+      },
+      {
+        "local": "rollback/src/Controllers/AuthController.php",
+        "server_path": "backend/src/Controllers/AuthController.php",
+        "sha256": "a2fc962a1ca4375217f3a4a2cfd4e26d119ffcd25757af77b9d9363d0b69704e",
+        "bytes": 14560,
+        "provenance": "git HEAD:backend/src/Controllers/AuthController.php (pre-change baseline)"
+      },
+      {
+        "local": "rollback/src/Services/AuthService.php",
+        "server_path": "backend/src/Services/AuthService.php",
+        "sha256": "604996ec48fea455dca2b91e30ae7a4dd726b1c9f4a1a91cd248dc02f5984e49",
+        "bytes": 37349,
+        "provenance": "git HEAD:backend/src/Services/AuthService.php (pre-change baseline)"
+      },
+      {
+        "local": "rollback/src/Services/SecurityService.php",
+        "server_path": "backend/src/Services/SecurityService.php",
+        "sha256": "627771063bf98ab7c36e0415f4fef1c5d5b3b4d0c33406d131c07d62f3aafc46",
+        "bytes": 11481,
+        "provenance": "git HEAD:backend/src/Services/SecurityService.php (pre-change baseline)"
+      },
+      {
+        "local": "rollback/src/Services/AppReleaseService.php",
+        "server_path": "backend/src/Services/AppReleaseService.php",
+        "sha256": "fa0c1fc718a1a6163d14831291b979e8057cb3cbe47c4b3f0ae75141bdfad91d",
+        "bytes": 20295,
+        "provenance": "git HEAD:backend/src/Services/AppReleaseService.php (pre-change baseline)"
+      },
+      {
+        "local": "rollback/src/Services/VideoLibrarySyncService.php",
+        "server_path": "backend/src/Services/VideoLibrarySyncService.php",
+        "sha256": "a832ee50cca8e139c25b10ffe7a5f3f43b914191e69f911522dd664fb260268c",
+        "bytes": 18537,
+        "provenance": "git HEAD:backend/src/Services/VideoLibrarySyncService.php (pre-change baseline)"
+      },
+      {
+        "local": "rollback/src/Http/Request.php",
+        "server_path": "backend/src/Http/Request.php",
+        "sha256": "d48a3d1daa65cb3699eedcf98b80d98d904278964ca0d4e17bff0e302618bf87",
+        "bytes": 4606,
+        "provenance": "git HEAD:backend/src/Http/Request.php (pre-change baseline)"
+      }
+    ],
+    "new_files": [
+      {
+        "server_path": "backend/src/Services/RateLimitService.php",
+        "rollback": "delete the file (it does not exist in the pre-change tree)"
+      }
+    ]
+  },
+  "database_changes": [],
+  "env_changes": [],
+  "env_optional_keys_documented_in": "ENV-CONFIG.md",
+  "routes_touched": [
+    "GET  /rpc/doctor-activity-stats/{doctorId}",
+    "GET  /rpc/doctor-credit-transactions/{doctorId}",
+    "GET  /rpc/doctor-earnings-dashboard/{doctorId}",
+    "POST /rpc/doctor-student-profile",
+    "POST /rpc/set-enrollment-assigned-price",
+    "POST /rpc/remove-student-and-record-earnings",
+    "POST /rpc/check-registration-conflicts",
+    "POST /rpc/get-email-by-phone",
+    "POST /auth/lookup",
+    "POST /auth/pre-login-check",
+    "POST /auth/refresh",
+    "POST /auth/forgot-password",
+    "POST /auth/reset-password",
+    "POST /auth/change-password",
+    "POST /security/events",
+    "POST /security/violations",
+    "POST /security/device-keys",
+    "POST /security/challenge",
+    "POST /security/evidence",
+    "POST /integrity/play",
+    "POST /integrity/app"
+  ],
+  "scripts": {
+    "generate_manifest": "node gen-manifest.cjs",
+    "preflight": "node preflight.cjs",
+    "verify_live": "node verify-live.cjs"
+  }
+}

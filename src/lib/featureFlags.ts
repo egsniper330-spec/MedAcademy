@@ -163,3 +163,19 @@ export function isFeatureDisabledError(err: unknown): string | null {
   }
   return null;
 }
+
+/**
+ * Idempotent APP-LIFECYCLE flag hydration. Called from the authenticated app
+ * shell so that Super Admin flag changes propagate to every client WITHOUT an
+ * app reinstall or restart:
+ *   • immediately on app start (the very first screen render sees real state),
+ *   • on every background → foreground transition (server TTL is the truth;
+ *     the 60s client TTL above is only a request de-duplication window).
+ * Force-refreshes past the client TTL because a foreground resume is exactly
+ * the moment an admin toggle may have happened while the user was away.
+ * Offline-safe: every failure keeps the last known good state (see
+ * refreshFeatureFlags), so this can never break a screen.
+ */
+export function ensureFeatureFlagsFresh(): void {
+  void refreshFeatureFlags(true);
+}

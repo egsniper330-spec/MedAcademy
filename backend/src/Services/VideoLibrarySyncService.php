@@ -6,6 +6,7 @@ namespace MedAcademy\Services;
 
 use MedAcademy\Database\Database;
 use MedAcademy\Http\ApiException;
+use MedAcademy\Utils\Logger;
 use MedAcademy\Video\VdoCipherService;
 
 /**
@@ -184,7 +185,14 @@ final class VideoLibrarySyncService
         } catch (\Throwable $e) {
             $db->rollback();
             AuditService::write($triggeredBy, 'video_remote_sync', ['outcome' => 'aborted_local_error', 'error' => $e->getMessage()]);
-            throw new ApiException(500, 'Local reconciliation failed: ' . $e->getMessage());
+            // SQL/driver internals stay in the server-side audit record only —
+            // this route is reachable by doctors, not just staff.
+            Logger::instance()->error('video library reconciliation failed', [
+                'exception' => get_class($e),
+                'detail'    => mb_substr((string) preg_replace('/(password|secret|token|api[_-]?key)\s*[:=]\s*\S+/i', '$1=[REDACTED]', $e->getMessage()), 0, 500),
+                'actor'     => $triggeredBy,
+            ]);
+            throw new ApiException(500, 'Local reconciliation failed', 'internal_error');
         }
 
         // ── 4. Duplicate detection / consolidation ───────────────────────

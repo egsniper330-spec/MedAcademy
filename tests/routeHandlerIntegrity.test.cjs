@@ -208,6 +208,32 @@ ok(/array_merge\(\$meta, \['handler' => \$e->handler\]\)/.test(err),
 ok(/\$logger->error\('Unhandled exception'/.test(err) && /Config::isDebug\(\)/.test(err),
   'unhandled errors are still logged and internals stay hidden unless APP_DEBUG');
 
+/* ── D2. Support Contact controller — the newly exposed page must save ────── */
+{
+  const routes = read(ROUTES);
+  ok(routes.includes("$router->put('/admin/support-settings', [SupportController::class, 'adminUpdate']"),
+    'PUT /admin/support-settings is wired to SupportController::adminUpdate');
+  ok(routes.includes("$router->get('/admin/support-settings', [SupportController::class, 'adminIndex']"),
+    'GET /admin/support-settings is wired to SupportController::adminIndex');
+  ok(routes.includes("$router->get('/support/contact', [SupportController::class, 'publicContact']"),
+    'GET /support/contact is wired to SupportController::publicContact (public, no auth)');
+
+  const supSrc = read(path.join(BACKEND, 'src', 'Controllers', 'SupportController.php'));
+  ok(supSrc.includes('public function adminUpdate(Request $request): void'),
+    'SupportController::adminUpdate implemented (the save handler)');
+  ok(supSrc.includes('public function adminIndex(Request $request): void'),
+    'SupportController::adminIndex implemented');
+  ok(supSrc.includes('public function publicContact(Request $request): void'),
+    'SupportController::publicContact implemented (public blocked-screen read)');
+  ok(supSrc.includes('private function assertSuperAdmin'),
+    'SupportController enforces Super Admin authorization on writes');
+  ok(supSrc.includes('ON DUPLICATE KEY UPDATE'),
+    'SupportController uses upsert (INSERT ... ON DUPLICATE KEY UPDATE)');  ok(supSrc.includes('AuditService::write') && supSrc.includes('support_settings_updated'),
+    'SupportController audits changes via the canonical AuditService (support_settings_updated)');
+  ok(!supSrc.includes('$value.trim().replace') && !supSrc.includes('\`+${'),
+    'SupportController phone normalization uses PHP preg_replace, not JS syntax');
+}
+
 /* ── E. release dependencies present in the tree ──────────────────────────── */
 
 ok(exists('backend/database/mysql-migrations/025_audit_actions_platform_console.sql'),

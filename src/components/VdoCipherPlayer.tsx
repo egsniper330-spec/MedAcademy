@@ -51,6 +51,15 @@ export interface VdoCipherPlayerProps {
    * stale boolean from player-creation time is never trusted.
    */
   shouldAllowFullscreen?: () => Promise<boolean> | boolean;
+  /**
+   * LIVE VERDICT — synchronous read of the host's already-published verdict.
+   * When supplied, fullscreen commits in the same frame as the tap; the gate
+   * above (plus this player's existing 5s live re-check) still collapses
+   * fullscreen the moment the authoritative verdict turns blocking, so the
+   * protection is unchanged — only the ordering of the visible transition.
+   * Omit to keep the previous strictly-blocking behaviour.
+   */
+  fullscreenVerdictNow?: () => boolean;
 }
 
 // ─── Router ───────────────────────────────────────────────────────────────────

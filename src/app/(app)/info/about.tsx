@@ -43,11 +43,12 @@ export default function AboutPage() {
   const pillarIconSz = layout.touchTarget;
 
   return (
-    <ScrollView
-      style={{ flex: 1, backgroundColor: c.base }}
-      contentContainerStyle={{ padding: layout.screenPx }}
-    >
+    <View style={{ flex: 1, backgroundColor: c.base }}>
       <PageHeader title="About Us" showBack />
+      <ScrollView
+        style={{ flex: 1 }}
+        contentContainerStyle={{ padding: layout.screenPx }}
+      >
 
       {/* ── Hero ─────────────────────────────────────────────────────────── */}
       <Animated.View
@@ -195,5 +196,6 @@ export default function AboutPage() {
         </Text>
       </NeuCard>
     </ScrollView>
+    </View>
   );
 }

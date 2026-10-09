@@ -67,8 +67,14 @@ console.log('G1: config plugins emit Groovy without live JS interpolation of Gro
         // means any of: const/let/var/function declaration, a function
         // parameter, or a destructuring binding — a bare identifier inside an
         // emitted string does NOT count (that was the expectedCert bug).
-        const name = line.slice(idx + 2).split(/[})\s.]/)[0].trim();
-        const esc = name.replace(/[$]/g, '\\$');
+        // The interpolated expression may be a CALL (e.g. `${escapeXml(host)}`),
+        // not just a bare identifier. Take the leading identifier only, and
+        // escape it fully before building a RegExp from it — otherwise a name
+        // like "escapeXml(host" becomes an unterminated group and crashes this
+        // guard instead of reporting a finding.
+        const name = (line.slice(idx + 2).match(/^[A-Za-z_$][A-Za-z0-9_$]*/) || [''])[0];
+        if (!name) return;
+        const esc = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
         const declared =
           new RegExp('(?:const|let|var|function)\\s+' + esc + '\\b').test(src) ||
           new RegExp('function\\s*\\([^)]*\\b' + esc + '\\b[^)]*\\)').test(src) ||

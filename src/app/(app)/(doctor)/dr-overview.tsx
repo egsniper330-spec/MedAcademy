@@ -12,6 +12,7 @@ import { StatCard } from '@/components/StatCard';
 import { QuickActionBtn } from '@/components/QuickActionBtn';
 import { neuColors, useLayout, neuMicroStyle, safeBottom } from '@/lib/neu';
 import { CourseThumbnail } from '@/components/CourseThumbnail';
+import { useStaleWhileRevalidateFocus } from '@/lib/useStaleWhileRevalidateFocus';
 import type { RelativePathString } from 'expo-router';
 import { useNotificationPermission } from '@/hooks/useNotificationPermission';
 import { PermissionRationaleModal } from '@/components/PermissionRationaleModal';
@@ -46,7 +47,13 @@ export default function DoctorDashboard() {
     setLoading(false);
   }, [profile]);
 
-  useFocusEffect(useCallback(() => { setLoading(true); loadData(); }, [loadData]));
+  // Stale-while-revalidate: first visit shows the spinner; every return to
+  // this dashboard refreshes in the background with the existing cards still
+  // mounted instead of blanking the screen back to a spinner.
+  useStaleWhileRevalidateFocus(loadData, {
+    setLoading,
+    hasContent: () => courses.length > 0 || enrollments.length > 0,
+  });
   const onRefresh = async () => {
     setRefreshing(true);
     await Promise.all([loadData(), refreshCredits()]);

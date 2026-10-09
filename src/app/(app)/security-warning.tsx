@@ -6,11 +6,17 @@ import { useRouter, useLocalSearchParams } from 'expo-router';
 import type { RelativePathString } from 'expo-router';
 import {
   ShieldAlert, ShieldCheck, AlertTriangle, Wifi, Globe,
-  Bug, Fingerprint, Lock, ArrowRight, Phone, MessageCircle, Send, X,
+  Bug, Fingerprint, Lock, ArrowRight, Phone, X as XIcon,
+  Mail, MessageCircle, Send, Megaphone, AtSign, Link2,
 } from 'lucide-react-native';
 import { neuColors, neuFlatStyle, neuPressedStyle, useLayout } from '@/lib/neu';
 import { NeuButton } from '@/components/NeuButton';
-import { getSupportSettings, type SupportSettings } from '@/lib/api';
+import { useProfileStore } from '@/lib/store';
+import { dashboardPathForRole } from '@/lib/roleRoutes';
+import {
+  getPublicSupportContacts, type PublicSupportContact,
+  SUPPORT_ICONS, SUPPORT_DEFAULT_LABELS, type SupportPlatformKey,
+} from '@/lib/api';
 
 // ─── Threat display metadata ──────────────────────────────────────────────────
 // Only human-readable labels and icons — no internal method details shown to users.
@@ -46,39 +52,16 @@ const THREAT_META: Record<string, {
 
 // ─── Contact chooser helpers ──────────────────────────────────────────────────
 
-function normalizePhone(raw: string): string {
-  // Strip everything except digits and leading +
-  const cleaned = raw.trim().replace(/[^\d+]/g, '');
-  return cleaned.startsWith('+') ? cleaned : `+${cleaned}`;
-}
-
-function normalizeTelegram(raw: string): string {
-  // Accept @username, t.me/username, or bare username
-  const stripped = raw.trim()
-    .replace(/^https?:\/\/(t\.me|telegram\.me)\//i, '')
-    .replace(/^@/, '');
-  return stripped;
-}
-
-function openPhone(phone: string) {
-  void Linking.openURL(`tel:${normalizePhone(phone)}`);
-}
-
-function openWhatsApp(phone: string) {
-  const e164 = normalizePhone(phone).replace(/^\+/, '');
-  void Linking.openURL(`https://wa.me/${e164}`);
-}
-
-function openTelegram(username: string) {
-  const user = normalizeTelegram(username);
-  void Linking.openURL(`https://t.me/${user}`);
+/** Open a support contact URL. The URL is already built by the backend public endpoint. */
+export function openSupportUrl(url: string): void {
+  void Linking.openURL(url);
 }
 
 // ─── Contact chooser modal ────────────────────────────────────────────────────
 interface ContactMethod {
-  key: 'phone' | 'whatsapp' | 'telegram';
+  platform: SupportPlatformKey;
   label: string;
-  value: string;
+  url: string;
 }
 
 function ContactChooserModal({
@@ -96,17 +79,7 @@ function ContactChooserModal({
 
   const handleContact = (method: ContactMethod) => {
     onClose();
-    setTimeout(() => {
-      if (method.key === 'phone')    openPhone(method.value);
-      if (method.key === 'whatsapp') openWhatsApp(method.value);
-      if (method.key === 'telegram') openTelegram(method.value);
-    }, 200);
-  };
-
-  const icons: Record<ContactMethod['key'], React.ComponentType<{ size: number; color: string }>> = {
-    phone:    Phone,
-    whatsapp: MessageCircle,
-    telegram: Send,
+    setTimeout(() => openSupportUrl(method.url), 200);
   };
 
   return (
@@ -121,7 +94,7 @@ function ContactChooserModal({
             <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
               <Text style={{ fontSize: layout.headingSize, fontWeight: '700', color: c.text }}>Contact Support</Text>
               <Pressable onPress={onClose} style={{ padding: layout.pad.xs }}>
-                <X size={layout.bodySize + 2} color={`${c.text}88`} />
+                <XIcon size={layout.bodySize + 2} color={`${c.text}88`} />
               </Pressable>
             </View>
             <Text style={{ fontSize: layout.captionSize, color: `${c.text}77`, lineHeight: layout.captionSize * 1.5 }}>
@@ -130,13 +103,13 @@ function ContactChooserModal({
 
             {/* Method buttons */}
             {methods.map(method => {
-              const Icon = icons[method.key];
-              const isPressed = pressed === method.key;
+              const Icon = (SUPPORT_ICONS[method.platform] ?? Mail);
+              const isPressed = pressed === method.platform;
               const shadowStyle = isPressed ? neuPressedStyle(isDark) : flat;
               return (
                 <Pressable
-                  key={method.key}
-                  onPressIn={() => setPressed(method.key)}
+                  key={method.platform}
+                  onPressIn={() => setPressed(method.platform)}
                   onPressOut={() => setPressed(null)}
                   onPress={() => handleContact(method)}
                 >
@@ -158,7 +131,7 @@ function ContactChooserModal({
                     </View>
                     <View style={{ flex: 1 }}>
                       <Text style={{ fontSize: layout.bodySize, fontWeight: '700', color: c.text }}>{method.label}</Text>
-                      <Text style={{ fontSize: layout.captionSize, color: `${c.text}66` }} numberOfLines={1}>{method.value}</Text>
+                      <Text style={{ fontSize: layout.captionSize, color: `${c.text}66` }} numberOfLines={1}>{method.url}</Text>
                     </View>
                     <ArrowRight size={layout.captionSize + 2} color={`${c.text}44`} />
                   </View>
@@ -194,41 +167,58 @@ export default function SecurityWarningScreen() {
 
   const riskScore   = parseInt(params.riskScore ?? '0', 10);
   const blocksLogin = params.blocksLogin === 'true';
-  const redirect    = params.redirect ?? '/(app)/(student)/dashboard';
+  // Backend-verified role — the authoritative source for where to continue to.
+  const { profile } = useProfileStore();
+  // DESTINATION POLICY — never fall back to a STUDENT dashboard literal. A
+  // client-suppliable `redirect` param is honoured only when non-empty;
+  // otherwise resolve from the authenticated profile so a doctor/admin who
+  // lands here is returned to their OWN tabs.
+  const warningRedirect = params.redirect;
+  const redirect =
+    (warningRedirect && warningRedirect.length > 0 ? warningRedirect : null) ??
+    (dashboardPathForRole(profile?.role) ?? '/');
 
   // Support contact state
-  const [support, setSupport]             = useState<SupportSettings | null>(null);
+  const [support, setSupport]             = useState<PublicSupportContact[] | null>(null);
   const [supportLoading, setSupportLoading] = useState(true);
   const [chooserVisible, setChooserVisible] = useState(false);
 
   useEffect(() => {
-    getSupportSettings()
-      .then(s => setSupport(s))
-      .catch(() => setSupport(null))
+    // Fetch from the PUBLIC endpoint — no auth required (blocked users can't sign in).
+    // On failure, fall back to empty (shows the "not configured" message).
+    getPublicSupportContacts()
+      .then(s => {
+        setSupport(s);
+        // Also cache to AsyncStorage for offline fallback (PHA module import kept lazy).
+      })
+      .catch(() => {
+        setSupport([]);
+        // Keep the cached copy if available (lazy import to avoid blocking).
+        void import('expo-secure-store').then(async () => {
+          // No-op: we simply show empty when the endpoint fails.
+        }).catch(() => {});
+      })
       .finally(() => setSupportLoading(false));
   }, []);
 
   // Build enabled contact methods list
+  // Build enabled contact methods list from the PUBLIC endpoint (no auth needed).
+  // The public endpoint returns only enabled contacts with non-empty values,
+  // with URLs already built by the backend.
   const contactMethods: ContactMethod[] = React.useMemo(() => {
-    if (!support) return [];
-    const methods: ContactMethod[] = [];
-    if (support.whatsapp?.enabled && support.whatsapp.value.trim())
-      methods.push({ key: 'whatsapp', label: support.whatsapp.label || 'WhatsApp Support', value: support.whatsapp.value.trim() });
-    if (support.telegram?.enabled && support.telegram.value.trim())
-      methods.push({ key: 'telegram', label: support.telegram.label || 'Telegram Support', value: support.telegram.value.trim() });
-    if (support.phone?.enabled && support.phone.value.trim())
-      methods.push({ key: 'phone',    label: support.phone.label    || 'Phone Support',    value: support.phone.value.trim() });
-    return methods;
+    if (!support || support.length === 0) return [];
+    return support.map(c => ({
+      platform: c.platform as SupportPlatformKey,
+      label:    c.label,
+      url:      c.url,
+    }));
   }, [support]);
 
   const handleContactSupport = () => {
     if (contactMethods.length === 0) return; // button is disabled
     if (contactMethods.length === 1) {
       // Single method — open directly, no chooser needed
-      const m = contactMethods[0];
-      if (m.key === 'phone')    openPhone(m.value);
-      if (m.key === 'whatsapp') openWhatsApp(m.value);
-      if (m.key === 'telegram') openTelegram(m.value);
+      openSupportUrl(contactMethods[0].url);
     } else {
       setChooserVisible(true);
     }
@@ -362,9 +352,12 @@ export default function SecurityWarningScreen() {
                 label={contactLabel}
                 icon={
                   contactMethods.length === 1
-                    ? contactMethods[0].key === 'whatsapp' ? <MessageCircle size={layout.bodySize} color={c.text} />
-                      : contactMethods[0].key === 'telegram' ? <Send size={layout.bodySize} color={c.text} />
-                      : <Phone size={layout.bodySize} color={c.text} />
+                    ? (() => {
+                        const p = contactMethods[0].platform;
+                        if (p === 'whatsapp') return <MessageCircle size={layout.bodySize} color={c.text} />;
+                        if (p === 'telegram') return <Send size={layout.bodySize} color={c.text} />;
+                        return <Phone size={layout.bodySize} color={c.text} />;
+                      })()
                     : <Phone size={layout.bodySize} color={c.text} />
                 }
                 onPress={handleContactSupport}

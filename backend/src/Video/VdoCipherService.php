@@ -39,16 +39,71 @@ final class VdoCipherService
     }
 
     /**
-     * SERVER-SIDE ANNOTATE WATERMARK — REMOVED (2026-09).
+     * DYNAMIC (MOVING) STREAM WATERMARK — `annotate` on the ONLINE OTP.
      *
-     * VdoCipher's stream annotation previously burned "NAME\nID: MED-####"
-     * into the video, which appeared alongside the app's canonical client
-     * overlay "NAME • MED-####" (watermarkIdentity.ts + NativeWatermarkOverlay
-     * / the Plyr in-HTML overlay) — the reported duplicate watermark. The
-     * client overlay is the single watermark for every platform (VdoCipher
-     * online, VdoCipher offline, Plyr/YouTube): same identity, same format,
-     * same forensic purpose. Keep NO annotate payload in any OTP.
+     * VdoCipher burns this text INTO THE STREAM server-side, so it is present in
+     * fullscreen, survives any React Native view re-parenting, and cannot be
+     * removed by clearing a DOM/overlay element — which a client-side overlay
+     * alone cannot guarantee.
+     *
+     * SCOPE: streaming OTPs only. `offlineAuthorize()` keeps the client overlay
+     * as its single watermark — the offline token is persisted by the app, so
+     * changing it here without an app-side contract would reintroduce the
+     * reported duplicate watermark on downloaded videos.
+     *
+     * ANTI-DUPLICATION CONTRACT: it was removed in 2026-09 because it
+     * double-fired alongside the app overlay (burned-in "NAME\nID: MED-####"
+     * PLUS the overlay pill) — the reported duplicate watermark. The OTP
+     * response now carries `annotateApplied`, and the app renders its overlay
+     * ONLY when that flag is false, so exactly one watermark is ever shown.
+     * The overlay stays as the fallback for accounts that cannot be annotated
+     * (missing name/public id) and for providers with no server-side
+     * annotation at all (YouTube).
+     *
+     * The provider's STATIC text watermark option is not available for mobile
+     * SDK playback, so it is deliberately not used — this is the rotating/moving
+     * annotation instead.
      */
+
+    /**
+     * Build the `annotate` value for the OTP request — a MOVING text watermark.
+     *
+     * `type: rtext` is VdoCipher's rotating text: `interval` is the ms between
+     * moves and `skip` the ms offset before the first move, so the mark is never
+     * static on screen.
+     *
+     * Content is the display name plus the canonical public user id (MED-####),
+     * falling back to the legacy watermark_id for pre-migration rows. Nothing
+     * else — never a password, token, email or device id.
+     *
+     * Built with json_encode(), NEVER string concatenation, so an apostrophe or
+     * quote in a display name cannot break or inject into the JSON payload.
+     * Returns "" when there is nothing safe to render, so callers skip the field
+     * entirely. The API secret is never part of this value.
+     */
+    public function buildAnnotate(string $fullName, string $watermarkId): string
+    {
+        $idLine = trim($watermarkId) !== '' ? 'ID: ' . trim($watermarkId) : '';
+        $name = trim($fullName);
+        $lines = array_filter([
+            $name,
+            $idLine,
+        ], static fn (string $v): bool => $v !== '');
+        if ($lines === []) {
+            return '';
+        }
+        $text = implode("\n", $lines);
+        $annotations = [[
+            'type'     => 'rtext',
+            'text'     => $text,
+            'color'    => '0xFFFFFF',
+            'alpha'    => '0.45',
+            'size'     => '18',
+            'interval' => '25000',
+            'skip'     => '2000',
+        ]];
+        return json_encode($annotations, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) ?: '';
+    }
 
     /**
      * Generate a playback OTP for a lesson video.
@@ -136,8 +191,27 @@ final class VdoCipherService
             $payload['whitelisthref'] = $appDomain;
         }
 
-        // NO 'annotate' payload: the client overlay (Name • MED-####) is the
-        // single watermark. See the class-level note on buildAnnotate removal.
+        // ── DYNAMIC (MOVING) STREAM WATERMARK — server-side annotate ──────
+        // Student playback only, matching the policy this code had before the
+        // 2026-09 removal: staff previewing their own or draft content are not
+        // watermarked. `annotateApplied` tells the app whether the burned-in
+        // watermark is present so it can suppress its own overlay — that flag is
+        // what keeps this from regressing into the reported duplicate watermark.
+        $annotated = false;
+        if (!$isPrivileged && $profile !== null) {
+            $name = trim((string) $profile['full_name']);
+            $wmId = trim((string) ($profile['public_user_id'] ?? ''));
+            if ($wmId === '') {
+                $wmId = trim((string) ($profile['watermark_id'] ?? ''));
+            }
+            if ($name !== '' && $wmId !== '') {
+                $annotate = $this->buildAnnotate($name, $wmId);
+                if ($annotate !== '') {
+                    $payload['annotate'] = $annotate;
+                    $annotated = true;
+                }
+            }
+        }
 
         $res = $this->request('POST', '/videos/' . rawurlencode($videoId) . '/otp', $payload);
         $status = (int) $res['status'];
@@ -162,7 +236,14 @@ final class VdoCipherService
             'lesson_id' => $lessonId,
         ], $ipAddress);
 
-        return ['otp' => $data['otp'] ?? null, 'playbackInfo' => $data['playbackInfo'] ?? null];
+        return [
+            'otp'             => $data['otp'] ?? null,
+            'playbackInfo'    => $data['playbackInfo'] ?? null,
+            // TRUE when the moving stream watermark was attached to THIS OTP;
+            // the app suppresses its own overlay in that case so exactly one
+            // watermark is ever shown. Never a secret.
+            'annotateApplied' => $annotated,
+        ];
     }
 
     /**
@@ -280,8 +361,12 @@ final class VdoCipherService
             $payload['whitelisthref'] = $appDomain;
         }
 
-        // NO 'annotate' payload: the client overlay (Name • MED-####) is the
-        // single watermark, online and offline alike.
+        // WATERMARK: the client-side overlay remains the single watermark for
+        // OFFLINE playback (see the class-level SCOPE note). The moving
+        // `annotate` watermark is restored for ONLINE streaming OTPs only.
+        // Adding it here would double-fire against the overlay the offline
+        // player renders, because the offline token is persisted by the app and
+        // has no app-side `annotateApplied` contract yet.
 
         // OFFLINE LICENSE (official VdoCipher offline-OTP contract): the OTP
         // must carry licenseRules = {"canPersist":true,"rentalDuration":<sec>}

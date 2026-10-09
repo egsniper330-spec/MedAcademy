@@ -59,11 +59,12 @@ export default function TermsPage() {
   const iconInner = Math.round(iconSz * 0.5);
 
   return (
-    <ScrollView
-      style={{ flex: 1, backgroundColor: c.base }}
-      contentContainerStyle={{ padding: layout.screenPx }}
-    >
+    <View style={{ flex: 1, backgroundColor: c.base }}>
       <PageHeader title="Terms & Conditions" showBack />
+      <ScrollView
+        style={{ flex: 1 }}
+        contentContainerStyle={{ padding: layout.screenPx }}
+      >
 
       {/* Icon header */}
       <View style={{ alignItems: 'center', marginBottom: layout.sectionGap, marginTop: layout.pad.xs }}>
@@ -98,5 +99,6 @@ export default function TermsPage() {
         </NeuCard>
       ))}
     </ScrollView>
+    </View>
   );
 }

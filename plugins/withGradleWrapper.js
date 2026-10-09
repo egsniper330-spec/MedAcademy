@@ -158,6 +158,58 @@ const withGradleWrapper = (config) => {
           fs.writeFileSync(buildGradleFile, contents, 'utf8');
           console.log('[withGradleWrapper] Injected VdoCipher Maven repo into build.gradle');
         }
+
+        // ── 4. JVM target alignment (idempotent) ────────────────────────────
+        // gradle.properties sets react.internal.disableJavaVersionAlignment=true
+        // so Gradle never downloads a Foojay toolchain on build servers. That
+        // flag also disables React Native's own Java/Kotlin alignment, leaving
+        // library subprojects compiling Java at 1.8 while Kotlin compiles at
+        // 17 — Gradle then fails with "Inconsistent JVM-target compatibility
+        // detected for tasks compileReleaseJavaWithJavac (1.8) and
+        // compileReleaseKotlin (17)".
+        //
+        // Instead of forcing one fixed version on every module (which would
+        // mismatch modules that deliberately use a different Java target),
+        // align Kotlin to EACH subproject's actual Java target, evaluated
+        // lazily when the task is configured. We deliberately avoid
+        // afterEvaluate: appending this block at the end of the root script
+        // (after expo-root-project / react.rootproject) means some subprojects
+        // may already be evaluated by the time it runs, and afterEvaluate on
+        // an evaluated project throws "Cannot run Project.afterEvaluate…
+        // when the project is already evaluated". tasks.configureEach is a
+        // live registration and is safe in any evaluation order.
+        const JVM_ALIGN_MARKER = 'MedAcademy: JVM target alignment';
+        if (!contents.includes(JVM_ALIGN_MARKER)) {
+          const jvmBlock = [
+            '',
+            '// ' + JVM_ALIGN_MARKER + ' (injected by plugins/withGradleWrapper.js).',
+            '// react.internal.disableJavaVersionAlignment=true (gradle.properties)',
+            '// disables React Native\'s Java/Kotlin alignment to avoid toolchain',
+            '// downloads, so library subprojects would otherwise compile Java at',
+            '// 1.8 while Kotlin compiles at 17 (Gradle "Inconsistent JVM-target',
+            '// compatibility" failure). Align Kotlin to each subproject\'s real',
+            '// Java target instead. Registered lazily at task-configuration time,',
+            '// so it is safe regardless of subproject evaluation order.',
+            'subprojects { proj ->',
+            '  proj.tasks.configureEach { t ->',
+            '    if (t instanceof org.jetbrains.kotlin.gradle.tasks.KotlinCompile) {',
+            '      try {',
+            "        def androidExt = t.project.extensions.findByName('android')",
+            '        if (androidExt != null) {',
+            "          def compat = String.valueOf(androidExt.compileOptions.sourceCompatibility)",
+            "          t.compilerOptions.jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.valueOf('JVM_' + compat.replace('.', '_')))",
+            '        }',
+            '      } catch (Throwable e) {',
+            "        println('[jvm-align] WARNING: ' + proj.path + ' ' + t.name + ': ' + e.message)",
+            '      }',
+            '    }',
+            '  }',
+            '}',
+            '',
+          ].join('\n');
+          fs.writeFileSync(buildGradleFile, contents + jvmBlock, 'utf8');
+          console.log('[withGradleWrapper] Injected JVM target alignment into build.gradle');
+        }
       }
 
       return cfg;

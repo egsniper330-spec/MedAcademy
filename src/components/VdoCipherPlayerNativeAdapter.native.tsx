@@ -65,6 +65,8 @@ import { ArrowLeft, Maximize2 } from 'lucide-react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { VdoPlayerView } from 'vdocipher-rn-bridge';
 import { useFullscreenWindowDims } from '@/lib/useFullscreenWindowDims';
+import { beginFullscreenOrientation, releaseFullscreenOrientation } from '@/lib/fullscreenOrientation';
+import { useSecurityPlaybackStop } from '@/lib/useSecurityPlaybackStop';
 import { playerSessionMount, playerSessionUnmount } from '@/lib/vdoPlayerSession';
 import { getVideoPlaybackToken } from '@/lib/api';
 import { neuColors } from '@/lib/neu';
@@ -151,10 +153,18 @@ export function VdoCipherPlayerNativeAdapter({
   onError,
   onFullscreen,
   shouldAllowFullscreen,
+  fullscreenVerdictNow,
 }: VdoCipherPlayerProps) {
   const isDark = useColorScheme() === 'dark';
   const c = isDark ? neuColors.dark : neuColors.light;
   const insets = useSafeAreaInsets();
+
+  // ── SECURITY CONTAINMENT: pause the native player the instant the central
+  // security lock engages (soft provisional containment from the native VPN
+  // callback included), BEFORE any React re-render could unmount it. React
+  // unmounting is the screen's job (hard lock); this is the synchronous stop
+  // that also covers an in-place FULLSCREEN player. */}
+  const playerRef = useSecurityPlaybackStop();
 
   // WATERMARK IDENTITY — the ONE authoritative resolver (shared with offline).
   // Public MED-#### id only; a UUID in the id slot is dirty data and renders
@@ -177,6 +187,10 @@ export function VdoCipherPlayerNativeAdapter({
 
   const [otp, setOtp]               = useState<string | null>(null);
   const [playbackInfo, setPlaybackInfo] = useState<string | null>(null);
+  // TRUE when the OTP carries VdoCipher's burned-in MOVING watermark. In that
+  // case this component must NOT render NativeWatermarkOverlay — the two
+  // together were the reported duplicate watermark.
+  const [annotateApplied, setAnnotateApplied] = useState(false);
   const [loading, setLoading]       = useState(true);
   const [error, setError]           = useState<string | null>(null);
 
@@ -274,6 +288,7 @@ export function VdoCipherPlayerNativeAdapter({
     setError(null);
     setOtp(null);
     setPlaybackInfo(null);
+    setAnnotateApplied(false);
     durationSecRef.current = 0;
 
     (async () => {
@@ -282,6 +297,7 @@ export function VdoCipherPlayerNativeAdapter({
         if (!cancelled) {
           setOtp(result.otp);
           setPlaybackInfo(result.playbackInfo);
+          setAnnotateApplied(result.annotateApplied === true);
           setLoading(false);
         }
       } catch (err: any) {
@@ -330,17 +346,46 @@ export function VdoCipherPlayerNativeAdapter({
 
   // ── Fullscreen enter/exit (SAME player instance both ways) ────────────────
   const enterFullscreen = useCallback(async () => {
+    // ROTATION FIRST (latency fix, ordering only): the gate below is
+    // network-bound, so rotate while it evaluates instead of after it. A denial
+    // rolls the rotation back — fullscreen is still never committed unverified.
+    beginFullscreenOrientation();
+
+    // ── INSTANT ENTRY ON THE LIVE VERDICT (fullscreen latency) ───────────────
+    // The host's PUBLISHED verdict decides entry synchronously, so fullscreen
+    // commits in the same frame as the tap. The authoritative gate is NOT
+    // skipped: the live gate mirror above re-runs it immediately when
+    // isFullscreen flips (and every 5s while fullscreen) and collapses
+    // fullscreen the moment it refuses — the same fail-closed path that already
+    // handles a violation appearing mid-playback.
+    if (fullscreenVerdictNow) {
+      let allowedNow = false;
+      try {
+        allowedNow = fullscreenVerdictNow() === true;
+      } catch {
+        allowedNow = false; // evaluation error → no fullscreen
+      }
+      if (!allowedNow) { releaseFullscreenOrientation(); return; }
+      setIsFullscreen(true);
+      return;
+    }
+
+    // ── FALLBACK (no sync verdict wired): previous blocking semantics ────────
     // SECURITY GATE — fail-closed: blocked state, in-flight evaluation, or a
     // thrown error all refuse fullscreen.
     if (shouldAllowFullscreen) {
       try {
-        if (!(await shouldAllowFullscreen())) return;
+        if (!(await shouldAllowFullscreen())) {
+          releaseFullscreenOrientation();
+          return;
+        }
       } catch {
+        releaseFullscreenOrientation();
         return;
       }
     }
     setIsFullscreen(true);
-  }, [shouldAllowFullscreen]);
+  }, [shouldAllowFullscreen, fullscreenVerdictNow]);
 
   const exitFullscreen = useCallback(() => {
     setIsFullscreen(false);
@@ -402,8 +447,26 @@ export function VdoCipherPlayerNativeAdapter({
   //
   // embedInfo.enableAutoResume=true activates VdoCipher's server-side resume
   // feature so the SDK automatically seeks to the last saved position on load.
-  // showNativeControls=true renders VdoCipher's built-in control bar
-  // (play/pause, seek, quality, and — on Android — the fullscreen button).
+  // ── showNativeControls MUST STAY ENABLED — do not pass false ─────────────
+  //
+  // The VdoCipher SDK control bar is the ONLY source of user playback control
+  // in this player: play/pause, the timeline (position + duration), drag-to-seek
+  // and the ±10s rewind/forward buttons. There is no app-level replacement —
+  // this component renders only a fullscreen button and the watermark overlay.
+  //
+  // Setting it to false does NOT "declutter" the view. The bridge then renders
+  // an entirely different native view (VdoPlayerSupportView → RCTVdoPlayerView)
+  // that has NO control bar at all: tapping the video reveals nothing, the
+  // timeline is gone, and playback can neither be paused nor seeked — it just
+  // runs until the user leaves the screen. It ALSO silently disables the
+  // MEDACADEMY single-fullscreen-entry patch, because that patch lives in
+  // ReactVdoPlayerUIView, the class only used when the bar is enabled.
+  //
+  // Enabling the bar does NOT reintroduce the surface-promoting fullscreen that
+  // used to bury the watermark: the bridge patch hides the SDK's OWN enter/exit
+  // fullscreen buttons per-button, leaving play/seek/quality/speed/captions
+  // untouched (see patches/vdocipher-rn-bridge+2.0.1.patch).
+  //
   // autoPlay=true mirrors the original WebView behaviour.
 
   return (
@@ -423,6 +486,7 @@ export function VdoCipherPlayerNativeAdapter({
     >
       {isFullscreen && <StatusBar hidden />}
       <VdoPlayerView
+        ref={playerRef}
         embedInfo={{
           otp,
           playbackInfo,
@@ -450,7 +514,7 @@ export function VdoCipherPlayerNativeAdapter({
           window, no surface reparenting) with the watermark overlay inside it.
           Rendered AFTER the native player so it wins the touch order, and it
           stays visible while inline (reliability over the SDK's auto-hide). */}
-      {!isFullscreen && Platform.OS === 'android' && (
+      {!isFullscreen && Platform.OS !== 'ios' && (
         <Pressable
           onPress={() => void enterFullscreen()}
           accessibilityLabel="Enter fullscreen"
@@ -474,7 +538,7 @@ export function VdoCipherPlayerNativeAdapter({
         </Pressable>
       )}
 
-      {identity && (
+      {identity && !annotateApplied && (
         <NativeWatermarkOverlay
           watermarkId={identity.id}
           watermarkName={identity.name ?? undefined}
@@ -509,18 +573,23 @@ export function VdoCipherPlayerNativeAdapter({
           Exit paths below: the app back-arrow (both platforms) and, on iOS, the
           SDK's exit control — all call the same exitFullscreen(). */}
 
-      {/* EXIT-fullscreen control (both platforms) — the single app-level exit
-          affordance, safe-area aware so it never sits under the Dynamic
-          Island or overlaps the status area. Collapses the SAME instance
-          back into the inline layout; playback continues uninterrupted
-          (same player, same position, no recreation). */}
+      {/* EXIT-fullscreen control (Android) — the single app-level exit
+          affordance for the app's fullscreen path, safe-area aware so it never
+          sits under the status area. Collapses the SAME instance back into the
+          inline layout; playback continues uninterrupted (same player, same
+          position, no recreation). The SDK's own exit control also fires
+          onExitFullscreen → exitFullscreen() above, but that path is surfaced
+          by the Android control bar (disabled by the bridge patch) so the only
+          reachable app-level exit affordance is this one.
+          Android only: on iOS the SDK's own fullscreen button remains the single
+          entry, and its exit control is the only app-visible exit affordance. */}
       {isFullscreen && (
         <Pressable
           onPress={exitFullscreen}
           style={{
             position: 'absolute',
             top: Math.max(12, insets.top + 8),
-            left: 12,
+            left: Math.max(12, insets.left + 8),
             width: 44,
             height: 44,
             borderRadius: 22,

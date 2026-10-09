@@ -13,7 +13,7 @@ import {
   FileText, Megaphone, ShieldAlert, ShieldCheck,
   ShieldX, AlertOctagon, Trash2, Lock, Eye, HeartPulse,
   MonitorDot, HardDrive, Shield, UserCog, HeartHandshake,
-  Upload, Database, SquareCode,
+  Upload, Database, SquareCode, Globe,
 } from 'lucide-react-native';
 import { PageHeader } from '@/components/PageHeader';
 import { neuColors, neuFlatStyle, neuPressedStyle, useLayout, safeBottom } from '@/lib/neu';
@@ -92,6 +92,7 @@ export default function SAPlatform() {
 
         {/* ── Integrations ─────────────────────────────────────────────── */}
         <SectionLabel title="Integrations" c={c} />
+                <NavItem icon={Globe}       label="Support Contact"    description="Contact methods shown on the blocked screen" color="#7C3AED" path="/sa-support-settings"   c={c} isDark={isDark} />
         <NavItem icon={Activity}    label="System Diagnostics" description="Database, DRM, email & storage health"     color="#059669" path="/sa-system-providers"      c={c} isDark={isDark} />
         <NavItem icon={Video}       label="Video Providers"    description="CDN and video platform settings"          color="#7C3AED" path="/video-providers"     c={c} isDark={isDark} />
         <NavItem icon={Coins}       label="Currency Settings"  description="Platform default currency"                color="#D97706" path="/sa-currency"             c={c} isDark={isDark} />

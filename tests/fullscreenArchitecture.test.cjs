@@ -86,8 +86,8 @@ for (const p of [ONLINE_ADAPTER, OFFLINE_PLAYER]) {
   // single entry, so the app must not render a second one there.
   const enterControls = (s.match(/accessibilityLabel="Enter fullscreen"/g) || []).length;
   ok(enterControls === 1, `${p}: exactly ONE app-level enter-fullscreen control`);
-  ok(/!isFullscreen && Platform\.OS === 'android' && \([\s\S]{0,400}Enter fullscreen/.test(s),
-    `${p}: the app enter control is Android-only (iOS keeps the SDK button as its single entry)`);
+  ok(/!isFullscreen && Platform\.OS !== 'ios' && \([\s\S]{0,400}Enter fullscreen/.test(s),
+    `${p}: the app enter control is non-iOS only (iOS keeps the SDK button as its only entry when SDK controls suppressed)`);
   ok(/onPress=\{\(\) => void enterFullscreen\(\)\}/.test(s),
     `${p}: the app enter control calls the canonical enterFullscreen() (gated, in-place)`);
   // Exactly ONE rendered Maximize2 element (the single enter control) plus its
@@ -279,13 +279,36 @@ console.log('── Props plumbing: gate + onFullscreen forwarded through wrappe
 
 /* ───────────────────────── PIN 2: watermark single source ───────────────── */
 
-console.log('── Duplicate server-side watermark renderer removed ──');
+console.log('── Server-side MOVING watermark: annotate restored, ONE watermark per playback ──');
 {
   const svc = read('backend/src/Video/VdoCipherService.php');
-  // The method is gone; only its removal NOTE (a comment) may remain.
-  ok(!/function\s+buildAnnotate/.test(svc), 'VdoCipherService.php: buildAnnotate() method removed (stream-burned "ID: MED-####" watermark)');
-  ok(!/'annotate'\s*=>/.test(svc), 'VdoCipherService.php: no annotate payload composed into any OTP options');
-  ok(!/ID:\s*["'\.]/.test(svc), 'VdoCipherService.php: no "ID: " label composed anywhere');
+  // buildAnnotate() is back. VdoCipher's `rtext` annotation burns the identity
+  // INTO THE STREAM, so it is present in fullscreen and cannot be removed by
+  // clearing an overlay — which is exactly what a client-side overlay alone
+  // cannot guarantee. It must be built with json_encode, never concatenation.
+  ok(/function\s+buildAnnotate/.test(svc), 'VdoCipherService.php: buildAnnotate() present (stream-burned watermark)');
+  ok(/'type'\s*=>\s*'rtext'/.test(svc), 'VdoCipherService.php: annotation is MOVING (rtext), not the static option');
+  ok(/json_encode\(\$annotations/.test(svc), 'VdoCipherService.php: annotate built with json_encode — no raw concatenation');
+
+  const otpFn  = svc.slice(svc.indexOf('public function otp('), svc.indexOf('public function offlineAuthorize('));
+  const offFn  = svc.slice(svc.indexOf('public function offlineAuthorize('));
+
+  // ONLINE only. Offline keeps the client overlay as its single watermark, so
+  // restoring annotate there without an app-side contract would re-introduce the
+  // reported duplicate watermark on downloaded video.
+  ok(/\$payload\['annotate'\]/.test(otpFn), 'otp(): attaches the stream annotation for online playback');
+  ok(!/\$payload\['annotate'\]/.test(offFn), 'offlineAuthorize(): no annotation (client overlay stays the single watermark)');
+
+  // The contract that prevents the duplicate: the OTP says which watermark is
+  // live, and the players render their overlay only when it is absent.
+  ok(/'annotateApplied'\s*=>\s*\$annotated/.test(otpFn), 'otp(): reports annotateApplied so the app knows which watermark is live');
+  ok(!/'annotateApplied'\s*=>/.test(offFn), 'offlineAuthorize(): does not report annotateApplied (no contract there)');
+
+  // Identity: display name + canonical public id. Nothing sensitive.
+  ok(/full_name/.test(svc) && /public_user_id/.test(svc), 'annotate identity: display name + canonical public user id');
+  const annBody = svc.slice(svc.indexOf('function buildAnnotate'), svc.indexOf('function buildAnnotate') + 1600);
+  ok(!/password|apiSecret|api_secret|\btoken\b|email/i.test(annBody), 'annotate payload: no password / secret / token / email');
+  ok(/students are not watermarked|not watermarked|isPrivileged/.test(svc), 'annotate is staff-exempt (same policy as before)');
 }
 
 console.log('── Canonical client watermark intact in every player ──');
@@ -299,6 +322,19 @@ console.log('── Canonical client watermark intact in every player ──');
     ok(/resolveWatermarkIdentity|NativeWatermarkOverlay/.test(s),
       `${p}: renders the canonical overlay via watermarkIdentity`);
   }
+
+  // Exactly ONE watermark per playback: the online players drop their overlay
+  // when the OTP already carries the burned-in stream annotation. Without this
+  // gate the restored annotate would re-introduce the reported duplicate.
+  // Offline has no annotateApplied and must keep rendering its overlay as-is.
+  const online = read(ONLINE_ADAPTER);
+  ok(/!annotateApplied &&/.test(online),
+    'online adapter: overlay suppressed when the stream watermark is attached');
+  ok(/result\.annotateApplied/.test(online),
+    'online adapter: reads annotateApplied from the OTP response');
+  const offline = read(OFFLINE_PLAYER);
+  ok(!/annotateApplied/.test(offline),
+    'offline player: no annotateApplied gate — overlay stays its single watermark');
   const plyr = read(PLYR_PLAYER);
   ok(/•/.test(plyr) || /watermarkLabel|watermark/.test(plyr.toLowerCase()),
     'Plyr/YouTube player: canonical watermark overlay present');
@@ -522,5 +558,67 @@ console.log('── VdoCipher watermark geometry evidence chain ──');
 }
 
 console.log('──────────────────────────────────────────────');
+/* ───────────────── PIN 3: playback controls must exist ─────────────────── */
+
+console.log('── PIN 3: playback controls exist (SDK control bar stays enabled) ──');
+{
+  const BRIDGE_UI =
+    'node_modules/vdocipher-rn-bridge/android/src/main/java/com/vdocipher/rnbridge/ReactVdoPlayerUIView.java';
+  const CONTROL_VIEW =
+    'node_modules/vdocipher-rn-bridge/android/src/main/java/com/vdocipher/rnbridge/VdoPlayerControlView.java';
+
+  // (1) Neither native player may disable the SDK control bar.
+  //
+  // This is the exact regression that shipped: `showNativeControls` was flipped
+  // to false in BOTH native players. The bridge then renders VdoPlayerSupportView
+  // instead of VdoPlayerUIView, i.e. a player with NO control bar at all —
+  // tapping the video revealed nothing, the timeline (position/duration) was
+  // gone, and playback could be neither paused nor seeked; it just ran until the
+  // user left the screen. Both players render only a fullscreen button and the
+  // watermark overlay, so the SDK bar is the ONLY control source: passing false
+  // removes every user-facing playback control.
+  for (const [label, file] of [['online', ONLINE_ADAPTER], ['offline', OFFLINE_PLAYER]]) {
+    const src = read(file);
+    ok(!/showNativeControls\s*=\s*\{\s*false\s*\}/.test(src),
+      `${label}: must NOT disable showNativeControls (it removes the whole control bar)`);
+    ok(/^\s*showNativeControls\s*$/m.test(src),
+      `${label}: showNativeControls passed as an enabled JSX prop`);
+    ok(src.includes('<VdoPlayerView'), `${label}: renders the SDK VdoPlayerView`);
+    ok(/autoPlay/.test(src), `${label}: autoPlay preserved`);
+  }
+
+  // (2) The bar really provides what the report needs — and the ±10s skips are
+  // real 10 000 ms seek intervals, so no invented/duplicated UI is required.
+  ok(exists(CONTROL_VIEW), 'SDK control bar implementation present (VdoPlayerControlView)');
+  const cv = read(CONTROL_VIEW);
+  for (const id of ['vdo_play', 'vdo_pause', 'vdo_seekbar', 'vdo_position', 'vdo_duration', 'vdo_rewind', 'vdo_ffwd']) {
+    ok(cv.includes(id), `control bar wires ${id}`);
+  }
+  ok(/seekBar\.setOnSeekBarChangeListener/.test(cv),
+    'control bar: timeline is drag-seekable (seek listener bound to the seekbar)');
+  ok(/DEFAULT_REWIND_MS = 10000/.test(cv) && /DEFAULT_FAST_FORWARD_MS = 10000/.test(cv),
+    'control bar: rewind AND fast-forward intervals are both 10s');
+  ok(/findViewById\(R\.id\.vdo_play\)/.test(cv) && /findViewById\(R\.id\.vdo_pause\)/.test(cv),
+    'control bar: separate real play AND pause buttons are bound');
+
+  // (3) Coupling pin: the surgical fullscreen hide lives in the
+  // controls-enabled native view, so disabling the bar silently disables the
+  // single-fullscreen-entry patch as well — the two are one setting.
+  const ui = read(BRIDGE_UI);
+  ok(/scheduleHideSdkFullscreenControls\(\)/.test(ui),
+    'bridge: per-button fullscreen hide armed in the controls-enabled view');
+  ok(/vdo_enter_fullscreen/.test(ui) && /vdo_exit_fullscreen/.test(ui),
+    'bridge: still hides exactly the SDK fullscreen buttons (by public id)');
+  ok(/putBoolean\("showControls",\s*true\)/.test(ui),
+    'bridge: the control bar itself stays enabled (hide is per-button, not global)');
+
+  // (4) Nothing may swallow the controls' touches: the watermark overlay is the
+  // only other full-size view and must stay pointer-transparent.
+  ok(read('src/components/NativeWatermarkOverlay.tsx').includes('pointerEvents="none"'),
+    'watermark overlay is pointerEvents:none — cannot intercept control touches');
+  ok(/wins the touch order/.test(read(ONLINE_ADAPTER)),
+    'fullscreen control is rendered after the native player so it wins touch order');
+}
+
 console.log(`RESULT: ${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

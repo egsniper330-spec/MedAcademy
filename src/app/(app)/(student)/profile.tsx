@@ -23,8 +23,9 @@ import {
 import type { RelativePathString } from 'expo-router';
 import { backendClient } from '@/client/backendClient';
 import { useProfileStore } from '@/lib/store';
+import { resolveImageMime, extFromMime, buildAvatarStoragePath, avatarFileName } from '@/lib/uploadPart';
 import {
-  getProfile, getMySubscriptions, updateProfile,
+  getProfile, getMySubscriptions, updateProfile, removeProfileAvatar,
   getUniversities, getFaculties, getAcademicLevels,
   changePassword, getPublicEmail, isInternalEmail,
 } from '@/lib/api';
@@ -33,6 +34,7 @@ import { NeuCard } from '@/components/NeuCard';
 import { NeuButton } from '@/components/NeuButton';
 import { NeuInputRow } from '@/components/NeuInputRow';
 import { ResponsiveModal } from '@/components/ResponsiveModal';
+import { ProfilePhotoActions } from '@/components/ProfilePhotoActions';
 import { neuColors, useLayout, safeBottom } from '@/lib/neu';
 import { validateRequired, friendlyError } from '@/lib/validation';
 import { useToast } from '@/components/Toast';
@@ -352,16 +354,18 @@ export default function StudentProfile() {
     setAvatarUploading(true);
     try {
       const asset = result.assets[0];
-      const uri   = asset.uri;
-      const ext   = uri.split('.').pop()?.toLowerCase() ?? 'jpg';
-      const path  = `avatars/${profile.id}.${ext}`;
-      // Use expo/fetch (supports arrayBuffer on Android content:// URIs)
-      const { fetch: expoFetch } = await import('expo/fetch');
-      const response = await expoFetch(uri);
-      const buffer   = await response.arrayBuffer();
+      const mime  = resolveImageMime(asset.mimeType, asset.uri);
+      const ext   = extFromMime(mime);
+      // Unique path per upload (fresh URL → no stale CDN/browser cache) and
+      // scoped under the user id, which the backend requires for avatars.
+      const path  = buildAvatarStoragePath(profile.id, ext, Date.now());
+      // Upload the local file URI directly — RN streams it from disk.
+      // Never load the image into JS memory (no arrayBuffer/Blob needed).
       const { error: upErr } = await backendClient.storage
         .from('user-avatars')
-        .upload(path, buffer, { upsert: true, contentType: asset.mimeType ?? `image/${ext}` });
+        .upload(path, { uri: asset.uri, mimeType: mime, name: avatarFileName(ext) }, {
+          upsert: true, contentType: mime,
+        });
       if (upErr) throw upErr;
       const { data: { publicUrl } } = backendClient.storage.from('user-avatars').getPublicUrl(path);
       const updated = await updateProfile(profile.id, { avatar_url: publicUrl });
@@ -371,6 +375,28 @@ export default function StudentProfile() {
       showToast({ type: 'error', message: e?.message ?? 'Failed to upload avatar.' });
     }
     setAvatarUploading(false);
+  };
+
+  // ── Avatar removal ────────────────────────────────────────────────────────
+  // The API clears profiles.avatar_url FIRST (authoritative, persists across
+  // restart and logout/login) and only then best-effort deletes the storage
+  // object. If clearing fails we rethrow, keep `avatar_url` untouched, and so
+  // the existing photo stays visible with a real error — never a blank avatar.
+  const [avatarRemoving, setAvatarRemoving] = useState(false);
+  const handleRemoveAvatar = async () => {
+    if (!profile?.id) return;
+    setAvatarRemoving(true);
+    try {
+      const current = profile.avatar_url;
+      await removeProfileAvatar(profile.id, current);
+      // Mirror the server state locally so the default avatar shows instantly.
+      setProfile({ ...profile, avatar_url: null } as any);
+      showToast({ type: 'success', message: 'Profile photo removed.' });
+    } catch (e: any) {
+      // Failure path deliberately leaves profile.avatar_url as-is.
+      showToast({ type: 'error', message: e?.message ?? 'Failed to remove profile photo.' });
+    }
+    setAvatarRemoving(false);
   };
 
   // ── Logout confirm ────────────────────────────────────────────────────────
@@ -497,29 +523,14 @@ export default function StudentProfile() {
         />
         {/* ── Avatar + name ──────────────────────────────────────────── */}
         <View style={{ alignItems: 'center', marginTop: 12, marginBottom: 28 }}>
-          <Pressable onPress={handlePickAvatar} accessibilityLabel="Change profile photo" accessibilityRole="button" style={{ marginBottom: 14 }}>
-            <View style={{
-              width: 96, height: 96, borderRadius: 48,
-              backgroundColor: `${c.primary}18`, alignItems: 'center', justifyContent: 'center',
-              shadowColor: c.shadowDark, shadowOffset: { width: 4, height: 4 }, shadowOpacity: 0.6, shadowRadius: 10,
-            }}>
-              {avatarUploading ? (
-                <ActivityIndicator color={c.primary} />
-              ) : profile?.avatar_url ? (
-                <Image source={{ uri: profile.avatar_url }} style={{ width: 96, height: 96, borderRadius: 48 }} contentFit="cover" />
-              ) : (
-                <User size={44} color={c.primary} />
-              )}
-            </View>
-            <View style={{
-              position: 'absolute', bottom: 0, right: 0,
-              width: 28, height: 28, borderRadius: 14,
-              backgroundColor: c.primary, alignItems: 'center', justifyContent: 'center',
-              shadowColor: c.shadowDark, shadowOffset: { width: 2, height: 2 }, shadowOpacity: 0.4, shadowRadius: 4,
-            }}>
-              <Camera size={14} color="#fff" />
-            </View>
-          </Pressable>
+          <ProfilePhotoActions
+            avatarUrl={profile?.avatar_url}
+            c={c}
+            uploading={avatarUploading}
+            removing={avatarRemoving}
+            onPick={handlePickAvatar}
+            onRemove={handleRemoveAvatar}
+          />
           <Text style={{ fontSize: 22, fontWeight: '800', color: c.text }}>{profile?.full_name || '—'}</Text>
           <Text style={{ fontSize: 13, color: c.text, opacity: 0.45, marginTop: 4 }}>
             {firstName ? `Welcome back, ${firstName} 👋` : 'Welcome back 👋'}

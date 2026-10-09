@@ -34,6 +34,7 @@ import { useDrawer } from './DrawerContext';
 import { BrandLogo } from '@/components/BrandLogo';
 import { getInstallationId } from '@/lib/installationId';
 import { unregisterPushToken, cancelPushTokenRetry } from '@/lib/pushTokenService';
+import { isFeatureEnabled } from '@/lib/featureFlags';
 
 type NavItemType = {
   icon: React.ElementType;
@@ -48,7 +49,12 @@ type NavSection = {
   items: NavItemType[];
 };
 
-function getNavSections(role: string, c: typeof neuColors.light, earningsEnabled?: boolean): NavSection[] {
+function getNavSections(
+  role: string,
+  c: typeof neuColors.light,
+  earningsEnabled?: boolean,
+  platformEarningsOn?: boolean,
+): NavSection[] {
   const commonBottom: NavSection = {
     items: [
       { icon: Bell,       label: 'Notifications', path: '/notifications', color: c.primary },
@@ -80,24 +86,28 @@ function getNavSections(role: string, c: typeof neuColors.light, earningsEnabled
   }
 
   if (role === 'doctor') {
-    return [
-      {
-        title: 'Doctor',
-        items: [
-          // Canonical doctor navigation order — do not reorder casually:
-          // Dashboard, My Courses, Video Library, Students, Credits,
-          // Earnings, Notifications, Profile.
-          { icon: LayoutDashboard, label: 'Dashboard',      path: '/dr-overview',   color: c.primary  },
-          { icon: BookOpen,        label: 'My Courses',     path: '/courses',       color: '#7C3AED'  },
-          { icon: Video,           label: 'Video Library',  path: '/video-library', color: '#0EA5E9'  },
-          { icon: Users,           label: 'Students',       path: '/students',      color: '#D97706'  },
-          { icon: Stethoscope,     label: 'Credits',        path: '/credits',       color: '#2DA8FF'  },
-          { icon: TrendingUp,      label: 'Earnings',       path: '/dr-earnings',   color: '#16A34A'  },
-          { icon: Bell,            label: 'Notifications',  path: '/notifications', color: c.primary  },
-          { icon: User,            label: 'Profile',        path: '/dr-profile',    color: '#7C3AED'  },
-        ],
-      },
+    const doctorItems: NavItemType[] = [
+      // Canonical doctor navigation order — do not reorder casually:
+      // Dashboard, My Courses, Video Library, Students, Credits,
+      // Earnings, Notifications, Profile.
+      { icon: LayoutDashboard, label: 'Dashboard',      path: '/dr-overview',   color: c.primary  },
+      { icon: BookOpen,        label: 'My Courses',     path: '/courses',       color: '#7C3AED'  },
+      { icon: Video,           label: 'Video Library',  path: '/video-library', color: '#0EA5E9'  },
+      { icon: Users,           label: 'Students',       path: '/students',      color: '#D97706'  },
+      { icon: Stethoscope,     label: 'Credits',        path: '/credits',       color: '#2DA8FF'  },
+      // EARNINGS — shown only while BOTH hold:
+      //   • the platform capability is ON (server-authoritative feature flag
+      //     doctor_earnings; Super Admin Feature Flags console), AND
+      //   • the doctor has the earnings system enabled for themselves.
+      // The screen itself also refuses (403 feature_disabled → unavailable
+      // state), so a deep link / stale route is still safe.
+      ...(platformEarningsOn && earningsEnabled
+        ? [{ icon: TrendingUp, label: 'Earnings', path: '/dr-earnings', color: '#16A34A' } as NavItemType]
+        : []),
+      { icon: Bell,            label: 'Notifications',  path: '/notifications', color: c.primary  },
+      { icon: User,            label: 'Profile',        path: '/dr-profile',    color: '#7C3AED'  },
     ];
+    return [{ title: 'Doctor', items: doctorItems }];
   }
 
   if (role === 'admin') {
@@ -453,7 +463,11 @@ export default function DrawerNav() {
 
   const role = (profile?.role ?? 'student') as import('@/lib/enums').UserRole;
   const earningsEnabled = !!(profile as any)?.earnings_enabled;
-  const baseSections = getNavSections(role, c, earningsEnabled);
+  // Platform flag (server-authoritative). Read synchronously from the
+  // featureFlags cache; the app shell keeps it fresh on mount + foreground, so
+  // a Super Admin toggle is reflected without restart or reinstall.
+  const platformEarningsOn = isFeatureEnabled('doctor_earnings');
+  const baseSections = getNavSections(role, c, earningsEnabled, platformEarningsOn);
 
   // Offline Videos drawer item is a PLAIN navigation row (UI decision): no
   // numeric badge. Download counts remain available internally via

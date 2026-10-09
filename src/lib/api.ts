@@ -1,10 +1,12 @@
 import { fetch as expoFetch } from 'expo/fetch';
 import { apiFetch, backendApiBase, backendClient } from '@/client/backendClient';
+import React from 'react';
 import { invalidateBranding } from '@/lib/branding';
 import { invalidateFeatureFlags } from '@/lib/featureFlags';
 import { normalizePhoneE164 } from '@/lib/identifier';
 import { buildProtectedCallHeaders } from '@/lib/deviceKey';
 import { isMaintenanceError } from '@/lib/maintenanceStateModel';
+import { previousAvatarStoragePath } from '@/lib/uploadPart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // SECURITY BOUNDARY
@@ -225,7 +227,8 @@ export async function getProfile(userId: string) {
 export async function updateProfile(
   userId: string,
   updates: Partial<{
-    full_name: string; phone: string; avatar_url: string;
+    // avatar_url accepts null so a photo can be REMOVED, not just replaced.
+    full_name: string; phone: string; avatar_url: string | null;
     profile_email: string | null;
     university_id: string; faculty_id: string; academic_level_id: string;
     /** Doctor default contact information */
@@ -297,6 +300,43 @@ export async function updateProfile(
   }
 
   return data;
+}
+
+/**
+ * Remove the authenticated user's profile photo.
+ *
+ * ORDER MATTERS (same contract as removeCourseCover):
+ *   1. Clear `profiles.avatar_url` FIRST — that is the authoritative,
+ *      user-visible state and what must persist across app restart and
+ *      logout/login. If this throws, nothing changes and the caller keeps
+ *      showing the existing avatar + a real error (requirement: a failed
+ *      removal must never blank the avatar).
+ *   2. Then delete the backing storage object best-effort. A failure here
+ *      leaves an orphaned file but must NOT resurrect the avatar in the UI —
+ *      the user-visible removal has already succeeded and been persisted.
+ *
+ * AUTHORIZATION: deletion goes through POST /storage/delete, which calls
+ * StorageController::canWritePath(). For the `user-avatars` bucket that
+ * requires a path segment to equal the authenticated user id, so a user can
+ * only ever delete their own avatar (admins/super_admins are exempt by role).
+ * The path is derived from the stored URL, never supplied by the caller.
+ */
+export async function removeProfileAvatar(
+  userId: string,
+  currentAvatarUrl: string | null | undefined,
+): Promise<{ avatar_url: null }> {
+  // 1. Authoritative: clear the DB column and return the fresh row.
+  const updated = await updateProfile(userId, { avatar_url: null });
+
+  // 2. Best-effort storage cleanup of the now-orphaned object.
+  try {
+    const storagePath = previousAvatarStoragePath(currentAvatarUrl, 'user-avatars');
+    if (storagePath) {
+      await backendClient.storage.from('user-avatars').remove([storagePath]);
+    }
+  } catch (_) { /* best-effort — orphaned file is harmless */ }
+
+  return { avatar_url: (updated as any)?.avatar_url ?? null };
 }
 
 // ── Doctor Earnings — Independent Pricing System ──────────────────────────────
@@ -2312,7 +2352,17 @@ export async function getVideoPlaybackToken(videoId: string, lessonId?: string) 
   // an unevidenced call may do (log_only vs enforce), never the client.
   const body = { video_id: videoId, lesson_id: lessonId ?? null };
   const securityHeaders = await buildProtectedCallHeaders('vdo_otp', body).catch(() => ({}));
-  return invokeEdgeFunction<{ otp: string; playbackInfo: string }>(
+  return invokeEdgeFunction<{
+    otp: string;
+    playbackInfo: string;
+    /**
+     * TRUE when the server attached its MOVING stream watermark (`annotate`)
+     * to this OTP. The player then suppresses its own overlay so exactly one
+     * watermark is ever shown. Absent on an older backend → render the overlay.
+     * Never a secret.
+     */
+    annotateApplied?: boolean;
+  }>(
     'vdocipher-otp',
     body,
     undefined,
@@ -2920,50 +2970,147 @@ export async function archiveAppRelease(id: string): Promise<AppRelease> {
 
 // ── Support Settings ────────────────────────────────────────────────────────
 
+/**
+ * Stable platform keys for support contact methods.
+ * The frontend icon registry and the backend MUST use these exact keys.
+ * Icons are selected by platform key — NEVER by matching label text.
+ */
+export type SupportPlatformKey = 'whatsapp' | 'facebook' | 'instagram' | 'telegram' | 'email' | 'phone' | 'x' | 'website';
+
+/**
+ * Canonical default label per platform key.
+ * The server (SupportController::DEFAULT_LABELS) is the source of truth;
+ * this mirror is used only for offline/validation fallback.
+ */
+export const SUPPORT_DEFAULT_LABELS: Record<SupportPlatformKey, string> = {
+  whatsapp:  'WhatsApp',
+  facebook:  'Facebook',
+  instagram: 'Instagram',
+  telegram:  'Telegram',
+  email:     'Email',
+  phone:     'Phone',
+  x:         'X / Twitter',
+  website:   'Website',
+};
+
+/**
+ * Canonical display order per platform key (matches backend PLATFORM_KEYS order).
+ */
+export const SUPPORT_PLATFORM_ORDER: SupportPlatformKey[] = [
+  'whatsapp', 'facebook', 'instagram', 'telegram',
+  'email', 'phone', 'x', 'website',
+];
+
+/**
+ * Resolve the display label for a contact entry.
+ * Stored label wins; falls back to the canonical default for the platform key.
+ */
+export function supportLabel(key: SupportPlatformKey, storedLabel: string | undefined): string {
+  if (storedLabel && storedLabel.trim()) return storedLabel.trim();  return SUPPORT_DEFAULT_LABELS[key] ?? key;
+}import {
+  MessageCircle, Send, Mail, Phone,
+  X as XIcon, Globe, AtSign, Link2, Megaphone,
+} from 'lucide-react-native';
+
+/** Platform icon component registry — keyed by stable platform key. */
+export const SUPPORT_ICONS: Record<SupportPlatformKey, React.ComponentType<{ size: number; color: string }>> = {
+  whatsapp:  MessageCircle,
+  facebook:  AtSign,
+  instagram: Link2,
+  telegram:  Send,
+  email:     Mail,
+  phone:     Phone,
+  x:         Megaphone,
+  website:   Globe,
+};
+
+// ── Full support contact entry (all platforms) ────────────────────────────────
 export interface SupportContactEntry {
-  value:   string;
-  label:   string;
-  enabled: boolean;
+  value:       string;
+  label:       string;
+  enabled:     boolean;
+  displayOrder?: number;
 }
 
 export interface SupportSettings {
-  phone?:    SupportContactEntry;
-  whatsapp?: SupportContactEntry;
-  telegram?: SupportContactEntry;
+  whatsapp?:  SupportContactEntry;
+  facebook?:  SupportContactEntry;
+  instagram?: SupportContactEntry;
+  telegram?:  SupportContactEntry;
+  email?:     SupportContactEntry;
+  phone?:     SupportContactEntry;
+  x?:         SupportContactEntry;
+  website?:   SupportContactEntry;
 }
 
-/** Fetch all support contact entries from the support_settings table. */
+/**
+ * Fetch all support contact entries from the support_settings table.
+ * Used by the Super Admin settings screen (authenticated).
+ */
 export async function getSupportSettings(): Promise<SupportSettings> {
   const { data, error } = await backendClient
     .from('support_settings')
-    .select('key, value, label, enabled');
+    .select('key, value, label, enabled, display_order');
   if (error) throw error;
   const result: SupportSettings = {};
   for (const row of data ?? []) {
-    if (row.key === 'phone' || row.key === 'whatsapp' || row.key === 'telegram') {
-      result[row.key as keyof SupportSettings] = {
-        value:   row.value   ?? '',
-        label:   row.label   ?? '',
-        enabled: row.enabled ?? false,
+    const key = row.key as SupportPlatformKey;
+    if (SUPPORT_PLATFORM_ORDER.includes(key)) {
+      result[key] = {
+        value:       row.value      ?? '',
+        label:       row.label      ?? '',
+        enabled:     row.enabled    ?? false,
+        displayOrder: row.display_order != null ? Number(row.display_order) : undefined,
       };
     }
   }
   return result;
 }
 
-/** Upsert a single support contact entry (Super Admin only). */
+/**
+ * Save a single support contact entry (Super Admin only).
+ * Uses the admin endpoint so validation + audit logging happen server-side.
+ */
 export async function upsertSupportSetting(
-  key: 'phone' | 'whatsapp' | 'telegram',
+  key: SupportPlatformKey,
   entry: Partial<SupportContactEntry>,
 ) {
-  const { data: { user } } = await backendClient.auth.getUser();
-  const { error } = await backendClient
-    .from('support_settings')
-    .upsert(
-      { key, ...entry, updated_by: user?.id, updated_at: new Date().toISOString() },
-      { onConflict: 'key' },
-    );
+  // Use the dedicated admin endpoint (validated, audited) rather than the
+  // generic DataController (which now blocks writes to support_settings).
+  const { data, error } = await apiFetch<{ settings: Record<string, unknown> }>('/admin/support-settings', {
+    method: 'PUT',
+    body: {
+      settings: {
+        [key]: {
+          value:       entry.value       ?? '',
+          label:       entry.label       ?? SUPPORT_DEFAULT_LABELS[key],
+          enabled:     entry.enabled     ?? false,
+          display_order: entry.displayOrder ?? SUPPORT_PLATFORM_ORDER.indexOf(key) + 1,
+        },
+      },
+    },
+  });
   if (error) throw error;
+  return data;
+}
+
+/**
+ * Fetch the PUBLIC support contact list for the security/blocked screen.
+ * This endpoint is UNAUTHENTICATED — blocked users may not be able to sign in.
+ * Returns ONLY enabled contacts with non-empty values.
+ */
+export interface PublicSupportContact {
+  platform: string;
+  label:    string;
+  url:      string;
+  enabled:  boolean;
+  order:    number;
+}
+
+export async function getPublicSupportContacts(): Promise<PublicSupportContact[]> {
+  const { data, error } = await apiFetch<{ contacts: PublicSupportContact[] }>('/support/contact');
+  if (error) throw error;
+  return data?.contacts ?? [];
 }
 
 

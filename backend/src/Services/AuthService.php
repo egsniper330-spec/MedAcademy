@@ -252,6 +252,18 @@ final class AuthService
 
     public function refresh(Request $request): array
     {
+        // Refresh-token rotation is an unauthenticated-capable operation whose
+        // only secret is a 96-hex-char token — brute force is infeasible, but
+        // the endpoint also performs a DB read+write per attempt, so a flood is
+        // a cheap DoS and a token-guessing oracle. Generous per-IP ceiling: a
+        // carrier NAT shares one address with many subscribers, so this is
+        // sized to never touch legitimate refresh traffic.
+        RateLimitService::perIp(
+            $request,
+            'auth_refresh',
+            RateLimitService::refreshPerIpPerMinute(),
+            60
+        );
         $token = (string) ($request->json()['refresh_token'] ?? '');
         if ($token === '') {
             throw new ApiException(422, 'refresh_token is required');
@@ -276,6 +288,26 @@ final class AuthService
     public function forgotPassword(Request $request, array $data): array
     {
         $identifier = trim((string) ($data['identifier'] ?? ''));
+        // Abuse control runs BEFORE the feature-flag assertion and BEFORE any
+        // identifier lookup: the same 429 path answers known and unknown
+        // identifiers alike, so throttling can never be used to probe which
+        // accounts exist. Two dimensions — per IP (generous, shared-NAT safe)
+        // and per submitted identifier (tight, stops targeted mail bombing).
+        // The identifier is stored hashed: no raw e-mail/phone at rest.
+        RateLimitService::perIp(
+            $request,
+            'auth_forgot_ip',
+            RateLimitService::forgotPasswordPerIpPerHour(),
+            3600
+        );
+        if ($identifier !== '') {
+            RateLimitService::forKey(
+                'auth_forgot_id',
+                'id:' . substr(hash('sha256', strtolower($identifier)), 0, 32),
+                RateLimitService::forgotPasswordPerAccountPerHour(),
+                3600
+            );
+        }
         // Feature flag: password_reset — enforced BEFORE any token exists and
         // before any identifier-existence probe. Authenticated password
         // changes (changePassword) are never gated by this flag.
@@ -310,6 +342,15 @@ final class AuthService
 
     public function resetPassword(Request $request, array $data): array
     {
+        // Reset tokens are 256-bit, but this endpoint writes a new password
+        // and revokes every session for the target account — throttle by IP so
+        // a token-guessing or endpoint-flood attempt cannot run unbounded.
+        RateLimitService::perIp(
+            $request,
+            'auth_reset_ip',
+            RateLimitService::resetPasswordPerIpPerHour(),
+            3600
+        );
         $token = (string) ($data['token'] ?? '');
         $password = (string) ($data['password'] ?? '');
         if (strlen($password) < 6) {
@@ -346,6 +387,15 @@ final class AuthService
         if ($userId === null) {
             throw new ApiException(401, 'Authentication required');
         }
+        // Account-scoped, not IP-scoped: this only runs for an authenticated
+        // caller and the goal is to stop current-password guessing without a
+        // shared carrier NAT ever colliding with an unrelated subscriber.
+        RateLimitService::perAccount(
+            $request,
+            'auth_change_password',
+            RateLimitService::changePasswordPerAccountPerHour(),
+            3600
+        );
         $current = (string) ($data['current_password'] ?? '');
         $new = (string) ($data['new_password'] ?? '');
         if (strlen($new) < 6) {
@@ -815,21 +865,10 @@ final class AuthService
 
     private function rateLimit(string $identifier, int $max, int $windowSeconds): void
     {
-        $db = Database::instance();
-        $windowStart = gmdate('Y-m-d H:i:s', intdiv(time(), $windowSeconds) * $windowSeconds);
-        $db->query(
-            'INSERT INTO rate_limits (id, identifier, operation, window_start, request_count)
-             VALUES (?, ?, ?, ?, 1)
-             ON DUPLICATE KEY UPDATE request_count = request_count + 1',
-            [Uuid::v4(), $identifier, 'auth', $windowStart]
-        );
-        $count = (int) $db->value(
-            'SELECT request_count FROM rate_limits WHERE identifier = ? AND operation = ? AND window_start = ?',
-            [$identifier, 'auth', $windowStart],
-            0
-        );
-        if ($count > $max) {
-            throw new ApiException(429, 'Too many attempts. Please try again later.', 'rate_limited');
-        }
+        // Thin shim: the counter logic now lives in RateLimitService so every
+        // abuse-prone endpoint shares one implementation and one storage table.
+        // Identifier format ('login:<ip>', 'register:<ip>') and operation
+        // ('auth') are unchanged, so a deploy does not reset live counters.
+        RateLimitService::legacy($identifier, $max, $windowSeconds);
     }
 }

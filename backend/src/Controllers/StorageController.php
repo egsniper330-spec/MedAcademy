@@ -162,7 +162,7 @@ final class StorageController
         return [
             'disk' => $disk,
             'disk_unavailable_reason' => $reason,
-            'measured_root_label' => 'application deployment volume (public storage root)',
+            'measured_root_label' => 'hosting deployment volume (the disk this app is deployed on — NOT the user hosting-plan quota)',
             'uploads' => [
                 'total_bytes' => $uploadsTotal,
                 'buckets' => $buckets,

@@ -1,0 +1,298 @@
+
+── preflight: Doctor Earnings enforcement + security-hardening package ──
+
+
+  ── artifact integrity ──
+  PASS  byte-identical to source: Controllers/RpcController.php  [pkg 9784d5bdde5c / src 9784d5bdde5c]
+  PASS  hash matches manifest.json: Controllers/RpcController.php
+  PASS  byte-identical to source: Controllers/SecurityController.php  [pkg 906511717d55 / src 906511717d55]
+  PASS  hash matches manifest.json: Controllers/SecurityController.php
+  PASS  byte-identical to source: Controllers/SecurityEvidenceController.php  [pkg 936794ea3206 / src 936794ea3206]
+  PASS  hash matches manifest.json: Controllers/SecurityEvidenceController.php
+  PASS  byte-identical to source: Controllers/IntegrityController.php  [pkg 2404576fc264 / src 2404576fc264]
+  PASS  hash matches manifest.json: Controllers/IntegrityController.php
+  PASS  byte-identical to source: Controllers/AuthController.php  [pkg e6a03f00f3ac / src e6a03f00f3ac]
+  PASS  hash matches manifest.json: Controllers/AuthController.php
+  PASS  byte-identical to source: Services/RateLimitService.php  [pkg 297a2b3a553a / src 297a2b3a553a]
+  PASS  hash matches manifest.json: Services/RateLimitService.php
+  PASS  byte-identical to source: Services/AuthService.php  [pkg ff792a62de51 / src ff792a62de51]
+  PASS  hash matches manifest.json: Services/AuthService.php
+  PASS  byte-identical to source: Services/SecurityService.php  [pkg 8ae237874529 / src 8ae237874529]
+  PASS  hash matches manifest.json: Services/SecurityService.php
+  PASS  byte-identical to source: Services/AppReleaseService.php  [pkg 7e7e7c2e2e37 / src 7e7e7c2e2e37]
+  PASS  hash matches manifest.json: Services/AppReleaseService.php
+  PASS  byte-identical to source: Services/VideoLibrarySyncService.php  [pkg 0360bb18e244 / src 0360bb18e244]
+  PASS  hash matches manifest.json: Services/VideoLibrarySyncService.php
+  PASS  byte-identical to source: Http/Request.php  [pkg 86cb39c087c5 / src 86cb39c087c5]
+  PASS  hash matches manifest.json: Http/Request.php
+  PASS  required artifact count is the expected 10 + 1 optional  [required 10, optional 1]
+
+  ── rollback baselines ──
+  PASS  rollback hash matches manifest: Controllers/RpcController.php
+  PASS  rollback differs from the artifact it reverses: Controllers/RpcController.php
+  PASS  rollback hash matches manifest: Controllers/SecurityController.php
+  PASS  rollback differs from the artifact it reverses: Controllers/SecurityController.php
+  PASS  rollback hash matches manifest: Controllers/SecurityEvidenceController.php
+  PASS  rollback differs from the artifact it reverses: Controllers/SecurityEvidenceController.php
+  PASS  rollback hash matches manifest: Controllers/IntegrityController.php
+  PASS  rollback differs from the artifact it reverses: Controllers/IntegrityController.php
+  PASS  rollback hash matches manifest: Controllers/AuthController.php
+  PASS  rollback differs from the artifact it reverses: Controllers/AuthController.php
+  PASS  rollback hash matches manifest: Services/AuthService.php
+  PASS  rollback differs from the artifact it reverses: Services/AuthService.php
+  PASS  rollback hash matches manifest: Services/SecurityService.php
+  PASS  rollback differs from the artifact it reverses: Services/SecurityService.php
+  PASS  rollback hash matches manifest: Services/AppReleaseService.php
+  PASS  rollback differs from the artifact it reverses: Services/AppReleaseService.php
+  PASS  rollback hash matches manifest: Services/VideoLibrarySyncService.php
+  PASS  rollback differs from the artifact it reverses: Services/VideoLibrarySyncService.php
+  PASS  rollback hash matches manifest: Http/Request.php
+  PASS  rollback differs from the artifact it reverses: Http/Request.php
+  PASS  every rollback baseline maps to a packaged artifact  [10 baselines / 11 artifacts]
+  PASS  new files are declared with a delete-on-rollback instruction  [["backend/src/Services/RateLimitService.php"]]
+
+  ── php grammar + copy hygiene ──
+  PASS  parses with the PHP 8 grammar: Controllers/RpcController.php
+  PASS  no UTF-8 BOM: Controllers/RpcController.php
+  PASS  opens with <?php: Controllers/RpcController.php
+  PASS  declares strict_types: Controllers/RpcController.php
+  PASS  parses with the PHP 8 grammar: Controllers/SecurityController.php
+  PASS  no UTF-8 BOM: Controllers/SecurityController.php
+  PASS  opens with <?php: Controllers/SecurityController.php
+  PASS  declares strict_types: Controllers/SecurityController.php
+  PASS  parses with the PHP 8 grammar: Controllers/SecurityEvidenceController.php
+  PASS  no UTF-8 BOM: Controllers/SecurityEvidenceController.php
+  PASS  opens with <?php: Controllers/SecurityEvidenceController.php
+  PASS  declares strict_types: Controllers/SecurityEvidenceController.php
+  PASS  parses with the PHP 8 grammar: Controllers/IntegrityController.php
+  PASS  no UTF-8 BOM: Controllers/IntegrityController.php
+  PASS  opens with <?php: Controllers/IntegrityController.php
+  PASS  declares strict_types: Controllers/IntegrityController.php
+  PASS  parses with the PHP 8 grammar: Controllers/AuthController.php
+  PASS  no UTF-8 BOM: Controllers/AuthController.php
+  PASS  opens with <?php: Controllers/AuthController.php
+  PASS  declares strict_types: Controllers/AuthController.php
+  PASS  parses with the PHP 8 grammar: Services/RateLimitService.php
+  PASS  no UTF-8 BOM: Services/RateLimitService.php
+  PASS  opens with <?php: Services/RateLimitService.php
+  PASS  declares strict_types: Services/RateLimitService.php
+  PASS  parses with the PHP 8 grammar: Services/AuthService.php
+  PASS  no UTF-8 BOM: Services/AuthService.php
+  PASS  opens with <?php: Services/AuthService.php
+  PASS  declares strict_types: Services/AuthService.php
+  PASS  parses with the PHP 8 grammar: Services/SecurityService.php
+  PASS  no UTF-8 BOM: Services/SecurityService.php
+  PASS  opens with <?php: Services/SecurityService.php
+  PASS  declares strict_types: Services/SecurityService.php
+  PASS  parses with the PHP 8 grammar: Services/AppReleaseService.php
+  PASS  no UTF-8 BOM: Services/AppReleaseService.php
+  PASS  opens with <?php: Services/AppReleaseService.php
+  PASS  declares strict_types: Services/AppReleaseService.php
+  PASS  parses with the PHP 8 grammar: Services/VideoLibrarySyncService.php
+  PASS  no UTF-8 BOM: Services/VideoLibrarySyncService.php
+  PASS  opens with <?php: Services/VideoLibrarySyncService.php
+  PASS  declares strict_types: Services/VideoLibrarySyncService.php
+  PASS  parses with the PHP 8 grammar: Http/Request.php
+  PASS  no UTF-8 BOM: Http/Request.php
+  PASS  opens with <?php: Http/Request.php
+  PASS  declares strict_types: Http/Request.php
+  PASS  rollback parses with the PHP 8 grammar: Controllers/RpcController.php
+  PASS  rollback parses with the PHP 8 grammar: Controllers/SecurityController.php
+  PASS  rollback parses with the PHP 8 grammar: Controllers/SecurityEvidenceController.php
+  PASS  rollback parses with the PHP 8 grammar: Controllers/IntegrityController.php
+  PASS  rollback parses with the PHP 8 grammar: Controllers/AuthController.php
+  PASS  rollback parses with the PHP 8 grammar: Services/AuthService.php
+  PASS  rollback parses with the PHP 8 grammar: Services/SecurityService.php
+  PASS  rollback parses with the PHP 8 grammar: Services/AppReleaseService.php
+  PASS  rollback parses with the PHP 8 grammar: Services/VideoLibrarySyncService.php
+  PASS  rollback parses with the PHP 8 grammar: Http/Request.php
+
+  ── earnings gate ──
+  PASS  gate present in ::doctorActivityStats()
+  PASS  gate present in ::doctorCreditTransactions()
+  PASS  gate present in ::doctorEarningsDashboard()
+  PASS  gate present in ::doctorStudentProfile()
+  PASS  gate present in ::setEnrollmentAssignedPrice()
+  PASS  gate present in ::removeStudentAndRecordEarnings()
+  PASS  exactly 6 gate call sites (one per surface)  [found 6]
+  PASS  helper is staff-exempt (admin/super_admin keep access)
+  PASS  helper calls assertEnabledFor (honours per-user override), not assertEnabled
+  PASS  flag key is the canonical 'doctor_earnings'
+  PASS  removeStudentAndRecordEarnings gate runs before any DB write
+  PASS  gate helper performs no DB write
+  PASS  rollback RpcController has NO assertDoctorEarningsEnabled helper (pre-fix baseline)
+
+  ── internal-error disclosure ──
+  PASS  no leaked internals (SQLSTATE interpolated into an ApiException message): Controllers/RpcController.php
+  PASS  no leaked internals (exception class interpolated into an ApiException message): Controllers/RpcController.php
+  PASS  no leaked internals (SQLSTATE variable still composed for a response): Controllers/RpcController.php
+  PASS  no leaked internals (publish failure returns driver text): Controllers/RpcController.php
+  PASS  no leaked internals (rollback failure returns driver text): Controllers/RpcController.php
+  PASS  no leaked internals (reconciliation failure returns driver text): Controllers/RpcController.php
+  PASS  no ApiException() built from an exception message/code: Controllers/RpcController.php
+  PASS  no leaked internals (SQLSTATE interpolated into an ApiException message): Controllers/SecurityController.php
+  PASS  no leaked internals (exception class interpolated into an ApiException message): Controllers/SecurityController.php
+  PASS  no leaked internals (SQLSTATE variable still composed for a response): Controllers/SecurityController.php
+  PASS  no leaked internals (publish failure returns driver text): Controllers/SecurityController.php
+  PASS  no leaked internals (rollback failure returns driver text): Controllers/SecurityController.php
+  PASS  no leaked internals (reconciliation failure returns driver text): Controllers/SecurityController.php
+  PASS  no ApiException() built from an exception message/code: Controllers/SecurityController.php
+  PASS  no leaked internals (SQLSTATE interpolated into an ApiException message): Controllers/SecurityEvidenceController.php
+  PASS  no leaked internals (exception class interpolated into an ApiException message): Controllers/SecurityEvidenceController.php
+  PASS  no leaked internals (SQLSTATE variable still composed for a response): Controllers/SecurityEvidenceController.php
+  PASS  no leaked internals (publish failure returns driver text): Controllers/SecurityEvidenceController.php
+  PASS  no leaked internals (rollback failure returns driver text): Controllers/SecurityEvidenceController.php
+  PASS  no leaked internals (reconciliation failure returns driver text): Controllers/SecurityEvidenceController.php
+  PASS  no ApiException() built from an exception message/code: Controllers/SecurityEvidenceController.php
+  PASS  no leaked internals (SQLSTATE interpolated into an ApiException message): Controllers/IntegrityController.php
+  PASS  no leaked internals (exception class interpolated into an ApiException message): Controllers/IntegrityController.php
+  PASS  no leaked internals (SQLSTATE variable still composed for a response): Controllers/IntegrityController.php
+  PASS  no leaked internals (publish failure returns driver text): Controllers/IntegrityController.php
+  PASS  no leaked internals (rollback failure returns driver text): Controllers/IntegrityController.php
+  PASS  no leaked internals (reconciliation failure returns driver text): Controllers/IntegrityController.php
+  PASS  no ApiException() built from an exception message/code: Controllers/IntegrityController.php
+  PASS  no leaked internals (SQLSTATE interpolated into an ApiException message): Controllers/AuthController.php
+  PASS  no leaked internals (exception class interpolated into an ApiException message): Controllers/AuthController.php
+  PASS  no leaked internals (SQLSTATE variable still composed for a response): Controllers/AuthController.php
+  PASS  no leaked internals (publish failure returns driver text): Controllers/AuthController.php
+  PASS  no leaked internals (rollback failure returns driver text): Controllers/AuthController.php
+  PASS  no leaked internals (reconciliation failure returns driver text): Controllers/AuthController.php
+  PASS  no ApiException() built from an exception message/code: Controllers/AuthController.php
+  PASS  no leaked internals (SQLSTATE interpolated into an ApiException message): Services/RateLimitService.php
+  PASS  no leaked internals (exception class interpolated into an ApiException message): Services/RateLimitService.php
+  PASS  no leaked internals (SQLSTATE variable still composed for a response): Services/RateLimitService.php
+  PASS  no leaked internals (publish failure returns driver text): Services/RateLimitService.php
+  PASS  no leaked internals (rollback failure returns driver text): Services/RateLimitService.php
+  PASS  no leaked internals (reconciliation failure returns driver text): Services/RateLimitService.php
+  PASS  no ApiException() built from an exception message/code: Services/RateLimitService.php
+  PASS  no leaked internals (SQLSTATE interpolated into an ApiException message): Services/AuthService.php
+  PASS  no leaked internals (exception class interpolated into an ApiException message): Services/AuthService.php
+  PASS  no leaked internals (SQLSTATE variable still composed for a response): Services/AuthService.php
+  PASS  no leaked internals (publish failure returns driver text): Services/AuthService.php
+  PASS  no leaked internals (rollback failure returns driver text): Services/AuthService.php
+  PASS  no leaked internals (reconciliation failure returns driver text): Services/AuthService.php
+  PASS  no ApiException() built from an exception message/code: Services/AuthService.php
+  PASS  no leaked internals (SQLSTATE interpolated into an ApiException message): Services/SecurityService.php
+  PASS  no leaked internals (exception class interpolated into an ApiException message): Services/SecurityService.php
+  PASS  no leaked internals (SQLSTATE variable still composed for a response): Services/SecurityService.php
+  PASS  no leaked internals (publish failure returns driver text): Services/SecurityService.php
+  PASS  no leaked internals (rollback failure returns driver text): Services/SecurityService.php
+  PASS  no leaked internals (reconciliation failure returns driver text): Services/SecurityService.php
+  PASS  no ApiException() built from an exception message/code: Services/SecurityService.php
+  PASS  no leaked internals (SQLSTATE interpolated into an ApiException message): Services/AppReleaseService.php
+  PASS  no leaked internals (exception class interpolated into an ApiException message): Services/AppReleaseService.php
+  PASS  no leaked internals (SQLSTATE variable still composed for a response): Services/AppReleaseService.php
+  PASS  no leaked internals (publish failure returns driver text): Services/AppReleaseService.php
+  PASS  no leaked internals (rollback failure returns driver text): Services/AppReleaseService.php
+  PASS  no leaked internals (reconciliation failure returns driver text): Services/AppReleaseService.php
+  PASS  no ApiException() built from an exception message/code: Services/AppReleaseService.php
+  PASS  no leaked internals (SQLSTATE interpolated into an ApiException message): Services/VideoLibrarySyncService.php
+  PASS  no leaked internals (exception class interpolated into an ApiException message): Services/VideoLibrarySyncService.php
+  PASS  no leaked internals (SQLSTATE variable still composed for a response): Services/VideoLibrarySyncService.php
+  PASS  no leaked internals (publish failure returns driver text): Services/VideoLibrarySyncService.php
+  PASS  no leaked internals (rollback failure returns driver text): Services/VideoLibrarySyncService.php
+  PASS  no leaked internals (reconciliation failure returns driver text): Services/VideoLibrarySyncService.php
+  PASS  no ApiException() built from an exception message/code: Services/VideoLibrarySyncService.php
+  PASS  no leaked internals (SQLSTATE interpolated into an ApiException message): Http/Request.php
+  PASS  no leaked internals (exception class interpolated into an ApiException message): Http/Request.php
+  PASS  no leaked internals (SQLSTATE variable still composed for a response): Http/Request.php
+  PASS  no leaked internals (publish failure returns driver text): Http/Request.php
+  PASS  no leaked internals (rollback failure returns driver text): Http/Request.php
+  PASS  no leaked internals (reconciliation failure returns driver text): Http/Request.php
+  PASS  no ApiException() built from an exception message/code: Http/Request.php
+  PASS  SecurityController returns the generic code 'internal_error'
+  PASS  SecurityController logs detail server-side (logInternalFailure helper present)
+  PASS  SecurityController re-throws deliberate ApiExceptions untouched  [2 ApiException catch block(s)]
+  PASS  SecurityController still redacts credential-shaped values before logging
+  PASS  SecurityController binds ip_address to the socket peer (client cannot write arbitrary IPs)
+  PASS  SecurityController prefers the JWT-bound device_id over the client value
+
+  ── cross-user profile minimization ──
+  PASS  doctorStudentProfile no longer runs SELECT * on profiles
+  PASS  doctorStudentProfile selects an explicit column list from profiles
+  PASS  doctorStudentProfile no longer returns a credits block
+  PASS  doctorStudentProfile no longer returns a devices block
+  PASS  doctorStudentProfile no longer queries the credits table
+  PASS  sensitive column not selected in doctorStudentProfile: suspension_reason
+  PASS  sensitive column not selected in doctorStudentProfile: phone_original
+  PASS  sensitive column not selected in doctorStudentProfile: trashed_at
+  PASS  sensitive column not selected in doctorStudentProfile: security_version
+  PASS  sensitive column not selected in doctorStudentProfile: credit_selling_price
+  PASS  no other SELECT * remains on profiles in RpcController  [0 occurrence(s)]
+  PASS  doctorStudentProfile allowlist query located
+  PASS  allowlisted columns exist in schema.sql  [24 columns verified]
+  PASS  allowlisted columns exist in schema-no-triggers.sql  [24 columns verified]
+
+  ── rate limiting ──
+  PASS  RateLimitService.php is part of the deploy set
+  PASS  reuses the existing rate_limits table (no migration)
+  PASS  refuses with HTTP 429 + code rate_limited
+  PASS  fail-safe: a non-positive limit disables the limiter instead of locking everyone out
+  PASS  perAccount() falls back to the IP only when anonymous
+  PASS  legacy() keeps operation=auth so a deploy cannot reset live counters
+  PASS  AuthService delegates to RateLimitService::legacy (single implementation)
+  PASS  every file referencing RateLimitService is in this package  [7 caller(s) packaged]
+
+  ── rate-limit bucket identity trust ──
+  PASS  clientIp() reads REMOTE_ADDR
+  PASS  clientIp() does NOT read X-Forwarded-For
+  PASS  clientIp() does not read any other spoofable header
+  PASS  the trust policy is documented in-code (proxies must be explicitly validated)
+  PASS  no packaged file falls back to a client-supplied IP header
+
+  ── dependency completeness ──
+  PASS  all MedAcademy imports resolve: Controllers/RpcController.php
+  PASS  all MedAcademy imports resolve: Controllers/SecurityController.php
+  PASS  all MedAcademy imports resolve: Controllers/SecurityEvidenceController.php
+  PASS  all MedAcademy imports resolve: Controllers/IntegrityController.php
+  PASS  all MedAcademy imports resolve: Controllers/AuthController.php
+  PASS  all MedAcademy imports resolve: Services/RateLimitService.php
+  PASS  all MedAcademy imports resolve: Services/AuthService.php
+  PASS  all MedAcademy imports resolve: Services/SecurityService.php
+  PASS  all MedAcademy imports resolve: Services/AppReleaseService.php
+  PASS  all MedAcademy imports resolve: Services/VideoLibrarySyncService.php
+  PASS  all MedAcademy imports resolve: Http/Request.php
+  PASS  the new class introduced by this pass is only referenced by packaged files  [packaged: src/Services/RateLimitService.php]
+
+  ── deployment completeness (no omitted dependency) ──
+  PASS  every changed backend/src file is either packaged or a known unrelated feature  [unrelated (not packaged): src/Controllers/AnalyticsController.php, src/Controllers/DataController.php, src/Controllers/StorageController.php, src/Controllers/SupportController.php]
+  PASS  no packaged file depends on a changed-but-unpackaged backend file  [checked 62 dependency edge(s) against 4 unpackaged change(s)]
+
+  ── configuration reference ──
+  PASS  ENV-CONFIG.md exists
+  PASS  every RATE_LIMIT_* key in code is documented
+  PASS  no key documented that the code does not read
+  PASS  documented default matches the shipped default
+  PASS  the config reference is key/optional-only (no secrets template)
+  PASS  all 13 tunables are documented  [13 found, 13 documented]
+
+  deploy   9784d5bdde5c218d5e43b9f2fb9b09a3faf8248e82370793320e685decbb34a9  backend/src/Controllers/RpcController.php
+  deploy   906511717d55928afcbf2562a113ce71b6b94a1488459f87098d19ee39e11ba3  backend/src/Controllers/SecurityController.php
+  deploy   936794ea32061dd6d9061a91bfcc0f481e1fe88ddfe156272ead8ef66c7d09d7  backend/src/Controllers/SecurityEvidenceController.php
+  deploy   2404576fc26436f1c47f1b1c0a37142710309beb7bf73f4f727b720e588a052d  backend/src/Controllers/IntegrityController.php
+  deploy   e6a03f00f3ac3b30c0a894cfbec0c5af21f6d7db36705db4554671a4bd2a47c7  backend/src/Controllers/AuthController.php
+  deploy   297a2b3a553a568e52d6721b148d4b4a06e1a7882198f8463dcc5a4ba4709e4a  backend/src/Services/RateLimitService.php
+  deploy   ff792a62de51fe62d52b1eae275eaea4f1e58edaf5959e382a55eba7f9d425ba  backend/src/Services/AuthService.php
+  deploy   8ae2378745295f6eef56050eed1ed352ef0dc24ec47b9c94ef52201935c55ae4  backend/src/Services/SecurityService.php
+  deploy   7e7e7c2e2e372b2dda1a61cbc9bf1c451f7fb0d5ed17242f83ce90eda4a002f7  backend/src/Services/AppReleaseService.php
+  deploy   0360bb18e2443dcbf4bcb0863cfb87ed5aeba4ca467dd51b46994f6e4b0a20cc  backend/src/Services/VideoLibrarySyncService.php
+  optional 86cb39c087c591072144267f305d4b3354409ecefb4afa9acc5cde9b25487aad  backend/src/Http/Request.php
+  rollback 1d51ad8db52052a4a34b6b5886f844e5f0590b366ee6dbcfacc14630542af188  backend/src/Controllers/RpcController.php
+  rollback f578e81d2c99e23d909de9d907609df72dbbc8f389206f155c9521d2d6f8acb8  backend/src/Controllers/SecurityController.php
+  rollback 4ca5c161f83500c013703ee0cea3b0dbeb5e52b9f719964aa1ecd7697d0e2748  backend/src/Controllers/SecurityEvidenceController.php
+  rollback 22228549185a7f53d3b5b3d32ce1338f7270fbc53f0b14a63d127c1e9eb591ca  backend/src/Controllers/IntegrityController.php
+  rollback a2fc962a1ca4375217f3a4a2cfd4e26d119ffcd25757af77b9d9363d0b69704e  backend/src/Controllers/AuthController.php
+  rollback 604996ec48fea455dca2b91e30ae7a4dd726b1c9f4a1a91cd248dc02f5984e49  backend/src/Services/AuthService.php
+  rollback 627771063bf98ab7c36e0415f4fef1c5d5b3b4d0c33406d131c07d62f3aafc46  backend/src/Services/SecurityService.php
+  rollback fa0c1fc718a1a6163d14831291b979e8057cb3cbe47c4b3f0ae75141bdfad91d  backend/src/Services/AppReleaseService.php
+  rollback a832ee50cca8e139c25b10ffe7a5f3f43b914191e69f911522dd664fb260268c  backend/src/Services/VideoLibrarySyncService.php
+  rollback d48a3d1daa65cb3699eedcf98b80d98d904278964ca0d4e17bff0e302618bf87  backend/src/Http/Request.php
+
+  242/242 checks passed
+
+  RESULT: safe to upload the 10 required artifacts (mirroring src/ onto backend/) to api.medacademy.site
+  Optional: src/Http/Request.php (documentation only — no behaviour change).
+  Do NOT upload rollback/ or gen-manifest.cjs / preflight.cjs / verify-live.cjs.
+
+  Next: upload, then run `node verify-live.cjs` with SUPERADMIN_* / DOCTOR_* credentials.
+

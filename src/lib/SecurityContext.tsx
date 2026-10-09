@@ -46,8 +46,23 @@ import {
   onNativeDebuggerAttached,
   onNativeIntegrityFailed,
 } from '@/lib/nativeSecurity';
+import { isVpnWhitelistKnownNonEmpty } from '@/lib/security';
+import {
+  engageSecurityLock,
+  releaseSecurityLock,
+  releaseAllSecurityLocks,
+  isSecurityLocked,
+  getSecurityLockState,
+  subscribeSecurityLock,
+  markNativeVpnSignal,
+  type SecurityLockState,
+} from '@/lib/securityLock';
 import { useSession } from '@/ctx';
 import { useProfileStore } from '@/lib/store';
+
+/** Lock holder names — one per independent signal source (they compose). */
+const LOCK_SRC_VERDICT    = 'verdict';      // authoritative policy decision
+const LOCK_SRC_NATIVE_VPN = 'native-vpn';   // fast native TRANSPORT_VPN signal
 
 // Continuous check interval — 30 seconds (balances security vs battery)
 const CONTINUOUS_CHECK_INTERVAL_MS = 30_000;
@@ -97,6 +112,19 @@ interface SecurityContextValue {
    * to lift restrictions for the Super Admin session only.
    */
   isSuperAdmin: boolean;
+  /**
+   * CENTRAL SECURITY LOCK — TRUE while ANY signal holds the app locked.
+   * While locked: protected requests are refused/aborted at the transport and
+   * playback is stopped immediately. Consumers that PAUSE playback subscribe
+   * to the lock directly (registerPlaybackStopper) rather than polling this.
+   */
+  securityLocked: boolean;
+  /**
+   * TRUE while an AUTHORITATIVE (policy-verdict) block holds the lock. Screens
+   * use this to UNMOUNT/destroy the native player — a soft (provisional)
+   * containment only pauses it.
+   */
+  securityLockHard: boolean;
   /** Run all security checks. Returns the result. */
   check:       (deviceId?: string) => Promise<SecurityCheckResult>;
   /**
@@ -190,6 +218,8 @@ const SecurityContext = createContext<SecurityContextValue>({
   blocksVideo: false,
   hasWarnings: false,
   isSuperAdmin: false,
+  securityLocked:   false,
+  securityLockHard: false,
   check:            async () => DEFAULT_RESULT,
   checkBeforeVideo: async () => false,
   reset:       () => {},
@@ -211,13 +241,41 @@ export function SecurityProvider({ children }: { children: React.ReactNode }) {
   // its invocation with a monotonically increasing generation; only the
   // newest generation is allowed to publish its result.
   const checkGenRef = useRef(0);
+
+  // ── Native-signal sequence → stale-verdict containment guard ──────────────
+  // The native TRANSPORT_VPN callback engages PROVISIONAL containment at once,
+  // before any network-bound check can decide whether the VPN is allowed. The
+  // authoritative verdict then either upgrades that to a HARD lock or releases
+  // it (an admin may whitelist a corporate VPN).
+  //
+  // THE RACE: a check that STARTED before the VPN signal can land a
+  // non-blocking verdict AFTER containment engaged. The previous code released
+  // the provisional holder unconditionally, silently dropping containment while
+  // the VPN was still up — the exact interception window this feature exists to
+  // close. So: every native signal bumps `nativeSignalSeqRef`; every published
+  // verdict records the sequence that was current when ITS CHECK STARTED. A
+  // verdict may only release the provisional holder if it started at or after
+  // the newest signal, i.e. it actually observed that VPN state. A stale
+  // verdict keeps containment, and the 1.5s VPN re-check lands a fresh one.
+  const nativeSignalSeqRef  = useRef(0);
+  const verdictNativeSeqRef = useRef(0);
+  //  Re-runs the verdict effect when a NEW verdict lands with identical block
+  //  flags and threat types — without it the effect could not re-evaluate the
+  //  provisional holder and a legitimately-allowed VPN would stay locked.
+  const [verdictSerial, setVerdictSerial] = useState(0);
+
   const runGuardedCheck = useCallback(async (): Promise<SecurityCheckResult | null> => {
     const gen = ++checkGenRef.current;
+    //  Snapshot BEFORE the probes run: a VPN signal arriving mid-check is newer
+    //  than this verdict's observation window and must not be cleared by it.
+    const nativeSeqAtStart = nativeSignalSeqRef.current;
     const r = await runSecurityChecks();
     if (gen !== checkGenRef.current) {
       if (__DEV__) console.log('[SecurityContext] discarding stale security result (gen superseded)');
       return null;
     }
+    verdictNativeSeqRef.current = nativeSeqAtStart;
+    setVerdictSerial((s) => s + 1);
     return r;
   }, []);
 
@@ -247,6 +305,16 @@ export function SecurityProvider({ children }: { children: React.ReactNode }) {
   //   • After logout → clearProfile() → role gone → bypass immediately revoked.
   const { profile } = useProfileStore();
   const isSuperAdmin = profile?.role === 'super_admin';
+
+  // ── Central security lock — observable state ─────────────────────────────
+  // The lock itself lives in a pure module (securityLock.ts) so non-React code
+  // (the transport) can consult it synchronously. React mirrors it here for
+  // rendering. subscribeSecurityLock fires immediately with the current state,
+  // so a lock engaged before mount is never missed.
+  const [lockState, setLockState] = useState<SecurityLockState>(getSecurityLockState);
+  const diagnosticsRef = useRef<{ nativeVPNSignalTimeMs?: number; lockEngagedTimeMs?: number }>({});
+  const [diagnostics, setDiagnostics] = useState<{ nativeVPNSignalTimeMs?: number; lockEngagedTimeMs?: number }>({});
+  useEffect(() => subscribeSecurityLock(setLockState), []);
 
   // ── Pre-warm cache from SecureStore on mount (before any session) ──────────
   useEffect(() => {
@@ -392,6 +460,10 @@ export function SecurityProvider({ children }: { children: React.ReactNode }) {
     if (!session) {
       if (intervalRef.current)   { clearInterval(intervalRef.current);   intervalRef.current = null; }
       if (configTimerRef.current){ clearInterval(configTimerRef.current); configTimerRef.current = null; }
+      // A lock is SESSION-SCOPED: on logout/account-switch every holder is
+      // dropped so the next identity cannot inherit a stale block (and the
+      // transport gate reopens for the auth flows it must serve).
+      releaseAllSecurityLocks();
       void invalidateSecurityConfig();
       void clearAppAttestKey();
       // Server policy + VPN whitelist caches are session-scoped: drop them on
@@ -509,8 +581,39 @@ export function SecurityProvider({ children }: { children: React.ReactNode }) {
     if (Platform.OS === 'android' && NativeModules.SecurityModule) {
       try {
         const emitter = new NativeEventEmitter(NativeModules.SecurityModule);
-        const subscription = emitter.addListener('vpnStateChanged', (event: { vpnActive: boolean }) => {
-          console.log('[SecurityContext][VpnCallback] vpnStateChanged event received vpnActive=', event?.vpnActive);
+        const subscription = emitter.addListener('vpnStateChanged', (event: { vpnActive: boolean; signalTimeMs?: number }) => {
+          const signalTimeMs = event?.signalTimeMs ?? 0;
+          console.log('[SecurityContext][VpnCallback] vpnStateChanged event received vpnActive=', event?.vpnActive, 'signalTimeMs=', signalTimeMs);
+          //  Record JS receipt + bump the native-signal sequence BEFORE any
+          //  containment work, so the measured latency excludes nothing and a
+          //  verdict landing mid-window cannot release this newer signal.
+          nativeSignalSeqRef.current += 1;
+          markNativeVpnSignal(signalTimeMs > 0 ? signalTimeMs : null);
+
+          // ── IMMEDIATE CONTAINMENT (latency fix) ──────────────────────────
+          // The network-bound verdict below needs a full check cycle (policy
+          // fetch + Play Integrity + SSL probe) before it can decide, and that
+          // window was long enough for an interception tool to capture API
+          // traffic and for the native player to keep running behind the gate.
+          // TRANSPORT_VPN is an OS-level FACT, not a heuristic, so we contain
+          // AT ONCE: pause playback + abort/halt protected requests. The
+          // authoritative verdict then either upgrades this to a HARD lock or
+          // releases it (admins may whitelist a corporate VPN).
+          //   • Super Admin sessions bypass containment entirely.
+          //   • A known-non-empty admin whitelist skips it (mirrors detectVPN).
+          if (isSuperAdmin) {
+            releaseSecurityLock(LOCK_SRC_NATIVE_VPN);
+          } else if (event?.vpnActive === true && !isVpnWhitelistKnownNonEmpty()) {
+            engageSecurityLock(LOCK_SRC_NATIVE_VPN);
+            if (signalTimeMs > 0 && event?.vpnActive) {
+              const lockEngageMs = Date.now();
+              diagnosticsRef.current = { nativeVPNSignalTimeMs: signalTimeMs, lockEngagedTimeMs: lockEngageMs };
+              setDiagnostics(diagnosticsRef.current);
+            }
+          } else if (event?.vpnActive !== true) {
+            releaseSecurityLock(LOCK_SRC_NATIVE_VPN);
+          }
+
           if (!appActiveRef.current) return;
           // Immediate re-check — no debounce needed because the NetworkCallback
           // already confirmed the VPN state changed. Use the VPN_RECHECK_DEBOUNCE_MS
@@ -562,6 +665,43 @@ export function SecurityProvider({ children }: { children: React.ReactNode }) {
     ? SUPERADMIN_BYPASS_RESULT
     : (result ?? NEUTRAL_STARTUP_RESULT);
   const hasVerdict = isSuperAdmin || result !== null;
+
+  // ── LOCK DRIVEN BY THE AUTHORITATIVE VERDICT ─────────────────────────────
+  // THE root-cause fix for "video keeps playing behind the security screen":
+  // the block SCREEN used to be driven by blocksLogin while the PLAYER was
+  // stopped ONLY by blocksVideo. VPN/proxy policy is block_login, so a VPN
+  // produced blocksLogin:true + blocksVideo:false — gate up, native player
+  // still running. The lock unifies both: a completed blocking verdict holds
+  // a HARD lock (screens unmount the player, transport refuses requests), and
+  // any non-blocking COMPLETED verdict releases the verdict holder AND drops
+  // the provisional native containment (so an allowed/whitelisted VPN cannot
+  // lock the app forever).
+  //
+  // `verdictTypes` is part of the dependency list deliberately: a verdict can
+  // land with the SAME block flags but different findings (e.g. VPN cleared by
+  // the whitelist), and the provisional holder must still be released then.
+  const verdictTypes = r.threats.map((t) => t.type).join(',');
+  useEffect(() => {
+    if (!isSuperAdmin && hasVerdict && (r.blocksLogin || r.blocksVideo)) {
+      engageSecurityLock(LOCK_SRC_VERDICT, { hard: true });
+      return;
+    }
+    releaseSecurityLock(LOCK_SRC_VERDICT);
+    // Only clear provisional containment once a COMPLETED verdict exists —
+    // before the first verdict, containment must stay fail-closed — AND only
+    // when that verdict started at or after the newest native VPN signal. A
+    // verdict that began before the signal cannot speak for the VPN state now
+    // in force, so dropping containment on it would reopen the interception
+    // window (see nativeSignalSeqRef above). The VPN re-check that follows every
+    // signal lands a fresh verdict that can legitimately release containment.
+    if (hasVerdict && verdictNativeSeqRef.current >= nativeSignalSeqRef.current) {
+      releaseSecurityLock(LOCK_SRC_NATIVE_VPN);
+    } else if (hasVerdict && __DEV__) {
+      console.log('[SecurityContext] holding provisional VPN containment — verdict predates the latest native signal');
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isSuperAdmin, hasVerdict, r.blocksLogin, r.blocksVideo, verdictTypes, verdictSerial]);
+
   const phase: GatePhase = resolveGatePhase({
     hasVerdict,
     evaluating,
@@ -582,6 +722,8 @@ export function SecurityProvider({ children }: { children: React.ReactNode }) {
       blocksVideo:         r.blocksVideo,
       hasWarnings:         r.hasWarnings,
       isSuperAdmin,
+      securityLocked:      lockState.locked,
+      securityLockHard:    lockState.hard,
       check,
       checkBeforeVideo,
       reset,

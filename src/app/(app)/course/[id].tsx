@@ -70,6 +70,27 @@ export default function CourseDetail() {
     if (!id) return;
     try {
       const isStudent = profile?.role === 'student' || isPreviewingCourse(id);
+      const wantsEnrollment = isStudent && !!profile;
+
+      // Fire the enrollment reads NOW rather than after the course payload
+      // returns. They depend only on `id` + `profile`, both already known, so
+      // running them as a second sequential Promise.all was pure
+      // serialization — this is the most-tapped screen in the app and the
+      // extra round trip directly delayed content appearing.
+      //
+      // Failure semantics are deliberately UNCHANGED: handlers are attached
+      // below, at the same point in the flow as before, so a rejected
+      // subscription read still skips setIsSubscribed/setCourseProgress and
+      // is caught by the outer try — and by then course/progress are already
+      // committed, exactly as they were with the sequential version. The
+      // early no-op catch only prevents a transient unhandled-rejection
+      // warning while phase 1 is still in flight.
+      const subsP = wantsEnrollment ? getMySubscriptions(profile!.id) : null;
+      const cpP = wantsEnrollment
+        ? getCourseProgress(profile!.id, id).catch(() => null)
+        : null;
+      subsP?.catch(() => {});
+
       const [courseData, prog] = await Promise.all([
         getCourseById(id),
         profile ? getLessonProgress(profile.id, id) : Promise.resolve([]),
@@ -84,11 +105,8 @@ export default function CourseDetail() {
         }
         // else: leave existing expanded state untouched — user may have expanded sections
       }
-      if (isStudent && profile) {
-        const [subs, cp] = await Promise.all([
-          getMySubscriptions(profile.id),
-          getCourseProgress(profile.id, id).catch(() => null),
-        ]);
+      if (subsP && cpP) {
+        const [subs, cp] = await Promise.all([subsP, cpP]);
         setIsSubscribed(subs.some((s: any) => s.course_id === id || s.course?.id === id));
         setCourseProgress(cp);
       }

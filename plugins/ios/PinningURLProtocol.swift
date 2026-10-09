@@ -84,20 +84,104 @@ final class PinningURLProtocol: URLProtocol, URLSessionDataDelegate {
         innerSession = nil
     }
 
+    // MARK: - SPKI pin extraction
+    //
+    // FIX (2026-10-09). The previous implementation hashed
+    // `SecKeyCopyExternalRepresentation(key)` — the platform's RAW key encoding
+    // (PKCS#1 for RSA, `0x04||X||Y` for EC). Certificate pins are SHA-256 of the
+    // DER **SubjectPublicKeyInfo** (SPKI), so that value could never equal a
+    // configured pin. With `MEDA_PINNED_HOSTS` non-empty (as it is in this
+    // build) `canInit` intercepted every API request and `validatePins` returned
+    // false unconditionally — a guaranteed fail-closed that would have made the
+    // API unreachable on iOS the moment pinning shipped.
+    //
+    // The SubjectPublicKeyInfo TLV is now read straight out of the certificate
+    // DER, which is byte-for-byte what `openssl x509 -pubkey` emits — i.e.
+    // exactly what the configured pin values were computed from. This is
+    // format-agnostic: no per-key-type prefix tables, valid for RSA and any EC
+    // curve, and independent of SecKeyCopyExternalRepresentation semantics.
+
+    /// One parsed DER TLV. `start` is the header byte (tag) offset, so
+    /// `data[start..<end]` is the complete TLV including its header.
+    private struct DERNode {
+        let tag: UInt8
+        let start: Int
+        let valueStart: Int
+        let end: Int
+    }
+
+    /// Read a single DER TLV at `offset` (advances `offset` past it).
+    /// Bounded: rejects truncated headers, indefinite lengths and >4-byte
+    /// length fields, and never reads beyond `data`. Returns nil on anything
+    /// malformed so the caller fails closed.
+    private static func readDER(_ data: Data, _ offset: inout Int) -> DERNode? {
+        guard offset < data.count else { return nil }
+        let start = offset
+        let tag = data[offset]
+        offset += 1
+        guard offset < data.count else { return nil }
+        var length = Int(data[offset])
+        offset += 1
+        if length & 0x80 != 0 {
+            let lengthBytes = length & 0x7F
+            guard lengthBytes > 0, lengthBytes <= 4, offset + lengthBytes <= data.count else { return nil }
+            length = 0
+            for _ in 0..<lengthBytes {
+                length = (length << 8) | Int(data[offset])
+                offset += 1
+            }
+        }
+        guard offset + length <= data.count else { return nil }
+        let valueStart = offset
+        let end = offset + length
+        offset = end
+        return DERNode(tag: tag, start: start, valueStart: valueStart, end: end)
+    }
+
+    /// `Certificate ::= SEQUENCE { tbsCertificate, signatureAlgorithm, signature }`
+    /// `TBSCertificate ::= SEQUENCE { [0] version, serialNumber, signature, issuer,
+    ///                                validity, subject, subjectPublicKeyInfo, ... }`
+    ///
+    /// So the SPKI is the field after subject — the 7th when the optional
+    /// `[0] EXPLICIT version` is present, the 6th when it is absent (v1).
+    /// Returns the complete SPKI TLV (`start..<end`).
+    private static func subjectPublicKeyInfo(from certDER: Data) -> Data? {
+        var offset = 0
+        guard let cert = readDER(certDER, &offset), cert.tag == 0x30 else { return nil }
+        var cursor = cert.valueStart
+        guard let tbs = readDER(certDER, &cursor), tbs.tag == 0x30 else { return nil }
+
+        var field = tbs.valueStart
+        if readDER(certDER, &field)?.tag != 0xA0 {
+            field = tbs.valueStart // no [0] version — rewind to serialNumber
+        }
+        // serialNumber, signature, issuer, validity, subject → then SPKI
+        for _ in 0..<5 {
+            guard readDER(certDER, &field) != nil else { return nil }
+        }
+        guard let spki = readDER(certDER, &field), spki.tag == 0x30 else { return nil }
+        return certDER.subdata(in: spki.start..<spki.end)
+    }
+
+    /// base64(SHA-256(SPKI DER)) for a certificate, or nil if unparseable.
+    private static func spkiDigest(of certificate: SecCertificate) -> String? {
+        let certDER = SecCertificateCopyData(certificate) as Data
+        guard let spki = subjectPublicKeyInfo(from: certDER) else { return nil }
+        return Data(SHA256.hash(data: spki)).base64EncodedString()
+    }
+
     // MARK: - Inner-session challenge handling (the actual pin enforcement)
 
     /// System trust FIRST (never weaken TLS), then pin restriction: the trusted
-    /// chain must carry at least one pinned SPKI public key.
+    /// chain must carry at least one certificate whose SPKI public key is pinned.
     private func validatePins(trust: SecTrust) -> Bool {
         var error: CFError?
         guard SecTrustEvaluateWithError(trust, &error) else { return false }
         if Self.pins.isEmpty { return true }
         guard let chain = SecTrustCopyCertificateChain(trust) as? [SecCertificate] else { return false }
-        for cert in chain {
-            if let key = SecCertificateCopyKey(cert),
-               let keyData = SecKeyCopyExternalRepresentation(key, nil) as Data? {
-                let digest = Data(SHA256.hash(data: keyData)).base64EncodedString()
-                if Self.pins.contains(digest) { return true }
+        for certificate in chain {
+            if let digest = Self.spkiDigest(of: certificate), Self.pins.contains(digest) {
+                return true
             }
         }
         return false

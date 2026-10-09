@@ -146,12 +146,19 @@ function validateSwiftFile(rel) {
   let s4checked = 0;
   for (const ann of objcAnnotations) {
     const selector = ann[1].trim();
-    // Skip class-level decorator: the token after @objc(...) (ignoring whitespace)
-    // is the `class` keyword, not a `func`.
+    // Skip class-level decorator: the token after @objc(...) (ignoring
+    // whitespace) is the `class` keyword, not a `func`. Modifiers must be
+    // allowed too — `@objc(Foo)\nfinal class Foo` is a class decorator (that is
+    // exactly the shape of PinningURLProtocol.swift, whose ObjC name is pinned
+    // so PinningInitializer.m can find it via NSClassFromString).
     const afterAnnotation = content.slice(ann.index + ann[0].length).trimStart();
-    if (/^class\s/.test(afterAnnotation)) continue;  // class decorator — skip
+    if (/^(?:final\s+|public\s+|internal\s+|private\s+|open\s+)*class\s/.test(afterAnnotation)) continue;
 
     const baseName  = selector.split(':')[0].replace(/^"|"$/g, '');
+    // Only real selectors can be exported. Documentation often writes the
+    // decorator generically (e.g. `@objc(...)` inside a comment) — that is not
+    // an exported method, so it must not be reported as a missing func.
+    if (!/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(baseName)) continue;
     const funcRegex = new RegExp(`func\\s+${baseName}\\s*\\(`);
     if (!funcRegex.test(content)) {
       fail(ctx, `S4: @objc("${selector}") has no matching Swift func ${baseName}()`);
@@ -324,6 +331,10 @@ function main() {
 
   const swiftFiles = [
     'plugins/ios/IOSSecurityModule.swift',
+    // The TLS pinning URLProtocol ships in the same generated iOS target but was
+    // previously outside this validator — a wrong pin hash (or a force-unwrap in
+    // the DER reader) would have shipped silently and broken the API on iOS.
+    'plugins/ios/PinningURLProtocol.swift',
   ];
 
   for (const rel of swiftFiles) {

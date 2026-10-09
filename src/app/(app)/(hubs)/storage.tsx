@@ -158,9 +158,8 @@ export default function StorageMonitorScreen({ backTo }: { backTo?: string } = {
                   {/* Usage bar */}
                   <View style={{ height: 8, borderRadius: 4, backgroundColor: `${c.text}12`, overflow: 'hidden' }}>
                     <View style={{ height: 8, width: `${Math.min(100, stats.disk.used_pct)}%`, backgroundColor: stats.disk.used_pct > 90 ? '#DC2626' : c.primary }} />
-                  </View>
-                  <Text style={{ fontSize: 11, color: c.text, opacity: 0.5 }}>
-                    {stats.disk.used_pct}% used · Measured: {stats.measured_root_label}
+                  </View>                    <Text style={{ fontSize: 11, color: c.text, opacity: 0.5 }}>
+                    {stats.disk.used_pct}% used · Measured on: {stats.measured_root_label}
                   </Text>
                 </>
               ) : (

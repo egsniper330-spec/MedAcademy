@@ -20,6 +20,7 @@ import {
   X, Phone, Mail, Hash, BookOpen, AlertTriangle,
   RotateCcw, UserMinus, Settings, ChevronRight,
   Check, Edit3, Trash2,
+  Briefcase,
 } from 'lucide-react-native';
 import { useProfileStore } from '@/lib/store';
 import {
@@ -43,7 +44,11 @@ import { NeuCard } from '@/components/NeuCard';
 import { useToast } from '@/components/Toast';
 import { neuColors, useLayout, safeBottom } from '@/lib/neu';
 import { DashboardHeader } from '@/components/DashboardHeader';
-import { isFeatureEnabled } from '@/lib/featureFlags';
+import {
+  isFeatureEnabled,
+  useFeatureFlags,
+  isFeatureDisabledError,
+} from '@/lib/featureFlags';
 
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -85,23 +90,28 @@ type ChartPeriod = 'daily' | 'weekly' | 'monthly' | 'yearly';
 // EarningsToggleCard
 // ─────────────────────────────────────────────────────────────────────────────
 function EarningsToggleCard({
-  enabled, toggling, onToggle, c,
-}: { enabled: boolean; toggling: boolean; onToggle: (v: boolean) => void; c: typeof neuColors.light }) {
+  enabled, toggling, onToggle, c, disabled,
+}: { enabled: boolean; toggling: boolean; onToggle: (v: boolean) => void; c: typeof neuColors.light; disabled?: boolean }) {
+  const frozen = disabled && !enabled;
   return (
-    <NeuCard radius={18} style={{ padding: 16, marginBottom: 20 }}>
+    <NeuCard radius={18} style={{ padding: 16, marginBottom: 20, opacity: frozen ? 0.55 : 1, pointerEvents: frozen ? 'none' : 'auto' }}>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
         <View style={{ width: 40, height: 40, borderRadius: 12, backgroundColor: enabled ? '#16A34A18' : `${c.text}0D`, alignItems: 'center', justifyContent: 'center' }}>
           <TrendingUp size={20} color={enabled ? '#16A34A' : `${c.text}44`} />
         </View>
         <View style={{ flex: 1 }}>
           <Text style={{ fontSize: 15, fontWeight: '700', color: c.text }}>Earnings System</Text>
-          <Text style={{ fontSize: 12, color: c.text, opacity: 0.45, marginTop: 2 }}>
-            {enabled ? 'Active — tracking revenue independently' : 'Disabled — enable to track revenue'}
+          <Text style={{ fontSize: 12, color: c.text, opacity: 0.4, marginTop: 2 }}>
+            {frozen ? 'Disabled by platform — contact support' :
+             enabled ? 'Active — tracking revenue independently' : 'Disabled — enable to track revenue'}
           </Text>
         </View>
-        {toggling
-          ? <ActivityIndicator size="small" color={c.primary} />
-          : <Switch value={enabled} onValueChange={onToggle} trackColor={{ false: `${c.text}20`, true: '#16A34A55' }} thumbColor={enabled ? '#16A34A' : `${c.text}55`} />}
+        {frozen
+          ? <View style={{ width: 18, height: 18, borderRadius: 4, backgroundColor: c.text }} />
+          : toggling
+            ? <ActivityIndicator size="small" color={c.primary} />
+            : <Switch value={enabled} onValueChange={onToggle} trackColor={{ false: `${c.text}20`, true: '#16A34A55' }} thumbColor={enabled ? '#16A34A' : `${c.text}55`} />
+        }
       </View>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 12, paddingTop: 12, borderTopWidth: 1, borderTopColor: `${c.text}08` }}>
         <View style={{ width: 7, height: 7, borderRadius: 4, backgroundColor: enabled ? '#16A34A' : `${c.text}33` }} />
@@ -888,12 +898,30 @@ export default function DoctorEarnings() {
   const { profile, setProfile } = useProfileStore();
   const { showToast } = useToast();
 
-  // ── Toggle ────────────────────────────────────────────────────────────────
+  // Server-authoritative flag state, refreshed on mount + on foreground.
+  // UI-only reflection — the BACKEND refuses the RPC (403 feature_disabled)
+  // and the Data API read of doctor_earnings_events (FeatureFlagService).
+  // Takes precedence over the personal toggle: if the platform disables
+  // earnings, the screen shows the unavailable state regardless of the local
+  // toggle, and re-enabling the flag restores everything without a restart.
+  const { isEnabled: flagEnabled, refresh: refreshFlags } = useFeatureFlags();
+
+  // Backend-refusal state (403 feature_disabled). Declared BEFORE the derived
+  // values below so the JSX never reads a block-scoped binding early.
+  const [flagBlocked,    setFlagBlocked]    = useState(false);
+  const [flagBlockedKey, setFlagBlockedKey] = useState<string | null>(null);
+
+  const platformEarningsOn = flagEnabled('doctor_earnings') && !flagBlocked;
+
+  // ── Toggle (local preference only; disabled by platform tombstone) ────────
   const [earningsEnabled, setEarningsEnabled] = useState<boolean>(!!profile?.earnings_enabled);
   const [toggling,        setToggling]        = useState(false);
 
+  const platformDisabled = flagBlocked || !platformEarningsOn;
+  const canToggle = !toggling && !platformDisabled;
+
   const handleToggle = async (value: boolean) => {
-    if (!profile?.id || toggling) return;
+    if (!profile?.id || toggling || platformDisabled) return;
     setEarningsEnabled(value);
     setProfile({ ...profile, earnings_enabled: value });
     setToggling(true);
@@ -901,8 +929,13 @@ export default function DoctorEarnings() {
       await updateProfile(profile.id, { earnings_enabled: value });
       showToast({ type: 'success', message: value ? 'Earnings system enabled.' : 'Earnings system disabled. History preserved.' });
     } catch (e: any) {
-      setEarningsEnabled(!value);
-      setProfile({ ...profile, earnings_enabled: !value });
+      const disabled = isFeatureDisabledError(e);
+      if (disabled) {
+        setEarningsEnabled(!value);
+        setProfile({ ...profile, earnings_enabled: !value });
+        setFlagBlocked(true);
+        setFlagBlockedKey(disabled);
+      }
       showToast({ type: 'error', message: e?.message ?? 'Failed to update setting.' });
     }
     setToggling(false);
@@ -912,20 +945,38 @@ export default function DoctorEarnings() {
   if (!toggling && earningsEnabled !== profileEarnings) setEarningsEnabled(profileEarnings);
 
   // ── Data ──────────────────────────────────────────────────────────────────
-  const [data,       setData]       = useState<DoctorEarningsDashboard | null>(null);
-  const [loading,    setLoading]    = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [selectedTx, setSelectedTx] = useState<EarningsTransactionRow | null>(null);
+  const [data,          setData]          = useState<DoctorEarningsDashboard | null>(null);
+  const [loading,       setLoading]       = useState(true);
+  const [refreshing,    setRefreshing]    = useState(false);
+  const [selectedTx,    setSelectedTx]    = useState<EarningsTransactionRow | null>(null);
+
+  // Use the live hook value (the shell refreshes it on foreground; this
+  // screen additionally refreshes loadData on focus so a toggle while the
+  // Doctor is on the tab is reflected without leaving the screen).
 
   const loadData = useCallback(async () => {
     if (!profile?.id) { setLoading(false); return; }
     try {
-      setData(await getDoctorEarningsDashboard(profile.id));
+      const dashboard = await getDoctorEarningsDashboard(profile.id);
+      if (dashboard && (data === null || (refreshing))) setData(dashboard);
+      setFlagBlocked(false);
+      setFlagBlockedKey(null);
     } catch (e: any) {
-      console.error('[DoctorEarnings]', e?.message);
+      const disabled = isFeatureDisabledError(e);
+      if (disabled) {
+        // Backend refused because the Super Admin disabled this feature.
+        // Show the clear "unavailable" state instead of stale/empty data.
+        setFlagBlocked(true);
+        setFlagBlockedKey(disabled);
+        setData(null);
+      } else {
+        // Network/read error — keep showing last known data, don't
+        // catastrophize into a silent blank screen.
+        console.error('[DoctorEarnings]', e?.message ?? e);
+      }
     }
     setLoading(false);
-  }, [profile?.id]);
+  }, [profile?.id, data, refreshing]);
 
   useFocusEffect(useCallback(() => { setLoading(true); (async () => { await loadData(); })(); }, [loadData]));
   const onRefresh = async () => { setRefreshing(true); await loadData(); setRefreshing(false); };
@@ -946,28 +997,34 @@ export default function DoctorEarnings() {
       />
       <View style={{ padding: layout.screenPx, paddingTop: 0 }}>
 
-        {/* Platform flag: doctor_earnings (Super Admin control). UI reflection
-            only — the server refuses the earnings RPC (403 feature_disabled).
-            Takes precedence over the personal toggle, and re-enabling the flag
-            restores this screen instantly; no data is ever modified. */}
-        {!isFeatureEnabled('doctor_earnings') ? (
+        {/* Platform flag: doctor_earnings (Super Admin control). Server-authoritative:
+            the backend refuses the RPC (403 feature_disabled) and the Data API read
+            of doctor_earnings_events (FeatureFlagService). The screen shows the
+            unavailable state if:
+              • the platform flag is OFF (platformEarningsOn is false), OR
+              • the backend returned 403 feature_disabled (flagBlocked is true).
+            Re-enabling the flag restores this screen instantly — no app restart,
+            no reinstall. Local toggle is frozen while the platform has disabled it. */}
+        {platformDisabled ? (
           <View style={{ alignItems: 'center', paddingVertical: 52, gap: 16 }}>
             <NeuCard radius={24} style={{ width: 72, height: 72, alignItems: 'center', justifyContent: 'center' }}>
               <DollarSign size={32} color={`${c.text}30`} />
             </NeuCard>
             <View style={{ alignItems: 'center', gap: 8 }}>
-              <Text style={{ fontSize: 17, fontWeight: '800', color: c.text, opacity: 0.4 }}>Earnings Temporarily Unavailable</Text>
-              <Text style={{ fontSize: 13, color: c.text, opacity: 0.25, textAlign: 'center', maxWidth: 260, lineHeight: 20 }}>
-                The platform operator has temporarily disabled the earnings area. Your balances and history are safe and will reappear when it is re-enabled.
+              <Text style={{ fontSize: 17, fontWeight: '800', color: c.text }}>This feature is currently unavailable.</Text>
+              <Text style={{ fontSize: 13, color: c.text, opacity: 0.4, textAlign: 'center', maxWidth: 260, lineHeight: 20 }}>
+                {flagBlockedKey ?
+                  'The platform operator has temporarily disabled this feature. Your balances and history are safe and will reappear when it is re-enabled.' :
+                  'The platform operator has temporarily disabled the earnings area. Your balances and history are safe and will reappear when it is re-enabled.'}
               </Text>
             </View>
           </View>
         ) : (<>
-        {/* Toggle */}
-        <EarningsToggleCard enabled={earningsEnabled} toggling={toggling} onToggle={handleToggle} c={c} />
+          {/* Toggle (disabled while platform has disabled earnings) */}
+          <EarningsToggleCard enabled={earningsEnabled} toggling={toggling} onToggle={handleToggle} c={c} disabled={platformDisabled} />
 
-        {/* Pricing Settings + Admin Tools */}
-        {earningsEnabled && (
+        {/* Pricing Settings + Admin Tools — only when the platform allows earnings */}
+        {platformEarningsOn && earningsEnabled && (
           <PricingSettingsSection
             doctorId={profile?.id ?? ''}
             c={c}
@@ -975,7 +1032,6 @@ export default function DoctorEarnings() {
           />
         )}
 
-        {/* ── Disabled state ───────────────────────────────────────────── */}
         {!earningsEnabled ? (
           <View style={{ alignItems: 'center', paddingVertical: 52, gap: 16 }}>
             <NeuCard radius={24} style={{ width: 72, height: 72, alignItems: 'center', justifyContent: 'center' }}>
@@ -1027,7 +1083,7 @@ export default function DoctorEarnings() {
                 <StatCard icon={<Zap        size={15} color="#7C3AED"  />} label="Transactions"        value={String(data.totalTransactions)}          color="#7C3AED" c={c} />
               </View>
               <View style={{ width: '100%' }}>
-                <StatCard icon={<Zap        size={15} color="#2DA8FF"  />} label="Avg Revenue / Student" value={fmtEGPPlain(data.avgRevenuePerStudent)} color="#2DA8FF" c={c} />
+                <StatCard icon={<Zap size={15} color="#2DA8FF" />} label="Avg Revenue / Student" value={fmtEGPPlain(data.avgRevenuePerStudent)} color="#2DA8FF" c={c} />
               </View>
             </View>
 
@@ -1056,20 +1112,8 @@ export default function DoctorEarnings() {
           </>
         )}
         </>
-        )}
-      </View>
-
-      {/* ── Student Profile Modal ─────────────────────────────────────────── */}
-      {selectedTx && profile?.id && (
-        <StudentProfileModal
-          tx={selectedTx}
-          doctorId={profile.id}
-          c={c}
-          onClose={() => setSelectedTx(null)}
-          onAction={loadData}
-        />
       )}
+      </View>
     </ScrollView>
   );
 }
-

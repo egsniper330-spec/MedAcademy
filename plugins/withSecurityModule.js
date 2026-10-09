@@ -671,13 +671,29 @@ class SecurityModule(private val reactContext: ReactApplicationContext) :
     }
 
     /**
-     * Mock location detection (3-tier approach):
-     *   Tier 1 (API 23+): AppOpsManager.checkOp(OPSTR_MOCK_LOCATION) — the authoritative
-     *            check. Returns MODE_ALLOWED only if the user granted "Allow mock locations"
-     *            in Developer Options to a specific app other than ours.
+     * Mock location detection (2-tier approach — FALSE-POSITIVE FIX):
+     *   Tier 1 (API 23+): AppOpsManager.checkOpNoThrow(OPSTR_MOCK_LOCATION) — the
+     *            authoritative check. Resolves to MODE_ALLOWED only when the user
+     *            actually selected a mock-location provider (Developer options →
+     *            Select mock location app), which is the ONLY thing that turns mock
+     *            GPS on.
      *   Tier 2 (API < 23): Settings.Secure.ALLOW_MOCK_LOCATION — the legacy global flag.
-     *   Tier 3: Check if any installed package holds the ACCESS_MOCK_LOCATION permission
-     *            (distinct from us). If yes, mock GPS is plausibly active.
+     *
+     * REMOVED (was Tier 3): "any installed package HOLDS android.permission.
+     * ACCESS_MOCK_LOCATION". That plane is wrong on two counts and locked the entire
+     * app on stock hardware:
+     *   • Holding a signature|development permission is NOT evidence of active
+     *     mocking. ACCESS_MOCK_LOCATION is granted at install time to preinstalled
+     *     apps that merely offer a mock-location feature — e.g. Google's
+     *     com.google.android.apps.restore, present on stock Samsung/Google images.
+     *   • The platform's own resolution for such a package is DENY (verified on a
+     *     stock SM-T505N, Android 12: 'appops get com.google.android.apps.restore
+     *     android:mock_location' → "No operations. Default mode: deny"), so Tier 1
+     *     already reports the truth and Tier 3 could only ever add a false positive.
+     * Observed impact: every launch on that tablet was blocked by the SecurityGate
+     * with risk score 20 — the JS maps this event to type 'debug_detected', so users
+     * saw the misleading "Insecure Build Detected / Install the official production
+     * release of the app." while running a legitimate release build.
      */
     private fun detectMockLocation(): Boolean {
         // Tier 1: AppOpsManager (API 23+) — check every package for MOCK_LOCATION op
@@ -718,20 +734,8 @@ class SecurityModule(private val reactContext: ReactApplicationContext) :
             Log.d(TAG, "[detectMockLocation] legacy flag exception: \${e.message}")
         }
 
-        // Tier 3: scan for any installed app with ACCESS_MOCK_LOCATION permission
-        try {
-            val pm = reactContext.packageManager
-            val mockApps = pm.getPackagesHoldingPermissions(
-                arrayOf("android.permission.ACCESS_MOCK_LOCATION"),
-                PackageManager.MATCH_ALL
-            )
-            val external = mockApps.filter { it.packageName != reactContext.packageName }
-            Log.d(TAG, "[detectMockLocation] mockLocationApps=" + external.map { it.packageName }.toString())
-            if (external.isNotEmpty()) return true
-        } catch (e: Exception) {
-            Log.d(TAG, "[detectMockLocation] permission scan exception: \${e.message}")
-        }
-
+        // NOTE: the previous "permission presence" tier lived here and was removed
+        // — see the doc comment above (false positive on stock devices).
         return false
     }
 

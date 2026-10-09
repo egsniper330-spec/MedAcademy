@@ -6,11 +6,12 @@ import { assertBackendConfigured } from '@/lib/backend-config-guard';
 
 import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { Stack } from 'expo-router';
-import { View, AppState } from 'react-native';
+import { View, AppState, useColorScheme } from 'react-native';
 import { PortalHost } from '@rn-primitives/portal';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import * as NavigationBar from 'expo-navigation-bar';
+import { useSystemBars } from '@/lib/useSystemBars';
 // expo-screen-capture: import the JS module directly so we call the real
 // preventScreenCaptureAsync / allowScreenCaptureAsync wrapper functions.
 //
@@ -340,14 +341,28 @@ const RootLayout: React.FC = () => {
 
   // Make the Android system navigation bar fully transparent so React Navigation
   // can render the tab bar edge-to-edge and apply its own safe-area padding.
-  // This works in tandem with android.navigationBarColor = "#00000000" in app.json.
+  // This works in tandem with android.navigationBarColor = "#00000000" in app.json
+  // and with plugins/withSystemBars.js (which disables the OS contrast scrim).
   useEffect(() => {
     if (process.env.EXPO_OS === 'android') {
-      NavigationBar.setPositionAsync('absolute');
-      NavigationBar.setBackgroundColorAsync('#00000000');
-      NavigationBar.setButtonStyleAsync('dark');
+      void NavigationBar.setPositionAsync('absolute').catch(() => {});
+      void NavigationBar.setBackgroundColorAsync('#00000000').catch(() => {});
     }
   }, []);
+
+  // Nav-bar ICON appearance is theme-aware.
+  //
+  // It used to be a hardcoded setButtonStyleAsync('dark') inside the effect
+  // above. Dark icons are only correct on a LIGHT bar, so in dark mode the
+  // system nav icons were dark-on-dark (effectively invisible), and OEM themes
+  // that force high-contrast navigation often drew a white block behind them —
+  // the reported "ugly white rectangle separated from the app". Combined with
+  // the OS contrast scrim this produced a detached strip in BOTH themes.
+  //
+  // useSystemBars re-applies the correct icon style on every light↔dark change;
+  // the theme-level default is seeded by plugins/withSystemBars.js.
+  const isDarkScheme = useColorScheme() === 'dark';
+  useSystemBars(isDarkScheme);
 
   return (
     // SafeAreaProvider MUST be at root — provides insets to every useSafeAreaInsets()

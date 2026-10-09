@@ -21,6 +21,7 @@ use MedAcademy\Controllers\StudentBulkController;
 use MedAcademy\Controllers\RpcController;
 use MedAcademy\Controllers\RedeemCodeController;
 use MedAcademy\Controllers\DataController;
+use MedAcademy\Controllers\SupportController;
 use MedAcademy\Controllers\StorageController;
 use MedAcademy\Controllers\SystemDiagnosticsController;
 use MedAcademy\Controllers\UserController;
@@ -34,6 +35,14 @@ use MedAcademy\Controllers\VideoProviderController;
  */
 
 $auth = ['auth' => true];
+
+// ---- Support Contact (public + admin) ------------------------------------
+// GET  /support/contact            — PUBLIC, no auth. Blocked screen reads this.
+// GET  /admin/support-settings     — Super Admin: full settings.
+// PUT  /admin/support-settings     — Super Admin: upsert all platforms.
+$router->get('/support/contact', [SupportController::class, 'publicContact']);
+$router->get('/admin/support-settings', [SupportController::class, 'adminIndex'], $auth + ['role' => ['super_admin']]);
+$router->put('/admin/support-settings', [SupportController::class, 'adminUpdate'], $auth + ['role' => ['super_admin']]);
 
 // ---- Health / system -------------------------------------------------------
 $router->get('/', [HealthController::class, 'root']);

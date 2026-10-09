@@ -157,7 +157,7 @@ function OfflineLibraryContent() {
   const { profile } = useProfileStore();
   // Live authoritative verdict — closes the player when a blocking finding
   // appears mid-playback (mirrors the online player's gate mirror).
-  const { blocksVideo, checkBeforeVideo } = useSecurity();
+  const { blocksVideo, checkBeforeVideo, securityLockHard } = useSecurity();
 
   // WATERMARK IDENTITY — one authoritative resolution per profile object.
   // Memoized on `profile` so the identity is stable for the whole playing
@@ -227,8 +227,11 @@ function OfflineLibraryContent() {
 
   // ── LIVE SECURITY ENFORCEMENT WHILE PLAYING ────────────────────────────────
   useEffect(() => {
-    if (playing && blocksVideo) setPlaying(null);
-  }, [playing, blocksVideo]);
+    // The security lock is the authoritative stop for ANY block (a VPN raises
+    // `block_login`, which never set blocksVideo) — the offline player must not
+    // survive behind the gate either.
+    if (playing && (blocksVideo || securityLockHard)) setPlaying(null);
+  }, [playing, blocksVideo, securityLockHard]);
 
   const onRefresh = useCallback(() => {
     setRefreshing(true);
@@ -290,6 +293,7 @@ function OfflineLibraryContent() {
           watermarkId={wmIdentity?.id}
           watermarkName={wmIdentity?.name ?? undefined}
           shouldAllowPlayback={async () => !(await checkBeforeVideo())}
+          fullscreenVerdictNow={() => !blocksVideo && !securityLockHard}
           onClose={() => setPlaying(null)}
         />
         <View style={{ padding: sp.screenPx }}>

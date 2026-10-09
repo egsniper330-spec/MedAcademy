@@ -12,6 +12,14 @@ export interface OfflineVideoPlayerProps {
   /** SECURITY GATE — same contract as VdoCipherPlayerProps.shouldAllowFullscreen. */
   shouldAllowPlayback?: () => Promise<boolean> | boolean;
   /**
+   * LIVE VERDICT — synchronous read of the host's already-published security
+   * verdict. When supplied, fullscreen commits in the same frame as the tap and
+   * `shouldAllowPlayback` re-validates in parallel (a denial collapses). Omit to
+   * keep the previous strictly-blocking behaviour.
+   * Same contract as VdoCipherPlayerProps.fullscreenVerdictNow.
+   */
+  fullscreenVerdictNow?: () => boolean;
+  /**
    * Application watermark identity — the viewer's PUBLIC MED-#### identifier
    * (legacy WM id fallback), matching the online player's product rule. When
    * omitted the overlay renders in ID-only mode with the DRM-internal owner

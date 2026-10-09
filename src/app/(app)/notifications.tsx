@@ -59,8 +59,12 @@ function NotificationsContent() {
       <ScrollView
         style={{ flex: 1 }}
         contentContainerStyle={{
-          padding: 20,
+          // Horizontal grid must follow the shared screen token (matches
+          // dashboard/explore/course screens); 20dp sat inside the standard
+          // 30dp grid and pulled cards 15px in on tablets.
+          paddingHorizontal: layout.screenPx,
           paddingTop: 8,
+          paddingBottom: 20,
         }}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />}
       >

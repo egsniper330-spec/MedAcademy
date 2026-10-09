@@ -147,7 +147,7 @@ export const SUPERADMIN_TABS: RoleTabDef[] = [
   { name: 'sa-cms',                  title: 'CMS Pages',              hidden: true },
   { name: 'sa-video-library',        title: 'Video Library',          hidden: true },
   { name: 'sa-video-settings',       title: 'Video Settings',         hidden: true },
-  { name: 'sa-support-settings',     title: 'Support Settings',       hidden: true },
+  { name: 'sa-support-settings',     title: 'Support Contact',        hidden: true },
   { name: 'sa-content-protection',   title: 'Watermark / DRM',        hidden: true },
   { name: 'sa-fraud-alerts',         title: 'Fraud Alerts',           hidden: true },
   { name: 'sa-admin-credits',        title: 'Admin Credits',          hidden: true },

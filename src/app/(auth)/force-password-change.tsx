@@ -17,6 +17,7 @@ import { NeuCard } from '@/components/NeuCard';
 import { NeuButton } from '@/components/NeuButton';
 import { useToast } from '@/components/Toast';
 import { useProfileStore } from '@/lib/store';
+import { dashboardPathForRole } from '@/lib/roleRoutes';
 import { friendlyError } from '@/lib/validation';
 import { NeuInputRow } from '@/components/NeuInputRow';
 
@@ -88,8 +89,13 @@ export default function ForcePasswordChangeScreen() {
 
       showToast({ type: 'success', message: 'Password changed successfully! Welcome.' });
 
-      // 6. Navigate to student dashboard
-      router.replace('/dashboard' as RelativePathString);
+      // 6. Navigate to THIS account's dashboard — never a hardcoded student
+      //    route. The root layout's one-shot role redirect was already consumed
+      //    while routing the user TO this screen, so nothing else corrects it:
+      //    a doctor sent here would otherwise land on the student bottom tabs.
+      //    Role comes from the backend-verified profile, not a route param.
+      const dest = dashboardPathForRole(profile?.role);
+      if (dest) router.replace(dest as RelativePathString);
     } catch (e) {
       setError(friendlyError(e, 'Password change failed. Please try again.'));
     }

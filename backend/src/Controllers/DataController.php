@@ -111,6 +111,10 @@ class DataController
         // grant themselves immunity from the maintenance gate. SA management
         // goes through MaintenanceController-adjacent dedicated APIs only.
         'maintenance_whitelist',
+        // Support contact configuration is admin-managed (see SupportController).
+        // Reads stay public (the SA settings screen and the admin UI need it);
+        // writes MUST go through /admin/support-settings — audited + validated.
+        'support_settings',
     ];
 
     /** Columns that must never be set via the generic API (prevents mass assignment) */
@@ -292,7 +296,11 @@ class DataController
         $plainCols = $parsed['plain'] ?? [];
         $stripId = $plainCols !== []
             && !in_array('*', $plainCols, true)
-            && !in_array('id', $plainCols, true);
+            && !in_array('id', $plainCols, true)
+            // Only inject when the table actually HAS an `id` column —
+            // key-PK tables like support_settings would otherwise throw
+            // SQLSTATE 42S22 (Unknown column 'support_settings.id').
+            && in_array('id', $this->tableColumns($table), true);
         if ($stripId) {
             $mainCols .= ", `{$table}`.`id`";
         }

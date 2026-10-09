@@ -383,6 +383,18 @@ let vpnWhitelistExpiry = 0;
 // so a transient failure cannot blank out a configured whitelist.
 let vpnWhitelistFetched = false;
 
+/**
+ * SYNCHRONOUS peek at the cached VPN whitelist — the fast containment path
+ * (native TRANSPORT_VPN callback) uses this to avoid pausing playback for a
+ * VPN the admin explicitly allowed. Returns true ONLY when a fetch has
+ * COMPLETED and returned entries; "never fetched" and "fetch failed" both
+ * return false, i.e. fail CLOSED (detection stays active). This mirrors the
+ * whitelist skip in detectVPN() exactly.
+ */
+export function isVpnWhitelistKnownNonEmpty(): boolean {
+  return vpnWhitelistFetched && vpnWhitelist.length > 0;
+}
+
 async function getVpnWhitelist(): Promise<string[]> {
   if (vpnWhitelistFetched && Date.now() < vpnWhitelistExpiry) return vpnWhitelist;
   try {
@@ -948,14 +960,38 @@ async function detectSSLPinning(): Promise<SecurityThreat | null> {
       originOk = res.status > 0;
       if (!originOk) originCategory = 'http_error';
     } catch (e: unknown) {
-      // Classify the failure: abort() → timeout; TypeError → network/DNS;
-      // anything else → unknown. NOTE: on Android no native pin enforcement
-      // is wired today, so a fetch-level rejection here cannot be a pin
-      // mismatch — it is reachability. If a native pinner is later wired and
-      // rejects a TLS identity, surface it as category 'tls_rejected' and
-      // this classifier will emit the real ssl_pinning_failure.
+      // Classify the failure. A rejected TLS identity is a SECURITY event and
+      // must be reported as 'tls_rejected' so classifySslProbe() resolves to
+      // 'pin_mismatch' → ssl_pinning_failure (risk 20 → block_login).
+      //
+      // As of 2026-10-09 BOTH platforms enforce real pinning:
+      //   • Android — network_security_config.xml <pin-set>, enforced by the
+      //     platform TLS stack (see plugins/withNetworkSecurityConfig.js);
+      //   • iOS — PinningURLProtocol SPKI check on the presented chain.
+      // A proxy/MITM CA therefore fails the handshake, and the failure text is
+      // distinguishable from plain unreachability:
+      //   Android/Conscrypt: SSLPeerUnverifiedException,
+      //     "Certificate pinning failure!",
+      //     "Trust anchor for certification path not found".
+      //   iOS: NSURLErrorServerCertificateUntrusted (-1202), or the
+      //     fail-closed NSURLErrorCancelled emitted by the pin URLProtocol.
+      //
+      // TLS rejection is tested FIRST so it can never be downgraded to a
+      // generic 'network_error' (which is weight 0 / log-only).
       const msg = e instanceof Error ? `${e.name}: ${e.message}` : String(e);
-      originCategory = /abort/i.test(msg) ? 'timeout' : /network|dns|failed to fetch|connect/i.test(msg) ? 'network_error' : 'unknown';
+      const tlsRejected =
+        /pin(ning)?\s*failure/i.test(msg) ||
+        /SSLPeerUnverifiedException/i.test(msg) ||
+        /trust anchor|certification path not found/i.test(msg) ||
+        /CERTIFICATE_VERIFY_FAILED|SSL certificate problem/i.test(msg) ||
+        /ServerCertificateUntrusted|-1202/i.test(msg);
+      originCategory = tlsRejected
+        ? 'tls_rejected'
+        : /abort/i.test(msg)
+          ? 'timeout'
+          : /network|dns|failed to fetch|connect/i.test(msg)
+            ? 'network_error'
+            : 'unknown';
     }
 
     // Step 3: only when the ORIGIN failed do we probe an unpinned control host

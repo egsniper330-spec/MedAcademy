@@ -105,25 +105,25 @@ export default function VideoSettingsScreen({ backTo }: { backTo?: string } = {}
 
   return (
     <View style={{ flex: 1, backgroundColor: c.base }}>
+      {/* Header sits OUTSIDE the padded ScrollView so the back control stays
+          on the app-wide safe-area edge grid (matches PageHeader contract). */}
+      <PageHeader
+          title="Video Settings"
+          subtitle="Authoritative VdoCipher status"
+          accentColor="#7C3AED"
+          showBack
+          backFallback={backTo ?? '/admin-overview'}
+          rightAction={
+            <Pressable onPress={onRefresh} disabled={refreshing || loading}
+              style={[neuFlatStyle(isDark), { width: 38, height: 38, borderRadius: 11, alignItems: 'center', justifyContent: 'center' }]}>
+              {refreshing ? <ActivityIndicator size={15} color={c.primary} /> : <RefreshCw size={16} color={c.primary} />}
+            </Pressable>
+          }
+      />
+
       <ScrollView
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />}
         contentContainerStyle={{ padding: layout.screenPx, paddingBottom: safeBottom(layout.insets.bottom), gap: 16 }}>
-
-        <View style={{ marginTop: 8 }}>
-          <PageHeader
-            title="Video Settings"
-            subtitle="Authoritative VdoCipher status"
-            accentColor="#7C3AED"
-            showBack
-            backFallback={backTo ?? '/admin-overview'}
-            rightAction={
-              <Pressable onPress={onRefresh} disabled={refreshing || loading}
-                style={[neuFlatStyle(isDark), { width: 38, height: 38, borderRadius: 11, alignItems: 'center', justifyContent: 'center' }]}>
-                {refreshing ? <ActivityIndicator size={15} color={c.primary} /> : <RefreshCw size={16} color={c.primary} />}
-              </Pressable>
-            }
-          />
-        </View>
 
         {loading ? (
           <ActivityIndicator color={c.primary} style={{ marginTop: 40 }} />

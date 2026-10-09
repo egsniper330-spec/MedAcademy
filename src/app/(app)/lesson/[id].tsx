@@ -102,7 +102,7 @@ export default function LessonPlayer() {
   const router = useRouter();
   const { id } = useLocalSearchParams<{ id: string }>();
   const { profile } = useProfileStore();
-  const { blocksVideo, hasWarnings, riskScore, threats, isSuperAdmin, checkBeforeVideo } = useSecurity();
+  const { blocksVideo, hasWarnings, riskScore, threats, isSuperAdmin, checkBeforeVideo, securityLockHard } = useSecurity();
 
   // Enable screenshot/recording protection while this screen is mounted.
   // Super Admin bypass: SA sessions are exempt — they can screenshot/record freely.
@@ -142,6 +142,30 @@ export default function LessonPlayer() {
   // Explicit fullscreen window pixels — the card/ScrollView fills below use
   // concrete dimensions instead of edge-anchored fill (ancestor-collapse fix).
   const fsWin = useFullscreenWindowDims(isFullscreen);
+
+  // ── LIVE COLLAPSE ON A SECURITY VERDICT FLIP ──────────────────────────────
+  // A violation detected at ANY time (periodic check, foreground re-check,
+  // screen-capture event, or the player's own parallel re-validation) sets
+  // blocksVideo → the player is unmounted by the render gate below. Without
+  // this effect the screen would stay in its FULLSCREEN layout with no player
+  // and no exit affordance (the header/back control is hidden while
+  // fullscreen). Collapsing first guarantees a visible, escapable state.
+  // ROOT-CAUSE EXTENSION (security containment): the trigger used to be
+  // `blocksVideo` ONLY, but VPN/proxy policy is `block_login` — so a detected
+  // VPN raised the gate with `blocksVideo:false` and the native player was
+  // NEVER unmounted: it kept decoding (and holding the audio session) behind
+  // the full-screen block. The central security lock (securityLockHard) is
+  // true for ANY authoritative block, so the player is now destroyed for a
+  // login-blocking finding too.
+  //
+  // `playerVisible` is deliberately cleared: after recovery (VPN off) the
+  // screen must NOT silently remount an autoPlay player. Playback restarts
+  // only from an explicit user tap.
+  useEffect(() => {
+    if (!blocksVideo && !securityLockHard) return;
+    setIsFullscreen(false);
+    setPlayerVisible(false);
+  }, [blocksVideo, securityLockHard]);
 
   // ── Download state ────────────────────────────────────────────────────────
   const [downloadState, setDownloadState] = useState<{
@@ -571,7 +595,7 @@ export default function LessonPlayer() {
   // ScrollView, an absolute-fill would only cover the scroll content box.
   // The SAME player instance renders in both placements — only its
   // container style toggles between the inline 16:9 block and absolute fill.
-  const isPinnedPlayer = !blocksVideo && playerVisible &&
+  const isPinnedPlayer = !blocksVideo && !securityLockHard && playerVisible &&
     (lesson.video_type === 'vdocipher' || lesson.video_type === 'youtube');
 
   // Header — spacing from headerTokens (EDGE_PAD=4, BREATHING=8)
@@ -592,7 +616,7 @@ export default function LessonPlayer() {
   const playerSection = (
     <>
         {/* ── Video Player — provider-routed (VdoCipher or YouTube) ── */}
-        {!blocksVideo && (lesson.video_type === 'vdocipher' || lesson.video_type === 'youtube') && (
+        {!blocksVideo && !securityLockHard && (lesson.video_type === 'vdocipher' || lesson.video_type === 'youtube') && (
           /* FULLSCREEN EXPANSION TARGET — this card is the player's direct
              parent, so IT receives the absolute-fill style when fullscreen
              (style-only: same card, same player instance, no remount).
@@ -648,6 +672,13 @@ export default function LessonPlayer() {
                     return false;
                   }
                 }}
+                // LIVE VERDICT — the already-published SecurityContext verdict
+                // (plus the Super Admin bypass). Read synchronously so fullscreen
+                // appears in the same frame as the tap; `shouldAllowFullscreen`
+                // above then re-validates the full pipeline in parallel and a
+                // denial collapses fullscreen immediately. Fail-closed: an
+                // UNKNOWN verdict (blocksVideo true) still refuses entry.
+                fullscreenVerdictNow={() => isSuperAdmin || (!blocksVideo && !securityLockHard)}
               />
             ) : (
               // ── Thumbnail / placeholder — tap to load ─────────────────────
