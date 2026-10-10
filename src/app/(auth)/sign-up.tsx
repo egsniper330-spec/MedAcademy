@@ -10,7 +10,7 @@ import { backendClient } from '@/client/backendClient';
 import { getUniversities, getFaculties, getAcademicLevels } from '@/lib/api';
 import { NeuCard } from '@/components/NeuCard';
 import { NeuButton } from '@/components/NeuButton';
-import { neuColors, useLayout, safeTop, safeBottom } from '@/lib/neu';
+import { neuColors, useLayout, safeTop, safeBottom, mutedTextStyle } from '@/lib/neu';
 import { normalizePhoneE164 } from '@/lib/identifier';
 import { useBranding } from '@/lib/branding';
 import { COUNTRIES, DEFAULT_COUNTRY, buildE164, validateNationalNumber, type Country } from '@/lib/phone';
@@ -38,8 +38,7 @@ function SelectPicker({
       <Text style={{
         fontSize: layout.captionSize,
         fontWeight: '600',
-        color: c.text,
-        opacity: 0.55,
+        ...mutedTextStyle(c, 0.55),
         marginBottom: layout.pad.xs,
         textTransform: 'uppercase',
         letterSpacing: 0.8,
@@ -77,7 +76,7 @@ function SelectPicker({
         <NeuCard radius={layout.cardRadius / 2} style={{ marginTop: layout.pad.xs, padding: layout.pad.xs, maxHeight: 220 }}>
           <ScrollView automaticallyAdjustKeyboardInsets={process.env.EXPO_OS === 'ios'} nestedScrollEnabled keyboardShouldPersistTaps="handled">
             {options.length === 0
-              ? <Text style={{ color: c.text, opacity: 0.4, fontSize: layout.captionSize, padding: layout.pad.md, textAlign: 'center' }}>No options available</Text>
+              ? <Text style={{ ...mutedTextStyle(c, 0.4), fontSize: layout.captionSize, padding: layout.pad.md, textAlign: 'center' }}>No options available</Text>
               : options.map(opt => (
                 <Pressable key={opt.id} onPress={() => { onSelect(opt); setOpen(false); }}
                   style={{
@@ -429,8 +428,7 @@ export default function SignUp() {
   const labelStyle = {
     fontSize: layout.captionSize,
     fontWeight: '600' as const,
-    color: c.text,
-    opacity: 0.55,
+    ...mutedTextStyle(c, 0.55),
     marginBottom: layout.pad.xs,
     textTransform: 'uppercase' as const,
     letterSpacing: 0.8,
@@ -458,7 +456,7 @@ export default function SignUp() {
           <Text style={{ fontSize: layout.titleSize, fontWeight: '800', color: c.text, marginTop: layout.pad.sm }}>
             Create Account
           </Text>
-          <Text style={{ fontSize: layout.bodySize, color: c.text, opacity: 0.55, marginTop: layout.pad.xs }}>
+          <Text style={{ fontSize: layout.bodySize, ...mutedTextStyle(c, 0.55), marginTop: layout.pad.xs }}>
             {`Join ${branding.app_name} today`}
           </Text>
         </View>
@@ -511,7 +509,7 @@ export default function SignUp() {
           {phoneError ? (
             <Text style={{ color: '#DC2626', fontSize: layout.captionSize, marginBottom: layout.pad.sm, marginLeft: 2 }}>{phoneError}</Text>
           ) : null}
-          <Text style={{ fontSize: layout.captionSize - 1, color: c.text, opacity: 0.4, marginTop: phoneError ? 0 : -layout.pad.sm, marginBottom: layout.pad.md, marginLeft: 2 }}>
+          <Text style={{ fontSize: layout.captionSize - 1, ...mutedTextStyle(c, 0.4), marginTop: phoneError ? 0 : -layout.pad.sm, marginBottom: layout.pad.md, marginLeft: 2 }}>
             Will be stored as {buildE164(country, nationalPhone) ?? `${country.callingCode}…`}
           </Text>
 
@@ -595,7 +593,7 @@ export default function SignUp() {
 
         {/* Sign-in link */}
         <View style={{ flexDirection: 'row', justifyContent: 'center', marginTop: layout.pad.xl, marginBottom: layout.pad.xl }}>
-          <Text style={{ color: c.text, opacity: 0.55, fontSize: layout.bodySize - 1 }}>Already have an account? </Text>
+          <Text style={{ ...mutedTextStyle(c, 0.55), fontSize: layout.bodySize - 1 }}>Already have an account? </Text>
           <Pressable onPress={() => router.push('/(auth)/sign-in')}>
             <Text style={{ color: c.primary, fontWeight: '700', fontSize: layout.bodySize - 1 }}>Sign In</Text>
           </Pressable>

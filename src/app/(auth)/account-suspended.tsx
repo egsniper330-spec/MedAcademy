@@ -8,7 +8,7 @@ import { View, Text, ScrollView, Pressable, Linking, useColorScheme } from 'reac
 import { router } from 'expo-router';
 import { ShieldOff, AlertTriangle, Smartphone, LogOut, Phone } from 'lucide-react-native';
 import { backendClient } from '@/client/backendClient';
-import { neuColors, neuFlatStyle } from '@/lib/neu';
+import { neuColors, neuFlatStyle, mutedTextStyle } from '@/lib/neu';
 import { NeuButton } from '@/components/NeuButton';
 
 export default function AccountBlockedScreen() {
@@ -40,7 +40,7 @@ export default function AccountBlockedScreen() {
       <Text style={{ fontSize: 22, fontWeight: '800', color: c.text, textAlign: 'center', marginBottom: 8 }}>
         Account Blocked
       </Text>
-      <Text style={{ fontSize: 14, color: c.text, opacity: 0.6, textAlign: 'center', lineHeight: 22, marginBottom: 28 }}>
+      <Text style={{ fontSize: 14, ...mutedTextStyle(c, 0.6), textAlign: 'center', lineHeight: 22, marginBottom: 28 }}>
         Your account has been blocked by an administrator. You cannot access the app at this time.
       </Text>
 
@@ -50,7 +50,7 @@ export default function AccountBlockedScreen() {
           <ShieldOff size={20} color="#DC2626" style={{ marginTop: 2 }} />
           <View style={{ flex: 1 }}>
             <Text style={{ fontSize: 14, fontWeight: '700', color: c.text, marginBottom: 2 }}>Why am I blocked?</Text>
-            <Text style={{ fontSize: 13, color: c.text, opacity: 0.6, lineHeight: 20 }}>
+            <Text style={{ fontSize: 13, ...mutedTextStyle(c, 0.6), lineHeight: 20 }}>
               {"Your account was blocked by an administrator. This may be due to a policy violation or at the admin's discretion."}
             </Text>
           </View>
@@ -60,7 +60,7 @@ export default function AccountBlockedScreen() {
           <AlertTriangle size={20} color={c.primary} style={{ marginTop: 2 }} />
           <View style={{ flex: 1 }}>
             <Text style={{ fontSize: 14, fontWeight: '700', color: c.text, marginBottom: 2 }}>What can I do?</Text>
-            <Text style={{ fontSize: 13, color: c.text, opacity: 0.6, lineHeight: 20 }}>
+            <Text style={{ fontSize: 13, ...mutedTextStyle(c, 0.6), lineHeight: 20 }}>
               Contact support to appeal this decision. Provide your account email and any relevant context.
             </Text>
           </View>
@@ -70,7 +70,7 @@ export default function AccountBlockedScreen() {
           <Smartphone size={20} color={c.primary} style={{ marginTop: 2 }} />
           <View style={{ flex: 1 }}>
             <Text style={{ fontSize: 14, fontWeight: '700', color: c.text, marginBottom: 2 }}>All sessions ended</Text>
-            <Text style={{ fontSize: 13, color: c.text, opacity: 0.6, lineHeight: 20 }}>
+            <Text style={{ fontSize: 13, ...mutedTextStyle(c, 0.6), lineHeight: 20 }}>
               All your active sessions on all devices have been ended automatically.
             </Text>
           </View>

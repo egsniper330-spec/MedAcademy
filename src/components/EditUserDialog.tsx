@@ -12,7 +12,7 @@ import { Eye, EyeOff, ChevronDown, Save } from 'lucide-react-native';
 import { ResponsiveModal } from '@/components/ResponsiveModal';
 import { NeuButton } from '@/components/NeuButton';
 import { NeuCard } from '@/components/NeuCard';
-import { neuColors } from '@/lib/neu';
+import { neuColors, mutedTextStyle } from '@/lib/neu';
 import {
   validateRequired, validateEmail, validatePasswordSimple, validateMatch,
 } from '@/lib/validation';
@@ -193,7 +193,8 @@ export function EditUserDialog({
   };
 
   const inp = {
-    backgroundColor: c.base,
+    // Recessed input step (identical to #E8EEF6 on Light).
+    backgroundColor: c.inputSurface,
     borderRadius: 12,
     paddingHorizontal: 14,
     paddingVertical: 12,
@@ -208,7 +209,7 @@ export function EditUserDialog({
   } as const;
 
   const lbl = (t: string) => (
-    <Text style={{ fontSize: 12, fontWeight: '700', color: c.text, opacity: 0.5, marginBottom: 5, textTransform: 'uppercase', letterSpacing: 0.7 }}>{t}</Text>
+    <Text style={{ fontSize: 12, fontWeight: '700', ...mutedTextStyle(c, 0.5), marginBottom: 5, textTransform: 'uppercase', letterSpacing: 0.7 }}>{t}</Text>
   );
 
   const dropBtn = (text: string, open: boolean, onPress: () => void) => (
@@ -219,7 +220,7 @@ export function EditUserDialog({
   );
 
   const dropList = (items: any[], selected: string, onSelect: (id: string) => void) => (
-    <View style={{ backgroundColor: c.base, borderRadius: 12, marginBottom: 14, shadowColor: c.shadowDark, shadowOffset: { width: 2, height: 2 }, shadowOpacity: 0.45, shadowRadius: 5, maxHeight: 160, overflow: 'hidden' }}>
+    <View style={{ backgroundColor: c.inputSurface, borderRadius: 12, marginBottom: 14, shadowColor: c.shadowDark, shadowOffset: { width: 2, height: 2 }, shadowOpacity: 0.45, shadowRadius: 5, maxHeight: 160, overflow: 'hidden' }}>
       <ScrollView nestedScrollEnabled keyboardShouldPersistTaps="handled">
         {items.map(item => (
           <Pressable key={item.id} onPress={() => { onSelect(item.id); setIsDirty(true); }}
@@ -282,7 +283,7 @@ export function EditUserDialog({
           ) : (
             <NeuCard style={{ padding: 12, marginBottom: 14 }}>
               <Text style={{ fontSize: 14, color: c.text }}>{email || '—'}</Text>
-              <Text style={{ fontSize: 11, color: c.text, opacity: 0.4, marginTop: 3 }}>Email changes require user verification. Use the administrator email-change workflow.</Text>
+              <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.4), marginTop: 3 }}>Email changes require user verification. Use the administrator email-change workflow.</Text>
             </NeuCard>
           )}
         </>

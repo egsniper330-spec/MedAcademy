@@ -11,7 +11,7 @@ import { startPreviewAsStudent, stopPreviewAsStudent } from '@/lib/previewAsStud
 import { NeuCard } from '@/components/NeuCard';
 import { NeuButton } from '@/components/NeuButton';
 import { useToast } from '@/components/Toast';
-import { neuColors, useLayout, safeBottom } from '@/lib/neu';
+import { neuColors, useLayout, safeBottom, mutedTextStyle } from '@/lib/neu';
 import { useDebounce } from '@/lib/useDebounce';
 import { useStaleWhileRevalidateFocus } from '@/lib/useStaleWhileRevalidateFocus';
 import { useFeatureFlags, isFeatureDisabledError } from '@/lib/featureFlags';
@@ -259,7 +259,7 @@ export default function DoctorCourses() {
           ) : filtered.length === 0 ? (
             <View style={{ paddingVertical: 60, alignItems: 'center', gap: 12 }}>
               <BookOpen size={48} color={c.primary} opacity={0.2} />
-              <Text style={{ fontSize: 16, color: c.text, opacity: 0.4 }}>
+              <Text style={{ fontSize: 16, ...mutedTextStyle(c, 0.4) }}>
                 {query
                   ? 'No matching courses'
                   : statusFilter === 'draft' ? 'No draft courses yet' : statusFilter === 'published' ? 'No published courses yet' : 'No courses yet'}
@@ -323,7 +323,7 @@ export default function DoctorCourses() {
 
                   {/* Short description */}
                   {course.short_description ? (
-                    <Text style={{ fontSize: 13, color: c.text, opacity: 0.55, lineHeight: 18 }} numberOfLines={2}>
+                    <Text style={{ fontSize: 13, ...mutedTextStyle(c, 0.55), lineHeight: 18 }} numberOfLines={2}>
                       {course.short_description}
                     </Text>
                   ) : null}
@@ -334,21 +334,21 @@ export default function DoctorCourses() {
                       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
                         <View style={{ width: 8, height: 8, borderRadius: 4,
                           backgroundColor: DIFFICULTY_COLORS[course.difficulty] ?? c.primary }} />
-                        <Text style={{ fontSize: 12, color: c.text, opacity: 0.55, textTransform: 'capitalize' }}>
+                        <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.55), textTransform: 'capitalize' }}>
                           {course.difficulty.replace('_', ' ')}
                         </Text>
                       </View>
                     )}
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
                       <BookOpen size={12} color={c.primary} />
-                      <Text style={{ fontSize: 12, color: c.text, opacity: 0.55 }}>
+                      <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.55) }}>
                         {course.total_lessons ?? 0} lessons
                       </Text>
                     </View>
                     {course.total_sections > 0 && (
                       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
                         <Users size={12} color={c.primary} />
-                        <Text style={{ fontSize: 12, color: c.text, opacity: 0.55 }}>
+                        <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.55) }}>
                           {course.total_sections} sections
                         </Text>
                       </View>
@@ -356,7 +356,7 @@ export default function DoctorCourses() {
                     {course.estimated_duration_hours && (
                       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
                         <Clock size={12} color={c.primary} />
-                        <Text style={{ fontSize: 12, color: c.text, opacity: 0.55 }}>
+                        <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.55) }}>
                           {course.estimated_duration_hours}h
                         </Text>
                       </View>
@@ -440,7 +440,7 @@ export default function DoctorCourses() {
                 <Eye size={18} color="#7C3AED" />
                 <View style={{ flex: 1 }}>
                   <Text style={{ fontSize: 15, fontWeight: '600', color: c.text }}>Preview as Student</Text>
-                  <Text style={{ fontSize: 11, color: c.text, opacity: 0.5 }}>
+                  <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.5) }}>
                     See this course as an enrolled student does
                   </Text>
                 </View>
@@ -498,7 +498,7 @@ export default function DoctorCourses() {
                   ['Attachments',      deleteStats.attachment_count],
                 ] as [string, string | number][]).map(([label, value]) => (
                   <View key={label} style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
-                    <Text style={{ fontSize: 13, color: c.text, opacity: 0.55 }}>{label}</Text>
+                    <Text style={{ fontSize: 13, ...mutedTextStyle(c, 0.55) }}>{label}</Text>
                     <Text style={{ fontSize: 13, fontWeight: '700', color: typeof value === 'number' && value > 0 ? '#DC2626' : c.text, flexShrink: 1, textAlign: 'right' }} numberOfLines={1}>
                       {value ?? '—'}
                     </Text>

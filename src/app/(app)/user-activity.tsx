@@ -28,7 +28,7 @@ import {
   type UserActivityEntry, type UserProfileSummary,
 } from '@/lib/api';
 import { NeuCard } from '@/components/NeuCard';
-import { neuColors, useLayout, safeBottom } from '@/lib/neu';
+import { neuColors, useLayout, safeBottom, mutedTextStyle } from '@/lib/neu';
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -154,9 +154,9 @@ function ProfileHeader({ profile, c }: { profile: UserProfileSummary; c: typeof 
         </View>
         <View style={{ flex: 1 }}>
           <Text style={{ fontSize: layout.bodySize + 4, fontWeight: '800', color: c.text }}>{profile.full_name}</Text>
-          <Text style={{ fontSize: layout.captionSize + 1, color: c.text, opacity: 0.5, marginTop: 2 }}>{displayEmail}</Text>
+          <Text style={{ fontSize: layout.captionSize + 1, ...mutedTextStyle(c, 0.5), marginTop: 2 }}>{displayEmail}</Text>
           {profile.phone && (
-            <Text style={{ fontSize: layout.captionSize, color: c.text, opacity: 0.4, marginTop: 1 }}>{profile.phone}</Text>
+            <Text style={{ fontSize: layout.captionSize, ...mutedTextStyle(c, 0.4), marginTop: 1 }}>{profile.phone}</Text>
           )}
         </View>
       </View>
@@ -182,7 +182,7 @@ function ProfileHeader({ profile, c }: { profile: UserProfileSummary; c: typeof 
           ['Last Active',     profile.last_active],
         ] as [string, string | null | undefined][]).map(([label, val]) => (
           <View key={label} style={{ flexDirection: 'row' }}>
-            <Text style={{ fontSize: layout.captionSize, color: c.text, opacity: 0.45, minWidth: 100, flexShrink: 0 }}>{label}</Text>
+            <Text style={{ fontSize: layout.captionSize, ...mutedTextStyle(c, 0.45), minWidth: 100, flexShrink: 0 }}>{label}</Text>
             <Text style={{ fontSize: layout.captionSize, color: c.text, flex: 1 }}>{formatTsShort(val)}</Text>
           </View>
         ))}
@@ -236,18 +236,18 @@ function TimelineRow({ entry, isLast, c }: { entry: UserActivityEntry; isLast: b
             <Text style={{ fontSize: layout.bodySize, color: c.text, marginBottom: layout.pad.sm }}>
               <Text style={{ fontWeight: '600' }}>{entry.target_name}</Text>
               {entry.resource_type
-                ? <Text style={{ color: c.text, opacity: 0.45 }}> · {entry.resource_type.replace(/_/g, ' ')}</Text>
+                ? <Text style={{ ...mutedTextStyle(c, 0.45) }}> · {entry.resource_type.replace(/_/g, ' ')}</Text>
                 : null}
             </Text>
           ) : null}
 
           {entry.actor_name && (
-            <Text style={{ fontSize: layout.captionSize, color: c.text, opacity: 0.5, marginBottom: layout.pad.xs }}>
+            <Text style={{ fontSize: layout.captionSize, ...mutedTextStyle(c, 0.5), marginBottom: layout.pad.xs }}>
               {`By: ${entry.actor_name}${entry.actor_role ? ` (${entry.actor_role.replace(/_/g, ' ')})` : ''}`}
             </Text>
           )}
 
-          <Text style={{ fontSize: layout.captionSize, color: c.text, opacity: 0.35 }}>{formatTs(entry.created_at)}</Text>
+          <Text style={{ fontSize: layout.captionSize, ...mutedTextStyle(c, 0.35) }}>{formatTs(entry.created_at)}</Text>
         </NeuCard>
       </View>
     </View>
@@ -508,7 +508,7 @@ export default function UserAuditLogs() {
             <ArrowLeft size={layout.bodySize + 4} color={c.text} opacity={0.7} />
           </Pressable>
           <View style={{ flex: 1 }}>
-            <Text style={{ fontSize: layout.captionSize, fontWeight: '600', color: c.text, opacity: 0.4, textTransform: 'uppercase', letterSpacing: 0.8 }}>
+            <Text style={{ fontSize: layout.captionSize, fontWeight: '600', ...mutedTextStyle(c, 0.4), textTransform: 'uppercase', letterSpacing: 0.8 }}>
               Audit Logs
             </Text>
             <Text style={{ fontSize: layout.titleSize, fontWeight: '800', color: c.text, marginTop: 1 }} numberOfLines={1}>
@@ -603,7 +603,7 @@ export default function UserAuditLogs() {
             onPress={() => applyFilter({ category: '', direction: '', datePreset: '' })}
             style={{ marginLeft: layout.pad.sm, paddingHorizontal: layout.pad.md, paddingVertical: layout.pad.xs + 1 }}
           >
-            <Text style={{ fontSize: layout.captionSize, color: c.text, opacity: 0.45, fontWeight: '600' }}>Clear all</Text>
+            <Text style={{ fontSize: layout.captionSize, ...mutedTextStyle(c, 0.45), fontWeight: '600' }}>Clear all</Text>
           </Pressable>
         </View>
       )}
@@ -613,10 +613,10 @@ export default function UserAuditLogs() {
         <ActivityIndicator color={c.primary} size="large" style={{ marginTop: layout.sectionGap * 2 }} />
       ) : loadError && entries.length === 0 ? (
         <View style={{ alignItems: 'center', paddingVertical: layout.sectionGap * 3, paddingHorizontal: layout.screenPx }}>
-          <Text style={{ fontSize: layout.bodySize + 2, fontWeight: '700', color: c.text, opacity: 0.6 }}>
+          <Text style={{ fontSize: layout.bodySize + 2, fontWeight: '700', ...mutedTextStyle(c, 0.6) }}>
             Unable to load audit logs
           </Text>
-          <Text style={{ fontSize: layout.bodySize, color: c.text, opacity: 0.35, marginTop: layout.pad.sm, textAlign: 'center' }}>
+          <Text style={{ fontSize: layout.bodySize, ...mutedTextStyle(c, 0.35), marginTop: layout.pad.sm, textAlign: 'center' }}>
             Check your connection and try again.
           </Text>
           <Pressable
@@ -640,10 +640,10 @@ export default function UserAuditLogs() {
           ListEmptyComponent={
             <View style={{ alignItems: 'center', paddingVertical: layout.sectionGap * 3 }}>
               <Clock size={Math.round(layout.touchTarget * 1.1)} color={c.primary} opacity={0.15} style={{ marginBottom: layout.pad.md }} />
-              <Text style={{ fontSize: layout.bodySize + 2, fontWeight: '700', color: c.text, opacity: 0.35 }}>
+              <Text style={{ fontSize: layout.bodySize + 2, fontWeight: '700', ...mutedTextStyle(c, 0.35) }}>
                 No logs found
               </Text>
-              <Text style={{ fontSize: layout.bodySize, color: c.text, opacity: 0.25, marginTop: layout.pad.sm, textAlign: 'center' }}>
+              <Text style={{ fontSize: layout.bodySize, ...mutedTextStyle(c, 0.25), marginTop: layout.pad.sm, textAlign: 'center' }}>
                 {activeFiltersCount > 0
                   ? 'Try clearing some filters'
                   : `No audit events recorded for ${userName}`}
@@ -660,7 +660,7 @@ export default function UserAuditLogs() {
                 <Text style={{ fontSize: layout.bodySize, color: c.primary, fontWeight: '600' }}>Load more</Text>
               </Pressable>
             ) : entries.length > 0 ? (
-              <Text style={{ textAlign: 'center', fontSize: layout.captionSize, color: c.text, opacity: 0.3, paddingVertical: layout.pad.lg }}>
+              <Text style={{ textAlign: 'center', fontSize: layout.captionSize, ...mutedTextStyle(c, 0.3), paddingVertical: layout.pad.lg }}>
                 All {totalCount.toLocaleString('en-US')} events shown
               </Text>
             ) : null

@@ -35,7 +35,7 @@ import { NeuButton } from '@/components/NeuButton';
 import { NeuInputRow } from '@/components/NeuInputRow';
 import { ResponsiveModal } from '@/components/ResponsiveModal';
 import { ProfilePhotoActions } from '@/components/ProfilePhotoActions';
-import { neuColors, useLayout, safeBottom } from '@/lib/neu';
+import { neuColors, useLayout, safeBottom, mutedTextStyle } from '@/lib/neu';
 import { validateRequired, friendlyError } from '@/lib/validation';
 import { useToast } from '@/components/Toast';
 import * as ImagePicker from 'expo-image-picker';
@@ -63,7 +63,7 @@ function WatermarkCard({ publicUserId, c }: { publicUserId: string | null; c: ty
           <Fingerprint size={18} color={c.primary} />
         </View>
         <View style={{ flex: 1 }}>
-          <Text style={{ fontSize: 11, fontWeight: '700', color: c.text, opacity: 0.4, textTransform: 'uppercase', letterSpacing: 0.9 }}>
+          <Text style={{ fontSize: 11, fontWeight: '700', ...mutedTextStyle(c, 0.4), textTransform: 'uppercase', letterSpacing: 0.9 }}>
             ID
           </Text>
           <Text style={{ fontSize: 18, fontWeight: '800', color: c.primary, letterSpacing: 1.5, marginTop: 2, fontVariant: ['tabular-nums'] }}>
@@ -88,7 +88,7 @@ function WatermarkCard({ publicUserId, c }: { publicUserId: string | null; c: ty
           </Text>
         </Pressable>
       </View>
-      <Text style={{ fontSize: 12, color: c.text, opacity: 0.4, lineHeight: 17 }}>
+      <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.4), lineHeight: 17 }}>
         This ID is permanently assigned to your account and appears as a watermark in every video you watch.
       </Text>
     </NeuCard>
@@ -108,7 +108,7 @@ function InfoRow({ icon, label, value, c }: { icon: React.ReactNode; label: stri
   return (
     <View style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: `${c.text}08` }}>
       <View style={{ width: 32, alignItems: 'center' }}>{icon}</View>
-      <Text style={{ fontSize: 13, color: c.text, opacity: 0.5, minWidth: 90, flexShrink: 0, marginLeft: 8 }}>{label}</Text>
+      <Text style={{ fontSize: 13, ...mutedTextStyle(c, 0.5), minWidth: 90, flexShrink: 0, marginLeft: 8 }}>{label}</Text>
       <Text style={{ flex: 1, fontSize: 14, fontWeight: '600', color: c.text, textAlign: 'right' }} numberOfLines={1}>
         {value || '—'}
       </Text>
@@ -142,7 +142,7 @@ function PickerRow({
 
   return (
     <View style={{ marginBottom: 14 }}>
-      <Text style={{ fontSize: 11, fontWeight: '600', color: c.text, opacity: 0.5, marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.8 }}>
+      <Text style={{ fontSize: 11, fontWeight: '600', ...mutedTextStyle(c, 0.5), marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.8 }}>
         {label}
       </Text>
       <Pressable
@@ -223,7 +223,7 @@ function PickerRow({
                 </Pressable>
               ))}
               {items.length === 0 && (
-                <Text style={{ fontSize: 14, color: c.text, opacity: 0.4, textAlign: 'center', paddingVertical: 24 }}>
+                <Text style={{ fontSize: 14, ...mutedTextStyle(c, 0.4), textAlign: 'center', paddingVertical: 24 }}>
                   No options available
                 </Text>
               )}
@@ -532,7 +532,7 @@ export default function StudentProfile() {
             onRemove={handleRemoveAvatar}
           />
           <Text style={{ fontSize: 22, fontWeight: '800', color: c.text }}>{profile?.full_name || '—'}</Text>
-          <Text style={{ fontSize: 13, color: c.text, opacity: 0.45, marginTop: 4 }}>
+          <Text style={{ fontSize: 13, ...mutedTextStyle(c, 0.45), marginTop: 4 }}>
             {firstName ? `Welcome back, ${firstName} 👋` : 'Welcome back 👋'}
           </Text>
           <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 8, gap: 8 }}>
@@ -601,7 +601,7 @@ export default function StudentProfile() {
               ].map(stat => (
                 <NeuCard key={stat.label} radius={16} style={{ flex: 1, alignItems: 'center', padding: 14 }}>
                   <Text style={{ fontSize: 26, fontWeight: '800', color: stat.color }}>{stat.value}</Text>
-                  <Text style={{ fontSize: 12, color: c.text, opacity: 0.5, marginTop: 2 }}>{stat.label}</Text>
+                  <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.5), marginTop: 2 }}>{stat.label}</Text>
                 </NeuCard>
               ))}
             </View>
@@ -622,7 +622,7 @@ export default function StudentProfile() {
                     </View>
                     <View style={{ flex: 1 }}>
                       <Text style={{ fontSize: 14, fontWeight: '600', color: c.text }} numberOfLines={1}>{sub.course?.title}</Text>
-                      <Text style={{ fontSize: 12, color: c.text, opacity: 0.45, marginTop: 1 }}>Dr. {sub.course?.doctor?.full_name ?? '—'}</Text>
+                      <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.45), marginTop: 1 }}>Dr. {sub.course?.doctor?.full_name ?? '—'}</Text>
                     </View>
                     <View style={{ backgroundColor: sub.completed_at ? '#16A34A18' : `${c.primary}15`, borderRadius: 8, paddingHorizontal: 8, paddingVertical: 3 }}>
                       <Text style={{ fontSize: 11, fontWeight: '700', color: sub.completed_at ? '#16A34A' : c.primary }}>
@@ -640,7 +640,7 @@ export default function StudentProfile() {
             ) : (
               <NeuCard radius={18} style={{ alignItems: 'center', padding: 28, marginBottom: 20 }}>
                 <BookOpen size={40} color={c.primary} opacity={0.25} style={{ marginBottom: 10 }} />
-                <Text style={{ fontSize: 15, fontWeight: '600', color: c.text, opacity: 0.4 }}>No subscribed courses yet</Text>
+                <Text style={{ fontSize: 15, fontWeight: '600', ...mutedTextStyle(c, 0.4) }}>No subscribed courses yet</Text>
               </NeuCard>
             )}
           </>
@@ -698,7 +698,7 @@ export default function StudentProfile() {
         }
       >
         
-          <Text style={{ fontSize: layout.captionSize + 1, fontWeight: '700', color: c.text, opacity: 0.55, textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 6 }}>Full Name</Text>
+          <Text style={{ fontSize: layout.captionSize + 1, fontWeight: '700', ...mutedTextStyle(c, 0.55), textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 6 }}>Full Name</Text>
           <NeuInputRow
             c={c}
             value={editName}
@@ -706,7 +706,7 @@ export default function StudentProfile() {
             placeholder="Your full name"
             leftIcon={<User size={16} color={c.text} opacity={0.4} />}
           />
-          <Text style={{ fontSize: layout.captionSize + 1, fontWeight: '700', color: c.text, opacity: 0.55, textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 6 }}>Email</Text>
+          <Text style={{ fontSize: layout.captionSize + 1, fontWeight: '700', ...mutedTextStyle(c, 0.55), textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 6 }}>Email</Text>
           <NeuInputRow
             c={c}
             value={editEmail}
@@ -717,7 +717,7 @@ export default function StudentProfile() {
             autoCorrect={false}
             leftIcon={<Mail size={16} color={c.text} opacity={0.4} />}
           />
-          <Text style={{ fontSize: layout.captionSize, color: c.text, opacity: 0.45, marginBottom: 12, lineHeight: Math.round(layout.captionSize * 1.4) }}>
+          <Text style={{ fontSize: layout.captionSize, ...mutedTextStyle(c, 0.45), marginBottom: 12, lineHeight: Math.round(layout.captionSize * 1.4) }}>
             Your login method stays unchanged.
           </Text>
           {editError ? (
@@ -751,7 +751,7 @@ export default function StudentProfile() {
             </View>
           ) : (
             <>
-              <Text style={{ fontSize: layout.captionSize + 1, fontWeight: '700', color: c.text, opacity: 0.55, textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 6 }}>New Password</Text>
+              <Text style={{ fontSize: layout.captionSize + 1, fontWeight: '700', ...mutedTextStyle(c, 0.55), textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 6 }}>New Password</Text>
               <NeuInputRow
                 c={c}
                 value={newPwd}
@@ -828,7 +828,7 @@ export default function StudentProfile() {
           </View>
         }
       >
-        <Text style={{ fontSize: 14, color: c.text, opacity: 0.6, lineHeight: 22 }}>Your progress and data are safely saved.</Text>
+        <Text style={{ fontSize: 14, ...mutedTextStyle(c, 0.6), lineHeight: 22 }}>Your progress and data are safely saved.</Text>
       </ResponsiveModal>
     </ScrollView>
   );

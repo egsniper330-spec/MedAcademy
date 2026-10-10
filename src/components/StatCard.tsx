@@ -1,7 +1,7 @@
 import React, { useRef } from 'react';
 import { Animated, FlatList, View, Text, useColorScheme, Platform } from 'react-native';
 import { NeuCard } from '@/components/NeuCard';
-import { neuColors, useLayout } from '@/lib/neu';
+import { neuColors, useLayout, mutedTextStyle } from '@/lib/neu';
 import { spacing, radius, typography, iconContainer } from '@/lib/ds';
 
 // ─── Simple inline StatCard (admin / doctor / superadmin dashboards) ──────────
@@ -28,7 +28,7 @@ export function StatCard({ label, value, icon, color }: StatCardProps) {
             {icon}
           </View>
         ) : null}
-        <Text style={{ ...typography.caption, color: c.text, opacity: 0.55, flex: 1 }} numberOfLines={1}>{label}</Text>
+        <Text style={{ ...typography.caption, ...mutedTextStyle(c, 0.55), flex: 1 }} numberOfLines={1}>{label}</Text>
       </View>
       <Text style={{ ...typography.display, color: color ?? c.primary }}>{value}</Text>
     </NeuCard>
@@ -138,7 +138,7 @@ export function StatCardCarousel({ cards }: { cards: StatCardItem[] }) {
               {item.isFuture ? '—' : item.value}
             </Text>
             {item.sublabel ? (
-              <Text style={{ ...typography.micro, color: c.text, opacity: 0.35, marginTop: 2 }}>{item.sublabel}</Text>
+              <Text style={{ ...typography.micro, ...mutedTextStyle(c, 0.35), marginTop: 2 }}>{item.sublabel}</Text>
             ) : null}
           </View>
         </NeuCard>

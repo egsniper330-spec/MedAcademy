@@ -28,7 +28,7 @@ import React, { useState } from 'react';
 import { View, Text, Pressable, ActivityIndicator } from 'react-native';
 import { User, Camera, Trash2, ImageIcon, AlertTriangle } from 'lucide-react-native';
 import { Image } from 'expo-image';
-import { neuColors } from '@/lib/neu';
+import { neuColors, mutedTextStyle } from '@/lib/neu';
 import { ResponsiveModal } from '@/components/ResponsiveModal';
 import { NeuButton } from '@/components/NeuButton';
 
@@ -194,7 +194,7 @@ export function ProfilePhotoActions({
           </View>
         }
       >
-        <Text style={{ fontSize: 14, color: c.text, opacity: 0.6, lineHeight: 20 }}>
+        <Text style={{ fontSize: 14, ...mutedTextStyle(c, 0.6), lineHeight: 20 }}>
           The photo will be deleted from your profile and storage.
         </Text>
       </ResponsiveModal>

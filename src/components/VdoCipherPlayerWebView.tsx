@@ -46,7 +46,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { View, Text, ActivityIndicator, useColorScheme } from 'react-native';
 import { getVideoPlaybackToken } from '@/lib/api';
-import { neuColors } from '@/lib/neu';
+import { neuColors, mutedTextStyle } from '@/lib/neu';
 import { WebView } from 'react-native-webview';
 import { useSecurityWebViewStop, type StoppableWebView } from '@/lib/useSecurityWebViewStop';
 import { buildWatermarkInjection } from '@/lib/watermarkInjection';
@@ -237,7 +237,7 @@ export function VdoCipherPlayerWebView({
     return (
       <View style={[containerStyleNative, { alignItems: 'center', justifyContent: 'center', gap: 10 }]}>
         <ActivityIndicator color={c.primary} size="large" />
-        <Text style={{ fontSize: 13, color: c.text, opacity: 0.5 }}>Loading player…</Text>
+        <Text style={{ fontSize: 13, ...mutedTextStyle(c, 0.5) }}>Loading player…</Text>
       </View>
     );
   }

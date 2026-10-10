@@ -14,7 +14,7 @@ import {
   DollarSign, TrendingUp, Calendar, Award, BookOpen, ArrowRight,
 } from 'lucide-react-native';
 import { NeuCard } from '@/components/NeuCard';
-import { neuColors, useLayout, safeBottom } from '@/lib/neu';
+import { neuColors, useLayout, safeBottom, mutedTextStyle } from '@/lib/neu';
 import { getPricingSettings, getCreditLedger } from '@/lib/api';
 
 type PricingSettings = {
@@ -116,8 +116,8 @@ export default function RevenueAnalyticsScreen() {
         <DollarSign size={16} color={color} />
       </View>
       <Text style={{ fontSize: 22, fontWeight: '900', color }}>{value}</Text>
-      <Text style={{ fontSize: 11, color: c.text, opacity: 0.45, marginTop: 3 }}>{label}</Text>
-      {sub && <Text style={{ fontSize: 10, color: c.text, opacity: 0.3, marginTop: 1 }}>{sub}</Text>}
+      <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.45), marginTop: 3 }}>{label}</Text>
+      {sub && <Text style={{ fontSize: 10, ...mutedTextStyle(c, 0.3), marginTop: 1 }}>{sub}</Text>}
     </NeuCard>
   );
 
@@ -147,7 +147,7 @@ export default function RevenueAnalyticsScreen() {
         {metrics && (
           <>
             {/* KPI Cards */}
-            <Text style={{ fontSize: 11, fontWeight: '700', color: c.text, opacity: 0.4, marginBottom: 10 }}>REVENUE OVERVIEW</Text>
+            <Text style={{ fontSize: 11, fontWeight: '700', ...mutedTextStyle(c, 0.4), marginBottom: 10 }}>REVENUE OVERVIEW</Text>
             <View style={{ flexDirection: 'row', gap: 10, marginBottom: 10, flexWrap: 'wrap' }}>
               <KpiCard label="Lifetime Revenue"   value={fmt(metrics.lifetimeRevenue, metrics.cur)} color="#16A34A" />
               <KpiCard label="Revenue from Credits" value={fmt(metrics.totalRevenue, metrics.cur)} color={c.primary} sub="credits only" />
@@ -163,14 +163,14 @@ export default function RevenueAnalyticsScreen() {
             {/* Monthly Revenue Chart */}
             {metrics.months.length > 0 && (
               <>
-                <Text style={{ fontSize: 11, fontWeight: '700', color: c.text, opacity: 0.4, marginBottom: 10 }}>
+                <Text style={{ fontSize: 11, fontWeight: '700', ...mutedTextStyle(c, 0.4), marginBottom: 10 }}>
                   MONTHLY REVENUE (LAST 6 MONTHS)
                 </Text>
                 <NeuCard style={{ padding: 16, marginBottom: 24 }}>
                   <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: 6, height: 100 }}>
                     {metrics.monthlyVals.map((v, i) => (
                       <View key={metrics.months[i]} style={{ flex: 1, alignItems: 'center' }}>
-                        <Text style={{ fontSize: 8, color: c.text, opacity: 0.4, marginBottom: 3 }}>
+                        <Text style={{ fontSize: 8, ...mutedTextStyle(c, 0.4), marginBottom: 3 }}>
                           {fmt(v, '').trim()}
                         </Text>
                         <View style={{
@@ -182,7 +182,7 @@ export default function RevenueAnalyticsScreen() {
                   </View>
                   <View style={{ flexDirection: 'row', gap: 6, marginTop: 6 }}>
                     {metrics.months.map(m => (
-                      <Text key={m} style={{ flex: 1, fontSize: 8, color: c.text, opacity: 0.4, textAlign: 'center' }}>
+                      <Text key={m} style={{ flex: 1, fontSize: 8, ...mutedTextStyle(c, 0.4), textAlign: 'center' }}>
                         {m.slice(5)}
                       </Text>
                     ))}
@@ -241,7 +241,7 @@ export default function RevenueAnalyticsScreen() {
 
             {/* Pricing reference */}
             <NeuCard style={{ padding: 14 }}>
-              <Text style={{ fontSize: 12, fontWeight: '700', color: c.text, opacity: 0.5, marginBottom: 8 }}>PRICING REFERENCE</Text>
+              <Text style={{ fontSize: 12, fontWeight: '700', ...mutedTextStyle(c, 0.5), marginBottom: 8 }}>PRICING REFERENCE</Text>
               <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
                 <Text style={{ fontSize: 13, color: c.text }}>Per Credit</Text>
                 <Text style={{ fontSize: 13, fontWeight: '700', color: '#16A34A' }}>

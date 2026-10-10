@@ -7,6 +7,31 @@ import { useState } from 'react';
 import { View, Text, Pressable, ActivityIndicator, useColorScheme, ScrollView } from 'react-native';
 import { ResponsiveModal } from '@/components/ResponsiveModal';
 import { neuColors } from '@/lib/neu';
+
+/**
+ * actionInk — dark-mode ink for the action palette.
+ *
+ * The DEFS table below carries the canonical LIGHT hex for each action. Those
+ * mids (#16A34A green, #DC2626 red, #D97706 amber, #7C3AED purple, #6B7280
+ * grey) are chosen to read on the light neumorphic base; pasted onto the dark
+ * elevated surface they measure 2.1–3.6:1, i.e. an action menu whose labels
+ * fail AA. Rather than fork the table (and risk the two drifting apart), the
+ * dark partner is resolved here at render time — one place to keep honest.
+ *
+ * Every dark partner measures ≥4.5:1 on `elevated`:
+ *   #4ADE80 7.4:1 · #F87171 4.7:1 · #FBBF24 6.9:1 · #A78BFA 4.7:1 · #A9BFD6 5.0:1
+ */
+const DARK_ACTION_INK: Record<string, string> = {
+  '#16A34A': '#4ADE80', // success — unblock / credits / push
+  '#DC2626': '#F87171', // destructive — block / delete
+  '#EF4444': '#F87171', // destructive — promote to admin
+  '#D97706': '#FBBF24', // warning — suspend / demote
+  '#7C3AED': '#A78BFA', // admin — password / audit / price
+  '#6B7280': '#A9BFD6', // neutral — login history
+};
+
+const actionInk = (hex: string, isDark: boolean): string =>
+  isDark ? (DARK_ACTION_INK[hex.toUpperCase()] ?? hex) : hex;
 import {
   Edit3, UserCheck, UserX, KeyRound, ArrowUpCircle, ArrowDownCircle,
   Trash2, Smartphone, CreditCard, Clock, FileText, History,
@@ -94,6 +119,7 @@ export function ActionMenu({
             loading={loadingKeys.has(def.key)}
             anyLoading={anyLoading}
             onAction={onAction}
+            isDark={isDark}
           />
         ))}
       </View>
@@ -101,10 +127,14 @@ export function ActionMenu({
   );
 }
 
-function ActionItem({ def, loading, anyLoading, onAction }: {
-  def: ActionDef; loading: boolean; anyLoading: boolean; onAction: (k: ActionKey) => void;
+function ActionItem({ def, loading, anyLoading, onAction, isDark }: {
+  def: ActionDef; loading: boolean; anyLoading: boolean; onAction: (k: ActionKey) => void; isDark: boolean;
 }) {
   const [pressed, setPressed] = useState(false);
+  // Dark gets the bright ink partner, and a tint strong enough to read as a row
+  // on the elevated surface (6–8% alpha was near-invisible on navy).
+  const ink = actionInk(def.color, isDark);
+  const restAlpha = isDark ? '1F' : def.danger ? '12' : '0E';
   return (
     <Pressable
       onPress={() => !anyLoading && onAction(def.key)}
@@ -113,15 +143,15 @@ function ActionItem({ def, loading, anyLoading, onAction }: {
       onPressOut={() => setPressed(false)}
       style={{
         flexDirection: 'row', alignItems: 'center', gap: 14, padding: 14, borderRadius: 14,
-        backgroundColor: pressed ? `${def.color}22` : def.danger ? `${def.color}12` : `${def.color}0E`,
+        backgroundColor: `${ink}${pressed ? '2E' : restAlpha}`,
         opacity: anyLoading && !loading ? 0.45 : 1,
       }}
     >
       {loading
-        ? <ActivityIndicator size="small" color={def.color} style={{ width: 18 }} />
-        : <View style={{ width: 18, alignItems: 'center', justifyContent: 'center' }}>{renderIcon(def.key, def.color)}</View>
+        ? <ActivityIndicator size="small" color={ink} style={{ width: 18 }} />
+        : <View style={{ width: 18, alignItems: 'center', justifyContent: 'center' }}>{renderIcon(def.key, ink)}</View>
       }
-      <Text style={{ flex: 1, fontSize: 15, fontWeight: def.danger ? '700' : '600', color: def.color }}>
+      <Text style={{ flex: 1, fontSize: 15, fontWeight: def.danger ? '700' : '600', color: ink }}>
         {def.label}
       </Text>
     </Pressable>

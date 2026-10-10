@@ -10,7 +10,7 @@ import { ActivityIndicator, Image, Pressable, Text, useColorScheme, View } from 
 import * as ImagePicker from 'expo-image-picker';
 import { Camera, RefreshCw, Upload, Check, X } from 'lucide-react-native';
 import { NeuCard } from '@/components/NeuCard';
-import { neuColors, neuFlatStyle, neuPressedStyle } from '@/lib/neu';
+import { neuColors, neuFlatStyle, neuPressedStyle, mutedTextStyle } from '@/lib/neu';
 import { backendClient } from '@/client/backendClient';
 import { updateUploadRecord, updateLessonVideoStatus, insertAuditLog } from '@/lib/videoUploadEngine';
 import { usePermission } from '@/hooks/usePermission';
@@ -103,7 +103,7 @@ export function VideoThumbnailCard({
         onConfirm={confirmThumbnailRequest}
         onDismiss={() => setShowThumbnailRationale(false)}
       />
-      <Text style={{ fontSize: 12, fontWeight: '700', color: c.text, opacity: 0.55 }}>VIDEO THUMBNAIL</Text>
+      <Text style={{ fontSize: 12, fontWeight: '700', ...mutedTextStyle(c, 0.55) }}>VIDEO THUMBNAIL</Text>
       <NeuCard style={[neuFlatStyle(isDark), { borderRadius: 14, overflow: 'hidden' }]}>
         {/* Thumbnail preview */}
         <View style={{ width: '100%', aspectRatio: 16 / 9, backgroundColor: `${c.text}08` }}>
@@ -152,7 +152,7 @@ export function VideoThumbnailCard({
             <Pressable onPress={() => setShowActions(false)}
               style={{ flexDirection: 'row', alignItems: 'center', gap: 8, padding: 10, borderRadius: 10 }}>
               <X size={14} color={`${c.text}50`} />
-              <Text style={{ fontSize: 13, color: c.text, opacity: 0.5 }}>Cancel</Text>
+              <Text style={{ fontSize: 13, ...mutedTextStyle(c, 0.5) }}>Cancel</Text>
             </Pressable>
           </View>
         )}

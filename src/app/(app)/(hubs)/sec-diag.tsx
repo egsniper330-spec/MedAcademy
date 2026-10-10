@@ -12,7 +12,7 @@ import {
 import { getAuditLogs, getAllUsers } from '@/lib/api';
 import { backendClient } from '@/client/backendClient';
 import { NeuCard } from '@/components/NeuCard';
-import { neuColors, useLayout, safeBottom } from '@/lib/neu';
+import { neuColors, useLayout, safeBottom, mutedTextStyle } from '@/lib/neu';
 import { PageHeader } from '@/components/PageHeader';
 import { ArrowLeft } from 'lucide-react-native';
 import { getNativeSecurityFlags, type NativeSecurityFlags } from '@/lib/nativeSecurity';
@@ -150,7 +150,7 @@ export default function SuperAdminSecurity() {
           showBack
           onBack={() => { if (router.canGoBack()) router.back(); else router.push('/(app)/(superadmin)/sa-overview' as never); }}
         />
-        <Text style={{ fontSize: 13, color: c.text, opacity: 0.5, marginBottom: 20 }}>
+        <Text style={{ fontSize: 13, ...mutedTextStyle(c, 0.5), marginBottom: 20 }}>
           Platform security overview and threat analysis
         </Text>
 
@@ -167,7 +167,7 @@ export default function SuperAdminSecurity() {
                     {severity === 'ok' ? <CheckCircle size={22} color={color} /> : <Icon size={22} color={color} />}
                   </View>
                   <Text style={{ fontSize: 22, fontWeight: '800', color }}>{value}</Text>
-                  <Text style={{ fontSize: 11, color: c.text, opacity: 0.55, textAlign: 'center', marginTop: 4 }}>{label}</Text>
+                  <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.55), textAlign: 'center', marginTop: 4 }}>{label}</Text>
                 </NeuCard>
               ))}
               {nativeThreatCount !== null && (
@@ -176,7 +176,7 @@ export default function SuperAdminSecurity() {
                     {nativeThreatCount > 0 ? <ShieldX size={22} color="#DC2626" /> : <ShieldCheck size={22} color="#16A34A" />}
                   </View>
                   <Text style={{ fontSize: 22, fontWeight: '800', color: nativeThreatCount > 0 ? '#DC2626' : '#16A34A' }}>{nativeThreatCount}</Text>
-                  <Text style={{ fontSize: 11, color: c.text, opacity: 0.55, textAlign: 'center', marginTop: 4 }}>Native Threats</Text>
+                  <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.55), textAlign: 'center', marginTop: 4 }}>Native Threats</Text>
                 </NeuCard>
               )}
             </View>
@@ -200,19 +200,19 @@ export default function SuperAdminSecurity() {
             {flagsError ? (
               <NeuCard style={{ padding: 16, marginBottom: 16 }}>
                 <Text style={{ fontSize: 13, color: '#DC2626' }}>⚠️ Native module error: {flagsError}</Text>
-                <Text style={{ fontSize: 12, color: c.text, opacity: 0.5, marginTop: 4 }}>
+                <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.5), marginTop: 4 }}>
                   Runs on Android/iOS only. Web preview always returns safe defaults.
                 </Text>
               </NeuCard>
             ) : flagsLoading && !nativeFlags ? (
               <NeuCard style={{ padding: layout.screenPx, alignItems: 'center', marginBottom: 16 }}>
                 <ActivityIndicator color={c.primary} />
-                <Text style={{ fontSize: 13, color: c.text, opacity: 0.6, marginTop: 10 }}>Running native checks…</Text>
+                <Text style={{ fontSize: 13, ...mutedTextStyle(c, 0.6), marginTop: 10 }}>Running native checks…</Text>
               </NeuCard>
             ) : nativeFlags ? (
               <>
                 {flagsTimestamp && (
-                  <Text style={{ fontSize: 11, color: c.text, opacity: 0.4, marginBottom: 10 }}>
+                  <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.4), marginBottom: 10 }}>
                     Last checked: {flagsTimestamp.toLocaleTimeString()}
                   </Text>
                 )}
@@ -239,7 +239,7 @@ export default function SuperAdminSecurity() {
                               </Text>
                             </View>
                           </View>
-                          <Text style={{ fontSize: 11, color: c.text, opacity: 0.5, marginTop: 2 }}>
+                          <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.5), marginTop: 2 }}>
                             {row.description}
                           </Text>
                         </View>
@@ -248,7 +248,7 @@ export default function SuperAdminSecurity() {
                             color: raw === undefined ? '#94A3B8' : (isThreat ? '#DC2626' : '#16A34A') }}>
                             {raw === undefined ? 'N/A' : String(raw)}
                           </Text>
-                          <Text style={{ fontSize: 10, color: c.text, opacity: 0.35 }}>raw</Text>
+                          <Text style={{ fontSize: 10, ...mutedTextStyle(c, 0.35) }}>raw</Text>
                         </View>
                       </View>
                     </NeuCard>
@@ -271,7 +271,7 @@ export default function SuperAdminSecurity() {
                     </View>
                     <View style={{ flex: 1 }}>
                       <Text style={{ fontSize: 14, fontWeight: '700', color: c.text }}>{user.full_name}</Text>
-                      <Text style={{ fontSize: 12, color: c.text, opacity: 0.5 }}>{user.email} · {count} devices</Text>
+                      <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.5) }}>{user.email} · {count} devices</Text>
                     </View>
                   </NeuCard>
                 ))}
@@ -292,10 +292,10 @@ export default function SuperAdminSecurity() {
                   <Text style={{ fontSize: 13, fontWeight: '600', color: c.text }}>
                     {log.action?.replace(/_/g, ' ')}
                   </Text>
-                  <Text style={{ fontSize: 12, color: c.text, opacity: 0.5 }}>
+                  <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.5) }}>
                     {log.user?.full_name ?? 'System'} · {log.user?.email}
                   </Text>
-                  <Text style={{ fontSize: 11, color: c.text, opacity: 0.35, marginTop: 2 }}>
+                  <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.35), marginTop: 2 }}>
                     {new Date(log.created_at).toLocaleString('en-US', {
                       month: 'short', day: 'numeric', year: 'numeric',
                       hour: '2-digit', minute: '2-digit', hour12: true,

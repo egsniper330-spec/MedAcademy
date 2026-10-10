@@ -42,9 +42,11 @@ import {
   Pressable,
   StyleSheet,
   View,
+  useColorScheme,
   useWindowDimensions,
 } from 'react-native';
 import { Portal } from '@rn-primitives/portal';
+import { neuColors } from '@/lib/neu';
 
 let overlaySeq = 0;
 
@@ -58,7 +60,12 @@ export interface PortalOverlayProps {
   onBackdropPress?: () => void;
   /** Animation/presentation style; default 'dialog' */
   variant?: PortalOverlayVariant;
-  /** Backdrop fill color. Ignored when variant='none' */
+  /**
+   * Backdrop fill color. Ignored when variant='none'. Defaults to a 40% black
+   * scrim on Light and a deeper 66% navy-black on Dark — the light scrim barely
+   * registers over an already-dark UI, so the content underneath never visually
+   * recedes and the overlay has no focus.
+   */
   backdropColor?: string;
   /** Set false to render no backdrop at all (content handles its own) */
   withBackdrop?: boolean;
@@ -70,10 +77,12 @@ export function PortalOverlay({
   onRequestClose,
   onBackdropPress,
   variant = 'dialog',
-  backdropColor = '#00000066',
+  backdropColor,
   withBackdrop = true,
   children,
 }: PortalOverlayProps) {
+  const isDark = useColorScheme() === 'dark';
+  const scrim = backdropColor ?? (isDark ? neuColors.dark.overlay : '#00000066');
   // Stable, unique portal identity per component instance — never changes
   // across re-renders, so the portal never remounts.
   const nameRef = useRef(`portal-overlay-${++overlaySeq}`);
@@ -168,7 +177,7 @@ export function PortalOverlay({
           wrapper below stops them. */}
       <View style={[StyleSheet.absoluteFill, styles.layer, { pointerEvents: visible ? 'box-none' : 'none' }]}>
         {withBackdrop && (
-          <Animated.View style={[StyleSheet.absoluteFill, { backgroundColor: backdropColor, opacity: backdropOpacity }]}>
+          <Animated.View style={[StyleSheet.absoluteFill, { backgroundColor: scrim, opacity: backdropOpacity }]}>
             <Pressable
               style={StyleSheet.absoluteFill}
               onPress={handleBackdropPress}

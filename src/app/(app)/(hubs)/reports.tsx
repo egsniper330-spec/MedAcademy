@@ -12,7 +12,7 @@ import { PageHeader } from '@/components/PageHeader';
 import { getReportData, getArchiveAnalytics, getCourseLifecycleLogs, formatStudyTime } from '@/lib/api';
 import { NeuCard } from '@/components/NeuCard';
 import { NeuButton } from '@/components/NeuButton';
-import { neuColors, useLayout, safeBottom } from '@/lib/neu';
+import { neuColors, useLayout, safeBottom, mutedTextStyle } from '@/lib/neu';
 
 const REPORT_TYPES = [
   { key: 'users',      label: 'User Report',            icon: Users,      color: '#1E90FF', desc: 'All registered users with roles and universities' },
@@ -106,7 +106,7 @@ export default function ReportsScreen() {
       <View style={{ paddingHorizontal: layout.screenPx }}>
 
         {/* Report Type Selection */}
-        <Text style={{ fontSize: 13, fontWeight: '700', color: c.text, opacity: 0.6, marginBottom: 12, textTransform: 'uppercase', letterSpacing: 0.8 }}>
+        <Text style={{ fontSize: 13, fontWeight: '700', ...mutedTextStyle(c, 0.6), marginBottom: 12, textTransform: 'uppercase', letterSpacing: 0.8 }}>
           Select Report Type
         </Text>
         {REPORT_TYPES.map(rt => {
@@ -120,7 +120,7 @@ export default function ReportsScreen() {
                   </View>
                   <View style={{ flex: 1 }}>
                     <Text style={{ fontSize: 15, fontWeight: '700', color: c.text }}>{rt.label}</Text>
-                    <Text style={{ fontSize: 12, color: c.text, opacity: 0.5, marginTop: 2 }}>{rt.desc}</Text>
+                    <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.5), marginTop: 2 }}>{rt.desc}</Text>
                   </View>
                   {active && (
                     <View style={{ width: 22, height: 22, borderRadius: 11, backgroundColor: rt.color, alignItems: 'center', justifyContent: 'center' }}>
@@ -158,7 +158,7 @@ export default function ReportsScreen() {
               ].map(stat => (
                 <NeuCard key={stat.label} style={{ flex: 1, alignItems: 'center', padding: 14, gap: 4 }}>
                   <Text style={{ fontSize: 22, fontWeight: '800', color: stat.color }}>{stat.value}</Text>
-                  <Text style={{ fontSize: 11, color: c.text, opacity: 0.5 }}>{stat.label}</Text>
+                  <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.5) }}>{stat.label}</Text>
                 </NeuCard>
               ))}
             </View>
@@ -181,11 +181,11 @@ export default function ReportsScreen() {
                   </Text>
                 </View>
                 <View style={{ flexDirection: 'row', gap: 14 }}>
-                  <Text style={{ fontSize: 11, color: c.text, opacity: 0.45 }}>
+                  <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.45) }}>
                     {log.actor_role ?? '—'} · {new Date(log.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
                   </Text>
                   {log.reason ? (
-                    <Text style={{ fontSize: 11, color: c.text, opacity: 0.45 }} numberOfLines={1}>
+                    <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.45) }} numberOfLines={1}>
                       {log.reason}
                     </Text>
                   ) : null}
@@ -213,7 +213,7 @@ export default function ReportsScreen() {
               <NeuCard key={i} style={{ marginBottom: 10, padding: 14 }}>
                 {Object.entries(row).slice(0, 4).map(([key, val]) => (
                   <View key={key} style={{ flexDirection: 'row', marginBottom: 4 }}>
-                    <Text style={{ fontSize: 11, fontWeight: '700', color: c.text, opacity: 0.5, minWidth: 90, flexShrink: 0 }}>{key}</Text>
+                    <Text style={{ fontSize: 11, fontWeight: '700', ...mutedTextStyle(c, 0.5), minWidth: 90, flexShrink: 0 }}>{key}</Text>
                     <Text style={{ fontSize: 11, color: c.text, flex: 1 }} numberOfLines={1}>{String(val ?? '')}</Text>
                   </View>
                 ))}
@@ -233,7 +233,7 @@ export default function ReportsScreen() {
         {generated && selectedType !== 'archive' && preview.length === 0 && (
           <NeuCard style={{ padding: 40, alignItems: 'center' }}>
             <FileText size={36} color={c.primary} opacity={0.25} />
-            <Text style={{ color: c.text, opacity: 0.4, marginTop: 16 }}>No data found for this report</Text>
+            <Text style={{ ...mutedTextStyle(c, 0.4), marginTop: 16 }}>No data found for this report</Text>
           </NeuCard>
         )}
       </View>

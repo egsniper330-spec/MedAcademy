@@ -24,7 +24,7 @@ import { Image } from 'expo-image';
 import {
   Check, ChevronDown, Clock, Film, Search, SortAsc, SortDesc, X,
 } from 'lucide-react-native';
-import { neuColors, neuFlatStyle, neuPressedStyle } from '@/lib/neu';
+import { neuColors, neuFlatStyle, neuPressedStyle, mutedTextStyle } from '@/lib/neu';
 import {
   getMyVideoLibrary, type VideoAsset, type LibraryFilters,
 } from '@/lib/videoLibraryApi';
@@ -160,14 +160,14 @@ export function VideoLibraryPicker({ visible, onClose, onSelect }: Props) {
             </View>
             {/* File size */}
             {item.file_size_bytes && (
-              <Text style={{ fontSize: 11, color: c.text, opacity: 0.5 }}>{formatBytes(item.file_size_bytes)}</Text>
+              <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.5) }}>{formatBytes(item.file_size_bytes)}</Text>
             )}
           </View>
 
-          <Text style={{ fontSize: 11, color: c.text, opacity: 0.4 }}>{formatDate(item.created_at)}</Text>
+          <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.4) }}>{formatDate(item.created_at)}</Text>
 
           {/* VdoCipher ID */}
-          <Text style={{ fontSize: 10, color: c.text, opacity: 0.3, fontFamily: 'monospace' }} numberOfLines={1}>
+          <Text style={{ fontSize: 10, ...mutedTextStyle(c, 0.3), fontFamily: 'monospace' }} numberOfLines={1}>
             {item.provider_video_id}
           </Text>
 
@@ -205,7 +205,7 @@ export function VideoLibraryPicker({ visible, onClose, onSelect }: Props) {
         <View style={{ paddingTop: 20, paddingHorizontal: 20, paddingBottom: 12, flexDirection: 'row', alignItems: 'center', gap: 12 }}>
           <View style={{ flex: 1 }}>
             <Text style={{ fontSize: 18, fontWeight: '800', color: c.text }}>My Video Library</Text>
-            <Text style={{ fontSize: 12, color: c.text, opacity: 0.45, marginTop: 2 }}>
+            <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.45), marginTop: 2 }}>
               Select a video to reuse — no re-upload needed
             </Text>
           </View>
@@ -303,7 +303,7 @@ export function VideoLibraryPicker({ visible, onClose, onSelect }: Props) {
         {loading ? (
           <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12 }}>
             <ActivityIndicator color={c.primary} size="large" />
-            <Text style={{ fontSize: 13, color: c.text, opacity: 0.45 }}>Loading library…</Text>
+            <Text style={{ fontSize: 13, ...mutedTextStyle(c, 0.45) }}>Loading library…</Text>
           </View>
         ) : assets.length === 0 ? (
           <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12, padding: 32 }}>
@@ -313,7 +313,7 @@ export function VideoLibraryPicker({ visible, onClose, onSelect }: Props) {
             <Text style={{ fontSize: 16, fontWeight: '700', color: c.text, textAlign: 'center' }}>
               {search ? 'No videos match your search' : 'No videos in your library yet'}
             </Text>
-            <Text style={{ fontSize: 13, color: c.text, opacity: 0.45, textAlign: 'center', lineHeight: 19 }}>
+            <Text style={{ fontSize: 13, ...mutedTextStyle(c, 0.45), textAlign: 'center', lineHeight: 19 }}>
               {search ? 'Try a different keyword.' : 'Upload your first video to a lesson — it will appear here for reuse.'}
             </Text>
           </View>

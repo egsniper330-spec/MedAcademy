@@ -78,11 +78,17 @@ export default function RoleTabShell({ tabs, initialRouteName, jsIconShrink }: R
             <ResponsiveTabBar
               {...props}
               activeTintColor={c.primary}
-              inactiveTintColor={`${c.text}44`}
+              // `${text}44` (26%) over the dark navy lands around 2.4:1 — the
+              // labels were technically "quiet" but effectively unreadable. Dark
+              // uses a readable 60% mix; Light keeps the original 26%.
+              inactiveTintColor={`${c.text}${isDark ? '99' : '44'}`}
               labelStyle={{ fontSize: 10, fontWeight: '700', letterSpacing: 0.2, marginTop: 2 }}
               style={{
-                backgroundColor: c.base,
-                borderTopWidth: 0,
+                // Navigation surface, one rung above the page — a bottom bar
+                // painted the page colour has no readable edge on dark.
+                backgroundColor: c.navSurface,
+                borderTopWidth: isDark ? 1 : 0,
+                borderTopColor: c.divider,
                 shadowColor: c.shadowDark,
                 shadowOffset: { width: 0, height: -4 },
                 shadowOpacity: 0.45,

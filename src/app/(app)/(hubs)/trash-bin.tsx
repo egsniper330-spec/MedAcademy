@@ -22,7 +22,7 @@ import { DeleteAccountModal } from '@/components/DeleteAccountModal';
 import { NeuCard } from '@/components/NeuCard';
 import { NeuButton } from '@/components/NeuButton';
 import { useToast } from '@/components/Toast';
-import { neuColors, useLayout, neuFlatStyle, safeBottom } from '@/lib/neu';
+import { neuColors, useLayout, neuFlatStyle, safeBottom, mutedTextStyle } from '@/lib/neu';
 import { logAndParse } from '@/lib/parseError';
 import { exportCSV } from '@/lib/exportUtils';
 import { KeyboardAwareScrollView } from '@/components/KeyboardAwareScrollView';
@@ -105,14 +105,14 @@ const TrashItemRow = memo(function TrashItemRow({
                 <Text style={{ fontSize: 10, fontWeight: '700', color: rc, textTransform: 'capitalize' }}>{item.role}</Text>
               </View>
             </View>
-            <Text style={{ fontSize: 12, color: c.text, opacity: 0.5, marginTop: 1 }}>{item.email}</Text>
+            <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.5), marginTop: 1 }}>{item.email}</Text>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 4 }}>
               <Clock size={11} color={isExpired ? '#EF4444' : isExpiringSoon ? '#D97706' : c.text} />
               <Text style={{ fontSize: 11, color: isExpired ? '#EF4444' : isExpiringSoon ? '#D97706' : c.text, opacity: isExpired || isExpiringSoon ? 1 : 0.45 }}>
                 {daysLabel(item.days_remaining)}
               </Text>
               {item.trash_reason ? (
-                <Text style={{ fontSize: 11, color: c.text, opacity: 0.35 }} numberOfLines={1}>· {item.trash_reason}</Text>
+                <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.35) }} numberOfLines={1}>· {item.trash_reason}</Text>
               ) : null}
             </View>
           </View>
@@ -430,7 +430,7 @@ export default function TrashBin() {
           <Settings size={18} color={c.primary} />
         </Pressable>
       </View>
-      <Text style={{ fontSize: 13, color: c.text, opacity: 0.5, marginBottom: 20 }}>
+      <Text style={{ fontSize: 13, ...mutedTextStyle(c, 0.5), marginBottom: 20 }}>
         Accounts pending permanent deletion — retention: {config?.custom_days ?? config?.retention_days ?? 30} days
       </Text>
 
@@ -465,7 +465,7 @@ export default function TrashBin() {
           ].map(s => (
             <NeuCard key={s.label} style={{ flex: 1, alignItems: 'center', padding: 14 }}>
               <Text style={{ fontSize: 24, fontWeight: '900', color: s.color }}>{s.value}</Text>
-              <Text style={{ fontSize: 10, color: c.text, opacity: 0.5, textAlign: 'center', marginTop: 4 }}>{s.label}</Text>
+              <Text style={{ fontSize: 10, ...mutedTextStyle(c, 0.5), textAlign: 'center', marginTop: 4 }}>{s.label}</Text>
             </NeuCard>
           ))}
         </View>
@@ -539,9 +539,9 @@ export default function TrashBin() {
                 : <View style={{ width: 12, height: 12, borderRadius: 3, borderWidth: 2, borderColor: `${c.text}30` }} />
               }
             </View>
-            <Text style={{ fontSize: 12, color: c.text, opacity: 0.5 }}>Select All</Text>
+            <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.5) }}>Select All</Text>
           </Pressable>
-          <Text style={{ fontSize: 12, color: c.text, opacity: 0.4 }}>{filtered.length} of {total}</Text>
+          <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.4) }}>{filtered.length} of {total}</Text>
         </View>
       )}
     </View>
@@ -558,7 +558,7 @@ export default function TrashBin() {
       )}
       {!hasMore && items.length > 0 && (
         <View style={{ paddingVertical: 14, alignItems: 'center' }}>
-          <Text style={{ fontSize: 12, color: c.text, opacity: 0.35 }}>No more deleted accounts.</Text>
+          <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.35) }}>No more deleted accounts.</Text>
         </View>
       )}
       {/* Footer actions */}
@@ -589,7 +589,7 @@ export default function TrashBin() {
         <NeuCard style={{ padding: 32, alignItems: 'center' }}>
           <AlertTriangle size={32} color="#EF4444" />
           <Text style={{ fontSize: 14, color: '#EF4444', marginTop: 12, fontWeight: '600' }}>Failed to load Trash Bin</Text>
-          <Text style={{ fontSize: 12, color: c.text, opacity: 0.5, marginTop: 6, textAlign: 'center' }}>{loadError}</Text>
+          <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.5), marginTop: 6, textAlign: 'center' }}>{loadError}</Text>
         </NeuCard>
       </View>
     ) : null
@@ -601,7 +601,7 @@ export default function TrashBin() {
       <View style={{ paddingHorizontal: layout.screenPx }}>
         <NeuCard style={{ padding: 32, alignItems: 'center' }}>
           <Trash2 size={32} color={`${c.text}30`} />
-          <Text style={{ fontSize: 14, color: c.text, opacity: 0.4, marginTop: 12 }}>Trash bin is empty</Text>
+          <Text style={{ fontSize: 14, ...mutedTextStyle(c, 0.4), marginTop: 12 }}>Trash bin is empty</Text>
         </NeuCard>
       </View>
     )

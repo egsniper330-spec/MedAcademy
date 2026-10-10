@@ -14,7 +14,7 @@
  */
 import React from 'react';
 import { View, Text, useColorScheme } from 'react-native';
-import { neuColors } from '@/lib/neu';
+import { neuColors, mutedTextStyle } from '@/lib/neu';
 import { NeuButton } from '@/components/NeuButton';
 import { spacing, typography } from '@/lib/ds';
 
@@ -51,7 +51,9 @@ export function EmptyState({ icon, title, description, action, style }: EmptySta
       ]}
     >
       {!!icon && (
-        <View style={{ opacity: 0.55, marginBottom: spacing.sm }}>
+        // Dark lifts the glyph slightly: a 55%-opacity icon on a deep navy field
+        // reads as an accidental smudge rather than a deliberate illustration.
+        <View style={{ opacity: isDark ? 0.72 : 0.55, marginBottom: spacing.sm }}>
           {icon}
         </View>
       )}
@@ -68,13 +70,11 @@ export function EmptyState({ icon, title, description, action, style }: EmptySta
 
       {!!description && (
         <Text
-          style={{
-            ...typography.body,
-            color: c.text,
-            opacity: 0.5,
-            textAlign: 'center',
-            maxWidth: 280,
-          }}
+          style={[
+            typography.body,
+            { textAlign: 'center', maxWidth: 280 },
+            mutedTextStyle(c, 0.5),
+          ]}
         >
           {description}
         </Text>

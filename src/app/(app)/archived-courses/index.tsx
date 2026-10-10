@@ -18,7 +18,7 @@ import {
 import { NeuCard } from '@/components/NeuCard';
 import { NeuButton } from '@/components/NeuButton';
 import { useToast } from '@/components/Toast';
-import { neuColors, useLayout, neuFlatStyle, neuPressedStyle, safeBottom } from '@/lib/neu';
+import { neuColors, useLayout, neuFlatStyle, neuPressedStyle, safeBottom, mutedTextStyle } from '@/lib/neu';
 import { PageHeader } from '@/components/PageHeader';
 import { KeyboardAwareScrollView } from '@/components/KeyboardAwareScrollView';
 
@@ -103,7 +103,7 @@ export default function ArchivedCoursesScreen() {
   if (!canAccess) {
     return (
       <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: c.base }}>
-        <Text style={{ color: c.text, opacity: 0.4 }}>Access denied</Text>
+        <Text style={{ ...mutedTextStyle(c, 0.4) }}>Access denied</Text>
       </View>
     );
   }
@@ -152,7 +152,7 @@ export default function ArchivedCoursesScreen() {
           ) : filtered.length === 0 ? (
             <View style={{ paddingVertical: 60, alignItems: 'center', gap: 12 }}>
               <Archive size={52} color={c.primary} opacity={0.15} />
-              <Text style={{ fontSize: 16, color: c.text, opacity: 0.4 }}>
+              <Text style={{ fontSize: 16, ...mutedTextStyle(c, 0.4) }}>
                 {query ? 'No matching archived courses' : 'No archived courses'}
               </Text>
             </View>
@@ -170,7 +170,7 @@ export default function ArchivedCoursesScreen() {
                       {course.title}
                     </Text>
                     {course.doctor_name && (
-                      <Text style={{ fontSize: 12, color: c.text, opacity: 0.5, marginTop: 2 }}>
+                      <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.5), marginTop: 2 }}>
                         Dr. {course.doctor_name}
                       </Text>
                     )}
@@ -190,7 +190,7 @@ export default function ArchivedCoursesScreen() {
                 {/* Reason */}
                 {course.archive_reason ? (
                   <View style={{ paddingHorizontal: 12, paddingVertical: 8, borderRadius: 10, backgroundColor: `${c.text}06` }}>
-                    <Text style={{ fontSize: 12, color: c.text, opacity: 0.5, fontStyle: 'italic' }}>
+                    <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.5), fontStyle: 'italic' }}>
                       {`"${course.archive_reason}"`}
                     </Text>
                   </View>
@@ -242,14 +242,14 @@ export default function ArchivedCoursesScreen() {
               </View>
               <Text style={{ fontSize: 17, fontWeight: '800', color: c.text, flex: 1 }}>Restore Course</Text>
             </View>
-            <Text style={{ fontSize: 13, color: c.text, opacity: 0.55, lineHeight: 20, marginBottom: 6 }}>
+            <Text style={{ fontSize: 13, ...mutedTextStyle(c, 0.55), lineHeight: 20, marginBottom: 6 }}>
               <Text style={{ fontWeight: '700', color: c.text }}>{showRestoreConfirm?.title}</Text>
               {'\n\n'}The course will immediately return to the public catalog, search results, and new subscriptions. All lessons, videos, student progress, and analytics are preserved.
             </Text>
             <View style={{ flexDirection: 'row', gap: 10, marginTop: 16 }}>
               <Pressable onPress={() => setShowRestoreConfirm(null)}
                 style={[neuFlatStyle(isDark), { flex: 1, padding: 12, borderRadius: 12, alignItems: 'center' }]}>
-                <Text style={{ fontSize: 14, fontWeight: '700', color: c.text, opacity: 0.5 }}>Cancel</Text>
+                <Text style={{ fontSize: 14, fontWeight: '700', ...mutedTextStyle(c, 0.5) }}>Cancel</Text>
               </Pressable>
               <Pressable
                 onPress={() => showRestoreConfirm && handleRestore(showRestoreConfirm)}
@@ -276,12 +276,12 @@ export default function ArchivedCoursesScreen() {
               <View style={{ gap: 8, marginBottom: 16 }}>
                 <View style={{ padding: 14, borderRadius: 12, backgroundColor: `${c.text}06`, gap: 6 }}>
                   <Text style={{ fontSize: 14, fontWeight: '800', color: c.text }}>{showDeleteConfirm.title}</Text>
-                  <Text style={{ fontSize: 12, color: c.text, opacity: 0.5 }}>Dr. {showDeleteConfirm.doctor_name}</Text>
+                  <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.5) }}>Dr. {showDeleteConfirm.doctor_name}</Text>
                   <View style={{ flexDirection: 'row', gap: 16, marginTop: 4 }}>
-                    <Text style={{ fontSize: 12, color: c.text, opacity: 0.55 }}>
+                    <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.55) }}>
                       👥 {showDeleteConfirm.students_count} students
                     </Text>
-                    <Text style={{ fontSize: 12, color: c.text, opacity: 0.55 }}>
+                    <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.55) }}>
                       📖 {showDeleteConfirm.lessons_count} lessons
                     </Text>
                   </View>
@@ -300,7 +300,7 @@ export default function ArchivedCoursesScreen() {
             <View style={{ flexDirection: 'row', gap: 10 }}>
               <Pressable onPress={() => setShowDeleteConfirm(null)}
                 style={[neuFlatStyle(isDark), { flex: 1, padding: 12, borderRadius: 12, alignItems: 'center' }]}>
-                <Text style={{ fontSize: 14, fontWeight: '700', color: c.text, opacity: 0.55 }}>Cancel</Text>
+                <Text style={{ fontSize: 14, fontWeight: '700', ...mutedTextStyle(c, 0.55) }}>Cancel</Text>
               </Pressable>
               <Pressable
                 onPress={() => showDeleteConfirm && handlePermanentDelete(showDeleteConfirm)}
@@ -319,7 +319,7 @@ function MetaItem({ icon: Icon, label, c }: { icon: any; label: string; c: any }
   return (
     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
       <Icon size={12} color={c.text} opacity={0.4} />
-      <Text style={{ fontSize: 12, color: c.text, opacity: 0.5 }}>{label}</Text>
+      <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.5) }}>{label}</Text>
     </View>
   );
 }

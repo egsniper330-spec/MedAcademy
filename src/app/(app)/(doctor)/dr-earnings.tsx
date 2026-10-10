@@ -42,7 +42,7 @@ import {
 } from '@/lib/api';
 import { NeuCard } from '@/components/NeuCard';
 import { useToast } from '@/components/Toast';
-import { neuColors, useLayout, safeTop, safeLeft, safeRight, safeBottom } from '@/lib/neu';
+import { neuColors, useLayout, safeTop, safeLeft, safeRight, safeBottom, mutedTextStyle } from '@/lib/neu';
 import { DashboardHeader } from '@/components/DashboardHeader';
 import HamburgerButton from '@/components/HamburgerButton';
 import { FeatureUnavailableState } from '@/components/ScreenState';
@@ -103,7 +103,7 @@ function EarningsToggleCard({
         </View>
         <View style={{ flex: 1 }}>
           <Text style={{ fontSize: 15, fontWeight: '700', color: c.text }}>Earnings System</Text>
-          <Text style={{ fontSize: 12, color: c.text, opacity: 0.4, marginTop: 2 }}>
+          <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.4), marginTop: 2 }}>
             {frozen ? 'Disabled by platform — contact support' :
              enabled ? 'Active — tracking revenue independently' : 'Disabled — enable to track revenue'}
           </Text>
@@ -136,7 +136,7 @@ function StatCard({ icon, label, value, color, c }: {
       <View style={{ width: 32, height: 32, borderRadius: 10, backgroundColor: `${color}18`, alignItems: 'center', justifyContent: 'center' }}>
         {icon}
       </View>
-      <Text style={{ fontSize: 9, color: c.text, opacity: 0.4, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.8 }} numberOfLines={1}>{label}</Text>
+      <Text style={{ fontSize: 9, ...mutedTextStyle(c, 0.4), fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.8 }} numberOfLines={1}>{label}</Text>
       <Text style={{ fontSize: 15, fontWeight: '800', color }} numberOfLines={1} adjustsFontSizeToFit>{value}</Text>
     </NeuCard>
   );
@@ -147,7 +147,7 @@ function StatCard({ icon, label, value, color, c }: {
 // ─────────────────────────────────────────────────────────────────────────────
 function SL({ label, c }: { label: string; c: typeof neuColors.light }) {
   return (
-    <Text style={{ fontSize: 9, fontWeight: '800', letterSpacing: 1.3, textTransform: 'uppercase', color: c.text, opacity: 0.3, marginBottom: 10, marginTop: 4 }}>
+    <Text style={{ fontSize: 9, fontWeight: '800', letterSpacing: 1.3, textTransform: 'uppercase', ...mutedTextStyle(c, 0.3), marginBottom: 10, marginTop: 4 }}>
       {label}
     </Text>
   );
@@ -196,11 +196,11 @@ function RevenueChart({ transactions, c }: { transactions: EarningsTransactionRo
         <View style={{ flexDirection: 'row', gap: 12 }}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
             <View style={{ width: 8, height: 8, borderRadius: 2, backgroundColor: '#16A34A' }} />
-            <Text style={{ fontSize: 9, color: c.text, opacity: 0.4 }}>Income</Text>
+            <Text style={{ fontSize: 9, ...mutedTextStyle(c, 0.4) }}>Income</Text>
           </View>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
             <View style={{ width: 8, height: 8, borderRadius: 2, backgroundColor: '#DC2626' }} />
-            <Text style={{ fontSize: 9, color: c.text, opacity: 0.4 }}>Deduction</Text>
+            <Text style={{ fontSize: 9, ...mutedTextStyle(c, 0.4) }}>Deduction</Text>
           </View>
         </View>
       </View>
@@ -208,7 +208,7 @@ function RevenueChart({ transactions, c }: { transactions: EarningsTransactionRo
       <PeriodPicker value={period} onChange={setPeriod} c={c} />
 
       {points.length === 0 ? (
-        <Text style={{ fontSize: 13, color: c.text, opacity: 0.3, textAlign: 'center', paddingVertical: 24 }}>No data for this period</Text>
+        <Text style={{ fontSize: 13, ...mutedTextStyle(c, 0.3), textAlign: 'center', paddingVertical: 24 }}>No data for this period</Text>
       ) : (
         <ScrollView automaticallyAdjustKeyboardInsets={process.env.EXPO_OS === 'ios'} horizontal showsHorizontalScrollIndicator={false}>
           <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: 5, height: 110, paddingBottom: 20, minWidth: points.length * 32 }}>
@@ -217,11 +217,11 @@ function RevenueChart({ transactions, c }: { transactions: EarningsTransactionRo
               const color = p.isNegative ? '#DC2626' : '#16A34A';
               return (
                 <View key={i} style={{ alignItems: 'center', gap: 3, width: 28 }}>
-                  <Text style={{ fontSize: 7, color: c.text, opacity: 0.3, fontWeight: '600' }} numberOfLines={1}>
+                  <Text style={{ fontSize: 7, ...mutedTextStyle(c, 0.3), fontWeight: '600' }} numberOfLines={1}>
                     {Math.abs(p.amount) > 0 ? String(Math.round(Math.abs(p.amount))) : ''}
                   </Text>
                   <View style={{ width: 20, height: barH, borderRadius: 5, backgroundColor: `${color}CC` }} />
-                  <Text style={{ fontSize: 8, color: c.text, opacity: 0.35, fontWeight: '600', textAlign: 'center' }} numberOfLines={1}>{p.label}</Text>
+                  <Text style={{ fontSize: 8, ...mutedTextStyle(c, 0.35), fontWeight: '600', textAlign: 'center' }} numberOfLines={1}>{p.label}</Text>
                 </View>
               );
             })}
@@ -239,10 +239,10 @@ function CourseRevenueTable({ rows, total, c }: { rows: EarningsCourseRow[]; tot
   return (
     <NeuCard radius={18} style={{ overflow: 'hidden', marginBottom: 20 }}>
       <View style={{ flexDirection: 'row', paddingVertical: 10, paddingHorizontal: 14, backgroundColor: `${c.text}06`, borderBottomWidth: 1, borderBottomColor: `${c.text}08` }}>
-        <Text style={{ flex: 1, fontSize: 9, fontWeight: '800', color: c.text, opacity: 0.4, textTransform: 'uppercase', letterSpacing: 0.7 }}>Course</Text>
-        <Text style={{ width: 44, textAlign: 'center', fontSize: 9, fontWeight: '800', color: c.text, opacity: 0.4, textTransform: 'uppercase' }}>Students</Text>
-        <Text style={{ width: 60, textAlign: 'right', fontSize: 9, fontWeight: '800', color: c.text, opacity: 0.4, textTransform: 'uppercase' }}>Revenue</Text>
-        <Text style={{ width: 32, textAlign: 'right', fontSize: 9, fontWeight: '800', color: c.text, opacity: 0.4, textTransform: 'uppercase' }}>%</Text>
+        <Text style={{ flex: 1, fontSize: 9, fontWeight: '800', ...mutedTextStyle(c, 0.4), textTransform: 'uppercase', letterSpacing: 0.7 }}>Course</Text>
+        <Text style={{ width: 44, textAlign: 'center', fontSize: 9, fontWeight: '800', ...mutedTextStyle(c, 0.4), textTransform: 'uppercase' }}>Students</Text>
+        <Text style={{ width: 60, textAlign: 'right', fontSize: 9, fontWeight: '800', ...mutedTextStyle(c, 0.4), textTransform: 'uppercase' }}>Revenue</Text>
+        <Text style={{ width: 32, textAlign: 'right', fontSize: 9, fontWeight: '800', ...mutedTextStyle(c, 0.4), textTransform: 'uppercase' }}>%</Text>
       </View>
       {rows.map(r => (
         <View key={r.course_id} style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 11, paddingHorizontal: 14, borderBottomWidth: 1, borderBottomColor: `${c.text}06` }}>
@@ -302,14 +302,14 @@ function TransactionRow({ row, onPress, c }: {
         <Text style={{ fontSize: 13, fontWeight: '700', color: c.text }} numberOfLines={1}>
           {txDisplayName(row)}
         </Text>
-        <Text style={{ fontSize: 11, color: c.text, opacity: 0.4 }} numberOfLines={1}>
+        <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.4) }} numberOfLines={1}>
           {row.course_title ?? '—'}{'  ·  '}{TX_LABEL[row.transaction_type] ?? row.transaction_type}
         </Text>
       </View>
 
       <View style={{ alignItems: 'flex-end', gap: 2 }}>
         <Text style={{ fontSize: 13, fontWeight: '800', color }}>{fmtEGP(row.amount)}</Text>
-        <Text style={{ fontSize: 10, color: c.text, opacity: 0.35 }}>{fmtDateShort(row.created_at)}</Text>
+        <Text style={{ fontSize: 10, ...mutedTextStyle(c, 0.35) }}>{fmtDateShort(row.created_at)}</Text>
       </View>
 
       {!isLegacy && <ChevronRight size={14} color={`${c.text}30`} style={{ marginLeft: 4 }} />}
@@ -336,7 +336,7 @@ function InfoRow({ icon, label, value, c }: {
         {icon}
       </View>
       <View style={{ flex: 1 }}>
-        <Text style={{ fontSize: 10, color: c.text, opacity: 0.4, fontWeight: '700',
+        <Text style={{ fontSize: 10, ...mutedTextStyle(c, 0.4), fontWeight: '700',
                        textTransform: 'uppercase', letterSpacing: 0.5 }}>{label}</Text>
         <Text style={{ fontSize: 13, fontWeight: '600', color: c.text }} numberOfLines={2}>{value}</Text>
       </View>
@@ -346,7 +346,7 @@ function InfoRow({ icon, label, value, c }: {
 
 function SectionLabel({ text, c }: { text: string; c: typeof neuColors.light }) {
   return (
-    <Text style={{ fontSize: 10, fontWeight: '800', color: c.text, opacity: 0.35,
+    <Text style={{ fontSize: 10, fontWeight: '800', ...mutedTextStyle(c, 0.35),
                    textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 8 }}>
       {text}
     </Text>
@@ -455,7 +455,7 @@ function StudentProfileModal({ tx, doctorId, onClose, onAction, c }: {
                 </View>
                 <View style={{ backgroundColor: `${c.text}0A`, borderRadius: 8,
                                paddingHorizontal: 8, paddingVertical: 3 }}>
-                  <Text style={{ fontSize: 10, fontWeight: '700', color: c.text, opacity: 0.5,
+                  <Text style={{ fontSize: 10, fontWeight: '700', ...mutedTextStyle(c, 0.5),
                                  textTransform: 'uppercase', letterSpacing: 0.5 }}>
                     {TX_LABEL[tx.transaction_type] ?? tx.transaction_type}
                   </Text>
@@ -529,7 +529,7 @@ function StudentProfileModal({ tx, doctorId, onClose, onAction, c }: {
                     {profile.enrollments.length === 0 ? (
                       <NeuCard radius={16} style={{ padding: layout.screenPx, alignItems: 'center', gap: 8, marginBottom: 16 }}>
                         <BookOpen size={22} color={`${c.text}30`} />
-                        <Text style={{ fontSize: 13, color: c.text, opacity: 0.3, textAlign: 'center' }}>
+                        <Text style={{ fontSize: 13, ...mutedTextStyle(c, 0.3), textAlign: 'center' }}>
                           No enrollments on your courses.
                         </Text>
                       </NeuCard>
@@ -555,14 +555,14 @@ function StudentProfileModal({ tx, doctorId, onClose, onAction, c }: {
                             <Text style={{ fontSize: 13, fontWeight: '800', color: c.primary }}>
                               {en.progress_percent}%
                             </Text>
-                            <Text style={{ fontSize: 9, color: c.text, opacity: 0.4 }}>Progress</Text>
+                            <Text style={{ fontSize: 9, ...mutedTextStyle(c, 0.4) }}>Progress</Text>
                           </View>
                           <View style={{ flex: 1, backgroundColor: `${c.text}06`, borderRadius: 10,
                                          padding: 10, alignItems: 'center' }}>
-                            <Text style={{ fontSize: 11, fontWeight: '700', color: c.text, opacity: 0.55 }}>
+                            <Text style={{ fontSize: 11, fontWeight: '700', ...mutedTextStyle(c, 0.55) }}>
                               {fmtDateShort(en.enrolled_at)}
                             </Text>
-                            <Text style={{ fontSize: 9, color: c.text, opacity: 0.4 }}>Enrolled</Text>
+                            <Text style={{ fontSize: 9, ...mutedTextStyle(c, 0.4) }}>Enrolled</Text>
                           </View>
                         </View>
 
@@ -620,7 +620,7 @@ function StudentProfileModal({ tx, doctorId, onClose, onAction, c }: {
                               <Pressable onPress={() => setConfirmRemove(null)}
                                 style={{ flex: 1, alignItems: 'center', justifyContent: 'center',
                                          backgroundColor: `${c.text}0D`, borderRadius: 10, paddingVertical: 9 }}>
-                                <Text style={{ fontSize: 12, fontWeight: '700', color: c.text, opacity: 0.6 }}>Cancel</Text>
+                                <Text style={{ fontSize: 12, fontWeight: '700', ...mutedTextStyle(c, 0.6) }}>Cancel</Text>
                               </Pressable>
                               <Pressable
                                 onPress={() => { setConfirmRemove(null); handleAction('remove', en.enrollment_id, en.course_id, en.course_title); }}
@@ -731,7 +731,7 @@ function PricingSettingsSection({
         </View>
         <View style={{ flex: 1 }}>
           <Text style={{ fontSize: 15, fontWeight: '700', color: c.text }}>Pricing & Admin Tools</Text>
-          <Text style={{ fontSize: 12, color: c.text, opacity: 0.4, marginTop: 2 }}>
+          <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.4), marginTop: 2 }}>
             {settings
               ? settings.doctor_global_price > 0
                 ? `Global: ${fmtEGPPlain(settings.doctor_global_price)} per enrollment`
@@ -750,7 +750,7 @@ function PricingSettingsSection({
             <>
               {/* ── Global earnings price ───────────────────────────── */}
               <View style={{ gap: 8 }}>
-                <Text style={{ fontSize: 10, fontWeight: '800', color: c.text, opacity: 0.4,
+                <Text style={{ fontSize: 10, fontWeight: '800', ...mutedTextStyle(c, 0.4),
                                textTransform: 'uppercase', letterSpacing: 0.8 }}>
                   Global Earnings Price
                 </Text>
@@ -794,7 +794,7 @@ function PricingSettingsSection({
                   <Text style={{ fontSize: 11, fontWeight: '700', color: c.primary }}>
                     Pricing Fallback Logic
                   </Text>
-                  <Text style={{ fontSize: 11, color: c.text, opacity: 0.5, lineHeight: 17 }}>
+                  <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.5), lineHeight: 17 }}>
                     {'1. Global Earnings Price (if set)'}
                     {'\n'}
                     {'2. Course Publish Price (automatic fallback)'}
@@ -806,7 +806,7 @@ function PricingSettingsSection({
 
               {/* ── Admin Tools ───────────────────────────────────────── */}
               <View style={{ borderTopWidth: 1, borderTopColor: `${c.text}08`, paddingTop: 16, gap: 10 }}>
-                <Text style={{ fontSize: 10, fontWeight: '800', color: c.text, opacity: 0.4,
+                <Text style={{ fontSize: 10, fontWeight: '800', ...mutedTextStyle(c, 0.4),
                                textTransform: 'uppercase', letterSpacing: 0.8 }}>
                   Admin Tools
                 </Text>
@@ -822,7 +822,7 @@ function PricingSettingsSection({
                   </View>
                   <View style={{ flex: 1 }}>
                     <Text style={{ fontSize: 13, fontWeight: '700', color: c.primary }}>Recalculate Earnings</Text>
-                    <Text style={{ fontSize: 11, color: c.text, opacity: 0.45, marginTop: 2 }}>
+                    <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.45), marginTop: 2 }}>
                       Fix inconsistencies without clearing history
                     </Text>
                   </View>
@@ -841,7 +841,7 @@ function PricingSettingsSection({
                   </View>
                   <View style={{ flex: 1 }}>
                     <Text style={{ fontSize: 13, fontWeight: '700', color: '#DC2626' }}>Reset Earnings</Text>
-                    <Text style={{ fontSize: 11, color: c.text, opacity: 0.45, marginTop: 2 }}>
+                    <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.45), marginTop: 2 }}>
                       Clear all history and rebuild from active students
                     </Text>
                   </View>
@@ -863,7 +863,7 @@ function PricingSettingsSection({
                         Reset Earnings?
                       </Text>
                     </View>
-                    <Text style={{ fontSize: 13, color: c.text, opacity: 0.6, lineHeight: 20, textAlign: 'center' }}>
+                    <Text style={{ fontSize: 13, ...mutedTextStyle(c, 0.6), lineHeight: 20, textAlign: 'center' }}>
                       This will permanently clear all earnings transactions and rebuild the dashboard from currently active enrolled students only.{'\n\n'}This action cannot be undone.
                     </Text>
                     <View style={{ flexDirection: 'row', gap: 10 }}>
@@ -1052,7 +1052,7 @@ export default function DoctorEarnings() {
             </NeuCard>
             <View style={{ alignItems: 'center', gap: 8 }}>
               <Text style={{ fontSize: 17, fontWeight: '800', color: c.text }}>This feature is currently unavailable.</Text>
-              <Text style={{ fontSize: 13, color: c.text, opacity: 0.4, textAlign: 'center', maxWidth: 260, lineHeight: 20 }}>
+              <Text style={{ fontSize: 13, ...mutedTextStyle(c, 0.4), textAlign: 'center', maxWidth: 260, lineHeight: 20 }}>
                 {flagBlockedKey ?
                   'The platform operator has temporarily disabled this feature. Your balances and history are safe and will reappear when it is re-enabled.' :
                   'The platform operator has temporarily disabled the earnings area. Your balances and history are safe and will reappear when it is re-enabled.'}
@@ -1078,8 +1078,8 @@ export default function DoctorEarnings() {
               <DollarSign size={32} color={`${c.text}30`} />
             </NeuCard>
             <View style={{ alignItems: 'center', gap: 8 }}>
-              <Text style={{ fontSize: 17, fontWeight: '800', color: c.text, opacity: 0.4 }}>Earnings System is Disabled</Text>
-              <Text style={{ fontSize: 13, color: c.text, opacity: 0.25, textAlign: 'center', maxWidth: 260, lineHeight: 20 }}>
+              <Text style={{ fontSize: 17, fontWeight: '800', ...mutedTextStyle(c, 0.4) }}>Earnings System is Disabled</Text>
+              <Text style={{ fontSize: 13, ...mutedTextStyle(c, 0.25), textAlign: 'center', maxWidth: 260, lineHeight: 20 }}>
                 Enable the Earnings System to start tracking course sales, revenue, and analytics.
               </Text>
             </View>
@@ -1099,7 +1099,7 @@ export default function DoctorEarnings() {
             <View style={{ width: 60, height: 60, borderRadius: 18, backgroundColor: `${c.primary}10`, alignItems: 'center', justifyContent: 'center' }}>
               <TrendingUp size={26} color={`${c.primary}55`} />
             </View>
-            <Text style={{ fontSize: 16, fontWeight: '700', color: c.text, opacity: 0.35 }}>No earnings yet.</Text>
+            <Text style={{ fontSize: 16, fontWeight: '700', ...mutedTextStyle(c, 0.35) }}>No earnings yet.</Text>
             <Text style={{ fontSize: 12, color: c.text, opacity: 0.22, textAlign: 'center', maxWidth: 240, lineHeight: 18 }}>
               Earnings appear here once students enroll. Set your revenue price in the Pricing Settings card above.
             </Text>
@@ -1139,7 +1139,7 @@ export default function DoctorEarnings() {
             <SL label="Recent Transactions" c={c} />
             <NeuCard radius={18} style={{ padding: 16, marginBottom: 4 }}>
               {data.transactions.length === 0 ? (
-                <Text style={{ fontSize: 13, color: c.text, opacity: 0.3, textAlign: 'center', paddingVertical: 20 }}>No transactions yet</Text>
+                <Text style={{ fontSize: 13, ...mutedTextStyle(c, 0.3), textAlign: 'center', paddingVertical: 20 }}>No transactions yet</Text>
               ) : (
                 data.transactions.map(row => (
                   <TransactionRow

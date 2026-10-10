@@ -13,7 +13,7 @@ import { SubscribeSheet, type SubscribeSheetContact } from '@/components/Subscri
 // ONE shared contact resolver — the SAME rule the course-details screen uses.
 import { resolveCourseContact } from '@/lib/subscribeContact';
 import { PageHeader } from '@/components/PageHeader';
-import { neuColors, useLayout, safeBottom } from '@/lib/neu';
+import { neuColors, useLayout, safeBottom, mutedTextStyle } from '@/lib/neu';
 import { NeuSearchBar } from '@/components/NeuInputRow';
 import type { RelativePathString } from 'expo-router';
 
@@ -207,13 +207,13 @@ function doctorOf(item: CourseItem): { id: string; full_name: string } | null {
 
       {/* Section label */}
       {!isSearching && (
-        <Text style={{ fontSize: 13, fontWeight: '700', color: c.text, opacity: 0.4,
+        <Text style={{ fontSize: 13, fontWeight: '700', ...mutedTextStyle(c, 0.4),
           textTransform: 'uppercase', letterSpacing: 1, marginBottom: 12 }}>
           Recently Published
         </Text>
       )}
       {isSearching && !searching && searchResults.length > 0 && (
-        <Text style={{ fontSize: 13, fontWeight: '700', color: c.text, opacity: 0.4,
+        <Text style={{ fontSize: 13, fontWeight: '700', ...mutedTextStyle(c, 0.4),
           textTransform: 'uppercase', letterSpacing: 1, marginBottom: 12 }}>
           {searchResults.length} result{searchResults.length !== 1 ? 's' : ''} found
         </Text>
@@ -229,10 +229,10 @@ function doctorOf(item: CourseItem): { id: string; full_name: string } | null {
         : (
           <>
             <BookOpen size={52} color={c.primary} opacity={0.2} style={{ marginBottom: 14 }} />
-            <Text style={{ fontSize: 17, fontWeight: '700', color: c.text, opacity: 0.45, textAlign: 'center' }}>
+            <Text style={{ fontSize: 17, fontWeight: '700', ...mutedTextStyle(c, 0.45), textAlign: 'center' }}>
               {isSearching ? 'No courses found' : 'No courses available'}
             </Text>
-            <Text style={{ fontSize: 13, color: c.text, opacity: 0.35, marginTop: 6, textAlign: 'center' }}>
+            <Text style={{ fontSize: 13, ...mutedTextStyle(c, 0.35), marginTop: 6, textAlign: 'center' }}>
               {isSearching
                 ? 'Try a different keyword or clear the search'
                 : 'Check back soon for new content'}

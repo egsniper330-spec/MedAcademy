@@ -69,7 +69,7 @@ import { beginFullscreenOrientation, releaseFullscreenOrientation } from '@/lib/
 import { useSecurityPlaybackStop } from '@/lib/useSecurityPlaybackStop';
 import { playerSessionMount, playerSessionUnmount } from '@/lib/vdoPlayerSession';
 import { getVideoPlaybackToken } from '@/lib/api';
-import { neuColors } from '@/lib/neu';
+import { neuColors, mutedTextStyle } from '@/lib/neu';
 import type { VdoCipherPlayerProps } from '@/components/VdoCipherPlayer';
 import { NativeWatermarkOverlay } from '@/components/NativeWatermarkOverlay';
 import { resolveWatermarkIdentity } from '@/lib/watermarkIdentity';
@@ -419,7 +419,7 @@ export function VdoCipherPlayerNativeAdapter({
     return (
       <View style={[INLINE_STYLE, { alignItems: 'center', justifyContent: 'center', gap: 10 }]}>
         <ActivityIndicator color={c.primary} size="large" />
-        <Text style={{ fontSize: 13, color: c.text, opacity: 0.5 }}>Loading player…</Text>
+        <Text style={{ fontSize: 13, ...mutedTextStyle(c, 0.5) }}>Loading player…</Text>
       </View>
     );
   }

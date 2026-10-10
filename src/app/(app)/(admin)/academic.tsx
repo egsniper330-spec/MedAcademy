@@ -17,7 +17,7 @@ import { NeuCard } from '@/components/NeuCard';
 import { NeuButton } from '@/components/NeuButton';
 import { ResponsiveModal } from '@/components/ResponsiveModal';
 import { useToast } from '@/components/Toast';
-import { neuColors, useLayout, safeBottom } from '@/lib/neu';
+import { neuColors, useLayout, safeBottom, mutedTextStyle } from '@/lib/neu';
 import { validateRequired, friendlyError } from '@/lib/validation';
 import { KeyboardAwareScrollView } from '@/components/KeyboardAwareScrollView';
 
@@ -45,7 +45,7 @@ function InputModal({
         </View>
       }
     >
-      <Text style={{ fontSize: 11, fontWeight: '700', color: c.text, opacity: 0.5, marginBottom: 8, textTransform: 'uppercase', letterSpacing: 0.8 }}>{label}</Text>
+      <Text style={{ fontSize: 11, fontWeight: '700', ...mutedTextStyle(c, 0.5), marginBottom: 8, textTransform: 'uppercase', letterSpacing: 0.8 }}>{label}</Text>
       <View style={inputStyle}>
         <TextInput
           value={val}
@@ -336,7 +336,7 @@ export default function AcademicManagement({ backTo }: { backTo?: string } = {})
               {!uniLoading && universities.length === 0 && (
                 <View style={{ alignItems: 'center', paddingVertical: 40 }}>
                   <Building2 size={40} color={c.primary} opacity={0.2} style={{ marginBottom: 10 }} />
-                  <Text style={{ color: c.text, opacity: 0.4 }}>No universities yet</Text>
+                  <Text style={{ ...mutedTextStyle(c, 0.4) }}>No universities yet</Text>
                 </View>
               )}
             </>
@@ -345,7 +345,7 @@ export default function AcademicManagement({ backTo }: { backTo?: string } = {})
           {/* ── FACULTIES TAB ────────────────────────────────────────────── */}
           {tab === 'faculties' && (
             <>
-              <Text style={{ fontSize: 13, color: c.text, opacity: 0.45, marginBottom: 14 }}>
+              <Text style={{ fontSize: 13, ...mutedTextStyle(c, 0.45), marginBottom: 14 }}>
                 Select a university to add or manage its faculties
               </Text>
               {uniLoading ? <ActivityIndicator color={c.primary} /> :
@@ -357,7 +357,7 @@ export default function AcademicManagement({ backTo }: { backTo?: string } = {})
                       <Pressable onPress={() => toggleUniExpand(uni.id)} style={{ flexDirection: 'row', alignItems: 'center', padding: 14 }}>
                         <Building2 size={18} color={c.primary} style={{ marginRight: 10 }} />
                         <Text style={{ flex: 1, fontSize: 14, fontWeight: '700', color: c.text }}>{uni.name}</Text>
-                        <Text style={{ fontSize: 12, color: c.text, opacity: 0.4, marginRight: 8 }}>{uniFacs.length} faculties</Text>
+                        <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.4), marginRight: 8 }}>{uniFacs.length} faculties</Text>
                         {expanded ? <ChevronDown size={18} color={c.text} opacity={0.4} /> : <ChevronRight size={18} color={c.text} opacity={0.4} />}
                       </Pressable>
                       {expanded && (
@@ -397,7 +397,7 @@ export default function AcademicManagement({ backTo }: { backTo?: string } = {})
           {/* ── LEVELS TAB ───────────────────────────────────────────────── */}
           {tab === 'levels' && (
             <>
-              <Text style={{ fontSize: 13, color: c.text, opacity: 0.45, marginBottom: 14 }}>
+              <Text style={{ fontSize: 13, ...mutedTextStyle(c, 0.45), marginBottom: 14 }}>
                 Expand a faculty to manage its academic levels
               </Text>
               {facLoading ? <ActivityIndicator color={c.primary} /> :
@@ -410,17 +410,17 @@ export default function AcademicManagement({ backTo }: { backTo?: string } = {})
                         <GraduationCap size={18} color={c.primary} style={{ marginRight: 10 }} />
                         <View style={{ flex: 1 }}>
                           <Text style={{ fontSize: 14, fontWeight: '700', color: c.text }}>{fac.name}</Text>
-                          <Text style={{ fontSize: 11, color: c.text, opacity: 0.4, marginTop: 1 }}>{uniById[fac.university_id]?.name ?? ''}</Text>
+                          <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.4), marginTop: 1 }}>{uniById[fac.university_id]?.name ?? ''}</Text>
                         </View>
                         {expanded ? <ChevronDown size={18} color={c.text} opacity={0.4} /> : <ChevronRight size={18} color={c.text} opacity={0.4} />}
                       </Pressable>
                       {expanded && (
                         <View style={{ borderTopWidth: 1, borderTopColor: `${c.text}08` }}>
                           {facLevels.length === 0
-                            ? <Text style={{ color: c.text, opacity: 0.35, fontSize: 13, textAlign: 'center', paddingVertical: 12 }}>No levels — tap + to add</Text>
+                            ? <Text style={{ ...mutedTextStyle(c, 0.35), fontSize: 13, textAlign: 'center', paddingVertical: 12 }}>No levels — tap + to add</Text>
                             : facLevels.map((lvl, idx) => (
                               <View key={lvl.id} style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 14, paddingVertical: 9, borderBottomWidth: 1, borderBottomColor: `${c.text}05` }}>
-                                <Text style={{ fontSize: 12, color: c.text, opacity: 0.35, width: 24 }}>{idx + 1}</Text>
+                                <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.35), width: 24 }}>{idx + 1}</Text>
                                 <Text style={{ flex: 1, fontSize: 13, fontWeight: '600', color: c.text }}>{lvl.name}</Text>
                                 <Text style={{ fontSize: 11, color: lvl.is_active ? '#16A34A' : '#DC2626', marginRight: 8 }}>{lvl.is_active ? '●' : '○'}</Text>
                                 <View style={{ flexDirection: 'row', gap: 4 }}>

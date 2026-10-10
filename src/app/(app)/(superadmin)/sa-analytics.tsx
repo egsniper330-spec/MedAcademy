@@ -18,7 +18,7 @@ import {
 import { PageHeader } from '@/components/PageHeader';
 import { NeuCard } from '@/components/NeuCard';
 import { StatCard } from '@/components/StatCard';
-import { neuColors, useLayout, safeBottom } from '@/lib/neu';
+import { neuColors, useLayout, safeBottom, mutedTextStyle } from '@/lib/neu';
 import { getSuperAdminStats } from '@/lib/api';
 import Bell from '@/components/Bell';
 
@@ -41,7 +41,7 @@ function AnalyticsNavItem({
         </View>
         <View style={{ flex: 1 }}>
           <Text style={{ fontSize: 14, fontWeight: '700', color: c.text }}>{label}</Text>
-          <Text style={{ fontSize: 12, color: c.text, opacity: 0.5, marginTop: 1 }}>{description}</Text>
+          <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.5), marginTop: 1 }}>{description}</Text>
         </View>
         <ChevronRight size={16} color={`${c.text}40`} />
       </NeuCard>
@@ -106,7 +106,7 @@ export default function SAAnalytics() {
           <ActivityIndicator color={c.primary} style={{ marginBottom: 20 }} />
         ) : stats && (
           <>
-            <Text style={{ fontSize: 11, fontWeight: '800', color: c.text, opacity: 0.4, textTransform: 'uppercase', letterSpacing: 1.2, marginBottom: 10 }}>
+            <Text style={{ fontSize: 11, fontWeight: '800', ...mutedTextStyle(c, 0.4), textTransform: 'uppercase', letterSpacing: 1.2, marginBottom: 10 }}>
               Live Counters
             </Text>
             <View style={{ flexDirection: 'row', flexWrap: 'wrap', marginBottom: 4 }}>
@@ -128,7 +128,7 @@ export default function SAAnalytics() {
                 ].map(s => (
                   <View key={s.label} style={{ alignItems: 'center' }}>
                     <Text style={{ fontSize: 28, fontWeight: '900', color: s.color }}>{s.value}</Text>
-                    <Text style={{ fontSize: 12, color: c.text, opacity: 0.5, marginTop: 2 }}>{s.label}</Text>
+                    <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.5), marginTop: 2 }}>{s.label}</Text>
                   </View>
                 ))}
               </View>
@@ -139,7 +139,7 @@ export default function SAAnalytics() {
         {/* Navigation sections */}
         {sections.map(section => (
           <View key={section.title} style={{ marginBottom: 16 }}>
-            <Text style={{ fontSize: 11, fontWeight: '800', color: c.text, opacity: 0.4, textTransform: 'uppercase', letterSpacing: 1.2, marginBottom: 10 }}>
+            <Text style={{ fontSize: 11, fontWeight: '800', ...mutedTextStyle(c, 0.4), textTransform: 'uppercase', letterSpacing: 1.2, marginBottom: 10 }}>
               {section.title}
             </Text>
             {section.items.map(item => (

@@ -24,7 +24,7 @@ import { NeuCard } from '@/components/NeuCard';
 import { NeuButton } from '@/components/NeuButton';
 import { ResponsiveModal } from '@/components/ResponsiveModal';
 import { useToast } from '@/components/Toast';
-import { neuColors, useLayout, safeBottom } from '@/lib/neu';
+import { neuColors, useLayout, safeBottom, mutedTextStyle } from '@/lib/neu';
 import {
   getRedeemCodes, createRedeemCode, revokeRedeemCode, archiveRedeemCode, getDoctors,
   type RedeemCode,
@@ -263,7 +263,7 @@ export default function RedeemCodesScreen() {
                         </Pressable>
                       )}
                       {inactive && (
-                        <Text style={{ fontSize: 10, fontWeight: '700', color: c.text, opacity: 0.45, letterSpacing: 0.6 }}>
+                        <Text style={{ fontSize: 10, fontWeight: '700', ...mutedTextStyle(c, 0.45), letterSpacing: 0.6 }}>
                           INACTIVE
                         </Text>
                       )}
@@ -275,21 +275,21 @@ export default function RedeemCodesScreen() {
                       </View>
                     </View>
                     {row.assigned_doctor_name && (
-                      <Text style={{ fontSize: 11, color: c.text, opacity: 0.55, marginTop: 4 }}>
+                      <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.55), marginTop: 4 }}>
                         For: {row.assigned_doctor_name} ({row.assigned_doctor_public_id ?? '—'})
                       </Text>
                     )}
                     {row.status === 'redeemed' && (
-                      <Text style={{ fontSize: 11, color: c.text, opacity: 0.55, marginTop: 4 }}>
+                      <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.55), marginTop: 4 }}>
                         Redeemed by {row.redeemed_by_name ?? '—'} · {fmt(row.redeemed_at)}
                       </Text>
                     )}
                     {row.expires_at && row.status !== 'redeemed' && (
-                      <Text style={{ fontSize: 11, color: c.text, opacity: 0.45, marginTop: 4 }}>
+                      <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.45), marginTop: 4 }}>
                         Expires: {fmt(row.expires_at)}
                       </Text>
                     )}
-                    <Text style={{ fontSize: 10, color: c.text, opacity: 0.35, marginTop: 4 }}>Created: {fmt(row.created_at)}</Text>
+                    <Text style={{ fontSize: 10, ...mutedTextStyle(c, 0.35), marginTop: 4 }}>Created: {fmt(row.created_at)}</Text>
                   </View>
                   {row.status === 'unused' && (
                     <Pressable
@@ -321,7 +321,7 @@ export default function RedeemCodesScreen() {
           {!loading && rows.length === 0 && (
             <NeuCard style={{ padding: 40, alignItems: 'center' }}>
               <Ticket size={38} color={c.primary} opacity={0.2} />
-              <Text style={{ color: c.text, opacity: 0.4, marginTop: 16 }}>No redeem codes found</Text>
+              <Text style={{ ...mutedTextStyle(c, 0.4), marginTop: 16 }}>No redeem codes found</Text>
             </NeuCard>
           )}
         </View>
@@ -340,7 +340,7 @@ export default function RedeemCodesScreen() {
           </View>
         }
       >
-        <Text style={{ fontSize: 11, fontWeight: '700', color: c.text, opacity: 0.5, marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.8 }}>
+        <Text style={{ fontSize: 11, fontWeight: '700', ...mutedTextStyle(c, 0.5), marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.8 }}>
           Credits per Code
         </Text>
         <TextInput
@@ -349,7 +349,7 @@ export default function RedeemCodesScreen() {
           keyboardType="number-pad" style={{ ...inp, marginBottom: 14 }}
         />
 
-        <Text style={{ fontSize: 11, fontWeight: '700', color: c.text, opacity: 0.5, marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.8 }}>
+        <Text style={{ fontSize: 11, fontWeight: '700', ...mutedTextStyle(c, 0.5), marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.8 }}>
           Number of Codes
         </Text>
         <TextInput
@@ -364,13 +364,13 @@ export default function RedeemCodesScreen() {
             <Text style={{ fontSize: 13, fontWeight: '700', color: c.text }}>
               {qtyNum} code{qtyNum > 1 ? 's' : ''} × {amtNum} credits each
             </Text>
-            <Text style={{ fontSize: 12, color: c.text, opacity: 0.6, marginTop: 2 }}>
+            <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.6), marginTop: 2 }}>
               Total: {qtyNum * amtNum} credits · {qtyNum > 1 ? `${qtyNum} separate redeem codes` : '1 redeem code'}
             </Text>
           </NeuCard>
         )}
 
-        <Text style={{ fontSize: 11, fontWeight: '700', color: c.text, opacity: 0.5, marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.8 }}>
+        <Text style={{ fontSize: 11, fontWeight: '700', ...mutedTextStyle(c, 0.5), marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.8 }}>
           Expires (optional)
         </Text>
         <TextInput
@@ -379,7 +379,7 @@ export default function RedeemCodesScreen() {
           autoCapitalize="none" style={{ ...inp, marginBottom: 14 }}
         />
 
-        <Text style={{ fontSize: 11, fontWeight: '700', color: c.text, opacity: 0.5, marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.8 }}>
+        <Text style={{ fontSize: 11, fontWeight: '700', ...mutedTextStyle(c, 0.5), marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.8 }}>
           Assign to Doctor (optional)
         </Text>
         {selectedDoctor ? (
@@ -409,12 +409,12 @@ export default function RedeemCodesScreen() {
                 </Pressable>
               ))}
               {filteredDoctors.length === 0 && (
-                <Text style={{ fontSize: 12, color: c.text, opacity: 0.4, paddingVertical: 10 }}>No doctors found</Text>
+                <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.4), paddingVertical: 10 }}>No doctors found</Text>
               )}
             </ScrollView>
           </>
         )}
-        <Text style={{ fontSize: 11, color: c.text, opacity: 0.4 }}>
+        <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.4) }}>
           Leave empty for a code any doctor can redeem.
         </Text>
       </ResponsiveModal>
@@ -435,17 +435,17 @@ export default function RedeemCodesScreen() {
                 Each: {createdCodes[0].credit_amount} credits
               </Text>
               {createdCodes.length > 1 && (
-                <Text style={{ fontSize: 12, color: c.text, opacity: 0.6, marginTop: 2 }}>
+                <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.6), marginTop: 2 }}>
                   Total potential: {createdCodes.length * createdCodes[0].credit_amount} credits
                 </Text>
               )}
               {createdCodes[0].assigned_doctor_name && (
-                <Text style={{ fontSize: 12, color: c.text, opacity: 0.6, marginTop: 2 }}>
+                <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.6), marginTop: 2 }}>
                   Assigned: {createdCodes[0].assigned_doctor_name}
                 </Text>
               )}
               {createdCodes[0].expires_at && (
-                <Text style={{ fontSize: 12, color: c.text, opacity: 0.6, marginTop: 2 }}>
+                <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.6), marginTop: 2 }}>
                   Expires: {fmt(createdCodes[0].expires_at)}
                 </Text>
               )}
@@ -457,7 +457,7 @@ export default function RedeemCodesScreen() {
                   style={{ flexDirection: 'row', alignItems: 'center', gap: 10,
                     paddingVertical: 9, borderBottomWidth: 1, borderBottomColor: `${c.text}0A` }}
                 >
-                  <Text style={{ fontSize: 11, color: c.text, opacity: 0.35, width: 20 }}>
+                  <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.35), width: 20 }}>
                     {idx + 1}
                   </Text>
                   <Text selectable style={{ flex: 1, minWidth: 0, fontSize: 14, fontWeight: '800', color: c.primary, letterSpacing: 0.5 }}>

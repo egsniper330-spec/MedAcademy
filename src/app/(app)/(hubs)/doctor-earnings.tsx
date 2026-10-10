@@ -23,7 +23,7 @@ import { NeuCard } from '@/components/NeuCard';
 import { NeuButton } from '@/components/NeuButton';
 import { PageHeader } from '@/components/PageHeader';
 import { ResponsiveModal } from '@/components/ResponsiveModal';
-import { neuColors, useLayout, safeBottom } from '@/lib/neu';
+import { neuColors, useLayout, safeBottom, mutedTextStyle } from '@/lib/neu';
 import { useToast } from '@/components/Toast';
 import {
   getAdminDoctorEarningsDashboard,
@@ -224,7 +224,7 @@ export default function DoctorEarningsScreen() {
                     : <ToggleLeft size={28} color={`${c.text}40`} />}
                   <View style={{ flex: 1 }}>
                     <Text style={{ fontSize: 14, fontWeight: '700', color: c.text }}>Custom Pricing</Text>
-                    <Text style={{ fontSize: 12, color: c.text, opacity: 0.5 }}>
+                    <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.5) }}>
                       {dashboard.custom_pricing_enabled
                         ? 'Doctor manages pricing independently'
                         : 'Using platform pricing (Super Admin controls)'}
@@ -261,7 +261,7 @@ export default function DoctorEarningsScreen() {
                           <Text style={{ fontSize: 12, fontWeight: '700', color: dashboard.earnings_mode === mode ? c.primary : `${c.text}70` }}>
                             {mode === 'credit' ? 'Credit-Based' : 'Course-Based'}
                           </Text>
-                          <Text style={{ fontSize: 10, color: c.text, opacity: 0.4 }}>
+                          <Text style={{ fontSize: 10, ...mutedTextStyle(c, 0.4) }}>
                             {mode === 'credit' ? 'Credits × Price' : 'Per-course price'}
                           </Text>
                         </View>
@@ -277,7 +277,7 @@ export default function DoctorEarningsScreen() {
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
                       <DollarSign size={18} color="#7C3AED" />
                       <View>
-                        <Text style={{ fontSize: 11, color: c.text, opacity: 0.45 }}>Credit Price</Text>
+                        <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.45) }}>Credit Price</Text>
                         <Text style={{ fontSize: 20, fontWeight: '900', color: '#7C3AED' }}>
                           EGP {dashboard.credit_selling_price}
                         </Text>
@@ -292,7 +292,7 @@ export default function DoctorEarningsScreen() {
               </NeuCard>
 
               {/* ── Earnings KPIs ── */}
-              <Text style={{ fontSize: 11, fontWeight: '800', color: c.text, opacity: 0.4, letterSpacing: 0.5 }}>
+              <Text style={{ fontSize: 11, fontWeight: '800', ...mutedTextStyle(c, 0.4), letterSpacing: 0.5 }}>
                 EARNINGS OVERVIEW
               </Text>
 
@@ -302,11 +302,11 @@ export default function DoctorEarningsScreen() {
                   alignItems: 'center', justifyContent: 'center', marginBottom: 4 }}>
                   <TrendingUp size={26} color="#16A34A" />
                 </View>
-                <Text style={{ fontSize: 11, color: c.text, opacity: 0.45 }}>Total Earnings</Text>
+                <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.45) }}>Total Earnings</Text>
                 <Text style={{ fontSize: 36, fontWeight: '900', color: '#16A34A' }}>
                   {fmt(dashboard.total_earnings)}
                 </Text>
-                <Text style={{ fontSize: 11, color: c.text, opacity: 0.3 }}>
+                <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.3) }}>
                   {dashboard.custom_pricing_enabled
                     ? (dashboard.earnings_mode === 'credit' ? 'Credit-based pricing' : 'Course-based pricing')
                     : 'Platform pricing'}
@@ -317,14 +317,14 @@ export default function DoctorEarningsScreen() {
               <View style={{ flexDirection: 'row', gap: 10 }}>
                 <NeuCard style={{ flex: 1, padding: 16, alignItems: 'center', gap: 4 }}>
                   <Calendar size={18} color={c.primary} />
-                  <Text style={{ fontSize: 11, color: c.text, opacity: 0.45 }}>This Month</Text>
+                  <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.45) }}>This Month</Text>
                   <Text style={{ fontSize: 20, fontWeight: '800', color: c.primary }}>
                     {fmt(dashboard.monthly_earnings)}
                   </Text>
                 </NeuCard>
                 <NeuCard style={{ flex: 1, padding: 16, alignItems: 'center', gap: 4 }}>
                   <BarChart3 size={18} color="#D97706" />
-                  <Text style={{ fontSize: 11, color: c.text, opacity: 0.45 }}>Today</Text>
+                  <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.45) }}>Today</Text>
                   <Text style={{ fontSize: 20, fontWeight: '800', color: '#D97706' }}>
                     {fmt(dashboard.today_earnings)}
                   </Text>
@@ -342,7 +342,7 @@ export default function DoctorEarningsScreen() {
                   return (
                     <NeuCard key={k.label} style={{ flexBasis: '47%', padding: 14, gap: 6 }}>
                       <Icon size={16} color={k.color} />
-                      <Text style={{ fontSize: 11, color: c.text, opacity: 0.45 }}>{k.label}</Text>
+                      <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.45) }}>{k.label}</Text>
                       <Text style={{ fontSize: 20, fontWeight: '900', color: k.color }}>{k.value}</Text>
                     </NeuCard>
                   );
@@ -351,7 +351,7 @@ export default function DoctorEarningsScreen() {
 
               {/* ── Per-Course Breakdown ── */}
               <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 4 }}>
-                <Text style={{ fontSize: 11, fontWeight: '800', color: c.text, opacity: 0.4, letterSpacing: 0.5 }}>
+                <Text style={{ fontSize: 11, fontWeight: '800', ...mutedTextStyle(c, 0.4), letterSpacing: 0.5 }}>
                   PER COURSE EARNINGS ({dashboard.per_course.length})
                 </Text>
               </View>
@@ -359,7 +359,7 @@ export default function DoctorEarningsScreen() {
               {dashboard.per_course.length === 0 ? (
                 <NeuCard style={{ padding: 40, alignItems: 'center', gap: 10 }}>
                   <BookOpen size={36} color={c.text} opacity={0.15} />
-                  <Text style={{ color: c.text, opacity: 0.4, fontSize: 14 }}>No courses yet</Text>
+                  <Text style={{ ...mutedTextStyle(c, 0.4), fontSize: 14 }}>No courses yet</Text>
                 </NeuCard>
               ) : (
                 dashboard.per_course.map((course: DoctorEarningsCourse, idx: number) => (
@@ -370,7 +370,7 @@ export default function DoctorEarningsScreen() {
                           {course.course_title}
                         </Text>
                         {dashboard.custom_pricing_enabled && dashboard.earnings_mode === 'course' && (
-                          <Text style={{ fontSize: 12, color: c.text, opacity: 0.45, marginTop: 2 }}>
+                          <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.45), marginTop: 2 }}>
                             Price: EGP {course.current_price}
                           </Text>
                         )}
@@ -399,7 +399,7 @@ export default function DoctorEarningsScreen() {
                           borderRadius: 10, padding: 10, alignItems: 'center',
                         }}>
                           <Text style={{ fontSize: 15, fontWeight: '800', color: s.color }}>{s.value}</Text>
-                          <Text style={{ fontSize: 10, color: c.text, opacity: 0.4, marginTop: 2 }}>{s.label}</Text>
+                          <Text style={{ fontSize: 10, ...mutedTextStyle(c, 0.4), marginTop: 2 }}>{s.label}</Text>
                         </View>
                       ))}
                     </View>
@@ -408,7 +408,7 @@ export default function DoctorEarningsScreen() {
               )}
 
               {/* ── Grand Totals ── */}
-              <Text style={{ fontSize: 11, fontWeight: '800', color: c.text, opacity: 0.4, letterSpacing: 0.5 }}>
+              <Text style={{ fontSize: 11, fontWeight: '800', ...mutedTextStyle(c, 0.4), letterSpacing: 0.5 }}>
                 GRAND TOTAL
               </Text>
               <NeuCard style={{ padding: 18, gap: 14 }}>
@@ -441,7 +441,7 @@ export default function DoctorEarningsScreen() {
                   <History size={18} color={c.text} opacity={0.5} />
                   <View>
                     <Text style={{ fontSize: 14, fontWeight: '600', color: c.text }}>Pricing Change History</Text>
-                    <Text style={{ fontSize: 12, color: c.text, opacity: 0.4 }}>{history.length} records</Text>
+                    <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.4) }}>{history.length} records</Text>
                   </View>
                 </View>
                 <ChevronRight size={16} color={`${c.text}40`} />
@@ -468,7 +468,7 @@ export default function DoctorEarningsScreen() {
         <View style={{ gap: 16 }}>
           {/* Toggle */}
           <View style={{ gap: 8 }}>
-            <Text style={{ fontSize: 12, color: c.text, opacity: 0.5 }}>Custom Pricing</Text>
+            <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.5) }}>Custom Pricing</Text>
             <View style={{ flexDirection: 'row', gap: 8 }}>
               {[
                 { val: false, label: 'OFF — Platform Price' },
@@ -497,7 +497,7 @@ export default function DoctorEarningsScreen() {
           {/* Mode (only if custom ON) */}
           {draftEnabled && (
             <View style={{ gap: 8 }}>
-              <Text style={{ fontSize: 12, color: c.text, opacity: 0.5 }}>Earnings Mode</Text>
+              <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.5) }}>Earnings Mode</Text>
               {[
                 { val: 'credit' as const, label: 'Credit-Based', desc: 'Credits Used × Credit Price' },
                 { val: 'course' as const, label: 'Course-Based', desc: 'Each course has its own price' },
@@ -521,7 +521,7 @@ export default function DoctorEarningsScreen() {
                     <Text style={{ fontSize: 14, fontWeight: '700', color: draftMode === opt.val ? c.primary : c.text }}>
                       {opt.label}
                     </Text>
-                    <Text style={{ fontSize: 11, color: c.text, opacity: 0.4 }}>{opt.desc}</Text>
+                    <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.4) }}>{opt.desc}</Text>
                   </View>
                 </Pressable>
               ))}
@@ -530,7 +530,7 @@ export default function DoctorEarningsScreen() {
 
           {!draftEnabled && (
             <View style={{ backgroundColor: `${c.text}08`, borderRadius: 12, padding: 14 }}>
-              <Text style={{ fontSize: 12, color: c.text, opacity: 0.5, lineHeight: 18 }}>
+              <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.5), lineHeight: 18 }}>
                 {"When OFF, earnings are calculated using the Super Admin's platform credit price. The doctor cannot change their own pricing."}
               </Text>
             </View>
@@ -553,13 +553,13 @@ export default function DoctorEarningsScreen() {
       >
         <View style={{ gap: 14 }}>
           <View style={{ backgroundColor: '#7C3AED0D', borderRadius: 14, padding: 14 }}>
-            <Text style={{ fontSize: 11, color: c.text, opacity: 0.45 }}>Current</Text>
+            <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.45) }}>Current</Text>
             <Text style={{ fontSize: 24, fontWeight: '900', color: '#7C3AED' }}>
               EGP {dashboard?.credit_selling_price ?? 0}
             </Text>
           </View>
           <View>
-            <Text style={{ fontSize: 12, color: c.text, opacity: 0.5, marginBottom: 8 }}>New Price (EGP)</Text>
+            <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.5), marginBottom: 8 }}>New Price (EGP)</Text>
             <TextInput
               value={creditInput}
               onChangeText={setCreditInput}
@@ -568,7 +568,7 @@ export default function DoctorEarningsScreen() {
               keyboardType="decimal-pad"
               style={[inp, { minWidth: 0 }]}
             />
-            <Text style={{ fontSize: 11, color: c.text, opacity: 0.3, marginTop: 8, lineHeight: 16 }}>
+            <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.3), marginTop: 8, lineHeight: 16 }}>
               Earnings = Credits Used × this price.{'\n'}
               Previous earnings are NOT recalculated.
             </Text>
@@ -591,13 +591,13 @@ export default function DoctorEarningsScreen() {
       >
         <View style={{ gap: 14 }}>
           <View style={{ backgroundColor: `${c.primary}0D`, borderRadius: 14, padding: 14 }}>
-            <Text style={{ fontSize: 11, color: c.text, opacity: 0.45 }}>Current Price</Text>
+            <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.45) }}>Current Price</Text>
             <Text style={{ fontSize: 24, fontWeight: '900', color: c.primary }}>
               EGP {editCourse?.current_price ?? 0}
             </Text>
           </View>
           <View>
-            <Text style={{ fontSize: 12, color: c.text, opacity: 0.5, marginBottom: 8 }}>New Price (EGP)</Text>
+            <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.5), marginBottom: 8 }}>New Price (EGP)</Text>
             <TextInput
               value={courseInput}
               onChangeText={setCourseInput}
@@ -606,7 +606,7 @@ export default function DoctorEarningsScreen() {
               keyboardType="decimal-pad"
               style={[inp, { minWidth: 0 }]}
             />
-            <Text style={{ fontSize: 11, color: c.text, opacity: 0.3, marginTop: 8, lineHeight: 16 }}>
+            <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.3), marginTop: 8, lineHeight: 16 }}>
               Previous enrollments keep their original price.{'\n'}
               Only future enrollments use the new price.
             </Text>
@@ -625,7 +625,7 @@ export default function DoctorEarningsScreen() {
           {history.length === 0 ? (
             <View style={{ alignItems: 'center', paddingVertical: 40 }}>
               <History size={36} color={c.text} opacity={0.15} />
-              <Text style={{ color: c.text, opacity: 0.4, marginTop: 12 }}>No changes recorded yet</Text>
+              <Text style={{ ...mutedTextStyle(c, 0.4), marginTop: 12 }}>No changes recorded yet</Text>
             </View>
           ) : (
             <View style={{ gap: 8 }}>
@@ -635,26 +635,26 @@ export default function DoctorEarningsScreen() {
                     <Text style={{ fontSize: 13, fontWeight: '700', color: c.text }}>
                       {fieldLabel(row.field_name)}
                     </Text>
-                    <Text style={{ fontSize: 10, color: c.text, opacity: 0.35 }}>
+                    <Text style={{ fontSize: 10, ...mutedTextStyle(c, 0.35) }}>
                       {fmtDate(row.created_at)}
                     </Text>
                   </View>
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
                     <View style={{ flex: 1, backgroundColor: '#DC262610', borderRadius: 8, padding: 8 }}>
-                      <Text style={{ fontSize: 10, color: c.text, opacity: 0.4 }}>Old</Text>
+                      <Text style={{ fontSize: 10, ...mutedTextStyle(c, 0.4) }}>Old</Text>
                       <Text style={{ fontSize: 13, fontWeight: '700', color: '#DC2626' }}>
                         {row.old_value ?? '—'}
                       </Text>
                     </View>
                     <ChevronRight size={14} color={`${c.text}30`} />
                     <View style={{ flex: 1, backgroundColor: '#16A34A10', borderRadius: 8, padding: 8 }}>
-                      <Text style={{ fontSize: 10, color: c.text, opacity: 0.4 }}>New</Text>
+                      <Text style={{ fontSize: 10, ...mutedTextStyle(c, 0.4) }}>New</Text>
                       <Text style={{ fontSize: 13, fontWeight: '700', color: '#16A34A' }}>
                         {row.new_value ?? '—'}
                       </Text>
                     </View>
                   </View>
-                  <Text style={{ fontSize: 11, color: c.text, opacity: 0.35 }}>
+                  <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.35) }}>
                     Changed by: {row.changer_name ?? 'Unknown'}
                   </Text>
                 </NeuCard>

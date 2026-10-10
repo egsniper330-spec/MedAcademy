@@ -13,7 +13,7 @@
 import React from 'react';
 import { View, Text, useColorScheme } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { neuColors, useNeuSpacing } from '@/lib/neu';
+import { neuColors, mutedTextStyle, useNeuSpacing } from '@/lib/neu';
 import { spacing, typography, safeTop, safeLeft, safeRight } from '@/lib/ds';
 import HamburgerButton from '@/components/HamburgerButton';
 
@@ -53,11 +53,10 @@ export function DashboardHeader({ roleLabel, greeting, rightActions }: Dashboard
       <View style={{ flex: 1, marginLeft: spacing.sm + spacing.xs }}>
         {!!roleLabel && (
           <Text
-            style={{
-              ...typography.overline,
-              color: c.text,
-              opacity: 0.45,
-            }}
+            style={[
+              typography.overline,
+              mutedTextStyle(c, 0.45),
+            ]}
             numberOfLines={1}
           >
             {roleLabel}

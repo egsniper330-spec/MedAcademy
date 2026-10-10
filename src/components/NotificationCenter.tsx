@@ -17,7 +17,7 @@ import {
   Bell, Upload, Pause, Play, CheckCircle, XCircle, AlertTriangle,
   Clock, Loader, Film, X, Trash2,
 } from 'lucide-react-native';
-import { neuColors, neuFlatStyle, neuPressedStyle } from '@/lib/neu';
+import { neuColors, neuFlatStyle, neuPressedStyle, mutedTextStyle } from '@/lib/neu';
 import { PortalOverlay } from '@/components/PortalOverlay';
 import {
   useUploadNotificationStore,
@@ -83,12 +83,12 @@ function NotifRow({ item, isDark }: { item: UploadNotification; isDark: boolean 
               }} />
             )}
           </View>
-          <Text style={{ fontSize: 11, color: c.text, opacity: 0.55 }} numberOfLines={1}>
+          <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.55) }} numberOfLines={1}>
             {item.fileName}
           </Text>
         </View>
 
-        <Text style={{ fontSize: 10, color: c.text, opacity: 0.4 }}>
+        <Text style={{ fontSize: 10, ...mutedTextStyle(c, 0.4) }}>
           {relativeTime(item.timestamp)}
         </Text>
       </View>
@@ -114,7 +114,7 @@ function NotifRow({ item, isDark }: { item: UploadNotification; isDark: boolean 
 
       {/* Message */}
       {item.message ? (
-        <Text style={{ fontSize: 11, color: c.text, opacity: 0.65, lineHeight: 16 }}>
+        <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.65), lineHeight: 16 }}>
           {item.message}
         </Text>
       ) : null}
@@ -203,7 +203,7 @@ function NotificationPanel({
             <Text style={{ fontSize: 15, fontWeight: '800', color: c.text }}>
               Notifications
             </Text>
-            <Text style={{ fontSize: 11, color: c.text, opacity: 0.45, marginTop: 1 }}>
+            <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.45), marginTop: 1 }}>
               {notifications.length === 0
                 ? 'No notifications yet'
                 : `${notifications.length} upload event${notifications.length !== 1 ? 's' : ''}`}
@@ -239,10 +239,10 @@ function NotificationPanel({
             }}>
               <Film size={26} color={`${c.text}30`} />
             </View>
-            <Text style={{ fontSize: 13, color: c.text, opacity: 0.4, fontWeight: '600' }}>
+            <Text style={{ fontSize: 13, ...mutedTextStyle(c, 0.4), fontWeight: '600' }}>
               No upload notifications yet
             </Text>
-            <Text style={{ fontSize: 11, color: c.text, opacity: 0.3, textAlign: 'center', paddingHorizontal: 32 }}>
+            <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.3), textAlign: 'center', paddingHorizontal: 32 }}>
               Upload activity will appear here
             </Text>
           </View>

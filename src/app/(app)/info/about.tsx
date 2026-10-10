@@ -10,7 +10,7 @@ import { PageHeader } from '@/components/PageHeader';
 import { NeuCard } from '@/components/NeuCard';
 import { useCmsSections } from '@/lib/cmsContent';
 import { BrandLogo } from '@/components/BrandLogo';
-import { neuColors, useLayout } from '@/lib/neu';
+import { neuColors, useLayout, mutedTextStyle } from '@/lib/neu';
 import { useEntranceAnim } from '@/lib/motion';
 import { Stethoscope, BookOpen, ShieldCheck, Zap } from 'lucide-react-native';
 import { useBranding } from '@/lib/branding';
@@ -167,7 +167,7 @@ export default function AboutPage() {
       )}
 
       {/* Pillars */}
-      <Text style={{ fontSize: layout.captionSize, fontWeight: '700', color: c.text, opacity: 0.4, textTransform: 'uppercase', letterSpacing: 1.2, marginBottom: layout.pad.md }}>
+      <Text style={{ fontSize: layout.captionSize, fontWeight: '700', ...mutedTextStyle(c, 0.4), textTransform: 'uppercase', letterSpacing: 1.2, marginBottom: layout.pad.md }}>
         What We Stand For
       </Text>
       <View style={{ gap: layout.itemGap, marginBottom: layout.sectionGap }}>
@@ -183,7 +183,7 @@ export default function AboutPage() {
             </View>
             <View style={{ flex: 1 }}>
               <Text style={{ fontSize: layout.bodySize, fontWeight: '700', color: c.text, marginBottom: 3 }}>{p.label}</Text>
-              <Text style={{ fontSize: layout.captionSize, color: c.text, opacity: 0.55, lineHeight: layout.captionSize * 1.5 }}>{p.desc}</Text>
+              <Text style={{ fontSize: layout.captionSize, ...mutedTextStyle(c, 0.55), lineHeight: layout.captionSize * 1.5 }}>{p.desc}</Text>
             </View>
           </NeuCard>
         ))}
@@ -191,7 +191,7 @@ export default function AboutPage() {
 
       {/* Footer note */}
       <NeuCard radius={layout.cardRadius} style={{ padding: layout.cardPx, alignItems: 'center' }}>
-        <Text style={{ fontSize: layout.captionSize + 1, color: c.text, opacity: 0.5, textAlign: 'center', lineHeight: (layout.captionSize + 1) * 1.6 }}>
+        <Text style={{ fontSize: layout.captionSize + 1, ...mutedTextStyle(c, 0.5), textAlign: 'center', lineHeight: (layout.captionSize + 1) * 1.6 }}>
           {`${branding.app_name} is continuously evolving.`}{'\n'}Thank you for being part of our community.
         </Text>
       </NeuCard>

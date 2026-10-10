@@ -17,7 +17,7 @@ import { NeuCard } from '@/components/NeuCard';
 import { NeuButton } from '@/components/NeuButton';
 import { ResponsiveModal } from '@/components/ResponsiveModal';
 import { useToast } from '@/components/Toast';
-import { neuColors, useLayout, safeBottom } from '@/lib/neu';
+import { neuColors, useLayout, safeBottom, mutedTextStyle } from '@/lib/neu';
 import { validateRequired, friendlyError } from '@/lib/validation';
 import { useDebounce } from '@/lib/useDebounce';
 import { getPublicEmail } from '@/lib/api';
@@ -137,11 +137,11 @@ export default function AdminCreditsScreen() {
                 </View>
                 <View style={{ flex: 1 }}>
                   <Text style={{ fontSize: 15, fontWeight: '700', color: c.text }}>{doc.full_name}</Text>
-                  <Text style={{ fontSize: 12, color: c.text, opacity: 0.5 }}>{getPublicEmail(doc) ?? '—'}</Text>
+                  <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.5) }}>{getPublicEmail(doc) ?? '—'}</Text>
                 </View>
                 <View style={{ alignItems: 'flex-end' }}>
                   <Text style={{ fontSize: 20, fontWeight: '800', color: '#16A34A' }}>{doc.credits_balance ?? 0}</Text>
-                  <Text style={{ fontSize: 10, color: c.text, opacity: 0.4 }}>credits</Text>
+                  <Text style={{ fontSize: 10, ...mutedTextStyle(c, 0.4) }}>credits</Text>
                 </View>
               </View>
               <View style={{ flexDirection: 'row', gap: 10 }}>
@@ -154,7 +154,7 @@ export default function AdminCreditsScreen() {
           {!loading && filtered.length === 0 && (
             <NeuCard style={{ padding: 40, alignItems: 'center' }}>
               <CreditCard size={36} color={c.primary} opacity={0.25} />
-              <Text style={{ color: c.text, opacity: 0.4, marginTop: 16 }}>No doctors found</Text>
+              <Text style={{ ...mutedTextStyle(c, 0.4), marginTop: 16 }}>No doctors found</Text>
             </NeuCard>
           )}
         </View>
@@ -172,13 +172,13 @@ export default function AdminCreditsScreen() {
           </View>
         }
       >
-        <Text style={{ fontSize: 11, fontWeight: '700', color: c.text, opacity: 0.5, marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.8 }}>Amount</Text>
+        <Text style={{ fontSize: 11, fontWeight: '700', ...mutedTextStyle(c, 0.5), marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.8 }}>Amount</Text>
         <TextInput
           value={amount} onChangeText={v => { setAmount(v); setIsDirty(true); }}
           placeholder="e.g. 100" placeholderTextColor={`${c.text}55`}
           keyboardType="numeric" style={{ ...inp, minWidth: 0 }}
         />
-        <Text style={{ fontSize: 11, fontWeight: '700', color: c.text, opacity: 0.5, marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.8 }}>Notes (optional)</Text>
+        <Text style={{ fontSize: 11, fontWeight: '700', ...mutedTextStyle(c, 0.5), marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.8 }}>Notes (optional)</Text>
         <TextInput
           value={notes} onChangeText={v => { setNotes(v); setIsDirty(true); }}
           placeholder="Reason for allocation..." placeholderTextColor={`${c.text}55`}
@@ -194,7 +194,7 @@ export default function AdminCreditsScreen() {
         {txLoading && <ActivityIndicator size="large" color={c.primary} style={{ marginVertical: 40 }} />}
         {!txLoading && transactions.length === 0 && (
           <View style={{ padding: 40, alignItems: 'center' }}>
-            <Text style={{ color: c.text, opacity: 0.4 }}>No transactions found</Text>
+            <Text style={{ ...mutedTextStyle(c, 0.4) }}>No transactions found</Text>
           </View>
         )}
         {transactions.map((tx, i) => {
@@ -214,8 +214,8 @@ export default function AdminCreditsScreen() {
               </View>
               <View style={{ flex: 1 }}>
                 <Text style={{ fontSize: 13, fontWeight: '700', color: c.text, textTransform: 'capitalize' }}>{tx.transaction_type}</Text>
-                {tx.notes && <Text style={{ fontSize: 11, color: c.text, opacity: 0.5 }}>{tx.notes}</Text>}
-                <Text style={{ fontSize: 11, color: c.text, opacity: 0.4 }}>{new Date(tx.created_at).toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true })}</Text>
+                {tx.notes && <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.5) }}>{tx.notes}</Text>}
+                <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.4) }}>{new Date(tx.created_at).toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true })}</Text>
               </View>
               <Text style={{ fontSize: 16, fontWeight: '800', color: txCol }}>
                 {isAlloc ? '+' : '-'}{Math.abs(tx.amount)}

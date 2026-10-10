@@ -81,7 +81,9 @@ export function ConfirmDialog({
         accessibilityLabel={request.title}
         style={[
           styles.card,
-          { backgroundColor: c.base, borderColor: `${c.text}22` },
+          // Elevated rung + a readable hairline: on dark, a dialog on the page
+          // colour with a 13%-alpha border had no edge at all.
+          { backgroundColor: c.elevated, borderColor: isDark ? c.border : `${c.text}22` },
         ]}
       >
         <Text style={[styles.title, { color: c.text }]}>{request.title}</Text>

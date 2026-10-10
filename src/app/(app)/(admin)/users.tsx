@@ -23,7 +23,7 @@ import { EditUserDialog } from '@/components/EditUserDialog';
 import { DeviceManagerSheet } from '@/components/DeviceManagerSheet';
 import { BulkSelectBar, type BulkAction } from '@/components/BulkSelectBar';
 import { useToast } from '@/components/Toast';
-import { neuColors, neuFlatStyle, useLayout, safeBottom } from '@/lib/neu'
+import { neuColors, neuFlatStyle, useLayout, safeBottom, mutedTextStyle } from '@/lib/neu';
 import { validateEmail, validateRequired, validatePasswordSimple, validateMatch } from '@/lib/validation';
 import { parseError, logAndParse } from '@/lib/parseError';
 import { useActionLoading } from '@/lib/useActionLoading';
@@ -492,7 +492,7 @@ export default function AdminUsers() {
     : users;
 
   const inp = { backgroundColor: c.base, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, shadowColor: c.shadowDark, shadowOffset: { width: 2, height: 2 }, shadowOpacity: 0.5, shadowRadius: 5, fontSize: 15, color: c.text };
-  const lbl = (t: string) => <Text style={{ fontSize: 12, fontWeight: '700', color: c.text, opacity: 0.5, marginBottom: 5, textTransform: 'uppercase', letterSpacing: 0.7 }}>{t}</Text>;
+  const lbl = (t: string) => <Text style={{ fontSize: 12, fontWeight: '700', ...mutedTextStyle(c, 0.5), marginBottom: 5, textTransform: 'uppercase', letterSpacing: 0.7 }}>{t}</Text>;
   const dropBtn = (text: string, open: boolean, onPress: () => void) => (
     <Pressable onPress={onPress} style={{ ...inp, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
       <Text style={{ fontSize: 15, color: text ? c.text : `${c.text}55`, flex: 1 }} numberOfLines={1}>{text || 'Select…'}</Text>
@@ -551,7 +551,7 @@ export default function AdminUsers() {
             <TextInput value={query} onChangeText={setQuery} placeholder="Name, email, phone or user ID…" placeholderTextColor={`${c.text}55`} autoCapitalize="none" returnKeyType="search" onSubmitEditing={handleSearch} style={{ flex: 1, marginLeft: 10, fontSize: 15, color: c.text }} />
             {searching && <ActivityIndicator size="small" color={c.primary} />}
           </View>
-          <Text style={{ fontSize: 11, color: c.text, opacity: 0.4, marginBottom: 12, marginLeft: 2 }}>Search by name, email, +20 phone, or user ID — then tap Enter</Text>
+          <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.4), marginBottom: 12, marginLeft: 2 }}>Search by name, email, +20 phone, or user ID — then tap Enter</Text>
 
           {/* Role Filters */}
           <ScrollView automaticallyAdjustKeyboardInsets={process.env.EXPO_OS === 'ios'} horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 8 }}>
@@ -581,7 +581,7 @@ export default function AdminUsers() {
             filtered.length === 0 ? (
               <View style={{ alignItems: 'center', paddingVertical: 60 }}>
                 <Users size={48} color={c.primary} style={{ opacity: 0.2 } as any} />
-                <Text style={{ color: c.text, opacity: 0.4, fontSize: 15, marginTop: 12 }}>No users found</Text>
+                <Text style={{ ...mutedTextStyle(c, 0.4), fontSize: 15, marginTop: 12 }}>No users found</Text>
               </View>
             ) : filtered.map(user => (
               <NeuCard key={user.id} style={{ marginBottom: 10, padding: 14, flexDirection: 'row', alignItems: 'center' }}>
@@ -607,7 +607,7 @@ export default function AdminUsers() {
                   {/* Email — secondary */}
                   <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 1 }}>
                     <Mail size={11} color={c.text} style={{ opacity: 0.4 }} />
-                    <Text style={{ fontSize: 12, color: c.text, opacity: 0.5, marginLeft: 3 }} numberOfLines={1}>{getPublicEmail(user) ?? '—'}</Text>
+                    <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.5), marginLeft: 3 }} numberOfLines={1}>{getPublicEmail(user) ?? '—'}</Text>
                   </View>
                   <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 4, gap: 6 }}>
                     <View style={{ backgroundColor: roleColor(user.role) + '20', borderRadius: 8, paddingHorizontal: 8, paddingVertical: 2 }}>
@@ -715,17 +715,17 @@ export default function AdminUsers() {
         {historyLoading ? <ActivityIndicator color={c.primary} style={{ marginVertical: 30 }} /> : (
           <ScrollView automaticallyAdjustKeyboardInsets={process.env.EXPO_OS === 'ios'} style={{ maxHeight: 400 }} showsVerticalScrollIndicator={false}>
             {loginHistory.length === 0 ? (
-              <Text style={{ color: c.text, opacity: 0.4, textAlign: 'center', padding: 30 }}>No login history found.</Text>
+              <Text style={{ ...mutedTextStyle(c, 0.4), textAlign: 'center', padding: 30 }}>No login history found.</Text>
             ) : loginHistory.map((h, i) => (
               <NeuCard key={h.id ?? i} style={{ marginBottom: 8, padding: 12 }}>
                 <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                   <View style={{ flex: 1 }}>
                     <Text style={{ fontSize: 13, fontWeight: '600', color: h.success ? '#16A34A' : '#DC2626' }}>{h.success ? '✓ Success' : '✗ Failed'}</Text>
-                    {h.device_name && <Text style={{ fontSize: 12, color: c.text, opacity: 0.6 }}>{h.device_name} · {h.platform}</Text>}
-                    {h.ip_address && <Text style={{ fontSize: 11, color: c.text, opacity: 0.4 }}>{h.ip_address}</Text>}
+                    {h.device_name && <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.6) }}>{h.device_name} · {h.platform}</Text>}
+                    {h.ip_address && <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.4) }}>{h.ip_address}</Text>}
                     {!h.success && h.failure_reason && <Text style={{ fontSize: 11, color: '#DC2626', opacity: 0.8 }}>{h.failure_reason}</Text>}
                   </View>
-                  <Text style={{ fontSize: 11, color: c.text, opacity: 0.4 }}>{h.created_at ? new Date(h.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : ''}</Text>
+                  <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.4) }}>{h.created_at ? new Date(h.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : ''}</Text>
                 </View>
               </NeuCard>
             ))}
@@ -773,7 +773,7 @@ export default function AdminUsers() {
         {!!fieldErrors.nationalPhone
           ? <Text style={{ color: '#DC2626', fontSize: 12, marginBottom: 10 }}>{fieldErrors.nationalPhone}</Text>
           : form.nationalPhone.trim()
-            ? <Text style={{ fontSize: 11, color: c.text, opacity: 0.4, marginTop: -10, marginBottom: 12 }}>
+            ? <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.4), marginTop: -10, marginBottom: 12 }}>
                 Stored as {buildE164(createCountry, form.nationalPhone) ?? `${createCountry.callingCode}…`}
               </Text>
             : null
@@ -812,7 +812,7 @@ export default function AdminUsers() {
           <View style={{ backgroundColor: '#16A34A20', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 4 }}>
             <Text style={{ fontSize: 12, fontWeight: '700', color: '#16A34A' }}>ACTIVE</Text>
           </View>
-          <Text style={{ fontSize: 12, color: c.text, opacity: 0.45 }}>Default role & status</Text>
+          <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.45) }}>Default role & status</Text>
         </View>
 
         {!!createError && (

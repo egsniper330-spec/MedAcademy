@@ -58,8 +58,12 @@ export function ChangePasswordModal({ visible, onClose, targetUserId, targetName
   const c       = isDark ? neuColors.dark : neuColors.light;
   const { showToast } = useToast();
 
-  // Derived semantic values from the actual neuColors shape
-  const mutedText   = isDark ? 'rgba(221,230,240,0.55)' : 'rgba(28,45,74,0.45)';
+  // Derived semantic values from the actual neuColors shape.
+  // Dark now takes the solid `textMuted` tier (a) for consistency with the rest
+  // of the app — this literal used a slightly different hue (221,230,240) than
+  // c.text (221,232,245) — and because a 55%-alpha label over the dark modal
+  // card is only 5.1:1, while the tier is 6.8:1. Light keeps its exact literal.
+  const mutedText   = isDark ? c.textMuted : 'rgba(28,45,74,0.45)';
   const borderColor = isDark ? 'rgba(48,68,100,0.6)'    : 'rgba(174,190,208,0.6)';
   const cardBg      = isDark ? 'rgba(255,255,255,0.04)'  : 'rgba(255,255,255,0.7)';
 

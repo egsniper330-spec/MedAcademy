@@ -15,7 +15,7 @@ import {
 import { ResponsiveModal } from '@/components/ResponsiveModal';
 import { NeuCard } from '@/components/NeuCard';
 import { NeuButton } from '@/components/NeuButton';
-import { neuColors } from '@/lib/neu';
+import { neuColors, mutedTextStyle } from '@/lib/neu';
 import { useActionLoading } from '@/lib/useActionLoading';
 import {
   getAdminUserDevices, logoutDevice, forceLogoutDevice, blockDevice, unblockDevice,
@@ -190,7 +190,7 @@ export function DeviceManagerSheet({ visible, onClose, userId, userName }: Devic
             ].map(s => (
               <NeuCard key={s.label} style={{ flex: 1, minWidth: 72, padding: 10, alignItems: 'center' }}>
                 <Text style={{ fontSize: 18, fontWeight: '800', color: s.color }}>{s.value}</Text>
-                <Text style={{ fontSize: 10, color: c.text, opacity: 0.45 }}>{s.label}</Text>
+                <Text style={{ fontSize: 10, ...mutedTextStyle(c, 0.45) }}>{s.label}</Text>
               </NeuCard>
             ))}
           </View>
@@ -224,7 +224,7 @@ export function DeviceManagerSheet({ visible, onClose, userId, userName }: Devic
                 keyboardType="number-pad"
                 placeholder="Max devices"
                 placeholderTextColor={`${c.text}55`}
-                style={{ flex: 1, backgroundColor: c.base, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 11,
+                style={{ flex: 1, backgroundColor: c.inputSurface, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 11,
                   shadowColor: c.shadowDark, shadowOffset: { width: 2, height: 2 }, shadowOpacity: 0.45, shadowRadius: 5,
                   fontSize: 15, color: c.text }}
               />
@@ -247,7 +247,7 @@ export function DeviceManagerSheet({ visible, onClose, userId, userName }: Devic
           {devices.length === 0 ? (
             <View style={{ alignItems: 'center', padding: 30 }}>
               <Smartphone size={36} color={c.primary} style={{ opacity: 0.2 } as any} />
-              <Text style={{ color: c.text, opacity: 0.4, marginTop: 12 }}>No registered devices</Text>
+              <Text style={{ ...mutedTextStyle(c, 0.4), marginTop: 12 }}>No registered devices</Text>
             </View>
           ) : (
             devices.map(device => {
@@ -267,11 +267,11 @@ export function DeviceManagerSheet({ visible, onClose, userId, userName }: Devic
                       <Text style={{ fontSize: 13, fontWeight: '700', color: c.text }}>
                         {device.device_name ?? device.device_model ?? 'Unknown Device'}
                       </Text>
-                      <Text style={{ fontSize: 11, color: c.text, opacity: 0.5 }}>
+                      <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.5) }}>
                         {[device.platform, device.os, device.os_version].filter(Boolean).join(' · ')}
                       </Text>
                       {device.app_version && (
-                        <Text style={{ fontSize: 10, color: c.text, opacity: 0.35 }}>App v{device.app_version}</Text>
+                        <Text style={{ fontSize: 10, ...mutedTextStyle(c, 0.35) }}>App v{device.app_version}</Text>
                       )}
                       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 3 }}>
                         {isOnline

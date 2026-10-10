@@ -24,7 +24,7 @@ import { randomUUID } from 'expo-crypto';
 import { NeuButton } from '@/components/NeuButton';
 import { NeuCard } from '@/components/NeuCard';
 import { useToast } from '@/components/Toast';
-import { neuColors, useLayout, neuFlatStyle, neuPressedStyle, safeTop, safeLeft, safeRight, safeBottom } from '@/lib/neu';
+import { neuColors, useLayout, neuFlatStyle, neuPressedStyle, safeTop, safeLeft, safeRight, safeBottom, mutedTextStyle } from '@/lib/neu';
 import { useProfileStore } from '@/lib/store';
 import { friendlyError } from '@/lib/validation';
 import {
@@ -717,7 +717,7 @@ export default function LessonEditor() {
               ) : (
                 <View style={[neuPressedStyle(isDark), { width: '100%', height: 120, borderRadius: 14, alignItems: 'center', justifyContent: 'center', gap: 8 }]}>
                   <Video size={32} color={c.primary} opacity={0.4} />
-                  <Text style={{ fontSize: 12, color: c.text, opacity: 0.4 }}>Generating thumbnail…</Text>
+                  <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.4) }}>Generating thumbnail…</Text>
                 </View>
               )}
 
@@ -729,13 +729,13 @@ export default function LessonEditor() {
                     <Text style={{ fontSize: 15, fontWeight: '800', color: c.text }}>
                       {formatDuration(lesson.video_duration_seconds)}
                     </Text>
-                    <Text style={{ fontSize: 11, color: c.text, opacity: 0.45 }}>Duration</Text>
+                    <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.45) }}>Duration</Text>
                   </View>
                 )}
                 <View style={[neuPressedStyle(isDark), { flex: 1, padding: 12, borderRadius: 14, alignItems: 'center', gap: 4 }]}>
                   <CheckCircle size={16} color="#16A34A" />
                   <Text style={{ fontSize: 13, fontWeight: '700', color: '#16A34A' }}>Ready</Text>
-                  <Text style={{ fontSize: 11, color: c.text, opacity: 0.45 }}>Status</Text>
+                  <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.45) }}>Status</Text>
                 </View>
               </View>
 
@@ -852,7 +852,7 @@ export default function LessonEditor() {
                     {uploadStatusLabel(activeTask.status)}
                   </Text>
                   {activeTask.status === 'uploading' && activeTask.progress > 0 && (
-                    <Text style={{ fontSize: 12, color: c.text, opacity: 0.5, marginTop: 2 }}>
+                    <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.5), marginTop: 2 }}>
                       {activeTask.progress.toFixed(0)}% · {activeTask.fileName}
                     </Text>
                   )}
@@ -887,7 +887,7 @@ export default function LessonEditor() {
                     </View>
                   );
                 })}
-                <Text style={{ fontSize: 11, color: c.text, opacity: 0.4, marginLeft: 4 }}>
+                <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.4), marginLeft: 4 }}>
                   {(['Queued', 'Uploading', 'Processing', 'Verifying'] as const)[
                     Math.min(['waiting', 'uploading', 'processing', 'verifying'].indexOf(activeTask.status), 3)
                   ]}
@@ -1038,7 +1038,7 @@ export default function LessonEditor() {
                   <View style={{ flexDirection: 'row', gap: 10 }}>
                     <Pressable onPress={() => { setDuplicateInfo(null); setPendingFile(null); }}
                       style={[neuFlatStyle(isDark), { flex: 1, padding: 11, borderRadius: 12, alignItems: 'center' }]}>
-                      <Text style={{ fontSize: 13, fontWeight: '700', color: c.text, opacity: 0.6 }}>Cancel</Text>
+                      <Text style={{ fontSize: 13, fontWeight: '700', ...mutedTextStyle(c, 0.6) }}>Cancel</Text>
                     </Pressable>
                     <Pressable
                       onPress={async () => {
@@ -1063,7 +1063,7 @@ export default function LessonEditor() {
                         {uploadStatusLabel(activeTask.status)}
                       </Text>
                       {activeTask.status === 'uploading' && (
-                        <Text style={{ fontSize: 12, color: c.text, opacity: 0.5, marginTop: 2 }}>
+                        <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.5), marginTop: 2 }}>
                           {activeTask.progress}%
                         </Text>
                       )}
@@ -1093,7 +1093,7 @@ export default function LessonEditor() {
                     <AlertCircle size={16} color="#F97316" />
                     <Text style={{ fontSize: 14, fontWeight: '700', color: '#F97316' }}>Processing Timed Out</Text>
                   </View>
-                  <Text style={{ fontSize: 12, color: c.text, opacity: 0.6, lineHeight: 17 }}>
+                  <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.6), lineHeight: 17 }}>
                     The video was uploaded but VdoCipher did not finish encoding within 10 minutes.
                     {'\n'}You can retry polling, replace with a new file, or delete the upload.
                   </Text>
@@ -1142,12 +1142,12 @@ export default function LessonEditor() {
                         <Text style={{ fontSize: 14, fontWeight: '800', color: '#DC2626' }}>
                           Video Missing
                         </Text>
-                        <Text style={{ fontSize: 12, color: c.text, opacity: 0.55, marginTop: 2 }}>
+                        <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.55), marginTop: 2 }}>
                           The video asset no longer exists on VdoCipher.
                         </Text>
                       </View>
                     </View>
-                    <Text style={{ fontSize: 12, color: c.text, opacity: 0.65, lineHeight: 18 }}>
+                    <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.65), lineHeight: 18 }}>
                       {"This lesson's video was deleted or became unavailable on the provider."}
                       {" Student progress for this lesson is preserved."}
                       {" Upload a replacement to restore playback."}
@@ -1161,7 +1161,7 @@ export default function LessonEditor() {
                       <Text style={{ fontSize: 14, fontWeight: '800', color: '#fff' }}>Re-upload Video</Text>
                     </Pressable>
                     {auditingVideo && (
-                      <Text style={{ fontSize: 11, color: c.text, opacity: 0.4, textAlign: 'center' }}>
+                      <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.4), textAlign: 'center' }}>
                         Verifying with VdoCipher…
                       </Text>
                     )}
@@ -1175,7 +1175,7 @@ export default function LessonEditor() {
                   <Text style={{ fontSize: 14, fontWeight: '700', color: c.text }}>
                     {videoTitle || 'Video Uploaded'}
                   </Text>
-                  <Text style={{ fontSize: 12, color: c.text, opacity: 0.45, textAlign: 'center' }}>
+                  <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.45), textAlign: 'center' }}>
                     MedAcademy Video Library · Secure Playback
                   </Text>
                   <View style={{ flexDirection: 'row', gap: 10, marginTop: 4 }}>
@@ -1194,7 +1194,7 @@ export default function LessonEditor() {
                       <Text style={{ fontSize: 13, fontWeight: '700', color: '#DC2626' }}>Delete</Text>
                     </Pressable>
                   </View>
-                  <Text style={{ fontSize: 11, color: c.text, opacity: 0.35, textAlign: 'center' }}>
+                  <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.35), textAlign: 'center' }}>
                     Replacing keeps lesson progress and materials.{'\n'}Old video is removed only after replacement succeeds.
                   </Text>
 
@@ -1202,13 +1202,13 @@ export default function LessonEditor() {
                   {showDeleteVideoDialog && (
                     <NeuCard style={[neuFlatStyle(isDark), { borderRadius: 14, padding: 14, gap: 10, alignSelf: 'stretch', borderLeftWidth: 3, borderLeftColor: '#DC2626' }]}>
                       <Text style={{ fontSize: 13, fontWeight: '700', color: '#DC2626' }}>Delete this video permanently?</Text>
-                      <Text style={{ fontSize: 12, color: c.text, opacity: 0.6, lineHeight: 17 }}>
+                      <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.6), lineHeight: 17 }}>
                         The VdoCipher asset will be removed. Student progress for this lesson is preserved.
                       </Text>
                       <View style={{ flexDirection: 'row', gap: 8 }}>
                         <Pressable onPress={() => setShowDeleteVideoDialog(false)}
                           style={[neuFlatStyle(isDark), { flex: 1, padding: 10, borderRadius: 10, alignItems: 'center' }]}>
-                          <Text style={{ fontSize: 13, fontWeight: '700', color: c.text, opacity: 0.6 }}>Cancel</Text>
+                          <Text style={{ fontSize: 13, fontWeight: '700', ...mutedTextStyle(c, 0.6) }}>Cancel</Text>
                         </Pressable>
                         <Pressable onPress={handleDeleteVideo}
                           style={{ flex: 1, padding: 10, borderRadius: 10, alignItems: 'center', backgroundColor: '#DC2626' }}>
@@ -1231,7 +1231,7 @@ export default function LessonEditor() {
                       </View>
                       <View style={{ flex: 1 }}>
                         <Text style={{ fontSize: 15, fontWeight: '800', color: c.text }}>Upload New Video</Text>
-                        <Text style={{ fontSize: 12, color: c.text, opacity: 0.45, marginTop: 3 }}>
+                        <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.45), marginTop: 3 }}>
                           Pick a file — MP4, MOV, AVI, MKV up to 5 GB
                         </Text>
                       </View>
@@ -1245,7 +1245,7 @@ export default function LessonEditor() {
                       </View>
                       <View style={{ flex: 1 }}>
                         <Text style={{ fontSize: 15, fontWeight: '800', color: c.text }}>Choose From My Library</Text>
-                        <Text style={{ fontSize: 12, color: c.text, opacity: 0.45, marginTop: 3 }}>
+                        <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.45), marginTop: 3 }}>
                           Reuse an existing upload — no extra storage used
                         </Text>
                       </View>
@@ -1280,7 +1280,7 @@ export default function LessonEditor() {
                     <Clock size={18} color={c.primary} />
                   </View>
                   <View style={{ flex: 1 }}>
-                    <Text style={{ fontSize: 11, color: c.text, opacity: 0.45, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 0.5 }}>Duration</Text>
+                    <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.45), fontWeight: '600', textTransform: 'uppercase', letterSpacing: 0.5 }}>Duration</Text>
                     <Text style={{ fontSize: 16, fontWeight: '800', color: c.text, marginTop: 1 }}>
                       {formatDuration(lesson.video_duration_seconds)}
                     </Text>
@@ -1296,7 +1296,7 @@ export default function LessonEditor() {
             <NeuCard style={[neuPressedStyle(isDark), { padding: 24, alignItems: 'center', gap: 8 }]}>
               <Clock size={36} color="#D97706" opacity={0.6} />
               <Text style={{ fontSize: 15, fontWeight: '700', color: c.text }}>Coming Soon</Text>
-              <Text style={{ fontSize: 13, color: c.text, opacity: 0.45, textAlign: 'center' }}>
+              <Text style={{ fontSize: 13, ...mutedTextStyle(c, 0.45), textAlign: 'center' }}>
                 {'Students will see a "Coming Soon" placeholder for this lesson.'}
               </Text>
             </NeuCard>
@@ -1311,7 +1311,7 @@ export default function LessonEditor() {
                 </View>
                 <View style={{ flex: 1 }}>
                   <Text style={{ fontSize: 14, fontWeight: '700', color: c.text }}>YouTube Video</Text>
-                  <Text style={{ fontSize: 12, color: c.text, opacity: 0.45 }}>Paste any YouTube URL or video ID</Text>
+                  <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.45) }}>Paste any YouTube URL or video ID</Text>
                 </View>
                 {youtubeVideoId ? (
                   <View style={{ paddingHorizontal: 10, paddingVertical: 4, borderRadius: 20, backgroundColor: '#16A34A18' }}>
@@ -1369,7 +1369,7 @@ export default function LessonEditor() {
 
               {/* Supported formats hint */}
               <View style={{ backgroundColor: `${c.primary}08`, borderRadius: 10, padding: 10, gap: 3 }}>
-                <Text style={{ fontSize: 11, fontWeight: '700', color: c.text, opacity: 0.5 }}>Supported formats</Text>
+                <Text style={{ fontSize: 11, fontWeight: '700', ...mutedTextStyle(c, 0.5) }}>Supported formats</Text>
                 {[
                   'https://youtu.be/VIDEO_ID',
                   'https://youtube.com/watch?v=VIDEO_ID',
@@ -1378,7 +1378,7 @@ export default function LessonEditor() {
                   'https://youtube.com/live/VIDEO_ID',
                   'VIDEO_ID (11 characters)',
                 ].map((fmt) => (
-                  <Text key={fmt} style={{ fontSize: 11, color: c.text, opacity: 0.4 }}>{fmt}</Text>
+                  <Text key={fmt} style={{ fontSize: 11, ...mutedTextStyle(c, 0.4) }}>{fmt}</Text>
                 ))}
               </View>
             </NeuCard>
@@ -1408,7 +1408,7 @@ export default function LessonEditor() {
                 {uploading ? 'Uploading…' : 'Upload File'}
               </Text>
             </Pressable>
-            <Text style={{ fontSize: 12, color: c.text, opacity: 0.4, textAlign: 'center', marginTop: 6 }}>
+            <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.4), textAlign: 'center', marginTop: 6 }}>
               PDF, PPTX, DOCX, XLSX, ZIP, images, audio, and more — up to 100 MB each
             </Text>
           </View>
@@ -1420,8 +1420,8 @@ export default function LessonEditor() {
             ListEmptyComponent={
               <View style={{ alignItems: 'center', paddingVertical: 60 }}>
                 <Paperclip size={44} color={c.primary} opacity={0.2} />
-                <Text style={{ color: c.text, opacity: 0.4, marginTop: 12, fontSize: 15 }}>No attachments yet</Text>
-                <Text style={{ color: c.text, opacity: 0.3, fontSize: 13, marginTop: 4 }}>
+                <Text style={{ ...mutedTextStyle(c, 0.4), marginTop: 12, fontSize: 15 }}>No attachments yet</Text>
+                <Text style={{ ...mutedTextStyle(c, 0.3), fontSize: 13, marginTop: 4 }}>
                   Upload PDFs, slides, or any file — unlimited
                 </Text>
               </View>
@@ -1442,7 +1442,7 @@ export default function LessonEditor() {
                     </View>
                     <View style={{ flex: 1 }}>
                       <Text style={{ fontSize: 14, fontWeight: '600', color: c.text }} numberOfLines={1}>{item.file_name}</Text>
-                      <Text style={{ fontSize: 11, color: c.text, opacity: 0.45, marginTop: 2 }}>
+                      <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.45), marginTop: 2 }}>
                         {formatBytes(item.file_size)} · {item.file_type.split('/')[1]?.toUpperCase() ?? 'FILE'}
                       </Text>
                     </View>
@@ -1570,7 +1570,7 @@ function SettingToggle({ icon: Icon, label, sub, value, onChange, isDark, c }: {
       </View>
       <View style={{ flex: 1 }}>
         <Text style={{ fontSize: 14, fontWeight: '700', color: c.text }}>{label}</Text>
-        <Text style={{ fontSize: 12, color: c.text, opacity: 0.45, marginTop: 2 }}>{sub}</Text>
+        <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.45), marginTop: 2 }}>{sub}</Text>
       </View>
       <View style={[
         value ? neuPressedStyle(isDark) : neuFlatStyle(isDark),

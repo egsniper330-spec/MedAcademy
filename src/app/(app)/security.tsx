@@ -11,7 +11,7 @@ import { getContactDisplay } from '@/lib/api';
 import { resolveWatermarkIdentity, isPublicWatermarkToken } from '@/lib/watermarkIdentity';
 import { NeuCard } from '@/components/NeuCard';
 import { NeuButton } from '@/components/NeuButton';
-import { neuColors } from '@/lib/neu';
+import { neuColors, mutedTextStyle } from '@/lib/neu';
 import { NeuInputRow } from '@/components/NeuInputRow';
 
 export default function SecurityCenter() {
@@ -72,7 +72,7 @@ export default function SecurityCenter() {
             </View>
             <View>
               <Text style={{ fontSize: 16, fontWeight: '700', color: c.text }}>Account Security</Text>
-              <Text style={{ fontSize: 12, color: c.text, opacity: 0.5 }}>{getContactDisplay(profile)}</Text>
+              <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.5) }}>{getContactDisplay(profile)}</Text>
             </View>
           </View>
           <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: '#16A34A12', borderRadius: 10, padding: 10 }}>
@@ -87,7 +87,7 @@ export default function SecurityCenter() {
             watermark token column (which held opaque values like "16"). */}
         <NeuCard style={{ marginBottom: 20, padding: 18 }}>
           <Text style={{ fontSize: 14, fontWeight: '700', color: c.text, marginBottom: 6 }}>Your Watermark ID</Text>
-          <Text style={{ fontSize: 12, color: c.text, opacity: 0.55, marginBottom: 10, lineHeight: 18 }}>
+          <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.55), marginBottom: 10, lineHeight: 18 }}>
             This ID is used to identify your account in protected video and PDF content.
           </Text>
           {wmIdentity ? (
@@ -111,12 +111,12 @@ export default function SecurityCenter() {
             </View>
           ) : (
             <View style={{ backgroundColor: `${c.text}0A`, borderRadius: 10, padding: 12 }}>
-              <Text style={{ fontSize: 13, fontWeight: '600', color: c.text, opacity: 0.6 }}>
+              <Text style={{ fontSize: 13, fontWeight: '600', ...mutedTextStyle(c, 0.6) }}>
                 {profile?.role === 'super_admin' ? 'Not applicable — administrator accounts do not participate in content watermarking.' : 'Watermark identity not yet assigned.'}
               </Text>
             </View>
           )}
-          <Text style={{ fontSize: 10, color: c.text, opacity: 0.4, marginTop: 8 }}>
+          <Text style={{ fontSize: 10, ...mutedTextStyle(c, 0.4), marginTop: 8 }}>
             Read-only — assigned by the system, shown identically inside watermarked content.
           </Text>
         </NeuCard>
@@ -128,7 +128,7 @@ export default function SecurityCenter() {
             <Text style={{ fontSize: 17, fontWeight: '800', color: c.text }}>Change Password</Text>
           </View>
 
-          <Text style={{ fontSize: 12, fontWeight: '600', color: c.text, opacity: 0.55, marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.8 }}>New Password</Text>
+          <Text style={{ fontSize: 12, fontWeight: '600', ...mutedTextStyle(c, 0.55), marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.8 }}>New Password</Text>
           <NeuInputRow
             c={c}
             value={newPassword}
@@ -143,7 +143,7 @@ export default function SecurityCenter() {
             }
           />
 
-          <Text style={{ fontSize: 12, fontWeight: '600', color: c.text, opacity: 0.55, marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.8 }}>Confirm Password</Text>
+          <Text style={{ fontSize: 12, fontWeight: '600', ...mutedTextStyle(c, 0.55), marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.8 }}>Confirm Password</Text>
           <NeuInputRow
             c={c}
             value={confirmPassword}

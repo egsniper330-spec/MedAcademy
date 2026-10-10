@@ -17,7 +17,7 @@ import { bulkDataExport, type BulkExportType } from '@/lib/api';
 import { useProfileStore } from '@/lib/store';
 import { NeuCard } from '@/components/NeuCard';
 import { NeuButton } from '@/components/NeuButton';
-import { neuColors, useLayout, safeBottom } from '@/lib/neu';
+import { neuColors, useLayout, safeBottom, mutedTextStyle } from '@/lib/neu';
 import { PageHeader } from '@/components/PageHeader';
 
 // ─── CSV helpers ──────────────────────────────────────────────────────────────
@@ -264,7 +264,7 @@ export default function ExportPanel() {
 
         <NeuCard style={{ padding: 14, marginBottom: 20, flexDirection: 'row', gap: 10, alignItems: 'center' }}>
           <Download size={18} color={c.primary} />
-          <Text style={{ fontSize: 13, color: c.text, opacity: 0.65, flex: 1 }}>
+          <Text style={{ fontSize: 13, ...mutedTextStyle(c, 0.65), flex: 1 }}>
             Exports generate CSV files. On mobile, use Share to save or forward.
             On Web, the file downloads directly.
           </Text>
@@ -278,7 +278,7 @@ export default function ExportPanel() {
             </Text>
             <NeuCard style={{ padding: 14, marginBottom: 14, flexDirection: 'row', gap: 10, alignItems: 'center' }}>
               <Shield size={16} color="#D97706" />
-              <Text style={{ fontSize: 12, color: c.text, opacity: 0.65, flex: 1 }}>
+              <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.65), flex: 1 }}>
                 Server-side allow-listed columns only — never passwords, tokens or secrets.
                 Every export is recorded in the audit log.
               </Text>
@@ -295,7 +295,7 @@ export default function ExportPanel() {
                     </View>
                     <View style={{ flex: 1 }}>
                       <Text style={{ fontSize: 15, fontWeight: '700', color: c.text }}>{cfg.label}</Text>
-                      <Text style={{ fontSize: 12, color: c.text, opacity: 0.45, marginTop: 2 }}>
+                      <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.45), marginTop: 2 }}>
                         {cfg.description}
                       </Text>
                     </View>
@@ -339,7 +339,7 @@ export default function ExportPanel() {
                 </View>
                 <View style={{ flex: 1 }}>
                   <Text style={{ fontSize: 15, fontWeight: '700', color: c.text }}>{cfg.label}</Text>
-                  <Text style={{ fontSize: 12, color: c.text, opacity: 0.45, marginTop: 2 }}>
+                  <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.45), marginTop: 2 }}>
                     {cfg.description}
                   </Text>
                 </View>

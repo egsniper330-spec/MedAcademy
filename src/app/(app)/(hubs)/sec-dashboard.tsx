@@ -9,7 +9,7 @@ import {
   Fingerprint, Camera, AlertTriangle, TrendingUp,
   Users, BarChart3, Download, Filter,
 } from 'lucide-react-native';
-import { neuColors, useLayout, neuFlatStyle, neuPressedStyle, safeBottom } from '@/lib/neu';
+import { neuColors, useLayout, neuFlatStyle, neuPressedStyle, safeBottom, mutedTextStyle } from '@/lib/neu';
 import { NeuCard } from '@/components/NeuCard';
 import { NeuButton } from '@/components/NeuButton';
 import { PageHeader } from '@/components/PageHeader';
@@ -278,7 +278,7 @@ export default function SecurityDashboard() {
         {securityVersion !== null && (
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: layout.pad.md, marginBottom: layout.pad.sm }}>
             <ShieldCheck size={layout.bodySize} color="#16A34A" />
-            <Text style={{ fontSize: layout.captionSize, color: c.text, opacity: 0.5 }}>
+            <Text style={{ fontSize: layout.captionSize, ...mutedTextStyle(c, 0.5) }}>
               Security config version: {securityVersion}
             </Text>
           </View>

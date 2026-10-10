@@ -25,7 +25,7 @@ import { PageHeader } from '@/components/PageHeader';
 import { DrawerProvider } from '@/components/DrawerContext';
 import DrawerNav from '@/components/DrawerNav';
 import { NeuCard } from '@/components/NeuCard';
-import { neuColors, useLayout, neuFlatStyle, neuMicroStyle, safeBottom } from '@/lib/neu';
+import { neuColors, useLayout, neuFlatStyle, neuMicroStyle, safeBottom, mutedTextStyle } from '@/lib/neu';
 import type { NativeSecurityFlags } from '@/lib/nativeSecurity';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -247,7 +247,7 @@ function DiagnosticsContent() {
       >
         {/* ── Module registration proof ──────────────────────────────── */}
         <View style={sectionPad}>
-          <Text style={{ fontSize: 11, fontWeight: '700', color: c.text, opacity: 0.4, letterSpacing: 1, textTransform: 'uppercase', marginBottom: 10 }}>
+          <Text style={{ fontSize: 11, fontWeight: '700', ...mutedTextStyle(c, 0.4), letterSpacing: 1, textTransform: 'uppercase', marginBottom: 10 }}>
             Module Registration
           </Text>
           <NeuCard style={{ padding: 16, marginBottom: 20 }}>
@@ -262,7 +262,7 @@ function DiagnosticsContent() {
 
             {state.moduleFound && (
               <>
-                <Text style={{ fontSize: 12, color: c.text, opacity: 0.5, marginBottom: 6 }}>
+                <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.5), marginBottom: 6 }}>
                   {state.moduleMethods.length} exported methods:
                 </Text>
                 <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
@@ -283,7 +283,7 @@ function DiagnosticsContent() {
           </NeuCard>
 
           {/* ── Timing ──────────────────────────────────────────────── */}
-          <Text style={{ fontSize: 11, fontWeight: '700', color: c.text, opacity: 0.4, letterSpacing: 1, textTransform: 'uppercase', marginBottom: 10 }}>
+          <Text style={{ fontSize: 11, fontWeight: '700', ...mutedTextStyle(c, 0.4), letterSpacing: 1, textTransform: 'uppercase', marginBottom: 10 }}>
             Execution
           </Text>
           <NeuCard style={{ padding: 16, marginBottom: 20 }}>
@@ -311,7 +311,7 @@ function DiagnosticsContent() {
           </NeuCard>
 
           {/* ── Raw native flags ──────────────────────────────────────── */}
-          <Text style={{ fontSize: 11, fontWeight: '700', color: c.text, opacity: 0.4, letterSpacing: 1, textTransform: 'uppercase', marginBottom: 10 }}>
+          <Text style={{ fontSize: 11, fontWeight: '700', ...mutedTextStyle(c, 0.4), letterSpacing: 1, textTransform: 'uppercase', marginBottom: 10 }}>
             Raw Native Result (unfiltered)
           </Text>
           <NeuCard style={{ padding: 16, marginBottom: 20 }}>
@@ -320,14 +320,14 @@ function DiagnosticsContent() {
                 {JSON.stringify(state.rawFlags, null, 2)}
               </Text>
             ) : (
-              <Text style={{ fontSize: 13, color: c.text, opacity: 0.5 }}>
+              <Text style={{ fontSize: 13, ...mutedTextStyle(c, 0.5) }}>
                 {running ? 'Running…' : (state.rawError ? 'Error — see above' : 'No data yet')}
               </Text>
             )}
           </NeuCard>
 
           {/* ── Per-detector breakdown ────────────────────────────────── */}
-          <Text style={{ fontSize: 11, fontWeight: '700', color: c.text, opacity: 0.4, letterSpacing: 1, textTransform: 'uppercase', marginBottom: 10 }}>
+          <Text style={{ fontSize: 11, fontWeight: '700', ...mutedTextStyle(c, 0.4), letterSpacing: 1, textTransform: 'uppercase', marginBottom: 10 }}>
             Per-Detector Analysis
           </Text>
         </View>
@@ -335,7 +335,7 @@ function DiagnosticsContent() {
         {/* detector cards */}
         <View style={sectionPad}>
           {state.detectors.length === 0 && !running && (
-            <Text style={{ fontSize: 14, color: c.text, opacity: 0.45, textAlign: 'center', marginTop: 20 }}>
+            <Text style={{ fontSize: 14, ...mutedTextStyle(c, 0.45), textAlign: 'center', marginTop: 20 }}>
               Tap ↻ to run diagnostics
             </Text>
           )}
@@ -363,7 +363,7 @@ function DiagnosticsContent() {
                 </Text>
 
                 {/* API explanation */}
-                <Text style={{ fontSize: 12, color: c.text, opacity: 0.65, lineHeight: 18 }}>
+                <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.65), lineHeight: 18 }}>
                   {d.apiExplain}
                 </Text>
 
@@ -400,7 +400,7 @@ function DiagnosticsContent() {
 
         {/* ── API restriction documentation ─────────────────────────── */}
         <View style={sectionPad}>
-          <Text style={{ fontSize: 11, fontWeight: '700', color: c.text, opacity: 0.4, letterSpacing: 1, textTransform: 'uppercase', marginBottom: 10, marginTop: 8 }}>
+          <Text style={{ fontSize: 11, fontWeight: '700', ...mutedTextStyle(c, 0.4), letterSpacing: 1, textTransform: 'uppercase', marginBottom: 10, marginTop: 8 }}>
             Android API Restrictions (Why Some Checks Have Limits)
           </Text>
           <NeuCard style={{ padding: 16, marginBottom: 8 }}>
@@ -435,7 +435,7 @@ function DiagnosticsContent() {
                   <Cpu size={13} color={c.primary} />
                   <Text style={{ fontSize: 13, fontWeight: '700', color: c.text }}>{item.title}</Text>
                 </View>
-                <Text style={{ fontSize: 12, color: c.text, opacity: 0.6, lineHeight: 18 }}>
+                <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.6), lineHeight: 18 }}>
                   {item.body}
                 </Text>
               </View>

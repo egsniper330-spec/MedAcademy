@@ -15,7 +15,7 @@ import { NeuCard } from '@/components/NeuCard';
 import { NeuButton } from '@/components/NeuButton';
 import { ResponsiveModal } from '@/components/ResponsiveModal';
 import { useToast } from '@/components/Toast';
-import { neuColors, useLayout, safeBottom } from '@/lib/neu';
+import { neuColors, useLayout, safeBottom, mutedTextStyle } from '@/lib/neu';
 import { getDoctors, invokeEdgeFunction } from '@/lib/api';
 import { useDebounce } from '@/lib/useDebounce';
 import { getPublicEmail } from '@/lib/api';
@@ -188,13 +188,13 @@ export default function BulkCreditsScreen() {
                     : <Square size={20} color={`${c.text}30`} />}
                   <View style={{ flex: 1 }}>
                     <Text style={{ fontSize: 13, fontWeight: '700', color: c.text }}>{doc.full_name}</Text>
-                    <Text style={{ fontSize: 11, color: c.text, opacity: 0.5 }}>{getPublicEmail(doc) ?? '—'}</Text>
+                    <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.5) }}>{getPublicEmail(doc) ?? '—'}</Text>
                   </View>
                   <View style={{ alignItems: 'flex-end' }}>
                     <Text style={{ fontSize: 16, fontWeight: '800', color: '#16A34A' }}>
                       {doc.credits_balance ?? 0}
                     </Text>
-                    <Text style={{ fontSize: 10, color: c.text, opacity: 0.4 }}>balance</Text>
+                    <Text style={{ fontSize: 10, ...mutedTextStyle(c, 0.4) }}>balance</Text>
                   </View>
                 </View>
               </NeuCard>
@@ -204,7 +204,7 @@ export default function BulkCreditsScreen() {
         ListEmptyComponent={!loading ? (
           <View style={{ padding: 60, alignItems: 'center' }}>
             <Users size={40} color={c.primary} opacity={0.2} />
-            <Text style={{ color: c.text, opacity: 0.4, marginTop: 16 }}>No doctors found</Text>
+            <Text style={{ ...mutedTextStyle(c, 0.4), marginTop: 16 }}>No doctors found</Text>
           </View>
         ) : null} contentContainerStyle={{ paddingBottom: safeBottom(layout.insets.bottom) }}
       />
@@ -212,7 +212,7 @@ export default function BulkCreditsScreen() {
       {/* Operation Modal */}
       <ResponsiveModal visible={opModal} onClose={() => setOpModal(false)}
         title={opType === 'add' ? `Add Credits to ${selected.size} Doctors` : `Remove Credits from ${selected.size} Doctors`}>
-        <Text style={{ fontSize: 13, color: c.text, opacity: 0.5, marginBottom: 16 }}>
+        <Text style={{ fontSize: 13, ...mutedTextStyle(c, 0.5), marginBottom: 16 }}>
           {opType === 'add'
             ? 'The same amount will be added to all selected doctors.'
             : 'Credits will be revoked via a reverse transaction. History is preserved.'}
@@ -244,11 +244,11 @@ export default function BulkCreditsScreen() {
         <NeuCard style={{ padding: 14, flexDirection: 'row', justifyContent: 'space-around', marginBottom: 16 }}>
           <View style={{ alignItems: 'center' }}>
             <Text style={{ fontSize: 24, fontWeight: '800', color: '#16A34A' }}>{successCount}</Text>
-            <Text style={{ fontSize: 11, color: c.text, opacity: 0.5 }}>Succeeded</Text>
+            <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.5) }}>Succeeded</Text>
           </View>
           <View style={{ alignItems: 'center' }}>
             <Text style={{ fontSize: 24, fontWeight: '800', color: '#DC2626' }}>{errorCount}</Text>
-            <Text style={{ fontSize: 11, color: c.text, opacity: 0.5 }}>Failed</Text>
+            <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.5) }}>Failed</Text>
           </View>
         </NeuCard>
         <KeyboardAwareScrollView style={{ maxHeight: 300 }}>

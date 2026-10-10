@@ -5,7 +5,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { Play, Bell, CheckCircle, BookOpen } from 'lucide-react-native';
 import Reanimated, { FadeInDown } from 'react-native-reanimated';
 import { NeuCard } from '@/components/NeuCard';
-import { neuColors, useLayout } from '@/lib/neu';
+import { neuColors, useLayout, mutedTextStyle } from '@/lib/neu';
 
 // ── Shimmer skeleton for thumbnail loading state ──────────────────────────
 function SkeletonShimmer({ width, height, borderRadius = 0 }: { width: number | string; height: number; borderRadius?: number }) {
@@ -117,7 +117,7 @@ export function CourseCard({
 
               {/* Doctor */}
               {doctorName ? (
-                <Text style={{ fontSize: metaFs, color: c.text, opacity: 0.5, marginTop: layout.pad.xs }} numberOfLines={1}>
+                <Text style={{ fontSize: metaFs, ...mutedTextStyle(c, 0.5), marginTop: layout.pad.xs }} numberOfLines={1}>
                   Dr. {doctorName}
                 </Text>
               ) : null}
@@ -134,7 +134,7 @@ export function CourseCard({
               {progress !== undefined ? (
                 <View style={{ marginTop: layout.pad.xs }}>
                   <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 2 }}>
-                    <Text style={{ fontSize: progressFs, color: c.text, opacity: 0.45 }}>Progress</Text>
+                    <Text style={{ fontSize: progressFs, ...mutedTextStyle(c, 0.45) }}>Progress</Text>
                     <Text style={{ fontSize: progressFs, color: PROGRESS_COLOR_DIM, fontWeight: '600' }}>{progress}%</Text>
                   </View>
                   <View style={{ height: 3, backgroundColor: isDark ? '#1a3a2a' : '#dcfce7', borderRadius: 2, overflow: 'hidden' }}>
@@ -216,13 +216,13 @@ export function CourseCard({
           </Text>
 
           {doctorName ? (
-            <Text style={{ fontSize: metaFs, color: c.text, opacity: 0.55, marginBottom: layout.pad.xs }}>
+            <Text style={{ fontSize: metaFs, ...mutedTextStyle(c, 0.55), marginBottom: layout.pad.xs }}>
               Dr. {doctorName}
             </Text>
           ) : null}
 
           {description ? (
-            <Text style={{ fontSize: metaFs, color: c.text, opacity: 0.5, lineHeight: metaFs * 1.4, marginBottom: layout.pad.xs }} numberOfLines={1}>
+            <Text style={{ fontSize: metaFs, ...mutedTextStyle(c, 0.5), lineHeight: metaFs * 1.4, marginBottom: layout.pad.xs }} numberOfLines={1}>
               {description}
             </Text>
           ) : null}
@@ -239,7 +239,7 @@ export function CourseCard({
           {progress !== undefined ? (
             <View style={{ marginBottom: layout.pad.xs }}>
               <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 3 }}>
-                <Text style={{ fontSize: progressFs, color: c.text, opacity: 0.5 }}>Progress</Text>
+                <Text style={{ fontSize: progressFs, ...mutedTextStyle(c, 0.5) }}>Progress</Text>
                 <Text style={{ fontSize: progressFs, color: PROGRESS_COLOR_DIM, fontWeight: '600' }}>{progress}%</Text>
               </View>
               <View style={{ height: 3, backgroundColor: isDark ? '#1a3a2a' : '#dcfce7', borderRadius: 2, overflow: 'hidden' }}>

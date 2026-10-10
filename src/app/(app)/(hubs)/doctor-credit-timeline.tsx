@@ -15,7 +15,7 @@ import {
 import { NeuCard } from '@/components/NeuCard';
 import { PageHeader } from '@/components/PageHeader';
 import { NeuButton } from '@/components/NeuButton';
-import { neuColors, useLayout, safeBottom } from '@/lib/neu';
+import { neuColors, useLayout, safeBottom, mutedTextStyle } from '@/lib/neu';
 import { getCreditLedger, getDoctorCreditSummary, getDoctorActivityStats, getProfile } from '@/lib/api';
 import type { DoctorActivityStats } from '@/lib/api';
 import { useProfileStore } from '@/lib/store';
@@ -159,7 +159,7 @@ export default function DoctorCreditTimelineScreen() {
           <Text style={{ fontSize: 18, fontWeight: '800', color: c.text, textAlign: 'center' }}>
             No Activity Timeline
           </Text>
-          <Text style={{ fontSize: 14, color: c.text, opacity: 0.5, textAlign: 'center', lineHeight: 22, maxWidth: 280 }}>
+          <Text style={{ fontSize: 14, ...mutedTextStyle(c, 0.5), textAlign: 'center', lineHeight: 22, maxWidth: 280 }}>
             This account does not have an Activity Timeline.{'\n'}Only Doctor accounts have a credit and activity timeline.
           </Text>
           <Pressable
@@ -187,7 +187,7 @@ export default function DoctorCreditTimelineScreen() {
         {!loading && loadError && (
           <NeuCard style={{ padding: 24, alignItems: 'center', gap: 12 }}>
             <Text style={{ fontSize: 15, fontWeight: '700', color: '#DC2626', textAlign: 'center' }}>Failed to load data</Text>
-            <Text style={{ fontSize: 12, color: c.text, opacity: 0.5, textAlign: 'center' }}>{loadError}</Text>
+            <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.5), textAlign: 'center' }}>{loadError}</Text>
             <Pressable onPress={() => { setLoading(true); setLoadError(null); load(); }}
               style={{ backgroundColor: c.primary, borderRadius: 10, paddingHorizontal: layout.screenPx, paddingVertical: 10, marginTop: 4 }}>
               <Text style={{ color: '#fff', fontWeight: '700' }}>Retry</Text>
@@ -227,7 +227,7 @@ export default function DoctorCreditTimelineScreen() {
             {/* ── Activity Stats ── */}
             {actStats && (
               <>
-                <Text style={{ fontSize: 11, fontWeight: '700', color: c.text, opacity: 0.4, marginBottom: 10 }}>
+                <Text style={{ fontSize: 11, fontWeight: '700', ...mutedTextStyle(c, 0.4), marginBottom: 10 }}>
                   ACTIVITY OVERVIEW
                 </Text>
 
@@ -237,11 +237,11 @@ export default function DoctorCreditTimelineScreen() {
                     <DollarSign size={22} color="#7C3AED" />
                   </View>
                   <View style={{ flex: 1 }}>
-                    <Text style={{ fontSize: 11, color: c.text, opacity: 0.45 }}>Credit Selling Price</Text>
+                    <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.45) }}>Credit Selling Price</Text>
                     <Text style={{ fontSize: 26, fontWeight: '900', color: '#7C3AED' }}>
                       EGP {actStats.credit_selling_price.toLocaleString('en-US')}
                     </Text>
-                    <Text style={{ fontSize: 11, color: c.text, opacity: 0.35, marginTop: 1 }}>per credit</Text>
+                    <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.35), marginTop: 1 }}>per credit</Text>
                   </View>
                 </NeuCard>
 
@@ -257,7 +257,7 @@ export default function DoctorCreditTimelineScreen() {
                   ].map(kpi => (
                     <NeuCard key={kpi.label} style={{ flexBasis: '47%', padding: 14, alignItems: 'center' }}>
                       <Text style={{ fontSize: 24, fontWeight: '900', color: kpi.color }}>{kpi.value}</Text>
-                      <Text style={{ fontSize: 10, color: c.text, opacity: 0.45, textAlign: 'center', marginTop: 2 }}>{kpi.label}</Text>
+                      <Text style={{ fontSize: 10, ...mutedTextStyle(c, 0.45), textAlign: 'center', marginTop: 2 }}>{kpi.label}</Text>
                     </NeuCard>
                   ))}
                 </View>
@@ -268,11 +268,11 @@ export default function DoctorCreditTimelineScreen() {
                     <TrendingUp size={20} color="#16A34A" />
                   </View>
                   <View style={{ flex: 1 }}>
-                    <Text style={{ fontSize: 11, color: c.text, opacity: 0.45 }}>Total Earnings</Text>
+                    <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.45) }}>Total Earnings</Text>
                     <Text style={{ fontSize: 20, fontWeight: '900', color: '#16A34A' }}>
                       EGP {actStats.total_earnings.toLocaleString('en-US')}
                     </Text>
-                    <Text style={{ fontSize: 11, color: c.text, opacity: 0.35 }}>
+                    <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.35) }}>
                       {actStats.total_used} credits × EGP {actStats.credit_selling_price}
                     </Text>
                   </View>
@@ -286,7 +286,7 @@ export default function DoctorCreditTimelineScreen() {
                   ].map(row => (
                     <View key={row.label} style={{ flexDirection: 'row', alignItems: 'center' }}>
                       <Clock size={14} color={c.text} opacity={0.4} style={{ marginRight: 8 }} />
-                      <Text style={{ fontSize: 12, color: c.text, opacity: 0.45, minWidth: 80, flexShrink: 0 }}>{row.label}</Text>
+                      <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.45), minWidth: 80, flexShrink: 0 }}>{row.label}</Text>
                       <Text style={{ fontSize: 12, color: c.text, flex: 1 }}>
                         {row.value
                           ? new Date(row.value).toLocaleString('en-US', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true })
@@ -311,7 +311,7 @@ export default function DoctorCreditTimelineScreen() {
               ].map(kpi => (
                 <NeuCard key={kpi.label} style={{ flexBasis: '47%', padding: 14, alignItems: 'center' }}>
                   <Text style={{ fontSize: 24, fontWeight: '900', color: kpi.color }}>{kpi.value}</Text>
-                  <Text style={{ fontSize: 10, color: c.text, opacity: 0.45, textAlign: 'center', marginTop: 2 }}>{kpi.label}</Text>
+                  <Text style={{ fontSize: 10, ...mutedTextStyle(c, 0.45), textAlign: 'center', marginTop: 2 }}>{kpi.label}</Text>
                 </NeuCard>
               ))}
             </View>
@@ -323,7 +323,7 @@ export default function DoctorCreditTimelineScreen() {
                 <DollarSign size={20} color="#16A34A" />
               </View>
               <View>
-                <Text style={{ fontSize: 11, color: c.text, opacity: 0.45 }}>Revenue Generated</Text>
+                <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.45) }}>Revenue Generated</Text>
                 <Text style={{ fontSize: 20, fontWeight: '900', color: '#16A34A' }}>
                   {'EGP'} {revenue.toLocaleString('en-US')}
                 </Text>
@@ -333,7 +333,7 @@ export default function DoctorCreditTimelineScreen() {
             {/* Balance Chart */}
             {chartData.vals.length > 1 && (
               <>
-                <Text style={{ fontSize: 11, fontWeight: '700', color: c.text, opacity: 0.4, marginBottom: 10 }}>
+                <Text style={{ fontSize: 11, fontWeight: '700', ...mutedTextStyle(c, 0.4), marginBottom: 10 }}>
                   BALANCE TREND (LAST {chartData.vals.length} TRANSACTIONS)
                 </Text>
                 <NeuCard style={{ padding: 16, marginBottom: 20 }}>
@@ -351,7 +351,7 @@ export default function DoctorCreditTimelineScreen() {
                   </View>
                   <View style={{ flexDirection: 'row', gap: 4, marginTop: 4 }}>
                     {chartData.labels.map((l, i) => (
-                      <Text key={i} style={{ flex: 1, fontSize: 8, color: c.text, opacity: 0.3, textAlign: 'center' }}>{l}</Text>
+                      <Text key={i} style={{ flex: 1, fontSize: 8, ...mutedTextStyle(c, 0.3), textAlign: 'center' }}>{l}</Text>
                     ))}
                   </View>
                 </NeuCard>
@@ -359,13 +359,13 @@ export default function DoctorCreditTimelineScreen() {
             )}
 
             {/* Transaction Timeline */}
-            <Text style={{ fontSize: 11, fontWeight: '700', color: c.text, opacity: 0.4, marginBottom: 12 }}>
+            <Text style={{ fontSize: 11, fontWeight: '700', ...mutedTextStyle(c, 0.4), marginBottom: 12 }}>
               TRANSACTION HISTORY ({txRows.length})
             </Text>
             {txRows.length === 0 ? (
               <NeuCard style={{ padding: 40, alignItems: 'center' }}>
                 <CreditCard size={32} color={c.primary} opacity={0.2} />
-                <Text style={{ color: c.text, opacity: 0.4, marginTop: 12 }}>No transactions yet</Text>
+                <Text style={{ ...mutedTextStyle(c, 0.4), marginTop: 12 }}>No transactions yet</Text>
               </NeuCard>
             ) : (
               txRows.map(tx => {
@@ -395,19 +395,19 @@ export default function DoctorCreditTimelineScreen() {
                             {tx.transaction_type.replace(/_/g, ' ')}
                           </Text>
                           {actorName && (
-                            <Text style={{ fontSize: 11, color: c.text, opacity: 0.5 }}>By {actorName}</Text>
+                            <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.5) }}>By {actorName}</Text>
                           )}
                           {(tx.reason || tx.notes) && (
-                            <Text style={{ fontSize: 11, color: c.text, opacity: 0.4, marginTop: 2 }}>
+                            <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.4), marginTop: 2 }}>
                               {tx.reason ?? tx.notes}
                             </Text>
                           )}
                           {tx.balance_before != null && tx.balance_after != null && (
-                            <Text style={{ fontSize: 10, color: c.text, opacity: 0.35, marginTop: 2 }}>
+                            <Text style={{ fontSize: 10, ...mutedTextStyle(c, 0.35), marginTop: 2 }}>
                               Balance: {tx.balance_before} → {tx.balance_after}
                             </Text>
                           )}
-                          <Text style={{ fontSize: 10, color: c.text, opacity: 0.3, marginTop: 3 }}>
+                          <Text style={{ fontSize: 10, ...mutedTextStyle(c, 0.3), marginTop: 3 }}>
                             {fmt(tx.created_at)}
                           </Text>
                         </View>

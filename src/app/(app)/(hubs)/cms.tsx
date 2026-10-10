@@ -25,7 +25,7 @@ import { NeuButton } from '@/components/NeuButton';
 import { LoadingState, ErrorState } from '@/components/ScreenState';
 import { EmptyState } from '@/components/EmptyState';
 import { useToast } from '@/components/Toast';
-import { neuColors, useLayout, safeBottom } from '@/lib/neu';
+import { neuColors, useLayout, safeBottom, mutedTextStyle } from '@/lib/neu';
 import { friendlyError } from '@/lib/validation';
 import { CONTACT_LINK_PRESETS, parseContactLinks, type ContactLink } from '@/lib/branding';
 
@@ -111,18 +111,18 @@ function ContactLinksEditor({
     <View style={{ marginTop: 6 }}>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 4 }}>
         <Link2 size={15} color={c.primary} />
-        <Text style={{ fontSize: 11, fontWeight: '700', color: c.text, opacity: 0.5, textTransform: 'uppercase' }}>
+        <Text style={{ fontSize: 11, fontWeight: '700', ...mutedTextStyle(c, 0.5), textTransform: 'uppercase' }}>
           Contact Links
         </Text>
       </View>
-      <Text style={{ fontSize: 11, color: c.text, opacity: 0.45, marginBottom: 12, lineHeight: 16 }}>
+      <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.45), marginBottom: 12, lineHeight: 16 }}>
         Shown on the public Contact Us screen in this order. Users see the label and tapping opens the
         destination. Email/phone are entered as a plain address/number; other platforms need a full
         https:// link. Disabled links stay saved but stay hidden.
       </Text>
 
       {links.length === 0 && (
-        <Text style={{ fontSize: 12, color: c.text, opacity: 0.45, marginBottom: 12 }}>
+        <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.45), marginBottom: 12 }}>
           No custom links yet — the built-in contact channels are still shown.
         </Text>
       )}
@@ -196,7 +196,7 @@ function ContactLinksEditor({
             </ScrollView>
 
             {/* Row 3 — label + destination */}
-            <Text style={{ fontSize: 10, fontWeight: '700', color: c.text, opacity: 0.45, marginBottom: 4 }}>
+            <Text style={{ fontSize: 10, fontWeight: '700', ...mutedTextStyle(c, 0.45), marginBottom: 4 }}>
               LABEL
             </Text>
             <TextInput
@@ -206,7 +206,7 @@ function ContactLinksEditor({
               placeholderTextColor={`${c.text}40`}
               style={{ ...inp, minWidth: 0, marginBottom: 10, fontSize: 13, color: c.text }}
             />
-            <Text style={{ fontSize: 10, fontWeight: '700', color: c.text, opacity: 0.45, marginBottom: 4 }}>
+            <Text style={{ fontSize: 10, fontWeight: '700', ...mutedTextStyle(c, 0.45), marginBottom: 4 }}>
               {link.platform === 'email' ? 'EMAIL ADDRESS'
                 : link.platform === 'phone' ? 'PHONE NUMBER'
                   : 'DESTINATION (https://…)'}
@@ -429,7 +429,7 @@ export default function CMSPagesScreen({ backTo }: { backTo?: string } = {}) {
                       </Text>
                       {page.using_builtin && (
                         <View style={{ backgroundColor: `${c.text}14`, borderRadius: 8, paddingHorizontal: 6, paddingVertical: 2 }}>
-                          <Text style={{ fontSize: 10, fontWeight: '800', color: c.text, opacity: 0.6 }}>BUILT-IN TEXT</Text>
+                          <Text style={{ fontSize: 10, fontWeight: '800', ...mutedTextStyle(c, 0.6) }}>BUILT-IN TEXT</Text>
                         </View>
                       )}
                     </View>
@@ -445,14 +445,14 @@ export default function CMSPagesScreen({ backTo }: { backTo?: string } = {}) {
 
                 {isOpen && draft && (
                   <View style={{ paddingHorizontal: 16, paddingBottom: 16 }}>
-                    <Text style={{ fontSize: 11, fontWeight: '700', color: c.text, opacity: 0.5, marginBottom: 6, textTransform: 'uppercase' }}>Page Title</Text>
+                    <Text style={{ fontSize: 11, fontWeight: '700', ...mutedTextStyle(c, 0.5), marginBottom: 6, textTransform: 'uppercase' }}>Page Title</Text>
                     <TextInput
                       value={draft.title}
                       onChangeText={v => setEditing(prev => ({ ...prev, [page.key]: { ...prev[page.key], title: v } }))}
                       style={{ ...inp, minWidth: 0, marginBottom: 14 }}
                     />
-                    <Text style={{ fontSize: 11, fontWeight: '700', color: c.text, opacity: 0.5, marginBottom: 6, textTransform: 'uppercase' }}>Content</Text>
-                    <Text style={{ fontSize: 11, color: c.text, opacity: 0.45, marginBottom: 8, lineHeight: 16 }}>
+                    <Text style={{ fontSize: 11, fontWeight: '700', ...mutedTextStyle(c, 0.5), marginBottom: 6, textTransform: 'uppercase' }}>Content</Text>
+                    <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.45), marginBottom: 8, lineHeight: 16 }}>
                       Plain text — no HTML. Lines starting with ## become section headings. Leave empty to keep the app&apos;s built-in text.
                     </Text>
                     <View style={{ ...inp, minWidth: 0, marginBottom: 16 }}>

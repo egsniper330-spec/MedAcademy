@@ -31,7 +31,7 @@ import {
 import { backendClient } from '@/client/backendClient';
 import { NeuCard } from '@/components/NeuCard';
 import { NeuButton } from '@/components/NeuButton';
-import { neuColors, useLayout, safeBottom } from '@/lib/neu';
+import { neuColors, useLayout, safeBottom, mutedTextStyle } from '@/lib/neu';
 import { PageHeader } from '@/components/PageHeader';
 
 interface DbAuditResult {
@@ -188,7 +188,7 @@ export default function DbAuditPanel({ backTo }: { backTo?: string } = {}) {
           <NeuCard style={{ padding: 30, alignItems: 'center' }}>
             <AlertTriangle size={40} color="#DC2626" />
             <Text style={{ fontSize: 14, fontWeight: '600', color: c.text, marginTop: 12 }}>Unable to run the integrity audit</Text>
-            <Text style={{ fontSize: 12, color: c.text, opacity: 0.5, marginTop: 6, textAlign: 'center' }}>
+            <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.5), marginTop: 6, textAlign: 'center' }}>
               The audit endpoint returned an error. Pull to refresh or tap &quot;Run Audit&quot; to retry.
             </Text>
           </NeuCard>
@@ -210,7 +210,7 @@ export default function DbAuditPanel({ backTo }: { backTo?: string } = {}) {
                 <Text style={{ fontSize: 18, fontWeight: '800', color: totalIssues === 0 ? '#16A34A' : '#DC2626' }}>
                   {totalIssues === 0 ? 'Database is Clean' : `${totalIssues} Issue${totalIssues > 1 ? 's' : ''} Detected`}
                 </Text>
-                <Text style={{ fontSize: 12, color: c.text, opacity: 0.45, marginTop: 3 }}>
+                <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.45), marginTop: 3 }}>
                   Data-integrity audit — for live service health use System Diagnostics
                 </Text>
               </View>

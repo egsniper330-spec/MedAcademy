@@ -15,7 +15,7 @@ import { PageHeader } from '@/components/PageHeader';
 import { NeuCard } from '@/components/NeuCard';
 import { NeuButton } from '@/components/NeuButton';
 import { useToast } from '@/components/Toast';
-import { neuColors, neuFlatStyle, useLayout, safeBottom } from '@/lib/neu'
+import { neuColors, neuFlatStyle, useLayout, safeBottom, mutedTextStyle } from '@/lib/neu';
 import { KeyboardAwareScrollView } from '@/components/KeyboardAwareScrollView';
 
 type ImportRole = 'student' | 'doctor' | 'admin';
@@ -218,7 +218,7 @@ export default function BulkImportScreen({ backTo }: { backTo?: string } = {}) {
       />
 
       <View style={{ padding: layout.screenPx }}>
-        <Text style={{ fontSize: 13, color: c.text, opacity: 0.5, marginBottom: 20 }}>
+        <Text style={{ fontSize: 13, ...mutedTextStyle(c, 0.5), marginBottom: 20 }}>
           Import users from CSV. Download the template, fill it in, then upload.
         </Text>
 
@@ -239,7 +239,7 @@ export default function BulkImportScreen({ backTo }: { backTo?: string } = {}) {
           <FileText size={20} color={c.primary} />
           <View style={{ flex: 1 }}>
             <Text style={{ fontSize: 13, fontWeight: '600', color: c.text }}>CSV Template</Text>
-            <Text style={{ fontSize: 11, color: c.text, opacity: 0.45, marginTop: 2 }} numberOfLines={2}>
+            <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.45), marginTop: 2 }} numberOfLines={2}>
               {templateForRole.split('\n')[0]}
             </Text>
           </View>
@@ -283,12 +283,12 @@ export default function BulkImportScreen({ backTo }: { backTo?: string } = {}) {
                 </View>
                 <View style={{ flex: 1 }}>
                   <Text style={{ fontSize: 13, fontWeight: '600', color: c.text }}>{row.full_name}</Text>
-                  <Text style={{ fontSize: 11, color: c.text, opacity: 0.5 }}>{row.email}</Text>
+                  <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.5) }}>{row.email}</Text>
                 </View>
               </NeuCard>
             ))}
             {rows.length > 10 && (
-              <Text style={{ fontSize: 12, color: c.text, opacity: 0.4, marginBottom: 8, textAlign: 'center' }}>
+              <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.4), marginBottom: 8, textAlign: 'center' }}>
                 …and {rows.length - 10} more rows
               </Text>
             )}
@@ -332,7 +332,7 @@ export default function BulkImportScreen({ backTo }: { backTo?: string } = {}) {
                 <NeuCard key={s.label} style={{ flex: 1, alignItems: 'center', padding: 12 }}>
                   <s.icon size={18} color={s.color} />
                   <Text style={{ fontSize: 20, fontWeight: '900', color: s.color, marginTop: 4 }}>{s.value}</Text>
-                  <Text style={{ fontSize: 10, color: c.text, opacity: 0.5, marginTop: 2 }}>{s.label}</Text>
+                  <Text style={{ fontSize: 10, ...mutedTextStyle(c, 0.5), marginTop: 2 }}>{s.label}</Text>
                 </NeuCard>
               ))}
             </View>
@@ -347,7 +347,7 @@ export default function BulkImportScreen({ backTo }: { backTo?: string } = {}) {
                 }
                 <View style={{ flex: 1 }}>
                   <Text style={{ fontSize: 13, fontWeight: '600', color: c.text }}>{r.full_name}</Text>
-                  <Text style={{ fontSize: 11, color: c.text, opacity: 0.45 }}>{r.email}</Text>
+                  <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.45) }}>{r.email}</Text>
                   {r.message && r.status !== 'success' && (
                     <Text style={{ fontSize: 11, color: '#EF4444', marginTop: 2 }} numberOfLines={2}>{r.message}</Text>
                   )}

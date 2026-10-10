@@ -8,7 +8,7 @@ import { Text, useColorScheme, View } from 'react-native';
 import { useFocusEffect } from 'expo-router';
 import { HardDrive, Film, TrendingUp, Maximize2 } from 'lucide-react-native';
 import { NeuCard } from '@/components/NeuCard';
-import { neuColors, neuFlatStyle, neuPressedStyle } from '@/lib/neu';
+import { neuColors, neuFlatStyle, neuPressedStyle, mutedTextStyle } from '@/lib/neu';
 import { getDoctorStorageStats, formatBytes, type DoctorStorageStats } from '@/lib/videoUploadEngine';
 import { useProfileStore } from '@/lib/store';
 
@@ -24,7 +24,7 @@ function StatRow({
         <Icon size={16} color={color} />
       </View>
       <View style={{ flex: 1 }}>
-        <Text style={{ fontSize: 12, color: c.text, opacity: 0.5, fontWeight: '600' }}>{label}</Text>
+        <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.5), fontWeight: '600' }}>{label}</Text>
         <Text style={{ fontSize: 14, fontWeight: '800', color: c.text, marginTop: 1 }}>{value}</Text>
       </View>
     </View>

@@ -64,8 +64,10 @@ export default function RoleTabShell({ tabs, initialRouteName }: RoleTabShellPro
           // arbitrary previously-mounted scene.
           backBehavior="history"
           tabBarActiveTintColor={c.primary}
-          // Inactive items: same text/50 mix the JS bar uses (`c.text + '44'`).
-          tabBarInactiveTintColor={`${c.text}66`}
+          // Inactive items: Light keeps the JS bar's translucent text mix. Dark
+          // uses the solid `textMuted` tier — a 40%-alpha tint over a deep navy
+          // field falls below AA, and the native bar draws it over its own glass.
+          tabBarInactiveTintColor={isDark ? c.textMuted : `${c.text}66`}
           // iPad keeps a BOTTOM bar (current behavior) instead of the iOS 18
           // sidebar adaptation; phones are unaffected by this option.
           sidebarAdaptable={false}

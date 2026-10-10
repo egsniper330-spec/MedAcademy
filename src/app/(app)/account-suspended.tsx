@@ -9,7 +9,7 @@ import { router } from 'expo-router';
 import { ShieldOff, AlertTriangle, Smartphone, LogOut, Phone } from 'lucide-react-native';
 import { backendClient } from '@/client/backendClient';
 // Add useLayout import
-import { neuColors, neuFlatStyle, useLayout } from '@/lib/neu';
+import { neuColors, neuFlatStyle, useLayout, mutedTextStyle } from '@/lib/neu';
 import { NeuButton } from '@/components/NeuButton';
 
 export default function AccountBlockedScreen() {
@@ -66,8 +66,7 @@ export default function AccountBlockedScreen() {
       </Text>
       <Text style={{
         fontSize: layout.bodySize,
-        color: c.text,
-        opacity: 0.6,
+        ...mutedTextStyle(c, 0.6),
         textAlign: 'center',
         lineHeight: layout.bodySize * 1.6,
         marginBottom: layout.pad.xl,
@@ -92,7 +91,7 @@ export default function AccountBlockedScreen() {
             {icon}
             <View style={{ flex: 1 }}>
               <Text style={{ fontSize: layout.bodySize, fontWeight: '700', color: c.text, marginBottom: 2 }}>{title}</Text>
-              <Text style={{ fontSize: layout.captionSize, color: c.text, opacity: 0.6, lineHeight: layout.captionSize * 1.6 }}>{body}</Text>
+              <Text style={{ fontSize: layout.captionSize, ...mutedTextStyle(c, 0.6), lineHeight: layout.captionSize * 1.6 }}>{body}</Text>
             </View>
           </View>
         ))}

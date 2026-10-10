@@ -28,7 +28,7 @@ import {
   TrendingDown,
 } from 'lucide-react-native';
 import { NeuCard } from '@/components/NeuCard';
-import { neuColors, useLayout, safeBottom } from '@/lib/neu';
+import { neuColors, useLayout, safeBottom, mutedTextStyle } from '@/lib/neu';
 import {
   getDoctorEarningsDashboard,
   bucketEarningsTimeSeries,
@@ -113,7 +113,7 @@ function StatCard({ icon, label, value, color, c }: {
       <View style={{ width: 32, height: 32, borderRadius: 10, backgroundColor: `${color}18`, alignItems: 'center', justifyContent: 'center' }}>
         {icon}
       </View>
-      <Text style={{ fontSize: 9, color: c.text, opacity: 0.4, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.8 }} numberOfLines={1}>{label}</Text>
+      <Text style={{ fontSize: 9, ...mutedTextStyle(c, 0.4), fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.8 }} numberOfLines={1}>{label}</Text>
       <Text style={{ fontSize: 15, fontWeight: '800', color }} numberOfLines={1} adjustsFontSizeToFit>{value}</Text>
     </NeuCard>
   );
@@ -124,7 +124,7 @@ function StatCard({ icon, label, value, color, c }: {
 // ─────────────────────────────────────────────────────────────────────────────
 function SL({ label, c }: { label: string; c: typeof neuColors.light }) {
   return (
-    <Text style={{ fontSize: 9, fontWeight: '800', letterSpacing: 1.3, textTransform: 'uppercase', color: c.text, opacity: 0.3, marginBottom: 10, marginTop: 4 }}>
+    <Text style={{ fontSize: 9, fontWeight: '800', letterSpacing: 1.3, textTransform: 'uppercase', ...mutedTextStyle(c, 0.3), marginBottom: 10, marginTop: 4 }}>
       {label}
     </Text>
   );
@@ -172,17 +172,17 @@ function RevenueChart({ transactions, c }: { transactions: EarningsTransactionRo
         <View style={{ flexDirection: 'row', gap: 12 }}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
             <View style={{ width: 8, height: 8, borderRadius: 2, backgroundColor: '#16A34A' }} />
-            <Text style={{ fontSize: 9, color: c.text, opacity: 0.4 }}>Income</Text>
+            <Text style={{ fontSize: 9, ...mutedTextStyle(c, 0.4) }}>Income</Text>
           </View>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
             <View style={{ width: 8, height: 8, borderRadius: 2, backgroundColor: '#DC2626' }} />
-            <Text style={{ fontSize: 9, color: c.text, opacity: 0.4 }}>Deduction</Text>
+            <Text style={{ fontSize: 9, ...mutedTextStyle(c, 0.4) }}>Deduction</Text>
           </View>
         </View>
       </View>
       <PeriodPicker value={period} onChange={setPeriod} c={c} />
       {points.length === 0 ? (
-        <Text style={{ fontSize: 13, color: c.text, opacity: 0.3, textAlign: 'center', paddingVertical: 24 }}>No data for this period</Text>
+        <Text style={{ fontSize: 13, ...mutedTextStyle(c, 0.3), textAlign: 'center', paddingVertical: 24 }}>No data for this period</Text>
       ) : (
         <ScrollView horizontal showsHorizontalScrollIndicator={false}>
           <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: 5, height: 110, paddingBottom: 20, minWidth: points.length * 32 }}>
@@ -191,11 +191,11 @@ function RevenueChart({ transactions, c }: { transactions: EarningsTransactionRo
               const color = p.isNegative ? '#DC2626' : '#16A34A';
               return (
                 <View key={i} style={{ alignItems: 'center', gap: 3, width: 28 }}>
-                  <Text style={{ fontSize: 7, color: c.text, opacity: 0.3, fontWeight: '600' }} numberOfLines={1}>
+                  <Text style={{ fontSize: 7, ...mutedTextStyle(c, 0.3), fontWeight: '600' }} numberOfLines={1}>
                     {Math.abs(p.amount) > 0 ? String(Math.round(Math.abs(p.amount))) : ''}
                   </Text>
                   <View style={{ width: 20, height: barH, borderRadius: 5, backgroundColor: `${color}CC` }} />
-                  <Text style={{ fontSize: 8, color: c.text, opacity: 0.35, fontWeight: '600', textAlign: 'center' }} numberOfLines={1}>{p.label}</Text>
+                  <Text style={{ fontSize: 8, ...mutedTextStyle(c, 0.35), fontWeight: '600', textAlign: 'center' }} numberOfLines={1}>{p.label}</Text>
                 </View>
               );
             })}
@@ -239,7 +239,7 @@ function BalanceTrendChart({ txRows, c }: { txRows: CreditRow[]; c: typeof neuCo
         </View>
         <View style={{ flexDirection: 'row', gap: 4, marginTop: 4 }}>
           {chartData.labels.map((l, i) => (
-            <Text key={i} style={{ flex: 1, fontSize: 8, color: c.text, opacity: 0.3, textAlign: 'center' }}>{l}</Text>
+            <Text key={i} style={{ flex: 1, fontSize: 8, ...mutedTextStyle(c, 0.3), textAlign: 'center' }}>{l}</Text>
           ))}
         </View>
       </NeuCard>
@@ -254,10 +254,10 @@ function CourseRevenueTable({ rows, total, c }: { rows: EarningsCourseRow[]; tot
   return (
     <NeuCard radius={18} style={{ overflow: 'hidden', marginBottom: 20 }}>
       <View style={{ flexDirection: 'row', paddingVertical: 10, paddingHorizontal: 14, backgroundColor: `${c.text}06`, borderBottomWidth: 1, borderBottomColor: `${c.text}08` }}>
-        <Text style={{ flex: 1, fontSize: 9, fontWeight: '800', color: c.text, opacity: 0.4, textTransform: 'uppercase', letterSpacing: 0.7 }}>Course</Text>
-        <Text style={{ width: 44, textAlign: 'center', fontSize: 9, fontWeight: '800', color: c.text, opacity: 0.4, textTransform: 'uppercase' }}>Students</Text>
-        <Text style={{ width: 60, textAlign: 'right', fontSize: 9, fontWeight: '800', color: c.text, opacity: 0.4, textTransform: 'uppercase' }}>Revenue</Text>
-        <Text style={{ width: 32, textAlign: 'right', fontSize: 9, fontWeight: '800', color: c.text, opacity: 0.4, textTransform: 'uppercase' }}>%</Text>
+        <Text style={{ flex: 1, fontSize: 9, fontWeight: '800', ...mutedTextStyle(c, 0.4), textTransform: 'uppercase', letterSpacing: 0.7 }}>Course</Text>
+        <Text style={{ width: 44, textAlign: 'center', fontSize: 9, fontWeight: '800', ...mutedTextStyle(c, 0.4), textTransform: 'uppercase' }}>Students</Text>
+        <Text style={{ width: 60, textAlign: 'right', fontSize: 9, fontWeight: '800', ...mutedTextStyle(c, 0.4), textTransform: 'uppercase' }}>Revenue</Text>
+        <Text style={{ width: 32, textAlign: 'right', fontSize: 9, fontWeight: '800', ...mutedTextStyle(c, 0.4), textTransform: 'uppercase' }}>%</Text>
       </View>
       {rows.map(r => (
         <View key={r.course_id} style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 11, paddingHorizontal: 14, borderBottomWidth: 1, borderBottomColor: `${c.text}06` }}>
@@ -306,13 +306,13 @@ function EarningsTransactionRowUI({ row, onPress, c }: {
       )}
       <View style={{ flex: 1, gap: 2 }}>
         <Text style={{ fontSize: 13, fontWeight: '700', color: c.text }} numberOfLines={1}>{txDisplayName(row)}</Text>
-        <Text style={{ fontSize: 11, color: c.text, opacity: 0.4 }} numberOfLines={1}>
+        <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.4) }} numberOfLines={1}>
           {row.course_title ?? '—'}{'  ·  '}{EARNINGS_TX_LABEL[row.transaction_type] ?? row.transaction_type}
         </Text>
       </View>
       <View style={{ alignItems: 'flex-end', gap: 2 }}>
         <Text style={{ fontSize: 13, fontWeight: '800', color }}>{fmtEGP(row.amount)}</Text>
-        <Text style={{ fontSize: 10, color: c.text, opacity: 0.35 }}>{fmtDateShort(row.created_at)}</Text>
+        <Text style={{ fontSize: 10, ...mutedTextStyle(c, 0.35) }}>{fmtDateShort(row.created_at)}</Text>
       </View>
       {row.student_id && <ChevronRight size={14} color={`${c.text}30`} style={{ marginLeft: 4 }} />}
     </Pressable>
@@ -339,29 +339,29 @@ function CreditTimelineRow({ tx, c, isLast }: { tx: CreditRow; c: typeof neuColo
               {tx.transaction_type.replace(/_/g, ' ')}
             </Text>
             {tx.performed_by_name && (
-              <Text style={{ fontSize: 11, color: c.text, opacity: 0.5 }}>By {tx.performed_by_name}</Text>
+              <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.5) }}>By {tx.performed_by_name}</Text>
             )}
             {(tx.reason || tx.notes) && (
-              <Text style={{ fontSize: 11, color: c.text, opacity: 0.4, marginTop: 2 }}>
+              <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.4), marginTop: 2 }}>
                 {tx.reason ?? tx.notes}
               </Text>
             )}
             {tx.balance_before != null && tx.balance_after != null && (
-              <Text style={{ fontSize: 10, color: c.text, opacity: 0.35, marginTop: 2 }}>
+              <Text style={{ fontSize: 10, ...mutedTextStyle(c, 0.35), marginTop: 2 }}>
                 Balance: {tx.balance_before} → {tx.balance_after}
               </Text>
             )}
             {tx.course_title && (
-              <Text style={{ fontSize: 10, color: c.text, opacity: 0.35, marginTop: 2 }}>
+              <Text style={{ fontSize: 10, ...mutedTextStyle(c, 0.35), marginTop: 2 }}>
                 Course: {tx.course_title}
               </Text>
             )}
             {tx.student_name && (
-              <Text style={{ fontSize: 10, color: c.text, opacity: 0.35 }}>
+              <Text style={{ fontSize: 10, ...mutedTextStyle(c, 0.35) }}>
                 Student: {tx.student_name}
               </Text>
             )}
-            <Text style={{ fontSize: 10, color: c.text, opacity: 0.3, marginTop: 3 }}>
+            <Text style={{ fontSize: 10, ...mutedTextStyle(c, 0.3), marginTop: 3 }}>
               {fmtDateTime(tx.created_at)}
             </Text>
           </View>
@@ -386,7 +386,7 @@ function InfoRow({ icon, label, value, c }: {
         {icon}
       </View>
       <View style={{ flex: 1 }}>
-        <Text style={{ fontSize: 10, color: c.text, opacity: 0.4, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5 }}>{label}</Text>
+        <Text style={{ fontSize: 10, ...mutedTextStyle(c, 0.4), fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5 }}>{label}</Text>
         <Text style={{ fontSize: 13, fontWeight: '600', color: c.text }} numberOfLines={2}>{value}</Text>
       </View>
     </View>
@@ -395,7 +395,7 @@ function InfoRow({ icon, label, value, c }: {
 
 function SectionLabel({ text, c }: { text: string; c: typeof neuColors.light }) {
   return (
-    <Text style={{ fontSize: 10, fontWeight: '800', color: c.text, opacity: 0.35, textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 8 }}>
+    <Text style={{ fontSize: 10, fontWeight: '800', ...mutedTextStyle(c, 0.35), textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 8 }}>
       {text}
     </Text>
   );
@@ -467,7 +467,7 @@ function StudentProfileModal({ tx, doctorId, onClose, c }: {
                 </View>
                 <View style={{ backgroundColor: `${c.text}08`, borderRadius: 8, paddingHorizontal: 8, paddingVertical: 3, flexDirection: 'row', alignItems: 'center', gap: 4 }}>
                   <Eye size={9} color={`${c.text}50`} />
-                  <Text style={{ fontSize: 10, fontWeight: '700', color: c.text, opacity: 0.4, textTransform: 'uppercase', letterSpacing: 0.5 }}>Read Only</Text>
+                  <Text style={{ fontSize: 10, fontWeight: '700', ...mutedTextStyle(c, 0.4), textTransform: 'uppercase', letterSpacing: 0.5 }}>Read Only</Text>
                 </View>
               </View>
             </View>
@@ -527,16 +527,16 @@ function StudentProfileModal({ tx, doctorId, onClose, c }: {
                         <View style={{ flexDirection: 'row', gap: 8 }}>
                           <View style={{ flex: 1, backgroundColor: `${c.text}06`, borderRadius: 10, padding: 10, alignItems: 'center' }}>
                             <Text style={{ fontSize: 13, fontWeight: '800', color: c.primary }}>{en.progress_percent}%</Text>
-                            <Text style={{ fontSize: 9, color: c.text, opacity: 0.4 }}>Progress</Text>
+                            <Text style={{ fontSize: 9, ...mutedTextStyle(c, 0.4) }}>Progress</Text>
                           </View>
                           <View style={{ flex: 1, backgroundColor: `${c.text}06`, borderRadius: 10, padding: 10, alignItems: 'center' }}>
-                            <Text style={{ fontSize: 11, fontWeight: '700', color: c.text, opacity: 0.55 }}>{fmtDateShort(en.enrolled_at)}</Text>
-                            <Text style={{ fontSize: 9, color: c.text, opacity: 0.4 }}>Enrolled</Text>
+                            <Text style={{ fontSize: 11, fontWeight: '700', ...mutedTextStyle(c, 0.55) }}>{fmtDateShort(en.enrolled_at)}</Text>
+                            <Text style={{ fontSize: 9, ...mutedTextStyle(c, 0.4) }}>Enrolled</Text>
                           </View>
                           {en.assigned_price != null && (
                             <View style={{ flex: 1, backgroundColor: '#16A34A08', borderRadius: 10, padding: 10, alignItems: 'center' }}>
                               <Text style={{ fontSize: 13, fontWeight: '800', color: '#16A34A' }}>{fmtEGPPlain(en.assigned_price)}</Text>
-                              <Text style={{ fontSize: 9, color: c.text, opacity: 0.4 }}>Revenue</Text>
+                              <Text style={{ fontSize: 9, ...mutedTextStyle(c, 0.4) }}>Revenue</Text>
                             </View>
                           )}
                         </View>
@@ -639,7 +639,7 @@ export default function SADoctorEarnings() {
               <Text style={{ fontSize: 20, fontWeight: '800', color: c.text }} numberOfLines={1}>{decodedName}</Text>
             </View>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginLeft: 40 }}>
-              <Text style={{ fontSize: 12, color: c.text, opacity: 0.38 }}>Earnings Dashboard</Text>
+              <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.38) }}>Earnings Dashboard</Text>
               <View style={{ backgroundColor: '#7C3AED12', borderRadius: 6, paddingHorizontal: 7, paddingVertical: 2, flexDirection: 'row', alignItems: 'center', gap: 4 }}>
                 <Eye size={9} color="#7C3AED" />
                 <Text style={{ fontSize: 9, fontWeight: '800', color: '#7C3AED', textTransform: 'uppercase', letterSpacing: 0.6 }}>Read Only</Text>
@@ -652,7 +652,7 @@ export default function SADoctorEarnings() {
         {loading && (
           <View style={{ alignItems: 'center', paddingVertical: 64 }}>
             <ActivityIndicator size="large" color={c.primary} />
-            <Text style={{ fontSize: 13, color: c.text, opacity: 0.35, marginTop: 14 }}>Loading earnings data…</Text>
+            <Text style={{ fontSize: 13, ...mutedTextStyle(c, 0.35), marginTop: 14 }}>Loading earnings data…</Text>
           </View>
         )}
 
@@ -660,7 +660,7 @@ export default function SADoctorEarnings() {
         {!loading && error && (
           <NeuCard radius={18} style={{ padding: 28, alignItems: 'center', gap: 14 }}>
             <Text style={{ fontSize: 15, fontWeight: '700', color: '#DC2626', textAlign: 'center' }}>Failed to load earnings</Text>
-            <Text style={{ fontSize: 12, color: c.text, opacity: 0.5, textAlign: 'center' }}>{error}</Text>
+            <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.5), textAlign: 'center' }}>{error}</Text>
             <Pressable onPress={() => { setLoading(true); loadData(); }}
               style={{ backgroundColor: c.primary, borderRadius: 10, paddingHorizontal: 24, paddingVertical: 11 }}>
               <Text style={{ color: '#fff', fontWeight: '700' }}>Retry</Text>
@@ -740,7 +740,7 @@ export default function SADoctorEarnings() {
                     <SL label="Recent Transactions" c={c} />
                     <NeuCard radius={18} style={{ padding: 16, marginBottom: 20 }}>
                       {earnings.transactions.length === 0 ? (
-                        <Text style={{ fontSize: 13, color: c.text, opacity: 0.3, textAlign: 'center', paddingVertical: 20 }}>No transactions yet</Text>
+                        <Text style={{ fontSize: 13, ...mutedTextStyle(c, 0.3), textAlign: 'center', paddingVertical: 20 }}>No transactions yet</Text>
                       ) : (
                         earnings.transactions.map(row => (
                           <EarningsTransactionRowUI key={row.id} row={row} c={c} onPress={() => setSelectedTx(row)} />
@@ -753,7 +753,7 @@ export default function SADoctorEarnings() {
                     <NeuCard radius={24} style={{ width: 64, height: 64, alignItems: 'center', justifyContent: 'center' }}>
                       <TrendingUp size={28} color={`${c.text}30`} />
                     </NeuCard>
-                    <Text style={{ fontSize: 15, fontWeight: '700', color: c.text, opacity: 0.35 }}>No Earnings Yet</Text>
+                    <Text style={{ fontSize: 15, fontWeight: '700', ...mutedTextStyle(c, 0.35) }}>No Earnings Yet</Text>
                     <Text style={{ fontSize: 12, color: c.text, opacity: 0.22, textAlign: 'center', maxWidth: 240, lineHeight: 18 }}>
                       No revenue transactions have been recorded for this doctor.
                     </Text>
@@ -778,11 +778,11 @@ export default function SADoctorEarnings() {
                         <DollarSign size={22} color="#7C3AED" />
                       </View>
                       <View style={{ flex: 1 }}>
-                        <Text style={{ fontSize: 11, color: c.text, opacity: 0.45 }}>Credit Selling Price</Text>
+                        <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.45) }}>Credit Selling Price</Text>
                         <Text style={{ fontSize: 26, fontWeight: '900', color: '#7C3AED' }}>
                           EGP {actStats.credit_selling_price.toLocaleString('en-US')}
                         </Text>
-                        <Text style={{ fontSize: 11, color: c.text, opacity: 0.35, marginTop: 1 }}>per credit</Text>
+                        <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.35), marginTop: 1 }}>per credit</Text>
                       </View>
                     </NeuCard>
 
@@ -798,7 +798,7 @@ export default function SADoctorEarnings() {
                       ].map(kpi => (
                         <NeuCard key={kpi.label} radius={16} style={{ flexBasis: '47%', padding: 14, alignItems: 'center' }}>
                           <Text style={{ fontSize: 24, fontWeight: '900', color: kpi.color }}>{kpi.value}</Text>
-                          <Text style={{ fontSize: 10, color: c.text, opacity: 0.45, textAlign: 'center', marginTop: 2 }}>{kpi.label}</Text>
+                          <Text style={{ fontSize: 10, ...mutedTextStyle(c, 0.45), textAlign: 'center', marginTop: 2 }}>{kpi.label}</Text>
                         </NeuCard>
                       ))}
                     </View>
@@ -809,11 +809,11 @@ export default function SADoctorEarnings() {
                         <TrendingUp size={20} color="#16A34A" />
                       </View>
                       <View style={{ flex: 1 }}>
-                        <Text style={{ fontSize: 11, color: c.text, opacity: 0.45 }}>Credit-Based Earnings</Text>
+                        <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.45) }}>Credit-Based Earnings</Text>
                         <Text style={{ fontSize: 20, fontWeight: '900', color: '#16A34A' }}>
                           EGP {actStats.total_earnings.toLocaleString('en-US')}
                         </Text>
-                        <Text style={{ fontSize: 11, color: c.text, opacity: 0.35 }}>
+                        <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.35) }}>
                           {actStats.total_used} credits × EGP {actStats.credit_selling_price}
                         </Text>
                       </View>
@@ -827,7 +827,7 @@ export default function SADoctorEarnings() {
                       ].map(row => (
                         <View key={row.label} style={{ flexDirection: 'row', alignItems: 'center' }}>
                           <Clock size={14} color={c.text} opacity={0.4} style={{ marginRight: 8 }} />
-                          <Text style={{ fontSize: 12, color: c.text, opacity: 0.45, minWidth: 80, flexShrink: 0 }}>{row.label}</Text>
+                          <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.45), minWidth: 80, flexShrink: 0 }}>{row.label}</Text>
                           <Text style={{ fontSize: 12, color: c.text, flex: 1 }}>
                             {row.value ? fmtDateTime(row.value) : '—'}
                           </Text>
@@ -860,7 +860,7 @@ export default function SADoctorEarnings() {
                       ].map(kpi => (
                         <NeuCard key={kpi.label} radius={16} style={{ flexBasis: '47%', padding: 14, alignItems: 'center' }}>
                           <Text style={{ fontSize: 24, fontWeight: '900', color: kpi.color }}>{kpi.value}</Text>
-                          <Text style={{ fontSize: 10, color: c.text, opacity: 0.45, textAlign: 'center', marginTop: 2 }}>{kpi.label}</Text>
+                          <Text style={{ fontSize: 10, ...mutedTextStyle(c, 0.45), textAlign: 'center', marginTop: 2 }}>{kpi.label}</Text>
                         </NeuCard>
                       ))}
                     </View>
@@ -871,7 +871,7 @@ export default function SADoctorEarnings() {
                         <DollarSign size={20} color="#16A34A" />
                       </View>
                       <View>
-                        <Text style={{ fontSize: 11, color: c.text, opacity: 0.45 }}>Revenue from Credit Sales</Text>
+                        <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.45) }}>Revenue from Credit Sales</Text>
                         <Text style={{ fontSize: 20, fontWeight: '900', color: '#16A34A' }}>
                           EGP {creditRevenue.toLocaleString('en-US')}
                         </Text>
@@ -897,7 +897,7 @@ export default function SADoctorEarnings() {
                       <NeuCard radius={24} style={{ width: 64, height: 64, alignItems: 'center', justifyContent: 'center' }}>
                         <CreditCard size={28} color={`${c.text}30`} />
                       </NeuCard>
-                      <Text style={{ fontSize: 15, fontWeight: '700', color: c.text, opacity: 0.35 }}>No Credit Activity</Text>
+                      <Text style={{ fontSize: 15, fontWeight: '700', ...mutedTextStyle(c, 0.35) }}>No Credit Activity</Text>
                       <Text style={{ fontSize: 12, color: c.text, opacity: 0.22, textAlign: 'center', maxWidth: 240, lineHeight: 18 }}>
                         No credit transactions have been recorded for this doctor.
                       </Text>
@@ -910,7 +910,7 @@ export default function SADoctorEarnings() {
             {/* Data source note — shown on both tabs */}
             <NeuCard radius={14} style={{ padding: 14, marginTop: 8, flexDirection: 'row', alignItems: 'flex-start', gap: 10 }}>
               <Eye size={14} color={`${c.text}40`} style={{ marginTop: 1 }} />
-              <Text style={{ flex: 1, fontSize: 11, color: c.text, opacity: 0.4, lineHeight: 17 }}>
+              <Text style={{ flex: 1, fontSize: 11, ...mutedTextStyle(c, 0.4), lineHeight: 17 }}>
                 {"All data uses the exact same sources as the doctor's own dashboards — identical queries, calculations, and totals. Super Admin view is read-only."}
               </Text>
             </NeuCard>

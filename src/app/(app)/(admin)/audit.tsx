@@ -12,7 +12,7 @@ import {
 } from 'lucide-react-native';
 import { getAuditTrail, AuditTrailEntry } from '@/lib/api';
 import { NeuCard } from '@/components/NeuCard';
-import { neuColors, useLayout, safeBottom } from '@/lib/neu';
+import { neuColors, useLayout, safeBottom, mutedTextStyle } from '@/lib/neu';
 import { PageHeader } from '@/components/PageHeader';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -116,14 +116,14 @@ function OldNewDiff({ oldValues, newValues, c }: {
   if (allKeys.length === 0) return null;
   return (
     <View style={{ marginTop: 4 }}>
-      <Text style={{ fontSize: 10, fontWeight: '700', color: c.text, opacity: 0.4, marginBottom: 8, textTransform: 'uppercase', letterSpacing: 0.5 }}>Changes</Text>
+      <Text style={{ fontSize: 10, fontWeight: '700', ...mutedTextStyle(c, 0.4), marginBottom: 8, textTransform: 'uppercase', letterSpacing: 0.5 }}>Changes</Text>
       {allKeys.map(key => {
         const oldVal = oldValues?.[key];
         const newVal = newValues?.[key];
         const changed = JSON.stringify(oldVal) !== JSON.stringify(newVal);
         return (
           <View key={key} style={{ marginBottom: 8 }}>
-            <Text style={{ fontSize: 11, fontWeight: '700', color: c.text, opacity: 0.5, marginBottom: 3, textTransform: 'capitalize' }}>{key.replace(/_/g, ' ')}</Text>
+            <Text style={{ fontSize: 11, fontWeight: '700', ...mutedTextStyle(c, 0.5), marginBottom: 3, textTransform: 'capitalize' }}>{key.replace(/_/g, ' ')}</Text>
             {oldVal !== undefined && (
               <View style={{ backgroundColor: '#DC262614', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 5, marginBottom: 3 }}>
                 <Text style={{ fontSize: 12, color: '#DC2626' }}>Before: {String(typeof oldVal === 'object' ? JSON.stringify(oldVal) : oldVal)}</Text>
@@ -170,18 +170,18 @@ function ExpandableLogCard({ entry, c }: { entry: AuditTrailEntry; c: typeof neu
           </Text>
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 4, alignItems: 'center' }}>
             {entry.actor_name && (
-              <Text style={{ fontSize: 11, color: c.text, opacity: 0.5 }}>{entry.actor_name}</Text>
+              <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.5) }}>{entry.actor_name}</Text>
             )}
             {entry.target_name && entry.target_name !== entry.actor_name && (
               <>
-                <Text style={{ fontSize: 11, color: c.text, opacity: 0.3 }}>→</Text>
-                <Text style={{ fontSize: 11, color: c.text, opacity: 0.6, fontWeight: '600' }}>{entry.target_name}</Text>
+                <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.3) }}>→</Text>
+                <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.6), fontWeight: '600' }}>{entry.target_name}</Text>
               </>
             )}
-            <Text style={{ fontSize: 11, color: c.text, opacity: 0.25 }}>·</Text>
+            <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.25) }}>·</Text>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3 }}>
               <Clock size={10} color={c.text} opacity={0.3} />
-              <Text style={{ fontSize: 11, color: c.text, opacity: 0.3 }}>{relativeTime(entry.created_at)}</Text>
+              <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.3) }}>{relativeTime(entry.created_at)}</Text>
             </View>
             <View style={{ marginLeft: 'auto' }}>{statusIcon(entry.log_status)}</View>
           </View>
@@ -202,18 +202,18 @@ function ExpandableLogCard({ entry, c }: { entry: AuditTrailEntry; c: typeof neu
           </View>
           {/* Actor */}
           <View style={{ backgroundColor: `${c.text}05`, borderRadius: 10, padding: 10, marginBottom: 8 }}>
-            <Text style={{ fontSize: 10, fontWeight: '700', color: c.text, opacity: 0.4, textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 6 }}>Actor</Text>
+            <Text style={{ fontSize: 10, fontWeight: '700', ...mutedTextStyle(c, 0.4), textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 6 }}>Actor</Text>
             <Text style={{ fontSize: 13, fontWeight: '700', color: c.text }}>{entry.actor_name ?? '—'}</Text>
-            {entry.actor_email && <Text style={{ fontSize: 12, color: c.text, opacity: 0.5 }}>{entry.actor_email}</Text>}
+            {entry.actor_email && <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.5) }}>{entry.actor_email}</Text>}
             {entry.actor_role  && <Text style={{ fontSize: 11, color: aColor, fontWeight: '600', textTransform: 'capitalize', marginTop: 2 }}>{entry.actor_role.replace(/_/g,' ')}</Text>}
           </View>
           {/* Target */}
           {(entry.target_name || entry.resource_type) && (
             <View style={{ backgroundColor: `${c.text}05`, borderRadius: 10, padding: 10, marginBottom: 8 }}>
-              <Text style={{ fontSize: 10, fontWeight: '700', color: c.text, opacity: 0.4, textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 6 }}>Target</Text>
+              <Text style={{ fontSize: 10, fontWeight: '700', ...mutedTextStyle(c, 0.4), textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 6 }}>Target</Text>
               {entry.target_name   && <Text style={{ fontSize: 13, fontWeight: '700', color: c.text }}>{entry.target_name}</Text>}
-              {entry.resource_type && <Text style={{ fontSize: 12, color: c.text, opacity: 0.5, textTransform: 'capitalize' }}>{entry.resource_type.replace(/_/g,' ')}</Text>}
-              {entry.resource_id   && <Text style={{ fontSize: 10, color: c.text, opacity: 0.3, fontFamily: 'monospace', marginTop: 2 }}>ID: {entry.resource_id}</Text>}
+              {entry.resource_type && <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.5), textTransform: 'capitalize' }}>{entry.resource_type.replace(/_/g,' ')}</Text>}
+              {entry.resource_id   && <Text style={{ fontSize: 10, ...mutedTextStyle(c, 0.3), fontFamily: 'monospace', marginTop: 2 }}>ID: {entry.resource_id}</Text>}
             </View>
           )}
           {/* Old/New values */}
@@ -225,10 +225,10 @@ function ExpandableLogCard({ entry, c }: { entry: AuditTrailEntry; c: typeof neu
           {/* Extra details */}
           {extraDetails.length > 0 && (
             <View style={{ backgroundColor: `${c.text}05`, borderRadius: 10, padding: 10, marginBottom: 8 }}>
-              <Text style={{ fontSize: 10, fontWeight: '700', color: c.text, opacity: 0.4, textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 6 }}>Additional Info</Text>
+              <Text style={{ fontSize: 10, fontWeight: '700', ...mutedTextStyle(c, 0.4), textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 6 }}>Additional Info</Text>
               {extraDetails.map(([k, v]) => (
                 <View key={k} style={{ flexDirection: 'row', paddingVertical: 4, borderBottomWidth: 1, borderBottomColor: `${c.text}06` }}>
-                  <Text style={{ fontSize: 12, color: c.text, opacity: 0.45, minWidth: 80, flexShrink: 0 }}>{k.replace(/_/g,' ')}</Text>
+                  <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.45), minWidth: 80, flexShrink: 0 }}>{k.replace(/_/g,' ')}</Text>
                   <Text style={{ fontSize: 12, color: c.text, flex: 1 }} numberOfLines={3}>
                     {typeof v === 'object' ? JSON.stringify(v) : String(v ?? '—')}
                   </Text>
@@ -239,12 +239,12 @@ function ExpandableLogCard({ entry, c }: { entry: AuditTrailEntry; c: typeof neu
           {/* Metadata */}
           <View style={{ backgroundColor: `${c.text}05`, borderRadius: 10, padding: 10 }}>
             <View style={{ flexDirection: 'row', paddingVertical: 4 }}>
-              <Text style={{ fontSize: 12, color: c.text, opacity: 0.45, width: 80 }}>Timestamp</Text>
+              <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.45), width: 80 }}>Timestamp</Text>
               <Text style={{ fontSize: 12, color: c.text }}>{fullTimestamp(entry.created_at)}</Text>
             </View>
             {entry.ip_address && (
               <View style={{ flexDirection: 'row', paddingVertical: 4 }}>
-                <Text style={{ fontSize: 12, color: c.text, opacity: 0.45, width: 80 }}>IP</Text>
+                <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.45), width: 80 }}>IP</Text>
                 <Text style={{ fontSize: 12, color: c.text, fontFamily: 'monospace' }}>{entry.ip_address}</Text>
               </View>
             )}
@@ -439,7 +439,7 @@ export default function AdminAudit() {
           ListEmptyComponent={
             <View style={{ alignItems: 'center', paddingVertical: 80 }}>
               <Shield size={48} color={c.primary} opacity={0.15} style={{ marginBottom: 12 }} />
-              <Text style={{ fontSize: 16, fontWeight: '700', color: c.text, opacity: 0.3 }}>No audit logs found</Text>
+              <Text style={{ fontSize: 16, fontWeight: '700', ...mutedTextStyle(c, 0.3) }}>No audit logs found</Text>
               <Text style={{ fontSize: 13, color: c.text, opacity: 0.2, marginTop: 6 }}>Try a different filter or search term</Text>
             </View>
           }
@@ -449,7 +449,7 @@ export default function AdminAudit() {
                 <RefreshCw size={20} color={c.primary} opacity={0.5} />
               </View>
             ) : entries.length > 0 && entries.length >= totalCount ? (
-              <Text style={{ textAlign: 'center', fontSize: 12, color: c.text, opacity: 0.25, paddingVertical: 16 }}>
+              <Text style={{ textAlign: 'center', fontSize: 12, ...mutedTextStyle(c, 0.25), paddingVertical: 16 }}>
                 All {totalCount.toLocaleString('en-US')} entries shown
               </Text>
             ) : null

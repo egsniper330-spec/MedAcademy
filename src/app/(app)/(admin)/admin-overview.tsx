@@ -10,7 +10,7 @@ import { getSuperAdminStats } from '@/lib/api';
 import { getFirstName } from '@/lib/utils';
 import { StatCard } from '@/components/StatCard';
 import { QuickActionBtn } from '@/components/QuickActionBtn';
-import { neuColors, useLayout, neuMicroStyle, safeBottom } from '@/lib/neu';
+import { neuColors, useLayout, neuMicroStyle, safeBottom, mutedTextStyle } from '@/lib/neu';
 import { DashboardHeader } from '@/components/DashboardHeader';
 import type { RelativePathString } from 'expo-router';
 import { useNotificationPermission } from '@/hooks/useNotificationPermission';
@@ -92,7 +92,7 @@ export default function AdminDashboard() {
           <ActivityIndicator color={c.primary} style={{ marginVertical: layout.sectionGap }} />
         ) : stats && (
           <>
-            <Text style={{ fontSize: layout.captionSize, fontWeight: '800', color: c.text, opacity: 0.4, marginBottom: layout.pad.sm, textTransform: 'uppercase', letterSpacing: 1 }}>Platform Overview</Text>
+            <Text style={{ fontSize: layout.captionSize, fontWeight: '800', ...mutedTextStyle(c, 0.4), marginBottom: layout.pad.sm, textTransform: 'uppercase', letterSpacing: 1 }}>Platform Overview</Text>
             <View style={{ flexDirection: 'row', flexWrap: 'wrap', marginBottom: layout.pad.xs }}>
               <StatCard label="Students"    value={stats.totalStudents}    icon={<Users size={layout.captionSize + 2} color="#fff" />}        color="#7C3AED" />
               <StatCard label="Doctors"     value={stats.totalDoctors}     icon={<Stethoscope size={layout.captionSize + 2} color="#fff" />}  color="#16A34A" />

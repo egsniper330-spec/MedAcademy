@@ -58,7 +58,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { X, AlertTriangle } from 'lucide-react-native';
-import { neuColors, useLayout } from '@/lib/neu';
+import { neuColors, mutedTextStyle, useLayout, type NeuPalette } from '@/lib/neu';
 import { NeuButton } from '@/components/NeuButton';
 import { PortalOverlay } from '@/components/PortalOverlay';
 
@@ -171,14 +171,17 @@ export function ResponsiveModal({
               style={{
                 width: '100%',
                 maxHeight: '100%',
-                backgroundColor: c.base,
+                // Elevated surface, NOT the page background: a dialog that paints
+                // `base` is the same colour as the screen behind it, which is why
+                // dark modals used to read as a flat rectangle with no depth.
+                backgroundColor: c.elevated,
                 borderRadius: 24,
                 overflow: 'hidden',
-                ...shadowStyle(c),
+                ...shadowStyle(c, isDark),
               }}
             >
               {/* Header */}
-              <ModalHeader icon={icon} title={title} subtitle={subtitle} onClose={handleClose} c={c} />
+              <ModalHeader icon={icon} title={title} subtitle={subtitle} onClose={handleClose} c={c} isDark={isDark} />
 
               {/* Scrollable body — flexGrow:0 is the content-sizing guarantee:
                   RN's ScrollView defaults to flexGrow:1 on its outer container,
@@ -209,11 +212,14 @@ export function ResponsiveModal({
                   style={[
                     styles.footer,
                     {
-                      backgroundColor: c.base,
+                      // Same surface as the card (the footer is part of the
+                      // dialog, not a second panel) with a readable divider —
+                      // `${text}15` was invisible on the dark navy surface.
+                      backgroundColor: c.elevated,
                       paddingTop: 12,
                       paddingHorizontal: layout.pad.lg,
                       borderTopWidth: StyleSheet.hairlineWidth,
-                      borderTopColor: `${c.text}15`,
+                      borderTopColor: c.divider,
                     },
                   ]}
                 >
@@ -230,6 +236,7 @@ export function ResponsiveModal({
         onKeep={() => setConfirmDiscard(false)}
         onDiscard={() => { setConfirmDiscard(false); onClose(); }}
         c={c}
+        isDark={isDark}
       />
     </>
   );
@@ -238,13 +245,14 @@ export function ResponsiveModal({
 // ── Sub-components ─────────────────────────────────────────────────────────────
 
 function ModalHeader({
-  icon, title, subtitle, onClose, c,
+  icon, title, subtitle, onClose, c, isDark,
 }: {
   icon?: React.ReactNode;
   title: string;
   subtitle?: string;
   onClose: () => void;
   c: typeof neuColors.light;
+  isDark: boolean;
 }) {
   // Fluid typography tokens: scale with device size + OS font scale
   // (clampFont over typography.h3 / typography.caption).
@@ -260,14 +268,14 @@ function ModalHeader({
         <View style={{ flex: 1, minWidth: 0 }}>
           {/* numberOfLines={2} supports long translated titles and large system font sizes */}
           <Text
-            style={{ fontSize: layout.headingSize, fontWeight: '800', color: (c as any).text, lineHeight: Math.round(layout.headingSize * 1.28) }}
+            style={{ fontSize: layout.headingSize, fontWeight: '800', color: c.text, lineHeight: Math.round(layout.headingSize * 1.28) }}
             numberOfLines={2}
           >
             {title}
           </Text>
           {subtitle ? (
             <Text
-              style={{ fontSize: layout.captionSize + 1, color: (c as any).text, opacity: 0.55, marginTop: 2, lineHeight: Math.round((layout.captionSize + 1) * 1.4) }}
+              style={[{ fontSize: layout.captionSize + 1, marginTop: 2, lineHeight: Math.round((layout.captionSize + 1) * 1.4) }, mutedTextStyle(c, 0.55)]}
               numberOfLines={2}
             >
               {subtitle}
@@ -280,12 +288,12 @@ function ModalHeader({
         hitSlop={12}
         style={{
           width: 32, height: 32, borderRadius: 10,
-          backgroundColor: `${(c as any).text}12`,
+          backgroundColor: `${c.text}12`,
           alignItems: 'center', justifyContent: 'center',
           flexShrink: 0,
         }}
       >
-        <X size={16} color={(c as any).text} opacity={0.6} />
+        <X size={16} color={isDark ? c.textMuted : c.text} opacity={isDark ? 1 : 0.6} />
       </Pressable>
     </View>
   );
@@ -295,12 +303,13 @@ function ModalHeader({
  *  Also portal-based: renders in the same window, stacked ABOVE the dialog
  *  (later portal registration renders later in the shared PortalHost). */
 function DiscardConfirmModal({
-  visible, onKeep, onDiscard, c,
+  visible, onKeep, onDiscard, c, isDark,
 }: {
   visible: boolean;
   onKeep: () => void;
   onDiscard: () => void;
   c: typeof neuColors.light;
+  isDark: boolean;
 }) {
   const { width: screenW } = useWindowDimensions();
   const insets = useSafeAreaInsets();
@@ -316,15 +325,16 @@ function DiscardConfirmModal({
       >
         <Pressable onPress={e => e.stopPropagation()} style={{ width: cardW }}>
           <View style={{
-            backgroundColor: (c as any).base,
+            backgroundColor: c.elevated,
             borderRadius: 24,
             padding: 24,
             width: '100%',
-            shadowColor: (c as any).shadowDark,
+            shadowColor: c.shadowDark,
             shadowOffset: { width: 0, height: 8 },
             shadowOpacity: 0.3,
             shadowRadius: 20,
             elevation: 20,
+            ...(isDark ? { borderWidth: 1, borderColor: c.border } : null),
           }}>
             <View style={{ alignItems: 'center', marginBottom: 16 }}>
               <View style={{
@@ -335,10 +345,10 @@ function DiscardConfirmModal({
               }}>
                 <AlertTriangle size={26} color="#F59E0B" />
               </View>
-              <Text style={{ fontSize: layout.headingSize, fontWeight: '800', color: (c as any).text, textAlign: 'center' }}>
+              <Text style={{ fontSize: layout.headingSize, fontWeight: '800', color: c.text, textAlign: 'center' }}>
                 Unsaved Changes
               </Text>
-              <Text style={{ fontSize: layout.bodySize, color: (c as any).text, opacity: 0.55, textAlign: 'center', marginTop: 6, lineHeight: Math.round(layout.bodySize * 1.5) }}>
+              <Text style={[{ fontSize: layout.bodySize, textAlign: 'center', marginTop: 6, lineHeight: Math.round(layout.bodySize * 1.5) }, mutedTextStyle(c, 0.55)]}>
                 You have unsaved changes.{'\n'}Leave without saving?
               </Text>
             </View>
@@ -378,12 +388,15 @@ const styles = StyleSheet.create({
   },
 });
 
-function shadowStyle(c: { shadowDark: string }) {
+function shadowStyle(c: NeuPalette, isDark: boolean) {
   return {
     shadowColor: c.shadowDark,
     shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.35,
+    shadowOpacity: isDark ? 0.5 : 0.35,
     shadowRadius: 20,
     elevation: 16,
+    // Dark relies on an edge + a deeper shadow, since a soft shadow barely
+    // reads against a deep navy field.
+    ...(isDark ? { borderWidth: 1, borderColor: c.border } : null),
   };
 }

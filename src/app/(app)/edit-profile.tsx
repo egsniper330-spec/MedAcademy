@@ -10,7 +10,7 @@ import { updateProfile, getPublicEmail, isInternalEmail } from '@/lib/api';
 import { NeuCard } from '@/components/NeuCard';
 import { NeuButton } from '@/components/NeuButton';
 import { useToast } from '@/components/Toast';
-import { neuColors, useLayout } from '@/lib/neu';
+import { neuColors, useLayout, mutedTextStyle } from '@/lib/neu';
 import { normalizePhoneE164 } from '@/lib/identifier';
 import { validateRequired, friendlyError } from '@/lib/validation';
 import { NeuInputRow } from '@/components/NeuInputRow';
@@ -104,7 +104,7 @@ export default function EditProfile() {
 
         <NeuCard radius={22} style={{ padding: 22 }}>
           {/* Full Name — always editable */}
-          <Text style={{ fontSize: 12, fontWeight: '600', color: c.text, opacity: 0.55, marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.8 }}>Full Name</Text>
+          <Text style={{ fontSize: 12, fontWeight: '600', ...mutedTextStyle(c, 0.55), marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.8 }}>Full Name</Text>
           <NeuInputRow
             c={c}
             value={fullName}
@@ -115,7 +115,7 @@ export default function EditProfile() {
 
           {/* Phone — editable only for admin/super_admin */}
           <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 6, gap: 6 }}>
-            <Text style={{ fontSize: 12, fontWeight: '600', color: c.text, opacity: 0.55, textTransform: 'uppercase', letterSpacing: 0.8 }}>Phone Number</Text>
+            <Text style={{ fontSize: 12, fontWeight: '600', ...mutedTextStyle(c, 0.55), textTransform: 'uppercase', letterSpacing: 0.8 }}>Phone Number</Text>
             {!canEditContact && <Lock size={12} color={c.text} opacity={0.35} />}
           </View>
           <NeuInputRow
@@ -129,14 +129,14 @@ export default function EditProfile() {
             leftIcon={<Phone size={18} color={c.text} opacity={0.4} />}
           />
           {!canEditContact && (
-            <Text style={{ fontSize: 11, color: c.text, opacity: 0.4, marginBottom: 12, marginTop: -10 }}>
+            <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.4), marginBottom: 12, marginTop: -10 }}>
               Phone number can only be changed by an admin.
             </Text>
           )}
 
           {/* Email — editable for all users (updates profile_email only, never auth email) */}
           <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 6, gap: 6 }}>
-            <Text style={{ fontSize: 12, fontWeight: '600', color: c.text, opacity: 0.55, textTransform: 'uppercase', letterSpacing: 0.8 }}>Email</Text>
+            <Text style={{ fontSize: 12, fontWeight: '600', ...mutedTextStyle(c, 0.55), textTransform: 'uppercase', letterSpacing: 0.8 }}>Email</Text>
           </View>
           <NeuInputRow
             c={c}
@@ -148,7 +148,7 @@ export default function EditProfile() {
             autoCorrect={false}
             leftIcon={<Mail size={18} color={c.text} opacity={0.4} />}
           />
-          <Text style={{ fontSize: 11, color: c.text, opacity: 0.4, marginBottom: 12, marginTop: -10 }}>
+          <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.4), marginBottom: 12, marginTop: -10 }}>
             Add or update your email address. Your login method stays unchanged.
           </Text>
 
@@ -163,7 +163,7 @@ export default function EditProfile() {
               <Fingerprint size={17} color={c.primary} />
             </View>
             <View style={{ flex: 1 }}>
-              <Text style={{ fontSize: 11, fontWeight: '700', color: c.text, opacity: 0.4, textTransform: 'uppercase', letterSpacing: 0.9 }}>ID</Text>
+              <Text style={{ fontSize: 11, fontWeight: '700', ...mutedTextStyle(c, 0.4), textTransform: 'uppercase', letterSpacing: 0.9 }}>ID</Text>
               <Text style={{ fontSize: 17, fontWeight: '800', color: c.primary, letterSpacing: 1.4, marginTop: 1, fontVariant: ['tabular-nums'] }}>
                 {profile?.public_user_id ?? '—'}
               </Text>
@@ -176,7 +176,7 @@ export default function EditProfile() {
               <Text style={{ fontSize: 11, fontWeight: '700', color: wmCopied ? '#16A34A' : c.primary }}>{wmCopied ? 'Copied!' : 'Copy'}</Text>
             </Pressable>
           </View>
-          <Text style={{ fontSize: 12, color: c.text, opacity: 0.4, lineHeight: 17 }}>
+          <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.4), lineHeight: 17 }}>
             Permanently embedded as a forensic watermark in every video you watch. Cannot be changed.
           </Text>
         </NeuCard>

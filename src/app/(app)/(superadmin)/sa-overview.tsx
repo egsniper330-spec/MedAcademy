@@ -16,7 +16,7 @@ import {
 import { useProfileStore } from '@/lib/store';
 import { getSuperAdminStats } from '@/lib/api';
 import { getFirstName } from '@/lib/utils';
-import { neuColors, neuFlatStyle, neuPressedStyle, useLayout, safeBottom } from '@/lib/neu';
+import { neuColors, neuFlatStyle, neuPressedStyle, useLayout, safeBottom, mutedTextStyle } from '@/lib/neu';
 import { DashboardHeader } from '@/components/DashboardHeader';
 import Bell from '@/components/Bell';
 import { useNotificationPermission } from '@/hooks/useNotificationPermission';
@@ -50,7 +50,7 @@ function KpiCard({
         <Icon size={iconInner} color={color} />
       </View>
       <Text style={{ fontSize: layout.titleSize * 0.9, fontWeight: '900', color: c.text, letterSpacing: -0.5 }}>{value}</Text>
-      <Text style={{ fontSize: layout.captionSize, color: c.text, opacity: 0.5, marginTop: 3 }}>{label}</Text>
+      <Text style={{ fontSize: layout.captionSize, ...mutedTextStyle(c, 0.5), marginTop: 3 }}>{label}</Text>
     </View>
   );
 
@@ -121,7 +121,7 @@ function HubRow({
               </View>
             )}
           </View>
-          <Text style={{ fontSize: layout.captionSize, color: c.text, opacity: 0.45, marginTop: 2 }}>{description}</Text>
+          <Text style={{ fontSize: layout.captionSize, ...mutedTextStyle(c, 0.45), marginTop: 2 }}>{description}</Text>
         </View>
         <ChevronRight size={layout.captionSize + 2} color={`${c.text}35`} />
       </View>
@@ -133,7 +133,7 @@ function HubRow({
 function SectionLabel({ label, c }: { label: string; c: typeof neuColors.light }) {
   const layout = useLayout();
   return (
-    <Text style={{ fontSize: layout.captionSize, fontWeight: '800', color: c.text, opacity: 0.4, textTransform: 'uppercase', letterSpacing: 1.4, marginBottom: layout.pad.md, marginTop: layout.sectionGap }}>
+    <Text style={{ fontSize: layout.captionSize, fontWeight: '800', ...mutedTextStyle(c, 0.4), textTransform: 'uppercase', letterSpacing: 1.4, marginBottom: layout.pad.md, marginTop: layout.sectionGap }}>
       {label}
     </Text>
   );

@@ -25,7 +25,7 @@ import {
 import { NeuCard } from '@/components/NeuCard';
 import { NeuButton } from '@/components/NeuButton';
 import { ResponsiveModal } from '@/components/ResponsiveModal';
-import { neuColors, neuFlatStyle, useLayout, safeBottom } from '@/lib/neu'
+import { neuColors, neuFlatStyle, useLayout, safeBottom, mutedTextStyle } from '@/lib/neu';
 import { PageHeader } from '@/components/PageHeader';
 import { getPublicEmail } from '@/lib/api';
 import { backendClient } from '@/client/backendClient';
@@ -347,7 +347,7 @@ export default function AdminDevices({ backTo }: { backTo?: string } = {}) {
               <Text style={{ fontSize: 14, fontWeight: '700', color: c.text }} numberOfLines={1}>{user.full_name}</Text>
               <RoleBadge role={user.role} c={c} />
             </View>
-            <Text style={{ fontSize: 11, color: c.text, opacity: 0.45, marginTop: 2 }} numberOfLines={1}>{getPublicEmail(user) ?? '—'}</Text>
+            <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.45), marginTop: 2 }} numberOfLines={1}>{getPublicEmail(user) ?? '—'}</Text>
 
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 5, flexWrap: 'wrap' }}>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3 }}>
@@ -404,7 +404,7 @@ export default function AdminDevices({ backTo }: { backTo?: string } = {}) {
                   style={{ flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 12, paddingVertical: 8, backgroundColor: `${c.text}0D`, borderRadius: 10 }}
                 >
                   <Clock size={13} color={`${c.text}99`} />
-                  <Text style={{ fontSize: 12, fontWeight: '700', color: c.text, opacity: 0.6 }}>History</Text>
+                  <Text style={{ fontSize: 12, fontWeight: '700', ...mutedTextStyle(c, 0.6) }}>History</Text>
                 </Pressable>
               </View>
             </ScrollView>
@@ -414,7 +414,7 @@ export default function AdminDevices({ backTo }: { backTo?: string } = {}) {
               <ActivityIndicator color={c.primary} style={{ padding: 16 }} />
             ) : devices.length === 0 ? (
               <View style={{ alignItems: 'center', paddingVertical: 20 }}>
-                <Text style={{ color: c.text, opacity: 0.4, fontSize: 13 }}>No devices registered</Text>
+                <Text style={{ ...mutedTextStyle(c, 0.4), fontSize: 13 }}>No devices registered</Text>
               </View>
             ) : (
               devices.map(device => {
@@ -433,7 +433,7 @@ export default function AdminDevices({ backTo }: { backTo?: string } = {}) {
                           {isBlocked && <Text style={{ fontSize: 9, fontWeight: '800', color: '#DC2626', backgroundColor: '#DC262618', paddingHorizontal: 5, paddingVertical: 2, borderRadius: 5 }}>BLOCKED</Text>}
                           {isOut && <Text style={{ fontSize: 9, fontWeight: '800', color: '#94A3B8', backgroundColor: '#94A3B818', paddingHorizontal: 5, paddingVertical: 2, borderRadius: 5 }}>LOGGED OUT</Text>}
                         </View>
-                        <Text style={{ fontSize: 11, color: c.text, opacity: 0.5, marginTop: 2 }}>
+                        <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.5), marginTop: 2 }}>
                           {[device.device_model, device.os, device.os_version].filter(Boolean).join(' · ') || device.platform}
                         </Text>
                         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 3 }}>
@@ -445,12 +445,12 @@ export default function AdminDevices({ backTo }: { backTo?: string } = {}) {
                             <>
                               <Text style={{ fontSize: 11, color: `${c.text}30` }}>·</Text>
                               <Globe size={10} color={`${c.text}55`} />
-                              <Text style={{ fontSize: 11, color: c.text, opacity: 0.4 }}>{device.ip_address}</Text>
+                              <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.4) }}>{device.ip_address}</Text>
                             </>
                           )}
                         </View>
                         {device.app_version && (
-                          <Text style={{ fontSize: 10, color: c.text, opacity: 0.3, marginTop: 2 }}>v{device.app_version}</Text>
+                          <Text style={{ fontSize: 10, ...mutedTextStyle(c, 0.3), marginTop: 2 }}>v{device.app_version}</Text>
                         )}
                         {isBlocked && device.block_reason && (
                           <Text style={{ fontSize: 11, color: '#DC2626', marginTop: 4 }}>⛔ {device.block_reason}</Text>
@@ -552,7 +552,7 @@ export default function AdminDevices({ backTo }: { backTo?: string } = {}) {
           ) : filtered.length === 0 ? (
             <View style={{ alignItems: 'center', paddingVertical: 64 }}>
               <Smartphone size={56} color={c.primary} opacity={0.15} />
-              <Text style={{ color: c.text, opacity: 0.4, fontSize: 16, marginTop: 12 }}>No users found</Text>
+              <Text style={{ ...mutedTextStyle(c, 0.4), fontSize: 16, marginTop: 12 }}>No users found</Text>
             </View>
           ) : (
             filtered.map(user => renderUserRow(user))
@@ -572,7 +572,7 @@ export default function AdminDevices({ backTo }: { backTo?: string } = {}) {
           </View>
         }
       >
-        <Text style={{ fontSize: 14, color: c.text, opacity: 0.65, marginBottom: 12, lineHeight: 22 }}>
+        <Text style={{ fontSize: 14, ...mutedTextStyle(c, 0.65), marginBottom: 12, lineHeight: 22 }}>
           Block <Text style={{ fontWeight: '700' }}>{action && 'device' in action ? (action.device.device_name ?? 'this device') : ''}</Text>? The device will not be able to log in until unblocked.
         </Text>
         <TextInput
@@ -596,7 +596,7 @@ export default function AdminDevices({ backTo }: { backTo?: string } = {}) {
           </View>
         }
       >
-        <Text style={{ fontSize: 14, color: c.text, opacity: 0.65, lineHeight: 22 }}>
+        <Text style={{ fontSize: 14, ...mutedTextStyle(c, 0.65), lineHeight: 22 }}>
           Unblock <Text style={{ fontWeight: '700' }}>{action && 'device' in action ? (action.device.device_name ?? 'this device') : ''}</Text>? The device will be able to log in again.
         </Text>
         {errorMsg ? <Text style={{ color: '#DC2626', fontSize: 13, marginTop: 8 }}>{errorMsg}</Text> : null}
@@ -614,7 +614,7 @@ export default function AdminDevices({ backTo }: { backTo?: string } = {}) {
           </View>
         }
       >
-        <Text style={{ fontSize: 14, color: c.text, opacity: 0.65, lineHeight: 22 }}>
+        <Text style={{ fontSize: 14, ...mutedTextStyle(c, 0.65), lineHeight: 22 }}>
           Force logout <Text style={{ fontWeight: '700' }}>{action && 'device' in action ? (action.device.device_name ?? 'this device') : ''}</Text>? The user will need to sign in again from this device.
         </Text>
         {errorMsg ? <Text style={{ color: '#DC2626', fontSize: 13, marginTop: 8 }}>{errorMsg}</Text> : null}
@@ -656,7 +656,7 @@ export default function AdminDevices({ backTo }: { backTo?: string } = {}) {
           </View>
         }
       >
-        <Text style={{ fontSize: 14, color: c.text, opacity: 0.65, lineHeight: 22 }}>
+        <Text style={{ fontSize: 14, ...mutedTextStyle(c, 0.65), lineHeight: 22 }}>
           Remove all registered devices for{' '}
           <Text style={{ fontWeight: '700' }}>{action?.type === 'reset' ? action.user.full_name : ''}</Text>. They must re-register on next login.
         </Text>
@@ -677,7 +677,7 @@ export default function AdminDevices({ backTo }: { backTo?: string } = {}) {
       >
         {action?.type === 'set_limit' && (
           <View>
-            <Text style={{ fontSize: 13, color: c.text, opacity: 0.6, marginBottom: 14, lineHeight: 20 }}>
+            <Text style={{ fontSize: 13, ...mutedTextStyle(c, 0.6), marginBottom: 14, lineHeight: 20 }}>
               Set max devices for <Text style={{ fontWeight: '700', opacity: 1 }}>{action.user.full_name}</Text>:
             </Text>
             {LIMIT_OPTIONS.map(opt => (

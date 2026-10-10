@@ -23,7 +23,7 @@ import { PageHeader } from '@/components/PageHeader';
 import { getRealStorageStats, type RealStorageStats } from '@/lib/api';
 import { formatBytes } from '@/lib/videoUploadEngine';
 import { NeuCard } from '@/components/NeuCard';
-import { neuColors, useLayout, safeBottom } from '@/lib/neu';
+import { neuColors, useLayout, safeBottom, mutedTextStyle } from '@/lib/neu';
 
 const BUCKET_LABELS: Record<string, string> = {
   avatars: 'Avatars',
@@ -65,7 +65,7 @@ function SectionUnavailable({ reason, isDark, c }: { reason: string | null | und
   return (
     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 6 }}>
       <AlertTriangle size={14} color="#D97706" />
-      <Text style={{ fontSize: 12, color: c.text, opacity: 0.55, flex: 1 }}>
+      <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.55), flex: 1 }}>
         {reasonLabel(reason)}
       </Text>
     </View>
@@ -81,8 +81,8 @@ function StatTile({ label, value, sub, color, Icon }: {
     <NeuCard style={{ flex: 1, padding: 14, alignItems: 'center', gap: 4 }}>
       <Icon size={18} color={color} />
       <Text style={{ fontSize: 17, fontWeight: '900', color }}>{value}</Text>
-      <Text style={{ fontSize: 10, color: c.text, opacity: 0.5, textAlign: 'center' }}>{label}</Text>
-      {sub ? <Text style={{ fontSize: 9, color: c.text, opacity: 0.35, textAlign: 'center' }}>{sub}</Text> : null}
+      <Text style={{ fontSize: 10, ...mutedTextStyle(c, 0.5), textAlign: 'center' }}>{label}</Text>
+      {sub ? <Text style={{ fontSize: 9, ...mutedTextStyle(c, 0.35), textAlign: 'center' }}>{sub}</Text> : null}
     </NeuCard>
   );
 }
@@ -136,7 +136,7 @@ export default function StorageMonitorScreen({ backTo }: { backTo?: string } = {
           <NeuCard style={{ padding: 24, alignItems: 'center', gap: 12, marginTop: 12 }}>
             <AlertTriangle size={28} color="#DC2626" />
             <Text style={{ fontSize: 14, fontWeight: '800', color: c.text }}>Unable to load storage statistics</Text>
-            <Text style={{ fontSize: 12, color: c.text, opacity: 0.5, textAlign: 'center' }}>{loadError}</Text>
+            <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.5), textAlign: 'center' }}>{loadError}</Text>
             <Pressable onPress={load}
               style={{ flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 16, paddingVertical: 10, borderRadius: 12, backgroundColor: c.primary }}>
               <RefreshCw size={14} color="#fff" />
@@ -158,7 +158,7 @@ export default function StorageMonitorScreen({ backTo }: { backTo?: string } = {
                   {/* Usage bar */}
                   <View style={{ height: 8, borderRadius: 4, backgroundColor: `${c.text}12`, overflow: 'hidden' }}>
                     <View style={{ height: 8, width: `${Math.min(100, stats.disk.used_pct)}%`, backgroundColor: stats.disk.used_pct > 90 ? '#DC2626' : c.primary }} />
-                  </View>                    <Text style={{ fontSize: 11, color: c.text, opacity: 0.5 }}>
+                  </View>                    <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.5) }}>
                     {stats.disk.used_pct}% used · Measured on: {stats.measured_root_label}
                   </Text>
                 </>
@@ -178,7 +178,7 @@ export default function StorageMonitorScreen({ backTo }: { backTo?: string } = {
                     </View>
                     <View style={{ flex: 1 }}>
                       <Text style={{ fontSize: 14, fontWeight: '700', color: c.text }}>Total Uploaded Files</Text>
-                      <Text style={{ fontSize: 11, color: c.text, opacity: 0.5 }}>
+                      <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.5) }}>
                         Physical size of {uploads.public_dir_label} + {uploads.private_dir_label}
                       </Text>
                     </View>
@@ -191,7 +191,7 @@ export default function StorageMonitorScreen({ backTo }: { backTo?: string } = {
                   {imageBuckets.length > 0 && (
                     <>
                       <View style={{ height: 1, backgroundColor: `${c.text}10` }} />
-                      <Text style={{ fontSize: 11, fontWeight: '700', color: c.text, opacity: 0.45, textTransform: 'uppercase' }}>Images</Text>
+                      <Text style={{ fontSize: 11, fontWeight: '700', ...mutedTextStyle(c, 0.45), textTransform: 'uppercase' }}>Images</Text>
                       {imageBuckets.map((b) => (
                         <View key={b.name} style={{ flexDirection: 'row', alignItems: 'center', gap: 10, paddingLeft: 4 }}>
                           <Image size={13} color={c.primary} />
@@ -208,7 +208,7 @@ export default function StorageMonitorScreen({ backTo }: { backTo?: string } = {
                   {otherBuckets.length > 0 && (
                     <>
                       <View style={{ height: 1, backgroundColor: `${c.text}10` }} />
-                      <Text style={{ fontSize: 11, fontWeight: '700', color: c.text, opacity: 0.45, textTransform: 'uppercase' }}>Other Files</Text>
+                      <Text style={{ fontSize: 11, fontWeight: '700', ...mutedTextStyle(c, 0.45), textTransform: 'uppercase' }}>Other Files</Text>
                       {otherBuckets.map((b) => {
                         const Icon = BUCKET_ICONS[b.name] ?? FileText;
                         return (
@@ -239,7 +239,7 @@ export default function StorageMonitorScreen({ backTo }: { backTo?: string } = {
                   {stats.database.largest_tables.length > 0 && (
                     <>
                       <View style={{ height: 1, backgroundColor: `${c.text}10` }} />
-                      <Text style={{ fontSize: 11, fontWeight: '700', color: c.text, opacity: 0.45, textTransform: 'uppercase' }}>Largest Tables</Text>
+                      <Text style={{ fontSize: 11, fontWeight: '700', ...mutedTextStyle(c, 0.45), textTransform: 'uppercase' }}>Largest Tables</Text>
                       {stats.database.largest_tables.map((t) => (
                         <View key={t.name} style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
                           <Text style={{ fontSize: 12, color: c.text, flex: 1 }} numberOfLines={1}>{t.name}</Text>
@@ -257,12 +257,12 @@ export default function StorageMonitorScreen({ backTo }: { backTo?: string } = {
             {/* VdoCipher note — videos are NOT on this disk */}
             <NeuCard style={{ marginBottom: 16, padding: 14, flexDirection: 'row', gap: 10, alignItems: 'center' }}>
               <Film size={16} color="#2DA8FF" />
-              <Text style={{ fontSize: 12, color: c.text, opacity: 0.55, flex: 1 }}>
+              <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.55), flex: 1 }}>
                 Lesson videos are streamed from VdoCipher (external CDN) and do not consume application storage. Live VdoCipher metrics live in Video Settings.
               </Text>
             </NeuCard>
 
-            <Text style={{ fontSize: 11, color: c.text, opacity: 0.4, textAlign: 'center' }}>
+            <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.4), textAlign: 'center' }}>
               Last checked: {new Date(stats.checked_at).toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true })}
             </Text>
           </>

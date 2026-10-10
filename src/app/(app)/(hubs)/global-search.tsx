@@ -27,7 +27,7 @@ import { DeleteAccountModal } from '@/components/DeleteAccountModal';
 import { displayPhoneNational } from '@/lib/phone';
 import { NeuCard } from '@/components/NeuCard';
 import { useToast } from '@/components/Toast';
-import { neuColors, useLayout, animation, zIndex, safeBottom } from '@/lib/neu';
+import { neuColors, useLayout, animation, zIndex, safeBottom, mutedTextStyle } from '@/lib/neu';
 import { useDebounce } from '@/lib/useDebounce';
 import { friendlyError } from '@/lib/validation';
 import { PageHeader } from '@/components/PageHeader';
@@ -299,8 +299,8 @@ export default function GlobalSearchScreen() {
                   </View>
                 )}
               </View>
-              <Text style={{ fontSize: 12, color: c.text, opacity: 0.5 }} numberOfLines={1}>{getPublicEmail(item) ?? '—'}</Text>
-              {item.phone && <Text style={{ fontSize: 11, color: c.text, opacity: 0.4 }}>{displayPhoneNational(item.phone)}</Text>}
+              <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.5) }} numberOfLines={1}>{getPublicEmail(item) ?? '—'}</Text>
+              {item.phone && <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.4) }}>{displayPhoneNational(item.phone)}</Text>}
             </View>
             <View style={{ alignItems: 'flex-end', gap: 4 }}>
               <View style={{ backgroundColor: `${roleColor}18`, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 8 }}>
@@ -332,13 +332,13 @@ export default function GlobalSearchScreen() {
               </View>
             </ScrollView>
             {filteredUsers.length === 0
-              ? <Text style={{ textAlign: 'center', color: c.text, opacity: 0.4, paddingVertical: 30 }}>No users found</Text>
+              ? <Text style={{ textAlign: 'center', ...mutedTextStyle(c, 0.4), paddingVertical: 30 }}>No users found</Text>
               : filteredUsers.map(renderUserRow)}
           </View>
         );
       case 'courses':
         return courseResults.length === 0
-          ? <Text style={{ textAlign: 'center', color: c.text, opacity: 0.4, paddingVertical: 30 }}>No courses found</Text>
+          ? <Text style={{ textAlign: 'center', ...mutedTextStyle(c, 0.4), paddingVertical: 30 }}>No courses found</Text>
           : courseResults.map(item => (
             <NeuCard key={item.id} style={{ marginBottom: 8, padding: 14 }}>
               <View style={{ flexDirection: 'row', alignItems: 'center' }}>
@@ -350,14 +350,14 @@ export default function GlobalSearchScreen() {
                 />
                 <View style={{ flex: 1, marginLeft: 12 }}>
                   <Text style={{ fontSize: 14, fontWeight: '600', color: c.text }}>{item.title}</Text>
-                  <Text style={{ fontSize: 12, color: c.text, opacity: 0.5 }}>{item.doctor?.full_name} • {item.status}</Text>
+                  <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.5) }}>{item.doctor?.full_name} • {item.status}</Text>
                 </View>
               </View>
             </NeuCard>
           ));
       case 'universities':
         return uniResults.length === 0
-          ? <Text style={{ textAlign: 'center', color: c.text, opacity: 0.4, paddingVertical: 30 }}>No universities found</Text>
+          ? <Text style={{ textAlign: 'center', ...mutedTextStyle(c, 0.4), paddingVertical: 30 }}>No universities found</Text>
           : uniResults.map(item => (
             <NeuCard key={item.id} style={{ marginBottom: 8, padding: 14 }}>
               <View style={{ flexDirection: 'row', alignItems: 'center' }}>
@@ -368,19 +368,19 @@ export default function GlobalSearchScreen() {
           ));
       case 'faculties':
         return facResults.length === 0
-          ? <Text style={{ textAlign: 'center', color: c.text, opacity: 0.4, paddingVertical: 30 }}>No faculties found</Text>
+          ? <Text style={{ textAlign: 'center', ...mutedTextStyle(c, 0.4), paddingVertical: 30 }}>No faculties found</Text>
           : facResults.map(item => (
             <NeuCard key={item.id} style={{ marginBottom: 8, padding: 14 }}>
               <View style={{ flexDirection: 'row', alignItems: 'center' }}>
                 <GraduationCap size={18} color="#7C3AED" style={{ marginRight: 12 }} />
                 <Text style={{ fontSize: 14, fontWeight: '600', color: c.text }}>{item.name}</Text>
-                {item.university?.name && <Text style={{ fontSize: 12, color: c.text, opacity: 0.4, marginLeft: 6 }}>· {item.university.name}</Text>}
+                {item.university?.name && <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.4), marginLeft: 6 }}>· {item.university.name}</Text>}
               </View>
             </NeuCard>
           ));
       case 'levels':
         return levelResults.length === 0
-          ? <Text style={{ textAlign: 'center', color: c.text, opacity: 0.4, paddingVertical: 30 }}>No levels found</Text>
+          ? <Text style={{ textAlign: 'center', ...mutedTextStyle(c, 0.4), paddingVertical: 30 }}>No levels found</Text>
           : levelResults.map(item => (
             <NeuCard key={item.id} style={{ marginBottom: 8, padding: 14 }}>
               <View style={{ flexDirection: 'row', alignItems: 'center' }}>
@@ -411,7 +411,7 @@ export default function GlobalSearchScreen() {
                 </View>
                 <View style={{ flex: 1 }}>
                   <Text style={{ fontSize: 18, fontWeight: '800', color: c.text }}>{user.full_name}</Text>
-                  <Text style={{ fontSize: 13, color: c.text, opacity: 0.5 }}>{getPublicEmail(user) ?? '—'}</Text>
+                  <Text style={{ fontSize: 13, ...mutedTextStyle(c, 0.5) }}>{getPublicEmail(user) ?? '—'}</Text>
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 6 }}>
                     <View style={{ backgroundColor: `${roleColor}18`, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 8 }}>
                       <Text style={{ fontSize: 11, fontWeight: '700', color: roleColor, textTransform: 'uppercase' }}>{user.role?.replace('_', ' ')}</Text>
@@ -435,7 +435,7 @@ export default function GlobalSearchScreen() {
               ].map(tile => (
                 <NeuCard key={tile.label} pressed radius={12} style={{ flexBasis: '47%', padding: 14, alignItems: 'center' }}>
                   <Text style={{ fontSize: 22, fontWeight: '800', color: tile.color }}>{tile.value}</Text>
-                  <Text style={{ fontSize: 11, color: c.text, opacity: 0.5, marginTop: 2 }}>{tile.label}</Text>
+                  <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.5), marginTop: 2 }}>{tile.label}</Text>
                 </NeuCard>
               ))}
             </View>
@@ -444,15 +444,15 @@ export default function GlobalSearchScreen() {
               <WatermarkBadge watermarkId={user.public_user_id} c={c} />
             )}
             {/* Recent audit */}
-            <Text style={{ fontSize: 13, fontWeight: '700', color: c.text, opacity: 0.5, textTransform: 'uppercase', letterSpacing: 0.5 }}>Recent Activity</Text>
+            <Text style={{ fontSize: 13, fontWeight: '700', ...mutedTextStyle(c, 0.5), textTransform: 'uppercase', letterSpacing: 0.5 }}>Recent Activity</Text>
             {drawerAuditLogs.slice(0, 3).map((log: any) => (
               <NeuCard key={log.id} pressed radius={12} style={{ padding: 12 }}>
                 <Text style={{ fontSize: 12, fontWeight: '600', color: c.text }}>{log.action}</Text>
-                <Text style={{ fontSize: 11, color: c.text, opacity: 0.4 }}>{new Date(log.created_at).toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true })}</Text>
+                <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.4) }}>{new Date(log.created_at).toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true })}</Text>
               </NeuCard>
             ))}
             {drawerAuditLogs.length === 0 && !drawerAuditLoading && (
-              <Text style={{ fontSize: 13, color: c.text, opacity: 0.3, textAlign: 'center', paddingVertical: 10 }}>No recent activity</Text>
+              <Text style={{ fontSize: 13, ...mutedTextStyle(c, 0.3), textAlign: 'center', paddingVertical: 10 }}>No recent activity</Text>
             )}
           </View>
         );
@@ -477,7 +477,7 @@ export default function GlobalSearchScreen() {
               { label: 'Created', value: user.created_at ? new Date(user.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '—' },
             ].map(row => (
               <View key={row.label} style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: `${c.text}08` }}>
-                <Text style={{ fontSize: 13, color: c.text, opacity: 0.5, minWidth: 80, flexShrink: 0 }}>{row.label}</Text>
+                <Text style={{ fontSize: 13, ...mutedTextStyle(c, 0.5), minWidth: 80, flexShrink: 0 }}>{row.label}</Text>
                 <Text style={{ fontSize: 13, fontWeight: '600', color: c.text, flex: 1, textAlign: 'right' }} numberOfLines={2}>{row.value}</Text>
               </View>
             ))}
@@ -490,7 +490,7 @@ export default function GlobalSearchScreen() {
         ) : drawerDevices.length === 0 ? (
           <View style={{ alignItems: 'center', paddingVertical: 40 }}>
             <Smartphone size={40} color={c.text} opacity={0.2} style={{ marginBottom: 10 }} />
-            <Text style={{ color: c.text, opacity: 0.4 }}>No devices registered</Text>
+            <Text style={{ ...mutedTextStyle(c, 0.4) }}>No devices registered</Text>
           </View>
         ) : (
           <View style={{ gap: 10 }}>
@@ -500,7 +500,7 @@ export default function GlobalSearchScreen() {
                   {d.is_active ? <Wifi size={20} color="#16A34A" /> : <WifiOff size={20} color="#DC2626" />}
                   <View style={{ flex: 1 }}>
                     <Text style={{ fontSize: 13, fontWeight: '600', color: c.text }}>{d.device_name ?? d.device_id ?? 'Unknown Device'}</Text>
-                    <Text style={{ fontSize: 11, color: c.text, opacity: 0.4 }}>{d.platform ?? '—'} · {d.last_seen ? new Date(d.last_seen).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '—'}</Text>
+                    <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.4) }}>{d.platform ?? '—'} · {d.last_seen ? new Date(d.last_seen).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '—'}</Text>
                   </View>
                   <View style={{ backgroundColor: d.is_active ? '#16A34A18' : '#DC262618', paddingHorizontal: 7, paddingVertical: 3, borderRadius: 7 }}>
                     <Text style={{ fontSize: 10, fontWeight: '700', color: d.is_active ? '#16A34A' : '#DC2626' }}>{d.is_active ? 'Active' : 'Inactive'}</Text>
@@ -515,7 +515,7 @@ export default function GlobalSearchScreen() {
         return (
           <View style={{ gap: 12 }}>
             <NeuCard pressed radius={14} style={{ padding: 18 }}>
-              <Text style={{ fontSize: 12, color: c.text, opacity: 0.5, marginBottom: 4 }}>CREDIT MANAGEMENT</Text>
+              <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.5), marginBottom: 4 }}>CREDIT MANAGEMENT</Text>
               <Text style={{ fontSize: 13, color: c.text, opacity: 0.7, marginBottom: 12 }}>{"Add or remove credits for this doctor's account."}</Text>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: c.base, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, marginBottom: 10, minWidth: 0, shadowColor: c.shadowDark, shadowOffset: { width: 2, height: 2 }, shadowOpacity: 0.4, shadowRadius: 5 }}>
                 <CreditCard size={16} color={c.text} opacity={0.5} style={{ flexShrink: 0 }} />
@@ -544,8 +544,8 @@ export default function GlobalSearchScreen() {
         return (
           <View style={{ alignItems: 'center', paddingVertical: 40 }}>
             <BookOpen size={40} color={c.primary} opacity={0.3} style={{ marginBottom: 10 }} />
-            <Text style={{ color: c.text, opacity: 0.5, fontSize: 14 }}>Course list for this user</Text>
-            <Text style={{ color: c.text, opacity: 0.3, fontSize: 12, marginTop: 4 }}>Available via Doctor or Student management pages</Text>
+            <Text style={{ ...mutedTextStyle(c, 0.5), fontSize: 14 }}>Course list for this user</Text>
+            <Text style={{ ...mutedTextStyle(c, 0.3), fontSize: 12, marginTop: 4 }}>Available via Doctor or Student management pages</Text>
           </View>
         );
 
@@ -555,8 +555,8 @@ export default function GlobalSearchScreen() {
           return (
             <View style={{ alignItems: 'center', paddingVertical: 60 }}>
               <Clock size={44} color={c.text} opacity={0.15} style={{ marginBottom: 12 }} />
-              <Text style={{ color: c.text, opacity: 0.35, fontSize: 14, fontWeight: '600' }}>Doctor Only</Text>
-              <Text style={{ color: c.text, opacity: 0.25, fontSize: 12, marginTop: 4 }}>Activity Timeline is only available for Doctor accounts.</Text>
+              <Text style={{ ...mutedTextStyle(c, 0.35), fontSize: 14, fontWeight: '600' }}>Doctor Only</Text>
+              <Text style={{ ...mutedTextStyle(c, 0.25), fontSize: 12, marginTop: 4 }}>Activity Timeline is only available for Doctor accounts.</Text>
             </View>
           );
         }
@@ -586,7 +586,7 @@ export default function GlobalSearchScreen() {
                     <DollarSign size={18} color="#7C3AED" />
                   </View>
                   <View style={{ flex: 1 }}>
-                    <Text style={{ fontSize: 11, color: c.text, opacity: 0.45 }}>Credit Selling Price</Text>
+                    <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.45) }}>Credit Selling Price</Text>
                     <Text style={{ fontSize: 20, fontWeight: '900', color: '#7C3AED' }}>
                       EGP {drawerActStats.credit_selling_price}
                     </Text>
@@ -605,7 +605,7 @@ export default function GlobalSearchScreen() {
                   ].map(kpi => (
                     <NeuCard key={kpi.label} style={{ flexBasis: '47%', padding: 12, alignItems: 'center' }}>
                       <Text style={{ fontSize: 20, fontWeight: '900', color: kpi.color }}>{kpi.value}</Text>
-                      <Text style={{ fontSize: 10, color: c.text, opacity: 0.45, textAlign: 'center', marginTop: 2 }}>{kpi.label}</Text>
+                      <Text style={{ fontSize: 10, ...mutedTextStyle(c, 0.45), textAlign: 'center', marginTop: 2 }}>{kpi.label}</Text>
                     </NeuCard>
                   ))}
                 </View>
@@ -616,11 +616,11 @@ export default function GlobalSearchScreen() {
                     <TrendingUp size={18} color="#16A34A" />
                   </View>
                   <View style={{ flex: 1 }}>
-                    <Text style={{ fontSize: 11, color: c.text, opacity: 0.45 }}>Total Earnings</Text>
+                    <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.45) }}>Total Earnings</Text>
                     <Text style={{ fontSize: 20, fontWeight: '900', color: '#16A34A' }}>
                       EGP {drawerActStats.total_earnings.toLocaleString('en-US')}
                     </Text>
-                    <Text style={{ fontSize: 11, color: c.text, opacity: 0.35 }}>
+                    <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.35) }}>
                       {drawerActStats.total_used} credits × EGP {drawerActStats.credit_selling_price}
                     </Text>
                   </View>
@@ -634,7 +634,7 @@ export default function GlobalSearchScreen() {
                   ].map(row => (
                     <View key={row.label} style={{ flexDirection: 'row', alignItems: 'center' }}>
                       <Clock size={13} color={c.text} opacity={0.4} style={{ marginRight: 8 }} />
-                      <Text style={{ fontSize: 12, color: c.text, opacity: 0.45, width: 90 }}>{row.label}</Text>
+                      <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.45), width: 90 }}>{row.label}</Text>
                       <Text style={{ fontSize: 12, color: c.text, flex: 1 }}>
                         {row.value
                           ? new Date(row.value).toLocaleString('en-US', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true })
@@ -674,7 +674,7 @@ export default function GlobalSearchScreen() {
             {drawerAuditLoading ? <ActivityIndicator color={c.primary} /> : drawerAuditLogs.length === 0 ? (
               <View style={{ alignItems: 'center', paddingVertical: 40 }}>
                 <FileText size={40} color={c.text} opacity={0.2} style={{ marginBottom: 10 }} />
-                <Text style={{ color: c.text, opacity: 0.4 }}>No recent activity</Text>
+                <Text style={{ ...mutedTextStyle(c, 0.4) }}>No recent activity</Text>
               </View>
             ) : (drawerAuditLogs as any[]).slice(0, 20).map((log: any) => {
               const aColor = (() => {
@@ -701,18 +701,18 @@ export default function GlobalSearchScreen() {
                             {(log.action ?? '').replace(/_/g, ' ')}
                           </Text>
                         </View>
-                        <Text style={{ fontSize: 10, color: c.text, opacity: 0.3 }}>
+                        <Text style={{ fontSize: 10, ...mutedTextStyle(c, 0.3) }}>
                           {new Date(log.created_at).toLocaleDateString('en-US', { day: '2-digit', month: 'short' })}
                         </Text>
                       </View>
                       {log.description
                         ? <Text style={{ fontSize: 12, color: c.text, opacity: 0.75, lineHeight: 17 }} numberOfLines={2}>{log.description}</Text>
                         : log.target_name
-                        ? <Text style={{ fontSize: 12, color: c.text, opacity: 0.6 }} numberOfLines={1}>{log.target_name}</Text>
+                        ? <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.6) }} numberOfLines={1}>{log.target_name}</Text>
                         : null
                       }
                       {log.actor_name && (
-                        <Text style={{ fontSize: 11, color: c.text, opacity: 0.4, marginTop: 3 }}>
+                        <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.4), marginTop: 3 }}>
                           By: {log.actor_name}
                         </Text>
                       )}
@@ -728,8 +728,8 @@ export default function GlobalSearchScreen() {
         return (
           <View style={{ alignItems: 'center', paddingVertical: 40 }}>
             <Bell size={40} color={c.primary} opacity={0.3} style={{ marginBottom: 10 }} />
-            <Text style={{ color: c.text, opacity: 0.5, fontSize: 14 }}>Send a notification to this user</Text>
-            <Text style={{ color: c.text, opacity: 0.3, fontSize: 12, marginTop: 4 }}>Use Notifications Center for targeted broadcasts</Text>
+            <Text style={{ ...mutedTextStyle(c, 0.5), fontSize: 14 }}>Send a notification to this user</Text>
+            <Text style={{ ...mutedTextStyle(c, 0.3), fontSize: 12, marginTop: 4 }}>Use Notifications Center for targeted broadcasts</Text>
           </View>
         );
 
@@ -744,7 +744,7 @@ export default function GlobalSearchScreen() {
                     <AlertTriangle size={16} color="#D97706" />
                     <View style={{ flex: 1 }}>
                       <Text style={{ fontSize: 12, fontWeight: '700', color: c.text }}>{log.action}</Text>
-                      <Text style={{ fontSize: 11, color: c.text, opacity: 0.4 }}>{new Date(log.created_at).toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true })}</Text>
+                      <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.4) }}>{new Date(log.created_at).toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true })}</Text>
                     </View>
                   </View>
                 </NeuCard>
@@ -854,8 +854,8 @@ export default function GlobalSearchScreen() {
           {!searched && !loading && (
             <View style={{ alignItems: 'center', paddingVertical: 60 }}>
               <Search size={52} color={c.primary} opacity={0.15} style={{ marginBottom: 14 }} />
-              <Text style={{ fontSize: 16, fontWeight: '600', color: c.text, opacity: 0.4 }}>Search anything</Text>
-              <Text style={{ fontSize: 13, color: c.text, opacity: 0.3, marginTop: 4 }}>Tap a result to open the Profile Drawer</Text>
+              <Text style={{ fontSize: 16, fontWeight: '600', ...mutedTextStyle(c, 0.4) }}>Search anything</Text>
+              <Text style={{ fontSize: 13, ...mutedTextStyle(c, 0.3), marginTop: 4 }}>Tap a result to open the Profile Drawer</Text>
             </View>
           )}
           {searched && renderCategoryResults()}
@@ -878,7 +878,7 @@ export default function GlobalSearchScreen() {
             <View style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 18, paddingTop: 0, paddingBottom: 12, borderBottomWidth: 1, borderBottomColor: `${c.text}10` }}>
               <View style={{ flex: 1 }}>
                 <Text style={{ fontSize: 16, fontWeight: '800', color: c.text }} numberOfLines={1}>{drawerUser.full_name}</Text>
-                <Text style={{ fontSize: 12, color: c.text, opacity: 0.5 }} numberOfLines={1}>{getPublicEmail(drawerUser) ?? '—'}</Text>
+                <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.5) }} numberOfLines={1}>{getPublicEmail(drawerUser) ?? '—'}</Text>
               </View>
               <Pressable onPress={closeDrawer} style={{ width: 36, height: 36, borderRadius: 10, backgroundColor: `${c.text}10`, alignItems: 'center', justifyContent: 'center' }}>
                 <X size={18} color={c.text} />

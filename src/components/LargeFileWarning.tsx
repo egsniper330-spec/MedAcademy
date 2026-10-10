@@ -10,7 +10,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { AlertTriangle, Wifi, Clock, HardDrive, X } from 'lucide-react-native';
 import { NeuCard } from '@/components/NeuCard';
 import { NeuButton } from '@/components/NeuButton';
-import { neuColors, neuFlatStyle, neuPressedStyle } from '@/lib/neu';
+import { neuColors, neuFlatStyle, neuPressedStyle, mutedTextStyle } from '@/lib/neu';
 import { type FileAnalysis } from '@/lib/videoUploadEngine';
 
 interface Props {
@@ -31,7 +31,7 @@ function StatRow({ icon: Icon, label, value, color, isDark }: {
         <Icon size={15} color={color} />
       </View>
       <View style={{ flex: 1 }}>
-        <Text style={{ fontSize: 11, color: c.text, opacity: 0.5, fontWeight: '600' }}>{label}</Text>
+        <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.5), fontWeight: '600' }}>{label}</Text>
         <Text style={{ fontSize: 13, fontWeight: '700', color: c.text }}>{value}</Text>
       </View>
     </View>
@@ -81,7 +81,7 @@ export function LargeFileWarning({ visible, analysis, fileName, onProceed, onCan
                 <Text style={{ fontSize: 16, fontWeight: '800', color: c.text }}>
                   {analysis.isVeryLarge ? 'Very Large File' : 'Large File Detected'}
                 </Text>
-                <Text style={{ fontSize: 12, color: c.text, opacity: 0.5, marginTop: 2 }} numberOfLines={2}>
+                <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.5), marginTop: 2 }} numberOfLines={2}>
                   {fileName}
                 </Text>
               </View>
@@ -106,7 +106,7 @@ export function LargeFileWarning({ visible, analysis, fileName, onProceed, onCan
                 color="#7C3AED" isDark={isDark} />
             </View>
 
-            <Text style={{ fontSize: 12, color: c.text, opacity: 0.45, lineHeight: 17 }}>
+            <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.45), lineHeight: 17 }}>
               Keep the app open during upload. The upload continues in the background queue.
             </Text>
 
@@ -114,7 +114,7 @@ export function LargeFileWarning({ visible, analysis, fileName, onProceed, onCan
             <View style={{ flexDirection: 'row', gap: 10 }}>
               <Pressable onPress={onCancel}
                 style={[neuFlatStyle(isDark), { flex: 1, padding: 13, borderRadius: 12, alignItems: 'center' }]}>
-                <Text style={{ fontSize: 14, fontWeight: '700', color: c.text, opacity: 0.6 }}>Cancel</Text>
+                <Text style={{ fontSize: 14, fontWeight: '700', ...mutedTextStyle(c, 0.6) }}>Cancel</Text>
               </Pressable>
               <Pressable onPress={onProceed}
                 style={[neuPressedStyle(isDark), { flex: 2, padding: 13, borderRadius: 12, alignItems: 'center', backgroundColor: c.primary }]}>

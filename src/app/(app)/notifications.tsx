@@ -8,7 +8,7 @@ import { Bell, Check, Trash2 } from 'lucide-react-native';
 import { useProfileStore } from '@/lib/store';
 import { getNotifications, markNotificationRead, deleteNotification } from '@/lib/api';
 import { NeuCard } from '@/components/NeuCard';
-import { neuColors, useLayout, neuMicroStyle, safeTop, safeBottom } from '@/lib/neu';
+import { neuColors, useLayout, neuMicroStyle, safeTop, safeBottom, mutedTextStyle } from '@/lib/neu';
 import { PageHeader } from '@/components/PageHeader';
 import { DrawerProvider } from '@/components/DrawerContext';
 import DrawerNav from '@/components/DrawerNav';
@@ -90,7 +90,7 @@ function NotificationsContent() {
             <Text style={{ fontSize: 18, fontWeight: '800', color: c.text, textAlign: 'center', marginBottom: 8 }}>
               No Notifications Yet
             </Text>
-            <Text style={{ fontSize: 14, color: c.text, opacity: 0.45, textAlign: 'center', lineHeight: 22 }}>
+            <Text style={{ fontSize: 14, ...mutedTextStyle(c, 0.45), textAlign: 'center', lineHeight: 22 }}>
               You&apos;re all caught up.{'\n'}New notifications will appear here.
             </Text>
           </View>
@@ -110,8 +110,8 @@ function NotificationsContent() {
 
               <View style={{ flex: 1 }}>
                 <Text style={{ fontSize: 14, fontWeight: n.is_read ? '500' : '700', color: c.text }}>{n.title}</Text>
-                <Text style={{ fontSize: 13, color: c.text, opacity: 0.6, marginTop: 2 }}>{n.body}</Text>
-                <Text style={{ fontSize: 11, color: c.text, opacity: 0.35, marginTop: 4 }}>
+                <Text style={{ fontSize: 13, ...mutedTextStyle(c, 0.6), marginTop: 2 }}>{n.body}</Text>
+                <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.35), marginTop: 4 }}>
                   {new Date(n.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
                 </Text>
               </View>

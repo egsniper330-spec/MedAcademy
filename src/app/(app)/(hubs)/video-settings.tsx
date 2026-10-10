@@ -31,7 +31,7 @@ import {
 } from 'lucide-react-native';
 import { PageHeader } from '@/components/PageHeader';
 import { NeuCard } from '@/components/NeuCard';
-import { neuColors, useLayout, neuFlatStyle, safeBottom } from '@/lib/neu';
+import { neuColors, useLayout, neuFlatStyle, safeBottom, mutedTextStyle } from '@/lib/neu';
 import { formatBytes } from '@/lib/videoUploadEngine';
 import { getVdoCipherStatus, type VdoCipherStatus } from '@/lib/api';
 
@@ -58,7 +58,7 @@ function Row({ label, value, warn }: { label: string; value: string; warn?: bool
   return (
     <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: 12,
       paddingVertical: 6, borderBottomWidth: 1, borderBottomColor: `${c.text}08` }}>
-      <Text style={{ fontSize: 12, color: c.text, opacity: 0.5 }}>{label}</Text>
+      <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.5) }}>{label}</Text>
       <Text style={{ fontSize: 12, fontWeight: '600', color: warn ? '#D97706' : c.text, flexShrink: 1, textAlign: 'right' }}>
         {value}
       </Text>
@@ -131,7 +131,7 @@ export default function VideoSettingsScreen({ backTo }: { backTo?: string } = {}
           <NeuCard style={[neuFlatStyle(isDark), { borderRadius: 16, padding: 24, alignItems: 'center', gap: 12 }]}>
             <AlertTriangle size={28} color="#DC2626" />
             <Text style={{ fontSize: 14, fontWeight: '800', color: c.text }}>Unable to load VdoCipher status</Text>
-            <Text style={{ fontSize: 12, color: c.text, opacity: 0.5, textAlign: 'center' }}>{loadError}</Text>
+            <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.5), textAlign: 'center' }}>{loadError}</Text>
             <Pressable onPress={load}
               style={{ flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 16, paddingVertical: 10, borderRadius: 12, backgroundColor: c.primary }}>
               <RefreshCw size={14} color="#fff" />
@@ -150,7 +150,7 @@ export default function VideoSettingsScreen({ backTo }: { backTo?: string } = {}
                 </View>
                 <View style={{ flex: 1 }}>
                   <Text style={{ fontSize: 15, fontWeight: '800', color: c.text }}>VdoCipher API</Text>
-                  <Text style={{ fontSize: 11, color: c.text, opacity: 0.45 }}>Live connection status</Text>
+                  <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.45) }}>Live connection status</Text>
                 </View>
                 <View style={{ backgroundColor: `${connCfg.color}18`, borderRadius: 10,
                   paddingHorizontal: 10, paddingVertical: 5 }}>
@@ -172,7 +172,7 @@ export default function VideoSettingsScreen({ backTo }: { backTo?: string } = {}
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
                     <Film size={18} color="#2DA8FF" />
                     <Text style={{ fontSize: 30, fontWeight: '900', color: '#2DA8FF' }}>{api.video_count}</Text>
-                    <Text style={{ fontSize: 12, color: c.text, opacity: 0.5 }}>videos in the VdoCipher library</Text>
+                    <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.5) }}>videos in the VdoCipher library</Text>
                   </View>
                   <Row label="Count source" value={api.count_source === 'vdocipher_reported_total' ? 'VdoCipher-reported total' : 'Fully paginated listing'} />
                   <Row label="Pages fetched" value={String(api.pages_fetched)} />
@@ -181,7 +181,7 @@ export default function VideoSettingsScreen({ backTo }: { backTo?: string } = {}
               ) : (
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 8 }}>
                   <AlertTriangle size={14} color="#D97706" />
-                  <Text style={{ fontSize: 12, color: c.text, opacity: 0.55, flex: 1 }}>
+                  <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.55), flex: 1 }}>
                     Video count unavailable — {apiErrorReason(api?.error ?? null, api?.http_status ?? 0)}
                   </Text>
                 </View>
@@ -194,7 +194,7 @@ export default function VideoSettingsScreen({ backTo }: { backTo?: string } = {}
               {apiOk && api?.listed_videos_size_bytes !== null && api?.listed_videos_size_bytes !== undefined ? (
                 <>
                   <Row label="Total size of videos returned by VdoCipher" value={formatBytes(api.listed_videos_size_bytes)} />
-                  <Text style={{ fontSize: 11, color: c.text, opacity: 0.4 }}>
+                  <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.4) }}>
                     {api.listed_videos_size_note}
                   </Text>
                   <Row label="Account storage usage" value="Not available from VdoCipher API" warn />
@@ -202,7 +202,7 @@ export default function VideoSettingsScreen({ backTo }: { backTo?: string } = {}
               ) : (
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 8 }}>
                   <AlertTriangle size={14} color="#D97706" />
-                  <Text style={{ fontSize: 12, color: c.text, opacity: 0.55, flex: 1 }}>
+                  <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.55), flex: 1 }}>
                     Video size data unavailable — {apiErrorReason(api?.error ?? null, api?.http_status ?? 0)}
                   </Text>
                 </View>
@@ -234,11 +234,11 @@ export default function VideoSettingsScreen({ backTo }: { backTo?: string } = {}
             {/* ── E. Diagnostics footer ───────────────────────────────── */}
             <NeuCard style={[neuFlatStyle(isDark), { borderRadius: 14, padding: 14, flexDirection: 'row', gap: 10, alignItems: 'center' }]}>
               <Activity size={15} color={c.primary} />
-              <Text style={{ fontSize: 12, color: c.text, opacity: 0.55, flex: 1 }}>
+              <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.55), flex: 1 }}>
                 All values are fetched live from the VdoCipher API at refresh — pull down or tap the refresh icon to re-check.
               </Text>
               {lastChecked && (
-                <Text style={{ fontSize: 11, color: c.text, opacity: 0.4 }}>
+                <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.4) }}>
                   Last checked: {lastChecked.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}
                 </Text>
               )}

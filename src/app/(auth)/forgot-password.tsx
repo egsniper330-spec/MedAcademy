@@ -18,7 +18,7 @@ import { backendClient } from '@/client/backendClient';
 import { NeuCard } from '@/components/NeuCard';
 import { NeuButton } from '@/components/NeuButton';
 import { BrandLogo } from '@/components/BrandLogo';
-import { neuColors } from '@/lib/neu';
+import { neuColors, mutedTextStyle } from '@/lib/neu';
 
 export default function ForgotPassword() {
   const scheme = useColorScheme();
@@ -66,7 +66,7 @@ export default function ForgotPassword() {
           <BrandLogo variant="auto" size={52} />
         </View>
         <Text style={{ fontSize: 28, fontWeight: '800', color: c.text, marginBottom: 8 }}>Reset Password</Text>
-        <Text style={{ fontSize: 14, color: c.text, opacity: 0.55, marginBottom: 32 }}>
+        <Text style={{ fontSize: 14, ...mutedTextStyle(c, 0.55), marginBottom: 32 }}>
           {"Enter your email and we'll send you a reset link."}
         </Text>
 
@@ -74,7 +74,7 @@ export default function ForgotPassword() {
           <NeuCard radius={20} style={{ padding: 24, alignItems: 'center' }}>
             <Mail size={48} color={c.primary} style={{ marginBottom: 16 }} />
             <Text style={{ fontSize: 18, fontWeight: '700', color: c.text, textAlign: 'center', marginBottom: 8 }}>Check Your Email</Text>
-            <Text style={{ fontSize: 14, color: c.text, opacity: 0.6, textAlign: 'center', marginBottom: 24 }}>
+            <Text style={{ fontSize: 14, ...mutedTextStyle(c, 0.6), textAlign: 'center', marginBottom: 24 }}>
               {"We've sent a password reset link to "}{email}
             </Text>
             <NeuButton label="Back to Sign In" onPress={() => router.replace('/(auth)/sign-in')} fullWidth />
@@ -82,7 +82,7 @@ export default function ForgotPassword() {
         ) : (
           <View>
             <NeuCard radius={22} style={{ padding: 22, marginBottom: 16 }}>
-              <Text style={{ fontSize: 12, fontWeight: '600', color: c.text, opacity: 0.55, marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.8 }}>Email Address</Text>
+              <Text style={{ fontSize: 12, fontWeight: '600', ...mutedTextStyle(c, 0.55), marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.8 }}>Email Address</Text>
               <View style={inputStyle}>
                 <Mail size={18} color={c.text} opacity={0.4} />
                 <TextInput

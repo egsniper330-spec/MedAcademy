@@ -3,7 +3,7 @@ import { View, Text, ActivityIndicator, useColorScheme } from 'react-native';
 import { useRouter } from 'expo-router';
 import { BrandLogo } from '@/components/BrandLogo';
 import { NeuButton } from '@/components/NeuButton';
-import { neuColors, useLayout } from '@/lib/neu';
+import { neuColors, useLayout, mutedTextStyle } from '@/lib/neu';
 import { useSession } from '@/ctx';
 import { resolveStartupRoute, type StartupRoute } from '@/lib/startupStateModel';
 import { useBranding } from '@/lib/branding';
@@ -113,7 +113,7 @@ export default function LandingScreen() {
          */}
         <BrandLogo variant="monogram" size={Math.round(layout.heroIconSize * 1.35)} />
         <Text style={{ fontSize: 34, fontWeight: '800', color: c.text, letterSpacing: -0.5, marginTop: 20 }}>{branding.app_name}</Text>
-        <Text style={{ fontSize: 16, color: c.text, opacity: 0.55, marginTop: 6, textAlign: 'center' }}>
+        <Text style={{ fontSize: 16, ...mutedTextStyle(c, 0.55), marginTop: 6, textAlign: 'center' }}>
           Best Educational Platform
         </Text>
       </View>

@@ -9,7 +9,7 @@ import { PageHeader } from '@/components/PageHeader';
 import { NeuCard } from '@/components/NeuCard';
 import { NeuButton } from '@/components/NeuButton';
 import { useToast } from '@/components/Toast';
-import { neuColors, useLayout, safeBottom } from '@/lib/neu';
+import { neuColors, useLayout, safeBottom, mutedTextStyle } from '@/lib/neu';
 import { backendClient } from '@/client/backendClient';
 import { getContactDisplay } from '@/lib/api';
 
@@ -100,7 +100,7 @@ export default function FraudAlertsScreen() {
           </View>
           <View style={{ flex: 1 }}>
             <Text style={{ fontSize: 22, fontWeight: '800', color: '#DC2626' }}>{unresolvedCount}</Text>
-            <Text style={{ fontSize: 12, color: c.text, opacity: 0.5 }}>unresolved alerts</Text>
+            <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.5) }}>unresolved alerts</Text>
           </View>
           <Pressable
             onPress={() => setShowResolved(v => !v)}
@@ -120,7 +120,7 @@ export default function FraudAlertsScreen() {
             <Text style={{ fontSize: 16, fontWeight: '700', color: '#16A34A' }}>
               {showResolved ? 'No resolved flags' : 'No active fraud alerts'}
             </Text>
-            <Text style={{ fontSize: 13, color: c.text, opacity: 0.5, marginTop: 4 }}>
+            <Text style={{ fontSize: 13, ...mutedTextStyle(c, 0.5), marginTop: 4 }}>
               {showResolved ? '' : 'The platform looks clean.'}
             </Text>
           </NeuCard>
@@ -152,20 +152,20 @@ export default function FraudAlertsScreen() {
 
                   {/* Actor */}
                   {flag.doctor && (
-                    <Text style={{ fontSize: 12, color: c.text, opacity: 0.6, marginBottom: 2 }}>
+                    <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.6), marginBottom: 2 }}>
                       Doctor: {flag.doctor.full_name} · {getContactDisplay(flag.doctor)}
                     </Text>
                   )}
 
                   {/* Details */}
-                  <Text style={{ fontSize: 11, color: c.text, opacity: 0.45, fontFamily: 'monospace' }}>
+                  <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.45), fontFamily: 'monospace' }}>
                     {JSON.stringify(flag.details ?? {}, null, 0).slice(0, 120)}
                   </Text>
 
                   {/* Time */}
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 6 }}>
                     <Clock size={11} color={c.text} style={{ opacity: 0.4 }} />
-                    <Text style={{ fontSize: 11, color: c.text, opacity: 0.4 }}>{timeAgo(flag.created_at)}</Text>
+                    <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.4) }}>{timeAgo(flag.created_at)}</Text>
                   </View>
                 </View>
               </View>

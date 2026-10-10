@@ -22,7 +22,7 @@ import {
 import { NeuCard } from '@/components/NeuCard';
 import { NeuButton } from '@/components/NeuButton';
 import { ResponsiveModal } from '@/components/ResponsiveModal';
-import { neuColors } from '@/lib/neu';
+import { neuColors, mutedTextStyle } from '@/lib/neu';
 import {
   createManagedUser, allocateCredits,
   getUniversities, getFaculties,
@@ -333,7 +333,7 @@ export function CreateUserModal({ visible, onClose, onCreated }: CreateUserModal
                 <Text style={{ fontSize: 16, fontWeight: '800', color: active ? opt.color : c.text }}>
                   {opt.label}
                 </Text>
-                <Text style={{ fontSize: 13, color: c.text, opacity: 0.5, marginTop: 2, lineHeight: 18 }}>
+                <Text style={{ fontSize: 13, ...mutedTextStyle(c, 0.5), marginTop: 2, lineHeight: 18 }}>
                   {opt.description}
                 </Text>
               </View>
@@ -462,7 +462,7 @@ export function CreateUserModal({ visible, onClose, onCreated }: CreateUserModal
       {/* — Optional: University / Faculty — */}
       {universities.length > 0 && (
         <>
-          <Text style={{ fontSize: 11, fontWeight: '700', color: c.text, opacity: 0.35, textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 8 }}>
+          <Text style={{ fontSize: 11, fontWeight: '700', ...mutedTextStyle(c, 0.35), textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 8 }}>
             Optional
           </Text>
 
@@ -545,7 +545,7 @@ export function CreateUserModal({ visible, onClose, onCreated }: CreateUserModal
               <Layers size={17} color={c.text} opacity={0.45} />
               <View>
                 <Text style={{ fontSize: 14, fontWeight: '600', color: c.text }}>Unlimited Devices</Text>
-                <Text style={{ fontSize: 11, color: c.text, opacity: 0.4 }}>Allow login from any number of devices</Text>
+                <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.4) }}>Allow login from any number of devices</Text>
               </View>
             </View>
             <Switch

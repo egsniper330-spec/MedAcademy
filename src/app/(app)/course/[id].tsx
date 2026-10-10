@@ -15,7 +15,7 @@ import { NeuButton } from '@/components/NeuButton';
 import { CourseProgressBar } from '@/components/CourseProgressBar';
 import { SubscribeSheet } from '@/components/SubscribeSheet';
 import { resolveCourseContact } from '@/lib/subscribeContact';
-import { neuColors, useLayout, safeTop, safeLeft, safeBottom } from '@/lib/neu';
+import { neuColors, useLayout, safeTop, safeLeft, safeBottom, mutedTextStyle } from '@/lib/neu';
 import { isPreviewingCourse, stopPreviewAsStudent } from '@/lib/previewAsStudent';
 import type { RelativePathString } from 'expo-router';
 
@@ -181,7 +181,7 @@ export default function CourseDetail() {
   );
   if (!course) return (
     <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: c.base }}>
-      <Text style={{ color: c.text, opacity: 0.5 }}>Course not found</Text>
+      <Text style={{ ...mutedTextStyle(c, 0.5) }}>Course not found</Text>
     </View>
   );
 
@@ -269,26 +269,26 @@ export default function CourseDetail() {
             {(course.doctor?.full_name ?? course.instructor_name) ? (
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
                 <GraduationCap size={13} color={c.primary} />
-                <Text style={{ fontSize: 13, color: c.text, opacity: 0.6 }}>{course.doctor?.full_name ?? course.instructor_name}</Text>
+                <Text style={{ fontSize: 13, ...mutedTextStyle(c, 0.6) }}>{course.doctor?.full_name ?? course.instructor_name}</Text>
               </View>
             ) : null}
             {course.language ? (
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
                 <Globe size={13} color={c.primary} />
-                <Text style={{ fontSize: 13, color: c.text, opacity: 0.6 }}>{course.language}</Text>
+                <Text style={{ fontSize: 13, ...mutedTextStyle(c, 0.6) }}>{course.language}</Text>
               </View>
             ) : null}
             {course.estimated_duration_hours ? (
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
                 <Clock size={13} color={c.primary} />
-                <Text style={{ fontSize: 13, color: c.text, opacity: 0.6 }}>
+                <Text style={{ fontSize: 13, ...mutedTextStyle(c, 0.6) }}>
                   {totalStudyMin > 0 ? formatStudyTime(totalStudyMin) : `${course.estimated_duration_hours}h`}
                 </Text>
               </View>
             ) : null}
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
               <BookOpen size={13} color={c.primary} />
-              <Text style={{ fontSize: 13, color: c.text, opacity: 0.6 }}>{allLessons.length} lessons</Text>
+              <Text style={{ fontSize: 13, ...mutedTextStyle(c, 0.6) }}>{allLessons.length} lessons</Text>
             </View>
           </View>
 
@@ -342,7 +342,7 @@ export default function CourseDetail() {
                 <View key={stat.label} style={{ flex: 1, alignItems: 'center', paddingVertical: 14,
                   borderRightWidth: i < 2 ? 1 : 0, borderColor: `${c.text}10` }}>
                   <Text style={{ fontSize: 14, fontWeight: '800', color: stat.color }}>{stat.value}</Text>
-                  <Text style={{ fontSize: 11, color: c.text, opacity: 0.45, marginTop: 2 }}>{stat.label}</Text>
+                  <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.45), marginTop: 2 }}>{stat.label}</Text>
                 </View>
               ))}
             </View>
@@ -356,7 +356,7 @@ export default function CourseDetail() {
 
         {/* Short description */}
         {course.short_description ? (
-          <Text style={{ fontSize: 14, color: c.text, opacity: 0.65, lineHeight: 22 }}>
+          <Text style={{ fontSize: 14, ...mutedTextStyle(c, 0.65), lineHeight: 22 }}>
             {course.short_description}
           </Text>
         ) : null}
@@ -365,7 +365,7 @@ export default function CourseDetail() {
         {course.full_description && course.full_description !== course.short_description ? (
           <NeuCard>
             <Text style={{ fontSize: 15, fontWeight: '700', color: c.text, marginBottom: 8 }}>About This Course</Text>
-            <Text style={{ fontSize: 14, color: c.text, opacity: 0.65, lineHeight: 22 }}>
+            <Text style={{ fontSize: 14, ...mutedTextStyle(c, 0.65), lineHeight: 22 }}>
               {course.full_description}
             </Text>
           </NeuCard>
@@ -380,7 +380,7 @@ export default function CourseDetail() {
 
         {/* Sections & Lessons */}
         <Text style={{ fontSize: 18, fontWeight: '800', color: c.text }}>Course Content</Text>
-        <Text style={{ fontSize: 13, color: c.text, opacity: 0.45, marginTop: -12 }}>
+        <Text style={{ fontSize: 13, ...mutedTextStyle(c, 0.45), marginTop: -12 }}>
           {`${(course.sections ?? []).length} sections \u00b7 ${allLessons.length} lessons${
             totalStudyMin > 0
               ? ` \u00b7 ${formatStudyTime(totalStudyMin)} total`
@@ -426,7 +426,7 @@ export default function CourseDetail() {
                     {section.title}
                   </Text>
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-                    <Text style={{ fontSize: 11, color: c.text, opacity: 0.45 }}>
+                    <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.45) }}>
                       {sectionLessons.length} lesson{sectionLessons.length !== 1 ? 's' : ''}
                     </Text>
                     {sectionCompleted > 0 && (
@@ -502,11 +502,11 @@ export default function CourseDetail() {
                           </Text>
                           <View style={{ flexDirection: 'row', gap: 10, marginTop: 2, flexWrap: 'wrap' }}>
                             {lesson.estimated_minutes > 0 ? (
-                              <Text style={{ fontSize: 11, color: c.text, opacity: 0.45 }}>
+                              <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.45) }}>
                                 {formatStudyTime(lesson.estimated_minutes)}
                               </Text>
                             ) : lesson.duration_seconds > 0 ? (
-                              <Text style={{ fontSize: 11, color: c.text, opacity: 0.4 }}>
+                              <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.4) }}>
                                 {Math.round(lesson.duration_seconds / 60)}m
                               </Text>
                             ) : null}
@@ -525,7 +525,7 @@ export default function CourseDetail() {
                         {(lesson.lesson_materials?.length ?? 0) > 0 && (
                           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3 }}>
                             <Paperclip size={11} color={c.text} opacity={0.3} />
-                            <Text style={{ fontSize: 11, color: c.text, opacity: 0.35 }}>
+                            <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.35) }}>
                               {lesson.lesson_materials.length}
                             </Text>
                           </View>
@@ -575,7 +575,7 @@ function FeatureRow({ icon: Icon, color, label }: { icon: any; color: string; la
   return (
     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
       <Icon size={16} color={color} />
-      <Text style={{ fontSize: 13, color: c.text, opacity: 0.65 }}>{label}</Text>
+      <Text style={{ fontSize: 13, ...mutedTextStyle(c, 0.65) }}>{label}</Text>
     </View>
   );
 }

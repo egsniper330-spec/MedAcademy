@@ -14,7 +14,7 @@ import { NeuCard } from '@/components/NeuCard';
 import { NeuButton } from '@/components/NeuButton';
 import { LoadingState, ErrorState } from '@/components/ScreenState';
 import { useToast } from '@/components/Toast';
-import { neuColors, useLayout, safeBottom } from '@/lib/neu';
+import { neuColors, useLayout, safeBottom, mutedTextStyle } from '@/lib/neu';
 import { friendlyError } from '@/lib/validation';
 import { KeyboardAwareScrollView } from '@/components/KeyboardAwareScrollView';
 
@@ -84,7 +84,7 @@ export default function BrandingScreen() {
   };
 
   const label = (text: string) => (
-    <Text style={{ fontSize: 11, fontWeight: '700', color: c.text, opacity: 0.5, marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.8 }}>{text}</Text>
+    <Text style={{ fontSize: 11, fontWeight: '700', ...mutedTextStyle(c, 0.5), marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.8 }}>{text}</Text>
   );
 
   return (
@@ -176,7 +176,7 @@ export default function BrandingScreen() {
             <NeuCard style={{ marginBottom: 20, padding: 14 }}>
               <View style={{ flexDirection: 'row', gap: 10 }}>
                 <Info size={16} color={c.primary} />
-                <Text style={{ flex: 1, fontSize: 12, lineHeight: 17, color: c.text, opacity: 0.6 }}>
+                <Text style={{ flex: 1, fontSize: 12, lineHeight: 17, ...mutedTextStyle(c, 0.6) }}>
                   The display name, logo and colours here are used by the app UI (landing screen,
                   About, Contact and headers). The name shown under the installed icon, the bundle
                   identifier and the API domain are part of the compiled build and cannot be

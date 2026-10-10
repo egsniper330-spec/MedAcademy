@@ -11,7 +11,7 @@ import { Coins, Save, RefreshCw } from 'lucide-react-native';
 import { PageHeader } from '@/components/PageHeader';
 import { NeuCard } from '@/components/NeuCard';
 import { NeuButton } from '@/components/NeuButton';
-import { neuColors, useLayout, safeBottom } from '@/lib/neu';
+import { neuColors, useLayout, safeBottom, mutedTextStyle } from '@/lib/neu';
 import {
   fetchCurrencyConfig, saveCurrencyConfig, invalidateCurrencyCache,
   formatCurrency, DEFAULT_CURRENCY, type CurrencyConfig,
@@ -99,15 +99,15 @@ export default function CurrencySettings({ backTo }: { backTo?: string } = {}) {
           <>
             {/* Live Preview */}
             <NeuCard style={{ marginBottom: 24, padding: 20, alignItems: 'center' }}>
-              <Text style={{ fontSize: 12, color: c.text, opacity: 0.5, textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 8 }}>Live Preview</Text>
+              <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.5), textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 8 }}>Live Preview</Text>
               <Text style={{ fontSize: 42, fontWeight: '900', color: c.primary }}>{preview}</Text>
-              <Text style={{ fontSize: 13, color: c.text, opacity: 0.45, marginTop: 6 }}>
+              <Text style={{ fontSize: 13, ...mutedTextStyle(c, 0.45), marginTop: 6 }}>
                 Code: {config.code} · {config.decimals === 0 ? 'No decimals' : `${config.decimals} decimal${config.decimals > 1 ? 's' : ''}`}
               </Text>
             </NeuCard>
 
             {/* Fields */}
-            <Text style={{ fontSize: 13, fontWeight: '700', color: c.text, opacity: 0.5, marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.8 }}>Currency Name</Text>
+            <Text style={{ fontSize: 13, fontWeight: '700', ...mutedTextStyle(c, 0.5), marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.8 }}>Currency Name</Text>
             <TextInput
               value={config.name}
               onChangeText={v => update('name', v)}
@@ -116,7 +116,7 @@ export default function CurrencySettings({ backTo }: { backTo?: string } = {}) {
               style={{ ...inp, minWidth: 0, marginBottom: 16 }}
             />
 
-            <Text style={{ fontSize: 13, fontWeight: '700', color: c.text, opacity: 0.5, marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.8 }}>Currency Code</Text>
+            <Text style={{ fontSize: 13, fontWeight: '700', ...mutedTextStyle(c, 0.5), marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.8 }}>Currency Code</Text>
             <TextInput
               value={config.code}
               onChangeText={v => update('code', v.toUpperCase())}
@@ -127,7 +127,7 @@ export default function CurrencySettings({ backTo }: { backTo?: string } = {}) {
               style={{ ...inp, minWidth: 0, marginBottom: 16 }}
             />
 
-            <Text style={{ fontSize: 13, fontWeight: '700', color: c.text, opacity: 0.5, marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.8 }}>Currency Symbol</Text>
+            <Text style={{ fontSize: 13, fontWeight: '700', ...mutedTextStyle(c, 0.5), marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.8 }}>Currency Symbol</Text>
             <TextInput
               value={config.symbol}
               onChangeText={v => update('symbol', v)}
@@ -136,7 +136,7 @@ export default function CurrencySettings({ backTo }: { backTo?: string } = {}) {
               style={{ ...inp, minWidth: 0, marginBottom: 16 }}
             />
 
-            <Text style={{ fontSize: 13, fontWeight: '700', color: c.text, opacity: 0.5, marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.8 }}>Decimal Places</Text>
+            <Text style={{ fontSize: 13, fontWeight: '700', ...mutedTextStyle(c, 0.5), marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.8 }}>Decimal Places</Text>
             <View style={{ flexDirection: 'row', gap: 10, marginBottom: 16 }}>
               {[0, 1, 2].map(d => (
                 <Pressable
@@ -154,14 +154,14 @@ export default function CurrencySettings({ backTo }: { backTo?: string } = {}) {
                   <Text style={{ fontSize: 15, fontWeight: '700', color: config.decimals === d ? c.primary : c.text }}>
                     {d}
                   </Text>
-                  <Text style={{ fontSize: 11, color: c.text, opacity: 0.5, marginTop: 2 }}>
+                  <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.5), marginTop: 2 }}>
                     {d === 0 ? 'None' : d === 1 ? '0.0' : '0.00'}
                   </Text>
                 </Pressable>
               ))}
             </View>
 
-            <Text style={{ fontSize: 13, fontWeight: '700', color: c.text, opacity: 0.5, marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.8 }}>Symbol Position</Text>
+            <Text style={{ fontSize: 13, fontWeight: '700', ...mutedTextStyle(c, 0.5), marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.8 }}>Symbol Position</Text>
             <View style={{ flexDirection: 'row', gap: 10, marginBottom: 24 }}>
               {(['after', 'before'] as const).map(pos => {
                 const label = pos === 'after' ? 'After Amount' : 'Before Amount';
@@ -180,7 +180,7 @@ export default function CurrencySettings({ backTo }: { backTo?: string } = {}) {
                     }}
                   >
                     <Text style={{ fontSize: 14, fontWeight: '800', color: config.position === pos ? c.primary : c.text }}>{example}</Text>
-                    <Text style={{ fontSize: 11, color: c.text, opacity: 0.5, marginTop: 3 }}>{label}</Text>
+                    <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.5), marginTop: 3 }}>{label}</Text>
                   </Pressable>
                 );
               })}
@@ -203,7 +203,7 @@ export default function CurrencySettings({ backTo }: { backTo?: string } = {}) {
             {/* Info box */}
             <NeuCard style={{ marginTop: 16, padding: 16 }}>
               <Text style={{ fontSize: 13, fontWeight: '700', color: c.text, marginBottom: 6 }}>How it works</Text>
-              <Text style={{ fontSize: 12, color: c.text, opacity: 0.55, lineHeight: 20 }}>
+              <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.55), lineHeight: 20 }}>
                 {'Monetary values are stored as plain numbers in the database. The currency symbol is only appended in the UI using this configuration.\n\nChanges apply immediately to Revenue, Pricing, Doctor Stats, and all Admin screens.'}
               </Text>
             </NeuCard>

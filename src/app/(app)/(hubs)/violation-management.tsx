@@ -14,7 +14,7 @@ import {
 } from 'lucide-react-native';
 import { backendClient } from '@/client/backendClient';
 import { NeuCard } from '@/components/NeuCard';
-import { neuColors, useLayout, neuFlatStyle, safeBottom } from '@/lib/neu';
+import { neuColors, useLayout, neuFlatStyle, safeBottom, mutedTextStyle } from '@/lib/neu';
 import { PageHeader } from '@/components/PageHeader';
 import { KeyboardAwareScrollView } from '@/components/KeyboardAwareScrollView';
 
@@ -165,7 +165,7 @@ export default function ViolationManagementScreen() {
             <Text style={{ fontSize: 15, fontWeight: '700', color: c.text }} numberOfLines={1}>
               {prof?.full_name ?? 'Unknown'}
             </Text>
-            <Text style={{ fontSize: 12, color: c.text, opacity: 0.5 }} numberOfLines={1}>
+            <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.5) }} numberOfLines={1}>
               {prof?.email} · {prof?.role}
             </Text>
           </View>
@@ -189,12 +189,12 @@ export default function ViolationManagementScreen() {
               {v.action_taken}
             </Text>
           </View>
-          <Text style={{ fontSize: 12, color: c.text, opacity: 0.4, paddingVertical: 4 }}>
+          <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.4), paddingVertical: 4 }}>
             Strikes: {prof?.strike_count ?? 0} · Violations: {prof?.violation_count ?? 0}
           </Text>
         </View>
 
-        <Text style={{ fontSize: 11, color: c.text, opacity: 0.35 }}>
+        <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.35) }}>
           {new Date(v.created_at).toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true })} · {v.platform ?? 'unknown'} · {v.installation_id?.slice(0, 8) ?? '—'}
         </Text>
 
@@ -275,7 +275,7 @@ export default function ViolationManagementScreen() {
       ) : filtered.length === 0 ? (
         <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', gap: 10 }}>
           <AlertTriangle size={40} color={c.text} opacity={0.2} />
-          <Text style={{ fontSize: 15, color: c.text, opacity: 0.4 }}>No violations found</Text>
+          <Text style={{ fontSize: 15, ...mutedTextStyle(c, 0.4) }}>No violations found</Text>
         </View>
       ) : (
         <FlatList

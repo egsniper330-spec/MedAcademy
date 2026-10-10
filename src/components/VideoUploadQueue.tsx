@@ -17,7 +17,7 @@ import {
 } from 'lucide-react-native';
 import { useUploadQueueStore } from '@/lib/uploadQueueStore';
 import { useVideoUploader } from '@/lib/useVideoUploader';
-import { neuColors, neuFlatStyle, neuPressedStyle, useLayout } from '@/lib/neu';
+import { neuColors, neuFlatStyle, neuPressedStyle, useLayout, mutedTextStyle } from '@/lib/neu';
 import {
   formatBytes, formatSpeed, formatEta, type UploadTask, type UploadStatus,
 } from '@/lib/videoUploadEngine';
@@ -215,7 +215,7 @@ function UploadItemCard({ task, isDark, lyt }: { task: UploadTask; isDark: boole
             <cfg.Icon size={statusIconSz} color={cfg.color} />
             <Text style={{ fontSize: lyt.captionSize, fontWeight: '600', color: cfg.color }}>{cfg.label}</Text>
             {chunkLabel && (
-              <Text style={{ fontSize: lyt.captionSize - 1, color: c.text, opacity: 0.45 }}>· {chunkLabel}</Text>
+              <Text style={{ fontSize: lyt.captionSize - 1, ...mutedTextStyle(c, 0.45) }}>· {chunkLabel}</Text>
             )}
           </View>
         </View>
@@ -281,10 +281,10 @@ function UploadItemCard({ task, isDark, lyt }: { task: UploadTask; isDark: boole
       {/* Upload stats */}
       {(isActive || isPaused || task.status === 'resuming') && (
         <View style={{ flexDirection: 'row', justifyContent: 'space-between', flexWrap: 'wrap', gap: lyt.pad.xs }}>
-          <Text style={{ fontSize: lyt.captionSize - 1, color: c.text, opacity: 0.5 }}>
+          <Text style={{ fontSize: lyt.captionSize - 1, ...mutedTextStyle(c, 0.5) }}>
             {formatBytes(task.bytesUploaded)} / {formatBytes(task.fileSize)}
           </Text>
-          <Text style={{ fontSize: lyt.captionSize - 1, color: c.text, opacity: 0.5 }}>
+          <Text style={{ fontSize: lyt.captionSize - 1, ...mutedTextStyle(c, 0.5) }}>
             {formatSpeed(task.speedBps)}  ·  ETA {formatEta(task.etaSeconds)}
           </Text>
           <Text style={{ fontSize: lyt.captionSize - 1, fontWeight: '700', color: cfg.color }}>{displayPct}%</Text>
@@ -398,12 +398,12 @@ function RecoveryDialog({ isDark, lyt }: { isDark: boolean; lyt: QueueLayout }) 
               <Text style={{ fontSize: lyt.headingSize, fontWeight: '800', color: c.text }}>
                 Unfinished Uploads Found
               </Text>
-              <Text style={{ fontSize: lyt.captionSize, color: c.text, opacity: 0.5, marginTop: lyt.pad.xs - 1 }}>
+              <Text style={{ fontSize: lyt.captionSize, ...mutedTextStyle(c, 0.5), marginTop: lyt.pad.xs - 1 }}>
                 {count} upload{count > 1 ? 's were' : ' was'} interrupted
               </Text>
             </View>
           </View>
-          <Text style={{ fontSize: lyt.bodySize - 1, color: c.text, opacity: 0.65, lineHeight: lyt.bodySize * 1.5 }}>
+          <Text style={{ fontSize: lyt.bodySize - 1, ...mutedTextStyle(c, 0.65), lineHeight: lyt.bodySize * 1.5 }}>
             {"We found uploads that didn't complete. You can resume them now or discard them."}
           </Text>
           <View style={{ gap: lyt.pad.md }}>
@@ -420,7 +420,7 @@ function RecoveryDialog({ isDark, lyt }: { isDark: boolean; lyt: QueueLayout }) 
             </Pressable>
             <Pressable onPress={() => setShowRecoveryDialog(false)}
               style={[neuFlatStyle(isDark), { padding: lyt.pad.md + 2, borderRadius: lyt.cardRadius, alignItems: 'center' }]}>
-              <Text style={{ fontSize: lyt.bodySize - 1, fontWeight: '700', color: c.text, opacity: 0.6 }}>
+              <Text style={{ fontSize: lyt.bodySize - 1, fontWeight: '700', ...mutedTextStyle(c, 0.6) }}>
                 Resume Later
               </Text>
             </Pressable>
@@ -515,7 +515,7 @@ function QueueHeader({ isDark, onClose, lyt }: { isDark: boolean; onClose: () =>
       </View>
       <View style={{ flex: 1 }}>
         <Text style={{ fontSize: lyt.headingSize, fontWeight: '800', color: c.text }}>Upload Queue</Text>
-        <Text style={{ fontSize: lyt.captionSize - 1, color: c.text, opacity: 0.5, marginTop: lyt.pad.xs - 2 }}>
+        <Text style={{ fontSize: lyt.captionSize - 1, ...mutedTextStyle(c, 0.5), marginTop: lyt.pad.xs - 2 }}>
           {uploading  > 0 ? `${uploading} uploading · `   : ''}
           {waiting    > 0 ? `${waiting} waiting · `       : ''}
           {recovering > 0 ? `${recovering} recovering · ` : ''}
@@ -631,7 +631,7 @@ export function VideoUploadQueuePanel({ visible, onClose }: { visible: boolean; 
           {tasks.length === 0 ? (
             <View style={{ alignItems: 'center', padding: lyt.pad.xxxl, gap: lyt.pad.md }}>
               <Upload size={Math.round(lyt.touchTarget * 0.9)} color={`${c.text}25`} />
-              <Text style={{ fontSize: lyt.bodySize - 1, color: c.text, opacity: 0.4, fontWeight: '600' }}>
+              <Text style={{ fontSize: lyt.bodySize - 1, ...mutedTextStyle(c, 0.4), fontWeight: '600' }}>
                 Queue is empty
               </Text>
             </View>

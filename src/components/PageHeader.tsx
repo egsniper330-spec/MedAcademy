@@ -15,7 +15,7 @@ import { View, Text, Pressable, useColorScheme } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { ArrowLeft } from 'lucide-react-native';
-import { neuColors, useNeuSpacing } from '@/lib/neu';
+import { neuColors, useNeuSpacing, mutedTextStyle } from '@/lib/neu';
 import { spacing, iconContainer, iconSize, typography, safeArea, safeTop, safeLeft, safeRight } from '@/lib/ds';
 import HamburgerButton from '@/components/HamburgerButton';
 import { useDrawer } from '@/components/DrawerContext';
@@ -110,7 +110,7 @@ export function PageHeader({
         </Text>
         {!!subtitle && (
           <Text
-            style={{ ...typography.caption, color: c.text, opacity: 0.45, marginTop: 2 }}
+            style={{ ...typography.caption, ...mutedTextStyle(c, 0.45), marginTop: 2 }}
             numberOfLines={1}
           >
             {subtitle}

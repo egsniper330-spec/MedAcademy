@@ -15,7 +15,7 @@ import {
 import { backendClient } from '@/client/backendClient';
 import { NeuCard } from '@/components/NeuCard';
 import { NeuButton } from '@/components/NeuButton';
-import { neuColors, useLayout, neuFlatStyle, safeBottom } from '@/lib/neu';
+import { neuColors, useLayout, neuFlatStyle, safeBottom, mutedTextStyle } from '@/lib/neu';
 import { PageHeader } from '@/components/PageHeader';
 import { KeyboardAwareScrollView } from '@/components/KeyboardAwareScrollView';
 
@@ -225,7 +225,7 @@ export default function ContentProtectionPolicyScreen({ backTo }: { backTo?: str
             <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
               <View style={{ flex: 1, gap: 2 }}>
                 <Text style={{ fontSize: 14, fontWeight: '600', color: c.text }}>Auto Logout</Text>
-                <Text style={{ fontSize: 12, color: c.text, opacity: 0.5 }}>Terminate session on violation</Text>
+                <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.5) }}>Terminate session on violation</Text>
               </View>
               <Switch
                 value={policy.auto_logout}
@@ -237,7 +237,7 @@ export default function ContentProtectionPolicyScreen({ backTo }: { backTo?: str
             <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
               <View style={{ flex: 1, gap: 2 }}>
                 <Text style={{ fontSize: 14, fontWeight: '600', color: c.text }}>Auto Suspend</Text>
-                <Text style={{ fontSize: 12, color: c.text, opacity: 0.5 }}>Suspend account on severe violation</Text>
+                <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.5) }}>Suspend account on severe violation</Text>
               </View>
               <Switch
                 value={policy.auto_suspend}

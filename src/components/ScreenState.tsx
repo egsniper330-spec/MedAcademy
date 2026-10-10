@@ -20,7 +20,7 @@ import { CloudOff, RefreshCw, AlertTriangle, Ban } from 'lucide-react-native';
 import { NeuButton } from '@/components/NeuButton';
 import { NeuCard } from '@/components/NeuCard';
 import { EmptyState } from '@/components/EmptyState';
-import { neuColors } from '@/lib/neu';
+import { neuColors, mutedTextStyle } from '@/lib/neu';
 import { spacing } from '@/lib/ds';
 import { friendlyError } from '@/lib/validation';
 
@@ -34,7 +34,7 @@ export function LoadingState({ label = 'Loading…' }: { label?: string }) {
   return (
     <View style={{ alignItems: 'center', justifyContent: 'center', paddingVertical: spacing.hero, gap: spacing.md }} accessibilityRole="progressbar" accessibilityLabel={label}>
       <ActivityIndicator size="large" color={c.primary} />
-      <Text style={{ fontSize: 13, color: c.text, opacity: 0.55 }}>{label}</Text>
+      <Text style={[{ fontSize: 13 }, mutedTextStyle(c, 0.55)]}>{label}</Text>
     </View>
   );
 }
@@ -60,7 +60,9 @@ export function ErrorState({ error, onRetry, retryLabel = 'Try Again', offline, 
   const isDark = useColorScheme() === 'dark';
   const c = isDark ? neuColors.dark : neuColors.light;
   const Icon = offline ? CloudOff : AlertTriangle;
-  const color = offline ? '#D97706' : '#DC2626';
+  // Semantic ink: the light-mode amber/red against a dark surface measure
+  // 3.0:1 and 2.4:1, so dark takes the brighter warning/danger tiers.
+  const color = offline ? (isDark ? c.warning : '#D97706') : (isDark ? c.danger : '#DC2626');
   const message = friendlyError(error, 'The request could not be completed.');
 
   const body = (
@@ -71,7 +73,7 @@ export function ErrorState({ error, onRetry, retryLabel = 'Try Again', offline, 
       <Text style={{ fontSize: 16, fontWeight: '700', color: c.text, textAlign: 'center' }}>
         {offline ? 'You are offline' : 'Something went wrong'}
       </Text>
-      <Text style={{ fontSize: 13, color: c.text, opacity: 0.6, textAlign: 'center', maxWidth: 340 }}>
+      <Text style={[{ fontSize: 13, textAlign: 'center', maxWidth: 340 }, mutedTextStyle(c, 0.6)]}>
         {message}
       </Text>
       {onRetry && (
@@ -117,7 +119,7 @@ interface FeatureUnavailableStateProps {
 export function FeatureUnavailableState({ title, description, icon, compact }: FeatureUnavailableStateProps) {
   const isDark = useColorScheme() === 'dark';
   const c = isDark ? neuColors.dark : neuColors.light;
-  const color = '#B45309';
+  const color = isDark ? c.warning : '#B45309';
 
   const body = (
     <View
@@ -135,7 +137,7 @@ export function FeatureUnavailableState({ title, description, icon, compact }: F
       <Text style={{ fontSize: 16, fontWeight: '700', color: c.text, textAlign: 'center' }}>
         {title}
       </Text>
-      <Text style={{ fontSize: 13, color: c.text, opacity: 0.6, textAlign: 'center', maxWidth: 360, lineHeight: 19 }}>
+      <Text style={[{ fontSize: 13, textAlign: 'center', maxWidth: 360, lineHeight: 19 }, mutedTextStyle(c, 0.6)]}>
         {description}
       </Text>
     </View>

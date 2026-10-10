@@ -12,7 +12,7 @@ import { ArrowLeft, CheckCircle, XCircle, Smartphone, Globe, Clock } from 'lucid
 import { PageHeader } from '@/components/PageHeader';
 import { Pressable } from 'react-native';
 import { getLoginHistory, LoginHistoryRecord } from '@/lib/api';
-import { neuColors, useLayout, neuFlatStyle, neuMicroStyle, safeBottom } from '@/lib/neu';
+import { neuColors, useLayout, neuFlatStyle, neuMicroStyle, safeBottom, mutedTextStyle } from '@/lib/neu';
 import { NeuCard } from '@/components/NeuCard';
 
 function formatDate(iso: string): string {
@@ -68,12 +68,12 @@ export default function LoginHistory() {
             <Text style={{ fontSize: 14, fontWeight: '700', color: item.success ? '#16A34A' : '#DC2626' }}>
               {item.success ? 'Login Successful' : 'Login Failed'}
             </Text>
-            <Text style={{ fontSize: 11, color: c.text, opacity: 0.4 }}>{formatDate(item.created_at)}</Text>
+            <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.4) }}>{formatDate(item.created_at)}</Text>
           </View>
 
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 4 }}>
             <Smartphone size={11} color={`${c.text}66`} />
-            <Text style={{ fontSize: 12, color: c.text, opacity: 0.6 }}>
+            <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.6) }}>
               {[item.device_name, item.platform].filter(Boolean).join(' · ') || 'Unknown device'}
             </Text>
           </View>
@@ -81,7 +81,7 @@ export default function LoginHistory() {
           {item.ip_address && (
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 2 }}>
               <Globe size={11} color={`${c.text}66`} />
-              <Text style={{ fontSize: 12, color: c.text, opacity: 0.5 }}>{item.ip_address}</Text>
+              <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.5) }}>{item.ip_address}</Text>
             </View>
           )}
 
@@ -109,15 +109,15 @@ export default function LoginHistory() {
           <View style={{ flexDirection: 'row', gap: 10, marginBottom: 20 }}>
             <NeuCard style={{ flex: 1, padding: 14, alignItems: 'center' }}>
               <Text style={{ fontSize: 22, fontWeight: '800', color: c.primary }}>{history.length}</Text>
-              <Text style={{ fontSize: 11, color: c.text, opacity: 0.5, marginTop: 2 }}>Total</Text>
+              <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.5), marginTop: 2 }}>Total</Text>
             </NeuCard>
             <NeuCard style={{ flex: 1, padding: 14, alignItems: 'center' }}>
               <Text style={{ fontSize: 22, fontWeight: '800', color: '#16A34A' }}>{successCount}</Text>
-              <Text style={{ fontSize: 11, color: c.text, opacity: 0.5, marginTop: 2 }}>Successful</Text>
+              <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.5), marginTop: 2 }}>Successful</Text>
             </NeuCard>
             <NeuCard style={{ flex: 1, padding: 14, alignItems: 'center' }}>
               <Text style={{ fontSize: 22, fontWeight: '800', color: '#DC2626' }}>{failureCount}</Text>
-              <Text style={{ fontSize: 11, color: c.text, opacity: 0.5, marginTop: 2 }}>Failed</Text>
+              <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.5), marginTop: 2 }}>Failed</Text>
             </NeuCard>
           </View>
         )}
@@ -128,7 +128,7 @@ export default function LoginHistory() {
       ) : history.length === 0 ? (
         <View style={{ alignItems: 'center', paddingVertical: 64 }}>
           <Clock size={56} color={c.primary} opacity={0.15} />
-          <Text style={{ color: c.text, opacity: 0.4, fontSize: 16, marginTop: 12 }}>No login history</Text>
+          <Text style={{ ...mutedTextStyle(c, 0.4), fontSize: 16, marginTop: 12 }}>No login history</Text>
         </View>
       ) : (
         <FlatList

@@ -27,7 +27,7 @@ import { LoadingState, ErrorState } from '@/components/ScreenState';
 import { EmptyState } from '@/components/EmptyState';
 import { NeuCard } from '@/components/NeuCard';
 import { NeuButton } from '@/components/NeuButton';
-import { neuColors, useLayout, safeBottom } from '@/lib/neu';
+import { neuColors, useLayout, safeBottom, mutedTextStyle } from '@/lib/neu';
 
 const STATUS_COLORS: Record<SystemServiceStatus, string> = {
   healthy: '#16A34A',
@@ -186,7 +186,7 @@ export default function SystemDiagnosticsScreen({ backTo }: { backTo?: string } 
               />
             </View>
 
-            <Text style={{ fontSize: 12, color: c.text, opacity: 0.5, marginBottom: 14 }}>
+            <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.5), marginBottom: 14 }}>
               Last checked: {fmtTime(report?.generatedAt)}
             </Text>
 
@@ -252,7 +252,7 @@ function ServiceCard({
           <Text style={{ fontSize: 15, fontWeight: '700', color: c.text }} numberOfLines={2}>
             {service.name}
           </Text>
-          <Text style={{ fontSize: 11, color: c.text, opacity: 0.45, marginTop: 1 }}>{service.category}</Text>
+          <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.45), marginTop: 1 }}>{service.category}</Text>
         </View>
         {/* Status pill — never overlaps the name (own row on narrow cards) */}
         <View style={{ backgroundColor: `${statusColor}18`, borderRadius: 10, paddingHorizontal: 10, paddingVertical: 5, marginLeft: 8 }}>
@@ -283,7 +283,7 @@ function ServiceCard({
 
       {/* Message */}
       {service.message !== '' && (
-        <Text style={{ fontSize: 12.5, color: c.text, opacity: 0.65, marginTop: 12, lineHeight: 18 }}>
+        <Text style={{ fontSize: 12.5, ...mutedTextStyle(c, 0.65), marginTop: 12, lineHeight: 18 }}>
           {service.message}
         </Text>
       )}
@@ -299,12 +299,12 @@ function ServiceCard({
           ) : null}
           {service.httpStatus != null && (
             <View style={{ backgroundColor: `${c.text}0A`, borderRadius: 8, paddingHorizontal: 8, paddingVertical: 4 }}>
-              <Text style={{ fontSize: 10.5, fontWeight: '700', color: c.text, opacity: 0.6 }}>HTTP {service.httpStatus}</Text>
+              <Text style={{ fontSize: 10.5, fontWeight: '700', ...mutedTextStyle(c, 0.6) }}>HTTP {service.httpStatus}</Text>
             </View>
           )}
           {service.latencyMs != null && (
             <View style={{ backgroundColor: `${c.text}0A`, borderRadius: 8, paddingHorizontal: 8, paddingVertical: 4 }}>
-              <Text style={{ fontSize: 10.5, fontWeight: '700', color: c.text, opacity: 0.6 }}>{service.latencyMs} ms</Text>
+              <Text style={{ fontSize: 10.5, fontWeight: '700', ...mutedTextStyle(c, 0.6) }}>{service.latencyMs} ms</Text>
             </View>
           )}
         </View>
@@ -321,7 +321,7 @@ function ServiceCard({
 
       {/* Footer: timestamp + per-service re-check */}
       <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 12, paddingTop: 10, borderTopWidth: 1, borderTopColor: `${c.text}0C` }}>
-        <Text style={{ fontSize: 10.5, color: c.text, opacity: 0.4, flex: 1, minWidth: 0 }} numberOfLines={1}>
+        <Text style={{ fontSize: 10.5, ...mutedTextStyle(c, 0.4), flex: 1, minWidth: 0 }} numberOfLines={1}>
           {fmtChecked(service.lastChecked)}
         </Text>
         {checking ? (

@@ -9,7 +9,7 @@ import React from 'react';
 import { View, Text, Pressable, useColorScheme } from 'react-native';
 import { PortalOverlay } from '@/components/PortalOverlay';
 import { AlertTriangle, ShieldX } from 'lucide-react-native';
-import { neuColors, neuFlatStyle } from '@/lib/neu';
+import { neuColors, neuFlatStyle, mutedTextStyle } from '@/lib/neu';
 
 interface Props {
   visible: boolean;
@@ -40,7 +40,7 @@ export function ContentProtectionWarning({ visible, warningMessage, strikeCount,
           </Text>
 
           {/* Warning message */}
-          <Text style={{ fontSize: 13, color: c.text, opacity: 0.65, textAlign: 'center', lineHeight: 20 }}>
+          <Text style={{ fontSize: 13, ...mutedTextStyle(c, 0.65), textAlign: 'center', lineHeight: 20 }}>
             {warningMessage}
           </Text>
 
@@ -60,7 +60,7 @@ export function ContentProtectionWarning({ visible, warningMessage, strikeCount,
 
           {/* Remaining hint */}
           {strikeCount < 3 && (
-            <Text style={{ fontSize: 12, color: c.text, opacity: 0.45, textAlign: 'center' }}>
+            <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.45), textAlign: 'center' }}>
               {3 - strikeCount} violation{3 - strikeCount !== 1 ? 's' : ''} remaining before account suspension.
             </Text>
           )}

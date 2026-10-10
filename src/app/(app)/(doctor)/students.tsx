@@ -24,7 +24,7 @@ import { NeuCard } from '@/components/NeuCard';
 import { NeuButton } from '@/components/NeuButton';
 import { ResponsiveModal } from '@/components/ResponsiveModal';
 import { useToast } from '@/components/Toast';
-import { neuColors, useLayout, safeBottom } from '@/lib/neu';
+import { neuColors, useLayout, safeBottom, mutedTextStyle } from '@/lib/neu';
 import { displayPhoneNational } from '@/lib/phone';
 import { getContactDisplay, getPublicEmail } from '@/lib/api';
 import { friendlyError } from '@/lib/validation';
@@ -325,7 +325,7 @@ export default function DoctorStudents() {
                 <Text style={{ fontSize: 10, fontWeight: '700', color: statusColor, textTransform: 'uppercase' }}>{enrollment.status}</Text>
               </View>
             </View>
-            <Text style={{ fontSize: 11, color: c.text, opacity: 0.5 }} numberOfLines={1}>{getContactDisplay(s)}</Text>
+            <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.5) }} numberOfLines={1}>{getContactDisplay(s)}</Text>
             {/* ID — stored Public User ID (MED-XXXX), visible to doctor for enrolled students only */}
             {Boolean(s?.public_user_id) && (
               <Pressable
@@ -342,15 +342,15 @@ export default function DoctorStudents() {
             )}
             <View style={{ flexDirection: 'row', gap: 12, marginTop: 6 }}>
               {Boolean(s?.university?.name) && (
-                <Text style={{ fontSize: 10, color: c.text, opacity: 0.4 }} numberOfLines={1}>{s.university.name}</Text>
+                <Text style={{ fontSize: 10, ...mutedTextStyle(c, 0.4) }} numberOfLines={1}>{s.university.name}</Text>
               )}
-              <Text style={{ fontSize: 10, color: c.text, opacity: 0.35 }}>
+              <Text style={{ fontSize: 10, ...mutedTextStyle(c, 0.35) }}>
                 {new Date(enrollment.enrolled_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
               </Text>
               {Boolean(enrollment.activation_method) && (
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3 }}>
                   <CreditCard size={9} color={c.text} opacity={0.3} />
-                  <Text style={{ fontSize: 10, color: c.text, opacity: 0.3 }}>{enrollment.activation_method === 'credits' ? 'credits' : enrollment.activation_method}</Text>
+                  <Text style={{ fontSize: 10, ...mutedTextStyle(c, 0.3) }}>{enrollment.activation_method === 'credits' ? 'credits' : enrollment.activation_method}</Text>
                 </View>
               )}
             </View>
@@ -412,7 +412,7 @@ export default function DoctorStudents() {
                 </View>
                 <View style={{ flex: 1 }}>
                   <Text style={{ fontSize: 14, fontWeight: '700', color: c.text }} numberOfLines={1}>{course.title}</Text>
-                  <Text style={{ fontSize: 11, color: c.text, opacity: 0.5 }}>{items.length} student{items.length !== 1 ? 's' : ''}</Text>
+                  <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.5) }}>{items.length} student{items.length !== 1 ? 's' : ''}</Text>
                 </View>
                 <ChevronRight size={16} color={c.text} opacity={0.3}
                   style={{ transform: [{ rotate: open ? '90deg' : '0deg' }] }} />
@@ -457,13 +457,13 @@ export default function DoctorStudents() {
                 <Text style={{ fontSize: 13, fontWeight: '600', color: c.text }} numberOfLines={1}>{s?.full_name}</Text>
                 <Text style={{ fontSize: 11, color: c.primary, opacity: 0.8 }} numberOfLines={1}>{e.course?.title}</Text>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 2 }}>
-                  <Text style={{ fontSize: 10, color: c.text, opacity: 0.4 }}>
+                  <Text style={{ fontSize: 10, ...mutedTextStyle(c, 0.4) }}>
                     Added {new Date(e.enrolled_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
                   </Text>
                   {Boolean(e.activation_method) && (
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3 }}>
                       <CreditCard size={9} color={c.text} opacity={0.3} />
-                      <Text style={{ fontSize: 10, color: c.text, opacity: 0.3 }}>{e.activation_method === 'credits' ? 'credits' : e.activation_method}</Text>
+                      <Text style={{ fontSize: 10, ...mutedTextStyle(c, 0.3) }}>{e.activation_method === 'credits' ? 'credits' : e.activation_method}</Text>
                     </View>
                   )}
                 </View>
@@ -554,7 +554,7 @@ export default function DoctorStudents() {
                   accessibilityRole="button"
                   accessibilityLabel="Clear selection"
                   style={{ paddingHorizontal: 10, paddingVertical: 7, borderRadius: 10, backgroundColor: `${c.text}0d` }}>
-                  <Text style={{ fontSize: 12, fontWeight: '700', color: c.text, opacity: 0.6 }}>Clear</Text>
+                  <Text style={{ fontSize: 12, fontWeight: '700', ...mutedTextStyle(c, 0.6) }}>Clear</Text>
                 </Pressable>
                 <Text style={{ fontSize: 12.5, fontWeight: '700', color: c.text, flex: 1, textAlign: 'right' }}>
                   {selected.size} selected
@@ -677,7 +677,7 @@ export default function DoctorStudents() {
       <ResponsiveModal visible={addModal} onClose={resetAddModal} title="Add Student">
         {enrollMethod === null && (
           <View style={{ gap: 12 }}>
-            <Text style={{ fontSize: 14, color: c.text, opacity: 0.6, textAlign: 'center', marginBottom: 8 }}>
+            <Text style={{ fontSize: 14, ...mutedTextStyle(c, 0.6), textAlign: 'center', marginBottom: 8 }}>
               Choose enrollment method
             </Text>
             <Pressable onPress={() => setEnrollMethod('credits')}>
@@ -687,7 +687,7 @@ export default function DoctorStudents() {
                 </View>
                 <View style={{ flex: 1 }}>
                   <Text style={{ fontSize: 14, fontWeight: '700', color: c.text }}>Add via Credits</Text>
-                  <Text style={{ fontSize: 12, color: c.text, opacity: 0.5, marginTop: 2 }}>Deduct 1 credit to enroll a student directly</Text>
+                  <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.5), marginTop: 2 }}>Deduct 1 credit to enroll a student directly</Text>
                 </View>
               </NeuCard>
             </Pressable>
@@ -699,13 +699,13 @@ export default function DoctorStudents() {
           <View style={{ gap: 14 }}>
             <Pressable onPress={() => { setEnrollMethod(null); setCreditStep(1); }} style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 4 }}>
               <X size={14} color={c.text} opacity={0.4} />
-              <Text style={{ fontSize: 12, color: c.text, opacity: 0.5 }}>Back</Text>
+              <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.5) }}>Back</Text>
             </Pressable>
 
             {/* Step 1: Find student */}
             {creditStep === 1 && (
               <>
-                <Text style={{ fontSize: 13, color: c.text, opacity: 0.6 }}>Search by email or phone:</Text>
+                <Text style={{ fontSize: 13, ...mutedTextStyle(c, 0.6) }}>Search by email or phone:</Text>
                 <View style={{ flexDirection: 'row', gap: 8 }}>
                   <TextInput
                     placeholder="student@email.com or phone"
@@ -729,7 +729,7 @@ export default function DoctorStudents() {
                       <GraduationCap size={18} color={c.primary} />
                       <View style={{ flex: 1 }}>
                         <Text style={{ fontSize: 13, fontWeight: '600', color: c.text }}>{s.full_name}</Text>
-                        <Text style={{ fontSize: 11, color: c.text, opacity: 0.5 }}>{getContactDisplay(s)}</Text>
+                        <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.5) }}>{getContactDisplay(s)}</Text>
                         </View>
                       </NeuCard>
                     </Pressable>
@@ -741,15 +741,15 @@ export default function DoctorStudents() {
             {creditStep === 2 && creditStudent && (
               <>
                 <NeuCard style={{ padding: 12, marginBottom: 4 }}>
-                  <Text style={{ fontSize: 12, color: c.text, opacity: 0.5 }}>Student</Text>
+                  <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.5) }}>Student</Text>
                   <Text style={{ fontSize: 14, fontWeight: '700', color: c.text }}>{creditStudent.full_name}</Text>
-                  <Text style={{ fontSize: 12, color: c.text, opacity: 0.5 }}>{getContactDisplay(creditStudent)}</Text>
+                  <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.5) }}>{getContactDisplay(creditStudent)}</Text>
                 </NeuCard>
-                <Text style={{ fontSize: 13, color: c.text, opacity: 0.6 }}>Select course:</Text>
+                <Text style={{ fontSize: 13, ...mutedTextStyle(c, 0.6) }}>Select course:</Text>
                 {modalCoursesLoading
                   ? <ActivityIndicator color={c.primary} style={{ marginVertical: 12 }} />
                   : modalCourses.length === 0
-                    ? <Text style={{ fontSize: 13, color: c.text, opacity: 0.5 }}>{"You don't have any published courses yet."}</Text>
+                    ? <Text style={{ fontSize: 13, ...mutedTextStyle(c, 0.5) }}>{"You don't have any published courses yet."}</Text>
                     : modalCourses.map(course => (
                         <Pressable key={course.id} onPress={() => { setCreditCourse(course.id); setCreditStep(3); }}>
                           <NeuCard style={{ flexDirection: 'row', alignItems: 'center', gap: 12, padding: 12,
@@ -774,7 +774,7 @@ export default function DoctorStudents() {
                     { label: 'Current Balance',  value: `${credits?.remaining ?? 0} Credits` },
                   ].map(row => (
                     <View key={row.label} style={{ flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 6, borderBottomWidth: 1, borderBottomColor: `${c.text}08` }}>
-                      <Text style={{ fontSize: 13, color: c.text, opacity: 0.5 }}>{row.label}</Text>
+                      <Text style={{ fontSize: 13, ...mutedTextStyle(c, 0.5) }}>{row.label}</Text>
                       <Text style={{ fontSize: 13, fontWeight: '700', color: c.text }}>{row.value}</Text>
                     </View>
                   ))}
@@ -864,7 +864,7 @@ export default function DoctorStudents() {
           return (
             <View style={{ gap: 0 }}>
               {/* ── Student Information section ── */}
-              <Text style={{ fontSize: 11, fontWeight: '700', letterSpacing: 1.1, textTransform: 'uppercase', color: c.text, opacity: 0.4, marginBottom: 6 }}>
+              <Text style={{ fontSize: 11, fontWeight: '700', letterSpacing: 1.1, textTransform: 'uppercase', ...mutedTextStyle(c, 0.4), marginBottom: 6 }}>
                 Student Information
               </Text>
               {infoRows.map(row => (
@@ -873,7 +873,7 @@ export default function DoctorStudents() {
                   onPress={row.copyable ? () => { void Clipboard.setStringAsync(row.value); showToast({ type: 'success', message: `${row.label} copied.` }); } : undefined}
                   style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: `${c.text}08` }}
                 >
-                  <Text style={{ fontSize: 13, color: c.text, opacity: 0.5, flexShrink: 0 }}>{row.label}</Text>
+                  <Text style={{ fontSize: 13, ...mutedTextStyle(c, 0.5), flexShrink: 0 }}>{row.label}</Text>
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5, flexShrink: 1 }}>
                     {row.copyable && <Copy size={11} color={c.primary} opacity={0.5} />}
                     <Text
@@ -897,12 +897,12 @@ export default function DoctorStudents() {
               {/* ── Enrollment context section ── */}
               {contextRows.length > 0 && (
                 <>
-                  <Text style={{ fontSize: 11, fontWeight: '700', letterSpacing: 1.1, textTransform: 'uppercase', color: c.text, opacity: 0.4, marginBottom: 6, marginTop: 16 }}>
+                  <Text style={{ fontSize: 11, fontWeight: '700', letterSpacing: 1.1, textTransform: 'uppercase', ...mutedTextStyle(c, 0.4), marginBottom: 6, marginTop: 16 }}>
                     Enrollment Details
                   </Text>
                   {contextRows.map(row => (
                     <View key={row.label} style={{ flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: `${c.text}08` }}>
-                      <Text style={{ fontSize: 13, color: c.text, opacity: 0.5 }}>{row.label}</Text>
+                      <Text style={{ fontSize: 13, ...mutedTextStyle(c, 0.5) }}>{row.label}</Text>
                       <Text style={{ fontSize: 13, fontWeight: '600', color: c.text, maxWidth: '60%', textAlign: 'right' }} numberOfLines={1}>{row.value}</Text>
                     </View>
                   ))}
@@ -938,7 +938,7 @@ export default function DoctorStudents() {
               />
               <Pressable onPress={() => setBulkConfirm(null)} disabled={bulkExecuting}
                 style={{ paddingVertical: 10, alignItems: 'center' }}>
-                <Text style={{ fontSize: 13, fontWeight: '600', color: c.text, opacity: 0.55 }}>Cancel</Text>
+                <Text style={{ fontSize: 13, fontWeight: '600', ...mutedTextStyle(c, 0.55) }}>Cancel</Text>
               </Pressable>
             </View>
           </View>
@@ -989,7 +989,7 @@ function EmptyState({ label }: { label: string }) {
   return (
     <View style={{ alignItems: 'center', paddingVertical: 48 }}>
       <Users size={40} color={c.text} opacity={0.15} />
-      <Text style={{ color: c.text, opacity: 0.4, fontSize: 14, fontWeight: '600', marginTop: 12 }}>{label}</Text>
+      <Text style={{ ...mutedTextStyle(c, 0.4), fontSize: 14, fontWeight: '600', marginTop: 12 }}>{label}</Text>
     </View>
   );
 }

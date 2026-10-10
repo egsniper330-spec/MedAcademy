@@ -10,7 +10,7 @@ import { Search, X, Mail, Phone, Hash, User } from 'lucide-react-native';
 import { backendClient } from '@/client/backendClient';
 import { detectIdentifierType } from '@/lib/identifier';
 import { displayPhoneNational } from '@/lib/phone';
-import { neuColors } from '@/lib/neu';
+import { neuColors, mutedTextStyle } from '@/lib/neu';
 import { NeuCard } from '@/components/NeuCard';
 
 export interface SearchedUser {
@@ -109,7 +109,7 @@ export function UserSearchInput({
   return (
     <View>
       <Text style={{
-        fontSize: 12, fontWeight: '600', color: c.text, opacity: 0.55,
+        fontSize: 12, fontWeight: '600', ...mutedTextStyle(c, 0.55),
         marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.8,
       }}>
         {label}
@@ -155,7 +155,7 @@ export function UserSearchInput({
 
       {/* Hint */}
       {query.length > 0 && query.length < 2 && (
-        <Text style={{ fontSize: 11, color: c.text, opacity: 0.4, marginBottom: 4, marginLeft: 2 }}>
+        <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.4), marginBottom: 4, marginLeft: 2 }}>
           Type at least 2 characters to search
         </Text>
       )}
@@ -163,7 +163,7 @@ export function UserSearchInput({
       {/* Results dropdown */}
       {searched && results.length === 0 && (
         <NeuCard radius={12} style={{ padding: 14, marginTop: 4 }}>
-          <Text style={{ color: c.text, opacity: 0.4, fontSize: 13, textAlign: 'center' }}>
+          <Text style={{ ...mutedTextStyle(c, 0.4), fontSize: 13, textAlign: 'center' }}>
             {`No user found for "${query}"`}
           </Text>
         </NeuCard>
@@ -192,15 +192,15 @@ export function UserSearchInput({
                 </View>
                 <View style={{ flex: 1 }}>
                   <Text style={{ fontSize: 14, fontWeight: '700', color: c.text }}>{user.full_name}</Text>
-                  <Text style={{ fontSize: 12, color: c.text, opacity: 0.5 }} numberOfLines={1}>
+                  <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.5) }} numberOfLines={1}>
                     {user.email}
                   </Text>
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
                     {!!user.public_user_id && (
-                      <Text style={{ fontSize: 11, fontWeight: '700', color: c.text, opacity: 0.55, letterSpacing: 0.5 }}>{user.public_user_id}</Text>
+                      <Text style={{ fontSize: 11, fontWeight: '700', ...mutedTextStyle(c, 0.55), letterSpacing: 0.5 }}>{user.public_user_id}</Text>
                     )}
                     {user.phone_e164 && (
-                      <Text style={{ fontSize: 11, color: c.text, opacity: 0.45 }}>{displayPhoneNational(user.phone_e164)}</Text>
+                      <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.45) }}>{displayPhoneNational(user.phone_e164)}</Text>
                     )}
                   </View>
                 </View>

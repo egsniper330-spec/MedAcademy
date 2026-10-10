@@ -30,7 +30,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Settings, ShieldAlert } from 'lucide-react-native';
-import { neuColors } from '@/lib/neu';
+import { neuColors, mutedTextStyle } from '@/lib/neu';
 import { PERMISSION_RATIONALES, type PermissionType } from '@/lib/permissions';
 
 // ─── cssInterop note ─────────────────────────────────────────────────────────
@@ -162,7 +162,7 @@ export function PermissionRationaleModal({
 
             {/* Message */}
             <Text style={{
-              fontSize: 14, color: c.text, opacity: 0.62,
+              fontSize: 14, ...mutedTextStyle(c, 0.62),
               textAlign: 'center', lineHeight: 21, marginBottom: 28,
             }}>
               {isBlocked

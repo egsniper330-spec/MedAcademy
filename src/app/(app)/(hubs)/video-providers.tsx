@@ -22,7 +22,7 @@ import { Video, Users, Globe, Lock, AlertTriangle, Search, ChevronDown, ChevronU
 import { PageHeader } from '@/components/PageHeader';
 import { NeuCard } from '@/components/NeuCard';
 import { useToast } from '@/components/Toast';
-import { neuColors, useLayout, safeBottom } from '@/lib/neu';
+import { neuColors, useLayout, safeBottom, mutedTextStyle } from '@/lib/neu';
 import {
   getVideoProviders, setGlobalProviderEnabled,
   getTeacherProviderPermissionsById, setTeacherProviderOverride,
@@ -187,7 +187,7 @@ export default function VideoProvidersScreen() {
             <Text style={{ fontSize: 16, fontWeight: '700', color: c.text }}>
               {provider.display_name}
             </Text>
-            <Text style={{ fontSize: 12, color: c.text, opacity: 0.5, marginTop: 2 }}>
+            <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.5), marginTop: 2 }}>
               {PROVIDER_DESCRIPTIONS[provider.provider_key] ?? 'Video provider'}
             </Text>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 3 }}>
@@ -195,7 +195,7 @@ export default function VideoProvidersScreen() {
                 width: 7, height: 7, borderRadius: 4,
                 backgroundColor: provider.is_globally_enabled ? '#16A34A' : '#9CA3AF',
               }} />
-              <Text style={{ fontSize: 12, color: c.text, opacity: 0.5 }}>
+              <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.5) }}>
                 {provider.is_globally_enabled ? 'Globally enabled' : 'Globally disabled'}
               </Text>
             </View>
@@ -232,7 +232,7 @@ export default function VideoProvidersScreen() {
         </View>
         <View style={{ flex: 1 }}>
           <Text style={{ fontSize: 15, fontWeight: '700', color: c.text }}>{doc.full_name}</Text>
-          <Text style={{ fontSize: 12, color: c.text, opacity: 0.5 }} numberOfLines={1}>{doc.email}</Text>
+          <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.5) }} numberOfLines={1}>{doc.email}</Text>
         </View>
         {doc.loading
           ? <ActivityIndicator size="small" color={c.primary} />
@@ -266,7 +266,7 @@ export default function VideoProvidersScreen() {
                     {perm.display_name}
                   </Text>
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 3 }}>
-                    <Text style={{ fontSize: 11, color: c.text, opacity: 0.5 }}>
+                    <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.5) }}>
                       Global: <Text style={{ fontWeight: '700', color: perm.global_enabled ? '#16A34A' : '#D97706' }}>
                         {perm.global_enabled ? 'ON' : 'OFF'}
                       </Text>
@@ -347,11 +347,11 @@ export default function VideoProvidersScreen() {
         <View style={{ gap: 8 }}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 4 }}>
             <Globe size={16} color={c.primary} />
-            <Text style={{ fontSize: 13, fontWeight: '700', color: c.text, opacity: 0.6, letterSpacing: 1, textTransform: 'uppercase' }}>
+            <Text style={{ fontSize: 13, fontWeight: '700', ...mutedTextStyle(c, 0.6), letterSpacing: 1, textTransform: 'uppercase' }}>
               Video Providers
             </Text>
           </View>
-          <Text style={{ fontSize: 12, color: c.text, opacity: 0.45, marginTop: -2 }}>
+          <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.45), marginTop: -2 }}>
             Default availability for every doctor. Individual doctors can be
             overridden below without changing this default.
           </Text>
@@ -361,7 +361,7 @@ export default function VideoProvidersScreen() {
           ) : loadError ? (
             <NeuCard style={{ padding: 20, alignItems: 'center', gap: 10 }}>
               <AlertTriangle size={20} color="#D97706" />
-              <Text style={{ fontSize: 13, color: c.text, opacity: 0.6, textAlign: 'center' }}>{loadError}</Text>
+              <Text style={{ fontSize: 13, ...mutedTextStyle(c, 0.6), textAlign: 'center' }}>{loadError}</Text>
               <Pressable
                 onPress={() => { setLoading(true); load(); }}
                 style={{ paddingHorizontal: 16, paddingVertical: 8, borderRadius: 10, backgroundColor: `${c.primary}18` }}
@@ -378,11 +378,11 @@ export default function VideoProvidersScreen() {
         <View style={{ gap: 8 }}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 4 }}>
             <Users size={16} color={c.primary} />
-            <Text style={{ fontSize: 13, fontWeight: '700', color: c.text, opacity: 0.6, letterSpacing: 1, textTransform: 'uppercase' }}>
+            <Text style={{ fontSize: 13, fontWeight: '700', ...mutedTextStyle(c, 0.6), letterSpacing: 1, textTransform: 'uppercase' }}>
               Doctor Overrides ({doctors.length})
             </Text>
           </View>
-          <Text style={{ fontSize: 12, color: c.text, opacity: 0.45, marginTop: -2 }}>
+          <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.45), marginTop: -2 }}>
             Inherit follows the global default. Enabled/Disabled applies to that
             doctor regardless of the global setting.
           </Text>
@@ -405,7 +405,7 @@ export default function VideoProvidersScreen() {
             <ActivityIndicator color={c.primary} style={{ marginTop: 20 }} />
           ) : loadError ? null : filteredDoctors.length === 0 ? (
             <NeuCard style={{ padding: 24, alignItems: 'center' }}>
-              <Text style={{ color: c.text, opacity: 0.5, fontSize: 14 }}>No doctors found.</Text>
+              <Text style={{ ...mutedTextStyle(c, 0.5), fontSize: 14 }}>No doctors found.</Text>
             </NeuCard>
           ) : (
             filteredDoctors.map(renderDoctorCard)

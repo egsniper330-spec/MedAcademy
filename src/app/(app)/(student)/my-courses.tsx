@@ -6,7 +6,7 @@ import { useProfileStore } from '@/lib/store';
 import { getMySubscriptions } from '@/lib/api';
 import { prefetchCourseImages, courseImageUrlsFrom } from '@/lib/imagePrefetch';
 import { CourseCard } from '@/components/CourseCard';
-import { neuColors, useLayout, safeBottom } from '@/lib/neu';
+import { neuColors, useLayout, safeBottom, mutedTextStyle } from '@/lib/neu';
 import type { RelativePathString } from 'expo-router';
 import { NeuSearchBar } from '@/components/NeuInputRow';
 import { KeyboardAwareScrollView } from '@/components/KeyboardAwareScrollView';
@@ -63,7 +63,7 @@ export default function MyCourses() {
 
         {filtered.length === 0 ? (
           <View style={{ alignItems: 'center', paddingVertical: 60 }}>
-            <Text style={{ fontSize: 16, color: c.text, opacity: 0.4 }}>
+            <Text style={{ fontSize: 16, ...mutedTextStyle(c, 0.4) }}>
               {query ? 'No results found' : 'No subscribed courses'}
             </Text>
           </View>

@@ -113,8 +113,17 @@ export function NeuButton({
   };
 
   const shadowStyle = pressed || disabled ? neuPressedStyle(isDark) : neuFlatStyle(isDark);
-  const bgColor = variant === 'primary' ? c.primary : variant === 'danger' ? '#DC2626' : c.base;
-  const labelColor = variant === 'primary' || variant === 'danger' ? '#FFFFFF' : c.text;
+  // Secondary reads as a RECESSED surface, so it takes the input step of the
+  // ladder. In Light every surface token collapses to #E8EEF6, so this paints
+  // exactly the colour it painted before — no Light change.
+  //
+  // Danger keeps its deep #DC2626 fill on BOTH themes on purpose: it carries a
+  // white label, and the lighter semantic red used for danger TEXT (#F87171 in
+  // dark) would drop white-on-fill to 2.4:1. `c.danger` is the text/icon tone.
+  const bgColor = variant === 'primary' ? c.primary : variant === 'danger' ? '#DC2626' : c.inputSurface;
+  const labelColor = variant === 'primary'
+    ? c.onPrimary
+    : variant === 'danger' ? '#FFFFFF' : c.text;
 
   return (
     <Pressable

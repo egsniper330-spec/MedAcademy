@@ -18,7 +18,7 @@ import { NeuButton } from '@/components/NeuButton';
 import { LoadingState, ErrorState } from '@/components/ScreenState';
 import { ResponsiveModal } from '@/components/ResponsiveModal';
 import { useToast } from '@/components/Toast';
-import { neuColors, useLayout, safeBottom } from '@/lib/neu';
+import { neuColors, useLayout, safeBottom, mutedTextStyle } from '@/lib/neu';
 import { useDebounce } from '@/lib/useDebounce';
 import { friendlyError } from '@/lib/validation';
 import { KeyboardAwareScrollView } from '@/components/KeyboardAwareScrollView';
@@ -159,7 +159,7 @@ export default function MaintenanceModeScreen() {
             )}
 
             {/* Message */}
-            <Text style={{ fontSize: 13, fontWeight: '700', color: c.text, opacity: 0.6, marginBottom: 8, textTransform: 'uppercase', letterSpacing: 0.8 }}>
+            <Text style={{ fontSize: 13, fontWeight: '700', ...mutedTextStyle(c, 0.6), marginBottom: 8, textTransform: 'uppercase', letterSpacing: 0.8 }}>
               Maintenance Message
             </Text>
             <View style={{ ...inp, minWidth: 0, marginBottom: 20 }}>
@@ -189,7 +189,7 @@ export default function MaintenanceModeScreen() {
             {whitelist.length === 0 ? (
               <NeuCard style={{ padding: 24, alignItems: 'center' }}>
                 <UserCheck size={32} color={c.primary} opacity={0.3} />
-                <Text style={{ color: c.text, opacity: 0.4, marginTop: 12 }}>No whitelisted users</Text>
+                <Text style={{ ...mutedTextStyle(c, 0.4), marginTop: 12 }}>No whitelisted users</Text>
               </NeuCard>
             ) : whitelist.map(item => (
               <NeuCard key={item.id} style={{ marginBottom: 10, padding: 14 }}>
@@ -199,7 +199,7 @@ export default function MaintenanceModeScreen() {
                   </View>
                   <View style={{ flex: 1 }}>
                     <Text style={{ fontSize: 14, fontWeight: '700', color: c.text }}>{item.profile?.full_name ?? 'Unknown'}</Text>
-                    <Text style={{ fontSize: 12, color: c.text, opacity: 0.5 }}>{item.profile?.email ?? ''}</Text>
+                    <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.5) }}>{item.profile?.email ?? ''}</Text>
                   </View>
                   <View style={{ backgroundColor: `${c.primary}18`, borderRadius: 8, paddingHorizontal: 8, paddingVertical: 3, marginRight: 10 }}>
                     <Text style={{ fontSize: 11, fontWeight: '700', color: c.primary }}>{item.profile?.role ?? ''}</Text>
@@ -245,7 +245,7 @@ export default function MaintenanceModeScreen() {
             style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: `${c.text}08` }}>
             <View style={{ flex: 1 }}>
               <Text style={{ fontSize: 14, fontWeight: '600', color: c.text }}>{u.full_name}</Text>
-              <Text style={{ fontSize: 12, color: c.text, opacity: 0.5 }}>{u.email} • {u.role}</Text>
+              <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.5) }}>{u.email} • {u.role}</Text>
             </View>
             <Plus size={16} color={c.primary} />
           </Pressable>

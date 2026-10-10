@@ -16,7 +16,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Film, Library, RefreshCw, Upload, X } from 'lucide-react-native';
-import { neuColors, neuFlatStyle, neuPressedStyle } from '@/lib/neu';
+import { neuColors, neuFlatStyle, neuPressedStyle, mutedTextStyle } from '@/lib/neu';
 import { VideoLibraryPicker } from '@/components/VideoLibraryPicker';
 import {
   attachAssetToLesson, replaceAssetEverywhere,
@@ -129,7 +129,7 @@ export function VideoReplaceSheet({
           }}>
             <View style={{ flex: 1 }}>
               <Text style={{ fontSize: 18, fontWeight: '800', color: c.text }}>Replace Video</Text>
-              <Text style={{ fontSize: 12, color: c.text, opacity: 0.45, marginTop: 2 }}>
+              <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.45), marginTop: 2 }}>
                 Choose how to replace the current video
               </Text>
             </View>
@@ -154,7 +154,7 @@ export function VideoReplaceSheet({
                   </View>
                   <View style={{ flex: 1 }}>
                     <Text style={{ fontSize: 15, fontWeight: '800', color: c.text }}>Upload New Video</Text>
-                    <Text style={{ fontSize: 12, color: c.text, opacity: 0.5, marginTop: 3, lineHeight: 17 }}>
+                    <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.5), marginTop: 3, lineHeight: 17 }}>
                       Pick a file from your device and upload it as a new asset.
                     </Text>
                   </View>
@@ -169,7 +169,7 @@ export function VideoReplaceSheet({
                   </View>
                   <View style={{ flex: 1 }}>
                     <Text style={{ fontSize: 15, fontWeight: '800', color: c.text }}>Choose From My Library</Text>
-                    <Text style={{ fontSize: 12, color: c.text, opacity: 0.5, marginTop: 3, lineHeight: 17 }}>
+                    <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.5), marginTop: 3, lineHeight: 17 }}>
                       Reuse an existing upload — no duplicate storage used.
                     </Text>
                   </View>
@@ -184,13 +184,13 @@ export function VideoReplaceSheet({
                   <Film size={18} color={c.primary} />
                   <View style={{ flex: 1 }}>
                     <Text style={{ fontSize: 14, fontWeight: '700', color: c.text }}>{selectedAsset.title || 'Selected video'}</Text>
-                    <Text style={{ fontSize: 11, color: c.text, opacity: 0.4 }}>
+                    <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.4) }}>
                       {selectedAsset.provider_video_id}
                     </Text>
                   </View>
                 </View>
 
-                <Text style={{ fontSize: 13, color: c.text, opacity: 0.6, lineHeight: 19 }}>
+                <Text style={{ fontSize: 13, ...mutedTextStyle(c, 0.6), lineHeight: 19 }}>
                   The current video is used in {sharedLessonCount} lessons.{'\n'}Which lessons should be updated?
                 </Text>
 
@@ -203,7 +203,7 @@ export function VideoReplaceSheet({
                   </View>
                   <View style={{ flex: 1 }}>
                     <Text style={{ fontSize: 14, fontWeight: '800', color: c.text }}>Replace only this lesson</Text>
-                    <Text style={{ fontSize: 12, color: c.text, opacity: 0.5, marginTop: 2 }}>
+                    <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.5), marginTop: 2 }}>
                       Other lessons keep using the old video.
                     </Text>
                   </View>
@@ -218,7 +218,7 @@ export function VideoReplaceSheet({
                   </View>
                   <View style={{ flex: 1 }}>
                     <Text style={{ fontSize: 14, fontWeight: '800', color: c.text }}>Replace every lesson using this video</Text>
-                    <Text style={{ fontSize: 12, color: c.text, opacity: 0.5, marginTop: 2 }}>
+                    <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.5), marginTop: 2 }}>
                       All {sharedLessonCount} lessons will be updated.
                     </Text>
                   </View>
@@ -227,7 +227,7 @@ export function VideoReplaceSheet({
                 <Pressable
                   onPress={() => setStep('choose_source')}
                   style={{ padding: 12, alignItems: 'center' }}>
-                  <Text style={{ fontSize: 13, color: c.text, opacity: 0.45 }}>← Back</Text>
+                  <Text style={{ fontSize: 13, ...mutedTextStyle(c, 0.45) }}>← Back</Text>
                 </Pressable>
               </>
             )}
@@ -236,7 +236,7 @@ export function VideoReplaceSheet({
             {step === 'applying' && (
               <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', gap: 14 }}>
                 <ActivityIndicator color={c.primary} size="large" />
-                <Text style={{ fontSize: 14, color: c.text, opacity: 0.55 }}>Applying replacement…</Text>
+                <Text style={{ fontSize: 14, ...mutedTextStyle(c, 0.55) }}>Applying replacement…</Text>
               </View>
             )}
           </View>

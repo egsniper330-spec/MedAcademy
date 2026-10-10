@@ -21,7 +21,7 @@ import { NeuCard } from '@/components/NeuCard';
 import { NeuButton } from '@/components/NeuButton';
 import { ResponsiveModal } from '@/components/ResponsiveModal';
 import { useToast } from '@/components/Toast';
-import { neuColors, useLayout, safeBottom } from '@/lib/neu';
+import { neuColors, useLayout, safeBottom, mutedTextStyle } from '@/lib/neu';
 import {
   getDoctors, allocateCredits, refundCredits, getCreditTransactions,
   getCreditLedger, getCreditLedgerStats, getCreditDailyStats, getTopDoctorsByCredits,
@@ -105,7 +105,7 @@ function StatBox({ label, value, color, c }: { label: string; value: number; col
   return (
     <NeuCard style={{ flex: 1, padding: 12, alignItems: 'center', minWidth: 80 }}>
       <Text style={{ fontSize: 20, fontWeight: '800', color }}>{value}</Text>
-      <Text style={{ fontSize: 10, color: c.text, opacity: 0.5, textAlign: 'center', marginTop: 2 }}>{label}</Text>
+      <Text style={{ fontSize: 10, ...mutedTextStyle(c, 0.5), textAlign: 'center', marginTop: 2 }}>{label}</Text>
     </NeuCard>
   );
 }
@@ -217,11 +217,11 @@ const { showToast } = useToast();
                   </View>
                   <View style={{ flex: 1 }}>
                     <Text style={{ fontSize: 15, fontWeight: '700', color: c.text }}>{doc.full_name}</Text>
-                    <Text style={{ fontSize: 12, color: c.text, opacity: 0.5 }}>{getPublicEmail(doc) ?? '—'}</Text>
+                    <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.5) }}>{getPublicEmail(doc) ?? '—'}</Text>
                   </View>
                   <View style={{ alignItems: 'flex-end' }}>
                     <Text style={{ fontSize: 20, fontWeight: '800', color: '#16A34A' }}>{doc.credits_balance ?? 0}</Text>
-                    <Text style={{ fontSize: 10, color: c.text, opacity: 0.4 }}>credits</Text>
+                    <Text style={{ fontSize: 10, ...mutedTextStyle(c, 0.4) }}>credits</Text>
                   </View>
                 </View>
                 <View style={{ flexDirection: 'row', gap: 10 }}>
@@ -234,7 +234,7 @@ const { showToast } = useToast();
             {!loading && filtered.length === 0 && (
               <NeuCard style={{ padding: 40, alignItems: 'center' }}>
                 <CreditCard size={36} color={c.primary} opacity={0.25} />
-                <Text style={{ color: c.text, opacity: 0.4, marginTop: 16 }}>No doctors found</Text>
+                <Text style={{ ...mutedTextStyle(c, 0.4), marginTop: 16 }}>No doctors found</Text>
               </NeuCard>
             )}
           </View>
@@ -257,14 +257,14 @@ const { showToast } = useToast();
           </View>
         }
       >
-        <Text style={{ fontSize: 11, fontWeight: '700', color: c.text, opacity: 0.5,
+        <Text style={{ fontSize: 11, fontWeight: '700', ...mutedTextStyle(c, 0.5),
           marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.8 }}>Amount</Text>
         <TextInput
           value={amount} onChangeText={v => { setAmount(v); setIsDirty(true); }}
           placeholder="e.g. 100" placeholderTextColor={`${c.text}55`}
           keyboardType="numeric" style={{ ...inp, minWidth: 0 }}
         />
-        <Text style={{ fontSize: 11, fontWeight: '700', color: c.text, opacity: 0.5,
+        <Text style={{ fontSize: 11, fontWeight: '700', ...mutedTextStyle(c, 0.5),
           marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.8 }}>Notes (optional)</Text>
         <TextInput
           value={notes} onChangeText={v => { setNotes(v); setIsDirty(true); }}
@@ -279,7 +279,7 @@ const { showToast } = useToast();
         {txLoading && <ActivityIndicator size="large" color={c.primary} style={{ marginVertical: 40 }} />}
         {!txLoading && transactions.length === 0 && (
           <View style={{ padding: 40, alignItems: 'center' }}>
-            <Text style={{ color: c.text, opacity: 0.4 }}>No transactions found</Text>
+            <Text style={{ ...mutedTextStyle(c, 0.4) }}>No transactions found</Text>
           </View>
         )}
         {transactions.map((tx, i) => {
@@ -298,8 +298,8 @@ const { showToast } = useToast();
                 <Text style={{ fontSize: 13, fontWeight: '700', color: c.text, textTransform: 'capitalize' }}>
                   {tx.transaction_type}
                 </Text>
-                {tx.notes && <Text style={{ fontSize: 11, color: c.text, opacity: 0.5 }}>{tx.notes}</Text>}
-                <Text style={{ fontSize: 11, color: c.text, opacity: 0.4 }}>
+                {tx.notes && <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.5) }}>{tx.notes}</Text>}
+                <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.4) }}>
                   {new Date(tx.created_at).toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true })}
                 </Text>
               </View>
@@ -414,7 +414,7 @@ const router = useRouter();
             {/* Summary stats */}
             {stats && (
               <>
-                <Text style={{ fontSize: 11, fontWeight: '700', color: c.text, opacity: 0.4, marginBottom: 8 }}>
+                <Text style={{ fontSize: 11, fontWeight: '700', ...mutedTextStyle(c, 0.4), marginBottom: 8 }}>
                   LIFETIME TOTALS
                 </Text>
                 <View style={{ flexDirection: 'row', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
@@ -423,7 +423,7 @@ const router = useRouter();
                   <StatBox label="Used"       value={stats.total_used}     color="#DC2626"   c={c} />
                   <StatBox label="Refunded"   value={stats.total_refunded} color="#2DA8FF"   c={c} />
                 </View>
-                <Text style={{ fontSize: 11, fontWeight: '700', color: c.text, opacity: 0.4, marginBottom: 8, marginTop: 4 }}>
+                <Text style={{ fontSize: 11, fontWeight: '700', ...mutedTextStyle(c, 0.4), marginBottom: 8, marginTop: 4 }}>
                   TODAY
                 </Text>
                 <View style={{ flexDirection: 'row', gap: 8, marginBottom: 16 }}>
@@ -437,7 +437,7 @@ const router = useRouter();
             {/* 14-day chart */}
             {chartData.days.length > 0 && (
               <>
-                <Text style={{ fontSize: 11, fontWeight: '700', color: c.text, opacity: 0.4, marginBottom: 8 }}>
+                <Text style={{ fontSize: 11, fontWeight: '700', ...mutedTextStyle(c, 0.4), marginBottom: 8 }}>
                   DAILY ACTIVITY — LAST 14 DAYS
                 </Text>
                 <NeuCard style={{ padding: 16, marginBottom: 20 }}>
@@ -445,7 +445,7 @@ const router = useRouter();
                     {[{ l: 'Added', col: '#16A34A' }, { l: 'Used', col: '#DC2626' }, { l: 'Removed', col: '#D97706' }].map(x => (
                       <View key={x.l} style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
                         <View style={{ width: 8, height: 8, borderRadius: 2, backgroundColor: x.col }} />
-                        <Text style={{ fontSize: 10, color: c.text, opacity: 0.5 }}>{x.l}</Text>
+                        <Text style={{ fontSize: 10, ...mutedTextStyle(c, 0.5) }}>{x.l}</Text>
                       </View>
                     ))}
                   </View>
@@ -460,7 +460,7 @@ const router = useRouter();
                   </View>
                   <View style={{ flexDirection: 'row', gap: 3, marginTop: 4 }}>
                     {chartData.days.map(d => (
-                      <Text key={d} style={{ flex: 1, fontSize: 7, color: c.text, opacity: 0.3, textAlign: 'center' }}>
+                      <Text key={d} style={{ flex: 1, fontSize: 7, ...mutedTextStyle(c, 0.3), textAlign: 'center' }}>
                         {d.slice(8)}
                       </Text>
                     ))}
@@ -488,7 +488,7 @@ const router = useRouter();
                         </View>
                         <View style={{ flex: 1 }}>
                           <Text style={{ fontSize: 13, fontWeight: '700', color: c.text }}>{doc.full_name}</Text>
-                          <Text style={{ fontSize: 11, color: c.text, opacity: 0.45 }}>
+                          <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.45) }}>
                             Received: {doc.total_received} · Used: {doc.total_used}
                           </Text>
                         </View>
@@ -545,7 +545,7 @@ const router = useRouter();
               </ScrollView>
             )}
 
-            <Text style={{ fontSize: 12, fontWeight: '700', color: c.text, opacity: 0.4, marginBottom: 8 }}>
+            <Text style={{ fontSize: 12, fontWeight: '700', ...mutedTextStyle(c, 0.4), marginBottom: 8 }}>
               TRANSACTIONS ({filtered.length})
             </Text>
 
@@ -579,17 +579,17 @@ const router = useRouter();
                     </View>
                     <Text style={{ fontSize: 12, color: c.text, fontWeight: '600' }}>{tx.doctor_name ?? tx.doctor_id}</Text>
                     {actorName && (
-                      <Text style={{ fontSize: 11, color: c.text, opacity: 0.5 }}>
+                      <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.5) }}>
                         {`By: ${actorName}${actorRole ? ` (${actorRole})` : ''}`}
                       </Text>
                     )}
                     {tx.course_title && (
-                      <Text style={{ fontSize: 11, color: c.text, opacity: 0.5 }}>Course: {tx.course_title}</Text>
+                      <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.5) }}>Course: {tx.course_title}</Text>
                     )}
                     <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 4 }}>
-                      <Text style={{ fontSize: 11, color: c.text, opacity: 0.4 }}>{fmt(tx.created_at)}</Text>
+                      <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.4) }}>{fmt(tx.created_at)}</Text>
                       {tx.balance_before != null && tx.balance_after != null && (
-                        <Text style={{ fontSize: 11, color: c.text, opacity: 0.45 }}>
+                        <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.45) }}>
                           {tx.balance_before} → {tx.balance_after}
                         </Text>
                       )}
@@ -604,7 +604,7 @@ const router = useRouter();
         ListEmptyComponent={!loading ? (
           <View style={{ padding: 60, alignItems: 'center' }}>
             <CreditCard size={38} color={c.primary} opacity={0.2} />
-            <Text style={{ color: c.text, opacity: 0.4, marginTop: 16 }}>No transactions found</Text>
+            <Text style={{ ...mutedTextStyle(c, 0.4), marginTop: 16 }}>No transactions found</Text>
           </View>
         ) : null} contentContainerStyle={{ paddingBottom: safeBottom(layout.insets.bottom) }}
       />
@@ -634,7 +634,7 @@ const router = useRouter();
                   </View>
                   <View>
                     <Text style={{ fontSize: 15, fontWeight: '800', color }}>{txLabel(selected.transaction_type)}</Text>
-                    <Text style={{ fontSize: 11, color: c.text, opacity: 0.4 }}>{fmt(selected.created_at)}</Text>
+                    <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.4) }}>{fmt(selected.created_at)}</Text>
                   </View>
                 </View>
                 <Text style={{ fontSize: 26, fontWeight: '800', color }}>{isPos ? '+' : '-'}{Math.abs(selected.amount)}</Text>
@@ -645,14 +645,14 @@ const router = useRouter();
                 <NeuCard style={{ padding: 14, marginBottom: 14, flexDirection: 'row', justifyContent: 'space-around' }}>
                   <View style={{ alignItems: 'center' }}>
                     <Text style={{ fontSize: 18, fontWeight: '700', color: c.text }}>{selected.balance_before}</Text>
-                    <Text style={{ fontSize: 10, color: c.text, opacity: 0.4 }}>Balance Before</Text>
+                    <Text style={{ fontSize: 10, ...mutedTextStyle(c, 0.4) }}>Balance Before</Text>
                   </View>
                   <View style={{ alignItems: 'center' }}>
                     <Text style={{ fontSize: 18, fontWeight: '700', color }}>→</Text>
                   </View>
                   <View style={{ alignItems: 'center' }}>
                     <Text style={{ fontSize: 18, fontWeight: '700', color }}>{selected.balance_after}</Text>
-                    <Text style={{ fontSize: 10, color: c.text, opacity: 0.4 }}>Balance After</Text>
+                    <Text style={{ fontSize: 10, ...mutedTextStyle(c, 0.4) }}>Balance After</Text>
                   </View>
                 </NeuCard>
               )}
@@ -669,9 +669,9 @@ const router = useRouter();
                     borderBottomWidth: 1, borderBottomColor: `${c.text}0A` }}>
                   <View style={{ marginRight: 10 }}>{row.icon}</View>
                   <View style={{ flex: 1 }}>
-                    <Text style={{ fontSize: 11, color: c.text, opacity: 0.4 }}>{row.label}</Text>
+                    <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.4) }}>{row.label}</Text>
                     <Text style={{ fontSize: 13, fontWeight: '600', color: c.text }}>{row.value}</Text>
-                    {row.sub && <Text style={{ fontSize: 11, color: c.text, opacity: 0.5 }}>{row.sub}</Text>}
+                    {row.sub && <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.5) }}>{row.sub}</Text>}
                   </View>
                   {row.onPress && <ChevronRight size={14} color={`${c.text}40`} />}
                 </Pressable>
@@ -681,7 +681,7 @@ const router = useRouter();
               {(selected.notes || selected.reason) && (
                 <NeuCard style={{ padding: 12, marginTop: 14 }}>
                   {selected.reason && (
-                    <Text style={{ fontSize: 12, color: c.text, opacity: 0.5, marginBottom: 4 }}>
+                    <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.5), marginBottom: 4 }}>
                       Reason: {selected.reason}
                     </Text>
                   )}
@@ -691,7 +691,7 @@ const router = useRouter();
 
               {/* TX ID */}
               <View style={{ marginTop: 14, gap: 4 }}>
-                <Text style={{ fontSize: 10, color: c.text, opacity: 0.3 }}>TX: {selected.id}</Text>
+                <Text style={{ fontSize: 10, ...mutedTextStyle(c, 0.3) }}>TX: {selected.id}</Text>
                 {selected.audit_log_id && (
                   <Pressable onPress={() => { setSelected(null); router.push('/sa-audit' as RelativePathString); }}>
                     <Text style={{ fontSize: 10, color: c.primary, opacity: 0.7 }}>→ View Audit Log</Text>

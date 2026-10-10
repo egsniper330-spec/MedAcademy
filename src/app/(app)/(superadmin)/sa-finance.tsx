@@ -16,7 +16,7 @@ import {
   Coins, Download, Stethoscope, Globe, ClipboardList,
 } from 'lucide-react-native';
 import { PageHeader } from '@/components/PageHeader';
-import { neuColors, neuFlatStyle, neuPressedStyle, useLayout, safeBottom } from '@/lib/neu';
+import { neuColors, neuFlatStyle, neuPressedStyle, useLayout, safeBottom, mutedTextStyle } from '@/lib/neu';
 import { getRevenueStats } from '@/lib/api';
 import { useCurrencyConfig } from '@/lib/currency';
 import Bell from '@/components/Bell';
@@ -52,7 +52,7 @@ function NavItem({
               </View>
             )}
           </View>
-          <Text style={{ fontSize: 12, color: c.text, opacity: 0.48, marginTop: 2 }}>{description}</Text>
+          <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.48), marginTop: 2 }}>{description}</Text>
         </View>
         <ChevronRight size={15} color={`${c.text}35`} />
       </View>
@@ -62,7 +62,7 @@ function NavItem({
 
 function SectionLabel({ title, c }: { title: string; c: typeof neuColors.light }) {
   return (
-    <Text style={{ fontSize: 11, fontWeight: '800', color: c.text, opacity: 0.38, textTransform: 'uppercase', letterSpacing: 1.4, marginBottom: 10, marginTop: 18 }}>
+    <Text style={{ fontSize: 11, fontWeight: '800', ...mutedTextStyle(c, 0.38), textTransform: 'uppercase', letterSpacing: 1.4, marginBottom: 10, marginTop: 18 }}>
       {title}
     </Text>
   );
@@ -103,7 +103,7 @@ export default function SAFinance() {
           <ActivityIndicator color={c.primary} style={{ marginVertical: 20 }} />
         ) : stats && (
           <View style={[neuFlatStyle(isDark), { borderRadius: 18, padding: 20, marginTop: 14, marginBottom: 4 }]}>
-            <Text style={{ fontSize: 11, fontWeight: '800', color: c.text, opacity: 0.4, textTransform: 'uppercase', letterSpacing: 1.2, marginBottom: 14 }}>
+            <Text style={{ fontSize: 11, fontWeight: '800', ...mutedTextStyle(c, 0.4), textTransform: 'uppercase', letterSpacing: 1.2, marginBottom: 14 }}>
               Revenue Overview
             </Text>
             <View style={{ flexDirection: 'row', justifyContent: 'space-around' }}>
@@ -114,7 +114,7 @@ export default function SAFinance() {
               ].map(s => (
                 <View key={s.label} style={{ alignItems: 'center' }}>
                   <Text style={{ fontSize: 22, fontWeight: '900', color: s.color }}>{s.value}</Text>
-                  <Text style={{ fontSize: 11, color: c.text, opacity: 0.5, marginTop: 3 }}>{s.label}</Text>
+                  <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.5), marginTop: 3 }}>{s.label}</Text>
                 </View>
               ))}
             </View>

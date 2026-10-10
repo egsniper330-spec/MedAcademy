@@ -1,7 +1,7 @@
 import { View, Text, useColorScheme } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { CheckCircle, BookOpen, Clock } from 'lucide-react-native';
-import { neuColors } from '@/lib/neu';
+import { neuColors, mutedTextStyle } from '@/lib/neu';
 
 // ── Progress bar color constants ────────────────────────────────────────────
 // Emerald green palette — conveys success / completion, matches MedAcademy
@@ -49,7 +49,7 @@ export function CourseProgressBar({
       <View style={{ gap: 4 }}>
         <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
           <Text style={{ fontSize: 12, fontWeight: '600', color: LABEL_COLOR }}>{pct}% complete</Text>
-          <Text style={{ fontSize: 11, color: c.text, opacity: 0.5 }}>{completedLessons}/{totalLessons}</Text>
+          <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.5) }}>{completedLessons}/{totalLessons}</Text>
         </View>
         {/* Track */}
         <View style={{

@@ -22,7 +22,7 @@
 import React, { useState } from 'react';
 import { Pressable, Text, View } from 'react-native';
 import { useRouter, type RelativePathString } from 'expo-router';
-import { neuFlatStyle, neuPressedStyle, useLayout } from '@/lib/neu';
+import { neuFlatStyle, neuPressedStyle, useLayout, mutedTextStyle } from '@/lib/neu';
 import { neuColors } from '@/lib/neu';
 
 interface QuickActionBtnProps {
@@ -55,7 +55,7 @@ export function QuickActionBtn({ icon: Icon, label, color, path, c, isDark }: Qu
       ]}>
         <Icon size={iconInner} color={color} />
       </View>
-      <Text style={{ fontSize: layout.captionSize - 1, fontWeight: '700', color: c.text, opacity: 0.65, textAlign: 'center' }} numberOfLines={2}>{label}</Text>
+      <Text style={{ fontSize: layout.captionSize - 1, fontWeight: '700', ...mutedTextStyle(c, 0.65), textAlign: 'center' }} numberOfLines={2}>{label}</Text>
     </Pressable>
   );
 }

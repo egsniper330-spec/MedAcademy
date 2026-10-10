@@ -18,7 +18,7 @@ import { NeuCard } from '@/components/NeuCard';
 import { NeuButton } from '@/components/NeuButton';
 import { ResponsiveModal } from '@/components/ResponsiveModal';
 import { useToast } from '@/components/Toast';
-import { neuColors, useLayout, safeBottom } from '@/lib/neu';
+import { neuColors, useLayout, safeBottom, mutedTextStyle } from '@/lib/neu';
 import { useCurrencyConfig } from '@/lib/currency';
 import { friendlyError } from '@/lib/validation';
 import { useProfileStore } from '@/lib/store';
@@ -146,7 +146,7 @@ export default function RevenueDashboard() {
           <>
             {/* Revenue Overview */}
             <NeuCard style={{ marginBottom: 16, padding: 22 }}>
-              <Text style={{ fontSize: 13, color: c.text, opacity: 0.5, marginBottom: 6 }}>Total Revenue</Text>
+              <Text style={{ fontSize: 13, ...mutedTextStyle(c, 0.5), marginBottom: 6 }}>Total Revenue</Text>
               <Text style={{ fontSize: 38, fontWeight: '900', color: '#16A34A' }}>{fmtLarge(stats.totalRevenue)}</Text>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 8 }}>
                 <TrendingUp size={16} color="#16A34A" />
@@ -156,11 +156,11 @@ export default function RevenueDashboard() {
 
             <View style={{ flexDirection: 'row', gap: 12, marginBottom: 16 }}>
               <NeuCard style={{ flex: 1, padding: 18, alignItems: 'center' }}>
-                <Text style={{ fontSize: 11, color: c.text, opacity: 0.5, marginBottom: 4, textTransform: 'uppercase', letterSpacing: 0.8 }}>Monthly</Text>
+                <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.5), marginBottom: 4, textTransform: 'uppercase', letterSpacing: 0.8 }}>Monthly</Text>
                 <Text style={{ fontSize: 24, fontWeight: '800', color: c.primary }}>{fmtLarge(stats.monthlyRevenue)}</Text>
               </NeuCard>
               <NeuCard style={{ flex: 1, padding: 18, alignItems: 'center' }}>
-                <Text style={{ fontSize: 11, color: c.text, opacity: 0.5, marginBottom: 4, textTransform: 'uppercase', letterSpacing: 0.8 }}>Yearly</Text>
+                <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.5), marginBottom: 4, textTransform: 'uppercase', letterSpacing: 0.8 }}>Yearly</Text>
                 <Text style={{ fontSize: 24, fontWeight: '800', color: '#7C3AED' }}>{fmtLarge(stats.yearlyRevenue)}</Text>
               </NeuCard>
             </View>
@@ -176,7 +176,7 @@ export default function RevenueDashboard() {
                 </View>
                 <View style={{ flex: 1 }}>
                   <Text style={{ fontSize: 14, fontWeight: '700', color: c.text }}>{item.label}</Text>
-                  <Text style={{ fontSize: 12, color: c.text, opacity: 0.5 }}>{item.desc}</Text>
+                  <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.5) }}>{item.desc}</Text>
                 </View>
                 <Text style={{ fontSize: 18, fontWeight: '800', color: item.color }}>{item.value}</Text>
               </NeuCard>
@@ -184,7 +184,7 @@ export default function RevenueDashboard() {
 
             <NeuCard style={{ marginTop: 8, padding: 16 }}>
               <Text style={{ fontSize: 14, fontWeight: '700', color: c.text, marginBottom: 8 }}>Revenue Formula</Text>
-              <Text style={{ fontSize: 13, color: c.text, opacity: 0.6, lineHeight: 22 }}>
+              <Text style={{ fontSize: 13, ...mutedTextStyle(c, 0.6), lineHeight: 22 }}>
                 {'Total Revenue = Credits Sold × '}{fmt(stats.creditPrice)}{'\n\nRevenue is calculated based on credits allocated to doctors.'}
               </Text>
             </NeuCard>
@@ -202,13 +202,13 @@ export default function RevenueDashboard() {
           <>
             {/* Earnings since last reset — the "counter" */}
             <NeuCard style={{ marginBottom: 12, padding: 22 }}>
-              <Text style={{ fontSize: 12, color: c.text, opacity: 0.5, marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.8 }}>
+              <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.5), marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.8 }}>
                 Earnings Since Last Reset
               </Text>
               <Text style={{ fontSize: 36, fontWeight: '900', color: '#16A34A' }}>
                 {fmtLarge(earningsStats.earningsSinceReset)}
               </Text>
-              <Text style={{ fontSize: 12, color: c.text, opacity: 0.45, marginTop: 6 }}>
+              <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.45), marginTop: 6 }}>
                 This is the current earnings counter value shown on the dashboard.
               </Text>
             </NeuCard>
@@ -219,7 +219,7 @@ export default function RevenueDashboard() {
                 <TrendingUp size={20} color={c.primary} />
               </View>
               <View style={{ flex: 1 }}>
-                <Text style={{ fontSize: 12, color: c.text, opacity: 0.5, textTransform: 'uppercase', letterSpacing: 0.7 }}>Total All-Time Earnings</Text>
+                <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.5), textTransform: 'uppercase', letterSpacing: 0.7 }}>Total All-Time Earnings</Text>
                 <Text style={{ fontSize: 20, fontWeight: '800', color: c.text, marginTop: 2 }}>
                   {fmtLarge(earningsStats.totalEarningsAllTime)}
                 </Text>
@@ -232,18 +232,18 @@ export default function RevenueDashboard() {
                 <Clock size={20} color="#D97706" />
               </View>
               <View style={{ flex: 1 }}>
-                <Text style={{ fontSize: 12, color: c.text, opacity: 0.5, textTransform: 'uppercase', letterSpacing: 0.7 }}>Last Reset</Text>
+                <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.5), textTransform: 'uppercase', letterSpacing: 0.7 }}>Last Reset</Text>
                 {earningsStats.lastReset ? (
                   <>
                     <Text style={{ fontSize: 14, fontWeight: '700', color: c.text, marginTop: 2 }}>
                       {formatResetDate(earningsStats.lastReset.reset_at)}
                     </Text>
-                    <Text style={{ fontSize: 12, color: c.text, opacity: 0.45, marginTop: 2 }}>
+                    <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.45), marginTop: 2 }}>
                       By {earningsStats.lastReset.reset_by_email} · Earnings before: {fmtLarge(earningsStats.lastReset.earnings_before)}
                     </Text>
                   </>
                 ) : (
-                  <Text style={{ fontSize: 14, color: c.text, opacity: 0.45, marginTop: 2 }}>Never reset</Text>
+                  <Text style={{ fontSize: 14, ...mutedTextStyle(c, 0.45), marginTop: 2 }}>Never reset</Text>
                 )}
               </View>
             </NeuCard>
@@ -256,7 +256,7 @@ export default function RevenueDashboard() {
               style={{ backgroundColor: '#DC2626', borderRadius: 14, paddingVertical: 16, marginBottom: 8 }}
               textStyle={{ color: '#fff', fontWeight: '800', fontSize: 15 }}
             />
-            <Text style={{ fontSize: 12, color: c.text, opacity: 0.4, textAlign: 'center', marginBottom: 24 }}>
+            <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.4), textAlign: 'center', marginBottom: 24 }}>
               Resets the earnings counter only. No financial records are deleted.
             </Text>
           </>
@@ -275,7 +275,7 @@ export default function RevenueDashboard() {
           </View>
         }
       >
-        <Text style={{ fontSize: 11, fontWeight: '700', color: c.text, opacity: 0.5, marginBottom: 6, textTransform: 'uppercase' }}>
+        <Text style={{ fontSize: 11, fontWeight: '700', ...mutedTextStyle(c, 0.5), marginBottom: 6, textTransform: 'uppercase' }}>
           Credit Price ({currencyCfg.code})
         </Text>
         <TextInput value={creditPrice} onChangeText={setCreditPrice} style={{ ...inp, minWidth: 0 }} keyboardType="decimal-pad" />

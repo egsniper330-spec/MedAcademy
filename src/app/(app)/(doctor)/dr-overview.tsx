@@ -10,7 +10,7 @@ import { getFirstName } from '@/lib/utils';
 import { NeuCard } from '@/components/NeuCard';
 import { StatCard } from '@/components/StatCard';
 import { QuickActionBtn } from '@/components/QuickActionBtn';
-import { neuColors, useLayout, neuMicroStyle, safeBottom } from '@/lib/neu';
+import { neuColors, useLayout, neuMicroStyle, safeBottom, mutedTextStyle } from '@/lib/neu';
 import { CourseThumbnail } from '@/components/CourseThumbnail';
 import { useStaleWhileRevalidateFocus } from '@/lib/useStaleWhileRevalidateFocus';
 import type { RelativePathString } from 'expo-router';
@@ -169,9 +169,9 @@ export default function DoctorDashboard() {
                   </View>
                   <View style={{ flex: 1 }}>
                     <Text style={{ fontSize: layout.bodySize, fontWeight: '600', color: c.text }} numberOfLines={1}>{e.student?.full_name}</Text>
-                    <Text style={{ fontSize: layout.captionSize, color: c.text, opacity: 0.5 }} numberOfLines={1}>{e.course?.title}</Text>
+                    <Text style={{ fontSize: layout.captionSize, ...mutedTextStyle(c, 0.5) }} numberOfLines={1}>{e.course?.title}</Text>
                   </View>
-                  <Text style={{ fontSize: layout.captionSize - 1, color: c.text, opacity: 0.35 }}>{new Date(e.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</Text>
+                  <Text style={{ fontSize: layout.captionSize - 1, ...mutedTextStyle(c, 0.35) }}>{new Date(e.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</Text>
                 </View>
               </NeuCard>
             ))}
@@ -200,7 +200,7 @@ export default function DoctorDashboard() {
             />
             <View style={{ flex: 1, marginLeft: layout.pad.md }}>
               <Text style={{ fontSize: layout.bodySize, fontWeight: '700', color: c.text }} numberOfLines={1}>{course.title}</Text>
-              <Text style={{ fontSize: layout.captionSize, color: c.text, opacity: 0.45, marginTop: 2 }}>{course.category?.name ?? 'General'}</Text>
+              <Text style={{ fontSize: layout.captionSize, ...mutedTextStyle(c, 0.45), marginTop: 2 }}>{course.category?.name ?? 'General'}</Text>
             </View>
             <View style={{ backgroundColor: statusColor(course.status) + '20', borderRadius: layout.cardRadius / 2, paddingHorizontal: layout.pad.sm, paddingVertical: layout.pad.xs }}>
               <Text style={{ fontSize: layout.captionSize - 1, fontWeight: '700', color: statusColor(course.status), textTransform: 'capitalize' }}>{course.status}</Text>
@@ -210,7 +210,7 @@ export default function DoctorDashboard() {
         {courses.length === 0 && (
           <NeuCard style={{ alignItems: 'center', padding: layout.cardPx * 2 }}>
             <Plus size={Math.round(layout.touchTarget * 0.72)} color={c.primary} opacity={0.3} style={{ marginBottom: layout.pad.sm }} />
-            <Text style={{ color: c.text, opacity: 0.45, fontSize: layout.bodySize }}>No courses yet. Create your first course!</Text>
+            <Text style={{ ...mutedTextStyle(c, 0.45), fontSize: layout.bodySize }}>No courses yet. Create your first course!</Text>
           </NeuCard>
         )}
       </View>

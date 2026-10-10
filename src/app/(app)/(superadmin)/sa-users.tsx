@@ -26,7 +26,7 @@ import { DeleteAccountModal } from '@/components/DeleteAccountModal';
 import { ChangePasswordModal } from '@/components/ChangePasswordModal';
 import { useToast } from '@/components/Toast';
 import { CreateUserModal } from '@/components/CreateUserModal';
-import { neuColors, neuFlatStyle, useLayout, safeBottom } from '@/lib/neu'
+import { neuColors, neuFlatStyle, useLayout, safeBottom, mutedTextStyle } from '@/lib/neu';
 import { displayPhoneNational } from '@/lib/phone';
 import { getPublicEmail, getAllUsers, updateUserStatus, promoteToDoctor, promoteToAdmin,
   demoteDoctor, demoteAdminToStudent, trashUser, undoTrash, bulkUserOps,
@@ -461,7 +461,7 @@ export default function SAUsers() {
 
           {/* User count */}
           {!loading && (
-            <Text style={{ fontSize: 12, color: c.text, opacity: 0.45, marginBottom: 12, marginLeft: 2 }}>
+            <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.45), marginBottom: 12, marginLeft: 2 }}>
               {filtered.length} {activeTab === 'all' ? 'users' : activeTab + 's'} total
             </Text>
           )}
@@ -472,7 +472,7 @@ export default function SAUsers() {
           ) : paginated.length === 0 ? (
             <View style={{ alignItems: 'center', paddingVertical: 60 }}>
               <Users size={48} color={c.primary} style={{ opacity: 0.2 } as any} />
-              <Text style={{ color: c.text, opacity: 0.4, fontSize: 16, marginTop: 12 }}>No users found</Text>
+              <Text style={{ ...mutedTextStyle(c, 0.4), fontSize: 16, marginTop: 12 }}>No users found</Text>
             </View>
           ) : (
             paginated.map(user => (
@@ -493,14 +493,14 @@ export default function SAUsers() {
                   <Text style={{ fontSize: 14, fontWeight: '700', color: c.text }}>{user.full_name}</Text>
                   <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 1 }}>
                     <Mail size={11} color={c.text} style={{ opacity: 0.4 } as any} />
-                    <Text style={{ fontSize: 12, color: c.text, opacity: 0.5, marginLeft: 3 }} numberOfLines={1}>
+                    <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.5), marginLeft: 3 }} numberOfLines={1}>
                       {getPublicEmail(user) ?? displayPhoneNational(user.phone_e164 ?? user.phone) ?? '—'}
                     </Text>
                   </View>
                   {(user.phone_e164 ?? user.phone) && (
                     <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 1 }}>
                       <Phone size={11} color={c.text} style={{ opacity: 0.4 } as any} />
-                      <Text style={{ fontSize: 12, color: c.text, opacity: 0.5, marginLeft: 3 }}>
+                      <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.5), marginLeft: 3 }}>
                         {displayPhoneNational(user.phone_e164 ?? user.phone)}
                       </Text>
                     </View>
@@ -535,7 +535,7 @@ export default function SAUsers() {
                           <Text style={{ fontSize: 13, fontWeight: '800', color: item.color, lineHeight: 16 }}>
                             {item.value}
                           </Text>
-                          <Text style={{ fontSize: 9, color: c.text, opacity: 0.38, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 0.5 }}>
+                          <Text style={{ fontSize: 9, ...mutedTextStyle(c, 0.38), fontWeight: '600', textTransform: 'uppercase', letterSpacing: 0.5 }}>
                             {item.label}
                           </Text>
                         </View>
@@ -573,7 +573,7 @@ export default function SAUsers() {
                 variant="secondary"
                 style={{ paddingHorizontal: 16 }}
               />
-              <Text style={{ fontSize: 13, color: c.text, opacity: 0.6 }}>
+              <Text style={{ fontSize: 13, ...mutedTextStyle(c, 0.6) }}>
                 {page + 1} / {totalPages}
               </Text>
               <NeuButton
@@ -679,7 +679,7 @@ export default function SAUsers() {
         {historyLoading ? <ActivityIndicator color={c.primary} style={{ marginVertical: 30 }} /> : (
           <ScrollView automaticallyAdjustKeyboardInsets={process.env.EXPO_OS === 'ios'} style={{ maxHeight: 400 }} showsVerticalScrollIndicator={false}>
             {loginHistory.length === 0
-              ? <Text style={{ color: c.text, opacity: 0.4, textAlign: 'center', padding: 30 }}>No login history found.</Text>
+              ? <Text style={{ ...mutedTextStyle(c, 0.4), textAlign: 'center', padding: 30 }}>No login history found.</Text>
               : loginHistory.map((h, i) => (
                 <NeuCard key={h.id ?? i} style={{ marginBottom: 8, padding: 12 }}>
                   <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}>
@@ -687,10 +687,10 @@ export default function SAUsers() {
                       <Text style={{ fontSize: 13, fontWeight: '600', color: h.success ? '#16A34A' : '#DC2626' }}>
                         {h.success ? '✓ Success' : '✗ Failed'}
                       </Text>
-                      {h.device_name && <Text style={{ fontSize: 12, color: c.text, opacity: 0.6 }}>{h.device_name} · {h.platform}</Text>}
-                      {h.ip_address && <Text style={{ fontSize: 11, color: c.text, opacity: 0.4 }}>{h.ip_address}</Text>}
+                      {h.device_name && <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.6) }}>{h.device_name} · {h.platform}</Text>}
+                      {h.ip_address && <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.4) }}>{h.ip_address}</Text>}
                     </View>
-                    <Text style={{ fontSize: 11, color: c.text, opacity: 0.4 }}>
+                    <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.4) }}>
                       {h.created_at ? new Date(h.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : ''}
                     </Text>
                   </View>

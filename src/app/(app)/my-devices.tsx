@@ -12,7 +12,7 @@ import {
   RotateCcw, Pencil, History, ChevronRight, Info, Infinity,
 } from 'lucide-react-native';
 import { getMyDevices, logoutDevice, renameDevice, DeviceRecord } from '@/lib/api';
-import { neuColors, useLayout, neuFlatStyle, neuMicroStyle, safeBottom } from '@/lib/neu';
+import { neuColors, useLayout, neuFlatStyle, neuMicroStyle, safeBottom, mutedTextStyle } from '@/lib/neu';
 import { NeuCard } from '@/components/NeuCard';
 import { NeuButton } from '@/components/NeuButton';
 import { ResponsiveModal } from '@/components/ResponsiveModal';
@@ -136,7 +136,7 @@ export default function MyDevices() {
               <Text style={{ fontSize: 15, fontWeight: '700', color: c.text }}>
                 {isUnlimited ? 'Unlimited access' : `${activeDevices.length} of ${maxDevices} devices used`}
               </Text>
-              <Text style={{ fontSize: 12, color: c.text, opacity: 0.45, marginTop: 1 }}>
+              <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.45), marginTop: 1 }}>
                 {`${devices.length} total \u00b7 ${onlineDevices.length} online`}
               </Text>
             </View>
@@ -170,7 +170,7 @@ export default function MyDevices() {
                 ].map(stat => (
                   <View key={stat.label} style={{ flex: 1, alignItems: 'center', padding: 10, backgroundColor: `${stat.color}0D`, borderRadius: 12 }}>
                     <Text style={{ fontSize: 18, fontWeight: '800', color: stat.color }}>{stat.value}</Text>
-                    <Text style={{ fontSize: 10, color: c.text, opacity: 0.5, marginTop: 2, textAlign: 'center' }}>{stat.label}</Text>
+                    <Text style={{ fontSize: 10, ...mutedTextStyle(c, 0.5), marginTop: 2, textAlign: 'center' }}>{stat.label}</Text>
                   </View>
                 ))}
               </View>
@@ -185,7 +185,7 @@ export default function MyDevices() {
                   ].map(stat => (
                     <View key={stat.label} style={{ flex: 1, alignItems: 'center', padding: 10, backgroundColor: `${stat.color}0D`, borderRadius: 12 }}>
                       <Text style={{ fontSize: 20, fontWeight: '800', color: stat.color }}>{stat.value}</Text>
-                      <Text style={{ fontSize: 10, color: c.text, opacity: 0.5, marginTop: 2, textAlign: 'center' }}>{stat.label}</Text>
+                      <Text style={{ fontSize: 10, ...mutedTextStyle(c, 0.5), marginTop: 2, textAlign: 'center' }}>{stat.label}</Text>
                     </View>
                   ))}
                 </View>
@@ -207,7 +207,7 @@ export default function MyDevices() {
           ) : devices.length === 0 ? (
             <View style={{ alignItems: 'center', paddingVertical: 64 }}>
               <Smartphone size={56} color={c.primary} opacity={0.15} />
-              <Text style={{ color: c.text, opacity: 0.4, fontSize: 16, marginTop: 12 }}>No devices registered</Text>
+              <Text style={{ ...mutedTextStyle(c, 0.4), fontSize: 16, marginTop: 12 }}>No devices registered</Text>
             </View>
           ) : (
             devices.map(device => {
@@ -238,7 +238,7 @@ export default function MyDevices() {
                         {isLoggedOut && <DeviceBadge label="LOGGED OUT" color="#94A3B8" bg="#94A3B818" />}
                       </View>
 
-                      <Text style={{ fontSize: 12, color: c.text, opacity: 0.55, marginTop: 2 }}>
+                      <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.55), marginTop: 2 }}>
                         {[device.device_model, device.os, device.os_version].filter(Boolean).join(' · ') || device.platform}
                       </Text>
 
@@ -249,15 +249,15 @@ export default function MyDevices() {
                         </Text>
                         {device.ip_address && (
                           <>
-                            <Text style={{ fontSize: 11, color: c.text, opacity: 0.3 }}>·</Text>
+                            <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.3) }}>·</Text>
                             <Globe size={11} color={`${c.text}66`} />
-                            <Text style={{ fontSize: 11, color: c.text, opacity: 0.45 }}>{device.ip_address}</Text>
+                            <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.45) }}>{device.ip_address}</Text>
                           </>
                         )}
                       </View>
 
                       {device.app_version && (
-                        <Text style={{ fontSize: 10, color: c.text, opacity: 0.35, marginTop: 3 }}>
+                        <Text style={{ fontSize: 10, ...mutedTextStyle(c, 0.35), marginTop: 3 }}>
                           App v{device.app_version}
                         </Text>
                       )}
@@ -348,7 +348,7 @@ export default function MyDevices() {
           </View>
         }
       >
-        <Text style={{ fontSize: 14, color: c.text, opacity: 0.65, lineHeight: 22 }}>
+        <Text style={{ fontSize: 14, ...mutedTextStyle(c, 0.65), lineHeight: 22 }}>
           This will log out your current device. You will need to sign in again on this device.
         </Text>
         {errorMsg ? <Text style={{ color: '#DC2626', fontSize: 13, marginTop: 8 }}>{errorMsg}</Text> : null}
@@ -375,7 +375,7 @@ export default function MyDevices() {
             ['Last Active', modal.device.last_active_at ? new Date(modal.device.last_active_at).toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true }) : null],
           ].filter(([, v]) => v).map(([k, v]) => (
             <View key={k as string} style={{ flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 7, borderBottomWidth: 1, borderBottomColor: `${c.text}0A` }}>
-              <Text style={{ fontSize: 13, color: c.text, opacity: 0.5, fontWeight: '600' }}>{k}</Text>
+              <Text style={{ fontSize: 13, ...mutedTextStyle(c, 0.5), fontWeight: '600' }}>{k}</Text>
               <Text style={{ fontSize: 13, color: c.text, fontWeight: '600', maxWidth: '60%', textAlign: 'right' }}>{v}</Text>
             </View>
           ))}

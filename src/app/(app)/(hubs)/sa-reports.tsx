@@ -17,7 +17,7 @@ import {
   TrendingUp, Activity,
 } from 'lucide-react-native';
 import { PageHeader } from '@/components/PageHeader';
-import { neuColors, neuFlatStyle, neuPressedStyle, useLayout, safeBottom } from '@/lib/neu';
+import { neuColors, neuFlatStyle, neuPressedStyle, useLayout, safeBottom, mutedTextStyle } from '@/lib/neu';
 import Bell from '@/components/Bell';
 
 // ── Nav item ───────────────────────────────────────────────────────────────
@@ -52,7 +52,7 @@ function NavItem({
               </View>
             )}
           </View>
-          <Text style={{ fontSize: 12, color: c.text, opacity: 0.48, marginTop: 2 }}>{description}</Text>
+          <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.48), marginTop: 2 }}>{description}</Text>
         </View>
         <ChevronRight size={15} color={`${c.text}35`} />
       </View>
@@ -62,7 +62,7 @@ function NavItem({
 
 function SectionLabel({ title, c }: { title: string; c: typeof neuColors.light }) {
   return (
-    <Text style={{ fontSize: 11, fontWeight: '800', color: c.text, opacity: 0.38, textTransform: 'uppercase', letterSpacing: 1.4, marginBottom: 10, marginTop: 18 }}>
+    <Text style={{ fontSize: 11, fontWeight: '800', ...mutedTextStyle(c, 0.38), textTransform: 'uppercase', letterSpacing: 1.4, marginBottom: 10, marginTop: 18 }}>
       {title}
     </Text>
   );

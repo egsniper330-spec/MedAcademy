@@ -24,7 +24,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { X, UserCheck, RefreshCw } from 'lucide-react-native';
-import { neuColors } from '@/lib/neu';
+import { neuColors, mutedTextStyle } from '@/lib/neu';
 import { getPublicSupportContacts, SUPPORT_ICONS } from '@/lib/api';
 import {
   contactLabel, contactUrl, safeSupportUrl, supportPlatformKey,
@@ -164,7 +164,8 @@ export function SubscribeSheet({ visible, courseTitle, contact, onClose }: Props
       {/* Sheet — sits after the backdrop in the Modal's layout, anchored to bottom */}
       <Pressable onPress={e => e.stopPropagation()}>
         <View style={{
-          backgroundColor: c.base,
+          // Elevated rung: the sheet must sit visibly ABOVE the page.
+          backgroundColor: c.elevated,
           borderTopLeftRadius: 28,
           borderTopRightRadius: 28,
           paddingTop: 12,
@@ -194,7 +195,7 @@ export function SubscribeSheet({ visible, courseTitle, contact, onClose }: Props
                 Subscribe to this Course
               </Text>
               <Text style={{
-                fontSize: 13, color: c.text, opacity: 0.5,
+                fontSize: 13, ...mutedTextStyle(c, 0.5),
                 marginTop: 3, lineHeight: 18,
               }} numberOfLines={2}>
                 {courseTitle}
@@ -208,19 +209,21 @@ export function SubscribeSheet({ visible, courseTitle, contact, onClose }: Props
                 marginLeft: 12,
                 width: 34, height: 34, borderRadius: 17,
                 alignItems: 'center', justifyContent: 'center',
-                backgroundColor: c.base,
+                backgroundColor: c.inputSurface,
+                borderWidth: isDark ? 1 : 0,
+                borderColor: c.borderSoft,
                 shadowColor: c.shadowDark,
                 shadowOffset: { width: 2, height: 2 },
                 shadowOpacity: 0.5, shadowRadius: 4,
               }}
             >
-              <X size={16} color={c.text} opacity={0.5} />
+              <X size={16} color={isDark ? c.textMuted : c.text} opacity={isDark ? 1 : 0.5} />
             </Pressable>
           </View>
 
           {/* Sub-label */}
           <Text style={{
-            fontSize: 13, color: c.text, opacity: 0.45,
+            fontSize: 13, ...mutedTextStyle(c, 0.45),
             paddingHorizontal: 24, marginBottom: 24, lineHeight: 18,
           }}>
             {entries.length > 0
@@ -237,14 +240,14 @@ export function SubscribeSheet({ visible, courseTitle, contact, onClose }: Props
             {loading ? (
               <View style={{ alignItems: 'center', paddingVertical: 32, gap: 12 }}>
                 <ActivityIndicator color={c.primary} />
-                <Text style={{ fontSize: 13, color: c.text, opacity: 0.45 }}>
+                <Text style={{ fontSize: 13, ...mutedTextStyle(c, 0.45) }}>
                   Loading contact options…
                 </Text>
               </View>
             ) : fallbackError ? (
               <View style={{ alignItems: 'center', paddingVertical: 32, gap: 12 }}>
                 <Text style={{
-                  fontSize: 14, color: c.text, opacity: 0.55,
+                  fontSize: 14, ...mutedTextStyle(c, 0.55),
                   textAlign: 'center', lineHeight: 20,
                 }}>
                   Could not load the contact options.{'\n'}Check your connection and try again.
@@ -267,7 +270,7 @@ export function SubscribeSheet({ visible, courseTitle, contact, onClose }: Props
               <View style={{ alignItems: 'center', paddingVertical: 32, gap: 12 }}>
                 <UserCheck size={44} color={c.text} opacity={0.15} />
                 <Text style={{
-                  fontSize: 14, color: c.text, opacity: 0.4,
+                  fontSize: 14, ...mutedTextStyle(c, 0.4),
                   textAlign: 'center', lineHeight: 20,
                 }}>
                   No contact methods are available{'\n'}for this course yet.
@@ -324,7 +327,9 @@ function ContactButton({ label, icon, accentColor, c, onPress }: ButtonProps) {
         paddingVertical: 15,
         paddingHorizontal: 20,
         borderRadius: 18,
-        backgroundColor: c.base,
+        // A selectable row INSIDE the sheet: the recessed step, so it reads as a
+        // distinct tappable well on the elevated sheet rather than a hole.
+        backgroundColor: c.inputSurface,
         shadowColor: c.shadowDark,
         shadowOffset: pressed ? { width: 1, height: 1 } : { width: 4, height: 4 },
         shadowOpacity: pressed ? 0.35 : 0.55,

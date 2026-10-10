@@ -135,7 +135,9 @@ function ToastItem({ toast, onDismiss }: { toast: ToastItem; onDismiss: (t: Toas
       style={[
         styles.toast,
         {
-          backgroundColor: c.base,
+          // A toast floats above everything, so it takes the elevated rung — on
+          // the page colour it would blend into the screen it is interrupting.
+          backgroundColor: c.elevated,
           borderLeftWidth: 4,
           borderLeftColor: config.accent,
           opacity: toast.opacity,

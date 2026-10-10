@@ -51,7 +51,7 @@ import { NeuButton } from '@/components/NeuButton';
 import { NeuInputRow } from '@/components/NeuInputRow';
 import { ResponsiveModal } from '@/components/ResponsiveModal';
 import { useToast } from '@/components/Toast';
-import { neuColors, safeBottom, useLayout } from '@/lib/neu';
+import { neuColors, safeBottom, useLayout, mutedTextStyle } from '@/lib/neu';
 import { usePermission } from '@/hooks/usePermission';
 import { PermissionRationaleModal } from '@/components/PermissionRationaleModal';
 
@@ -115,7 +115,7 @@ function SectionLabel({ label, color }: { label: string; color: string }) {
 function EarnSL({ label, c }: { label: string; c: typeof neuColors.light }) {
   return (
     <Text style={{ fontSize: 9, fontWeight: '800', letterSpacing: 1.3, textTransform: 'uppercase',
-                   color: c.text, opacity: 0.3, marginBottom: 10, marginTop: 4 }}>
+                   ...mutedTextStyle(c, 0.3), marginBottom: 10, marginTop: 4 }}>
       {label}
     </Text>
   );
@@ -126,7 +126,7 @@ function InfoRow({ icon, label, value, c }: { icon: React.ReactNode; label: stri
     <View style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 12,
                    borderBottomWidth: 1, borderBottomColor: `${c.text}08` }}>
       <View style={{ width: 32, alignItems: 'center' }}>{icon}</View>
-      <Text style={{ fontSize: 13, color: c.text, opacity: 0.5, minWidth: 90, flexShrink: 0, marginLeft: 8 }}>{label}</Text>
+      <Text style={{ fontSize: 13, ...mutedTextStyle(c, 0.5), minWidth: 90, flexShrink: 0, marginLeft: 8 }}>{label}</Text>
       <Text style={{ flex: 1, fontSize: 14, fontWeight: '600', color: c.text, textAlign: 'right' }} numberOfLines={1}>
         {value || '—'}
       </Text>
@@ -143,7 +143,7 @@ function StatCard({ icon, label, value, color, c }: {
                      alignItems: 'center', justifyContent: 'center' }}>
         {icon}
       </View>
-      <Text style={{ fontSize: 9, color: c.text, opacity: 0.4, fontWeight: '800',
+      <Text style={{ fontSize: 9, ...mutedTextStyle(c, 0.4), fontWeight: '800',
                      textTransform: 'uppercase', letterSpacing: 0.8 }} numberOfLines={1}>{label}</Text>
       <Text style={{ fontSize: 15, fontWeight: '800', color }} numberOfLines={1} adjustsFontSizeToFit>{value}</Text>
     </NeuCard>
@@ -180,14 +180,14 @@ function RevenueChart({ transactions, c }: { transactions: EarningsTransactionRo
           {[{ color: '#16A34A', label: 'Income' }, { color: '#DC2626', label: 'Deduct' }].map(l => (
             <View key={l.label} style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
               <View style={{ width: 8, height: 8, borderRadius: 2, backgroundColor: l.color }} />
-              <Text style={{ fontSize: 9, color: c.text, opacity: 0.4 }}>{l.label}</Text>
+              <Text style={{ fontSize: 9, ...mutedTextStyle(c, 0.4) }}>{l.label}</Text>
             </View>
           ))}
         </View>
       </View>
       <PeriodPicker value={period} onChange={setPeriod} c={c} />
       {points.length === 0 ? (
-        <Text style={{ fontSize: 13, color: c.text, opacity: 0.3, textAlign: 'center', paddingVertical: 24 }}>No data for this period</Text>
+        <Text style={{ fontSize: 13, ...mutedTextStyle(c, 0.3), textAlign: 'center', paddingVertical: 24 }}>No data for this period</Text>
       ) : (
         <ScrollView automaticallyAdjustKeyboardInsets={process.env.EXPO_OS === 'ios'} horizontal showsHorizontalScrollIndicator={false}>
           <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: 5, height: 110, paddingBottom: 20, minWidth: points.length * 32 }}>
@@ -196,11 +196,11 @@ function RevenueChart({ transactions, c }: { transactions: EarningsTransactionRo
               const color = p.isNegative ? '#DC2626' : '#16A34A';
               return (
                 <View key={i} style={{ alignItems: 'center', gap: 3, width: 28 }}>
-                  <Text style={{ fontSize: 7, color: c.text, opacity: 0.3, fontWeight: '600' }} numberOfLines={1}>
+                  <Text style={{ fontSize: 7, ...mutedTextStyle(c, 0.3), fontWeight: '600' }} numberOfLines={1}>
                     {Math.abs(p.amount) > 0 ? String(Math.round(Math.abs(p.amount))) : ''}
                   </Text>
                   <View style={{ width: 20, height: barH, borderRadius: 5, backgroundColor: `${color}CC` }} />
-                  <Text style={{ fontSize: 8, color: c.text, opacity: 0.35, fontWeight: '600', textAlign: 'center' }} numberOfLines={1}>{p.label}</Text>
+                  <Text style={{ fontSize: 8, ...mutedTextStyle(c, 0.35), fontWeight: '600', textAlign: 'center' }} numberOfLines={1}>{p.label}</Text>
                 </View>
               );
             })}
@@ -217,14 +217,14 @@ return (
     <NeuCard radius={18} style={{ overflow: 'hidden', marginBottom: 20 }}>
       <View style={{ flexDirection: 'row', paddingVertical: 10, paddingHorizontal: 14,
                      backgroundColor: `${c.text}06`, borderBottomWidth: 1, borderBottomColor: `${c.text}08` }}>
-        <Text style={{ flex: 1, fontSize: 9, fontWeight: '800', color: c.text, opacity: 0.4, textTransform: 'uppercase', letterSpacing: 0.7 }}>Course</Text>
-        <Text style={{ width: 44, textAlign: 'center', fontSize: 9, fontWeight: '800', color: c.text, opacity: 0.4, textTransform: 'uppercase' }}>Stud.</Text>
-        <Text style={{ width: 70, textAlign: 'right', fontSize: 9, fontWeight: '800', color: c.text, opacity: 0.4, textTransform: 'uppercase' }}>Revenue</Text>
-        <Text style={{ width: 28, textAlign: 'right', fontSize: 9, fontWeight: '800', color: c.text, opacity: 0.4, textTransform: 'uppercase' }}>%</Text>
+        <Text style={{ flex: 1, fontSize: 9, fontWeight: '800', ...mutedTextStyle(c, 0.4), textTransform: 'uppercase', letterSpacing: 0.7 }}>Course</Text>
+        <Text style={{ width: 44, textAlign: 'center', fontSize: 9, fontWeight: '800', ...mutedTextStyle(c, 0.4), textTransform: 'uppercase' }}>Stud.</Text>
+        <Text style={{ width: 70, textAlign: 'right', fontSize: 9, fontWeight: '800', ...mutedTextStyle(c, 0.4), textTransform: 'uppercase' }}>Revenue</Text>
+        <Text style={{ width: 28, textAlign: 'right', fontSize: 9, fontWeight: '800', ...mutedTextStyle(c, 0.4), textTransform: 'uppercase' }}>%</Text>
       </View>
       {rows.length === 0 ? (
         <View style={{ padding: layout.screenPx, alignItems: 'center' }}>
-          <Text style={{ fontSize: 13, color: c.text, opacity: 0.3 }}>No course data yet</Text>
+          <Text style={{ fontSize: 13, ...mutedTextStyle(c, 0.3) }}>No course data yet</Text>
         </View>
       ) : rows.map(r => (
         <View key={r.course_id} style={{ flexDirection: 'row', alignItems: 'center',
@@ -267,13 +267,13 @@ function TxRow({ row, onPress, c }: { row: EarningsTransactionRow; onPress: () =
       )}
       <View style={{ flex: 1, gap: 2 }}>
         <Text style={{ fontSize: 13, fontWeight: '700', color: c.text }} numberOfLines={1}>{txDisplayName(row)}</Text>
-        <Text style={{ fontSize: 11, color: c.text, opacity: 0.4 }} numberOfLines={1}>
+        <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.4) }} numberOfLines={1}>
           {row.course_title ?? '—'}{'  ·  '}{TX_LABEL[row.transaction_type] ?? row.transaction_type}
         </Text>
       </View>
       <View style={{ alignItems: 'flex-end', gap: 2 }}>
         <Text style={{ fontSize: 13, fontWeight: '800', color }}>{fmtEGP(row.amount)}</Text>
-        <Text style={{ fontSize: 10, color: c.text, opacity: 0.35 }}>{fmtDateShort(row.created_at)}</Text>
+        <Text style={{ fontSize: 10, ...mutedTextStyle(c, 0.35) }}>{fmtDateShort(row.created_at)}</Text>
       </View>
       <ChevronRight size={14} color={`${c.text}30`} style={{ marginLeft: 4 }} />
     </Pressable>
@@ -402,7 +402,7 @@ function GlobalPriceCard({ doctorId, c, onRecalculate }: {
         <>
           {/* Global price */}
           <View style={{ gap: 8 }}>
-            <Text style={{ fontSize: 10, fontWeight: '800', color: c.text, opacity: 0.4,
+            <Text style={{ fontSize: 10, fontWeight: '800', ...mutedTextStyle(c, 0.4),
                            textTransform: 'uppercase', letterSpacing: 0.8 }}>
               Global Earnings Price (per student)
             </Text>
@@ -415,7 +415,7 @@ function GlobalPriceCard({ doctorId, c, onRecalculate }: {
             />
             <View style={{ backgroundColor: `${c.primary}08`, borderRadius: 10, padding: 12, gap: 4 }}>
               <Text style={{ fontSize: 11, fontWeight: '700', color: c.primary }}>Fallback Logic</Text>
-              <Text style={{ fontSize: 11, color: c.text, opacity: 0.5, lineHeight: 17 }}>
+              <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.5), lineHeight: 17 }}>
                 {'1. Global Earnings Price ← used if set\n'}
                 {'2. Course Publish Price  ← fallback if no global price\n'}
                 {'No per-course or per-student overrides.'}
@@ -425,7 +425,7 @@ function GlobalPriceCard({ doctorId, c, onRecalculate }: {
 
           {/* ── Admin Tools ─────────────────────────────────────────────── */}
           <View style={{ borderTopWidth: 1, borderTopColor: `${c.text}08`, paddingTop: 14, gap: 10 }}>
-            <Text style={{ fontSize: 10, fontWeight: '800', color: c.text, opacity: 0.4,
+            <Text style={{ fontSize: 10, fontWeight: '800', ...mutedTextStyle(c, 0.4),
                            textTransform: 'uppercase', letterSpacing: 0.8 }}>
               Admin Tools
             </Text>
@@ -439,7 +439,7 @@ function GlobalPriceCard({ doctorId, c, onRecalculate }: {
                 : <RotateCw size={15} color={c.primary} />}
               <View style={{ flex: 1 }}>
                 <Text style={{ fontSize: 13, fontWeight: '700', color: c.text }}>Recalculate Earnings</Text>
-                <Text style={{ fontSize: 11, color: c.text, opacity: 0.4, lineHeight: 16 }}>
+                <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.4), lineHeight: 16 }}>
                   Re-check all active enrollments and apply price corrections.
                 </Text>
               </View>
@@ -479,7 +479,7 @@ function GlobalPriceCard({ doctorId, c, onRecalculate }: {
               </View>
               <Text style={{ fontSize: 17, fontWeight: '800', color: c.text, textAlign: 'center' }}>Reset Earnings?</Text>
             </View>
-            <Text style={{ fontSize: 13, color: c.text, opacity: 0.6, lineHeight: 20, textAlign: 'center' }}>
+            <Text style={{ fontSize: 13, ...mutedTextStyle(c, 0.6), lineHeight: 20, textAlign: 'center' }}>
               This will permanently clear all earnings transactions and rebuild the dashboard from currently active enrolled students only.{'\n\n'}This action cannot be undone.
             </Text>
             <View style={{ flexDirection: 'row', gap: 10 }}>
@@ -610,7 +610,7 @@ function StudentProfileModal({ tx, doctorId, onClose, onAction, c }: {
                                  textTransform: 'uppercase', letterSpacing: 0.6 }}>{accountStatus}</Text>
                 </View>
                 <View style={{ backgroundColor: `${c.text}0A`, borderRadius: 8, paddingHorizontal: 8, paddingVertical: 3 }}>
-                  <Text style={{ fontSize: 10, fontWeight: '700', color: c.text, opacity: 0.5,
+                  <Text style={{ fontSize: 10, fontWeight: '700', ...mutedTextStyle(c, 0.5),
                                  textTransform: 'uppercase', letterSpacing: 0.5 }}>
                     {TX_MODAL_LABEL[tx.transaction_type] ?? tx.transaction_type}
                   </Text>
@@ -642,7 +642,7 @@ function StudentProfileModal({ tx, doctorId, onClose, onAction, c }: {
                 )}
 
                 {/* Identity */}
-                <Text style={{ fontSize: 10, fontWeight: '800', color: c.text, opacity: 0.35,
+                <Text style={{ fontSize: 10, fontWeight: '800', ...mutedTextStyle(c, 0.35),
                                textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 8 }}>
                   {isDeleted ? 'Historical Snapshot' : 'Student Profile'}
                 </Text>
@@ -657,7 +657,7 @@ function StudentProfileModal({ tx, doctorId, onClose, onAction, c }: {
                       <View style={{ width: 30, height: 30, borderRadius: 9, backgroundColor: `${c.primary}12`,
                                      alignItems: 'center', justifyContent: 'center' }}>{r.icon}</View>
                       <View style={{ flex: 1 }}>
-                        <Text style={{ fontSize: 10, color: c.text, opacity: 0.4, fontWeight: '700',
+                        <Text style={{ fontSize: 10, ...mutedTextStyle(c, 0.4), fontWeight: '700',
                                        textTransform: 'uppercase', letterSpacing: 0.5 }}>{r.label}</Text>
                         <Text style={{ fontSize: 13, fontWeight: '600', color: c.text }} numberOfLines={2}>{r.value}</Text>
                       </View>
@@ -670,7 +670,7 @@ function StudentProfileModal({ tx, doctorId, onClose, onAction, c }: {
                         <Calendar size={14} color={c.primary} />
                       </View>
                       <View style={{ flex: 1 }}>
-                        <Text style={{ fontSize: 10, color: c.text, opacity: 0.4, fontWeight: '700',
+                        <Text style={{ fontSize: 10, ...mutedTextStyle(c, 0.4), fontWeight: '700',
                                        textTransform: 'uppercase', letterSpacing: 0.5 }}>Joined</Text>
                         <Text style={{ fontSize: 13, fontWeight: '600', color: c.text }}>{fmtDate(displayJoin)}</Text>
                       </View>
@@ -679,7 +679,7 @@ function StudentProfileModal({ tx, doctorId, onClose, onAction, c }: {
                 </NeuCard>
 
                 {/* Transaction details */}
-                <Text style={{ fontSize: 10, fontWeight: '800', color: c.text, opacity: 0.35,
+                <Text style={{ fontSize: 10, fontWeight: '800', ...mutedTextStyle(c, 0.35),
                                textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 8 }}>
                   Transaction Details
                 </Text>
@@ -695,7 +695,7 @@ function StudentProfileModal({ tx, doctorId, onClose, onAction, c }: {
                       <View style={{ width: 30, height: 30, borderRadius: 9, backgroundColor: `${c.primary}12`,
                                      alignItems: 'center', justifyContent: 'center' }}>{r.icon}</View>
                       <View style={{ flex: 1 }}>
-                        <Text style={{ fontSize: 10, color: c.text, opacity: 0.4, fontWeight: '700',
+                        <Text style={{ fontSize: 10, ...mutedTextStyle(c, 0.4), fontWeight: '700',
                                        textTransform: 'uppercase', letterSpacing: 0.5 }}>{r.label}</Text>
                         <Text style={{ fontSize: 13, fontWeight: '600', color: c.text }} numberOfLines={2}>{r.value}</Text>
                       </View>
@@ -706,7 +706,7 @@ function StudentProfileModal({ tx, doctorId, onClose, onAction, c }: {
                 {/* Enrollments + actions — live accounts only */}
                 {!isDeleted && studentProfile && studentProfile.enrollments.length > 0 && (
                   <>
-                    <Text style={{ fontSize: 10, fontWeight: '800', color: c.text, opacity: 0.35,
+                    <Text style={{ fontSize: 10, fontWeight: '800', ...mutedTextStyle(c, 0.35),
                                    textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 8 }}>
                       Course Enrollments
                     </Text>
@@ -729,14 +729,14 @@ function StudentProfileModal({ tx, doctorId, onClose, onAction, c }: {
                           <View style={{ flex: 1, backgroundColor: `${c.text}06`, borderRadius: 10,
                                          padding: 10, alignItems: 'center' }}>
                             <Text style={{ fontSize: 13, fontWeight: '800', color: c.primary }}>{en.progress_percent}%</Text>
-                            <Text style={{ fontSize: 9, color: c.text, opacity: 0.4 }}>Progress</Text>
+                            <Text style={{ fontSize: 9, ...mutedTextStyle(c, 0.4) }}>Progress</Text>
                           </View>
                           <View style={{ flex: 1, backgroundColor: `${c.text}06`, borderRadius: 10,
                                          padding: 10, alignItems: 'center' }}>
-                            <Text style={{ fontSize: 11, fontWeight: '700', color: c.text, opacity: 0.55 }}>
+                            <Text style={{ fontSize: 11, fontWeight: '700', ...mutedTextStyle(c, 0.55) }}>
                               {fmtDateShort(en.enrolled_at)}
                             </Text>
-                            <Text style={{ fontSize: 9, color: c.text, opacity: 0.4 }}>Enrolled</Text>
+                            <Text style={{ fontSize: 9, ...mutedTextStyle(c, 0.4) }}>Enrolled</Text>
                           </View>
                         </View>
                         <View style={{ flexDirection: 'row', gap: 8 }}>
@@ -782,7 +782,7 @@ function StudentProfileModal({ tx, doctorId, onClose, onAction, c }: {
                               <Pressable onPress={() => setConfirmRemove(null)}
                                 style={{ flex: 1, alignItems: 'center', backgroundColor: `${c.text}0D`,
                                          borderRadius: 10, paddingVertical: 9 }}>
-                                <Text style={{ fontSize: 12, fontWeight: '700', color: c.text, opacity: 0.6 }}>Cancel</Text>
+                                <Text style={{ fontSize: 12, fontWeight: '700', ...mutedTextStyle(c, 0.6) }}>Cancel</Text>
                               </Pressable>
                               <Pressable onPress={() => { setConfirmRemove(null); handleAction('remove', en.enrollment_id, en.course_id, en.course_title); }}
                                 disabled={!!acting}
@@ -864,12 +864,12 @@ function useContactEdit(profile: any, setProfile: (p: any) => void) {
       }
     >
       
-        <Text style={{ fontSize: 13, color: c.text, opacity: 0.5, marginBottom: 16, lineHeight: 19 }}>
+        <Text style={{ fontSize: 13, ...mutedTextStyle(c, 0.5), marginBottom: 16, lineHeight: 19 }}>
           These become the default contact methods for all your courses. Each field is optional.
         </Text>
 
         {/* WhatsApp */}
-        <Text style={{ fontSize: 11, fontWeight: '700', color: c.text, opacity: 0.5, textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 6 }}>
+        <Text style={{ fontSize: 11, fontWeight: '700', ...mutedTextStyle(c, 0.5), textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 6 }}>
           WhatsApp Number
         </Text>
         <NeuInputRow
@@ -883,7 +883,7 @@ function useContactEdit(profile: any, setProfile: (p: any) => void) {
         />
 
         {/* Telegram */}
-        <Text style={{ fontSize: 11, fontWeight: '700', color: c.text, opacity: 0.5, textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 6 }}>
+        <Text style={{ fontSize: 11, fontWeight: '700', ...mutedTextStyle(c, 0.5), textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 6 }}>
           Telegram
         </Text>
         <NeuInputRow
@@ -897,7 +897,7 @@ function useContactEdit(profile: any, setProfile: (p: any) => void) {
         />
 
         {/* Phone */}
-        <Text style={{ fontSize: 11, fontWeight: '700', color: c.text, opacity: 0.5, textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 6 }}>
+        <Text style={{ fontSize: 11, fontWeight: '700', ...mutedTextStyle(c, 0.5), textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 6 }}>
           Phone Number
         </Text>
         <NeuInputRow
@@ -942,7 +942,7 @@ function WatermarkCard({ publicUserId, c }: { publicUserId: string | null; c: ty
           <Fingerprint size={18} color={c.primary} />
         </View>
         <View style={{ flex: 1 }}>
-          <Text style={{ fontSize: 11, fontWeight: '700', color: c.text, opacity: 0.4, textTransform: 'uppercase', letterSpacing: 0.9 }}>
+          <Text style={{ fontSize: 11, fontWeight: '700', ...mutedTextStyle(c, 0.4), textTransform: 'uppercase', letterSpacing: 0.9 }}>
             User ID
           </Text>
           <Text style={{ fontSize: 18, fontWeight: '800', color: c.primary, letterSpacing: 1.5, marginTop: 2, fontVariant: ['tabular-nums'] }}>
@@ -963,7 +963,7 @@ function WatermarkCard({ publicUserId, c }: { publicUserId: string | null; c: ty
           </Text>
         </Pressable>
       </View>
-      <Text style={{ fontSize: 12, color: c.text, opacity: 0.4, lineHeight: 17 }}>
+      <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.4), lineHeight: 17 }}>
         This ID is permanently assigned to your account and is embedded as a forensic watermark in every video you upload.
       </Text>
     </NeuCard>
@@ -1011,7 +1011,7 @@ function EarningsTab({ doctorId, earningsEnabled, c }: { // eslint-disable-line 
         <Text style={{ fontSize: 17, fontWeight: '800', color: c.text, textAlign: 'center' }}>
           Earnings System is Off
         </Text>
-        <Text style={{ fontSize: 13, color: c.text, opacity: 0.45, textAlign: 'center', lineHeight: 20 }}>
+        <Text style={{ fontSize: 13, ...mutedTextStyle(c, 0.45), textAlign: 'center', lineHeight: 20 }}>
           Enable the earnings system in the Profile tab to start tracking your revenue.
         </Text>
       </View>
@@ -1081,10 +1081,10 @@ function EarningsTab({ doctorId, earningsEnabled, c }: { // eslint-disable-line 
       {transactions.length === 0 && (
         <NeuCard radius={18} style={{ padding: 32, alignItems: 'center', gap: 12, marginBottom: 20 }}>
           <TrendingUp size={32} color={`${c.text}25`} />
-          <Text style={{ fontSize: 14, fontWeight: '700', color: c.text, opacity: 0.4, textAlign: 'center' }}>
+          <Text style={{ fontSize: 14, fontWeight: '700', ...mutedTextStyle(c, 0.4), textAlign: 'center' }}>
             No transactions yet
           </Text>
-          <Text style={{ fontSize: 12, color: c.text, opacity: 0.3, textAlign: 'center', lineHeight: 18 }}>
+          <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.3), textAlign: 'center', lineHeight: 18 }}>
             Revenue events will appear here as students enroll in your courses.
           </Text>
         </NeuCard>
@@ -1363,7 +1363,7 @@ export default function DoctorProfile() {
             <NeuCard key={stat.label} radius={16} style={{ flex: 1, alignItems: 'center', padding: 14, gap: 6 }}>
               {stat.icon}
               <Text style={{ fontSize: 26, fontWeight: '800', color: stat.color }}>{stat.value}</Text>
-              <Text style={{ fontSize: 11, color: c.text, opacity: 0.5 }}>{stat.label}</Text>
+              <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.5) }}>{stat.label}</Text>
             </NeuCard>
           ))}
         </View>
@@ -1411,7 +1411,7 @@ export default function DoctorProfile() {
           </View>
           <View style={{ flex: 1, gap: 2 }}>
             <Text style={{ fontSize: 15, fontWeight: '700', color: c.text }}>Enable Earnings System</Text>
-            <Text style={{ fontSize: 12, color: c.text, opacity: 0.45, lineHeight: 16 }}>
+            <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.45), lineHeight: 16 }}>
               {earningsEnabled
                 ? 'Revenue dashboard, transactions & payouts are active'
                 : 'Turn on to track revenue, transactions and request payouts'}
@@ -1529,7 +1529,7 @@ export default function DoctorProfile() {
           }
         >
           
-            <Text style={{ fontSize: 11, fontWeight: '700', color: c.text, opacity: 0.5, textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 6 }}>Full Name</Text>
+            <Text style={{ fontSize: 11, fontWeight: '700', ...mutedTextStyle(c, 0.5), textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 6 }}>Full Name</Text>
             <NeuInputRow
               c={c}
               value={editName}
@@ -1537,7 +1537,7 @@ export default function DoctorProfile() {
               placeholder="Your full name"
               leftIcon={<User size={16} color={c.text} opacity={0.4} />}
             />
-            <Text style={{ fontSize: 11, fontWeight: '700', color: c.text, opacity: 0.5, textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 6 }}>Email</Text>
+            <Text style={{ fontSize: 11, fontWeight: '700', ...mutedTextStyle(c, 0.5), textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 6 }}>Email</Text>
             <NeuInputRow
               c={c}
               value={editEmail}
@@ -1548,7 +1548,7 @@ export default function DoctorProfile() {
               autoCorrect={false}
               leftIcon={<Mail size={16} color={c.text} opacity={0.4} />}
             />
-            <Text style={{ fontSize: 11, color: c.text, opacity: 0.4, marginBottom: 12, marginTop: -10, lineHeight: 16 }}>
+            <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.4), marginBottom: 12, marginTop: -10, lineHeight: 16 }}>
               Your login method stays unchanged.
             </Text>
             {editError ? (
@@ -1582,7 +1582,7 @@ export default function DoctorProfile() {
               </View>
             ) : (
               <>
-                <Text style={{ fontSize: 11, fontWeight: '700', color: c.text, opacity: 0.5, textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 6 }}>New Password</Text>
+                <Text style={{ fontSize: 11, fontWeight: '700', ...mutedTextStyle(c, 0.5), textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 6 }}>New Password</Text>
                 <NeuInputRow
                   c={c}
                   value={newPwd}
@@ -1596,7 +1596,7 @@ export default function DoctorProfile() {
                     </Pressable>
                   }
                 />
-                <Text style={{ fontSize: 11, fontWeight: '700', color: c.text, opacity: 0.5, textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 6 }}>Confirm Password</Text>
+                <Text style={{ fontSize: 11, fontWeight: '700', ...mutedTextStyle(c, 0.5), textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 6 }}>Confirm Password</Text>
                 <NeuInputRow
                   c={c}
                   containerStyle={{ marginBottom: 4 }}
@@ -1651,7 +1651,7 @@ export default function DoctorProfile() {
             onRemove={handleRemoveAvatar}
           />
           <Text style={{ fontSize: 20, fontWeight: '800', color: c.text }}>{profile?.full_name || '—'}</Text>
-          <Text style={{ fontSize: 13, color: c.text, opacity: 0.45, marginTop: 3 }}>
+          <Text style={{ fontSize: 13, ...mutedTextStyle(c, 0.45), marginTop: 3 }}>
             {firstName ? `Dr. ${firstName}` : 'Doctor'}
           </Text>
           <View style={{ flexDirection: 'row', gap: 8, marginTop: 8 }}>
@@ -1707,7 +1707,7 @@ export default function DoctorProfile() {
           </View>
         }
       >
-        <Text style={{ fontSize: 14, color: c.text, opacity: 0.6, lineHeight: 22 }}>
+        <Text style={{ fontSize: 14, ...mutedTextStyle(c, 0.6), lineHeight: 22 }}>
           Your courses and data are safely saved.
         </Text>
       </ResponsiveModal>

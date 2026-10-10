@@ -18,7 +18,7 @@ import { startImpersonationSession } from '@/lib/impersonationService';
 import { NeuCard } from '@/components/NeuCard';
 import { NeuButton } from '@/components/NeuButton';
 import { useToast } from '@/components/Toast';
-import { neuColors, useLayout, safeBottom } from '@/lib/neu';
+import { neuColors, useLayout, safeBottom, mutedTextStyle } from '@/lib/neu';
 import { friendlyError } from '@/lib/validation';
 import { useDebounce } from '@/lib/useDebounce';
 import { useImpersonationStore } from '@/lib/store';
@@ -130,7 +130,7 @@ export default function ImpersonationScreen() {
         </NeuCard>
 
         {/* Search */}
-        <Text style={{ fontSize: 13, fontWeight: '700', color: c.text, opacity: 0.6, marginBottom: 8, textTransform: 'uppercase', letterSpacing: 0.8 }}>
+        <Text style={{ fontSize: 13, fontWeight: '700', ...mutedTextStyle(c, 0.6), marginBottom: 8, textTransform: 'uppercase', letterSpacing: 0.8 }}>
           Find User
         </Text>
         <View style={{ ...inp, flexDirection: 'row', alignItems: 'center', minWidth: 0, marginBottom: 12 }}>
@@ -173,14 +173,14 @@ export default function ImpersonationScreen() {
                     </View>
                     <View style={{ flex: 1 }}>
                       <Text style={{ fontSize: 15, fontWeight: '700', color: c.text }}>{user.full_name}</Text>
-                      <Text style={{ fontSize: 12, color: c.text, opacity: 0.5 }}>{user.email}</Text>
+                      <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.5) }}>{user.email}</Text>
                       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 4, flexWrap: 'wrap' }}>
                         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
                           <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: roleColor }} />
                           <Text style={{ fontSize: 11, fontWeight: '700', color: roleColor }}>{user.role?.replace('_', ' ')}</Text>
                         </View>
                         {!!user.public_user_id && (
-                          <Text style={{ fontSize: 11, fontWeight: '700', color: c.text, opacity: 0.55, letterSpacing: 0.5 }}>{user.public_user_id}</Text>
+                          <Text style={{ fontSize: 11, fontWeight: '700', ...mutedTextStyle(c, 0.55), letterSpacing: 0.5 }}>{user.public_user_id}</Text>
                         )}
                       </View>
                     </View>
@@ -213,7 +213,7 @@ export default function ImpersonationScreen() {
           <Text style={{ fontSize: 16, fontWeight: '700', color: c.text, marginBottom: 14 }}>Recent Impersonations</Text>
           {logsLoaded && recentLogs.length === 0 && (
             <NeuCard style={{ padding: 24, alignItems: 'center' }}>
-              <Text style={{ color: c.text, opacity: 0.4 }}>No impersonation history found</Text>
+              <Text style={{ ...mutedTextStyle(c, 0.4) }}>No impersonation history found</Text>
             </NeuCard>
           )}
           {recentLogs.map(log => (
@@ -221,7 +221,7 @@ export default function ImpersonationScreen() {
               <Text style={{ fontSize: 13, fontWeight: '700', color: log.action === 'impersonation_failed' ? '#DC2626' : c.text }}>
                 {log.action?.replace(/_/g, ' ')}
               </Text>
-              <Text style={{ fontSize: 12, color: c.text, opacity: 0.5, marginTop: 3 }}>
+              <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.5), marginTop: 3 }}>
                 {log.details?.target_name ?? log.details?.reason ?? 'Unknown'}{log.details?.target_role ? ` (${log.details.target_role})` : ''} • {new Date(log.created_at).toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true })}
               </Text>
             </NeuCard>

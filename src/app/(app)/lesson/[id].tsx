@@ -15,7 +15,7 @@ import { useProfileStore } from '@/lib/store';
 import { isPreviewStudent } from '@/lib/previewAsStudent';
 import { NeuCard } from '@/components/NeuCard';
 import { NeuButton } from '@/components/NeuButton';
-import { neuColors, useLayout, neuFlatStyle, safeTop, safeLeft, safeRight, safeBottom } from '@/lib/neu';
+import { neuColors, useLayout, neuFlatStyle, safeTop, safeLeft, safeRight, safeBottom, mutedTextStyle } from '@/lib/neu';
 // expo-file-system v55: legacy sub-path exports createDownloadResumable
 // (real progress callbacks) + documentDirectory/cacheDirectory string constants
 import {
@@ -126,10 +126,10 @@ function MaterialsSection({
         {!canAccess ? (
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
             <Lock size={13} color={c.text} opacity={0.4} />
-            <Text style={{ fontSize: 12, color: c.text, opacity: 0.4 }}>Subscribers only</Text>
+            <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.4) }}>Subscribers only</Text>
           </View>
         ) : (
-          <Text style={{ fontSize: 12, color: c.text, opacity: 0.45 }}>
+          <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.45) }}>
             {items.length + pdfs.length} {items.length + pdfs.length === 1 ? 'file' : 'files'}
           </Text>
         )}
@@ -157,7 +157,7 @@ function MaterialsSection({
                   </View>
                   <View style={{ flex: 1 }}>
                     <Text style={{ fontSize: 14, fontWeight: '600', color: c.text }} numberOfLines={1}>{name}</Text>
-                    <Text style={{ fontSize: 12, color: c.text, opacity: 0.45 }}>
+                    <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.45) }}>
                       {[formatBytes(mat.file_size), mat.file_type?.split('/')[1]?.toUpperCase() ?? 'FILE']
                         .filter(Boolean).join(' · ')}
                     </Text>
@@ -184,7 +184,7 @@ function MaterialsSection({
                   </View>
                   <View style={{ flex: 1 }}>
                     <Text style={{ fontSize: 14, fontWeight: '600', color: c.text }}>{pdfName}</Text>
-                    <Text style={{ fontSize: 12, color: c.text, opacity: 0.45 }}>PDF Document</Text>
+                    <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.45) }}>PDF Document</Text>
                   </View>
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: '#DC262612', borderRadius: 8, paddingHorizontal: 8, paddingVertical: 4 }}>
                     <Download size={13} color="#DC2626" />
@@ -198,7 +198,7 @@ function MaterialsSection({
       ) : (
         <NeuCard style={{ padding: 16, alignItems: 'center', gap: 10 }}>
           <Lock size={32} color={c.text} opacity={0.2} />
-          <Text style={{ fontSize: 14, fontWeight: '600', color: c.text, opacity: 0.5 }}>
+          <Text style={{ fontSize: 14, fontWeight: '600', ...mutedTextStyle(c, 0.5) }}>
             Subscribe to access {items.length + pdfs.length} {items.length + pdfs.length === 1 ? 'material' : 'materials'}
           </Text>
         </NeuCard>
@@ -697,11 +697,11 @@ export default function LessonPlayer() {
             : 'Lesson not found'}
       </Text>
       {loadError ? (
-        <Text style={{ fontSize: 13, color: c.text, opacity: 0.5, textAlign: 'center' }} numberOfLines={4}>
+        <Text style={{ fontSize: 13, ...mutedTextStyle(c, 0.5), textAlign: 'center' }} numberOfLines={4}>
           {loadError}
         </Text>
       ) : (
-        <Text style={{ fontSize: 13, color: c.text, opacity: 0.45, textAlign: 'center' }}>
+        <Text style={{ fontSize: 13, ...mutedTextStyle(c, 0.45), textAlign: 'center' }}>
           {profile?.role === 'student' || isPreviewStudent() ? 'It may have been removed or is not yet published.' : ''}
         </Text>
       )}
@@ -831,7 +831,7 @@ export default function LessonPlayer() {
                       <Play size={24} color="#fff" />
                     </View>
                     {resumePosition > 10 && (
-                      <Text style={{ fontSize: 12, fontWeight: '600', color: c.text, opacity: 0.5 }}>
+                      <Text style={{ fontSize: 12, fontWeight: '600', ...mutedTextStyle(c, 0.5) }}>
                         Resume at {Math.floor(resumePosition / 60)}m {Math.floor(resumePosition % 60)}s
                       </Text>
                     )}
@@ -965,7 +965,7 @@ export default function LessonPlayer() {
                       <View style={{ height: 6, borderRadius: 3, backgroundColor: c.primary, width: `${Math.max(3, Math.min(100, dlEntry.progress))}%` }} />
                     </View>
                     <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 4 }}>
-                      <Text style={{ fontSize: 11, color: c.text, opacity: 0.5 }}>
+                      <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.5) }}>
                         {Math.round(dlEntry.progress)}%
                         {Platform.OS === 'android' && dlEntry.totalSizeBytes
                           ? ` · ${fmtBytesLocal(dlEntry.bytesDownloaded)} / ${fmtBytesLocal(dlEntry.totalSizeBytes)}`
@@ -978,14 +978,14 @@ export default function LessonPlayer() {
                   <Text style={{ fontSize: 11, color: '#FF5A5A', marginTop: 6 }} numberOfLines={2}>{dlEntry.lastError}</Text>
                 )}
                 {dlEntry && dlEntry.phase === 'completed' && !isOfflineVideoExpired(dlEntry) && (
-                  <Text style={{ fontSize: 11, color: c.text, opacity: 0.45, marginTop: 6 }}>
+                  <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.45), marginTop: 6 }}>
                     Downloaded — available in Offline Videos until the license expires.
                   </Text>
                 )}
               </View>
             )}
             {!!offlineMsg && (
-              <Text style={{ paddingHorizontal: 14, paddingBottom: 12, fontSize: 12, color: c.text, opacity: 0.6 }} numberOfLines={3}>
+              <Text style={{ paddingHorizontal: 14, paddingBottom: 12, fontSize: 12, ...mutedTextStyle(c, 0.6) }} numberOfLines={3}>
                 {offlineMsg}
               </Text>
             )}
@@ -1044,7 +1044,7 @@ export default function LessonPlayer() {
                    downloadState.status === 'error'   ? 'Download Failed' :
                    'Downloading…'}
                 </Text>
-                <Text style={{ fontSize: 12, color: c.text, opacity: 0.5, marginTop: 2 }} numberOfLines={1}>
+                <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.5), marginTop: 2 }} numberOfLines={1}>
                   {downloadState.fileName}
                 </Text>
               </View>
@@ -1069,7 +1069,7 @@ export default function LessonPlayer() {
                     width: `${Math.round(downloadState.progress * 100)}%` as `${number}%`,
                   }} />
                 </View>
-                <Text style={{ fontSize: 12, color: c.text, opacity: 0.5, marginTop: 6, textAlign: 'right' }}>
+                <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.5), marginTop: 6, textAlign: 'right' }}>
                   {Math.round(downloadState.progress * 100)}%
                 </Text>
               </View>
@@ -1115,13 +1115,13 @@ export default function LessonPlayer() {
         <NeuCard>
           <Text style={{ fontSize: 20, fontWeight: '800', color: c.text, marginBottom: 8 }}>{lesson.title}</Text>
           {lesson.description ? (
-            <Text style={{ fontSize: 14, color: c.text, opacity: 0.65, lineHeight: 22, marginBottom: 12 }}>{lesson.description}</Text>
+            <Text style={{ fontSize: 14, ...mutedTextStyle(c, 0.65), lineHeight: 22, marginBottom: 12 }}>{lesson.description}</Text>
           ) : null}
           <View style={{ flexDirection: 'row', gap: 16, flexWrap: 'wrap' }}>
             {durationMins !== null && (
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
                 <Clock size={14} color={c.primary} />
-                <Text style={{ fontSize: 13, color: c.text, opacity: 0.6 }}>{durationMins} min</Text>
+                <Text style={{ fontSize: 13, ...mutedTextStyle(c, 0.6) }}>{durationMins} min</Text>
               </View>
             )}
             {/* BUG #1 FIX: never show status to students — draft/published is editor-only */}
@@ -1129,7 +1129,7 @@ export default function LessonPlayer() {
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
                 <View style={{ width: 8, height: 8, borderRadius: 4,
                   backgroundColor: lesson.status === 'published' ? '#16A34A' : '#D97706' }} />
-                <Text style={{ fontSize: 13, color: c.text, opacity: 0.6 }}>
+                <Text style={{ fontSize: 13, ...mutedTextStyle(c, 0.6) }}>
                   {lesson.status === 'published' ? 'Published' : lesson.status === 'scheduled' ? 'Scheduled' : 'Draft'}
                 </Text>
               </View>
@@ -1205,8 +1205,8 @@ export default function LessonPlayer() {
           <NeuCard style={{ padding: 0 }}>
             <View style={{ width: '100%', aspectRatio: 16 / 9, backgroundColor: `${c.primary}08`, alignItems: 'center', justifyContent: 'center', gap: 10 }}>
               <ActivityIndicator color={c.primary} size="large" />
-              <Text style={{ fontSize: 14, fontWeight: '700', color: c.text, opacity: 0.65 }}>Processing Video…</Text>
-              <Text style={{ fontSize: 12, color: c.text, opacity: 0.4, textAlign: 'center', paddingHorizontal: 24 }}>
+              <Text style={{ fontSize: 14, fontWeight: '700', ...mutedTextStyle(c, 0.65) }}>Processing Video…</Text>
+              <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.4), textAlign: 'center', paddingHorizontal: 24 }}>
                 This video is being prepared. Check back shortly.
               </Text>
             </View>
@@ -1217,7 +1217,7 @@ export default function LessonPlayer() {
           <NeuCard style={{ padding: 24, alignItems: 'center', gap: 10 }}>
             <Clock size={44} color="#D97706" opacity={0.5} />
             <Text style={{ fontSize: 16, fontWeight: '700', color: c.text }}>Coming Soon</Text>
-            <Text style={{ fontSize: 13, color: c.text, opacity: 0.45, textAlign: 'center' }}>
+            <Text style={{ fontSize: 13, ...mutedTextStyle(c, 0.45), textAlign: 'center' }}>
               This lesson&apos;s video will be available soon.
             </Text>
           </NeuCard>
@@ -1227,7 +1227,7 @@ export default function LessonPlayer() {
         {!isFullscreen && !!lesson.notes && (
           <NeuCard>
             <Text style={{ fontSize: 15, fontWeight: '700', color: c.text, marginBottom: 8 }}>Lesson Notes</Text>
-            <Text style={{ fontSize: 14, color: c.text, opacity: 0.65, lineHeight: 22 }}>{lesson.notes}</Text>
+            <Text style={{ fontSize: 14, ...mutedTextStyle(c, 0.65), lineHeight: 22 }}>{lesson.notes}</Text>
           </NeuCard>
         )}
 
@@ -1298,13 +1298,13 @@ export default function LessonPlayer() {
         <NeuCard>
           <Text style={{ fontSize: 20, fontWeight: '800', color: c.text, marginBottom: 8 }}>{lesson.title}</Text>
           {lesson.description ? (
-            <Text style={{ fontSize: 14, color: c.text, opacity: 0.65, lineHeight: 22, marginBottom: 12 }}>{lesson.description}</Text>
+            <Text style={{ fontSize: 14, ...mutedTextStyle(c, 0.65), lineHeight: 22, marginBottom: 12 }}>{lesson.description}</Text>
           ) : null}
           <View style={{ flexDirection: 'row', gap: 16, flexWrap: 'wrap' }}>
             {durationMins !== null && (
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
                 <Clock size={14} color={c.primary} />
-                <Text style={{ fontSize: 13, color: c.text, opacity: 0.6 }}>{durationMins} min</Text>
+                <Text style={{ fontSize: 13, ...mutedTextStyle(c, 0.6) }}>{durationMins} min</Text>
               </View>
             )}
             {/* BUG #1 FIX: never show status to students — draft/published is editor-only */}
@@ -1312,7 +1312,7 @@ export default function LessonPlayer() {
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
                 <View style={{ width: 8, height: 8, borderRadius: 4,
                   backgroundColor: lesson.status === 'published' ? '#16A34A' : '#D97706' }} />
-                <Text style={{ fontSize: 13, color: c.text, opacity: 0.6 }}>
+                <Text style={{ fontSize: 13, ...mutedTextStyle(c, 0.6) }}>
                   {lesson.status === 'published' ? 'Published' : lesson.status === 'scheduled' ? 'Scheduled' : 'Draft'}
                 </Text>
               </View>
@@ -1389,8 +1389,8 @@ export default function LessonPlayer() {
           <NeuCard style={{ padding: 0 }}>
             <View style={{ width: '100%', aspectRatio: 16 / 9, backgroundColor: `${c.primary}08`, alignItems: 'center', justifyContent: 'center', gap: 10 }}>
               <ActivityIndicator color={c.primary} size="large" />
-              <Text style={{ fontSize: 14, fontWeight: '700', color: c.text, opacity: 0.65 }}>Processing Video…</Text>
-              <Text style={{ fontSize: 12, color: c.text, opacity: 0.4, textAlign: 'center', paddingHorizontal: 24 }}>
+              <Text style={{ fontSize: 14, fontWeight: '700', ...mutedTextStyle(c, 0.65) }}>Processing Video…</Text>
+              <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.4), textAlign: 'center', paddingHorizontal: 24 }}>
                 This video is being prepared. Check back shortly.
               </Text>
             </View>
@@ -1401,7 +1401,7 @@ export default function LessonPlayer() {
           <NeuCard style={{ padding: 24, alignItems: 'center', gap: 10 }}>
             <Clock size={44} color="#D97706" opacity={0.5} />
             <Text style={{ fontSize: 16, fontWeight: '700', color: c.text }}>Coming Soon</Text>
-            <Text style={{ fontSize: 13, color: c.text, opacity: 0.45, textAlign: 'center' }}>
+            <Text style={{ fontSize: 13, ...mutedTextStyle(c, 0.45), textAlign: 'center' }}>
               This lesson&apos;s video will be available soon.
             </Text>
           </NeuCard>
@@ -1411,7 +1411,7 @@ export default function LessonPlayer() {
         {!isFullscreen && !!lesson.notes && (
           <NeuCard>
             <Text style={{ fontSize: 15, fontWeight: '700', color: c.text, marginBottom: 8 }}>Lesson Notes</Text>
-            <Text style={{ fontSize: 14, color: c.text, opacity: 0.65, lineHeight: 22 }}>{lesson.notes}</Text>
+            <Text style={{ fontSize: 14, ...mutedTextStyle(c, 0.65), lineHeight: 22 }}>{lesson.notes}</Text>
           </NeuCard>
         )}
 

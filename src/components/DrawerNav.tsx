@@ -28,7 +28,7 @@ import {
 import { backendClient } from '@/client/backendClient';
 import { useProfileStore } from '@/lib/store';
 import { useConnectivity } from '@/lib/offlineTransition';
-import { neuColors, neuMicroStyle } from '@/lib/neu';
+import { neuColors, neuMicroStyle, mutedTextStyle, type NeuPalette } from '@/lib/neu';
 import { spacing, radius, typography, iconContainer, safeBottom } from '@/lib/ds';
 import { useDrawer } from './DrawerContext';
 import { BrandLogo } from '@/components/BrandLogo';
@@ -251,8 +251,15 @@ function ConnectivityBadge({ isDark, c }: { isDark: boolean; c: typeof neuColors
 }
 
 // ── Nav item row ──────────────────────────────────────────────────────────
-function NavItem({ item, onPress, c, active }: { item: NavItemType; onPress: () => void; c: typeof neuColors.light; active?: boolean }) {
+function NavItem({ item, onPress, c, isDark, active }: { item: NavItemType; onPress: () => void; c: typeof neuColors.light; isDark: boolean; active?: boolean }) {
   const [pressed, setPressed] = useState(false);
+  // Active/inactive separation. In Light both states keep today's exact
+  // treatment (opaque text, the 1F tint). In Dark the selected row gets a
+  // stronger brand tint AND full-strength label, while unselected rows step
+  // down to the readable `textMuted` tier — so "where am I?" is answerable at
+  // a glance without dimming anything below legibility.
+  const tint = item.color ?? c.primary;
+  const labelColor = isDark ? (active ? c.text : c.textMuted) : c.text;
   return (
     <Pressable
       onPress={onPress}
@@ -265,40 +272,48 @@ function NavItem({ item, onPress, c, active }: { item: NavItemType; onPress: () 
         paddingHorizontal: spacing.lg, paddingVertical: spacing.sm + spacing.xs,
         marginHorizontal: spacing.sm, marginBottom: 1,
         borderRadius: radius.md,
+        // Active rows also carry a brand-blue left rule, which survives the
+        // low-contrast tint overlay that launchers/theme layers may flatten.
+        borderLeftWidth: isDark && active ? 2 : 0,
+        borderLeftColor: isDark && active ? tint : 'transparent',
         backgroundColor: active
-          ? `${item.color ?? c.primary}1F`
-          : pressed ? `${item.color ?? c.primary}18` : 'transparent',
+          ? `${tint}${isDark ? '2B' : '1F'}`
+          : pressed ? `${tint}18` : 'transparent',
       }}
     >
       <View style={{
         ...iconContainer.sm,
-        backgroundColor: `${item.color ?? c.primary}18`,
+        backgroundColor: `${tint}${isDark && active ? '30' : '18'}`,
         alignItems: 'center', justifyContent: 'center',
       }}>
-        <item.icon size={iconContainer.xs.width / 2 + 2} color={item.color ?? c.primary} />
+        <item.icon size={iconContainer.xs.width / 2 + 2} color={tint} />
       </View>
-      <Text style={{ flex: 1, ...typography.labelSm, color: c.text }}>{item.label}</Text>
+      <Text style={{ flex: 1, ...typography.labelSm, color: labelColor, fontWeight: isDark && active ? '700' : typography.labelSm.fontWeight }}>{item.label}</Text>
       {!!item.badge && item.badge > 0 && (
         <View
           accessibilityLabel={`${item.badge} items`}
           style={{
             minWidth: 20, height: 20, borderRadius: radius.full,
             paddingHorizontal: 6, alignItems: 'center', justifyContent: 'center',
-            backgroundColor: `${item.color ?? c.primary}26`,
+            backgroundColor: `${tint}${isDark ? '33' : '26'}`,
           }}
         >
-          <Text style={{ fontSize: 11, fontWeight: '800', color: item.color ?? c.primary }}>
+          <Text style={{ fontSize: 11, fontWeight: '800', color: tint }}>
             {item.badge > 99 ? '99+' : item.badge}
           </Text>
         </View>
       )}
-      <ChevronRight size={iconContainer.xs.width / 2} color={`${c.text}33`} />
+      <ChevronRight size={iconContainer.xs.width / 2} color={`${c.text}${isDark ? '40' : '33'}`} />
     </Pressable>
   );
 }
 
-function LogoutRow({ onPress }: { onPress: () => void }) {
+function LogoutRow({ onPress, c }: { onPress: () => void; c: NeuPalette }) {
   const [pressed, setPressed] = useState(false);
+  // `c.danger` is #DC2626 in Light (byte-identical to the old literal) and
+  // #F87171 in Dark. The darker light-mode red only reaches 3.4:1 against the
+  // dark sidebar surface — below AA for a label — while the dark token is 6.1:1.
+  const danger = c.danger;
   return (
     <Pressable
       onPress={onPress}
@@ -310,13 +325,13 @@ function LogoutRow({ onPress }: { onPress: () => void }) {
         flexDirection: 'row', alignItems: 'center', gap: spacing.sm + spacing.xs,
         paddingHorizontal: spacing.lg, paddingVertical: spacing.sm + spacing.xs,
         borderRadius: radius.md,
-        backgroundColor: pressed ? '#DC262615' : 'transparent',
+        backgroundColor: pressed ? `${danger}15` : 'transparent',
       }}
     >
-      <View style={{ ...iconContainer.sm, backgroundColor: '#DC262618', alignItems: 'center', justifyContent: 'center' }}>
-        <LogOut size={iconContainer.xs.width / 2 + 2} color="#DC2626" />
+      <View style={{ ...iconContainer.sm, backgroundColor: `${danger}18`, alignItems: 'center', justifyContent: 'center' }}>
+        <LogOut size={iconContainer.xs.width / 2 + 2} color={danger} />
       </View>
-      <Text style={{ flex: 1, ...typography.labelSm, color: '#DC2626' }}>Sign Out</Text>
+      <Text style={{ flex: 1, ...typography.labelSm, color: danger }}>Sign Out</Text>
     </Pressable>
   );
 }
@@ -514,7 +529,11 @@ export default function DrawerNav() {
           position: 'absolute', top: 0, left: 0, bottom: 0,
           zIndex: 2,
           width: DRAWER_WIDTH,
-          backgroundColor: c.base,
+          // The sidebar is its own layer of the ladder, not the page colour:
+          // painting `base` made the drawer dissolve into the screen behind it.
+          backgroundColor: c.navSurface,
+          borderRightWidth: isDark ? 1 : 0,
+          borderRightColor: c.border,
           transform: [{ translateX: slideAnim }],
           ...Platform.select({
             ios: { shadowColor: c.shadowDark, shadowOffset: { width: 8, height: 0 }, shadowOpacity: 0.7, shadowRadius: 20 },
@@ -551,7 +570,11 @@ export default function DrawerNav() {
                 accessibilityRole="button"
                 style={({ pressed }) => ({
                   ...iconContainer.sm,
-                  backgroundColor: c.base,
+                  // Recessed step, so the pill stays visible against the sidebar
+                  // (it was the sidebar's own colour before).
+                  backgroundColor: c.inputSurface,
+                  borderWidth: isDark ? 1 : 0,
+                  borderColor: c.borderSoft,
                   alignItems: 'center', justifyContent: 'center',
                   opacity: pressed ? 0.6 : 1,
                   ...Platform.select({
@@ -575,12 +598,15 @@ export default function DrawerNav() {
               marginHorizontal: spacing.lg - spacing.xs,
               marginBottom: spacing.lg - spacing.xs,
               borderRadius: radius.lg,
+              // The PROFILE section gets its own rung: a real raised card on the
+              // sidebar (dark) / today's wash (light). A 4%-white film over a
+              // 10%-lightness navy was indistinguishable from the sidebar itself.
               backgroundColor: isDark
-                ? 'rgba(255,255,255,0.04)'
+                ? c.surface
                 : 'rgba(8,26,53,0.04)',
               borderWidth: 1,
               borderColor: isDark
-                ? 'rgba(255,255,255,0.07)'
+                ? c.border
                 : 'rgba(8,26,53,0.06)',
               paddingHorizontal: spacing.lg - spacing.xs,
               paddingVertical: spacing.md,
@@ -623,7 +649,7 @@ export default function DrawerNav() {
                 </View>
                 {profile?.email ? (
                   <Text
-                    style={{ ...typography.micro, color: c.text, opacity: 0.4, marginTop: 1 }}
+                    style={[{ ...typography.micro, marginTop: 1 }, mutedTextStyle(c, 0.4)]}
                     numberOfLines={1}
                   >
                     {profile.email}
@@ -640,7 +666,7 @@ export default function DrawerNav() {
             <View style={{
               marginHorizontal: spacing.xl,
               height: 1,
-              backgroundColor: isDark ? 'rgba(255,255,255,0.07)' : 'rgba(8,26,53,0.07)',
+              backgroundColor: isDark ? c.divider : 'rgba(8,26,53,0.07)',
             }} />
           </View>
 
@@ -649,17 +675,15 @@ export default function DrawerNav() {
             {sections.map((section, si) => (
               <View key={si}>
                 {section.title && (
-                  <Text style={{
+                  <Text style={[{
                     ...typography.micro,
                     fontWeight: '800',
-                    color: c.text,
-                    opacity: 0.35,
                     paddingHorizontal: spacing.xl,
                     paddingTop: spacing.xl,
                     paddingBottom: spacing.sm,
                     textTransform: 'uppercase',
                     letterSpacing: 1.2,
-                  }}>
+                  }, mutedTextStyle(c, 0.35)]}>
                     {section.title}
                   </Text>
                 )}
@@ -669,6 +693,7 @@ export default function DrawerNav() {
                     item={item}
                     onPress={() => navigate(item.path)}
                     c={c}
+                    isDark={isDark}
                     // Active-route highlight: Offline Videos stays highlighted
                     // on both /offline-library and /offline-course.
                     active={pathname === item.path || (item.path === '/offline-library' && pathname?.startsWith('/offline-'))}
@@ -678,8 +703,8 @@ export default function DrawerNav() {
             ))}
 
             {/* Logout */}
-            <View style={{ marginHorizontal: spacing.sm + spacing.xs, marginTop: spacing.md, borderTopWidth: 1, borderTopColor: `${c.text}0D`, paddingTop: spacing.md }}>
-              <LogoutRow onPress={handleLogout} />
+            <View style={{ marginHorizontal: spacing.sm + spacing.xs, marginTop: spacing.md, borderTopWidth: 1, borderTopColor: isDark ? c.divider : `${c.text}0D`, paddingTop: spacing.md }}>
+              <LogoutRow onPress={handleLogout} c={c} />
             </View>
           </View>
         </ScrollView>

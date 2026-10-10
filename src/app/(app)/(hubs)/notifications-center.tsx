@@ -12,7 +12,7 @@ import {
 } from '@/lib/api';
 import { NeuCard } from '@/components/NeuCard';
 import { NeuButton } from '@/components/NeuButton';
-import { neuColors, useLayout, safeBottom } from '@/lib/neu';
+import { neuColors, useLayout, safeBottom, mutedTextStyle } from '@/lib/neu';
 import { useToast } from '@/components/Toast';
 
 const TARGET_TYPES = [
@@ -95,7 +95,7 @@ export default function NotificationsCenterScreen({ backTo }: { backTo?: string 
           <Text style={{ fontSize: 15, fontWeight: '700', color: c.text, marginBottom: 14 }}>Compose Notification</Text>
 
           {/* Target type */}
-          <Text style={{ fontSize: 11, fontWeight: '700', color: c.text, opacity: 0.5, marginBottom: 8, textTransform: 'uppercase', letterSpacing: 0.8 }}>Target</Text>
+          <Text style={{ fontSize: 11, fontWeight: '700', ...mutedTextStyle(c, 0.5), marginBottom: 8, textTransform: 'uppercase', letterSpacing: 0.8 }}>Target</Text>
           <ScrollView automaticallyAdjustKeyboardInsets={process.env.EXPO_OS === 'ios'} horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 14 }}>
             <View style={{ flexDirection: 'row', gap: 8 }}>
               {TARGET_TYPES.map(t => {
@@ -140,17 +140,17 @@ export default function NotificationsCenterScreen({ backTo }: { backTo?: string 
 
           {targetType === 'individual' && (
             <>
-              <Text style={{ fontSize: 11, fontWeight: '700', color: c.text, opacity: 0.5, marginBottom: 6, textTransform: 'uppercase' }}>User ID</Text>
+              <Text style={{ fontSize: 11, fontWeight: '700', ...mutedTextStyle(c, 0.5), marginBottom: 6, textTransform: 'uppercase' }}>User ID</Text>
               <TextInput value={targetUserId} onChangeText={setTargetUserId} placeholder="Paste user UUID..." placeholderTextColor={`${c.text}55`}
                 style={{ ...inp, minWidth: 0, marginBottom: 14 }} autoCapitalize="none" />
             </>
           )}
 
-          <Text style={{ fontSize: 11, fontWeight: '700', color: c.text, opacity: 0.5, marginBottom: 6, textTransform: 'uppercase' }}>Title</Text>
+          <Text style={{ fontSize: 11, fontWeight: '700', ...mutedTextStyle(c, 0.5), marginBottom: 6, textTransform: 'uppercase' }}>Title</Text>
           <TextInput value={title} onChangeText={setTitle} placeholder="Notification title..." placeholderTextColor={`${c.text}55`}
             style={{ ...inp, minWidth: 0, marginBottom: 12 }} />
 
-          <Text style={{ fontSize: 11, fontWeight: '700', color: c.text, opacity: 0.5, marginBottom: 6, textTransform: 'uppercase' }}>Message</Text>
+          <Text style={{ fontSize: 11, fontWeight: '700', ...mutedTextStyle(c, 0.5), marginBottom: 6, textTransform: 'uppercase' }}>Message</Text>
           <View style={{ ...inp, minWidth: 0, marginBottom: 16 }}>
             <TextInput value={body} onChangeText={setBody} placeholder="Notification body..." placeholderTextColor={`${c.text}55`}
               multiline numberOfLines={3} style={{ fontSize: 14, color: c.text, minWidth: 0, minHeight: 72 }} />
@@ -169,12 +169,12 @@ export default function NotificationsCenterScreen({ backTo }: { backTo?: string 
             {history.map(n => (
               <NeuCard key={n.id} style={{ marginBottom: 10, padding: 14 }}>
                 <Text style={{ fontSize: 14, fontWeight: '700', color: c.text }}>{n.title}</Text>
-                <Text style={{ fontSize: 12, color: c.text, opacity: 0.6, marginTop: 3 }}>{n.body}</Text>
+                <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.6), marginTop: 3 }}>{n.body}</Text>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 6 }}>
                   <View style={{ backgroundColor: `${c.primary}18`, borderRadius: 6, paddingHorizontal: 7, paddingVertical: 2 }}>
                     <Text style={{ fontSize: 10, fontWeight: '700', color: c.primary }}>{n.target_type ?? 'individual'}</Text>
                   </View>
-                  <Text style={{ fontSize: 11, color: c.text, opacity: 0.4 }}>{new Date(n.sent_at ?? n.created_at).toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true })}</Text>
+                  <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.4) }}>{new Date(n.sent_at ?? n.created_at).toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true })}</Text>
                 </View>
               </NeuCard>
             ))}

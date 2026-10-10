@@ -14,7 +14,7 @@ import { getAdminStats } from '@/lib/api';
 import { backendClient } from '@/client/backendClient';
 import { NeuCard } from '@/components/NeuCard';
 import { NeuButton } from '@/components/NeuButton';
-import { neuColors, neuFlatStyle, useLayout, safeBottom } from '@/lib/neu'
+import { neuColors, neuFlatStyle, useLayout, safeBottom, mutedTextStyle } from '@/lib/neu';
 import { useToast } from '@/components/Toast';
 import { logAndParse } from '@/lib/parseError';
 
@@ -164,7 +164,7 @@ export default function SuperAdminHealth() {
                 <Text style={{ fontSize: 18, fontWeight: '800', color: overallHealthy ? '#16A34A' : '#DC2626' }}>
                   {overallHealthy ? 'All Systems Operational' : 'Degraded Performance'}
                 </Text>
-                <Text style={{ fontSize: 12, color: c.text, opacity: 0.5, marginTop: 3 }}>
+                <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.5), marginTop: 3 }}>
                   Last checked: {new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true })}
                 </Text>
               </View>
@@ -182,7 +182,7 @@ export default function SuperAdminHealth() {
                 <View style={{ flex: 1 }}>
                   <Text style={{ fontSize: 15, fontWeight: '700', color: c.text }}>{svc.name}</Text>
                   {svc.latency !== undefined && svc.latency > 0 && (
-                    <Text style={{ fontSize: 12, color: c.text, opacity: 0.45, marginTop: 2 }}>
+                    <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.45), marginTop: 2 }}>
                       Latency: {svc.latency}ms
                     </Text>
                   )}
@@ -214,13 +214,13 @@ export default function SuperAdminHealth() {
                     <NeuCard key={label} style={{ flex: 1, minWidth: 140, alignItems: 'center', padding: 16 }}>
                       <Icon size={22} color={color} style={{ marginBottom: 6 }} />
                       <Text style={{ fontSize: 26, fontWeight: '900', color }}>{value}</Text>
-                      <Text style={{ fontSize: 11, color: c.text, opacity: 0.5, marginTop: 4, textAlign: 'center' }}>{label}</Text>
+                      <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.5), marginTop: 4, textAlign: 'center' }}>{label}</Text>
                     </NeuCard>
                   ))}
                 </View>
 
                 {/* Orphan tiles */}
-                <Text style={{ fontSize: 14, fontWeight: '600', color: c.text, opacity: 0.6, marginBottom: 10 }}>
+                <Text style={{ fontSize: 14, fontWeight: '600', ...mutedTextStyle(c, 0.6), marginBottom: 10 }}>
                   Orphan Records
                 </Text>
                 <View style={{ flexDirection: 'row', gap: 10, marginBottom: 14 }}>
@@ -232,7 +232,7 @@ export default function SuperAdminHealth() {
                     <NeuCard key={label} style={{ flex: 1, alignItems: 'center', padding: 14 }}>
                       <Icon size={20} color={color} style={{ marginBottom: 4 }} />
                       <Text style={{ fontSize: 22, fontWeight: '800', color }}>{value}</Text>
-                      <Text style={{ fontSize: 10, color: c.text, opacity: 0.5, textAlign: 'center', marginTop: 3 }}>{label}</Text>
+                      <Text style={{ fontSize: 10, ...mutedTextStyle(c, 0.5), textAlign: 'center', marginTop: 3 }}>{label}</Text>
                     </NeuCard>
                   ))}
                 </View>
@@ -247,7 +247,7 @@ export default function SuperAdminHealth() {
                       <Text style={{ fontSize: 14, fontWeight: '700', color: c.text }}>
                         Orphan Records Detected
                       </Text>
-                      <Text style={{ fontSize: 12, color: c.text, opacity: 0.5, marginTop: 2 }}>
+                      <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.5), marginTop: 2 }}>
                         {deletionStats.orphan_storage + deletionStats.orphan_videos + deletionStats.orphan_devices} record(s) need attention
                       </Text>
                     </View>
@@ -269,7 +269,7 @@ export default function SuperAdminHealth() {
                       onPress={() => setShowRecent(p => !p)}
                       style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}
                     >
-                      <Text style={{ fontSize: 14, fontWeight: '600', color: c.text, opacity: 0.6 }}>
+                      <Text style={{ fontSize: 14, fontWeight: '600', ...mutedTextStyle(c, 0.6) }}>
                         Recent Deletions ({deletionStats.recent.length})
                       </Text>
                       {showRecent
@@ -316,7 +316,7 @@ export default function SuperAdminHealth() {
                                 {rec.orphan_storage && <FileX size={13} color="#EF4444" />}
                                 {rec.orphan_videos  && <Film  size={13} color="#EF4444" />}
                               </View>
-                              <Text style={{ fontSize: 11, color: c.text, opacity: 0.4, marginTop: 3 }}>
+                              <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.4), marginTop: 3 }}>
                                 {new Date(rec.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })} · {rec.files_removed} files · {rec.videos_removed} videos
                               </Text>
                             </View>
@@ -330,7 +330,7 @@ export default function SuperAdminHealth() {
             ) : (
               <NeuCard style={{ padding: layout.screenPx, alignItems: 'center' }}>
                 <Trash2 size={28} color={c.primary} style={{ opacity: 0.3 } as any} />
-                <Text style={{ fontSize: 13, color: c.text, opacity: 0.4, marginTop: 10 }}>No deletion records yet</Text>
+                <Text style={{ fontSize: 13, ...mutedTextStyle(c, 0.4), marginTop: 10 }}>No deletion records yet</Text>
               </NeuCard>
             )}
 
@@ -349,7 +349,7 @@ export default function SuperAdminHealth() {
                   ].map(({ label, value, color }) => (
                     <NeuCard key={label} style={{ flex: 1, minWidth: 130, alignItems: 'center', padding: 16 }}>
                       <Text style={{ fontSize: 28, fontWeight: '900', color }}>{value}</Text>
-                      <Text style={{ fontSize: 12, color: c.text, opacity: 0.5, marginTop: 4, textAlign: 'center' }}>{label}</Text>
+                      <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.5), marginTop: 4, textAlign: 'center' }}>{label}</Text>
                     </NeuCard>
                   ))}
                 </View>

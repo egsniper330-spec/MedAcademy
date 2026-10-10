@@ -22,7 +22,7 @@ import { NeuCard } from '@/components/NeuCard';
 import { NeuSearchBar } from '@/components/NeuInputRow';
 import { StatCardCarousel } from '@/components/StatCard';
 import type { StatCardItem } from '@/components/StatCard';
-import { neuColors, neuMicroStyle, useLayout, safeBottom } from '@/lib/neu';
+import { neuColors, neuMicroStyle, useLayout, safeBottom, mutedTextStyle } from '@/lib/neu';
 import { DashboardHeader } from '@/components/DashboardHeader';
 import { useNotificationPermission } from '@/hooks/useNotificationPermission';
 import { PermissionRationaleModal } from '@/components/PermissionRationaleModal';
@@ -232,7 +232,7 @@ export default function StudentDashboard() {
               <Text style={{ fontSize: layout.bodySize, fontWeight: '700', color: c.text, lineHeight: layout.bodySize * 1.35 }} numberOfLines={2}>
                 {course.title}
               </Text>
-              <Text style={{ fontSize: layout.captionSize, color: c.text, opacity: 0.45, marginTop: 2 }} numberOfLines={1}>
+              <Text style={{ fontSize: layout.captionSize, ...mutedTextStyle(c, 0.45), marginTop: 2 }} numberOfLines={1}>
                 {`Dr. ${course.doctor?.full_name ?? '—'}${course.category?.name ? ` · ${course.category.name}` : ''}`}
               </Text>
               <View style={{ marginTop: 4, flexDirection: 'row', justifyContent: 'flex-end' }}>
@@ -276,7 +276,7 @@ export default function StudentDashboard() {
               <Text style={{ fontSize: layout.bodySize, fontWeight: '700', color: c.text, lineHeight: layout.bodySize * 1.35 }} numberOfLines={2}>
                 {course.title}
               </Text>
-              <Text style={{ fontSize: layout.captionSize, color: c.text, opacity: 0.45, marginTop: 2 }} numberOfLines={1}>
+              <Text style={{ fontSize: layout.captionSize, ...mutedTextStyle(c, 0.45), marginTop: 2 }} numberOfLines={1}>
                 Dr. {course.doctor?.full_name ?? '—'}
               </Text>
               <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: layout.pad.sm }}>
@@ -359,7 +359,7 @@ export default function StudentDashboard() {
         {/* ── Filter panel ──────────────────────────────────────────────── */}
         {showFilters && (
           <NeuCard style={{ marginBottom: layout.pad.md, padding: layout.cardPx }}>
-            <Text style={{ fontSize: layout.captionSize - 1, fontWeight: '800', color: c.text, opacity: 0.45, marginBottom: layout.pad.sm, textTransform: 'uppercase', letterSpacing: 0.8 }}>Category</Text>
+            <Text style={{ fontSize: layout.captionSize - 1, fontWeight: '800', ...mutedTextStyle(c, 0.45), marginBottom: layout.pad.sm, textTransform: 'uppercase', letterSpacing: 0.8 }}>Category</Text>
             <ScrollView automaticallyAdjustKeyboardInsets={process.env.EXPO_OS === 'ios'} horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: layout.pad.md }}>
               <Pressable onPress={() => setFilters(f => ({ ...f, category: null }))} style={chipStyle(!filters.category)}>
                 <Text style={chipText(!filters.category)}>All</Text>
@@ -373,7 +373,7 @@ export default function StudentDashboard() {
 
             {teachers.length > 0 && (
               <>
-                <Text style={{ fontSize: layout.captionSize - 1, fontWeight: '800', color: c.text, opacity: 0.45, marginBottom: layout.pad.sm, textTransform: 'uppercase', letterSpacing: 0.8 }}>Teacher</Text>
+                <Text style={{ fontSize: layout.captionSize - 1, fontWeight: '800', ...mutedTextStyle(c, 0.45), marginBottom: layout.pad.sm, textTransform: 'uppercase', letterSpacing: 0.8 }}>Teacher</Text>
                 <ScrollView automaticallyAdjustKeyboardInsets={process.env.EXPO_OS === 'ios'} horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: layout.pad.md }}>
                   <Pressable onPress={() => setFilters(f => ({ ...f, teacher: null }))} style={chipStyle(!filters.teacher)}>
                     <Text style={chipText(!filters.teacher)}>All</Text>
@@ -387,7 +387,7 @@ export default function StudentDashboard() {
               </>
             )}
 
-            <Text style={{ fontSize: layout.captionSize - 1, fontWeight: '800', color: c.text, opacity: 0.45, marginBottom: layout.pad.sm, textTransform: 'uppercase', letterSpacing: 0.8 }}>Price</Text>
+            <Text style={{ fontSize: layout.captionSize - 1, fontWeight: '800', ...mutedTextStyle(c, 0.45), marginBottom: layout.pad.sm, textTransform: 'uppercase', letterSpacing: 0.8 }}>Price</Text>
             <View style={{ flexDirection: 'row', gap: layout.pad.sm }}>
               {(['all', 'free', 'paid'] as const).map(pt => (
                 <Pressable key={pt} onPress={() => setFilters(f => ({ ...f, priceType: pt }))} style={chipStyle(filters.priceType === pt)}>
@@ -431,7 +431,7 @@ export default function StudentDashboard() {
           {filteredMyCourses.length === 0 ? (
             <NeuCard style={{ alignItems: 'center', padding: layout.cardPx * 1.5, marginBottom: layout.sectionGap }}>
               <BookOpen size={Math.round(layout.touchTarget * 0.85)} color={c.primary} opacity={0.25} style={{ marginBottom: layout.pad.sm }} />
-              <Text style={{ fontSize: layout.bodySize, fontWeight: '700', color: c.text, opacity: 0.5, marginBottom: layout.pad.xs }}>
+              <Text style={{ fontSize: layout.bodySize, fontWeight: '700', ...mutedTextStyle(c, 0.5), marginBottom: layout.pad.xs }}>
                 {searchQuery ? 'No matching courses' : "You haven't enrolled in any courses yet."}
               </Text>
               {!searchQuery && (
@@ -464,7 +464,7 @@ export default function StudentDashboard() {
             <View>
               <Text style={{ fontSize: layout.bodySize + 2, fontWeight: '800', color: c.text }}>Explore Courses</Text>
               {filteredExplore.length > 0 && (
-                <Text style={{ fontSize: layout.captionSize, color: c.text, opacity: 0.4, marginTop: 2 }}>
+                <Text style={{ fontSize: layout.captionSize, ...mutedTextStyle(c, 0.4), marginTop: 2 }}>
                   {filteredExplore.length} available
                 </Text>
               )}
@@ -474,7 +474,7 @@ export default function StudentDashboard() {
           {filteredExplore.length === 0 ? (
             <NeuCard style={{ alignItems: 'center', padding: layout.cardPx * 1.5, marginBottom: layout.sectionGap }}>
               <Search size={Math.round(layout.touchTarget * 0.85)} color={c.primary} opacity={0.25} style={{ marginBottom: layout.pad.sm }} />
-              <Text style={{ fontSize: layout.bodySize, fontWeight: '700', color: c.text, opacity: 0.5, textAlign: 'center' }}>
+              <Text style={{ fontSize: layout.bodySize, fontWeight: '700', ...mutedTextStyle(c, 0.5), textAlign: 'center' }}>
                 {searchQuery || hasActiveFilters ? 'No courses match your search' : 'No new courses available'}
               </Text>
               {(searchQuery || hasActiveFilters) && (

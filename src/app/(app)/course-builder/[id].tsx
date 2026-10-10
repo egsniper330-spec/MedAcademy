@@ -25,7 +25,7 @@ import * as DocumentPicker from 'expo-document-picker';
 import { NeuButton } from '@/components/NeuButton';
 import { NeuCard } from '@/components/NeuCard';
 import { useToast } from '@/components/Toast';
-import { neuColors, useLayout, neuFlatStyle, neuPressedStyle, safeTop, safeLeft, safeRight, safeBottom } from '@/lib/neu';
+import { neuColors, useLayout, neuFlatStyle, neuPressedStyle, safeTop, safeLeft, safeRight, safeBottom, mutedTextStyle } from '@/lib/neu';
 import { useProfileStore } from '@/lib/store';
 import { friendlyError } from '@/lib/validation';
 import {
@@ -848,7 +848,7 @@ export default function CourseBuilder() {
             <View style={[neuFlatStyle(isDark), {
               marginHorizontal: 16, marginBottom: 32, borderRadius: 20, padding: 8, gap: 2, width: screenWidth - 32,
             }]}>
-              <Text style={{ fontSize: 11, fontWeight: '700', color: c.text, opacity: 0.4,
+              <Text style={{ fontSize: 11, fontWeight: '700', ...mutedTextStyle(c, 0.4),
                 paddingHorizontal: 14, paddingTop: 8, paddingBottom: 4, textTransform: 'uppercase', letterSpacing: 0.8 }}>
                 More Actions
               </Text>
@@ -874,7 +874,7 @@ export default function CourseBuilder() {
               {/* Dismiss */}
               <Pressable onPress={() => setShowOverflowMenu(false)}
                 style={{ alignItems: 'center', paddingVertical: 14, marginTop: 4, borderTopWidth: 1, borderColor: `${c.text}12` }}>
-                <Text style={{ fontSize: 14, fontWeight: '600', color: c.text, opacity: 0.45 }}>Cancel</Text>
+                <Text style={{ fontSize: 14, fontWeight: '600', ...mutedTextStyle(c, 0.45) }}>Cancel</Text>
               </Pressable>
             </View>
           </Pressable>
@@ -925,7 +925,7 @@ export default function CourseBuilder() {
                 </Pressable>
               ))}
             </View>
-            <Text style={{ fontSize: 11, color: c.text, opacity: 0.45, marginTop: 6 }}>
+            <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.45), marginTop: 6 }}>
               Draft keeps this course hidden from students. Published makes it visible in Explore and to enrolled students.
             </Text>
           </Field>
@@ -1000,10 +1000,10 @@ export default function CourseBuilder() {
                   <Text style={{ fontSize: 12, fontWeight: '700', color: '#16A34A' }}>Free</Text>
                 </View>
               ) : (
-                <Text style={{ fontSize: 12, color: c.text, opacity: 0.45 }}>EGP {parseFloat(priceEgp).toFixed(2)}</Text>
+                <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.45) }}>EGP {parseFloat(priceEgp).toFixed(2)}</Text>
               )}
             </View>
-            <Text style={{ fontSize: 11, color: c.text, opacity: 0.4, marginTop: 4 }}>
+            <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.4), marginTop: 4 }}>
               Set to 0 to offer the course for free.
             </Text>
           </Field>
@@ -1016,7 +1016,7 @@ export default function CourseBuilder() {
                 Contact Information
               </Text>
             </View>
-            <Text style={{ fontSize: 12, color: c.text, opacity: 0.45, marginBottom: 10 }}>
+            <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.45), marginBottom: 10 }}>
               Students will use these to subscribe to this course.
             </Text>
 
@@ -1142,8 +1142,8 @@ export default function CourseBuilder() {
                 <Text style={{ fontSize: 12, fontWeight: '700', color: c.primary }}>
                   {formatStudyTime(totalMin)} total
                 </Text>
-                <Text style={{ fontSize: 12, color: c.text, opacity: 0.45 }}>·</Text>
-                <Text style={{ fontSize: 12, color: c.text, opacity: 0.55 }}>
+                <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.45) }}>·</Text>
+                <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.55) }}>
                   {totalLessons} lessons across {sections.length} sections
                 </Text>
               </View>
@@ -1157,8 +1157,8 @@ export default function CourseBuilder() {
             ListEmptyComponent={
               <View style={{ alignItems: 'center', paddingVertical: 60 }}>
                 <Layers size={44} color={c.primary} opacity={0.2} />
-                <Text style={{ color: c.text, opacity: 0.4, marginTop: 12, fontSize: 15 }}>No sections yet</Text>
-                <Text style={{ color: c.text, opacity: 0.3, fontSize: 13, marginTop: 4 }}>{'Tap "+ Section" to get started'}</Text>
+                <Text style={{ ...mutedTextStyle(c, 0.4), marginTop: 12, fontSize: 15 }}>No sections yet</Text>
+                <Text style={{ ...mutedTextStyle(c, 0.3), fontSize: 13, marginTop: 4 }}>{'Tap "+ Section" to get started'}</Text>
               </View>
             }
             renderItem={({ item: section, index: sIdx }) => (
@@ -1196,7 +1196,7 @@ export default function CourseBuilder() {
                   {/* Lesson count badge */}
                   <View style={{ paddingHorizontal: 8, paddingVertical: 3, borderRadius: 10,
                     backgroundColor: `${c.text}10`, flexShrink: 0 }}>
-                    <Text style={{ fontSize: 11, fontWeight: '700', color: c.text, opacity: 0.5 }}>
+                    <Text style={{ fontSize: 11, fontWeight: '700', ...mutedTextStyle(c, 0.5) }}>
                       {(section.lessons ?? []).length}
                     </Text>
                   </View>
@@ -1291,7 +1291,7 @@ export default function CourseBuilder() {
                           paddingHorizontal: 14, paddingVertical: 10, gap: 10, minHeight: 56 }}>
                           <GripVertical size={13} color={c.text} opacity={0.2} />
                           {/* Number */}
-                          <Text style={{ fontSize: 11, fontWeight: '700', color: c.text, opacity: 0.4, minWidth: 18, flexShrink: 0 }}>
+                          <Text style={{ fontSize: 11, fontWeight: '700', ...mutedTextStyle(c, 0.4), minWidth: 18, flexShrink: 0 }}>
                             {lIdx + 1}.
                           </Text>
                           {/* Status dot */}
@@ -1317,10 +1317,10 @@ export default function CourseBuilder() {
                               <View style={{ flexDirection: 'row', gap: 6, marginTop: 2, alignItems: 'center' }}>
                                 {/* Friendly type label */}
                                 <LessonTypeIcon videoType={lesson.video_type} size={9} color={c.primary} />
-                                <Text style={{ fontSize: 11, color: c.text, opacity: 0.45 }}>
+                                <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.45) }}>
                                   {lessonTypeLabel(lesson.video_type)}
                                 </Text>
-                                <Text style={{ fontSize: 11, color: c.text, opacity: 0.3 }}>·</Text>
+                                <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.3) }}>·</Text>
                                 {/* Friendly status label */}
                                 <Text style={{ fontSize: 11, fontWeight: '600',
                                   color: lesson.status === 'published' ? '#16A34A' : lesson.status === 'scheduled' ? '#3B82F6' : '#D97706',
@@ -1329,7 +1329,7 @@ export default function CourseBuilder() {
                                 </Text>
                                 {(lesson.estimated_minutes ?? 0) > 0 && (
                                   <>
-                                    <Text style={{ fontSize: 11, color: c.text, opacity: 0.3 }}>·</Text>
+                                    <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.3) }}>·</Text>
                                     <Clock size={9} color={c.primary} opacity={0.7} />
                                     <Text style={{ fontSize: 11, color: c.primary, opacity: 0.7, fontWeight: '600' }}>
                                       {formatStudyTime(lesson.estimated_minutes)}
@@ -1433,7 +1433,7 @@ export default function CourseBuilder() {
                       <Pressable onPress={() => handleBulkImport(section.id)}
                         style={{ flexDirection: 'row', alignItems: 'center', padding: 12, gap: 6, minHeight: 44, opacity: 0.65 }}>
                         <FileUp size={14} color={c.text} opacity={0.6} />
-                        <Text style={{ fontSize: 13, color: c.text, opacity: 0.6, fontWeight: '600' }}>Bulk Import</Text>
+                        <Text style={{ fontSize: 13, ...mutedTextStyle(c, 0.6), fontWeight: '600' }}>Bulk Import</Text>
                       </Pressable>
                     </View>
                   </View>
@@ -1468,7 +1468,7 @@ export default function CourseBuilder() {
             </View>
             <View style={{ flex: 1 }}>
               <Text style={{ fontSize: 13, fontWeight: '700', color: c.text }}>Enrollment Cost: 1 Credit</Text>
-              <Text style={{ fontSize: 12, color: c.text, opacity: 0.45, marginTop: 2 }}>
+              <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.45), marginTop: 2 }}>
                 Set by the platform. Students use 1 credit to subscribe.
               </Text>
             </View>
@@ -1483,7 +1483,7 @@ export default function CourseBuilder() {
         <View style={{ position: 'absolute', inset: 0, backgroundColor: '#000a', justifyContent: 'center', alignItems: 'center', padding: 24 }}>
           <NeuCard style={{ width: '100%', maxWidth: 420 }}>
             <Text style={{ fontSize: 17, fontWeight: '800', color: c.text, marginBottom: 4 }}>Publish Checklist</Text>
-            <Text style={{ fontSize: 13, color: c.text, opacity: 0.5, marginBottom: 16 }}>Please resolve the following issues before publishing:</Text>
+            <Text style={{ fontSize: 13, ...mutedTextStyle(c, 0.5), marginBottom: 16 }}>Please resolve the following issues before publishing:</Text>
             {getPublishIssues().map((issue, i) => (
               <View key={`issue-${i}`} style={{ flexDirection: 'row', gap: 8, marginBottom: 8, alignItems: 'flex-start' }}>
                 <Text style={{ fontSize: 16, color: '#DC2626' }}>✗</Text>
@@ -1520,7 +1520,7 @@ export default function CourseBuilder() {
           <Pressable onPress={e => e.stopPropagation()}>
             <NeuCard style={{ width: Math.min(screenWidth - 40, 440) }}>
               <Text style={{ fontSize: 18, fontWeight: '800', color: c.text, marginBottom: 4 }}>Start New Course</Text>
-              <Text style={{ fontSize: 13, color: c.text, opacity: 0.5, marginBottom: 20 }}>Choose how to start building your course.</Text>
+              <Text style={{ fontSize: 13, ...mutedTextStyle(c, 0.5), marginBottom: 20 }}>Choose how to start building your course.</Text>
               {/* Blank */}
               <Pressable onPress={() => setShowStartModal(false)}
                 style={[neuFlatStyle(isDark), { borderRadius: 14, padding: 16, marginBottom: 10, flexDirection: 'row', alignItems: 'center', gap: 14 }]}>
@@ -1529,7 +1529,7 @@ export default function CourseBuilder() {
                 </View>
                 <View style={{ flex: 1 }}>
                   <Text style={{ fontSize: 15, fontWeight: '700', color: c.text }} numberOfLines={1}>Start Blank</Text>
-                  <Text style={{ fontSize: 12, color: c.text, opacity: 0.45 }} numberOfLines={1}>Build from scratch</Text>
+                  <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.45) }} numberOfLines={1}>Build from scratch</Text>
                 </View>
               </Pressable>
               {/* Templates */}
@@ -1537,7 +1537,7 @@ export default function CourseBuilder() {
                 <ActivityIndicator color={c.primary} style={{ marginVertical: 16 }} />
               ) : templates.length > 0 ? (
                 <>
-                  <Text style={{ fontSize: 12, fontWeight: '700', color: c.text, opacity: 0.45, marginBottom: 8, textTransform: 'uppercase', letterSpacing: 0.6 }}>
+                  <Text style={{ fontSize: 12, fontWeight: '700', ...mutedTextStyle(c, 0.45), marginBottom: 8, textTransform: 'uppercase', letterSpacing: 0.6 }}>
                     Saved Templates
                   </Text>
                   {templates.map(t => (
@@ -1546,7 +1546,7 @@ export default function CourseBuilder() {
                       <Bookmark size={18} color={c.primary} />
                       <View style={{ flex: 1 }}>
                         <Text style={{ fontSize: 14, fontWeight: '700', color: c.text }} numberOfLines={1}>{t.title}</Text>
-                        {t.description ? <Text style={{ fontSize: 12, color: c.text, opacity: 0.45 }} numberOfLines={1}>{t.description}</Text> : null}
+                        {t.description ? <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.45) }} numberOfLines={1}>{t.description}</Text> : null}
                       </View>
                       <ChevronRight size={16} color={c.text} opacity={0.35} />
                     </Pressable>
@@ -1554,7 +1554,7 @@ export default function CourseBuilder() {
                 </>
               ) : null}
               <Pressable onPress={() => setShowStartModal(false)} style={{ alignItems: 'center', marginTop: 8, padding: 8 }}>
-                <Text style={{ fontSize: 13, color: c.text, opacity: 0.4 }}>Dismiss</Text>
+                <Text style={{ fontSize: 13, ...mutedTextStyle(c, 0.4) }}>Dismiss</Text>
               </Pressable>
             </NeuCard>
           </Pressable>
@@ -1572,12 +1572,12 @@ export default function CourseBuilder() {
                 </View>
                 <Text style={{ fontSize: 17, fontWeight: '800', color: c.text, flex: 1 }} numberOfLines={1}>Archive Course</Text>
               </View>
-              <Text style={{ fontSize: 13, color: c.text, opacity: 0.55, marginBottom: 16, lineHeight: 20 }}>
+              <Text style={{ fontSize: 13, ...mutedTextStyle(c, 0.55), marginBottom: 16, lineHeight: 20 }}>
                 This course will be hidden from the public catalog, search, and new subscriptions.
                 {'\n\n'}Students already enrolled will retain full access to all lessons, videos, and progress.
               </Text>
               <View style={{ gap: 6, marginBottom: 16 }}>
-                <Text style={{ fontSize: 12, fontWeight: '700', color: c.text, opacity: 0.5 }}>Reason (optional)</Text>
+                <Text style={{ fontSize: 12, fontWeight: '700', ...mutedTextStyle(c, 0.5) }}>Reason (optional)</Text>
                 <TextInput
                   value={archiveReason}
                   onChangeText={setArchiveReason}
@@ -1592,7 +1592,7 @@ export default function CourseBuilder() {
               </View>
               <View style={{ flexDirection: 'row', gap: 10 }}>
                 <Pressable onPress={() => setShowArchiveModal(false)} style={[neuFlatStyle(isDark), { flex: 1, minWidth: 100, padding: 12, borderRadius: 12, alignItems: 'center' }]}>
-                  <Text style={{ fontSize: 14, fontWeight: '700', color: c.text, opacity: 0.55 }} numberOfLines={1}>Cancel</Text>
+                  <Text style={{ fontSize: 14, fontWeight: '700', ...mutedTextStyle(c, 0.55) }} numberOfLines={1}>Cancel</Text>
                 </Pressable>
                 <Pressable onPress={handleArchive} disabled={archiving}
                   style={{ flex: 1, minWidth: 100, padding: 12, borderRadius: 12, alignItems: 'center', backgroundColor: '#D97706', opacity: archiving ? 0.6 : 1 }}>
@@ -1617,7 +1617,7 @@ export default function CourseBuilder() {
               <View style={{ flexDirection: 'row', gap: 10 }}>
                 <Pressable onPress={() => setShowSaveTemplate(false)}
                   style={[neuFlatStyle(isDark), { flex: 1, minWidth: 100, padding: 12, borderRadius: 12, alignItems: 'center' }]}>
-                  <Text style={{ fontSize: 14, fontWeight: '700', color: c.text, opacity: 0.55 }} numberOfLines={1}>Cancel</Text>
+                  <Text style={{ fontSize: 14, fontWeight: '700', ...mutedTextStyle(c, 0.55) }} numberOfLines={1}>Cancel</Text>
                 </Pressable>
                 <Pressable onPress={handleSaveTemplate} disabled={savingTemplate || !templateTitle.trim()}
                   style={{ flex: 1, minWidth: 100, padding: 12, borderRadius: 12, alignItems: 'center', backgroundColor: c.primary, opacity: templateTitle.trim() ? 1 : 0.45 }}>
@@ -1796,7 +1796,7 @@ function ToggleRow({ label, sub, value, onChange, isDark, c }: {
       style={[neuFlatStyle(isDark), { borderRadius: 16, padding: 16, flexDirection: 'row', alignItems: 'center', gap: 14 }]}>
       <View style={{ flex: 1 }}>
         <Text style={{ fontSize: 14, fontWeight: '700', color: c.text }}>{label}</Text>
-        <Text style={{ fontSize: 12, color: c.text, opacity: 0.45, marginTop: 2 }}>{sub}</Text>
+        <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.45), marginTop: 2 }}>{sub}</Text>
       </View>
       <View style={[
         value ? neuPressedStyle(isDark) : neuFlatStyle(isDark),

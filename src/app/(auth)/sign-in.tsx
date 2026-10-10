@@ -10,7 +10,7 @@ import { backendClient } from '@/client/backendClient';
 import { NeuCard } from '@/components/NeuCard';
 import { NeuButton } from '@/components/NeuButton';
 import { BrandLogo } from '@/components/BrandLogo';
-import { neuColors, useLayout, safeTop, safeBottom } from '@/lib/neu';
+import { neuColors, useLayout, safeTop, safeBottom, mutedTextStyle } from '@/lib/neu';
 import { detectIdentifierType, resolveEmailFromIdentifier } from '@/lib/identifier';
 import { registerDevice } from '@/lib/api';
 import { useBranding } from '@/lib/branding';
@@ -306,8 +306,7 @@ export default function SignIn() {
   const fieldLabelStyle = {
     fontSize: layout.captionSize,
     fontWeight: '700' as const,
-    color: c.text,
-    opacity: 0.5,
+    ...mutedTextStyle(c, 0.5),
     marginBottom: layout.pad.xs,
     textTransform: 'uppercase' as const,
     letterSpacing: 0.9,
@@ -341,8 +340,7 @@ export default function SignIn() {
           }}>Welcome Back</Text>
           <Text style={{
             fontSize: layout.captionSize,
-            color: c.text,
-            opacity: 0.5,
+            ...mutedTextStyle(c, 0.5),
             marginTop: layout.pad.xs,
             textAlign: 'center',
             lineHeight: layout.captionSize * 1.5,
@@ -417,7 +415,7 @@ export default function SignIn() {
 
         {/* Register link — gap replaces hardcoded marginTop: 16 */}
         <View style={{ flexDirection: 'row', justifyContent: 'center', marginTop: layout.pad.lg, gap: layout.pad.xs }}>
-          <Text style={{ color: c.text, opacity: 0.5, fontSize: layout.captionSize }}>{"Don't have an account?"}</Text>
+          <Text style={{ ...mutedTextStyle(c, 0.5), fontSize: layout.captionSize }}>{"Don't have an account?"}</Text>
           <Pressable onPress={() => router.push('/(auth)/sign-up')} accessibilityLabel="Register a new account" accessibilityRole="button">
             <Text style={{ color: c.primary, fontWeight: '700', fontSize: layout.captionSize }}>Register</Text>
           </Pressable>

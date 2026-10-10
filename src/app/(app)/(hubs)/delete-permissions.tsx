@@ -17,7 +17,7 @@ import { backendClient } from '@/client/backendClient';
 import { NeuCard } from '@/components/NeuCard';
 import { NeuButton } from '@/components/NeuButton';
 import { useToast } from '@/components/Toast';
-import { neuColors, neuFlatStyle, useLayout, safeBottom } from '@/lib/neu'
+import { neuColors, neuFlatStyle, useLayout, safeBottom, mutedTextStyle } from '@/lib/neu';
 import { logAndParse } from '@/lib/parseError';
 
 const PERM_LABELS: Array<{ key: keyof DeletePermissions; label: string; desc: string; danger?: boolean }> = [
@@ -113,7 +113,7 @@ export default function DeletePermissionsScreen() {
           </View>
           <View style={{ flex: 1 }}>
             <Text style={{ fontSize: 14, fontWeight: '700', color: c.text }}>{item.full_name}</Text>
-            <Text style={{ fontSize: 12, color: c.text, opacity: 0.5, marginTop: 1 }}>{item.email}</Text>
+            <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.5), marginTop: 1 }}>{item.email}</Text>
             <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 4, marginTop: 5 }}>
               {PERM_LABELS.filter(p => perms[p.key]).map(p => (
                 <View key={p.key} style={{ backgroundColor: `${c.primary}15`, borderRadius: 5, paddingHorizontal: 6, paddingVertical: 2 }}>
@@ -147,7 +147,7 @@ export default function DeletePermissionsScreen() {
                   </View>
                   <View style={{ flex: 1 }}>
                     <Text style={{ fontSize: 13, fontWeight: '600', color: enabled ? accentColor : c.text }}>{p.label}</Text>
-                    <Text style={{ fontSize: 11, color: c.text, opacity: 0.45, marginTop: 1 }}>{p.desc}</Text>
+                    <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.45), marginTop: 1 }}>{p.desc}</Text>
                   </View>
                 </Pressable>
               );
@@ -183,7 +183,7 @@ export default function DeletePermissionsScreen() {
           <Shield size={22} color={c.primary} />
           <Text style={{ fontSize: 24, fontWeight: '800', color: c.text }}>Delete Permissions</Text>
         </View>
-        <Text style={{ fontSize: 13, color: c.text, opacity: 0.5, marginBottom: 20 }}>
+        <Text style={{ fontSize: 13, ...mutedTextStyle(c, 0.5), marginBottom: 20 }}>
           Configure which admins can delete, restore, and manage trash.
         </Text>
 
@@ -192,7 +192,7 @@ export default function DeletePermissionsScreen() {
         ) : admins.length === 0 ? (
           <NeuCard style={{ padding: 32, alignItems: 'center' }}>
             <UserCog size={28} color={`${c.text}30`} />
-            <Text style={{ fontSize: 13, color: c.text, opacity: 0.4, marginTop: 10 }}>No active admins found.</Text>
+            <Text style={{ fontSize: 13, ...mutedTextStyle(c, 0.4), marginTop: 10 }}>No active admins found.</Text>
           </NeuCard>
         ) : (
           <FlatList

@@ -28,7 +28,7 @@ import {
 import { PageHeader } from '@/components/PageHeader';
 import { NeuCard } from '@/components/NeuCard';
 import { BrandLogo } from '@/components/BrandLogo';
-import { neuColors, useLayout } from '@/lib/neu';
+import { neuColors, useLayout, mutedTextStyle } from '@/lib/neu';
 import { usePressAnim, useEntranceAnim } from '@/lib/motion';
 import { useCmsSections } from '@/lib/cmsContent';
 import {
@@ -120,7 +120,7 @@ function ContactCard({ item }: { item: ContactItem }) {
             </Text>
             <Text style={{
               fontSize: layout.captionSize, fontWeight: '500',
-              color: c.text, opacity: 0.45, lineHeight: layout.captionSize * 1.4,
+              ...mutedTextStyle(c, 0.45), lineHeight: layout.captionSize * 1.4,
             }} numberOfLines={2}>
               {item.description}
             </Text>
@@ -254,7 +254,7 @@ export default function ContactPage() {
           <Text style={{ fontSize: layout.bodySize + 1, fontWeight: '800', color: c.text, textAlign: 'center' }}>
             Unable to load Contact Us
           </Text>
-          <Text style={{ fontSize: layout.captionSize, color: c.text, opacity: 0.5, textAlign: 'center' }}>
+          <Text style={{ fontSize: layout.captionSize, ...mutedTextStyle(c, 0.5), textAlign: 'center' }}>
             Please check your connection and try again.
           </Text>
           <Pressable
@@ -307,7 +307,7 @@ export default function ContactPage() {
             }} />
 
             <Text style={{
-              fontSize: layout.captionSize + 1, color: c.text, opacity: 0.5,
+              fontSize: layout.captionSize + 1, ...mutedTextStyle(c, 0.5),
               textAlign: 'center', lineHeight: (layout.captionSize + 1) * 1.55,
               paddingHorizontal: layout.screenPx,
             }}>
@@ -319,10 +319,10 @@ export default function ContactPage() {
           {contacts.length === 0 ? (
             <NeuCard radius={layout.cardRadius} style={{ padding: layout.cardPx * 2, alignItems: 'center', gap: layout.pad.md }}>
               <HeartHandshake size={layout.heroIconSize} color={c.primary} opacity={0.22} />
-              <Text style={{ fontSize: layout.bodySize + 1, fontWeight: '700', color: c.text, opacity: 0.5, textAlign: 'center' }}>
+              <Text style={{ fontSize: layout.bodySize + 1, fontWeight: '700', ...mutedTextStyle(c, 0.5), textAlign: 'center' }}>
                 Contact details are not yet configured.
               </Text>
-              <Text style={{ fontSize: layout.captionSize, color: c.text, opacity: 0.35, textAlign: 'center' }}>
+              <Text style={{ fontSize: layout.captionSize, ...mutedTextStyle(c, 0.35), textAlign: 'center' }}>
                 Please check back soon.
               </Text>
             </NeuCard>

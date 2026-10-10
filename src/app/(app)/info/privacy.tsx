@@ -5,7 +5,7 @@ import { ScrollView, View, Text, useColorScheme } from 'react-native';
 import { PageHeader } from '@/components/PageHeader';
 import { useCmsSections } from '@/lib/cmsContent';
 import { NeuCard } from '@/components/NeuCard';
-import { neuColors, useLayout, safeBottom } from '@/lib/neu';
+import { neuColors, useLayout, safeBottom, mutedTextStyle } from '@/lib/neu';
 import { Shield } from 'lucide-react-native';
 
 const SECTIONS = [
@@ -79,7 +79,7 @@ export default function PrivacyPage() {
         }}>
           <Shield size={iconInner} color={c.primary} />
         </View>
-        <Text style={{ fontSize: layout.captionSize, color: c.text, opacity: 0.4, textAlign: 'center' }}>
+        <Text style={{ fontSize: layout.captionSize, ...mutedTextStyle(c, 0.4), textAlign: 'center' }}>
           Last updated: July 2025
         </Text>
       </View>

@@ -28,7 +28,7 @@ import { NeuCard } from '@/components/NeuCard';
 import { NeuButton } from '@/components/NeuButton';
 import { LoadingState, ErrorState } from '@/components/ScreenState';
 import { EmptyState } from '@/components/EmptyState';
-import { neuColors, useLayout, safeBottom } from '@/lib/neu';
+import { neuColors, useLayout, safeBottom, mutedTextStyle } from '@/lib/neu';
 import { friendlyError } from '@/lib/validation';
 import { KeyboardAwareScrollView } from '@/components/KeyboardAwareScrollView';
 
@@ -199,7 +199,7 @@ export default function FeatureFlagsScreen() {
 
         <NeuCard style={{ marginBottom: 20, padding: 14, flexDirection: 'row', alignItems: 'center', gap: 10 }}>
           <RefreshCw size={16} color={c.primary} />
-          <Text style={{ flex: 1, fontSize: 12, color: c.text, opacity: 0.6 }}>
+          <Text style={{ flex: 1, fontSize: 12, ...mutedTextStyle(c, 0.6) }}>
             Enforced on the server — every flag below is checked by the endpoint that performs the
             action, not just by this screen. Super Admin is never locked out: sign-in stays available
             to Super Admin while the login flag is off so it can always be switched back on.
@@ -222,7 +222,7 @@ export default function FeatureFlagsScreen() {
               {/* Category header */}
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 10 }}>
                 <View style={{ width: 4, height: 16, borderRadius: 2, backgroundColor: group.color }} />
-                <Text style={{ fontSize: 13, fontWeight: '800', color: c.text, opacity: 0.65, letterSpacing: 1, textTransform: 'uppercase' }}>
+                <Text style={{ fontSize: 13, fontWeight: '800', ...mutedTextStyle(c, 0.65), letterSpacing: 1, textTransform: 'uppercase' }}>
                   {group.title}
                 </Text>
               </View>
@@ -238,7 +238,7 @@ export default function FeatureFlagsScreen() {
                       <View style={{ flex: 1 }}>
                         <Text style={{ fontSize: 15, fontWeight: '700', color: c.text }}>{flag.label}</Text>
                         {flag.description && (
-                          <Text style={{ fontSize: 12, color: c.text, opacity: 0.5, marginTop: 3 }}>{flag.description}</Text>
+                          <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.5), marginTop: 3 }}>{flag.description}</Text>
                         )}
                       </View>
                       {savingThis ? (
@@ -259,7 +259,7 @@ export default function FeatureFlagsScreen() {
                         {flag.enabled ? 'Enabled globally' : 'Disabled globally'}
                       </Text>
                       {!!flag.overrides && (
-                        <Text style={{ fontSize: 11, color: c.text, opacity: 0.5 }}>
+                        <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.5) }}>
                           · {flag.overrides} per-user override{flag.overrides === 1 ? '' : 's'}
                         </Text>
                       )}
@@ -275,11 +275,11 @@ export default function FeatureFlagsScreen() {
         <View style={{ marginBottom: 22 }}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 10 }}>
             <View style={{ width: 4, height: 16, borderRadius: 2, backgroundColor: '#7C3AED' }} />
-            <Text style={{ fontSize: 13, fontWeight: '800', color: c.text, opacity: 0.65, letterSpacing: 1, textTransform: 'uppercase' }}>
+            <Text style={{ fontSize: 13, fontWeight: '800', ...mutedTextStyle(c, 0.65), letterSpacing: 1, textTransform: 'uppercase' }}>
               Per-User Overrides
             </Text>
           </View>
-          <Text style={{ fontSize: 12, color: c.text, opacity: 0.45, marginBottom: 10 }}>
+          <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.45), marginBottom: 10 }}>
             Look up an account to give it explicit access to a disabled feature, or block it
             individually while the feature stays on globally. Inherit removes any override.
           </Text>
@@ -315,7 +315,7 @@ export default function FeatureFlagsScreen() {
                   <Text style={{ fontSize: 14, fontWeight: '700', color: c.text }} numberOfLines={1}>
                     {targetUser.full_name}
                   </Text>
-                  <Text style={{ fontSize: 11, color: c.text, opacity: 0.5 }} numberOfLines={1}>
+                  <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.5) }} numberOfLines={1}>
                     {targetUser.email ?? targetUser.id}
                   </Text>
                 </View>

@@ -21,7 +21,7 @@ import {
   BookOpen, ChevronDown, ChevronUp, Clock, CloudOff, Edit2, Film, RefreshCw,
   Search, SortAsc, SortDesc, Trash2, X, Upload,
 } from 'lucide-react-native';
-import { neuColors, useLayout, neuFlatStyle, neuPressedStyle, safeBottom, zIndex } from '@/lib/neu';
+import { neuColors, useLayout, neuFlatStyle, neuPressedStyle, safeBottom, zIndex, mutedTextStyle } from '@/lib/neu';
 import { PageHeader } from '@/components/PageHeader';
 import { NeuCard } from '@/components/NeuCard';
 import { useToast } from '@/components/Toast';
@@ -369,12 +369,12 @@ export default function VideoLibraryScreen() {
                   {item.status.charAt(0).toUpperCase() + item.status.slice(1)}
                 </Text>
               </View>
-              <Text style={{ fontSize: 11, color: c.text, opacity: 0.45 }}>{formatBytes(item.file_size_bytes)}</Text>
-              <Text style={{ fontSize: 11, color: c.text, opacity: 0.35 }}>{formatDate(item.created_at)}</Text>
+              <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.45) }}>{formatBytes(item.file_size_bytes)}</Text>
+              <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.35) }}>{formatDate(item.created_at)}</Text>
             </View>
 
             {/* VdoCipher ID */}
-            <Text style={{ fontSize: 10, color: c.text, opacity: 0.3 }} numberOfLines={1}>
+            <Text style={{ fontSize: 10, ...mutedTextStyle(c, 0.3) }} numberOfLines={1}>
               ID: {item.provider_video_id}
             </Text>
           </View>
@@ -407,7 +407,7 @@ export default function VideoLibraryScreen() {
             onPress={() => { setRenameAsset(item); setRenameTitle(item.title); }}
             style={{ flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 10, borderLeftWidth: 1, borderLeftColor: `${c.text}10` }}>
             <Edit2 size={13} color={c.text} opacity={0.5} />
-            <Text style={{ fontSize: 12, fontWeight: '700', color: c.text, opacity: 0.6 }}>Rename</Text>
+            <Text style={{ fontSize: 12, fontWeight: '700', ...mutedTextStyle(c, 0.6) }}>Rename</Text>
           </Pressable>
 
           {/* Delete */}
@@ -423,12 +423,12 @@ export default function VideoLibraryScreen() {
         {isExpanded && (
           <View style={{ borderTopWidth: 1, borderTopColor: `${c.text}10`, padding: 12, gap: 8 }}>
             {usages.length === 0 ? (
-              <Text style={{ fontSize: 12, color: c.text, opacity: 0.4, textAlign: 'center' }}>
+              <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.4), textAlign: 'center' }}>
                 Not used in any lesson yet.
               </Text>
             ) : (
               <>
-                <Text style={{ fontSize: 11, fontWeight: '700', color: c.text, opacity: 0.5, textTransform: 'uppercase', letterSpacing: 0.5 }}>
+                <Text style={{ fontSize: 11, fontWeight: '700', ...mutedTextStyle(c, 0.5), textTransform: 'uppercase', letterSpacing: 0.5 }}>
                   Used In
                 </Text>
                 {usages.map((u) => (
@@ -436,7 +436,7 @@ export default function VideoLibraryScreen() {
                     <Film size={12} color={c.primary} />
                     <View style={{ flex: 1 }}>
                       <Text style={{ fontSize: 12, fontWeight: '700', color: c.text }} numberOfLines={1}>{u.lesson_title}</Text>
-                      <Text style={{ fontSize: 11, color: c.text, opacity: 0.45 }} numberOfLines={1}>{u.course_title}</Text>
+                      <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.45) }} numberOfLines={1}>{u.course_title}</Text>
                     </View>
                   </View>
                 ))}
@@ -469,7 +469,7 @@ export default function VideoLibraryScreen() {
             <View style={{ flexDirection: 'row', gap: 12 }}>
               <Pressable onPress={() => setRenameAsset(null)}
                 style={[neuFlatStyle(isDark), { flex: 1, padding: 13, borderRadius: 12, alignItems: 'center' }]}>
-                <Text style={{ fontSize: 14, fontWeight: '700', color: c.text, opacity: 0.6 }}>Cancel</Text>
+                <Text style={{ fontSize: 14, fontWeight: '700', ...mutedTextStyle(c, 0.6) }}>Cancel</Text>
               </Pressable>
               <Pressable onPress={handleRename} disabled={renameSaving}
                 style={{ flex: 1, padding: 13, borderRadius: 12, alignItems: 'center', backgroundColor: c.primary, flexDirection: 'row', justifyContent: 'center', gap: 8 }}>
@@ -491,7 +491,7 @@ export default function VideoLibraryScreen() {
               </View>
               <View style={{ flex: 1 }}>
                 <Text style={{ fontSize: 16, fontWeight: '800', color: '#DC2626' }}>Delete Video Permanently?</Text>
-                <Text style={{ fontSize: 12, color: c.text, opacity: 0.55, marginTop: 2 }}>
+                <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.55), marginTop: 2 }}>
                   Used in {deleteConfirm?.usages.length ?? 0} {(deleteConfirm?.usages.length ?? 0) === 1 ? 'lesson' : 'lessons'}.
                 </Text>
               </View>
@@ -505,18 +505,18 @@ export default function VideoLibraryScreen() {
                   <Film size={12} color={c.primary} />
                   <View style={{ flex: 1 }}>
                     <Text style={{ fontSize: 12, fontWeight: '700', color: c.text }} numberOfLines={1}>{u.lesson_title}</Text>
-                    <Text style={{ fontSize: 11, color: c.text, opacity: 0.45 }} numberOfLines={1}>{u.course_title}</Text>
+                    <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.45) }} numberOfLines={1}>{u.course_title}</Text>
                   </View>
                 </View>
               ))}
               {(deleteConfirm?.usages.length ?? 0) === 0 && (
-                <Text style={{ fontSize: 12, color: c.text, opacity: 0.5, textAlign: 'center', padding: 10 }}>Not used in any lesson.</Text>
+                <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.5), textAlign: 'center', padding: 10 }}>Not used in any lesson.</Text>
               )}
             </ScrollView>
             <View style={{ flexDirection: 'row', gap: 12 }}>
               <Pressable onPress={() => setDeleteConfirm(null)} disabled={deleteSaving}
                 style={[neuFlatStyle(isDark), { flex: 1, padding: 13, borderRadius: 14, alignItems: 'center' }]}>
-                <Text style={{ fontSize: 14, fontWeight: '700', color: c.text, opacity: 0.65 }}>Keep Video</Text>
+                <Text style={{ fontSize: 14, fontWeight: '700', ...mutedTextStyle(c, 0.65) }}>Keep Video</Text>
               </Pressable>
               <Pressable onPress={confirmDelete} disabled={deleteSaving}
                 style={{ flex: 1, padding: 13, borderRadius: 14, alignItems: 'center', justifyContent: 'center', backgroundColor: '#DC2626', flexDirection: 'row', gap: 8 }}>
@@ -622,7 +622,7 @@ export default function VideoLibraryScreen() {
 
       {!syncing && syncSummary && (
         <View style={{ marginHorizontal: 16, marginBottom: 10, padding: 12, borderRadius: 14, backgroundColor: `${c.primary}0D` }}>
-          <Text style={{ fontSize: 12, color: c.text, opacity: 0.55 }}>{syncSummary}</Text>
+          <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.55) }}>{syncSummary}</Text>
         </View>
       )}
 
@@ -714,7 +714,7 @@ export default function VideoLibraryScreen() {
       {loading ? (
         <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12 }}>
           <ActivityIndicator color={c.primary} size="large" />
-          <Text style={{ fontSize: 13, color: c.text, opacity: 0.45 }}>Loading your library…</Text>
+          <Text style={{ fontSize: 13, ...mutedTextStyle(c, 0.45) }}>Loading your library…</Text>
         </View>
       ) : (
         <FlatList
@@ -731,7 +731,7 @@ export default function VideoLibraryScreen() {
               <Text style={{ fontSize: 17, fontWeight: '700', color: c.text }}>
                 {search ? 'No videos found' : 'Your library is empty'}
               </Text>
-              <Text style={{ fontSize: 13, color: c.text, opacity: 0.45, textAlign: 'center', lineHeight: 19, maxWidth: 280 }}>
+              <Text style={{ fontSize: 13, ...mutedTextStyle(c, 0.45), textAlign: 'center', lineHeight: 19, maxWidth: 280 }}>
                 {search ? 'Try a different search term.' : 'Videos you upload to lessons will appear here and can be reused across any course.'}
               </Text>
             </View>
