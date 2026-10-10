@@ -9,9 +9,7 @@
  */
 import { useCallback, useState } from 'react';
 import {
-  View, Text, ScrollView, TextInput, ActivityIndicator,
-  useColorScheme, Pressable,
-} from 'react-native';
+  View, Text, TextInput, ActivityIndicator, useColorScheme, Pressable } from 'react-native';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { User, Search, AlertTriangle, LogIn } from 'lucide-react-native';
 import { PageHeader } from '@/components/PageHeader';
@@ -24,6 +22,7 @@ import { neuColors, useLayout, safeBottom } from '@/lib/neu';
 import { friendlyError } from '@/lib/validation';
 import { useDebounce } from '@/lib/useDebounce';
 import { useImpersonationStore } from '@/lib/store';
+import { KeyboardAwareScrollView } from '@/components/KeyboardAwareScrollView';
 
 const ROLE_COLORS: Record<string, string> = {
   student: '#7C3AED', doctor: '#16A34A',
@@ -109,7 +108,7 @@ export default function ImpersonationScreen() {
   };
 
   return (
-    <ScrollView style={{ flex: 1, backgroundColor: c.base }} contentContainerStyle={{ paddingBottom: safeBottom(layout.insets.bottom) }}>
+    <KeyboardAwareScrollView style={{ flex: 1, backgroundColor: c.base }} contentContainerStyle={{ paddingBottom: safeBottom(layout.insets.bottom) }}>
       <PageHeader title="Impersonation" subtitle="Log in as another user" accentColor="#D97706" showBack backFallback="/sa-platform" />
 
       <View style={{ paddingHorizontal: layout.screenPx }}>
@@ -229,6 +228,6 @@ export default function ImpersonationScreen() {
           ))}
         </View>
       </View>
-    </ScrollView>
+    </KeyboardAwareScrollView>
   );
 }

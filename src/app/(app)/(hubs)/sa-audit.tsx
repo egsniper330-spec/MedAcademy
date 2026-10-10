@@ -508,7 +508,7 @@ export default function SAaudit() {
       <View style={{ paddingHorizontal: layout.screenPx, paddingTop: 8, paddingBottom: 8 }}>
 
         {/* ── Category chips ─────────────────────────────────────────── */}
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 10 }}>
+        <ScrollView automaticallyAdjustKeyboardInsets={process.env.EXPO_OS === 'ios'} horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 10 }}>
           <View style={{ flexDirection: 'row', gap: 7, paddingRight: 8 }}>
             {CATEGORIES.map(cat => {
               const active = category === cat.key;
@@ -536,7 +536,7 @@ export default function SAaudit() {
         </ScrollView>
 
         {/* ── Time quick-filters ─────────────────────────────────────── */}
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 10 }}>
+        <ScrollView automaticallyAdjustKeyboardInsets={process.env.EXPO_OS === 'ios'} horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 10 }}>
           <View style={{ flexDirection: 'row', gap: 7, paddingRight: 8 }}>
             {TIME_FILTERS.map(tf => {
               const active = timeFilter === tf.key;

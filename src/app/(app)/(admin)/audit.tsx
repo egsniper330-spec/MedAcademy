@@ -380,7 +380,7 @@ export default function AdminAudit() {
         </View>
 
         {/* Category chips */}
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 10 }}>
+        <ScrollView automaticallyAdjustKeyboardInsets={process.env.EXPO_OS === 'ios'} horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 10 }}>
           <View style={{ flexDirection: 'row', gap: 7, paddingRight: 8 }}>
             {CATEGORIES.map(cat => {
               const active = category === cat.key;
@@ -401,7 +401,7 @@ export default function AdminAudit() {
         </ScrollView>
 
         {/* Time filters */}
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 10 }}>
+        <ScrollView automaticallyAdjustKeyboardInsets={process.env.EXPO_OS === 'ios'} horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 10 }}>
           <View style={{ flexDirection: 'row', gap: 7, paddingRight: 8 }}>
             {TIME_FILTERS.map(tf => {
               const active = timeFilter === tf.key;

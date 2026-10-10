@@ -12,9 +12,7 @@
  */
 import { useCallback, useMemo, useState } from 'react';
 import {
-  View, Text, ScrollView, Switch, ActivityIndicator,
-  RefreshControl, useColorScheme, TextInput, Pressable,
-} from 'react-native';
+  View, Text, Switch, ActivityIndicator, RefreshControl, useColorScheme, TextInput, Pressable } from 'react-native';
 import { useFocusEffect, useRouter } from 'expo-router';
 import {
   Flag, RefreshCw, Search, ChevronDown, ChevronUp, User as UserIcon, Users,
@@ -32,6 +30,7 @@ import { LoadingState, ErrorState } from '@/components/ScreenState';
 import { EmptyState } from '@/components/EmptyState';
 import { neuColors, useLayout, safeBottom } from '@/lib/neu';
 import { friendlyError } from '@/lib/validation';
+import { KeyboardAwareScrollView } from '@/components/KeyboardAwareScrollView';
 
 type FlagRow = {
   key: string;
@@ -187,7 +186,7 @@ export default function FeatureFlagsScreen() {
   const totalOverrides = flags.reduce((n, f) => n + (f.overrides ?? 0), 0);
 
   return (
-    <ScrollView style={{ flex: 1, backgroundColor: c.base }}
+    <KeyboardAwareScrollView style={{ flex: 1, backgroundColor: c.base }}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />} contentContainerStyle={{ paddingBottom: safeBottom(layout.insets.bottom) }}>
       <PageHeader
         title="Feature Flags"
@@ -375,6 +374,6 @@ export default function FeatureFlagsScreen() {
 
         <View style={{ height: 30 }} />
       </View>
-    </ScrollView>
+    </KeyboardAwareScrollView>
   );
 }

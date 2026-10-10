@@ -43,12 +43,12 @@
  */
 import React from 'react';
 import {
-  View, ScrollView, KeyboardAvoidingView,
-  StyleSheet, useColorScheme,
+  View, StyleSheet, useColorScheme,
   type ViewStyle, type ScrollViewProps,
 } from 'react-native';
 import { neuColors } from '@/lib/neu';
 import { useLayout, spacing } from '@/lib/ds';
+import { KeyboardAwareScrollView } from '@/components/KeyboardAwareScrollView';
 
 export interface AdaptiveScreenProps {
   children: React.ReactNode;
@@ -118,15 +118,19 @@ export function AdaptiveScreen({
   ];
 
   if (scroll) {
+    //  KEYBOARD FIX (was a DOUBLE INSET): this used to be
+    //    <KeyboardAvoidingView behavior={ios ? 'padding' : 'height'}>
+    //      <ScrollView contentInsetAdjustmentBehavior="automatic">
+    //  On iOS the platform ALREADY adjusts the scroll view's insets for the
+    //  keyboard, so `padding` pushed the subtree up a second time (layout jump /
+    //  clipped controls). On Android the window is already `adjustResize`, so
+    //  `height` shrank the container twice. KeyboardAwareScrollView applies the
+    //  ONE correct native mechanism per platform instead (see its docs), so
+    //  every screen built on AdaptiveScreen inherits the fix.
     return (
-      <KeyboardAvoidingView
-        style={[styles.root, { backgroundColor: bg }]}
-        behavior={process.env.EXPO_OS === 'ios' ? 'padding' : 'height'}
-  keyboardVerticalOffset={layout.headerTop}
-      >
-        <ScrollView
+      <View style={[styles.root, { backgroundColor: bg }]}>
+        <KeyboardAwareScrollView
           showsVerticalScrollIndicator={false}
-          keyboardShouldPersistTaps="handled"
           {...scrollProps}
           contentContainerStyle={[
             ...contentStyle,
@@ -135,8 +139,8 @@ export function AdaptiveScreen({
           style={[styles.root, style]}
         >
           {children}
-        </ScrollView>
-      </KeyboardAvoidingView>
+        </KeyboardAwareScrollView>
+      </View>
     );
   }
 

@@ -1901,11 +1901,21 @@ export async function uploadLessonMaterial(
  *  Accepts either a raw storage_path or a legacy full URL — the Edge Function
  *  normalises it automatically.
  */
-export async function getMaterialSignedUrl(storagePathOrUrl: string): Promise<string> {
+export async function getMaterialSignedUrl(
+  storagePathOrUrl: string,
+  /**
+   * TRUE only for the student's Download action. The server refuses to mint a
+   * download link for a material the doctor marked `preview_only` (or with
+   * download disabled) while still allowing the same file to be VIEWED — so the
+   * per-material policy is enforced server-side, not just by hiding a button.
+   */
+  forDownload = false,
+): Promise<string> {
   const result = await invokeEdgeFunction<{ signed_url: string }>('get-signed-url', {
     bucket: 'lesson-materials',
     path:   storagePathOrUrl,
     expires_in: 3600,
+    download: forDownload,
   });
   return result.signed_url;
 }
@@ -2144,21 +2154,16 @@ export async function getDoctorStudentEnrollments(doctorId: string) {
  *  (the UPDATE can only match enrollments whose course belongs to the
  *  calling doctor), so cross-doctor suspension is impossible.
  */
+/** Suspend a course subscription. Delegates to the canonical writer — there is
+ *  ONE enrollment-suspension path, so a future enforcement change cannot land
+ *  on one alias and miss the other. */
 export async function suspendCourseSubscription(enrollmentId: string) {
-  const { error } = await backendClient
-    .from('enrollments')
-    .update({ status: 'suspended' })
-    .eq('id', enrollmentId);
-  if (error) throw error;
+  return suspendStudentCourseAccess(enrollmentId);
 }
 
-/** Resume a suspended course subscription. Same no-updated_at rule as suspend. */
+/** Resume a suspended course subscription (canonical writer; see suspend alias). */
 export async function resumeCourseSubscription(enrollmentId: string) {
-  const { error } = await backendClient
-    .from('enrollments')
-    .update({ status: 'active' })
-    .eq('id', enrollmentId);
-  if (error) throw error;
+  return restoreStudentCourseAccess(enrollmentId);
 }
 
 /** Remove a student from a course via SECURITY DEFINER RPC.
@@ -2320,6 +2325,13 @@ export async function getMySubscriptions(studentId: string) {
     .from('enrollments')
     .select('*, course:courses!enrollments_course_id_fkey(*, doctor:profiles!courses_doctor_id_fkey(id,full_name), category:categories(id,name))')
     .eq('student_id', studentId)
+    //  SUSPENSION: a course the doctor suspended must disappear from the
+    //  student's ACTIVE list. The backend enforces the same rule on its own
+    //  reads (DataController enrollment scope) and on every protected access
+    //  path (course detail, lessons, VdoCipher OTP, offline download), so this
+    //  is the UI half of one server-authoritative policy — never the only
+    //  enforcement. Enrollment history is preserved; unsuspending restores it.
+    .neq('status', 'suspended')
     .limit(200);
   if (error) throw error;
   return data ?? [];
@@ -3071,10 +3083,43 @@ export async function getSupportSettings(): Promise<SupportSettings> {
  * Save a single support contact entry (Super Admin only).
  * Uses the admin endpoint so validation + audit logging happen server-side.
  */
+/**
+ * Normalize the admin GET/PUT `settings` map into the UI's SupportSettings
+ * shape. The admin endpoint serializes `display_order` (snake_case) while the
+ * UI uses `displayOrder`; the generic Data API read path returns the row shape.
+ * One normalizer keeps the two paths from drifting.
+ */
+function normalizeAdminSupportSettings(raw: unknown): SupportSettings {
+  const out: SupportSettings = {};
+  if (!raw || typeof raw !== 'object') return out;
+  const map = raw as Record<string, unknown>;
+  for (const key of SUPPORT_PLATFORM_ORDER) {
+    const row = map[key];
+    if (!row || typeof row !== 'object') continue;
+    const r = row as Record<string, unknown>;
+    out[key] = {
+      value:       typeof r.value === 'string' ? r.value : '',
+      label:       typeof r.label === 'string' ? r.label : '',
+      enabled:     r.enabled === true,
+      displayOrder: r.display_order != null ? Number(r.display_order) : undefined,
+    };
+  }
+  return out;
+}
+
+/**
+ * Save a single support contact entry (Super Admin only).
+ * Uses the admin endpoint so validation + audit logging happen server-side.
+ *
+ * Returns the CANONICAL settings the server echoed back (the endpoint answers
+ * with the freshly-persisted state) plus the normalized entry for this platform,
+ * so the caller can VERIFY the write is readable back before reporting success
+ * instead of assuming a 2xx means the value is visible to the block screen.
+ */
 export async function upsertSupportSetting(
   key: SupportPlatformKey,
   entry: Partial<SupportContactEntry>,
-) {
+): Promise<{ settings: SupportSettings; saved: SupportContactEntry | null }> {
   // Use the dedicated admin endpoint (validated, audited) rather than the
   // generic DataController (which now blocks writes to support_settings).
   const { data, error } = await apiFetch<{ settings: Record<string, unknown> }>('/admin/support-settings', {
@@ -3091,7 +3136,8 @@ export async function upsertSupportSetting(
     },
   });
   if (error) throw error;
-  return data;
+  const settings = normalizeAdminSupportSettings(data?.settings);
+  return { settings, saved: settings[key] ?? null };
 }
 
 /**

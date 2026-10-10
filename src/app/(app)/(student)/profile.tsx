@@ -205,7 +205,7 @@ function PickerRow({
               </Pressable>
             </View>
             {/* Item list — scrollable; flex:1 fills inside the capped sheet */}
-            <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+            <ScrollView automaticallyAdjustKeyboardInsets={process.env.EXPO_OS === 'ios'} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
               {items.map(item => (
                 <Pressable
                   key={item.id}
@@ -509,7 +509,7 @@ export default function StudentProfile() {
   ];
 
   return (
-    <ScrollView
+    <ScrollView automaticallyAdjustKeyboardInsets={process.env.EXPO_OS === 'ios'}
       style={{ flex: 1, backgroundColor: c.base }}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />}
     >

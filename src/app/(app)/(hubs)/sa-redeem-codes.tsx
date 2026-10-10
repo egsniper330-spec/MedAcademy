@@ -195,7 +195,7 @@ export default function RedeemCodesScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: c.base }}>
-      <ScrollView
+      <ScrollView automaticallyAdjustKeyboardInsets={process.env.EXPO_OS === 'ios'}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />} contentContainerStyle={{ paddingBottom: safeBottom(layout.insets.bottom) }}
       >
         <View style={{ padding: layout.screenPx, paddingBottom: 40 }}>
@@ -221,7 +221,7 @@ export default function RedeemCodesScreen() {
           </View>
 
           {/* Status filter chips */}
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 14 }}>
+          <ScrollView automaticallyAdjustKeyboardInsets={process.env.EXPO_OS === 'ios'} horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 14 }}>
             {STATUS_FILTERS.map(s => (
               <Pressable key={s} onPress={() => setStatusFilter(s)} style={chip(statusFilter === s)}>
                 <Text style={{ fontSize: 11, fontWeight: '600', color: statusFilter === s ? '#fff' : c.text }}>
@@ -397,7 +397,7 @@ export default function RedeemCodesScreen() {
               placeholder="Search doctors..." placeholderTextColor={`${c.text}55`}
               style={{ ...inp, marginBottom: 8 }}
             />
-            <ScrollView style={{ maxHeight: 180, marginBottom: 14 }} nestedScrollEnabled>
+            <ScrollView automaticallyAdjustKeyboardInsets={process.env.EXPO_OS === 'ios'} style={{ maxHeight: 180, marginBottom: 14 }} nestedScrollEnabled>
               {filteredDoctors.map(d => (
                 <Pressable
                   key={d.id} onPress={() => setSelectedDoctor(d)}
@@ -450,7 +450,7 @@ export default function RedeemCodesScreen() {
                 </Text>
               )}
             </NeuCard>
-            <ScrollView style={{ maxHeight: 320, marginBottom: 8 }} nestedScrollEnabled>
+            <ScrollView automaticallyAdjustKeyboardInsets={process.env.EXPO_OS === 'ios'} style={{ maxHeight: 320, marginBottom: 8 }} nestedScrollEnabled>
               {createdCodes.map((cd, idx) => (
                 <View
                   key={cd.id ?? idx}

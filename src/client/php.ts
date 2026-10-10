@@ -104,11 +104,22 @@ const NO_AUTO_REFRESH_PREFIXES = [
 //   • /security/events, /security/violations — the violation report is itself
 //                           security telemetry the backend audit needs.
 //   • /auth/logout        — a locked user must always be able to sign out.
+//   • /support/contact    — PUBLIC, read-only, returns ONLY the enabled support
+//                           contact methods. This is the endpoint the BLOCKED
+//                           screen itself calls to tell the user how to reach
+//                           support; it was missing from this list, so the very
+//                           lock that mounted the block screen also refused the
+//                           fetch, and the screen fell back to "Support contact
+//                           is not configured" even when contacts were saved.
+//                           Exempting it exposes nothing protected (no auth, no
+//                           user data, no secrets) and is required for the
+//                           block screen to be actionable.
 // NOTABLY ABSENT: /auth/refresh. Token rotation is protected activity and is
 // deliberately frozen while locked (see refreshAccessToken's guard).
 const LOCK_EXEMPT_PREFIXES = [
   '/security/policies', '/security/config', '/security/events', '/security/violations',
   '/auth/logout',
+  '/support/contact',
 ];
 
 function isLockExempt(path: string): boolean {

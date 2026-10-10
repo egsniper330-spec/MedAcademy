@@ -5,9 +5,7 @@
  */
 import { useCallback, useState } from 'react';
 import {
-  View, Text, ScrollView, TextInput, ActivityIndicator,
-  RefreshControl, useColorScheme,
-} from 'react-native';
+  View, Text, TextInput, ActivityIndicator, RefreshControl, useColorScheme } from 'react-native';
 import { useFocusEffect } from 'expo-router';
 import { TrendingUp, Edit2, Check, Coins, RotateCcw, Clock, AlertTriangle } from 'lucide-react-native';
 import { PageHeader } from '@/components/PageHeader';
@@ -34,6 +32,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
+import { KeyboardAwareScrollView } from '@/components/KeyboardAwareScrollView';
 
 export default function RevenueDashboard() {
   const scheme = useColorScheme();
@@ -128,7 +127,7 @@ export default function RevenueDashboard() {
   };
 
   return (
-    <ScrollView style={{ flex: 1, backgroundColor: c.base }}
+    <KeyboardAwareScrollView style={{ flex: 1, backgroundColor: c.base }}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />} contentContainerStyle={{ paddingBottom: safeBottom(layout.insets.bottom) }}>
       {/* PageHeader owns horizontal padding; Pricing action via rightAction aligns
           to the trailing edge with proper spacing on every width. */}
@@ -310,6 +309,6 @@ export default function RevenueDashboard() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </ScrollView>
+    </KeyboardAwareScrollView>
   );
 }

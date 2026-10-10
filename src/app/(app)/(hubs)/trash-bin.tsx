@@ -4,9 +4,7 @@
  */
 import { useCallback, useState, useRef, useMemo, memo } from 'react';
 import {
-  View, Text, ScrollView, useColorScheme, Pressable,
-  RefreshControl, ActivityIndicator, TextInput, FlatList,
-} from 'react-native';
+  View, Text, useColorScheme, Pressable, RefreshControl, ActivityIndicator, TextInput, FlatList } from 'react-native';
 import { useFocusEffect, useRouter } from 'expo-router';
 import {
   Trash2, RotateCcw, X, Search, Settings, ArrowLeft,
@@ -27,6 +25,7 @@ import { useToast } from '@/components/Toast';
 import { neuColors, useLayout, neuFlatStyle, safeBottom } from '@/lib/neu';
 import { logAndParse } from '@/lib/parseError';
 import { exportCSV } from '@/lib/exportUtils';
+import { KeyboardAwareScrollView } from '@/components/KeyboardAwareScrollView';
 
 const PAGE_SIZE = 20;
 
@@ -473,7 +472,7 @@ export default function TrashBin() {
       )}
 
       {/* Role filter chips */}
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 12 }}>
+      <KeyboardAwareScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 12 }}>
         <View style={{ flexDirection: 'row', gap: 8 }}>
           {ROLE_FILTERS.map(f => {
             const active = roleFilter === f.value;
@@ -489,7 +488,7 @@ export default function TrashBin() {
             );
           })}
         </View>
-      </ScrollView>
+      </KeyboardAwareScrollView>
 
       {/* Search bar */}
       <NeuCard style={{ flexDirection: 'row', alignItems: 'center', gap: 10, padding: 12, marginBottom: 14, minWidth: 0 }}>

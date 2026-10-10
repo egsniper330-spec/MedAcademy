@@ -6,9 +6,7 @@
  */
 import { useCallback, useState } from 'react';
 import {
-  View, Text, ScrollView, useColorScheme, Pressable, TextInput,
-  Switch, ActivityIndicator,
-} from 'react-native';
+  View, Text, useColorScheme, Pressable, TextInput, Switch, ActivityIndicator } from 'react-native';
 import { useFocusEffect } from 'expo-router';
 import {
   Shield, Camera, Video, AlertTriangle, RotateCcw, Save,
@@ -19,6 +17,7 @@ import { NeuCard } from '@/components/NeuCard';
 import { NeuButton } from '@/components/NeuButton';
 import { neuColors, useLayout, neuFlatStyle, safeBottom } from '@/lib/neu';
 import { PageHeader } from '@/components/PageHeader';
+import { KeyboardAwareScrollView } from '@/components/KeyboardAwareScrollView';
 
 type CPAction = 'warn_only' | 'strike_system' | 'auto_logout' | 'auto_suspend';
 type StrikeAction = 'warning' | 'logout' | 'suspend' | 'ban';
@@ -156,7 +155,7 @@ export default function ContentProtectionPolicyScreen({ backTo }: { backTo?: str
   );
 
   return (
-    <ScrollView style={{ flex: 1, backgroundColor: c.base }}>
+    <KeyboardAwareScrollView style={{ flex: 1, backgroundColor: c.base }}>
       <PageHeader
         title="Content Protection"
         subtitle="Configure screenshot & recording policies"
@@ -312,6 +311,6 @@ export default function ContentProtectionPolicyScreen({ backTo }: { backTo?: str
           </View>
         </View>
       </View>
-    </ScrollView>
+    </KeyboardAwareScrollView>
   );
 }

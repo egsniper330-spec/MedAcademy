@@ -501,7 +501,7 @@ export default function AdminUsers() {
   );
   const dropList = (items: any[], selected: string, onSelect: (id: string) => void) => (
     <View style={{ backgroundColor: c.base, borderRadius: 12, marginBottom: 14, shadowColor: c.shadowDark, shadowOffset: { width: 2, height: 2 }, shadowOpacity: 0.5, shadowRadius: 5, maxHeight: 180, overflow: 'hidden' }}>
-      <ScrollView nestedScrollEnabled keyboardShouldPersistTaps="handled" contentContainerStyle={{ paddingBottom: safeBottom(layout.insets.bottom) }}>
+      <ScrollView automaticallyAdjustKeyboardInsets={process.env.EXPO_OS === 'ios'} nestedScrollEnabled keyboardShouldPersistTaps="handled" contentContainerStyle={{ paddingBottom: safeBottom(layout.insets.bottom) }}>
         {items.map(item => (
           <Pressable key={item.id} onPress={() => onSelect(item.id)} style={{ paddingHorizontal: 14, paddingVertical: 11, backgroundColor: selected === item.id ? `${c.primary}18` : 'transparent', borderBottomWidth: 0.5, borderBottomColor: `${c.text}12` }}>
             <Text style={{ fontSize: 14, color: selected === item.id ? c.primary : c.text, fontWeight: selected === item.id ? '700' : '400' }}>{item.name}</Text>
@@ -513,7 +513,7 @@ export default function AdminUsers() {
 
   return (
     <View style={{ flex: 1, backgroundColor: c.base }}>
-      <ScrollView
+      <ScrollView automaticallyAdjustKeyboardInsets={process.env.EXPO_OS === 'ios'}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />} contentContainerStyle={{ paddingBottom: safeBottom(layout.insets.bottom) }}>
           {/* PageHeader sits OUTSIDE the inner padding view so it can own its own horizontal padding */}
           <PageHeader
@@ -554,7 +554,7 @@ export default function AdminUsers() {
           <Text style={{ fontSize: 11, color: c.text, opacity: 0.4, marginBottom: 12, marginLeft: 2 }}>Search by name, email, +20 phone, or user ID — then tap Enter</Text>
 
           {/* Role Filters */}
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 8 }}>
+          <ScrollView automaticallyAdjustKeyboardInsets={process.env.EXPO_OS === 'ios'} horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 8 }}>
             <View style={{ flexDirection: 'row', gap: 8 }}>
               {ROLE_FILTERS.map(r => (
                 <Pressable key={r || 'all'} onPress={() => setRoleFilter(r)}
@@ -566,7 +566,7 @@ export default function AdminUsers() {
           </ScrollView>
 
           {/* Status Filters */}
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 16 }}>
+          <ScrollView automaticallyAdjustKeyboardInsets={process.env.EXPO_OS === 'ios'} horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 16 }}>
             <View style={{ flexDirection: 'row', gap: 8 }}>
               {STATUS_FILTERS.map(s => (
                 <Pressable key={s || 'all-status'} onPress={() => setStatusFilter(s)}
@@ -713,7 +713,7 @@ export default function AdminUsers() {
       {/* ── Login History ── */}
       <ResponsiveModal visible={loginHistoryModal} onClose={() => setLoginHistoryModal(false)} title="Login History" subtitle={selectedUser?.full_name}>
         {historyLoading ? <ActivityIndicator color={c.primary} style={{ marginVertical: 30 }} /> : (
-          <ScrollView style={{ maxHeight: 400 }} showsVerticalScrollIndicator={false}>
+          <ScrollView automaticallyAdjustKeyboardInsets={process.env.EXPO_OS === 'ios'} style={{ maxHeight: 400 }} showsVerticalScrollIndicator={false}>
             {loginHistory.length === 0 ? (
               <Text style={{ color: c.text, opacity: 0.4, textAlign: 'center', padding: 30 }}>No login history found.</Text>
             ) : loginHistory.map((h, i) => (

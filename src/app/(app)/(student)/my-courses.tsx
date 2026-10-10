@@ -1,6 +1,6 @@
 import { useCallback, useState } from 'react';
 import { PageHeader } from '@/components/PageHeader';
-import { View, Text, ScrollView, useColorScheme, RefreshControl } from 'react-native';
+import { View, Text, useColorScheme, RefreshControl } from 'react-native';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useProfileStore } from '@/lib/store';
 import { getMySubscriptions } from '@/lib/api';
@@ -9,6 +9,7 @@ import { CourseCard } from '@/components/CourseCard';
 import { neuColors, useLayout, safeBottom } from '@/lib/neu';
 import type { RelativePathString } from 'expo-router';
 import { NeuSearchBar } from '@/components/NeuInputRow';
+import { KeyboardAwareScrollView } from '@/components/KeyboardAwareScrollView';
 
 export default function MyCourses() {
   const scheme = useColorScheme();
@@ -41,7 +42,7 @@ export default function MyCourses() {
   );
 
   return (
-    <ScrollView
+    <KeyboardAwareScrollView
       style={{ flex: 1, backgroundColor: c.base }}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />} contentContainerStyle={{ paddingBottom: safeBottom(layout.insets.bottom) }}
     >
@@ -80,6 +81,6 @@ export default function MyCourses() {
           ))
         )}
       </View>
-    </ScrollView>
+    </KeyboardAwareScrollView>
   );
 }

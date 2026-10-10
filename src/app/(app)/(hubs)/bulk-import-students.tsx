@@ -5,10 +5,7 @@
  * Creates each student row-by-row, deducts credits where needed.
  */
 import React, { useState } from 'react';
-import {
-  View, Text, ScrollView, Pressable, ActivityIndicator,
-  TextInput, useColorScheme, Share,
-} from 'react-native';
+import { View, Text, Pressable, ActivityIndicator, TextInput, useColorScheme, Share } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Upload, Download, AlertCircle, CheckCircle, XCircle } from 'lucide-react-native';
 import * as DocumentPicker from 'expo-document-picker';
@@ -22,6 +19,7 @@ import { useProfileStore } from '@/lib/store';
 import { createStudentByDoctor, getCourses } from '@/lib/api';
 import { enrollStudentViaCredits } from '@/lib/creditService';
 import { friendlyError } from '@/lib/validation';
+import { KeyboardAwareScrollView } from '@/components/KeyboardAwareScrollView';
 
 // ── CSV parsing helpers ────────────────────────────────────────────────────
 function parseCsvLine(line: string): string[] {
@@ -204,7 +202,7 @@ Jane Smith,jane@example.com,,Cairo University,Medicine,Level 2,,none`;
 
   return (
     <View style={{ flex: 1, backgroundColor: c.base }}>
-      <ScrollView>
+      <KeyboardAwareScrollView>
         <PageHeader title="Bulk Import Students" subtitle="Upload CSV to create multiple students" />
 
       <View style={{ paddingHorizontal: layout.screenPx, gap: 16 }}>
@@ -334,7 +332,7 @@ Jane Smith,jane@example.com,,Cairo University,Medicine,Level 2,,none`;
           </>
         )}
       </View>
-      </ScrollView>
+      </KeyboardAwareScrollView>
     </View>
   );
 }

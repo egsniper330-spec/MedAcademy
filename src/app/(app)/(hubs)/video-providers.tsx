@@ -16,9 +16,7 @@
  */
 import { useCallback, useState } from 'react';
 import {
-  View, Text, ScrollView, Switch, ActivityIndicator,
-  RefreshControl, useColorScheme, TextInput, Pressable,
-} from 'react-native';
+  View, Text, Switch, ActivityIndicator, RefreshControl, useColorScheme, TextInput, Pressable } from 'react-native';
 import { useFocusEffect } from 'expo-router';
 import { Video, Users, Globe, Lock, AlertTriangle, Search, ChevronDown, ChevronUp } from 'lucide-react-native';
 import { PageHeader } from '@/components/PageHeader';
@@ -30,6 +28,7 @@ import {
   getTeacherProviderPermissionsById, setTeacherProviderOverride,
   type VideoProvider, type TeacherProviderPermission,
 } from '@/lib/api';
+import { KeyboardAwareScrollView } from '@/components/KeyboardAwareScrollView';
 
 interface DoctorRow {
   id: string;
@@ -321,7 +320,7 @@ export default function VideoProvidersScreen() {
   const allDisabled = providers.length > 0 && providers.every(p => !p.is_globally_enabled);
 
   return (
-    <ScrollView
+    <KeyboardAwareScrollView
       style={{ flex: 1, backgroundColor: c.base }}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />} contentContainerStyle={{ paddingBottom: safeBottom(layout.insets.bottom) }}
     >
@@ -415,7 +414,7 @@ export default function VideoProvidersScreen() {
 
         <View style={{ height: 40 }} />
       </View>
-    </ScrollView>
+    </KeyboardAwareScrollView>
   );
 }
 

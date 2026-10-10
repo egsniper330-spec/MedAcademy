@@ -78,16 +78,20 @@ console.log('── iOS fullscreen contract: ONE control, NO forced landscape, n
 for (const p of [ONLINE_ADAPTER, OFFLINE_PLAYER]) {
   const s = read(p);
 
-  // (1) Exactly ONE user-facing fullscreen ENTRY per platform.
-  // Android: the SDK's own control-bar button is HIDDEN by the bridge (it runs
-  // the SDK default fullscreen, which promotes the surface above the RN tree and
-  // buries the watermark), so the app renders the single entry — and it MUST be
-  // wired to the canonical in-place path. iOS: the SDK's own button stays the
-  // single entry, so the app must not render a second one there.
+  // (1) Exactly ONE user-facing fullscreen ENTRY — on BOTH platforms.
+  // The SDK's own control-bar button is HIDDEN by the bridge on Android
+  // (ReactVdoPlayerUIView.java) AND on iOS (RCTVdoPlayerUIView.swift): it runs
+  // the SDK's own fullscreen, which promotes the video surface above the React
+  // Native tree and buries the watermark overlay. The app-level control is
+  // therefore the single entry everywhere, wired to the canonical in-place path,
+  // and it must NOT be platform-gated (an iOS-gated control with the SDK button
+  // hidden would leave iOS with NO way into fullscreen).
   const enterControls = (s.match(/accessibilityLabel="Enter fullscreen"/g) || []).length;
   ok(enterControls === 1, `${p}: exactly ONE app-level enter-fullscreen control`);
-  ok(/!isFullscreen && Platform\.OS !== 'ios' && \([\s\S]{0,400}Enter fullscreen/.test(s),
-    `${p}: the app enter control is non-iOS only (iOS keeps the SDK button as its only entry when SDK controls suppressed)`);
+  ok(/\{!isFullscreen && \([\s\S]{0,400}accessibilityLabel="Enter fullscreen"/.test(s),
+    `${p}: the app enter control serves BOTH platforms (no iOS gate — the bridge hides the SDK button)`);
+  ok(!/!isFullscreen && Platform\.OS !== 'ios'/.test(s),
+    `${p}: no iOS-gated enter control (that was the two-controls split)`);
   ok(/onPress=\{\(\) => void enterFullscreen\(\)\}/.test(s),
     `${p}: the app enter control calls the canonical enterFullscreen() (gated, in-place)`);
   // Exactly ONE rendered Maximize2 element (the single enter control) plus its
@@ -309,6 +313,21 @@ console.log('── Server-side MOVING watermark: annotate restored, ONE waterma
   const annBody = svc.slice(svc.indexOf('function buildAnnotate'), svc.indexOf('function buildAnnotate') + 1600);
   ok(!/password|apiSecret|api_secret|\btoken\b|email/i.test(annBody), 'annotate payload: no password / secret / token / email');
   ok(/students are not watermarked|not watermarked|isPrivileged/.test(svc), 'annotate is staff-exempt (same policy as before)');
+
+  // ── Availability guard ──────────────────────────────────────────────────
+  // Whether the ACCOUNT may burn a watermark in is a dashboard/plan capability
+  // the code cannot observe. A refusal must never cost playback: the OTP is
+  // retried ONCE without `annotate`, and because the response then reports
+  // annotateApplied=false the app renders its own overlay — so the session is
+  // never silently unwatermarked, and `patch`ing a flag can never break video.
+  ok(/unset\(\$payload\['annotate'\]\)/.test(otpFn),
+    'otp(): retries WITHOUT annotate when the upstream refuses the annotation');
+  ok(/\$annotated\s*=\s*false;/.test(otpFn),
+    'otp(): the fallback reports annotateApplied=false (client overlay becomes the watermark)');
+  ok((otpFn.match(/->request\('POST'/g) || []).length === 2,
+    'otp(): exactly one retry — the watermark fallback can never loop');
+  ok(/if \(\$status >= 400 && \$annotated/.test(otpFn),
+    'otp(): the retry is issued only when the first attempt actually carried the annotation');
 }
 
 console.log('── Canonical client watermark intact in every player ──');
@@ -489,10 +508,28 @@ console.log('── Single fullscreen entry: the SDK\'s own fullscreen controls 
   } catch (e) {
     ok(false, `patch-package parser rejects the patch: ${e.message}`);
   }
-  // Existing iOS portions must remain untouched by the Android hide work.
+  // Every bridge source the patch touches must stay in the patch.
   for (const ios of ['ios/AssetList.swift', 'ios/RCTVdoPlayerUIView.swift', 'ios/VdoDownload.swift']) {
     ok(bridgePatch.includes(ios), `patch: iOS portion intact — ${ios}`);
   }
+
+  // iOS — the SDK's OWN control-bar fullscreen button must be hidden, exactly
+  // as Android hides it. Verified from the shipped VdoFramework: the control bar
+  // (PlayerControlsView.nib) carries the outlet `fullScreenBtn` wired to the
+  // action `didTapFullScreenBtn:`. Without this the iOS player keeps a SECOND
+  // fullscreen entry whose own presentation buries the watermark overlay.
+  ok(/hideSdkFullscreenControls/.test(bridgePatch),
+    'patch: iOS hides the SDK control-bar fullscreen button (hideSdkFullscreenControls)');
+  ok(/didTapFullScreenBtn/.test(bridgePatch),
+    'patch: iOS identifies the button by its real SDK action (didTapFullScreenBtn:), not by position');
+  ok(/fullScreenBtn/.test(bridgePatch),
+    'patch: iOS also matches the nib outlet name (fullScreenBtn)');
+  ok(/as\? UIButton/.test(bridgePatch),
+    'patch: iOS only ever hides a UIButton (never a container that would take the whole bar)');
+  ok(/\+    override func layoutSubviews\(\) \{[\s\S]{0,700}\+        self\.hideSdkFullscreenControls\(\)/.test(bridgePatch),
+    'patch: iOS re-applies the hide on every layout pass (SDK rebuilds its bar during init)');
+  ok(/playerReadyToPlay[\s\S]{0,600}hideSdkFullscreenControls/.test(bridgePatch),
+    'patch: iOS covers the post-init window with delayed re-applies');
 
   // (6) The app control is the SOLE fullscreen ownership path: no direct native
   // fullscreen command that would bypass the canonical (gated, in-place) entry.

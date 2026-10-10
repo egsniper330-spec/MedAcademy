@@ -438,7 +438,7 @@ export default function SACourses() {
 
   return (
     <View style={{ flex: 1, backgroundColor: c.base }}>
-      <ScrollView
+      <ScrollView automaticallyAdjustKeyboardInsets={process.env.EXPO_OS === 'ios'}
         style={{ flex: 1 }}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />}
       >
@@ -474,7 +474,7 @@ export default function SACourses() {
           </View>
 
           {/* ── Status filter tabs ───────────────────────────────────────── */}
-          <ScrollView
+          <ScrollView automaticallyAdjustKeyboardInsets={process.env.EXPO_OS === 'ios'}
             horizontal
             showsHorizontalScrollIndicator={false}
             style={{ marginBottom: 20 }}

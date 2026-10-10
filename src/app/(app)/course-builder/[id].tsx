@@ -48,6 +48,8 @@ import { useUploadQueueStore } from '@/lib/uploadQueueStore';
 import type { RelativePathString } from 'expo-router';
 import { usePermission } from '@/hooks/usePermission';
 import { PermissionRationaleModal } from '@/components/PermissionRationaleModal';
+import { useFeatureFlags } from '@/lib/featureFlags';
+import { FeatureUnavailableState } from '@/components/ScreenState';
 import { isFeatureEnabled } from '@/lib/featureFlags';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -144,6 +146,10 @@ export default function CourseBuilder() {
   const isNarrow = screenWidth < 480;
 
   const isNew = id === 'new';
+
+  //  Course-creation feature flag — the server gate is authoritative; this
+  //  only mirrors it so the creation route shows an honest unavailable state.
+  const { isEnabled } = useFeatureFlags();
 
   // ── UI state
   const [tab, setTab] = useState<Tab>('info');
@@ -699,6 +705,35 @@ export default function CourseBuilder() {
     </View>
   );
 
+  //  COURSE CREATION FEATURE FLAG — a NEW course cannot be created while the
+  //  flag is off (the server refuses every create entry point with
+  //  403 feature_disabled). Guard the creation route so a direct deep link to
+  //  /course-builder/new shows an honest unavailable state instead of a form
+  //  that would fail on first save. EDITING an existing course is unaffected.
+  if (isNew && !isEnabled('course_creation')) {
+    return (
+      <View style={{ flex: 1, backgroundColor: c.base }}>
+        <View style={{
+          paddingTop: layout.headerTop, paddingLeft: layout.headerLeft,
+          paddingRight: layout.headerRight, paddingBottom: 12,
+          flexDirection: 'row', alignItems: 'center', gap: 10,
+        }}>
+          <Pressable onPress={() => router.back()} hitSlop={8}
+            style={[neuFlatStyle(isDark), { width: 40, height: 40, borderRadius: 12, alignItems: 'center', justifyContent: 'center', flexShrink: 0 }]}>
+            <ArrowLeft size={20} color={c.text} opacity={0.6} />
+          </Pressable>
+          <Text style={{ fontSize: 16, fontWeight: '800', color: c.text }}>New Course</Text>
+        </View>
+        <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: layout.screenPx }}>
+          <FeatureUnavailableState
+            title="Course creation is unavailable"
+            description="An administrator has turned off course creation. Existing courses can still be opened and edited. This becomes available again as soon as it is re-enabled."
+          />
+        </View>
+      </View>
+    );
+  }
+
   return (
     <>
       <PermissionRationaleModal
@@ -708,7 +743,7 @@ export default function CourseBuilder() {
         onConfirm={confirmCoverPhotoRequest}
         onDismiss={() => setShowCoverPhotoRationale(false)}
       />
-    <KeyboardAvoidingView style={{ flex: 1, backgroundColor: c.base }} behavior={process.env.EXPO_OS === 'ios' ? 'padding' : 'height'}>
+    <KeyboardAvoidingView style={{ flex: 1, backgroundColor: c.base }} behavior={undefined} /* keyboard: native inset only */>
       {/* ── Header — spacing from headerTokens (EDGE_PAD=4, BREATHING=8) ── */}
       <View style={{ paddingTop: layout.headerTop, paddingLeft: layout.headerLeft, paddingRight: layout.headerRight, paddingBottom: 12, flexDirection: 'row', alignItems: 'center', gap: 10 }}>
         {/* Back */}
@@ -870,8 +905,30 @@ export default function CourseBuilder() {
           TAB: INFO
       ══════════════════════════════════════════════════════════════════════ */}
       {tab === 'info' && (
-        <ScrollView keyboardShouldPersistTaps="handled"
+        <ScrollView automaticallyAdjustKeyboardInsets={process.env.EXPO_OS === 'ios'} keyboardShouldPersistTaps="handled"
           contentContainerStyle={{ padding: layout.screenPx, gap: 16 }}>
+
+          {/* ── PUBLICATION STATE — leads the form ────────────────────────
+              This control used to sit at the VERY BOTTOM of the Info tab, where
+              doctors routinely overlooked it. It is the decision that gates
+              student visibility, so it now appears first. Same two values and
+              the same save payload — placement only. */}
+          <Field label="Course Status">
+            <View style={{ flexDirection: 'row', gap: 10 }}>
+              {(['draft', 'published'] as const).map(s => (
+                <Pressable key={s} onPress={() => setStatus(s)}
+                  style={[
+                    status === s ? neuPressedStyle(isDark) : neuFlatStyle(isDark),
+                    { flex: 1, paddingVertical: 12, borderRadius: 12, alignItems: 'center' },
+                  ]}>
+                  <Text style={{ fontSize: 14, fontWeight: '700', color: status === s ? c.primary : c.text, opacity: status === s ? 1 : 0.5, textTransform: 'capitalize' }}>{s}</Text>
+                </Pressable>
+              ))}
+            </View>
+            <Text style={{ fontSize: 11, color: c.text, opacity: 0.45, marginTop: 6 }}>
+              Draft keeps this course hidden from students. Published makes it visible in Explore and to enrolled students.
+            </Text>
+          </Field>
 
           {/* Title */}
           <Field label="Course Title *">
@@ -1048,20 +1105,6 @@ export default function CourseBuilder() {
             )}
           </View>
 
-          {/* Status toggle */}
-          <Field label="Course Status">
-            <View style={{ flexDirection: 'row', gap: 10 }}>
-              {(['draft', 'published'] as const).map(s => (
-                <Pressable key={s} onPress={() => setStatus(s)}
-                  style={[
-                    status === s ? neuPressedStyle(isDark) : neuFlatStyle(isDark),
-                    { flex: 1, paddingVertical: 12, borderRadius: 12, alignItems: 'center' },
-                  ]}>
-                  <Text style={{ fontSize: 14, fontWeight: '700', color: status === s ? c.primary : c.text, opacity: status === s ? 1 : 0.5, textTransform: 'capitalize' }}>{s}</Text>
-                </Pressable>
-              ))}
-            </View>
-          </Field>
         </ScrollView>
       )}
 
@@ -1405,7 +1448,7 @@ export default function CourseBuilder() {
           TAB: SETTINGS
       ══════════════════════════════════════════════════════════════════════ */}
       {tab === 'settings' && (
-        <ScrollView keyboardShouldPersistTaps="handled"
+        <ScrollView automaticallyAdjustKeyboardInsets={process.env.EXPO_OS === 'ios'} keyboardShouldPersistTaps="handled"
           contentContainerStyle={{ padding: layout.screenPx, gap: 16 }}>
           <Text style={{ fontSize: 16, fontWeight: '800', color: c.text, opacity: 0.7 }}>Learning & Access</Text>
 
@@ -1728,7 +1771,7 @@ function PickerRow({ value, options, placeholder, onChange, isDark, c }: {
       </Pressable>
       {open && (
         <NeuCard style={{ marginTop: 4, padding: 4, maxHeight: 200, overflow: 'hidden' }}>
-          <ScrollView nestedScrollEnabled keyboardShouldPersistTaps="handled">
+          <ScrollView automaticallyAdjustKeyboardInsets={process.env.EXPO_OS === 'ios'} nestedScrollEnabled keyboardShouldPersistTaps="handled">
             {options.map(opt => (
               <Pressable key={opt.value} onPress={() => { onChange(opt.value); setOpen(false); }}
                 style={{ padding: 12, borderRadius: 10, backgroundColor: value === opt.value ? `${c.primary}18` : 'transparent' }}>

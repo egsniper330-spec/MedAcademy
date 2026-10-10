@@ -354,16 +354,16 @@ export function OfflineVideoPlayer({ entry, shouldAllowPlayback, fullscreenVerdi
       {identity && (
         <NativeWatermarkOverlay watermarkId={identity.id} watermarkName={identity.name ?? undefined} />
       )}
-      {/* SINGLE FULLSCREEN CONTROL — on Android the SDK control bar's own
-          fullscreen button is HIDDEN by the RN bridge (MEDACADEMY PATCH in
-          ReactVdoPlayerUIView.java), because that button runs the SDK's default
-          fullscreen and promotes the video surface above the React Native tree,
-          burying this component's watermark overlay. The app therefore renders
-          the one entry below, on the canonical path (security gate re-validated
-          at entry → in-place expansion of the SAME instance). On iOS the SDK's
-          own button stays as the only entry (the former app-level duplicate was
-          removed — it created two competing fullscreen systems). */}
-      {!isFullscreen && Platform.OS !== 'ios' && (
+      {/* SINGLE FULLSCREEN CONTROL — on BOTH platforms the SDK control bar's own
+          fullscreen button is HIDDEN by the RN bridge (MEDACADEMY PATCH:
+          ReactVdoPlayerUIView.java on Android, RCTVdoPlayerUIView.swift on iOS),
+          because that button runs the SDK's own fullscreen and promotes the
+          video surface above the React Native tree, burying this component's
+          watermark overlay. The app therefore renders the one entry below, on the
+          canonical path (security gate re-validated at entry → in-place expansion
+          of the SAME instance). onEnterFullscreen/onExitFullscreen stay wired as
+          a fallback into that same state. */}
+      {!isFullscreen && (
         <Pressable
           onPress={() => void enterFullscreen()}
           accessibilityLabel="Enter fullscreen"

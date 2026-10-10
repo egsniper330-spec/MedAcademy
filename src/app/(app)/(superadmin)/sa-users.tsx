@@ -372,7 +372,7 @@ export default function SAUsers() {
 
   return (
     <View style={{ flex: 1, backgroundColor: c.base }}>
-      <ScrollView
+      <ScrollView automaticallyAdjustKeyboardInsets={process.env.EXPO_OS === 'ios'}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />} contentContainerStyle={{ paddingBottom: safeBottom(layout.insets.bottom) }}
       >
           {/* PageHeader sits OUTSIDE the inner padding view so it can own its own horizontal padding */}
@@ -416,7 +416,7 @@ export default function SAUsers() {
           )}
 
           {/* Role filter tabs */}
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 16 }}>
+          <ScrollView automaticallyAdjustKeyboardInsets={process.env.EXPO_OS === 'ios'} horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 16 }}>
             <View style={{ flexDirection: 'row', gap: 8, paddingRight: 8 }}>
               {ROLE_TABS.map(tab => {
                 const active = activeTab === tab.key;
@@ -677,7 +677,7 @@ export default function SAUsers() {
         subtitle={selectedUser?.full_name}
       >
         {historyLoading ? <ActivityIndicator color={c.primary} style={{ marginVertical: 30 }} /> : (
-          <ScrollView style={{ maxHeight: 400 }} showsVerticalScrollIndicator={false}>
+          <ScrollView automaticallyAdjustKeyboardInsets={process.env.EXPO_OS === 'ios'} style={{ maxHeight: 400 }} showsVerticalScrollIndicator={false}>
             {loginHistory.length === 0
               ? <Text style={{ color: c.text, opacity: 0.4, textAlign: 'center', padding: 30 }}>No login history found.</Text>
               : loginHistory.map((h, i) => (

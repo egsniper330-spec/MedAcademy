@@ -6,9 +6,7 @@
  */
 import { useCallback, useState } from 'react';
 import {
-  View, Text, ScrollView, useColorScheme, Pressable,
-  ActivityIndicator, TextInput, FlatList,
-} from 'react-native';
+  View, Text, useColorScheme, Pressable, ActivityIndicator, TextInput, FlatList } from 'react-native';
 import { useFocusEffect } from 'expo-router';
 import {
   ShieldOff, RotateCcw, UserCheck, AlertTriangle,
@@ -18,6 +16,7 @@ import { backendClient } from '@/client/backendClient';
 import { NeuCard } from '@/components/NeuCard';
 import { neuColors, useLayout, neuFlatStyle, safeBottom } from '@/lib/neu';
 import { PageHeader } from '@/components/PageHeader';
+import { KeyboardAwareScrollView } from '@/components/KeyboardAwareScrollView';
 
 interface Violation {
   id: string;
@@ -255,12 +254,12 @@ export default function ViolationManagementScreen() {
           />
         </View>
 
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
+        <KeyboardAwareScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
           <FilterBtn val="all"        label="All" />
           <FilterBtn val="suspended"  label="Suspended" />
           <FilterBtn val="screenshot" label="Screenshot" />
           <FilterBtn val="recording"  label="Recording" />
-        </ScrollView>
+        </KeyboardAwareScrollView>
       </View>
 
       {actionMsg !== '' && (

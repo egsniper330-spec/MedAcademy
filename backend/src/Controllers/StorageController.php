@@ -17,6 +17,18 @@ final class StorageController
     private const PUBLIC_BUCKETS = ['avatars', 'user-avatars', 'course-images', 'course-covers', 'lesson-thumbnails', 'video-thumbnails', 'app-assets'];
     private const PRIVATE_BUCKETS = ['lesson-pdfs', 'lesson-materials', 'video-chunks', 'video-uploads', 'temp-uploads', 'patch-uploads'];
 
+    /**
+     * Executable / script / server-side types that must never be stored as a
+     * lesson attachment (see assertUploadAllowed). Documents, archives, media
+     * and images are all allowed — this is a denylist, not an allowlist.
+     */
+    private const BLOCKED_UPLOAD_EXTENSIONS = [
+        'php', 'php3', 'php4', 'php5', 'php7', 'php8', 'phtml', 'phar', 'pht',
+        'cgi', 'pl', 'py', 'rb', 'sh', 'bash', 'zsh', 'bat', 'cmd', 'com', 'ps1', 'psm1',
+        'exe', 'msi', 'dll', 'so', 'dylib', 'jar', 'war', 'scr', 'vbs', 'vbe', 'wsf', 'hta',
+        'jsp', 'jspx', 'asp', 'aspx', 'ashx', 'htaccess', 'htpasswd', 'pem', 'key',
+    ];
+
     public function __construct(private readonly StorageService $storage = new StorageService())
     {
     }
@@ -188,8 +200,15 @@ final class StorageController
             throw new ApiException(400, 'path is required');
         }
 
+        // `download: true` is what the app sends when the student taps the
+        // Download action (as opposed to opening the material in the viewer).
+        // It lets a material the doctor marked `preview_only`, or one with
+        // download_enabled = false, still be VIEWED while its download is
+        // refused — server-side, not just by hiding a button.
+        $forDownload = filter_var($request->json()['download'] ?? false, FILTER_VALIDATE_BOOLEAN);
+
         $normalised = $this->normalisePath($path);
-        if (!$this->storage->canAccess($request->user['id'], $request->user['role'], $bucket, $normalised)) {
+        if (!$this->storage->canAccess($request->user['id'], $request->user['role'], $bucket, $normalised, $forDownload)) {
             throw new ApiException(403, 'Access denied');
         }
         return ['signed_url' => $this->storage->signedUrl($bucket, $normalised, $expiresIn)];
@@ -240,7 +259,18 @@ final class StorageController
             Response::error('File not found', 404);
         }
         $mime = mime_content_type($file) ?: 'application/octet-stream';
-        Response::raw((string) file_get_contents($file), 200, $mime);
+        // CONTENT DELIVERY HARDENING (documents): a lesson attachment is user-
+        // supplied content served from the API's own origin. Rendering it inline
+        // is what turns an uploaded .html/.svg into stored XSS against that
+        // origin. Document buckets are therefore ALWAYS delivered as an
+        // attachment with sniffing disabled; the app saves the bytes and hands
+        // them to the OS viewer, so nothing about in-app opening changes.
+        $headers = ['X-Content-Type-Options' => 'nosniff'];
+        if (in_array($bucket, ['lesson-materials', 'lesson-pdfs', 'temp-uploads', 'patch-uploads'], true)) {
+            $name = basename($path) !== '' ? basename($path) : 'download';
+            $headers['Content-Disposition'] = 'attachment; filename="' . rawurlencode($name) . '"';
+        }
+        Response::raw((string) file_get_contents($file), 200, $mime, $headers);
     }
 
     public function upload(Request $request): array
@@ -274,6 +304,16 @@ final class StorageController
             throw new ApiException(403, 'Not authorized to upload to this storage path');
         }
 
+        // CONTENT POLICY (server-side): the lesson-attachment buckets advertise
+        // "PDF, PPTX, DOCX, XLSX, ZIP, images, audio, and more — up to 100 MB
+        // each", and until now that was enforced ONLY by the picker in the app.
+        // Validate the size and the file type here so a crafted request cannot
+        // park an arbitrarily large blob or an executable/script in a bucket the
+        // app later serves back. Chunked VIDEO uploads (video-chunks /
+        // video-uploads / temp-uploads) are deliberately exempt from the size cap
+        // — they are assembled by the video pipeline, not delivered to students.
+        $this->assertUploadAllowed($bucket, $file, $dest);
+
         $public = in_array($bucket, self::PUBLIC_BUCKETS, true);
         $this->storage->putFile($bucket, $dest, (string) $file['tmp_name'], $public);
 
@@ -297,6 +337,46 @@ final class StorageController
         $public = in_array($bucket, self::PUBLIC_BUCKETS, true);
         $this->storage->delete($bucket, $path, $public);
         return ['success' => true];
+    }
+
+    /**
+     * Server-side content policy for the lesson-attachment buckets.
+     *
+     *  • SIZE — capped at LESSON_MATERIAL_MAX_BYTES (default 100 MB, the figure
+     *    the upload UI already advertises). A request bigger than this is
+     *    rejected before anything touches the filesystem.
+     *  • TYPE — a denylist of executable / script / server-side types that must
+     *    never be stored in a bucket the app serves back. The list is a denylist
+     *    (not an allowlist) so the documented "and more" of ordinary documents,
+     *    archives, media and images all keep working.
+     */
+    private function assertUploadAllowed(string $bucket, array $file, string $dest): void
+    {
+        if (!in_array($bucket, ['lesson-materials', 'lesson-pdfs'], true)) {
+            return;
+        }
+
+        $max = Config::int('LESSON_MATERIAL_MAX_BYTES', 100 * 1024 * 1024);
+        $size = (int) ($file['size'] ?? 0);
+        // "$file['size']" is what PHP actually received; when it is unavailable
+        // fall back to the temp file on disk so the cap cannot be bypassed.
+        if ($size <= 0 && isset($file['tmp_name']) && is_file((string) $file['tmp_name'])) {
+            $size = (int) filesize((string) $file['tmp_name']);
+        }
+        if ($size > $max) {
+            throw new ApiException(413, 'File is too large. Maximum size is ' . (int) round($max / 1048576) . ' MB.');
+        }
+
+        $ext = strtolower((string) pathinfo($dest, PATHINFO_EXTENSION));
+        if ($ext === '' && isset($file['name'])) {
+            $ext = strtolower((string) pathinfo((string) $file['name'], PATHINFO_EXTENSION));
+        }
+        if ($ext === '') {
+            return; // extension-less documents are harmless; size already checked
+        }
+        if (in_array($ext, self::BLOCKED_UPLOAD_EXTENSIONS, true)) {
+            throw new ApiException(415, '.' . $ext . ' files cannot be attached to a lesson.');
+        }
     }
 
     private function canWritePath(string $userId, string $role, string $bucket, string $path): bool

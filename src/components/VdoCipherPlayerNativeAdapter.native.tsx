@@ -206,15 +206,16 @@ export function VdoCipherPlayerNativeAdapter({
   // — same root cause as the Plyr fullscreen black frame).
   const win = useFullscreenWindowDims(isFullscreen);
 
-  // ── ONE fullscreen entry (Android) ────────────────────────────────────────
-  // The VdoCipher SDK's own control-bar fullscreen button is now HIDDEN by the
-  // RN bridge (see the MEDACADEMY PATCH in ReactVdoPlayerUIView.java): that
-  // button runs the SDK's default fullscreen, which promotes the video surface
-  // above the React Native tree and buries this component's watermark overlay.
-  // The app therefore renders the single fullscreen entry below, wired to the
-  // canonical path (security gate + in-place expansion of the SAME instance).
-  // iOS keeps the SDK's own control-bar button as its only entry (the app-level
-  // duplicate was removed there earlier), so each platform has exactly one.
+  // ── ONE fullscreen entry, on BOTH platforms ───────────────────────────────
+  // The VdoCipher SDK's own control-bar fullscreen button is HIDDEN by the RN
+  // bridge (see the MEDACADEMY PATCH in ReactVdoPlayerUIView.java for Android and
+  // RCTVdoPlayerUIView.swift for iOS): that button runs the SDK's own fullscreen,
+  // which promotes the video surface above the React Native tree and buries this
+  // component's watermark overlay. The app therefore renders the single
+  // fullscreen entry below, wired to the canonical path (security gate + in-place
+  // expansion of the SAME instance) with the watermark overlay inside it. The
+  // SDK's enter/exit events stay wired as a fallback into that SAME state, so no
+  // second, watermark-less fullscreen system can open on either platform.
 
   // Forward enter/exit to the host screen (contract: host may hide non-video
   // chrome; with the pinned-player layout this is cosmetic redundancy).
@@ -502,19 +503,28 @@ export function VdoCipherPlayerNativeAdapter({
         onEnterFullscreen={handleSdkEnterFullscreen}
         onExitFullscreen={handleSdkExitFullscreen}
       />
-      {/* Application watermark — Plyr-parity overlay (the ONLY client-side
-          watermark; the server-side annotate watermark was removed from the
-          OTP). Lives INSIDE the expanding container → visible and correctly
-          positioned in normal AND fullscreen (re-clamps on resize). */}
-      {/* THE fullscreen control (Android) — the ONLY user-facing fullscreen
-          action: the SDK's own control-bar button is hidden by the bridge, so
-          its surface-promoting default fullscreen can never run. This calls
-          the canonical path (security gate → setIsFullscreen → explicit
-          window-pixel expansion of the SAME VdoPlayerView — no Modal, no second
-          window, no surface reparenting) with the watermark overlay inside it.
-          Rendered AFTER the native player so it wins the touch order, and it
-          stays visible while inline (reliability over the SDK's auto-hide). */}
-      {!isFullscreen && Platform.OS !== 'ios' && (
+      {/* Application watermark — Plyr-parity overlay, rendered ONLY when the
+          OTP does NOT already carry VdoCipher's burned-in MOVING watermark
+          (`annotateApplied === false`). Two watermarks at once were the reported
+          duplicate, so exactly one is ever shown: the stream-burned mark when
+          the server could attach it, this overlay otherwise (accounts/providers
+          with no server-side annotation, and the offline player, whose license
+          OTP has no annotate contract). Lives INSIDE the expanding container →
+          visible and correctly positioned in normal AND fullscreen (re-clamps
+          on resize). */}
+      {/* THE fullscreen control — the ONLY user-facing fullscreen action on BOTH
+          platforms. The SDK's own control-bar button is hidden by the RN bridge
+          (Android: ReactVdoPlayerUIView.java hideSdkFullscreenControls; iOS:
+          RCTVdoPlayerUIView.swift hideSdkFullscreenControls — the iOS SDK's
+          control bar ships its own fullScreenBtn/didTapFullScreenBtn:), so its
+          surface-promoting default fullscreen can never run and can never bury
+          the watermark overlay. This calls the canonical path (security gate →
+          setIsFullscreen → explicit window-pixel expansion of the SAME
+          VdoPlayerView — no Modal, no second window, no surface reparenting)
+          with the watermark overlay inside it. Rendered AFTER the native player
+          so it wins the touch order, and it stays visible while inline
+          (reliability over the SDK's auto-hide). */}
+      {!isFullscreen && (
         <Pressable
           onPress={() => void enterFullscreen()}
           accessibilityLabel="Enter fullscreen"
@@ -558,31 +568,29 @@ export function VdoCipherPlayerNativeAdapter({
         />
       )}
 
-      {/* FULLSCREEN ENTRY — exactly one per platform (see the Android control
-          above):
-            • Android: the SDK's own control-bar button is HIDDEN by the RN
-              bridge (hideSdkFullscreenControls, shipped in the source-controlled
-              patch), because it runs the SDK's default fullscreen and promotes
-              the video surface above the React Native tree — which buries this
-              watermark. The app-level control above is the single entry.
-            • iOS: the SDK's own button remains the single entry (a previous
-              app-level duplicate created a SECOND fullscreen system — two
-              opposite buttons whose expansions raced the native presentation →
-              split UI). It fires onEnterFullscreen above, mapped into the ONE
-              app fullscreen state.
-          Exit paths below: the app back-arrow (both platforms) and, on iOS, the
-          SDK's exit control — all call the same exitFullscreen(). */}
+      {/* FULLSCREEN ENTRY — exactly ONE control, on BOTH platforms (the app-level
+          control above):
+            • Android AND iOS: the SDK's own control-bar button is HIDDEN by the
+              RN bridge (hideSdkFullscreenControls, shipped in the
+              source-controlled patch — ReactVdoPlayerUIView.java on Android,
+              RCTVdoPlayerUIView.swift on iOS), because it runs the SDK's own
+              fullscreen and promotes the video surface above the React Native
+              tree — which buries this watermark overlay. Play/pause, timeline,
+              drag-seek, ±10s, quality, speed and captions are untouched.
+            • onEnterFullscreen/onExitFullscreen stay wired as a belt-and-braces
+              path: if a future SDK build ever surfaces its own control again,
+              the tap still lands in the ONE app fullscreen state instead of
+              opening a second, watermark-less fullscreen system.
+          Exit paths: this app-level control, the lesson screen's back-arrow, and
+          the Android hardware back button — all call the same exitFullscreen(). */}
 
-      {/* EXIT-fullscreen control (Android) — the single app-level exit
+      {/* EXIT-fullscreen control (both platforms) — the single app-level exit
           affordance for the app's fullscreen path, safe-area aware so it never
           sits under the status area. Collapses the SAME instance back into the
           inline layout; playback continues uninterrupted (same player, same
           position, no recreation). The SDK's own exit control also fires
-          onExitFullscreen → exitFullscreen() above, but that path is surfaced
-          by the Android control bar (disabled by the bridge patch) so the only
-          reachable app-level exit affordance is this one.
-          Android only: on iOS the SDK's own fullscreen button remains the single
-          entry, and its exit control is the only app-visible exit affordance. */}
+          onExitFullscreen → exitFullscreen() above, but that path is surfaced by
+          the SDK control bar, whose fullscreen buttons the bridge patch hides. */}
       {isFullscreen && (
         <Pressable
           onPress={exitFullscreen}

@@ -160,13 +160,23 @@ final class VdoCipherService
                 throw new ApiException(403, 'This lesson is not available');
             }
             if (!$isPrivileged) {
-                $enrolled = $db->value(
-                    'SELECT COUNT(*) FROM enrollments WHERE student_id = ? AND course_id = ?',
+                //  SUSPENSION ENFORCEMENT: a SUSPENDED enrollment is not
+                //  access. Previously this counted rows without consulting
+                //  `status`, so a doctor's course suspension was written to the
+                //  DB but never read — the student kept receiving playback OTPs.
+                //  Read the status so the refusal is HONEST (suspended vs never
+                //  enrolled). The row is never deleted; resuming restores
+                //  access with progress intact.
+                $enrollmentStatus = $db->value(
+                    'SELECT status FROM enrollments WHERE student_id = ? AND course_id = ? LIMIT 1',
                     [$userId, $lesson['course_id']],
-                    0
+                    null
                 );
-                if (!$enrolled) {
+                if ($enrollmentStatus === null) {
                     throw new ApiException(403, 'Not enrolled in this course');
+                }
+                if ((string) $enrollmentStatus === 'suspended') {
+                    throw new ApiException(403, 'Your access to this course has been suspended by the instructor.');
                 }
                 // COURSE VISIBILITY GATE: enrollment alone is not access. If the
                 // parent course is not currently published, a student must not
@@ -216,6 +226,27 @@ final class VdoCipherService
         $res = $this->request('POST', '/videos/' . rawurlencode($videoId) . '/otp', $payload);
         $status = (int) $res['status'];
         $body = $res['body'];
+
+        // ── WATERMARK CAPABILITY FALLBACK (availability guard) ─────────────
+        // `annotate` is attached only when a safe identity exists, but whether
+        // the ACCOUNT is allowed to burn a watermark in is a dashboard/plan
+        // capability this code cannot observe. If the annotation is what the
+        // upstream refused, the student must still be able to play: retry ONCE
+        // WITHOUT it and let the client overlay take over (annotateApplied=false
+        // → the app renders its own watermark, so playback is never
+        // unwatermarked either way). Exactly one retry is issued, and only when
+        // the first attempt actually carried the annotation, so this can never
+        // loop; if the retry also fails the ORIGINAL upstream error is raised.
+        if ($status >= 400 && $annotated && isset($payload['annotate'])) {
+            unset($payload['annotate']);
+            $retry = $this->request('POST', '/videos/' . rawurlencode($videoId) . '/otp', $payload);
+            if ((int) $retry['status'] < 400) {
+                $res    = $retry;
+                $status = (int) $retry['status'];
+                $body   = $retry['body'];
+                $annotated = false;
+            }
+        }
 
         if ($status >= 400) {
             $errDetail = '';
@@ -310,13 +341,20 @@ final class VdoCipherService
                 throw new ApiException(403, 'This lesson is not available');
             }
             if (!$isPrivileged) {
-                $enrolled = $db->value(
-                    'SELECT COUNT(*) FROM enrollments WHERE student_id = ? AND course_id = ?',
+                //  SUSPENSION ENFORCEMENT (offline twin): no NEW download
+                //  authorization for a suspended enrollment — same rule as
+                //  otp(), no weaker path. Already-downloaded DRM media is never
+                //  touched here (this gate only refuses new licences).
+                $enrollmentStatus = $db->value(
+                    'SELECT status FROM enrollments WHERE student_id = ? AND course_id = ? LIMIT 1',
                     [$userId, $lesson['course_id']],
-                    0
+                    null
                 );
-                if (!$enrolled) {
+                if ($enrollmentStatus === null) {
                     throw new ApiException(403, 'Not enrolled in this course');
+                }
+                if ((string) $enrollmentStatus === 'suspended') {
+                    throw new ApiException(403, 'Your access to this course has been suspended by the instructor.');
                 }
                 // COURSE VISIBILITY GATE (offline twin): identical rule to
                 // otp() — an enrollment row alone is not access while the

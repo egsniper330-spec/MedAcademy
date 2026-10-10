@@ -51,8 +51,8 @@ export default function ForgotPassword() {
   };
 
   return (
-    <KeyboardAvoidingView behavior="padding" style={{ flex: 1, backgroundColor: c.base }}>
-      <ScrollView
+    <KeyboardAvoidingView behavior={undefined} /* keyboard: native inset only */ style={{ flex: 1, backgroundColor: c.base }}>
+      <ScrollView automaticallyAdjustKeyboardInsets={process.env.EXPO_OS === 'ios'}
         contentContainerStyle={{
           flexGrow: 1,
           padding: 24,

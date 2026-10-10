@@ -4,9 +4,7 @@
  */
 import { useCallback, useState } from 'react';
 import {
-  View, Text, ScrollView, Pressable, ActivityIndicator,
-  TextInput, useColorScheme, RefreshControl, Modal,
-} from 'react-native';
+  View, Text, Pressable, ActivityIndicator, TextInput, useColorScheme, RefreshControl, Modal } from 'react-native';
 import { useFocusEffect } from 'expo-router';
 import {
   Archive, BookOpen, Clock, RefreshCw, Search,
@@ -22,6 +20,7 @@ import { NeuButton } from '@/components/NeuButton';
 import { useToast } from '@/components/Toast';
 import { neuColors, useLayout, neuFlatStyle, neuPressedStyle, safeBottom } from '@/lib/neu';
 import { PageHeader } from '@/components/PageHeader';
+import { KeyboardAwareScrollView } from '@/components/KeyboardAwareScrollView';
 
 export default function ArchivedCoursesScreen() {
   const scheme = useColorScheme();
@@ -111,7 +110,7 @@ export default function ArchivedCoursesScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: c.base }}>
-      <ScrollView
+      <KeyboardAwareScrollView
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}>
 
         {/* Header */}
@@ -231,7 +230,7 @@ export default function ArchivedCoursesScreen() {
             ))
           )}
         </View>
-      </ScrollView>
+      </KeyboardAwareScrollView>
 
       {/* ── Restore Confirmation ── */}
       <Modal visible={!!showRestoreConfirm} transparent animationType="fade">

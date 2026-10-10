@@ -4,10 +4,7 @@
  */
 import { useCallback, useState, useMemo } from 'react';
 import {
-  View, Text, FlatList, TextInput, Pressable,
-  ActivityIndicator, RefreshControl, useColorScheme,
-  ScrollView,
-} from 'react-native';
+  View, Text, FlatList, TextInput, Pressable, ActivityIndicator, RefreshControl, useColorScheme } from 'react-native';
 import { useFocusEffect } from 'expo-router';
 import { PageHeader } from '@/components/PageHeader';
 import {
@@ -22,6 +19,7 @@ import { neuColors, useLayout, safeBottom } from '@/lib/neu';
 import { getDoctors, invokeEdgeFunction } from '@/lib/api';
 import { useDebounce } from '@/lib/useDebounce';
 import { getPublicEmail } from '@/lib/api';
+import { KeyboardAwareScrollView } from '@/components/KeyboardAwareScrollView';
 
 export default function BulkCreditsScreen() {
   const scheme = useColorScheme();
@@ -253,7 +251,7 @@ export default function BulkCreditsScreen() {
             <Text style={{ fontSize: 11, color: c.text, opacity: 0.5 }}>Failed</Text>
           </View>
         </NeuCard>
-        <ScrollView style={{ maxHeight: 300 }}>
+        <KeyboardAwareScrollView style={{ maxHeight: 300 }}>
           {results.map((r, i) => {
             const doc = doctors.find(d => d.id === r.doctor_id);
             return (
@@ -269,7 +267,7 @@ export default function BulkCreditsScreen() {
               </View>
             );
           })}
-        </ScrollView>
+        </KeyboardAwareScrollView>
         <NeuButton label="Done" onPress={() => setResultModal(false)} style={{ marginTop: 16 }} />
       </ResponsiveModal>
     </View>

@@ -492,7 +492,7 @@ export default function DoctorStudents() {
   // ── Render ────────────────────────────────────────────────────────────────────
   return (
     <View style={{ flex: 1, backgroundColor: c.base }}>
-      <ScrollView
+      <ScrollView automaticallyAdjustKeyboardInsets={process.env.EXPO_OS === 'ios'}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />} contentContainerStyle={{ paddingBottom: safeBottom(layout.insets.bottom) }}
       >
           <PageHeader
@@ -639,7 +639,7 @@ export default function DoctorStudents() {
           </View>
 
           {/* Tab strip */}
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 16 }}>
+          <ScrollView automaticallyAdjustKeyboardInsets={process.env.EXPO_OS === 'ios'} horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 16 }}>
             <View style={{ flexDirection: 'row', gap: 8 }}>
               {TABS.map(tab => {
                 const Icon = tab.icon;

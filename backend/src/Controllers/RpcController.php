@@ -382,6 +382,14 @@ final class RpcController
      */
     public function createCourseAudited(Request $request): array
     {
+        // Feature flag: course_creation — server-side enforcement
+        // (403 feature_disabled). THIS is the endpoint the doctor UI actually
+        // calls (backendClient.rpc('create_course_audited')), so asserting the
+        // flag only on CourseController::create left course creation reachable
+        // while the flag was OFF. Gate-first: before validation, before any
+        // write. Existing courses are never touched.
+        $this->flags->assertEnabled('course_creation', $request);
+
         $data = $request->json();
         $userId = $request->user['id'];
 

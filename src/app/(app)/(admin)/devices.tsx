@@ -383,7 +383,7 @@ export default function AdminDevices({ backTo }: { backTo?: string } = {}) {
         {isExpanded && (
           <View style={{ borderTopWidth: 1, borderTopColor: `${c.text}0A`, padding: 12 }}>
             {/* Quick action buttons */}
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 12 }}>
+            <ScrollView automaticallyAdjustKeyboardInsets={process.env.EXPO_OS === 'ios'} horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 12 }}>
               <View style={{ flexDirection: 'row', gap: 8 }}>
                 <Pressable
                   onPress={() => { setSelectedLimit(user.max_devices ?? 1); setAction({ type: 'set_limit', user }); }}
@@ -503,7 +503,7 @@ export default function AdminDevices({ backTo }: { backTo?: string } = {}) {
 
   return (
     <View style={{ flex: 1, backgroundColor: c.base }}>
-      <ScrollView
+      <ScrollView automaticallyAdjustKeyboardInsets={process.env.EXPO_OS === 'ios'}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />} contentContainerStyle={{ paddingBottom: safeBottom(layout.insets.bottom) }}
       >
           {/* PageHeader sits OUTSIDE the inner padding view so it can own its own horizontal padding */}

@@ -14,6 +14,8 @@ import { useToast } from '@/components/Toast';
 import { neuColors, useLayout, safeBottom } from '@/lib/neu';
 import { useDebounce } from '@/lib/useDebounce';
 import { useStaleWhileRevalidateFocus } from '@/lib/useStaleWhileRevalidateFocus';
+import { useFeatureFlags, isFeatureDisabledError } from '@/lib/featureFlags';
+import { FeatureUnavailableState } from '@/components/ScreenState';
 import type { RelativePathString } from 'expo-router';
 
 const DIFFICULTY_COLORS: Record<string, string> = {
@@ -41,6 +43,15 @@ export default function DoctorCourses() {
   const [creating, setCreating] = useState(false);
   const [statusFilter, setStatusFilter] = useState<'all' | 'draft' | 'published'>('all');
   const { showToast } = useToast();
+
+  //  COURSE CREATION FEATURE FLAG — the server refuses course creation while the
+  //  flag is off (403 feature_disabled) on every entry point (RPC, /courses,
+  //  /api/courses, duplicate). The UI reflects that state so a doctor never
+  //  meets a confusing "creation failed" error for a deliberate admin setting.
+  const { isEnabled } = useFeatureFlags();
+  const canCreate = isEnabled('course_creation');
+  //  Set when the server refuses a create; shows the shared unavailable state.
+  const [createBlocked, setCreateBlocked] = useState(false);
 
   // ── Options menu ─────────────────────────────────────────────────────────────
   const [menuCourse,    setMenuCourse]    = useState<any>(null);
@@ -101,11 +112,18 @@ export default function DoctorCourses() {
       });
       router.push(`/(app)/course-builder/${course.id}` as RelativePathString);
     } catch (e: any) {
-      // Surface the real DB/RPC error so issues are immediately visible
-      const msg = e?.message ?? e?.error_description ?? String(e);
-      const code = e?.code ? ` [${e.code}]` : '';
-      console.error('[courses] createCourse failed:', e);
-      showToast({ type: 'error', message: `Course creation failed${code}: ${msg}` });
+      // A DISABLED FEATURE is not a failure — render the shared unavailable
+      // state instead of an alarming "Course creation failed" toast.
+      if (isFeatureDisabledError(e)) {
+        setCreateBlocked(true);
+        showToast({ type: 'info', message: 'Course creation is currently disabled by your administrator.' });
+      } else {
+        // Surface the real DB/RPC error so issues are immediately visible
+        const msg = e?.message ?? e?.error_description ?? String(e);
+        const code = e?.code ? ` [${e.code}]` : '';
+        console.error('[courses] createCourse failed:', e);
+        showToast({ type: 'error', message: `Course creation failed${code}: ${msg}` });
+      }
     }
     setCreating(false);
   };
@@ -170,22 +188,36 @@ export default function DoctorCourses() {
 
   return (
     <>
-      <ScrollView style={{ flex: 1, backgroundColor: c.base }}
+      <ScrollView automaticallyAdjustKeyboardInsets={process.env.EXPO_OS === 'ios'} style={{ flex: 1, backgroundColor: c.base }}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}>
         {/* Header — uses DashboardHeader for consistent safe-area + hamburger alignment */}
         <DashboardHeader
           greeting="My Courses"
           roleLabel={`${courses.length} course${courses.length !== 1 ? 's' : ''}`}
           rightActions={
-            <Pressable onPress={handleNewCourse} disabled={creating}
-              style={{ backgroundColor: c.primary, paddingHorizontal: 16, paddingVertical: 11, borderRadius: 14, flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-              {creating
-              ? <ActivityIndicator size="small" color="#fff" />
-              : <Plus size={18} color="#fff" />}
-              <Text style={{ fontSize: 14, fontWeight: '700', color: '#fff' }}>New</Text>
-            </Pressable>
+            canCreate ? (
+              <Pressable onPress={handleNewCourse} disabled={creating}
+                style={{ backgroundColor: c.primary, paddingHorizontal: 16, paddingVertical: 11, borderRadius: 14, flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                {creating
+                ? <ActivityIndicator size="small" color="#fff" />
+                : <Plus size={18} color="#fff" />}
+                <Text style={{ fontSize: 14, fontWeight: '700', color: '#fff' }}>New</Text>
+              </Pressable>
+            ) : undefined
           }
         />
+
+        {/* Course creation disabled — a deliberate configuration, not a failure.
+            Existing courses stay fully viewable/editable (see the list below). */}
+        {(!canCreate || createBlocked) && (
+          <View style={{ marginHorizontal: layout.screenPx, marginBottom: 8 }}>
+            <FeatureUnavailableState
+              compact
+              title="Course creation is unavailable"
+              description="An administrator has turned off course creation. You can still view and edit your existing courses. This becomes available again as soon as it is re-enabled."
+            />
+          </View>
+        )}
 
         {/* Search + status filter tabs */}
         <View style={{ paddingHorizontal: layout.screenPx, marginBottom: 16, gap: 10 }}>
@@ -232,7 +264,7 @@ export default function DoctorCourses() {
                   ? 'No matching courses'
                   : statusFilter === 'draft' ? 'No draft courses yet' : statusFilter === 'published' ? 'No published courses yet' : 'No courses yet'}
               </Text>
-              {!query && (statusFilter === 'draft' || statusFilter === 'all') && (
+              {!query && (statusFilter === 'draft' || statusFilter === 'all') && canCreate && !createBlocked && (
                 <NeuButton label="Create First Course" onPress={handleNewCourse} loading={creating} />
               )}
             </View>
@@ -429,7 +461,7 @@ export default function DoctorCourses() {
           <View style={{ ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center',
             paddingTop: insets.top + 8, paddingBottom: insets.bottom + 8 }}
             pointerEvents="box-none">
-          <ScrollView style={{ width: Math.min(screenW * 0.92, 480), maxHeight: '100%', flexGrow: 0, flexShrink: 1 }}>
+          <ScrollView automaticallyAdjustKeyboardInsets={process.env.EXPO_OS === 'ios'} style={{ width: Math.min(screenW * 0.92, 480), maxHeight: '100%', flexGrow: 0, flexShrink: 1 }}>
           <View style={{ backgroundColor: c.base, borderRadius: 24,
             padding: 24, gap: 20,
             shadowColor: '#000', shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.15, shadowRadius: 20, elevation: 16 }}>

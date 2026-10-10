@@ -170,7 +170,7 @@ function ContactLinksEditor({
             </View>
 
             {/* Row 2 — presets */}
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 10 }}>
+            <ScrollView automaticallyAdjustKeyboardInsets={process.env.EXPO_OS === 'ios'} horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 10 }}>
               <View style={{ flexDirection: 'row', gap: 6 }}>
                 {CONTACT_LINK_PRESETS.map(p => {
                   const on = p.key === link.platform;
@@ -382,7 +382,7 @@ export default function CMSPagesScreen({ backTo }: { backTo?: string } = {}) {
   const inp = { backgroundColor: c.base, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, shadowColor: c.shadowDark, shadowOffset: { width: 2, height: 2 }, shadowOpacity: 0.45, shadowRadius: 5 };
 
   return (
-    <ScrollView style={{ flex: 1, backgroundColor: c.base }}
+    <ScrollView automaticallyAdjustKeyboardInsets={process.env.EXPO_OS === 'ios'} style={{ flex: 1, backgroundColor: c.base }}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />} contentContainerStyle={{ paddingBottom: safeBottom(layout.insets.bottom) }}>
       <PageHeader
         title="CMS Pages"

@@ -351,14 +351,44 @@ class DataController
             }
         }
 
-        // Fetch each one-to-many level (parents → children), bottom-up attach.
+        // Fetch each one-to-many rel (parents → children), bottom-up attach.
         // rels are collected depth-first; process deepest-first by attaching
         // children into their parents after fetching, level by level.
+        //
+        // PARENT SET PER RELATION (sibling bug fix): the parent ids for a
+        // relation are the MAIN rows when it hangs off the root, otherwise the
+        // child rows of the relation it is nested inside (`parentRelIndex`).
+        // This used to be ONE rolling `$parentIds` that, after the first
+        // relation at a given depth, held that relation's CHILD ids — so every
+        // LATER SIBLING at the same depth queried its FK against the wrong ids
+        // and always came back empty. Concretely: for
+        // `lessons?select=…,lesson_pdfs(*),lesson_materials(*)` the materials
+        // query ran as `lesson_id IN (<lesson_pdfs.id>)`, so an uploaded lesson
+        // material could never reach the client even though it was stored and
+        // correctly associated (doctor uploads, student lesson screen shows
+        // nothing). A linear chain (sections → lessons → lesson_materials) was
+        // unaffected, which is why only the lesson/video screens lost them.
         $levelData = []; // relIndex => parentKey => [ childId => childRow ]
-        $parentIds = $mainIds;
-        $prevKeyCol = null;
         foreach ($oneToMany as $i => $rel) {
-            if (empty($parentIds)) break;
+            $depth = (int) ($rel['depth'] ?? 1);
+            if ($depth === 1) {
+                $parentIds = $mainIds;
+            } else {
+                $parentRelIndex = $rel['parentRelIndex'] ?? null;
+                $parentGroups = $parentRelIndex !== null
+                    ? ($levelData[$parentRelIndex] ?? [])
+                    : [];
+                $parentIds = [];
+                foreach ($parentGroups as $group) {
+                    foreach (array_keys($group) as $pid) $parentIds[] = $pid;
+                }
+            }
+            if (empty($parentIds)) {
+                // No parents at this level → expose the relation as [] (Supabase
+                // contract) and keep going: a sibling may still have parents.
+                $levelData[$i] = [];
+                continue;
+            }
             $childRows = $this->fetchChildren($db, $rel, $parentIds, (string) ($request->user['role'] ?? ''));
             $keyed = [];
             foreach ($childRows as $child) {
@@ -367,12 +397,6 @@ class DataController
                 $keyed[$pid][$child['id']] = $child;
             }
             $levelData[$i] = $keyed;
-            // next level parents = all children of this level
-            $parentIds = array_values(array_filter(array_map(
-                static fn ($group) => array_keys($group),
-                $keyed
-            ), static fn ($ids) => !empty($ids)));
-            $parentIds = $parentIds ? array_merge(...$parentIds) : [];
         }
 
         // Attach bottom-up so nested children land in the right parents.
@@ -459,6 +483,17 @@ class DataController
         $this->assertAllowed($table, 'write');
         $this->assertNotReadOnly($table, $request);
         $this->assertAccess($table, $request);
+
+        // ── COURSE CREATION AVAILABILITY ────────────────────────────────────
+        // The generic Data API can INSERT into `courses` (owner-scoped), which
+        // is another course-creation entry point — e.g. the "create from
+        // template" flow. Without this gate a doctor could create a course via
+        // POST /api/courses even while the course_creation flag is OFF, which
+        // is exactly the class of bypass this controller already closes for
+        // the lessons/Plyr path below. Gate-first, before validation/writes.
+        if ($table === 'courses') {
+            (new FeatureFlagService())->assertEnabled('course_creation', $request);
+        }
 
         $body = $request->json();
         if (!$body) throw new ApiException(422, 'Request body is required');
@@ -833,6 +868,15 @@ class DataController
                 $visibilitySql = " AND (`enrollments`.`visibility_level` = 'all' OR `enrollments`.`visibility_level` IS NULL)";
             } elseif ($role === 'admin') {
                 $visibilitySql = " AND (`enrollments`.`visibility_level` IN ('all', 'admin_only') OR `enrollments`.`visibility_level` IS NULL)";
+            } elseif ($role === 'student') {
+                //  SUSPENSION ENFORCEMENT (students only): a SUSPENDED enrollment
+                //  is not an active course, so it disappears from the student's
+                //  own reads at the BACKEND — a direct GET /api/enrollments can
+                //  no longer resurrect a course the doctor suspended. Doctors and
+                //  admins keep FULL visibility (they manage suspensions), the row
+                //  is never deleted, and `<> 'suspended'` (not `= 'active'`) so a
+                //  legacy non-'active' status is never accidentally hidden.
+                $visibilitySql = " AND (`enrollments`.`status` IS NULL OR `enrollments`.`status` <> 'suspended')";
             }
             return [
                 "(`enrollments`.`student_id` = ? OR EXISTS (SELECT 1 FROM `courses` c WHERE c.id = `enrollments`.`course_id` AND c.doctor_id = ?))"

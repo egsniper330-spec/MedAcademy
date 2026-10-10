@@ -403,7 +403,7 @@ export default function EnrollmentManager({ backTo }: { backTo?: string } = {}) 
 
   return (
     <KeyboardAvoidingView
-      behavior={process.env.EXPO_OS === 'ios' ? 'padding' : 'height'}
+      behavior={undefined} /* keyboard: native inset only */
       style={{ flex: 1, backgroundColor: c.base }}
     >
       <PageHeader
@@ -411,7 +411,7 @@ export default function EnrollmentManager({ backTo }: { backTo?: string } = {}) 
         showBack
         backFallback={backTo ?? '/admin-overview'}
       />
-      <ScrollView
+      <ScrollView automaticallyAdjustKeyboardInsets={process.env.EXPO_OS === 'ios'}
         contentContainerStyle={{ padding: 16 }}
         keyboardShouldPersistTaps="handled"
       >
@@ -601,7 +601,7 @@ export default function EnrollmentManager({ backTo }: { backTo?: string } = {}) 
           <Search size={15} color={`${c.text}66`} />
           <TextInput value={courseSearch} onChangeText={setCourseSearch} placeholder="Filter courses…" placeholderTextColor={`${c.text}55`} style={{ flex: 1, fontSize: 14, color: c.text, paddingVertical: 11 }} />
         </View>
-        <ScrollView style={{ maxHeight: 380 }} keyboardShouldPersistTaps="handled">
+        <ScrollView automaticallyAdjustKeyboardInsets={process.env.EXPO_OS === 'ios'} style={{ maxHeight: 380 }} keyboardShouldPersistTaps="handled">
           {coursesLoading ? <ActivityIndicator style={{ padding: 24 }} color={c.primary} /> :
            filteredCourses.length === 0 ? <Text style={{ textAlign: 'center', color: `${c.text}77`, padding: 24 }}>No courses found</Text> :
            filteredCourses.map(course => (
@@ -617,7 +617,7 @@ export default function EnrollmentManager({ backTo }: { backTo?: string } = {}) 
           <Search size={15} color={`${c.text}66`} />
           <TextInput value={viewCourseSearch} onChangeText={setViewCourseSearch} placeholder="Filter courses…" placeholderTextColor={`${c.text}55`} style={{ flex: 1, fontSize: 14, color: c.text, paddingVertical: 11 }} />
         </View>
-        <ScrollView style={{ maxHeight: 380 }} keyboardShouldPersistTaps="handled">
+        <ScrollView automaticallyAdjustKeyboardInsets={process.env.EXPO_OS === 'ios'} style={{ maxHeight: 380 }} keyboardShouldPersistTaps="handled">
           {coursesLoading ? <ActivityIndicator style={{ padding: 24 }} color={c.primary} /> :
            filteredViewCourses.length === 0 ? <Text style={{ textAlign: 'center', color: `${c.text}77`, padding: 24 }}>No courses found</Text> :
            filteredViewCourses.map(course => (

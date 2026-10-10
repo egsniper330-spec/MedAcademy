@@ -98,8 +98,8 @@ export default function ForcePasswordChangeScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: c.base }}>
-      <KeyboardAvoidingView behavior={process.env.EXPO_OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1 }}>
-        <ScrollView
+      <KeyboardAvoidingView behavior={undefined} /* keyboard: native inset only */ style={{ flex: 1 }}>
+        <ScrollView automaticallyAdjustKeyboardInsets={process.env.EXPO_OS === 'ios'}
           contentContainerStyle={{
             paddingHorizontal: layout.screenPx,
             // headerTop accounts for status bar + Dynamic Island/notch + breathing room

@@ -307,7 +307,7 @@ export default function StudentDashboard() {
         onConfirm={confirmNotifRequest}
         onDismiss={() => setShowNotifRationale(false)}
       />
-    <ScrollView
+    <ScrollView automaticallyAdjustKeyboardInsets={process.env.EXPO_OS === 'ios'}
       style={{ flex: 1, backgroundColor: c.base }}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />}
     >
@@ -360,7 +360,7 @@ export default function StudentDashboard() {
         {showFilters && (
           <NeuCard style={{ marginBottom: layout.pad.md, padding: layout.cardPx }}>
             <Text style={{ fontSize: layout.captionSize - 1, fontWeight: '800', color: c.text, opacity: 0.45, marginBottom: layout.pad.sm, textTransform: 'uppercase', letterSpacing: 0.8 }}>Category</Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: layout.pad.md }}>
+            <ScrollView automaticallyAdjustKeyboardInsets={process.env.EXPO_OS === 'ios'} horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: layout.pad.md }}>
               <Pressable onPress={() => setFilters(f => ({ ...f, category: null }))} style={chipStyle(!filters.category)}>
                 <Text style={chipText(!filters.category)}>All</Text>
               </Pressable>
@@ -374,7 +374,7 @@ export default function StudentDashboard() {
             {teachers.length > 0 && (
               <>
                 <Text style={{ fontSize: layout.captionSize - 1, fontWeight: '800', color: c.text, opacity: 0.45, marginBottom: layout.pad.sm, textTransform: 'uppercase', letterSpacing: 0.8 }}>Teacher</Text>
-                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: layout.pad.md }}>
+                <ScrollView automaticallyAdjustKeyboardInsets={process.env.EXPO_OS === 'ios'} horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: layout.pad.md }}>
                   <Pressable onPress={() => setFilters(f => ({ ...f, teacher: null }))} style={chipStyle(!filters.teacher)}>
                     <Text style={chipText(!filters.teacher)}>All</Text>
                   </Pressable>

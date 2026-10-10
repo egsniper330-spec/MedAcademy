@@ -5,9 +5,7 @@
  */
 import { useState, useCallback } from 'react';
 import {
-  View, Text, ScrollView, useColorScheme, Pressable,
-  ActivityIndicator, TextInput,
-} from 'react-native';
+  View, Text, useColorScheme, Pressable, ActivityIndicator, TextInput } from 'react-native';
 import { Upload, Download, CheckCircle, XCircle, AlertTriangle, FileText, ChevronDown, ChevronUp, RefreshCw } from 'lucide-react-native';
 import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system';
@@ -18,6 +16,7 @@ import { NeuCard } from '@/components/NeuCard';
 import { NeuButton } from '@/components/NeuButton';
 import { useToast } from '@/components/Toast';
 import { neuColors, neuFlatStyle, useLayout, safeBottom } from '@/lib/neu'
+import { KeyboardAwareScrollView } from '@/components/KeyboardAwareScrollView';
 
 type ImportRole = 'student' | 'doctor' | 'admin';
 
@@ -209,7 +208,7 @@ export default function BulkImportScreen({ backTo }: { backTo?: string } = {}) {
   const skipped   = results.filter(r => r.status === 'skipped').length;
 
   return (
-    <ScrollView style={{ flex: 1, backgroundColor: c.base }} contentContainerStyle={{ paddingBottom: safeBottom(layout.insets.bottom) }}>
+    <KeyboardAwareScrollView style={{ flex: 1, backgroundColor: c.base }} contentContainerStyle={{ paddingBottom: safeBottom(layout.insets.bottom) }}>
       <PageHeader
         title="Bulk Import"
         subtitle="Import users from CSV"
@@ -366,6 +365,6 @@ export default function BulkImportScreen({ backTo }: { backTo?: string } = {}) {
           </>
         )}
       </View>
-    </ScrollView>
+    </KeyboardAwareScrollView>
   );
 }

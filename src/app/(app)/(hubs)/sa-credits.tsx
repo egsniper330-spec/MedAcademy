@@ -190,8 +190,8 @@ const { showToast } = useToast();
 
   return (
     <>
-      <KeyboardAvoidingView behavior={process.env.EXPO_OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1 }}>
-        <ScrollView
+      <KeyboardAvoidingView behavior={undefined} /* keyboard: native inset only */ style={{ flex: 1 }}>
+        <ScrollView automaticallyAdjustKeyboardInsets={process.env.EXPO_OS === 'ios'}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />} contentContainerStyle={{ paddingBottom: safeBottom(layout.insets.bottom) }}
         >
           <View style={{ padding: layout.screenPx }}>
@@ -534,7 +534,7 @@ const router = useRouter();
             </View>
 
             {showFilters && (
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 14 }}>
+              <ScrollView automaticallyAdjustKeyboardInsets={process.env.EXPO_OS === 'ios'} horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 14 }}>
                 {TX_TYPES.map(t => (
                   <Pressable key={t} onPress={() => setTypeFilter(t)} style={chip(typeFilter === t)}>
                     <Text style={{ fontSize: 11, fontWeight: '600', color: typeFilter === t ? '#fff' : c.text }}>

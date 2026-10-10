@@ -6,10 +6,7 @@
  * /admin/support-settings endpoint with Super Admin authorization enforced.
  */
 import React, { useCallback, useState } from 'react';
-import {
-  View, Text, ScrollView, Switch, TextInput,
-  useColorScheme, ActivityIndicator, RefreshControl,
-} from 'react-native';
+import { View, Text, Switch, TextInput, useColorScheme, ActivityIndicator, RefreshControl } from 'react-native';
 import { useFocusEffect } from 'expo-router';
 import {
   Phone, MessageCircle, Send, Save, Info, CheckCircle,
@@ -25,6 +22,7 @@ import {
   SUPPORT_DEFAULT_LABELS, SUPPORT_ICONS,
 } from '@/lib/api';
 import { neuColors, neuFlatStyle, useLayout, safeBottom } from '@/lib/neu';
+import { KeyboardAwareScrollView } from '@/components/KeyboardAwareScrollView';
 
 // ─── Per-key metadata ────────────────────────────────────────────────────────
 type ContactKey = SupportPlatformKey;
@@ -258,6 +256,8 @@ export default function SaSupportSettings() {
   const [saving,     setSaving]     = useState<ContactKey | null>(null);
   const [saved,      setSaved]      = useState<ContactKey | null>(null);
   const [error,      setError]      = useState<string | null>(null);
+  //  Non-fatal advisory (e.g. "saved, but hidden because it is disabled").
+  const [notice,     setNotice]     = useState<string | null>(null);
 
   const loadData = useCallback(async () => {
     setError(null);
@@ -289,12 +289,46 @@ export default function SaSupportSettings() {
   const handleSave = async (k: ContactKey) => {
     setSaving(k);
     setError(null);
+    setNotice(null);
+    const sentValue   = drafts[k].value.trim();
+    const sentLabel   = drafts[k].label.trim() || CONTACT_META[k].title;
+    const sentEnabled = drafts[k].enabled;
     try {
-      await upsertSupportSetting(k, {
-        value:   drafts[k].value.trim(),
-        label:   drafts[k].label.trim() || CONTACT_META[k].title,
-        enabled: drafts[k].enabled,
+      const { settings: fresh, saved: readBack } = await upsertSupportSetting(k, {
+        value:   sentValue,
+        label:   sentLabel,
+        enabled: sentEnabled,
       });
+
+      //  VERIFY PERSISTENCE: report success ONLY when the server-echoed state
+      //  matches what we sent. The endpoint normalizes values (a phone becomes
+      //  E.164, a WhatsApp handle becomes an https://wa.me URL), so we compare
+      //  the fields that are NOT rewritten and require a non-empty value to
+      //  survive when we sent one.
+      const ok =
+        !!readBack &&
+        readBack.enabled === sentEnabled &&
+        (readBack.label ?? '') === sentLabel &&
+        (sentValue === '' || (readBack.value ?? '').trim() !== '');
+      if (!ok) {
+        setError(`Saving ${CONTACT_META[k].title} did not persist. Please try again.`);
+        return;
+      }
+
+      //  Refresh from the canonical server state so the form shows the
+      //  normalized values (no stale local draft) after a successful save.
+      setDrafts(settingsToDrafts(fresh));
+
+      //  Honest advisory: a value saved with the toggle OFF is persisted but
+      //  intentionally NOT shown to users — say so instead of letting the admin
+      //  believe the block screen will display it.
+      if (sentValue !== '' && !sentEnabled) {
+        setNotice(
+          `${CONTACT_META[k].title} was saved but is hidden from users. ` +
+          'Turn it on and save again to show it on the security screen.'
+        );
+      }
+
       setSaved(k);
       setTimeout(() => setSaved(prev => (prev === k ? null : prev)), 2500);
     } catch {
@@ -305,7 +339,7 @@ export default function SaSupportSettings() {
   };
 
   return (
-    <ScrollView
+    <KeyboardAwareScrollView
       style={{ flex: 1, backgroundColor: c.base }}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />} contentContainerStyle={{ paddingBottom: safeBottom(layout.insets.bottom) }}
     >
@@ -324,6 +358,18 @@ export default function SaSupportSettings() {
           }}>
             <Text style={{ fontSize: layout.captionSize, color: '#DC2626', lineHeight: layout.captionSize * 1.5 }}>
               {error}
+            </Text>
+          </View>
+        )}
+
+        {notice && (
+          <View style={{
+            backgroundColor: '#FFFBEB', borderRadius: layout.cardRadius / 2,
+            padding: layout.pad.md, marginBottom: layout.pad.lg,
+            borderLeftWidth: 4, borderLeftColor: '#F59E0B',
+          }}>
+            <Text style={{ fontSize: layout.captionSize, color: '#B45309', lineHeight: layout.captionSize * 1.5 }}>
+              {notice}
             </Text>
           </View>
         )}
@@ -359,6 +405,6 @@ export default function SaSupportSettings() {
           </>
         )}
       </View>
-    </ScrollView>
+    </KeyboardAwareScrollView>
   );
 }

@@ -4,9 +4,7 @@
  */
 import { useCallback, useState } from 'react';
 import {
-  View, Text, ScrollView, TextInput,
-  RefreshControl, useColorScheme,
-} from 'react-native';
+  View, Text, TextInput, RefreshControl, useColorScheme } from 'react-native';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { Star, Palette, Link, Mail, Phone, Info } from 'lucide-react-native';
 import { PageHeader } from '@/components/PageHeader';
@@ -18,6 +16,7 @@ import { LoadingState, ErrorState } from '@/components/ScreenState';
 import { useToast } from '@/components/Toast';
 import { neuColors, useLayout, safeBottom } from '@/lib/neu';
 import { friendlyError } from '@/lib/validation';
+import { KeyboardAwareScrollView } from '@/components/KeyboardAwareScrollView';
 
 export default function BrandingScreen() {
   const scheme = useColorScheme();
@@ -89,7 +88,7 @@ export default function BrandingScreen() {
   );
 
   return (
-    <ScrollView style={{ flex: 1, backgroundColor: c.base }}
+    <KeyboardAwareScrollView style={{ flex: 1, backgroundColor: c.base }}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />} contentContainerStyle={{ paddingBottom: safeBottom(layout.insets.bottom) }}>
       <PageHeader
         title="Branding"
@@ -190,6 +189,6 @@ export default function BrandingScreen() {
           </>
         )}
       </View>
-    </ScrollView>
+    </KeyboardAwareScrollView>
   );
 }

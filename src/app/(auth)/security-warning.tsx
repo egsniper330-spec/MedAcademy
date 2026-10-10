@@ -182,15 +182,29 @@ export default function SecurityWarningScreen() {
   // Support contact state
   const [support, setSupport]             = useState<PublicSupportContact[] | null>(null);
   const [supportLoading, setSupportLoading] = useState(true);
+  //  Distinguishes a TRANSPORT failure from a real "no contacts configured"
+  //  result. Previously any error fell through to an empty list, so a failed
+  //  fetch rendered the misleading "Support contact is not configured" copy.
+  const [supportError, setSupportError] = useState(false);
   const [chooserVisible, setChooserVisible] = useState(false);
 
-  useEffect(() => {
-    // Fetch from the PUBLIC endpoint — no auth required (blocked users can't sign in).
-    getPublicSupportContacts()
-      .then(s => setSupport(s))
-      .catch(() => setSupport([]))
-      .finally(() => setSupportLoading(false));
+  const loadSupportContacts = React.useCallback(() => {
+    setSupportError(false);
+    setSupportLoading(true);
+    // Fetch from the PUBLIC endpoint — no auth required (blocked users can't
+    // sign in). It stays reachable WHILE the security lock is active (the
+    // transport gate exempts /support/contact), because this screen is exactly
+    // where a locked user learns how to reach support.
+    return getPublicSupportContacts()
+      .then(s => { setSupport(s); setSupportLoading(false); setSupportError(false); })
+      .catch(() => {
+        setSupport(prev => prev ?? []);
+        setSupportLoading(false);
+        setSupportError(true);
+      });
   }, []);
+
+  useEffect(() => { void loadSupportContacts(); }, [loadSupportContacts]);
 
   // Build enabled contact methods list
   // Build enabled contact methods list from the PUBLIC endpoint (no auth needed).
@@ -327,16 +341,34 @@ export default function SecurityWarningScreen() {
                 <ActivityIndicator color={c.primary} size="small" />
               </View>
             ) : contactMethods.length === 0 ? (
-              <View style={[flat, {
-                borderRadius: layout.cardRadius, padding: layout.cardPx,
-                flexDirection: 'row', alignItems: 'center', gap: layout.pad.md,
-                borderLeftWidth: 4, borderLeftColor: `${c.text}33`,
-              }]}>
-                <Phone size={layout.bodySize + 4} color={`${c.text}55`} />
-                <Text style={{ flex: 1, fontSize: layout.captionSize, color: `${c.text}66`, lineHeight: layout.captionSize * 1.5 }}>
-                  Support contact is not configured. Please reach out to your administrator directly.
-                </Text>
-              </View>
+              supportError ? (
+                <View style={[flat, {
+                  borderRadius: layout.cardRadius, padding: layout.cardPx,
+                  flexDirection: 'row', alignItems: 'center', gap: layout.pad.md,
+                  borderLeftWidth: 4, borderLeftColor: '#F59E0B',
+                }]}>
+                  <AlertTriangle size={layout.bodySize + 4} color="#F59E0B" />
+                  <View style={{ flex: 1, gap: layout.pad.xs }}>
+                    <Text style={{ fontSize: layout.captionSize, color: c.text, lineHeight: layout.captionSize * 1.5 }}>
+                      Could not load support contacts. Check your connection and try again.
+                    </Text>
+                    <Pressable onPress={() => void loadSupportContacts()} style={{ alignSelf: 'flex-start' }}>
+                      <Text style={{ fontSize: layout.captionSize, fontWeight: '700', color: c.primary }}>Retry</Text>
+                    </Pressable>
+                  </View>
+                </View>
+              ) : (
+                <View style={[flat, {
+                  borderRadius: layout.cardRadius, padding: layout.cardPx,
+                  flexDirection: 'row', alignItems: 'center', gap: layout.pad.md,
+                  borderLeftWidth: 4, borderLeftColor: `${c.text}33`,
+                }]}>
+                  <Phone size={layout.bodySize + 4} color={`${c.text}55`} />
+                  <Text style={{ flex: 1, fontSize: layout.captionSize, color: `${c.text}66`, lineHeight: layout.captionSize * 1.5 }}>
+                    Support contact is not configured. Please reach out to your administrator directly.
+                  </Text>
+                </View>
+              )
             ) : (
               <NeuButton
                 label={contactLabel}

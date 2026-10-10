@@ -5,9 +5,7 @@
  */
 import { useCallback, useState } from 'react';
 import {
-  View, Text, ScrollView, useColorScheme, Pressable,
-  RefreshControl, TextInput, ActivityIndicator, Platform,
-} from 'react-native';
+  View, Text, useColorScheme, Pressable, RefreshControl, TextInput, ActivityIndicator, Platform } from 'react-native';
 import { useFocusEffect, useRouter } from 'expo-router';
 import {
   Smartphone, Wifi, WifiOff, Clock, Globe,
@@ -20,6 +18,7 @@ import { NeuButton } from '@/components/NeuButton';
 import { ResponsiveModal } from '@/components/ResponsiveModal';
 import { PageHeader } from '@/components/PageHeader';
 import type { RelativePathString } from 'expo-router';
+import { KeyboardAwareScrollView } from '@/components/KeyboardAwareScrollView';
 
 type ModalState =
   | { type: 'rename'; device: DeviceRecord }
@@ -120,7 +119,7 @@ export default function MyDevices() {
 
   return (
     <View style={{ flex: 1, backgroundColor: c.base }}>
-      <ScrollView
+      <KeyboardAwareScrollView
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />} contentContainerStyle={{ paddingBottom: safeBottom(layout.insets.bottom) }}
       >
           {/* Back navigation header */}
@@ -313,7 +312,7 @@ export default function MyDevices() {
             <ChevronRight size={16} color={c.primary} opacity={0.6} />
           </Pressable>
         </View>
-      </ScrollView>
+      </KeyboardAwareScrollView>
 
       {/* Rename modal */}
       <ResponsiveModal

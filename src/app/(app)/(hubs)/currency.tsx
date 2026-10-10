@@ -5,9 +5,7 @@
  */
 import { useCallback, useState } from 'react';
 import {
-  View, Text, ScrollView, TextInput, ActivityIndicator,
-  RefreshControl, useColorScheme, Pressable,
-} from 'react-native';
+  View, Text, TextInput, ActivityIndicator, RefreshControl, useColorScheme, Pressable } from 'react-native';
 import { useFocusEffect } from 'expo-router';
 import { Coins, Save, RefreshCw } from 'lucide-react-native';
 import { PageHeader } from '@/components/PageHeader';
@@ -18,6 +16,7 @@ import {
   fetchCurrencyConfig, saveCurrencyConfig, invalidateCurrencyCache,
   formatCurrency, DEFAULT_CURRENCY, type CurrencyConfig,
 } from '@/lib/currency';
+import { KeyboardAwareScrollView } from '@/components/KeyboardAwareScrollView';
 
 export default function CurrencySettings({ backTo }: { backTo?: string } = {}) {
   const scheme = useColorScheme();
@@ -80,7 +79,7 @@ export default function CurrencySettings({ backTo }: { backTo?: string } = {}) {
   const preview = formatCurrency(50, config);
 
   return (
-    <ScrollView
+    <KeyboardAwareScrollView
       style={{ flex: 1, backgroundColor: c.base }}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />} contentContainerStyle={{ paddingBottom: safeBottom(layout.insets.bottom) }}
     >
@@ -211,6 +210,6 @@ export default function CurrencySettings({ backTo }: { backTo?: string } = {}) {
           </>
         )}
       </View>
-    </ScrollView>
+    </KeyboardAwareScrollView>
   );
 }

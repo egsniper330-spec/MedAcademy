@@ -35,12 +35,15 @@ import {
   getMyProviderPermissions,
   type LessonBuilderPayload, type DownloadPermission, type TeacherProviderPermission,
 } from '@/lib/api';
+import { validateMaterialFile } from '@/lib/lessonMaterials';
 import {
   attachAssetToLesson, getVideoAssetUsage,
   type VideoAsset,
 } from '@/lib/videoLibraryApi';
 import { VideoLibraryPicker } from '@/components/VideoLibraryPicker';
 import { VideoReplaceSheet } from '@/components/VideoReplaceSheet';
+import { isProviderDisabledError, describeProviderError } from '@/lib/videoProviderPolicy';
+import { FeatureUnavailableState } from '@/components/ScreenState';
 import { useUploadQueueStore } from '@/lib/uploadQueueStore';import {
   createUploadRecord, checkDuplicateVideo, analyzeFile, clearLessonVideoRef,
   type FileAnalysis,
@@ -219,6 +222,24 @@ export default function LessonEditor() {
 
   // Provider permissions (doctor-role gate for upload options)
   const [providerPerms, setProviderPerms] = useState<TeacherProviderPermission[]>([]);
+
+  //  Set when the SERVER refused a save because the lesson's video provider is
+  //  disabled for this account. Renders the informative inline unavailable
+  //  state in the video entry area (instead of leaving a form that will fail
+  //  again). Cleared on retry and when the lesson reloads.
+  const [providerSaveBlocked, setProviderSaveBlocked] = useState<string | null>(null);
+
+  //  Effective provider availability for THIS account — the exact mirror of
+  //  VideoProviderPolicyService. Hoisted here (previously computed inline in
+  //  the picker) so the video entry area can render the same decision.
+  const vdoCipherPerm = providerPerms.find(p => p.provider_key === 'vdocipher');
+  const plyrPerm      = providerPerms.find(p => p.provider_key === 'plyr');
+  const vdoCipherBlocked = vdoCipherPerm ? !vdoCipherPerm.final_enabled : false;
+  const plyrBlocked      = plyrPerm ? !plyrPerm.final_enabled : false;
+  const providerBlockedMsg = (perm: TeacherProviderPermission | undefined, name: string) =>
+    perm && !perm.global_enabled
+      ? `${name} is currently disabled by the administrator.`
+      : `${name} has been disabled for your account.`;
 
   // Per-material permission picker & replace tracking
   const [openPermMenu, setOpenPermMenu] = useState<string | null>(null);
@@ -517,6 +538,15 @@ export default function LessonEditor() {
       const file = result.assets[0];
       if (!profile || !lesson) return;
 
+      // Fail fast on the same policy the server enforces (size + file type), so
+      // the doctor gets a specific reason instead of a generic "Upload failed"
+      // after the bytes have already been sent.
+      const policyError = validateMaterialFile({ name: file.name, size: file.size });
+      if (policyError) {
+        showToast({ type: 'error', message: policyError });
+        return;
+      }
+
       setUploading(true);
       const courseId = lesson.section?.course_id ?? lesson.course_id;
       const { storagePath, publicUrl } = await uploadLessonMaterial(
@@ -552,6 +582,12 @@ export default function LessonEditor() {
       if (result.canceled || !result.assets?.[0]) return;
       const file = result.assets[0];
       if (!lesson) return;
+
+      const replacePolicyError = validateMaterialFile({ name: file.name, size: file.size });
+      if (replacePolicyError) {
+        showToast({ type: 'error', message: replacePolicyError });
+        return;
+      }
 
       setReplacingId(material.id);
       const courseId = lesson.section?.course_id ?? lesson.course_id;
@@ -615,10 +651,21 @@ export default function LessonEditor() {
         throw new Error(`Status mismatch: expected '${status}' but database returned '${saved.status}'. Please try again.`);
       }
       setLastSaved(new Date());
+      setProviderSaveBlocked(null);
       showToast({ type: 'success', message: 'Lesson saved.' });
       router.back();
     } catch (e) {
-      showToast({ type: 'error', message: friendlyError(e, 'Save failed.') });
+      //  A disabled video provider is a DELIBERATE policy state, not a bug.
+      //  Surface the friendly provider notice and render the inline
+      //  unavailable state in the video entry area — never a generic
+      //  "Save failed." that reads as a broken app.
+      if (isProviderDisabledError(e)) {
+        const msg = describeProviderError(e);
+        setProviderSaveBlocked(msg);
+        showToast({ type: 'info', message: msg });
+      } else {
+        showToast({ type: 'error', message: friendlyError(e, 'Save failed.') });
+      }
     }
     setSaving(false);
   };
@@ -641,7 +688,7 @@ export default function LessonEditor() {
 
   return (
     <KeyboardAvoidingView style={{ flex: 1, backgroundColor: c.base }}
-      behavior={process.env.EXPO_OS === 'ios' ? 'padding' : 'height'}>
+      behavior={undefined} /* keyboard: native inset only */>
 
       {/* ══ Upload-Complete Dialog ══════════════════════════════════════════ */}
       <Modal
@@ -784,7 +831,7 @@ export default function LessonEditor() {
           TAB: VIDEO
       ══════════════════════════════════════════════════════════════════════ */}
       {tab === 'video' && (
-        <ScrollView keyboardShouldPersistTaps="handled"
+        <ScrollView automaticallyAdjustKeyboardInsets={process.env.EXPO_OS === 'ios'} keyboardShouldPersistTaps="handled"
           contentContainerStyle={{ padding: layout.screenPx, gap: 16 }}>
 
           {/* ── Live upload / processing status card ─────────────────────── */}
@@ -849,6 +896,45 @@ export default function LessonEditor() {
             </NeuCard>
           )}
 
+          {/* ── PUBLICATION STATE — leads the form ────────────────────────
+              This control used to sit below Lesson Notes, at the very bottom of
+              the Info tab, where doctors routinely overlooked it. It is the
+              decision that gates student visibility, so it now appears first.
+              Same five values and the same save payload — placement only. */}
+          <Field label="Lesson Status">
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+              {LESSON_STATUSES.map(ls => (
+                <Pressable key={ls.value} onPress={() => setStatus(ls.value)}
+                  style={[
+                    status === ls.value ? neuPressedStyle(isDark) : neuFlatStyle(isDark),
+                    { paddingHorizontal: 14, paddingVertical: 10, borderRadius: 12, flexDirection: 'row', alignItems: 'center', gap: 6 },
+                  ]}>
+                  <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: ls.color, opacity: status === ls.value ? 1 : 0.4 }} />
+                  <Text style={{ fontSize: 13, fontWeight: '700', color: status === ls.value ? ls.color : c.text, opacity: status === ls.value ? 1 : 0.5 }}>
+                    {ls.label}
+                  </Text>
+                </Pressable>
+              ))}
+            </View>
+
+            {/* Scheduled date — shown only when status=scheduled */}
+            {status === 'scheduled' && (
+              <View style={{ marginTop: 10 }}>
+                <Field label="Publish Date & Time">
+                  <NeuInput
+                    value={scheduledAt}
+                    onChangeText={setScheduledAt}
+                    placeholder="YYYY-MM-DD HH:MM (e.g. 2025-09-01 09:00)"
+                    isDark={isDark} c={c}
+                  />
+                  <Text style={{ fontSize: 11, color: '#3B82F6', opacity: 0.8, marginTop: 2 }}>
+                    Lesson will automatically become visible at this date/time.
+                  </Text>
+                </Field>
+              </View>
+            )}
+          </Field>
+
           {/* Description */}
           <Field label="Lesson Description">
             <NeuInput value={description} onChangeText={setDescription}
@@ -865,14 +951,10 @@ export default function LessonEditor() {
                 every authorization, so hiding is UX, never the enforcement. */}
             {(() => {
               const allBlocked = providerPerms.length > 0 && providerPerms.every(p => !p.final_enabled);
-              const vdoCipherPerm = providerPerms.find(p => p.provider_key === 'vdocipher');
-              const plyrPerm = providerPerms.find(p => p.provider_key === 'plyr');
-              const vdoCipherBlocked = vdoCipherPerm ? !vdoCipherPerm.final_enabled : false;
-              const plyrBlocked = plyrPerm ? !plyrPerm.final_enabled : false;
-              const blockedMsg = (perm: typeof vdoCipherPerm, name: string) =>
-                perm && !perm.global_enabled
-                  ? `${name} is currently disabled by the administrator.`
-                  : `${name} has been disabled for your account.`;
+              // vdoCipherBlocked / plyrBlocked / providerBlockedMsg are derived
+              // ONCE in the component body so the video entry area renders the
+              // exact same decision (see providerSaveBlocked).
+              const blockedMsg = providerBlockedMsg;
               return (
                 <>
                   {allBlocked && (
@@ -1238,7 +1320,16 @@ export default function LessonEditor() {
                 ) : null}
               </View>
 
-              {/* URL input */}
+              {/* URL input — replaced by an informative unavailable state when
+                  this provider is disabled for the account, so the doctor is
+                  never left filing a form the server will refuse. */}
+              {plyrBlocked || providerSaveBlocked ? (
+                <FeatureUnavailableState
+                  compact
+                  title="YouTube video is unavailable"
+                  description={providerSaveBlocked ?? providerBlockedMsg(plyrPerm, 'YouTube video')}
+                />
+              ) : (
               <View style={{ gap: 6 }}>
                 <NeuInput
                   value={youtubeUrlInput}
@@ -1274,6 +1365,7 @@ export default function LessonEditor() {
                   </Text>
                 ) : null}
               </View>
+              )}
 
               {/* Supported formats hint */}
               <View style={{ backgroundColor: `${c.primary}08`, borderRadius: 10, padding: 10, gap: 3 }}>
@@ -1299,40 +1391,6 @@ export default function LessonEditor() {
               isDark={isDark} c={c} multiline style={{ minHeight: 100 }} />
           </Field>
 
-          {/* Status — 5 states */}
-          <Field label="Lesson Status">
-            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
-              {LESSON_STATUSES.map(ls => (
-                <Pressable key={ls.value} onPress={() => setStatus(ls.value)}
-                  style={[
-                    status === ls.value ? neuPressedStyle(isDark) : neuFlatStyle(isDark),
-                    { paddingHorizontal: 14, paddingVertical: 10, borderRadius: 12, flexDirection: 'row', alignItems: 'center', gap: 6 },
-                  ]}>
-                  <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: ls.color, opacity: status === ls.value ? 1 : 0.4 }} />
-                  <Text style={{ fontSize: 13, fontWeight: '700', color: status === ls.value ? ls.color : c.text, opacity: status === ls.value ? 1 : 0.5 }}>
-                    {ls.label}
-                  </Text>
-                </Pressable>
-              ))}
-            </View>
-
-            {/* Scheduled date — shown only when status=scheduled */}
-            {status === 'scheduled' && (
-              <View style={{ marginTop: 10 }}>
-                <Field label="Publish Date & Time">
-                  <NeuInput
-                    value={scheduledAt}
-                    onChangeText={setScheduledAt}
-                    placeholder="YYYY-MM-DD HH:MM (e.g. 2025-09-01 09:00)"
-                    isDark={isDark} c={c}
-                  />
-                  <Text style={{ fontSize: 11, color: '#3B82F6', opacity: 0.8, marginTop: 2 }}>
-                    Lesson will automatically become visible at this date/time.
-                  </Text>
-                </Field>
-              </View>
-            )}
-          </Field>
         </ScrollView>
       )}
 
@@ -1445,7 +1503,7 @@ export default function LessonEditor() {
           TAB: SETTINGS
       ══════════════════════════════════════════════════════════════════════ */}
       {tab === 'settings' && (
-        <ScrollView keyboardShouldPersistTaps="handled"
+        <ScrollView automaticallyAdjustKeyboardInsets={process.env.EXPO_OS === 'ios'} keyboardShouldPersistTaps="handled"
           contentContainerStyle={{ padding: layout.screenPx, gap: 16 }}>
           <Text style={{ fontSize: 16, fontWeight: '800', color: c.text, opacity: 0.7 }}>Lesson Access</Text>
 

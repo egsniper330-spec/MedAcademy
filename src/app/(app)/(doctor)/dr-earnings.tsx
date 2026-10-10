@@ -42,8 +42,10 @@ import {
 } from '@/lib/api';
 import { NeuCard } from '@/components/NeuCard';
 import { useToast } from '@/components/Toast';
-import { neuColors, useLayout, safeBottom } from '@/lib/neu';
+import { neuColors, useLayout, safeTop, safeLeft, safeRight, safeBottom } from '@/lib/neu';
 import { DashboardHeader } from '@/components/DashboardHeader';
+import HamburgerButton from '@/components/HamburgerButton';
+import { FeatureUnavailableState } from '@/components/ScreenState';
 import {
   isFeatureEnabled,
   useFeatureFlags,
@@ -208,7 +210,7 @@ function RevenueChart({ transactions, c }: { transactions: EarningsTransactionRo
       {points.length === 0 ? (
         <Text style={{ fontSize: 13, color: c.text, opacity: 0.3, textAlign: 'center', paddingVertical: 24 }}>No data for this period</Text>
       ) : (
-        <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+        <ScrollView automaticallyAdjustKeyboardInsets={process.env.EXPO_OS === 'ios'} horizontal showsHorizontalScrollIndicator={false}>
           <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: 5, height: 110, paddingBottom: 20, minWidth: points.length * 32 }}>
             {points.map((p, i) => {
               const barH  = Math.max(4, (Math.abs(p.amount) / maxAbs) * 80);
@@ -467,7 +469,7 @@ function StudentProfileModal({ tx, doctorId, onClose, onAction, c }: {
             </Pressable>
           </View>
 
-          <ScrollView contentContainerStyle={{ paddingHorizontal: layout.screenPx }}>
+          <ScrollView automaticallyAdjustKeyboardInsets={process.env.EXPO_OS === 'ios'} contentContainerStyle={{ paddingHorizontal: layout.screenPx }}>
             {loading ? (
               <ActivityIndicator color={c.primary} style={{ marginVertical: 48 }} />
             ) : (
@@ -981,8 +983,46 @@ export default function DoctorEarnings() {
   useFocusEffect(useCallback(() => { setLoading(true); (async () => { await loadData(); })(); }, [loadData]));
   const onRefresh = async () => { setRefreshing(true); await loadData(); setRefreshing(false); };
 
+  // ── Platform-disabled: a DEDICATED, centred unavailable screen ────────────
+  //  The normal Earnings header — the "Doctor revenue · independent pricing ·
+  //  EGP" overline, the "Earnings" title and the trend/action icon — belongs
+  //  to the page that no longer exists while the feature is off, so it is not
+  //  rendered at all. Only the drawer affordance is kept, so the user can
+  //  still navigate away. The state is centred in the FULL available height,
+  //  inset-aware at the top and clearing the bottom tab bar, instead of
+  //  sitting against the top of an otherwise empty page.
+  if (platformDisabled) {
+    return (
+      <View
+        style={{
+          flex: 1,
+          backgroundColor: c.base,
+          paddingTop: safeTop(layout.insets.top),
+          paddingLeft: safeLeft(layout.insets.left || 0),
+          paddingRight: safeRight(layout.insets.right || 0),
+          paddingBottom: safeBottom(layout.insets.bottom),
+        }}
+      >
+        <View style={{ flexDirection: 'row', alignItems: 'center', paddingBottom: 8 }}>
+          <HamburgerButton plain />
+        </View>
+        <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: layout.screenPx }}>
+          <FeatureUnavailableState
+            icon={<DollarSign size={26} color="#B45309" />}
+            title="This feature is currently unavailable"
+            description={
+              flagBlockedKey
+                ? 'The platform operator has temporarily disabled this feature. Your balances and history are safe and will reappear when it is re-enabled.'
+                : 'The platform operator has temporarily disabled the earnings area. Your balances and history are safe and will reappear when it is re-enabled.'
+            }
+          />
+        </View>
+      </View>
+    );
+  }
+
   return (
-    <ScrollView
+    <ScrollView automaticallyAdjustKeyboardInsets={process.env.EXPO_OS === 'ios'}
       style={{ flex: 1, backgroundColor: c.base }}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />}
     >

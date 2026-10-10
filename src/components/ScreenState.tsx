@@ -16,7 +16,7 @@
  */
 import React from 'react';
 import { View, Text, ActivityIndicator, useColorScheme } from 'react-native';
-import { CloudOff, RefreshCw, AlertTriangle } from 'lucide-react-native';
+import { CloudOff, RefreshCw, AlertTriangle, Ban } from 'lucide-react-native';
 import { NeuButton } from '@/components/NeuButton';
 import { NeuCard } from '@/components/NeuCard';
 import { EmptyState } from '@/components/EmptyState';
@@ -88,6 +88,61 @@ export function ErrorState({ error, onRetry, retryLabel = 'Try Again', offline, 
       {body}
     </NeuCard>
   );
+}
+
+interface FeatureUnavailableStateProps {
+  /** Short headline, e.g. "Course creation is unavailable". */
+  title: string;
+  /** One or two sentences: what is off, who turned it off, what to do. */
+  description: string;
+  /** Optional custom glyph (defaults to a muted "blocked" icon). */
+  icon?: React.ReactNode;
+  /** Inline variant — no card chrome, for embedding in a form section. */
+  compact?: boolean;
+}
+
+/**
+ * Ubiquitous UNAVAILABLE-FEATURE state.
+ *
+ * A feature the Super Admin has turned OFF is NOT an error, and must never be
+ * presented as one. The historical bug was a generic "Save failed" toast when a
+ * doctor tried to use a disabled capability — which reads as "the app is
+ * broken" instead of "an administrator disabled this". Every disabled-capability
+ * surface (course creation, video provider/Plyr assignment, doctor earnings, …)
+ * renders THIS component so the copy, colour and layout stay consistent and the
+ * state is unmistakably a deliberate configuration, not a failure.
+ *
+ * Colour: amber (an advisory), never red (an error).
+ */
+export function FeatureUnavailableState({ title, description, icon, compact }: FeatureUnavailableStateProps) {
+  const isDark = useColorScheme() === 'dark';
+  const c = isDark ? neuColors.dark : neuColors.light;
+  const color = '#B45309';
+
+  const body = (
+    <View
+      style={{
+        alignItems: 'center',
+        justifyContent: 'center',
+        paddingVertical: compact ? spacing.lg : spacing.hero,
+        paddingHorizontal: spacing.lg,
+        gap: spacing.sm,
+      }}
+    >
+      <View style={{ width: 56, height: 56, borderRadius: 18, backgroundColor: `${color}18`, alignItems: 'center', justifyContent: 'center' }}>
+        {icon ?? <Ban size={26} color={color} />}
+      </View>
+      <Text style={{ fontSize: 16, fontWeight: '700', color: c.text, textAlign: 'center' }}>
+        {title}
+      </Text>
+      <Text style={{ fontSize: 13, color: c.text, opacity: 0.6, textAlign: 'center', maxWidth: 360, lineHeight: 19 }}>
+        {description}
+      </Text>
+    </View>
+  );
+
+  if (compact) return body;
+  return <NeuCard style={{ marginTop: spacing.lg }}>{body}</NeuCard>;
 }
 
 /**

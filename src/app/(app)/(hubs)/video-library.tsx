@@ -449,7 +449,7 @@ export default function VideoLibraryScreen() {
   };
 
   return (
-    <KeyboardAvoidingView style={{ flex: 1, backgroundColor: c.base }} behavior={process.env.EXPO_OS === 'ios' ? 'padding' : 'height'}>
+    <KeyboardAvoidingView style={{ flex: 1, backgroundColor: c.base }} behavior={undefined} /* keyboard: native inset only */>
 
       {/* ── Rename modal ── */}
       <Modal visible={!!renameAsset} transparent animationType="fade" onRequestClose={() => setRenameAsset(null)}>
@@ -499,7 +499,7 @@ export default function VideoLibraryScreen() {
             <Text style={{ fontSize: 13, color: c.text, opacity: 0.7, lineHeight: 19 }}>
               This removes the video from every listed lesson and permanently deletes the VdoCipher resource. Published lessons that lose their video will be automatically set to Draft.
             </Text>
-            <ScrollView showsVerticalScrollIndicator={false} style={{ maxHeight: 220 }}>
+            <ScrollView automaticallyAdjustKeyboardInsets={process.env.EXPO_OS === 'ios'} showsVerticalScrollIndicator={false} style={{ maxHeight: 220 }}>
               {(deleteConfirm?.usages ?? []).map((u) => (
                 <View key={u.lesson_id} style={[neuPressedStyle(isDark), { borderRadius: 10, padding: 10, marginBottom: 6, flexDirection: 'row', alignItems: 'center', gap: 8 }]}>
                   <Film size={12} color={c.primary} />
@@ -690,7 +690,7 @@ export default function VideoLibraryScreen() {
           inflate and alignItems:'stretch' blew every chip up to a tall block).
           flexGrow:0 shrinks the scroller to its content height; the content
           row centers its chips so they stay content-sized (~36px). */}
-      <ScrollView
+      <ScrollView automaticallyAdjustKeyboardInsets={process.env.EXPO_OS === 'ios'}
         horizontal
         showsHorizontalScrollIndicator={false}
         style={{ flexGrow: 0, flexShrink: 0 }}

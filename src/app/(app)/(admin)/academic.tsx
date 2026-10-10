@@ -5,9 +5,7 @@
 import { useCallback, useState } from 'react';
 import { PageHeader } from '@/components/PageHeader';
 import {
-  View, Text, ScrollView, useColorScheme, Pressable,
-  TextInput, ActivityIndicator, RefreshControl,
-} from 'react-native';
+  View, Text, useColorScheme, Pressable, TextInput, ActivityIndicator, RefreshControl } from 'react-native';
 import { useFocusEffect } from 'expo-router';
 import { Plus, Edit2, Trash2, ChevronDown, ChevronRight, Building2, GraduationCap, BookOpen, ToggleLeft, ToggleRight } from 'lucide-react-native';
 import {
@@ -21,6 +19,7 @@ import { ResponsiveModal } from '@/components/ResponsiveModal';
 import { useToast } from '@/components/Toast';
 import { neuColors, useLayout, safeBottom } from '@/lib/neu';
 import { validateRequired, friendlyError } from '@/lib/validation';
+import { KeyboardAwareScrollView } from '@/components/KeyboardAwareScrollView';
 
 type Tab = 'universities' | 'faculties' | 'levels';
 
@@ -273,7 +272,7 @@ export default function AcademicManagement({ backTo }: { backTo?: string } = {})
 
   return (
     <View style={{ flex: 1, backgroundColor: c.base }}>
-      <ScrollView
+      <KeyboardAwareScrollView
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />} contentContainerStyle={{ paddingBottom: safeBottom(layout.insets.bottom) }}>
           <PageHeader
             title="Academic Structure"
@@ -452,7 +451,7 @@ export default function AcademicManagement({ backTo }: { backTo?: string } = {})
             </>
           )}
         </View>
-      </ScrollView>
+      </KeyboardAwareScrollView>
 
       {/* Modals */}
       <InputModal

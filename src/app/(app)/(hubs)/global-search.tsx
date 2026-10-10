@@ -321,7 +321,7 @@ export default function GlobalSearchScreen() {
         return (
           <View>
             {/* Role filter chips */}
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 12 }}>
+            <ScrollView automaticallyAdjustKeyboardInsets={process.env.EXPO_OS === 'ios'} horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 12 }}>
               <View style={{ flexDirection: 'row', gap: 8 }}>
                 {[null, 'student', 'doctor', 'admin', 'super_admin'].map(r => (
                   <Pressable key={String(r)} onPress={() => setFilterRole(r)}
@@ -800,13 +800,13 @@ export default function GlobalSearchScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: c.base }}>
-      <ScrollView>
+      <ScrollView automaticallyAdjustKeyboardInsets={process.env.EXPO_OS === 'ios'}>
           <PageHeader title="Global Search" subtitle="Search users, courses, academic entities" accentColor={c.primary} />
 
         <View style={{ paddingHorizontal: layout.screenPx }}>
 
           {/* Search bar */}
-          <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+          <KeyboardAvoidingView behavior={undefined} /* keyboard: native inset only */>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 16 }}>
               <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', backgroundColor: c.base, borderRadius: 16, paddingHorizontal: 14, paddingVertical: 13, shadowColor: c.shadowDark, shadowOffset: { width: 3, height: 3 }, shadowOpacity: 0.6, shadowRadius: 8, minWidth: 0 }}>
                 <Search size={18} color={c.text} opacity={0.45} style={{ marginRight: 10, flexShrink: 0 }} />
@@ -833,7 +833,7 @@ export default function GlobalSearchScreen() {
 
           {/* Category tabs */}
           {searched && (
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 16 }}>
+            <ScrollView automaticallyAdjustKeyboardInsets={process.env.EXPO_OS === 'ios'} horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 16 }}>
               <View style={{ flexDirection: 'row', gap: 8 }}>
                 {categoryTabs.map(tab => (
                   <Pressable key={tab.key} onPress={() => setCategory(tab.key)}
@@ -886,7 +886,7 @@ export default function GlobalSearchScreen() {
             </View>
 
             {/* Tab strip — Timeline only shown for doctors */}
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ maxHeight: 48, borderBottomWidth: 1, borderBottomColor: `${c.text}10` }}>
+            <ScrollView automaticallyAdjustKeyboardInsets={process.env.EXPO_OS === 'ios'} horizontal showsHorizontalScrollIndicator={false} style={{ maxHeight: 48, borderBottomWidth: 1, borderBottomColor: `${c.text}10` }}>
               <View style={{ flexDirection: 'row', paddingHorizontal: 12, alignItems: 'center', height: 48 }}>
                 {DRAWER_TABS.filter(tab =>
                   tab.key !== 'timeline' || drawerUser?.role === 'doctor'
@@ -905,7 +905,7 @@ export default function GlobalSearchScreen() {
             </ScrollView>
 
             {/* Tab body */}
-            <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 18, paddingBottom: safeBottom(layout.insets.bottom) }}>
+            <ScrollView automaticallyAdjustKeyboardInsets={process.env.EXPO_OS === 'ios'} style={{ flex: 1 }} contentContainerStyle={{ padding: 18, paddingBottom: safeBottom(layout.insets.bottom) }}>
               {renderDrawerContent()}
             </ScrollView>
           </Animated.View>

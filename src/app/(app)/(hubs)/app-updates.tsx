@@ -1,8 +1,6 @@
 import { useCallback, useMemo, useState } from 'react';
 import {
-  View, Text, ScrollView, useColorScheme, RefreshControl,
-  ActivityIndicator, TextInput, Pressable, Linking, Switch,
-} from 'react-native';
+  View, Text, useColorScheme, RefreshControl, ActivityIndicator, TextInput, Pressable, Linking, Switch } from 'react-native';
 import { useFocusEffect } from 'expo-router';
 import {
   CheckCircle2, CloudUpload, History, Package, Rocket, Undo2, Archive,
@@ -19,6 +17,7 @@ import { displayVersion, normalizeSemanticVersion } from '@/lib/semver';
 import { NeuCard } from '@/components/NeuCard';
 import { NeuButton } from '@/components/NeuButton';
 import { neuColors, useLayout, safeBottom } from '@/lib/neu';
+import { KeyboardAwareScrollView } from '@/components/KeyboardAwareScrollView';
 /**
  * Super Admin → App Updates — production version management (mig028).
  *
@@ -424,7 +423,7 @@ export default function SuperAdminAppUpdates() {
   return (
     <View style={{ flex: 1, backgroundColor: c.base }}>
       <PageHeader title="App Updates" subtitle="Production version management" />
-      <ScrollView
+      <KeyboardAwareScrollView
         contentContainerStyle={{ padding: layout.pad.md, paddingBottom: safeBottom(layout.insets.bottom) + 48 }}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.text} />}
         keyboardShouldPersistTaps="handled"
@@ -844,7 +843,7 @@ export default function SuperAdminAppUpdates() {
           this screen, building, or changing any other setting. Only an explicit{'\n'}
           Publish / Activate action above moves Current Production forward.
         </Text>
-      </ScrollView>
+      </KeyboardAwareScrollView>
     </View>
   );
 }

@@ -180,7 +180,7 @@ export default function DoctorEarningsScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: c.base }}>
-      <ScrollView
+      <ScrollView automaticallyAdjustKeyboardInsets={process.env.EXPO_OS === 'ios'}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />} contentContainerStyle={{ paddingBottom: safeBottom(layout.insets.bottom) }}
       >
         <View style={{ padding: layout.screenPx, gap: 16 }}>
@@ -621,7 +621,7 @@ export default function DoctorEarningsScreen() {
         title="Pricing Change History"
         subtitle={decodeURIComponent(doctor_name ?? 'Doctor')}
       >
-        <ScrollView style={{ maxHeight: 480 }} showsVerticalScrollIndicator={false}>
+        <ScrollView automaticallyAdjustKeyboardInsets={process.env.EXPO_OS === 'ios'} style={{ maxHeight: 480 }} showsVerticalScrollIndicator={false}>
           {history.length === 0 ? (
             <View style={{ alignItems: 'center', paddingVertical: 40 }}>
               <History size={36} color={c.text} opacity={0.15} />

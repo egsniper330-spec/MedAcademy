@@ -75,7 +75,7 @@ function SelectPicker({
       </Pressable>
       {open && (
         <NeuCard radius={layout.cardRadius / 2} style={{ marginTop: layout.pad.xs, padding: layout.pad.xs, maxHeight: 220 }}>
-          <ScrollView nestedScrollEnabled keyboardShouldPersistTaps="handled">
+          <ScrollView automaticallyAdjustKeyboardInsets={process.env.EXPO_OS === 'ios'} nestedScrollEnabled keyboardShouldPersistTaps="handled">
             {options.length === 0
               ? <Text style={{ color: c.text, opacity: 0.4, fontSize: layout.captionSize, padding: layout.pad.md, textAlign: 'center' }}>No options available</Text>
               : options.map(opt => (
@@ -440,8 +440,8 @@ export default function SignUp() {
   const fieldIconSize = layout.bodySize + 2;
 
   return (
-    <KeyboardAvoidingView behavior={process.env.EXPO_OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1, backgroundColor: c.base }}>
-      <ScrollView
+    <KeyboardAvoidingView behavior={undefined} /* keyboard: native inset only */ style={{ flex: 1, backgroundColor: c.base }}>
+      <ScrollView automaticallyAdjustKeyboardInsets={process.env.EXPO_OS === 'ios'}
         contentContainerStyle={{
           flexGrow: 1,
           // screenPx: fluid horizontal gutter replaces hardcoded padding:24

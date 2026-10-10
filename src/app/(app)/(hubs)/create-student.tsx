@@ -74,7 +74,7 @@ function PickerSheet({
     }}>
       <View style={[flat, { borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 20, maxHeight: '60%' }]}>
         <Text style={{ fontSize: 17, fontWeight: '700', color: c.text, marginBottom: 16 }}>{title}</Text>
-        <ScrollView>
+        <ScrollView automaticallyAdjustKeyboardInsets={process.env.EXPO_OS === 'ios'}>
           {options.map(o => (
             <Pressable key={o.id} onPress={() => { onSelect(o); onClose(); }}
               style={{ paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: `${c.text}18`, flexDirection: 'row', alignItems: 'center', gap: 10 }}>
@@ -297,8 +297,8 @@ export default function CreateStudentScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: c.base }}>
-      <KeyboardAvoidingView behavior={process.env.EXPO_OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1 }}>
-        <ScrollView keyboardShouldPersistTaps="handled">
+      <KeyboardAvoidingView behavior={undefined} /* keyboard: native inset only */ style={{ flex: 1 }}>
+        <ScrollView automaticallyAdjustKeyboardInsets={process.env.EXPO_OS === 'ios'} keyboardShouldPersistTaps="handled">
           <PageHeader title="Create Student" subtitle={step === 1 ? 'Step 1 of 2 — Student Info' : 'Step 2 of 2 — Creation Mode'} />
 
         <View style={{ paddingHorizontal: layout.screenPx, gap: 16 }}>

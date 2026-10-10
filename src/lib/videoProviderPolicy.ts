@@ -78,16 +78,33 @@ export function providerForVideoType(videoType: string | null | undefined): Vide
 }
 
 /**
+ * True ONLY for the structured policy refusal `video_provider_disabled`
+ * (HTTP 403 from VideoProviderPolicyService::assertProviderAllowed).
+ *
+ * A DISABLED PROVIDER IS NOT A FAILURE — it is a deliberate administrator
+ * setting. Screens must branch on this so they render an unavailable-feature
+ * state instead of a generic "Save failed." error. Genuine authorization 403s
+ * ("not your course") and every other error class return false and keep their
+ * own messages.
+ */
+export function isProviderDisabledError(e: unknown): boolean {
+  const err = e as { message?: string; code?: string; status?: number } | undefined;
+  if (!err) return false;
+  if (err.code === 'video_provider_disabled') return true;
+  // Some transports surface only the status + canonical provider message.
+  return err.status === 403 && typeof err.message === 'string'
+    && err.message.toLowerCase().includes('video player is currently unavailable');
+}
+
+/**
  * Classify a policy refusal from the backend into a user-facing message.
- * ONLY the structured code `video_provider_disabled` (HTTP 403 from
- * VideoProviderPolicyService::assertProviderAllowed) maps to the friendly
- * provider notice — genuine authorization 403s ("not your course") and other
- * error classes keep their own messages and must never be collapsed into it.
+ * ONLY the structured code `video_provider_disabled` maps to the friendly
+ * provider notice.
  */
 export function describeProviderError(e: unknown): string {
-  const err = e as { message?: string; code?: string; status?: number } | undefined;
-  if (err?.code === 'video_provider_disabled') {
+  if (isProviderDisabledError(e)) {
     return 'This video player is currently unavailable. Please choose another available player.';
   }
+  const err = e as { message?: string } | undefined;
   return err?.message ?? 'Video player unavailable. Please try again later.';
 }

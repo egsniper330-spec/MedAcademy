@@ -1,9 +1,7 @@
 import React, { useState, useCallback } from 'react';
 import { useFocusEffect, useRouter } from 'expo-router';
 import {
-  View, Text, ScrollView, Pressable, ActivityIndicator,
-  Switch, useColorScheme, TextInput,
-} from 'react-native';
+  View, Text, Pressable, ActivityIndicator, Switch, useColorScheme, TextInput } from 'react-native';
 import {
   ShieldAlert, ShieldCheck, Wifi, Globe, Bug, Lock,
   Camera, Trash2, Plus, Save,
@@ -15,6 +13,7 @@ import { useToast } from '@/components/Toast';
 import { backendClient } from '@/client/backendClient';
 import { invalidatePolicyCache } from '@/lib/security';
 import { friendlyError } from '@/lib/validation';
+import { KeyboardAwareScrollView } from '@/components/KeyboardAwareScrollView';
 
 // ── Server contract (Super-Admin-only write plane) ─────────────────────────
 //
@@ -188,7 +187,7 @@ export default function SecurityPoliciesScreen() {
   return (
     <View style={{ flex: 1, backgroundColor: c.base }}>
       <PageHeader title="Security Policies" showBack backFallback="/sa-platform" />
-      <ScrollView
+      <KeyboardAwareScrollView
         contentContainerStyle={{ padding: layout.screenPx, gap: layout.sectionGap }}
       >
         {/* Intro */}
@@ -333,7 +332,7 @@ export default function SecurityPoliciesScreen() {
             </View>
           ))
         )}
-      </ScrollView>
+      </KeyboardAwareScrollView>
     </View>
   );
 }

@@ -9,6 +9,7 @@ import {
   Lock, Paperclip, Pause, Play, RefreshCw, ShieldAlert, X,
 } from 'lucide-react-native';
 import { getLessonById, upsertLessonProgress, getMySubscriptions, getMaterialSignedUrl, getLessonPdfSignedUrl, getCourseById } from '@/lib/api';
+import { materialAccess, materialActionLabel, visibleMaterials } from '@/lib/lessonMaterials';
 import { backendClient } from '@/client/backendClient';
 import { useProfileStore } from '@/lib/store';
 import { isPreviewStudent } from '@/lib/previewAsStudent';
@@ -89,6 +90,121 @@ function cleanFileName(name: string | null | undefined): string {
 // Storage paths contain slashes and look like "videos/.../file.mov".
 function isVdoCipherVideoId(videoId: string | null | undefined): boolean {
   return !!videoId && !videoId.includes('/') && !videoId.includes('.');
+}
+
+/**
+ * Lesson Materials / Attachments — the ONE renderer used by both lesson-screen
+ * layouts (pinned-player and standard), so the two can never drift apart.
+ *
+ * Visibility rules (client half; the server enforces the same policy when it
+ * mints the signed URL):
+ *   • `hidden` / `disabled` materials are NOT listed to a student at all.
+ *   • `preview_only` (or download disabled) materials are listed as View — no
+ *     download is offered, and a download link is refused server-side anyway.
+ *   • `allow` materials offer Download.
+ * The section renders nothing when there is no accessible content, so an empty
+ * lesson never shows a dangling heading.
+ */
+function MaterialsSection({
+  materials, pdfs, canAccess, c,
+  onOpenMaterial, onOpenPdf,
+}: {
+  materials: any[];
+  pdfs: any[];
+  canAccess: boolean;
+  c: any;
+  onOpenMaterial: (storagePathOrUrl: string, displayName: string, forDownload: boolean) => void;
+  onOpenPdf: (fileUrlOrPath: string, displayName: string) => void;
+}) {
+  const items = visibleMaterials(materials);
+  if (items.length === 0 && pdfs.length === 0) return null;
+
+  return (
+    <>
+      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+        <Text style={{ fontSize: 17, fontWeight: '700', color: c.text }}>Lecture Materials</Text>
+        {!canAccess ? (
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
+            <Lock size={13} color={c.text} opacity={0.4} />
+            <Text style={{ fontSize: 12, color: c.text, opacity: 0.4 }}>Subscribers only</Text>
+          </View>
+        ) : (
+          <Text style={{ fontSize: 12, color: c.text, opacity: 0.45 }}>
+            {items.length + pdfs.length} {items.length + pdfs.length === 1 ? 'file' : 'files'}
+          </Text>
+        )}
+      </View>
+
+      {canAccess ? (
+        <>
+          {items.map((mat: any) => {
+            const fi = fileIcon(mat.file_type);
+            const Icon = fi.icon;
+            const name = cleanFileName(mat.file_name);
+            const access = materialAccess(mat);
+            const downloadable = access === 'download';
+            const path = mat.storage_path ?? mat.file_url;
+            return (
+              <Pressable
+                key={mat.id}
+                onPress={() => { if (path) onOpenMaterial(path, name, downloadable); }}
+                accessibilityLabel={downloadable ? `Download ${name}` : `View ${name}`}
+                accessibilityRole="button"
+              >
+                <NeuCard style={{ flexDirection: 'row', alignItems: 'center', gap: 12, padding: 14 }}>
+                  <View style={{ width: 44, height: 44, borderRadius: 12, backgroundColor: `${fi.color}18`, alignItems: 'center', justifyContent: 'center' }}>
+                    <Icon size={22} color={fi.color} />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={{ fontSize: 14, fontWeight: '600', color: c.text }} numberOfLines={1}>{name}</Text>
+                    <Text style={{ fontSize: 12, color: c.text, opacity: 0.45 }}>
+                      {[formatBytes(mat.file_size), mat.file_type?.split('/')[1]?.toUpperCase() ?? 'FILE']
+                        .filter(Boolean).join(' · ')}
+                    </Text>
+                  </View>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: `${c.primary}12`, borderRadius: 8, paddingHorizontal: 8, paddingVertical: 4 }}>
+                    {downloadable ? <Download size={13} color={c.primary} /> : <Eye size={13} color={c.primary} />}
+                    <Text style={{ fontSize: 11, fontWeight: '700', color: c.primary }}>
+                      {materialActionLabel(access)}
+                    </Text>
+                  </View>
+                </NeuCard>
+              </Pressable>
+            );
+          })}
+          {/* legacy lesson_pdfs — no per-material permission column; access is
+              governed by the enrollment gate (`canAccess`) as before. */}
+          {pdfs.map((pdf: any) => {
+            const pdfName = pdf.title ?? pdf.file_name ?? 'Lecture Notes';
+            return (
+              <Pressable key={pdf.id} onPress={() => onOpenPdf(pdf.file_url, pdfName)} accessibilityLabel={`Download ${pdfName}`} accessibilityRole="button">
+                <NeuCard style={{ flexDirection: 'row', alignItems: 'center', gap: 12, padding: 14 }}>
+                  <View style={{ width: 44, height: 44, borderRadius: 12, backgroundColor: '#DC262618', alignItems: 'center', justifyContent: 'center' }}>
+                    <FileText size={22} color="#DC2626" />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={{ fontSize: 14, fontWeight: '600', color: c.text }}>{pdfName}</Text>
+                    <Text style={{ fontSize: 12, color: c.text, opacity: 0.45 }}>PDF Document</Text>
+                  </View>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: '#DC262612', borderRadius: 8, paddingHorizontal: 8, paddingVertical: 4 }}>
+                    <Download size={13} color="#DC2626" />
+                    <Text style={{ fontSize: 11, fontWeight: '700', color: '#DC2626' }}>Download</Text>
+                  </View>
+                </NeuCard>
+              </Pressable>
+            );
+          })}
+        </>
+      ) : (
+        <NeuCard style={{ padding: 16, alignItems: 'center', gap: 10 }}>
+          <Lock size={32} color={c.text} opacity={0.2} />
+          <Text style={{ fontSize: 14, fontWeight: '600', color: c.text, opacity: 0.5 }}>
+            Subscribe to access {items.length + pdfs.length} {items.length + pdfs.length === 1 ? 'material' : 'materials'}
+          </Text>
+        </NeuCard>
+      )}
+    </>
+  );
 }
 
 export default function LessonPlayer() {
@@ -514,18 +630,35 @@ export default function LessonPlayer() {
     }
   }, []);
 
-  /** Download a lesson-material via a fresh 1-hour signed URL. */
-  const openMaterial = useCallback(async (storagePathOrUrl: string, displayName?: string) => {
+  /**
+   * Open a lesson material through a fresh 1-hour signed URL.
+   *
+   * `forDownload` mirrors the action the student took: a `preview_only` material
+   * (or one with downloads switched off) asks for a VIEW link, and the server
+   * refuses to mint a download link for it. A refusal is surfaced as the honest
+   * per-material message rather than a generic failure.
+   */
+  const openMaterial = useCallback(async (
+    storagePathOrUrl: string,
+    displayName?: string,
+    forDownload = true,
+  ) => {
     if (!storagePathOrUrl) return;
     try {
-      const signedUrl = await getMaterialSignedUrl(storagePathOrUrl);
+      const signedUrl = await getMaterialSignedUrl(storagePathOrUrl, forDownload);
       await downloadFile(signedUrl, displayName ?? 'Course Material');
     } catch (e: any) {
-      console.error('[openMaterial] signed URL error:', e?.message ?? e);
+      const msg = String(e?.message ?? '');
+      const refused = /access denied|403/i.test(msg);
+      console.error('[openMaterial] signed URL error:', msg);
       setDownloadState({
         visible: true, fileName: displayName ?? 'Course Material',
         progress: 0, status: 'error',
-        errorMsg: 'Could not generate a download link. Please try again.',
+        errorMsg: refused
+          ? (forDownload
+              ? 'This material is not available for download. You can still open it from the lesson.'
+              : 'You no longer have access to this material.')
+          : 'Could not generate a download link. Please try again.',
       });
     }
   }, [downloadFile]);
@@ -1098,84 +1231,20 @@ export default function LessonPlayer() {
           </NeuCard>
         )}
 
-        {/* ── Materials ── */}
-        {!isFullscreen && ((lesson.lesson_materials?.length > 0) || (lesson.lesson_pdfs?.length > 0)) && (
-          <>
-            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-              <Text style={{ fontSize: 17, fontWeight: '700', color: c.text }}>Lesson Materials</Text>
-              {!canAccessMaterials && (
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
-                  <Lock size={13} color={c.text} opacity={0.4} />
-                  <Text style={{ fontSize: 12, color: c.text, opacity: 0.4 }}>Subscribers only</Text>
-                </View>
-              )}
-            </View>
-
-            {canAccessMaterials ? (
-              <>
-                {/* lesson_materials (new) */}
-                {(lesson.lesson_materials ?? []).map((mat: any) => {
-                  const fi = fileIcon(mat.file_type);
-                  const Icon = fi.icon;
-                  const name = cleanFileName(mat.file_name);
-                  return (
-                    <Pressable
-                      key={mat.id}
-                      onPress={() => mat.download_enabled && openMaterial(mat.storage_path ?? mat.file_url, name)}
-                      accessibilityLabel={mat.download_enabled ? `Download ${name}` : name}
-                      accessibilityRole="button"
-                    >
-                      <NeuCard style={{ flexDirection: 'row', alignItems: 'center', gap: 12, padding: 14 }}>
-                        <View style={{ width: 44, height: 44, borderRadius: 12, backgroundColor: `${fi.color}18`, alignItems: 'center', justifyContent: 'center' }}>
-                          <Icon size={22} color={fi.color} />
-                        </View>
-                        <View style={{ flex: 1 }}>
-                          <Text style={{ fontSize: 14, fontWeight: '600', color: c.text }} numberOfLines={1}>{name}</Text>
-                          <Text style={{ fontSize: 12, color: c.text, opacity: 0.45 }}>
-                            {formatBytes(mat.file_size)} · {mat.file_type?.split('/')[1]?.toUpperCase() ?? 'FILE'}
-                          </Text>
-                        </View>
-                        {mat.download_enabled && (
-                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: `${c.primary}12`, borderRadius: 8, paddingHorizontal: 8, paddingVertical: 4 }}>
-                            <Download size={13} color={c.primary} />
-                            <Text style={{ fontSize: 11, fontWeight: '700', color: c.primary }}>Download</Text>
-                          </View>
-                        )}
-                      </NeuCard>
-                    </Pressable>
-                  );
-                })}
-                {/* legacy lesson_pdfs */}
-                {(lesson.lesson_pdfs ?? []).map((pdf: any) => {
-                  const pdfName = pdf.title ?? pdf.file_name ?? 'Lecture Notes';
-                  return (
-                    <Pressable key={pdf.id} onPress={() => openPdf(pdf.file_url, pdfName)} accessibilityLabel={`Download ${pdfName}`} accessibilityRole="button">
-                      <NeuCard style={{ flexDirection: 'row', alignItems: 'center', gap: 12, padding: 14 }}>
-                        <View style={{ width: 44, height: 44, borderRadius: 12, backgroundColor: '#DC262618', alignItems: 'center', justifyContent: 'center' }}>
-                          <FileText size={22} color="#DC2626" />
-                        </View>
-                        <View style={{ flex: 1 }}>
-                          <Text style={{ fontSize: 14, fontWeight: '600', color: c.text }}>{pdfName}</Text>
-                          <Text style={{ fontSize: 12, color: c.text, opacity: 0.45 }}>PDF Document</Text>
-                        </View>
-                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: '#DC262612', borderRadius: 8, paddingHorizontal: 8, paddingVertical: 4 }}>
-                          <Download size={13} color="#DC2626" />
-                          <Text style={{ fontSize: 11, fontWeight: '700', color: '#DC2626' }}>Download</Text>
-                        </View>
-                      </NeuCard>
-                    </Pressable>
-                  );
-                })}
-              </>
-            ) : (
-              <NeuCard style={{ padding: layout.screenPx, alignItems: 'center', gap: 10 }}>
-                <Lock size={32} color={c.text} opacity={0.2} />
-                <Text style={{ fontSize: 14, fontWeight: '600', color: c.text, opacity: 0.5 }}>
-                  Subscribe to access {(lesson.lesson_materials?.length ?? 0) + (lesson.lesson_pdfs?.length ?? 0)} materials
-                </Text>
-              </NeuCard>
-            )}
-          </>
+        {/* ── Lecture Materials / Attachments ──
+            One shared renderer for both lesson layouts. It hides itself when the
+            lesson has no accessible attachments, lists hidden/disabled ones to
+            nobody, and offers View (not Download) for `preview_only` materials.
+            Shown below the player, lesson info and notes. */}
+        {!isFullscreen && (
+          <MaterialsSection
+            materials={lesson.lesson_materials ?? []}
+            pdfs={lesson.lesson_pdfs ?? []}
+            canAccess={canAccessMaterials}
+            c={c}
+            onOpenMaterial={openMaterial}
+            onOpenPdf={openPdf}
+          />
         )}
 
         {/* Mark Complete / Mark Incomplete — hidden during fullscreen */}
@@ -1346,84 +1415,20 @@ export default function LessonPlayer() {
           </NeuCard>
         )}
 
-        {/* ── Materials ── */}
-        {!isFullscreen && ((lesson.lesson_materials?.length > 0) || (lesson.lesson_pdfs?.length > 0)) && (
-          <>
-            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-              <Text style={{ fontSize: 17, fontWeight: '700', color: c.text }}>Lesson Materials</Text>
-              {!canAccessMaterials && (
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
-                  <Lock size={13} color={c.text} opacity={0.4} />
-                  <Text style={{ fontSize: 12, color: c.text, opacity: 0.4 }}>Subscribers only</Text>
-                </View>
-              )}
-            </View>
-
-            {canAccessMaterials ? (
-              <>
-                {/* lesson_materials (new) */}
-                {(lesson.lesson_materials ?? []).map((mat: any) => {
-                  const fi = fileIcon(mat.file_type);
-                  const Icon = fi.icon;
-                  const name = cleanFileName(mat.file_name);
-                  return (
-                    <Pressable
-                      key={mat.id}
-                      onPress={() => mat.download_enabled && openMaterial(mat.storage_path ?? mat.file_url, name)}
-                      accessibilityLabel={mat.download_enabled ? `Download ${name}` : name}
-                      accessibilityRole="button"
-                    >
-                      <NeuCard style={{ flexDirection: 'row', alignItems: 'center', gap: 12, padding: 14 }}>
-                        <View style={{ width: 44, height: 44, borderRadius: 12, backgroundColor: `${fi.color}18`, alignItems: 'center', justifyContent: 'center' }}>
-                          <Icon size={22} color={fi.color} />
-                        </View>
-                        <View style={{ flex: 1 }}>
-                          <Text style={{ fontSize: 14, fontWeight: '600', color: c.text }} numberOfLines={1}>{name}</Text>
-                          <Text style={{ fontSize: 12, color: c.text, opacity: 0.45 }}>
-                            {formatBytes(mat.file_size)} · {mat.file_type?.split('/')[1]?.toUpperCase() ?? 'FILE'}
-                          </Text>
-                        </View>
-                        {mat.download_enabled && (
-                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: `${c.primary}12`, borderRadius: 8, paddingHorizontal: 8, paddingVertical: 4 }}>
-                            <Download size={13} color={c.primary} />
-                            <Text style={{ fontSize: 11, fontWeight: '700', color: c.primary }}>Download</Text>
-                          </View>
-                        )}
-                      </NeuCard>
-                    </Pressable>
-                  );
-                })}
-                {/* legacy lesson_pdfs */}
-                {(lesson.lesson_pdfs ?? []).map((pdf: any) => {
-                  const pdfName = pdf.title ?? pdf.file_name ?? 'Lecture Notes';
-                  return (
-                    <Pressable key={pdf.id} onPress={() => openPdf(pdf.file_url, pdfName)} accessibilityLabel={`Download ${pdfName}`} accessibilityRole="button">
-                      <NeuCard style={{ flexDirection: 'row', alignItems: 'center', gap: 12, padding: 14 }}>
-                        <View style={{ width: 44, height: 44, borderRadius: 12, backgroundColor: '#DC262618', alignItems: 'center', justifyContent: 'center' }}>
-                          <FileText size={22} color="#DC2626" />
-                        </View>
-                        <View style={{ flex: 1 }}>
-                          <Text style={{ fontSize: 14, fontWeight: '600', color: c.text }}>{pdfName}</Text>
-                          <Text style={{ fontSize: 12, color: c.text, opacity: 0.45 }}>PDF Document</Text>
-                        </View>
-                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: '#DC262612', borderRadius: 8, paddingHorizontal: 8, paddingVertical: 4 }}>
-                          <Download size={13} color="#DC2626" />
-                          <Text style={{ fontSize: 11, fontWeight: '700', color: '#DC2626' }}>Download</Text>
-                        </View>
-                      </NeuCard>
-                    </Pressable>
-                  );
-                })}
-              </>
-            ) : (
-              <NeuCard style={{ padding: layout.screenPx, alignItems: 'center', gap: 10 }}>
-                <Lock size={32} color={c.text} opacity={0.2} />
-                <Text style={{ fontSize: 14, fontWeight: '600', color: c.text, opacity: 0.5 }}>
-                  Subscribe to access {(lesson.lesson_materials?.length ?? 0) + (lesson.lesson_pdfs?.length ?? 0)} materials
-                </Text>
-              </NeuCard>
-            )}
-          </>
+        {/* ── Lecture Materials / Attachments ──
+            One shared renderer for both lesson layouts. It hides itself when the
+            lesson has no accessible attachments, lists hidden/disabled ones to
+            nobody, and offers View (not Download) for `preview_only` materials.
+            Shown below the player, lesson info and notes. */}
+        {!isFullscreen && (
+          <MaterialsSection
+            materials={lesson.lesson_materials ?? []}
+            pdfs={lesson.lesson_pdfs ?? []}
+            canAccess={canAccessMaterials}
+            c={c}
+            onOpenMaterial={openMaterial}
+            onOpenPdf={openPdf}
+          />
         )}
 
         {/* Mark Complete / Mark Incomplete — hidden during fullscreen */}

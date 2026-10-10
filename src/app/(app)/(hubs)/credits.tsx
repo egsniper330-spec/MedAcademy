@@ -1,5 +1,5 @@
 import { useCallback, useState } from 'react';
-import { View, Text, ScrollView, TextInput, useColorScheme, RefreshControl, ActivityIndicator } from 'react-native';
+import { View, Text, TextInput, useColorScheme, RefreshControl, ActivityIndicator } from 'react-native';
 import { useFocusEffect } from 'expo-router';
 import { CreditCard, TrendingUp, TrendingDown, Clock, Ticket } from 'lucide-react-native';
 import { useCreditBalance } from '@/lib/useCreditBalance';
@@ -12,6 +12,7 @@ import { ResponsiveModal } from '@/components/ResponsiveModal';
 import { useToast } from '@/components/Toast';
 import { neuColors, useLayout, safeBottom } from '@/lib/neu';
 import { PageHeader } from '@/components/PageHeader';
+import { KeyboardAwareScrollView } from '@/components/KeyboardAwareScrollView';
 
 export default function DoctorCredits() {
   const scheme = useColorScheme();
@@ -76,7 +77,7 @@ export default function DoctorCredits() {
   };
 
   return (
-    <ScrollView style={{ flex: 1, backgroundColor: c.base }}
+    <KeyboardAwareScrollView style={{ flex: 1, backgroundColor: c.base }}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />} contentContainerStyle={{ paddingBottom: safeBottom(layout.insets.bottom) }}>
       <PageHeader title="My Credits" subtitle="Credit balance & history" accentColor={c.primary} />
 
@@ -189,6 +190,6 @@ export default function DoctorCredits() {
           Credits are added to your existing balance after the server confirms the code.
         </Text>
       </ResponsiveModal>
-    </ScrollView>
+    </KeyboardAwareScrollView>
   );
 }

@@ -548,7 +548,7 @@ export default function UserAuditLogs() {
         </View>
 
         {/* Date preset row */}
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: layout.pad.sm }}>
+        <ScrollView automaticallyAdjustKeyboardInsets={process.env.EXPO_OS === 'ios'} horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: layout.pad.sm }}>
           <View style={{ flexDirection: 'row', gap: layout.pad.sm, paddingRight: layout.pad.sm }}>
             {DATE_PRESETS.map(p => (
               <FilterPill
@@ -571,7 +571,7 @@ export default function UserAuditLogs() {
         </ScrollView>
 
         {/* Activity type chips */}
-        <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+        <ScrollView automaticallyAdjustKeyboardInsets={process.env.EXPO_OS === 'ios'} horizontal showsHorizontalScrollIndicator={false}>
           <View style={{ flexDirection: 'row', gap: layout.pad.sm, paddingRight: layout.pad.sm }}>
             {CATEGORIES.map(cat => {
               const Icon = cat.icon;

@@ -269,6 +269,10 @@ function doctorOf(item: CourseItem): { id: string; full_name: string } | null {
         contentContainerStyle={{ paddingHorizontal: layout.screenPx }}
         keyboardShouldPersistTaps="handled"
         keyboardDismissMode="on-drag"
+        /* keyboard: native iOS inset, once — no KeyboardAvoidingView stacking a
+           second inset on top; Android is adjustResize so nothing is needed
+           there. Same mechanism as the shared KeyboardAwareScrollView. */
+        automaticallyAdjustKeyboardInsets={process.env.EXPO_OS === 'ios'}
         refreshControl={
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />
         }

@@ -315,10 +315,10 @@ export default function SignIn() {
 
   return (
     <KeyboardAvoidingView
-      behavior={process.env.EXPO_OS === 'ios' ? 'padding' : 'height'}
+      behavior={undefined} /* keyboard: native inset only */
       style={{ flex: 1, backgroundColor: c.base }}
     >
-      <ScrollView
+      <ScrollView automaticallyAdjustKeyboardInsets={process.env.EXPO_OS === 'ios'}
         contentContainerStyle={{
           flexGrow: 1,
           justifyContent: 'center',

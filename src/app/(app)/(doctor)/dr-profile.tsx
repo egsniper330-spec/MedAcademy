@@ -189,7 +189,7 @@ function RevenueChart({ transactions, c }: { transactions: EarningsTransactionRo
       {points.length === 0 ? (
         <Text style={{ fontSize: 13, color: c.text, opacity: 0.3, textAlign: 'center', paddingVertical: 24 }}>No data for this period</Text>
       ) : (
-        <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+        <ScrollView automaticallyAdjustKeyboardInsets={process.env.EXPO_OS === 'ios'} horizontal showsHorizontalScrollIndicator={false}>
           <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: 5, height: 110, paddingBottom: 20, minWidth: points.length * 32 }}>
             {points.map((p, i) => {
               const barH = Math.max(4, (Math.abs(p.amount) / maxAbs) * 80);
@@ -624,7 +624,7 @@ function StudentProfileModal({ tx, doctorId, onClose, onAction, c }: {
             </Pressable>
           </View>
 
-          <ScrollView contentContainerStyle={{ paddingHorizontal: layout.screenPx }}>
+          <ScrollView automaticallyAdjustKeyboardInsets={process.env.EXPO_OS === 'ios'} contentContainerStyle={{ paddingHorizontal: layout.screenPx }}>
             {loading ? <ActivityIndicator color={c.primary} style={{ marginVertical: 48 }} /> : (
               <>
                 {isDeleted && (
@@ -1032,7 +1032,7 @@ function EarningsTab({ doctorId, earningsEnabled, c }: { // eslint-disable-line 
   const courseRows    = d?.courseRows          ?? [];
 
   return (
-    <ScrollView
+    <ScrollView automaticallyAdjustKeyboardInsets={process.env.EXPO_OS === 'ios'}
       style={{ flex: 1, backgroundColor: c.base }}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />}
       contentContainerStyle={{ padding: layout.screenPx }}
@@ -1344,7 +1344,7 @@ export default function DoctorProfile() {
 
   // ── Tab: Profile ───────────────────────────────────────────────────────────
   const renderProfileTab = () => (
-    <ScrollView
+    <ScrollView automaticallyAdjustKeyboardInsets={process.env.EXPO_OS === 'ios'}
       style={{ flex: 1, backgroundColor: c.base }}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />}
       contentContainerStyle={{ padding: layout.screenPx }}
@@ -1460,7 +1460,7 @@ export default function DoctorProfile() {
       { label: 'Contact Us',         icon: HeartHandshake, path: '/(app)/info/contact' as RelativePathString },
     ];
     return (
-      <ScrollView
+      <ScrollView automaticallyAdjustKeyboardInsets={process.env.EXPO_OS === 'ios'}
         style={{ flex: 1, backgroundColor: c.base }}
         contentContainerStyle={{ padding: layout.screenPx }}
       >

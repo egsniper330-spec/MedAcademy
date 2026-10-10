@@ -55,8 +55,14 @@ final class CourseController
                 $params[] = $userId;
             }
         } else {
+            //  SUSPENSION ENFORCEMENT: a SUSPENDED enrollment must not keep a
+            //  draft/hidden course visible to the student. Only a NON-suspended
+            //  enrollment grants that visibility (published courses stay
+            //  browsable by everyone, as before).
             $sql .= " WHERE c.status = 'published'
-                      OR EXISTS (SELECT 1 FROM enrollments e WHERE e.student_id = ? AND e.course_id = c.id)";
+                      OR EXISTS (SELECT 1 FROM enrollments e
+                                  WHERE e.student_id = ? AND e.course_id = c.id
+                                    AND (e.status IS NULL OR e.status <> 'suspended'))";
             $params[] = $userId;
         }
         $sql .= ' ORDER BY c.created_at DESC LIMIT 200';
@@ -479,6 +485,11 @@ final class CourseController
      */
     public function duplicate(Request $request): array
     {
+        // Feature flag: course_creation — duplicating creates a NEW course row,
+        // so it is a course-creation operation and must honour the same flag as
+        // POST /courses. Gate-first, before any read or write.
+        $this->flags->assertEnabled('course_creation', $request);
+
         $id = Uuid::normalize((string) $request->params['id']);
         $this->assertCourseOwner($request, $id);
 
@@ -639,10 +650,18 @@ final class CourseController
     }
 
     // ---- helpers ----------------------------------------------------------
+    /**
+     * Enrollment that grants course access. A SUSPENDED enrollment is not
+     * access, so the row's status is part of the question — previously this
+     * counted rows regardless of status, so a suspension never took effect on
+     * the course detail / sections / lessons paths.
+     */
     private function isEnrolled(string $studentId, string $courseId): bool
     {
         return (bool) Database::instance()->value(
-            'SELECT COUNT(*) FROM enrollments WHERE student_id = ? AND course_id = ?',
+            "SELECT COUNT(*) FROM enrollments
+              WHERE student_id = ? AND course_id = ?
+                AND (status IS NULL OR status <> 'suspended')",
             [$studentId, $courseId], 0
         );
     }

@@ -78,7 +78,7 @@ export default function NotificationsCenterScreen({ backTo }: { backTo?: string 
   const inp = { backgroundColor: c.base, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, shadowColor: c.shadowDark, shadowOffset: { width: 2, height: 2 }, shadowOpacity: 0.45, shadowRadius: 5 };
 
   return (
-    <ScrollView style={{ flex: 1, backgroundColor: c.base }}
+    <ScrollView automaticallyAdjustKeyboardInsets={process.env.EXPO_OS === 'ios'} style={{ flex: 1, backgroundColor: c.base }}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />} contentContainerStyle={{ paddingBottom: safeBottom(layout.insets.bottom) }}>
       <PageHeader
         title="Notification Center"
@@ -96,7 +96,7 @@ export default function NotificationsCenterScreen({ backTo }: { backTo?: string 
 
           {/* Target type */}
           <Text style={{ fontSize: 11, fontWeight: '700', color: c.text, opacity: 0.5, marginBottom: 8, textTransform: 'uppercase', letterSpacing: 0.8 }}>Target</Text>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 14 }}>
+          <ScrollView automaticallyAdjustKeyboardInsets={process.env.EXPO_OS === 'ios'} horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 14 }}>
             <View style={{ flexDirection: 'row', gap: 8 }}>
               {TARGET_TYPES.map(t => {
                 const active = targetType === t.key;
@@ -113,7 +113,7 @@ export default function NotificationsCenterScreen({ backTo }: { backTo?: string 
 
           {/* Conditional target selectors */}
           {targetType === 'role' && (
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 14 }}>
+            <ScrollView automaticallyAdjustKeyboardInsets={process.env.EXPO_OS === 'ios'} horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 14 }}>
               <View style={{ flexDirection: 'row', gap: 8 }}>
                 {ROLES.map(r => (
                   <Pressable key={r} onPress={() => setTargetRole(r)}
@@ -126,7 +126,7 @@ export default function NotificationsCenterScreen({ backTo }: { backTo?: string 
           )}
 
           {targetType === 'university' && (
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 14 }}>
+            <ScrollView automaticallyAdjustKeyboardInsets={process.env.EXPO_OS === 'ios'} horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 14 }}>
               <View style={{ flexDirection: 'row', gap: 8 }}>
                 {universities.map(u => (
                   <Pressable key={u.id} onPress={() => setTargetUniversityId(u.id)}

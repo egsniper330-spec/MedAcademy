@@ -4,9 +4,7 @@
  */
 import { useCallback, useState } from 'react';
 import {
-  View, Text, ScrollView, Switch, TextInput, ActivityIndicator,
-  RefreshControl, useColorScheme, Pressable,
-} from 'react-native';
+  View, Text, Switch, TextInput, ActivityIndicator, RefreshControl, useColorScheme, Pressable } from 'react-native';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { Wrench, Plus, Trash2, UserCheck, AlertTriangle } from 'lucide-react-native';
 import { PageHeader } from '@/components/PageHeader';
@@ -23,6 +21,7 @@ import { useToast } from '@/components/Toast';
 import { neuColors, useLayout, safeBottom } from '@/lib/neu';
 import { useDebounce } from '@/lib/useDebounce';
 import { friendlyError } from '@/lib/validation';
+import { KeyboardAwareScrollView } from '@/components/KeyboardAwareScrollView';
 
 export default function MaintenanceModeScreen() {
   const scheme = useColorScheme();
@@ -116,7 +115,7 @@ export default function MaintenanceModeScreen() {
   const inp = { backgroundColor: c.base, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, shadowColor: c.shadowDark, shadowOffset: { width: 2, height: 2 }, shadowOpacity: 0.55, shadowRadius: 5 };
 
   return (
-    <ScrollView style={{ flex: 1, backgroundColor: c.base }}
+    <KeyboardAwareScrollView style={{ flex: 1, backgroundColor: c.base }}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />} contentContainerStyle={{ paddingBottom: safeBottom(layout.insets.bottom) }}>
       <PageHeader
         title="Maintenance Mode"
@@ -253,6 +252,6 @@ export default function MaintenanceModeScreen() {
         ))}
         {adding && <ActivityIndicator color={c.primary} style={{ marginTop: 8 }} />}
       </ResponsiveModal>
-    </ScrollView>
+    </KeyboardAwareScrollView>
   );
 }

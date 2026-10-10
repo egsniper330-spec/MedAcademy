@@ -70,7 +70,7 @@ final class FeatureFlagService
         ],
         'course_creation' => [
             'label'       => 'Course Creation',
-            'description' => 'Allow creating new courses. Enforced on POST /courses.',
+            'description' => 'Allow creating new courses. Enforced on POST /courses, POST /rpc/create-course-audited (the path the doctor app uses), POST /api/courses and POST /courses/{id}/duplicate. Existing courses are never modified.',
             'category'    => 'courses',
             'default'     => true,
             'superadmin_exempt' => true,

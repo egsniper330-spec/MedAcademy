@@ -107,10 +107,19 @@ final class StorageService
 
     /**
      * Authorisation check — port of the get-signed-url Edge Function:
-     *   lesson-materials: doctor/admin/super_admin OR enrolled student OR preview lesson
+     *   lesson-materials: doctor/admin/super_admin OR ENROLLED (non-suspended)
+     *                     student on a PUBLISHED lesson/course OR preview lesson
      *   lesson-pdfs:      any authenticated user
+     *
+     * $forDownload distinguishes the app's "save this file" action from merely
+     * VIEWING it. A material the doctor set to `preview_only` may be viewed but
+     * never delivered for download, and `download_enabled = false` blocks the
+     * download for any permission level. (`hidden` / `disabled` are refused for
+     * both.) The bytes still have to reach the device to be displayed, so the
+     * enforceable boundary is the mint request that carries this intent — which
+     * is exactly what the client sends when the student taps Download.
      */
-    public function canAccess(string $userId, string $role, string $bucket, string $path): bool
+    public function canAccess(string $userId, string $role, string $bucket, string $path, bool $forDownload = false): bool
     {
         if (in_array($role, ['doctor', 'admin', 'super_admin'], true)) {
             return true;
@@ -120,9 +129,12 @@ final class StorageService
         }
         if ($bucket === 'lesson-materials') {
             $row = Database::instance()->row(
-                'SELECT lm.course_id, l.is_preview
+                'SELECT lm.course_id, lm.permission, lm.download_enabled, lm.preview_enabled,
+                        l.is_preview, l.status AS lesson_status,
+                        c.status AS course_status
                    FROM lesson_materials lm
                    LEFT JOIN lessons l ON l.id = lm.lesson_id
+                   LEFT JOIN courses c ON c.id = lm.course_id
                   WHERE lm.storage_path = ?
                   LIMIT 1',
                 [$path]
@@ -130,15 +142,51 @@ final class StorageService
             if ($row === null) {
                 return false;
             }
-            if (!empty($row['is_preview'])) {
-                return true;
+            // 1. A material the doctor switched off is never delivered — not to
+            //    a viewer, not as a download. This is the per-material policy the
+            //    lesson editor already exposes (allow / preview_only / hidden /
+            //    disabled); before this check it was honoured ONLY in the UI, so
+            //    any enrolled student who knew the storage path could fetch a
+            //    hidden attachment directly through the storage API.
+            $permission = (string) ($row['permission'] ?? 'allow');
+            if (in_array($permission, ['hidden', 'disabled'], true)) {
+                return false;
             }
+            // 2. A free-preview lesson is open to any authenticated user
+            //    (unchanged), but the material's own permission switch still
+            //    applies to DOWNLOADS.
+            if (!empty($row['is_preview'])) {
+                return !($forDownload && ($permission === 'preview_only' || !$row['download_enabled']));
+            }
+            // 3. Unpublished content is never delivered to students — the same
+            //    rule the playback OTP and the course-visibility scope enforce.
+            //    (A NULL lesson/course row means the association is broken, so the
+            //    material is not delivered either.)
+            if (($row['course_status'] ?? null) !== 'published') {
+                return false;
+            }
+            if (($row['lesson_status'] ?? null) !== 'published') {
+                return false;
+            }
+            // 4. Enrollment must be ACTIVE: a SUSPENDED enrollment is not access
+            //    (the doctor suspends a student per course, and the course
+            //    disappears from their account — its materials must go with it).
+            //    A legacy row without a status counts as active, so this never
+            //    hides a legitimate enrollment.
             $enrolled = (bool) Database::instance()->value(
-                'SELECT COUNT(*) FROM enrollments WHERE student_id = ? AND course_id = ?',
+                "SELECT COUNT(*) FROM enrollments
+                  WHERE student_id = ? AND course_id = ?
+                    AND (`status` IS NULL OR `status` <> 'suspended')",
                 [$userId, $row['course_id']],
                 0
             );
-            return $enrolled;
+            if (!$enrolled) {
+                return false;
+            }
+            if ($forDownload && ($permission === 'preview_only' || !$row['download_enabled'])) {
+                return false;
+            }
+            return true;
         }
         return false;
     }
