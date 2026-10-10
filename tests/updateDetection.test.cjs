@@ -130,7 +130,14 @@ ok(screen.includes('openUpdateUrl'), 'Update Now opens the configured production
 ok(screen.includes('SafeAreaView'), 'full-screen page is safe-area aware');
 ok(screen.includes('update.installedVersionCode'), 'installed build number displayed');
 ok(screen.includes('update.latestVersionCode'), 'required build number displayed');
-ok(screen.includes('assets/icon.png'), 'MedAcademy branding on the update page');
+ok(
+  screen.includes("from '@/components/BrandLogo'") && screen.includes('<BrandLogo'),
+  'MedAcademy branding on the update page comes from the shared BrandLogo'
+);
+ok(
+  !screen.includes('assets/icon.png') && !/require\(.*assets\/brand/.test(screen),
+  'update page does not bypass BrandLogo with a raw brand-asset require'
+);
 const hook = read('src/lib/useForceUpdate.ts');
 ok(
   hook.includes('dismissedThisSession') && hook.includes("mode === 'OPTIONAL'"),

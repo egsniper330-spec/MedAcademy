@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react';
 import { View, Text, ActivityIndicator, useColorScheme } from 'react-native';
 import { useRouter } from 'expo-router';
-import { ShieldPlus } from 'lucide-react-native';
+import { BrandLogo } from '@/components/BrandLogo';
 import { NeuButton } from '@/components/NeuButton';
-import { neuColors } from '@/lib/neu';
+import { neuColors, useLayout } from '@/lib/neu';
 import { useSession } from '@/ctx';
 import { resolveStartupRoute, type StartupRoute } from '@/lib/startupStateModel';
 import { useBranding } from '@/lib/branding';
@@ -41,6 +41,7 @@ export default function LandingScreen() {
   const scheme = useColorScheme();
   const isDark = scheme === 'dark';
   const c = isDark ? neuColors.dark : neuColors.light;
+  const layout = useLayout();
   const router = useRouter();
   const { session, isLoading } = useSession();
   // Server-managed platform identity (Super Admin → Platform → Branding).
@@ -98,14 +99,20 @@ export default function LandingScreen() {
   return (
     <View style={{ flex: 1, backgroundColor: c.base, alignItems: 'center', justifyContent: 'center', padding: 32 }}>
       <View style={{ alignItems: 'center', marginBottom: 48 }}>
-        <View style={{
-          width: 88, height: 88, borderRadius: 28,
-          backgroundColor: c.primary, alignItems: 'center',
-          justifyContent: 'center', marginBottom: 20,
-        }}>
-          <ShieldPlus size={44} color="#fff" />
-        </View>
-        <Text style={{ fontSize: 34, fontWeight: '800', color: c.text, letterSpacing: -0.5 }}>{branding.app_name}</Text>
+        {/*
+         * Brand mark — the official MedAcademy symbol (the M/feather monogram),
+         * NOT the previous generic shield glyph. `variant="monogram"` resolves the
+         * theme-appropriate asset itself (light-mode ink on light surfaces, light
+         * ink in dark mode), so this stays correct when the OS theme flips.
+         *
+         * Sized from the shared responsive token: the monogram asset carries 8%
+         * canvas padding per side (336/400 ink), so ×1.35 lands the INK at
+         * ~85dp — the visual mass of the 88dp tile it replaces — and keeps the
+         * approved lockup's ~3.5:1 symbol-to-wordmark proportion. 1:1 with
+         * `contentFit="contain"` at every width: never stretched, never cropped.
+         */}
+        <BrandLogo variant="monogram" size={Math.round(layout.heroIconSize * 1.35)} />
+        <Text style={{ fontSize: 34, fontWeight: '800', color: c.text, letterSpacing: -0.5, marginTop: 20 }}>{branding.app_name}</Text>
         <Text style={{ fontSize: 16, color: c.text, opacity: 0.55, marginTop: 6, textAlign: 'center' }}>
           Best Educational Platform
         </Text>

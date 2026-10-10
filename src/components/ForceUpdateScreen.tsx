@@ -14,7 +14,6 @@
 import React, { useState } from 'react';
 import {
   ActivityIndicator,
-  Image,
   Linking,
   Pressable,
   ScrollView,
@@ -24,11 +23,9 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { BrandLogo } from '@/components/BrandLogo';
 import { NeuButton } from '@/components/NeuButton';
 import { useUpdate } from '@/lib/useForceUpdate';
-
-// MedAcademy brand mark (same asset the OS uses for the app icon).
-const LOGO = require('../../assets/icon.png');
 
 // MedAcademy palette (matches the security-gate styling conventions).
 const C = {
@@ -117,7 +114,9 @@ export default function ForceUpdateScreen(): React.JSX.Element {
         // No gesture dismiss, no backdoor, no skip.
       >
         <View style={styles.hero}>
-          <Image source={LOGO} style={styles.logo} resizeMode="contain" />
+          <View style={styles.logo}>
+            <BrandLogo variant="icon" size={82} />
+          </View>
           <View style={styles.badgeRow}>
             <View style={[styles.badge, forced ? styles.badgeForced : styles.badgeOptional]}>
               <Text style={styles.badgeText}>{forced ? 'UPDATE REQUIRED' : 'OPTIONAL UPDATE'}</Text>
@@ -219,6 +218,7 @@ const styles = StyleSheet.create({
   checkingSub: { color: C.sub, fontSize: 13, marginTop: 8, textAlign: 'center', lineHeight: 19 },
   hero: { marginTop: 28, marginBottom: 20 },
   logo: {
+    overflow: 'hidden',
     width: 84, height: 84, borderRadius: 20, marginBottom: 18,
     backgroundColor: C.card, borderWidth: 1, borderColor: C.border,
   },

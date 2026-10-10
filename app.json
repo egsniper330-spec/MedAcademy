@@ -9,6 +9,11 @@
     "userInterfaceStyle": "automatic",
     "jsEngine": "hermes",
     "ios": {
+      "icon": {
+        "light": "./assets/icon.png",
+        "dark": "./assets/icon-dark.png",
+        "tinted": "./assets/icon-tinted.png"
+      },
       "jsEngine": "jsc",
       "supportsTablet": true,
       "buildNumber": "212",
@@ -52,9 +57,11 @@
       }
     },
     "android": {
+      "icon": "./assets/android-icon.png",
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
-        "backgroundColor": "#081A35"
+        "backgroundColor": "#0E2C46",
+        "monochromeImage": "./assets/adaptive-icon-monochrome.png"
       },
       "predictiveBackGestureEnabled": false,
       "versionCode": 221,
@@ -109,7 +116,7 @@
       [
         "expo-notifications",
         {
-          "icon": "./assets/icon.png",
+          "icon": "./assets/brand/notification-icon.png",
           "color": "#1E90FF",
           "androidMode": "default",
           "androidCollapsedTitle": "MedAcademy",
