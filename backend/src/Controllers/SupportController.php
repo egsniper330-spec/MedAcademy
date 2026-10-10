@@ -218,6 +218,19 @@ final class SupportController
                 $enabled = (bool) ($entry['enabled'] ?? false);
                 $displayOrder = (int) ($entry['display_order'] ?? self::defaultDisplayOrder($key));
 
+                // ROOT CAUSE FIX ("Failed to save WhatsApp/Telegram"): normalize
+                // the DOCUMENTED input formats BEFORE validating. The admin UI's
+                // own placeholders/hints instruct the Super Admin to type values
+                // this validator used to reject outright:
+                //   • WhatsApp hint placeholder '+1 555 000 0000' → the space
+                //     failed the handle regex (422 → "Failed to save").
+                //   • Telegram hint 'Enter a @username, t.me/username, or full
+                //     Telegram URL' → 't.me/username' contained a '/' and was
+                //     rejected as an invalid handle (422).
+                // Website passed only because its validation is lenient, which is
+                // exactly the asymmetry that was reported.
+                $value = $this->canonicalize($key, $value);
+
                 // Validate the value for this platform
                 $this->validateValue($key, $value);
 
@@ -271,6 +284,81 @@ final class SupportController
     }
 
     // ── Internal helpers ──────────────────────────────────────────────────────
+
+    /**
+     * Map the formats the ADMIN UI advertises onto the canonical handle/value
+     * `validateValue()` + `normalizeValue()` expect.
+     *
+     * Accepted per platform (all whitespace is stripped first, so the
+     * placeholders '+1 555 000 0000' and '(555) 000-0000' both work):
+     *   whatsapp   https://wa.me/<num>, https://api.whatsapp.com/send?phone=<num>, +1 555 000 0000
+     *   phone      +1 555 000 0000, tel:+15550000000, 555-000-0000
+     *   telegram   @user, user, t.me/user, telegram.me/user, https://t.me/user
+     *   x          @user, user, x.com/user, twitter.com/user, https://x.com/user
+     *   facebook   @user, user, facebook.com/user, fb.me/user, https://facebook.com/user
+     *   instagram  @user, user, instagram.com/user, https://instagram.com/user
+     *   email      user@example.com, mailto:user@example.com
+     *   website    example.com, https://example.com/support
+     *
+     * A value that still cannot be understood is returned UNCHANGED so the
+     * validator produces its explicit 422 message instead of silently storing
+     * an empty contact.
+     */
+    private function canonicalize(string $key, string $value): string
+    {
+        $value = preg_replace('/\s+/', '', $value) ?? $value;
+        if ($value === '') {
+            return '';
+        }
+
+        switch ($key) {
+            case 'whatsapp':
+                // Already a wa.me / api.whatsapp.com link → keep the number.
+                if (preg_match('#^https?://(?:www\.)?(?:wa\.me|api\.whatsapp\.com)/(?:send\?phone=)?(\+?\d+)#i', $value, $m) === 1) {
+                    return $m[1];
+                }
+                if (str_starts_with($value, 'http://') || str_starts_with($value, 'https://')) {
+                    return $value; // arbitrary URL → validator decides
+                }
+                $number = preg_replace('/[^\d+]/', '', $value) ?? '';
+                return $number !== '' ? $number : $value;
+
+            case 'phone':
+                if (str_starts_with($value, 'tel:')) {
+                    $value = substr($value, 4);
+                }
+                $plus = str_starts_with($value, '+');
+                $digits = preg_replace('/\D/', '', $value) ?? '';
+                if ($digits === '') {
+                    return $value;
+                }
+                return $plus ? '+' . $digits : $digits;
+
+            case 'telegram':
+            case 'x':
+            case 'facebook':
+            case 'instagram':
+                if (str_starts_with($value, 'http://') || str_starts_with($value, 'https://')) {
+                    return $value;
+                }
+                $hosts = [
+                    'telegram'  => ['telegram.me/', 't.me/'],
+                    'x'         => ['twitter.com/', 'x.com/'],
+                    'facebook'  => ['fb.me/', 'fb.com/', 'facebook.com/', 'www.facebook.com/'],
+                    'instagram' => ['www.instagram.com/', 'instagram.com/'],
+                ][$key] ?? [];
+                foreach ($hosts as $host) {
+                    if (strncasecmp($value, $host, strlen($host)) === 0) {
+                        $value = substr($value, strlen($host));
+                        break;
+                    }
+                }
+                return ltrim($value, '@/');
+
+            default:
+                return $value; // email / website keep their documented forms
+        }
+    }
 
     private function resolveLabel(string $key, string $storedLabel): string
     {

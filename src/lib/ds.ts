@@ -38,6 +38,7 @@
 import { useWindowDimensions, PixelRatio, Easing } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useMemo } from 'react';
+import { tabBarClearance } from '@/lib/tabBarClearance';
 
 // ─── 1. Spacing scale ────────────────────────────────────────────────────────
 // 4-dp base grid — every spacing value is a multiple of 4.
@@ -735,14 +736,26 @@ export function useAdaptive() {
 export function useLayout() {
   const insets = useSafeAreaInsets();
   const adapt  = useAdaptive();
+  const win    = useWindowDimensions();
 
   const headerTop    = safeTop(insets.top);
   const headerLeft   = safeLeft(insets.left  ?? 0, adapt?.isTablet ?? false);
   const headerRight  = safeRight(insets.right ?? 0);
-  const pageBottom   = safeBottom(insets.bottom, 0);
+
+  // ── Bottom navigation clearance ───────────────────────────────────────────
+  //   ANDROID / WEB: the JS tab bar is in the layout flow, so the screen's
+  //   viewport already ends above it → tabBarClearance() returns 0 and these
+  //   values are byte-for-byte what they were before.
+  //   iOS: the REAL native tab bar is drawn by UIKit outside the RN hierarchy
+  //   and floats OVER the content, so the bar's own height must be reserved
+  //   here — see src/lib/tabBarClearance.ios.ts for the full root cause. One
+  //   shared number covers every screen, so no screen needs its own padding.
+  const barClearance = tabBarClearance(win.width > win.height);
+
+  const pageBottom   = safeBottom(insets.bottom, barClearance);
   const scrollBottom = useMemo(
-    () => (extra = 0) => safeBottom(insets.bottom, extra),
-    [insets.bottom],
+    () => (extra = 0) => safeBottom(insets.bottom, extra + barClearance),
+    [insets.bottom, barClearance],
   );
 
   return useMemo(() => {
@@ -776,11 +789,18 @@ export function useLayout() {
       // ── Scroll / page bottom ──────────────────────────────────────────────
       pageBottom,
       scrollBottom,
+      /**
+       * Space the bottom navigation occupies above the safe-area inset.
+       * 0 on Android/web (bar is in the layout flow); the native bar's height
+       * on iOS (native bar floats over the content). Exposed for the rare
+       * screen that positions a floating element above the bar.
+       */
+      barClearance,
 
       // ── Content padding shorthand ─────────────────────────────────────────
       contentPadding: {
         paddingHorizontal: (adapt?.screenPx ?? spacing.lg),
       } as const,
     };
-  }, [adapt, insets, headerTop, headerLeft, headerRight, pageBottom, scrollBottom]);
+  }, [adapt, insets, headerTop, headerLeft, headerRight, pageBottom, scrollBottom, barClearance]);
 }

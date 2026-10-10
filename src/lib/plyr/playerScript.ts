@@ -75,6 +75,30 @@ export const PLAYER_SCRIPT = `
 
   document.getElementById('player').setAttribute('data-plyr-embed-id', videoId);
 
+  // ── Control hit-area / stacking guarantees ─────────────────────────────────
+  //   The centre play/pause control is an absolutely positioned 48 px button
+  //   painted OVER the cross-origin YouTube iframe. Inside the native WebView
+  //   that iframe is composited as its own surface, and an overlay that has no
+  //   layer of its own can lose the paint / hit-test contest at the CENTRE of
+  //   the player even though it wins in a desktop browser (the desktop browser
+  //   is how this was reproduced as working, so the difference is the
+  //   compositing path, not the DOM). Promoting the controls that sit over the
+  //   video surface into their own composited layers, with an explicit z-index
+  //   above the video wrapper, keeps them visible AND tappable.
+  //   Purely additive CSS — no markup, no second play/pause mechanism.
+  function injectControlCSS() {
+    if (document.getElementById('plyr-control-fixes')) return;
+    var s = document.createElement('style');
+    s.id = 'plyr-control-fixes';
+    s.textContent =
+      '.plyr__video-wrapper{z-index:0;}' +
+      '.plyr__control--overlaid{z-index:4;transform:translate3d(-50%,-50%,0);' +
+        'will-change:transform;touch-action:manipulation;}' +
+      '.plyr__video .plyr__controls{z-index:5;touch-action:manipulation;}';
+    (document.head || document.documentElement).appendChild(s);
+  }
+  injectControlCSS();
+
   // ── Bridge ─────────────────────────────────────────────────────────────────
   function send(obj) {
     var s = JSON.stringify(obj);
@@ -401,8 +425,13 @@ export const PLAYER_SCRIPT = `
   //   hideFullscreen=false → inline mode: fullscreen button present as a UI
   //     trigger; the BUTTON CLICK (not Plyr entering fullscreen) sends the
   //     postMessage. Plyr never actually enters fullscreen on native.
+  //   'rewind' / 'fast-forward' are Plyr's OWN supported control types: they
+  //   are bound to the media's currentTime through Plyr's seek API and share
+  //   the seekTime config below (±10 s). No custom seek UI is added — the
+  //   controls are the ones Plyr ships, so their icons/tooltips/a11y already
+  //   match the rest of the bar. Ordered around Play, the standard layout.
   var controls = [
-    'play-large', 'play', 'progress', 'current-time',
+    'play-large', 'rewind', 'play', 'fast-forward', 'progress', 'current-time',
     'mute', 'volume', 'captions', 'settings',
   ];
   if (!hideFullscreen) {
@@ -411,6 +440,10 @@ export const PLAYER_SCRIPT = `
 
   var player = new Plyr('#player', {
     controls: controls,
+    // ±10 s seeking for the rewind / fast-forward controls. Plyr's default is
+    // already 10 s — declared explicitly so the step cannot drift silently and
+    // so the value is visible next to the controls that consume it.
+    seekTime: 10,
     // 'quality' omitted: HTML5-only, no effect on YouTube embeds.
     settings: ['captions', 'speed'],
     speed: { selected: 1, options: [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2, 4] },
@@ -491,6 +524,19 @@ export const PLAYER_SCRIPT = `
   // Expose for external seeks (e.g. inline WebView re-sync after modal closes).
   window.__plyr = player;
 
+  // ── ±10 s seek helper ──────────────────────────────────────────────────────
+  //   Clamps the target into the media's valid range and is a deliberate NO-OP
+  //   when the duration is unknown or zero (live stream / not yet seekable), so
+  //   a forward seek can never push playback past the end of the media.
+  function seekBy(direction) {
+    var d = player.duration;
+    if (!isFinite(d) || d <= 0) return;
+    var step = (player.config && player.config.seekTime) || 10;
+    var target = player.currentTime + direction * step;
+    target = Math.max(0, Math.min(target, Math.max(0, d - 0.25)));
+    player.currentTime = target;
+  }
+
   // ── Events ─────────────────────────────────────────────────────────────────
 
   player.on('ready', function () {
@@ -537,6 +583,45 @@ export const PLAYER_SCRIPT = `
         }, true /* useCapture */);
       }
     }
+
+    // ── Centre (play-large) play/pause + ±10 s seek controls ─────────────────
+    //   WHY A DELEGATED CAPTURE LISTENER (and not a per-element bind):
+    //   Plyr binds control handlers with bind() while it builds the controls.
+    //   For a YouTube EMBED the control bar is injected asynchronously (the
+    //   provider build is deferred), which is exactly the window in which a
+    //   control can end up painted but without a working handler — the reported
+    //   symptom was "the large centre play/pause button does nothing while the
+    //   bottom-bar play/pause works". A capture-phase listener on the document
+    //   is immune to that ordering: it is installed once, always runs before
+    //   any target listener, and resolves the control from the event target, so
+    //   it also survives a control-bar rebuild or a provider re-init.
+    //   stopImmediatePropagation() guarantees the action runs EXACTLY ONCE even
+    //   when Plyr's own handler is present (no double toggle, no 20 s seek).
+    //
+    //   SCOPE: only the CENTRE button and the two seek buttons. The bottom-bar
+    //   play/pause keeps Plyr's own (working) handler, and no listener is added
+    //   over the video surface — the one-mechanism tap-to-toggle policy at the
+    //   top of this file still holds.
+    document.addEventListener('click', function (e) {
+      var t = e.target;
+      if (!t || !t.closest) return;
+      var el = t.closest('[data-plyr]');
+      if (!el) return;
+      var kind = el.getAttribute('data-plyr');
+      var isCentre = kind === 'play' &&
+        !!(el.classList && el.classList.contains('plyr__control--overlaid'));
+      if (isCentre) {
+        e.stopImmediatePropagation();
+        e.preventDefault();
+        player.togglePlay();
+        return;
+      }
+      if (kind === 'rewind' || kind === 'fast-forward') {
+        e.stopImmediatePropagation();
+        e.preventDefault();
+        seekBy(kind === 'rewind' ? -1 : 1);
+      }
+    }, true /* useCapture */);
   });
 
   // ── timeupdate throttled to 1 Hz ──────────────────────────────────────────

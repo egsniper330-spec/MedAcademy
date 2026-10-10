@@ -233,10 +233,14 @@
     // 'airplay'  : AirPlay button (auto-hidden on non-Safari)
     // These three are rendered by Plyr only when the browser supports them;
     // they are never visible on unsupported platforms — no harm in including them.
+    // 'rewind' / 'fast-forward' are Plyr's own control types, bound to the
+    // media's currentTime through Plyr's seek API and sharing seekTime (±10 s).
     controls: [
-      'play-large', 'play', 'progress', 'current-time',
+      'play-large', 'rewind', 'play', 'fast-forward', 'progress', 'current-time',
       'mute', 'volume', 'captions', 'settings', 'pip', 'airplay', 'fullscreen',
     ],
+    // ±10 s seek step for rewind / fast-forward (Plyr's default, made explicit).
+    seekTime: 10,
     // 'quality' omitted: quality selection is HTML5-only (requires <source size="">);
     // it has no effect on YouTube embeds and does not appear in the settings menu.
     settings: ['captions', 'speed'],
@@ -292,6 +296,54 @@
 
   // Expose for host-injected seeks.
   window.__plyr = player;
+
+  // ── Control hit-area / stacking + ±10 s seek ────────────────────────────────
+  //   The centre play/pause control is painted over the cross-origin YouTube
+  //   iframe; giving the controls their own composited layers with an explicit
+  //   z-index keeps them visible and tappable wherever the iframe is rendered as
+  //   a separate surface. The centre button and the two seek buttons run through
+  //   one capture-phase delegate so the action executes exactly once, including
+  //   when Plyr's own binding is missing (deferred embed build).
+  (function () {
+    var s = document.createElement('style');
+    s.id = 'plyr-control-fixes';
+    s.textContent =
+      '.plyr__video-wrapper{z-index:0;}' +
+      '.plyr__control--overlaid{z-index:4;transform:translate3d(-50%,-50%,0);' +
+        'will-change:transform;touch-action:manipulation;}' +
+      '.plyr__video .plyr__controls{z-index:5;touch-action:manipulation;}';
+    (document.head || document.documentElement).appendChild(s);
+
+    function seekBy(direction) {
+      var d = player.duration;
+      if (!isFinite(d) || d <= 0) return;      // live / unseekable → no-op
+      var step = (player.config && player.config.seekTime) || 10;
+      var target = player.currentTime + direction * step;
+      target = Math.max(0, Math.min(target, Math.max(0, d - 0.25)));
+      player.currentTime = target;
+    }
+
+    document.addEventListener('click', function (e) {
+      var t = e.target;
+      if (!t || !t.closest) return;
+      var el = t.closest('[data-plyr]');
+      if (!el) return;
+      var kind = el.getAttribute('data-plyr');
+      var isCentre = kind === 'play' &&
+        !!(el.classList && el.classList.contains('plyr__control--overlaid'));
+      if (isCentre) {
+        e.stopImmediatePropagation();
+        e.preventDefault();
+        player.togglePlay();
+        return;
+      }
+      if (kind === 'rewind' || kind === 'fast-forward') {
+        e.stopImmediatePropagation();
+        e.preventDefault();
+        seekBy(kind === 'rewind' ? -1 : 1);
+      }
+    }, true);
+  })();
 
   // ── Events ───────────────────────────────────────────────────────────────────
 

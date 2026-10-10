@@ -1630,7 +1630,14 @@ export default function DoctorProfile() {
         onDismiss={() => setShowPhotoRationale(false)}
       />
       {/* ── Avatar + name header ─────────────────────────────────────────── */}
-      <View style={{ paddingTop: 20, paddingHorizontal: layout.screenPx, paddingBottom: 0,
+      {/* This header is a SIBLING of the scroll container (it does not scroll),
+          so it must own the status-bar / Dynamic-Island clearance itself. It
+          used a hardcoded paddingTop: 20 — on notched iPhones (insets.top ≈
+          47–62) the avatar row started UNDER the status bar / Dynamic Island
+          and was clipped. `layout.headerTop` is the same shared primitive
+          PageHeader uses (max(insets.top + breathing, floor)), so the profile
+          now sits on the app-wide header grid like every other screen. */}
+      <View style={{ paddingTop: layout.headerTop, paddingHorizontal: layout.screenPx, paddingBottom: 0,
                      backgroundColor: c.base }}>
         <View style={{ alignItems: 'center', marginBottom: 20 }}>
           <ProfilePhotoActions

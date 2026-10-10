@@ -13,7 +13,8 @@ import { useProfileStore } from '@/lib/store';
 import { NeuCard } from '@/components/NeuCard';
 import { NeuButton } from '@/components/NeuButton';
 import { CourseProgressBar } from '@/components/CourseProgressBar';
-import { ContactSheet } from '@/components/ContactSheet';
+import { SubscribeSheet } from '@/components/SubscribeSheet';
+import { resolveCourseContact } from '@/lib/subscribeContact';
 import { neuColors, useLayout, safeTop, safeLeft, safeBottom } from '@/lib/neu';
 import { isPreviewingCourse, stopPreviewAsStudent } from '@/lib/previewAsStudent';
 import type { RelativePathString } from 'expo-router';
@@ -538,21 +539,28 @@ export default function CourseDetail() {
           );
         })}
 
-        {/* Subscribe — shows contact sheet with doctor's configured methods.
+        {/* Subscribe — the SAME shared sheet, fed by the SAME shared contact
+            resolver, as the Explore course list. Previously this screen used the
+            legacy ContactSheet with the raw course-level whatsapp/telegram/phone
+            columns, ignoring use_default_contact (and getCourseById did not even
+            select the doctor's contacts), which is why this flow showed a stale
+            number while Explore showed the configured options.
+            Shown whenever the viewer is not a subscriber — the sheet itself
+            reports the not-configured state.
             Hidden during "Preview as Student": the doctor is not actually a
             subscriber and must not be offered the student purchase flow. */}
-        {!previewMode && !isSubscribed && !!(course.whatsapp || course.telegram || course.phone) ? (
+        {!previewMode && !isSubscribed ? (
           <NeuButton label="Subscribe" variant="primary"
             icon={<MessageCircle size={16} color="#fff" />}
             onPress={() => setShowContact(true)} fullWidth />
         ) : null}
       </View>
 
-      <ContactSheet
+      <SubscribeSheet
         visible={showContact}
         onClose={() => setShowContact(false)}
         courseTitle={course.title}
-        contact={{ whatsapp: course.whatsapp, telegram: course.telegram, phone: course.phone }}
+        contact={resolveCourseContact(course)}
       />
     </ScrollView>
   );

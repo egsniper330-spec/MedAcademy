@@ -10,6 +10,8 @@ import { getFeaturedCourses, searchAllPublishedCourses, getMySubscriptions } fro
 import { prefetchCourseImages, courseImageUrlsFrom } from '@/lib/imagePrefetch';
 import { CourseCard } from '@/components/CourseCard';
 import { SubscribeSheet, type SubscribeSheetContact } from '@/components/SubscribeSheet';
+// ONE shared contact resolver — the SAME rule the course-details screen uses.
+import { resolveCourseContact } from '@/lib/subscribeContact';
 import { PageHeader } from '@/components/PageHeader';
 import { neuColors, useLayout, safeBottom } from '@/lib/neu';
 import { NeuSearchBar } from '@/components/NeuInputRow';
@@ -44,19 +46,10 @@ type CourseItem = {
   }[] | null;
 };
 
-/** Resolve the effective contact info for a course, respecting use_default_contact. */
-function resolveContact(item: CourseItem): { whatsapp?: string | null; telegram?: string | null; phone?: string | null } {
-  const useDefault = item.use_default_contact !== false; // true when null/undefined (default)
-  if (useDefault) {
-    const doc = Array.isArray(item.doctor) ? (item.doctor[0] ?? null) : item.doctor;
-    return {
-      whatsapp: doc?.contact_whatsapp,
-      telegram: doc?.contact_telegram,
-      phone:    doc?.contact_phone,
-    };
-  }
-  return { whatsapp: item.whatsapp, telegram: item.telegram, phone: item.phone };
-}
+// NOTE: the use_default_contact → doctor / course-level contact rule used to
+// live here as a private copy. It now lives in ONE place
+// (src/lib/subscribeContact.ts) and is shared with the course-details screen,
+// so the two Subscribe flows can never resolve different contacts again.
 
 function doctorOf(item: CourseItem): { id: string; full_name: string } | null {
   if (!item.doctor) return null;
@@ -181,7 +174,7 @@ function doctorOf(item: CourseItem): { id: string; full_name: string } | null {
         onPress={() => router.push(`/(app)/course/${item.id}` as RelativePathString)}
         onAction={() => router.push(`/(app)/course/${item.id}` as RelativePathString)}
         onSubscribe={() => {
-          const contact = resolveContact(item);
+          const contact = resolveCourseContact(item);
           setSubscribeCourseTitle(item.title);
           setSubscribeContact(contact);
           setSubscribeVisible(true);

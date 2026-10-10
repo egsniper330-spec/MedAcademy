@@ -33,6 +33,9 @@
  *   Landscape), the system Rotation Lock is never overridden, and the
  *   device is never force-rotated; only the layout adapts (the absolute-
  *   fill container re-measures to whatever window it gets).
+ * • Entry: the SDK control bar's OWN fullscreen button (Android always; iOS
+ *   since bridge 2.9.4 via didTapEnterFullScreen) fires onEnterFullscreen →
+ *   the in-place expansion. There is NO app-level fullscreen button.
  * • Exit: the SDK's exit control and the safe-area-aware back arrow both
  *   call the same exitFullscreen(); Android hardware back collapses it.
  * • DRM ERRORS: an expired/invalid offline license surfaces a clear error
@@ -49,7 +52,7 @@ import {
   ActivityIndicator, BackHandler, Platform, Pressable, StatusBar, Text, View,
 } from 'react-native';
 import * as ScreenOrientation from 'expo-screen-orientation';
-import { ArrowLeft, Maximize2 } from 'lucide-react-native';
+import { ArrowLeft } from 'lucide-react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { VdoPlayerView } from 'vdocipher-rn-bridge';
 import { playerSessionMount, playerSessionUnmount } from '@/lib/vdoPlayerSession';
@@ -328,13 +331,13 @@ export function OfflineVideoPlayer({ entry, shouldAllowPlayback, fullscreenVerdi
       )}
       {/* Native SDK control bar MUST stay enabled (full rationale in the online
           adapter). It is the ONLY play/pause, timeline, drag-seek and ±10s
-          surface — this component only adds a fullscreen button and the
-          watermark. Disabling it makes the bridge render VdoPlayerSupportView
-          instead of VdoPlayerUIView (no controls at all) and turns the
-          per-button fullscreen hide into dead code, since that patch lives in
-          the controls-enabled view. The SDK's own fullscreen buttons stay
-          hidden per-button, so the bar cannot promote the surface above the
-          React Native tree or bury the watermark. */}
+          surface, and it ALSO supplies the one fullscreen entry — this component
+          adds only the watermark. Disabling it makes the bridge render
+          VdoPlayerSupportView instead of VdoPlayerUIView (no controls at all)
+          and removes the fullscreen entry entirely, since that control lives in
+          the controls-enabled view. The bridge patch makes the SDK's own
+          fullscreen button drive the app's in-place fullscreen instead of
+          promoting the surface above the React Native tree. */}
       <VdoPlayerView
         ref={playerRef}
         embedInfo={offlineEmbedInfo}
@@ -354,26 +357,10 @@ export function OfflineVideoPlayer({ entry, shouldAllowPlayback, fullscreenVerdi
       {identity && (
         <NativeWatermarkOverlay watermarkId={identity.id} watermarkName={identity.name ?? undefined} />
       )}
-      {/* SINGLE FULLSCREEN CONTROL — on BOTH platforms the SDK control bar's own
-          fullscreen button is HIDDEN by the RN bridge (MEDACADEMY PATCH:
-          ReactVdoPlayerUIView.java on Android, RCTVdoPlayerUIView.swift on iOS),
-          because that button runs the SDK's own fullscreen and promotes the
-          video surface above the React Native tree, burying this component's
-          watermark overlay. The app therefore renders the one entry below, on the
-          canonical path (security gate re-validated at entry → in-place expansion
-          of the SAME instance). onEnterFullscreen/onExitFullscreen stay wired as
-          a fallback into that same state. */}
-      {!isFullscreen && (
-        <Pressable
-          onPress={() => void enterFullscreen()}
-          accessibilityLabel="Enter fullscreen"
-          accessibilityRole="button"
-          hitSlop={{ top: 8, right: 8, bottom: 8, left: 8 }}
-          style={{ position: 'absolute', bottom: 12, right: 12, width: 44, height: 44, borderRadius: 22, backgroundColor: '#00000080', alignItems: 'center', justifyContent: 'center', zIndex: 50, elevation: 50 }}
-        >
-          <Maximize2 size={22} color="#fff" />
-        </Pressable>
-      )}
+      {/* NO app-level fullscreen button. The SDK control bar's OWN fullscreen
+          button (Android always; iOS since bridge 2.9.4 via didTapEnterFullScreen)
+          is the single entry: onEnterFullscreen → the in-place fullscreen state
+          above (security gate re-validated at entry). */}
       {/* Fullscreen back control — the single app-level EXIT affordance,
           safe-area aware so it never sits under the Dynamic Island/status
           area. Collapses back to the inline layout; playback continues in

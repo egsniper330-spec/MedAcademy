@@ -331,8 +331,21 @@ export default function SaSupportSettings() {
 
       setSaved(k);
       setTimeout(() => setSaved(prev => (prev === k ? null : prev)), 2500);
-    } catch {
-      setError(`Failed to save ${CONTACT_META[k].title}. Please try again.`);
+    } catch (e: unknown) {
+      //  MEANINGFUL ERROR: the product endpoint validates the value server-side
+      //  (e.g. 'Invalid whatsapp value', 'Invalid phone number. Use international
+      //  format'). Surfacing that text is the difference between "Failed to save"
+      //  and knowing exactly what to fix. The draft (value/label/enabled) is
+      //  never cleared on failure, so nothing the admin typed is lost.
+      const serverMsg =
+        e && typeof e === 'object' && typeof (e as { message?: unknown }).message === 'string'
+          ? (e as { message: string }).message.trim()
+          : '';
+      setError(
+        serverMsg
+          ? `${CONTACT_META[k].title}: ${serverMsg}`
+          : `Failed to save ${CONTACT_META[k].title}. Please try again.`
+      );
     } finally {
       setSaving(null);
     }

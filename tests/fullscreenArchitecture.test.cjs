@@ -74,32 +74,24 @@ console.log('── Online VdoCipher adapter: ONE native player instance, in-pla
   ok(/shouldAllowFullscreen/.test(s), 'online adapter: security gate re-validated at fullscreen entry');
 }
 
-console.log('── iOS fullscreen contract: ONE control, NO forced landscape, no second presentation ──');
+console.log('── iOS fullscreen contract: SDK-owned fullscreen button, NO forced landscape, no second presentation ──');
 for (const p of [ONLINE_ADAPTER, OFFLINE_PLAYER]) {
   const s = read(p);
 
-  // (1) Exactly ONE user-facing fullscreen ENTRY — on BOTH platforms.
-  // The SDK's own control-bar button is HIDDEN by the bridge on Android
-  // (ReactVdoPlayerUIView.java) AND on iOS (RCTVdoPlayerUIView.swift): it runs
-  // the SDK's own fullscreen, which promotes the video surface above the React
-  // Native tree and buries the watermark overlay. The app-level control is
-  // therefore the single entry everywhere, wired to the canonical in-place path,
-  // and it must NOT be platform-gated (an iOS-gated control with the SDK button
-  // hidden would leave iOS with NO way into fullscreen).
+  // (1) The SDK control bar's OWN fullscreen button is the ONE user-facing
+  // entry on BOTH platforms (Android always; iOS since bridge 2.9.4 via
+  // didTapEnterFullScreen). The app-owned duplicate entry button was REMOVED:
+  // with the bridge patch returning "handled" from the SDK's fullscreen
+  // listener, the SDK's own button drives the app's in-place fullscreen instead
+  // of promoting its own surface above the React Native tree (which is what
+  // used to bury the watermark overlay).
   const enterControls = (s.match(/accessibilityLabel="Enter fullscreen"/g) || []).length;
-  ok(enterControls === 1, `${p}: exactly ONE app-level enter-fullscreen control`);
-  ok(/\{!isFullscreen && \([\s\S]{0,400}accessibilityLabel="Enter fullscreen"/.test(s),
-    `${p}: the app enter control serves BOTH platforms (no iOS gate — the bridge hides the SDK button)`);
-  ok(!/!isFullscreen && Platform\.OS !== 'ios'/.test(s),
-    `${p}: no iOS-gated enter control (that was the two-controls split)`);
-  ok(/onPress=\{\(\) => void enterFullscreen\(\)\}/.test(s),
-    `${p}: the app enter control calls the canonical enterFullscreen() (gated, in-place)`);
-  // Exactly ONE rendered Maximize2 element (the single enter control) plus its
-  // import — so 1 JSX usage, not 1 raw occurrence.
-  ok((s.match(/<Maximize2\b/g) || []).length === 1, `${p}: exactly one rendered Maximize2 icon (the single enter control)`);
-  ok(/import \{[^}]*\bMaximize2\b[^}]*\} from 'lucide-react-native'/.test(s),
-    `${p}: Maximize2 icon imported from lucide-react-native`);
-  ok(/onEnterFullscreen=\{/.test(s), `${p}: SDK fullscreen event still mapped into the app state (iOS path)`);
+  ok(enterControls === 0, `${p}: NO app-level enter-fullscreen button (the SDK's own button is the entry)`);
+  ok(!/Maximize2/.test(s), `${p}: no app-level Maximize2 icon (no duplicate fullscreen control)`);
+  ok(/onEnterFullscreen=\{/.test(s) && /onExitFullscreen=\{/.test(s),
+    `${p}: the SDK's own enter/exit fullscreen events drive the app fullscreen state`);
+  ok((s.match(/<VdoPlayerView/g) || []).length === 1,
+    `${p}: the SDK player supplies the control bar (and its fullscreen button)`);
 
   // (2) iOS NEVER calls any orientation API — Portrait stays Portrait,
   // Landscape stays Landscape, system Rotation Lock is never overridden.
@@ -187,8 +179,8 @@ console.log('── Offline VdoCipher player: ONE native player instance, in-pla
   ok(!/key=\{[^}]*isFullscreen/.test(s), 'offline player: player key must not depend on isFullscreen');
   ok(/shouldAllowFullscreen/.test(s) || /fullscreenGate|checkBeforeVideo/.test(s),
     'offline player: fullscreen remains gated');
-  ok(/Enter fullscreen|enterFullscreen/.test(s),
-    'offline player: app-level fullscreen entry control (iOS parity)');
+  ok(/onEnterFullscreen=\{/.test(s) && !/Enter fullscreen"/.test(s),
+    'offline player: the SDK control-bar fullscreen button drives the app state (iOS parity)');
 }
 
 console.log('── Plyr/YouTube player: ONE WebView instance, in-place fullscreen ──');
@@ -436,56 +428,44 @@ console.log('── Native bridge patch: SDK fullscreen must never bury the RN w
     'telemetry logs no credentials');
 }
 
-console.log('── Single fullscreen entry: the SDK\'s own fullscreen controls are hidden ──');
+console.log('── Single fullscreen entry: the SDK\'s OWN fullscreen button is restored ──');
 {
-  // The app's canonical in-place fullscreen is the only path that keeps the
-  // watermark visible, so the SDK's own fullscreen button must never be
-  // reachable. Pins: the bridge hides BOTH of those controls surgically, the
-  // hide ships inside the source-controlled patch, the patch still parses with
-  // patch-package's own parser, and the app-level control remains the single
-  // fullscreen ownership path.
+  // The SDK control bar's own fullscreen button is the single user-facing entry
+  // on BOTH platforms. Nothing hides it, and the bridge patch makes the SDK's
+  // fullscreen listener report "handled" so that button drives the app's
+  // in-place fullscreen (watermark overlay inside the same container) instead of
+  // promoting its own surface above the React Native tree.
   const BRIDGE =
     'node_modules/vdocipher-rn-bridge/android/src/main/java/com/vdocipher/rnbridge/ReactVdoPlayerUIView.java';
   const PATCH = 'patches/vdocipher-rn-bridge+2.0.1.patch';
-  ok(exists(BRIDGE), 'bridge player view present (hide lives where the controls are created)');
+  ok(exists(BRIDGE), 'bridge player view present (controls live where the bar is created)');
   const b = read(BRIDGE);
 
-  // (1) A real method that is actually invoked where the control bar is created.
-  ok(/private\s+void\s+hideSdkFullscreenControls\s*\(/.test(b),
-    'bridge: hideSdkFullscreenControls() exists (not a comment-only mention)');
-  ok(/private\s+void\s+scheduleHideSdkFullscreenControls\s*\(/.test(b),
-    'bridge: scheduleHideSdkFullscreenControls() exists so the hide can be re-armed');
-  ok(/scheduleHideSdkFullscreenControls\(\)/.test(b),
-    'bridge: the hide is invoked where the fragment/control bar is created');
+  // (1) The SDK's own fullscreen controls are NOT hidden and NOT disabled.
+  ok(!/hideSdkFullscreenControls/.test(b),
+    'bridge: the SDK fullscreen controls are NOT hidden (the SDK button is restored)');
+  ok(!/scheduleHideSdkFullscreenControls/.test(b),
+    'bridge: the re-arming hide scheduler is gone');
+  ok(!/setVisibility\s*\(\s*View\.GONE\s*\)/.test(b),
+    'bridge: no per-button GONE visibility change remains');
+  ok(/putBoolean\("showControls",\s*true\)/.test(b) && !/showControls\s*=\s*false/.test(b),
+    'bridge: the control bar stays enabled (its fullscreen button included)');
 
-  // (2) BOTH controls are handled, by their public resource ids.
-  const enterRefs = (b.match(/vdo_enter_fullscreen/g) || []).length;
-  const exitRefs  = (b.match(/vdo_exit_fullscreen/g) || []).length;
-  ok(enterRefs >= 1 && exitRefs >= 1,
-    `bridge: hides BOTH SDK fullscreen controls (enter id refs=${enterRefs}, exit id refs=${exitRefs})`);
-  ok(/getId\(\) == enterId \|\| v\.getId\(\) == exitId/.test(b),
-    'bridge: the visibility change is gated on the two fullscreen ids only');
+  // (2) The listener reports "handled" so the SDK never promotes its own surface:
+  // the SDK's fullscreen button enters the APP's single in-place fullscreen.
+  ok(/return true;/.test(b) && !/return false;/.test(b),
+    'bridge: fullscreen listener reports "handled" (no surface-promoting default fullscreen)');
+  ok(/setFullscreenActionListener\(fullscreenToggleListener\)/.test(b),
+    'bridge: the SDK control-bar listener is wired where the feature is created');
 
-  // (3) SURGICAL: exactly one GONE application site in the whole file, controls
-  // explicitly kept enabled — play/seek/quality/captions are never touched.
-  const goneSites = (b.match(/setVisibility\s*\(\s*View\.GONE\s*\)/g) || []).length;
-  ok(goneSites === 1,
-    `bridge: exactly ONE GONE site (the two fullscreen ids) — found ${goneSites}`);
-  ok(/putBoolean\("showControls",\s*true\)/.test(b),
-    'bridge: SDK control bar still enabled (hide is per-button, not showControls=false)');
-  ok(!/showControls\s*=\s*false/.test(b),
-    'bridge: never disables the whole SDK control bar');
-
-  // (4) The hide ships in the source-controlled patch — a fresh install keeps it.
+  // (3) The source-controlled patch carries exactly that and nothing more.
   const bridgePatch = read(PATCH);
-  ok(exists(PATCH) && bridgePatch.includes('hideSdkFullscreenControls'),
-    'source-controlled bridge patch carries the hide (survives a fresh install)');
-  ok(bridgePatch.includes('vdo_enter_fullscreen') && bridgePatch.includes('vdo_exit_fullscreen'),
-    'patch: hides BOTH SDK fullscreen ids');
-  ok(/^\+.*setVisibility\(View\.GONE\)/m.test(bridgePatch),
-    'patch: adds the GONE call itself (not just the method signature)');
-  ok(/^\+.*scheduleHideSdkFullscreenControls\(\);/m.test(bridgePatch),
-    'patch: wires the hide into fragment/control-bar creation');
+  ok(bridgePatch.includes('-            return false;') && bridgePatch.includes('+            return true;'),
+    'patch: Android listener switched to "handled" (return true)');
+  ok(!bridgePatch.includes('hideSdkFullscreenControls'),
+    'patch: no fullscreen-hiding workaround remains in the bridge patch');
+  ok(!bridgePatch.includes('vdo_enter_fullscreen') && !bridgePatch.includes('vdo_exit_fullscreen'),
+    'patch: the SDK fullscreen buttons are never hidden by public resource id');
 
   // (5) patch-package compatibility: standard unified diff with balanced,
   // node_modules-relative headers (what `patch -p1` / patch-package reads).
@@ -513,34 +493,28 @@ console.log('── Single fullscreen entry: the SDK\'s own fullscreen controls 
     ok(bridgePatch.includes(ios), `patch: iOS portion intact — ${ios}`);
   }
 
-  // iOS — the SDK's OWN control-bar fullscreen button must be hidden, exactly
-  // as Android hides it. Verified from the shipped VdoFramework: the control bar
-  // (PlayerControlsView.nib) carries the outlet `fullScreenBtn` wired to the
-  // action `didTapFullScreenBtn:`. Without this the iOS player keeps a SECOND
-  // fullscreen entry whose own presentation buries the watermark overlay.
-  ok(/hideSdkFullscreenControls/.test(bridgePatch),
-    'patch: iOS hides the SDK control-bar fullscreen button (hideSdkFullscreenControls)');
-  ok(/didTapFullScreenBtn/.test(bridgePatch),
-    'patch: iOS identifies the button by its real SDK action (didTapFullScreenBtn:), not by position');
-  ok(/fullScreenBtn/.test(bridgePatch),
-    'patch: iOS also matches the nib outlet name (fullScreenBtn)');
-  ok(/as\? UIButton/.test(bridgePatch),
-    'patch: iOS only ever hides a UIButton (never a container that would take the whole bar)');
-  ok(/\+    override func layoutSubviews\(\) \{[\s\S]{0,700}\+        self\.hideSdkFullscreenControls\(\)/.test(bridgePatch),
-    'patch: iOS re-applies the hide on every layout pass (SDK rebuilds its bar during init)');
-  ok(/playerReadyToPlay[\s\S]{0,600}hideSdkFullscreenControls/.test(bridgePatch),
-    'patch: iOS covers the post-init window with delayed re-applies');
+  // iOS — the SDK control bar's own fullscreen button is LEFT VISIBLE: it is
+  // the single entry, exactly as on Android. The patch keeps only the
+  // layoutSubviews re-frame of the embedded player view (so the video surface
+  // follows rotation) and no button-hiding logic at all.
+  ok(!/hideSdkFullscreenControls/.test(bridgePatch),
+    'patch: iOS hides nothing — the SDK control-bar fullscreen button is the single entry');
+  ok(!/didTapFullScreenBtn/.test(bridgePatch) && !/fullScreenBtn/.test(bridgePatch),
+    'patch: iOS no longer matches the SDK fullscreen button by action or outlet name');
+  ok(/\+\s+override func layoutSubviews\(\) \{/.test(bridgePatch) &&
+     /vcView\.frame = self\.bounds/.test(bridgePatch),
+    'patch: iOS still re-frames the embedded player view on layout (video follows rotation)');
 
-  // (6) The app control is the SOLE fullscreen ownership path: no direct native
-  // fullscreen command that would bypass the canonical (gated, in-place) entry.
+  // (6) ONE fullscreen ownership path: the SDK's own control-bar button drives
+  // the app's in-place state, and no app-owned duplicate entry exists.
   const on = read(ONLINE_ADAPTER);
   const off = read(OFFLINE_PLAYER);
   ok(!/enterFullscreenV2|dispatchViewManagerCommand/.test(on + off),
     'players: no direct native fullscreen command (canonical enterFullscreen()/exitFullscreen() only)');
-  ok((on.match(/accessibilityLabel="Enter fullscreen"/g) || []).length === 1,
-    'online adapter: exactly ONE app-level fullscreen control');
-  ok((off.match(/accessibilityLabel="Enter fullscreen"/g) || []).length === 1,
-    'offline player: exactly ONE app-level fullscreen control');
+  ok(!/accessibilityLabel="Enter fullscreen"/.test(on + off),
+    'players: NO app-level fullscreen entry button (the SDK control bar owns the entry)');
+  ok(/onEnterFullscreen=\{/.test(on) && /onEnterFullscreen=\{/.test(off),
+    'players: the SDK control-bar fullscreen events drive the single app fullscreen state');
 
   // (7) The watermark self-proof must NEVER run in production.
   ok(/debugProve=\{__DEV__\}/.test(on),
@@ -611,9 +585,9 @@ console.log('── PIN 3: playback controls exist (SDK control bar stays enable
   // instead of VdoPlayerUIView, i.e. a player with NO control bar at all —
   // tapping the video revealed nothing, the timeline (position/duration) was
   // gone, and playback could be neither paused nor seeked; it just ran until the
-  // user left the screen. Both players render only a fullscreen button and the
-  // watermark overlay, so the SDK bar is the ONLY control source: passing false
-  // removes every user-facing playback control.
+  // user left the screen. The SDK bar is the ONLY control source: it provides
+  // play/pause, the timeline, the +/-10s skips AND the single fullscreen entry,
+  // so passing false removes every user-facing playback control.
   for (const [label, file] of [['online', ONLINE_ADAPTER], ['offline', OFFLINE_PLAYER]]) {
     const src = read(file);
     ok(!/showNativeControls\s*=\s*\{\s*false\s*\}/.test(src),
@@ -638,23 +612,23 @@ console.log('── PIN 3: playback controls exist (SDK control bar stays enable
   ok(/findViewById\(R\.id\.vdo_play\)/.test(cv) && /findViewById\(R\.id\.vdo_pause\)/.test(cv),
     'control bar: separate real play AND pause buttons are bound');
 
-  // (3) Coupling pin: the surgical fullscreen hide lives in the
-  // controls-enabled native view, so disabling the bar silently disables the
-  // single-fullscreen-entry patch as well — the two are one setting.
+  // (3) Coupling pin: the single fullscreen entry lives in the
+  // controls-enabled native view (the same view the SDK builds the bar in), so
+  // disabling the bar would remove the entry as well - one setting.
   const ui = read(BRIDGE_UI);
-  ok(/scheduleHideSdkFullscreenControls\(\)/.test(ui),
-    'bridge: per-button fullscreen hide armed in the controls-enabled view');
-  ok(/vdo_enter_fullscreen/.test(ui) && /vdo_exit_fullscreen/.test(ui),
-    'bridge: still hides exactly the SDK fullscreen buttons (by public id)');
+  ok(!/hideSdkFullscreenControls/.test(ui),
+    'bridge: the SDK fullscreen button is left visible in the controls-enabled view');
+  ok(/setFullscreenActionListener\(fullscreenToggleListener\)/.test(ui),
+    'bridge: the SDK fullscreen listener is wired where the control bar is created');
   ok(/putBoolean\("showControls",\s*true\)/.test(ui),
-    'bridge: the control bar itself stays enabled (hide is per-button, not global)');
+    'bridge: the control bar itself stays enabled (its fullscreen button included)');
 
   // (4) Nothing may swallow the controls' touches: the watermark overlay is the
   // only other full-size view and must stay pointer-transparent.
   ok(read('src/components/NativeWatermarkOverlay.tsx').includes('pointerEvents="none"'),
     'watermark overlay is pointerEvents:none — cannot intercept control touches');
-  ok(/wins the touch order/.test(read(ONLINE_ADAPTER)),
-    'fullscreen control is rendered after the native player so it wins touch order');
+  ok(!/accessibilityLabel="Enter fullscreen"/.test(read(ONLINE_ADAPTER)),
+    'online adapter: no app-level control overlays the native player (the SDK bar owns the entry)');
 }
 
 console.log(`RESULT: ${passed} passed, ${failed} failed`);
