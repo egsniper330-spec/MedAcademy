@@ -1,21 +1,119 @@
-/* MedAcademy website — brand palette mirrors src/global.css */
+/* ══════════════════════════════════════════════════════════════════════════
+   MedAcademy.site — one brand, two themes.
+
+   THEME MODEL
+   -----------
+   `:root` holds the DARK tokens and is the DEFAULT, so:
+     • with JavaScript disabled the site renders exactly as it always has
+       (dark navy) — the toggle is the only thing JS is required for;
+     • the inline <head> script (on every page) sets `data-theme` on <html>
+       BEFORE first paint, so there is no flash of the wrong theme: the
+       stylesheet is render-blocking and the script runs before it.
+   `html[data-theme="light"]` overrides the tokens for Light Mode.
+
+   Persisted choice wins over the OS: an explicit selection is stored in
+   localStorage and the `prefers-color-scheme` listener in js/main.js only
+   applies to visitors who have NOT chosen.
+
+   RULE FOR NEW CSS: never write a colour literal in a rule — add a token to
+   BOTH blocks instead. `tests/websiteTheme.test.cjs` fails the build if a
+   hex/hsl literal appears outside the token blocks.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/* ── Dark (default) ─────────────────────────────────────────────────────── */
 :root {
-  --bg: hsl(216 62% 10%);
-  --bg-elevated: hsl(216 50% 14%);
-  --card: hsl(216 45% 13%);
-  --border: hsl(216 34% 22%);
-  --primary: hsl(210 100% 60%);
-  --primary-strong: hsl(210 100% 52%);
-  --accent: hsl(205 96% 58%);
-  --text: hsl(216 30% 96%);
-  --text-muted: hsl(216 15% 68%);
+  color-scheme: dark;
+
+  /* Surfaces — a measured ladder, not one shade of navy for everything.
+     The previous site painted page and card 1.081:1 apart, which is why Dark
+     read as flat; these steps are 1.07–1.17 apart and the border adds edge. */
+  --bg:            hsl(216 62% 9%);    /* page background            #091425 */
+  --bg-elevated:   hsl(216 52% 12%);   /* sticky header, mobile nav  #0F1B2F */
+  --card:          hsl(216 45% 15%);   /* content panels, cards      #152337 */
+  --inset:         hsl(216 50% 11.5%); /* notes, inputs, recessed    #0F1A2C */
+
+  /* Lines */
+  --border:        hsl(216 34% 24%);
+  --border-strong: hsl(210 60% 42%);
+
+  /* Type */
+  --text:          hsl(216 30% 96%);
+  --text-muted:    hsl(216 15% 70%);
+
+  /* Brand */
+  --primary:       hsl(210 100% 60%);  /* brand blue: icons, accents, hover   */
+  --primary-strong:hsl(210 100% 44%);  /* button fill — 4.76:1 with white ink */
+  --on-primary:    hsl(0 0% 100%);
+  --accent:        hsl(205 96% 58%);   /* display-text accent                 */
+  --link:          hsl(210 100% 60%);  /* 6.27:1 on --bg                      */
+  --focus:         hsl(210 100% 70%);
+
+  /* Semantics */
+  --success:       hsl(152 60% 55%);
+  --warning:       hsl(38 92% 62%);
+  --error:         hsl(0 80% 68%);
+  --info:          hsl(210 90% 68%);
+
+  /* Effects */
+  --shadow:        0 10px 30px hsl(216 80% 3% / 0.5);
+  --shadow-hover:  0 14px 34px hsl(216 80% 3% / 0.62);
+  --shadow-brand:  0 6px 18px hsl(210 100% 40% / 0.32); /* under primary fills */
+  --header-bg:     hsl(216 62% 9% / 0.92);
+  --hero-a:        hsl(210 100% 60% / 0.14);
+  --hero-b:        hsl(205 96% 58% / 0.10);
+  --band-a:        hsl(210 100% 22%);
+  --band-b:        hsl(216 62% 13%);
+  --row-hover:     hsl(210 100% 60% / 0.07);
+
   --radius: 14px;
-  --shadow: 0 10px 30px hsl(216 80% 4% / 0.45);
+}
+
+/* ── Light ──────────────────────────────────────────────────────────────── */
+html[data-theme="light"] {
+  color-scheme: light;
+
+  --bg:            hsl(213 55% 96%);   /* cool light base, same family as dark */
+  --bg-elevated:   hsl(0 0% 100%);     /* white sticky header / mobile nav     */
+  --card:          hsl(0 0% 100%);     /* white panels on a tinted page        */
+  --inset:         hsl(213 45% 95%);   /* notes, inputs, recessed              */
+
+  --border:        hsl(213 30% 86%);
+  --border-strong: hsl(210 60% 46%);
+
+  --text:          hsl(216 40% 12%);   /* dark navy ink, not pure black        */
+  --text-muted:    hsl(216 14% 38%);   /* 6.17:1 on white                      */
+
+  --primary:       hsl(210 100% 45%);
+  --primary-strong:hsl(210 100% 44%);  /* same fill, so buttons match themes   */
+  --on-primary:    hsl(0 0% 100%);
+  --accent:        hsl(210 100% 45%);  /* 3.75:1 on the light page — AA-large  */
+  --link:          hsl(210 100% 38%);  /* 6.03:1 on white — AA for body text   */
+  --focus:         hsl(210 100% 40%);
+
+  --success:       hsl(152 60% 32%);
+  --warning:       hsl(38 90% 38%);
+  --error:         hsl(0 72% 45%);
+  --info:          hsl(210 90% 42%);
+
+  /* Restrained shadows: white cards need a much lighter touch than navy ones */
+  --shadow:        0 1px 2px hsl(216 60% 30% / 0.05), 0 10px 26px hsl(216 60% 30% / 0.08);
+  --shadow-hover:  0 2px 4px hsl(216 60% 30% / 0.07), 0 14px 32px hsl(216 60% 30% / 0.12);
+  --shadow-brand:  0 6px 16px hsl(210 100% 40% / 0.25);
+  --header-bg:     hsl(213 55% 97% / 0.88);
+  --hero-a:        hsl(210 100% 45% / 0.16);
+  --hero-b:        hsl(205 96% 58% / 0.12);
+  --band-a:        hsl(210 100% 97%);
+  --band-b:        hsl(205 90% 95%);
+  --row-hover:     hsl(210 100% 45% / 0.07);
 }
 
 * { margin: 0; padding: 0; box-sizing: border-box; }
 
 html { scroll-behavior: smooth; }
+
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+}
 
 body {
   font-family: "Segoe UI", system-ui, -apple-system, Roboto, "Helvetica Neue", Arial, sans-serif;
@@ -27,7 +125,7 @@ body {
 
 img { max-width: 100%; display: block; }
 
-a { color: var(--primary); text-decoration: none; }
+a { color: var(--link); text-decoration: none; }
 a:hover { text-decoration: underline; }
 
 .container {
@@ -35,13 +133,14 @@ a:hover { text-decoration: underline; }
   margin: 0 auto;
 }
 
-/* ── Header ─────────────────────────────────────────── */
+/* ── Header ─────────────────────────────────────────────────────────── */
 .site-header {
   position: sticky;
   top: 0;
   z-index: 50;
-  background: hsl(216 62% 10% / 0.92);
+  background: var(--header-bg);
   backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
   border-bottom: 1px solid var(--border);
 }
 
@@ -53,6 +152,16 @@ a:hover { text-decoration: underline; }
   gap: 1rem;
 }
 
+/* Theme-paired logo. Both variants are generated from ONE geometry pass, so
+   they are pixel-identical in extent — swapping them cannot shift the header
+   by a pixel when the theme changes.
+
+   Dark is the CSS default (no `data-theme` attribute at all = JS disabled), so
+   the LIGHT variant is the one hidden by default; Light Mode opts into it. */
+.logo-light { display: none; }
+html[data-theme="light"] .logo-light { display: block; }
+html[data-theme="light"] .logo-dark  { display: none; }
+
 .brand {
   display: flex;
   align-items: center;
@@ -60,9 +169,13 @@ a:hover { text-decoration: underline; }
   font-weight: 700;
   font-size: 1.15rem;
   color: var(--text);
+  /* The header holds three groups (brand · theme toggle · hamburger · nav).
+     The auto margin absorbs the free space after the brand, so the controls
+     stay flush right on desktop and the collapsed mobile menu is unaffected. */
+  margin-right: auto;
 }
 .brand:hover { text-decoration: none; }
-.brand img { height: 36px; width: auto; }
+.brand-logo { height: 34px; width: auto; }
 
 .main-nav { display: flex; align-items: center; gap: 1.4rem; }
 .main-nav a {
@@ -71,12 +184,46 @@ a:hover { text-decoration: underline; }
 }
 .main-nav a:hover { color: var(--text); text-decoration: none; }
 .main-nav a.nav-cta {
-  color: #fff;
+  color: var(--on-primary);
   background: var(--primary-strong);
   padding: 0.5rem 1.1rem;
   border-radius: 999px;
 }
 .main-nav a.nav-cta:hover { background: var(--primary); }
+
+/* Header controls sit together: [theme toggle] [hamburger] */
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-shrink: 0;
+}
+
+/* ── Theme toggle ───────────────────────────────────────────────────── */
+.theme-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.4rem;
+  height: 2.4rem;
+  padding: 0;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease;
+}
+.theme-toggle:hover { color: var(--text); border-color: var(--border-strong); }
+.theme-toggle svg { width: 1.15rem; height: 1.15rem; display: block; }
+/* The icon shows the DESTINATION theme, so it always agrees with the button's
+   aria-label ("Switch to light mode" → sun; "Switch to dark mode" → moon).
+   Dark is the :root default, so it renders the sun with no attribute present;
+   the toggle itself is hidden entirely under <noscript>. */
+.theme-toggle .icon-sun  { display: block; }
+.theme-toggle .icon-moon { display: none; }
+html[data-theme="light"] .theme-toggle .icon-sun  { display: none; }
+html[data-theme="light"] .theme-toggle .icon-moon { display: block; }
 
 .nav-toggle {
   display: none;
@@ -89,16 +236,18 @@ a:hover { text-decoration: underline; }
   cursor: pointer;
 }
 
-/* ── Hero ───────────────────────────────────────────── */
+/* ── Hero ───────────────────────────────────────────────────────────── */
 .hero {
-  padding: 5rem 0 4rem;
+  padding: 4.4rem 0 4rem;
   text-align: center;
   background:
-    radial-gradient(60% 90% at 70% 0%, hsl(210 100% 60% / 0.14), transparent 65%),
-    radial-gradient(50% 80% at 20% 10%, hsl(205 96% 58% / 0.10), transparent 60%);
+    radial-gradient(60% 90% at 70% 0%, var(--hero-a), transparent 65%),
+    radial-gradient(50% 80% at 20% 10%, var(--hero-b), transparent 60%);
 }
 
-.hero .logo { height: 88px; width: auto; margin: 0 auto 1.4rem; }
+/* Stacked lockup: symbol over wordmark — larger than the header mark and
+   sized so the symbol carries the hero without a second copy of the tagline. */
+.hero .brand-logo { height: 190px; width: auto; margin: 0 auto 1.6rem; }
 
 .hero h1 {
   font-size: clamp(2rem, 5vw, 3.1rem);
@@ -106,7 +255,7 @@ a:hover { text-decoration: underline; }
   margin-bottom: 0.9rem;
 }
 
-.hero h1 .accent { color: var(--primary); }
+.hero h1 .accent { color: var(--accent); }
 
 .hero p.tagline {
   color: var(--text-muted);
@@ -122,7 +271,7 @@ a:hover { text-decoration: underline; }
   flex-wrap: wrap;
 }
 
-/* ── Buttons ────────────────────────────────────────── */
+/* ── Buttons ────────────────────────────────────────────────────────── */
 .btn {
   display: inline-flex;
   align-items: center;
@@ -136,8 +285,8 @@ a:hover { text-decoration: underline; }
 
 .btn-primary {
   background: var(--primary-strong);
-  color: #fff;
-  box-shadow: 0 6px 18px hsl(210 100% 50% / 0.35);
+  color: var(--on-primary);
+  box-shadow: var(--shadow-brand);
 }
 .btn-primary:hover { background: var(--primary); }
 
@@ -148,7 +297,7 @@ a:hover { text-decoration: underline; }
 }
 .btn-ghost:hover { border-color: var(--primary); color: var(--primary); }
 
-/* ── Sections ───────────────────────────────────────── */
+/* ── Sections ───────────────────────────────────────────────────────── */
 .section { padding: 4rem 0; }
 .section-head { text-align: center; margin-bottom: 2.6rem; }
 .section-head h2 { font-size: clamp(1.5rem, 3.6vw, 2.1rem); margin-bottom: 0.5rem; }
@@ -166,15 +315,17 @@ a:hover { text-decoration: underline; }
   border-radius: var(--radius);
   padding: 1.6rem;
   box-shadow: var(--shadow);
+  transition: box-shadow 0.18s ease, border-color 0.18s ease;
 }
+.feature-card:hover { box-shadow: var(--shadow-hover); border-color: var(--border-strong); }
 
 .feature-card .icon { font-size: 1.9rem; margin-bottom: 0.8rem; }
 .feature-card h3 { font-size: 1.08rem; margin-bottom: 0.45rem; }
 .feature-card p { color: var(--text-muted); font-size: 0.95rem; }
 
-/* ── CTA band ───────────────────────────────────────── */
+/* ── CTA band ───────────────────────────────────────────────────────── */
 .cta-band {
-  background: linear-gradient(135deg, hsl(210 100% 24%), hsl(216 62% 12%));
+  background: linear-gradient(135deg, var(--band-a), var(--band-b));
   border: 1px solid var(--border);
   border-radius: calc(var(--radius) + 4px);
   padding: 2.6rem 1.6rem;
@@ -184,7 +335,7 @@ a:hover { text-decoration: underline; }
 .cta-band h2 { margin-bottom: 0.6rem; }
 .cta-band p { color: var(--text-muted); margin-bottom: 1.6rem; }
 
-/* ── Download page ──────────────────────────────────── */
+/* ── Download page ──────────────────────────────────────────────────── */
 .download-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
@@ -202,7 +353,9 @@ a:hover { text-decoration: underline; }
   flex-direction: column;
   gap: 1rem;
   align-items: center;
+  transition: box-shadow 0.18s ease, border-color 0.18s ease;
 }
+.download-card:hover { box-shadow: var(--shadow-hover); border-color: var(--border-strong); }
 
 .download-card .icon { font-size: 2.4rem; }
 .download-card h3 { font-size: 1.25rem; }
@@ -229,7 +382,7 @@ a:hover { text-decoration: underline; }
   height: 1.35rem;
   border-radius: 50%;
   background: var(--primary-strong);
-  color: #fff;
+  color: var(--on-primary);
   font-size: 0.75rem;
   font-weight: 700;
   display: grid;
@@ -239,14 +392,14 @@ a:hover { text-decoration: underline; }
 .note {
   font-size: 0.85rem;
   color: var(--text-muted);
-  background: var(--bg-elevated);
+  background: var(--inset);
   border: 1px solid var(--border);
   border-radius: 10px;
   padding: 0.7rem 1rem;
   width: 100%;
 }
 
-/* ── Contact page — simple vertical contact list ────────── */
+/* ── Contact page — simple vertical contact list ────────────────────── */
 .contact-list {
   display: flex;
   flex-direction: column;
@@ -274,12 +427,8 @@ a:hover { text-decoration: underline; }
 }
 .contact-row:last-child { border-bottom: none; }
 .contact-row:hover {
-  background: hsl(210 100% 60% / 0.07);
+  background: var(--row-hover);
   text-decoration: none;
-}
-.contact-row:focus-visible {
-  outline: 2px solid var(--primary);
-  outline-offset: -2px;
 }
 
 /* Small colored platform icon — every dimension constrained so neither an
@@ -315,7 +464,7 @@ a:hover { text-decoration: underline; }
   .contact-row { min-height: 56px; padding: 0.65rem 1rem; }
 }
 
-/* ── Footer ─────────────────────────────────────────── */
+/* ── Footer ─────────────────────────────────────────────────────────── */
 .site-footer {
   border-top: 1px solid var(--border);
   padding: 2rem 0 2.4rem;
@@ -333,11 +482,45 @@ a:hover { text-decoration: underline; }
 .footer-links a { color: var(--text-muted); }
 .footer-links a:hover { color: var(--text); text-decoration: none; }
 
-/* ── Scroll reveal ──────────────────────────────────── */
+/* ── Focus visibility (keyboard) ────────────────────────────────────── */
+a:focus-visible,
+button:focus-visible,
+.contact-row:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+.contact-row:focus-visible { outline-offset: -2px; }
+.nav-cta:focus-visible,
+.btn:focus-visible { outline-offset: 3px; }
+
+/* ── Theme transition ───────────────────────────────────────────────── */
+/* Applied only under `prefers-reduced-motion: no-preference`, so switching
+   themes fades surfaces instead of snapping, but never animates for users who
+   asked for less motion. Colours only — never transform/size, so no layout
+   shift is possible mid-transition. */
+@media (prefers-reduced-motion: no-preference) {
+  body,
+  .site-header,
+  .feature-card,
+  .download-card,
+  .contact-list,
+  .cta-band,
+  .note,
+  .theme-toggle,
+  .nav-toggle {
+    transition: background-color 0.18s ease, border-color 0.18s ease, color 0.18s ease;
+  }
+}
+
+/* ── Scroll reveal ──────────────────────────────────────────────────── */
 .reveal { opacity: 0; transform: translateY(14px); transition: opacity 0.5s ease, transform 0.5s ease; }
 .reveal.visible { opacity: 1; transform: none; }
+@media (prefers-reduced-motion: reduce) {
+  .reveal { opacity: 1; transform: none; transition: none; }
+}
 
-/* ── Responsive ─────────────────────────────────────── */
+/* ── Responsive ─────────────────────────────────────────────────────── */
 @media (max-width: 720px) {
   .nav-toggle { display: block; }
   .main-nav {
@@ -358,4 +541,6 @@ a:hover { text-decoration: underline; }
   .main-nav a:last-child { border-bottom: none; }
   .main-nav a.nav-cta { text-align: center; border-bottom: none; margin: 0.5rem 0; }
   .hero { padding: 3.4rem 0 3rem; }
+  .hero .brand-logo { height: 138px; }
+  .brand-logo { height: 30px; }
 }

@@ -1414,15 +1414,22 @@ export async function getPublishedCourses() {
 export async function getCourseById(courseId: string) {
   const { data, error } = await backendClient
     .from('courses')
+    // CONTACTS: the doctor's contact_* fields MUST be selected here. The
+    // course-level whatsapp/telegram/phone columns only apply when
+    // use_default_contact = false, so without these fields the course screen
+    // could not resolve a default-contact course's Subscribe options at all
+    // (it fell back to the stale course columns — the reported "only a phone
+    // number and another incorrect number"). Same selection as the Explore
+    // list; both now feed the shared resolver in lib/subscribeContact.ts.
+    //
+    // IMPORTANT: this comment must stay OUTSIDE the template literal below.
+    // DataController::parseSelect() has no comment handling — splitTopLevel()
+    // splits the prose on its own commas and assertAllowed() then rejects the
+    // resulting bogus table name with a 403. getCourseById() threw, the screen's
+    // catch{} swallowed it, and every course rendered "Course not found"
+    // (regression introduced by commit 3c78997).
     .select(`
       *,
-      //  CONTACTS: the doctor's contact_* fields MUST be selected here. The
-      //  course-level whatsapp/telegram/phone columns only apply when
-      //  use_default_contact = false, so without these fields the course screen
-      //  could not resolve a default-contact course's Subscribe options at all
-      //  (it fell back to the stale course columns — the reported "only a phone
-      //  number and another incorrect number"). Same selection as the Explore
-      //  list; both now feed the shared resolver in lib/subscribeContact.ts.
       doctor:profiles!courses_doctor_id_fkey(id,full_name,avatar_url,contact_whatsapp,contact_telegram,contact_phone),
       category:categories(id,name),
       university:universities(id,name),

@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+/* global __dirname */
 'use strict';
 /**
  * generate-website-brand-assets.js — rebuilds the medacademy.site brand assets
@@ -47,7 +48,6 @@ const rgb = (hex) => {
 };
 
 const SYM_B = bounds(SYMBOL);
-const WORD_B = bounds(WORDMARK);
 
 /** Tight lockup raster: box sized to the fitted content, so ink touches edges. */
 function lockupRaster(ink, { stack, wordScale, gapScale }, targetH) {
@@ -87,9 +87,14 @@ function writePng(name, im) {
 
 /* ── 1. horizontal lockups (header) ──────────────────────────────────────── */
 // wordScale 0.38 / gapScale 0.16 = the approved 3.676 ink aspect.
+// render()'s `color` is an [r,g,b] ARRAY — handing it the raw hex string
+// rasterises to black, so convert once here (caught by tests/websiteTheme.test.cjs).
+const INK_DARK_ON_LIGHT = rgb(PALETTE.ink);    // #081E33 navy — for light backgrounds
+const INK_LIGHT_ON_DARK = rgb(PALETTE.onDark); // #FFFFFF white — for dark backgrounds
+
 const HORIZ = { stack: false, wordScale: 0.38, gapScale: 0.16 };
 say('horizontal lockups (aspect must match the approved 3.676):');
-for (const [name, ink] of [['logo-light.png', PALETTE.ink], ['logo-dark.png', PALETTE.onDark]]) {
+for (const [name, ink] of [['logo-light.png', INK_DARK_ON_LIGHT], ['logo-dark.png', INK_LIGHT_ON_DARK]]) {
   const { im, W, H, aspect } = lockupRaster(ink, HORIZ, 300);
   const bb = inkBox(im);
   writePng(name, im);
@@ -101,7 +106,7 @@ for (const [name, ink] of [['logo-light.png', PALETTE.ink], ['logo-dark.png', PA
 // wordScale 0.40 ≈ the board's stacked wordmark (61 px tall over a 151 px mark).
 const STACK = { stack: true, wordScale: 0.40, gapScale: 0.24 };
 say('stacked hero lockups:');
-for (const [name, ink] of [['logo-stacked-light.png', PALETTE.ink], ['logo-stacked-dark.png', PALETTE.onDark]]) {
+for (const [name, ink] of [['logo-stacked-light.png', INK_DARK_ON_LIGHT], ['logo-stacked-dark.png', INK_LIGHT_ON_DARK]]) {
   const { im, W, H, aspect } = lockupRaster(ink, STACK, 620);
   const bb = inkBox(im);
   writePng(name, im);

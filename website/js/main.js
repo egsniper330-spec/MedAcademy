@@ -15,7 +15,7 @@
   // The static hrefs in contact.html are kept identical so the page also
   // works with JavaScript disabled.
   // ─────────────────────────────────────────────────────────────────
-  var CONTACT_LINKS = {
+  let CONTACT_LINKS = {
     facebook:  'https://facebook.com',
     instagram: 'https://instagram.com',
     whatsapp:  'https://wa.me/',
@@ -24,8 +24,8 @@
   };
 
   document.querySelectorAll('.contact-row[data-contact]').forEach(function (row) {
-    var key = row.getAttribute('data-contact');
-    var value = CONTACT_LINKS[key];
+    let key = row.getAttribute('data-contact');
+    let value = CONTACT_LINKS[key];
     if (!value) return;
     if (key === 'email') {
       row.setAttribute('href', 'mailto:' + value);
@@ -35,12 +35,68 @@
     }
   });
 
+  // ─────────────────────────────────────────────────────────────────
+  // THEME — Light / Dark. The inline <head> script has ALREADY applied
+  // data-theme before first paint (that is what avoids the flash); this
+  // block only wires the control, persistence and the OS-follow fallback.
+  // ─────────────────────────────────────────────────────────────────
+  let THEME_KEY = 'med-theme';
+  let root = document.documentElement;
+  let themeBtn = document.getElementById('themeToggle');
+
+  function currentTheme() {
+    return root.getAttribute('data-theme') === 'light' ? 'light' : 'dark';
+  }
+
+  function storedTheme() {
+    try {
+      let v = localStorage.getItem(THEME_KEY);
+      return (v === 'light' || v === 'dark') ? v : null;
+    } catch (_e) { return null; } // storage blocked (private mode) — no persistence
+  }
+
+  function applyTheme(theme, persist) {
+    root.setAttribute('data-theme', theme);
+    if (persist) {
+      try { localStorage.setItem(THEME_KEY, theme); } catch (_e) { /* private mode */ }
+    }
+    let meta = document.querySelector('meta[name="theme-color"]');
+    if (meta) meta.setAttribute('content', theme === 'light' ? '#EEF3F9' : '#091425');
+    if (themeBtn) {
+      // The control shows the icon of the theme it would switch TO, so the
+      // accessible name always describes the action, not the current state.
+      let next = theme === 'dark' ? 'light' : 'dark';
+      themeBtn.setAttribute('aria-label', 'Switch to ' + next + ' mode');
+      themeBtn.setAttribute('title', 'Switch to ' + next + ' mode');
+    }
+  }
+
+  if (themeBtn) {
+    themeBtn.addEventListener('click', function () {
+      applyTheme(currentTheme() === 'dark' ? 'light' : 'dark', true);
+    });
+    // Sync the label with whatever the head script decided (no re-persist).
+    applyTheme(currentTheme(), false);
+  }
+
+  // Follow the OS theme ONLY while the visitor has not chosen explicitly —
+  // an explicit selection must survive OS changes for the rest of the session.
+  let schemeQuery = window.matchMedia ? window.matchMedia('(prefers-color-scheme: dark)') : null;
+  let onSchemeChange = function (e) {
+    if (storedTheme()) return;
+    applyTheme(e.matches ? 'dark' : 'light', false);
+  };
+  if (schemeQuery) {
+    if (typeof schemeQuery.addEventListener === 'function') schemeQuery.addEventListener('change', onSchemeChange);
+    else if (typeof schemeQuery.addListener === 'function') schemeQuery.addListener(onSchemeChange); // Safari < 14
+  }
+
   // Mobile navigation toggle
-  var toggle = document.getElementById('navToggle');
-  var nav = document.getElementById('mainNav');
+  let toggle = document.getElementById('navToggle');
+  let nav = document.getElementById('mainNav');
   if (toggle && nav) {
     toggle.addEventListener('click', function () {
-      var open = nav.classList.toggle('open');
+      let open = nav.classList.toggle('open');
       toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
     });
     nav.addEventListener('click', function (e) {
@@ -52,9 +108,9 @@
   }
 
   // Scroll-reveal: mark visible immediately, then observe for graceful entry
-  var revealables = document.querySelectorAll('.reveal');
+  let revealables = document.querySelectorAll('.reveal');
   if ('IntersectionObserver' in window) {
-    var observer = new IntersectionObserver(function (entries) {
+    const observer = new IntersectionObserver(function (entries) {
       entries.forEach(function (entry) {
         if (entry.isIntersecting) {
           entry.target.classList.add('visible');
@@ -70,7 +126,7 @@
   // Resolve the Android direct-APK link if a release manifest is present.
   // Drop releases.json next to this page to enable the direct download button;
   // without it, the button stays hidden and only store links are shown.
-  var apkLink = document.getElementById('androidApk');
+  let apkLink = document.getElementById('androidApk');
   if (apkLink) {
     fetch('releases.json', { cache: 'no-store' })
       .then(function (res) { if (!res.ok) throw new Error('no manifest'); return res.json(); })
