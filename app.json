@@ -164,6 +164,7 @@
       "./plugins/withDynamicVersions",
       "./plugins/withGradleWrapper",
       "./plugins/withSystemBars",
+      "./plugins/withAndroidBranding",
     [
       "expo-navigation-bar",
       {

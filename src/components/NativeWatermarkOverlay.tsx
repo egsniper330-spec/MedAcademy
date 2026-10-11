@@ -2,40 +2,49 @@
  * NativeWatermarkOverlay.tsx
  *
  * Application-level forensic watermark for BOTH native VdoCipher players
- * (online adapter + offline player) — a behavioral replica of the Plyr/YouTube
- * player's in-HTML watermark (src/lib/plyr/playerScript.ts, `injectWatermark`),
- * whose constants are published in src/lib/nativeWatermarkConfig.ts.
+ * (online adapter + offline player).
  *
- * ── Why a replica (not a shared component) ─────────────────────────────────
- *   The Plyr watermark lives inside the player's WebView DOM; the native
- *   VdoPlayerView is a native TextureView with no injectable DOM, so the same
- *   behavior must be rendered as a React Native sibling view. The overlay is
- *   positioned via Reanimated shared values driven by the SAME slot table,
- *   timing, opacity band, rotation jitter and clamp as Plyr — verified
- *   value-for-value in nativeWatermarkConfig.ts. Do NOT tune values here:
- *   change nativeWatermarkConfig.ts (and mirror only where the platform
- *   forces it, e.g. web uses CSS transitions natively).
+ * ── THE MOTION ───────────────────────────────────────────────────────────────
+ * Continuous BILLIARD-STYLE motion: the pill travels along a real trajectory
+ * and reflects off all four boundaries of the actual video viewport, keeping
+ * its whole box inside at all times. The physics live in
+ * src/lib/watermarkMotion.ts (pure + tested); this file only owns the frame
+ * loop and the DOM/measure plumbing.
  *
- * ── Behavior (Plyr-parity, stable by construction) ──────────────────────────
- *   • One overlay instance per player; identity resolved ONCE upstream and
- *     keyed by id — cannot flip or re-resolve mid-session.
- *   • Visible immediately at a random slot (opacity 0.40–0.56), then moves
- *     every 30–60 s with a smooth 600 ms ease glide to a random no-repeat
- *     slot, rotation ±3°, opacity re-drawn from 0.38–0.58 — while REMAINING
- *     VISIBLE. No fade-out/teleport/hide gap (the old "watermark disappears"
- *     behaviors are structurally impossible: opacity never leaves the
- *     Plyr band).
- *   • Whole-element clamp (Plyr mkTransform): the pill can never clip at the
- *     right/bottom edge — fixes "parts of the watermark are missing".
- *   • Timers are self-rescheduling and cleaned up on unmount/resize; a
- *     container resize (rotation/fullscreen) re-clamps to the new bounds on
- *     the next move, and the first move after resize happens quickly.
- *   • pointerEvents="none" — never intercepts touch on the player controls.
+ * It REPLACES the previous 9-slot / 30–60 s glide (a "teleport with a glide",
+ * not motion). Two concrete defects of that implementation are gone:
  *
- * ── Fullscreen ──────────────────────────────────────────────────────────────
- *   The fullscreen Modal renders its own instance of this overlay, so the
- *   watermark stays visible in fullscreen exactly as in normal playback
- *   (same identity, same behavior).
+ *   1. CLIPPING. The old `wmClampPosition` ran on a timer that could fire
+ *      before the pill had reported its layout, so it clamped a ~200 px pill
+ *      as if it were 1×1 — a right/bottom slot then landed hundreds of pixels
+ *      past the right edge, where the container's `overflow: hidden` cut it
+ *      off ("watermark partially outside the frame / clipped / text missing").
+ *      Now: placement does not start until BOTH the container and the pill have
+ *      measured, and every frame is clamped with the measured size.
+ *   2. DISAPPEARING. Position was only ever assigned at move time, so a
+ *      container resize (rotation/fullscreen) or a transient 0×0 layout left
+ *      the pill outside the visible area until the next tick. Now: a bounds
+ *      change re-projects the position synchronously in onLayout, and opacity
+ *      is drawn ONCE and never leaves the Plyr band — there is no hide gap.
+ *
+ * ── WHO OWNS WHICH LAYER ─────────────────────────────────────────────────────
+ * This component is the APP layer. Whether it renders at all for a session is
+ * decided by resolveWatermarkLayers (src/lib/watermarkLayers.ts) — this
+ * component is always rendered by its caller when the caller decided the app
+ * layer is the one the viewer should see. See that module for the security
+ * implications of an app-rendered mark vs VdoCipher's burned-in provider mark.
+ *
+ * ── Performance / lifecycle ──────────────────────────────────────────────────
+ * • Frame loop runs on the UI thread via Reanimated `useFrameCallback` — no JS
+ *   thread work, no re-render per frame, no timers to leak.
+ * • The loop is armed only once container AND pill have real dimensions, and
+ *   stopped on unmount (Reanimated deactivates the callback with the hook), so
+ *   no animation survives a player that has closed.
+ * • pointerEvents="none" — never intercepts a touch on the player controls.
+ * • `useAnimatedStyle` reads the shared values, so the JS thread is idle.
+ *
+ * A11y: reduced-motion is honoured for app CHROME elsewhere; this mark is a
+ * forensic anti-capture control, so it keeps moving deliberately.
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -43,22 +52,26 @@ import { View, Text, LayoutChangeEvent } from 'react-native';
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
-  withTiming,
-  Easing,
+  useFrameCallback,
 } from 'react-native-reanimated';
 import {
-  WATERMARK_SLOTS,
-  WATERMARK_GLIDE_MS,
   WATERMARK_MAX_WIDTH_CAP,
   WATERMARK_MAX_WIDTH_FRAC,
   WATERMARK_FONT_PX,
-  wmNextSlotIndex,
-  wmRandomRotation,
   wmRandomOpacity,
-  wmInitialOpacity,
-  wmNextMoveDelayMs,
-  wmClampPosition,
+  wmRandomRotation,
 } from '@/lib/nativeWatermarkConfig';
+import {
+  createWatermarkMotion,
+  stepWatermarkMotion,
+  resolveWatermarkMotionBounds,
+  clampWatermarkMotion,
+  isWatermarkMotionInBounds,
+  WM_MOTION_MAX_STEP_S,
+  type MotionBounds,
+  type MotionSize,
+  type WatermarkMotionState,
+} from '@/lib/watermarkMotion';
 
 // ─── Props ────────────────────────────────────────────────────────────────────
 
@@ -72,7 +85,7 @@ export interface NativeWatermarkOverlayProps {
    *  window rectangle + opacity every 2s via measureInWindow. This is the
    *  REAL view's native geometry — physical proof the watermark is on-screen
    *  and visible without screenshots (which DRM secure surfaces block).
-   *  Dimensions/state only — no secrets.
+   *  Dimensions/state only — no secrets, and NEVER a token/OTP/identity.
    *
    *  NEVER runs in production: the effect below additionally requires __DEV__,
    *  so a release build schedules no interval and does no measureInWindow work
@@ -88,97 +101,157 @@ export function NativeWatermarkOverlay({
   onContainerLayout,
   debugProve = false,
 }: NativeWatermarkOverlayProps) {
-  // Reanimated shared values — position is the top-left corner of the pill
-  // (Plyr anchors top-left via translate3d from top:0/left:0).
-  const posX     = useSharedValue(-200);
-  const posY     = useSharedValue(-200);
-  const opacity  = useSharedValue(0);
+  // Position of the pill's top-left corner, in container px — written on the
+  // UI thread by the frame callback, read by the animated style.
+  const posX = useSharedValue(0);
+  const posY = useSharedValue(0);
+  const opacity = useSharedValue(0);
   const rotation = useSharedValue(0);
 
-  // Mutable refs — updated by layout callbacks, read inside timer callbacks.
+  // Motion state (x, y, vx, vy) — shared so the UI-thread frame loop owns it.
+  const motionSV = useSharedValue<WatermarkMotionState | null>(null);
+
+  // Measured geometry. Kept in refs (read by the loop) and mirrored in state
+  // only where React must re-render (the responsive pill cap).
   const containerWRef = useRef(0);
   const containerHRef = useRef(0);
-  const pillWRef      = useRef(0);
-  const pillHRef      = useRef(0);
-  const slotRef       = useRef(-1);
-  const timerRef      = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const mountedRef    = useRef(false);
+  const pillWRef = useRef(0);
+  const pillHRef = useRef(0);
+  const prevBoundsRef = useRef<MotionBounds>({ width: 0, height: 0 });
 
-  // Responsive pill cap — Plyr: max-width min(320px, 55%).
   const [maxPillWidth, setMaxPillWidth] = useState(WATERMARK_MAX_WIDTH_CAP);
 
-  // Trigger to start the timers once container dimensions are known.
-  const [containerReady, setContainerReady] = useState(false);
+  const size = (): MotionSize => ({
+    width: pillWRef.current > 0 ? pillWRef.current : 1,
+    height: pillHRef.current > 0 ? pillHRef.current : 1,
+  });
 
-  // ── Named animated style — never inline inside JSX ───────────────────────
-  const containerStyle = useAnimatedStyle(() => ({
-    position: 'absolute' as const,
-    left:     posX.value,
-    top:      posY.value,
-    opacity:  opacity.value,
-    transform: [{ rotate: `${rotation.value}deg` }],
-  }));
-
-  // ── Layout callbacks ──────────────────────────────────────────────────────
-
-  const handleContainerLayout = useCallback((e: LayoutChangeEvent) => {
-    const { width, height } = e.nativeEvent.layout;
-    if (width === 0 || height === 0) return;
-    const changed =
-      Math.abs(width - containerWRef.current) > 1 ||
-      Math.abs(height - containerHRef.current) > 1;
-    containerWRef.current = width;
-    containerHRef.current = height;
-    // Responsive pill cap — Plyr max-width formula.
-    setMaxPillWidth(Math.min(width * WATERMARK_MAX_WIDTH_FRAC, WATERMARK_MAX_WIDTH_CAP));
-    if (!containerReady) setContainerReady(true);
-    else if (changed) scheduleMoveRef.current?.(0); // resize → re-clamp quickly
-  }, [containerReady]);
-
-  const handlePillLayout = useCallback((e: LayoutChangeEvent) => {
-    pillWRef.current = e.nativeEvent.layout.width;
-    pillHRef.current = e.nativeEvent.layout.height;
-  }, []);
-
-  // ── Move — Plyr `move()`: glide to the next slot, stay visible ────────────
-  const move = useCallback((delayMs = 0) => {
+  // ── Start / (re)project the motion ─────────────────────────────────────────
+  // Called from layout callbacks, NOT from a timer. It is idempotent: it
+  // creates the motion on first measurement and re-projects it on any change.
+  const syncMotion = useCallback(() => {
     const cW = containerWRef.current;
     const cH = containerHRef.current;
+    // Nothing drawable until the container has real size — never place with a
+    // 0×0 container (that is how the mark ends up lost off-screen).
     if (cW <= 0 || cH <= 0) return;
+    if (pillWRef.current <= 0 || pillHRef.current <= 0) return;
 
-    slotRef.current = wmNextSlotIndex(slotRef.current);
-    const slot = WATERMARK_SLOTS[slotRef.current];
-    const clamped = wmClampPosition(slot, cW, cH, Math.max(pillWRef.current, 1), Math.max(pillHRef.current, 1));
+    const bounds: MotionBounds = { width: cW, height: cH };
+    const sz = size();
+    const current = motionSV.value;
 
-    const start = () => {
-      posX.value = withTiming(clamped.x, { duration: WATERMARK_GLIDE_MS, easing: Easing.ease });
-      posY.value = withTiming(clamped.y, { duration: WATERMARK_GLIDE_MS, easing: Easing.ease });
-      rotation.value = withTiming(wmRandomRotation(), { duration: WATERMARK_GLIDE_MS, easing: Easing.ease });
-      opacity.value = withTiming(wmRandomOpacity(), { duration: WATERMARK_GLIDE_MS, easing: Easing.ease });
-    };
-    if (delayMs > 0) timerRef.current = setTimeout(start, delayMs);
-    else start();
-  }, [posX, posY, opacity, rotation]);
+    if (current === null) {
+      const next = createWatermarkMotion(bounds, sz);
+      motionSV.value = next;
+      posX.value = next.x;
+      posY.value = next.y;
+      // Plyr parity: one opacity draw and one small static tilt, both set once
+      // at placement. There is no fade cycle and no hide gap, so the mark can
+      // never "disappear" mid-playback.
+      if (opacity.value === 0) opacity.value = wmRandomOpacity();
+      rotation.value = wmRandomRotation();
+      prevBoundsRef.current = bounds;
+      return;
+    }
 
-  // Late-bound ref so the layout callback can trigger a fast move after resize.
-  const scheduleMoveRef = useRef<((delayMs?: number) => void) | null>(null);
+    const resized =
+      Math.abs(prevBoundsRef.current.width - cW) > 0.5 ||
+      Math.abs(prevBoundsRef.current.height - cH) > 0.5;
+    const next = resized
+      ? resolveWatermarkMotionBounds(current, prevBoundsRef.current, bounds, sz)
+      : clampWatermarkMotion(current, bounds, sz);
+    motionSV.value = next;
+    posX.value = next.x;
+    posY.value = next.y;
+    prevBoundsRef.current = bounds;
+  }, [motionSV, opacity, posX, posY, rotation]);
 
-  // Ref to the pill itself for the visibility self-proof (real host view).
-  const pillRef = useRef<Animated.View | null>(null);
+  // ── Layout callbacks ──────────────────────────────────────────────────────
+  const handleContainerLayout = useCallback((e: LayoutChangeEvent) => {
+    const { width, height } = e.nativeEvent.layout;
+    if (width === 0 || height === 0) return; // transient collapse — keep last known
+    const prev = prevBoundsRef.current;
+    if (Math.abs(width - prev.width) > 0.5 || Math.abs(height - prev.height) > 0.5) {
+      setMaxPillWidth(Math.min(width * WATERMARK_MAX_WIDTH_FRAC, WATERMARK_MAX_WIDTH_CAP));
+    }
+    containerWRef.current = width;
+    containerHRef.current = height;
+    syncMotion();
+    onContainerLayout?.(e);
+  }, [onContainerLayout, syncMotion]);
 
-  // ── DEV-ONLY DEBUG PROOF — self-reporting visibility (no screenshots) ─────
-  // Every 2s the pill measures itself in WINDOW coordinates and reports its
-  // real on-screen rect + current opacity. A 'vis=yes' line is direct native
-  // evidence: the watermark view exists in the window at a non-zero rect
-  // within the Plyr opacity band — i.e. it is physically visible on screen.
-  //
-  // PRODUCTION GUARD: __DEV__ is statically false in release bundles, so this
-  // effect bails before creating the interval — no timer, no measureInWindow,
-  // no overhead — even if a caller passes debugProve={true}.
+  const handlePillLayout = useCallback((e: LayoutChangeEvent) => {
+    const { width, height } = e.nativeEvent.layout;
+    if (width > 0) pillWRef.current = width;
+    if (height > 0) pillHRef.current = height;
+    syncMotion();
+  }, [syncMotion]);
+
+  // ── Frame loop (UI thread) ────────────────────────────────────────────────
+  // Armed only while there is a real motion state to advance. Reanimated
+  // deactivates the callback when the component unmounts, so no loop survives
+  // the player closing.
+  const frameCallback = useFrameCallback((info) => {
+    'worklet';
+    const dtMs = info.timeSincePreviousFrame;
+    if (dtMs == null || dtMs <= 0) return;
+    const m = motionSV.value;
+    if (m === null) return;
+    const w = containerWRef.current;
+    const h = containerHRef.current;
+    if (w <= 0 || h <= 0) return;
+    const pw = pillWRef.current;
+    const ph = pillHRef.current;
+    if (pw <= 0 || ph <= 0) return;
+
+    const dt = Math.min(dtMs / 1000, WM_MOTION_MAX_STEP_S);
+    const next = stepWatermarkMotion(
+      m,
+      dt,
+      { width: w, height: h },
+      { width: pw, height: ph },
+    );
+    motionSV.value = next;
+    posX.value = next.x;
+    posY.value = next.y;
+  }, false);
+
+  // Activate on mount; Reanimated deactivates with the hook on unmount.
+  // The callback itself returns early until both container and pill have real
+  // measurements, so "armed" is a guard INSIDE the worklet — no need to
+  // re-run an effect to arm it (reading a shared value during render would
+  // not re-render the component anyway).
+  useEffect(() => {
+    frameCallback.setActive(true);
+    return () => frameCallback.setActive(false);
+  }, [frameCallback]);
+
+  // ── Geometry self-check (DEV only) ────────────────────────────────────────
+  // Cheap assertions that the mark is inside the viewport — dimensions only.
+  useEffect(() => {
+    if (!__DEV__) return;
+    const id = setInterval(() => {
+      const m = motionSV.value;
+      if (!m) return;
+      const w = containerWRef.current;
+      const h = containerHRef.current;
+      if (w <= 0 || h <= 0) return;
+      const inBounds = isWatermarkMotionInBounds(m, { width: w, height: h }, size());
+      if (!inBounds) {
+        // Signals a real bug — surfaced without any identity/token data.
+        console.warn(
+          `[VDO_WM_GEOMETRY] out-of-bounds x=${Math.round(m.x)} y=${Math.round(m.y)} box=${w.toFixed(0)}x${h.toFixed(0)} pill=${pillWRef.current.toFixed(0)}x${pillHRef.current.toFixed(0)}`
+        );
+      }
+    }, 2000);
+    return () => clearInterval(id);
+  }, [motionSV]);
+
+  // ── DEV-ONLY visibility self-proof ────────────────────────────────────────
   useEffect(() => {
     if (!debugProve || !__DEV__) return;
     const id = setInterval(() => {
-      const o = opacity.value;
       const pill = pillRef.current;
       const measure = (pill as unknown as { measureInWindow?: (cb: (x: number, y: number, w: number, h: number) => void) => void } | null)?.measureInWindow;
       if (typeof measure !== 'function') {
@@ -186,58 +259,31 @@ export function NativeWatermarkOverlay({
         return;
       }
       measure.call(pill, (x: number, y: number, w: number, h: number) => {
-        const visible = w > 0 && h > 0 && o >= 0.3; // Plyr band floor ~0.38
-        console.log(`[VDO_WM_PROVE] vis=${visible ? 'yes' : 'NO'} px=${Math.round(x)},${Math.round(y)} pw=${Math.round(w)}x${Math.round(h)} opacity=${o.toFixed(2)}`);
+        const visible = w > 0 && h > 0 && opacity.value >= 0.3;
+        console.log(`[VDO_WM_PROVE] vis=${visible ? 'yes' : 'NO'} px=${Math.round(x)},${Math.round(y)} pw=${Math.round(w)}x${Math.round(h)} opacity=${opacity.value.toFixed(2)}`);
       });
     }, 2000);
     return () => clearInterval(id);
   }, [debugProve, opacity]);
 
-  // ── Timer effect (Plyr scheduleTick) ──────────────────────────────────────
-  useEffect(() => {
-    if (!containerReady) return;
-    if (containerWRef.current <= 0 || containerHRef.current <= 0) return;
-    if (mountedRef.current) return; // schedule exactly once per mount
-    mountedRef.current = true;
+  const pillRef = useRef<Animated.View | null>(null);
 
-    // Initial position: random slot, clamped, then fade IN to the Plyr band
-    // (Plyr mounts at opacity:0 and transitions to 0.40–0.56 on the first rAF).
-    slotRef.current = wmNextSlotIndex(-1);
-    const slot = WATERMARK_SLOTS[slotRef.current];
-    const clamped = wmClampPosition(slot, containerWRef.current, containerHRef.current, Math.max(pillWRef.current, 1), Math.max(pillHRef.current, 1));
-    posX.value = clamped.x;
-    posY.value = clamped.y;
-    rotation.value = wmRandomRotation();
-    opacity.value = withTiming(wmInitialOpacity(), { duration: WATERMARK_GLIDE_MS, easing: Easing.ease });
+  const containerStyle = useAnimatedStyle(() => ({
+    position: 'absolute' as const,
+    left: posX.value,
+    top: posY.value,
+    opacity: opacity.value,
+    transform: [{ rotate: `${rotation.value}deg` }],
+  }));
 
-    const tick = () => {
-      timerRef.current = setTimeout(() => {
-        move();
-        tick();
-      }, wmNextMoveDelayMs());
-    };
-    tick();
-
-    return () => {
-      if (timerRef.current !== null) { clearTimeout(timerRef.current); timerRef.current = null; }
-      mountedRef.current = false;
-    };
-  }, [containerReady, move, posX, posY, opacity, rotation]);
-
-  scheduleMoveRef.current = move;
-
-  // ── Render ────────────────────────────────────────────────────────────────
-  // Single-line watermark: "NAME • ID" or "ID" — Plyr's U+2022 format.
+  // Single-line watermark: "NAME • ID" or "ID".
   const label = watermarkName ? `${watermarkName} • ${watermarkId}` : watermarkId;
 
   return (
     <View
       style={styles.overlay}
       pointerEvents="none"
-      onLayout={(e) => {
-        handleContainerLayout(e);
-        onContainerLayout?.(e);
-      }}
+      onLayout={handleContainerLayout}
     >
       <Animated.View
         ref={pillRef}
@@ -253,9 +299,9 @@ export function NativeWatermarkOverlay({
 }
 
 // ─── Static styles — Plyr typography (playerScript.ts buildEl) ────────────────
-//   color #fff · WATERMARK_FONT_PX (15px) · weight 600 · letterSpacing 0.3 ·
-//   single line ellipsis · two-layer text shadow · no background (text floats
-//   over video). Size comes from nativeWatermarkConfig — the canonical source.
+//   color #fff · WATERMARK_FONT_PX · weight 600 · letterSpacing 0.3 ·
+//   single line ellipsis · two-layer text shadow · no background.
+//   Size comes from nativeWatermarkConfig — the canonical source.
 
 const styles = {
   overlay: {
@@ -265,10 +311,8 @@ const styles = {
   },
   wmText: {
     color:           '#fff',
-    // Canonical size from nativeWatermarkConfig (Plyr 13px → 15px for
-    // readability). Do NOT hardcode here — the config is the single source.
     fontSize:        WATERMARK_FONT_PX,
-    fontWeight:     '600' as const,
+    fontWeight:      '600' as const,
     letterSpacing:   0.3,
     textShadowColor:  'rgba(0,0,0,0.95)',
     textShadowOffset: { width: 0, height: 1 },

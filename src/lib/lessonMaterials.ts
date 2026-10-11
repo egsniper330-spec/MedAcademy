@@ -44,6 +44,20 @@ export function materialAccess(mat: any): MaterialAccess {
   return isMaterialDownloadEnabled(mat) ? 'download' : 'view';
 }
 
+/**
+ * The teacher's "Personalized Student Watermark" switch for one material.
+ *
+ * INDEPENDENT of `materialAccess`: all four combinations are legal — a
+ * Preview-Only material may be watermarked, and a Preview+Download material may
+ * be left unmarked. Like `download_enabled`, a pre-migration row has no value;
+ * `undefined` means OFF (the server column defaults to 0), so nothing starts
+ * watermarking by accident.
+ */
+export function isMaterialWatermarkEnabled(mat: any): boolean {
+  if (mat?.watermark_enabled === undefined || mat?.watermark_enabled === null) return false;
+  return Number(mat.watermark_enabled) === 1;
+}
+
 /** Materials a student may see at all (permission 'none' ones are dropped). */
 export function visibleMaterials(materials: any[] | null | undefined): any[] {
   return (materials ?? []).filter((m) => materialAccess(m) !== 'none');

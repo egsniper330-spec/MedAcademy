@@ -778,10 +778,31 @@ CREATE TABLE IF NOT EXISTS `lesson_materials` (
   `created_at` DATETIME(6) DEFAULT CURRENT_TIMESTAMP NOT NULL COMMENT 'pg_default: now()',
   `updated_at` DATETIME(6) DEFAULT CURRENT_TIMESTAMP NOT NULL COMMENT 'pg_default: now()',
   `permission` VARCHAR(16) DEFAULT 'allow' NOT NULL COMMENT 'pg_default: ''allow''',
+  `watermark_enabled` TINYINT(1) DEFAULT 0 NOT NULL COMMENT 'Personalized Student Watermark: 1 = every delivered copy carries the student identity (migration 032)',
   PRIMARY KEY (`id`),
   CONSTRAINT `fk_lesson_materials_lesson_id` FOREIGN KEY (`lesson_id`) REFERENCES `lessons` (`id`) ON DELETE CASCADE,
   CONSTRAINT `fk_lesson_materials_course_id` FOREIGN KEY (`course_id`) REFERENCES `courses` (`id`) ON DELETE CASCADE,
   CONSTRAINT `fk_lesson_materials_uploaded_by` FOREIGN KEY (`uploaded_by`) REFERENCES `profiles` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+-- ===========================================================================
+-- TABLE: lesson_material_pdfs (generated personalized copies — migration 032)
+-- ===========================================================================
+CREATE TABLE IF NOT EXISTS `lesson_material_pdfs` (
+  `id` CHAR(36) DEFAULT (UUID()) COMMENT 'pg_default: gen_random_uuid()',
+  `material_id` CHAR(36) NOT NULL,
+  `student_id` CHAR(36) NOT NULL,
+  `source_hash` CHAR(64) NOT NULL COMMENT 'sha256 of the SOURCE pdf; replacing the source invalidates every copy',
+  `variant_key` CHAR(64) NOT NULL COMMENT 'sha256(identity + engine/settings + source_hash)',
+  `storage_path` TEXT NOT NULL COMMENT 'private object path inside the lesson-material-pdfs bucket',
+  `file_size` BIGINT DEFAULT 0 NOT NULL COMMENT 'pg_default: 0',
+  `page_count` INT DEFAULT 0 NOT NULL COMMENT 'pg_default: 0',
+  `created_at` DATETIME(6) DEFAULT CURRENT_TIMESTAMP NOT NULL COMMENT 'pg_default: now()',
+  `updated_at` DATETIME(6) DEFAULT CURRENT_TIMESTAMP NOT NULL COMMENT 'pg_default: now()',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_lesson_material_pdfs_variant` (`material_id`, `student_id`, `variant_key`),
+  KEY `idx_lesson_material_pdfs_student` (`student_id`),
+  CONSTRAINT `fk_lesson_material_pdfs_material` FOREIGN KEY (`material_id`) REFERENCES `lesson_materials` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_lesson_material_pdfs_student` FOREIGN KEY (`student_id`) REFERENCES `profiles` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 -- ===========================================================================
 -- TABLE: course_templates

@@ -512,8 +512,28 @@ export default function StudentProfile() {
     <ScrollView automaticallyAdjustKeyboardInsets={process.env.EXPO_OS === 'ios'}
       style={{ flex: 1, backgroundColor: c.base }}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />}
+      // Scroll content owns the BOTTOM clearance. NOT the raw
+      // safeBottom(insets.bottom): on iOS the role tab bar is the REAL native
+      // bar drawn by UIKit OUTSIDE the React Native hierarchy, so it floats
+      // over this screen and its own height (tabBarClearance.ios.ts) must be
+      // reserved on top of the home-indicator inset. layout.scrollBottom() is
+      // exactly that (Android/web resolve a 0 clearance, so nothing changes
+      // there). RN's contentInsetAdjustmentBehavior defaults to 'never' and
+      // automaticallyAdjustKeyboardInsets is keyboard-only, so this padding is
+      // applied once, never twice.
+      contentContainerStyle={{ paddingBottom: layout.scrollBottom() }}
     >
-      <View style={{ padding: layout.screenPx }}>
+      {/* paddingTop = safeTop(insets.top) — the same shared primitive
+          PageHeader / DashboardHeader use. This screen's hero is INSIDE the
+          scroll content and has no header component above it, so it must
+          reserve the status-bar / Dynamic-Island region itself; with the old
+          `padding: layout.screenPx` (~20dp) the avatar row started under the
+          notch and the top of the circle was hidden on iPhone.
+
+          The bottom side is owned by the ScrollView's contentContainerStyle
+          above (layout.scrollBottom()), so this View deliberately has NO
+          paddingBottom — that is what avoids reserving the space twice. */}
+      <View style={{ paddingHorizontal: layout.screenPx, paddingTop: layout.headerTop }}>
         <PermissionRationaleModal
           type="mediaLibrary"
           visible={showPhotoRationale}

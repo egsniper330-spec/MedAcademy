@@ -334,18 +334,20 @@ console.log('── Canonical client watermark intact in every player ──');
       `${p}: renders the canonical overlay via watermarkIdentity`);
   }
 
-  // Exactly ONE watermark per playback: the online players drop their overlay
-  // when the OTP already carries the burned-in stream annotation. Without this
-  // gate the restored annotate would re-introduce the reported duplicate.
-  // Offline has no annotateApplied and must keep rendering its overlay as-is.
+  // Exactly ONE watermark per playback. That decision now lives in ONE place —
+  // resolveWatermarkLayers (src/lib/watermarkLayers.ts) — instead of a local
+  // `!annotateApplied &&` gate in each player. Without a single owner the
+  // restored annotate re-introduced the reported Android duplicate (both the
+  // burned-in stream mark AND the app overlay). Offline has no annotateApplied
+  // contract, so it feeds `false` through the same policy and keeps its overlay.
   const online = read(ONLINE_ADAPTER);
-  ok(/!annotateApplied &&/.test(online),
-    'online adapter: overlay suppressed when the stream watermark is attached');
+  ok(/resolveWatermarkLayers\(\{/.test(online) && /playerKind: 'native'/.test(online),
+    'online adapter: overlay rendering decided by the shared watermark-layer policy');
   ok(/result\.annotateApplied/.test(online),
     'online adapter: reads annotateApplied from the OTP response');
   const offline = read(OFFLINE_PLAYER);
-  ok(!/annotateApplied/.test(offline),
-    'offline player: no annotateApplied gate — overlay stays its single watermark');
+  ok(/resolveWatermarkLayers\(\{/.test(offline) && /annotateApplied: false/.test(offline),
+    'offline player: routes through the same policy with annotateApplied:false — one watermark');
   const plyr = read(PLYR_PLAYER);
   ok(/•/.test(plyr) || /watermarkLabel|watermark/.test(plyr.toLowerCase()),
     'Plyr/YouTube player: canonical watermark overlay present');

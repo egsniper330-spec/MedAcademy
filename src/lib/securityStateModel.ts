@@ -186,6 +186,208 @@ export function resolveGatePhase(input: {
   return 'unlocked';
 }
 
+// ─── CENTRALIZED SECURITY GATE STATE (single closed vocabulary) ─────────────
+//
+// WHY A SECOND, NAMED STATE (root cause: two independent gate inputs had no
+// common vocabulary)
+// ─────────────────────────────────────────────────────────────────────────────
+// The gate used to be driven by ONE derived boolean (`phase === 'blocked'`),
+// which was computed from the policy verdict alone. Overlay/obscured-window
+// protection and the background→resume lock are DIFFERENT inputs with
+// different lifecycles — an overlay is not a policy finding, and a resume is
+// not a device violation — so folding them into `blocksLogin` would have made
+// the copy wrong and the recovery paths indistinguishable.
+//
+// This enum is the ONE vocabulary every consumer renders from. It is explicit
+// (not a boolean) so the gate can show accurate copy and offer the correct
+// recovery action for each cause, and so tests can assert the precedence.
+
+export type SecurityGateState =
+  | 'CHECKING'
+  | 'BLOCKED_OVERLAY'
+  | 'BLOCKED_BACKGROUND_RESUME'
+  | 'BLOCKED_VPN'
+  | 'BLOCKED_SECURITY_VIOLATION'
+  | 'ALLOWED';
+
+/** Every state, for exhaustive tests / future consumers. */
+export const SECURITY_GATE_STATES: readonly SecurityGateState[] = [
+  'CHECKING',
+  'BLOCKED_OVERLAY',
+  'BLOCKED_BACKGROUND_RESUME',
+  'BLOCKED_VPN',
+  'BLOCKED_SECURITY_VIOLATION',
+  'ALLOWED',
+] as const;
+
+export interface SecurityGateInputs {
+  /** A security evaluation is in flight right now. */
+  evaluating: boolean;
+  /** At least one COMPLETED evaluation has been published for this session. */
+  hasVerdict: boolean;
+  /**
+   * A live obscured-window / overlay signal holds the gate. This is the
+   * attacker-present-in-the-touch-path signal: it outranks every other cause
+   * because anything rendered or tapped while it is live is untrusted.
+   */
+  overlayBlocked: boolean;
+  /**
+   * The app left the foreground and has not yet completed a post-resume
+   * verification. Held from the instant the app is backgrounded until a
+   * COMPLETED evaluation that STARTED AFTER the resume found nothing blocking.
+   */
+  backgroundResumeBlocked: boolean;
+  /** The live policy verdict pairs a VPN/proxy transport finding with a block. */
+  vpnBlocked: boolean;
+  /** Any other policy blocking finding (root, tamper, overlay policy, etc.). */
+  violationBlocked: boolean;
+}
+
+/**
+ * The single AUTHORITATIVE gate state.
+ *
+ * Precedence (documented, fail-closed, most-trusted-blocker first):
+ *
+ *   1. BLOCKED_OVERLAY             — an untrusted window is in the touch path.
+ *   2. BLOCKED_BACKGROUND_RESUME   — left the foreground; not yet re-verified.
+ *   3. BLOCKED_VPN                 — policy block caused by a VPN/proxy.
+ *   4. BLOCKED_SECURITY_VIOLATION  — any other policy block.
+ *   5. CHECKING                    — no completed verdict, or a check running.
+ *   6. ALLOWED                     — completed verdict, nothing blocking.
+ *
+ * The order encodes two invariants:
+ *   • A live block ALWAYS outranks CHECKING. A re-check in flight must never
+ *     downgrade a verified block into a "verifying…" state that a consumer
+ *     might treat as recoverable — the BLOCKED → CHECKING → TEMP-ALLOWED race.
+ *   • UNKNOWN is never ALLOWED. With no completed verdict the state is
+ *     CHECKING, so a cold start can never present protected content as
+ *     cleared (the startup-flash fix, preserved).
+ */
+export function resolveSecurityGateState(input: SecurityGateInputs): SecurityGateState {
+  if (input.overlayBlocked) return 'BLOCKED_OVERLAY';
+  if (input.backgroundResumeBlocked) return 'BLOCKED_BACKGROUND_RESUME';
+  if (input.vpnBlocked) return 'BLOCKED_VPN';
+  if (input.violationBlocked) return 'BLOCKED_SECURITY_VIOLATION';
+  if (!input.hasVerdict || input.evaluating) return 'CHECKING';
+  return 'ALLOWED';
+}
+
+/** True for the states in which protected content must not be visible. */
+export function isGateBlocked(state: SecurityGateState): boolean {
+  return state === 'BLOCKED_OVERLAY'
+    || state === 'BLOCKED_BACKGROUND_RESUME'
+    || state === 'BLOCKED_VPN'
+    || state === 'BLOCKED_SECURITY_VIOLATION';
+}
+
+/**
+ * True when the user can clear the state by acting and then re-verifying.
+ *
+ * Deliberately narrow: only the two states caused by something the USER can
+ * remove (an overlay app, a backgrounded session) get the recheck control. A
+ * VPN or integrity violation is cleared by the automatic re-evaluation, and a
+ * user-facing "verify" button there would only invite retry-spamming a device
+ * condition that has not changed.
+ */
+export function isGateRecheckable(state: SecurityGateState): boolean {
+  return state === 'BLOCKED_OVERLAY' || state === 'BLOCKED_BACKGROUND_RESUME';
+}
+
+// ─── Background → resume gate ────────────────────────────────────────────────
+
+/**
+ * The background/resume lock. ENGAGED the instant the app leaves the
+ * foreground and RELEASED only when BOTH hold:
+ *
+ *   • the app is in the foreground, AND
+ *   • a COMPLETED evaluation that observed the resumed state found nothing
+ *     blocking.
+ *
+ * The second condition is what closes the reported "Home → reopen → 2-3 s
+ * unprotected window": the previous implementation re-checked on resume but
+ * never HELD anything, so the last pre-background verdict kept the app usable
+ * while the fresh check ran.
+ *
+ * Fail-closed: an in-flight or superseded evaluation leaves the lock engaged.
+ */
+export function resolveBackgroundResumeGate(input: {
+  /** AppState is 'active'. */
+  foreground: boolean;
+  /**
+   * A COMPLETED evaluation that STARTED AT OR AFTER the most recent resume has
+   * been published. A check that began BEFORE the resume cannot speak for the
+   * resumed state (see acceptsResumeVerification).
+   */
+  verifiedSinceResume: boolean;
+  /** That completed evaluation found a blocking condition. */
+  blocking: boolean;
+}): boolean {
+  if (input.blocking) return true;
+  if (!input.foreground) return true;
+  return !input.verifiedSinceResume;
+}
+
+/**
+ * Stale-async guard for the resume verification.
+ *
+ * `resumeToken` is bumped on every transition into the foreground. An
+ * evaluation records the token that was current when it STARTED; only an
+ * evaluation whose recorded token is at or after the live token may release
+ * the background lock. Without this, a check started before the resume (or
+ * before a rapid second background) could land afterwards and unblock the app
+ * on evidence that predates the state it is being used to clear.
+ */
+export function acceptsResumeVerification(input: {
+  evaluationStartedToken: number;
+  liveResumeToken: number;
+}): boolean {
+  return input.evaluationStartedToken >= input.liveResumeToken;
+}
+
+// ─── Overlay / obscured-window gate ──────────────────────────────────────────
+
+/**
+ * The overlay lock may only release when BOTH hold:
+ *
+ *   • the native obscured-window signal has CLEARED, and
+ *   • a FRESH security evaluation has completed.
+ *
+ * The second condition is the explicit "do not automatically trust the app
+ * merely because the warning was dismissed" rule: pressing the recheck control
+ * does not clear the gate — it requests a re-check, and the gate clears only
+ * if the platform independently reports the obscured signal gone AND policy
+ * still passes. A user cannot dismiss their way past a live overlay.
+ */
+export function canClearOverlayBlock(input: {
+  /** The native obscured-window signal is currently clear. */
+  signalCleared: boolean;
+  /** A COMPLETED evaluation has landed since the recheck was requested. */
+  hasFreshVerdict: boolean;
+}): boolean {
+  return input.signalCleared && input.hasFreshVerdict;
+}
+
+/**
+ * Exact overlay copy required by the security specification. Exported from the
+ * state model (not the screen) so the wording is unit-testable and cannot
+ * drift between the full-screen gate and any other surface.
+ */
+export const OVERLAY_WARNING_COPY = {
+  title: 'Security warning',
+  message:
+    'An overlay or another app may be interfering with MedAcademy. ' +
+    'Close the interfering app and verify security to continue.',
+} as const;
+
+/** What the platform can and cannot detect — surfaced verbatim in the report. */
+export const OVERLAY_DETECTION_LIMITS = [
+  'Android exposes no API for one app to enumerate another app\u2019s windows, so "an overlay is on screen right now" cannot be measured directly.',
+  'MotionEvent.FLAG_WINDOW_IS_OBSCURED / FLAG_WINDOW_IS_PARTIALLY_OBSCURED are only set by the framework from API 29 (Q).',
+  'Observation requires the user to touch the screen; a passive overlay that is never touched is invisible to app-side checks.',
+  'setHideOverlayWindows(true) (API 31+) prevents non-system overlays while the app is focused — prevention, not detection.',
+  'A system-signed overlay, or one drawn by the device/profile owner, can be neither hidden nor filtered.',
+] as const;
+
 // ─── Update verdict (versionCode is authoritative; names never compared) ─────
 
 export interface UpdateVerdictPure {

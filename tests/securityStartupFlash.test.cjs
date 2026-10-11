@@ -196,8 +196,11 @@ console.log('\n── E. Risk score sentinel never displayed pre-verdict ──'
   );
   // The gate renders the risk pill ONLY from a completed verdict. (Use the
   // LAST 'Risk Score:' occurrence — earlier ones exist inside comments.)
+  // The guard is `{hasVerdict && <state checks> && (` — it now ALSO excludes the
+  // overlay/resume causes, which only tightens it. Match the hasVerdict gate
+  // itself rather than the exact trailing `(`.
   const pillIdx = gateSrc.lastIndexOf('Risk Score:');
-  const pillGuard = gateSrc.lastIndexOf('{hasVerdict && (', pillIdx);
+  const pillGuard = gateSrc.lastIndexOf('{hasVerdict &&', pillIdx);
   check(
     pillGuard !== -1 && pillIdx - pillGuard < 800,
     'E gate renders the risk pill only when hasVerdict (no fake "Risk Score: 10")',
@@ -236,9 +239,14 @@ console.log('\n── F. Foreground re-evaluation ──');
 console.log('\n── G. Regressions (security preserved) ──');
 {
   // The state machine is the single mount decision — driven by state, not time.
+  // The mount now reads the centralized gate state (isGateBlocked(gateState),
+  // computed once from resolveSecurityGateState) instead of re-deriving a local
+  // phase boolean. The invariant is unchanged: a pure state function decides,
+  // never a timer.
   check(
-    /resolveGatePhase\(\{/.test(gateSrc) && /phase === 'blocked'/.test(gateSrc),
-    'G gate mount decision comes from resolveGatePhase (state-driven, no timer)',
+    (/resolveGatePhase\(\{/.test(gateSrc) || /isGateBlocked\(gateState\)/.test(gateSrc))
+      && /if \(!blocking\) return null;/.test(gateSrc),
+    'G gate mount decision comes from the centralized gate state (state-driven, no timer)',
   );
   check(
     !/setTimeout\([\s\S]{0,80}blocking\s*=\s*false/.test(gateSrc),

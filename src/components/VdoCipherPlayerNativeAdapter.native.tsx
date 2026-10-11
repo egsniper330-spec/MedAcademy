@@ -73,6 +73,7 @@ import { neuColors, mutedTextStyle } from '@/lib/neu';
 import type { VdoCipherPlayerProps } from '@/components/VdoCipherPlayer';
 import { NativeWatermarkOverlay } from '@/components/NativeWatermarkOverlay';
 import { resolveWatermarkIdentity } from '@/lib/watermarkIdentity';
+import { resolveWatermarkLayers, type WatermarkPlatform } from '@/lib/watermarkLayers';
 import {
   enterFullscreenSystemUi,
   exitFullscreenSystemUi,
@@ -191,6 +192,24 @@ export function VdoCipherPlayerNativeAdapter({
   // case this component must NOT render NativeWatermarkOverlay — the two
   // together were the reported duplicate watermark.
   const [annotateApplied, setAnnotateApplied] = useState(false);
+  // ── WHICH WATERMARK LAYER THIS SESSION SHOWS ──────────────────────────
+  // `annotateApplied` alone cannot decide: the OTP is byte-identical for
+  // every platform, but only the VdoCipher WEB renderer (and the iOS native
+  // SDK) draw the provider's burned-in `rtext` annotation. On Android the
+  // native SDK path does not — and because this component used to suppress
+  // its own overlay whenever `annotateApplied` was true, Android was left
+  // with NEITHER watermark (the reported "does not appear at all").
+  // resolveWatermarkLayers owns that single decision for every player.
+  const wmPlatform: WatermarkPlatform = Platform.OS === 'ios' ? 'ios' : 'android';
+  const watermarkLayers = useMemo(
+    () => resolveWatermarkLayers({
+      platform: wmPlatform,
+      playerKind: 'native',
+      annotateApplied,
+      hasIdentity: !!identity,
+    }),
+    [wmPlatform, annotateApplied, identity]
+  );
   const [loading, setLoading]       = useState(true);
   const [error, setError]           = useState<string | null>(null);
 
@@ -505,21 +524,26 @@ export function VdoCipherPlayerNativeAdapter({
         onEnterFullscreen={handleSdkEnterFullscreen}
         onExitFullscreen={handleSdkExitFullscreen}
       />
-      {/* Application watermark — Plyr-parity overlay, rendered ONLY when the
-          OTP does NOT already carry VdoCipher's burned-in MOVING watermark
-          (`annotateApplied === false`). Two watermarks at once were the reported
-          duplicate, so exactly one is ever shown: the stream-burned mark when
-          the server could attach it, this overlay otherwise (accounts/providers
-          with no server-side annotation, and the offline player, whose license
-          OTP has no annotate contract). Lives INSIDE the expanding container →
-          visible and correctly positioned in normal AND fullscreen (re-clamps
-          on resize). */}
+      {/* Application watermark — the APP layer, with continuous billiard
+          motion (watermarkMotion.ts) that reflects off the four bounds of the
+          real video viewport.
+
+          Whether it renders is decided by resolveWatermarkLayers, NOT by the
+          local `annotateApplied` flag: exactly one watermark is ever shown
+          (the provider's stream-burned mark when it actually draws — iOS
+          native and the web player — this overlay otherwise). On Android the
+          native SDK does not draw the provider annotation, so this overlay is
+          the ONLY watermark the student gets; suppressing it here (the old
+          rule) is what produced "no watermark on Android at all".
+
+          Lives INSIDE the expanding container → correct in normal AND
+          fullscreen, and re-projected on every resize/rotation. */}
       {/* NO app-level fullscreen button. The SDK control bar's OWN fullscreen
           button (Android always; iOS since bridge 2.9.4) is the single entry,
           and it maps into the in-place fullscreen state above — one fullscreen
           system, watermark overlay inside it. */}
 
-      {identity && !annotateApplied && (
+      {identity && watermarkLayers.appOverlay && (
         <NativeWatermarkOverlay
           watermarkId={identity.id}
           watermarkName={identity.name ?? undefined}

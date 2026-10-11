@@ -29,7 +29,7 @@ import { useProfileStore } from '@/lib/store';
 import { friendlyError } from '@/lib/validation';
 import {
   createLessonMaterial, deleteLessonMaterial, getLessonById,
-  updateLesson, updateMaterialPermission,
+  updateLesson, updateMaterialPermission, updateMaterialWatermark,
   uploadLessonMaterial, replaceLessonMaterialFile,
   getLessonVideoState, getVdoCipherVideoStatus, markLessonVideoMissing,
   getMyProviderPermissions,
@@ -623,6 +623,27 @@ export default function LessonEditor() {
       setOpenPermMenu(null);
     } catch (e) {
       showToast({ type: 'error', message: friendlyError(e, 'Failed to update permission.') });
+    }
+  };
+
+  /**
+   * Toggle the per-material "Personalized Student Watermark".
+   *
+   * Deliberately SEPARATE from handleUpdatePermission: the download permission
+   * and the watermark are independent settings (a Preview-Only material can be
+   * watermarked; a Preview+Download one can be left unmarked). The server owns
+   * the effect — it personalizes every delivered copy while this is on, and
+   * refuses to serve the unwatermarked original.
+   */
+  const handleUpdateWatermark = async (materialId: string, enabled: boolean) => {
+    // Optimistic flip, reverted on failure so the switch never lies.
+    setMaterials(prev => prev.map(m => m.id === materialId ? { ...m, watermark_enabled: enabled ? 1 : 0 } : m));
+    try {
+      await updateMaterialWatermark(materialId, enabled);
+      showToast({ type: 'success', message: enabled ? 'Personalized watermark enabled.' : 'Watermark disabled.' });
+    } catch (e) {
+      setMaterials(prev => prev.map(m => m.id === materialId ? { ...m, watermark_enabled: enabled ? 0 : 1 } : m));
+      showToast({ type: 'error', message: friendlyError(e, 'Failed to update watermark.') });
     }
   };
 
@@ -1489,6 +1510,32 @@ export default function LessonEditor() {
                             </Pressable>
                           );
                         })}
+
+                        {/* Independent of the permission above: the watermark
+                            applies to HOW a copy is personalized, not to
+                            WHETHER the student may download it. */}
+                        <View style={{ height: 1, backgroundColor: c.border, opacity: 0.4, marginVertical: 4 }} />
+                        <Pressable
+                          onPress={() => handleUpdateWatermark(item.id, !(Number(item.watermark_enabled) === 1))}
+                          style={{ flexDirection: 'row', alignItems: 'center', gap: 10, padding: 10, borderRadius: 8 }}>
+                          <ShieldAlert size={14} color='#7C3AED' />
+                          <View style={{ flex: 1 }}>
+                            <Text style={{ fontSize: 13, fontWeight: '700', color: '#7C3AED' }}>
+                              Personalized Student Watermark
+                            </Text>
+                            <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.55) }}>
+                              Every delivered copy carries that student name and ID
+                            </Text>
+                          </View>
+                          {/* Pill switch — same visual language as the rest of
+                              the editor; no new component dependency. */}
+                          <View style={{ width: 38, height: 22, borderRadius: 11, padding: 2,
+                            backgroundColor: Number(item.watermark_enabled) === 1 ? '#7C3AED' : '#00000030',
+                            justifyContent: 'center',
+                            alignItems: Number(item.watermark_enabled) === 1 ? 'flex-end' : 'flex-start' }}>
+                            <View style={{ width: 18, height: 18, borderRadius: 9, backgroundColor: '#FFFFFF' }} />
+                          </View>
+                        </Pressable>
                       </NeuCard>
                     )}
                   </View>

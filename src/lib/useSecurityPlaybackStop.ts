@@ -21,8 +21,19 @@
  * defensive: a player that has not loaded yet, or has already unmounted,
  * is a no-op rather than a crash.
  *
- * NOTE: backgrounding the app is NOT a security lock and does NOT call this —
- * intentional background playback is preserved. Only a security lock stops it.
+ * BACKGROUND/RESUME (behavior changed deliberately — see below)
+ * ─────────────────────────────────────────────────────────────────────────
+ * This hook used to state that backgrounding never invoked the stopper, so
+ * intentional background playback survived a Home press. That is no longer the
+ * contract: the centralized security gate holds a HARD lock the instant the app
+ * leaves the foreground (`background-resume` in SecurityContext), precisely so
+ * protected lecture audio/video cannot keep running while the app is not in the
+ * foreground and cannot be briefly revealed on return before the post-resume
+ * checks finish. `Container.test` / `securityGate.test.cjs` assert this.
+ *
+ * Everything else still holds: a lock is the ONLY thing that stops playback
+ * early, it is released as soon as the post-resume verification passes, and
+ * public/auth traffic is never contained (see the transport gate in php.ts).
  */
 
 import { useEffect, useRef } from 'react';

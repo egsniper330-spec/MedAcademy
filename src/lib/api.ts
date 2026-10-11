@@ -1764,6 +1764,12 @@ export interface LessonMaterialPayload {
   file_size: number;
   download_enabled?: boolean;
   preview_enabled?: boolean;
+  /**
+   * "Personalized Student Watermark" — INDEPENDENT of the download setting.
+   * When true, every student receives a copy carrying their own name + MED id.
+   * Defaults to false server-side, so omitting it preserves current behaviour.
+   */
+  watermark_enabled?: boolean;
   order_index?: number;
 }
 
@@ -1783,7 +1789,7 @@ export async function createLessonMaterial(payload: LessonMaterialPayload) {
   return data;
 }
 
-export async function updateLessonMaterial(id: string, updates: Partial<{ file_name: string; download_enabled: boolean; preview_enabled: boolean; order_index: number }>) {
+export async function updateLessonMaterial(id: string, updates: Partial<{ file_name: string; download_enabled: boolean; preview_enabled: boolean; watermark_enabled: boolean; order_index: number }>) {
   const { data, error } = await backendClient.from('lesson_materials').update({ ...updates, updated_at: new Date().toISOString() }).eq('id', id).select().single();
   if (error) throw error;
   return data;
@@ -4409,6 +4415,49 @@ export async function updateMaterialPermission(id: string, permission: DownloadP
     .single();
   if (error) throw error;
   return data;
+}
+
+/** Toggle the per-material "Personalized Student Watermark" switch.
+ *
+ *  INDEPENDENT of `permission` / `download_enabled`: a Preview-Only material can
+ *  be watermarked, and a Preview + Download material can be left unmarked. The
+ *  server owns the effect — it personalizes every delivered copy when this is on.
+ */
+export async function updateMaterialWatermark(id: string, watermarkEnabled: boolean) {
+  const { data, error } = await backendClient
+    .from('lesson_materials')
+    .update({ watermark_enabled: watermarkEnabled, updated_at: new Date().toISOString() })
+    .eq('id', id)
+    .select()
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+/**
+ * Short-lived, authorized delivery URL for a lesson PDF.
+ *
+ * WHY THIS REPLACES getMaterialSignedUrl() FOR PDF MATERIALS
+ * ─────────────────────────────────────────────────────────────
+ * A plain storage signed URL encodes only a path and an expiry, so it cannot
+ * carry the material's watermark/download policy and keeps working after the
+ * teacher changes it. This endpoint returns a token naming the MATERIAL, the
+ * STUDENT and the INTENT; the server re-reads the current permission and
+ * enrollment when the token is redeemed, and it personalizes the copy when the
+ * teacher enabled watermarking. The unwatermarked original is never returned
+ * when watermarking is on.
+ *
+ * `forDownload` MUST be true only for the student's Download action — a
+ * Preview-Only material refuses that intent server-side.
+ */
+export async function getMaterialPdfUrl(
+  materialId: string,
+  forDownload = false,
+): Promise<{ url: string; watermarked: boolean; expires_at: string }> {
+  return invokeEdgeFunction<{ url: string; watermarked: boolean; expires_at: string }>(
+    'materials/pdf-url',
+    { material_id: materialId, intent: forDownload ? 'download' : 'view' },
+  );
 }
 
 // ── Course Duplication (RPC) ──────────────────────────────────────────────────

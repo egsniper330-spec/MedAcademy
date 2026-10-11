@@ -43,13 +43,14 @@
  *   the VdoCipher server-side annotate watermark (layer 1) remains active.
  */
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { View, Text, ActivityIndicator, useColorScheme } from 'react-native';
 import { getVideoPlaybackToken } from '@/lib/api';
 import { neuColors, mutedTextStyle } from '@/lib/neu';
 import { WebView } from 'react-native-webview';
 import { useSecurityWebViewStop, type StoppableWebView } from '@/lib/useSecurityWebViewStop';
 import { buildWatermarkInjection } from '@/lib/watermarkInjection';
+import { resolveWatermarkLayers, type WatermarkPlatform } from '@/lib/watermarkLayers';
 import { useFullscreenWatermark } from '@/hooks/useFullscreenWatermark';
 import type { VdoCipherPlayerProps } from '@/components/VdoCipherPlayer';
 
@@ -136,6 +137,31 @@ export function VdoCipherPlayerWebView({
   // injected DOM watermark is then suppressed so exactly one watermark shows.
   const [annotateApplied, setAnnotateApplied] = useState(false);
 
+  // ── WHICH WATERMARK LAYER THIS SESSION SHOWS ────────────────────────────
+  // Same single decision module as the native SDK adapter, so the two
+  // renderers can never drift on a security-relevant rule. This player IS the
+  // VdoCipher WEB renderer (the browser iframe on web; the same player in a
+  // WebView on the native rollback path), whose renderer draws the provider's
+  // `rtext` annotation — so when the OTP carried it, the DOM watermark stays
+  // suppressed exactly as before. The policy only differs from a bare
+  // `annotateApplied` check on the Android NATIVE SDK path, which never
+  // reaches this component.
+  const wmPlatform: WatermarkPlatform =
+    process.env.EXPO_OS === 'web'
+      ? 'web'
+      : process.env.EXPO_OS === 'ios'
+        ? 'ios'
+        : 'android';
+  const watermarkLayers = useMemo(
+    () => resolveWatermarkLayers({
+      platform: wmPlatform,
+      playerKind: 'webview',
+      annotateApplied,
+      hasIdentity: !!watermarkId,
+    }),
+    [wmPlatform, annotateApplied, watermarkId]
+  );
+
   // Web only — container ref for DOM watermark hook + Reanimated overlay dimensions.
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [containerW, setContainerW] = useState(0);
@@ -146,7 +172,7 @@ export function VdoCipherPlayerWebView({
   // re-parents itself into document.fullscreenElement on fullscreenchange.
   useFullscreenWatermark(
     containerRef,
-    annotateApplied ? null : watermarkId ? { watermarkId, watermarkName } : null,
+    watermarkLayers.appOverlay && watermarkId ? { watermarkId, watermarkName } : null,
     process.env.EXPO_OS === 'web' && !!watermarkId,
   );
 
@@ -311,8 +337,8 @@ export function VdoCipherPlayerWebView({
   // meant buildWatermarkInjection() returned event-bridge-only code and the
   // watermark div was never created.
   const eventBridgeScript = buildWatermarkInjection(
-    annotateApplied ? undefined : watermarkId,
-    annotateApplied ? undefined : watermarkName,
+    watermarkLayers.appOverlay ? watermarkId : undefined,
+    watermarkLayers.appOverlay ? watermarkName : undefined,
   );
 
   return (

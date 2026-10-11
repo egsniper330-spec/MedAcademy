@@ -35,7 +35,15 @@ import {
   type SecurityCheckResult, type SecurityThreat,
   type DetectionType, type PolicyAction,
 } from '@/lib/security';
-import { resolveGatePhase, type GatePhase } from '@/lib/securityStateModel';
+import {
+  resolveGatePhase,
+  resolveSecurityGateState,
+  resolveBackgroundResumeGate,
+  acceptsResumeVerification,
+  canClearOverlayBlock,
+  type GatePhase,
+  type SecurityGateState,
+} from '@/lib/securityStateModel';
 import {
   checkAndRefreshSecurityConfig,
   prewarmSecurityConfig,
@@ -45,6 +53,9 @@ import {
   onNativeJailbreakDetected,
   onNativeDebuggerAttached,
   onNativeIntegrityFailed,
+  onNativeObscuredChanged,
+  isNativeWindowObscured,
+  enableNativeOverlayProtection,
 } from '@/lib/nativeSecurity';
 import { isVpnWhitelistKnownNonEmpty } from '@/lib/security';
 import {
@@ -63,6 +74,10 @@ import { useProfileStore } from '@/lib/store';
 /** Lock holder names — one per independent signal source (they compose). */
 const LOCK_SRC_VERDICT    = 'verdict';      // authoritative policy decision
 const LOCK_SRC_NATIVE_VPN = 'native-vpn';   // fast native TRANSPORT_VPN signal
+/** Live obscured-window / overlay signal (see the Android security module). */
+const LOCK_SRC_OVERLAY    = 'overlay';
+/** The app left the foreground and has not yet re-verified after resuming. */
+const LOCK_SRC_BACKGROUND = 'background-resume';
 
 // Continuous check interval — 30 seconds (balances security vs battery)
 const CONTINUOUS_CHECK_INTERVAL_MS = 30_000;
@@ -125,6 +140,25 @@ interface SecurityContextValue {
    * containment only pauses it.
    */
   securityLockHard: boolean;
+  /**
+   * THE single authoritative gate state (securityStateModel.ts): one closed
+   * vocabulary covering policy blocks, the live overlay signal, the
+   * background→resume hold, in-flight checks and the allowed case. Consumers
+   * render from this instead of re-deriving a boolean from several flags.
+   */
+  gateState: SecurityGateState;
+  /** A live obscured-window/overlay signal holds the gate. */
+  overlayBlocked: boolean;
+  /** The app is backgrounded, or resumed and not yet re-verified. */
+  backgroundBlocked: boolean;
+  /**
+   * Re-verify security on demand (the overlay / resume recheck control).
+   * Re-reads the native obscured signal, runs a fresh evaluation, and bumps
+   * the resume token so the released state is provably post-request. It can
+   * only REQUEST a recheck — the gate clears solely on a clean platform signal
+   * plus a clean verdict, so the warning cannot be dismissed away.
+   */
+  verifySecurity: () => Promise<void>;
   /** Run all security checks. Returns the result. */
   check:       (deviceId?: string) => Promise<SecurityCheckResult>;
   /**
@@ -220,6 +254,10 @@ const SecurityContext = createContext<SecurityContextValue>({
   isSuperAdmin: false,
   securityLocked:   false,
   securityLockHard: false,
+  gateState:        'CHECKING',
+  overlayBlocked:   false,
+  backgroundBlocked: false,
+  verifySecurity:   async () => {},
   check:            async () => DEFAULT_RESULT,
   checkBeforeVideo: async () => false,
   reset:       () => {},
@@ -269,6 +307,10 @@ export function SecurityProvider({ children }: { children: React.ReactNode }) {
     //  Snapshot BEFORE the probes run: a VPN signal arriving mid-check is newer
     //  than this verdict's observation window and must not be cleared by it.
     const nativeSeqAtStart = nativeSignalSeqRef.current;
+    //  Same idea for the resume gate: record which resume this evaluation is
+    //  answering. Set BEFORE the probes so a background transition during the
+    //  check makes this result ineligible to release the hold.
+    evaluationStartTokenRef.current = resumeTokenRef.current;
     const r = await runSecurityChecks();
     if (gen !== checkGenRef.current) {
       if (__DEV__) console.log('[SecurityContext] discarding stale security result (gen superseded)');
@@ -316,6 +358,66 @@ export function SecurityProvider({ children }: { children: React.ReactNode }) {
   const [diagnostics, setDiagnostics] = useState<{ nativeVPNSignalTimeMs?: number; lockEngagedTimeMs?: number }>({});
   useEffect(() => subscribeSecurityLock(setLockState), []);
 
+  // ── Background → resume gate bookkeeping (pure model: securityStateModel) ─
+  // `resumeTokenRef`        — bumped on EVERY transition into the foreground.
+  // `evaluationStartTokenRef` — the token live when the running evaluation STARTED.
+  // A verdict may only release the background hold when the evaluation that
+  // produced it began at or after the resume it is being used to clear
+  // (acceptsResumeVerification). Without this, a check started BEFORE the
+  // resume — or before a rapid second background — could land afterwards and
+  // unblock the app on evidence that predates the state it claims to verify.
+  const resumeTokenRef = useRef(0);
+  const evaluationStartTokenRef = useRef(0);
+  const backgroundHeldRef = useRef(false);
+
+  // ── Overlay gate bookkeeping ────────────────────────────────────────────
+  // `overlaySignalRef`      — the native obscured-window belief (live).
+  // `overlayEngagedSerialRef` — the verdict serial current when the overlay
+  //   lock engaged. The lock clears only when the signal is CLEAR *and* a
+  //   NEWER completed verdict exists (canClearOverlayBlock) — so dismissing or
+  //   ignoring the warning can never clear it.
+  const overlaySignalRef = useRef(false);
+  const overlayEngagedSerialRef = useRef(-1);
+  const verdictSerialRef = useRef(0);
+
+  /**
+   * Engage the background/resume hold. Hard, so screens UNMOUNT the native
+   * player (a soft hold would only pause it), and idempotent.
+   */
+  const enterBackgroundHold = useCallback((why: string) => {
+    if (isSuperAdmin) return;
+    if (backgroundHeldRef.current) return;
+    backgroundHeldRef.current = true;
+    if (__DEV__) console.log('[SecurityContext] background hold engaged (' + why + ')');
+    engageSecurityLock(LOCK_SRC_BACKGROUND, { hard: true });
+  }, [isSuperAdmin]);
+
+  /**
+   * Release the background hold ONLY for a verdict that began at or after the
+   * current resume and found nothing blocking. Called from every publish path
+   * (session start, periodic, foreground resume, pre-video, manual recheck), so
+   * whichever evaluation finishes first is the one that can clear it.
+   */
+  const maybeReleaseBackgroundHold = useCallback((result: SecurityCheckResult) => {
+    if (!backgroundHeldRef.current) return;
+    if (!acceptsResumeVerification({
+      evaluationStartedToken: evaluationStartTokenRef.current,
+      liveResumeToken:       resumeTokenRef.current,
+    })) {
+      if (__DEV__) console.log('[SecurityContext] holding background lock — verdict predates the current resume');
+      return;
+    }
+    const stillBlocked = resolveBackgroundResumeGate({
+      foreground:          appActiveRef.current,
+      verifiedSinceResume: true,
+      blocking:            result.blocksLogin || result.blocksVideo,
+    });
+    if (stillBlocked) return; // the policy verdict holder keeps the app blocked
+    backgroundHeldRef.current = false;
+    if (__DEV__) console.log('[SecurityContext] background hold cleared — post-resume verification passed');
+    releaseSecurityLock(LOCK_SRC_BACKGROUND);
+  }, []);
+
   // ── Pre-warm cache from SecureStore on mount (before any session) ──────────
   useEffect(() => {
     void prewarmSecurityConfig();
@@ -351,6 +453,7 @@ export function SecurityProvider({ children }: { children: React.ReactNode }) {
       setResult(r);
       // Track whether a VPN threat is currently active for stale-state monitoring
       hasActiveVpnThreat.current = r.threats.some(t => t.type === 'vpn_detected');
+      maybeReleaseBackgroundHold(r);
       void logThreats(r.threats, r.policies, r.riskScore, deviceId, r.evidence);
       return r;
     } catch (e) {
@@ -389,7 +492,7 @@ export function SecurityProvider({ children }: { children: React.ReactNode }) {
       setChecking(false);
       setEvaluating(false);
     }
-  }, [isSuperAdmin, result]);
+  }, [isSuperAdmin, result, maybeReleaseBackgroundHold]);
 
   /**
    * Pre-video re-validation — called by video player screens before showing the player.
@@ -411,6 +514,7 @@ export function SecurityProvider({ children }: { children: React.ReactNode }) {
         return false;
       }
       setResult(r);
+      maybeReleaseBackgroundHold(r);
       void logThreats(r.threats, r.policies, r.riskScore, undefined, r.evidence);
       // Fire blocking callbacks for both login-blocking and video-blocking threats
       // so _layout.tsx can redirect even when checkBeforeVideo is the trigger.
@@ -419,7 +523,7 @@ export function SecurityProvider({ children }: { children: React.ReactNode }) {
     } catch {
       return false; // fail-open for non-security errors (network down etc.)
     }
-  }, [isSuperAdmin, runGuardedCheck]);
+  }, [isSuperAdmin, runGuardedCheck, maybeReleaseBackgroundHold]);
 
   const reset = useCallback(() => {
     // FAIL-CLOSED reset: the previous verdict is retained (NOT nulled) so the
@@ -435,6 +539,80 @@ export function SecurityProvider({ children }: { children: React.ReactNode }) {
     blockingCbsRef.current.add(cb);
     return () => { blockingCbsRef.current.delete(cb); };
   }, []);
+
+  // ── Android live obscured-window / overlay signal → security gate ─────────
+  /**
+   * Release the overlay hold only when the platform signal is CLEAR and a
+   * completed verdict NEWER than the engage has landed (canClearOverlayBlock).
+   * Not callable by UI code: the recheck control calls verifySecurity(), which
+   * RE-READS the native signal instead of asserting it. `getSecurityLockState()`
+   * is the synchronous module state — reading React state here would go stale
+   * inside the event listener.
+   */
+  const tryReleaseOverlayLock = useCallback(() => {
+    if (!getSecurityLockState().sources.includes(LOCK_SRC_OVERLAY)) return;
+    const clears = canClearOverlayBlock({
+      signalCleared:   !overlaySignalRef.current,
+      hasFreshVerdict: verdictSerialRef.current > overlayEngagedSerialRef.current,
+    });
+    if (!clears) return;
+    if (__DEV__) console.log('[SecurityContext] overlay lock cleared — signal gone and a fresh verdict landed');
+    overlayEngagedSerialRef.current = -1;
+    releaseSecurityLock(LOCK_SRC_OVERLAY);
+  }, []);
+
+  // SEPARATE INPUT, not a lifecycle proxy. The security specification is
+  // explicit that an AppState listener alone must not stand in for overlay
+  // detection: this subscription carries the FRAMEWORK's own "a touch arrived
+  // through an obscured window" evidence from Android (SecurityModule.kt),
+  // which a lifecycle transition cannot produce.
+  //
+  // On a positive signal the gate engages AT ONCE and the lock is hard, so
+  // protected playback is unmounted, in-flight protected requests are aborted
+  // and the transport refuses new ones. Only the NATIVE side sets this belief.
+  useEffect(() => {
+    if (Platform.OS !== 'android') return;
+    const unsub = onNativeObscuredChanged((obscured) => {
+      if (isSuperAdmin) return;
+      overlaySignalRef.current = obscured;
+      if (obscured) {
+        if (!getSecurityLockState().sources.includes(LOCK_SRC_OVERLAY)) {
+          // Remember the verdict serial at engage time: only a NEWER completed
+          // verdict may clear this block, so the warning cannot be dismissed.
+          overlayEngagedSerialRef.current = verdictSerialRef.current;
+          if (__DEV__) console.log('[SecurityContext] OVERLAY BLOCK — obscured touch observed; gate engaged');
+          engageSecurityLock(LOCK_SRC_OVERLAY, { hard: true });
+        }
+        return;
+      }
+      // Signal cleared. A cleared signal alone is NOT verification — a fresh
+      // verdict is still required (canClearOverlayBlock).
+      tryReleaseOverlayLock();
+    });
+    return unsub;
+  }, [isSuperAdmin, tryReleaseOverlayLock]);
+
+  /**
+   * Manual recheck (the overlay / resume gate control).
+   *
+   * RE-READS the native obscured signal, invalidates verdicts that predate the
+   * request (so an older in-flight check cannot clear the hold), runs a fresh
+   * evaluation, then re-evaluates the release condition. It cannot force the
+   * gate open: clearing still requires the platform to report the signal gone
+   * AND policy to pass.
+   */
+  const verifySecurity = useCallback(async () => {
+    if (Platform.OS === 'android') {
+      try {
+        overlaySignalRef.current = await isNativeWindowObscured();
+      } catch {
+        // Keep the last known belief — an unreadable signal is NOT a clear one.
+      }
+    }
+    resumeTokenRef.current += 1;
+    await check();
+    tryReleaseOverlayLock();
+  }, [check, tryReleaseOverlayLock]);
 
   // ── Native iOS security event bridge → unified logging pipeline ───────────
   // Subscribe to IOSSecurityModule events; map each to the existing logSecurityEvent
@@ -464,6 +642,17 @@ export function SecurityProvider({ children }: { children: React.ReactNode }) {
       // dropped so the next identity cannot inherit a stale block (and the
       // transport gate reopens for the auth flows it must serve).
       releaseAllSecurityLocks();
+      // The gate BOOKKEEPING is session-scoped too. Without this reset the
+      // next identity would start with backgroundHeldRef=true and a stale
+      // verdict serial, so its first post-resume evaluation would be judged
+      // against the previous account's state (and could release a hold that
+      // was never engaged, or hold forever without one).
+      backgroundHeldRef.current = false;
+      overlaySignalRef.current = false;
+      overlayEngagedSerialRef.current = -1;
+      verdictSerialRef.current = 0;
+      resumeTokenRef.current = 0;
+      evaluationStartTokenRef.current = 0;
       void invalidateSecurityConfig();
       void clearAppAttestKey();
       // Server policy + VPN whitelist caches are session-scoped: drop them on
@@ -502,15 +691,62 @@ export function SecurityProvider({ children }: { children: React.ReactNode }) {
         if (r.blocksLogin || r.blocksVideo) {
           blockingCbsRef.current.forEach((cb) => cb(r));
         }
+        maybeReleaseBackgroundHold(r);
       } catch { /* non-fatal */ }
     };
     // Keep the stable ref up-to-date with the latest closure
     runPeriodicCheckRef.current = runPeriodicCheck;
 
+    // ── Background → resume gate ───────────────────────────────────────────
+    // TWO directions, and both are load-bearing:
+    //
+    //   LEAVING the foreground  → engage the hold IMMEDIATELY (before any React
+    //     render, synchronously with the state change): protected playback is
+    //     paused, in-flight protected requests are aborted, and new ones are
+    //     refused by the transport gate. Previously nothing was held here, so
+    //     protected content stayed live behind the Home button and the last
+    //     pre-background verdict kept the app usable after returning.
+    //
+    //   RETURNING to the foreground → the hold STAYS ENGAGED and a full-screen
+    //     verification state is shown until a COMPLETED post-resume evaluation
+    //     finds nothing blocking. There is no window in which protected screens
+    //     or playback are briefly revealed before the checks finish.
+    //
+    // Super Admin sessions bypass the hold (matching every other enforcement
+    // path). The hold is SESSION-SCOPED: `!session` releases all holders, so
+    // the next identity never inherits it.
+    // (enterBackgroundHold / maybeReleaseBackgroundHold are provider-scope
+    //  callbacks — every publish path must be able to release the hold.)
+
     // Track foreground/background; trigger re-validation on return from external app
     const appStateSub = AppState.addEventListener('change', (nextState) => {
       const wasActive = appActiveRef.current;
       appActiveRef.current = nextState === 'active';
+
+      if (nextState === 'background') {
+        // Left the foreground → hold at once (hard: screens unmount the player).
+        //
+        // Only 'background', deliberately NOT 'inactive'. On Android a real
+        // stop (Home, recents, app switch) is the only thing that reports
+        // 'background' — a system dialog, the keyboard, or a trusted system UI
+        // surface keeps the activity visible and does NOT produce one, so those
+        // legitimate cases cannot trip the gate. On iOS 'inactive' additionally
+        // fires for the app switcher, a call banner and Control Centre, and
+        // gating on it would block every benign interruption; iOS keeps its
+        // existing resume re-check behavior.
+        enterBackgroundHold('appstate=' + nextState);
+      }
+
+      if (nextState === 'active' && !wasActive) {
+        // Resume: bump the token FIRST so any evaluation already in flight is
+        // ineligible to clear this hold, then keep the gate engaged until a
+        // fresh post-resume verification completes.
+        resumeTokenRef.current += 1;
+        enterBackgroundHold('resumed');
+        // Re-assert the native overlay protection on the (possibly recreated)
+        // activity — Android can rebuild the window across a background cycle.
+        void enableNativeOverlayProtection();
+      }
 
       if (nextState === 'active') {
         void checkAndRefreshSecurityConfig();
@@ -631,6 +867,9 @@ export function SecurityProvider({ children }: { children: React.ReactNode }) {
     }
 
     void checkAndRefreshSecurityConfig();
+    // Install the native overlay protection as soon as an authenticated
+    // session exists. Idempotent; resolves false on platforms without it.
+    void enableNativeOverlayProtection();
 
     const refreshDynamicConfig = async () => {
       if (!appActiveRef.current) return;
@@ -682,6 +921,13 @@ export function SecurityProvider({ children }: { children: React.ReactNode }) {
   // the whitelist), and the provisional holder must still be released then.
   const verdictTypes = r.threats.map((t) => t.type).join(',');
   useEffect(() => {
+    // Publish the new verdict serial to the ref FIRST (the overlay gate's
+    // engage-time snapshot and its release test both read the ref from contexts
+    // where React state would already be stale), then give the overlay gate its
+    // chance to clear now that a NEWER completed verdict exists.
+    verdictSerialRef.current = verdictSerial;
+    tryReleaseOverlayLock();
+
     if (!isSuperAdmin && hasVerdict && (r.blocksLogin || r.blocksVideo)) {
       engageSecurityLock(LOCK_SRC_VERDICT, { hard: true });
       return;
@@ -700,7 +946,7 @@ export function SecurityProvider({ children }: { children: React.ReactNode }) {
       console.log('[SecurityContext] holding provisional VPN containment — verdict predates the latest native signal');
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isSuperAdmin, hasVerdict, r.blocksLogin, r.blocksVideo, verdictTypes, verdictSerial]);
+  }, [isSuperAdmin, hasVerdict, r.blocksLogin, r.blocksVideo, verdictTypes, tryReleaseOverlayLock, verdictSerial]);
 
   const phase: GatePhase = resolveGatePhase({
     hasVerdict,
@@ -708,6 +954,34 @@ export function SecurityProvider({ children }: { children: React.ReactNode }) {
     liveBlocking:  r.blocksLogin && r.threats.length > 0,
     stickyCount:   0,
   });
+
+  // ── THE CENTRALIZED GATE STATE ───────────────────────────────────────────
+  // One closed vocabulary (securityStateModel.resolveSecurityGateState) built
+  // from ALL FOUR independent inputs, so every consumer renders from the same
+  // decision instead of re-deriving a boolean from a different subset of flags:
+  //
+  //   • policy verdict        → vpn / violation blocks
+  //   • live overlay signal   → overlay block (from the native touch filter)
+  //   • foreground lifecycle  → background/resume hold (the security lock)
+  //   • evaluation progress   → CHECKING (never a fabricated block)
+  //
+  // The overlay and background causes are read from the LOCK, not from a
+  // separate React flag: the lock is the single source of truth for "protected
+  // content is contained", so the gate and the transport can never disagree.
+  const overlayBlocked    = !isSuperAdmin && lockState.sources.includes(LOCK_SRC_OVERLAY);
+  const backgroundBlocked = !isSuperAdmin && lockState.sources.includes(LOCK_SRC_BACKGROUND);
+  const liveBlocking      = r.blocksLogin && r.threats.length > 0;
+  const vpnBlocked        = liveBlocking && r.threats.some((t) => t.type === 'vpn_detected');
+  const gateState: SecurityGateState = isSuperAdmin
+    ? 'ALLOWED'
+    : resolveSecurityGateState({
+        evaluating:             evaluating || checking,
+        hasVerdict,
+        overlayBlocked,
+        backgroundResumeBlocked: backgroundBlocked,
+        vpnBlocked,
+        violationBlocked:        liveBlocking && !vpnBlocked,
+      });
 
   return (
     <SecurityContext.Provider value={{
@@ -724,6 +998,10 @@ export function SecurityProvider({ children }: { children: React.ReactNode }) {
       isSuperAdmin,
       securityLocked:      lockState.locked,
       securityLockHard:    lockState.hard,
+      gateState,
+      overlayBlocked,
+      backgroundBlocked,
+      verifySecurity,
       check,
       checkBeforeVideo,
       reset,

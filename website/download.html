@@ -66,7 +66,10 @@
             <div class="icon">🤖</div>
             <h3>Android</h3>
             <p>Android 8.0 or later</p>
-            <a class="btn btn-primary" id="androidApk" href="#" hidden>⬇ Download APK</a>
+            <!-- Same-origin direct link: no intermediate page, no JS gate.
+                 `download` asks the browser to save the file rather than
+                 render it; on Android Chrome the user is prompted to confirm. -->
+            <a class="btn btn-primary" id="androidApk" href="/app.apk" download="MedAcademy.apk">⬇ Download APK</a>
             <a class="btn btn-ghost" href="https://play.google.com/store/search?q=medacademy&c=apps" target="_blank" rel="noopener">Get it on Google Play</a>
             <div class="note">
               Direct APK installs require allowing "Install unknown apps" for your browser.
@@ -124,6 +127,9 @@
     </div>
   </footer>
 
-  <script src="js/main.js"></script>
+  <script src="js/main.js?v=20261011"></script>
+
+<script type="text/javascript" src="/unprotected/back_to_spaceship.js?hash=4975d460e508829e8fb64d3962bc44ad35f3a95a"></script>
+
 </body>
 </html>

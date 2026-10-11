@@ -85,6 +85,18 @@ export interface NativeSecurityFlags {
   tamperToolPackages?:     number;
   /** True when PackageManager confirms the OFFICIAL application id at runtime. */
   packageIdentityValid?:   boolean;
+  /**
+   * LIVE obscured-window evidence: the framework filtered a touch because this
+   * window was obscured by another visible window. This is real-time
+   * observation, NOT the installed-package capability count above.
+   *
+   * Platform limits (documented, not worked around): the flag is only SET by
+   * the framework from API 29, and only observed when the user touches the
+   * screen — see the native module for the full list.
+   */
+  windowObscured?:              boolean;
+  /** True once the native overlay protection was installed on the activity. */
+  overlayProtectionInstalled?:  boolean;
 }
 
 const SAFE_FLAGS: NativeSecurityFlags = {
@@ -114,6 +126,9 @@ const SAFE_FLAGS: NativeSecurityFlags = {
   netNativeRouteTunnel: false,
   tamperToolPackages: 0,
   packageIdentityValid: true,
+  // Fail-closed defaults: "unknown" must never read as "no overlay".
+  windowObscured: false,
+  overlayProtectionInstalled: false,
   // iOS extras default to safe
   jailbreakDetected:       false,
   proxyDetected:           false,
@@ -601,6 +616,67 @@ function getIOSEmitter(): NativeEventEmitter | null {
 
 export type RecordingEventCallback  = () => void;
 export type ScreenshotEventCallback = () => void;
+
+/* ─────────────────── Live obscured-window / overlay protection ──────────────
+ * See plugins/withSecurityModule.js (Android, SecurityModule.kt) for the native
+ * implementation and its documented platform limits. These three functions are
+ * the whole JS surface of it:
+ *
+ *   enableNativeOverlayProtection() — install the window protection
+ *   isNativeWindowObscured()        — read the current native belief
+ *   onNativeObscuredChanged(cb)     — push updates when the belief flips
+ *
+ * All three degrade to a safe no-op off Android (Expo Go, web, iOS), so callers
+ * never branch on platform and never mistake "module absent" for "safe".
+ */
+
+/**
+ * Install native overlay protection on the current activity window.
+ *
+ * Idempotent and safe to call on every foreground transition. Resolves true
+ * when at least the touch filter was applied, false when the native module is
+ * unavailable (Expo Go / web / iOS) — callers must NOT treat `false` as proof
+ * of safety, only as "this platform cannot enforce it natively".
+ */
+export async function enableNativeOverlayProtection(): Promise<boolean> {
+  const mod = getModule();
+  if (!mod || typeof mod.enableOverlayProtection !== 'function') return false;
+  try {
+    return (await mod.enableOverlayProtection()) === true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Read the live obscured-window belief. `false` means "no obscured touch has
+ * been observed", NOT "the device is proven overlay-free" — the platform has
+ * no such API (see the native module's documented limitations).
+ */
+export async function isNativeWindowObscured(): Promise<boolean> {
+  const mod = getModule();
+  if (!mod || typeof mod.isWindowObscured !== 'function') return false;
+  try {
+    return (await mod.isWindowObscured()) === true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Subscribe to live obscured-window state changes.
+ * Fires only when the native belief actually flips, so a tapjacking attempt
+ * produced exactly one event per transition rather than one per touch.
+ */
+export function onNativeObscuredChanged(cb: (obscured: boolean) => void): () => void {
+  if (Platform.OS !== 'android') return () => {};
+  const emitter = getAndroidEmitter();
+  if (!emitter) return () => {};
+  const sub = emitter.addListener('obscuredStateChanged', (evt: { obscured?: boolean }) => {
+    cb(evt?.obscured === true);
+  });
+  return () => sub.remove();
+}
 
 // ── Screen recording events ───────────────────────────────────────────────────
 

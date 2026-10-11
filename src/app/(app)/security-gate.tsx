@@ -23,6 +23,25 @@
  *      instead of the mislabeled 'tamper_detected' that showed "App Integrity
  *      Compromised" on OFFICIAL installs at every cold start.
  *
+ * OVERLAY + BACKGROUND/RESUME EXTENSION (latest round):
+ *   The gate is now driven by ONE centralized state
+ *   (securityStateModel.resolveSecurityGateState) instead of a locally
+ *   re-derived boolean, so all four independent inputs share a vocabulary:
+ *
+ *     BLOCKED_OVERLAY            a live obscured-window signal from the
+ *                                Android touch filter. Copy is exactly
+ *                                OVERLAY_WARNING_COPY; a recheck control is
+ *                                offered but cannot dismiss the block — it
+ *                                clears only when the platform reports the
+ *                                signal gone AND a fresh evaluation passes.
+ *     BLOCKED_BACKGROUND_RESUME  the app left the foreground and has not yet
+ *                                completed a post-resume verification, so no
+ *                                protected screen or playback is briefly
+ *                                revealed on return.
+ *     BLOCKED_VPN                a policy block caused by a VPN/proxy.
+ *     BLOCKED_SECURITY_VIOLATION any other policy block (root, tamper, ...).
+ *     CHECKING / ALLOWED         never a block / nothing blocking.
+ *
  * ARCHITECTURE (unchanged — proven non-bypassable):
  *   Rendered by (app)/_layout.tsx ABOVE the entire authenticated Stack as
  *   inline content (not a route, not a Modal): nothing to navigate "around",
@@ -36,13 +55,18 @@
  *   are never routed there — see (app)/_layout.tsx).
  */
 
-import React, { useEffect, useRef } from 'react';
-import { View, Text, StyleSheet, BackHandler, ActivityIndicator, useColorScheme, ScrollView } from 'react-native';
+import React, { useEffect, useRef, useState } from 'react';
+import { View, Text, StyleSheet, BackHandler, ActivityIndicator, Pressable, useColorScheme, ScrollView } from 'react-native';
 import * as ScreenCaptureLib from '@/lib/screenCaptureGuard';
-import { ShieldAlert, WifiOff } from 'lucide-react-native';
+import { ShieldAlert, WifiOff, Eye } from 'lucide-react-native';
 import { neuColors, useLayout } from '@/lib/neu';
 import { useSecurity } from '@/lib/SecurityContext';
-import { nextStickyTypes, resolveGatePhase } from '@/lib/securityStateModel';
+import {
+  nextStickyTypes,
+  isGateBlocked,
+  isGateRecheckable,
+  OVERLAY_WARNING_COPY,
+} from '@/lib/securityStateModel';
 
 /**
  * User-facing copy per blocking event. ROOT-CAUSE FIX (event-accurate gate
@@ -109,7 +133,11 @@ function gateFindings(types: string[]): GateFinding[] {
 }
 
 export function SecurityGate() {
-  const { threats, riskScore, blocksLogin, checking, evaluating, hasVerdict, onNewBlockingThreat } = useSecurity();
+  const {
+    threats, riskScore, blocksLogin, checking, evaluating, hasVerdict,
+    gateState, verifySecurity, onNewBlockingThreat,
+  } = useSecurity();
+  const [verifying, setVerifying] = useState(false);
   const scheme = useColorScheme();
   const isDark = scheme === 'dark';
   const c = isDark ? neuColors.dark : neuColors.light;
@@ -144,23 +172,37 @@ export function SecurityGate() {
     return () => unsub?.();
   }, [onNewBlockingThreat]);
 
-  // Gate condition (AUTHORITATIVE PHASE — resolveGatePhase in the pure state
-  // model): 'blocked' requires a policy-confirmed blocking condition — the
-  // live verdict OR a previously-verified sticky block. Pending/unknown
-  // evaluation states are NEVER blocking: with no completed verdict the phase
-  // is 'pending' and the gate does not mount. Pure warn_only threats
-  // (hasWarnings without blocksLogin) do NOT gate — they surface on the
-  // security-warning screen.
-  const phase = resolveGatePhase({
-    hasVerdict,
-    evaluating:   evaluating || checking,
-    liveBlocking,
-    stickyCount:  stickyTypes.length,
-  });
-  const blocking = phase === 'blocked';
+  // ── GATE CONDITION ──────────────────────────────────────────────────────
+  // Driven by the CENTRALIZED gate state (securityStateModel.resolveSecurityGateState,
+  // computed once in SecurityContext), not by a locally re-derived boolean.
+  // Every cause of a block is one named state:
+  //
+  //   BLOCKED_OVERLAY            live obscured-window signal (native touch filter)
+  //   BLOCKED_BACKGROUND_RESUME  left the foreground, not yet re-verified
+  //   BLOCKED_VPN                policy block caused by a VPN/proxy
+  //   BLOCKED_SECURITY_VIOLATION any other policy block
+  //   CHECKING                   no completed verdict, or a check running
+  //   ALLOWED                    completed verdict, nothing blocking
+  //
+  // CHECKING is NEVER a block: with no completed verdict the gate does not
+  // mount (startup-flash contract). Pure warn_only threats (hasWarnings without
+  // blocksLogin) do not gate — they surface on the security-warning screen.
+  const blocking = isGateBlocked(gateState);
+  const overlayBlocked = gateState === 'BLOCKED_OVERLAY';
+  const resumeBlocked = gateState === 'BLOCKED_BACKGROUND_RESUME';
+  // Only the two user-actionable causes offer a recheck control.
+  const recheckable = isGateRecheckable(gateState);
   const types = liveBlocking ? threats.map((t) => t.type) : stickyTypes;
-  const revalidating = !liveBlocking && (checking || evaluating);
-  const findings = gateFindings(types);
+  // Overlay / resume states carry their own dedicated copy — listing policy
+  // findings would be misleading when the cause is not a policy finding.
+  const findings = overlayBlocked || resumeBlocked ? [] : gateFindings(types);
+  const revalidating = !liveBlocking && !overlayBlocked && !resumeBlocked && (checking || evaluating);
+
+  const onVerify = () => {
+    if (verifying) return;
+    setVerifying(true);
+    void verifySecurity().finally(() => setVerifying(false));
+  };
 
   // Defensive belt-and-suspenders: while the gate is shown, block the Android
   // hardware back button entirely — there is no route to pop to, but an
@@ -202,56 +244,100 @@ export function SecurityGate() {
       >
         {/* Header */}
         <View style={[styles.iconWrap, { backgroundColor: '#EF444418' }]}>
-          <ShieldAlert size={layout.heroIconSize * 0.5} color="#EF4444" />
+          {resumeBlocked
+            ? <Eye size={layout.heroIconSize * 0.5} color="#EF4444" />
+            : <ShieldAlert size={layout.heroIconSize * 0.5} color="#EF4444" />}
         </View>
         <Text
           style={[styles.title, { color: c.text, fontSize: layout.titleSize }]}
           accessibilityRole="header"
         >
-          SECURITY BLOCK ACTIVE
+          {overlayBlocked
+            ? OVERLAY_WARNING_COPY.title.toUpperCase()
+            : resumeBlocked
+              ? 'VERIFYING YOUR SESSION'
+              : 'SECURITY BLOCK ACTIVE'}
         </Text>
         <Text style={[styles.subtitle, { color: `${c.text}CC`, fontSize: layout.bodySize }]}>
-          Your device does not currently meet MedAcademy&apos;s security requirements.
+          {overlayBlocked
+            ? OVERLAY_WARNING_COPY.message
+            : resumeBlocked
+              ? 'MedAcademy was in the background. Security is being re-verified before protected content is shown again.'
+              : 'Your device does not currently meet MedAcademy\u2019s security requirements.'}
         </Text>
 
-        {/* Detected issues — EVERY live finding on ONE page */}
-        <Text
-          style={[styles.sectionLabel, { color: `${c.text}80`, fontSize: layout.captionSize }]}
-          accessibilityRole="header"
-        >
-          DETECTED ISSUES
-        </Text>
-        <View style={styles.findingsList}>
-          {findings.map((finding) => {
-            const RowIcon = finding.icon === 'vpn' ? WifiOff : ShieldAlert;
-            return (
-              <View
-                key={finding.type}
-                style={[styles.findingRow, { borderColor: `${c.text}1F` }]}
-                accessibilityRole="text"
-              >
-                <View style={[styles.findingIcon, { backgroundColor: '#EF444414' }]}>
-                  <RowIcon size={18} color="#EF4444" />
-                </View>
-                <View style={styles.findingText}>
-                  <Text style={{ color: c.text, fontSize: Math.max(14, layout.bodySize), fontWeight: '700' }}>
-                    {finding.title}
-                  </Text>
-                  <Text style={{ color: `${c.text}B3`, fontSize: layout.captionSize + 1, lineHeight: (layout.captionSize + 1) * 1.45, marginTop: 2 }}>
-                    {finding.instruction}
-                  </Text>
-                </View>
-              </View>
-            );
-          })}
-        </View>
+        {/* Detected issues — EVERY live finding on ONE page. Rendered only for
+            the policy-driven states; the overlay / resume states explain
+            themselves above and would be misleading with a findings list. */}
+        {findings.length > 0 && (
+          <>
+            <Text
+              style={[styles.sectionLabel, { color: `${c.text}80`, fontSize: layout.captionSize }]}
+              accessibilityRole="header"
+            >
+              DETECTED ISSUES
+            </Text>
+            <View style={styles.findingsList}>
+              {findings.map((finding) => {
+                const RowIcon = finding.icon === 'vpn' ? WifiOff : ShieldAlert;
+                return (
+                  <View
+                    key={finding.type}
+                    style={[styles.findingRow, { borderColor: `${c.text}1F` }]}
+                    accessibilityRole="text"
+                  >
+                    <View style={[styles.findingIcon, { backgroundColor: '#EF444414' }]}>
+                      <RowIcon size={18} color="#EF4444" />
+                    </View>
+                    <View style={styles.findingText}>
+                      <Text style={{ color: c.text, fontSize: Math.max(14, layout.bodySize), fontWeight: '700' }}>
+                        {finding.title}
+                      </Text>
+                      <Text style={{ color: `${c.text}B3`, fontSize: layout.captionSize + 1, lineHeight: (layout.captionSize + 1) * 1.45, marginTop: 2 }}>
+                        {finding.instruction}
+                      </Text>
+                    </View>
+                  </View>
+                );
+              })}
+            </View>
+          </>
+        )}
+
+        {/* SAFE RECHECK — offered only for the user-actionable causes (an
+            overlay to close, a backgrounded session to re-verify). It REQUESTs
+            a recheck; it cannot force the gate open: the state clears only when
+            the platform reports the obscured signal gone AND a fresh security
+            evaluation passes (canClearOverlayBlock). Policy blocks (VPN /
+            violation) deliberately have no button — retrying cannot change a
+            device condition that has not changed. */}
+        {recheckable && (
+          <Pressable
+            onPress={onVerify}
+            disabled={verifying}
+            accessibilityRole="button"
+            accessibilityLabel="Verify security and continue"
+            accessibilityState={{ disabled: verifying, busy: verifying }}
+            style={({ pressed }) => ([
+              styles.verifyBtn,
+              { backgroundColor: pressed || verifying ? '#DC2626' : '#EF4444' },
+            ])}
+          >
+            {verifying
+              ? <ActivityIndicator size="small" color="#FFFFFF" />
+              : <ShieldAlert size={18} color="#FFFFFF" />}
+            <Text style={styles.verifyBtnText}>
+              {verifying ? 'Verifying\u2026' : 'Verify security and continue'}
+            </Text>
+          </Pressable>
+        )}
 
         {/* Risk score — informational telemetry from the same authoritative
             result that drives the findings (never an independent decision).
             Rendered ONLY from a completed verdict (hasVerdict): the
             fail-closed sentinel's weight can no longer surface here as a
             fake "Risk Score: 10" — pending states never mount this page. */}
-        {hasVerdict && (
+        {hasVerdict && !overlayBlocked && !resumeBlocked && (
           <View style={[styles.pill, { backgroundColor: '#EF444418' }]}>
             <Text style={{ fontSize: layout.captionSize, fontWeight: '700', color: '#EF4444' }}>
               Risk Score: {riskScore}
@@ -283,7 +369,11 @@ export function SecurityGate() {
             }}
             accessibilityRole="text"
           >
-            This app is locked for your protection. It unlocks automatically once all security issues are resolved.
+            {overlayBlocked
+              ? 'Protected content stays hidden while an overlay or another app may be interfering. Closing the interfering app and verifying security restores access.'
+              : resumeBlocked
+                ? 'Access stays held for your protection until the post-resume security check finishes. It unlocks automatically when the check passes.'
+                : 'This app is locked for your protection. It unlocks automatically once all security issues are resolved.'}
           </Text>
         </View>
       </ScrollView>
@@ -360,6 +450,21 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 8,
     borderRadius: 20,
+  },
+  verifyBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
+    minHeight: 52,
+    paddingHorizontal: 26,
+    borderRadius: 14,
+    marginTop: 6,
+  },
+  verifyBtnText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '800',
   },
   statusRow: {
     flexDirection: 'row',

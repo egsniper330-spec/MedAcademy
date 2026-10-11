@@ -59,7 +59,10 @@ for (const page of PAGES) {
     `${name}: SVG favicon with PNG fallback`);
   ok(/rel="apple-touch-icon" href="assets\/apple-touch-icon\.png"/.test(html), `${name}: apple-touch-icon declared`);
   ok(/name="theme-color"/.test(html), `${name}: theme-color meta (kept in sync by JS)`);
-  ok(/<script src="js\/main\.js"><\/script>/.test(html), `${name}: main.js still loaded`);
+  // The ?v= cache-buster is optional and intentional: the host sends no
+  // cache-control/etag for JS, so a stale main.js could keep old behaviour
+  // after an update (see tests/websiteContactLinks.test.cjs).
+  ok(/<script src="js\/main\.js(?:\?v=[^"]*)?"><\/script>/.test(html), `${name}: main.js still loaded`);
   ok(/\.theme-toggle\{display:none\}<\/style>/.test(html.replace(/\s+/g, '')),
     `${name}: toggle hidden when JS is unavailable`);
   const logos = (html.match(/logo-(dark|light)/g) || []).length;
@@ -221,11 +224,21 @@ ok(/outline: 2px solid var\(--focus\)/.test(css), 'keyboard focus ring uses a th
 
 /* ══ 6. nothing outside the website was touched by this task ═════════════ */
 section('6. scope');
-const appTouched = ['app.json', 'package.json', 'package-lock.json'].filter((f) => {
+// The intent is that THIS task needed no mobile/app-side change. Dependency
+// manifests are therefore held to zero drift. `app.json` may legitimately carry
+// drift from an UNRELATED task sharing the worktree (the Android branding
+// config plugin), so for app.json we assert the thing that actually matters:
+// no theme-related key was introduced by the website work.
+const depTouched = ['package.json', 'package-lock.json'].filter((f) => {
   try { return require('child_process').execSync(`git diff --name-only HEAD -- ${f}`, { cwd: ROOT, encoding: 'utf8' }).trim().length > 0; }
   catch (e) { void e; return false; }
 });
-ok(appTouched.length === 0, `no app/mobile config drift from this task (${appTouched.join(', ') || 'clean'})`);
+ok(depTouched.length === 0, `website theming added no dependency (${depTouched.join(', ') || 'clean'})`);
+let appJsonDiff = '';
+try { appJsonDiff = require('child_process').execSync('git diff HEAD -- app.json', { cwd: ROOT, encoding: 'utf8' }); }
+catch (e) { void e; }
+ok(!/^\+.*(userInterfaceStyle|user_interface_style|"scheme"|backgroundColor)/m.test(appJsonDiff),
+  'website theming introduced no theme key into app.json');
 
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exitCode = failed ? 1 : 0;

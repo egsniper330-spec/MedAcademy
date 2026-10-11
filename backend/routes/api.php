@@ -21,6 +21,7 @@ use MedAcademy\Controllers\StudentBulkController;
 use MedAcademy\Controllers\RpcController;
 use MedAcademy\Controllers\RedeemCodeController;
 use MedAcademy\Controllers\DataController;
+use MedAcademy\Controllers\MaterialDeliveryController;
 use MedAcademy\Controllers\SupportController;
 use MedAcademy\Controllers\StorageController;
 use MedAcademy\Controllers\SystemDiagnosticsController;
@@ -256,6 +257,17 @@ $router->get('/storage/signed', [StorageController::class, 'signedFile']);
 $router->get('/storage/public/{bucket}/{path*}', [StorageController::class, 'publicFile']);
 $router->post('/storage/upload', [StorageController::class, 'upload'], $auth);
 $router->post('/storage/delete', [StorageController::class, 'delete'], $auth);
+
+// ---- Personalized lesson-PDF delivery (watermark + download policy) --------
+// POST /materials/pdf-url  — authorises the caller, ensures the correct variant
+//   (personalized when watermarking is ON) exists, and mints a SHORT-LIVED URL.
+// GET  /materials/pdf?token=… — public-by-token, like /storage/signed: it
+//   re-reads the CURRENT permission/enrollment before streaming, so a link
+//   issued before a permission change stops working immediately.
+// The token names the material, the student and the intent — never a path.
+$router->post('/materials/pdf-url', [MaterialDeliveryController::class, 'pdfUrl'], $auth);
+$router->get('/materials/pdf', [MaterialDeliveryController::class, 'streamPdf']);
+$router->get('/admin/material-watermark-status', [MaterialDeliveryController::class, 'watermarkStatus'], $auth + ['role' => ['admin', 'super_admin']]);
 
 // ---- Admin ----------------------------------------------------------------
 $router->get('/admin/users', [AdminController::class, 'users'], $auth + ['role' => ['admin', 'super_admin']]);

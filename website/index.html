@@ -161,6 +161,9 @@
     </div>
   </footer>
 
-  <script src="js/main.js"></script>
+  <!-- ?v= cache-buster: the host sends no cache-control/etag for JS, so a
+       stale main.js could keep old behaviour after an update. Bump on every
+       behavioural change to js/main.js. -->
+  <script src="js/main.js?v=20261011"></script>
 </body>
 </html>

@@ -31,8 +31,13 @@
  * try/catch, so a player that has not mounted yet, has already unmounted, or
  * is mid-navigation degrades to a no-op instead of throwing inside containment.
  *
- * ONLY a security lock invokes this. Backgrounding the app does not — an
- * intentional-background-playback feature is preserved.
+ * ONLY a security lock invokes this — and leaving the foreground NOW ENGAGES
+ * one (the `background-resume` holder in SecurityContext), so an embedded
+ * protected player is torn down on a Home press instead of continuing behind
+ * it. Deliberate contract change: protected media must not keep decoding while
+ * the app is backgrounded, and no protected screen may be briefly revealed on
+ * return before the post-resume verification completes. The holder is released
+ * as soon as that verification passes.
  */
 
 import { useEffect } from 'react';

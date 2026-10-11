@@ -62,6 +62,7 @@ import {
   reconcileOfflineMediaState,
 } from '@/lib/offlineVideoService';
 import { resolveWatermarkIdentity } from '@/lib/watermarkIdentity';
+import { resolveWatermarkLayers, type WatermarkPlatform } from '@/lib/watermarkLayers';
 import { NativeWatermarkOverlay } from '@/components/NativeWatermarkOverlay';
 import {
   enterFullscreenSystemUi,
@@ -117,6 +118,25 @@ export function OfflineVideoPlayer({ entry, shouldAllowPlayback, fullscreenVerdi
   // Server-issued rental window is authoritative for the pre-mount expiry
   // check (isExpired() is Android-only in the official SDK).
   const expired = useMemo(() => isOfflineVideoExpired(entry), [entry]);
+
+  // ── WHICH WATERMARK LAYER THIS SHOWS ──────────────────────────────────────
+  // Downloaded playback has NO server annotate contract (the offline OTP is
+  // persisted, so the provider's stream watermark is deliberately not attached
+  // to it — see VdoCipherService::offlineAuthorize). annotateApplied is
+  // therefore always false here and the app overlay is the single watermark.
+  // Going through the shared policy keeps the rule in ONE place rather than a
+  // second inline expression that can drift.
+  const wmPlatform: WatermarkPlatform =
+    process.env.EXPO_OS === 'ios' ? 'ios' : 'android';
+  const watermarkLayers = useMemo(
+    () => resolveWatermarkLayers({
+      platform: wmPlatform,
+      playerKind: 'native',
+      annotateApplied: false,
+      hasIdentity: !!identity,
+    }),
+    [wmPlatform, identity]
+  );
 
   // ── DEV-ONLY player-session observability (6120 evidence gathering) ──────
   const sessionTag = `vdo-offline-${entry.meta.mediaId.slice(0, 8)}`;
@@ -350,11 +370,13 @@ export function OfflineVideoPlayer({ entry, shouldAllowPlayback, fullscreenVerdi
         onEnterFullscreen={enterFullscreen}
         onExitFullscreen={exitFullscreen}
       />
-      {/* Application watermark — Plyr-parity component + shared identity.
-          Renders only when a SAFE public identity exists (no UUID fallback).
-          It lives INSIDE the expanding container → visible and correctly
-          positioned in normal AND fullscreen (re-clamps on resize). */}
-      {identity && (
+      {/* Application watermark — the APP layer, continuous billiard motion
+          (watermarkMotion.ts) + the shared identity resolver. Downloaded
+          playback has no server-side annotate contract, so this is the ONLY
+          watermark on an offline lesson. Renders only when a SAFE public
+          identity exists (no UUID fallback). It lives INSIDE the expanding
+          container → correct in normal AND fullscreen, re-projected on resize. */}
+      {identity && watermarkLayers.appOverlay && (
         <NativeWatermarkOverlay watermarkId={identity.id} watermarkName={identity.name ?? undefined} />
       )}
       {/* NO app-level fullscreen button. The SDK control bar's OWN fullscreen

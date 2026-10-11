@@ -39,6 +39,9 @@ import android.os.Handler
 import android.os.Looper
 import android.provider.Settings
 import android.util.Log
+import android.view.MotionEvent
+import android.view.View
+import android.view.ViewGroup
 import android.view.WindowManager
 import com.facebook.react.bridge.Arguments
 import com.facebook.react.bridge.Promise
@@ -1027,6 +1030,169 @@ class SecurityModule(private val reactContext: ReactApplicationContext) :
     }
 
     // ══════════════════════════════════════════════════════════════════════════
+    // PHASE 2 — LIVE OBSCURED-WINDOW / OVERLAY PROTECTION (real-time)
+    // ══════════════════════════════════════════════════════════════════════════
+    //
+    // detectOverlay() above answers a DIFFERENT question — "is a known-abusive
+    // overlay-capable package INSTALLED?" — a capability check that can never
+    // observe an overlay actually drawn over this window. A regular app has no
+    // API to enumerate another app's windows, so an ACTIVE overlay is only
+    // observable (and preventable) through the signals below.
+    //
+    // THREE LAYERS, strongest first:
+    //   1. PREVENTION (API 31+) — Window.setHideOverlayWindows(true) makes the
+    //      system HIDE every non-system overlay window while our window is
+    //      focused. There is nothing to detect because the overlay cannot be
+    //      shown. Needs the normal (install-time, no prompt) permission
+    //      android.permission.HIDE_OVERLAY_WINDOWS.
+    //   2. TOUCH FILTERING (all API levels) — View.setFilterTouchesWhenObscured
+    //      makes the framework DISCARD a touch that arrives while this window is
+    //      obscured, so a tapjacking tap never reaches a button. The flag is set
+    //      on the decor view and recursively on every view added afterwards.
+    //   3. OBSERVATION — a filter-touch listener reports when a touch WAS
+    //      filtered, so JS raises the security gate instead of the tap simply
+    //      vanishing.
+    //
+    // HONEST LIMITATIONS (documented, not papered over):
+    //   • An app CANNOT enumerate other apps' windows. There is no
+    //     "an overlay is on screen right now" API — layers 1-3 are the only
+    //     supported signals.
+    //   • MotionEvent.FLAG_WINDOW_IS_OBSCURED / FLAG_WINDOW_IS_PARTIALLY_OBSCURED
+    //     are only SET by the framework from API 29 (Q). On API 24-28 layer 3
+    //     reports nothing; only layers 1-2 protect those devices, and layer 1
+    //     needs API 31+.
+    //   • Layer 3 requires the user to TOUCH the screen: a passive overlay that
+    //     is never touched is invisible to every app-side check.
+    //   • A SYSTEM-signed overlay, or one drawn by the device owner/profile
+    //     owner, can be neither hidden nor filtered. Android protects no app
+    //     from that, and this module does not claim otherwise.
+    //   • setHideOverlayWindows only takes effect while OUR window is focused.
+
+    /** Live obscured-window belief, set ONLY from the framework's touch filter. */
+    @Volatile private var windowObscured: Boolean = false
+    private var overlayProtectionInstalled = false
+
+    /**
+     * True when the last observed touch was filtered by the framework because
+     * this window was obscured. Cleared by the next clean touch. Read by
+     * getSecurityFlags() and pushed to JS as the obscuredStateChanged event.
+     */
+    @ReactMethod
+    fun isWindowObscured(promise: Promise) {
+        runSafe(promise) { windowObscured }
+    }
+
+    /**
+     * Install overlay protection on the CURRENT activity's window.
+     * Idempotent; safe to call on every foreground/resume.
+     * Resolves true when at least the touch filter was applied.
+     */
+    @ReactMethod
+    fun enableOverlayProtection(promise: Promise) {
+        Log.d(TAG, "[enableOverlayProtection] ▶ called")
+        mainHandler.post {
+            try {
+                val activity = currentActivity
+                if (activity == null) {
+                    Log.d(TAG, "[enableOverlayProtection] no current activity")
+                    promise.resolve(false)
+                    return@post
+                }
+                val window = activity.window
+                val decor = window.decorView
+
+                // ── Layer 1: PREVENTION (API 31+) ─────────────────────────
+                // Non-system overlays are hidden outright while we are focused.
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                    try {
+                        window.setHideOverlayWindows(true)
+                        Log.d(TAG, "[enableOverlayProtection] setHideOverlayWindows(true) applied")
+                    } catch (e: Exception) {
+                        Log.d(TAG, "[enableOverlayProtection] setHideOverlayWindows unavailable: \${e.message}")
+                    }
+                }
+
+                // ── Layer 2: TOUCH FILTERING (all levels) ─────────────────
+                applyObscuredTouchFilter(decor)
+
+                // ── Layer 3: OBSERVATION (API 31+) ────────────────────────
+                // OnFilterTouchEventListener is the documented "a touch was
+                // filtered" callback. On older levels the filter still discards
+                // the touch; there is simply no callback to observe it, so JS
+                // learns about it from the NEXT security evaluation instead.
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && !overlayProtectionInstalled) {
+                    try {
+                        decor.setOnFilterTouchEventListener(
+                            View.OnFilterTouchEventListener { _: View, event: MotionEvent ->
+                                observeObscured(event)
+                                false
+                            }
+                        )
+                    } catch (e: Exception) {
+                        Log.d(TAG, "[enableOverlayProtection] filter-touch listener unavailable: \${e.message}")
+                    }
+                }
+
+                // Newly attached sub-trees (RN mounts views long after onCreate)
+                // must inherit at least the root flag — re-apply on hierarchy
+                // changes rather than walking the tree on every layout pass.
+                if (!overlayProtectionInstalled && decor is ViewGroup) {
+                    decor.setOnHierarchyChangeListener(
+                        object : ViewGroup.OnHierarchyChangeListener {
+                            override fun onChildViewAdded(parent: View, child: View) {
+                                applyObscuredTouchFilter(child)
+                            }
+                            override fun onChildViewRemoved(parent: View, child: View) { }
+                        }
+                    )
+                }
+
+                overlayProtectionInstalled = true
+                promise.resolve(true)
+            } catch (e: Exception) {
+                Log.d(TAG, "[enableOverlayProtection] failed: \${e.message}")
+                promise.resolve(false)
+            }
+        }
+    }
+
+    /**
+     * Recursively set the obscured-touch filter. Bounded by the real view
+     * count of this app's hierarchy (never user data), and idempotent.
+     */
+    private fun applyObscuredTouchFilter(view: View) {
+        try {
+            view.filterTouchesWhenObscured = true
+            if (view is ViewGroup) {
+                for (i in 0 until view.childCount) applyObscuredTouchFilter(view.getChildAt(i))
+            }
+        } catch (_: Exception) {
+            // A view being torn down mid-walk must not break containment.
+        }
+    }
+
+    /**
+     * Read the framework's own obscured-window evidence off a touch event and
+     * push a state change to JS only when the belief actually changes.
+     */
+    private fun observeObscured(event: MotionEvent) {
+        try {
+            val obscured = (event.flags and MotionEvent.FLAG_WINDOW_IS_OBSCURED) != 0 ||
+                (event.flags and MotionEvent.FLAG_WINDOW_IS_PARTIALLY_OBSCURED) != 0
+            if (obscured == windowObscured) return
+            windowObscured = obscured
+            Log.d(TAG, "[observeObscured] windowObscured=\$obscured")
+            if (!reactContext.hasActiveReactInstance()) return
+            val params = Arguments.createMap()
+            params.putBoolean("obscured", obscured)
+            params.putDouble("signalTimeMs", System.currentTimeMillis().toDouble())
+            reactContext
+                .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
+                .emit("obscuredStateChanged", params)
+        } catch (_: Exception) { }
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
     // PHASE 2 — APP SIGNATURE VERIFICATION
     // ══════════════════════════════════════════════════════════════════════════
 
@@ -1358,6 +1524,11 @@ class SecurityModule(private val reactContext: ReactApplicationContext) :
             val sigHex = runCatching { getSignatureSha256Hex() }.getOrNull()
             if (sigHex != null) r.putString("signatureSha256", sigHex)
             r.putInt("overlayCapableAppsCount", _lastOverlayCapableAppsCount)
+            // Live obscured-window evidence (the framework's own touch filter).
+            // Deliberately NOT the capability count: this is true only when a
+            // touch was actually delivered through an obscured window.
+            r.putBoolean("windowObscured", windowObscured)
+            r.putBoolean("overlayProtectionInstalled", overlayProtectionInstalled)
             Log.d(TAG, "[getSecurityFlags] frida=$frida xposed=$xposed magisk=$magisk overlay=$overlay sigOk=$sigOk tamper=$tamper")
 
             // ── Phase 3 (new) ──────────────────────────────────────────────
@@ -2586,6 +2757,29 @@ const withTargetAppQueries = (config) =>
     return cfg;
   });
 
+/**
+ * android.permission.HIDE_OVERLAY_WINDOWS — install-time (normal) permission,
+ * no runtime prompt. It is what lets SecurityModule call
+ * Window.setHideOverlayWindows(true) (API 31+), which makes the SYSTEM hide
+ * every non-system overlay window while this app is focused.
+ *
+ * This is the strongest supported overlay protection available to a regular
+ * app: prevention instead of detection. Without the permission the call is a
+ * silent no-op (caught in Kotlin), so the app degrades to touch filtering
+ * rather than failing — but it must be declared for the protection to exist.
+ */
+const withOverlayWindowPermission = (config) =>
+  withAndroidManifest(config, (cfg) => {
+    const manifest = cfg.modResults.manifest;
+    if (!manifest['uses-permission']) manifest['uses-permission'] = [];
+    const name = 'android.permission.HIDE_OVERLAY_WINDOWS';
+    const exists = manifest['uses-permission'].some(
+      (p) => p.$ && p.$['android:name'] === name
+    );
+    if (!exists) manifest['uses-permission'].push({ $: { 'android:name': name } });
+    return cfg;
+  });
+
 const withSecurityModule = (config) => {
   config = withMedaSslPins(config);
   // Android
@@ -2593,6 +2787,7 @@ const withSecurityModule = (config) => {
   config = withSecurityPackageRegistration(config);
   config = withSecNativeCoreSources(config);
   config = withTargetAppQueries(config);
+  config = withOverlayWindowPermission(config);
   // iOS
   config = withIOSSwiftSources(config);
   config = withIOSEmbedPodsFrameworks(config);

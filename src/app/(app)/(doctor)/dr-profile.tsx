@@ -1347,7 +1347,12 @@ export default function DoctorProfile() {
     <ScrollView automaticallyAdjustKeyboardInsets={process.env.EXPO_OS === 'ios'}
       style={{ flex: 1, backgroundColor: c.base }}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />}
-      contentContainerStyle={{ padding: layout.screenPx }}
+      // BOTTOM clearance: layout.scrollBottom() = safeBottom(insets.bottom,
+      // tabBarClearance). The raw safeBottom(insets.bottom) reserved only the
+      // home indicator, so on iOS the floating NATIVE tab bar (drawn by UIKit
+      // outside the RN hierarchy) covered the tail of this scrolling tab.
+      // Android/web resolve a 0 clearance — byte-for-byte unchanged there.
+      contentContainerStyle={{ paddingHorizontal: layout.screenPx, paddingTop: layout.screenPx, paddingBottom: layout.scrollBottom() }}
     >
       {/* Stats row */}
       <SectionLabel label="Overview" color={c.text} />
@@ -1462,7 +1467,8 @@ export default function DoctorProfile() {
     return (
       <ScrollView automaticallyAdjustKeyboardInsets={process.env.EXPO_OS === 'ios'}
         style={{ flex: 1, backgroundColor: c.base }}
-        contentContainerStyle={{ padding: layout.screenPx }}
+        // See renderProfileTab: same iOS native-tab-bar clearance.
+        contentContainerStyle={{ paddingHorizontal: layout.screenPx, paddingTop: layout.screenPx, paddingBottom: layout.scrollBottom() }}
       >
         {/* ── Edit Profile ───────────────────────────────────────────── */}
         <SectionLabel label="Profile" color={c.text} />

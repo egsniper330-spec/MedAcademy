@@ -63,6 +63,50 @@ final class StorageService
     }
 
     /**
+     * Absolute path of a PRIVATE object. Used by the personalized-PDF delivery
+     * endpoint, which streams the bytes itself after re-validating the caller's
+     * permission — the `lesson-material-pdfs` bucket deliberately has NO
+     * /storage/signed route, so this is the only way those bytes can be read.
+     */
+    public function privateFilePath(string $bucket, string $path): string
+    {
+        return $this->privateDir . '/' . $this->bucketPath($bucket, $path);
+    }
+
+    /**
+     * Write bytes that the application GENERATED (not an uploaded temp file).
+     * `putFile()` is for uploads only — it uses move_uploaded_file()/rename() on
+     * an existing temp file. Returns the object path relative to the bucket.
+     */
+    public function writeFile(string $bucket, string $destPath, string $bytes, bool $public = false): string
+    {
+        $rel = $this->bucketPath($bucket, $destPath);
+        $full = ($public ? $this->publicDir : $this->privateDir) . '/' . $rel;
+        $dir = dirname($full);
+        if (!is_dir($dir) && !mkdir($dir, 0775, true) && !is_dir($dir)) {
+            throw new ApiException(500, 'Storage directory is not writable');
+        }
+        // Atomic: write a sibling temp file then rename, so a concurrent request
+        // never streams a half-written PDF.
+        $tmp = $full . '.' . bin2hex(random_bytes(6)) . '.part';
+        if (@file_put_contents($tmp, $bytes, LOCK_EX) === false) {
+            @unlink($tmp);
+            throw new ApiException(500, 'Failed to write generated file');
+        }
+        if (!@rename($tmp, $full)) {
+            @unlink($tmp);
+            throw new ApiException(500, 'Failed to finalise generated file');
+        }
+        return $rel;
+    }
+
+    /** True when a private object exists on disk. */
+    public function privateFileExists(string $bucket, string $path): bool
+    {
+        return is_file($this->privateFilePath($bucket, $path));
+    }
+
+    /**
      * Move an uploaded temp file into storage.
      * Returns the object path relative to the bucket.
      */
