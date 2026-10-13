@@ -1,11 +1,11 @@
 import React, { useEffect, useState } from 'react';
 import {
-  View, Text, ScrollView, Linking, Modal, Pressable, useColorScheme, ActivityIndicator,
+  View, Text, ScrollView, Linking, Modal, Pressable, useColorScheme, ActivityIndicator, Platform,
 } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import type { RelativePathString } from 'expo-router';
 import {
-  ShieldAlert, ShieldCheck, AlertTriangle, Wifi, Globe,
+  ShieldAlert, ShieldCheck, AlertTriangle, Wifi, WifiOff, Globe,
   Bug, Fingerprint, Lock, ArrowRight, Phone, X as XIcon,
   Mail, MessageCircle, Send, Megaphone, AtSign, Link2,
 } from 'lucide-react-native';
@@ -18,6 +18,11 @@ import {
   SUPPORT_ICONS, SUPPORT_DEFAULT_LABELS, type SupportPlatformKey,
 } from '@/lib/api';
 import { useSecurity } from '@/lib/SecurityContext';
+import {
+  hasConnectionFinding,
+  connectionBlockInstructions,
+  VPN_WARNING_COPY,
+} from '@/lib/securityStateModel';
 
 // ─── Threat display metadata ──────────────────────────────────────────────────
 // Only human-readable labels and icons — no internal method details shown to users.
@@ -186,6 +191,25 @@ export default function SecurityWarningScreen() {
     ? security.blocksLogin
     : params.blocksLogin === 'true';
 
+  // ── MANDATORY CONNECTION BLOCK (no "Continue Anyway", ever) ──────────────
+  // A live VPN/proxy finding is a policy block: the dismissible warning path is
+  // CLOSED for it regardless of how this screen was reached. `threats` already
+  // resolves authoritative-first, and the condition below is evaluated from the
+  // FINDING TYPES (not from `blocksLogin`), so neither a stale param
+  // (`blocksLogin=false`) nor a deep link can re-open the dismiss button on a
+  // device that is reporting an active VPN/proxy.
+  const connectionBlocked = hasConnectionFinding(threats);
+  const connectionSteps = connectionBlocked
+    ? connectionBlockInstructions(Platform.OS)
+    : [];
+  // Re-verify: only a FRESH authoritative evaluation can clear the block.
+  const [verifying, setVerifying] = useState(false);
+  const onVerifyConnection = () => {
+    if (verifying) return;
+    setVerifying(true);
+    void security.verifySecurity().finally(() => setVerifying(false));
+  };
+
   // A warning must never claim a finding it cannot list, and a screen reached
   // while the authoritative evaluation is still running must not read as a
   // verified clean result.
@@ -300,10 +324,14 @@ export default function SecurityWarningScreen() {
             <ShieldAlert size={Math.round(layout.heroIconSize * 0.5)} color={accent} />
           </View>
           <Text style={{ fontSize: layout.titleSize, fontWeight: '700', color: c.text, textAlign: 'center' }}>
-            {blocksLogin ? 'Access Blocked' : hasFindings ? 'Security Warning' : 'Security Check'}
+            {connectionBlocked
+              ? VPN_WARNING_COPY.title
+              : blocksLogin ? 'Access Blocked' : hasFindings ? 'Security Warning' : 'Security Check'}
           </Text>
           <Text style={{ fontSize: layout.bodySize, color: `${c.text}88`, textAlign: 'center', lineHeight: layout.bodySize * 1.5 }}>
-            {blocksLogin
+            {connectionBlocked
+              ? VPN_WARNING_COPY.message
+              : blocksLogin
               ? 'Your device does not meet security requirements. Login has been blocked by your administrator.'
               : hasFindings
                 ? 'Security issues were detected on your device. Proceed with caution — some features may be restricted.'
@@ -387,7 +415,53 @@ export default function SecurityWarningScreen() {
         })}
 
         {/* Actions */}
-        {blocksLogin ? (
+        {connectionBlocked ? (
+          <View style={{ gap: layout.pad.md }}>
+            {/* MANDATORY CONNECTION BLOCK — deliberately NO Continue/dismiss
+                control. The reported bypass was exactly this button on a VPN
+                finding; the only way out is to turn the VPN/proxy off and let a
+                fresh evaluation confirm it. */}
+            <View style={[flat, {
+              borderRadius: layout.cardRadius, padding: layout.cardPx,
+              flexDirection: 'row', alignItems: 'center', gap: layout.pad.md,
+              borderLeftWidth: 4, borderLeftColor: '#EF4444',
+            }]}>
+              <WifiOff size={layout.bodySize + 4} color="#EF4444" />
+              <Text style={{ flex: 1, fontSize: layout.captionSize, color: c.text, lineHeight: layout.captionSize * 1.5 }}>
+                {'Access cannot be continued while a VPN or proxy is active. Turn it off, then verify \u2014 nothing here can be dismissed to bypass this.'}
+              </Text>
+            </View>
+
+            <Text style={{ fontSize: layout.headingSize, fontWeight: '700', color: c.text }}>
+              How to turn it off
+            </Text>
+            {connectionSteps.map((step, i) => (
+              <View key={step} style={[flat, {
+                borderRadius: layout.cardRadius, padding: layout.cardPx,
+                flexDirection: 'row', alignItems: 'flex-start', gap: layout.pad.lg,
+              }]}>
+                <View style={{
+                  width: layout.touchTarget, height: layout.touchTarget,
+                  borderRadius: layout.cardRadius / 2,
+                  backgroundColor: '#EF444418',
+                  alignItems: 'center', justifyContent: 'center',
+                }}>
+                  <Text style={{ color: '#EF4444', fontWeight: '800' }}>{i + 1}</Text>
+                </View>
+                <Text style={{ flex: 1, fontSize: layout.captionSize, color: c.text, lineHeight: layout.captionSize * 1.5 }}>
+                  {step}
+                </Text>
+              </View>
+            ))}
+
+            <NeuButton
+              label={verifying ? 'Verifying\u2026' : 'Verify connection'}
+              icon={<WifiOff size={layout.bodySize} color={c.text} />}
+              onPress={onVerifyConnection}
+              disabled={verifying}
+            />
+          </View>
+        ) : blocksLogin ? (
           <View style={{ gap: layout.pad.md }}>
             <View style={[flat, {
               borderRadius: layout.cardRadius, padding: layout.cardPx,

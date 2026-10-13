@@ -68,6 +68,22 @@ final class SecurityController
             ];
         }
 
+        // ── MANDATORY CONNECTION FLOOR (server-authoritative) ──────────────
+        // A CONFIRMED VPN/proxy is always block_login. The floor is applied to
+        // the SERVED payload, so a stored `warn_only` (or disabled) vpn/proxy
+        // row can no longer instruct a client to downgrade the block into the
+        // dismissible warning that produced the reported iOS bypass — and it
+        // covers already-installed clients too, since this endpoint is their
+        // only policy source. Writes to those two rows are refused by
+        // updatePolicy() (MANDATORY_BLOCK), so the stored row cannot be
+        // weakened either; adminPolicies() still returns the raw rows so the
+        // management UI can show that the floor is an enforced minimum.
+        foreach (self::MANDATORY_FLOOR as $type => $floorAction) {
+            // Set unconditionally (including when the row is missing) so a live
+            // VPN/proxy can never resolve to "no enforcement".
+            $policies[$type] = ['action' => $floorAction, 'enabled' => true];
+        }
+
         $vpnWhitelist = array_map(
             static fn (array $r): string => strtolower((string) $r['name']),
             $db->select('SELECT name FROM security_vpn_whitelist') ?? []
@@ -98,8 +114,28 @@ final class SecurityController
      * these four debug/tamper surfaces must stay enabled + block_login. The
      * write path refuses any change that would weaken them, so the admin UI
      * cannot accidentally (or maliciously) disable mandatory security.
+     *
+     * Migration 033 adds the two CONNECTION detectors (vpn, proxy) to the same
+     * rule set: a confirmed VPN/proxy must never be downgraded to a dismissal.
      */
-    private const MANDATORY_BLOCK = ['developer_options', 'debug', 'tamper', 'play_integrity'];
+    private const MANDATORY_BLOCK = [
+        'developer_options', 'debug', 'tamper', 'play_integrity',
+        'vpn', 'proxy',
+    ];
+
+    /**
+     * The enforced MINIMUM each detection resolves to when policies are SERVED
+     * (public /security/policies). Applied to the response, not stored:
+     *   • vpn/proxy → block_login.
+     * This is the mirror of the client-side floor in
+     * src/lib/securityStateModel.ts (applyMandatoryConnectionFloor) so the two
+     * planes can never disagree, and it retro-fits already-installed clients
+     * that only ever read this endpoint.
+     */
+    private const MANDATORY_FLOOR = [
+        'vpn'   => 'block_login',
+        'proxy' => 'block_login',
+    ];
 
     /**
      * GET /admin/security/policies — full policy rows + VPN whitelist for the

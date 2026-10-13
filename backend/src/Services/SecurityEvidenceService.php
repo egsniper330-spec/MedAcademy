@@ -640,10 +640,16 @@ final class SecurityEvidenceService
         // The client's evidence field IS the sensor-flag map (flat: vpn, adb,
         // tampered, …). Accept a nested {'flags': …} form too for forward
         // compatibility, but never require it.
-        $flags = is_array($evidence['flags'] ?? null) ? $evidence['flags'] : $evidence;
-
-        // Values are true = risk present. Unknown/absent = not observed.
-        $blocking = ['vpn', 'developer_options', 'adb', 'debugger', 'tampered', 'root', 'magisk', 'frida', 'xposed', 'emulator', 'mock_location'];
+        $flags = is_array($evidence['flags'] ?? null) ? $evidence['flags'] : $evidence;          // Values are true = risk present. Unknown/absent = not observed.
+          //
+          // `proxy` joined this list with the mandatory connection block
+          // (migration 033): the served policy for the proxy detector is
+          // block_login, so signed evidence reporting a live proxy must reach
+          // BLOCKED assurance exactly like a live VPN does. It used to be a
+          // mere warning signal, which was consistent with the old warn_only
+          // default — and with the dismissible path that produced the reported
+          // iOS bypass.
+          $blocking = ['vpn', 'proxy', 'developer_options', 'adb', 'debugger', 'tampered', 'root', 'magisk', 'frida', 'xposed', 'emulator', 'mock_location'];
         $blockingHits = [];
         foreach ($blocking as $signal) {
             if (!empty($flags[$signal])) {
@@ -663,13 +669,10 @@ final class SecurityEvidenceService
         $vpnState = $evidence['vpn_state'] ?? $vpnStateOverride;
         if ($vpnState === 'on') {
             return ['BLOCKED', ['blocking_signals' => ['vpn_state_on']]];
-        }
-
-        $warn = [];
-        if ($vpnState === 'suspicious') { $warn[] = 'vpn_state_suspicious'; }
-        if ($vpnState === 'unknown') { $warn[] = 'vpn_state_unknown'; }
-        if (!empty($flags['proxy'])) { $warn[] = 'proxy'; }
-        if (!empty($flags['overlay'])) { $warn[] = 'overlay'; }
+        }          $warn = [];
+          if ($vpnState === 'suspicious') { $warn[] = 'vpn_state_suspicious'; }
+          if ($vpnState === 'unknown') { $warn[] = 'vpn_state_unknown'; }
+          if (!empty($flags['overlay'])) { $warn[] = 'overlay'; }
         if (!empty($flags['screen_recording'])) { $warn[] = 'screen_recording'; }
         if (!empty($flags['test_only'])) { $warn[] = 'test_only'; }
         if (!empty($flags['signature_mismatch'])) { $warn[] = 'signature_mismatch'; }

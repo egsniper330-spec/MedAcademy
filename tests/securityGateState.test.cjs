@@ -189,8 +189,13 @@ console.log('── Part 7: which states offer a recheck control ──');
 {
   check('7a: overlay is recheckable', M.isGateRecheckable('BLOCKED_OVERLAY') === true);
   check('7b: background/resume is recheckable', M.isGateRecheckable('BLOCKED_BACKGROUND_RESUME') === true);
-  check('7c: a VPN block is NOT recheckable (retrying cannot change the device)',
-    M.isGateRecheckable('BLOCKED_VPN') === false);
+  // CHANGED deliberately: a VPN/proxy is something the USER can remove (turn the
+  // VPN off) and the reported flow is exactly "switch it off, then get back in".
+  // The control only REQUESTS a re-check — the block clears solely when a fresh
+  // authoritative evaluation finds no connection finding (see
+  // tests/vpnMandatoryBlock.test.cjs C6-C8), so it is not a dismiss path.
+  check('7c: a VPN block IS recheckable (the user can turn the VPN off and re-verify)',
+    M.isGateRecheckable('BLOCKED_VPN') === true);
   check('7d: a generic violation is NOT recheckable',
     M.isGateRecheckable('BLOCKED_SECURITY_VIOLATION') === false);
   check('7e: ALLOWED / CHECKING offer nothing', !M.isGateRecheckable('ALLOWED') && !M.isGateRecheckable('CHECKING'));

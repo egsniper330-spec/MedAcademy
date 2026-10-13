@@ -176,23 +176,27 @@ The gate must be derived from one authoritative evaluation.
 > had been detected. A pre-existing VPN at cold launch was never shown at all.
 > Expected results below reflect the fixed behaviour.
 
-Distinguish the two policy outcomes before you start. With the **shipped default**
-`vpn → block_login`, a VPN opens the non-dismissible **SecurityGate**
-("VPN Connection Detected"). If your server's authoritative `security_policies`
-resolves VPN/proxy to `warn_only`, you instead get the dismissible
-**security-warning** screen. Record which one your deployment uses.
+> **There is no warn mode for a connection finding any more.** A confirmed
+> VPN/proxy is a MANDATORY block in three planes (stored policy row, served
+> `/security/policies` payload, client policy table) — see
+> [VPN_PROXY_MANDATORY_BLOCK.md](VPN_PROXY_MANDATORY_BLOCK.md). Every row below
+> expects the non-dismissible **SecurityGate** page ("VPN OR PROXY DETECTED")
+> with a **HOW TO TURN IT OFF** list and a "Verify security and continue"
+> control. A `Continue Anyway` button anywhere on a VPN/proxy finding is a
+> **FAIL**.
 
 | # | Step | Expected |
 |---|---|---|
 | 10.1 | VPN **off**. Launch MedAcademy cold, sign in. | No VPN finding. Dashboard loads normally. |
-| 10.2 | With the app **foregrounded**, enable the VPN (open the VPN app or Settings, then return). | The finding appears. Warn mode → security-warning with the **real score (15)** and **1 listed finding** ("VPN Connection Detected"). Block mode → SecurityGate. |
-| 10.3 | Disable the VPN, return to the app. | Finding clears on the next evaluation (~30 s) or on resume. No restart needed. |
+| 10.2 | With the app **foregrounded**, enable the VPN (open the VPN app or Settings, then return). | SecurityGate opens with the **real score (15)**, 1 listed finding ("VPN Connection Detected"), platform-specific turn-off steps, and a re-verify control. |
+| 10.3 | Disable the VPN, return to the app, tap **Verify security and continue**. | Gate clears on the fresh evaluation (the `vpnStateChanged` native signal and every foreground return also trigger it). No restart needed. The re-verify control alone must never clear the gate. |
 | 10.4 | Disable VPN. Launch the app, then **background it**, enable the VPN while backgrounded, and resume. | Same as 10.2 — the post-resume re-check must catch it. |
 | 10.5 | **Force-close** the app. Enable the VPN. Then launch the app fresh. | **The finding must appear from the FIRST verdict.** This is the previously broken case. Warn mode → security-warning with score 15 and 1 finding; block mode → SecurityGate. |
-| 10.6 | Repeat 10.5 for a **proxy** configuration the platform exposes. | `proxy → warn_only` by default: warning screen, score **15**, finding "Proxy Connection Detected", distinct from the VPN row. |
-| 10.7 | On the security-warning screen, read the four numbers/lists together. | Title, accent colour, risk score, `Detected Issues (N)` and the button label all describe the **same** state. `N` must equal the number of rendered finding rows. `Continue Anyway` appears only when real findings exist. |
-| 10.8 | If a screen is ever reached with **no** findings. | It must read "Security Check" / "No issues detected" (or "Verification in progress" while a check runs) — **never** "Security issues were detected" over an empty list, and the button reads "Continue". |
-| 10.9 | With an admin VPN whitelist configured (any rows). | Detection is skipped by design — the finding is expected to be **absent**. Confirm this is intentional, not the bug. |
+| 10.6 | Repeat 10.5 for a **proxy** configuration the platform exposes. | Mandatory block on the SAME gate page: score **15**, finding "Proxy Connection Detected", distinct from the VPN row. |
+| 10.7 | On the **security-warning** screen (reachable only for NON-connection warn-level findings, or by deep link), read the four numbers/lists together. | Title, accent colour, risk score, `Detected Issues (N)` and the button label all describe the **same** state. `N` must equal the number of rendered finding rows. |
+| 10.8 | Deep-link into the warn screen with a connection finding, e.g. `/(app)/security-warning?blocksLogin=false&threats=[{"type":"vpn_detected"}]`, and the pre-login variant. | **No dismiss control of any kind.** The VPN/proxy block + turn-off steps render (the finding suppresses the button, not the `blocksLogin` flag). Pre-login the only forward action is "I turned it off — try again", which returns to sign-in and re-runs the check. |
+| 10.9 | If a screen is ever reached with **no** findings. | It must read "Security Check" / "No issues detected" (or "Verification in progress" while a check runs) — **never** "Security issues were detected" over an empty list, and the button reads "Continue". |
+| 10.10 | With an admin VPN whitelist configured (any rows). | Detection is skipped by design — the finding is expected to be **absent**. Confirm this is intentional, not the bug. |
 
 **Record for each run:** the finding type(s), risk score, gate decision
 (warning vs SecurityGate), and the timestamp — the report asked for these

@@ -1,11 +1,11 @@
 import React, { useEffect, useState } from 'react';
 import {
-  View, Text, ScrollView, Linking, Modal, Pressable, useColorScheme, ActivityIndicator,
+  View, Text, ScrollView, Linking, Modal, Pressable, useColorScheme, ActivityIndicator, Platform,
 } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import type { RelativePathString } from 'expo-router';
 import {
-  ShieldAlert, ShieldCheck, AlertTriangle, Wifi, Globe,
+  ShieldAlert, ShieldCheck, AlertTriangle, Wifi, WifiOff, Globe,
   Bug, Fingerprint, Lock, ArrowRight, Phone, X as XIcon,
   Mail, MessageCircle, Send, Megaphone, AtSign, Link2,
 } from 'lucide-react-native';
@@ -13,6 +13,7 @@ import { neuColors, neuFlatStyle, neuPressedStyle, useLayout } from '@/lib/neu';
 import { NeuButton } from '@/components/NeuButton';
 import { useProfileStore } from '@/lib/store';
 import { dashboardPathForRole } from '@/lib/roleRoutes';
+import { hasConnectionFinding, connectionBlockInstructions, VPN_WARNING_COPY } from '@/lib/securityStateModel';
 import {
   getPublicSupportContacts, type PublicSupportContact,
   SUPPORT_ICONS, type SupportPlatformKey,
@@ -168,6 +169,27 @@ export default function SecurityWarningScreen() {
 
   const riskScore   = parseInt(params.riskScore ?? '0', 10);
   const blocksLogin = params.blocksLogin === 'true';
+
+  // ── MANDATORY CONNECTION BLOCK (pre-login) ─────────────────────────────────
+  // Same rule as the authenticated screen, enforced one screen earlier: a VPN/
+  // proxy finding closes the dismissible path. This is derived from the FINDING
+  // TYPES rather than from `blocksLogin`, so signing in with an active VPN no
+  // longer shows "Continue Anyway", and a crafted deep link
+  // (`?blocksLogin=false&threats=[{"type":"vpn_detected"}]`) cannot re-open it
+  // either — the finding itself is what suppresses the button.
+  // NOTE: this file deliberately does NOT read the authoritative context
+  // (no session exists yet); the server-computed outcome arrives as route
+  // params, which is the recorded pre-login exemption in
+  // scripts/check-security-param-authority.js. It must stay presentation-only.
+  const connectionBlocked = hasConnectionFinding(threats);
+  const connectionSteps = connectionBlocked
+    ? connectionBlockInstructions(Platform.OS)
+    : [];
+  // The ONLY forward action: return to sign-in, which re-runs the authoritative
+  // security check before any session or protected content is created.
+  const onRecheck = () => {
+    router.replace('/(auth)/sign-in' as RelativePathString);
+  };
   // Backend-verified role — the authoritative source for where to continue to.
   const { profile } = useProfileStore();
   // DESTINATION POLICY — do not trust the redirect param as authoritative.
@@ -262,13 +284,19 @@ export default function SecurityWarningScreen() {
             borderRadius: layout.heroIconRadius,
             alignItems: 'center', justifyContent: 'center',
           }]}>
-            <ShieldAlert size={Math.round(layout.heroIconSize * 0.5)} color={blocksLogin ? '#EF4444' : '#F59E0B'} />
+            {connectionBlocked
+              ? <WifiOff size={Math.round(layout.heroIconSize * 0.5)} color="#EF4444" />
+              : <ShieldAlert size={Math.round(layout.heroIconSize * 0.5)} color={blocksLogin ? '#EF4444' : '#F59E0B'} />}
           </View>
           <Text style={{ fontSize: layout.titleSize, fontWeight: '700', color: c.text, textAlign: 'center' }}>
-            {blocksLogin ? 'Access Blocked' : 'Security Warning'}
+            {connectionBlocked
+              ? VPN_WARNING_COPY.title
+              : blocksLogin ? 'Access Blocked' : 'Security Warning'}
           </Text>
           <Text style={{ fontSize: layout.bodySize, color: `${c.text}88`, textAlign: 'center', lineHeight: layout.bodySize * 1.5 }}>
-            {blocksLogin
+            {connectionBlocked
+              ? VPN_WARNING_COPY.message
+              : blocksLogin
               ? 'Your device does not meet security requirements. Login has been blocked by your administrator.'
               : 'Security issues were detected on your device. Proceed with caution — some features may be restricted.'}
           </Text>
@@ -319,7 +347,52 @@ export default function SecurityWarningScreen() {
         })}
 
         {/* Actions */}
-        {blocksLogin ? (
+        {connectionBlocked ? (
+          <View style={{ gap: layout.pad.md }}>
+            {/* MANDATORY CONNECTION BLOCK — no Continue/dismiss control exists on
+                this branch, and signing in again is the only forward action
+                (sign-in re-runs the authoritative check first). */}
+            <View style={[flat, {
+              borderRadius: layout.cardRadius, padding: layout.cardPx,
+              flexDirection: 'row', alignItems: 'center', gap: layout.pad.md,
+              borderLeftWidth: 4, borderLeftColor: '#EF4444',
+            }]}>
+              <WifiOff size={layout.bodySize + 4} color="#EF4444" />
+              <Text style={{ flex: 1, fontSize: layout.captionSize, color: c.text, lineHeight: layout.captionSize * 1.5 }}>
+                {'Sign-in is blocked while a VPN or proxy is active. Turn it off, then try again \u2014 this cannot be dismissed to continue.'}
+              </Text>
+            </View>
+
+            <Text style={{ fontSize: layout.headingSize, fontWeight: '700', color: c.text }}>
+              How to turn it off
+            </Text>
+            {connectionSteps.map((step, i) => (
+              <View key={step} style={[flat, {
+                borderRadius: layout.cardRadius, padding: layout.cardPx,
+                flexDirection: 'row', alignItems: 'flex-start', gap: layout.pad.lg,
+              }]}>
+                <View style={{
+                  width: layout.touchTarget, height: layout.touchTarget,
+                  borderRadius: layout.cardRadius / 2,
+                  backgroundColor: '#EF444418',
+                  alignItems: 'center', justifyContent: 'center',
+                }}>
+                  <Text style={{ color: '#EF4444', fontWeight: '800' }}>{i + 1}</Text>
+                </View>
+                <Text style={{ flex: 1, fontSize: layout.captionSize, color: c.text, lineHeight: layout.captionSize * 1.5 }}>
+                  {step}
+                </Text>
+              </View>
+            ))}
+
+            <NeuButton
+              label="I turned it off — try again"
+              icon={<ArrowRight size={layout.bodySize} color="#fff" />}
+              onPress={onRecheck}
+              variant="primary"
+            />
+          </View>
+        ) : blocksLogin ? (
           <View style={{ gap: layout.pad.md }}>
             <View style={[flat, {
               borderRadius: layout.cardRadius, padding: layout.cardPx,

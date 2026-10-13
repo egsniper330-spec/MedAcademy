@@ -113,6 +113,97 @@ export function evaluateSecurityResult(input: {
   return { riskScore, blocksLogin, blocksVideo, hasWarnings, blockingTypes, warningTypes, unmappedTypes };
 }
 
+// ─── MANDATORY CONNECTION BLOCK (VPN / proxy) ────────────────────────────────
+//
+// ROOT CAUSE of the reported bypass (real iPhone):
+//   VPN detection worked, but the app still showed the DISMISSIBLE
+//   security-warning screen with a "Continue Anyway" button, so the user could
+//   enter the app and make API requests while the VPN was active.
+//
+//   The client is fully server-driven (getSecurityPolicies() merges the
+//   authoritative security_policies rows over the bundled defaults), and the
+//   shipped defaults already said `vpn → block_login`. The observed warn-level
+//   behaviour therefore came from the POLICY ROW resolving vpn/proxy to
+//   `warn_only` (or a disabled row) — i.e. a *configuration* value was allowed
+//   to downgrade a connection-security block into a dismissible warning.
+//   docs/DEVICE_VALIDATION_CHECKLIST.md §10 documented exactly that split
+//   ("If your server's authoritative security_policies resolves VPN/proxy to
+//   warn_only, you instead get the dismissible security-warning screen").
+//
+// THE RULE (owner requirement): a CONFIRMED VPN/proxy transport can never be
+// down-graded below block_login — not by a server row, not by a disabled row,
+// not by a deep link, not by a patched screen. This mirrors the backend's own
+// MANDATORY_BLOCK write-path refusal (SecurityController), which refuses to
+// weaken developer_options/debug/tamper/play_integrity. The floor is applied in
+// BOTH planes:
+//   • server  — /security/policies serves vpn/proxy as block_login; the admin
+//               write path refuses anything weaker.
+//   • client  — applyMandatoryConnectionFloor() below, so an offline launch
+//               (bundled defaults), a stale cache, or an older/downgraded row
+//               cannot resurrect the dismissible path.
+//
+// SCOPE — deliberately narrow:
+//   • only the connection detectors (vpn, proxy);
+//   • only a CONFIRMED detection is blocking. A detector that could not run is
+//     reported as degraded/unavailable EVIDENCE (weight 0, never a block, never
+//     a silent "clean") — see VPN_SIGNAL_DEGRADED_EVENT. Unreliable heuristics
+//     must never lock a user out of ordinary Wi-Fi/mobile-data use.
+//
+// The admin-sanctioned escape hatch is unchanged: security_vpn_whitelist (any
+// row ⇒ detection is skipped by design, documented in the checklist §10.9) and
+// the five-minute policy cache that re-reads the server rows.
+
+export const CONNECTION_DETECTION_TYPES = ['vpn', 'proxy'] as const;
+export type ConnectionDetectionType = (typeof CONNECTION_DETECTION_TYPES)[number];
+
+/** The action vpn/proxy can never be downgraded below. */
+export const MANDATORY_CONNECTION_ACTION: PurePolicyAction = 'block_login';
+
+/** Event types emitted by the connection detectors. */
+export const CONNECTION_DETECTION_EVENTS = ['vpn_detected', 'proxy_detected'] as const;
+
+/** True for a finding produced by the VPN or proxy detector. */
+export function isConnectionFinding(eventType: string): boolean {
+  return (CONNECTION_DETECTION_EVENTS as readonly string[]).includes(eventType);
+}
+
+/** True when any live finding is a connection (VPN/proxy) finding. */
+export function hasConnectionFinding(threats: ReadonlyArray<{ type: string; detected?: boolean }>): boolean {
+  return threats.some((t) => t.detected !== false && isConnectionFinding(t.type));
+}
+
+/**
+ * Applies the mandatory floor to a resolved policy table (pure; returns a new
+ * object). `enabled: false` rows cannot opt out either: a disabled detection
+ * resolves to log_only everywhere else, but for the connection detectors that
+ * would silently re-open the dismissible path the report is about.
+ */
+export function applyMandatoryConnectionFloor<T extends PurePolicies>(policies: T): T {
+  const floored: PurePolicies = { ...policies };
+  for (const detection of CONNECTION_DETECTION_TYPES) {
+    // Always SET the key (not merely overwrite an existing one): a table that
+    // lost it would otherwise resolve to "no action" for a live VPN finding,
+    // i.e. fail open.
+    floored[detection] = MANDATORY_CONNECTION_ACTION;
+  }
+  // Generic-preserving cast: the only writes are the two keys named in
+  // CONNECTION_DETECTION_TYPES, which every policy table typed by the caller
+  // carries (the runtime merge starts from the bundled defaults).
+  return floored as T;
+}
+
+/**
+ * Evidence event for a connection detector that could NOT run its authoritative
+ * signal path (iOS without the native two-gate module ⇒ the weak NetInfo
+ * fallback, or a thrown probe). It carries weight 0 and is deliberately NOT
+ * mapped in DETECTION_TO_EVENT: it can never block and never warn, but it also
+ * never lets the device be reported as "verified clean" — the gap is visible in
+ * the security event trail (policy_action log_only) and in the diagnostics log.
+ */
+export const VPN_SIGNAL_DEGRADED_EVENT = 'vpn_detection_degraded';
+
+export type VpnSignalPath = 'native' | 'netinfo-fallback' | 'unavailable';
+
 // ─── Gate sticky-state machine (BLOCKED → CHECKING → SAFE|BLOCKED) ───────────
 
 /**
@@ -283,14 +374,20 @@ export function isGateBlocked(state: SecurityGateState): boolean {
 /**
  * True when the user can clear the state by acting and then re-verifying.
  *
- * Deliberately narrow: only the two states caused by something the USER can
- * remove (an overlay app, a backgrounded session) get the recheck control. A
- * VPN or integrity violation is cleared by the automatic re-evaluation, and a
- * user-facing "verify" button there would only invite retry-spamming a device
- * condition that has not changed.
+ * Only states the USER can resolve by acting get the control: an overlay app
+ * they can close, a backgrounded session that re-verifies on return, and — new
+ * in this round — a VPN/proxy they can switch off. The reported flow is exactly
+ * "turn the VPN off, then get back in": the control only REQUESTs a re-check, it
+ * can never force the gate open (the state clears when a FRESH authoritative
+ * evaluation finds no blocking finding), so it is not a dismiss path.
+ *
+ * A generic integrity violation (root/tamper) stays without a control: retrying
+ * cannot change a device condition that has not changed.
  */
 export function isGateRecheckable(state: SecurityGateState): boolean {
-  return state === 'BLOCKED_OVERLAY' || state === 'BLOCKED_BACKGROUND_RESUME';
+  return state === 'BLOCKED_OVERLAY'
+    || state === 'BLOCKED_BACKGROUND_RESUME'
+    || state === 'BLOCKED_VPN';
 }
 
 // ─── Finding → user-facing copy key ─────────────────────────────────────────
@@ -412,6 +509,65 @@ export const OVERLAY_WARNING_COPY = {
 } as const;
 
 /** What the platform can and cannot detect — surfaced verbatim in the report. */
+// ─── VPN / proxy block copy + documented iOS detection limits ────────────────
+
+export type VpnBlockCopy = { title: string; message: string };
+
+/**
+ * Exact copy for the mandatory VPN/proxy block. Lives in the pure model (like
+ * OVERLAY_WARNING_COPY) so the wording is unit-testable, shared by the
+ * authenticated gate AND the pre-login block screen, and cannot drift.
+ *
+ * It deliberately does NOT claim the app can disable a third-party VPN: iOS
+ * gives an app no API to stop a Network Extension another app owns.
+ */
+export const VPN_WARNING_COPY: VpnBlockCopy = {
+  title: 'VPN or proxy detected',
+  message:
+    'MedAcademy cannot be used while a VPN or proxy is active. Turn it off in '
+    + 'iOS Settings or in your VPN app, then return to this screen \u2014 the app re-checks automatically.',
+};
+
+/**
+ * Step-by-step guidance per platform. Rendered on the blocking screen; kept
+ * here so the same instructions are used pre-login and post-login.
+ */
+export function connectionBlockInstructions(platform: string): readonly string[] {
+  if (platform === 'ios') {
+    return [
+      'Open Settings \u2192 General \u2192 VPN & Device Management \u2192 VPN and set Status to Not Connected.',
+      'If a VPN app installed it (WireGuard, OpenVPN, Tailscale, NordVPN, WARP\u2026), open that app and disconnect there \u2014 iOS only manages it from Settings when it is configured as a personal VPN.',
+      'If a proxy is configured, open Settings \u2192 Wi-Fi \u2192 (i) next to your network \u2192 Configure Proxy \u2192 Off.',
+      'Return to MedAcademy. Access is restored when the next check finds no VPN or proxy.',
+    ];
+  }
+  if (platform === 'android') {
+    return [
+      'Open Settings \u2192 Network & internet \u2192 VPN and disconnect the active profile.',
+      'Or open the VPN app and disconnect there, then stop its always-on/per-app VPN setting.',
+      'If a proxy is configured, open the Wi-Fi network \u2192 Advanced \u2192 Proxy and set it to None.',
+      'Return to MedAcademy. Access is restored when the next check finds no VPN or proxy.',
+    ];
+  }
+  return [
+    'Disconnect the active VPN or proxy on this device.',
+    'Return to MedAcademy. Access is restored when the next check finds no VPN or proxy.',
+  ];
+}
+
+/**
+ * What iOS can and cannot tell us — the honest limits, surfaced verbatim in the
+ * implementation report (mirrors OVERLAY_DETECTION_LIMITS).
+ */
+export const VPN_DETECTION_LIMITS = [
+  'iOS never names the VPN vendor: NO public API lets an app enumerate VPN configurations or read the active tunnel\u2019s owner.',
+  'The authoritative iOS signal is a two-gate check \u2014 NWPathMonitor (is the active path a non-standard interface type?) plus getifaddrs with IFF_UP (is a utun*/ipsec*/ppp* interface actually up?). Both must agree, which is what removed the old 100% false-positive rate from iOS\u2019s permanent utun0/1/2 interfaces.',
+  'Without the native SecurityModule the detector falls back to @react-native-community/netinfo where ONLY type===\'vpn\' counts; packet-tunnel VPNs (WireGuard, OpenVPN, Tailscale, Cloudflare WARP) commonly report as wifi/other and are MISSED. That degraded path is reported as evidence (' + VPN_SIGNAL_DEGRADED_EVENT + ') \u2014 never as a verified clean device.',
+  'DNS-only VPNs, per-app VPNs that never become the active path transport, and iCloud Private Relay (Apple surfaces it as .wifi/.cellular) are accepted gaps, not detections.',
+  'Proxy detection uses CFNetworkCopySystemProxySettings (HTTP/HTTPS/SOCKS); a PAC/auto-config URL is reported as a proxy configuration.',
+  'An app cannot turn a third-party VPN off: the blocking screen must instruct the user, and only the fresh security evaluation can restore access.',
+] as const;
+
 export const OVERLAY_DETECTION_LIMITS = [
   'Android exposes no API for one app to enumerate another app\u2019s windows, so "an overlay is on screen right now" cannot be measured directly.',
   'MotionEvent.FLAG_WINDOW_IS_OBSCURED / FLAG_WINDOW_IS_PARTIALLY_OBSCURED are only set by the framework from API 29 (Q).',
@@ -421,6 +577,51 @@ export const OVERLAY_DETECTION_LIMITS = [
 ] as const;
 
 // ─── Update verdict (versionCode is authoritative; names never compared) ─────
+
+// ─── Update gate placement (block the PROTECTED shell, never the startup) ────
+//
+// ROOT CAUSE of the reported "Checking for updates" startup wall: the root
+// ForceUpdateGate hard-blocked on `verdict === 'UNKNOWN' && evaluating` (and on
+// any UPDATE_REQUIRED) for the WHOLE app, above authentication — so a
+// signed-out cold start rendered the update screen instead of the normal
+// startup/sign-in flow, purely because a background network request had not
+// answered yet.
+//
+// The enforcement rule now has an explicit surface input:
+//
+//   protectedSurface=false (no session: splash / sign-in / auth screens)
+//     → 'none'. The version check is a background request; the normal startup
+//       experience is never gated by it.
+//   protectedSurface=true (the authenticated (app) shell)
+//     → 'required' when the server (or a cached verdict for THIS build) says
+//       the installed build is blocked; 'pending' while the decision is still
+//       unknown. Fail-closed: protected content is never granted on an unknown
+//       update state, and the server-side HTTP 426 gate remains the real
+//       boundary for every protected API call.
+//
+// NOTE: the mode is intentionally NOT part of the block decision — that is the
+// shipped semantics (any UPDATE_REQUIRED blocks), preserved here so this change
+// cannot weaken enforcement. The OPTIONAL banner path in ForceUpdateScreen is
+// left untouched.
+
+export type UpdateGateDecision = 'none' | 'pending' | 'required';
+
+export function resolveUpdateGateDecision(input: {
+  verdict: 'SUPPORTED' | 'UPDATE_REQUIRED' | 'UNKNOWN';
+  evaluating: boolean;
+  /** The surface about to render is the authenticated/protected shell. */
+  protectedSurface: boolean;
+}): UpdateGateDecision {
+  if (!input.protectedSurface) return 'none';
+  if (input.verdict === 'UPDATE_REQUIRED') return 'required';
+  if (input.verdict === 'UNKNOWN' && input.evaluating) return 'pending';
+  return 'none';
+}
+
+/** True when the decision blocks protected content (pending or required). */
+export function updateGateBlocks(decision: UpdateGateDecision): boolean {
+  return decision !== 'none';
+}
 
 export interface UpdateVerdictPure {
   /** 'UPDATE_REQUIRED' when the installed versionCode is below the minimum. */

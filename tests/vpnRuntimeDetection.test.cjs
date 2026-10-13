@@ -43,8 +43,17 @@
  *
  *  Part B — the source wiring that produced the two symptoms
  *
- * IMPORTANT: Part A deliberately asserts the SHIPPED policy for VPN stays
- * blocking. This suite must never become the thing that weakens detection.
+ * IMPORTANT: Part A deliberately asserts that VPN/proxy findings stay BLOCKING.
+ * This suite must never become the thing that weakens detection.
+ *
+ * POLICY UPDATE (mandatory connection block — see
+ * docs/VPN_PROXY_MANDATORY_BLOCK.md and tests/vpnMandatoryBlock.test.cjs):
+ * on this deployment the stored `security_policies` rows resolved vpn/proxy to
+ * `warn_only`, which is what produced the dismissible "Continue Anyway" screen
+ * described in Symptom A. A confirmed VPN/proxy can no longer be downgraded
+ * below block_login in ANY plane, so the weakened row below is now floored by
+ * applyMandatoryConnectionFloor() before it is evaluated — Part A asserts that
+ * the lifecycle still surfaces the finding AND that it blocks.
  */
 
 'use strict';
@@ -152,6 +161,8 @@ const DETECTION_TO_EVENT = {
 
 const WEIGHTS = {
   tamper_detected: 40, signature_invalid: 40, root_detected: 35,
+  // VPN-detection coverage-gap evidence (weight 0; see vpnMandatoryBlock suite).
+  vpn_detection_degraded: 0,
   frida_detected: 30, magisk_detected: 25, xposed_detected: 25,
   debugger_attached: 25, developer_options_enabled: 25, adb_enabled: 20,
   debug_detected: 20, ssl_pinning_failure: 20, vpn_detected: 15,
@@ -169,12 +180,17 @@ const evaluate = (threats, overrides = {}) => M.evaluateSecurityResult({
 
 /**
  * The scenario the iPhone report describes: on this deployment the server's
- * authoritative `security_policies` config resolves a VPN/proxy finding to
- * warn_only, so the shell routes to the dismissible security-warning screen
- * instead of the blocking gate. Both policies are exercised below — the shipped
- * blocking default AND this warn-only server policy.
+ * authoritative `security_policies` config resolved a VPN/proxy finding to
+ * warn_only, so the shell routed to the dismissible security-warning screen
+ * instead of the blocking gate.
+ *
+ * MANDATORY-BLOCK FIX: the connection detectors are floored before evaluation,
+ * so this weakened table is exactly what the reported configuration now
+ * resolves to — block_login for both detectors. Part A asserts that the
+ * lifecycle still surfaces the finding, and that it BLOCKS.
  */
-const WARN_VPN = { vpn: 'warn_only' };
+const WEAKENED_ROW = { vpn: 'warn_only', proxy: 'warn_only' };
+const WARN_VPN = M.applyMandatoryConnectionFloor({ ...DEFAULT_POLICIES, ...WEAKENED_ROW });
 
 // ════════════════════════════════════════════════════════════════════════════
 // PART A — lifecycle / policy model
@@ -186,10 +202,12 @@ console.log('\n\u2500\u2500 Part A1: launch clean, VPN enabled while FOREGROUNDE
   const after  = evaluate([threat('vpn_detected', 'VPN Connection detected')], WARN_VPN);
 
   check('clean launch reports nothing', !before.blocksLogin && !before.hasWarnings && before.riskScore === 0);
-  check('runtime VPN is detected as a warning (warn-only server policy)', after.hasWarnings && !after.blocksLogin);
-  check('runtime VPN warns about vpn_detected specifically', after.warningTypes.includes('vpn_detected'));
+  check('runtime VPN is detected and BLOCKS even against a warn_only server row',
+    after.blocksLogin === true && after.blockingTypes.includes('vpn_detected'));
+  check('runtime VPN is no longer presented as a dismissible warning',
+    after.hasWarnings === false && after.warningTypes.length === 0);
   check('runtime VPN scores the shipped weight (15)', after.riskScore === 15);
-  check('a warn-only VPN does NOT open the blocking gate', !after.blocksLogin && !after.blocksVideo);
+  check('the block opens the gate (video is not the only surface held)', after.blocksVideo === false);
 }
 
 console.log('\n\u2500\u2500 Part A2: launch clean, VPN enabled while BACKGROUNDED \u2192 resume \u2500\u2500');
@@ -202,9 +220,11 @@ console.log('\n\u2500\u2500 Part A2: launch clean, VPN enabled while BACKGROUNDE
 
   // Post-resume evaluation detects the VPN.
   const postResume = evaluate([threat('vpn_detected')], WARN_VPN);
-  check('post-resume check sees the VPN', postResume.hasWarnings && postResume.riskScore === 15);
-  check('resume releases once a warn-only post-resume check completed',
-    M.resolveBackgroundResumeGate({ foreground: true, verifiedSinceResume: true, blocking: postResume.blocksLogin }) === false);
+  check('post-resume check sees the VPN', postResume.blocksLogin && postResume.riskScore === 15);
+  check('resume does NOT release while the VPN still blocks',
+    M.resolveBackgroundResumeGate({ foreground: true, verifiedSinceResume: true, blocking: postResume.blocksLogin }) === true);
+  check('resume releases only after the VPN is gone (clean post-resume evaluation)',
+    M.resolveBackgroundResumeGate({ foreground: true, verifiedSinceResume: true, blocking: evaluate([]).blocksLogin }) === false);
   // With the shipped blocking policy it must NOT release.
   const postResumeBlocking = evaluate([threat('vpn_detected')]);
   check('resume stays held when the VPN blocks (shipped policy)',
@@ -214,8 +234,8 @@ console.log('\n\u2500\u2500 Part A2: launch clean, VPN enabled while BACKGROUNDE
 console.log('\n\u2500\u2500 Part A3: launched with VPN ALREADY ON (the cold-start case) \u2500\u2500');
 {
   const firstVerdict = evaluate([threat('vpn_detected')], WARN_VPN);
-  check('the FIRST verdict already reports the pre-existing VPN', firstVerdict.hasWarnings);
-  check('cold-start VPN carries the finding for the UI to render', firstVerdict.warningTypes.includes('vpn_detected'));
+  check('the FIRST verdict already reports the pre-existing VPN', firstVerdict.blocksLogin);
+  check('cold-start VPN carries the finding for the UI to render', firstVerdict.blockingTypes.includes('vpn_detected'));
   check('cold-start VPN scores 15 (not 0) — the reported "Risk Score: 0" was a params bug',
     firstVerdict.riskScore === 15);
 
@@ -233,18 +253,19 @@ console.log('\n\u2500\u2500 Part A4: VPN disconnected while running \u2500\u2500
 {
   const prev = evaluate([threat('vpn_detected')], WARN_VPN);
   const now  = evaluate([]);
-  check('clearing the VPN clears the warning', !now.hasWarnings && now.riskScore === 0);
+  check('clearing the VPN clears the finding', !now.hasWarnings && !now.blocksLogin && now.riskScore === 0);
   check('a completed clean evaluation recovers the gate',
     M.nextStickyTypes(['vpn_detected'], { checking: false, liveBlocking: false, liveThreatTypes: [] }).length === 0);
-  check('the warning latch may present again later (signature changes)', prev.warningTypes.join() !== '');
+  check('the finding set still drives the presentation signature (a new state can present again)',
+    prev.blockingTypes.join(',') === 'vpn_detected');
 }
 
 console.log('\n\u2500\u2500 Part A5: proxy configuration change \u2500\u2500');
 {
-  const proxy = evaluate([threat('proxy_detected', 'Proxy configuration detected')]);
-  check('proxy is detected and kept DISTINCT from VPN', proxy.warningTypes.includes('proxy_detected'));
-  check('proxy does not masquerade as a VPN finding', !proxy.warningTypes.includes('vpn_detected'));
-  check('proxy stays warn-only (never blocks login)', !proxy.blocksLogin);
+  const proxy = evaluate([threat('proxy_detected', 'Proxy configuration detected')], WARN_VPN);
+  check('proxy is detected and kept DISTINCT from VPN', proxy.blockingTypes.includes('proxy_detected'));
+  check('proxy does not masquerade as a VPN finding', !proxy.blockingTypes.includes('vpn_detected'));
+  check('proxy now BLOCKS login (mandatory connection block, was warn_only)', proxy.blocksLogin === true);
   check('proxy scores the shipped weight (15)', proxy.riskScore === 15);
 }
 
@@ -283,9 +304,9 @@ console.log('\n\u2500\u2500 Part A9: findings present \u21d2 score and listed ty
 {
   const both = evaluate([threat('vpn_detected'), threat('proxy_detected')], WARN_VPN);
   check('score is the sum of the live weights', both.riskScore === 30);
-  check('every scored finding is listed for the UI', both.warningTypes.length === 2);
+  check('every scored finding is listed for the UI', both.blockingTypes.length === 2);
   check('listed types match the findings exactly',
-    [...both.warningTypes].sort().join(',') === 'proxy_detected,vpn_detected');
+    [...both.blockingTypes].sort().join(',') === 'proxy_detected,vpn_detected');
 
   const vpnOnly = evaluate([threat('vpn_detected')]);
   check('a blocking finding is listed as blocking, not as a warning',
@@ -395,9 +416,12 @@ console.log('\n\u2500\u2500 Part B3: detection and policy were NOT weakened \u25
   check('both detectors remain wired into runSecurityChecks',
     /withTimeout\(detectVPN\(\)/.test(security) && /withTimeout\(detectProxy\(\)/.test(security));
 
-  // The shipped fallback policy must still block a VPN.
+  // The shipped fallback policy must block BOTH connection detectors.
   check('VPN default policy is still block_login', /vpn:\s*'block_login'/.test(security));
-  check('proxy default policy is still warn_only', /proxy:\s*'warn_only'/.test(security));
+  check('proxy default policy is now block_login (mandatory connection block)',
+    /proxy:\s*'block_login'/.test(security));
+  check('the merged policy table is floored for the connection detectors',
+    /applyMandatoryConnectionFloor/.test(security));
   check('VPN/proxy risk weights unchanged (15 / 15)',
     /vpn_detected:\s+15/.test(security) && /proxy_detected:\s+15/.test(security));
   check('vpn_detected still emits its own event type', /type: 'vpn_detected'/.test(security));

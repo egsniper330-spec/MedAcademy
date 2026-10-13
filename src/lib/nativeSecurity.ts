@@ -21,6 +21,8 @@
  */
 
 import { NativeModules, NativeEventEmitter, Platform } from 'react-native';
+// PURE vocabulary only (type import — no runtime dependency on the model).
+import type { VpnSignalPath } from './securityStateModel';
 import NetInfo from '@react-native-community/netinfo';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -469,6 +471,27 @@ async function detectVPNviaNetInfo(): Promise<boolean> {
  *          (IOSSecurityModule removed for build stability — see comment above.)
  *          Covers Personal VPN, IKEv2, IPSec, WireGuard, OpenVPN, Tailscale, WARP.
  */
+/**
+ * WHICH iOS VPN signal path is live right now.
+ *
+ *   'native'           — IOSSecurityModule present: NWPathMonitor gate +
+ *                        getifaddrs(IFF_UP) tunnel-interface gate (authoritative).
+ *   'netinfo-fallback' — native module absent: only NetInfo type==='vpn' runs,
+ *                        which MISSES packet-tunnel VPNs (WireGuard, OpenVPN,
+ *                        Tailscale, Cloudflare WARP report as wifi/other).
+ *
+ * Exported so the security pipeline can report a degraded VPN signal AS
+ * EVIDENCE instead of letting the weaker path pass as a verified-clean result.
+ * Returns null on non-iOS platforms (their decision comes from the native
+ * security-flag batch).
+ */
+export function getIosVpnSignalPath(): VpnSignalPath | null {
+  if (Platform.OS !== 'ios') return null;
+  // 'unavailable' is reported by the caller when the probe itself could not
+  // produce a measurement (threw / timed out).
+  return getIOSModule() ? 'native' : 'netinfo-fallback';
+}
+
 export async function isNativeVPNDetected(): Promise<boolean> {
   console.log('[NativeSecurity][isNativeVPNDetected] platform=', Platform.OS);
 

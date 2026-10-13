@@ -52,7 +52,8 @@ import "../global.css";
 assertBackendConfigured();
 
 /**
- * ForceUpdateGate — rendered at the ROOT level, above ALL navigation.
+ * ForceUpdateGate — mounted at the ROOT level, above ALL navigation, but the
+ * HARD BLOCK now applies to the PROTECTED surface only.
  *
  * Execution order guarantees:
  *   ForceUpdateGate > authentication > home > course loading > video playback
@@ -61,19 +62,33 @@ assertBackendConfigured();
  * + server-side HTTP 426 interception). This UI is NOT the security boundary —
  * the backend rejects unsupported versions on every protected call.
  *
- * Hard block (UPDATE_REQUIRED, mode FORCED, or UNKNOWN during the fail-closed
- * startup check):
- *   • Replaces the entire screen — Stack navigator is never rendered.
- *   • No navigation, auth, or content is accessible.
- *   • Re-checks on every foreground return; a block never auto-clears — only
- *     an explicit successful evaluation can clear it.
+ * STARTUP FIX (reported defect: an initial "Checking for updates" wall):
+ *   The version check is a background request and MUST NOT gate the normal
+ *   startup/sign-in experience. Previously this gate hard-blocked on
+ *   `verdict === 'UNKNOWN' && evaluating` for the WHOLE app, so a signed-out
+ *   cold start showed the update screen instead of the splash/sign-in flow
+ *   purely because the request had not answered yet.
  *
- * Soft update (UPDATE_REQUIRED, mode OPTIONAL):
- *   • Dismissible banner above the Stack navigator; app stays usable.
- *   • FORCED is the production default; OPTIONAL exists for staged rollouts.
+ *   The decision is now surface-aware (resolveUpdateGateDecision):
+ *     • no session (splash, sign-in, auth screens) → NEVER blocked;
+ *     • session present (the authenticated shell) → 'pending' while the verdict
+ *       is unknown, 'required' once the server (or a cached verdict for THIS
+ *       build) says the installed build is blocked.
+ *
+ *   Fail-closed is preserved where it matters: protected content and protected
+ *   API calls still respect the authoritative update state (this gate in front
+ *   of the shell, plus the server's 426 rejection of every protected request).
+ *
+ * Re-checks on every foreground return; a block never auto-clears — only an
+ * explicit successful evaluation can clear it.
  */
 function ForceUpdateGate({ children }: { children: React.ReactNode }) {
   const update = useUpdate();
+  // The surface decides whether the update state may hard-block this render:
+  // with no session there is nothing protected to withhold (the root Stack's
+  // Protected guard keeps (app) out of the route table until a session exists).
+  const { session } = useSession();
+  const protectedSurface = !!session;
 
   // Wire the remote-check lifecycle exactly once (cold start + foreground),
   // plus the online⇄offline transition service (update-policy refresh,
@@ -86,10 +101,18 @@ function ForceUpdateGate({ children }: { children: React.ReactNode }) {
     return () => { un1(); un2(); un3(); un4(); };
   }, []);
 
-  // ── Hard block / fail-closed checking wall ─────────────────────────────────
-  const hardBlocked =
-    update.verdict === 'UPDATE_REQUIRED' ||
-    (update.verdict === 'UNKNOWN' && update.evaluating);
+  // ── Hard block / fail-closed checking wall (protected surface only) ────────
+  // UPDATE_REQUIRED always blocks a signed-in session (mode OPTIONAL/FORCED is
+  // deliberately not consulted — the shipped semantics, preserved). While the
+  // verdict is UNKNOWN a signed-in session waits rather than assuming the
+  // installed build is allowed, so no protected content or protected API call
+  // is granted on an unknown update state.
+  // Routed through the PURE decision (securityStateModel.resolveUpdateGateDecision,
+  // unit-tested) so the root gate and the (app) shell gate can never disagree:
+  // a public surface resolves to 'none', a protected surface to 'pending' or
+  // 'required'. Only the protected surface input differs here.
+  const gateDecision = protectedSurface ? update.protectedDecision : 'none';
+  const hardBlocked = gateDecision !== 'none';
 
   if (hardBlocked) {
     return <ForceUpdateScreen />;
@@ -178,11 +201,11 @@ const ROOT_SC_KEY = 'root-shell';
  *
  * WHY THIS EXISTS — the launch black screen:
  * `isLoading` alone is NOT sufficient evidence that a frame has been presented.
- * At cold start the FIRST root UI is now the fail-closed update wall
- * (ForceUpdateGate: verdict UNKNOWN + evaluating), and the two inputs race:
- *   • isLoading ← getSession(), a LOCAL SecureStore read → resolves in a few ms;
- *   • the update wall  ← a NETWORK call to /app/version → hundreds of ms later.
- * So `isLoading` flips false while the first frames are still being presented,
+ * `isLoading` is flipped by getSession() (a LOCAL SecureStore read, a few ms) and
+ * the timing of the first real content is not bounded by it — and once a session
+ * exists the protected update wall (a NETWORK call to /app/version, hundreds of
+ * ms later) can still replace the tree while the first frames are being
+ * presented. Either way `isLoading` can flip while frames are still presenting,
  * and the un-deferred preventScreenCaptureAsync() below would call
  * keyWindow.layer.removeFromSuperlayer() + reparent into the secure UITextField
  * sublayer in that same run-loop iteration: the app renders into an off-screen

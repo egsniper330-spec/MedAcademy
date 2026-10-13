@@ -18,6 +18,8 @@ import { maintenanceEpoch } from '@/components/MaintenanceGate';
 import { UploadFAB } from '@/components/VideoUploadQueue';
 import { useSecurity } from '@/lib/SecurityContext';
 import { SecurityGate } from '@/app/(app)/security-gate';
+import { useUpdate } from '@/lib/useForceUpdate';
+import ForceUpdateScreen from '@/components/ForceUpdateScreen';
 import type { RelativePathString } from 'expo-router';
 // Roles that can upload videos and need the floating upload queue FAB.
 const UPLOAD_ROLES = new Set(['doctor', 'admin', 'super_admin']);
@@ -457,6 +459,19 @@ function AppLayoutNav() {
 export default function AppLayout() {
   const { profile } = useProfileStore();
   const canUpload = !!profile && UPLOAD_ROLES.has(profile.role);
+  // ── DEFENSE IN DEPTH: the protected shell enforces the update verdict ──────
+  // The root ForceUpdateGate already withholds the whole tree while a signed-in
+  // session is on an unknown or blocked update state. This second, local check
+  // is deliberately redundant: it guarantees the AUTHENTICATED shell itself
+  // cannot render protected screens + playback even if the root gate is ever
+  // reordered, so the two can never disagree. Both read the same authoritative
+  // store, so there is no flash window between them.
+  const update = useUpdate();
+  const updateBlocks = update.protectedDecision !== 'none';
+
+  if (updateBlocks) {
+    return <ForceUpdateScreen />;
+  }
 
   return (
     <View style={{ flex: 1 }}>

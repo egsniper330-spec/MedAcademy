@@ -65,6 +65,7 @@ import {
   type NativeSecurityFlags,
   isNativeVPNDetected,
   isNativeProxyDetected,
+  getIosVpnSignalPath,
   generateAppAttestKey,
   attestAppAttestKey,
   generateAppAttestAssertion,
@@ -77,7 +78,13 @@ import {
 import { getSecurityGuards, getSecurityConfig } from '@/lib/securityConfigService';
 // PURE state model (no react-native/expo imports) — risk scoring + policy
 // evaluation are delegated there so they are unit-testable with plain node.
-import { computeRiskScorePure, evaluateSecurityResult } from './securityStateModel';
+import {
+  computeRiskScorePure,
+  evaluateSecurityResult,
+  applyMandatoryConnectionFloor,
+  VPN_SIGNAL_DEGRADED_EVENT,
+  type VpnSignalPath,
+} from './securityStateModel';
 
 // SecureStore key for persisting the App Attest keyId across sessions.
 // WHEN_UNLOCKED_THIS_DEVICE_ONLY: never migrated to another device, never iCloud-synced,
@@ -136,7 +143,17 @@ export type SecurityEventType =
   // server error, or inconclusive. Weight 0, never blocking: weak internet is
   // a reachability state, not a proven security violation. A REAL pin
   // mismatch still emits 'ssl_pinning_failure' exactly as before.
-  | 'connection_probe_degraded';
+  | 'connection_probe_degraded'
+  // VPN DETECTION DEGRADED (honesty fix, iOS): the VPN check could not run its
+  // authoritative signal path — the native two-gate module (NWPathMonitor +
+  // getifaddrs IFF_UP) is absent so only the weak NetInfo `type==='vpn'`
+  // fallback ran (which provably MISSES WireGuard/OpenVPN/Tailscale/WARP),
+  // the probe threw, or it timed out. Weight 0 and deliberately NOT mapped in
+  // DETECTION_TO_EVENT: it can never block and never warn (unreliable network
+  // heuristics must not lock users out), but it also never lets a device be
+  // reported as "verified clean" — the coverage gap is logged (policy_action
+  // log_only) and visible in diagnostics.
+  | 'vpn_detection_degraded';
 
 export type PolicyAction = 'log_only' | 'warn_only' | 'block_video' | 'block_login';
 
@@ -188,6 +205,16 @@ export interface SecurityCheckResult {
 
 /** Evidence-quality + distribution telemetry attached to a security check. */
 export interface SecurityEvidence {
+  /**
+   * WHICH iOS VPN signal path produced this check's VPN decision:
+   *   'native'           — IOSSecurityModule two-gate check (NWPath + getifaddrs)
+   *   'netinfo-fallback' — native module absent; weak NetInfo type==='vpn' only
+   *   'unavailable'      — neither path produced a measurement
+   * null/undefined on platforms (# Android reads its own native batch).
+   * Observability only: it never changes the block decision, but it makes the
+   * difference between "measured clean" and "could not measure" auditable.
+   */
+  vpnSignalPath?:            VpnSignalPath | null;
   /** Installing package if the platform reports one (may legitimately be null). */
   installerSource?:          string | null;
   /** True when a pinned expected cert SHA-256 is configured in the build. */
@@ -237,6 +264,10 @@ const WEIGHTS: Record<SecurityEventType, number> = {
   // pin mismatch (TLS identity rejected while the origin answered) remains a
   // blocking ssl_pinning_failure.
   connection_probe_degraded:  0,
+  // VPN-detection-degraded evidence (iOS honesty fix): the VPN check could not
+  // run its authoritative path. Weight 0 — a coverage gap is not a device
+  // violation and must never raise the risk score or lock anyone out.
+  vpn_detection_degraded:     0,
 };
 
 /** Weight of the fail-closed sentinel — used by SecurityContext's sentinel results. */
@@ -285,8 +316,14 @@ const POLICY_TTL_MS = 5 * 60 * 1000;
 
 const DEFAULT_POLICIES: Record<DetectionType, PolicyAction> = {
   root_jailbreak:    'block_login',
+  // MANDATORY CONNECTION BLOCK (owner requirement — see
+  // applyMandatoryConnectionFloor in securityStateModel.ts): a CONFIRMED VPN or
+  // proxy is always block_login. `proxy` used to be warn_only, which — combined
+  // with a warn_only server row for `vpn` — is what produced the reported
+  // dismissible "Continue Anyway" path on iOS. The bundled default plus the
+  // floor now make that unreachable from the client side.
   vpn:               'block_login',
-  proxy:             'warn_only',
+  proxy:             'block_login',
   ssl_pinning:       'block_login',
   // Probe observability: a degraded/timeout connection probe is logged, never
   // blocks — a REAL pin mismatch (ssl_pinning_failure above) keeps blocking.
@@ -328,7 +365,7 @@ export async function getSecurityPolicies(): Promise<Record<DetectionType, Polic
       const Network = await import('expo-network');
       const st = await Network.getNetworkStateAsync();
       if (!(st.isConnected && st.isInternetReachable !== false)) {
-        cachedPolicies = { ...DEFAULT_POLICIES };
+        cachedPolicies = applyMandatoryConnectionFloor({ ...DEFAULT_POLICIES });
         policyCacheExpiry = Date.now() + POLICY_TTL_MS;
         return cachedPolicies;
       }
@@ -361,7 +398,14 @@ export async function getSecurityPolicies(): Promise<Record<DetectionType, Polic
         }
       }
       if (sawAny) {
-        cachedPolicies = merged;
+        // MANDATORY CONNECTION FLOOR (see securityStateModel): whatever the
+        // server rows say, vpn/proxy resolve to at least block_login. This is
+        // the client half of the fix for the reported iOS bypass — a
+        // `warn_only` (or disabled) vpn/proxy row can no longer turn a
+        // confirmed VPN into a dismissible "Continue Anyway" warning. The
+        // server serves the same floor, so this only closes the gaps created
+        // by an older client, an offline launch, or a stale cache.
+        cachedPolicies = applyMandatoryConnectionFloor(merged);
         policyCacheExpiry = Date.now() + POLICY_TTL_MS;
         return cachedPolicies;
       }
@@ -369,7 +413,7 @@ export async function getSecurityPolicies(): Promise<Record<DetectionType, Polic
   } catch {
     // Server unreachable → keep fail-secure defaults below
   }
-  cachedPolicies = { ...DEFAULT_POLICIES };
+  cachedPolicies = applyMandatoryConnectionFloor({ ...DEFAULT_POLICIES });
   policyCacheExpiry = Date.now() + POLICY_TTL_MS;
   return cachedPolicies;
 }
@@ -506,6 +550,23 @@ async function detectRootJailbreak(): Promise<SecurityThreat | null> {
  * allowed corporate VPNs — skip detection entirely (we cannot match by name on either
  * platform without a Network Extension entitlement).
  */
+/**
+ * WHICH iOS VPN signal path the LAST check used (see SecurityEvidence).
+ * 'unavailable' means no measurement was possible. Only an iOS-side value:
+ * Android's VPN decision comes from the native security-flag batch.
+ */
+let lastVpnSignalPath: VpnSignalPath | null = null;
+
+/**
+ * Evidence-only finding for a connection detector that could not run its
+ * authoritative signal path. Weight 0, mapped to no policy bucket → it can
+ * never block or warn; it exists so "we could not verify" is auditable instead
+ * of being reported as a clean device.
+ */
+function vpnDetectionDegradedThreat(detail: string): SecurityThreat {
+  return { type: VPN_SIGNAL_DEGRADED_EVENT, detectionMethod: detail, detected: true };
+}
+
 async function detectVPN(): Promise<SecurityThreat | null> {
   try {
     if (process.env.EXPO_OS === 'web') return null;
@@ -523,18 +584,40 @@ async function detectVPN(): Promise<SecurityThreat | null> {
       // Diagnostic: always log on iOS so false-positive investigations have evidence.
       // iOS path: native IOSSecurityModule.checkVPNSafe() (NWPath gate + getifaddrs IFF_UP gate).
       // JS fallback (detectVPNviaNetInfo) only runs when native module is null.
+      //
+      // HONESTY FIX: the fallback path is NOT equivalent to the native one (it
+      // only sees NetInfo type==='vpn', so it provably misses WireGuard/
+      // OpenVPN/Tailscale/WARP). It used to look identical to a verified-clean
+      // result. The signal path is now recorded on every iOS check and a
+      // degraded signal is REPORTED as evidence (weight 0, never blocking) so
+      // "could not verify" is never presented as "verified clean".
+      lastVpnSignalPath = getIosVpnSignalPath();
       console.log('[SecurityCheck][VPN] iOS: invoking isNativeVPNDetected…',
         '| detector=IOSSecurityModule.checkVPNSafe (two-gate: NWPath+getifaddrs)',
-        '| fallback=NetInfo type===vpn only');
+        '| fallback=NetInfo type===vpn only',
+        '| signalPath=', lastVpnSignalPath);
       const vpn = await isNativeVPNDetected();
       console.log('[SecurityCheck][VPN] iOS: raw result =', vpn,
         '| decision =', vpn ? '🔴 BLOCK (VPN active)' : '✅ PASS (no VPN)');
-      if (!vpn) return null;
-      return {
-        type: 'vpn_detected',
-        detectionMethod: 'VPN Connection detected',
-        detected: true,
-      };
+      if (vpn) {
+        return {
+          type: 'vpn_detected',
+          detectionMethod: 'VPN Connection detected',
+          detected: true,
+        };
+      }
+      if (lastVpnSignalPath !== 'native') {
+        // No VPN observed, but not by the authoritative signal: report the
+        // coverage gap instead of a clean verdict. Never a block (a degraded
+        // heuristic must not lock anyone out) — the policy layer treats this
+        // event as unmapped/log_only.
+        return vpnDetectionDegradedThreat(
+          lastVpnSignalPath === 'unavailable'
+            ? 'VPN check could not run on this device (no native tunnel signal available) — result is NOT a verified clean state'
+            : 'VPN check ran on the weak NetInfo fallback (native tunnel probe unavailable) — packet-tunnel VPNs may be missed; result is NOT a verified clean state',
+        );
+      }
+      return null;
     }
 
     // Android — native SecurityModule: ConnectivityManager TRANSPORT_VPN +
@@ -596,6 +679,13 @@ async function detectVPN(): Promise<SecurityThreat | null> {
   } catch (e) {
     if (__DEV__) {
       console.log('[SecurityCheck][VPN] exception:', e);
+    }
+    // A thrown VPN probe is NOT a clean device. On iOS report the coverage gap
+    // as evidence (weight 0, non-blocking) instead of silently returning null;
+    // Android keeps its existing native-unavailable telemetry path.
+    if (process.env.EXPO_OS === 'ios') {
+      lastVpnSignalPath = 'unavailable';
+      return vpnDetectionDegradedThreat('VPN check threw on this device — result is NOT a verified clean state');
     }
     return null;
   }
@@ -1646,7 +1736,14 @@ export async function runSecurityChecks(): Promise<SecurityCheckResult> {
     // detector this cycle) so the check always completes and the mutex below
     // (SecurityContext checkRef) is always released.
     withTimeout(detectRootJailbreak(),        DETECTOR_TIMEOUT_MS, () => null),
-    withTimeout(detectVPN(),                  DETECTOR_TIMEOUT_MS, () => null),
+    withTimeout(detectVPN(),                  DETECTOR_TIMEOUT_MS, () => vpnDetectionDegradedThreat(
+      // A timed-out VPN probe is a coverage gap, not a clean device. The
+      // fallback value keeps that distinction visible on iOS; on other
+      // platforms the Android/Play-Integrity unavailable telemetry applies.
+      process.env.EXPO_OS === 'ios'
+        ? 'VPN check timed out on this device — result is NOT a verified clean state'
+        : 'VPN check timed out — result is NOT a verified clean state'
+    )),
     withTimeout(detectProxy(),                DETECTOR_TIMEOUT_MS, () => null),
     withTimeout(detectDebug(),                DETECTOR_TIMEOUT_MS, () => null),
     withTimeout(detectDeveloperOptions(),     DETECTOR_TIMEOUT_MS, () => null),
@@ -1691,6 +1788,8 @@ export async function runSecurityChecks(): Promise<SecurityCheckResult> {
   // Distinguishes "verified" from "unavailable" and carries distribution
   // telemetry so the backend can audit evidence quality per event.
   const evidence: SecurityEvidence = {
+    // WHICH iOS VPN signal produced this check (see SecurityEvidence doc).
+    vpnSignalPath:           process.env.EXPO_OS === 'ios' ? lastVpnSignalPath : null,
     installerSource:         rawFlags?.installerSource ?? undefined,
     expectedCertConfigured:  rawFlags?.expectedCertConfigured ?? false,
     signatureSha256:         rawFlags?.signatureSha256 ?? undefined,
@@ -1795,6 +1894,10 @@ export async function logThreats(
         installer_source:           evidence?.installerSource ?? null,
         overlay_capable_apps_count: evidence?.overlayCapableAppsCount ?? null,
         detection_unavailable:      evidence?.detectionUnavailable ?? false,
+        // WHICH iOS VPN signal path produced this check ('native' /
+        // 'netinfo-fallback' / 'unavailable', null elsewhere) — lets the
+        // backend tell a measured-clean VPN state apart from a coverage gap.
+        vpn_signal_path:            evidence?.vpnSignalPath ?? null,
       },
     };
   });

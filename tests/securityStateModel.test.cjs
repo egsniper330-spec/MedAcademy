@@ -41,8 +41,10 @@ const model = requireStateModel('securityStateModel.js');
 
 const DEFAULT_POLICIES = {
   root_jailbreak: 'block_login',
+  // MANDATORY CONNECTION BLOCK: both connection detectors are block_login in
+  // the shipped defaults (see docs/VPN_PROXY_MANDATORY_BLOCK.md).
   vpn: 'block_login',
-  proxy: 'warn_only',
+  proxy: 'block_login',
   ssl_pinning: 'block_login',
   debug: 'block_login',
   developer_options: 'block_login',
@@ -202,10 +204,13 @@ test('10. BLOCKING finding with weight 0 → STILL BLOCKED (risk score never dec
 
 test('11. high risk score with only warn_only findings → NOT blocked', () => {
   // Inverse: score is informational; a warn_only finding never locks the app.
-  const v = evaluate([threat('proxy_detected', 'warn-path')]);
+  // (Uses the app_integrity bucket — a genuine warn_only policy — because the
+  // connection detectors are a MANDATORY block, covered in
+  // tests/vpnMandatoryBlock.test.cjs.)
+  const v = evaluate([threat('app_integrity_compromised', 'warn-path')]);
   assert.equal(v.hasWarnings, true);
   assert.equal(v.blocksLogin, false);
-  assert.equal(v.riskScore, 15);
+  assert.equal(v.riskScore, 20);
 });
 
 test('12. risk score clamps at 100', () => {

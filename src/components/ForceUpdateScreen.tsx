@@ -11,7 +11,7 @@
  * the integer versionCode comparison (authoritative) — never string compare.
  */
 
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Linking,
@@ -49,6 +49,13 @@ export default function ForceUpdateScreen(): React.JSX.Element {
   const [launching, setLaunching] = useState(false);
   const [launchError, setLaunchError] = useState<string | null>(null);
   const [checking, setChecking] = useState(false);
+
+  // UNMOUNT SAFETY: both handlers below await asynchronous work (opening the
+  // update URL, re-running the remote check) and the screen is unmounted the
+  // instant the verdict clears or the shell re-renders without a block. Without
+  // this guard a late resolution would call setState on an unmounted component.
+  const mountedRef = useRef(true);
+  useEffect(() => () => { mountedRef.current = false; }, []);
 
   const required = update.verdict === 'UPDATE_REQUIRED';
   const forced = update.mode === 'FORCED';
@@ -95,14 +102,18 @@ export default function ForceUpdateScreen(): React.JSX.Element {
     setLaunching(true);
     setLaunchError(null);
     const r = await update.openUpdateUrl();
+    if (!mountedRef.current) return;
     if (!r.ok) setLaunchError(r.error ?? 'Could not open the update link.');
     setLaunching(false);
   };
 
   const onManualRecheck = async (): Promise<void> => {
     setChecking(true);
-    await update.recheck();
-    setChecking(false);
+    try {
+      await update.recheck();
+    } finally {
+      if (mountedRef.current) setChecking(false);
+    }
   };
 
   return (

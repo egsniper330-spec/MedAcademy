@@ -40,7 +40,13 @@ import { backendApiBase } from '@/client/php';
 import { getInstalledBuildNumber as getNativeBuildNumber, getInstalledVersionName as getNativeVersionName, getAppPlatform } from './appIdentity';
 // PURE verdict model (no react-native/expo imports) — the versionCode
 // comparison is delegated there so it is unit-testable with plain node.
-import { evaluateUpdateVerdict, evaluateOfflineUpdatePolicy } from './securityStateModel';
+import {
+  evaluateUpdateVerdict,
+  evaluateOfflineUpdatePolicy,
+  resolveUpdateGateDecision,
+  updateGateBlocks,
+  type UpdateGateDecision,
+} from './securityStateModel';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import NetInfo from '@react-native-community/netinfo';
 
@@ -131,6 +137,10 @@ export function subscribeUpdateState(l: Listener): () => void {
  * Called by the apiFetch interceptor when the server rejects a request with
  * HTTP 426 UPDATE_REQUIRED. This is the authoritative server-side verdict —
  * it overrides any locally cached SUPPORTED state instantly.
+ *
+ * It also INVALIDATES any in-flight version check (see updateSeq): a response
+ * that was already on the wire when the server said 426 must never land
+ * afterwards and clear the authoritative verdict it already contradicted.
  */
 export function markServerUpdateRequired(meta: {
   latestVersion?: string;
@@ -139,6 +149,7 @@ export function markServerUpdateRequired(meta: {
   updateUrl?: string;
   updateMode?: string;
 }): void {
+  updateSeq += 1; // supersede every in-flight check (stale-response guard)
   setState({
     verdict: 'UPDATE_REQUIRED',
     evaluating: false,
@@ -209,7 +220,40 @@ export async function openUpdateUrl(url: string): Promise<{ ok: boolean; error?:
  *      - if UNKNOWN (first check of the process) → stay UNKNOWN; the gate
  *        keeps the fail-closed startup wall until a check succeeds.
  */
+/**
+ * Monotonic request generation. Every check records the generation it started
+ * in and may only publish its result while that generation is still current:
+ *   • markServerUpdateRequired() bumps it (an HTTP 426 supersedes a check that
+ *     was already in flight — the late "SUPPORTED" answer can no longer clear
+ *     an authoritative server verdict);
+ *   • a newer check supersedes an older one (out-of-order completions cannot
+ *     overwrite fresher state).
+ */
+let updateSeq = 0;
+/**
+ * In-flight check shared by every concurrent caller. Multiple triggers fire at
+ * the same moment in real life — cold start, app-state 'active', the offline
+ * transition hook, a screen unfurling its own re-check — and each used to open
+ * its own request. One shared promise means one request, one verdict, one set
+ * of listeners notified, and no competing responses to race.
+ */
+let updateCheckInFlight: Promise<UpdateState> | null = null;
+
 export async function checkAppUpdate(): Promise<UpdateState> {
+  if (updateCheckInFlight) return updateCheckInFlight;
+  const promise = runUpdateCheck();
+  updateCheckInFlight = promise;
+  try {
+    return await promise;
+  } finally {
+    // Only the promise that is still the shared one may clear the slot, so a
+    // superseded check can never un-deduplicate a newer request.
+    if (updateCheckInFlight === promise) updateCheckInFlight = null;
+  }
+}
+
+async function runUpdateCheck(): Promise<UpdateState> {
+  const mySeq = ++updateSeq;
   try {
     // Native platforms send explicit identity headers; on web the headers are
     // omitted (CORS allowlist on the deployed backend does not include them
@@ -220,6 +264,8 @@ export async function checkAppUpdate(): Promise<UpdateState> {
       method: 'GET',
       headers: nativeHeaders,
     });
+    // A superseded check must not publish anything (see updateSeq).
+    if (mySeq !== updateSeq) return state;
     if (res.error || !res.data) {
       // 404/405 = the endpoint does not exist on this backend build — an
       // EXPLICIT server answer meaning "update enforcement not deployed".
@@ -245,6 +291,7 @@ export async function checkAppUpdate(): Promise<UpdateState> {
     applyRemoteConfig(res.data);
     return state;
   } catch {
+    if (mySeq !== updateSeq) return state;
     if (state.verdict === 'UNKNOWN') {
       setState({ evaluating: true, usingCachedVerdict: true });
     } else {
@@ -252,6 +299,28 @@ export async function checkAppUpdate(): Promise<UpdateState> {
     }
     return state;
   }
+}
+
+/**
+ * The single authoritative decision consumed by BOTH gates (root and the
+ * authenticated shell): does the surface about to render have to wait for / be
+ * replaced by the update state?
+ *
+ * Pure delegation to securityStateModel.resolveUpdateGateDecision — the whole
+ * point of the split is that a NON-protected surface (splash, sign-in, auth
+ * screens) is never gated by the version check: the check is a background
+ * request there.
+ */
+export function getUpdateGateDecision(protectedSurface: boolean): UpdateGateDecision {
+  return resolveUpdateGateDecision({
+    verdict: state.verdict,
+    evaluating: state.evaluating,
+    protectedSurface,
+  });
+}
+
+export function isProtectedSurfaceBlocked(protectedSurface: boolean): boolean {
+  return updateGateBlocks(getUpdateGateDecision(protectedSurface));
 }
 
 /**
@@ -417,10 +486,32 @@ export async function applyCachedUpdatePolicyOffline(): Promise<void> {
           lastCheckedAt: null,
         });
       }
+    } else if (decision.reason === 'cached_supported' && state.verdict === 'UNKNOWN' && state.evaluating) {
+      // CACHED SUPPORTED FOR *THIS* BUILD → resolve the pending state now.
+      //
+      // WHY: the cached entry is an explicit, server-issued verdict for the very
+      // build that is installed, written at most CACHED_UPDATE_MAX_AGE_MS ago
+      // (14 days) and discarded the moment the installed build changes. Without
+      // this, an update-to-date signed-in user still had to watch the
+      // "Checking for updates" wall until the network answered — the exact
+      // startup delay this change removes.
+      //
+      // This does NOT weaken enforcement: the live check still runs immediately
+      // afterwards and OVERWRITES this verdict (SUPPORTED or UPDATE_REQUIRED),
+      // and the server-side HTTP 426 gate remains the real boundary for every
+      // protected call. The fail-closed direction is untouched — a cached
+      // UPDATE_REQUIRED is still honored above, and no cache at all still leaves
+      // the protected shell waiting for the live answer.
+      setState({
+        verdict: 'SUPPORTED',
+        evaluating: false,
+        usingCachedVerdict: true,
+        lastCheckedAt: null,
+      });
     }
-    // cached SUPPORTED → nothing to do: the online check will confirm; while
-    // unreachable, the existing in-memory fail policy keeps the app usable
-    // and the server 426 gate stays the boundary.
+    // No cache at all → the armed offline probe + the live check decide (see
+    // armOfflineStartupProbe): no cached policy means we cannot assume either
+    // direction.
   } catch { /* unreadable cache → normal online flow */ } finally {
     // A completed live check (or any verdict) retires the probe.
     if (probeOffline && state.verdict !== 'UNKNOWN') probeOffline();

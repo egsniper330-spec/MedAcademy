@@ -56,7 +56,7 @@
  */
 
 import React, { useEffect, useRef, useState } from 'react';
-import { View, Text, StyleSheet, BackHandler, ActivityIndicator, Pressable, useColorScheme, ScrollView } from 'react-native';
+import { View, Text, StyleSheet, BackHandler, ActivityIndicator, Pressable, useColorScheme, ScrollView, Platform } from 'react-native';
 import * as ScreenCaptureLib from '@/lib/screenCaptureGuard';
 import { ShieldAlert, WifiOff, Eye } from 'lucide-react-native';
 import { neuColors, useLayout } from '@/lib/neu';
@@ -66,6 +66,9 @@ import {
   isGateBlocked,
   isGateRecheckable,
   resolveFindingCopyKey,
+  isConnectionFinding,
+  connectionBlockInstructions,
+  VPN_WARNING_COPY,
   OVERLAY_WARNING_COPY,
 } from '@/lib/securityStateModel';
 
@@ -76,7 +79,12 @@ import {
  * and so multiple simultaneous findings can be enumerated on ONE page.
  */
 const GATE_EVENT_COPY: Record<string, { title: string; instruction: string }> = {
-  vpn_detected:               { title: 'VPN Connection Detected',     instruction: 'Turn off your VPN or proxy connection.' },
+  vpn_detected:               { title: 'VPN Connection Detected',     instruction: 'Turn off your VPN connection, then tap Verify.' },
+  // MANDATORY CONNECTION BLOCK (see applyMandatoryConnectionFloor): proxy is
+  // now a blocking detection bucket too, so it needs its own accurate copy —
+  // without it the gate fell back to the generic "Security Requirement Not
+  // Satisfied" row (accurate but unactionable).
+  proxy_detected:             { title: 'Proxy Connection Detected',   instruction: 'Turn off the proxy configured for your connection, then tap Verify.' },
   developer_options_enabled:  { title: 'Developer Options Enabled',   instruction: 'Open Settings → Developer options and turn Developer options off.' },
   adb_enabled:                { title: 'USB Debugging Enabled',       instruction: 'Open Settings → Developer options and turn USB debugging off.' },
   debugger_attached:          { title: 'Debugger Detected',           instruction: 'Detach the debugger connected to this app.' },
@@ -130,7 +138,7 @@ function gateFindings(keys: string[]): GateFinding[] {
     .map((type) => {
       const copy = GATE_EVENT_COPY[type];
       if (!copy) return null;
-      return { type, ...copy, icon: (type === 'vpn_detected' ? 'vpn' : 'shield') as GateFinding['icon'] };
+      return { type, ...copy, icon: (isConnectionFinding(type) ? 'vpn' : 'shield') as GateFinding['icon'] };
     })
     .filter((f): f is GateFinding => f !== null);
 
@@ -209,6 +217,15 @@ export function SecurityGate() {
   const blocking = isGateBlocked(gateState);
   const overlayBlocked = gateState === 'BLOCKED_OVERLAY';
   const resumeBlocked = gateState === 'BLOCKED_BACKGROUND_RESUME';
+  // A VPN/proxy block renders the MANDATORY connection page: it states the
+  // policy, tells the user exactly where to switch the VPN/proxy off (the app
+  // cannot do it for them — iOS exposes no API to stop another app's tunnel),
+  // and offers a re-verify control that can only clear the gate when a FRESH
+  // authoritative evaluation finds no connection finding. There is deliberately
+  // no dismiss, no "Continue Anyway" and no route around it (the gate is
+  // inline content above the whole authenticated Stack).
+  const vpnBlocked = gateState === 'BLOCKED_VPN';
+  const connectionSteps = vpnBlocked ? connectionBlockInstructions(Platform.OS) : [];
   // Only the two user-actionable causes offer a recheck control.
   const recheckable = isGateRecheckable(gateState);
   const types = liveBlocking ? liveCopyKeys : stickyTypes;
@@ -265,7 +282,9 @@ export function SecurityGate() {
         <View style={[styles.iconWrap, { backgroundColor: '#EF444418' }]}>
           {resumeBlocked
             ? <Eye size={layout.heroIconSize * 0.5} color="#EF4444" />
-            : <ShieldAlert size={layout.heroIconSize * 0.5} color="#EF4444" />}
+            : vpnBlocked
+              ? <WifiOff size={layout.heroIconSize * 0.5} color="#EF4444" />
+              : <ShieldAlert size={layout.heroIconSize * 0.5} color="#EF4444" />}
         </View>
         <Text
           style={[styles.title, { color: c.text, fontSize: layout.titleSize }]}
@@ -275,14 +294,18 @@ export function SecurityGate() {
             ? OVERLAY_WARNING_COPY.title.toUpperCase()
             : resumeBlocked
               ? 'VERIFYING YOUR SESSION'
-              : 'SECURITY BLOCK ACTIVE'}
+              : vpnBlocked
+                ? VPN_WARNING_COPY.title.toUpperCase()
+                : 'SECURITY BLOCK ACTIVE'}
         </Text>
         <Text style={[styles.subtitle, { color: `${c.text}CC`, fontSize: layout.bodySize }]}>
           {overlayBlocked
             ? OVERLAY_WARNING_COPY.message
             : resumeBlocked
               ? 'MedAcademy was in the background. Security is being re-verified before protected content is shown again.'
-              : 'Your device does not currently meet MedAcademy\u2019s security requirements.'}
+              : vpnBlocked
+                ? VPN_WARNING_COPY.message
+                : 'Your device does not currently meet MedAcademy\u2019s security requirements.'}
         </Text>
 
         {/* Detected issues — EVERY live finding on ONE page. Rendered only for
@@ -323,13 +346,49 @@ export function SecurityGate() {
           </>
         )}
 
-        {/* SAFE RECHECK — offered only for the user-actionable causes (an
-            overlay to close, a backgrounded session to re-verify). It REQUESTs
-            a recheck; it cannot force the gate open: the state clears only when
-            the platform reports the obscured signal gone AND a fresh security
-            evaluation passes (canClearOverlayBlock). Policy blocks (VPN /
-            violation) deliberately have no button — retrying cannot change a
-            device condition that has not changed. */}
+        {/* HOW TO TURN IT OFF — platform-specific, honest, actionable steps for
+            a VPN/proxy block. Required because the app CANNOT disable a
+            third-party VPN: iOS gives an app no API to stop a Network Extension
+            another app owns, so the instruction must be "do it yourself, then
+            return". */}
+        {connectionSteps.length > 0 && (
+          <>
+            <Text
+              style={[styles.sectionLabel, { color: `${c.text}80`, fontSize: layout.captionSize }]}
+              accessibilityRole="header"
+            >
+              HOW TO TURN IT OFF
+            </Text>
+            <View style={styles.findingsList}>
+              {connectionSteps.map((step, i) => (
+                <View key={step} style={[styles.findingRow, { borderColor: `${c.text}1F` }]}>
+                  <View style={[styles.findingIcon, { backgroundColor: '#EF444414' }]}>
+                    <Text style={{ color: '#EF4444', fontWeight: '800' }}>{i + 1}</Text>
+                  </View>
+                  <Text
+                    style={{
+                      flex: 1,
+                      color: `${c.text}CC`,
+                      fontSize: layout.captionSize + 1,
+                      lineHeight: (layout.captionSize + 1) * 1.45,
+                    }}
+                  >
+                    {step}
+                  </Text>
+                </View>
+              ))}
+            </View>
+          </>
+        )}
+
+        {/* SAFE RECHECK — offered for the causes the USER can actually remove: an
+            overlay to close, a backgrounded session to re-verify, or a VPN/proxy
+            to switch off. It only REQUESTs a recheck; it cannot force the gate
+            open — the state clears when a FRESH authoritative evaluation finds
+            no blocking finding (the native vpnStateChanged signal and every
+            foreground return also trigger that re-check automatically). A
+            generic integrity violation (root/tamper) still has no control:
+            retrying cannot change a device condition that has not changed. */}
         {recheckable && (
           <Pressable
             onPress={onVerify}
@@ -392,7 +451,9 @@ export function SecurityGate() {
               ? 'Protected content stays hidden while an overlay or another app may be interfering. Closing the interfering app and verifying security restores access.'
               : resumeBlocked
                 ? 'Access stays held for your protection until the post-resume security check finishes. It unlocks automatically when the check passes.'
-                : 'This app is locked for your protection. It unlocks automatically once all security issues are resolved.'}
+                : vpnBlocked
+                  ? 'MedAcademy cannot run while a VPN or proxy is active \u2014 protected content and playback stay closed. Access is restored automatically once the connection is clear and a fresh security check passes.'
+                  : 'This app is locked for your protection. It unlocks automatically once all security issues are resolved.'}
           </Text>
         </View>
       </ScrollView>

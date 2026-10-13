@@ -15,8 +15,10 @@ import {
   openUpdateUrl,
   getInstalledVersionName,
   getInstalledVersionCode,
+  getUpdateGateDecision,
   type UpdateState,
 } from '@/lib/updateConfigService';
+import type { UpdateGateDecision } from '@/lib/securityStateModel';
 
 export interface UseUpdateResult {
   verdict: UpdateState['verdict'];
@@ -32,6 +34,14 @@ export interface UseUpdateResult {
   releaseNotes: string | null;
   /** Convenience: forced gate active (no app access). */
   blocked: boolean;
+  /**
+   * The authoritative gate decision for the PROTECTED (authenticated) shell.
+   * 'pending'/'required' mean protected content must not render; the startup and
+   * sign-in surfaces are never gated (see resolveUpdateGateDecision).
+   */
+  protectedDecision: UpdateGateDecision;
+  /** True when the version check has not produced a verdict yet. */
+  pendingVerdict: boolean;
   /** Re-run the remote check now. */
   recheck: () => Promise<void>;
   /** Open the configured update destination externally. */
@@ -44,6 +54,11 @@ let dismissedThisSession = false;
 
 export function useUpdate(): UseUpdateResult {
   const state = useSyncExternalStore(subscribeUpdateState, getUpdateState, getUpdateState);
+
+  // Derived from the SAME store read this render is based on, so the decision
+  // can never lag the state it describes (no effect, no extra render).
+  const protectedDecision = getUpdateGateDecision(true);
+  const pendingVerdict = state.verdict === 'UNKNOWN' && state.evaluating;
 
   const optionalDismissed =
     state.verdict === 'UPDATE_REQUIRED' &&
@@ -63,6 +78,8 @@ export function useUpdate(): UseUpdateResult {
     updateUrl: state.updateUrl,
     releaseNotes: state.releaseNotes,
     blocked: state.verdict === 'UPDATE_REQUIRED' && !optionalDismissed,
+    protectedDecision,
+    pendingVerdict,
     recheck: async () => {
       void (await checkAppUpdate());
     },
