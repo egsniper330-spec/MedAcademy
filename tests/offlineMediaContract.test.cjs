@@ -36,9 +36,17 @@ section('D) Resolved VdoCipher Android SDK = 1.29.9');
 {
   const gradle = read('node_modules/vdocipher-rn-bridge/android/build.gradle');
   ok(gradle.includes('com.vdocipher.aegis:vdocipher-android:1.29.9'),
-    'bridge pins vdocipher-android 1.29.9 (6120/6122 reliability fixes)');
-  ok(!/resolutionStrategy|force\s/.test(read('android/build.gradle')),
-    'app gradle does not force/override a different version');
+    'bridge pins vdocipher-android 1.29.9 (6120/6122 reliability fixes)');    // android/build.gradle is PREBUILD OUTPUT, not source (this read used to
+    // throw an uncaught ENOENT on a clean checkout). No plugin-level equivalent
+    // exists, so a missing generated tree is a deliberate PREREQUISITE failure —
+    // never a silent skip, so the negative assertion keeps its gate.
+    const APP_GRADLE = 'android/build.gradle';
+    if (!fs.existsSync(path.join(ROOT, APP_GRADLE))) {
+      ok(false, `PREREQUISITE MISSING: ${APP_GRADLE} — the generated Android tree is not in this checkout. Run: npx expo prebuild -p android`);
+    } else {
+      ok(!/resolutionStrategy|force\s/.test(read(APP_GRADLE)),
+        'app gradle does not force/override a different version');
+    }
   const pkg = JSON.parse(read('package.json'));
   ok(pkg.dependencies['vdocipher-rn-bridge'] === '2.0.1', 'RN bridge 2.0.1 declared');
 }

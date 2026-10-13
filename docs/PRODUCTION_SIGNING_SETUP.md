@@ -137,6 +137,14 @@ static cases:
 node scripts/verify-signing-cases.mjs
 ```
 
+**Prerequisite — the generated Android tree.** Static cases C and D read
+`android/app/src/main/java/com/medacademy/security/SecurityModule.kt` and
+`android/app/build.gradle`. Those are `npx expo prebuild -p android` output and
+are **not committed**, so on a fresh checkout the script reports them as
+`FAIL — PREREQUISITE MISSING` (a deliberate red with the exact command to run;
+never a silent skip, so the gate stays fail-closed). Run the prebuild first, or
+run the script from a tree that already has one.
+
 Cases A (production-signed + pin → VALID) and B (archived debug-signed artifact
 → must FAIL the pin) are dynamic: they are reported as `SKIPPED` with a reason
 when the APK or the Android SDK is absent. Case B needs a debug-signed APK

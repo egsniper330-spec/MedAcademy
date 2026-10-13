@@ -317,6 +317,14 @@ rotation-survival manifest `configChanges`. Must stay green for every change
 to `VdoCipherPlayer*`, `OfflineVideoPlayer*`, `YouTubePlayer`, the lesson
 screen, or `VdoCipherService.php`.
 
+**Clean-checkout prerequisite:** the `configChanges` assertion reads
+`android/app/src/main/AndroidManifest.xml`, which is `npx expo prebuild -p android`
+output and is not committed. In a checkout without a generated `android/` tree
+this suite (like `offlineMediaContract` and `mockLocationDetection`) reports a
+single explicit `PREREQUISITE MISSING … Run: npx expo prebuild -p android`
+failure and exits 1 — a deliberate red, never a silent skip and never an
+uncaught `ENOENT`.
+
 ---
 
 ## BP-8 · Release build: "Gradle build daemon disappeared unexpectedly" — native memory exhaustion from two concurrent builds (daemon had been disabled)

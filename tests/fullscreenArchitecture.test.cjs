@@ -370,10 +370,18 @@ console.log('── No fake visual suppression of the old watermark ──');
 console.log('── Security surfaces untouched ──');
 {
   ok(exists('src/components/RecordingBlockedOverlay.tsx'), 'RecordingBlockedOverlay still present');
-  ok(exists('src/app/(app)/security-gate.tsx'), 'security-gate screen still present');
-  const manifest = read('android/app/src/main/AndroidManifest.xml');
-  ok(/configChanges=[^>]*orientation/.test(manifest) && /configChanges=[^>]*screenSize/.test(manifest),
-    'Android manifest: activity survives rotation (in-place fullscreen prerequisite)');
+  ok(exists('src/app/(app)/security-gate.tsx'), 'security-gate screen still present');    // android/ is PREBUILD OUTPUT, not source: on a clean checkout the tree is
+    // absent (this used to be an uncaught ENOENT). There is no plugin-level
+    // source of truth for MainActivity's configChanges, so the missing tree is
+    // reported as a deliberate PREREQUISITE failure — never a silent skip.
+    const MANIFEST = 'android/app/src/main/AndroidManifest.xml';
+    if (!exists(MANIFEST)) {
+      ok(false, `PREREQUISITE MISSING: ${MANIFEST} — the generated Android tree is not in this checkout. Run: npx expo prebuild -p android`);
+    } else {
+      const manifest = read(MANIFEST);
+      ok(/configChanges=[^>]*orientation/.test(manifest) && /configChanges=[^>]*screenSize/.test(manifest),
+        'Android manifest: activity survives rotation (in-place fullscreen prerequisite)');
+    }
   ok(/FLAG_SECURE|setFlags/.test(read('src/lib/nativeSecurity.ts') || '') ||
      exists('src/lib/nativeSecurity.ts'), 'native security lib present');
 }

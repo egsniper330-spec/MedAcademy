@@ -60,9 +60,29 @@ const negativeApks = [
 const pinFile    = 'android/app/expected-cert-sha256.local';
 const apksigner  = findApksigner();
 
+// ── generated-tree prerequisite ─────────────────────────────────────────────
+// Cases C and D read files that `npx expo prebuild -p android` GENERATES; they
+// are not committed. On a clean checkout those reads used to throw an uncaught
+// ENOENT, which told the operator nothing. A missing generated tree is a
+// PREREQUISITE problem: it is reported as a deliberate FAIL (never a silent
+// skip, so the release gate stays fail-closed) naming the exact command.
+const GENERATED = {
+  securityModule: 'android/app/src/main/java/com/medacademy/security/SecurityModule.kt',
+  appGradle: 'android/app/build.gradle',
+};
+const PREREQ_HINT = 'run: npx expo prebuild -p android (the generated android/ tree is not committed)';
+const generatedMissing = Object.entries(GENERATED)
+  .filter(([, p]) => !fs.existsSync(p))
+  .map(([k, p]) => `${k} (${p})`);
+/** Read a generated file, or null when the prebuild prerequisite is missing. */
+const genRead = (key) => (fs.existsSync(GENERATED[key]) ? fs.readFileSync(GENERATED[key], 'utf8') : null);
+
 const pin = (fs.existsSync(pinFile) ? fs.readFileSync(pinFile, 'utf8').trim() : '').toUpperCase();
 console.log('expected pin  :', pin || '(EMPTY on this machine)');
 console.log('apksigner     :', apksigner ? 'found' : 'NOT FOUND (dynamic cases will be skipped)');
+console.log('generated tree:', generatedMissing.length === 0
+  ? 'present (static cases C and D are measurable)'
+  : `MISSING — ${generatedMissing.join(', ')}; ${PREREQ_HINT}`);
 console.log('');
 
 // ── A / B: dynamic, need a built APK ────────────────────────────────────────
@@ -92,29 +112,34 @@ if (!apksigner) {
 
 // ── C: the pin-missing case is code-path proven (static) ────────────────────
 {
-  const kt = fs.readFileSync('android/app/src/main/java/com/medacademy/security/SecurityModule.kt', 'utf8');
+  const kt = genRead('securityModule');
   const js = fs.readFileSync('src/lib/security.ts', 'utf8');
-  const nativeSkips = kt.includes('if (expected.isEmpty()) return true');
-  const reportsUnavailable = kt.includes('r.putBoolean("expectedCertConfigured", expectedCertSha256().isNotEmpty())');
+  const nativeSkips = kt !== null && kt.includes('if (expected.isEmpty()) return true');
+  const reportsUnavailable = kt !== null && kt.includes('r.putBoolean("expectedCertConfigured", expectedCertSha256().isNotEmpty())');
   const jsIntegrityGuard  = js.includes('flags.expectedCertConfigured === true && flags.signatureValid === false');
   const jsTamperGuard     = /SIGNATURE_CHECK_READY && TRUSTED_CERTS\.length > 0 && buildPinnedCert/.test(js);
   record('C pin missing = UNAVAILABLE',
-    nativeSkips && reportsUnavailable && jsIntegrityGuard && jsTamperGuard
-      ? 'native skips + reports expectedCertConfigured=false; BOTH JS detectors require a build-time pin before accepting signatureValid — never "tampered"'
-      : 'FAIL — a skipped signature check can still be read as verified');
+    kt === null
+      ? `FAIL — PREREQUISITE MISSING: ${GENERATED.securityModule}; ${PREREQ_HINT}`
+      : nativeSkips && reportsUnavailable && jsIntegrityGuard && jsTamperGuard
+        ? 'native skips + reports expectedCertConfigured=false; BOTH JS detectors require a build-time pin before accepting signatureValid — never "tampered"'
+        : 'FAIL — a skipped signature check can still be read as verified');
 }
 
 // ── D: the pin must actually reach the build, and an empty pin must block ───
 {
   const plugin = fs.readFileSync('plugins/withProductionSigning.js', 'utf8');
-  const gradle = fs.readFileSync('android/app/build.gradle', 'utf8');
-  const injected = gradle.includes('buildConfigField "String", "EXPECTED_CERT_SHA256"');
-  const guarded  = gradle.includes('release cert-pin fail-closed guard')
+  const gradle = genRead('appGradle');
+  const injected = gradle !== null && gradle.includes('buildConfigField "String", "EXPECTED_CERT_SHA256"');
+  const guarded  = gradle !== null && gradle.includes('release cert-pin fail-closed guard')
     && gradle.includes('packageRelease') && gradle.includes('GradleException');
-  const sources  = ['expectedCertSha256', 'MEDA_EXPECTED_CERT_SHA256', 'expected-cert-sha256.local']
-    .every((s) => plugin.includes(s) && gradle.includes(s));
+  const sources  = gradle !== null
+    && ['expectedCertSha256', 'MEDA_EXPECTED_CERT_SHA256', 'expected-cert-sha256.local']
+      .every((s) => plugin.includes(s) && gradle.includes(s));
   record('D pin supply + fail-closed release',
-    injected && guarded && sources
+    gradle === null
+      ? `FAIL — PREREQUISITE MISSING: ${GENERATED.appGradle}; ${PREREQ_HINT}`
+      : injected && guarded && sources
       ? 'pin resolved from gradle property / env / expected-cert-sha256.local into BuildConfig; a release packaging task with an EMPTY pin throws GradleException'
       : `FAIL — injected=${injected} guarded=${guarded} allSourcesDocumented=${sources}`);
 }

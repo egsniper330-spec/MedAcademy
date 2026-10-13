@@ -15,7 +15,7 @@
  *     • GET /video/vdocipher-status exists, SA-gated, secret stays server-side
  *     • count from the live listing API (provider total or full pagination),
  *       never local DB rows; failures render unavailable + reason, not 0
- *     • webhook contract: real route /api/video/webhook, POST, HMAC
+ *     • webhook contract: real route /video/webhook, POST, HMAC
  *       X-VdoCipher-Signature, honest "dashboard could not be verified" text
  *     • Video Health + Video Monitor removed everywhere (routes, nav,
  *       wrappers, component, registry) without touching live infrastructure
@@ -117,8 +117,18 @@ console.log('\n── Video Settings: authoritative VdoCipher status ──');
   check(!/Apisecret \{\$this->video->/.test(vc.slice(vc.indexOf('vdocipherStatus'), vc.indexOf('public function assets'))) &&
     !/VDOCIPHER_API_SECRET/.test(vc.slice(vc.indexOf('vdocipherStatus'), vc.indexOf('public function assets'))),
     'no API secret handling inside the status endpoint (delegated to VdoCipherService)');
-  check(/'endpoint_url' => \$appUrl \. '\/api\/video\/webhook'/.test(vc),
-    'webhook URL derived from server APP_URL → https://api.medacademy.site/api/video/webhook (not eu.cc, not frontend-generated)');
+  // The advertised callback URL must be a path the router really dispatches.
+  // Router::match() is an anchored exact match, and the webhook is registered
+  // as POST /video/webhook — so `…/api/video/webhook` (the value this suite
+  // used to pin) is a 404: VdoCipher would post, nothing would handle it, and
+  // videos would sit unencoded-ready forever. Derived, not hardcoded, so the
+  // two files cannot drift apart again.
+  const advertised = vc.match(/'endpoint_url'\s*=>\s*\$appUrl\s*\.\s*'([^']+)'/);
+  check(!!advertised, 'vdocipherStatus advertises a webhook endpoint_url');
+  check(!!advertised && routes.includes(`post('${advertised[1]}'`),
+    `advertised webhook path (${advertised ? advertised[1] : 'none'}) is a registered POST route in routes/api.php`);
+  check(!/endpoint_url'\s*=>\s*\$appUrl\s*\.\s*'\/api\//.test(vc),
+    'the advertised webhook URL is not the unreachable /api/video/webhook form');
   check(/X-VdoCipher-Signature/.test(vc) && /secret_configured/.test(vc) &&
     /could not be verified automatically/.test(vc),
     'webhook card: HMAC header, secret-configured flag, honest dashboard-verification statement');
