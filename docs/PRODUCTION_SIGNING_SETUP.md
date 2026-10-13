@@ -47,11 +47,28 @@ MEDA_UPLOAD_KEY_PASSWORD=<secret>
 - `plugins/withProductionSigning.js` (registered in `app.json`) — re-applies the
   same configuration on every Expo prebuild so `/android` regeneration can never
   silently regress to debug signing.
-- `EXPECTED_CERT_SHA256` is injected into the **release BuildConfig** from
-  `android/app/expected-cert-sha256.local` (gitignored, public fingerprint only)
-  or `MEDA_EXPECTED_CERT_SHA256`. `SecurityModule.checkSignatureValid()` compares
-  the runtime signing cert against it — this is the client-side integrity
-  bootstrap pin that works before/without server config.
+- `EXPECTED_CERT_SHA256` is injected into BuildConfig by
+  `plugins/withProductionSigning.js`, resolved at Gradle-configuration time in
+  this order:
+  1. Gradle property — `-PexpectedCertSha256=<64-hex>`
+  2. Environment variable — `MEDA_EXPECTED_CERT_SHA256`
+  3. `android/app/expected-cert-sha256.local` (gitignored, public fingerprint
+     only; written by `scripts/set-production-cert-sha256.mjs`)
+
+  It goes into `defaultConfig` (NOT the release buildType) because
+  `SecurityModule.expectedCertSha256()` uses a direct static reference to
+  `com.medacademy.app.BuildConfig.EXPECTED_CERT_SHA256`, which must compile in
+  debug builds too. `checkSignatureValid()` compares the runtime signing cert
+  against it — the client-side integrity bootstrap pin that works
+  before/without server config.
+- **Fail-closed release guard** — a release packaging task (`packageRelease` /
+  `assembleRelease` / `bundleRelease` / `installRelease`) **fails with a
+  `GradleException`** when the resolved pin is empty. Rationale: with an empty
+  pin `checkSignatureValid()` returns `true` having compared *nothing*, so the
+  release would ship with signature verification silently disabled while still
+  looking "valid". Same posture as `signingConfigs.release`, which has no
+  debug-keystore fallback. The guard is task-graph aware, so `assembleDebug`
+  still works on a machine that has never generated the pin.
 
 ## Backend trust (authoritative)
 
@@ -91,18 +108,64 @@ Never edit `expected-cert-sha256.local` by hand. After any (discouraged) key
 change: `node scripts/set-production-cert-sha256.mjs` → rebuild → update the
 backend pin (append, don't replace, if old installs must still update).
 
+## When the pin is missing (UNAVAILABLE, never "tampered")
+
+Two independent layers keep a missing pin from being mistaken for a *passed*
+check:
+
+1. **Native** — `checkSignatureValid()` returns `true` when the pin is empty
+   (skip), and `getSecurityFlags()` publishes
+   `expectedCertConfigured = EXPECTED_CERT_SHA256.isNotEmpty()`. A consumer can
+   therefore always tell "verified against a pin" from "nothing to compare
+   against".
+2. **JS** — *both* integrity detectors (`detectAppIntegrity()` and
+   `detectTamper()`) require `expectedCertConfigured === true` before they will
+   accept `signatureValid` at all. Without that condition, a build with no pin
+   would have its unverified signature read as *verified* whenever the server
+   had `expected_cert_sha256s` configured. The state is reported as evidence
+   (`expected_cert_configured: false` on the security event) and never produces
+   `signature_invalid`.
+
+Build time closes the third gap: see the fail-closed release guard above.
+
 ## Verification commands
 
-```bash
-# Verify the actual APK (do not trust gradle output alone):
-~/AppData/Local/Android/Sdk/build-tools/37.0.0/apksigner.bat verify --verbose --print-certs \
-  android/app/build/outputs/apk/release/app-release.apk
+Run the case-verification script first — it needs no build and no SDK for its
+static cases:
 
-# Negative test — the archived debug-signed artifact must FAIL the pin:
-~/AppData/Local/Android/Sdk/build-tools/37.0.0/apksigner.bat verify --print-certs \
-  docs/artifacts/app-release-DEBUGSIGNED-archived.apk
+```bash
+node scripts/verify-signing-cases.mjs
+```
+
+Cases A (production-signed + pin → VALID) and B (archived debug-signed artifact
+→ must FAIL the pin) are dynamic: they are reported as `SKIPPED` with a reason
+when the APK or the Android SDK is absent. Case B needs a debug-signed APK
+archived to `docs/artifacts/app-release-NEGATIVE-debug-signed.apk`.
+
+Direct APK check (do not trust Gradle output alone):
+
+```bash
+$ANDROID_HOME/build-tools/<version>/apksigner.bat verify --verbose --print-certs \
+  android/app/build/outputs/apk/release/app-release.apk
 ```
 
 Expected production result: `Verifies`, DN `CN=MedAcademy Production…`,
 SHA-256 `62e8539c…f3784` (lowercase in apksigner output; pins are case-insensitive
 in the codebase — both sides uppercase before comparison).
+
+Confirm which pin the build actually baked in:
+
+```bash
+unzip -p android/app/build/outputs/apk/release/app-release.apk classes.dex \
+  | strings | grep -i 62e8539c
+```
+
+Confirm the guard resolves the pin the same way BuildConfig does (no build):
+
+```bash
+grep -n "release cert-pin fail-closed guard" -A 20 android/app/build.gradle
+```
+
+Never read, copy or print the keystore password. `scripts/set-production-cert-sha256.mjs`
+reads it from `~/.medacademy/release-keystore.password` and only ever writes the
+PUBLIC fingerprint.

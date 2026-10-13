@@ -2,6 +2,15 @@
 
 declare(strict_types=1);
 
+// CLI-ONLY GUARD — this is the backend regression harness (it creates and
+// deletes disposable @test.invalid accounts). It must never be reachable over
+// HTTP; some hosts use the app root as the document root, which would expose
+// backend/scripts/* to anonymous requests. Same guard as the sibling scripts.
+if (PHP_SAPI !== 'cli') {
+    http_response_code(403);
+    exit('CLI only');
+}
+
 /**
  * backend/scripts/regression-test.php
  *

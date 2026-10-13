@@ -1,5 +1,12 @@
 # FINAL PRODUCTION CUTOVER AUDIT
 
+> **Historical record.** This audit captures the state on the date below. The
+> production API host has since been confirmed as **`api.medacademy.site`** (see
+> `backend/NAMECHEAP_DEPLOYMENT.md` for the live runbook). The
+> `api.medacademy.eu.cc` values used throughout are preserved verbatim because
+> they are the environment that was actually exercised at the time; no current
+> runtime configuration reads them.
+
 **Date:** 2026-08-24
 **Target:** `https://api.medacademy.eu.cc/backend/public/index.php` (cPanel / Namecheap)
 **Status:** **NOT READY** — 2 CRITICAL deployment items pending (see §M), 0 unresolvable blockers

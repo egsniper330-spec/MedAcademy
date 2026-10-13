@@ -46,7 +46,7 @@ const _aliveCheckTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
 /**
  * Initialize notification channels and handler.
- * Must be called once during app startup (from _layout_app.tsx or similar).
+ * Must be called once during app startup (from the root layout, src/app/_layout.tsx).
  */
 export async function initializeBackgroundUploadNotifications(): Promise<void> {
   if (_initialized) return;

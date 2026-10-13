@@ -150,7 +150,18 @@ ok(
 
 // ── F. Verdict semantics (pure model, unchanged contracts) ────────────────────
 console.log('\nF. Verdict semantics preserved');
-const model = require('../.freebuff/state-build/securityStateModel.js');
+/** Compiled state model — scripts/state-build/ (npm run test:state), with the
+ *  legacy .freebuff/state-build/ location still honoured. */
+function requireStateModel(name) {
+  const path = require('node:path');
+  const fs = require('node:fs');
+  for (const dir of ['scripts/state-build', '.freebuff/state-build']) {
+    const p = path.join(__dirname, '..', dir, name);
+    if (fs.existsSync(p)) return require(p);
+  }
+  throw new Error(`compiled state model not found: ${name} — run: npm run test:state`);
+}
+const model = requireStateModel('securityStateModel.js');
 ok(model.evaluateUpdateVerdict({ enabled: true, minimumVersionCode: 250, installedVersionCode: 212 }).verdict === 'UPDATE_REQUIRED',
   'installed 212 < minimum 250 → UPDATE_REQUIRED');
 ok(model.evaluateUpdateVerdict({ enabled: true, minimumVersionCode: 250, installedVersionCode: 250 }).verdict === 'SUPPORTED',

@@ -65,6 +65,7 @@ import {
   nextStickyTypes,
   isGateBlocked,
   isGateRecheckable,
+  resolveFindingCopyKey,
   OVERLAY_WARNING_COPY,
 } from '@/lib/securityStateModel';
 
@@ -80,6 +81,16 @@ const GATE_EVENT_COPY: Record<string, { title: string; instruction: string }> = 
   adb_enabled:                { title: 'USB Debugging Enabled',       instruction: 'Open Settings → Developer options and turn USB debugging off.' },
   debugger_attached:          { title: 'Debugger Detected',           instruction: 'Detach the debugger connected to this app.' },
   debug_detected:             { title: 'Insecure Build Detected',     instruction: 'Install the official production release of the app.' },
+  // ── Derived from `debug_detected` by resolveFindingCopyKey ────────────────
+  // SAME event type, SAME risk weight (20) and SAME block decision — but the
+  // detected condition is a DEVICE STATE, not an insecure installation. These
+  // two keys exist because the shared copy above asserted "Insecure Build
+  // Detected / Install the official production release of the app." for them,
+  // which contradicts what the engine measured and cannot be acted on (a
+  // reinstall never clears a mock-location setting or an emulator). See
+  // resolveFindingCopyKey in src/lib/securityStateModel.ts.
+  mock_location_detected:     { title: 'Mock Location Detected',      instruction: 'Turn off mock location: Developer options \u2192 Select mock location app \u2192 None, then reopen the app.' },
+  virtual_device_detected:    { title: 'Unsupported Device Detected', instruction: 'This app cannot run on an emulator or virtual device. Install it on a physical Android device.' },
   root_detected:              { title: 'Root Access Detected',        instruction: 'Root access was detected on this device. Contact support for assistance.' },
   jailbreak_detected:         { title: 'Jailbreak Detected',          instruction: 'Jailbreak access was detected on this device. Contact support for assistance.' },
   frida_detected:             { title: 'Tampering Framework Detected', instruction: 'Remove the code-injection framework from this device.' },
@@ -110,9 +121,12 @@ interface GateFinding {
  * Builds the finding list rendered on the page. EVERY live blocking event is
  * listed (BUG #3C — multiple issues on ONE page, no queued dialogs); unknown
  * event types get an explicit generic row instead of vanishing.
+ *
+ * `keys` are COPY KEYS (resolveFindingCopyKey), not raw event types — the same
+ * event type can describe different conditions (see GATE_EVENT_COPY).
  */
-function gateFindings(types: string[]): GateFinding[] {
-  const matched = types
+function gateFindings(keys: string[]): GateFinding[] {
+  const matched = keys
     .map((type) => {
       const copy = GATE_EVENT_COPY[type];
       if (!copy) return null;
@@ -151,10 +165,15 @@ export function SecurityGate() {
   // flashes a temporary all-clear.
   const gateTypesRef = useRef<string[]>([]);
   const liveBlocking = blocksLogin && threats.length > 0;
+  // Findings travel as COPY KEYS, not raw event types: three unrelated
+  // conditions share `debug_detected` (see resolveFindingCopyKey), so the label
+  // must come from the engine's own detectionMethod. The block, the policy and
+  // the risk weight are unchanged — only the rendered description is corrected.
+  const liveCopyKeys = threats.map((t) => resolveFindingCopyKey(t.type, t.detectionMethod));
   const stickyTypes = nextStickyTypes(gateTypesRef.current, {
     checking:        checking || evaluating,
     liveBlocking,
-    liveThreatTypes: threats.map((t) => t.type),
+    liveThreatTypes: liveCopyKeys,
   });
   gateTypesRef.current = stickyTypes;
 
@@ -166,7 +185,7 @@ export function SecurityGate() {
     if (!onNewBlockingThreat) return;
     const unsub = onNewBlockingThreat((result) => {
       if (result.blocksLogin && result.threats.length > 0) {
-        gateTypesRef.current = result.threats.map((t) => t.type);
+        gateTypesRef.current = result.threats.map((t) => resolveFindingCopyKey(t.type, t.detectionMethod));
       }
     });
     return () => unsub?.();
@@ -192,7 +211,7 @@ export function SecurityGate() {
   const resumeBlocked = gateState === 'BLOCKED_BACKGROUND_RESUME';
   // Only the two user-actionable causes offer a recheck control.
   const recheckable = isGateRecheckable(gateState);
-  const types = liveBlocking ? threats.map((t) => t.type) : stickyTypes;
+  const types = liveBlocking ? liveCopyKeys : stickyTypes;
   // Overlay / resume states carry their own dedicated copy — listing policy
   // findings would be misleading when the cause is not a policy finding.
   const findings = overlayBlocked || resumeBlocked ? [] : gateFindings(types);

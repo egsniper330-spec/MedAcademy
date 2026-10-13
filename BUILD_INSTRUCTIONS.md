@@ -4,6 +4,11 @@ This archive contains a fully pre-built Expo project with generated `android/` a
 native directories. All Expo config plugins have already been executed. You can open the
 projects directly in Android Studio and Xcode without running `expo prebuild` again.
 
+> **Building the Android release APK on Windows?** Follow
+> [`docs/ANDROID_BUILD_WINDOWS.md`](docs/ANDROID_BUILD_WINDOWS.md) — pinned JDK/Gradle
+> toolchain and memory-safety rules (read BP-8 in `docs/build-troubleshooting.md`
+> before touching `gradle.properties` memory/daemon settings).
+
 ---
 
 ## Required Tool Versions

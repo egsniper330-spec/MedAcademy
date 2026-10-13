@@ -211,7 +211,25 @@ check(
 // The iOS client must treat an unavailable verifier as "skip", never as "pass".
 const securityTs = fs.readFileSync(path.join(REPO, 'src', 'lib', 'security.ts'), 'utf8');
 check('D2: iOS assertion verification requires an explicit passed===true', /verifyData\?\.passed\s*===\s*true/.test(securityTs));
-check('D2: a verify error is non-blocking (skip), never a pass', /if\s*\(verifyErr\)\s*return null;/.test(securityTs));
+// Both integrity flows (Android Play Integrity, iOS App Attest) must treat a
+// verify error as a NON-BLOCKING, NON-PASS outcome. This pins the SEMANTICS
+// rather than one literal line: every `if (verifyErr)` branch has to classify
+// the error and exit with a null-ish (non-blocking) result. It covers BOTH
+// flows — the previous single-line pattern only matched one of them.
+check(
+  'D2: a verify error is non-blocking (skip), never a pass',
+  (securityTs.match(
+    /if \(verifyErr\) \{[\s\S]{0,300}?classifyIntegrityError\(verifyErr,[\s\S]{0,200}?return (?:null|finishUnverified\(\));/g,
+  ) || []).length >= 2,
+);
+check(
+  'D2: no verify-error branch records a pass',
+  !/if \(verifyErr\) \{[\s\S]{0,250}?'passed'/.test(securityTs),
+);
+check(
+  'D2: the unverified exit is typed to return null (cannot return a threat)',
+  /const finishUnverified = \(\): null => \{/.test(securityTs),
+);
 check('D2: DeviceCheck token path also requires an explicit passed===true', /dcData\?\.passed\s*===\s*true/.test(securityTs));
 
 // ═══════════════════════════════════════════════════════════════════════════

@@ -10,7 +10,7 @@ import { backendClient } from '@/client/backendClient';
 import { getUniversities, getFaculties, getAcademicLevels } from '@/lib/api';
 import { NeuCard } from '@/components/NeuCard';
 import { NeuButton } from '@/components/NeuButton';
-import { neuColors, useLayout, safeTop, safeBottom, mutedTextStyle } from '@/lib/neu';
+import { neuColors, useLayout, safeBottom, mutedTextStyle } from '@/lib/neu';
 import { normalizePhoneE164 } from '@/lib/identifier';
 import { useBranding } from '@/lib/branding';
 import { COUNTRIES, DEFAULT_COUNTRY, buildE164, validateNationalNumber, type Country } from '@/lib/phone';
@@ -442,9 +442,37 @@ export default function SignUp() {
       <ScrollView automaticallyAdjustKeyboardInsets={process.env.EXPO_OS === 'ios'}
         contentContainerStyle={{
           flexGrow: 1,
+          // ── Vertical centring (root-cause fix) ──────────────────────────
+          // `flexGrow: 1` alone stretches the content container to the full
+          // viewport but leaves its children pinned to the TOP of it. On any
+          // device where the form is shorter than the visible area — tall
+          // iPhones especially — the whole block therefore sat immediately
+          // under the status bar and all the slack collected BELOW it.
+          //
+          // Sign In has always carried `justifyContent: 'center'` here
+          // (see src/app/(auth)/sign-in.tsx); this screen simply never got it,
+          // so the two auth screens disagreed. Adding it makes the block
+          // centre in the free space while it fits, and once the content is
+          // TALLER than the viewport (small screens, landscape, or the keyboard
+          // open) the container grows to the content height, centring becomes
+          // a no-op, and the normal scroll path takes over — nothing is clipped
+          // and the Create Account button always stays reachable.
+          justifyContent: 'center',
           // screenPx: fluid horizontal gutter replaces hardcoded padding:24
           paddingHorizontal: layout.screenPx,
+          // Top safe area (status bar / notch / camera cutout). Applied as
+          // container padding, so centring always happens BELOW it — content
+          // can never slide under the status bar, on any device.
           paddingTop: layout.headerTop,
+          // Bottom safe area (iPhone home indicator; Android gesture and
+          // 3-button navigation). Without this the "Already have an account?"
+          // row finished only `pad.xl` (20 dp) from the edge — inside the
+          // home-indicator strip on iOS and behind the nav bar on Android —
+          // as soon as the content scrolled past the viewport.
+          // safeBottom() is the design-system rule for scroll containers, and
+          // unlike pageBottom/scrollBottom it deliberately excludes tab-bar
+          // clearance (auth screens have no tab bar).
+          paddingBottom: safeBottom(insets.bottom),
           gap: layout.pad.sm,
         }}
         keyboardShouldPersistTaps="handled"

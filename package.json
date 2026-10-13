@@ -8,14 +8,17 @@
     "ios": "expo run:ios",
     "web": "expo start --web",
     "lint": "eslint .",
-    "test:state": "node .freebuff/run-state-tests.cjs",
+    "test": "npm run test:state && node scripts/run-all-tests.cjs",
+    "test:all": "node scripts/run-all-tests.cjs",
+    "test:state": "node scripts/run-state-tests.cjs",
+    "lint:security-params": "node scripts/check-security-param-authority.js",
     "validate:kotlin": "node scripts/validate-kotlin-template.js",
     "validate:swift": "node scripts/validate-swift-source.js",
     "validate:native": "node scripts/validate-native-build.js",
     "validate": "node scripts/validate-all.js",
     "prebuild:validate": "node scripts/validate-all.js",
     "postinstall": "patch-package || true && node scripts/sync-android-version.js || true",
-    "test:offline": "node .freebuff/run-offline-tests.cjs"
+    "test:offline": "node scripts/run-state-tests.cjs offlineState.test.cjs offlinePipeline.test.cjs offlineEntitlement.test.cjs offlineMediaContract.test.cjs aboutOfflineUi.test.cjs"
   },
   "dependencies": {
     "@bottom-tabs/react-navigation": "^1.4.0",

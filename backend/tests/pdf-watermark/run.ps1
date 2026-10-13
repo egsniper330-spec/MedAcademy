@@ -125,15 +125,27 @@ function Get-RemoteFile([string]$Url, [string]$Dest, [string]$What) {
 
 function Test-PhpUsable([string]$Php) {
     $problems = @()
+    # NOTE: PHP code lives in single-quoted here-strings so the argument contains
+    # no double quotes (PowerShell 5.1 strips embedded double quotes when building
+    # the native command line).
+    $phpVerCheck = @'
+echo PHP_VERSION;
+'@
+    $phpExtCheck = @'
+$m = array(); foreach (array('gd', 'pdo_sqlite', 'mbstring') as $e) { if (!extension_loaded($e)) { $m[] = $e; } } if (!function_exists('imagettftext')) { $m[] = 'gd-FreeType'; } if (!function_exists('proc_open')) { $m[] = 'proc_open'; } elseif (in_array('proc_open', array_map('trim', explode(',', (string) ini_get('disable_functions'))))) { $m[] = 'proc_open-disabled'; } echo implode(',', $m);
+'@
+    $phpMemCheck = @'
+echo ini_get('memory_limit');
+'@
     try {
-        $v = & $Php -r 'echo PHP_VERSION;' 2>$null
-        if ($LASTEXITCODE -ne 0 -or -not $v) { return ,@('php cannot execute') }
+        $v = & $Php -r $phpVerCheck 2>$null
+        if ($LASTEXITCODE -ne 0 -or -not $v) { return @('php cannot execute') }
         $ver = ($v -join '').Trim()
         if ([version](($ver -split '-')[0]) -lt [version]'8.1.0') { $problems += "PHP $ver is too old (need >= 8.1)" }
-        $miss = & $Php -r '$m = []; foreach (["gd", "pdo_sqlite", "mbstring"] as $e) { if (!extension_loaded($e)) { $m[] = $e; } } if (!function_exists("imagettftext")) { $m[] = "gd-FreeType"; } if (!function_exists("proc_open")) { $m[] = "proc_open"; } elseif (in_array("proc_open", array_map("trim", explode(",", (string) ini_get("disable_functions"))))) { $m[] = "proc_open-disabled"; } echo implode(",", $m);' 2>$null
+        $miss = & $Php -r $phpExtCheck 2>$null
         $missStr = ($miss -join '').Trim()
         if ($missStr -ne '') { $problems += "missing/disabled: $missStr" }
-        $mem = & $Php -r 'echo ini_get("memory_limit");' 2>$null
+        $mem = & $Php -r $phpMemCheck 2>$null
         $memStr = ($mem -join '').Trim()
         if ($memStr -ne '' -and $memStr -ne '-1' -and $memStr -notmatch '^\s*\d+\s*G') {
             $num = [double]($memStr -replace '[^0-9.]', '')
@@ -144,7 +156,7 @@ function Test-PhpUsable([string]$Php) {
     } catch {
         $problems += "php failed to run: $($_.Exception.Message)"
     }
-    return ,($problems)
+    return $problems
 }
 
 # ── Clean state ──────────────────────────────────────────────────────────────

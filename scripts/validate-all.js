@@ -12,6 +12,9 @@
  *   2. Swift source validation       (validate-swift-source.js)
  *   3. Full native build validation  (validate-native-build.js)
  *      (covers plugins, ObjC headers, app.json, ProGuard, tsconfig, TS security)
+ *   4. Security param-authority guard (check-security-param-authority.js)
+ *      (fails if a screen derives a security finding, risk score or gate decision
+ *       from route params instead of the authoritative SecurityContext verdict)
  *
  * The orchestrator exits 0 only if ALL stages pass.
  * It always runs every stage (no short-circuit) so that all errors are reported
@@ -28,19 +31,24 @@ const NODE        = process.execPath;
 
 const STAGES = [
   {
-    id:     '1/3',
+    id:     '1/4',
     label:  'Kotlin Template Validation',
     script: path.join(SCRIPTS_DIR, 'validate-kotlin-template.js'),
   },
   {
-    id:     '2/3',
+    id:     '2/4',
     label:  'Swift Source Validation',
     script: path.join(SCRIPTS_DIR, 'validate-swift-source.js'),
   },
   {
-    id:     '3/3',
+    id:     '3/4',
     label:  'Full Native Build Validation (plugins, app.json, ProGuard, TS)',
     script: path.join(SCRIPTS_DIR, 'validate-native-build.js'),
+  },
+  {
+    id:     '4/4',
+    label:  'Security Param-Authority Guard (no security decision from route params)',
+    script: path.join(SCRIPTS_DIR, 'check-security-param-authority.js'),
   },
 ];
 

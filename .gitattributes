@@ -1,0 +1,42 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Line-ending policy — deterministic checkouts on every platform.
+#
+# Why this file exists (a reproduced defect, not cosmetics):
+#   Suites in tests/ read repository files and match multi-line string literals
+#   containing "\n" (e.g. tests/videoLibrarySync.test.cjs), and
+#   tests/brandIdentity.test.cjs compares generated assets byte-for-byte
+#   against the committed ones. With no .gitattributes and core.autocrlf=true,
+#   `git checkout` rewrites those files with CRLF on Windows, so the same commit
+#   that is green on a machine whose working tree kept LF FAILS on a fresh
+#   Windows checkout.
+#
+#   Reproduced: worktree 18,897 bytes (LF) vs checkout 19,266 bytes (CRLF) for
+#   backend/src/Services/VideoLibrarySyncService.php; the assertion
+#   includes("UPDATE lessons SET\n<indent>video_asset_id = NULL") then returns
+#   false. tests/brandIdentity.test.cjs fails on exactly the two SVG text
+#   assets for the same reason.
+#
+#   Every tracked text blob in this repository is already LF, so this file
+#   changes no file content — it only pins what a checkout produces.
+#
+# Policy: text files are LF in the repository and in the working tree.
+* text=auto eol=lf
+
+# Binary assets are never line-normalized (git's auto-detection covers most of
+# these already; listing them keeps the intent explicit).
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.webp binary
+*.ico binary
+*.ttf binary
+*.otf binary
+*.woff binary
+*.woff2 binary
+*.pdf binary
+*.mp4 binary
+*.zip binary
+*.jar binary
+*.keystore binary
+*.jks binary

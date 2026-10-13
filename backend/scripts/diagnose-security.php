@@ -2,6 +2,13 @@
 
 declare(strict_types=1);
 
+// CLI-ONLY GUARD — prints security_config/security_events metadata. It is
+// non-secret by design, but it is an operator tool, not an HTTP endpoint.
+if (PHP_SAPI !== 'cli') {
+    http_response_code(403);
+    exit('CLI only');
+}
+
 /**
  * backend/scripts/diagnose-security.php
  *

@@ -181,6 +181,81 @@ export function getNativeSecurityFlagsSync(): NativeSecurityFlags {
 }
 
 /**
+ * One real native round-trip. `measured:false` means the returned object is the
+ * fail-safe default, NOT a measurement.
+ */
+async function readNativeSecurityFlagsOnce(): Promise<{ flags: NativeSecurityFlags; measured: boolean }> {
+  if (Platform.OS === 'android') {
+    const mod = getModule();
+    if (!mod) {
+      console.warn('[NativeSecurity][Stage-2] ❌ Module is null — returning SAFE_FLAGS (detection UNAVAILABLE, not measured). Check native registration.');
+      return { flags: SAFE_FLAGS, measured: false };
+    }
+    try {
+      const flags = await mod.getSecurityFlags() as NativeSecurityFlags;
+      const merged = { ...SAFE_FLAGS, ...flags };
+      _lastMeasuredFlags = merged;
+      return { flags: merged, measured: true };
+    } catch (e) {
+      console.error('[NativeSecurity][Stage-2] ❌ getSecurityFlags() threw:', e, '— returning SAFE_FLAGS (detection UNAVAILABLE, not measured)');
+      return { flags: SAFE_FLAGS, measured: false };
+    }
+  }
+
+  if (Platform.OS === 'ios') {
+    const mod = getIOSModule();
+    if (!mod) {
+      console.warn('[NativeSecurity][Stage-2] ❌ iOS module null — returning SAFE_FLAGS (detection UNAVAILABLE)');
+      return { flags: SAFE_FLAGS, measured: false };
+    }
+    try {
+      const flags = await mod.getSecurityFlags() as NativeSecurityFlags;
+      const merged = { ...SAFE_FLAGS, ...flags };
+      // FIX: the iOS branch previously did not refresh the sync snapshot, so
+      // getNativeSecurityFlagsSync() (used by detectAppIntegrity) kept reading
+      // SAFE_FLAGS on iOS even after a successful measurement.
+      _lastMeasuredFlags = merged;
+      return { flags: merged, measured: true };
+    } catch (e) {
+      console.error('[NativeSecurity][Stage-2] ❌ iOS getSecurityFlags() threw:', e, '— returning SAFE_FLAGS (detection UNAVAILABLE)');
+      return { flags: SAFE_FLAGS, measured: false };
+    }
+  }
+
+  // Web: no native module by design — this is the SUPPORTED platform behavior,
+  // not a degradation. Availability stays false so callers skip enforcement.
+  return { flags: SAFE_FLAGS, measured: false };
+}
+
+/**
+ * PER-CYCLE COALESCE + SHORT TTL for the native flag batch.
+ *
+ * WHY: runSecurityChecks() reads the flag batch once per detector — 16 call
+ * sites in security.ts — and the periodic pipeline repeats that every
+ * CONTINUOUS_CHECK_INTERVAL_MS. With no cache, ONE check cycle crossed the
+ * native bridge ~16 times, and each crossing re-reads Settings.Global, the
+ * package manager and /proc inside Kotlin. The warm-up call in
+ * runSecurityChecks() ("so every detector re-uses it") therefore did nothing:
+ * by the time the detectors ran, every one of them issued its own call.
+ *
+ * SAFETY — why this cannot hide a security condition:
+ *   • TTL is one check cycle (milliseconds), so every NEW cycle performs a real
+ *     measurement; a stale value can never outlive the current cycle.
+ *   • Concurrent callers share ONE in-flight promise, so a measurement is never
+ *     half-applied and the fail-safe/unavailable contract is decided once.
+ *   • FAILURES ARE NEVER CACHED: a call that could not reach the module leaves
+ *     the cache cold, so the next caller retries immediately instead of
+ *     inheriting a fail-safe default.
+ *   • The gated values (developer options, ADB, debugger, test-only build) are
+ *     user-initiated settings that change on a human timescale, and the
+ *     pipeline re-runs on a 30 s timer, on foreground resume, on gate re-check
+ *     and after a policy/config change.
+ */
+const FLAGS_CACHE_TTL_MS = 500;
+let _flagsCacheAt = 0;
+let _flagsInFlight: Promise<NativeSecurityFlags> | null = null;
+
+/**
  * Returns ALL security flags in one native call.
  * Falls back to SAFE_FLAGS if the module is unavailable — and records the
  * degradation in wasLastSecurityFlagsCallUnavailable() so callers can tell
@@ -188,49 +263,28 @@ export function getNativeSecurityFlagsSync(): NativeSecurityFlags {
  * Works on both Android (SecurityModule) and iOS (IOSSecurityModule).
  */
 export async function getNativeSecurityFlags(): Promise<NativeSecurityFlags> {
-  if (Platform.OS === 'android') {
-    const mod = getModule();
-    if (!mod) {
-      _lastFlagsCallUnavailable = true;
-      console.warn('[NativeSecurity][Stage-2] ❌ Module is null — returning SAFE_FLAGS (detection UNAVAILABLE, not measured). Check native registration.');
-      return SAFE_FLAGS;
-    }
-    try {
-      const flags = await mod.getSecurityFlags() as NativeSecurityFlags;
-      _lastFlagsCallUnavailable = false;
-      const merged = { ...SAFE_FLAGS, ...flags };
-      _lastMeasuredFlags = merged;
-      return merged;
-    } catch (e) {
-      _lastFlagsCallUnavailable = true;
-      console.error('[NativeSecurity][Stage-2] ❌ getSecurityFlags() threw:', e, '— returning SAFE_FLAGS (detection UNAVAILABLE, not measured)');
-      return SAFE_FLAGS;
-    }
+  const now = Date.now();
+  if (_flagsCacheAt !== 0 && now - _flagsCacheAt < FLAGS_CACHE_TTL_MS) {
+    return _lastMeasuredFlags;
   }
+  if (_flagsInFlight) return _flagsInFlight;
 
-  if (Platform.OS === 'ios') {
-    const mod = getIOSModule();
-    if (!mod) {
-      _lastFlagsCallUnavailable = true;
-      console.warn('[NativeSecurity][Stage-2] ❌ iOS module null — returning SAFE_FLAGS (detection UNAVAILABLE)');
-      return SAFE_FLAGS;
-    }
-    try {
-      const flags = await mod.getSecurityFlags() as NativeSecurityFlags;
-      _lastFlagsCallUnavailable = false;
-      const merged = { ...SAFE_FLAGS, ...flags };
-      return merged;
-    } catch (e) {
-      _lastFlagsCallUnavailable = true;
-      console.error('[NativeSecurity][Stage-2] ❌ iOS getSecurityFlags() threw:', e, '— returning SAFE_FLAGS (detection UNAVAILABLE)');
-      return SAFE_FLAGS;
-    }
-  }
+  _flagsInFlight = readNativeSecurityFlagsOnce()
+    .then(({ flags, measured }) => {
+      _lastFlagsCallUnavailable = !measured;
+      _flagsCacheAt = measured ? Date.now() : 0;
+      return flags;
+    })
+    .finally(() => {
+      _flagsInFlight = null;
+    });
+  return _flagsInFlight;
+}
 
-  // Web: no native module by design — this is the SUPPORTED platform behavior,
-  // not a degradation. Availability stays false so callers skip enforcement.
-  _lastFlagsCallUnavailable = true;
-  return SAFE_FLAGS;
+/** Test/engineering seam: drop the coalescing cache (never used in app code). */
+export function resetNativeSecurityFlagsCache(): void {
+  _flagsCacheAt = 0;
+  _flagsInFlight = null;
 }
 
 // ─── Individual APIs ──────────────────────────────────────────────────────────

@@ -2,6 +2,14 @@
 
 declare(strict_types=1);
 
+// CLI-ONLY GUARD — daily video health scan. Reachable from cron (CLI) only;
+// never over HTTP, in case the host uses the app root as the document root.
+// Same guard as the sibling scripts.
+if (PHP_SAPI !== 'cli') {
+    http_response_code(403);
+    exit('CLI only');
+}
+
 /**
  * cron-video-health.php — PHP CLI equivalent of the video-daily-health Edge Function.
  *

@@ -41,29 +41,119 @@ const WRAPPER_CONTENT = [
   '',
 ].join('\n');
 
-// Properties to append to gradle.properties after every prebuild.
-// These prevent Gradle / RNGP from trying to download a JDK at build time:
+// ── gradle.properties: canonical managed keys (docs/build-troubleshooting.md BP-6/BP-8) ──
+//
+// The toolchain properties below stay as they were (they stop RNGP/Foojay
+// from downloading a JDK at build time):
 //
 //   react.internal.disableJavaVersionAlignment — tells JdkConfiguratorUtils.kt
 //     to skip calling kotlinExtension.jvmToolchain(17) on every Kotlin subproject.
-//     Without this, Gradle's Foojay Disco provisioner tries to download JDK 17
-//     over the network, timing out on restricted CI build servers.
+//   org.gradle.java.installations.auto-provisioning=false — belt-and-suspenders
+//     against Gradle auto-provisioning a JDK if a toolchain spec slips through.
 //
-//   org.gradle.java.installations.auto-provisioning=false — belt-and-suspenders:
-//     prevents Gradle itself from auto-provisioning a JDK even if some other
-//     toolchain spec slips through.
+// The daemon key is now MANAGED, not append-only (BP-6/BP-8): the historical
+// block was re-appended on every prebuild (observed: org.gradle.daemon=false
+// ×8) and daemon=false forced every build to fork its own single-use ~2 GB
+// JVM. On the 7.6 GB dev machine, two overlapping builds (CI-agent script +
+// user build) exhausted physical RAM and crashed the daemon with native
+// malloc failures (all 8 hs_err_pid*.log files share that signature).
 //
-//   org.gradle.daemon=false — CI builds run in ephemeral containers; the
-//     Gradle daemon provides no speedup there and can cause stale-process issues.
-const GRADLE_PROPS_ADDITIONS = [
-  '',
-  '# Disable RN JVM toolchain alignment to prevent Foojay JDK download on build servers.',
-  'react.internal.disableJavaVersionAlignment=true',
-  '# Disable Gradle auto-provisioning as belt-and-suspenders.',
-  'org.gradle.java.installations.auto-provisioning=false',
-  '# Disable Gradle daemon for ephemeral CI containers.',
-  'org.gradle.daemon=false',
-].join('\n');
+// Contract: every prebuild NORMALIZES gradle.properties — all copies of the
+// managed keys and their comments are stripped, then exactly one canonical
+// block is appended. Locally the daemon is ENABLED (one reused JVM serializes
+// concurrent builds and frees its memory when idle); in CI (env CI or
+// EAS_BUILD) it stays disabled for ephemeral containers.
+const GRADLE_JVMARGS_LINE =
+  // Conservative heap for a low-memory host: covers this project's R8/AGP peak
+  // Java heap with SerialGC's small native overhead while leaving RAM for the
+  // Kotlin daemon, Node.js (Metro bundling) and the OS. Never set Xmx above
+  // ~half of physical RAM on such machines (BP-8).
+  'org.gradle.jvmargs=-Xmx2048m -XX:MaxMetaspaceSize=512m -XX:+UseSerialGC';
+
+const C_TOOLCHAIN =
+  '# Disable RN JVM toolchain alignment to prevent Foojay JDK download on build servers.';
+const C_AUTOPROVISION =
+  '# Disable Gradle auto-provisioning as belt-and-suspenders.';
+const C_DAEMON_CI =
+  '# Disable Gradle daemon for ephemeral CI containers.';
+const C_DAEMON_ON_A =
+  '# Gradle daemon ON locally: overlapping builds (agent + user) must share ONE JVM.';
+const C_DAEMON_ON_B =
+  '# BP-8: dual ~2 GB single-use JVMs exhausted this 7.6 GB machine (native-OOM JVM crashes).';
+const C_DAEMON_ON_C =
+  '# The reused daemon serializes concurrent builds and releases memory when idle.';
+
+// Comment lines owned by this manager: stripped if present (any number of
+// copies, including older wordings) and re-emitted in the canonical block.
+const GRADLE_MANAGED_COMMENTS = [
+  C_TOOLCHAIN,
+  C_AUTOPROVISION,
+  C_DAEMON_CI,
+  C_DAEMON_ON_A,
+  C_DAEMON_ON_B,
+  C_DAEMON_ON_C,
+];
+
+const GRADLE_MANAGED_KEYS = [
+  'react.internal.disableJavaVersionAlignment',
+  'org.gradle.java.installations.auto-provisioning',
+  'org.gradle.daemon',
+  'org.gradle.daemon.idletimeout',
+  'org.gradle.jvmargs',
+];
+
+const buildGradleDaemonBlock = () => {
+  const isCI =
+    process.env.CI === 'true' || process.env.CI === '1' || !!process.env.EAS_BUILD;
+  const lines = [
+    '',
+    C_TOOLCHAIN,
+    'react.internal.disableJavaVersionAlignment=true',
+    C_AUTOPROVISION,
+    'org.gradle.java.installations.auto-provisioning=false',
+  ];
+  if (isCI) {
+    lines.push(C_DAEMON_CI, 'org.gradle.daemon=false');
+  } else {
+    lines.push(
+      C_DAEMON_ON_A,
+      C_DAEMON_ON_B,
+      C_DAEMON_ON_C,
+      'org.gradle.daemon=true',
+      'org.gradle.daemon.idletimeout=1800'
+    );
+  }
+  return lines.join('\n');
+};
+
+// Deterministic normalizer (pure string function, unit-testable): strip all
+// managed keys/comments, then append the single canonical jvmargs + block.
+const normalizeGradleProperties = (contents) => {
+  const isManagedProp = (t) =>
+    GRADLE_MANAGED_KEYS.some((k) => t === k || t.startsWith(k + '='));
+  const isManagedComment = (t) => GRADLE_MANAGED_COMMENTS.indexOf(t) !== -1;
+
+  const kept = [];
+  for (const raw of String(contents).split(/\r?\n/)) {
+    const t = raw.trim();
+    if (isManagedProp(t) || isManagedComment(t)) continue;
+    kept.push(raw);
+  }
+  // Collapse consecutive blanks left behind by stripped blocks, then drop
+  // trailing blanks BEFORE appending the canonical block — otherwise each run
+  // would accumulate one more blank line before it (not idempotent).
+  const cleaned = [];
+  for (const line of kept) {
+    if (line.trim() === '' && cleaned.length > 0 && cleaned[cleaned.length - 1].trim() === '') {
+      continue;
+    }
+    cleaned.push(line);
+  }
+  while (cleaned.length > 0 && cleaned[cleaned.length - 1].trim() === '') cleaned.pop();
+
+  cleaned.push(GRADLE_JVMARGS_LINE, buildGradleDaemonBlock());
+  return cleaned.join('\n') + '\n';
+};
 
 // VdoCipher Maven repo line to inject into android/build.gradle allprojects.repositories.
 // expo-build-properties extraMavenRepos does NOT reliably inject into the root
@@ -97,46 +187,30 @@ const withGradleWrapper = (config) => {
         `[withGradleWrapper] Pinned gradle-wrapper.properties to Gradle ${GRADLE_VERSION}`
       );
 
-      // ── 2. Inject toolchain-disable properties into gradle.properties ────────
+      // ── 2. Normalize managed keys in gradle.properties (one canonical block) ──
+      // BP-8: append-only injection re-appended org.gradle.daemon=false on every
+      // prebuild (observed ×8) and forced each build to fork its own single-use
+      // ~2 GB JVM; two overlapping builds then exhausted physical RAM on the
+      // 7.6 GB dev machine and crashed the daemon (native-OOM JVM crashes,
+      // e.g. hs_err_pid14468.log). The normalizer below is idempotent and
+      // environment-aware (CI keeps daemon=false, local runs get the daemon).
       const gradlePropsFile = path.join(projectRoot, 'gradle.properties');
       if (fs.existsSync(gradlePropsFile)) {
-        let contents = fs.readFileSync(gradlePropsFile, 'utf8');
-        // Idempotent: only append if not already present.
-        // Dedupe pass: earlier versions of this plugin appended on every
-        // prebuild, leaving multiple duplicate blocks in generated
-        // gradle.properties (observed: 5 copies). Strip repeats first so the
-        // generated file converges to exactly one block regardless of history.
-        const marker = 'react.internal.disableJavaVersionAlignment=true';
-        const firstIdx = contents.indexOf(marker);
-        if (firstIdx >= 0) {
-          // Keep everything up to and including the FIRST block, then drop any
-          // subsequent re-appended blocks (comment lines + the three props).
-          const head = contents.slice(0, firstIdx);
-          const tail = contents.slice(firstIdx);
-          const blockEnd = tail.indexOf('org.gradle.daemon=false');
-          if (blockEnd >= 0) {
-            const keepBlock = tail.slice(0, blockEnd + 'org.gradle.daemon=false'.length);
-            let rest = tail.slice(blockEnd + 'org.gradle.daemon=false'.length);
-            // Remove every later occurrence of the three property lines.
-            rest = rest
-              .split('\n')
-              .filter((l) =>
-                !l.includes('react.internal.disableJavaVersionAlignment') &&
-                !l.includes('org.gradle.java.installations.auto-provisioning') &&
-                !/^org\.gradle\.daemon=false\s*$/.test(l.trim())
-              )
-              .join('\n');
-            contents = head + keepBlock + rest;
-            fs.writeFileSync(gradlePropsFile, contents, 'utf8');
-            console.log('[withGradleWrapper] Deduped toolchain-disable block in gradle.properties');
-          }
-        } else {
-          contents += GRADLE_PROPS_ADDITIONS;
-          fs.writeFileSync(gradlePropsFile, contents, 'utf8');
+        const before = fs.readFileSync(gradlePropsFile, 'utf8');
+        const after = normalizeGradleProperties(before);
+        if (after !== before) {
+          fs.writeFileSync(gradlePropsFile, after, 'utf8');
           console.log(
-            '[withGradleWrapper] Injected disableJavaVersionAlignment + auto-provisioning=false into gradle.properties'
+            '[withGradleWrapper] Normalized gradle.properties (single canonical jvmargs/toolchain/daemon block)'
           );
         }
+      } else {
+        fs.writeFileSync(
+          gradlePropsFile,
+          GRADLE_JVMARGS_LINE + '\n' + buildGradleDaemonBlock() + '\n',
+          'utf8'
+        );
+        console.log('[withGradleWrapper] Created gradle.properties with canonical managed Gradle settings');
       }
 
       // ── 3. Inject VdoCipher Maven repo into root build.gradle ───────────────
@@ -218,3 +292,7 @@ const withGradleWrapper = (config) => {
 };
 
 module.exports = withGradleWrapper;
+// Exported for unit tests / offline normalization (see .freebuff/test-plugin-repairs.cjs):
+module.exports.normalizeGradleProperties = normalizeGradleProperties;
+module.exports.buildGradleDaemonBlock = buildGradleDaemonBlock;
+module.exports.GRADLE_JVMARGS_LINE = GRADLE_JVMARGS_LINE;

@@ -10,13 +10,13 @@
  * independently of any caching layer.
  */
 
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import {
   View, Text, ScrollView, Pressable, useColorScheme,
   ActivityIndicator, useWindowDimensions,
 } from 'react-native';
 import { NativeModules } from 'react-native';
-import { useFocusEffect } from 'expo-router';
+import { useFocusEffect, router, type RelativePathString } from 'expo-router';
 import {
   ShieldCheck, ShieldAlert, ShieldX, RefreshCw,
   CheckCircle, XCircle, AlertCircle, Clock, Cpu, Activity,
@@ -27,6 +27,13 @@ import DrawerNav from '@/components/DrawerNav';
 import { NeuCard } from '@/components/NeuCard';
 import { neuColors, useLayout, neuFlatStyle, neuMicroStyle, safeBottom, mutedTextStyle } from '@/lib/neu';
 import type { NativeSecurityFlags } from '@/lib/nativeSecurity';
+import { useProfileStore } from '@/lib/store';
+import { dashboardPathForRole } from '@/lib/roleRoutes';
+import {
+  getPlatformIntegrity,
+  platformIntegrityLabel,
+  type PlatformIntegrityRecord,
+} from '@/lib/platformIntegrity';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -173,6 +180,10 @@ function DiagnosticsContent() {
     runAt:         null,
   });
   const [running, setRunning] = useState(false);
+  // Platform-integrity ENFORCEMENT status (Play Integrity / App Attest). Read
+  // from the same module the security pipeline writes to, so this screen can
+  // never disagree with the pipeline about whether the control is active.
+  const [integrity, setIntegrity] = useState<PlatformIntegrityRecord>(() => getPlatformIntegrity());
 
   const runDiagnostics = useCallback(async () => {
     setRunning(true);
@@ -214,6 +225,8 @@ function DiagnosticsContent() {
         moduleFound, moduleMethods, rawFlags, rawError,
         elapsedMs, detectors, runAt: new Date(),
       });
+      // Re-read after running so the card reflects the latest pipeline result.
+      setIntegrity(getPlatformIntegrity());
     } finally {
       setRunning(false);
     }
@@ -398,6 +411,44 @@ function DiagnosticsContent() {
           })}
         </View>
 
+        {/* ── Platform integrity enforcement status ──────────────────── */}
+        <View style={sectionPad}>
+          <Text style={{ fontSize: 11, fontWeight: '700', ...mutedTextStyle(c, 0.4), letterSpacing: 1, textTransform: 'uppercase', marginBottom: 10, marginTop: 8 }}>
+            Platform Integrity Enforcement
+          </Text>
+          <NeuCard style={{ padding: 16, marginBottom: 20 }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 10 }}>
+              {integrity.status === 'passed'
+                ? <ShieldCheck size={18} color="#22C55E" />
+                : integrity.status === 'failed'
+                  ? <ShieldX size={18} color="#EF4444" />
+                  : <AlertCircle size={18} color="#F59E0B" />}
+              <Text style={{
+                fontSize: 14, fontWeight: '800',
+                color: integrity.status === 'passed' ? '#22C55E'
+                  : integrity.status === 'failed' ? '#EF4444'
+                    : '#F59E0B',
+              }}>
+                {platformIntegrityLabel(integrity.status)}
+              </Text>
+            </View>
+            {integrity.detail && (
+              <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.6), lineHeight: 18, marginBottom: 8 }}>
+                {integrity.detail}
+              </Text>
+            )}
+            <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.5), lineHeight: 17 }}>
+              {integrity.updatedAt
+                ? `Last evaluated ${new Date(integrity.updatedAt).toLocaleTimeString()}. `
+                : 'Not evaluated this session. '}
+              ONLY “PASS” means the platform actually verified this device. “DEFERRED / NOT VERIFIED”
+              means server-side enforcement is intentionally switched off, and “UNAVAILABLE” /
+              “INCONCLUSIVE” mean the check did not produce a verdict. None of those is a clean
+              result: they mean this control is not currently covering this device.
+            </Text>
+          </NeuCard>
+        </View>
+
         {/* ── API restriction documentation ─────────────────────────── */}
         <View style={sectionPad}>
           <Text style={{ fontSize: 11, fontWeight: '700', ...mutedTextStyle(c, 0.4), letterSpacing: 1, textTransform: 'uppercase', marginBottom: 10, marginTop: 8 }}>
@@ -448,6 +499,33 @@ function DiagnosticsContent() {
 }
 
 export default function SecurityDiagnosticsScreen() {
+  // ── ACCESS CONTROL — Super Admin only ────────────────────────────────────
+  // This screen renders the RAW native security flags, the security-evidence
+  // bundle and the expected signing fingerprint, but its route is role-neutral
+  // inside the (app)/ group (it is not under (superadmin)), so nothing about
+  // navigation alone restricts it. Membership is therefore asserted in-component
+  // — the same model the role tab groups use (useRoleTabGuard) — instead of
+  // relying on the drawer simply not linking to it.
+  //
+  // The role comes from the backend-verified profile (getProfile), never from a
+  // route param or navigation state, both of which are client-controlled. A
+  // non-SA session is redirected to its own dashboard and renders nothing in
+  // the meantime, so the diagnostic content is never mounted. Server-side
+  // authorization on every request is unchanged and remains authoritative.
+  const profile = useProfileStore((s) => s.profile);
+  const isProfileLoading = useProfileStore((s) => s.isProfileLoading);
+  const isSuperAdmin = profile?.role === 'super_admin';
+
+  useEffect(() => {
+    // No authoritative profile yet → no opinion (do not guess from route state).
+    if (isProfileLoading || !profile) return;
+    if (isSuperAdmin) return;
+    const dest = dashboardPathForRole(profile.role);
+    if (dest) router.replace(dest as RelativePathString);
+  }, [isProfileLoading, profile, isSuperAdmin]);
+
+  if (!isSuperAdmin) return null;
+
   return (
     <DrawerProvider>
       <View style={{ flex: 1 }}>

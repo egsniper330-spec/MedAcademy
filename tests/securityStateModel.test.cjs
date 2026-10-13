@@ -18,7 +18,24 @@
 'use strict';
 
 const assert = require('node:assert/strict');
-const model = require('../.freebuff/state-build/securityStateModel.js');
+
+/**
+ * Resolve a compiled state model. The harness writes them to
+ * `scripts/state-build/` (see `npm run test:state`); the legacy
+ * `.freebuff/state-build/` location is still honoured so a developer machine
+ * that only has the old output keeps working.
+ */
+function requireStateModel(name) {
+  const path = require('node:path');
+  const fs = require('node:fs');
+  for (const dir of ['scripts/state-build', '.freebuff/state-build']) {
+    const p = path.join(__dirname, '..', dir, name);
+    if (fs.existsSync(p)) return require(p);
+  }
+  throw new Error(`compiled state model not found: ${name} — run: npm run test:state`);
+}
+
+const model = requireStateModel('securityStateModel.js');
 
 // ── Shipped-default snapshots (src/lib/security.ts) ──────────────────────────
 
@@ -336,7 +353,7 @@ test('31. zero-weight observability events can never block', () => {
 // routing + auth-failure classification + account isolation. Compiled and run
 // by the same harness (npm run test:state).
 // ═════════════════════════════════════════════════════════════════════════════
-const startup = require('../.freebuff/state-build/startupStateModel.js');
+const startup = requireStateModel('startupStateModel.js');
 
 // ── The 15-item startup matrix (requirement) ─────────────────────────────────
 // Items 11/12 are the startup races; 4/13/14 assert network failures NEVER

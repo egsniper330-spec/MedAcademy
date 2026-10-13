@@ -201,6 +201,13 @@ $report = [
 
 echo json_encode($report, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\n";
 
+// The reproducible test workflow (backend/tests/pdf-watermark) collects this
+// report as machine-readable output; a plain interactive run just prints it.
+if (($jp = getenv('PDFTEST_JSON_OUT')) !== false && $jp !== '') {
+    @mkdir(dirname($jp), 0775, true);
+    file_put_contents($jp, json_encode($report, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\n");
+}
+
 // Cleanup the scratch directory (files only).
 foreach (glob($work . '/*') ?: [] as $f) {
     @unlink($f);

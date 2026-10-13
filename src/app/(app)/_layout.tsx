@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Stack, useRouter, usePathname } from 'expo-router';
 import { AppState, View, ActivityIndicator } from 'react-native';
 // Fix: import JS wrapper module directly (not requireOptionalNativeModule).
@@ -57,7 +57,58 @@ function AppLayoutNav() {
   // below). check() alone re-validates with native-state reads — policies use
   // a short 5-min TTL cache by design; VPN/native flags are read fresh every
   // call, so stale-cached "safe" results cannot persist here.
-  const { check, onNewBlockingThreat, isSuperAdmin } = useSecurity();
+  const {
+    check, onNewBlockingThreat, isSuperAdmin,
+    hasWarnings, blocksLogin, threats, riskScore,
+  } = useSecurity();
+
+  // ── Non-blocking warning presentation (root-cause fix) ────────────────────
+  // TWO defects are fixed here, both surfaced by the iOS VPN/proxy report:
+  //
+  //  1. These navigations used to call `router.replace('/security-warning')`
+  //     with NO PARAMS. That screen derives threats/riskScore/blocksLogin from
+  //     route params, so it fell back to [] / 0 / false and rendered the
+  //     self-contradictory page: "Security Warning" + "Device Risk Score: 0"
+  //     + "Detected Issues (0)" + "issues were detected" + "Continue Anyway".
+  //     The authoritative payload is now ALWAYS passed.
+  //
+  //  2. Warn-level findings were ONLY surfaced on a background→foreground
+  //     transition, and `onNewBlockingThreat` fires only for BLOCKING results
+  //     (SecurityContext: `if (r.blocksLogin || r.blocksVideo)`), so it could
+  //     never carry a `!blocksLogin` warning. A VPN/proxy already active at
+  //     cold launch was therefore detected but never shown, while enabling one
+  //     later forced a background trip that DID trigger the resume handler.
+  //     The effect below presents warnings on any authoritative verdict
+  //     change, including the first verdict after launch.
+  //
+  // Enforcement is unchanged: only `hasWarnings && !blocksLogin` is presented
+  // here. Blocking findings stay with the non-dismissible SecurityGate.
+  const warningPresentedRef = useRef<string | null>(null);
+  const presentWarningScreen = useCallback(
+    (r: {
+      threats: ReadonlyArray<{ type: string }>;
+      riskScore: number;
+      blocksLogin: boolean;
+      hasWarnings: boolean;
+    }) => {
+      if (!r.hasWarnings || r.blocksLogin) return;
+      // One presentation per distinct warning state — prevents a navigation
+      // loop (e.g. the user taps Continue while the finding is still live).
+      const signature = `${r.riskScore}|${r.threats.map((t) => t.type).sort().join(',')}`;
+      if (warningPresentedRef.current === signature) return;
+      warningPresentedRef.current = signature;
+      router.replace({
+        pathname: '/security-warning' as RelativePathString,
+        params: {
+          threats:     JSON.stringify(r.threats),
+          riskScore:   String(r.riskScore),
+          blocksLogin: 'false',
+          redirect:    '',
+        },
+      });
+    },
+    [router],
+  );
 
   // ── App-shell FLAG_SECURE ──────────────────────────────────────────────────
   // Activates Android FLAG_SECURE for ALL screens inside (app)/, blocking
@@ -139,13 +190,11 @@ function AppLayoutNav() {
         // for them — without the blocksLogin param that screen rendered in
         // warn-mode WITH "Continue Anyway", a bypass of a block_login policy.
         // Non-blocking warnings (hasWarnings only) still route there.
-        if (result.hasWarnings && !result.blocksLogin) {
-          router.replace('/security-warning' as RelativePathString);
-        }
+        presentWarningScreen(result);
       });
     });
     return () => sub.remove();
-  }, [check, router]);
+  }, [check, presentWarningScreen]);
 
   // ── Continuous monitoring → forced redirect ────────────────────────────────
   // Subscribe to SecurityContext's periodic-check callback so that VPN / Developer
@@ -157,13 +206,33 @@ function AppLayoutNav() {
     const unsub = onNewBlockingThreat((result) => {
       // ALL blocking threats are enforced by the central SecurityGate overlay
       // (non-dismissible, auto-unlocking) — never routed to the dismissible
-      // security-warning screen.
-      if (result.hasWarnings && !result.blocksLogin) {
-        router.replace('/security-warning' as any);
-      }
+      // security-warning screen. `presentWarningScreen` enforces that split.
+      presentWarningScreen(result);
     });
     return unsub;
-  }, [onNewBlockingThreat, router]);
+  }, [onNewBlockingThreat, presentWarningScreen]);
+
+  // ── Cold-start / verdict-change warning presentation ──────────────────────
+  // Covers the gap that made a pre-launch VPN invisible: the resume handler
+  // needs a background→foreground transition, and the periodic callback only
+  // fires for BLOCKING results. This runs on the FIRST authoritative verdict
+  // after launch as well as on every later change.
+  //
+  // It waits for the profile so the role redirect has settled and the screen's
+  // `redirect` fallback resolves to the right dashboard.
+  useEffect(() => {
+    if (process.env.EXPO_OS === 'web') return;
+    if (isProfileLoading || !profile) return;
+    if (!hasWarnings || blocksLogin) {
+      // Device is clean again → let the next distinct warning present.
+      if (!hasWarnings) warningPresentedRef.current = null;
+      return;
+    }
+    presentWarningScreen({ threats, riskScore, blocksLogin, hasWarnings });
+  }, [
+    hasWarnings, blocksLogin, threats, riskScore,
+    isProfileLoading, profile, presentWarningScreen,
+  ]);
 
   // ── Identity-switch generation guard (impersonation swap race) ──────────
   // getProfile(rounds-trip the network; if the session identity CHANGES while

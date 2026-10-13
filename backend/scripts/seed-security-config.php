@@ -2,6 +2,15 @@
 
 declare(strict_types=1);
 
+// CLI-ONLY GUARD — this script seeds security configuration and must never be
+// reachable over HTTP. Some hosts use the app root as the document root (see
+// backend/public/.htaccess), which would otherwise expose backend/scripts/*
+// to anonymous requests. Same guard as the sibling scripts.
+if (PHP_SAPI !== 'cli') {
+    http_response_code(403);
+    exit('CLI only');
+}
+
 /**
  * backend/scripts/seed-security-config.php
  *

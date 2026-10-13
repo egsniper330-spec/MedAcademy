@@ -724,7 +724,18 @@ class SecurityModule(private val reactContext: ReactApplicationContext) :
             }
         }
 
-        // Tier 2: Legacy flag (API < 23)
+        // Tier 2: Legacy flag — API < 23 ONLY (guard added with the fix below).
+        // Android STOPPED honoring Settings.Secure.ALLOW_MOCK_LOCATION in API 23:
+        // from Marshmallow on, mock location is controlled by the AppOps
+        // "select mock location app" mechanism (Tier 1). A leftover value of 1 in
+        // that legacy setting — written by a pre-Marshmallow app, a GPS-spoofing
+        // tool or an MDM suite and never cleaned up — is therefore NOT evidence of
+        // active mocking on any modern device, but it was being read as if it
+        // were: that is a device-specific false positive that hard-blocked
+        // legitimate release installs with risk 20 and the misleading
+        // "Insecure Build Detected / Install the official production release"
+        // screen, while the same APK on a device without the stale setting ran
+        // normally.
         try {
             @Suppress("DEPRECATION")
             val legacyFlag = Settings.Secure.getInt(
@@ -732,7 +743,7 @@ class SecurityModule(private val reactContext: ReactApplicationContext) :
                 Settings.Secure.ALLOW_MOCK_LOCATION, 0
             )
             Log.d(TAG, "[detectMockLocation] legacy ALLOW_MOCK_LOCATION=$legacyFlag")
-            if (legacyFlag != 0) return true
+            if (legacyFlag != 0 && Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return true
         } catch (e: Exception) {
             Log.d(TAG, "[detectMockLocation] legacy flag exception: \${e.message}")
         }

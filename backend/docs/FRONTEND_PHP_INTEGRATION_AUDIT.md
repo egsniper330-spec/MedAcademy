@@ -1,5 +1,12 @@
 # FRONTEND → PHP INTEGRATION AUDIT
 
+> **Historical record.** This audit captures the state on the date below. The
+> production API host has since been confirmed as **`api.medacademy.site`** (see
+> `backend/NAMECHEAP_DEPLOYMENT.md` for the live runbook). The
+> `api.medacademy.eu.cc` values used throughout are preserved verbatim because
+> they are the environment that was actually exercised at the time; no current
+> runtime configuration reads them.
+
 **Date:** 2026-08-24
 **Status legend:** PASS = verified live · PARTIAL = works but degraded/limited · FAIL = broken · BLOCKED = cannot verify without deployment
 **Environment:** Production `https://api.medacademy.eu.cc/backend/public/index.php` (Namecheap/cPanel) · web build served from `dist/` on `http://localhost:8081` (CORS-allowed origin)

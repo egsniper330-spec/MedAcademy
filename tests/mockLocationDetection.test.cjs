@@ -21,10 +21,20 @@
  *   The JS layer then reported it as type 'debug_detected' (risk 20), which maps
  *   into the `debug` → block_login policy bucket, locking the whole app.
  *
+ * SECOND, INDEPENDENT DEVICE-SPECIFIC FALSE POSITIVE (also pinned here):
+ *   `Settings.Secure.ALLOW_MOCK_LOCATION` was read with NO API guard even though
+ *   the platform stopped honoring it in API 23 (Marshmallow). A leftover value of
+ *   1 — written by a pre-Marshmallow app, a GPS spoofing tool or an MDM suite and
+ *   never cleaned up — was therefore treated as active mocking on a MODERN
+ *   device, producing exactly the same block on the same APK that ran fine on a
+ *   device without the stale setting. The legacy tier is now guarded to the API
+ *   levels where the platform actually reads the setting; the AppOps plane stays
+ *   authoritative everywhere else.
+ *
  * WHAT THIS SUITE PINS
  *   A. plugins/withSecurityModule.js (source of truth for the generated Kotlin)
  *      - the authoritative AppOps plane is INTACT (a real mock provider blocks)
- *      - the legacy pre-API-23 plane is intact
+ *      - the legacy pre-API-23 plane is intact AND API-guarded
  *      - the permission-holder plane is GONE (regression guard)
  *   B. android/.../SecurityModule.kt — the generated file matches (catches a
  *      stale generated file, i.e. someone editing android/ without the plugin)
@@ -94,6 +104,18 @@ function assertPlanes(label, source) {
   const returns = fn.match(/return true/g) || [];
   ok(returns.length === 2,
     `${label}: exactly two positive planes remain (found ${returns.length}) — AppOps + legacy flag`);
+
+  // ── Legacy tier must be API-GUARDED (second device-specific false positive) ─
+  // The platform stopped honoring Settings.Secure.ALLOW_MOCK_LOCATION in API 23;
+  // reading a leftover value of 1 as evidence hard-locked legitimate release
+  // installs (risk 20, "Insecure Build Detected") on devices that merely carried
+  // the stale setting. Only the AppOps plane is authoritative on API 23+.
+  ok(/Build\.VERSION\.SDK_INT < Build\.VERSION_CODES\.M/.test(fn),
+    `${label}: legacy ALLOW_MOCK_LOCATION tier is guarded to API < 23`);
+  ok(!/if \(legacyFlag != 0\) return true/.test(fn),
+    `${label}: the unguarded legacy return is gone (APK-level regression guard)`);
+  ok(/legacyFlag != 0 && Build\.VERSION\.SDK_INT < Build\.VERSION_CODES\.M/.test(fn),
+    `${label}: legacy flag only counts where the platform still honors it`);
 }
 
 // ════════════════════════════════════════════════════════════════════════════

@@ -229,9 +229,26 @@ section('6. scope');
 // drift from an UNRELATED task sharing the worktree (the Android branding
 // config plugin), so for app.json we assert the thing that actually matters:
 // no theme-related key was introduced by the website work.
+// Compare the DEPENDENCY SECTIONS against HEAD, not the whole file: the intent
+// is zero dependency drift. A byte-identity check also fails on unrelated,
+// legitimate edits to the same manifest (e.g. adding an npm script), which is
+// drift in the FILE but not in the dependency graph.
+const DEP_SECTIONS = ['dependencies', 'devDependencies', 'peerDependencies', 'optionalDependencies', 'overrides', 'resolutions'];
+const depGraphOf = (pkg) => {
+  const out = {};
+  for (const s of DEP_SECTIONS) if (pkg && pkg[s]) out[s] = pkg[s];
+  return JSON.stringify(out);
+};
 const depTouched = ['package.json', 'package-lock.json'].filter((f) => {
-  try { return require('child_process').execSync(`git diff --name-only HEAD -- ${f}`, { cwd: ROOT, encoding: 'utf8' }).trim().length > 0; }
-  catch (e) { void e; return false; }
+  try {
+    const child = require('child_process');
+    const head = JSON.parse(child.execSync(`git show HEAD:${f}`, { cwd: ROOT, encoding: 'utf8' }));
+    const now = JSON.parse(fs.readFileSync(path.join(ROOT, f), 'utf8'));
+    // package-lock v3 mirrors the root manifest under packages[''].
+    const headRoot = f.endsWith('lock.json') ? (head.packages && head.packages['']) : head;
+    const nowRoot = f.endsWith('lock.json') ? (now.packages && now.packages['']) : now;
+    return depGraphOf(headRoot) !== depGraphOf(nowRoot);
+  } catch (e) { void e; return false; }
 });
 ok(depTouched.length === 0, `website theming added no dependency (${depTouched.join(', ') || 'clean'})`);
 let appJsonDiff = '';

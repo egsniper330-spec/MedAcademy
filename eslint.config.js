@@ -14,14 +14,20 @@ module.exports = defineConfig([
   // suites are invoked as `node tests/x.test.cjs`), so __dirname/process are
   // defined at runtime — without this override eslint's browser/globals set
   // flags them no-undef and the CI lint gate fails on healthy code.
-  {
-    files: [
-      "tests/**/*.cjs",
-      "backend/tests/**/*.js",
-      "plugins/**/*.js",
-      "metro-stubs/**/*.js",
-      ".freebuff/**/*.cjs",
-    ],
+  {      files: [
+        "tests/**/*.cjs",
+        // Repo scripts are Node CommonJS too: the test runners and the
+        // validation/guard scripts are invoked as `node scripts/x.cjs`. They
+        // were missing from this list, so `__dirname` was flagged no-undef and
+        // `npm run lint` (a CI step) failed on healthy code.
+        "scripts/**/*.cjs",
+        "scripts/**/*.js",
+        "backend/tests/**/*.js",
+        "backend/deploy-package/**/*.cjs",
+        "plugins/**/*.js",
+        "metro-stubs/**/*.js",
+        ".freebuff/**/*.cjs",
+      ],
     languageOptions: {
       globals: {
         __dirname: "readonly",

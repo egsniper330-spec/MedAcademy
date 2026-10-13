@@ -288,9 +288,20 @@ check('F4 the stale "no native pin enforcement is wired" note is gone', () => {
 });
 
 // Classifier behaviour (pure function, shipped defaults).
+// Compiled by scripts/run-state-tests.cjs (npm run test:state) into
+// scripts/state-build/, with the legacy .freebuff/state-build/ still honoured.
+function requireStateModel(name) {
+  const path = require('node:path');
+  const fs = require('node:fs');
+  for (const dir of ['scripts/state-build', '.freebuff/state-build']) {
+    const p = path.join(__dirname, '..', dir, name);
+    if (fs.existsSync(p)) return require(p);
+  }
+  throw new Error(`compiled state model not found: ${name} — run: npm run test:state`);
+}
 let model = null;
 try {
-  model = require('../.freebuff/state-build/securityStateModel.js');
+  model = requireStateModel('securityStateModel.js');
 } catch {
   model = null;
 }
@@ -311,7 +322,7 @@ if (model) {
     assert.equal(model.classifySslProbe(true, null, 'none'), 'pin_verified');
   });
 } else {
-  console.log('  note  .freebuff/state-build/securityStateModel.js absent — classifier checks skipped');
+  console.log('  note  compiled securityStateModel.js absent (run npm run test:state) — classifier checks skipped');
 }
 
 // ─── Summary ────────────────────────────────────────────────────────────────

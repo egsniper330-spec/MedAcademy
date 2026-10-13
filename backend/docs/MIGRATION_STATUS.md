@@ -2,6 +2,11 @@
 **Supabase → PHP/MySQL Backend**
 Updated: 2026-08-19
 
+> **Production host confirmed 2026-10-13:** `api.medacademy.site`. The live
+> deployment steps below (including the VdoCipher webhook URL) use it. The
+> earlier-dated evidence in `backend/docs/*AUDIT*.md` keeps the historical
+> `api.medacademy.eu.cc` values verbatim, clearly labeled as historical.
+
 ---
 
 ## Summary
@@ -307,6 +312,6 @@ Implements all 5 student-operations modes:
    0 3 * * * php /home/medainmj/medacademy-api/scripts/cron-video-health.php --secret=YOUR_CRON_SECRET
    ```
 3. Configure VdoCipher webhook URL in VdoCipher dashboard:
-   `https://api.medacademy.eu.cc/video/webhook`
+   `https://api.medacademy.site/video/webhook`
 4. Set `CRON_SECRET` in `.env`
 5. Run regression tests: `php scripts/regression-test.php`

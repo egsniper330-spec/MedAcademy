@@ -484,8 +484,15 @@ final class VideoController
 
         // ── Webhook contract — what MedAcademy actually implements ──
         $appUrl = rtrim(Config::string('APP_URL'), '/');
+        // The advertised callback path MUST be a path the router actually
+        // dispatches: Router::match() is an anchored exact match, so an
+        // unregistered path is a 404 and VdoCipher would never mark a video
+        // ready. The webhook is registered as POST /video/webhook (the only
+        // `/api/*` routes in the table are `/api/health` and the generic data
+        // API), so this value must stay in lockstep with routes/api.php —
+        // pinned by tests/adminDiagnosticsAudit.test.cjs.
         $webhook = [
-            'endpoint_url' => $appUrl . '/api/video/webhook',
+            'endpoint_url' => $appUrl . '/video/webhook',
             'method' => 'POST',
             'route_implemented' => true,
             'signature_header' => 'X-VdoCipher-Signature',

@@ -198,10 +198,15 @@ console.log('── Part 6: protected traffic ──');
 // ── Part 7: no security control was weakened ──────────────────────────────
 console.log('── Part 7: existing controls preserved ──');
 {
-  check('7a: FLAG_SECURE_DEBUG_DISABLED is still true',
-    /const FLAG_SECURE_DEBUG_DISABLED = true;/.test(read('src/lib/screenCaptureGuard.ts')));
-  check('7b: DEBUG_DISABLE_DEV_OPTIONS_AND_ADB is still true',
-    /const DEBUG_DISABLE_DEV_OPTIONS_AND_ADB = true;/.test(read('src/lib/security.ts')));
+  check('7a: screen-capture protection carries no blanket disable switch',
+    !/FLAG_SECURE_DEBUG_DISABLED/.test(read('src/lib/screenCaptureGuard.ts')));
+  check('7b: the capture escape hatch is dev-build only (unreachable in release)',
+    /typeof __DEV__ !== 'undefined'\s*&&/.test(read('src/lib/screenCaptureGuard.ts'))
+      && /EXPO_PUBLIC_DISABLE_CAPTURE_PROTECTION/.test(read('src/lib/screenCaptureGuard.ts')));
+  check('7b-2: developer-options/ADB detection carries no disable switch on Android',
+    !/DEBUG_DISABLE_DEV_OPTIONS_AND_ADB/.test(read('src/lib/security.ts'))
+      && /if \(flags\.adbEnabled\) \{/.test(read('src/lib/security.ts'))
+      && /if \(flags\.developerOptionsEnabled\) \{/.test(read('src/lib/security.ts')));
   check('7c: VPN detection is untouched', /detectVpn/.test(KT) && /vpnStateChanged/.test(CONTEXT));
   check('7d: TLS pinning sources are untouched', /withMedaSslPins/.test(SECURITY_MODULE_PLUGIN));
   check('7e: the overlay capability count is STILL documented as evidence-only, not a threat',

@@ -316,3 +316,73 @@ pinned-player lesson layout, annotate removal, canonical label, and the
 rotation-survival manifest `configChanges`. Must stay green for every change
 to `VdoCipherPlayer*`, `OfflineVideoPlayer*`, `YouTubePlayer`, the lesson
 screen, or `VdoCipherService.php`.
+
+---
+
+## BP-8 · Release build: "Gradle build daemon disappeared unexpectedly" — native memory exhaustion from two concurrent builds (daemon had been disabled)
+
+- **Date/context:** 2026-10-11 — `.\gradlew.bat assembleRelease` from `D:\v3\android`
+  failed right after the JS bundle completed:
+  `Gradle build daemon disappeared unexpectedly`, JVM crash log
+  `android/hs_err_pid14468.log`. 8 `hs_err_pid*.log` files exist on the
+  machine; all 8 share one signature.
+- **Platform:** Windows, **7.6 GB RAM**. Oracle JDK 17.0.12 (resolved via
+  PATH — `JAVA_HOME` was unset), Gradle 8.13 wrapper, AGP 8.13.0,
+  Kotlin 2.1.20, RN 0.83.10 / Expo 55.
+- **Exact failure:** every crash log shows a **native** fatal error —
+  `std::bad_alloc` / `malloc` failure (`arena.cpp:189`,
+  `ArtJvmFuncSig_CreateInternalDaemonThread`), most often in a C2 compiler
+  thread. Free physical RAM at death: **91 MB–987 MB of 7778 MB**. One crash
+  pair (pid20496, a 21-min build, + pid2384, a 2-min build) died one second
+  apart with 330 MB free — two Gradle JVMs overlapped. Not Java-heap OOM, not
+  a JS/TS error (bundling had finished).
+- **Root cause:** `org.gradle.daemon=false` had been injected **append-only**
+  by `plugins/withGradleWrapper.js` (observed: 8 copies in the generated
+  `gradle.properties`, see BP-6). Daemon-off forces every invocation to fork
+  its own single-use ~2 GB JVM; the agent build and a user build overlapped →
+  two full Gradle JVMs + Kotlin daemon + Node/Metro exceeded 7.6 GB → native
+  malloc failure → JVM crash → "daemon disappeared". This is also why the
+  agent's builds sometimes succeeded while the user's next build failed: the
+  second JVM of a pair hits the exhausted machine.
+- **Correct fix:** `withGradleWrapper` now **normalizes** `gradle.properties`
+  on every prebuild — all copies of the managed keys (and their comments) are
+  stripped, then exactly one canonical block is appended:
+  - `org.gradle.jvmargs=-Xmx2048m -XX:MaxMetaspaceSize=512m -XX:+UseSerialGC`
+    — conservative for a 7.6 GB host (SerialGC keeps native overhead small);
+  - `org.gradle.daemon=true` + `org.gradle.daemon.idletimeout=1800` locally —
+    one reused JVM **serializes** overlapping builds and frees its RAM on
+    idle; `org.gradle.daemon=false` only when `CI`/`EAS_BUILD` is set.
+  Toolchain consistency: Gradle and every build script resolve the **same**
+  Oracle JDK 17.0.12 from PATH today (`JAVA_HOME` unset); the supported
+  procedure optionally pins it at user scope — see
+  `docs/ANDROID_BUILD_WINDOWS.md`.
+- **Files involved:** `plugins/withGradleWrapper.js` (normalizer, exported as
+  `normalizeGradleProperties`/`buildGradleDaemonBlock`), generated
+  `android/gradle.properties`, `docs/ANDROID_BUILD_WINDOWS.md`.
+- **What NOT to do:** do not raise `-Xmx` to "fix" crashes — that worsens
+  exhaustion on this host; never run two Gradle builds concurrently on this
+  machine; do not re-introduce append-only property injection (BP-6); do not
+  add `--no-daemon` to local build scripts (it overrides the managed daemon
+  setting and recreates the single-use-JVM hazard).
+- **Prevention:** normalizer covered by `.freebuff/test-plugin-repairs.cjs`
+  and guard suite (`tests/buildConfigGuards.test.cjs`); the repeatable
+  procedure is pinned in `docs/ANDROID_BUILD_WINDOWS.md`.
+
+**Addendum (2026-10-11, verification runs): second failure mode behind the
+same wall.** With the daemon fixed, two full `assembleRelease` runs completed
+without any JVM crash (no new `hs_err_*` — the error reporting now surfaces
+real failures) but both died at `:app:createBundleReleaseJsAndAssets` with a
+**node** native OOM: `FATAL ERROR: Zone Allocation failed - process out of
+memory` (run 1) and `FATAL ERROR: Committing semi space failed … JavaScript
+heap out of memory` (run 2, exit 0x80000003). Same disease, new organ: Metro's
+`getMaxWorkers()` sizes the transform pool from `os.availableParallelism()`
+→ 6 worker isolates inside one node process, whose peak exceeds what this
+machine can back while the ~2 GB Gradle daemon + Kotlin daemon + editor are
+resident. The project's `metro.config.js` already carries an opt-in cap
+(`METRO_MAX_WORKERS` env → `config.maxWorkers`, honored by
+`expo export:embed` via `options.maxWorkers ?? config.maxWorkers`); the fix
+was to make that variable **present in the environment that starts the
+Gradle daemon** — set at user scope (`METRO_MAX_WORKERS=2`, survives
+reboots, applies to every new terminal and to agent-driven builds). Do not
+"fix" this by raising node/Gradle heaps — the abort is OS-level memory
+refusal, not a JS heap limit (the JS heap was at ~140 MB when it died).

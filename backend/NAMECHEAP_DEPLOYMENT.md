@@ -5,7 +5,7 @@ I do not have access to your hosting account — nothing here runs against
 Namecheap on my side. Everything was prepared and validated locally in this
 workspace (see `backend/README.md` → "Validation status").
 
-Target: `https://api.medacademy.eu.cc` · PHP 8.x · MySQL/MariaDB · no
+Target: `https://api.medacademy.site` · PHP 8.x · MySQL/MariaDB · no
 Composer/Node/Docker required.
 
 ---
@@ -13,7 +13,7 @@ Composer/Node/Docker required.
 ## A. PHP version selection
 
 1. cPanel → **Select PHP Version** (MultiPHP Manager).
-2. For the domain `api.medacademy.eu.cc` (or the parent domain, which
+2. For the domain `api.medacademy.site` (or the parent domain, which
    subdomains inherit), select **PHP 8.1 or 8.2** (8.2 preferred).
 3. This backend targets PHP 8.0+ (`str_starts_with`, typed properties,
    `match`-free, union-free). Do **not** use PHP 7.x.
@@ -92,12 +92,12 @@ and no new files need special permissions.
 ## C. Create / configure the API subdomain
 
 1. In your domain registrar DNS, add the record for the subdomain
-   (Namecheap control panel → **Advanced DNS** on `medacademy.eu.cc`):
+   (Namecheap control panel → **Advanced DNS** on `medacademy.site`):
    - Type `A`, Host `api`, Value = your server IP, TTL Automatic.
    - Wait for propagation (Namecheap shows the subdomain in cPanel once DNS
      resolves; you can also add it in cPanel immediately).
 2. cPanel → **Domains** → **Create a New Domain** (or **Subdomains**):
-   - Domain: `api.medacademy.eu.cc`
+   - Domain: `api.medacademy.site`
    - Document Root: leave the auto value for now; you will change it in step D.
 
 ## D. Document root
@@ -105,7 +105,7 @@ and no new files need special permissions.
 Set the document root to the **`public/`** folder of the backend, NOT the
 backend root:
 
-1. cPanel → **Domains** → **Manage** (next to `api.medacademy.eu.cc`) →
+1. cPanel → **Domains** → **Manage** (next to `api.medacademy.site`) →
    **Document Root** → change it to:
    ```
    /home/USERNAME/medacademy-api/public
@@ -184,10 +184,10 @@ the folder owner-writable and re-check — do not jump to `777`.
 
 ## I. SSL / HTTPS
 
-1. cPanel → **SSL/TLS Status** → run **AutoSSL** for `medacademy.eu.cc` and
+1. cPanel → **SSL/TLS Status** → run **AutoSSL** for `medacademy.site` and
    the `api` subdomain (AutoSSL usually covers subdomains automatically).
    If AutoSSL does not issue for the subdomain, use **Let's Encrypt SSL** in
-   cPanel and issue a certificate including `api.medacademy.eu.cc`.
+   cPanel and issue a certificate including `api.medacademy.site`.
 2. After the certificate is active, force HTTPS. In
    `medacademy-api/public/.htaccess`, uncomment/append:
    ```apache
@@ -204,7 +204,7 @@ the folder owner-writable and re-check — do not jump to `777`.
 After upload + `.env` + docroot:
 
 ```
-https://api.medacademy.eu.cc/api/health
+https://api.medacademy.site/api/health
 ```
 
 Expected (DB not yet imported / not yet configured):
@@ -218,7 +218,7 @@ Expected after the schema import + working DB credentials:
 ```
 
 The response never contains credentials, secrets, paths, or stack traces.
-A plain `https://api.medacademy.eu.cc/` returns the service identity block.
+A plain `https://api.medacademy.site/` returns the service identity block.
 
 If you get a blank page / 500 instead of JSON:
 1. Check `medacademy-api/storage/logs/app.log` and the domain's
@@ -256,7 +256,7 @@ in Phase 2. If you want to be ready, note that cPanel → Cron Jobs uses:
 | `JWT secret is not configured` | `.env` missing/empty | Copy `.env.example` → `.env`, generate `JWT_SECRET` |
 | `.env` not loaded | Wrong location | `.env` must sit in `medacademy-api/` (parent of `public/`) |
 | `Storage directory is not writable` | folder perms | chmod `755` on `storage/`, owner-write |
-| Mixed content (http assets on https page) | `APP_URL` has http | Set `APP_URL=https://api.medacademy.eu.cc` |
+| Mixed content (http assets on https page) | `APP_URL` has http | Set `APP_URL=https://api.medacademy.site` |
 | Email not sent | cPanel `mail()` restrictions | Configure SMTP_* in `.env` (Hostinger/Namecheap SMTP) |
 | CORS blocked in browser | origin missing from allow-list | Add the web origin to `CORS_ALLOWED_ORIGINS` |
 | phpMyAdmin import error on triggers | phpMyAdmin cannot run `DELIMITER` | Use cPanel Terminal (primary) or the split files (below) |
@@ -293,7 +293,7 @@ InnoDB defaults. Nothing is executed against Supabase, ever.
 
 ```
 medacademy-api/                     # upload the whole backend/ folder
-├── public/          → DOCUMENT ROOT for api.medacademy.eu.cc (contains index.php + .htaccess)
+├── public/          → DOCUMENT ROOT for api.medacademy.site (contains index.php + .htaccess)
 ├── src/             → PHP application code (NOT web-accessible)
 ├── routes/          → route table (NOT web-accessible)
 ├── config/          → bootstrap config (NOT web-accessible)

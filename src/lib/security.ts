@@ -51,6 +51,13 @@ import {
 import * as SecureStore from 'expo-secure-store';
 import { backendClient } from '@/client/backendClient';
 import {
+  recordPlatformIntegrity,
+  platformFromProcessEnv,
+  classifyIntegrityError,
+  resetPlatformIntegrity,
+  type PlatformIntegrityStatus,
+} from '@/lib/platformIntegrity';
+import {
   getNativeSecurityFlags,
   getNativeSecurityFlagsSync,
   wasLastSecurityFlagsCallUnavailable,
@@ -675,25 +682,19 @@ async function detectDebug(): Promise<SecurityThreat | null> {
   }
 }
 
-/**
- * ⚠️ TEMPORARY DEBUG GATE — AUTHORIZED REAL-DEVICE DEBUGGING SESSION ⚠️
- * Owner-directed: Developer Options + USB Debugging detection are bypassed
- * WHILE THIS FLAG IS true so ADB-based debugging works on the owner's
- * physical Android tablet (fullscreen video investigation).
- *
- * SCOPE (exactly two flags — nothing else):
- *   • developerOptionsEnabled  (dev-options toggle)
- *   • adbEnabled               (USB debugging)
- * debugger_attached / testOnlyBuild / VPN / root / Frida / Xposed / Magisk /
- * tamper / signature / emulator / mock-location / overlay / screen-recording
- * detection and ALL backend enforcement remain FULLY ACTIVE.
- *
- * The detector below and the native SecurityModule are UNCHANGED — restore
- * by flipping this constant back to false (owner will request this).
- * TODO(RESTORE): set DEBUG_DISABLE_DEV_OPTIONS_AND_ADB = false.
- */
-const DEBUG_DISABLE_DEV_OPTIONS_AND_ADB = true;
-
+// ── RESTORED (was: TEMPORARY DEBUG GATE) ─────────────────────────────────────
+// Developer Options + USB Debugging (ADB) detection were bypassed for an
+// authorized real-device debugging session on the owner's physical Android
+// tablet. The bypass has been REMOVED: a release build installed on a device
+// with either setting enabled is detected again and locked behind the central
+// SecurityGate, as the owner's security policy requires.
+//
+// Both flags keep their own event types (developer_options_enabled /
+// adb_enabled) so the backend audit trail records exactly which surface is
+// present; both map into the blocking `developer_options` policy bucket
+// (block_login). DEBUG DISABLE constant intentionally deleted — there is no
+// longer any single line that can switch these detections off in production.
+// ─────────────────────────────────────────────────────────────────────────────
 /**
  * Developer-options / debugger detection.
  * Android: SecurityModule (Developer Options flag, ADB, Debug.isDebuggerConnected).
@@ -702,15 +703,6 @@ const DEBUG_DISABLE_DEV_OPTIONS_AND_ADB = true;
 async function detectDeveloperOptions(): Promise<SecurityThreat | null> {
   try {
     if (process.env.EXPO_OS === 'web') return null;
-
-    // TEMPORARY DEBUG GATE (see block comment above) — bypass ONLY the
-    // developer-options/ADB detections; every other check still runs.
-    if (DEBUG_DISABLE_DEV_OPTIONS_AND_ADB) {
-      if (__DEV__) {
-        console.log('[SecurityCheck][DevOptions] TEMPORARY DEBUG GATE active — developerOptions/adb bypassed for authorized device debugging');
-      }
-      return null;
-    }
 
     if (process.env.EXPO_OS === 'ios') {
       const flags = await getNativeSecurityFlags();
@@ -743,13 +735,13 @@ async function detectDeveloperOptions(): Promise<SecurityThreat | null> {
     if (flags.debuggerAttached) {
       return { type: 'debugger_attached', detectionMethod: 'Debugger attached', detected: true };
     }
-    // TEMPORARY DEBUG GATE — bypass ONLY these two detections while the
-    // authorized real-device debugging session is active. debuggerAttached
-    // and testOnlyBuild REMAIN ENFORCED (outside the authorized scope).
-    if (!DEBUG_DISABLE_DEV_OPTIONS_AND_ADB && flags.adbEnabled) {
+    // RESTORED: USB debugging (ADB) and Developer Options are mandatory blocks
+    // again (both map to the blocking developer_options bucket). The bypass
+    // used during the authorized device-debugging session is gone.
+    if (flags.adbEnabled) {
       return { type: 'adb_enabled', detectionMethod: 'USB debugging (ADB) enabled', detected: true };
     }
-    if (!DEBUG_DISABLE_DEV_OPTIONS_AND_ADB && flags.developerOptionsEnabled) {
+    if (flags.developerOptionsEnabled) {
       return { type: 'developer_options_enabled', detectionMethod: 'Developer options enabled', detected: true };
     }
     if (flags.testOnlyBuild) {
@@ -1128,10 +1120,21 @@ async function detectTamper(): Promise<SecurityThreat | null> {
         '| expectedCertConfigured=', flags.expectedCertConfigured ?? false);
     }
 
-    // Signature check: pass only when runtime cert matches ANY trusted fingerprint.
-    // UNAVAILABLE when no fingerprint is configured anywhere — that state is
-    // surfaced as evidence (expectedCertConfigured=false), never as a failure.
-    if (SIGNATURE_CHECK_READY && TRUSTED_CERTS.length > 0) {
+    // Signature check: pass only when the runtime cert matches a trusted
+    // fingerprint AND the BUILD actually pinned one.
+    //
+    // Why the extra `expectedCertConfigured` condition matters: with an empty
+    // BuildConfig.EXPECTED_CERT_SHA256 the native check returns
+    // signatureValid=true having compared NOTHING (see
+    // SecurityModule.checkSignatureValid — `if (expected.isEmpty()) return true`).
+    // Without this condition, a release built on a machine that never generated
+    // the pin would have its unverified signature read as "verified" whenever
+    // the server had trusted certs configured. Requiring the build-time pin
+    // keeps "UNAVAILABLE" distinct from "passed" — the same rule
+    // detectAppIntegrity() already applies. UNAVAILABLE is surfaced as evidence
+    // (expectedCertConfigured=false in the security event), never as a verdict.
+    const buildPinnedCert = flags.expectedCertConfigured === true;
+    if (SIGNATURE_CHECK_READY && TRUSTED_CERTS.length > 0 && buildPinnedCert) {
       if (!flags.signatureValid) {
         return { type: 'signature_invalid', detectionMethod: 'App signature verification failed', detected: true };
       }
@@ -1204,9 +1207,27 @@ async function detectMockLocation(): Promise<SecurityThreat | null> {
 
 // Shared TTL cache — 10 min rate limit to avoid Apple/Google quota exhaustion
 let _piNonce: string | null   = null;
+// `_piResult` is the THREAT-DECISION cache only: true = "produced no threat this
+// cycle", false = "produced a blocking threat". It is NOT a verdict record — in
+// particular `true` does NOT mean "verified". Whether the check actually ran and
+// what the platform said lives in `platformIntegrity` (see below); that is the
+// only thing diagnostics and reports may read. Keeping the two separate is what
+// stops an unavailable/deferred check from being presented as a pass.
 let _piResult: boolean | null = null;
 let _piExpiry = 0;
 const PI_TTL_MS = 10 * 60 * 1000;
+
+/**
+ * Record the integrity outcome for reporting. Pure bookkeeping — it never
+ * changes a weight, policy, or gate decision. See `platformIntegrity.ts` for
+ * the status vocabulary and invariants.
+ */
+function settlePlatformIntegrity(
+  status: PlatformIntegrityStatus,
+  detail: string | null,
+): void {
+  recordPlatformIntegrity({ status, platform: platformFromProcessEnv(), detail });
+}
 
 // iOS App Attest key — loaded from SecureStore on first use, regenerated on invalidation
 let _appAttestKeyId: string | null = null;
@@ -1220,7 +1241,10 @@ export async function runPlayIntegrityCheck(): Promise<SecurityThreat | null> {
 
     // ── Android: Google Play Integrity ──────────────────────────────────────
     const { PLAY_INTEGRITY_READY } = getSecurityGuards();
-    if (!PLAY_INTEGRITY_READY) return null;
+    if (!PLAY_INTEGRITY_READY) {
+      settlePlatformIntegrity('unavailable', 'Play Integrity build-time guard inactive (PLAY_INTEGRITY_READY=false) — check did NOT run');
+      return null;
+    }
 
     if (_piResult !== null && Date.now() < _piExpiry) {
       return _piResult ? null : {
@@ -1236,13 +1260,28 @@ export async function runPlayIntegrityCheck(): Promise<SecurityThreat | null> {
     const { data: nonceData, error: nonceErr } = await backendClient.functions.invoke('verify-play-integrity', {
       body: { action: 'get_nonce', protected_action: 'generic' },
     });
-    if (nonceErr || !nonceData?.request_hash) return null;
+    if (nonceErr || !nonceData?.request_hash) {
+      const c = classifyIntegrityError(
+        nonceErr ?? { message: 'nonce response missing request_hash' },
+        'android',
+      );
+      settlePlatformIntegrity(c.status, c.detail);
+      return null;
+    }
     _piNonce = nonceData.request_hash as string;
 
     // 2. Request token from Play Integrity API (native; the hash becomes
     //    Google-signed requestDetails.requestHash)
     const token = await requestPlayIntegrityToken(_piNonce);
     if (!token) {
+      // No token (no Play Services, or an unsupported device). This is an
+      // ENVIRONMENT limitation, NOT a verified pass. Recorded as
+      // 'unavailable' so no diagnostic, report or summary can ever present it
+      // as a satisfied control. The cache below is still written, but note
+      // WHAT it caches: `_piResult` is the THREAT DECISION for this cycle
+      // (true = "produced no threat"), not a verdict. It exists so a device
+      // without Play Services does not re-enter the native bridge every cycle.
+      settlePlatformIntegrity('unavailable', 'Play Integrity token unavailable (no Play Services / unsupported device) — check did NOT run');
       _piResult = true;
       _piExpiry = Date.now() + PI_TTL_MS;
       return null;
@@ -1254,11 +1293,21 @@ export async function runPlayIntegrityCheck(): Promise<SecurityThreat | null> {
     const { data: verifyData, error: verifyErr } = await backendClient.functions.invoke('verify-play-integrity', {
       body: { action: 'verify', token, request_hash: _piNonce },
     });
-    if (verifyErr) return null;
+    if (verifyErr) {
+      const c = classifyIntegrityError(verifyErr, 'android');
+      settlePlatformIntegrity(c.status, c.detail);
+      return null;
+    }
 
     const passed = verifyData?.passed === true;
     _piResult = passed;
     _piExpiry = Date.now() + PI_TTL_MS;
+    settlePlatformIntegrity(
+      passed ? 'passed' : 'failed',
+      passed
+        ? 'Play Integrity verdict: device/app genuine'
+        : 'Play Integrity verdict: integrity failure reported by the server',
+    );
 
     if (!passed) {
       return {
@@ -1268,7 +1317,14 @@ export async function runPlayIntegrityCheck(): Promise<SecurityThreat | null> {
       };
     }
     return null;
-  } catch { return null; }
+  } catch (e: unknown) {
+    // Unexpected throw: inconclusive, never a pass.
+    settlePlatformIntegrity(
+      'error',
+      `Play Integrity flow threw unexpectedly (${(e as { message?: string })?.message ?? 'unknown'}) — NOT a pass`,
+    );
+    return null;
+  }
 }
 
 /**
@@ -1287,6 +1343,25 @@ export async function runPlayIntegrityCheck(): Promise<SecurityThreat | null> {
  * 10. Neither available → skip, non-blocking.
  */
 async function runAppAttestCheck(): Promise<SecurityThreat | null> {
+  // Tracks the most informative reason the flow could not produce a verdict, so
+  // every terminal exit can record an accurate status instead of a blanket
+  // "unknown". 'deferred' wins over a generic transient 'error' because it is
+  // the most specific cause (a deliberate server-side product decision).
+  let unverifiedStatus: PlatformIntegrityStatus | null = null;
+  let unverifiedDetail: string | null = null;
+  const noteUnverified = (status: PlatformIntegrityStatus, detail: string) => {
+    if (unverifiedStatus === 'deferred') return; // already the most specific
+    unverifiedStatus = status;
+    unverifiedDetail = detail;
+  };
+  const finishUnverified = (): null => {
+    settlePlatformIntegrity(
+      unverifiedStatus ?? 'error',
+      unverifiedDetail ?? 'App Attest produced no verdict — NOT a pass',
+    );
+    return null;
+  };
+
   try {
     // Cache: avoid hammering Apple quota — 10-min TTL
     if (_piResult !== null && Date.now() < _piExpiry) {
@@ -1329,8 +1404,10 @@ async function runAppAttestCheck(): Promise<SecurityThreat | null> {
             // Simulator or A11-: genuine unavailability → fall through to DeviceCheck
             break;
           }
-          // Any other key-generation error: skip this check
-          return null;
+          // Any other key-generation error: skip this check (recorded as
+          // inconclusive — never as a pass).
+          noteUnverified('error', `App Attest key generation failed (${code ?? 'unknown'}) — check did NOT run`);
+          return finishUnverified();
         }
       }
 
@@ -1338,7 +1415,15 @@ async function runAppAttestCheck(): Promise<SecurityThreat | null> {
       const { data: nonceData, error: nonceErr } = await backendClient.functions.invoke('verify-app-integrity', {
         body: { action: 'get_challenge', platform: 'ios' },
       });
-      if (nonceErr || !nonceData?.challenge) return null; // Backend unavailable → non-blocking
+      if (nonceErr || !nonceData?.challenge) {
+        // Backend unavailable → non-blocking, but explicitly NOT a pass.
+        const c = classifyIntegrityError(
+          nonceErr ?? { message: 'challenge response missing challenge' },
+          'ios',
+        );
+        noteUnverified(c.status, c.detail);
+        return finishUnverified();
+      }
 
       const challenge = nonceData.challenge as string;
 
@@ -1348,10 +1433,17 @@ async function runAppAttestCheck(): Promise<SecurityThreat | null> {
           body: { action: 'attest_key', keyId: _appAttestKeyId, challenge, platform: 'ios' },
         });
         if (attestErr) {
-          // Server-side attestation failed: discard key and regenerate on next attempt
+          // Server-side attestation failed. Classify BEFORE discarding the key:
+          // HTTP 503/501 means the server deliberately has App Attest
+          // enforcement OFF (the deferred product decision). That is not a
+          // device fault and is not worth retrying inside this cycle.
+          const c = classifyIntegrityError(attestErr, 'ios');
+          noteUnverified(c.status, c.detail);
+          // Key may need regeneration on the next real attempt.
           _appAttestKeyId = null;
           _appAttestKeyPersisted = false;
           try { await SecureStore.deleteItemAsync(ATTEST_KEY_STORE); } catch { /* ignore */ }
+          if (c.status === 'deferred') break; // do not spin on a deliberate deferral
           continue;
         }
         _appAttestKeyPersisted = true;
@@ -1373,23 +1465,39 @@ async function runAppAttestCheck(): Promise<SecurityThreat | null> {
         }
         if (code === APP_ATTEST_SERVER_ERROR) {
           // Transient Apple server error — do NOT fall back to DeviceCheck; skip check
-          return null;
+          noteUnverified('error', 'App Attest assertion failed (Apple server error) — inconclusive, NOT a pass');
+          return finishUnverified();
         }
         // Other assertion errors: skip
-        return null;
+        noteUnverified('error', `App Attest assertion failed (${code ?? 'unknown'}) — check did NOT run`);
+        return finishUnverified();
       }
 
-      if (!assertion) return null;
+      if (!assertion) {
+        noteUnverified('error', 'App Attest produced no assertion — check did NOT run');
+        return finishUnverified();
+      }
 
       // 2e. Server-side assertion verification
       const { data: verifyData, error: verifyErr } = await backendClient.functions.invoke('verify-app-integrity', {
         body: { action: 'verify_assertion', keyId: _appAttestKeyId, assertion, challenge, platform: 'ios' },
       });
-      if (verifyErr) return null; // Transient server issue — non-blocking
+      if (verifyErr) {
+        // Transient server issue — non-blocking, but explicitly NOT a pass.
+        const c = classifyIntegrityError(verifyErr, 'ios');
+        noteUnverified(c.status, c.detail);
+        return finishUnverified();
+      }
 
       const passed = verifyData?.passed === true;
       _piResult = passed;
       _piExpiry = Date.now() + PI_TTL_MS;
+      settlePlatformIntegrity(
+        passed ? 'passed' : 'failed',
+        passed
+          ? 'App Attest assertion verified by the server'
+          : 'App Attest assertion rejected: real integrity failure reported by the server',
+      );
       if (!passed) {
         return {
           type: 'app_attest_failed',
@@ -1408,20 +1516,38 @@ async function runAppAttestCheck(): Promise<SecurityThreat | null> {
       dcToken = await generateDeviceCheckToken();
     } catch (dcErr: unknown) {
       const code = (dcErr as { code?: string })?.code;
-      if (code === DEVICE_CHECK_UNSUPPORTED) return null; // Simulator — skip, non-blocking
-      return null;
+      if (code === DEVICE_CHECK_UNSUPPORTED) {
+        // Simulator — skip, non-blocking. Recorded as an environment fact.
+        noteUnverified('unavailable', 'DeviceCheck unsupported on this device (simulator) — check did NOT run');
+        return finishUnverified();
+      }
+      noteUnverified('error', `DeviceCheck token unavailable (${code ?? 'unknown'}) — check did NOT run`);
+      return finishUnverified();
     }
 
-    if (!dcToken) return null;
+    if (!dcToken) {
+      noteUnverified('unavailable', 'DeviceCheck returned no token — check did NOT run');
+      return finishUnverified();
+    }
 
     const { data: dcData, error: dcErr } = await backendClient.functions.invoke('verify-app-integrity', {
       body: { action: 'verify_device_check', token: dcToken, platform: 'ios' },
     });
-    if (dcErr) return null;
+    if (dcErr) {
+      const c = classifyIntegrityError(dcErr, 'ios');
+      noteUnverified(c.status, c.detail);
+      return finishUnverified();
+    }
 
     const dcPassed = dcData?.passed === true;
     _piResult = dcPassed;
     _piExpiry = Date.now() + PI_TTL_MS;
+    settlePlatformIntegrity(
+      dcPassed ? 'passed' : 'failed',
+      dcPassed
+        ? 'DeviceCheck token verified by the server'
+        : 'DeviceCheck verdict: real integrity failure reported by the server',
+    );
     if (!dcPassed) {
       return {
         type: 'app_attest_failed',
@@ -1430,7 +1556,14 @@ async function runAppAttestCheck(): Promise<SecurityThreat | null> {
       };
     }
     return null;
-  } catch { return null; }
+  } catch (e: unknown) {
+    // Unexpected throw: inconclusive, never a pass.
+    settlePlatformIntegrity(
+      'error',
+      `App Attest flow threw unexpectedly (${(e as { message?: string })?.message ?? 'unknown'}) — NOT a pass`,
+    );
+    return null;
+  }
 }
 
 /**
@@ -1442,6 +1575,9 @@ export async function clearAppAttestKey(): Promise<void> {
   _appAttestKeyPersisted = false;
   _piResult = null;
   _piExpiry = 0;
+  // The integrity cache is gone, so the reported status must go back to
+  // "not checked" rather than describing a stale previous session.
+  resetPlatformIntegrity();
   try { await SecureStore.deleteItemAsync(ATTEST_KEY_STORE, ATTEST_KEY_OPTIONS); } catch { /* ignore */ }
 }
 

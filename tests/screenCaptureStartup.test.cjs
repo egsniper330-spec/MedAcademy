@@ -171,24 +171,27 @@ function read(rel) {
     };
   `);
 
-  // ── TEMPORARY DEBUG GATE (intentional, still disabled for the real-device
-  // debugging session): FLAG_SECURE is force-disabled in the shipped source,
-  // which makes the guard an early-return no-op. The behavioural scenarios
-  // below pin the PRODUCTION path, so the gate is neutralised in the compiled
-  // copy ONLY — while the shipped source keeps the documented single-constant
-  // restore point.
+  // ── RESTORED PRODUCTION STATE ──────────────────────────────────────────────
+  // The temporary debug gate that force-disabled FLAG_SECURE in EVERY build
+  // (including release) has been removed. Protection is the default again, and
+  // the only escape hatch is an explicit DEVELOPMENT-build opt-in — the
+  // `__DEV__` conjunct makes it unreachable in a release bundle. The scenarios
+  // below therefore run against the SHIPPED source with no source rewriting.
   {
     const guardSrc = read('src/lib/screenCaptureGuard.ts');
-    ok(/const FLAG_SECURE_DEBUG_DISABLED\s*=/.test(guardSrc),
-      'screenCaptureGuard: FLAG_SECURE debug gate is a single named constant (restore point)');
-    ok(/TEMPORARY DEBUG GATE/.test(guardSrc),
-      'screenCaptureGuard: debug gate is explicitly marked TEMPORARY DEBUG GATE');
+    ok(!/FLAG_SECURE_DEBUG_DISABLED/.test(guardSrc),
+      'screenCaptureGuard: no blanket FLAG_SECURE disable switch remains');
+    ok(/const CAPTURE_PROTECTION_DISABLED\s*=/.test(guardSrc),
+      'screenCaptureGuard: the dev escape hatch is a single named constant');
+    ok(/typeof __DEV__ !== 'undefined'/.test(guardSrc) && /__DEV__ === true/.test(guardSrc),
+      'screenCaptureGuard: escape hatch requires __DEV__ (cannot fire in a release bundle)');
+    ok(/EXPO_PUBLIC_DISABLE_CAPTURE_PROTECTION/.test(guardSrc),
+      'screenCaptureGuard: escape hatch requires an explicit opt-in env var');
   }
 
   const compile = () => {
     const src = read('src/lib/screenCaptureGuard.ts');
-    const prod = src.replace(/const FLAG_SECURE_DEBUG_DISABLED\s*=\s*true/, 'const FLAG_SECURE_DEBUG_DISABLED = false');
-    const out = babel.transformSync(prod, {
+    const out = babel.transformSync(src, {
       filename: 'screenCaptureGuard.ts',
       configFile: false, babelrc: false,
       plugins: [

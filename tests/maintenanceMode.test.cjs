@@ -26,7 +26,18 @@ const fs = require('fs');
 const path = require('path');
 
 const ROOT = path.resolve(__dirname, '..');
-const model = require('../.freebuff/state-build/maintenanceStateModel.js');
+
+/** Compiled state model — scripts/state-build/ (npm run test:state), with the
+ *  legacy .freebuff/state-build/ location still honoured. */
+function requireStateModel(name) {
+  for (const dir of ['scripts/state-build', '.freebuff/state-build']) {
+    const p = path.join(__dirname, '..', dir, name);
+    if (fs.existsSync(p)) return require(p);
+  }
+  throw new Error(`compiled state model not found: ${name} — run: npm run test:state`);
+}
+
+const model = requireStateModel('maintenanceStateModel.js');
 
 let passed = 0;
 const failures = [];

@@ -17,6 +17,7 @@ import {
   getPublicSupportContacts, type PublicSupportContact,
   SUPPORT_ICONS, SUPPORT_DEFAULT_LABELS, type SupportPlatformKey,
 } from '@/lib/api';
+import { useSecurity } from '@/lib/SecurityContext';
 
 // ─── Threat display metadata ──────────────────────────────────────────────────
 // Only human-readable labels and icons — no internal method details shown to users.
@@ -161,12 +162,44 @@ export default function SecurityWarningScreen() {
     redirect:    string;
   }>();
 
-  const threats: ThreatItem[] = React.useMemo(() => {
-    try { return JSON.parse(params.threats ?? '[]'); } catch { return []; }
-  }, [params.threats]);
+  // ── AUTHORITATIVE SOURCE FIRST (root-cause fix) ───────────────────────────
+  // This screen previously derived EVERYTHING from route params. The
+  // authenticated shell navigated here with `router.replace('/security-warning')`
+  // and passed NO params, so the defaults below ([] / 0 / false) were rendered —
+  // producing the contradictory page:
+  //   "Security Warning" + "Device Risk Score: 0" + "Detected Issues (0)"
+  //   + "Security issues were detected on your device." + "Continue Anyway"
+  // The live SecurityContext verdict is now the single source of truth for
+  // findings, score and policy outcome. Route params remain a FALLBACK for
+  // callers outside the authenticated shell (the pre-login (auth) variant).
+  const security = useSecurity();
 
-  const riskScore   = parseInt(params.riskScore ?? '0', 10);
-  const blocksLogin = params.blocksLogin === 'true';
+  const threats: ThreatItem[] = React.useMemo(() => {
+    if (security.hasVerdict) return (security.threats ?? []) as ThreatItem[];
+    try { return JSON.parse(params.threats ?? '[]'); } catch { return []; }
+  }, [security.hasVerdict, security.threats, params.threats]);
+
+  const riskScore = security.hasVerdict
+    ? security.riskScore
+    : parseInt(params.riskScore ?? '0', 10);
+  const blocksLogin = security.hasVerdict
+    ? security.blocksLogin
+    : params.blocksLogin === 'true';
+
+  // A warning must never claim a finding it cannot list, and a screen reached
+  // while the authoritative evaluation is still running must not read as a
+  // verified clean result.
+  const findingCount = threats.length;
+  const hasFindings  = findingCount > 0;
+  const checkPending =
+    !hasFindings && !blocksLogin && (security.evaluating || !security.hasVerdict);
+
+  // ONE accent colour derived from the SAME state that drives the copy, so the
+  // icon, title, score and issue list can never disagree with each other.
+  const accent = blocksLogin ? '#EF4444'
+    : hasFindings ? '#F59E0B'
+      : checkPending ? c.primary
+        : '#22C55E';
   // Backend-verified role — the authoritative source for where to continue to.
   const { profile } = useProfileStore();
   // DESTINATION POLICY — never fall back to a STUDENT dashboard literal. A
@@ -264,15 +297,19 @@ export default function SecurityWarningScreen() {
             borderRadius: layout.heroIconRadius,
             alignItems: 'center', justifyContent: 'center',
           }]}>
-            <ShieldAlert size={Math.round(layout.heroIconSize * 0.5)} color={blocksLogin ? '#EF4444' : '#F59E0B'} />
+            <ShieldAlert size={Math.round(layout.heroIconSize * 0.5)} color={accent} />
           </View>
           <Text style={{ fontSize: layout.titleSize, fontWeight: '700', color: c.text, textAlign: 'center' }}>
-            {blocksLogin ? 'Access Blocked' : 'Security Warning'}
+            {blocksLogin ? 'Access Blocked' : hasFindings ? 'Security Warning' : 'Security Check'}
           </Text>
           <Text style={{ fontSize: layout.bodySize, color: `${c.text}88`, textAlign: 'center', lineHeight: layout.bodySize * 1.5 }}>
             {blocksLogin
               ? 'Your device does not meet security requirements. Login has been blocked by your administrator.'
-              : 'Security issues were detected on your device. Proceed with caution — some features may be restricted.'}
+              : hasFindings
+                ? 'Security issues were detected on your device. Proceed with caution — some features may be restricted.'
+                : checkPending
+                  ? 'The security evaluation is still running. This device has not been verified for this session yet.'
+                  : 'No security issues were found on your device. Nothing is currently blocking you.'}
           </Text>
         </View>
 
@@ -292,8 +329,37 @@ export default function SecurityWarningScreen() {
 
         {/* Detected Threats — user-friendly labels and descriptions only */}
         <Text style={{ fontSize: layout.headingSize, fontWeight: '700', color: c.text }}>
-          Detected Issues ({threats.length})
+          Detected Issues ({findingCount})
         </Text>
+        {/* EXPLICIT ZERO-FINDING STATE: never render the generic
+            "issues were detected" copy above an empty list. */}
+        {!hasFindings && (
+          <View style={[flat, {
+            borderRadius: layout.cardRadius, padding: layout.cardPx,
+            flexDirection: 'row', alignItems: 'flex-start', gap: layout.pad.lg,
+          }]}>
+            <View style={{
+              width: layout.touchTarget, height: layout.touchTarget,
+              borderRadius: layout.cardRadius / 2,
+              backgroundColor: `${accent}18`,
+              alignItems: 'center', justifyContent: 'center',
+            }}>
+              {checkPending
+                ? <ActivityIndicator color={accent} size="small" />
+                : <ShieldCheck size={layout.bodySize + 4} color={accent} />}
+            </View>
+            <View style={{ flex: 1, gap: layout.pad.xs }}>
+              <Text style={{ fontSize: layout.bodySize, fontWeight: '700', color: c.text }}>
+                {checkPending ? 'Verification in progress' : 'No issues detected'}
+              </Text>
+              <Text style={{ fontSize: layout.captionSize, color: `${c.text}77`, lineHeight: layout.captionSize * 1.5 }}>
+                {checkPending
+                  ? 'Security checks are running. This screen updates automatically once the evaluation completes.'
+                  : 'Every security check completed without reporting a finding. If you reached this screen by mistake, you can continue safely.'}
+              </Text>
+            </View>
+          </View>
+        )}
         {threats.map((t, i) => {
           const meta = THREAT_META[t.type] ?? { label: 'Security Issue', description: 'A security issue was detected on your device.', icon: ShieldAlert };
           const Icon = meta.icon;
@@ -398,10 +464,17 @@ export default function SecurityWarningScreen() {
             }]}>
               <AlertTriangle size={layout.bodySize + 4} color="#F59E0B" />
               <Text style={{ flex: 1, fontSize: layout.captionSize, color: c.text, lineHeight: layout.captionSize * 1.5 }}>
-                Continuing on a compromised device may expose your learning data to security risks.
+                {hasFindings
+                  ? 'Continuing on a compromised device may expose your learning data to security risks.'
+                  : 'No security findings are active. This notice is informational only.'}
               </Text>
             </View>
-            <NeuButton label="Continue Anyway" icon={<ArrowRight size={layout.bodySize} color="#fff" />} onPress={handleContinue} variant="primary" />
+            <NeuButton
+              label={hasFindings ? 'Continue Anyway' : 'Continue'}
+              icon={<ArrowRight size={layout.bodySize} color="#fff" />}
+              onPress={handleContinue}
+              variant="primary"
+            />
           </View>
         )}
 

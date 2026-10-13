@@ -5,6 +5,13 @@
 **Source:** supabase-backend-export.zip (2026-07-13)
 **Target:** backend/ (PHP 8.x + MySQL/MariaDB on cPanel)
 
+> **Historical record.** This audit captures the state on the date above. The
+> production API host has since been confirmed as **`api.medacademy.site`** (see
+> `backend/NAMECHEAP_DEPLOYMENT.md` for the live runbook). Any
+> `api.medacademy.eu.cc` values below are preserved verbatim because they are the
+> environment that was actually observed at the time; no current runtime
+> configuration reads them.
+
 ---
 
 ## EXECUTIVE SUMMARY

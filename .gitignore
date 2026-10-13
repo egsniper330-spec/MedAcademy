@@ -37,6 +37,20 @@ npm-debug.*
 yarn-debug.*
 yarn-error.*
 
+# ── Crash / diagnostic artifacts — NEVER commit ──────────────────────────────
+# JVM crash dumps and JIT replay logs (written by the Gradle daemon on OOM).
+hs_err_pid*.log
+replay_pid*.log
+# Console/build dumps captured while investigating a specific bug.
+*-test.txt
+# Preview/dev-server logs written into the repo root by tooling.
+*preview-*.log
+*preview-*.log.err
+
+# Compiled state models written by scripts/run-state-tests.cjs (regenerated
+# on every `npm run test:state`)
+scripts/state-build/
+
 # macOS
 .DS_Store
 *.pem
@@ -74,3 +88,7 @@ package.json.*
 
 # local git-history backup (never commit)
 .git-backup/
+
+# IDE / editor state (per-developer, never commit)
+.idea/
+*.iml

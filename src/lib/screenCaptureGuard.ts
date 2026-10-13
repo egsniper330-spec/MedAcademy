@@ -95,18 +95,25 @@ function warnUnavailable(api: string) {
   }
 }
 
-// ═══ TEMPORARY DEBUG GATE — FLAG_SECURE / SCREEN-CAPTURE PROTECTION ═══
-// TEMPORARY DEBUG STATE: FLAG_SECURE (screenshot/recording blocking) is
-// DISABLED for the current real-device fullscreen debugging session so ADB
-// `screencap` can capture evidence. Developer Options and USB Debugging
-// detections are also temporarily disabled (see security.ts / deviceKey.ts
-// TEMPORARY DEBUG GATE). ALL other security protections remain active.
-// The protection architecture below is fully preserved — restore by deleting
-// the single early return in this gate and rebuilding.
-// TODO(RESTORE): remove this gate when the user explicitly asks to restore
-// screen-capture protection.
-const FLAG_SECURE_DEBUG_DISABLED = true; // TEMPORARY DEBUG GATE — flip to false to restore
-// ═══════════════════════════════════════════════════════════════════════
+// ═══ SCREEN-CAPTURE PROTECTION — RESTORED (production default: ON) ═════════
+// Native FLAG_SECURE blocking is ACTIVE. The previous blanket debug gate that
+// force-disabled it in every build (including release) has been removed.
+//
+// The only remaining escape hatch is an explicit DEVELOPMENT-build opt-in, for
+// the case where an engineer must capture on-device evidence with ADB
+// `screencap`:
+//
+//     EXPO_PUBLIC_DISABLE_CAPTURE_PROTECTION=1     # .env.local, dev builds only
+//
+// The `__DEV__` conjunct makes this opt-out UNREACHABLE from a release bundle:
+// the release compiler folds `__DEV__` to `false`, so the constant is `false`
+// no matter what the environment contains. A shipped production release can
+// therefore never lose screenshot/recording protection.
+// ═══════════════════════════════════════════════════════════════════════════
+const CAPTURE_PROTECTION_DISABLED =
+  typeof __DEV__ !== 'undefined' &&
+  __DEV__ === true &&
+  process.env.EXPO_PUBLIC_DISABLE_CAPTURE_PROTECTION === '1';
 
 /**
  * Keyed prevent. The FIRST key to arrive while no native lock is held performs
@@ -115,8 +122,9 @@ const FLAG_SECURE_DEBUG_DISABLED = true; // TEMPORARY DEBUG GATE — flip to fal
  * has been applied).
  */
 export async function preventScreenCaptureAsync(key = 'default'): Promise<void> {
-  // TEMPORARY DEBUG GATE: skip the native FLAG_SECURE activation entirely.
-  if (FLAG_SECURE_DEBUG_DISABLED) return;
+  // Development-only opt-out (see the gate comment above). Always false in a
+  // release bundle, so production always activates native FLAG_SECURE.
+  if (CAPTURE_PROTECTION_DISABLED) return;
   if (jsTags.has(key)) return; // idempotent per key
   jsTags.add(key);
   const first = nativeLocked.size === 0;
@@ -140,8 +148,8 @@ export async function preventScreenCaptureAsync(key = 'default'): Promise<void> 
  * are ignored — they can never tear down another owner's protection.
  */
 export async function allowScreenCaptureAsync(key = 'default'): Promise<void> {
-  // TEMPORARY DEBUG GATE: FLAG_SECURE is force-released while debugging.
-  if (FLAG_SECURE_DEBUG_DISABLED) {
+  // Development-only opt-out (see the gate comment above).
+  if (CAPTURE_PROTECTION_DISABLED) {
     jsTags.delete(key);
     nativeLocked.delete(key);
     return;

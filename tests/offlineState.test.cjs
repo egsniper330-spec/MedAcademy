@@ -610,7 +610,14 @@ console.log('── Offline startup state machine wiring (no login redirect whil
   assert(/e\.meta\.userId === userId/.test(ovsSrc), 'hydrate filters rows by session owner (state 9)');
 
   // The pure machine itself is exercised by test:state (17 startup tests).
-  const runnerSrc = fs.readFileSync(path.join(ROOT, '.freebuff/run-state-tests.cjs'), 'utf8').replace(/\r/g, '');
+  // The runner is TRACKED in scripts/ so `npm run test:state` works from a
+  // clean checkout; the legacy .freebuff/ copy is accepted as a fallback.
+  const runnerPath = [
+    path.join(ROOT, 'scripts/run-state-tests.cjs'),
+    path.join(ROOT, '.freebuff/run-state-tests.cjs'),
+  ].find((p) => fs.existsSync(p));
+  assert(runnerPath, 'the state-test harness exists in a tracked location');
+  const runnerSrc = fs.readFileSync(runnerPath, 'utf8').replace(/\r/g, '');
   assert(/src\/lib\/startupStateModel\.ts/.test(runnerSrc), 'state-test harness compiles startupStateModel');
 }
 
