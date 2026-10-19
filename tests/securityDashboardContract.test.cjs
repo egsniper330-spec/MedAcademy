@@ -148,8 +148,10 @@ function ok(cond, label) {
 
   ok(/POLICY_TYPES = \[/.test(ctrl) && ctrl.includes("'play_integrity'"),
     'policy types validated against the schema CHECK allowlist');
-  ok(/MANDATORY_BLOCK = \['developer_options', 'debug', 'tamper', 'play_integrity'\]/.test(ctrl),
-    'mandatory-block buckets pinned (migration 016 owner requirement)');
+  // Migration 016 pinned the four debug/integrity buckets; migration 033 adds
+  // the two CONNECTION detectors — a confirmed VPN/proxy can never be weakened.
+  ok(/MANDATORY_BLOCK = \[[\s\S]{0,200}'vpn', 'proxy'/.test(ctrl),
+    'mandatory-block buckets pinned (migration 016 + 033 owner requirement)', );
   ok(/cannot be weakened/.test(ctrl), 'write path refuses weakening mandatory policies');
   ok((ctrl.match(/AuditService::write/g) || []).length >= 3,
     'every policy/whitelist mutation is audited');

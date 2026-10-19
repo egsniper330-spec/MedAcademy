@@ -76,6 +76,7 @@ const NO_INPUT = {
   evaluating: false,
   hasVerdict: true,
   overlayBlocked: false,
+  multiWindowBlocked: false,
   backgroundResumeBlocked: false,
   vpnBlocked: false,
   violationBlocked: false,
@@ -86,11 +87,15 @@ const state = (over) => M.resolveSecurityGateState({ ...NO_INPUT, ...over });
 // ── Part 1: the closed vocabulary ────────────────────────────────────────────
 console.log('── Part 1: state vocabulary ──');
 {
+  // Seven states now: the multi-window/split-screen restriction (a WINDOW-STATE
+  // cause, added for mandatory full-screen usage) sits directly below the live
+  // overlay signal and above the background/resume hold — see the precedence
+  // block below.
   const expected = [
-    'CHECKING', 'BLOCKED_OVERLAY', 'BLOCKED_BACKGROUND_RESUME',
+    'CHECKING', 'BLOCKED_OVERLAY', 'BLOCKED_MULTI_WINDOW', 'BLOCKED_BACKGROUND_RESUME',
     'BLOCKED_VPN', 'BLOCKED_SECURITY_VIOLATION', 'ALLOWED',
   ];
-  check('1a: exactly the six required states are enumerated',
+  check('1a: exactly the seven required states are enumerated',
     JSON.stringify(M.SECURITY_GATE_STATES) === JSON.stringify(expected));
 }
 
@@ -103,9 +108,29 @@ console.log('── Part 2: precedence ──');
     state({ overlayBlocked: true, backgroundResumeBlocked: true, vpnBlocked: true, violationBlocked: true })
       === 'BLOCKED_OVERLAY');
 
-  check('2c: background/resume outranks VPN and violation',
+  // A prohibited window mode (split-screen / other multi-window mode / our own
+  // PiP) outranks the resume hold: it is a live, user-visible condition, and the
+  // window in front of the gate is one the user can pair with another app.
+  check('2b-2: multi-window outranks background/resume, VPN and a violation',
+    state({ multiWindowBlocked: true, backgroundResumeBlocked: true, vpnBlocked: true, violationBlocked: true })
+      === 'BLOCKED_MULTI_WINDOW');
+  check('2b-3: the live overlay signal still outranks multi-window',
+    state({ overlayBlocked: true, multiWindowBlocked: true }) === 'BLOCKED_OVERLAY');
+
+  // CHANGED deliberately: the resume hold is an INTERIM state with NO screen
+  // (rendersBlockScreen is false). If it outranked the policy states, a
+  // violation confirmed DURING a resume would be masked by a state that renders
+  // nothing and the user would face refused requests with no explanation. The
+  // violation must win the DISPLAY decision; the hold keeps winning CONTAINMENT
+  // (isGateBlocked stays true for it, and the lock holders keep it engaged).
+  check('2c: a confirmed VPN block outranks the interim resume hold',
     state({ backgroundResumeBlocked: true, vpnBlocked: true, violationBlocked: true })
-      === 'BLOCKED_BACKGROUND_RESUME');
+      === 'BLOCKED_VPN');
+  check('2c-2: a confirmed non-VPN violation also outranks the resume hold',
+    state({ backgroundResumeBlocked: true, violationBlocked: true })
+      === 'BLOCKED_SECURITY_VIOLATION');
+  check('2c-3: with nothing else blocking, the resume hold is still the state',
+    state({ backgroundResumeBlocked: true }) === 'BLOCKED_BACKGROUND_RESUME');
 
   check('2d: VPN outranks a generic violation',
     state({ vpnBlocked: true, violationBlocked: true }) === 'BLOCKED_VPN');
@@ -132,7 +157,7 @@ console.log('── Part 3: fail-closed on an unverified state ──');
   check('3d: CHECKING is not a block (the gate does not mount)',
     M.isGateBlocked('CHECKING') === false && M.isGateBlocked('ALLOWED') === false);
   check('3e: every BLOCKED_* state is a block',
-    ['BLOCKED_OVERLAY', 'BLOCKED_BACKGROUND_RESUME', 'BLOCKED_VPN', 'BLOCKED_SECURITY_VIOLATION']
+    ['BLOCKED_OVERLAY', 'BLOCKED_MULTI_WINDOW', 'BLOCKED_BACKGROUND_RESUME', 'BLOCKED_VPN', 'BLOCKED_SECURITY_VIOLATION']
       .every((s) => M.isGateBlocked(s) === true));
 }
 
@@ -188,7 +213,13 @@ console.log('── Part 6: overlay gate release rule ──');
 console.log('── Part 7: which states offer a recheck control ──');
 {
   check('7a: overlay is recheckable', M.isGateRecheckable('BLOCKED_OVERLAY') === true);
-  check('7b: background/resume is recheckable', M.isGateRecheckable('BLOCKED_BACKGROUND_RESUME') === true);
+  // CHANGED deliberately: the resume hold renders no page, and its verification
+  // always starts and completes on its own — there is no control to offer, and
+  // nothing a user could press could clear it faster (the previous Continue
+  // control was a no-op whenever an evaluation was already running).
+  check('7b: background/resume offers no recheck control (it has no page)',
+    M.isGateRecheckable('BLOCKED_BACKGROUND_RESUME') === false
+    && M.rendersBlockScreen('BLOCKED_BACKGROUND_RESUME') === false);
   // CHANGED deliberately: a VPN/proxy is something the USER can remove (turn the
   // VPN off) and the reported flow is exactly "switch it off, then get back in".
   // The control only REQUESTS a re-check — the block clears solely when a fresh
@@ -198,6 +229,12 @@ console.log('── Part 7: which states offer a recheck control ──');
     M.isGateRecheckable('BLOCKED_VPN') === true);
   check('7d: a generic violation is NOT recheckable',
     M.isGateRecheckable('BLOCKED_SECURITY_VIOLATION') === false);
+  // The multi-window restriction is the ONE cause whose state the user must
+  // change (return to full screen): a control here would read as an
+  // acknowledgement they can tap while still in split-screen, i.e. a bypass.
+  // The platform's own signal clears it, together with a fresh verdict.
+  check('7d-2: the multi-window restriction is NOT recheckable (no bypass path)',
+    M.isGateRecheckable('BLOCKED_MULTI_WINDOW') === false);
   check('7e: ALLOWED / CHECKING offer nothing', !M.isGateRecheckable('ALLOWED') && !M.isGateRecheckable('CHECKING'));
 }
 

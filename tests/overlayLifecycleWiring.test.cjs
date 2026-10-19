@@ -42,6 +42,15 @@ const SECURITY_MODULE_PLUGIN = read('plugins/withSecurityModule.js');
 const NATIVE = read('src/lib/nativeSecurity.ts');
 const CONTEXT = read('src/lib/SecurityContext.tsx');
 const GATE = read('src/app/(app)/security-gate.tsx');
+/** GATE with block comments stripped — for "no dismiss control" assertions,
+ *  so a comment that QUOTES the forbidden label cannot satisfy (or defeat)
+ *  the pattern. Mirrors the guarded helper in tests/vpnMandatoryBlock.test.cjs. */
+const GATE_CODE = GATE.replace(/\/\*[\s\S]*?\*\//g, (match, offset, whole) => {
+  const lineStart = whole.lastIndexOf('\n', offset) + 1;
+  const before  = whole.slice(lineStart, offset);
+  const odd     = (q) => (before.split(q).length - 1) % 2 === 1;
+  return (odd("'") || odd('"') || odd('`')) ? match : '';
+}).split('\n').map((l) => l.replace(/(^|[^:])\/\/.*$/, '$1')).join('\n');
 const TRANSPORT = read('src/client/php.ts');
 
 /** The Kotlin source embedded in the config plugin (the real native module). */
@@ -164,20 +173,27 @@ console.log('── Part 5: gate presentation ──');
     ['5d: the overlay copy comes from the state model (verbatim)', /OVERLAY_WARNING_COPY\.message/],
     ['5e: ... including its title', /OVERLAY_WARNING_COPY\.title\.toUpperCase\(\)/],
     ['5f: the recheck button is accessible', /accessibilityLabel="Verify security and continue"/],
-    ['5g: a background/resume state gets its own copy', /VERIFYING YOUR SESSION/],
+    // CHANGED deliberately: the interim resume state renders NO page at all.
+    ['5g: the resume hold renders no full-screen page (previous VERIFYING page removed)',
+      /if \(!blocking \|\| !blockScreen\) return null;/],
+    ['5g-2: the page predicate is the pure model\u2019s rendersBlockScreen',
+      /rendersBlockScreen\(gateState\)/],
     ['5h: the recheck reports a busy state', /accessibilityState=\{\{ disabled: verifying, busy: verifying \}\}/],
-    ['5i: findings are suppressed for the non-policy states', /overlayBlocked \|\| resumeBlocked \? \[\] : gateFindings\(types\)/],
+    // The findings list is for POLICY states only: the window-state causes
+    // (overlay, multi-window) and the resume hold each explain themselves.
+    ['5i: findings are suppressed for the non-policy states',
+      /overlayBlocked \|\| windowModeBlockedState \? \[\] : gateFindings\(types\)/],
     ['5j: the hardware back button cannot dismiss a block', /hardwareBackPress', \(\) => true/],
     ['5k: FLAG_SECURE is held while gated', /preventScreenCaptureAsync\('security-gate'\)/],
   ];
   for (const [name, re] of pairs) check(name, re.test(GATE));
 
   check('5l: no "Continue Anyway" / dismiss control exists for a block state',
-    !/Continue Anyway/i.test(GATE));
+    !/Continue Anyway/i.test(GATE_CODE));
   check('5m: the recheck does not clear state locally (it calls the context action)',
     /void verifySecurity\(\)\.finally/.test(GATE));
-  check('5n: all five required states are named in the file documentation',
-    ['BLOCKED_OVERLAY', 'BLOCKED_BACKGROUND_RESUME', 'BLOCKED_VPN', 'BLOCKED_SECURITY_VIOLATION', 'CHECKING']
+  check('5n: all six required states are named in the file documentation',
+    ['BLOCKED_OVERLAY', 'BLOCKED_MULTI_WINDOW', 'BLOCKED_BACKGROUND_RESUME', 'BLOCKED_VPN', 'BLOCKED_SECURITY_VIOLATION', 'CHECKING']
       .every((s) => GATE.includes(s)));
 }
 

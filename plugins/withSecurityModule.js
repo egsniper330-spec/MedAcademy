@@ -12,7 +12,7 @@ const path = require('path');
 // the version that matches the installed Expo SDK (55.x), regardless of whether
 // any unrelated version is listed in the project's package.json.
 const expoRoot = path.dirname(require.resolve('expo/package.json'));
-const { withDangerousMod, withMainApplication, withXcodeProject, withAndroidManifest } = require(
+const { withDangerousMod, withMainActivity, withMainApplication, withXcodeProject, withAndroidManifest } = require(
   require.resolve('@expo/config-plugins', { paths: [expoRoot] })
 );
 
@@ -21,6 +21,7 @@ const { withDangerousMod, withMainApplication, withXcodeProject, withAndroidMani
 const SECURITY_MODULE_KT = `package com.medacademy.security
 
 import android.annotation.SuppressLint
+import android.app.Activity
 import android.app.ActivityManager
 import android.app.AppOpsManager
 import android.content.Context
@@ -44,6 +45,7 @@ import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
 import com.facebook.react.bridge.Arguments
+import com.facebook.react.bridge.LifecycleEventListener
 import com.facebook.react.bridge.Promise
 import com.facebook.react.bridge.ReactApplicationContext
 import com.facebook.react.bridge.ReactContextBaseJavaModule
@@ -54,6 +56,7 @@ import com.facebook.react.modules.core.DeviceEventManagerModule
 import java.io.BufferedReader
 import java.io.File
 import java.io.InputStreamReader
+import java.lang.ref.WeakReference
 import java.util.zip.ZipFile
 import org.json.JSONObject
 import org.json.JSONArray
@@ -69,6 +72,76 @@ import java.security.spec.ECGenParameterSpec
 import java.security.MessageDigest
 
 private const val TAG = "SecurityModule"
+
+// ─── Multi-window / split-screen vocabulary (THIS app's window STATE) ────────
+// A deliberately small, closed set so JS policy switches on four named values
+// instead of interpreting booleans, and so an unmeasured state is its OWN
+// value rather than being silently rounded to "fullscreen" (fail-safe).
+private const val WINDOW_MODE_FULLSCREEN = "fullscreen"
+private const val WINDOW_MODE_MULTI = "multi_window"
+private const val WINDOW_MODE_PIP = "picture_in_picture"
+private const val WINDOW_MODE_UNKNOWN = "unknown"
+
+/**
+ * Process-wide window-mode relay.
+ *
+ * WHY A SEPARATE HOLDER: the multi-window / PiP TRANSITION callbacks are
+ * delivered by the framework to the ACTIVITY (MainActivity.kt), while the
+ * security module is constructed lazily by React Native — so a callback can
+ * arrive before any module instance exists, and a React reload replaces the
+ * instance while the activity lives on. This object is the single meeting
+ * point: the activity reports its real, documented state here and every live
+ * module instance subscribes. It also retains the last reported value so a
+ * module that starts later does not begin blind, and it never polls anything.
+ */
+object WindowModeBridge {
+
+    /** Last mode an Activity actually reported ("unknown" until then). */
+    @Volatile
+    var lastReported: String = WINDOW_MODE_UNKNOWN
+        private set
+
+    @Volatile
+    private var listener: ((String) -> Unit)? = null
+
+    /**
+     * Subscribe the live module instance. Replays the last reported mode (when
+     * one exists) so a module created after the app was ALREADY launched into
+     * split-screen still learns the current mode immediately.
+     */
+    fun subscribe(cb: (String) -> Unit) {
+        listener = cb
+        val current = lastReported
+        if (current != WINDOW_MODE_UNKNOWN) {
+            try { cb(current) } catch (_: Exception) { /* the subscriber logs its own failures */ }
+        }
+    }
+
+    /** Drop the module listener on teardown (never affects the activity). */
+    fun unsubscribe() {
+        listener = null
+    }
+
+    /**
+     * Called by MainActivity on every multi-window / picture-in-picture
+     * transition, with the Activity's OWN documented return values:
+     * isInMultiWindowMode covers split-screen, freeform/desktop windowing and
+     * our own PiP (PiP is documented as a special case of multi-window), so PiP
+     * is classified FIRST and reported as its own mode.
+     */
+    fun report(isInMultiWindowMode: Boolean, isInPictureInPictureMode: Boolean) {
+        val mode = modeOf(isInMultiWindowMode, isInPictureInPictureMode)
+        lastReported = mode
+        try { listener?.invoke(mode) } catch (_: Exception) { /* a throwing subscriber cannot break the activity callback */ }
+    }
+
+    /** The ONE mapping from the platform booleans to the JS vocabulary. */
+    fun modeOf(isInMultiWindowMode: Boolean, isInPictureInPictureMode: Boolean): String {
+        if (isInPictureInPictureMode) return WINDOW_MODE_PIP
+        if (isInMultiWindowMode) return WINDOW_MODE_MULTI
+        return WINDOW_MODE_FULLSCREEN
+    }
+}
 
 /**
  * SecurityModule — comprehensive native Android security checks.
@@ -106,6 +179,12 @@ class SecurityModule(private val reactContext: ReactApplicationContext) :
     init {
         Log.d(TAG, "◀▶ SecurityModule INSTANTIATED — module is live and registered")
         registerVpnNetworkCallback()
+        // Multi-window monitoring starts WITH the module so the first evaluation
+        // already has a real measurement, and an app launched DIRECTLY into
+        // split-screen is never missed. Posted to the UI thread because the
+        // module is constructed on the native-modules thread while window reads
+        // and window listeners are UI-thread operations.
+        Handler(Looper.getMainLooper()).post { installWindowModeMonitoring() }
     }
 
     // ══════════════════════════════════════════════════════════════════════════
@@ -230,6 +309,11 @@ class SecurityModule(private val reactContext: ReactApplicationContext) :
 
     override fun onCatalystInstanceDestroy() {
         super.onCatalystInstanceDestroy()
+        // The window-mode relay, the lifecycle listener and the layout watcher
+        // are module resources: drop them before anything else so a reloaded
+        // module never leaves a stale listener behind. The ACTIVITY's own state
+        // is not touched.
+        tearDownWindowModeMonitoring()
         val cb = vpnNetworkCallback ?: return
         try {
             val cm = reactContext.getSystemService(Context.CONNECTIVITY_SERVICE)
@@ -1204,6 +1288,267 @@ class SecurityModule(private val reactContext: ReactApplicationContext) :
     }
 
     // ══════════════════════════════════════════════════════════════════════════
+    // MULTI-WINDOW / SPLIT-SCREEN — mandatory full-screen usage
+    //
+    // WHAT ANDROID CAN ANSWER (documented APIs; no permission, no polling):
+    //   • Activity.isInMultiWindowMode()      — API 24+. TRUE while THIS
+    //     activity is in split-screen, in a freeform/desktop app window, or in
+    //     our own picture-in-picture (documented: PiP is a special case of
+    //     multi-window, so PiP implies TRUE here).
+    //   • Activity.isInPictureInPictureMode() — API 24+. TRUE only while THIS
+    //     activity is floating in PiP. The two are reported as DISTINCT modes
+    //     because the copy the user reads must not call a split screen a float
+    //     — and must never call either one a confirmed overlay.
+    //   • Activity.onMultiWindowModeChanged / onPictureInPictureModeChanged —
+    //     the transition callbacks. Only an Activity receives them, so
+    //     MainActivity forwards them through WindowModeBridge (see the
+    //     withMainActivity mod in this plugin).
+    //
+    // WHAT ANDROID CANNOT ANSWER (documented platform limits — never inferred,
+    // never reported as a confirmed finding):
+    //   • There is NO public API for one app to enumerate ANOTHER app's windows,
+    //     so "another app is floating over MedAcademy right now" cannot be
+    //     measured at all. AccessibilityService.getWindows() exists but requires
+    //     an accessibility service, which this app deliberately does not
+    //     request (privacy, and Play policy for a learning app).
+    //   • OEM floating-window features (MIUI / Samsung / EMUI floating windows)
+    //     are vendor UI layered over the documented state; no API reports them
+    //     and no claim is made about them.
+    //   • "Another app is drawn OVER us" is a DIFFERENT question, answered
+    //     separately and honestly by the obscured-touch evidence above
+    //     (API 29+ framework flags, touch-dependent) plus prevention via
+    //     setHideOverlayWindows on API 31+. A multi-window state is never
+    //     presented as an overlay, and vice versa.
+    //
+    // THREE INDEPENDENT TRIGGERS, ONE AUTHORITATIVE STATE (no polling timer):
+    //   1. the activity callback relayed by WindowModeBridge (real transition),
+    //   2. a decor-view LAYOUT pass — entering or leaving split-screen resizes
+    //      our window, so a layout change is a reliable prompt to re-read, and
+    //      it also covers the case where the MainActivity forwarder is absent,
+    //   3. host RESUME — covers being launched directly into split-screen and
+    //      returning from another app.
+    // ══════════════════════════════════════════════════════════════════════════
+
+    /** Last measured mode. "unknown" until a real read succeeds. */
+    private var windowMode: String = WINDOW_MODE_UNKNOWN
+
+    /** True only once a REAL read produced a mode (never set by a failure). */
+    private var windowModeMeasured: Boolean = false
+
+    private var windowModeMonitoringInstalled = false
+    private var hostResumeListener: LifecycleEventListener? = null
+    private var watchedActivity: WeakReference<Activity>? = null
+
+    /**
+     * A layout pass re-reads the mode. The listener does the minimum possible
+     * work (one posted read) and is replaced when the activity changes; there
+     * is no timer and no per-frame measurement.
+     */
+    private val windowModeLayoutListener =
+        View.OnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
+            refreshWindowModeOnMain("layout")
+        }
+
+    /**
+     * Read the CURRENT window mode on demand.
+     *
+     * Resolves { mode, inMultiWindow, inPictureInPicture, measured,
+     * signalTimeMs }. A measured value of false means the platform could not
+     * answer (no activity yet, or the read threw): JS must treat that as "not
+     * measurable on this device", NEVER as proof of full-screen use. Resolves
+     * null only if the call itself failed.
+     */
+    @ReactMethod
+    fun getWindowMode(promise: Promise) {
+        mainHandler.post {
+            try {
+                val mode = readWindowMode(currentActivity)
+                if (mode != WINDOW_MODE_UNKNOWN) publishWindowMode(mode, "read")
+                val reading = Arguments.createMap()
+                reading.putString("mode", mode)
+                reading.putBoolean("measured", mode != WINDOW_MODE_UNKNOWN)
+                reading.putBoolean("inMultiWindow",
+                    mode == WINDOW_MODE_MULTI || mode == WINDOW_MODE_PIP)
+                reading.putBoolean("inPictureInPicture", mode == WINDOW_MODE_PIP)
+                reading.putDouble("signalTimeMs", System.currentTimeMillis().toDouble())
+                promise.resolve(reading)
+            } catch (e: Exception) {
+                Log.d(TAG, "[getWindowMode] failed: \${e.message}")
+                promise.resolve(null)
+            }
+        }
+    }
+
+    /**
+     * Install the window-mode monitoring on the CURRENT activity and re-read the
+     * mode at once. Idempotent; safe to call on every session start and on every
+     * foreground return, because Android can recreate the activity (which drops
+     * the layout watcher) across a background cycle.
+     *
+     * Resolves true only when a REAL measurement exists afterwards. False means
+     * "this platform could not answer" (no activity yet / older device) — never
+     * "full-screen confirmed".
+     */
+    @ReactMethod
+    fun enableWindowModeMonitoring(promise: Promise) {
+        Log.d(TAG, "[enableWindowModeMonitoring] ▶ called")
+        mainHandler.post {
+            try {
+                installWindowModeMonitoring()
+                refreshWindowMode("install")
+                promise.resolve(windowModeMeasured)
+            } catch (e: Exception) {
+                Log.d(TAG, "[enableWindowModeMonitoring] failed: \${e.message}")
+                promise.resolve(false)
+            }
+        }
+    }
+
+    /** Attach the relay, the RN lifecycle listener and the layout watcher. */
+    private fun installWindowModeMonitoring() {
+        WindowModeBridge.subscribe { mode -> publishWindowMode(mode, "activity") }
+        if (!windowModeMonitoringInstalled) {
+            val listener = object : LifecycleEventListener {
+                override fun onHostResume() {
+                    // Foreground return, or the first resume after a cold start:
+                    // a mandatory re-check, because the mode may have changed
+                    // while another app was in front.
+                    mainHandler.post { refreshWindowMode("resume") }
+                }
+                override fun onHostPause() { }
+                override fun onHostDestroy() { watchedActivity = null }
+            }
+            try {
+                reactContext.addLifecycleEventListener(listener)
+                hostResumeListener = listener
+                windowModeMonitoringInstalled = true
+            } catch (e: Exception) {
+                Log.d(TAG, "[windowMode] lifecycle listener unavailable: \${e.message}")
+            }
+        }
+        attachLayoutWatcher(currentActivity)
+    }
+
+    /**
+     * Watch the activity's decor view for LAYOUT changes only — entering or
+     * leaving split-screen resizes our window, which produces exactly one layout
+     * pass. One watcher per activity, replaced when the activity changes.
+     */
+    private fun attachLayoutWatcher(activity: Activity?) {
+        if (activity == null) return
+        // Reference comparison is enough: Activity does not override equals().
+        if (watchedActivity?.get() == activity) return
+        detachLayoutWatcher()
+        try {
+            activity.window.decorView.addOnLayoutChangeListener(windowModeLayoutListener)
+            watchedActivity = WeakReference(activity)
+            Log.d(TAG, "[windowMode] layout watcher attached (re-reads on resize)")
+        } catch (e: Exception) {
+            Log.d(TAG, "[windowMode] layout watcher unavailable: \${e.message}")
+        }
+    }
+
+    private fun detachLayoutWatcher() {
+        val previous = watchedActivity?.get()
+        if (previous != null) {
+            try {
+                previous.window.decorView.removeOnLayoutChangeListener(windowModeLayoutListener)
+            } catch (_: Exception) {
+                // A window being torn down must not break containment.
+            }
+        }
+        watchedActivity = null
+    }
+
+    /** Re-read on the UI thread from whichever thread called in. */
+    private fun refreshWindowModeOnMain(source: String) {
+        try {
+            if (Looper.myLooper() == Looper.getMainLooper()) refreshWindowMode(source)
+            else mainHandler.post { refreshWindowMode(source) }
+        } catch (_: Exception) {
+            // A mode probe must never disturb the caller (layout pass, resume).
+        }
+    }
+
+    /**
+     * Fresh measurement of the current activity's window mode.
+     * An absent or failed read is NOT a measurement: the last measured value is
+     * kept, so an unreadable moment can never be mistaken for full-screen, and
+     * nothing is published.
+     */
+    private fun refreshWindowMode(source: String): String {
+        val mode = readWindowMode(currentActivity)
+        if (mode == WINDOW_MODE_UNKNOWN) return windowMode
+        publishWindowMode(mode, source)
+        return mode
+    }
+
+    /** The documented Activity reads, fail-safe to "unknown". */
+    private fun readWindowMode(activity: Activity?): String {
+        if (activity == null) return WINDOW_MODE_UNKNOWN
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.N) return WINDOW_MODE_UNKNOWN
+        return try {
+            WindowModeBridge.modeOf(
+                activity.isInMultiWindowMode(),
+                activity.isInPictureInPictureMode(),
+            )
+        } catch (_: Exception) {
+            WINDOW_MODE_UNKNOWN
+        }
+    }
+
+    /** Store and push, but only when the belief actually changes. */
+    private fun publishWindowMode(mode: String, source: String) {
+        if (mode == WINDOW_MODE_UNKNOWN) return
+        val changed = mode != windowMode || !windowModeMeasured
+        windowMode = mode
+        windowModeMeasured = true
+        if (!changed) return
+        Log.d(TAG, "[windowMode] \$mode (source=\$source)")
+        emitWindowModeChanged(mode, source)
+    }
+
+    /** One event per real transition — never one per check or per layout pass. */
+    private fun emitWindowModeChanged(mode: String, source: String) {
+        try {
+            if (!reactContext.hasActiveReactInstance()) return
+            val params = Arguments.createMap()
+            params.putString("mode", mode)
+            params.putBoolean("inMultiWindow",
+                mode == WINDOW_MODE_MULTI || mode == WINDOW_MODE_PIP)
+            params.putBoolean("inPictureInPicture", mode == WINDOW_MODE_PIP)
+            params.putBoolean("measured", true)
+            params.putString("source", source)
+            params.putDouble("signalTimeMs", System.currentTimeMillis().toDouble())
+            reactContext
+                .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
+                .emit("windowModeChanged", params)
+        } catch (e: Exception) {
+            Log.d(TAG, "[windowMode] emit exception: \${e.message}")
+        }
+    }
+
+    /** Teardown — the activity's own state is untouched. */
+    private fun tearDownWindowModeMonitoring() {
+        try {
+            WindowModeBridge.unsubscribe()
+        } catch (_: Exception) {
+            // Teardown must never throw.
+        }
+        detachLayoutWatcher()
+        val listener = hostResumeListener
+        if (listener != null) {
+            try {
+                reactContext.removeLifecycleEventListener(listener)
+            } catch (_: Exception) {
+                // A dead bridge instance has nothing left to unregister.
+            }
+            hostResumeListener = null
+        }
+        windowModeMonitoringInstalled = false
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
     // PHASE 2 — APP SIGNATURE VERIFICATION
     // ══════════════════════════════════════════════════════════════════════════
 
@@ -1541,6 +1886,23 @@ class SecurityModule(private val reactContext: ReactApplicationContext) :
             r.putBoolean("windowObscured", windowObscured)
             r.putBoolean("overlayProtectionInstalled", overlayProtectionInstalled)
             Log.d(TAG, "[getSecurityFlags] frida=$frida xposed=$xposed magisk=$magisk overlay=$overlay sigOk=$sigOk tamper=$tamper")
+
+            // ── Multi-window / split-screen state (window-state evidence) ──
+            // The LAST MEASURED value (the activity callback, the layout watcher
+            // and the resume hook keep it current) plus a UI-thread refresh for
+            // the next read: the documented window reads are UI-thread
+            // operations, and a check must never block on them. These fields are
+            // EVIDENCE for the report and diagnostics; the enforcement decision
+            // is driven by the live window-mode signal, not by this snapshot.
+            // windowModeMeasured=false means "not measurable here", which is
+            // never the same as "full-screen".
+            refreshWindowModeOnMain("flags")
+            r.putString("windowMode", windowMode)
+            r.putBoolean("windowModeMeasured", windowModeMeasured)
+            r.putBoolean("inMultiWindowMode",
+                windowMode == WINDOW_MODE_MULTI || windowMode == WINDOW_MODE_PIP)
+            r.putBoolean("inPictureInPictureMode", windowMode == WINDOW_MODE_PIP)
+            Log.d(TAG, "[getSecurityFlags] windowMode=$windowMode measured=$windowModeMeasured")
 
             // ── Phase 3 (new) ──────────────────────────────────────────────
             val vpn      = runCatching { detectVpn()           }.getOrDefault(false)
@@ -2187,6 +2549,119 @@ function withSecurityPackageRegistration(config) {
   });
 }
 
+// ─── withMainActivity: multi-window / PiP forwarders ─────────────────────────
+//
+// WHY THIS MOD EXISTS: the framework delivers the multi-window and
+// picture-in-picture TRANSITION callbacks to the ACTIVITY
+// (onMultiWindowModeChanged / onPictureInPictureModeChanged). A React Native
+// module can neither receive nor override them, so the generated MainActivity
+// forwards each transition to WindowModeBridge (declared in the Kotlin security
+// module), which relays it to whichever SecurityModule instance is live.
+//
+// Both overloads are injected deliberately:
+//   • onMultiWindowModeChanged(boolean)              — API 24-25 (deprecated
+//     from 26, but that is exactly what the platform calls on 24/25);
+//   • onMultiWindowModeChanged(boolean, Configuration) — API 26+.
+// The platform's two-argument default delegates to the one-argument form, so a
+// single transition can reach the bridge twice; WindowModeBridge emits only a
+// real CHANGE, so the duplicate is invisible to JS (no event storm).
+//
+// The patch is IDEMPOTENT (marker-guarded), refuses to touch anything that is
+// not the generated Kotlin MainActivity, and is exported on the plugin function
+// so a test can exercise it without a full prebuild.
+
+const WINDOW_MODE_ACTIVITY_MARKER = 'MedAcademy multi-window guard';
+
+const WINDOW_MODE_ACTIVITY_OVERRIDES = `
+  /**
+   * ${WINDOW_MODE_ACTIVITY_MARKER} (injected by plugins/withSecurityModule.js).
+   *
+   * MedAcademy may only run full-screen, so every multi-window state transition
+   * is reported to the native security module, which enforces the block
+   * (SecurityGate -> BLOCKED_MULTI_WINDOW). Reporting is fire-and-forget: it
+   * never blocks or delays this callback, and the module deduplicates repeated
+   * reports of the same state.
+   */
+  override fun onMultiWindowModeChanged(isInMultiWindowMode: Boolean, newConfig: Configuration) {
+    super.onMultiWindowModeChanged(isInMultiWindowMode, newConfig)
+    WindowModeBridge.report(isInMultiWindowMode, isInPictureInPictureMode())
+  }
+
+  @Deprecated("Deprecated in Java")
+  override fun onMultiWindowModeChanged(isInMultiWindowMode: Boolean) {
+    super.onMultiWindowModeChanged(isInMultiWindowMode)
+    WindowModeBridge.report(isInMultiWindowMode, isInPictureInPictureMode())
+  }
+
+  override fun onPictureInPictureModeChanged(isInPictureInPictureMode: Boolean, newConfig: Configuration) {
+    super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
+    WindowModeBridge.report(isInMultiWindowMode(), isInPictureInPictureMode)
+  }
+`;
+
+/**
+ * Insert the window-mode forwarders into a generated MainActivity (Kotlin).
+ * PURE: takes source text, returns source text. Returns the input unchanged when
+ *   • it is not the generated Kotlin MainActivity, or
+ *   • the marker is already present (idempotent), or
+ *   • no insertion point (final class brace) exists.
+ */
+function patchMainActivityForWindowMode(contents) {
+  if (typeof contents !== 'string' || contents.length === 0) return contents;
+  if (contents.includes(WINDOW_MODE_ACTIVITY_MARKER)) return contents;
+  if (!/\boverride\s+fun\b/.test(contents)) return contents;
+  if (!/class\s+MainActivity\b/.test(contents)) return contents;
+
+  let next = contents;
+
+  // 1. Imports (idempotent, anchored on the generated import block).
+  if (!/^import android\.content\.res\.Configuration$/m.test(next)) {
+    if (/^import android\.os\.Bundle$/m.test(next)) {
+      next = next.replace(
+        /^import android\.os\.Bundle$/m,
+        'import android.content.res.Configuration\nimport android.os.Bundle'
+      );
+    } else if (/^import /m.test(next)) {
+      next = next.replace(/^(import )/m, 'import android.content.res.Configuration\n$1');
+    }
+  }
+  if (!/^import com\.medacademy\.security\.WindowModeBridge$/m.test(next)) {
+    if (/^import com\.facebook\.react\.ReactActivity$/m.test(next)) {
+      next = next.replace(
+        /^import com\.facebook\.react\.ReactActivity$/m,
+        'import com.facebook.react.ReactActivity\nimport com.medacademy.security.WindowModeBridge'
+      );
+    } else if (/^import /m.test(next)) {
+      next = next.replace(/^(import )/m, 'import com.medacademy.security.WindowModeBridge\n$1');
+    }
+  }
+
+  // 2. The overrides themselves, before the final closing brace of the class.
+  const lastBrace = next.lastIndexOf('}');
+  if (lastBrace < 0) return contents;
+  const patched = next.slice(0, lastBrace) + WINDOW_MODE_ACTIVITY_OVERRIDES + next.slice(lastBrace);
+
+  // 3. Only accept the patch when BOTH imports and all three overrides landed —
+  //    a half-patched activity would be worse than an unpatched one (the layout
+  //    watcher and the resume hook would silently become the only triggers).
+  const complete =
+    /import android\.content\.res\.Configuration/.test(patched) &&
+    /import com\.medacademy\.security\.WindowModeBridge/.test(patched) &&
+    /override fun onMultiWindowModeChanged\(isInMultiWindowMode: Boolean, newConfig: Configuration\)/.test(patched) &&
+    /override fun onMultiWindowModeChanged\(isInMultiWindowMode: Boolean\)/.test(patched) &&
+    /override fun onPictureInPictureModeChanged\(isInPictureInPictureMode: Boolean, newConfig: Configuration\)/.test(patched);
+  return complete ? patched : contents;
+}
+
+function withMainActivityWindowMode(config) {
+  return withMainActivity(config, (cfg) => {
+    const current = cfg?.modResults?.contents ?? '';
+    const patched = patchMainActivityForWindowMode(current);
+    if (patched !== current) cfg.modResults.contents = patched;
+    return cfg;
+  });
+}
+
 // ─── iOS Swift sources: copy from plugins/ios/ → ios/<AppName>/ ─────────────
 // ─── withIOSSwiftSources ──────────────────────────────────────────────────────
 // Copies IOSSecurityModule.swift + .m into the Xcode app source folder AND
@@ -2796,6 +3271,7 @@ const withSecurityModule = (config) => {
   // Android
   config = withSecurityKotlinSources(config);
   config = withSecurityPackageRegistration(config);
+  config = withMainActivityWindowMode(config);
   config = withSecNativeCoreSources(config);
   config = withTargetAppQueries(config);
   config = withOverlayWindowPermission(config);
@@ -2805,5 +3281,11 @@ const withSecurityModule = (config) => {
   config = withIOSXcodeFiles(config);
   return config;
 };
+
+// Exposed for tests: the pure MainActivity patcher and its marker, so the
+// multi-window forwarder can be exercised (idempotency, refusal on a foreign
+// activity, completeness) without running a full prebuild.
+withSecurityModule.patchMainActivityForWindowMode = patchMainActivityForWindowMode;
+withSecurityModule.WINDOW_MODE_ACTIVITY_MARKER = WINDOW_MODE_ACTIVITY_MARKER;
 
 module.exports = withSecurityModule;

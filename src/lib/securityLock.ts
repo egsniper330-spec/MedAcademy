@@ -98,6 +98,35 @@ export interface ContainmentDiagnostics {
    * at 0 growth after containment — a rising count proves a gate breach.
    */
   refusedProtectedRequests: number;
+  // ── NETWORK LOCK (temporary app-traffic suspension) ────────────────────────
+  /** Monotonic ms the lock last transitioned locked → unlocked (traffic restored). */
+  networkUnlockMs: number | null;
+  /** Monotonic ms the lock last transitioned unlocked → locked. */
+  networkLockMs: number | null;
+  /**
+   * Requests QUEUED (deferred, not sent) because they arrived while the lock
+   * was active. Queued work is released — or refused — when the lock clears;
+   * nothing is ever sent while locked.
+   */
+  deferredProtectedRequests: number;
+  /**
+   * Deferred requests REFUSED because the lock did not clear within the bound.
+   * Must never be treated as authorization: a bound expiry is a refusal.
+   */
+  deferredRequestsExpired: number;
+  // ── Resume verification (session-resume gate) ─────────────────────────────
+  // Measured so "resume felt slow" can be answered with a number instead of an
+  // impression. Timestamps, counts and durations only — no payload, no identity.
+  /** Monotonic ms the resume hold engaged (the foreground return). */
+  resumeHoldEngagedMs: number | null;
+  /** Monotonic ms that hold was DECIDED (released by a clean post-resume verdict). */
+  resumeVerdictMs: number | null;
+  /** Duration of the last completed resume verification (engage → release). */
+  lastResumeVerificationMs: number | null;
+  /** Evaluations the resume path started (1 = immediate; >1 = chained/retry). */
+  resumeEvaluationsStarted: number;
+  /** Resume verifications that exceeded the reporting threshold (never auto-released). */
+  resumeVerificationsOverdue: number;
 }
 
 const diagnostics: ContainmentDiagnostics = {
@@ -111,6 +140,15 @@ const diagnostics: ContainmentDiagnostics = {
   abortedRequests: 0,
   stoppedPlayers: 0,
   refusedProtectedRequests: 0,
+  networkUnlockMs: null,
+  networkLockMs: null,
+  deferredProtectedRequests: 0,
+  deferredRequestsExpired: 0,
+  resumeHoldEngagedMs: null,
+  resumeVerdictMs: null,
+  lastResumeVerificationMs: null,
+  resumeEvaluationsStarted: 0,
+  resumeVerificationsOverdue: 0,
 };
 
 /**
@@ -141,6 +179,48 @@ export function getContainmentDiagnostics(): ContainmentDiagnostics {
 export function markNativeVpnSignal(nativeSignalMs: number | null): void {
   diagnostics.nativeSignalMs = nativeSignalMs;
   diagnostics.jsReceiptMs    = nowMs();
+}
+
+/**
+ * Record that the resume hold engaged, on the same monotonic clock as every
+ * other measurement here. Called synchronously with the engage, so the measured
+ * resume latency starts at the foreground transition rather than at the first
+ * render.
+ */
+export function markResumeHoldEngaged(): void {
+  diagnostics.resumeHoldEngagedMs = nowMs();
+  diagnostics.resumeVerdictMs = null;
+  diagnostics.lastResumeVerificationMs = null;
+  diagnostics.resumeEvaluationsStarted = 0;
+}
+
+/**
+ * Record that the resume path started an evaluation. A value above 1 for a
+ * single resume is exactly the "the first attempt was refused/coalesced" signal
+ * that used to mean a multi-second stall.
+ */
+export function markResumeEvaluationStarted(): void {
+  diagnostics.resumeEvaluationsStarted++;
+}
+
+/**
+ * Record that the resume verification was DECIDED by a clean post-resume
+ * verdict, and publish its duration.
+ */
+export function markResumeVerdictResolved(): void {
+  const engagedAt = diagnostics.resumeHoldEngagedMs;
+  diagnostics.resumeVerdictMs = nowMs();
+  diagnostics.lastResumeVerificationMs =
+    engagedAt === null ? null : Math.max(0, diagnostics.resumeVerdictMs - engagedAt);
+}
+
+/**
+ * Record an OVERDUE resume verification. Evidence only: nothing here releases a
+ * lock, and the caller must not treat it as authorization (see
+ * `isResumeVerificationOverdue` in the state model).
+ */
+export function markResumeVerificationOverdue(): void {
+  diagnostics.resumeVerificationsOverdue++;
 }
 
 function snapshot(): SecurityLockState {
@@ -207,7 +287,14 @@ function contain(): void {
 
 function applyChange(wasLocked: boolean): void {
   const nowLocked = holders.size > 0;
-  if (!wasLocked && nowLocked) contain();
+  if (!wasLocked && nowLocked) {
+    diagnostics.networkLockMs = nowMs();
+    contain();
+  }
+  //  locked → unlocked is the ONLY event that may release deferred traffic.
+  //  A confirmed violation keeps a holder engaged, so the lock never reaches
+  //  this branch and nothing queued is ever replayed on a blocked device.
+  if (wasLocked && !nowLocked) diagnostics.networkUnlockMs = nowMs();
   notify();
 }
 
@@ -247,6 +334,136 @@ export function releaseAllSecurityLocks(): void {
 
 export function isSecurityLocked(): boolean {
   return holders.size > 0;
+}
+
+/**
+ * THE NETWORK LOCK PREDICATE — the single authoritative answer to "is the
+ * app's own traffic suspended right now?".
+ *
+ * Same underlying state as `isSecurityLocked()` (any live holder); the two
+ * names exist so call sites state their intent: enforcement code asks whether
+ * protected REQUESTS are refused, the network-lock vocabulary is used by the
+ * transport, the upload path and the context's `networkLocked` field.
+ *
+ * SCOPE — what this DOES and does NOT suspend (see NETWORK_LOCK_SCOPE in
+ * securityStateModel.ts for the canonical list):
+ *   • YES — every request that leaves through the app's API client
+ *     (src/client/php.ts): new ones are queued or refused before any network
+ *     I/O, and in-flight registered ones are aborted by containment.
+ *   • YES — app-originated direct fetches that opt in (storage upload,
+ *     VdoCipher chunk upload).
+ *   • NO — traffic a WebView / iframe / external player opens on its own
+ *     (the YouTube embed connects to YouTube independently of the API client).
+ *     That path is contained by stopping the load + tearing down the player,
+ *     never by a socket-level block, and it is NOT claimed to be offline.
+ */
+export function isNetworkLocked(): boolean {
+  return holders.size > 0;
+}
+
+/**
+ * Resolve `true` as soon as the lock clears, or `false` when `timeoutMs`
+ * elapses with it still held.
+ *
+ * This is a WAIT, never an authorization: a `false` result means "still
+ * locked", and callers must refuse (or stay blocked) rather than proceed. It
+ * exists so queued work and paused uploads can resume automatically the moment
+ * a clean verdict clears the lock, with no app restart and no user action.
+ */
+export function waitForNetworkUnlock(timeoutMs: number): Promise<boolean> {
+  if (holders.size === 0) return Promise.resolve(true);
+  return new Promise<boolean>((resolve) => {
+    let settled = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const finish = (unlocked: boolean) => {
+      if (settled) return;
+      settled = true;
+      if (timer) clearTimeout(timer);
+      unsub();
+      resolve(unlocked);
+    };
+    const unsub = subscribeSecurityLock((state) => {
+      if (!state.locked) finish(true);
+    });
+    timer = setTimeout(() => finish(false), timeoutMs);
+  });
+}
+
+/** Record that a protected request was QUEUED because the network lock is held. */
+export function markProtectedRequestDeferred(): void {
+  diagnostics.deferredProtectedRequests++;
+}
+
+/** Record that a queued request was REFUSED because the bound expired. */
+export function markDeferredRequestExpired(): void {
+  diagnostics.deferredRequestsExpired++;
+}
+
+// ─── QUEUED WORK — the deferral primitive ───────────────────────────────────
+//
+// Live in this module (rather than in the transport) so the queue's semantics
+// are behaviourally unit-testable: `securityLock.ts` has no imports, so the
+// suite compiles and executes it directly.
+
+export interface DeferredRunOutcome<T> {
+  /** True only when `run` was actually executed — i.e. after a real unlock. */
+  ran: boolean;
+  /** Present only when `ran` is true. */
+  value?: T;
+}
+
+/**
+ * In-flight queued entries, keyed by the caller's key (method + path + body).
+ * A second identical request JOINS the first entry instead of queueing its own,
+ * so a queued non-idempotent operation can never be executed twice.
+ */
+const pendingRuns = new Map<string, Promise<DeferredRunOutcome<unknown>>>();
+
+/**
+ * Run `run()` — but never while the network lock is held.
+ *
+ *   • The lock is already clear  → `run()` executes immediately.
+ *   • The lock is held           → the entry is queued; `run()` executes ONCE,
+ *     after the lock has FULLY cleared (every holder released).
+ *   • The lock outlives the bound → NOTHING is executed; `{ ran: false }` is
+ *     returned so the caller can refuse. A bound expiry is a refusal, never an
+ *     authorization: a mandatory check that never resolves keeps access closed.
+ *
+ * A confirmed violation keeps a holder engaged, so `run()` is never executed on
+ * a blocked device — the queued entry expires instead.
+ */
+export function runWhenNetworkUnlocked<T>(
+  key: string,
+  run: () => Promise<T>,
+  timeoutMs: number,
+): Promise<DeferredRunOutcome<T>> {
+  const existing = pendingRuns.get(key) as Promise<DeferredRunOutcome<T>> | undefined;
+  if (existing) return existing;
+  if (!isNetworkLocked()) {
+    return run().then((value) => ({ ran: true, value }));
+  }
+  markProtectedRequestDeferred();
+  const entry = (async (): Promise<DeferredRunOutcome<T>> => {
+    try {
+      const unlocked = await waitForNetworkUnlock(timeoutMs);
+      // Re-check after the wait: a SECOND lock may have engaged in the gap (a
+      // rapid re-background). Nothing is sent in that case either.
+      if (!unlocked || isNetworkLocked()) {
+        markDeferredRequestExpired();
+        return { ran: false };
+      }
+      return { ran: true, value: await run() };
+    } finally {
+      pendingRuns.delete(key);
+    }
+  })();
+  pendingRuns.set(key, entry as Promise<DeferredRunOutcome<unknown>>);
+  return entry;
+}
+
+/** Test hook — number of queued entries currently waiting for an unlock. */
+export function _pendingRunsForTests(): number {
+  return pendingRuns.size;
 }
 
 export function isSecurityLockHard(): boolean {
@@ -340,6 +557,16 @@ export function _resetSecurityLockForTests(): void {
   diagnostics.abortedRequests = 0;
   diagnostics.stoppedPlayers = 0;
   diagnostics.refusedProtectedRequests = 0;
+  diagnostics.networkUnlockMs = null;
+  diagnostics.networkLockMs = null;
+  diagnostics.deferredProtectedRequests = 0;
+  diagnostics.deferredRequestsExpired = 0;
+  pendingRuns.clear();
+  diagnostics.resumeHoldEngagedMs = null;
+  diagnostics.resumeVerdictMs = null;
+  diagnostics.lastResumeVerificationMs = null;
+  diagnostics.resumeEvaluationsStarted = 0;
+  diagnostics.resumeVerificationsOverdue = 0;
 }
 
 /** Test hook — count of registered in-flight protected requests. */

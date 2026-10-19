@@ -243,9 +243,13 @@ console.log('\n── G. Regressions (security preserved) ──');
   // computed once from resolveSecurityGateState) instead of re-deriving a local
   // phase boolean. The invariant is unchanged: a pure state function decides,
   // never a timer.
+  // The mount reads TWO pure decisions: isGateBlocked (containment) and
+  // rendersBlockScreen (does this cause take over the screen). The interim
+  // resume hold is blocking but screenless, so the page condition is the
+  // conjunction — still a state function, still never a timer.
   check(
     (/resolveGatePhase\(\{/.test(gateSrc) || /isGateBlocked\(gateState\)/.test(gateSrc))
-      && /if \(!blocking\) return null;/.test(gateSrc),
+      && /if \(!blocking \|\| !blockScreen\) return null;/.test(gateSrc),
     'G gate mount decision comes from the centralized gate state (state-driven, no timer)',
   );
   check(
@@ -253,8 +257,12 @@ console.log('\n── G. Regressions (security preserved) ──');
     'G no timer-based hiding of the security block',
   );
   check(
-    /if \(!blocking\) return null;/.test(gateSrc),
+    /if \(!blocking \|\| !blockScreen\) return null;/.test(gateSrc),
     'G gate renders null when not blocking (normal startup/loading stays visible)',
+  );
+  check(
+    /const blockScreen = rendersBlockScreen\(gateState\)/.test(gateSrc),
+    'G the screenless interim resume state never takes over the app shell',
   );
   // context exposes the new contract
   assert(/hasVerdict:/.test(ctxSrc) && /phase:/.test(ctxSrc), 'G context exposes hasVerdict + phase');

@@ -130,6 +130,7 @@ relax the detector.
 | 5.1 | Set a mock location app (Developer options → Select mock location app), open the app. | Gate: **"Mock Location Detected"** — instructs how to clear the mock app. |
 | 5.2 | **False-positive regression:** Developer Options on with **no** mock app selected. | Must **not** say "Mock Location Detected". (Both are `debug_detected`/weight 20, but `resolveFindingCopyKey` must pick the *device-state* copy, not "Insecure Build Detected".) |
 | 5.3 | Clear the mock app entirely, reopen. | App opens normally. |
+| 5.4 | Read the **login-blocked** (`Access Blocked`) screen's issue row with a mock app selected. | **"Mock Location Detected"** — never "Debug Mode Active". (`debug_detected` is one event/weight 20 shared by four conditions; both `security-warning` screens resolve the label from `resolveFindingCopyKey`.) |
 
 ## 6. Emulator / virtual device
 
@@ -137,6 +138,7 @@ relax the detector.
 |---|---|---|
 | 6.1 | Install and open on any emulator. | Gate: **"Unsupported Device Detected"** — *"This app cannot run on an emulator or virtual device."* |
 | 6.2 | Same on a physical device. | Opens normally. |
+| 6.3 | On a physical device where the check reports an emulator (a device-specific false positive), read the issue row. | **"Unsupported Device Detected"**, not "Debug Mode Active" — and the **Device security report** (§14) shows `Emulator / virtual device: on` with the manufacturer/model/build fingerprint needed to tighten the heuristic. |
 
 ## 7. Signing verification / tamper
 
@@ -159,6 +161,11 @@ The gate must be derived from one authoritative evaluation.
 
 ## 9. Startup, resume, and stale state
 
+> **Resume no longer shows a verification page.** An ordinary background→foreground
+> transition restores the app shell immediately and verifies asynchronously, with
+> protected requests/playback held by the central lock until the verdict lands.
+> See [RESUME_VERIFICATION.md](RESUME_VERIFICATION.md).
+
 | # | Step | Expected |
 |---|---|---|
 | 9.1 | Cold start with a clean condition. | No gate flash, no false `debug_detected`. |
@@ -166,6 +173,11 @@ The gate must be derived from one authoritative evaluation.
 | 9.3 | Introduce a condition while backgrounded (turn USB debugging on), then resume. | Gate appears on resume. |
 | 9.4 | Leave the app foregrounded past a check cycle (~30 s). | Findings/risk refresh; no drift between the gate and diagnostics. |
 | 9.5 | Airplane mode / no network, then restore. | Fails closed and honest; never reports "trusted" because a check could not run. |
+| 9.6 | Clean device: background the app, then resume. | **No** `VERIFYING YOUR SESSION` page. The screen you left is back immediately; protected requests and lesson playback stay refused for the moment the check takes. No Continue button is needed. |
+| 9.7 | Clean device on a slow network: background, then resume. | Same as 9.6 — no verification page, no artificial wait. A stalled check may be retried once after ~8 s; access is never granted on the timeout. |
+| 9.8 | Background/resume the app 5× in a row. | One verification per resume (no duplicate native bridge calls or API storms); never stuck locked after a final clean verdict. |
+| 9.9 | Turn on a VPN (or Developer Options / USB debugging / mock location), background the app, then resume. | The **authoritative** page for that exact finding appears as soon as the verdict lands — VPN/proxy copy and steps for a connection block, the matching row for any other finding. No `Continue Anyway`, no way past it. |
+| 9.10 | Repeat 9.9 with the app already on a protected lesson. | The player is stopped and unmounted on the hard lock; no protected frame or audio continues behind the block. |
 
 ## 10. VPN / proxy — launch, runtime and resume
 
@@ -258,6 +270,62 @@ Both exemptions are **backend-verified role** decisions, not device states.
 | 12.3 | Sign in as a **student** and trigger the same violation. | Penalty **is** applied — the exemption must not leak to students. |
 | 12.4 | Confirm the role source. | Derived from the backend profile, **never** from a client-supplied value. |
 
+## 14. Device security report (the only diagnostic on a phone that cannot be attached to a computer)
+
+Read-only card rendered on **every policy block surface**: both `security-warning`
+screens (including the pre-login `Access Blocked` page) and the in-app
+`SecurityGate` page (blocking findings never route to `security-warning`, so the
+gate carries the same card). It cannot unblock, cannot change a policy or the
+risk score, logs nothing, and sends nothing to the backend. See
+`docs/DEBUG_MODE_FALSE_POSITIVE_INVESTIGATION.md` for the detector trace it
+supports.
+
+| # | Step | Expected |
+|---|---|---|
+| 14.1 | Try to sign in on a device the check blocks, then scroll the `Access Blocked` page to **Device security report**. | Six rows appear: Developer options, USB debugging (ADB), Debugger connected to the app, Test-only build flag, Emulator / virtual device, Mock-location app selected — each `on` / `off` / `unknown` / `unavailable`. No login, Super Admin role, dev build or deep link was needed. |
+| 14.2 | Compare the rows with the finding shown above them. | Exactly the reported condition reads `on`; every unrelated signal reads `off`; a signal that could not be measured reads `unknown` (measured device) or `unavailable` (native module unreachable) — never `off`. |
+| 14.2b | Open Android Settings (leaving the block page mounted), turn Developer options off, then return to the app. | The card re-reads on foreground: the row changes to `off` without a manual refresh. |
+| 14.2c | Sign in on a clean account, then trigger an in-app policy block (e.g. root/tamper on a test device). | The `SECURITY BLOCK ACTIVE` page also carries the card; the block is unchanged and non-dismissible. |
+| 14.3 | Tap **Copy security report**. | The copied text carries the six signals, app version/build, Android version + API level, manufacturer/model, build fingerprint, the finding with its raw event type + detector description, and a timestamp. No token, credential, identifier or user data. |
+| 14.4 | Force the native module to be unavailable (e.g. an Expo Go / web-dev run). | The card states the module is **UNAVAILABLE** and that the values are *not* a clean result — it must never present fail-safe defaults as verified. |
+| 14.5 | Try to reach the rest of the app from the card. | Impossible: the card contains no dismiss, continue, verify or navigation control, and the block still stands (§10.8). |
+
+## 15. Network lock (traffic suspended while a verification is pending)
+
+See [NETWORK_LOCK.md](NETWORK_LOCK.md). The lock suspends the app's **own**
+traffic and stops/unmounts protected media; it does not disconnect the YouTube
+connection, and nothing in the UI may claim the device is offline.
+
+| # | Step | Expected |
+|---|---|---|
+| 15.0.1 | Launch clean, with a session. | Protected requests are queued for the moment the first verification takes and then flow normally — no empty/error dashboard that never recovers, no restart needed. |
+| 15.0.2 | Background the app while a lesson video plays, then resume. | Playback stops; the YouTube player is **not** rendered while the lock is held; after the clean verdict it loads normally from the resume position. |
+| 15.0.3 | Resume and immediately open a video. | The player does not load YouTube: at most a loading/unavailable state, never audio or frames. |
+| 15.0.4 | Turn on a VPN, background, resume. | Protected traffic stays blocked and the **VPN/proxy** block screen appears; no protected content is briefly visible. The queue never sends. |
+| 15.0.5 | Airplane mode, background, resume. | Fails closed: no protected access granted on a timeout, and the app is not permanently stuck (recovers when the check succeeds). |
+| 15.0.6 | Background/foreground 5× quickly. | One verification per resume, no deadlock, and normal traffic resumes after the last clean verdict. |
+| 15.0.7 | Start a video upload (VdoCipher) as a doctor/admin, then background/resume mid-upload. | No chunk is sent while the lock is held; the upload resumes after the verdict (or reports Paused) — never a silent success. |
+| 15.0.8 | Trigger a forced update or maintenance state while a verification is pending. | The flow still appears once verification clears (its GETs are queued, not refused). |
+
+## 16. Split-screen / multi-window (mandatory full-screen usage)
+
+MedAcademy may only run full-screen. Enforcement is a HARD block driven by the
+Android window state, with no dismiss control (see `docs/MULTI_WINDOW_BLOCKING.md`
+for what is and is not detectable).
+
+| # | Step | Expected |
+|---|---|---|
+| 15.1 | Launch the app **directly into split-screen** (open MedAcademy from the recent-apps split view, or pair it from another app's split menu) while signed in. | The full-screen **FULL-SCREEN REQUIRED** page appears (title `FULL-SCREEN REQUIRED`, split-screen copy). No app content, no playback, no dismiss control. |
+| 15.2 | While running full-screen, enter split-screen (recents → split screen). | The block appears immediately, without needing a tap or a resume. |
+| 15.3 | Try to interact with the app while the block is up. | Nothing behind the page is reachable: hardware back is consumed, no route/navigation leaves it, no “Continue Anyway”, no Verify button. |
+| 15.4 | Drag the app back to full-screen. | The page clears **automatically** once the fresh security evaluation lands — no restart, no manual step. |
+| 15.5 | Press Home while in split-screen, then reopen the app (still split). | The block is still up after resume (the resume re-read never treats “not measured yet” as full-screen). |
+| 15.6 | Put MedAcademy into **picture-in-picture** (Home / recents → PiP, on a device that supports it). | A block appears whose copy names the **floating window** — it must NOT say “split-screen” and must NOT claim an overlay was detected. |
+| 15.7 | Close the PiP window and open the app normally. | Access returns automatically, as in 15.4. |
+| 15.8 | Open another app in split-screen or PiP **next to / over** MedAcademy’s own full-screen window (e.g. a floating chat head, a floating-window OEM feature). | Only **MedAcademy's own** window mode is asserted. If MedAcademy itself is full-screen, no multi-window page is shown — and neither page ever claims “another app is floating over you”. (An overlay over the app is the separate overlay signal of §1/§2 behaviour.) |
+| 15.9 | Confirm no new permission prompt appears. | None: multi-window detection uses `isInMultiWindowMode()` / `isInPictureInPictureMode()` — no accessibility service, no usage access, no screen capture. |
+| 15.10 | Trigger a screenshot or screen recording while the multi-window page is up. | Capture stays blocked (`FLAG_SECURE` is held while any block is displayed). |
+
 ---
 
 ## Result recording
@@ -278,6 +346,9 @@ Both exemptions are **backend-verified role** decisions, not device states.
 | §11 Video | | | |
 | §12 PDF | | | |
 | §13 Role exemptions | | | |
+| §14 Device security report | | | copied report text + which signal read `on` |
+| §15 Network lock | | | queued requests flowed after unlock; no protected traffic or playback while pending |
+| §16 Split-screen / multi-window | | | mode detected (split-screen vs PiP), page shown, auto-clear on return to full-screen |
 | iOS platform integrity | | | must read DEFERRED / NOT VERIFIED — never PASS |
 
 Record the device model, Android/iOS version, and build `versionCode` beside

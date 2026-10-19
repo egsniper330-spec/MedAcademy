@@ -40,7 +40,14 @@ import {
   resolveSecurityGateState,
   resolveBackgroundResumeGate,
   acceptsResumeVerification,
+  resolveNetworkAccessState,
+  hasConnectionFinding,
+  type NetworkAccessState,
   canClearOverlayBlock,
+  canClearMultiWindowBlock,
+  isProhibitedWindowMode,
+  isResumeVerificationOverdue,
+  RESUME_VERIFICATION_TIMEOUT_MS,
   type GatePhase,
   type SecurityGateState,
 } from '@/lib/securityStateModel';
@@ -56,6 +63,9 @@ import {
   onNativeObscuredChanged,
   isNativeWindowObscured,
   enableNativeOverlayProtection,
+  onNativeWindowModeChanged,
+  getNativeWindowMode,
+  enableNativeWindowModeMonitoring,
 } from '@/lib/nativeSecurity';
 import { isVpnWhitelistKnownNonEmpty } from '@/lib/security';
 import {
@@ -66,6 +76,10 @@ import {
   getSecurityLockState,
   subscribeSecurityLock,
   markNativeVpnSignal,
+  markResumeHoldEngaged,
+  markResumeEvaluationStarted,
+  markResumeVerdictResolved,
+  markResumeVerificationOverdue,
   type SecurityLockState,
 } from '@/lib/securityLock';
 import { useSession } from '@/ctx';
@@ -76,6 +90,13 @@ const LOCK_SRC_VERDICT    = 'verdict';      // authoritative policy decision
 const LOCK_SRC_NATIVE_VPN = 'native-vpn';   // fast native TRANSPORT_VPN signal
 /** Live obscured-window / overlay signal (see the Android security module). */
 const LOCK_SRC_OVERLAY    = 'overlay';
+/**
+ * Prohibited window mode (split-screen / other multi-window mode, or our own
+ * picture-in-picture) reported by the platform for THIS app. A window-state
+ * cause, not a policy finding — kept as its own lock source so its copy, its
+ * release rule and its evidence stay independent of the overlay signal.
+ */
+const LOCK_SRC_WINDOW_MODE = 'window-mode';
 /** The app left the foreground and has not yet re-verified after resuming. */
 const LOCK_SRC_BACKGROUND = 'background-resume';
 
@@ -135,6 +156,17 @@ interface SecurityContextValue {
    */
   securityLocked: boolean;
   /**
+   * NETWORK LOCK — TRUE while the app's OWN traffic is suspended (see
+   * NETWORK_LOCK_SCOPE in securityStateModel.ts for exactly what that covers
+   * and what it cannot: a WebView/YouTube connection is not in scope).
+   *
+   * Same underlying state as `securityLocked`; this is the name consumers use
+   * when the question is "may the app talk to the network right now?".
+   */
+  networkLocked: boolean;
+  /** `NETWORK_LOCKED` while the lock is held, `NETWORK_OPEN` otherwise. */
+  networkAccessState: NetworkAccessState;
+  /**
    * TRUE while an AUTHORITATIVE (policy-verdict) block holds the lock. Screens
    * use this to UNMOUNT/destroy the native player — a soft (provisional)
    * containment only pauses it.
@@ -149,6 +181,14 @@ interface SecurityContextValue {
   gateState: SecurityGateState;
   /** A live obscured-window/overlay signal holds the gate. */
   overlayBlocked: boolean;
+  /** The platform reports this app in a prohibited multi-window mode. */
+  multiWindowBlocked: boolean;
+  /**
+   * The last window mode the platform reported for this app:
+   * 'fullscreen' | 'multi_window' | 'picture_in_picture' | 'unknown'.
+   * Evidence for the gate copy; 'unknown' means "not measurable here".
+   */
+  windowMode: string;
   /** The app is backgrounded, or resumed and not yet re-verified. */
   backgroundBlocked: boolean;
   /**
@@ -253,9 +293,13 @@ const SecurityContext = createContext<SecurityContextValue>({
   hasWarnings: false,
   isSuperAdmin: false,
   securityLocked:   false,
+  networkLocked:    false,
+  networkAccessState: 'NETWORK_OPEN',
   securityLockHard: false,
   gateState:        'CHECKING',
   overlayBlocked:   false,
+  multiWindowBlocked: false,
+  windowMode:       'unknown',
   backgroundBlocked: false,
   verifySecurity:   async () => {},
   check:            async () => DEFAULT_RESULT,
@@ -268,7 +312,10 @@ export function SecurityProvider({ children }: { children: React.ReactNode }) {
   const [result, setResult]     = useState<SecurityCheckResult | null>(null);
   const [checking, setChecking] = useState(false);
   const [evaluating, setEvaluating] = useState(false);
-  const checkRef           = useRef(false);
+  // NOTE: the old single-flight guard (`checkRef`) is gone. It REJECTED a request
+  // that arrived while an evaluation ran, which is exactly how the post-resume
+  // re-check used to be dropped. runEvaluation now coalesces and CHAINS instead;
+  // in-flight state lives in `inFlightEvaluationRef` (declared with the queue).
   // ── Probe generation guard (stale-result race fix) ─────────────────────────
   // Multiple entry points (periodic tick, foreground transition, network
   // change, native VPN callback, pre-video re-validation) can start security
@@ -370,6 +417,30 @@ export function SecurityProvider({ children }: { children: React.ReactNode }) {
   const evaluationStartTokenRef = useRef(0);
   const backgroundHeldRef = useRef(false);
 
+  // ── COALESCED EVALUATION QUEUE (the resume-latency fix) ────────────────────
+  // ROOT CAUSE of "sometimes instant, sometimes tens of seconds": only ONE
+  // evaluation could run at a time (`checkRef`), and a request that arrived
+  // while one was running was silently DROPPED rather than queued. A resume that
+  // coincided with an in-flight evaluation therefore (a) discarded that
+  // evaluation's verdict — correct, it predates the resume — and (b) never
+  // started its replacement, so the hold waited for the next 30 s periodic tick.
+  // The user's Continue control could not help either: it went through the same
+  // in-flight guard and returned without running anything.
+  //
+  // Now: one evaluation still runs at a time (the probes are native/network
+  // work and the transport is locked anyway), but a request that arrives mid-run
+  // is REMEMBERED and started the instant the current run finishes — chained,
+  // not dropped, with no timer and no polling.
+  const inFlightEvaluationRef = useRef<Promise<SecurityCheckResult | null> | null>(null);
+  const queuedEvaluationRef = useRef<string | null>(null);
+  /** Monotonic ms the current resume verification was requested (null = none). */
+  const resumePendingSinceRef = useRef<number | null>(null);
+  const resumeWatchdogRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const resumeRetriedRef = useRef(false);
+  const runEvaluationRef = useRef<(reason: string) => Promise<SecurityCheckResult | null>>(
+    async () => null,
+  );
+
   // ── Overlay gate bookkeeping ────────────────────────────────────────────
   // `overlaySignalRef`      — the native obscured-window belief (live).
   // `overlayEngagedSerialRef` — the verdict serial current when the overlay
@@ -378,11 +449,29 @@ export function SecurityProvider({ children }: { children: React.ReactNode }) {
   //   ignoring the warning can never clear it.
   const overlaySignalRef = useRef(false);
   const overlayEngagedSerialRef = useRef(-1);
+  // ── Multi-window gate bookkeeping ───────────────────────────────────────
+  // `windowModeRef`           — the platform's last reported window mode.
+  // `windowModeEngagedSerialRef` — the verdict serial current when the lock
+  //   engaged; the lock clears only when the platform reports FULL SCREEN *and*
+  //   a NEWER completed verdict exists (canClearMultiWindowBlock). Both are read
+  //   synchronously from the lock module, because React state is stale inside
+  //   the native event listener.
+  const windowModeRef = useRef<string>('unknown');
+  // The mode the CURRENT hold is about. Kept separately from the live reading so
+  // the blocking screen keeps describing the PROHIBITED mode while the platform
+  // already reports full screen but the fresh verdict is still pending (the
+  // copy must not flip to "you are fine" before the block is actually released).
+  const windowModeEngagedModeRef = useRef<string>('multi_window');
+  const windowModeEngagedSerialRef = useRef(-1);
   const verdictSerialRef = useRef(0);
 
   /**
    * Engage the background/resume hold. Hard, so screens UNMOUNT the native
    * player (a soft hold would only pause it), and idempotent.
+   *
+   * Containment is the ONLY thing this does: it no longer implies a full-screen
+   * page (see rendersBlockScreen in the state model). The shell returns at once,
+   * protected operations stay refused until a clean post-resume verdict.
    */
   const enterBackgroundHold = useCallback((why: string) => {
     if (isSuperAdmin) return;
@@ -414,8 +503,141 @@ export function SecurityProvider({ children }: { children: React.ReactNode }) {
     });
     if (stillBlocked) return; // the policy verdict holder keeps the app blocked
     backgroundHeldRef.current = false;
+    // The resume verification is DECIDED. Record its measured duration, drop the
+    // pending marker and disarm the watchdog — a resolved verification must never
+    // leave a timer that could later "retry" against a released lock.
+    resumePendingSinceRef.current = null;
+    if (resumeWatchdogRef.current) {
+      clearTimeout(resumeWatchdogRef.current);
+      resumeWatchdogRef.current = null;
+    }
+    markResumeVerdictResolved();
     if (__DEV__) console.log('[SecurityContext] background hold cleared — post-resume verification passed');
     releaseSecurityLock(LOCK_SRC_BACKGROUND);
+  }, []);
+
+  /**
+   * PUBLISH a completed evaluation to the whole app: the authoritative verdict
+   * state, the blocking callbacks, the threat log, and the background/resume
+   * hold release.
+   *
+   * ROOT-CAUSE FIX (resume stuck for up to a full period): the resume
+   * verification used to run an evaluation and DROP its result — only `check()`
+   * and `runPeriodicCheck` published. A clean post-resume verdict therefore
+   * could not release the hold, and the app stayed network-locked (protected
+   * requests refused / queued, playback stopped) until the NEXT 30 s periodic
+   * tick happened to publish one. Every trigger now shares this single publish
+   * path, so a resume is decided by the resume's own verification.
+   */
+  const publishVerdict = useCallback((r: SecurityCheckResult) => {
+    setResult(r);
+    // Keep the VPN threat flag current so foreground re-checks are scheduled
+    // correctly (mirrors the periodic path).
+    hasActiveVpnThreat.current = r.threats.some((t) => t.type === 'vpn_detected');
+    void logThreats(r.threats, r.policies, r.riskScore, undefined, r.evidence);
+    // Blocking callbacks: this is what routes a CONFIRMED violation to its
+    // authoritative screen when the resume verification is the trigger.
+    if (r.blocksLogin || r.blocksVideo) blockingCbsRef.current.forEach((cb) => cb(r));
+    // Releases the resume/startup hold ONLY on a clean verdict that started at
+    // or after the current resume (acceptsResumeVerification inside).
+    maybeReleaseBackgroundHold(r);
+  }, [maybeReleaseBackgroundHold]);
+  // Stable handle for the resume scheduler (registered once, reads through ref).
+  const publishVerdictRef = useRef(publishVerdict);
+  publishVerdictRef.current = publishVerdict;
+
+  /**
+   * Run ONE security evaluation, COALESCING concurrent requests.
+   *
+   * Returns the evaluation's result when THIS call actually ran one, or null when
+   * it was coalesced into a run that was already in flight — in which case the
+   * evaluation that was queued for afterwards is the authoritative one for this
+   * request (exactly like a superseded result: null is never a verdict).
+   *
+   * One evaluation runs at a time (the detectors are native/network work and the
+   * transport is locked meanwhile), but a request arriving mid-run is REMEMBERED
+   * and started the moment the current one finishes. No timer, no polling loop,
+   * and — critically — no dropped request: dropping the post-resume re-check is
+   * what used to leave the app holding for up to a full periodic interval.
+   */
+  const runEvaluation = useCallback(async (reason: string): Promise<SecurityCheckResult | null> => {
+    const inFlight = inFlightEvaluationRef.current;
+    if (inFlight) {
+      queuedEvaluationRef.current = reason;
+      if (__DEV__) console.log('[SecurityContext] evaluation coalesced (one in flight) — queued: ' + reason);
+      await inFlight;
+      return null;
+    }
+    const started = (async () => {
+      try {
+        return await runGuardedCheck();
+      } finally {
+        inFlightEvaluationRef.current = null;
+      }
+    })();
+    inFlightEvaluationRef.current = started;
+    const result = await started;
+    // Chain the queued request immediately (no waiting for the next tick).
+    const queued = queuedEvaluationRef.current;
+    if (queued !== null) {
+      queuedEvaluationRef.current = null;
+      if (__DEV__) console.log('[SecurityContext] starting queued evaluation immediately: ' + queued);
+      void runEvaluationRef.current(queued);
+    }
+    return result;
+  }, [runGuardedCheck]);
+  // Self-reference for the chained start (a useCallback cannot depend on itself).
+  runEvaluationRef.current = runEvaluation;
+
+  /**
+   * Request a RESUME verification: one evaluation (queued if one is already
+   * running) plus a bounded watchdog that reports an overdue verification and
+   * retries it ONCE.
+   *
+   * What this deliberately does NOT do:
+   *   • it never waits for anything before returning — the caller (the AppState
+   *     listener) returns immediately and the app shell stays responsive;
+   *   • it never releases the hold: only a clean verdict that STARTED at or after
+   *     this resume can (maybeReleaseBackgroundHold);
+   *   • a watchdog fire is evidence + one retry — never authorization. An
+   *     unresolved mandatory check stays closed.
+   */
+  const requestResumeVerification = useCallback((reason: string) => {
+    /**
+     * Run one evaluation and PUBLISH it (see publishVerdict). Defined here so it
+     * closes over refs only and needs no dependency list of its own.
+     */
+    const runAndPublish = async (why: string) => {
+      const r = await runEvaluationRef.current(why);
+      // Coalesced/superseded (null) → the run that superseded this one publishes
+      // its own result; publishing an older one would be a stale verdict.
+      if (!r) return;
+      publishVerdictRef.current(r);
+    };
+
+    resumePendingSinceRef.current = Date.now();
+    resumeRetriedRef.current = false;
+    markResumeHoldEngaged();
+    if (resumeWatchdogRef.current) {
+      clearTimeout(resumeWatchdogRef.current);
+      resumeWatchdogRef.current = null;
+    }
+    resumeWatchdogRef.current = setTimeout(() => {
+      resumeWatchdogRef.current = null;
+      if (!backgroundHeldRef.current) return;
+      if (!isResumeVerificationOverdue({
+        pendingSinceMs: resumePendingSinceRef.current,
+        nowMs: Date.now(),
+      })) return;
+      markResumeVerificationOverdue();
+      if (resumeRetriedRef.current) return; // one bounded retry per resume
+      resumeRetriedRef.current = true;
+      markResumeEvaluationStarted();
+      if (__DEV__) console.warn('[SecurityContext] resume verification overdue — retrying once; protected access stays closed');
+      void runAndPublish('resume-retry');
+    }, RESUME_VERIFICATION_TIMEOUT_MS);
+    markResumeEvaluationStarted();
+    void runAndPublish(reason);
   }, []);
 
   // ── Pre-warm cache from SecureStore on mount (before any session) ──────────
@@ -433,19 +655,19 @@ export function SecurityProvider({ children }: { children: React.ReactNode }) {
       hasActiveVpnThreat.current = false;
       return SUPERADMIN_BYPASS_RESULT;
     }
-    if (checkRef.current) {
-      console.log('[SecurityContext][Stage-6] check() skipped — already in progress, returning cached result');
-      return result ?? BLOCKING_UNKNOWN_RESULT;
-    }
-    checkRef.current = true;
+    console.log('[SecurityContext][Stage-6] check() ▶ requesting evaluation');
     setChecking(true);
     setEvaluating(true);
-    console.log('[SecurityContext][Stage-6] check() ▶ starting runSecurityChecks()');
     try {
-      const r = await runGuardedCheck();
+      // COALESCED (root-cause fix): a request that arrives while an evaluation is
+      // already running is QUEUED and started the instant it finishes, instead of
+      // being dropped by an in-flight guard. Returns null when it coalesced — the
+      // queued run is then the authoritative one, and the last published verdict
+      // is served meanwhile (never a fabricated block, never a claimed fresh
+      // result).
+      const r = await runEvaluation('manual');
       if (!r) {
-        // A newer check superseded this one — do NOT publish; the newer result
-        // (already landed or about to land) is authoritative.
+        console.log('[SecurityContext][Stage-6] check() coalesced into an in-flight evaluation — queued a fresh one');
         return result ?? BLOCKING_UNKNOWN_RESULT;
       }
       console.log('[SecurityContext][Stage-6] setResult() with threats=', r.threats.map(t => t.type).join(',') || 'none',
@@ -457,6 +679,10 @@ export function SecurityProvider({ children }: { children: React.ReactNode }) {
       void logThreats(r.threats, r.policies, r.riskScore, deviceId, r.evidence);
       return r;
     } catch (e) {
+      // The evaluation itself threw. See the fail-closed contract below: the
+      // last COMPLETED verdict stays authoritative and no synthetic block is
+      // published — the CALLER receives the sentinel so a sensitive action that
+      // raced this failure stays gated.
       console.error('[SecurityContext][Stage-6] ❌ runSecurityChecks() threw — keeping last verdict, caller gets fail-closed fallback:', e);
       // STARTUP-FLASH + NETWORK-ERROR CONTRACT:
       //   • A thrown evaluation (backend timeout, transient network failure,
@@ -488,11 +714,10 @@ export function SecurityProvider({ children }: { children: React.ReactNode }) {
         return BLOCKING_UNKNOWN_RESULT;
       }
     } finally {
-      checkRef.current = false;
       setChecking(false);
       setEvaluating(false);
     }
-  }, [isSuperAdmin, result, maybeReleaseBackgroundHold]);
+  }, [isSuperAdmin, result, runEvaluation, maybeReleaseBackgroundHold]);
 
   /**
    * Pre-video re-validation — called by video player screens before showing the player.
@@ -527,10 +752,11 @@ export function SecurityProvider({ children }: { children: React.ReactNode }) {
 
   const reset = useCallback(() => {
     // FAIL-CLOSED reset: the previous verdict is retained (NOT nulled) so the
-    // gate stays mounted while the fresh check runs. checkRef is force-cleared
-    // so an in-flight/hung check cannot silently swallow this re-check, and
-    // evaluating gates consumers on "UNKNOWN until verified" semantics.
-    checkRef.current = false;
+    // gate stays mounted while the fresh check runs, and `evaluating` gates
+    // consumers on "UNKNOWN until verified" semantics.
+    // No in-flight flag is force-cleared any more: a re-check request can never
+    // be swallowed by an in-flight evaluation (it is QUEUED through
+    // runEvaluation), so clearing a flag here would only hide real work.
     setChecking(true);
     setEvaluating(true);
   }, []);
@@ -592,14 +818,84 @@ export function SecurityProvider({ children }: { children: React.ReactNode }) {
     return unsub;
   }, [isSuperAdmin, tryReleaseOverlayLock]);
 
+  // ── Android multi-window / split-screen signal → security gate ────────────
+  /**
+   * Release the multi-window hold only when BOTH hold (canClearMultiWindowBlock):
+   * the platform reports the app back in FULL SCREEN, and a completed verdict
+   * NEWER than the engage exists. Reading the lock synchronously (not React
+   * state) keeps this correct inside the native event listener, and the second
+   * condition guarantees the app can never unblock on a verdict that predates
+   * the prohibited state.
+   */
+  const tryReleaseWindowModeLock = useCallback(() => {
+    if (!getSecurityLockState().sources.includes(LOCK_SRC_WINDOW_MODE)) return;
+    const clears = canClearMultiWindowBlock({
+      modeRestored:    !isProhibitedWindowMode(windowModeRef.current),
+      hasFreshVerdict: verdictSerialRef.current > windowModeEngagedSerialRef.current,
+    });
+    if (!clears) return;
+    if (__DEV__) console.log('[SecurityContext] multi-window lock cleared — platform reports full-screen and a fresh verdict landed');
+    windowModeEngagedSerialRef.current = -1;
+    windowModeEngagedModeRef.current = 'multi_window';
+    releaseSecurityLock(LOCK_SRC_WINDOW_MODE);
+  }, []);
+
+  /**
+   * Apply ONE authoritative window-mode reading.
+   *
+   * Prohibited mode  → engage the HARD lock at once (players unmount, in-flight
+   *   protected requests abort, the transport refuses new ones) and remember the
+   *   verdict serial so only a NEWER verdict may clear it.
+   * Full screen      → hand the reading to the release rule, and (when asked)
+   *   request the fresh verdict that rule requires. There is NO dismiss path: the
+   *   user cannot acknowledge their way out, only return the app to full screen.
+   * 'unknown'        → neither: an unmeasurable mode is never a finding, and it
+   *   is never treated as restored either (the release rule sees a prohibited
+   *   hold as still-active until the platform positively reports full screen).
+   */
+  const applyWindowModeReading = useCallback((mode: string, requestVerdict: boolean) => {
+    windowModeRef.current = mode;
+    if (isSuperAdmin) return;
+    if (isProhibitedWindowMode(mode)) {
+      if (!getSecurityLockState().sources.includes(LOCK_SRC_WINDOW_MODE)) {
+        windowModeEngagedSerialRef.current = verdictSerialRef.current;
+        windowModeEngagedModeRef.current = mode;
+        if (__DEV__) console.log('[SecurityContext] MULTI-WINDOW BLOCK — platform reports mode=' + mode + '; gate engaged');
+        engageSecurityLock(LOCK_SRC_WINDOW_MODE, { hard: true });
+      }
+      return;
+    }
+    tryReleaseWindowModeLock();
+    if (requestVerdict && mode === 'fullscreen') void check();
+  }, [check, isSuperAdmin, tryReleaseWindowModeLock]);
+
+  // SEPARATE INPUT, not a lifecycle proxy — the same rule the overlay signal
+  // follows. This subscription carries the PLATFORM's own window-mode
+  // transitions (activity callback relayed by MainActivity, window layout pass,
+  // host resume) so a cold start that lands DIRECTLY in split-screen and a live
+  // transition both reach the gate. The native side emits only on a real change,
+  // so there is one event per transition — no duplicate polling loop and no
+  // bridge chatter.
+  useEffect(() => {
+    if (Platform.OS !== 'android') return;
+    const unsub = onNativeWindowModeChanged((reading) => {
+      // requestVerdict: returning to full screen must be re-verified by a FRESH
+      // authoritative evaluation before the gate opens (never by the event alone).
+      applyWindowModeReading(reading.mode, true);
+    });
+    return unsub;
+  }, [applyWindowModeReading]);
+
   /**
    * Manual recheck (the overlay / resume gate control).
    *
-   * RE-READS the native obscured signal, invalidates verdicts that predate the
-   * request (so an older in-flight check cannot clear the hold), runs a fresh
-   * evaluation, then re-evaluates the release condition. It cannot force the
-   * gate open: clearing still requires the platform to report the signal gone
-   * AND policy to pass.
+   * RE-READS the native obscured signal AND the platform window mode,
+   * invalidates verdicts that predate the request (so an older in-flight check
+   * cannot clear the hold), runs a fresh evaluation, then re-evaluates both
+   * release conditions. It cannot force the gate open: clearing still requires
+   * the platform to report the condition gone AND policy to pass. The
+   * multi-window restriction deliberately offers no control of its own (see
+   * isGateRecheckable) — the platform's own signal is what clears it.
    */
   const verifySecurity = useCallback(async () => {
     if (Platform.OS === 'android') {
@@ -608,11 +904,18 @@ export function SecurityProvider({ children }: { children: React.ReactNode }) {
       } catch {
         // Keep the last known belief — an unreadable signal is NOT a clear one.
       }
+      try {
+        const reading = await getNativeWindowMode();
+        if (reading.measured) applyWindowModeReading(reading.mode, false);
+      } catch {
+        // Same rule: an unreadable window mode is not a restored one.
+      }
     }
     resumeTokenRef.current += 1;
     await check();
     tryReleaseOverlayLock();
-  }, [check, tryReleaseOverlayLock]);
+    tryReleaseWindowModeLock();
+  }, [applyWindowModeReading, check, tryReleaseOverlayLock, tryReleaseWindowModeLock]);
 
   // ── Native iOS security event bridge → unified logging pipeline ───────────
   // Subscribe to IOSSecurityModule events; map each to the existing logSecurityEvent
@@ -648,8 +951,24 @@ export function SecurityProvider({ children }: { children: React.ReactNode }) {
       // against the previous account's state (and could release a hold that
       // was never engaged, or hold forever without one).
       backgroundHeldRef.current = false;
+      // The evaluation queue and the resume watchdog are session-scoped as well:
+      // a queued evaluation from the previous identity must never run, and a
+      // pending watchdog must not outlive the hold it belongs to.
+      queuedEvaluationRef.current = null;
+      inFlightEvaluationRef.current = null;
+      resumePendingSinceRef.current = null;
+      resumeRetriedRef.current = false;
+      if (resumeWatchdogRef.current) {
+        clearTimeout(resumeWatchdogRef.current);
+        resumeWatchdogRef.current = null;
+      }
       overlaySignalRef.current = false;
       overlayEngagedSerialRef.current = -1;
+      // The window-mode belief is session-scoped too: 'unknown' (not
+      // 'fullscreen') so the next identity cannot inherit this one's reading.
+      windowModeRef.current = 'unknown';
+      windowModeEngagedSerialRef.current = -1;
+      windowModeEngagedModeRef.current = 'multi_window';
       verdictSerialRef.current = 0;
       resumeTokenRef.current = 0;
       evaluationStartTokenRef.current = 0;
@@ -662,18 +981,40 @@ export function SecurityProvider({ children }: { children: React.ReactNode }) {
       return;
     }
 
-    // ── Initial check at session start ─────────────────────────────────────
-    // The scheduler below only fires on the 30s tick / state transitions; run
-    // one full check immediately when a session appears so authenticated
-    // monitoring is established from second zero (not after the first tick).
-    void runPeriodicCheckRef.current();
+    // ── NETWORK LOCK AT SESSION START ───────────────────────────────────────
+    // A mandatory verification is PENDING the moment an authenticated session
+    // exists (a previous process's verdict is not evidence for this one), so the
+    // app's own traffic is suspended BEFORE that verification runs and protected
+    // operations are withheld while it does.
+    //
+    // RACE ARGUMENT (why this holds even though child effects run first): a
+    // screen can only send traffic through the transport, and the transport
+    // consults this lock synchronously before any I/O — a request that raced
+    // past the check is registered and aborted by containment, one that arrives
+    // afterwards is queued. Nothing protected leaves the device either way.
+    //
+    // Released by the same path as every other hold: a COMPLETED, clean verdict
+    // that started at/after this session (`maybeReleaseBackgroundHold`). A
+    // confirming violation keeps the lock engaged and shows its own screen.
+    // Super Admin sessions bypass it (enterBackgroundHold returns early).
+    //  Only when NO verdict has been published in this process. After an in-app
+    //  sign-in the pre-session `check()` has already produced one, so engaging
+    //  here would only delay the post-login bootstrap requests (device
+    //  registration, profile load) without adding any evidence. A cold start
+    //  with a restored session has no verdict yet — that is the case this
+    //  protects.
+    if (result === null) enterBackgroundHold('session-start');
 
     // ── runPeriodicCheck ──────────────────────────────────────────────────────
     // Defined inside the effect so it closes over the current isSuperAdmin value.
     // Written into a stable ref so the AppState / network handlers (registered
     // once) always invoke the most-recent version without stale-closure issues.
     const runPeriodicCheck = async () => {
-      if (!appActiveRef.current || checkRef.current) return;
+      if (!appActiveRef.current) return;
+      // NOTE: an in-flight evaluation no longer makes this a no-op — the request
+      // is queued and started the moment the current run finishes (runEvaluation).
+      // Dropping it is what used to let a resume-triggered re-check disappear
+      // until the NEXT tick.
       // Super Admin bypass: no checks needed during the bypass window
       if (isSuperAdmin) {
         if (__DEV__) console.log('[SecurityContext] Super Admin bypass — skipping periodic check');
@@ -682,8 +1023,10 @@ export function SecurityProvider({ children }: { children: React.ReactNode }) {
         return;
       }
       try {
-        const r = await runGuardedCheck();
-        if (!r) return; // superseded by a newer check — newer result is authoritative
+        const r = await runEvaluation('periodic');
+        // null = coalesced into a run already in flight (or superseded by a newer
+        // one); that newer result is authoritative and will publish itself.
+        if (!r) return;
         setResult(r);
         // Update VPN threat tracking so foreground re-checks are scheduled correctly
         hasActiveVpnThreat.current = r.threats.some(t => t.type === 'vpn_detected');
@@ -697,6 +1040,15 @@ export function SecurityProvider({ children }: { children: React.ReactNode }) {
     // Keep the stable ref up-to-date with the latest closure
     runPeriodicCheckRef.current = runPeriodicCheck;
 
+    //  ORDERING FIX (the session-start verification never ran): the immediate
+    //  session-start check used to be invoked BEFORE this assignment, so on the
+    //  first execution of this effect it called the ref's inert initializer
+    //  (`async () => {}`) and the first authoritative evaluation was deferred to
+    //  the 30 s interval tick — the app ran on a previous process's state (or on
+    //  no verdict at all) for up to half a minute. Assign first, then call, so
+    //  the real implementation runs at start.
+    void runPeriodicCheckRef.current();
+
     // ── Background → resume gate ───────────────────────────────────────────
     // TWO directions, and both are load-bearing:
     //
@@ -707,10 +1059,13 @@ export function SecurityProvider({ children }: { children: React.ReactNode }) {
     //     protected content stayed live behind the Home button and the last
     //     pre-background verdict kept the app usable after returning.
     //
-    //   RETURNING to the foreground → the hold STAYS ENGAGED and a full-screen
-    //     verification state is shown until a COMPLETED post-resume evaluation
-    //     finds nothing blocking. There is no window in which protected screens
-    //     or playback are briefly revealed before the checks finish.
+    //   RETURNING to the foreground → the hold STAYS ENGAGED (containment is what
+    //     protects protected content), a post-resume evaluation starts at once,
+    //     and the app SHELL is restored immediately. The hold is no longer
+    //     rendered as a full-screen VERIFYING page: protected operations are
+    //     refused by the transport gate, protected playback stays stopped by the
+    //     hard lock, and the shell is usable. A confirmed violation is routed to
+    //     its own blocking screen the moment the verdict lands.
     //
     // Super Admin sessions bypass the hold (matching every other enforcement
     // path). The hold is SESSION-SCOPED: `!session` releases all holders, so
@@ -739,13 +1094,22 @@ export function SecurityProvider({ children }: { children: React.ReactNode }) {
 
       if (nextState === 'active' && !wasActive) {
         // Resume: bump the token FIRST so any evaluation already in flight is
-        // ineligible to clear this hold, then keep the gate engaged until a
-        // fresh post-resume verification completes.
+        // ineligible to clear this hold, then keep the CONTAINMENT engaged until a
+        // fresh post-resume verification completes. The hold is no longer
+        // rendered as a page (see rendersBlockScreen): the app shell comes back
+        // immediately, while protected operations stay refused and protected
+        // media stays stopped until the verdict lands.
         resumeTokenRef.current += 1;
         enterBackgroundHold('resumed');
         // Re-assert the native overlay protection on the (possibly recreated)
         // activity — Android can rebuild the window across a background cycle.
         void enableNativeOverlayProtection();
+        // Same for the multi-window triggers (the activity can be recreated, so
+        // the layout watcher is gone) plus a fresh reading: returning from
+        // another app is exactly when a split-screen change may have happened.
+        void enableNativeWindowModeMonitoring().then(() => getNativeWindowMode()).then((reading) => {
+          if (reading.measured) applyWindowModeReading(reading.mode, false);
+        }).catch(() => {});
       }
 
       if (nextState === 'active') {
@@ -768,12 +1132,21 @@ export function SecurityProvider({ children }: { children: React.ReactNode }) {
         // Also re-check whenever returning from background for the first time.
         // FIX: use runPeriodicCheckRef.current so the AppState handler always
         // calls the latest closure (avoids stale-closure VPN re-check bug).
-        if (!wasActive || hasActiveVpnThreat.current) {
-          // Small debounce so the network stack has settled after resume
+        // ── Resume verification ────────────────────────────────────────────────
+        // ALWAYS requested on a real background→foreground transition, started
+        // at once (no artificial delay) and queued rather than dropped if an
+        // evaluation is already running. The VPN case keeps its short debounce
+        // alone, because that one waits for the network stack to settle after a
+        // tunnel teardown — the hold stays engaged for those 1.5 s, and the
+        // value read afterwards is the first one that can speak for the new
+        // transport state.
+        if (hasActiveVpnThreat.current) {
           if (vpnRecheckTimer.current) clearTimeout(vpnRecheckTimer.current);
           vpnRecheckTimer.current = setTimeout(() => {
-            void runPeriodicCheckRef.current();
-          }, hasActiveVpnThreat.current ? VPN_RECHECK_DEBOUNCE_MS : 0);
+            requestResumeVerification('resume-vpn-settled');
+          }, VPN_RECHECK_DEBOUNCE_MS);
+        } else {
+          requestResumeVerification('resume');
         }
       }
     });
@@ -870,6 +1243,14 @@ export function SecurityProvider({ children }: { children: React.ReactNode }) {
     // Install the native overlay protection as soon as an authenticated
     // session exists. Idempotent; resolves false on platforms without it.
     void enableNativeOverlayProtection();
+    // Install the multi-window triggers (activity callback relay, window layout
+    // watcher, host-resume hook) and take ONE authoritative reading — this is
+    // what catches an app that was LAUNCHED directly into split-screen, where an
+    // event-only design would never fire. A reading that could not be measured
+    // ('unknown') is not a finding and not a clearance.
+    void enableNativeWindowModeMonitoring().then(() => getNativeWindowMode()).then((reading) => {
+      if (reading.measured) applyWindowModeReading(reading.mode, false);
+    }).catch(() => {});
 
     const refreshDynamicConfig = async () => {
       if (!appActiveRef.current) return;
@@ -927,6 +1308,11 @@ export function SecurityProvider({ children }: { children: React.ReactNode }) {
     // chance to clear now that a NEWER completed verdict exists.
     verdictSerialRef.current = verdictSerial;
     tryReleaseOverlayLock();
+    // Same hand-off for the multi-window hold: a NEWER completed verdict is one
+    // of its two release conditions (canClearMultiWindowBlock). The other one —
+    // the platform reporting full screen — is owned by the native signal, so a
+    // verdict alone can never open this gate.
+    tryReleaseWindowModeLock();
 
     if (!isSuperAdmin && hasVerdict && (r.blocksLogin || r.blocksVideo)) {
       engageSecurityLock(LOCK_SRC_VERDICT, { hard: true });
@@ -945,8 +1331,7 @@ export function SecurityProvider({ children }: { children: React.ReactNode }) {
     } else if (hasVerdict && __DEV__) {
       console.log('[SecurityContext] holding provisional VPN containment — verdict predates the latest native signal');
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isSuperAdmin, hasVerdict, r.blocksLogin, r.blocksVideo, verdictTypes, tryReleaseOverlayLock, verdictSerial]);
+  }, [isSuperAdmin, hasVerdict, r.blocksLogin, r.blocksVideo, verdictTypes, tryReleaseOverlayLock, tryReleaseWindowModeLock, verdictSerial]);
 
   const phase: GatePhase = resolveGatePhase({
     hasVerdict,
@@ -969,15 +1354,23 @@ export function SecurityProvider({ children }: { children: React.ReactNode }) {
   // separate React flag: the lock is the single source of truth for "protected
   // content is contained", so the gate and the transport can never disagree.
   const overlayBlocked    = !isSuperAdmin && lockState.sources.includes(LOCK_SRC_OVERLAY);
+  const multiWindowBlocked = !isSuperAdmin && lockState.sources.includes(LOCK_SRC_WINDOW_MODE);
   const backgroundBlocked = !isSuperAdmin && lockState.sources.includes(LOCK_SRC_BACKGROUND);
   const liveBlocking      = r.blocksLogin && r.threats.length > 0;
-  const vpnBlocked        = liveBlocking && r.threats.some((t) => t.type === 'vpn_detected');
+  // CONNECTION BLOCK (VPN **or** proxy). Both detectors are floored to
+  // block_login (applyMandatoryConnectionFloor) and both have their own copy on
+  // the connection page, so they must resolve to the SAME state: matching only
+  // `vpn_detected` sent a proxy-only violation to the generic
+  // BLOCKED_SECURITY_VIOLATION page, which has no recovery steps and no recheck
+  // control — i.e. the correct finding, the wrong screen and no way to recover
+  // after switching the proxy off.
+  const vpnBlocked        = liveBlocking && hasConnectionFinding(r.threats);
   const gateState: SecurityGateState = isSuperAdmin
-    ? 'ALLOWED'
-    : resolveSecurityGateState({
+    ? 'ALLOWED'      : resolveSecurityGateState({
         evaluating:             evaluating || checking,
         hasVerdict,
         overlayBlocked,
+        multiWindowBlocked,
         backgroundResumeBlocked: backgroundBlocked,
         vpnBlocked,
         violationBlocked:        liveBlocking && !vpnBlocked,
@@ -997,9 +1390,13 @@ export function SecurityProvider({ children }: { children: React.ReactNode }) {
       hasWarnings:         r.hasWarnings,
       isSuperAdmin,
       securityLocked:      lockState.locked,
+      networkLocked:       lockState.locked,
+      networkAccessState:  resolveNetworkAccessState({ locked: lockState.locked }),
       securityLockHard:    lockState.hard,
       gateState,
       overlayBlocked,
+      multiWindowBlocked,
+      windowMode:          multiWindowBlocked ? windowModeEngagedModeRef.current : windowModeRef.current,
       backgroundBlocked,
       verifySecurity,
       check,

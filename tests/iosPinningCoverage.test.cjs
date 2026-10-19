@@ -270,12 +270,19 @@ check('F2 the first-party expo/fetch site is now served by a pinned session', ()
   );
 });
 
-// ─── G. Severity separation: proxy warn vs pin block ─────────────────────────
+// ─── G. Severity separation: connection block vs pin block ───────────────────
 
-check('G1 proxy detection stays warn_only (heuristic — must not lock users)', () => {
+// POLICY UPDATE (mandatory connection block — migration 033 + client floor):
+// proxy used to be warn_only here; a confirmed VPN/proxy can no longer be
+// downgraded below block_login in any plane (see docs/VPN_PROXY_MANDATORY_BLOCK.md).
+check('G1 proxy detection is floored to block_login (mandatory connection block)', () => {
   ok(
-    /proxy:\s+'warn_only'/.test(securityTs),
-    'proxy detection is a low-confidence heuristic; blocking on it would lock VPN users',
+    /proxy:\s+'block_login'/.test(securityTs),
+    'proxy is a mandatory block: a dismissed proxy finding was the reported iOS bypass',
+  );
+  ok(
+    /applyMandatoryConnectionFloor/.test(securityTs),
+    'the client floor must still be applied so a weakened server row cannot reopen the dismiss path',
   );
 });
 

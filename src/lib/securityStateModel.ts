@@ -296,6 +296,7 @@ export function resolveGatePhase(input: {
 export type SecurityGateState =
   | 'CHECKING'
   | 'BLOCKED_OVERLAY'
+  | 'BLOCKED_MULTI_WINDOW'
   | 'BLOCKED_BACKGROUND_RESUME'
   | 'BLOCKED_VPN'
   | 'BLOCKED_SECURITY_VIOLATION'
@@ -305,6 +306,7 @@ export type SecurityGateState =
 export const SECURITY_GATE_STATES: readonly SecurityGateState[] = [
   'CHECKING',
   'BLOCKED_OVERLAY',
+  'BLOCKED_MULTI_WINDOW',
   'BLOCKED_BACKGROUND_RESUME',
   'BLOCKED_VPN',
   'BLOCKED_SECURITY_VIOLATION',
@@ -323,6 +325,14 @@ export interface SecurityGateInputs {
    */
   overlayBlocked: boolean;
   /**
+   * The platform reports THIS app in a prohibited window mode (split-screen /
+   * other multi-window mode, or our own picture-in-picture). A window-state
+   * restriction, not a policy finding: it says nothing about the device being
+   * compromised, only that protected content must not be presented in a window
+   * the user can pair with another app.
+   */
+  multiWindowBlocked: boolean;
+  /**
    * The app left the foreground and has not yet completed a post-resume
    * verification. Held from the instant the app is backgrounded until a
    * COMPLETED evaluation that STARTED AFTER the resume found nothing blocking.
@@ -340,11 +350,28 @@ export interface SecurityGateInputs {
  * Precedence (documented, fail-closed, most-trusted-blocker first):
  *
  *   1. BLOCKED_OVERLAY             — an untrusted window is in the touch path.
- *   2. BLOCKED_BACKGROUND_RESUME   — left the foreground; not yet re-verified.
+ *   2. BLOCKED_MULTI_WINDOW        — this app is in a prohibited window mode.
  *   3. BLOCKED_VPN                 — policy block caused by a VPN/proxy.
  *   4. BLOCKED_SECURITY_VIOLATION  — any other policy block.
- *   5. CHECKING                    — no completed verdict, or a check running.
- *   6. ALLOWED                     — completed verdict, nothing blocking.
+ *   5. BLOCKED_BACKGROUND_RESUME   — left the foreground; not yet re-verified.
+ *   6. CHECKING                    — no completed verdict, or a check running.
+ *   7. ALLOWED                     — completed verdict, nothing blocking.
+ *
+ * BLOCKED_MULTI_WINDOW ranks directly below BLOCKED_OVERLAY because both are
+ * WINDOW-STATE causes rather than policy verdicts: the cause and the recovery
+ * are the same window, so the screen must speak about the window rather than
+ * list policy findings.
+ *
+ * WHY A CONFIRMED POLICY BLOCK OUTRANKS THE RESUME HOLD (changed deliberately):
+ * the resume hold is an INTERIM state with no screen of its own — the app shell
+ * is restored immediately and verified asynchronously — so if it outranked the
+ * policy states, a violation confirmed DURING a resume would be masked by a
+ * state that renders nothing, and the user would face refused requests with no
+ * explanation. Routing the violation to its own authoritative screen the moment
+ * it is confirmed is required, and it weakens nothing: CONTAINMENT is driven by
+ * the lock holders, not by which state is displayed. The resume holder stays
+ * engaged until a clean post-resume evaluation lands, so protected operations
+ * remain blocked either way.
  *
  * The order encodes two invariants:
  *   • A live block ALWAYS outranks CHECKING. A re-check in flight must never
@@ -356,16 +383,40 @@ export interface SecurityGateInputs {
  */
 export function resolveSecurityGateState(input: SecurityGateInputs): SecurityGateState {
   if (input.overlayBlocked) return 'BLOCKED_OVERLAY';
-  if (input.backgroundResumeBlocked) return 'BLOCKED_BACKGROUND_RESUME';
+  if (input.multiWindowBlocked) return 'BLOCKED_MULTI_WINDOW';
+  // A CONFIRMED violation always wins over the interim resume hold (see the
+  // precedence note above): the hold has no screen, the violation has one.
   if (input.vpnBlocked) return 'BLOCKED_VPN';
   if (input.violationBlocked) return 'BLOCKED_SECURITY_VIOLATION';
+  if (input.backgroundResumeBlocked) return 'BLOCKED_BACKGROUND_RESUME';
   if (!input.hasVerdict || input.evaluating) return 'CHECKING';
   return 'ALLOWED';
+}
+
+/**
+ * Which states RENDER a full-screen authoritative block page.
+ *
+ * `isGateBlocked` answers "must protected content/operations be withheld?" and
+ * stays true for every BLOCKED_* state. This answers the different question
+ * "does this state take over the whole screen?" — and the answer for
+ * BLOCKED_BACKGROUND_RESUME is NO: an ordinary resume restores the app shell
+ * immediately and verifies asynchronously, with protected operations refused by
+ * the central lock until a clean post-resume verdict lands. Showing the user a
+ * full-screen VERIFYING page for that interim state was the reported defect
+ * (a visible verification interruption on a clean device, sometimes for tens of
+ * seconds, plus a Continue control that could not clear it).
+ */
+export function rendersBlockScreen(state: SecurityGateState): boolean {
+  return state === 'BLOCKED_OVERLAY'
+    || state === 'BLOCKED_MULTI_WINDOW'
+    || state === 'BLOCKED_VPN'
+    || state === 'BLOCKED_SECURITY_VIOLATION';
 }
 
 /** True for the states in which protected content must not be visible. */
 export function isGateBlocked(state: SecurityGateState): boolean {
   return state === 'BLOCKED_OVERLAY'
+    || state === 'BLOCKED_MULTI_WINDOW'
     || state === 'BLOCKED_BACKGROUND_RESUME'
     || state === 'BLOCKED_VPN'
     || state === 'BLOCKED_SECURITY_VIOLATION';
@@ -383,12 +434,87 @@ export function isGateBlocked(state: SecurityGateState): boolean {
  *
  * A generic integrity violation (root/tamper) stays without a control: retrying
  * cannot change a device condition that has not changed.
+ *
+ * BLOCKED_MULTI_WINDOW deliberately has NO control either — and that is the
+ * whole point of this restriction. A "Verify" button here would read as an
+ * acknowledgement the user can tap while still in split-screen, i.e. a bypass.
+ * Returning the app to full-screen is the ONLY way out: the native window-mode
+ * signal then reports "fullscreen" (the activity callback, the window layout
+ * pass and the resume hook all push it) and the gate re-verifies automatically.
+ *
+ * BLOCKED_BACKGROUND_RESUME has no control either, because it renders no page:
+ * the resume verification always starts on its own and completes on its own, so
+ * there is nothing for the user to press — and nothing they COULD press could
+ * clear it faster (the previous Continue control was in fact a no-op whenever an
+ * evaluation was already running; see the resume-verification suite).
  */
 export function isGateRecheckable(state: SecurityGateState): boolean {
   return state === 'BLOCKED_OVERLAY'
-    || state === 'BLOCKED_BACKGROUND_RESUME'
     || state === 'BLOCKED_VPN';
 }
+
+// ─── NETWORK LOCK (temporary suspension of the app's own traffic) ───────────
+//
+// WHY: withholding protected CONTENT is not the same as withholding the app's
+// own NETWORK ACTIVITY. A video is authorized by a request; a PDF is fetched by
+// a request; progress is written by a request. While a mandatory verification
+// is pending, the transport therefore suspends the app's traffic instead of
+// merely hiding screens — the state below is that suspension, named.
+//
+// THE LOCK IS TEMPORARY AND SELF-CLEARING: it is released by a completed, clean
+// post-event verification (never by a timer, never by a user tap), and a
+// confirmed violation keeps a holder engaged so the lock never reaches the
+// unlocked state on a blocked device.
+
+export type NetworkAccessState = 'NETWORK_LOCKED' | 'NETWORK_OPEN';
+
+/** Every network-access state, for exhaustive tests / future consumers. */
+export const NETWORK_ACCESS_STATES: readonly NetworkAccessState[] = [
+  'NETWORK_LOCKED',
+  'NETWORK_OPEN',
+] as const;
+
+/**
+ * The single authoritative answer to "is the app's own traffic suspended?".
+ *
+ * Deliberately a pure function of ONE input (the central lock's holder state)
+ * so it can never disagree with the transport: the transport and every UI
+ * consumer derive from the same holders.
+ */
+export function resolveNetworkAccessState(input: { locked: boolean }): NetworkAccessState {
+  return input.locked ? 'NETWORK_LOCKED' : 'NETWORK_OPEN';
+}
+
+/**
+ * The documented SCOPE of the network lock. Written down (and tested) so nobody
+ * — in code, docs or a status report — claims more than the architecture
+ * delivers.
+ */
+export const NETWORK_LOCK_SCOPE = {
+  /** Suspended while the lock is held (before any network I/O). */
+  covered: [
+    'central API client (apiFetch / apiFetchOnce): queued, then replayed once on unlock, or refused at the bound',
+    'in-flight registered protected requests: aborted immediately by containment',
+    'storage uploads through the API client: refused while locked',
+    'VdoCipher chunk uploads: held between chunks, resumed on unlock',
+    'protected playback: native player and WebView player stopped and unmounted',
+  ],
+  /**
+   * NOT suspended. These are separate TCP connections opened by a WebView, an
+   * iframe, a native media SDK or the OS — invisible to any JS-layer gate.
+   */
+  notCovered: [
+    'the YouTube embed inside the player WebView (it talks to YouTube on its own connection)',
+    'an already-established native media stream that ignores pause()',
+    'any traffic the OS or another app performs on the device',
+  ],
+  /**
+   * What is used instead where a socket-level block is unavailable: stop the
+   * load, pause the player, detach the cross-origin frame, and (for a player
+   * that has not mounted yet) never render it in the first place.
+   */
+  mitigation: 'stop-load + player teardown + unmount gate; never claimed to be a device-wide block',
+} as const;
 
 // ─── Finding → user-facing copy key ─────────────────────────────────────────
 
@@ -457,6 +583,67 @@ export function resolveBackgroundResumeGate(input: {
 }
 
 /**
+ * ─── Resume-verification evidence policy (what may be reused, and when) ─────
+ *
+ * The resume re-check must be FAST without being weaker. The rules, in one
+ * place so a reviewer can audit them rather than infer them:
+ *
+ *  1. A VERDICT IS NEVER REUSED ACROSS A RESUME. `acceptsResumeVerification`
+ *     below is the enforcement: only an evaluation that STARTED at or after the
+ *     current resume may clear the hold, so "it was clean two minutes ago" can
+ *     never stand in for "it is clean now". A resume therefore always runs a
+ *     real evaluation; the async/coalesced scheduler is what makes it fast, not
+ *     a skipped check.
+ *  2. SUB-MEASUREMENTS INSIDE ONE EVALUATION may be reused under their own
+ *     existing, bounded validity rules — the native flags batch (a single bridge
+ *     call, short TTL) and the server policy/config caches (long TTL, refreshed
+ *     independently). A chained re-run that starts within those windows reuses
+ *     them instead of paying for the same native/network work twice.
+ *  3. EVERYTHING ELSE INVALIDATES: a native signal (VPN state change, window-mode
+ *     change), a network change, a foreground transition, a new verdict or a
+ *     session identity change all bump a sequence/token, which makes any older
+ *     evaluation ineligible to release a hold. Fail-closed by construction.
+ */
+export const RESUME_VERIFICATION_EVIDENCE_POLICY = {
+  /** Cross-resume verdict reuse: never. */
+  verdictReuseAcrossResume: false,
+  /** Sub-measurements are reused only within their own bounded validity window. */
+  subMeasurementReuse: 'within-ttl',
+  /** Clearing the hold requires an evaluation that STARTED at/after the resume. */
+  releaseRequiresPostResumeEvaluation: true,
+} as const;
+
+/**
+ * How long a resume verification may stay UNRESOLVED before the app treats it as
+ * overdue, retries it once, and reports it as evidence.
+ *
+ * A timeout is a REPORTING threshold, never an authorization: crossing it must
+ * not release protected access (see `isResumeVerificationOverdue` — it returns a
+ * boolean about the PENDING state, and the caller is forbidden to convert it
+ * into a release). The periodic scheduler and the retry keep working after it.
+ */
+export const RESUME_VERIFICATION_TIMEOUT_MS = 8000;
+
+/**
+ * True when a resume verification has been pending longer than `timeoutMs`.
+ * Outreach used for: (a) reporting/instrumentation, (b) scheduling the single
+ * bounded retry. NOTHING may use it to release the hold — an unresolved
+ * mandatory check stays closed.
+ */
+export function isResumeVerificationOverdue(input: {
+  /** Monotonic ms when the resume verification was requested (null = none pending). */
+  pendingSinceMs: number | null;
+  /** Monotonic ms now. */
+  nowMs: number;
+  timeoutMs?: number;
+}): boolean {
+  const timeout = input.timeoutMs ?? RESUME_VERIFICATION_TIMEOUT_MS;
+  if (input.pendingSinceMs === null) return false;
+  if (!Number.isFinite(input.pendingSinceMs) || !Number.isFinite(input.nowMs)) return false;
+  return input.nowMs - input.pendingSinceMs >= timeout;
+}
+
+/**
  * Stale-async guard for the resume verification.
  *
  * `resumeToken` is bumped on every transition into the foreground. An
@@ -507,6 +694,116 @@ export const OVERLAY_WARNING_COPY = {
     'An overlay or another app may be interfering with MedAcademy. ' +
     'Close the interfering app and verify security to continue.',
 } as const;
+
+// ─── Multi-window / split-screen gate (mandatory full-screen usage) ──────────
+
+/**
+ * The three window modes the native module can REPORT. They are the platform's
+ * own documented values, not an inference:
+ *
+ *   fullscreen         nothing to enforce.
+ *   multi_window       split-screen, a freeform/desktop app window, or any
+ *                      other Android multi-window presentation of THIS app.
+ *   picture_in_picture THIS app is floating in PiP (documented as a special
+ *                      case of multi-window, which is why it is classified
+ *                      first and worded separately from a split screen).
+ *
+ * `unknown` (the fourth platform value) is NOT listed as a prohibited mode: an
+ * unmeasurable signal must never become a confirmed finding.
+ */
+export type WindowMode = 'fullscreen' | 'multi_window' | 'picture_in_picture' | 'unknown';
+
+/** True for the modes in which protected content must not be presented. */
+export function isProhibitedWindowMode(mode: WindowMode | string | null | undefined): boolean {
+  return mode === 'multi_window' || mode === 'picture_in_picture';
+}
+
+/**
+ * Exact copy for the two prohibited window modes. Split-screen and a floating
+ * window are DIFFERENT conditions with different recovery actions, and neither
+ * is an overlay — so the wording never claims an overlay was detected (an
+ * overlay is a separate, separately-measured signal: OVERLAY_WARNING_COPY).
+ */
+export const MULTI_WINDOW_WARNING_COPY = {
+  title: 'Full-screen required',
+  message:
+    'Split-screen detected. MedAcademy must be used full-screen, so protected '
+    + 'content is hidden until you close split-screen and the app is back to '
+    + 'normal full-screen usage.',
+} as const;
+
+export const PICTURE_IN_PICTURE_WARNING_COPY = {
+  title: 'Full-screen required',
+  message:
+    'MedAcademy is in a floating window (picture-in-picture), which is not '
+    + 'allowed. Close the floating window and open the app full-screen to '
+    + 'continue — access is restored automatically.',
+} as const;
+
+/** Pick the copy for the mode the platform actually reported. */
+export function windowModeBlockCopy(mode: WindowMode | string | null | undefined): {
+  title: string;
+  message: string;
+} {
+  return mode === 'picture_in_picture' ? PICTURE_IN_PICTURE_WARNING_COPY : MULTI_WINDOW_WARNING_COPY;
+}
+
+/**
+ * What the user must do, per mode. Rendered on the blocking screen; kept here
+ * (like connectionBlockInstructions) so the instructions cannot drift between
+ * the gate and any other surface.
+ */
+export function windowModeBlockSteps(mode: WindowMode | string | null | undefined): readonly string[] {
+  if (mode === 'picture_in_picture') {
+    return [
+      'Close the floating MedAcademy window (drag it to the bottom of the screen, or open the app from Recents).',
+      'Open MedAcademy normally \u2014 it must fill the screen.',
+      'Access returns automatically as soon as the app is full-screen again.',
+    ];
+  }
+  return [
+    'Open the recent-apps view (the square/gesture button) and choose "Full screen" / drag the divider to the top or bottom edge.',
+    'Or close the app paired with MedAcademy and reopen MedAcademy on its own.',
+    'Access returns automatically as soon as MedAcademy is back to full-screen.',
+  ];
+}
+
+/**
+ * The multi-window lock may only release when BOTH hold:
+ *
+ *   • the platform reports the app back in FULL SCREEN, and
+ *   • a FRESH security evaluation has completed.
+ *
+ * Same two-condition shape as the overlay rule, for the same reason: the first
+ * condition is the required proof that the prohibited state is gone, and the
+ * second one guarantees the app never unblocks on a verdict that predates it.
+ * There is deliberately NO third, user-tappable condition — the user cannot
+ * acknowledge their way past this restriction. Both are read from the
+ * authoritative lock/verdict state, never from UI state.
+ */
+export function canClearMultiWindowBlock(input: {
+  /** The platform now reports the app in the permitted (full-screen) mode. */
+  modeRestored: boolean;
+  /** A COMPLETED evaluation has landed since the lock was engaged. */
+  hasFreshVerdict: boolean;
+}): boolean {
+  return input.modeRestored && input.hasFreshVerdict;
+}
+
+/**
+ * What Android can and cannot tell us about other apps' windows — surfaced
+ * verbatim in the implementation report. Split-screen/multi-window detection of
+ * THIS app is real and mandatory; "another app is floating over us" is NOT
+ * detectable, and nothing here pretends otherwise.
+ */
+export const MULTI_WINDOW_DETECTION_LIMITS = [
+  'Activity.isInMultiWindowMode() (API 24+) answers for THIS app only: split-screen, a freeform/desktop app window, and our own picture-in-picture all report true (PiP is documented as a special case of multi-window).',
+  'Activity.isInPictureInPictureMode() (API 24+) reports only that THIS app is floating in PiP. Another app being in PiP, split-screen, or a floating window is NOT observable: Android provides no public API for one app to enumerate another app\u2019s windows.',
+  'AccessibilityService.getWindows() could observe other apps\u2019 windows, but it requires an accessibility service \u2014 a broad, sensitive permission this app deliberately does not request for a learning product (privacy, and Play policy). No permission is requested for multi-window detection: the APIs above need none.',
+  'OEM floating-window features (MIUI, One UI, EMUI and similar) are vendor UI layered over the documented APIs. When a vendor puts MedAcademy itself in a resizable/floating window the documented multi-window state reports it; when a vendor feature only affects OTHER apps, nothing is claimed.',
+  'The multi-window signal and the obscured-window/overlay signal are DIFFERENT measurements and are never conflated: a prohibited window mode is never reported as an overlay, and the touch-path overlay evidence is never reported as a split screen.',
+  'A failed, absent or not-yet-available measurement reports "unknown" and is treated as "not measurable on this device" \u2014 never as proof of full-screen use, and never as a confirmed finding.',
+] as const;
 
 /** What the platform can and cannot detect — surfaced verbatim in the report. */
 // ─── VPN / proxy block copy + documented iOS detection limits ────────────────

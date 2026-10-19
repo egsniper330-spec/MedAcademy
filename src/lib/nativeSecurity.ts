@@ -99,6 +99,20 @@ export interface NativeSecurityFlags {
   windowObscured?:              boolean;
   /** True once the native overlay protection was installed on the activity. */
   overlayProtectionInstalled?:  boolean;
+  // ── Multi-window / split-screen state (window-state evidence) ─────────────
+  /**
+   * Last measured window mode of THIS app: 'fullscreen' | 'multi_window' |
+   * 'picture_in_picture' | 'unknown'. Evidence and cross-check for the report;
+   * the enforcement decision uses the LIVE window-mode signal
+   * (onNativeWindowModeChanged / getNativeWindowMode), not this snapshot.
+   */
+  windowMode?:                  string;
+  /** True for split-screen / another multi-window mode AND for our own PiP. */
+  inMultiWindowMode?:           boolean;
+  /** True only when THIS app is floating in picture-in-picture. */
+  inPictureInPictureMode?:      boolean;
+  /** False means "no real measurement yet" — never "full-screen confirmed". */
+  windowModeMeasured?:          boolean;
 }
 
 const SAFE_FLAGS: NativeSecurityFlags = {
@@ -131,6 +145,13 @@ const SAFE_FLAGS: NativeSecurityFlags = {
   // Fail-closed defaults: "unknown" must never read as "no overlay".
   windowObscured: false,
   overlayProtectionInstalled: false,
+  // Multi-window: 'unknown' + measured:false is the honest default — it is the
+  // same state as "this platform could not answer" (web / iOS / module absent)
+  // and is never treated as a confirmed full-screen measurement.
+  windowMode: 'unknown',
+  inMultiWindowMode: false,
+  inPictureInPictureMode: false,
+  windowModeMeasured: false,
   // iOS extras default to safe
   jailbreakDetected:       false,
   proxyDetected:           false,
@@ -751,6 +772,111 @@ export function onNativeObscuredChanged(cb: (obscured: boolean) => void): () => 
   if (!emitter) return () => {};
   const sub = emitter.addListener('obscuredStateChanged', (evt: { obscured?: boolean }) => {
     cb(evt?.obscured === true);
+  });
+  return () => sub.remove();
+}
+
+/* ─────────────── Multi-window / split-screen (mandatory full-screen) ───────
+ * See plugins/withSecurityModule.js (Android SecurityModule.kt + the
+ * withMainActivity forwarders) for the native implementation and its
+ * documented platform limits (MULTI_WINDOW_DETECTION_LIMITS in
+ * securityStateModel.ts). The whole JS surface is these three functions plus
+ * the evidence fields in NativeSecurityFlags:
+ *
+ *   getNativeWindowMode()             — one authoritative measurement
+ *   enableNativeWindowModeMonitoring() — attach the native triggers
+ *   onNativeWindowModeChanged(cb)      — push updates on real transitions
+ *
+ * They degrade to "unknown" / no-op off Android (Expo Go, web, iOS), so a
+ * caller never branches on platform — and never mistakes "module absent" for
+ * "full-screen confirmed".
+ */
+
+export interface NativeWindowModeReading {
+  /** 'fullscreen' | 'multi_window' | 'picture_in_picture' | 'unknown'. */
+  mode: string;
+  /** True for split-screen / multi-window AND for our own PiP. */
+  inMultiWindow: boolean;
+  /** True only when THIS app is floating in picture-in-picture. */
+  inPictureInPicture: boolean;
+  /**
+   * False means the platform could not answer (no activity yet, older device,
+   * module unavailable). It is NOT a full-screen measurement.
+   */
+  measured: boolean;
+}
+
+const UNMEASURED_WINDOW_MODE: NativeWindowModeReading = {
+  mode: 'unknown',
+  inMultiWindow: false,
+  inPictureInPicture: false,
+  measured: false,
+};
+
+/** Normalise an untrusted native/JSON value into the reading contract. */
+function toWindowModeReading(raw: unknown): NativeWindowModeReading {
+  if (!raw || typeof raw !== 'object') return UNMEASURED_WINDOW_MODE;
+  const r = raw as Record<string, unknown>;
+  const mode = typeof r.mode === 'string' && r.mode.length > 0 ? r.mode : 'unknown';
+  return {
+    mode,
+    inMultiWindow: r.inMultiWindow === true,
+    inPictureInPicture: r.inPictureInPicture === true,
+    measured: r.measured === true,
+  };
+}
+
+/**
+ * One authoritative measurement of the CURRENT window mode.
+ *
+ * Android-only by construction: the documented APIs (isInMultiWindowMode /
+ * isInPictureInPictureMode, API 24+) describe the Android window model. On
+ * iOS/web this resolves the honest 'unknown', measured:false — those platforms
+ * have their own windowing model that this restriction does not cover.
+ */
+export async function getNativeWindowMode(): Promise<NativeWindowModeReading> {
+  const mod = getModule();
+  if (!mod || typeof mod.getWindowMode !== 'function') return UNMEASURED_WINDOW_MODE;
+  try {
+    return toWindowModeReading(await mod.getWindowMode());
+  } catch {
+    // A thrown read is unmeasured, never "full-screen".
+    return UNMEASURED_WINDOW_MODE;
+  }
+}
+
+/**
+ * Attach the native window-mode triggers (activity callback relay, window
+ * layout watcher, host-resume hook) and re-read the mode once.
+ *
+ * Idempotent and safe on every session start / foreground return (Android can
+ * recreate the activity, which drops the watcher). Resolves true only when a
+ * REAL measurement exists afterwards — false means "this platform cannot
+ * answer", which callers must not read as proof of full-screen use.
+ */
+export async function enableNativeWindowModeMonitoring(): Promise<boolean> {
+  const mod = getModule();
+  if (!mod || typeof mod.enableWindowModeMonitoring !== 'function') return false;
+  try {
+    return (await mod.enableWindowModeMonitoring()) === true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Subscribe to real window-mode transitions. The native side emits only on an
+ * actual change of state (it deduplicates repeated reports of the same mode),
+ * so this is one event per transition — not one per layout pass or per check.
+ */
+export function onNativeWindowModeChanged(
+  cb: (reading: NativeWindowModeReading) => void,
+): () => void {
+  if (Platform.OS !== 'android') return () => {};
+  const emitter = getAndroidEmitter();
+  if (!emitter) return () => {};
+  const sub = emitter.addListener('windowModeChanged', (evt: unknown) => {
+    cb(toWindowModeReading(evt));
   });
   return () => sub.remove();
 }

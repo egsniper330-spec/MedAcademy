@@ -37,6 +37,14 @@ import { File as FSFile, Paths as FSPaths } from 'expo-file-system';
 import { copyAsync, readAsStringAsync, EncodingType } from 'expo-file-system/legacy';
 import { uploadVideoChunkWithProgress } from './uploadVideoChunkXhr';
 import { setAbortController, removeAbortController } from './uploadQueueStore';
+import { isNetworkLocked, waitForNetworkUnlock } from './securityLock';
+
+/**
+ * How long a chunk may wait for the NETWORK LOCK to clear before the upload is
+ * treated as PAUSED. Bounded on purpose: an unresolved mandatory verification
+ * must never let upload traffic flow (and must never look like success).
+ */
+const UPLOAD_NETWORK_LOCK_WAIT_MS = 30_000;
 
 /**
  * Upload a video file in chunks to the video-upload-chunk Edge Function.
@@ -91,6 +99,21 @@ export async function uploadVideoInChunks(params: ChunkedUploadParams): Promise<
   const ac = new AbortController();
   setAbortController(uploadId, ac);
 
+  // ── NETWORK LOCK (see docs/NETWORK_LOCK.md) ─────────────────────────────────
+  // Chunk uploads go straight to VdoCipher over their own connection, so the
+  // API client's gate cannot cover them; the loop must consult the lock itself.
+  // While a mandatory verification is pending NO chunk leaves the device — the
+  // upload holds between chunks and resumes the moment a clean verdict clears
+  // the lock (no restart, no re-upload of completed chunks). A bound that
+  // expires is reported as the same PAUSED state the user's pause button
+  // produces, never as success.
+  const holdWhileNetworkLocked = async () => {
+    if (!isNetworkLocked()) return;
+    const released = await waitForNetworkUnlock(UPLOAD_NETWORK_LOCK_WAIT_MS);
+    if (!released || ac.signal.aborted) throw new Error('Upload paused or cancelled');
+  };
+  await holdWhileNetworkLocked();
+
   // ── Pre-fetch full buffer on Web (blob: URI, can't seek) ─────────────────
   let webBuffer: ArrayBuffer | null = null;
   if (isWeb) {
@@ -109,6 +132,8 @@ export async function uploadVideoInChunks(params: ChunkedUploadParams): Promise<
     if (ac.signal.aborted) {
       throw new Error('Upload paused or cancelled');
     }
+    // …and never start a chunk while the device is being verified.
+    await holdWhileNetworkLocked();
 
     const chunkStart = i * chunkSizeBytes;
     const chunkEnd   = Math.min(chunkStart + chunkSizeBytes, fileSize);

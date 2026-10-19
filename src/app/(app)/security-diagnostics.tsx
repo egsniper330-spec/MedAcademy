@@ -101,7 +101,7 @@ const DETECTOR_META: Record<string, { label: string; apiExplain: string; falseOn
   },
   emulatorDetected: {
     label: 'Emulator / AVD',
-    apiExplain: '5 heuristics: (1) Build.FINGERPRINT starts with "generic"/"unknown" or contains "vbox"/"sdk", (2) Build.MODEL contains "emulator"/"genymotion"/"android sdk" or Build.HARDWARE is "goldfish"/"ranchu", (3) Build.MANUFACTURER is "unknown" or "Genymotion", (4) ro.kernel.qemu system property = "1", (5) SensorManager sensor count = 0 (physical phones always have ≥1 sensor). Real devices return false on all 5.',
+    apiExplain: '5 heuristics: (1) Build.FINGERPRINT starts with "generic"/"unknown" or contains "vbox" (or "test-keys" together with "sdk"), (2) Build.MODEL contains "emulator"/"genymotion"/"android sdk" or Build.HARDWARE is "goldfish"/"ranchu"/"vbox", (3) Build.MANUFACTURER is "unknown" or "Genymotion", (4) ro.kernel.qemu = "1", or ro.product.device containing "generic"/"goldfish", (5) SensorManager sensor count = 0 TOGETHER WITH emulator-indicative build evidence. A missing sensor list is NOT a verdict on its own — some real tablets/TV boxes expose no sensors, and treating that as an emulator hard-blocked legitimate release installs (risk 20, "Debug Mode Active"). Real devices return false on all 5.',
     falseOnStock: true,
   },
   mockLocationDetected: {
@@ -123,6 +123,13 @@ const DETECTOR_META: Record<string, { label: string; apiExplain: string; falseOn
     label: 'Magisk / Zygisk',
     apiExplain: '5 methods: (1) known Magisk path scan (/sbin/.magisk, /data/adb/magisk, etc.), (2) 5 known Magisk app packages (com.topjohnwu.magisk, etc.), (3) /proc/modules for "zygisk"/"magisk" kernel modules, (4) /proc/self/mounts for Magisk mirror mount points, (5) /proc/self/maps for /data/adb entries. DenyList can hide paths — combine with root check.',
     falseOnStock: true,
+  },
+  inMultiWindowMode: {
+    label: 'Split-Screen / Multi-Window',
+    apiExplain: 'Android window-state reads on THIS app: Activity.isInMultiWindowMode() (API 24+) is true in split-screen, in a freeform/desktop app window, and in our own picture-in-picture (documented: PiP is a special case of multi-window); Activity.isInPictureInPictureMode() (API 24+) narrows that to the floating PiP case. POLICY: MANDATORY BLOCK — MedAcademy enforces full-screen usage (SecurityGate -> BLOCKED_MULTI_WINDOW, hard lock: playback unmounts and protected requests are refused). This boolean is EVIDENCE for this screen; the enforcement decision uses the live window-mode signal (activity multi-window/PiP callbacks relayed from MainActivity, a window layout pass, and a host-resume re-read). LIMIT: these APIs answer for this app only — there is no public API for one app to enumerate another app\u2019s windows, so "another app is floating over us" cannot be measured and is never reported as a finding.',
+    falseOnStock: true,
+    restricted: true,
+    restrictedReason: 'Another app\u2019s split-screen, PiP or OEM floating-window state is not observable by a normal app (AccessibilityService.getWindows() would require an accessibility service, which this app deliberately does not request). Only MedAcademy\u2019s OWN window mode is measured.',
   },
   overlayDetected: {
     label: 'Overlay / Tapjacking',

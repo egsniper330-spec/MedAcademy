@@ -91,6 +91,7 @@ const WEIGHTS = {
   adb_enabled: 20,
   debug_detected: 20,
   ssl_pinning_failure: 20,
+  app_integrity_compromised: 20,
   vpn_detected: 15,
   proxy_detected: 15,
   overlay_detected: 15,

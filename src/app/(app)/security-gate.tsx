@@ -34,10 +34,25 @@
  *                                offered but cannot dismiss the block — it
  *                                clears only when the platform reports the
  *                                signal gone AND a fresh evaluation passes.
+ *     BLOCKED_MULTI_WINDOW       the platform reports THIS app in a prohibited
+ *                                window mode (split-screen / other multi-window
+ *                                mode, or our own picture-in-picture). Copy is
+ *                                windowModeBlockCopy() for the mode actually
+ *                                reported, with the recovery steps from
+ *                                windowModeBlockSteps(). There is deliberately
+ *                                NO recheck/dismiss control: returning the app
+ *                                to full screen is the only way out, and the
+ *                                native signal then clears it automatically.
  *     BLOCKED_BACKGROUND_RESUME  the app left the foreground and has not yet
- *                                completed a post-resume verification, so no
- *                                protected screen or playback is briefly
- *                                revealed on return.
+ *                                completed a post-resume verification. This
+ *                                state renders NO PAGE (rendersBlockScreen):
+ *                                the shell is restored immediately and
+ *                                protected operations/media stay locked by the
+ *                                central lock until the verdict lands. It also
+ *                                ranks BELOW the policy states, so a violation
+ *                                confirmed during a resume is routed to its own
+ *                                screen at once instead of being masked by an
+ *                                interim state that displays nothing.
  *     BLOCKED_VPN                a policy block caused by a VPN/proxy.
  *     BLOCKED_SECURITY_VIOLATION any other policy block (root, tamper, ...).
  *     CHECKING / ALLOWED         never a block / nothing blocking.
@@ -58,9 +73,10 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { View, Text, StyleSheet, BackHandler, ActivityIndicator, Pressable, useColorScheme, ScrollView, Platform } from 'react-native';
 import * as ScreenCaptureLib from '@/lib/screenCaptureGuard';
-import { ShieldAlert, WifiOff, Eye } from 'lucide-react-native';
+import { ShieldAlert, WifiOff, Smartphone } from 'lucide-react-native';
 import { neuColors, useLayout } from '@/lib/neu';
 import { useSecurity } from '@/lib/SecurityContext';
+import { SecuritySignalReport } from '@/components/SecuritySignalReport';
 import {
   nextStickyTypes,
   isGateBlocked,
@@ -68,6 +84,9 @@ import {
   resolveFindingCopyKey,
   isConnectionFinding,
   connectionBlockInstructions,
+  rendersBlockScreen,
+  windowModeBlockCopy,
+  windowModeBlockSteps,
   VPN_WARNING_COPY,
   OVERLAY_WARNING_COPY,
 } from '@/lib/securityStateModel';
@@ -158,6 +177,10 @@ export function SecurityGate() {
   const {
     threats, riskScore, blocksLogin, checking, evaluating, hasVerdict,
     gateState, verifySecurity, onNewBlockingThreat,
+    // windowMode = the mode the multi-window block is ABOUT (the platform's
+    // reported mode at engage time), so the copy cannot drift to "you are fine"
+    // while the fresh post-full-screen verdict is still pending.
+    windowMode,
   } = useSecurity();
   const [verifying, setVerifying] = useState(false);
   const scheme = useColorScheme();
@@ -205,18 +228,38 @@ export function SecurityGate() {
   // Every cause of a block is one named state:
   //
   //   BLOCKED_OVERLAY            live obscured-window signal (native touch filter)
-  //   BLOCKED_BACKGROUND_RESUME  left the foreground, not yet re-verified
+  //   BLOCKED_MULTI_WINDOW       this app is in a prohibited window mode
   //   BLOCKED_VPN                policy block caused by a VPN/proxy
   //   BLOCKED_SECURITY_VIOLATION any other policy block
+  //   BLOCKED_BACKGROUND_RESUME  left the foreground, not yet re-verified
   //   CHECKING                   no completed verdict, or a check running
   //   ALLOWED                    completed verdict, nothing blocking
+  //
+  // TWO different questions, two different predicates:
+  //   isGateBlocked(state)       — must protected content/operations be withheld?
+  //                                (true for every BLOCKED_* state; this is what
+  //                                 the transport gate and the lock enforce)
+  //   rendersBlockScreen(state)  — does this state take over the whole screen?
+  //
+  // BLOCKED_BACKGROUND_RESUME is BLOCKED but renders NO page: an ordinary resume
+  // restores the app shell immediately (protected operations stay refused and
+  // protected playback stays stopped until a clean post-resume verdict lands).
+  // The previous full-screen VERIFYING page was the reported defect — a visible
+  // verification interruption on a clean device, with a Continue control that
+  // could not even clear the hold when an evaluation was already running.
   //
   // CHECKING is NEVER a block: with no completed verdict the gate does not
   // mount (startup-flash contract). Pure warn_only threats (hasWarnings without
   // blocksLogin) do not gate — they surface on the security-warning screen.
   const blocking = isGateBlocked(gateState);
+  const blockScreen = rendersBlockScreen(gateState);
   const overlayBlocked = gateState === 'BLOCKED_OVERLAY';
-  const resumeBlocked = gateState === 'BLOCKED_BACKGROUND_RESUME';
+  // The multi-window restriction. Copy comes from the pure model, selected by
+  // the mode the platform ACTUALLY reported (a split screen and a floating
+  // picture-in-picture window are different conditions with different recovery
+  // actions — and neither is ever worded as an overlay).
+  const windowModeBlockedState = gateState === 'BLOCKED_MULTI_WINDOW';
+  const multiWindowCopy = windowModeBlockCopy(windowMode);
   // A VPN/proxy block renders the MANDATORY connection page: it states the
   // policy, tells the user exactly where to switch the VPN/proxy off (the app
   // cannot do it for them — iOS exposes no API to stop another app's tunnel),
@@ -225,14 +268,34 @@ export function SecurityGate() {
   // no dismiss, no "Continue Anyway" and no route around it (the gate is
   // inline content above the whole authenticated Stack).
   const vpnBlocked = gateState === 'BLOCKED_VPN';
-  const connectionSteps = vpnBlocked ? connectionBlockInstructions(Platform.OS) : [];
+  // ONE step list for both actionable window/connection causes (same markup, one
+  // source per cause in the pure model): returning to full screen for the
+  // multi-window restriction, switching the VPN/proxy off for a connection block.
+  const stepsLabel = windowModeBlockedState ? 'HOW TO RETURN TO FULL SCREEN' : 'HOW TO TURN IT OFF';
+  const steps = windowModeBlockedState
+    ? windowModeBlockSteps(windowMode)
+    : (vpnBlocked ? connectionBlockInstructions(Platform.OS) : []);
   // Only the two user-actionable causes offer a recheck control.
   const recheckable = isGateRecheckable(gateState);
   const types = liveBlocking ? liveCopyKeys : stickyTypes;
   // Overlay / resume states carry their own dedicated copy — listing policy
   // findings would be misleading when the cause is not a policy finding.
-  const findings = overlayBlocked || resumeBlocked ? [] : gateFindings(types);
-  const revalidating = !liveBlocking && !overlayBlocked && !resumeBlocked && (checking || evaluating);
+  const findings = overlayBlocked || windowModeBlockedState ? [] : gateFindings(types);
+  // READ-ONLY device diagnostic for the POLICY block pages (the ones a
+  // `debug_detected` false positive produces). It is the in-app counterpart of
+  // the card on the pre-login Access Blocked screen: policy blocking findings
+  // are NEVER routed to /security-warning (see (app)/_layout), so without this
+  // the gate was the one block screen with no way to read the six raw signals.
+  // Same component, same read-only contract — it cannot dismiss the gate.
+  const reportFindings = liveBlocking
+    ? threats.map((t) => ({
+        label: GATE_EVENT_COPY[resolveFindingCopyKey(t.type, t.detectionMethod)]?.title ?? 'Security Issue',
+        type: t.type,
+        detectionMethod: t.detectionMethod ?? null,
+      }))
+    : [];
+  const revalidating = !liveBlocking && !overlayBlocked
+    && !windowModeBlockedState && (checking || evaluating);
 
   const onVerify = () => {
     if (verifying) return;
@@ -244,10 +307,13 @@ export function SecurityGate() {
   // hardware back button entirely — there is no route to pop to, but an
   // explicit handler guarantees no navigator transition can dismiss the gate.
   useEffect(() => {
-    if (!blocking) return;
+    // Keyed on the PAGE, not on containment: during a resume verification there is
+    // no page, so the back button must behave normally (the restriction is
+    // enforced at the operation layer, not by trapping navigation).
+    if (!blockScreen) return;
     const sub = BackHandler.addEventListener('hardwareBackPress', () => true); // consume
     return () => sub.remove();
-  }, [blocking]);
+  }, [blockScreen]);
 
   // ── FLAG_SECURE while gated (defense in depth, preserved) ─────────────────
   // The gate is a block_screen: whatever is underneath it (or captured while
@@ -256,7 +322,7 @@ export function SecurityGate() {
   // app-shell and lesson locks without racing them; released on unblock.
   useEffect(() => {
     if (process.env.EXPO_OS === 'web') return;
-    if (!blocking) return;
+    if (!blockScreen) return;
     let active = true;
     ScreenCaptureLib.preventScreenCaptureAsync('security-gate').catch(() => {});
     return () => {
@@ -266,9 +332,11 @@ export function SecurityGate() {
       // released, so removing ours never lifts the app-shell/lesson locks.
       ScreenCaptureLib.allowScreenCaptureAsync('security-gate').catch(() => {});
     };
-  }, [blocking]);
+  }, [blockScreen]);
 
-  if (!blocking) return null;
+  // No page for the interim resume state (and none for CHECKING/ALLOWED): the app
+  // shell stays, containment stays.
+  if (!blocking || !blockScreen) return null;
 
   return (
     <View style={[styles.page, { backgroundColor: c.base }]}>
@@ -280,10 +348,10 @@ export function SecurityGate() {
       >
         {/* Header */}
         <View style={[styles.iconWrap, { backgroundColor: '#EF444418' }]}>
-          {resumeBlocked
-            ? <Eye size={layout.heroIconSize * 0.5} color="#EF4444" />
-            : vpnBlocked
-              ? <WifiOff size={layout.heroIconSize * 0.5} color="#EF4444" />
+          {vpnBlocked
+            ? <WifiOff size={layout.heroIconSize * 0.5} color="#EF4444" />
+            : windowModeBlockedState
+              ? <Smartphone size={layout.heroIconSize * 0.5} color="#EF4444" />
               : <ShieldAlert size={layout.heroIconSize * 0.5} color="#EF4444" />}
         </View>
         <Text
@@ -292,8 +360,8 @@ export function SecurityGate() {
         >
           {overlayBlocked
             ? OVERLAY_WARNING_COPY.title.toUpperCase()
-            : resumeBlocked
-              ? 'VERIFYING YOUR SESSION'
+            : windowModeBlockedState
+              ? multiWindowCopy.title.toUpperCase()
               : vpnBlocked
                 ? VPN_WARNING_COPY.title.toUpperCase()
                 : 'SECURITY BLOCK ACTIVE'}
@@ -301,8 +369,8 @@ export function SecurityGate() {
         <Text style={[styles.subtitle, { color: `${c.text}CC`, fontSize: layout.bodySize }]}>
           {overlayBlocked
             ? OVERLAY_WARNING_COPY.message
-            : resumeBlocked
-              ? 'MedAcademy was in the background. Security is being re-verified before protected content is shown again.'
+            : windowModeBlockedState
+              ? multiWindowCopy.message
               : vpnBlocked
                 ? VPN_WARNING_COPY.message
                 : 'Your device does not currently meet MedAcademy\u2019s security requirements.'}
@@ -351,16 +419,16 @@ export function SecurityGate() {
             third-party VPN: iOS gives an app no API to stop a Network Extension
             another app owns, so the instruction must be "do it yourself, then
             return". */}
-        {connectionSteps.length > 0 && (
+        {steps.length > 0 && (
           <>
             <Text
               style={[styles.sectionLabel, { color: `${c.text}80`, fontSize: layout.captionSize }]}
               accessibilityRole="header"
             >
-              HOW TO TURN IT OFF
+              {stepsLabel}
             </Text>
             <View style={styles.findingsList}>
-              {connectionSteps.map((step, i) => (
+              {steps.map((step, i) => (
                 <View key={step} style={[styles.findingRow, { borderColor: `${c.text}1F` }]}>
                   <View style={[styles.findingIcon, { backgroundColor: '#EF444414' }]}>
                     <Text style={{ color: '#EF4444', fontWeight: '800' }}>{i + 1}</Text>
@@ -415,11 +483,20 @@ export function SecurityGate() {
             Rendered ONLY from a completed verdict (hasVerdict): the
             fail-closed sentinel's weight can no longer surface here as a
             fake "Risk Score: 10" — pending states never mount this page. */}
-        {hasVerdict && !overlayBlocked && !resumeBlocked && (
+        {hasVerdict && !overlayBlocked && !windowModeBlockedState && (
           <View style={[styles.pill, { backgroundColor: '#EF444418' }]}>
             <Text style={{ fontSize: layout.captionSize, fontWeight: '700', color: '#EF4444' }}>
               Risk Score: {riskScore}
             </Text>
+          </View>
+        )}
+
+        {/* READ-ONLY diagnostic — shows which raw signal is actually set and
+            lets the user copy it, on the block page itself (no computer, no
+            login, no privileged access). It cannot dismiss the gate. */}
+        {!overlayBlocked && !windowModeBlockedState && (
+          <View style={{ width: '100%', marginTop: 4 }}>
+            <SecuritySignalReport findings={reportFindings} />
           </View>
         )}
 
@@ -449,8 +526,8 @@ export function SecurityGate() {
           >
             {overlayBlocked
               ? 'Protected content stays hidden while an overlay or another app may be interfering. Closing the interfering app and verifying security restores access.'
-              : resumeBlocked
-                ? 'Access stays held for your protection until the post-resume security check finishes. It unlocks automatically when the check passes.'
+              : windowModeBlockedState
+                ? 'MedAcademy only runs full-screen. Protected content stays closed while the app is in split-screen or another multi-window mode, and access returns automatically as soon as it is full-screen again.'
                 : vpnBlocked
                   ? 'MedAcademy cannot run while a VPN or proxy is active \u2014 protected content and playback stay closed. Access is restored automatically once the connection is clear and a fresh security check passes.'
                   : 'This app is locked for your protection. It unlocks automatically once all security issues are resolved.'}

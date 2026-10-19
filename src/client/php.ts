@@ -17,7 +17,11 @@ import { Platform as RNPlatform } from 'react-native';
 import { setMaintenanceControlFlowActive, isMaintenanceControlFlowActive } from '@/lib/maintenanceStateModel';
 import { classifyAuthHttpStatus, shouldClearSession } from '@/lib/authFailureModel';
 import { toUploadPart } from '@/lib/uploadPart';
-import { isSecurityLocked, registerProtectedAbort } from '@/lib/securityLock';
+import {
+  isSecurityLocked,
+  registerProtectedAbort,
+  runWhenNetworkUnlocked,
+} from '@/lib/securityLock';
 
 // ── Config ──────────────────────────────────────────────────────────────────
 
@@ -124,6 +128,76 @@ const LOCK_EXEMPT_PREFIXES = [
 
 function isLockExempt(path: string): boolean {
   return LOCK_EXEMPT_PREFIXES.some((p) => path.startsWith(p));
+}
+
+// ── NETWORK LOCK — DEFERRAL (queue, then replay ONCE on unlock) ─────────────
+// WHY DEFER INSTEAD OF ONLY REFUSING:
+//   The lock can be engaged at SESSION START, on every resume and on a native
+//   VPN signal. If every request in that window were refused, the screens that
+//   mount at the same moment would render empty/error states and would only be
+//   correct again after the user navigated away and back. Queuing them means
+//   the app's data arrives the moment verification clears — no restart, no tap,
+//   no duplicated work.
+//
+// RULES (all tested in tests/networkLock.test.cjs):
+//   • NOTHING is sent while the lock is held. A queued entry performs its
+//     request only after the lock has FULLY cleared (every holder released).
+//   • The bound is a REFUSAL, never an authorization: if the lock is still held
+//     after NETWORK_LOCK_DEFER_MAX_MS, the caller gets the SECURITY_LOCK error.
+//     A mandatory check that never resolves therefore keeps access closed.
+//   • IDENTICAL requests (same method + path + body) share ONE entry and are
+//     executed ONCE, so a queued non-idempotent call cannot be duplicated.
+//     Callers each receive their own result object.
+//   • A confirmed violation keeps a holder engaged forever, so queued work is
+//     never replayed on a blocked device — it expires instead.
+//   • The queue is keyed per request, not per caller: a screen that mounts,
+//     unmounts and remounts during the window produces one network execution.
+const NETWORK_LOCK_DEFER_MAX_MS = 20_000;
+
+type ApiResult<T> = { data: T | null; error: { message: string; code?: string; status?: number } | null };
+
+function networkLockRefusal<T>(): ApiResult<T> {
+  return {
+    data: null,
+    error: {
+      message: 'Blocked by the active security lock — resolve the security issue to continue.',
+      code: 'SECURITY_LOCK',
+      status: 0,
+    },
+  };
+}
+
+/** Callers never share one result object (one may attach/format its own view). */
+function cloneApiResult<T>(r: ApiResult<unknown>): ApiResult<T> {
+  return { data: (r.data ?? null) as T | null, error: r.error ? { ...r.error } : null };
+}
+
+function deferredKey(path: string, opts: { method?: string; body?: unknown }): string {
+  const body = opts.body != null ? JSON.stringify(opts.body) : '';
+  return `${opts.method ?? 'GET'} ${path} ${body}`;
+}
+
+/**
+ * Queue `path` until the lock clears, then perform it EXACTLY once.
+ * Returns a fail-closed refusal when the lock outlives the bound.
+ *
+ * The queue itself (dedupe by key, bound, full-release replay, cleanup) lives in
+ * `runWhenNetworkUnlocked` (securityLock.ts) so it is behaviourally unit-tested
+ * — this function only adapts its outcome to the client's result shape.
+ */
+async function deferUntilNetworkUnlocked<T>(
+  path: string,
+  opts: { method?: string; body?: unknown; headers?: Record<string, string> },
+): Promise<ApiResult<T>> {
+  const outcome = await runWhenNetworkUnlocked(
+    deferredKey(path, opts),
+    // Replay through the normal path: headers, token, 30 s timeout and abort
+    // registration are all re-evaluated NOW — never a stale pre-lock snapshot.
+    () => apiFetchOnce<unknown>(path, opts),
+    NETWORK_LOCK_DEFER_MAX_MS,
+  );
+  if (!outcome.ran) return networkLockRefusal<T>();
+  return cloneApiResult<T>(outcome.value as ApiResult<unknown>);
 }
 
 function shouldAutoRefresh(path: string): boolean {
@@ -248,14 +322,10 @@ async function apiFetchOnce<T = unknown>(
   // every caller at once — retries, progress pings, background polls and
   // token refreshes all funnel through this one choke point.
   if (isSecurityLocked() && !isLockExempt(path)) {
-    return {
-      data: null,
-      error: {
-        message: 'Blocked by the active security lock — resolve the security issue to continue.',
-        code: 'SECURITY_LOCK',
-        status: 0,
-      },
-    };
+    // QUEUE (bounded) rather than merely fail: see the deferral block above.
+    // The refusal shape is unchanged for the bound-expiry path, and the
+    // allowlist above is the only traffic that bypasses this entirely.
+    return deferUntilNetworkUnlocked<T>(path, opts);
   }
 
   // 30s request timeout — a hung request must never leave a screen in an
@@ -951,6 +1021,12 @@ function createStorageBucket(bucket: string) {
       const token = getToken();
       const headers: Record<string, string> = {};
       if (token) headers['Authorization'] = `Bearer ${token}`;
+      // NETWORK LOCK: this upload goes through `globalThis.fetch` directly (a
+      // multipart body cannot use the JSON client), so it must consult the lock
+      // itself. Uploads are WRITES: refused, never queued for replay.
+      if (isSecurityLocked()) {
+        return { error: { message: 'Upload blocked by the active security lock (your device is being verified).', code: 'SECURITY_LOCK', status: 0 } };
+      }
       try {
         const res = await globalThis.fetch(`${API_BASE}/storage/upload`, {
           method: 'POST', headers, body: formData,

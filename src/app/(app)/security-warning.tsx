@@ -7,7 +7,7 @@ import type { RelativePathString } from 'expo-router';
 import {
   ShieldAlert, ShieldCheck, AlertTriangle, Wifi, WifiOff, Globe,
   Bug, Fingerprint, Lock, ArrowRight, Phone, X as XIcon,
-  Mail, MessageCircle, Send, Megaphone, AtSign, Link2,
+  Mail, MessageCircle, Send, Megaphone, AtSign, Link2, MapPin, Smartphone,
 } from 'lucide-react-native';
 import { neuColors, neuFlatStyle, neuPressedStyle, useLayout } from '@/lib/neu';
 import { NeuButton } from '@/components/NeuButton';
@@ -21,12 +21,14 @@ import { useSecurity } from '@/lib/SecurityContext';
 import {
   hasConnectionFinding,
   connectionBlockInstructions,
+  resolveFindingCopyKey,
   VPN_WARNING_COPY,
 } from '@/lib/securityStateModel';
+import { SecuritySignalReport } from '@/components/SecuritySignalReport';
 
 // ─── Threat display metadata ──────────────────────────────────────────────────
 // Only human-readable labels and icons — no internal method details shown to users.
-type ThreatItem = { type: string };
+type ThreatItem = { type: string; detectionMethod?: string | null };
 
 const THREAT_META: Record<string, {
   label: string;
@@ -38,6 +40,16 @@ const THREAT_META: Record<string, {
   vpn_detected:              { label: 'VPN Connection Detected',      description: 'A VPN or tunnel connection is active on your device.',                   icon: Wifi },
   proxy_detected:            { label: 'Proxy Connection Detected',    description: 'Network traffic is being routed through a proxy.',                       icon: Globe },
   debug_detected:            { label: 'Debug Mode Active',            description: 'Your device or app is running in a debug environment.',                  icon: Bug },
+  // DERIVED FROM `debug_detected` by resolveFindingCopyKey (see
+  // src/lib/securityStateModel.ts). The engine reports four metrologically
+  // DIFFERENT conditions as this one event type and weight (20): a test-only /
+  // debug-detectable build, a selected mock-location app, and an emulator-like
+  // device. Labelling all of them "Debug Mode Active / running in a debug
+  // environment" is inaccurate for the two device-state cases and hides the
+  // actionable cause (reinstalling the app never clears either). Same event,
+  // same weight, same block — only the description becomes truthful.
+  mock_location_detected:    { label: 'Mock Location Detected',       description: 'Mock location is enabled. Turn it off: Settings \u2192 Developer options \u2192 Select mock location app \u2192 None, then reopen the app.', icon: MapPin },
+  virtual_device_detected:   { label: 'Unsupported Device Detected', description: 'This app cannot run on an emulator or virtual device. Install it on a physical Android device.', icon: Smartphone },
   developer_options_enabled: { label: 'Developer Options Enabled',    description: 'Developer settings are active on your device.',                          icon: Bug },
   adb_enabled:               { label: 'USB Debugging Enabled',        description: 'USB debugging is enabled on your device.',                               icon: Bug },
   debugger_attached:         { label: 'Debugger Attached',            description: 'A debugger is currently connected to the app.',                          icon: Bug },
@@ -55,6 +67,21 @@ const THREAT_META: Record<string, {
   screenshot_detected:       { label: 'Screenshot Taken',             description: 'A screenshot was captured while the app was active.',                    icon: Bug },
   security_unverified:       { label: 'Security Check Incomplete',    description: 'The security evaluation could not complete. The app will re-verify automatically.', icon: Bug },
 };
+
+/**
+ * Display metadata for a reported threat. The COPY KEY is resolved from the
+ * engine's own detectionMethod (resolveFindingCopyKey), never from the event
+ * type alone: `debug_detected` is one event but four different measured
+ * conditions. Unknown types pass through unchanged and keep the generic
+ * fallback below.
+ */
+function threatMeta(t: ThreatItem) {
+  return THREAT_META[resolveFindingCopyKey(t.type, t.detectionMethod)] ?? {
+    label: 'Security Issue',
+    description: 'A security issue was detected on your device.',
+    icon: ShieldAlert,
+  };
+}
 
 // ─── Contact chooser helpers ──────────────────────────────────────────────────
 
@@ -215,6 +242,17 @@ export default function SecurityWarningScreen() {
   // verified clean result.
   const findingCount = threats.length;
   const hasFindings  = findingCount > 0;
+  // READ-ONLY DIAGNOSTIC PAYLOAD (device security report below). The labels are
+  // the SAME resolved metadata the issue list renders, so the report and the
+  // list can never disagree about which condition was measured.
+  const reportFindings = React.useMemo(
+    () => threats.map((t) => ({
+      label: threatMeta(t).label,
+      type: t.type,
+      detectionMethod: t.detectionMethod ?? null,
+    })),
+    [threats],
+  );
   const checkPending =
     !hasFindings && !blocksLogin && (security.evaluating || !security.hasVerdict);
 
@@ -389,7 +427,7 @@ export default function SecurityWarningScreen() {
           </View>
         )}
         {threats.map((t, i) => {
-          const meta = THREAT_META[t.type] ?? { label: 'Security Issue', description: 'A security issue was detected on your device.', icon: ShieldAlert };
+          const meta = threatMeta(t);
           const Icon = meta.icon;
           return (
             <View key={i} style={[flat, {
@@ -460,6 +498,9 @@ export default function SecurityWarningScreen() {
               onPress={onVerifyConnection}
               disabled={verifying}
             />
+
+            {/* READ-ONLY diagnostic — cannot dismiss this block. */}
+            <SecuritySignalReport findings={reportFindings} />
           </View>
         ) : blocksLogin ? (
           <View style={{ gap: layout.pad.md }}>
@@ -528,6 +569,11 @@ export default function SecurityWarningScreen() {
                 disabled={contactDisabled}
               />
             )}
+
+            {/* READ-ONLY diagnostic: lets the device owner establish WHICH signal
+                blocked them and send the report on, without a computer. It offers
+                no way past this block. */}
+            <SecuritySignalReport findings={reportFindings} />
           </View>
         ) : (
           <View style={{ gap: layout.pad.md }}>
