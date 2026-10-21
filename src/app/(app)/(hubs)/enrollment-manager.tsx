@@ -408,7 +408,6 @@ export default function EnrollmentManager({ backTo }: { backTo?: string } = {}) 
     >
       <PageHeader
         title="Enrollment Manager"
-        showBack
         backFallback={backTo ?? '/admin-overview'}
       />
       <ScrollView automaticallyAdjustKeyboardInsets={process.env.EXPO_OS === 'ios'}

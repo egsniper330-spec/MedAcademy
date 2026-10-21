@@ -1,10 +1,13 @@
 /**
  * PageHeader — neumorphic page header, safe-area aware, responsive.
  *
- * Navigation model:
- *  • Root drawer pages  (showBack=false, DrawerContext present) → HamburgerButton on left
- *  • Root non-drawer    (showBack=false, no DrawerContext)      → title only
- *  • Stack-pushed pages (showBack=true)                        → back button on left
+ * Navigation model — ONE contextual resolver (see lib/navigation/navIntent.ts):
+ *  • primary drawer/tab destination opened from the drawer/tab bar → hamburger
+ *  • primary destination opened from a quick action / card / link → Back
+ *  • nested screen (editor, detail, report, form)                 → Back
+ *  • direct entry (deep link, notification, cold start)           → Back only
+ *    with usable history, otherwise the role dashboard fallback / hamburger
+ * `showBack` / `navMode` remain as explicit per-screen overrides.
  *
  * Safe-area contract — all values from ds.ts:
  *  • paddingTop  = safeTop(insets.top)
@@ -13,12 +16,12 @@
  */
 import { View, Text, Pressable, useColorScheme } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
 import { ArrowLeft, ArrowRight } from 'lucide-react-native';
 import { neuColors, useNeuSpacing, mutedTextStyle } from '@/lib/neu';
 import { spacing, iconContainer, iconSize, typography, safeArea, safeTop, safeLeft, safeRight } from '@/lib/ds';
 import HamburgerButton from '@/components/HamburgerButton';
 import { useDrawer } from '@/components/DrawerContext';
+import { useNavHeader } from '@/lib/navigation/useNavHeader';
 import { t, useTranslation } from '@/lib/i18n';
 
 interface PageHeaderProps {
@@ -35,15 +38,20 @@ interface PageHeaderProps {
    */
   backFallback?: string;
   rightAction?: React.ReactNode;
+  /**
+   * Force the leading control. Omit for the contextual default (recommended):
+   * the header decides from the navigation intent + route classification, not
+   * from a hardcoded guess.
+   */
+  navMode?: 'menu' | 'back';
 }
 
 export function PageHeader({
-  title, subtitle, accentColor, showBack = false, onBack, backFallback, rightAction,
+  title, subtitle, accentColor, showBack, onBack, backFallback, rightAction, navMode,
 }: PageHeaderProps) {
   const scheme    = useColorScheme();
   const isDark    = scheme === 'dark';
   const c         = isDark ? neuColors.dark : neuColors.light;
-  const router    = useRouter();
   const insets    = useSafeAreaInsets();
   const sp        = useNeuSpacing();
   const drawerCtx = useDrawer();
@@ -53,13 +61,16 @@ export function PageHeader({
   // back affordance stays a directional arrow in both directions.
   const { isRTL } = useTranslation();
 
-  const handleBack = () => {
-    if (onBack) { onBack(); return; }
-    if (router.canGoBack()) { router.back(); return; }
-    if (backFallback) router.push(backFallback as never);
-  };
-
-  const showHamburger = !showBack && insideDrawer;
+  // Contextual control: intent → root classification → real history → fallback.
+  const { control, handleBack } = useNavHeader({
+    showBack,
+    navMode,
+    fallback: backFallback,
+    insideDrawer,
+    onBack,
+  });
+  const isMenu = control === 'menu';
+  const showHamburger = isMenu && insideDrawer;
 
   const topPad   = safeTop(insets.top);
   const leftPad  = safeLeft(insets.left || 0, sp.isTablet);
@@ -75,7 +86,7 @@ export function PageHeader({
       paddingRight: rightPad,
     }}>
       {/* ── Left control ── */}
-      {showBack ? (
+      {!isMenu ? (
         // Integrated back button: the icon IS the control (touch target comes
         // from the fixed 40dp box + hitSlop, not a visible container). The old
         // raised-chrome icon container (base-fill + border = the "white box")

@@ -67,7 +67,7 @@ ok(noneInRoles, 'no drawer-only screen remains inside a role tab group');
 
 console.log('── 2. Role groups contain ONLY visible tabs + layout ──');
 const visibleByRole = {
-  '(doctor)': ['courses', 'dr-earnings', 'dr-overview', 'dr-profile', 'students'],
+  '(doctor)': ['courses', 'dr-overview', 'dr-profile', 'students', 'video-library'],
   '(admin)': ['academic', 'admin-overview', 'audit', 'devices', 'users'],
   '(superadmin)': ['sa-analytics', 'sa-finance', 'sa-overview', 'sa-platform', 'sa-users'],
 };
@@ -99,14 +99,16 @@ if (doctorBlock) {
   const block = doctorBlock[0];
   // Labels are routed through t('nav.*') for localization; the ORDER and the
   // item set remain the invariant, so match translation keys, not literals.
+  // EARNINGS is retired — the canonical doctor drawer no longer has that item.
   const EXPECTED_ORDER = [
     'nav.dashboard', 'nav.myCourses', 'nav.videoLibrary', 'nav.students',
-    'nav.credits', 'nav.earnings', 'nav.notifications', 'nav.profile',
+    'nav.credits', 'nav.notifications', 'nav.profile',
   ];
   const positions = EXPECTED_ORDER.map((key) => block.indexOf("label: t('" + key + "')"));
-  ok(positions.every((p) => p >= 0), 'all 8 canonical doctor items present');
+  ok(positions.every((p) => p >= 0), 'all 7 canonical doctor items present');
   const inOrder = positions.every((p, i2) => p >= 0 && (i2 === 0 || p > positions[i2 - 1]));
-  ok(inOrder, 'doctor drawer order: Dashboard → My Courses → Video Library → Students → Credits → Earnings → Notifications → Profile');
+  ok(inOrder, 'doctor drawer order: Dashboard → My Courses → Video Library → Students → Credits → Notifications → Profile');
+  ok(!block.includes("nav.earnings"), 'the retired Earnings item is absent from the doctor drawer');
   // Notifications lives in the main list now — no duplicate entry may remain.
   const notifCount = (block.match(/label: t\('nav\.notifications'\)/g) || []).length;
   ok(notifCount === 1, 'Notifications appears exactly once in the doctor drawer');

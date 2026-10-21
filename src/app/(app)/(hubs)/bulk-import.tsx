@@ -213,7 +213,6 @@ export default function BulkImportScreen({ backTo }: { backTo?: string } = {}) {
         title="Bulk Import"
         subtitle="Import users from CSV"
         accentColor={c.primary}
-        showBack
         backFallback={backTo ?? '/admin-overview'}
       />
 

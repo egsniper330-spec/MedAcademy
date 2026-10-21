@@ -275,7 +275,11 @@ export default function CreateStudentScreen() {
         : (creditBal?.remaining ?? 0);
 
       router.push({
-        pathname: '/(app)/(doctor)/student-credentials' as RelativePathString,
+        // Credentials screen lives in the (hubs) stack — the group-qualified
+        // (doctor) href resolved to no screen (Unmatched Route) right after a
+        // successful creation, stranding the doctor before they could read the
+        // temporary password they had just set.
+        pathname: '/student-credentials' as RelativePathString,
         params: {
           full_name:         fullName.trim(),
           email:             result.email ?? '',          // null/'' for phone-only

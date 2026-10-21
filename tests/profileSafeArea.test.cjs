@@ -86,9 +86,11 @@ section('2. profile bottom clearance (iOS native tab bar)');
     `2c: BOTH live doctor-profile tab scroll containers use scrollBottom() (found ${docScroll.length})`);
   ok(/paddingTop:\s*layout\.headerTop/.test(doctor),
     '2d: the doctor hero header still owns the top inset (not regressed)');
-  // Guard the dead code path we deliberately left alone rather than pretend.
-  ok(/function EarningsTab\(/.test(doctor),
-    '2e: EarningsTab is still present (unused component — left untouched)');
+  // The earnings feature was removed, so the dead EarningsTab component that
+  // used to live in this file is gone too (it must not come back as a second
+  // scroll owner that skips scrollBottom()).
+  ok(!/function EarningsTab\(/.test(doctor),
+    '2e: the retired EarningsTab component is gone from the doctor profile');
 }
 
 /* ── 3. The clearance is additive, never duplicative ───────────────────── */

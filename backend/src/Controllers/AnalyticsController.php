@@ -424,14 +424,74 @@ final class AnalyticsController
 
     /**
      * GET /analytics/archived-courses — list archived courses.
+     *
+     * THE DEFECT THIS FIXES ("the Archived Courses page always says 0")
+     * ────────────────────────────────────────────────────────────────
+     *  • The route was admin/super_admin-only, but the screen is opened from
+     *    the DOCTOR dashboard quick action. A doctor's request was refused with
+     *    403, the client swallows load errors, so the screen rendered its empty
+     *    state with "0 archived" — for every doctor, always.
+     *  • The response carried 5 of the 10 fields the client contract requires
+     *    (no doctor_id / status / archive_reason / archived_by_name / counts),
+     *    and the client expected a bare array while the handler wrapped it in
+     *    `{ courses: [...] }`.
+     *  • There was no owner scoping: whoever could read the list saw EVERY
+     *    doctor's archived courses.
+     *
+     * Rules now:
+     *  • doctor       → only courses they own (ownership from the SESSION, never
+     *                   from a client-supplied id).
+     *  • admin / SA   → every archived course, optionally narrowed with
+     *                   `?doctor_id=<uuid>`.
+     *  • A row is archived when its status is 'archived' OR archived_at is set,
+     *    so a legacy row that was archived before the status column was written
+     *    still appears instead of silently disappearing.
+     *  • Counts are DISTINCT students (an account is one student however many
+     *    lessons/courses it touches) and COUNT(*) lessons.
+     *  • Archived courses stay out of the public catalog by status — this
+     *    endpoint is read-only and never changes a course's visibility.
      */
     public function archivedCourses(Request $request): array
     {
-        $courses = Database::instance()->select(
-            "SELECT c.id, c.title, c.archived_at, c.archived_by, p.full_name AS doctor_name
-             FROM courses c LEFT JOIN profiles p ON p.id = c.doctor_id
-             WHERE c.status = 'archived' ORDER BY c.archived_at DESC"
+        $db = Database::instance();
+        $role = (string) ($request->user['role'] ?? '');
+        $userId = (string) ($request->user['id'] ?? '');
+        $isStaff = in_array($role, ['admin', 'super_admin'], true);
+
+        $where = "(c.status = 'archived' OR c.archived_at IS NOT NULL)";
+        $params = [];
+
+        if (!$isStaff) {
+            if ($role !== 'doctor' || $userId === '') {
+                throw new ApiException(403, 'Not authorized');
+            }
+            $where .= ' AND c.doctor_id = ?';
+            $params[] = $userId;
+        } else {
+            $doctorId = Uuid::normalize((string) ($request->query('doctor_id', '') ?? ''));
+            if ($doctorId !== '') {
+                $where .= ' AND c.doctor_id = ?';
+                $params[] = $doctorId;
+            }
+        }
+
+        $courses = $db->select(
+            "SELECT c.id, c.title, c.doctor_id, c.status, c.archived_at, c.archived_by,
+                    c.archive_reason,
+                    dp.full_name AS doctor_name,
+                    ap.full_name AS archived_by_name,
+                    (SELECT COUNT(DISTINCT e.student_id) FROM enrollments e
+                      WHERE e.course_id = c.id) AS students_count,
+                    (SELECT COUNT(*) FROM lessons l WHERE l.course_id = c.id) AS lessons_count,
+                    (SELECT COUNT(*) FROM enrollments e WHERE e.course_id = c.id) AS enrollments_count
+               FROM courses c
+               LEFT JOIN profiles dp ON dp.id = c.doctor_id
+               LEFT JOIN profiles ap ON ap.id = c.archived_by
+              WHERE {$where}
+              ORDER BY (c.archived_at IS NULL), c.archived_at DESC, c.title ASC",
+            $params
         );
+
         return ['courses' => $courses ?? []];
     }
 
@@ -795,6 +855,10 @@ final class AnalyticsController
 
     /**
      * POST /analytics/recalculate-earnings/{doctorId} — rebuild doctor earnings.
+     *
+     * RETIRED (earnings feature removed): unreachable — no route points here.
+     * Kept so no historical earnings data is touched by the removal; safe to
+     * delete in a separate reviewed cleanup.
      */
     public function recalculateEarnings(Request $request): array
     {
@@ -823,6 +887,9 @@ final class AnalyticsController
 
     /**
      * POST /analytics/reset-doctor-earnings/{doctorId} — admin resets doctor earnings.
+     *
+     * RETIRED (earnings feature removed): unreachable — no route points here.
+     * Historical earnings rows are retained for audit.
      */
     public function resetDoctorEarnings(Request $request): array
     {
@@ -844,6 +911,9 @@ final class AnalyticsController
 
     /**
      * POST /analytics/reset-platform-earnings — super_admin resets platform earnings.
+     *
+     * RETIRED (earnings feature removed): unreachable — no route points here.
+     * `platform_earnings_resets` history is retained untouched.
      */
     public function resetPlatformEarnings(Request $request): array
     {

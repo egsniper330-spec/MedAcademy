@@ -85,7 +85,12 @@ const LISTED_PAGES = [
     const src = read(file);
     // A back action is either the shared PageHeader back button (showBack), an
     // explicit header arrow, or a canGoBack()-guarded router.back().
-    const hasBack = /showBack/.test(src)
+    // A back action is either the shared contextual PageHeader (which resolves
+    // to Back for every non-main entry and only keeps the menu on a drawer/tab
+    // destination), the explicit showBack override, an explicit header arrow, or
+    // a canGoBack()-guarded router.back().
+    const hasBack = /<PageHeader/.test(src)
+      || /showBack/.test(src)
       || /ArrowLeft/.test(src)
       || /canGoBack\(\)/.test(src);
     if (isTabRoot) {
@@ -102,11 +107,16 @@ const LISTED_PAGES = [
      /'common\.goBack': 'Go back'/.test(read('src/lib/i18n/resources.ts')),
     'nav: PageHeader back button is accessible ("Go back", localized)');
   ok(/backFallback/.test(header), 'nav: PageHeader supports a terminal backFallback');
-  ok(/if \(onBack\) \{ onBack\(\); return; \}/.test(header), 'nav: PageHeader prefers an explicit onBack');
-  ok(/if \(router\.canGoBack\(\)\) \{ router\.back\(\); return; \}/.test(header),
-    'nav: PageHeader pops the real parent before falling back');
-  ok(/const showHamburger = !showBack && insideDrawer;/.test(header),
-    'nav: hamburger is only rendered when there is no back action');
+  ok(/if \(onBack\) \{\s*onBack\(\);\s*return;\s*\}/.test(read('src/lib/navigation/useNavHeader.ts')),
+    'nav: the shared header hook prefers an explicit onBack');
+  ok(/resolveHeaderControl\(/.test(read('src/lib/navigation/navIntent.ts'))
+    && /useNavHeader\(/.test(header),
+    'nav: PageHeader resolves menu/back from entry intent, not a hardcoded guess');
+  const navHook = read('src/lib/navigation/useNavHeader.ts');
+  ok(/if \(router\.canGoBack\(\)\) \{\s*router\.back\(\);\s*return;\s*\}/.test(navHook),
+    'nav: the header hook pops the real parent before falling back');
+  ok(/const showHamburger = isMenu && insideDrawer;/.test(header),
+    'nav: hamburger is only rendered when the resolver chose the menu and a drawer exists');
 
   // SA-shell wrappers must hand the shared screens a terminal fallback, so a
   // drawer entry cannot dead-end.

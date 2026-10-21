@@ -62,7 +62,7 @@ function actionsForUser(user: any): ActionKey[] {
   const deviceAction: ActionKey = isUnlimited ? 'limited_devices' : 'unlimited_devices';
   // change_password replaces reset_password email flow
   const base: ActionKey[] = ['edit', 'change_password', deviceAction, 'devices', 'login_history', 'audit'];
-  if (role === 'doctor') base.push('earnings');
+  // EARNINGS: retired from the product — no per-doctor earnings action exists.
   // Status action mirrors the SERVER-authoritative account status:
   //   blocked   → Unblock (legacy blocked flow)
   //   suspended → Unsuspend (manual OR security-violation suspension — the
@@ -293,7 +293,6 @@ export default function SAUsers() {
       setHistoryLoading(false);
       return;
     }
-    if (key === 'earnings') { setMenuVisible(false); router.push(`/sa-doctor-earnings?doctor_id=${id}&doctor_name=${encodeURIComponent(selectedUser?.full_name ?? '')}` as RelativePathString); return; }
     if (key === 'audit')    { setMenuVisible(false); router.push(`/(app)/user-activity?user_id=${id}&user_name=${encodeURIComponent(selectedUser?.full_name ?? 'User')}` as RelativePathString); return; }
 
     const actionMap: Partial<Record<ActionKey, () => Promise<void>>> = {

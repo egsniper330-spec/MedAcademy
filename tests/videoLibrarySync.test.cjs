@@ -186,7 +186,7 @@ console.log();
 // ── 6. Video Library hamburger ──────────────────────────────────────────────
 section('Video Library navigation (hamburger via standard PageHeader)');
 {
-  const screen = read('src/app/(app)/(hubs)/video-library.tsx').replace(/\r/g, '');
+  const screen = read('src/app/(app)/(doctor)/video-library.tsx').replace(/\r/g, '');
 
   ok(screen.includes("import { PageHeader } from '@/components/PageHeader';"),
     'screen uses the shared PageHeader (standard drawer/back pattern)');
@@ -213,7 +213,7 @@ section('Video Library navigation (hamburger via standard PageHeader)');
 
 section('Upload progress visibility in Video Library');
 {
-  const screen = read('src/app/(app)/(hubs)/video-library.tsx').replace(/\r/g, '');
+  const screen = read('src/app/(app)/(doctor)/video-library.tsx').replace(/\r/g, '');
 
   ok(screen.includes('const activeUpload = tasks.find') && screen.includes("includes(t.status)"),
     'library derives the live in-flight upload task from the queue store');
@@ -271,7 +271,7 @@ console.log();
 // ── 8. Filter chips layout (video-library.tsx) ──────────────────────────────
 section('Filter chips layout (compact, content-sized)');
 {
-  const lib = read('src/app/(app)/(hubs)/video-library.tsx');
+  const lib = read('src/app/(app)/(doctor)/video-library.tsx');
 
   // Parent must not grow vertically: react-native-web bases ScrollView on
   // flexGrow:1 — in the column parent the row inflated and the default

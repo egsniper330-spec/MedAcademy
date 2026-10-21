@@ -45,7 +45,7 @@ export type ActionKey =
   | 'delete'
   | 'devices' | 'credits' | 'timeline' | 'audit' | 'login_history'
   | 'unlimited_devices' | 'limited_devices'
-  | 'credit_price' | 'earnings';
+  | 'credit_price';
 
 interface ActionDef {
   key: ActionKey;
@@ -99,7 +99,6 @@ export function ActionMenu({
     { key: 'credits',          label: 'Credits',                  icon: <CreditCard size={18} />,      color: '#16A34A' },
     { key: 'timeline',         label: 'Activity Timeline',        icon: <Clock size={18} />,           color: c.primary },
     { key: 'credit_price',     label: 'Credit Selling Price',     icon: <Tag size={18} />,             color: '#7C3AED' },
-    { key: 'earnings',         label: 'Earnings Dashboard',       icon: <TrendingUp size={18} />,      color: '#16A34A' },
     { key: 'audit',            label: 'Audit Logs',               icon: <FileText size={18} />,        color: '#7C3AED' },
     { key: 'login_history',    label: 'Login History',            icon: <History size={18} />,         color: '#6B7280' },
     { key: 'delete',           label: 'Delete Account',           icon: <Trash2 size={18} />,          color: '#DC2626', danger: true },

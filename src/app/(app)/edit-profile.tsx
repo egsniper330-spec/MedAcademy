@@ -87,7 +87,7 @@ export default function EditProfile() {
   return (
     <KeyboardAvoidingView behavior={undefined} /* keyboard: native inset only */ style={{ flex: 1, backgroundColor: c.base }}>
       <ScrollView automaticallyAdjustKeyboardInsets={process.env.EXPO_OS === 'ios'} contentContainerStyle={{ flexGrow: 1, paddingTop: 0 }} keyboardShouldPersistTaps="handled">
-        <PageHeader title={t('profile.editProfile')} showBack />
+        <PageHeader title={t('profile.editProfile')} />
 
       <View style={{ paddingHorizontal: 24 }}>
 

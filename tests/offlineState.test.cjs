@@ -508,7 +508,9 @@ console.log('── Watch-screen SafeArea + header integration ──');
   assert(!/Pressable[^>]*accessibilityLabel="Open course"/.test(libSrc), 'chevron is not a competing tap target (whole card opens the course)');
   // Issue 5: the shared back button renders WITHOUT container chrome.
   const phSrc = fs.readFileSync(path.join(ROOT, 'src/components/PageHeader.tsx'), 'utf8');
-  const backBlock = phSrc.slice(phSrc.indexOf('{showBack ?'), phSrc.indexOf('showHamburger ?'));
+  // The leading control is chosen by the shared resolver: `!isMenu` renders the
+  // Back branch (the old hardcoded `showBack ?` branch was replaced).
+  const backBlock = phSrc.slice(phSrc.indexOf('{!isMenu ?'), phSrc.indexOf('showHamburger ?'));
   assert(!/neuMicroStyle/.test(backBlock), 'back button has no white-box container chrome');
   assert(/ArrowLeft/.test(backBlock), 'back affordance retained');
   assert(/hitSlop=\{spacing\.sm\}/.test(backBlock), 'touch target preserved via hitSlop');

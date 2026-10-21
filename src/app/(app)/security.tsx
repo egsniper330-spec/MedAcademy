@@ -83,7 +83,7 @@ export default function SecurityCenter() {
   return (
     <KeyboardAvoidingView behavior={undefined} /* keyboard: native inset only */ style={{ flex: 1, backgroundColor: c.base }}>
       <ScrollView automaticallyAdjustKeyboardInsets={process.env.EXPO_OS === 'ios'} contentContainerStyle={{ flexGrow: 1, paddingTop: 0 }} keyboardShouldPersistTaps="handled">
-        <PageHeader title={t('securityCenter.title')} subtitle={t('securityCenter.subtitle')} showBack />
+        <PageHeader title={t('securityCenter.title')} subtitle={t('securityCenter.subtitle')} />
 
       <View style={{ paddingHorizontal: 24 }}>
 

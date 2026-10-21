@@ -247,6 +247,11 @@ final class CreditController
 
     /**
      * GET /credits/doctor/{id} — doctor earnings dashboard.
+     *
+     * RETIRED (earnings feature removed from the product): no route points here
+     * any more, so the method is unreachable over HTTP. It is kept, with the
+     * data it reads, purely so nothing about historical records changes; delete
+     * it in a separate, reviewed cleanup once the removal has shipped.
      */
     public function doctorEarnings(Request $request): array
     {

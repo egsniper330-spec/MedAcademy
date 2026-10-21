@@ -307,37 +307,6 @@ check(`key-table entries resolve in both dictionaries (${tableKeys.size} found)`
 // The retired list is a SAMPLE of the replaced copy — enough to prove the
 // dictionary is the source of truth without duplicating the whole dictionary.
 const MIGRATED_SCREENS = [
-  {
-    file: 'src/app/(app)/(doctor)/dr-earnings.tsx',
-    retired: [
-      'Earnings System is Disabled',
-      'Revenue Timeline',
-      'Revenue by Course',
-      'Pricing & Admin Tools',
-      'Recalculate Earnings',
-      'Reset Earnings?',
-      'No enrollments on your courses.',
-      'Immutable snapshot recorded at transaction time.',
-      'Pricing Fallback Logic',
-      'This feature is currently unavailable',
-      'Pricing Source',
-    ],
-  },
-  {
-    file: 'src/app/(app)/(hubs)/sa-doctor-earnings.tsx',
-    retired: [
-      'Earnings Dashboard',
-      'Credit Selling Price',
-      'Credit Ledger Summary',
-      'Revenue from Credit Sales',
-      'Balance Trend (Last',
-      'Credit History (',
-      'No Credit Activity',
-      'Last Login',
-      'Students Activated',
-      'All data uses the exact same sources',
-    ],
-  },
   // ── Shared modals used by every role ──────────────────────────────────────
   {
     file: 'src/components/ChangePasswordModal.tsx',
@@ -489,19 +458,6 @@ const MIGRATED_SCREENS = [
       'Student Information',
       'Bulk action result',
       'Choose enrollment method',
-    ],
-  },
-  {
-    file: 'src/app/(app)/(hubs)/doctor-earnings.tsx',
-    minKeys: 40,
-    retired: [
-      'EARNINGS SETTINGS',
-      'Credit Selling Price',
-      'No changes recorded yet',
-      'Custom Pricing',
-      'Grand Total',
-      'PER COURSE EARNINGS',
-      'Failed to update course price.',
     ],
   },
   // ── Student role: profile (shared by every student surface) ──────────────

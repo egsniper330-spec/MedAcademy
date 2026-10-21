@@ -68,14 +68,15 @@ export const DOCTOR_TABS: RoleTabDef[] = [
   { name: 'dr-overview', title: 'Dashboard', titleKey: 'tabs.dashboard', icon: 'LayoutDashboard', sfSymbol: 'square.grid.2x2' },
   { name: 'courses',     title: 'Courses',   titleKey: 'tabs.courses',   icon: 'BookOpen',        sfSymbol: 'book' },
   { name: 'students',    title: 'Students',  titleKey: 'tabs.students',  icon: 'Users',           sfSymbol: 'person.2' },
-  { name: 'dr-earnings', title: 'Earnings',  titleKey: 'tabs.earnings',  icon: 'TrendingUp',      sfSymbol: 'chart.line.uptrend.xyaxis' },
+  // Video Library is a real BOTTOM TAB (it replaced the retired Earnings tab).
+  // It is the same screen the drawer used to open at /video-library — the route
+  // now lives in this group so the tab can own it (no duplicate screen).
+  { name: 'video-library', title: 'Video Library', titleKey: 'tabs.videoLibrary', icon: 'Video', sfSymbol: 'play.rectangle' },
   { name: 'dr-profile',  title: 'Profile',   titleKey: 'tabs.profile',   icon: 'UserCircle',      sfSymbol: 'person.crop.circle' },
   // Drawer-only screens — registered, navigable, no bar item.
   { name: 'credits',              title: 'My Credits',     hidden: true },
   { name: 'create-student',       title: 'Create Student', hidden: true },
   { name: 'student-credentials',  title: 'Credentials',    hidden: true },
-  { name: 'bulk-import-students', title: 'Bulk Import',    hidden: true },
-  { name: 'video-library',        title: 'Video Library',  hidden: true },
 ];
 
 /* ── Admin ───────────────────────────────────────────────────────────── */
@@ -96,7 +97,6 @@ export const ADMIN_TABS: RoleTabDef[] = [
   { name: 'admin-credits',          title: 'Credits',            hidden: true },
   { name: 'bulk-credits',           title: 'Bulk Credits',       hidden: true },
   { name: 'revenue-analytics',      title: 'Revenue Analytics',  hidden: true },
-  { name: 'doctor-earnings',        title: 'Doctor Earnings',    hidden: true },
   { name: 'doctor-credit-timeline', title: 'Doctor Timeline',    hidden: true },
   { name: 'admin-settings',         title: 'Settings',           hidden: true },
   { name: 'system-providers',       title: 'System Diagnostics', hidden: true },
@@ -134,7 +134,6 @@ export const SUPERADMIN_TABS: RoleTabDef[] = [
   { name: 'trash-bin',               title: 'Trash Bin',              hidden: true },
   { name: 'delete-permissions',      title: 'Delete Permissions',     hidden: true },
   { name: 'video-providers',         title: 'Video Providers',        hidden: true },
-  { name: 'sa-doctor-earnings',      title: 'Doctor Earnings',        hidden: true },
   { name: 'sa-academic',             title: 'Academic Structure',     hidden: true },
   { name: 'sa-credits',              title: 'Credits',                hidden: true },
   { name: 'sa-currency',             title: 'Currency Settings',      hidden: true },

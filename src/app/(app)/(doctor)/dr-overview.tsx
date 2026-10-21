@@ -1,7 +1,7 @@
 import { useCallback, useState } from 'react';
 import { View, Text, ScrollView, useColorScheme, Pressable, RefreshControl, ActivityIndicator } from 'react-native';
 import { useFocusEffect, useRouter } from 'expo-router';
-import { BookOpen, Users, TrendingUp, Bell, Archive, GraduationCap, Ban, Zap, CreditCard, Plus } from 'lucide-react-native';
+import { BookOpen, Users, TrendingUp, Bell, Archive, GraduationCap, Ban, Zap, CreditCard, Plus, Calendar } from 'lucide-react-native';
 import { DashboardHeader } from '@/components/DashboardHeader';
 import { useProfileStore } from '@/lib/store';
 import { getCourses, getDoctorStudentEnrollments } from '@/lib/api';
@@ -17,7 +17,9 @@ import type { RelativePathString } from 'expo-router';
 import { useNotificationPermission } from '@/hooks/useNotificationPermission';
 import { PermissionRationaleModal } from '@/components/PermissionRationaleModal';
 import { useTranslation } from '@/lib/i18n';
+import { markEntryIntent } from '@/lib/navigation/navIntent';
 import { courseStatusLabel } from '@/lib/i18n/labels';
+import { formatLocalizedDate } from '@/lib/i18n/date';
 
 export default function DoctorDashboard() {
   const scheme = useColorScheme();
@@ -110,7 +112,11 @@ export default function DoctorDashboard() {
         greeting={firstName ? `${firstName} 👋` : '👋'}
         rightActions={
           <Pressable
-            onPress={() => router.push('/(app)/notifications' as RelativePathString)}
+            onPress={() => {
+              // Opened from the dashboard (not the drawer) → destination shows Back.
+              markEntryIntent('/(app)/notifications', 'nested');
+              router.push('/(app)/notifications' as RelativePathString);
+            }}
             accessibilityLabel={t('nav.notifications')}
             accessibilityRole="button"
             style={[{ width: layout.touchTarget, height: layout.touchTarget, borderRadius: layout.cardRadius, alignItems: 'center', justifyContent: 'center' }, neuMicroStyle(isDark)]}
@@ -160,31 +166,73 @@ export default function DoctorDashboard() {
           <>
             <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: layout.pad.md }}>
               <Text style={{ fontSize: layout.bodySize + 1, fontWeight: '800', color: c.text }}>{t('drOverview.recentEnrollments')}</Text>
-              <Pressable onPress={() => router.push('/(app)/(doctor)/students' as RelativePathString)}>
+              <Pressable onPress={() => {
+                markEntryIntent('/(app)/(doctor)/students', 'nested');
+                router.push('/(app)/(doctor)/students' as RelativePathString);
+              }}>
                 <Text style={{ fontSize: layout.captionSize + 1, fontWeight: '700', color: c.primary }}>{t('common.seeAll')}</Text>
               </Pressable>
             </View>
-            {recentEnrollments.map(e => (
-              <NeuCard key={e.id} style={{ marginBottom: layout.itemGap, padding: layout.cardPx }}>
-                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                  <View style={{ width: layout.touchTarget, height: layout.touchTarget, borderRadius: layout.cardRadius, backgroundColor: `${c.primary}18`, alignItems: 'center', justifyContent: 'center', marginRight: layout.pad.md }}>
-                    <Text style={{ fontSize: layout.bodySize, fontWeight: '800', color: c.primary }}>{e.student?.full_name?.[0]?.toUpperCase() ?? '?'}</Text>
+            {recentEnrollments.map(enrollment => {
+              // ── Recent Enrollments — one row, three distinct blocks ───────────
+              // The timestamp used to sit BESIDE the name/course as a third
+              // shrinking column with a physical (marginRight/marginLeft) gap
+              // and `numberOfLines={1}` on both texts. In Arabic that column
+              // collapsed onto the names, and long Arabic course titles were
+              // clipped. Now: avatar (fixed) + one flexible column whose lines
+              // stack name → course → date. No fixed widths, no physical
+              // margins (RTL-safe), every line truncates independently, and the
+              // whole card exposes the full text to screen readers.
+              const studentName = enrollment.student?.full_name ?? '';
+              const courseTitle = enrollment.course?.title ?? '';
+              const dateLabel = formatLocalizedDate(enrollment.created_at, locale);
+              return (
+                <NeuCard
+                  key={enrollment.id}
+                  style={{ marginBottom: layout.itemGap, padding: layout.cardPx }}
+                  accessibilityLabel={[studentName, courseTitle, dateLabel].filter(Boolean).join(' — ')}
+                >
+                  <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: layout.pad.md }}>
+                    <View style={{
+                      width: layout.touchTarget, height: layout.touchTarget, borderRadius: layout.cardRadius,
+                      backgroundColor: `${c.primary}18`, alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+                    }}>
+                      <Text style={{ fontSize: layout.bodySize, fontWeight: '800', color: c.primary }}>
+                        {studentName ? String(studentName).trim().charAt(0).toUpperCase() : '?'}
+                      </Text>
+                    </View>
+                    <View style={{ flex: 1, minWidth: 0, gap: 3 }}>
+                      {studentName ? (
+                        <Text style={{ fontSize: layout.bodySize, fontWeight: '600', color: c.text }} numberOfLines={2}>
+                          {studentName}
+                        </Text>
+                      ) : null}
+                      {courseTitle ? (
+                        <Text style={{ fontSize: layout.captionSize, ...mutedTextStyle(c, 0.55) }} numberOfLines={2}>
+                          {courseTitle}
+                        </Text>
+                      ) : null}
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 2 }}>
+                        <Calendar size={11} color={c.text} opacity={0.35} />
+                        <Text style={{ flexShrink: 1, fontSize: layout.captionSize - 1, ...mutedTextStyle(c, 0.4) }} numberOfLines={1}>
+                          {dateLabel}
+                        </Text>
+                      </View>
+                    </View>
                   </View>
-                  <View style={{ flex: 1 }}>
-                    <Text style={{ fontSize: layout.bodySize, fontWeight: '600', color: c.text }} numberOfLines={1}>{e.student?.full_name}</Text>
-                    <Text style={{ fontSize: layout.captionSize, ...mutedTextStyle(c, 0.5) }} numberOfLines={1}>{e.course?.title}</Text>
-                  </View>
-                  <Text style={{ fontSize: layout.captionSize - 1, ...mutedTextStyle(c, 0.35) }}>{new Date(e.created_at).toLocaleDateString(locale === 'ar' ? 'ar-EG' : 'en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</Text>
-                </View>
-              </NeuCard>
-            ))}
+                </NeuCard>
+              );
+            })}
           </>
         )}
 
         {/* Recent Courses */}
         <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: layout.pad.md, marginTop: layout.pad.sm }}>
           <Text style={{ fontSize: layout.bodySize + 1, fontWeight: '800', color: c.text }}>{t('drOverview.recentCourses')}</Text>
-          <Pressable onPress={() => router.push('/(app)/(doctor)/courses' as RelativePathString)}>
+          <Pressable onPress={() => {
+            markEntryIntent('/(app)/(doctor)/courses', 'nested');
+            router.push('/(app)/(doctor)/courses' as RelativePathString);
+          }}>
             <Text style={{ fontSize: layout.captionSize + 1, fontWeight: '700', color: c.primary }}>{t('common.seeAll')}</Text>
           </Pressable>
         </View>
@@ -192,8 +240,11 @@ export default function DoctorDashboard() {
           <NeuCard
             key={course.id}
             pressable
-            onPress={() => router.push(`/(app)/course/${course.id}` as RelativePathString)}
-            style={{ flexDirection: 'row', alignItems: 'center', padding: layout.cardPx, marginBottom: layout.itemGap }}
+            onPress={() => {
+              markEntryIntent(`/(app)/course/${course.id}`, 'nested');
+              router.push(`/(app)/course/${course.id}` as RelativePathString);
+            }}
+            style={{ flexDirection: 'row', alignItems: 'center', gap: layout.pad.md, padding: layout.cardPx, marginBottom: layout.itemGap }}
           >
             <CourseThumbnail
               imageUrl={course.image_url ?? course.thumbnail_url ?? course.cover_url}
@@ -201,7 +252,9 @@ export default function DoctorDashboard() {
               height={layout.touchTarget}
               borderRadius={layout.cardRadius}
             />
-            <View style={{ flex: 1, marginLeft: layout.pad.md }}>
+            {/* Gap instead of marginLeft: physical margins land on the wrong
+                side once I18nManager mirrors `row` for Arabic. */}
+            <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
               <Text style={{ fontSize: layout.bodySize, fontWeight: '700', color: c.text }} numberOfLines={1}>{course.title}</Text>
               <Text style={{ fontSize: layout.captionSize, ...mutedTextStyle(c, 0.45), marginTop: 2 }}>{course.category?.name ?? t('drOverview.generalCategory')}</Text>
             </View>

@@ -76,6 +76,20 @@ final class StudentBulkController
             throw new ApiException(422, 'enrollment_ids did not contain any valid identifiers');
         }
 
+        //  COURSE SCOPE: the UI's "Select all in this course" sends the course
+        //  it selected from. When present, every id must belong to that course
+        //  (on top of the ownership check below) — a course-scoped selection can
+        //  never mutate a student enrolled in a different course, even if a
+        //  stale or tampered client sends foreign ids.
+        $courseId = null;
+        $rawCourse = $body['course_id'] ?? null;
+        if ($rawCourse !== null && $rawCourse !== '') {
+            $courseId = Uuid::normalize((string) $rawCourse);
+            if ($courseId === '') {
+                throw new ApiException(422, 'course_id is not a valid identifier');
+            }
+        }
+
         // ── ONE server-side scoped fetch resolves authorization for ALL ids ──
         $db = Database::instance();
         $placeholders = implode(',', array_fill(0, count($ids), '?'));
@@ -114,6 +128,13 @@ final class StudentBulkController
                     $results[] = ['id' => $id, 'status' => 'failed', 'reason' => 'not_authorized'];
                     continue;
                 }
+            }
+
+            // Course scope (only when the caller declared one).
+            if ($courseId !== null && (string) $row['course_id'] !== $courseId) {
+                $failed++;
+                $results[] = ['id' => $id, 'status' => 'failed', 'reason' => 'not_in_course'];
+                continue;
             }
 
             $currentStatus = (string) ($row['status'] ?? '');
@@ -158,6 +179,7 @@ final class StudentBulkController
         // today; bulk holds itself to the stricter standard).
         AuditService::write($actorId, 'students_bulk_action', [
             'action' => $action,
+            'course_id' => $courseId,
             'requested' => count($ids),
             'succeeded' => $succeeded,
             'skipped' => $skipped,

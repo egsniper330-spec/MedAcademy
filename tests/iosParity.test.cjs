@@ -59,27 +59,31 @@ console.log('── 1. Feature flags: one client lib, both platforms ──');
   ok(/feature_disabled/.test(clientFlags), 'client recognises the shared refusal code on both platforms');
 }
 
-console.log('── 2. Doctor Earnings: no platform exemption in the client gates ──');
+console.log('── 2. Earnings retirement: identical on both platforms ──');
 {
-  const targets = [
-    ['drawer', 'src/components/DrawerNav.tsx'],
-    ['earnings screen', 'src/app/(app)/(doctor)/dr-earnings.tsx'],
-    ['doctor profile', 'src/app/(app)/(doctor)/dr-profile.tsx'],
-  ];
-  for (const [label, rel] of targets) {
+  // The earnings feature was removed for every client, so parity now means the
+  // retirement is not platform-conditional either: no role shell, drawer or
+  // profile screen may bring back an earnings surface on just one OS.
+  for (const rel of [
+    'src/components/DrawerNav.tsx',
+    'src/app/(app)/(doctor)/dr-profile.tsx',
+    'src/app/(app)/(doctor)/dr-overview.tsx',
+  ]) {
     const src = stripComments(read(rel));
-    ok(/doctor_earnings/.test(src), `${label}: consults the platform flag`);
-    ok(!/Platform\.OS[^\n]*doctor_earnings|doctor_earnings[^\n]*Platform\.OS/.test(src),
-      `${label}: flag check is NOT platform-conditional`);
+    ok(!/doctor_earnings|earningsEnabled/.test(src),
+      `${path.basename(rel)}: no earnings gate remains (retired on both platforms)`);
   }
-  // The sentence now lives in the dictionary (both screens render it through
-  // t()), so parity is: the screen renders the key on every platform and the
-  // English copy is present for that key. No platform branch may change it.
-  const earnings = stripComments(read('src/app/(app)/(doctor)/dr-earnings.tsx'));
-  const earningsCopy = stripComments(read('src/lib/i18n/resources.ts'));
-  ok(/t\('drProfile\.featureUnavailable'\)/.test(earnings) &&
-     /'drProfile\.featureUnavailable': 'This feature is currently unavailable\.'/.test(earningsCopy),
-    'earnings screen shows the same user-safe message on iOS');
+  for (const rel of [
+    'src/app/(app)/(doctor)/dr-earnings.tsx',
+    'src/app/(app)/(hubs)/doctor-earnings.tsx',
+    'src/app/(app)/(hubs)/sa-doctor-earnings.tsx',
+  ]) {
+    ok(!fs.existsSync(path.join(ROOT, rel)), `${rel} is gone (no iOS-only resurrection)`);
+  }
+  // The retained server-side key must stay platform-agnostic in the client lib.
+  const flags = read('src/lib/featureFlags.ts');
+  ok(!/Platform\.OS[^\n]*doctor_earnings|doctor_earnings[^\n]*Platform\.OS/.test(flags),
+    'the retained doctor_earnings key is never platform-conditional');
 }
 
 console.log('── 3. Profile photo Remove: shared control, iOS permission, X-platform APIs ──');

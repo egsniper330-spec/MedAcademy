@@ -20,10 +20,11 @@
  *     • Video Health + Video Monitor removed everywhere (routes, nav,
  *       wrappers, component, registry) without touching live infrastructure
  *
- *   DOCTOR EARNINGS — backend-enforced feature flag:
- *     • generic Data API read path gated for the earnings tables
- *     • named endpoints keep their existing gates
+ *   DOCTOR EARNINGS — RETIRED feature, retained server-side guard:
+ *     • generic Data API read path still gated for the earnings tables
+ *     • retained (unrouted) handlers keep their existing gates
  *     • flag key doctor_earnings, 403 feature_disabled contract
+ *     • no client screen, drawer entry or profile card remains
  *
  * Run: node tests/adminDiagnosticsAudit.test.cjs
  */
@@ -176,7 +177,7 @@ console.log('\n── Video Health / Video Monitor: removed cleanly ──');
     check(!exists(f), `removed: ${f}`);
   }
   check(exists('src/app/(app)/(hubs)/video-settings.tsx'), 'Video Settings remains (the one authoritative page)');
-  check(exists('src/app/(app)/(hubs)/video-library.tsx'), 'Video Library remains (upload/management, distinct purpose)');
+  check(exists('src/app/(app)/(doctor)/video-library.tsx'), 'Video Library remains (upload/management, distinct purpose)');
 
   // No dangling references anywhere in app code.
   const glob = (dir, exts) => {
@@ -262,29 +263,24 @@ console.log('\n── Doctor Earnings: backend enforcement ──');
   check(/'doctor_earnings' => \[[\s\S]{0,400}?'superadmin_exempt' => true/.test(ffs),
     'registry: doctor_earnings exists, superadmin_exempt preserved (no new bypass invented)');
 
-  // Frontend: page consumes a gated source + renders a clean disabled state.
-  const drPage = src('src/app/(app)/(doctor)/dr-earnings.tsx');
-  check(/useFeatureFlags\(\)/.test(drPage) && /flagEnabled\('doctor_earnings'\)/.test(drPage),
-    'doctor earnings page reflects the platform flag (unavailable state when off)');
-  // The copy moved into the dictionary (localization pass), so the gate follows
-  // it: the screen must render the shared unavailable design AND the exact
-  // user-safe English sentence must still exist in the English resources. That
-  // keeps the intent — no logout/suspension/maintenance misclassification —
-  // while the dictionary is the single source of truth for the wording.
-  const i18nResources = src('src/lib/i18n/resources.ts');
-  check(/FeatureUnavailableState/.test(drPage),
-    'disabled state uses the shared unavailable design');
-  check(/t\('drProfile\.featureUnavailable'\)/.test(drPage) &&
-        /t\('drProfile\.earnings\.unavailableBody'\)/.test(drPage),
-    'clean user-facing disabled state (no logout / suspension / maintenance misclassification)');
-  check(/'drProfile\.featureUnavailable': 'This feature is currently unavailable\.'/.test(i18nResources),
-    'the user-safe disabled copy is still the shipped English sentence');
-  // The three surfaces that made the flag feel "not enforced" for a doctor:
-  // the drawer entry, the profile earnings card, and the ops endpoints.
-  check(/isFeatureEnabled\('doctor_earnings'\)/.test(src('src/components/DrawerNav.tsx')),
-    'drawer gates the doctor Earnings entry on the platform flag');
-  check(/isFeatureEnabled\('doctor_earnings'\)/.test(src('src/app/(app)/(doctor)/dr-profile.tsx')),
-    'profile earnings card honors the platform flag');
+  // Frontend: the earnings feature is RETIRED, so the client surfaces that used
+  // to consult the flag must be gone while the server-side key stays registered
+  // (it still protects the retained earnings tables on the generic read path).
+  for (const rel of [
+    'src/app/(app)/(doctor)/dr-earnings.tsx',
+    'src/app/(app)/(hubs)/doctor-earnings.tsx',
+    'src/app/(app)/(hubs)/sa-doctor-earnings.tsx',
+  ]) {
+    check(!fs.existsSync(path.join(ROOT, rel)), `retired earnings screen is gone: ${rel}`);
+  }
+  const drawerSrc = src('src/components/DrawerNav.tsx');
+  check(!/isFeatureEnabled\('doctor_earnings'\)/.test(drawerSrc) &&
+        !/nav\.earnings/.test(drawerSrc),
+    'drawer no longer carries an Earnings entry');
+  const drProfileSrc = src('src/app/(app)/(doctor)/dr-profile.tsx');
+  check(!/isFeatureEnabled\('doctor_earnings'\)/.test(drProfileSrc) &&
+        !/function EarningsTab\(/.test(drProfileSrc),
+    'doctor profile no longer renders an earnings card');
   const flags = src('src/lib/featureFlags.ts');
   check(/isFeatureDisabledError/.test(flags) && /feature_disabled/.test(flags),
     'client recognizes the structured feature_disabled refusal');

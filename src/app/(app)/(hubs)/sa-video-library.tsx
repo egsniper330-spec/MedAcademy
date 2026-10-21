@@ -1,1 +1,1 @@
-export { default } from '@/app/(app)/(hubs)/video-library';
+export { default } from '@/app/(app)/(doctor)/video-library';

@@ -1,8 +1,8 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { View, Text, ScrollView, StyleSheet, useColorScheme, Pressable, RefreshControl, TextInput, ActivityIndicator, useWindowDimensions } from 'react-native';
 import { Image } from 'expo-image';
 import { useFocusEffect, useRouter } from 'expo-router';
-import { Plus, BookOpen, Search, Archive, Clock, Users, ChevronRight, GraduationCap, MoreVertical, Trash2, Pencil, AlertTriangle, FileText, Globe, Eye, LayoutGrid } from 'lucide-react-native';
+import { Plus, BookOpen, Search, Archive, CheckCircle, Clock, GraduationCap, MoreVertical, Trash2, Pencil, AlertTriangle, FileText, Globe, Eye, LayoutGrid, Layers, X } from 'lucide-react-native';
 import { PortalOverlay } from '@/components/PortalOverlay';
 import { DashboardHeader } from '@/components/DashboardHeader';
 import { useProfileStore } from '@/lib/store';
@@ -18,6 +18,7 @@ import { useFeatureFlags, isFeatureDisabledError } from '@/lib/featureFlags';
 import { FeatureUnavailableState } from '@/components/ScreenState';
 import { useTranslation } from '@/lib/i18n';
 import { courseStatusLabel, difficultyLabel } from '@/lib/i18n/labels';
+import { filterCoursesByStatus } from '@/lib/courseStatus';
 import type { RelativePathString } from 'expo-router';
 
 const DIFFICULTY_COLORS: Record<string, string> = {
@@ -26,6 +27,180 @@ const DIFFICULTY_COLORS: Record<string, string> = {
 const STATUS_COLORS: Record<string, string> = {
   published: '#16A34A', draft: '#D97706', hidden: '#6B7280', archived: '#9CA3AF',
 };
+
+/**
+ * The approved compact course card (one row instead of the previous
+ * thumbnail + description + meta + tags + CTA stack).
+ *
+ * Everything the old card showed is still here, just packed: thumbnail,
+ * title (2 lines), status pill, lessons, sections, duration, difficulty and
+ * the first two tags. The actions that used to live in a modal now expand
+ * inline from the ⋮ button — same three actions (Edit, Preview as student,
+ * Delete), one tap away, with nothing dropped.
+ */
+function DoctorCourseCard({
+  course, c, layout, wide, onEdit, onPreview, onDelete,
+}: {
+  course: any;
+  c: typeof neuColors.light;
+  layout: ReturnType<typeof useLayout>;
+  wide: boolean;
+  onEdit: () => void;
+  onPreview: () => void;
+  onDelete: () => void;
+}) {
+  const { t, tCount } = useTranslation();
+  const [open, setOpen] = useState(false);
+  const statusColor = STATUS_COLORS[course.status] ?? '#6B7280';
+  const isArchived = !!course.archived_at;
+  const image = course.image_url ?? course.cover_url ?? course.thumbnail_url;
+  const lessons = course.total_lessons ?? 0;
+  const sections = course.total_sections ?? 0;
+  const hours = course.estimated_duration_hours;
+  const tags: string[] = Array.isArray(course.tags) ? course.tags : [];
+
+  const actions = [
+    { key: 'edit', Icon: Pencil, label: t('drCourses.edit'), color: c.primary, onPress: onEdit },
+    { key: 'preview', Icon: Eye, label: t('drCourses.previewAsStudent'), color: '#7C3AED', onPress: onPreview },
+    { key: 'delete', Icon: Trash2, label: t('drCourses.delete'), color: '#DC2626', onPress: onDelete },
+  ];
+
+  return (
+    <NeuCard
+      style={{
+        padding: layout.pad.sm + 2,
+        opacity: isArchived ? 0.72 : 1,
+        ...(isArchived ? { borderWidth: 1, borderColor: '#9CA3AF33' } : {}),
+      }}
+    >
+      <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: layout.pad.md }}>
+        {/* Thumbnail — 56×56, falling back to a glyph instead of an empty box */}
+        <Pressable
+          onPress={onEdit}
+          accessibilityRole="button"
+          accessibilityLabel={course.title}
+          style={{
+            width: wide ? 64 : 56, height: wide ? 64 : 56, borderRadius: 12, overflow: 'hidden',
+            backgroundColor: `${c.primary}14`, alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+          }}
+        >
+          {image ? (
+            <Image source={{ uri: image }} style={{ width: '100%', height: '100%' }} contentFit="cover" />
+          ) : (
+            <GraduationCap size={wide ? 26 : 22} color={c.primary} opacity={0.4} />
+          )}
+        </Pressable>
+
+        {/* Identity + metadata */}
+        <View style={{ flex: 1, minWidth: 0, gap: 4 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+            <Pressable style={{ flex: 1, minWidth: 0 }} onPress={onEdit} accessibilityRole="button">
+              <Text style={{ fontSize: 14.5, fontWeight: '700', color: c.text }} numberOfLines={2}>
+                {course.title}
+              </Text>
+            </Pressable>
+            <View
+              style={{
+                flexDirection: 'row', alignItems: 'center', gap: 4, flexShrink: 0,
+                paddingHorizontal: 7, paddingVertical: 2, borderRadius: 20,
+                backgroundColor: `${statusColor}18`,
+              }}
+            >
+              {course.status === 'published'
+                ? <CheckCircle size={10} color={statusColor} />
+                : isArchived ? <Archive size={10} color={statusColor} /> : null}
+              <Text style={{ fontSize: 10, fontWeight: '800', color: statusColor }}>
+                {courseStatusLabel(course.status, t)}
+              </Text>
+            </View>
+            {isArchived && (
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3, flexShrink: 0,
+                paddingHorizontal: 7, paddingVertical: 2, borderRadius: 20, backgroundColor: '#D9770618' }}>
+                <Archive size={9} color="#D97706" />
+                <Text style={{ fontSize: 10, fontWeight: '700', color: '#D97706' }}>{t('courseStatus.archived')}</Text>
+              </View>
+            )}
+          </View>
+
+          {/* One wrapped meta line: lessons · sections · duration · difficulty · tags */}
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 8, rowGap: 3 }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3 }}>
+              <BookOpen size={10} color={c.primary} />
+              <Text style={{ fontSize: 10.5, ...mutedTextStyle(c, 0.6) }}>
+                {tCount('drCourses.lessonCount', lessons)}
+              </Text>
+            </View>
+            {sections > 0 && (
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3 }}>
+                <Layers size={10} color={c.primary} opacity={0.75} />
+                <Text style={{ fontSize: 10.5, ...mutedTextStyle(c, 0.6) }}>
+                  {tCount('drCourses.sectionCount', sections)}
+                </Text>
+              </View>
+            )}
+            {hours ? (
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3 }}>
+                <Clock size={10} color={c.primary} opacity={0.75} />
+                <Text style={{ fontSize: 10.5, ...mutedTextStyle(c, 0.6) }}>
+                  {t('drCourses.duration', { hours })}
+                </Text>
+              </View>
+            ) : null}
+            {course.difficulty ? (
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3 }}>
+                <View style={{ width: 6, height: 6, borderRadius: 3,
+                  backgroundColor: DIFFICULTY_COLORS[course.difficulty] ?? c.primary }} />
+                <Text style={{ fontSize: 10.5, ...mutedTextStyle(c, 0.5) }}>
+                  {difficultyLabel(course.difficulty, t)}
+                </Text>
+              </View>
+            ) : null}
+            {tags.slice(0, 2).map((tag) => (
+              <View key={tag} style={{ paddingHorizontal: 6, paddingVertical: 1, borderRadius: 20, backgroundColor: `${c.primary}12` }}>
+                <Text style={{ fontSize: 9.5, fontWeight: '700', color: c.primary }}>{tag}</Text>
+              </View>
+            ))}
+          </View>
+        </View>
+
+        {/* ⋮ — expands the same actions the old modal offered */}
+        <Pressable
+          onPress={() => setOpen(v => !v)}
+          accessibilityRole="button"
+          accessibilityLabel={t('drCourses.optionsA11y', { title: course.title })}
+          hitSlop={6}
+          style={{
+            width: 34, height: 34, borderRadius: 10, alignItems: 'center', justifyContent: 'center',
+            backgroundColor: open ? `${c.primary}18` : 'transparent', flexShrink: 0,
+          }}
+        >
+          {open ? <X size={16} color={c.primary} /> : <MoreVertical size={16} color={c.text} opacity={0.45} />}
+        </Pressable>
+      </View>
+
+      {open && (
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: layout.pad.sm }}>
+          {actions.map(action => (
+            <Pressable
+              key={action.key}
+              onPress={() => { setOpen(false); action.onPress(); }}
+              accessibilityRole="button"
+              accessibilityLabel={action.label}
+              style={{
+                flexDirection: 'row', alignItems: 'center', gap: 5,
+                paddingHorizontal: 9, paddingVertical: 6, borderRadius: 9,
+                backgroundColor: `${action.color}14`,
+              }}
+            >
+              <action.Icon size={12} color={action.color} />
+              <Text style={{ fontSize: 11, fontWeight: '700', color: action.color }}>{action.label}</Text>
+            </Pressable>
+          ))}
+        </View>
+      )}
+    </NeuCard>
+  );
+}
 
 export default function DoctorCourses() {
   const scheme = useColorScheme();
@@ -47,6 +222,10 @@ export default function DoctorCourses() {
   const [statusFilter, setStatusFilter] = useState<'all' | 'draft' | 'published'>('all');
   const { showToast } = useToast();
 
+  // A response that lands after the screen unmounts must not call setState.
+  const cancelledRef = useRef(false);
+  useEffect(() => () => { cancelledRef.current = true; }, []);
+
   //  COURSE CREATION FEATURE FLAG — the server refuses course creation while the
   //  flag is off (403 feature_disabled) on every entry point (RPC, /courses,
   //  /api/courses, duplicate). The UI reflects that state so a doctor never
@@ -55,10 +234,6 @@ export default function DoctorCourses() {
   const canCreate = isEnabled('course_creation');
   //  Set when the server refuses a create; shows the shared unavailable state.
   const [createBlocked, setCreateBlocked] = useState(false);
-
-  // ── Options menu ─────────────────────────────────────────────────────────────
-  const [menuCourse,    setMenuCourse]    = useState<any>(null);
-  const [menuVisible,   setMenuVisible]   = useState(false);
 
   // ── Delete confirmation ───────────────────────────────────────────────────────
   const [deleteTarget,  setDeleteTarget]  = useState<any>(null);
@@ -69,25 +244,22 @@ export default function DoctorCourses() {
   const loadData = useCallback(async () => {
     if (!profile) return;
     try {
-      // Server-side status filter (draft / published) + archived excluded by default.
-      // 'all' fetches everything and sorts published-first client-side (the API's
-      // single-column ORDER BY can't express status-grouped ordering).
-      const data = await getCoursesWithArchived({ doctorId: profile.id, status: statusFilter === 'all' ? undefined : statusFilter });
-      const sorted = statusFilter === 'all'
-        ? [...data].sort((a: any, b: any) => {
-            if (a.status === b.status) {
-              // Within a group: most recently updated/created first
-              const ta = a.updated_at ?? a.created_at ?? '';
-              const tb = b.updated_at ?? b.created_at ?? '';
-              return tb.localeCompare(ta);
-            }
-            return a.status === 'published' ? -1 : 1; // published before drafts
-          })
-        : data;
-      setCourses(sorted);
+      // ONE fetch for every tab — archived excluded by the server by default.
+      //
+      // WHY NOT `status: statusFilter`: the tab is a pure client-side view of
+      // the same doctor-scoped list. Asking the server for one status at a time
+      // (a) re-introduced a network round-trip on every tab press, (b) left the
+      // previously fetched rows on screen when a request was in flight or
+      // failed, and (c) depended on `/courses` honouring `?status=`, which it
+      // did not — so Drafts displayed published rows. The list is capped at 200
+      // rows for a single doctor, so filtering locally is both cheaper and the
+      // only representation the user can actually verify.
+      const data = await getCoursesWithArchived({ doctorId: profile.id });
+      if (cancelledRef.current) return;
+      setCourses(data);
     } catch {}
-    setLoading(false);
-  }, [profile, statusFilter]);
+    if (!cancelledRef.current) setLoading(false);
+  }, [profile]);
 
   // Stale-while-revalidate: the course list stays on screen and refreshes in
   // the background on focus instead of collapsing to a full-screen spinner.
@@ -98,9 +270,22 @@ export default function DoctorCourses() {
   });
   const onRefresh = async () => { setRefreshing(true); await loadData(); setRefreshing(false); };
 
-  const filtered = courses.filter(course =>
-    !debouncedQuery || course.title.toLowerCase().includes(debouncedQuery.toLowerCase())
-  );
+  // Tab semantics applied to the rows we hold (normalization lives in
+  // lib/courseStatus so drafts/published/archived can never drift again).
+  const statusScoped = filterCoursesByStatus(courses, statusFilter);
+  const filtered = statusScoped
+    .filter(course =>
+      !debouncedQuery || String(course.title ?? '').toLowerCase().includes(debouncedQuery.toLowerCase())
+    )
+    // All / Published-first, then most recently updated within a group.
+    .sort((a: any, b: any) => {
+      const sa = a.status === 'published' ? 0 : 1;
+      const sb = b.status === 'published' ? 0 : 1;
+      if (sa !== sb) return sa - sb;
+      const ta = a.updated_at ?? a.created_at ?? '';
+      const tb = b.updated_at ?? b.created_at ?? '';
+      return String(tb).localeCompare(String(ta));
+    });
 
   // Create a blank course and navigate into the builder
   const handleNewCourse = async () => {
@@ -131,36 +316,23 @@ export default function DoctorCourses() {
     setCreating(false);
   };
 
-  // Open the "⋮" options menu for a course
-  const openMenu = (course: any) => {
-    setMenuCourse(course);
-    setMenuVisible(true);
-  };
-  const closeMenu = () => { setMenuVisible(false); setMenuCourse(null); };
-
   // Navigate to course builder (edit)
-  const handleEdit = () => {
-    if (!menuCourse) return;
-    closeMenu();
-    router.push(`/(app)/course-builder/${menuCourse.id}` as RelativePathString);
+  const handleEdit = (course: any) => {
+    router.push(`/(app)/course-builder/${course.id}` as RelativePathString);
   };
 
   // "Preview as Student" — see exactly what an enrolled student sees for this
   // course. Uses the student-facing course screen with student fetch semantics;
   // the doctor's role/JWT is untouched. Only one preview session at a time.
-  const handlePreviewAsStudent = () => {
-    if (!menuCourse) return;
+  const handlePreviewAsStudent = (course: any) => {
     stopPreviewAsStudent();
-    startPreviewAsStudent(menuCourse.id);
-    closeMenu();
-    router.push(`/(app)/course/${menuCourse.id}` as RelativePathString);
+    startPreviewAsStudent(course.id);
+    router.push(`/(app)/course/${course.id}` as RelativePathString);
   };
 
   // Open delete confirmation: fetch stats first
-  const handleOpenDelete = async () => {
-    if (!menuCourse) return;
-    const target = menuCourse;
-    closeMenu();
+  const handleOpenDelete = async (target: any) => {
+    if (!target) return;
     setDeleteTarget(target);
     setDeleteStats(null);
     setStatsLoading(true);
@@ -201,15 +373,17 @@ export default function DoctorCourses() {
           greeting={t('nav.myCourses')}
           roleLabel={tCount('drCourses.count', courses.length)}
           rightActions={
-            canCreate ? (
-              <Pressable onPress={handleNewCourse} disabled={creating}
-                style={{ backgroundColor: c.primary, paddingHorizontal: 16, paddingVertical: 11, borderRadius: 14, flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                {creating
-                ? <ActivityIndicator size="small" color="#fff" />
-                : <Plus size={18} color="#fff" />}
-                <Text style={{ fontSize: 14, fontWeight: '700', color: '#fff' }}>{t('common.new')}</Text>
-              </Pressable>
-            ) : undefined
+            <>
+              {canCreate ? (
+                <Pressable onPress={handleNewCourse} disabled={creating}
+                  style={{ backgroundColor: c.primary, paddingHorizontal: 16, paddingVertical: 11, borderRadius: 14, flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                  {creating
+                  ? <ActivityIndicator size="small" color="#fff" />
+                  : <Plus size={18} color="#fff" />}
+                  <Text style={{ fontSize: 14, fontWeight: '700', color: '#fff' }}>{t('common.new')}</Text>
+                </Pressable>
+              ) : null}
+            </>
           }
         />
 
@@ -275,191 +449,24 @@ export default function DoctorCourses() {
               )}
             </View>
           ) : (
-            filtered.map(course => (
-              <NeuCard key={course.id} style={{ padding: 0, overflow: 'hidden' }}>
-                {/* Thumbnail — tapping the image navigates to editor */}
-                <Pressable onPress={() => router.push(`/(app)/course-builder/${course.id}` as RelativePathString)}>
-                  {(course.image_url || course.cover_url || course.thumbnail_url) ? (
-                    <Image
-                      source={{ uri: course.image_url ?? course.cover_url ?? course.thumbnail_url }}
-                      style={{ width: '100%', height: 140 }}
-                      contentFit="cover"
-                    />
-                  ) : (
-                    <View style={{ width: '100%', height: 100, backgroundColor: `${c.primary}12`, alignItems: 'center', justifyContent: 'center' }}>
-                      <GraduationCap size={36} color={c.primary} opacity={0.25} />
-                    </View>
-                  )}
-                </Pressable>
-
-                <View style={{ padding: 16, gap: 10 }}>
-                  {/* Title + Status + Options menu button */}
-                  <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 8 }}>
-                    <Pressable style={{ flex: 1 }}
-                      onPress={() => router.push(`/(app)/course-builder/${course.id}` as RelativePathString)}>
-                      <Text style={{ fontSize: 16, fontWeight: '800', color: c.text }} numberOfLines={2}>
-                        {course.title}
-                      </Text>
-                    </Pressable>
-                    <View style={{ alignItems: 'flex-end', gap: 4 }}>
-                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                        <View style={{ paddingHorizontal: 10, paddingVertical: 4, borderRadius: 20,
-                          backgroundColor: `${STATUS_COLORS[course.status] ?? '#6B7280'}18` }}>
-                          <Text style={{ fontSize: 11, fontWeight: '700', color: STATUS_COLORS[course.status] ?? '#6B7280' }}>
-                            {courseStatusLabel(course.status, t)}
-                          </Text>
-                        </View>
-                        {/* ⋮ options menu */}
-                        <Pressable onPress={() => openMenu(course)}
-                          accessibilityRole="button"
-                          accessibilityLabel={t('drCourses.optionsA11y', { title: course.title })}
-                          style={{ padding: 4, borderRadius: 8, backgroundColor: `${c.text}08` }}>
-                          <MoreVertical size={16} color={c.text} opacity={0.5} />
-                        </Pressable>
-                      </View>
-                      {course.archived_at && (
-                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4,
-                          paddingHorizontal: 8, paddingVertical: 3, borderRadius: 20, backgroundColor: '#D9770618' }}>
-                          <Archive size={9} color="#D97706" />
-                          <Text style={{ fontSize: 10, fontWeight: '700', color: '#D97706' }}>{t('courseStatus.archived')}</Text>
-                        </View>
-                      )}
-                    </View>
-                  </View>
-
-                  {/* Short description */}
-                  {course.short_description ? (
-                    <Text style={{ fontSize: 13, ...mutedTextStyle(c, 0.55), lineHeight: 18 }} numberOfLines={2}>
-                      {course.short_description}
-                    </Text>
-                  ) : null}
-
-                  {/* Meta row */}
-                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 12, alignItems: 'center' }}>
-                    {course.difficulty && (
-                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-                        <View style={{ width: 8, height: 8, borderRadius: 4,
-                          backgroundColor: DIFFICULTY_COLORS[course.difficulty] ?? c.primary }} />
-                        <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.55) }}>
-                          {difficultyLabel(course.difficulty, t)}
-                        </Text>
-                      </View>
-                    )}
-                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-                      <BookOpen size={12} color={c.primary} />
-                      <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.55) }}>
-                        {tCount('drCourses.lessonCount', course.total_lessons ?? 0)}
-                      </Text>
-                    </View>
-                    {course.total_sections > 0 && (
-                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-                        <Users size={12} color={c.primary} />
-                        <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.55) }}>
-                          {tCount('drCourses.sectionCount', course.total_sections)}
-                        </Text>
-                      </View>
-                    )}
-                    {course.estimated_duration_hours && (
-                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-                        <Clock size={12} color={c.primary} />
-                        <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.55) }}>
-                          {t('drCourses.duration', { hours: course.estimated_duration_hours })}
-                        </Text>
-                      </View>
-                    )}
-                  </View>
-
-                  {/* Tags */}
-                  {course.tags?.length > 0 && (
-                    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
-                      {course.tags.slice(0, 3).map((tag: string) => (
-                        <View key={tag} style={{ paddingHorizontal: 10, paddingVertical: 3, borderRadius: 20,
-                          backgroundColor: `${c.primary}15` }}>
-                          <Text style={{ fontSize: 11, color: c.primary, fontWeight: '600' }}>{tag}</Text>
-                        </View>
-                      ))}
-                    </View>
-                  )}
-
-                  {/* Edit CTA */}
-                  <Pressable style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', marginTop: 2 }}
-                    onPress={() => router.push(`/(app)/course-builder/${course.id}` as RelativePathString)}>
-                    <Text style={{ fontSize: 13, fontWeight: '700', color: c.primary, marginRight: 4 }}>{t('drCourses.edit')}</Text>
-                    <ChevronRight size={14} color={c.primary} />
-                  </Pressable>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 12 }}>
+              {filtered.map(course => (
+                <View key={course.id} style={{ width: screenW >= 700 ? '48.8%' : '100%', minWidth: 0 }}>
+                  <DoctorCourseCard
+                    course={course}
+                    c={c}
+                    layout={layout}
+                    wide={screenW >= 700}
+                    onEdit={() => handleEdit(course)}
+                    onPreview={() => handlePreviewAsStudent(course)}
+                    onDelete={() => handleOpenDelete(course)}
+                  />
                 </View>
-              </NeuCard>
-            ))
+              ))}
+            </View>
           )}
         </View>
       </ScrollView>
-
-      {/* ── Options menu modal ──────────────────────────────────────────────────── */}
-      {/*
-        Fix: was `position:'absolute', bottom:32` — hardcoded 32dp ignored the
-        Android navigation-bar inset. With gesture-nav the bar can be 40+ dp,
-        hiding the bottom button behind system UI.
-        Fix: use `justifyContent:'flex-end'` on the scrim so the sheet naturally
-        sits at the bottom, then apply `paddingBottom: Math.max(insets.bottom, 16)`
-        on the sheet itself to clear the nav-bar on every device.
-        Fix: added statusBarTranslucent so the scrim covers the Android status bar.
-      */}
-      <PortalOverlay visible={menuVisible} variant="dialog" backdropColor="rgba(0,0,0,0.35)" onRequestClose={closeMenu}>
-        <View
-          style={{
-            ...StyleSheet.absoluteFillObject,
-            alignItems: 'center',
-            justifyContent: 'center',
-            paddingTop: insets.top + 8,
-            paddingBottom: insets.bottom + 8,
-          }}
-          pointerEvents="box-none"
-        >
-        <View style={{
-          backgroundColor: c.base,
-          borderRadius: 20,
-          overflow: 'hidden',
-          width: Math.min(screenW * 0.92, 360),
-          shadowColor: '#000',
-          shadowOffset: { width: 0, height: 8 },
-          shadowOpacity: 0.14,
-          shadowRadius: 20,
-          elevation: 12,
-        }}>
-              {/* Course name header */}
-              <View style={{ padding: 18, borderBottomWidth: 1, borderBottomColor: `${c.text}10` }}>
-                <Text style={{ fontSize: 14, fontWeight: '700', color: c.text }} numberOfLines={1}>
-                  {menuCourse?.title}
-                </Text>
-              </View>
-              {/* Edit */}
-              <Pressable onPress={handleEdit}
-                style={{ flexDirection: 'row', alignItems: 'center', gap: 14, padding: 18,
-                  borderBottomWidth: 1, borderBottomColor: `${c.text}08` }}>
-                <Pencil size={18} color={c.primary} />
-                <Text style={{ fontSize: 15, fontWeight: '600', color: c.text }}>{t('drCourses.edit')}</Text>
-              </Pressable>
-              {/* Preview as Student — opens the student-facing course screen */}
-              <Pressable onPress={handlePreviewAsStudent}
-                style={{ flexDirection: 'row', alignItems: 'center', gap: 14, padding: 18,
-                  borderBottomWidth: 1, borderBottomColor: `${c.text}08` }}>
-                <Eye size={18} color="#7C3AED" />
-                <View style={{ flex: 1 }}>
-                  <Text style={{ fontSize: 15, fontWeight: '600', color: c.text }}>{t('drCourses.previewAsStudent')}</Text>
-                  <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.5) }}>
-                    {t('drCourses.previewHint')}
-                  </Text>
-                </View>
-              </Pressable>
-              {/* Delete */}
-              <Pressable onPress={handleOpenDelete}
-                style={{ flexDirection: 'row', alignItems: 'center', gap: 14, padding: 18 }}>
-                <Trash2 size={18} color="#DC2626" />
-                <Text style={{ fontSize: 15, fontWeight: '600', color: '#DC2626' }}>{t('drCourses.delete')}</Text>
-              </Pressable>
-        </View>
-        </View>
-      </PortalOverlay>
 
       {/* ── Delete confirmation modal ───────────────────────────────────────────── */}
       {/* Fix: added statusBarTranslucent so scrim covers the Android status bar */}

@@ -198,28 +198,23 @@ console.log('\n── P5: course-creation flag enforced on the path the UI uses 
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-console.log('\n── P6: disabled Earnings hides the page header and centres the state ──');
+console.log('\n── P6: earnings retired — the disabled page cannot regress (screen gone) ──');
 {
-  const dr = read('src/app/(app)/(doctor)/dr-earnings.tsx');
-  // Slice the guard branch by its real boundaries (start → its return statement)
-  // instead of a fixed 1400-character window: the window silently spilled into
-  // the normal branch once the copy moved into the dictionary, which would have
-  // made this check depend on string length rather than on the branch content.
-  const guardStart = dr.indexOf('if (platformDisabled) {');
-  // End at the component's own top-level `return (` (2-space indent); the guard's
-  // early return is indented one level deeper.
-  const guard = dr.slice(guardStart, dr.indexOf('\n  return (', guardStart));
-  ok(guard.length > 0, 'a dedicated platformDisabled branch exists');
-  ok(!/DashboardHeader/.test(guard),
-    'the disabled branch renders NO DashboardHeader (no revenue subtitle / trend icon)');
-  ok(/FeatureUnavailableState/.test(guard),
-    'the disabled branch uses the shared, consistent unavailable design');
-  ok(/flex: 1[^}]*alignItems: 'center', justifyContent: 'center'/.test(guard) ||
-     /justifyContent: 'center'/.test(guard),
-    'the state is centred in the available area');
-  ok(/safeTop\(layout\.insets\.top\)/.test(guard) && /safeBottom\(layout\.insets\.bottom\)/.test(guard),
-    'the centred state accounts for top safe area and the bottom tab bar');
-  ok(/HamburgerButton/.test(guard), 'navigation is still reachable (drawer affordance kept)');
+  // The disabled-earnings page was REMOVED with the feature, so the regression it
+  // guarded (a page header above a centred unavailable state) has no surface any
+  // more. What must stay true is the retirement itself plus the shared design the
+  // remaining gated screens still use.
+  ok(!fs.existsSync(path.join(ROOT, 'src/app/(app)/(doctor)/dr-earnings.tsx')),
+    'the earnings page is gone (no disabled-earnings layout to regress)');
+  ok(!fs.existsSync(path.join(ROOT, 'src/app/(app)/(hubs)/sa-doctor-earnings.tsx')) &&
+     !fs.existsSync(path.join(ROOT, 'src/app/(app)/(hubs)/doctor-earnings.tsx')),
+    'no earnings page survives in either console');
+  const screenState = read('src/components/ScreenState.tsx');
+  ok(/export function FeatureUnavailableState/.test(screenState),
+    'the shared unavailable design is retained for the screens that still use it');
+  const courses = read('src/app/(app)/(doctor)/courses.tsx');
+  ok(/FeatureUnavailableState/.test(courses),
+    'a retained gated screen still renders the shared unavailable state');
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

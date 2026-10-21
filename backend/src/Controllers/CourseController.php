@@ -45,13 +45,15 @@ final class CourseController
                        c.status, c.category_id, c.total_lessons, c.total_sections, c.language,
                        c.difficulty, c.price_egp, c.credits_required, c.free_preview,
                        c.university_id, c.faculty_id, c.academic_level_id, c.created_at,
+                       c.updated_at, c.archived_at, c.estimated_duration_hours,
                        p.full_name AS doctor_name
                   FROM courses c
                   LEFT JOIN profiles p ON p.id = c.doctor_id";
         $params = [];
+        $where = [];
         if ($isPrivileged) {
             if ($role === 'doctor') {
-                $sql .= ' WHERE c.doctor_id = ?';
+                $where[] = 'c.doctor_id = ?';
                 $params[] = $userId;
             }
         } else {
@@ -59,11 +61,38 @@ final class CourseController
             //  draft/hidden course visible to the student. Only a NON-suspended
             //  enrollment grants that visibility (published courses stay
             //  browsable by everyone, as before).
-            $sql .= " WHERE c.status = 'published'
-                      OR EXISTS (SELECT 1 FROM enrollments e
-                                  WHERE e.student_id = ? AND e.course_id = c.id
-                                    AND (e.status IS NULL OR e.status <> 'suspended'))";
+            $where[] = "(c.status = 'published'
+                         OR EXISTS (SELECT 1 FROM enrollments e
+                                     WHERE e.student_id = ? AND e.course_id = c.id
+                                       AND (e.status IS NULL OR e.status <> 'suspended')))";
             $params[] = $userId;
+        }
+
+        //  STATUS FILTER: `?status=draft|published|hidden|archived`
+        //  This parameter used to be IGNORED, so a client asking for drafts
+        //  received every course the doctor owns (the "Drafts shows published
+        //  courses" bug). Only a whitelist is ever interpolated, and the value
+        //  is still bound as a parameter.
+        $status = $request->query('status');
+        if (is_string($status) && $status !== '' && $status !== 'all') {
+            $allowed = ['draft', 'published', 'hidden', 'archived'];
+            if (!in_array($status, $allowed, true)) {
+                throw new ApiException(422, 'status must be one of: ' . implode(', ', $allowed));
+            }
+            $where[] = 'c.status = ?';
+            $params[] = $status;
+        }
+
+        //  ARCHIVED FILTER: the client sends `archived_at=is.null` when it wants
+        //  live rows only (the default for the Doctor course list). When the
+        //  parameter is absent (e.g. the admin course manager requesting
+        //  archived rows too) no filter is applied, preserving that behavior.
+        if ((string) $request->query('archived_at', '') === 'is.null') {
+            $where[] = 'c.archived_at IS NULL';
+        }
+
+        if ($where !== []) {
+            $sql .= ' WHERE ' . implode(' AND ', $where);
         }
         $sql .= ' ORDER BY c.created_at DESC LIMIT 200';
         return ['courses' => Database::instance()->select($sql, $params)];
@@ -766,6 +795,12 @@ final class CourseController
 
         // 3. Cascade DB delete
         $db->transaction(function (Database $db) use ($lessonId) {
+            //  RESUME POINTER: enrollments.last_lesson_id references lessons
+            //  with NO ON DELETE action (MySQL default = RESTRICT). Leaving it
+            //  alone made every lesson delete fail with a raw FK error as soon
+            //  as one student had reached that lesson. Clearing the pointer
+            //  keeps the enrollment intact and only forgets "where they were".
+            $db->query('UPDATE enrollments SET last_lesson_id = NULL WHERE last_lesson_id = ?', [$lessonId]);
             $db->query('DELETE FROM lesson_pdfs WHERE lesson_id = ?', [$lessonId]);
             $db->query('DELETE FROM lesson_materials WHERE lesson_id = ?', [$lessonId]);
             $db->query('DELETE FROM video_uploads WHERE lesson_id = ?', [$lessonId]);
@@ -785,6 +820,159 @@ final class CourseController
             'lesson_id' => $lessonId,
             'vdo_deleted' => $vdoDeleted,
             'vdo_error' => $vdoError,
+        ];
+    }
+
+    /**
+     * POST /courses/{id}/sections/{section_id}/delete
+     *
+     * Delete ONE section of ONE course, with everything the doctor confirmed.
+     *
+     * WHY A DEDICATED ENDPOINT (the "Failed to delete section" bug)
+     * ─────────────────────────────────────────────────────────────
+     * The app used to delete sections through the generic table API
+     * (`DELETE /api/sections?id=eq.…`), which is a single `DELETE` statement.
+     * Any dependent row therefore aborted the whole statement:
+     *
+     *   • lessons.section_id          (CASCADE in schema.sql, but a live DB
+     *                                  migrated from the Postgres era may still
+     *                                  carry the RESTRICT default),
+     *   • enrollments.last_lesson_id  (REFERENCES lessons with NO ON DELETE
+     *                                  action — RESTRICT — in the CURRENT
+     *                                  schema, so every section holding a
+     *                                  student's resume lesson failed even with
+     *                                  correct CASCADEs),
+     *   • lesson_pdfs / lesson_materials / lesson_progress / video_uploads,
+     *     which hang off those lessons.
+     *
+     * MySQL reported error 1451, the client's friendlyError() masks
+     * "Integrity constraint violation" (SQL internals are never shown), and the
+     * doctor saw only "Failed to delete section."
+     *
+     * This handler removes the exact dependency chain in ONE transaction, in
+     * dependency order, so the section delete cannot be blocked by a
+     * restrictive foreign key. Nothing outside the section is touched:
+     * enrollments, students, other sections and other courses stay intact;
+     * videos in the library (video_assets) are NOT deleted; remote VdoCipher
+     * media is left to the existing per-lesson delete flow.
+     *
+     * Authorization is server-side and re-checked here: the caller must be a
+     * doctor who OWNS the course (admins/super admins excepted), and the
+     * section must actually belong to that course — a doctor can never delete
+     * another course's section by guessing its id.
+     */
+    public function deleteSection(Request $request): array
+    {
+        $courseId = Uuid::normalize((string) ($request->params['id'] ?? ''));
+        $sectionId = Uuid::normalize((string) ($request->params['section_id'] ?? ''));
+        $userId = $request->user['id'];
+
+        $db = Database::instance();
+
+        $course = $db->row('SELECT id, title, doctor_id FROM courses WHERE id = ?', [$courseId]);
+        if ($course === null) {
+            throw new ApiException(404, 'Course not found');
+        }
+        // Ownership (403 for a doctor who does not own the course).
+        $this->assertCourseOwner($request, $courseId);
+
+        $section = $db->row('SELECT id, title, course_id FROM sections WHERE id = ?', [$sectionId]);
+        if ($section === null) {
+            throw new ApiException(404, 'Section not found');
+        }
+        // CROSS-COURSE GUARD: the section must belong to the course in the URL.
+        // Answered as 404 (not 403) so the endpoint never confirms that a
+        // section id exists elsewhere.
+        if ((string) $section['course_id'] !== $courseId) {
+            throw new ApiException(404, 'Section not found in this course');
+        }
+
+        $lessonIds = array_map(
+            static fn(array $r): string => (string) $r['id'],
+            $db->select('SELECT id FROM lessons WHERE section_id = ?', [$sectionId])
+        );
+
+        try {
+            $result = $db->transaction(function (Database $db) use ($sectionId, $courseId, $lessonIds): array {
+                if ($lessonIds !== []) {
+                    $in = implode(',', array_fill(0, count($lessonIds), '?'));
+
+                    // 1. Resume pointers first: RESTRICT FK, and the enrollment
+                    //    itself must survive (a student keeps their seat).
+                    $db->query("UPDATE enrollments SET last_lesson_id = NULL WHERE last_lesson_id IN ({$in})", $lessonIds);
+
+                    // 2. Lesson children, explicitly — never rely on a CASCADE
+                    //    that a migrated live schema may not have.
+                    $db->query("DELETE FROM lesson_pdfs WHERE lesson_id IN ({$in})", $lessonIds);
+                    $db->query("DELETE FROM lesson_materials WHERE lesson_id IN ({$in})", $lessonIds);
+                    $db->query("DELETE FROM lesson_progress WHERE lesson_id IN ({$in})", $lessonIds);
+                    $db->query("DELETE FROM video_uploads WHERE lesson_id IN ({$in})", $lessonIds);
+
+                    // 3. The lessons themselves (video_assets rows stay — the
+                    //    asset library is shared and must not be destroyed by
+                    //    deleting a section).
+                    $db->query("DELETE FROM lessons WHERE id IN ({$in})", $lessonIds);
+                }
+
+                // 4. The section, still constrained to the authorized course.
+                $db->query('DELETE FROM sections WHERE id = ? AND course_id = ?', [$sectionId, $courseId]);
+
+                // 5. Recount from the source of truth. The schema has triggers
+                //    for these counters; recomputing keeps them correct even on
+                //    a deployment where a trigger is missing.
+                $db->query(
+                    'UPDATE courses
+                        SET total_sections = (SELECT COUNT(*) FROM sections WHERE course_id = ?),
+                            total_lessons  = (SELECT COUNT(*) FROM lessons  WHERE course_id = ?),
+                            updated_at     = CURRENT_TIMESTAMP
+                      WHERE id = ?',
+                    [$courseId, $courseId, $courseId]
+                );
+
+                $remainingSections = (int) $db->value(
+                    'SELECT COUNT(*) FROM sections WHERE course_id = ?',
+                    [$courseId],
+                    0
+                );
+
+                return ['remaining_sections' => $remainingSections];
+            });
+        } catch (\PDOException $e) {
+            // Still referenced by something we do not own (an older schema
+            // object, a future feature). Report a conflict — never a 500 with
+            // SQL internals, and never a silent success.
+            if ((int) ($e->errorInfo[1] ?? 0) === 1451) {
+                error_log(sprintf(
+                    '[CourseController][section-delete][FK] course=%s section=%s driver=%s',
+                    $courseId,
+                    $sectionId,
+                    $e->errorInfo[2] ?? 'unknown'
+                ));
+                throw new ApiException(
+                    409,
+                    'This section is still referenced by other records and cannot be deleted yet. No changes were made.',
+                    'dependency_conflict',
+                    $e
+                );
+            }
+            throw $e;
+        }
+
+        AuditService::write($userId, 'course_updated', [
+            'course_id' => $courseId,
+            'section_deleted' => true,
+            'section_id' => $sectionId,
+            'section_title' => $section['title'],
+            'lessons_removed' => count($lessonIds),
+        ]);
+
+        return [
+            'success' => true,
+            'course_id' => $courseId,
+            'section_id' => $sectionId,
+            'section_title' => $section['title'],
+            'removed_lessons' => count($lessonIds),
+            'remaining_sections' => $result['remaining_sections'],
         ];
     }
 

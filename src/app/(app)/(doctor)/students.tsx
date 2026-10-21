@@ -6,7 +6,7 @@ import {
 import { useFocusEffect, useRouter, RelativePathString } from 'expo-router';
 import {
   Users, Search, UserPlus, BookOpen, Ban, Play, Trash2, Eye, CreditCard, X,
-  Clock, GraduationCap, ChevronRight, CheckCircle, PlusCircle, Upload, Fingerprint, Copy,
+  Clock, GraduationCap, ChevronRight, CheckCircle, PlusCircle, Fingerprint, Copy,
   Check, ListChecks,
 } from 'lucide-react-native';
 import * as Clipboard from 'expo-clipboard';
@@ -100,6 +100,12 @@ export default function DoctorStudents() {
   const [bulkConfirm,   setBulkConfirm]   = useState<BulkAction | null>(null);
   const [bulkResult,    setBulkResult]    = useState<BulkStudentActionResult | null>(null);
   const [bulkExecuting, setBulkExecuting] = useState(false);
+  //  COURSE SCOPE: when the selection was created from a specific course
+  //  ("Select all in this course"), the scope is remembered and sent to the
+  //  backend with the action. The server independently validates that every id
+  //  belongs to that course, so a stale/edited client can never action a
+  //  student from another course.
+  const [selectionCourse, setSelectionCourse] = useState<{ id: string; title: string } | null>(null);
 
   // ── Load ──────────────────────────────────────────────────────────────────────
   const loadData = useCallback(async () => {
@@ -245,10 +251,23 @@ export default function DoctorStudents() {
   const toggleSelect = useCallback((id: string) => {
     setSelected(prev => { const next = new Set(prev); if (next.has(id)) next.delete(id); else next.add(id); return next; });
   }, []);
-  const selectAllVisible = useCallback(() => setSelected(new Set(visibleEnrollments.map(e => e.id))), [visibleEnrollments]);
+  const selectAllVisible = useCallback(() => {
+    setSelectionCourse(null);
+    setSelected(new Set(visibleEnrollments.map(e => e.id)));
+  }, [visibleEnrollments]);
+
+  /** Select every student of ONE course (never the platform, never other courses). */
+  const selectCourseGroup = useCallback((course: { id: string; title: string }, items: any[]) => {
+    setSelectMode(true);
+    setBulkMenu(false);
+    setSelectionCourse({ id: course.id, title: course.title });
+    setSelected(new Set(items.map(e => e.id)));
+  }, []);
+
   const exitSelectMode = useCallback(() => {
     setSelectMode(false); setSelected(new Set()); setBulkMenu(false);
     setBulkConfirm(null); setBulkResult(null); setBulkExecuting(false);
+    setSelectionCourse(null);
   }, []);
 
   // Authorization-derived menu state (mirrors the per-card buttons: Suspend
@@ -264,7 +283,11 @@ export default function DoctorStudents() {
     try {
       // One backend call — the server authorizes every id against the real
       // scope and returns exact per-row results. Never per-student fan-out.
-      const res = await bulkStudentAction({ enrollmentIds: [...selected], action });
+      const res = await bulkStudentAction({
+        enrollmentIds: [...selected],
+        action,
+        courseId: selectionCourse?.id,
+      });
       setBulkResult(res);
       if (res.succeeded > 0) {
         if (action === 'remove') invalidateCreditCache();
@@ -275,7 +298,7 @@ export default function DoctorStudents() {
       setBulkResult(null);
     }
     setBulkExecuting(false);
-  }, [bulkExecuting, selected, loadData, showToast]);
+  }, [bulkExecuting, selected, selectionCourse, loadData, showToast]);
 
   const resetAddModal = () => {
     setAddModal(false); setEnrollMethod(null);
@@ -408,7 +431,10 @@ export default function DoctorStudents() {
         const open = expandCourse === course.id;
         return (
           <View key={course.id} style={{ marginBottom: 12 }}>
-            <Pressable onPress={() => setExpandCourse(open ? null : course.id)}>
+            <Pressable onPress={() => {
+              if (selectMode && selectionCourse && selectionCourse.id !== course.id) exitSelectMode();
+              setExpandCourse(open ? null : course.id);
+            }}>
               <NeuCard style={{ flexDirection: 'row', alignItems: 'center', padding: 14, gap: 12 }}>
                 <View style={{ width: 38, height: 38, borderRadius: 12, backgroundColor: `${c.primary}18`, alignItems: 'center', justifyContent: 'center' }}>
                   <BookOpen size={18} color={c.primary} />
@@ -422,7 +448,29 @@ export default function DoctorStudents() {
               </NeuCard>
             </Pressable>
             {open && (
-              <View style={{ paddingTop: 6, paddingLeft: 8 }}>
+              <View style={{ paddingTop: 6, paddingHorizontal: 8 }}>
+                {/*  COURSE-SCOPED SELECT ALL — selects only this course's
+                    students (the group's own rows), never the whole platform
+                    and never another course's list. */}
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                  <Pressable
+                    onPress={() => selectCourseGroup(course, items)}
+                    accessibilityRole="button"
+                    accessibilityLabel={t('bulk.selectAllCourseA11y', { course: course.title })}
+                    style={{ flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 10,
+                      paddingVertical: 7, borderRadius: 10, backgroundColor: `${c.primary}12`, flexShrink: 1 }}
+                  >
+                    <CheckCircle size={13} color={c.primary} />
+                    <Text style={{ fontSize: 12, fontWeight: '700', color: c.primary }} numberOfLines={1}>
+                      {t('bulk.selectAllInCourse')}
+                    </Text>
+                  </Pressable>
+                  {selectionCourse?.id === course.id && (
+                    <Text style={{ fontSize: 11.5, fontWeight: '700', ...mutedTextStyle(c, 0.55) }} numberOfLines={1}>
+                      {t('bulk.selectedInCourse', { count: selected.size })}
+                    </Text>
+                  )}
+                </View>
                 {items.map(e => renderEnrollmentCard(e, false))}
               </View>
             )}
@@ -514,18 +562,28 @@ export default function DoctorStudents() {
                 <Text style={{ fontSize: 14, fontWeight: '700', color: c.primary }}>{t('drStudents.addStudent')}</Text>
               </NeuCard>
             </Pressable>
-            <Pressable onPress={() => router.push('/(app)/(doctor)/create-student' as RelativePathString)} style={{ flex: 1 }}>
+            {/*  ROUTE FIX: the full-flow creator lives in the (hubs) stack, not
+                in (doctor). Group-qualified hrefs (`/(app)/(doctor)/create-student`)
+                select a route INSIDE that group, where no such screen exists —
+                which is what produced the Expo Router "Unmatched Route" screen.
+                Every other navigation in the app uses the group-free URL
+                (DrawerNav: `/students`, `/video-library`), so follow that. */}
+            <Pressable
+              onPress={() => router.push('/create-student' as RelativePathString)}
+              style={{ flex: 1 }}
+              accessibilityRole="button"
+              accessibilityLabel={t('drStudents.createStudent')}
+            >
               <NeuCard style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: 14 }}>
                 <PlusCircle size={18} color="#22C55E" />
                 <Text style={{ fontSize: 14, fontWeight: '700', color: '#22C55E' }}>{t('drStudents.createStudent')}</Text>
               </NeuCard>
             </Pressable>
-            <Pressable onPress={() => router.push('/(app)/(doctor)/bulk-import-students' as RelativePathString)}
-              accessibilityRole="button" accessibilityLabel={t('drStudents.bulkImportA11y')}>
-              <NeuCard style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: 14, paddingHorizontal: 14 }}>
-                <Upload size={18} color="#F59E0B" />
-              </NeuCard>
-            </Pressable>
+            {/* The icon-only bulk-import shortcut that used to sit here was
+                removed: it had no visible label (its only name was an a11y
+                string), it pointed at the same broken group-qualified route,
+                and it duplicated Create Student's slot on this row. Bulk import
+                stays reachable from the drawer (nav.bulkImport). */}
           </View>
 
           {/* Select mode toggle — compact, native to the row above */}
@@ -548,6 +606,7 @@ export default function DoctorStudents() {
                   onPress={selectAllVisible}
                   accessibilityRole="button"
                   accessibilityLabel={t('drStudents.selectAllA11y')}
+                  accessibilityHint={t('bulk.scopeAll')}
                   style={{ flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 10, paddingVertical: 7,
                     borderRadius: 10, backgroundColor: `${c.primary}12` }}>
                   <CheckCircle size={13} color={c.primary} />
@@ -571,6 +630,13 @@ export default function DoctorStudents() {
                   <X size={14} color={c.text} opacity={0.6} />
                 </Pressable>
               </View>
+              {/*  SCOPE LINE — makes the selection's reach explicit: everything in
+                  the current tab, or exactly one course. */}
+              <Text style={{ fontSize: 11.5, fontWeight: '600', ...mutedTextStyle(c, 0.55) }} numberOfLines={2}>
+                {selectionCourse
+                  ? t('bulk.courseScopeLabel', { course: selectionCourse.title })
+                  : t('bulk.scopeAll')}
+              </Text>
               {/* Bulk Actions — only when ≥1 selected. Options mirror the
                   individual-card authorization (Suspend for active rows,
                   Resume for suspended rows, Remove always offered individually). */}
@@ -653,7 +719,11 @@ export default function DoctorStudents() {
                 const Icon = tab.icon;
                 const active = activeTab === tab.key;
                 return (
-                  <Pressable key={tab.key} onPress={() => setActiveTab(tab.key)}
+                  <Pressable key={tab.key} onPress={() => {
+                    // A selection belongs to the tab/course it was made in —
+                    // switching lists must never carry it into another course.
+                    if (tab.key !== activeTab) { if (selectMode) exitSelectMode(); setActiveTab(tab.key); }
+                  }}
                     style={{ flexDirection: 'row', alignItems: 'center', gap: 6,
                       paddingHorizontal: 14, paddingVertical: 9, borderRadius: 12,
                       backgroundColor: active ? c.primary : c.base,
@@ -927,6 +997,13 @@ export default function DoctorStudents() {
       >
         {bulkConfirm !== null && (
           <View style={{ gap: 16 }}>
+            {/* Scope line in the confirmation itself: a destructive bulk action
+                must name the course it was scoped to, not just a count. */}
+            {selectionCourse && (
+              <Text style={{ fontSize: 12.5, fontWeight: '700', ...mutedTextStyle(c, 0.6), textAlign: 'center' }} numberOfLines={2}>
+                {t('bulk.courseScopeLabel', { course: selectionCourse.title })}
+              </Text>
+            )}
             <Text style={{ fontSize: 14, color: c.text, opacity: 0.7, textAlign: 'center' }}>
               {bulkConfirm === 'suspend'
                 ? t('drStudents.bulkSuspendPrompt', { active: selectedActiveCount, total: selected.size })
@@ -981,7 +1058,13 @@ export default function DoctorStudents() {
                     <View key={r.id} style={{ flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: `${c.text}08` }}>
                       <Text style={{ fontSize: 13, color: c.text }} numberOfLines={1}>{name}</Text>
                       <Text style={{ fontSize: 12, color: '#DC2626', fontWeight: '600' }}>
-                        {r.reason === 'not_authorized' ? t('drStudents.notAuthorized') : r.reason === 'not_found' ? t('drStudents.notFound') : t('common.failed')}
+                        {r.reason === 'not_authorized'
+                          ? t('drStudents.notAuthorized')
+                          : r.reason === 'not_found'
+                          ? t('drStudents.notFound')
+                          : r.reason === 'not_in_course'
+                          ? t('drStudents.notInCourse')
+                          : t('common.failed')}
                       </Text>
                     </View>
                   );

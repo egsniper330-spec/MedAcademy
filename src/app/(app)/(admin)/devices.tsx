@@ -566,7 +566,9 @@ export default function AdminDevices({ backTo }: { backTo?: string } = {}) {
             title={t('adminDevices.title')}
             subtitle={t('adminDevices.accountsCount', { count: users.length })}
             accentColor={c.primary}
-            showBack
+            /* Nested when opened from a hub (backTo) → Back to that hub; a
+               primary destination when opened from the drawer/tab bar → menu. */
+            navMode={backTo ? 'back' : undefined}
             backFallback={backTo ?? '/admin-overview'}
             rightAction={
               <Pressable

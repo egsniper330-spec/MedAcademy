@@ -29,6 +29,7 @@ import {
   BarChart2,
   Settings2,
   TrendingUp,
+  Video,
   Circle,
 } from 'lucide-react-native';
 import { DrawerProvider } from '@/components/DrawerContext';
@@ -60,6 +61,7 @@ const ICONS: Record<string, IconComponent> = {
   BarChart2,
   Settings2,
   TrendingUp,
+  Video,
 };
 
 const lucideIcon = (name: string | undefined): IconComponent =>

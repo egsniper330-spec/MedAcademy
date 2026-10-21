@@ -123,7 +123,7 @@ export default function SAFinance() {
 
         {/* ── Platform Revenue ─────────────────────────────────────────── */}
         <SectionLabel title="Platform Revenue" c={c} />
-        <NavItem icon={DollarSign}  label="Revenue Dashboard"   description="All-time earnings, pricing & payouts"     color="#16A34A" path="/revenue"           badge="LIVE" isDark={isDark} c={c} />
+        <NavItem icon={DollarSign}  label="Revenue Dashboard"   description="All-time revenue, pricing & credits"     color="#16A34A" path="/revenue"           badge="LIVE" isDark={isDark} c={c} />
         <NavItem icon={TrendingUp}  label="Revenue Analytics"   description="Revenue trends and breakdowns"            color="#2DA8FF" path="/revenue-analytics"       isDark={isDark} c={c} />
         <NavItem icon={Globe}       label="Currency Settings"   description="Platform default currency configuration"   color="#D97706" path="/currency"           isDark={isDark} c={c} />
 

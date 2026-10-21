@@ -1133,7 +1133,6 @@ function createStorageBucket(bucket: string) {
 const EDGE_FUNCTION_MAP: Record<string, string> = {
   'redeem-codes':           '/redeem-codes',
   'redeem-code-redeem':     '/redeem-codes/redeem',
-  'admin-doctor-earnings':  '/analytics/doctor-earnings',
   'admin-enrollment':       '/admin/enrollment',
   'admin-data-export':      '/admin/data-export',
   'admin-update-email':     '/admin/update-email',
@@ -1243,6 +1242,15 @@ async function invokeFunction<T = any>(
     if (typeof payload.lesson_id === 'string') payload.id = payload.lesson_id;
     delete payload.lesson_id;
   }
+  if (name === 'delete-section') {
+    // Dedicated transactional section delete. Both ids are REQUIRED: the
+    // course id is the authorization scope (ownership is re-checked server
+    // side) and the section id must belong to it. The route template consumes
+    // `{id}` (course) and `{section_id}` (section) from the payload.
+    route = '/courses/{id}/sections/{section_id}/delete';
+    if (typeof payload.course_id === 'string') payload.id = payload.course_id;
+    delete payload.course_id;
+  }
   if (name === 'set-app-update-config') {
     // PUT /admin/app-updates/{platform}: the route token is literally
     // `{platform}` (Router extracts params by token name), so the payload key
@@ -1347,8 +1355,6 @@ const RPC_MAP: Record<string, string> = {
   'get_enrollment_doctor_stats':      '/analytics/enrollment-stats/doctors/{id}',
   'get_enrollment_course_stats':      '/analytics/enrollment-stats/courses/{id}',
   'get_doctor_credit_transactions':   '/rpc/doctor-credit-transactions/{doctorId}',
-  'get_doctor_earnings_dashboard':    '/rpc/doctor-earnings-dashboard/{doctorId}',
-  'get_doctor_student_profile':       '/rpc/doctor-student-profile',
   'get_doctor_students':              '/doctors/students',
   'get_email_by_phone':               '/rpc/get-email-by-phone',
   'get_enum_values_bulk':             '/rpc/enum-values-bulk',
@@ -1374,17 +1380,13 @@ const RPC_MAP: Record<string, string> = {
   'permanently_delete_course':        '/rpc/permanently-delete-course',
   'pre_login_device_check':           '/auth/pre-login-check',
   'publish_course':                   '/courses/{id}/publish',
-  'recalculate_doctor_earnings':      '/analytics/recalculate-earnings/{doctorId}',
   'recover_stale_upload_sessions':    '/rpc/recover-stale-upload-sessions',
   'remove_course_enrollment':         '/rpc/remove-course-enrollment',
   'remove_student_and_record_earnings': '/rpc/remove-student-and-record-earnings',
-  'reset_doctor_earnings':            '/analytics/reset-doctor-earnings/{doctorId}',
-  'reset_platform_earnings':          '/analytics/reset-platform-earnings',
   'reset_user_password_by_admin':     '/rpc/reset-user-password-by-admin',
   'restore_course':                   '/courses/{id}/restore',
   'run_db_audit':                     '/analytics/db-audit',
   'search_audit_logs':                '/rpc/search-audit-logs',
-  'set_doctor_credit_price':          '/rpc/set-doctor-credit-price',
   'set_enrollment_assigned_price':    '/rpc/set-enrollment-assigned-price',
   'set_user_role':                    '/admin/users/{id}/role',
   'set_user_status':                  '/admin/users/{id}/status',
@@ -1402,14 +1404,11 @@ const RPC_PATH_ALIASES: Record<string, Record<string, string>> = {
   'get_course_progress':            { id: 'p_course_id' },
   'get_doctor_activity_stats':      { doctorId: 'p_doctor_id' },
   'get_doctor_credit_transactions': { doctorId: 'p_doctor_id' },
-  'get_doctor_earnings_dashboard':  { doctorId: 'p_doctor_id' },
   'get_enrollment_doctor_stats':    { id: 'doctor_id' },
   'get_enrollment_course_stats':    { id: 'course_id' },
   'get_user_activity':              { id: 'p_user_id' },
   'get_user_profile_summary':       { id: 'p_user_id' },
   'publish_course':                 { id: 'p_course_id' },
-  'recalculate_doctor_earnings':    { doctorId: 'p_doctor_id' },
-  'reset_doctor_earnings':          { doctorId: 'p_doctor_id' },
   'restore_course':                 { id: 'p_course_id' },
   'set_user_role':                  { id: 'p_user_id' },
   'set_user_status':                { id: 'p_user_id' },
@@ -1424,7 +1423,6 @@ const RPC_KEY_RENAMES: Record<string, Record<string, string>> = {
   'get_chunk_upload_state':              { p_upload_id: 'upload_id' },
   'reset_user_password_by_admin':        { p_target_id: 'user_id' },
   'upsert_teacher_provider_permission':  { p_provider_key: 'provider', p_is_enabled: 'enabled' },
-  'set_doctor_credit_price':             { p_new_price: 'price' },
   'admin_reset_violations':              { target_user_id: 'user_id' },
   // The PHP port renamed the original `p_email` arg to `identifier`
   'pre_login_device_check':              { p_email: 'identifier' },
@@ -1440,7 +1438,6 @@ const GET_RPCS = new Set([
   'get_deletion_stats',
   'get_doctor_activity_stats',
   'get_doctor_credit_transactions',
-  'get_doctor_earnings_dashboard',
   'get_doctor_students',
   'get_enrollment_stats',
   'get_enrollment_stats_doctors',

@@ -46,7 +46,6 @@ export default function AdminSettingsScreen() {
       <PageHeader
         title={t('adminSettings.title')}
         subtitle={t('adminSettings.subtitle')}
-        showBack
         backFallback="/admin-overview"
       />
 

@@ -388,7 +388,6 @@ export default function CMSPagesScreen({ backTo }: { backTo?: string } = {}) {
         title="CMS Pages"
         subtitle="Edit platform content pages"
         accentColor="#16A34A"
-        showBack
         backFallback={backTo ?? '/admin-overview'}
       />
 

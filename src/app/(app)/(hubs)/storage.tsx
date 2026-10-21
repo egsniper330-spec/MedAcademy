@@ -123,7 +123,6 @@ export default function StorageMonitorScreen({ backTo }: { backTo?: string } = {
         title="Storage Monitor"
         subtitle="Live server-measured storage"
         accentColor="#2DA8FF"
-        showBack
         backFallback={backTo ?? '/admin-overview'}
       />
 

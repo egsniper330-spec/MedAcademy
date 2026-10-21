@@ -20,6 +20,7 @@ import { neuColors, neuFlatStyle, neuPressedStyle, useLayout, safeBottom, mutedT
 import { DashboardHeader } from '@/components/DashboardHeader';
 import Bell from '@/components/Bell';
 import { useTranslation } from '@/lib/i18n';
+import { markEntryIntent } from '@/lib/navigation/navIntent';
 import { useNotificationPermission } from '@/hooks/useNotificationPermission';
 import { PermissionRationaleModal } from '@/components/PermissionRationaleModal';
 import { QuickActionBtn } from '@/components/QuickActionBtn';
@@ -67,7 +68,11 @@ function KpiCard({
     <Pressable
       onPressIn={() => setPressed(true)}
       onPressOut={() => setPressed(false)}
-      onPress={() => router.push(path as RelativePathString)}
+      onPress={() => {
+        // Dashboard → destination is a nested entry (Back), never the drawer's menu.
+        markEntryIntent(path, 'nested');
+        router.push(path as RelativePathString);
+      }}
       accessibilityLabel={`${label}: ${value}`}
       accessibilityRole="button"
       style={{ flexGrow: 1, flexBasis: '46%' }}
@@ -96,7 +101,10 @@ function HubRow({
     <Pressable
       onPressIn={() => setPressed(true)}
       onPressOut={() => setPressed(false)}
-      onPress={() => router.push(path as RelativePathString)}
+      onPress={() => {
+        markEntryIntent(path, 'nested');
+        router.push(path as RelativePathString);
+      }}
       accessibilityLabel={label}
       accessibilityRole="button"
     >
@@ -276,7 +284,10 @@ export default function SuperAdminDashboard() {
 
         {/* ── Global search ───────────────────────────────────────────── */}
         <Pressable
-          onPress={() => router.push('/sa-global-search' as RelativePathString)}
+          onPress={() => {
+            markEntryIntent('/sa-global-search', 'nested');
+            router.push('/sa-global-search' as RelativePathString);
+          }}
           accessibilityLabel={t('nav.globalSearch')}
           accessibilityRole="search"
           style={[

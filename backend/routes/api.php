@@ -142,6 +142,10 @@ $router->get('/courses', [CourseController::class, 'index'], $auth);
 $router->get('/courses/{id}', [CourseController::class, 'show'], $auth);
 $router->get('/courses/{id}/sections', [CourseController::class, 'sections'], $auth);
 $router->get('/courses/{id}/lessons', [CourseController::class, 'lessons'], $auth);
+// Section deletion is transactional + dependency-aware (see the controller).
+// POST (not the generic DELETE /api/{table}) so the dependency chain, the
+// cross-course guard and the ownership check are all enforced in one place.
+$router->post('/courses/{id}/sections/{section_id}/delete', [CourseController::class, 'deleteSection'], $auth + ['role' => ['doctor', 'admin', 'super_admin']]);
 $router->get('/courses/{id}/progress', [CourseController::class, 'progress'], $auth);
 $router->post('/courses', [CourseController::class, 'create'], $auth + ['role' => ['doctor', 'admin', 'super_admin']]);
 $router->patch('/courses/{id}', [CourseController::class, 'update'], $auth + ['role' => ['doctor', 'admin', 'super_admin']]);
@@ -166,7 +170,9 @@ $router->post('/credits/allocate', [CreditController::class, 'allocate'], $auth 
 $router->post('/credits/refund', [CreditController::class, 'refund'], $auth + ['role' => ['admin', 'super_admin']]);
 $router->post('/credits/revoke', [CreditController::class, 'revoke'], $auth + ['role' => ['admin', 'super_admin']]);
 $router->post('/credits/bulk-allocate', [CreditController::class, 'bulkAllocate'], $auth + ['role' => ['admin', 'super_admin']]);
-$router->get('/credits/doctor/{id}', [CreditController::class, 'doctorEarnings'], $auth + ['role' => ['admin', 'super_admin']]);
+// EARNINGS RETIRED: GET /credits/doctor/{id} (doctor earnings dashboard) is no
+// longer served. Credit balances/ledgers remain available through
+// /credits/me, /credits/transactions and the ledger/analytics endpoints.
 
 // ---- Redeem Codes (Credit Redeem Code — credit top-up ONLY) -----------------
 $router->post('/redeem-codes',              [RedeemCodeController::class, 'create'], $auth + ['role' => ['super_admin']]);
@@ -301,7 +307,9 @@ $router->get('/analytics/trash-list', [AnalyticsController::class, 'trashList'],
 $router->get('/analytics/trash-stats', [AnalyticsController::class, 'trashStats'], $auth + ['role' => ['admin', 'super_admin']]);
 $router->get('/analytics/deletion-stats', [AnalyticsController::class, 'deletionStats'], $auth + ['role' => ['admin', 'super_admin']]);
 $router->get('/analytics/archive-analytics', [AnalyticsController::class, 'archiveAnalytics'], $auth + ['role' => ['admin', 'super_admin']]);
-$router->get('/analytics/archived-courses', [AnalyticsController::class, 'archivedCourses'], $auth + ['role' => ['admin', 'super_admin']]);
+// The Doctor dashboard quick action opens this list, so doctors are allowed —
+// scoped to their OWN archived courses by the controller (staff see all).
+$router->get('/analytics/archived-courses', [AnalyticsController::class, 'archivedCourses'], $auth + ['role' => ['doctor', 'admin', 'super_admin']]);
 $router->get('/analytics/course-delete-stats/{id}', [AnalyticsController::class, 'courseDeleteStats'], $auth); // owner-aware: admins + the owning doctor
 $router->get('/analytics/risky-devices', [AnalyticsController::class, 'riskyDevices'], $auth + ['role' => ['admin', 'super_admin']]);
 // Recent security events with server-side user-identity join (Security
@@ -309,9 +317,9 @@ $router->get('/analytics/risky-devices', [AnalyticsController::class, 'riskyDevi
 $router->get('/analytics/security-events', [AnalyticsController::class, 'securityEvents'], $auth + ['role' => ['admin', 'super_admin']]);
 $router->get('/analytics/video-asset-usage', [AnalyticsController::class, 'videoAssetUsage'], $auth); // ownership enforced in controller (doctors may query their own assets)
 $router->post('/analytics/db-audit', [AnalyticsController::class, 'dbAudit'], $auth + ['role' => ['admin', 'super_admin']]);
-$router->post('/analytics/recalculate-earnings/{doctorId}', [AnalyticsController::class, 'recalculateEarnings'], $auth + ['role' => ['admin', 'super_admin']]);
-$router->post('/analytics/reset-doctor-earnings/{doctorId}', [AnalyticsController::class, 'resetDoctorEarnings'], $auth + ['role' => ['admin', 'super_admin']]);
-$router->post('/analytics/reset-platform-earnings', [AnalyticsController::class, 'resetPlatformEarnings'], $auth + ['role' => ['super_admin']]);
+// EARNINGS RETIRED: recalculate/reset doctor + platform earnings endpoints are
+// no longer routed. Historical earnings rows are retained (see
+// backend/docs/EARNINGS_FEATURE_RETIREMENT.md); nothing is deleted.
 
 // ---- Enrollment statistics (Admin + Super Admin, read-only) ------------------
 // Two explicitly separate metrics: `unique_students` (distinct accounts) and
@@ -346,8 +354,8 @@ $router->post('/rpc/get-email-by-phone', [RpcController::class, 'getEmailByPhone
 // Doctor RPCs
 $router->get('/rpc/doctor-activity-stats/{doctorId}', [RpcController::class, 'doctorActivityStats'], $auth + ['role' => ['doctor', 'admin', 'super_admin']]);
 $router->get('/rpc/doctor-credit-transactions/{doctorId}', [RpcController::class, 'doctorCreditTransactions'], $auth + ['role' => ['doctor', 'admin', 'super_admin']]);
-$router->get('/rpc/doctor-earnings-dashboard/{doctorId}', [RpcController::class, 'doctorEarningsDashboard'], $auth + ['role' => ['doctor', 'admin', 'super_admin']]);
-$router->post('/rpc/doctor-student-profile', [RpcController::class, 'doctorStudentProfile'], $auth + ['role' => ['doctor']]);
+// EARNINGS RETIRED: the doctor earnings dashboard RPC and its student-financial
+// profile modal endpoint are no longer routed (feature removed end-to-end).
 
 // Course RPCs
 $router->post('/rpc/create-course-audited', [RpcController::class, 'createCourseAudited'], $auth + ['role' => ['doctor', 'admin', 'super_admin']]);
@@ -355,7 +363,8 @@ $router->post('/rpc/update-course-audited', [RpcController::class, 'updateCourse
 $router->post('/rpc/permanently-delete-course', [RpcController::class, 'permanentlyDeleteCourse'], $auth + ['role' => ['admin', 'super_admin']]);
 
 // Doctor pricing RPCs
-$router->post('/rpc/set-doctor-credit-price', [RpcController::class, 'setDoctorCreditPrice'], $auth + ['role' => ['admin', 'super_admin']]);
+// EARNINGS RETIRED: /rpc/set-doctor-credit-price (the admin per-doctor credit
+// price editor that lived in the earnings console) is no longer routed.
 $router->post('/rpc/set-enrollment-assigned-price', [RpcController::class, 'setEnrollmentAssignedPrice'], $auth + ['role' => ['doctor', 'admin', 'super_admin']]);
 
 // Video provider permissions RPCs

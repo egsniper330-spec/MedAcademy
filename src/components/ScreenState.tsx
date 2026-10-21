@@ -114,7 +114,7 @@ interface FeatureUnavailableStateProps {
  * presented as one. The historical bug was a generic "Save failed" toast when a
  * doctor tried to use a disabled capability — which reads as "the app is
  * broken" instead of "an administrator disabled this". Every disabled-capability
- * surface (course creation, video provider/Plyr assignment, doctor earnings, …)
+ * surface (course creation, video provider/Plyr assignment, …)
  * renders THIS component so the copy, colour and layout stay consistent and the
  * state is unmistakably a deliberate configuration, not a failure.
  *

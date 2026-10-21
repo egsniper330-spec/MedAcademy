@@ -150,48 +150,28 @@ check('course.lectures → المحاضرات', ar['course.lectures'] === 'ال�
 check('files and lessons have separate plural keys',
   'lesson.fileCount.few' in ar && 'home.lessonsCount.few' in ar);
 
-/* ────────── 5b. earnings / credit vocabulary (doctor + Super Admin) ─────── */
+/* ────────── 5b. credit vocabulary + retired earnings copy ─────────────── */
 
-// The standalone earnings screens reuse the embedded tab's vocabulary instead
-// of inventing a second word for the same money concept: "Earnings" = الأرباح،
-// "Revenue" = الإيرادات/الإيراد، "Credits" = الرصيد، "Course" = الدورة.
-console.log('\nearnings vocabulary');
-const EARNINGS_PINNED = {
-  'drProfile.earnings.totalRevenue': 'إجمالي الإيرادات',
-  'drProfile.earnings.thisMonth': 'هذا الشهر',
-  'drProfile.earnings.paidStudents': 'الطلاب الدافعون',
-  'drProfile.earnings.transactions': 'المعاملات',
-  'drProfile.earnings.timeline': 'الخط الزمني للإيرادات',
-  'drProfile.earnings.byCourse': 'الإيرادات حسب الدورة',
-  'drProfile.earnings.colCourse': 'الدورة',
-  'drProfile.earnings.colRevenue': 'الإيراد',
-  'drProfile.earnings.income': 'إيراد',
-  'drProfile.earnings.deduction': 'خصم',
-  'drProfile.tx.purchase': 'شراء',
-  'drProfile.tx.suspension_refund': 'استرداد',
-  'saEarnings.readOnly': 'عرض فقط',
-  'saEarnings.dashboard': 'لوحة الأرباح',
-  'saEarnings.creditActivity': 'نشاط الرصيد',
-  'saEarnings.kpi.remainingCredits': 'الرصيد المتبقي',
-  'saEarnings.kpi.coursesSold': 'الدورات المبيعة',
-  'saEarnings.creditTx.consumption': 'استهلاك',
+// The earnings feature has been REMOVED from the product. Its dictionary
+// entries are gone with it (verified below), while the retained credit/revenue
+// vocabulary must keep the same Arabic wording it always had.
+console.log('\ncredit vocabulary / earnings removal');
+const CREDIT_PINNED = {
+  'nav.credits': 'الرصيد',
+  'nav.revenueAnalytics': 'تحليلات الإيرادات',
 };
-for (const [key, expected] of Object.entries(EARNINGS_PINNED)) {
+for (const [key, expected] of Object.entries(CREDIT_PINNED)) {
   check(`${key} → ${expected}`, ar[key] === expected);
 }
 
-// "Earnings" (the section) and "Revenue" (the money) must not collapse into the
-// same Arabic word — they are different concepts on the same screen.
-check('Earnings (الأرباح) is distinct from Revenue (الإيرادات)',
-  ar['nav.earnings'] === 'الأرباح' && ar['drProfile.earnings.totalRevenue'] === 'إجمالي الإيرادات');
-
-// A transaction type and its reversal type must stay distinguishable, and an
-// unknown enum value must never borrow another type's translation.
-check('refund (استرداد) and purchase (شراء) stay distinct',
-  ar['drProfile.tx.suspension_refund'] !== ar['drProfile.tx.purchase']);
-check('no credit/earnings value is left in Latin script except the EGP code',
-  ['saEarnings.creditEarnings', 'saEarnings.ledgerSummary', 'saEarnings.lastLogin']
-    .every((k) => /[\u0600-\u06FF]/.test(ar[k])));
+check('the earnings nav label was removed from both dictionaries',
+  !('nav.earnings' in ar) && !('nav.earnings' in en));
+check('no embedded earnings-tab copy survives',
+  !Object.keys(ar).some((k) => k.startsWith('drProfile.earnings.'))
+  && !Object.keys(en).some((k) => k.startsWith('drProfile.earnings.')));
+check('no standalone earnings-screen copy survives',
+  !Object.keys(ar).some((k) => k.startsWith('saEarnings.'))
+  && !Object.keys(en).some((k) => k.startsWith('saEarnings.')));
 
 /* ────────────────────── 6. Arabic plural correctness ───────────────────── */
 

@@ -9,13 +9,13 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useFocusEffect } from 'expo-router';
 import {
   ActivityIndicator, Animated, FlatList, KeyboardAvoidingView, Modal, Pressable,
-  ScrollView, Text, TextInput, useColorScheme, useWindowDimensions, View,
+  ScrollView, Text, TextInput, useColorScheme, useWindowDimensions, View, I18nManager,
 } from 'react-native';
 import { useFadeAnim } from '@/lib/motion';
 import { Image } from 'expo-image';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import {
-  ArrowLeft, ArrowDown, ArrowUp, Archive, BookOpen, Check, CheckCircle, ChevronDown,
+  ArrowLeft, ArrowRight, ChevronLeft, ArrowDown, ArrowUp, Archive, BookOpen, Check, CheckCircle, ChevronDown,
   ChevronRight, Clock, Copy, GripVertical, Layers, MoreHorizontal, Pencil, Phone, Plus, RefreshCw, Save, Settings,
   Trash2, Upload, Bookmark, X, FileUp, MessageCircle, Send, Video, FileText,
 } from 'lucide-react-native';
@@ -51,6 +51,8 @@ import { PermissionRationaleModal } from '@/components/PermissionRationaleModal'
 import { useFeatureFlags } from '@/lib/featureFlags';
 import { FeatureUnavailableState } from '@/components/ScreenState';
 import { isFeatureEnabled } from '@/lib/featureFlags';
+import { sectionDeleteErrorKey } from '@/lib/sectionDelete';
+import { useTranslation } from '@/lib/i18n';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 type Tab = 'info' | 'structure' | 'settings';
@@ -69,27 +71,28 @@ function savedLabel(date: Date): string {
   return `✓ Last saved: ${date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true })}`;
 }
 
-/** Maps internal video_type values to user-friendly display labels. */
-function lessonTypeLabel(videoType: string | undefined): string {
+/** Translator signature (resolved at render, never at module load). */
+type Translate = (key: string, params?: Record<string, string | number>) => string;
+
+/** Maps internal video_type values to localized display labels. */
+function lessonTypeLabel(videoType: string | undefined, t: Translate): string {
   switch (videoType) {
-    case 'vdocipher':    return 'Video Lesson';
-    case 'youtube':      return 'Video Lesson';
-    case 'pdf':          return 'PDF Lesson';
-    case 'coming_soon':  return 'Coming Soon';
-    case 'text':         return 'Text Lesson';
-    default:             return 'Lesson';
+    case 'vdocipher':
+    case 'youtube':      return t('cb.lessonType.video');
+    case 'pdf':          return t('cb.lessonType.pdf');
+    case 'coming_soon':  return t('cb.lessonType.comingSoon');
+    case 'text':         return t('cb.lessonType.text');
+    default:             return t('cb.lessonType.lesson');
   }
 }
 
-/** Maps internal status values to user-friendly display labels. */
-function lessonStatusLabel(status: string | undefined): string {
+/** Maps internal status values to localized display labels. */
+function lessonStatusLabel(status: string | undefined, t: Translate): string {
   switch (status) {
-    case 'draft':      return 'Draft';
-    case 'published':  return 'Published';
-    case 'scheduled':  return 'Scheduled';
-    default:           return status
-      ? status.charAt(0).toUpperCase() + status.slice(1)
-      : 'Draft';
+    case 'published':  return t('courseStatus.published');
+    case 'scheduled':  return t('courseStatus.scheduled');
+    case 'draft':
+    default:           return t('courseStatus.draft');
   }
 }
 
@@ -144,6 +147,9 @@ export default function CourseBuilder() {
   const layout = useLayout();
   const insets = layout.insets;
   const isNarrow = screenWidth < 480;
+  const { t, tCount } = useTranslation();
+  const BackIcon = I18nManager.isRTL ? ArrowRight : ArrowLeft;
+  const ChevronForward = I18nManager.isRTL ? ChevronLeft : ChevronRight;
 
   const isNew = id === 'new';
 
@@ -182,6 +188,10 @@ export default function CourseBuilder() {
   const [archiveReason, setArchiveReason] = useState('');
   const [archiving, setArchiving] = useState(false);
   const [isArchived, setIsArchived] = useState(false);
+
+  // ── Section deletion: confirmation target + in-flight guard (no double submit)
+  const [deleteSectionTarget, setDeleteSectionTarget] = useState<any>(null);
+  const [deletingSection, setDeletingSection] = useState(false);
 
   // ── Dropdown options
   const [universities, setUniversities] = useState<any[]>([]);
@@ -296,7 +306,7 @@ export default function CourseBuilder() {
       setSections(data.sections ?? []);
       if (data.sections?.length) setExpandedSections(new Set([data.sections[0].id]));
     } catch (e) {
-      showToast({ type: 'error', message: friendlyError(e, 'Failed to load course.') });
+      showToast({ type: 'error', message: friendlyError(e, t('cb.toast.loadFailed')) });
     }
     setLoading(false);
   }, [courseId]);
@@ -324,7 +334,7 @@ export default function CourseBuilder() {
   // ── Create course on first interaction if new
   const ensureCourse = async (): Promise<string> => {
     if (courseId) return courseId;
-    if (!title.trim()) throw new Error('Enter a course title first.');
+    if (!title.trim()) throw new Error(t('cb.issue.titleFirst'));
     const course = await createCourse({
       title: title.trim(),
       description: fullDesc,
@@ -357,7 +367,7 @@ export default function CourseBuilder() {
     try {
       cid = await ensureCourse();
     } catch (e) {
-      showToast({ type: 'error', message: friendlyError(e, 'Save course first.') });
+      showToast({ type: 'error', message: friendlyError(e, t('cb.toast.saveFirst')) });
       return;
     }
 
@@ -366,9 +376,9 @@ export default function CourseBuilder() {
       const mimeType = asset.mimeType ?? 'image/jpeg';
       const publicUrl = await uploadCourseCover(cid, asset.uri, mimeType, coverImageUrl || undefined);
       setCoverImageUrl(publicUrl);
-      showToast({ type: 'success', message: 'Cover image updated.' });
+      showToast({ type: 'success', message: t('cb.toast.coverUpdated') });
     } catch (e) {
-      showToast({ type: 'error', message: friendlyError(e, 'Cover upload failed.') });
+      showToast({ type: 'error', message: friendlyError(e, t('cb.toast.coverUploadFailed')) });
     }
     setUploadingCover(false);
   };
@@ -379,9 +389,9 @@ export default function CourseBuilder() {
     try {
       await removeCourseCover(courseId, coverImageUrl);
       setCoverImageUrl('');
-      showToast({ type: 'success', message: 'Cover image removed.' });
+      showToast({ type: 'success', message: t('cb.toast.coverRemoved') });
     } catch (e) {
-      showToast({ type: 'error', message: friendlyError(e, 'Remove cover failed.') });
+      showToast({ type: 'error', message: friendlyError(e, t('cb.toast.removeCoverFailed')) });
     }
     setUploadingCover(false);
   };
@@ -394,10 +404,10 @@ export default function CourseBuilder() {
       await archiveCourse(courseId, profile.id, profile.role, archiveReason.trim() || undefined);
       setIsArchived(true);
       setShowArchiveModal(false);
-      showToast({ type: 'success', message: 'Course archived.' });
+      showToast({ type: 'success', message: t('cb.toast.archived') });
       router.back();
     } catch (e) {
-      showToast({ type: 'error', message: friendlyError(e, 'Archive failed.') });
+      showToast({ type: 'error', message: friendlyError(e, t('cb.toast.archiveFailed')) });
     }
     setArchiving(false);
   };
@@ -406,12 +416,12 @@ export default function CourseBuilder() {
   const handleAddSection = async () => {
     try {
       const cid = await ensureCourse();
-      const s = await createSection(cid, 'New Section', sections.length);
+      const s = await createSection(cid, t('cb.newSectionName'), sections.length);
       setSections(prev => [...prev, { ...s, lessons: [] }]);
       setExpandedSections(prev => new Set([...prev, s.id]));
       setRenamingSection(s.id);
-      setRenameValue('New Section');
-    } catch (e) { showToast({ type: 'error', message: friendlyError(e, 'Failed to add section.') }); }
+      setRenameValue(t('cb.newSectionName'));
+    } catch (e) { showToast({ type: 'error', message: friendlyError(e, t('cb.toast.addSectionFailed')) }); }
   };
 
   const handleRenameSection = async (sectionId: string) => {
@@ -419,15 +429,59 @@ export default function CourseBuilder() {
     try {
       await updateSection(sectionId, { title: renameValue.trim() });
       setSections(prev => prev.map(s => s.id === sectionId ? { ...s, title: renameValue.trim() } : s));
-    } catch (e) { showToast({ type: 'error', message: friendlyError(e, 'Failed to rename.') }); }
+    } catch (e) { showToast({ type: 'error', message: friendlyError(e, t('cb.toast.renameFailed')) }); }
     setRenamingSection(null);
   };
 
-  const handleDeleteSection = async (sectionId: string) => {
+  /** Open the confirmation dialog. Deleting is NEVER immediate: a section can
+   *  carry lessons (and their materials/progress), so the doctor always sees
+   *  exactly what will be removed first. */
+  const requestDeleteSection = (section: any) => {
+    if (deletingSection) return;
+    setSectionMoreId(null);
+    setDeleteSectionTarget(section);
+  };
+
+  const handleDeleteSection = async () => {
+    const target = deleteSectionTarget;
+    if (!target || deletingSection) return;
+    if (!courseId) {
+      showToast({ type: 'error', message: t('cb.toast.saveFirst') });
+      return;
+    }
+    setDeletingSection(true);
     try {
-      await deleteSection(sectionId);
-      setSections(prev => prev.filter(s => s.id !== sectionId));
-    } catch (e) { showToast({ type: 'error', message: friendlyError(e, 'Failed to delete section.') }); }
+      // /courses/{id}/sections/{section_id}/delete — one transaction, authorized
+      // server-side, dependency-aware. The UI is updated ONLY on success.
+      const result = await deleteSection(target.id, courseId);
+      setSections(prev => prev.filter(s => s.id !== target.id));
+      setExpandedSections(prev => {
+        const next = new Set(prev);
+        next.delete(target.id);
+        return next;
+      });
+      setDeleteSectionTarget(null);
+      showToast({
+        type: 'success',
+        message: result?.removed_lessons
+          ? t('cb.toast.deleteSectionSuccessWithLessons', {
+              title: target.title,
+              lessons: tCount('drCourses.lessonCount', result.removed_lessons),
+            })
+          : t('cb.toast.deleteSectionSuccess', { title: target.title }),
+      });
+      // Re-read the course so counts/order come from the server, never a
+      // locally-guessed structure (a failed delete leaves everything as-is).
+      await loadCourse();
+    } catch (e: any) {
+      const key = sectionDeleteErrorKey(e?.httpStatus);
+      showToast({
+        type: 'error',
+        message: key ? t(key) : friendlyError(e, t('cb.toast.deleteSectionFailed')),
+      });
+    } finally {
+      setDeletingSection(false);
+    }
   };
 
   const moveSectionUp = async (idx: number) => {
@@ -454,15 +508,15 @@ export default function CourseBuilder() {
       const orderIndex = section?.lessons?.length ?? 0;
       const lesson = await createLesson({
         section_id: sectionId, course_id: cid,
-        title: 'New Lesson', order_index: orderIndex,
+        title: t('cb.newLessonName'), order_index: orderIndex,
         video_type: 'vdocipher', status: 'draft',
       });
       setSections(prev => prev.map(s =>
         s.id === sectionId ? { ...s, lessons: [...(s.lessons ?? []), lesson] } : s
       ));
       setRenamingLesson(lesson.id);
-      setRenameValue('New Lesson');
-    } catch (e) { showToast({ type: 'error', message: friendlyError(e, 'Failed to add lesson.') }); }
+      setRenameValue(t('cb.newLessonName'));
+    } catch (e) { showToast({ type: 'error', message: friendlyError(e, t('cb.toast.addLessonFailed')) }); }
   };
 
   const handleRenameLesson = async (lessonId: string, sectionId: string) => {
@@ -474,7 +528,7 @@ export default function CourseBuilder() {
           ? { ...s, lessons: s.lessons.map((l: any) => l.id === lessonId ? { ...l, title: renameValue.trim() } : l) }
           : s
       ));
-    } catch (e) { showToast({ type: 'error', message: friendlyError(e, 'Failed to rename.') }); }
+    } catch (e) { showToast({ type: 'error', message: friendlyError(e, t('cb.toast.renameFailed')) }); }
     setRenamingLesson(null);
   };
 
@@ -484,7 +538,7 @@ export default function CourseBuilder() {
       setSections(prev => prev.map(s =>
         s.id === sectionId ? { ...s, lessons: s.lessons.filter((l: any) => l.id !== lessonId) } : s
       ));
-    } catch (e) { showToast({ type: 'error', message: friendlyError(e, 'Failed to delete lesson.') }); }
+    } catch (e) { showToast({ type: 'error', message: friendlyError(e, t('cb.toast.deleteLessonFailed')) }); }
   };
 
   const handleDuplicateLesson = async (lessonId: string, sectionId: string) => {
@@ -494,8 +548,8 @@ export default function CourseBuilder() {
       setSections(prev => prev.map(s =>
         s.id === sectionId ? { ...s, lessons: [...(s.lessons ?? []), lesson] } : s
       ));
-      showToast({ type: 'success', message: 'Lesson duplicated.' });
-    } catch (e) { showToast({ type: 'error', message: friendlyError(e, 'Failed to duplicate.') }); }
+      showToast({ type: 'success', message: t('cb.toast.lessonDuplicated') });
+    } catch (e) { showToast({ type: 'error', message: friendlyError(e, t('cb.toast.duplicateFailed')) }); }
   };
 
   const moveLessonUp = async (lessonIdx: number, sectionId: string) => {
@@ -523,15 +577,15 @@ export default function CourseBuilder() {
   // ── Publish validation
   const getPublishIssues = () => {
     const issues: string[] = [];
-    if (!title.trim()) issues.push('Course title is required.');
+    if (!title.trim()) issues.push(t('cb.issue.titleRequired'));
     // Contact: when using default, the doctor's profile contact is used — no per-course check needed here.
     // When using custom, at least one custom field must be set.
     if (!useDefaultContact && !contactWhatsapp.trim() && !contactTelegram.trim() && !contactPhone.trim()) {
-      issues.push('At least one contact method (WhatsApp, Telegram, or Phone) is required.');
+      issues.push(t('cb.issue.contactRequired'));
     }
-    if (sections.length === 0) issues.push('At least one section is required.');
+    if (sections.length === 0) issues.push(t('cb.issue.sectionRequired'));
     sections.forEach(s => {
-      if ((s.lessons ?? []).length === 0) issues.push(`Section "${s.title}" has no lessons.`);
+      if ((s.lessons ?? []).length === 0) issues.push(t('cb.issue.sectionNoLessons', { title: s.title }));
     });
     const allLessons = sections.flatMap(s => s.lessons ?? []);
     allLessons.forEach(l => {
@@ -545,7 +599,7 @@ export default function CourseBuilder() {
         hasVideo = !!l.video_id || l.video_status === 'ready' || !!l.video_upload_id;
       }
       if (!hasVideo) {
-        issues.push(`Lesson "${l.title}" has no video.`);
+        issues.push(t('cb.issue.lessonNoVideo', { title: l.title }));
       }
     });
     return issues;
@@ -555,7 +609,7 @@ export default function CourseBuilder() {
     // Feature flag: doctor_course_publishing. UI reflection only — the server
     // refuses the publish itself (403 feature_disabled) when the flag is off.
     if (!isFeatureEnabled('doctor_course_publishing')) {
-      showToast({ type: 'error', message: 'Publishing is temporarily unavailable.' });
+      showToast({ type: 'error', message: t('cb.toast.publishingUnavailable') });
       return;
     }
     const freshData = courseId ? await getCourseById(courseId).catch(() => null) : null;
@@ -567,13 +621,13 @@ export default function CourseBuilder() {
 
     const getIssues = (sects: any[]) => {
       const issues: string[] = [];
-      if (!title.trim()) issues.push('Course title is required.');
+      if (!title.trim()) issues.push(t('cb.issue.titleRequired'));
       if (!freshUseDefault && !freshWhatsapp.trim() && !freshTelegram.trim() && !freshPhone.trim()) {
-        issues.push('At least one contact method (WhatsApp, Telegram, or Phone) is required.');
+        issues.push(t('cb.issue.contactRequired'));
       }
-      if (sects.length === 0) issues.push('At least one section is required.');
+      if (sects.length === 0) issues.push(t('cb.issue.sectionRequired'));
       sects.forEach(s => {
-        if ((s.lessons ?? []).length === 0) issues.push(`Section "${s.title}" has no lessons.`);
+        if ((s.lessons ?? []).length === 0) issues.push(t('cb.issue.sectionNoLessons', { title: s.title }));
       });
       sects.flatMap(s => s.lessons ?? []).forEach(l => {
         const vt = l.video_type ?? 'vdocipher';
@@ -585,7 +639,7 @@ export default function CourseBuilder() {
         } else {
           hasVideo = !!l.video_id || l.video_status === 'ready' || !!l.video_upload_id;
         }
-        if (!hasVideo) issues.push(`Lesson "${l.title}" has no video.`);
+        if (!hasVideo) issues.push(t('cb.issue.lessonNoVideo', { title: l.title }));
       });
       return issues;
     };
@@ -610,12 +664,12 @@ export default function CourseBuilder() {
       const result = await publishCourse(resolvedId);
       setStatus('published');
       const message = result.action === 'already_published'
-        ? 'Course already published. No new changes to publish.'
+        ? t('cb.toast.publishAlready')
         : result.action === 'updated'
-          ? 'Course updated and published successfully.'
-          : 'Course published successfully.';
+          ? t('cb.toast.publishUpdated')
+          : t('cb.toast.publishSuccess');
       showToast({ type: 'success', message });
-    } catch (e) { showToast({ type: 'error', message: friendlyError(e, 'Publish failed.') }); }
+    } catch (e) { showToast({ type: 'error', message: friendlyError(e, t('cb.toast.publishFailed')) }); }
     setPublishing(false);
   };
 
@@ -623,9 +677,9 @@ export default function CourseBuilder() {
     try {
       const cid = await ensureCourse();
       await updateCourse(cid, autoSaveFields);
-      showToast({ type: 'success', message: 'Course saved.' });
+      showToast({ type: 'success', message: t('cb.toast.courseSaved') });
       router.back();
-    } catch (e) { showToast({ type: 'error', message: friendlyError(e, 'Save failed.') }); }
+    } catch (e) { showToast({ type: 'error', message: friendlyError(e, t('cb.toast.saveFailed')) }); }
   };
 
   // ── Duplicate course
@@ -634,9 +688,9 @@ export default function CourseBuilder() {
     setDuplicating(true);
     try {
       const newId = await duplicateCourse(courseId, profile.id);
-      showToast({ type: 'success', message: 'Course duplicated! Opening copy…' });
+      showToast({ type: 'success', message: t('cb.toast.duplicated') });
       router.replace(`/(app)/course-builder/${newId}` as RelativePathString);
-    } catch (e) { showToast({ type: 'error', message: friendlyError(e, 'Duplication failed.') }); }
+    } catch (e) { showToast({ type: 'error', message: friendlyError(e, t('cb.toast.duplicateFailed')) }); }
     setDuplicating(false);
   };
 
@@ -646,10 +700,10 @@ export default function CourseBuilder() {
     setSavingTemplate(true);
     try {
       await saveCourseAsTemplate(courseId, profile.id, templateTitle.trim());
-      showToast({ type: 'success', message: 'Saved as template!' });
+      showToast({ type: 'success', message: t('cb.toast.savedTemplate') });
       setShowSaveTemplate(false);
       setTemplateTitle('');
-    } catch (e) { showToast({ type: 'error', message: friendlyError(e, 'Save template failed.') }); }
+    } catch (e) { showToast({ type: 'error', message: friendlyError(e, t('cb.toast.templateFailed')) }); }
     setSavingTemplate(false);
   };
 
@@ -661,8 +715,8 @@ export default function CourseBuilder() {
       setCourseId(newCourseId);
       setShowStartModal(false);
       await loadCourse();
-      showToast({ type: 'success', message: 'Course created from template.' });
-    } catch (e) { showToast({ type: 'error', message: friendlyError(e, 'Failed to start from template.') }); }
+      showToast({ type: 'success', message: t('cb.toast.fromTemplate') });
+    } catch (e) { showToast({ type: 'error', message: friendlyError(e, t('cb.toast.templateStartFailed')) }); }
   };
 
   // ── Bulk import lessons from files
@@ -683,8 +737,8 @@ export default function CourseBuilder() {
       setSections(prev => prev.map(s =>
         s.id === sectionId ? { ...s, lessons: [...(s.lessons ?? []), ...newLessons] } : s
       ));
-      showToast({ type: 'success', message: `${newLessons.length} lessons created.` });
-    } catch (e) { showToast({ type: 'error', message: friendlyError(e, 'Bulk import failed.') }); }
+      showToast({ type: 'success', message: t('cb.toast.lessonsCreated', { count: newLessons.length }) });
+    } catch (e) { showToast({ type: 'error', message: friendlyError(e, t('cb.toast.bulkImportFailed')) }); }
   };
 
   // ── Filter structure
@@ -720,14 +774,14 @@ export default function CourseBuilder() {
         }}>
           <Pressable onPress={() => router.back()} hitSlop={8}
             style={[neuFlatStyle(isDark), { width: 40, height: 40, borderRadius: 12, alignItems: 'center', justifyContent: 'center', flexShrink: 0 }]}>
-            <ArrowLeft size={20} color={c.text} opacity={0.6} />
+            <BackIcon size={20} color={c.text} opacity={0.6} />
           </Pressable>
-          <Text style={{ fontSize: 16, fontWeight: '800', color: c.text }}>New Course</Text>
+          <Text style={{ fontSize: 16, fontWeight: '800', color: c.text }}>{t('cb.newCourse')}</Text>
         </View>
         <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: layout.screenPx }}>
           <FeatureUnavailableState
-            title="Course creation is unavailable"
-            description="An administrator has turned off course creation. Existing courses can still be opened and edited. This becomes available again as soon as it is re-enabled."
+            title={t('cb.unavailableTitle')}
+            description={t('cb.unavailableDesc')}
           />
         </View>
       </View>
@@ -750,18 +804,18 @@ export default function CourseBuilder() {
         <Pressable onPress={() => router.back()}
           hitSlop={8}
           style={[neuFlatStyle(isDark), { width: 40, height: 40, borderRadius: 12, alignItems: 'center', justifyContent: 'center', flexShrink: 0 }]}>
-          <ArrowLeft size={20} color={c.text} opacity={0.6} />
+          <BackIcon size={20} color={c.text} opacity={0.6} />
         </Pressable>
 
         {/* Title + saved flash */}
         <View style={{ flex: 1, minWidth: 0 }}>
           <Text style={{ fontSize: 16, fontWeight: '800', color: c.text }} numberOfLines={1}>
-            {title.trim() || 'New Course'}
+            {title.trim() || t('cb.newCourse')}
           </Text>
           {savedVisible && (
             <Animated.View style={{ position: 'absolute', bottom: -16, left: 0, ...savedFade.style, flexDirection: 'row', alignItems: 'center', gap: 3 }}>
               <Check size={10} color="#16A34A" />
-              <Text style={{ fontSize: 10, color: '#16A34A', fontWeight: '600' }}>Saved</Text>
+              <Text style={{ fontSize: 10, color: '#16A34A', fontWeight: '600' }}>{t('cb.saved')}</Text>
             </Animated.View>
           )}
         </View>
@@ -769,7 +823,7 @@ export default function CourseBuilder() {
         {/* ── Archived badge ── */}
         {isArchived && (
           <View style={{ paddingHorizontal: 10, paddingVertical: 6, borderRadius: 12, backgroundColor: '#D9770620', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-            <Text style={{ fontSize: 11, fontWeight: '800', color: '#D97706' }}>ARCHIVED</Text>
+            <Text style={{ fontSize: 11, fontWeight: '800', color: '#D97706' }}>{t('courseStatus.archived')}</Text>
           </View>
         )}
 
@@ -797,7 +851,7 @@ export default function CourseBuilder() {
             <Pressable onPress={handleSaveAndExit}
               style={[neuFlatStyle(isDark), { paddingHorizontal: 14, paddingVertical: 11, borderRadius: 12, flexDirection: 'row', alignItems: 'center', gap: 6, height: 44 }]}>
               <Save size={15} color={c.primary} />
-              <Text style={{ fontSize: 13, fontWeight: '700', color: c.primary }}>Save</Text>
+              <Text style={{ fontSize: 13, fontWeight: '700', color: c.primary }}>{t('common.save')}</Text>
             </Pressable>
             <Pressable onPress={handlePublish} disabled={publishing || !isFeatureEnabled('doctor_course_publishing')}
               style={{ paddingHorizontal: 14, paddingVertical: 11, borderRadius: 12, height: 44, opacity: isFeatureEnabled('doctor_course_publishing') ? 1 : 0.5,
@@ -805,7 +859,7 @@ export default function CourseBuilder() {
                 flexDirection: 'row', alignItems: 'center', gap: 6 }}>
               {publishing ? <ActivityIndicator size="small" color="#fff" /> : <Check size={15} color="#fff" />}
               <Text style={{ fontSize: 13, fontWeight: '700', color: '#fff' }}>
-                {status === 'published' ? 'Published' : 'Publish'}
+                {status === 'published' ? t('courseStatus.published') : t('cb.publish')}
               </Text>
             </Pressable>
           </View>
@@ -826,7 +880,7 @@ export default function CourseBuilder() {
                 ? <ActivityIndicator size="small" color="#fff" />
                 : <Check size={14} color="#fff" />}
               <Text style={{ fontSize: 12, fontWeight: '700', color: '#fff' }}>
-                {status === 'published' ? 'Published' : 'Publish'}
+                {status === 'published' ? t('courseStatus.published') : t('cb.publish')}
               </Text>
             </Pressable>
             {/* Overflow "⋯" — only shown when there are extra actions */}
@@ -850,31 +904,31 @@ export default function CourseBuilder() {
             }]}>
               <Text style={{ fontSize: 11, fontWeight: '700', ...mutedTextStyle(c, 0.4),
                 paddingHorizontal: 14, paddingTop: 8, paddingBottom: 4, textTransform: 'uppercase', letterSpacing: 0.8 }}>
-                More Actions
+                {t('cb.moreActions')}
               </Text>
               {/* Duplicate */}
               <Pressable onPress={() => { setShowOverflowMenu(false); handleDuplicateCourse(); }}
                 disabled={duplicating}
                 style={{ flexDirection: 'row', alignItems: 'center', gap: 14, paddingHorizontal: 14, paddingVertical: 14, borderRadius: 14 }}>
                 <Copy size={20} color={c.text} opacity={0.65} />
-                <Text style={{ fontSize: 15, fontWeight: '600', color: c.text, flex: 1 }} numberOfLines={1}>Duplicate Course</Text>
+                <Text style={{ fontSize: 15, fontWeight: '600', color: c.text, flex: 1 }} numberOfLines={1}>{t('cb.duplicateCourse')}</Text>
               </Pressable>
               {/* Save as Template */}
               <Pressable onPress={() => { setShowOverflowMenu(false); setTemplateTitle(title); setShowSaveTemplate(true); }}
                 style={{ flexDirection: 'row', alignItems: 'center', gap: 14, paddingHorizontal: 14, paddingVertical: 14, borderRadius: 14 }}>
                 <Bookmark size={20} color={c.text} opacity={0.65} />
-                <Text style={{ fontSize: 15, fontWeight: '600', color: c.text, flex: 1 }} numberOfLines={1}>Save as Template</Text>
+                <Text style={{ fontSize: 15, fontWeight: '600', color: c.text, flex: 1 }} numberOfLines={1}>{t('cb.saveAsTemplate')}</Text>
               </Pressable>
               {/* Archive */}
               <Pressable onPress={() => { setShowOverflowMenu(false); setShowArchiveModal(true); }}
                 style={{ flexDirection: 'row', alignItems: 'center', gap: 14, paddingHorizontal: 14, paddingVertical: 14, borderRadius: 14 }}>
                 <Archive size={20} color="#D97706" opacity={0.9} />
-                <Text style={{ fontSize: 15, fontWeight: '600', color: '#D97706', flex: 1 }} numberOfLines={1}>Archive Course</Text>
+                <Text style={{ fontSize: 15, fontWeight: '600', color: '#D97706', flex: 1 }} numberOfLines={1}>{t('cb.archiveCourse')}</Text>
               </Pressable>
               {/* Dismiss */}
               <Pressable onPress={() => setShowOverflowMenu(false)}
                 style={{ alignItems: 'center', paddingVertical: 14, marginTop: 4, borderTopWidth: 1, borderColor: `${c.text}12` }}>
-                <Text style={{ fontSize: 14, fontWeight: '600', ...mutedTextStyle(c, 0.45) }}>Cancel</Text>
+                <Text style={{ fontSize: 14, fontWeight: '600', ...mutedTextStyle(c, 0.45) }}>{t('common.cancel')}</Text>
               </Pressable>
             </View>
           </Pressable>
@@ -884,9 +938,9 @@ export default function CourseBuilder() {
       {/* ── Tab Bar ── */}
       <View style={{ flexDirection: 'row', paddingHorizontal: layout.screenPx, gap: 8, marginBottom: 4 }}>
         {([
-          { key: 'info', label: 'Info', icon: BookOpen },
-          { key: 'structure', label: 'Structure', icon: Layers },
-          { key: 'settings', label: 'Settings', icon: Settings },
+          { key: 'info', label: t('cb.tab.info'), icon: BookOpen },
+          { key: 'structure', label: t('cb.tab.structure'), icon: Layers },
+          { key: 'settings', label: t('cb.tab.settings'), icon: Settings },
         ] as { key: Tab; label: string; icon: any }[]).map(({ key, label, icon: Icon }) => (
           <Pressable key={key} onPress={() => setTab(key)}
             style={[
@@ -913,7 +967,7 @@ export default function CourseBuilder() {
               doctors routinely overlooked it. It is the decision that gates
               student visibility, so it now appears first. Same two values and
               the same save payload — placement only. */}
-          <Field label="Course Status">
+          <Field label={t('cb.field.courseStatus')}>
             <View style={{ flexDirection: 'row', gap: 10 }}>
               {(['draft', 'published'] as const).map(s => (
                 <Pressable key={s} onPress={() => setStatus(s)}
@@ -921,33 +975,35 @@ export default function CourseBuilder() {
                     status === s ? neuPressedStyle(isDark) : neuFlatStyle(isDark),
                     { flex: 1, paddingVertical: 12, borderRadius: 12, alignItems: 'center' },
                   ]}>
-                  <Text style={{ fontSize: 14, fontWeight: '700', color: status === s ? c.primary : c.text, opacity: status === s ? 1 : 0.5, textTransform: 'capitalize' }}>{s}</Text>
+                  <Text style={{ fontSize: 14, fontWeight: '700', color: status === s ? c.primary : c.text, opacity: status === s ? 1 : 0.5 }}>
+                    {s === 'published' ? t('courseStatus.published') : t('courseStatus.draft')}
+                  </Text>
                 </Pressable>
               ))}
             </View>
             <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.45), marginTop: 6 }}>
-              Draft keeps this course hidden from students. Published makes it visible in Explore and to enrolled students.
+              {t('cb.statusHelp')}
             </Text>
           </Field>
 
           {/* Title */}
-          <Field label="Course Title *">
-            <NeuInput value={title} onChangeText={setTitle} placeholder="e.g. Clinical Pharmacology" isDark={isDark} c={c} />
+          <Field label={t('cb.field.title')}>
+            <NeuInput value={title} onChangeText={setTitle} placeholder={t('cb.field.titlePlaceholder')} isDark={isDark} c={c} />
           </Field>
 
           {/* Short description */}
-          <Field label="Short Description *">
-            <NeuInput value={shortDesc} onChangeText={setShortDesc} placeholder="One-line summary shown in listings" isDark={isDark} c={c} multiline />
+          <Field label={t('cb.field.shortDesc')}>
+            <NeuInput value={shortDesc} onChangeText={setShortDesc} placeholder={t('cb.field.shortDescPlaceholder')} isDark={isDark} c={c} multiline />
           </Field>
 
           {/* Full description */}
-          <Field label="Full Description *">
-            <NeuInput value={fullDesc} onChangeText={setFullDesc} placeholder="Detailed course description, objectives, outcomes…"
+          <Field label={t('cb.field.fullDesc')}>
+            <NeuInput value={fullDesc} onChangeText={setFullDesc} placeholder={t('cb.field.fullDescPlaceholder')}
               isDark={isDark} c={c} multiline style={{ minHeight: 100 }} />
           </Field>
 
           {/* Course Cover — single optional image */}
-          <Field label="Course Cover (Optional)">
+          <Field label={t('cb.field.cover')}>
             <CourseCoverSection
               uri={coverImageUrl}
               uploading={uploadingCover}
@@ -959,34 +1015,36 @@ export default function CourseBuilder() {
           </Field>
 
           {/* University */}
-          <Field label="University">
+          <Field label={t('cb.field.university')}>
             <PickerRow
               value={universityId} options={universities.map(u => ({ value: u.id, label: u.name }))}
-              placeholder="Select university" onChange={v => { setUniversityId(v); setFacultyId(''); }} isDark={isDark} c={c}
+              placeholder={t('cb.selectUniversity')} onChange={v => { setUniversityId(v); setFacultyId(''); }} isDark={isDark} c={c}
             />
           </Field>
 
           {/* Faculty */}
           {faculties.length > 0 && (
-            <Field label="Faculty">
+            <Field label={t('cb.field.faculty')}>
               <PickerRow
                 value={facultyId} options={faculties.map(f => ({ value: f.id, label: f.name }))}
-                placeholder="Select faculty" onChange={setFacultyId} isDark={isDark} c={c}
+                placeholder={t('cb.selectFaculty')} onChange={setFacultyId} isDark={isDark} c={c}
               />
             </Field>
           )}
 
           {/* Language */}
-          <Field label="Language">
+          <Field label={t('cb.field.language')}>
             <PickerRow value={language}
               options={LANGUAGES.map(l => ({ value: l, label: l }))}
-              placeholder="Language" onChange={setLanguage} isDark={isDark} c={c} />
+              placeholder={t('cb.field.language')} onChange={setLanguage} isDark={isDark} c={c} />
           </Field>
 
           {/* Price (EGP) */}
-          <Field label="Course Price (EGP) *">
+          <Field label={t('cb.field.price')}>
             <View style={[neuPressedStyle(isDark), { borderRadius: 12, flexDirection: 'row', alignItems: 'center', paddingHorizontal: 14 }]}>
-              <Text style={{ fontSize: 14, fontWeight: '700', color: c.primary, marginRight: 8 }}>EGP</Text>
+              {/* marginEnd (not marginRight) so the currency code keeps its gap
+                  when the row is mirrored for Arabic. */}
+              <Text style={{ fontSize: 14, fontWeight: '700', color: c.primary, marginEnd: 8 }}>EGP</Text>
               <TextInput
                 value={priceEgp}
                 onChangeText={v => setPriceEgp(v.replace(/[^0-9.]/g, ''))}
@@ -997,14 +1055,14 @@ export default function CourseBuilder() {
               />
               {parseFloat(priceEgp) === 0 || !priceEgp ? (
                 <View style={{ backgroundColor: '#16A34A22', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 4 }}>
-                  <Text style={{ fontSize: 12, fontWeight: '700', color: '#16A34A' }}>Free</Text>
+                  <Text style={{ fontSize: 12, fontWeight: '700', color: '#16A34A' }}>{t('cb.free')}</Text>
                 </View>
               ) : (
                 <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.45) }}>EGP {parseFloat(priceEgp).toFixed(2)}</Text>
               )}
             </View>
             <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.4), marginTop: 4 }}>
-              Set to 0 to offer the course for free.
+              {t('cb.priceHelp')}
             </Text>
           </Field>
 
@@ -1013,17 +1071,17 @@ export default function CourseBuilder() {
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 2 }}>
               <MessageCircle size={14} color={c.primary} />
               <Text style={{ fontSize: 13, fontWeight: '800', color: c.text, opacity: 0.75 }}>
-                Contact Information
+                {t('cb.contact.title')}
               </Text>
             </View>
             <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.45), marginBottom: 10 }}>
-              Students will use these to subscribe to this course.
+              {t('cb.contact.help')}
             </Text>
 
             {/* Radio: use default vs custom */}
             {[
-              { value: true,  label: 'Use my default contact information' },
-              { value: false, label: 'Use custom contact information for this course' },
+              { value: true,  label: t('cb.contact.useDefault') },
+              { value: false, label: t('cb.contact.useCustom') },
             ].map(opt => (
               <Pressable
                 key={String(opt.value)}
@@ -1065,7 +1123,7 @@ export default function CourseBuilder() {
                   <TextInput
                     value={contactWhatsapp}
                     onChangeText={setContactWhatsapp}
-                    placeholder="WhatsApp number  e.g. +201234567890"
+                    placeholder={t('cb.contact.whatsapp')}
                     placeholderTextColor={`${c.text}44`}
                     keyboardType="phone-pad"
                     style={{ flex: 1, fontSize: 14, color: c.text, paddingVertical: 12 }}
@@ -1077,7 +1135,7 @@ export default function CourseBuilder() {
                   <TextInput
                     value={contactTelegram}
                     onChangeText={setContactTelegram}
-                    placeholder="Telegram  e.g. @username or https://t.me/…"
+                    placeholder={t('cb.contact.telegram')}
                     placeholderTextColor={`${c.text}44`}
                     autoCapitalize="none"
                     style={{ flex: 1, fontSize: 14, color: c.text, paddingVertical: 12 }}
@@ -1089,7 +1147,7 @@ export default function CourseBuilder() {
                   <TextInput
                     value={contactPhone}
                     onChangeText={setContactPhone}
-                    placeholder="Phone number  e.g. +201234567890"
+                    placeholder={t('cb.contact.phone')}
                     placeholderTextColor={`${c.text}44`}
                     keyboardType="phone-pad"
                     style={{ flex: 1, fontSize: 14, color: c.text, paddingVertical: 12 }}
@@ -1098,7 +1156,7 @@ export default function CourseBuilder() {
                 </View>
                 {!contactWhatsapp.trim() && !contactTelegram.trim() && !contactPhone.trim() && (
                   <Text style={{ fontSize: 12, color: '#DC2626', opacity: 0.8, marginTop: 2 }}>
-                    Please add at least one contact method.
+                    {t('cb.contact.required')}
                   </Text>
                 )}
               </View>
@@ -1119,7 +1177,7 @@ export default function CourseBuilder() {
               <RefreshCw size={14} color={c.text} opacity={0.4} />
               <TextInput
                 value={structureSearch} onChangeText={setStructureSearch}
-                placeholder="Search sections & lessons…"
+                placeholder={t('cb.searchStructure')}
                 placeholderTextColor={`${c.text}55`}
                 style={{ flex: 1, fontSize: 14, color: c.text, paddingVertical: 10 }}
               />
@@ -1127,7 +1185,7 @@ export default function CourseBuilder() {
             <Pressable onPress={handleAddSection}
               style={{ backgroundColor: c.primary, paddingHorizontal: 14, paddingVertical: 10, borderRadius: 12, flexDirection: 'row', alignItems: 'center', gap: 6 }}>
               <Plus size={16} color="#fff" />
-              <Text style={{ fontSize: 13, fontWeight: '700', color: '#fff' }}>Section</Text>
+              <Text style={{ fontSize: 13, fontWeight: '700', color: '#fff' }}>{t('cb.section')}</Text>
             </Pressable>
           </View>
 
@@ -1140,11 +1198,11 @@ export default function CourseBuilder() {
                 paddingHorizontal: 14, paddingVertical: 8, borderRadius: 12, backgroundColor: `${c.primary}10` }}>
                 <Clock size={13} color={c.primary} />
                 <Text style={{ fontSize: 12, fontWeight: '700', color: c.primary }}>
-                  {formatStudyTime(totalMin)} total
+                  {t('cb.durationTotal', { time: formatStudyTime(totalMin) })}
                 </Text>
                 <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.45) }}>·</Text>
                 <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.55) }}>
-                  {totalLessons} lessons across {sections.length} sections
+                  {t('cb.structureSummary', { lessons: totalLessons, sections: sections.length })}
                 </Text>
               </View>
             ) : null;
@@ -1157,8 +1215,8 @@ export default function CourseBuilder() {
             ListEmptyComponent={
               <View style={{ alignItems: 'center', paddingVertical: 60 }}>
                 <Layers size={44} color={c.primary} opacity={0.2} />
-                <Text style={{ ...mutedTextStyle(c, 0.4), marginTop: 12, fontSize: 15 }}>No sections yet</Text>
-                <Text style={{ ...mutedTextStyle(c, 0.3), fontSize: 13, marginTop: 4 }}>{'Tap "+ Section" to get started'}</Text>
+                <Text style={{ ...mutedTextStyle(c, 0.4), marginTop: 12, fontSize: 15 }}>{t('cb.noSections')}</Text>
+                <Text style={{ ...mutedTextStyle(c, 0.3), fontSize: 13, marginTop: 4 }}>{t('cb.noSectionsHint')}</Text>
               </View>
             }
             renderItem={({ item: section, index: sIdx }) => (
@@ -1220,8 +1278,10 @@ export default function CourseBuilder() {
                         style={{ width: 36, height: 36, alignItems: 'center', justifyContent: 'center' }} hitSlop={4}>
                         <Pencil size={14} color={c.primary} opacity={0.7} />
                       </Pressable>
-                      <Pressable onPress={() => handleDeleteSection(section.id)}
-                        style={{ width: 36, height: 36, alignItems: 'center', justifyContent: 'center' }} hitSlop={4}>
+                      <Pressable onPress={() => requestDeleteSection(section)}
+                        disabled={deletingSection}
+                        accessibilityLabel={t('cb.deleteSection')}
+                        style={{ width: 36, height: 36, alignItems: 'center', justifyContent: 'center', opacity: deletingSection ? 0.4 : 1 }} hitSlop={4}>
                         <Trash2 size={14} color="#DC2626" opacity={0.7} />
                       </Pressable>
                     </>
@@ -1237,7 +1297,7 @@ export default function CourseBuilder() {
 
                   {expandedSections.has(section.id)
                     ? <ChevronDown size={16} color={c.text} opacity={0.4} />
-                    : <ChevronRight size={16} color={c.text} opacity={0.4} />}
+                    : <ChevronForward size={16} color={c.text} opacity={0.4} />}
                 </Pressable>
 
                 {/* ── Section "more" drawer (mobile) ── */}
@@ -1248,34 +1308,34 @@ export default function CourseBuilder() {
                       style={[neuFlatStyle(isDark), { flexDirection: 'row', alignItems: 'center', gap: 6,
                         paddingHorizontal: 12, paddingVertical: 10, borderRadius: 10, minHeight: 44 }]}>
                       <Pencil size={14} color={c.primary} />
-                      <Text style={{ fontSize: 13, fontWeight: '600', color: c.primary }}>Rename</Text>
+                      <Text style={{ fontSize: 13, fontWeight: '600', color: c.primary }}>{t('cb.rename')}</Text>
                     </Pressable>
                     <Pressable onPress={() => { moveSectionUp(sIdx); setSectionMoreId(null); }}
                       style={[neuFlatStyle(isDark), { flexDirection: 'row', alignItems: 'center', gap: 6,
                         paddingHorizontal: 12, paddingVertical: 10, borderRadius: 10, minHeight: 44,
                         opacity: sIdx === 0 ? 0.3 : 1 }]}>
                       <ArrowUp size={14} color={c.text} />
-                      <Text style={{ fontSize: 13, fontWeight: '600', color: c.text }}>Move Up</Text>
+                      <Text style={{ fontSize: 13, fontWeight: '600', color: c.text }}>{t('cb.moveUp')}</Text>
                     </Pressable>
                     <Pressable onPress={() => { moveSectionDown(sIdx); setSectionMoreId(null); }}
                       style={[neuFlatStyle(isDark), { flexDirection: 'row', alignItems: 'center', gap: 6,
                         paddingHorizontal: 12, paddingVertical: 10, borderRadius: 10, minHeight: 44,
                         opacity: sIdx === sections.length - 1 ? 0.3 : 1 }]}>
                       <ArrowDown size={14} color={c.text} />
-                      <Text style={{ fontSize: 13, fontWeight: '600', color: c.text }}>Move Down</Text>
+                      <Text style={{ fontSize: 13, fontWeight: '600', color: c.text }}>{t('cb.moveDown')}</Text>
                     </Pressable>
                     <Pressable onPress={() => { handleBulkImport(section.id); setSectionMoreId(null); }}
                       style={[neuFlatStyle(isDark), { flexDirection: 'row', alignItems: 'center', gap: 6,
                         paddingHorizontal: 12, paddingVertical: 10, borderRadius: 10, minHeight: 44 }]}>
                       <FileUp size={14} color={c.text} />
-                      <Text style={{ fontSize: 13, fontWeight: '600', color: c.text }}>Bulk Import</Text>
+                      <Text style={{ fontSize: 13, fontWeight: '600', color: c.text }}>{t('cb.bulkImport')}</Text>
                     </Pressable>
-                    <Pressable onPress={() => { handleDeleteSection(section.id); setSectionMoreId(null); }}
+                    <Pressable onPress={() => requestDeleteSection(section)} disabled={deletingSection}
                       style={[neuFlatStyle(isDark), { flexDirection: 'row', alignItems: 'center', gap: 6,
                         paddingHorizontal: 12, paddingVertical: 10, borderRadius: 10, minHeight: 44,
                         backgroundColor: '#DC262618' }]}>
                       <Trash2 size={14} color="#DC2626" />
-                      <Text style={{ fontSize: 13, fontWeight: '600', color: '#DC2626' }}>Delete</Text>
+                      <Text style={{ fontSize: 13, fontWeight: '600', color: '#DC2626' }}>{t('common.delete')}</Text>
                     </Pressable>
                   </View>
                 )}
@@ -1318,14 +1378,14 @@ export default function CourseBuilder() {
                                 {/* Friendly type label */}
                                 <LessonTypeIcon videoType={lesson.video_type} size={9} color={c.primary} />
                                 <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.45) }}>
-                                  {lessonTypeLabel(lesson.video_type)}
+                                  {lessonTypeLabel(lesson.video_type, t)}
                                 </Text>
                                 <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.3) }}>·</Text>
                                 {/* Friendly status label */}
                                 <Text style={{ fontSize: 11, fontWeight: '600',
                                   color: lesson.status === 'published' ? '#16A34A' : lesson.status === 'scheduled' ? '#3B82F6' : '#D97706',
                                   opacity: 0.85 }}>
-                                  {lessonStatusLabel(lesson.status)}
+                                  {lessonStatusLabel(lesson.status, t)}
                                 </Text>
                                 {(lesson.estimated_minutes ?? 0) > 0 && (
                                   <>
@@ -1377,7 +1437,7 @@ export default function CourseBuilder() {
                           {/* Open lesson editor */}
                           <Pressable onPress={() => router.push(`/(app)/lesson-editor/${lesson.id}` as RelativePathString)}
                             style={{ width: 44, height: 44, alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                            <ChevronRight size={15} color={c.primary} opacity={0.6} />
+                            <ChevronForward size={15} color={c.primary} opacity={0.6} />
                           </Pressable>
                         </View>
 
@@ -1389,34 +1449,34 @@ export default function CourseBuilder() {
                               style={[neuFlatStyle(isDark), { flexDirection: 'row', alignItems: 'center', gap: 6,
                                 paddingHorizontal: 12, paddingVertical: 10, borderRadius: 10, minHeight: 44 }]}>
                               <Pencil size={13} color={c.primary} />
-                              <Text style={{ fontSize: 13, fontWeight: '600', color: c.primary }}>Rename</Text>
+                              <Text style={{ fontSize: 13, fontWeight: '600', color: c.primary }}>{t('cb.rename')}</Text>
                             </Pressable>
                             <Pressable onPress={() => { moveLessonUp(lIdx, section.id); setLessonMoreId(null); }}
                               style={[neuFlatStyle(isDark), { flexDirection: 'row', alignItems: 'center', gap: 6,
                                 paddingHorizontal: 12, paddingVertical: 10, borderRadius: 10, minHeight: 44,
                                 opacity: lIdx === 0 ? 0.3 : 1 }]}>
                               <ArrowUp size={13} color={c.text} />
-                              <Text style={{ fontSize: 13, fontWeight: '600', color: c.text }}>Move Up</Text>
+                              <Text style={{ fontSize: 13, fontWeight: '600', color: c.text }}>{t('cb.moveUp')}</Text>
                             </Pressable>
                             <Pressable onPress={() => { moveLessonDown(lIdx, section.id); setLessonMoreId(null); }}
                               style={[neuFlatStyle(isDark), { flexDirection: 'row', alignItems: 'center', gap: 6,
                                 paddingHorizontal: 12, paddingVertical: 10, borderRadius: 10, minHeight: 44,
                                 opacity: lIdx === (section.lessons?.length ?? 0) - 1 ? 0.3 : 1 }]}>
                               <ArrowDown size={13} color={c.text} />
-                              <Text style={{ fontSize: 13, fontWeight: '600', color: c.text }}>Move Down</Text>
+                              <Text style={{ fontSize: 13, fontWeight: '600', color: c.text }}>{t('cb.moveDown')}</Text>
                             </Pressable>
                             <Pressable onPress={() => { handleDuplicateLesson(lesson.id, section.id); setLessonMoreId(null); }}
                               style={[neuFlatStyle(isDark), { flexDirection: 'row', alignItems: 'center', gap: 6,
                                 paddingHorizontal: 12, paddingVertical: 10, borderRadius: 10, minHeight: 44 }]}>
                               <RefreshCw size={13} color={c.text} />
-                              <Text style={{ fontSize: 13, fontWeight: '600', color: c.text }}>Duplicate</Text>
+                              <Text style={{ fontSize: 13, fontWeight: '600', color: c.text }}>{t('cb.duplicate')}</Text>
                             </Pressable>
                             <Pressable onPress={() => { handleDeleteLesson(lesson.id, section.id); setLessonMoreId(null); }}
                               style={[neuFlatStyle(isDark), { flexDirection: 'row', alignItems: 'center', gap: 6,
                                 paddingHorizontal: 12, paddingVertical: 10, borderRadius: 10, minHeight: 44,
                                 backgroundColor: '#DC262618' }]}>
                               <Trash2 size={13} color="#DC2626" />
-                              <Text style={{ fontSize: 13, fontWeight: '600', color: '#DC2626' }}>Delete</Text>
+                              <Text style={{ fontSize: 13, fontWeight: '600', color: '#DC2626' }}>{t('common.delete')}</Text>
                             </Pressable>
                           </View>
                         )}
@@ -1428,12 +1488,12 @@ export default function CourseBuilder() {
                       <Pressable onPress={() => handleAddLesson(section.id)}
                         style={{ flex: 1, flexDirection: 'row', alignItems: 'center', padding: 12, gap: 8, minHeight: 44, opacity: 0.65 }}>
                         <Plus size={14} color={c.primary} />
-                        <Text style={{ fontSize: 13, color: c.primary, fontWeight: '600' }}>Add Lesson</Text>
+                        <Text style={{ fontSize: 13, color: c.primary, fontWeight: '600' }}>{t('cb.addLesson')}</Text>
                       </Pressable>
                       <Pressable onPress={() => handleBulkImport(section.id)}
                         style={{ flexDirection: 'row', alignItems: 'center', padding: 12, gap: 6, minHeight: 44, opacity: 0.65 }}>
                         <FileUp size={14} color={c.text} opacity={0.6} />
-                        <Text style={{ fontSize: 13, ...mutedTextStyle(c, 0.6), fontWeight: '600' }}>Bulk Import</Text>
+                        <Text style={{ fontSize: 13, ...mutedTextStyle(c, 0.6), fontWeight: '600' }}>{t('cb.bulkImport')}</Text>
                       </Pressable>
                     </View>
                   </View>
@@ -1450,15 +1510,15 @@ export default function CourseBuilder() {
       {tab === 'settings' && (
         <ScrollView automaticallyAdjustKeyboardInsets={process.env.EXPO_OS === 'ios'} keyboardShouldPersistTaps="handled"
           contentContainerStyle={{ padding: layout.screenPx, gap: 16 }}>
-          <Text style={{ fontSize: 16, fontWeight: '800', color: c.text, opacity: 0.7 }}>Learning & Access</Text>
+          <Text style={{ fontSize: 16, fontWeight: '800', color: c.text, opacity: 0.7 }}>{t('cb.learningAccess')}</Text>
 
-          <ToggleRow label="Sequential Learning" sub="Students must complete lessons in order"
+          <ToggleRow label={t('cb.sequential')} sub={t('cb.sequentialSub')}
             value={sequential} onChange={setSequential} isDark={isDark} c={c} />
-          <ToggleRow label="Free Preview" sub="Allow non-enrolled students to preview the course"
+          <ToggleRow label={t('cb.freePreview')} sub={t('cb.freePreviewSub')}
             value={freePreview} onChange={setFreePreview} isDark={isDark} c={c} />
-          <ToggleRow label="Certificate" sub="Issue a certificate on completion"
+          <ToggleRow label={t('cb.certificate')} sub={t('cb.certificateSub')}
             value={certificate} onChange={setCertificate} isDark={isDark} c={c} />
-          <ToggleRow label="Subscription Required" sub="Students must subscribe to access lessons"
+          <ToggleRow label={t('cb.subscriptionRequired')} sub={t('cb.subscriptionRequiredSub')}
             value={subscriptionRequired} onChange={setSubscriptionRequired} isDark={isDark} c={c} />
 
           {/* Platform info — credit cost is always 1, not configurable */}
@@ -1467,14 +1527,14 @@ export default function CourseBuilder() {
               <Text style={{ fontSize: 18 }}>🎓</Text>
             </View>
             <View style={{ flex: 1 }}>
-              <Text style={{ fontSize: 13, fontWeight: '700', color: c.text }}>Enrollment Cost: 1 Credit</Text>
+              <Text style={{ fontSize: 13, fontWeight: '700', color: c.text }}>{t('cb.enrollmentCost')}</Text>
               <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.45), marginTop: 2 }}>
-                Set by the platform. Students use 1 credit to subscribe.
+                {t('cb.enrollmentCostSub')}
               </Text>
             </View>
           </NeuCard>
 
-          <NeuButton label="Save Settings" onPress={handleSaveAndExit} fullWidth />
+          <NeuButton label={t('cb.saveSettings')} onPress={handleSaveAndExit} fullWidth />
         </ScrollView>
       )}
 
@@ -1482,8 +1542,8 @@ export default function CourseBuilder() {
       {showPublishCheck && (
         <View style={{ position: 'absolute', inset: 0, backgroundColor: '#000a', justifyContent: 'center', alignItems: 'center', padding: 24 }}>
           <NeuCard style={{ width: '100%', maxWidth: 420 }}>
-            <Text style={{ fontSize: 17, fontWeight: '800', color: c.text, marginBottom: 4 }}>Publish Checklist</Text>
-            <Text style={{ fontSize: 13, ...mutedTextStyle(c, 0.5), marginBottom: 16 }}>Please resolve the following issues before publishing:</Text>
+            <Text style={{ fontSize: 17, fontWeight: '800', color: c.text, marginBottom: 4 }}>{t('cb.publishChecklist')}</Text>
+            <Text style={{ fontSize: 13, ...mutedTextStyle(c, 0.5), marginBottom: 16 }}>{t('cb.publishChecklistIntro')}</Text>
             {getPublishIssues().map((issue, i) => (
               <View key={`issue-${i}`} style={{ flexDirection: 'row', gap: 8, marginBottom: 8, alignItems: 'flex-start' }}>
                 <Text style={{ fontSize: 16, color: '#DC2626' }}>✗</Text>
@@ -1493,7 +1553,7 @@ export default function CourseBuilder() {
             {videoBlockers.length > 0 && (
               <>
                 <Text style={{ fontSize: 13, fontWeight: '700', color: '#D97706', marginTop: 8, marginBottom: 6 }}>
-                  ⚠️ Video uploads incomplete
+                  {t('cb.videoIncomplete')}
                 </Text>
                 {videoBlockers.map((b, i) => (
                   <View key={`vb-${i}`} style={{ flexDirection: 'row', gap: 8, marginBottom: 6, alignItems: 'flex-start',
@@ -1508,7 +1568,7 @@ export default function CourseBuilder() {
               </>
             )}
             <View style={{ marginTop: 16 }}>
-              <NeuButton label="Go Back and Fix" onPress={() => setShowPublishCheck(false)} fullWidth />
+              <NeuButton label={t('cb.goBackFix')} onPress={() => setShowPublishCheck(false)} fullWidth />
             </View>
           </NeuCard>
         </View>
@@ -1519,8 +1579,8 @@ export default function CourseBuilder() {
         <View style={{ flex: 1, backgroundColor: '#000a', justifyContent: 'center', alignItems: 'center', padding: 20 }}>
           <Pressable onPress={e => e.stopPropagation()}>
             <NeuCard style={{ width: Math.min(screenWidth - 40, 440) }}>
-              <Text style={{ fontSize: 18, fontWeight: '800', color: c.text, marginBottom: 4 }}>Start New Course</Text>
-              <Text style={{ fontSize: 13, ...mutedTextStyle(c, 0.5), marginBottom: 20 }}>Choose how to start building your course.</Text>
+              <Text style={{ fontSize: 18, fontWeight: '800', color: c.text, marginBottom: 4 }}>{t('cb.startNewCourse')}</Text>
+              <Text style={{ fontSize: 13, ...mutedTextStyle(c, 0.5), marginBottom: 20 }}>{t('cb.startNewCourseHelp')}</Text>
               {/* Blank */}
               <Pressable onPress={() => setShowStartModal(false)}
                 style={[neuFlatStyle(isDark), { borderRadius: 14, padding: 16, marginBottom: 10, flexDirection: 'row', alignItems: 'center', gap: 14 }]}>
@@ -1528,8 +1588,8 @@ export default function CourseBuilder() {
                   <BookOpen size={20} color={c.primary} />
                 </View>
                 <View style={{ flex: 1 }}>
-                  <Text style={{ fontSize: 15, fontWeight: '700', color: c.text }} numberOfLines={1}>Start Blank</Text>
-                  <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.45) }} numberOfLines={1}>Build from scratch</Text>
+                  <Text style={{ fontSize: 15, fontWeight: '700', color: c.text }} numberOfLines={1}>{t('cb.startBlank')}</Text>
+                  <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.45) }} numberOfLines={1}>{t('cb.startBlankSub')}</Text>
                 </View>
               </Pressable>
               {/* Templates */}
@@ -1538,7 +1598,7 @@ export default function CourseBuilder() {
               ) : templates.length > 0 ? (
                 <>
                   <Text style={{ fontSize: 12, fontWeight: '700', ...mutedTextStyle(c, 0.45), marginBottom: 8, textTransform: 'uppercase', letterSpacing: 0.6 }}>
-                    Saved Templates
+                    {t('cb.savedTemplates')}
                   </Text>
                   {templates.map(t => (
                     <Pressable key={t.id} onPress={() => handleStartFromTemplate(t.id)}
@@ -1548,13 +1608,13 @@ export default function CourseBuilder() {
                         <Text style={{ fontSize: 14, fontWeight: '700', color: c.text }} numberOfLines={1}>{t.title}</Text>
                         {t.description ? <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.45) }} numberOfLines={1}>{t.description}</Text> : null}
                       </View>
-                      <ChevronRight size={16} color={c.text} opacity={0.35} />
+                      <ChevronForward size={16} color={c.text} opacity={0.35} />
                     </Pressable>
                   ))}
                 </>
               ) : null}
               <Pressable onPress={() => setShowStartModal(false)} style={{ alignItems: 'center', marginTop: 8, padding: 8 }}>
-                <Text style={{ fontSize: 13, ...mutedTextStyle(c, 0.4) }}>Dismiss</Text>
+                <Text style={{ fontSize: 13, ...mutedTextStyle(c, 0.4) }}>{t('cb.dismiss')}</Text>
               </Pressable>
             </NeuCard>
           </Pressable>
@@ -1570,18 +1630,17 @@ export default function CourseBuilder() {
                 <View style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: '#D9770618', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
                   <Archive size={20} color="#D97706" />
                 </View>
-                <Text style={{ fontSize: 17, fontWeight: '800', color: c.text, flex: 1 }} numberOfLines={1}>Archive Course</Text>
+                <Text style={{ fontSize: 17, fontWeight: '800', color: c.text, flex: 1 }} numberOfLines={1}>{t('cb.archiveCourse')}</Text>
               </View>
               <Text style={{ fontSize: 13, ...mutedTextStyle(c, 0.55), marginBottom: 16, lineHeight: 20 }}>
-                This course will be hidden from the public catalog, search, and new subscriptions.
-                {'\n\n'}Students already enrolled will retain full access to all lessons, videos, and progress.
+                {t('cb.archiveHelp')}
               </Text>
               <View style={{ gap: 6, marginBottom: 16 }}>
-                <Text style={{ fontSize: 12, fontWeight: '700', ...mutedTextStyle(c, 0.5) }}>Reason (optional)</Text>
+                <Text style={{ fontSize: 12, fontWeight: '700', ...mutedTextStyle(c, 0.5) }}>{t('cb.reasonOptional')}</Text>
                 <TextInput
                   value={archiveReason}
                   onChangeText={setArchiveReason}
-                  placeholder="e.g. Outdated content, under revision…"
+                  placeholder={t('cb.reasonPlaceholder')}
                   placeholderTextColor={`${c.text}55`}
                   multiline
                   style={{ borderRadius: 12, padding: 12, fontSize: 13, color: c.text, minHeight: 80,
@@ -1592,13 +1651,71 @@ export default function CourseBuilder() {
               </View>
               <View style={{ flexDirection: 'row', gap: 10 }}>
                 <Pressable onPress={() => setShowArchiveModal(false)} style={[neuFlatStyle(isDark), { flex: 1, minWidth: 100, padding: 12, borderRadius: 12, alignItems: 'center' }]}>
-                  <Text style={{ fontSize: 14, fontWeight: '700', ...mutedTextStyle(c, 0.55) }} numberOfLines={1}>Cancel</Text>
+                  <Text style={{ fontSize: 14, fontWeight: '700', ...mutedTextStyle(c, 0.55) }} numberOfLines={1}>{t('common.cancel')}</Text>
                 </Pressable>
                 <Pressable onPress={handleArchive} disabled={archiving}
                   style={{ flex: 1, minWidth: 100, padding: 12, borderRadius: 12, alignItems: 'center', backgroundColor: '#D97706', opacity: archiving ? 0.6 : 1 }}>
                   {archiving
                     ? <ActivityIndicator size="small" color="#fff" />
-                    : <Text style={{ fontSize: 14, fontWeight: '700', color: '#fff' }} numberOfLines={1}>Archive</Text>}
+                    : <Text style={{ fontSize: 14, fontWeight: '700', color: '#fff' }} numberOfLines={1}>{t('cb.archive')}</Text>}
+                </Pressable>
+              </View>
+            </NeuCard>
+          </Pressable>
+        </View>
+      </Modal>
+
+      {/* ── Delete Section Confirmation ── */}
+      <Modal visible={!!deleteSectionTarget} transparent animationType="fade"
+        onRequestClose={() => { if (!deletingSection) setDeleteSectionTarget(null); }}>
+        <View style={{ flex: 1, backgroundColor: '#000a', justifyContent: 'center', alignItems: 'center', padding: 20 }}>
+          <Pressable onPress={e => e.stopPropagation()}>
+            <NeuCard style={{ width: Math.min(screenWidth - 40, 420) }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 10 }}>
+                <View style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: '#DC262618', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                  <Trash2 size={20} color="#DC2626" />
+                </View>
+                <Text style={{ fontSize: 17, fontWeight: '800', color: c.text, flex: 1 }} numberOfLines={1}>
+                  {t('cb.deleteSection')}
+                </Text>
+              </View>
+
+              <Text style={{ fontSize: 13, ...mutedTextStyle(c, 0.6), marginBottom: 12, lineHeight: 20 }}>
+                {t('cb.deleteSectionConfirmBody')}
+              </Text>
+
+              <View style={{ borderRadius: 12, padding: 12, marginBottom: 14, backgroundColor: `${c.text}08` }}>
+                <Text style={{ fontSize: 14, fontWeight: '700', color: c.text }} numberOfLines={2}>
+                  {deleteSectionTarget?.title}
+                </Text>
+              </View>
+
+              {(deleteSectionTarget?.lessons?.length ?? 0) > 0 ? (
+                <View style={{ flexDirection: 'row', gap: 10, borderRadius: 12, padding: 12, marginBottom: 16, backgroundColor: '#DC262610' }}>
+                  <Trash2 size={15} color="#DC2626" style={{ marginTop: 1, flexShrink: 0 }} />
+                  <Text style={{ flex: 1, fontSize: 12, lineHeight: 18, color: '#DC2626', fontWeight: '500' }}>
+                    {t('cb.deleteSectionLessonsWarning', {
+                      lessons: tCount('drCourses.lessonCount', deleteSectionTarget?.lessons?.length ?? 0),
+                    })}
+                  </Text>
+                </View>
+              ) : (
+                <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.5), marginBottom: 16, lineHeight: 18 }}>
+                  {t('cb.deleteSectionEmptyHint')}
+                </Text>
+              )}
+
+              <View style={{ flexDirection: 'row', gap: 10 }}>
+                <Pressable onPress={() => setDeleteSectionTarget(null)} disabled={deletingSection}
+                  style={[neuFlatStyle(isDark), { flex: 1, minWidth: 100, padding: 12, borderRadius: 12, alignItems: 'center' }]}>
+                  <Text style={{ fontSize: 14, fontWeight: '700', ...mutedTextStyle(c, 0.55) }} numberOfLines={1}>{t('common.cancel')}</Text>
+                </Pressable>
+                <Pressable onPress={handleDeleteSection} disabled={deletingSection}
+                  style={{ flex: 1, minWidth: 100, padding: 12, borderRadius: 12, alignItems: 'center',
+                    backgroundColor: '#DC2626', opacity: deletingSection ? 0.6 : 1 }}>
+                  {deletingSection
+                    ? <ActivityIndicator size="small" color="#fff" />
+                    : <Text style={{ fontSize: 14, fontWeight: '700', color: '#fff' }} numberOfLines={1}>{t('common.delete')}</Text>}
                 </Pressable>
               </View>
             </NeuCard>
@@ -1611,18 +1728,18 @@ export default function CourseBuilder() {
         <View style={{ flex: 1, backgroundColor: '#000a', justifyContent: 'center', alignItems: 'center', padding: 20 }}>
           <Pressable onPress={e => e.stopPropagation()}>
             <NeuCard style={{ width: Math.min(screenWidth - 40, 400) }}>
-              <Text style={{ fontSize: 16, fontWeight: '800', color: c.text, marginBottom: 12 }}>Save as Template</Text>
+              <Text style={{ fontSize: 16, fontWeight: '800', color: c.text, marginBottom: 12 }}>{t('cb.saveAsTemplate')}</Text>
               <NeuInput value={templateTitle} onChangeText={setTemplateTitle}
-                placeholder="Template name…" isDark={isDark} c={c} style={{ marginBottom: 14 }} />
+                placeholder={t('cb.templateName')} isDark={isDark} c={c} style={{ marginBottom: 14 }} />
               <View style={{ flexDirection: 'row', gap: 10 }}>
                 <Pressable onPress={() => setShowSaveTemplate(false)}
                   style={[neuFlatStyle(isDark), { flex: 1, minWidth: 100, padding: 12, borderRadius: 12, alignItems: 'center' }]}>
-                  <Text style={{ fontSize: 14, fontWeight: '700', ...mutedTextStyle(c, 0.55) }} numberOfLines={1}>Cancel</Text>
+                  <Text style={{ fontSize: 14, fontWeight: '700', ...mutedTextStyle(c, 0.55) }} numberOfLines={1}>{t('common.cancel')}</Text>
                 </Pressable>
                 <Pressable onPress={handleSaveTemplate} disabled={savingTemplate || !templateTitle.trim()}
                   style={{ flex: 1, minWidth: 100, padding: 12, borderRadius: 12, alignItems: 'center', backgroundColor: c.primary, opacity: templateTitle.trim() ? 1 : 0.45 }}>
                   {savingTemplate ? <ActivityIndicator size="small" color="#fff" /> :
-                    <Text style={{ fontSize: 14, fontWeight: '700', color: '#fff' }} numberOfLines={1}>Save</Text>}
+                    <Text style={{ fontSize: 14, fontWeight: '700', color: '#fff' }} numberOfLines={1}>{t('common.save')}</Text>}
                 </Pressable>
               </View>
             </NeuCard>
@@ -1682,6 +1799,7 @@ function CourseCoverSection({
   c: any;
 }) {
   const hasCover = !!uri;
+  const { t } = useTranslation();
 
   // ── Empty state: one clear upload button ──────────────────────────────────
   if (!hasCover) {
@@ -1698,7 +1816,7 @@ function CourseCoverSection({
           ? <ActivityIndicator size="small" color={c.primary} />
           : <Upload size={16} color={c.primary} />}
         <Text style={{ fontSize: 14, fontWeight: '700', color: c.primary }}>
-          {uploading ? 'Uploading…' : 'Upload Cover'}
+          {uploading ? t('cb.cover.uploading') : t('cb.cover.upload')}
         </Text>
       </Pressable>
     );
@@ -1732,7 +1850,7 @@ function CourseCoverSection({
           ]}
         >
           <RefreshCw size={15} color={c.primary} />
-          <Text style={{ fontSize: 13, fontWeight: '700', color: c.primary }}>Replace Cover</Text>
+          <Text style={{ fontSize: 13, fontWeight: '700', color: c.primary }}>{t('cb.cover.replace')}</Text>
         </Pressable>
         <Pressable
           onPress={!uploading ? onRemove : undefined}
@@ -1743,7 +1861,7 @@ function CourseCoverSection({
           ]}
         >
           <Trash2 size={15} color="#DC2626" />
-          <Text style={{ fontSize: 13, fontWeight: '700', color: '#DC2626' }}>Remove Cover</Text>
+          <Text style={{ fontSize: 13, fontWeight: '700', color: '#DC2626' }}>{t('cb.cover.remove')}</Text>
         </Pressable>
       </View>
     </View>

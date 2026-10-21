@@ -286,7 +286,10 @@ export default function AcademicManagement({ backTo }: { backTo?: string } = {})
           <PageHeader
             title={t('adminAcademic.title')}
             subtitle={t('adminAcademic.subtitle')}
-            showBack
+            /* From a hub (backTo set) this is a nested screen → Back to that
+               hub. Opened from the drawer/tab bar it is a primary destination
+               → the menu stays available. */
+            navMode={backTo ? 'back' : undefined}
             backFallback={backTo ?? '/admin-overview'}
           />
 

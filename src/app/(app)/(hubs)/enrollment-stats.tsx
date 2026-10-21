@@ -300,7 +300,6 @@ export default function EnrollmentStatsScreen({ backTo = '/admin-overview' }: { 
           title={t('enrollmentStats.title')}
           subtitle={t('enrollmentStats.subtitle')}
           accentColor={c.primary}
-          showBack
           backFallback={backTo}
           rightAction={
             <Pressable

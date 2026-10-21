@@ -16,6 +16,7 @@ import { DashboardHeader } from '@/components/DashboardHeader';
 import type { RelativePathString } from 'expo-router';
 import { useNotificationPermission } from '@/hooks/useNotificationPermission';
 import { PermissionRationaleModal } from '@/components/PermissionRationaleModal';
+import { markEntryIntent } from '@/lib/navigation/navIntent';
 
 export default function AdminDashboard() {
   const scheme = useColorScheme();
@@ -81,7 +82,11 @@ export default function AdminDashboard() {
         greeting={firstName ? t('adminOverview.greeting', { name: firstName }) : t('adminOverview.greetingFallback')}
         rightActions={
           <Pressable
-            onPress={() => router.push('/(app)/notifications' as RelativePathString)}
+            onPress={() => {
+              // Dashboard entry (not the drawer) → notifications shows Back.
+              markEntryIntent('/(app)/notifications', 'nested');
+              router.push('/(app)/notifications' as RelativePathString);
+            }}
             accessibilityLabel={t('adminOverview.notifications')}
             accessibilityRole="button"
             style={[{ width: layout.touchTarget, height: layout.touchTarget, borderRadius: layout.cardRadius, alignItems: 'center', justifyContent: 'center' }, neuMicroStyle(isDark)]}

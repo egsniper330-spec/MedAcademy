@@ -172,8 +172,10 @@ for (const role of ['student', 'doctor', 'admin']) {
   check(`getNavSections has a branch for ${role}`, new RegExp(`role === '${role}'`).test(drawer));
 }
 check('super_admin keeps its consolidated hub IA', /super_admin/.test(drawer) && /sa-overview/.test(drawer));
-check('doctor earnings item is still gated by BOTH flags',
-  /platformEarningsOn && earningsEnabled/.test(drawer));
+// Earnings was retired from the product: the drawer must not carry the entry or
+// its flags any more (the server keeps the key only for data protection).
+check('drawer no longer exposes a doctor earnings entry',
+  !/earningsEnabled|platformEarningsOn|doctor_earnings|nav\.earnings/.test(drawer));
 check('every drawer label is localized through t()',
   !/label: '(?!.*\(\')[A-Z][a-z]+ [A-Z]/.test(drawer));
 

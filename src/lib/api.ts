@@ -133,7 +133,7 @@ export async function invokeEdgeFunction<T = unknown>(
 // ── Profiles ──────────────────────────────────────────────────────────────────
 // phone_e164 and phone_national are included so every profile object carries
 // all three phone representations — required for search, display, and uniqueness checks.
-const PROFILE_SELECT = 'id, public_user_id, email, profile_email, full_name, phone, phone_e164, phone_national, phone_country_code, role, status, watermark_id, avatar_url, created_at, updated_at, university_id, faculty_id, academic_level_id, contact_whatsapp, contact_telegram, contact_phone, earnings_enabled, doctor_global_price, university:universities(id,name), faculty:faculties(id,name), academic_level:academic_levels(id,name)';
+const PROFILE_SELECT = 'id, public_user_id, email, profile_email, full_name, phone, phone_e164, phone_national, phone_country_code, role, status, watermark_id, avatar_url, created_at, updated_at, university_id, faculty_id, academic_level_id, contact_whatsapp, contact_telegram, contact_phone, university:universities(id,name), faculty:faculties(id,name), academic_level:academic_levels(id,name)';
 
 // ── Email helpers ─────────────────────────────────────────────────────────────
 
@@ -235,8 +235,6 @@ export async function updateProfile(
     contact_whatsapp: string | null;
     contact_telegram: string | null;
     contact_phone:    string | null;
-    /** Doctor earnings system toggle */
-    earnings_enabled: boolean;
   }>
 ) {
   // Fetch current profile for old-values comparison before applying update
@@ -339,492 +337,6 @@ export async function removeProfileAvatar(
   return { avatar_url: (updated as any)?.avatar_url ?? null };
 }
 
-// ── Doctor Earnings — Independent Pricing System ──────────────────────────────
-//
-// Revenue source: doctor_earnings_events.earnings_amount
-// Doctor price  = enrollment.assigned_price  (per-student override)
-//              ?? profiles.doctor_global_price (doctor's own global price)
-//
-// NEVER uses platform credit_selling_price — completely independent.
-//
-// Transaction types:
-//   purchase          → positive amount  (student enrolled)
-//   removal           → negative amount  (student removed, revenue deducted)
-//   suspension_refund → negative amount  (optional refund on suspension)
-//   adjustment        → positive or negative (manual correction)
-
-export type EarningsTransactionType = 'purchase' | 'removal' | 'suspension_refund' | 'adjustment' | 'account_deletion';
-
-export interface EarningsTransactionRow {
-  id:               string;
-  student_id:       string | null;
-  student_name:     string | null;   // null only when student_id is null (legacy event)
-  student_phone:    string | null;
-  student_email:    string | null;
-  student_avatar:   string | null;
-  // Immutable snapshots — always available even after account deletion
-  student_phone_snapshot:    string | null;
-  student_email_snapshot:    string | null;
-  student_watermark_snapshot: string | null;
-  course_id:        string | null;
-  course_title:     string | null;
-  amount:           number;           // positive = income, negative = deduction
-  price_snapshot:   number;           // the price used when this event was created
-  pricing_mode:     string;           // 'doctor_independent' | 'global' | etc.
-  transaction_type: EarningsTransactionType;
-  notes:            string | null;
-  created_at:       string;
-}
-
-export interface EarningsCourseRow {
-  course_id:    string;
-  course_title: string;
-  students:     number;  // net enrolled (purchases - removals)
-  revenue_egp:  number;  // net revenue
-  pct:          number;  // % of total net revenue
-}
-
-export interface EarningsTimePoint {
-  label:      string;   // x-axis label
-  key:        string;   // sort key  YYYY-MM-DD / YYYY-WW / YYYY-MM / YYYY
-  amount:     number;   // net revenue for this period
-  isNegative: boolean;  // true if net is negative
-}
-
-export interface DoctorEarningsDashboard {
-  totalRevenue:         number;  // net (purchases - removals)
-  thisMonthRevenue:     number;
-  totalPaidStudents:    number;  // unique students with net positive revenue
-  totalTransactions:    number;
-  avgRevenuePerStudent: number;
-  courseRows:           EarningsCourseRow[];
-  transactions:         EarningsTransactionRow[];
-  timePoints:           EarningsTimePoint[];   // pre-bucketed for daily view by default
-}
-
-export interface DoctorStudentProfile {
-  id:           string;
-  full_name:    string | null;
-  phone:        string | null;
-  email:        string | null;
-  avatar_url:   string | null;
-  watermark_id: string | null;
-  /** Canonical Public User ID (MED-0001) — the user-facing identifier. */
-  public_user_id: string | null;
-  created_at:   string | null;
-  /** 'active' | 'suspended' | 'trashed' — used to determine isDeleted in modal */
-  account_status: string;
-  enrollments: {
-    enrollment_id:    string;
-    course_id:        string;
-    course_title:     string;
-    enrolled_at:      string;
-    status:           string;
-    assigned_price:   number | null;
-    progress_percent: number;
-  }[];
-}
-
-export interface DoctorPricingSettings {
-  doctor_global_price: number;
-}
-
-/**
- * Fetch the doctor's full earnings dashboard from doctor_earnings_events.
- * Revenue = SUM(earnings_amount) using doctor's own pricing — never platform credit price.
- * RLS: doctor_read_own_dee ensures only own records are visible.
- *
- * Name resolution priority (per transaction):
- *  1. student_name_snapshot  — immutable, written at insert time
- *  2. current profiles.full_name — live join fallback
- *  3. 'Deleted Account'      — student_id exists but profile is gone
- *  No row ever shows "Unknown Student", "Legacy Transaction", or "Deleted Student".
- */
-export async function getDoctorEarningsDashboard(
-  doctorId: string,
-): Promise<DoctorEarningsDashboard> {
-  const empty: DoctorEarningsDashboard = {
-    totalRevenue: 0, thisMonthRevenue: 0, totalPaidStudents: 0,
-    totalTransactions: 0, avgRevenuePerStudent: 0,
-    courseRows: [], transactions: [], timePoints: [],
-  };
-
-  const { data: events, error: evErr } = await backendClient
-    .from('doctor_earnings_events')
-    .select('id, course_id, student_id, transaction_type, earnings_amount, notes, created_at, student_name_snapshot, course_name_snapshot, student_email_snapshot, student_phone_snapshot, student_watermark_snapshot, price_snapshot, pricing_mode')
-    .eq('doctor_id', doctorId)
-    .order('created_at', { ascending: false });
-  if (evErr) throw evErr;
-
-  const evArr: any[] = events ?? [];
-  if (evArr.length === 0) return empty;
-
-  const courseIds  = [...new Set(evArr.map(e => e.course_id).filter(Boolean))]  as string[];
-  const studentIds = [...new Set(evArr.map(e => e.student_id).filter(Boolean))] as string[];
-
-  const [courseRes, profileRes] = await Promise.all([
-    backendClient.from('courses').select('id, title').in('id', courseIds),
-    backendClient.from('profiles').select('id, full_name, phone, profile_email, email, avatar_url, status').in('id', studentIds),
-  ]);
-
-  const courseMap:  Record<string, string> = {};
-  (courseRes.data ?? []).forEach((c: any) => { courseMap[c.id] = c.title; });
-
-  const profileMap: Record<string, any> = {};
-  (profileRes.data ?? []).forEach((p: any) => { profileMap[p.id] = p; });
-
-  // Set of student IDs whose accounts are trashed — their events must not
-  // contribute to revenue totals (Recalculate will insert matching deductions,
-  // but the dashboard must never show positive net for deleted accounts).
-  const trashedIds = new Set<string>(
-    (profileRes.data ?? []).filter((p: any) => p.status === 'trashed').map((p: any) => p.id as string),
-  );
-
-  // ── Totals ────────────────────────────────────────────────────────────────
-  const now = new Date();
-  const thisMonthKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
-  let totalRevenue = 0;
-  let thisMonthRevenue = 0;
-  const dailyMap: Record<string, number> = {};
-  const studentNetMap: Record<string, number> = {};
-  const courseAggMap: Record<string, { revenue: number; students: Set<string> }> = {};
-
-  evArr.forEach(e => {
-    // Never let trashed (deleted) accounts inflate revenue.
-    // Their events still exist in the DB until Recalculate inserts the
-    // matching negative correction — skip their contribution entirely here.
-    if (e.student_id && trashedIds.has(e.student_id)) return;
-
-    const amt = Number(e.earnings_amount ?? 0); // already signed in DB (negative for removals)
-    totalRevenue += amt;
-    const d   = new Date(e.created_at);
-    const dayKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-    const monKey  = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-    dailyMap[dayKey] = (dailyMap[dayKey] ?? 0) + amt;
-    if (monKey === thisMonthKey) thisMonthRevenue += amt;
-
-    if (e.student_id) {
-      studentNetMap[e.student_id] = (studentNetMap[e.student_id] ?? 0) + amt;
-    }
-    const cid = e.course_id ?? 'unknown';
-    if (!courseAggMap[cid]) courseAggMap[cid] = { revenue: 0, students: new Set() };
-    courseAggMap[cid].revenue += amt;
-    if (e.student_id && amt > 0) courseAggMap[cid].students.add(e.student_id);
-  });
-
-  const totalPaidStudents    = Object.values(studentNetMap).filter(v => v > 0).length;
-  const avgRevenuePerStudent = totalPaidStudents > 0 ? totalRevenue / totalPaidStudents : 0;
-
-  // ── Time points (daily, last 30 days) ─────────────────────────────────────
-  const timePoints: EarningsTimePoint[] = Object.entries(dailyMap)
-    .sort(([a], [b]) => a.localeCompare(b))
-    .slice(-30)
-    .map(([key, amount]) => {
-      const [, m, dd] = key.split('-');
-      return { key, label: `${dd}/${m}`, amount, isNegative: amount < 0 };
-    });
-
-  // ── Course rows ───────────────────────────────────────────────────────────
-  const posTotal = Object.values(courseAggMap).reduce((s, c) => s + Math.max(0, c.revenue), 0) || 1;
-  const courseRows: EarningsCourseRow[] = Object.entries(courseAggMap)
-    .map(([cid, agg]) => ({
-      course_id:    cid,
-      course_title: courseMap[cid] ?? 'Unknown Course',
-      students:     agg.students.size,
-      revenue_egp:  agg.revenue,
-      pct:          Math.round((Math.max(0, agg.revenue) / posTotal) * 100),
-    }))
-    .sort((a, b) => b.revenue_egp - a.revenue_egp);
-
-  // ── Transactions (latest 50) ──────────────────────────────────────────────
-  // Name resolution: snapshot → live join → 'Deleted Account' (never placeholder labels)
-  const transactions: EarningsTransactionRow[] = evArr.slice(0, 50).map(e => {
-    const prof = e.student_id ? profileMap[e.student_id] : null;
-    // Snapshot takes priority; live join is a fallback; 'Deleted Account' only when
-    // student_id exists but both snapshot and live profile are missing.
-    const resolvedName: string | null =
-      e.student_name_snapshot ??
-      (prof?.full_name ?? null) ??
-      (e.student_id ? 'Deleted Account' : null);
-
-    const resolvedCourse: string | null =
-      e.course_name_snapshot ??
-      (e.course_id ? (courseMap[e.course_id] ?? null) : null);
-
-    return {
-      id:               e.id,
-      student_id:       e.student_id ?? null,
-      student_name:     resolvedName,
-      student_phone:    prof?.phone ?? null,
-      student_email:    prof?.profile_email ?? prof?.email ?? null,
-      student_avatar:   prof?.avatar_url ?? null,
-      student_phone_snapshot:     e.student_phone_snapshot    ?? null,
-      student_email_snapshot:     e.student_email_snapshot    ?? null,
-      student_watermark_snapshot: e.student_watermark_snapshot ?? null,
-      course_id:        e.course_id  ?? null,
-      course_title:     resolvedCourse,
-      amount:           Number(e.earnings_amount ?? 0),
-      price_snapshot:   Number(e.price_snapshot  ?? 0),
-      pricing_mode:     e.pricing_mode ?? 'doctor_independent',
-      transaction_type: (e.transaction_type ?? 'purchase') as EarningsTransactionType,
-      notes:            e.notes ?? null,
-      created_at:       e.created_at,
-    };
-  });
-
-  return {
-    totalRevenue, thisMonthRevenue, totalPaidStudents,
-    totalTransactions: evArr.length, avgRevenuePerStudent,
-    courseRows, transactions, timePoints,
-  };
-}
-
-/**
- * Get time-series data bucketed by period for the revenue chart.
- * Returns signed amounts — removals appear as negative bars.
- */
-export function bucketEarningsTimeSeries(
-  transactions: EarningsTransactionRow[],
-  period: 'daily' | 'weekly' | 'monthly' | 'yearly',
-): EarningsTimePoint[] {
-  const buckets: Record<string, number> = {};
-
-  transactions.forEach(t => {
-    const d = new Date(t.created_at);
-    let key = '';
-    let label = '';
-    if (period === 'daily') {
-      key   = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-      label = `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}`;
-    } else if (period === 'weekly') {
-      // ISO week number
-      const startOfYear = new Date(d.getFullYear(), 0, 1);
-      const week = Math.ceil(((d.getTime() - startOfYear.getTime()) / 86400000 + startOfYear.getDay() + 1) / 7);
-      key   = `${d.getFullYear()}-W${String(week).padStart(2, '0')}`;
-      label = `W${week}`;
-    } else if (period === 'monthly') {
-      key   = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-      const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-      label = months[d.getMonth()];
-    } else {
-      key   = String(d.getFullYear());
-      label = key;
-    }
-    buckets[key] = (buckets[key] ?? 0) + t.amount;
-  });
-
-  const limit = period === 'daily' ? 30 : period === 'weekly' ? 16 : period === 'monthly' ? 12 : 5;
-  return Object.entries(buckets)
-    .sort(([a], [b]) => a.localeCompare(b))
-    .slice(-limit)
-    .map(([key, amount]) => ({
-      key,
-      label: Object.entries(buckets).find(([k]) => k === key) ? key : key,
-      amount,
-      isNegative: amount < 0,
-    }))
-    .map(p => ({
-      ...p,
-      label: (() => {
-        const d = new Date(p.key.replace(/-W\d+/, ''));
-        if (period === 'daily') {
-          const [, m, dd] = p.key.split('-');
-          return `${dd}/${m}`;
-        }
-        if (period === 'weekly') return p.key.replace(/^\d+-/, '');
-        if (period === 'monthly') {
-          const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-          return months[d.getMonth()] ?? p.key;
-        }
-        return p.key;
-      })(),
-    }));
-}
-
-/**
- * Get a student's full profile including enrollments on this doctor's courses.
- *
- * Uses the get_doctor_student_profile SECURITY DEFINER RPC because doctors
- * do not have direct RLS access to student rows in the profiles table
- * (only their own row + other doctors are visible via standard policies).
- *
- * The RPC verifies the enrollment relationship before returning data.
- *
- * Returns null when:
- *   - the student row was hard-deleted (extremely rare)
- *   - the doctor has no enrollment relationship with this student
- *   - an unexpected error occurs
- * The modal treats null as "account not found" and shows the snapshot fallback.
- */
-export async function getDoctorStudentProfile(
-  doctorId: string,
-  studentId: string,
-): Promise<DoctorStudentProfile | null> {
-  const { data, error } = await backendClient.rpc('get_doctor_student_profile', {
-    p_doctor_id:  doctorId,
-    p_student_id: studentId,
-  });
-
-  if (error) {
-    // Expected control flow while the server maintenance gate is up — never a
-    // red console warning (see maintenanceStateModel.isMaintenanceError).
-    if (!isMaintenanceError(error)) {
-      console.warn('[getDoctorStudentProfile] RPC error:', error.message);
-    }
-    return null;
-  }
-
-  const d = data as any;
-
-  // RPC returned a logical error (no relationship, forbidden, etc.)
-  if (d?.error || d?.found === false) return null;
-
-  const enrollments: DoctorStudentProfile['enrollments'] = ((d.enrollments ?? []) as any[]).map(e => ({
-    enrollment_id:    e.enrollment_id,
-    course_id:        e.course_id,
-    course_title:     e.course_title ?? 'Unknown',
-    enrolled_at:      e.enrolled_at,
-    status:           e.status ?? 'active',
-    assigned_price:   e.assigned_price != null ? Number(e.assigned_price) : null,
-    progress_percent: e.progress_percent ?? 0,
-  }));
-
-  return {
-    id:             d.id,
-    full_name:      d.full_name    ?? null,
-    phone:          d.phone        ?? null,
-    email:          d.email        ?? null,
-    avatar_url:     d.avatar_url   ?? null,
-    watermark_id:   d.watermark_id ?? null,
-    public_user_id: d.public_user_id ?? null,
-    created_at:     d.created_at   ?? null,
-    account_status: d.account_status ?? 'active',
-    enrollments,
-  };
-}
-
-/** Get the doctor's global earnings price. */
-export async function getDoctorPricingSettings(
-  doctorId: string,
-): Promise<DoctorPricingSettings> {
-  const { data, error } = await backendClient
-    .from('profiles')
-    .select('doctor_global_price')
-    .eq('id', doctorId)
-    .single();
-  if (error) throw error;
-  return {
-    doctor_global_price: Number((data as any)?.doctor_global_price ?? 0),
-  };
-}
-
-/**
- * Update the doctor's global earnings price.
- * Fallback logic (enforced in DB / Edge Functions):
- *   1. doctor_global_price  — if set (> 0)
- *   2. course publish price — automatic fallback when global price is 0 / null
- */
-export async function setDoctorGlobalPrice(
-  doctorId: string,
-  globalPrice: number,
-): Promise<void> {
-  const { error } = await backendClient
-    .from('profiles')
-    .update({ doctor_global_price: globalPrice })
-    .eq('id', doctorId);
-  if (error) throw error;
-}
-
-/** Set a per-student assigned price override on an enrollment. */
-/**
- * Set (or clear) the per-student price override on an enrollment.
- *
- * Uses a SECURITY DEFINER RPC instead of a direct table UPDATE because the
- * enrollments_update RLS policy only covers the student themselves and admins —
- * doctors are blocked from direct UPDATE even on their own students, causing the
- * call to silently match 0 rows and return no error while saving nothing.
- *
- * The RPC also runs recalculate_doctor_earnings immediately, so doctor_earnings_events
- * reflects the new price without requiring a separate manual recalculate step.
- *
- * Returns the number of correction events inserted by the recalculation.
- */
-export async function setEnrollmentAssignedPrice(
-  enrollmentId: string,
-  price: number | null,
-): Promise<{ corrections: number }> {
-  const { data, error } = await backendClient.rpc('set_enrollment_assigned_price', {
-    p_enrollment_id: enrollmentId,
-    p_price:         price,
-  });
-  if (error) throw error;
-  const r = data as { success: boolean; code?: string; corrections?: number };
-  if (!r?.success) throw new Error(r?.code ?? 'Failed to save price override');
-  return { corrections: r.corrections ?? 0 };
-}
-
-/**
- * Recalculate doctor earnings without wiping history.
- * Inserts corrective 'adjustment' events so every active student/course pair
- * nets the correct price. Also zeroes out revenue for trashed (deleted) accounts.
- */
-export async function recalculateDoctorEarnings(
-  doctorId: string,
-): Promise<{ corrections: number }> {
-  const { data, error } = await backendClient.rpc('recalculate_doctor_earnings', {
-    p_doctor_id: doctorId,
-  });
-  if (error) throw error;
-  const r = data as { success: boolean; code?: string; corrections?: number };
-  if (!r?.success) throw new Error(r?.code ?? 'Recalculate failed');
-  return { corrections: r.corrections ?? 0 };
-}
-
-/**
- * Reset doctor earnings: delete ALL existing events then rebuild from scratch
- * using only active, non-trashed enrollments.
- */
-export async function resetDoctorEarnings(
-  doctorId: string,
-): Promise<{ deleted: number; rebuilt: number }> {
-  const { data, error } = await backendClient.rpc('reset_doctor_earnings', {
-    p_doctor_id: doctorId,
-  });
-  if (error) throw error;
-  const r = data as { success: boolean; code?: string; deleted?: number; rebuilt?: number };
-  if (!r?.success) throw new Error(r?.code ?? 'Reset failed');
-  return { deleted: r.deleted ?? 0, rebuilt: r.rebuilt ?? 0 };
-}
-
-
-export async function suspendStudentCourseAccess(
-  enrollmentId: string,
-): Promise<void> {
-  const { error } = await backendClient
-    .from('enrollments')
-    .update({ status: 'suspended' })
-    .eq('id', enrollmentId);
-  if (error) throw error;
-}
-
-/**
- * Restore a suspended student's course access.
- */
-export async function restoreStudentCourseAccess(
-  enrollmentId: string,
-): Promise<void> {
-  const { error } = await backendClient
-    .from('enrollments')
-    .update({ status: 'active' })
-    .eq('id', enrollmentId);
-  if (error) throw error;
-}
-
-/**
- * Remove a student from a course and deduct revenue — atomic SECURITY DEFINER RPC.
- * Price is resolved entirely inside the DB (assigned_price → course price → global price),
- * so the client never needs to pre-load or pass a price value.
- */
 export async function removeStudentFromCourseWithRefund(params: {
   doctorId:            string;
   enrollmentId:        string;
@@ -848,127 +360,6 @@ export async function removeStudentFromCourseWithRefund(params: {
  * Fetch a doctor's default contact information from their profile.
  * Used when a course has use_default_contact = true.
  */
-export async function getDoctorContactInfo(doctorId: string): Promise<{
-  contact_whatsapp: string | null;
-  contact_telegram: string | null;
-  contact_phone:    string | null;
-}> {
-  const { data, error } = await backendClient
-    .from('profiles')
-    .select('contact_whatsapp, contact_telegram, contact_phone')
-    .eq('id', doctorId)
-    .single();
-  if (error) throw error;
-  return data ?? { contact_whatsapp: null, contact_telegram: null, contact_phone: null };
-}
-
-// ── Doctor Earnings ───────────────────────────────────────────────────────────
-
-export interface EarningsTransaction {
-  id: string;
-  course_id: string | null;
-  student_id: string | null;
-  amount_egp: number;
-  transaction_type: string;
-  description: string | null;
-  created_at: string;
-  course?: { title: string } | null;
-  student?: { full_name: string } | null;
-}
-
-export interface PayoutRequest {
-  id: string;
-  amount_egp: number;
-  status: 'pending' | 'approved' | 'rejected' | 'paid';
-  method: string | null;
-  notes: string | null;
-  created_at: string;
-}
-
-export interface DoctorEarningsData {
-  totalEarnings: number;
-  pendingPayout:  number;
-  paidOut:        number;
-  transactions:   EarningsTransaction[];
-  payouts:        PayoutRequest[];
-  monthlyTotals:  { month: string; amount: number }[];
-}
-
-/**
- * Fetch the doctor's full earnings dashboard data.
- * Returns empty zeros when no transactions exist — safe to display before
- * any earnings are recorded.
- */
-export async function getDoctorEarningsData(doctorId: string): Promise<DoctorEarningsData> {
-  const [txRes, payRes] = await Promise.all([
-    backendClient
-      .from('doctor_earnings_transactions')
-      .select('*, course:courses(title), student:profiles!doctor_earnings_transactions_student_id_fkey(full_name)')
-      .eq('doctor_id', doctorId)
-      .order('created_at', { ascending: false })
-      .limit(100),
-    backendClient
-      .from('doctor_payout_requests')
-      .select('*')
-      .eq('doctor_id', doctorId)
-      .order('created_at', { ascending: false }),
-  ]);
-  if (txRes.error) throw txRes.error;
-  if (payRes.error) throw payRes.error;
-
-  const transactions: EarningsTransaction[] = (txRes.data ?? []).map((r: any) => ({
-    ...r,
-    course:  Array.isArray(r.course)  ? (r.course[0]  ?? null) : r.course,
-    student: Array.isArray(r.student) ? (r.student[0] ?? null) : r.student,
-  }));
-  const payouts: PayoutRequest[] = payRes.data ?? [];
-
-  const totalEarnings = transactions
-    .filter(t => t.transaction_type !== 'refund')
-    .reduce((s, t) => s + (t.amount_egp ?? 0), 0);
-
-  const paidOut = payouts
-    .filter(p => p.status === 'paid')
-    .reduce((s, p) => s + (p.amount_egp ?? 0), 0);
-
-  const pendingPayout = payouts
-    .filter(p => p.status === 'pending' || p.status === 'approved')
-    .reduce((s, p) => s + (p.amount_egp ?? 0), 0);
-
-  // Build monthly totals for chart (last 6 months)
-  const monthlyMap: Record<string, number> = {};
-  transactions.forEach(t => {
-    if (t.transaction_type === 'refund') return;
-    const d = new Date(t.created_at);
-    const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-    monthlyMap[key] = (monthlyMap[key] ?? 0) + (t.amount_egp ?? 0);
-  });
-  const monthlyTotals = Object.entries(monthlyMap)
-    .sort(([a], [b]) => a.localeCompare(b))
-    .slice(-6)
-    .map(([month, amount]) => ({ month, amount }));
-
-  return { totalEarnings, pendingPayout, paidOut, transactions, payouts, monthlyTotals };
-}
-
-/**
- * Submit a payout request on behalf of a doctor.
- */
-export async function submitPayoutRequest(doctorId: string, payload: {
-  amount_egp: number;
-  method: string;
-  notes?: string;
-}): Promise<void> {
-  const { error } = await backendClient.from('doctor_payout_requests').insert({
-    doctor_id:  doctorId,
-    amount_egp: payload.amount_egp,
-    method:     payload.method,
-    notes:      payload.notes ?? null,
-    status:     'pending',
-  });
-  if (error) throw error;
-}
-
 export async function getAllUsers(role?: string, status?: string) {
   let query = backendClient
     .from('profiles')
@@ -1639,9 +1030,36 @@ export async function updateSection(sectionId: string, updates: { title?: string
   return data;
 }
 
-export async function deleteSection(sectionId: string) {
-  const { error } = await backendClient.from('sections').delete().eq('id', sectionId);
-  if (error) throw error;
+/**
+ * Delete ONE section of ONE course (plus the lessons inside it, after the
+ * doctor confirms) through the dedicated transactional endpoint.
+ *
+ * WHY NOT `from('sections').delete()`
+ * ───────────────────────────────────
+ * That was a single DELETE statement, so ANY dependent row aborted it:
+ *   • enrollments.last_lesson_id references lessons with no ON DELETE action
+ *     (RESTRICT) — ANY section containing a student's resume lesson failed,
+ *   • lesson_pdfs / lesson_materials / lesson_progress / video_uploads hang
+ *     off those lessons,
+ *   • a migrated live schema may still hold the RESTRICT default on
+ *     lessons.section_id.
+ * MySQL answered 1451 ("Integrity constraint violation"), the UI masks SQL
+ * internals, and the doctor only ever saw "Failed to delete section."
+ *
+ * The endpoint (POST /courses/{id}/sections/{section_id}/delete) clears that
+ * exact chain in one transaction, keeps enrollments, other sections/courses
+ * and the shared video-asset library intact, and answers with how many
+ * lessons were removed so the UI can report something truthful.
+ */
+export async function deleteSection(sectionId: string, courseId: string) {
+  if (!courseId) throw new Error('deleteSection requires the owning course id');
+  return invokeEdgeFunction<{
+    success: boolean;
+    section_id: string;
+    section_title: string;
+    removed_lessons: number;
+    remaining_sections: number;
+  }>('delete-section', { section_id: sectionId, course_id: courseId });
 }
 
 /** Reorder sections for a course atomically via individual updates. */
@@ -2217,16 +1635,30 @@ export async function getDoctorStudentEnrollments(doctorId: string) {
  *  (the UPDATE can only match enrollments whose course belongs to the
  *  calling doctor), so cross-doctor suspension is impossible.
  */
+export async function suspendStudentCourseAccess(enrollmentId: string): Promise<void> {
+  const { error } = await backendClient
+    .from('enrollments')
+    .update({ status: 'suspended' })
+    .eq('id', enrollmentId);
+  if (error) throw error;
+}
+
 /** Suspend a course subscription. Delegates to the canonical writer — there is
  *  ONE enrollment-suspension path, so a future enforcement change cannot land
  *  on one alias and miss the other. */
-export async function suspendCourseSubscription(enrollmentId: string) {
+export async function suspendCourseSubscription(enrollmentId: string): Promise<void> {
   return suspendStudentCourseAccess(enrollmentId);
 }
 
-/** Resume a suspended course subscription (canonical writer; see suspend alias). */
-export async function resumeCourseSubscription(enrollmentId: string) {
-  return restoreStudentCourseAccess(enrollmentId);
+/** Resume a suspended course subscription.
+ *  RETENTION NOTE: enrollment suspension/resumption is enrollment management,
+ *  not the earnings feature — it is intentionally kept after the removal. */
+export async function resumeCourseSubscription(enrollmentId: string): Promise<void> {
+  const { error } = await backendClient
+    .from('enrollments')
+    .update({ status: 'active' })
+    .eq('id', enrollmentId);
+  if (error) throw error;
 }
 
 /** Remove a student from a course via SECURITY DEFINER RPC.
@@ -2314,10 +1746,18 @@ export interface BulkStudentActionResult {
 export async function bulkStudentAction(params: {
   enrollmentIds: string[];
   action: 'suspend' | 'resume' | 'remove';
+  /**
+   * Optional course scope. When present the backend additionally requires every
+   * enrollment id to belong to this course (and still to the caller's own
+   * courses) — a course-scoped "Select all" can never spill into another
+   * course. Omit for a deliberate cross-course selection.
+   */
+  courseId?: string;
 }): Promise<BulkStudentActionResult> {
   return invokeEdgeFunction<BulkStudentActionResult>('student-bulk-action', {
     enrollment_ids: params.enrollmentIds,
     action: params.action,
+    ...(params.courseId ? { course_id: params.courseId } : {}),
   });
 }
 
@@ -3719,43 +3159,11 @@ export async function updatePricingSettings(creditAmount: number, currency = 'EG
   await upsertSystemConfig('credit_price', { amount: creditAmount, currency });
 }
 
-/** Set a doctor's individual credit selling price.
- *  Writes an audit log entry with old/new values automatically (server-side RPC). */
-export async function setDoctorCreditPrice(
-  doctorId:  string,
-  newPrice:  number,
-  actorId?:  string,
-  actorName?: string,
-  actorRole?: string,
-): Promise<void> {
-  const { error } = await backendClient.rpc('set_doctor_credit_price', {
-    p_doctor_id:  doctorId,
-    p_new_price:  newPrice,
-    p_actor_id:   actorId  ?? null,
-    p_actor_name: actorName ?? null,
-    p_actor_role: actorRole ?? null,
-  });
-  if (error) throw error;
-}
-
-/** Set a per-course price override for a doctor (admin only). */
-export async function setDoctorCoursePrice(
-  courseId: string,
-  newPrice: number,
-): Promise<void> {
-  const { error } = await backendClient
-    .from('courses')
-    .update({ price_egp: newPrice })
-    .eq('id', courseId);
-  if (error) throw error;
-}
-
 export interface DoctorActivityStats {
   credit_selling_price: number;
   total_allocated:      number;
   total_used:           number;
   remaining_credits:    number;
-  total_earnings:       number;
   courses_sold:         number;
   students_enrolled:    number;
   videos_uploaded:      number;
@@ -4032,84 +3440,6 @@ export async function getRevenueStats() {
     currency: pricing.creditPrice.currency,
     creditPrice: unitPrice,
   };
-}
-
-// ── Platform Earnings Reset ───────────────────────────────────────────────────
-
-export interface EarningsResetRecord {
-  id: string;
-  reset_at: string;
-  earnings_before: number;
-  reset_by_email: string;
-}
-
-export interface PlatformEarningsStats {
-  totalEarningsAllTime: number;
-  earningsSinceReset: number;
-  lastReset: EarningsResetRecord | null;
-  currency: string;
-  creditPrice: number;
-}
-
-/**
- * Returns platform earnings stats:
- * - total all-time revenue
- * - revenue since the last reset (earnings counter value)
- * - last reset record
- */
-export async function getPlatformEarningsStats(): Promise<PlatformEarningsStats> {
-  const [pricing, creditTx, resetRows] = await Promise.all([
-    getPricingSettings(),
-    backendClient
-      .from('credit_transactions')
-      .select('amount, created_at, transaction_type')
-      .in('transaction_type', ['allocation', 'grant_admin', 'grant_super_admin'])
-      .order('created_at', { ascending: false })
-      .limit(5000),
-    backendClient
-      .from('platform_earnings_resets')
-      .select('id, reset_at, earnings_before, reset_by_email')
-      .order('reset_at', { ascending: false })
-      .limit(1),
-  ]);
-
-  const txns = creditTx.data ?? [];
-  const unitPrice = pricing.creditPrice.amount;
-  const lastReset = (resetRows.data ?? [])[0] ?? null;
-
-  const totalCredits = txns.reduce((s: number, t: { amount: number | null }) => s + (t.amount ?? 0), 0);
-  const totalEarningsAllTime = totalCredits * unitPrice;
-
-  const creditsAfterReset = lastReset
-    ? txns
-        .filter((t: { created_at: string; amount: number | null }) => t.created_at > lastReset.reset_at)
-        .reduce((s: number, t: { amount: number | null }) => s + (t.amount ?? 0), 0)
-    : totalCredits;
-
-  return {
-    totalEarningsAllTime,
-    earningsSinceReset: creditsAfterReset * unitPrice,
-    lastReset: lastReset ?? null,
-    currency: pricing.creditPrice.currency,
-    creditPrice: unitPrice,
-  };
-}
-
-/**
- * Atomically resets the platform earnings counter via SECURITY DEFINER RPC.
- * Writes an audit log entry. Only callable by super_admin.
- */
-export async function resetPlatformEarnings(
-  earningsBefore: number,
-  adminEmail: string,
-): Promise<string> {
-  const { data, error } = await backendClient.rpc('reset_platform_earnings', {
-    p_earnings_before: earningsBefore,
-    p_admin_email:     adminEmail,
-    p_note:            null,
-  });
-  if (error) throw error;
-  return data as string;
 }
 
 // ── Enterprise Ledger API ─────────────────────────────────────────────────────
@@ -4785,28 +4115,41 @@ export interface ArchivedCourse {
   id: string;
   title: string;
   doctor_id: string;
-  doctor_name: string;
-  archived_at: string;
-  archived_by: string;
-  archived_by_name: string;
+  doctor_name: string | null;
+  /** Null on legacy rows archived before archived_at was written. */
+  archived_at: string | null;
+  archived_by: string | null;
+  archived_by_name: string | null;
   archive_reason: string | null;
+  /** DISTINCT student accounts enrolled in the course. */
   students_count: number;
   lessons_count: number;
+  /** Total student-course enrollments (rows), for reconciliation displays. */
+  enrollments_count?: number;
   status: string;
 }
 
-export async function getArchivedCourses(
-  actorId: string,
-  actorRole: string,
-  doctorId?: string
-): Promise<ArchivedCourse[]> {
-  const { data, error } = await backendClient.rpc('get_archived_courses', {
-    p_actor_id: actorId,
-    p_actor_role: actorRole,
-    p_doctor_id: doctorId ?? null,
-  });
+/**
+ * Archived courses for the CURRENT user (identity always comes from the
+ * session on the server):
+ *   • doctor     → only courses they own — this is the doctor dashboard flow;
+ *   • admin / SA → every archived course, optionally narrowed to one doctor.
+ *
+ * The PHP handler wraps its rows in `{ courses: [...] }` while older Supabase
+ * deployments returned a bare array, so both shapes are accepted. Returning the
+ * wrapper by accident used to make `.filter()` throw on the Archived screen.
+ */
+export async function getArchivedCourses(doctorId?: string): Promise<ArchivedCourse[]> {
+  const { data, error } = await backendClient.rpc<ArchivedCourse[] | { courses?: ArchivedCourse[] }>(
+    'get_archived_courses',
+    doctorId ? { p_doctor_id: doctorId } : {},
+  );
   if (error) throw error;
-  return (data ?? []) as ArchivedCourse[];
+  if (Array.isArray(data)) return data;
+  if (data && Array.isArray((data as { courses?: ArchivedCourse[] }).courses)) {
+    return (data as { courses: ArchivedCourse[] }).courses;
+  }
+  return [];
 }
 
 // ── Archive Analytics ─────────────────────────────────────────────────────────
@@ -5258,86 +4601,6 @@ export async function adminRemoveEnrollment(enrollmentId: string): Promise<void>
   if (!(data as any)?.success) throw new Error('Remove failed');
 }
 
-
-// ── Admin Doctor Earnings (RPC-backed, admin-only) ────────────────────────────
-
-export interface DoctorEarningsCourse {
-  course_id:         string;
-  course_title:      string;
-  current_price:     number;
-  enrollment_count:  number;
-  course_revenue:    number;
-  avg_price_at_sale: number;
-}
-
-export interface AdminDoctorEarningsDashboard {
-  custom_pricing_enabled: boolean;
-  earnings_mode:          'credit' | 'course';
-  credit_selling_price:   number;
-  total_earnings:         number;
-  monthly_earnings:       number;
-  today_earnings:         number;
-  total_enrollments:      number;
-  paid_courses_count:     number;
-  avg_course_price:       number;
-  per_course:             DoctorEarningsCourse[];
-}
-
-export interface DoctorPricingHistoryRow {
-  id:           string;
-  field_name:   string;
-  old_value:    string | null;
-  new_value:    string | null;
-  changed_by:   string;
-  changer_name: string | null;
-  created_at:   string;
-}
-
-/** Get full earnings dashboard for a doctor (admin view via RPC). */
-export async function getAdminDoctorEarningsDashboard(
-  doctorId: string,
-): Promise<AdminDoctorEarningsDashboard> {
-  const { data, error } = await backendClient.rpc('get_doctor_earnings_dashboard', {
-    p_doctor_id: doctorId,
-  });
-  if (error) throw error;
-  return data as AdminDoctorEarningsDashboard;
-}
-
-/** Update custom pricing toggle + earnings mode for a doctor (admin only). */
-export async function setDoctorEarningsSettings(
-  doctorId: string,
-  customPricingEnabled: boolean,
-  earningsMode: 'credit' | 'course',
-): Promise<void> {
-  const { error } = await backendClient.functions.invoke('admin-doctor-earnings', {
-    body: { action: 'update_settings', doctor_id: doctorId, custom_pricing_enabled: customPricingEnabled, earnings_mode: earningsMode },
-  });
-  if (error) throw error;
-}
-
-/** Get pricing change history for a doctor (admin only). */
-export async function getDoctorPricingHistory(
-  doctorId: string,
-  limit = 50,
-): Promise<DoctorPricingHistoryRow[]> {
-  const { data, error } = await backendClient
-    .from('doctor_pricing_history')
-    .select('id, field_name, old_value, new_value, changed_by, changer:profiles!doctor_pricing_history_changed_by_fkey(full_name), created_at')
-    .eq('doctor_id', doctorId)
-    .order('created_at', { ascending: false })
-    .limit(limit);
-  if (error) throw error;
-  return ((data ?? []) as any[]).map(r => ({
-    id:           r.id,
-    field_name:   r.field_name,
-    old_value:    r.old_value,
-    new_value:    r.new_value,
-    changed_by:   r.changed_by,
-    changer_name: r.changer?.full_name ?? null,
-    created_at:   r.created_at,
-  }));
-}
 
 // ─────────────────────────────────────────────────────────────────────────────
 

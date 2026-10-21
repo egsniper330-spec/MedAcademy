@@ -61,11 +61,6 @@ export default function DoctorCreditTimelineScreen() {
   const layout = useLayout();
   const router = useRouter();
   const { profile: currentUser } = useProfileStore();
-  // Super Admins get routed to the dedicated SA earnings page (identical data, read-only UI).
-  // Admins continue to the admin earnings page (which also has settings editing).
-  const earningsPath = currentUser?.role === 'super_admin'
-    ? `/sa-doctor-earnings?doctor_id=${doctor_id}&doctor_name=${encodeURIComponent(doctor_name ?? '')}`
-    : `/(app)/(admin)/doctor-earnings?doctor_id=${doctor_id}&doctor_name=${encodeURIComponent(doctor_name ?? '')}`;
 
   const [loading, setLoading]           = useState(true);
   const [refreshing, setRefreshing]     = useState(false);
@@ -197,33 +192,6 @@ export default function DoctorCreditTimelineScreen() {
 
         {!loading && !loadError && (
           <>
-            {/* ── Earnings Dashboard shortcut ── */}
-            <Pressable
-              onPress={() => router.push(earningsPath as any)}
-              style={{
-                flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-                backgroundColor: '#16A34A12', borderRadius: 14,
-                paddingHorizontal: 16, paddingVertical: 12, marginBottom: 12,
-              }}
-            >
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-                <TrendingUp size={18} color="#16A34A" />
-                <Text style={{ fontSize: 13, fontWeight: '700', color: '#16A34A' }}>Open Earnings Dashboard</Text>
-              </View>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                {actStats && (
-                  <View style={{
-                    backgroundColor: actStats.credit_selling_price > 0 ? '#16A34A20' : `${'#000'}10`,
-                    borderRadius: 7, paddingHorizontal: 7, paddingVertical: 3,
-                  }}>
-                    <Text style={{ fontSize: 10, fontWeight: '700', color: '#16A34A' }}>
-                      {actStats.credit_selling_price > 0 ? `EGP ${actStats.credit_selling_price}/cr` : 'Platform price'}
-                    </Text>
-                  </View>
-                )}
-              </View>
-            </Pressable>
-
             {/* ── Activity Stats ── */}
             {actStats && (
               <>
@@ -261,22 +229,6 @@ export default function DoctorCreditTimelineScreen() {
                     </NeuCard>
                   ))}
                 </View>
-
-                {/* Total Earnings */}
-                <NeuCard style={{ padding: 14, flexDirection: 'row', alignItems: 'center', gap: 14, marginBottom: 10 }}>
-                  <View style={{ width: 40, height: 40, borderRadius: 13, backgroundColor: '#16A34A18', alignItems: 'center', justifyContent: 'center' }}>
-                    <TrendingUp size={20} color="#16A34A" />
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.45) }}>Total Earnings</Text>
-                    <Text style={{ fontSize: 20, fontWeight: '900', color: '#16A34A' }}>
-                      EGP {actStats.total_earnings.toLocaleString('en-US')}
-                    </Text>
-                    <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.35) }}>
-                      {actStats.total_used} credits × EGP {actStats.credit_selling_price}
-                    </Text>
-                  </View>
-                </NeuCard>
 
                 {/* Last login / last active */}
                 <NeuCard style={{ padding: 14, marginBottom: 20, gap: 8 }}>

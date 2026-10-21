@@ -610,22 +610,6 @@ export default function GlobalSearchScreen() {
                   ))}
                 </View>
 
-                {/* Total Earnings */}
-                <NeuCard style={{ padding: 14, flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-                  <View style={{ width: 38, height: 38, borderRadius: 12, backgroundColor: '#16A34A18', alignItems: 'center', justifyContent: 'center' }}>
-                    <TrendingUp size={18} color="#16A34A" />
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.45) }}>Total Earnings</Text>
-                    <Text style={{ fontSize: 20, fontWeight: '900', color: '#16A34A' }}>
-                      EGP {drawerActStats.total_earnings.toLocaleString('en-US')}
-                    </Text>
-                    <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.35) }}>
-                      {drawerActStats.total_used} credits × EGP {drawerActStats.credit_selling_price}
-                    </Text>
-                  </View>
-                </NeuCard>
-
                 {/* Last login / activity */}
                 <NeuCard style={{ padding: 14, gap: 8 }}>
                   {[

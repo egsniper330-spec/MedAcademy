@@ -30,6 +30,10 @@ export const FEATURE_FLAG_DEFAULTS: Record<string, boolean> = {
   course_creation: true,
   doctor_course_publishing: true,
   course_enrollment: true,
+  // EARNINGS: the earnings FEATURE is retired (no screen, tab or drawer entry),
+  // but the server still registers the `doctor_earnings` key as a data-protection
+  // switch over the RETAINED earnings tables. The mirror stays for registry
+  // parity (tests/platformCenter) — no UI reads it.
   doctor_earnings: true,
   // Second-pass registry (see the platform audit report for the skipped list).
   password_reset: true,

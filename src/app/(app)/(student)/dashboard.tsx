@@ -26,6 +26,7 @@ import { neuColors, neuMicroStyle, useLayout, safeBottom, mutedTextStyle } from 
 import { DashboardHeader } from '@/components/DashboardHeader';
 import { useNotificationPermission } from '@/hooks/useNotificationPermission';
 import { PermissionRationaleModal } from '@/components/PermissionRationaleModal';
+import { markEntryIntent } from '@/lib/navigation/navIntent';
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 interface FilterState {
@@ -318,7 +319,11 @@ export default function StudentDashboard() {
         rightActions={
           <>
             <Pressable
-              onPress={() => router.push('/(app)/notifications' as RelativePathString)}
+              onPress={() => {
+                // Dashboard entry (not the drawer) → notifications shows Back.
+                markEntryIntent('/(app)/notifications', 'nested');
+                router.push('/(app)/notifications' as RelativePathString);
+              }}
               accessibilityLabel={unreadCount > 0 ? `${t('nav.notifications')}, ${tCount('common.unreadCount', unreadCount)}` : t('nav.notifications')}
               accessibilityRole="button"
               style={[{ width: layout.touchTarget + 2, height: layout.touchTarget + 2, borderRadius: layout.cardRadius, alignItems: 'center', justifyContent: 'center' }, neuMicroStyle(isDark)]}
@@ -422,7 +427,10 @@ export default function StudentDashboard() {
           <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: layout.pad.md }}>
             <Text style={{ fontSize: layout.bodySize + 2, fontWeight: '800', color: c.text }}>{t('nav.myCourses')}</Text>
             {subscriptions.length > 3 && (
-              <Pressable onPress={() => router.push('/(app)/(student)/my-courses' as RelativePathString)}
+              <Pressable onPress={() => {
+                markEntryIntent('/(app)/(student)/my-courses', 'nested');
+                router.push('/(app)/(student)/my-courses' as RelativePathString);
+              }}
                 style={{ flexDirection: 'row', alignItems: 'center', gap: layout.pad.xs }}>
                 <Text style={{ fontSize: layout.captionSize + 1, fontWeight: '700', color: c.primary }}>{t('common.viewAll')}</Text>
                 <ChevronRight size={layout.captionSize + 1} color={c.primary} />
@@ -450,7 +458,10 @@ export default function StudentDashboard() {
               {filteredMyCourses.slice(0, 3).map(renderMyCourseCard)}
               {filteredMyCourses.length > 3 && (
                 <Pressable
-                  onPress={() => router.push('/(app)/(student)/my-courses' as RelativePathString)}
+                  onPress={() => {
+                    markEntryIntent('/(app)/(student)/my-courses', 'nested');
+                    router.push('/(app)/(student)/my-courses' as RelativePathString);
+                  }}
                   style={{ alignItems: 'center', marginBottom: layout.sectionGap }}
                 >
                   <Text style={{ fontSize: layout.bodySize, fontWeight: '700', color: c.primary }}>

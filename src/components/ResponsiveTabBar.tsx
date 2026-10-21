@@ -17,6 +17,7 @@
 import React, { useCallback } from 'react';
 import { View, Text, Pressable, StyleSheet, type ViewStyle } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { markEntryIntent } from '@/lib/navigation/navIntent';
 
 /* ── Types (loose to avoid importing @react-navigation/bottom-tabs) ── */
 interface Props {
@@ -99,6 +100,9 @@ export default function ResponsiveTabBar({
       });
 
       if (activeIndex !== routeIndex && !event.defaultPrevented) {
+        // A tab tap is primary navigation: the destination keeps the menu
+        // control even if a quick action previously opened it with Back.
+        markEntryIntent('/' + routeName, 'main');
         navigation.navigate(routeName);
       }
     },

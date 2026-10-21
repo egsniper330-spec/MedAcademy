@@ -172,8 +172,8 @@ function AppLayoutNav() {
   // Uses AppState (not useFocusEffect) because this layout is never unmounted.
   // FEATURE FLAGS: foreground resume is also the moment a Super Admin toggle
   // may have landed while the user was away — hydrate flag state (fire-and-
-  // forget, offline-safe) so availability UIs (e.g. Doctor Earnings) track
-  // the server without a restart or reinstall.
+  // forget, offline-safe) so capability-gated UIs track the server without a
+  // restart or reinstall.
   const appStateRef = useRef(AppState.currentState);
   useEffect(() => {
     if (process.env.EXPO_OS === 'web') return;
@@ -287,7 +287,7 @@ function AppLayoutNav() {
         // changes that happened while this session was signed in, and
         // ACTIVE→BLOCKED that happened between sessions. ALSO flushes feature
         // flag state so a Super Admin toggle made during the gap reaches the
-        // doctor's Earnings before the first render completes.
+        // app before the first render completes.
         void refreshAccountState(session.user.id, { reason: 'shell_cold_start' }).then((outcome) => {
           void handleRefreshOutcome(outcome, { userId: session.user.id });
         });

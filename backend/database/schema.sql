@@ -424,7 +424,7 @@ CREATE TABLE IF NOT EXISTS `enrollments` (
   UNIQUE (`student_id`, `course_id`),
   CONSTRAINT `fk_enrollments_student_id` FOREIGN KEY (`student_id`) REFERENCES `profiles` (`id`) ON DELETE CASCADE,
   CONSTRAINT `fk_enrollments_course_id` FOREIGN KEY (`course_id`) REFERENCES `courses` (`id`) ON DELETE CASCADE,
-  CONSTRAINT `fk_enrollments_last_lesson_id` FOREIGN KEY (`last_lesson_id`) REFERENCES `lessons` (`id`),
+  CONSTRAINT `fk_enrollments_last_lesson_id` FOREIGN KEY (`last_lesson_id`) REFERENCES `lessons` (`id`) ON DELETE SET NULL,
   CONSTRAINT `fk_enrollments_enrolled_by` FOREIGN KEY (`enrolled_by`) REFERENCES `profiles` (`id`) ON DELETE SET NULL,
   CONSTRAINT `chk_enrollments_c0` CHECK ((progress_percent IS NULL OR (progress_percent >= 0 AND progress_percent <= 100)))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

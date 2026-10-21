@@ -229,7 +229,7 @@ check('no hardcoded physical side in the shared menu',
 check('no blind tree mirroring (row-reverse / scaleX(-1))', !/row-reverse|scaleX\(-1\)/.test(component));
 
 // The two menus that existed must now use the shared component.
-const videoLibrary = read('src/app/(app)/(hubs)/video-library.tsx');
+const videoLibrary = read('src/app/(app)/(doctor)/video-library.tsx');
 const picker = read('src/components/VideoLibraryPicker.tsx');
 check('video-library sort menu uses AnchoredMenu', /<AnchoredMenu/.test(videoLibrary));
 check('VideoLibraryPicker sort menu uses AnchoredMenu', /<AnchoredMenu/.test(picker));

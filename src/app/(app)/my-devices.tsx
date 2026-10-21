@@ -141,7 +141,7 @@ export default function MyDevices() {
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />} contentContainerStyle={{ paddingBottom: safeBottom(layout.insets.bottom) }}
       >
           {/* Back navigation header */}
-          <PageHeader title="My Devices" subtitle="Manage your registered devices" showBack />
+          <PageHeader title="My Devices" subtitle="Manage your registered devices" />
 
         <View style={{ paddingHorizontal: layout.screenPx, paddingTop: 12 }}>
 

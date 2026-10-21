@@ -24,6 +24,7 @@ import { Pressable, Text, View } from 'react-native';
 import { useRouter, type RelativePathString } from 'expo-router';
 import { neuFlatStyle, neuPressedStyle, useLayout, mutedTextStyle } from '@/lib/neu';
 import { neuColors } from '@/lib/neu';
+import { markEntryIntent } from '@/lib/navigation/navIntent';
 
 interface QuickActionBtnProps {
   icon: React.ElementType;
@@ -44,7 +45,13 @@ export function QuickActionBtn({ icon: Icon, label, color, path, c, isDark }: Qu
     <Pressable
       onPressIn={() => setPressed(true)}
       onPressOut={() => setPressed(false)}
-      onPress={() => router.push(path as RelativePathString)}
+      onPress={() => {
+        // A quick action opens the destination FROM this screen: the destination
+        // must offer Back (not the drawer menu), even when its route is also a
+        // primary drawer/tab destination (e.g. Students).
+        markEntryIntent(path, 'nested');
+        router.push(path as RelativePathString);
+      }}
       accessibilityLabel={label}
       accessibilityRole="button"
       style={{ width: '22%', maxWidth: Math.round(layout.touchTarget * 1.6), alignItems: 'center', marginBottom: layout.pad.md }}

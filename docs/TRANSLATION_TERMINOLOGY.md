@@ -78,6 +78,25 @@ English word cannot acquire two different Arabic words across the surfaces.
 | Weak / Fair / Good / Strong (password) | **ضعيفة / مقبولة / جيدة / قوية** | `password.strength.*` | Strength adjectives agree with the feminine noun «كلمة المرور»; «مقبولة» avoids the literal «عادلة», which reads as *fair-minded*. |
 | Optional | **اختياري** | `createUser.optional`, `editUser.newPasswordOptional` | Standard Arabic form label; used instead of «(إن أردت)» so the field header stays compact. |
 
+## Course builder (create / edit)
+
+Used by `src/app/(app)/course-builder/[id].tsx` (the `cb.*` namespace). These
+were chosen for internal consistency with the terminology already approved
+above, not from a new external source.
+
+| English | Arabic | Where | Reasoning |
+|---|---|---|---|
+| Course Status | **حالة الدورة** | `cb.field.courseStatus` | Same «الدورة» noun as the rest of the course namespace. |
+| Draft | **مسودة** | `courseStatus.draft`, `cb.statusHelp` | The state of unpublished authored content; standard Arabic UI term. |
+| Published | **منشور** | `courseStatus.published` | Agrees with the existing `courseStatus.published` key already used by the course list. |
+| Scheduled | **مجدول** | `courseStatus.scheduled` | Added because the lesson editor can schedule lessons; previously the raw enum value leaked. |
+| Structure | **الهيكل** | `cb.tab.structure` | The tab edits sections/lessons (the course's internal structure), not a “programme”. |
+| Section | **قسم** | `cb.section`, `drCourses.sectionCount` | Matches «أقسام» already used in the doctor course list. |
+| Learning & Access | **التعلّم والوصول** | `cb.learningAccess` | Two nouns, both standard; kept distinct from «الاشتراك» (subscription). |
+| Subscription Required | **الاشتراك مطلوب** | `cb.subscriptionRequired` | Reuses the approved «اشترك/مشترك» root so the setting and the student-facing gate agree. |
+| Enrollment Cost: 1 Credit | **تكلفة التسجيل: رصيد واحد** | `cb.enrollmentCost` | «التسجيل» is the enrollment *record*; the credit noun follows the earnings/credits section. |
+| Bulk Import | **استيراد جماعي** | `cb.bulkImport`, `nav.bulkImport` | Same pattern as the approved «منح رصيد جماعي» (batch action + «جماعي»). |
+
 ## Verification
 
 `tests/i18nTerminology.test.cjs` pins these decisions (including

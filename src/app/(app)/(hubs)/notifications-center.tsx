@@ -84,7 +84,6 @@ export default function NotificationsCenterScreen({ backTo }: { backTo?: string 
         title="Notification Center"
         subtitle="Send messages to users"
         accentColor="#D97706"
-        showBack
         backFallback={backTo ?? '/admin-overview'}
       />
 

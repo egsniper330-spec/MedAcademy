@@ -24,10 +24,6 @@ export interface Profile {
   university?: { id: string; name: string } | null;
   faculty?: { id: string; name: string } | null;
   academic_level?: { id: string; name: string } | null;
-  /** Doctor-only: whether the independent earnings system is active */
-  earnings_enabled?: boolean;
-  /** Doctor-only: default revenue per student enrollment (EGP) */
-  doctor_global_price?: number;
 }
 
 interface ProfileStore {

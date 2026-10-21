@@ -258,6 +258,11 @@ final class RpcController
 
     /**
      * get_doctor_earnings_dashboard — Full earnings dashboard for a doctor.
+     *
+     * RETIRED (earnings feature removed from Doctor, Admin and Super Admin
+     * surfaces): no route points here, so it cannot be reached over HTTP.
+     * Retained with its data for historical/audit purposes; delete in a
+     * separate reviewed cleanup.
      */
     public function doctorEarningsDashboard(Request $request): array
     {
@@ -297,6 +302,9 @@ final class RpcController
 
     /**
      * get_doctor_student_profile — Doctor fetches a specific student profile.
+     *
+     * RETIRED (earnings feature removed): this modal belonged to the earnings
+     * surface. Unreachable — no route points here.
      */
     public function doctorStudentProfile(Request $request): array
     {
@@ -593,6 +601,10 @@ final class RpcController
 
     /**
      * set_doctor_credit_price — Set custom credit price for a doctor.
+     *
+     * RETIRED (earnings feature removed): the admin per-doctor credit-price
+     * editor lived in the deleted earnings console, so no route points here.
+     * Kept with the history it writes; delete in a separate reviewed cleanup.
      */
     public function setDoctorCreditPrice(Request $request): array
     {

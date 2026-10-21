@@ -41,6 +41,7 @@ import {
   drawerDirection,
   panelEdgeStyle,
 } from '@/lib/ui/drawerDirection';
+import { markEntryIntent } from '@/lib/navigation/navIntent';
 
 type NavItemType = {
   icon: React.ElementType;
@@ -58,8 +59,6 @@ type NavSection = {
 function getNavSections(
   role: string,
   c: typeof neuColors.light,
-  earningsEnabled?: boolean,
-  platformEarningsOn?: boolean,
 ): NavSection[] {
   const commonBottom: NavSection = {
     items: [
@@ -95,21 +94,18 @@ function getNavSections(
     const doctorItems: NavItemType[] = [
       // Canonical doctor navigation order — do not reorder casually:
       // Dashboard, My Courses, Video Library, Students, Credits,
-      // Earnings, Notifications, Profile.
+      // Notifications, Profile.
+      //
+      // BULK IMPORT: removed from the DOCTOR drawer on request. The admin-side
+      // /bulk-import stays (unrelated role + workflow); only this entry was
+      // dropped, so no empty section or spacer is left behind.
       { icon: LayoutDashboard, label: t('nav.dashboard'),      path: '/dr-overview',   color: c.primary  },
       { icon: BookOpen,        label: t('nav.myCourses'),     path: '/courses',       color: '#7C3AED'  },
       { icon: Video,           label: t('nav.videoLibrary'),  path: '/video-library', color: '#0EA5E9'  },
       { icon: Users,           label: t('nav.students'),       path: '/students',      color: '#D97706'  },
       { icon: Stethoscope,     label: t('nav.credits'),        path: '/credits',       color: '#2DA8FF'  },
-      // EARNINGS — shown only while BOTH hold:
-      //   • the platform capability is ON (server-authoritative feature flag
-      //     doctor_earnings; Super Admin Feature Flags console), AND
-      //   • the doctor has the earnings system enabled for themselves.
-      // The screen itself also refuses (403 feature_disabled → unavailable
-      // state), so a deep link / stale route is still safe.
-      ...(platformEarningsOn && earningsEnabled
-        ? [{ icon: TrendingUp, label: t('nav.earnings'), path: '/dr-earnings', color: '#16A34A' } as NavItemType]
-        : []),
+      // EARNINGS: removed from the product (feature retired end-to-end). No
+      // navigation entry, no deep link target — the screens themselves are gone.
       { icon: Bell,            label: t('nav.notifications'),  path: '/notifications', color: c.primary  },
       { icon: User,            label: t('nav.profile'),        path: '/dr-profile',    color: '#7C3AED'  },
     ];
@@ -413,6 +409,11 @@ export default function DrawerNav() {
 
   const navigate = (path: string) => {
     closeDrawer();
+    // A DRAWER destination keeps the main-navigation control on the
+    // destination screen — record that intent before pushing (the destination
+    // header consumes it on focus). Same route opened from a quick action gets
+    // Back instead; see QuickActionBtn.
+    markEntryIntent(path, 'main');
     // Navigate immediately using canonical runtime paths. Delaying navigation
     // leaves the drawer animation and navigator state racing on web.
     router.push(path as RelativePathString);
@@ -499,12 +500,7 @@ export default function DrawerNav() {
   };
 
   const role = (profile?.role ?? 'student') as import('@/lib/enums').UserRole;
-  const earningsEnabled = !!(profile as any)?.earnings_enabled;
-  // Platform flag (server-authoritative). Read synchronously from the
-  // featureFlags cache; the app shell keeps it fresh on mount + foreground, so
-  // a Super Admin toggle is reflected without restart or reinstall.
-  const platformEarningsOn = isFeatureEnabled('doctor_earnings');
-  const baseSections = getNavSections(role, c, earningsEnabled, platformEarningsOn);
+  const baseSections = getNavSections(role, c);
 
   // Offline Videos drawer item is a PLAIN navigation row (UI decision): no
   // numeric badge. Download counts remain available internally via

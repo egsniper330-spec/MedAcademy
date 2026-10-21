@@ -177,11 +177,14 @@ check(
   doctorBody.includes("visibility_level = 'all'")
 );
 
-// ── 5. Authorization precedes the data read ─────────────────────────────────
+// ── 5. Transport: the endpoint is retired, the guards are still in the code ──
+// `get_doctor_student_profile` existed only for the earnings student modal, so
+// the route was withdrawn with the feature. The handler stays in the controller
+// (unrouted) and must keep every guard it had, so any future re-mount inherits
+// the authorization and minimization instead of an unguarded copy.
 const routesRaw = fs.readFileSync(ROUTES, 'utf8');
-const profileRoute = routesRaw.split('\n').find((l) => l.includes('/rpc/doctor-student-profile')) || '';
-check('M5: route requires authentication', profileRoute.includes('$auth'));
-check("M5: route requires the doctor role", /role'\s*=>\s*\[\s*'doctor'\s*\]/.test(profileRoute));
+check('M5: the retired doctor-student-profile route is not mounted',
+  !/\/rpc\/doctor-student-profile/.test(stripPhpComments(routesRaw)));
 check(
   'M5: server derives the doctor id from the session, not the request',
   doctorBody.includes("$doctorId = $request->user['id']")
@@ -191,7 +194,7 @@ check(
   doctorBody.indexOf('No shared enrollment with this student') !== -1 &&
     doctorBody.indexOf('No shared enrollment with this student') < doctorBody.indexOf('FROM profiles WHERE id =')
 );
-check('M5: handler is gated by the doctor_earnings feature flag', doctorBody.includes('assertDoctorEarningsEnabled'));
+check('M5: handler is still gated by the doctor_earnings feature flag', doctorBody.includes('assertDoctorEarningsEnabled'));
 
 // ── 6. Remaining full-row reads are staff-only ──────────────────────────────
 const otherFullReads = [];
@@ -214,17 +217,19 @@ for (const route of ['/admin/users/{id}', '/analytics/user-profile/{id}']) {
   );
 }
 
-// ── 7. The documented UI contract still lines up ────────────────────────────
+// ── 7. The client contract is withdrawn with the endpoint ──────────────────
+// Nothing may call a retired endpoint: the wrapper and its response type are
+// gone, so the app has no route to the cross-user read.
 const apiTs = fs.readFileSync(path.join(REPO, 'src', 'lib', 'api.ts'), 'utf8');
-const typeBlock = (apiTs.match(/export interface DoctorStudentProfile \{([\s\S]*?)\n\}/) || [])[1] || '';
-check('M7: client contract type exists', !!typeBlock);
-const declared = typeBlock ? [...typeBlock.matchAll(/^\s*([a-z_]+)\s*:/gm)].map((m) => m[1]) : [];
-for (const f of ['id', 'full_name', 'phone', 'email', 'avatar_url', 'watermark_id', 'created_at']) {
-  check(
-    "M7: client declares '" + f + "' and the server still supplies it",
-    declared.includes(f) && selected.includes(f)
-  );
-}
+check('M7: client wrapper for the retired endpoint is gone',
+  !/export async function getDoctorStudentProfile/.test(apiTs));
+check('M7: cross-user response type is gone',
+  !/export interface DoctorStudentProfile/.test(apiTs));
+check('M7: no client code calls the retired endpoint',
+  !/doctor_student_profile|doctor-student-profile/.test(apiTs));
+check('M7: the allowlist still carries the fields any future UI would need',
+  ['id', 'full_name', 'phone', 'email', 'avatar_url', 'watermark_id', 'created_at']
+    .every((f) => selected.includes(f)));
 
 // ── 8. The allowlist is portable across BOTH shipped schemas ────────────────
 for (const schemaFile of ['schema.sql', 'schema-no-triggers.sql']) {

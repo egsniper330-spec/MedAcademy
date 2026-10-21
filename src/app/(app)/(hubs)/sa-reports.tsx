@@ -17,6 +17,7 @@ import {
   TrendingUp, Activity,
 } from 'lucide-react-native';
 import { PageHeader } from '@/components/PageHeader';
+import { markEntryIntent } from '@/lib/navigation/navIntent';
 import { neuColors, neuFlatStyle, neuPressedStyle, useLayout, safeBottom, mutedTextStyle } from '@/lib/neu';
 import Bell from '@/components/Bell';
 
@@ -34,7 +35,11 @@ function NavItem({
     <Pressable
       onPressIn={() => setPressed(true)}
       onPressOut={() => setPressed(false)}
-      onPress={() => router.push(path as RelativePathString)}
+      onPress={() => {
+        // Hub → destination is a nested entry: the destination shows Back.
+        markEntryIntent(path, 'nested');
+        router.push(path as RelativePathString);
+      }}
     >
       <View style={[
         pressed ? neuPressedStyle(isDark) : neuFlatStyle(isDark),

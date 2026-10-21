@@ -223,7 +223,10 @@ for (const file of walk(path.join(ROOT, 'src'))) {
 }
 ok(inRange.length === 0,
   `no \`color: c.text, opacity: 0.25–0.68\` site survives anywhere in src (found ${inRange.length})`);
-ok(helperSites >= 800,
+// The floor tracks the shipped source size; it dropped when the three earnings
+// screens (~120 call sites) were retired. The sweep above is the real assertion —
+// this only has to be high enough that a wholesale revert would trip it.
+ok(helperSites >= 700,
   `${helperSites} call sites now route muted text through the theme-aware helper`);
 
 /* ══ summary ═════════════════════════════════════════════════════════════ */

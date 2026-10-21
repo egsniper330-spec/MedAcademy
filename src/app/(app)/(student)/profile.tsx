@@ -4,7 +4,7 @@
  */
 import { useState, useCallback } from 'react';
 import {
-  View, Text, ScrollView, useColorScheme, Pressable,
+  View, Text, ScrollView, useColorScheme, Pressable, I18nManager,
   ActivityIndicator, RefreshControl, Modal, TextInput,
   useWindowDimensions,
 } from 'react-native';
@@ -41,6 +41,7 @@ import * as ImagePicker from 'expo-image-picker';
 import { usePermission } from '@/hooks/usePermission';
 import { PermissionRationaleModal } from '@/components/PermissionRationaleModal';
 import { LanguageSetting } from '@/components/LanguageSetting';
+import { SettingsRow } from '@/components/SettingsRow';
 import { useTranslation } from '@/lib/i18n';
 import { statusLabel } from '@/lib/i18n/labels';
 
@@ -108,11 +109,15 @@ function SectionLabel({ label, color }: { label: string; color: string }) {
 }
 
 function InfoRow({ icon, label, value, c }: { icon: React.ReactNode; label: string; value: string; c: typeof neuColors.light }) {
+  // RTL-safe: `gap` instead of a physical marginLeft (which ends up on the
+  // wrong side once the row is mirrored), a capped label width so long Arabic
+  // labels wrap instead of squeezing the value, and a direction-aware text
+  // alignment for the value.
   return (
-    <View style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: `${c.text}08` }}>
-      <View style={{ width: 32, alignItems: 'center' }}>{icon}</View>
-      <Text style={{ fontSize: 13, ...mutedTextStyle(c, 0.5), minWidth: 90, flexShrink: 0, marginLeft: 8 }}>{label}</Text>
-      <Text style={{ flex: 1, fontSize: 14, fontWeight: '600', color: c.text, textAlign: 'right' }} numberOfLines={1}>
+    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: `${c.text}08` }}>
+      <View style={{ width: 26, alignItems: 'center', flexShrink: 0 }}>{icon}</View>
+      <Text style={{ fontSize: 13, ...mutedTextStyle(c, 0.5), maxWidth: '45%' }} numberOfLines={2}>{label}</Text>
+      <Text style={{ flex: 1, minWidth: 0, fontSize: 14, fontWeight: '600', color: c.text, textAlign: I18nManager.isRTL ? 'left' : 'right' }} numberOfLines={2}>
         {value || '—'}
       </Text>
     </View>
@@ -672,19 +677,23 @@ export default function StudentProfile() {
 
         {/* ── Security: Change Password ────────────────────────────── */}
         <SectionLabel label={t('profile.security')} color={c.text} />
+        {/* Shared SettingsRow — gap-based spacing so the icon never touches the
+            Arabic label and the row keeps a 48dp touch target. */}
         <NeuCard radius={18} style={{ paddingHorizontal: 16, marginBottom: 20 }}>
-          <Pressable onPress={openPwdEdit}
-            style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 14,
-                     borderBottomWidth: 1, borderBottomColor: `${c.text}08` }}>
-            <Lock size={18} color={c.primary} />
-            <Text style={{ flex: 1, fontSize: 15, fontWeight: '600', color: c.text, marginLeft: 10 }}>{t('studentProfile.changePassword')}</Text>
-            <ChevronRight size={16} color={c.text} opacity={0.3} />
-          </Pressable>
-          <Pressable onPress={() => setShowLogout(true)}
-            style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 14 }}>
-            <LogOut size={18} color="#DC2626" />
-            <Text style={{ flex: 1, fontSize: 15, fontWeight: '600', color: '#DC2626', marginLeft: 10 }}>{t('common.signOut')}</Text>
-          </Pressable>
+          <SettingsRow
+            c={c}
+            icon={<Lock size={18} color={c.primary} />}
+            label={t('studentProfile.changePassword')}
+            onPress={openPwdEdit}
+          />
+          <SettingsRow
+            c={c}
+            last
+            destructive
+            icon={<LogOut size={18} color="#DC2626" />}
+            label={t('common.signOut')}
+            onPress={() => setShowLogout(true)}
+          />
         </NeuCard>
 
         {/* ── App language ─────────────────────────────────────────── */}
@@ -694,19 +703,14 @@ export default function StudentProfile() {
         <SectionLabel label={t('studentProfile.information')} color={c.text} />
         <NeuCard radius={18} style={{ paddingHorizontal: 16, marginBottom: 20 }}>
           {INFO_LINKS.map((item, idx) => (
-            <Pressable
+            <SettingsRow
               key={item.path}
+              c={c}
+              icon={<item.icon size={18} color={c.primary} />}
+              label={t(item.labelKey)}
+              last={idx === INFO_LINKS.length - 1}
               onPress={() => router.push(item.path)}
-              style={{
-                flexDirection: 'row', alignItems: 'center', paddingVertical: 14,
-                borderBottomWidth: idx < INFO_LINKS.length - 1 ? 1 : 0,
-                borderBottomColor: `${c.text}08`,
-              }}
-            >
-              <item.icon size={18} color={c.primary} />
-              <Text style={{ flex: 1, fontSize: 15, fontWeight: '600', color: c.text, marginLeft: 10 }}>{t(item.labelKey)}</Text>
-              <ChevronRight size={16} color={c.text} opacity={0.3} />
-            </Pressable>
+            />
           ))}
         </NeuCard>
 
