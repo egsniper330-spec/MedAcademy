@@ -36,10 +36,22 @@ export interface UseUpdateResult {
   blocked: boolean;
   /**
    * The authoritative gate decision for the PROTECTED (authenticated) shell.
-   * 'pending'/'required' mean protected content must not render; the startup and
-   * sign-in surfaces are never gated (see resolveUpdateGateDecision).
+   * 'required' means a CONFIRMED mandatory update: block protected content.
+   * 'pending' only means the background check has not resolved yet and never
+   * blocks — render the app normally (see resolveUpdateGateDecision).
    */
   protectedDecision: UpdateGateDecision;
+  /**
+   * True when a confirmed mandatory update must block (protected shell AND
+   * authentication checkpoints). The ONLY blocking predicate: `pending` is
+   * deliberately excluded so a slow or failed version request can never hide
+   * the app behind a spinner.
+   */
+  gateBlocks: boolean;
+  /** True when the version check is on the wire right now. */
+  checkInFlight: boolean;
+  /** True when the last attempt finished without an answer (network/timeout). */
+  checkFailed: boolean;
   /** True when the version check has not produced a verdict yet. */
   pendingVerdict: boolean;
   /** Re-run the remote check now. */
@@ -59,6 +71,10 @@ export function useUpdate(): UseUpdateResult {
   // can never lag the state it describes (no effect, no extra render).
   const protectedDecision = getUpdateGateDecision(true);
   const pendingVerdict = state.verdict === 'UNKNOWN' && state.evaluating;
+  // ONLY a confirmed requirement blocks. 'pending' (unresolved: in flight or a
+  // failed attempt) renders the normal app — the background request is not a
+  // render dependency, and a network failure is not a verdict.
+  const gateBlocks = protectedDecision === 'required';
 
   const optionalDismissed =
     state.verdict === 'UPDATE_REQUIRED' &&
@@ -79,6 +95,9 @@ export function useUpdate(): UseUpdateResult {
     releaseNotes: state.releaseNotes,
     blocked: state.verdict === 'UPDATE_REQUIRED' && !optionalDismissed,
     protectedDecision,
+    gateBlocks,
+    checkInFlight: state.evaluating,
+    checkFailed: state.lastCheckFailed,
     pendingVerdict,
     recheck: async () => {
       void (await checkAppUpdate());

@@ -9,19 +9,34 @@
  * versionCode (integer, from the Android build) is the AUTHORITATIVE value.
  * Version names are display-only and are NEVER compared.
  *
- * ─── Fail-closed / fail-open policy (documented, matches the security gate) ─
- *  • UNKNOWN (no successful check yet, e.g. cold start with endpoint down):
- *    evaluating=true → the root ForceUpdateGate renders a blocking
- *    "Checking for updates…" wall. Protected content is NOT granted until a
- *    check completes. This is the fail-closed startup state.
- *  • UPDATE_REQUIRED (explicit verdict): hard block (FORCED) or dismissible
- *    banner (OPTIONAL) until a fresh check clears it. Never auto-clears.
+ * ─── Background-check policy (the check NEVER gates a first render) ─────────
+ *  • The check is started at app initialization and NOT awaited by any screen:
+ *    the splash / landing / sign-in screens and the authenticated shell all
+ *    render immediately. There is no "Checking for updates…" startup page —
+ *    that wall (the old fail-closed UNKNOWN state) was the reported defect.
+ *  • UNKNOWN (no verdict yet: a check is in flight, or the last attempt failed):
+ *    evaluating=true while a request is genuinely in flight, false once an
+ *    attempt has finished without an answer. Either way the app stays usable;
+ *    `lastCheckFailed` records the failure so it is never reported as
+ *    "no update needed".
+ *  • UPDATE_REQUIRED (explicit verdict): full-screen block on the protected
+ *    shell and on every authentication checkpoint. Never auto-clears — only a
+ *    fresh successful evaluation (this build now ≥ minimum) can clear it.
  *  • SUPPORTED (explicit verdict): normal app. A LATER check that cannot
  *    reach the endpoint (network down / endpoint error) PRESERVES the last
  *    explicit verdict — a temporary outage never locks out a user whose
  *    version was already verified supported, and never destroys the session.
  *    The verdict is refreshed on every foreground return; a stale "supported"
  *    is replaced the moment the server says otherwise.
+ *
+ * ─── One shared, race-safe request ──────────────────────────────────────────
+ *  Every trigger (cold start, foreground, reconnect, auth checkpoint, manual
+ *  re-check) funnels through `checkAppUpdate()`, which joins the in-flight
+ *  promise instead of opening a second request, and a monotonic generation
+ *  (`updateSeq`) drops late answers that a newer check or a server 426 has
+ *  already superseded. Auth checkpoints call `awaitUpdateCheck()`: join the
+ *  shared request for a bounded budget, never a duplicate request, never an
+ *  indefinite wait.
  *
  * ─── Server-side 426 handling ───────────────────────────────────────────────
  * Every authenticated API call carries X-App-Platform / X-App-Version-Code
@@ -44,8 +59,11 @@ import {
   evaluateUpdateVerdict,
   evaluateOfflineUpdatePolicy,
   resolveUpdateGateDecision,
+  resolveUpdateCheckpoint,
+  raceUpdateCheckWithTimeout,
   updateGateBlocks,
   type UpdateGateDecision,
+  type UpdateCheckpointPlan,
 } from './securityStateModel';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import NetInfo from '@react-native-community/netinfo';
@@ -68,7 +86,7 @@ export interface RemoteUpdateConfig {
 
 export interface UpdateState {
   verdict: UpdateVerdict;
-  /** True during the very first check (fail-closed startup wall). */
+  /** True while a version request is on the wire (never a blocking UI state). */
   evaluating: boolean;
   mode: UpdateMode;
   installedVersionName: string;
@@ -81,6 +99,13 @@ export interface UpdateState {
   lastCheckedAt: number | null;
   /** True when the last refresh failed and a previous verdict is being kept. */
   usingCachedVerdict: boolean;
+  /**
+   * True when the most recent attempt finished WITHOUT an answer (network /
+   * timeout / endpoint error). Kept separately from `evaluating` so a finished
+   * failure is never mistaken for "still checking" (that was the permanent
+   * startup wall) and never reported as "no update needed".
+   */
+  lastCheckFailed: boolean;
 }
 
 // ─── Installed identity (from the native build, not JS config) ────────────────
@@ -115,6 +140,7 @@ let state: UpdateState = {
   releaseNotes: null,
   lastCheckedAt: null,
   usingCachedVerdict: false,
+  lastCheckFailed: false,
 };
 
 function setState(patch: Partial<UpdateState>): void {
@@ -160,7 +186,10 @@ export function markServerUpdateRequired(meta: {
     updateUrl: meta.updateUrl ?? state.updateUrl,
     usingCachedVerdict: false,
     lastCheckedAt: Date.now(),
+    lastCheckFailed: false,
   });
+  clearUpdateRetry();      // a server verdict settles the question
+  updateRetryAttempt = 0;
 }
 
 /** apiFetch ↔ service wiring (idempotent). */
@@ -217,8 +246,9 @@ export async function openUpdateUrl(url: string): Promise<{ ok: boolean; error?:
  *      - if we already have an explicit verdict (SUPPORTED or
  *        UPDATE_REQUIRED) → KEEP it (usingCachedVerdict=true). No lockout on
  *        transient failures; no staleness for a block.
- *      - if UNKNOWN (first check of the process) → stay UNKNOWN; the gate
- *        keeps the fail-closed startup wall until a check succeeds.
+ *      - if UNKNOWN (no verdict yet) → stay UNKNOWN with evaluating=false and
+ *        lastCheckFailed=true; the app keeps working and the bounded retry /
+ *        next checkpoint asks again. A failure is NEVER published as SUPPORTED.
  */
 /**
  * Monotonic request generation. Every check records the generation it started
@@ -252,8 +282,59 @@ export async function checkAppUpdate(): Promise<UpdateState> {
   }
 }
 
+/** True while a version request is on the wire (used by diagnostics/tests). */
+export function isUpdateCheckInFlight(): boolean {
+  return updateCheckInFlight !== null;
+}
+
+/**
+ * Starts the background check when this session has no verdict yet, joining an
+ * existing request instead of opening another. Every authentication surface
+ * calls this on mount, so a check is guaranteed to be in flight by the time
+ * the user can submit credentials — without any screen awaiting it.
+ */
+export function ensureUpdateCheck(): void {
+  if (updateCheckInFlight) return;
+  if (state.verdict !== 'UNKNOWN') return;
+  void checkAppUpdate();
+}
+
+// ─── Bounded retry after a failed attempt ────────────────────────────────────
+// A finished failure leaves verdict=UNKNOWN (never SUPPORTED — an unreachable
+// endpoint is not evidence that no update is required). The checkpoints below
+// retry it: foreground (initUpdateLifecycle), reconnect (offlineTransition),
+// an authentication attempt (awaitUpdateCheck), the manual "Check again"
+// button, and this bounded timer chain so a user who never backgrounds the app
+// still converges on the server's verdict. Three attempts, then stop — no
+// unbounded retry loop, and any explicit verdict cancels the chain.
+const UPDATE_RETRY_DELAYS_MS = [20_000, 45_000, 90_000] as const;
+let updateRetryAttempt = 0;
+let updateRetryTimer: ReturnType<typeof setTimeout> | null = null;
+
+function clearUpdateRetry(): void {
+  if (updateRetryTimer !== null) {
+    clearTimeout(updateRetryTimer);
+    updateRetryTimer = null;
+  }
+}
+
+function scheduleUpdateRetryAfterFailure(): void {
+  if (state.verdict !== 'UNKNOWN') return;
+  if (updateRetryAttempt >= UPDATE_RETRY_DELAYS_MS.length) return;
+  const delay = UPDATE_RETRY_DELAYS_MS[updateRetryAttempt];
+  updateRetryAttempt += 1;
+  clearUpdateRetry();
+  updateRetryTimer = setTimeout(() => {
+    updateRetryTimer = null;
+    if (state.verdict === 'UNKNOWN') void checkAppUpdate();
+  }, delay);
+}
+
 async function runUpdateCheck(): Promise<UpdateState> {
   const mySeq = ++updateSeq;
+  // "A check is on the wire" — accurate for the whole request, so an auth
+  // checkpoint can tell 'wait' (join it) from 'retry' (nothing running).
+  setState({ evaluating: true });
   try {
     // Native platforms send explicit identity headers; on web the headers are
     // omitted (CORS allowlist on the deployed backend does not include them
@@ -277,28 +358,46 @@ async function runUpdateCheck(): Promise<UpdateState> {
           evaluating: false,
           usingCachedVerdict: false,
           lastCheckedAt: Date.now(),
+          lastCheckFailed: false,
         });
+        clearUpdateRetry();
+        updateRetryAttempt = 0;
         return state;
       }
-      // Transient failure — keep any explicit verdict (see policy above).
-      if (state.verdict === 'UNKNOWN') {
-        setState({ evaluating: true, usingCachedVerdict: true });
-      } else {
-        setState({ usingCachedVerdict: true, lastCheckedAt: Date.now() });
-      }
-      return state;
+      return recordFailedAttempt();
     }
     applyRemoteConfig(res.data);
     return state;
   } catch {
     if (mySeq !== updateSeq) return state;
-    if (state.verdict === 'UNKNOWN') {
-      setState({ evaluating: true, usingCachedVerdict: true });
-    } else {
-      setState({ usingCachedVerdict: true, lastCheckedAt: Date.now() });
-    }
-    return state;
+    return recordFailedAttempt();
   }
+}
+
+/**
+ * The single failure path: an attempt finished without an answer.
+ *
+ * What it deliberately does NOT do:
+ *   • it does NOT resolve the verdict (a network failure is not evidence that
+ *     the installed build is supported);
+ *   • it does NOT leave `evaluating` true (that was the permanent full-screen
+ *     "Checking for updates…" wall on an unreachable endpoint).
+ * What it does: marks the failure, keeps any previous explicit verdict, and
+ * arms the bounded retry chain so the next checkpoint converges on the truth.
+ */
+function recordFailedAttempt(): UpdateState {
+  if (state.verdict === 'UNKNOWN') {
+    setState({
+      evaluating: false,
+      usingCachedVerdict: true,
+      lastCheckFailed: true,
+      lastCheckedAt: Date.now(),
+    });
+  } else {
+    setState({ usingCachedVerdict: true, lastCheckFailed: true, lastCheckedAt: Date.now() });
+  }
+  scheduleUpdateRetryAfterFailure();
+  return state;
 }
 
 /**
@@ -306,10 +405,12 @@ async function runUpdateCheck(): Promise<UpdateState> {
  * authenticated shell): does the surface about to render have to wait for / be
  * replaced by the update state?
  *
- * Pure delegation to securityStateModel.resolveUpdateGateDecision — the whole
- * point of the split is that a NON-protected surface (splash, sign-in, auth
- * screens) is never gated by the version check: the check is a background
- * request there.
+ * Pure delegation to securityStateModel.resolveUpdateGateDecision — a
+ * NON-protected surface (splash, sign-in, auth screens) is never gated by the
+ * version check, and an unresolved ('pending') result never gates ANY surface:
+ * the check is a background request. Only a confirmed UPDATE_REQUIRED blocks,
+ * and callers must use `updateGateBlocks` / `isUpdateAuthBlocked` — never
+ * `decision !== 'none'` — so 'pending' can never turn back into a wall.
  */
 export function getUpdateGateDecision(protectedSurface: boolean): UpdateGateDecision {
   return resolveUpdateGateDecision({
@@ -324,6 +425,58 @@ export function isProtectedSurfaceBlocked(protectedSurface: boolean): boolean {
 }
 
 /**
+ * True when a CONFIRMED mandatory update must prevent authentication.
+ * An unresolved check is not a confirmation, so it never blocks a sign-in
+ * attempt on its own — the server's 426 rejection still guards the API.
+ */
+export function isUpdateAuthBlocked(): boolean {
+  return state.verdict === 'UPDATE_REQUIRED';
+}
+
+/** How long an authentication checkpoint may wait on a shared in-flight check. */
+export const UPDATE_CHECKPOINT_TIMEOUT_MS = 4_000;
+
+export interface UpdateCheckpointResult {
+  /** What the caller should do with this verdict (see resolveUpdateCheckpoint). */
+  plan: UpdateCheckpointPlan;
+  state: UpdateState;
+  /** True when the bounded wait expired before an answer landed. */
+  timedOut: boolean;
+}
+
+/**
+ * Authentication checkpoint: make sure the version check is running (or join
+ * the one already running) and wait for it — for a BOUNDED time only.
+ *
+ * Contract:
+ *   • never opens a duplicate request (checkAppUpdate is single-flight);
+ *   • returns immediately with 'block' / 'proceed' when a verdict exists;
+ *   • joins an in-flight check for up to `timeoutMs` ('wait');
+ *   • starts exactly one fresh check when the previous attempt failed
+ *     ('retry') — an auth attempt is an appropriate retry checkpoint;
+ *   • on timeout returns the CURRENT plan (never blocks, never throws): the
+ *     request keeps running and its result still lands in the shared store, so
+ *     a confirmed mandatory update blocks the shell the moment it arrives.
+ */
+export async function awaitUpdateCheck(
+  timeoutMs: number = UPDATE_CHECKPOINT_TIMEOUT_MS
+): Promise<UpdateCheckpointResult> {
+  const initial = resolveUpdateCheckpoint({ verdict: state.verdict, evaluating: state.evaluating });
+  if (initial !== 'wait' && initial !== 'retry') {
+    return { plan: initial, state, timedOut: false };
+  }
+  // 'wait' → join the shared promise. 'retry' → checkAppUpdate starts exactly
+  // one request (no other check is running, or it would have been 'wait').
+  const pending = checkAppUpdate();
+  const raced = await raceUpdateCheckWithTimeout(pending, timeoutMs);
+  return {
+    plan: resolveUpdateCheckpoint({ verdict: state.verdict, evaluating: state.evaluating }),
+    state,
+    timedOut: raced.timedOut,
+  };
+}
+
+/**
  * Applies an explicit server verdict (and persists it for offline use).
  */
 function applyRemoteConfig(cfg: RemoteUpdateConfig): void {
@@ -334,10 +487,13 @@ function applyRemoteConfig(cfg: RemoteUpdateConfig): void {
       evaluating: false,
       usingCachedVerdict: false,
       lastCheckedAt: Date.now(),
+      lastCheckFailed: false,
       minimumVersionCode: 0,
       updateUrl: '',
       releaseNotes: null,
     });
+    clearUpdateRetry();
+    updateRetryAttempt = 0;
     void persistCachedUpdatePolicy(null); // explicit server "off" clears the cache
     return;
   }
@@ -374,7 +530,11 @@ function applyRemoteConfig(cfg: RemoteUpdateConfig): void {
     releaseNotes: cfg.releaseNotes ?? null,
     usingCachedVerdict: false,
     lastCheckedAt: Date.now(),
+    lastCheckFailed: false,
   });
+  // A real server answer settles the question → cancel the bounded retry chain.
+  clearUpdateRetry();
+  updateRetryAttempt = 0;
 
   // OFFLINE CACHE: persist every explicit server verdict so a later offline
   // cold launch honors the last known policy instead of guessing. Bound to
@@ -428,18 +588,19 @@ async function persistCachedUpdatePolicy(entry: {
 /**
  * Applies the persisted offline policy at cold start BEFORE the first
  * (possibly unreachable) online check. Called once from initUpdateLifecycle.
- * If the cached policy says UPDATE_REQUIRED, the fail-closed startup wall
- * becomes the cached Update Required page immediately — no temporary usable
- * window and no endless spinner while offline.
+ * If the cached policy says UPDATE_REQUIRED, the full-screen Update Required
+ * page is applied immediately (protected shell + auth checkpoints) — no
+ * temporary usable window on a blocked build while offline.
  *
  * NO-CACHE OFFLINE RULE: network unavailability is NOT an update requirement
  * (evaluateOfflineUpdatePolicy → 'no_cached_policy' → SUPPORTED). With no
  * cached policy, this function arms a one-shot NetInfo probe: if the device
- * is actually offline, the fail-closed startup wall resolves to SUPPORTED so
- * the offline flow (Offline Library) can proceed; if online, the wall stays
- * up until the live check lands. The first request that does reach the
- * server re-establishes the authoritative verdict either way (and the global
- * HTTP 426 interceptor remains the real boundary).
+ * is actually offline, the unresolved verdict resolves to SUPPORTED so the
+ * offline flow (Offline Library) can proceed; if online, the live check
+ * decides as usual (and the app renders normally in the meantime — there is
+ * no startup wall to hold). The first request that does reach the server
+ * re-establishes the authoritative verdict either way (and the global HTTP 426
+ * interceptor remains the real boundary).
  */
 export async function applyCachedUpdatePolicyOffline(): Promise<void> {
   let probeOffline: (() => void) | null = null;
@@ -491,17 +652,18 @@ export async function applyCachedUpdatePolicyOffline(): Promise<void> {
       //
       // WHY: the cached entry is an explicit, server-issued verdict for the very
       // build that is installed, written at most CACHED_UPDATE_MAX_AGE_MS ago
-      // (14 days) and discarded the moment the installed build changes. Without
-      // this, an update-to-date signed-in user still had to watch the
-      // "Checking for updates" wall until the network answered — the exact
-      // startup delay this change removes.
+      // (14 days) and discarded the moment the installed build changes. It
+      // resolves the UNKNOWN state from the offline cache instead of waiting on
+      // a network answer that may not come — so a re-check never delays an
+      // already-verified build.
       //
       // This does NOT weaken enforcement: the live check still runs immediately
       // afterwards and OVERWRITES this verdict (SUPPORTED or UPDATE_REQUIRED),
       // and the server-side HTTP 426 gate remains the real boundary for every
-      // protected call. The fail-closed direction is untouched — a cached
-      // UPDATE_REQUIRED is still honored above, and no cache at all still leaves
-      // the protected shell waiting for the live answer.
+      // protected call. The enforced direction is untouched — a cached
+      // UPDATE_REQUIRED is still honored above, and with no cache at all the
+      // verdict simply stays unresolved (never invented) while the app renders
+      // and the retries run.
       setState({
         verdict: 'SUPPORTED',
         evaluating: false,
@@ -544,7 +706,7 @@ function armOfflineStartupProbe(): () => void {
         }
         unsubscribe();
       }
-    } catch { /* probe failed → leave the fail-closed wall up */ }
+    } catch { /* probe failed → leave the verdict unresolved; retries decide */ }
   };
   const unsubscribe = NetInfo.addEventListener(() => { void resolveIfOffline(); });
   void resolveIfOffline();
@@ -559,9 +721,9 @@ function armOfflineStartupProbe(): () => void {
 let lifecycleWired = false;
 /**
  * Wires the update check into the app lifecycle. Called once from the root
- * layout. Startup fires the first (fail-closed) check; every foreground
- * return re-checks — matching the security-gate lifecycle so the two gates
- * never create a gap.
+ * layout. Startup fires the first BACKGROUND check (never awaited); every
+ * foreground return re-checks — matching the security-gate lifecycle so the
+ * two gates never create a gap.
  */
 export function initUpdateLifecycle(): () => void {
   if (lifecycleWired) return () => {};
@@ -574,13 +736,19 @@ export function initUpdateLifecycle(): () => void {
   // check which stays authoritative when the network is available.
   void applyCachedUpdatePolicyOffline();
 
-  void checkAppUpdate(); // cold-start check (fail-closed until it lands)
+  // COLD-START CHECK — started, never awaited. The first screen (splash,
+  // sign-in, or the restored authenticated shell) renders immediately; the
+  // verdict is applied to the shared store the moment it lands.
+  void checkAppUpdate();
 
   const sub = AppState.addEventListener('change', (s) => {
+    // Foreground is a checkpoint: refresh the verdict (and retry a failed
+    // attempt) without ever unmounting the current screen while it runs.
     if (s === 'active') void checkAppUpdate();
   });
   return () => {
     sub.remove();
+    clearUpdateRetry();
     lifecycleWired = false;
   };
 }

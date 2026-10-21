@@ -19,6 +19,7 @@ import { registerPushToken } from '@/lib/pushTokenService';
 import * as Device from 'expo-device';
 import Constants from 'expo-constants';
 import { useSecurity } from '@/lib/SecurityContext';
+import { awaitUpdateCheck } from '@/lib/updateConfigService';
 import { NeuInputRow } from '@/components/NeuInputRow';
 import { t } from '@/lib/i18n';
 
@@ -95,6 +96,25 @@ export default function SignIn() {
     _diag('start', { apiBasePresent: !!process.env.EXPO_PUBLIC_PHP_API_URL });
 
     try {
+      // Step 0: AUTH CHECKPOINT — app-update policy.
+      // Joins (or starts) the SHARED background version check and waits for it
+      // for a bounded time only. A confirmed mandatory update must never create
+      // a session: the (auth) layout's UpdateAuthGate swaps in the full-screen
+      // update page from the shared store, so we simply stop here. A timeout or
+      // network failure returns 'wait'/'retry' — sign-in proceeds normally (a
+      // failed check is never "no update needed", and the server's HTTP 426
+      // rejection still guards every protected call).
+      const updateCheckpoint = await awaitUpdateCheck();
+      _diag('update-checkpoint', {
+        plan: updateCheckpoint.plan,
+        timedOut: updateCheckpoint.timedOut,
+        verdict: updateCheckpoint.state.verdict,
+      });
+      if (updateCheckpoint.plan === 'block') {
+        setLoading(false);
+        return;
+      }
+
       // Step 1: Run security checks BEFORE creating any session
       _diag('install-id-before');
       const installationId = await getInstallationId();

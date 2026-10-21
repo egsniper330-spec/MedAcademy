@@ -467,14 +467,18 @@ export default function AppLayout() {
   const { profile } = useProfileStore();
   const canUpload = !!profile && UPLOAD_ROLES.has(profile.role);
   // ── DEFENSE IN DEPTH: the protected shell enforces the update verdict ──────
-  // The root ForceUpdateGate already withholds the whole tree while a signed-in
-  // session is on an unknown or blocked update state. This second, local check
-  // is deliberately redundant: it guarantees the AUTHENTICATED shell itself
-  // cannot render protected screens + playback even if the root gate is ever
+  // The root ForceUpdateGate already withholds the whole tree when a signed-in
+  // session is on a CONFIRMED mandatory update. This second, local check is
+  // deliberately redundant: it guarantees the AUTHENTICATED shell itself cannot
+  // render protected screens + playback even if the root gate is ever
   // reordered, so the two can never disagree. Both read the same authoritative
   // store, so there is no flash window between them.
+  //
+  // `gateBlocks` (verdict UPDATE_REQUIRED only) — NOT `protectedDecision !==
+  // 'none'`: 'pending' means the background version request has not answered
+  // yet (or the last attempt failed) and must render the shell normally.
   const update = useUpdate();
-  const updateBlocks = update.protectedDecision !== 'none';
+  const updateBlocks = update.gateBlocks;
 
   if (updateBlocks) {
     return <ForceUpdateScreen />;

@@ -16,6 +16,7 @@ import { useBranding } from '@/lib/branding';
 import { COUNTRIES, DEFAULT_COUNTRY, buildE164, validateNationalNumber, type Country } from '@/lib/phone';
 import { NeuInputRow } from '@/components/NeuInputRow';
 import { isFeatureEnabled } from '@/lib/featureFlags';
+import { awaitUpdateCheck } from '@/lib/updateConfigService';
 import { t } from '@/lib/i18n';
 
 interface PickerOption { id: string; name: string; }
@@ -320,6 +321,15 @@ export default function SignUp() {
     const validationError = validate();
     if (validationError) { setError(validationError); return; }
     setLoading(true);
+
+    // AUTH CHECKPOINT — app-update policy (same rule as sign-in): a confirmed
+    // mandatory update must not create an account. Unresolved/timeout → proceed
+    // (UpdateAuthGate owns the blocking screen; a failure is never a verdict).
+    const updateCheckpoint = await awaitUpdateCheck();
+    if (updateCheckpoint.plan === 'block') {
+      setLoading(false);
+      return;
+    }
 
     // Build canonical E.164 from country + national input
     const e164 = buildE164(country, nationalPhone.trim());

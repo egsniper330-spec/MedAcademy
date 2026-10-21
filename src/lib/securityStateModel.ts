@@ -879,26 +879,41 @@ export const OVERLAY_DETECTION_LIMITS = [
 
 // ─── Update verdict (versionCode is authoritative; names never compared) ─────
 
-// ─── Update gate placement (block the PROTECTED shell, never the startup) ────
+// ─── Update gate placement (block ONLY a confirmed mandatory update) ─────────
 //
-// ROOT CAUSE of the reported "Checking for updates" startup wall: the root
-// ForceUpdateGate hard-blocked on `verdict === 'UNKNOWN' && evaluating` (and on
-// any UPDATE_REQUIRED) for the WHOLE app, above authentication — so a
-// signed-out cold start rendered the update screen instead of the normal
-// startup/sign-in flow, purely because a background network request had not
-// answered yet.
+// Two startup-wall defects lived here; both came from treating the BACKGROUND
+// version request as a render dependency.
 //
-// The enforcement rule now has an explicit surface input:
+//  ROOT CAUSE #1 (first fix): the root ForceUpdateGate hard-blocked on
+//    `verdict === 'UNKNOWN' && evaluating` (and on any UPDATE_REQUIRED) for the
+//    WHOLE app, above authentication — a signed-out cold start rendered the
+//    update screen instead of the normal startup/sign-in flow purely because
+//    the request had not answered yet.
 //
-//   protectedSurface=false (no session: splash / sign-in / auth screens)
-//     → 'none'. The version check is a background request; the normal startup
-//       experience is never gated by it.
-//   protectedSurface=true (the authenticated (app) shell)
-//     → 'required' when the server (or a cached verdict for THIS build) says
-//       the installed build is blocked; 'pending' while the decision is still
-//       unknown. Fail-closed: protected content is never granted on an unknown
-//       update state, and the server-side HTTP 426 gate remains the real
-//       boundary for every protected API call.
+//  ROOT CAUSE #2 (this fix): the SAME unresolved state STILL hard-blocked the
+//    protected surface. A restored session therefore replaced the entire app
+//    shell with a full-screen "Checking for updates…" spinner until
+//    /app/version answered, and because a failed attempt left `evaluating`
+//    true forever, an unreachable or slow endpoint left that wall up
+//    permanently.
+//
+// The verdict is now one of three values, and only one of them may block:
+//
+//   SUPPORTED        → nothing to do; normal app.
+//   UPDATE_REQUIRED  → confirmed mandatory update: full-screen gate blocks the
+//                      protected shell AND the authentication checkpoints.
+//   UNKNOWN          → unresolved (a check is in flight, or the last attempt
+//                      failed). The app renders normally; the result is applied
+//                      the moment it lands. NEVER a reason to hide the UI.
+//
+// `resolveUpdateGateDecision` still reports UNKNOWN as 'pending' so callers can
+// distinguish "no verdict yet" from "verdict says fine", but the single
+// predicate both gates use — `updateGateBlocks` — blocks ONLY on a confirmed
+// requirement. Enforcement is not weakened: a confirmed requirement blocks the
+// protected shell (root gate + (app) gate) and every authentication checkpoint
+// (`resolveUpdateCheckpoint`), and the server-side HTTP 426 rejection of every
+// protected call remains the real boundary — an unknown state can never be
+// spent to reach protected data.
 //
 // NOTE: the mode is intentionally NOT part of the block decision — that is the
 // shipped semantics (any UPDATE_REQUIRED blocks), preserved here so this change
@@ -909,19 +924,75 @@ export type UpdateGateDecision = 'none' | 'pending' | 'required';
 
 export function resolveUpdateGateDecision(input: {
   verdict: 'SUPPORTED' | 'UPDATE_REQUIRED' | 'UNKNOWN';
+  /** A version check is currently in flight (informational — never blocks). */
   evaluating: boolean;
   /** The surface about to render is the authenticated/protected shell. */
   protectedSurface: boolean;
 }): UpdateGateDecision {
   if (!input.protectedSurface) return 'none';
   if (input.verdict === 'UPDATE_REQUIRED') return 'required';
-  if (input.verdict === 'UNKNOWN' && input.evaluating) return 'pending';
+  // Unresolved (in flight OR the last attempt failed) — a background request,
+  // never a shield in front of the app.
+  if (input.verdict === 'UNKNOWN') return 'pending';
   return 'none';
 }
 
-/** True when the decision blocks protected content (pending or required). */
+/** True when the decision must BLOCK (only a confirmed mandatory update). */
 export function updateGateBlocks(decision: UpdateGateDecision): boolean {
-  return decision !== 'none';
+  return decision === 'required';
+}
+
+/**
+ * What an authentication checkpoint should do with the current verdict.
+ *
+ *   'block'   — confirmed mandatory update: do not create a session; the
+ *               full-screen update gate takes over.
+ *   'proceed' — explicit SUPPORTED verdict: authenticate normally.
+ *   'wait'    — a check is in flight: join it (one shared request) for a bounded
+ *               budget, then re-plan.
+ *   'retry'   — UNKNOWN with no check running (the last attempt failed): start a
+ *               fresh check once and await it, bounded; a failure is never
+ *               mistaken for "no update needed", and never blocks sign-in.
+ */
+export type UpdateCheckpointPlan = 'block' | 'proceed' | 'wait' | 'retry';
+
+export function resolveUpdateCheckpoint(input: {
+  verdict: 'SUPPORTED' | 'UPDATE_REQUIRED' | 'UNKNOWN';
+  evaluating: boolean;
+}): UpdateCheckpointPlan {
+  if (input.verdict === 'UPDATE_REQUIRED') return 'block';
+  if (input.verdict === 'SUPPORTED') return 'proceed';
+  return input.evaluating ? 'wait' : 'retry';
+}
+
+/**
+ * Races a pending version check against a bounded budget.
+ *
+ * Needed so an authentication checkpoint can "wait for the answer if it is
+ * imminent" without ever stranding the user on an endpoint that never answers.
+ * The pending promise keeps running after a timeout (its result still lands in
+ * the shared store); only the WAIT is bounded. Pure timing helper — no React,
+ * no react-native — so the behaviour is unit-tested with plain node timers.
+ */
+export async function raceUpdateCheckWithTimeout<T>(
+  pending: Promise<T>,
+  timeoutMs: number
+): Promise<{ value: T | null; timedOut: boolean }> {
+  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
+    return { value: null, timedOut: true };
+  }
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  const timeout = new Promise<{ value: null; timedOut: true }>((resolve) => {
+    timer = setTimeout(() => resolve({ value: null, timedOut: true }), timeoutMs);
+  });
+  try {
+    return await Promise.race([
+      pending.then((value) => ({ value, timedOut: false as const })),
+      timeout,
+    ]);
+  } finally {
+    if (timer !== null) clearTimeout(timer);
+  }
 }
 
 export interface UpdateVerdictPure {

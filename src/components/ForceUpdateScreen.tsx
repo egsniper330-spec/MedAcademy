@@ -1,11 +1,15 @@
 /**
  * ForceUpdateScreen — the UI face of the remote version-enforcement system.
  *
- * Rendered by the root ForceUpdateGate whenever the authoritative update state
- * (src/lib/updateConfigService.ts) is UPDATE_REQUIRED (or UNKNOWN during the
- * fail-closed startup check). This screen is NOT the security boundary — the
- * server's HTTP 426 enforcement is; this screen reflects the authoritative
- * state maintained by updateConfigService.
+ * Rendered ONLY for a CONFIRMED mandatory update (verdict UPDATE_REQUIRED): by
+ * the root ForceUpdateGate / (app) gate for the protected shell, and by
+ * UpdateAuthGate for the authentication screens.
+ *
+ * There is deliberately no "checking for updates" state here: the version check
+ * is a background request, so an unresolved verdict renders the normal app
+ * instead of this page (that blocking startup screen was the reported defect).
+ * This screen is NOT the security boundary — the server's HTTP 426 enforcement
+ * is; this screen reflects the authoritative state in updateConfigService.
  *
  * Version names are display-only. The FORCED/OPTIONAL decision is made from
  * the integer versionCode comparison (authoritative) — never string compare.
@@ -60,20 +64,9 @@ export default function ForceUpdateScreen(): React.JSX.Element {
 
   const required = update.verdict === 'UPDATE_REQUIRED';
   const forced = update.mode === 'FORCED';
-  const showGate = required || (update.verdict === 'UNKNOWN' && update.evaluating);
-
-  // Fail-closed startup wall — first check still in flight.
-  if (update.verdict === 'UNKNOWN' && update.evaluating) {
-    return (
-      <View style={[styles.root, styles.center]} accessibilityLabel={t('update.checking')}>
-        <ActivityIndicator size="large" color={C.accent} />
-        <Text style={styles.checkingTitle}>{t('update.checking')}</Text>
-        <Text style={styles.checkingSub}>
-          {t('update.checkingSub')}
-        </Text>
-      </View>
-    );
-  }
+  // Only a confirmed requirement takes over the screen. An unresolved check
+  // never renders a blocking state (see the header note).
+  const showGate = required;
 
   // OPTIONAL mode → dismissible banner over normal app content.
   if (!showGate) {
@@ -222,10 +215,7 @@ export default function ForceUpdateScreen(): React.JSX.Element {
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: C.bg },
-  center: { alignItems: 'center', justifyContent: 'center', padding: 32 },
   scroll: { padding: 20, paddingBottom: 48 },
-  checkingTitle: { color: C.text, fontSize: 17, fontWeight: '600', marginTop: 18, textAlign: 'center' },
-  checkingSub: { color: C.sub, fontSize: 13, marginTop: 8, textAlign: 'center', lineHeight: 19 },
   hero: { marginTop: 28, marginBottom: 20 },
   logo: {
     overflow: 'hidden',

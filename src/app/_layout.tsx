@@ -63,22 +63,23 @@ assertBackendConfigured();
  * + server-side HTTP 426 interception). This UI is NOT the security boundary —
  * the backend rejects unsupported versions on every protected call.
  *
- * STARTUP FIX (reported defect: an initial "Checking for updates" wall):
- *   The version check is a background request and MUST NOT gate the normal
- *   startup/sign-in experience. Previously this gate hard-blocked on
- *   `verdict === 'UNKNOWN' && evaluating` for the WHOLE app, so a signed-out
- *   cold start showed the update screen instead of the splash/sign-in flow
- *   purely because the request had not answered yet.
+ * STARTUP CONTRACT (both reported defects fixed):
+ *   The version check is a BACKGROUND request and is never a render
+ *   dependency.
+ *     • no session (splash, sign-in, auth screens) → never blocked here; the
+ *       (auth) layout's UpdateAuthGate enforces a confirmed requirement at the
+ *       authentication checkpoint;
+ *     • session present (the authenticated shell) → rendered immediately. Only
+ *       a CONFIRMED mandatory update (`gateBlocks`, i.e. verdict
+ *       UPDATE_REQUIRED) replaces it with the full-screen update page.
  *
- *   The decision is now surface-aware (resolveUpdateGateDecision):
- *     • no session (splash, sign-in, auth screens) → NEVER blocked;
- *     • session present (the authenticated shell) → 'pending' while the verdict
- *       is unknown, 'required' once the server (or a cached verdict for THIS
- *       build) says the installed build is blocked.
- *
- *   Fail-closed is preserved where it matters: protected content and protected
- *   API calls still respect the authoritative update state (this gate in front
- *   of the shell, plus the server's 426 rejection of every protected request).
+ *   There is deliberately NO "Checking for updates…" wall: an unresolved
+ *   verdict ('pending') — a check in flight OR a failed/unreachable endpoint —
+ *   used to hard-block the whole shell, which is exactly the blocking startup
+ *   screen this change removes. A failure is never treated as "no update
+ *   needed" either: enforcement stays with the confirmed verdict, the next
+ *   checkpoint's retry, and the server's 426 rejection of every protected
+ *   request.
  *
  * Re-checks on every foreground return; a block never auto-clears — only an
  * explicit successful evaluation can clear it.
@@ -102,18 +103,15 @@ function ForceUpdateGate({ children }: { children: React.ReactNode }) {
     return () => { un1(); un2(); un3(); un4(); };
   }, []);
 
-  // ── Hard block / fail-closed checking wall (protected surface only) ────────
+  // ── Confirmed mandatory update → full-screen block (protected surface) ─────
   // UPDATE_REQUIRED always blocks a signed-in session (mode OPTIONAL/FORCED is
-  // deliberately not consulted — the shipped semantics, preserved). While the
-  // verdict is UNKNOWN a signed-in session waits rather than assuming the
-  // installed build is allowed, so no protected content or protected API call
-  // is granted on an unknown update state.
-  // Routed through the PURE decision (securityStateModel.resolveUpdateGateDecision,
-  // unit-tested) so the root gate and the (app) shell gate can never disagree:
-  // a public surface resolves to 'none', a protected surface to 'pending' or
-  // 'required'. Only the protected surface input differs here.
-  const gateDecision = protectedSurface ? update.protectedDecision : 'none';
-  const hardBlocked = gateDecision !== 'none';
+  // deliberately not consulted — the shipped semantics, preserved). An
+  // UNRESOLVED verdict does NOT block: the check is a background request, and
+  // hiding the shell behind a spinner is the defect this gate no longer has.
+  // `gateBlocks` is derived from the SAME pure decision as the (app) shell gate
+  // (securityStateModel.resolveUpdateGateDecision + updateGateBlocks, both
+  // unit-tested), so the two gates can never disagree.
+  const hardBlocked = protectedSurface && update.gateBlocks;
 
   if (hardBlocked) {
     return <ForceUpdateScreen />;

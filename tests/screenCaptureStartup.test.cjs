@@ -13,14 +13,17 @@
  * the app keeps rendering into an off-screen buffer, the display receives
  * nothing, and the screen is BLACK while JS happily keeps running.
  *
- * At cold start the FIRST root UI is the fail-closed update wall
- * (ForceUpdateGate: verdict UNKNOWN + evaluating → "Checking for updates…"),
- * and two inputs race:
- *   • isLoading  ← SessionProvider.getSession(), a LOCAL SecureStore read;
- *   • the wall   ← a NETWORK request to /app/version.
+ * At cold start the first root UI is decided by asynchronously-resolving
+ * inputs, and they race:
+ *   • isLoading ← SessionProvider.getSession(), a LOCAL SecureStore read;
+ *   • (historically) the fail-closed update wall, driven by a NETWORK request
+ *     to /app/version. That wall is GONE — the update check is a background
+ *     request now (see tests/backgroundUpdateCheck.test.cjs) — but the same
+ *     launch race reappears for any screen swap driven by something that
+ *     answers after the first commit.
  * The local read resolves first, so an effect gated ONLY on `isLoading` fires
  * its reparent while the first frames are still being presented → the observed
- * sequence "Checking updates… → wall disappears → black screen".
+ * sequence "splash/wall → screen swap → black screen".
  *
  * WHY STRUCTURAL: the contract is a native run-loop ordering guarantee. There
  * is no JS unit under test (the device/UI thread behaviour cannot be
