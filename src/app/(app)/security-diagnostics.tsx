@@ -104,11 +104,6 @@ const DETECTOR_META: Record<string, { label: string; apiExplain: string; falseOn
     apiExplain: '5 heuristics: (1) Build.FINGERPRINT starts with "generic"/"unknown" or contains "vbox" (or "test-keys" together with "sdk"), (2) Build.MODEL contains "emulator"/"genymotion"/"android sdk" or Build.HARDWARE is "goldfish"/"ranchu"/"vbox", (3) Build.MANUFACTURER is "unknown" or "Genymotion", (4) ro.kernel.qemu = "1", or ro.product.device containing "generic"/"goldfish", (5) SensorManager sensor count = 0 TOGETHER WITH emulator-indicative build evidence. A missing sensor list is NOT a verdict on its own — some real tablets/TV boxes expose no sensors, and treating that as an emulator hard-blocked legitimate release installs (risk 20, "Debug Mode Active"). Real devices return false on all 5.',
     falseOnStock: true,
   },
-  mockLocationDetected: {
-    label: 'Mock Location',
-    apiExplain: 'API 23+: AppOpsManager.checkOpNoThrow(OPSTR_MOCK_LOCATION) — returns MODE_ALLOWED only if the user explicitly granted mock-location permission to a specific app in Developer Options → Mock location app. API <23 fallback: Settings.Secure.ALLOW_MOCK_LOCATION. Returns false when no mock-location app is configured.',
-    falseOnStock: true,
-  },
   fridaDetected: {
     label: 'Frida / Dynamic Instrumentation',
     apiExplain: '6 methods: (1) TCP port 27042-27045 probe (Frida server default ports), (2) /proc/self/maps scan for "frida"/"gadget" memory-mapped libs, (3) /proc/*/cmdline scan for frida processes, (4) /proc/self/maps for loaded frida-agent .so, (5) known frida temp files in /data/local/tmp, (6) /proc/self/maps for gum-js-loop (Gum runtime). All return false on a clean device.',
@@ -472,8 +467,8 @@ function DiagnosticsContent() {
                 body: 'Android 10+ restricts /proc/*/status reads. tracerpid= field is hidden from unprivileged readers. Use Debug.isDebuggerConnected() instead (already implemented).',
               },
               {
-                title: 'Mock Location — GPS provider mock flag',
-                body: 'LocationManager.isProviderEnabled(GPS_PROVIDER) no longer exposes whether the provider is mocked in API 31+. AppOpsManager.OPSTR_MOCK_LOCATION is the only reliable path (already implemented).',
+                title: 'Mock Location — removed, not merely unsupported',
+                body: 'A third-party APK cannot reliably read another package\u2019s mock-location app-op: the cross-UID AppOps query needs UPDATE_APP_OPS_STATS (signature|privileged), and the mode it would expose is persisted state that survives the Developer-options toggle. Because a stale or OEM-preset MODE_ALLOWED entry is indistinguishable from a live selection, the check was deleted from this build rather than reported as ON/OFF/unknown. It is not part of the security evaluation, risk score or login policy.',
               },
               {
                 title: 'Screen Recording — MediaProjection session list',

@@ -297,13 +297,25 @@
   // Expose for host-injected seeks.
   window.__plyr = player;
 
-  // ── Control hit-area / stacking + ±10 s seek ────────────────────────────────
+  // ── Control hit-area / stacking, centre control, double-tap seek ────────────
   //   The centre play/pause control is painted over the cross-origin YouTube
   //   iframe; giving the controls their own composited layers with an explicit
   //   z-index keeps them visible and tappable wherever the iframe is rendered as
   //   a separate surface. The centre button and the two seek buttons run through
   //   one capture-phase delegate so the action executes exactly once, including
   //   when Plyr's own binding is missing (deferred embed build).
+  //
+  //   CENTRE CONTROL: Plyr hides `.plyr__control--overlaid` while playing
+  //   (opacity:0; visibility:hidden), which removes the only centre hit target
+  //   exactly when the user needs to pause, and it builds `play-large` as a
+  //   non-toggle control (one `play` icon, no iconPressed). The CSS below keeps
+  //   it present and tappable while playing; syncCentreState() swaps its glyph
+  //   between Plyr's OWN sprite symbols from the player's real state.
+  //
+  //   DOUBLE-TAP SEEK: a transparent layer over the VIDEO SURFACE only, stacked
+  //   below the centre control (4) and the bar (5). A single tap is inert
+  //   (clickToPlay stays false); two taps inside 320 ms in the same half seek
+  //   ±seekTime. Mirrors src/lib/plyr/playerScript.ts (native WebView).
   (function () {
     var s = document.createElement('style');
     s.id = 'plyr-control-fixes';
@@ -311,17 +323,193 @@
       '.plyr__video-wrapper{z-index:0;}' +
       '.plyr__control--overlaid{z-index:4;transform:translate3d(-50%,-50%,0);' +
         'will-change:transform;touch-action:manipulation;}' +
-      '.plyr__video .plyr__controls{z-index:5;touch-action:manipulation;}';
+      '.plyr--playing .plyr__control--overlaid{opacity:.35;visibility:visible;' +
+        'pointer-events:auto;}' +
+      '.plyr--playing .plyr__control--overlaid:hover,' +
+      '.plyr--playing .plyr__control--overlaid:focus{opacity:1;}' +
+      '.plyr__video .plyr__controls{z-index:5;touch-action:manipulation;}' +
+      '#plyr-gesture-zone{position:absolute;top:0;right:0;bottom:0;left:0;' +
+        'z-index:1;background:transparent;touch-action:manipulation;' +
+        '-webkit-tap-highlight-color:transparent;transform:translateZ(0);' +
+        'will-change:transform;}' +
+      '.plyr-gesture-feedback{position:absolute;top:50%;z-index:3;' +
+        'transform:translateY(-50%);display:flex;align-items:center;gap:6px;' +
+        'padding:10px 16px;border-radius:999px;' +
+        'border:2px solid rgba(255,255,255,.75);color:#fff;background:rgba(0,0,0,.55);' +
+        'font:600 13px -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;' +
+        'opacity:0;visibility:hidden;transition:opacity .18s ease;' +
+        'pointer-events:none;}' +
+      '.plyr-gesture-feedback[data-side="back"]{left:8%;}' +
+      '.plyr-gesture-feedback[data-side="forward"]{right:8%;}' +
+      '.plyr-gesture-feedback[data-show="1"]{opacity:1;visibility:visible;}';
     (document.head || document.documentElement).appendChild(s);
 
-    function seekBy(direction) {
-      var d = player.duration;
-      if (!isFinite(d) || d <= 0) return;      // live / unseekable → no-op
-      var step = (player.config && player.config.seekTime) || 10;
-      var target = player.currentTime + direction * step;
-      target = Math.max(0, Math.min(target, Math.max(0, d - 0.25)));
-      player.currentTime = target;
+    // ── Shared seek math (controls + gesture) ─────────────────────────────────
+    function seekStep() {
+      var st = player && player.config ? player.config.seekTime : null;
+      return (typeof st === 'number' && isFinite(st) && st > 0) ? st : 10;
     }
+
+    function clampSeekTarget(current, duration, direction) {
+      if (typeof duration !== 'number' || !isFinite(duration) || duration <= 0) return null;
+      if (typeof current !== 'number' || !isFinite(current)) current = 0;
+      var raw = current + direction * seekStep();
+      if (!isFinite(raw)) return null;
+      // Never land exactly on the end (that fires 'ended'). The margin was 0.25 s,
+      // but verified in a REAL browser against the live YouTube IFrame API: the
+      // player REJECTS a seek to duration-0.25 (it snaps back to the pre-seek
+      // position), while duration-1 is accepted cleanly. So the clamp must keep a
+      // full second of clearance, or forward double-taps near the end silently do
+      // nothing. 1 s is the largest margin that is both safe and accepted.
+      var max = Math.max(0, duration - 1);
+      return Math.max(0, Math.min(raw, max));
+    }
+
+    function seekBy(direction) {
+      if (window.__medaSecurityStopped) return null; // containment froze playback
+      var target = clampSeekTarget(player.currentTime, player.duration, direction);
+      if (target === null) return null;              // live / unseekable → no-op
+      player.currentTime = target;
+      return target;
+    }
+
+    // ── Centre control: real state in, real state out ─────────────────────────
+    function centreButton() {
+      return document.querySelector('.plyr__control--overlaid');
+    }
+
+    function setCentreState(playing) {
+      var btn = centreButton();
+      if (!btn || !btn.setAttribute) return;
+      var state = playing ? 'playing' : 'paused';
+      if (btn.getAttribute('data-meda-state') === state) return;
+      btn.setAttribute('data-meda-state', state);
+      btn.setAttribute('aria-label', playing ? 'Pause' : 'Play');
+      var use = btn.querySelector ? btn.querySelector('use') : null;
+      if (!use || !use.getAttribute) return;
+      var href = use.getAttribute('href') || use.getAttribute('xlink:href') || '';
+      if (!href) return;
+      var next = href.replace(/(play|pause)$/, playing ? 'pause' : 'play');
+      if (next === href) return;
+      if (use.getAttribute('href') !== null) use.setAttribute('href', next);
+      if (use.getAttribute('xlink:href') !== null) {
+        if (use.setAttributeNS) use.setAttributeNS('http://www.w3.org/1999/xlink', 'xlink:href', next);
+        else use.setAttribute('xlink:href', next);
+      }
+    }
+
+    function realPlaying() {
+      return !!(player && !player.paused && !player.ended);
+    }
+
+    function syncCentreState() {
+      setCentreState(realPlaying());
+    }
+
+    function togglePlayback() {
+      if (window.__medaSecurityStopped) return; // never restart a contained player
+      if (realPlaying()) player.pause();
+      else player.play();
+      syncCentreState();
+      if (typeof requestAnimationFrame === 'function') requestAnimationFrame(syncCentreState);
+    }
+
+    // ── Double-tap seek detection ────────────────────────────────────────────
+    var DOUBLE_TAP_MS = 320;
+    var FEEDBACK_MS = 650;
+    var _lastTap = { t: 0, x: 0, y: 0, zone: null };
+
+    /** Pure tap classifier (also a test/diagnostic seam — dimensions only). */
+    window.__medaSeekTap = function (now, x, y, w, h) {
+      if (!(w > 0) || !(h > 0)) return null;
+      var zone = x < w / 2 ? 'back' : 'forward';
+      var near = Math.abs(x - _lastTap.x) <= Math.max(48, w * 0.12) &&
+                 Math.abs(y - _lastTap.y) <= Math.max(48, h * 0.25);
+      var isDouble = _lastTap.zone === zone && near && (now - _lastTap.t) <= DOUBLE_TAP_MS;
+      if (isDouble) {
+        _lastTap = { t: 0, x: 0, y: 0, zone: null };
+        return zone;
+      }
+      _lastTap = { t: now, x: x, y: y, zone: zone };
+      return null;
+    };
+
+    function inRect(el, clientX, clientY, pad) {
+      if (!el || !el.getBoundingClientRect || typeof clientX !== 'number') return false;
+      var r = el.getBoundingClientRect();
+      if (!r || (!r.width && !r.height)) return false;
+      return clientX >= r.left - pad && clientX <= r.right + pad &&
+             clientY >= r.top - pad && clientY <= r.bottom + pad;
+    }
+
+    function showSeekFeedback(zone) {
+      var wrapper = document.querySelector('.plyr__video-wrapper');
+      if (!wrapper || !wrapper.appendChild) return;
+      var side = zone === 'back' ? 'back' : 'forward';
+      var el = document.getElementById('plyr-seek-' + side);
+      if (!el) {
+        el = document.createElement('div');
+        el.id = 'plyr-seek-' + side;
+        el.className = 'plyr-gesture-feedback';
+        el.setAttribute('data-side', side);
+        el.setAttribute('data-show', '0');
+        el.setAttribute('aria-hidden', 'true');
+        var arrow = document.createElement('span');
+        arrow.className = 'plyr-seek-arrow';
+        arrow.textContent = side === 'back' ? '\u21ba' : '\u21bb';
+        var label = document.createElement('span');
+        label.className = 'plyr-seek-label';
+        label.textContent = seekStep() + ' seconds';
+        el.appendChild(arrow);
+        el.appendChild(label);
+        wrapper.appendChild(el);
+      }
+      var other = document.getElementById('plyr-seek-' + (side === 'back' ? 'forward' : 'back'));
+      if (other && other.setAttribute) other.setAttribute('data-show', '0');
+      var lbl = el.querySelector ? el.querySelector('.plyr-seek-label') : null;
+      if (lbl) lbl.textContent = seekStep() + ' seconds';
+      el.setAttribute('data-show', '1');
+      if (el.__medaFeedbackTimer) clearTimeout(el.__medaFeedbackTimer);
+      el.__medaFeedbackTimer = setTimeout(function () {
+        el.setAttribute('data-show', '0');
+        el.__medaFeedbackTimer = null;
+      }, FEEDBACK_MS);
+    }
+
+    function installSeekGestures() {
+      if (document.getElementById('plyr-gesture-zone')) return;
+      var wrapper = document.querySelector('.plyr__video-wrapper');
+      if (!wrapper || !wrapper.appendChild) return;
+      var layer = document.createElement('div');
+      layer.id = 'plyr-gesture-zone';
+      layer.setAttribute('aria-hidden', 'true');
+      wrapper.appendChild(layer);
+
+      layer.addEventListener('click', function (e) {
+        if (window.__medaSecurityStopped) return; // contained players are frozen
+        var rect = layer.getBoundingClientRect ? layer.getBoundingClientRect() : null;
+        var w = (rect && rect.width) || layer.offsetWidth || 0;
+        var h = (rect && rect.height) || layer.offsetHeight || 0;
+        if (!(w > 0) || !(h > 0)) return;
+        var left = (rect && rect.left) || 0;
+        var top = (rect && rect.top) || 0;
+        var clientX = typeof e.clientX === 'number' ? e.clientX : left;
+        var clientY = typeof e.clientY === 'number' ? e.clientY : top;
+        // Defensive only — the stacking order keeps controls out of this layer.
+        if (inRect(centreButton(), clientX, clientY, 8)) return;
+        if (inRect(document.querySelector('.plyr__controls'), clientX, clientY, 0)) return;
+        var zone = window.__medaSeekTap(Date.now(), clientX - left, clientY - top, w, h);
+        if (!zone) return; // first tap: nothing happens
+        if (e.stopPropagation) e.stopPropagation();
+        if (e.preventDefault) e.preventDefault();
+        var target = seekBy(zone === 'back' ? -1 : 1);
+        if (target === null) return; // unknown duration: no misleading feedback
+        showSeekFeedback(zone);
+      }, false);
+    }
+
+    window.__medaSyncCentre = syncCentreState;
+    window.__medaInstallSeekGestures = installSeekGestures;
 
     document.addEventListener('click', function (e) {
       var t = e.target;
@@ -334,7 +522,7 @@
       if (isCentre) {
         e.stopImmediatePropagation();
         e.preventDefault();
-        player.togglePlay();
+        togglePlayback(); // real play/pause against the media's own state
         return;
       }
       if (kind === 'rewind' || kind === 'fast-forward') {
@@ -350,6 +538,9 @@
   player.on('ready', function () {
     if (resumeAt > 0) player.currentTime = resumeAt;
     injectWatermark(wmName, wmId);
+    // Centre glyph + double-tap seek layer (idempotent; needs the built controls).
+    window.__medaSyncCentre && window.__medaSyncCentre();
+    window.__medaInstallSeekGestures && window.__medaInstallSeekGestures();
     send({ type: 'yt:ready' });
 
     player.on('enterfullscreen', function () {
@@ -365,13 +556,16 @@
   });
 
   player.on('play', function () {
+    window.__medaSyncCentre && window.__medaSyncCentre();
     send({ type: 'yt:playing' });
   });
   player.on('pause', function () {
+    window.__medaSyncCentre && window.__medaSyncCentre();
     send({ type: 'yt:paused' });
   });
 
   player.on('ended', function () {
+    window.__medaSyncCentre && window.__medaSyncCentre();
     send({ type: 'yt:ended', currentTime: player.currentTime, duration: player.duration });
   });
 

@@ -23,18 +23,21 @@ import { EmptyState } from '@/components/EmptyState';
 import { neuColors, mutedTextStyle } from '@/lib/neu';
 import { spacing } from '@/lib/ds';
 import { friendlyError } from '@/lib/validation';
+import { useTranslation } from '@/lib/i18n';
 
 /**
  * Fullscreen loading indicator with context. Replaces bare <ActivityIndicator/>
  * so a slow screen never looks like a dead screen.
  */
-export function LoadingState({ label = 'Loading…' }: { label?: string }) {
+export function LoadingState({ label }: { label?: string }) {
   const isDark = useColorScheme() === 'dark';
   const c = isDark ? neuColors.dark : neuColors.light;
+  const { t } = useTranslation();
+  const text = label ?? t('common.loading');
   return (
-    <View style={{ alignItems: 'center', justifyContent: 'center', paddingVertical: spacing.hero, gap: spacing.md }} accessibilityRole="progressbar" accessibilityLabel={label}>
+    <View style={{ alignItems: 'center', justifyContent: 'center', paddingVertical: spacing.hero, gap: spacing.md }} accessibilityRole="progressbar" accessibilityLabel={text}>
       <ActivityIndicator size="large" color={c.primary} />
-      <Text style={[{ fontSize: 13 }, mutedTextStyle(c, 0.55)]}>{label}</Text>
+      <Text style={[{ fontSize: 13 }, mutedTextStyle(c, 0.55)]}>{text}</Text>
     </View>
   );
 }
@@ -56,14 +59,15 @@ interface ErrorStateProps {
  * Terminal error state. Distinguishes network failure from server failure —
  * a network error is NEVER rendered as empty data, and never as a blank screen.
  */
-export function ErrorState({ error, onRetry, retryLabel = 'Try Again', offline, compact }: ErrorStateProps) {
+export function ErrorState({ error, onRetry, retryLabel, offline, compact }: ErrorStateProps) {
   const isDark = useColorScheme() === 'dark';
   const c = isDark ? neuColors.dark : neuColors.light;
+  const { t } = useTranslation();
   const Icon = offline ? CloudOff : AlertTriangle;
   // Semantic ink: the light-mode amber/red against a dark surface measure
   // 3.0:1 and 2.4:1, so dark takes the brighter warning/danger tiers.
   const color = offline ? (isDark ? c.warning : '#D97706') : (isDark ? c.danger : '#DC2626');
-  const message = friendlyError(error, 'The request could not be completed.');
+  const message = friendlyError(error, t('common.requestFailed'));
 
   const body = (
     <View style={{ alignItems: 'center', paddingVertical: compact ? spacing.lg : spacing.xl, gap: spacing.sm, paddingHorizontal: spacing.lg }}>
@@ -71,14 +75,14 @@ export function ErrorState({ error, onRetry, retryLabel = 'Try Again', offline, 
         <Icon size={26} color={color} />
       </View>
       <Text style={{ fontSize: 16, fontWeight: '700', color: c.text, textAlign: 'center' }}>
-        {offline ? 'You are offline' : 'Something went wrong'}
+        {offline ? t('common.offlineTitle') : t('common.somethingWentWrong')}
       </Text>
       <Text style={[{ fontSize: 13, textAlign: 'center', maxWidth: 340 }, mutedTextStyle(c, 0.6)]}>
         {message}
       </Text>
       {onRetry && (
         <View style={{ marginTop: spacing.sm, minWidth: 180 }}>
-          <NeuButton label={offline ? 'Retry When Online' : retryLabel} onPress={onRetry} icon={<RefreshCw size={15} color="#fff" />} />
+          <NeuButton label={offline ? t('common.retryWhenOnline') : (retryLabel ?? t('common.tryAgain'))} onPress={onRetry} icon={<RefreshCw size={15} color="#fff" />} />
         </View>
       )}
     </View>

@@ -39,6 +39,7 @@ import { useContentProtection } from '@/lib/useContentProtection';
 import { ContentProtectionWarning } from '@/components/ContentProtectionWarning';
 import { RecordingBlockedOverlay } from '@/components/RecordingBlockedOverlay';
 import { VideoPlayer } from '@/components/VideoPlayer';
+import { useTranslation } from '@/lib/i18n';
 
 /** Byte label for the download-progress line (Android-only official fields). */
 function fmtBytesLocal(n: number): string {
@@ -116,21 +117,22 @@ function MaterialsSection({
   onOpenMaterial: (storagePathOrUrl: string, displayName: string, forDownload: boolean) => void;
   onOpenPdf: (fileUrlOrPath: string, displayName: string) => void;
 }) {
+  const { t, tCount } = useTranslation();
   const items = visibleMaterials(materials);
   if (items.length === 0 && pdfs.length === 0) return null;
 
   return (
     <>
       <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-        <Text style={{ fontSize: 17, fontWeight: '700', color: c.text }}>Lecture Materials</Text>
+        <Text style={{ fontSize: 17, fontWeight: '700', color: c.text }}>{t('lesson.lectureMaterials')}</Text>
         {!canAccess ? (
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
             <Lock size={13} color={c.text} opacity={0.4} />
-            <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.4) }}>Subscribers only</Text>
+            <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.4) }}>{t('lesson.subscribersOnly')}</Text>
           </View>
         ) : (
           <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.45) }}>
-            {items.length + pdfs.length} {items.length + pdfs.length === 1 ? 'file' : 'files'}
+            {tCount('lesson.fileCount', items.length + pdfs.length)}
           </Text>
         )}
       </View>
@@ -184,11 +186,11 @@ function MaterialsSection({
                   </View>
                   <View style={{ flex: 1 }}>
                     <Text style={{ fontSize: 14, fontWeight: '600', color: c.text }}>{pdfName}</Text>
-                    <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.45) }}>PDF Document</Text>
+                    <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.45) }}>{t('lesson.pdfDocument')}</Text>
                   </View>
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: '#DC262612', borderRadius: 8, paddingHorizontal: 8, paddingVertical: 4 }}>
                     <Download size={13} color="#DC2626" />
-                    <Text style={{ fontSize: 11, fontWeight: '700', color: '#DC2626' }}>Download</Text>
+                    <Text style={{ fontSize: 11, fontWeight: '700', color: '#DC2626' }}>{t('lesson.download')}</Text>
                   </View>
                 </NeuCard>
               </Pressable>
@@ -216,6 +218,7 @@ export default function LessonPlayer() {
   const insets = layout.insets;
   const { width: screenWidth } = useWindowDimensions();
   const router = useRouter();
+  const { t } = useTranslation();
   const { id } = useLocalSearchParams<{ id: string }>();
   const { profile } = useProfileStore();
   const { blocksVideo, hasWarnings, riskScore, threats, isSuperAdmin, checkBeforeVideo, securityLockHard } = useSecurity();
@@ -652,32 +655,32 @@ export default function LessonPlayer() {
       const refused = /access denied|403/i.test(msg);
       console.error('[openMaterial] signed URL error:', msg);
       setDownloadState({
-        visible: true, fileName: displayName ?? 'Course Material',
+        visible: true, fileName: displayName ?? t('lesson.courseMaterial'),
         progress: 0, status: 'error',
         errorMsg: refused
           ? (forDownload
-              ? 'This material is not available for download. You can still open it from the lesson.'
-              : 'You no longer have access to this material.')
-          : 'Could not generate a download link. Please try again.',
+              ? t('lesson.materialDownloadUnavailable')
+              : t('lesson.materialNoAccess'))
+          : t('lesson.downloadLinkError'),
       });
     }
-  }, [downloadFile]);
+  }, [downloadFile, t]);
 
   /** Download a legacy lesson-pdf via a fresh 1-hour signed URL. */
   const openPdf = useCallback(async (fileUrlOrPath: string, displayName?: string) => {
     if (!fileUrlOrPath) return;
     try {
       const signedUrl = await getLessonPdfSignedUrl(fileUrlOrPath);
-      await downloadFile(signedUrl, displayName ?? 'Lecture Notes');
+      await downloadFile(signedUrl, displayName ?? t('lesson.lectureNotes'));
     } catch (e: any) {
       console.error('[openPdf] signed URL error:', e?.message ?? e);
       setDownloadState({
-        visible: true, fileName: displayName ?? 'Lecture Notes',
+        visible: true, fileName: displayName ?? t('lesson.lectureNotes'),
         progress: 0, status: 'error',
-        errorMsg: 'Could not generate a download link. Please try again.',
+        errorMsg: t('lesson.downloadLinkError'),
       });
     }
-  }, [downloadFile]);
+  }, [downloadFile, t]);
 
   const isStudent = profile?.role === 'student';
   const canAccessMaterials = isSubscribed || lesson?.is_preview || !isStudent;
@@ -691,10 +694,10 @@ export default function LessonPlayer() {
     <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: c.base, gap: 8, padding: 24 }}>
       <Text style={{ fontSize: 16, fontWeight: '700', color: c.text, textAlign: 'center' }}>
         {loadError
-          ? 'Failed to load the lesson'
+          ? t('lesson.failedToLoad')
           : profile?.role === 'student' || isPreviewStudent()
-            ? 'This lesson is not available.'
-            : 'Lesson not found'}
+            ? t('lesson.notAvailable')
+            : t('lesson.notFound')}
       </Text>
       {loadError ? (
         <Text style={{ fontSize: 13, ...mutedTextStyle(c, 0.5), textAlign: 'center' }} numberOfLines={4}>
@@ -702,16 +705,16 @@ export default function LessonPlayer() {
         </Text>
       ) : (
         <Text style={{ fontSize: 13, ...mutedTextStyle(c, 0.45), textAlign: 'center' }}>
-          {profile?.role === 'student' || isPreviewStudent() ? 'It may have been removed or is not yet published.' : ''}
+          {profile?.role === 'student' || isPreviewStudent() ? t('lesson.mayBeRemoved') : ''}
         </Text>
       )}
       {/* Retry — the fetch is idempotent (plain GET); no side effects. */}
       <Pressable
         onPress={() => { setLoading(true); loadData(); }}
         accessibilityRole="button"
-        accessibilityLabel="Retry loading lesson"
+        accessibilityLabel={t('lesson.retryLoad')}
         style={{ marginTop: 8, paddingHorizontal: 22, paddingVertical: 10, borderRadius: 12, backgroundColor: `${c.primary}15` }}>
-        <Text style={{ fontSize: 14, fontWeight: '700', color: c.primary }}>Retry</Text>
+        <Text style={{ fontSize: 14, fontWeight: '700', color: c.primary }}>{t('common.retry')}</Text>
       </Pressable>
     </View>
   );
@@ -815,7 +818,7 @@ export default function LessonPlayer() {
               />
             ) : (
               // ── Thumbnail / placeholder — tap to load ─────────────────────
-              <Pressable onPress={handlePlay} accessibilityLabel="Play video" accessibilityRole="button">
+              <Pressable onPress={handlePlay} accessibilityLabel={t('lesson.playVideo')} accessibilityRole="button">
                 {lesson.video_thumbnail ? (
                   <View style={{ width: '100%', aspectRatio: 16 / 9, position: 'relative' }}>
                     <Image source={{ uri: lesson.video_thumbnail }} style={{ width: '100%', height: '100%' }} contentFit="cover" />
@@ -832,7 +835,10 @@ export default function LessonPlayer() {
                     </View>
                     {resumePosition > 10 && (
                       <Text style={{ fontSize: 12, fontWeight: '600', ...mutedTextStyle(c, 0.5) }}>
-                        Resume at {Math.floor(resumePosition / 60)}m {Math.floor(resumePosition % 60)}s
+                        {t('lesson.resumeAt', {
+                          mins: Math.floor(resumePosition / 60),
+                          secs: Math.floor(resumePosition % 60),
+                        })}
                       </Text>
                     )}
                   </View>
@@ -858,9 +864,9 @@ export default function LessonPlayer() {
                     const busy = offlineBusy;
                     if (dlEntry && expired) {
                       return (
-                        <Pressable onPress={handleRedownload} disabled={busy} accessibilityRole="button" accessibilityLabel="Redownload expired video" style={pill('#FFB02022')}>
+                        <Pressable onPress={handleRedownload} disabled={busy} accessibilityRole="button" accessibilityLabel={t('lesson.redownloadExpired')} style={pill('#FFB02022')}>
                           <RefreshCw size={15} color="#FFB020" />
-                          <Text style={{ fontSize: 12, fontWeight: '700', color: '#FFB020' }}>Redownload</Text>
+                          <Text style={{ fontSize: 12, fontWeight: '700', color: '#FFB020' }}>{t('lesson.redownload')}</Text>
                         </Pressable>
                       );
                     }
@@ -882,24 +888,24 @@ export default function LessonPlayer() {
                               : '/offline-library');
                           }}
                           accessibilityRole="button"
-                          accessibilityLabel="Watch offline"
+                          accessibilityLabel={t('lesson.watchOffline')}
                           style={pill('#22C55E1F')}
                         >
                           <Check size={15} color="#22C55E" />
-                          <Text style={{ fontSize: 12, fontWeight: '700', color: '#22C55E' }}>Watch Offline</Text>
+                          <Text style={{ fontSize: 12, fontWeight: '700', color: '#22C55E' }}>{t('lesson.watchOfflineTitle')}</Text>
                         </Pressable>
                       );
                     }
                     if (phase === 'paused') {
                       return (
                         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                          <Pressable onPress={() => void resumeOfflineVideo(dlEntry!.meta.mediaId)} accessibilityRole="button" accessibilityLabel="Resume download" style={pill(`${c.primary}22`)}>
+                          <Pressable onPress={() => void resumeOfflineVideo(dlEntry!.meta.mediaId)} accessibilityRole="button" accessibilityLabel={t('lesson.resumeDownload')} style={pill(`${c.primary}22`)}>
                             <Download size={15} color={c.text} />
-                            <Text style={{ fontSize: 12, fontWeight: '700', color: c.text }}>Resume</Text>
+                            <Text style={{ fontSize: 12, fontWeight: '700', color: c.text }}>{t('course.resume')}</Text>
                           </Pressable>
-                          <Pressable onPress={handleCancelDownload} accessibilityRole="button" accessibilityLabel="Cancel download" style={pill(`${c.text}14`)}>
+                          <Pressable onPress={handleCancelDownload} accessibilityRole="button" accessibilityLabel={t('lesson.cancelDownload')} style={pill(`${c.text}14`)}>
                             <X size={14} color={c.text} />
-                            <Text style={{ fontSize: 12, fontWeight: '700', color: c.text }}>Cancel</Text>
+                            <Text style={{ fontSize: 12, fontWeight: '700', color: c.text }}>{t('common.cancel')}</Text>
                           </Pressable>
                         </View>
                       );
@@ -908,20 +914,20 @@ export default function LessonPlayer() {
                       return (
                         <View style={pill(`${c.primary}22`)}>
                           <Download size={15} color={c.text} />
-                          <Text style={{ fontSize: 12, fontWeight: '700', color: c.text }}>Processing…</Text>
+                          <Text style={{ fontSize: 12, fontWeight: '700', color: c.text }}>{t('lesson.processing')}</Text>
                         </View>
                       );
                     }
                     if (phase === 'downloading') {
                       return (
                         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                          <Pressable onPress={() => void pauseOfflineVideo(dlEntry!.meta.mediaId)} accessibilityRole="button" accessibilityLabel="Pause download" style={pill(`${c.primary}22`)}>
+                          <Pressable onPress={() => void pauseOfflineVideo(dlEntry!.meta.mediaId)} accessibilityRole="button" accessibilityLabel={t('lesson.pauseDownload')} style={pill(`${c.primary}22`)}>
                             <Pause size={15} color={c.text} />
                             <Text style={{ fontSize: 12, fontWeight: '700', color: c.text }}>{Math.round(dlEntry!.progress)}%</Text>
                           </Pressable>
-                          <Pressable onPress={handleCancelDownload} accessibilityRole="button" accessibilityLabel="Cancel download" style={pill(`${c.text}14`)}>
+                          <Pressable onPress={handleCancelDownload} accessibilityRole="button" accessibilityLabel={t('lesson.cancelDownload')} style={pill(`${c.text}14`)}>
                             <X size={14} color={c.text} />
-                            <Text style={{ fontSize: 12, fontWeight: '700', color: c.text }}>Cancel</Text>
+                            <Text style={{ fontSize: 12, fontWeight: '700', color: c.text }}>{t('common.cancel')}</Text>
                           </Pressable>
                         </View>
                       );
@@ -931,27 +937,27 @@ export default function LessonPlayer() {
                         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
                           <View style={pill(`${c.primary}22`)}>
                             <Download size={15} color={c.text} />
-                            <Text style={{ fontSize: 12, fontWeight: '700', color: c.text }}>Queued…</Text>
+                            <Text style={{ fontSize: 12, fontWeight: '700', color: c.text }}>{t('lesson.queued')}</Text>
                           </View>
-                          <Pressable onPress={handleCancelDownload} accessibilityRole="button" accessibilityLabel="Cancel download" style={pill(`${c.text}14`)}>
+                          <Pressable onPress={handleCancelDownload} accessibilityRole="button" accessibilityLabel={t('lesson.cancelDownload')} style={pill(`${c.text}14`)}>
                             <X size={14} color={c.text} />
-                            <Text style={{ fontSize: 12, fontWeight: '700', color: c.text }}>Cancel</Text>
+                            <Text style={{ fontSize: 12, fontWeight: '700', color: c.text }}>{t('common.cancel')}</Text>
                           </Pressable>
                         </View>
                       );
                     }
                     if (phase === 'failed') {
                       return (
-                        <Pressable onPress={() => void resumeOfflineVideo(dlEntry!.meta.mediaId)} accessibilityRole="button" accessibilityLabel="Retry download" style={pill('#FF5A5A1F')}>
+                        <Pressable onPress={() => void resumeOfflineVideo(dlEntry!.meta.mediaId)} accessibilityRole="button" accessibilityLabel={t('lesson.retryDownload')} style={pill('#FF5A5A1F')}>
                           <RefreshCw size={15} color="#FF5A5A" />
-                          <Text style={{ fontSize: 12, fontWeight: '700', color: '#FF5A5A' }}>Retry</Text>
+                          <Text style={{ fontSize: 12, fontWeight: '700', color: '#FF5A5A' }}>{t('common.retry')}</Text>
                         </Pressable>
                       );
                     }
                     return (
-                      <Pressable onPress={handleDownloadForOffline} disabled={busy} accessibilityRole="button" accessibilityLabel="Download for offline playback" style={pill(busy ? `${c.primary}33` : `${c.primary}22`)}>
+                      <Pressable onPress={handleDownloadForOffline} disabled={busy} accessibilityRole="button" accessibilityLabel={t('lesson.downloadForOffline')} style={pill(busy ? `${c.primary}33` : `${c.primary}22`)}>
                         <Download size={15} color={c.text} />
-                        <Text style={{ fontSize: 12, fontWeight: '700', color: c.text }}>{busy ? 'Starting…' : 'Download'}</Text>
+                        <Text style={{ fontSize: 12, fontWeight: '700', color: c.text }}>{busy ? t('lesson.starting') : t('lesson.download')}</Text>
                       </Pressable>
                     );
                   })()}
@@ -1051,7 +1057,7 @@ export default function LessonPlayer() {
               {downloadState.status !== 'downloading' && (
                 <Pressable
                   onPress={() => setDownloadState(prev => ({ ...prev, visible: false }))}
-                  accessibilityLabel="Dismiss download panel"
+                  accessibilityLabel={t('lesson.dismissPanel')}
                   accessibilityRole="button"
                   hitSlop={6} style={{ width: 32, height: 32, borderRadius: 9, backgroundColor: `${c.text}0D`, alignItems: 'center', justifyContent: 'center' }}
                 >
@@ -1136,7 +1142,7 @@ export default function LessonPlayer() {
             )}
             {lesson.is_preview && (
               <View style={{ paddingHorizontal: 10, paddingVertical: 3, borderRadius: 20, backgroundColor: `${c.primary}15` }}>
-                <Text style={{ fontSize: 11, fontWeight: '700', color: c.primary }}>Free Preview</Text>
+                <Text style={{ fontSize: 11, fontWeight: '700', color: c.primary }}>{t('lesson.freePreview')}</Text>
               </View>
             )}
           </View>
@@ -1193,7 +1199,7 @@ export default function LessonPlayer() {
           }]}>
             <ShieldAlert size={18} color="#F59E0B" />
             <View style={{ flex: 1 }}>
-              <Text style={{ fontSize: 13, fontWeight: '700', color: c.text }}>Security Warning</Text>
+              <Text style={{ fontSize: 13, fontWeight: '700', color: c.text }}>{t('lesson.securityWarning')}</Text>
               <Text style={{ fontSize: 12, color: `${c.text}77` }}>
                 {threats.map((t) => t.type.replace(/_/g, ' ')).join(', ')} detected (Risk: {riskScore})
               </Text>
@@ -1205,7 +1211,7 @@ export default function LessonPlayer() {
           <NeuCard style={{ padding: 0 }}>
             <View style={{ width: '100%', aspectRatio: 16 / 9, backgroundColor: `${c.primary}08`, alignItems: 'center', justifyContent: 'center', gap: 10 }}>
               <ActivityIndicator color={c.primary} size="large" />
-              <Text style={{ fontSize: 14, fontWeight: '700', ...mutedTextStyle(c, 0.65) }}>Processing Video…</Text>
+              <Text style={{ fontSize: 14, fontWeight: '700', ...mutedTextStyle(c, 0.65) }}>{t('lesson.processingVideo')}</Text>
               <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.4), textAlign: 'center', paddingHorizontal: 24 }}>
                 This video is being prepared. Check back shortly.
               </Text>
@@ -1216,7 +1222,7 @@ export default function LessonPlayer() {
         {lesson.video_type === 'coming_soon' && (
           <NeuCard style={{ padding: 24, alignItems: 'center', gap: 10 }}>
             <Clock size={44} color="#D97706" opacity={0.5} />
-            <Text style={{ fontSize: 16, fontWeight: '700', color: c.text }}>Coming Soon</Text>
+            <Text style={{ fontSize: 16, fontWeight: '700', color: c.text }}>{t('lesson.comingSoon')}</Text>
             <Text style={{ fontSize: 13, ...mutedTextStyle(c, 0.45), textAlign: 'center' }}>
               This lesson&apos;s video will be available soon.
             </Text>
@@ -1226,7 +1232,7 @@ export default function LessonPlayer() {
         {/* ── Lesson Notes ── */}
         {!isFullscreen && !!lesson.notes && (
           <NeuCard>
-            <Text style={{ fontSize: 15, fontWeight: '700', color: c.text, marginBottom: 8 }}>Lesson Notes</Text>
+            <Text style={{ fontSize: 15, fontWeight: '700', color: c.text, marginBottom: 8 }}>{t('lesson.notes')}</Text>
             <Text style={{ fontSize: 14, ...mutedTextStyle(c, 0.65), lineHeight: 22 }}>{lesson.notes}</Text>
           </NeuCard>
         )}
@@ -1254,7 +1260,7 @@ export default function LessonPlayer() {
               <View style={{ gap: 10 }}>
                 <NeuCard style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', padding: 18, gap: 10 }}>
                   <CheckCircle size={22} color="#16A34A" />
-                  <Text style={{ fontSize: 16, fontWeight: '700', color: '#16A34A' }}>Lesson Completed!</Text>
+                  <Text style={{ fontSize: 16, fontWeight: '700', color: '#16A34A' }}>{t('lesson.completed')}</Text>
                 </NeuCard>
                 <Pressable
                   onPress={handleToggleComplete}
@@ -1269,7 +1275,7 @@ export default function LessonPlayer() {
               </View>
             ) : (
               <NeuButton
-                label="Mark as Complete"
+                label={t('lesson.markComplete')}
                 onPress={handleToggleComplete}
                 loading={markingComplete}
                 fullWidth
@@ -1319,7 +1325,7 @@ export default function LessonPlayer() {
             )}
             {lesson.is_preview && (
               <View style={{ paddingHorizontal: 10, paddingVertical: 3, borderRadius: 20, backgroundColor: `${c.primary}15` }}>
-                <Text style={{ fontSize: 11, fontWeight: '700', color: c.primary }}>Free Preview</Text>
+                <Text style={{ fontSize: 11, fontWeight: '700', color: c.primary }}>{t('lesson.freePreview')}</Text>
               </View>
             )}
           </View>
@@ -1376,7 +1382,7 @@ export default function LessonPlayer() {
           }]}>
             <ShieldAlert size={18} color="#F59E0B" />
             <View style={{ flex: 1 }}>
-              <Text style={{ fontSize: 13, fontWeight: '700', color: c.text }}>Security Warning</Text>
+              <Text style={{ fontSize: 13, fontWeight: '700', color: c.text }}>{t('lesson.securityWarning')}</Text>
               <Text style={{ fontSize: 12, color: `${c.text}77` }}>
                 {threats.map((t) => t.type.replace(/_/g, ' ')).join(', ')} detected (Risk: {riskScore})
               </Text>
@@ -1389,7 +1395,7 @@ export default function LessonPlayer() {
           <NeuCard style={{ padding: 0 }}>
             <View style={{ width: '100%', aspectRatio: 16 / 9, backgroundColor: `${c.primary}08`, alignItems: 'center', justifyContent: 'center', gap: 10 }}>
               <ActivityIndicator color={c.primary} size="large" />
-              <Text style={{ fontSize: 14, fontWeight: '700', ...mutedTextStyle(c, 0.65) }}>Processing Video…</Text>
+              <Text style={{ fontSize: 14, fontWeight: '700', ...mutedTextStyle(c, 0.65) }}>{t('lesson.processingVideo')}</Text>
               <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.4), textAlign: 'center', paddingHorizontal: 24 }}>
                 This video is being prepared. Check back shortly.
               </Text>
@@ -1400,7 +1406,7 @@ export default function LessonPlayer() {
         {lesson.video_type === 'coming_soon' && (
           <NeuCard style={{ padding: 24, alignItems: 'center', gap: 10 }}>
             <Clock size={44} color="#D97706" opacity={0.5} />
-            <Text style={{ fontSize: 16, fontWeight: '700', color: c.text }}>Coming Soon</Text>
+            <Text style={{ fontSize: 16, fontWeight: '700', color: c.text }}>{t('lesson.comingSoon')}</Text>
             <Text style={{ fontSize: 13, ...mutedTextStyle(c, 0.45), textAlign: 'center' }}>
               This lesson&apos;s video will be available soon.
             </Text>
@@ -1410,7 +1416,7 @@ export default function LessonPlayer() {
         {/* ── Lesson Notes ── */}
         {!isFullscreen && !!lesson.notes && (
           <NeuCard>
-            <Text style={{ fontSize: 15, fontWeight: '700', color: c.text, marginBottom: 8 }}>Lesson Notes</Text>
+            <Text style={{ fontSize: 15, fontWeight: '700', color: c.text, marginBottom: 8 }}>{t('lesson.notes')}</Text>
             <Text style={{ fontSize: 14, ...mutedTextStyle(c, 0.65), lineHeight: 22 }}>{lesson.notes}</Text>
           </NeuCard>
         )}
@@ -1438,7 +1444,7 @@ export default function LessonPlayer() {
               <View style={{ gap: 10 }}>
                 <NeuCard style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', padding: 18, gap: 10 }}>
                   <CheckCircle size={22} color="#16A34A" />
-                  <Text style={{ fontSize: 16, fontWeight: '700', color: '#16A34A' }}>Lesson Completed!</Text>
+                  <Text style={{ fontSize: 16, fontWeight: '700', color: '#16A34A' }}>{t('lesson.completed')}</Text>
                 </NeuCard>
                 <Pressable
                   onPress={handleToggleComplete}
@@ -1453,7 +1459,7 @@ export default function LessonPlayer() {
               </View>
             ) : (
               <NeuButton
-                label="Mark as Complete"
+                label={t('lesson.markComplete')}
                 onPress={handleToggleComplete}
                 loading={markingComplete}
                 fullWidth

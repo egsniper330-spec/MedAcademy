@@ -323,7 +323,9 @@ async function collectEvidenceFlags(): Promise<Record<string, unknown>> {
     out.frida = flags.fridaDetected === true;
     out.xposed = flags.xposedDetected === true;
     out.emulator = flags.emulatorDetected === true;
-    out.mock_location = flags.mockLocationDetected === true;
+    // Mock location is NOT collected: the detector was removed (unreliable on
+    // modern Android for a third-party APK). No field is sent, so the backend
+    // can never treat a stale/no-longer-measured condition as evidence.
     // RESTORED: developer-options/ADB evidence is reported honestly. These two
     // fields were force-cleared while the (now removed) client-side debug gate
     // was active; the backend evidence bundle must always match what the client

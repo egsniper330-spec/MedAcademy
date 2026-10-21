@@ -72,16 +72,26 @@ console.log('── 2. Doctor Earnings: no platform exemption in the client gate
     ok(!/Platform\.OS[^\n]*doctor_earnings|doctor_earnings[^\n]*Platform\.OS/.test(src),
       `${label}: flag check is NOT platform-conditional`);
   }
+  // The sentence now lives in the dictionary (both screens render it through
+  // t()), so parity is: the screen renders the key on every platform and the
+  // English copy is present for that key. No platform branch may change it.
   const earnings = stripComments(read('src/app/(app)/(doctor)/dr-earnings.tsx'));
-  ok(/currently unavailable/i.test(earnings),
+  const earningsCopy = stripComments(read('src/lib/i18n/resources.ts'));
+  ok(/t\('drProfile\.featureUnavailable'\)/.test(earnings) &&
+     /'drProfile\.featureUnavailable': 'This feature is currently unavailable\.'/.test(earningsCopy),
     'earnings screen shows the same user-safe message on iOS');
 }
 
 console.log('── 3. Profile photo Remove: shared control, iOS permission, X-platform APIs ──');
 {
   const comp = read('src/components/ProfilePhotoActions.tsx');
+  const copy = read('src/lib/i18n/resources.ts');
   ok(/export function ProfilePhotoActions/.test(comp), 'one shared control component');
-  ok(/label="Remove Photo"/.test(comp) && !/Platform\.OS/.test(comp),
+  // The label is localized; the English copy must still be "Remove Photo" so the
+  // iOS flow is identical to Android's, and the component must stay platform-free.
+  ok(/label=\{t\('profilePhoto\.remove'\)\}/.test(comp)
+    && /'profilePhoto\.remove': 'Remove Photo'/.test(copy)
+    && !/Platform\.OS/.test(comp),
     'Remove Photo is rendered on every platform (no platform branch)');
 
   for (const [label, rel] of [['student', 'src/app/(app)/(student)/profile.tsx'],

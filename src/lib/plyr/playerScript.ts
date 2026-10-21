@@ -54,11 +54,20 @@
  *   restarts the timer only when tampered — never during normal playback.
  *
  * ── Tap-to-toggle policy (IMPORTANT) ────────────────────────────────────────
- *   clickToPlay is false: tapping the video area never toggles playback.
- *   Play/Pause is controlled exclusively by Plyr's Play/Pause control.
- *   Do NOT add tap interceptors / transparent buttons over the video surface —
- *   an earlier version had one (fixiOSTapToToggle) and it caused the
- *   tap-anywhere-pauses bug plus YouTube's title/channel HUD appearing on tap.
+ *   clickToPlay is false: a SINGLE tap on the video area never toggles playback.
+ *   Play/Pause is controlled by Plyr's Play/Pause controls — including the
+ *   centre `play-large` control, which this script keeps usable while playing
+ *   (see the Centre-control block below) and drives from the real media state.
+ *
+ *   Do NOT add a tap-anywhere toggle: an earlier version had one
+ *   (fixiOSTapToToggle) and it caused the tap-anywhere-pauses bug plus
+ *   YouTube's title/channel HUD appearing on tap.
+ *
+ *   DOUBLE-TAP SEEKING is a gesture, not a toggle: two taps inside 320 ms in
+ *   the same half of the video surface seek ±10 s. It is detected on a
+ *   transparent layer over the VIDEO AREA ONLY, stacked BELOW the centre
+ *   control (z-index 4) and the control bar (z-index 5), so it can never
+ *   swallow a control tap. A single tap stays inert.
  */
 import { WATERMARK_FONT_PX } from '@/lib/nativeWatermarkConfig';
 
@@ -94,7 +103,41 @@ export const PLAYER_SCRIPT = `
       '.plyr__video-wrapper{z-index:0;}' +
       '.plyr__control--overlaid{z-index:4;transform:translate3d(-50%,-50%,0);' +
         'will-change:transform;touch-action:manipulation;}' +
-      '.plyr__video .plyr__controls{z-index:5;touch-action:manipulation;}';
+      // ── CENTRE CONTROL ROOT-CAUSE FIX ────────────────────────────────────
+      // Plyr ships '.plyr--playing .plyr__control--overlaid{opacity:0;
+      // visibility:hidden}'. Once playback starts the centre button is not
+      // just invisible — 'visibility:hidden' removes it from HIT TESTING, so
+      // the centre of the player had no target at all and the only way to
+      // pause was the auto-hiding bottom bar. Keep the control present and
+      // tappable while playing; dim it so it does not obscure the video, and
+      // restore full opacity on hover/focus. Its glyph is swapped to the pause
+      // icon from the player's real state (setCentreState below).
+      '.plyr--playing .plyr__control--overlaid{opacity:.35;visibility:visible;' +
+        'pointer-events:auto;}' +
+      '.plyr--playing .plyr__control--overlaid:hover,' +
+      '.plyr--playing .plyr__control--overlaid:focus{opacity:1;}' +
+      '.plyr__video .plyr__controls{z-index:5;touch-action:manipulation;}' +
+      // ── Double-tap seek layer ────────────────────────────────────────────
+      // Transparent, video-surface only, z-index 1: ABOVE the video/iframe
+      // (wrapper is 0) and BELOW the centre control (4) and the bar (5), so
+      // every control keeps its own hit area. Its own composited layer keeps
+      // it hit-testable over a cross-origin iframe in WKWebView/WebView.
+      '#plyr-gesture-zone{position:absolute;top:0;right:0;bottom:0;left:0;' +
+        'z-index:1;background:transparent;touch-action:manipulation;' +
+        '-webkit-tap-highlight-color:transparent;transform:translateZ(0);' +
+        'will-change:transform;}' +
+      // Seeking feedback: informational only — never a hit target, so it can
+      // never leave an invisible touch-blocking element behind.
+      '.plyr-gesture-feedback{position:absolute;top:50%;z-index:3;' +
+        'transform:translateY(-50%);display:flex;align-items:center;gap:6px;' +
+        'padding:10px 16px;border-radius:999px;' +
+        'border:2px solid rgba(255,255,255,.75);color:#fff;background:rgba(0,0,0,.55);' +
+        'font:600 13px -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;' +
+        'opacity:0;visibility:hidden;transition:opacity .18s ease;' +
+        'pointer-events:none;}' +
+      '.plyr-gesture-feedback[data-side="back"]{left:8%;}' +
+      '.plyr-gesture-feedback[data-side="forward"]{right:8%;}' +
+      '.plyr-gesture-feedback[data-show="1"]{opacity:1;visibility:visible;}';
     (document.head || document.documentElement).appendChild(s);
   }
   injectControlCSS();
@@ -528,13 +571,192 @@ export const PLAYER_SCRIPT = `
   //   Clamps the target into the media's valid range and is a deliberate NO-OP
   //   when the duration is unknown or zero (live stream / not yet seekable), so
   //   a forward seek can never push playback past the end of the media.
+  //   Shared by the rewind / fast-forward controls AND the double-tap gesture,
+  //   so both act through Plyr's own seek API on the same instance.
+  function seekStep() {
+    var s = player && player.config ? player.config.seekTime : null;
+    return (typeof s === 'number' && isFinite(s) && s > 0) ? s : 10;
+  }
+
+  function clampSeekTarget(current, duration, direction) {
+    if (typeof duration !== 'number' || !isFinite(duration) || duration <= 0) return null;
+    if (typeof current !== 'number' || !isFinite(current)) current = 0;
+    var raw = current + direction * seekStep();
+    if (!isFinite(raw)) return null;
+    // Never land exactly on the end (that fires 'ended'). The margin was 0.25 s,
+    // but verified in a REAL browser against the live YouTube IFrame API: the
+    // player REJECTS a seek to duration-0.25 (it snaps back to the pre-seek
+    // position), while duration-1 is accepted cleanly. So the clamp must keep a
+    // full second of clearance, or forward double-taps near the end silently do
+    // nothing. 1 s is the largest margin that is both safe and accepted.
+    var max = Math.max(0, duration - 1);
+    return Math.max(0, Math.min(raw, max));
+  }
+
   function seekBy(direction) {
-    var d = player.duration;
-    if (!isFinite(d) || d <= 0) return;
-    var step = (player.config && player.config.seekTime) || 10;
-    var target = player.currentTime + direction * step;
-    target = Math.max(0, Math.min(target, Math.max(0, d - 0.25)));
+    // SECURITY: the lock's containment sets this flag when it stops playback —
+    // a seek must never move or restart a contained player.
+    if (window.__medaSecurityStopped) return null;
+    var target = clampSeekTarget(player.currentTime, player.duration, direction);
+    if (target === null) return null;
     player.currentTime = target;
+    return target;
+  }
+
+  // ── Centre play/pause: real state in, real state out ───────────────────────
+  //   ROOT CAUSE (reported): Plyr builds "play-large" as a NON-toggle control —
+  //   one icon ("play"), no iconPressed — and its own CSS hides the control
+  //   while playing. Tapping the centre could therefore never pause (no hit
+  //   target, and the glyph was always "play"). These helpers:
+  //     • keep the control visible/tappable (injectControlCSS above);
+  //     • swap its glyph between Plyr's OWN play/pause sprite symbols from the
+  //       player's real play / pause / ended events;
+  //     • toggle against the media's OWN paused/ended state at the moment of
+  //       the tap, so rapid taps cannot both resolve to the same command.
+  function centreButton() {
+    return document.querySelector('.plyr__control--overlaid');
+  }
+
+  function setCentreState(playing) {
+    var btn = centreButton();
+    if (!btn || !btn.setAttribute) return;
+    var state = playing ? 'playing' : 'paused';
+    if (btn.getAttribute('data-meda-state') === state) return;
+    btn.setAttribute('data-meda-state', state);
+    btn.setAttribute('aria-label', playing ? 'Pause' : 'Play');
+    var use = btn.querySelector ? btn.querySelector('use') : null;
+    if (!use || !use.getAttribute) return;
+    var href = use.getAttribute('href') || use.getAttribute('xlink:href') || '';
+    if (!href) return;
+    var next = href.replace(/(play|pause)$/, playing ? 'pause' : 'play');
+    if (next === href) return;
+    if (use.getAttribute('href') !== null) use.setAttribute('href', next);
+    if (use.getAttribute('xlink:href') !== null) {
+      if (use.setAttributeNS) {
+        use.setAttributeNS('http://www.w3.org/1999/xlink', 'xlink:href', next);
+      } else {
+        use.setAttribute('xlink:href', next);
+      }
+    }
+  }
+
+  function realPlaying() {
+    return !!(player && !player.paused && !player.ended);
+  }
+
+  function syncCentreState() {
+    setCentreState(realPlaying());
+  }
+
+  function togglePlayback() {
+    // SECURITY: never restart a player the lock has contained.
+    if (window.__medaSecurityStopped) return;
+    // Authoritative toggle — read the media's own state now, not a cached flag.
+    if (realPlaying()) player.pause();
+    else player.play();
+    syncCentreState();
+    // Provider commands are asynchronous: re-read on the next frame so the
+    // glyph follows what actually happened.
+    if (typeof requestAnimationFrame === 'function') requestAnimationFrame(syncCentreState);
+  }
+
+  // ── Double-tap seeking (YouTube-style) ────────────────────────────────────
+  //   Layer over the VIDEO SURFACE only (never the controls), single tap inert,
+  //   two taps within DOUBLE_TAP_MS in the same half seek ±seekStep().
+  var DOUBLE_TAP_MS = 320;
+  var FEEDBACK_MS = 650;
+  var _lastTap = { t: 0, x: 0, y: 0, zone: null };
+
+  /** Pure tap classifier (also a test/diagnostic seam — dimensions only). */
+  window.__medaSeekTap = function (now, x, y, w, h) {
+    if (!(w > 0) || !(h > 0)) return null;
+    var zone = x < w / 2 ? 'back' : 'forward';
+    var near = Math.abs(x - _lastTap.x) <= Math.max(48, w * 0.12) &&
+               Math.abs(y - _lastTap.y) <= Math.max(48, h * 0.25);
+    var isDouble = _lastTap.zone === zone && near && (now - _lastTap.t) <= DOUBLE_TAP_MS;
+    if (isDouble) {
+      _lastTap = { t: 0, x: 0, y: 0, zone: null }; // a second double-tap starts over
+      return zone;
+    }
+    _lastTap = { t: now, x: x, y: y, zone: zone };
+    return null;
+  };
+
+  function inRect(el, clientX, clientY, pad) {
+    if (!el || !el.getBoundingClientRect || typeof clientX !== 'number') return false;
+    var r = el.getBoundingClientRect();
+    if (!r || (!r.width && !r.height)) return false;
+    return clientX >= r.left - pad && clientX <= r.right + pad &&
+           clientY >= r.top - pad && clientY <= r.bottom + pad;
+  }
+
+  function showSeekFeedback(zone, target) {
+    var wrapper = document.querySelector('.plyr__video-wrapper');
+    if (!wrapper || !wrapper.appendChild) return;
+    var side = zone === 'back' ? 'back' : 'forward';
+    var el = document.getElementById('plyr-seek-' + side);
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'plyr-seek-' + side;
+      el.className = 'plyr-gesture-feedback';
+      el.setAttribute('data-side', side);
+      el.setAttribute('data-show', '0');
+      el.setAttribute('aria-hidden', 'true');
+      var arrow = document.createElement('span');
+      arrow.className = 'plyr-seek-arrow';
+      arrow.textContent = side === 'back' ? '\u21ba' : '\u21bb';
+      var label = document.createElement('span');
+      label.className = 'plyr-seek-label';
+      label.textContent = seekStep() + ' seconds';
+      el.appendChild(arrow);
+      el.appendChild(label);
+      wrapper.appendChild(el);
+    }
+    // Only one side is ever shown.
+    var other = document.getElementById('plyr-seek-' + (side === 'back' ? 'forward' : 'back'));
+    if (other && other.setAttribute) other.setAttribute('data-show', '0');
+    var lbl = el.querySelector ? el.querySelector('.plyr-seek-label') : null;
+    if (lbl) lbl.textContent = seekStep() + ' seconds';
+    el.setAttribute('data-show', '1');
+    if (el.__medaFeedbackTimer) clearTimeout(el.__medaFeedbackTimer);
+    el.__medaFeedbackTimer = setTimeout(function () {
+      el.setAttribute('data-show', '0');
+      el.__medaFeedbackTimer = null;
+    }, FEEDBACK_MS);
+  }
+
+  function installSeekGestures() {
+    if (document.getElementById('plyr-gesture-zone')) return;
+    var wrapper = document.querySelector('.plyr__video-wrapper');
+    if (!wrapper || !wrapper.appendChild) return;
+    var layer = document.createElement('div');
+    layer.id = 'plyr-gesture-zone';
+    layer.setAttribute('aria-hidden', 'true');
+    wrapper.appendChild(layer);
+
+    layer.addEventListener('click', function (e) {
+      // SECURITY: contained players are frozen — no seeking either.
+      if (window.__medaSecurityStopped) return;
+      var rect = layer.getBoundingClientRect ? layer.getBoundingClientRect() : null;
+      var w = (rect && rect.width) || layer.offsetWidth || 0;
+      var h = (rect && rect.height) || layer.offsetHeight || 0;
+      if (!(w > 0) || !(h > 0)) return;
+      var left = (rect && rect.left) || 0;
+      var top = (rect && rect.top) || 0;
+      var clientX = typeof e.clientX === 'number' ? e.clientX : left;
+      var clientY = typeof e.clientY === 'number' ? e.clientY : top;
+      // Defensive only: the stacking order already puts the centre control and
+      // the control bar above this layer, so their taps never arrive here.
+      if (inRect(centreButton(), clientX, clientY, 8)) return;
+      if (inRect(document.querySelector('.plyr__controls'), clientX, clientY, 0)) return;
+      var zone = window.__medaSeekTap(Date.now(), clientX - left, clientY - top, w, h);
+      if (!zone) return; // first tap: nothing happens (single taps stay inert)
+      if (e.stopPropagation) e.stopPropagation();
+      if (e.preventDefault) e.preventDefault();
+      var target = seekBy(zone === 'back' ? -1 : 1);
+      if (target === null) return; // unknown duration: no misleading feedback
+      showSeekFeedback(zone, target);
+    }, false);
   }
 
   // ── Events ─────────────────────────────────────────────────────────────────
@@ -542,6 +764,12 @@ export const PLAYER_SCRIPT = `
   player.on('ready', function () {
     if (resumeAt > 0) player.currentTime = resumeAt;
     injectWatermark(wmName, wmId);
+
+    // Centre control glyph + double-tap seek layer. Both are idempotent, and
+    // 'ready' is late enough for the embed's controls (Plyr injects them in a
+    // deferred build) while still before the first user interaction.
+    syncCentreState();
+    installSeekGestures();
 
     send({ type: 'yt:ready' });
 
@@ -613,7 +841,8 @@ export const PLAYER_SCRIPT = `
       if (isCentre) {
         e.stopImmediatePropagation();
         e.preventDefault();
-        player.togglePlay();
+        // toggles the REAL player (play/pause), never a visual simulation
+        togglePlayback();
         return;
       }
       if (kind === 'rewind' || kind === 'fast-forward') {
@@ -641,13 +870,16 @@ export const PLAYER_SCRIPT = `
 
   // Play / pause state — used by the host to restore state after modal closes.
   player.on('play', function () {
+    syncCentreState();
     send({ type: 'yt:playing' });
   });
   player.on('pause', function () {
+    syncCentreState();
     send({ type: 'yt:paused' });
   });
 
   player.on('ended', function () {
+    syncCentreState();
     send({ type: 'yt:ended', currentTime: player.currentTime, duration: player.duration });
   });
 

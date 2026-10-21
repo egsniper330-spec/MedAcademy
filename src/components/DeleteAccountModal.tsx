@@ -30,6 +30,7 @@ import { ResponsiveModal } from '@/components/ResponsiveModal';
 import { getDeletePreflight, deleteUser, type DeletePreflight } from '@/lib/api';
 import { logAndParse } from '@/lib/parseError';
 import { displayPhoneNational } from '@/lib/phone';
+import { useTranslation } from '@/lib/i18n';
 
 interface Props {
   userId: string | null;
@@ -49,6 +50,7 @@ export function DeleteAccountModal({ userId, visible, onClose, onDeleted }: Prop
   const isDark = useColorScheme() === 'dark';
   const c    = isDark ? neuColors.dark : neuColors.light;
   const flat = neuFlatStyle(isDark);
+  const { t } = useTranslation();
 
   const [loading,   setLoading]   = useState(false);
   const [deleting,  setDeleting]  = useState(false);
@@ -125,7 +127,7 @@ export function DeleteAccountModal({ userId, visible, onClose, onDeleted }: Prop
     ? preflight.role === 'super_admin' && !preflight.email
       ? null  // only EF knows if it's the last super_admin
     : preflight.role === 'doctor' && preflight.active_courses > 0
-      ? `This doctor has ${preflight.active_courses} active course(s). Archive or transfer them first.`
+      ? t('deleteAccount.doctorHasCourses', { count: preflight.active_courses })
     : null
     : null;
 
@@ -135,19 +137,19 @@ export function DeleteAccountModal({ userId, visible, onClose, onDeleted }: Prop
     <ResponsiveModal
       visible={visible}
       onClose={handleClose}
-      title="Delete Account"
-      subtitle="This action is permanent and cannot be undone"
+      title={t('deleteAccount.title')}
+      subtitle={t('deleteAccount.subtitle')}
       footer={
         <View style={{ flexDirection: 'row', gap: 12 }}>
           <NeuButton
-            label="Cancel"
+            label={t('common.cancel')}
             onPress={handleClose}
             variant="secondary"
             style={{ flex: 1 }}
             disabled={deleting}
           />
           <NeuButton
-            label="Delete Permanently"
+            label={t('deleteAccount.deletePermanently')}
             onPress={handleDelete}
             loading={deleting}
             variant="danger"
@@ -164,7 +166,7 @@ export function DeleteAccountModal({ userId, visible, onClose, onDeleted }: Prop
           <View style={{ alignItems: 'center', paddingVertical: 40 }}>
             <ActivityIndicator color={c.primary} size="large" />
             <Text style={{ color: `${c.text}66`, marginTop: 12, fontSize: 14 }}>
-              Loading account details…
+              {t('deleteAccount.loading')}
             </Text>
           </View>
         )}
@@ -197,27 +199,27 @@ export function DeleteAccountModal({ userId, visible, onClose, onDeleted }: Prop
             <View style={[flat, { borderRadius: 16, paddingHorizontal: 14, paddingVertical: 4 }]}>
               <InfoRow
                 icon={<User size={16} color={c.primary} />}
-                label="Full Name"
+                label={t('deleteAccount.fullName')}
                 value={preflight.full_name}
               />
               {preflight.email && !preflight.email.includes('@medacademy.internal') && (
                 <InfoRow
                   icon={<Mail size={16} color={c.primary} />}
-                  label="Email"
+                  label={t('deleteAccount.email')}
                   value={preflight.email}
                 />
               )}
               {preflight.phone && (
                 <InfoRow
                   icon={<Phone size={16} color={c.primary} />}
-                  label="Phone"
+                  label={t('deleteAccount.phone')}
                   value={displayPhoneNational(preflight.phone)}
                 />
               )}
               {preflight.role === 'doctor' && (
                 <InfoRow
                   icon={<BookOpen size={16} color={preflight.active_courses > 0 ? '#EF4444' : c.primary} />}
-                  label="Active Courses"
+                  label={t('deleteAccount.activeCourses')}
                   value={String(preflight.active_courses)}
                   danger={preflight.active_courses > 0}
                 />
@@ -225,19 +227,19 @@ export function DeleteAccountModal({ userId, visible, onClose, onDeleted }: Prop
               {preflight.credits_remaining > 0 && (
                 <InfoRow
                   icon={<CreditCard size={16} color={c.primary} />}
-                  label="Credits Remaining"
+                  label={t('deleteAccount.creditsRemaining')}
                   value={String(preflight.credits_remaining)}
                 />
               )}
               <InfoRow
                 icon={<Smartphone size={16} color={c.primary} />}
-                label="Registered Devices"
+                label={t('deleteAccount.registeredDevices')}
                 value={String(preflight.devices)}
               />
               {preflight.active_enrollments > 0 && preflight.role === 'student' && (
                 <InfoRow
                   icon={<BookOpen size={16} color={c.primary} />}
-                  label="Active Enrollments"
+                  label={t('deleteAccount.activeEnrollments')}
                   value={String(preflight.active_enrollments)}
                 />
               )}
@@ -266,10 +268,10 @@ export function DeleteAccountModal({ userId, visible, onClose, onDeleted }: Prop
               }]}>
                 <Shield size={18} color="#EF4444" style={{ marginTop: 1 }} />
                 <Text style={{ flex: 1, fontSize: 13, color: c.text, lineHeight: 20 }}>
-                  <Text style={{ fontWeight: '700', color: '#EF4444' }}>Warning: </Text>
-                  This action permanently deletes this account and{' '}
-                  <Text style={{ fontWeight: '700' }}>cannot be undone</Text>.
-                  All devices, sessions, enrollments, and data will be removed immediately.
+                  <Text style={{ fontWeight: '700', color: '#EF4444' }}>{t('deleteAccount.warningLabel')}</Text>
+                  {t('deleteAccount.warningBefore')}
+                  <Text style={{ fontWeight: '700' }}>{t('deleteAccount.cannotBeUndone')}</Text>
+                  {t('deleteAccount.warningAfter')}
                 </Text>
               </View>
             )}

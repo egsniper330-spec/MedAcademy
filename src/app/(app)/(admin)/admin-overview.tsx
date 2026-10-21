@@ -3,9 +3,10 @@ import { View, Text, ScrollView, useColorScheme, Pressable, RefreshControl, Acti
 import { useFocusEffect, useRouter } from 'expo-router';
 import {
   Users, BookOpen, Ticket, Shield, CreditCard, Bell,
-  Stethoscope, Smartphone, Search, Megaphone, Video, Database, FileText, GraduationCap, Archive, Activity, Layers,
+  Stethoscope, Smartphone, Search, Megaphone, Video, Database, FileText, GraduationCap, Archive, Activity, Layers, Settings,
 } from 'lucide-react-native';
 import { useProfileStore } from '@/lib/store';
+import { useTranslation } from '@/lib/i18n';
 import { getSuperAdminStats } from '@/lib/api';
 import { getFirstName } from '@/lib/utils';
 import { StatCard } from '@/components/StatCard';
@@ -50,20 +51,24 @@ export default function AdminDashboard() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []));
 
+  const { t } = useTranslation();
   const firstName = getFirstName(profile?.full_name);
 
   const quickActions = [
-    { icon: Users,      label: 'Users',        color: c.primary,  path: '/(app)/(admin)/users' },
-    { icon: Smartphone, label: 'Devices',       color: '#D97706',  path: '/(app)/(admin)/devices' },
-    { icon: Search,     label: 'Search',        color: '#2DA8FF',  path: '/(app)/(admin)/global-search' },
-    { icon: Megaphone,  label: 'Notify',        color: '#D97706',  path: '/(app)/(admin)/notifications-center' },
-    { icon: Layers,     label: 'System Diagnostics', color: '#059669',  path: '/(app)/(admin)/system-providers' },
-    { icon: FileText,   label: 'CMS Pages',      color: '#16A34A',  path: '/(app)/(admin)/cms' },
-    { icon: Database,   label: 'Storage',       color: '#2DA8FF',  path: '/(app)/(admin)/storage' },
-    { icon: Shield,     label: 'Audit Logs',    color: '#DC2626',  path: '/(app)/(admin)/audit' },
-    { icon: BookOpen,   label: 'Reports',       color: '#6B7280',  path: '/(app)/(admin)/reports' },
-    { icon: GraduationCap, label: 'Academic',   color: '#D97706',  path: '/(app)/(admin)/academic' },
-    { icon: Archive,    label: 'Archived',      color: '#D97706',  path: '/(app)/archived-courses' },
+    { icon: Users,      label: t('adminOverview.action.users'),        color: c.primary,  path: '/(app)/(admin)/users' },
+    { icon: Smartphone, label: t('adminOverview.action.devices'),       color: '#D97706',  path: '/(app)/(admin)/devices' },
+    { icon: Search,     label: t('adminOverview.action.search'),        color: '#2DA8FF',  path: '/(app)/(admin)/global-search' },
+    { icon: Megaphone,  label: t('adminOverview.action.notify'),        color: '#D97706',  path: '/(app)/(admin)/notifications-center' },
+    { icon: Layers,     label: t('adminOverview.action.systemDiagnostics'), color: '#059669',  path: '/(app)/(admin)/system-providers' },
+    { icon: FileText,   label: t('adminOverview.action.cms'),      color: '#16A34A',  path: '/(app)/(admin)/cms' },
+    { icon: Database,   label: t('adminOverview.action.storage'),       color: '#2DA8FF',  path: '/(app)/(admin)/storage' },
+    { icon: Shield,     label: t('adminOverview.action.auditLogs'),    color: '#DC2626',  path: '/(app)/(admin)/audit' },
+    { icon: BookOpen,   label: t('adminOverview.action.reports'),       color: '#6B7280',  path: '/(app)/(admin)/reports' },
+    { icon: GraduationCap, label: t('adminOverview.action.academic'),   color: '#D97706',  path: '/(app)/(admin)/academic' },
+    { icon: Archive,    label: t('adminOverview.action.archived'),      color: '#D97706',  path: '/(app)/archived-courses' },
+    { icon: GraduationCap, label: t('adminOverview.action.enrollmentStats'), color: '#7C3AED', path: '/(app)/enrollment-stats' },
+    // Language access for the Admin role — same selector Student/Doctor/Super Admin use.
+    { icon: Settings,   label: t('adminOverview.action.settings'), color: '#6B7280', path: '/(app)/admin-settings' },
   ];
 
   return (
@@ -72,12 +77,12 @@ export default function AdminDashboard() {
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />}
     >
       <DashboardHeader
-        roleLabel="Admin Panel"
-        greeting={firstName ? `${firstName} 👋` : 'Dashboard 👋'}
+        roleLabel={t('adminOverview.roleLabel')}
+        greeting={firstName ? t('adminOverview.greeting', { name: firstName }) : t('adminOverview.greetingFallback')}
         rightActions={
           <Pressable
             onPress={() => router.push('/(app)/notifications' as RelativePathString)}
-            accessibilityLabel="Notifications"
+            accessibilityLabel={t('adminOverview.notifications')}
             accessibilityRole="button"
             style={[{ width: layout.touchTarget, height: layout.touchTarget, borderRadius: layout.cardRadius, alignItems: 'center', justifyContent: 'center' }, neuMicroStyle(isDark)]}
           >
@@ -92,15 +97,15 @@ export default function AdminDashboard() {
           <ActivityIndicator color={c.primary} style={{ marginVertical: layout.sectionGap }} />
         ) : stats && (
           <>
-            <Text style={{ fontSize: layout.captionSize, fontWeight: '800', ...mutedTextStyle(c, 0.4), marginBottom: layout.pad.sm, textTransform: 'uppercase', letterSpacing: 1 }}>Platform Overview</Text>
+            <Text style={{ fontSize: layout.captionSize, fontWeight: '800', ...mutedTextStyle(c, 0.4), marginBottom: layout.pad.sm, textTransform: 'uppercase', letterSpacing: 1 }}>{t('adminOverview.platformOverview')}</Text>
             <View style={{ flexDirection: 'row', flexWrap: 'wrap', marginBottom: layout.pad.xs }}>
-              <StatCard label="Students"    value={stats.totalStudents}    icon={<Users size={layout.captionSize + 2} color="#fff" />}        color="#7C3AED" />
-              <StatCard label="Doctors"     value={stats.totalDoctors}     icon={<Stethoscope size={layout.captionSize + 2} color="#fff" />}  color="#16A34A" />
-              <StatCard label="Devices"     value={stats.totalDevices}     icon={<Smartphone size={layout.captionSize + 2} color="#fff" />}   color="#D97706" />
-              <StatCard label="Credits"     value={stats.totalCredits}     icon={<CreditCard size={layout.captionSize + 2} color="#fff" />}   color="#16A34A" />
-              <StatCard label="Consumed"    value={stats.usedCredits}      icon={<CreditCard size={layout.captionSize + 2} color="#fff" />}   color="#D97706" />
-              <StatCard label="Courses"     value={stats.totalCourses}     icon={<BookOpen size={layout.captionSize + 2} color="#fff" />}     color="#2DA8FF" />
-              <StatCard label="Published"   value={stats.publishedCourses} icon={<BookOpen size={layout.captionSize + 2} color="#fff" />}     color="#16A34A" />
+              <StatCard label={t('adminOverview.kpi.students')}    value={stats.totalStudents}    icon={<Users size={layout.captionSize + 2} color="#fff" />}        color="#7C3AED" />
+              <StatCard label={t('adminOverview.kpi.doctors')}     value={stats.totalDoctors}     icon={<Stethoscope size={layout.captionSize + 2} color="#fff" />}  color="#16A34A" />
+              <StatCard label={t('adminOverview.kpi.devices')}     value={stats.totalDevices}     icon={<Smartphone size={layout.captionSize + 2} color="#fff" />}   color="#D97706" />
+              <StatCard label={t('adminOverview.kpi.credits')}     value={stats.totalCredits}     icon={<CreditCard size={layout.captionSize + 2} color="#fff" />}   color="#16A34A" />
+              <StatCard label={t('adminOverview.kpi.consumed')}    value={stats.usedCredits}      icon={<CreditCard size={layout.captionSize + 2} color="#fff" />}   color="#D97706" />
+              <StatCard label={t('adminOverview.kpi.courses')}     value={stats.totalCourses}     icon={<BookOpen size={layout.captionSize + 2} color="#fff" />}     color="#2DA8FF" />
+              <StatCard label={t('adminOverview.kpi.published')}   value={stats.publishedCourses} icon={<BookOpen size={layout.captionSize + 2} color="#fff" />}     color="#16A34A" />
             </View>
           </>
         )}
@@ -108,7 +113,7 @@ export default function AdminDashboard() {
         {/* Quick Actions — shared tile component (fixed-square icon box; the
             previous 46%/flexGrow wrap-row variant stretched into tall
             rectangles on Android). */}
-        <Text style={{ fontSize: layout.bodySize + 1, fontWeight: '800', color: c.text, marginBottom: layout.pad.md, marginTop: layout.pad.sm }}>Quick Actions</Text>
+        <Text style={{ fontSize: layout.bodySize + 1, fontWeight: '800', color: c.text, marginBottom: layout.pad.md, marginTop: layout.pad.sm }}>{t('adminOverview.quickActions')}</Text>
         <View style={{ flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', marginBottom: layout.pad.md }}>
           {quickActions.map(({ icon, label, color, path }) => (
             <QuickActionBtn

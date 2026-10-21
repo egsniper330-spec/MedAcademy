@@ -10,6 +10,7 @@ import { ResponsiveModal } from '@/components/ResponsiveModal';
 import { neuColors } from '@/lib/neu';
 import { changeAdminPassword } from '@/lib/api';
 import { useToast } from '@/components/Toast';
+import { useTranslation } from '@/lib/i18n';
 
 // ── Password strength ────────────────────────────────────────────────────────
 
@@ -17,12 +18,13 @@ type StrengthLevel = 0 | 1 | 2 | 3 | 4;
 
 interface StrengthResult {
   level: StrengthLevel;
-  label: string;
+  /** Translation key — the label is resolved at render time so it follows the locale. */
+  labelKey: string;
   color: string;
 }
 
 function getStrength(pw: string): StrengthResult {
-  if (!pw) return { level: 0, label: '', color: '#E5E7EB' };
+  if (!pw) return { level: 0, labelKey: '', color: '#E5E7EB' };
   let score = 0;
   if (pw.length >= 8)  score++;
   if (pw.length >= 12) score++;
@@ -30,12 +32,12 @@ function getStrength(pw: string): StrengthResult {
   if (/[0-9]/.test(pw)) score++;
   if (/[^A-Za-z0-9]/.test(pw)) score++;
   const clamped = Math.min(score, 4) as StrengthLevel;
-  const map: Record<StrengthLevel, { label: string; color: string }> = {
-    0: { label: '',       color: '#E5E7EB' },
-    1: { label: 'Weak',   color: '#EF4444' },
-    2: { label: 'Fair',   color: '#F97316' },
-    3: { label: 'Good',   color: '#EAB308' },
-    4: { label: 'Strong', color: '#22C55E' },
+  const map: Record<StrengthLevel, { labelKey: string; color: string }> = {
+    0: { labelKey: '',                        color: '#E5E7EB' },
+    1: { labelKey: 'password.strength.weak',   color: '#EF4444' },
+    2: { labelKey: 'password.strength.fair',   color: '#F97316' },
+    3: { labelKey: 'password.strength.good',   color: '#EAB308' },
+    4: { labelKey: 'password.strength.strong', color: '#22C55E' },
   };
   return { level: clamped, ...map[clamped] };
 }
@@ -57,6 +59,7 @@ export function ChangePasswordModal({ visible, onClose, targetUserId, targetName
   const isDark  = scheme === 'dark';
   const c       = isDark ? neuColors.dark : neuColors.light;
   const { showToast } = useToast();
+  const { t } = useTranslation();
 
   // Derived semantic values from the actual neuColors shape.
   // Dark now takes the solid `textMuted` tier (a) for consistency with the rest
@@ -85,11 +88,11 @@ export function ChangePasswordModal({ visible, onClose, targetUserId, targetName
   const strength = getStrength(newPw);
 
   const validate = (): string | null => {
-    if (!newPw)             return 'Please enter a new password.';
-    if (newPw.length < 8)   return 'Password must be at least 8 characters.';
-    if (!confirmPw)         return 'Please confirm the password.';
-    if (newPw !== confirmPw) return 'Passwords do not match.';
-    if (strength.level < 2) return 'Password is too weak. Add uppercase, numbers, or symbols.';
+    if (!newPw)             return t('password.enterRequired');
+    if (newPw.length < 8)   return t('password.tooShort');
+    if (!confirmPw)         return t('password.confirmRequired');
+    if (newPw !== confirmPw) return t('password.mismatch');
+    if (strength.level < 2) return t('password.tooWeak');
     return null;
   };
 
@@ -100,10 +103,10 @@ export function ChangePasswordModal({ visible, onClose, targetUserId, targetName
     setLoading(true);
     try {
       await changeAdminPassword(targetUserId, newPw);
-      showToast({ type: 'success', message: `Password updated for ${targetName}.` });
+      showToast({ type: 'success', message: t('password.updatedFor', { name: targetName }) });
       onClose();
     } catch (e: any) {
-      setError(e?.message ?? 'Failed to change password. Please try again.');
+      setError(e?.message ?? t('password.changeFailed'));
     } finally {
       setLoading(false);
     }
@@ -126,7 +129,7 @@ export function ChangePasswordModal({ visible, onClose, targetUserId, targetName
     <ResponsiveModal
       visible={visible}
       onClose={onClose}
-      title="Change Password"
+      title={t('password.changeTitle')}
       subtitle={targetName}
     >
       <View style={{ gap: 20 }}>
@@ -136,20 +139,20 @@ export function ChangePasswordModal({ visible, onClose, targetUserId, targetName
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
             <ShieldCheck size={16} color={mutedText} />
             <Text style={{ fontSize: 13, color: mutedText, textTransform: 'capitalize' }}>
-              {targetRole.replace('_', ' ')} account
+              {t('password.roleAccount', { role: targetRole.replace('_', ' ') })}
             </Text>
           </View>
         )}
 
         {/* New password */}
         <View style={{ gap: 6 }}>
-          <Text style={{ fontSize: 13, fontWeight: '600', color: mutedText }}>New Password</Text>
+          <Text style={{ fontSize: 13, fontWeight: '600', color: mutedText }}>{t('password.new')}</Text>
           <View style={inputWrap}>
             <Lock size={16} color={mutedText} />
             <TextInput
               value={newPw}
-              onChangeText={t => { setNewPw(t); setError(''); }}
-              placeholder="Enter new password"
+              onChangeText={v => { setNewPw(v); setError(''); }}
+              placeholder={t('password.enterNew')}
               placeholderTextColor={mutedText}
               secureTextEntry={!showNew}
               autoCapitalize="none"
@@ -178,9 +181,9 @@ export function ChangePasswordModal({ visible, onClose, targetUserId, targetName
                   />
                 ))}
               </View>
-              {strength.label ? (
+              {strength.labelKey ? (
                 <Text style={{ fontSize: 12, color: strength.color, fontWeight: '600' }}>
-                  {strength.label}
+                  {t(strength.labelKey)}
                 </Text>
               ) : null}
             </View>
@@ -189,7 +192,7 @@ export function ChangePasswordModal({ visible, onClose, targetUserId, targetName
 
         {/* Confirm password */}
         <View style={{ gap: 6 }}>
-          <Text style={{ fontSize: 13, fontWeight: '600', color: mutedText }}>Confirm Password</Text>
+          <Text style={{ fontSize: 13, fontWeight: '600', color: mutedText }}>{t('password.confirm')}</Text>
           <View style={{
             ...inputWrap,
             borderColor: confirmPw && confirmPw !== newPw ? '#EF4444' : borderColor,
@@ -197,8 +200,8 @@ export function ChangePasswordModal({ visible, onClose, targetUserId, targetName
             <Lock size={16} color={mutedText} />
             <TextInput
               value={confirmPw}
-              onChangeText={t => { setConfirmPw(t); setError(''); }}
-              placeholder="Confirm new password"
+              onChangeText={v => { setConfirmPw(v); setError(''); }}
+              placeholder={t('password.confirmNew')}
               placeholderTextColor={mutedText}
               secureTextEntry={!showConf}
               autoCapitalize="none"
@@ -213,10 +216,10 @@ export function ChangePasswordModal({ visible, onClose, targetUserId, targetName
             </Pressable>
           </View>
           {confirmPw.length > 0 && confirmPw !== newPw && (
-            <Text style={{ fontSize: 12, color: '#EF4444' }}>Passwords do not match.</Text>
+            <Text style={{ fontSize: 12, color: '#EF4444' }}>{t('password.mismatch')}</Text>
           )}
           {confirmPw.length > 0 && confirmPw === newPw && (
-            <Text style={{ fontSize: 12, color: '#22C55E', fontWeight: '600' }}>✓ Passwords match</Text>
+            <Text style={{ fontSize: 12, color: '#22C55E', fontWeight: '600' }}>✓ {t('password.match')}</Text>
           )}
         </View>
 
@@ -233,7 +236,7 @@ export function ChangePasswordModal({ visible, onClose, targetUserId, targetName
         {/* Security note */}
         <View style={{ backgroundColor: `${c.primary}18`, borderRadius: 10, padding: 12 }}>
           <Text style={{ fontSize: 12, color: mutedText, lineHeight: 18 }}>
-            The new password takes effect immediately. No email notification will be sent.
+            {t('password.immediateNote')}
           </Text>
         </View>
 
@@ -249,7 +252,7 @@ export function ChangePasswordModal({ visible, onClose, targetUserId, targetName
               opacity: loading ? 0.5 : 1,
             }}
           >
-            <Text style={{ fontSize: 15, fontWeight: '600', color: mutedText }}>Cancel</Text>
+            <Text style={{ fontSize: 15, fontWeight: '600', color: mutedText }}>{t('common.cancel')}</Text>
           </Pressable>
 
           <Pressable
@@ -264,7 +267,7 @@ export function ChangePasswordModal({ visible, onClose, targetUserId, targetName
           >
             {loading && <ActivityIndicator size="small" color="#fff" />}
             <Text style={{ fontSize: 15, fontWeight: '700', color: '#fff' }}>
-              {loading ? 'Saving…' : 'Set Password'}
+              {loading ? t('common.saving') : t('password.set')}
             </Text>
           </Pressable>
         </View>

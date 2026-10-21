@@ -47,6 +47,7 @@ import {
 } from 'react-native';
 import { Portal } from '@rn-primitives/portal';
 import { neuColors } from '@/lib/neu';
+import { useTranslation } from '@/lib/i18n';
 
 let overlaySeq = 0;
 
@@ -82,6 +83,7 @@ export function PortalOverlay({
   children,
 }: PortalOverlayProps) {
   const isDark = useColorScheme() === 'dark';
+  const { t } = useTranslation();
   const scrim = backdropColor ?? (isDark ? neuColors.dark.overlay : '#00000066');
   // Stable, unique portal identity per component instance — never changes
   // across re-renders, so the portal never remounts.
@@ -182,7 +184,7 @@ export function PortalOverlay({
               style={StyleSheet.absoluteFill}
               onPress={handleBackdropPress}
               accessibilityRole="button"
-              accessibilityLabel="Close"
+              accessibilityLabel={t('common.close')}
             />
           </Animated.View>
         )}

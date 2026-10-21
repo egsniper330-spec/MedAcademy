@@ -395,15 +395,23 @@ console.log('\n\u2500\u2500 Part B2: the warning screen derives from ONE authori
     /const blocksLogin = security\.hasVerdict/.test(screen));
 
   // The contradiction itself: generic "issues were detected" copy over 0 findings.
+  // The copy is translated now, so the condition is pinned on the KEY — and the
+  // English string is asserted against the dictionary, not the screen.
+  const resources = read('src/lib/i18n/resources.ts');
   check('the found-issues copy is conditional on findings existing',
-    /hasFindings\s*\?\s*'Security issues were detected on your device/.test(screen));
-  check('an explicit zero-finding state exists', /No issues detected/.test(screen));
-  check('a pending check is not presented as a clean result', /Verification in progress/.test(screen));
-  check('the issues heading is driven by the derived count', /Detected Issues \(\{findingCount\}\)/.test(screen));
+    /hasFindings\s*\n?\s*\?\s*t\('security\.warningBody'\)/.test(screen) &&
+    /'security\.warningBody': 'Security issues were detected on your device/.test(resources));
+  check('an explicit zero-finding state exists',
+    /t\('security\.noIssuesDetected'\)/.test(screen));
+  check('a pending check is not presented as a clean result',
+    /t\('security\.verificationInProgress'\)/.test(screen));
+  check('the issues heading is driven by the derived count',
+    /t\('security\.detectedIssues', \{ count: findingCount \}\)/.test(screen));
   check('the action label is honest when nothing was found',
-    /label=\{hasFindings \? 'Continue Anyway' : 'Continue'\}/.test(screen));
+    /label=\{hasFindings \? t\('security\.continueAnyway'\) : t\('security\.continue'\)\}/.test(screen));
   check('"Continue Anyway" is still offered for real findings (no new bypass created)',
-    /'Continue Anyway'/.test(screen));
+    /t\('security\.continueAnyway'\)/.test(screen) &&
+    /'security\.continueAnyway': 'Continue Anyway'/.test(resources));
   check('the accent colour derives from the same state as the copy', /const accent = blocksLogin/.test(screen));
 }
 

@@ -170,9 +170,11 @@ console.log('── Part 5: gate presentation ──');
     ['5a: the gate uses the centralized state', /gateState/],
     ['5b: block visibility comes from isGateBlocked', /isGateBlocked\(gateState\)/],
     ['5c: the recheck control is offered only where appropriate', /isGateRecheckable\(gateState\)/],
-    ['5d: the overlay copy comes from the state model (verbatim)', /OVERLAY_WARNING_COPY\.message/],
-    ['5e: ... including its title', /OVERLAY_WARNING_COPY\.title\.toUpperCase\(\)/],
-    ['5f: the recheck button is accessible', /accessibilityLabel="Verify security and continue"/],
+    // Localized copy now lives in the translation resources; the state model keeps
+    // the canonical English wording and its own unit tests.
+    ['5d: the overlay message is localized', /t\('security\.overlay\.message'\)/],
+    ['5e: ... including its title', /t\('security\.overlay\.title'\)\.toUpperCase\(\)/],
+    ['5f: the recheck button is accessible', /accessibilityLabel=\{t\('security\.gate\.verify'\)\}/],
     // CHANGED deliberately: the interim resume state renders NO page at all.
     ['5g: the resume hold renders no full-screen page (previous VERIFYING page removed)',
       /if \(!blocking \|\| !blockScreen\) return null;/],

@@ -354,7 +354,8 @@ console.log('\n\u2500\u2500 Part F: every other security control is unchanged \u
   check('ADB detection is unconditional (no disable constant)',
     /flags\.adbEnabled/.test(security) && !/DEBUG_DISABLE_DEV_OPTIONS_AND_ADB/.test(security));
   check('Developer-Options detection is unconditional', /flags\.developerOptionsEnabled/.test(security));
-  check('mock-location detection is present', /mockLocationDetected/.test(security));
+  check('mock-location detection is REMOVED (no field, no event, no score)',
+    !/mockLocationDetected/.test(security) && !/detectMockLocation/.test(security));
   check('VPN/proxy weights unchanged', /vpn_detected:\s+15/.test(security) && /proxy_detected:\s+15/.test(security));
 
   // Signing pin still fail-closed.
@@ -413,7 +414,7 @@ console.log('\n\u2500\u2500 Part H: the comment-stripping harness is conservativ
   check('a "/*" inside a string does not delete the code that follows it',
     diagCode.includes('setIntegrity(getPlatformIntegrity());'));
   check('a "/*" inside a string does not swallow the detector table',
-    diagCode.includes('mockLocationDetected:') && diagCode.includes('fridaDetected:'));
+    diagCode.includes('emulatorDetected:') && diagCode.includes('fridaDetected:'));
   check('inline-code "/*" in the audit doc does not delete the doc',
     auditCode.includes('| `tests/*.test.cjs` |'));
   check('the audit doc keeps its decision-record prose',

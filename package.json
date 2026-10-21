@@ -18,7 +18,8 @@
     "validate": "node scripts/validate-all.js",
     "prebuild:validate": "node scripts/validate-all.js",
     "postinstall": "patch-package || true && node scripts/sync-android-version.js || true",
-    "test:offline": "node scripts/run-state-tests.cjs offlineState.test.cjs offlinePipeline.test.cjs offlineEntitlement.test.cjs offlineMediaContract.test.cjs aboutOfflineUi.test.cjs"
+    "test:offline": "node scripts/run-state-tests.cjs offlineState.test.cjs offlinePipeline.test.cjs offlineEntitlement.test.cjs offlineMediaContract.test.cjs aboutOfflineUi.test.cjs",
+    "i18n:audit": "node scripts/i18n-coverage.js"
   },
   "dependencies": {
     "@bottom-tabs/react-navigation": "^1.4.0",
@@ -73,6 +74,7 @@
     "expo-image-picker": "~55.0.24",
     "expo-linear-gradient": "~55.0.18",
     "expo-linking": "~55.0.17",
+    "expo-localization": "~17.0.8",
     "expo-media-library": "~55.0.21",
     "expo-navigation-bar": "~55.0.17",
     "expo-network": "~55.0.18",

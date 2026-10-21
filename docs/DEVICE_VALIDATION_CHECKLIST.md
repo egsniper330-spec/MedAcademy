@@ -123,14 +123,22 @@ requires USB debugging to be on — which the app is designed to block.
 to run with Developer Options on, that is a product decision — raise it, do not
 relax the detector.
 
-## 5. Mock location — genuine detection *and* the fixed false positive
+## 5. Mock location — detector REMOVED (no longer a security signal)
+
+Mock-location detection was removed outright, not re-weighted or exempted. A
+release APK cannot perform the cross-UID app-ops read it needs
+(`UPDATE_APP_OPS_STATS` is signature|privileged), and the per-package app-op that
+some ROMs do answer is persisted state that survives the Developer-options toggle
+and can be OEM-preset — it never proved a live selection. MedAcademy has no
+location feature, so nothing was protected by the check. Full record:
+`docs/MOCK_LOCATION_REMOVAL.md`.
 
 | # | Step | Expected |
 |---|---|---|
-| 5.1 | Set a mock location app (Developer options → Select mock location app), open the app. | Gate: **"Mock Location Detected"** — instructs how to clear the mock app. |
-| 5.2 | **False-positive regression:** Developer Options on with **no** mock app selected. | Must **not** say "Mock Location Detected". (Both are `debug_detected`/weight 20, but `resolveFindingCopyKey` must pick the *device-state* copy, not "Insecure Build Detected".) |
-| 5.3 | Clear the mock app entirely, reopen. | App opens normally. |
-| 5.4 | Read the **login-blocked** (`Access Blocked`) screen's issue row with a mock app selected. | **"Mock Location Detected"** — never "Debug Mode Active". (`debug_detected` is one event/weight 20 shared by four conditions; both `security-warning` screens resolve the label from `resolveFindingCopyKey`.) |
+| 5.1 | Select a mock location app (Developer options → Select mock location app), then open the app. | **No** "Mock Location Detected" block, no risk contribution. Other device-state checks behave normally. |
+| 5.2 | **Regression (the Android 16 report):** Developer Options **off** on a device that previously had a mock app (or that carries an OEM-preset app-op). | App opens normally. It must **never** show "Mock Location Detected" or a "Mock-location app selected" row — the field no longer exists. |
+| 5.3 | Open Security Diagnostics (§14 area) and the Device security report. | No mock-location row/entry anywhere; the diagnostics API-limits card states the removal and why. |
+| 5.4 | On a device with a genuine unrelated violation (e.g. Developer Options on). | That exact finding still blocks with its own copy — the removal did not weaken any other detector. |
 
 ## 6. Emulator / virtual device
 
@@ -176,7 +184,7 @@ The gate must be derived from one authoritative evaluation.
 | 9.6 | Clean device: background the app, then resume. | **No** `VERIFYING YOUR SESSION` page. The screen you left is back immediately; protected requests and lesson playback stay refused for the moment the check takes. No Continue button is needed. |
 | 9.7 | Clean device on a slow network: background, then resume. | Same as 9.6 — no verification page, no artificial wait. A stalled check may be retried once after ~8 s; access is never granted on the timeout. |
 | 9.8 | Background/resume the app 5× in a row. | One verification per resume (no duplicate native bridge calls or API storms); never stuck locked after a final clean verdict. |
-| 9.9 | Turn on a VPN (or Developer Options / USB debugging / mock location), background the app, then resume. | The **authoritative** page for that exact finding appears as soon as the verdict lands — VPN/proxy copy and steps for a connection block, the matching row for any other finding. No `Continue Anyway`, no way past it. |
+| 9.9 | Turn on a VPN (or Developer Options / USB debugging), background the app, then resume. | The **authoritative** page for that exact finding appears as soon as the verdict lands — VPN/proxy copy and steps for a connection block, the matching row for any other finding. No `Continue Anyway`, no way past it. |
 | 9.10 | Repeat 9.9 with the app already on a protected lesson. | The player is stopped and unmounted on the hard lock; no protected frame or audio continues behind the block. |
 
 ## 10. VPN / proxy — launch, runtime and resume
@@ -282,11 +290,11 @@ supports.
 
 | # | Step | Expected |
 |---|---|---|
-| 14.1 | Try to sign in on a device the check blocks, then scroll the `Access Blocked` page to **Device security report**. | Six rows appear: Developer options, USB debugging (ADB), Debugger connected to the app, Test-only build flag, Emulator / virtual device, Mock-location app selected — each `on` / `off` / `unknown` / `unavailable`. No login, Super Admin role, dev build or deep link was needed. |
+| 14.1 | Try to sign in on a device the check blocks, then scroll the `Access Blocked` page to **Device security report**. | Five rows appear: Developer options, USB debugging (ADB), Debugger connected to the app, Test-only build flag, Emulator / virtual device — each `on` / `off` / `unknown` / `unavailable`. (Mock location is not reported at all — the detector was removed; `docs/MOCK_LOCATION_REMOVAL.md`.) No login, Super Admin role, dev build or deep link was needed. |
 | 14.2 | Compare the rows with the finding shown above them. | Exactly the reported condition reads `on`; every unrelated signal reads `off`; a signal that could not be measured reads `unknown` (measured device) or `unavailable` (native module unreachable) — never `off`. |
 | 14.2b | Open Android Settings (leaving the block page mounted), turn Developer options off, then return to the app. | The card re-reads on foreground: the row changes to `off` without a manual refresh. |
 | 14.2c | Sign in on a clean account, then trigger an in-app policy block (e.g. root/tamper on a test device). | The `SECURITY BLOCK ACTIVE` page also carries the card; the block is unchanged and non-dismissible. |
-| 14.3 | Tap **Copy security report**. | The copied text carries the six signals, app version/build, Android version + API level, manufacturer/model, build fingerprint, the finding with its raw event type + detector description, and a timestamp. No token, credential, identifier or user data. |
+| 14.3 | Tap **Copy security report**. | The copied text carries the five signals, app version/build, Android version + API level, manufacturer/model, build fingerprint, the finding with its raw event type + detector description, and a timestamp. No token, credential, identifier or user data. |
 | 14.4 | Force the native module to be unavailable (e.g. an Expo Go / web-dev run). | The card states the module is **UNAVAILABLE** and that the values are *not* a clean result — it must never present fail-safe defaults as verified. |
 | 14.5 | Try to reach the rest of the app from the card. | Impossible: the card contains no dismiss, continue, verify or navigation control, and the block still stands (§10.8). |
 
@@ -337,7 +345,7 @@ for what is and is not detectable).
 | §2 Screen recording | | | |
 | §3 USB debugging | | | |
 | §4 Developer Options | | | |
-| §5 Mock location | | | |
+| §5 Mock location (removed) | | | |
 | §6 Emulator | | | |
 | §7 Signing | | | |
 | §8 Gate consistency | | | |
@@ -377,6 +385,8 @@ Android path.
   detect and block (§3).
 - A determined user with ADB can flip these settings back; the control is
   deterrence plus the server-side audit trail, not prevention.
-- Mock-location detection depends on the OS reporting an app-op; a rooted device
-  can defeat it (which is itself detected by `root_detected` / `magisk_detected`).
+- Mock-location detection is **removed**: it could not be established reliably by
+  a third-party APK, and the app has no location feature to protect. Do not
+  reintroduce it without a platform-supported signal
+  (`docs/MOCK_LOCATION_REMOVAL.md`).
 - Screenshot blocking prevents casual capture; it is not DRM.

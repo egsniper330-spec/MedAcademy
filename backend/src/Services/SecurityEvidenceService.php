@@ -649,7 +649,14 @@ final class SecurityEvidenceService
           // mere warning signal, which was consistent with the old warn_only
           // default — and with the dismissible path that produced the reported
           // iOS bypass.
-          $blocking = ['vpn', 'proxy', 'developer_options', 'adb', 'debugger', 'tampered', 'root', 'magisk', 'frida', 'xposed', 'emulator', 'mock_location'];
+          // `mock_location` was REMOVED from this list together with the client
+          // detector (docs/MOCK_LOCATION_REMOVAL.md): no client sends the field
+          // any more, and pre-removal rows may still carry `mock_location: true`
+          // from a stale/unsupported AppOps reading. Keeping it blocking would
+          // let a persisted false positive from an older APK continue to deny
+          // login after the detector is gone. Nothing else changed — every
+          // remaining signal keeps its existing blocking effect.
+          $blocking = ['vpn', 'proxy', 'developer_options', 'adb', 'debugger', 'tampered', 'root', 'magisk', 'frida', 'xposed', 'emulator'];
         $blockingHits = [];
         foreach ($blocking as $signal) {
             if (!empty($flags[$signal])) {

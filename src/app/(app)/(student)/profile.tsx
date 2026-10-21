@@ -29,7 +29,6 @@ import {
   getUniversities, getFaculties, getAcademicLevels,
   changePassword, getPublicEmail, isInternalEmail,
 } from '@/lib/api';
-import { getFirstName } from '@/lib/utils';
 import { NeuCard } from '@/components/NeuCard';
 import { NeuButton } from '@/components/NeuButton';
 import { NeuInputRow } from '@/components/NeuInputRow';
@@ -41,11 +40,15 @@ import { useToast } from '@/components/Toast';
 import * as ImagePicker from 'expo-image-picker';
 import { usePermission } from '@/hooks/usePermission';
 import { PermissionRationaleModal } from '@/components/PermissionRationaleModal';
+import { LanguageSetting } from '@/components/LanguageSetting';
+import { useTranslation } from '@/lib/i18n';
+import { statusLabel } from '@/lib/i18n/labels';
 
 // ─── ID card ─────────────────────────────────────────────────────────────────
 // Displays the PUBLIC USER ID (MED-####) — the canonical user-facing identifier.
 // The internal numeric/legacy watermark_id must never be shown here.
 function WatermarkCard({ publicUserId, c }: { publicUserId: string | null; c: typeof neuColors.light }) {
+  const { t } = useTranslation();
   const [copied, setCopied] = useState(false);
   if (!publicUserId && __DEV__) {
     console.warn('[Profile] public_user_id missing from profile payload — check backend PUBLIC_COLS/profile select.');
@@ -64,7 +67,7 @@ function WatermarkCard({ publicUserId, c }: { publicUserId: string | null; c: ty
         </View>
         <View style={{ flex: 1 }}>
           <Text style={{ fontSize: 11, fontWeight: '700', ...mutedTextStyle(c, 0.4), textTransform: 'uppercase', letterSpacing: 0.9 }}>
-            ID
+            {t('profile.idLabel')}
           </Text>
           <Text style={{ fontSize: 18, fontWeight: '800', color: c.primary, letterSpacing: 1.5, marginTop: 2, fontVariant: ['tabular-nums'] }}>
             {publicUserId ?? '—'}
@@ -72,7 +75,7 @@ function WatermarkCard({ publicUserId, c }: { publicUserId: string | null; c: ty
         </View>
         <Pressable
           onPress={handleCopy}
-          accessibilityLabel={copied ? 'User ID copied' : 'Copy user ID'}
+          accessibilityLabel={copied ? t('studentProfile.idCopiedA11y') : t('studentProfile.copyIdA11y')}
           accessibilityRole="button"
           style={{
             flexDirection: 'row', alignItems: 'center', gap: 5,
@@ -84,12 +87,12 @@ function WatermarkCard({ publicUserId, c }: { publicUserId: string | null; c: ty
             ? <CheckCircle size={15} color="#16A34A" />
             : <Copy size={15} color={c.primary} />}
           <Text style={{ fontSize: 12, fontWeight: '700', color: copied ? '#16A34A' : c.primary }}>
-            {copied ? 'Copied!' : 'Copy'}
+            {copied ? t('profile.copied') : t('common.copy')}
           </Text>
         </Pressable>
       </View>
       <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.4), lineHeight: 17 }}>
-        This ID is permanently assigned to your account and appears as a watermark in every video you watch.
+        {t('profile.watermarkNote')}
       </Text>
     </NeuCard>
   );
@@ -131,8 +134,9 @@ function PickerRow({
   onSelect: (id: string, name: string) => void;
   c: typeof neuColors.light;
 }) {
+  const { t } = useTranslation();
   const [open, setOpen] = useState(false);
-  const selectedName = items.find(i => i.id === value)?.name ?? '— Select —';
+  const selectedName = items.find(i => i.id === value)?.name ?? t('studentProfile.selectPlaceholder');
   const { height: screenH } = useWindowDimensions();
   const insets = usePickerInsets();
 
@@ -147,7 +151,7 @@ function PickerRow({
       </Text>
       <Pressable
         onPress={() => setOpen(true)}
-        accessibilityLabel={`Select ${label}: ${selectedName}`}
+        accessibilityLabel={t('studentProfile.selectA11y', { label, value: selectedName })}
         accessibilityRole="button"
         style={{
           flexDirection: 'row', alignItems: 'center',
@@ -173,7 +177,7 @@ function PickerRow({
         <Pressable
           style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.35)' }}
           onPress={() => setOpen(false)}
-          accessibilityLabel="Close picker"
+          accessibilityLabel={t('common.close')}
           accessibilityRole="button"
         />
 
@@ -197,7 +201,7 @@ function PickerRow({
               <Text style={{ flex: 1, fontSize: 17, fontWeight: '700', color: c.text }} numberOfLines={1}>{label}</Text>
               <Pressable
                 onPress={() => setOpen(false)}
-                accessibilityLabel="Close"
+                accessibilityLabel={t('common.close')}
                 accessibilityRole="button"
                 style={{ padding: 4 }}
               >
@@ -224,7 +228,7 @@ function PickerRow({
               ))}
               {items.length === 0 && (
                 <Text style={{ fontSize: 14, ...mutedTextStyle(c, 0.4), textAlign: 'center', paddingVertical: 24 }}>
-                  No options available
+                  {t('studentProfile.noOptions')}
                 </Text>
               )}
             </ScrollView>
@@ -245,6 +249,7 @@ export default function StudentProfile() {
   const router = useRouter();
   const { profile, setProfile } = useProfileStore();
   const { showToast } = useToast();
+  const { t, tCount } = useTranslation();
 
   const [subscriptions, setSubscriptions] = useState<any[]>([]);
   const [refreshing, setRefreshing] = useState(false);
@@ -277,13 +282,13 @@ export default function StudentProfile() {
   };
 
   const handleSavePersonal = async () => {
-    const nameErr = validateRequired(editName, 'Full name');
+    const nameErr = validateRequired(editName, t('profile.fullName'));
     if (nameErr) { setEditError(nameErr); return; }
     if (editEmail.trim() && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(editEmail.trim())) {
-      setEditError('Enter a valid email address.'); return;
+      setEditError(t('validation.invalidEmail')); return;
     }
     if (isInternalEmail(editEmail.trim())) {
-      setEditError('Enter a valid email address.'); return;
+      setEditError(t('validation.invalidEmail')); return;
     }
     if (!profile?.id) return;
     setEditSaving(true); setEditError('');
@@ -293,10 +298,10 @@ export default function StudentProfile() {
         profile_email: editEmail.trim() || null,
       });
       setProfile({ ...profile, ...(updated as any) });
-      showToast({ type: 'success', message: 'Profile updated successfully.' });
+      showToast({ type: 'success', message: t('profile.saved') });
       setShowPersonalEdit(false);
     } catch (e: any) {
-      setEditError(friendlyError(e, 'Failed to save. Please try again.'));
+      setEditError(friendlyError(e, t('studentProfile.saveFailed')));
     }
     setEditSaving(false);
   };
@@ -316,8 +321,8 @@ export default function StudentProfile() {
   };
 
   const handleChangePassword = async () => {
-    if (newPwd.length < 8) { setPwdError('Password must be at least 8 characters.'); return; }
-    if (newPwd !== confirmPwd) { setPwdError('Passwords do not match.'); return; }
+    if (newPwd.length < 8) { setPwdError(t('validation.passwordMin', { min: 8 })); return; }
+    if (newPwd !== confirmPwd) { setPwdError(t('validation.passwordMatch')); return; }
     setPwdSaving(true); setPwdError('');
     try {
       await changePassword(newPwd);
@@ -325,7 +330,7 @@ export default function StudentProfile() {
       setNewPwd(''); setConfirmPwd('');
       setTimeout(() => { setPwdSuccess(false); setShowPwdEdit(false); }, 2000);
     } catch (e: any) {
-      setPwdError(e?.message ?? 'Password change failed.');
+      setPwdError(e?.message ?? t('studentProfile.passwordChangeFailed'));
     }
     setPwdSaving(false);
   };
@@ -370,9 +375,9 @@ export default function StudentProfile() {
       const { data: { publicUrl } } = backendClient.storage.from('user-avatars').getPublicUrl(path);
       const updated = await updateProfile(profile.id, { avatar_url: publicUrl });
       setProfile({ ...profile, ...(updated as any) });
-      showToast({ type: 'success', message: 'Avatar updated!' });
+      showToast({ type: 'success', message: t('studentProfile.avatarUpdated') });
     } catch (e: any) {
-      showToast({ type: 'error', message: e?.message ?? 'Failed to upload avatar.' });
+      showToast({ type: 'error', message: e?.message ?? t('studentProfile.avatarUploadFailed') });
     }
     setAvatarUploading(false);
   };
@@ -391,10 +396,10 @@ export default function StudentProfile() {
       await removeProfileAvatar(profile.id, current);
       // Mirror the server state locally so the default avatar shows instantly.
       setProfile({ ...profile, avatar_url: null } as any);
-      showToast({ type: 'success', message: 'Profile photo removed.' });
+      showToast({ type: 'success', message: t('studentProfile.avatarRemoved') });
     } catch (e: any) {
       // Failure path deliberately leaves profile.avatar_url as-is.
-      showToast({ type: 'error', message: e?.message ?? 'Failed to remove profile photo.' });
+      showToast({ type: 'error', message: e?.message ?? t('studentProfile.avatarRemoveFailed') });
     }
     setAvatarRemoving(false);
   };
@@ -465,7 +470,7 @@ export default function StudentProfile() {
 
   const handleSaveAcademic = async () => {
     if (!selUnivId || !selFacId || !selLevelId) {
-      setAcadError('Please select University, Faculty, and Academic Level.');
+      setAcadError(t('studentProfile.selectAllFields'));
       return;
     }
     if (!profile?.id) return;
@@ -480,7 +485,7 @@ export default function StudentProfile() {
       setAcadSuccess(true);
       setTimeout(() => { setAcadSuccess(false); setShowAcademicEdit(false); }, 1800);
     } catch (e: any) {
-      setAcadError(e?.message ?? 'Failed to save. Please try again.');
+      setAcadError(e?.message ?? t('studentProfile.saveFailed'));
     }
     setAcadLoading(false);
   };
@@ -497,15 +502,14 @@ export default function StudentProfile() {
   const completedCount = subscriptions.filter(s => s.completed_at).length;
   const activeCount    = subscriptions.length - completedCount;
   const statusColor    = profile?.status === 'active' ? '#16A34A' : profile?.status === 'suspended' ? '#DC2626' : '#D97706';
-  const firstName      = getFirstName(profile?.full_name);
 
   // inputStyle removed — use NeuInputRow instead
 
   const INFO_LINKS = [
-    { label: 'Terms & Conditions', icon: FileText,      path: '/(app)/info/terms'   as RelativePathString },
-    { label: 'Privacy Policy',     icon: Shield,        path: '/(app)/info/privacy' as RelativePathString },
-    { label: 'About Us',           icon: Info,          path: '/(app)/info/about'   as RelativePathString },
-    { label: 'Contact Us',         icon: HeartHandshake,path: '/(app)/info/contact' as RelativePathString },
+    { labelKey: 'studentProfile.terms',  icon: FileText,      path: '/(app)/info/terms'   as RelativePathString },
+    { labelKey: 'studentProfile.privacy', icon: Shield,        path: '/(app)/info/privacy' as RelativePathString },
+    { labelKey: 'nav.aboutUs',            icon: Info,          path: '/(app)/info/about'   as RelativePathString },
+    { labelKey: 'nav.contactUs',          icon: HeartHandshake,path: '/(app)/info/contact' as RelativePathString },
   ];
 
   return (
@@ -553,71 +557,71 @@ export default function StudentProfile() {
           />
           <Text style={{ fontSize: 22, fontWeight: '800', color: c.text }}>{profile?.full_name || '—'}</Text>
           <Text style={{ fontSize: 13, ...mutedTextStyle(c, 0.45), marginTop: 4 }}>
-            {firstName ? `Welcome back, ${firstName} 👋` : 'Welcome back 👋'}
+            {t('home.welcome')}
           </Text>
           <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 8, gap: 8 }}>
             <View style={{ backgroundColor: `${statusColor}18`, borderRadius: 20, paddingHorizontal: 12, paddingVertical: 4 }}>
-              <Text style={{ fontSize: 12, fontWeight: '700', color: statusColor, textTransform: 'capitalize' }}>
-                {profile?.status ?? 'active'}
+              <Text style={{ fontSize: 12, fontWeight: '700', color: statusColor }}>
+                {statusLabel(profile?.status ?? 'active', t)}
               </Text>
             </View>
             <View style={{ backgroundColor: `${c.primary}12`, borderRadius: 20, paddingHorizontal: 12, paddingVertical: 4 }}>
-              <Text style={{ fontSize: 12, fontWeight: '700', color: c.primary }}>Student</Text>
+              <Text style={{ fontSize: 12, fontWeight: '700', color: c.primary }}>{t('role.student')}</Text>
             </View>
           </View>
         </View>
 
         {/* ── ID ───────────────────────────────────────────────────── */}
-        <SectionLabel label="ID" color={c.text} />
+        <SectionLabel label={t('profile.idLabel')} color={c.text} />
         <WatermarkCard publicUserId={(profile as any)?.public_user_id ?? null} c={c} />
 
         {/* ── Account info ─────────────────────────────────────────── */}
-        <SectionLabel label="Account Information" color={c.text} />
+        <SectionLabel label={t('studentProfile.accountInformation')} color={c.text} />
         <NeuCard radius={18} style={{ padding: 16, marginBottom: 20 }}>
-          <InfoRow icon={<Mail size={16} color={c.primary} />}  label="Email" value={getPublicEmail(profile) ?? 'Not set'} c={c} />
-          <InfoRow icon={<Phone size={16} color={c.primary} />} label="Phone" value={profile?.phone ?? ''}   c={c} />
-          <InfoRow icon={<Lock  size={16} color={c.text}    />} label="Role"  value="Student"               c={c} />
+          <InfoRow icon={<Mail size={16} color={c.primary} />}  label={t('profile.email')} value={getPublicEmail(profile) ?? t('profile.notSet')} c={c} />
+          <InfoRow icon={<Phone size={16} color={c.primary} />} label={t('profile.phone')} value={profile?.phone ?? ''}   c={c} />
+          <InfoRow icon={<Lock  size={16} color={c.text}    />} label={t('profile.role')}  value={t('role.student')}     c={c} />
           <Pressable
             onPress={openPersonalEdit}
-            accessibilityLabel="Edit name and email"
+            accessibilityLabel={t('studentProfile.editNameEmailA11y')}
             accessibilityRole="button"
             style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
                      marginTop: 14, paddingTop: 14, borderTopWidth: 1, borderTopColor: `${c.text}08` }}
           >
             <Pencil size={15} color={c.primary} />
-            <Text style={{ fontSize: 14, fontWeight: '700', color: c.primary, marginLeft: 7 }}>Edit Name & Email</Text>
+            <Text style={{ fontSize: 14, fontWeight: '700', color: c.primary, marginLeft: 7 }}>{t('studentProfile.editNameEmail')}</Text>
           </Pressable>
         </NeuCard>
 
         {/* ── Academic Info + Edit ─────────────────────────────────── */}
-        <SectionLabel label="Academic Information" color={c.text} />
+        <SectionLabel label={t('studentProfile.academicInformation')} color={c.text} />
         <NeuCard radius={18} style={{ padding: 16, marginBottom: 20 }}>
-          <InfoRow icon={<Building2    size={16} color={c.primary} />} label="University"     value={(profile as any)?.university?.name ?? ''} c={c} />
-          <InfoRow icon={<GraduationCap size={16} color={c.primary} />} label="Faculty"        value={(profile as any)?.faculty?.name ?? ''}    c={c} />
-          <InfoRow icon={<GraduationCap size={16} color={c.primary} />} label="Academic Level" value={(profile as any)?.academic_level?.name ?? ''} c={c} />
+          <InfoRow icon={<Building2    size={16} color={c.primary} />} label={t('studentProfile.university')}     value={(profile as any)?.university?.name ?? ''} c={c} />
+          <InfoRow icon={<GraduationCap size={16} color={c.primary} />} label={t('studentProfile.faculty')}        value={(profile as any)?.faculty?.name ?? ''}    c={c} />
+          <InfoRow icon={<GraduationCap size={16} color={c.primary} />} label={t('studentProfile.academicLevel')} value={(profile as any)?.academic_level?.name ?? ''} c={c} />
           <Pressable
             onPress={openAcademicEdit}
-            accessibilityLabel="Edit academic information"
+            accessibilityLabel={t('studentProfile.editAcademicA11y')}
             accessibilityRole="button"
             style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
                      marginTop: 14, paddingTop: 14, borderTopWidth: 1, borderTopColor: `${c.text}08` }}
           >
             <Pencil size={15} color={c.primary} />
-            <Text style={{ fontSize: 14, fontWeight: '700', color: c.primary, marginLeft: 7 }}>Edit Academic Info</Text>
+            <Text style={{ fontSize: 14, fontWeight: '700', color: c.primary, marginLeft: 7 }}>{t('studentProfile.editAcademic')}</Text>
           </Pressable>
         </NeuCard>
 
         {/* ── Subscription stats ───────────────────────────────────── */}
-        <SectionLabel label="My Subscriptions" color={c.text} />
+        <SectionLabel label={t('studentProfile.mySubscriptions')} color={c.text} />
         {dataLoading ? (
           <ActivityIndicator color={c.primary} style={{ marginVertical: 20 }} />
         ) : (
           <>
             <View style={{ flexDirection: 'row', gap: 12, marginBottom: 16 }}>
               {[
-                { label: 'Total',  value: subscriptions.length, color: c.primary },
-                { label: 'Active', value: activeCount,           color: '#D97706' },
-                { label: 'Done',   value: completedCount,        color: '#16A34A' },
+                { label: t('common.total'),    value: subscriptions.length, color: c.primary },
+                { label: t('status.active'),   value: activeCount,           color: '#D97706' },
+                { label: t('common.done'),     value: completedCount,        color: '#16A34A' },
               ].map(stat => (
                 <NeuCard key={stat.label} radius={16} style={{ flex: 1, alignItems: 'center', padding: 14 }}>
                   <Text style={{ fontSize: 26, fontWeight: '800', color: stat.color }}>{stat.value}</Text>
@@ -630,7 +634,7 @@ export default function StudentProfile() {
                 {subscriptions.slice(0, 5).map((sub, idx) => (
                   <Pressable key={sub.id}
                     onPress={() => router.push(`/(app)/course/${sub.course?.id}` as RelativePathString)}
-                    accessibilityLabel={`Open course: ${sub.course?.title ?? 'course'}`}
+                    accessibilityLabel={t('studentProfile.openCourseA11y', { title: sub.course?.title ?? t('studentProfile.courseFallback') })}
                     accessibilityRole="button"
                     style={{
                       flexDirection: 'row', alignItems: 'center', paddingVertical: 10,
@@ -642,49 +646,52 @@ export default function StudentProfile() {
                     </View>
                     <View style={{ flex: 1 }}>
                       <Text style={{ fontSize: 14, fontWeight: '600', color: c.text }} numberOfLines={1}>{sub.course?.title}</Text>
-                      <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.45), marginTop: 1 }}>Dr. {sub.course?.doctor?.full_name ?? '—'}</Text>
+                      <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.45), marginTop: 1 }}>{t('studentProfile.doctorPrefix', { name: sub.course?.doctor?.full_name ?? '—' })}</Text>
                     </View>
                     <View style={{ backgroundColor: sub.completed_at ? '#16A34A18' : `${c.primary}15`, borderRadius: 8, paddingHorizontal: 8, paddingVertical: 3 }}>
                       <Text style={{ fontSize: 11, fontWeight: '700', color: sub.completed_at ? '#16A34A' : c.primary }}>
-                        {sub.completed_at ? 'Done' : 'Active'}
+                        {sub.completed_at ? t('common.done') : t('status.active')}
                       </Text>
                     </View>
                   </Pressable>
                 ))}
                 {subscriptions.length > 5 && (
                   <Pressable onPress={() => router.push('/(app)/(student)/my-courses' as RelativePathString)} style={{ paddingTop: 12, alignItems: 'center' }}>
-                    <Text style={{ fontSize: 13, color: c.primary, fontWeight: '700' }}>View all {subscriptions.length} courses →</Text>
+                    <Text style={{ fontSize: 13, color: c.primary, fontWeight: '700' }}>{tCount('studentProfile.viewAllCourses', subscriptions.length)}</Text>
                   </Pressable>
                 )}
               </NeuCard>
             ) : (
               <NeuCard radius={18} style={{ alignItems: 'center', padding: 28, marginBottom: 20 }}>
                 <BookOpen size={40} color={c.primary} opacity={0.25} style={{ marginBottom: 10 }} />
-                <Text style={{ fontSize: 15, fontWeight: '600', ...mutedTextStyle(c, 0.4) }}>No subscribed courses yet</Text>
+                <Text style={{ fontSize: 15, fontWeight: '600', ...mutedTextStyle(c, 0.4) }}>{t('studentProfile.noSubscribedCourses')}</Text>
               </NeuCard>
             )}
           </>
         )}
 
         {/* ── Security: Change Password ────────────────────────────── */}
-        <SectionLabel label="Security" color={c.text} />
+        <SectionLabel label={t('profile.security')} color={c.text} />
         <NeuCard radius={18} style={{ paddingHorizontal: 16, marginBottom: 20 }}>
           <Pressable onPress={openPwdEdit}
             style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 14,
                      borderBottomWidth: 1, borderBottomColor: `${c.text}08` }}>
             <Lock size={18} color={c.primary} />
-            <Text style={{ flex: 1, fontSize: 15, fontWeight: '600', color: c.text, marginLeft: 10 }}>Change Password</Text>
+            <Text style={{ flex: 1, fontSize: 15, fontWeight: '600', color: c.text, marginLeft: 10 }}>{t('studentProfile.changePassword')}</Text>
             <ChevronRight size={16} color={c.text} opacity={0.3} />
           </Pressable>
           <Pressable onPress={() => setShowLogout(true)}
             style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 14 }}>
             <LogOut size={18} color="#DC2626" />
-            <Text style={{ flex: 1, fontSize: 15, fontWeight: '600', color: '#DC2626', marginLeft: 10 }}>Sign Out</Text>
+            <Text style={{ flex: 1, fontSize: 15, fontWeight: '600', color: '#DC2626', marginLeft: 10 }}>{t('common.signOut')}</Text>
           </Pressable>
         </NeuCard>
 
+        {/* ── App language ─────────────────────────────────────────── */}
+        <LanguageSetting />
+
         {/* ── Information Links ────────────────────────────────────── */}
-        <SectionLabel label="Information" color={c.text} />
+        <SectionLabel label={t('studentProfile.information')} color={c.text} />
         <NeuCard radius={18} style={{ paddingHorizontal: 16, marginBottom: 20 }}>
           {INFO_LINKS.map((item, idx) => (
             <Pressable
@@ -697,7 +704,7 @@ export default function StudentProfile() {
               }}
             >
               <item.icon size={18} color={c.primary} />
-              <Text style={{ flex: 1, fontSize: 15, fontWeight: '600', color: c.text, marginLeft: 10 }}>{item.label}</Text>
+              <Text style={{ flex: 1, fontSize: 15, fontWeight: '600', color: c.text, marginLeft: 10 }}>{t(item.labelKey)}</Text>
               <ChevronRight size={16} color={c.text} opacity={0.3} />
             </Pressable>
           ))}
@@ -709,36 +716,36 @@ export default function StudentProfile() {
       <ResponsiveModal
         visible={showPersonalEdit}
         onClose={() => setShowPersonalEdit(false)}
-        title="Edit Profile"
+        title={t('nav.editProfile')}
         footer={
           <View style={{ flexDirection: 'row', gap: 12 }}>
-            <NeuButton label="Cancel" onPress={() => setShowPersonalEdit(false)} variant="secondary" style={{ flex: 1 }} />
-            <NeuButton label="Save" onPress={handleSavePersonal} loading={editSaving} style={{ flex: 1 }} />
+            <NeuButton label={t('common.cancel')} onPress={() => setShowPersonalEdit(false)} variant="secondary" style={{ flex: 1 }} />
+            <NeuButton label={t('common.save')} onPress={handleSavePersonal} loading={editSaving} style={{ flex: 1 }} />
           </View>
         }
       >
         
-          <Text style={{ fontSize: layout.captionSize + 1, fontWeight: '700', ...mutedTextStyle(c, 0.55), textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 6 }}>Full Name</Text>
+          <Text style={{ fontSize: layout.captionSize + 1, fontWeight: '700', ...mutedTextStyle(c, 0.55), textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 6 }}>{t('profile.fullName')}</Text>
           <NeuInputRow
             c={c}
             value={editName}
             onChangeText={setEditName}
-            placeholder="Your full name"
+            placeholder={t('studentProfile.fullNamePlaceholder')}
             leftIcon={<User size={16} color={c.text} opacity={0.4} />}
           />
-          <Text style={{ fontSize: layout.captionSize + 1, fontWeight: '700', ...mutedTextStyle(c, 0.55), textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 6 }}>Email</Text>
+          <Text style={{ fontSize: layout.captionSize + 1, fontWeight: '700', ...mutedTextStyle(c, 0.55), textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 6 }}>{t('profile.email')}</Text>
           <NeuInputRow
             c={c}
             value={editEmail}
             onChangeText={setEditEmail}
-            placeholder="Not set"
+            placeholder={t('profile.notSet')}
             keyboardType="email-address"
             autoCapitalize="none"
             autoCorrect={false}
             leftIcon={<Mail size={16} color={c.text} opacity={0.4} />}
           />
           <Text style={{ fontSize: layout.captionSize, ...mutedTextStyle(c, 0.45), marginBottom: 12, lineHeight: Math.round(layout.captionSize * 1.4) }}>
-            Your login method stays unchanged.
+            {t('profile.emailHint')}
           </Text>
           {editError ? (
             <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8 }}>
@@ -753,12 +760,12 @@ export default function StudentProfile() {
       <ResponsiveModal
         visible={showPwdEdit}
         onClose={() => setShowPwdEdit(false)}
-        title="Change Password"
+        title={t('studentProfile.changePassword')}
         footer={
           !pwdSuccess ? (
             <View style={{ flexDirection: 'row', gap: 12 }}>
-              <NeuButton label="Cancel" onPress={() => setShowPwdEdit(false)} variant="secondary" style={{ flex: 1 }} />
-              <NeuButton label="Update" onPress={handleChangePassword} loading={pwdSaving} style={{ flex: 1 }} />
+              <NeuButton label={t('common.cancel')} onPress={() => setShowPwdEdit(false)} variant="secondary" style={{ flex: 1 }} />
+              <NeuButton label={t('common.update')} onPress={handleChangePassword} loading={pwdSaving} style={{ flex: 1 }} />
             </View>
           ) : undefined
         }
@@ -767,16 +774,16 @@ export default function StudentProfile() {
           {pwdSuccess ? (
             <View style={{ alignItems: 'center', paddingVertical: 12, gap: 10 }}>
               <CheckCircle size={44} color="#16A34A" />
-              <Text style={{ fontSize: 16, fontWeight: '700', color: '#16A34A' }}>Password Updated!</Text>
+              <Text style={{ fontSize: 16, fontWeight: '700', color: '#16A34A' }}>{t('studentProfile.passwordUpdated')}</Text>
             </View>
           ) : (
             <>
-              <Text style={{ fontSize: layout.captionSize + 1, fontWeight: '700', ...mutedTextStyle(c, 0.55), textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 6 }}>New Password</Text>
+              <Text style={{ fontSize: layout.captionSize + 1, fontWeight: '700', ...mutedTextStyle(c, 0.55), textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 6 }}>{t('studentProfile.newPassword')}</Text>
               <NeuInputRow
                 c={c}
                 value={newPwd}
                 onChangeText={setNewPwd}
-                placeholder="Min. 8 characters"
+                placeholder={t('studentProfile.min8')}
                 secureTextEntry={!showPwd}
                 leftIcon={<Lock size={16} color={c.text} opacity={0.4} />}
                 rightElement={
@@ -790,7 +797,7 @@ export default function StudentProfile() {
                 containerStyle={{ marginBottom: 4 }}
                 value={confirmPwd}
                 onChangeText={setConfirmPwd}
-                placeholder="Re-enter password"
+                placeholder={t('studentProfile.reenterPassword')}
                 secureTextEntry={!showPwd}
                 leftIcon={<Lock size={16} color={c.text} opacity={0.4} />}
               />
@@ -809,19 +816,19 @@ export default function StudentProfile() {
       <ResponsiveModal
         visible={showAcademicEdit}
         onClose={() => setShowAcademicEdit(false)}
-        title="Edit Academic Info"
+        title={t('studentProfile.editAcademic')}
         footer={
           <NeuButton
-            label={acadLoading ? 'Saving…' : 'Save Changes'}
+            label={acadLoading ? t('common.saving') : t('profile.saveChanges')}
             onPress={handleSaveAcademic}
             loading={acadLoading}
             fullWidth
           />
         }
       >
-        <PickerRow label="University"     value={selUnivId}   items={universities} onSelect={(id) => handleUniversityChange(id)} c={c} />
-        <PickerRow label="Faculty"        value={selFacId}    items={faculties}    onSelect={(id) => handleFacultyChange(id)}    c={c} />
-        <PickerRow label="Academic Level" value={selLevelId}  items={levels}       onSelect={(id) => setSelLevelId(id)}           c={c} />
+        <PickerRow label={t('studentProfile.university')}     value={selUnivId}   items={universities} onSelect={(id) => handleUniversityChange(id)} c={c} />
+        <PickerRow label={t('studentProfile.faculty')}        value={selFacId}    items={faculties}    onSelect={(id) => handleFacultyChange(id)}    c={c} />
+        <PickerRow label={t('studentProfile.academicLevel')} value={selLevelId}  items={levels}       onSelect={(id) => setSelLevelId(id)}           c={c} />
         {acadError ? (
           <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 12 }}>
             <AlertCircle size={15} color="#DC2626" />
@@ -831,7 +838,7 @@ export default function StudentProfile() {
         {acadSuccess ? (
           <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 4 }}>
             <CheckCircle size={15} color="#16A34A" />
-            <Text style={{ color: '#16A34A', fontSize: 13, marginLeft: 7 }}>Saved!</Text>
+            <Text style={{ color: '#16A34A', fontSize: 13, marginLeft: 7 }}>{t('studentProfile.saved')}</Text>
           </View>
         ) : null}
       </ResponsiveModal>
@@ -840,15 +847,15 @@ export default function StudentProfile() {
       <ResponsiveModal
         visible={showLogout}
         onClose={() => setShowLogout(false)}
-        title="Sign Out?"
+        title={t('studentProfile.signOutTitle')}
         footer={
           <View style={{ flexDirection: 'row', gap: 12 }}>
-            <NeuButton label="Cancel" onPress={() => setShowLogout(false)} variant="secondary" style={{ flex: 1 }} />
-            <NeuButton label="Sign Out" onPress={handleLogout} style={{ flex: 1 }} />
+            <NeuButton label={t('common.cancel')} onPress={() => setShowLogout(false)} variant="secondary" style={{ flex: 1 }} />
+            <NeuButton label={t('common.signOut')} onPress={handleLogout} style={{ flex: 1 }} />
           </View>
         }
       >
-        <Text style={{ fontSize: 14, ...mutedTextStyle(c, 0.6), lineHeight: 22 }}>Your progress and data are safely saved.</Text>
+        <Text style={{ fontSize: 14, ...mutedTextStyle(c, 0.6), lineHeight: 22 }}>{t('studentProfile.signOutBody')}</Text>
       </ResponsiveModal>
     </ScrollView>
   );

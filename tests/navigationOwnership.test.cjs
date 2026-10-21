@@ -97,16 +97,18 @@ const doctorBlock = drawerNavSrc.match(/if \(role === 'doctor'\) \{[\s\S]*?\n  \
 ok(doctorBlock !== null, "role === 'doctor' block found in DrawerNav (role-scoped)");
 if (doctorBlock) {
   const block = doctorBlock[0];
+  // Labels are routed through t('nav.*') for localization; the ORDER and the
+  // item set remain the invariant, so match translation keys, not literals.
   const EXPECTED_ORDER = [
-    'Dashboard', 'My Courses', 'Video Library', 'Students',
-    'Credits', 'Earnings', 'Notifications', 'Profile',
+    'nav.dashboard', 'nav.myCourses', 'nav.videoLibrary', 'nav.students',
+    'nav.credits', 'nav.earnings', 'nav.notifications', 'nav.profile',
   ];
-  const positions = EXPECTED_ORDER.map((label) => block.indexOf("label: '" + label + "'"));
+  const positions = EXPECTED_ORDER.map((key) => block.indexOf("label: t('" + key + "')"));
   ok(positions.every((p) => p >= 0), 'all 8 canonical doctor items present');
-  const inOrder = positions.every((p, i) => p >= 0 && (i === 0 || p > positions[i - 1]));
+  const inOrder = positions.every((p, i2) => p >= 0 && (i2 === 0 || p > positions[i2 - 1]));
   ok(inOrder, 'doctor drawer order: Dashboard → My Courses → Video Library → Students → Credits → Earnings → Notifications → Profile');
   // Notifications lives in the main list now — no duplicate entry may remain.
-  const notifCount = (block.match(/label: 'Notifications'/g) || []).length;
+  const notifCount = (block.match(/label: t\('nav\.notifications'\)/g) || []).length;
   ok(notifCount === 1, 'Notifications appears exactly once in the doctor drawer');
   // Role scoping: student/admin/super_admin blocks untouched by the reorder.
   ok(/if \(role === 'student'\) \{[\s\S]*?path: '\/profile'/.test(drawerNavSrc), 'student drawer block unchanged (role-scoped)');

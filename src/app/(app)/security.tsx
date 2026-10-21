@@ -13,6 +13,29 @@ import { NeuCard } from '@/components/NeuCard';
 import { NeuButton } from '@/components/NeuButton';
 import { neuColors, mutedTextStyle } from '@/lib/neu';
 import { NeuInputRow } from '@/components/NeuInputRow';
+import { t } from '@/lib/i18n';
+
+
+/**
+ * Map a password-change failure to localized copy.
+ *
+ * The endpoint may return free-form text; we NEVER render it verbatim. Known
+ * causes map to specific messages, everything else falls back to a generic
+ * localized error while the original detail is kept for developer logs only.
+ */
+function passwordChangeError(message: string | undefined): string {
+  const m = (message ?? '').toLowerCase();
+  if (process.env.NODE_ENV !== 'production' && message) {
+    console.warn('[SecurityCenter] password change failed:', message);
+  }
+  if (m.includes('at least') || m.includes('too short') || m.includes('minimum')) return t('securityCenter.errLength');
+  if (m.includes('match') || m.includes('confirm')) return t('securityCenter.errMatch');
+  if (m.includes('same') || m.includes('current password')) return t('securityCenter.errSame');
+  if (m.includes('network') || m.includes('connect') || m.includes('timeout') || m.includes('fetch')) {
+    return t('securityCenter.errNetwork');
+  }
+  return t('securityCenter.changeFailed');
+}
 
 export default function SecurityCenter() {
   const scheme = useColorScheme();
@@ -39,8 +62,8 @@ export default function SecurityCenter() {
   const [wmCopied, setWmCopied] = useState(false);
 
   const handleChangePassword = async () => {
-    if (newPassword.length < 8) { setError('Password must be at least 8 characters.'); return; }
-    if (newPassword !== confirmPassword) { setError('Passwords do not match.'); return; }
+    if (newPassword.length < 8) { setError(t('securityCenter.errLength')); return; }
+    if (newPassword !== confirmPassword) { setError(t('securityCenter.errMatch')); return; }
     setSaving(true);
     setError('');
     try {
@@ -50,7 +73,7 @@ export default function SecurityCenter() {
       setNewPassword('');
       setConfirmPassword('');
     } catch (e: any) {
-      setError(e?.message ?? 'Password change failed.');
+      setError(passwordChangeError(e?.message));
     }
     setSaving(false);
   };
@@ -60,7 +83,7 @@ export default function SecurityCenter() {
   return (
     <KeyboardAvoidingView behavior={undefined} /* keyboard: native inset only */ style={{ flex: 1, backgroundColor: c.base }}>
       <ScrollView automaticallyAdjustKeyboardInsets={process.env.EXPO_OS === 'ios'} contentContainerStyle={{ flexGrow: 1, paddingTop: 0 }} keyboardShouldPersistTaps="handled">
-        <PageHeader title="Security Center" subtitle="Password & account security" showBack />
+        <PageHeader title={t('securityCenter.title')} subtitle={t('securityCenter.subtitle')} showBack />
 
       <View style={{ paddingHorizontal: 24 }}>
 
@@ -71,13 +94,13 @@ export default function SecurityCenter() {
               <Shield size={22} color={c.primary} />
             </View>
             <View>
-              <Text style={{ fontSize: 16, fontWeight: '700', color: c.text }}>Account Security</Text>
+              <Text style={{ fontSize: 16, fontWeight: '700', color: c.text }}>{t('securityCenter.accountSecurity')}</Text>
               <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.5) }}>{getContactDisplay(profile)}</Text>
             </View>
           </View>
           <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: '#16A34A12', borderRadius: 10, padding: 10 }}>
             <CheckCircle size={16} color="#16A34A" style={{ marginRight: 8 }} />
-            <Text style={{ fontSize: 13, color: '#16A34A', fontWeight: '600' }}>Account is secured with email/password authentication</Text>
+            <Text style={{ fontSize: 13, color: '#16A34A', fontWeight: '600' }}>{t('securityCenter.securedWith')}</Text>
           </View>
         </NeuCard>
 
@@ -86,9 +109,9 @@ export default function SecurityCenter() {
             watermarkIdentity.ts). NEVER the internal DB id or the legacy
             watermark token column (which held opaque values like "16"). */}
         <NeuCard style={{ marginBottom: 20, padding: 18 }}>
-          <Text style={{ fontSize: 14, fontWeight: '700', color: c.text, marginBottom: 6 }}>Your Watermark ID</Text>
+          <Text style={{ fontSize: 14, fontWeight: '700', color: c.text, marginBottom: 6 }}>{t('securityCenter.watermarkId')}</Text>
           <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.55), marginBottom: 10, lineHeight: 18 }}>
-            This ID is used to identify your account in protected video and PDF content.
+            {t('securityCenter.watermarkDesc')}
           </Text>
           {wmIdentity ? (
             <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: `${c.primary}12`, borderRadius: 10, padding: 12, gap: 10 }}>
@@ -102,22 +125,22 @@ export default function SecurityCenter() {
                   setTimeout(() => setWmCopied(false), 1500);
                 }}
                 accessibilityRole="button"
-                accessibilityLabel="Copy watermark ID"
+                accessibilityLabel={t('securityCenter.copyWatermark')}
                 style={{ paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8, backgroundColor: `${c.primary}1A` }}>
                 <Text style={{ fontSize: 11, fontWeight: '700', color: c.primary }}>
-                  {wmCopied ? 'Copied ✓' : 'Copy'}
+                  {wmCopied ? t('securityCenter.copied') : t('securityCenter.copy')}
                 </Text>
               </Pressable>
             </View>
           ) : (
             <View style={{ backgroundColor: `${c.text}0A`, borderRadius: 10, padding: 12 }}>
               <Text style={{ fontSize: 13, fontWeight: '600', ...mutedTextStyle(c, 0.6) }}>
-                {profile?.role === 'super_admin' ? 'Not applicable — administrator accounts do not participate in content watermarking.' : 'Watermark identity not yet assigned.'}
+                {profile?.role === 'super_admin' ? t('securityCenter.notApplicable') : t('securityCenter.notAssigned')}
               </Text>
             </View>
           )}
           <Text style={{ fontSize: 10, ...mutedTextStyle(c, 0.4), marginTop: 8 }}>
-            Read-only — assigned by the system, shown identically inside watermarked content.
+            {t('securityCenter.readOnly')}
           </Text>
         </NeuCard>
 
@@ -125,15 +148,15 @@ export default function SecurityCenter() {
         <NeuCard radius={22} style={{ padding: 22 }}>
           <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 20 }}>
             <Lock size={20} color={c.primary} style={{ marginRight: 10 }} />
-            <Text style={{ fontSize: 17, fontWeight: '800', color: c.text }}>Change Password</Text>
+            <Text style={{ fontSize: 17, fontWeight: '800', color: c.text }}>{t('securityCenter.changePassword')}</Text>
           </View>
 
-          <Text style={{ fontSize: 12, fontWeight: '600', ...mutedTextStyle(c, 0.55), marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.8 }}>New Password</Text>
+          <Text style={{ fontSize: 12, fontWeight: '600', ...mutedTextStyle(c, 0.55), marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.8 }}>{t('securityCenter.newPassword')}</Text>
           <NeuInputRow
             c={c}
             value={newPassword}
             onChangeText={setNewPassword}
-            placeholder="Min. 8 characters"
+            placeholder={t('signUp.passwordPlaceholder')}
             secureTextEntry={!showPwd}
             leftIcon={<Lock size={18} color={c.text} opacity={0.4} />}
             rightElement={
@@ -143,12 +166,12 @@ export default function SecurityCenter() {
             }
           />
 
-          <Text style={{ fontSize: 12, fontWeight: '600', ...mutedTextStyle(c, 0.55), marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.8 }}>Confirm Password</Text>
+          <Text style={{ fontSize: 12, fontWeight: '600', ...mutedTextStyle(c, 0.55), marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.8 }}>{t('securityCenter.confirmPassword')}</Text>
           <NeuInputRow
             c={c}
             value={confirmPassword}
             onChangeText={setConfirmPassword}
-            placeholder="Re-enter password"
+            placeholder={t('securityCenter.reenterPassword')}
             secureTextEntry={!showPwd}
             leftIcon={<Lock size={18} color={c.text} opacity={0.4} />}
           />
@@ -159,9 +182,9 @@ export default function SecurityCenter() {
               <Text style={{ color: '#DC2626', fontSize: 13 }}>{error}</Text>
             </View>
           ) : null}
-          {success ? <Text style={{ color: '#16A34A', fontSize: 13, marginBottom: 12 }}>✓ Password updated successfully!</Text> : null}
+          {success ? <Text style={{ color: '#16A34A', fontSize: 13, marginBottom: 12 }}>{t('securityCenter.passwordUpdated')}</Text> : null}
 
-          <NeuButton label="Update Password" onPress={handleChangePassword} loading={saving} fullWidth />
+          <NeuButton label={t('securityCenter.updatePassword')} onPress={handleChangePassword} loading={saving} fullWidth />
         </NeuCard>
       </View>
       </ScrollView>

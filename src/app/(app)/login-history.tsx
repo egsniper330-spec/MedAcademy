@@ -14,6 +14,7 @@ import { Pressable } from 'react-native';
 import { getLoginHistory, LoginHistoryRecord } from '@/lib/api';
 import { neuColors, useLayout, neuFlatStyle, neuMicroStyle, safeBottom, mutedTextStyle } from '@/lib/neu';
 import { NeuCard } from '@/components/NeuCard';
+import { t } from '@/lib/i18n';
 
 function formatDate(iso: string): string {
   const d = new Date(iso);
@@ -66,7 +67,7 @@ export default function LoginHistory() {
         <View style={{ flex: 1 }}>
           <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
             <Text style={{ fontSize: 14, fontWeight: '700', color: item.success ? '#16A34A' : '#DC2626' }}>
-              {item.success ? 'Login Successful' : 'Login Failed'}
+              {item.success ? t('loginHistory.success') : t('loginHistory.failed')}
             </Text>
             <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.4) }}>{formatDate(item.created_at)}</Text>
           </View>
@@ -74,7 +75,7 @@ export default function LoginHistory() {
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 4 }}>
             <Smartphone size={11} color={`${c.text}66`} />
             <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.6) }}>
-              {[item.device_name, item.platform].filter(Boolean).join(' · ') || 'Unknown device'}
+              {[item.device_name, item.platform].filter(Boolean).join(' · ') || t('loginHistory.unknownDevice')}
             </Text>
           </View>
 
@@ -88,7 +89,7 @@ export default function LoginHistory() {
           {!item.success && item.failure_reason && (
             <View style={{ marginTop: 6, backgroundColor: '#DC262610', borderRadius: 8, padding: 8 }}>
               <Text style={{ fontSize: 11, color: '#DC2626', fontWeight: '600' }}>
-                Reason: {item.failure_reason}
+                {t('loginHistory.reason', { reason: item.failure_reason })}
               </Text>
             </View>
           )}
@@ -100,7 +101,7 @@ export default function LoginHistory() {
   return (
     <View style={{ flex: 1, backgroundColor: c.base }}>
         {/* Header */}
-        <PageHeader title="Login History" subtitle={userName ?? undefined} showBack />
+        <PageHeader title={t('loginHistory.title')} subtitle={userName ?? undefined} showBack />
 
       <View style={{ paddingHorizontal: layout.screenPx, paddingTop: 0 }}>
 
@@ -109,15 +110,15 @@ export default function LoginHistory() {
           <View style={{ flexDirection: 'row', gap: 10, marginBottom: 20 }}>
             <NeuCard style={{ flex: 1, padding: 14, alignItems: 'center' }}>
               <Text style={{ fontSize: 22, fontWeight: '800', color: c.primary }}>{history.length}</Text>
-              <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.5), marginTop: 2 }}>Total</Text>
+              <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.5), marginTop: 2 }}>{t('loginHistory.total')}</Text>
             </NeuCard>
             <NeuCard style={{ flex: 1, padding: 14, alignItems: 'center' }}>
               <Text style={{ fontSize: 22, fontWeight: '800', color: '#16A34A' }}>{successCount}</Text>
-              <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.5), marginTop: 2 }}>Successful</Text>
+              <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.5), marginTop: 2 }}>{t('loginHistory.successful')}</Text>
             </NeuCard>
             <NeuCard style={{ flex: 1, padding: 14, alignItems: 'center' }}>
               <Text style={{ fontSize: 22, fontWeight: '800', color: '#DC2626' }}>{failureCount}</Text>
-              <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.5), marginTop: 2 }}>Failed</Text>
+              <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.5), marginTop: 2 }}>{t('loginHistory.failedCount')}</Text>
             </NeuCard>
           </View>
         )}
@@ -128,7 +129,7 @@ export default function LoginHistory() {
       ) : history.length === 0 ? (
         <View style={{ alignItems: 'center', paddingVertical: 64 }}>
           <Clock size={56} color={c.primary} opacity={0.15} />
-          <Text style={{ ...mutedTextStyle(c, 0.4), fontSize: 16, marginTop: 12 }}>No login history</Text>
+          <Text style={{ ...mutedTextStyle(c, 0.4), fontSize: 16, marginTop: 12 }}>{t('loginHistory.empty')}</Text>
         </View>
       ) : (
         <FlatList

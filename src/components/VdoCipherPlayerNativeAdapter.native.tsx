@@ -72,6 +72,7 @@ import { getVideoPlaybackToken } from '@/lib/api';
 import { neuColors, mutedTextStyle } from '@/lib/neu';
 import type { VdoCipherPlayerProps } from '@/components/VdoCipherPlayer';
 import { NativeWatermarkOverlay } from '@/components/NativeWatermarkOverlay';
+import { t } from '@/lib/i18n';
 import { resolveWatermarkIdentity } from '@/lib/watermarkIdentity';
 import { resolveWatermarkLayers, type WatermarkPlatform } from '@/lib/watermarkLayers';
 import {
@@ -438,7 +439,7 @@ export function VdoCipherPlayerNativeAdapter({
     return (
       <View style={[INLINE_STYLE, { alignItems: 'center', justifyContent: 'center', gap: 10 }]}>
         <ActivityIndicator color={c.primary} size="large" />
-        <Text style={{ fontSize: 13, ...mutedTextStyle(c, 0.5) }}>Loading player…</Text>
+        <Text style={{ fontSize: 13, ...mutedTextStyle(c, 0.5) }}>{t('player.loading')}</Text>
       </View>
     );
   }
@@ -454,7 +455,7 @@ export function VdoCipherPlayerNativeAdapter({
         gap: 8,
       }]}>
         <Text style={{ fontSize: 14, fontWeight: '700', color: '#fff', textAlign: 'center' }}>
-          Video Unavailable
+          {t('player.unavailable')}
         </Text>
         <Text style={{ fontSize: 12, color: '#ffffff88', textAlign: 'center', lineHeight: 18 }}>
           {error ?? 'Could not load the player. Please check your connection.'}
@@ -601,7 +602,7 @@ export function VdoCipherPlayerNativeAdapter({
             justifyContent: 'center',
             zIndex: 999,
           }}
-          accessibilityLabel="Exit fullscreen"
+          accessibilityLabel={t('player.exitFullscreen')}
           accessibilityRole="button"
           hitSlop={{ top: 8, right: 8, bottom: 8, left: 8 }}
         >

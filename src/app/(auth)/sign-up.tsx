@@ -16,13 +16,15 @@ import { useBranding } from '@/lib/branding';
 import { COUNTRIES, DEFAULT_COUNTRY, buildE164, validateNationalNumber, type Country } from '@/lib/phone';
 import { NeuInputRow } from '@/components/NeuInputRow';
 import { isFeatureEnabled } from '@/lib/featureFlags';
+import { t } from '@/lib/i18n';
 
 interface PickerOption { id: string; name: string; }
 
 function SelectPicker({
-  label, value, options, onSelect, loading, disabled, placeholder, c, layout,
+  label, icon, value, options, onSelect, loading, disabled, placeholder, c, layout,
 }: {
   label: string;
+  icon: 'university' | 'faculty' | 'level';
   value: PickerOption | null;
   options: PickerOption[];
   onSelect: (o: PickerOption) => void;
@@ -61,8 +63,8 @@ function SelectPicker({
         {loading
           ? <ActivityIndicator size="small" color={c.primary} style={{ marginRight: layout.pad.sm }} />
           : <View style={{ marginRight: layout.pad.sm }}>
-              {label.startsWith('Uni') ? <Building2 size={layout.bodySize} color={c.text} opacity={0.4} />
-                : label.startsWith('Fac') ? <GraduationCap size={layout.bodySize} color={c.text} opacity={0.4} />
+              {icon === 'university' ? <Building2 size={layout.bodySize} color={c.text} opacity={0.4} />
+                : icon === 'faculty' ? <GraduationCap size={layout.bodySize} color={c.text} opacity={0.4} />
                 : <BookOpen size={layout.bodySize} color={c.text} opacity={0.4} />}
             </View>
         }
@@ -76,7 +78,7 @@ function SelectPicker({
         <NeuCard radius={layout.cardRadius / 2} style={{ marginTop: layout.pad.xs, padding: layout.pad.xs, maxHeight: 220 }}>
           <ScrollView automaticallyAdjustKeyboardInsets={process.env.EXPO_OS === 'ios'} nestedScrollEnabled keyboardShouldPersistTaps="handled">
             {options.length === 0
-              ? <Text style={{ ...mutedTextStyle(c, 0.4), fontSize: layout.captionSize, padding: layout.pad.md, textAlign: 'center' }}>No options available</Text>
+              ? <Text style={{ ...mutedTextStyle(c, 0.4), fontSize: layout.captionSize, padding: layout.pad.md, textAlign: 'center' }}>{t('signUp.noOptions')}</Text>
               : options.map(opt => (
                 <Pressable key={opt.id} onPress={() => { onSelect(opt); setOpen(false); }}
                   style={{
@@ -161,7 +163,7 @@ function CountryCodePicker({
             onPress={() => {/* prevent dismiss */}}
           >
             <Text style={{ fontSize: layout.headingSize, fontWeight: '800', color: c.text, marginBottom: layout.pad.md, textAlign: 'center' }}>
-              Select Country
+              {t('signUp.selectCountry')}
             </Text>
             {/* Search */}
             <View style={{
@@ -176,7 +178,7 @@ function CountryCodePicker({
               <TextInput
                 value={searchText}
                 onChangeText={setSearchText}
-                placeholder="Search country or code…"
+                placeholder={t('signUp.searchCountry')}
                 placeholderTextColor={`${c.text}55`}
                 autoCapitalize="none"
                 style={{ flex: 1, marginLeft: layout.pad.sm, fontSize: layout.bodySize - 1, color: c.text }}
@@ -293,12 +295,13 @@ export default function SignUp() {
   }, [faculty]);
 
   const validate = (): string | null => {
-    if (!fullName.trim()) return 'Full name is required.';
-    if (!email.trim() || !email.includes('@')) return 'A valid email is required.';
+    if (!fullName.trim()) return t('signUp.fullNameRequired');
+    if (!email.trim() || !email.includes('@')) return t('signUp.emailRequired');
+    if (!nationalPhone.trim()) return t('signUp.phoneRequired');
     const phoneErr = validateNationalNumber(country, nationalPhone.trim());
-    if (phoneErr) return phoneErr;
-    if (password.length < 8) return 'Password must be at least 8 characters.';
-    if (password !== confirmPassword) return 'Passwords do not match.';
+    if (phoneErr) return t('signUp.invalidPhone', { country: country.name });
+    if (password.length < 8) return t('signUp.passwordTooShort');
+    if (password !== confirmPassword) return t('signUp.passwordMismatch');
     return null;
   };
 
@@ -306,7 +309,7 @@ export default function SignUp() {
     // Feature flag: user_registration. UI reflection only — the server refuses
     // the registration itself (403 feature_disabled) when the flag is off.
     if (!isFeatureEnabled('user_registration')) {
-      setError('Registration is temporarily unavailable. Please try again later.');
+      setError(t('signUp.registrationUnavailable'));
       return;
     }
     // Clear all errors on each attempt
@@ -321,7 +324,7 @@ export default function SignUp() {
     // Build canonical E.164 from country + national input
     const e164 = buildE164(country, nationalPhone.trim());
     if (!e164) {
-      setError('Invalid phone number. Please check and try again.');
+      setError(t('signUp.invalidPhoneGeneric'));
       setLoading(false);
       return;
     }
@@ -351,11 +354,11 @@ export default function SignUp() {
         };
         let hasConflict = false;
         if (email_taken) {
-          setEmailError('This email address is already registered.');
+          setEmailError(t('signUp.emailTaken'));
           hasConflict = true;
         }
         if (phone_taken) {
-          setPhoneError('This phone number is already registered.');
+          setPhoneError(t('signUp.phoneTaken'));
           hasConflict = true;
         }
         if (hasConflict) {
@@ -398,21 +401,21 @@ export default function SignUp() {
         msg.toLowerCase().includes('already exists')
       ) {
         // Treat ambiguous DB errors as a duplicate email (most common cause)
-        setEmailError('This email address is already registered.');
+        setEmailError(t('signUp.emailTaken'));
       } else if (
         msg.toLowerCase().includes('invalid email') ||
         msg.toLowerCase().includes('email')
       ) {
-        setEmailError('Please enter a valid email address.');
+        setEmailError(t('signUp.validEmail'));
       } else if (msg.toLowerCase().includes('password')) {
-        setError('Password must be at least 8 characters.');
+        setError(t('signUp.passwordTooShort'));
       } else if (
         msg.toLowerCase().includes('rate limit') ||
         msg.toLowerCase().includes('too many')
       ) {
-        setError('Too many attempts. Please wait a moment and try again.');
+        setError(t('signUp.tooManyAttempts'));
       } else {
-        setError('Registration failed. Please check your details and try again.');
+        setError(t('signUp.registrationFailed'));
       }
       setLoading(false);
       return;
@@ -482,34 +485,34 @@ export default function SignUp() {
         <View style={{ alignItems: 'center', marginBottom: layout.pad.xl }}>
           <BrandLogo variant="auto" size={Math.round(layout.heroIconSize * 0.6)} />
           <Text style={{ fontSize: layout.titleSize, fontWeight: '800', color: c.text, marginTop: layout.pad.sm }}>
-            Create Account
+            {t('signUp.title')}
           </Text>
           <Text style={{ fontSize: layout.bodySize, ...mutedTextStyle(c, 0.55), marginTop: layout.pad.xs }}>
-            {`Join ${branding.app_name} today`}
+            {t('signUp.subtitle', { app: branding.app_name })}
           </Text>
         </View>
 
         {/* Form card — radius and padding from adaptive tokens */}
         <NeuCard radius={layout.cardRadius} style={{ padding: layout.cardPx }}>
           {/* Full Name */}
-          <Text style={labelStyle}>Full Name</Text>
+          <Text style={labelStyle}>{t('signUp.fullName')}</Text>
           <NeuInputRow
             c={c}
             value={fullName}
             onChangeText={setFullName}
-            placeholder="Ahmed Abdelfattah"
+            placeholder={t('signUp.fullNamePlaceholder')}
             autoCapitalize="words"
             leftIcon={<User size={fieldIconSize} color={c.text} opacity={0.4} />}
           />
 
           {/* Email */}
-          <Text style={labelStyle}>Email</Text>
+          <Text style={labelStyle}>{t('signUp.email')}</Text>
           <NeuInputRow
             c={c}
             hasError={!!emailError}
             value={email}
             onChangeText={(v) => { setEmail(v); if (emailError) setEmailError(''); }}
-            placeholder="ahmed@gmail.com"
+            placeholder={t('signUp.emailPlaceholder')}
             keyboardType="email-address"
             autoCapitalize="none"
             autoCorrect={false}
@@ -520,7 +523,7 @@ export default function SignUp() {
           ) : null}
 
           {/* Phone */}
-          <Text style={labelStyle}>Phone Number</Text>
+          <Text style={labelStyle}>{t('signUp.phone')}</Text>
           <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: phoneError ? layout.pad.xs : layout.pad.md }}>
             <CountryCodePicker value={country} onChange={(ct) => { setCountry(ct); setNationalPhone(''); setPhoneError(''); }} c={c} layout={layout} />
             <NeuInputRow
@@ -538,22 +541,22 @@ export default function SignUp() {
             <Text style={{ color: '#DC2626', fontSize: layout.captionSize, marginBottom: layout.pad.sm, marginLeft: 2 }}>{phoneError}</Text>
           ) : null}
           <Text style={{ fontSize: layout.captionSize - 1, ...mutedTextStyle(c, 0.4), marginTop: phoneError ? 0 : -layout.pad.sm, marginBottom: layout.pad.md, marginLeft: 2 }}>
-            Will be stored as {buildE164(country, nationalPhone) ?? `${country.callingCode}…`}
+            {t('signUp.storedAs', { phone: buildE164(country, nationalPhone) ?? `${country.callingCode}…` })}
           </Text>
 
           {/* Password */}
-          <Text style={labelStyle}>Password</Text>
+          <Text style={labelStyle}>{t('signUp.password')}</Text>
           <NeuInputRow
             c={c}
             value={password}
             onChangeText={setPassword}
-            placeholder="Min. 8 characters"
+            placeholder={t('signUp.passwordPlaceholder')}
             secureTextEntry={!showPwd}
             leftIcon={<Lock size={fieldIconSize} color={c.text} opacity={0.4} />}
             rightElement={
               <Pressable
                 onPress={() => setShowPwd(!showPwd)}
-                accessibilityLabel={showPwd ? 'Hide password' : 'Show password'}
+                accessibilityLabel={showPwd ? t('auth.hidePassword') : t('auth.showPassword')}
                 accessibilityRole="button"
                 style={{ padding: layout.pad.xs }}
               >
@@ -565,13 +568,13 @@ export default function SignUp() {
           />
 
           {/* Confirm Password */}
-          <Text style={labelStyle}>Confirm Password</Text>
+          <Text style={labelStyle}>{t('signUp.confirmPassword')}</Text>
           <NeuInputRow
             c={c}
             hasError={confirmPassword.length > 0 && confirmPassword !== password}
             value={confirmPassword}
             onChangeText={setConfirmPassword}
-            placeholder="Re-enter your password"
+            placeholder={t('signUp.confirmPlaceholder')}
             secureTextEntry={!showConfirmPwd}
             leftIcon={<Lock size={fieldIconSize} color={c.text} opacity={0.4} />}
             rightElement={
@@ -584,7 +587,7 @@ export default function SignUp() {
           />
           {confirmPassword.length > 0 && confirmPassword !== password && (
             <Text style={{ color: '#DC2626', fontSize: layout.captionSize, marginBottom: layout.pad.sm, marginTop: -layout.pad.xs }}>
-              Passwords do not match.
+              {t('signUp.passwordMismatch')}
             </Text>
           )}
 
@@ -594,15 +597,15 @@ export default function SignUp() {
             style={{ flexDirection: 'row', alignItems: 'center', marginBottom: layout.pad.md }}
           >
             <Text style={{ fontSize: layout.bodySize - 1, color: c.primary, fontWeight: '600' }}>
-              {academicOpen ? '▾ Hide' : '▸ Add'} Academic Info (optional)
+              {academicOpen ? `▾ ${t('signUp.hideAcademic')}` : `▸ ${t('signUp.addAcademic')}`} {t('signUp.academicInfo')}
             </Text>
           </Pressable>
 
           {academicOpen && (
             <>
-              <SelectPicker label="University"     value={university}    options={universities}   onSelect={(o) => { setUniversity(o); setFaculty(null); }} loading={loadingUni} placeholder="Select university"  c={c} layout={layout} />
-              <SelectPicker label="Faculty"        value={faculty}       options={faculties}      onSelect={setFaculty}      loading={loadingFac} disabled={!university} placeholder={university ? 'Select faculty' : 'Select university first'} c={c} layout={layout} />
-              <SelectPicker label="Academic Level" value={academicLevel} options={academicLevels} onSelect={setAcademicLevel} loading={loadingLvl} placeholder="Select level" c={c} layout={layout} />
+              <SelectPicker label={t('signUp.university')} icon="university" value={university}    options={universities}   onSelect={(o) => { setUniversity(o); setFaculty(null); }} loading={loadingUni} placeholder={t('signUp.selectUniversity')}  c={c} layout={layout} />
+              <SelectPicker label={t('signUp.faculty')} icon="faculty" value={faculty}       options={faculties}      onSelect={setFaculty}      loading={loadingFac} disabled={!university} placeholder={university ? t('signUp.selectFaculty') : t('signUp.selectUniversityFirst')} c={c} layout={layout} />
+              <SelectPicker label={t('signUp.academicLevel')} icon="level" value={academicLevel} options={academicLevels} onSelect={setAcademicLevel} loading={loadingLvl} placeholder={t('signUp.selectLevel')} c={c} layout={layout} />
             </>
           )}
 
@@ -611,7 +614,7 @@ export default function SignUp() {
           ) : null}
 
           <NeuButton
-            label="Create Account"
+            label={t('signUp.createAccount')}
             onPress={handleSignUp}
             loading={loading}
             disabled={!isFeatureEnabled('user_registration')}
@@ -621,9 +624,9 @@ export default function SignUp() {
 
         {/* Sign-in link */}
         <View style={{ flexDirection: 'row', justifyContent: 'center', marginTop: layout.pad.xl, marginBottom: layout.pad.xl }}>
-          <Text style={{ ...mutedTextStyle(c, 0.55), fontSize: layout.bodySize - 1 }}>Already have an account? </Text>
+          <Text style={{ ...mutedTextStyle(c, 0.55), fontSize: layout.bodySize - 1 }}>{t('signUp.haveAccount')} </Text>
           <Pressable onPress={() => router.push('/(auth)/sign-in')}>
-            <Text style={{ color: c.primary, fontWeight: '700', fontSize: layout.bodySize - 1 }}>Sign In</Text>
+            <Text style={{ color: c.primary, fontWeight: '700', fontSize: layout.bodySize - 1 }}>{t('signUp.signIn')}</Text>
           </Pressable>
         </View>
       </ScrollView>

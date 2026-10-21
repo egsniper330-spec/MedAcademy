@@ -33,6 +33,7 @@ import { useSystemBars } from '@/lib/useSystemBars';
 import * as ScreenCaptureLib from '@/lib/screenCaptureGuard';
 
 import { SessionProvider, useSession } from '@/ctx';
+import { I18nProvider } from '@/lib/i18n';
 import { ToastProvider } from '@/components/Toast';
 import { ImpersonationBanner } from '@/components/ImpersonationBanner';
 import { rearmImpersonationAfterReload } from '@/lib/impersonationService';
@@ -388,8 +389,14 @@ const RootLayout: React.FC = () => {
   useSystemBars(isDarkScheme);
 
   return (
-    // SafeAreaProvider MUST be at root — provides insets to every useSafeAreaInsets()
-    // call throughout the entire app. Without it, insets.top/bottom return 0 on Android.
+    // I18nProvider is OUTERMOST so every screen/component can call useTranslation()
+    // and so the active locale is seeded from the device BEFORE the first child
+    // renders (the tab registry and any module-level t() calls read it too).
+    // It also applies the RTL direction once on mount (may require a native
+    // reload — see applyRTL).
+    <I18nProvider>
+    {/* SafeAreaProvider MUST be at root — provides insets to every useSafeAreaInsets()
+        call throughout the entire app. Without it, insets.top/bottom return 0 on Android. */}
     <SafeAreaProvider>
       {/* NOTE: keep the child on its own line. JSX whitespace that sits on a
           single line is preserved by Babel as a literal text child, and React
@@ -423,6 +430,7 @@ const RootLayout: React.FC = () => {
         </SessionProvider>
       </GestureHandlerRootView>
     </SafeAreaProvider>
+    </I18nProvider>
   );
 };
 

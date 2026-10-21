@@ -194,12 +194,14 @@ console.log('\n── E. Risk score sentinel never displayed pre-verdict ──'
     globalR !== null && /NEUTRAL_STARTUP_RESULT/.test(globalR[0]) && !/BLOCKING_UNKNOWN_RESULT/.test(globalR[0]),
     'E the blocking sentinel is no longer served as the global default (provider tail uses NEUTRAL)',
   );
-  // The gate renders the risk pill ONLY from a completed verdict. (Use the
-  // LAST 'Risk Score:' occurrence — earlier ones exist inside comments.)
+  // The gate renders the risk pill ONLY from a completed verdict. (Anchor on the
+  // rendered pill itself — `t('security.gate.riskScore', …)` — because the
+  // English 'Risk Score:' text now lives in the translation resources and older
+  // occurrences remain inside comments.)
   // The guard is `{hasVerdict && <state checks> && (` — it now ALSO excludes the
   // overlay/resume causes, which only tightens it. Match the hasVerdict gate
   // itself rather than the exact trailing `(`.
-  const pillIdx = gateSrc.lastIndexOf('Risk Score:');
+  const pillIdx = gateSrc.lastIndexOf("t('security.gate.riskScore'");
   const pillGuard = gateSrc.lastIndexOf('{hasVerdict &&', pillIdx);
   check(
     pillGuard !== -1 && pillIdx - pillGuard < 800,

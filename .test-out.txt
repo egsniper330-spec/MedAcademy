@@ -1,0 +1,253 @@
+
+> medacademy@2.0.1 test
+> npm run test:state && node scripts/run-all-tests.cjs
+
+
+> medacademy@2.0.1 test:state
+> node scripts/run-state-tests.cjs
+
+
+Security state machine:
+  ✓ 1. all safe → SAFE (no blocks, risk 0)
+  ✓ 2. VPN only → BLOCKED (block_login)
+  ✓ 3. VPN removed → SAFE (recovers without restart)
+  ✓ 4. USB debugging (adb) only → BLOCKED
+  ✓ 5. USB debugging removed → SAFE
+  ✓ 6. VPN + USB debugging → BLOCKED with BOTH findings listed (one page)
+  ✓ 7. VPN removed while USB debugging remains → STILL BLOCKED
+  ✓ 8. all conditions removed after multi-finding block → SAFE
+  ✓ 9. integrity failure (tamper_detected) → BLOCKED per policy
+  ✓ 10. BLOCKING finding with weight 0 → STILL BLOCKED (risk score never decides)
+  ✓ 11. high risk score with only warn_only findings → NOT blocked
+  ✓ 12. risk score clamps at 100
+  ✓ 13. unmapped event types are skipped by policy (never invent blocks)
+  ✓ 14. block_video finding blocks video without locking login
+
+Gate sticky-state machine:
+  ✓ 15. live blocking result refreshes the sticky set
+  ✓ 16. re-check in flight with no live block → KEEP last verified block (fail-closed, no temp-allow window)
+  ✓ 17. COMPLETED non-blocking evaluation → CLEAR sticky set (recover without restart)
+  ✓ 18. completed evaluation with a remaining condition → KEEP blocking (sticky refresh via live)
+  ✓ 19. previously safe + routine re-check → stays unblocked (no false gate)
+  ✓ 20. cold-start sentinel window: unverified is blocking while checking
+
+Update state machine (versionCode authoritative):
+  ✓ 21. installed 221 < minimum 230 → UPDATE_REQUIRED
+  ✓ 22. installed 230 = minimum 230 → SUPPORTED
+  ✓ 23. installed 231 > minimum 230 → SUPPORTED
+  ✓ 24. enabled=false (kill switch) → SUPPORTED regardless of codes
+  ✓ 25. no floor configured (minimum 0) → SUPPORTED
+  ✓ 26. installed code 0 (cannot compare) → SUPPORTED client-side; server 426 stays authoritative
+  ✓ 27. isVersionSupported boundary semantics
+  ✓ 28. pin mismatch only when TLS identity rejected while device online
+  ✓ 29. weak network: origin times out while control CDN answers → NOT a security finding
+  ✓ 30. offline / both fail → no finding; verified origin → pass
+  ✓ 31. zero-weight observability events can never block
+  ✓ startup 1. ONLINE + persisted valid session → Online Mode
+  ✓ startup 2. OFFLINE + persisted valid session → authenticated Offline Mode (direct, no API wait)
+  ✓ startup 3. OFFLINE + no persisted session → Login
+  ✓ startup 4. OFFLINE + API/network failure + persisted session → NOT logout (still Offline Mode)
+  ✓ startup 5. ONLINE + no session → Login
+  ✓ startup 6. Explicit logout → Login (any connectivity)
+  ✓ startup 7. Genuine security violation while offline → router routes offline, SecurityGate (independent layer) blocks
+  ✓ startup 8. Valid offline session + cached offline policy → Offline Mode without waiting for API timeout
+  ✓ startup 9. Account isolation: Account B can never see Account A's downloads
+  ✓ startup 10. Connectivity restoration → Online re-evaluation
+  ✓ startup 11. Race: hydration completes AFTER connectivity is known → still correct authenticated Offline state
+  ✓ startup 12. Race: connectivity flips DURING hydration → never redirected to Login
+  ✓ startup 13. Network timeout does not mutate authenticated state to logged-out
+  ✓ startup 14. Security-check timeout does not mutate authenticated state to logged-out
+  ✓ startup 15. Cached offline policy missing/invalid → no invented bypass, no invented denial
+  ✓ startup 16. Hydration truncation rule — an unfinished read is never a negative
+  ✓ startup 17. Machine matches its self-documenting matrix (STARTUP_MATRIX)
+  ✓ startup 18. Profile-refresh classifier: server verdict replaces cached role/status (USER→ADMIN, ADMIN→USER)
+  ✓ startup 19. Profile-refresh classifier: ACTIVE→BLOCKED → blocked (terminal, not spinner)
+  ✓ startup 20. Profile-refresh classifier: BLOCKED→ACTIVE refreshes back to applied
+  ✓ startup 21. Profile-refresh classifier: offline skip, network errors never become logout/block
+  ✓ startup 22. Profile-refresh classifier: 401 → existing auth policy; other 4xx → non-fatal
+  ✓ startup 23. Profile-refresh classifier: 403 WITHOUT the blocked verdict is NOT a block
+
+54 assertions passed.
+
+ALL STATE-MACHINE TESTS PASSED
+── Offline download phase machine ──
+── Track selection parity ──
+── Rental expiry (single source of truth: server-issued expiresAt) ──
+── Offline update-policy cache ──
+── Raw VdoCipher title ban (safeDisplayTitle) ──
+── Course grouping ──
+ok: offline OTP payload contract (licenseRules/canPersist/rentalDuration)
+── Watermark identity (no UUID leak / online-parity) ──
+── Fullscreen rotation (in-place expansion, single player instance) ──
+── Offline metadata model (course image / chapters) ──
+── Rental duration (backend 90-day policy) ──
+── Watch-screen SafeArea + header integration ──
+── Focused fix pass (transition, card, drawer, About, watermark) ──
+── Offline startup state machine wiring (no login redirect while offline) ──
+── Account state sync (server-authoritative role/status) + Global Search crash ──
+──────────────────────────────────────────────
+RESULT: 258 passed, 0 failed
+── Backend: authoritative maintenance decision (structural) ──
+── Client: typed maintenance classifier (exactness) ──
+── Client: expected control flow (canary) ──
+── Client: verdict model + silent recovery ──
+── Client: call-site wiring (structural) ──
+──────────────────────────────────────────────
+RESULT: 79 passed, 0 failed
+ALL MAINTENANCE-MODE TESTS PASSED
+Running 90 suite(s)…
+
+PASS  aboutOfflineUi.test.cjs
+PASS  adminDiagnosticsAudit.test.cjs
+PASS  adminOpsHardening.test.cjs
+PASS  androidBranding.test.cjs
+PASS  apiDataMinimization.test.cjs
+PASS  apiInformationDisclosure.test.cjs
+PASS  appAttestDeferral.test.cjs
+PASS  appReleasesAndWatermark.test.cjs
+PASS  appUpdatesActions.test.cjs
+PASS  auditTrailPipeline.test.cjs
+PASS  authFailureModel.test.cjs
+FAIL  authHeroBranding.test.cjs
+          ✔ both monogram assets are square (400×400, 400×400)
+          ✔ monogram ink is ~84% of the canvas (336/400) — the basis of the ×1.35 sizing
+          ✔ monogram ink is centred in its canvas (pad L/R/T/B 32/32/32/32)
+          ✔ both monogram assets carry real transparency (minAlpha 0)
+          ✔ light-mode monogram ink is dark (Y=0.012, #081d32)
+          ✔ dark-mode monogram ink is light (Y=0.939, #f8f8f8)
+          ✔ the two variants are genuinely different assets (no white-on-white / dark-on-dark)
+          ✔ screen sizes the hero as heroIconSize × 1.35 to compensate the asset's 8% canvas padding
+          ✔ at a 320dp-wide screen the logo box is 97px — comfortably inside the 320px viewport
+          ✔ and its ink stays 81dp — not so small that the mark stops reading
+        
+        26 assertions passed, 1 failed.
+PASS  authLayoutCentering.test.cjs
+PASS  avatarUploadPipeline.test.cjs
+PASS  brandIdentity.test.cjs
+PASS  buildConfigGuards.test.cjs
+FAIL  bulkStudentsAndCourseVisibility.test.cjs
+          ok    embedded lesson tree published-only for students (defense in depth)
+          ok    enrollment rows are NOT deleted by unpublish (no unenroll side effect)
+          ok    otp() blocks students when parent course is not published
+          ok    course gate counts BOTH otp and offline authorization
+          ok    gate applies to students only (staff manage unpublished content)
+          ok    canonical status field used (no second publication system)
+          ok    direct course GET stays owner-OR-published for students (ownerScope)
+          ok    student direct lesson GET stays published-only (ownerScope)
+          ok    My Courses tolerates hidden embeds (no crash on null course)
+          ok    offline entitlement still keys on the enrollment row (downloads preserved)
+        
+        35 passed, 4 failed
+PASS  certificatePinning.test.cjs
+PASS  contactUs.test.cjs
+FAIL  contentGridConsistency.test.cjs
+        E. explore list structure
+          ok    explore: PageHeader renders above the FlatList (edge-aligned)
+          ok    explore: PageHeader no longer inside ListHeader (was double-padded to x=90)
+          ok    explore: ListHeader no longer stacks a second screenPx (cards/search share one grid)
+        F. repo-wide PageHeader placement sweep
+          ok    no screen renders PageHeader inside padded content
+        
+        ═══ contentGridConsistency: 27 passed, 4 failed ═══
+         - privacy.tsx: PageHeader title "Privacy Policy" present
+         - privacy.tsx: PageHeader immediately precedes ScrollView (edge-aligned)
+         - terms.tsx: PageHeader title "Terms & Conditions" present
+         - terms.tsx: PageHeader immediately precedes ScrollView (edge-aligned)
+PASS  courseByIdSelect.test.cjs
+PASS  darkModeTheme.test.cjs
+PASS  debugModeFindingDiagnostics.test.cjs
+PASS  devicePresence.test.cjs
+PASS  enrollmentStats.test.cjs
+PASS  featureFlagEnforcement.test.cjs
+PASS  fullscreenArchitecture.test.cjs
+PASS  fullscreenLatency.test.cjs
+PASS  fullscreenSystemUi.test.cjs
+PASS  globalFixesRegression.test.cjs
+PASS  i18nLocalization.test.cjs
+PASS  i18nTerminology.test.cjs
+PASS  impersonationLifecycle.test.cjs
+PASS  iosParity.test.cjs
+PASS  iosPinningCoverage.test.cjs
+PASS  jsxTextNodes.test.cjs
+PASS  languagePreference.test.cjs
+PASS  lessonMaterialsDelivery.test.cjs
+PASS  maintenanceMode.test.cjs
+PASS  materialWatermark.test.cjs
+PASS  mockLocationDetection.test.cjs
+PASS  multiWindowGate.test.cjs
+PASS  nativeFlagsCoalescing.test.cjs
+PASS  navigationDrawerDirection.test.cjs
+PASS  navigationLiquidGlass.test.cjs
+PASS  navigationOwnership.test.cjs
+PASS  networkLock.test.cjs
+PASS  offlineEntitlement.test.cjs
+PASS  offlineMediaContract.test.cjs
+PASS  offlinePipeline.test.cjs
+PASS  offlineState.test.cjs
+PASS  overlayLifecycleWiring.test.cjs
+PASS  perceivedPerformance.test.cjs
+PASS  phpFatalGuards.test.cjs
+PASS  platformCenter.test.cjs
+PASS  platformControlCenter.test.cjs
+PASS  plyrControlsAndSeeking.test.cjs
+PASS  profileSafeArea.test.cjs
+PASS  rateLimiting.test.cjs
+PASS  releaseConfigConsistency.test.cjs
+PASS  resumeVerification.test.cjs
+PASS  roleNavigation.test.cjs
+PASS  routeHandlerIntegrity.test.cjs
+PASS  rtlMenuPlacement.test.cjs
+PASS  screenCaptureStartup.test.cjs
+PASS  securityDashboardContract.test.cjs
+PASS  securityGateFindingCopy.test.cjs
+PASS  securityGateState.test.cjs
+PASS  securityLock.test.cjs
+PASS  securityLockTrafficAndSessionRecovery.test.cjs
+FAIL  securityParamAuthorityGuard.test.cjs
+FAIL  securityProtectionRestored.test.cjs
+FAIL  securityStartupFlash.test.cjs
+FAIL  securityStateModel.test.cjs
+FAIL  serverSideSecurityEnforcement.test.cjs
+FAIL  supportContactFlows.test.cjs
+FAIL  supportContactSave.test.cjs
+FAIL  supportContactSystem.test.cjs
+FAIL  systemBarsPlugin.test.cjs
+FAIL  tabBarClearance.test.cjs
+FAIL  updateDetection.test.cjs
+FAIL  userSuspendUnsuspend.test.cjs
+FAIL  vdoContract.test.cjs
+FAIL  videoLibrarySync.test.cjs
+FAIL  videoProviders.test.cjs
+FAIL  vpnMandatoryBlock.test.cjs
+FAIL  vpnRuntimeDetection.test.cjs
+FAIL  watermarkMotion.test.cjs
+FAIL  websiteContactLinks.test.cjs
+FAIL  websiteTheme.test.cjs
+
+────────────────────────────────────────────────────────────
+67 passed, 23 failed  (1080.7s)
+
+Failed suites:
+  - authHeroBranding.test.cjs
+  - bulkStudentsAndCourseVisibility.test.cjs
+  - contentGridConsistency.test.cjs
+  - securityParamAuthorityGuard.test.cjs
+  - securityProtectionRestored.test.cjs
+  - securityStartupFlash.test.cjs
+  - securityStateModel.test.cjs
+  - serverSideSecurityEnforcement.test.cjs
+  - supportContactFlows.test.cjs
+  - supportContactSave.test.cjs
+  - supportContactSystem.test.cjs
+  - systemBarsPlugin.test.cjs
+  - tabBarClearance.test.cjs
+  - updateDetection.test.cjs
+  - userSuspendUnsuspend.test.cjs
+  - vdoContract.test.cjs
+  - videoLibrarySync.test.cjs
+  - videoProviders.test.cjs
+  - vpnMandatoryBlock.test.cjs
+  - vpnRuntimeDetection.test.cjs
+  - watermarkMotion.test.cjs
+  - websiteContactLinks.test.cjs
+  - websiteTheme.test.cjs

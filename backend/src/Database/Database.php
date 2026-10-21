@@ -51,7 +51,46 @@ final class Database
         } catch (PDOException $e) {
             throw new ApiException(500, 'Database connection failed', [], $e);
         }
+
+        $this->pinSessionTimeZone($this->pdo);
         return $this->pdo;
+    }
+
+    /**
+     * Pin the MySQL SESSION time zone to UTC.
+     *
+     * WHY: a DATETIME column stores whatever wall-clock the session writes, and
+     * the schema defaults ~100 timestamp columns to `CURRENT_TIMESTAMP` — which
+     * follows the SESSION zone, not UTC. On a host whose MySQL default zone is
+     * not UTC, those defaults wrote local time (e.g. Africa/Cairo) into columns
+     * the rest of the code writes AND reads as UTC (`UTC_TIMESTAMP(6)`). One
+     * column then held two different clocks: a device row inserted by the login
+     * path could read as "3 hours ago" one minute after it was created, while a
+     * row updated by an explicit UTC write was correct.
+     *
+     * Pinning the zone makes `CURRENT_TIMESTAMP` and `UTC_TIMESTAMP` agree, so
+     * every new row is UTC regardless of which write path touches it. It does
+     * NOT rewrite stored values: existing DATETIME data is left exactly as it is
+     * (a blind "shift every row" migration would corrupt the rows that were
+     * already correct). Rows written before this fix may still carry local time;
+     * the presence policy treats an implausibly-future timestamp as unknown and
+     * the next heartbeat re-anchors it (see DeviceController).
+     *
+     * `SET time_zone = '+00:00'` works on servers without the named-zone tables;
+     * the 'UTC' name is only a fallback. A host that forbids both is reported in
+     * the error log rather than silently continuing with a mixed clock.
+     */
+    private function pinSessionTimeZone(PDO $pdo): void
+    {
+        foreach (["SET time_zone = '+00:00'", "SET time_zone = 'UTC'"] as $sql) {
+            try {
+                $pdo->exec($sql);
+                return;
+            } catch (\Throwable) {
+                // try the next form
+            }
+        }
+        error_log('[Database] could not pin session time_zone to UTC — timestamps may use the server zone');
     }
 
     public function query(string $sql, array $params = []): PDOStatement

@@ -14,11 +14,12 @@
 import { View, Text, Pressable, useColorScheme } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
-import { ArrowLeft } from 'lucide-react-native';
+import { ArrowLeft, ArrowRight } from 'lucide-react-native';
 import { neuColors, useNeuSpacing, mutedTextStyle } from '@/lib/neu';
 import { spacing, iconContainer, iconSize, typography, safeArea, safeTop, safeLeft, safeRight } from '@/lib/ds';
 import HamburgerButton from '@/components/HamburgerButton';
 import { useDrawer } from '@/components/DrawerContext';
+import { t, useTranslation } from '@/lib/i18n';
 
 interface PageHeaderProps {
   title: string;
@@ -47,6 +48,10 @@ export function PageHeader({
   const sp        = useNeuSpacing();
   const drawerCtx = useDrawer();
   const insideDrawer = drawerCtx._mounted;
+  // "Back" points along the reading direction: left in LTR, right in RTL.
+  // Icons are not mirrored by the layout engine, so this is explicit and the
+  // back affordance stays a directional arrow in both directions.
+  const { isRTL } = useTranslation();
 
   const handleBack = () => {
     if (onBack) { onBack(); return; }
@@ -79,7 +84,7 @@ export function PageHeader({
         <Pressable
           onPress={handleBack}
           hitSlop={spacing.sm}
-          accessibilityLabel="Go back"
+          accessibilityLabel={t('common.goBack')}
           accessibilityRole="button"
           style={{
             width: iconContainer.md.width,
@@ -88,7 +93,9 @@ export function PageHeader({
             alignItems: 'center', justifyContent: 'center',
           }}
         >
-          <ArrowLeft size={iconSize.lg} color={c.text} opacity={0.75} />
+          {isRTL
+            ? <ArrowRight size={iconSize.lg} color={c.text} opacity={0.75} />
+            : <ArrowLeft  size={iconSize.lg} color={c.text} opacity={0.75} />}
         </Pressable>
       ) : showHamburger ? (
         <HamburgerButton plain />

@@ -38,6 +38,12 @@ export interface RoleTabDef {
   /** Bar / screen title — same strings as the original JS bar. */
   title: string;
   /**
+   * Translation key for the bar label, resolved at RENDER time by the shells
+   * (t(titleKey ?? title)). Kept out of the module constant so the label is
+   * not frozen at import time, before the I18nProvider seeds the locale.
+   */
+  titleKey?: string;
+  /**
    * lucide-react-native EXPORT NAME for the JS bar (Android/web), resolved
    * through the lucide namespace by RoleTabShell.tsx. A plain name keeps the
    * iOS bundle free of the lucide graph. Tests assert every name exists.
@@ -51,19 +57,19 @@ export interface RoleTabDef {
 
 /* ── Student ─────────────────────────────────────────────────────────── */
 export const STUDENT_TABS: RoleTabDef[] = [
-  { name: 'dashboard',  title: 'Home',       icon: 'LayoutDashboard', sfSymbol: 'house' },
-  { name: 'explore',    title: 'Explore',    icon: 'Compass',         sfSymbol: 'safari' },
-  { name: 'my-courses', title: 'My Courses', icon: 'BookOpen',        sfSymbol: 'book' },
-  { name: 'profile',    title: 'Profile',    icon: 'UserCircle',      sfSymbol: 'person.crop.circle' },
+  { name: 'dashboard',  title: 'Home',       titleKey: 'tabs.home',       icon: 'LayoutDashboard', sfSymbol: 'house' },
+  { name: 'explore',    title: 'Explore',    titleKey: 'tabs.explore',    icon: 'Compass',         sfSymbol: 'safari' },
+  { name: 'my-courses', title: 'My Courses', titleKey: 'tabs.myCourses', icon: 'BookOpen',        sfSymbol: 'book' },
+  { name: 'profile',    title: 'Profile',    titleKey: 'tabs.profile',    icon: 'UserCircle',      sfSymbol: 'person.crop.circle' },
 ];
 
 /* ── Doctor ──────────────────────────────────────────────────────────── */
 export const DOCTOR_TABS: RoleTabDef[] = [
-  { name: 'dr-overview', title: 'Dashboard', icon: 'LayoutDashboard', sfSymbol: 'square.grid.2x2' },
-  { name: 'courses',     title: 'Courses',   icon: 'BookOpen',        sfSymbol: 'book' },
-  { name: 'students',    title: 'Students',  icon: 'Users',           sfSymbol: 'person.2' },
-  { name: 'dr-earnings', title: 'Earnings',  icon: 'TrendingUp',      sfSymbol: 'chart.line.uptrend.xyaxis' },
-  { name: 'dr-profile',  title: 'Profile',   icon: 'UserCircle',      sfSymbol: 'person.crop.circle' },
+  { name: 'dr-overview', title: 'Dashboard', titleKey: 'tabs.dashboard', icon: 'LayoutDashboard', sfSymbol: 'square.grid.2x2' },
+  { name: 'courses',     title: 'Courses',   titleKey: 'tabs.courses',   icon: 'BookOpen',        sfSymbol: 'book' },
+  { name: 'students',    title: 'Students',  titleKey: 'tabs.students',  icon: 'Users',           sfSymbol: 'person.2' },
+  { name: 'dr-earnings', title: 'Earnings',  titleKey: 'tabs.earnings',  icon: 'TrendingUp',      sfSymbol: 'chart.line.uptrend.xyaxis' },
+  { name: 'dr-profile',  title: 'Profile',   titleKey: 'tabs.profile',   icon: 'UserCircle',      sfSymbol: 'person.crop.circle' },
   // Drawer-only screens — registered, navigable, no bar item.
   { name: 'credits',              title: 'My Credits',     hidden: true },
   { name: 'create-student',       title: 'Create Student', hidden: true },
@@ -74,11 +80,11 @@ export const DOCTOR_TABS: RoleTabDef[] = [
 
 /* ── Admin ───────────────────────────────────────────────────────────── */
 export const ADMIN_TABS: RoleTabDef[] = [
-  { name: 'admin-overview', title: 'Dashboard', icon: 'LayoutDashboard', sfSymbol: 'square.grid.2x2' },
-  { name: 'users',          title: 'Users',     icon: 'Users',           sfSymbol: 'person.2' },
-  { name: 'devices',        title: 'Devices',   icon: 'Smartphone',      sfSymbol: 'iphone' },
-  { name: 'academic',       title: 'Academic',  icon: 'GraduationCap',   sfSymbol: 'graduationcap' },
-  { name: 'audit',          title: 'Audit',     icon: 'Shield',          sfSymbol: 'checkmark.shield' },
+  { name: 'admin-overview', title: 'Dashboard', titleKey: 'tabs.dashboard', icon: 'LayoutDashboard', sfSymbol: 'square.grid.2x2' },
+  { name: 'users',          title: 'Users',     titleKey: 'tabs.users',     icon: 'Users',           sfSymbol: 'person.2' },
+  { name: 'devices',        title: 'Devices',   titleKey: 'tabs.devices',   icon: 'Smartphone',      sfSymbol: 'iphone' },
+  { name: 'academic',       title: 'Academic',  titleKey: 'tabs.academic',  icon: 'GraduationCap',   sfSymbol: 'graduationcap' },
+  { name: 'audit',          title: 'Audit',     titleKey: 'tabs.audit',     icon: 'Shield',          sfSymbol: 'checkmark.shield' },
   // Drawer-only screens — registered, navigable, no bar item.
   { name: 'bulk-import',            title: 'Bulk Import',        hidden: true },
   { name: 'notifications-center',   title: 'Notifications',      hidden: true },
@@ -102,11 +108,11 @@ export const ADMIN_TABS: RoleTabDef[] = [
 
 /* ── Super Admin ─────────────────────────────────────────────────────── */
 export const SUPERADMIN_TABS: RoleTabDef[] = [
-  { name: 'sa-overview',  title: 'Dashboard', icon: 'LayoutDashboard', sfSymbol: 'square.grid.2x2' },
-  { name: 'sa-users',     title: 'Users',     icon: 'Users',           sfSymbol: 'person.2' },
-  { name: 'sa-finance',   title: 'Finance',   icon: 'DollarSign',      sfSymbol: 'dollarsign.circle' },
-  { name: 'sa-analytics', title: 'Analytics', icon: 'BarChart2',       sfSymbol: 'chart.bar' },
-  { name: 'sa-platform',  title: 'Platform',  icon: 'Settings2',       sfSymbol: 'gearshape' },
+  { name: 'sa-overview',  title: 'Dashboard', titleKey: 'tabs.dashboard', icon: 'LayoutDashboard', sfSymbol: 'square.grid.2x2' },
+  { name: 'sa-users',     title: 'Users',     titleKey: 'tabs.users',     icon: 'Users',           sfSymbol: 'person.2' },
+  { name: 'sa-finance',   title: 'Finance',   titleKey: 'tabs.finance',   icon: 'DollarSign',      sfSymbol: 'dollarsign.circle' },
+  { name: 'sa-analytics', title: 'Analytics', titleKey: 'tabs.analytics', icon: 'BarChart2',       sfSymbol: 'chart.bar' },
+  { name: 'sa-platform',  title: 'Platform',  titleKey: 'tabs.platform',  icon: 'Settings2',       sfSymbol: 'gearshape' },
   // Drawer-only screens — registered, navigable, no bar item.
   { name: 'sa-content',              title: 'Content & Media',        hidden: true },
   { name: 'sa-reports',              title: 'Reports & Logs',         hidden: true },

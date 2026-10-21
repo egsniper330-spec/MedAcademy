@@ -370,11 +370,15 @@ never as PASS, and never as "implemented" merely because code exists.
 Deferring App Attest changes **no** other control. Still enforced exactly as
 before: Android Play Integrity; production signing pin + tamper detection;
 `FLAG_SECURE` screenshot/recording protection; USB-debugging (ADB) and
-Developer-Options detection; mock-location detection (including the fixed
-false-positive copy); VPN/proxy detection; TLS, certificate pinning and native
-integrity checks; SecurityGate policies and risk weights; backend authorization
-and role exemptions; force-update enforcement; protected media/PDF permissions.
-No weight was reduced, no detector disabled, no allowlist added.
+Developer-Options detection; VPN/proxy detection; TLS, certificate pinning and
+native integrity checks; SecurityGate policies and risk weights; backend
+authorization and role exemptions; force-update enforcement; protected media/PDF
+permissions. No weight was reduced, no allowlist added.
+
+Mock-location detection is the one exception, and it was **removed** (not
+deferred or re-weighted): a release APK cannot perform the cross-UID app-ops read
+it needs and the app has no location feature, so the check could only ever block
+login without establishing anything — see `docs/MOCK_LOCATION_REMOVAL.md`.
 
 To make an unverified result impossible to mistake for a pass, the outcome is
 now carried in an **explicit status model** — `src/lib/platformIntegrity.ts` —
@@ -603,8 +607,9 @@ Still open after this pass, deliberately not fixed:
   is a workflow change that cannot be validated from here — and a naive job would
   be red, because 3 suites require the generated `android/` tree first.
 - **3 suites require `npx expo prebuild -p android`**: `fullscreenArchitecture`,
-  `mockLocationDetection` and `offlineMediaContract` read `AndroidManifest.xml`,
-  the generated `SecurityModule.kt` and `android/build.gradle`. They pass in a
+  `mockLocationDetection` (now a removal contract) and `offlineMediaContract`
+  read `AndroidManifest.xml`, the generated `SecurityModule.kt` and
+  `android/build.gradle`. They pass in a
   prepared worktree and fail loudly (never silently skip) on a bare checkout.
 - **`package.json` (2.0.1) vs `app.json` `expo.version` (1.0.844)** drift.
   Force-update enforcement is versionCode-based (`X-App-Version-Code` versus

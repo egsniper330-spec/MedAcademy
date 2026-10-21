@@ -25,6 +25,29 @@ use MedAcademy\Utils\Uuid;
  */
 final class DeviceController
 {
+    /**
+     * ── DEVICE PRESENCE POLICY ──────────────────────────────────────────────
+     * Shared contract with the client (src/lib/devicePresence.ts):
+     *
+     *   HEARTBEAT_SECONDS = 60   a foreground app posts one beat per interval.
+     *   ONLINE_WINDOW_SECONDS = 150  2 beats + jitter. A device is "online" ONLY
+     *                     while a backend-confirmed beat is inside this window.
+     *   FUTURE_TOLERANCE_SECONDS = 300  a stored timestamp further in the future
+     *                     than this cannot come from a real beat (legacy rows
+     *                     written with the server's local zone, or a clock
+     *                     jump). It is reported as "unknown" and re-anchored by
+     *                     the next heartbeat instead of being displayed.
+     *
+     * NO OFFLINE EVENT EXISTS. iOS and Android may suspend or kill the process
+     * without letting it send anything, so `last_confirmed_offline_at` is always
+     * null: the UI shows the last CONFIRMED ONLINE time plus an inferred
+     * "offline" state derived from the window above. It never invents a moment
+     * at which the device went offline.
+     */
+    private const PRESENCE_HEARTBEAT_SECONDS = 60;
+    private const PRESENCE_ONLINE_WINDOW_SECONDS = 150;
+    private const PRESENCE_FUTURE_TOLERANCE_SECONDS = 300;
+
     private AuthService $authService;
 
     public function __construct(?AuthService $authService = null)
@@ -67,6 +90,7 @@ final class DeviceController
 
         return match ($action) {
             'register' => $this->register($request, $body, $userId),
+            'heartbeat' => $this->heartbeat($request, $userId),
             'status' => $this->status($userId),
             'get_devices' => $this->getDevices($body, $role),
             'logout_device' => $this->logoutDevice($body, $userId, $role),
@@ -141,11 +165,154 @@ final class DeviceController
         );
 
         $isUnlimited = ($profile['role'] ?? '') === 'super_admin' || $profile['max_devices'] === null;
+        $nowMs = self::nowMs();
 
         return [
-            'devices' => $devices ?? [],
+            'devices' => array_map(
+                static fn (array $d): array => self::withPresence($d, $nowMs),
+                $devices ?? []
+            ),
             'max_devices' => $isUnlimited ? null : ((int) ($profile['max_devices'] ?? 1)),
+        ] + self::presenceMeta($nowMs);
+    }
+
+    /**
+     * POST /device-binding { action: 'heartbeat' }
+     *
+     * Records a backend-confirmed presence event for the device THIS SESSION is
+     * bound to. Authorization is the access token's `device_id` claim — the body
+     * cannot name another device, so a client can never mark someone else's
+     * device online.
+     *
+     * MONOTONIC: the UPDATE only moves the timestamp forward. A delayed or
+     * duplicated request therefore cannot overwrite a newer beat (the guard is
+     * inside the statement, not a read-then-write race). Implausibly-future
+     * values (legacy local-zone rows) are the one exception — they are re-anchored
+     * to now, otherwise a row 3 hours ahead could never be corrected.
+     *
+     * IDEMPOTENT: one UPDATE per call, no rows created, no audit rows written.
+     */
+    private function heartbeat(Request $request, string $userId): array
+    {
+        $deviceId = $request->user['device_id'] ?? null;
+        if (!is_string($deviceId) || $deviceId === '') {
+            throw new ApiException(400, 'This session is not bound to a device', 'device_unbound');
+        }
+
+        $db = Database::instance();
+        $db->query(
+            "UPDATE devices SET last_active_at = UTC_TIMESTAMP(6)
+              WHERE id = ? AND user_id = ? AND status = 'active'
+                AND (last_active_at IS NULL
+                     OR last_active_at <= UTC_TIMESTAMP(6)
+                     OR last_active_at > DATE_ADD(UTC_TIMESTAMP(6), INTERVAL " . self::PRESENCE_FUTURE_TOLERANCE_SECONDS . ' SECOND))',
+            [$deviceId, $userId]
+        );
+
+        $row = $db->row(
+            "SELECT id, device_name, device_model, platform, os, os_version, app_version, manufacturer,
+                    ip_address, status, block_reason, registered_at, last_active_at, device_fingerprint,
+                    installation_id, trust_level, revoked_at
+               FROM devices WHERE id = ? AND user_id = ?",
+            [$deviceId, $userId]
+        );
+        if ($row === null) {
+            throw new ApiException(404, 'Device not found');
+        }
+
+        $nowMs = self::nowMs();
+        return array_merge(
+            ['device' => self::withPresence($row, $nowMs)],
+            self::presenceMeta($nowMs)
+        );
+    }
+
+    /** Current epoch milliseconds (server clock — the only trusted "now"). */
+    private static function nowMs(): int
+    {
+        return (int) round(microtime(true) * 1000);
+    }
+
+    /**
+     * Normalize a `devices` row into the presence contract.
+     *
+     * The raw `last_active_at` DATETIME is UTC by policy (Database pins the
+     * session zone) and has NO zone suffix, so it must never reach the client as
+     * a naive string: `new Date('2026-10-21 10:00:00')` is parsed in the VIEWER's
+     * local zone, which is what turned a 1-minute-old beat into "3h ago" for a
+     * UTC+3 admin. Both an ISO-8601 `…Z` string and epoch ms are returned.
+     */
+    private static function withPresence(array $row, int $nowMs): array
+    {
+        $seenMs = self::utcToMs($row['last_active_at'] ?? null);
+        $status = (string) ($row['status'] ?? 'active');
+
+        if ($seenMs === null) {
+            $presence = 'unknown';
+        } elseif ($status !== 'active') {
+            $presence = 'offline';
+        } elseif ($seenMs > $nowMs + self::PRESENCE_FUTURE_TOLERANCE_SECONDS * 1000) {
+            // Cannot be a real beat (legacy local-zone write or a clock jump).
+            $presence = 'unknown';
+        } elseif ($nowMs - $seenMs <= self::PRESENCE_ONLINE_WINDOW_SECONDS * 1000) {
+            $presence = 'online';
+        } else {
+            $presence = 'offline';
+        }
+
+        $row['last_active_at'] = $row['last_active_at'] ?? null;   // legacy field, untouched
+        $row['last_seen_at'] = self::utcIso($row['last_active_at']);
+        $row['last_seen_epoch_ms'] = $seenMs;
+        $row['presence'] = $presence;
+        $row['is_online'] = $presence === 'online';
+        // No reliable offline event exists on mobile OSes — never fabricate one.
+        $row['last_confirmed_offline_at'] = null;
+        return $row;
+    }
+
+    /** Response-level presence metadata (server clock + the documented policy). */
+    private static function presenceMeta(int $nowMs): array
+    {
+        return [
+            'server_time' => gmdate('Y-m-d\TH:i:s\Z', intdiv($nowMs, 1000)),
+            'server_epoch_ms' => $nowMs,
+            'presence_policy' => [
+                'heartbeat_seconds' => self::PRESENCE_HEARTBEAT_SECONDS,
+                'online_window_seconds' => self::PRESENCE_ONLINE_WINDOW_SECONDS,
+                'offline_is_inferred' => true,
+            ],
         ];
+    }
+
+    /**
+     * Parse a MySQL DATETIME (naive, UTC by policy) into epoch ms.
+     * A string that already carries a zone/offset is honoured as-is.
+     */
+    private static function utcToMs(?string $naive): ?int
+    {
+        if ($naive === null || trim($naive) === '') {
+            return null;
+        }
+        try {
+            $dt = new \DateTimeImmutable(trim($naive), new \DateTimeZone('UTC'));
+        } catch (\Throwable) {
+            return null;
+        }
+        return $dt->getTimestamp() * 1000 + (int) $dt->format('u') / 1000;
+    }
+
+    /** Format a naive-UTC DATETIME as ISO-8601 with an explicit `Z`. */
+    private static function utcIso(?string $naive): ?string
+    {
+        if ($naive === null || trim($naive) === '') {
+            return null;
+        }
+        try {
+            $dt = new \DateTimeImmutable(trim($naive), new \DateTimeZone('UTC'));
+        } catch (\Throwable) {
+            return null;
+        }
+        return $dt->setTimezone(new \DateTimeZone('UTC'))->format('Y-m-d\TH:i:s.v\Z');
     }
 
     private function getDevices(array $body, string $role): array
@@ -171,7 +338,14 @@ final class DeviceController
             [$targetUserId]
         );
 
-        return ['devices' => $devices ?? [], 'profile' => $profile];
+        $nowMs = self::nowMs();
+        return [
+            'devices' => array_map(
+                static fn (array $d): array => self::withPresence($d, $nowMs),
+                $devices ?? []
+            ),
+            'profile' => $profile,
+        ] + self::presenceMeta($nowMs);
     }
 
     private function logoutDevice(array $body, string $userId, string $role): array

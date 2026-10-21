@@ -34,6 +34,7 @@ import {
   DEFAULT_MAINTENANCE_MESSAGE,
   gateVisibilityForSession,
 } from '@/lib/maintenanceStateModel';
+import { useTranslation } from '@/lib/i18n';
 
 /** Bumped every time a MAINTENANCE→NORMAL recovery completes. */
 let recoveryEpoch = 0;
@@ -52,6 +53,7 @@ export function MaintenanceGate({ children }: { children: React.ReactNode }) {
   const isDark = scheme === 'dark';
   const c = isDark ? neuColors.dark : neuColors.light;
   const layout = useLayout();
+  const { t } = useTranslation();
 
   // Silent recovery → re-bootstrap the authenticated shell. The epoch bumps
   // ONLY on a real transition (subscribeMaintenance's initial callback fires
@@ -89,11 +91,11 @@ export function MaintenanceGate({ children }: { children: React.ReactNode }) {
         <View style={[styles.iconWrap, { backgroundColor: `${c.primary}18` }]}>
           <Wrench size={Math.round(layout.touchTarget * 1.4)} color={c.primary} />
         </View>
-        <Text style={[styles.title, { color: c.text }]}>Maintenance Mode</Text>
+        <Text style={[styles.title, { color: c.text }]}>{t('common.maintenanceTitle')}</Text>
         <Text style={[styles.message, { color: c.text }]}>
           {verdict.message?.trim() || DEFAULT_MAINTENANCE_MESSAGE}
         </Text>
-        <Text style={[styles.sub, { color: c.text }]}>Please try again later.</Text>
+        <Text style={[styles.sub, { color: c.text }]}>{t('common.tryAgainLater')}</Text>
       </ScrollView>
     </View>
   );

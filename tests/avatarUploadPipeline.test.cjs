@@ -273,20 +273,29 @@ function canWriteAvatarPath(userId, path) {
     'C4.4: avatars/user-avatars buckets share the owner rule');
 }
 
-// C5 — the shared control covers all three states
+// C5 — the shared control covers all three states.
+// The labels are localized now, so each assertion checks BOTH the component's
+// translation key and the English copy that key resolves to — the rendered
+// English is unchanged while Arabic gets the same actions.
 {
   const comp = read('src/components/ProfilePhotoActions.tsx');
+  const copy = read('src/lib/i18n/resources.ts');
   ok(/if \(!hasPhoto\)\s*\{[\s\S]{0,120}?onPick\(\)/.test(comp),
     'C5.1: NO photo → tap goes straight to the picker (Add Photo)');
-  ok(/label="Change Photo"/.test(comp), 'C5.2: photo present → "Change Photo" action');
-  ok(/label="Remove Photo"/.test(comp), 'C5.3: photo present → "Remove Photo" action');
-  ok(/label="Remove Photo"[\s\S]{0,200}?destructive/.test(comp),
+  ok(/label=\{t\('profilePhoto\.change'\)\}/.test(comp)
+    && /'profilePhoto\.change': 'Change Photo'/.test(copy),
+    'C5.2: photo present → "Change Photo" action');
+  ok(/label=\{t\('profilePhoto\.remove'\)\}/.test(comp)
+    && /'profilePhoto\.remove': 'Remove Photo'/.test(copy),
+    'C5.3: photo present → "Remove Photo" action');
+  ok(/label=\{t\('profilePhoto\.remove'\)\}[\s\S]{0,200}?destructive/.test(comp),
     'C5.4: Remove is rendered as a destructive action');
   ok(/setSheetOpen\(false\);\s*setConfirmOpen\(true\)/.test(comp),
     'C5.5: Remove opens a CONFIRMATION step (never deletes on first tap)');
-  ok(/label="Remove"[\s\S]{0,80}?onPress=\{handleConfirmRemove\}/.test(comp),
+  ok(/label=\{t\('common\.remove'\)\}[\s\S]{0,80}?onPress=\{handleConfirmRemove\}/.test(comp),
     'C5.6: confirmation dialog confirms before calling onRemove');
-  ok(/label="Cancel"/.test(comp), 'C5.7: confirmation dialog can be cancelled');
+  ok(/label=\{t\('common\.cancel'\)\}/.test(comp),
+    'C5.7: confirmation dialog can be cancelled');
   ok(/const busy = uploading \|\| removing/.test(comp),
     'C5.8: control is disabled while an upload/removal is in flight');
   const compCode = comp.replace(/^\s*\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, '');

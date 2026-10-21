@@ -17,7 +17,7 @@ import {
   getMySubscriptions, getUnreadNotificationCount,
   getPublishedCourses, getCategories,
 } from '@/lib/api';
-import { getFirstName } from '@/lib/utils';
+import { useTranslation } from '@/lib/i18n';
 import { NeuCard } from '@/components/NeuCard';
 import { NeuSearchBar } from '@/components/NeuInputRow';
 import { StatCardCarousel } from '@/components/StatCard';
@@ -42,6 +42,7 @@ export default function StudentDashboard() {
   const insets = layout.insets;
   const { profile } = useProfileStore();
   const router = useRouter();
+  const { t, tCount } = useTranslation();
 
   // ── Data state ────────────────────────────────────────────────────────────
   const [subscriptions, setSubscriptions] = useState<any[]>([]);
@@ -114,7 +115,6 @@ export default function StudentDashboard() {
   // enrollments.status is a text column; treat 'completed' as done, otherwise in-progress
   const completedCount = subscriptions.filter(e => e.status === 'completed').length;
   const inProgressCount = subscriptions.length - completedCount;
-  const firstName = getFirstName(profile?.full_name);
 
   // Explore courses = published + not enrolled
   const exploreCourses = useMemo(
@@ -169,10 +169,10 @@ export default function StudentDashboard() {
   const activeFilterCount = [filters.category, filters.teacher, filters.priceType !== 'all' ? 1 : null].filter(Boolean).length;
 
   const statCards: StatCardItem[] = [
-    { id: 'subscribed', label: 'My Courses',    value: subscriptions.length, icon: <BookOpen size={18} color="#fff" />, color: c.primary },
-    { id: 'progress',   label: 'In Progress',   value: inProgressCount,      icon: <TrendingUp size={18} color="#fff" />, color: '#D97706' },
-    { id: 'completed',  label: 'Completed',      value: completedCount,        icon: <Award size={18} color="#fff" />,     color: '#16A34A' },
-    { id: 'notifs',     label: 'Notifications',  value: unreadCount,          icon: <Bell size={18} color="#fff" />,      color: '#1E90FF' },
+    { id: 'subscribed', label: t('home.myCourses'),    value: subscriptions.length, icon: <BookOpen size={18} color="#fff" />, color: c.primary },
+    { id: 'progress',   label: t('home.inProgress'),   value: inProgressCount,      icon: <TrendingUp size={18} color="#fff" />, color: '#D97706' },
+    { id: 'completed',  label: t('home.completed'),      value: completedCount,        icon: <Award size={18} color="#fff" />,     color: '#16A34A' },
+    { id: 'notifs',     label: t('common.notifications'),  value: unreadCount,          icon: <Bell size={18} color="#fff" />,      color: '#1E90FF' },
   ];
 
   // ── Helpers ───────────────────────────────────────────────────────────────
@@ -197,7 +197,7 @@ export default function StudentDashboard() {
   // Price display: price_egp column (0 = free)
   const formatPrice = (course: any) => {
     const p = course.price_egp ?? 0;
-    if (!p || p === 0) return 'Free';
+    if (!p || p === 0) return t('home.free');
     return `EGP ${Number(p).toFixed(0)}`;
   };
 
@@ -233,14 +233,14 @@ export default function StudentDashboard() {
                 {course.title}
               </Text>
               <Text style={{ fontSize: layout.captionSize, ...mutedTextStyle(c, 0.45), marginTop: 2 }} numberOfLines={1}>
-                {`Dr. ${course.doctor?.full_name ?? '—'}${course.category?.name ? ` · ${course.category.name}` : ''}`}
+                {`${t('studentProfile.doctorPrefix', { name: course.doctor?.full_name ?? '—' })}${course.category?.name ? ` · ${course.category.name}` : ''}`}
               </Text>
               <View style={{ marginTop: 4, flexDirection: 'row', justifyContent: 'flex-end' }}>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4,
                   backgroundColor: `${c.primary}15`, borderRadius: layout.cardRadius / 2,
                   paddingHorizontal: layout.pad.sm, paddingVertical: layout.pad.xs }}>
                   <Play size={layout.captionSize - 2} color={c.primary} />
-                  <Text style={{ fontSize: layout.captionSize - 1, fontWeight: '700', color: c.primary }}>Continue</Text>
+                  <Text style={{ fontSize: layout.captionSize - 1, fontWeight: '700', color: c.primary }}>{t('course.continue')}</Text>
                 </View>
               </View>
             </View>
@@ -277,7 +277,7 @@ export default function StudentDashboard() {
                 {course.title}
               </Text>
               <Text style={{ fontSize: layout.captionSize, ...mutedTextStyle(c, 0.45), marginTop: 2 }} numberOfLines={1}>
-                Dr. {course.doctor?.full_name ?? '—'}
+                {t('studentProfile.doctorPrefix', { name: course.doctor?.full_name ?? '—' })}
               </Text>
               <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: layout.pad.sm }}>
                 <Text style={{ fontSize: layout.captionSize + 1, fontWeight: '800',
@@ -287,7 +287,7 @@ export default function StudentDashboard() {
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3,
                   backgroundColor: `${c.primary}15`, borderRadius: layout.cardRadius / 2,
                   paddingHorizontal: layout.pad.sm, paddingVertical: layout.pad.xs }}>
-                  <Text style={{ fontSize: layout.captionSize - 1, fontWeight: '700', color: c.primary }}>View</Text>
+                  <Text style={{ fontSize: layout.captionSize - 1, fontWeight: '700', color: c.primary }}>{t('common.view')}</Text>
                   <ChevronRight size={layout.captionSize - 1} color={c.primary} />
                 </View>
               </View>
@@ -313,13 +313,13 @@ export default function StudentDashboard() {
     >
       {/* DashboardHeader owns its safe-area top padding — no paddingTop on outer View */}
       <DashboardHeader
-        roleLabel="Welcome back,"
-        greeting={firstName ? `${firstName} 👋` : '👋'}
+        roleLabel={t('role.student')}
+        greeting={t('home.welcome')}
         rightActions={
           <>
             <Pressable
               onPress={() => router.push('/(app)/notifications' as RelativePathString)}
-              accessibilityLabel={unreadCount > 0 ? `Notifications, ${unreadCount} unread` : 'Notifications'}
+              accessibilityLabel={unreadCount > 0 ? `${t('nav.notifications')}, ${tCount('common.unreadCount', unreadCount)}` : t('nav.notifications')}
               accessibilityRole="button"
               style={[{ width: layout.touchTarget + 2, height: layout.touchTarget + 2, borderRadius: layout.cardRadius, alignItems: 'center', justifyContent: 'center' }, neuMicroStyle(isDark)]}
             >
@@ -340,7 +340,7 @@ export default function StudentDashboard() {
             value={searchQuery}
             onChangeText={setSearchQuery}
             onClear={() => setSearchQuery('')}
-            placeholder="Search courses..."
+            placeholder={t('course.searchPlaceholder')}
             returnKeyType="search"
           />
           <Pressable
@@ -359,10 +359,10 @@ export default function StudentDashboard() {
         {/* ── Filter panel ──────────────────────────────────────────────── */}
         {showFilters && (
           <NeuCard style={{ marginBottom: layout.pad.md, padding: layout.cardPx }}>
-            <Text style={{ fontSize: layout.captionSize - 1, fontWeight: '800', ...mutedTextStyle(c, 0.45), marginBottom: layout.pad.sm, textTransform: 'uppercase', letterSpacing: 0.8 }}>Category</Text>
+            <Text style={{ fontSize: layout.captionSize - 1, fontWeight: '800', ...mutedTextStyle(c, 0.45), marginBottom: layout.pad.sm, textTransform: 'uppercase', letterSpacing: 0.8 }}>{t('course.category')}</Text>
             <ScrollView automaticallyAdjustKeyboardInsets={process.env.EXPO_OS === 'ios'} horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: layout.pad.md }}>
               <Pressable onPress={() => setFilters(f => ({ ...f, category: null }))} style={chipStyle(!filters.category)}>
-                <Text style={chipText(!filters.category)}>All</Text>
+                <Text style={chipText(!filters.category)}>{t('common.all')}</Text>
               </Pressable>
               {categories.map(cat => (
                 <Pressable key={cat.id} onPress={() => setFilters(f => ({ ...f, category: f.category === cat.id ? null : cat.id }))} style={chipStyle(filters.category === cat.id)}>
@@ -373,25 +373,27 @@ export default function StudentDashboard() {
 
             {teachers.length > 0 && (
               <>
-                <Text style={{ fontSize: layout.captionSize - 1, fontWeight: '800', ...mutedTextStyle(c, 0.45), marginBottom: layout.pad.sm, textTransform: 'uppercase', letterSpacing: 0.8 }}>Teacher</Text>
+                <Text style={{ fontSize: layout.captionSize - 1, fontWeight: '800', ...mutedTextStyle(c, 0.45), marginBottom: layout.pad.sm, textTransform: 'uppercase', letterSpacing: 0.8 }}>{t('course.teacher')}</Text>
                 <ScrollView automaticallyAdjustKeyboardInsets={process.env.EXPO_OS === 'ios'} horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: layout.pad.md }}>
                   <Pressable onPress={() => setFilters(f => ({ ...f, teacher: null }))} style={chipStyle(!filters.teacher)}>
-                    <Text style={chipText(!filters.teacher)}>All</Text>
+                    <Text style={chipText(!filters.teacher)}>{t('common.all')}</Text>
                   </Pressable>
-                  {teachers.map(t => (
-                    <Pressable key={t.id} onPress={() => setFilters(f => ({ ...f, teacher: f.teacher === t.id ? null : t.id }))} style={chipStyle(filters.teacher === t.id)}>
-                      <Text style={chipText(filters.teacher === t.id)}>Dr. {t.name}</Text>
+                  {teachers.map(teacher => (
+                    <Pressable key={teacher.id} onPress={() => setFilters(f => ({ ...f, teacher: f.teacher === teacher.id ? null : teacher.id }))} style={chipStyle(filters.teacher === teacher.id)}>
+                      <Text style={chipText(filters.teacher === teacher.id)}>{t('studentProfile.doctorPrefix', { name: teacher.name })}</Text>
                     </Pressable>
                   ))}
                 </ScrollView>
               </>
             )}
 
-            <Text style={{ fontSize: layout.captionSize - 1, fontWeight: '800', ...mutedTextStyle(c, 0.45), marginBottom: layout.pad.sm, textTransform: 'uppercase', letterSpacing: 0.8 }}>Price</Text>
+            <Text style={{ fontSize: layout.captionSize - 1, fontWeight: '800', ...mutedTextStyle(c, 0.45), marginBottom: layout.pad.sm, textTransform: 'uppercase', letterSpacing: 0.8 }}>{t('course.price')}</Text>
             <View style={{ flexDirection: 'row', gap: layout.pad.sm }}>
               {(['all', 'free', 'paid'] as const).map(pt => (
                 <Pressable key={pt} onPress={() => setFilters(f => ({ ...f, priceType: pt }))} style={chipStyle(filters.priceType === pt)}>
-                  <Text style={chipText(filters.priceType === pt)}>{pt.charAt(0).toUpperCase() + pt.slice(1)}</Text>
+                  <Text style={chipText(filters.priceType === pt)}>
+                    {pt === 'all' ? t('common.all') : pt === 'free' ? t('home.free') : t('home.paid')}
+                  </Text>
                 </Pressable>
               ))}
             </View>
@@ -401,7 +403,7 @@ export default function StudentDashboard() {
                 onPress={() => setFilters({ category: null, teacher: null, priceType: 'all' })}
                 style={{ marginTop: layout.pad.md, alignItems: 'center' }}
               >
-                <Text style={{ fontSize: layout.captionSize + 1, fontWeight: '700', color: '#DC2626' }}>Clear All Filters</Text>
+                <Text style={{ fontSize: layout.captionSize + 1, fontWeight: '700', color: '#DC2626' }}>{t('course.clearFilters')}</Text>
               </Pressable>
             )}
           </NeuCard>
@@ -418,11 +420,11 @@ export default function StudentDashboard() {
 
           {/* ── My Courses ───────────────────────────────────────────────── */}
           <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: layout.pad.md }}>
-            <Text style={{ fontSize: layout.bodySize + 2, fontWeight: '800', color: c.text }}>My Courses</Text>
+            <Text style={{ fontSize: layout.bodySize + 2, fontWeight: '800', color: c.text }}>{t('nav.myCourses')}</Text>
             {subscriptions.length > 3 && (
               <Pressable onPress={() => router.push('/(app)/(student)/my-courses' as RelativePathString)}
                 style={{ flexDirection: 'row', alignItems: 'center', gap: layout.pad.xs }}>
-                <Text style={{ fontSize: layout.captionSize + 1, fontWeight: '700', color: c.primary }}>See All</Text>
+                <Text style={{ fontSize: layout.captionSize + 1, fontWeight: '700', color: c.primary }}>{t('common.viewAll')}</Text>
                 <ChevronRight size={layout.captionSize + 1} color={c.primary} />
               </Pressable>
             )}
@@ -432,14 +434,14 @@ export default function StudentDashboard() {
             <NeuCard style={{ alignItems: 'center', padding: layout.cardPx * 1.5, marginBottom: layout.sectionGap }}>
               <BookOpen size={Math.round(layout.touchTarget * 0.85)} color={c.primary} opacity={0.25} style={{ marginBottom: layout.pad.sm }} />
               <Text style={{ fontSize: layout.bodySize, fontWeight: '700', ...mutedTextStyle(c, 0.5), marginBottom: layout.pad.xs }}>
-                {searchQuery ? 'No matching courses' : "You haven't enrolled in any courses yet."}
+                {searchQuery ? t('home.noMatchingCourses') : t('home.noEnrolledCourses')}
               </Text>
               {!searchQuery && (
                 <Pressable
                   onPress={() => { setSearchQuery(''); setShowFilters(false); }}
                   style={{ marginTop: layout.pad.sm, backgroundColor: c.primary, borderRadius: layout.cardRadius, paddingHorizontal: layout.pad.lg, paddingVertical: layout.pad.sm }}
                 >
-                  <Text style={{ fontSize: layout.bodySize, fontWeight: '700', color: '#fff' }}>Browse Courses ↓</Text>
+                  <Text style={{ fontSize: layout.bodySize, fontWeight: '700', color: '#fff' }}>{t('home.browseCourses')}</Text>
                 </Pressable>
               )}
             </NeuCard>
@@ -452,7 +454,7 @@ export default function StudentDashboard() {
                   style={{ alignItems: 'center', marginBottom: layout.sectionGap }}
                 >
                   <Text style={{ fontSize: layout.bodySize, fontWeight: '700', color: c.primary }}>
-                    View all {filteredMyCourses.length} courses →
+                    {tCount('home.viewAllCourses', filteredMyCourses.length)}
                   </Text>
                 </Pressable>
               )}
@@ -462,10 +464,10 @@ export default function StudentDashboard() {
           {/* ── Explore / Available Courses ───────────────────────────── */}
           <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: layout.pad.md, marginTop: layout.pad.sm }}>
             <View>
-              <Text style={{ fontSize: layout.bodySize + 2, fontWeight: '800', color: c.text }}>Explore Courses</Text>
+              <Text style={{ fontSize: layout.bodySize + 2, fontWeight: '800', color: c.text }}>{t('home.exploreCourses')}</Text>
               {filteredExplore.length > 0 && (
                 <Text style={{ fontSize: layout.captionSize, ...mutedTextStyle(c, 0.4), marginTop: 2 }}>
-                  {filteredExplore.length} available
+                  {tCount('home.availableCourses', filteredExplore.length)}
                 </Text>
               )}
             </View>
@@ -475,14 +477,14 @@ export default function StudentDashboard() {
             <NeuCard style={{ alignItems: 'center', padding: layout.cardPx * 1.5, marginBottom: layout.sectionGap }}>
               <Search size={Math.round(layout.touchTarget * 0.85)} color={c.primary} opacity={0.25} style={{ marginBottom: layout.pad.sm }} />
               <Text style={{ fontSize: layout.bodySize, fontWeight: '700', ...mutedTextStyle(c, 0.5), textAlign: 'center' }}>
-                {searchQuery || hasActiveFilters ? 'No courses match your search' : 'No new courses available'}
+                {searchQuery || hasActiveFilters ? t('home.noCoursesMatchSearch') : t('home.noNewCourses')}
               </Text>
               {(searchQuery || hasActiveFilters) && (
                 <Pressable
                   onPress={() => { setSearchQuery(''); setFilters({ category: null, teacher: null, priceType: 'all' }); }}
                   style={{ marginTop: layout.pad.sm }}
                 >
-                  <Text style={{ fontSize: layout.bodySize, fontWeight: '700', color: c.primary }}>Clear search & filters</Text>
+                  <Text style={{ fontSize: layout.bodySize, fontWeight: '700', color: c.primary }}>{t('course.clearSearchFilters')}</Text>
                 </Pressable>
               )}
             </NeuCard>

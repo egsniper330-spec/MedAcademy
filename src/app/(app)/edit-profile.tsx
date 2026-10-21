@@ -12,8 +12,9 @@ import { NeuButton } from '@/components/NeuButton';
 import { useToast } from '@/components/Toast';
 import { neuColors, useLayout, mutedTextStyle } from '@/lib/neu';
 import { normalizePhoneE164 } from '@/lib/identifier';
-import { validateRequired, friendlyError } from '@/lib/validation';
+import { friendlyError } from '@/lib/validation';
 import { NeuInputRow } from '@/components/NeuInputRow';
+import { t } from '@/lib/i18n';
 
 export default function EditProfile() {
   const scheme = useColorScheme();
@@ -43,22 +44,21 @@ export default function EditProfile() {
   };
 
   const handleSave = async () => {
-    const nameErr = validateRequired(fullName, 'Full name');
-    if (nameErr) { setError(nameErr); return; }
+    if (!fullName.trim()) { setError(t('signUp.fullNameRequired')); return; }
 
     if (canEditContact && phone.trim()) {
       const normalized = normalizePhoneE164(phone.trim());
-      if (!normalized) { setError('Enter a valid phone number (e.g. +20 100 000 0000 or 01001234567).'); return; }
+      if (!normalized) { setError(t('profile.phoneInvalid')); return; }
     }
 
     // Validate real email if provided
     if (profileEmail.trim() && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(profileEmail.trim())) {
-      setError('Enter a valid email address.');
+      setError(t('signUp.validEmail'));
       return;
     }
     // Prevent saving an internal placeholder as the real email
     if (isInternalEmail(profileEmail.trim())) {
-      setError('Enter a valid email address.');
+      setError(t('signUp.validEmail'));
       return;
     }
 
@@ -72,10 +72,10 @@ export default function EditProfile() {
       updates.profile_email = profileEmail.trim() || null;
       const updated = await updateProfile(profile!.id, updates);
       setProfile({ ...profile!, ...(updated as any) });
-      showToast({ type: 'success', message: 'Profile updated successfully.' });
+      showToast({ type: 'success', message: t('profile.saved') });
       setTimeout(() => router.back(), 800);
     } catch (e: any) {
-      const msg = friendlyError(e, 'Failed to update profile.');
+      const msg = friendlyError(e, t('profile.updateFailed'));
       setError(msg);
       showToast({ type: 'error', message: msg });
     }
@@ -87,7 +87,7 @@ export default function EditProfile() {
   return (
     <KeyboardAvoidingView behavior={undefined} /* keyboard: native inset only */ style={{ flex: 1, backgroundColor: c.base }}>
       <ScrollView automaticallyAdjustKeyboardInsets={process.env.EXPO_OS === 'ios'} contentContainerStyle={{ flexGrow: 1, paddingTop: 0 }} keyboardShouldPersistTaps="handled">
-        <PageHeader title="Edit Profile" showBack />
+        <PageHeader title={t('profile.editProfile')} showBack />
 
       <View style={{ paddingHorizontal: 24 }}>
 
@@ -104,18 +104,18 @@ export default function EditProfile() {
 
         <NeuCard radius={22} style={{ padding: 22 }}>
           {/* Full Name — always editable */}
-          <Text style={{ fontSize: 12, fontWeight: '600', ...mutedTextStyle(c, 0.55), marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.8 }}>Full Name</Text>
+          <Text style={{ fontSize: 12, fontWeight: '600', ...mutedTextStyle(c, 0.55), marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.8 }}>{t('profile.fullName')}</Text>
           <NeuInputRow
             c={c}
             value={fullName}
             onChangeText={setFullName}
-            placeholder="Your full name"
+            placeholder={t('signUp.fullNamePlaceholder')}
             leftIcon={<User size={18} color={c.text} opacity={0.4} />}
           />
 
           {/* Phone — editable only for admin/super_admin */}
           <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 6, gap: 6 }}>
-            <Text style={{ fontSize: 12, fontWeight: '600', ...mutedTextStyle(c, 0.55), textTransform: 'uppercase', letterSpacing: 0.8 }}>Phone Number</Text>
+            <Text style={{ fontSize: 12, fontWeight: '600', ...mutedTextStyle(c, 0.55), textTransform: 'uppercase', letterSpacing: 0.8 }}>{t('profile.phone')}</Text>
             {!canEditContact && <Lock size={12} color={c.text} opacity={0.35} />}
           </View>
           <NeuInputRow
@@ -130,30 +130,30 @@ export default function EditProfile() {
           />
           {!canEditContact && (
             <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.4), marginBottom: 12, marginTop: -10 }}>
-              Phone number can only be changed by an admin.
+              {t('profile.phoneAdminOnly')}
             </Text>
           )}
 
           {/* Email — editable for all users (updates profile_email only, never auth email) */}
           <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 6, gap: 6 }}>
-            <Text style={{ fontSize: 12, fontWeight: '600', ...mutedTextStyle(c, 0.55), textTransform: 'uppercase', letterSpacing: 0.8 }}>Email</Text>
+            <Text style={{ fontSize: 12, fontWeight: '600', ...mutedTextStyle(c, 0.55), textTransform: 'uppercase', letterSpacing: 0.8 }}>{t('profile.email')}</Text>
           </View>
           <NeuInputRow
             c={c}
             value={profileEmail}
             onChangeText={setProfileEmail}
-            placeholder="Not set"
+            placeholder={t('profile.notSet')}
             keyboardType="email-address"
             autoCapitalize="none"
             autoCorrect={false}
             leftIcon={<Mail size={18} color={c.text} opacity={0.4} />}
           />
           <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.4), marginBottom: 12, marginTop: -10 }}>
-            Add or update your email address. Your login method stays unchanged.
+            {t('profile.emailHint')}
           </Text>
 
           {error ? <Text style={{ color: '#DC2626', fontSize: 13, marginBottom: 12 }}>{error}</Text> : null}
-          <NeuButton label="Save Changes" onPress={handleSave} loading={saving} fullWidth />
+          <NeuButton label={t('profile.saveChanges')} onPress={handleSave} loading={saving} fullWidth />
         </NeuCard>
 
         {/* ── ID (read-only) ── */}
@@ -163,7 +163,7 @@ export default function EditProfile() {
               <Fingerprint size={17} color={c.primary} />
             </View>
             <View style={{ flex: 1 }}>
-              <Text style={{ fontSize: 11, fontWeight: '700', ...mutedTextStyle(c, 0.4), textTransform: 'uppercase', letterSpacing: 0.9 }}>ID</Text>
+              <Text style={{ fontSize: 11, fontWeight: '700', ...mutedTextStyle(c, 0.4), textTransform: 'uppercase', letterSpacing: 0.9 }}>{t('profile.idLabel')}</Text>
               <Text style={{ fontSize: 17, fontWeight: '800', color: c.primary, letterSpacing: 1.4, marginTop: 1, fontVariant: ['tabular-nums'] }}>
                 {profile?.public_user_id ?? '—'}
               </Text>
@@ -173,11 +173,11 @@ export default function EditProfile() {
               style={{ flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 11, paddingVertical: 7, borderRadius: 9, backgroundColor: wmCopied ? '#16A34A18' : `${c.primary}12` }}
             >
               {wmCopied ? <CheckCircle size={14} color="#16A34A" /> : <Copy size={14} color={c.primary} />}
-              <Text style={{ fontSize: 11, fontWeight: '700', color: wmCopied ? '#16A34A' : c.primary }}>{wmCopied ? 'Copied!' : 'Copy'}</Text>
+              <Text style={{ fontSize: 11, fontWeight: '700', color: wmCopied ? '#16A34A' : c.primary }}>{wmCopied ? t('profile.copied') : t('securityCenter.copy')}</Text>
             </Pressable>
           </View>
           <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.4), lineHeight: 17 }}>
-            Permanently embedded as a forensic watermark in every video you watch. Cannot be changed.
+            {t('profile.watermarkNote')}
           </Text>
         </NeuCard>
       </View>

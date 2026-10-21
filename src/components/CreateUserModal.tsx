@@ -28,6 +28,7 @@ import {
   getUniversities, getFaculties,
   type CreateUserPayload,
 } from '@/lib/api';
+import { useTranslation } from '@/lib/i18n';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -38,8 +39,9 @@ type Step = 'role' | 'form';
 
 interface RoleOption {
   key:         UserRole;
-  label:       string;
-  description: string;
+  /** Translation keys — resolved at render so the picker follows the locale. */
+  labelKey:       string;
+  descriptionKey: string;
   Icon:        React.ComponentType<{ size: number; color: string }>;
   color:       string;
 }
@@ -47,22 +49,22 @@ interface RoleOption {
 const ROLE_OPTIONS: RoleOption[] = [
   {
     key:         'student',
-    label:       'Student',
-    description: 'Can purchase and access courses.',
+    labelKey:       'role.student',
+    descriptionKey: 'createUser.studentDesc',
     Icon:        GraduationCap,
     color:       '#7C3AED',
   },
   {
     key:         'doctor',
-    label:       'Doctor',
-    description: 'Can publish and manage courses.',
+    labelKey:       'role.doctor',
+    descriptionKey: 'createUser.doctorDesc',
     Icon:        Stethoscope,
     color:       '#16A34A',
   },
   {
     key:         'admin',
-    label:       'Admin',
-    description: 'Can manage platform operations.',
+    labelKey:       'role.admin',
+    descriptionKey: 'createUser.adminDesc',
     Icon:        ShieldCheck,
     color:       '#EF4444',
   },
@@ -99,18 +101,18 @@ const BLANK_FORM: FormState = {
 // Password strength
 // ─────────────────────────────────────────────────────────────────────────────
 
-function passwordStrength(pw: string): { score: number; label: string; color: string } {
+function passwordStrength(pw: string): { score: number; labelKey: string; color: string } {
   let score = 0;
   if (pw.length >= 8)            score++;
   if (/[A-Z]/.test(pw))         score++;
   if (/[0-9]/.test(pw))         score++;
   if (/[^A-Za-z0-9]/.test(pw))  score++;
   const map = [
-    { label: '',        color: 'transparent' },
-    { label: 'Weak',    color: '#DC2626' },
-    { label: 'Fair',    color: '#D97706' },
-    { label: 'Good',    color: '#16A34A' },
-    { label: 'Strong',  color: '#2DA8FF' },
+    { labelKey: '',                        color: 'transparent' },
+    { labelKey: 'password.strength.weak',   color: '#DC2626' },
+    { labelKey: 'password.strength.fair',   color: '#D97706' },
+    { labelKey: 'password.strength.good',   color: '#16A34A' },
+    { labelKey: 'password.strength.strong', color: '#2DA8FF' },
   ];
   return { score, ...map[score] };
 }
@@ -177,6 +179,7 @@ export function CreateUserModal({ visible, onClose, onCreated }: CreateUserModal
   const [step,         setStep]         = useState<Step>('role');
   const [selectedRole, setSelectedRole] = useState<UserRole | null>(null);
   const [form,         setForm]         = useState<FormState>(BLANK_FORM);
+  const { t } = useTranslation();
   const [errors,       setErrors]       = useState<Partial<Record<keyof FormState, string>>>({});
   const [submitting,   setSubmitting]   = useState(false);
   const [showPw,       setShowPw]       = useState(false);
@@ -227,17 +230,17 @@ export function CreateUserModal({ visible, onClose, onCreated }: CreateUserModal
 
   const validate = (): boolean => {
     const errs: typeof errors = {};
-    if (!form.fullName.trim())          errs.fullName       = 'Full name is required.';
-    if (!form.email.trim())             errs.email          = 'Email is required.';
+    if (!form.fullName.trim())          errs.fullName       = t('validation.requiredFor', { label: t('profile.fullName') });
+    if (!form.email.trim())             errs.email          = t('validation.emailRequired');
     else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim()))
-                                        errs.email          = 'Enter a valid email address.';
-    if (!form.password)                 errs.password       = 'Password is required.';
-    else if (form.password.length < 8)  errs.password       = 'Password must be at least 8 characters.';
-    if (!form.confirmPassword)          errs.confirmPassword = 'Please confirm your password.';
+                                        errs.email          = t('validation.invalidEmail');
+    if (!form.password)                 errs.password       = t('validation.passwordRequired');
+    else if (form.password.length < 8)  errs.password       = t('validation.passwordMin', { min: 8 });
+    if (!form.confirmPassword)          errs.confirmPassword = t('createUser.confirmRequired');
     else if (form.password !== form.confirmPassword)
-                                        errs.confirmPassword = 'Passwords do not match.';
+                                        errs.confirmPassword = t('password.mismatch');
     if (selectedRole === 'doctor' && form.initialCredits && isNaN(Number(form.initialCredits)))
-                                        errs.initialCredits  = 'Enter a valid number.';
+                                        errs.initialCredits  = t('createUser.invalidNumber');
     setErrors(errs);
     return Object.keys(errs).length === 0;
   };
@@ -285,12 +288,12 @@ export function CreateUserModal({ visible, onClose, onCreated }: CreateUserModal
         onClose();
       }, 1200);
     } catch (e: any) {
-      const msg: string = e?.message ?? 'Failed to create account.';
+      const msg: string = e?.message ?? t('createUser.createFailed');
       // Surface known API errors as field-level hints
       if (/email.*already|already.*email/i.test(msg))
-        setErrors(prev => ({ ...prev, email: 'This email is already in use.' }));
+        setErrors(prev => ({ ...prev, email: t('createUser.emailInUse') }));
       else if (/phone.*already|already.*phone/i.test(msg))
-        setErrors(prev => ({ ...prev, phone: 'This phone number is already registered.' }));
+        setErrors(prev => ({ ...prev, phone: t('validation.phoneExists') }));
       else
         setGlobalError(msg);
     }
@@ -331,10 +334,10 @@ export function CreateUserModal({ visible, onClose, onCreated }: CreateUserModal
               </View>
               <View style={{ flex: 1 }}>
                 <Text style={{ fontSize: 16, fontWeight: '800', color: active ? opt.color : c.text }}>
-                  {opt.label}
+                  {t(opt.labelKey)}
                 </Text>
                 <Text style={{ fontSize: 13, ...mutedTextStyle(c, 0.5), marginTop: 2, lineHeight: 18 }}>
-                  {opt.description}
+                  {t(opt.descriptionKey)}
                 </Text>
               </View>
               {active && (
@@ -346,7 +349,7 @@ export function CreateUserModal({ visible, onClose, onCreated }: CreateUserModal
       })}
 
       <NeuButton
-        label="Continue"
+        label={t('common.continue')}
         onPress={() => { if (selectedRole) setStep('form'); }}
         disabled={!selectedRole}
         style={{ marginTop: 4 }}
@@ -366,7 +369,7 @@ export function CreateUserModal({ visible, onClose, onCreated }: CreateUserModal
         style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 18, alignSelf: 'flex-start' }}
       >
         <ChevronLeft size={16} color={c.primary} />
-        <Text style={{ fontSize: 13, fontWeight: '700', color: c.primary }}>Change Role</Text>
+        <Text style={{ fontSize: 13, fontWeight: '700', color: c.primary }}>{t('createUser.changeRole')}</Text>
       </Pressable>
 
       {/* Role badge */}
@@ -378,7 +381,7 @@ export function CreateUserModal({ visible, onClose, onCreated }: CreateUserModal
         }}>
           <selectedOpt.Icon size={16} color={selectedOpt.color} />
           <Text style={{ fontSize: 13, fontWeight: '700', color: selectedOpt.color }}>
-            Creating {selectedOpt.label} account
+            {t('createUser.creatingAccount', { role: t(selectedOpt.labelKey) })}
           </Text>
         </View>
       )}
@@ -387,7 +390,7 @@ export function CreateUserModal({ visible, onClose, onCreated }: CreateUserModal
       <FieldInput
         isDark={isDark}
         icon={<User size={17} color={c.text} />}
-        placeholder="Full Name *"
+        placeholder={t('editUser.fullNameRequired')}
         value={form.fullName}
         onChangeText={v => set('fullName', v)}
         autoCapitalize="words"
@@ -396,7 +399,7 @@ export function CreateUserModal({ visible, onClose, onCreated }: CreateUserModal
       <FieldInput
         isDark={isDark}
         icon={<Mail size={17} color={c.text} />}
-        placeholder="Email Address *"
+        placeholder={t('createUser.emailAddressRequired')}
         value={form.email}
         onChangeText={v => set('email', v)}
         keyboardType="email-address"
@@ -405,7 +408,7 @@ export function CreateUserModal({ visible, onClose, onCreated }: CreateUserModal
       <FieldInput
         isDark={isDark}
         icon={<Phone size={17} color={c.text} />}
-        placeholder="Phone Number (optional)"
+        placeholder={t('createUser.phoneOptional')}
         value={form.phone}
         onChangeText={v => set('phone', v)}
         keyboardType="phone-pad"
@@ -416,7 +419,7 @@ export function CreateUserModal({ visible, onClose, onCreated }: CreateUserModal
       <FieldInput
         isDark={isDark}
         icon={<Lock size={17} color={c.text} />}
-        placeholder="Password *"
+        placeholder={t('createUser.passwordRequired')}
         value={form.password}
         onChangeText={v => set('password', v)}
         secureTextEntry={!showPw}
@@ -438,14 +441,14 @@ export function CreateUserModal({ visible, onClose, onCreated }: CreateUserModal
               backgroundColor: i <= pw.score ? pw.color : `${c.text}15`,
             }} />
           ))}
-          <Text style={{ fontSize: 10, color: pw.color, fontWeight: '700', minWidth: 46 }}>{pw.label}</Text>
+          <Text style={{ fontSize: 10, color: pw.color, fontWeight: '700', minWidth: 46 }}>{t(pw.labelKey)}</Text>
         </View>
       )}
 
       <FieldInput
         isDark={isDark}
         icon={<Lock size={17} color={c.text} />}
-        placeholder="Confirm Password *"
+        placeholder={t('createUser.confirmPasswordRequired')}
         value={form.confirmPassword}
         onChangeText={v => set('confirmPassword', v)}
         secureTextEntry={!showConfirm}
@@ -463,7 +466,7 @@ export function CreateUserModal({ visible, onClose, onCreated }: CreateUserModal
       {universities.length > 0 && (
         <>
           <Text style={{ fontSize: 11, fontWeight: '700', ...mutedTextStyle(c, 0.35), textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 8 }}>
-            Optional
+            {t('createUser.optional')}
           </Text>
 
           {/* University picker */}
@@ -522,13 +525,13 @@ export function CreateUserModal({ visible, onClose, onCreated }: CreateUserModal
       {selectedRole === 'doctor' && (
         <>
           <Text style={{ fontSize: 11, fontWeight: '700', color: '#16A34A', opacity: 0.7, textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 10, marginTop: 4 }}>
-            Doctor Settings
+            {t('createUser.doctorSettings')}
           </Text>
 
           <FieldInput
             isDark={isDark}
             icon={<Zap size={17} color="#16A34A" />}
-            placeholder="Initial Credits (optional)"
+            placeholder={t('createUser.initialCredits')}
             value={form.initialCredits}
             onChangeText={v => set('initialCredits', v)}
             keyboardType="numeric"
@@ -544,8 +547,8 @@ export function CreateUserModal({ visible, onClose, onCreated }: CreateUserModal
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
               <Layers size={17} color={c.text} opacity={0.45} />
               <View>
-                <Text style={{ fontSize: 14, fontWeight: '600', color: c.text }}>Unlimited Devices</Text>
-                <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.4) }}>Allow login from any number of devices</Text>
+                <Text style={{ fontSize: 14, fontWeight: '600', color: c.text }}>{t('createUser.unlimitedDevices')}</Text>
+                <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.4) }}>{t('createUser.unlimitedDevicesHint')}</Text>
               </View>
             </View>
             <Switch
@@ -569,13 +572,15 @@ export function CreateUserModal({ visible, onClose, onCreated }: CreateUserModal
       {success && (
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: '#16A34A14', borderRadius: 12, padding: 12, marginBottom: 14 }}>
           <CheckCircle2 size={18} color="#16A34A" />
-          <Text style={{ fontSize: 13, fontWeight: '700', color: '#16A34A' }}>Account created successfully!</Text>
+          <Text style={{ fontSize: 13, fontWeight: '700', color: '#16A34A' }}>{t('createUser.created')}</Text>
         </View>
       )}
 
       {/* Submit */}
       <NeuButton
-        label={submitting ? 'Creating…' : `Create ${selectedOpt?.label ?? ''} Account`}
+        label={submitting
+          ? t('createUser.creating')
+          : t('createUser.createAccount', { role: selectedOpt ? t(selectedOpt.labelKey) : '' })}
         onPress={handleSubmit}
         disabled={submitting || success}
         style={{ marginTop: 4 }}
@@ -587,8 +592,8 @@ export function CreateUserModal({ visible, onClose, onCreated }: CreateUserModal
     <ResponsiveModal
       visible={visible}
       onClose={onClose}
-      title={step === 'role' ? 'Choose Account Type' : 'New Account'}
-      subtitle={step === 'role' ? 'Select the role for the new user' : undefined}
+      title={step === 'role' ? t('createUser.chooseType') : t('createUser.newAccount')}
+      subtitle={step === 'role' ? t('createUser.selectRoleHint') : undefined}
       icon={
         step === 'role'
           ? <UserPlus size={20} color={c.primary} />

@@ -390,15 +390,17 @@ console.log('\u2500\u2500 Part 8: gate presentation \u2500\u2500');
 {
   const pairs = [
     ['8a: the gate branches on the new state', /gateState === 'BLOCKED_MULTI_WINDOW'/],
-    ['8b: copy comes from the pure model, selected by the reported mode',
-      /windowModeBlockCopy\(windowMode\)/],
+    ['8b: copy is selected by the mode the platform reported (split-screen)',
+      /security\.window\.multi\.message/],
+    ['8b-2: ... and picture-in-picture has its own copy',
+      /security\.window\.pip\.message/],
     ['8c: recovery steps come from the pure model', /windowModeBlockSteps\(windowMode\)/],
-    ['8d: the steps section is labelled for this cause', /'HOW TO RETURN TO FULL SCREEN'/],
+    ['8d: the steps section is labelled for this cause', /t\('security\.gate\.stepsWindow'\)/],
     ['8e: the policy finding list is suppressed for this window-state cause',
       /overlayBlocked \|\| windowModeBlockedState \? \[\] : gateFindings\(types\)/],
     ['8f: no risk score is presented for a non-policy window state',
       /hasVerdict && !overlayBlocked && !windowModeBlockedState/],
-    ['8g: the screen states that access returns automatically', /access returns automatically as soon as it is full-screen again/],
+    ['8g: the screen states that access returns automatically', /t\('security\.gate\.footerWindow'\)/],
     ['8h: the hardware back button cannot dismiss it', /hardwareBackPress', \(\) => true/],
     ['8i: FLAG_SECURE is held while this block is up', /preventScreenCaptureAsync\('security-gate'\)/],
   ];
@@ -407,7 +409,7 @@ console.log('\u2500\u2500 Part 8: gate presentation \u2500\u2500');
   check('8j: no recheck/dismiss control is rendered for the multi-window state',
     !/windowModeBlockedState[\s\S]{0,400}Verify security and continue/.test(GATE_CODE));
   check('8k: the recheck control is still offered for the causes that remain actionable',
-    /isGateRecheckable\(gateState\)/.test(GATE) && /accessibilityLabel="Verify security and continue"/.test(GATE));
+    /isGateRecheckable\(gateState\)/.test(GATE) && /accessibilityLabel=\{t\('security\.gate\.verify'\)\}/.test(GATE));
   check('8l: no "Continue Anyway" / dismiss control exists anywhere in the gate',
     !/Continue Anyway/i.test(GATE_CODE));
   check('8m: the new state is documented in the file header',

@@ -20,6 +20,7 @@ import * as Device from 'expo-device';
 import Constants from 'expo-constants';
 import { useSecurity } from '@/lib/SecurityContext';
 import { NeuInputRow } from '@/components/NeuInputRow';
+import { t } from '@/lib/i18n';
 
 // Build a stable device fingerprint from hardware identifiers (metadata only — not for enforcement)
 function buildFingerprint(): string {
@@ -88,7 +89,7 @@ export default function SignIn() {
 
   const handleSignIn = async () => {
     const trimmed = identifier.trim();
-    if (!trimmed || !password) { setError('Email or phone number and password are required.'); return; }
+    if (!trimmed || !password) { setError(t('auth.requiredFields')); return; }
     setLoading(true);
     setError('');
     _diag('start', { apiBasePresent: !!process.env.EXPO_PUBLIC_PHP_API_URL });
@@ -122,7 +123,7 @@ export default function SignIn() {
       const email = await resolveEmailFromIdentifier(trimmed);
       _diag('lookup-after', { found: !!email });
       if (!email) {
-        setError('No account found for this email or phone number.');
+        setError(t('auth.noAccountFound'));
         setLoading(false);
         return;
       }
@@ -140,7 +141,7 @@ export default function SignIn() {
         // Non-fatal: allow login attempt if the check itself fails (network issue, etc.)
       } else if (checkData && checkData.allowed === false) {
         const reason: string = checkData.reason ??
-          'This account is already active on another authorized device.';
+          t('auth.deviceActiveElsewhere');
         setError(reason);
         setLoading(false);
         return;
@@ -152,7 +153,7 @@ export default function SignIn() {
       const deviceMeta = {
         installation_id:   installationId,
         device_fingerprint: buildFingerprint(),
-        device_name:       [Device.modelName, Device.osName].filter(Boolean).join(' ') || 'Unknown Device',
+        device_name:       [Device.modelName, Device.osName].filter(Boolean).join(' ') || t('auth.unknownDevice'),
         platform:          process.env.EXPO_OS ?? 'unknown',
         device_model:      Device.modelName    ?? undefined,
         os:                Device.osName       ?? undefined,
@@ -182,12 +183,12 @@ export default function SignIn() {
 
         if (isNetworkFailure && signInMs > 5000) {
           // Long delay + network error = connection timeout, not bad password.
-          setError(`Network error: request timed out after ${Math.round(signInMs/1000)}s. Check your connection and try again.`);
+          setError(t('auth.networkTimeout', { seconds: Math.round(signInMs / 1000) }));
           setLoading(false);
           return;
         }
         if (isNetworkFailure) {
-          setError('Network error: could not connect to the server. Please check your connection.');
+          setError(t('auth.networkError'));
           setLoading(false);
           return;
         }
@@ -199,12 +200,12 @@ export default function SignIn() {
             .eq('email', email.toLowerCase().trim())
             .maybeSingle();
           if (profileCheck?.status === 'blocked') {
-            setError('Your account has been blocked. Please contact the administrator.');
+            setError(t('auth.accountBlocked'));
           } else {
-            setError('No account found for this email or phone number.');
+            setError(t('auth.noAccountFound'));
           }
         } else if (/invalid.*login|invalid.*credential|invalid.*password|wrong.*password/i.test(msg)) {
-          setError('Incorrect email or password. Please try again.');
+          setError(t('auth.incorrectCredentials'));
         } else {
           setError(msg);
         }
@@ -292,7 +293,7 @@ export default function SignIn() {
         msgLower.includes('failed to fetch') ||
         msgLower.includes('network')
       ) {
-        setError('Network error: could not connect to the server. Please check your connection and try again.');
+        setError(t('common.networkError'));
       } else {
         setError(errMsg);
       }
@@ -337,7 +338,7 @@ export default function SignIn() {
             color: c.text,
             letterSpacing: -0.3,
             marginTop: layout.pad.sm,
-          }}>Welcome Back</Text>
+          }}>{t('auth.welcomeBack')}</Text>
           <Text style={{
             fontSize: layout.captionSize,
             ...mutedTextStyle(c, 0.5),
@@ -345,19 +346,19 @@ export default function SignIn() {
             textAlign: 'center',
             lineHeight: layout.captionSize * 1.5,
           }}>
-            {`Sign in to your ${branding.app_name} account`}
+            {t('auth.signInSubtitle', { app: branding.app_name })}
           </Text>
         </View>
 
         {/* Card — padding from adaptive screenPx instead of hardcoded 16/24 */}
         <NeuCard radius={layout.cardRadius} style={{ padding: layout.cardPx }}>
           {/* Email or Phone */}
-          <Text style={fieldLabelStyle}>Email or Phone</Text>
+          <Text style={fieldLabelStyle}>{t('auth.emailOrPhone')}</Text>
           <NeuInputRow
             c={c}
             value={identifier}
             onChangeText={setIdentifier}
-            placeholder="user@gmail.com or 01020xxxxxxx"
+            placeholder={t('auth.emailOrPhonePlaceholder')}
             keyboardType="default"
             autoCapitalize="none"
             autoCorrect={false}
@@ -370,18 +371,18 @@ export default function SignIn() {
                 paddingHorizontal: layout.pad.xs + 2,
                 paddingVertical: 2,
               }}>
-                <Text style={{ fontSize: layout.captionSize - 2, fontWeight: '800', color: c.primary }}>PHONE</Text>
+                <Text style={{ fontSize: layout.captionSize - 2, fontWeight: '800', color: c.primary }}>{t('auth.phone')}</Text>
               </View>
             ) : undefined}
           />
 
           {/* Password */}
-          <Text style={fieldLabelStyle}>Password</Text>
+          <Text style={fieldLabelStyle}>{t('auth.password')}</Text>
           <NeuInputRow
             c={c}
             value={password}
             onChangeText={setPassword}
-            placeholder="••••••••"
+            placeholder={t('auth.passwordPlaceholder')}
             secureTextEntry={!showPwd}
             autoCapitalize="none"
             autoCorrect={false}
@@ -390,7 +391,7 @@ export default function SignIn() {
             rightElement={
               <Pressable
                 onPress={() => setShowPwd(!showPwd)}
-                accessibilityLabel={showPwd ? 'Hide password' : 'Show password'}
+                accessibilityLabel={showPwd ? t('auth.hidePassword') : t('auth.showPassword')}
                 accessibilityRole="button"
                 style={{ padding: layout.pad.xs }}
               >
@@ -410,14 +411,14 @@ export default function SignIn() {
             }}>{error}</Text>
           ) : null}
 
-          <NeuButton label="Sign In" onPress={handleSignIn} loading={loading} fullWidth style={{ marginTop: layout.pad.xs }} />
+          <NeuButton label={t('auth.signIn')} onPress={handleSignIn} loading={loading} fullWidth style={{ marginTop: layout.pad.xs }} />
         </NeuCard>
 
         {/* Register link — gap replaces hardcoded marginTop: 16 */}
         <View style={{ flexDirection: 'row', justifyContent: 'center', marginTop: layout.pad.lg, gap: layout.pad.xs }}>
-          <Text style={{ ...mutedTextStyle(c, 0.5), fontSize: layout.captionSize }}>{"Don't have an account?"}</Text>
-          <Pressable onPress={() => router.push('/(auth)/sign-up')} accessibilityLabel="Register a new account" accessibilityRole="button">
-            <Text style={{ color: c.primary, fontWeight: '700', fontSize: layout.captionSize }}>Register</Text>
+          <Text style={{ ...mutedTextStyle(c, 0.5), fontSize: layout.captionSize }}>{t('auth.noAccount')}</Text>
+          <Pressable onPress={() => router.push('/(auth)/sign-up')} accessibilityLabel={t('auth.registerNew')} accessibilityRole="button">
+            <Text style={{ color: c.primary, fontWeight: '700', fontSize: layout.captionSize }}>{t('auth.register')}</Text>
           </Pressable>
         </View>
 

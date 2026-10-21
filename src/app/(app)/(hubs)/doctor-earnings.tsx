@@ -37,12 +37,19 @@ import type {
   DoctorEarningsCourse,
   DoctorPricingHistoryRow,
 } from '@/lib/api';
+import { useTranslation } from '@/lib/i18n';
 
-const fmt = (n: number) =>
-  `EGP ${n.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
+/** Money is LTR content: the currency code and Latin digits never mirror. */
+const fmt = (n: number, locale: string) =>
+  `EGP ${n.toLocaleString(locale === 'ar' ? 'ar-EG' : 'en-US', {
+    numberingSystem: 'latn',
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 0,
+  })}`;
 
-const fmtDate = (iso: string) =>
-  new Date(iso).toLocaleString('en-US', {
+const fmtDate = (iso: string, locale: string) =>
+  new Date(iso).toLocaleString(locale === 'ar' ? 'ar-EG' : 'en-US', {
+    numberingSystem: 'latn',
     day: '2-digit', month: 'short', year: 'numeric',
     hour: '2-digit', minute: '2-digit',
   });
@@ -58,6 +65,8 @@ export default function DoctorEarningsScreen() {
   const c       = isDark ? neuColors.dark : neuColors.light;
   const layout = useLayout();
   const { showToast } = useToast();
+  const { t, tCount, locale } = useTranslation();
+  const money = (n: number) => fmt(n, locale);
 
   const [loading,    setLoading]    = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -94,7 +103,7 @@ export default function DoctorEarningsScreen() {
       setDashboard(dash);
       setHistory(hist);
     } catch (e: any) {
-      showToast({ type: 'error', message: e?.message ?? 'Failed to load earnings' });
+      showToast({ type: 'error', message: e?.message ?? t('doctorEarnings.loadFailed') });
     }
     setLoading(false);
   }, [doctor_id]);
@@ -113,11 +122,11 @@ export default function DoctorEarningsScreen() {
     setSettingsSaving(true);
     try {
       await setDoctorEarningsSettings(doctor_id!, draftEnabled, draftMode);
-      showToast({ type: 'success', message: 'Earnings settings updated.' });
+      showToast({ type: 'success', message: t('doctorEarnings.settingsUpdated') });
       setSettingsModal(false);
       await load();
     } catch (e: any) {
-      showToast({ type: 'error', message: e?.message ?? 'Failed to update settings.' });
+      showToast({ type: 'error', message: e?.message ?? t('doctorEarnings.settingsUpdateFailed') });
     }
     setSettingsSaving(false);
   };
@@ -125,17 +134,17 @@ export default function DoctorEarningsScreen() {
   const saveCreditPrice = async () => {
     const val = parseFloat(creditInput);
     if (isNaN(val) || val < 0) {
-      showToast({ type: 'error', message: 'Enter a valid price ≥ 0.' });
+      showToast({ type: 'error', message: t('doctorEarnings.invalidPrice') });
       return;
     }
     setCreditSaving(true);
     try {
       await setDoctorCreditPrice(doctor_id!, val);
-      showToast({ type: 'success', message: `Credit price set to EGP ${val}.` });
+      showToast({ type: 'success', message: t('doctorEarnings.creditPriceSet', { price: val }) });
       setCreditModal(false);
       await load();
     } catch (e: any) {
-      showToast({ type: 'error', message: e?.message ?? 'Failed to update price.' });
+      showToast({ type: 'error', message: e?.message ?? t('doctorEarnings.priceUpdateFailed') });
     }
     setCreditSaving(false);
   };
@@ -144,17 +153,17 @@ export default function DoctorEarningsScreen() {
     if (!editCourse) return;
     const val = parseFloat(courseInput);
     if (isNaN(val) || val < 0) {
-      showToast({ type: 'error', message: 'Enter a valid price ≥ 0.' });
+      showToast({ type: 'error', message: t('doctorEarnings.invalidPrice') });
       return;
     }
     setCourseSaving(true);
     try {
       await setDoctorCoursePrice(editCourse.course_id, val);
-      showToast({ type: 'success', message: `${editCourse.course_title} price updated.` });
+      showToast({ type: 'success', message: t('doctorEarnings.coursePriceUpdated', { course: editCourse.course_title }) });
       setCourseModal(false);
       await load();
     } catch (e: any) {
-      showToast({ type: 'error', message: e?.message ?? 'Failed to update course price.' });
+      showToast({ type: 'error', message: e?.message ?? t('doctorEarnings.coursePriceFailed') });
     }
     setCourseSaving(false);
   };
@@ -171,10 +180,10 @@ export default function DoctorEarningsScreen() {
   const totalStudents = (dashboard?.per_course ?? []).reduce((s, x) => s + x.enrollment_count, 0);
 
   const fieldLabel = (name: string) => {
-    if (name === 'custom_pricing_enabled') return 'Custom Pricing';
-    if (name === 'earnings_mode')           return 'Earnings Mode';
-    if (name === 'credit_selling_price')    return 'Credit Price';
-    if (name.startsWith('course_price:'))   return 'Course Price';
+    if (name === 'custom_pricing_enabled') return t('doctorEarnings.customPricing');
+    if (name === 'earnings_mode')           return t('doctorEarnings.earningsMode');
+    if (name === 'credit_selling_price')    return t('doctorEarnings.creditPrice');
+    if (name.startsWith('course_price:'))   return t('doctorEarnings.coursePriceTitle');
     return name;
   };
 
@@ -194,8 +203,8 @@ export default function DoctorEarningsScreen() {
             </Pressable>
             <View style={{ flex: 1 }}>
               <PageHeader
-                title="Earnings"
-                subtitle={decodeURIComponent(doctor_name ?? 'Doctor')}
+                title={t('nav.earnings')}
+                subtitle={decodeURIComponent(doctor_name ?? t('doctorEarnings.doctorFallback'))}
                 accentColor="#16A34A"
               />
             </View>
@@ -209,11 +218,11 @@ export default function DoctorEarningsScreen() {
               <NeuCard style={{ padding: 18, gap: 14 }}>
                 <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
                   <Text style={{ fontSize: 13, fontWeight: '800', color: c.text, opacity: 0.7, letterSpacing: 0.5 }}>
-                    EARNINGS SETTINGS
+                    {t('doctorEarnings.settingsSection')}
                   </Text>
                   <Pressable onPress={openSettings}
                     style={{ backgroundColor: `${c.primary}15`, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 6 }}>
-                    <Text style={{ fontSize: 12, fontWeight: '700', color: c.primary }}>Edit</Text>
+                    <Text style={{ fontSize: 12, fontWeight: '700', color: c.primary }}>{t('common.edit')}</Text>
                   </Pressable>
                 </View>
 
@@ -223,11 +232,11 @@ export default function DoctorEarningsScreen() {
                     ? <ToggleRight size={28} color="#16A34A" />
                     : <ToggleLeft size={28} color={`${c.text}40`} />}
                   <View style={{ flex: 1 }}>
-                    <Text style={{ fontSize: 14, fontWeight: '700', color: c.text }}>Custom Pricing</Text>
+                    <Text style={{ fontSize: 14, fontWeight: '700', color: c.text }}>{t('doctorEarnings.customPricing')}</Text>
                     <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.5) }}>
                       {dashboard.custom_pricing_enabled
-                        ? 'Doctor manages pricing independently'
-                        : 'Using platform pricing (Super Admin controls)'}
+                        ? t('doctorEarnings.customPricingOnHint')
+                        : t('doctorEarnings.customPricingOffHint')}
                     </Text>
                   </View>
                   <View style={{
@@ -238,7 +247,7 @@ export default function DoctorEarningsScreen() {
                       fontSize: 11, fontWeight: '700',
                       color: dashboard.custom_pricing_enabled ? '#16A34A' : `${c.text}60`,
                     }}>
-                      {dashboard.custom_pricing_enabled ? 'ON' : 'OFF'}
+                      {dashboard.custom_pricing_enabled ? t('doctorEarnings.on') : t('doctorEarnings.off')}
                     </Text>
                   </View>
                 </View>
@@ -259,10 +268,10 @@ export default function DoctorEarningsScreen() {
                           : <View style={{ width: 14, height: 14, borderRadius: 7, borderWidth: 1.5, borderColor: `${c.text}30` }} />}
                         <View>
                           <Text style={{ fontSize: 12, fontWeight: '700', color: dashboard.earnings_mode === mode ? c.primary : `${c.text}70` }}>
-                            {mode === 'credit' ? 'Credit-Based' : 'Course-Based'}
+                            {mode === 'credit' ? t('doctorEarnings.creditBased') : t('doctorEarnings.courseBased')}
                           </Text>
                           <Text style={{ fontSize: 10, ...mutedTextStyle(c, 0.4) }}>
-                            {mode === 'credit' ? 'Credits × Price' : 'Per-course price'}
+                            {mode === 'credit' ? t('doctorEarnings.creditsTimesPrice') : t('doctorEarnings.perCoursePrice')}
                           </Text>
                         </View>
                       </View>
@@ -277,15 +286,15 @@ export default function DoctorEarningsScreen() {
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
                       <DollarSign size={18} color="#7C3AED" />
                       <View>
-                        <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.45) }}>Credit Price</Text>
+                        <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.45) }}>{t('doctorEarnings.creditPrice')}</Text>
                         <Text style={{ fontSize: 20, fontWeight: '900', color: '#7C3AED' }}>
-                          EGP {dashboard.credit_selling_price}
+                          {money(dashboard.credit_selling_price)}
                         </Text>
                       </View>
                     </View>
                     <Pressable onPress={() => { setCreditInput(String(dashboard.credit_selling_price)); setCreditModal(true); }}
                       style={{ backgroundColor: '#7C3AED18', borderRadius: 10, paddingHorizontal: 12, paddingVertical: 6 }}>
-                      <Text style={{ fontSize: 12, fontWeight: '700', color: '#7C3AED' }}>Change</Text>
+                      <Text style={{ fontSize: 12, fontWeight: '700', color: '#7C3AED' }}>{t('doctorEarnings.change')}</Text>
                     </Pressable>
                   </View>
                 )}
@@ -293,7 +302,7 @@ export default function DoctorEarningsScreen() {
 
               {/* ── Earnings KPIs ── */}
               <Text style={{ fontSize: 11, fontWeight: '800', ...mutedTextStyle(c, 0.4), letterSpacing: 0.5 }}>
-                EARNINGS OVERVIEW
+                {t('doctorEarnings.overview')}
               </Text>
 
               {/* Big total */}
@@ -302,14 +311,14 @@ export default function DoctorEarningsScreen() {
                   alignItems: 'center', justifyContent: 'center', marginBottom: 4 }}>
                   <TrendingUp size={26} color="#16A34A" />
                 </View>
-                <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.45) }}>Total Earnings</Text>
+                <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.45) }}>{t('doctorEarnings.totalEarnings')}</Text>
                 <Text style={{ fontSize: 36, fontWeight: '900', color: '#16A34A' }}>
-                  {fmt(dashboard.total_earnings)}
+                  {money(dashboard.total_earnings)}
                 </Text>
                 <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.3) }}>
                   {dashboard.custom_pricing_enabled
-                    ? (dashboard.earnings_mode === 'credit' ? 'Credit-based pricing' : 'Course-based pricing')
-                    : 'Platform pricing'}
+                    ? (dashboard.earnings_mode === 'credit' ? t('doctorEarnings.creditBasedPricing') : t('doctorEarnings.courseBasedPricing'))
+                    : t('doctorEarnings.platformPricing')}
                 </Text>
               </NeuCard>
 
@@ -317,16 +326,16 @@ export default function DoctorEarningsScreen() {
               <View style={{ flexDirection: 'row', gap: 10 }}>
                 <NeuCard style={{ flex: 1, padding: 16, alignItems: 'center', gap: 4 }}>
                   <Calendar size={18} color={c.primary} />
-                  <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.45) }}>This Month</Text>
+                  <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.45) }}>{t('doctorEarnings.thisMonth')}</Text>
                   <Text style={{ fontSize: 20, fontWeight: '800', color: c.primary }}>
-                    {fmt(dashboard.monthly_earnings)}
+                    {money(dashboard.monthly_earnings)}
                   </Text>
                 </NeuCard>
                 <NeuCard style={{ flex: 1, padding: 16, alignItems: 'center', gap: 4 }}>
                   <BarChart3 size={18} color="#D97706" />
-                  <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.45) }}>Today</Text>
+                  <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.45) }}>{t('doctorEarnings.today')}</Text>
                   <Text style={{ fontSize: 20, fontWeight: '800', color: '#D97706' }}>
-                    {fmt(dashboard.today_earnings)}
+                    {money(dashboard.today_earnings)}
                   </Text>
                 </NeuCard>
               </View>
@@ -334,9 +343,9 @@ export default function DoctorEarningsScreen() {
               {/* Other KPIs */}
               <View style={{ flexDirection: 'row', gap: 10, flexWrap: 'wrap' }}>
                 {[
-                  { label: 'Total Enrollments', value: dashboard.total_enrollments, color: '#2DA8FF', icon: Users },
-                  { label: 'Paid Courses',       value: dashboard.paid_courses_count, color: '#7C3AED', icon: BookOpen },
-                  { label: 'Avg Course Price',   value: `EGP ${Math.round(dashboard.avg_course_price)}`, color: '#16A34A', icon: Tag },
+                  { label: t('doctorEarnings.totalEnrollments'), value: dashboard.total_enrollments, color: '#2DA8FF', icon: Users },
+                  { label: t('doctorEarnings.paidCourses'),       value: dashboard.paid_courses_count, color: '#7C3AED', icon: BookOpen },
+                  { label: t('doctorEarnings.avgCoursePrice'),   value: money(Math.round(dashboard.avg_course_price)), color: '#16A34A', icon: Tag },
                 ].map(k => {
                   const Icon = k.icon;
                   return (
@@ -352,14 +361,14 @@ export default function DoctorEarningsScreen() {
               {/* ── Per-Course Breakdown ── */}
               <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 4 }}>
                 <Text style={{ fontSize: 11, fontWeight: '800', ...mutedTextStyle(c, 0.4), letterSpacing: 0.5 }}>
-                  PER COURSE EARNINGS ({dashboard.per_course.length})
+                  {t('doctorEarnings.perCourse', { count: dashboard.per_course.length })}
                 </Text>
               </View>
 
               {dashboard.per_course.length === 0 ? (
                 <NeuCard style={{ padding: 40, alignItems: 'center', gap: 10 }}>
                   <BookOpen size={36} color={c.text} opacity={0.15} />
-                  <Text style={{ ...mutedTextStyle(c, 0.4), fontSize: 14 }}>No courses yet</Text>
+                  <Text style={{ ...mutedTextStyle(c, 0.4), fontSize: 14 }}>{t('doctorEarnings.noCourses')}</Text>
                 </NeuCard>
               ) : (
                 dashboard.per_course.map((course: DoctorEarningsCourse, idx: number) => (
@@ -371,7 +380,7 @@ export default function DoctorEarningsScreen() {
                         </Text>
                         {dashboard.custom_pricing_enabled && dashboard.earnings_mode === 'course' && (
                           <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.45), marginTop: 2 }}>
-                            Price: EGP {course.current_price}
+                            {t('doctorEarnings.priceLabel', { price: course.current_price })}
                           </Text>
                         )}
                       </View>
@@ -383,16 +392,16 @@ export default function DoctorEarningsScreen() {
                             setCourseModal(true);
                           }}
                           style={{ backgroundColor: `${c.primary}12`, borderRadius: 9, paddingHorizontal: 10, paddingVertical: 5 }}>
-                          <Text style={{ fontSize: 11, fontWeight: '700', color: c.primary }}>Set Price</Text>
+                          <Text style={{ fontSize: 11, fontWeight: '700', color: c.primary }}>{t('doctorEarnings.setPrice')}</Text>
                         </Pressable>
                       )}
                     </View>
 
                     <View style={{ flexDirection: 'row', gap: 8 }}>
                       {[
-                        { label: 'Students', value: String(course.enrollment_count), color: '#2DA8FF' },
-                        { label: 'Revenue',  value: fmt(course.course_revenue),       color: '#16A34A' },
-                        { label: 'Avg Price',value: `EGP ${Math.round(course.avg_price_at_sale)}`, color: '#D97706' },
+                        { label: t('doctorEarnings.students'), value: String(course.enrollment_count), color: '#2DA8FF' },
+                        { label: t('doctorEarnings.revenue'),  value: money(course.course_revenue),       color: '#16A34A' },
+                        { label: t('doctorEarnings.avgPrice'), value: money(Math.round(course.avg_price_at_sale)), color: '#D97706' },
                       ].map(s => (
                         <View key={s.label} style={{
                           flex: 1, backgroundColor: `${s.color}10`,
@@ -409,13 +418,13 @@ export default function DoctorEarningsScreen() {
 
               {/* ── Grand Totals ── */}
               <Text style={{ fontSize: 11, fontWeight: '800', ...mutedTextStyle(c, 0.4), letterSpacing: 0.5 }}>
-                GRAND TOTAL
+                {t('doctorEarnings.grandTotal')}
               </Text>
               <NeuCard style={{ padding: 18, gap: 14 }}>
                 {[
-                  { label: 'Total Students', value: String(totalStudents), color: '#2DA8FF',  icon: Users     },
-                  { label: 'Total Courses',  value: String(dashboard.per_course.length), color: '#7C3AED', icon: BookOpen  },
-                  { label: 'Total Revenue',  value: fmt(totalRevenue),     color: '#16A34A', icon: TrendingUp },
+                  { label: t('doctorEarnings.totalStudents'), value: String(totalStudents), color: '#2DA8FF',  icon: Users     },
+                  { label: t('doctorEarnings.totalCourses'),  value: String(dashboard.per_course.length), color: '#7C3AED', icon: BookOpen  },
+                  { label: t('doctorEarnings.totalRevenue'),  value: money(totalRevenue),     color: '#16A34A', icon: TrendingUp },
                 ].map(row => {
                   const Icon = row.icon;
                   return (
@@ -440,8 +449,8 @@ export default function DoctorEarningsScreen() {
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
                   <History size={18} color={c.text} opacity={0.5} />
                   <View>
-                    <Text style={{ fontSize: 14, fontWeight: '600', color: c.text }}>Pricing Change History</Text>
-                    <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.4) }}>{history.length} records</Text>
+                    <Text style={{ fontSize: 14, fontWeight: '600', color: c.text }}>{t('doctorEarnings.pricingHistory')}</Text>
+                    <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.4) }}>{tCount('doctorEarnings.records', history.length)}</Text>
                   </View>
                 </View>
                 <ChevronRight size={16} color={`${c.text}40`} />
@@ -456,23 +465,23 @@ export default function DoctorEarningsScreen() {
       <ResponsiveModal
         visible={settingsModal}
         onClose={() => setSettingsModal(false)}
-        title="Earnings Settings"
-        subtitle={decodeURIComponent(doctor_name ?? 'Doctor')}
+        title={t('doctorEarnings.settingsTitle')}
+        subtitle={decodeURIComponent(doctor_name ?? t('doctorEarnings.doctorFallback'))}
         footer={
           <View style={{ gap: 10 }}>
-            <NeuButton label={settingsSaving ? 'Saving…' : 'Save Settings'} loading={settingsSaving} fullWidth onPress={saveSettings} />
-            <NeuButton label="Cancel" variant="secondary" fullWidth onPress={() => setSettingsModal(false)} />
+            <NeuButton label={settingsSaving ? t('common.saving') : t('doctorEarnings.saveSettings')} loading={settingsSaving} fullWidth onPress={saveSettings} />
+            <NeuButton label={t('common.cancel')} variant="secondary" fullWidth onPress={() => setSettingsModal(false)} />
           </View>
         }
       >
         <View style={{ gap: 16 }}>
           {/* Toggle */}
           <View style={{ gap: 8 }}>
-            <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.5) }}>Custom Pricing</Text>
+            <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.5) }}>{t('doctorEarnings.customPricing')}</Text>
             <View style={{ flexDirection: 'row', gap: 8 }}>
               {[
-                { val: false, label: 'OFF — Platform Price' },
-                { val: true,  label: 'ON — Custom Price'    },
+                { val: false, label: t('doctorEarnings.offPlatformPrice') },
+                { val: true,  label: t('doctorEarnings.onCustomPrice')    },
               ].map(opt => (
                 <Pressable key={String(opt.val)} onPress={() => setDraftEnabled(opt.val)}
                   style={{
@@ -497,10 +506,10 @@ export default function DoctorEarningsScreen() {
           {/* Mode (only if custom ON) */}
           {draftEnabled && (
             <View style={{ gap: 8 }}>
-              <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.5) }}>Earnings Mode</Text>
+              <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.5) }}>{t('doctorEarnings.earningsMode')}</Text>
               {[
-                { val: 'credit' as const, label: 'Credit-Based', desc: 'Credits Used × Credit Price' },
-                { val: 'course' as const, label: 'Course-Based', desc: 'Each course has its own price' },
+                { val: 'credit' as const, label: t('doctorEarnings.creditBased'), desc: t('doctorEarnings.creditModeDesc') },
+                { val: 'course' as const, label: t('doctorEarnings.courseBased'), desc: t('doctorEarnings.courseModeDesc') },
               ].map(opt => (
                 <Pressable key={opt.val} onPress={() => setDraftMode(opt.val)}
                   style={{
@@ -531,7 +540,7 @@ export default function DoctorEarningsScreen() {
           {!draftEnabled && (
             <View style={{ backgroundColor: `${c.text}08`, borderRadius: 12, padding: 14 }}>
               <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.5), lineHeight: 18 }}>
-                {"When OFF, earnings are calculated using the Super Admin's platform credit price. The doctor cannot change their own pricing."}
+                {t('doctorEarnings.offExplanation')}
               </Text>
             </View>
           )}
@@ -542,35 +551,36 @@ export default function DoctorEarningsScreen() {
       <ResponsiveModal
         visible={creditModal}
         onClose={() => setCreditModal(false)}
-        title="Credit Selling Price"
-        subtitle={decodeURIComponent(doctor_name ?? 'Doctor')}
+        title={t('doctorEarnings.creditPriceTitle')}
+        subtitle={decodeURIComponent(doctor_name ?? t('doctorEarnings.doctorFallback'))}
         footer={
           <View style={{ gap: 10 }}>
-            <NeuButton label={creditSaving ? 'Saving…' : 'Save Price'} loading={creditSaving} fullWidth onPress={saveCreditPrice} />
-            <NeuButton label="Cancel" variant="secondary" fullWidth onPress={() => setCreditModal(false)} />
+            <NeuButton label={creditSaving ? t('common.saving') : t('doctorEarnings.savePrice')} loading={creditSaving} fullWidth onPress={saveCreditPrice} />
+            <NeuButton label={t('common.cancel')} variant="secondary" fullWidth onPress={() => setCreditModal(false)} />
           </View>
         }
       >
         <View style={{ gap: 14 }}>
           <View style={{ backgroundColor: '#7C3AED0D', borderRadius: 14, padding: 14 }}>
-            <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.45) }}>Current</Text>
+            <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.45) }}>{t('doctorEarnings.current')}</Text>
             <Text style={{ fontSize: 24, fontWeight: '900', color: '#7C3AED' }}>
-              EGP {dashboard?.credit_selling_price ?? 0}
+              {money(dashboard?.credit_selling_price ?? 0)}
             </Text>
           </View>
           <View>
-            <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.5), marginBottom: 8 }}>New Price (EGP)</Text>
+            <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.5), marginBottom: 8 }}>{t('doctorEarnings.newPriceEgp')}</Text>
             <TextInput
               value={creditInput}
               onChangeText={setCreditInput}
-              placeholder="e.g. 120"
+              placeholder={t('doctorEarnings.placeholder120')}
               placeholderTextColor={`${c.text}50`}
               keyboardType="decimal-pad"
               style={[inp, { minWidth: 0 }]}
             />
             <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.3), marginTop: 8, lineHeight: 16 }}>
-              Earnings = Credits Used × this price.{'\n'}
-              Previous earnings are NOT recalculated.
+              {t('doctorEarnings.creditHint')}
+              {'\n'}
+              {t('doctorEarnings.creditHintKeep')}
             </Text>
           </View>
         </View>
@@ -580,35 +590,36 @@ export default function DoctorEarningsScreen() {
       <ResponsiveModal
         visible={courseModal}
         onClose={() => setCourseModal(false)}
-        title="Course Price"
+        title={t('doctorEarnings.coursePriceTitle')}
         subtitle={editCourse?.course_title ?? ''}
         footer={
           <View style={{ gap: 10 }}>
-            <NeuButton label={courseSaving ? 'Saving…' : 'Save Price'} loading={courseSaving} fullWidth onPress={saveCoursePrice} />
-            <NeuButton label="Cancel" variant="secondary" fullWidth onPress={() => setCourseModal(false)} />
+            <NeuButton label={courseSaving ? t('common.saving') : t('doctorEarnings.savePrice')} loading={courseSaving} fullWidth onPress={saveCoursePrice} />
+            <NeuButton label={t('common.cancel')} variant="secondary" fullWidth onPress={() => setCourseModal(false)} />
           </View>
         }
       >
         <View style={{ gap: 14 }}>
           <View style={{ backgroundColor: `${c.primary}0D`, borderRadius: 14, padding: 14 }}>
-            <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.45) }}>Current Price</Text>
+            <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.45) }}>{t('doctorEarnings.currentPrice')}</Text>
             <Text style={{ fontSize: 24, fontWeight: '900', color: c.primary }}>
-              EGP {editCourse?.current_price ?? 0}
+              {money(editCourse?.current_price ?? 0)}
             </Text>
           </View>
           <View>
-            <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.5), marginBottom: 8 }}>New Price (EGP)</Text>
+            <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.5), marginBottom: 8 }}>{t('doctorEarnings.newPriceEgp')}</Text>
             <TextInput
               value={courseInput}
               onChangeText={setCourseInput}
-              placeholder="e.g. 300"
+              placeholder={t('doctorEarnings.placeholder300')}
               placeholderTextColor={`${c.text}50`}
               keyboardType="decimal-pad"
               style={[inp, { minWidth: 0 }]}
             />
             <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.3), marginTop: 8, lineHeight: 16 }}>
-              Previous enrollments keep their original price.{'\n'}
-              Only future enrollments use the new price.
+              {t('doctorEarnings.courseHint')}
+              {'\n'}
+              {t('doctorEarnings.courseHintKeep')}
             </Text>
           </View>
         </View>
@@ -618,14 +629,14 @@ export default function DoctorEarningsScreen() {
       <ResponsiveModal
         visible={historyModal}
         onClose={() => setHistoryModal(false)}
-        title="Pricing Change History"
-        subtitle={decodeURIComponent(doctor_name ?? 'Doctor')}
+        title={t('doctorEarnings.pricingHistory')}
+        subtitle={decodeURIComponent(doctor_name ?? t('doctorEarnings.doctorFallback'))}
       >
         <ScrollView automaticallyAdjustKeyboardInsets={process.env.EXPO_OS === 'ios'} style={{ maxHeight: 480 }} showsVerticalScrollIndicator={false}>
           {history.length === 0 ? (
             <View style={{ alignItems: 'center', paddingVertical: 40 }}>
               <History size={36} color={c.text} opacity={0.15} />
-              <Text style={{ ...mutedTextStyle(c, 0.4), marginTop: 12 }}>No changes recorded yet</Text>
+              <Text style={{ ...mutedTextStyle(c, 0.4), marginTop: 12 }}>{t('doctorEarnings.noChanges')}</Text>
             </View>
           ) : (
             <View style={{ gap: 8 }}>
@@ -636,26 +647,26 @@ export default function DoctorEarningsScreen() {
                       {fieldLabel(row.field_name)}
                     </Text>
                     <Text style={{ fontSize: 10, ...mutedTextStyle(c, 0.35) }}>
-                      {fmtDate(row.created_at)}
+                      {fmtDate(row.created_at, locale)}
                     </Text>
                   </View>
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
                     <View style={{ flex: 1, backgroundColor: '#DC262610', borderRadius: 8, padding: 8 }}>
-                      <Text style={{ fontSize: 10, ...mutedTextStyle(c, 0.4) }}>Old</Text>
+                      <Text style={{ fontSize: 10, ...mutedTextStyle(c, 0.4) }}>{t('doctorEarnings.old')}</Text>
                       <Text style={{ fontSize: 13, fontWeight: '700', color: '#DC2626' }}>
                         {row.old_value ?? '—'}
                       </Text>
                     </View>
                     <ChevronRight size={14} color={`${c.text}30`} />
                     <View style={{ flex: 1, backgroundColor: '#16A34A10', borderRadius: 8, padding: 8 }}>
-                      <Text style={{ fontSize: 10, ...mutedTextStyle(c, 0.4) }}>New</Text>
+                      <Text style={{ fontSize: 10, ...mutedTextStyle(c, 0.4) }}>{t('doctorEarnings.new')}</Text>
                       <Text style={{ fontSize: 13, fontWeight: '700', color: '#16A34A' }}>
                         {row.new_value ?? '—'}
                       </Text>
                     </View>
                   </View>
                   <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.35) }}>
-                    Changed by: {row.changer_name ?? 'Unknown'}
+                    {t('doctorEarnings.changedBy', { name: row.changer_name ?? t('doctorEarnings.unknown') })}
                   </Text>
                 </NeuCard>
               ))}

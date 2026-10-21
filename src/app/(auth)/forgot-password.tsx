@@ -19,6 +19,7 @@ import { NeuCard } from '@/components/NeuCard';
 import { NeuButton } from '@/components/NeuButton';
 import { BrandLogo } from '@/components/BrandLogo';
 import { neuColors, mutedTextStyle } from '@/lib/neu';
+import { t } from '@/lib/i18n';
 
 export default function ForgotPassword() {
   const scheme = useColorScheme();
@@ -33,7 +34,7 @@ export default function ForgotPassword() {
   const [sent, setSent] = useState(false);
 
   const handleReset = async () => {
-    if (!email.trim()) { setError('Please enter your email.'); return; }
+    if (!email.trim()) { setError(t('forgot.enterEmail')); return; }
     setLoading(true);
     setError('');
     const { error: resetError } = await backendClient.auth.resetPasswordForEmail(email.trim().toLowerCase());
@@ -65,24 +66,24 @@ export default function ForgotPassword() {
         <View style={{ alignItems: 'center', marginBottom: 28 }}>
           <BrandLogo variant="auto" size={52} />
         </View>
-        <Text style={{ fontSize: 28, fontWeight: '800', color: c.text, marginBottom: 8 }}>Reset Password</Text>
+        <Text style={{ fontSize: 28, fontWeight: '800', color: c.text, marginBottom: 8 }}>{t('reset.title')}</Text>
         <Text style={{ fontSize: 14, ...mutedTextStyle(c, 0.55), marginBottom: 32 }}>
-          {"Enter your email and we'll send you a reset link."}
+          {t('forgot.subtitleFull')}
         </Text>
 
         {sent ? (
           <NeuCard radius={20} style={{ padding: 24, alignItems: 'center' }}>
             <Mail size={48} color={c.primary} style={{ marginBottom: 16 }} />
-            <Text style={{ fontSize: 18, fontWeight: '700', color: c.text, textAlign: 'center', marginBottom: 8 }}>Check Your Email</Text>
+            <Text style={{ fontSize: 18, fontWeight: '700', color: c.text, textAlign: 'center', marginBottom: 8 }}>{t('forgot.checkEmail')}</Text>
             <Text style={{ fontSize: 14, ...mutedTextStyle(c, 0.6), textAlign: 'center', marginBottom: 24 }}>
-              {"We've sent a password reset link to "}{email}
+              {t('forgot.sentTo', { email })}
             </Text>
-            <NeuButton label="Back to Sign In" onPress={() => router.replace('/(auth)/sign-in')} fullWidth />
+            <NeuButton label={t('forgot.backToSignIn')} onPress={() => router.replace('/(auth)/sign-in')} fullWidth />
           </NeuCard>
         ) : (
           <View>
             <NeuCard radius={22} style={{ padding: 22, marginBottom: 16 }}>
-              <Text style={{ fontSize: 12, fontWeight: '600', ...mutedTextStyle(c, 0.55), marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.8 }}>Email Address</Text>
+              <Text style={{ fontSize: 12, fontWeight: '600', ...mutedTextStyle(c, 0.55), marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.8 }}>{t('forgot.emailLabel')}</Text>
               <View style={inputStyle}>
                 <Mail size={18} color={c.text} opacity={0.4} />
                 <TextInput
@@ -93,7 +94,7 @@ export default function ForgotPassword() {
                 />
               </View>
               {error ? <Text style={{ color: '#DC2626', fontSize: 13, marginBottom: 12 }}>{error}</Text> : null}
-              <NeuButton label="Send Reset Link" onPress={handleReset} loading={loading} fullWidth />
+              <NeuButton label={t('forgot.sendLink')} onPress={handleReset} loading={loading} fullWidth />
             </NeuCard>
 
             {/*
@@ -104,7 +105,7 @@ export default function ForgotPassword() {
             */}
 
             <NeuButton
-              label="Back to Sign In"
+              label={t('forgot.backToSignIn')}
               onPress={() => router.replace('/(auth)/sign-in')}
               variant="secondary"
               fullWidth

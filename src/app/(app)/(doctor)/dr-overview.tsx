@@ -16,6 +16,8 @@ import { useStaleWhileRevalidateFocus } from '@/lib/useStaleWhileRevalidateFocus
 import type { RelativePathString } from 'expo-router';
 import { useNotificationPermission } from '@/hooks/useNotificationPermission';
 import { PermissionRationaleModal } from '@/components/PermissionRationaleModal';
+import { useTranslation } from '@/lib/i18n';
+import { courseStatusLabel } from '@/lib/i18n/labels';
 
 export default function DoctorDashboard() {
   const scheme = useColorScheme();
@@ -25,6 +27,7 @@ export default function DoctorDashboard() {
   const insets = layout.insets;
   const { profile } = useProfileStore();
   const router = useRouter();
+  const { t, locale } = useTranslation();
 
   // ── Single source of truth for credits ──────────────────────────────────────
   const { balance: credits, loading: creditsLoading, refresh: refreshCredits } = useCreditBalance();
@@ -103,12 +106,12 @@ export default function DoctorDashboard() {
     >
       {/* DashboardHeader sits OUTSIDE the inner padding view so it can own its own horizontal padding */}
       <DashboardHeader
-        roleLabel="Doctor Panel"
+        roleLabel={t('drOverview.roleLabel')}
         greeting={firstName ? `${firstName} 👋` : '👋'}
         rightActions={
           <Pressable
             onPress={() => router.push('/(app)/notifications' as RelativePathString)}
-            accessibilityLabel="Notifications"
+            accessibilityLabel={t('nav.notifications')}
             accessibilityRole="button"
             style={[{ width: layout.touchTarget, height: layout.touchTarget, borderRadius: layout.cardRadius, alignItems: 'center', justifyContent: 'center' }, neuMicroStyle(isDark)]}
           >
@@ -120,30 +123,30 @@ export default function DoctorDashboard() {
 
         {/* 7-tile KPI Grid */}
         <View style={{ flexDirection: 'row', flexWrap: 'wrap', marginBottom: layout.sectionGap }}>
-          <StatCard label="Total Students"      value={totalStudents}       icon={<Users size={layout.captionSize + 2} color="#fff" />}        color="#7C3AED" />
-          <StatCard label="Active"              value={activeStudents}      icon={<GraduationCap size={layout.captionSize + 2} color="#fff" />} color="#16A34A" />
-          <StatCard label="Suspended"           value={suspendedStudents}   icon={<Ban size={layout.captionSize + 2} color="#fff" />}          color="#D97706" />
-          <StatCard label="My Courses"          value={totalCourses}        icon={<BookOpen size={layout.captionSize + 2} color="#fff" />}     color={c.primary} />
-          <StatCard label="Credits"             value={creditsRemaining}    icon={<CreditCard size={layout.captionSize + 2} color="#fff" />}   color="#2DA8FF" />
-          <StatCard label="Today's Activations" value={todayActivations}    icon={<Zap size={layout.captionSize + 2} color="#fff" />}         color="#F59E0B" />
-          <StatCard label="Published"           value={courses.filter(cr => cr.status === 'published').length} icon={<TrendingUp size={layout.captionSize + 2} color="#fff" />} color="#6366F1" />
+          <StatCard label={t('drOverview.totalStudents')}      value={totalStudents}       icon={<Users size={layout.captionSize + 2} color="#fff" />}        color="#7C3AED" />
+          <StatCard label={t('status.active')}                 value={activeStudents}      icon={<GraduationCap size={layout.captionSize + 2} color="#fff" />} color="#16A34A" />
+          <StatCard label={t('status.suspended')}              value={suspendedStudents}   icon={<Ban size={layout.captionSize + 2} color="#fff" />}          color="#D97706" />
+          <StatCard label={t('nav.myCourses')}                 value={totalCourses}        icon={<BookOpen size={layout.captionSize + 2} color="#fff" />}     color={c.primary} />
+          <StatCard label={t('nav.credits')}                   value={creditsRemaining}    icon={<CreditCard size={layout.captionSize + 2} color="#fff" />}   color="#2DA8FF" />
+          <StatCard label={t('drOverview.todayActivations')}   value={todayActivations}    icon={<Zap size={layout.captionSize + 2} color="#fff" />}         color="#F59E0B" />
+          <StatCard label={t('drOverview.published')}          value={courses.filter(cr => cr.status === 'published').length} icon={<TrendingUp size={layout.captionSize + 2} color="#fff" />} color="#6366F1" />
         </View>
 
         {/* Quick Actions — shared tile component (fixed-square icon box; the
             previous flexGrow wrap-row variant stretched into tall rectangles
             on Android). */}
-        <Text style={{ fontSize: layout.bodySize + 1, fontWeight: '800', color: c.text, marginBottom: layout.pad.md }}>Quick Actions</Text>
+        <Text style={{ fontSize: layout.bodySize + 1, fontWeight: '800', color: c.text, marginBottom: layout.pad.md }}>{t('drOverview.quickActions')}</Text>
         <View style={{ flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', marginBottom: layout.sectionGap }}>
           {[
-            { label: 'My Courses', icon: BookOpen,  color: c.primary, route: '/(app)/(doctor)/courses' },
-            { label: 'Students',   icon: Users,     color: '#7C3AED', route: '/(app)/(doctor)/students' },
-            { label: 'Archived',   icon: Archive,   color: '#D97706', route: '/(app)/archived-courses' },
-            { label: 'Alerts',     icon: Bell,      color: '#2DA8FF', route: '/(app)/notifications' },
-          ].map(({ label, icon, color, route }) => (
+            { labelKey: 'nav.myCourses', icon: BookOpen,  color: c.primary, route: '/(app)/(doctor)/courses' },
+            { labelKey: 'nav.students',  icon: Users,     color: '#7C3AED', route: '/(app)/(doctor)/students' },
+            { labelKey: 'nav.archived',  icon: Archive,   color: '#D97706', route: '/(app)/archived-courses' },
+            { labelKey: 'nav.alerts',    icon: Bell,      color: '#2DA8FF', route: '/(app)/notifications' },
+          ].map(({ labelKey, icon, color, route }) => (
             <QuickActionBtn
-              key={label}
+              key={labelKey}
               icon={icon}
-              label={label}
+              label={t(labelKey)}
               color={color}
               path={route}
               c={c}
@@ -156,9 +159,9 @@ export default function DoctorDashboard() {
         {recentEnrollments.length > 0 && (
           <>
             <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: layout.pad.md }}>
-              <Text style={{ fontSize: layout.bodySize + 1, fontWeight: '800', color: c.text }}>Recent Enrollments</Text>
+              <Text style={{ fontSize: layout.bodySize + 1, fontWeight: '800', color: c.text }}>{t('drOverview.recentEnrollments')}</Text>
               <Pressable onPress={() => router.push('/(app)/(doctor)/students' as RelativePathString)}>
-                <Text style={{ fontSize: layout.captionSize + 1, fontWeight: '700', color: c.primary }}>See All</Text>
+                <Text style={{ fontSize: layout.captionSize + 1, fontWeight: '700', color: c.primary }}>{t('common.seeAll')}</Text>
               </Pressable>
             </View>
             {recentEnrollments.map(e => (
@@ -171,7 +174,7 @@ export default function DoctorDashboard() {
                     <Text style={{ fontSize: layout.bodySize, fontWeight: '600', color: c.text }} numberOfLines={1}>{e.student?.full_name}</Text>
                     <Text style={{ fontSize: layout.captionSize, ...mutedTextStyle(c, 0.5) }} numberOfLines={1}>{e.course?.title}</Text>
                   </View>
-                  <Text style={{ fontSize: layout.captionSize - 1, ...mutedTextStyle(c, 0.35) }}>{new Date(e.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</Text>
+                  <Text style={{ fontSize: layout.captionSize - 1, ...mutedTextStyle(c, 0.35) }}>{new Date(e.created_at).toLocaleDateString(locale === 'ar' ? 'ar-EG' : 'en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</Text>
                 </View>
               </NeuCard>
             ))}
@@ -180,9 +183,9 @@ export default function DoctorDashboard() {
 
         {/* Recent Courses */}
         <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: layout.pad.md, marginTop: layout.pad.sm }}>
-          <Text style={{ fontSize: layout.bodySize + 1, fontWeight: '800', color: c.text }}>Recent Courses</Text>
+          <Text style={{ fontSize: layout.bodySize + 1, fontWeight: '800', color: c.text }}>{t('drOverview.recentCourses')}</Text>
           <Pressable onPress={() => router.push('/(app)/(doctor)/courses' as RelativePathString)}>
-            <Text style={{ fontSize: layout.captionSize + 1, fontWeight: '700', color: c.primary }}>See All</Text>
+            <Text style={{ fontSize: layout.captionSize + 1, fontWeight: '700', color: c.primary }}>{t('common.seeAll')}</Text>
           </Pressable>
         </View>
         {courses.slice(0, 3).map((course) => (
@@ -200,17 +203,17 @@ export default function DoctorDashboard() {
             />
             <View style={{ flex: 1, marginLeft: layout.pad.md }}>
               <Text style={{ fontSize: layout.bodySize, fontWeight: '700', color: c.text }} numberOfLines={1}>{course.title}</Text>
-              <Text style={{ fontSize: layout.captionSize, ...mutedTextStyle(c, 0.45), marginTop: 2 }}>{course.category?.name ?? 'General'}</Text>
+              <Text style={{ fontSize: layout.captionSize, ...mutedTextStyle(c, 0.45), marginTop: 2 }}>{course.category?.name ?? t('drOverview.generalCategory')}</Text>
             </View>
             <View style={{ backgroundColor: statusColor(course.status) + '20', borderRadius: layout.cardRadius / 2, paddingHorizontal: layout.pad.sm, paddingVertical: layout.pad.xs }}>
-              <Text style={{ fontSize: layout.captionSize - 1, fontWeight: '700', color: statusColor(course.status), textTransform: 'capitalize' }}>{course.status}</Text>
+              <Text style={{ fontSize: layout.captionSize - 1, fontWeight: '700', color: statusColor(course.status) }}>{courseStatusLabel(course.status, t)}</Text>
             </View>
           </NeuCard>
         ))}
         {courses.length === 0 && (
           <NeuCard style={{ alignItems: 'center', padding: layout.cardPx * 2 }}>
             <Plus size={Math.round(layout.touchTarget * 0.72)} color={c.primary} opacity={0.3} style={{ marginBottom: layout.pad.sm }} />
-            <Text style={{ ...mutedTextStyle(c, 0.45), fontSize: layout.bodySize }}>No courses yet. Create your first course!</Text>
+            <Text style={{ ...mutedTextStyle(c, 0.45), fontSize: layout.bodySize }}>{t('drOverview.noCourses')}</Text>
           </NeuCard>
         )}
       </View>

@@ -72,12 +72,27 @@ function buildModel() {
 const M = buildModel();
 const GATE = read('src/app/(app)/security-gate.tsx');
 const SECURITY = read('src/lib/security.ts');
+const RESOURCES = read('src/lib/i18n/resources.ts');
 
-/** Extract one GATE_EVENT_COPY entry body by key. */
+/**
+ * The gate's English copy table was replaced by the shared translation
+ * resources (`security.gate.event.<key>.{title,instruction}`); the gate keeps
+ * a KEY SET (which events have copy) and resolves the text at render time.
+ * These helpers pin the copy in the dictionaries instead of the screen.
+ */
+function dictValue(key, localeStart) {
+  const re = new RegExp("^  '" + key.replace(/\\./g, '\\.') + "': '(.*)',$", 'm');
+  const scope = localeStart ? RESOURCES.slice(localeStart) : RESOURCES;
+  const m = scope.match(re);
+  return m ? m[1] : null;
+}
+const AR_START = RESOURCES.indexOf('export const ar');
+
+/** English title + instruction for one gate event key, or null when absent. */
 function copyEntry(key) {
-  const at = GATE.indexOf(`  ${key}:`);
-  if (at < 0) return null;
-  return GATE.slice(at, GATE.indexOf('\n', at));
+  const title = dictValue(`security.gate.event.${key}.title`);
+  const instruction = dictValue(`security.gate.event.${key}.instruction`);
+  return title === null || instruction === null ? null : `${title} ${instruction}`;
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -87,8 +102,14 @@ console.log('\n1. resolveFindingCopyKey()');
 {
   const K = M.resolveFindingCopyKey;
 
-  check('1a: a mock-location finding is NOT described as a build problem',
-    K('debug_detected', 'Mock location enabled') === 'mock_location_detected');
+  // Mock location is no longer a producer of `debug_detected`: the whole
+  // detector was removed (it could not be established reliably on modern
+  // Android — see docs/MOCK_LOCATION_REMOVAL.md). A legacy detectionMethod
+  // string therefore must NOT resurrect a dedicated copy key; it falls back to
+  // the generic event copy, exactly like any unknown method.
+  check('1a: a removed mock-location finding cannot resurrect its own copy key',
+    K('debug_detected', 'Mock location enabled') === 'debug_detected' &&
+    K('debug_detected', 'Mock location enabled') !== 'mock_location_detected');
 
   check('1b: an emulator finding gets its own key',
     K('debug_detected', 'Emulator / debug environment detected') === 'virtual_device_detected');
@@ -113,21 +134,17 @@ console.log('\n1. resolveFindingCopyKey()');
 // ════════════════════════════════════════════════════════════════════════════
 console.log('\n2. gate copy table');
 {
-  const mock = copyEntry('mock_location_detected');
   const virt = copyEntry('virtual_device_detected');
   const build = copyEntry('debug_detected');
 
-  check('2a: mock_location_detected has its own entry', mock !== null);
+  check('2a: the removed mock-location copy entry is gone (no dead UI path)',
+    copyEntry('mock_location_detected') === null);
   check('2b: virtual_device_detected has its own entry', virt !== null);
 
-  check('2c: mock-location copy does not claim an insecure build and does not tell the user to reinstall',
-    mock !== null &&
-    !/Insecure Build/i.test(mock) &&
-    !/official production release/i.test(mock) &&
-    /Mock Location/i.test(mock));
-
-  check('2d: mock-location copy names the actionable fix (Select mock location app → None)',
-    mock !== null && /Select mock location app/.test(mock) && /None/.test(mock));
+  check('2c: the emulator copy does not claim an insecure build and does not tell the user to reinstall',
+    virt !== null &&
+    !/Insecure Build/i.test(virt) &&
+    !/official production release/i.test(virt));
 
   check('2e: virtual-device copy does not claim an insecure build either',
     virt !== null &&
@@ -148,6 +165,35 @@ console.log('\n2. gate copy table');
 
   check('2i: the rendered finding list is built from those keys',
     /const types = liveBlocking \? liveCopyKeys : stickyTypes;/.test(GATE));
+
+  // The English copy table in the screen was replaced by the dictionaries:
+  // the gate keeps only the SET of events that have copy, and resolves the
+  // text with t() at render time (so the language follows the device).
+  check('2j: the gate no longer keeps its own English copy table',
+    /GATE_EVENT_KEYS: ReadonlySet<string>/.test(GATE) &&
+    /t\(`security\.gate\.event\.\$\{type\}\.title`\)/.test(GATE) &&
+    /t\(`security\.gate\.event\.\$\{type\}\.instruction`\)/.test(GATE) &&
+    !/GATE_EVENT_COPY/.test(GATE));
+
+  // The unknown-event fallback is the ONLY row for an event without copy.
+  check('2k: an unknown event still gets the generic row instead of a raw key',
+    /t\('security\.gate\.unknownTitle'\)/.test(GATE) &&
+    /t\('security\.gate\.unknownInstruction'\)/.test(GATE));
+
+  // Both languages must carry every gate event's title and instruction.
+  const eventKeys = [...GATE.matchAll(/^\s{2}'([a-z_]+)',/gm)]
+    .map((m) => m[1]);
+  const missingAr = eventKeys.filter((k) =>
+    dictValue(`security.gate.event.${k}.title`, AR_START) === null ||
+    dictValue(`security.gate.event.${k}.instruction`, AR_START) === null);
+  const missingEn = eventKeys.filter((k) =>
+    dictValue(`security.gate.event.${k}.title`) === null ||
+    dictValue(`security.gate.event.${k}.instruction`) === null);
+  check('2l: every gated event has copy in BOTH dictionaries',
+    eventKeys.length >= 15 && missingAr.length === 0 && missingEn.length === 0);
+  check('2m: the Arabic gate copy is really Arabic (no English placeholder)',
+    eventKeys.every((k) => /[\u0600-\u06FF]/.test(
+      dictValue(`security.gate.event.${k}.title`, AR_START) ?? '')));
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -155,8 +201,8 @@ console.log('\n2. gate copy table');
 // ════════════════════════════════════════════════════════════════════════════
 console.log('\n3. enforcement unchanged');
 {
-  check('3a: the event type is still debug_detected (policy/audit vocabulary intact)',
-    /type: 'debug_detected',\s*\n\s*detectionMethod: 'Mock location enabled'/.test(SECURITY));
+  check('3a: the event type is still debug_detected for the remaining producer (policy/audit vocabulary intact)',
+    /type: 'debug_detected',\s*\n\s*detectionMethod: 'Emulator \/ debug environment detected'/.test(SECURITY));
 
   check('3b: debug_detected still weighs 20 (risk score semantics unchanged)',
     /debug_detected:\s*20,/.test(SECURITY));
@@ -168,10 +214,10 @@ console.log('\n3. enforcement unchanged');
     /debug:\s*\['debug_detected', 'debugger_attached'\]/.test(SECURITY));
 
   const risk = M.computeRiskScorePure(
-    [{ type: 'debug_detected', detectionMethod: 'Mock location enabled', detected: true }],
+    [{ type: 'debug_detected', detectionMethod: 'Emulator / debug environment detected', detected: true }],
     { debug_detected: 20 },
   );
-  check('3e: the same single finding still scores 20 (screenshot value reproduced)',
+  check('3e: the same single emulator finding still scores 20 (enforcement unchanged)',
     risk === 20);
 
   check('3f: the gate still blocks on the same centralized state (no new escape hatch)',
@@ -179,12 +225,21 @@ console.log('\n3. enforcement unchanged');
     M.isGateBlocked('ALLOWED') === false);
 
   const PLUGIN = read('plugins/withSecurityModule.js');
-  check('3g: the authoritative AppOps plane still detects a real mock provider (protection intact)',
-    /OPSTR_MOCK_LOCATION/.test(PLUGIN) && /AppOpsManager\.MODE_ALLOWED/.test(PLUGIN));
+  check('3g: the mock-location detector is GONE from the native template (not merely disabled)',
+    !/fun isMockLocationEnabled\(/.test(PLUGIN) &&
+    !/fun detectMockLocation\(/.test(PLUGIN) &&
+    !/putBoolean\("mockLocationDetected"/.test(PLUGIN));
 
-  check('3h: the JS comment describing the legacy tier matches the shipped guard',
-    /pre-API 23 fallback/.test(SECURITY) &&
-    /Build\.VERSION\.SDK_INT < Build\.VERSION_CODES\.M/.test(PLUGIN));
+  check('3h: the removal is documented in the template itself (why it could not be trusted)',
+    /MOCK-LOCATION DETECTION - REMOVED|MOCK-LOCATION DETECTION — REMOVED/.test(PLUGIN) &&
+    /UPDATE_APP_OPS_STATS/.test(PLUGIN));
+
+  check('3i: removing it left the surviving device detectors untouched',
+    /fun isDeveloperOptionsEnabled\(/.test(PLUGIN) &&
+    /fun isAdbEnabled\(/.test(PLUGIN) &&
+    /fun isDebuggerAttached\(/.test(PLUGIN) &&
+    /fun detectEmulator\(/.test(PLUGIN) &&
+    /fun detectVpn\(/.test(PLUGIN));
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);

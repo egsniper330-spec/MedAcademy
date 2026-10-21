@@ -26,6 +26,7 @@
  * see (hubs)/_layout.tsx. DrawerNav remains a sibling of the navigator
  * (outside the tab scenes), exactly as before.
  */
+import { t } from '@/lib/i18n';
 import { View, useColorScheme } from 'react-native';
 import { createNativeBottomTabNavigator } from '@bottom-tabs/react-navigation';
 import { withLayoutContext } from 'expo-router';
@@ -85,7 +86,7 @@ export default function RoleTabShell({ tabs, initialRouteName }: RoleTabShellPro
               key={tab.name}
               name={tab.name}
               options={{
-                title: tab.title,
+                title: t(tab.titleKey ?? tab.title),
                 // Native SF Symbol icon — the system renders
                 // selected/unselected states; no duplicated icon layer.
                 tabBarIcon: () => ({ sfSymbol: tab.sfSymbol! }),

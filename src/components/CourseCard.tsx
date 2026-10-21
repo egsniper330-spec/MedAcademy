@@ -6,6 +6,8 @@ import { Play, Bell, CheckCircle, BookOpen } from 'lucide-react-native';
 import Reanimated, { FadeInDown } from 'react-native-reanimated';
 import { NeuCard } from '@/components/NeuCard';
 import { neuColors, useLayout, mutedTextStyle } from '@/lib/neu';
+import { useTranslation } from '@/lib/i18n';
+import { courseStatusLabel } from '@/lib/i18n/labels';
 
 // ── Shimmer skeleton for thumbnail loading state ──────────────────────────
 function SkeletonShimmer({ width, height, borderRadius = 0 }: { width: number | string; height: number; borderRadius?: number }) {
@@ -76,6 +78,7 @@ export function CourseCard({
   const isDark = scheme === 'dark';
   const c = isDark ? neuColors.dark : neuColors.light;
   const layout = useLayout();
+  const { t } = useTranslation();
 
   // Fluid thumb size: ~20% of available width on phones, ~15% on tablets, min 64dp, max 100dp
   const availW     = layout.width - layout.screenPx * 2;
@@ -118,7 +121,7 @@ export function CourseCard({
               {/* Doctor */}
               {doctorName ? (
                 <Text style={{ fontSize: metaFs, ...mutedTextStyle(c, 0.5), marginTop: layout.pad.xs }} numberOfLines={1}>
-                  Dr. {doctorName}
+                  {t('studentProfile.doctorPrefix', { name: doctorName })}
                 </Text>
               ) : null}
 
@@ -126,7 +129,7 @@ export function CourseCard({
               {priceEgp !== undefined && !isEnrolled ? (
                 <Text style={{ fontSize: priceFs, fontWeight: '800', marginTop: layout.pad.xs,
                   color: (!priceEgp || priceEgp === 0) ? '#16A34A' : c.primary }}>
-                  {(!priceEgp || priceEgp === 0) ? 'Free' : `EGP ${Number(priceEgp).toFixed(0)}`}
+                  {(!priceEgp || priceEgp === 0) ? t('home.free') : `EGP ${Number(priceEgp).toFixed(0)}`}
                 </Text>
               ) : null}
 
@@ -134,7 +137,7 @@ export function CourseCard({
               {progress !== undefined ? (
                 <View style={{ marginTop: layout.pad.xs }}>
                   <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 2 }}>
-                    <Text style={{ fontSize: progressFs, ...mutedTextStyle(c, 0.45) }}>Progress</Text>
+                    <Text style={{ fontSize: progressFs, ...mutedTextStyle(c, 0.45) }}>{t('course.progressLabel')}</Text>
                     <Text style={{ fontSize: progressFs, color: PROGRESS_COLOR_DIM, fontWeight: '600' }}>{progress}%</Text>
                   </View>
                   <View style={{ height: 3, backgroundColor: isDark ? '#1a3a2a' : '#dcfce7', borderRadius: 2, overflow: 'hidden' }}>
@@ -152,7 +155,7 @@ export function CourseCard({
                 <View style={{ marginTop: layout.pad.xs, alignSelf: 'flex-start',
                   backgroundColor: legacyStatusColor(status, c.primary),
                   paddingHorizontal: layout.pad.sm, paddingVertical: 2, borderRadius: layout.cardRadius }}>
-                  <Text style={{ fontSize: badgeFs, color: '#fff', fontWeight: '600', textTransform: 'uppercase' }}>{status}</Text>
+                  <Text style={{ fontSize: badgeFs, color: '#fff', fontWeight: '600' }}>{courseStatusLabel(status, t)}</Text>
                 </View>
               ) : null}
 
@@ -166,7 +169,7 @@ export function CourseCard({
                       backgroundColor: `${c.primary}18` }}
                   >
                     <Play size={btnFs} color={c.primary} />
-                    <Text style={{ fontSize: btnFs, fontWeight: '700', color: c.primary }}>Continue</Text>
+                    <Text style={{ fontSize: btnFs, fontWeight: '700', color: c.primary }}>{t('course.continue')}</Text>
                   </Pressable>
                 ) : (
                   <Pressable
@@ -176,7 +179,7 @@ export function CourseCard({
                       backgroundColor: c.primary }}
                   >
                     <Bell size={btnFs} color="#fff" />
-                    <Text style={{ fontSize: btnFs, fontWeight: '700', color: '#fff' }}>Subscribe</Text>
+                    <Text style={{ fontSize: btnFs, fontWeight: '700', color: '#fff' }}>{t('course.enroll')}</Text>
                   </Pressable>
                 )
               ) : null}
@@ -204,7 +207,7 @@ export function CourseCard({
             }}>
               <CheckCircle size={badgeFs + 1} color="#fff" />
               <Text style={{ fontSize: badgeFs + 1, color: '#fff', fontWeight: '700' }}>
-                {enrollmentStatus === 'completed' ? 'Completed' : 'Enrolled'}
+                {enrollmentStatus === 'completed' ? t('course.completedLabel') : t('course.enrolled')}
               </Text>
             </View>
           )}
@@ -217,7 +220,7 @@ export function CourseCard({
 
           {doctorName ? (
             <Text style={{ fontSize: metaFs, ...mutedTextStyle(c, 0.55), marginBottom: layout.pad.xs }}>
-              Dr. {doctorName}
+              {t('studentProfile.doctorPrefix', { name: doctorName })}
             </Text>
           ) : null}
 
@@ -231,7 +234,7 @@ export function CourseCard({
             <View style={{ alignSelf: 'flex-start', marginBottom: layout.pad.xs }}>
               <Text style={{ fontSize: priceFs, fontWeight: '800',
                 color: (!priceEgp || priceEgp === 0) ? '#16A34A' : c.primary }}>
-                {(!priceEgp || priceEgp === 0) ? 'Free' : `EGP ${Number(priceEgp).toFixed(0)}`}
+                {(!priceEgp || priceEgp === 0) ? t('home.free') : `EGP ${Number(priceEgp).toFixed(0)}`}
               </Text>
             </View>
           ) : null}
@@ -239,7 +242,7 @@ export function CourseCard({
           {progress !== undefined ? (
             <View style={{ marginBottom: layout.pad.xs }}>
               <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 3 }}>
-                <Text style={{ fontSize: progressFs, ...mutedTextStyle(c, 0.5) }}>Progress</Text>
+                <Text style={{ fontSize: progressFs, ...mutedTextStyle(c, 0.5) }}>{t('course.progressLabel')}</Text>
                 <Text style={{ fontSize: progressFs, color: PROGRESS_COLOR_DIM, fontWeight: '600' }}>{progress}%</Text>
               </View>
               <View style={{ height: 3, backgroundColor: isDark ? '#1a3a2a' : '#dcfce7', borderRadius: 2, overflow: 'hidden' }}>
@@ -256,7 +259,7 @@ export function CourseCard({
             <View style={{ marginTop: layout.pad.xs, alignSelf: 'flex-start',
               backgroundColor: legacyStatusColor(status, c.primary),
               paddingHorizontal: layout.pad.sm, paddingVertical: 2, borderRadius: layout.cardRadius }}>
-              <Text style={{ fontSize: badgeFs, color: '#fff', fontWeight: '600', textTransform: 'uppercase' }}>{status}</Text>
+              <Text style={{ fontSize: badgeFs, color: '#fff', fontWeight: '600' }}>{courseStatusLabel(status, t)}</Text>
             </View>
           ) : null}
 
@@ -269,7 +272,7 @@ export function CourseCard({
                   backgroundColor: `${c.primary}18` }}
               >
                 <Play size={btnFs + 1} color={c.primary} />
-                <Text style={{ fontSize: btnFs + 1, fontWeight: '700', color: c.primary }}>Continue Learning</Text>
+                <Text style={{ fontSize: btnFs + 1, fontWeight: '700', color: c.primary }}>{t('home.continueLearning')}</Text>
               </Pressable>
             ) : (
               <Pressable
@@ -280,7 +283,7 @@ export function CourseCard({
                   shadowColor: c.primary, shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.2, shadowRadius: 5 }}
               >
                 <Bell size={btnFs + 1} color="#fff" />
-                <Text style={{ fontSize: btnFs + 1, fontWeight: '700', color: '#fff' }}>Subscribe</Text>
+                <Text style={{ fontSize: btnFs + 1, fontWeight: '700', color: '#fff' }}>{t('course.enroll')}</Text>
               </Pressable>
             )
           ) : null}

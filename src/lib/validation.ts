@@ -1,48 +1,65 @@
 /**
  * Form validation helpers.
  * Each validator returns null on success or a human-readable error string.
+ *
+ * The messages are resolved through the i18n registry at CALL time (not import
+ * time), so a form that is open while the user switches language re-validates
+ * in the newly selected language.
  */
+
+import { t } from '@/lib/i18n';
 
 // ─── Primitives ───────────────────────────────────────────────────────────────
 
-export function validateRequired(value: string, label = 'This field'): string | null {
-  return value.trim() ? null : `${label} is required.`;
+export function validateRequired(
+  value: string,
+  label = t('validation.thisField'),
+): string | null {
+  return value.trim() ? null : t('validation.requiredFor', { label });
 }
 
 export function validateEmail(value: string): string | null {
-  if (!value.trim()) return 'Email is required.';
+  if (!value.trim()) return t('validation.emailRequired');
   const re = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-  return re.test(value.trim()) ? null : 'Please enter a valid email address.';
+  return re.test(value.trim()) ? null : t('validation.invalidEmail');
 }
 
 /** Accepts international E.164 or local formats — must have 7–15 digits after stripping symbols */
 export function validatePhone(value: string): string | null {
   if (!value.trim()) return null; // phone is optional in most forms
   const digits = value.replace(/\D/g, '');
-  if (digits.length < 7 || digits.length > 15) return 'Please enter a valid phone number.';
+  if (digits.length < 7 || digits.length > 15) return t('validation.invalidPhone');
   return null;
 }
 
 export function validatePassword(value: string, minLength = 8): string | null {
-  if (!value) return 'Password is required.';
-  if (value.length < minLength) return `Password must be at least ${minLength} characters.`;
-  if (!/[A-Z]/.test(value)) return 'Password must contain at least one uppercase letter.';
-  if (!/[0-9]/.test(value)) return 'Password must contain at least one number.';
+  if (!value) return t('validation.passwordRequired');
+  if (value.length < minLength) return t('validation.passwordMin', { min: minLength });
+  if (!/[A-Z]/.test(value)) return t('validation.passwordUppercase');
+  if (!/[0-9]/.test(value)) return t('validation.passwordNumber');
   return null;
 }
 
 export function validatePasswordSimple(value: string): string | null {
-  if (!value) return 'Password is required.';
-  if (value.length < 6) return 'Password must be at least 6 characters.';
+  if (!value) return t('validation.passwordRequired');
+  if (value.length < 6) return t('validation.passwordMin', { min: 6 });
   return null;
 }
 
-export function validateMatch(a: string, b: string, label = 'Passwords'): string | null {
-  return a === b ? null : `${label} do not match.`;
+export function validateMatch(
+  a: string,
+  b: string,
+  label = t('validation.passwordsLabel'),
+): string | null {
+  return a === b ? null : t('validation.matchFor', { label });
 }
 
-export function validateMinLength(value: string, min: number, label = 'This field'): string | null {
-  return value.trim().length >= min ? null : `${label} must be at least ${min} characters.`;
+export function validateMinLength(
+  value: string,
+  min: number,
+  label = t('validation.thisField'),
+): string | null {
+  return value.trim().length >= min ? null : t('validation.minLengthFor', { label, min });
 }
 
 // ─── Composite helpers ────────────────────────────────────────────────────────
@@ -59,28 +76,32 @@ export function allErrors(...results: (string | null)[]): string[] {
 
 // ─── Friendly error mapper ────────────────────────────────────────────────────
 
+/**
+ * Raw backend/network patterns → translation keys. The key is resolved when the
+ * message is produced, so the same map serves both languages.
+ */
 const ERROR_MAP: Array<[RegExp, string]> = [
-  [/duplicate key.*email/i,           'An account with this email already exists.'],
-  [/duplicate key.*phone/i,           'This phone number is already registered.'],
-  [/duplicate key.*unique/i,          'This value already exists.'],
-  [/invalid.*email/i,                 'Please enter a valid email address.'],
-  [/password.*short|too.*short/i,     'Password is too short.'],
-  [/network.*request.*failed|fetch/i, 'Network connection lost. Please check your internet.'],
-  [/jwt.*expired/i,                   'Your session has expired. Please sign in again.'],
-  [/permission.*denied|not.*authorized/i, 'You do not have permission to perform this action.'],
-  [/foreign.*key.*violation/i,        'Referenced record no longer exists.'],
-  [/not.*null.*violation/i,           'One or more required fields are missing.'],
+  [/duplicate key.*email/i,           'validation.emailExists'],
+  [/duplicate key.*phone/i,           'validation.phoneExists'],
+  [/duplicate key.*unique/i,          'validation.valueExists'],
+  [/invalid.*email/i,                 'validation.invalidEmail'],
+  [/password.*short|too.*short/i,     'validation.passwordShort'],
+  [/network.*request.*failed|fetch/i, 'validation.networkLost'],
+  [/jwt.*expired/i,                   'validation.sessionExpired'],
+  [/permission.*denied|not.*authorized/i, 'validation.noPermission'],
+  [/foreign.*key.*violation/i,        'validation.recordMissing'],
+  [/not.*null.*violation/i,           'validation.fieldsMissing'],
   // MySQL (PHP backend) duplicate-entry phrasing — same friendly mapping as
   // the PG "duplicate key" patterns above.
-  [/duplicate entry/i,                'This value already exists.'],
+  [/duplicate entry/i,                'validation.valueExists'],
   // Student-operations business errors (StudentController::mapPdoError + guard
   // clauses). Mapped by exact message so the doctor sees the REAL cause instead
   // of a misleading "check your credit balance" fallback.
-  [/insufficient credits/i,           'Insufficient credits. Allocate credits to your account first.'],
-  [/already enrolled/i,               'This student is already enrolled in this course.'],
-  [/course could not be found/i,      'The selected course could not be found. Please pick the course again.'],
-  [/student account could not be found/i, 'The selected student account could not be found. Please search for the student again.'],
-  [/operation could not be completed/i, 'The operation could not be completed. Please try again.'],
+  [/insufficient credits/i,           'validation.insufficientCredits'],
+  [/already enrolled/i,               'validation.alreadyEnrolled'],
+  [/course could not be found/i,      'validation.courseNotFound'],
+  [/student account could not be found/i, 'validation.studentNotFound'],
+  [/operation could not be completed/i, 'validation.opIncomplete'],
 ];
 
 /**
@@ -98,11 +119,14 @@ const ERROR_MAP: Array<[RegExp, string]> = [
  * "duplicate key value". Common English words like "from" and "table" are NOT
  * blocked because they frequently appear in legitimate business messages.
  */
-export function friendlyError(error: unknown, fallback = 'Something went wrong. Please try again.'): string {
+export function friendlyError(
+  error: unknown,
+  fallback = t('validation.genericError'),
+): string {
   const msg = error instanceof Error ? error.message : String(error ?? '');
   if (!msg || msg === '[object Object]') return fallback;
-  for (const [pattern, friendly] of ERROR_MAP) {
-    if (pattern.test(msg)) return friendly;
+  for (const [pattern, key] of ERROR_MAP) {
+    if (pattern.test(msg)) return t(key);
   }
   // Block messages that are clearly raw PostgreSQL internals:
   //   - Contain a 5-digit PG error code (e.g. "23503", "42703")

@@ -15,6 +15,7 @@ import { resolveCourseContact } from '@/lib/subscribeContact';
 import { PageHeader } from '@/components/PageHeader';
 import { neuColors, useLayout, safeBottom, mutedTextStyle } from '@/lib/neu';
 import { NeuSearchBar } from '@/components/NeuInputRow';
+import { useTranslation } from '@/lib/i18n';
 import type { RelativePathString } from 'expo-router';
 
 const FEATURED_LIMIT = 10;
@@ -55,6 +56,7 @@ function doctorOf(item: CourseItem): { id: string; full_name: string } | null {
   if (!item.doctor) return null;
   return Array.isArray(item.doctor) ? (item.doctor[0] ?? null) : item.doctor;
 }export default function CoursesHome() {
+  const { t, tCount } = useTranslation();
   const scheme = useColorScheme();
   const isDark = scheme === 'dark';
   const c = isDark ? neuColors.dark : neuColors.light;
@@ -197,7 +199,7 @@ function doctorOf(item: CourseItem): { id: string; full_name: string } | null {
           value={query}
           onChangeText={setQuery}
           onClear={() => setQuery('')}
-          placeholder="Search all courses by title, description, instructor…"
+          placeholder={t('explore.searchPlaceholder')}
           returnKeyType="search"
           autoCapitalize="none"
           autoCorrect={false}
@@ -209,13 +211,13 @@ function doctorOf(item: CourseItem): { id: string; full_name: string } | null {
       {!isSearching && (
         <Text style={{ fontSize: 13, fontWeight: '700', ...mutedTextStyle(c, 0.4),
           textTransform: 'uppercase', letterSpacing: 1, marginBottom: 12 }}>
-          Recently Published
+          {t('explore.recentlyPublished')}
         </Text>
       )}
       {isSearching && !searching && searchResults.length > 0 && (
         <Text style={{ fontSize: 13, fontWeight: '700', ...mutedTextStyle(c, 0.4),
           textTransform: 'uppercase', letterSpacing: 1, marginBottom: 12 }}>
-          {searchResults.length} result{searchResults.length !== 1 ? 's' : ''} found
+          {tCount('explore.resultsFound', searchResults.length)}
         </Text>
       )}
     </View>
@@ -230,12 +232,12 @@ function doctorOf(item: CourseItem): { id: string; full_name: string } | null {
           <>
             <BookOpen size={52} color={c.primary} opacity={0.2} style={{ marginBottom: 14 }} />
             <Text style={{ fontSize: 17, fontWeight: '700', ...mutedTextStyle(c, 0.45), textAlign: 'center' }}>
-              {isSearching ? 'No courses found' : 'No courses available'}
+              {isSearching ? t('explore.noCoursesFound') : t('explore.noCoursesAvailable')}
             </Text>
             <Text style={{ fontSize: 13, ...mutedTextStyle(c, 0.35), marginTop: 6, textAlign: 'center' }}>
               {isSearching
-                ? 'Try a different keyword or clear the search'
-                : 'Check back soon for new content'}
+                ? t('explore.searchHint')
+                : t('explore.emptyHint')}
             </Text>
           </>
         )
@@ -248,10 +250,10 @@ function doctorOf(item: CourseItem): { id: string; full_name: string } | null {
     // default (white in light mode) bleeds through behind the FlatList.
     <View style={{ flex: 1, backgroundColor: c.base }}>
       <PageHeader
-        title="Courses"
+        title={t('common.courses')}
         subtitle={isSearching
-          ? `Searching all published courses…`
-          : `${FEATURED_LIMIT} recently published`}
+          ? t('explore.searchingAll')
+          : tCount('explore.recentlyPublishedCount', FEATURED_LIMIT)}
       />
       <FlatList
         data={displayList}

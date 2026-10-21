@@ -266,8 +266,19 @@ console.log('\n── Doctor Earnings: backend enforcement ──');
   const drPage = src('src/app/(app)/(doctor)/dr-earnings.tsx');
   check(/useFeatureFlags\(\)/.test(drPage) && /flagEnabled\('doctor_earnings'\)/.test(drPage),
     'doctor earnings page reflects the platform flag (unavailable state when off)');
-  check(/This feature is currently unavailable\./.test(drPage),
+  // The copy moved into the dictionary (localization pass), so the gate follows
+  // it: the screen must render the shared unavailable design AND the exact
+  // user-safe English sentence must still exist in the English resources. That
+  // keeps the intent — no logout/suspension/maintenance misclassification —
+  // while the dictionary is the single source of truth for the wording.
+  const i18nResources = src('src/lib/i18n/resources.ts');
+  check(/FeatureUnavailableState/.test(drPage),
+    'disabled state uses the shared unavailable design');
+  check(/t\('drProfile\.featureUnavailable'\)/.test(drPage) &&
+        /t\('drProfile\.earnings\.unavailableBody'\)/.test(drPage),
     'clean user-facing disabled state (no logout / suspension / maintenance misclassification)');
+  check(/'drProfile\.featureUnavailable': 'This feature is currently unavailable\.'/.test(i18nResources),
+    'the user-safe disabled copy is still the shipped English sentence');
   // The three surfaces that made the flag feel "not enforced" for a doctor:
   // the drawer entry, the profile earnings card, and the ops endpoints.
   check(/isFeatureEnabled\('doctor_earnings'\)/.test(src('src/components/DrawerNav.tsx')),

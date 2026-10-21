@@ -7,6 +7,7 @@ import { useCmsSections } from '@/lib/cmsContent';
 import { NeuCard } from '@/components/NeuCard';
 import { neuColors, useLayout, safeBottom, mutedTextStyle } from '@/lib/neu';
 import { Shield } from 'lucide-react-native';
+import { useTranslation } from '@/lib/i18n';
 
 const SECTIONS = [
   {
@@ -50,6 +51,7 @@ const SECTIONS = [
 export default function PrivacyPage() {
   const isDark = useColorScheme() === 'dark';
   const c = isDark ? neuColors.dark : neuColors.light;
+  const { t } = useTranslation();
   const layout = useLayout();
   // Server-managed content (Super Admin → Platform → CMS Pages), with the
   // bundled SECTIONS as the fallback whenever no body has been written.
@@ -59,7 +61,7 @@ export default function PrivacyPage() {
 
   return (
     <View style={{ flex: 1, backgroundColor: c.base }}>
-      <PageHeader title="Privacy Policy" showBack />
+      <PageHeader title={t('studentProfile.privacy')} showBack />
       <ScrollView
         style={{ flex: 1 }}
         contentContainerStyle={{ padding: layout.screenPx }}

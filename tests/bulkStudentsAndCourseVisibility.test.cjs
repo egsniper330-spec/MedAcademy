@@ -127,7 +127,7 @@ console.log('\n── PART 1: Bulk frontend (Select mode UX) ──');
     'EDGE_FUNCTION_MAP entry missing');
 
   check('Select mode toggle exists',
-    /Select students for bulk actions/.test(ui),
+    /Select students for bulk actions|drStudents\.selectModeA11y/.test(ui),
     'Select entry button missing');
 
   check('selection checkbox on cards only in Select mode',
@@ -139,7 +139,9 @@ console.log('\n── PART 1: Bulk frontend (Select mode UX) ──');
     'selected state missing');
 
   check('Select all visible + Clear + count present',
-    /Select all visible students/.test(ui) && /Clear selection/.test(ui) && /\{selected\.size\} selected/.test(ui),
+    /Select all visible students|drStudents\.selectAllA11y/.test(ui) &&
+    /Clear selection|drStudents\.clearSelectionA11y/.test(ui) &&
+    /\{selected\.size\} selected|bulk\.selected/.test(ui),
     'selection bar controls missing');
 
   check('Bulk Actions appears only with ≥1 selected',
@@ -151,11 +153,12 @@ console.log('\n── PART 1: Bulk frontend (Select mode UX) ──');
     'suspend/resume availability not derived from row states');
 
   check('confirmation modal before destructive bulk action',
-    /setBulkConfirm\(null\)/.test(ui) && /Cancel<\/Text>/.test(ui),
+    /setBulkConfirm\(null\)/.test(ui) && /Cancel<\/Text>|common\.cancel/.test(ui),
     'confirmation/cancel flow missing');
 
   check('result modal reports accurate succeeded/failed/skipped',
-    /\{bulkResult\.succeeded\} succeeded/.test(ui) && /bulkResult\.failed > 0/.test(ui),
+    (/\{bulkResult\.succeeded\} succeeded|drStudents\.resultSummary/.test(ui)) &&
+    /bulkResult\.failed > 0/.test(ui),
     'accurate result display missing');
 
   check('individual per-card actions hidden during Select mode',

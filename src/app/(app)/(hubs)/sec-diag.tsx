@@ -7,7 +7,7 @@ import { useFocusEffect, useRouter } from 'expo-router';
 import {
   ShieldAlert, Eye, Lock, AlertTriangle, CheckCircle,
   ShieldCheck, ShieldX, RefreshCw, Wifi, Bug, Smartphone,
-  MapPin, Code, Layers, Wrench, Cpu, Fingerprint,
+  Code, Layers, Wrench, Cpu, Fingerprint,
 } from 'lucide-react-native';
 import { getAuditLogs, getAllUsers } from '@/lib/api';
 import { backendClient } from '@/client/backendClient';
@@ -34,7 +34,6 @@ const CHECK_ROWS: CheckRow[] = [
   { key: 'vpnDetected',             label: 'VPN Active',           description: 'ConnectivityManager TRANSPORT_VPN + tun/vpn/ppp interface scan', threatWhenTrue: true,  icon: Wifi },
   { key: 'rootDetected',            label: 'Root Detected',        description: 'su paths + system props + test-keys + /system write test',       threatWhenTrue: true,  icon: ShieldX },
   { key: 'emulatorDetected',        label: 'Emulator Detected',    description: 'Build fingerprint/model/manufacturer + QEMU props + sensor count',threatWhenTrue: true,  icon: Smartphone },
-  { key: 'mockLocationDetected',    label: 'Mock Location',        description: 'AppOpsManager MOCK_LOCATION + Settings.Secure + permission scan', threatWhenTrue: true,  icon: MapPin },
   { key: 'developerOptionsEnabled', label: 'Developer Options',    description: 'Settings.Global.DEVELOPMENT_SETTINGS_ENABLED',                   threatWhenTrue: true,  icon: Wrench },
   { key: 'adbEnabled',              label: 'USB Debugging (ADB)', description: 'Settings.Global.ADB_ENABLED',                                     threatWhenTrue: true,  icon: Code },
   { key: 'debuggerAttached',        label: 'Debugger Attached',   description: 'Debug.isDebuggerConnected() / sysctl P_TRACED (iOS)',              threatWhenTrue: true,  icon: Bug },

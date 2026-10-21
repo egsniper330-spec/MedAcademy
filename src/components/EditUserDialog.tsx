@@ -21,6 +21,7 @@ import {
   getUniversities, getFaculties, getAcademicLevels,
 } from '@/lib/api';
 import { parseError } from '@/lib/parseError';
+import { useTranslation } from '@/lib/i18n';
 
 export interface EditUserData {
   id: string;
@@ -62,6 +63,7 @@ export function EditUserDialog({
   const scheme = useColorScheme();
   const isDark = scheme === 'dark';
   const c = isDark ? neuColors.dark : neuColors.light;
+  const { t } = useTranslation();
 
   const [full_name, setFullName]     = useState('');
   const [email, setEmail]           = useState('');
@@ -139,7 +141,7 @@ export function EditUserDialog({
 
   const validate = () => {
     const e: Record<string, string> = {};
-    if (has('full_name')) { const err = validateRequired(full_name, 'Full name'); if (err) e.full_name = err; }
+    if (has('full_name')) { const err = validateRequired(full_name, t('profile.fullName')); if (err) e.full_name = err; }
     if (has('email') && isSuperAdmin) {
       const err = validateEmail(email);
       if (err) e.email = err;
@@ -187,7 +189,7 @@ export function EditUserDialog({
       });
       onClose();
     } catch (e) {
-      setGlobalError(parseError(e, 'Failed to save changes.'));
+      setGlobalError(parseError(e, t('editUser.saveFailed')));
     }
     setSaving(false);
   };
@@ -208,13 +210,13 @@ export function EditUserDialog({
     marginBottom: 14,
   } as const;
 
-  const lbl = (t: string) => (
-    <Text style={{ fontSize: 12, fontWeight: '700', ...mutedTextStyle(c, 0.5), marginBottom: 5, textTransform: 'uppercase', letterSpacing: 0.7 }}>{t}</Text>
+  const lbl = (label: string) => (
+    <Text style={{ fontSize: 12, fontWeight: '700', ...mutedTextStyle(c, 0.5), marginBottom: 5, textTransform: 'uppercase', letterSpacing: 0.7 }}>{label}</Text>
   );
 
   const dropBtn = (text: string, open: boolean, onPress: () => void) => (
     <Pressable onPress={onPress} style={{ ...inp, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-      <Text style={{ fontSize: 15, color: text ? c.text : `${c.text}55`, flex: 1 }} numberOfLines={1}>{text || 'Select…'}</Text>
+      <Text style={{ fontSize: 15, color: text ? c.text : `${c.text}55`, flex: 1 }} numberOfLines={1}>{text || t('editUser.select')}</Text>
       <ChevronDown size={16} color={c.text} style={{ opacity: 0.4 }} />
     </Pressable>
   );
@@ -237,13 +239,13 @@ export function EditUserDialog({
       visible={visible}
       onClose={onClose}
       isDirty={isDirty}
-      title="Edit Profile"
+      title={t('editUser.title')}
       subtitle={user?.email}
       footer={
         <View style={{ flexDirection: 'row', gap: 12 }}>
-          <NeuButton label="Cancel" onPress={onClose} variant="secondary" style={{ flex: 1 }} />
+          <NeuButton label={t('common.cancel')} onPress={onClose} variant="secondary" style={{ flex: 1 }} />
           <NeuButton
-            label="Save Changes"
+            label={t('profile.saveChanges')}
             icon={<Save size={15} color="#fff" />}
             onPress={handleSave}
             loading={saving}
@@ -255,8 +257,8 @@ export function EditUserDialog({
       {/* Full Name */}
       {has('full_name') && (
         <>
-          {lbl('Full Name *')}
-          <TextInput value={full_name} onChangeText={v => mark('full_name', v)} placeholder="Full name" placeholderTextColor={`${c.text}55`}
+          {lbl(t('editUser.fullNameRequired'))}
+          <TextInput value={full_name} onChangeText={v => mark('full_name', v)} placeholder={t('editUser.fullNamePlaceholder')} placeholderTextColor={`${c.text}55`}
             style={{ ...inp, marginBottom: errors.full_name ? 4 : 14, paddingVertical: 12 }} />
           {!!errors.full_name && <Text style={{ color: '#DC2626', fontSize: 12, marginBottom: 10 }}>{errors.full_name}</Text>}
         </>
@@ -265,7 +267,7 @@ export function EditUserDialog({
       {/* Email — editable for super_admin, read-only for everyone else */}
       {has('email') && (
         <>
-          {lbl('Email')}
+          {lbl(t('common.email'))}
           {isSuperAdmin ? (
             <>
               <TextInput
@@ -283,7 +285,7 @@ export function EditUserDialog({
           ) : (
             <NeuCard style={{ padding: 12, marginBottom: 14 }}>
               <Text style={{ fontSize: 14, color: c.text }}>{email || '—'}</Text>
-              <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.4), marginTop: 3 }}>Email changes require user verification. Use the administrator email-change workflow.</Text>
+              <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.4), marginTop: 3 }}>{t('editUser.emailLocked')}</Text>
             </NeuCard>
           )}
         </>
@@ -292,7 +294,7 @@ export function EditUserDialog({
       {/* Phone */}
       {has('phone') && (
         <>
-          {lbl('Phone Number')}
+          {lbl(t('editUser.phoneNumber'))}
           <TextInput value={phone} onChangeText={v => mark('phone', v)} placeholder="01xxxxxxxxx"
             placeholderTextColor={`${c.text}55`} keyboardType="phone-pad" style={{ ...inp, paddingVertical: 12 }} />
         </>
@@ -301,15 +303,15 @@ export function EditUserDialog({
       {/* University / Faculty / Level */}
       {has('university') && (
         <>
-          {lbl('University')}
+          {lbl(t('editUser.university'))}
           {dropBtn(universities.find(u => u.id === university_id)?.name ?? '', uniOpen, () => setUniOpen(o => !o))}
           {uniOpen && dropList(universities, university_id, onUniSelect)}
 
-          {lbl('Faculty')}
+          {lbl(t('editUser.faculty'))}
           {dropBtn(faculties.find(f => f.id === faculty_id)?.name ?? '', facOpen, () => setFacOpen(o => !o))}
           {facOpen && faculties.length > 0 && dropList(faculties, faculty_id, onFacSelect)}
 
-          {lbl('Academic Level')}
+          {lbl(t('editUser.academicLevel'))}
           {dropBtn(levels.find(l => l.id === level_id)?.name ?? '', lvlOpen, () => setLvlOpen(o => !o))}
           {lvlOpen && levels.length > 0 && dropList(levels, level_id, id => { setLevelId(id); setLvlOpen(false); setIsDirty(true); })}
         </>
@@ -318,7 +320,7 @@ export function EditUserDialog({
       {/* Status toggle */}
       {has('status') && (
         <>
-          {lbl('Status')}
+          {lbl(t('editUser.status'))}
           <View style={{ flexDirection: 'row', gap: 10, marginBottom: 14 }}>
             {STATUS_OPTIONS.map(s => (
               <Pressable key={s} onPress={() => { setStatus(s); setIsDirty(true); }}
@@ -331,7 +333,7 @@ export function EditUserDialog({
                 }}>
                 <Text style={{ fontSize: 13, fontWeight: '700', textTransform: 'capitalize',
                   color: status === s ? (s === 'active' ? '#16A34A' : '#DC2626') : c.text }}>
-                  {s}
+                  {t(`status.${s}`)}
                 </Text>
               </Pressable>
             ))}
@@ -342,9 +344,9 @@ export function EditUserDialog({
       {/* New Password */}
       {has('password') && (
         <>
-          {lbl('New Password (leave blank to keep current)')}
+          {lbl(t('editUser.newPasswordOptionalLabel'))}
           <View style={{ ...inp, flexDirection: 'row', alignItems: 'center', marginBottom: errors.password ? 4 : 14 }}>
-            <TextInput value={password} onChangeText={v => mark('password', v)} placeholder="New password (optional)"
+            <TextInput value={password} onChangeText={v => mark('password', v)} placeholder={t('editUser.newPasswordOptional')}
               placeholderTextColor={`${c.text}55`} secureTextEntry={!showPwd}
               style={{ flex: 1, minWidth: 0, fontSize: 15, color: c.text, paddingVertical: 0 }} />
             <Pressable onPress={() => setShowPwd(p => !p)} hitSlop={8}>
@@ -355,9 +357,9 @@ export function EditUserDialog({
 
           {password.length > 0 && (
             <>
-              {lbl('Confirm New Password')}
+              {lbl(t('editUser.confirmNewPassword'))}
               <View style={{ ...inp, flexDirection: 'row', alignItems: 'center', marginBottom: errors.confirm ? 4 : 14 }}>
-                <TextInput value={confirm} onChangeText={v => mark('confirm', v)} placeholder="Confirm new password"
+                <TextInput value={confirm} onChangeText={v => mark('confirm', v)} placeholder={t('password.confirmNew')}
                   placeholderTextColor={`${c.text}55`} secureTextEntry={!showCfm}
                   style={{ flex: 1, minWidth: 0, fontSize: 15, color: c.text, paddingVertical: 0 }} />
                 <Pressable onPress={() => setShowCfm(p => !p)} hitSlop={8}>

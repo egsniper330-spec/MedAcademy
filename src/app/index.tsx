@@ -8,6 +8,7 @@ import { useSession } from '@/ctx';
 import { resolveStartupRoute, type StartupRoute } from '@/lib/startupStateModel';
 import { useBranding } from '@/lib/branding';
 import NetInfo from '@react-native-community/netinfo';
+import { useTranslation } from '@/lib/i18n';
 
 /**
  * Landing screen — routes through the PURE cold-start state machine
@@ -48,6 +49,7 @@ export default function LandingScreen() {
   // Falls back to the built-in defaults on failure — this screen renders
   // identically whether or not the branding API is reachable.
   const { branding } = useBranding();
+  const { t } = useTranslation();
 
   // Connectivity tri-state mirroring offlineTransition.useConnectivity exactly
   // (isConnected && isInternetReachable !== false). null = not yet determined.
@@ -114,11 +116,11 @@ export default function LandingScreen() {
         <BrandLogo variant="monogram" size={Math.round(layout.heroIconSize * 1.35)} />
         <Text style={{ fontSize: 34, fontWeight: '800', color: c.text, letterSpacing: -0.5, marginTop: 20 }}>{branding.app_name}</Text>
         <Text style={{ fontSize: 16, ...mutedTextStyle(c, 0.55), marginTop: 6, textAlign: 'center' }}>
-          Best Educational Platform
+          {t('landing.tagline')}
         </Text>
       </View>
-      <NeuButton label="Sign In" onPress={() => router.push('/(auth)/sign-in')} fullWidth style={{ marginBottom: 14 }} />
-      <NeuButton label="Create Account" onPress={() => router.push('/(auth)/sign-up')} variant="secondary" fullWidth />
+      <NeuButton label={t('common.signIn')} onPress={() => router.push('/(auth)/sign-in')} fullWidth style={{ marginBottom: 14 }} />
+      <NeuButton label={t('common.createAccount')} onPress={() => router.push('/(auth)/sign-up')} variant="secondary" fullWidth />
     </View>
   );
 }

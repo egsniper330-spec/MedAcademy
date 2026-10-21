@@ -19,6 +19,7 @@ import { getFirstName } from '@/lib/utils';
 import { neuColors, neuFlatStyle, neuPressedStyle, useLayout, safeBottom, mutedTextStyle } from '@/lib/neu';
 import { DashboardHeader } from '@/components/DashboardHeader';
 import Bell from '@/components/Bell';
+import { useTranslation } from '@/lib/i18n';
 import { useNotificationPermission } from '@/hooks/useNotificationPermission';
 import { PermissionRationaleModal } from '@/components/PermissionRationaleModal';
 import { QuickActionBtn } from '@/components/QuickActionBtn';
@@ -87,6 +88,7 @@ function HubRow({
 }) {
   const router = useRouter();
   const layout = useLayout();
+  const { isRTL } = useTranslation();
   const iconSz = layout.touchTarget;
   const iconInner = Math.round(iconSz * 0.44);
   const [pressed, setPressed] = useState(false);
@@ -107,7 +109,10 @@ function HubRow({
           borderRadius: layout.cardRadius / 1.5,
           backgroundColor: `${color}1A`,
           alignItems: 'center', justifyContent: 'center',
-          marginRight: layout.pad.md,
+          // Logical margin (not marginRight): in Arabic the icon sits on the
+          // RIGHT of the row, so the drawer/hub rows must follow the reading
+          // direction instead of a hardcoded physical side.
+          marginEnd: layout.pad.md,
           flexShrink: 0,
         }}>
           <Icon size={iconInner} color={color} />
@@ -123,7 +128,12 @@ function HubRow({
           </View>
           <Text style={{ fontSize: layout.captionSize, ...mutedTextStyle(c, 0.45), marginTop: 2 }}>{description}</Text>
         </View>
-        <ChevronRight size={layout.captionSize + 2} color={`${c.text}35`} />
+        <ChevronRight
+          size={layout.captionSize + 2}
+          color={`${c.text}35`}
+          // Directional icon: points along the reading direction.
+          style={{ transform: [{ scaleX: isRTL ? -1 : 1 }] }}
+        />
       </View>
     </Pressable>
   );
@@ -133,7 +143,7 @@ function HubRow({
 function SectionLabel({ label, c }: { label: string; c: typeof neuColors.light }) {
   const layout = useLayout();
   return (
-    <Text style={{ fontSize: layout.captionSize, fontWeight: '800', ...mutedTextStyle(c, 0.4), textTransform: 'uppercase', letterSpacing: 1.4, marginBottom: layout.pad.md, marginTop: layout.sectionGap }}>
+    <Text style={{ fontSize: layout.captionSize, fontWeight: '800', ...mutedTextStyle(c, 0.4), textTransform: 'uppercase', letterSpacing: 1.4, marginBottom: layout.pad.md, marginTop: layout.sectionGap, textAlign: 'left' }}>
       {label}
     </Text>
   );
@@ -146,6 +156,7 @@ export default function SuperAdminDashboard() {
   const c = isDark ? neuColors.dark : neuColors.light;
   const layout = useLayout();
   const { profile } = useProfileStore();
+  const { t } = useTranslation();
   const router = useRouter();
 
   const [stats, setStats] = useState<any>(null);
@@ -178,67 +189,77 @@ export default function SuperAdminDashboard() {
   const firstName = getFirstName(profile?.full_name);
 
   const quickActions = [
-    { icon: UserPlus,     label: 'Add Doctor',     color: '#16A34A', path: '/sa-users' },
-    { icon: BookOpen,     label: 'New Course',     color: '#7C3AED', path: '/sa-global-search' },
-    { icon: Megaphone,    label: 'Broadcast',      color: '#D97706', path: '/sa-notifications-center' },
-    { icon: CreditCard,   label: 'Credits',        color: '#7C3AED', path: '/sa-credits' },
-    { icon: Shield,       label: 'Audit Logs',     color: '#DC2626', path: '/sa-audit' },
-    { icon: Wrench,       label: 'Maintenance',    color: '#6B7280', path: '/maintenance' },
-    { icon: Flag,         label: 'Feat. Flags',    color: '#7C3AED', path: '/feature-flags' },
-    { icon: Database,     label: 'DB Audit',       color: '#D97706', path: '/sa-db-audit' },
+    { icon: UserPlus,     label: t('saOverview.action.addDoctor'),    color: '#16A34A', path: '/sa-users' },
+    { icon: BookOpen,     label: t('saOverview.action.newCourse'),    color: '#7C3AED', path: '/sa-global-search' },
+    { icon: Megaphone,    label: t('saOverview.action.broadcast'),    color: '#D97706', path: '/sa-notifications-center' },
+    { icon: CreditCard,   label: t('nav.credits'),                    color: '#7C3AED', path: '/sa-credits' },
+    { icon: Shield,       label: t('saOverview.action.auditLogs'),    color: '#DC2626', path: '/sa-audit' },
+    { icon: Wrench,       label: t('saOverview.nav.maintenance'),     color: '#6B7280', path: '/maintenance' },
+    { icon: Flag,         label: t('saOverview.nav.featureFlags'),    color: '#7C3AED', path: '/feature-flags' },
+    { icon: Database,     label: t('saOverview.action.dbAudit'),      color: '#D97706', path: '/sa-db-audit' },
   ];
 
   const navSections = [
     {
-      title: 'Management',
+      title: t('nav.management'),
       items: [
-        { icon: Users,      label: 'All Users',        description: 'Students, doctors & admins',     color: c.primary,  path: '/sa-users' },
-        { icon: BookOpen,   label: 'Courses',           description: 'All courses, status & search',   color: '#7C3AED',  path: '/sa-global-search' },
-        { icon: GraduationCap,label:'Academic',         description: 'Universities, faculties, levels',color: '#2DA8FF',  path: '/sa-academic' },
+        { icon: Users,      label: t('nav.allUsers'),            description: t('saOverview.nav.allUsersDesc'),      color: c.primary,  path: '/sa-users' },
+        { icon: BookOpen,   label: t('saOverview.nav.courses'),   description: t('saOverview.nav.coursesDesc'),       color: '#7C3AED',  path: '/sa-global-search' },
+        { icon: GraduationCap,label:t('nav.academicStructure'),   description: t('saOverview.nav.academicDesc'),      color: '#2DA8FF',  path: '/sa-academic' },
       ],
     },
     {
-      title: 'Revenue',
+      title: t('saOverview.section.revenue'),
       items: [
-        { icon: DollarSign, label: 'Platform Revenue', description: 'Total earnings & payouts',        color: '#16A34A',  path: '/revenue', badge: 'Live' },
-        { icon: BarChart2,  label: 'Ledger',           description: 'Transaction ledger & history',    color: c.primary,  path: '/sa-ledger-dashboard' },
+        { icon: DollarSign, label: t('saOverview.nav.platformRevenue'), description: t('saOverview.nav.platformRevenueDesc'), color: '#16A34A', path: '/revenue', badge: t('saOverview.badge.live') },
+        { icon: BarChart2,  label: t('saOverview.nav.ledger'),          description: t('saOverview.nav.ledgerDesc'),          color: c.primary, path: '/sa-ledger-dashboard' },
       ],
     },
     {
-      title: 'Credits',
+      title: t('nav.credits'),
       items: [
-        { icon: CreditCard, label: 'Credits',          description: 'Manage credits & view history',   color: '#7C3AED',  path: '/sa-credits' },
+        { icon: CreditCard, label: t('nav.credits'), description: t('saOverview.nav.creditsDesc'), color: '#7C3AED', path: '/sa-credits' },
       ],
     },
     {
-      title: 'Content & Media',
+      title: t('nav.contentMedia'),
       items: [
-        { icon: Video,       label: 'Video Library',    description: 'Manage uploaded videos',          color: '#7C3AED',  path: '/sa-video-library' },
-        { icon: AlertOctagon,label: 'Watermark / DRM',  description: 'Content protection & forensics',  color: '#DC2626',  path: '/content-protection' },
-        { icon: HardDrive,   label: 'Storage',          description: 'Bucket usage & cleanup',          color: '#6B7280',  path: '/sa-storage' },
+        { icon: Video,        label: t('nav.videoLibrary'),            description: t('saOverview.nav.videoLibraryDesc'), color: '#7C3AED',  path: '/sa-video-library' },
+        { icon: AlertOctagon, label: t('saOverview.nav.watermark'),     description: t('saOverview.nav.watermarkDesc'),    color: '#DC2626',  path: '/content-protection' },
+        { icon: HardDrive,    label: t('saOverview.nav.storage'),       description: t('saOverview.nav.storageDesc'),      color: '#6B7280',  path: '/sa-storage' },
       ],
     },
     {
-      title: 'Monitoring',
+      title: t('nav.sectionMonitoring'),
       items: [
-        { icon: Activity,   label: 'Analytics',        description: 'Platform metrics & trends',       color: '#16A34A',  path: '/sa-analytics' },
-        { icon: FileText,   label: 'Reports',          description: 'Detailed platform reports',       color: '#7C3AED',  path: '/sa-reports' },
-        { icon: Shield,     label: 'Audit Trail',      description: 'Full platform audit log',         color: '#DC2626',  path: '/sa-audit' },
-        { icon: SquareCode, label: 'Credit Analytics', description: 'Credit flow & analytics',         color: c.primary,  path: '/sa-credit-analytics' },
+        { icon: Activity,    label: t('nav.analytics'),          description: t('saOverview.nav.analyticsDesc'),      color: '#16A34A',  path: '/sa-analytics' },
+        { icon: FileText,    label: t('nav.reports'),            description: t('saOverview.nav.reportsDesc'),        color: '#7C3AED',  path: '/sa-reports' },
+        { icon: Shield,      label: t('nav.auditTrail'),         description: t('saOverview.nav.auditTrailDesc'),     color: '#DC2626',  path: '/sa-audit' },
+        { icon: SquareCode,  label: t('nav.creditAnalytics'),    description: t('saOverview.nav.creditAnalyticsDesc'), color: c.primary, path: '/sa-credit-analytics' },
+        { icon: GraduationCap, label: t('nav.enrollmentStats'),  description: t('saOverview.nav.enrollmentStatsDesc'), color: '#7C3AED', path: '/sa-enrollment-stats' },
       ],
     },
     {
-      title: 'Platform & Settings',
+      title: t('nav.platformSettings'),
       items: [
-        { icon: ShieldAlert, label: 'Security',         description: 'Dashboard, policies & logs',      color: '#EF4444',  path: '/sec-dashboard' },
-        { icon: Shield,      label: 'Security Diag.',   description: 'Native module diagnostics',       color: '#DC2626',  path: '/security-diagnostics' },
-        { icon: Flag,        label: 'Feature Flags',    description: 'Toggle platform features',        color: '#7C3AED',  path: '/feature-flags' },
-        { icon: Paintbrush,  label: 'Branding',         description: 'Logo, colours & identity',        color: '#D97706',  path: '/branding' },
-        { icon: Wrench,      label: 'Maintenance',      description: 'Mode & system operations',        color: '#6B7280',  path: '/maintenance' },
-        { icon: Globe,       label: 'Currency',         description: 'Global currency settings',        color: '#16A34A',  path: '/currency' },
-        { icon: Trash2,      label: 'Trash Bin',        description: 'Deleted item recovery',           color: '#DC2626',  path: '/trash-bin' },
+        { icon: ShieldAlert, label: t('saOverview.nav.security'),      description: t('saOverview.nav.securityDesc'),      color: '#EF4444',  path: '/sec-dashboard' },
+        { icon: Shield,      label: t('saOverview.nav.securityDiag'),  description: t('saOverview.nav.securityDiagDesc'),  color: '#DC2626',  path: '/security-diagnostics' },
+        { icon: Flag,        label: t('saOverview.nav.featureFlags'),  description: t('saOverview.nav.featureFlagsDesc'),  color: '#7C3AED',  path: '/feature-flags' },
+        { icon: Paintbrush,  label: t('saOverview.nav.branding'),      description: t('saOverview.nav.brandingDesc'),      color: '#D97706',  path: '/branding' },
+        { icon: Wrench,      label: t('saOverview.nav.maintenance'),   description: t('saOverview.nav.maintenanceDesc'),   color: '#6B7280',  path: '/maintenance' },
+        { icon: Globe,       label: t('saOverview.nav.currency'),      description: t('saOverview.nav.currencyDesc'),      color: '#16A34A',  path: '/currency' },
+        { icon: Trash2,      label: t('saOverview.nav.trashBin'),      description: t('saOverview.nav.trashBinDesc'),      color: '#DC2626',  path: '/trash-bin' },
+        // Language access for the Super Admin role (parity with Student/Doctor).
+        { icon: Settings,    label: t('nav.settings'),                 description: t('saOverview.nav.settingsDesc'),      color: '#6B7280',  path: '/admin-settings' },
       ],
     },
+  ];
+
+  const platformStatus = [
+    { label: t('saOverview.status.database'),       status: t('saOverview.status.operational'), color: '#16A34A' },
+    { label: t('saOverview.status.authentication'), status: t('saOverview.status.active'),      color: '#16A34A' },
+    { label: t('saOverview.status.storage'),        status: t('saOverview.status.healthy'),     color: '#16A34A' },
+    { label: t('saOverview.status.edgeFunctions'),  status: t('saOverview.status.running'),     color: '#16A34A' },
   ];
 
   return (
@@ -247,8 +268,8 @@ export default function SuperAdminDashboard() {
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />} contentContainerStyle={{ paddingBottom: safeBottom(layout.insets.bottom) }}
     >
       <DashboardHeader
-        roleLabel="Super Admin"
-        greeting={firstName ? `Hi, ${firstName} 👋` : 'Dashboard 👋'}
+        roleLabel={t('role.superAdmin')}
+        greeting={firstName ? t('saOverview.greeting', { name: firstName }) : t('saOverview.greetingFallback')}
         rightActions={<Bell />}
       />
       <View style={{ padding: layout.screenPx, paddingTop: 0 }}>
@@ -256,7 +277,7 @@ export default function SuperAdminDashboard() {
         {/* ── Global search ───────────────────────────────────────────── */}
         <Pressable
           onPress={() => router.push('/sa-global-search' as RelativePathString)}
-          accessibilityLabel="Global search"
+          accessibilityLabel={t('nav.globalSearch')}
           accessibilityRole="search"
           style={[
             neuFlatStyle(isDark),
@@ -264,11 +285,11 @@ export default function SuperAdminDashboard() {
           ]}
         >
           <Search size={layout.bodySize + 2} color={`${c.text}50`} />
-          <Text style={{ flex: 1, fontSize: layout.bodySize + 1, color: `${c.text}50` }}>
-            Search doctors, students, courses, transactions…
+          <Text style={{ flex: 1, fontSize: layout.bodySize + 1, color: `${c.text}50`, textAlign: 'left' }}>
+            {t('saOverview.searchPlaceholder')}
           </Text>
           <View style={{ backgroundColor: `${c.primary}18`, borderRadius: layout.cardRadius / 2, paddingHorizontal: layout.pad.sm, paddingVertical: layout.pad.xs }}>
-            <Text style={{ fontSize: layout.captionSize - 1, fontWeight: '700', color: c.primary }}>SEARCH</Text>
+            <Text style={{ fontSize: layout.captionSize - 1, fontWeight: '700', color: c.primary }}>{t('saOverview.searchChip')}</Text>
           </View>
         </Pressable>
 
@@ -277,35 +298,35 @@ export default function SuperAdminDashboard() {
           <ActivityIndicator color={c.primary} style={{ marginVertical: layout.sectionGap }} />
         ) : stats && (
           <>
-            <SectionLabel label="Users & Platform" c={c} />
+            <SectionLabel label={t('saOverview.section.usersPlatform')} c={c} />
             <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: layout.itemGap }}>
-              <KpiCard label="Total Doctors"   value={stats.totalDoctors}   icon={Stethoscope}    color="#16A34A" path="/sa-users"       c={c} isDark={isDark} />
-              <KpiCard label="Total Students"  value={stats.totalStudents}  icon={GraduationCap}  color="#7C3AED" path="/sa-users"       c={c} isDark={isDark} />
-              <KpiCard label="Total Courses"   value={stats.totalCourses}   icon={BookOpen}       color="#2DA8FF" path="/global-search"       c={c} isDark={isDark} />
-              <KpiCard label="Total Devices"   value={stats.totalDevices}   icon={UserCog}        color="#D97706" path="/sa-devices"       c={c} isDark={isDark} />
+              <KpiCard label={t('saOverview.kpi.totalDoctors')} value={stats.totalDoctors}   icon={Stethoscope}    color="#16A34A" path="/sa-users"       c={c} isDark={isDark} />
+              <KpiCard label={t('saOverview.kpi.totalStudents')} value={stats.totalStudents}  icon={GraduationCap}  color="#7C3AED" path="/sa-users"       c={c} isDark={isDark} />
+              <KpiCard label={t('saOverview.kpi.totalCourses')} value={stats.totalCourses}   icon={BookOpen}       color="#2DA8FF" path="/global-search"       c={c} isDark={isDark} />
+              <KpiCard label={t('saOverview.kpi.totalDevices')} value={stats.totalDevices}   icon={UserCog}        color="#D97706" path="/sa-devices"       c={c} isDark={isDark} />
             </View>
 
-            <SectionLabel label="Revenue & Operations" c={c} />
+            <SectionLabel label={t('saOverview.section.revenueOps')} c={c} />
             <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: layout.itemGap }}>
-              <KpiCard label="Total Credits"    value={stats.totalCredits.toLocaleString('en-US')}  icon={CreditCard}  color="#16A34A" path="/sa-credits"    c={c} isDark={isDark} />
-              <KpiCard label="Used Credits"     value={stats.usedCredits.toLocaleString('en-US')}   icon={Coins}       color="#D97706" path="/sa-credits"      c={c} isDark={isDark} />
-              <KpiCard label="Published"        value={stats.publishedCourses}               icon={BookOpen}    color="#2DA8FF" path="/global-search"       c={c} isDark={isDark} />
-              <KpiCard label="Draft Courses"    value={stats.draftCourses}                   icon={FileText}    color="#6B7280" path="/global-search"       c={c} isDark={isDark} />
+              <KpiCard label={t('saOverview.kpi.totalCredits')} value={stats.totalCredits.toLocaleString('en-US')}  icon={CreditCard}  color="#16A34A" path="/sa-credits"    c={c} isDark={isDark} />
+              <KpiCard label={t('saOverview.kpi.usedCredits')} value={stats.usedCredits.toLocaleString('en-US')}   icon={Coins}       color="#D97706" path="/sa-credits"      c={c} isDark={isDark} />
+              <KpiCard label={t('saOverview.kpi.published')} value={stats.publishedCourses}               icon={BookOpen}    color="#2DA8FF" path="/global-search"       c={c} isDark={isDark} />
+              <KpiCard label={t('saOverview.kpi.draftCourses')} value={stats.draftCourses}                   icon={FileText}    color="#6B7280" path="/global-search"       c={c} isDark={isDark} />
             </View>
 
-            <SectionLabel label="System Snapshot" c={c} />
+            <SectionLabel label={t('saOverview.section.snapshot')} c={c} />
             <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: layout.itemGap }}>
-              <KpiCard label="Universities"    value={stats.totalUniversities}  icon={GraduationCap}  color="#2DA8FF" path="/sa-academic"     c={c} isDark={isDark} />
-              <KpiCard label="Faculties"       value={stats.totalFaculties}     icon={BookOpen}       color="#7C3AED" path="/sa-academic"     c={c} isDark={isDark} />
-              <KpiCard label="Admin Staff"     value={stats.totalAdmins}        icon={UserCog}        color="#EF4444" path="/sa-users"  c={c} isDark={isDark} />
-              <KpiCard label="Total Users"     value={stats.totalUsers}         icon={Users}          color={c.primary} path="/sa-users" c={c} isDark={isDark} />
+              <KpiCard label={t('saOverview.kpi.universities')} value={stats.totalUniversities}  icon={GraduationCap}  color="#2DA8FF" path="/sa-academic"     c={c} isDark={isDark} />
+              <KpiCard label={t('saOverview.kpi.faculties')} value={stats.totalFaculties}     icon={BookOpen}       color="#7C3AED" path="/sa-academic"     c={c} isDark={isDark} />
+              <KpiCard label={t('saOverview.kpi.adminStaff')} value={stats.totalAdmins}        icon={UserCog}        color="#EF4444" path="/sa-users"  c={c} isDark={isDark} />
+              <KpiCard label={t('saOverview.kpi.totalUsers')} value={stats.totalUsers}         icon={Users}          color={c.primary} path="/sa-users" c={c} isDark={isDark} />
             </View>
 
           </>
         )}
 
         {/* ── Quick Actions ────────────────────────────────────────────── */}
-        <SectionLabel label="Quick Actions" c={c} />
+        <SectionLabel label={t('saOverview.section.quickActions')} c={c} />
         <View style={[neuFlatStyle(isDark), { borderRadius: layout.cardRadius, padding: layout.cardPx, marginBottom: layout.itemGap }]}>
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between' }}>
             {quickActions.map(a => (
@@ -325,14 +346,9 @@ export default function SuperAdminDashboard() {
         ))}
 
         {/* ── Platform status ──────────────────────────────────────────── */}
-        <SectionLabel label="Platform Status" c={c} />
+        <SectionLabel label={t('saOverview.section.platformStatus')} c={c} />
         <View style={[neuFlatStyle(isDark), { borderRadius: layout.cardRadius, padding: layout.cardPx,  }]}>
-          {[
-            { label: 'Database',       status: 'Operational', color: '#16A34A' },
-            { label: 'Authentication', status: 'Active',      color: '#16A34A' },
-            { label: 'Storage',        status: 'Healthy',     color: '#16A34A' },
-            { label: 'Edge Functions', status: 'Running',     color: '#16A34A' },
-          ].map(({ label, status, color }, i, arr) => (
+          {platformStatus.map(({ label, status, color }, i, arr) => (
             <View key={label} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: layout.pad.md, borderBottomWidth: i < arr.length - 1 ? 1 : 0, borderBottomColor: `${c.text}08` }}>
               <Text style={{ fontSize: layout.bodySize, color: c.text, opacity: 0.7, fontWeight: '500' }}>{label}</Text>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: layout.pad.sm }}>

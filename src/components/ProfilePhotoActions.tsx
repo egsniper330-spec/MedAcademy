@@ -31,6 +31,7 @@ import { Image } from 'expo-image';
 import { neuColors, mutedTextStyle } from '@/lib/neu';
 import { ResponsiveModal } from '@/components/ResponsiveModal';
 import { NeuButton } from '@/components/NeuButton';
+import { useTranslation } from '@/lib/i18n';
 
 export interface ProfilePhotoActionsProps {
   /** Current avatar URL — null/empty renders the default avatar. */
@@ -63,6 +64,7 @@ export function ProfilePhotoActions({
 }: ProfilePhotoActionsProps) {
   const [sheetOpen, setSheetOpen] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const { t } = useTranslation();
 
   const hasPhoto = !!avatarUrl;
   const busy = uploading || removing;
@@ -99,7 +101,7 @@ export function ProfilePhotoActions({
         onPress={handlePress}
         disabled={busy}
         accessibilityRole="button"
-        accessibilityLabel={hasPhoto ? 'Change or remove profile photo' : 'Add profile photo'}
+        accessibilityLabel={hasPhoto ? t('profilePhoto.changeA11y') : t('profilePhoto.addA11y')}
         style={{ width: size, height: size }}
       >
         <View
@@ -148,19 +150,19 @@ export function ProfilePhotoActions({
       <ResponsiveModal
         visible={sheetOpen}
         onClose={() => setSheetOpen(false)}
-        title="Profile Photo"
-        subtitle="Choose an action for your current photo."
+        title={t('profilePhoto.title')}
+        subtitle={t('profilePhoto.subtitle')}
       >
         <ActionRow
           c={c}
           icon={<ImageIcon size={18} color={c.primary} />}
-          label="Change Photo"
+          label={t('profilePhoto.change')}
           onPress={handleChange}
         />
         <ActionRow
           c={c}
           icon={<Trash2 size={18} color="#DC2626" />}
-          label="Remove Photo"
+          label={t('profilePhoto.remove')}
           destructive
           onPress={handleAskRemove}
         />
@@ -170,8 +172,8 @@ export function ProfilePhotoActions({
       <ResponsiveModal
         visible={confirmOpen}
         onClose={() => setConfirmOpen(false)}
-        title="Remove Photo?"
-        subtitle="Your profile picture will be replaced with the default avatar. This cannot be undone."
+        title={t('profilePhoto.removeTitle')}
+        subtitle={t('profilePhoto.removeSubtitle')}
         icon={
           <View style={{ width: 40, height: 40, borderRadius: 12, backgroundColor: '#DC262618', alignItems: 'center', justifyContent: 'center' }}>
             <AlertTriangle size={20} color="#DC2626" />
@@ -180,13 +182,13 @@ export function ProfilePhotoActions({
         footer={
           <View style={{ flexDirection: 'row', gap: 12 }}>
             <NeuButton
-              label="Cancel"
+              label={t('common.cancel')}
               variant="secondary"
               onPress={() => setConfirmOpen(false)}
               style={{ flex: 1, minWidth: 0 }}
             />
             <NeuButton
-              label="Remove"
+              label={t('common.remove')}
               variant="danger"
               onPress={handleConfirmRemove}
               style={{ flex: 1, minWidth: 0 }}
@@ -195,7 +197,7 @@ export function ProfilePhotoActions({
         }
       >
         <Text style={{ fontSize: 14, ...mutedTextStyle(c, 0.6), lineHeight: 20 }}>
-          The photo will be deleted from your profile and storage.
+          {t('profilePhoto.removeBody')}
         </Text>
       </ResponsiveModal>
     </View>

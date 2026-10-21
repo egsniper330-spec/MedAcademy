@@ -42,6 +42,7 @@ import {
 } from '@/lib/api';
 import { NeuCard } from '@/components/NeuCard';
 import { useToast } from '@/components/Toast';
+import { useTranslation } from '@/lib/i18n';
 import { neuColors, useLayout, safeTop, safeLeft, safeRight, safeBottom, mutedTextStyle } from '@/lib/neu';
 import { DashboardHeader } from '@/components/DashboardHeader';
 import HamburgerButton from '@/components/HamburgerButton';
@@ -71,19 +72,31 @@ function fmtDateShort(iso: string): string {
   return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 }
 
-const TX_LABEL: Record<string, string> = {
-  purchase:          'Purchase',
-  removal:           'Course Removal',
-  suspension_refund: 'Refund',
-  adjustment:        'Adjustment',
-  account_deletion:  'Account Deleted',
+// Transaction types are machine values from the backend; the label is resolved
+// through the dictionary at RENDER time (never at module load), so switching
+// language repaints without a remount.
+const TX_LABEL_KEY: Record<string, string> = {
+  purchase:          'drProfile.tx.purchase',
+  removal:           'drProfile.tx.removal',
+  suspension_refund: 'drProfile.tx.suspension_refund',
+  adjustment:        'drProfile.tx.adjustment',
+  account_deletion:  'drProfile.tx.account_deletion',
 };
 
+/** Translator signature — resolved per render, never cached in a module const. */
+type Translate = (key: string, params?: Record<string, string | number>) => string;
+
+/** Unknown transaction types fall through verbatim (they are API values). */
+function txTypeLabel(type: string, t: Translate): string {
+  const key = TX_LABEL_KEY[type];
+  return key ? t(key) : type;
+}
+
 // For account_deletion rows the student name is stored as the name at deletion time;
-// display as 'Deleted Account' regardless since the account no longer exists.
-function txDisplayName(row: EarningsTransactionRow): string {
-  if (row.transaction_type === 'account_deletion') return 'Deleted Account';
-  return row.student_name ?? 'Deleted Account';
+// display as the localized 'Deleted Account' regardless since the account no longer exists.
+function txDisplayName(row: EarningsTransactionRow, t: Translate): string {
+  if (row.transaction_type === 'account_deletion') return t('drProfile.deletedAccount');
+  return row.student_name ?? t('drProfile.deletedAccount');
 }
 
 type ChartPeriod = 'daily' | 'weekly' | 'monthly' | 'yearly';
@@ -94,6 +107,7 @@ type ChartPeriod = 'daily' | 'weekly' | 'monthly' | 'yearly';
 function EarningsToggleCard({
   enabled, toggling, onToggle, c, disabled,
 }: { enabled: boolean; toggling: boolean; onToggle: (v: boolean) => void; c: typeof neuColors.light; disabled?: boolean }) {
+  const { t } = useTranslation();
   const frozen = disabled && !enabled;
   return (
     <NeuCard radius={18} style={{ padding: 16, marginBottom: 20, opacity: frozen ? 0.55 : 1, pointerEvents: frozen ? 'none' : 'auto' }}>
@@ -102,10 +116,10 @@ function EarningsToggleCard({
           <TrendingUp size={20} color={enabled ? '#16A34A' : `${c.text}44`} />
         </View>
         <View style={{ flex: 1 }}>
-          <Text style={{ fontSize: 15, fontWeight: '700', color: c.text }}>Earnings System</Text>
+          <Text style={{ fontSize: 15, fontWeight: '700', color: c.text }}>{t('drProfile.section.earnings')}</Text>
           <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.4), marginTop: 2 }}>
-            {frozen ? 'Disabled by platform — contact support' :
-             enabled ? 'Active — tracking revenue independently' : 'Disabled — enable to track revenue'}
+            {frozen ? t('drProfile.earnings.toggleFrozen') :
+             enabled ? t('drProfile.earnings.toggleActive') : t('drProfile.earnings.toggleInactive')}
           </Text>
         </View>
         {frozen
@@ -118,7 +132,7 @@ function EarningsToggleCard({
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 12, paddingTop: 12, borderTopWidth: 1, borderTopColor: `${c.text}08` }}>
         <View style={{ width: 7, height: 7, borderRadius: 4, backgroundColor: enabled ? '#16A34A' : `${c.text}33` }} />
         <Text style={{ fontSize: 11, fontWeight: '600', color: enabled ? '#16A34A' : `${c.text}44` }}>
-          {enabled ? 'Earnings system is ON' : 'Earnings system is OFF'}
+          {enabled ? t('drProfile.earningsOn') : t('drProfile.earningsOff')}
         </Text>
       </View>
     </NeuCard>
@@ -156,14 +170,15 @@ function SL({ label, c }: { label: string; c: typeof neuColors.light }) {
 // ─────────────────────────────────────────────────────────────────────────────
 // Period toggle
 // ─────────────────────────────────────────────────────────────────────────────
-const PERIODS: { key: ChartPeriod; label: string }[] = [
-  { key: 'daily',   label: 'Daily'   },
-  { key: 'weekly',  label: 'Weekly'  },
-  { key: 'monthly', label: 'Monthly' },
-  { key: 'yearly',  label: 'Yearly'  },
+const PERIODS: { key: ChartPeriod; labelKey: string }[] = [
+  { key: 'daily',   labelKey: 'period.daily'   },
+  { key: 'weekly',  labelKey: 'period.weekly'  },
+  { key: 'monthly', labelKey: 'period.monthly' },
+  { key: 'yearly',  labelKey: 'period.yearly'  },
 ];
 
 function PeriodPicker({ value, onChange, c }: { value: ChartPeriod; onChange: (v: ChartPeriod) => void; c: typeof neuColors.light }) {
+  const { t } = useTranslation();
   return (
     <View style={{ flexDirection: 'row', backgroundColor: `${c.text}0A`, borderRadius: 12, padding: 3, marginBottom: 16 }}>
       {PERIODS.map(p => (
@@ -172,7 +187,7 @@ function PeriodPicker({ value, onChange, c }: { value: ChartPeriod; onChange: (v
           backgroundColor: value === p.key ? c.base : 'transparent',
           ...(value === p.key ? { shadowColor: c.shadowDark, shadowOffset: { width: 1, height: 1 }, shadowOpacity: 0.35, shadowRadius: 4 } : {}),
         }}>
-          <Text style={{ fontSize: 11, fontWeight: '700', color: value === p.key ? c.primary : `${c.text}55` }}>{p.label}</Text>
+          <Text style={{ fontSize: 11, fontWeight: '700', color: value === p.key ? c.primary : `${c.text}55` }}>{t(p.labelKey)}</Text>
         </Pressable>
       ))}
     </View>
@@ -183,6 +198,7 @@ function PeriodPicker({ value, onChange, c }: { value: ChartPeriod; onChange: (v
 // Revenue Time-Series Chart
 // ─────────────────────────────────────────────────────────────────────────────
 function RevenueChart({ transactions, c }: { transactions: EarningsTransactionRow[]; c: typeof neuColors.light }) {
+  const { t } = useTranslation();
   const [period, setPeriod] = useState<ChartPeriod>('daily');
 
   const points = useMemo(() => bucketEarningsTimeSeries(transactions, period), [transactions, period]);
@@ -192,15 +208,15 @@ function RevenueChart({ transactions, c }: { transactions: EarningsTransactionRo
     <NeuCard radius={18} style={{ padding: 18, marginBottom: 20 }}>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 14 }}>
         <BarChart2 size={15} color={c.primary} />
-        <Text style={{ fontSize: 13, fontWeight: '700', color: c.text, flex: 1 }}>Revenue Timeline</Text>
+        <Text style={{ fontSize: 13, fontWeight: '700', color: c.text, flex: 1 }}>{t('drProfile.earnings.timeline')}</Text>
         <View style={{ flexDirection: 'row', gap: 12 }}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
             <View style={{ width: 8, height: 8, borderRadius: 2, backgroundColor: '#16A34A' }} />
-            <Text style={{ fontSize: 9, ...mutedTextStyle(c, 0.4) }}>Income</Text>
+            <Text style={{ fontSize: 9, ...mutedTextStyle(c, 0.4) }}>{t('drProfile.earnings.income')}</Text>
           </View>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
             <View style={{ width: 8, height: 8, borderRadius: 2, backgroundColor: '#DC2626' }} />
-            <Text style={{ fontSize: 9, ...mutedTextStyle(c, 0.4) }}>Deduction</Text>
+            <Text style={{ fontSize: 9, ...mutedTextStyle(c, 0.4) }}>{t('drProfile.earnings.deduction')}</Text>
           </View>
         </View>
       </View>
@@ -208,7 +224,7 @@ function RevenueChart({ transactions, c }: { transactions: EarningsTransactionRo
       <PeriodPicker value={period} onChange={setPeriod} c={c} />
 
       {points.length === 0 ? (
-        <Text style={{ fontSize: 13, ...mutedTextStyle(c, 0.3), textAlign: 'center', paddingVertical: 24 }}>No data for this period</Text>
+        <Text style={{ fontSize: 13, ...mutedTextStyle(c, 0.3), textAlign: 'center', paddingVertical: 24 }}>{t('drProfile.earnings.noDataPeriod')}</Text>
       ) : (
         <ScrollView automaticallyAdjustKeyboardInsets={process.env.EXPO_OS === 'ios'} horizontal showsHorizontalScrollIndicator={false}>
           <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: 5, height: 110, paddingBottom: 20, minWidth: points.length * 32 }}>
@@ -236,13 +252,18 @@ function RevenueChart({ transactions, c }: { transactions: EarningsTransactionRo
 // Course Revenue Table
 // ─────────────────────────────────────────────────────────────────────────────
 function CourseRevenueTable({ rows, total, c }: { rows: EarningsCourseRow[]; total: number; c: typeof neuColors.light }) {
+  const { t, isRTL } = useTranslation();
+  // Numeric columns hug the trailing edge: right in LTR, left in RTL. Physical
+  // textAlign is used (not 'auto') because these are right-aligned NUMBERS,
+  // and RN does not mirror textAlign for us.
+  const numAlign = isRTL ? 'left' : 'right';
   return (
     <NeuCard radius={18} style={{ overflow: 'hidden', marginBottom: 20 }}>
       <View style={{ flexDirection: 'row', paddingVertical: 10, paddingHorizontal: 14, backgroundColor: `${c.text}06`, borderBottomWidth: 1, borderBottomColor: `${c.text}08` }}>
-        <Text style={{ flex: 1, fontSize: 9, fontWeight: '800', ...mutedTextStyle(c, 0.4), textTransform: 'uppercase', letterSpacing: 0.7 }}>Course</Text>
-        <Text style={{ width: 44, textAlign: 'center', fontSize: 9, fontWeight: '800', ...mutedTextStyle(c, 0.4), textTransform: 'uppercase' }}>Students</Text>
-        <Text style={{ width: 60, textAlign: 'right', fontSize: 9, fontWeight: '800', ...mutedTextStyle(c, 0.4), textTransform: 'uppercase' }}>Revenue</Text>
-        <Text style={{ width: 32, textAlign: 'right', fontSize: 9, fontWeight: '800', ...mutedTextStyle(c, 0.4), textTransform: 'uppercase' }}>%</Text>
+        <Text style={{ flex: 1, fontSize: 9, fontWeight: '800', ...mutedTextStyle(c, 0.4), textTransform: 'uppercase', letterSpacing: 0.7 }}>{t('drProfile.earnings.colCourse')}</Text>
+        <Text style={{ width: 44, textAlign: 'center', fontSize: 9, fontWeight: '800', ...mutedTextStyle(c, 0.4), textTransform: 'uppercase' }}>{t('drProfile.stats.students')}</Text>
+        <Text style={{ width: 60, textAlign: numAlign, fontSize: 9, fontWeight: '800', ...mutedTextStyle(c, 0.4), textTransform: 'uppercase' }}>{t('drProfile.earnings.colRevenue')}</Text>
+        <Text style={{ width: 32, textAlign: numAlign, fontSize: 9, fontWeight: '800', ...mutedTextStyle(c, 0.4), textTransform: 'uppercase' }}>%</Text>
       </View>
       {rows.map(r => (
         <View key={r.course_id} style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 11, paddingHorizontal: 14, borderBottomWidth: 1, borderBottomColor: `${c.text}06` }}>
@@ -253,15 +274,15 @@ function CourseRevenueTable({ rows, total, c }: { rows: EarningsCourseRow[]; tot
             </View>
           </View>
           <Text style={{ width: 44, textAlign: 'center', fontSize: 12, fontWeight: '600', color: `${c.text}77` }}>{r.students}</Text>
-          <Text style={{ width: 60, textAlign: 'right', fontSize: 12, fontWeight: '700', color: r.revenue_egp >= 0 ? '#16A34A' : '#DC2626' }} numberOfLines={1}>{fmtEGPPlain(r.revenue_egp)}</Text>
-          <Text style={{ width: 32, textAlign: 'right', fontSize: 11, fontWeight: '700', color: c.primary }}>{r.pct}%</Text>
+          <Text style={{ width: 60, textAlign: numAlign, fontSize: 12, fontWeight: '700', color: r.revenue_egp >= 0 ? '#16A34A' : '#DC2626' }} numberOfLines={1}>{fmtEGPPlain(r.revenue_egp)}</Text>
+          <Text style={{ width: 32, textAlign: numAlign, fontSize: 11, fontWeight: '700', color: c.primary }}>{r.pct}%</Text>
         </View>
       ))}
       <View style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 12, paddingHorizontal: 14, backgroundColor: `${c.primary}08`, borderTopWidth: 1.5, borderTopColor: `${c.primary}22` }}>
-        <Text style={{ flex: 1, fontSize: 13, fontWeight: '800', color: c.primary }}>Total</Text>
+        <Text style={{ flex: 1, fontSize: 13, fontWeight: '800', color: c.primary }}>{t('common.total')}</Text>
         <Text style={{ width: 44, textAlign: 'center', fontSize: 12, fontWeight: '700', color: c.primary }}>{rows.reduce((s, r) => s + r.students, 0)}</Text>
-        <Text style={{ width: 60, textAlign: 'right', fontSize: 13, fontWeight: '800', color: c.primary }} numberOfLines={1}>{fmtEGPPlain(total)}</Text>
-        <Text style={{ width: 32, textAlign: 'right', fontSize: 11, fontWeight: '700', color: c.primary }}>100%</Text>
+        <Text style={{ width: 60, textAlign: numAlign, fontSize: 13, fontWeight: '800', color: c.primary }} numberOfLines={1}>{fmtEGPPlain(total)}</Text>
+        <Text style={{ width: 32, textAlign: numAlign, fontSize: 11, fontWeight: '700', color: c.primary }}>100%</Text>
       </View>
     </NeuCard>
   );
@@ -273,6 +294,7 @@ function CourseRevenueTable({ rows, total, c }: { rows: EarningsCourseRow[]; tot
 function TransactionRow({ row, onPress, c }: {
   row: EarningsTransactionRow; onPress: () => void; c: typeof neuColors.light;
 }) {
+  const { t, isRTL } = useTranslation();
   const isPositive = row.amount >= 0;
   const color      = isPositive ? '#16A34A' : '#DC2626';
   const Icon       = isPositive ? ArrowUpRight : ArrowDownRight;
@@ -288,22 +310,22 @@ function TransactionRow({ row, onPress, c }: {
       {row.student_avatar ? (
         <Image
           source={{ uri: row.student_avatar }}
-          style={{ width: 38, height: 38, borderRadius: 12, marginRight: 12 }}
+          style={{ width: 38, height: 38, borderRadius: 12, marginEnd: 12 }}
         />
       ) : (
         <View style={{ width: 38, height: 38, borderRadius: 12,
                        backgroundColor: `${color}18`, alignItems: 'center',
-                       justifyContent: 'center', marginRight: 12 }}>
+                       justifyContent: 'center', marginEnd: 12 }}>
           <Icon size={16} color={color} />
         </View>
       )}
 
       <View style={{ flex: 1, gap: 2 }}>
         <Text style={{ fontSize: 13, fontWeight: '700', color: c.text }} numberOfLines={1}>
-          {txDisplayName(row)}
+          {txDisplayName(row, t)}
         </Text>
         <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.4) }} numberOfLines={1}>
-          {row.course_title ?? '—'}{'  ·  '}{TX_LABEL[row.transaction_type] ?? row.transaction_type}
+          {row.course_title ?? '—'}{'  ·  '}{txTypeLabel(row.transaction_type, t)}
         </Text>
       </View>
 
@@ -312,7 +334,13 @@ function TransactionRow({ row, onPress, c }: {
         <Text style={{ fontSize: 10, ...mutedTextStyle(c, 0.35) }}>{fmtDateShort(row.created_at)}</Text>
       </View>
 
-      {!isLegacy && <ChevronRight size={14} color={`${c.text}30`} style={{ marginLeft: 4 }} />}
+      {!isLegacy && (
+        <ChevronRight
+          size={14}
+          color={`${c.text}30`}
+          style={{ marginStart: 4, transform: [{ rotate: isRTL ? '180deg' : '0deg' }] }}
+        />
+      )}
     </Pressable>
   );
 }
@@ -320,11 +348,17 @@ function TransactionRow({ row, onPress, c }: {
 // ─────────────────────────────────────────────────────────────────────────────
 // Student Profile Modal  (action-only — no per-student price override)
 // ─────────────────────────────────────────────────────────────────────────────
-const PRICING_LABEL: Record<string, string> = {
-  doctor_independent: 'Doctor Pricing',
-  global:             'Global Price',
-  per_student:        'Student Override',
+const PRICING_KEY: Record<string, string> = {
+  doctor_independent: 'drProfile.earnings.pricing.doctor',
+  global:             'drProfile.earnings.pricing.global',
+  per_student:        'drProfile.earnings.pricing.perStudent',
 };
+
+/** Pricing source → localized label. Unknown modes fall back to doctor pricing. */
+function pricingSourceLabel(mode: string, t: Translate): string {
+  const key = PRICING_KEY[mode];
+  return key ? t(key) : t('drProfile.earnings.pricing.doctor');
+}
 
 function InfoRow({ icon, label, value, c }: {
   icon: React.ReactNode; label: string; value: string; c: typeof neuColors.light;
@@ -365,6 +399,7 @@ function StudentProfileModal({ tx, doctorId, onClose, onAction, c }: {
   const [acting,        setActing]        = useState<string | null>(null);
   const [confirmRemove, setConfirmRemove] = useState<{ enrollmentId: string; courseTitle: string } | null>(null);
   const { showToast } = useToast();
+  const { t } = useTranslation();
 
   const loadProfile = useCallback(async () => {
     setLoading(true);
@@ -394,11 +429,11 @@ function StudentProfileModal({ tx, doctorId, onClose, onAction, c }: {
     try {
       if (action === 'suspend') {
         await suspendStudentCourseAccess(enrollmentId);
-        showToast({ type: 'success', message: 'Access suspended. Revenue preserved.' });
+        showToast({ type: 'success', message: t('drProfile.student.accessSuspendedPreserved') });
         await loadProfile();
       } else if (action === 'restore') {
         await restoreStudentCourseAccess(enrollmentId);
-        showToast({ type: 'success', message: 'Access restored.' });
+        showToast({ type: 'success', message: t('drProfile.student.accessRestored') });
         await loadProfile();
       } else {
         await removeStudentFromCourseWithRefund({
@@ -406,15 +441,20 @@ function StudentProfileModal({ tx, doctorId, onClose, onAction, c }: {
           studentNameSnapshot: tx.student_name ?? '',
           courseNameSnapshot:  courseTitle,
         });
-        showToast({ type: 'success', message: 'Student removed. Revenue deducted.' });
+        showToast({ type: 'success', message: t('drProfile.student.removed') });
         onClose(); onAction(); return;
       }
-    } catch (e: any) { showToast({ type: 'error', message: e?.message ?? 'Action failed.' }); }
+    } catch (e: any) { showToast({ type: 'error', message: e?.message ?? t('drProfile.student.actionFailed') }); }
     setActing(null);
   };
 
   const enStatusColor = (s: string) =>
     s === 'active' ? '#16A34A' : s === 'suspended' ? '#D97706' : '#DC2626';
+  // Enrollment statuses are backend enum values; only the known ones are
+  // localized, anything new falls through verbatim.
+  const enStatusLabel = (s: string) =>
+    s === 'active' ? t('drProfile.status.active')
+      : s === 'suspended' ? t('drProfile.status.suspended') : s;
 
   const displayName  = profile?.full_name    ?? tx.student_name               ?? '—';
   const displayPhone = profile?.phone        ?? tx.student_phone_snapshot     ?? tx.student_phone  ?? '—';
@@ -423,9 +463,11 @@ function StudentProfileModal({ tx, doctorId, onClose, onAction, c }: {
   const displayJoin  = (!isDeleted && profile?.created_at) ? profile.created_at : null;
 
   const hasSuspended       = (profile?.enrollments ?? []).some(e => e.status === 'suspended');
-  const accountStatus      = isDeleted ? 'Deleted' : hasSuspended ? 'Suspended' : 'Active';
+  const accountStatus      = isDeleted ? t('drProfile.status.deleted')
+                                     : hasSuspended ? t('drProfile.status.suspended')
+                                                    : t('drProfile.status.active');
   const accountStatusColor = isDeleted ? '#DC2626' : hasSuspended ? '#D97706' : '#16A34A';
-  const pricingLabel       = PRICING_LABEL[tx.pricing_mode] ?? 'Doctor Pricing';
+  const pricingSourceValue = pricingSourceLabel(tx.pricing_mode, t);
 
   return (
     <Modal visible animationType="slide" transparent onRequestClose={onClose}>
@@ -438,7 +480,7 @@ function StudentProfileModal({ tx, doctorId, onClose, onAction, c }: {
 
           <View style={{ flexDirection: 'row', alignItems: 'center',
                          paddingHorizontal: layout.screenPx, paddingTop: 14, paddingBottom: 10 }}>
-            <View style={{ width: 48, height: 48, borderRadius: 14, marginRight: 12,
+            <View style={{ width: 48, height: 48, borderRadius: 14, marginEnd: 12,
                            backgroundColor: isDeleted ? '#DC262614' : `${c.primary}15`,
                            alignItems: 'center', justifyContent: 'center' }}>
               {isDeleted ? <Trash2 size={22} color="#DC2626" /> : <Users size={22} color={c.primary} />}
@@ -457,7 +499,7 @@ function StudentProfileModal({ tx, doctorId, onClose, onAction, c }: {
                                paddingHorizontal: 8, paddingVertical: 3 }}>
                   <Text style={{ fontSize: 10, fontWeight: '700', ...mutedTextStyle(c, 0.5),
                                  textTransform: 'uppercase', letterSpacing: 0.5 }}>
-                    {TX_LABEL[tx.transaction_type] ?? tx.transaction_type}
+                    {txTypeLabel(tx.transaction_type, t)}
                   </Text>
                 </View>
               </View>
@@ -481,56 +523,56 @@ function StudentProfileModal({ tx, doctorId, onClose, onAction, c }: {
                     <Trash2 size={15} color="#DC2626" style={{ marginTop: 1 }} />
                     <View style={{ flex: 1, gap: 3 }}>
                       <Text style={{ fontSize: 13, fontWeight: '700', color: '#DC2626' }}>
-                        Account Permanently Deleted
+                        {t('drProfile.student.deletedTitle')}
                       </Text>
                       <Text style={{ fontSize: 12, color: '#DC2626', opacity: 0.7, lineHeight: 18 }}>
-                        Immutable snapshot recorded at transaction time.
+                        {t('drProfile.student.deletedHint')}
                       </Text>
                     </View>
                   </View>
                 )}
 
-                <SectionLabel text={isDeleted ? 'Historical Snapshot' : 'Student Profile'} c={c} />
+                <SectionLabel text={isDeleted ? t('drProfile.student.historical') : t('drProfile.student.profile')} c={c} />
                 <NeuCard radius={16} style={{ padding: 16, gap: 14, marginBottom: 16 }}>
-                  <InfoRow icon={<Users    size={14} color={c.primary} />} label="Full Name"    value={displayName}  c={c} />
-                  <InfoRow icon={<Phone    size={14} color={c.primary} />} label="Phone"        value={displayPhone} c={c} />
-                  <InfoRow icon={<Mail     size={14} color={c.primary} />} label="Email"        value={displayEmail} c={c} />
-                  <InfoRow icon={<Hash     size={14} color={c.primary} />} label="Watermark ID" value={displayWmk}   c={c} />
+                  <InfoRow icon={<Users    size={14} color={c.primary} />} label={t('profile.fullName')}     value={displayName}  c={c} />
+                  <InfoRow icon={<Phone    size={14} color={c.primary} />} label={t('common.phone')}        value={displayPhone} c={c} />
+                  <InfoRow icon={<Mail     size={14} color={c.primary} />} label={t('common.email')}        value={displayEmail} c={c} />
+                  <InfoRow icon={<Hash     size={14} color={c.primary} />} label={t('drProfile.earnings.watermarkId')} value={displayWmk} c={c} />
                   {displayJoin && (
-                    <InfoRow icon={<Calendar size={14} color={c.primary} />} label="Joined" value={fmtDate(displayJoin)} c={c} />
+                    <InfoRow icon={<Calendar size={14} color={c.primary} />} label={t('drProfile.student.joined')} value={fmtDate(displayJoin)} c={c} />
                   )}
                 </NeuCard>
 
-                <SectionLabel text="Transaction Details" c={c} />
+                <SectionLabel text={t('drProfile.student.txDetails')} c={c} />
                 <NeuCard radius={16} style={{ padding: 16, gap: 14, marginBottom: 16 }}>
                   <InfoRow icon={<BookOpen size={14} color={c.primary} />}
-                    label="Course" value={tx.course_title ?? '—'} c={c} />
+                    label={t('drProfile.earnings.colCourse')} value={tx.course_title ?? '—'} c={c} />
                   <InfoRow icon={<Zap size={14} color={c.primary} />}
-                    label="Transaction Type" value={TX_LABEL[tx.transaction_type] ?? tx.transaction_type} c={c} />
+                    label={t('drProfile.earnings.transactionType')} value={txTypeLabel(tx.transaction_type, t)} c={c} />
                   <InfoRow icon={<Calendar size={14} color={c.primary} />}
-                    label="Date" value={fmtDate(tx.created_at)} c={c} />
+                    label={t('common.date')} value={fmtDate(tx.created_at)} c={c} />
                   <InfoRow
                     icon={<DollarSign size={14} color={tx.amount >= 0 ? '#16A34A' : '#DC2626'} />}
-                    label="Revenue"
+                    label={t('drProfile.earnings.colRevenue')}
                     value={`${tx.amount >= 0 ? '+' : '−'}EGP ${Math.abs(tx.amount).toLocaleString('en-US')}`}
                     c={c} />
                   {tx.price_snapshot > 0 && (
                     <InfoRow icon={<Settings size={14} color={c.primary} />}
-                      label="Pricing Source" value={pricingLabel} c={c} />
+                      label={t('drProfile.earnings.pricingSource')} value={pricingSourceValue} c={c} />
                   )}
                   {tx.notes && (
-                    <InfoRow icon={<Hash size={14} color={c.primary} />} label="Notes" value={tx.notes} c={c} />
+                    <InfoRow icon={<Hash size={14} color={c.primary} />} label={t('drProfile.earnings.notes')} value={tx.notes} c={c} />
                   )}
                 </NeuCard>
 
                 {!isDeleted && profile && (
                   <>
-                    <SectionLabel text="Course Enrollments" c={c} />
+                    <SectionLabel text={t('drProfile.student.enrollments')} c={c} />
                     {profile.enrollments.length === 0 ? (
                       <NeuCard radius={16} style={{ padding: layout.screenPx, alignItems: 'center', gap: 8, marginBottom: 16 }}>
                         <BookOpen size={22} color={`${c.text}30`} />
                         <Text style={{ fontSize: 13, ...mutedTextStyle(c, 0.3), textAlign: 'center' }}>
-                          No enrollments on your courses.
+                          {t('drProfile.student.noEnrollments')}
                         </Text>
                       </NeuCard>
                     ) : profile.enrollments.map(en => (
@@ -544,7 +586,7 @@ function StudentProfileModal({ tx, doctorId, onClose, onAction, c }: {
                                          borderRadius: 8, paddingHorizontal: 8, paddingVertical: 3 }}>
                             <Text style={{ fontSize: 11, fontWeight: '700',
                                            color: enStatusColor(en.status), textTransform: 'capitalize' }}>
-                              {en.status}
+                              {enStatusLabel(en.status)}
                             </Text>
                           </View>
                         </View>
@@ -555,14 +597,14 @@ function StudentProfileModal({ tx, doctorId, onClose, onAction, c }: {
                             <Text style={{ fontSize: 13, fontWeight: '800', color: c.primary }}>
                               {en.progress_percent}%
                             </Text>
-                            <Text style={{ fontSize: 9, ...mutedTextStyle(c, 0.4) }}>Progress</Text>
+                            <Text style={{ fontSize: 9, ...mutedTextStyle(c, 0.4) }}>{t('drProfile.student.progress')}</Text>
                           </View>
                           <View style={{ flex: 1, backgroundColor: `${c.text}06`, borderRadius: 10,
                                          padding: 10, alignItems: 'center' }}>
                             <Text style={{ fontSize: 11, fontWeight: '700', ...mutedTextStyle(c, 0.55) }}>
                               {fmtDateShort(en.enrolled_at)}
                             </Text>
-                            <Text style={{ fontSize: 9, ...mutedTextStyle(c, 0.4) }}>Enrolled</Text>
+                            <Text style={{ fontSize: 9, ...mutedTextStyle(c, 0.4) }}>{t('drProfile.student.enrolled')}</Text>
                           </View>
                         </View>
 
@@ -577,7 +619,7 @@ function StudentProfileModal({ tx, doctorId, onClose, onAction, c }: {
                               {acting === `suspend-${en.enrollment_id}`
                                 ? <ActivityIndicator size="small" color="#D97706" />
                                 : <AlertTriangle size={13} color="#D97706" />}
-                              <Text style={{ fontSize: 12, fontWeight: '700', color: '#D97706' }}>Suspend</Text>
+                              <Text style={{ fontSize: 12, fontWeight: '700', color: '#D97706' }}>{t('drProfile.student.suspend')}</Text>
                             </Pressable>
                           )}
                           {en.status === 'suspended' && (
@@ -590,7 +632,7 @@ function StudentProfileModal({ tx, doctorId, onClose, onAction, c }: {
                               {acting === `restore-${en.enrollment_id}`
                                 ? <ActivityIndicator size="small" color="#16A34A" />
                                 : <RotateCcw size={13} color="#16A34A" />}
-                              <Text style={{ fontSize: 12, fontWeight: '700', color: '#16A34A' }}>Resume</Text>
+                              <Text style={{ fontSize: 12, fontWeight: '700', color: '#16A34A' }}>{t('drProfile.student.resume')}</Text>
                             </Pressable>
                           )}
                           <Pressable
@@ -602,7 +644,7 @@ function StudentProfileModal({ tx, doctorId, onClose, onAction, c }: {
                             {acting === `remove-${en.enrollment_id}`
                               ? <ActivityIndicator size="small" color="#DC2626" />
                               : <UserMinus size={13} color="#DC2626" />}
-                            <Text style={{ fontSize: 12, fontWeight: '700', color: '#DC2626' }}>Remove</Text>
+                            <Text style={{ fontSize: 12, fontWeight: '700', color: '#DC2626' }}>{t('common.remove')}</Text>
                           </Pressable>
                         </View>
 
@@ -612,15 +654,14 @@ function StudentProfileModal({ tx, doctorId, onClose, onAction, c }: {
                             <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 8 }}>
                               <AlertTriangle size={15} color="#DC2626" style={{ marginTop: 1 }} />
                               <Text style={{ flex: 1, fontSize: 12, color: '#DC2626', lineHeight: 18 }}>
-                                Remove {displayName} from {en.course_title}?{'\n'}
-                                A negative earnings entry will be created. This cannot be undone.
+                                {t('drProfile.student.removeConfirm', { name: displayName, course: en.course_title })}
                               </Text>
                             </View>
                             <View style={{ flexDirection: 'row', gap: 8 }}>
                               <Pressable onPress={() => setConfirmRemove(null)}
                                 style={{ flex: 1, alignItems: 'center', justifyContent: 'center',
                                          backgroundColor: `${c.text}0D`, borderRadius: 10, paddingVertical: 9 }}>
-                                <Text style={{ fontSize: 12, fontWeight: '700', ...mutedTextStyle(c, 0.6) }}>Cancel</Text>
+                                <Text style={{ fontSize: 12, fontWeight: '700', ...mutedTextStyle(c, 0.6) }}>{t('common.cancel')}</Text>
                               </Pressable>
                               <Pressable
                                 onPress={() => { setConfirmRemove(null); handleAction('remove', en.enrollment_id, en.course_id, en.course_title); }}
@@ -631,7 +672,7 @@ function StudentProfileModal({ tx, doctorId, onClose, onAction, c }: {
                                 {acting === `remove-${en.enrollment_id}`
                                   ? <ActivityIndicator size="small" color="#fff" />
                                   : <UserMinus size={13} color="#fff" />}
-                                <Text style={{ fontSize: 12, fontWeight: '800', color: '#fff' }}>Confirm Remove</Text>
+                                <Text style={{ fontSize: 12, fontWeight: '800', color: '#fff' }}>{t('drProfile.student.confirmRemove')}</Text>
                               </Pressable>
                             </View>
                           </View>
@@ -666,6 +707,7 @@ function PricingSettingsSection({
   const [editingGlobal,    setEditingGlobal]     = useState(false);
   const [showResetConfirm, setShowResetConfirm]  = useState(false);
   const { showToast } = useToast();
+  const { t, isRTL } = useTranslation();
 
   const load = useCallback(async () => {
     try {
@@ -687,8 +729,11 @@ function PricingSettingsSection({
       await setDoctorGlobalPrice(doctorId, p);
       setSettings({ ...settings, doctor_global_price: p });
       setEditingGlobal(false);
-      showToast({ type: 'success', message: p === 0 ? 'Global price cleared — course price will be used as fallback.' : 'Global earnings price updated.' });
-    } catch (e: any) { showToast({ type: 'error', message: e?.message ?? 'Failed.' }); }
+      showToast({
+        type: 'success',
+        message: p === 0 ? t('drProfile.earnings.globalCleared') : t('drProfile.earnings.globalSaved'),
+      });
+    } catch (e: any) { showToast({ type: 'error', message: e?.message ?? t('drProfile.earnings.genericFailure') }); }
     setSaving(null);
   };
 
@@ -699,11 +744,11 @@ function PricingSettingsSection({
       showToast({
         type: 'success',
         message: corrections > 0
-          ? `Earnings recalculated. ${corrections} correction${corrections !== 1 ? 's' : ''} applied.`
-          : 'Earnings verified. No corrections needed.',
+          ? t('drProfile.earnings.recalculated', { count: corrections })
+          : t('drProfile.earnings.verified'),
       });
       onRecalculate?.();
-    } catch (e: any) { showToast({ type: 'error', message: e?.message ?? 'Recalculate failed.' }); }
+    } catch (e: any) { showToast({ type: 'error', message: e?.message ?? t('drProfile.earnings.recalculateFailed') }); }
     setSaving(null);
   };
 
@@ -714,10 +759,10 @@ function PricingSettingsSection({
       const { rebuilt } = await resetDoctorEarnings(doctorId);
       showToast({
         type: 'success',
-        message: `Earnings reset. ${rebuilt} active student${rebuilt !== 1 ? 's' : ''} rebuilt from scratch.`,
+        message: t('drProfile.earnings.resetDone', { count: rebuilt }),
       });
       onRecalculate?.();
-    } catch (e: any) { showToast({ type: 'error', message: e?.message ?? 'Reset failed.' }); }
+    } catch (e: any) { showToast({ type: 'error', message: e?.message ?? t('drProfile.earnings.resetFailed') }); }
     setSaving(null);
   };
 
@@ -730,17 +775,23 @@ function PricingSettingsSection({
           <Settings size={18} color={c.primary} />
         </View>
         <View style={{ flex: 1 }}>
-          <Text style={{ fontSize: 15, fontWeight: '700', color: c.text }}>Pricing & Admin Tools</Text>
+          <Text style={{ fontSize: 15, fontWeight: '700', color: c.text }}>{t('drProfile.earnings.pricingTools')}</Text>
           <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.4), marginTop: 2 }}>
             {settings
               ? settings.doctor_global_price > 0
-                ? `Global: ${fmtEGPPlain(settings.doctor_global_price)} per enrollment`
-                : 'Fallback: course publish price'
-              : 'Tap to configure your earnings price'}
+                ? t('drProfile.earnings.globalPerEnrollment', { amount: fmtEGPPlain(settings.doctor_global_price) })
+                : t('drProfile.earnings.fallbackCoursePrice')
+              : t('drProfile.earnings.configureHint')}
           </Text>
         </View>
+        {/* Disclosure chevron follows the reading direction: it opens downward
+            along the inline axis, so the rotation is mirrored in RTL. */}
         <ChevronRight size={16} color={`${c.text}40`}
-          style={{ transform: [{ rotate: expanded ? '90deg' : '0deg' }] }} />
+          style={{
+            transform: [{
+              rotate: expanded ? (isRTL ? '-90deg' : '90deg') : (isRTL ? '180deg' : '0deg'),
+            }],
+          }} />
       </Pressable>
 
       {expanded && (
@@ -752,7 +803,7 @@ function PricingSettingsSection({
               <View style={{ gap: 8 }}>
                 <Text style={{ fontSize: 10, fontWeight: '800', ...mutedTextStyle(c, 0.4),
                                textTransform: 'uppercase', letterSpacing: 0.8 }}>
-                  Global Earnings Price
+                  {t('drProfile.earnings.globalPrice')}
                 </Text>
                 {editingGlobal ? (
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
@@ -785,21 +836,17 @@ function PricingSettingsSection({
                                    color: settings.doctor_global_price > 0 ? '#16A34A' : `${c.text}44` }}>
                       {settings.doctor_global_price > 0
                         ? fmtEGPPlain(settings.doctor_global_price)
-                        : 'Not set — using course publish price'}
+                        : t('drProfile.earnings.notSetFallback')}
                     </Text>
                     <Edit3 size={12} color={`${c.text}33`} />
                   </Pressable>
                 )}
                 <View style={{ backgroundColor: `${c.primary}08`, borderRadius: 10, padding: 12, gap: 4 }}>
                   <Text style={{ fontSize: 11, fontWeight: '700', color: c.primary }}>
-                    Pricing Fallback Logic
+                    {t('drProfile.earnings.fallbackLogic')}
                   </Text>
                   <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.5), lineHeight: 17 }}>
-                    {'1. Global Earnings Price (if set)'}
-                    {'\n'}
-                    {'2. Course Publish Price (automatic fallback)'}
-                    {'\n'}
-                    {'Platform credit price is never used.'}
+                    {t('drProfile.earnings.pricingBodyNoCredits')}
                   </Text>
                 </View>
               </View>
@@ -808,7 +855,7 @@ function PricingSettingsSection({
               <View style={{ borderTopWidth: 1, borderTopColor: `${c.text}08`, paddingTop: 16, gap: 10 }}>
                 <Text style={{ fontSize: 10, fontWeight: '800', ...mutedTextStyle(c, 0.4),
                                textTransform: 'uppercase', letterSpacing: 0.8 }}>
-                  Admin Tools
+                  {t('drProfile.earnings.adminTools')}
                 </Text>
                 <Pressable onPress={saving === 'recalculate' ? undefined : handleRecalculate}
                   style={{ flexDirection: 'row', alignItems: 'center', gap: 10,
@@ -821,9 +868,9 @@ function PricingSettingsSection({
                       : <RotateCcw size={15} color={c.primary} />}
                   </View>
                   <View style={{ flex: 1 }}>
-                    <Text style={{ fontSize: 13, fontWeight: '700', color: c.primary }}>Recalculate Earnings</Text>
+                    <Text style={{ fontSize: 13, fontWeight: '700', color: c.primary }}>{t('drProfile.earnings.recalculate')}</Text>
                     <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.45), marginTop: 2 }}>
-                      Fix inconsistencies without clearing history
+                      {t('drProfile.earnings.recalculateHintShort')}
                     </Text>
                   </View>
                 </Pressable>
@@ -840,9 +887,9 @@ function PricingSettingsSection({
                       : <AlertTriangle size={15} color="#DC2626" />}
                   </View>
                   <View style={{ flex: 1 }}>
-                    <Text style={{ fontSize: 13, fontWeight: '700', color: '#DC2626' }}>Reset Earnings</Text>
+                    <Text style={{ fontSize: 13, fontWeight: '700', color: '#DC2626' }}>{t('drProfile.earnings.resetAll')}</Text>
                     <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.45), marginTop: 2 }}>
-                      Clear all history and rebuild from active students
+                      {t('drProfile.earnings.resetHint')}
                     </Text>
                   </View>
                 </Pressable>
@@ -860,22 +907,22 @@ function PricingSettingsSection({
                         <AlertTriangle size={24} color="#DC2626" />
                       </View>
                       <Text style={{ fontSize: 17, fontWeight: '800', color: c.text, textAlign: 'center' }}>
-                        Reset Earnings?
+                        {t('drProfile.earnings.resetTitle')}
                       </Text>
                     </View>
                     <Text style={{ fontSize: 13, ...mutedTextStyle(c, 0.6), lineHeight: 20, textAlign: 'center' }}>
-                      This will permanently clear all earnings transactions and rebuild the dashboard from currently active enrolled students only.{'\n\n'}This action cannot be undone.
+                      {t('drProfile.earnings.resetBody')}
                     </Text>
                     <View style={{ flexDirection: 'row', gap: 10 }}>
                       <Pressable onPress={() => setShowResetConfirm(false)}
                         style={{ flex: 1, paddingVertical: 13, borderRadius: 12,
                                  backgroundColor: `${c.text}0D`, alignItems: 'center' }}>
-                        <Text style={{ fontSize: 14, fontWeight: '700', color: c.text }}>Cancel</Text>
+                        <Text style={{ fontSize: 14, fontWeight: '700', color: c.text }}>{t('common.cancel')}</Text>
                       </Pressable>
                       <Pressable onPress={handleReset}
                         style={{ flex: 1, paddingVertical: 13, borderRadius: 12,
                                  backgroundColor: '#DC2626', alignItems: 'center' }}>
-                        <Text style={{ fontSize: 14, fontWeight: '700', color: '#fff' }}>Reset</Text>
+                        <Text style={{ fontSize: 14, fontWeight: '700', color: '#fff' }}>{t('drProfile.earnings.reset')}</Text>
                       </Pressable>
                     </View>
                   </View>
@@ -899,6 +946,7 @@ export default function DoctorEarnings() {
   const c      = scheme === 'dark' ? neuColors.dark : neuColors.light;
   const { profile, setProfile } = useProfileStore();
   const { showToast } = useToast();
+  const { t } = useTranslation();
 
   // Server-authoritative flag state, refreshed on mount + on foreground.
   // UI-only reflection — the BACKEND refuses the RPC (403 feature_disabled)
@@ -910,8 +958,9 @@ export default function DoctorEarnings() {
 
   // Backend-refusal state (403 feature_disabled). Declared BEFORE the derived
   // values below so the JSX never reads a block-scoped binding early.
-  const [flagBlocked,    setFlagBlocked]    = useState(false);
-  const [flagBlockedKey, setFlagBlockedKey] = useState<string | null>(null);
+  // The refused feature key is logged for diagnostics only — both refusal
+  // paths show the same localized explanation, so it is no longer rendered.
+  const [flagBlocked, setFlagBlocked] = useState(false);
 
   const platformEarningsOn = flagEnabled('doctor_earnings') && !flagBlocked;
 
@@ -929,16 +978,19 @@ export default function DoctorEarnings() {
     setToggling(true);
     try {
       await updateProfile(profile.id, { earnings_enabled: value });
-      showToast({ type: 'success', message: value ? 'Earnings system enabled.' : 'Earnings system disabled. History preserved.' });
+      showToast({
+        type: 'success',
+        message: value ? t('drProfile.earningsEnabledToast') : t('drProfile.earningsDisabledToast'),
+      });
     } catch (e: any) {
       const disabled = isFeatureDisabledError(e);
       if (disabled) {
         setEarningsEnabled(!value);
         setProfile({ ...profile, earnings_enabled: !value });
         setFlagBlocked(true);
-        setFlagBlockedKey(disabled);
+        console.info('[DoctorEarnings] toggle refused, feature disabled:', disabled);
       }
-      showToast({ type: 'error', message: e?.message ?? 'Failed to update setting.' });
+      showToast({ type: 'error', message: e?.message ?? t('drProfile.earningsUpdateFailed') });
     }
     setToggling(false);
   };
@@ -962,14 +1014,13 @@ export default function DoctorEarnings() {
       const dashboard = await getDoctorEarningsDashboard(profile.id);
       if (dashboard && (data === null || (refreshing))) setData(dashboard);
       setFlagBlocked(false);
-      setFlagBlockedKey(null);
     } catch (e: any) {
       const disabled = isFeatureDisabledError(e);
       if (disabled) {
         // Backend refused because the Super Admin disabled this feature.
         // Show the clear "unavailable" state instead of stale/empty data.
         setFlagBlocked(true);
-        setFlagBlockedKey(disabled);
+        console.info('[DoctorEarnings] read refused, feature disabled:', disabled);
         setData(null);
       } else {
         // Network/read error — keep showing last known data, don't
@@ -1009,12 +1060,8 @@ export default function DoctorEarnings() {
         <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: layout.screenPx }}>
           <FeatureUnavailableState
             icon={<DollarSign size={26} color="#B45309" />}
-            title="This feature is currently unavailable"
-            description={
-              flagBlockedKey
-                ? 'The platform operator has temporarily disabled this feature. Your balances and history are safe and will reappear when it is re-enabled.'
-                : 'The platform operator has temporarily disabled the earnings area. Your balances and history are safe and will reappear when it is re-enabled.'
-            }
+            title={t('drProfile.featureUnavailable')}
+            description={t('drProfile.earnings.unavailableBody')}
           />
         </View>
       </View>
@@ -1027,8 +1074,8 @@ export default function DoctorEarnings() {
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />}
     >
       <DashboardHeader
-        roleLabel="Doctor revenue · independent pricing · EGP"
-        greeting="Earnings"
+        roleLabel={t('drProfile.earnings.headerRole')}
+        greeting={t('nav.earnings')}
         rightActions={
           <View style={{ width: 38, height: 38, borderRadius: 12, backgroundColor: `${c.primary}18`, alignItems: 'center', justifyContent: 'center' }}>
             <TrendingUp size={19} color={c.primary} />
@@ -1051,11 +1098,9 @@ export default function DoctorEarnings() {
               <DollarSign size={32} color={`${c.text}30`} />
             </NeuCard>
             <View style={{ alignItems: 'center', gap: 8 }}>
-              <Text style={{ fontSize: 17, fontWeight: '800', color: c.text }}>This feature is currently unavailable.</Text>
+              <Text style={{ fontSize: 17, fontWeight: '800', color: c.text, textAlign: 'center' }}>{t('drProfile.featureUnavailable')}</Text>
               <Text style={{ fontSize: 13, ...mutedTextStyle(c, 0.4), textAlign: 'center', maxWidth: 260, lineHeight: 20 }}>
-                {flagBlockedKey ?
-                  'The platform operator has temporarily disabled this feature. Your balances and history are safe and will reappear when it is re-enabled.' :
-                  'The platform operator has temporarily disabled the earnings area. Your balances and history are safe and will reappear when it is re-enabled.'}
+                {t('drProfile.earnings.unavailableBody')}
               </Text>
             </View>
           </View>
@@ -1078,16 +1123,16 @@ export default function DoctorEarnings() {
               <DollarSign size={32} color={`${c.text}30`} />
             </NeuCard>
             <View style={{ alignItems: 'center', gap: 8 }}>
-              <Text style={{ fontSize: 17, fontWeight: '800', ...mutedTextStyle(c, 0.4) }}>Earnings System is Disabled</Text>
+              <Text style={{ fontSize: 17, fontWeight: '800', ...mutedTextStyle(c, 0.4), textAlign: 'center' }}>{t('drProfile.earnings.disabledTitle')}</Text>
               <Text style={{ fontSize: 13, ...mutedTextStyle(c, 0.25), textAlign: 'center', maxWidth: 260, lineHeight: 20 }}>
-                Enable the Earnings System to start tracking course sales, revenue, and analytics.
+                {t('drProfile.earnings.disabledHint')}
               </Text>
             </View>
             <Pressable onPress={() => handleToggle(true)} style={{
               backgroundColor: '#16A34A', borderRadius: 14, paddingHorizontal: 24, paddingVertical: 13,
               shadowColor: '#16A34A', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 10,
             }}>
-              <Text style={{ fontSize: 14, fontWeight: '800', color: '#fff' }}>Enable Earnings System</Text>
+              <Text style={{ fontSize: 14, fontWeight: '800', color: '#fff' }}>{t('drProfile.enableEarnings')}</Text>
             </Pressable>
           </View>
 
@@ -1099,47 +1144,47 @@ export default function DoctorEarnings() {
             <View style={{ width: 60, height: 60, borderRadius: 18, backgroundColor: `${c.primary}10`, alignItems: 'center', justifyContent: 'center' }}>
               <TrendingUp size={26} color={`${c.primary}55`} />
             </View>
-            <Text style={{ fontSize: 16, fontWeight: '700', ...mutedTextStyle(c, 0.35) }}>No earnings yet.</Text>
+            <Text style={{ fontSize: 16, fontWeight: '700', ...mutedTextStyle(c, 0.35), textAlign: 'center' }}>{t('drProfile.earnings.emptyTitle')}</Text>
             <Text style={{ fontSize: 12, color: c.text, opacity: 0.22, textAlign: 'center', maxWidth: 240, lineHeight: 18 }}>
-              Earnings appear here once students enroll. Set your revenue price in the Pricing Settings card above.
+              {t('drProfile.earnings.emptyHint')}
             </Text>
           </View>
 
         ) : (
           <>
             {/* ── Stat Cards ─────────────────────────────────────────────── */}
-            <SL label="Overview" c={c} />
+            <SL label={t('common.overview')} c={c} />
             <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginBottom: 20 }}>
               <View style={{ width: '47%' }}>
-                <StatCard icon={<DollarSign size={15} color="#16A34A" />} label="Total Revenue"        value={fmtEGPPlain(data.totalRevenue)}         color="#16A34A" c={c} />
+                <StatCard icon={<DollarSign size={15} color="#16A34A" />} label={t('drProfile.earnings.totalRevenue')} value={fmtEGPPlain(data.totalRevenue)}         color="#16A34A" c={c} />
               </View>
               <View style={{ width: '47%' }}>
-                <StatCard icon={<Calendar   size={15} color={c.primary} />} label="This Month"         value={fmtEGPPlain(data.thisMonthRevenue)}      color={c.primary} c={c} />
+                <StatCard icon={<Calendar   size={15} color={c.primary} />} label={t('drProfile.earnings.thisMonth')}    value={fmtEGPPlain(data.thisMonthRevenue)}      color={c.primary} c={c} />
               </View>
               <View style={{ width: '47%' }}>
-                <StatCard icon={<Users      size={15} color="#D97706"  />} label="Paid Students"       value={String(data.totalPaidStudents)}          color="#D97706" c={c} />
+                <StatCard icon={<Users      size={15} color="#D97706"  />} label={t('drProfile.earnings.paidStudents')}  value={String(data.totalPaidStudents)}          color="#D97706" c={c} />
               </View>
               <View style={{ width: '47%' }}>
-                <StatCard icon={<Zap        size={15} color="#7C3AED"  />} label="Transactions"        value={String(data.totalTransactions)}          color="#7C3AED" c={c} />
+                <StatCard icon={<Zap        size={15} color="#7C3AED"  />} label={t('drProfile.earnings.transactions')}  value={String(data.totalTransactions)}          color="#7C3AED" c={c} />
               </View>
               <View style={{ width: '100%' }}>
-                <StatCard icon={<Zap size={15} color="#2DA8FF" />} label="Avg Revenue / Student" value={fmtEGPPlain(data.avgRevenuePerStudent)} color="#2DA8FF" c={c} />
+                <StatCard icon={<Zap size={15} color="#2DA8FF" />} label={t('drProfile.earnings.avgRevenuePerStudent')} value={fmtEGPPlain(data.avgRevenuePerStudent)} color="#2DA8FF" c={c} />
               </View>
             </View>
 
             {/* ── Revenue Timeline Chart ──────────────────────────────────── */}
-            <SL label="Revenue Timeline" c={c} />
+            <SL label={t('drProfile.earnings.timeline')} c={c} />
             <RevenueChart transactions={data.transactions} c={c} />
 
             {/* ── Revenue by Course ───────────────────────────────────────── */}
-            <SL label="Revenue by Course" c={c} />
+            <SL label={t('drProfile.earnings.byCourse')} c={c} />
             <CourseRevenueTable rows={data.courseRows} total={data.totalRevenue} c={c} />
 
             {/* ── Recent Transactions ─────────────────────────────────────── */}
-            <SL label="Recent Transactions" c={c} />
+            <SL label={t('drProfile.earnings.recent')} c={c} />
             <NeuCard radius={18} style={{ padding: 16, marginBottom: 4 }}>
               {data.transactions.length === 0 ? (
-                <Text style={{ fontSize: 13, ...mutedTextStyle(c, 0.3), textAlign: 'center', paddingVertical: 20 }}>No transactions yet</Text>
+                <Text style={{ fontSize: 13, ...mutedTextStyle(c, 0.3), textAlign: 'center', paddingVertical: 20 }}>{t('drProfile.earnings.none')}</Text>
               ) : (
                 data.transactions.map(row => (
                   <TransactionRow

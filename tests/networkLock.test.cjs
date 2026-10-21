@@ -269,9 +269,15 @@ console.log('\n3. transport — the central choke point');
     ]));
   check('3h: no protected-content prefix is exempt',
     !listed.some((p) => /lesson|course|video|material|storage|admin|user/.test(p)));
-  check('3i: token rotation is still NOT exempt (protected activity stays frozen)',
-    /if \(isSecurityLocked\(\)\) \{\s*\n\s*authStateLog\('AUTH_REFRESH_DEFINITIVE_FAILURE'/.test(TRANSPORT_CODE)
+  check('3i: token rotation is still NOT on the allowlist (protected activity stays frozen)',
+    /if \(isSecurityLocked\(\)\) \{\s*\n\s*authStateLog\('AUTH_REFRESH_SUPPRESSED'/.test(TRANSPORT_CODE)
     && !listed.includes('/auth/refresh'));
+  check('3i-2: a suppressed rotation is re-scheduled for the moment the lock FULLY clears',
+    /scheduleRefreshAfterUnlock\(\);/.test(TRANSPORT_CODE)
+    && /runWhenNetworkUnlocked\([\s\S]{0,300}'POST \/auth\/refresh \(post-unlock recovery\)'/.test(TRANSPORT_CODE)
+    && /if \(!outcome\.ran\) \{\s*\n\s*unlockRefreshScheduled = false;/.test(TRANSPORT_CODE));
+  check('3i-3: the queued rotation re-reads the stored session (never rotates a signed-out/other identity)',
+    /const stored = getStoredSession\(\);\s*\n\s*if \(!stored\?\.refresh_token \|\| isSecurityLocked\(\)\) return;/.test(TRANSPORT_CODE));
 
   // The one direct fetch that carries app data must consult the lock itself.
   check('3j: the direct storage upload is refused (a write is never queued for replay)',
@@ -400,9 +406,21 @@ console.log('\n5. YouTube / protected playback scenarios');
     /shouldAllowFullscreen/.test(YT_CODE) && /securityGateRef/.test(YT_CODE));
 
   // 8. In-flight / established connections.
-  check('5.8a: every protected request is registered so containment can abort it',
-    /registerProtectedAbort\(controller\)/.test(TRANSPORT_CODE)
+  check('5.8a: protected requests are registered so containment can abort them',
+    /const unregisterAbort = abortExempt \? \(\) => \{\} : registerProtectedAbort\(controller\)/.test(TRANSPORT_CODE)
     && /protectedAborts\.clear\(\)/.test(read(LOCK_SRC)));
+
+  // 8b. Two classes must never be abort-registered, or containment destroys the
+  // very traffic the lock depends on:
+  //   • allowlisted paths — registerProtectedAbort() aborts immediately while
+  //     the lock is held, which made the allowlist dead code and produced the
+  //     "Could not load support contacts" failure on the pre-login block screen;
+  //   • /auth/refresh — aborting a single-use rotation loses the new pair while
+  //     the server has already revoked the old token, so the next refresh gets a
+  //     definitive 401 and logs out a valid session after resume.
+  check('5.8c: allowlisted traffic is never abort-registered (the allowlist must actually work)',
+    /const abortExempt = isLockExempt\(path\) \|\| path\.startsWith\('\/auth\/refresh'\);/.test(TRANSPORT_CODE)
+    && /abortExempt \? \(\) => \{\} : registerProtectedAbort\(controller\)/.test(TRANSPORT_CODE));
   check('5.8b: the documentation states that an established external connection is not revoked',
     /notCovered/.test(read(MODEL_SRC))
     && /already-established/i.test(read(MODEL_SRC)));

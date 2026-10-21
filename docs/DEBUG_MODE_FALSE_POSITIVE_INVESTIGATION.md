@@ -1,5 +1,12 @@
 # Android release device blocked with `Debug Mode Active` (risk 20) — investigation
 
+> **Status: investigation closed.** The temporary *Device Security Report*
+> (`SecuritySignalReport.tsx` + `securitySignalReport.ts`) has been **removed**:
+> it is no longer rendered on any security screen and both files are deleted. The
+> Mock Location detector it was built to diagnose was removed from enforcement
+> (`docs/MOCK_LOCATION_REMOVAL.md`). §5.1 and §5.2 are kept as the historical
+> record of how the report was verified; they no longer describe shipped UI.
+
 **Symptom reported by the phone owner**
 
 - `Access Blocked`
@@ -95,7 +102,7 @@ never route to `/security-warning` (`(app)/_layout.tsx` sends only warn-level
 findings there), so the gate is the only place an in-app `debug_detected` block
 can show it.
 
-### 5.1 Verified accessibility (source-level, not assumed from a test)
+### 5.1 Verified accessibility (historical — the report has since been removed)
 
 | Question | Answer |
 |---|---|
@@ -106,7 +113,7 @@ can show it.
 | Needs Super Admin / dev build / hidden route / deep link? | No. The card is plain JSX on the block branch; the route is auto-registered by the `(auth)` `<Stack>` (`src/app/(auth)/_layout.tsx`) and reached by `router.push` from sign-in. No `__DEV__`, role, env var or param gates it. |
 | Hidden in Release? | No conditional build flag anywhere in the component or its call sites. Both native deps (`expo-clipboard`, `expo-device`) are declared in `package.json` and autolinked into the Release APK. |
 | Live or stale? | Live per mount, re-read on **Refresh** and on every return to the foreground (`AppState`), and built from `getNativeSecurityFlags()` — the same measurement the engine reads. The only reuse is the 500 ms per-cycle native batch cache (never across cycles; failures are never cached). |
-| All six signals + emulator vs mock-location? | Yes: Developer options, USB debugging (ADB), Debugger attached, Test-only build, Emulator/virtual device, Mock-location app selected, each `on`/`off`/`unknown`/`unavailable`. The report also carries the finding's raw event type and the detector's own `detectionMethod`, which is what separates `emulatorDetected` (`Emulator / debug environment detected`) from `mockLocationDetected` (`Mock location enabled`). |
+| The remaining signals + emulator vs mock-location? | Five rows: Developer options, USB debugging (ADB), Debugger attached, Test-only build, Emulator/virtual device, each `on`/`off`/`unknown`/`unavailable`. The report also carries the finding's raw event type and the detector's own `detectionMethod`, which is what separates `emulatorDetected` (`Emulator / debug environment detected`) from the build-identity copy. **Mock location is no longer a row at all** — the detector was removed after it reported ON on an Android 16 device with Developer options OFF (`docs/MOCK_LOCATION_REMOVAL.md`). |
 | Copy without signing in? | Yes — `Clipboard.setStringAsync` from the same card; a failed copy is now surfaced instead of swallowed. |
 | Matches this document? | Yes. One gap was found and fixed while verifying: an unreachable native module returned fail-safe `false` flags, so every row rendered **off** (only a banner said otherwise). Rows now read **unavailable** unless the batch was actually measured. |
 
@@ -141,8 +148,8 @@ was out of scope for this UI fix.
    is not the production artifact (or the friend installed a different build);
    the report's app version/build pins which one.
 
-Manual check that needs no report at all: `Settings → Developer options` (toggle
-off), `USB debugging` (off), `Select mock location app` (None).
+Manual check (the report that used to expose these flags has been removed):
+`Settings → Developer options` (toggle off), `USB debugging` (off).
 
 The report is read-only by construction: it calls `getNativeSecurityFlags()`
 (a plain measurement), writes nothing, logs nothing, offers no dismiss/verify
@@ -152,15 +159,23 @@ all so it cannot become a privileged path.
 
 ## 6. Remaining diagnostics only the owner can do
 
-- Steps in §5 (the report is the only way to see the flags for that device).
-- If the report shows an unexpected signal, the model/build fingerprint is what
-  lets a maintainer reproduce the heuristic against that hardware.
+- The manual Settings checks in §5 (the report was removed with the investigation).
+- If a signal is still unexpected, the model/build fingerprint is what lets a
+  maintainer reproduce the heuristic against that hardware.
 
 ## 7. Known limitations
 
-- The affected device has **not** been verified; no fix is claimed to resolve it.
-  The card's Release-UI availability is established from source/config, not from
-  an installed APK on that hardware.
+- The affected device has **not** been verified; the card's Release-UI
+  availability is established from source/config, not from an installed APK on
+  that hardware.
+- **Addendum (Android 16 / API 36 report, Developer options OFF):** the
+  mock-location producer described in §2 as detector **D** was removed outright.
+  A release APK cannot perform the cross-UID app-ops read it needs, and the
+  per-package app-op some ROMs answer is persisted state that outlives the
+  Developer-options toggle (OEM preset / stale selection), so `MODE_ALLOWED`
+  never proved a live mock selection. MedAcademy has no location feature, so the
+  check protected nothing. See `docs/MOCK_LOCATION_REMOVAL.md`. The rest of this
+  document remains the trace for the debug-family findings that still exist.
 - Per-signal unavailability is not reported (see the native limitation in §5.1).
 - The login-block case leaves no server-side audit trail (see §3, diagnostic gap).
 - If a stale session token is still on the device, `logThreats()` may succeed and

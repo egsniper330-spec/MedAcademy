@@ -8,7 +8,7 @@
  *   - Per-item: thumbnail, title, duration, file size, upload date, usage count
  *   - Confirms selection and returns the chosen VideoAsset
  */
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
@@ -25,6 +25,7 @@ import {
   Check, ChevronDown, Clock, Film, Search, SortAsc, SortDesc, X,
 } from 'lucide-react-native';
 import { neuColors, neuFlatStyle, neuPressedStyle, mutedTextStyle } from '@/lib/neu';
+import { AnchoredMenu } from '@/components/AnchoredMenu';
 import {
   getMyVideoLibrary, type VideoAsset, type LibraryFilters,
 } from '@/lib/videoLibraryApi';
@@ -78,6 +79,8 @@ export function VideoLibraryPicker({ visible, onClose, onSelect }: Props) {
   const [sortBy, setSortBy] = useState<LibraryFilters['sortBy']>('created_at');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
   const [showSortMenu, setShowSortMenu] = useState(false);
+  // Trigger rect source for the direction-aware anchored menu.
+  const sortAnchorRef = useRef<View>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
@@ -235,10 +238,14 @@ export function VideoLibraryPicker({ visible, onClose, onSelect }: Props) {
             )}
           </View>
 
-          {/* Sort button */}
-          <View>
+          {/* Sort button — menu placement is direction-aware (see AnchoredMenu).
+              `inline` because this picker is already inside a native Modal:
+              a root portal would render under that modal window on Android. */}
+          <View ref={sortAnchorRef} collapsable={false}>
             <Pressable
               onPress={() => setShowSortMenu(v => !v)}
+              accessibilityRole="button"
+              accessibilityState={{ expanded: showSortMenu }}
               style={[neuFlatStyle(isDark), { height: 40, paddingHorizontal: 12, borderRadius: 12, flexDirection: 'row', alignItems: 'center', gap: 6 }]}>
               {sortDir === 'asc' ? <SortAsc size={15} color={c.primary} /> : <SortDesc size={15} color={c.primary} />}
               <Text style={{ fontSize: 12, fontWeight: '700', color: c.primary }}>
@@ -247,11 +254,14 @@ export function VideoLibraryPicker({ visible, onClose, onSelect }: Props) {
               <ChevronDown size={13} color={c.primary} />
             </Pressable>
 
-            {showSortMenu && (
-              <View style={[neuFlatStyle(isDark), {
-                position: 'absolute', top: 44, right: 0, zIndex: 99,
-                borderRadius: 14, padding: 8, minWidth: 160, gap: 2,
-              }]}>
+            <AnchoredMenu
+              visible={showSortMenu}
+              onClose={() => setShowSortMenu(false)}
+              anchorRef={sortAnchorRef}
+              preferredWidth={180}
+              inline
+              style={{ minWidth: 160 }}
+            >
                 {SORT_OPTIONS.map(opt => (
                   <Pressable
                     key={opt.value}
@@ -274,8 +284,7 @@ export function VideoLibraryPicker({ visible, onClose, onSelect }: Props) {
                     )}
                   </Pressable>
                 ))}
-              </View>
-            )}
+            </AnchoredMenu>
           </View>
         </View>
 

@@ -23,13 +23,11 @@ const SECURITY_MODULE_KT = `package com.medacademy.security
 import android.annotation.SuppressLint
 import android.app.Activity
 import android.app.ActivityManager
-import android.app.AppOpsManager
 import android.content.Context
 import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
 import android.hardware.Sensor
 import android.hardware.SensorManager
-import android.location.LocationManager
 import android.net.ConnectivityManager
 import android.net.Network
 import android.net.NetworkCapabilities
@@ -165,7 +163,12 @@ object WindowModeBridge {
  *   VPN detection       — ConnectivityManager TRANSPORT_VPN + NetworkInterface tun/vpn scan
  *   Root detection      — su binary paths + system props + test-keys + /system write test
  *   Emulator detection  — Build fingerprint/model/manufacturer + QEMU props + sensor count
- *   Mock location       — AppOpsManager MOCK_LOCATION + Settings.Secure (pre-API23 fallback)
+ *
+ * Mock location is NOT detected and is NOT a security signal: the cross-UID
+ * AppOps query it would need requires a privileged permission a release APK
+ * cannot hold, and the per-package app-op it exposes is persisted state that
+ * outlives the Developer-options toggle and can be OEM-preset. See the
+ * "MOCK-LOCATION DETECTION — REMOVED" block below.
  *
  * All checks: fail-safe (exception → false), detailed Log.d for diagnostics.
  * Never block the main/UI thread.
@@ -744,98 +747,39 @@ class SecurityModule(private val reactContext: ReactApplicationContext) :
     }
 
     // ══════════════════════════════════════════════════════════════════════════
-    // PHASE 3 — MOCK LOCATION DETECTION
+    // MOCK-LOCATION DETECTION — REMOVED (deliberately, not disabled)
     // ══════════════════════════════════════════════════════════════════════════
-
-    @ReactMethod
-    fun isMockLocationEnabled(promise: Promise) {
-        Log.d(TAG, "[isMockLocationEnabled] ▶ called")
-        runSafe(promise) {
-            val result = detectMockLocation()
-            Log.d(TAG, "[isMockLocationEnabled] result=$result")
-            result
-        }
-    }
-
-    /**
-     * Mock location detection (2-tier approach — FALSE-POSITIVE FIX):
-     *   Tier 1 (API 23+): AppOpsManager.checkOpNoThrow(OPSTR_MOCK_LOCATION) — the
-     *            authoritative check. Resolves to MODE_ALLOWED only when the user
-     *            actually selected a mock-location provider (Developer options →
-     *            Select mock location app), which is the ONLY thing that turns mock
-     *            GPS on.
-     *   Tier 2 (API < 23): Settings.Secure.ALLOW_MOCK_LOCATION — the legacy global flag.
-     *
-     * REMOVED (was Tier 3): "any installed package HOLDS android.permission.
-     * ACCESS_MOCK_LOCATION". That plane is wrong on two counts and locked the entire
-     * app on stock hardware:
-     *   • Holding a signature|development permission is NOT evidence of active
-     *     mocking. ACCESS_MOCK_LOCATION is granted at install time to preinstalled
-     *     apps that merely offer a mock-location feature — e.g. Google's
-     *     com.google.android.apps.restore, present on stock Samsung/Google images.
-     *   • The platform's own resolution for such a package is DENY (verified on a
-     *     stock SM-T505N, Android 12: 'appops get com.google.android.apps.restore
-     *     android:mock_location' → "No operations. Default mode: deny"), so Tier 1
-     *     already reports the truth and Tier 3 could only ever add a false positive.
-     * Observed impact: every launch on that tablet was blocked by the SecurityGate
-     * with risk score 20 — the JS maps this event to type 'debug_detected', so users
-     * saw the misleading "Insecure Build Detected / Install the official production
-     * release of the app." while running a legitimate release build.
-     */
-    private fun detectMockLocation(): Boolean {
-        // Tier 1: AppOpsManager (API 23+) — check every package for MOCK_LOCATION op
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            try {
-                val appOps = reactContext.getSystemService(Context.APP_OPS_SERVICE) as? AppOpsManager
-                if (appOps != null) {
-                    val pm = reactContext.packageManager
-                    val packages = pm.getInstalledApplications(PackageManager.GET_META_DATA)
-                    for (appInfo in packages) {
-                        if (appInfo.packageName == reactContext.packageName) continue
-                        val mode = appOps.checkOpNoThrow(
-                            AppOpsManager.OPSTR_MOCK_LOCATION,
-                            appInfo.uid,
-                            appInfo.packageName
-                        )
-                        if (mode == AppOpsManager.MODE_ALLOWED) {
-                            Log.d(TAG, "[detectMockLocation] MOCK_LOCATION granted to \${appInfo.packageName}")
-                            return true
-                        }
-                    }
-                }
-            } catch (e: Exception) {
-                Log.d(TAG, "[detectMockLocation] AppOpsManager tier exception: \${e.message}")
-            }
-        }
-
-        // Tier 2: Legacy flag — API < 23 ONLY (guard added with the fix below).
-        // Android STOPPED honoring Settings.Secure.ALLOW_MOCK_LOCATION in API 23:
-        // from Marshmallow on, mock location is controlled by the AppOps
-        // "select mock location app" mechanism (Tier 1). A leftover value of 1 in
-        // that legacy setting — written by a pre-Marshmallow app, a GPS-spoofing
-        // tool or an MDM suite and never cleaned up — is therefore NOT evidence of
-        // active mocking on any modern device, but it was being read as if it
-        // were: that is a device-specific false positive that hard-blocked
-        // legitimate release installs with risk 20 and the misleading
-        // "Insecure Build Detected / Install the official production release"
-        // screen, while the same APK on a device without the stale setting ran
-        // normally.
-        try {
-            @Suppress("DEPRECATION")
-            val legacyFlag = Settings.Secure.getInt(
-                reactContext.contentResolver,
-                Settings.Secure.ALLOW_MOCK_LOCATION, 0
-            )
-            Log.d(TAG, "[detectMockLocation] legacy ALLOW_MOCK_LOCATION=$legacyFlag")
-            if (legacyFlag != 0 && Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return true
-        } catch (e: Exception) {
-            Log.d(TAG, "[detectMockLocation] legacy flag exception: \${e.message}")
-        }
-
-        // NOTE: the previous "permission presence" tier lived here and was removed
-        // — see the doc comment above (false positive on stock devices).
-        return false
-    }
+    // There is no mock-location check here any more, and no mockLocationDetected
+    // field in getSecurityFlags(). Why the check could not be made reliable on a
+    // modern third-party APK:
+    //
+    //   • The only authoritative query is
+    //       AppOpsManager.checkOpNoThrow(OPSTR_MOCK_LOCATION, otherUid, otherPkg)
+    //     which is a CROSS-UID read that requires android.permission.
+    //     UPDATE_APP_OPS_STATS (protectionLevel signature|privileged|installer|role).
+    //     A normal release APK cannot hold it. On stock AOSP the service rejects
+    //     the call and it throws — a coverage gap that the previous
+    //     getOrDefault(false) silently reported as "no mock app".
+    //   • On ROMs that DO answer the query, the answer is the per-package
+    //     android:mock_location app-op MODE. That mode is PERSISTED STATE: it
+    //     outlives the Developer-options toggle, can be preset by the OEM for a
+    //     preinstalled package, and is not cleared when the user stops mocking.
+    //     "Some installed package has MODE_ALLOWED" therefore does NOT establish
+    //     that Developer options are ON, that a mock provider is currently
+    //     selected by the user, or that any Mock Location Detected is happening
+    //     NOW — the three facts this signal was being treated as.
+    //   • MedAcademy has no location-based feature, so a mock provider cannot
+    //     defeat any protection this app actually enforces. The check contributed
+    //     risk 20 and hard-blocked login for a condition it could not establish.
+    //
+    // Observed evidence that closed this: an Android 16 (API 36) device reported
+    // Developer options OFF, ADB OFF, no debugger, non-test build, not emulated —
+    // and still "Mock-location app selected ON" with risk 20 blocking login.
+    // Nothing in that report distinguished a stale/OEM-preset app-op from a live
+    // selection, because the platform exposes no such distinction to this app.
+    //
+    // Removed, not neutralised: no field, no ReactMethod, no event type, no score.
+    // Enforcement for the remaining native signals is untouched.
 
     // ══════════════════════════════════════════════════════════════════════════
     // PHASE 2 — FRIDA DETECTION
@@ -1908,12 +1852,10 @@ class SecurityModule(private val reactContext: ReactApplicationContext) :
             val vpn      = runCatching { detectVpn()           }.getOrDefault(false)
             val rooted   = runCatching { detectRoot()          }.getOrDefault(false)
             val emulator = runCatching { detectEmulator()      }.getOrDefault(false)
-            val mockLoc  = runCatching { detectMockLocation()  }.getOrDefault(false)
             r.putBoolean("vpnDetected",          vpn)
             r.putBoolean("rootDetected",         rooted)
             r.putBoolean("emulatorDetected",     emulator)
-            r.putBoolean("mockLocationDetected", mockLoc)
-            Log.d(TAG, "[getSecurityFlags] vpn=$vpn rooted=$rooted emulator=$emulator mockLoc=$mockLoc")
+            Log.d(TAG, "[getSecurityFlags] vpn=$vpn rooted=$rooted emulator=$emulator")
 
             val _elapsed = System.currentTimeMillis() - _t0
             Log.d(TAG, "[getSecurityFlags] ✅ all checks complete in \${_elapsed}ms")

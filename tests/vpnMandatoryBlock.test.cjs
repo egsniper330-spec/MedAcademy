@@ -317,7 +317,7 @@ console.log('\n\u2500\u2500 C: scenarios \u2500\u2500');
 console.log('\n\u2500\u2500 D: no dismiss control for a connection finding \u2500\u2500');
 {
   const gate = readCode('src/app/(app)/security-gate.tsx');
-  check('D1: the gate renders the mandatory connection copy', /VPN_WARNING_COPY/.test(gate));
+  check('D1: the gate renders the mandatory connection copy', /t\('security\.vpn\.message'\)/.test(gate));
   check('D2: the gate lists platform-specific turn-off steps', /connectionBlockInstructions\(Platform\.OS\)/.test(gate));
   check('D3: the gate has NO "Continue Anyway" control at all',
     !/Continue Anyway/.test(gate));
@@ -330,8 +330,11 @@ console.log('\n\u2500\u2500 D: no dismiss control for a connection finding \u250
     /const connectionBlocked = hasConnectionFinding\(threats\)/.test(appWarning));
   check('D7: the dismiss button is behind the connection check',
     /\{connectionBlocked \? \(/.test(appWarning) && /\) : blocksLogin \? \(/.test(appWarning));
+  // The label is translated now (English copy lives in the dictionaries, Arabic
+  // in the twin dictionary) — the CONTROL and its condition must be unchanged.
   check('D8: "Continue Anyway" survives ONLY for non-connection findings',
-    /label=\{hasFindings \? 'Continue Anyway' : 'Continue'\}/.test(appWarning));
+    /label=\{hasFindings \? t\('security\.continueAnyway'\) : t\('security\.continue'\)\}/.test(appWarning) &&
+    /'security\.continueAnyway': 'Continue Anyway'/.test(read('src/lib/i18n/resources.ts')));
   check('D9: the connection branch offers a re-verify (not a dismiss) action',
     /onVerifyConnection/.test(appWarning) && /verifySecurity\(\)/.test(appWarning));
 
@@ -341,9 +344,12 @@ console.log('\n\u2500\u2500 D: no dismiss control for a connection finding \u250
   check('D11: pre-login the only forward action re-runs the check (sign-in)',
     /onRecheck/.test(authWarning)
       && /\(auth\)\/sign-in/.test(authWarning)
-      && /I turned it off/.test(authWarning));
+      && /t\('security\.triedIt'\)/.test(authWarning)
+      && /'security\.triedIt': 'I turned it off/.test(read('src/lib/i18n/resources.ts')));
   check('D12: the pre-login screen states the block cannot be dismissed',
-    /cannot be dismissed to continue/.test(authWarning));
+    /t\('security\.connectionBlockedAuth'\)/.test(authWarning) &&
+    /'security\.connectionBlockedAuth': 'Sign-in is blocked[^']*cannot be dismissed to continue/.test(
+      read('src/lib/i18n/resources.ts')));
   check('D13: the pre-login exemption stays presentation-only (no authoritative read added)',
     !/useSecurity\(\)/.test(authWarning));
 }

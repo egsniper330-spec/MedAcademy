@@ -232,8 +232,12 @@ const earningsScreen = path.join(REPO, 'src', 'app', '(app)', '(doctor)', 'dr-ea
 check('doctor earnings screen exists', fs.existsSync(earningsScreen));
 if (fs.existsSync(earningsScreen)) {
   const screen = read(earningsScreen);
+  // Localization moved the sentence into the dictionary: the screen must render
+  // the unavailable key, and the English resources must still hold the exact
+  // user-safe sentence (so the message is both shipped and translatable).
+  const strings = read(path.join(REPO, 'src', 'lib', 'i18n', 'resources.ts'));
   check('earnings screen renders a user-safe unavailability message',
-    /currently unavailable/i.test(screen));
+    /t\('drProfile\.featureUnavailable'\)/.test(screen) && /currently unavailable/i.test(strings));
   check('earnings screen does NOT leak technical detail in that message',
     !/feature_disabled[^"'`]{0,40}message/i.test(screen));
   check('earnings screen checks the platform flag (not only the doctor toggle)',

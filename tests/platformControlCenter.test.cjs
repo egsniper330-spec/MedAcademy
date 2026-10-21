@@ -98,7 +98,9 @@ const LISTED_PAGES = [
 
   // The shared header must expose an accessible, reusable back control.
   const header = read('src/components/PageHeader.tsx');
-  ok(/accessibilityLabel="Go back"/.test(header), 'nav: PageHeader back button is accessible ("Go back")');
+  ok(/accessibilityLabel=\{t\('common\.goBack'\)\}/.test(header) &&
+     /'common\.goBack': 'Go back'/.test(read('src/lib/i18n/resources.ts')),
+    'nav: PageHeader back button is accessible ("Go back", localized)');
   ok(/backFallback/.test(header), 'nav: PageHeader supports a terminal backFallback');
   ok(/if \(onBack\) \{ onBack\(\); return; \}/.test(header), 'nav: PageHeader prefers an explicit onBack');
   ok(/if \(router\.canGoBack\(\)\) \{ router\.back\(\); return; \}/.test(header),

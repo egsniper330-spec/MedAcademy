@@ -12,6 +12,7 @@
  * plugin only supports named identifier imports — namespace imports break
  * the web bundle).
  */
+import { t } from '@/lib/i18n';
 import React from 'react';
 import { View, useColorScheme } from 'react-native';
 import { Tabs } from 'expo-router';
@@ -111,7 +112,7 @@ export default function RoleTabShell({ tabs, initialRouteName, jsIconShrink }: R
               key={tab.name}
               name={tab.name}
               options={{
-                title: tab.title,
+                title: t(tab.titleKey ?? tab.title),
                 tabBarIcon: ({ color, size }: { color: string; size: number }) => {
                       const Icon = lucideIcon(tab.icon);
                       return <Icon size={jsIconShrink ? size - 2 : size} color={color} />;

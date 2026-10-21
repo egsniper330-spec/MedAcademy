@@ -207,6 +207,39 @@ function shouldAutoRefresh(path: string): boolean {
   return !!getStoredSession()?.refresh_token;
 }
 
+// One-shot post-unlock rotation. Suppressing a refresh while the lock is up is
+// correct (no credentials are minted on a device under containment), but the
+// suppression used to be FINAL: after the lock cleared, nothing rotated the
+// token until some screen happened to receive another 401 — after a ~30 min
+// background the access token is always expired, so every screen mounted behind
+// an error state until the 30 s poll re-triggered the chain. Scheduling the
+// rotation for the moment the lock FULLY clears restores the session
+// deterministically. It is NOT an allowlist entry: the lock must be released
+// first, a confirmed violation never releases it (the queued entry expires and
+// no credential is minted), and the callback re-reads the stored session so a
+// sign-out or identity swap during the lock cannot be rotated.
+let unlockRefreshScheduled = false;
+function scheduleRefreshAfterUnlock(): void {
+  if (unlockRefreshScheduled) return;
+  unlockRefreshScheduled = true;
+  void runWhenNetworkUnlocked(
+    'POST /auth/refresh (post-unlock recovery)',
+    async () => {
+      unlockRefreshScheduled = false;
+      const stored = getStoredSession();
+      if (!stored?.refresh_token || isSecurityLocked()) return;
+      authStateLog('AUTH_REFRESH_START', 'post-unlock recovery');
+      await refreshAccessToken();
+    },
+    NETWORK_LOCK_DEFER_MAX_MS,
+  ).then((outcome) => {
+    if (!outcome.ran) {
+      unlockRefreshScheduled = false;
+      authStateLog('AUTH_REFRESH_SUPPRESSED', 'lock did not clear — no rotation attempted (session preserved)');
+    }
+  });
+}
+
 async function refreshAccessToken(): Promise<boolean> {
   if (refreshPromise) {
     authStateLog('AUTH_REFRESH_START', 'joining in-flight refresh (single-flight)');
@@ -215,10 +248,11 @@ async function refreshAccessToken(): Promise<boolean> {
   authStateLog('AUTH_REFRESH_START');
   refreshPromise = (async (): Promise<boolean> => {
     // SECURITY LOCK: token rotation is protected activity. While the lock is
-    // active we never mint new credentials — the rotation resumes when the
-    // lock clears (the caller re-runs its own flow at that point).
+    // active we never mint new credentials — the rotation is re-scheduled for
+    // the moment the lock fully clears (see scheduleRefreshAfterUnlock).
     if (isSecurityLocked()) {
-      authStateLog('AUTH_REFRESH_DEFINITIVE_FAILURE', 'security lock active — refresh suppressed');
+      authStateLog('AUTH_REFRESH_SUPPRESSED', 'security lock active — refresh deferred until unlock');
+      scheduleRefreshAfterUnlock();
       return false;
     }
     const stored = getStoredSession();
@@ -334,7 +368,32 @@ async function apiFetchOnce<T = unknown>(
   const timer = setTimeout(() => controller.abort(), 30000);
   // Register the controller so activating the lock aborts THIS request
   // immediately (no waiting for the 30s timeout). Unregistered on settle.
-  const unregisterAbort = registerProtectedAbort(controller);
+  //
+  // TWO EXEMPTIONS, both load-bearing:
+  //
+  //  1. LOCK-EXEMPT PATHS. registerProtectedAbort() ABORTS IMMEDIATELY when the
+  //     lock is already held (that is its job for protected traffic). Registering
+  //     the allowlist therefore killed every allowlisted request at birth while
+  //     the lock was up — which is exactly the state the pre-login security
+  //     screen runs in. That made the allowlist dead code: /support/contact was
+  //     refused ("Could not load support contacts"), the violation report could
+  //     not reach the audit log, and /auth/logout was aborted on a blocked
+  //     device. Allowlisted traffic is the verification/recovery/audit plane the
+  //     lock itself depends on: it must be allowed to COMPLETE, never contained.
+  //
+  //  2. /auth/refresh. Rotation is single-use: if containment aborts a refresh
+  //     the server may already have completed, the client never receives the new
+  //     pair while the OLD refresh token is now revoked. The next refresh then
+  //     gets a definitive 401 and clears a perfectly valid session — the
+  //     "logged out about a minute after returning from the background" bug
+  //     (resume engages the lock, the in-flight rotation is aborted, the next
+  //     poll's refresh hits the revoked token). A refresh is bounded by the 30s
+  //     timeout above, so leaving it un-abortable cannot hang containment, and it
+  //     stays FROZEN while the lock is up (refreshAccessToken's own guard + the
+  //     pre-network gate below) — it is exempt from containment, not from the
+  //     lock.
+  const abortExempt = isLockExempt(path) || path.startsWith('/auth/refresh');
+  const unregisterAbort = abortExempt ? () => {} : registerProtectedAbort(controller);
   try {
     const res = await globalThis.fetch(`${API_BASE}${path}`, {
       method,
@@ -1279,6 +1338,14 @@ const RPC_MAP: Record<string, string> = {
   'get_course_progress':              '/courses/{id}/progress',
   'get_deletion_stats':               '/analytics/deletion-stats',
   'get_doctor_activity_stats':        '/rpc/doctor-activity-stats/{doctorId}',
+  // Enrollment statistics (Admin + Super Admin, read-only). Both counting
+  // metrics travel together in every response so the UI can switch modes
+  // without a refetch.
+  'get_enrollment_stats':             '/analytics/enrollment-stats',
+  'get_enrollment_stats_doctors':     '/analytics/enrollment-stats/doctors',
+  'get_enrollment_stats_courses':     '/analytics/enrollment-stats/courses',
+  'get_enrollment_doctor_stats':      '/analytics/enrollment-stats/doctors/{id}',
+  'get_enrollment_course_stats':      '/analytics/enrollment-stats/courses/{id}',
   'get_doctor_credit_transactions':   '/rpc/doctor-credit-transactions/{doctorId}',
   'get_doctor_earnings_dashboard':    '/rpc/doctor-earnings-dashboard/{doctorId}',
   'get_doctor_student_profile':       '/rpc/doctor-student-profile',
@@ -1336,6 +1403,8 @@ const RPC_PATH_ALIASES: Record<string, Record<string, string>> = {
   'get_doctor_activity_stats':      { doctorId: 'p_doctor_id' },
   'get_doctor_credit_transactions': { doctorId: 'p_doctor_id' },
   'get_doctor_earnings_dashboard':  { doctorId: 'p_doctor_id' },
+  'get_enrollment_doctor_stats':    { id: 'doctor_id' },
+  'get_enrollment_course_stats':    { id: 'course_id' },
   'get_user_activity':              { id: 'p_user_id' },
   'get_user_profile_summary':       { id: 'p_user_id' },
   'publish_course':                 { id: 'p_course_id' },
@@ -1373,6 +1442,11 @@ const GET_RPCS = new Set([
   'get_doctor_credit_transactions',
   'get_doctor_earnings_dashboard',
   'get_doctor_students',
+  'get_enrollment_stats',
+  'get_enrollment_stats_doctors',
+  'get_enrollment_stats_courses',
+  'get_enrollment_doctor_stats',
+  'get_enrollment_course_stats',
   'get_lesson_video_state',
   'get_my_credits_balance',
   'get_orphan_deletion_records',

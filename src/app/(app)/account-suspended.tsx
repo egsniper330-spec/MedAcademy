@@ -11,6 +11,7 @@ import { backendClient } from '@/client/backendClient';
 // Add useLayout import
 import { neuColors, neuFlatStyle, useLayout, mutedTextStyle } from '@/lib/neu';
 import { NeuButton } from '@/components/NeuButton';
+import { t } from '@/lib/i18n';
 
 export default function AccountBlockedScreen() {
   const isDark = useColorScheme() === 'dark';
@@ -62,7 +63,7 @@ export default function AccountBlockedScreen() {
 
       {/* Title */}
       <Text style={{ fontSize: layout.titleSize, fontWeight: '800', color: c.text, textAlign: 'center', marginBottom: layout.pad.xs }}>
-        Account Blocked
+        {t('suspended.blockedTitle')}
       </Text>
       <Text style={{
         fontSize: layout.bodySize,
@@ -71,7 +72,7 @@ export default function AccountBlockedScreen() {
         lineHeight: layout.bodySize * 1.6,
         marginBottom: layout.pad.xl,
       }}>
-        Your account has been blocked by an administrator. You cannot access the app at this time.
+        {t('suspended.blockedMessage')}
       </Text>
 
       {/* Info card — padding/gap/radius from adaptive tokens */}
@@ -83,9 +84,9 @@ export default function AccountBlockedScreen() {
         marginBottom: layout.pad.lg,
       }]}>
         {[
-          { icon: <ShieldOff size={layout.bodySize + 4} color="#DC2626" style={{ marginTop: 2 }} />, title: 'Why am I blocked?', body: "Your account was blocked by an administrator. This may be due to a policy violation or at the admin's discretion." },
-          { icon: <AlertTriangle size={layout.bodySize + 4} color={c.primary} style={{ marginTop: 2 }} />, title: 'What can I do?', body: 'Contact support to appeal this decision. Provide your account email and any relevant context.' },
-          { icon: <Smartphone size={layout.bodySize + 4} color={c.primary} style={{ marginTop: 2 }} />, title: 'All sessions ended', body: 'All your active sessions on all devices have been ended automatically.' },
+          { icon: <ShieldOff size={layout.bodySize + 4} color="#DC2626" style={{ marginTop: 2 }} />, title: t('suspended.why'), body: t('suspended.whyBody') },
+          { icon: <AlertTriangle size={layout.bodySize + 4} color={c.primary} style={{ marginTop: 2 }} />, title: t('suspended.whatCanIDo'), body: t('suspended.whatCanIDoBody') },
+          { icon: <Smartphone size={layout.bodySize + 4} color={c.primary} style={{ marginTop: 2 }} />, title: t('suspended.sessionsEnded'), body: t('suspended.sessionsEndedBody') },
         ].map(({ icon, title, body }) => (
           <View key={title} style={{ flexDirection: 'row', alignItems: 'flex-start', gap: layout.pad.md }}>
             {icon}
@@ -99,8 +100,8 @@ export default function AccountBlockedScreen() {
 
       {/* Actions */}
       <View style={{ width: '100%', gap: layout.pad.md }}>
-        <NeuButton label="Contact Support" icon={<Phone size={layout.bodySize} color="#fff" />} onPress={handleContactSupport} variant="primary" fullWidth />
-        <NeuButton label="Back to Login"   icon={<LogOut size={layout.bodySize} color={c.text} />} onPress={handleLogout} fullWidth />
+        <NeuButton label={t('support.title')} icon={<Phone size={layout.bodySize} color="#fff" />} onPress={handleContactSupport} variant="primary" fullWidth />
+        <NeuButton label={t('suspended.backToLogin')}   icon={<LogOut size={layout.bodySize} color={c.text} />} onPress={handleLogout} fullWidth />
       </View>
     </ScrollView>
   );

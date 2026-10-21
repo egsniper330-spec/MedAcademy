@@ -14,30 +14,31 @@ import { getAuditTrail, AuditTrailEntry } from '@/lib/api';
 import { NeuCard } from '@/components/NeuCard';
 import { neuColors, useLayout, safeBottom, mutedTextStyle } from '@/lib/neu';
 import { PageHeader } from '@/components/PageHeader';
+import { useTranslation } from '@/lib/i18n';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const PAGE_SIZE = 50;
 
-interface CategoryFilter { key: string; label: string; icon: React.ElementType; color: string }
+interface CategoryFilter { key: string; labelKey: string; icon: React.ElementType; color: string }
 
 const CATEGORIES: CategoryFilter[] = [
-  { key: '',         label: 'All Events',   icon: Shield,      color: '#6B7280' },
-  { key: 'users',    label: 'Users',        icon: User,        color: '#7C3AED' },
-  { key: 'roles',    label: 'Role Changes', icon: ArrowUpDown, color: '#9333EA' },
-  { key: 'doctor',   label: 'Doctor',       icon: UserCheck,   color: '#2DA8FF' },
-  { key: 'student',  label: 'Student',      icon: Users,       color: '#2563EB' },
-  { key: 'courses',  label: 'Courses',      icon: BookOpen,    color: '#D97706' },
-  { key: 'auth',     label: 'Auth',         icon: LogIn,       color: '#DC2626' },
-  { key: 'finance',  label: 'Finance',      icon: DollarSign,  color: '#065F46' },
-  { key: 'platform', label: 'Platform',     icon: Settings,    color: '#0F766E' },
+  { key: '',         labelKey: 'adminAudit.allEvents',   icon: Shield,      color: '#6B7280' },
+  { key: 'users',    labelKey: 'adminAudit.users',       icon: User,        color: '#7C3AED' },
+  { key: 'roles',    labelKey: 'adminAudit.roleChanges', icon: ArrowUpDown, color: '#9333EA' },
+  { key: 'doctor',   labelKey: 'adminAudit.doctor',      icon: UserCheck,   color: '#2DA8FF' },
+  { key: 'student',  labelKey: 'adminAudit.student',     icon: Users,       color: '#2563EB' },
+  { key: 'courses',  labelKey: 'adminAudit.courses',     icon: BookOpen,    color: '#D97706' },
+  { key: 'auth',     labelKey: 'adminAudit.auth',        icon: LogIn,       color: '#DC2626' },
+  { key: 'finance',  labelKey: 'adminAudit.finance',     icon: DollarSign,  color: '#065F46' },
+  { key: 'platform', labelKey: 'adminAudit.platform',    icon: Settings,    color: '#0F766E' },
 ];
 
 const TIME_FILTERS = [
-  { key: '',      label: 'All Time' },
-  { key: 'today', label: 'Today'    },
-  { key: '7d',    label: '7 Days'   },
-  { key: '30d',   label: '30 Days'  },
+  { key: '',      labelKey: 'adminAudit.allTime' },
+  { key: 'today', labelKey: 'adminAudit.today'   },
+  { key: '7d',    labelKey: 'adminAudit.days7'   },
+  { key: '30d',   labelKey: 'adminAudit.days30'  },
 ];
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -112,11 +113,12 @@ function OldNewDiff({ oldValues, newValues, c }: {
   newValues: Record<string, unknown> | null;
   c: typeof neuColors.light;
 }) {
+  const { t } = useTranslation();
   const allKeys = Array.from(new Set([...Object.keys(oldValues ?? {}), ...Object.keys(newValues ?? {})]));
   if (allKeys.length === 0) return null;
   return (
     <View style={{ marginTop: 4 }}>
-      <Text style={{ fontSize: 10, fontWeight: '700', ...mutedTextStyle(c, 0.4), marginBottom: 8, textTransform: 'uppercase', letterSpacing: 0.5 }}>Changes</Text>
+      <Text style={{ fontSize: 10, fontWeight: '700', ...mutedTextStyle(c, 0.4), marginBottom: 8, textTransform: 'uppercase', letterSpacing: 0.5 }}>{t('adminAudit.changes')}</Text>
       {allKeys.map(key => {
         const oldVal = oldValues?.[key];
         const newVal = newValues?.[key];
@@ -126,12 +128,12 @@ function OldNewDiff({ oldValues, newValues, c }: {
             <Text style={{ fontSize: 11, fontWeight: '700', ...mutedTextStyle(c, 0.5), marginBottom: 3, textTransform: 'capitalize' }}>{key.replace(/_/g, ' ')}</Text>
             {oldVal !== undefined && (
               <View style={{ backgroundColor: '#DC262614', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 5, marginBottom: 3 }}>
-                <Text style={{ fontSize: 12, color: '#DC2626' }}>Before: {String(typeof oldVal === 'object' ? JSON.stringify(oldVal) : oldVal)}</Text>
+                <Text style={{ fontSize: 12, color: '#DC2626' }}>{t('adminAudit.before', { value: String(typeof oldVal === 'object' ? JSON.stringify(oldVal) : oldVal) })}</Text>
               </View>
             )}
             {newVal !== undefined && changed && (
               <View style={{ backgroundColor: '#16A34A14', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 5 }}>
-                <Text style={{ fontSize: 12, color: '#16A34A' }}>After: {String(typeof newVal === 'object' ? JSON.stringify(newVal) : newVal)}</Text>
+                <Text style={{ fontSize: 12, color: '#16A34A' }}>{t('adminAudit.after', { value: String(typeof newVal === 'object' ? JSON.stringify(newVal) : newVal) })}</Text>
               </View>
             )}
           </View>
@@ -144,6 +146,7 @@ function OldNewDiff({ oldValues, newValues, c }: {
 // ─── ExpandableLogCard ────────────────────────────────────────────────────────
 
 function ExpandableLogCard({ entry, c }: { entry: AuditTrailEntry; c: typeof neuColors.light }) {
+  const { t } = useTranslation();
   const [expanded, setExpanded] = useState(false);
   const aColor = actionColor(entry.action, entry.log_status);
 
@@ -202,7 +205,7 @@ function ExpandableLogCard({ entry, c }: { entry: AuditTrailEntry; c: typeof neu
           </View>
           {/* Actor */}
           <View style={{ backgroundColor: `${c.text}05`, borderRadius: 10, padding: 10, marginBottom: 8 }}>
-            <Text style={{ fontSize: 10, fontWeight: '700', ...mutedTextStyle(c, 0.4), textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 6 }}>Actor</Text>
+            <Text style={{ fontSize: 10, fontWeight: '700', ...mutedTextStyle(c, 0.4), textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 6 }}>{t('adminAudit.actor')}</Text>
             <Text style={{ fontSize: 13, fontWeight: '700', color: c.text }}>{entry.actor_name ?? '—'}</Text>
             {entry.actor_email && <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.5) }}>{entry.actor_email}</Text>}
             {entry.actor_role  && <Text style={{ fontSize: 11, color: aColor, fontWeight: '600', textTransform: 'capitalize', marginTop: 2 }}>{entry.actor_role.replace(/_/g,' ')}</Text>}
@@ -210,7 +213,7 @@ function ExpandableLogCard({ entry, c }: { entry: AuditTrailEntry; c: typeof neu
           {/* Target */}
           {(entry.target_name || entry.resource_type) && (
             <View style={{ backgroundColor: `${c.text}05`, borderRadius: 10, padding: 10, marginBottom: 8 }}>
-              <Text style={{ fontSize: 10, fontWeight: '700', ...mutedTextStyle(c, 0.4), textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 6 }}>Target</Text>
+              <Text style={{ fontSize: 10, fontWeight: '700', ...mutedTextStyle(c, 0.4), textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 6 }}>{t('adminAudit.target')}</Text>
               {entry.target_name   && <Text style={{ fontSize: 13, fontWeight: '700', color: c.text }}>{entry.target_name}</Text>}
               {entry.resource_type && <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.5), textTransform: 'capitalize' }}>{entry.resource_type.replace(/_/g,' ')}</Text>}
               {entry.resource_id   && <Text style={{ fontSize: 10, ...mutedTextStyle(c, 0.3), fontFamily: 'monospace', marginTop: 2 }}>ID: {entry.resource_id}</Text>}
@@ -225,7 +228,7 @@ function ExpandableLogCard({ entry, c }: { entry: AuditTrailEntry; c: typeof neu
           {/* Extra details */}
           {extraDetails.length > 0 && (
             <View style={{ backgroundColor: `${c.text}05`, borderRadius: 10, padding: 10, marginBottom: 8 }}>
-              <Text style={{ fontSize: 10, fontWeight: '700', ...mutedTextStyle(c, 0.4), textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 6 }}>Additional Info</Text>
+              <Text style={{ fontSize: 10, fontWeight: '700', ...mutedTextStyle(c, 0.4), textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 6 }}>{t('adminAudit.additionalInfo')}</Text>
               {extraDetails.map(([k, v]) => (
                 <View key={k} style={{ flexDirection: 'row', paddingVertical: 4, borderBottomWidth: 1, borderBottomColor: `${c.text}06` }}>
                   <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.45), minWidth: 80, flexShrink: 0 }}>{k.replace(/_/g,' ')}</Text>
@@ -239,7 +242,7 @@ function ExpandableLogCard({ entry, c }: { entry: AuditTrailEntry; c: typeof neu
           {/* Metadata */}
           <View style={{ backgroundColor: `${c.text}05`, borderRadius: 10, padding: 10 }}>
             <View style={{ flexDirection: 'row', paddingVertical: 4 }}>
-              <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.45), width: 80 }}>Timestamp</Text>
+              <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.45), width: 80 }}>{t('adminAudit.timestamp')}</Text>
               <Text style={{ fontSize: 12, color: c.text }}>{fullTimestamp(entry.created_at)}</Text>
             </View>
             {entry.ip_address && (
@@ -289,6 +292,7 @@ export default function AdminAudit() {
   const layout = useLayout();
   const insets = layout.insets;
   const c = scheme === 'dark' ? neuColors.dark : neuColors.light;
+  const { t } = useTranslation();
 
   const [entries,     setEntries]    = useState<AuditTrailEntry[]>([]);
   const [totalCount,  setTotalCount] = useState(0);
@@ -354,14 +358,14 @@ export default function AdminAudit() {
     debRef.current = setTimeout(() => { offset.current = 0; reload(); }, 400);
   };
 
-  const onActorChange    = (t: string) => { setActorSearch(t);    activeActor.current    = t; scheduleSearch(); };
-  const onTargetChange   = (t: string) => { setTargetSearch(t);   activeTarget.current   = t; scheduleSearch(); };
-  const onResourceChange = (t: string) => { setResourceSearch(t); activeResource.current = t; scheduleSearch(); };
+  const onActorChange    = (v: string) => { setActorSearch(v);    activeActor.current    = v; scheduleSearch(); };
+  const onTargetChange   = (v: string) => { setTargetSearch(v);   activeTarget.current   = v; scheduleSearch(); };
+  const onResourceChange = (v: string) => { setResourceSearch(v); activeResource.current = v; scheduleSearch(); };
 
   return (
     <View style={{ flex: 1, backgroundColor: c.base }}>
       {/* PageHeader sits OUTSIDE the inner padding view so it can own its own horizontal padding */}
-      <PageHeader title="Audit Logs" subtitle="Security & activity trail" accentColor="#DC2626" />
+      <PageHeader title={t('adminAudit.title')} subtitle={t('adminAudit.subtitle')} accentColor="#DC2626" />
 
       <View style={{ paddingHorizontal: layout.screenPx, paddingTop: 8, paddingBottom: 8 }}>
         <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
@@ -369,7 +373,7 @@ export default function AdminAudit() {
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
             {totalCount > 0 && (
               <View style={{ backgroundColor: `${c.primary}15`, borderRadius: 10, paddingHorizontal: 10, paddingVertical: 4 }}>
-                <Text style={{ fontSize: 12, fontWeight: '700', color: c.primary }}>{totalCount.toLocaleString('en-US')} entries</Text>
+                <Text style={{ fontSize: 12, fontWeight: '700', color: c.primary }}>{t('adminAudit.entries', { count: totalCount.toLocaleString('en-US') })}</Text>
               </View>
             )}
             <Pressable onPress={() => setShowFilters(v => !v)}
@@ -393,7 +397,7 @@ export default function AdminAudit() {
                     backgroundColor: active ? cat.color : `${c.text}0C`,
                   }}>
                   <Icon size={13} color={active ? '#fff' : c.text} opacity={active ? 1 : 0.55} />
-                  <Text style={{ fontSize: 12, fontWeight: '600', color: active ? '#fff' : c.text, opacity: active ? 1 : 0.65 }}>{cat.label}</Text>
+                  <Text style={{ fontSize: 12, fontWeight: '600', color: active ? '#fff' : c.text, opacity: active ? 1 : 0.65 }}>{t(cat.labelKey)}</Text>
                 </Pressable>
               );
             })}
@@ -408,7 +412,7 @@ export default function AdminAudit() {
               return (
                 <Pressable key={tf.key} onPress={() => { setTimeFilter(tf.key); offset.current = 0; }}
                   style={{ paddingHorizontal: 14, paddingVertical: 6, borderRadius: 20, backgroundColor: active ? c.primary : `${c.text}0C` }}>
-                  <Text style={{ fontSize: 12, fontWeight: '600', color: active ? '#fff' : c.text, opacity: active ? 1 : 0.6 }}>{tf.label}</Text>
+                  <Text style={{ fontSize: 12, fontWeight: '600', color: active ? '#fff' : c.text, opacity: active ? 1 : 0.6 }}>{t(tf.labelKey)}</Text>
                 </Pressable>
               );
             })}
@@ -418,9 +422,9 @@ export default function AdminAudit() {
         {/* Expanded search fields */}
         {showFilters && (
           <View style={{ flexDirection: 'row', gap: 8, marginBottom: 4 }}>
-            <SearchBar placeholder="Actor…"    value={actorSearch}    onChange={onActorChange}    c={c} />
-            <SearchBar placeholder="Target…"   value={targetSearch}   onChange={onTargetChange}   c={c} />
-            <SearchBar placeholder="Resource…" value={resourceSearch} onChange={onResourceChange} c={c} />
+            <SearchBar placeholder={t('adminAudit.actorPlaceholder')}    value={actorSearch}    onChange={onActorChange}    c={c} />
+            <SearchBar placeholder={t('adminAudit.targetPlaceholder')}   value={targetSearch}   onChange={onTargetChange}   c={c} />
+            <SearchBar placeholder={t('adminAudit.resourcePlaceholder')} value={resourceSearch} onChange={onResourceChange} c={c} />
           </View>
         )}
       </View>
@@ -439,8 +443,8 @@ export default function AdminAudit() {
           ListEmptyComponent={
             <View style={{ alignItems: 'center', paddingVertical: 80 }}>
               <Shield size={48} color={c.primary} opacity={0.15} style={{ marginBottom: 12 }} />
-              <Text style={{ fontSize: 16, fontWeight: '700', ...mutedTextStyle(c, 0.3) }}>No audit logs found</Text>
-              <Text style={{ fontSize: 13, color: c.text, opacity: 0.2, marginTop: 6 }}>Try a different filter or search term</Text>
+              <Text style={{ fontSize: 16, fontWeight: '700', ...mutedTextStyle(c, 0.3) }}>{t('adminAudit.empty')}</Text>
+              <Text style={{ fontSize: 13, color: c.text, opacity: 0.2, marginTop: 6 }}>{t('adminAudit.emptyHint')}</Text>
             </View>
           }
           ListFooterComponent={

@@ -12,6 +12,8 @@ import { neuColors, useLayout, neuMicroStyle, safeTop, safeBottom, mutedTextStyl
 import { PageHeader } from '@/components/PageHeader';
 import { DrawerProvider } from '@/components/DrawerContext';
 import DrawerNav from '@/components/DrawerNav';
+import { useTranslation } from '@/lib/i18n';
+import { localizeNotification } from '@/lib/notificationCopy';
 
 function NotificationsContent() {
   const scheme = useColorScheme();
@@ -20,6 +22,7 @@ function NotificationsContent() {
   const { profile } = useProfileStore();
   const layout = useLayout();
   const insets = layout.insets;
+  const { t, locale } = useTranslation();
   const { height: screenHeight } = useWindowDimensions();
 
   const [notifications, setNotifications] = useState<any[]>([]);
@@ -53,7 +56,7 @@ function NotificationsContent() {
   return (
     <View style={{ flex: 1, backgroundColor: c.base }}>
       {/* ── Global-standard header: hamburger + title, safe-area aware ── */}
-      <PageHeader title="Notifications" />
+      <PageHeader title={t('common.notifications')} />
 
       {/* ── Scrollable content ────────────────────────────────────────── */}
       <ScrollView
@@ -88,16 +91,18 @@ function NotificationsContent() {
               <Bell size={40} color={c.primary} opacity={0.55} />
             </View>
             <Text style={{ fontSize: 18, fontWeight: '800', color: c.text, textAlign: 'center', marginBottom: 8 }}>
-              No Notifications Yet
+              {t('notifications.empty')}
             </Text>
             <Text style={{ fontSize: 14, ...mutedTextStyle(c, 0.45), textAlign: 'center', lineHeight: 22 }}>
-              You&apos;re all caught up.{'\n'}New notifications will appear here.
+              {t('notifications.emptyHint')}
             </Text>
           </View>
 
         ) : (
           // ── Notification list ────────────────────────────────────────
-          notifications.map((n) => (
+          notifications.map((n) => {
+            const copy = localizeNotification(n, t);
+            return (
             <NeuCard key={n.id} pressed={n.is_read} style={{ marginBottom: 10, padding: 16, flexDirection: 'row', alignItems: 'flex-start' }}>
               <View style={{
                 width: 40, height: 40, borderRadius: 12,
@@ -109,10 +114,12 @@ function NotificationsContent() {
               </View>
 
               <View style={{ flex: 1 }}>
-                <Text style={{ fontSize: 14, fontWeight: n.is_read ? '500' : '700', color: c.text }}>{n.title}</Text>
-                <Text style={{ fontSize: 13, ...mutedTextStyle(c, 0.6), marginTop: 2 }}>{n.body}</Text>
+                <Text style={{ fontSize: 14, fontWeight: n.is_read ? '500' : '700', color: c.text }}>{copy.title}</Text>
+                <Text style={{ fontSize: 13, ...mutedTextStyle(c, 0.6), marginTop: 2 }}>{copy.body}</Text>
                 <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.35), marginTop: 4 }}>
-                  {new Date(n.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                  {new Date(n.created_at).toLocaleDateString(locale === 'ar' ? 'ar-EG' : 'en-US', {
+                    numberingSystem: 'latn', month: 'short', day: 'numeric', year: 'numeric',
+                  })}
                 </Text>
               </View>
 
@@ -120,7 +127,7 @@ function NotificationsContent() {
                 {!n.is_read && (
                   <Pressable
                     onPress={() => handleRead(n.id)}
-                    accessibilityLabel="Mark as read"
+                    accessibilityLabel={t('notifications.markRead')}
                     accessibilityRole="button"
                     style={{ width: 40, height: 40, borderRadius: 12, backgroundColor: '#16A34A18', alignItems: 'center', justifyContent: 'center' }}
                   >
@@ -129,7 +136,7 @@ function NotificationsContent() {
                 )}
                 <Pressable
                   onPress={() => handleDelete(n.id)}
-                  accessibilityLabel="Delete notification"
+                  accessibilityLabel={t('notifications.delete')}
                   accessibilityRole="button"
                   style={{ width: 40, height: 40, borderRadius: 12, backgroundColor: '#DC262618', alignItems: 'center', justifyContent: 'center' }}
                 >
@@ -137,7 +144,8 @@ function NotificationsContent() {
                 </Pressable>
               </View>
             </NeuCard>
-          ))
+            );
+          })
         )}
       </ScrollView>
     </View>

@@ -1,6 +1,7 @@
 import { Icon } from '@/components/ui/icon';
 import { NativeOnlyAnimatedView } from '@/components/ui/native-only-animated-view';
 import { cn } from '@/lib/utils';
+import { t } from '@/lib/i18n';
 import * as DialogPrimitive from '@rn-primitives/dialog';
 import { X } from 'lucide-react-native';
 import * as React from 'react';
@@ -79,7 +80,7 @@ function DialogContent({
               as={X}
               className={cn('text-accent-foreground web:pointer-events-none size-4 shrink-0')}
             />
-            <Text className="sr-only">Close</Text>
+            <Text className="sr-only">{t('common.close')}</Text>
           </DialogPrimitive.Close>
         </DialogPrimitive.Content>
       </DialogOverlay>

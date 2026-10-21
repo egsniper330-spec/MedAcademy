@@ -32,6 +32,7 @@ import { useDebounce } from '@/lib/useDebounce';
 import { DeleteAccountModal } from '@/components/DeleteAccountModal';
 import { ChangePasswordModal } from '@/components/ChangePasswordModal';
 import { getPublicEmail } from '@/lib/api';
+import { useTranslation } from '@/lib/i18n';
 import { UserRole, UserStatus } from '@/lib/enums';
 import { COUNTRIES, DEFAULT_COUNTRY, buildE164, validateNationalNumber, type Country } from '@/lib/phone';
 // Role filter options — sourced from shared enum constants
@@ -40,6 +41,7 @@ const STATUS_FILTERS = ['', UserStatus.ACTIVE, UserStatus.SUSPENDED];
 
 // ── Inline country-code picker for the Create User modal ─────────────────────
 function AdminCountryPicker({ value, onChange, c }: { value: Country; onChange: (c: Country) => void; c: typeof neuColors.light }) {
+  const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState('');
   const layout = useLayout();
@@ -65,10 +67,10 @@ function AdminCountryPicker({ value, onChange, c }: { value: Country; onChange: 
         <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' }} onPress={() => setOpen(false)}>
           <Pressable style={{ backgroundColor: c.base, borderTopLeftRadius: 24, borderTopRightRadius: 24, width: '100%', maxHeight: '72%', padding: 20 }} onPress={e => e.stopPropagation()}>
             <View style={{ width: 36, height: 4, borderRadius: 2, backgroundColor: `${c.text}20`, alignSelf: 'center', marginBottom: 14 }} />
-            <Text style={{ fontSize: 17, fontWeight: '800', color: c.text, marginBottom: 12, textAlign: 'center' }}>Select Country</Text>
+            <Text style={{ fontSize: 17, fontWeight: '800', color: c.text, marginBottom: 12, textAlign: 'center' }}>{t('adminUsers.selectCountry')}</Text>
             <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: c.base, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10, marginBottom: 12, shadowColor: c.shadowDark, shadowOffset: { width: 1, height: 1 }, shadowOpacity: 0.4, shadowRadius: 3 }}>
               <Search size={14} color={c.text} style={{ opacity: 0.4, marginRight: 8, flexShrink: 0 }} />
-              <TextInput value={search} onChangeText={setSearch} placeholder="Search…" placeholderTextColor={`${c.text}55`} autoCapitalize="none" style={{ flex: 1, minWidth: 0, fontSize: 14, color: c.text, paddingVertical: 0 }} />
+              <TextInput value={search} onChangeText={setSearch} placeholder={t('adminUsers.search')} placeholderTextColor={`${c.text}55`} autoCapitalize="none" style={{ flex: 1, minWidth: 0, fontSize: 14, color: c.text, paddingVertical: 0 }} />
             </View>
             <FlatList
               data={filtered}
@@ -119,6 +121,7 @@ export default function AdminUsers() {
   const c = isDark ? neuColors.dark : neuColors.light;
   const layout = useLayout();
   const { showToast } = useToast();
+  const { t } = useTranslation();
   const router = useRouter();
   const { isLoading, run } = useActionLoading();
 
@@ -292,7 +295,7 @@ export default function AdminUsers() {
         status: 'active',
       });
       setIsDirty(false); closeCreateModal();
-      showToast({ type: 'success', message: 'User created successfully.' });
+      showToast({ type: 'success', message: t('adminUsers.created') });
       await loadData();
     } catch (e: any) {
       setCreateError(e?.message || 'Failed to create user. Please try again.');
@@ -426,27 +429,27 @@ export default function AdminUsers() {
       // Suspend family — local state mirrors the EXACT status the backend
       // persisted (updateUserStatus → set_user_status RPC), eliminating the
       // old blockUser/unblockUser 'blocked'-label drift.
-      suspend:        async () => { await updateUserStatus(id, 'suspended'); setUsers(p => p.map(u => u.id === id ? { ...u, status: 'suspended' } : u)); setSelectedUser((p: any) => p ? { ...p, status: 'suspended' } : null); showToast({ type: 'success', message: 'User suspended.' }); },
-      unsuspend:      async () => { await updateUserStatus(id, 'active');    setUsers(p => p.map(u => u.id === id ? { ...u, status: 'active' } : u));    setSelectedUser((p: any) => p ? { ...p, status: 'active' } : null);    showToast({ type: 'success', message: 'User unsuspended.' }); },
-      block:          async () => { await updateUserStatus(id, 'suspended'); setUsers(p => p.map(u => u.id === id ? { ...u, status: 'suspended' } : u)); setSelectedUser((p: any) => p ? { ...p, status: 'suspended' } : null); showToast({ type: 'success', message: 'User blocked.' }); },
-      unblock:        async () => { await updateUserStatus(id, 'active');    setUsers(p => p.map(u => u.id === id ? { ...u, status: 'active' } : u));    setSelectedUser((p: any) => p ? { ...p, status: 'active' } : null);    showToast({ type: 'success', message: 'User unblocked.' }); },
-      promote_doctor: async () => { await setUserRole(id, 'doctor');  setUsers(p => p.map(u => u.id === id ? { ...u, role: 'doctor' }  : u)); setSelectedUser((p: any) => p ? { ...p, role: 'doctor' }  : null); showToast({ type: 'success', message: 'Promoted to Doctor.' }); },
-      promote_admin:  async () => { await setUserRole(id, 'admin');   setUsers(p => p.map(u => u.id === id ? { ...u, role: 'admin' }   : u)); setSelectedUser((p: any) => p ? { ...p, role: 'admin' }   : null); showToast({ type: 'success', message: 'Promoted to Admin.' }); },
-      demote_student: async () => { await setUserRole(id, 'student'); setUsers(p => p.map(u => u.id === id ? { ...u, role: 'student' } : u)); setSelectedUser((p: any) => p ? { ...p, role: 'student' } : null); showToast({ type: 'success', message: 'Demoted to Student.' }); },
-      demote_doctor:  async () => { await setUserRole(id, 'doctor');  setUsers(p => p.map(u => u.id === id ? { ...u, role: 'doctor' }  : u)); setSelectedUser((p: any) => p ? { ...p, role: 'doctor' }  : null); showToast({ type: 'success', message: 'Demoted to Doctor.' }); },
+      suspend:        async () => { await updateUserStatus(id, 'suspended'); setUsers(p => p.map(u => u.id === id ? { ...u, status: 'suspended' } : u)); setSelectedUser((p: any) => p ? { ...p, status: 'suspended' } : null); showToast({ type: 'success', message: t('adminUsers.suspended') }); },
+      unsuspend:      async () => { await updateUserStatus(id, 'active');    setUsers(p => p.map(u => u.id === id ? { ...u, status: 'active' } : u));    setSelectedUser((p: any) => p ? { ...p, status: 'active' } : null);    showToast({ type: 'success', message: t('adminUsers.unsuspended') }); },
+      block:          async () => { await updateUserStatus(id, 'suspended'); setUsers(p => p.map(u => u.id === id ? { ...u, status: 'suspended' } : u)); setSelectedUser((p: any) => p ? { ...p, status: 'suspended' } : null); showToast({ type: 'success', message: t('adminUsers.blocked') }); },
+      unblock:        async () => { await updateUserStatus(id, 'active');    setUsers(p => p.map(u => u.id === id ? { ...u, status: 'active' } : u));    setSelectedUser((p: any) => p ? { ...p, status: 'active' } : null);    showToast({ type: 'success', message: t('adminUsers.unblocked') }); },
+      promote_doctor: async () => { await setUserRole(id, 'doctor');  setUsers(p => p.map(u => u.id === id ? { ...u, role: 'doctor' }  : u)); setSelectedUser((p: any) => p ? { ...p, role: 'doctor' }  : null); showToast({ type: 'success', message: t('adminUsers.promotedDoctor') }); },
+      promote_admin:  async () => { await setUserRole(id, 'admin');   setUsers(p => p.map(u => u.id === id ? { ...u, role: 'admin' }   : u)); setSelectedUser((p: any) => p ? { ...p, role: 'admin' }   : null); showToast({ type: 'success', message: t('adminUsers.promotedAdmin') }); },
+      demote_student: async () => { await setUserRole(id, 'student'); setUsers(p => p.map(u => u.id === id ? { ...u, role: 'student' } : u)); setSelectedUser((p: any) => p ? { ...p, role: 'student' } : null); showToast({ type: 'success', message: t('adminUsers.demotedStudent') }); },
+      demote_doctor:  async () => { await setUserRole(id, 'doctor');  setUsers(p => p.map(u => u.id === id ? { ...u, role: 'doctor' }  : u)); setSelectedUser((p: any) => p ? { ...p, role: 'doctor' }  : null); showToast({ type: 'success', message: t('adminUsers.demotedDoctor') }); },
       unlimited_devices: async () => {
         await enableUnlimitedDevices(id);
         // Reflect new state: max_devices = null (unlimited)
         setUsers(p => p.map(u => u.id === id ? { ...u, max_devices: null } : u));
         setSelectedUser((p: any) => p ? { ...p, max_devices: null } : null);
-        showToast({ type: 'success', message: 'Unlimited devices enabled.' });
+        showToast({ type: 'success', message: t('adminUsers.unlimitedEnabled') });
       },
       limited_devices: async () => {
         await disableUnlimitedDevices(id, 1);
         // Reflect new state: max_devices = 1 (limited)
         setUsers(p => p.map(u => u.id === id ? { ...u, max_devices: 1 } : u));
         setSelectedUser((p: any) => p ? { ...p, max_devices: 1 } : null);
-        showToast({ type: 'success', message: 'Unlimited devices disabled (limit: 1).' });
+        showToast({ type: 'success', message: t('adminUsers.unlimitedDisabled') });
       },
     };
 
@@ -460,7 +463,7 @@ export default function AdminUsers() {
 
   const handleDeleted = (deletedId: string) => {
     setUsers(p => p.filter(u => u.id !== deletedId));
-    showToast({ type: 'success', message: 'User account permanently deleted.' });
+    showToast({ type: 'success', message: t('adminUsers.deleted') });
     setDeleteConfirm(false);
     setSelectedUser(null);
   };
@@ -492,7 +495,7 @@ export default function AdminUsers() {
     : users;
 
   const inp = { backgroundColor: c.base, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, shadowColor: c.shadowDark, shadowOffset: { width: 2, height: 2 }, shadowOpacity: 0.5, shadowRadius: 5, fontSize: 15, color: c.text };
-  const lbl = (t: string) => <Text style={{ fontSize: 12, fontWeight: '700', ...mutedTextStyle(c, 0.5), marginBottom: 5, textTransform: 'uppercase', letterSpacing: 0.7 }}>{t}</Text>;
+  const lbl = (label: string) => <Text style={{ fontSize: 12, fontWeight: '700', ...mutedTextStyle(c, 0.5), marginBottom: 5, textTransform: 'uppercase', letterSpacing: 0.7 }}>{label}</Text>;
   const dropBtn = (text: string, open: boolean, onPress: () => void) => (
     <Pressable onPress={onPress} style={{ ...inp, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
       <Text style={{ fontSize: 15, color: text ? c.text : `${c.text}55`, flex: 1 }} numberOfLines={1}>{text || 'Select…'}</Text>
@@ -517,8 +520,8 @@ export default function AdminUsers() {
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />} contentContainerStyle={{ paddingBottom: safeBottom(layout.insets.bottom) }}>
           {/* PageHeader sits OUTSIDE the inner padding view so it can own its own horizontal padding */}
           <PageHeader
-            title="User Management"
-            subtitle="All platform users"
+            title={t('adminUsers.title')}
+            subtitle={t('adminUsers.subtitle')}
             rightAction={
               <View style={{ flexDirection: 'row', gap: 8 }}>
                 <Pressable
@@ -527,7 +530,7 @@ export default function AdminUsers() {
                 >
                   <CheckSquare size={18} color={bulkMode ? c.primary : `${c.text}70`} />
                 </Pressable>
-                <NeuButton label="Add User" icon={<UserPlus size={15} color="#fff" />} onPress={openCreateModal} style={{ paddingHorizontal: 14 }} />
+                <NeuButton label={t('adminUsers.addUser')} icon={<UserPlus size={15} color="#fff" />} onPress={openCreateModal} style={{ paddingHorizontal: 14 }} />
               </View>
             }
           />
@@ -538,9 +541,9 @@ export default function AdminUsers() {
           {undoInfo && (
             <View style={{ backgroundColor: '#1C1C1E', borderRadius: 12, flexDirection: 'row', alignItems: 'center', padding: 12, marginBottom: 12, gap: 10 }}>
               <CheckCircle size={16} color="#4ADE80" />
-              <Text style={{ flex: 1, color: '#fff', fontSize: 13 }}>{undoInfo.name} moved to Trash</Text>
+              <Text style={{ flex: 1, color: '#fff', fontSize: 13 }}>{t('adminUsers.movedToTrash', { name: undoInfo.name })}</Text>
               <Pressable onPress={handleUndoTrash} style={{ backgroundColor: c.primary, borderRadius: 8, paddingHorizontal: 12, paddingVertical: 6 }}>
-                <Text style={{ color: '#fff', fontSize: 12, fontWeight: '700' }}>Undo (10s)</Text>
+                <Text style={{ color: '#fff', fontSize: 12, fontWeight: '700' }}>{t('adminUsers.undo')}</Text>
               </Pressable>
             </View>
           )}
@@ -548,10 +551,10 @@ export default function AdminUsers() {
           {/* Universal Search */}
           <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: c.base, borderRadius: 14, paddingHorizontal: 14, paddingVertical: 12, marginBottom: 8, shadowColor: c.shadowDark, shadowOffset: { width: 2, height: 2 }, shadowOpacity: 0.6, shadowRadius: 6 }}>
             <Search size={18} color={c.text} style={{ opacity: 0.4 }} />
-            <TextInput value={query} onChangeText={setQuery} placeholder="Name, email, phone or user ID…" placeholderTextColor={`${c.text}55`} autoCapitalize="none" returnKeyType="search" onSubmitEditing={handleSearch} style={{ flex: 1, marginLeft: 10, fontSize: 15, color: c.text }} />
+            <TextInput value={query} onChangeText={setQuery} placeholder={t('adminUsers.searchPlaceholder')} placeholderTextColor={`${c.text}55`} autoCapitalize="none" returnKeyType="search" onSubmitEditing={handleSearch} style={{ flex: 1, marginLeft: 10, fontSize: 15, color: c.text }} />
             {searching && <ActivityIndicator size="small" color={c.primary} />}
           </View>
-          <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.4), marginBottom: 12, marginLeft: 2 }}>Search by name, email, +20 phone, or user ID — then tap Enter</Text>
+          <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.4), marginBottom: 12, marginLeft: 2 }}>{t('adminUsers.searchHint')}</Text>
 
           {/* Role Filters */}
           <ScrollView automaticallyAdjustKeyboardInsets={process.env.EXPO_OS === 'ios'} horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 8 }}>
@@ -581,7 +584,7 @@ export default function AdminUsers() {
             filtered.length === 0 ? (
               <View style={{ alignItems: 'center', paddingVertical: 60 }}>
                 <Users size={48} color={c.primary} style={{ opacity: 0.2 } as any} />
-                <Text style={{ ...mutedTextStyle(c, 0.4), fontSize: 15, marginTop: 12 }}>No users found</Text>
+                <Text style={{ ...mutedTextStyle(c, 0.4), fontSize: 15, marginTop: 12 }}>{t('adminDevices.noUsers')}</Text>
               </View>
             ) : filtered.map(user => (
               <NeuCard key={user.id} style={{ marginBottom: 10, padding: 14, flexDirection: 'row', alignItems: 'center' }}>
@@ -600,7 +603,7 @@ export default function AdminUsers() {
                     ) : (
                       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
                         <AlertTriangle size={10} color="#DC2626" />
-                        <Text style={{ fontSize: 12, color: '#DC2626', marginLeft: 3, fontWeight: '600' }}>No phone</Text>
+                        <Text style={{ fontSize: 12, color: '#DC2626', marginLeft: 3, fontWeight: '600' }}>{t('adminUsers.noPhone')}</Text>
                       </View>
                     )}
                   </View>
@@ -674,7 +677,7 @@ export default function AdminUsers() {
         isSuperAdmin={false}
         onSaved={updated => {
           setUsers(p => p.map(u => u.id === updated.id ? { ...u, ...updated } : u));
-          showToast({ type: 'success', message: 'User profile updated.' });
+          showToast({ type: 'success', message: t('adminUsers.profileUpdated') });
         }}
       />
 
@@ -711,11 +714,11 @@ export default function AdminUsers() {
       />
 
       {/* ── Login History ── */}
-      <ResponsiveModal visible={loginHistoryModal} onClose={() => setLoginHistoryModal(false)} title="Login History" subtitle={selectedUser?.full_name}>
+      <ResponsiveModal visible={loginHistoryModal} onClose={() => setLoginHistoryModal(false)} title={t('loginHistory.title')} subtitle={selectedUser?.full_name}>
         {historyLoading ? <ActivityIndicator color={c.primary} style={{ marginVertical: 30 }} /> : (
           <ScrollView automaticallyAdjustKeyboardInsets={process.env.EXPO_OS === 'ios'} style={{ maxHeight: 400 }} showsVerticalScrollIndicator={false}>
             {loginHistory.length === 0 ? (
-              <Text style={{ ...mutedTextStyle(c, 0.4), textAlign: 'center', padding: 30 }}>No login history found.</Text>
+              <Text style={{ ...mutedTextStyle(c, 0.4), textAlign: 'center', padding: 30 }}>{t('adminUsers.noLoginHistory')}</Text>
             ) : loginHistory.map((h, i) => (
               <NeuCard key={h.id ?? i} style={{ marginBottom: 8, padding: 12 }}>
                 <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}>
@@ -737,18 +740,18 @@ export default function AdminUsers() {
       <ResponsiveModal
         visible={createModal}
         onClose={() => setCreateModal(false)}
-        title="Create User"
+        title={t('adminUsers.createUser')}
         isDirty={isDirty}
         icon={<View style={{ width: 40, height: 40, borderRadius: 12, backgroundColor: `${c.primary}18`, alignItems: 'center', justifyContent: 'center' }}><UserPlus size={20} color={c.primary} /></View>}
         footer={
           <View style={{ flexDirection: 'row', gap: 12 }}>
-            <NeuButton label="Cancel" onPress={() => setCreateModal(false)} variant="secondary" style={{ flex: 1 }} />
-            <NeuButton label="Create User" icon={<UserPlus size={15} color="#fff" />} onPress={handleCreate} loading={createLoading} style={{ flex: 1 }} />
+            <NeuButton label={t('common.cancel')} onPress={() => setCreateModal(false)} variant="secondary" style={{ flex: 1 }} />
+            <NeuButton label={t('adminUsers.createUser')} icon={<UserPlus size={15} color="#fff" />} onPress={handleCreate} loading={createLoading} style={{ flex: 1 }} />
           </View>
         }
       >
-        {lbl('Full Name *')}
-        <TextInput value={form.full_name} onChangeText={v => setField('full_name', v)} placeholder="Ahmed Mohamed" placeholderTextColor={`${c.text}55`} style={{ ...inp, marginBottom: fieldErrors.full_name ? 4 : 14 }} />
+        {lbl(t('editUser.fullNameRequired'))}
+        <TextInput value={form.full_name} onChangeText={v => setField('full_name', v)} placeholder={t('adminUsers.fullNamePlaceholder')} placeholderTextColor={`${c.text}55`} style={{ ...inp, marginBottom: fieldErrors.full_name ? 4 : 14 }} />
         {!!fieldErrors.full_name && <Text style={{ color: '#DC2626', fontSize: 12, marginBottom: 10 }}>{fieldErrors.full_name}</Text>}
 
         {lbl('Email *')}
@@ -779,16 +782,16 @@ export default function AdminUsers() {
             : null
         }
 
-        {lbl('Password *')}
+        {lbl(t('createUser.passwordRequired'))}
         <View style={{ ...inp, flexDirection: 'row', alignItems: 'center', marginBottom: fieldErrors.password ? 4 : 14 }}>
-          <TextInput value={form.password} onChangeText={v => setField('password', v)} placeholder="Min 6 characters" placeholderTextColor={`${c.text}55`} secureTextEntry={!showPwd} style={{ flex: 1, fontSize: 15, color: c.text }} />
+          <TextInput value={form.password} onChangeText={v => setField('password', v)} placeholder={t('adminUsers.min6')} placeholderTextColor={`${c.text}55`} secureTextEntry={!showPwd} style={{ flex: 1, fontSize: 15, color: c.text }} />
           <Pressable onPress={() => setShowPwd(p => !p)} hitSlop={8}>{showPwd ? <EyeOff size={18} color={c.text} style={{ opacity: 0.4 }} /> : <Eye size={18} color={c.text} style={{ opacity: 0.4 }} />}</Pressable>
         </View>
         {!!fieldErrors.password && <Text style={{ color: '#DC2626', fontSize: 12, marginBottom: 10 }}>{fieldErrors.password}</Text>}
 
-        {lbl('Confirm Password *')}
+        {lbl(t('createUser.confirmPasswordRequired'))}
         <View style={{ ...inp, flexDirection: 'row', alignItems: 'center', marginBottom: fieldErrors.confirm ? 4 : 14 }}>
-          <TextInput value={form.confirm} onChangeText={v => setField('confirm', v)} placeholder="Repeat password" placeholderTextColor={`${c.text}55`} secureTextEntry={!showConfirm} style={{ flex: 1, fontSize: 15, color: c.text }} />
+          <TextInput value={form.confirm} onChangeText={v => setField('confirm', v)} placeholder={t('adminUsers.repeatPassword')} placeholderTextColor={`${c.text}55`} secureTextEntry={!showConfirm} style={{ flex: 1, fontSize: 15, color: c.text }} />
           <Pressable onPress={() => setShowConfirm(p => !p)} hitSlop={8}>{showConfirm ? <EyeOff size={18} color={c.text} style={{ opacity: 0.4 }} /> : <Eye size={18} color={c.text} style={{ opacity: 0.4 }} />}</Pressable>
         </View>
         {!!fieldErrors.confirm && <Text style={{ color: '#DC2626', fontSize: 12, marginBottom: 10 }}>{fieldErrors.confirm}</Text>}
@@ -807,12 +810,12 @@ export default function AdminUsers() {
 
         <View style={{ flexDirection: 'row', gap: 8, marginTop: 4, marginBottom: 8, alignItems: 'center' }}>
           <View style={{ backgroundColor: `${roleColor('student')}20`, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 4 }}>
-            <Text style={{ fontSize: 12, fontWeight: '700', color: roleColor('student') }}>STUDENT</Text>
+            <Text style={{ fontSize: 12, fontWeight: '700', color: roleColor('student') }}>{t('role.student')}</Text>
           </View>
           <View style={{ backgroundColor: '#16A34A20', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 4 }}>
-            <Text style={{ fontSize: 12, fontWeight: '700', color: '#16A34A' }}>ACTIVE</Text>
+            <Text style={{ fontSize: 12, fontWeight: '700', color: '#16A34A' }}>{t('status.active')}</Text>
           </View>
-          <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.45) }}>Default role & status</Text>
+          <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.45) }}>{t('adminUsers.defaultRole')}</Text>
         </View>
 
         {!!createError && (

@@ -10,6 +10,7 @@ import { neuColors, useLayout, safeBottom, mutedTextStyle } from '@/lib/neu';
 import type { RelativePathString } from 'expo-router';
 import { NeuSearchBar } from '@/components/NeuInputRow';
 import { KeyboardAwareScrollView } from '@/components/KeyboardAwareScrollView';
+import { t } from '@/lib/i18n';
 
 export default function MyCourses() {
   const scheme = useColorScheme();
@@ -46,7 +47,7 @@ export default function MyCourses() {
       style={{ flex: 1, backgroundColor: c.base }}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />} contentContainerStyle={{ paddingBottom: safeBottom(layout.insets.bottom) }}
     >
-      <PageHeader title="My Courses" subtitle="Your subscribed courses" />
+      <PageHeader title={t('nav.myCourses')} subtitle={t('course.subtitleMine')} />
 
       <View style={{ paddingHorizontal: layout.screenPx }}>
 
@@ -57,21 +58,21 @@ export default function MyCourses() {
             value={query}
             onChangeText={setQuery}
             onClear={() => setQuery('')}
-            placeholder="Search courses…"
+            placeholder={t('course.searchPlaceholder')}
           />
         </View>
 
         {filtered.length === 0 ? (
           <View style={{ alignItems: 'center', paddingVertical: 60 }}>
             <Text style={{ fontSize: 16, ...mutedTextStyle(c, 0.4) }}>
-              {query ? 'No results found' : 'No subscribed courses'}
+              {query ? t('common.noResults') : t('course.none')}
             </Text>
           </View>
         ) : (
           filtered.map((sub) => (
             <CourseCard
               key={sub.id}
-              title={sub.course?.title ?? 'Course'}
+              title={sub.course?.title ?? t('course.titleFallback')}
               doctorName={sub.course?.doctor?.full_name}
               imageUrl={sub.course?.image_url}
               status={sub.status === 'completed' ? 'completed' : 'active'}

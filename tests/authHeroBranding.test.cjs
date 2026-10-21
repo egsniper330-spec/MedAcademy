@@ -60,7 +60,9 @@ ok(/\{branding\.app_name\}/.test(src),
   'the server-managed platform name still renders as the wordmark (stays admin-configurable)');
 ok(/router\.push\('\/\(auth\)\/sign-in'\)/.test(src), 'Sign In target unchanged: /(auth)/sign-in');
 ok(/router\.push\('\/\(auth\)\/sign-up'\)/.test(src), 'Create Account target unchanged: /(auth)/sign-up');
-ok(/label="Sign In"/.test(src) && /label="Create Account"/.test(src), 'both authentication actions still render');
+ok(/label="Sign In"|label=\{t\('common\.signIn'\)\}/.test(src) &&
+  /label="Create Account"|label=\{t\('common\.createAccount'\)\}/.test(src),
+  'both authentication actions still render');
 ok(/resolveStartupRoute\(/.test(src), 'cold-start routing (resolveStartupRoute) untouched');
 ok(/variant="secondary"/.test(src), 'the secondary treatment of Create Account is preserved');
 

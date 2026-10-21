@@ -9,6 +9,7 @@ import {
   PlusCircle, MinusCircle, Infinity,
 } from 'lucide-react-native';
 import { neuColors } from '@/lib/neu';
+import { useTranslation } from '@/lib/i18n';
 
 export type BulkAction =
   | 'trash' | 'block' | 'unblock'
@@ -25,26 +26,28 @@ interface BulkSelectBarProps {
 
 interface ActionDef {
   id: BulkAction;
-  label: string;
+  /** Translation key — resolved at render so the bar follows the locale. */
+  labelKey: string;
   icon: React.ComponentType<{ size: number; color: string }>;
   color: string;
   roles?: string[]; // undefined = all roles
 }
 
 const ACTIONS: ActionDef[] = [
-  { id: 'trash',           label: 'Delete',         icon: Trash2,       color: '#EF4444' },
-  { id: 'block',           label: 'Block',          icon: UserX,        color: '#DC2626' },
-  { id: 'unblock',         label: 'Unblock',        icon: UserCheck,    color: '#16A34A' },
-  { id: 'reset_devices',   label: 'Reset Devices',  icon: Smartphone,   color: '#6366F1' },
-  { id: 'reset_password',  label: 'Reset Password', icon: KeyRound,     color: '#0EA5E9' },
-  { id: 'add_credits',     label: 'Add Credits',    icon: PlusCircle,   color: '#16A34A', roles: ['doctor'] },
-  { id: 'remove_credits',  label: 'Rm Credits',     icon: MinusCircle,  color: '#EF4444', roles: ['doctor'] },
-  { id: 'unlimited_devices', label: 'Unlimited',    icon: Infinity,     color: '#7C3AED', roles: ['doctor'] },
+  { id: 'trash',           labelKey: 'common.delete',        icon: Trash2,       color: '#EF4444' },
+  { id: 'block',           labelKey: 'bulk.block',           icon: UserX,        color: '#DC2626' },
+  { id: 'unblock',         labelKey: 'bulk.unblock',         icon: UserCheck,    color: '#16A34A' },
+  { id: 'reset_devices',   labelKey: 'bulk.resetDevices',    icon: Smartphone,   color: '#6366F1' },
+  { id: 'reset_password',  labelKey: 'bulk.resetPassword',   icon: KeyRound,     color: '#0EA5E9' },
+  { id: 'add_credits',     labelKey: 'bulk.addCredits',      icon: PlusCircle,   color: '#16A34A', roles: ['doctor'] },
+  { id: 'remove_credits',  labelKey: 'bulk.removeCredits',   icon: MinusCircle,  color: '#EF4444', roles: ['doctor'] },
+  { id: 'unlimited_devices', labelKey: 'bulk.unlimited',     icon: Infinity,     color: '#7C3AED', roles: ['doctor'] },
 ];
 
 export function BulkSelectBar({ count, role, loading, onAction, onClear }: BulkSelectBarProps) {
   const isDark = useColorScheme() === 'dark';
   const c = isDark ? neuColors.dark : neuColors.light;
+  const { t } = useTranslation();
 
   const visibleActions = ACTIONS.filter(a => !a.roles || (role && a.roles.includes(role)));
 
@@ -64,7 +67,7 @@ export function BulkSelectBar({ count, role, loading, onAction, onClear }: BulkS
       <View style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingTop: 10, paddingBottom: 6 }}>
         <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: 8 }}>
           <View style={{ backgroundColor: `${c.primary}20`, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 4 }}>
-            <Text style={{ fontSize: 13, fontWeight: '800', color: c.primary }}>{count} selected</Text>
+            <Text style={{ fontSize: 13, fontWeight: '800', color: c.primary }}>{t('bulk.selected', { count })}</Text>
           </View>
           {loading && <ActivityIndicator size="small" color={c.primary} />}
         </View>
@@ -89,7 +92,7 @@ export function BulkSelectBar({ count, role, loading, onAction, onClear }: BulkS
             }}
           >
             <a.icon size={14} color={a.color} />
-            <Text style={{ fontSize: 12, fontWeight: '700', color: a.color }}>{a.label}</Text>
+            <Text style={{ fontSize: 12, fontWeight: '700', color: a.color }}>{t(a.labelKey)}</Text>
           </Pressable>
         ))}
       </ScrollView>

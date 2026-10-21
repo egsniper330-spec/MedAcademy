@@ -115,11 +115,18 @@ console.log('\n── P2: support contact reaches the block screen while locked 
   ok(/'\/auth\/refresh'/.test(php) && !/'\/auth\/refresh'/.test(exemptBlock),
     'token refresh stays frozen while locked (exemption did not widen refresh)');
 
+  // The support-load error copy is localized now: the screen renders the
+  // `security.supportLoadFailed` key and the English string lives in the
+  // dictionaries. Pin the key on the screen AND the copy in the resources, so a
+  // regression cannot silently turn the error back into "not configured".
+  const resources = read('src/lib/i18n/resources.ts');
   for (const f of ['src/app/(app)/security-warning.tsx', 'src/app/(auth)/security-warning.tsx']) {
     const src = read(f);
     ok(/supportError/.test(src), `${f} tracks a fetch error separately from "not configured"`);
-    ok(/Could not load support contacts/.test(src),
+    ok(/t\('security\.supportLoadFailed'\)/.test(src),
       `${f} shows an error + retry instead of the misleading "not configured"`);
+    ok(/'security\.supportLoadFailed': 'Could not load support contacts/.test(resources),
+      `${f} error copy still says it could not load the contacts (dictionary)`);
     ok(/loadSupportContacts/.test(src), `${f} can retry the public contact fetch`);
   }
 
@@ -194,7 +201,14 @@ console.log('\n── P5: course-creation flag enforced on the path the UI uses 
 console.log('\n── P6: disabled Earnings hides the page header and centres the state ──');
 {
   const dr = read('src/app/(app)/(doctor)/dr-earnings.tsx');
-  const guard = dr.slice(dr.indexOf('if (platformDisabled) {'), dr.indexOf('if (platformDisabled) {') + 1400);
+  // Slice the guard branch by its real boundaries (start → its return statement)
+  // instead of a fixed 1400-character window: the window silently spilled into
+  // the normal branch once the copy moved into the dictionary, which would have
+  // made this check depend on string length rather than on the branch content.
+  const guardStart = dr.indexOf('if (platformDisabled) {');
+  // End at the component's own top-level `return (` (2-space indent); the guard's
+  // early return is indented one level deeper.
+  const guard = dr.slice(guardStart, dr.indexOf('\n  return (', guardStart));
   ok(guard.length > 0, 'a dedicated platformDisabled branch exists');
   ok(!/DashboardHeader/.test(guard),
     'the disabled branch renders NO DashboardHeader (no revenue subtitle / trend icon)');

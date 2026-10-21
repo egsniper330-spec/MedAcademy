@@ -19,6 +19,7 @@ import { useToast } from '@/components/Toast';
 import { useProfileStore } from '@/lib/store';
 import { friendlyError } from '@/lib/validation';
 import { NeuInputRow } from '@/components/NeuInputRow';
+import { t } from '@/lib/i18n';
 
 export default function ForcePasswordChangeScreen() {
   const scheme = useColorScheme();
@@ -41,10 +42,10 @@ export default function ForcePasswordChangeScreen() {
   const [error,        setError]        = useState('');
 
   const validate = (): string | null => {
-    if (!currentPass) return 'Please enter your current temporary password.';
-    if (!newPass || newPass.length < 8) return 'New password must be at least 8 characters.';
-    if (newPass !== confirmPass) return 'New passwords do not match.';
-    if (newPass === currentPass) return 'New password must be different from your temporary password.';
+    if (!currentPass) return t('forcePwd.errCurrent');
+    if (!newPass || newPass.length < 8) return t('forcePwd.errLength');
+    if (newPass !== confirmPass) return t('forcePwd.errMatch');
+    if (newPass === currentPass) return t('forcePwd.errSame');
     return null;
   };
 
@@ -55,13 +56,13 @@ export default function ForcePasswordChangeScreen() {
     try {
       // 1. Re-authenticate to verify current temp password
       const userEmail = profile?.email;
-      if (!userEmail) throw new Error('Session error. Please log in again.');
+      if (!userEmail) throw new Error(t('forcePwd.errSession'));
 
       const { error: signInErr } = await backendClient.auth.signInWithPassword({
         email: userEmail,
         password: currentPass,
       });
-      if (signInErr) throw new Error('Incorrect current password. Please try again.');
+      if (signInErr) throw new Error(t('forcePwd.errIncorrect'));
 
       // 2. Update to new password
       const { error: updateErr } = await backendClient.auth.updateUser({ password: newPass });
@@ -86,12 +87,12 @@ export default function ForcePasswordChangeScreen() {
       // 5. Update local profile so layout doesn't redirect again
       if (profile) setProfile({ ...profile, force_password_change: false } as any);
 
-      showToast({ type: 'success', message: 'Password changed successfully! Welcome.' });
+      showToast({ type: 'success', message: t('forcePwd.success') });
 
       // 6. Navigate to student dashboard
       router.replace('/(app)/(student)/dashboard' as RelativePathString);
     } catch (e) {
-      setError(friendlyError(e, 'Password change failed. Please try again.'));
+      setError(friendlyError(e, t('forcePwd.failed')));
     }
     setLoading(false);
   };
@@ -122,20 +123,19 @@ export default function ForcePasswordChangeScreen() {
               <ShieldCheck size={Math.round(layout.heroIconSize * 0.5)} color={c.primary} />
             </View>
             <Text style={{ fontSize: layout.titleSize, fontWeight: '800', color: c.text, textAlign: 'center' }}>
-              Change Your Password
+              {t('forcePwd.heading')}
             </Text>
             <Text style={{ fontSize: layout.bodySize, color: `${c.text}88`, textAlign: 'center', lineHeight: layout.bodySize * 1.6 }}>
-              Your account was created with a temporary password.{'\n'}
-              Please set a new password to continue.
+              {t('forcePwd.headingSub')}
             </Text>
           </View>
 
           <NeuCard>
             <Text style={{ fontSize: layout.headingSize, fontWeight: '700', color: c.text, marginBottom: layout.pad.lg }}>
-              Set New Password
+              {t('forcePwd.setNew')}
             </Text>
             <View style={{ gap: layout.pad.md }}>
-              <NeuInputRow c={c} placeholder="Current Temporary Password" secureTextEntry={!showCurrent}
+              <NeuInputRow c={c} placeholder={t('forcePwd.currentPlaceholder')} secureTextEntry={!showCurrent}
                 value={currentPass} onChangeText={setCurrentPass} autoCapitalize="none"
                 containerStyle={{ marginBottom: 0 }}
                 leftIcon={<Lock size={layout.bodySize + 2} color={`${c.text}77`} />}
@@ -145,7 +145,7 @@ export default function ForcePasswordChangeScreen() {
                   </Pressable>
                 }
               />
-              <NeuInputRow c={c} placeholder="New Password (min 8 characters)" secureTextEntry={!showNew}
+              <NeuInputRow c={c} placeholder={t('forcePwd.newPlaceholder')} secureTextEntry={!showNew}
                 value={newPass} onChangeText={setNewPass} autoCapitalize="none"
                 containerStyle={{ marginBottom: 0 }}
                 leftIcon={<Lock size={layout.bodySize + 2} color={c.primary} />}
@@ -155,7 +155,7 @@ export default function ForcePasswordChangeScreen() {
                   </Pressable>
                 }
               />
-              <NeuInputRow c={c} placeholder="Confirm New Password" secureTextEntry={!showConfirm}
+              <NeuInputRow c={c} placeholder={t('forcePwd.confirmPlaceholder')} secureTextEntry={!showConfirm}
                 value={confirmPass} onChangeText={setConfirmPass} autoCapitalize="none"
                 containerStyle={{ marginBottom: 0 }}
                 leftIcon={<Lock size={layout.bodySize + 2} color={c.primary} />}
@@ -170,9 +170,9 @@ export default function ForcePasswordChangeScreen() {
             {/* Password rules */}
             <View style={{ marginTop: layout.pad.md, gap: layout.pad.xs }}>
               {[
-                ['✓', 'At least 8 characters',            newPass.length >= 8],
-                ['✓', 'Different from temporary password', newPass !== currentPass && newPass.length > 0],
-                ['✓', 'Passwords match',                   newPass === confirmPass && confirmPass.length > 0],
+                ['✓', t('forcePwd.ruleLength'),            newPass.length >= 8],
+                ['✓', t('forcePwd.ruleDifferent'), newPass !== currentPass && newPass.length > 0],
+                ['✓', t('forcePwd.ruleMatch'),                   newPass === confirmPass && confirmPass.length > 0],
               ].map(([mark, rule, ok]) => (
                 <Text key={String(rule)} style={{ fontSize: layout.captionSize, color: ok ? '#22C55E' : `${c.text}55` }}>
                   {ok ? mark : '○'} {String(rule)}
@@ -185,10 +185,10 @@ export default function ForcePasswordChangeScreen() {
             <Text style={{ color: '#EF4444', fontSize: layout.bodySize, textAlign: 'center' }}>{error}</Text>
           ) : null}
 
-          <NeuButton label={loading ? 'Changing Password…' : 'Change Password & Continue'} onPress={handleChange} loading={loading} />
+          <NeuButton label={loading ? t('forcePwd.changing') : t('forcePwd.changeContinue')} onPress={handleChange} loading={loading} />
 
           <Text style={{ fontSize: layout.captionSize, color: `${c.text}55`, textAlign: 'center' }}>
-            {"Contact your doctor or administrator if you don't know your temporary password."}
+            {t('forcePwd.hint')}
           </Text>
         </ScrollView>
       </KeyboardAvoidingView>

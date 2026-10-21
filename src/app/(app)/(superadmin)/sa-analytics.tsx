@@ -87,7 +87,11 @@ export default function SAAnalytics() {
     },
     {
       title: 'Operations',
-      items: [],
+      items: [
+        // Two explicitly separate metrics: unique student ACCOUNTS vs actual
+        // student↔course enrollments. Same server aggregate, never summed.
+        { icon: GraduationCap, label: 'Enrollment Statistics', description: 'Unique students vs actual enrollments', color: '#7C3AED', path: '/sa-enrollment-stats' },
+      ],
     },
   ];
 

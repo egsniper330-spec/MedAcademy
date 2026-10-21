@@ -15,6 +15,7 @@ import {
 } from 'react-native';
 import { neuColors } from '@/lib/neu';
 import { spacing, radius, typography } from '@/lib/ds';
+import { useTranslation } from '@/lib/i18n';
 
 export interface NeuInputRowProps extends TextInputProps {
   /** Left icon element (e.g. <Mail size={18} color={...} />) */
@@ -125,11 +126,12 @@ export function NeuSearchBar({
   onClear,
   c,
   containerStyle,
-  placeholder = 'Search…',
+  placeholder,
   leftIcon,
   ...rest
 }: NeuSearchBarProps) {
   const isDark = useColorScheme() === 'dark';
+  const { t } = useTranslation();
   return (
     <View
       style={[
@@ -158,7 +160,7 @@ export function NeuSearchBar({
       <TextInput
         value={value}
         onChangeText={onChangeText}
-        placeholder={placeholder}
+        placeholder={placeholder ?? t('common.searchPlaceholder')}
         placeholderTextColor={isDark ? c.textSubtle : `${c.text}50`}
         returnKeyType="search"
         autoCapitalize="none"

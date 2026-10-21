@@ -263,7 +263,11 @@ check('B6: a lock abort is NOT reported as a 30s timeout',
   /request aborted by security lock/.test(php));
 check('B7: policy/audit/logout paths stay exempt so the app can report + recover',
   /'\/security\/policies'/.test(php) && /'\/security\/events'/.test(php) && /'\/auth\/logout'/.test(php));
-check('B8: token refresh is frozen while locked', /security lock active — refresh suppressed/.test(php));
+check('B8: token refresh is frozen while locked',
+  /security lock active — refresh deferred until unlock/.test(php) &&
+  /scheduleRefreshAfterUnlock\(\);/.test(php));
+check('B8b: a frozen refresh is never treated as a session failure',
+  !/AUTH_REFRESH_SUPPRESSED[\s\S]{0,200}await clearSession\(\)/.test(php));
 
 const ctx = read('src/lib/SecurityContext.tsx');
 check('B9: context engages a HARD lock from the authoritative verdict',

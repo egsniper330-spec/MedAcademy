@@ -7,16 +7,16 @@ import type { RelativePathString } from 'expo-router';
 import {
   ShieldAlert, ShieldCheck, AlertTriangle, Wifi, WifiOff, Globe,
   Bug, Fingerprint, Lock, ArrowRight, Phone, X as XIcon,
-  Mail, MessageCircle, Send, Megaphone, AtSign, Link2, MapPin, Smartphone,
+  Mail, MessageCircle, Send, Megaphone, AtSign, Link2, Smartphone,
 } from 'lucide-react-native';
 import { neuColors, neuFlatStyle, neuPressedStyle, useLayout } from '@/lib/neu';
 import { NeuButton } from '@/components/NeuButton';
+import { t } from '@/lib/i18n';
 import { useProfileStore } from '@/lib/store';
 import { dashboardPathForRole } from '@/lib/roleRoutes';
 import {
-  hasConnectionFinding, connectionBlockInstructions, resolveFindingCopyKey, VPN_WARNING_COPY,
+  hasConnectionFinding, connectionBlockInstructions, resolveFindingCopyKey,
 } from '@/lib/securityStateModel';
-import { SecuritySignalReport } from '@/components/SecuritySignalReport';
 import {
   getPublicSupportContacts, type PublicSupportContact,
   SUPPORT_ICONS, type SupportPlatformKey,
@@ -28,41 +28,39 @@ import {
 type ThreatItem = { type: string; detectionMethod?: string | null };
 
 const THREAT_META: Record<string, {
-  label: string;
-  description: string;
   icon: React.ComponentType<{ size: number; color: string }>;
 }> = {
-  root_detected:             { label: 'Root Access Detected',         description: 'Your device has been modified to gain elevated system access.',           icon: ShieldAlert },
-  jailbreak_detected:        { label: 'Jailbreak Detected',           description: 'Your device has been modified to bypass platform security restrictions.', icon: ShieldAlert },
-  vpn_detected:              { label: 'VPN Connection Detected',      description: 'A VPN or tunnel connection is active on your device.',                   icon: Wifi },
-  proxy_detected:            { label: 'Proxy Connection Detected',    description: 'Network traffic is being routed through a proxy.',                       icon: Globe },
-  debug_detected:            { label: 'Debug Mode Active',            description: 'Your device or app is running in a debug environment.',                  icon: Bug },
+  root_detected:             { icon: ShieldAlert },
+  jailbreak_detected:        { icon: ShieldAlert },
+  vpn_detected:              { icon: Wifi },
+  proxy_detected:            { icon: Globe },
+  debug_detected:            { icon: Bug },
   // DERIVED FROM `debug_detected` by resolveFindingCopyKey (see
-  // src/lib/securityStateModel.ts). The engine reports four metrologically
+  // src/lib/securityStateModel.ts). The engine reports two metrologically
   // DIFFERENT conditions as this one event type and weight (20): a test-only /
-  // debug-detectable build, a selected mock-location app, and an emulator-like
-  // device. Labelling all of them "Debug Mode Active / running in a debug
-  // environment" is inaccurate for the two device-state cases and hides the
-  // actionable cause (reinstalling the app never clears either). Same event,
-  // same weight, same block — only the description becomes truthful.
-  mock_location_detected:    { label: 'Mock Location Detected',       description: 'Mock location is enabled. Turn it off: Settings \u2192 Developer options \u2192 Select mock location app \u2192 None, then reopen the app.', icon: MapPin },
-  virtual_device_detected:   { label: 'Unsupported Device Detected', description: 'This app cannot run on an emulator or virtual device. Install it on a physical Android device.', icon: Smartphone },
-  developer_options_enabled: { label: 'Developer Options Enabled',    description: 'Developer settings are active on your device.',                          icon: Bug },
-  adb_enabled:               { label: 'USB Debugging Enabled',        description: 'USB debugging is enabled on your device.',                               icon: Bug },
-  debugger_attached:         { label: 'Debugger Attached',            description: 'A debugger is currently connected to the app.',                          icon: Bug },
-  frida_detected:            { label: 'Instrumentation Detected',     description: 'An instrumentation or hooking framework is active.',                     icon: Fingerprint },
-  xposed_detected:           { label: 'Xposed Framework Detected',    description: 'A system-level hooking framework is installed on your device.',          icon: Fingerprint },
-  magisk_detected:           { label: 'Root Management Detected',     description: 'A root management tool is installed on your device.',                    icon: ShieldAlert },
-  overlay_detected:          { label: 'Screen Overlay Detected',      description: 'An app is displaying an overlay over this screen.',                      icon: Lock },
-  app_integrity_compromised: { label: 'App Integrity Compromised',    description: 'The app may have been modified or tampered with.',                       icon: Lock },
-  tamper_detected:           { label: 'App Integrity Compromised',    description: 'The app may have been modified or tampered with.',                       icon: Lock },
-  signature_invalid:         { label: 'Invalid App Signature',        description: 'The app signature does not match the expected certificate.',              icon: Lock },
-  ssl_pinning_failure:       { label: 'Connection Security Issue',    description: 'A secure connection to the server could not be verified.',               icon: Lock },
-  play_integrity_failed:     { label: 'Device Integrity Check Failed',description: 'Your device failed a security integrity check.',                         icon: ShieldAlert },
-  app_attest_failed:         { label: 'Device Integrity Check Failed',description: 'Your device failed a security integrity check.',                         icon: ShieldAlert },
-  screen_recording_detected: { label: 'Screen Recording Active',      description: 'Your screen is currently being recorded or mirrored.',                   icon: Bug },
-  screenshot_detected:       { label: 'Screenshot Taken',             description: 'A screenshot was captured while the app was active.',                    icon: Bug },
-  security_unverified:       { label: 'Security Check Incomplete',    description: 'The security evaluation could not complete. The app will re-verify automatically.', icon: Bug },
+  // debug-detectable build and an emulator-like device. Labelling both "Debug
+  // Mode Active / running in a debug environment" is inaccurate for the device-
+  // state case and hides the actionable cause (reinstalling the app never
+  // clears it). Same event, same weight, same block — only the description
+  // becomes truthful. (Mock location used to be a third producer here; the
+  // detector was removed — docs/MOCK_LOCATION_REMOVAL.md.)
+  virtual_device_detected:   { icon: Smartphone },
+  developer_options_enabled: { icon: Bug },
+  adb_enabled:               { icon: Bug },
+  debugger_attached:         { icon: Bug },
+  frida_detected:            { icon: Fingerprint },
+  xposed_detected:           { icon: Fingerprint },
+  magisk_detected:           { icon: ShieldAlert },
+  overlay_detected:          { icon: Lock },
+  app_integrity_compromised: { icon: Lock },
+  tamper_detected:           { icon: Lock },
+  signature_invalid:         { icon: Lock },
+  ssl_pinning_failure:       { icon: Lock },
+  play_integrity_failed:     { icon: ShieldAlert },
+  app_attest_failed:         { icon: ShieldAlert },
+  screen_recording_detected: { icon: Bug },
+  screenshot_detected:       { icon: Bug },
+  security_unverified:       { icon: Bug },
 };
 
 /**
@@ -72,11 +70,16 @@ const THREAT_META: Record<string, {
  * conditions. Unknown types pass through unchanged and keep the generic
  * fallback below.
  */
-function threatMeta(t: ThreatItem) {
-  return THREAT_META[resolveFindingCopyKey(t.type, t.detectionMethod)] ?? {
-    label: 'Security Issue',
-    description: 'A security issue was detected on your device.',
-    icon: ShieldAlert,
+function threatMeta(item: ThreatItem) {
+  const key = resolveFindingCopyKey(item.type, item.detectionMethod);
+  const base = THREAT_META[key];
+  const copyKey = base ? key : 'unknown';
+  return {
+    ...(base ?? { icon: ShieldAlert }),
+    // Localized at RENDER time; both dictionaries carry every threat key, and
+    // an unknown event type falls back to the shared generic copy key.
+    label: t(`security.threat.${copyKey}.label`),
+    description: t(`security.threat.${copyKey}.desc`),
   };
 }
 
@@ -122,13 +125,13 @@ function ContactChooserModal({
           <View style={[flat, { borderRadius: layout.cardRadius, padding: layout.cardPx, gap: layout.pad.md, backgroundColor: c.base }]}>
             {/* Header */}
             <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-              <Text style={{ fontSize: layout.headingSize, fontWeight: '700', color: c.text }}>Contact Support</Text>
+              <Text style={{ fontSize: layout.headingSize, fontWeight: '700', color: c.text }}>{t('support.title')}</Text>
               <Pressable onPress={onClose} style={{ padding: layout.pad.xs }}>
                 <XIcon size={layout.bodySize + 2} color={`${c.text}88`} />
               </Pressable>
             </View>
             <Text style={{ fontSize: layout.captionSize, color: `${c.text}77`, lineHeight: layout.captionSize * 1.5 }}>
-              Choose how you would like to reach our support team.
+              {t('security.supportChooserHint')}
             </Text>
 
             {/* Method buttons */}
@@ -197,18 +200,6 @@ export default function SecurityWarningScreen() {
 
   const riskScore   = parseInt(params.riskScore ?? '0', 10);
   const blocksLogin = params.blocksLogin === 'true';
-  // READ-ONLY DIAGNOSTIC PAYLOAD (device security report below). Labels are the
-  // SAME resolved metadata the issue list renders, so report and list cannot
-  // disagree about which condition was measured.
-  const reportFindings = React.useMemo(
-    () => threats.map((t) => ({
-      label: threatMeta(t).label,
-      type: t.type,
-      detectionMethod: t.detectionMethod ?? null,
-    })),
-    [threats],
-  );
-
   // ── MANDATORY CONNECTION BLOCK (pre-login) ─────────────────────────────────
   // Same rule as the authenticated screen, enforced one screen earlier: a VPN/
   // proxy finding closes the dismissible path. This is derived from the FINDING
@@ -221,8 +212,15 @@ export default function SecurityWarningScreen() {
   // params, which is the recorded pre-login exemption in
   // scripts/check-security-param-authority.js. It must stay presentation-only.
   const connectionBlocked = hasConnectionFinding(threats);
+  // Instructions are localized per platform: the pure helper still decides
+  // WHICH platforms have steps and in what order; the strings come from the
+  // dictionaries (no English copy is rendered here).
+  const connectionOs: 'ios' | 'android' | 'other' =
+    Platform.OS === 'ios' ? 'ios' : Platform.OS === 'android' ? 'android' : 'other';
   const connectionSteps = connectionBlocked
-    ? connectionBlockInstructions(Platform.OS)
+    ? connectionBlockInstructions(Platform.OS).map((_, i) =>
+        t(`security.vpn.${connectionOs}.step${i + 1}`),
+      )
     : [];
   // The ONLY forward action: return to sign-in, which re-runs the authoritative
   // security check before any session or protected content is created.
@@ -299,12 +297,12 @@ export default function SecurityWarningScreen() {
   // Contact button label and disabled state
   const contactDisabled = supportLoading || contactMethods.length === 0;
   const contactLabel = supportLoading
-    ? 'Loading…'
+    ? t('common.loading')
     : contactMethods.length === 0
-      ? 'Support Not Configured'
+      ? t('security.supportNotConfigured')
       : contactMethods.length === 1
-        ? `Contact via ${contactMethods[0].label}`
-        : 'Contact Support';
+        ? t('security.contactVia', { method: contactMethods[0].label })
+        : t('support.title');
 
   return (
     <View style={{ flex: 1, backgroundColor: c.base }}>
@@ -329,35 +327,35 @@ export default function SecurityWarningScreen() {
           </View>
           <Text style={{ fontSize: layout.titleSize, fontWeight: '700', color: c.text, textAlign: 'center' }}>
             {connectionBlocked
-              ? VPN_WARNING_COPY.title
-              : blocksLogin ? 'Access Blocked' : 'Security Warning'}
+              ? t('security.vpn.title')
+              : blocksLogin ? t('security.blocked') : t('security.warning')}
           </Text>
           <Text style={{ fontSize: layout.bodySize, color: `${c.text}88`, textAlign: 'center', lineHeight: layout.bodySize * 1.5 }}>
             {connectionBlocked
-              ? VPN_WARNING_COPY.message
+              ? t('security.vpn.message')
               : blocksLogin
-              ? 'Your device does not meet security requirements. Login has been blocked by your administrator.'
-              : 'Security issues were detected on your device. Proceed with caution — some features may be restricted.'}
+              ? t('security.loginBlockedBody')
+              : t('security.warningBody')}
           </Text>
         </View>
 
         {/* Risk Score */}
         <View style={[flat, { borderRadius: layout.cardRadius, padding: layout.cardPx, alignItems: 'center', gap: layout.pad.sm }]}>
           <Text style={{ fontSize: layout.captionSize, fontWeight: '600', color: `${c.text}77`, letterSpacing: 1, textTransform: 'uppercase' }}>
-            Device Risk Score
+            {t('security.riskScoreLabel')}
           </Text>
           <Text style={{ fontSize: Math.round(layout.heroIconSize * 0.55), fontWeight: '800', color: riskColor }}>{riskScore}</Text>
           <View style={{ width: '100%', height: layout.pad.xs + 2, backgroundColor: `${c.text}18`, borderRadius: layout.pad.xs }}>
             <View style={{ width: `${riskScore}%`, height: layout.pad.xs + 2, borderRadius: layout.pad.xs, backgroundColor: riskColor }} />
           </View>
           <Text style={{ fontSize: layout.captionSize, color: `${c.text}66` }}>
-            {riskScore < 30 ? 'Low Risk' : riskScore < 60 ? 'Medium Risk' : 'High Risk'}
+            {riskScore < 30 ? t('security.riskLow') : riskScore < 60 ? t('security.riskMedium') : t('security.riskHigh')}
           </Text>
         </View>
 
         {/* Detected Threats — user-friendly labels and descriptions only */}
         <Text style={{ fontSize: layout.headingSize, fontWeight: '700', color: c.text }}>
-          Detected Issues ({threats.length})
+          {t('security.detectedCount', { count: threats.length })}
         </Text>
         {threats.map((t, i) => {
           const meta = threatMeta(t);
@@ -398,12 +396,12 @@ export default function SecurityWarningScreen() {
             }]}>
               <WifiOff size={layout.bodySize + 4} color="#EF4444" />
               <Text style={{ flex: 1, fontSize: layout.captionSize, color: c.text, lineHeight: layout.captionSize * 1.5 }}>
-                {'Sign-in is blocked while a VPN or proxy is active. Turn it off, then try again \u2014 this cannot be dismissed to continue.'}
+                {t('security.connectionBlockedAuth')}
               </Text>
             </View>
 
             <Text style={{ fontSize: layout.headingSize, fontWeight: '700', color: c.text }}>
-              How to turn it off
+              {t('security.howToTurnOff')}
             </Text>
             {connectionSteps.map((step, i) => (
               <View key={step} style={[flat, {
@@ -425,14 +423,12 @@ export default function SecurityWarningScreen() {
             ))}
 
             <NeuButton
-              label="I turned it off — try again"
+              label={t('security.triedIt')}
               icon={<ArrowRight size={layout.bodySize} color="#fff" />}
               onPress={onRecheck}
               variant="primary"
             />
 
-            {/* READ-ONLY diagnostic — offers no way past this block. */}
-            <SecuritySignalReport findings={reportFindings} />
           </View>
         ) : blocksLogin ? (
           <View style={{ gap: layout.pad.md }}>
@@ -465,10 +461,10 @@ export default function SecurityWarningScreen() {
                   <AlertTriangle size={layout.bodySize + 4} color="#F59E0B" />
                   <View style={{ flex: 1, gap: layout.pad.xs }}>
                     <Text style={{ fontSize: layout.captionSize, color: c.text, lineHeight: layout.captionSize * 1.5 }}>
-                      Could not load support contacts. Check your connection and try again.
+                      {t('security.supportLoadFailed')}
                     </Text>
                     <Pressable onPress={() => void loadSupportContacts()} style={{ alignSelf: 'flex-start' }}>
-                      <Text style={{ fontSize: layout.captionSize, fontWeight: '700', color: c.primary }}>Retry</Text>
+                      <Text style={{ fontSize: layout.captionSize, fontWeight: '700', color: c.primary }}>{t('common.retry')}</Text>
                     </Pressable>
                   </View>
                 </View>
@@ -480,7 +476,7 @@ export default function SecurityWarningScreen() {
                 }]}>
                   <Phone size={layout.bodySize + 4} color={`${c.text}55`} />
                   <Text style={{ flex: 1, fontSize: layout.captionSize, color: `${c.text}66`, lineHeight: layout.captionSize * 1.5 }}>
-                    Support contact is not configured. Please reach out to your administrator directly.
+                    {t('security.supportNotConfiguredBody')}
                   </Text>
                 </View>
               )
@@ -502,10 +498,6 @@ export default function SecurityWarningScreen() {
               />
             )}
 
-            {/* READ-ONLY diagnostic: lets the phone owner establish WHICH signal
-                blocked them and send the report on, without a computer. It offers
-                no way past this block. */}
-            <SecuritySignalReport findings={reportFindings} />
           </View>
         ) : (
           <View style={{ gap: layout.pad.md }}>
@@ -516,10 +508,10 @@ export default function SecurityWarningScreen() {
             }]}>
               <AlertTriangle size={layout.bodySize + 4} color="#F59E0B" />
               <Text style={{ flex: 1, fontSize: layout.captionSize, color: c.text, lineHeight: layout.captionSize * 1.5 }}>
-                Continuing on a compromised device may expose your learning data to security risks.
+                {t('security.compromisedWarning')}
               </Text>
             </View>
-            <NeuButton label="Continue Anyway" icon={<ArrowRight size={layout.bodySize} color="#fff" />} onPress={handleContinue} variant="primary" />
+            <NeuButton label={t('security.continueAnyway')} icon={<ArrowRight size={layout.bodySize} color="#fff" />} onPress={handleContinue} variant="primary" />
           </View>
         )}
 
@@ -527,7 +519,7 @@ export default function SecurityWarningScreen() {
         <View style={{ alignItems: 'center', gap: layout.pad.xs, paddingTop: layout.pad.sm }}>
           <ShieldCheck size={layout.captionSize + 4} color={`${c.text}44`} />
           <Text style={{ fontSize: layout.captionSize - 1, color: `${c.text}55`, textAlign: 'center' }}>
-            MedAcademy Enterprise Security{'\n'}All security events are logged and monitored.
+            {t('security.footerTitle')}{'\n'}{t('security.footerMonitoring')}
           </Text>
         </View>
       </ScrollView>

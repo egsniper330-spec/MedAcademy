@@ -1,0 +1,7504 @@
+{
+  "total": 1708,
+  "files": 111,
+  "top": [
+    {
+      "file": "src/app/(app)/course-builder/[id].tsx",
+      "count": 83,
+      "hits": [
+        {
+          "line": 363,
+          "text": "Cover image updated."
+        },
+        {
+          "line": 376,
+          "text": "Cover image removed."
+        },
+        {
+          "line": 391,
+          "text": "Course archived."
+        },
+        {
+          "line": 451,
+          "text": "New Lesson"
+        },
+        {
+          "line": 491,
+          "text": "Lesson duplicated."
+        },
+        {
+          "line": 552,
+          "text": "Publishing is temporarily unavailable."
+        },
+        {
+          "line": 620,
+          "text": "Course saved."
+        },
+        {
+          "line": 631,
+          "text": "Course duplicated! Opening copy…"
+        },
+        {
+          "line": 643,
+          "text": "Saved as template!"
+        },
+        {
+          "line": 658,
+          "text": "Course created from template."
+        },
+        {
+          "line": 683,
+          "text": "Saved"
+        },
+        {
+          "line": 691,
+          "text": "ARCHIVED"
+        },
+        {
+          "line": 719,
+          "text": "Save"
+        },
+        {
+          "line": 779,
+          "text": "Duplicate Course"
+        },
+        {
+          "line": 785,
+          "text": "Save as Template"
+        },
+        {
+          "line": 791,
+          "text": "Archive Course"
+        },
+        {
+          "line": 796,
+          "text": "Cancel"
+        },
+        {
+          "line": 806,
+          "text": "Info"
+        },
+        {
+          "line": 807,
+          "text": "Structure"
+        },
+        {
+          "line": 808,
+          "text": "Settings"
+        },
+        {
+          "line": 829,
+          "text": "Course Status"
+        },
+        {
+          "line": 847,
+          "text": "Course Title *"
+        },
+        {
+          "line": 848,
+          "text": "e.g. Clinical Pharmacology"
+        },
+        {
+          "line": 852,
+          "text": "Short Description *"
+        },
+        {
+          "line": 853,
+          "text": "One-line summary shown in listings"
+        },
+        {
+          "line": 857,
+          "text": "Full Description *"
+        },
+        {
+          "line": 858,
+          "text": "Detailed course description, objectives, outcomes…"
+        },
+        {
+          "line": 863,
+          "text": "Course Cover (Optional)"
+        },
+        {
+          "line": 875,
+          "text": "University"
+        },
+        {
+          "line": 878,
+          "text": "Select university"
+        },
+        {
+          "line": 884,
+          "text": "Faculty"
+        },
+        {
+          "line": 887,
+          "text": "Select faculty"
+        },
+        {
+          "line": 893,
+          "text": "Language"
+        },
+        {
+          "line": 896,
+          "text": "Language"
+        },
+        {
+          "line": 900,
+          "text": "Course Price (EGP) *"
+        },
+        {
+          "line": 902,
+          "text": "EGP"
+        },
+        {
+          "line": 913,
+          "text": "Free"
+        },
+        {
+          "line": 938,
+          "text": "Use my default contact information"
+        },
+        {
+          "line": 939,
+          "text": "Use custom contact information for this course"
+        },
+        {
+          "line": 981,
+          "text": "WhatsApp number  e.g. +201234567890"
+        },
+        {
+          "line": 993,
+          "text": "Telegram  e.g. @username or https://t.me/…"
+        },
+        {
+          "line": 1005,
+          "text": "Phone number  e.g. +201234567890"
+        },
+        {
+          "line": 1033,
+          "text": "Search sections & lessons…"
+        },
+        {
+          "line": 1041,
+          "text": "Section"
+        },
+        {
+          "line": 1071,
+          "text": "No sections yet"
+        },
+        {
+          "line": 1162,
+          "text": "Rename"
+        },
+        {
+          "line": 1169,
+          "text": "Move Up"
+        },
+        {
+          "line": 1176,
+          "text": "Move Down"
+        },
+        {
+          "line": 1182,
+          "text": "Bulk Import"
+        },
+        {
+          "line": 1189,
+          "text": "Delete"
+        },
+        {
+          "line": 1303,
+          "text": "Rename"
+        },
+        {
+          "line": 1310,
+          "text": "Move Up"
+        },
+        {
+          "line": 1317,
+          "text": "Move Down"
+        },
+        {
+          "line": 1323,
+          "text": "Duplicate"
+        },
+        {
+          "line": 1330,
+          "text": "Delete"
+        },
+        {
+          "line": 1342,
+          "text": "Add Lesson"
+        },
+        {
+          "line": 1347,
+          "text": "Bulk Import"
+        },
+        {
+          "line": 1362,
+          "text": "Learning & Access"
+        },
+        {
+          "line": 1364,
+          "text": "Sequential Learning"
+        },
+        {
+          "line": 1366,
+          "text": "Free Preview"
+        },
+        {
+          "line": 1368,
+          "text": "Certificate"
+        },
+        {
+          "line": 1370,
+          "text": "Subscription Required"
+        },
+        {
+          "line": 1379,
+          "text": "Enrollment Cost: 1 Credit"
+        },
+        {
+          "line": 1386,
+          "text": "Save Settings"
+        },
+        {
+          "line": 1394,
+          "text": "Publish Checklist"
+        },
+        {
+          "line": 1395,
+          "text": "Please resolve the following issues before publishing:"
+        },
+        {
+          "line": 1420,
+          "text": "Go Back and Fix"
+        },
+        {
+          "line": 1431,
+          "text": "Start New Course"
+        },
+        {
+          "line": 1432,
+          "text": "Choose how to start building your course."
+        },
+        {
+          "line": 1440,
+          "text": "Start Blank"
+        },
+        {
+          "line": 1441,
+          "text": "Build from scratch"
+        },
+        {
+          "line": 1466,
+          "text": "Dismiss"
+        },
+        {
+          "line": 1482,
+          "text": "Archive Course"
+        },
+        {
+          "line": 1489,
+          "text": "Reason (optional)"
+        },
+        {
+          "line": 1493,
+          "text": "e.g. Outdated content, under revision…"
+        },
+        {
+          "line": 1504,
+          "text": "Cancel"
+        },
+        {
+          "line": 1510,
+          "text": "Archive"
+        },
+        {
+          "line": 1523,
+          "text": "Save as Template"
+        },
+        {
+          "line": 1525,
+          "text": "Template name…"
+        },
+        {
+          "line": 1529,
+          "text": "Cancel"
+        },
+        {
+          "line": 1534,
+          "text": "Save"
+        },
+        {
+          "line": 1636,
+          "text": "Replace Cover"
+        },
+        {
+          "line": 1647,
+          "text": "Remove Cover"
+        }
+      ]
+    },
+    {
+      "file": "src/app/(app)/(hubs)/global-search.tsx",
+      "count": 78,
+      "hits": [
+        {
+          "line": 42,
+          "text": "Overview"
+        },
+        {
+          "line": 43,
+          "text": "Profile"
+        },
+        {
+          "line": 44,
+          "text": "Devices"
+        },
+        {
+          "line": 45,
+          "text": "Credits"
+        },
+        {
+          "line": 46,
+          "text": "Courses"
+        },
+        {
+          "line": 47,
+          "text": "Timeline"
+        },
+        {
+          "line": 48,
+          "text": "Activity"
+        },
+        {
+          "line": 49,
+          "text": "Notifications"
+        },
+        {
+          "line": 50,
+          "text": "Security"
+        },
+        {
+          "line": 51,
+          "text": "Quick Actions"
+        },
+        {
+          "line": 216,
+          "text": "Password reset email sent."
+        },
+        {
+          "line": 227,
+          "text": "Unlimited devices granted."
+        },
+        {
+          "line": 232,
+          "text": "Device limit set to 2."
+        },
+        {
+          "line": 294,
+          "text": "SUSPENDED"
+        },
+        {
+          "line": 331,
+          "text": "No users found"
+        },
+        {
+          "line": 337,
+          "text": "No courses found"
+        },
+        {
+          "line": 356,
+          "text": "No universities found"
+        },
+        {
+          "line": 367,
+          "text": "No faculties found"
+        },
+        {
+          "line": 379,
+          "text": "No levels found"
+        },
+        {
+          "line": 417,
+          "text": "SUSPENDED"
+        },
+        {
+          "line": 427,
+          "text": "Devices"
+        },
+        {
+          "line": 428,
+          "text": "Audit Events"
+        },
+        {
+          "line": 429,
+          "text": "Status"
+        },
+        {
+          "line": 430,
+          "text": "Max Devices"
+        },
+        {
+          "line": 443,
+          "text": "Recent Activity"
+        },
+        {
+          "line": 451,
+          "text": "No recent activity"
+        },
+        {
+          "line": 464,
+          "text": "Full Name"
+        },
+        {
+          "line": 465,
+          "text": "Email"
+        },
+        {
+          "line": 466,
+          "text": "Phone"
+        },
+        {
+          "line": 467,
+          "text": "Role"
+        },
+        {
+          "line": 468,
+          "text": "Status"
+        },
+        {
+          "line": 469,
+          "text": "University"
+        },
+        {
+          "line": 470,
+          "text": "Faculty"
+        },
+        {
+          "line": 471,
+          "text": "Level"
+        },
+        {
+          "line": 472,
+          "text": "User ID"
+        },
+        {
+          "line": 473,
+          "text": "Created"
+        },
+        {
+          "line": 489,
+          "text": "No devices registered"
+        },
+        {
+          "line": 514,
+          "text": "CREDIT MANAGEMENT"
+        },
+        {
+          "line": 518,
+          "text": "Amount"
+        },
+        {
+          "line": 521,
+          "text": "Notes (optional)"
+        },
+        {
+          "line": 527,
+          "text": "Add Credits"
+        },
+        {
+          "line": 532,
+          "text": "Remove"
+        },
+        {
+          "line": 543,
+          "text": "Course list for this user"
+        },
+        {
+          "line": 544,
+          "text": "Available via Doctor or Student management pages"
+        },
+        {
+          "line": 554,
+          "text": "Doctor Only"
+        },
+        {
+          "line": 555,
+          "text": "Activity Timeline is only available for Doctor accounts."
+        },
+        {
+          "line": 573,
+          "text": "Open Full Activity Timeline"
+        },
+        {
+          "line": 585,
+          "text": "Credit Selling Price"
+        },
+        {
+          "line": 595,
+          "text": "Allocated"
+        },
+        {
+          "line": 596,
+          "text": "Used"
+        },
+        {
+          "line": 597,
+          "text": "Remaining"
+        },
+        {
+          "line": 598,
+          "text": "Courses Sold"
+        },
+        {
+          "line": 599,
+          "text": "Students"
+        },
+        {
+          "line": 600,
+          "text": "Videos"
+        },
+        {
+          "line": 615,
+          "text": "Total Earnings"
+        },
+        {
+          "line": 628,
+          "text": "Last Login"
+        },
+        {
+          "line": 629,
+          "text": "Last Activity"
+        },
+        {
+          "line": 666,
+          "text": "Open Full Activity History"
+        },
+        {
+          "line": 673,
+          "text": "No recent activity"
+        },
+        {
+          "line": 727,
+          "text": "Send a notification to this user"
+        },
+        {
+          "line": 728,
+          "text": "Use Notifications Center for targeted broadcasts"
+        },
+        {
+          "line": 751,
+          "text": "No security events"
+        },
+        {
+          "line": 763,
+          "text": "Reset Password"
+        },
+        {
+          "line": 764,
+          "text": "Promote to Doctor"
+        },
+        {
+          "line": 765,
+          "text": "Unlimited Devices"
+        },
+        {
+          "line": 766,
+          "text": "Set Device Limit (2)"
+        },
+        {
+          "line": 767,
+          "text": "Login As"
+        },
+        {
+          "line": 768,
+          "text": "Delete Account"
+        },
+        {
+          "line": 790,
+          "text": "Users"
+        },
+        {
+          "line": 791,
+          "text": "Courses"
+        },
+        {
+          "line": 792,
+          "text": "Universities"
+        },
+        {
+          "line": 793,
+          "text": "Faculties"
+        },
+        {
+          "line": 794,
+          "text": "Levels"
+        },
+        {
+          "line": 800,
+          "text": "Global Search"
+        },
+        {
+          "line": 814,
+          "text": "Search name, email, phone…"
+        },
+        {
+          "line": 853,
+          "text": "Search anything"
+        },
+        {
+          "line": 854,
+          "text": "Tap a result to open the Profile Drawer"
+        },
+        {
+          "line": 920,
+          "text": "Account permanently deleted."
+        }
+      ]
+    },
+    {
+      "file": "src/app/(app)/lesson-editor/[id].tsx",
+      "count": 66,
+      "hits": [
+        {
+          "line": 94,
+          "text": "Draft"
+        },
+        {
+          "line": 95,
+          "text": "Published"
+        },
+        {
+          "line": 96,
+          "text": "Hidden"
+        },
+        {
+          "line": 97,
+          "text": "Scheduled"
+        },
+        {
+          "line": 98,
+          "text": "Archived"
+        },
+        {
+          "line": 102,
+          "text": "Allow"
+        },
+        {
+          "line": 103,
+          "text": "Preview Only"
+        },
+        {
+          "line": 104,
+          "text": "Hidden"
+        },
+        {
+          "line": 105,
+          "text": "Disabled"
+        },
+        {
+          "line": 110,
+          "text": "Video Lesson"
+        },
+        {
+          "line": 111,
+          "text": "YouTube Video"
+        },
+        {
+          "line": 112,
+          "text": "Coming Soon"
+        },
+        {
+          "line": 470,
+          "text": "Lesson saved."
+        },
+        {
+          "line": 535,
+          "text": "Generating thumbnail…"
+        },
+        {
+          "line": 547,
+          "text": "Duration"
+        },
+        {
+          "line": 552,
+          "text": "Ready"
+        },
+        {
+          "line": 553,
+          "text": "Status"
+        },
+        {
+          "line": 562,
+          "text": "Upload Another"
+        },
+        {
+          "line": 567,
+          "text": "Done"
+        },
+        {
+          "line": 601,
+          "text": "Lesson Title"
+        },
+        {
+          "line": 609,
+          "text": "Saved"
+        },
+        {
+          "line": 616,
+          "text": "Save"
+        },
+        {
+          "line": 623,
+          "text": "Video"
+        },
+        {
+          "line": 624,
+          "text": "Materials"
+        },
+        {
+          "line": 625,
+          "text": "Settings"
+        },
+        {
+          "line": 713,
+          "text": "Lesson Status"
+        },
+        {
+          "line": 732,
+          "text": "Publish Date & Time"
+        },
+        {
+          "line": 736,
+          "text": "YYYY-MM-DD HH:MM (e.g. 2025-09-01 09:00)"
+        },
+        {
+          "line": 748,
+          "text": "Lesson Description"
+        },
+        {
+          "line": 750,
+          "text": "Briefly describe what this lesson covers…"
+        },
+        {
+          "line": 755,
+          "text": "Video Source"
+        },
+        {
+          "line": 846,
+          "text": "Cancel"
+        },
+        {
+          "line": 856,
+          "text": "Upload Anyway"
+        },
+        {
+          "line": 882,
+          "text": "Cancel"
+        },
+        {
+          "line": 899,
+          "text": "Processing Timed Out"
+        },
+        {
+          "line": 913,
+          "text": "Retry"
+        },
+        {
+          "line": 922,
+          "text": "Replace"
+        },
+        {
+          "line": 930,
+          "text": "Delete"
+        },
+        {
+          "line": 966,
+          "text": "Re-upload Video"
+        },
+        {
+          "line": 992,
+          "text": "Replace"
+        },
+        {
+          "line": 999,
+          "text": "Delete"
+        },
+        {
+          "line": 1009,
+          "text": "Delete this video permanently?"
+        },
+        {
+          "line": 1016,
+          "text": "Cancel"
+        },
+        {
+          "line": 1020,
+          "text": "Yes, Delete"
+        },
+        {
+          "line": 1038,
+          "text": "Upload New Video"
+        },
+        {
+          "line": 1052,
+          "text": "Choose From My Library"
+        },
+        {
+          "line": 1076,
+          "text": "Video Title"
+        },
+        {
+          "line": 1077,
+          "text": "Display title for the video"
+        },
+        {
+          "line": 1088,
+          "text": "Duration"
+        },
+        {
+          "line": 1093,
+          "text": "Auto-detected"
+        },
+        {
+          "line": 1103,
+          "text": "Coming Soon"
+        },
+        {
+          "line": 1118,
+          "text": "YouTube Video"
+        },
+        {
+          "line": 1119,
+          "text": "Paste any YouTube URL or video ID"
+        },
+        {
+          "line": 1123,
+          "text": "Linked"
+        },
+        {
+          "line": 1132,
+          "text": "YouTube video is unavailable"
+        },
+        {
+          "line": 1156,
+          "text": "https://youtu.be/... or youtube.com/watch?v=..."
+        },
+        {
+          "line": 1175,
+          "text": "Supported formats"
+        },
+        {
+          "line": 1191,
+          "text": "Lesson Notes"
+        },
+        {
+          "line": 1193,
+          "text": "Additional notes shown below the video…"
+        },
+        {
+          "line": 1224,
+          "text": "No attachments yet"
+        },
+        {
+          "line": 1330,
+          "text": "Lesson Access"
+        },
+        {
+          "line": 1333,
+          "text": "Free Preview"
+        },
+        {
+          "line": 1336,
+          "text": "Allow Download"
+        },
+        {
+          "line": 1339,
+          "text": "Comments Enabled"
+        },
+        {
+          "line": 1342,
+          "text": "Visible"
+        },
+        {
+          "line": 1345,
+          "text": "Save Settings"
+        }
+      ]
+    },
+    {
+      "file": "src/app/(app)/(doctor)/students.tsx",
+      "count": 58,
+      "hits": [
+        {
+          "line": 42,
+          "text": "All Students"
+        },
+        {
+          "line": 43,
+          "text": "By Course"
+        },
+        {
+          "line": 44,
+          "text": "Active"
+        },
+        {
+          "line": 45,
+          "text": "Suspended"
+        },
+        {
+          "line": 46,
+          "text": "Recently Added"
+        },
+        {
+          "line": 203,
+          "text": "Subscription suspended."
+        },
+        {
+          "line": 207,
+          "text": "Subscription resumed."
+        },
+        {
+          "line": 216,
+          "text": "Student removed. Revenue deducted."
+        },
+        {
+          "line": 332,
+          "text": "ID copied."
+        },
+        {
+          "line": 365,
+          "text": "Profile"
+        },
+        {
+          "line": 370,
+          "text": "Suspend"
+        },
+        {
+          "line": 375,
+          "text": "Resume"
+        },
+        {
+          "line": 396,
+          "text": "No students found"
+        },
+        {
+          "line": 402,
+          "text": "No courses with students"
+        },
+        {
+          "line": 434,
+          "text": "No active subscriptions"
+        },
+        {
+          "line": 441,
+          "text": "No suspended subscriptions"
+        },
+        {
+          "line": 447,
+          "text": "No recent enrollments"
+        },
+        {
+          "line": 499,
+          "text": "Students"
+        },
+        {
+          "line": 511,
+          "text": "Add Student"
+        },
+        {
+          "line": 517,
+          "text": "Create Student"
+        },
+        {
+          "line": 532,
+          "text": "Select students for bulk actions"
+        },
+        {
+          "line": 537,
+          "text": "Select"
+        },
+        {
+          "line": 546,
+          "text": "Select all visible students"
+        },
+        {
+          "line": 550,
+          "text": "All visible"
+        },
+        {
+          "line": 555,
+          "text": "Clear selection"
+        },
+        {
+          "line": 557,
+          "text": "Clear"
+        },
+        {
+          "line": 565,
+          "text": "Exit select mode"
+        },
+        {
+          "line": 576,
+          "text": "Open bulk actions"
+        },
+        {
+          "line": 610,
+          "text": "Remove from course"
+        },
+        {
+          "line": 626,
+          "text": "Search students, courses…"
+        },
+        {
+          "line": 675,
+          "text": "Add Student"
+        },
+        {
+          "line": 687,
+          "text": "Add via Credits"
+        },
+        {
+          "line": 688,
+          "text": "Deduct 1 credit to enroll a student directly"
+        },
+        {
+          "line": 700,
+          "text": "Back"
+        },
+        {
+          "line": 706,
+          "text": "Search by email or phone:"
+        },
+        {
+          "line": 709,
+          "text": "student@email.com or phone"
+        },
+        {
+          "line": 742,
+          "text": "Student"
+        },
+        {
+          "line": 746,
+          "text": "Select course:"
+        },
+        {
+          "line": 769,
+          "text": "Student"
+        },
+        {
+          "line": 770,
+          "text": "Course"
+        },
+        {
+          "line": 771,
+          "text": "Cost"
+        },
+        {
+          "line": 772,
+          "text": "Current Balance"
+        },
+        {
+          "line": 817,
+          "text": "Student Profile"
+        },
+        {
+          "line": 843,
+          "text": "Full Name"
+        },
+        {
+          "line": 844,
+          "text": "Email"
+        },
+        {
+          "line": 845,
+          "text": "Phone Number"
+        },
+        {
+          "line": 847,
+          "text": "Account Status"
+        },
+        {
+          "line": 848,
+          "text": "Registered"
+        },
+        {
+          "line": 853,
+          "text": "University"
+        },
+        {
+          "line": 854,
+          "text": "Faculty"
+        },
+        {
+          "line": 855,
+          "text": "Academic Level"
+        },
+        {
+          "line": 856,
+          "text": "Course"
+        },
+        {
+          "line": 857,
+          "text": "Enrolled"
+        },
+        {
+          "line": 858,
+          "text": "Enrollment Status"
+        },
+        {
+          "line": 859,
+          "text": "Method"
+        },
+        {
+          "line": 939,
+          "text": "Cancel"
+        },
+        {
+          "line": 950,
+          "text": "Bulk action result"
+        },
+        {
+          "line": 975,
+          "text": "Done"
+        }
+      ]
+    },
+    {
+      "file": "src/app/(app)/(student)/profile.tsx",
+      "count": 54,
+      "hits": [
+        {
+          "line": 174,
+          "text": "Close picker"
+        },
+        {
+          "line": 198,
+          "text": "Close"
+        },
+        {
+          "line": 294,
+          "text": "Profile updated successfully."
+        },
+        {
+          "line": 371,
+          "text": "Avatar updated!"
+        },
+        {
+          "line": 392,
+          "text": "Profile photo removed."
+        },
+        {
+          "line": 503,
+          "text": "Terms & Conditions"
+        },
+        {
+          "line": 504,
+          "text": "Privacy Policy"
+        },
+        {
+          "line": 505,
+          "text": "About Us"
+        },
+        {
+          "line": 506,
+          "text": "Contact Us"
+        },
+        {
+          "line": 554,
+          "text": "Student"
+        },
+        {
+          "line": 564,
+          "text": "Account Information"
+        },
+        {
+          "line": 566,
+          "text": "Email"
+        },
+        {
+          "line": 567,
+          "text": "Phone"
+        },
+        {
+          "line": 568,
+          "text": "Role"
+        },
+        {
+          "line": 571,
+          "text": "Edit name and email"
+        },
+        {
+          "line": 577,
+          "text": "Edit Name & Email"
+        },
+        {
+          "line": 582,
+          "text": "Academic Information"
+        },
+        {
+          "line": 584,
+          "text": "University"
+        },
+        {
+          "line": 585,
+          "text": "Faculty"
+        },
+        {
+          "line": 586,
+          "text": "Academic Level"
+        },
+        {
+          "line": 589,
+          "text": "Edit academic information"
+        },
+        {
+          "line": 595,
+          "text": "Edit Academic Info"
+        },
+        {
+          "line": 600,
+          "text": "My Subscriptions"
+        },
+        {
+          "line": 607,
+          "text": "Total"
+        },
+        {
+          "line": 608,
+          "text": "Active"
+        },
+        {
+          "line": 609,
+          "text": "Done"
+        },
+        {
+          "line": 652,
+          "text": "No subscribed courses yet"
+        },
+        {
+          "line": 659,
+          "text": "Security"
+        },
+        {
+          "line": 665,
+          "text": "Change Password"
+        },
+        {
+          "line": 671,
+          "text": "Sign Out"
+        },
+        {
+          "line": 679,
+          "text": "Information"
+        },
+        {
+          "line": 704,
+          "text": "Edit Profile"
+        },
+        {
+          "line": 707,
+          "text": "Cancel"
+        },
+        {
+          "line": 708,
+          "text": "Save"
+        },
+        {
+          "line": 713,
+          "text": "Full Name"
+        },
+        {
+          "line": 718,
+          "text": "Your full name"
+        },
+        {
+          "line": 721,
+          "text": "Email"
+        },
+        {
+          "line": 726,
+          "text": "Not set"
+        },
+        {
+          "line": 748,
+          "text": "Change Password"
+        },
+        {
+          "line": 752,
+          "text": "Cancel"
+        },
+        {
+          "line": 753,
+          "text": "Update"
+        },
+        {
+          "line": 762,
+          "text": "Password Updated!"
+        },
+        {
+          "line": 766,
+          "text": "New Password"
+        },
+        {
+          "line": 771,
+          "text": "Min. 8 characters"
+        },
+        {
+          "line": 785,
+          "text": "Re-enter password"
+        },
+        {
+          "line": 804,
+          "text": "Edit Academic Info"
+        },
+        {
+          "line": 814,
+          "text": "University"
+        },
+        {
+          "line": 815,
+          "text": "Faculty"
+        },
+        {
+          "line": 816,
+          "text": "Academic Level"
+        },
+        {
+          "line": 826,
+          "text": "Saved!"
+        },
+        {
+          "line": 835,
+          "text": "Sign Out?"
+        },
+        {
+          "line": 838,
+          "text": "Cancel"
+        },
+        {
+          "line": 839,
+          "text": "Sign Out"
+        },
+        {
+          "line": 843,
+          "text": "Your progress and data are safely saved."
+        }
+      ]
+    },
+    {
+      "file": "src/app/(app)/(hubs)/doctor-earnings.tsx",
+      "count": 43,
+      "hits": [
+        {
+          "line": 107,
+          "text": "Earnings settings updated."
+        },
+        {
+          "line": 119,
+          "text": "Enter a valid price ≥ 0."
+        },
+        {
+          "line": 138,
+          "text": "Enter a valid price ≥ 0."
+        },
+        {
+          "line": 188,
+          "text": "Earnings"
+        },
+        {
+          "line": 207,
+          "text": "Edit"
+        },
+        {
+          "line": 217,
+          "text": "Custom Pricing"
+        },
+        {
+          "line": 271,
+          "text": "Credit Price"
+        },
+        {
+          "line": 279,
+          "text": "Change"
+        },
+        {
+          "line": 296,
+          "text": "Total Earnings"
+        },
+        {
+          "line": 311,
+          "text": "This Month"
+        },
+        {
+          "line": 318,
+          "text": "Today"
+        },
+        {
+          "line": 328,
+          "text": "Total Enrollments"
+        },
+        {
+          "line": 329,
+          "text": "Paid Courses"
+        },
+        {
+          "line": 330,
+          "text": "Avg Course Price"
+        },
+        {
+          "line": 353,
+          "text": "No courses yet"
+        },
+        {
+          "line": 377,
+          "text": "Set Price"
+        },
+        {
+          "line": 384,
+          "text": "Students"
+        },
+        {
+          "line": 385,
+          "text": "Revenue"
+        },
+        {
+          "line": 386,
+          "text": "Avg Price"
+        },
+        {
+          "line": 407,
+          "text": "Total Students"
+        },
+        {
+          "line": 408,
+          "text": "Total Courses"
+        },
+        {
+          "line": 409,
+          "text": "Total Revenue"
+        },
+        {
+          "line": 434,
+          "text": "Pricing Change History"
+        },
+        {
+          "line": 450,
+          "text": "Earnings Settings"
+        },
+        {
+          "line": 455,
+          "text": "Cancel"
+        },
+        {
+          "line": 462,
+          "text": "Custom Pricing"
+        },
+        {
+          "line": 465,
+          "text": "OFF — Platform Price"
+        },
+        {
+          "line": 466,
+          "text": "ON — Custom Price"
+        },
+        {
+          "line": 491,
+          "text": "Earnings Mode"
+        },
+        {
+          "line": 493,
+          "text": "Credit-Based"
+        },
+        {
+          "line": 494,
+          "text": "Course-Based"
+        },
+        {
+          "line": 536,
+          "text": "Credit Selling Price"
+        },
+        {
+          "line": 541,
+          "text": "Cancel"
+        },
+        {
+          "line": 547,
+          "text": "Current"
+        },
+        {
+          "line": 553,
+          "text": "New Price (EGP)"
+        },
+        {
+          "line": 574,
+          "text": "Course Price"
+        },
+        {
+          "line": 579,
+          "text": "Cancel"
+        },
+        {
+          "line": 585,
+          "text": "Current Price"
+        },
+        {
+          "line": 591,
+          "text": "New Price (EGP)"
+        },
+        {
+          "line": 612,
+          "text": "Pricing Change History"
+        },
+        {
+          "line": 619,
+          "text": "No changes recorded yet"
+        },
+        {
+          "line": 635,
+          "text": "Old"
+        },
+        {
+          "line": 642,
+          "text": "New"
+        }
+      ]
+    },
+    {
+      "file": "src/app/(app)/(hubs)/sa-audit.tsx",
+      "count": 40,
+      "hits": [
+        {
+          "line": 27,
+          "text": "All Events"
+        },
+        {
+          "line": 28,
+          "text": "User Mgmt"
+        },
+        {
+          "line": 29,
+          "text": "Role Changes"
+        },
+        {
+          "line": 30,
+          "text": "Doctor"
+        },
+        {
+          "line": 31,
+          "text": "Student"
+        },
+        {
+          "line": 32,
+          "text": "Courses"
+        },
+        {
+          "line": 33,
+          "text": "Auth"
+        },
+        {
+          "line": 34,
+          "text": "Platform"
+        },
+        {
+          "line": 35,
+          "text": "Finance"
+        },
+        {
+          "line": 36,
+          "text": "Security"
+        },
+        {
+          "line": 40,
+          "text": "All Time"
+        },
+        {
+          "line": 41,
+          "text": "Today"
+        },
+        {
+          "line": 42,
+          "text": "7 Days"
+        },
+        {
+          "line": 43,
+          "text": "30 Days"
+        },
+        {
+          "line": 47,
+          "text": "Any"
+        },
+        {
+          "line": 48,
+          "text": "Success"
+        },
+        {
+          "line": 49,
+          "text": "Failed"
+        },
+        {
+          "line": 50,
+          "text": "Warning"
+        },
+        {
+          "line": 141,
+          "text": "Changes"
+        },
+        {
+          "line": 274,
+          "text": "Actor (Performed By)"
+        },
+        {
+          "line": 275,
+          "text": "Name"
+        },
+        {
+          "line": 276,
+          "text": "Email"
+        },
+        {
+          "line": 277,
+          "text": "Role"
+        },
+        {
+          "line": 284,
+          "text": "Target"
+        },
+        {
+          "line": 285,
+          "text": "Name"
+        },
+        {
+          "line": 286,
+          "text": "Resource"
+        },
+        {
+          "line": 301,
+          "text": "Additional Info"
+        },
+        {
+          "line": 315,
+          "text": "Metadata"
+        },
+        {
+          "line": 316,
+          "text": "Timestamp"
+        },
+        {
+          "line": 317,
+          "text": "IP Address"
+        },
+        {
+          "line": 480,
+          "text": "Audit Trail"
+        },
+        {
+          "line": 558,
+          "text": "Status:"
+        },
+        {
+          "line": 575,
+          "text": "Search actor…"
+        },
+        {
+          "line": 576,
+          "text": "Search target…"
+        },
+        {
+          "line": 577,
+          "text": "Search resource…"
+        },
+        {
+          "line": 589,
+          "text": "Unable to load the audit trail"
+        },
+        {
+          "line": 600,
+          "text": "Retry loading the audit trail"
+        },
+        {
+          "line": 602,
+          "text": "Retry"
+        },
+        {
+          "line": 616,
+          "text": "No audit logs found"
+        },
+        {
+          "line": 629,
+          "text": "Load more"
+        }
+      ]
+    },
+    {
+      "file": "src/app/(app)/(admin)/devices.tsx",
+      "count": 35,
+      "hits": [
+        {
+          "line": 33,
+          "text": "1 Device"
+        },
+        {
+          "line": 34,
+          "text": "2 Devices"
+        },
+        {
+          "line": 35,
+          "text": "3 Devices"
+        },
+        {
+          "line": 36,
+          "text": "5 Devices"
+        },
+        {
+          "line": 37,
+          "text": "10 Devices"
+        },
+        {
+          "line": 38,
+          "text": "Unlimited"
+        },
+        {
+          "line": 425,
+          "text": "Set Limit"
+        },
+        {
+          "line": 432,
+          "text": "Reset All"
+        },
+        {
+          "line": 439,
+          "text": "History"
+        },
+        {
+          "line": 449,
+          "text": "No devices registered"
+        },
+        {
+          "line": 466,
+          "text": "BLOCKED"
+        },
+        {
+          "line": 467,
+          "text": "LOGGED OUT"
+        },
+        {
+          "line": 550,
+          "text": "Device Management"
+        },
+        {
+          "line": 583,
+          "text": "Search user by name or email…"
+        },
+        {
+          "line": 594,
+          "text": "No users found"
+        },
+        {
+          "line": 606,
+          "text": "Block Device"
+        },
+        {
+          "line": 609,
+          "text": "Cancel"
+        },
+        {
+          "line": 610,
+          "text": "Block"
+        },
+        {
+          "line": 619,
+          "text": "Block reason (optional)…"
+        },
+        {
+          "line": 630,
+          "text": "Unblock Device"
+        },
+        {
+          "line": 633,
+          "text": "Cancel"
+        },
+        {
+          "line": 634,
+          "text": "Unblock"
+        },
+        {
+          "line": 648,
+          "text": "Logout Device"
+        },
+        {
+          "line": 651,
+          "text": "Cancel"
+        },
+        {
+          "line": 652,
+          "text": "Logout"
+        },
+        {
+          "line": 666,
+          "text": "Delete Device Record"
+        },
+        {
+          "line": 669,
+          "text": "Cancel"
+        },
+        {
+          "line": 670,
+          "text": "Delete"
+        },
+        {
+          "line": 677,
+          "text": "Permanent action"
+        },
+        {
+          "line": 690,
+          "text": "Reset All Devices"
+        },
+        {
+          "line": 693,
+          "text": "Cancel"
+        },
+        {
+          "line": 694,
+          "text": "Reset All"
+        },
+        {
+          "line": 709,
+          "text": "Configure Device Limit"
+        },
+        {
+          "line": 712,
+          "text": "Cancel"
+        },
+        {
+          "line": 713,
+          "text": "Apply"
+        }
+      ]
+    },
+    {
+      "file": "src/app/(app)/(admin)/users.tsx",
+      "count": 34,
+      "hits": [
+        {
+          "line": 68,
+          "text": "Select Country"
+        },
+        {
+          "line": 71,
+          "text": "Search…"
+        },
+        {
+          "line": 295,
+          "text": "User created successfully."
+        },
+        {
+          "line": 425,
+          "text": "Promise"
+        },
+        {
+          "line": 429,
+          "text": "User suspended."
+        },
+        {
+          "line": 430,
+          "text": "User unsuspended."
+        },
+        {
+          "line": 431,
+          "text": "User blocked."
+        },
+        {
+          "line": 432,
+          "text": "User unblocked."
+        },
+        {
+          "line": 433,
+          "text": "Promoted to Doctor."
+        },
+        {
+          "line": 434,
+          "text": "Promoted to Admin."
+        },
+        {
+          "line": 435,
+          "text": "Demoted to Student."
+        },
+        {
+          "line": 436,
+          "text": "Demoted to Doctor."
+        },
+        {
+          "line": 442,
+          "text": "Unlimited devices enabled."
+        },
+        {
+          "line": 449,
+          "text": "Unlimited devices disabled (limit: 1)."
+        },
+        {
+          "line": 463,
+          "text": "User account permanently deleted."
+        },
+        {
+          "line": 520,
+          "text": "User Management"
+        },
+        {
+          "line": 530,
+          "text": "Add User"
+        },
+        {
+          "line": 543,
+          "text": "Undo (10s)"
+        },
+        {
+          "line": 551,
+          "text": "Name, email, phone or user ID…"
+        },
+        {
+          "line": 554,
+          "text": "Search by name, email, +20 phone, or user ID — then tap Enter"
+        },
+        {
+          "line": 584,
+          "text": "No users found"
+        },
+        {
+          "line": 603,
+          "text": "No phone"
+        },
+        {
+          "line": 677,
+          "text": "User profile updated."
+        },
+        {
+          "line": 714,
+          "text": "Login History"
+        },
+        {
+          "line": 718,
+          "text": "No login history found."
+        },
+        {
+          "line": 740,
+          "text": "Create User"
+        },
+        {
+          "line": 745,
+          "text": "Cancel"
+        },
+        {
+          "line": 746,
+          "text": "Create User"
+        },
+        {
+          "line": 751,
+          "text": "Ahmed Mohamed"
+        },
+        {
+          "line": 784,
+          "text": "Min 6 characters"
+        },
+        {
+          "line": 791,
+          "text": "Repeat password"
+        },
+        {
+          "line": 810,
+          "text": "STUDENT"
+        },
+        {
+          "line": 813,
+          "text": "ACTIVE"
+        },
+        {
+          "line": 815,
+          "text": "Default role & status"
+        }
+      ]
+    },
+    {
+      "file": "src/app/(app)/(superadmin)/sa-platform.tsx",
+      "count": 34,
+      "hits": [
+        {
+          "line": 75,
+          "text": "Platform"
+        },
+        {
+          "line": 80,
+          "text": "Appearance & Content"
+        },
+        {
+          "line": 81,
+          "text": "Branding"
+        },
+        {
+          "line": 82,
+          "text": "CMS Pages"
+        },
+        {
+          "line": 85,
+          "text": "Feature Control"
+        },
+        {
+          "line": 86,
+          "text": "Feature Flags"
+        },
+        {
+          "line": 87,
+          "text": "Maintenance Mode"
+        },
+        {
+          "line": 90,
+          "text": "Integrations"
+        },
+        {
+          "line": 91,
+          "text": "Support Contact"
+        },
+        {
+          "line": 92,
+          "text": "System Diagnostics"
+        },
+        {
+          "line": 93,
+          "text": "Video Providers"
+        },
+        {
+          "line": 94,
+          "text": "Currency Settings"
+        },
+        {
+          "line": 97,
+          "text": "Content Protection"
+        },
+        {
+          "line": 98,
+          "text": "Watermark / DRM"
+        },
+        {
+          "line": 99,
+          "text": "Video Settings"
+        },
+        {
+          "line": 100,
+          "text": "Storage"
+        },
+        {
+          "line": 103,
+          "text": "Security"
+        },
+        {
+          "line": 104,
+          "text": "Security Dashboard"
+        },
+        {
+          "line": 105,
+          "text": "Security Policies"
+        },
+        {
+          "line": 106,
+          "text": "Security Diagnostics"
+        },
+        {
+          "line": 107,
+          "text": "Violation Management"
+        },
+        {
+          "line": 110,
+          "text": "User Management"
+        },
+        {
+          "line": 111,
+          "text": "Admin Management"
+        },
+        {
+          "line": 112,
+          "text": "Impersonation"
+        },
+        {
+          "line": 113,
+          "text": "Device Management"
+        },
+        {
+          "line": 116,
+          "text": "Academic & Operations"
+        },
+        {
+          "line": 117,
+          "text": "Academic Structure"
+        },
+        {
+          "line": 118,
+          "text": "Enrollment Manager"
+        },
+        {
+          "line": 119,
+          "text": "Notifications"
+        },
+        {
+          "line": 120,
+          "text": "Bulk Import"
+        },
+        {
+          "line": 121,
+          "text": "DB Audit"
+        },
+        {
+          "line": 124,
+          "text": "Cleanup & Permissions"
+        },
+        {
+          "line": 125,
+          "text": "Trash Bin"
+        },
+        {
+          "line": 126,
+          "text": "Delete Permissions"
+        }
+      ]
+    },
+    {
+      "file": "src/app/(app)/(hubs)/sa-credits.tsx",
+      "count": 33,
+      "hits": [
+        {
+          "line": 149,
+          "text": "Enter a valid positive amount."
+        },
+        {
+          "line": 199,
+          "text": "Search doctors..."
+        },
+        {
+          "line": 224,
+          "text": "Add / Remove"
+        },
+        {
+          "line": 225,
+          "text": "History"
+        },
+        {
+          "line": 233,
+          "text": "No doctors found"
+        },
+        {
+          "line": 247,
+          "text": "Cancel"
+        },
+        {
+          "line": 248,
+          "text": "Refund"
+        },
+        {
+          "line": 251,
+          "text": "Add Credits"
+        },
+        {
+          "line": 257,
+          "text": "Amount"
+        },
+        {
+          "line": 264,
+          "text": "Notes (optional)"
+        },
+        {
+          "line": 267,
+          "text": "Reason for allocation..."
+        },
+        {
+          "line": 278,
+          "text": "No transactions found"
+        },
+        {
+          "line": 417,
+          "text": "Total Tx"
+        },
+        {
+          "line": 418,
+          "text": "Added"
+        },
+        {
+          "line": 419,
+          "text": "Used"
+        },
+        {
+          "line": 420,
+          "text": "Refunded"
+        },
+        {
+          "line": 426,
+          "text": "Added"
+        },
+        {
+          "line": 427,
+          "text": "Used"
+        },
+        {
+          "line": 428,
+          "text": "Removed"
+        },
+        {
+          "line": 475,
+          "text": "Top Doctors by Balance"
+        },
+        {
+          "line": 505,
+          "text": "Search doctor, course, type..."
+        },
+        {
+          "line": 603,
+          "text": "No transactions found"
+        },
+        {
+          "line": 609,
+          "text": "Transaction Detail"
+        },
+        {
+          "line": 644,
+          "text": "Balance Before"
+        },
+        {
+          "line": 651,
+          "text": "Balance After"
+        },
+        {
+          "line": 658,
+          "text": "Doctor"
+        },
+        {
+          "line": 659,
+          "text": "Performed By"
+        },
+        {
+          "line": 660,
+          "text": "Student"
+        },
+        {
+          "line": 661,
+          "text": "Course"
+        },
+        {
+          "line": 698,
+          "text": "Close"
+        },
+        {
+          "line": 722,
+          "text": "Credits"
+        },
+        {
+          "line": 725,
+          "text": "Credit Management"
+        },
+        {
+          "line": 731,
+          "text": "Credit History"
+        }
+      ]
+    },
+    {
+      "file": "src/app/(app)/(hubs)/enrollment-manager.tsx",
+      "count": 31,
+      "hits": [
+        {
+          "line": 38,
+          "text": "Visible to all"
+        },
+        {
+          "line": 39,
+          "text": "Hidden from instructors"
+        },
+        {
+          "line": 40,
+          "text": "Hidden from admins & instructors"
+        },
+        {
+          "line": 250,
+          "text": "Visibility"
+        },
+        {
+          "line": 301,
+          "text": "Failed to load courses"
+        },
+        {
+          "line": 377,
+          "text": "Enrollment removed."
+        },
+        {
+          "line": 407,
+          "text": "Enrollment Manager"
+        },
+        {
+          "line": 421,
+          "text": "Enroll User"
+        },
+        {
+          "line": 421,
+          "text": "View Enrollments"
+        },
+        {
+          "line": 445,
+          "text": "Select Student"
+        },
+        {
+          "line": 467,
+          "text": "Search by name, email, watermark ID, or user ID"
+        },
+        {
+          "line": 485,
+          "text": "No users found"
+        },
+        {
+          "line": 497,
+          "text": "Select Course"
+        },
+        {
+          "line": 505,
+          "text": "Tap to choose a course…"
+        },
+        {
+          "line": 521,
+          "text": "Visibility"
+        },
+        {
+          "line": 522,
+          "text": "Super Admin only"
+        },
+        {
+          "line": 537,
+          "text": "Enroll"
+        },
+        {
+          "line": 541,
+          "text": "Clear selection"
+        },
+        {
+          "line": 551,
+          "text": "Course"
+        },
+        {
+          "line": 558,
+          "text": "Select a course to view enrollments…"
+        },
+        {
+          "line": 570,
+          "text": "No enrollments for this course"
+        },
+        {
+          "line": 596,
+          "text": "Select Course"
+        },
+        {
+          "line": 599,
+          "text": "Filter courses…"
+        },
+        {
+          "line": 603,
+          "text": "No courses found"
+        },
+        {
+          "line": 612,
+          "text": "Select Course"
+        },
+        {
+          "line": 615,
+          "text": "Filter courses…"
+        },
+        {
+          "line": 619,
+          "text": "No courses found"
+        },
+        {
+          "line": 629,
+          "text": "Remove Enrollment"
+        },
+        {
+          "line": 632,
+          "text": "Cancel"
+        },
+        {
+          "line": 633,
+          "text": "Remove"
+        },
+        {
+          "line": 641,
+          "text": "Remove this user from the course?"
+        }
+      ]
+    },
+    {
+      "file": "src/app/(app)/(hubs)/create-student.tsx",
+      "count": 30,
+      "hits": [
+        {
+          "line": 81,
+          "text": "Cancel"
+        },
+        {
+          "line": 232,
+          "text": "Please choose a creation mode."
+        },
+        {
+          "line": 234,
+          "text": "Please select a course."
+        },
+        {
+          "line": 235,
+          "text": "Please choose an enrollment method."
+        },
+        {
+          "line": 236,
+          "text": "Insufficient credits."
+        },
+        {
+          "line": 266,
+          "text": "Student account created successfully!"
+        },
+        {
+          "line": 286,
+          "text": "Student creation failed. Please try again."
+        },
+        {
+          "line": 297,
+          "text": "Create Student"
+        },
+        {
+          "line": 312,
+          "text": "Student Information"
+        },
+        {
+          "line": 314,
+          "text": "Full Name *"
+        },
+        {
+          "line": 315,
+          "text": "Email (optional if phone provided)"
+        },
+        {
+          "line": 316,
+          "text": "Phone (optional if email provided)"
+        },
+        {
+          "line": 322,
+          "text": "Academic Information"
+        },
+        {
+          "line": 324,
+          "text": "University"
+        },
+        {
+          "line": 325,
+          "text": "Faculty"
+        },
+        {
+          "line": 326,
+          "text": "Academic Level"
+        },
+        {
+          "line": 332,
+          "text": "Temporary Password"
+        },
+        {
+          "line": 337,
+          "text": "Temporary Password *"
+        },
+        {
+          "line": 354,
+          "text": "Next"
+        },
+        {
+          "line": 362,
+          "text": "Choose Creation Mode"
+        },
+        {
+          "line": 383,
+          "text": "Select Course"
+        },
+        {
+          "line": 385,
+          "text": "Choose a course…"
+        },
+        {
+          "line": 394,
+          "text": "Enrollment Method"
+        },
+        {
+          "line": 419,
+          "text": "Doctor Credits"
+        },
+        {
+          "line": 436,
+          "text": "Summary"
+        },
+        {
+          "line": 458,
+          "text": "Back"
+        },
+        {
+          "line": 470,
+          "text": "Select University"
+        },
+        {
+          "line": 473,
+          "text": "Select Faculty"
+        },
+        {
+          "line": 476,
+          "text": "Select Level"
+        },
+        {
+          "line": 479,
+          "text": "Select Course"
+        }
+      ]
+    },
+    {
+      "file": "src/app/(app)/(superadmin)/sa-users.tsx",
+      "count": 28,
+      "hits": [
+        {
+          "line": 42,
+          "text": "All Users"
+        },
+        {
+          "line": 43,
+          "text": "Students"
+        },
+        {
+          "line": 44,
+          "text": "Doctors"
+        },
+        {
+          "line": 45,
+          "text": "Admins"
+        },
+        {
+          "line": 294,
+          "text": "Promise"
+        },
+        {
+          "line": 301,
+          "text": "User suspended."
+        },
+        {
+          "line": 302,
+          "text": "User unsuspended."
+        },
+        {
+          "line": 303,
+          "text": "User blocked."
+        },
+        {
+          "line": 304,
+          "text": "User unblocked."
+        },
+        {
+          "line": 305,
+          "text": "Promoted to Doctor."
+        },
+        {
+          "line": 306,
+          "text": "Promoted to Admin."
+        },
+        {
+          "line": 307,
+          "text": "Demoted to Doctor."
+        },
+        {
+          "line": 308,
+          "text": "Demoted to Student."
+        },
+        {
+          "line": 309,
+          "text": "Unlimited devices enabled."
+        },
+        {
+          "line": 310,
+          "text": "Device limit set to 1."
+        },
+        {
+          "line": 323,
+          "text": "Account permanently deleted."
+        },
+        {
+          "line": 375,
+          "text": "Users"
+        },
+        {
+          "line": 408,
+          "text": "Undo (10s)"
+        },
+        {
+          "line": 447,
+          "text": "Search name, email, phone or ID…"
+        },
+        {
+          "line": 470,
+          "text": "No users found"
+        },
+        {
+          "line": 520,
+          "text": "Allocated"
+        },
+        {
+          "line": 521,
+          "text": "Consumed"
+        },
+        {
+          "line": 522,
+          "text": "Remaining"
+        },
+        {
+          "line": 565,
+          "text": "← Prev"
+        },
+        {
+          "line": 575,
+          "text": "Next →"
+        },
+        {
+          "line": 631,
+          "text": "User updated."
+        },
+        {
+          "line": 671,
+          "text": "Login History"
+        },
+        {
+          "line": 677,
+          "text": "No login history found."
+        }
+      ]
+    },
+    {
+      "file": "src/app/(app)/(hubs)/trash-bin.tsx",
+      "count": 27,
+      "hits": [
+        {
+          "line": 30,
+          "text": "All"
+        },
+        {
+          "line": 31,
+          "text": "Students"
+        },
+        {
+          "line": 32,
+          "text": "Doctors"
+        },
+        {
+          "line": 33,
+          "text": "Admins"
+        },
+        {
+          "line": 34,
+          "text": "Super Admin"
+        },
+        {
+          "line": 38,
+          "text": "7 Days"
+        },
+        {
+          "line": 39,
+          "text": "15 Days"
+        },
+        {
+          "line": 40,
+          "text": "30 Days"
+        },
+        {
+          "line": 41,
+          "text": "60 Days"
+        },
+        {
+          "line": 42,
+          "text": "90 Days"
+        },
+        {
+          "line": 370,
+          "text": "Retention period updated."
+        },
+        {
+          "line": 418,
+          "text": "Go back"
+        },
+        {
+          "line": 425,
+          "text": "Trash Bin"
+        },
+        {
+          "line": 437,
+          "text": "Retention Period"
+        },
+        {
+          "line": 449,
+          "text": "Save"
+        },
+        {
+          "line": 450,
+          "text": "Cancel"
+        },
+        {
+          "line": 459,
+          "text": "In Trash"
+        },
+        {
+          "line": 460,
+          "text": "Expiring Soon"
+        },
+        {
+          "line": 461,
+          "text": "Expired"
+        },
+        {
+          "line": 495,
+          "text": "Search name or email…"
+        },
+        {
+          "line": 507,
+          "text": "Restore"
+        },
+        {
+          "line": 515,
+          "text": "Delete Forever"
+        },
+        {
+          "line": 539,
+          "text": "Select All"
+        },
+        {
+          "line": 558,
+          "text": "No more deleted accounts."
+        },
+        {
+          "line": 588,
+          "text": "Failed to load Trash Bin"
+        },
+        {
+          "line": 601,
+          "text": "Trash bin is empty"
+        },
+        {
+          "line": 649,
+          "text": "Account permanently deleted."
+        }
+      ]
+    },
+    {
+      "file": "src/app/(app)/(admin)/academic.tsx",
+      "count": 26,
+      "hits": [
+        {
+          "line": 40,
+          "text": "Cancel"
+        },
+        {
+          "line": 41,
+          "text": "Save"
+        },
+        {
+          "line": 131,
+          "text": "University updated successfully."
+        },
+        {
+          "line": 135,
+          "text": "University created successfully."
+        },
+        {
+          "line": 158,
+          "text": "University deleted."
+        },
+        {
+          "line": 173,
+          "text": "Faculty updated successfully."
+        },
+        {
+          "line": 178,
+          "text": "Faculty created successfully."
+        },
+        {
+          "line": 201,
+          "text": "Faculty deleted."
+        },
+        {
+          "line": 217,
+          "text": "Level updated successfully."
+        },
+        {
+          "line": 221,
+          "text": "Level created successfully."
+        },
+        {
+          "line": 263,
+          "text": "Universities"
+        },
+        {
+          "line": 264,
+          "text": "Faculties"
+        },
+        {
+          "line": 265,
+          "text": "Levels"
+        },
+        {
+          "line": 275,
+          "text": "Academic Structure"
+        },
+        {
+          "line": 302,
+          "text": "Add"
+        },
+        {
+          "line": 336,
+          "text": "No universities yet"
+        },
+        {
+          "line": 371,
+          "text": "Edit faculty"
+        },
+        {
+          "line": 374,
+          "text": "Delete faculty"
+        },
+        {
+          "line": 383,
+          "text": "Add Faculty"
+        },
+        {
+          "line": 417,
+          "text": "No levels — tap + to add"
+        },
+        {
+          "line": 427,
+          "text": "Edit level"
+        },
+        {
+          "line": 430,
+          "text": "Delete level"
+        },
+        {
+          "line": 440,
+          "text": "Add Level"
+        },
+        {
+          "line": 456,
+          "text": "University Name"
+        },
+        {
+          "line": 462,
+          "text": "Faculty Name"
+        },
+        {
+          "line": 468,
+          "text": "Level Name"
+        }
+      ]
+    },
+    {
+      "file": "src/app/(app)/(hubs)/video-library.tsx",
+      "count": 26,
+      "hits": [
+        {
+          "line": 54,
+          "text": "All"
+        },
+        {
+          "line": 55,
+          "text": "Ready"
+        },
+        {
+          "line": 56,
+          "text": "Processing"
+        },
+        {
+          "line": 57,
+          "text": "Failed"
+        },
+        {
+          "line": 61,
+          "text": "Date"
+        },
+        {
+          "line": 62,
+          "text": "Title"
+        },
+        {
+          "line": 63,
+          "text": "Duration"
+        },
+        {
+          "line": 64,
+          "text": "Size"
+        },
+        {
+          "line": 256,
+          "text": "Rename"
+        },
+        {
+          "line": 264,
+          "text": "Delete"
+        },
+        {
+          "line": 304,
+          "text": "Rename Video"
+        },
+        {
+          "line": 309,
+          "text": "Video title"
+        },
+        {
+          "line": 318,
+          "text": "Cancel"
+        },
+        {
+          "line": 323,
+          "text": "Save"
+        },
+        {
+          "line": 339,
+          "text": "Delete Video Permanently?"
+        },
+        {
+          "line": 359,
+          "text": "Not used in any lesson."
+        },
+        {
+          "line": 365,
+          "text": "Keep Video"
+        },
+        {
+          "line": 370,
+          "text": "Delete Permanently"
+        },
+        {
+          "line": 379,
+          "text": "Video Library"
+        },
+        {
+          "line": 388,
+          "text": "Sync library with VdoCipher"
+        },
+        {
+          "line": 403,
+          "text": "Upload"
+        },
+        {
+          "line": 413,
+          "text": "Syncing video library with VdoCipher…"
+        },
+        {
+          "line": 423,
+          "text": "Retry"
+        },
+        {
+          "line": 455,
+          "text": "Retry upload"
+        },
+        {
+          "line": 480,
+          "text": "Search by title…"
+        },
+        {
+          "line": 562,
+          "text": "Loading your library…"
+        }
+      ]
+    },
+    {
+      "file": "src/components/VideoUploadQueue.tsx",
+      "count": 26,
+      "hits": [
+        {
+          "line": 26,
+          "text": "Waiting…"
+        },
+        {
+          "line": 27,
+          "text": "Uploading…"
+        },
+        {
+          "line": 28,
+          "text": "Paused"
+        },
+        {
+          "line": 29,
+          "text": "Resuming…"
+        },
+        {
+          "line": 30,
+          "text": "Processing…"
+        },
+        {
+          "line": 31,
+          "text": "Encoding…"
+        },
+        {
+          "line": 32,
+          "text": "Generating streams…"
+        },
+        {
+          "line": 33,
+          "text": "Verifying…"
+        },
+        {
+          "line": 34,
+          "text": "Ready to Watch"
+        },
+        {
+          "line": 35,
+          "text": "Upload Failed"
+        },
+        {
+          "line": 36,
+          "text": "Processing Timed Out"
+        },
+        {
+          "line": 37,
+          "text": "Canceled"
+        },
+        {
+          "line": 38,
+          "text": "Recovering…"
+        },
+        {
+          "line": 95,
+          "text": "Upload"
+        },
+        {
+          "line": 96,
+          "text": "Process"
+        },
+        {
+          "line": 97,
+          "text": "Encode"
+        },
+        {
+          "line": 98,
+          "text": "Stream"
+        },
+        {
+          "line": 99,
+          "text": "Verify"
+        },
+        {
+          "line": 100,
+          "text": "Ready"
+        },
+        {
+          "line": 206,
+          "text": "REPLACE"
+        },
+        {
+          "line": 236,
+          "text": "Retry"
+        },
+        {
+          "line": 243,
+          "text": "Retry"
+        },
+        {
+          "line": 297,
+          "text": "Integrity verified"
+        },
+        {
+          "line": 461,
+          "text": "Retry All Failed"
+        },
+        {
+          "line": 474,
+          "text": "Clear Completed"
+        },
+        {
+          "line": 512,
+          "text": "Upload Queue"
+        }
+      ]
+    },
+    {
+      "file": "src/app/(app)/(hubs)/sa-redeem-codes.tsx",
+      "count": 25,
+      "hits": [
+        {
+          "line": 28,
+          "text": "Unused"
+        },
+        {
+          "line": 29,
+          "text": "Redeemed"
+        },
+        {
+          "line": 30,
+          "text": "Expired"
+        },
+        {
+          "line": 31,
+          "text": "Revoked"
+        },
+        {
+          "line": 111,
+          "text": "Enter a valid positive credit amount."
+        },
+        {
+          "line": 116,
+          "text": "Number of codes must be between 1 and 200."
+        },
+        {
+          "line": 120,
+          "text": "Expiry must be YYYY-MM-DD (or leave empty)."
+        },
+        {
+          "line": 170,
+          "text": "Code copied."
+        },
+        {
+          "line": 192,
+          "text": "Redeem Codes"
+        },
+        {
+          "line": 200,
+          "text": "Search code, doctor, ID..."
+        },
+        {
+          "line": 210,
+          "text": "New Code"
+        },
+        {
+          "line": 287,
+          "text": "Permanently remove unused redeem code"
+        },
+        {
+          "line": 298,
+          "text": "Remove redeemed code from active list"
+        },
+        {
+          "line": 314,
+          "text": "No redeem codes found"
+        },
+        {
+          "line": 323,
+          "text": "New Redeem Code"
+        },
+        {
+          "line": 328,
+          "text": "Cancel"
+        },
+        {
+          "line": 329,
+          "text": "Create"
+        },
+        {
+          "line": 368,
+          "text": "YYYY-MM-DD"
+        },
+        {
+          "line": 387,
+          "text": "Search doctors..."
+        },
+        {
+          "line": 402,
+          "text": "No doctors found"
+        },
+        {
+          "line": 418,
+          "text": "Done"
+        },
+        {
+          "line": 464,
+          "text": "Copy All Codes"
+        },
+        {
+          "line": 478,
+          "text": "Remove Redeemed Code?"
+        },
+        {
+          "line": 481,
+          "text": "Cancel"
+        },
+        {
+          "line": 482,
+          "text": "Remove"
+        }
+      ]
+    },
+    {
+      "file": "src/app/(app)/user-activity.tsx",
+      "count": 25,
+      "hits": [
+        {
+          "line": 27,
+          "text": "All Activities"
+        },
+        {
+          "line": 28,
+          "text": "Authentication"
+        },
+        {
+          "line": 29,
+          "text": "Profile"
+        },
+        {
+          "line": 30,
+          "text": "Security"
+        },
+        {
+          "line": 31,
+          "text": "Devices"
+        },
+        {
+          "line": 32,
+          "text": "Courses"
+        },
+        {
+          "line": 33,
+          "text": "Purchases"
+        },
+        {
+          "line": 34,
+          "text": "Admin Actions"
+        },
+        {
+          "line": 35,
+          "text": "Role Changes"
+        },
+        {
+          "line": 36,
+          "text": "Blocking"
+        },
+        {
+          "line": 37,
+          "text": "System"
+        },
+        {
+          "line": 42,
+          "text": "Everything"
+        },
+        {
+          "line": 43,
+          "text": "Actions by this user"
+        },
+        {
+          "line": 44,
+          "text": "Actions on this user"
+        },
+        {
+          "line": 49,
+          "text": "All Time"
+        },
+        {
+          "line": 50,
+          "text": "Today"
+        },
+        {
+          "line": 51,
+          "text": "Last 7 Days"
+        },
+        {
+          "line": 52,
+          "text": "Last 30 Days"
+        },
+        {
+          "line": 308,
+          "text": "Close"
+        },
+        {
+          "line": 487,
+          "text": "Go back"
+        },
+        {
+          "line": 532,
+          "text": "Clear search"
+        },
+        {
+          "line": 594,
+          "text": "Clear all"
+        },
+        {
+          "line": 614,
+          "text": "Retry loading audit logs"
+        },
+        {
+          "line": 616,
+          "text": "Retry"
+        },
+        {
+          "line": 648,
+          "text": "Load more"
+        }
+      ]
+    },
+    {
+      "file": "src/app/(app)/(admin)/audit.tsx",
+      "count": 24,
+      "hits": [
+        {
+          "line": 25,
+          "text": "All Events"
+        },
+        {
+          "line": 26,
+          "text": "Users"
+        },
+        {
+          "line": 27,
+          "text": "Role Changes"
+        },
+        {
+          "line": 28,
+          "text": "Doctor"
+        },
+        {
+          "line": 29,
+          "text": "Student"
+        },
+        {
+          "line": 30,
+          "text": "Courses"
+        },
+        {
+          "line": 31,
+          "text": "Auth"
+        },
+        {
+          "line": 32,
+          "text": "Finance"
+        },
+        {
+          "line": 33,
+          "text": "Platform"
+        },
+        {
+          "line": 37,
+          "text": "All Time"
+        },
+        {
+          "line": 38,
+          "text": "Today"
+        },
+        {
+          "line": 39,
+          "text": "7 Days"
+        },
+        {
+          "line": 40,
+          "text": "30 Days"
+        },
+        {
+          "line": 119,
+          "text": "Changes"
+        },
+        {
+          "line": 205,
+          "text": "Actor"
+        },
+        {
+          "line": 213,
+          "text": "Target"
+        },
+        {
+          "line": 228,
+          "text": "Additional Info"
+        },
+        {
+          "line": 242,
+          "text": "Timestamp"
+        },
+        {
+          "line": 364,
+          "text": "Audit Logs"
+        },
+        {
+          "line": 421,
+          "text": "Actor…"
+        },
+        {
+          "line": 422,
+          "text": "Target…"
+        },
+        {
+          "line": 423,
+          "text": "Resource…"
+        },
+        {
+          "line": 442,
+          "text": "No audit logs found"
+        },
+        {
+          "line": 443,
+          "text": "Try a different filter or search term"
+        }
+      ]
+    },
+    {
+      "file": "src/app/(app)/(hubs)/doctor-credit-timeline.tsx",
+      "count": 24,
+      "hits": [
+        {
+          "line": 166,
+          "text": "Go Back"
+        },
+        {
+          "line": 186,
+          "text": "Failed to load data"
+        },
+        {
+          "line": 190,
+          "text": "Retry"
+        },
+        {
+          "line": 208,
+          "text": "Open Earnings Dashboard"
+        },
+        {
+          "line": 237,
+          "text": "Credit Selling Price"
+        },
+        {
+          "line": 241,
+          "text": "per credit"
+        },
+        {
+          "line": 248,
+          "text": "Total Allocated"
+        },
+        {
+          "line": 249,
+          "text": "Credits Used"
+        },
+        {
+          "line": 250,
+          "text": "Remaining Credits"
+        },
+        {
+          "line": 251,
+          "text": "Courses Sold"
+        },
+        {
+          "line": 252,
+          "text": "Students Enrolled"
+        },
+        {
+          "line": 253,
+          "text": "Videos Uploaded"
+        },
+        {
+          "line": 268,
+          "text": "Total Earnings"
+        },
+        {
+          "line": 281,
+          "text": "Last Login"
+        },
+        {
+          "line": 282,
+          "text": "Last Activity"
+        },
+        {
+          "line": 301,
+          "text": "Current Balance"
+        },
+        {
+          "line": 302,
+          "text": "Credits Added"
+        },
+        {
+          "line": 303,
+          "text": "Credits Used"
+        },
+        {
+          "line": 304,
+          "text": "Credits Removed"
+        },
+        {
+          "line": 305,
+          "text": "Credits Remaining"
+        },
+        {
+          "line": 306,
+          "text": "Courses Activated"
+        },
+        {
+          "line": 307,
+          "text": "Students Activated"
+        },
+        {
+          "line": 323,
+          "text": "Revenue Generated"
+        },
+        {
+          "line": 365,
+          "text": "No transactions yet"
+        }
+      ]
+    },
+    {
+      "file": "src/app/(app)/(hubs)/sec-dashboard.tsx",
+      "count": 24,
+      "hits": [
+        {
+          "line": 59,
+          "text": "Root"
+        },
+        {
+          "line": 60,
+          "text": "Jailbreak"
+        },
+        {
+          "line": 61,
+          "text": "VPN"
+        },
+        {
+          "line": 62,
+          "text": "Proxy"
+        },
+        {
+          "line": 63,
+          "text": "Debug"
+        },
+        {
+          "line": 64,
+          "text": "Frida"
+        },
+        {
+          "line": 65,
+          "text": "Xposed"
+        },
+        {
+          "line": 66,
+          "text": "SSL Pinning"
+        },
+        {
+          "line": 67,
+          "text": "Screenshot"
+        },
+        {
+          "line": 68,
+          "text": "Recording"
+        },
+        {
+          "line": 69,
+          "text": "Integrity"
+        },
+        {
+          "line": 196,
+          "text": "Security Events Report"
+        },
+        {
+          "line": 233,
+          "text": "Security Dashboard"
+        },
+        {
+          "line": 265,
+          "text": "Export"
+        },
+        {
+          "line": 282,
+          "text": "Total Events"
+        },
+        {
+          "line": 283,
+          "text": "Root / Jailbreak"
+        },
+        {
+          "line": 284,
+          "text": "VPN Detections"
+        },
+        {
+          "line": 285,
+          "text": "Proxy Attempts"
+        },
+        {
+          "line": 286,
+          "text": "SSL Failures"
+        },
+        {
+          "line": 287,
+          "text": "Screenshots"
+        },
+        {
+          "line": 288,
+          "text": "Recordings"
+        },
+        {
+          "line": 289,
+          "text": "Debug / Frida"
+        },
+        {
+          "line": 290,
+          "text": "Integrity Issues"
+        },
+        {
+          "line": 303,
+          "text": "No risky devices detected"
+        }
+      ]
+    },
+    {
+      "file": "src/app/(app)/(hubs)/video-settings.tsx",
+      "count": 24,
+      "hits": [
+        {
+          "line": 81,
+          "text": "Online"
+        },
+        {
+          "line": 83,
+          "text": "Unavailable"
+        },
+        {
+          "line": 84,
+          "text": "Unknown"
+        },
+        {
+          "line": 90,
+          "text": "Video Settings"
+        },
+        {
+          "line": 112,
+          "text": "Unable to load VdoCipher status"
+        },
+        {
+          "line": 117,
+          "text": "Retry"
+        },
+        {
+          "line": 131,
+          "text": "VdoCipher API"
+        },
+        {
+          "line": 132,
+          "text": "Live connection status"
+        },
+        {
+          "line": 140,
+          "text": "Listing request"
+        },
+        {
+          "line": 141,
+          "text": "Last successful check"
+        },
+        {
+          "line": 142,
+          "text": "Reason"
+        },
+        {
+          "line": 148,
+          "text": "Video Library"
+        },
+        {
+          "line": 154,
+          "text": "videos in the VdoCipher library"
+        },
+        {
+          "line": 156,
+          "text": "Count source"
+        },
+        {
+          "line": 157,
+          "text": "Pages fetched"
+        },
+        {
+          "line": 158,
+          "text": "Deleted VdoCipher assets"
+        },
+        {
+          "line": 172,
+          "text": "Storage / Usage"
+        },
+        {
+          "line": 175,
+          "text": "Total size of videos returned by VdoCipher"
+        },
+        {
+          "line": 179,
+          "text": "Account storage usage"
+        },
+        {
+          "line": 193,
+          "text": "Webhook"
+        },
+        {
+          "line": 201,
+          "text": "Method"
+        },
+        {
+          "line": 202,
+          "text": "Signature verification"
+        },
+        {
+          "line": 203,
+          "text": "Webhook secret configured on server"
+        },
+        {
+          "line": 207,
+          "text": "Unknown events"
+        }
+      ]
+    },
+    {
+      "file": "src/components/DeviceManagerSheet.tsx",
+      "count": 24,
+      "hits": [
+        {
+          "line": 115,
+          "text": "Promise"
+        },
+        {
+          "line": 126,
+          "text": "Promise"
+        },
+        {
+          "line": 137,
+          "text": "Enter a valid number ≥ 1."
+        },
+        {
+          "line": 140,
+          "text": "setDeviceLimit(userId, val) as Promise"
+        },
+        {
+          "line": 148,
+          "text": "setDeviceLimit(userId, newVal ? null : (maxDevices ?? 1)) as Promise"
+        },
+        {
+          "line": 176,
+          "text": "Total"
+        },
+        {
+          "line": 177,
+          "text": "Online"
+        },
+        {
+          "line": 178,
+          "text": "Offline"
+        },
+        {
+          "line": 179,
+          "text": "Blocked"
+        },
+        {
+          "line": 205,
+          "text": "Set Limit"
+        },
+        {
+          "line": 215,
+          "text": "Max devices"
+        },
+        {
+          "line": 221,
+          "text": "Apply"
+        },
+        {
+          "line": 227,
+          "text": "Reset All Devices"
+        },
+        {
+          "line": 229,
+          "text": "resetUserDevice(userId) as Promise"
+        },
+        {
+          "line": 240,
+          "text": "No registered devices"
+        },
+        {
+          "line": 276,
+          "text": "BLOCKED"
+        },
+        {
+          "line": 287,
+          "text": "Logout"
+        },
+        {
+          "line": 289,
+          "text": "forceLogoutDevice(device.id) as Promise"
+        },
+        {
+          "line": 294,
+          "text": "Unblock"
+        },
+        {
+          "line": 296,
+          "text": "unblockDevice(device.id) as Promise"
+        },
+        {
+          "line": 300,
+          "text": "Block"
+        },
+        {
+          "line": 302,
+          "text": "blockDevice(device.id) as Promise"
+        },
+        {
+          "line": 307,
+          "text": "Delete"
+        },
+        {
+          "line": 309,
+          "text": "deleteDevice(device.id) as Promise"
+        }
+      ]
+    },
+    {
+      "file": "src/app/(app)/(admin)/admin-overview.tsx",
+      "count": 22,
+      "hits": [
+        {
+          "line": 56,
+          "text": "Users"
+        },
+        {
+          "line": 57,
+          "text": "Devices"
+        },
+        {
+          "line": 58,
+          "text": "Search"
+        },
+        {
+          "line": 59,
+          "text": "Notify"
+        },
+        {
+          "line": 60,
+          "text": "System Diagnostics"
+        },
+        {
+          "line": 61,
+          "text": "CMS Pages"
+        },
+        {
+          "line": 62,
+          "text": "Storage"
+        },
+        {
+          "line": 63,
+          "text": "Audit Logs"
+        },
+        {
+          "line": 64,
+          "text": "Reports"
+        },
+        {
+          "line": 65,
+          "text": "Academic"
+        },
+        {
+          "line": 66,
+          "text": "Archived"
+        },
+        {
+          "line": 67,
+          "text": "Enrollment Stats"
+        },
+        {
+          "line": 81,
+          "text": "Notifications"
+        },
+        {
+          "line": 96,
+          "text": "Platform Overview"
+        },
+        {
+          "line": 98,
+          "text": "Students"
+        },
+        {
+          "line": 99,
+          "text": "Doctors"
+        },
+        {
+          "line": 100,
+          "text": "Devices"
+        },
+        {
+          "line": 101,
+          "text": "Credits"
+        },
+        {
+          "line": 102,
+          "text": "Consumed"
+        },
+        {
+          "line": 103,
+          "text": "Courses"
+        },
+        {
+          "line": 104,
+          "text": "Published"
+        },
+        {
+          "line": 110,
+          "text": "Quick Actions"
+        }
+      ]
+    },
+    {
+      "file": "src/app/(app)/(hubs)/sec-diag.tsx",
+      "count": 22,
+      "hits": [
+        {
+          "line": 34,
+          "text": "VPN Active"
+        },
+        {
+          "line": 35,
+          "text": "Root Detected"
+        },
+        {
+          "line": 36,
+          "text": "Emulator Detected"
+        },
+        {
+          "line": 37,
+          "text": "Developer Options"
+        },
+        {
+          "line": 38,
+          "text": "USB Debugging (ADB)"
+        },
+        {
+          "line": 39,
+          "text": "Debugger Attached"
+        },
+        {
+          "line": 40,
+          "text": "Screen Recording"
+        },
+        {
+          "line": 41,
+          "text": "Frida Detected"
+        },
+        {
+          "line": 42,
+          "text": "Xposed / LSPosed"
+        },
+        {
+          "line": 43,
+          "text": "Magisk / Zygisk"
+        },
+        {
+          "line": 44,
+          "text": "Overlay Attack"
+        },
+        {
+          "line": 45,
+          "text": "App Tampered"
+        },
+        {
+          "line": 46,
+          "text": "Signature Valid"
+        },
+        {
+          "line": 128,
+          "text": "Suspended"
+        },
+        {
+          "line": 129,
+          "text": "Multi-Device"
+        },
+        {
+          "line": 147,
+          "text": "Security Diagnostics"
+        },
+        {
+          "line": 161,
+          "text": "Security Alerts"
+        },
+        {
+          "line": 178,
+          "text": "Native Threats"
+        },
+        {
+          "line": 185,
+          "text": "Live Device Checks"
+        },
+        {
+          "line": 195,
+          "text": "Run Checks"
+        },
+        {
+          "line": 209,
+          "text": "Running native checks…"
+        },
+        {
+          "line": 310,
+          "text": "No security events"
+        }
+      ]
+    },
+    {
+      "file": "src/app/(app)/my-devices.tsx",
+      "count": 22,
+      "hits": [
+        {
+          "line": 135,
+          "text": "My Devices"
+        },
+        {
+          "line": 175,
+          "text": "Allowed"
+        },
+        {
+          "line": 176,
+          "text": "Active"
+        },
+        {
+          "line": 177,
+          "text": "Online"
+        },
+        {
+          "line": 178,
+          "text": "Registered"
+        },
+        {
+          "line": 191,
+          "text": "Allowed"
+        },
+        {
+          "line": 192,
+          "text": "Active"
+        },
+        {
+          "line": 193,
+          "text": "Registered"
+        },
+        {
+          "line": 219,
+          "text": "No devices registered"
+        },
+        {
+          "line": 246,
+          "text": "THIS DEVICE"
+        },
+        {
+          "line": 247,
+          "text": "BLOCKED"
+        },
+        {
+          "line": 248,
+          "text": "LOGGED OUT"
+        },
+        {
+          "line": 321,
+          "text": "View Login History"
+        },
+        {
+          "line": 331,
+          "text": "Rename Device"
+        },
+        {
+          "line": 334,
+          "text": "Cancel"
+        },
+        {
+          "line": 335,
+          "text": "Save"
+        },
+        {
+          "line": 342,
+          "text": "Device name…"
+        },
+        {
+          "line": 353,
+          "text": "Logout This Device"
+        },
+        {
+          "line": 356,
+          "text": "Cancel"
+        },
+        {
+          "line": 357,
+          "text": "Logout"
+        },
+        {
+          "line": 372,
+          "text": "Device Details"
+        },
+        {
+          "line": 373,
+          "text": "Close"
+        }
+      ]
+    },
+    {
+      "file": "src/components/ActionMenu.tsx",
+      "count": 21,
+      "hits": [
+        {
+          "line": 67,
+          "text": "Edit Profile"
+        },
+        {
+          "line": 68,
+          "text": "Unblock"
+        },
+        {
+          "line": 69,
+          "text": "Block"
+        },
+        {
+          "line": 72,
+          "text": "Unsuspend"
+        },
+        {
+          "line": 73,
+          "text": "Suspend"
+        },
+        {
+          "line": 74,
+          "text": "Reset Password (Email)"
+        },
+        {
+          "line": 75,
+          "text": "Change Password"
+        },
+        {
+          "line": 76,
+          "text": "Promote → Doctor"
+        },
+        {
+          "line": 77,
+          "text": "Promote → Admin"
+        },
+        {
+          "line": 78,
+          "text": "Demote → Doctor"
+        },
+        {
+          "line": 79,
+          "text": "Demote → Student"
+        },
+        {
+          "line": 80,
+          "text": "Enable Unlimited Devices"
+        },
+        {
+          "line": 81,
+          "text": "Disable Unlimited Devices"
+        },
+        {
+          "line": 82,
+          "text": "Manage Devices"
+        },
+        {
+          "line": 83,
+          "text": "Credits"
+        },
+        {
+          "line": 84,
+          "text": "Activity Timeline"
+        },
+        {
+          "line": 85,
+          "text": "Credit Selling Price"
+        },
+        {
+          "line": 86,
+          "text": "Earnings Dashboard"
+        },
+        {
+          "line": 87,
+          "text": "Audit Logs"
+        },
+        {
+          "line": 88,
+          "text": "Login History"
+        },
+        {
+          "line": 89,
+          "text": "Delete Account"
+        }
+      ]
+    },
+    {
+      "file": "src/app/(app)/(hubs)/bulk-import-students.tsx",
+      "count": 20,
+      "hits": [
+        {
+          "line": 88,
+          "text": "Failed to read file. Please try again."
+        },
+        {
+          "line": 94,
+          "text": "CSV must have a header row and at least one data row."
+        },
+        {
+          "line": 115,
+          "text": "No data rows found in CSV."
+        },
+        {
+          "line": 186,
+          "text": "Bulk Import Report"
+        },
+        {
+          "line": 201,
+          "text": "Bulk Import Students"
+        },
+        {
+          "line": 209,
+          "text": "CSV File Format"
+        },
+        {
+          "line": 212,
+          "text": "name, email, phone, university, faculty, academic_level, course, enrollment_method"
+        },
+        {
+          "line": 220,
+          "text": "Default Temporary Password"
+        },
+        {
+          "line": 225,
+          "text": "e.g. Temp@1234"
+        },
+        {
+          "line": 241,
+          "text": "Choose CSV File"
+        },
+        {
+          "line": 252,
+          "text": "Change File"
+        },
+        {
+          "line": 279,
+          "text": "Importing…"
+        },
+        {
+          "line": 281,
+          "text": "Please wait — do not close this screen."
+        },
+        {
+          "line": 291,
+          "text": "Total"
+        },
+        {
+          "line": 292,
+          "text": "Created"
+        },
+        {
+          "line": 293,
+          "text": "Failed"
+        },
+        {
+          "line": 294,
+          "text": "Credits"
+        },
+        {
+          "line": 305,
+          "text": "Details"
+        },
+        {
+          "line": 323,
+          "text": "Download Report"
+        },
+        {
+          "line": 325,
+          "text": "Done"
+        }
+      ]
+    },
+    {
+      "file": "src/app/(app)/(hubs)/notifications-center.tsx",
+      "count": 20,
+      "hits": [
+        {
+          "line": 19,
+          "text": "Everyone"
+        },
+        {
+          "line": 20,
+          "text": "By Role"
+        },
+        {
+          "line": 21,
+          "text": "By University"
+        },
+        {
+          "line": 22,
+          "text": "By Faculty"
+        },
+        {
+          "line": 23,
+          "text": "By Level"
+        },
+        {
+          "line": 24,
+          "text": "By Course"
+        },
+        {
+          "line": 25,
+          "text": "Individual"
+        },
+        {
+          "line": 61,
+          "text": "Title and message are required."
+        },
+        {
+          "line": 74,
+          "text": "Failed to send notification."
+        },
+        {
+          "line": 84,
+          "text": "Notification Center"
+        },
+        {
+          "line": 95,
+          "text": "Compose Notification"
+        },
+        {
+          "line": 98,
+          "text": "Target"
+        },
+        {
+          "line": 143,
+          "text": "User ID"
+        },
+        {
+          "line": 144,
+          "text": "Paste user UUID..."
+        },
+        {
+          "line": 149,
+          "text": "Title"
+        },
+        {
+          "line": 150,
+          "text": "Notification title..."
+        },
+        {
+          "line": 153,
+          "text": "Message"
+        },
+        {
+          "line": 155,
+          "text": "Notification body..."
+        },
+        {
+          "line": 162,
+          "text": "Send Notification"
+        },
+        {
+          "line": 168,
+          "text": "Recently Sent"
+        }
+      ]
+    },
+    {
+      "file": "src/app/(app)/(hubs)/revenue.tsx",
+      "count": 20,
+      "hits": [
+        {
+          "line": 90,
+          "text": "Pricing settings saved."
+        },
+        {
+          "line": 103,
+          "text": "Platform earnings counter has been reset."
+        },
+        {
+          "line": 130,
+          "text": "Revenue Dashboard"
+        },
+        {
+          "line": 134,
+          "text": "Pricing"
+        },
+        {
+          "line": 144,
+          "text": "Total Revenue"
+        },
+        {
+          "line": 148,
+          "text": "All time"
+        },
+        {
+          "line": 154,
+          "text": "Monthly"
+        },
+        {
+          "line": 158,
+          "text": "Yearly"
+        },
+        {
+          "line": 164,
+          "text": "Pricing Configuration"
+        },
+        {
+          "line": 166,
+          "text": "Credit Price"
+        },
+        {
+          "line": 181,
+          "text": "Revenue Formula"
+        },
+        {
+          "line": 217,
+          "text": "Total All-Time Earnings"
+        },
+        {
+          "line": 230,
+          "text": "Last Reset"
+        },
+        {
+          "line": 241,
+          "text": "Never reset"
+        },
+        {
+          "line": 248,
+          "text": "Reset Earnings"
+        },
+        {
+          "line": 265,
+          "text": "Update Pricing"
+        },
+        {
+          "line": 268,
+          "text": "Cancel"
+        },
+        {
+          "line": 269,
+          "text": "Save"
+        },
+        {
+          "line": 285,
+          "text": "Reset Platform Earnings?"
+        },
+        {
+          "line": 293,
+          "text": "Cancel"
+        }
+      ]
+    },
+    {
+      "file": "src/app/(app)/(superadmin)/sa-analytics.tsx",
+      "count": 20,
+      "hits": [
+        {
+          "line": 69,
+          "text": "System Health"
+        },
+        {
+          "line": 71,
+          "text": "System Health"
+        },
+        {
+          "line": 72,
+          "text": "Storage Monitor"
+        },
+        {
+          "line": 73,
+          "text": "Video Settings"
+        },
+        {
+          "line": 77,
+          "text": "Financial Analytics"
+        },
+        {
+          "line": 79,
+          "text": "Revenue Analytics"
+        },
+        {
+          "line": 80,
+          "text": "Credits"
+        },
+        {
+          "line": 81,
+          "text": "Fraud Alerts"
+        },
+        {
+          "line": 85,
+          "text": "Operations"
+        },
+        {
+          "line": 89,
+          "text": "Enrollment Statistics"
+        },
+        {
+          "line": 100,
+          "text": "Analytics"
+        },
+        {
+          "line": 113,
+          "text": "Students"
+        },
+        {
+          "line": 114,
+          "text": "Doctors"
+        },
+        {
+          "line": 115,
+          "text": "Courses"
+        },
+        {
+          "line": 116,
+          "text": "Published"
+        },
+        {
+          "line": 117,
+          "text": "Total Credits"
+        },
+        {
+          "line": 122,
+          "text": "Courses Breakdown"
+        },
+        {
+          "line": 125,
+          "text": "Total"
+        },
+        {
+          "line": 126,
+          "text": "Published"
+        },
+        {
+          "line": 127,
+          "text": "Drafts"
+        }
+      ]
+    },
+    {
+      "file": "src/app/(app)/(hubs)/bulk-credits.tsx",
+      "count": 19,
+      "hits": [
+        {
+          "line": 71,
+          "text": "Select at least one doctor"
+        },
+        {
+          "line": 78,
+          "text": "Enter a valid amount"
+        },
+        {
+          "line": 79,
+          "text": "Reason is required for credit removal"
+        },
+        {
+          "line": 132,
+          "text": "Bulk Credits"
+        },
+        {
+          "line": 139,
+          "text": "Search doctors..."
+        },
+        {
+          "line": 158,
+          "text": "Select All"
+        },
+        {
+          "line": 164,
+          "text": "Add Credits"
+        },
+        {
+          "line": 170,
+          "text": "Remove"
+        },
+        {
+          "line": 204,
+          "text": "No doctors found"
+        },
+        {
+          "line": 217,
+          "text": "Amount *"
+        },
+        {
+          "line": 222,
+          "text": "Reason *"
+        },
+        {
+          "line": 223,
+          "text": "Required for removal..."
+        },
+        {
+          "line": 227,
+          "text": "Notes (optional)"
+        },
+        {
+          "line": 228,
+          "text": "Internal notes..."
+        },
+        {
+          "line": 236,
+          "text": "Cancel"
+        },
+        {
+          "line": 240,
+          "text": "Bulk Operation Results"
+        },
+        {
+          "line": 244,
+          "text": "Succeeded"
+        },
+        {
+          "line": 248,
+          "text": "Failed"
+        },
+        {
+          "line": 268,
+          "text": "Done"
+        }
+      ]
+    },
+    {
+      "file": "src/app/(app)/(hubs)/bulk-import.tsx",
+      "count": 19,
+      "hits": [
+        {
+          "line": 39,
+          "text": "Students"
+        },
+        {
+          "line": 40,
+          "text": "Doctors"
+        },
+        {
+          "line": 41,
+          "text": "Admins"
+        },
+        {
+          "line": 103,
+          "text": "Paste CSV data first."
+        },
+        {
+          "line": 106,
+          "text": "CSV must have a header + at least one row."
+        },
+        {
+          "line": 126,
+          "text": "Failed to parse CSV. Check format."
+        },
+        {
+          "line": 141,
+          "text": "File loaded. Tap"
+        },
+        {
+          "line": 143,
+          "text": "Could not read file."
+        },
+        {
+          "line": 148,
+          "text": "No rows to import."
+        },
+        {
+          "line": 209,
+          "text": "Bulk Import"
+        },
+        {
+          "line": 237,
+          "text": "CSV Template"
+        },
+        {
+          "line": 243,
+          "text": "Template loaded into editor."
+        },
+        {
+          "line": 245,
+          "text": "Load Template"
+        },
+        {
+          "line": 263,
+          "text": "Pick File"
+        },
+        {
+          "line": 264,
+          "text": "Parse & Preview"
+        },
+        {
+          "line": 317,
+          "text": "Import Report"
+        },
+        {
+          "line": 324,
+          "text": "Created"
+        },
+        {
+          "line": 325,
+          "text": "Skipped"
+        },
+        {
+          "line": 326,
+          "text": "Failed"
+        }
+      ]
+    },
+    {
+      "file": "src/app/(app)/(hubs)/sec-policies.tsx",
+      "count": 19,
+      "hits": [
+        {
+          "line": 67,
+          "text": "Root / Jailbreak"
+        },
+        {
+          "line": 68,
+          "text": "VPN"
+        },
+        {
+          "line": 69,
+          "text": "Proxy"
+        },
+        {
+          "line": 70,
+          "text": "SSL Pinning"
+        },
+        {
+          "line": 71,
+          "text": "Debug / Frida"
+        },
+        {
+          "line": 72,
+          "text": "Screenshot"
+        },
+        {
+          "line": 73,
+          "text": "Screen Recording"
+        },
+        {
+          "line": 74,
+          "text": "App Integrity"
+        },
+        {
+          "line": 78,
+          "text": "Log Only"
+        },
+        {
+          "line": 79,
+          "text": "Warn"
+        },
+        {
+          "line": 80,
+          "text": "Block Video"
+        },
+        {
+          "line": 81,
+          "text": "Block Login"
+        },
+        {
+          "line": 136,
+          "text": "Security policies saved."
+        },
+        {
+          "line": 155,
+          "text": "VPN added to whitelist."
+        },
+        {
+          "line": 171,
+          "text": "VPN removed from whitelist."
+        },
+        {
+          "line": 187,
+          "text": "Security Policies"
+        },
+        {
+          "line": 284,
+          "text": "VPN Whitelist"
+        },
+        {
+          "line": 296,
+          "text": "VPN name (e.g. Corporate VPN)"
+        },
+        {
+          "line": 317,
+          "text": "No whitelisted VPNs"
+        }
+      ]
+    },
+    {
+      "file": "src/app/(app)/(doctor)/dr-overview.tsx",
+      "count": 18,
+      "hits": [
+        {
+          "line": 111,
+          "text": "Notifications"
+        },
+        {
+          "line": 123,
+          "text": "Total Students"
+        },
+        {
+          "line": 124,
+          "text": "Active"
+        },
+        {
+          "line": 125,
+          "text": "Suspended"
+        },
+        {
+          "line": 126,
+          "text": "My Courses"
+        },
+        {
+          "line": 127,
+          "text": "Credits"
+        },
+        {
+          "line": 128,
+          "text": "Today"
+        },
+        {
+          "line": 129,
+          "text": "Published"
+        },
+        {
+          "line": 133,
+          "text": "Quick Actions"
+        },
+        {
+          "line": 136,
+          "text": "My Courses"
+        },
+        {
+          "line": 137,
+          "text": "Students"
+        },
+        {
+          "line": 138,
+          "text": "Archived"
+        },
+        {
+          "line": 139,
+          "text": "Alerts"
+        },
+        {
+          "line": 157,
+          "text": "Recent Enrollments"
+        },
+        {
+          "line": 159,
+          "text": "See All"
+        },
+        {
+          "line": 181,
+          "text": "Recent Courses"
+        },
+        {
+          "line": 183,
+          "text": "See All"
+        },
+        {
+          "line": 211,
+          "text": "No courses yet. Create your first course!"
+        }
+      ]
+    },
+    {
+      "file": "src/app/(app)/(hubs)/app-updates.tsx",
+      "count": 18,
+      "hits": [
+        {
+          "line": 130,
+          "text": "Failed to load releases"
+        },
+        {
+          "line": 233,
+          "text": "Failed to save the release."
+        },
+        {
+          "line": 245,
+          "text": "Publish to production?"
+        },
+        {
+          "line": 255,
+          "text": "Publish failed."
+        },
+        {
+          "line": 266,
+          "text": "Roll back production?"
+        },
+        {
+          "line": 276,
+          "text": "Rollback failed."
+        },
+        {
+          "line": 287,
+          "text": "Archive release?"
+        },
+        {
+          "line": 298,
+          "text": "Archive failed."
+        },
+        {
+          "line": 348,
+          "text": "Failed to save the policy."
+        },
+        {
+          "line": 408,
+          "text": "App Updates"
+        },
+        {
+          "line": 496,
+          "text": "MIN SUPPORTED CODE"
+        },
+        {
+          "line": 507,
+          "text": "LATEST CODE"
+        },
+        {
+          "line": 518,
+          "text": "MODE"
+        },
+        {
+          "line": 538,
+          "text": "UPDATE URL"
+        },
+        {
+          "line": 595,
+          "text": "VERSION"
+        },
+        {
+          "line": 638,
+          "text": "RELEASE NOTES (OPTIONAL)"
+        },
+        {
+          "line": 643,
+          "text": "What"
+        },
+        {
+          "line": 663,
+          "text": "Cancel editing this release"
+        }
+      ]
+    },
+    {
+      "file": "src/components/CreateUserModal.tsx",
+      "count": 18,
+      "hits": [
+        {
+          "line": 40,
+          "text": "Student"
+        },
+        {
+          "line": 47,
+          "text": "Doctor"
+        },
+        {
+          "line": 54,
+          "text": "Admin"
+        },
+        {
+          "line": 100,
+          "text": "Weak"
+        },
+        {
+          "line": 101,
+          "text": "Fair"
+        },
+        {
+          "line": 102,
+          "text": "Good"
+        },
+        {
+          "line": 103,
+          "text": "Strong"
+        },
+        {
+          "line": 339,
+          "text": "Continue"
+        },
+        {
+          "line": 359,
+          "text": "Change Role"
+        },
+        {
+          "line": 380,
+          "text": "Full Name *"
+        },
+        {
+          "line": 389,
+          "text": "Email Address *"
+        },
+        {
+          "line": 398,
+          "text": "Phone Number (optional)"
+        },
+        {
+          "line": 409,
+          "text": "Password *"
+        },
+        {
+          "line": 438,
+          "text": "Confirm Password *"
+        },
+        {
+          "line": 521,
+          "text": "Initial Credits (optional)"
+        },
+        {
+          "line": 537,
+          "text": "Unlimited Devices"
+        },
+        {
+          "line": 538,
+          "text": "Allow login from any number of devices"
+        },
+        {
+          "line": 562,
+          "text": "Account created successfully!"
+        }
+      ]
+    },
+    {
+      "file": "src/app/(app)/(hubs)/content-protection.tsx",
+      "count": 16,
+      "hits": [
+        {
+          "line": 155,
+          "text": "Content Protection"
+        },
+        {
+          "line": 163,
+          "text": "Detection Policies"
+        },
+        {
+          "line": 167,
+          "text": "Screenshot Policy"
+        },
+        {
+          "line": 175,
+          "text": "Screen Recording Policy"
+        },
+        {
+          "line": 186,
+          "text": "Strike System"
+        },
+        {
+          "line": 202,
+          "text": "Violation Limit"
+        },
+        {
+          "line": 217,
+          "text": "Auto Actions"
+        },
+        {
+          "line": 222,
+          "text": "Auto Logout"
+        },
+        {
+          "line": 223,
+          "text": "Terminate session on violation"
+        },
+        {
+          "line": 234,
+          "text": "Auto Suspend"
+        },
+        {
+          "line": 235,
+          "text": "Suspend account on severe violation"
+        },
+        {
+          "line": 246,
+          "text": "Suspension Duration (hours)"
+        },
+        {
+          "line": 262,
+          "text": "Warning Message"
+        },
+        {
+          "line": 284,
+          "text": "Policy saved successfully."
+        },
+        {
+          "line": 295,
+          "text": "Reset"
+        },
+        {
+          "line": 299,
+          "text": "Save Policy"
+        }
+      ]
+    },
+    {
+      "file": "src/app/(app)/course/[id].tsx",
+      "count": 16,
+      "hits": [
+        {
+          "line": 62,
+          "text": "id ? (_sectionStateCache.get(id) ?? new Set"
+        },
+        {
+          "line": 184,
+          "text": "Course not found"
+        },
+        {
+          "line": 210,
+          "text": "Go back"
+        },
+        {
+          "line": 225,
+          "text": "Course Archived"
+        },
+        {
+          "line": 240,
+          "text": "Preview as Student"
+        },
+        {
+          "line": 246,
+          "text": "Exit student preview"
+        },
+        {
+          "line": 338,
+          "text": "Total"
+        },
+        {
+          "line": 339,
+          "text": "Completed"
+        },
+        {
+          "line": 340,
+          "text": "Remaining"
+        },
+        {
+          "line": 367,
+          "text": "About This Course"
+        },
+        {
+          "line": 376,
+          "text": "Certificate on completion"
+        },
+        {
+          "line": 377,
+          "text": "Free preview available"
+        },
+        {
+          "line": 378,
+          "text": "Sequential learning path"
+        },
+        {
+          "line": 382,
+          "text": "Course Content"
+        },
+        {
+          "line": 514,
+          "text": "Free Preview"
+        },
+        {
+          "line": 544,
+          "text": "Subscribe"
+        }
+      ]
+    },
+    {
+      "file": "src/app/(app)/(hubs)/cms.tsx",
+      "count": 15,
+      "hits": [
+        {
+          "line": 186,
+          "text": "WhatsApp"
+        },
+        {
+          "line": 230,
+          "text": "Website"
+        },
+        {
+          "line": 231,
+          "text": "Add contact link"
+        },
+        {
+          "line": 240,
+          "text": "Add Link"
+        },
+        {
+          "line": 250,
+          "text": "Save Contact Links"
+        },
+        {
+          "line": 338,
+          "text": "Built-in text restored."
+        },
+        {
+          "line": 350,
+          "text": "Contact links saved."
+        },
+        {
+          "line": 363,
+          "text": "CMS Pages"
+        },
+        {
+          "line": 373,
+          "text": "Loading CMS pages…"
+        },
+        {
+          "line": 379,
+          "text": "No CMS pages"
+        },
+        {
+          "line": 381,
+          "text": "Refresh"
+        },
+        {
+          "line": 407,
+          "text": "BUILT-IN TEXT"
+        },
+        {
+          "line": 423,
+          "text": "Page Title"
+        },
+        {
+          "line": 429,
+          "text": "Content"
+        },
+        {
+          "line": 446,
+          "text": "Save Changes"
+        }
+      ]
+    },
+    {
+      "file": "src/app/(app)/(hubs)/health.tsx",
+      "count": 15,
+      "hits": [
+        {
+          "line": 122,
+          "text": "No orphans found — everything is clean."
+        },
+        {
+          "line": 209,
+          "text": "Total Deletions"
+        },
+        {
+          "line": 210,
+          "text": "Successful"
+        },
+        {
+          "line": 211,
+          "text": "Failed"
+        },
+        {
+          "line": 212,
+          "text": "Pending"
+        },
+        {
+          "line": 228,
+          "text": "Orphan Files"
+        },
+        {
+          "line": 229,
+          "text": "Orphan Videos"
+        },
+        {
+          "line": 230,
+          "text": "Orphan Devices"
+        },
+        {
+          "line": 255,
+          "text": "Repair"
+        },
+        {
+          "line": 333,
+          "text": "No deletion records yet"
+        },
+        {
+          "line": 345,
+          "text": "Total Users"
+        },
+        {
+          "line": 346,
+          "text": "Active Courses"
+        },
+        {
+          "line": 347,
+          "text": "Students"
+        },
+        {
+          "line": 348,
+          "text": "Doctors"
+        },
+        {
+          "line": 359,
+          "text": "Refresh Health Check"
+        }
+      ]
+    },
+    {
+      "file": "src/app/(app)/(hubs)/storage.tsx",
+      "count": 15,
+      "hits": [
+        {
+          "line": 110,
+          "text": "Storage Monitor"
+        },
+        {
+          "line": 125,
+          "text": "Unable to load storage statistics"
+        },
+        {
+          "line": 130,
+          "text": "Retry"
+        },
+        {
+          "line": 136,
+          "text": "Hosting Storage"
+        },
+        {
+          "line": 141,
+          "text": "Total Space"
+        },
+        {
+          "line": 142,
+          "text": "Used"
+        },
+        {
+          "line": 143,
+          "text": "Free"
+        },
+        {
+          "line": 160,
+          "text": "Application Uploads"
+        },
+        {
+          "line": 167,
+          "text": "Total Uploaded Files"
+        },
+        {
+          "line": 181,
+          "text": "Images"
+        },
+        {
+          "line": 198,
+          "text": "Other Files"
+        },
+        {
+          "line": 218,
+          "text": "Database"
+        },
+        {
+          "line": 223,
+          "text": "Database Size"
+        },
+        {
+          "line": 224,
+          "text": "Tables"
+        },
+        {
+          "line": 229,
+          "text": "Largest Tables"
+        }
+      ]
+    },
+    {
+      "file": "src/app/(app)/security-diagnostics.tsx",
+      "count": 15,
+      "hits": [
+        {
+          "line": 58,
+          "text": "Developer Options"
+        },
+        {
+          "line": 63,
+          "text": "USB Debugging (ADB)"
+        },
+        {
+          "line": 68,
+          "text": "Debugger Attached"
+        },
+        {
+          "line": 73,
+          "text": "Test-Only Build"
+        },
+        {
+          "line": 78,
+          "text": "Screen Recording"
+        },
+        {
+          "line": 83,
+          "text": "VPN Active"
+        },
+        {
+          "line": 88,
+          "text": "Root / Superuser"
+        },
+        {
+          "line": 93,
+          "text": "Emulator / AVD"
+        },
+        {
+          "line": 98,
+          "text": "Frida / Dynamic Instrumentation"
+        },
+        {
+          "line": 298,
+          "text": "Overlay Detection — active window enumeration"
+        },
+        {
+          "line": 302,
+          "text": "Root Detection — /proc/self/status TracerPid"
+        },
+        {
+          "line": 306,
+          "text": "Mock Location — removed, not merely unsupported"
+        },
+        {
+          "line": 310,
+          "text": "Screen Recording — MediaProjection session list"
+        },
+        {
+          "line": 314,
+          "text": "Emulator — sys.qemu.sf.lcd_density"
+        },
+        {
+          "line": 318,
+          "text": "Certificate Pinning / Play Integrity"
+        }
+      ]
+    },
+    {
+      "file": "src/app/(app)/(hubs)/credits.tsx",
+      "count": 14,
+      "hits": [
+        {
+          "line": 38,
+          "text": "Enter a redeem code."
+        },
+        {
+          "line": 82,
+          "text": "My Credits"
+        },
+        {
+          "line": 95,
+          "text": "Redeem Code"
+        },
+        {
+          "line": 96,
+          "text": "Add credits with a redeem code"
+        },
+        {
+          "line": 98,
+          "text": "Enter Code"
+        },
+        {
+          "line": 106,
+          "text": "Available Credits"
+        },
+        {
+          "line": 112,
+          "text": "Total Allocated"
+        },
+        {
+          "line": 117,
+          "text": "Used"
+        },
+        {
+          "line": 124,
+          "text": "Transaction History"
+        },
+        {
+          "line": 127,
+          "text": "No transactions yet"
+        },
+        {
+          "line": 171,
+          "text": "Redeem Code"
+        },
+        {
+          "line": 176,
+          "text": "Cancel"
+        },
+        {
+          "line": 177,
+          "text": "Redeem"
+        },
+        {
+          "line": 183,
+          "text": "MED-XXXX-XXXX-XXXX"
+        }
+      ]
+    },
+    {
+      "file": "src/app/(app)/(hubs)/sa-courses.tsx",
+      "count": 14,
+      "hits": [
+        {
+          "line": 33,
+          "text": "All"
+        },
+        {
+          "line": 34,
+          "text": "Published"
+        },
+        {
+          "line": 35,
+          "text": "Draft"
+        },
+        {
+          "line": 36,
+          "text": "Hidden"
+        },
+        {
+          "line": 37,
+          "text": "Archived"
+        },
+        {
+          "line": 146,
+          "text": "Unpublish"
+        },
+        {
+          "line": 158,
+          "text": "Publish"
+        },
+        {
+          "line": 262,
+          "text": "Cancel"
+        },
+        {
+          "line": 276,
+          "text": "Delete"
+        },
+        {
+          "line": 359,
+          "text": "Course published."
+        },
+        {
+          "line": 373,
+          "text": "Course unpublished."
+        },
+        {
+          "line": 402,
+          "text": "Course deleted."
+        },
+        {
+          "line": 435,
+          "text": "Courses"
+        },
+        {
+          "line": 451,
+          "text": "Search by title or instructor…"
+        }
+      ]
+    },
+    {
+      "file": "src/app/(app)/(superadmin)/sa-finance.tsx",
+      "count": 14,
+      "hits": [
+        {
+          "line": 93,
+          "text": "Finance"
+        },
+        {
+          "line": 107,
+          "text": "All Time"
+        },
+        {
+          "line": 108,
+          "text": "Monthly"
+        },
+        {
+          "line": 109,
+          "text": "Yearly"
+        },
+        {
+          "line": 121,
+          "text": "Platform Revenue"
+        },
+        {
+          "line": 122,
+          "text": "Revenue Dashboard"
+        },
+        {
+          "line": 123,
+          "text": "Revenue Analytics"
+        },
+        {
+          "line": 124,
+          "text": "Currency Settings"
+        },
+        {
+          "line": 127,
+          "text": "Credits"
+        },
+        {
+          "line": 128,
+          "text": "Credits"
+        },
+        {
+          "line": 129,
+          "text": "Bulk Credits"
+        },
+        {
+          "line": 132,
+          "text": "Operations"
+        },
+        {
+          "line": 133,
+          "text": "Fraud Alerts"
+        },
+        {
+          "line": 134,
+          "text": "Export Center"
+        }
+      ]
+    },
+    {
+      "file": "src/app/(app)/(hubs)/admin-credits.tsx",
+      "count": 13,
+      "hits": [
+        {
+          "line": 67,
+          "text": "Enter a valid positive amount."
+        },
+        {
+          "line": 113,
+          "text": "Credit Management"
+        },
+        {
+          "line": 120,
+          "text": "Search doctors..."
+        },
+        {
+          "line": 145,
+          "text": "Add Credits"
+        },
+        {
+          "line": 146,
+          "text": "History"
+        },
+        {
+          "line": 154,
+          "text": "No doctors found"
+        },
+        {
+          "line": 166,
+          "text": "Cancel"
+        },
+        {
+          "line": 167,
+          "text": "Refund"
+        },
+        {
+          "line": 168,
+          "text": "Add Credits"
+        },
+        {
+          "line": 172,
+          "text": "Amount"
+        },
+        {
+          "line": 178,
+          "text": "Notes (optional)"
+        },
+        {
+          "line": 181,
+          "text": "Reason for allocation..."
+        },
+        {
+          "line": 194,
+          "text": "No transactions found"
+        }
+      ]
+    },
+    {
+      "file": "src/app/(app)/(hubs)/revenue-analytics.tsx",
+      "count": 13,
+      "hits": [
+        {
+          "line": 138,
+          "text": "Revenue Analytics"
+        },
+        {
+          "line": 147,
+          "text": "REVENUE OVERVIEW"
+        },
+        {
+          "line": 149,
+          "text": "Lifetime Revenue"
+        },
+        {
+          "line": 150,
+          "text": "Revenue from Credits"
+        },
+        {
+          "line": 153,
+          "text": "Today"
+        },
+        {
+          "line": 156,
+          "text": "This Month"
+        },
+        {
+          "line": 157,
+          "text": "This Year"
+        },
+        {
+          "line": 196,
+          "text": "Top Doctors by Revenue"
+        },
+        {
+          "line": 214,
+          "text": "Most Active Admins"
+        },
+        {
+          "line": 229,
+          "text": "Top Courses by Revenue"
+        },
+        {
+          "line": 241,
+          "text": "PRICING REFERENCE"
+        },
+        {
+          "line": 243,
+          "text": "Per Credit"
+        },
+        {
+          "line": 250,
+          "text": "Edit Pricing in Platform Settings"
+        }
+      ]
+    },
+    {
+      "file": "src/app/(app)/(hubs)/sa-reports.tsx",
+      "count": 13,
+      "hits": [
+        {
+          "line": 72,
+          "text": "Reports & Logs"
+        },
+        {
+          "line": 77,
+          "text": "Reports & Exports"
+        },
+        {
+          "line": 78,
+          "text": "Reports"
+        },
+        {
+          "line": 79,
+          "text": "Export Center"
+        },
+        {
+          "line": 82,
+          "text": "Analytics"
+        },
+        {
+          "line": 83,
+          "text": "Platform Analytics"
+        },
+        {
+          "line": 84,
+          "text": "Credits"
+        },
+        {
+          "line": 85,
+          "text": "Revenue Analytics"
+        },
+        {
+          "line": 88,
+          "text": "Audit Logs"
+        },
+        {
+          "line": 89,
+          "text": "Audit Trail"
+        },
+        {
+          "line": 94,
+          "text": "Security Monitoring"
+        },
+        {
+          "line": 95,
+          "text": "Content Protection"
+        },
+        {
+          "line": 96,
+          "text": "Fraud Alerts"
+        }
+      ]
+    },
+    {
+      "file": "src/app/(app)/archived-courses/index.tsx",
+      "count": 13,
+      "hits": [
+        {
+          "line": 75,
+          "text": "Restore failed. Please try again."
+        },
+        {
+          "line": 89,
+          "text": "Delete failed. Please try again."
+        },
+        {
+          "line": 103,
+          "text": "Access denied"
+        },
+        {
+          "line": 115,
+          "text": "Archived Courses"
+        },
+        {
+          "line": 137,
+          "text": "Search archived courses…"
+        },
+        {
+          "line": 208,
+          "text": "Restore"
+        },
+        {
+          "line": 222,
+          "text": "Delete Forever"
+        },
+        {
+          "line": 240,
+          "text": "Restore Course"
+        },
+        {
+          "line": 249,
+          "text": "Cancel"
+        },
+        {
+          "line": 254,
+          "text": "Restore"
+        },
+        {
+          "line": 269,
+          "text": "Permanent Delete"
+        },
+        {
+          "line": 300,
+          "text": "Cancel"
+        },
+        {
+          "line": 305,
+          "text": "Delete Forever"
+        }
+      ]
+    },
+    {
+      "file": "src/app/(app)/(doctor)/courses.tsx",
+      "count": 12,
+      "hits": [
+        {
+          "line": 108,
+          "text": "Untitled Course"
+        },
+        {
+          "line": 119,
+          "text": "Course creation is currently disabled by your administrator."
+        },
+        {
+          "line": 204,
+          "text": "New"
+        },
+        {
+          "line": 215,
+          "text": "Course creation is unavailable"
+        },
+        {
+          "line": 226,
+          "text": "Search courses…"
+        },
+        {
+          "line": 267,
+          "text": "Create First Course"
+        },
+        {
+          "line": 317,
+          "text": "Archived"
+        },
+        {
+          "line": 380,
+          "text": "Edit Course"
+        },
+        {
+          "line": 425,
+          "text": "Edit Course"
+        },
+        {
+          "line": 433,
+          "text": "Preview as Student"
+        },
+        {
+          "line": 443,
+          "text": "Delete Course"
+        },
+        {
+          "line": 515,
+          "text": "Cancel"
+        }
+      ]
+    },
+    {
+      "file": "src/app/(app)/(hubs)/branding.tsx",
+      "count": 12,
+      "hits": [
+        {
+          "line": 91,
+          "text": "Branding"
+        },
+        {
+          "line": 106,
+          "text": "Loading branding…"
+        },
+        {
+          "line": 114,
+          "text": "App Identity"
+        },
+        {
+          "line": 140,
+          "text": "Contact Information"
+        },
+        {
+          "line": 154,
+          "text": "Social Links"
+        },
+        {
+          "line": 157,
+          "text": "Facebook URL"
+        },
+        {
+          "line": 158,
+          "text": "Instagram URL"
+        },
+        {
+          "line": 159,
+          "text": "YouTube URL"
+        },
+        {
+          "line": 160,
+          "text": "Telegram URL"
+        },
+        {
+          "line": 161,
+          "text": "WhatsApp URL"
+        },
+        {
+          "line": 162,
+          "text": "Website URL"
+        },
+        {
+          "line": 184,
+          "text": "Save Branding"
+        }
+      ]
+    },
+    {
+      "file": "src/app/(app)/(hubs)/currency.tsx",
+      "count": 12,
+      "hits": [
+        {
+          "line": 48,
+          "text": "Name, code, and symbol are required."
+        },
+        {
+          "line": 57,
+          "text": "Failed to save currency settings."
+        },
+        {
+          "line": 83,
+          "text": "Platform Currency"
+        },
+        {
+          "line": 98,
+          "text": "Live Preview"
+        },
+        {
+          "line": 106,
+          "text": "Currency Name"
+        },
+        {
+          "line": 110,
+          "text": "Egyptian Pound"
+        },
+        {
+          "line": 115,
+          "text": "Currency Code"
+        },
+        {
+          "line": 119,
+          "text": "EGP"
+        },
+        {
+          "line": 126,
+          "text": "Currency Symbol"
+        },
+        {
+          "line": 135,
+          "text": "Decimal Places"
+        },
+        {
+          "line": 160,
+          "text": "Symbol Position"
+        },
+        {
+          "line": 201,
+          "text": "How it works"
+        }
+      ]
+    },
+    {
+      "file": "src/app/(app)/(hubs)/export-panel.tsx",
+      "count": 12,
+      "hits": [
+        {
+          "line": 55,
+          "text": "Promise"
+        },
+        {
+          "line": 72,
+          "text": "Health Report"
+        },
+        {
+          "line": 95,
+          "text": "Credits Ledger"
+        },
+        {
+          "line": 115,
+          "text": "Audit Logs"
+        },
+        {
+          "line": 143,
+          "text": "Security Report"
+        },
+        {
+          "line": 167,
+          "text": "DB Audit Report"
+        },
+        {
+          "line": 205,
+          "text": "Users"
+        },
+        {
+          "line": 206,
+          "text": "Courses"
+        },
+        {
+          "line": 207,
+          "text": "Enrollments"
+        },
+        {
+          "line": 208,
+          "text": "Academic Structure"
+        },
+        {
+          "line": 257,
+          "text": "Export Center"
+        },
+        {
+          "line": 370,
+          "text": "JSON"
+        }
+      ]
+    },
+    {
+      "file": "src/app/(app)/(hubs)/maintenance.tsx",
+      "count": 12,
+      "hits": [
+        {
+          "line": 96,
+          "text": "User added to whitelist."
+        },
+        {
+          "line": 118,
+          "text": "Maintenance Mode"
+        },
+        {
+          "line": 127,
+          "text": "Loading maintenance settings…"
+        },
+        {
+          "line": 135,
+          "text": "Maintenance Mode"
+        },
+        {
+          "line": 168,
+          "text": "Message shown to non-whitelisted users..."
+        },
+        {
+          "line": 174,
+          "text": "Save Settings"
+        },
+        {
+          "line": 182,
+          "text": "Add User"
+        },
+        {
+          "line": 189,
+          "text": "No whitelisted users"
+        },
+        {
+          "line": 218,
+          "text": "Add to Whitelist"
+        },
+        {
+          "line": 221,
+          "text": "Cancel"
+        },
+        {
+          "line": 233,
+          "text": "Search by name, email or phone..."
+        },
+        {
+          "line": 239,
+          "text": "Search"
+        }
+      ]
+    },
+    {
+      "file": "src/app/(app)/(hubs)/sa-content.tsx",
+      "count": 12,
+      "hits": [
+        {
+          "line": 66,
+          "text": "Content & Media"
+        },
+        {
+          "line": 69,
+          "text": "Courses & Content"
+        },
+        {
+          "line": 70,
+          "text": "Courses"
+        },
+        {
+          "line": 71,
+          "text": "CMS Pages"
+        },
+        {
+          "line": 72,
+          "text": "Branding"
+        },
+        {
+          "line": 74,
+          "text": "Video Library & Delivery"
+        },
+        {
+          "line": 75,
+          "text": "Video Library"
+        },
+        {
+          "line": 76,
+          "text": "Video Providers"
+        },
+        {
+          "line": 77,
+          "text": "Video Settings"
+        },
+        {
+          "line": 79,
+          "text": "Health & Protection"
+        },
+        {
+          "line": 80,
+          "text": "Watermark / DRM"
+        },
+        {
+          "line": 81,
+          "text": "Storage"
+        }
+      ]
+    },
+    {
+      "file": "src/components/ChangePasswordModal.tsx",
+      "count": 12,
+      "hits": [
+        {
+          "line": 31,
+          "text": "Weak"
+        },
+        {
+          "line": 32,
+          "text": "Fair"
+        },
+        {
+          "line": 33,
+          "text": "Good"
+        },
+        {
+          "line": 34,
+          "text": "Strong"
+        },
+        {
+          "line": 102,
+          "text": "Failed to change password. Please try again."
+        },
+        {
+          "line": 125,
+          "text": "Change Password"
+        },
+        {
+          "line": 142,
+          "text": "New Password"
+        },
+        {
+          "line": 148,
+          "text": "Enter new password"
+        },
+        {
+          "line": 188,
+          "text": "Confirm Password"
+        },
+        {
+          "line": 197,
+          "text": "Confirm new password"
+        },
+        {
+          "line": 212,
+          "text": "Passwords do not match."
+        },
+        {
+          "line": 248,
+          "text": "Cancel"
+        }
+      ]
+    },
+    {
+      "file": "src/components/DeleteAccountModal.tsx",
+      "count": 12,
+      "hits": [
+        {
+          "line": 121,
+          "text": "Delete Account"
+        },
+        {
+          "line": 126,
+          "text": "Cancel"
+        },
+        {
+          "line": 133,
+          "text": "Delete Permanently"
+        },
+        {
+          "line": 183,
+          "text": "Full Name"
+        },
+        {
+          "line": 189,
+          "text": "Email"
+        },
+        {
+          "line": 196,
+          "text": "Phone"
+        },
+        {
+          "line": 203,
+          "text": "Active Courses"
+        },
+        {
+          "line": 211,
+          "text": "Credits Remaining"
+        },
+        {
+          "line": 217,
+          "text": "Registered Devices"
+        },
+        {
+          "line": 223,
+          "text": "Active Enrollments"
+        },
+        {
+          "line": 252,
+          "text": "Warning:"
+        },
+        {
+          "line": 254,
+          "text": "cannot be undone"
+        }
+      ]
+    },
+    {
+      "file": "src/app/(app)/(hubs)/reports.tsx",
+      "count": 11,
+      "hits": [
+        {
+          "line": 15,
+          "text": "User Report"
+        },
+        {
+          "line": 16,
+          "text": "Credit Transactions"
+        },
+        {
+          "line": 17,
+          "text": "Archive Analytics"
+        },
+        {
+          "line": 101,
+          "text": "Reports"
+        },
+        {
+          "line": 135,
+          "text": "Generate Report"
+        },
+        {
+          "line": 152,
+          "text": "Archived"
+        },
+        {
+          "line": 153,
+          "text": "Restored"
+        },
+        {
+          "line": 154,
+          "text": "Deleted"
+        },
+        {
+          "line": 194,
+          "text": "Export Archive CSV"
+        },
+        {
+          "line": 221,
+          "text": "Export CSV"
+        },
+        {
+          "line": 233,
+          "text": "No data found for this report"
+        }
+      ]
+    },
+    {
+      "file": "src/app/(app)/(hubs)/sa-support-settings.tsx",
+      "count": 11,
+      "hits": [
+        {
+          "line": 32,
+          "text": "Phone Support"
+        },
+        {
+          "line": 39,
+          "text": "WhatsApp Support"
+        },
+        {
+          "line": 46,
+          "text": "Telegram Support"
+        },
+        {
+          "line": 53,
+          "text": "Facebook Support"
+        },
+        {
+          "line": 60,
+          "text": "Instagram Support"
+        },
+        {
+          "line": 67,
+          "text": "Email Support"
+        },
+        {
+          "line": 74,
+          "text": "X / Twitter Support"
+        },
+        {
+          "line": 81,
+          "text": "Website Support"
+        },
+        {
+          "line": 225,
+          "text": "Saved!"
+        },
+        {
+          "line": 262,
+          "text": "Failed to load support settings. Please try again."
+        },
+        {
+          "line": 354,
+          "text": "Support Settings"
+        }
+      ]
+    },
+    {
+      "file": "src/app/(app)/(hubs)/violation-management.tsx",
+      "count": 11,
+      "hits": [
+        {
+          "line": 170,
+          "text": "SUSPENDED"
+        },
+        {
+          "line": 207,
+          "text": "Unsuspend"
+        },
+        {
+          "line": 217,
+          "text": "Reset"
+        },
+        {
+          "line": 228,
+          "text": "Restore All"
+        },
+        {
+          "line": 237,
+          "text": "Violations"
+        },
+        {
+          "line": 246,
+          "text": "Search by name or email…"
+        },
+        {
+          "line": 253,
+          "text": "All"
+        },
+        {
+          "line": 254,
+          "text": "Suspended"
+        },
+        {
+          "line": 255,
+          "text": "Screenshot"
+        },
+        {
+          "line": 256,
+          "text": "Recording"
+        },
+        {
+          "line": 273,
+          "text": "No violations found"
+        }
+      ]
+    },
+    {
+      "file": "src/components/VideoLibraryPicker.tsx",
+      "count": 11,
+      "hits": [
+        {
+          "line": 48,
+          "text": "All"
+        },
+        {
+          "line": 49,
+          "text": "Ready"
+        },
+        {
+          "line": 50,
+          "text": "Processing"
+        },
+        {
+          "line": 51,
+          "text": "Failed"
+        },
+        {
+          "line": 55,
+          "text": "Date"
+        },
+        {
+          "line": 56,
+          "text": "Title"
+        },
+        {
+          "line": 57,
+          "text": "Duration"
+        },
+        {
+          "line": 58,
+          "text": "Size"
+        },
+        {
+          "line": 201,
+          "text": "My Video Library"
+        },
+        {
+          "line": 220,
+          "text": "Search videos…"
+        },
+        {
+          "line": 304,
+          "text": "Loading library…"
+        }
+      ]
+    },
+    {
+      "file": "src/app/(app)/(hubs)/delete-permissions.tsx",
+      "count": 9,
+      "hits": [
+        {
+          "line": 21,
+          "text": "Delete Students"
+        },
+        {
+          "line": 22,
+          "text": "Delete Doctors"
+        },
+        {
+          "line": 23,
+          "text": "Delete Admins"
+        },
+        {
+          "line": 24,
+          "text": "Restore Accounts"
+        },
+        {
+          "line": 25,
+          "text": "Permanent Delete"
+        },
+        {
+          "line": 26,
+          "text": "Empty Trash"
+        },
+        {
+          "line": 174,
+          "text": "Go back"
+        },
+        {
+          "line": 181,
+          "text": "Delete Permissions"
+        },
+        {
+          "line": 192,
+          "text": "No active admins found."
+        }
+      ]
+    },
+    {
+      "file": "src/app/(app)/(hubs)/student-credentials.tsx",
+      "count": 9,
+      "hits": [
+        {
+          "line": 94,
+          "text": "Credentials copied to clipboard."
+        },
+        {
+          "line": 96,
+          "text": "Copy not supported on this device."
+        },
+        {
+          "line": 102,
+          "text": "Student Credentials"
+        },
+        {
+          "line": 145,
+          "text": "Student Created"
+        },
+        {
+          "line": 170,
+          "text": "Login Method"
+        },
+        {
+          "line": 210,
+          "text": "Important:"
+        },
+        {
+          "line": 220,
+          "text": "Copy"
+        },
+        {
+          "line": 225,
+          "text": "Share"
+        },
+        {
+          "line": 229,
+          "text": "Done"
+        }
+      ]
+    },
+    {
+      "file": "src/app/(app)/offline-library.tsx",
+      "count": 9,
+      "hits": [
+        {
+          "line": 237,
+          "text": "Back to Offline Videos"
+        },
+        {
+          "line": 279,
+          "text": "Offline Videos"
+        },
+        {
+          "line": 319,
+          "text": "DOWNLOADING"
+        },
+        {
+          "line": 355,
+          "text": "Pause"
+        },
+        {
+          "line": 365,
+          "text": "Cancel"
+        },
+        {
+          "line": 379,
+          "text": "NEEDS ATTENTION"
+        },
+        {
+          "line": 400,
+          "text": "Retry"
+        },
+        {
+          "line": 411,
+          "text": "DOWNLOADED COURSES"
+        },
+        {
+          "line": 503,
+          "text": "No additional downloads illustration"
+        }
+      ]
+    },
+    {
+      "file": "src/app/(app)/(hubs)/db-audit.tsx",
+      "count": 8,
+      "hits": [
+        {
+          "line": 30,
+          "text": "Profiles without a user record"
+        },
+        {
+          "line": 31,
+          "text": "Enrollments without a student"
+        },
+        {
+          "line": 32,
+          "text": "Credit rows without an owner"
+        },
+        {
+          "line": 33,
+          "text": "Courses without an instructor"
+        },
+        {
+          "line": 34,
+          "text": "Negative credit balances"
+        },
+        {
+          "line": 135,
+          "text": "Database Integrity"
+        },
+        {
+          "line": 171,
+          "text": "Unable to run the integrity audit"
+        },
+        {
+          "line": 201,
+          "text": "Issue Checklist"
+        }
+      ]
+    },
+    {
+      "file": "src/app/(app)/(hubs)/feature-flags.tsx",
+      "count": 8,
+      "hits": [
+        {
+          "line": 125,
+          "text": "No matching user found."
+        },
+        {
+          "line": 181,
+          "text": "Feature Flags"
+        },
+        {
+          "line": 199,
+          "text": "Loading feature flags…"
+        },
+        {
+          "line": 204,
+          "text": "No feature flags"
+        },
+        {
+          "line": 206,
+          "text": "Refresh"
+        },
+        {
+          "line": 281,
+          "text": "Find a user by email or phone…"
+        },
+        {
+          "line": 292,
+          "text": "Find"
+        },
+        {
+          "line": 312,
+          "text": "Clear"
+        }
+      ]
+    },
+    {
+      "file": "src/app/(app)/(hubs)/impersonation.tsx",
+      "count": 8,
+      "hits": [
+        {
+          "line": 104,
+          "text": "Impersonation"
+        },
+        {
+          "line": 132,
+          "text": "Name, email, phone or user ID..."
+        },
+        {
+          "line": 134,
+          "text": "Search users to impersonate"
+        },
+        {
+          "line": 139,
+          "text": "Search"
+        },
+        {
+          "line": 146,
+          "text": "Impersonation failed"
+        },
+        {
+          "line": 194,
+          "text": "Cannot impersonate Super Admins"
+        },
+        {
+          "line": 205,
+          "text": "Recent Impersonations"
+        },
+        {
+          "line": 208,
+          "text": "No impersonation history found"
+        }
+      ]
+    },
+    {
+      "file": "src/app/(app)/info/contact.tsx",
+      "count": 8,
+      "hits": [
+        {
+          "line": 116,
+          "text": "Open"
+        },
+        {
+          "line": 180,
+          "text": "Email"
+        },
+        {
+          "line": 183,
+          "text": "Phone"
+        },
+        {
+          "line": 188,
+          "text": "WhatsApp"
+        },
+        {
+          "line": 193,
+          "text": "Telegram"
+        },
+        {
+          "line": 196,
+          "text": "Website"
+        },
+        {
+          "line": 214,
+          "text": "Contact Us"
+        },
+        {
+          "line": 243,
+          "text": "Retry loading Contact Us"
+        }
+      ]
+    },
+    {
+      "file": "src/components/BulkSelectBar.tsx",
+      "count": 8,
+      "hits": [
+        {
+          "line": 31,
+          "text": "Delete"
+        },
+        {
+          "line": 32,
+          "text": "Block"
+        },
+        {
+          "line": 33,
+          "text": "Unblock"
+        },
+        {
+          "line": 34,
+          "text": "Reset Devices"
+        },
+        {
+          "line": 35,
+          "text": "Reset Password"
+        },
+        {
+          "line": 36,
+          "text": "Add Credits"
+        },
+        {
+          "line": 37,
+          "text": "Rm Credits"
+        },
+        {
+          "line": 38,
+          "text": "Unlimited"
+        }
+      ]
+    },
+    {
+      "file": "src/components/EditUserDialog.tsx",
+      "count": 7,
+      "hits": [
+        {
+          "line": 236,
+          "text": "Edit Profile"
+        },
+        {
+          "line": 240,
+          "text": "Cancel"
+        },
+        {
+          "line": 242,
+          "text": "Save Changes"
+        },
+        {
+          "line": 255,
+          "text": "Full name"
+        },
+        {
+          "line": 282,
+          "text": "Email changes require user verification. Use the administrator email-change workflow."
+        },
+        {
+          "line": 343,
+          "text": "New password (optional)"
+        },
+        {
+          "line": 356,
+          "text": "Confirm new password"
+        }
+      ]
+    },
+    {
+      "file": "src/components/ProfilePhotoActions.tsx",
+      "count": 7,
+      "hits": [
+        {
+          "line": 23,
+          "text": "Promise"
+        },
+        {
+          "line": 127,
+          "text": "Profile Photo"
+        },
+        {
+          "line": 133,
+          "text": "Change Photo"
+        },
+        {
+          "line": 139,
+          "text": "Remove Photo"
+        },
+        {
+          "line": 149,
+          "text": "Remove Photo?"
+        },
+        {
+          "line": 159,
+          "text": "Cancel"
+        },
+        {
+          "line": 165,
+          "text": "Remove"
+        }
+      ]
+    },
+    {
+      "file": "src/components/VideoReplaceSheet.tsx",
+      "count": 7,
+      "hits": [
+        {
+          "line": 79,
+          "text": "Video replaced in this lesson."
+        },
+        {
+          "line": 116,
+          "text": "Replace Video"
+        },
+        {
+          "line": 141,
+          "text": "Upload New Video"
+        },
+        {
+          "line": 156,
+          "text": "Choose From My Library"
+        },
+        {
+          "line": 190,
+          "text": "Replace only this lesson"
+        },
+        {
+          "line": 205,
+          "text": "Replace every lesson using this video"
+        },
+        {
+          "line": 224,
+          "text": "Applying replacement…"
+        }
+      ]
+    },
+    {
+      "file": "src/app/(app)/(hubs)/system-providers.tsx",
+      "count": 6,
+      "hits": [
+        {
+          "line": 114,
+          "text": "Re-check failed — the request could not be completed. Run Scan All."
+        },
+        {
+          "line": 140,
+          "text": "System Diagnostics"
+        },
+        {
+          "line": 150,
+          "text": "Scanning backend services…"
+        },
+        {
+          "line": 156,
+          "text": "No services registered"
+        },
+        {
+          "line": 158,
+          "text": "Scan Again"
+        },
+        {
+          "line": 315,
+          "text": "Check Again"
+        }
+      ]
+    },
+    {
+      "file": "src/app/(app)/offline-course.tsx",
+      "count": 6,
+      "hits": [
+        {
+          "line": 191,
+          "text": "Download expired"
+        },
+        {
+          "line": 203,
+          "text": "Back to course"
+        },
+        {
+          "line": 232,
+          "text": "Offline course"
+        },
+        {
+          "line": 243,
+          "text": "Offline course"
+        },
+        {
+          "line": 246,
+          "text": "Nothing downloaded here yet"
+        },
+        {
+          "line": 451,
+          "text": "About these downloads"
+        }
+      ]
+    },
+    {
+      "file": "src/components/CourseCard.tsx",
+      "count": 6,
+      "hits": [
+        {
+          "line": 137,
+          "text": "Progress"
+        },
+        {
+          "line": 169,
+          "text": "Continue"
+        },
+        {
+          "line": 179,
+          "text": "Subscribe"
+        },
+        {
+          "line": 242,
+          "text": "Progress"
+        },
+        {
+          "line": 272,
+          "text": "Continue Learning"
+        },
+        {
+          "line": 283,
+          "text": "Subscribe"
+        }
+      ]
+    },
+    {
+      "file": "src/components/VideoThumbnailCard.tsx",
+      "count": 6,
+      "hits": [
+        {
+          "line": 101,
+          "text": "VIDEO THUMBNAIL"
+        },
+        {
+          "line": 122,
+          "text": "Change"
+        },
+        {
+          "line": 133,
+          "text": "Keep This Thumbnail"
+        },
+        {
+          "line": 138,
+          "text": "Upload Custom Thumbnail"
+        },
+        {
+          "line": 144,
+          "text": "Restore Auto Thumbnail"
+        },
+        {
+          "line": 150,
+          "text": "Cancel"
+        }
+      ]
+    },
+    {
+      "file": "src/components/YouTubePlayer.tsx",
+      "count": 6,
+      "hits": [
+        {
+          "line": 35,
+          "text": "Promise"
+        },
+        {
+          "line": 188,
+          "text": "Promise"
+        },
+        {
+          "line": 273,
+          "text": "Video Player"
+        },
+        {
+          "line": 289,
+          "text": "Exit fullscreen"
+        },
+        {
+          "line": 342,
+          "text": "Promise"
+        },
+        {
+          "line": 728,
+          "text": "Exit fullscreen"
+        }
+      ]
+    },
+    {
+      "file": "src/app/(app)/(hubs)/fraud-alerts.tsx",
+      "count": 5,
+      "hits": [
+        {
+          "line": 77,
+          "text": "Flag resolved."
+        },
+        {
+          "line": 92,
+          "text": "Fraud Alerts"
+        },
+        {
+          "line": 103,
+          "text": "unresolved alerts"
+        },
+        {
+          "line": 148,
+          "text": "RESOLVED"
+        },
+        {
+          "line": 176,
+          "text": "Mark Resolved"
+        }
+      ]
+    },
+    {
+      "file": "src/app/(app)/info/about.tsx",
+      "count": 5,
+      "hits": [
+        {
+          "line": 13,
+          "text": "Expert-Led Content"
+        },
+        {
+          "line": 14,
+          "text": "Secure Learning"
+        },
+        {
+          "line": 15,
+          "text": "Clinical Focus"
+        },
+        {
+          "line": 16,
+          "text": "Always Accessible"
+        },
+        {
+          "line": 41,
+          "text": "About Us"
+        }
+      ]
+    },
+    {
+      "file": "src/components/LargeFileWarning.tsx",
+      "count": 5,
+      "hits": [
+        {
+          "line": 98,
+          "text": "File Size"
+        },
+        {
+          "line": 99,
+          "text": "Recommended Connection"
+        },
+        {
+          "line": 100,
+          "text": "Estimated Upload Time"
+        },
+        {
+          "line": 113,
+          "text": "Cancel"
+        },
+        {
+          "line": 117,
+          "text": "Upload Anyway"
+        }
+      ]
+    },
+    {
+      "file": "src/components/StorageMonitor.tsx",
+      "count": 5,
+      "hits": [
+        {
+          "line": 58,
+          "text": "Storage Usage"
+        },
+        {
+          "line": 61,
+          "text": "Uploaded Videos"
+        },
+        {
+          "line": 62,
+          "text": "Total Storage"
+        },
+        {
+          "line": 63,
+          "text": "Avg. File Size"
+        },
+        {
+          "line": 64,
+          "text": "Largest Video"
+        }
+      ]
+    },
+    {
+      "file": "src/app/(app)/(hubs)/video-providers.tsx",
+      "count": 4,
+      "hits": [
+        {
+          "line": 313,
+          "text": "Video Providers"
+        },
+        {
+          "line": 354,
+          "text": "Retry"
+        },
+        {
+          "line": 381,
+          "text": "Search doctors…"
+        },
+        {
+          "line": 393,
+          "text": "No doctors found."
+        }
+      ]
+    },
+    {
+      "file": "src/components/OfflineVideoPlayer.native.tsx",
+      "count": 4,
+      "hits": [
+        {
+          "line": 234,
+          "text": "This download is not complete on this device. Delete it and download again while online."
+        },
+        {
+          "line": 249,
+          "text": "Download Expired"
+        },
+        {
+          "line": 258,
+          "text": "Playback Blocked"
+        },
+        {
+          "line": 327,
+          "text": "Exit fullscreen"
+        }
+      ]
+    },
+    {
+      "file": "src/components/SubscribeSheet.tsx",
+      "count": 3,
+      "hits": [
+        {
+          "line": 189,
+          "text": "Close"
+        },
+        {
+          "line": 240,
+          "text": "Retry loading contact options"
+        },
+        {
+          "line": 248,
+          "text": "Try again"
+        }
+      ]
+    },
+    {
+      "file": "src/app/(app)/(doctor)/dr-profile.tsx",
+      "count": 2,
+      "hits": [
+        {
+          "line": 898,
+          "text": "@username or https://t.me/…"
+        },
+        {
+          "line": 1400,
+          "text": "WhatsApp"
+        }
+      ]
+    },
+    {
+      "file": "src/app/(app)/(student)/explore.tsx",
+      "count": 2,
+      "hits": [
+        {
+          "line": 198,
+          "text": "Search all courses by title, description, instructor…"
+        },
+        {
+          "line": 249,
+          "text": "Courses"
+        }
+      ]
+    },
+    {
+      "file": "src/app/(auth)/sign-in.tsx",
+      "count": 2,
+      "hits": [
+        {
+          "line": 205,
+          "text": "No account found for this email or phone number."
+        },
+        {
+          "line": 296,
+          "text": "Network error: could not connect to the server. Please check your connection and try again."
+        }
+      ]
+    },
+    {
+      "file": "src/app/index.tsx",
+      "count": 2,
+      "hits": [
+        {
+          "line": 82,
+          "text": "Sign In"
+        },
+        {
+          "line": 83,
+          "text": "Create Account"
+        }
+      ]
+    },
+    {
+      "file": "src/components/MaintenanceGate.tsx",
+      "count": 2,
+      "hits": [
+        {
+          "line": 72,
+          "text": "Maintenance Mode"
+        },
+        {
+          "line": 76,
+          "text": "Please try again later."
+        }
+      ]
+    },
+    {
+      "file": "src/components/ResponsiveModal.tsx",
+      "count": 2,
+      "hits": [
+        {
+          "line": 296,
+          "text": "Keep Editing"
+        },
+        {
+          "line": 297,
+          "text": "Discard"
+        }
+      ]
+    },
+    {
+      "file": "src/components/ScreenState.tsx",
+      "count": 2,
+      "hits": [
+        {
+          "line": 13,
+          "text": "Loading…"
+        },
+        {
+          "line": 140,
+          "text": "Refresh"
+        }
+      ]
+    },
+    {
+      "file": "src/components/VdoCipherPlayerNativeAdapter.native.tsx",
+      "count": 2,
+      "hits": [
+        {
+          "line": 381,
+          "text": "Loading player…"
+        },
+        {
+          "line": 508,
+          "text": "Exit fullscreen"
+        }
+      ]
+    },
+    {
+      "file": "src/components/VdoCipherPlayerWebView.tsx",
+      "count": 2,
+      "hits": [
+        {
+          "line": 223,
+          "text": "Loading player…"
+        },
+        {
+          "line": 232,
+          "text": "Video Unavailable"
+        }
+      ]
+    },
+    {
+      "file": "src/app/(app)/(hubs)/admin-settings.tsx",
+      "count": 1,
+      "hits": [
+        {
+          "line": 12,
+          "text": "Settings"
+        }
+      ]
+    },
+    {
+      "file": "src/app/(app)/info/privacy.tsx",
+      "count": 1,
+      "hits": [
+        {
+          "line": 60,
+          "text": "Privacy Policy"
+        }
+      ]
+    },
+    {
+      "file": "src/app/(app)/info/terms.tsx",
+      "count": 1,
+      "hits": [
+        {
+          "line": 61,
+          "text": "Terms & Conditions"
+        }
+      ]
+    },
+    {
+      "file": "src/app/(app)/lesson/[id].tsx",
+      "count": 1,
+      "hits": [
+        {
+          "line": 716,
+          "text": "Go back"
+        }
+      ]
+    },
+    {
+      "file": "src/components/ConfirmDialog.tsx",
+      "count": 1,
+      "hits": [
+        {
+          "line": 16,
+          "text": "void | Promise"
+        }
+      ]
+    },
+    {
+      "file": "src/components/ContentProtectionWarning.tsx",
+      "count": 1,
+      "hits": [
+        {
+          "line": 67,
+          "text": "I Understand"
+        }
+      ]
+    },
+    {
+      "file": "src/components/CourseProgressBar.tsx",
+      "count": 1,
+      "hits": [
+        {
+          "line": 86,
+          "text": "Your Progress"
+        }
+      ]
+    },
+    {
+      "file": "src/components/ImpersonationBanner.tsx",
+      "count": 1,
+      "hits": [
+        {
+          "line": 71,
+          "text": "Exit impersonation and return to your Super Admin account"
+        }
+      ]
+    },
+    {
+      "file": "src/components/NeuInputRow.tsx",
+      "count": 1,
+      "hits": [
+        {
+          "line": 119,
+          "text": "Search…"
+        }
+      ]
+    },
+    {
+      "file": "src/components/OfflineVideoPlayer.tsx",
+      "count": 1,
+      "hits": [
+        {
+          "line": 9,
+          "text": "Offline playback unavailable on web"
+        }
+      ]
+    },
+    {
+      "file": "src/components/OfflineVideoPlayer.types.ts",
+      "count": 1,
+      "hits": [
+        {
+          "line": 8,
+          "text": "Promise"
+        }
+      ]
+    },
+    {
+      "file": "src/components/PortalOverlay.tsx",
+      "count": 1,
+      "hits": [
+        {
+          "line": 145,
+          "text": "Close"
+        }
+      ]
+    },
+    {
+      "file": "src/components/ui/dialog.tsx",
+      "count": 1,
+      "hits": [
+        {
+          "line": 82,
+          "text": "Close"
+        }
+      ]
+    },
+    {
+      "file": "src/components/VdoCipherPlayer.tsx",
+      "count": 1,
+      "hits": [
+        {
+          "line": 24,
+          "text": "Promise"
+        }
+      ]
+    },
+    {
+      "file": "src/components/VideoPlayer.tsx",
+      "count": 1,
+      "hits": [
+        {
+          "line": 35,
+          "text": "Promise"
+        }
+      ]
+    }
+  ]
+}

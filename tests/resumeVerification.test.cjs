@@ -95,6 +95,22 @@ const lock = buildLock();
 
 const CONTEXT = read('src/lib/SecurityContext.tsx');
 const GATE = read('src/app/(app)/security-gate.tsx');
+
+/**
+ * The gate's English copy table was replaced by the shared dictionaries
+ * (`security.gate.event.<key>.{title,instruction}`); the gate keeps a KEY SET
+ * and resolves the text with t() at render time. These helpers read the EN
+ * copy straight out of the resources so the assertions still pin the wording.
+ */
+const RES = read('src/lib/i18n/resources.ts');
+function dictVal(key) {
+  const prefix = `  '${key}': `;
+  const line = RES.split('\n').find((l) => l.startsWith(prefix));
+  if (!line) return null;
+  const value = line.slice(prefix.length).replace(/,\s*$/, '');
+  if (!value.startsWith("'") || !value.endsWith("'")) return null;
+  return value.slice(1, -1).replace(/\\'/g, "'").replace(/\\n/g, '\n');
+}
 const MODEL = read('src/lib/securityStateModel.ts');
 // php.ts is CRLF in this repository — normalise before multi-line matching.
 const TRANSPORT = read('src/client/php.ts').replace(/\r/g, '');
@@ -276,22 +292,28 @@ console.log('\u2500\u2500 Part 3: presentation + routing \u2500\u2500');
     /const blocking = isGateBlocked\(gateState\);/.test(GATE));
 
   // Each supported finding still gets its OWN accurate reason (no generic label).
+  // Copy lives in the dictionaries now (`security.gate.event.<k>.title` /
+  // `.instruction`); the gate keeps a KEY SET and resolves via t().
   const EVENT_COPY = [
     'vpn_detected', 'proxy_detected', 'developer_options_enabled', 'adb_enabled',
-    'debugger_attached', 'debug_detected', 'mock_location_detected',
+    'debugger_attached', 'debug_detected',
     'virtual_device_detected', 'root_detected', 'tamper_detected',
     'signature_invalid', 'play_integrity_failed', 'security_unverified',
   ];
-  check('3g: every supported finding has its own title + instruction on the page',
-    EVENT_COPY.every((k) => new RegExp(`\\b${k}:\\s*\\{ title:`).test(GATE)));
+  const dictValAll = dictVal;
+  check('3g: every supported finding has its own title + instruction (dictionary)',
+    EVENT_COPY.every((k) =>
+      dictValAll(`security.gate.event.${k}.title`) !== null &&
+      dictValAll(`security.gate.event.${k}.instruction`) !== null));
   check('3h: the copy keys are distinct (a violation is never labelled as another one)',
     (() => {
-      const titles = [...GATE.matchAll(/\b[a-z_]+:\s*\{ title: '([^']+)'/g)].map((m) => m[1]);
-      return titles.length >= 10 && new Set(titles).size > 1;
+      const titles = EVENT_COPY.map((k) => dictValAll(`security.gate.event.${k}.title`)).filter(Boolean);
+      return titles.length === EVENT_COPY.length && new Set(titles).size >= EVENT_COPY.length - 1;
     })());
-  check('3i: mock-location / emulator findings are separated from the insecure-build copy',
-    /resolveFindingCopyKey/.test(GATE) && /mock_location_detected/.test(MODEL)
-    && /virtual_device_detected/.test(MODEL));
+  check('3i: emulator findings are separated from the insecure-build copy',
+    /resolveFindingCopyKey/.test(GATE) && /virtual_device_detected/.test(MODEL));
+  check('3i-2: the removed mock-location finding has no surviving copy path',
+    !/mock_location_detected/.test(GATE) && !/'mock_location'/.test(MODEL));
   check('3j: mid-session blocks reuse the SAME page (no second presentation path)',
     /onNewBlockingThreat\(\(result\) => \{/.test(GATE));
 }
@@ -323,9 +345,15 @@ console.log('\u2500\u2500 Part 4: containment during the pending window \u2500\u
   check('4h: the allowlist is the documented minimum (verification + recovery only)',
     /const LOCK_EXEMPT_PREFIXES = \[\n\s+'\/security\/policies', '\/security\/config', '\/security\/events', '\/security\/violations',\n\s+'\/auth\/logout',\n\s+'\/support\/contact',\n\];/.test(TRANSPORT)
     && (TRANSPORT.match(/'\/[a-z-]+\/[a-z-]+'/g) || []).length > 0);
-  check('4i: token rotation is NOT exempt (protected activity stays frozen)',
-    /if \(isSecurityLocked\(\)\) \{\n\s+authStateLog\('AUTH_REFRESH_DEFINITIVE_FAILURE', 'security lock active — refresh suppressed'\);/.test(TRANSPORT)
+  check('4i: token rotation is NOT on the allowlist (protected activity stays frozen)',
+    /if \(isSecurityLocked\(\)\) \{\n\s+authStateLog\('AUTH_REFRESH_SUPPRESSED', 'security lock active — refresh deferred until unlock'\);/.test(TRANSPORT)
     && !/'\/auth\/refresh'/.test(TRANSPORT.split('const LOCK_EXEMPT_PREFIXES')[1].split('];')[0]));
+  check('4i-2: a suppressed rotation is recovered after unlock, never treated as a logout',
+    /scheduleRefreshAfterUnlock\(\);/.test(TRANSPORT)
+    && /POST \/auth\/refresh \(post-unlock recovery\)/.test(TRANSPORT)
+    && !/AUTH_REFRESH_SUPPRESSED[\s\S]{0,200}await clearSession\(\)/.test(TRANSPORT));
+  check('4i-3: containment never aborts an in-flight rotation or allowlisted traffic',
+    /const abortExempt = isLockExempt\(path\) \|\| path\.startsWith\('\/auth\/refresh'\);/.test(TRANSPORT));
   check('4j: protected playback is stopped by the same lock (stoppers run on containment)',
     /for \(const stop of stops\) \{/.test(LOCK_SRC) && /registerPlaybackStopper/.test(LOCK_SRC));
   check('4k: protected screens key on the HARD lock, so media cannot stay mounted',
@@ -343,8 +371,8 @@ console.log('\u2500\u2500 Part 4: containment during the pending window \u2500\u
     /const vpnBlocked\s+= liveBlocking && hasConnectionFinding\(r\.threats\);/.test(CONTEXT)
     && /violationBlocked:\s+liveBlocking && !vpnBlocked/.test(CONTEXT));
   check('4o: the connection page carries per-finding copy for both detectors',
-    /vpn_detected:\s+\{ title: 'VPN Connection Detected'/.test(GATE)
-    && /proxy_detected:\s+\{ title: 'Proxy Connection Detected'/.test(GATE));
+    dictVal('security.gate.event.vpn_detected.title') === 'VPN Connection Detected'
+    && dictVal('security.gate.event.proxy_detected.title') === 'Proxy Connection Detected');
 }
 
 // ── Part 5: errors, indeterminate results and bounded retries ──────────────

@@ -16,6 +16,8 @@ import { useDebounce } from '@/lib/useDebounce';
 import { useStaleWhileRevalidateFocus } from '@/lib/useStaleWhileRevalidateFocus';
 import { useFeatureFlags, isFeatureDisabledError } from '@/lib/featureFlags';
 import { FeatureUnavailableState } from '@/components/ScreenState';
+import { useTranslation } from '@/lib/i18n';
+import { courseStatusLabel, difficultyLabel } from '@/lib/i18n/labels';
 import type { RelativePathString } from 'expo-router';
 
 const DIFFICULTY_COLORS: Record<string, string> = {
@@ -34,6 +36,7 @@ export default function DoctorCourses() {
   const insets = layout.insets;
   const { profile } = useProfileStore();
   const router = useRouter();
+  const { t, tCount, locale } = useTranslation();
 
   const [courses, setCourses] = useState<any[]>([]);
   const [query, setQuery] = useState('');
@@ -116,13 +119,13 @@ export default function DoctorCourses() {
       // state instead of an alarming "Course creation failed" toast.
       if (isFeatureDisabledError(e)) {
         setCreateBlocked(true);
-        showToast({ type: 'info', message: 'Course creation is currently disabled by your administrator.' });
+        showToast({ type: 'info', message: t('drCourses.creationDisabled') });
       } else {
         // Surface the real DB/RPC error so issues are immediately visible
         const msg = e?.message ?? e?.error_description ?? String(e);
         const code = e?.code ? ` [${e.code}]` : '';
         console.error('[courses] createCourse failed:', e);
-        showToast({ type: 'error', message: `Course creation failed${code}: ${msg}` });
+        showToast({ type: 'error', message: t('drCourses.createFailed', { code, message: msg }) });
       }
     }
     setCreating(false);
@@ -176,12 +179,15 @@ export default function DoctorCourses() {
     setDeleteLoading(true);
     try {
       const result = await deleteCourseWithCleanup(deleteTarget.id);
-      showToast({ type: 'success', message: `"${deleteTarget.title}" deleted. ${result.students_removed} student${result.students_removed !== 1 ? 's' : ''} removed.` });
+      showToast({
+        type: 'success',
+        message: `${t('drCourses.deletedTitle', { title: deleteTarget.title })} ${tCount('drCourses.studentsRemoved', result.students_removed)}`,
+      });
       setDeleteTarget(null);
       setDeleteStats(null);
       await loadData();
     } catch (e: any) {
-      showToast({ type: 'error', message: e?.message ?? 'Failed to delete course.' });
+      showToast({ type: 'error', message: e?.message ?? t('drCourses.deleteFailed') });
     }
     setDeleteLoading(false);
   };
@@ -192,8 +198,8 @@ export default function DoctorCourses() {
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}>
         {/* Header — uses DashboardHeader for consistent safe-area + hamburger alignment */}
         <DashboardHeader
-          greeting="My Courses"
-          roleLabel={`${courses.length} course${courses.length !== 1 ? 's' : ''}`}
+          greeting={t('nav.myCourses')}
+          roleLabel={tCount('drCourses.count', courses.length)}
           rightActions={
             canCreate ? (
               <Pressable onPress={handleNewCourse} disabled={creating}
@@ -201,7 +207,7 @@ export default function DoctorCourses() {
                 {creating
                 ? <ActivityIndicator size="small" color="#fff" />
                 : <Plus size={18} color="#fff" />}
-                <Text style={{ fontSize: 14, fontWeight: '700', color: '#fff' }}>New</Text>
+                <Text style={{ fontSize: 14, fontWeight: '700', color: '#fff' }}>{t('common.new')}</Text>
               </Pressable>
             ) : undefined
           }
@@ -213,8 +219,8 @@ export default function DoctorCourses() {
           <View style={{ marginHorizontal: layout.screenPx, marginBottom: 8 }}>
             <FeatureUnavailableState
               compact
-              title="Course creation is unavailable"
-              description="An administrator has turned off course creation. You can still view and edit your existing courses. This becomes available again as soon as it is re-enabled."
+              title={t('drCourses.creationUnavailableTitle')}
+              description={t('drCourses.creationUnavailableDescription')}
             />
           </View>
         )}
@@ -224,7 +230,7 @@ export default function DoctorCourses() {
           <View style={[{ borderRadius: 14, flexDirection: 'row', alignItems: 'center', paddingHorizontal: 14, gap: 10, minWidth: 0 },
             { backgroundColor: c.base, shadowColor: c.shadowDark, shadowOffset: { width: 3, height: 3 }, shadowOpacity: 0.6, shadowRadius: 8, elevation: 3 }]}>
             <Search size={16} color={c.text} opacity={0.4} style={{ flexShrink: 0 }} />
-            <TextInput value={query} onChangeText={setQuery} placeholder="Search courses…"
+            <TextInput value={query} onChangeText={setQuery} placeholder={t('course.searchPlaceholder')}
               placeholderTextColor={`${c.text}55`}
               style={{ flex: 1, minWidth: 0, fontSize: 14, color: c.text, paddingVertical: 12 }} />
           </View>
@@ -242,7 +248,7 @@ export default function DoctorCourses() {
                     backgroundColor: active ? activeColor : 'transparent' }}>
                   <Icon size={13} color={active ? '#fff' : c.text} opacity={active ? 1 : 0.45} />
                   <Text style={{ fontSize: 13, fontWeight: '700', color: active ? '#fff' : c.text, opacity: active ? 1 : 0.55 }}>
-                    {status === 'all' ? 'All' : status === 'draft' ? 'Drafts' : 'Published'}
+                    {status === 'all' ? t('common.all') : status === 'draft' ? t('drCourses.drafts') : t('courseStatus.published')}
                   </Text>
                 </Pressable>
               );
@@ -261,11 +267,11 @@ export default function DoctorCourses() {
               <BookOpen size={48} color={c.primary} opacity={0.2} />
               <Text style={{ fontSize: 16, ...mutedTextStyle(c, 0.4) }}>
                 {query
-                  ? 'No matching courses'
-                  : statusFilter === 'draft' ? 'No draft courses yet' : statusFilter === 'published' ? 'No published courses yet' : 'No courses yet'}
+                  ? t('drCourses.noMatches')
+                  : statusFilter === 'draft' ? t('drCourses.noDrafts') : statusFilter === 'published' ? t('drCourses.noPublished') : t('drCourses.none')}
               </Text>
               {!query && (statusFilter === 'draft' || statusFilter === 'all') && canCreate && !createBlocked && (
-                <NeuButton label="Create First Course" onPress={handleNewCourse} loading={creating} />
+                <NeuButton label={t('drCourses.createFirst')} onPress={handleNewCourse} loading={creating} />
               )}
             </View>
           ) : (
@@ -299,14 +305,14 @@ export default function DoctorCourses() {
                       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
                         <View style={{ paddingHorizontal: 10, paddingVertical: 4, borderRadius: 20,
                           backgroundColor: `${STATUS_COLORS[course.status] ?? '#6B7280'}18` }}>
-                          <Text style={{ fontSize: 11, fontWeight: '700', color: STATUS_COLORS[course.status] ?? '#6B7280', textTransform: 'capitalize' }}>
-                            {course.status}
+                          <Text style={{ fontSize: 11, fontWeight: '700', color: STATUS_COLORS[course.status] ?? '#6B7280' }}>
+                            {courseStatusLabel(course.status, t)}
                           </Text>
                         </View>
                         {/* ⋮ options menu */}
                         <Pressable onPress={() => openMenu(course)}
                           accessibilityRole="button"
-                          accessibilityLabel={`Course options for ${course.title}`}
+                          accessibilityLabel={t('drCourses.optionsA11y', { title: course.title })}
                           style={{ padding: 4, borderRadius: 8, backgroundColor: `${c.text}08` }}>
                           <MoreVertical size={16} color={c.text} opacity={0.5} />
                         </Pressable>
@@ -315,7 +321,7 @@ export default function DoctorCourses() {
                         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4,
                           paddingHorizontal: 8, paddingVertical: 3, borderRadius: 20, backgroundColor: '#D9770618' }}>
                           <Archive size={9} color="#D97706" />
-                          <Text style={{ fontSize: 10, fontWeight: '700', color: '#D97706' }}>Archived</Text>
+                          <Text style={{ fontSize: 10, fontWeight: '700', color: '#D97706' }}>{t('courseStatus.archived')}</Text>
                         </View>
                       )}
                     </View>
@@ -334,22 +340,22 @@ export default function DoctorCourses() {
                       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
                         <View style={{ width: 8, height: 8, borderRadius: 4,
                           backgroundColor: DIFFICULTY_COLORS[course.difficulty] ?? c.primary }} />
-                        <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.55), textTransform: 'capitalize' }}>
-                          {course.difficulty.replace('_', ' ')}
+                        <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.55) }}>
+                          {difficultyLabel(course.difficulty, t)}
                         </Text>
                       </View>
                     )}
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
                       <BookOpen size={12} color={c.primary} />
                       <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.55) }}>
-                        {course.total_lessons ?? 0} lessons
+                        {tCount('drCourses.lessonCount', course.total_lessons ?? 0)}
                       </Text>
                     </View>
                     {course.total_sections > 0 && (
                       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
                         <Users size={12} color={c.primary} />
                         <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.55) }}>
-                          {course.total_sections} sections
+                          {tCount('drCourses.sectionCount', course.total_sections)}
                         </Text>
                       </View>
                     )}
@@ -357,7 +363,7 @@ export default function DoctorCourses() {
                       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
                         <Clock size={12} color={c.primary} />
                         <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.55) }}>
-                          {course.estimated_duration_hours}h
+                          {t('drCourses.duration', { hours: course.estimated_duration_hours })}
                         </Text>
                       </View>
                     )}
@@ -378,7 +384,7 @@ export default function DoctorCourses() {
                   {/* Edit CTA */}
                   <Pressable style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', marginTop: 2 }}
                     onPress={() => router.push(`/(app)/course-builder/${course.id}` as RelativePathString)}>
-                    <Text style={{ fontSize: 13, fontWeight: '700', color: c.primary, marginRight: 4 }}>Edit Course</Text>
+                    <Text style={{ fontSize: 13, fontWeight: '700', color: c.primary, marginRight: 4 }}>{t('drCourses.edit')}</Text>
                     <ChevronRight size={14} color={c.primary} />
                   </Pressable>
                 </View>
@@ -431,7 +437,7 @@ export default function DoctorCourses() {
                 style={{ flexDirection: 'row', alignItems: 'center', gap: 14, padding: 18,
                   borderBottomWidth: 1, borderBottomColor: `${c.text}08` }}>
                 <Pencil size={18} color={c.primary} />
-                <Text style={{ fontSize: 15, fontWeight: '600', color: c.text }}>Edit Course</Text>
+                <Text style={{ fontSize: 15, fontWeight: '600', color: c.text }}>{t('drCourses.edit')}</Text>
               </Pressable>
               {/* Preview as Student — opens the student-facing course screen */}
               <Pressable onPress={handlePreviewAsStudent}
@@ -439,9 +445,9 @@ export default function DoctorCourses() {
                   borderBottomWidth: 1, borderBottomColor: `${c.text}08` }}>
                 <Eye size={18} color="#7C3AED" />
                 <View style={{ flex: 1 }}>
-                  <Text style={{ fontSize: 15, fontWeight: '600', color: c.text }}>Preview as Student</Text>
+                  <Text style={{ fontSize: 15, fontWeight: '600', color: c.text }}>{t('drCourses.previewAsStudent')}</Text>
                   <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.5) }}>
-                    See this course as an enrolled student does
+                    {t('drCourses.previewHint')}
                   </Text>
                 </View>
               </Pressable>
@@ -449,7 +455,7 @@ export default function DoctorCourses() {
               <Pressable onPress={handleOpenDelete}
                 style={{ flexDirection: 'row', alignItems: 'center', gap: 14, padding: 18 }}>
                 <Trash2 size={18} color="#DC2626" />
-                <Text style={{ fontSize: 15, fontWeight: '600', color: '#DC2626' }}>Delete Course</Text>
+                <Text style={{ fontSize: 15, fontWeight: '600', color: '#DC2626' }}>{t('drCourses.delete')}</Text>
               </Pressable>
         </View>
         </View>
@@ -473,7 +479,7 @@ export default function DoctorCourses() {
                 <AlertTriangle size={26} color="#DC2626" />
               </View>
               <Text style={{ fontSize: 18, fontWeight: '800', color: c.text, textAlign: 'center' }}>
-                Delete Course?
+                {t('drCourses.deleteTitle')}
               </Text>
               <Text style={{ fontSize: 14, fontWeight: '700', color: c.primary, textAlign: 'center' }} numberOfLines={2}>
                 {deleteStats?.title ?? deleteTarget?.title}
@@ -486,19 +492,19 @@ export default function DoctorCourses() {
             ) : deleteStats ? (
               <View style={{ backgroundColor: `${c.text}06`, borderRadius: 14, padding: 16, gap: 8 }}>
                 {([
-                  ['Course',           deleteStats.title],
-                  ['Doctor',           deleteStats.doctor_name],
-                  ['Created',          deleteStats.created_at ? new Date(deleteStats.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '—'],
-                  ['Last updated',     deleteStats.updated_at ? new Date(deleteStats.updated_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '—'],
-                  ['Students enrolled',deleteStats.enrolled_count],
-                  ['Sections',         deleteStats.section_count],
-                  ['Lessons',          deleteStats.lesson_count],
-                  ['Videos',           deleteStats.video_count],
-                  ['PDFs',             deleteStats.pdf_count],
-                  ['Attachments',      deleteStats.attachment_count],
-                ] as [string, string | number][]).map(([label, value]) => (
-                  <View key={label} style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
-                    <Text style={{ fontSize: 13, ...mutedTextStyle(c, 0.55) }}>{label}</Text>
+                  ['drCourses.fact.course',    deleteStats.title],
+                  ['drCourses.fact.doctor',    deleteStats.doctor_name],
+                  ['drCourses.fact.created',   deleteStats.created_at ? new Date(deleteStats.created_at).toLocaleDateString(locale === 'ar' ? 'ar-EG' : 'en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '—'],
+                  ['drCourses.fact.updated',   deleteStats.updated_at ? new Date(deleteStats.updated_at).toLocaleDateString(locale === 'ar' ? 'ar-EG' : 'en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '—'],
+                  ['drCourses.fact.students',  deleteStats.enrolled_count],
+                  ['drCourses.fact.sections',  deleteStats.section_count],
+                  ['drCourses.fact.lessons',   deleteStats.lesson_count],
+                  ['drCourses.fact.videos',    deleteStats.video_count],
+                  ['drCourses.fact.pdfs',      deleteStats.pdf_count],
+                  ['drCourses.fact.attachments', deleteStats.attachment_count],
+                ] as [string, string | number][]).map(([labelKey, value]) => (
+                  <View key={labelKey} style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
+                    <Text style={{ fontSize: 13, ...mutedTextStyle(c, 0.55) }}>{t(labelKey)}</Text>
                     <Text style={{ fontSize: 13, fontWeight: '700', color: typeof value === 'number' && value > 0 ? '#DC2626' : c.text, flexShrink: 1, textAlign: 'right' }} numberOfLines={1}>
                       {value ?? '—'}
                     </Text>
@@ -511,7 +517,7 @@ export default function DoctorCourses() {
             <View style={{ backgroundColor: '#DC262610', borderRadius: 12, padding: 14, flexDirection: 'row', gap: 10 }}>
               <AlertTriangle size={15} color="#DC2626" style={{ marginTop: 1 }} />
               <Text style={{ flex: 1, fontSize: 12, lineHeight: 18, color: '#DC2626', fontWeight: '500' }}>
-                This action permanently deletes this course and all associated lessons, videos, attachments and subscriptions. This cannot be undone.
+                {t('drCourses.deleteWarning')}
               </Text>
             </View>
 
@@ -521,7 +527,7 @@ export default function DoctorCourses() {
                 disabled={deleteLoading}
                 style={{ flex: 1, paddingVertical: 14, borderRadius: 14, alignItems: 'center',
                   backgroundColor: `${c.text}0E` }}>
-                <Text style={{ fontSize: 15, fontWeight: '700', color: c.text }}>Cancel</Text>
+                <Text style={{ fontSize: 15, fontWeight: '700', color: c.text }}>{t('common.cancel')}</Text>
               </Pressable>
               <Pressable onPress={handleConfirmDelete} disabled={deleteLoading || statsLoading}
                 style={{ flex: 1, paddingVertical: 14, borderRadius: 14, alignItems: 'center',
@@ -530,7 +536,7 @@ export default function DoctorCourses() {
                   ? <ActivityIndicator size="small" color="#fff" />
                   : <Trash2 size={15} color="#fff" />}
                 <Text style={{ fontSize: 15, fontWeight: '700', color: '#fff' }}>
-                  {deleteLoading ? 'Deleting…' : 'Delete'}
+                  {deleteLoading ? t('common.deleting') : t('common.delete')}
                 </Text>
               </Pressable>
             </View>

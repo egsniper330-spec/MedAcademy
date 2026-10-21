@@ -52,6 +52,7 @@ import { useSecurityWebViewStop, type StoppableWebView } from '@/lib/useSecurity
 import { buildWatermarkInjection } from '@/lib/watermarkInjection';
 import { resolveWatermarkLayers, type WatermarkPlatform } from '@/lib/watermarkLayers';
 import { useFullscreenWatermark } from '@/hooks/useFullscreenWatermark';
+import { t } from '@/lib/i18n';
 import type { VdoCipherPlayerProps } from '@/components/VdoCipherPlayer';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -263,7 +264,7 @@ export function VdoCipherPlayerWebView({
     return (
       <View style={[containerStyleNative, { alignItems: 'center', justifyContent: 'center', gap: 10 }]}>
         <ActivityIndicator color={c.primary} size="large" />
-        <Text style={{ fontSize: 13, ...mutedTextStyle(c, 0.5) }}>Loading player…</Text>
+        <Text style={{ fontSize: 13, ...mutedTextStyle(c, 0.5) }}>{t('player.loading')}</Text>
       </View>
     );
   }
@@ -272,7 +273,7 @@ export function VdoCipherPlayerWebView({
   if (error || !playerUrl) {
     return (
       <View style={[containerStyleNative, { backgroundColor: '#0A0A0A', alignItems: 'center', justifyContent: 'center', paddingHorizontal: 24, gap: 8 }]}>
-        <Text style={{ fontSize: 14, fontWeight: '700', color: '#fff', textAlign: 'center' }}>Video Unavailable</Text>
+        <Text style={{ fontSize: 14, fontWeight: '700', color: '#fff', textAlign: 'center' }}>{t('player.unavailable')}</Text>
         <Text style={{ fontSize: 12, color: '#ffffff88', textAlign: 'center', lineHeight: 18 }}>
           {error ?? 'Could not load the player. Please check your connection.'}
         </Text>

@@ -45,7 +45,10 @@ export interface NativeSecurityFlags {
   vpnDetected:          boolean;
   rootDetected:         boolean;
   emulatorDetected:     boolean;
-  mockLocationDetected: boolean;
+  // NOTE: mock location is deliberately NOT part of this contract. The check
+  // was removed because a release APK cannot obtain the cross-UID AppOps read
+  // it needs, and the per-package app-op it exposes is persisted state rather
+  // than live evidence (see the removal note in plugins/withSecurityModule.js).
   // iOS-only extras (Android module returns false for these)
   jailbreakDetected?:      boolean;
   proxyDetected?:          boolean;
@@ -131,7 +134,6 @@ const SAFE_FLAGS: NativeSecurityFlags = {
   vpnDetected:          false,
   rootDetected:         false,
   emulatorDetected:     false,
-  mockLocationDetected: false,
   // Phase 4 signal plane defaults (unknown/unavailable ≠ safe; policy decides)
   vpnState: 'unknown',
   coreAvailable: false,

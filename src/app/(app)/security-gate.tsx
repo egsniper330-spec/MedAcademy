@@ -76,7 +76,7 @@ import * as ScreenCaptureLib from '@/lib/screenCaptureGuard';
 import { ShieldAlert, WifiOff, Smartphone } from 'lucide-react-native';
 import { neuColors, useLayout } from '@/lib/neu';
 import { useSecurity } from '@/lib/SecurityContext';
-import { SecuritySignalReport } from '@/components/SecuritySignalReport';
+import { t } from '@/lib/i18n';
 import {
   nextStickyTypes,
   isGateBlocked,
@@ -85,57 +85,41 @@ import {
   isConnectionFinding,
   connectionBlockInstructions,
   rendersBlockScreen,
-  windowModeBlockCopy,
   windowModeBlockSteps,
-  VPN_WARNING_COPY,
-  OVERLAY_WARNING_COPY,
 } from '@/lib/securityStateModel';
 
 /**
- * User-facing copy per blocking event. ROOT-CAUSE FIX (event-accurate gate
- * copy, preserved): each event has its own accurate title/instruction so a
- * device with USB debugging on never displays "Developer Options Detected",
- * and so multiple simultaneous findings can be enumerated on ONE page.
+ * Blocking events that have their own user-facing copy. ROOT-CAUSE FIX
+ * (event-accurate gate copy, preserved): each event still has its own accurate
+ * title/instruction so a device with USB debugging on never displays
+ * "Developer Options Detected", and so multiple simultaneous findings can be
+ * enumerated on ONE page. The copy itself lives in the translation resources
+ * (`security.gate.event.<key>.{title,instruction}`, English + Arabic); this set
+ * only records WHICH events have copy, so an unknown future event falls back to
+ * the single generic row instead of rendering a raw key.
  */
-const GATE_EVENT_COPY: Record<string, { title: string; instruction: string }> = {
-  vpn_detected:               { title: 'VPN Connection Detected',     instruction: 'Turn off your VPN connection, then tap Verify.' },
-  // MANDATORY CONNECTION BLOCK (see applyMandatoryConnectionFloor): proxy is
-  // now a blocking detection bucket too, so it needs its own accurate copy —
-  // without it the gate fell back to the generic "Security Requirement Not
-  // Satisfied" row (accurate but unactionable).
-  proxy_detected:             { title: 'Proxy Connection Detected',   instruction: 'Turn off the proxy configured for your connection, then tap Verify.' },
-  developer_options_enabled:  { title: 'Developer Options Enabled',   instruction: 'Open Settings → Developer options and turn Developer options off.' },
-  adb_enabled:                { title: 'USB Debugging Enabled',       instruction: 'Open Settings → Developer options and turn USB debugging off.' },
-  debugger_attached:          { title: 'Debugger Detected',           instruction: 'Detach the debugger connected to this app.' },
-  debug_detected:             { title: 'Insecure Build Detected',     instruction: 'Install the official production release of the app.' },
-  // ── Derived from `debug_detected` by resolveFindingCopyKey ────────────────
-  // SAME event type, SAME risk weight (20) and SAME block decision — but the
-  // detected condition is a DEVICE STATE, not an insecure installation. These
-  // two keys exist because the shared copy above asserted "Insecure Build
-  // Detected / Install the official production release of the app." for them,
-  // which contradicts what the engine measured and cannot be acted on (a
-  // reinstall never clears a mock-location setting or an emulator). See
-  // resolveFindingCopyKey in src/lib/securityStateModel.ts.
-  mock_location_detected:     { title: 'Mock Location Detected',      instruction: 'Turn off mock location: Developer options \u2192 Select mock location app \u2192 None, then reopen the app.' },
-  virtual_device_detected:    { title: 'Unsupported Device Detected', instruction: 'This app cannot run on an emulator or virtual device. Install it on a physical Android device.' },
-  root_detected:              { title: 'Root Access Detected',        instruction: 'Root access was detected on this device. Contact support for assistance.' },
-  jailbreak_detected:         { title: 'Jailbreak Detected',          instruction: 'Jailbreak access was detected on this device. Contact support for assistance.' },
-  frida_detected:             { title: 'Tampering Framework Detected', instruction: 'Remove the code-injection framework from this device.' },
-  xposed_detected:            { title: 'Tampering Framework Detected', instruction: 'Remove the hooking framework from this device.' },
-  magisk_detected:            { title: 'Root Management Detected',    instruction: 'Remove the root management tool from this device.' },
-  tamper_detected:            { title: 'App Integrity Compromised',   instruction: 'This installation failed integrity verification. Install the official release.' },
-  signature_invalid:          { title: 'App Integrity Compromised',   instruction: 'This installation failed integrity verification. Install the official release.' },
-  ssl_pinning_failure:        { title: 'Connection Security Issue',   instruction: 'A secure connection to the server could not be verified. Reconnect and try again.' },
-  play_integrity_failed:      { title: 'Device Integrity Check Failed', instruction: 'This device failed the integrity check required to run the app.' },
-  app_attest_failed:          { title: 'Device Integrity Check Failed', instruction: 'This device failed the integrity check required to run the app.' },
-  overlay_detected:           { title: 'Screen Overlay Detected',     instruction: 'Turn off screen overlays (e.g. screen filters, chat heads) for this app.' },
-  screen_recording_detected:  { title: 'Screen Recording Detected',   instruction: 'Stop screen recording or mirroring to continue.' },
-  // Fail-closed sentinel (NOT a device finding): shown only while an
-  // evaluation is running or could not complete. Honest copy — it resolves
-  // automatically when the real evaluation lands; it never claims the
-  // installation is tampered with.
-  security_unverified:        { title: 'Security Check Incomplete',   instruction: 'The security evaluation could not complete. The app is re-verifying automatically and will unlock if no issue is found.' },
-};
+const GATE_EVENT_KEYS: ReadonlySet<string> = new Set([
+  'vpn_detected',
+  'proxy_detected',
+  'developer_options_enabled',
+  'adb_enabled',
+  'debugger_attached',
+  'debug_detected',
+  'virtual_device_detected',
+  'root_detected',
+  'jailbreak_detected',
+  'frida_detected',
+  'xposed_detected',
+  'magisk_detected',
+  'tamper_detected',
+  'signature_invalid',
+  'ssl_pinning_failure',
+  'play_integrity_failed',
+  'app_attest_failed',
+  'overlay_detected',
+  'screen_recording_detected',
+  'security_unverified',
+]);
 
 interface GateFinding {
   type: string;
@@ -150,14 +134,19 @@ interface GateFinding {
  * event types get an explicit generic row instead of vanishing.
  *
  * `keys` are COPY KEYS (resolveFindingCopyKey), not raw event types — the same
- * event type can describe different conditions (see GATE_EVENT_COPY).
+ * event type can describe different conditions (see GATE_EVENT_KEYS).
  */
 function gateFindings(keys: string[]): GateFinding[] {
   const matched = keys
     .map((type) => {
-      const copy = GATE_EVENT_COPY[type];
-      if (!copy) return null;
-      return { type, ...copy, icon: (isConnectionFinding(type) ? 'vpn' : 'shield') as GateFinding['icon'] };
+      if (!GATE_EVENT_KEYS.has(type)) return null;
+      // Resolve at RENDER time so the label follows the seeded device locale.
+      return {
+        type,
+        title: t(`security.gate.event.${type}.title`),
+        instruction: t(`security.gate.event.${type}.instruction`),
+        icon: (isConnectionFinding(type) ? 'vpn' : 'shield') as GateFinding['icon'],
+      };
     })
     .filter((f): f is GateFinding => f !== null);
 
@@ -167,8 +156,8 @@ function gateFindings(keys: string[]): GateFinding[] {
   // authoritative row rather than an empty or ambiguous screen.
   return [{
     type: '__unknown__',
-    title: 'Security Requirement Not Satisfied',
-    instruction: 'A security policy is not satisfied on this device. Resolve the issue to continue.',
+    title: t('security.gate.unknownTitle'),
+    instruction: t('security.gate.unknownInstruction'),
     icon: 'shield',
   }];
 }
@@ -259,7 +248,6 @@ export function SecurityGate() {
   // picture-in-picture window are different conditions with different recovery
   // actions — and neither is ever worded as an overlay).
   const windowModeBlockedState = gateState === 'BLOCKED_MULTI_WINDOW';
-  const multiWindowCopy = windowModeBlockCopy(windowMode);
   // A VPN/proxy block renders the MANDATORY connection page: it states the
   // policy, tells the user exactly where to switch the VPN/proxy off (the app
   // cannot do it for them — iOS exposes no API to stop another app's tunnel),
@@ -271,7 +259,7 @@ export function SecurityGate() {
   // ONE step list for both actionable window/connection causes (same markup, one
   // source per cause in the pure model): returning to full screen for the
   // multi-window restriction, switching the VPN/proxy off for a connection block.
-  const stepsLabel = windowModeBlockedState ? 'HOW TO RETURN TO FULL SCREEN' : 'HOW TO TURN IT OFF';
+  const stepsLabel = windowModeBlockedState ? t('security.gate.stepsWindow') : t('security.gate.stepsVpn');
   const steps = windowModeBlockedState
     ? windowModeBlockSteps(windowMode)
     : (vpnBlocked ? connectionBlockInstructions(Platform.OS) : []);
@@ -281,19 +269,6 @@ export function SecurityGate() {
   // Overlay / resume states carry their own dedicated copy — listing policy
   // findings would be misleading when the cause is not a policy finding.
   const findings = overlayBlocked || windowModeBlockedState ? [] : gateFindings(types);
-  // READ-ONLY device diagnostic for the POLICY block pages (the ones a
-  // `debug_detected` false positive produces). It is the in-app counterpart of
-  // the card on the pre-login Access Blocked screen: policy blocking findings
-  // are NEVER routed to /security-warning (see (app)/_layout), so without this
-  // the gate was the one block screen with no way to read the six raw signals.
-  // Same component, same read-only contract — it cannot dismiss the gate.
-  const reportFindings = liveBlocking
-    ? threats.map((t) => ({
-        label: GATE_EVENT_COPY[resolveFindingCopyKey(t.type, t.detectionMethod)]?.title ?? 'Security Issue',
-        type: t.type,
-        detectionMethod: t.detectionMethod ?? null,
-      }))
-    : [];
   const revalidating = !liveBlocking && !overlayBlocked
     && !windowModeBlockedState && (checking || evaluating);
 
@@ -359,21 +334,25 @@ export function SecurityGate() {
           accessibilityRole="header"
         >
           {overlayBlocked
-            ? OVERLAY_WARNING_COPY.title.toUpperCase()
+            ? t('security.overlay.title').toUpperCase()
             : windowModeBlockedState
-              ? multiWindowCopy.title.toUpperCase()
+              ? t(windowMode === 'picture_in_picture'
+                  ? 'security.window.pip.title'
+                  : 'security.window.multi.title').toUpperCase()
               : vpnBlocked
-                ? VPN_WARNING_COPY.title.toUpperCase()
-                : 'SECURITY BLOCK ACTIVE'}
+                ? t('security.vpn.title').toUpperCase()
+                : t('security.gate.title')}
         </Text>
         <Text style={[styles.subtitle, { color: `${c.text}CC`, fontSize: layout.bodySize }]}>
           {overlayBlocked
-            ? OVERLAY_WARNING_COPY.message
+            ? t('security.overlay.message')
             : windowModeBlockedState
-              ? multiWindowCopy.message
+              ? t(windowMode === 'picture_in_picture'
+                  ? 'security.window.pip.message'
+                  : 'security.window.multi.message')
               : vpnBlocked
-                ? VPN_WARNING_COPY.message
-                : 'Your device does not currently meet MedAcademy\u2019s security requirements.'}
+                ? t('security.vpn.message')
+                : t('security.gate.subtitle')}
         </Text>
 
         {/* Detected issues — EVERY live finding on ONE page. Rendered only for
@@ -385,7 +364,7 @@ export function SecurityGate() {
               style={[styles.sectionLabel, { color: `${c.text}80`, fontSize: layout.captionSize }]}
               accessibilityRole="header"
             >
-              DETECTED ISSUES
+              {t('security.gate.detectedIssues')}
             </Text>
             <View style={styles.findingsList}>
               {findings.map((finding) => {
@@ -462,7 +441,7 @@ export function SecurityGate() {
             onPress={onVerify}
             disabled={verifying}
             accessibilityRole="button"
-            accessibilityLabel="Verify security and continue"
+            accessibilityLabel={t('security.gate.verify')}
             accessibilityState={{ disabled: verifying, busy: verifying }}
             style={({ pressed }) => ([
               styles.verifyBtn,
@@ -473,7 +452,7 @@ export function SecurityGate() {
               ? <ActivityIndicator size="small" color="#FFFFFF" />
               : <ShieldAlert size={18} color="#FFFFFF" />}
             <Text style={styles.verifyBtnText}>
-              {verifying ? 'Verifying\u2026' : 'Verify security and continue'}
+              {verifying ? t('security.gate.verifying') : t('security.gate.verify')}
             </Text>
           </Pressable>
         )}
@@ -486,17 +465,8 @@ export function SecurityGate() {
         {hasVerdict && !overlayBlocked && !windowModeBlockedState && (
           <View style={[styles.pill, { backgroundColor: '#EF444418' }]}>
             <Text style={{ fontSize: layout.captionSize, fontWeight: '700', color: '#EF4444' }}>
-              Risk Score: {riskScore}
+              {t('security.gate.riskScore', { score: riskScore })}
             </Text>
-          </View>
-        )}
-
-        {/* READ-ONLY diagnostic — shows which raw signal is actually set and
-            lets the user copy it, on the block page itself (no computer, no
-            login, no privileged access). It cannot dismiss the gate. */}
-        {!overlayBlocked && !windowModeBlockedState && (
-          <View style={{ width: '100%', marginTop: 4 }}>
-            <SecuritySignalReport findings={reportFindings} />
           </View>
         )}
 
@@ -507,7 +477,7 @@ export function SecurityGate() {
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 4 }}>
             <ActivityIndicator size="small" color="#EF4444" />
             <Text style={{ fontSize: layout.captionSize, color: `${c.text}99` }}>
-              Re-validating security state…
+              {t('security.gate.revalidating')}
             </Text>
           </View>
         )}
@@ -525,12 +495,12 @@ export function SecurityGate() {
             accessibilityRole="text"
           >
             {overlayBlocked
-              ? 'Protected content stays hidden while an overlay or another app may be interfering. Closing the interfering app and verifying security restores access.'
+              ? t('security.gate.footerOverlay')
               : windowModeBlockedState
-                ? 'MedAcademy only runs full-screen. Protected content stays closed while the app is in split-screen or another multi-window mode, and access returns automatically as soon as it is full-screen again.'
+                ? t('security.gate.footerWindow')
                 : vpnBlocked
-                  ? 'MedAcademy cannot run while a VPN or proxy is active \u2014 protected content and playback stay closed. Access is restored automatically once the connection is clear and a fresh security check passes.'
-                  : 'This app is locked for your protection. It unlocks automatically once all security issues are resolved.'}
+                  ? t('security.gate.footerVpn')
+                  : t('security.gate.footerDefault')}
           </Text>
         </View>
       </ScrollView>

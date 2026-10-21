@@ -1274,7 +1274,38 @@ export interface DeviceRecord {
   block_reason: string | null;
   blocked_at: string | null;
   registered_at: string;
+  /**
+   * Legacy raw DATETIME (UTC, no zone suffix). Kept for older servers/builds;
+   * new UI reads `last_seen_at` / `last_seen_epoch_ms` through
+   * src/lib/devicePresence.ts, which never parses a naive string as local time.
+   */
   last_active_at: string;
+  /** ISO-8601 UTC (…Z) of the last backend-confirmed presence event. */
+  last_seen_at?: string | null;
+  /** Same instant in epoch ms — unit-exact, no parsing involved. */
+  last_seen_epoch_ms?: number | null;
+  /** Backend-derived state at the time of the response. */
+  presence?: 'online' | 'offline' | 'unknown' | null;
+  is_online?: boolean | null;
+  /** Always null: mobile OSes do not report a reliable offline event. */
+  last_confirmed_offline_at?: string | null;
+}
+
+export interface DevicePresencePolicy {
+  heartbeat_seconds: number;
+  online_window_seconds: number;
+  offline_is_inferred: boolean;
+}
+
+export interface DevicePresenceMeta {
+  /** Server clock — the reference for every elapsed-time calculation. */
+  server_time: string;
+  server_epoch_ms: number;
+  presence_policy: DevicePresencePolicy;
+}
+
+export interface DeviceHeartbeatResponse extends DevicePresenceMeta {
+  device: DeviceRecord;
 }
 
 export interface LoginHistoryRecord {
@@ -1330,7 +1361,7 @@ export async function updateDevicePushToken(
 }
 
 export async function getMyDevices() {
-  return invokeEdgeFunction<{ devices: DeviceRecord[]; max_devices: number | null }>(
+  return invokeEdgeFunction<{ devices: DeviceRecord[]; max_devices: number | null } & Partial<DevicePresenceMeta>>(
     'device-binding', { action: 'status' }
   );
 }
@@ -1339,7 +1370,19 @@ export async function getAdminUserDevices(targetUserId: string) {
   return invokeEdgeFunction<{
     devices: DeviceRecord[];
     profile: { max_devices: number | null; full_name: string; email: string; role: string } | null;
-  }>('device-binding', { action: 'get_devices', target_user_id: targetUserId });
+  } & Partial<DevicePresenceMeta>>('device-binding', { action: 'get_devices', target_user_id: targetUserId });
+}
+
+/**
+ * POST one presence heartbeat for the CURRENT device.
+ *
+ * The backend identifies the device from the access token's `device_id` claim,
+ * so nothing in the body can mark another device online. Safe to call from a
+ * foreground timer: one UPDATE, idempotent, monotonic (an older/delayed beat can
+ * never move the timestamp backwards).
+ */
+export async function sendDeviceHeartbeat(): Promise<DeviceHeartbeatResponse> {
+  return invokeEdgeFunction<DeviceHeartbeatResponse>('device-binding', { action: 'heartbeat' });
 }
 
 export async function logoutDevice(deviceId: string) {
@@ -5336,6 +5379,184 @@ export async function getAdminCourseEnrollments(
     throw new Error(msg || 'Failed to load enrollments');
   }
   return Array.isArray((data as any)?.enrollments) ? (data as any).enrollments : [];
+}
+
+// ── Enrollment statistics (Admin + Super Admin, read-only) ────────────────────
+//
+// TWO metrics that must never be merged into one number:
+//   • unique_students — distinct student ACCOUNTS (a student in 5 courses = 1)
+//   · enrollments     — valid student↔course enrolments (that same student = 5)
+// Every response carries both, so switching the mode in the UI never changes
+// what a figure means and never needs a second request.
+//
+// Counting rules live server-side (EnrollmentStatsController): active enrolments
+// only, student-role profiles only, non-trashed students, non-deleted courses,
+// archived courses excluded unless `include_archived` is set. Duplicate
+// student/course rows are collapsed before aggregation.
+
+export type EnrollmentCountingMode = 'unique_students' | 'enrollments';
+
+export interface EnrollmentStatsTotals {
+  /** Distinct student accounts across the scope. */
+  unique_students: number;
+  /** Student↔course enrolments (one per course per student). */
+  enrollments: number;
+  courses_with_enrollments: number;
+  doctors_with_enrollments: number;
+  courses_total: number;
+  doctors_total: number;
+}
+
+export interface EnrollmentStatsPolicy {
+  counting_modes: EnrollmentCountingMode[];
+  eligible_statuses: string[];
+  includes_null_status: boolean;
+  student_role_only: boolean;
+  excludes_trashed: boolean;
+  include_archived: boolean;
+  counts_are_distinct: boolean;
+}
+
+export interface EnrollmentStatsSummary {
+  totals: EnrollmentStatsTotals;
+  policy: EnrollmentStatsPolicy;
+  server_time: string;
+}
+
+export interface EnrollmentDoctorStatRow {
+  doctor_id: string;
+  full_name: string;
+  email: string;
+  status: string | null;
+  courses_count: number;
+  enrollments: number;
+  unique_students: number;
+}
+
+export interface EnrollmentCourseStatRow {
+  course_id: string;
+  title: string;
+  status: string;
+  archived_at: string | null;
+  doctor_id: string | null;
+  doctor_name: string | null;
+  doctor_email: string | null;
+  enrollments: number;
+  unique_students: number;
+  last_enrolled_at: string | null;
+}
+
+export type EnrollmentStatsSort =
+  | 'unique_students'
+  | 'enrollments'
+  | 'courses'
+  | 'name'
+  | 'title'
+  | 'doctor';
+
+export interface EnrollmentStatsQuery {
+  search?: string;
+  sort?: EnrollmentStatsSort;
+  order?: 'asc' | 'desc';
+  page?: number;
+  per_page?: number;
+  /** Archived courses are excluded by default; this opts them back in. */
+  include_archived?: boolean;
+  /** Courses view only. */
+  doctor_id?: string;
+  /** Courses view only: draft | published | archived. */
+  course_status?: string;
+}
+
+export interface EnrollmentStatsList<TRow> {
+  rows: TRow[];
+  page: number;
+  per_page: number;
+  total: number;
+  total_pages: number;
+  sort?: string;
+  order?: 'asc' | 'desc';
+  policy: EnrollmentStatsPolicy;
+}
+
+export interface EnrollmentDoctorDetail {
+  doctor: EnrollmentDoctorStatRow;
+  courses: Omit<EnrollmentStatsList<EnrollmentCourseStatRow>, 'policy'>;
+  policy: EnrollmentStatsPolicy;
+}
+
+export interface EnrollmentCourseDetail {
+  course: EnrollmentCourseStatRow;
+  policy: EnrollmentStatsPolicy;
+}
+
+function enrollmentQueryParams(q: EnrollmentStatsQuery = {}): Record<string, unknown> {
+  const params: Record<string, unknown> = {};
+  if (q.search?.trim()) params.search = q.search.trim();
+  if (q.sort) params.sort = q.sort;
+  if (q.order) params.order = q.order;
+  if (q.page != null) params.page = q.page;
+  if (q.per_page != null) params.per_page = q.per_page;
+  if (q.include_archived != null) params.include_archived = q.include_archived;
+  if (q.doctor_id) params.doctor_id = q.doctor_id;
+  if (q.course_status) params.course_status = q.course_status;
+  return params;
+}
+
+/** Platform-wide totals + the documented counting policy. */
+export async function getEnrollmentStats(
+  opts: { include_archived?: boolean } = {},
+): Promise<EnrollmentStatsSummary> {
+  const { data, error } = await backendClient.rpc('get_enrollment_stats', {
+    ...(opts.include_archived != null ? { include_archived: opts.include_archived } : {}),
+  });
+  if (error) throw new Error(error.message || 'Failed to load enrollment statistics');
+  if (!data?.totals) throw new Error('Enrollment statistics response was incomplete');
+  return data as EnrollmentStatsSummary;
+}
+
+/** Per-doctor rows (search, sort, pagination) — zeros included. */
+export async function getEnrollmentStatsDoctors(
+  q: EnrollmentStatsQuery = {},
+): Promise<EnrollmentStatsList<EnrollmentDoctorStatRow>> {
+  const { data, error } = await backendClient.rpc('get_enrollment_stats_doctors', enrollmentQueryParams(q));
+  if (error) throw new Error(error.message || 'Failed to load doctor enrollment statistics');
+  if (!Array.isArray(data?.rows)) throw new Error('Doctor enrollment statistics response was incomplete');
+  return data as EnrollmentStatsList<EnrollmentDoctorStatRow>;
+}
+
+/** Per-course rows (search, doctor filter, status, sort, pagination). */
+export async function getEnrollmentStatsCourses(
+  q: EnrollmentStatsQuery = {},
+): Promise<EnrollmentStatsList<EnrollmentCourseStatRow>> {
+  const { data, error } = await backendClient.rpc('get_enrollment_stats_courses', enrollmentQueryParams(q));
+  if (error) throw new Error(error.message || 'Failed to load course enrollment statistics');
+  if (!Array.isArray(data?.rows)) throw new Error('Course enrollment statistics response was incomplete');
+  return data as EnrollmentStatsList<EnrollmentCourseStatRow>;
+}
+
+/** One doctor's totals plus the per-course breakdown behind them. */
+export async function getEnrollmentDoctorStats(
+  doctorId: string,
+  q: Omit<EnrollmentStatsQuery, 'doctor_id'> = {},
+): Promise<EnrollmentDoctorDetail> {
+  const { data, error } = await backendClient.rpc('get_enrollment_doctor_stats', {
+    doctor_id: doctorId,
+    ...enrollmentQueryParams(q),
+  });
+  if (error) throw new Error(error.message || 'Failed to load this doctor\'s statistics');
+  if (!data?.doctor) throw new Error('Doctor statistics response was incomplete');
+  return data as EnrollmentDoctorDetail;
+}
+
+/** One course's metrics (and the doctor it belongs to). */
+export async function getEnrollmentCourseStats(
+  courseId: string,
+): Promise<EnrollmentCourseDetail> {
+  const { data, error } = await backendClient.rpc('get_enrollment_course_stats', { course_id: courseId });
+  if (error) throw new Error(error.message || 'Failed to load this course\'s statistics');
+  if (!data?.course) throw new Error('Course statistics response was incomplete');
+  return data as EnrollmentCourseDetail;
 }
 
 // ── Bulk Data Export (super_admin only, server-audited) ───────────────────

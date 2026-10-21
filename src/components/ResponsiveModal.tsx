@@ -61,6 +61,7 @@ import { X, AlertTriangle } from 'lucide-react-native';
 import { neuColors, mutedTextStyle, useLayout, type NeuPalette } from '@/lib/neu';
 import { NeuButton } from '@/components/NeuButton';
 import { PortalOverlay } from '@/components/PortalOverlay';
+import { useTranslation } from '@/lib/i18n';
 
 export interface ResponsiveModalProps {
   visible: boolean;
@@ -314,6 +315,7 @@ function DiscardConfirmModal({
   const { width: screenW } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const layout = useLayout();
+  const { t } = useTranslation();
   // Same width rule as the main dialog: 92 % viewport, capped.
   const cardW = Math.min(screenW * 0.92, 400);
 
@@ -346,15 +348,15 @@ function DiscardConfirmModal({
                 <AlertTriangle size={26} color="#F59E0B" />
               </View>
               <Text style={{ fontSize: layout.headingSize, fontWeight: '800', color: c.text, textAlign: 'center' }}>
-                Unsaved Changes
+                {t('common.unsavedChanges')}
               </Text>
               <Text style={[{ fontSize: layout.bodySize, textAlign: 'center', marginTop: 6, lineHeight: Math.round(layout.bodySize * 1.5) }, mutedTextStyle(c, 0.55)]}>
-                You have unsaved changes.{'\n'}Leave without saving?
+                {t('common.unsavedBody')}
               </Text>
             </View>
             <View style={{ flexDirection: 'row', gap: 12 }}>
-              <NeuButton label="Keep Editing" onPress={onKeep} variant="secondary" style={{ flex: 1, minWidth: 0 }} />
-              <NeuButton label="Discard" onPress={onDiscard} variant="danger" style={{ flex: 1, minWidth: 0 }} />
+              <NeuButton label={t('common.keepEditing')} onPress={onKeep} variant="secondary" style={{ flex: 1, minWidth: 0 }} />
+              <NeuButton label={t('common.discard')} onPress={onDiscard} variant="danger" style={{ flex: 1, minWidth: 0 }} />
             </View>
           </View>
         </Pressable>

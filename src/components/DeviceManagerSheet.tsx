@@ -25,6 +25,8 @@ import {
 import { parseError } from '@/lib/parseError';
 import { useToast } from '@/components/Toast';
 import { backendClient } from '@/client/backendClient';
+import { useTranslation } from '@/lib/i18n';
+import { formatPresenceLine, getPresence, setServerClock } from '@/lib/devicePresence';
 
 interface DeviceManagerSheetProps {
   visible: boolean;
@@ -38,6 +40,7 @@ export function DeviceManagerSheet({ visible, onClose, userId, userName }: Devic
   const isDark = scheme === 'dark';
   const c = isDark ? neuColors.dark : neuColors.light;
   const { showToast } = useToast();
+  const { t, tCount } = useTranslation();
   const { isLoading, run } = useActionLoading();
 
   const [devices, setDevices]           = useState<DeviceRecord[]>([]);
@@ -56,6 +59,8 @@ export function DeviceManagerSheet({ visible, onClose, userId, userName }: Devic
     setLoading(true);
     try {
       const res = await getAdminUserDevices(userId);
+      // Server clock anchor — relative labels must not depend on this device's clock.
+      setServerClock(res?.server_epoch_ms);
       setDevices((res as any)?.devices ?? []);
       const profile = (res as any)?.profile;
       setMaxDevices(profile?.max_devices ?? null);
@@ -149,21 +154,10 @@ export function DeviceManagerSheet({ visible, onClose, userId, userName }: Devic
     );
   };
 
-  const online = devices.filter(d => {
-    const last = d.last_active_at ? new Date(d.last_active_at).getTime() : 0;
-    return Date.now() - last < 5 * 60 * 1000; // within 5 min = online
-  });
-
-  function relativeTime(iso: string) {
-    const diff = Date.now() - new Date(iso).getTime();
-    const mins  = Math.floor(diff / 60000);
-    const hours = Math.floor(mins / 60);
-    const days  = Math.floor(hours / 24);
-    if (days > 0) return `${days}d ago`;
-    if (hours > 0) return `${hours}h ago`;
-    if (mins > 0) return `${mins}m ago`;
-    return 'Just now';
-  }
+  // Presence is computed by the shared model (UTC-safe parsing, server clock,
+  // documented window). The local 5-minute helper that used to live here read a
+  // naive DATETIME as local time and reported live devices as hours offline.
+  const online = devices.filter(d => getPresence(d).state === 'online');
 
   return (
     <ResponsiveModal
@@ -251,7 +245,8 @@ export function DeviceManagerSheet({ visible, onClose, userId, userName }: Devic
             </View>
           ) : (
             devices.map(device => {
-              const isOnline = online.some(d => d.id === device.id);
+              const presence = getPresence(device);
+              const isOnline = presence.state === 'online';
               const isBlocked = device.status === 'blocked';
               return (
                 <NeuCard key={device.id} style={{ marginBottom: 10, padding: 14 }}>
@@ -275,9 +270,11 @@ export function DeviceManagerSheet({ visible, onClose, userId, userName }: Devic
                       )}
                       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 3 }}>
                         {isOnline
-                          ? <><Wifi size={11} color="#16A34A" /><Text style={{ fontSize: 10, color: '#16A34A', fontWeight: '600' }}>Online</Text></>
-                          : <><WifiOff size={11} color="#6B7280" /><Text style={{ fontSize: 10, color: '#6B7280' }}>{device.last_active_at ? relativeTime(device.last_active_at) : 'Never'}</Text></>
-                        }
+                          ? <Wifi size={11} color="#16A34A" />
+                          : <WifiOff size={11} color="#6B7280" />}
+                        <Text style={{ fontSize: 10, color: isOnline ? '#16A34A' : '#6B7280', fontWeight: isOnline ? '600' : '400' }}>
+                          {formatPresenceLine(presence, t, tCount)}
+                        </Text>
                         {isBlocked && (
                           <View style={{ backgroundColor: '#DC262618', borderRadius: 6, paddingHorizontal: 6, paddingVertical: 1, marginLeft: 4 }}>
                             <Text style={{ fontSize: 9, fontWeight: '700', color: '#DC2626' }}>BLOCKED</Text>

@@ -10,6 +10,7 @@ import { ShieldOff, AlertTriangle, Smartphone, LogOut, Phone } from 'lucide-reac
 import { backendClient } from '@/client/backendClient';
 import { neuColors, neuFlatStyle, mutedTextStyle } from '@/lib/neu';
 import { NeuButton } from '@/components/NeuButton';
+import { t } from '@/lib/i18n';
 
 export default function AccountBlockedScreen() {
   const isDark = useColorScheme() === 'dark';
@@ -38,10 +39,10 @@ export default function AccountBlockedScreen() {
 
       {/* Title */}
       <Text style={{ fontSize: 22, fontWeight: '800', color: c.text, textAlign: 'center', marginBottom: 8 }}>
-        Account Blocked
+        {t('suspended.blockedTitle')}
       </Text>
       <Text style={{ fontSize: 14, ...mutedTextStyle(c, 0.6), textAlign: 'center', lineHeight: 22, marginBottom: 28 }}>
-        Your account has been blocked by an administrator. You cannot access the app at this time.
+        {t('suspended.blockedMessage')}
       </Text>
 
       {/* Info card */}
@@ -49,9 +50,9 @@ export default function AccountBlockedScreen() {
         <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 12 }}>
           <ShieldOff size={20} color="#DC2626" style={{ marginTop: 2 }} />
           <View style={{ flex: 1 }}>
-            <Text style={{ fontSize: 14, fontWeight: '700', color: c.text, marginBottom: 2 }}>Why am I blocked?</Text>
+            <Text style={{ fontSize: 14, fontWeight: '700', color: c.text, marginBottom: 2 }}>{t('suspended.why')}</Text>
             <Text style={{ fontSize: 13, ...mutedTextStyle(c, 0.6), lineHeight: 20 }}>
-              {"Your account was blocked by an administrator. This may be due to a policy violation or at the admin's discretion."}
+              {t('suspended.whyBody')}
             </Text>
           </View>
         </View>
@@ -59,9 +60,9 @@ export default function AccountBlockedScreen() {
         <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 12 }}>
           <AlertTriangle size={20} color={c.primary} style={{ marginTop: 2 }} />
           <View style={{ flex: 1 }}>
-            <Text style={{ fontSize: 14, fontWeight: '700', color: c.text, marginBottom: 2 }}>What can I do?</Text>
+            <Text style={{ fontSize: 14, fontWeight: '700', color: c.text, marginBottom: 2 }}>{t('suspended.whatCanIDo')}</Text>
             <Text style={{ fontSize: 13, ...mutedTextStyle(c, 0.6), lineHeight: 20 }}>
-              Contact support to appeal this decision. Provide your account email and any relevant context.
+              {t('suspended.whatCanIDoBody')}
             </Text>
           </View>
         </View>
@@ -69,9 +70,9 @@ export default function AccountBlockedScreen() {
         <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 12 }}>
           <Smartphone size={20} color={c.primary} style={{ marginTop: 2 }} />
           <View style={{ flex: 1 }}>
-            <Text style={{ fontSize: 14, fontWeight: '700', color: c.text, marginBottom: 2 }}>All sessions ended</Text>
+            <Text style={{ fontSize: 14, fontWeight: '700', color: c.text, marginBottom: 2 }}>{t('suspended.sessionsEnded')}</Text>
             <Text style={{ fontSize: 13, ...mutedTextStyle(c, 0.6), lineHeight: 20 }}>
-              All your active sessions on all devices have been ended automatically.
+              {t('suspended.sessionsEndedBody')}
             </Text>
           </View>
         </View>
@@ -80,14 +81,14 @@ export default function AccountBlockedScreen() {
       {/* Actions */}
       <View style={{ width: '100%', gap: 12 }}>
         <NeuButton
-          label="Contact Support"
+          label={t('support.title')}
           icon={<Phone size={18} color="#fff" />}
           onPress={handleContactSupport}
           variant="primary"
           fullWidth
         />
         <NeuButton
-          label="Back to Login"
+          label={t('suspended.backToLogin')}
           icon={<LogOut size={18} color={c.text} />}
           onPress={handleLogout}
           fullWidth

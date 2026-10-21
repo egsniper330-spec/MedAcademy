@@ -28,6 +28,8 @@ import { neuColors, useLayout, safeBottom, mutedTextStyle } from '@/lib/neu';
 import { displayPhoneNational } from '@/lib/phone';
 import { getContactDisplay, getPublicEmail } from '@/lib/api';
 import { friendlyError } from '@/lib/validation';
+import { useTranslation } from '@/lib/i18n';
+import { statusLabel } from '@/lib/i18n/labels';
 
 type EnrollMethod = 'credits' | null;
 type ActionType   = 'suspend' | 'resume' | 'remove' | 'profile' | null;
@@ -38,12 +40,12 @@ const STATUS_COLOR: Record<string, string> = {
   active: '#16A34A', suspended: '#D97706', pending: '#6B7280', expired: '#DC2626',
 };
 
-const TABS: { key: TabKey; label: string; icon: React.ElementType }[] = [
-  { key: 'all',        label: 'All Students',       icon: Users },
-  { key: 'by_course',  label: 'By Course',           icon: BookOpen },
-  { key: 'active',     label: 'Active',              icon: CheckCircle },
-  { key: 'suspended',  label: 'Suspended',           icon: Ban },
-  { key: 'recent',     label: 'Recently Added',      icon: Clock },
+const TABS: { key: TabKey; labelKey: string; icon: React.ElementType }[] = [
+  { key: 'all',        labelKey: 'drStudents.tabAll',      icon: Users },
+  { key: 'by_course',  labelKey: 'drStudents.tabByCourse', icon: BookOpen },
+  { key: 'active',     labelKey: 'status.active',          icon: CheckCircle },
+  { key: 'suspended',  labelKey: 'status.suspended',       icon: Ban },
+  { key: 'recent',     labelKey: 'drStudents.tabRecent',   icon: Clock },
 ];
 
 export default function DoctorStudents() {
@@ -54,6 +56,7 @@ export default function DoctorStudents() {
   const { profile } = useProfileStore();
   const { showToast } = useToast();
   const router = useRouter();
+  const { t, tCount, locale } = useTranslation();
 
   // ── Data ──────────────────────────────────────────────────────────────────────
   const [enrollments, setEnrollments] = useState<any[]>([]);
@@ -166,9 +169,9 @@ export default function DoctorStudents() {
     try {
       const results = await searchUsers(creditEmail.trim());
       const students = results.filter((u: any) => u.role === 'student');
-      if (students.length === 0) { setCreditError('No student found.'); setCreditSearchResults([]); }
+      if (students.length === 0) { setCreditError(t('drStudents.noStudentFound')); setCreditSearchResults([]); }
       else setCreditSearchResults(students);
-    } catch (e) { setCreditError(friendlyError(e, 'Search failed.')); }
+    } catch (e) { setCreditError(friendlyError(e, t('drStudents.searchFailed'))); }
     setCreditSearching(false);
   };
 
@@ -186,9 +189,9 @@ export default function DoctorStudents() {
       // EF already committed; invalidate cache so balance refreshes everywhere
       invalidateCreditCache();
       await Promise.all([refreshCredits(), loadData()]);
-      showToast({ type: 'success', message: `${creditStudent.full_name} enrolled. 1 credit deducted.` });
+      showToast({ type: 'success', message: t('drStudents.enrolled', { name: creditStudent.full_name }) });
       resetAddModal();
-    } catch (e) { setCreditError(friendlyError(e, 'Enrollment failed. Check your credit balance.')); }
+    } catch (e) { setCreditError(friendlyError(e, t('drStudents.enrollFailed'))); }
     setCreditEnrolling(false);
   };
 
@@ -200,11 +203,11 @@ export default function DoctorStudents() {
       if (actionType === 'suspend') {
         await suspendCourseSubscription(actionTarget.id);
         setEnrollments(prev => prev.map(e => e.id === actionTarget.id ? { ...e, status: 'suspended' } : e));
-        showToast({ type: 'success', message: 'Subscription suspended.' });
+        showToast({ type: 'success', message: t('drStudents.subscriptionSuspended') });
       } else if (actionType === 'resume') {
         await resumeCourseSubscription(actionTarget.id);
         setEnrollments(prev => prev.map(e => e.id === actionTarget.id ? { ...e, status: 'active' } : e));
-        showToast({ type: 'success', message: 'Subscription resumed.' });
+        showToast({ type: 'success', message: t('drStudents.subscriptionResumed') });
       } else if (actionType === 'remove') {
         await removeStudentFromCourseWithRefund({
           doctorId:            profile!.id,
@@ -213,12 +216,12 @@ export default function DoctorStudents() {
           courseNameSnapshot:  actionTarget.course?.title ?? '',
         });
         setEnrollments(prev => prev.filter(e => e.id !== actionTarget.id));
-        showToast({ type: 'success', message: 'Student removed. Revenue deducted.' });
+        showToast({ type: 'success', message: t('drStudents.studentRemoved') });
         invalidateCreditCache();
         loadData();
       }
       setActionTarget(null); setActionType(null);
-    } catch (e) { showToast({ type: 'error', message: friendlyError(e, 'Action failed.') }); }
+    } catch (e) { showToast({ type: 'error', message: friendlyError(e, t('drStudents.actionFailed')) }); }
     setActionLoading(false);
   };
 
@@ -268,7 +271,7 @@ export default function DoctorStudents() {
         await loadData();
       }
     } catch (e) {
-      showToast({ type: 'error', message: friendlyError(e, 'Bulk action failed.') });
+      showToast({ type: 'error', message: friendlyError(e, t('drStudents.bulkFailed')) });
       setBulkResult(null);
     }
     setBulkExecuting(false);
@@ -292,7 +295,7 @@ export default function DoctorStudents() {
         onPress={() => toggleSelect(enrollment.id)}
         accessibilityRole={selectMode ? 'checkbox' : undefined}
         accessibilityState={selectMode ? { checked: isSelected } : undefined}
-        accessibilityLabel={selectMode ? `Select ${s?.full_name ?? 'student'}` : undefined}
+        accessibilityLabel={selectMode ? t('drStudents.selectA11y', { name: s?.full_name ?? t('drStudents.student') }) : undefined}
       >
       <NeuCard style={{
         marginBottom: 10, padding: 16,
@@ -322,14 +325,14 @@ export default function DoctorStudents() {
             <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 2 }}>
               <Text style={{ fontSize: 14, fontWeight: '700', color: c.text }} numberOfLines={1}>{s?.full_name}</Text>
               <View style={{ paddingHorizontal: 8, paddingVertical: 2, borderRadius: 8, backgroundColor: `${statusColor}18` }}>
-                <Text style={{ fontSize: 10, fontWeight: '700', color: statusColor, textTransform: 'uppercase' }}>{enrollment.status}</Text>
+                <Text style={{ fontSize: 10, fontWeight: '700', color: statusColor }}>{statusLabel(enrollment.status, t)}</Text>
               </View>
             </View>
             <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.5) }} numberOfLines={1}>{getContactDisplay(s)}</Text>
             {/* ID — stored Public User ID (MED-XXXX), visible to doctor for enrolled students only */}
             {Boolean(s?.public_user_id) && (
               <Pressable
-                onPress={() => { void Clipboard.setStringAsync(s.public_user_id); showToast({ type: 'success', message: 'ID copied.' }); }}
+                onPress={() => { void Clipboard.setStringAsync(s.public_user_id); showToast({ type: 'success', message: t('drStudents.idCopied') }); }}
                 style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 3 }}
               >
                 <Fingerprint size={11} color={c.primary} opacity={0.7} />
@@ -345,12 +348,12 @@ export default function DoctorStudents() {
                 <Text style={{ fontSize: 10, ...mutedTextStyle(c, 0.4) }} numberOfLines={1}>{s.university.name}</Text>
               )}
               <Text style={{ fontSize: 10, ...mutedTextStyle(c, 0.35) }}>
-                {new Date(enrollment.enrolled_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                {new Date(enrollment.enrolled_at).toLocaleDateString(locale === 'ar' ? 'ar-EG' : 'en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
               </Text>
               {Boolean(enrollment.activation_method) && (
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3 }}>
                   <CreditCard size={9} color={c.text} opacity={0.3} />
-                  <Text style={{ fontSize: 10, ...mutedTextStyle(c, 0.3) }}>{enrollment.activation_method === 'credits' ? 'credits' : enrollment.activation_method}</Text>
+                  <Text style={{ fontSize: 10, ...mutedTextStyle(c, 0.3) }}>{enrollment.activation_method === 'credits' ? t('drStudents.credits') : enrollment.activation_method}</Text>
                 </View>
               )}
             </View>
@@ -362,17 +365,17 @@ export default function DoctorStudents() {
         <View style={{ flexDirection: 'row', gap: 6, marginTop: 12 }}>
           <Pressable onPress={() => openAction(enrollment, 'profile')}
             style={{ flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 4, paddingVertical: 7, borderRadius: 10, backgroundColor: `${c.primary}12` }}>
-            <Eye size={13} color={c.primary} /><Text style={{ fontSize: 11, fontWeight: '600', color: c.primary }}>Profile</Text>
+            <Eye size={13} color={c.primary} /><Text style={{ fontSize: 11, fontWeight: '600', color: c.primary }}>{t('common.profile')}</Text>
           </Pressable>
           {enrollment.status === 'active' ? (
             <Pressable onPress={() => openAction(enrollment, 'suspend')}
               style={{ flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 4, paddingVertical: 7, borderRadius: 10, backgroundColor: '#D9770618' }}>
-              <Ban size={13} color="#D97706" /><Text style={{ fontSize: 11, fontWeight: '600', color: '#D97706' }}>Suspend</Text>
+              <Ban size={13} color="#D97706" /><Text style={{ fontSize: 11, fontWeight: '600', color: '#D97706' }}>{t('drStudents.suspend')}</Text>
             </Pressable>
           ) : (
             <Pressable onPress={() => openAction(enrollment, 'resume')}
               style={{ flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 4, paddingVertical: 7, borderRadius: 10, backgroundColor: '#16A34A18' }}>
-              <Play size={13} color="#16A34A" /><Text style={{ fontSize: 11, fontWeight: '600', color: '#16A34A' }}>Resume</Text>
+              <Play size={13} color="#16A34A" /><Text style={{ fontSize: 11, fontWeight: '600', color: '#16A34A' }}>{t('drStudents.resume')}</Text>
             </Pressable>
           )}
           <Pressable onPress={() => openAction(enrollment, 'remove')}
@@ -393,13 +396,13 @@ export default function DoctorStudents() {
     // ALL STUDENTS
     if (activeTab === 'all') {
       return allFiltered.length === 0
-        ? <EmptyState label="No students found" />
+        ? <EmptyState label={t('drStudents.noStudents')} />
         : allFiltered.map(e => renderEnrollmentCard(e));
     }
 
     // BY COURSE
     if (activeTab === 'by_course') {
-      if (courseGroups.length === 0) return <EmptyState label="No courses with students" />;
+      if (courseGroups.length === 0) return <EmptyState label={t('drStudents.noCoursesWithStudents')} />;
 
       return courseGroups.map(({ course, items }) => {
         const open = expandCourse === course.id;
@@ -412,7 +415,7 @@ export default function DoctorStudents() {
                 </View>
                 <View style={{ flex: 1 }}>
                   <Text style={{ fontSize: 14, fontWeight: '700', color: c.text }} numberOfLines={1}>{course.title}</Text>
-                  <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.5) }}>{items.length} student{items.length !== 1 ? 's' : ''}</Text>
+                  <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.5) }}>{tCount('drStudents.studentCount', items.length)}</Text>
                 </View>
                 <ChevronRight size={16} color={c.text} opacity={0.3}
                   style={{ transform: [{ rotate: open ? '90deg' : '0deg' }] }} />
@@ -431,20 +434,20 @@ export default function DoctorStudents() {
     // ACTIVE
     if (activeTab === 'active') {
       return activeEnrollments.length === 0
-        ? <EmptyState label="No active subscriptions" />
+        ? <EmptyState label={t('drStudents.noActive')} />
         : activeEnrollments.map(e => renderEnrollmentCard(e));
     }
 
     // SUSPENDED
     if (activeTab === 'suspended') {
       return suspendedEnrollments.length === 0
-        ? <EmptyState label="No suspended subscriptions" />
+        ? <EmptyState label={t('drStudents.noSuspended')} />
         : suspendedEnrollments.map(e => renderEnrollmentCard(e));
     }
 
     // RECENTLY ADDED
     if (activeTab === 'recent') {
-      if (recentEnrollments.length === 0) return <EmptyState label="No recent enrollments" />;
+      if (recentEnrollments.length === 0) return <EmptyState label={t('drStudents.noRecent')} />;
       return recentEnrollments.slice(0, 30).map(e => {
         const s = e.student;
         return (
@@ -458,18 +461,18 @@ export default function DoctorStudents() {
                 <Text style={{ fontSize: 11, color: c.primary, opacity: 0.8 }} numberOfLines={1}>{e.course?.title}</Text>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 2 }}>
                   <Text style={{ fontSize: 10, ...mutedTextStyle(c, 0.4) }}>
-                    Added {new Date(e.enrolled_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                    {t('drStudents.addedOn', { date: new Date(e.enrolled_at).toLocaleDateString(locale === 'ar' ? 'ar-EG' : 'en-US', { month: 'short', day: 'numeric', year: 'numeric' }) })}
                   </Text>
                   {Boolean(e.activation_method) && (
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3 }}>
                       <CreditCard size={9} color={c.text} opacity={0.3} />
-                      <Text style={{ fontSize: 10, ...mutedTextStyle(c, 0.3) }}>{e.activation_method === 'credits' ? 'credits' : e.activation_method}</Text>
+                      <Text style={{ fontSize: 10, ...mutedTextStyle(c, 0.3) }}>{e.activation_method === 'credits' ? t('drStudents.credits') : e.activation_method}</Text>
                     </View>
                   )}
                 </View>
               </View>
               <View style={{ paddingHorizontal: 8, paddingVertical: 2, borderRadius: 8, backgroundColor: `${STATUS_COLOR[e.status] ?? '#6B7280'}18` }}>
-                <Text style={{ fontSize: 10, fontWeight: '700', color: STATUS_COLOR[e.status] ?? '#6B7280', textTransform: 'uppercase' }}>{e.status}</Text>
+                <Text style={{ fontSize: 10, fontWeight: '700', color: STATUS_COLOR[e.status] ?? '#6B7280' }}>{statusLabel(e.status, t)}</Text>
               </View>
             </View>
           </NeuCard>
@@ -496,8 +499,8 @@ export default function DoctorStudents() {
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />} contentContainerStyle={{ paddingBottom: safeBottom(layout.insets.bottom) }}
       >
           <PageHeader
-            title="Students"
-            subtitle={`${enrollments.length} total · ${credits?.remaining ?? 0} credits remaining`}
+            title={t('nav.students')}
+            subtitle={t('drStudents.subtitle', { total: enrollments.length, credits: credits?.remaining ?? 0 })}
             accentColor={c.primary}
           />
 
@@ -508,16 +511,17 @@ export default function DoctorStudents() {
             <Pressable onPress={openAddModal} style={{ flex: 1 }}>
               <NeuCard style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: 14 }}>
                 <UserPlus size={18} color={c.primary} />
-                <Text style={{ fontSize: 14, fontWeight: '700', color: c.primary }}>Add Student</Text>
+                <Text style={{ fontSize: 14, fontWeight: '700', color: c.primary }}>{t('drStudents.addStudent')}</Text>
               </NeuCard>
             </Pressable>
             <Pressable onPress={() => router.push('/(app)/(doctor)/create-student' as RelativePathString)} style={{ flex: 1 }}>
               <NeuCard style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: 14 }}>
                 <PlusCircle size={18} color="#22C55E" />
-                <Text style={{ fontSize: 14, fontWeight: '700', color: '#22C55E' }}>Create Student</Text>
+                <Text style={{ fontSize: 14, fontWeight: '700', color: '#22C55E' }}>{t('drStudents.createStudent')}</Text>
               </NeuCard>
             </Pressable>
-            <Pressable onPress={() => router.push('/(app)/(doctor)/bulk-import-students' as RelativePathString)}>
+            <Pressable onPress={() => router.push('/(app)/(doctor)/bulk-import-students' as RelativePathString)}
+              accessibilityRole="button" accessibilityLabel={t('drStudents.bulkImportA11y')}>
               <NeuCard style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: 14, paddingHorizontal: 14 }}>
                 <Upload size={18} color="#F59E0B" />
               </NeuCard>
@@ -529,12 +533,12 @@ export default function DoctorStudents() {
             <Pressable
               onPress={() => setSelectMode(true)}
               accessibilityRole="button"
-              accessibilityLabel="Select students for bulk actions"
+              accessibilityLabel={t('drStudents.selectModeA11y')}
               style={{ alignSelf: 'flex-start', flexDirection: 'row', alignItems: 'center', gap: 6,
                 paddingHorizontal: 12, paddingVertical: 7, borderRadius: 10,
                 backgroundColor: `${c.primary}12`, marginBottom: 12 }}>
               <ListChecks size={14} color={c.primary} />
-              <Text style={{ fontSize: 12.5, fontWeight: '700', color: c.primary }}>Select</Text>
+              <Text style={{ fontSize: 12.5, fontWeight: '700', color: c.primary }}>{t('drStudents.select')}</Text>
             </Pressable>
           ) : (
             /* Selection action bar — appears only when at least one is selected */
@@ -543,26 +547,26 @@ export default function DoctorStudents() {
                 <Pressable
                   onPress={selectAllVisible}
                   accessibilityRole="button"
-                  accessibilityLabel="Select all visible students"
+                  accessibilityLabel={t('drStudents.selectAllA11y')}
                   style={{ flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 10, paddingVertical: 7,
                     borderRadius: 10, backgroundColor: `${c.primary}12` }}>
                   <CheckCircle size={13} color={c.primary} />
-                  <Text style={{ fontSize: 12, fontWeight: '700', color: c.primary }}>All visible</Text>
+                  <Text style={{ fontSize: 12, fontWeight: '700', color: c.primary }}>{t('drStudents.allVisible')}</Text>
                 </Pressable>
                 <Pressable
                   onPress={() => setSelected(new Set())}
                   accessibilityRole="button"
-                  accessibilityLabel="Clear selection"
+                  accessibilityLabel={t('drStudents.clearSelectionA11y')}
                   style={{ paddingHorizontal: 10, paddingVertical: 7, borderRadius: 10, backgroundColor: `${c.text}0d` }}>
-                  <Text style={{ fontSize: 12, fontWeight: '700', ...mutedTextStyle(c, 0.6) }}>Clear</Text>
+                  <Text style={{ fontSize: 12, fontWeight: '700', ...mutedTextStyle(c, 0.6) }}>{t('drStudents.clear')}</Text>
                 </Pressable>
-                <Text style={{ fontSize: 12.5, fontWeight: '700', color: c.text, flex: 1, textAlign: 'right' }}>
-                  {selected.size} selected
+                <Text style={{ fontSize: 12.5, fontWeight: '700', color: c.text, flex: 1 }}>
+                  {t('bulk.selected', { count: selected.size })}
                 </Text>
                 <Pressable
                   onPress={exitSelectMode}
                   accessibilityRole="button"
-                  accessibilityLabel="Exit select mode"
+                  accessibilityLabel={t('drStudents.exitSelectA11y')}
                   style={{ paddingHorizontal: 10, paddingVertical: 7, borderRadius: 10, backgroundColor: `${c.text}0d` }}>
                   <X size={14} color={c.text} opacity={0.6} />
                 </Pressable>
@@ -575,12 +579,12 @@ export default function DoctorStudents() {
                   <Pressable
                     onPress={() => setBulkMenu(v => !v)}
                     accessibilityRole="button"
-                    accessibilityLabel="Open bulk actions"
+                    accessibilityLabel={t('drStudents.openBulkA11y')}
                     style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
                       paddingVertical: 12, borderRadius: 12, backgroundColor: c.primary }}>
                     <ListChecks size={16} color="#fff" />
                     <Text style={{ fontSize: 14, fontWeight: '800', color: '#fff' }}>
-                      Bulk Actions ({selected.size})
+                      {t('drStudents.bulkActions', { count: selected.size })}
                     </Text>
                   </Pressable>
                   {bulkMenu && (
@@ -591,7 +595,9 @@ export default function DoctorStudents() {
                             borderRadius: 12, backgroundColor: '#D9770618' }}>
                           <Ban size={15} color="#D97706" />
                           <Text style={{ fontSize: 13, fontWeight: '700', color: '#D97706' }}>
-                            Suspend{selectedActiveCount < selected.size ? ` (${selectedActiveCount} active)` : ''}
+                            {selectedActiveCount < selected.size
+                              ? t('drStudents.suspendActive', { count: selectedActiveCount })
+                              : t('drStudents.suspend')}
                           </Text>
                         </Pressable>
                       )}
@@ -601,7 +607,9 @@ export default function DoctorStudents() {
                             borderRadius: 12, backgroundColor: '#16A34A18' }}>
                           <Play size={15} color="#16A34A" />
                           <Text style={{ fontSize: 13, fontWeight: '700', color: '#16A34A' }}>
-                            Resume{selectedSuspendedCount < selected.size ? ` (${selectedSuspendedCount} suspended)` : ''}
+                            {selectedSuspendedCount < selected.size
+                              ? t('drStudents.resumeSuspended', { count: selectedSuspendedCount })
+                              : t('drStudents.resume')}
                           </Text>
                         </Pressable>
                       )}
@@ -609,7 +617,7 @@ export default function DoctorStudents() {
                         style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 11, paddingHorizontal: 14,
                           borderRadius: 12, backgroundColor: '#DC262618' }}>
                         <Trash2 size={15} color="#DC2626" />
-                        <Text style={{ fontSize: 13, fontWeight: '700', color: '#DC2626' }}>Remove from course</Text>
+                        <Text style={{ fontSize: 13, fontWeight: '700', color: '#DC2626' }}>{t('drStudents.removeFromCourse')}</Text>
                       </Pressable>
                     </View>
                   )}
@@ -625,7 +633,7 @@ export default function DoctorStudents() {
             shadowColor: c.shadowDark, shadowOffset: { width: 2, height: 2 }, shadowOpacity: 0.5, shadowRadius: 6 }}>
             <Search size={16} color={c.text} opacity={0.4} style={{ flexShrink: 0 }} />
             <TextInput
-              placeholder="Search students, courses…"
+              placeholder={t('drStudents.searchPlaceholder')}
               placeholderTextColor={`${c.text}50`}
               value={query}
               onChangeText={setQuery}
@@ -654,7 +662,7 @@ export default function DoctorStudents() {
                       shadowOpacity: active ? 0 : 0.4, shadowRadius: active ? 0 : 5 }}>
                     <Icon size={13} color={active ? '#fff' : `${c.text}70`} />
                     <Text style={{ fontSize: 12, fontWeight: '700', color: active ? '#fff' : `${c.text}70` }}>
-                      {tab.label}
+                      {t(tab.labelKey)}
                     </Text>
                     <View style={{ paddingHorizontal: 5, paddingVertical: 1, borderRadius: 6,
                       backgroundColor: active ? 'rgba(255,255,255,0.25)' : `${c.text}12` }}>
@@ -674,11 +682,11 @@ export default function DoctorStudents() {
       </ScrollView>
 
       {/* ── Add Student Modal ───────────────────────────────────────────────────── */}
-      <ResponsiveModal visible={addModal} onClose={resetAddModal} title="Add Student">
+      <ResponsiveModal visible={addModal} onClose={resetAddModal} title={t('drStudents.addStudent')}>
         {enrollMethod === null && (
           <View style={{ gap: 12 }}>
             <Text style={{ fontSize: 14, ...mutedTextStyle(c, 0.6), textAlign: 'center', marginBottom: 8 }}>
-              Choose enrollment method
+              {t('drStudents.chooseMethod')}
             </Text>
             <Pressable onPress={() => setEnrollMethod('credits')}>
               <NeuCard style={{ flexDirection: 'row', alignItems: 'center', gap: 14, padding: 18 }}>
@@ -686,8 +694,8 @@ export default function DoctorStudents() {
                   <CreditCard size={20} color="#16A34A" />
                 </View>
                 <View style={{ flex: 1 }}>
-                  <Text style={{ fontSize: 14, fontWeight: '700', color: c.text }}>Add via Credits</Text>
-                  <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.5), marginTop: 2 }}>Deduct 1 credit to enroll a student directly</Text>
+                  <Text style={{ fontSize: 14, fontWeight: '700', color: c.text }}>{t('drStudents.addViaCredits')}</Text>
+                  <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.5), marginTop: 2 }}>{t('drStudents.addViaCreditsHint')}</Text>
                 </View>
               </NeuCard>
             </Pressable>
@@ -699,16 +707,16 @@ export default function DoctorStudents() {
           <View style={{ gap: 14 }}>
             <Pressable onPress={() => { setEnrollMethod(null); setCreditStep(1); }} style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 4 }}>
               <X size={14} color={c.text} opacity={0.4} />
-              <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.5) }}>Back</Text>
+              <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.5) }}>{t('common.back')}</Text>
             </Pressable>
 
             {/* Step 1: Find student */}
             {creditStep === 1 && (
               <>
-                <Text style={{ fontSize: 13, ...mutedTextStyle(c, 0.6) }}>Search by email or phone:</Text>
+                <Text style={{ fontSize: 13, ...mutedTextStyle(c, 0.6) }}>{t('drStudents.searchByEmailOrPhone')}</Text>
                 <View style={{ flexDirection: 'row', gap: 8 }}>
                   <TextInput
-                    placeholder="student@email.com or phone"
+                    placeholder={t('drStudents.studentSearchPlaceholder')}
                     placeholderTextColor={`${c.text}50`}
                     value={creditEmail}
                     onChangeText={setCreditEmail}
@@ -741,15 +749,15 @@ export default function DoctorStudents() {
             {creditStep === 2 && creditStudent && (
               <>
                 <NeuCard style={{ padding: 12, marginBottom: 4 }}>
-                  <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.5) }}>Student</Text>
+                  <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.5) }}>{t('drStudents.student')}</Text>
                   <Text style={{ fontSize: 14, fontWeight: '700', color: c.text }}>{creditStudent.full_name}</Text>
                   <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.5) }}>{getContactDisplay(creditStudent)}</Text>
                 </NeuCard>
-                <Text style={{ fontSize: 13, ...mutedTextStyle(c, 0.6) }}>Select course:</Text>
+                <Text style={{ fontSize: 13, ...mutedTextStyle(c, 0.6) }}>{t('drStudents.selectCourse')}</Text>
                 {modalCoursesLoading
                   ? <ActivityIndicator color={c.primary} style={{ marginVertical: 12 }} />
                   : modalCourses.length === 0
-                    ? <Text style={{ fontSize: 13, ...mutedTextStyle(c, 0.5) }}>{"You don't have any published courses yet."}</Text>
+                    ? <Text style={{ fontSize: 13, ...mutedTextStyle(c, 0.5) }}>{t('drStudents.noPublishedCourses')}</Text>
                     : modalCourses.map(course => (
                         <Pressable key={course.id} onPress={() => { setCreditCourse(course.id); setCreditStep(3); }}>
                           <NeuCard style={{ flexDirection: 'row', alignItems: 'center', gap: 12, padding: 12,
@@ -768,10 +776,10 @@ export default function DoctorStudents() {
               <>
                 <NeuCard style={{ padding: 16, gap: 8 }}>
                   {[
-                    { label: 'Student',          value: creditStudent.full_name },
-                    { label: 'Course',           value: modalCourses.find(mc => mc.id === creditCourse)?.title ?? '' },
-                    { label: 'Cost',             value: '1 Credit' },
-                    { label: 'Current Balance',  value: `${credits?.remaining ?? 0} Credits` },
+                    { label: t('drStudents.student'),         value: creditStudent.full_name },
+                    { label: t('drStudents.course'),          value: modalCourses.find(mc => mc.id === creditCourse)?.title ?? '' },
+                    { label: t('drStudents.cost'),            value: tCount('drStudents.creditCount', 1) },
+                    { label: t('drStudents.currentBalance'),  value: tCount('drStudents.creditCount', credits?.remaining ?? 0) },
                   ].map(row => (
                     <View key={row.label} style={{ flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 6, borderBottomWidth: 1, borderBottomColor: `${c.text}08` }}>
                       <Text style={{ fontSize: 13, ...mutedTextStyle(c, 0.5) }}>{row.label}</Text>
@@ -780,7 +788,7 @@ export default function DoctorStudents() {
                   ))}
                 </NeuCard>
                 {creditError ? <Text style={{ fontSize: 12, color: '#DC2626' }}>{creditError}</Text> : null}
-                <NeuButton label={creditEnrolling ? 'Enrolling…' : 'Add Student'} onPress={handleEnrollCredits}
+                <NeuButton label={creditEnrolling ? t('drStudents.enrolling') : t('drStudents.addStudent')} onPress={handleEnrollCredits}
                   loading={creditEnrolling} disabled={creditEnrolling} />
               </>
             )}
@@ -792,19 +800,19 @@ export default function DoctorStudents() {
       <ResponsiveModal
         visible={!!actionTarget && actionType !== 'profile'}
         onClose={() => { setActionTarget(null); setActionType(null); }}
-        title={actionType === 'suspend' ? 'Suspend Subscription' : actionType === 'resume' ? 'Resume Subscription' : 'Remove Student'}
+        title={actionType === 'suspend' ? t('drStudents.suspendTitle') : actionType === 'resume' ? t('drStudents.resumeTitle') : t('drStudents.removeTitle')}
       >
         {actionTarget && actionType !== 'profile' && (
           <View style={{ gap: 16 }}>
             <Text style={{ fontSize: 14, color: c.text, opacity: 0.7, textAlign: 'center' }}>
               {actionType === 'suspend'
-                ? `Suspend ${actionTarget.student?.full_name}'s access to ${actionTarget.course?.title}?`
+                ? t('drStudents.suspendPrompt', { name: actionTarget.student?.full_name, course: actionTarget.course?.title })
                 : actionType === 'resume'
-                ? `Resume ${actionTarget.student?.full_name}'s access to ${actionTarget.course?.title}?`
-                : `Permanently remove ${actionTarget.student?.full_name} from ${actionTarget.course?.title}?`}
+                ? t('drStudents.resumePrompt', { name: actionTarget.student?.full_name, course: actionTarget.course?.title })
+                : t('drStudents.removePrompt', { name: actionTarget.student?.full_name, course: actionTarget.course?.title })}
             </Text>
             <NeuButton
-              label={actionLoading ? 'Processing…' : actionType === 'suspend' ? 'Suspend' : actionType === 'resume' ? 'Resume' : 'Remove'}
+              label={actionLoading ? t('common.processing') : actionType === 'suspend' ? t('drStudents.suspend') : actionType === 'resume' ? t('drStudents.resume') : t('common.remove')}
               onPress={handleAction} loading={actionLoading}
               style={{ backgroundColor: actionType === 'remove' ? '#DC2626' : actionType === 'suspend' ? '#D97706' : '#16A34A' }}
             />
@@ -816,7 +824,7 @@ export default function DoctorStudents() {
         <ResponsiveModal
           visible={!!actionTarget && actionType === 'profile'}
           onClose={() => { setActionTarget(null); setActionType(null); }}
-          title="Student Profile"
+          title={t('drStudents.profileTitle')}
         >
           {actionTarget && actionType === 'profile' && (() => {
             const s = actionTarget.student;
@@ -831,46 +839,44 @@ export default function DoctorStudents() {
             : null;
 
           // Account status — use account-level status, not enrollment status
-          const accountStatus = s?.status
-            ? (s.status as string).charAt(0).toUpperCase() + (s.status as string).slice(1)
-            : null;
+          const accountStatus = s?.status ? statusLabel(s.status as string, t) : null;
 
           // Registration date
           const registeredDate = s?.created_at
-            ? new Date(s.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+            ? new Date(s.created_at).toLocaleDateString(locale === 'ar' ? 'ar-EG' : 'en-US', { month: 'short', day: 'numeric', year: 'numeric' })
             : null;
 
           // Always-shown student info rows (Phone and ID always present even if "Not Available")
           const infoRows: { label: string; value: string; highlight?: boolean; mono?: boolean; copyable?: boolean }[] = [
-            { label: 'Full Name',      value: s?.full_name ?? '—' },
-            { label: 'Email',          value: getPublicEmail(s) ?? '—' },
-            { label: 'Phone Number',   value: phoneDisplay ?? 'Not Available', highlight: !phoneDisplay },
-            { label: 'ID',             value: s?.public_user_id ?? 'Not Available', highlight: !s?.public_user_id, mono: true, copyable: !!s?.public_user_id },
-            { label: 'Account Status', value: accountStatus ?? '—' },
-            { label: 'Registered',     value: registeredDate ?? '—' },
+            { label: t('drStudents.fullName'),      value: s?.full_name ?? '—' },
+            { label: t('common.email'),             value: getPublicEmail(s) ?? '—' },
+            { label: t('drStudents.phoneNumber'),   value: phoneDisplay ?? t('drStudents.notAvailable'), highlight: !phoneDisplay },
+            { label: t('drStudents.id'),            value: s?.public_user_id ?? t('drStudents.notAvailable'), highlight: !s?.public_user_id, mono: true, copyable: !!s?.public_user_id },
+            { label: t('drStudents.accountStatus'), value: accountStatus ?? '—' },
+            { label: t('drStudents.registered'),    value: registeredDate ?? '—' },
           ];
 
           // Optional enrollment-context rows
           const contextRows: { label: string; value: string | undefined }[] = [
-            { label: 'University',     value: s?.university?.name },
-            { label: 'Faculty',        value: s?.faculty?.name },
-            { label: 'Academic Level', value: s?.academic_level?.name },
-            { label: 'Course',         value: actionTarget.course?.title },
-            { label: 'Enrolled',       value: new Date(actionTarget.enrolled_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) },
-            { label: 'Enrollment Status', value: actionTarget.status },
-            { label: 'Method',         value: actionTarget.activation_method },
+            { label: t('drStudents.university'),       value: s?.university?.name },
+            { label: t('drStudents.faculty'),          value: s?.faculty?.name },
+            { label: t('drStudents.academicLevel'),    value: s?.academic_level?.name },
+            { label: t('drStudents.course'),           value: actionTarget.course?.title },
+            { label: t('drStudents.enrolledOn'),       value: new Date(actionTarget.enrolled_at).toLocaleDateString(locale === 'ar' ? 'ar-EG' : 'en-US', { month: 'short', day: 'numeric', year: 'numeric' }) },
+            { label: t('drStudents.enrollmentStatus'), value: statusLabel(actionTarget.status, t) },
+            { label: t('drStudents.method'),           value: actionTarget.activation_method === 'credits' ? t('drStudents.credits') : actionTarget.activation_method },
           ].filter(r => !!r.value) as { label: string; value: string }[];
 
           return (
             <View style={{ gap: 0 }}>
               {/* ── Student Information section ── */}
               <Text style={{ fontSize: 11, fontWeight: '700', letterSpacing: 1.1, textTransform: 'uppercase', ...mutedTextStyle(c, 0.4), marginBottom: 6 }}>
-                Student Information
+                {t('drStudents.studentInformation')}
               </Text>
               {infoRows.map(row => (
                 <Pressable
                   key={row.label}
-                  onPress={row.copyable ? () => { void Clipboard.setStringAsync(row.value); showToast({ type: 'success', message: `${row.label} copied.` }); } : undefined}
+                  onPress={row.copyable ? () => { void Clipboard.setStringAsync(row.value); showToast({ type: 'success', message: t('drStudents.copied', { label: row.label }) }); } : undefined}
                   style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: `${c.text}08` }}
                 >
                   <Text style={{ fontSize: 13, ...mutedTextStyle(c, 0.5), flexShrink: 0 }}>{row.label}</Text>
@@ -898,7 +904,7 @@ export default function DoctorStudents() {
               {contextRows.length > 0 && (
                 <>
                   <Text style={{ fontSize: 11, fontWeight: '700', letterSpacing: 1.1, textTransform: 'uppercase', ...mutedTextStyle(c, 0.4), marginBottom: 6, marginTop: 16 }}>
-                    Enrollment Details
+                    {t('drStudents.enrollmentDetails')}
                   </Text>
                   {contextRows.map(row => (
                     <View key={row.label} style={{ flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: `${c.text}08` }}>
@@ -917,20 +923,26 @@ export default function DoctorStudents() {
       <ResponsiveModal
         visible={bulkConfirm !== null && bulkResult === null}
         onClose={() => setBulkConfirm(null)}
-        title={bulkConfirm === 'suspend' ? 'Suspend students' : bulkConfirm === 'resume' ? 'Resume students' : 'Remove students'}
+        title={bulkConfirm === 'suspend' ? t('drStudents.bulkSuspendTitle') : bulkConfirm === 'resume' ? t('drStudents.bulkResumeTitle') : t('drStudents.bulkRemoveTitle')}
       >
         {bulkConfirm !== null && (
           <View style={{ gap: 16 }}>
             <Text style={{ fontSize: 14, color: c.text, opacity: 0.7, textAlign: 'center' }}>
               {bulkConfirm === 'suspend'
-                ? `This will suspend the selected students. (${selectedActiveCount} of ${selected.size} selected are active)`
+                ? t('drStudents.bulkSuspendPrompt', { active: selectedActiveCount, total: selected.size })
                 : bulkConfirm === 'resume'
-                ? `This will resume the selected students. (${selectedSuspendedCount} of ${selected.size} selected are suspended)`
-                : `This will permanently remove ${selected.size} selected enrollment${selected.size === 1 ? '' : 's'} from their courses and adjust earnings. This action cannot be easily undone.`}
+                ? t('drStudents.bulkResumePrompt', { suspended: selectedSuspendedCount, total: selected.size })
+                : tCount('drStudents.bulkRemovePrompt', selected.size)}
             </Text>
             <View style={{ gap: 8 }}>
               <NeuButton
-                label={bulkExecuting ? 'Processing…' : bulkConfirm === 'suspend' ? `Suspend ${selectedActiveCount || selected.size}` : bulkConfirm === 'resume' ? `Resume ${selectedSuspendedCount || selected.size}` : `Remove ${selected.size}`}
+                label={bulkExecuting
+                  ? t('common.processing')
+                  : bulkConfirm === 'suspend'
+                  ? t('drStudents.suspendCount', { count: selectedActiveCount || selected.size })
+                  : bulkConfirm === 'resume'
+                  ? t('drStudents.resumeCount', { count: selectedSuspendedCount || selected.size })
+                  : t('drStudents.removeCount', { count: selected.size })}
                 onPress={() => void executeBulk(bulkConfirm)}
                 loading={bulkExecuting}
                 disabled={bulkExecuting}
@@ -938,7 +950,7 @@ export default function DoctorStudents() {
               />
               <Pressable onPress={() => setBulkConfirm(null)} disabled={bulkExecuting}
                 style={{ paddingVertical: 10, alignItems: 'center' }}>
-                <Text style={{ fontSize: 13, fontWeight: '600', ...mutedTextStyle(c, 0.55) }}>Cancel</Text>
+                <Text style={{ fontSize: 13, fontWeight: '600', ...mutedTextStyle(c, 0.55) }}>{t('common.cancel')}</Text>
               </Pressable>
             </View>
           </View>
@@ -949,14 +961,16 @@ export default function DoctorStudents() {
       <ResponsiveModal
         visible={bulkResult !== null}
         onClose={() => { setBulkResult(null); setBulkConfirm(null); }}
-        title="Bulk action result"
+        title={t('drStudents.bulkResultTitle')}
       >
         {bulkResult && (
           <View style={{ gap: 14 }}>
             <Text style={{ fontSize: 15, fontWeight: '700', color: c.text, textAlign: 'center' }}>
-              {bulkResult.succeeded} succeeded
-              {bulkResult.failed > 0 ? `, ${bulkResult.failed} failed` : ''}
-              {bulkResult.skipped > 0 ? `, ${bulkResult.skipped} skipped` : ''}
+              {t('drStudents.resultSummary', {
+                succeeded: bulkResult.succeeded,
+                failed: bulkResult.failed,
+                skipped: bulkResult.skipped,
+              })}
             </Text>
             {bulkResult.failed > 0 && (
               <View style={{ gap: 6 }}>
@@ -967,14 +981,14 @@ export default function DoctorStudents() {
                     <View key={r.id} style={{ flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: `${c.text}08` }}>
                       <Text style={{ fontSize: 13, color: c.text }} numberOfLines={1}>{name}</Text>
                       <Text style={{ fontSize: 12, color: '#DC2626', fontWeight: '600' }}>
-                        {r.reason === 'not_authorized' ? 'Not authorized' : r.reason === 'not_found' ? 'Not found' : 'Failed'}
+                        {r.reason === 'not_authorized' ? t('drStudents.notAuthorized') : r.reason === 'not_found' ? t('drStudents.notFound') : t('common.failed')}
                       </Text>
                     </View>
                   );
                 })}
               </View>
             )}
-            <NeuButton label="Done" onPress={() => { setBulkResult(null); setBulkConfirm(null); }} />
+            <NeuButton label={t('common.done')} onPress={() => { setBulkResult(null); setBulkConfirm(null); }} />
           </View>
         )}
       </ResponsiveModal>

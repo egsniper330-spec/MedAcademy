@@ -131,7 +131,10 @@ console.log('\u2500\u2500 Registration behaviour untouched \u2500\u2500');
   const src = read(SCREENS['Create Account']);
   // The fix is layout-only: the submit path, validation and role assignment
   // must be exactly as before.
-  ok(/label="Create Account"/.test(src), 'Create Account: submit button still present');
+  // The button label is translated now; the submit CONTROL must still be there
+  // and must still call the same handler.
+  ok(/label=\{t\('signUp\.createAccount'\)\}/.test(src) && /onPress=\{handleSignUp\}/.test(src),
+    'Create Account: submit button still present');
   ok(/router\.replace\('\/\(auth\)\/sign-in'\)/.test(src),
     'Create Account: post-registration redirect unchanged');
   ok(/role:\s*'student'/.test(src), 'Create Account: self-registration role still hardcoded to student');

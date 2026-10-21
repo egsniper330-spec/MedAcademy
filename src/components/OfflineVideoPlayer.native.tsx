@@ -71,6 +71,7 @@ import {
 import { beginFullscreenOrientation, releaseFullscreenOrientation } from '@/lib/fullscreenOrientation';
 import { useSecurityPlaybackStop } from '@/lib/useSecurityPlaybackStop';
 
+import { t } from '@/lib/i18n';
 import type { OfflineVideoPlayerProps } from './OfflineVideoPlayer.types';
 export type { OfflineVideoPlayerProps };
 
@@ -197,9 +198,9 @@ export function OfflineVideoPlayer({ entry, shouldAllowPlayback, fullscreenVerdi
     }
     setError({
       message:
-        kind === 'expired' ? 'The offline rental license has expired.'
+        kind === 'expired' ? t('offline.errorExpiredRental')
         : kind === 'incomplete_media'
-          ? 'This download is not complete on this device. Delete it and download again while online.'
+          ? t('offline.errorIncomplete')
           : kind === 'renderer'
             ? `${raw} (code ${String(code)}). Close and reopen the app — if it persists, make sure no other video is playing in the app and try again.`
             : kind === 'drm_state'
@@ -280,7 +281,7 @@ export function OfflineVideoPlayer({ entry, shouldAllowPlayback, fullscreenVerdi
       if (cancelled) return;
       if (verdict === 'not_completed') {
         setError({
-          message: 'This download is not complete on this device. Delete it and download again while online.',
+          message: t('offline.errorIncomplete'),
           expired: false,
         });
       }
@@ -295,8 +296,8 @@ export function OfflineVideoPlayer({ entry, shouldAllowPlayback, fullscreenVerdi
   if (expired) {
     return (
       <OfflinePlayerMessage
-        title="Download Expired"
-        body="The offline license for this video has expired. Reconnect to the internet to renew your access, then download the video again."
+        title={t('offline.downloadExpired')}
+        body={t('offline.expiredBody')}
       />
     );
   }
@@ -304,8 +305,8 @@ export function OfflineVideoPlayer({ entry, shouldAllowPlayback, fullscreenVerdi
   if (gateDenied) {
     return (
       <OfflinePlayerMessage
-        title="Playback Blocked"
-        body="Your device does not currently meet MedAcademy's security requirements. Playback is unavailable until every security issue is resolved."
+        title={t('offline.playbackBlocked')}
+        body={t('offline.gateBody')}
       />
     );
   }
@@ -313,10 +314,10 @@ export function OfflineVideoPlayer({ entry, shouldAllowPlayback, fullscreenVerdi
   if (error) {
     return (
       <OfflinePlayerMessage
-        title={error.expired ? 'Download Expired' : 'Playback Error'}
+        title={error.expired ? t('offline.downloadExpired') : t('offline.playbackError')}
         body={error.expired
-          ? 'The offline license has expired. Reconnect to the internet and download the video again to continue watching.'
-          : `The DRM player could not play this download. ${error.message}`}
+          ? t('offline.expiredBodyShort')
+          : t('offline.drmFail', { message: error.message })}
       />
     );
   }
@@ -392,7 +393,7 @@ export function OfflineVideoPlayer({ entry, shouldAllowPlayback, fullscreenVerdi
           onPress={exitFullscreen}
           style={{ position: 'absolute', top: Math.max(12, insets.top + 8), left: Math.max(12, insets.left + 8), width: 44, height: 44, borderRadius: 22, backgroundColor: '#00000080', alignItems: 'center', justifyContent: 'center', zIndex: 999 }}
           accessibilityRole="button"
-          accessibilityLabel="Exit fullscreen"
+          accessibilityLabel={t('player.exitFullscreen')}
           hitSlop={{ top: 8, right: 8, bottom: 8, left: 8 }}
         >
           <ArrowLeft size={22} color="#fff" />

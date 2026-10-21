@@ -522,28 +522,32 @@ export const NETWORK_LOCK_SCOPE = {
  * Map a BLOCKING finding to the copy key used to describe it on screen.
  *
  * WHY THIS EXISTS (observed on-device defect): the security engine collapses
- * three unrelated conditions into the single event type `debug_detected` —
+ * unrelated conditions into the single event type `debug_detected` —
  *
  *   • a test-only / debuggable build (`testOnlyBuild`, `__DEV__`)
- *   • a mock-location provider selected on the device (AppOps / legacy flag)
  *   • an emulator-like device (`emulatorDetected`)
  *
- * — and the gate rendered one shared piece of copy for all three: "Insecure
- * Build Detected / Install the official production release of the app." On a
- * device whose only problem was a mock-location setting that was false advice:
- * the installation was not insecure, and reinstalling the official release
- * cannot clear a device condition. The displayed finding therefore contradicted
- * the result that produced it (finding, risk score and gate decision disagreed).
+ * — and the gate rendered one shared piece of copy for both: "Insecure Build
+ * Detected / Install the official production release of the app." On an
+ * emulator-like device that is false advice: the installation is not insecure,
+ * and reinstalling the official release cannot clear a device condition. The
+ * displayed finding therefore contradicted the result that produced it
+ * (finding, risk score and gate decision disagreed).
  *
  * The event type stays `debug_detected` — it is the policy/audit vocabulary and
  * `debug` → block_login must keep blocking — and so do the risk weight (20) and
  * the gate decision. Only the PRESENTATION is corrected, using the engine's own
  * `detectionMethod` to describe the sensor that actually fired.
+ *
+ * Mock location is NOT a producer of `debug_detected` any more: that detector
+ * was removed outright (no field, no event, no score) — see
+ * docs/MOCK_LOCATION_REMOVAL.md. Any legacy `mock_location_detected` key still
+ * arriving from persisted evidence falls through to the generic copy, which is
+ * accurate because the condition is no longer evaluated.
  */
 export function resolveFindingCopyKey(type: string, detectionMethod?: string | null): string {
   if (type !== 'debug_detected') return type;
   const method = (detectionMethod ?? '').toLowerCase();
-  if (method.includes('mock location')) return 'mock_location_detected';
   if (method.includes('emulator') || method.includes('debug environment')) return 'virtual_device_detected';
   return type;
 }

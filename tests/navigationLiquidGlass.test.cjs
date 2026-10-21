@@ -78,8 +78,10 @@ console.log('\n═══ B. Icon identity validity ═══');
 
 // Extract registry entries: name/title/icon/sfSymbol per role block.
 const registrySrc = read('src/lib/nativeTabRegistry.tsx');
-const entries = [...registrySrc.matchAll(/\{\s*name:\s*'([^']+)'\s*,\s*title:\s*'([^']+)'\s*(?:,\s*icon:\s*'([^']+)')?\s*(?:,\s*sfSymbol:\s*'([^']+)')?\s*(,\s*hidden:\s*true)?/g)]
-  .map((m) => ({ name: m[1], title: m[2], icon: m[3] || null, sfSymbol: m[4] || null, hidden: !!m[5] }));
+// titleKey was added for localization and is resolved at RENDER time by both
+// shells (t(titleKey ?? title)); the English title stays as the fallback.
+const entries = [...registrySrc.matchAll(/\{\s*name:\s*'([^']+)'\s*,\s*title:\s*'([^']+)'\s*(?:,\s*titleKey:\s*'([^']+)')?\s*(?:,\s*icon:\s*'([^']+)')?\s*(?:,\s*sfSymbol:\s*'([^']+)')?\s*(,\s*hidden:\s*true)?/g)]
+  .map((m) => ({ name: m[1], title: m[2], titleKey: m[3] || null, icon: m[4] || null, sfSymbol: m[5] || null, hidden: !!m[6] }));
 check('registry parsed', entries.length >= 70, `parsed ${entries.length} entries`);
 
 // Visible entries must carry both icons; hidden entries must carry none.
@@ -89,6 +91,7 @@ for (const e of entries) {
   } else {
     check(`visible ${e.name} has lucide name`, !!e.icon);
     check(`visible ${e.name} has sfSymbol`, !!e.sfSymbol);
+    check(`visible ${e.name} has a localization titleKey`, !!e.titleKey && /^tabs./.test(e.titleKey));
   }
 }
 

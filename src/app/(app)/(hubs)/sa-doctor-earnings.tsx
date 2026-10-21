@@ -28,6 +28,7 @@ import {
   TrendingDown,
 } from 'lucide-react-native';
 import { NeuCard } from '@/components/NeuCard';
+import { useTranslation } from '@/lib/i18n';
 import { neuColors, useLayout, safeBottom, mutedTextStyle } from '@/lib/neu';
 import {
   getDoctorEarningsDashboard,
@@ -67,13 +68,40 @@ function fmtDateTime(iso: string): string {
   });
 }
 
-const EARNINGS_TX_LABEL: Record<string, string> = {
-  purchase:          'Purchase',
-  removal:           'Course Removal',
-  suspension_refund: 'Refund',
-  adjustment:        'Adjustment',
-  account_deletion:  'Account Deleted',
+// Machine values → dictionary keys. Resolved at RENDER time so a language
+// switch repaints; unknown values fall through verbatim (they are API enums).
+const EARNINGS_TX_LABEL_KEY: Record<string, string> = {
+  purchase:          'drProfile.tx.purchase',
+  removal:           'drProfile.tx.removal',
+  suspension_refund: 'drProfile.tx.suspension_refund',
+  adjustment:        'drProfile.tx.adjustment',
+  account_deletion:  'drProfile.tx.account_deletion',
 };
+
+const CREDIT_TX_LABEL_KEY: Record<string, string> = {
+  allocation:        'saEarnings.creditTx.allocation',
+  grant_admin:       'saEarnings.creditTx.grant_admin',
+  grant_super_admin: 'saEarnings.creditTx.grant_super_admin',
+  restoration:       'saEarnings.creditTx.restoration',
+  adjustment:        'saEarnings.creditTx.adjustment',
+  transfer:          'saEarnings.creditTx.transfer',
+  consumption:       'saEarnings.creditTx.consumption',
+  deduction:         'saEarnings.creditTx.deduction',
+  expiry:            'saEarnings.creditTx.expiry',
+};
+
+/** Translator signature — resolved per render, never cached in a module const. */
+type Translate = (key: string, params?: Record<string, string | number>) => string;
+
+function txTypeLabel(type: string, t: Translate): string {
+  const key = EARNINGS_TX_LABEL_KEY[type];
+  return key ? t(key) : type;
+}
+
+function creditTypeLabel(type: string, t: Translate): string {
+  const key = CREDIT_TX_LABEL_KEY[type];
+  return key ? t(key) : type.replace(/_/g, ' ');
+}
 
 // Credit ledger tx colours & signs — from doctor-credit-timeline.tsx
 const CREDIT_TX_COLORS: Record<string, string> = {
@@ -95,12 +123,17 @@ type CreditRow = {
   course_title: string | null; student_name: string | null;
 };
 
-function txDisplayName(row: EarningsTransactionRow): string {
-  if (row.transaction_type === 'account_deletion') return 'Deleted Account';
-  return row.student_name ?? 'Deleted Account';
+function txDisplayName(row: EarningsTransactionRow, t: Translate): string {
+  if (row.transaction_type === 'account_deletion') return t('drProfile.deletedAccount');
+  return row.student_name ?? t('drProfile.deletedAccount');
 }
 
 type ChartPeriod = 'daily' | 'weekly' | 'monthly' | 'yearly';
+
+// Sentinel stored in `error` when the request fails without a message of its
+// own. It is localized at RENDER time, so the fetch callback does not have to
+// depend on the translator (a language switch must not re-trigger a fetch).
+const GENERIC_LOAD_ERROR = 'drProfile.earnings.loadFailed';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // StatCard
@@ -133,14 +166,15 @@ function SL({ label, c }: { label: string; c: typeof neuColors.light }) {
 // ─────────────────────────────────────────────────────────────────────────────
 // Period toggle
 // ─────────────────────────────────────────────────────────────────────────────
-const PERIODS: { key: ChartPeriod; label: string }[] = [
-  { key: 'daily',   label: 'Daily'   },
-  { key: 'weekly',  label: 'Weekly'  },
-  { key: 'monthly', label: 'Monthly' },
-  { key: 'yearly',  label: 'Yearly'  },
+const PERIODS: { key: ChartPeriod; labelKey: string }[] = [
+  { key: 'daily',   labelKey: 'period.daily'   },
+  { key: 'weekly',  labelKey: 'period.weekly'  },
+  { key: 'monthly', labelKey: 'period.monthly' },
+  { key: 'yearly',  labelKey: 'period.yearly'  },
 ];
 
 function PeriodPicker({ value, onChange, c }: { value: ChartPeriod; onChange: (v: ChartPeriod) => void; c: typeof neuColors.light }) {
+  const { t } = useTranslation();
   return (
     <View style={{ flexDirection: 'row', backgroundColor: `${c.text}0A`, borderRadius: 12, padding: 3, marginBottom: 16 }}>
       {PERIODS.map(p => (
@@ -149,7 +183,7 @@ function PeriodPicker({ value, onChange, c }: { value: ChartPeriod; onChange: (v
           backgroundColor: value === p.key ? c.base : 'transparent',
           ...(value === p.key ? { shadowColor: c.shadowDark, shadowOffset: { width: 1, height: 1 }, shadowOpacity: 0.35, shadowRadius: 4 } : {}),
         }}>
-          <Text style={{ fontSize: 11, fontWeight: '700', color: value === p.key ? c.primary : `${c.text}55` }}>{p.label}</Text>
+          <Text style={{ fontSize: 11, fontWeight: '700', color: value === p.key ? c.primary : `${c.text}55` }}>{t(p.labelKey)}</Text>
         </Pressable>
       ))}
     </View>
@@ -160,6 +194,7 @@ function PeriodPicker({ value, onChange, c }: { value: ChartPeriod; onChange: (v
 // Revenue Time-Series Chart
 // ─────────────────────────────────────────────────────────────────────────────
 function RevenueChart({ transactions, c }: { transactions: EarningsTransactionRow[]; c: typeof neuColors.light }) {
+  const { t } = useTranslation();
   const [period, setPeriod] = useState<ChartPeriod>('daily');
   const points = useMemo(() => bucketEarningsTimeSeries(transactions, period), [transactions, period]);
   const maxAbs = Math.max(...points.map(p => Math.abs(p.amount)), 1);
@@ -168,21 +203,21 @@ function RevenueChart({ transactions, c }: { transactions: EarningsTransactionRo
     <NeuCard radius={18} style={{ padding: 18, marginBottom: 20 }}>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 14 }}>
         <BarChart2 size={15} color={c.primary} />
-        <Text style={{ fontSize: 13, fontWeight: '700', color: c.text, flex: 1 }}>Revenue Timeline</Text>
+        <Text style={{ fontSize: 13, fontWeight: '700', color: c.text, flex: 1 }}>{t('drProfile.earnings.timeline')}</Text>
         <View style={{ flexDirection: 'row', gap: 12 }}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
             <View style={{ width: 8, height: 8, borderRadius: 2, backgroundColor: '#16A34A' }} />
-            <Text style={{ fontSize: 9, ...mutedTextStyle(c, 0.4) }}>Income</Text>
+            <Text style={{ fontSize: 9, ...mutedTextStyle(c, 0.4) }}>{t('drProfile.earnings.income')}</Text>
           </View>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
             <View style={{ width: 8, height: 8, borderRadius: 2, backgroundColor: '#DC2626' }} />
-            <Text style={{ fontSize: 9, ...mutedTextStyle(c, 0.4) }}>Deduction</Text>
+            <Text style={{ fontSize: 9, ...mutedTextStyle(c, 0.4) }}>{t('drProfile.earnings.deduction')}</Text>
           </View>
         </View>
       </View>
       <PeriodPicker value={period} onChange={setPeriod} c={c} />
       {points.length === 0 ? (
-        <Text style={{ fontSize: 13, ...mutedTextStyle(c, 0.3), textAlign: 'center', paddingVertical: 24 }}>No data for this period</Text>
+        <Text style={{ fontSize: 13, ...mutedTextStyle(c, 0.3), textAlign: 'center', paddingVertical: 24 }}>{t('drProfile.earnings.noDataPeriod')}</Text>
       ) : (
         <ScrollView horizontal showsHorizontalScrollIndicator={false}>
           <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: 5, height: 110, paddingBottom: 20, minWidth: points.length * 32 }}>
@@ -210,6 +245,7 @@ function RevenueChart({ transactions, c }: { transactions: EarningsTransactionRo
 // Balance Trend Chart — migrated from doctor-credit-timeline.tsx
 // ─────────────────────────────────────────────────────────────────────────────
 function BalanceTrendChart({ txRows, c }: { txRows: CreditRow[]; c: typeof neuColors.light }) {
+  const { t } = useTranslation();
   const chartData = useMemo(() => {
     const sorted = [...txRows].reverse();
     const last14 = sorted.slice(-14);
@@ -223,7 +259,7 @@ function BalanceTrendChart({ txRows, c }: { txRows: CreditRow[]; c: typeof neuCo
 
   return (
     <>
-      <SL label={`Balance Trend (Last ${chartData.vals.length} Transactions)`} c={c} />
+      <SL label={t('saEarnings.balanceTrend', { count: chartData.vals.length })} c={c} />
       <NeuCard radius={18} style={{ padding: 16, marginBottom: 20 }}>
         <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: 4, height: 80 }}>
           {chartData.vals.map((v, i) => (
@@ -251,13 +287,16 @@ function BalanceTrendChart({ txRows, c }: { txRows: CreditRow[]; c: typeof neuCo
 // Course Revenue Table
 // ─────────────────────────────────────────────────────────────────────────────
 function CourseRevenueTable({ rows, total, c }: { rows: EarningsCourseRow[]; total: number; c: typeof neuColors.light }) {
+  const { t, isRTL } = useTranslation();
+  // Numeric columns hug the trailing edge: right in LTR, left in RTL.
+  const numAlign = isRTL ? 'left' : 'right';
   return (
     <NeuCard radius={18} style={{ overflow: 'hidden', marginBottom: 20 }}>
       <View style={{ flexDirection: 'row', paddingVertical: 10, paddingHorizontal: 14, backgroundColor: `${c.text}06`, borderBottomWidth: 1, borderBottomColor: `${c.text}08` }}>
-        <Text style={{ flex: 1, fontSize: 9, fontWeight: '800', ...mutedTextStyle(c, 0.4), textTransform: 'uppercase', letterSpacing: 0.7 }}>Course</Text>
-        <Text style={{ width: 44, textAlign: 'center', fontSize: 9, fontWeight: '800', ...mutedTextStyle(c, 0.4), textTransform: 'uppercase' }}>Students</Text>
-        <Text style={{ width: 60, textAlign: 'right', fontSize: 9, fontWeight: '800', ...mutedTextStyle(c, 0.4), textTransform: 'uppercase' }}>Revenue</Text>
-        <Text style={{ width: 32, textAlign: 'right', fontSize: 9, fontWeight: '800', ...mutedTextStyle(c, 0.4), textTransform: 'uppercase' }}>%</Text>
+        <Text style={{ flex: 1, fontSize: 9, fontWeight: '800', ...mutedTextStyle(c, 0.4), textTransform: 'uppercase', letterSpacing: 0.7 }}>{t('drProfile.earnings.colCourse')}</Text>
+        <Text style={{ width: 44, textAlign: 'center', fontSize: 9, fontWeight: '800', ...mutedTextStyle(c, 0.4), textTransform: 'uppercase' }}>{t('drProfile.stats.students')}</Text>
+        <Text style={{ width: 60, textAlign: numAlign, fontSize: 9, fontWeight: '800', ...mutedTextStyle(c, 0.4), textTransform: 'uppercase' }}>{t('drProfile.earnings.colRevenue')}</Text>
+        <Text style={{ width: 32, textAlign: numAlign, fontSize: 9, fontWeight: '800', ...mutedTextStyle(c, 0.4), textTransform: 'uppercase' }}>%</Text>
       </View>
       {rows.map(r => (
         <View key={r.course_id} style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 11, paddingHorizontal: 14, borderBottomWidth: 1, borderBottomColor: `${c.text}06` }}>
@@ -268,15 +307,15 @@ function CourseRevenueTable({ rows, total, c }: { rows: EarningsCourseRow[]; tot
             </View>
           </View>
           <Text style={{ width: 44, textAlign: 'center', fontSize: 12, fontWeight: '600', color: `${c.text}77` }}>{r.students}</Text>
-          <Text style={{ width: 60, textAlign: 'right', fontSize: 12, fontWeight: '700', color: r.revenue_egp >= 0 ? '#16A34A' : '#DC2626' }} numberOfLines={1}>{fmtEGPPlain(r.revenue_egp)}</Text>
-          <Text style={{ width: 32, textAlign: 'right', fontSize: 11, fontWeight: '700', color: c.primary }}>{r.pct}%</Text>
+          <Text style={{ width: 60, textAlign: numAlign, fontSize: 12, fontWeight: '700', color: r.revenue_egp >= 0 ? '#16A34A' : '#DC2626' }} numberOfLines={1}>{fmtEGPPlain(r.revenue_egp)}</Text>
+          <Text style={{ width: 32, textAlign: numAlign, fontSize: 11, fontWeight: '700', color: c.primary }}>{r.pct}%</Text>
         </View>
       ))}
       <View style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 12, paddingHorizontal: 14, backgroundColor: `${c.primary}08`, borderTopWidth: 1.5, borderTopColor: `${c.primary}22` }}>
-        <Text style={{ flex: 1, fontSize: 13, fontWeight: '800', color: c.primary }}>Total</Text>
+        <Text style={{ flex: 1, fontSize: 13, fontWeight: '800', color: c.primary }}>{t('common.total')}</Text>
         <Text style={{ width: 44, textAlign: 'center', fontSize: 12, fontWeight: '700', color: c.primary }}>{rows.reduce((s, r) => s + r.students, 0)}</Text>
-        <Text style={{ width: 60, textAlign: 'right', fontSize: 13, fontWeight: '800', color: c.primary }} numberOfLines={1}>{fmtEGPPlain(total)}</Text>
-        <Text style={{ width: 32, textAlign: 'right', fontSize: 11, fontWeight: '700', color: c.primary }}>100%</Text>
+        <Text style={{ width: 60, textAlign: numAlign, fontSize: 13, fontWeight: '800', color: c.primary }} numberOfLines={1}>{fmtEGPPlain(total)}</Text>
+        <Text style={{ width: 32, textAlign: numAlign, fontSize: 11, fontWeight: '700', color: c.primary }}>100%</Text>
       </View>
     </NeuCard>
   );
@@ -288,6 +327,7 @@ function CourseRevenueTable({ rows, total, c }: { rows: EarningsCourseRow[]; tot
 function EarningsTransactionRowUI({ row, onPress, c }: {
   row: EarningsTransactionRow; onPress: () => void; c: typeof neuColors.light;
 }) {
+  const { t, isRTL } = useTranslation();
   const isPositive = row.amount >= 0;
   const color = isPositive ? '#16A34A' : '#DC2626';
   const Icon  = isPositive ? ArrowUpRight : ArrowDownRight;
@@ -298,23 +338,29 @@ function EarningsTransactionRowUI({ row, onPress, c }: {
       style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: `${c.text}06` }}
     >
       {row.student_avatar ? (
-        <Image source={{ uri: row.student_avatar }} style={{ width: 38, height: 38, borderRadius: 12, marginRight: 12 }} />
+        <Image source={{ uri: row.student_avatar }} style={{ width: 38, height: 38, borderRadius: 12, marginEnd: 12 }} />
       ) : (
-        <View style={{ width: 38, height: 38, borderRadius: 12, backgroundColor: `${color}18`, alignItems: 'center', justifyContent: 'center', marginRight: 12 }}>
+        <View style={{ width: 38, height: 38, borderRadius: 12, backgroundColor: `${color}18`, alignItems: 'center', justifyContent: 'center', marginEnd: 12 }}>
           <Icon size={16} color={color} />
         </View>
       )}
       <View style={{ flex: 1, gap: 2 }}>
-        <Text style={{ fontSize: 13, fontWeight: '700', color: c.text }} numberOfLines={1}>{txDisplayName(row)}</Text>
+        <Text style={{ fontSize: 13, fontWeight: '700', color: c.text }} numberOfLines={1}>{txDisplayName(row, t)}</Text>
         <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.4) }} numberOfLines={1}>
-          {row.course_title ?? '—'}{'  ·  '}{EARNINGS_TX_LABEL[row.transaction_type] ?? row.transaction_type}
+          {row.course_title ?? '—'}{'  ·  '}{txTypeLabel(row.transaction_type, t)}
         </Text>
       </View>
       <View style={{ alignItems: 'flex-end', gap: 2 }}>
         <Text style={{ fontSize: 13, fontWeight: '800', color }}>{fmtEGP(row.amount)}</Text>
         <Text style={{ fontSize: 10, ...mutedTextStyle(c, 0.35) }}>{fmtDateShort(row.created_at)}</Text>
       </View>
-      {row.student_id && <ChevronRight size={14} color={`${c.text}30`} style={{ marginLeft: 4 }} />}
+      {row.student_id && (
+        <ChevronRight
+          size={14}
+          color={`${c.text}30`}
+          style={{ marginStart: 4, transform: [{ rotate: isRTL ? '180deg' : '0deg' }] }}
+        />
+      )}
     </Pressable>
   );
 }
@@ -323,6 +369,7 @@ function EarningsTransactionRowUI({ row, onPress, c }: {
 // Credit Ledger Timeline Row — migrated from doctor-credit-timeline.tsx
 // ─────────────────────────────────────────────────────────────────────────────
 function CreditTimelineRow({ tx, c, isLast }: { tx: CreditRow; c: typeof neuColors.light; isLast: boolean }) {
+  const { t } = useTranslation();
   const col  = CREDIT_TX_COLORS[tx.transaction_type] ?? '#6B7280';
   const sign = CREDIT_TX_SIGN[tx.transaction_type] ?? '';
   return (
@@ -335,11 +382,13 @@ function CreditTimelineRow({ tx, c, isLast }: { tx: CreditRow; c: typeof neuColo
       <NeuCard radius={14} style={{ flex: 1, padding: 12 }}>
         <View style={{ flexDirection: 'row', alignItems: 'flex-start' }}>
           <View style={{ flex: 1 }}>
-            <Text style={{ fontSize: 13, fontWeight: '700', color: c.text, textTransform: 'capitalize' }}>
-              {tx.transaction_type.replace(/_/g, ' ')}
+            <Text style={{ fontSize: 13, fontWeight: '700', color: c.text }}>
+              {creditTypeLabel(tx.transaction_type, t)}
             </Text>
             {tx.performed_by_name && (
-              <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.5) }}>By {tx.performed_by_name}</Text>
+              <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.5) }}>
+                {t('saEarnings.by', { name: tx.performed_by_name })}
+              </Text>
             )}
             {(tx.reason || tx.notes) && (
               <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.4), marginTop: 2 }}>
@@ -348,24 +397,24 @@ function CreditTimelineRow({ tx, c, isLast }: { tx: CreditRow; c: typeof neuColo
             )}
             {tx.balance_before != null && tx.balance_after != null && (
               <Text style={{ fontSize: 10, ...mutedTextStyle(c, 0.35), marginTop: 2 }}>
-                Balance: {tx.balance_before} → {tx.balance_after}
+                {t('saEarnings.balanceChange', { before: tx.balance_before, after: tx.balance_after })}
               </Text>
             )}
             {tx.course_title && (
               <Text style={{ fontSize: 10, ...mutedTextStyle(c, 0.35), marginTop: 2 }}>
-                Course: {tx.course_title}
+                {t('saEarnings.courseLine', { title: tx.course_title })}
               </Text>
             )}
             {tx.student_name && (
               <Text style={{ fontSize: 10, ...mutedTextStyle(c, 0.35) }}>
-                Student: {tx.student_name}
+                {t('saEarnings.studentLine', { name: tx.student_name })}
               </Text>
             )}
             <Text style={{ fontSize: 10, ...mutedTextStyle(c, 0.3), marginTop: 3 }}>
               {fmtDateTime(tx.created_at)}
             </Text>
           </View>
-          <Text style={{ fontSize: 18, fontWeight: '900', color: col, marginLeft: 8 }}>
+          <Text style={{ fontSize: 18, fontWeight: '900', color: col, marginStart: 8 }}>
             {sign}{Math.abs(tx.amount)}
           </Text>
         </View>
@@ -404,11 +453,17 @@ function SectionLabel({ text, c }: { text: string; c: typeof neuColors.light }) 
 // ─────────────────────────────────────────────────────────────────────────────
 // Student Profile Modal — read-only
 // ─────────────────────────────────────────────────────────────────────────────
-const PRICING_LABEL: Record<string, string> = {
-  doctor_independent: 'Doctor Pricing',
-  global:             'Global Price',
-  per_student:        'Student Override',
+const PRICING_KEY: Record<string, string> = {
+  doctor_independent: 'drProfile.earnings.pricing.doctor',
+  global:             'drProfile.earnings.pricing.global',
+  per_student:        'drProfile.earnings.pricing.perStudent',
 };
+
+/** Pricing source → localized label. Unknown modes fall back to doctor pricing. */
+function pricingSourceLabel(mode: string, t: Translate): string {
+  const key = PRICING_KEY[mode];
+  return key ? t(key) : t('drProfile.earnings.pricing.doctor');
+}
 
 function StudentProfileModal({ tx, doctorId, onClose, c }: {
   tx: EarningsTransactionRow; doctorId: string; onClose: () => void; c: typeof neuColors.light;
@@ -418,6 +473,7 @@ function StudentProfileModal({ tx, doctorId, onClose, c }: {
   const [profile,   setProfile]   = useState<DoctorStudentProfile | null>(null);
   const [loading,   setLoading]   = useState(true);
   const [isDeleted, setIsDeleted] = useState(false);
+  const { t } = useTranslation();
 
   useMemo(() => {
     (async () => {
@@ -439,10 +495,15 @@ function StudentProfileModal({ tx, doctorId, onClose, c }: {
   const displayJoin  = (!isDeleted && profile?.created_at) ? profile.created_at : null;
 
   const hasSuspended       = (profile?.enrollments ?? []).some(e => e.status === 'suspended');
-  const accountStatus      = isDeleted ? 'Deleted' : hasSuspended ? 'Suspended' : 'Active';
+  const accountStatus      = isDeleted ? t('drProfile.status.deleted')
+                                     : hasSuspended ? t('drProfile.status.suspended')
+                                                    : t('drProfile.status.active');
   const accountStatusColor = isDeleted ? '#DC2626' : hasSuspended ? '#D97706' : '#16A34A';
-  const pricingLabel       = PRICING_LABEL[tx.pricing_mode] ?? 'Doctor Pricing';
+  const pricingSourceValue = pricingSourceLabel(tx.pricing_mode, t);
   const enStatusColor      = (s: string) => s === 'active' ? '#16A34A' : s === 'suspended' ? '#D97706' : '#DC2626';
+  const enStatusLabel      = (s: string) =>
+    s === 'active' ? t('drProfile.status.active')
+      : s === 'suspended' ? t('drProfile.status.suspended') : s;
 
   return (
     <Modal visible animationType="slide" transparent onRequestClose={onClose}>
@@ -453,9 +514,9 @@ function StudentProfileModal({ tx, doctorId, onClose, c }: {
           </View>
           <View style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: layout.screenPx, paddingTop: 14, paddingBottom: 10 }}>
             {profile?.avatar_url && !isDeleted ? (
-              <Image source={{ uri: profile.avatar_url }} style={{ width: 48, height: 48, borderRadius: 14, marginRight: 12 }} />
+              <Image source={{ uri: profile.avatar_url }} style={{ width: 48, height: 48, borderRadius: 14, marginEnd: 12 }} />
             ) : (
-              <View style={{ width: 48, height: 48, borderRadius: 14, marginRight: 12, backgroundColor: isDeleted ? '#DC262614' : `${c.primary}15`, alignItems: 'center', justifyContent: 'center' }}>
+              <View style={{ width: 48, height: 48, borderRadius: 14, marginEnd: 12, backgroundColor: isDeleted ? '#DC262614' : `${c.primary}15`, alignItems: 'center', justifyContent: 'center' }}>
                 <Users size={22} color={isDeleted ? '#DC2626' : c.primary} />
               </View>
             )}
@@ -467,7 +528,7 @@ function StudentProfileModal({ tx, doctorId, onClose, c }: {
                 </View>
                 <View style={{ backgroundColor: `${c.text}08`, borderRadius: 8, paddingHorizontal: 8, paddingVertical: 3, flexDirection: 'row', alignItems: 'center', gap: 4 }}>
                   <Eye size={9} color={`${c.text}50`} />
-                  <Text style={{ fontSize: 10, fontWeight: '700', ...mutedTextStyle(c, 0.4), textTransform: 'uppercase', letterSpacing: 0.5 }}>Read Only</Text>
+                  <Text style={{ fontSize: 10, fontWeight: '700', ...mutedTextStyle(c, 0.4), textTransform: 'uppercase', letterSpacing: 0.5 }}>{t('saEarnings.readOnly')}</Text>
                 </View>
               </View>
             </View>
@@ -485,58 +546,58 @@ function StudentProfileModal({ tx, doctorId, onClose, c }: {
                   <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 10, backgroundColor: '#DC262608', borderRadius: 14, padding: 14, marginBottom: 16, borderWidth: 1, borderColor: '#DC262622' }}>
                     <Users size={15} color="#DC2626" style={{ marginTop: 1 }} />
                     <View style={{ flex: 1, gap: 3 }}>
-                      <Text style={{ fontSize: 13, fontWeight: '700', color: '#DC2626' }}>Account Permanently Deleted</Text>
+                      <Text style={{ fontSize: 13, fontWeight: '700', color: '#DC2626' }}>{t('drProfile.student.deletedTitle')}</Text>
                       <Text style={{ fontSize: 12, color: '#DC2626', opacity: 0.7, lineHeight: 18 }}>
-                        This account no longer exists. The data below is the immutable snapshot recorded at transaction time.
+                        {t('saEarnings.deletedSnapshotNote')}
                       </Text>
                     </View>
                   </View>
                 )}
-                <SectionLabel text={isDeleted ? 'Historical Snapshot' : 'Student Profile'} c={c} />
+                <SectionLabel text={isDeleted ? t('drProfile.student.historical') : t('drProfile.student.profile')} c={c} />
                 <NeuCard radius={16} style={{ padding: 16, gap: 14, marginBottom: 16 }}>
-                  <InfoRow icon={<Users    size={14} color={c.primary} />} label="Full Name"    value={displayName}  c={c} />
-                  <InfoRow icon={<Phone    size={14} color={c.primary} />} label="Phone"        value={displayPhone} c={c} />
-                  <InfoRow icon={<Mail     size={14} color={c.primary} />} label="Email"        value={displayEmail} c={c} />
-                  <InfoRow icon={<Hash     size={14} color={c.primary} />} label="Watermark ID" value={displayWmk}   c={c} />
-                  {displayJoin && <InfoRow icon={<Calendar size={14} color={c.primary} />} label="Joined" value={fmtDate(displayJoin)} c={c} />}
+                  <InfoRow icon={<Users    size={14} color={c.primary} />} label={t('profile.fullName')} value={displayName}  c={c} />
+                  <InfoRow icon={<Phone    size={14} color={c.primary} />} label={t('common.phone')}     value={displayPhone} c={c} />
+                  <InfoRow icon={<Mail     size={14} color={c.primary} />} label={t('common.email')}     value={displayEmail} c={c} />
+                  <InfoRow icon={<Hash     size={14} color={c.primary} />} label={t('drProfile.earnings.watermarkId')} value={displayWmk} c={c} />
+                  {displayJoin && <InfoRow icon={<Calendar size={14} color={c.primary} />} label={t('drProfile.student.joined')} value={fmtDate(displayJoin)} c={c} />}
                 </NeuCard>
 
-                <SectionLabel text="Transaction Details" c={c} />
+                <SectionLabel text={t('drProfile.student.txDetails')} c={c} />
                 <NeuCard radius={16} style={{ padding: 16, gap: 14, marginBottom: 16 }}>
-                  <InfoRow icon={<BookOpen size={14} color={c.primary} />} label="Course" value={tx.course_title ?? '—'} c={c} />
-                  <InfoRow icon={<Zap size={14} color={c.primary} />} label="Transaction Type" value={EARNINGS_TX_LABEL[tx.transaction_type] ?? tx.transaction_type} c={c} />
-                  <InfoRow icon={<Calendar size={14} color={c.primary} />} label="Date" value={fmtDate(tx.created_at)} c={c} />
-                  <InfoRow icon={<DollarSign size={14} color={tx.amount >= 0 ? '#16A34A' : '#DC2626'} />} label="Revenue"
+                  <InfoRow icon={<BookOpen size={14} color={c.primary} />} label={t('drProfile.earnings.colCourse')} value={tx.course_title ?? '—'} c={c} />
+                  <InfoRow icon={<Zap size={14} color={c.primary} />} label={t('drProfile.earnings.transactionType')} value={txTypeLabel(tx.transaction_type, t)} c={c} />
+                  <InfoRow icon={<Calendar size={14} color={c.primary} />} label={t('common.date')} value={fmtDate(tx.created_at)} c={c} />
+                  <InfoRow icon={<DollarSign size={14} color={tx.amount >= 0 ? '#16A34A' : '#DC2626'} />} label={t('drProfile.earnings.colRevenue')}
                     value={`${tx.amount >= 0 ? '+' : '−'}EGP ${Math.abs(tx.amount).toLocaleString('en-US')}`} c={c} />
-                  {tx.price_snapshot > 0 && <InfoRow icon={<Award size={14} color={c.primary} />} label="Pricing Source" value={pricingLabel} c={c} />}
-                  {tx.notes && <InfoRow icon={<Hash size={14} color={c.primary} />} label="Notes" value={tx.notes} c={c} />}
+                  {tx.price_snapshot > 0 && <InfoRow icon={<Award size={14} color={c.primary} />} label={t('drProfile.earnings.pricingSource')} value={pricingSourceValue} c={c} />}
+                  {tx.notes && <InfoRow icon={<Hash size={14} color={c.primary} />} label={t('drProfile.earnings.notes')} value={tx.notes} c={c} />}
                 </NeuCard>
 
                 {!isDeleted && profile && profile.enrollments.length > 0 && (
                   <>
-                    <SectionLabel text="Course Enrollments" c={c} />
+                    <SectionLabel text={t('drProfile.student.enrollments')} c={c} />
                     {profile.enrollments.map(en => (
                       <NeuCard key={en.enrollment_id} radius={16} style={{ padding: 16, marginBottom: 12, gap: 12 }}>
                         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
                           <BookOpen size={15} color={c.primary} />
                           <Text style={{ flex: 1, fontSize: 14, fontWeight: '700', color: c.text }} numberOfLines={1}>{en.course_title}</Text>
                           <View style={{ backgroundColor: `${enStatusColor(en.status)}18`, borderRadius: 8, paddingHorizontal: 8, paddingVertical: 3 }}>
-                            <Text style={{ fontSize: 11, fontWeight: '700', color: enStatusColor(en.status), textTransform: 'capitalize' }}>{en.status}</Text>
+                            <Text style={{ fontSize: 11, fontWeight: '700', color: enStatusColor(en.status), textTransform: 'capitalize' }}>{enStatusLabel(en.status)}</Text>
                           </View>
                         </View>
                         <View style={{ flexDirection: 'row', gap: 8 }}>
                           <View style={{ flex: 1, backgroundColor: `${c.text}06`, borderRadius: 10, padding: 10, alignItems: 'center' }}>
                             <Text style={{ fontSize: 13, fontWeight: '800', color: c.primary }}>{en.progress_percent}%</Text>
-                            <Text style={{ fontSize: 9, ...mutedTextStyle(c, 0.4) }}>Progress</Text>
+                            <Text style={{ fontSize: 9, ...mutedTextStyle(c, 0.4) }}>{t('drProfile.student.progress')}</Text>
                           </View>
                           <View style={{ flex: 1, backgroundColor: `${c.text}06`, borderRadius: 10, padding: 10, alignItems: 'center' }}>
                             <Text style={{ fontSize: 11, fontWeight: '700', ...mutedTextStyle(c, 0.55) }}>{fmtDateShort(en.enrolled_at)}</Text>
-                            <Text style={{ fontSize: 9, ...mutedTextStyle(c, 0.4) }}>Enrolled</Text>
+                            <Text style={{ fontSize: 9, ...mutedTextStyle(c, 0.4) }}>{t('drProfile.student.enrolled')}</Text>
                           </View>
                           {en.assigned_price != null && (
                             <View style={{ flex: 1, backgroundColor: '#16A34A08', borderRadius: 10, padding: 10, alignItems: 'center' }}>
                               <Text style={{ fontSize: 13, fontWeight: '800', color: '#16A34A' }}>{fmtEGPPlain(en.assigned_price)}</Text>
-                              <Text style={{ fontSize: 9, ...mutedTextStyle(c, 0.4) }}>Revenue</Text>
+                              <Text style={{ fontSize: 9, ...mutedTextStyle(c, 0.4) }}>{t('drProfile.earnings.colRevenue')}</Text>
                             </View>
                           )}
                         </View>
@@ -563,6 +624,7 @@ export default function SADoctorEarnings() {
   const layout = useLayout();
   const insets = layout.insets;
   const c      = scheme === 'dark' ? neuColors.dark : neuColors.light;
+  const { t, isRTL } = useTranslation();
 
   // ── State ──────────────────────────────────────────────────────────────────
   const [earnings,   setEarnings]   = useState<DoctorEarningsDashboard | null>(null);
@@ -603,7 +665,7 @@ export default function SADoctorEarnings() {
       setCreditSum(summary);
       setActStats(stats);
     } catch (e: any) {
-      setError(e?.message ?? 'Failed to load earnings data.');
+      setError(e?.message ?? GENERIC_LOAD_ERROR);
     }
     setLoading(false);
   }, [doctor_id]);
@@ -615,7 +677,7 @@ export default function SADoctorEarnings() {
 
   const onRefresh = async () => { setRefreshing(true); await loadData(); setRefreshing(false); };
 
-  const decodedName = decodeURIComponent(doctor_name ?? 'Doctor');
+  const decodedName = decodeURIComponent(doctor_name ?? t('role.doctor'));
   const hasData     = !loading && !error && (earnings || actStats || creditRows.length > 0);
 
   return (
@@ -627,9 +689,13 @@ export default function SADoctorEarnings() {
 
         {/* ── Header ──────────────────────────────────────────────────────── */}
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 20, marginTop: 12 }}>
-          <Pressable onPress={() => router.back()}
+          <Pressable
+            onPress={() => router.back()}
+            accessibilityRole="button"
+            accessibilityLabel={t('common.back')}
             style={{ width: 38, height: 38, borderRadius: 12, backgroundColor: `${c.text}0D`, alignItems: 'center', justifyContent: 'center' }}>
-            <ChevronRight size={18} color={c.text} style={{ transform: [{ rotate: '180deg' }] }} />
+            {/* Back chevron points along the reading direction's start edge. */}
+            <ChevronRight size={18} color={c.text} style={{ transform: [{ rotate: isRTL ? '0deg' : '180deg' }] }} />
           </Pressable>
           <View style={{ flex: 1 }}>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 2 }}>
@@ -638,11 +704,11 @@ export default function SADoctorEarnings() {
               </View>
               <Text style={{ fontSize: 20, fontWeight: '800', color: c.text }} numberOfLines={1}>{decodedName}</Text>
             </View>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginLeft: 40 }}>
-              <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.38) }}>Earnings Dashboard</Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginStart: 40, flexWrap: 'wrap' }}>
+              <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.38) }}>{t('saEarnings.dashboard')}</Text>
               <View style={{ backgroundColor: '#7C3AED12', borderRadius: 6, paddingHorizontal: 7, paddingVertical: 2, flexDirection: 'row', alignItems: 'center', gap: 4 }}>
                 <Eye size={9} color="#7C3AED" />
-                <Text style={{ fontSize: 9, fontWeight: '800', color: '#7C3AED', textTransform: 'uppercase', letterSpacing: 0.6 }}>Read Only</Text>
+                <Text style={{ fontSize: 9, fontWeight: '800', color: '#7C3AED', textTransform: 'uppercase', letterSpacing: 0.6 }}>{t('saEarnings.readOnly')}</Text>
               </View>
             </View>
           </View>
@@ -652,18 +718,20 @@ export default function SADoctorEarnings() {
         {loading && (
           <View style={{ alignItems: 'center', paddingVertical: 64 }}>
             <ActivityIndicator size="large" color={c.primary} />
-            <Text style={{ fontSize: 13, ...mutedTextStyle(c, 0.35), marginTop: 14 }}>Loading earnings data…</Text>
+            <Text style={{ fontSize: 13, ...mutedTextStyle(c, 0.35), marginTop: 14 }}>{t('saEarnings.loading')}</Text>
           </View>
         )}
 
         {/* ── Error ───────────────────────────────────────────────────────── */}
         {!loading && error && (
           <NeuCard radius={18} style={{ padding: 28, alignItems: 'center', gap: 14 }}>
-            <Text style={{ fontSize: 15, fontWeight: '700', color: '#DC2626', textAlign: 'center' }}>Failed to load earnings</Text>
-            <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.5), textAlign: 'center' }}>{error}</Text>
+            <Text style={{ fontSize: 15, fontWeight: '700', color: '#DC2626', textAlign: 'center' }}>{t('drProfile.earnings.loadFailed')}</Text>
+            <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.5), textAlign: 'center' }}>
+              {error === GENERIC_LOAD_ERROR ? t(GENERIC_LOAD_ERROR) : error}
+            </Text>
             <Pressable onPress={() => { setLoading(true); loadData(); }}
               style={{ backgroundColor: c.primary, borderRadius: 10, paddingHorizontal: 24, paddingVertical: 11 }}>
-              <Text style={{ color: '#fff', fontWeight: '700' }}>Retry</Text>
+              <Text style={{ color: '#fff', fontWeight: '700' }}>{t('common.retry')}</Text>
             </Pressable>
           </NeuCard>
         )}
@@ -676,8 +744,8 @@ export default function SADoctorEarnings() {
               borderRadius: 14, padding: 3, marginBottom: 20,
             }}>
               {([
-                { key: 'earnings', label: 'Earnings',        icon: <TrendingUp size={13} color={activeTab === 'earnings' ? c.primary : `${c.text}55`} /> },
-                { key: 'credits',  label: 'Credit Activity', icon: <CreditCard size={13} color={activeTab === 'credits'  ? c.primary : `${c.text}55`} /> },
+                { key: 'earnings', label: t('nav.earnings'),         icon: <TrendingUp size={13} color={activeTab === 'earnings' ? c.primary : `${c.text}55`} /> },
+                { key: 'credits',  label: t('saEarnings.creditActivity'), icon: <CreditCard size={13} color={activeTab === 'credits'  ? c.primary : `${c.text}55`} /> },
               ] as const).map(tab => (
                 <Pressable
                   key={tab.key}
@@ -712,35 +780,35 @@ export default function SADoctorEarnings() {
               <>
                 {earnings ? (
                   <>
-                    <SL label="Earnings Overview" c={c} />
+                    <SL label={t('saEarnings.overview')} c={c} />
                     <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginBottom: 20 }}>
                       <View style={{ width: '47%' }}>
-                        <StatCard icon={<DollarSign size={15} color="#16A34A" />} label="Total Revenue"         value={fmtEGPPlain(earnings.totalRevenue)}       color="#16A34A" c={c} />
+                        <StatCard icon={<DollarSign size={15} color="#16A34A" />} label={t('drProfile.earnings.totalRevenue')} value={fmtEGPPlain(earnings.totalRevenue)} color="#16A34A" c={c} />
                       </View>
                       <View style={{ width: '47%' }}>
-                        <StatCard icon={<Calendar   size={15} color={c.primary} />} label="This Month"          value={fmtEGPPlain(earnings.thisMonthRevenue)}   color={c.primary} c={c} />
+                        <StatCard icon={<Calendar   size={15} color={c.primary} />} label={t('drProfile.earnings.thisMonth')} value={fmtEGPPlain(earnings.thisMonthRevenue)} color={c.primary} c={c} />
                       </View>
                       <View style={{ width: '47%' }}>
-                        <StatCard icon={<Users      size={15} color="#D97706" />} label="Paid Students"         value={String(earnings.totalPaidStudents)}        color="#D97706" c={c} />
+                        <StatCard icon={<Users      size={15} color="#D97706" />} label={t('drProfile.earnings.paidStudents')} value={String(earnings.totalPaidStudents)} color="#D97706" c={c} />
                       </View>
                       <View style={{ width: '47%' }}>
-                        <StatCard icon={<Zap        size={15} color="#7C3AED" />} label="Transactions"          value={String(earnings.totalTransactions)}        color="#7C3AED" c={c} />
+                        <StatCard icon={<Zap        size={15} color="#7C3AED" />} label={t('drProfile.earnings.transactions')} value={String(earnings.totalTransactions)} color="#7C3AED" c={c} />
                       </View>
                       <View style={{ width: '100%' }}>
-                        <StatCard icon={<Award      size={15} color="#2DA8FF" />} label="Avg Revenue / Student" value={fmtEGPPlain(earnings.avgRevenuePerStudent)} color="#2DA8FF" c={c} />
+                        <StatCard icon={<Award      size={15} color="#2DA8FF" />} label={t('drProfile.earnings.avgRevenuePerStudent')} value={fmtEGPPlain(earnings.avgRevenuePerStudent)} color="#2DA8FF" c={c} />
                       </View>
                     </View>
 
-                    <SL label="Revenue Timeline" c={c} />
+                    <SL label={t('drProfile.earnings.timeline')} c={c} />
                     <RevenueChart transactions={earnings.transactions} c={c} />
 
-                    <SL label="Revenue by Course" c={c} />
+                    <SL label={t('drProfile.earnings.byCourse')} c={c} />
                     <CourseRevenueTable rows={earnings.courseRows} total={earnings.totalRevenue} c={c} />
 
-                    <SL label="Recent Transactions" c={c} />
+                    <SL label={t('drProfile.earnings.recent')} c={c} />
                     <NeuCard radius={18} style={{ padding: 16, marginBottom: 20 }}>
                       {earnings.transactions.length === 0 ? (
-                        <Text style={{ fontSize: 13, ...mutedTextStyle(c, 0.3), textAlign: 'center', paddingVertical: 20 }}>No transactions yet</Text>
+                        <Text style={{ fontSize: 13, ...mutedTextStyle(c, 0.3), textAlign: 'center', paddingVertical: 20 }}>{t('drProfile.earnings.none')}</Text>
                       ) : (
                         earnings.transactions.map(row => (
                           <EarningsTransactionRowUI key={row.id} row={row} c={c} onPress={() => setSelectedTx(row)} />
@@ -753,9 +821,9 @@ export default function SADoctorEarnings() {
                     <NeuCard radius={24} style={{ width: 64, height: 64, alignItems: 'center', justifyContent: 'center' }}>
                       <TrendingUp size={28} color={`${c.text}30`} />
                     </NeuCard>
-                    <Text style={{ fontSize: 15, fontWeight: '700', ...mutedTextStyle(c, 0.35) }}>No Earnings Yet</Text>
+                    <Text style={{ fontSize: 15, fontWeight: '700', ...mutedTextStyle(c, 0.35), textAlign: 'center' }}>{t('drProfile.earnings.emptyTitle')}</Text>
                     <Text style={{ fontSize: 12, color: c.text, opacity: 0.22, textAlign: 'center', maxWidth: 240, lineHeight: 18 }}>
-                      No revenue transactions have been recorded for this doctor.
+                      {t('saEarnings.noEarningsHint')}
                     </Text>
                   </View>
                 )}
@@ -770,7 +838,7 @@ export default function SADoctorEarnings() {
                 {/* Credit Activity Stats (getDoctorActivityStats) */}
                 {actStats && (
                   <>
-                    <SL label="Credit Activity" c={c} />
+                    <SL label={t('saEarnings.creditActivity')} c={c} />
 
                     {/* Credit Selling Price */}
                     <NeuCard radius={18} style={{ padding: 16, flexDirection: 'row', alignItems: 'center', gap: 16, marginBottom: 10 }}>
@@ -778,27 +846,27 @@ export default function SADoctorEarnings() {
                         <DollarSign size={22} color="#7C3AED" />
                       </View>
                       <View style={{ flex: 1 }}>
-                        <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.45) }}>Credit Selling Price</Text>
+                        <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.45) }}>{t('saEarnings.creditSellingPrice')}</Text>
                         <Text style={{ fontSize: 26, fontWeight: '900', color: '#7C3AED' }}>
                           EGP {actStats.credit_selling_price.toLocaleString('en-US')}
                         </Text>
-                        <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.35), marginTop: 1 }}>per credit</Text>
+                        <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.35), marginTop: 1 }}>{t('saEarnings.perCredit')}</Text>
                       </View>
                     </NeuCard>
 
                     {/* Activity KPIs grid */}
                     <View style={{ flexDirection: 'row', gap: 10, marginBottom: 10, flexWrap: 'wrap' }}>
                       {[
-                        { label: 'Total Allocated',  value: actStats.total_allocated,   color: c.primary },
-                        { label: 'Credits Used',      value: actStats.total_used,        color: '#DC2626' },
-                        { label: 'Remaining Credits', value: actStats.remaining_credits, color: '#16A34A' },
-                        { label: 'Courses Sold',      value: actStats.courses_sold,      color: '#2DA8FF' },
-                        { label: 'Students Enrolled', value: actStats.students_enrolled, color: '#7C3AED' },
-                        { label: 'Videos Uploaded',   value: actStats.videos_uploaded,   color: '#D97706' },
+                        { labelKey: 'saEarnings.kpi.totalAllocated',  value: actStats.total_allocated,   color: c.primary },
+                        { labelKey: 'saEarnings.kpi.creditsUsed',      value: actStats.total_used,        color: '#DC2626' },
+                        { labelKey: 'saEarnings.kpi.remainingCredits', value: actStats.remaining_credits, color: '#16A34A' },
+                        { labelKey: 'saEarnings.kpi.coursesSold',      value: actStats.courses_sold,      color: '#2DA8FF' },
+                        { labelKey: 'saEarnings.kpi.studentsEnrolled', value: actStats.students_enrolled, color: '#7C3AED' },
+                        { labelKey: 'saEarnings.kpi.videosUploaded',   value: actStats.videos_uploaded,   color: '#D97706' },
                       ].map(kpi => (
-                        <NeuCard key={kpi.label} radius={16} style={{ flexBasis: '47%', padding: 14, alignItems: 'center' }}>
+                        <NeuCard key={kpi.labelKey} radius={16} style={{ flexBasis: '47%', padding: 14, alignItems: 'center' }}>
                           <Text style={{ fontSize: 24, fontWeight: '900', color: kpi.color }}>{kpi.value}</Text>
-                          <Text style={{ fontSize: 10, ...mutedTextStyle(c, 0.45), textAlign: 'center', marginTop: 2 }}>{kpi.label}</Text>
+                          <Text style={{ fontSize: 10, ...mutedTextStyle(c, 0.45), textAlign: 'center', marginTop: 2 }}>{t(kpi.labelKey)}</Text>
                         </NeuCard>
                       ))}
                     </View>
@@ -809,12 +877,12 @@ export default function SADoctorEarnings() {
                         <TrendingUp size={20} color="#16A34A" />
                       </View>
                       <View style={{ flex: 1 }}>
-                        <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.45) }}>Credit-Based Earnings</Text>
+                        <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.45) }}>{t('saEarnings.creditEarnings')}</Text>
                         <Text style={{ fontSize: 20, fontWeight: '900', color: '#16A34A' }}>
                           EGP {actStats.total_earnings.toLocaleString('en-US')}
                         </Text>
                         <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.35) }}>
-                          {actStats.total_used} credits × EGP {actStats.credit_selling_price}
+                          {t('saEarnings.creditFormula', { count: actStats.total_used, price: actStats.credit_selling_price })}
                         </Text>
                       </View>
                     </NeuCard>
@@ -822,12 +890,12 @@ export default function SADoctorEarnings() {
                     {/* Last Login / Last Activity */}
                     <NeuCard radius={18} style={{ padding: 14, marginBottom: 20, gap: 8 }}>
                       {[
-                        { label: 'Last Login',    value: actStats.last_login  },
-                        { label: 'Last Activity', value: actStats.last_active },
+                        { labelKey: 'saEarnings.lastLogin',    value: actStats.last_login  },
+                        { labelKey: 'saEarnings.lastActivity', value: actStats.last_active },
                       ].map(row => (
-                        <View key={row.label} style={{ flexDirection: 'row', alignItems: 'center' }}>
-                          <Clock size={14} color={c.text} opacity={0.4} style={{ marginRight: 8 }} />
-                          <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.45), minWidth: 80, flexShrink: 0 }}>{row.label}</Text>
+                        <View key={row.labelKey} style={{ flexDirection: 'row', alignItems: 'center' }}>
+                          <Clock size={14} color={c.text} opacity={0.4} style={{ marginEnd: 8 }} />
+                          <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.45), flexShrink: 0, marginEnd: 8 }}>{t(row.labelKey)}</Text>
                           <Text style={{ fontSize: 12, color: c.text, flex: 1 }}>
                             {row.value ? fmtDateTime(row.value) : '—'}
                           </Text>
@@ -840,27 +908,27 @@ export default function SADoctorEarnings() {
                 {/* Credit Ledger Summary (getDoctorCreditSummary) */}
                 {creditSum && (
                   <>
-                    <SL label="Credit Ledger Summary" c={c} />
+                    <SL label={t('saEarnings.ledgerSummary')} c={c} />
                     <View style={{ flexDirection: 'row', gap: 10, marginBottom: 10, flexWrap: 'wrap' }}>
                       {[
-                        { label: 'Current Balance',   value: creditSum.current_balance ?? 0, color: '#16A34A'  },
-                        { label: 'Credits Added',      value: creditSum.total_received  ?? 0, color: c.primary  },
-                        { label: 'Credits Used',       value: creditSum.total_used      ?? 0, color: '#DC2626'  },
-                        { label: 'Credits Removed',    value: creditSum.total_removed   ?? 0, color: '#D97706'  },
+                        { labelKey: 'saEarnings.kpi.currentBalance', value: creditSum.current_balance ?? 0, color: '#16A34A' },
+                        { labelKey: 'saEarnings.kpi.creditsAdded',   value: creditSum.total_received  ?? 0, color: c.primary },
+                        { labelKey: 'saEarnings.kpi.creditsUsed',    value: creditSum.total_used      ?? 0, color: '#DC2626' },
+                        { labelKey: 'saEarnings.kpi.creditsRemoved', value: creditSum.total_removed   ?? 0, color: '#D97706' },
                         {
-                          label: 'Courses Activated',
+                          labelKey: 'saEarnings.kpi.coursesActivated',
                           value: new Set(creditRows.filter(t => t.transaction_type === 'consumption' && t.course_title).map(t => t.course_title)).size,
                           color: '#7C3AED',
                         },
                         {
-                          label: 'Students Activated',
+                          labelKey: 'saEarnings.kpi.studentsActivated',
                           value: new Set(creditRows.filter(t => t.transaction_type === 'consumption' && t.student_name).map(t => t.student_name)).size,
                           color: '#2DA8FF',
                         },
                       ].map(kpi => (
-                        <NeuCard key={kpi.label} radius={16} style={{ flexBasis: '47%', padding: 14, alignItems: 'center' }}>
+                        <NeuCard key={kpi.labelKey} radius={16} style={{ flexBasis: '47%', padding: 14, alignItems: 'center' }}>
                           <Text style={{ fontSize: 24, fontWeight: '900', color: kpi.color }}>{kpi.value}</Text>
-                          <Text style={{ fontSize: 10, ...mutedTextStyle(c, 0.45), textAlign: 'center', marginTop: 2 }}>{kpi.label}</Text>
+                          <Text style={{ fontSize: 10, ...mutedTextStyle(c, 0.45), textAlign: 'center', marginTop: 2 }}>{t(kpi.labelKey)}</Text>
                         </NeuCard>
                       ))}
                     </View>
@@ -871,7 +939,7 @@ export default function SADoctorEarnings() {
                         <DollarSign size={20} color="#16A34A" />
                       </View>
                       <View>
-                        <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.45) }}>Revenue from Credit Sales</Text>
+                        <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.45) }}>{t('saEarnings.creditSalesRevenue')}</Text>
                         <Text style={{ fontSize: 20, fontWeight: '900', color: '#16A34A' }}>
                           EGP {creditRevenue.toLocaleString('en-US')}
                         </Text>
@@ -886,7 +954,7 @@ export default function SADoctorEarnings() {
                 {/* Credit Ledger Timeline */}
                 {creditRows.length > 0 ? (
                   <>
-                    <SL label={`Credit History (${creditRows.length})`} c={c} />
+                    <SL label={t('saEarnings.creditHistory', { count: creditRows.length })} c={c} />
                     {creditRows.map((tx, idx) => (
                       <CreditTimelineRow key={tx.id} tx={tx} c={c} isLast={idx === creditRows.length - 1} />
                     ))}
@@ -897,9 +965,9 @@ export default function SADoctorEarnings() {
                       <NeuCard radius={24} style={{ width: 64, height: 64, alignItems: 'center', justifyContent: 'center' }}>
                         <CreditCard size={28} color={`${c.text}30`} />
                       </NeuCard>
-                      <Text style={{ fontSize: 15, fontWeight: '700', ...mutedTextStyle(c, 0.35) }}>No Credit Activity</Text>
+                      <Text style={{ fontSize: 15, fontWeight: '700', ...mutedTextStyle(c, 0.35), textAlign: 'center' }}>{t('saEarnings.noCreditActivity')}</Text>
                       <Text style={{ fontSize: 12, color: c.text, opacity: 0.22, textAlign: 'center', maxWidth: 240, lineHeight: 18 }}>
-                        No credit transactions have been recorded for this doctor.
+                        {t('saEarnings.noCreditActivityHint')}
                       </Text>
                     </View>
                   )
@@ -911,7 +979,7 @@ export default function SADoctorEarnings() {
             <NeuCard radius={14} style={{ padding: 14, marginTop: 8, flexDirection: 'row', alignItems: 'flex-start', gap: 10 }}>
               <Eye size={14} color={`${c.text}40`} style={{ marginTop: 1 }} />
               <Text style={{ flex: 1, fontSize: 11, ...mutedTextStyle(c, 0.4), lineHeight: 17 }}>
-                {"All data uses the exact same sources as the doctor's own dashboards — identical queries, calculations, and totals. Super Admin view is read-only."}
+                {t('saEarnings.dataNote')}
               </Text>
             </NeuCard>
           </>

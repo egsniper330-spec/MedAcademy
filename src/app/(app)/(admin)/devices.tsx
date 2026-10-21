@@ -29,14 +29,19 @@ import { neuColors, neuFlatStyle, useLayout, safeBottom, mutedTextStyle } from '
 import { PageHeader } from '@/components/PageHeader';
 import { getPublicEmail } from '@/lib/api';
 import { backendClient } from '@/client/backendClient';
+import { useTranslation } from '@/lib/i18n';
+import {
+  formatAbsoluteTimestamp, formatPresenceLine, getPresence, setServerClock,
+  type DevicePresenceState,
+} from '@/lib/devicePresence';
 
-const LIMIT_OPTIONS: Array<{ label: string; value: number | null }> = [
-  { label: '1 Device', value: 1 },
-  { label: '2 Devices', value: 2 },
-  { label: '3 Devices', value: 3 },
-  { label: '5 Devices', value: 5 },
-  { label: '10 Devices', value: 10 },
-  { label: 'Unlimited', value: null },
+const LIMIT_OPTIONS: Array<{ labelKey: string; value: number | null }> = [
+  { labelKey: 'adminDevices.limit1',    value: 1 },
+  { labelKey: 'adminDevices.limit2',    value: 2 },
+  { labelKey: 'adminDevices.limit3',    value: 3 },
+  { labelKey: 'adminDevices.limit5',    value: 5 },
+  { labelKey: 'adminDevices.limit10',   value: 10 },
+  { labelKey: 'bulk.unlimited',         value: null },
 ];
 
 type UserRow = {
@@ -59,19 +64,17 @@ type DeviceAction =
   | { type: 'set_limit'; user: UserRow }
   | null;
 
-function timeAgo(iso: string): string {
-  const diff = Date.now() - new Date(iso).getTime();
-  const mins = Math.floor(diff / 60000);
-  if (mins < 1) return 'Just now';
-  if (mins < 60) return `${mins}m ago`;
-  const hrs = Math.floor(mins / 60);
-  if (hrs < 24) return `${hrs}h ago`;
-  return `${Math.floor(hrs / 24)}d ago`;
-}
-
-function isOnline(lastActive: string) {
-  return Date.now() - new Date(lastActive).getTime() < 5 * 60 * 1000;
-}
+/**
+ * Presence comes from the shared model (src/lib/devicePresence.ts): it parses
+ * the backend's ISO/UTC timestamp (never a naive string as local time), measures
+ * elapsed time against the SERVER clock, and applies the documented online
+ * window. The local helpers that used to live here computed a 5-minute window
+ * from `new Date(last_active_at)` and produced the "3h ago" label for a
+ * 1-minute-old heartbeat.
+ */
+const PRESENCE_RANK: Record<DevicePresenceState, number> = {
+  online: 0, unknown: 1, offline: 2, blocked: 3, logged_out: 4,
+};
 
 function RoleBadge({ role, c }: { role: string; c: typeof neuColors.light }) {
   const colors: Record<string, string> = {
@@ -94,6 +97,7 @@ export default function AdminDevices({ backTo }: { backTo?: string } = {}) {
   const c = isDark ? neuColors.dark : neuColors.light;
   const layout = useLayout();
   const router = useRouter();
+  const { t, tCount } = useTranslation();
 
   const [users, setUsers] = useState<UserRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -224,15 +228,40 @@ export default function AdminDevices({ backTo }: { backTo?: string } = {}) {
 
   // Always force-reload on expand — never skip due to stale `loaded` flag.
   // This ensures that re-expanding a user always shows the latest devices.
-  const loadUserDevices = async (userId: string, forceReload = false) => {
+  const loadUserDevices = useCallback(async (userId: string, forceReload = false) => {
     if (deviceMapRef.current[userId]?.loaded && !forceReload) return;
     try {
       const res = await getAdminUserDevices(userId);
+      // Anchor the shared server clock: every relative label on this screen is
+      // measured against it, so an admin whose own clock is off still sees the
+      // right duration.
+      setServerClock(res?.server_epoch_ms);
       setUserDeviceMap(prev => ({ ...prev, [userId]: { devices: res.devices, loaded: true } }));
     } catch (_) {
-      setUserDeviceMap(prev => ({ ...prev, [userId]: { devices: [], loaded: true } }));
+      // A failed read is NOT evidence that devices went offline: keep the last
+      // known snapshot (and its timestamps) instead of blanking the list.
+      setUserDeviceMap(prev => (
+        prev[userId]?.loaded
+          ? prev
+          : { ...prev, [userId]: { devices: [], loaded: true } }
+      ));
     }
-  };
+  }, []);
+
+  // Presence ages while the screen is open. The status line is derived from a
+  // timestamp, so a cheap local tick keeps "5 min ago" and the online/offline
+  // boundary honest without polling the API. The expanded device list itself is
+  // re-fetched once a minute so heartbeats from other devices show up.
+  const [, setClockTick] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => setClockTick(n => n + 1), 30_000);
+    return () => clearInterval(id);
+  }, []);
+  useEffect(() => {
+    if (!expandedUser) return;
+    const id = setInterval(() => { void loadUserDevices(expandedUser, true); }, 60_000);
+    return () => clearInterval(id);
+  }, [expandedUser, loadUserDevices]);
 
   const toggleExpand = async (userId: string) => {
     if (expandedUser === userId) { setExpandedUser(null); return; }
@@ -327,7 +356,17 @@ export default function AdminDevices({ backTo }: { backTo?: string } = {}) {
       ? devices.filter(d => d.status !== 'logged_out').length
       : (user.device_count ?? 0);
     const blockedCount = devices.filter(d => d.status === 'blocked').length;
-    const onlineCount  = devices.filter(d => d.status === 'active' && isOnline(d.last_active_at)).length;
+    // ONE snapshot decides both the badge and each row's label, so the summary
+    // can never say "1 online" while the row says "last seen 3h ago".
+    const onlineCount  = devices.filter(d => getPresence(d).state === 'online').length;
+    // Online first, then most recent, then blocked/logged-out — the row order
+    // now follows the presence field instead of raw string order.
+    const sortedDevices = [...devices].sort((a, b) => {
+      const pa = getPresence(a), pb = getPresence(b);
+      const rank = PRESENCE_RANK[pa.state] - PRESENCE_RANK[pb.state];
+      if (rank !== 0) return rank;
+      return (pb.lastSeenMs ?? 0) - (pa.lastSeenMs ?? 0);
+    });
     const isUnlimited  = user.max_devices === null;
     const limitReached = !isUnlimited && activeCount >= (user.max_devices ?? 1);
 
@@ -353,24 +392,30 @@ export default function AdminDevices({ backTo }: { backTo?: string } = {}) {
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3 }}>
                 <Smartphone size={11} color={c.primary} />
                 <Text style={{ fontSize: 11, color: c.primary, fontWeight: '700' }}>
-                  {isUnlimited ? `${activeCount} / ∞ Unlimited` : `${activeCount} / ${user.max_devices ?? 1} devices`}
+                  {isUnlimited
+                    ? t('device.devicesUnlimited', { count: activeCount })
+                    : t('device.devicesCount', { count: activeCount, max: user.max_devices ?? 1 })}
                 </Text>
               </View>
               {onlineCount > 0 && (
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3 }}>
                   <Wifi size={11} color="#16A34A" />
-                  <Text style={{ fontSize: 11, color: '#16A34A', fontWeight: '700' }}>{onlineCount} online</Text>
+                  <Text style={{ fontSize: 11, color: '#16A34A', fontWeight: '700' }}>
+                    {t('device.countOnline', { count: onlineCount })}
+                  </Text>
                 </View>
               )}
               {blockedCount > 0 && (
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3 }}>
                   <Shield size={11} color="#DC2626" />
-                  <Text style={{ fontSize: 11, color: '#DC2626', fontWeight: '700' }}>{blockedCount} blocked</Text>
+                  <Text style={{ fontSize: 11, color: '#DC2626', fontWeight: '700' }}>
+                    {t('device.countBlocked', { count: blockedCount })}
+                  </Text>
                 </View>
               )}
               {limitReached && (
                 <View style={{ backgroundColor: '#DC262618', borderRadius: 6, paddingHorizontal: 5, paddingVertical: 2 }}>
-                  <Text style={{ fontSize: 9, fontWeight: '800', color: '#DC2626' }}>LIMIT REACHED</Text>
+                  <Text style={{ fontSize: 9, fontWeight: '800', color: '#DC2626' }}>{t('device.limitReached')}</Text>
                 </View>
               )}
             </View>
@@ -390,21 +435,21 @@ export default function AdminDevices({ backTo }: { backTo?: string } = {}) {
                   style={{ flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 12, paddingVertical: 8, backgroundColor: `${c.primary}18`, borderRadius: 10 }}
                 >
                   <Settings size={13} color={c.primary} />
-                  <Text style={{ fontSize: 12, fontWeight: '700', color: c.primary }}>Set Limit</Text>
+                  <Text style={{ fontSize: 12, fontWeight: '700', color: c.primary }}>{t('adminDevices.setLimit')}</Text>
                 </Pressable>
                 <Pressable
                   onPress={() => setAction({ type: 'reset', user })}
                   style={{ flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 12, paddingVertical: 8, backgroundColor: '#D9770618', borderRadius: 10 }}
                 >
                   <RotateCcw size={13} color="#D97706" />
-                  <Text style={{ fontSize: 12, fontWeight: '700', color: '#D97706' }}>Reset All</Text>
+                  <Text style={{ fontSize: 12, fontWeight: '700', color: '#D97706' }}>{t('adminDevices.resetAll')}</Text>
                 </Pressable>
                 <Pressable
                   onPress={() => router.push(`/(app)/login-history?user_id=${user.id}&user_name=${encodeURIComponent(user.full_name)}` as RelativePathString)}
                   style={{ flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 12, paddingVertical: 8, backgroundColor: `${c.text}0D`, borderRadius: 10 }}
                 >
                   <Clock size={13} color={`${c.text}99`} />
-                  <Text style={{ fontSize: 12, fontWeight: '700', ...mutedTextStyle(c, 0.6) }}>History</Text>
+                  <Text style={{ fontSize: 12, fontWeight: '700', ...mutedTextStyle(c, 0.6) }}>{t('adminDevices.history')}</Text>
                 </Pressable>
               </View>
             </ScrollView>
@@ -414,11 +459,12 @@ export default function AdminDevices({ backTo }: { backTo?: string } = {}) {
               <ActivityIndicator color={c.primary} style={{ padding: 16 }} />
             ) : devices.length === 0 ? (
               <View style={{ alignItems: 'center', paddingVertical: 20 }}>
-                <Text style={{ ...mutedTextStyle(c, 0.4), fontSize: 13 }}>No devices registered</Text>
+                <Text style={{ ...mutedTextStyle(c, 0.4), fontSize: 13 }}>{t('adminDevices.noDevices')}</Text>
               </View>
             ) : (
-              devices.map(device => {
-                const online    = device.status === 'active' && isOnline(device.last_active_at);
+              sortedDevices.map(device => {
+                const presence  = getPresence(device);
+                const online    = presence.state === 'online';
                 const isBlocked = device.status === 'blocked';
                 const isOut     = device.status === 'logged_out';
                 return (
@@ -429,9 +475,9 @@ export default function AdminDevices({ backTo }: { backTo?: string } = {}) {
                       </View>
                       <View style={{ flex: 1, minWidth: 0 }}>
                         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5, flexWrap: 'wrap' }}>
-                          <Text style={{ fontSize: 13, fontWeight: '700', color: c.text }}>{device.device_name ?? 'Unknown'}</Text>
-                          {isBlocked && <Text style={{ fontSize: 9, fontWeight: '800', color: '#DC2626', backgroundColor: '#DC262618', paddingHorizontal: 5, paddingVertical: 2, borderRadius: 5 }}>BLOCKED</Text>}
-                          {isOut && <Text style={{ fontSize: 9, fontWeight: '800', color: '#94A3B8', backgroundColor: '#94A3B818', paddingHorizontal: 5, paddingVertical: 2, borderRadius: 5 }}>LOGGED OUT</Text>}
+                          <Text style={{ fontSize: 13, fontWeight: '700', color: c.text }}>{device.device_name ?? t('adminDevices.unknown')}</Text>
+                          {isBlocked && <Text style={{ fontSize: 9, fontWeight: '800', color: '#DC2626', backgroundColor: '#DC262618', paddingHorizontal: 5, paddingVertical: 2, borderRadius: 5 }}>{t('adminDevices.blocked')}</Text>}
+                          {isOut && <Text style={{ fontSize: 9, fontWeight: '800', color: '#94A3B8', backgroundColor: '#94A3B818', paddingHorizontal: 5, paddingVertical: 2, borderRadius: 5 }}>{t('adminDevices.loggedOut')}</Text>}
                         </View>
                         <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.5), marginTop: 2 }}>
                           {[device.device_model, device.os, device.os_version].filter(Boolean).join(' · ') || device.platform}
@@ -439,7 +485,7 @@ export default function AdminDevices({ backTo }: { backTo?: string } = {}) {
                         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 3 }}>
                           {online ? <Wifi size={10} color="#16A34A" /> : <WifiOff size={10} color="#94A3B8" />}
                           <Text style={{ fontSize: 11, color: online ? '#16A34A' : '#94A3B8', fontWeight: '600' }}>
-                            {isBlocked ? `Blocked` : isOut ? 'Logged out' : online ? 'Online now' : `Last seen ${timeAgo(device.last_active_at)}`}
+                            {formatPresenceLine(presence, t, tCount)}
                           </Text>
                           {device.ip_address && (
                             <>
@@ -449,6 +495,15 @@ export default function AdminDevices({ backTo }: { backTo?: string } = {}) {
                             </>
                           )}
                         </View>
+                        {/* Current status and the last CONFIRMED time are separate
+                            facts and are labelled separately. Labour-saving text like
+                            "offline for 3h" is never derived from a guess: mobile OSes
+                            do not report when an app died. */}
+                        {presence.lastSeenMs !== null && (
+                          <Text style={{ fontSize: 10, ...mutedTextStyle(c, 0.35), marginTop: 2 }}>
+                            {t('device.lastConfirmedOnline')} · {formatAbsoluteTimestamp(presence.lastSeenMs)}
+                          </Text>
+                        )}
                         {device.app_version && (
                           <Text style={{ fontSize: 10, ...mutedTextStyle(c, 0.3), marginTop: 2 }}>v{device.app_version}</Text>
                         )}
@@ -508,8 +563,8 @@ export default function AdminDevices({ backTo }: { backTo?: string } = {}) {
       >
           {/* PageHeader sits OUTSIDE the inner padding view so it can own its own horizontal padding */}
           <PageHeader
-            title="Device Management"
-            subtitle={`${users.length} accounts`}
+            title={t('adminDevices.title')}
+            subtitle={t('adminDevices.accountsCount', { count: users.length })}
             accentColor={c.primary}
             showBack
             backFallback={backTo ?? '/admin-overview'}
@@ -541,7 +596,7 @@ export default function AdminDevices({ backTo }: { backTo?: string } = {}) {
             <Search size={18} color={c.text} opacity={0.4} style={{ flexShrink: 0 }} />
             <TextInput
               value={query} onChangeText={setQuery}
-              placeholder="Search user by name or email…"
+              placeholder={t('adminDevices.searchPlaceholder')}
               placeholderTextColor={`${c.text}55`}
               style={{ flex: 1, minWidth: 0, marginLeft: 10, fontSize: 15, color: c.text }}
             />
@@ -552,7 +607,7 @@ export default function AdminDevices({ backTo }: { backTo?: string } = {}) {
           ) : filtered.length === 0 ? (
             <View style={{ alignItems: 'center', paddingVertical: 64 }}>
               <Smartphone size={56} color={c.primary} opacity={0.15} />
-              <Text style={{ ...mutedTextStyle(c, 0.4), fontSize: 16, marginTop: 12 }}>No users found</Text>
+              <Text style={{ ...mutedTextStyle(c, 0.4), fontSize: 16, marginTop: 12 }}>{t('adminDevices.noUsers')}</Text>
             </View>
           ) : (
             filtered.map(user => renderUserRow(user))
@@ -564,20 +619,24 @@ export default function AdminDevices({ backTo }: { backTo?: string } = {}) {
       <ResponsiveModal
         visible={action?.type === 'block'}
         onClose={() => setAction(null)}
-        title="Block Device"
+        title={t('adminDevices.blockTitle')}
         footer={
           <View style={{ flexDirection: 'row', gap: 10 }}>
-            <NeuButton label="Cancel" onPress={() => setAction(null)} variant="secondary" style={{ flex: 1 }} />
-            <NeuButton label="Block" onPress={executeAction} loading={actionLoading} variant="danger" style={{ flex: 1 }} />
+            <NeuButton label={t('common.cancel')} onPress={() => setAction(null)} variant="secondary" style={{ flex: 1 }} />
+            <NeuButton label={t('bulk.block')} onPress={executeAction} loading={actionLoading} variant="danger" style={{ flex: 1 }} />
           </View>
         }
       >
         <Text style={{ fontSize: 14, ...mutedTextStyle(c, 0.65), marginBottom: 12, lineHeight: 22 }}>
-          Block <Text style={{ fontWeight: '700' }}>{action && 'device' in action ? (action.device.device_name ?? 'this device') : ''}</Text>? The device will not be able to log in until unblocked.
+          {t('adminDevices.blockBody', {
+            device: action && 'device' in action
+              ? (action.device.device_name ?? t('adminDevices.thisDevice'))
+              : '',
+          })}
         </Text>
         <TextInput
           value={blockReason} onChangeText={setBlockReason}
-          placeholder="Block reason (optional)…"
+          placeholder={t('adminDevices.blockReason')}
           placeholderTextColor={`${c.text}55`}
           style={{ backgroundColor: `${c.text}0A`, borderRadius: 12, paddingHorizontal: 13, paddingVertical: 13, fontSize: 14, color: c.text, minWidth: 0 }}
         />
@@ -588,16 +647,20 @@ export default function AdminDevices({ backTo }: { backTo?: string } = {}) {
       <ResponsiveModal
         visible={action?.type === 'unblock'}
         onClose={() => setAction(null)}
-        title="Unblock Device"
+        title={t('adminDevices.unblockTitle')}
         footer={
           <View style={{ flexDirection: 'row', gap: 10 }}>
-            <NeuButton label="Cancel" onPress={() => setAction(null)} variant="secondary" style={{ flex: 1 }} />
-            <NeuButton label="Unblock" onPress={executeAction} loading={actionLoading} style={{ flex: 1 }} />
+            <NeuButton label={t('common.cancel')} onPress={() => setAction(null)} variant="secondary" style={{ flex: 1 }} />
+            <NeuButton label={t('bulk.unblock')} onPress={executeAction} loading={actionLoading} style={{ flex: 1 }} />
           </View>
         }
       >
         <Text style={{ fontSize: 14, ...mutedTextStyle(c, 0.65), lineHeight: 22 }}>
-          Unblock <Text style={{ fontWeight: '700' }}>{action && 'device' in action ? (action.device.device_name ?? 'this device') : ''}</Text>? The device will be able to log in again.
+          {t('adminDevices.unblockBody', {
+            device: action && 'device' in action
+              ? (action.device.device_name ?? t('adminDevices.thisDevice'))
+              : '',
+          })}
         </Text>
         {errorMsg ? <Text style={{ color: '#DC2626', fontSize: 13, marginTop: 8 }}>{errorMsg}</Text> : null}
       </ResponsiveModal>
@@ -606,16 +669,20 @@ export default function AdminDevices({ backTo }: { backTo?: string } = {}) {
       <ResponsiveModal
         visible={action?.type === 'logout'}
         onClose={() => setAction(null)}
-        title="Logout Device"
+        title={t('adminDevices.logoutTitle')}
         footer={
           <View style={{ flexDirection: 'row', gap: 10 }}>
-            <NeuButton label="Cancel" onPress={() => setAction(null)} variant="secondary" style={{ flex: 1 }} />
-            <NeuButton label="Logout" onPress={executeAction} loading={actionLoading} variant="danger" style={{ flex: 1 }} />
+            <NeuButton label={t('common.cancel')} onPress={() => setAction(null)} variant="secondary" style={{ flex: 1 }} />
+            <NeuButton label={t('adminDevices.logoutAction')} onPress={executeAction} loading={actionLoading} variant="danger" style={{ flex: 1 }} />
           </View>
         }
       >
         <Text style={{ fontSize: 14, ...mutedTextStyle(c, 0.65), lineHeight: 22 }}>
-          Force logout <Text style={{ fontWeight: '700' }}>{action && 'device' in action ? (action.device.device_name ?? 'this device') : ''}</Text>? The user will need to sign in again from this device.
+          {t('adminDevices.logoutBody', {
+            device: action && 'device' in action
+              ? (action.device.device_name ?? t('adminDevices.thisDevice'))
+              : '',
+          })}
         </Text>
         {errorMsg ? <Text style={{ color: '#DC2626', fontSize: 13, marginTop: 8 }}>{errorMsg}</Text> : null}
       </ResponsiveModal>
@@ -624,21 +691,21 @@ export default function AdminDevices({ backTo }: { backTo?: string } = {}) {
       <ResponsiveModal
         visible={action?.type === 'delete'}
         onClose={() => setAction(null)}
-        title="Delete Device Record"
+        title={t('adminDevices.deleteTitle')}
         footer={
           <View style={{ flexDirection: 'row', gap: 10 }}>
-            <NeuButton label="Cancel" onPress={() => setAction(null)} variant="secondary" style={{ flex: 1 }} />
-            <NeuButton label="Delete" onPress={executeAction} loading={actionLoading} variant="danger" style={{ flex: 1 }} />
+            <NeuButton label={t('common.cancel')} onPress={() => setAction(null)} variant="secondary" style={{ flex: 1 }} />
+            <NeuButton label={t('common.delete')} onPress={executeAction} loading={actionLoading} variant="danger" style={{ flex: 1 }} />
           </View>
         }
       >
         <View style={{ backgroundColor: '#DC262610', borderRadius: 12, padding: 12, marginBottom: 12 }}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
             <AlertTriangle size={16} color="#DC2626" />
-            <Text style={{ fontSize: 13, fontWeight: '700', color: '#DC2626' }}>Permanent action</Text>
+            <Text style={{ fontSize: 13, fontWeight: '700', color: '#DC2626' }}>{t('adminDevices.permanent')}</Text>
           </View>
           <Text style={{ fontSize: 12, color: '#DC2626', marginTop: 4, lineHeight: 18 }}>
-            This will permanently remove the device record. The user will be able to re-register this device on next login.
+            {t('adminDevices.deleteBody')}
           </Text>
         </View>
         {errorMsg ? <Text style={{ color: '#DC2626', fontSize: 13 }}>{errorMsg}</Text> : null}
@@ -648,17 +715,18 @@ export default function AdminDevices({ backTo }: { backTo?: string } = {}) {
       <ResponsiveModal
         visible={action?.type === 'reset'}
         onClose={() => setAction(null)}
-        title="Reset All Devices"
+        title={t('adminDevices.resetTitle')}
         footer={
           <View style={{ flexDirection: 'row', gap: 10 }}>
-            <NeuButton label="Cancel" onPress={() => setAction(null)} variant="secondary" style={{ flex: 1 }} />
-            <NeuButton label="Reset All" onPress={executeAction} loading={actionLoading} variant="danger" style={{ flex: 1 }} />
+            <NeuButton label={t('common.cancel')} onPress={() => setAction(null)} variant="secondary" style={{ flex: 1 }} />
+            <NeuButton label={t('adminDevices.resetAll')} onPress={executeAction} loading={actionLoading} variant="danger" style={{ flex: 1 }} />
           </View>
         }
       >
         <Text style={{ fontSize: 14, ...mutedTextStyle(c, 0.65), lineHeight: 22 }}>
-          Remove all registered devices for{' '}
-          <Text style={{ fontWeight: '700' }}>{action?.type === 'reset' ? action.user.full_name : ''}</Text>. They must re-register on next login.
+          {t('adminDevices.resetBody', {
+            name: action?.type === 'reset' ? action.user.full_name : '',
+          })}
         </Text>
         {errorMsg ? <Text style={{ color: '#DC2626', fontSize: 13, marginTop: 8 }}>{errorMsg}</Text> : null}
       </ResponsiveModal>
@@ -667,18 +735,18 @@ export default function AdminDevices({ backTo }: { backTo?: string } = {}) {
       <ResponsiveModal
         visible={action?.type === 'set_limit'}
         onClose={() => setAction(null)}
-        title="Configure Device Limit"
+        title={t('adminDevices.limitTitle')}
         footer={
           <View style={{ flexDirection: 'row', gap: 10 }}>
-            <NeuButton label="Cancel" onPress={() => setAction(null)} variant="secondary" style={{ flex: 1 }} />
-            <NeuButton label="Apply" onPress={executeAction} loading={actionLoading} style={{ flex: 1 }} />
+            <NeuButton label={t('common.cancel')} onPress={() => setAction(null)} variant="secondary" style={{ flex: 1 }} />
+            <NeuButton label={t('common.apply')} onPress={executeAction} loading={actionLoading} style={{ flex: 1 }} />
           </View>
         }
       >
         {action?.type === 'set_limit' && (
           <View>
             <Text style={{ fontSize: 13, ...mutedTextStyle(c, 0.6), marginBottom: 14, lineHeight: 20 }}>
-              Set max devices for <Text style={{ fontWeight: '700', opacity: 1 }}>{action.user.full_name}</Text>:
+              {t('adminDevices.limitBody', { name: action.user.full_name })}
             </Text>
             {LIMIT_OPTIONS.map(opt => (
               <Pressable
@@ -698,7 +766,7 @@ export default function AdminDevices({ backTo }: { backTo?: string } = {}) {
                   }
                 </View>
                 <Text style={{ flex: 1, fontSize: 14, fontWeight: selectedLimit === opt.value ? '700' : '500', color: selectedLimit === opt.value ? c.primary : c.text }}>
-                  {opt.label}
+                  {t(opt.labelKey)}
                 </Text>
                 {selectedLimit === opt.value && <CheckCircle size={18} color={c.primary} />}
               </Pressable>

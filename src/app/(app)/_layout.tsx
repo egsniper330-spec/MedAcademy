@@ -17,6 +17,7 @@ import { isExpectedMaintenanceError } from '@/lib/maintenanceStateModel';
 import { maintenanceEpoch } from '@/components/MaintenanceGate';
 import { UploadFAB } from '@/components/VideoUploadQueue';
 import { useSecurity } from '@/lib/SecurityContext';
+import { useDeviceHeartbeat } from '@/lib/deviceHeartbeat';
 import { SecurityGate } from '@/app/(app)/security-gate';
 import { useUpdate } from '@/lib/useForceUpdate';
 import ForceUpdateScreen from '@/components/ForceUpdateScreen';
@@ -33,6 +34,12 @@ const APP_SC_KEY = 'app-shell';
 
 function AppLayoutNav() {
   const { session } = useSession();
+  // Presence: one authenticated heartbeat per interval while the app is in the
+  // FOREGROUND (see src/lib/deviceHeartbeat.ts). Mounted on the authenticated
+  // shell so it starts after login and stops on sign-out. Without it
+  // `devices.last_active_at` only changed at login, so every "online" badge was
+  // really "logged in at some point".
+  useDeviceHeartbeat(session?.user?.id);
   const { profile, isProfileLoading, setProfile, setProfileLoading, clearProfile } = useProfileStore();
   const router = useRouter();
   const hasNavigated = useRef(false);

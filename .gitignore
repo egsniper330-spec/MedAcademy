@@ -92,3 +92,6 @@ package.json.*
 # IDE / editor state (per-developer, never commit)
 .idea/
 *.iml
+.gradle-build/
+.dev-api-proxy.log
+.expo-web-preview.log

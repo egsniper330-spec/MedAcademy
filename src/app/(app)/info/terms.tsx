@@ -7,6 +7,7 @@ import { useCmsSections } from '@/lib/cmsContent';
 import { NeuCard } from '@/components/NeuCard';
 import { neuColors, useLayout, safeBottom, mutedTextStyle } from '@/lib/neu';
 import { FileText } from 'lucide-react-native';
+import { useTranslation } from '@/lib/i18n';
 
 const SECTIONS = [
   {
@@ -50,6 +51,7 @@ const SECTIONS = [
 export default function TermsPage() {
   const isDark = useColorScheme() === 'dark';
   const c = isDark ? neuColors.dark : neuColors.light;
+  const { t } = useTranslation();
   const layout = useLayout();
   // Server-managed content (Super Admin → Platform → CMS Pages). Falls back to
   // SECTIONS below whenever no body has been written, so this page is never
@@ -60,7 +62,7 @@ export default function TermsPage() {
 
   return (
     <View style={{ flex: 1, backgroundColor: c.base }}>
-      <PageHeader title="Terms & Conditions" showBack />
+      <PageHeader title={t('studentProfile.terms')} showBack />
       <ScrollView
         style={{ flex: 1 }}
         contentContainerStyle={{ padding: layout.screenPx }}

@@ -23,6 +23,8 @@ import {
 } from 'lucide-react-native';
 import { neuColors, useLayout, neuFlatStyle, neuPressedStyle, safeBottom, zIndex, mutedTextStyle } from '@/lib/neu';
 import { PageHeader } from '@/components/PageHeader';
+import { AnchoredMenu } from '@/components/AnchoredMenu';
+import { t as translate } from '@/lib/i18n';
 import { NeuCard } from '@/components/NeuCard';
 import { useToast } from '@/components/Toast';
 import { useProfileStore } from '@/lib/store';
@@ -92,6 +94,8 @@ export default function VideoLibraryScreen() {
   const [sortBy, setSortBy] = useState<LibraryFilters['sortBy']>('created_at');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
   const [showSortMenu, setShowSortMenu] = useState(false);
+  // Trigger rect source for the RTL-aware anchored menu.
+  const sortAnchorRef = useRef<View>(null);
   const [expandedUsage, setExpandedUsage] = useState<Record<string, VideoAssetUsage[]>>({});
   const [loadingUsage, setLoadingUsage] = useState<string | null>(null);
 
@@ -645,9 +649,14 @@ export default function VideoLibraryScreen() {
           )}
         </View>
 
-        <View>
+        {/* The menu is anchored to THIS wrapper. Placement (side + collision)
+            is computed from the trigger's window rect by AnchoredMenu, so the
+            menu follows the inline-start edge in both LTR and RTL. */}
+        <View ref={sortAnchorRef} collapsable={false}>
           <Pressable
             onPress={() => setShowSortMenu(v => !v)}
+            accessibilityRole="button"
+            accessibilityState={{ expanded: showSortMenu }}
             style={[neuFlatStyle(isDark), { height: 42, paddingHorizontal: 12, borderRadius: 14, flexDirection: 'row', alignItems: 'center', gap: 6 }]}>
             {sortDir === 'asc' ? <SortAsc size={15} color={c.primary} /> : <SortDesc size={15} color={c.primary} />}
             <Text style={{ fontSize: 12, fontWeight: '700', color: c.primary }}>
@@ -656,11 +665,14 @@ export default function VideoLibraryScreen() {
             <ChevronDown size={13} color={c.primary} />
           </Pressable>
 
-          {showSortMenu && (
-            <View style={[neuFlatStyle(isDark), {
-              position: 'absolute', top: 46, right: 0, zIndex: zIndex.dropdown,
-              borderRadius: 14, padding: 8, minWidth: 160, gap: 2,
-            }]}>
+          <AnchoredMenu
+            visible={showSortMenu}
+            onClose={() => setShowSortMenu(false)}
+            anchorRef={sortAnchorRef}
+            preferredWidth={180}
+            accessibilityLabel={translate('nav.closeMenu')}
+            style={{ zIndex: zIndex.dropdown, minWidth: 160 }}
+          >
               {SORT_OPTIONS.map(opt => (
                 <Pressable
                   key={opt.value}
@@ -679,8 +691,7 @@ export default function VideoLibraryScreen() {
                   {sortBy === opt.value && (sortDir === 'asc' ? <SortAsc size={12} color={c.primary} /> : <SortDesc size={12} color={c.primary} />)}
                 </Pressable>
               ))}
-            </View>
-          )}
+          </AnchoredMenu>
         </View>
       </View>
 

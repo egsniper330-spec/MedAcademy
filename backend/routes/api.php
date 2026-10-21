@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use MedAcademy\Controllers\AdminController;
 use MedAcademy\Controllers\AnalyticsController;
+use MedAcademy\Controllers\EnrollmentStatsController;
 use MedAcademy\Controllers\AuthController;
 use MedAcademy\Controllers\CourseController;
 use MedAcademy\Controllers\CreditController;
@@ -311,6 +312,16 @@ $router->post('/analytics/db-audit', [AnalyticsController::class, 'dbAudit'], $a
 $router->post('/analytics/recalculate-earnings/{doctorId}', [AnalyticsController::class, 'recalculateEarnings'], $auth + ['role' => ['admin', 'super_admin']]);
 $router->post('/analytics/reset-doctor-earnings/{doctorId}', [AnalyticsController::class, 'resetDoctorEarnings'], $auth + ['role' => ['admin', 'super_admin']]);
 $router->post('/analytics/reset-platform-earnings', [AnalyticsController::class, 'resetPlatformEarnings'], $auth + ['role' => ['super_admin']]);
+
+// ---- Enrollment statistics (Admin + Super Admin, read-only) ------------------
+// Two explicitly separate metrics: `unique_students` (distinct accounts) and
+// `enrollments` (one per student per course). Same pair set, same eligibility
+// rules; see EnrollmentStatsController's docblock for the counting contract.
+$router->get('/analytics/enrollment-stats', [EnrollmentStatsController::class, 'summary'], $auth + ['role' => ['admin', 'super_admin']]);
+$router->get('/analytics/enrollment-stats/doctors', [EnrollmentStatsController::class, 'doctors'], $auth + ['role' => ['admin', 'super_admin']]);
+$router->get('/analytics/enrollment-stats/courses', [EnrollmentStatsController::class, 'courses'], $auth + ['role' => ['admin', 'super_admin']]);
+$router->get('/analytics/enrollment-stats/doctors/{id}', [EnrollmentStatsController::class, 'doctorDetail'], $auth + ['role' => ['admin', 'super_admin']]);
+$router->get('/analytics/enrollment-stats/courses/{id}', [EnrollmentStatsController::class, 'courseDetail'], $auth + ['role' => ['admin', 'super_admin']]);
 
 // ---- System diagnostics (Super Admin) --------------------------------------
 // Safe, sanitized infrastructure checks. NEVER returns secret values — only

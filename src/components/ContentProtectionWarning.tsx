@@ -10,6 +10,7 @@ import { View, Text, Pressable, useColorScheme } from 'react-native';
 import { PortalOverlay } from '@/components/PortalOverlay';
 import { AlertTriangle, ShieldX } from 'lucide-react-native';
 import { neuColors, neuFlatStyle, mutedTextStyle } from '@/lib/neu';
+import { useTranslation } from '@/lib/i18n';
 
 interface Props {
   visible: boolean;
@@ -22,6 +23,7 @@ export function ContentProtectionWarning({ visible, warningMessage, strikeCount,
   const isDark = useColorScheme() === 'dark';
   const c = isDark ? neuColors.dark : neuColors.light;
   const flat = neuFlatStyle(isDark);
+  const { t, tCount } = useTranslation();
 
   return (
     <PortalOverlay visible={visible} variant="dialog" backdropColor="rgba(0,0,0,0.75)">
@@ -61,7 +63,7 @@ export function ContentProtectionWarning({ visible, warningMessage, strikeCount,
           {/* Remaining hint */}
           {strikeCount < 3 && (
             <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.45), textAlign: 'center' }}>
-              {3 - strikeCount} violation{3 - strikeCount !== 1 ? 's' : ''} remaining before account suspension.
+              {tCount('contentProtection.remainingViolations', 3 - strikeCount)}
             </Text>
           )}
 
@@ -70,7 +72,7 @@ export function ContentProtectionWarning({ visible, warningMessage, strikeCount,
             onPress={onAcknowledge}
             style={{ backgroundColor: c.primary, paddingVertical: 14, borderRadius: 14, alignItems: 'center' }}
           >
-            <Text style={{ fontSize: 15, fontWeight: '700', color: '#fff' }}>I Understand</Text>
+            <Text style={{ fontSize: 15, fontWeight: '700', color: '#fff' }}>{t('common.iUnderstand')}</Text>
           </Pressable>
         </View>
       </View>

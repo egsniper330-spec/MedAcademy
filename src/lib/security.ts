@@ -1257,32 +1257,20 @@ async function detectTamper(): Promise<SecurityThreat | null> {
 }
 
 /**
- * Mock location detection — Android only.
- * Uses SecurityModule.getSecurityFlags().mockLocationDetected which checks:
- *   - AppOpsManager.OPSTR_MOCK_LOCATION granted to any non-system app (API 23+)
- *   - Settings.Secure.ALLOW_MOCK_LOCATION legacy flag (pre-API 23 fallback)
- *   - Installed packages holding ACCESS_MOCK_LOCATION permission
+ * MOCK LOCATION — deliberately NOT detected. There is no detector function here
+ * and no `mock_location` evidence field anywhere in the pipeline.
+ *
+ * A third-party APK cannot read another package's `android:mock_location` app-op
+ * (the cross-UID query needs UPDATE_APP_OPS_STATS, a signature|privileged
+ * permission), and the per-package mode it would expose is persisted state that
+ * outlives the Developer-options toggle and can be OEM-preset. `MODE_ALLOWED`
+ * therefore never proved "Developer options are on", "the user selected a mock
+ * app" or "locations are being mocked right now" — it only produced a
+ * login-blocking risk-20 finding on stock devices (last seen on Android 16 /
+ * API 36 with Developer options OFF). MedAcademy has no location-based feature,
+ * so the check protected nothing. See the removal note in
+ * plugins/withSecurityModule.js and docs/MOCK_LOCATION_REMOVAL.md.
  */
-async function detectMockLocation(): Promise<SecurityThreat | null> {
-  try {
-    if (process.env.EXPO_OS !== 'android') return null;
-    const flags = await getNativeSecurityFlags();
-    if (__DEV__) {
-      console.log('[SecurityCheck][MockLocation] mockLocationDetected=', flags.mockLocationDetected);
-    }
-    if (!flags.mockLocationDetected) return null;
-    return {
-      type: 'debug_detected',
-      detectionMethod: 'Mock location enabled',
-      detected: true,
-    };
-  } catch (e) {
-    if (__DEV__) {
-      console.log('[SecurityCheck][MockLocation] exception:', e);
-    }
-    return null;
-  }
-}
 
 /**
  * Play Integrity (Android) / App Attest (iOS) — server-verified device/app integrity.
@@ -1696,7 +1684,7 @@ export async function runSecurityChecks(): Promise<SecurityCheckResult> {
   // before Offline Mode appeared. Skipping them WHEN THE DEVICE IS GENUINELY
   // OFFLINE is honest: they cannot produce evidence offline either way, and
   // the connectivity-restore listener re-runs the full pipeline the moment
-  // the network returns. EVERY LOCAL detector (root, emulator, mock location,
+  // the network returns. EVERY LOCAL detector (root, emulator,
   // developer options, USB debugging, debugger, frida/xposed/magisk, overlay,
   // screen recording, tamper/signature) still runs — genuine violations still
   // block offline exactly as online.
@@ -1728,7 +1716,7 @@ export async function runSecurityChecks(): Promise<SecurityCheckResult> {
   const [
     rootThreat, vpnThreat, proxyThreat, debugThreat, devOptsThreat, screenRecThreat,
     fridaThreat, xposedThreat, magiskThreat, overlayThreat, tamperThreat,
-    mockLocThreat, piThreat, sslThreat,
+    piThreat, sslThreat,
   ] = await Promise.all([
     // Every detector is individually bounded (DETECTOR_TIMEOUT_MS): a single
     // hung native/network call can no longer stall the whole pipeline. A timed-
@@ -1753,7 +1741,6 @@ export async function runSecurityChecks(): Promise<SecurityCheckResult> {
     withTimeout(detectMagisk(),               DETECTOR_TIMEOUT_MS, () => null),
     withTimeout(detectOverlay(),              DETECTOR_TIMEOUT_MS, () => null),
     withTimeout(detectTamper(),               DETECTOR_TIMEOUT_MS, () => null),
-    withTimeout(detectMockLocation(),         DETECTOR_TIMEOUT_MS, () => null),
     // Play Integrity is entirely network-bound (backend nonce → Google API).
     // Offline it can only burn its timeouts before returning null anyway.
     withTimeout(genuinelyOffline ? Promise.resolve(null) : runPlayIntegrityCheck(), DETECTOR_TIMEOUT_MS, () => null),
@@ -1771,7 +1758,7 @@ export async function runSecurityChecks(): Promise<SecurityCheckResult> {
     rootThreat, vpnThreat, proxyThreat, debugThreat,
     devOptsThreat, screenRecThreat, integrityThreat,
     fridaThreat, xposedThreat, magiskThreat, overlayThreat,
-    tamperThreat, mockLocThreat, piThreat, sslThreat,
+    tamperThreat, piThreat, sslThreat,
   ].filter((t): t is SecurityThreat => t !== null && t.detected);
 
   if (__DEV__) {

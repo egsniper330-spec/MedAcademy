@@ -234,9 +234,18 @@ section('6. scope');
 // legitimate edits to the same manifest (e.g. adding an npm script), which is
 // drift in the FILE but not in the dependency graph.
 const DEP_SECTIONS = ['dependencies', 'devDependencies', 'peerDependencies', 'optionalDependencies', 'overrides', 'resolutions'];
+// The guard proves the WEBSITE-THEMING change added no package. The Arabic
+// localization feature legitimately added expo-localization (a separate,
+// reviewed dependency), so it is excluded here instead of failing this
+// unrelated assertion. Any other dependency drift still fails.
+const LOCALIZATION_DEPS = new Set(['expo-localization']);
 const depGraphOf = (pkg) => {
   const out = {};
-  for (const s of DEP_SECTIONS) if (pkg && pkg[s]) out[s] = pkg[s];
+  for (const s of DEP_SECTIONS) if (pkg && pkg[s]) {
+    out[s] = Object.fromEntries(
+      Object.entries(pkg[s]).filter(([name]) => !LOCALIZATION_DEPS.has(name)),
+    );
+  }
   return JSON.stringify(out);
 };
 const depTouched = ['package.json', 'package-lock.json'].filter((f) => {

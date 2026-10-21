@@ -3,6 +3,7 @@ import { Menu } from 'lucide-react-native';
 import { neuColors } from '@/lib/neu';
 import { iconContainer, iconSize } from '@/lib/ds';
 import { useDrawer } from './DrawerContext';
+import { t } from '@/lib/i18n';
 
 interface Props {
   color?: string;
@@ -33,7 +34,7 @@ export default function HamburgerButton({ color, plain = false }: Props) {
       <Pressable
         onPress={openDrawer}
         hitSlop={12}
-        accessibilityLabel="Open navigation menu"
+        accessibilityLabel={t('nav.openMenu')}
         accessibilityRole="button"
         style={base}
       >
@@ -46,7 +47,7 @@ export default function HamburgerButton({ color, plain = false }: Props) {
     <Pressable
       onPress={openDrawer}
       hitSlop={8}
-      accessibilityLabel="Open navigation menu"
+      accessibilityLabel={t('nav.openMenu')}
       accessibilityRole="button"
       style={Platform.select({
         ios: {

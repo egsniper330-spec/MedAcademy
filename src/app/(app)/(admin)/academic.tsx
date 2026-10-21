@@ -20,6 +20,7 @@ import { useToast } from '@/components/Toast';
 import { neuColors, useLayout, safeBottom, mutedTextStyle } from '@/lib/neu';
 import { validateRequired, friendlyError } from '@/lib/validation';
 import { KeyboardAwareScrollView } from '@/components/KeyboardAwareScrollView';
+import { useTranslation } from '@/lib/i18n';
 
 type Tab = 'universities' | 'faculties' | 'levels';
 
@@ -32,6 +33,7 @@ function InputModal({
   loading: boolean; c: typeof neuColors.light;
 }) {
   const [val, setVal] = useState(initialValue ?? '');
+  const { t } = useTranslation();
   const inputStyle = { backgroundColor: c.base, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, shadowColor: c.shadowDark, shadowOffset: { width: 2, height: 2 }, shadowOpacity: 0.55, shadowRadius: 5 };
   return (
     <ResponsiveModal
@@ -40,8 +42,8 @@ function InputModal({
       title={title}
       footer={
         <View style={{ flexDirection: 'row', gap: 12 }}>
-          <NeuButton label="Cancel" onPress={onCancel} variant="secondary" style={{ flex: 1 }} />
-          <NeuButton label="Save" onPress={() => onConfirm(val)} loading={loading} style={{ flex: 1 }} />
+          <NeuButton label={t('common.cancel')} onPress={onCancel} variant="secondary" style={{ flex: 1 }} />
+          <NeuButton label={t('common.save')} onPress={() => onConfirm(val)} loading={loading} style={{ flex: 1 }} />
         </View>
       }
     >
@@ -67,6 +69,7 @@ export default function AcademicManagement({ backTo }: { backTo?: string } = {})
   const c = isDark ? neuColors.dark : neuColors.light;
   const layout = useLayout();
   const { showToast } = useToast();
+  const { t } = useTranslation();
 
   const [tab, setTab] = useState<Tab>('universities');
   const [refreshing, setRefreshing] = useState(false);
@@ -124,18 +127,18 @@ export default function AcademicManagement({ backTo }: { backTo?: string } = {})
 
   // ── University handlers ───────────────────────────────────────────────────
   const handleSaveUniversity = async (name: string) => {
-    const err = validateRequired(name, 'University name');
+    const err = validateRequired(name, t('adminAcademic.universityName'));
     if (err) return;
     setUniSaving(true);
     try {
       if (editUni) {
         const updated = await updateUniversity(editUni.id, { name });
         setUniversities(prev => prev.map(u => u.id === editUni.id ? { ...u, ...updated } : u));
-        showToast({ type: 'success', message: 'University updated successfully.' });
+        showToast({ type: 'success', message: t('adminAcademic.uniUpdated') });
       } else {
         const created = await createUniversity(name);
         setUniversities(prev => [...prev, created]);
-        showToast({ type: 'success', message: 'University created successfully.' });
+        showToast({ type: 'success', message: t('adminAcademic.uniCreated') });
       }
       setUniModal(false); setEditUni(null);
     } catch (e) {
@@ -148,9 +151,12 @@ export default function AcademicManagement({ backTo }: { backTo?: string } = {})
     try {
       const updated = await updateUniversity(uni.id, { is_active: !uni.is_active });
       setUniversities(prev => prev.map(u => u.id === uni.id ? { ...u, ...updated } : u));
-      showToast({ type: 'info', message: `University ${updated.is_active ? 'activated' : 'deactivated'}.` });
+      showToast({
+        type: 'info',
+        message: t(updated.is_active ? 'adminAcademic.uniActivated' : 'adminAcademic.uniDeactivated'),
+      });
     } catch (e) {
-      showToast({ type: 'error', message: friendlyError(e, 'Failed to update university.') });
+      showToast({ type: 'error', message: friendlyError(e, t('adminAcademic.uniUpdateFailed')) });
     }
   };
 
@@ -158,31 +164,31 @@ export default function AcademicManagement({ backTo }: { backTo?: string } = {})
     try {
       await deleteUniversity(id);
       setUniversities(prev => prev.filter(u => u.id !== id));
-      showToast({ type: 'success', message: 'University deleted.' });
+      showToast({ type: 'success', message: t('adminAcademic.uniDeleted') });
     } catch (e) {
-      showToast({ type: 'error', message: friendlyError(e, 'Failed to delete university.') });
+      showToast({ type: 'error', message: friendlyError(e, t('adminAcademic.uniDeleteFailed')) });
     }
   };
 
   // ── Faculty handlers ──────────────────────────────────────────────────────
   const handleSaveFaculty = async (name: string) => {
-    const err = validateRequired(name, 'Faculty name');
+    const err = validateRequired(name, t('adminAcademic.facultyName'));
     if (err) return;
     setFacSaving(true);
     try {
       if (editFac) {
         const updated = await updateFaculty(editFac.id, { name });
         setFaculties(prev => prev.map(f => f.id === editFac.id ? { ...f, ...updated } : f));
-        showToast({ type: 'success', message: 'Faculty updated successfully.' });
+        showToast({ type: 'success', message: t('adminAcademic.facUpdated') });
       } else {
         const created = await createFaculty(selectedUniForFac, name);
         setFaculties(prev => [...prev, { ...created, university: universities.find(u => u.id === selectedUniForFac) }]);
         await loadLevelsForFaculty(created.id);
-        showToast({ type: 'success', message: 'Faculty created successfully.' });
+        showToast({ type: 'success', message: t('adminAcademic.facCreated') });
       }
       setFacModal(false); setEditFac(null);
     } catch (e) {
-      showToast({ type: 'error', message: friendlyError(e, 'Failed to save faculty.') });
+      showToast({ type: 'error', message: friendlyError(e, t('adminAcademic.facSaveFailed')) });
     }
     setFacSaving(false);
   };
@@ -191,9 +197,12 @@ export default function AcademicManagement({ backTo }: { backTo?: string } = {})
     try {
       const updated = await updateFaculty(fac.id, { is_active: !fac.is_active });
       setFaculties(prev => prev.map(f => f.id === fac.id ? { ...f, ...updated } : f));
-      showToast({ type: 'info', message: `Faculty ${updated.is_active ? 'activated' : 'deactivated'}.` });
+      showToast({
+        type: 'info',
+        message: t(updated.is_active ? 'adminAcademic.facActivated' : 'adminAcademic.facDeactivated'),
+      });
     } catch (e) {
-      showToast({ type: 'error', message: friendlyError(e, 'Failed to update faculty.') });
+      showToast({ type: 'error', message: friendlyError(e, t('adminAcademic.facUpdateFailed')) });
     }
   };
 
@@ -201,15 +210,15 @@ export default function AcademicManagement({ backTo }: { backTo?: string } = {})
     try {
       await deleteFaculty(id);
       setFaculties(prev => prev.filter(f => f.id !== id));
-      showToast({ type: 'success', message: 'Faculty deleted.' });
+      showToast({ type: 'success', message: t('adminAcademic.facDeleted') });
     } catch (e) {
-      showToast({ type: 'error', message: friendlyError(e, 'Failed to delete faculty.') });
+      showToast({ type: 'error', message: friendlyError(e, t('adminAcademic.facDeleteFailed')) });
     }
   };
 
   // ── Level handlers ────────────────────────────────────────────────────────
   const handleSaveLevel = async (name: string) => {
-    const err = validateRequired(name, 'Level name');
+    const err = validateRequired(name, t('adminAcademic.levelName'));
     if (err) return;
     setLvlSaving(true);
     try {
@@ -217,15 +226,15 @@ export default function AcademicManagement({ backTo }: { backTo?: string } = {})
       if (editLvl) {
         const updated = await updateAcademicLevel(editLvl.id, { name });
         setLevels(prev => ({ ...prev, [selectedFacForLvl]: (prev[selectedFacForLvl] ?? []).map(l => l.id === editLvl.id ? { ...l, ...updated } : l) }));
-        showToast({ type: 'success', message: 'Level updated successfully.' });
+        showToast({ type: 'success', message: t('adminAcademic.lvlUpdated') });
       } else {
         const created = await createAcademicLevel(selectedFacForLvl, name, facLevels.length + 1);
         setLevels(prev => ({ ...prev, [selectedFacForLvl]: [...(prev[selectedFacForLvl] ?? []), created] }));
-        showToast({ type: 'success', message: 'Level created successfully.' });
+        showToast({ type: 'success', message: t('adminAcademic.lvlCreated') });
       }
       setLvlModal(false); setEditLvl(null);
     } catch (e) {
-      showToast({ type: 'error', message: friendlyError(e, 'Failed to save level.') });
+      showToast({ type: 'error', message: friendlyError(e, t('adminAcademic.lvlSaveFailed')) });
     }
     setLvlSaving(false);
   };
@@ -262,10 +271,10 @@ export default function AcademicManagement({ backTo }: { backTo?: string } = {})
     });
   };
 
-  const tabs: { key: Tab; label: string; icon: React.ReactNode }[] = [
-    { key: 'universities', label: 'Universities', icon: <Building2 size={16} color={tab === 'universities' ? c.primary : `${c.text}66`} /> },
-    { key: 'faculties', label: 'Faculties', icon: <GraduationCap size={16} color={tab === 'faculties' ? c.primary : `${c.text}66`} /> },
-    { key: 'levels', label: 'Levels', icon: <BookOpen size={16} color={tab === 'levels' ? c.primary : `${c.text}66`} /> },
+  const tabs: { key: Tab; labelKey: string; icon: React.ReactNode }[] = [
+    { key: 'universities', labelKey: 'adminAcademic.tabUniversities', icon: <Building2 size={16} color={tab === 'universities' ? c.primary : `${c.text}66`} /> },
+    { key: 'faculties', labelKey: 'adminAcademic.tabFaculties', icon: <GraduationCap size={16} color={tab === 'faculties' ? c.primary : `${c.text}66`} /> },
+    { key: 'levels', labelKey: 'adminAcademic.tabLevels', icon: <BookOpen size={16} color={tab === 'levels' ? c.primary : `${c.text}66`} /> },
   ];
 
   const uniById = Object.fromEntries(universities.map(u => [u.id, u]));
@@ -275,8 +284,8 @@ export default function AcademicManagement({ backTo }: { backTo?: string } = {})
       <KeyboardAwareScrollView
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />} contentContainerStyle={{ paddingBottom: safeBottom(layout.insets.bottom) }}>
           <PageHeader
-            title="Academic Structure"
-            subtitle="Manage universities, faculties and levels"
+            title={t('adminAcademic.title')}
+            subtitle={t('adminAcademic.subtitle')}
             showBack
             backFallback={backTo ?? '/admin-overview'}
           />
@@ -285,11 +294,11 @@ export default function AcademicManagement({ backTo }: { backTo?: string } = {})
 
           {/* Tab bar */}
           <View style={{ flexDirection: 'row', gap: 8, marginBottom: 20 }}>
-            {tabs.map(t => (
-              <Pressable key={t.key} onPress={() => setTab(t.key)}
-                style={{ flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 10, borderRadius: 12, backgroundColor: tab === t.key ? `${c.primary}18` : c.base, shadowColor: c.shadowDark, shadowOffset: { width: 2, height: 2 }, shadowOpacity: tab === t.key ? 0.3 : 0.5, shadowRadius: 5 }}>
-                {t.icon}
-                <Text style={{ fontSize: 12, fontWeight: '700', color: tab === t.key ? c.primary : `${c.text}66` }}>{t.label}</Text>
+            {tabs.map(tabItem => (
+              <Pressable key={tabItem.key} onPress={() => setTab(tabItem.key)}
+                style={{ flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 10, borderRadius: 12, backgroundColor: tab === tabItem.key ? `${c.primary}18` : c.base, shadowColor: c.shadowDark, shadowOffset: { width: 2, height: 2 }, shadowOpacity: tab === tabItem.key ? 0.3 : 0.5, shadowRadius: 5 }}>
+                {tabItem.icon}
+                <Text style={{ fontSize: 12, fontWeight: '700', color: tab === tabItem.key ? c.primary : `${c.text}66` }}>{t(tabItem.labelKey)}</Text>
               </Pressable>
             ))}
           </View>
@@ -298,11 +307,11 @@ export default function AcademicManagement({ backTo }: { backTo?: string } = {})
           {tab === 'universities' && (
             <>
               <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
-                <Text style={{ fontSize: 16, fontWeight: '700', color: c.text }}>{universities.length} Universities</Text>
+                <Text style={{ fontSize: 16, fontWeight: '700', color: c.text }}>{t('adminAcademic.countUniversities', { count: universities.length })}</Text>
                 <Pressable onPress={() => { setEditUni(null); setUniModal(true); }}
                   style={{ flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: c.primary, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 8 }}>
                   <Plus size={16} color="#fff" />
-                  <Text style={{ color: '#fff', fontWeight: '700', fontSize: 13 }}>Add</Text>
+                  <Text style={{ color: '#fff', fontWeight: '700', fontSize: 13 }}>{t('common.add')}</Text>
                 </Pressable>
               </View>
               {uniLoading ? <ActivityIndicator color={c.primary} style={{ marginTop: 20 }} /> :
@@ -315,7 +324,7 @@ export default function AcademicManagement({ backTo }: { backTo?: string } = {})
                       <View style={{ flex: 1 }}>
                         <Text style={{ fontSize: 14, fontWeight: '700', color: c.text }}>{uni.name}</Text>
                         <Text style={{ fontSize: 11, color: uni.is_active ? '#16A34A' : '#DC2626', fontWeight: '600', marginTop: 2 }}>
-                          {uni.is_active ? 'Active' : 'Inactive'}
+                          {t(uni.is_active ? 'status.active' : 'adminAcademic.statusInactive')}
                         </Text>
                       </View>
                       <View style={{ flexDirection: 'row', gap: 8 }}>
@@ -336,7 +345,7 @@ export default function AcademicManagement({ backTo }: { backTo?: string } = {})
               {!uniLoading && universities.length === 0 && (
                 <View style={{ alignItems: 'center', paddingVertical: 40 }}>
                   <Building2 size={40} color={c.primary} opacity={0.2} style={{ marginBottom: 10 }} />
-                  <Text style={{ ...mutedTextStyle(c, 0.4) }}>No universities yet</Text>
+                  <Text style={{ ...mutedTextStyle(c, 0.4) }}>{t('adminAcademic.noUniversities')}</Text>
                 </View>
               )}
             </>
@@ -357,7 +366,7 @@ export default function AcademicManagement({ backTo }: { backTo?: string } = {})
                       <Pressable onPress={() => toggleUniExpand(uni.id)} style={{ flexDirection: 'row', alignItems: 'center', padding: 14 }}>
                         <Building2 size={18} color={c.primary} style={{ marginRight: 10 }} />
                         <Text style={{ flex: 1, fontSize: 14, fontWeight: '700', color: c.text }}>{uni.name}</Text>
-                        <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.4), marginRight: 8 }}>{uniFacs.length} faculties</Text>
+                        <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.4), marginRight: 8 }}>{t('adminAcademic.countFaculties', { count: uniFacs.length })}</Text>
                         {expanded ? <ChevronDown size={18} color={c.text} opacity={0.4} /> : <ChevronRight size={18} color={c.text} opacity={0.4} />}
                       </Pressable>
                       {expanded && (
@@ -368,13 +377,13 @@ export default function AcademicManagement({ backTo }: { backTo?: string } = {})
                               <Text style={{ flex: 1, fontSize: 13, fontWeight: '600', color: c.text }}>{fac.name}</Text>
                               <Text style={{ fontSize: 11, color: fac.is_active ? '#16A34A' : '#DC2626', marginRight: 8 }}>{fac.is_active ? '●' : '○'}</Text>
                               <View style={{ flexDirection: 'row', gap: 4 }}>
-                                <Pressable onPress={() => handleToggleFaculty(fac)} accessibilityLabel={fac.is_active ? 'Deactivate faculty' : 'Activate faculty'} accessibilityRole="button" style={{ width: 44, height: 44, borderRadius: 10, backgroundColor: `${fac.is_active ? '#16A34A' : '#6B7280'}18`, alignItems: 'center', justifyContent: 'center' }}>
+                                <Pressable onPress={() => handleToggleFaculty(fac)} accessibilityLabel={t(fac.is_active ? 'adminAcademic.deactivateFaculty' : 'adminAcademic.activateFaculty')} accessibilityRole="button" style={{ width: 44, height: 44, borderRadius: 10, backgroundColor: `${fac.is_active ? '#16A34A' : '#6B7280'}18`, alignItems: 'center', justifyContent: 'center' }}>
                                   {fac.is_active ? <ToggleRight size={15} color="#16A34A" /> : <ToggleLeft size={15} color="#6B7280" />}
                                 </Pressable>
-                                <Pressable onPress={() => { setEditFac(fac); setSelectedUniForFac(uni.id); setFacModal(true); }} accessibilityLabel="Edit faculty" accessibilityRole="button" style={{ width: 44, height: 44, borderRadius: 10, backgroundColor: `${c.primary}18`, alignItems: 'center', justifyContent: 'center' }}>
+                                <Pressable onPress={() => { setEditFac(fac); setSelectedUniForFac(uni.id); setFacModal(true); }} accessibilityLabel={t('adminAcademic.editFaculty')} accessibilityRole="button" style={{ width: 44, height: 44, borderRadius: 10, backgroundColor: `${c.primary}18`, alignItems: 'center', justifyContent: 'center' }}>
                                   <Edit2 size={14} color={c.primary} />
                                 </Pressable>
-                                <Pressable onPress={() => handleDeleteFaculty(fac.id)} accessibilityLabel="Delete faculty" accessibilityRole="button" style={{ width: 44, height: 44, borderRadius: 10, backgroundColor: '#DC262618', alignItems: 'center', justifyContent: 'center' }}>
+                                <Pressable onPress={() => handleDeleteFaculty(fac.id)} accessibilityLabel={t('adminAcademic.deleteFaculty')} accessibilityRole="button" style={{ width: 44, height: 44, borderRadius: 10, backgroundColor: '#DC262618', alignItems: 'center', justifyContent: 'center' }}>
                                   <Trash2 size={14} color="#DC2626" />
                                 </Pressable>
                               </View>
@@ -383,7 +392,7 @@ export default function AcademicManagement({ backTo }: { backTo?: string } = {})
                           <Pressable onPress={() => { setEditFac(null); setSelectedUniForFac(uni.id); setFacModal(true); }}
                             style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, padding: 12 }}>
                             <Plus size={14} color={c.primary} />
-                            <Text style={{ fontSize: 13, color: c.primary, fontWeight: '600' }}>Add Faculty</Text>
+                            <Text style={{ fontSize: 13, color: c.primary, fontWeight: '600' }}>{t('adminAcademic.addFaculty')}</Text>
                           </Pressable>
                         </View>
                       )}
@@ -417,20 +426,20 @@ export default function AcademicManagement({ backTo }: { backTo?: string } = {})
                       {expanded && (
                         <View style={{ borderTopWidth: 1, borderTopColor: `${c.text}08` }}>
                           {facLevels.length === 0
-                            ? <Text style={{ ...mutedTextStyle(c, 0.35), fontSize: 13, textAlign: 'center', paddingVertical: 12 }}>No levels — tap + to add</Text>
+                            ? <Text style={{ ...mutedTextStyle(c, 0.35), fontSize: 13, textAlign: 'center', paddingVertical: 12 }}>{t('adminAcademic.noLevels')}</Text>
                             : facLevels.map((lvl, idx) => (
                               <View key={lvl.id} style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 14, paddingVertical: 9, borderBottomWidth: 1, borderBottomColor: `${c.text}05` }}>
                                 <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.35), width: 24 }}>{idx + 1}</Text>
                                 <Text style={{ flex: 1, fontSize: 13, fontWeight: '600', color: c.text }}>{lvl.name}</Text>
                                 <Text style={{ fontSize: 11, color: lvl.is_active ? '#16A34A' : '#DC2626', marginRight: 8 }}>{lvl.is_active ? '●' : '○'}</Text>
                                 <View style={{ flexDirection: 'row', gap: 4 }}>
-                                  <Pressable onPress={() => handleToggleLevel(fac.id, lvl)} accessibilityLabel={lvl.is_active ? 'Deactivate level' : 'Activate level'} accessibilityRole="button" style={{ width: 44, height: 44, borderRadius: 10, backgroundColor: `${lvl.is_active ? '#16A34A' : '#6B7280'}18`, alignItems: 'center', justifyContent: 'center' }}>
+                                  <Pressable onPress={() => handleToggleLevel(fac.id, lvl)} accessibilityLabel={t(lvl.is_active ? 'adminAcademic.deactivateLevel' : 'adminAcademic.activateLevel')} accessibilityRole="button" style={{ width: 44, height: 44, borderRadius: 10, backgroundColor: `${lvl.is_active ? '#16A34A' : '#6B7280'}18`, alignItems: 'center', justifyContent: 'center' }}>
                                     {lvl.is_active ? <ToggleRight size={15} color="#16A34A" /> : <ToggleLeft size={15} color="#6B7280" />}
                                   </Pressable>
-                                  <Pressable onPress={() => { setEditLvl(lvl); setSelectedFacForLvl(fac.id); setLvlModal(true); }} accessibilityLabel="Edit level" accessibilityRole="button" style={{ width: 44, height: 44, borderRadius: 10, backgroundColor: `${c.primary}18`, alignItems: 'center', justifyContent: 'center' }}>
+                                  <Pressable onPress={() => { setEditLvl(lvl); setSelectedFacForLvl(fac.id); setLvlModal(true); }} accessibilityLabel={t('adminAcademic.editLevel')} accessibilityRole="button" style={{ width: 44, height: 44, borderRadius: 10, backgroundColor: `${c.primary}18`, alignItems: 'center', justifyContent: 'center' }}>
                                     <Edit2 size={14} color={c.primary} />
                                   </Pressable>
-                                  <Pressable onPress={() => handleDeleteLevel(fac.id, lvl.id)} accessibilityLabel="Delete level" accessibilityRole="button" style={{ width: 44, height: 44, borderRadius: 10, backgroundColor: '#DC262618', alignItems: 'center', justifyContent: 'center' }}>
+                                  <Pressable onPress={() => handleDeleteLevel(fac.id, lvl.id)} accessibilityLabel={t('adminAcademic.deleteLevel')} accessibilityRole="button" style={{ width: 44, height: 44, borderRadius: 10, backgroundColor: '#DC262618', alignItems: 'center', justifyContent: 'center' }}>
                                     <Trash2 size={14} color="#DC2626" />
                                   </Pressable>
                                 </View>
@@ -440,7 +449,7 @@ export default function AcademicManagement({ backTo }: { backTo?: string } = {})
                           <Pressable onPress={() => { setEditLvl(null); setSelectedFacForLvl(fac.id); setLvlModal(true); }}
                             style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, padding: 12 }}>
                             <Plus size={14} color={c.primary} />
-                            <Text style={{ fontSize: 13, color: c.primary, fontWeight: '600' }}>Add Level</Text>
+                            <Text style={{ fontSize: 13, color: c.primary, fontWeight: '600' }}>{t('adminAcademic.addLevel')}</Text>
                           </Pressable>
                         </View>
                       )}
@@ -455,20 +464,20 @@ export default function AcademicManagement({ backTo }: { backTo?: string } = {})
 
       {/* Modals */}
       <InputModal
-        visible={uniModal} title={editUni ? 'Edit University' : 'Add University'}
-        label="University Name" initialValue={editUni?.name ?? ''}
+        visible={uniModal} title={t(editUni ? 'adminAcademic.editUniversity' : 'adminAcademic.addUniversity')}
+        label={t('adminAcademic.universityName')} initialValue={editUni?.name ?? ''}
         onCancel={() => { setUniModal(false); setEditUni(null); }}
         onConfirm={handleSaveUniversity} loading={uniSaving} c={c}
       />
       <InputModal
-        visible={facModal} title={editFac ? 'Edit Faculty' : 'Add Faculty'}
-        label="Faculty Name" initialValue={editFac?.name ?? ''}
+        visible={facModal} title={t(editFac ? 'adminAcademic.editFaculty' : 'adminAcademic.addFaculty')}
+        label={t('adminAcademic.facultyName')} initialValue={editFac?.name ?? ''}
         onCancel={() => { setFacModal(false); setEditFac(null); }}
         onConfirm={handleSaveFaculty} loading={facSaving} c={c}
       />
       <InputModal
-        visible={lvlModal} title={editLvl ? 'Edit Level' : 'Add Level'}
-        label="Level Name" initialValue={editLvl?.name ?? ''}
+        visible={lvlModal} title={t(editLvl ? 'adminAcademic.editLevel' : 'adminAcademic.addLevel')}
+        label={t('adminAcademic.levelName')} initialValue={editLvl?.name ?? ''}
         onCancel={() => { setLvlModal(false); setEditLvl(null); }}
         onConfirm={handleSaveLevel} loading={lvlSaving} c={c}
       />

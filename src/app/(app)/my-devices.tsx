@@ -19,6 +19,11 @@ import { ResponsiveModal } from '@/components/ResponsiveModal';
 import { PageHeader } from '@/components/PageHeader';
 import type { RelativePathString } from 'expo-router';
 import { KeyboardAwareScrollView } from '@/components/KeyboardAwareScrollView';
+import { useTranslation } from '@/lib/i18n';
+import {
+  formatAbsoluteTimestamp, formatPresenceLine, getPresence, parseServerTimestamp, setServerClock,
+  type DevicePresenceState,
+} from '@/lib/devicePresence';
 
 type ModalState =
   | { type: 'rename'; device: DeviceRecord }
@@ -26,18 +31,20 @@ type ModalState =
   | { type: 'info'; device: DeviceRecord }
   | null;
 
-function timeAgo(iso: string): string {
-  const diff = Date.now() - new Date(iso).getTime();
-  const mins = Math.floor(diff / 60000);
-  if (mins < 1) return 'Just now';
-  if (mins < 60) return `${mins}m ago`;
-  const hrs = Math.floor(mins / 60);
-  if (hrs < 24) return `${hrs}h ago`;
-  return `${Math.floor(hrs / 24)}d ago`;
-}
+/** Presence/relative-time logic is shared with the admin device screens. */
+const PRESENCE_RANK: Record<DevicePresenceState, number> = {
+  online: 0, unknown: 1, offline: 2, blocked: 3, logged_out: 4,
+};
 
-function isOnline(lastActive: string) {
-  return Date.now() - new Date(lastActive).getTime() < 5 * 60 * 1000; // 5 min window
+/**
+ * Absolute local timestamp for a backend value, or null when unusable.
+ * Parsing goes through the shared UTC-aware helper: a naive DATETIME must never
+ * be interpreted in the viewer's zone (that produced "3h ago" for a 1-minute-old
+ * heartbeat).
+ */
+function formatSeen(value: string | null | undefined): string | null {
+  const ms = parseServerTimestamp(value);
+  return ms === null ? null : formatAbsoluteTimestamp(ms);
 }
 
 function DeviceBadge({ label, color, bg }: { label: string; color: string; bg: string }) {
@@ -55,6 +62,7 @@ export default function MyDevices() {
   const isDark = scheme === 'dark';
   const c = isDark ? neuColors.dark : neuColors.light;
   const router = useRouter();
+  const { t, tCount } = useTranslation();
 
   const [devices, setDevices] = useState<DeviceRecord[]>([]);
   const [maxDevices, setMaxDevices] = useState<number | null>(1);
@@ -69,6 +77,7 @@ export default function MyDevices() {
   const loadData = useCallback(async () => {
     try {
       const res = await getMyDevices();
+      setServerClock(res?.server_epoch_ms);
       setDevices(res.devices);
       setMaxDevices(res.max_devices);
       // Try to identify current device by stored fingerprint
@@ -83,8 +92,14 @@ export default function MyDevices() {
   const onRefresh = async () => { setRefreshing(true); await loadData(); setRefreshing(false); };
 
   const activeDevices  = devices.filter(d => d.status !== 'logged_out');
-  const onlineDevices  = activeDevices.filter(d => isOnline(d.last_active_at));
-  const offlineDevices = activeDevices.filter(d => !isOnline(d.last_active_at));
+  const onlineDevices  = activeDevices.filter(d => getPresence(d).state === 'online');
+  const offlineDevices = activeDevices.filter(d => getPresence(d).state !== 'online');
+  // Online first, then most recent — presence drives the order.
+  const orderedDevices = [...devices].sort((a, b) => {
+    const pa = getPresence(a), pb = getPresence(b);
+    const rank = PRESENCE_RANK[pa.state] - PRESENCE_RANK[pb.state];
+    return rank !== 0 ? rank : (pb.lastSeenMs ?? 0) - (pa.lastSeenMs ?? 0);
+  });
   const isUnlimited    = maxDevices === null;
 
   const handleRename = async () => {
@@ -114,8 +129,11 @@ export default function MyDevices() {
   const isCurrent = (d: DeviceRecord) =>
     currentFingerprint ? d.device_fingerprint === currentFingerprint : false;
 
-  const statusColor = (d: DeviceRecord) =>
-    d.status === 'blocked' ? '#DC2626' : isOnline(d.last_active_at) ? '#16A34A' : '#94A3B8';
+  const statusColor = (d: DeviceRecord) => {
+    const state = getPresence(d).state;
+    if (d.status === 'blocked') return '#DC2626';
+    return state === 'online' ? '#16A34A' : '#94A3B8';
+  };
 
   return (
     <View style={{ flex: 1, backgroundColor: c.base }}>
@@ -210,9 +228,10 @@ export default function MyDevices() {
               <Text style={{ ...mutedTextStyle(c, 0.4), fontSize: 16, marginTop: 12 }}>No devices registered</Text>
             </View>
           ) : (
-            devices.map(device => {
+            orderedDevices.map(device => {
               const current    = isCurrent(device);
-              const online     = isOnline(device.last_active_at);
+              const presence   = getPresence(device);
+              const online     = presence.state === 'online';
               const isBlocked  = device.status === 'blocked';
               const isLoggedOut = device.status === 'logged_out';
 
@@ -245,7 +264,7 @@ export default function MyDevices() {
                       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 6 }}>
                         {online ? <Wifi size={11} color="#16A34A" /> : <WifiOff size={11} color="#94A3B8" />}
                         <Text style={{ fontSize: 11, color: statusColor(device), fontWeight: '600' }}>
-                          {isBlocked ? 'Blocked' : isLoggedOut ? 'Logged out' : online ? 'Online' : `Last seen ${timeAgo(device.last_active_at)}`}
+                          {formatPresenceLine(presence, t, tCount)}
                         </Text>
                         {device.ip_address && (
                           <>
@@ -371,8 +390,10 @@ export default function MyDevices() {
             ['App Version', modal.device.app_version],
             ['Manufacturer', modal.device.manufacturer],
             ['IP Address', modal.device.ip_address],
-            ['Registered', modal.device.registered_at ? new Date(modal.device.registered_at).toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true }) : null],
-            ['Last Active', modal.device.last_active_at ? new Date(modal.device.last_active_at).toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true }) : null],
+            ['Registered', formatSeen(modal.device.registered_at)],
+            // "Last active" shows the last CONFIRMED online event. It is not the
+            // moment the device went offline — that is not observable.
+            [t('device.lastConfirmedOnline'), formatSeen(modal.device.last_seen_at ?? modal.device.last_active_at)],
           ].filter(([, v]) => v).map(([k, v]) => (
             <View key={k as string} style={{ flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 7, borderBottomWidth: 1, borderBottomColor: `${c.text}0A` }}>
               <Text style={{ fontSize: 13, ...mutedTextStyle(c, 0.5), fontWeight: '600' }}>{k}</Text>

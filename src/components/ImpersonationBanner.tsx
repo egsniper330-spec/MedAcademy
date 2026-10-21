@@ -16,10 +16,12 @@ import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useImpersonationStore } from '@/lib/store';
 import { endImpersonationSession } from '@/lib/impersonationService';
+import { useTranslation } from '@/lib/i18n';
 
 export function ImpersonationBanner() {
   const { impersonation } = useImpersonationStore();
   const router = useRouter();
+  const { t } = useTranslation();
   const scheme = useColorScheme();
   const isDark = scheme === 'dark';
   // REAL device inset (status bar / notch / Dynamic Island). On web this is
@@ -70,10 +72,10 @@ export function ImpersonationBanner() {
       <UserCheck size={16} color="#fff" />
       <View style={{ flex: 1 }}>
         <Text style={{ color: '#fff', fontSize: 12, fontWeight: '700' }} numberOfLines={1}>
-          Impersonating: {impersonation.targetName}
+          {t('impersonation.banner', { name: impersonation.targetName ?? '—' })}
         </Text>
         <Text style={{ color: '#fff', fontSize: 11, opacity: 0.85 }} numberOfLines={1}>
-          ({impersonation.targetRole}) · logged in as {impersonation.originalEmail}
+          {t('impersonation.bannerAs', { role: impersonation.targetRole ?? '—', email: impersonation.originalEmail ?? '—' })}
         </Text>
       </View>
       <Pressable

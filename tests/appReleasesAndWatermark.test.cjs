@@ -271,15 +271,24 @@ console.log('── Part B: Security Center watermark identity ──');
   ok(mod.resolveWatermarkIdentity({ public_user_id: '758490a6-5538-4af2-acf3-a72b862804d6' }) === null,
     'resolver: UUID never rendered');
 
-  // UI contract: read-only + copy + not-applicable state for SA without identity
-  ok(/Copy watermark ID/.test(screen), 'security center: copy button with a11y label');
-  ok(/Copied ✓/.test(screen), 'security center: copy success feedback');
+  // UI contract: read-only + copy + not-applicable state for SA without identity.
+  // The copy itself now lives in the translation resources (English + Arabic),
+  // so the screen must reference the keys AND the English strings must still
+  // exist in the English dictionary.
+  const resources = read('src/lib/i18n/resources.ts');
+  const hasCopy = (key, text) =>
+    screen.includes(`t('${key}')`) && resources.includes(text);
+  ok(hasCopy('securityCenter.copyWatermark', "'Copy watermark ID'"),
+    'security center: copy button with a11y label');
+  ok(hasCopy('securityCenter.copied', "'Copied ✓'"), 'security center: copy success feedback');
   // The identity must never be bound to an editable input value: the only
   // TextInput values in this screen are the password fields.
   const identityBlock = screen.slice(screen.indexOf('Watermark ID'), screen.indexOf('Change Password'));
   ok(!/TextInput/.test(identityBlock), 'security center: identity is a read-only display (no TextInput in the card)');
-  ok(/Not applicable/.test(screen), 'security center: explicit not-applicable state (no DB-id fallback)');
-  ok(/Read-only/.test(screen), 'security center: read-only note present');
+  ok(hasCopy('securityCenter.notApplicable', 'Not applicable — administrator accounts'),
+    'security center: explicit not-applicable state (no DB-id fallback)');
+  ok(hasCopy('securityCenter.readOnly', 'Read-only — assigned by the system'),
+    'security center: read-only note present');
   ok(/isPublicWatermarkToken/.test(screen) && /isPublicWatermarkToken/.test(resolver),
     'security center: bare-numeric internal-id filter applied at display time');
 }

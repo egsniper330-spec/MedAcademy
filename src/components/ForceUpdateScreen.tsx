@@ -26,6 +26,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { BrandLogo } from '@/components/BrandLogo';
 import { NeuButton } from '@/components/NeuButton';
 import { useUpdate } from '@/lib/useForceUpdate';
+import { t } from '@/lib/i18n';
 
 // MedAcademy palette (matches the security-gate styling conventions).
 const C = {
@@ -64,11 +65,11 @@ export default function ForceUpdateScreen(): React.JSX.Element {
   // Fail-closed startup wall — first check still in flight.
   if (update.verdict === 'UNKNOWN' && update.evaluating) {
     return (
-      <View style={[styles.root, styles.center]} accessibilityLabel="Checking for updates">
+      <View style={[styles.root, styles.center]} accessibilityLabel={t('update.checking')}>
         <ActivityIndicator size="large" color={C.accent} />
-        <Text style={styles.checkingTitle}>Checking for updates…</Text>
+        <Text style={styles.checkingTitle}>{t('update.checking')}</Text>
         <Text style={styles.checkingSub}>
-          This will only take a moment.{'\n'}You need the latest MedAcademy to continue.
+          {t('update.checkingSub')}
         </Text>
       </View>
     );
@@ -80,18 +81,18 @@ export default function ForceUpdateScreen(): React.JSX.Element {
       <View style={styles.optionalWrap} pointerEvents="box-none">
         <View style={styles.optionalBar}>
           <View style={{ flex: 1 }}>
-            <Text style={styles.optionalTitle}>New version available</Text>
+            <Text style={styles.optionalTitle}>{t('update.newVersion')}</Text>
             <Text style={styles.optionalSub} numberOfLines={1}>
               {update.latestVersionName
                 ? `${update.installedVersionName} → ${update.latestVersionName}`
-                : 'An update is available for MedAcademy.'}
+                : t('update.optionalSubFallback')}
             </Text>
           </View>
           <Pressable style={styles.optionalBtn} onPress={() => openExternal(update.updateUrl)}>
-            <Text style={styles.optionalBtnText}>Update</Text>
+            <Text style={styles.optionalBtnText}>{t('update.update')}</Text>
           </Pressable>
           <Pressable style={styles.laterBtn} onPress={update.dismissOptional}>
-            <Text style={styles.laterBtnText}>Later</Text>
+            <Text style={styles.laterBtnText}>{t('update.later')}</Text>
           </Pressable>
         </View>
       </View>
@@ -103,7 +104,7 @@ export default function ForceUpdateScreen(): React.JSX.Element {
     setLaunchError(null);
     const r = await update.openUpdateUrl();
     if (!mountedRef.current) return;
-    if (!r.ok) setLaunchError(r.error ?? 'Could not open the update link.');
+    if (!r.ok) setLaunchError(r.error ?? t('update.couldNotOpen'));
     setLaunching(false);
   };
 
@@ -130,34 +131,32 @@ export default function ForceUpdateScreen(): React.JSX.Element {
           </View>
           <View style={styles.badgeRow}>
             <View style={[styles.badge, forced ? styles.badgeForced : styles.badgeOptional]}>
-              <Text style={styles.badgeText}>{forced ? 'UPDATE REQUIRED' : 'OPTIONAL UPDATE'}</Text>
+              <Text style={styles.badgeText}>{forced ? t('update.badgeRequired') : t('update.badgeOptional')}</Text>
             </View>
             {update.usingCachedVerdict ? (
               <View style={[styles.badge, styles.badgeWarn]}>
-                <Text style={styles.badgeText}>OFFLINE — USING LAST VERDICT</Text>
+                <Text style={styles.badgeText}>{t('update.badgeOffline')}</Text>
               </View>
             ) : null}
           </View>
           <Text style={styles.title}>
-            {forced ? 'Update Required' : 'New version available'}
+            {forced ? t('update.required') : t('update.newVersion')}
           </Text>
           <Text style={styles.subtitle}>
-            {forced
-              ? "You're using an older version of MedAcademy.\nPlease update to continue using the app."
-              : 'A newer version of MedAcademy is available.\nUpdating is recommended.'}
+            {forced ? t('update.subtitleForced') : t('update.subtitleOptional')}
           </Text>
         </View>
 
         <View style={styles.card}>
           <View style={styles.row}>
-            <Text style={styles.rowLabel}>Current version</Text>
+            <Text style={styles.rowLabel}>{t('update.currentVersion')}</Text>
             <Text style={styles.rowValue}>
               {update.installedVersionName || '—'}
               {update.installedVersionCode > 0 ? ` (build ${update.installedVersionCode})` : ''}
             </Text>
           </View>
           <View style={[styles.row, styles.rowLast]}>
-            <Text style={styles.rowLabel}>Latest version</Text>
+            <Text style={styles.rowLabel}>{t('update.latestVersion')}</Text>
             <Text style={[styles.rowValue, styles.rowValueAccent]}>
               {update.latestVersionName
                 ? `${update.latestVersionName}${update.latestVersionCode > 0 ? ` (build ${update.latestVersionCode})` : ''}`
@@ -168,14 +167,14 @@ export default function ForceUpdateScreen(): React.JSX.Element {
 
         {update.releaseNotes ? (
           <View style={styles.card}>
-            <Text style={styles.notesTitle}>What&apos;s new</Text>
+            <Text style={styles.notesTitle}>{t('update.whatsNew')}</Text>
             <Text style={styles.notes}>{update.releaseNotes}</Text>
           </View>
         ) : null}
 
         {launchError ? (
           <View style={[styles.card, styles.cardError]}>
-            <Text style={styles.errorTitle}>Update link problem</Text>
+            <Text style={styles.errorTitle}>{t('update.linkProblem')}</Text>
             <Text style={styles.errorText}>{launchError}</Text>
             {update.updateUrl ? (
               <Text style={styles.errorUrl} numberOfLines={1} selectable>
@@ -195,7 +194,7 @@ export default function ForceUpdateScreen(): React.JSX.Element {
             touch target (≥44pt accessibility minimum). The accessible name
             is the label itself: "Update Now". */}
         <NeuButton
-          label="Update Now"
+          label={t('update.updateNow')}
           onPress={onPrimary}
           loading={launching}
           variant="primary"
@@ -205,15 +204,15 @@ export default function ForceUpdateScreen(): React.JSX.Element {
 
         <Text style={styles.hint}>
           {forced
-            ? 'MedAcademy cannot be used until it is updated.'
-            : 'You can keep using the app and update later.'}
+            ? t('update.cannotUse')
+            : t('update.keepUsing')}
         </Text>
 
         <Pressable onPress={onManualRecheck} disabled={checking} style={styles.recheckBtn}>
           {checking ? (
             <ActivityIndicator size="small" color={C.sub} />
           ) : (
-            <Text style={styles.recheckText}>Check again</Text>
+            <Text style={styles.recheckText}>{t('update.checkAgain')}</Text>
           )}
         </Pressable>
       </ScrollView>

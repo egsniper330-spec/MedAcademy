@@ -10,14 +10,15 @@
  */
 
 import { Text, View } from 'react-native';
+import { t } from '@/lib/i18n';
 import type { OfflineVideoPlayerProps } from './OfflineVideoPlayer.types';
 
 export function OfflineVideoPlayer(_props: OfflineVideoPlayerProps) {
   return (
     <View style={{ width: '100%', aspectRatio: 16 / 9, backgroundColor: '#0b1220', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
-      <Text style={{ color: '#fff', fontWeight: '700', fontSize: 15, marginBottom: 8 }}>Offline playback unavailable on web</Text>
+      <Text style={{ color: '#fff', fontWeight: '700', fontSize: 15, marginBottom: 8 }}>{t('offline.webUnavailable')}</Text>
       <Text style={{ color: '#ffffff99', fontSize: 13, textAlign: 'center', lineHeight: 19 }}>
-        Downloaded videos play in the MedAcademy mobile app (Android & iOS) with full DRM protection.
+        {t('offline.webHint')}
       </Text>
     </View>
   );
