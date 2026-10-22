@@ -339,9 +339,18 @@ async function runUpdateCheck(): Promise<UpdateState> {
     // Native platforms send explicit identity headers; on web the headers are
     // omitted (CORS allowlist on the deployed backend does not include them
     // and the server falls back to its non-android default).
+    // A native build that could not report its identity (INSTALLED_CODE === 0)
+    // must NOT claim "version 0": the backend's floor treats a present header
+    // below the minimum as UPDATE_REQUIRED, so an unknown build would be
+    // blocked by metadata it never had. Omitting the header is the documented
+    // "version unknown" case (AuthMiddleware falls back to the remote gate).
     const nativeHeaders: Record<string, string> = RNPlatform.OS === 'web'
       ? {}
-      : { 'X-App-Platform': getPlatform(), 'X-App-Version-Code': String(INSTALLED_CODE) };    const res = await apiFetch<RemoteUpdateConfig>('/app/version', {
+      : {
+          'X-App-Platform': getPlatform(),
+          ...(INSTALLED_CODE > 0 ? { 'X-App-Version-Code': String(INSTALLED_CODE) } : {}),
+        };
+    const res = await apiFetch<RemoteUpdateConfig>('/app/version', {
       method: 'GET',
       headers: nativeHeaders,
     });

@@ -16,7 +16,20 @@
 //              via withGradleProperties, then reference them in build.gradle with
 //              findProperty() — pure key=value, no Groovy parsing, no imports,
 //              no path assumptions, works in every Gradle version and locale.
-//     iOS:     unchanged — withInfoPlist sets $(MARKETING_VERSION) tokens.
+//     iOS:     Info.plist gets the REAL values (CFBundleShortVersionString =
+//              config.version, CFBundleVersion = config.ios.buildNumber) and
+//              the Xcode build settings MARKETING_VERSION /
+//              CURRENT_PROJECT_VERSION are kept in sync with them.
+//
+// BUG THIS FIXES (iOS forced-update mismatch): the previous iOS step replaced
+// both Info.plist values with the tokens '$(MARKETING_VERSION)' and
+// '$(CURRENT_PROJECT_VERSION)', but nothing ever set those build settings —
+// Expo prebuild does not write them and they stay at Xcode's template defaults
+// (1.0 / 1). The built app therefore reported "1.0 (build 1)" no matter what
+// app.json said (version 1.0.844, ios.buildNumber 221), the client sent
+// X-App-Version-Code: 1 to the backend, and the version floor blocked it.
+// Changing ios.buildNumber had zero effect because the value was overwritten
+// in the same prebuild pass that wrote it.
 
 const path = require('path');
 // Resolve @expo/config-plugins from expo's own package tree so we always get
@@ -26,6 +39,7 @@ const {
   withAppBuildGradle,
   withGradleProperties,
   withInfoPlist,
+  withXcodeProject,
 } = require(require.resolve('@expo/config-plugins', { paths: [expoRoot] }));
 
 // ─── Android: write version into gradle.properties ───────────────────────────
@@ -107,14 +121,54 @@ function withDynamicAndroidVersion(config) {
   return config;
 }
 
-// ─── iOS: replace hardcoded version strings with Xcode build-setting tokens ──
+// ─── iOS: write the real version / build into Info.plist ─────────────────────
+
+/**
+ * The identity iOS will actually carry, resolved the same way Expo does
+ * (`ios.version` overrides `version` for CFBundleShortVersionString;
+ * `ios.buildNumber` is CFBundleVersion). Empty string = not configured, in
+ * which case the value already in the project is left untouched instead of
+ * being replaced by a token that resolves to nothing.
+ */
+function resolveIosVersionIdentity(config) {
+  const ios = config.ios || {};
+  const shortVersion = String(ios.version || config.version || '').trim();
+  const buildNumber = String(ios.buildNumber || '').trim();
+  return { shortVersion, buildNumber };
+}
 
 function withDynamicIOSVersion(config) {
-  return withInfoPlist(config, (cfg) => {
-    cfg.modResults['CFBundleShortVersionString'] = '$(MARKETING_VERSION)';
-    cfg.modResults['CFBundleVersion']            = '$(CURRENT_PROJECT_VERSION)';
+  const { shortVersion, buildNumber } = resolveIosVersionIdentity(config);
+
+  // 1. Info.plist — the values expo-application (and therefore the forced
+  //    update screen) reports at runtime.
+  config = withInfoPlist(config, (cfg) => {
+    if (shortVersion) cfg.modResults['CFBundleShortVersionString'] = shortVersion;
+    if (buildNumber)  cfg.modResults['CFBundleVersion'] = buildNumber;
     return cfg;
   });
+
+  // 2. Xcode build settings — keep MARKETING_VERSION /
+  //    CURRENT_PROJECT_VERSION equal to the same values so Xcode's UI, CI
+  //    tooling and any remaining $(MARKETING_VERSION) reference can never
+  //    disagree with the Info.plist above.
+  config = withXcodeProject(config, (cfg) => {
+    let section = null;
+    try {
+      section = cfg.modResults.pbxXCBuildConfigurationSection();
+    } catch {
+      return cfg; // no project to patch (e.g. a config-only evaluation)
+    }
+    for (const key of Object.keys(section || {})) {
+      const entry = section[key];
+      if (!entry || typeof entry !== 'object' || !entry.buildSettings) continue;
+      if (shortVersion) entry.buildSettings.MARKETING_VERSION = shortVersion;
+      if (buildNumber)  entry.buildSettings.CURRENT_PROJECT_VERSION = buildNumber;
+    }
+    return cfg;
+  });
+
+  return config;
 }
 
 // ─── Combined export ──────────────────────────────────────────────────────────
@@ -126,3 +180,5 @@ const withDynamicVersions = (config) => {
 };
 
 module.exports = withDynamicVersions;
+// Exposed for tests (tests/appVersionIdentity.test.cjs) — pure, no config mods.
+module.exports.resolveIosVersionIdentity = resolveIosVersionIdentity;
