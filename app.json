@@ -16,7 +16,7 @@
       },
       "jsEngine": "jsc",
       "supportsTablet": true,
-      "buildNumber": "212",
+      "buildNumber": "221",
       "bundleIdentifier": "com.medacademy.app",
       "entitlements": {
         "aps-environment": "production"
