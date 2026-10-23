@@ -9,7 +9,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useFocusEffect } from 'expo-router';
 import {
   ActivityIndicator, Animated, FlatList, KeyboardAvoidingView, Modal, Pressable,
-  ScrollView, Text, TextInput, useColorScheme, useWindowDimensions, View, I18nManager,
+  ScrollView, Text, TextInput, useColorScheme, useWindowDimensions, View,
 } from 'react-native';
 import { useFadeAnim } from '@/lib/motion';
 import { Image } from 'expo-image';
@@ -61,15 +61,7 @@ type CourseStartMode = 'blank' | 'template';
 const LANGUAGES = ['Arabic', 'English', 'French', 'German', 'Spanish', 'Turkish', 'Urdu'];
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
-/** Human-readable "Saved X min ago" label — kept for internal use only. */
-function savedLabel(date: Date): string {
-  const diffMs  = Date.now() - date.getTime();
-  const diffMin = Math.floor(diffMs / 60_000);
-  if (diffMin < 1)  return '✓ Saved just now';
-  if (diffMin === 1) return '✓ Saved 1 min ago';
-  if (diffMin < 60) return `✓ Saved ${diffMin} min ago`;
-  return `✓ Last saved: ${date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true })}`;
-}
+
 
 /** Translator signature (resolved at render, never at module load). */
 type Translate = (key: string, params?: Record<string, string | number>) => string;
@@ -147,9 +139,9 @@ export default function CourseBuilder() {
   const layout = useLayout();
   const insets = layout.insets;
   const isNarrow = screenWidth < 480;
-  const { t, tCount } = useTranslation();
-  const BackIcon = I18nManager.isRTL ? ArrowRight : ArrowLeft;
-  const ChevronForward = I18nManager.isRTL ? ChevronLeft : ChevronRight;
+  const { t, tCount, isRTL } = useTranslation();
+  const BackIcon = isRTL ? ArrowRight : ArrowLeft;
+  const ChevronForward = isRTL ? ChevronLeft : ChevronRight;
 
   const isNew = id === 'new';
 
@@ -766,11 +758,11 @@ export default function CourseBuilder() {
   //  that would fail on first save. EDITING an existing course is unaffected.
   if (isNew && !isEnabled('course_creation')) {
     return (
-      <View style={{ flex: 1, backgroundColor: c.base }}>
+        <View style={{ flex: 1, backgroundColor: c.base, direction: isRTL ? 'rtl' : 'ltr' }}>
         <View style={{
-          paddingTop: layout.headerTop, paddingLeft: layout.headerLeft,
-          paddingRight: layout.headerRight, paddingBottom: 12,
-          flexDirection: 'row', alignItems: 'center', gap: 10,
+          paddingTop: layout.headerTop, paddingStart: isRTL ? layout.headerRight : layout.headerLeft,
+          paddingEnd: isRTL ? layout.headerLeft : layout.headerRight, paddingBottom: 12,
+          flexDirection: 'row', direction: isRTL ? 'rtl' : 'ltr', alignItems: 'center', gap: 10,
         }}>
           <Pressable onPress={() => router.back()} hitSlop={8}
             style={[neuFlatStyle(isDark), { width: 40, height: 40, borderRadius: 12, alignItems: 'center', justifyContent: 'center', flexShrink: 0 }]}>
@@ -797,9 +789,9 @@ export default function CourseBuilder() {
         onConfirm={confirmCoverPhotoRequest}
         onDismiss={() => setShowCoverPhotoRationale(false)}
       />
-    <KeyboardAvoidingView style={{ flex: 1, backgroundColor: c.base }} behavior={undefined} /* keyboard: native inset only */>
+    <KeyboardAvoidingView style={{ flex: 1, backgroundColor: c.base, direction: isRTL ? 'rtl' : 'ltr' }} behavior={undefined} /* keyboard: native inset only */>
       {/* ── Header — spacing from headerTokens (EDGE_PAD=4, BREATHING=8) ── */}
-      <View style={{ paddingTop: layout.headerTop, paddingLeft: layout.headerLeft, paddingRight: layout.headerRight, paddingBottom: 12, flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+      <View style={{ paddingTop: layout.headerTop, paddingStart: isRTL ? layout.headerRight : layout.headerLeft, paddingEnd: isRTL ? layout.headerLeft : layout.headerRight, paddingBottom: 12, flexDirection: 'row', direction: isRTL ? 'rtl' : 'ltr', alignItems: 'center', gap: 10 }}>
         {/* Back */}
         <Pressable onPress={() => router.back()}
           hitSlop={8}
@@ -813,7 +805,7 @@ export default function CourseBuilder() {
             {title.trim() || t('cb.newCourse')}
           </Text>
           {savedVisible && (
-            <Animated.View style={{ position: 'absolute', bottom: -16, left: 0, ...savedFade.style, flexDirection: 'row', alignItems: 'center', gap: 3 }}>
+            <Animated.View style={{ position: 'absolute', bottom: -16, start: 0, ...savedFade.style, flexDirection: 'row', alignItems: 'center', gap: 3 }}>
               <Check size={10} color="#16A34A" />
               <Text style={{ fontSize: 10, color: '#16A34A', fontWeight: '600' }}>{t('cb.saved')}</Text>
             </Animated.View>
@@ -828,8 +820,8 @@ export default function CourseBuilder() {
         )}
 
         {/* ── WIDE layout: show all action buttons inline ── */}
-        {!isNarrow && (
-          <View style={{ flexDirection: 'row', gap: 8, flexShrink: 0 }}>
+        {!isNarrow && (              <View style={{ flexDirection: 'row', direction: isRTL ? 'rtl' : 'ltr', gap: 8, flexShrink: 0 }}>
+
             {courseId && !isArchived && (
               <Pressable onPress={() => setShowArchiveModal(true)}
                 style={[neuFlatStyle(isDark), { width: 44, height: 44, borderRadius: 12, alignItems: 'center', justifyContent: 'center' }]}>
@@ -856,7 +848,7 @@ export default function CourseBuilder() {
             <Pressable onPress={handlePublish} disabled={publishing || !isFeatureEnabled('doctor_course_publishing')}
               style={{ paddingHorizontal: 14, paddingVertical: 11, borderRadius: 12, height: 44, opacity: isFeatureEnabled('doctor_course_publishing') ? 1 : 0.5,
                 backgroundColor: status === 'published' ? '#16A34A' : c.primary,
-                flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                flexDirection: 'row', direction: isRTL ? 'rtl' : 'ltr', alignItems: 'center', gap: 6 }}>
               {publishing ? <ActivityIndicator size="small" color="#fff" /> : <Check size={15} color="#fff" />}
               <Text style={{ fontSize: 13, fontWeight: '700', color: '#fff' }}>
                 {status === 'published' ? t('courseStatus.published') : t('cb.publish')}
@@ -866,8 +858,8 @@ export default function CourseBuilder() {
         )}
 
         {/* ── NARROW layout: Save + Publish + overflow "⋯" ── */}
-        {isNarrow && (
-          <View style={{ flexDirection: 'row', gap: 8, flexShrink: 0 }}>
+        {isNarrow && (              <View style={{ flexDirection: 'row', direction: isRTL ? 'rtl' : 'ltr', gap: 8, flexShrink: 0 }}>
+
             <Pressable onPress={handleSaveAndExit}
               style={[neuFlatStyle(isDark), { width: 44, height: 44, borderRadius: 12, alignItems: 'center', justifyContent: 'center' }]}>
               <Save size={17} color={c.primary} />
@@ -909,19 +901,19 @@ export default function CourseBuilder() {
               {/* Duplicate */}
               <Pressable onPress={() => { setShowOverflowMenu(false); handleDuplicateCourse(); }}
                 disabled={duplicating}
-                style={{ flexDirection: 'row', alignItems: 'center', gap: 14, paddingHorizontal: 14, paddingVertical: 14, borderRadius: 14 }}>
+                style={{ flexDirection: 'row', direction: isRTL ? 'rtl' : 'ltr', alignItems: 'center', gap: 14, paddingHorizontal: 14, paddingVertical: 14, borderRadius: 14 }}>
                 <Copy size={20} color={c.text} opacity={0.65} />
                 <Text style={{ fontSize: 15, fontWeight: '600', color: c.text, flex: 1 }} numberOfLines={1}>{t('cb.duplicateCourse')}</Text>
               </Pressable>
               {/* Save as Template */}
               <Pressable onPress={() => { setShowOverflowMenu(false); setTemplateTitle(title); setShowSaveTemplate(true); }}
-                style={{ flexDirection: 'row', alignItems: 'center', gap: 14, paddingHorizontal: 14, paddingVertical: 14, borderRadius: 14 }}>
+                style={{ flexDirection: 'row', direction: isRTL ? 'rtl' : 'ltr', alignItems: 'center', gap: 14, paddingHorizontal: 14, paddingVertical: 14, borderRadius: 14 }}>
                 <Bookmark size={20} color={c.text} opacity={0.65} />
                 <Text style={{ fontSize: 15, fontWeight: '600', color: c.text, flex: 1 }} numberOfLines={1}>{t('cb.saveAsTemplate')}</Text>
               </Pressable>
               {/* Archive */}
               <Pressable onPress={() => { setShowOverflowMenu(false); setShowArchiveModal(true); }}
-                style={{ flexDirection: 'row', alignItems: 'center', gap: 14, paddingHorizontal: 14, paddingVertical: 14, borderRadius: 14 }}>
+                style={{ flexDirection: 'row', direction: isRTL ? 'rtl' : 'ltr', alignItems: 'center', gap: 14, paddingHorizontal: 14, paddingVertical: 14, borderRadius: 14 }}>
                 <Archive size={20} color="#D97706" opacity={0.9} />
                 <Text style={{ fontSize: 15, fontWeight: '600', color: '#D97706', flex: 1 }} numberOfLines={1}>{t('cb.archiveCourse')}</Text>
               </Pressable>
@@ -936,7 +928,8 @@ export default function CourseBuilder() {
       </Modal>
 
       {/* ── Tab Bar ── */}
-      <View style={{ flexDirection: 'row', paddingHorizontal: layout.screenPx, gap: 8, marginBottom: 4 }}>
+      <View style={{ flexDirection: 'row', direction: isRTL ? 'rtl' : 'ltr', paddingHorizontal: layout.screenPx, gap: 8, marginBottom: 4 }}>
+
         {([
           { key: 'info', label: t('cb.tab.info'), icon: BookOpen },
           { key: 'structure', label: t('cb.tab.structure'), icon: Layers },
@@ -944,8 +937,8 @@ export default function CourseBuilder() {
         ] as { key: Tab; label: string; icon: any }[]).map(({ key, label, icon: Icon }) => (
           <Pressable key={key} onPress={() => setTab(key)}
             style={[
-              tab === key ? neuPressedStyle(isDark) : neuFlatStyle(isDark),
-              { flex: 1, paddingVertical: 10, borderRadius: 14, alignItems: 'center', flexDirection: 'row', justifyContent: 'center', gap: 6 },
+              tab === key ? neuPressedStyle(isDark) : neuFlatStyle(isDark),                  { flex: 1, paddingVertical: 10, borderRadius: 14, alignItems: 'center', flexDirection: 'row', direction: isRTL ? 'rtl' : 'ltr', justifyContent: 'center', gap: 6 },
+
             ]}>
             <Icon size={15} color={tab === key ? c.primary : c.text} opacity={tab === key ? 1 : 0.45} />
             <Text style={{ fontSize: 13, fontWeight: '700', color: tab === key ? c.primary : c.text, opacity: tab === key ? 1 : 0.55 }}>
@@ -967,8 +960,8 @@ export default function CourseBuilder() {
               doctors routinely overlooked it. It is the decision that gates
               student visibility, so it now appears first. Same two values and
               the same save payload — placement only. */}
-          <Field label={t('cb.field.courseStatus')}>
-            <View style={{ flexDirection: 'row', gap: 10 }}>
+          <Field label={t('cb.field.courseStatus')} c={c}>
+            <View style={{ flexDirection: 'row', direction: isRTL ? 'rtl' : 'ltr', gap: 10 }}>
               {(['draft', 'published'] as const).map(s => (
                 <Pressable key={s} onPress={() => setStatus(s)}
                   style={[
@@ -987,23 +980,23 @@ export default function CourseBuilder() {
           </Field>
 
           {/* Title */}
-          <Field label={t('cb.field.title')}>
+          <Field label={t('cb.field.title')} c={c}>
             <NeuInput value={title} onChangeText={setTitle} placeholder={t('cb.field.titlePlaceholder')} isDark={isDark} c={c} />
           </Field>
 
           {/* Short description */}
-          <Field label={t('cb.field.shortDesc')}>
+          <Field label={t('cb.field.shortDesc')} c={c}>
             <NeuInput value={shortDesc} onChangeText={setShortDesc} placeholder={t('cb.field.shortDescPlaceholder')} isDark={isDark} c={c} multiline />
           </Field>
 
           {/* Full description */}
-          <Field label={t('cb.field.fullDesc')}>
+          <Field label={t('cb.field.fullDesc')} c={c}>
             <NeuInput value={fullDesc} onChangeText={setFullDesc} placeholder={t('cb.field.fullDescPlaceholder')}
               isDark={isDark} c={c} multiline style={{ minHeight: 100 }} />
           </Field>
 
           {/* Course Cover — single optional image */}
-          <Field label={t('cb.field.cover')}>
+          <Field label={t('cb.field.cover')} c={c}>
             <CourseCoverSection
               uri={coverImageUrl}
               uploading={uploadingCover}
@@ -1015,7 +1008,7 @@ export default function CourseBuilder() {
           </Field>
 
           {/* University */}
-          <Field label={t('cb.field.university')}>
+          <Field label={t('cb.field.university')} c={c}>
             <PickerRow
               value={universityId} options={universities.map(u => ({ value: u.id, label: u.name }))}
               placeholder={t('cb.selectUniversity')} onChange={v => { setUniversityId(v); setFacultyId(''); }} isDark={isDark} c={c}
@@ -1024,7 +1017,7 @@ export default function CourseBuilder() {
 
           {/* Faculty */}
           {faculties.length > 0 && (
-            <Field label={t('cb.field.faculty')}>
+            <Field label={t('cb.field.faculty')} c={c}>
               <PickerRow
                 value={facultyId} options={faculties.map(f => ({ value: f.id, label: f.name }))}
                 placeholder={t('cb.selectFaculty')} onChange={setFacultyId} isDark={isDark} c={c}
@@ -1033,25 +1026,25 @@ export default function CourseBuilder() {
           )}
 
           {/* Language */}
-          <Field label={t('cb.field.language')}>
+          <Field label={t('cb.field.language')} c={c}>
             <PickerRow value={language}
               options={LANGUAGES.map(l => ({ value: l, label: l }))}
               placeholder={t('cb.field.language')} onChange={setLanguage} isDark={isDark} c={c} />
           </Field>
 
           {/* Price (EGP) */}
-          <Field label={t('cb.field.price')}>
-            <View style={[neuPressedStyle(isDark), { borderRadius: 12, flexDirection: 'row', alignItems: 'center', paddingHorizontal: 14 }]}>
-              {/* marginEnd (not marginRight) so the currency code keeps its gap
-                  when the row is mirrored for Arabic. */}
+          <Field label={t('cb.field.price')} c={c}>
+            <View style={[neuPressedStyle(isDark), { borderRadius: 12, flexDirection: 'row', direction: isRTL ? 'rtl' : 'ltr', alignItems: 'center', paddingHorizontal: 14 }]}>
+              {/* marginEnd keeps the currency code paired with its value in both directions. */}
               <Text style={{ fontSize: 14, fontWeight: '700', color: c.primary, marginEnd: 8 }}>EGP</Text>
               <TextInput
                 value={priceEgp}
                 onChangeText={v => setPriceEgp(v.replace(/[^0-9.]/g, ''))}
                 placeholder="0"
-                placeholderTextColor={`${c.text}55`}
+                placeholderTextColor={inputPlaceholderColor(c)}
+                selectionColor={c.primary}
                 keyboardType="decimal-pad"
-                style={{ flex: 1, fontSize: 16, color: c.text, paddingVertical: 14, fontWeight: '600' }}
+                style={{ flex: 1, fontSize: 16, color: c.text, paddingVertical: 14, fontWeight: '600', textAlign: 'left', writingDirection: 'ltr' }}
               />
               {parseFloat(priceEgp) === 0 || !priceEgp ? (
                 <View style={{ backgroundColor: '#16A34A22', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 4 }}>
@@ -1068,7 +1061,7 @@ export default function CourseBuilder() {
 
           {/* ── Contact Methods ─────────────────────────────────────── */}
           <View style={{ gap: 4 }}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 2 }}>
+            <View style={{ flexDirection: 'row', direction: isRTL ? 'rtl' : 'ltr', alignItems: 'center', gap: 6, marginBottom: 2 }}>
               <MessageCircle size={14} color={c.primary} />
               <Text style={{ fontSize: 13, fontWeight: '800', color: c.text, opacity: 0.75 }}>
                 {t('cb.contact.title')}
@@ -1087,7 +1080,7 @@ export default function CourseBuilder() {
                 key={String(opt.value)}
                 onPress={() => setUseDefaultContact(opt.value)}
                 style={{
-                  flexDirection: 'row', alignItems: 'center', gap: 10,
+                  flexDirection: 'row', direction: isRTL ? 'rtl' : 'ltr', alignItems: 'center', gap: 10,
                   paddingVertical: 11, paddingHorizontal: 14,
                   borderRadius: 12, marginBottom: 8,
                   backgroundColor: useDefaultContact === opt.value ? `${c.primary}12` : c.base,
@@ -1109,6 +1102,7 @@ export default function CourseBuilder() {
                 <Text style={{
                   flex: 1, fontSize: 13, fontWeight: useDefaultContact === opt.value ? '700' : '500',
                   color: useDefaultContact === opt.value ? c.primary : c.text,
+                  textAlign: isRTL ? 'right' : 'left', writingDirection: isRTL ? 'rtl' : 'ltr',
                 }}>
                   {opt.label}
                 </Text>
@@ -1118,39 +1112,39 @@ export default function CourseBuilder() {
             {/* Custom contact fields — only shown when custom is selected */}
             {!useDefaultContact && (
               <View style={{ marginTop: 4, gap: 8 }}>
-                <View style={[neuFlatStyle(isDark), { borderRadius: 14, flexDirection: 'row', alignItems: 'center', paddingHorizontal: 14, gap: 10 }]}>
+                <View style={[neuFlatStyle(isDark), { borderRadius: 14, flexDirection: 'row', direction: isRTL ? 'rtl' : 'ltr', alignItems: 'center', paddingHorizontal: 14, gap: 10 }]}>
                   <Text style={{ fontSize: 18 }}>💬</Text>
                   <TextInput
                     value={contactWhatsapp}
                     onChangeText={setContactWhatsapp}
                     placeholder={t('cb.contact.whatsapp')}
-                    placeholderTextColor={`${c.text}44`}
+                    placeholderTextColor={inputPlaceholderColor(c)}
                     keyboardType="phone-pad"
-                    style={{ flex: 1, fontSize: 14, color: c.text, paddingVertical: 12 }}
+                    style={{ flex: 1, fontSize: 14, color: c.text, paddingVertical: 12, textAlign: 'left', writingDirection: 'ltr' }}
                   />
                   {contactWhatsapp.trim() ? <Check size={14} color="#25D366" /> : null}
                 </View>
-                <View style={[neuFlatStyle(isDark), { borderRadius: 14, flexDirection: 'row', alignItems: 'center', paddingHorizontal: 14, gap: 10 }]}>
+                <View style={[neuFlatStyle(isDark), { borderRadius: 14, flexDirection: 'row', direction: isRTL ? 'rtl' : 'ltr', alignItems: 'center', paddingHorizontal: 14, gap: 10 }]}>
                   <Send size={16} color="#229ED9" />
                   <TextInput
                     value={contactTelegram}
                     onChangeText={setContactTelegram}
                     placeholder={t('cb.contact.telegram')}
-                    placeholderTextColor={`${c.text}44`}
+                    placeholderTextColor={inputPlaceholderColor(c)}
                     autoCapitalize="none"
-                    style={{ flex: 1, fontSize: 14, color: c.text, paddingVertical: 12 }}
+                    style={{ flex: 1, fontSize: 14, color: c.text, paddingVertical: 12, textAlign: 'left', writingDirection: 'ltr' }}
                   />
                   {contactTelegram.trim() ? <Check size={14} color="#229ED9" /> : null}
                 </View>
-                <View style={[neuFlatStyle(isDark), { borderRadius: 14, flexDirection: 'row', alignItems: 'center', paddingHorizontal: 14, gap: 10 }]}>
+                <View style={[neuFlatStyle(isDark), { borderRadius: 14, flexDirection: 'row', direction: isRTL ? 'rtl' : 'ltr', alignItems: 'center', paddingHorizontal: 14, gap: 10 }]}>
                   <Phone size={15} color="#16A34A" />
                   <TextInput
                     value={contactPhone}
                     onChangeText={setContactPhone}
                     placeholder={t('cb.contact.phone')}
-                    placeholderTextColor={`${c.text}44`}
+                    placeholderTextColor={inputPlaceholderColor(c)}
                     keyboardType="phone-pad"
-                    style={{ flex: 1, fontSize: 14, color: c.text, paddingVertical: 12 }}
+                    style={{ flex: 1, fontSize: 14, color: c.text, paddingVertical: 12, textAlign: 'left', writingDirection: 'ltr' }}
                   />
                   {contactPhone.trim() ? <Check size={14} color="#16A34A" /> : null}
                 </View>
@@ -1172,14 +1166,16 @@ export default function CourseBuilder() {
       {tab === 'structure' && (
         <View style={{ flex: 1 }}>
           {/* Search + Add Section */}
-          <View style={{ paddingHorizontal: layout.screenPx, paddingVertical: 8, flexDirection: 'row', gap: 10 }}>
-            <View style={[neuPressedStyle(isDark), { flex: 1, borderRadius: 12, flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, gap: 8 }]}>
+          <View style={{ paddingHorizontal: layout.screenPx, paddingVertical: 8, flexDirection: 'row', direction: isRTL ? 'rtl' : 'ltr', gap: 10 }}>
+            <View style={[neuPressedStyle(isDark), { flex: 1, borderRadius: 12, flexDirection: 'row', direction: isRTL ? 'rtl' : 'ltr', alignItems: 'center', paddingHorizontal: 12, gap: 8 }]}>
               <RefreshCw size={14} color={c.text} opacity={0.4} />
               <TextInput
                 value={structureSearch} onChangeText={setStructureSearch}
                 placeholder={t('cb.searchStructure')}
-                placeholderTextColor={`${c.text}55`}
-                style={{ flex: 1, fontSize: 14, color: c.text, paddingVertical: 10 }}
+                placeholderTextColor={inputPlaceholderColor(c)}
+                selectionColor={c.primary}
+                style={{ flex: 1, fontSize: 14, color: c.text, paddingVertical: 10,
+                  writingDirection: isRTL ? 'rtl' : 'ltr', textAlign: isRTL ? 'right' : 'left' }}
               />
             </View>
             <Pressable onPress={handleAddSection}
@@ -1194,7 +1190,7 @@ export default function CourseBuilder() {
             const totalMin = calcCourseDuration(sections);
             const totalLessons = sections.reduce((t: number, s: any) => t + (s.lessons?.length ?? 0), 0);
             return totalMin > 0 ? (
-              <View style={{ marginHorizontal: 20, marginBottom: 4, flexDirection: 'row', alignItems: 'center', gap: 8,
+              <View style={{ marginHorizontal: 20, marginBottom: 4, flexDirection: 'row', direction: isRTL ? 'rtl' : 'ltr', alignItems: 'center', gap: 8,
                 paddingHorizontal: 14, paddingVertical: 8, borderRadius: 12, backgroundColor: `${c.primary}10` }}>
                 <Clock size={13} color={c.primary} />
                 <Text style={{ fontSize: 12, fontWeight: '700', color: c.primary }}>
@@ -1229,7 +1225,7 @@ export default function CourseBuilder() {
                     if (next.has(section.id)) next.delete(section.id); else next.add(section.id);
                     return next;
                   })}
-                  style={{ flexDirection: 'row', alignItems: 'center', padding: 14, gap: 10, minHeight: 56 }}>
+                  style={{ flexDirection: 'row', direction: isRTL ? 'rtl' : 'ltr', alignItems: 'center', padding: 14, gap: 10, minHeight: 56 }}>
                   <GripVertical size={16} color={c.text} opacity={0.3} />
                   {/* Auto-number badge */}
                   <View style={{ width: 26, height: 26, borderRadius: 13, backgroundColor: `${c.primary}22`,
@@ -1238,13 +1234,16 @@ export default function CourseBuilder() {
                   </View>
 
                   {renamingSection === section.id ? (
-                    <TextInput
-                      value={renameValue} onChangeText={setRenameValue}
-                      autoFocus onBlur={() => handleRenameSection(section.id)}
-                      onSubmitEditing={() => handleRenameSection(section.id)}
-                      style={{ flex: 1, fontSize: 15, fontWeight: '700', color: c.text,
-                        borderBottomWidth: 1, borderColor: c.primary, paddingVertical: 2 }}
-                    />
+            <TextInput
+              value={renameValue} onChangeText={setRenameValue}
+              autoFocus onBlur={() => handleRenameSection(section.id)}
+              onSubmitEditing={() => handleRenameSection(section.id)}
+              placeholderTextColor={inputPlaceholderColor(c)}
+              selectionColor={c.primary}
+              style={{ flex: 1, fontSize: 15, fontWeight: '700', color: c.text,
+                writingDirection: isRTL ? 'rtl' : 'ltr', textAlign: isRTL ? 'right' : 'left',
+                borderBottomWidth: 1, borderColor: c.primary, paddingVertical: 2 }}
+            />
                   ) : (
                     <Text style={{ flex: 1, fontSize: 15, fontWeight: '700', color: c.text }} numberOfLines={1}>
                       {section.title}
@@ -1302,36 +1301,37 @@ export default function CourseBuilder() {
 
                 {/* ── Section "more" drawer (mobile) ── */}
                 {isNarrow && sectionMoreId === section.id && (
-                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', paddingHorizontal: 14, paddingBottom: 10,
+                  <View style={{ flexDirection: 'row', direction: isRTL ? 'rtl' : 'ltr', flexWrap: 'wrap', paddingHorizontal: 14, paddingBottom: 10,
+
                     paddingTop: 2, gap: 8, borderTopWidth: 1, borderColor: `${c.text}10` }}>
                     <Pressable onPress={() => { setRenamingSection(section.id); setRenameValue(section.title); setSectionMoreId(null); }}
-                      style={[neuFlatStyle(isDark), { flexDirection: 'row', alignItems: 'center', gap: 6,
+                      style={[neuFlatStyle(isDark), { flexDirection: 'row', direction: isRTL ? 'rtl' : 'ltr', alignItems: 'center', gap: 6,
                         paddingHorizontal: 12, paddingVertical: 10, borderRadius: 10, minHeight: 44 }]}>
                       <Pencil size={14} color={c.primary} />
                       <Text style={{ fontSize: 13, fontWeight: '600', color: c.primary }}>{t('cb.rename')}</Text>
                     </Pressable>
                     <Pressable onPress={() => { moveSectionUp(sIdx); setSectionMoreId(null); }}
-                      style={[neuFlatStyle(isDark), { flexDirection: 'row', alignItems: 'center', gap: 6,
+                      style={[neuFlatStyle(isDark), { flexDirection: 'row', direction: isRTL ? 'rtl' : 'ltr', alignItems: 'center', gap: 6,
                         paddingHorizontal: 12, paddingVertical: 10, borderRadius: 10, minHeight: 44,
                         opacity: sIdx === 0 ? 0.3 : 1 }]}>
                       <ArrowUp size={14} color={c.text} />
                       <Text style={{ fontSize: 13, fontWeight: '600', color: c.text }}>{t('cb.moveUp')}</Text>
                     </Pressable>
                     <Pressable onPress={() => { moveSectionDown(sIdx); setSectionMoreId(null); }}
-                      style={[neuFlatStyle(isDark), { flexDirection: 'row', alignItems: 'center', gap: 6,
+                      style={[neuFlatStyle(isDark), { flexDirection: 'row', direction: isRTL ? 'rtl' : 'ltr', alignItems: 'center', gap: 6,
                         paddingHorizontal: 12, paddingVertical: 10, borderRadius: 10, minHeight: 44,
                         opacity: sIdx === sections.length - 1 ? 0.3 : 1 }]}>
                       <ArrowDown size={14} color={c.text} />
                       <Text style={{ fontSize: 13, fontWeight: '600', color: c.text }}>{t('cb.moveDown')}</Text>
                     </Pressable>
                     <Pressable onPress={() => { handleBulkImport(section.id); setSectionMoreId(null); }}
-                      style={[neuFlatStyle(isDark), { flexDirection: 'row', alignItems: 'center', gap: 6,
+                      style={[neuFlatStyle(isDark), { flexDirection: 'row', direction: isRTL ? 'rtl' : 'ltr', alignItems: 'center', gap: 6,
                         paddingHorizontal: 12, paddingVertical: 10, borderRadius: 10, minHeight: 44 }]}>
                       <FileUp size={14} color={c.text} />
                       <Text style={{ fontSize: 13, fontWeight: '600', color: c.text }}>{t('cb.bulkImport')}</Text>
                     </Pressable>
                     <Pressable onPress={() => requestDeleteSection(section)} disabled={deletingSection}
-                      style={[neuFlatStyle(isDark), { flexDirection: 'row', alignItems: 'center', gap: 6,
+                      style={[neuFlatStyle(isDark), { flexDirection: 'row', direction: isRTL ? 'rtl' : 'ltr', alignItems: 'center', gap: 6,
                         paddingHorizontal: 12, paddingVertical: 10, borderRadius: 10, minHeight: 44,
                         backgroundColor: '#DC262618' }]}>
                       <Trash2 size={14} color="#DC2626" />
@@ -1347,7 +1347,7 @@ export default function CourseBuilder() {
                       <View key={lesson.id} style={{ borderBottomWidth: 1, borderColor: `${c.text}08` }}>
 
                         {/* Main lesson row */}
-                        <View style={{ flexDirection: 'row', alignItems: 'center',
+                        <View style={{ flexDirection: 'row', direction: isRTL ? 'rtl' : 'ltr', alignItems: 'center',
                           paddingHorizontal: 14, paddingVertical: 10, gap: 10, minHeight: 56 }}>
                           <GripVertical size={13} color={c.text} opacity={0.2} />
                           {/* Number */}
@@ -1365,7 +1365,10 @@ export default function CourseBuilder() {
                               autoFocus
                               onBlur={() => handleRenameLesson(lesson.id, section.id)}
                               onSubmitEditing={() => handleRenameLesson(lesson.id, section.id)}
+                              placeholderTextColor={inputPlaceholderColor(c)}
+                              selectionColor={c.primary}
                               style={{ flex: 1, fontSize: 13, color: c.text,
+                                writingDirection: isRTL ? 'rtl' : 'ltr', textAlign: isRTL ? 'right' : 'left',
                                 borderBottomWidth: 1, borderColor: c.primary, paddingVertical: 1 }}
                             />
                           ) : (
@@ -1374,7 +1377,8 @@ export default function CourseBuilder() {
                               <Text style={{ fontSize: 13, fontWeight: '600', color: c.text }} numberOfLines={1}>
                                 {lesson.title}
                               </Text>
-                              <View style={{ flexDirection: 'row', gap: 6, marginTop: 2, alignItems: 'center' }}>
+                              <View style={{ flexDirection: 'row', direction: isRTL ? 'rtl' : 'ltr', gap: 6, marginTop: 2, alignItems: 'center' }}>
+
                                 {/* Friendly type label */}
                                 <LessonTypeIcon videoType={lesson.video_type} size={9} color={c.primary} />
                                 <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.45) }}>
@@ -1443,36 +1447,36 @@ export default function CourseBuilder() {
 
                         {/* ── Lesson "more" drawer (mobile) ── */}
                         {isNarrow && lessonMoreId === lesson.id && (
-                          <View style={{ flexDirection: 'row', flexWrap: 'wrap', paddingHorizontal: 14,
+                          <View style={{ flexDirection: 'row', direction: isRTL ? 'rtl' : 'ltr', flexWrap: 'wrap', paddingHorizontal: 14,
                             paddingBottom: 10, paddingTop: 2, gap: 8, backgroundColor: `${c.text}05` }}>
                             <Pressable onPress={() => { setRenamingLesson(lesson.id); setRenameValue(lesson.title); setLessonMoreId(null); }}
-                              style={[neuFlatStyle(isDark), { flexDirection: 'row', alignItems: 'center', gap: 6,
+                              style={[neuFlatStyle(isDark), { flexDirection: 'row', direction: isRTL ? 'rtl' : 'ltr', alignItems: 'center', gap: 6,
                                 paddingHorizontal: 12, paddingVertical: 10, borderRadius: 10, minHeight: 44 }]}>
                               <Pencil size={13} color={c.primary} />
                               <Text style={{ fontSize: 13, fontWeight: '600', color: c.primary }}>{t('cb.rename')}</Text>
                             </Pressable>
                             <Pressable onPress={() => { moveLessonUp(lIdx, section.id); setLessonMoreId(null); }}
-                              style={[neuFlatStyle(isDark), { flexDirection: 'row', alignItems: 'center', gap: 6,
+                              style={[neuFlatStyle(isDark), { flexDirection: 'row', direction: isRTL ? 'rtl' : 'ltr', alignItems: 'center', gap: 6,
                                 paddingHorizontal: 12, paddingVertical: 10, borderRadius: 10, minHeight: 44,
                                 opacity: lIdx === 0 ? 0.3 : 1 }]}>
                               <ArrowUp size={13} color={c.text} />
                               <Text style={{ fontSize: 13, fontWeight: '600', color: c.text }}>{t('cb.moveUp')}</Text>
                             </Pressable>
                             <Pressable onPress={() => { moveLessonDown(lIdx, section.id); setLessonMoreId(null); }}
-                              style={[neuFlatStyle(isDark), { flexDirection: 'row', alignItems: 'center', gap: 6,
+                              style={[neuFlatStyle(isDark), { flexDirection: 'row', direction: isRTL ? 'rtl' : 'ltr', alignItems: 'center', gap: 6,
                                 paddingHorizontal: 12, paddingVertical: 10, borderRadius: 10, minHeight: 44,
                                 opacity: lIdx === (section.lessons?.length ?? 0) - 1 ? 0.3 : 1 }]}>
                               <ArrowDown size={13} color={c.text} />
                               <Text style={{ fontSize: 13, fontWeight: '600', color: c.text }}>{t('cb.moveDown')}</Text>
                             </Pressable>
                             <Pressable onPress={() => { handleDuplicateLesson(lesson.id, section.id); setLessonMoreId(null); }}
-                              style={[neuFlatStyle(isDark), { flexDirection: 'row', alignItems: 'center', gap: 6,
+                              style={[neuFlatStyle(isDark), { flexDirection: 'row', direction: isRTL ? 'rtl' : 'ltr', alignItems: 'center', gap: 6,
                                 paddingHorizontal: 12, paddingVertical: 10, borderRadius: 10, minHeight: 44 }]}>
                               <RefreshCw size={13} color={c.text} />
                               <Text style={{ fontSize: 13, fontWeight: '600', color: c.text }}>{t('cb.duplicate')}</Text>
                             </Pressable>
                             <Pressable onPress={() => { handleDeleteLesson(lesson.id, section.id); setLessonMoreId(null); }}
-                              style={[neuFlatStyle(isDark), { flexDirection: 'row', alignItems: 'center', gap: 6,
+                              style={[neuFlatStyle(isDark), { flexDirection: 'row', direction: isRTL ? 'rtl' : 'ltr', alignItems: 'center', gap: 6,
                                 paddingHorizontal: 12, paddingVertical: 10, borderRadius: 10, minHeight: 44,
                                 backgroundColor: '#DC262618' }]}>
                               <Trash2 size={13} color="#DC2626" />
@@ -1484,14 +1488,14 @@ export default function CourseBuilder() {
                     ))}
 
                     {/* Add Lesson + Bulk Import footer */}
-                    <View style={{ flexDirection: 'row', borderTopWidth: 1, borderColor: `${c.text}08` }}>
+                    <View style={{ flexDirection: 'row', direction: isRTL ? 'rtl' : 'ltr', borderTopWidth: 1, borderColor: `${c.text}08` }}>
                       <Pressable onPress={() => handleAddLesson(section.id)}
-                        style={{ flex: 1, flexDirection: 'row', alignItems: 'center', padding: 12, gap: 8, minHeight: 44, opacity: 0.65 }}>
+                        style={{ flex: 1, flexDirection: 'row', direction: isRTL ? 'rtl' : 'ltr', alignItems: 'center', padding: 12, gap: 8, minHeight: 44, opacity: 0.65 }}>
                         <Plus size={14} color={c.primary} />
                         <Text style={{ fontSize: 13, color: c.primary, fontWeight: '600' }}>{t('cb.addLesson')}</Text>
                       </Pressable>
                       <Pressable onPress={() => handleBulkImport(section.id)}
-                        style={{ flexDirection: 'row', alignItems: 'center', padding: 12, gap: 6, minHeight: 44, opacity: 0.65 }}>
+                        style={{ flexDirection: 'row', direction: isRTL ? 'rtl' : 'ltr', alignItems: 'center', padding: 12, gap: 6, minHeight: 44, opacity: 0.65 }}>
                         <FileUp size={14} color={c.text} opacity={0.6} />
                         <Text style={{ fontSize: 13, ...mutedTextStyle(c, 0.6), fontWeight: '600' }}>{t('cb.bulkImport')}</Text>
                       </Pressable>
@@ -1510,7 +1514,7 @@ export default function CourseBuilder() {
       {tab === 'settings' && (
         <ScrollView automaticallyAdjustKeyboardInsets={process.env.EXPO_OS === 'ios'} keyboardShouldPersistTaps="handled"
           contentContainerStyle={{ padding: layout.screenPx, gap: 16 }}>
-          <Text style={{ fontSize: 16, fontWeight: '800', color: c.text, opacity: 0.7 }}>{t('cb.learningAccess')}</Text>
+          <Text style={{ fontSize: 16, fontWeight: '800', color: c.text }}>{t('cb.learningAccess')}</Text>
 
           <ToggleRow label={t('cb.sequential')} sub={t('cb.sequentialSub')}
             value={sequential} onChange={setSequential} isDark={isDark} c={c} />
@@ -1522,7 +1526,7 @@ export default function CourseBuilder() {
             value={subscriptionRequired} onChange={setSubscriptionRequired} isDark={isDark} c={c} />
 
           {/* Platform info — credit cost is always 1, not configurable */}
-          <NeuCard style={[neuPressedStyle(isDark), { padding: 14, flexDirection: 'row', alignItems: 'center', gap: 12 }]}>
+          <NeuCard style={[neuPressedStyle(isDark), { padding: 14, flexDirection: 'row', direction: isRTL ? 'rtl' : 'ltr', alignItems: 'center', gap: 12 }]}>
             <View style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: `${c.primary}18`, alignItems: 'center', justifyContent: 'center' }}>
               <Text style={{ fontSize: 18 }}>🎓</Text>
             </View>
@@ -1545,7 +1549,7 @@ export default function CourseBuilder() {
             <Text style={{ fontSize: 17, fontWeight: '800', color: c.text, marginBottom: 4 }}>{t('cb.publishChecklist')}</Text>
             <Text style={{ fontSize: 13, ...mutedTextStyle(c, 0.5), marginBottom: 16 }}>{t('cb.publishChecklistIntro')}</Text>
             {getPublishIssues().map((issue, i) => (
-              <View key={`issue-${i}`} style={{ flexDirection: 'row', gap: 8, marginBottom: 8, alignItems: 'flex-start' }}>
+              <View key={`issue-${i}`} style={{ flexDirection: 'row', direction: isRTL ? 'rtl' : 'ltr', gap: 8, marginBottom: 8, alignItems: 'flex-start' }}>
                 <Text style={{ fontSize: 16, color: '#DC2626' }}>✗</Text>
                 <Text style={{ fontSize: 13, color: c.text, flex: 1 }}>{issue}</Text>
               </View>
@@ -1556,7 +1560,7 @@ export default function CourseBuilder() {
                   {t('cb.videoIncomplete')}
                 </Text>
                 {videoBlockers.map((b, i) => (
-                  <View key={`vb-${i}`} style={{ flexDirection: 'row', gap: 8, marginBottom: 6, alignItems: 'flex-start',
+                  <View key={`vb-${i}`} style={{ flexDirection: 'row', direction: isRTL ? 'rtl' : 'ltr', gap: 8, marginBottom: 6, alignItems: 'flex-start',
                     backgroundColor: '#D9770612', borderRadius: 8, padding: 8 }}>
                     <Text style={{ fontSize: 12, color: '#D97706' }}>•</Text>
                     <View style={{ flex: 1 }}>
@@ -1583,7 +1587,7 @@ export default function CourseBuilder() {
               <Text style={{ fontSize: 13, ...mutedTextStyle(c, 0.5), marginBottom: 20 }}>{t('cb.startNewCourseHelp')}</Text>
               {/* Blank */}
               <Pressable onPress={() => setShowStartModal(false)}
-                style={[neuFlatStyle(isDark), { borderRadius: 14, padding: 16, marginBottom: 10, flexDirection: 'row', alignItems: 'center', gap: 14 }]}>
+                style={[neuFlatStyle(isDark), { borderRadius: 14, padding: 16, marginBottom: 10, flexDirection: 'row', direction: isRTL ? 'rtl' : 'ltr', alignItems: 'center', gap: 14 }]}>
                 <View style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: `${c.primary}22`, alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
                   <BookOpen size={20} color={c.primary} />
                 </View>
@@ -1602,7 +1606,7 @@ export default function CourseBuilder() {
                   </Text>
                   {templates.map(t => (
                     <Pressable key={t.id} onPress={() => handleStartFromTemplate(t.id)}
-                      style={[neuFlatStyle(isDark), { borderRadius: 14, padding: 14, marginBottom: 8, flexDirection: 'row', alignItems: 'center', gap: 12 }]}>
+                      style={[neuFlatStyle(isDark), { borderRadius: 14, padding: 14, marginBottom: 8, flexDirection: 'row', direction: isRTL ? 'rtl' : 'ltr', alignItems: 'center', gap: 12 }]}>
                       <Bookmark size={18} color={c.primary} />
                       <View style={{ flex: 1 }}>
                         <Text style={{ fontSize: 14, fontWeight: '700', color: c.text }} numberOfLines={1}>{t.title}</Text>
@@ -1626,7 +1630,7 @@ export default function CourseBuilder() {
         <View style={{ flex: 1, backgroundColor: '#000a', justifyContent: 'center', alignItems: 'center', padding: 20 }}>
           <Pressable onPress={e => e.stopPropagation()}>
             <NeuCard style={{ width: Math.min(screenWidth - 40, 420) }}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 8 }}>
+              <View style={{ flexDirection: 'row', direction: isRTL ? 'rtl' : 'ltr', alignItems: 'center', gap: 12, marginBottom: 8 }}>
                 <View style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: '#D9770618', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
                   <Archive size={20} color="#D97706" />
                 </View>
@@ -1641,7 +1645,7 @@ export default function CourseBuilder() {
                   value={archiveReason}
                   onChangeText={setArchiveReason}
                   placeholder={t('cb.reasonPlaceholder')}
-                  placeholderTextColor={`${c.text}55`}
+                  placeholderTextColor={inputPlaceholderColor(c)}
                   multiline
                   style={{ borderRadius: 12, padding: 12, fontSize: 13, color: c.text, minHeight: 80,
                     textAlignVertical: 'top', backgroundColor: c.base,
@@ -1649,7 +1653,7 @@ export default function CourseBuilder() {
                     shadowOpacity: 0.5, shadowRadius: 6 }}
                 />
               </View>
-              <View style={{ flexDirection: 'row', gap: 10 }}>
+              <View style={{ flexDirection: 'row', direction: isRTL ? 'rtl' : 'ltr', gap: 10 }}>
                 <Pressable onPress={() => setShowArchiveModal(false)} style={[neuFlatStyle(isDark), { flex: 1, minWidth: 100, padding: 12, borderRadius: 12, alignItems: 'center' }]}>
                   <Text style={{ fontSize: 14, fontWeight: '700', ...mutedTextStyle(c, 0.55) }} numberOfLines={1}>{t('common.cancel')}</Text>
                 </Pressable>
@@ -1671,7 +1675,7 @@ export default function CourseBuilder() {
         <View style={{ flex: 1, backgroundColor: '#000a', justifyContent: 'center', alignItems: 'center', padding: 20 }}>
           <Pressable onPress={e => e.stopPropagation()}>
             <NeuCard style={{ width: Math.min(screenWidth - 40, 420) }}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 10 }}>
+              <View style={{ flexDirection: 'row', direction: isRTL ? 'rtl' : 'ltr', alignItems: 'center', gap: 12, marginBottom: 10 }}>
                 <View style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: '#DC262618', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
                   <Trash2 size={20} color="#DC2626" />
                 </View>
@@ -1691,7 +1695,7 @@ export default function CourseBuilder() {
               </View>
 
               {(deleteSectionTarget?.lessons?.length ?? 0) > 0 ? (
-                <View style={{ flexDirection: 'row', gap: 10, borderRadius: 12, padding: 12, marginBottom: 16, backgroundColor: '#DC262610' }}>
+                <View style={{ flexDirection: 'row', direction: isRTL ? 'rtl' : 'ltr', gap: 10, borderRadius: 12, padding: 12, marginBottom: 16, backgroundColor: '#DC262610' }}>
                   <Trash2 size={15} color="#DC2626" style={{ marginTop: 1, flexShrink: 0 }} />
                   <Text style={{ flex: 1, fontSize: 12, lineHeight: 18, color: '#DC2626', fontWeight: '500' }}>
                     {t('cb.deleteSectionLessonsWarning', {
@@ -1705,7 +1709,7 @@ export default function CourseBuilder() {
                 </Text>
               )}
 
-              <View style={{ flexDirection: 'row', gap: 10 }}>
+              <View style={{ flexDirection: 'row', direction: isRTL ? 'rtl' : 'ltr', gap: 10 }}>
                 <Pressable onPress={() => setDeleteSectionTarget(null)} disabled={deletingSection}
                   style={[neuFlatStyle(isDark), { flex: 1, minWidth: 100, padding: 12, borderRadius: 12, alignItems: 'center' }]}>
                   <Text style={{ fontSize: 14, fontWeight: '700', ...mutedTextStyle(c, 0.55) }} numberOfLines={1}>{t('common.cancel')}</Text>
@@ -1731,7 +1735,7 @@ export default function CourseBuilder() {
               <Text style={{ fontSize: 16, fontWeight: '800', color: c.text, marginBottom: 12 }}>{t('cb.saveAsTemplate')}</Text>
               <NeuInput value={templateTitle} onChangeText={setTemplateTitle}
                 placeholder={t('cb.templateName')} isDark={isDark} c={c} style={{ marginBottom: 14 }} />
-              <View style={{ flexDirection: 'row', gap: 10 }}>
+              <View style={{ flexDirection: 'row', direction: isRTL ? 'rtl' : 'ltr', gap: 10 }}>
                 <Pressable onPress={() => setShowSaveTemplate(false)}
                   style={[neuFlatStyle(isDark), { flex: 1, minWidth: 100, padding: 12, borderRadius: 12, alignItems: 'center' }]}>
                   <Text style={{ fontSize: 14, fontWeight: '700', ...mutedTextStyle(c, 0.55) }} numberOfLines={1}>{t('common.cancel')}</Text>
@@ -1753,25 +1757,32 @@ export default function CourseBuilder() {
 
 // ── Shared sub-components ──────────────────────────────────────────────────────
 
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
+function Field({ label, children, c }: { label: string; children: React.ReactNode; c?: typeof neuColors.light }) {
+  const { isRTL } = useTranslation();
+  const scheme = useColorScheme();
+  const palette = c ?? (scheme === 'dark' ? neuColors.dark : neuColors.light);
   return (
     <View style={{ gap: 6 }}>
-      <Text style={{ fontSize: 13, fontWeight: '700', opacity: 0.55 }}>{label}</Text>
+      <Text style={[{ fontSize: 13, fontWeight: '700', textAlign: isRTL ? 'right' : 'left' }, mutedTextStyle(palette, 0.6)]}>{label}</Text>
       {children}
     </View>
   );
 }
 
 function NeuInput({ isDark, c, style, ...props }: any) {
+  const { isRTL } = useTranslation();
   return (
     <TextInput
-      placeholderTextColor={`${c.text}55`}
+      placeholderTextColor={inputPlaceholderColor(c)}
+      selectionColor={c.primary}
       style={[{
         ...neuPressedStyle(isDark),
         borderRadius: 12,
         padding: 14,
         fontSize: 14,
         color: c.text,
+        writingDirection: isRTL ? 'rtl' : 'ltr',
+        textAlign: isRTL ? 'right' : 'left',
         textAlignVertical: 'top',
       }, style]}
       {...props}
@@ -1878,11 +1889,12 @@ function PickerRow({ value, options, placeholder, onChange, isDark, c }: {
 }) {
   const [open, setOpen] = useState(false);
   const selected = options.find(o => o.value === value);
+  const { isRTL } = useTranslation();
   return (
     <View>
       <Pressable onPress={() => setOpen(o => !o)}
         style={[neuPressedStyle(isDark), { borderRadius: 12, padding: 14, flexDirection: 'row', alignItems: 'center' }]}>
-        <Text style={{ flex: 1, fontSize: 14, color: selected ? c.text : `${c.text}55` }}>
+        <Text style={{ flex: 1, fontSize: 14, color: selected ? c.text : inputPlaceholderColor(c), textAlign: isRTL ? 'right' : 'left' }}>
           {selected?.label ?? placeholder}
         </Text>
         <ChevronDown size={16} color={c.text} opacity={0.4} />
@@ -1893,7 +1905,7 @@ function PickerRow({ value, options, placeholder, onChange, isDark, c }: {
             {options.map(opt => (
               <Pressable key={opt.value} onPress={() => { onChange(opt.value); setOpen(false); }}
                 style={{ padding: 12, borderRadius: 10, backgroundColor: value === opt.value ? `${c.primary}18` : 'transparent' }}>
-                <Text style={{ fontSize: 14, color: c.text, fontWeight: value === opt.value ? '700' : '400' }}>
+                <Text style={{ fontSize: 14, color: c.text, fontWeight: value === opt.value ? '700' : '400', textAlign: isRTL ? 'right' : 'left' }}>
                   {opt.label}
                 </Text>
               </Pressable>
@@ -1905,16 +1917,21 @@ function PickerRow({ value, options, placeholder, onChange, isDark, c }: {
   );
 }
 
+function inputPlaceholderColor(c: typeof neuColors.light): string {
+  return c.mode === 'dark' ? c.textMuted : '#56657A';
+}
+
 function ToggleRow({ label, sub, value, onChange, isDark, c }: {
   label: string; sub: string; value: boolean;
   onChange: (v: boolean) => void; isDark: boolean; c: any;
 }) {
+  const { isRTL } = useTranslation();
   return (
     <Pressable onPress={() => onChange(!value)}
-      style={[neuFlatStyle(isDark), { borderRadius: 16, padding: 16, flexDirection: 'row', alignItems: 'center', gap: 14 }]}>
+      style={[neuFlatStyle(isDark), { borderRadius: 16, padding: 16, flexDirection: 'row', direction: isRTL ? 'rtl' : 'ltr', alignItems: 'center', gap: 14 }]}>
       <View style={{ flex: 1 }}>
-        <Text style={{ fontSize: 14, fontWeight: '700', color: c.text }}>{label}</Text>
-        <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.45), marginTop: 2 }}>{sub}</Text>
+        <Text style={{ fontSize: 14, fontWeight: '700', color: c.text, textAlign: isRTL ? 'right' : 'left' }}>{label}</Text>
+        <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.55), marginTop: 2, textAlign: isRTL ? 'right' : 'left' }}>{sub}</Text>
       </View>
       <View style={[
         value ? neuPressedStyle(isDark) : neuFlatStyle(isDark),

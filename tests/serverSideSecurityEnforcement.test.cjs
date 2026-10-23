@@ -166,7 +166,12 @@ for (const sf of schemaFiles) {
 }
 const integrityCode = read('backend/src/Services/IntegrityService.php');
 const integrityPolicy = bodyOf(integrityCode, 'policy') || '';
-check('B2: integrity policy default actions are log_only', integrityPolicy.includes("'vdo_otp'     => 'log_only'"));
+// Whitespace-insensitive: the table was re-aligned when 'material_pdf' was added.
+check(
+  'B2: integrity policy default actions are log_only',
+  /['"]vdo_otp['"]\s*=>\s*['"]log_only['"]/.test(integrityPolicy)
+    && /['"]material_pdf['"]\s*=>\s*['"]log_only['"]/.test(integrityPolicy)
+);
 check('B2: integrity enforcement requires enabled AND tier==enforce', /\$policy\['enabled'\]/.test(bodyOf(integrityCode, 'assertActionAllowed') || ''));
 check('B2: a MISSING hash can never satisfy an enforced action (no client input consulted at log_only)', /if\s*\(\$hash\s*!==\s*null\s*&&\s*\$hash\s*!==\s*''\)/.test(integrityCode));
 

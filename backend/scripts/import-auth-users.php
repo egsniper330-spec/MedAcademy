@@ -23,6 +23,7 @@ if (PHP_SAPI !== 'cli') {
 require dirname(__DIR__) . '/src/bootstrap.php';
 
 use MedAcademy\Database\Database;
+use MedAcademy\Services\PublicUserIdService;
 use MedAcademy\Utils\Uuid;
 
 $file = '';
@@ -72,6 +73,20 @@ while (($row = fgetcsv($fh)) !== false) {
     $phone = $phoneIdx !== false ? trim((string) ($row[$phoneIdx] ?? '')) : null;
     $meta = $metaIdx !== false ? trim((string) ($row[$metaIdx] ?? '')) : null;
     $created = $createdIdx !== false && trim((string) ($row[$createdIdx] ?? '')) !== '' ? trim((string) $row[$createdIdx]) : null;
+
+    // NEW rows take their user-facing MED-##### id from the same allocator the
+    // API uses (the trigger would allocate one too, but the application
+    // allocator is the CSPRNG one with the exhaustion contract). Existing rows
+    // are never touched: re-importing must not rewrite an issued id.
+    $isNew = (int) $db->value('SELECT COUNT(*) FROM users WHERE id = ?', [strtolower($id)], 0) === 0;
+    if ($isNew) {
+        $decoded = is_string($meta) && $meta !== '' ? json_decode($meta, true) : [];
+        if (!is_array($decoded)) {
+            $decoded = [];
+        }
+        $decoded['public_user_id'] = PublicUserIdService::allocate();
+        $meta = json_encode($decoded, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+    }
 
     try {
         $db->insert(

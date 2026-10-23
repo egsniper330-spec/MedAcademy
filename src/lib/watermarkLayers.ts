@@ -58,12 +58,23 @@
  *   This decision was derived from the reported production behaviour; it has
  *   NOT been re-confirmed on a physical Android device in this change.
  *
- * ── DEPLOYMENT NOTE (not applied here — backend file listed in the report) ──
- * `buildAnnotate()` joins the name and `ID: MED-####` with a literal "\n"
- * (the docs say multi-line marks need one `rtext` object per line) and passes
- * `'skip' => '2000'`, which is 2000 ms HIDDEN every cycle — both explain the
- * reported iOS clipping/disappearance of the provider mark. Fixing it requires
- * a backend change, so this module deliberately does NOT depend on it.
+ * ── PROVIDER LAYER: WHAT IT DOES AND DOES NOT DO ───────────────────────────
+ * `buildAnnotate()` (backend/src/Video/VdoCipherService.php) now emits the
+ * identity as `NAME` then the bare `MED-####` (no `ID:` prefix) and passes
+ * `'skip' => '0'` — VdoCipher documents `skip` as the HIDDEN time per cycle, so
+ * the old 2000 blanked the mark for 2 s of every cycle (the reported iOS
+ * disappearance). `interval` is the time it then holds one position, so 8 s
+ * keeps it relocating instead of parking.
+ *
+ * PROVIDER LIMITS (documented, not worked around):
+ *   • The provider chooses the position; its `rtext` mark relocates on
+ *     `interval`. CONTINUOUS billiard motion is not available on this layer —
+ *     never claim otherwise for a provider-only session (iOS native, webview).
+ *   • VdoCipher documents separate lines as separate watermark objects, not a
+ *     newline inside one object; multi-line rendering of a single `rtext` is
+ *     therefore unverified. The app layer is the layer whose two-line layout
+ *     we control.
+ *   • Neither `alpha`/`size` nor the font are ours to animate per frame.
  */
 
 /** The platform being rendered on. */

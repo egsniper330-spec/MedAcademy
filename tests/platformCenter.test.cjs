@@ -302,20 +302,43 @@ function read(rel) {
       return m ? m[1] : null;
     };
     const unescapeSql = (s) => s.replace(/\\n/g, '\n').replace(/\\'/g, "'").replace(/\\"/g, '"').replace(/''/g, "'");
-    const extractSections = (file) => {
-      const re = /heading:\s*'([^']*)',\s*\n\s*body:\s*'((?:[^'\\\\]|\\\\.)*)'/g;
+    // The bundled legal copy now lives in the translation dictionaries
+    // (`terms.s<N>h` / `terms.s<N>b`), so the "built-in" sections are the
+    // ENGLISH dictionary values. A small literal reader keeps escaped quotes
+    // intact without regex gymnastics.
+    const resourcesSrc = fs.readFileSync('src/lib/i18n/resources.ts', 'utf8');
+    const englishOnly = resourcesSrc.slice(0, resourcesSrc.indexOf('export const ar'));
+    const readLiteral = (key) => {
+      const at = englishOnly.indexOf(`'${key}':`);
+      if (at < 0) return null;
+      let i = at + key.length + 3;
+      while (i < englishOnly.length && englishOnly[i] !== "'") i++;
+      i++;
+      let out = '';
+      while (i < englishOnly.length) {
+        const ch = englishOnly[i];
+        if (ch === '\\') { out += englishOnly[i + 1]; i += 2; continue; }
+        if (ch === "'") break;
+        out += ch;
+        i++;
+      }
+      return out;
+    };
+    const extractSections = (prefix) => {
       const secs = [];
-      let m;
-      while ((m = re.exec(fs.readFileSync(file, 'utf8'))) !== null) {
-        secs.push({ heading: m[1], body: m[2].replace(/\\'/g, "'") });
+      for (let n = 1; n <= 20; n++) {
+        const heading = readLiteral(`${prefix}.s${n}h`);
+        const body = readLiteral(`${prefix}.s${n}b`);
+        if (heading === null || body === null) break;
+        secs.push({ heading, body });
       }
       return secs;
     };
-    for (const [key, file] of [
-      ['terms_conditions', 'src/app/(app)/info/terms.tsx'],
-      ['privacy_policy', 'src/app/(app)/info/privacy.tsx'],
+    for (const [key, prefix] of [
+      ['terms_conditions', 'terms'],
+      ['privacy_policy', 'privacy'],
     ]) {
-      const builtIn = extractSections(file);
+      const builtIn = extractSections(prefix);
       const seeded = cms.parseCmsBody(unescapeSql(bodyFor(key)));
       ok(builtIn.length >= 9 && builtIn.length === seeded.length,
         `content round-trip: ${key} seeded body yields all ${builtIn.length} built-in sections`);

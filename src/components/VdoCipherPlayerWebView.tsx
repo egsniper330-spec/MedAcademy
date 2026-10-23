@@ -337,6 +337,11 @@ export function VdoCipherPlayerWebView({
   // forensic watermark overlay.  Previously called with NO arguments, which
   // meant buildWatermarkInjection() returned event-bridge-only code and the
   // watermark div was never created.
+  //
+  // The WebView below is KEYED BY THE IDENTITY: injectedJavaScriptBeforeContent
+  // Loaded runs once per document, so an identity change must force a fresh
+  // document. Without that key the old IIFE would keep painting the PREVIOUS
+  // user's name/id — "stale identity after account switch".
   const eventBridgeScript = buildWatermarkInjection(
     watermarkLayers.appOverlay ? watermarkId : undefined,
     watermarkLayers.appOverlay ? watermarkName : undefined,
@@ -345,6 +350,7 @@ export function VdoCipherPlayerWebView({
   return (
     <View style={containerStyleNative}>
       <WebView
+          key={`wm:${watermarkLayers.appOverlay ? watermarkId ?? '' : ''}|${watermarkLayers.appOverlay ? watermarkName ?? '' : ''}`}
           ref={(node: any) => {
             playerWebViewRef.current = node;
             (window as any).__MEDA_WEBVIEW_PLAYER = node;

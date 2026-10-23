@@ -232,16 +232,52 @@ console.log('── Student lesson screen: materials section + per-material poli
   ok(/getMaterialSignedUrl\([\s\S]{0,400}forDownload = false/.test(api),
     'api: getMaterialSignedUrl takes the download intent');
   ok(/download: forDownload/.test(api), 'api: the signed-URL request carries the download intent');
-  ok(/getMaterialSignedUrl\(storagePathOrUrl, forDownload\)/.test(s),
+  // The item action now forwards the whole MATERIAL row (the delivery endpoint
+  // needs its id) plus the access level, and BOTH delivery branches carry that
+  // intent: PDFs through the personalized endpoint, everything else through a
+  // signed storage URL.
+  ok(/onOpenMaterial\(mat, name, downloadable\)/.test(s),
     'student screen: the item action forwards its own access level');
+  ok(/getMaterialPdfUrl\(String\(material\.id\), forDownload\)/.test(s),
+    'student screen: PDFs are delivered through the personalized endpoint');
+  ok(/getMaterialSignedUrl\(String\(path\), forDownload\)/.test(s),
+    'student screen: non-PDF attachments keep the signed-URL flow');
 
   const ed = read(EDITOR);
+  const phpClient = read('src/client/php.ts');
+  const request = read('backend/src/Http/Request.php');
+  const storage = read('backend/src/Controllers/StorageController.php');
   ok((ed.match(/validateMaterialFile\(/g) || []).length === 2,
     'lesson editor: both upload and replace pre-validate against the server policy');
   ok(/uploadLessonMaterial\(/.test(ed) && /createLessonMaterial\(/.test(ed),
     'lesson editor: upload still stores the file and creates the DB association');
   ok(/lesson_id: lesson\.id/.test(ed) && /course_id: courseId/.test(ed),
     'lesson editor: the association carries lesson_id + course_id (reopening keeps it)');
+
+  ok(/getDocumentAsync\(\{ type: '\*\/\*', multiple: false \}\)/.test(ed)
+    && /resolveUploadMime\(file\.name, file\.mimeType\)/.test(ed)
+    && /file\.size/.test(ed),
+    'lesson editor: normal picker carries file name, size and resolved MIME metadata');
+  ok(/method: 'POST', headers, body: formData/.test(phpClient)
+    && /headers\['Authorization'\] = `Bearer \$\{token\}`/.test(phpClient)
+    && !/headers\[['\"]Content-Type['\"]\]\s*=/.test(phpClient),
+    'multipart upload keeps bearer auth and lets fetch generate the boundary');
+  ok(/status: res\.status/.test(phpClient)
+    && /Upload failed \(HTTP \$\{res\.status\}\)/.test(phpClient)
+    && /res\.status === 413/.test(phpClient),
+    'upload errors retain HTTP status and actionable size response (including non-JSON proxies)');
+  ok(/postBodyExceededLimit\(\)/.test(request)
+    && /CONTENT_LENGTH/.test(request)
+    && /ini_get\('post_max_size'\)/.test(request),
+    'PHP identifies post_max_size discard from request length and current INI setting');
+  ok(/Upload exceeds the server request limit/.test(storage)
+    && /UPLOAD_ERR_INI_SIZE/.test(storage)
+    && /UPLOAD_ERR_CANT_WRITE/.test(storage)
+    && /Not authorized to upload to this storage path/.test(storage),
+    'backend distinguishes request size, PHP upload, storage failure, and permission errors');
+  ok(/upload_max_filesize=100M/.test(read('backend/.env.example'))
+    && /post_max_size=105M/.test(read('backend/.env.example')),
+    'documented PHP limits leave multipart overhead above the app 100 MiB cap');
 }
 
 console.log(`\nRESULT: ${passed} passed, ${failed} failed\n`);

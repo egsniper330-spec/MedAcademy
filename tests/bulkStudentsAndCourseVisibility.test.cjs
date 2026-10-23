@@ -130,12 +130,17 @@ console.log('\n── PART 1: Bulk frontend (Select mode UX) ──');
     /Select students for bulk actions|drStudents\.selectModeA11y/.test(ui),
     'Select entry button missing');
 
-  check('selection checkbox on cards only in Select mode',
+  // Rows are checkboxes ONLY in Select mode. Outside it the row must not be a
+  // role="button" element: react-native-web renders that as a real <button>,
+  // and the row contains its own copy/action buttons (invalid nesting).
+  check('selection checkbox on rows only in Select mode',
     /selectMode && \(/.test(ui) && /accessibilityRole=\{selectMode \? 'checkbox' : undefined\}/.test(ui),
     'checkbox rendering not gated on select mode');
 
-  check('selected card gets a subtle state (border, same card)',
-    /selectMode && isSelected \? \{ borderWidth: 1\.5, borderColor: c\.primary \} : \{\}/.test(ui),
+  // The compact row marks selection with a primary tint instead of a border
+  // (a border on a 56 px divider row would read as a raised card again).
+  check('selected row gets a subtle state (primary tint)',
+    /backgroundColor: selectMode && isSelected \? `\$\{c\.primary\}10` : 'transparent'/.test(ui),
     'selected state missing');
 
   check('Select all visible + Clear + count present',

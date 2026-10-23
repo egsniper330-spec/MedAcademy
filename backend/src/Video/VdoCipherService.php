@@ -83,24 +83,44 @@ final class VdoCipherService
      */
     public function buildAnnotate(string $fullName, string $watermarkId): string
     {
-        $idLine = trim($watermarkId) !== '' ? 'ID: ' . trim($watermarkId) : '';
+        // IDENTITY LAYOUT: line 1 is the recipient's display name, line 2 is
+        // the complete public id, and there is no "ID:" prefix. The prefix
+        // made the identifier read as prose. The long brand label is not part
+        // of the mark, so every character on the sheet belongs to the person
+        // who received the copy.
+        $id = trim($watermarkId);
         $name = trim($fullName);
         $lines = array_filter([
             $name,
-            $idLine,
+            $id,
         ], static fn (string $v): bool => $v !== '');
         if ($lines === []) {
             return '';
         }
         $text = implode("\n", $lines);
+
+        // `skip` is the HIDDEN time of each cycle (VdoCipher docs), not an
+        // offset before the first move. The old '2000' therefore blanked the
+        // mark for 2 s of every cycle — the reported "watermark disappears
+        // periodically" on iOS. '0' keeps it on screen for the whole playback,
+        // and a shorter `interval` makes the provider relocate it more often,
+        // so it is never parked in one place.
+        //
+        // LIMITATION (provider): `rtext` positions are chosen by VdoCipher and
+        // the docs describe the text as a single line. Multi-line rendering and
+        // the exact font scale are the provider's, not ours — continuous
+        // billiard motion is NOT available on this layer. The app overlay
+        // (NativeWatermarkOverlay / watermarkInjection) is the layer that can
+        // bounce, and it is what Android renders because the native SDK does
+        // not paint this annotation (see src/lib/watermarkLayers.ts).
         $annotations = [[
             'type'     => 'rtext',
             'text'     => $text,
             'color'    => '0xFFFFFF',
-            'alpha'    => '0.45',
-            'size'     => '18',
-            'interval' => '25000',
-            'skip'     => '2000',
+            'alpha'    => '0.5',
+            'size'     => '16',
+            'interval' => '8000',
+            'skip'     => '0',
         ]];
         return json_encode($annotations, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) ?: '';
     }

@@ -45,17 +45,22 @@ export function materialAccess(mat: any): MaterialAccess {
 }
 
 /**
- * The teacher's "Personalized Student Watermark" switch for one material.
+ * Is this attachment a PDF?
  *
- * INDEPENDENT of `materialAccess`: all four combinations are legal — a
- * Preview-Only material may be watermarked, and a Preview+Download material may
- * be left unmarked. Like `download_enabled`, a pre-migration row has no value;
- * `undefined` means OFF (the server column defaults to 0), so nothing starts
- * watermarking by accident.
+ * Matters because PDFs follow a DIFFERENT delivery path from every other
+ * attachment: they are personalized per student and served by the token-gated
+ * `/materials/pdf` endpoint, whereas office documents, archives and images keep
+ * using a plain signed storage URL. Checked on the MIME type first and the file
+ * name second, because older rows sometimes carry only one of them.
+ *
+ * There is NO watermark switch to read: watermarking is mandatory for students
+ * and decided by the server from the caller's role, so this module must not
+ * consult `watermark_enabled` (the legacy column is ignored server-side).
  */
-export function isMaterialWatermarkEnabled(mat: any): boolean {
-  if (mat?.watermark_enabled === undefined || mat?.watermark_enabled === null) return false;
-  return Number(mat.watermark_enabled) === 1;
+export function isPdfMaterial(mat: any): boolean {
+  const type = String(mat?.file_type ?? '').toLowerCase();
+  const name = String(mat?.file_name ?? '').toLowerCase();
+  return type.includes('pdf') || name.endsWith('.pdf');
 }
 
 /** Materials a student may see at all (permission 'none' ones are dropped). */

@@ -82,6 +82,28 @@ export interface NativeSecurityFlags {
   coreFridaThreads?:       number;
   /** /proc/self/status thread count disagrees with /proc/task enumeration. */
   coreThreadMismatch?:     boolean;
+  /** Decoded hook-lib path tails from the C++ core's /proc/self/maps read
+   *  (bounded sample). Evidence only — never a verdict on its own. */
+  coreHookLibNames?:       string[];
+  // ── Second-pass evidence model (see docs/ROOT_DETECTION_SECOND_PASS_AUDIT.md)
+  /**
+   * Checks that THREW or structurally could not run in the native batch
+   * (hidepid-blocked process scan, unreadable /proc/self/maps, missing
+   * libmedasec core, any runCatching failure). "unknown" — NEVER the same as a
+   * clean result, and never auto-blocking. Absent when an older native module
+   * does not emit the field.
+   */
+  detectionsUnavailable?:  string[];
+  /**
+   * Provenance: which signal fired each verdict (e.g. root:
+   * artifact_probe / mount_view / su_on_path / test_keys …). rootEvidenceSignals
+   * and magiskEvidenceSignals can name the SAME source — that is ONE
+   * observation behind two booleans, not independent corroboration.
+   */
+  rootEvidenceSignals?:     string[];
+  magiskEvidenceSignals?:   string[];
+  fridaEvidenceSignals?:    string[];
+  xposedEvidenceSignals?:   string[];
   /** Kernel-plane tunnel-class interface count (/proc/net/dev via C++). */
   netNativeTunnelIfaces?:  number;
   /** Kernel routing table has a default route via a tunnel-class interface. */
@@ -379,6 +401,70 @@ export async function isNativeMagiskDetected(): Promise<boolean> {
   const mod = getModule();  // Android-only — Magisk has no iOS equivalent
   if (!mod) return false;
   try { return await mod.isMagiskDetected() as boolean; } catch { return false; }
+}
+
+/**
+ * Raw outcome of the native root-framework filesystem probe.
+ *
+ * WHY IT IS SEPARATE FROM THE BOOLEANS ABOVE:
+ *   `magiskDetected` / `rootDetected` are verdicts that now include this probe.
+ *   This object carries the EVIDENCE behind that verdict (which paths were
+ *   present, which answered EACCES) so the in-app diagnostics screen and the
+ *   signed evidence payload can report exactly what was observed instead of a
+ *   single opaque boolean.
+ *
+ * FAIL-CLOSED CONTRACT: this returns NULL when the module is missing, the call
+ * throws, or the platform is not Android. It never returns an empty-but-valid
+ * object, because `{ present: [], denied: [] }` would read as "measured clean" —
+ * the precise confusion this probe exists to remove. Callers must treat null as
+ * UNKNOWN, never as safe.
+ */
+export interface NativeRootArtifactEvidence {
+  available: true;
+  /** True when the native rule found root-manager evidence. */
+  rootFrameworkEvidence: boolean;
+  /** Paths that exist and are stat-able (e.g. an unmounted /data/adb). */
+  present: string[];
+  /** Paths that exist but are root-only (EACCES) — the DenyList-resistant signal. */
+  denied: string[];
+  /** Probes that failed for an unrelated reason; not evidence either way. */
+  unreadable: string[];
+  /** Verified-boot / bootloader state. Evidence only — never a sole verdict. */
+  bootloaderUnlocked: boolean;
+  verifiedBootState: string;
+  /**
+   * Root-framework MOUNTS seen in this process's mount view, as named kinds
+   * (`root_overlay_on_system`, `root_module_mount`, `magisk_debug_ramdisk`).
+   * Empty = none seen, NOT proof of a clean device: a hidden (DenyList) root
+   * framework removes these mounts from the app's namespace. Optional because
+   * an older native module does not emit it.
+   */
+  mountEvidence?: string[];
+  /** Bounded sample of the matching mount lines (paths only). */
+  mountSamples?: string[];
+  /** `su` reachable through the process PATH (stat-based probe). */
+  suOnPath?: string[];
+  /** `/system` is writable by this process — a remounted-system artifact. */
+  systemWritable?: boolean;
+}
+
+export async function getNativeRootArtifactEvidence(): Promise<NativeRootArtifactEvidence | null> {
+  if (Platform.OS !== 'android') return null;
+  const mod = getModule();
+  if (!mod) return null;
+  try {
+    const raw = await mod.getRootArtifactEvidence() as string | null;
+    if (typeof raw !== 'string' || raw.length === 0) return null;
+    const parsed = JSON.parse(raw) as NativeRootArtifactEvidence;
+    // Guard against a malformed/partial payload: an object without the boolean
+    // and the arrays is not usable evidence. Null (UNKNOWN) is honest; a
+    // half-parsed object could be read as clean.
+    if (parsed?.available !== true || typeof parsed.rootFrameworkEvidence !== 'boolean') return null;
+    if (!Array.isArray(parsed.present) || !Array.isArray(parsed.denied)) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
 }
 
 export async function isNativeOverlayDetected(): Promise<boolean> {

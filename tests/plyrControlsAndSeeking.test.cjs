@@ -249,8 +249,23 @@ function runPlayerScript() {
     this.handlers = {};
     this.playCalls = 0;
     this.pauseCalls = 0;
+    // Real Plyr exposes elements.container and paints the playing/paused/
+    // stopped classes on it (checkPlaying). The script now reads THAT state
+    // instead of the embed's paused proxy, so the stub must paint it too —
+    // otherwise this fake is not a faithful Plyr.
+    this.elements = { container: playerEl };
+    this._syncPlayingClasses();
     built = this;
   }
+  FakePlyr.prototype._syncPlayingClasses = function () {
+    const c = this.elements.container.classList;
+    c.remove('plyr--playing');
+    c.remove('plyr--paused');
+    c.remove('plyr--stopped');
+    if (this.playing) c.add('plyr--playing');
+    else c.add('plyr--paused');
+    if (!this.playing && this.currentTime === 0) c.add('plyr--stopped');
+  };
   FakePlyr.prototype.on = function (evt, fn) {
     (this.handlers[evt] = this.handlers[evt] || []).push(fn);
     return this;
@@ -263,12 +278,14 @@ function runPlayerScript() {
     this.paused = false;
     this.ended = false;
     this.playing = true;
+    this._syncPlayingClasses();
     this.emit('play');
   };
   FakePlyr.prototype.pause = function () {
     this.pauseCalls++;
     this.paused = true;
     this.playing = false;
+    this._syncPlayingClasses();
     this.emit('pause');
   };
   // Kept so a regression to the old derived-flag toggle is caught by name too.
@@ -417,13 +434,95 @@ if (env && env.built) {
   ok(centreState() === 'playing' && /pause$/.test(centreHref() || ''),
     'a real play event flips the icon to PAUSE again');
 
-  env.built.paused = true;
   env.built.playing = false;
   env.built.ended = true;
+  env.built._syncPlayingClasses();
   env.built.emit('ended');
   ok(centreState() === 'paused' && /play$/.test(centreHref() || ''),
     'ending playback shows PLAY (ended is not "playing")');
   env.built.ended = false;
+
+  /* ── 4b. centre control = the control bar's OWN idle lifecycle ─────────── */
+  //
+  // THE REPORTED BUG: during playback the large centre button stayed painted
+  // after the progress bar and the other transient controls had gone. The
+  // lifecycle is now the bar's own `plyr--hide-controls` class on the live
+  // root — the same signal whose CSS hides the bar — with no second predicate
+  // (the old `player.paused || player.ended` short-circuit could disagree with
+  // the class Plyr actually painted, and kept the button up).
+  function classes() { return env.built.elements.container.classList; }
+  function centreVisible() {
+    return env.centre.style.visibility === 'visible' &&
+           env.centre.style.pointerEvents === 'auto' &&
+           env.centre.style.opacity !== '0';
+  }
+  function centreHidden() {
+    return env.centre.style.visibility === 'hidden' &&
+           env.centre.style.opacity === '0' &&
+           env.centre.style.pointerEvents === 'none';
+  }
+
+  env.built.play();
+  ok(classes().contains('plyr--playing'), 'fake player paints plyr--playing like real Plyr');
+
+  // Idle: Plyr adds the class and fires controlshidden.
+  classes().add('plyr--hide-controls');
+  env.built.emit('controlshidden');
+  ok(centreHidden(),
+    'PLAYING + idle: the centre control is hidden the moment the bar hides');
+  ok(env.centre.getAttribute('data-meda-centre') === 'hidden',
+    'the hidden lifecycle is published for device diagnostics');
+
+  // It must STAY hidden while playback continues and the player stays idle.
+  for (let i = 0; i < 5; i++) env.built.emit('playing');
+  env.built.emit('timeupdate'); // 1 Hz safety re-sync path
+  ok(centreHidden(),
+    'PLAYING + idle: repeated provider state events do not resurrect the centre control');
+
+  // Tap the video: Plyr shows the bar again.
+  classes().remove('plyr--hide-controls');
+  env.built.emit('controlsshown');
+  ok(centreVisible() && env.centre.getAttribute('data-meda-centre') === 'visible',
+    'tap: the centre control reappears with the bar');
+
+  // Wait out the idle timer again.
+  classes().add('plyr--hide-controls');
+  env.built.emit('controlshidden');
+  ok(centreHidden(), 'idle again: it hides again with the bar');
+
+  // Paused: Plyr keeps the bar up (toggleControls treats paused as a show
+  // condition), so the centre Play control is the primary action.
+  classes().remove('plyr--hide-controls');
+  env.built.pause();
+  ok(centreVisible(), 'paused: the centre Play control is shown (paused UX preserved)');
+  ok(env.centre.style.opacity !== '0.7',
+    'paused: the centre control is painted at full strength, not the playing dim');
+  ok(centreState() === 'paused' && /play$/.test(centreHref() || ''),
+    'paused: the glyph is PLAY');
+
+  /* ── 4c. the one-tap device diagnostic proves it on a real phone ────────── */
+  // __plyrDiag() must answer with the centre lifecycle AND the bar's own state
+  // together — "centre hidden" alone cannot distinguish the fix from the bug.
+  const diagStart = env.postMessages.length;
+  env.win.__plyrDiag();
+  const diagPaused = env.postMessages.slice(diagStart).filter((m) => m.type === 'yt:diag').pop();
+  ok(!!diagPaused && !!diagPaused.centre, '__plyrDiag() replies with a centre snapshot');
+  ok(diagPaused && diagPaused.centre.hideControls === false &&
+     diagPaused.centre.state === 'visible',
+    'diagnostic reports the bar state and the centre state at the same instant');
+  ok(diagPaused && typeof diagPaused.centre.count === 'number',
+    'diagnostic reports the live centre-control count (the stub document reports 0; the real player reports 1 — verified in the browser run)');
+
+  classes().add('plyr--hide-controls');
+  env.built.emit('controlshidden');
+  env.win.__plyrDiag();
+  const diagIdle = env.postMessages.filter((m) => m.type === 'yt:diag').pop();
+  ok(diagIdle && diagIdle.centre.hideControls === true && diagIdle.centre.state === 'hidden',
+    'diagnostic proves the idle case: bar hidden AND centre hidden (the device PASS condition)');
+  const diagJson = JSON.stringify(diagIdle);
+  ok(!/otp|token|https?:|MED-\d|bearer/i.test(diagJson),
+    'diagnostic payload carries no URL, token or recipient identity (safe to show on screen)');
+  classes().remove('plyr--hide-controls');
 
   /* ───────────── 5. bridge messages stay in sync with the player ─────────── */
 
@@ -611,17 +710,59 @@ if (env && env.built) {
     'centre control CSS keeps it centred while promoting it to its own layer');
   ok(/\.plyr__video \.plyr__controls\{[^}]*z-index:5/.test(css),
     'bottom control bar stays above the video wrapper (z-index 5)');
-  ok(/\.plyr--playing \.plyr__control--overlaid\{[^}]*visibility:visible/.test(css) &&
-     /\.plyr--playing \.plyr__control--overlaid\{[^}]*pointer-events:auto/.test(css),
-    'ROOT-CAUSE FIX: the centre control stays visible and tappable while playing');
+  // The centre control must follow the CONTROLS-IDLE lifecycle, not be pinned
+  // visible for the whole of playback (that pin was the persistent centre
+  // button bug). Visibility is applied by the script as inline style; the CSS
+  // keeps only a mirror of the SAME predicate, so a provider rebuild that
+  // inserts a button after the bar hid cannot leave one painted.
+  ok(/\.plyr\.plyr--hide-controls \.plyr__control--overlaid\{[^}]*visibility:hidden/.test(css) &&
+     /\.plyr\.plyr--hide-controls \.plyr__control--overlaid\{[^}]*pointer-events:none/.test(css),
+    'centre control hides WITH the controls on idle (no persistent centre button)');
+  ok(!/\.plyr--control--overlaid\{[^}]*visibility:visible/.test(css) &&
+     !/\.plyr__control--overlaid\{[^}]*opacity:1/.test(css),
+    'no stylesheet rule pins the centre control visible (the pin was the bug)');
   ok(/#plyr-gesture-zone\{[^}]*z-index:1/.test(css),
     'the gesture layer sits above the video (1) and below controls (4/5)');
   ok(/#plyr-gesture-zone\{[^}]*touch-action:manipulation/.test(css),
     'the gesture layer opts out of double-tap zoom / delayed taps');
-  ok(!/\.plyr__(control|controls)[^{]*\{[^}]*pointer-events:\s*none/.test(css),
-    'no player control is made pointer-transparent (controls must stay tappable)');
+  // A control may only become pointer-transparent in the SAME rule that makes
+  // it invisible (the idle-hidden centre button); a visible control must never
+  // be untappable.
+  const pointerNoneRules = css.split('}').filter((r) => /pointer-events:\s*none/.test(r));
+  ok(
+    pointerNoneRules.every((r) => /visibility:hidden/.test(r) || /plyr-gesture-feedback/.test(r) || /\/\*/.test(r)),
+    'no VISIBLE player control is made pointer-transparent (controls stay tappable)',
+  );
   ok(/\.plyr-gesture-feedback\{[^}]*pointer-events:\s*none/.test(css),
     'seeking feedback is pointer-transparent (it can never block a tap)');
+
+  /* ── 10b. the lifecycle's SINGLE source of truth ──────────────────────── */
+  const showFn = (script.match(/function centreShouldShow\(\) \{[\s\S]*?\n  \}/) || [''])[0];
+  ok(showFn.length > 0, 'centreShouldShow() is present');
+  ok(/plyr--hide-controls/.test(showFn),
+    'the centre predicate reads the bar\'s own plyr--hide-controls class');
+  ok(!/player\.paused|player\.ended/.test(showFn),
+    'the centre predicate does not read the embed paused/ended proxies (they can disagree with the painted class)');
+  ok(/function centreButton\(\) \{\s*var root = playerRoot\(\);/.test(script),
+    'the centre button is looked up inside the LIVE root (never the first node in the document)');
+  ok(/hideStrayCentre/.test(script),
+    'a centre button left in a detached root is closed instead of painted');
+  ok(/attributeFilter: \['class'\], childList: true/.test(script),
+    'the lifecycle observer also watches control-bar (re)insertion');
+
+  /* ── 10c. debug-build one-tap diagnostic wired into the player screen ──── */
+  const ytSource = read('src/components/YouTubePlayer.tsx');
+  ok(/\{__DEV__ && Platform\.OS !== 'web' && \(\s*<Pressable/.test(ytSource) &&
+     /requestCentreDiag/.test(ytSource) &&
+     /window\.__plyrDiag && window\.__plyrDiag\(\); true;/.test(ytSource),
+    'debug builds render a one-tap DIAG control that injects __plyrDiag() (native channel only)');
+  ok(/typeof wv\.injectJavaScript !== 'function'\) return;/.test(ytSource),
+    'the diagnostic is a no-op where the WebView bridge does not exist (never throws on web)');
+  ok(/if \(__DEV__ && diagPendingRef\.current\)/.test(ytSource),
+    'the on-screen answer is shown only for a DIAG tap, and only in debug builds');
+  ok(/PASS — the centre button is hidden together with the bar/.test(ytSource) &&
+     /FAIL — the bar is hidden but the centre button is still painted/.test(ytSource),
+    'the diagnostic prints a plain PASS / FAIL verdict the reporter can read out');
 
   /* ───────── 11. preserved configuration (fullscreen / speed / provider) ── */
 
@@ -662,6 +803,16 @@ ok(/__medaSecurityStopped/.test(web),
 ok(/setCentreState\(/.test(web) && /plyr-gesture-feedback/.test(web) &&
    /realPlaying\(\)/.test(web) && /\.pause\(\)/.test(web) && /\.play\(\)/.test(web),
   'web player.js: syncs the centre glyph from real state and issues real play/pause');
+// The web copy must carry the SAME lifecycle fix as the native script.
+const webShowFn = (web.match(/function centreShouldShow\(\) \{[\s\S]*?\n    \}/) || [''])[0];
+ok(webShowFn.length > 0 && /plyr--hide-controls/.test(webShowFn) &&
+   !/player\.paused|player\.ended/.test(webShowFn),
+  'web player.js: the centre predicate is the bar class alone (native parity)');
+ok(/function centreButton\(\) \{\s*var root = playerRoot\(\);/.test(web) &&
+   /hideStrayCentre/.test(web),
+  'web player.js: live-root scoped centre lookup + stray handling');
+ok(/\.plyr\.plyr--hide-controls \.plyr__control--overlaid\{[^}]*visibility:hidden/.test(web),
+  'web player.js: the CSS mirror hides the centre with the bar');
 ok(!/function\s+fixiOSTapToToggle/.test(web),
   'web player.js: the removed tap-anywhere interceptor is not re-introduced');
 

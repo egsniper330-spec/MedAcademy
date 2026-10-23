@@ -1,5 +1,3 @@
-import { WATERMARK_FONT_PX } from './nativeWatermarkConfig';
-
 /**
  * watermarkInjection.ts
  *
@@ -23,8 +21,10 @@ import { WATERMARK_FONT_PX } from './nativeWatermarkConfig';
  *   4. Positions the overlay using transform:translate3d(x,y,0) only — this
  *      is compositor-layer movement with zero layout recalculation.
  *      top/left are set to 0 once at mount and never modified again.
- *   5. Moves the overlay to a new random position every 30–60 seconds by
- *      writing only el.style.transform — the only JS timer needed.
+ *   5. Animates the overlay CONTINUOUSLY with requestAnimationFrame: the
+ *      position advances from elapsed time and reflects off the four edges of
+ *      the measured viewport (billiard motion), so the mark is always moving,
+ *      always inside the frame, and never fades or hides.
  *   6. Watches document.body for childList changes (direct children only)
  *      to detect node removal.  The attribute observer is scoped to the
  *      watermark element itself — not the full subtree.
@@ -33,13 +33,13 @@ import { WATERMARK_FONT_PX } from './nativeWatermarkConfig';
  *      multiple times if WebView reloads without unmounting).
  *
  * Performance strategy:
- *   • All per-frame animation → pure CSS @keyframes (__fwmPulse).
- *   • __fwmSize (font-size keyframes) removed — font-size changes trigger
- *     layout recalculation on every frame.
+ *   • One frame loop, one element: transform-only writes inside the loop, so
+ *     the compositor does the work and no layout is recalculated.
+ *   • No CSS keyframes for opacity — the mark never fades, blinks or hides.
  *   • Position changes → transform:translate3d only (compositor-only, zero reflow).
- *   • JS timer fires every 30–60 s and writes one style property (transform).
- *   • No getComputedStyle, no querySelectorAll in any hot path.
- *   • Child span references stored at build time — no DOM queries in observer.
+ *   • Single element reference and two span references stored at build time —
+ *     no getComputedStyle, no querySelectorAll in any hot path.
+ *   • Loop cancelled and listeners removed on tamper recovery.
  *
  * Fullscreen safety:
  *   • position:fixed anchors the overlay to the viewport.
@@ -159,34 +159,50 @@ export function buildWatermarkInjection(
   var WM_ID='${safeId}';
   var WM_NAME='${safeName}';
 
-  /* 9-slot grid [xFrac, yFrac] — VERBATIM from the Plyr watermark
-     (playerScript.ts G table, 8% inset) — the source of truth. */
-  var G=[
-    [0.08,0.08],[0.42,0.08],[0.72,0.08],
-    [0.04,0.42],[0.35,0.42],[0.68,0.42],
-    [0.08,0.74],[0.42,0.74],[0.72,0.74]
-  ];
-  var cur=-1;
+  /* ── CONTINUOUS BILLIARD MOTION — same model as the Plyr watermark ────────
+     The previous implementation teleported to one of nine fixed slots every
+     30–60 s (a glide, not motion) and re-drew opacity on each move. This is a
+     real trajectory: position advances from ELAPSED TIME in requestAnimationFrame,
+     velocity reflects EXACTLY off the four edges of the measured viewport, and
+     the element's own box is subtracted so the whole mark (name line + id line)
+     stays inside at all times.
+
+     • No opacity animation at all — the mark never fades, blinks or hides.
+     • No CSS transition on transform — the frame loop owns the position, so
+       there is no easing lag between frames.
+     • pointer-events:none — taps, drags and seeks always reach the player. */
+  var _el=null,_nEl=null,_iEl=null;
+  var _raf=0,_last=0;
+  var _x=0,_y=0,_vx=0,_vy=0;
+  var _vw=0,_vh=0,_ew=0,_eh=0;
+  var _resizeBound=false;
+  var SPEED_MIN=26,SPEED_MAX=44,MAX_STEP_S=0.05;
 
   function rnd(a,b){return a+Math.random()*(b-a);}
-  function nxtSlot(){
-    var n;do{n=Math.floor(Math.random()*G.length);}while(n===cur);
-    cur=n;return G[n];
-  }
 
-  /* Viewport dimensions — read once at mount, reused on every move.
-     No layout reads in the timer callback. */
-  var _vw=0,_vh=0;
   function captureViewport(){
     _vw=window.innerWidth||320;
     _vh=window.innerHeight||180;
+    if(_el){_ew=_el.offsetWidth||0;_eh=_el.offsetHeight||0;}
+  }
+  function maxX(){var m=_vw-_ew;return m>0?m:0;}
+  function maxY(){var m=_vh-_eh;return m>0?m:0;}
+
+  /* Responsive type: 6.2 % of the smaller viewport dimension, clamped 13–34 px,
+     so the mark is readable on a phone and clearly larger in fullscreen. */
+  function fontSize(){
+    var base=Math.min(_vw||360,_vh||202);
+    var px=Math.round(base*0.062);
+    if(px<13)px=13;
+    if(px>34)px=34;
+    return px;
+  }
+  function applyFont(){
+    var px=fontSize();
+    if(_nEl)_nEl.style.fontSize=Math.round(px*0.9)+'px';
+    if(_iEl)_iEl.style.fontSize=px+'px';
   }
 
-  function slotTransform(slot,deg){
-    return 'translate3d('+Math.round(slot[0]*_vw)+'px,'+Math.round(slot[1]*_vh)+'px,0) rotate('+deg+'deg)';
-  }
-
-  /* ── Inject <style> — appended to <head> or <html> if head absent ── */
   function injectCSS(){
     if(document.getElementById(ST_ID))return;
     var s=document.createElement('style');
@@ -200,33 +216,19 @@ export function buildWatermarkInjection(
         'pointer-events:none;',
         'user-select:none;',
         '-webkit-user-select:none;',
-        'line-height:1.4;',
-        'max-width:min(320px,55%);',
-        'overflow:visible;',
-        /* Compositor-only transition — PLYR PARITY: 0.6s ease (Plyr CSS).
-           The watermark GLIDES while staying visible — no pulse animation,
-           no hide gap (opacity is re-drawn per move from the Plyr band). */
-        'transition:transform 0.6s ease,opacity 0.6s ease;',
-        'will-change:transform,opacity;',
-        'opacity:0;',
+        'max-width:78%;',
+        'opacity:0.55;',
+        'will-change:transform;',
         'transform:translate3d(0,0,0);',
       '}',
-      '#'+EL_ID+' span{',
+      '#'+EL_ID+' > div{',
         'display:block;',
         'color:#fff;',
-        /* System sans-serif stack — same as Plyr watermark */
         'font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;',
-        /* PLYR PARITY typography: size from the canonical WATERMARK_FONT_PX
-           (Plyr's 13px raised to 15px for readability — see config) / 600 /
-           0.3px tracking. Interpolated by TypeScript at build time (this
-           whole IIFE is an emitted template literal) — do NOT concatenate
-           inside it. */
-        'font-size:${WATERMARK_FONT_PX}px;',
         'font-weight:600;',
         'letter-spacing:0.3px;',
         'white-space:nowrap;',
-        'overflow:hidden;',
-        'text-overflow:ellipsis;',
+        'line-height:1.25;',
         'text-shadow:0 1px 4px rgba(0,0,0,0.95),0 0 10px rgba(0,0,0,0.7);',
         '-webkit-font-smoothing:antialiased;',
       '}',
@@ -234,95 +236,133 @@ export function buildWatermarkInjection(
     (document.head||document.documentElement).appendChild(s);
   }
 
-  /* ── Build the watermark element — called ONCE ── */
-  /* Store span references to avoid querySelectorAll in observer callbacks */
-  var _el=null,_nSpan=null,_iSpan=null;
+  /* Two lines: the recipient's display name, then the complete public id
+     directly underneath it. The "ID:" prefix is gone — the id is a line, not
+     a sentence — and the name line can never push the id out of view because
+     it is a separate block with its own ellipsis. */
   function buildEl(){
     var d=document.createElement('div');
     d.id=EL_ID;
-    /* Single-line: "NAME • WM-NNNN" or "WM-NNNN" */
-    _iSpan=document.createElement('span');
-    _iSpan.className='fwm-i';
-    _iSpan.textContent=WM_NAME ? WM_NAME+' \u2022 '+WM_ID : WM_ID;
-    d.appendChild(_iSpan);
+    if(WM_NAME){
+      _nEl=document.createElement('div');
+      _nEl.textContent=WM_NAME;
+      _nEl.style.fontWeight='600';
+      _nEl.style.opacity='0.92';
+      _nEl.style.overflow='hidden';
+      _nEl.style.textOverflow='ellipsis';
+      d.appendChild(_nEl);
+    }
+    _iEl=document.createElement('div');
+    _iEl.textContent=WM_ID;
+    _iEl.style.fontWeight='700';
+    d.appendChild(_iEl);
     return d;
   }
 
-  /* ── Mount: inject style + create element, set initial transform ── */
+  function draw(){
+    if(!_el)return;
+    _el.style.transform='translate3d('+Math.round(_x)+'px,'+Math.round(_y)+'px,0)';
+  }
+
+  /* Exact reflection: the overshoot travels back, so speed is preserved and
+     the mark never sticks to a wall. */
+  function advance(pos,vel,dt,max){
+    var next=pos+vel*dt, v=vel, i;
+    for(i=0;i<4;i++){
+      if(next<0){next=-next;v=-v;}
+      else if(next>max){next=2*max-next;v=-v;}
+      else break;
+    }
+    if(next<0)next=0;
+    if(next>max)next=max;
+    return {pos:next,vel:v};
+  }
+
+  function step(ts){
+    if(!_el||!_el.parentNode){_raf=0;recover();return;}
+    if(!_last)_last=ts;
+    var dt=(ts-_last)/1000;
+    _last=ts;
+    if(!isFinite(dt)||dt<0)dt=0;
+    if(dt>MAX_STEP_S)dt=MAX_STEP_S;
+    var ax=advance(_x,_vx,dt,maxX());
+    var ay=advance(_y,_vy,dt,maxY());
+    _x=ax.pos;_vx=ax.vel;
+    _y=ay.pos;_vy=ay.vel;
+    draw();
+    _raf=requestAnimationFrame(step);
+  }
+
+  function startMotion(){
+    if(_raf){cancelAnimationFrame(_raf);_raf=0;}
+    _last=0;
+    captureViewport();
+    applyFont();
+    captureViewport();
+    _x=maxX()*rnd(0.12,0.88);
+    _y=maxY()*rnd(0.12,0.88);
+    var speed=rnd(SPEED_MIN,SPEED_MAX);
+    var share=rnd(0.55,0.85);
+    _vx=speed*share*(Math.random()<0.5?-1:1);
+    _vy=speed*Math.sqrt(Math.max(0,1-share*share))*(Math.random()<0.5?-1:1);
+    draw();
+    _raf=requestAnimationFrame(step);
+  }
+
+  /* Resize / orientation / fullscreen: re-measure, re-scale the type and clamp
+     the position immediately. Velocity is kept, so the trajectory continues. */
+  function onResize(){
+    if(!_el)return;
+    captureViewport();
+    applyFont();
+    captureViewport();
+    if(_x>maxX())_x=maxX();
+    if(_y>maxY())_y=maxY();
+    draw();
+  }
+
   function mount(){
     if(document.getElementById(EL_ID))return;
     injectCSS();
     captureViewport();
     _el=buildEl();
     (document.body||document.documentElement).appendChild(_el);
-    /* Double rAF to ensure element is painted before transition starts */
-    requestAnimationFrame(function(){
-      requestAnimationFrame(function(){
-        if(!_el)return;
-        var slot=nxtSlot();
-        var deg=rnd(-3,3).toFixed(1);
-        /* Plyr move: glide (CSS transition) to slot + rotation jitter +
-           opacity re-drawn from the Plyr band 0.38–0.58 — stays visible. */
-        _el.style.transform=slotTransform(slot,deg);
-        _el.style.opacity=rnd(0.38,0.58).toFixed(2);
-      });
-    });
+    startMotion();
+    if(!_resizeBound){_resizeBound=true;window.addEventListener('resize',onResize);}
   }
 
-  /* ── Move: write transform + opacity only — compositor-only, zero reflow ── */
-  var _tmr=null;
-  function move(){
-    if(!_el||!_el.parentNode){recover();return;}
-    var slot=nxtSlot();
-    var deg=rnd(-3,3).toFixed(1);
-    _el.style.transform=slotTransform(slot,deg);
-    /* Plyr band */
-    _el.style.opacity=rnd(0.38,0.58).toFixed(2);
-  }
-
-  /* ── Self-rescheduling move timer — PLYR PARITY: 30–60 s ── */
-  function scheduleTick(){
-    _tmr=setTimeout(function(){move();scheduleTick();},rnd(30000,60000));
-  }
-
-  /* ── Lightweight tamper check — no getComputedStyle, no querySelectorAll ── */
   function isTampered(){
     if(!_el||!_el.parentNode)return true;
     if(_el.style.display==='none')return true;
     if(_el.style.visibility==='hidden')return true;
-    /* Single-line span: check combined label */
-    var expected=WM_NAME?WM_NAME+' \u2022 '+WM_ID:WM_ID;
-    if(_iSpan&&_iSpan.textContent!==expected)return true;
+    if(_nEl&&_nEl.textContent!==WM_NAME)return true;
+    if(_iEl&&_iEl.textContent!==WM_ID)return true;
     return false;
   }
 
-  /* ── Tamper recovery — NEVER called during normal playback ── */
   function recover(){
-    if(_tmr){clearTimeout(_tmr);_tmr=null;}
+    if(_raf){cancelAnimationFrame(_raf);_raf=0;}
     if(_el&&_el.parentNode){try{_el.parentNode.removeChild(_el);}catch(e){}}
-    _el=null;_nSpan=null;_iSpan=null;
+    _el=null;_nEl=null;_iEl=null;_last=0;
     mount();
-    scheduleTick();
   }
 
-  /* ── MutationObserver — minimal scope ── */
+  var _obs1=null,_obs2=null;
   function watch(){
     if(!window.MutationObserver)return;
-    /* Observer 1: body direct children only — catches node removal */
+    if(_obs1){try{_obs1.disconnect();}catch(e){}}
+    if(_obs2){try{_obs2.disconnect();}catch(e){}}
     var body=document.body||document.documentElement;
-    new MutationObserver(function(ms){
+    _obs1=new MutationObserver(function(ms){
       for(var i=0;i<ms.length;i++){
         var rm=ms[i].removedNodes;
-        for(var r=0;r<rm.length;r++){
-          if(rm[r]===_el){recover();return;}
-        }
+        for(var r=0;r<rm.length;r++){if(rm[r]===_el){recover();return;}}
       }
-    }).observe(body,{childList:true});
-    /* Observer 2: watermark element itself for attribute/text tampering */
+    });
+    _obs1.observe(body,{childList:true});
     if(_el){
-      new MutationObserver(function(){
-        if(isTampered())recover();
-      }).observe(_el,{
+      _obs2=new MutationObserver(function(){if(isTampered())recover();});
+      _obs2.observe(_el,{
         attributes:true,
         characterData:true,
         subtree:true,
@@ -331,10 +371,8 @@ export function buildWatermarkInjection(
     }
   }
 
-  /* ── Bootstrap: wait for document.body if not yet available ── */
   function start(){
     mount();
-    scheduleTick();
     watch();
   }
 

@@ -293,7 +293,7 @@ export default function DoctorCourses() {
     setCreating(true);
     try {
       const course = await createCourse({
-        title: 'Untitled Course',
+        title: t('drCourses.newCourseDefault'),
         description: '',
         doctor_id: profile.id,
         status: 'draft',
@@ -372,6 +372,7 @@ export default function DoctorCourses() {
         <DashboardHeader
           greeting={t('nav.myCourses')}
           roleLabel={tCount('drCourses.count', courses.length)}
+          roleLabelPosition="below"
           rightActions={
             <>
               {canCreate ? (

@@ -1,61 +1,43 @@
 /**
  * Privacy Policy — static info page
+ *
+ * CONTENT SOURCE
+ *   • Built-in copy: the numbered sections live in the shared translation
+ *     dictionaries (`privacy.s1h` … `privacy.s9b`) and follow the in-app
+ *     language. Previously the whole policy was hardcoded English.
+ *   • Server-managed copy (Super Admin → Platform → CMS Pages) still wins when
+ *     a body has been written; it is single-language as stored and rendered
+ *     verbatim. An empty body falls back to the translated sections.
+ *
+ * LEGAL NOTE: the Arabic copy is a faithful translation of the English source —
+ * no clause was added, removed or weakened.
  */
 import { ScrollView, View, Text, useColorScheme } from 'react-native';
 import { PageHeader } from '@/components/PageHeader';
 import { useCmsSections } from '@/lib/cmsContent';
 import { NeuCard } from '@/components/NeuCard';
-import { neuColors, useLayout, safeBottom, mutedTextStyle } from '@/lib/neu';
+import { neuColors, useLayout, mutedTextStyle } from '@/lib/neu';
 import { Shield } from 'lucide-react-native';
 import { useTranslation } from '@/lib/i18n';
 
-const SECTIONS = [
-  {
-    heading: '1. Information We Collect',
-    body: 'We collect information you provide when registering (name, email, phone), academic information (university, faculty, level), and device information for security enforcement. We also collect content-interaction data such as watch progress and lesson completion.',
-  },
-  {
-    heading: '2. How We Use Your Information',
-    body: 'Your information is used to provide and personalize the learning experience, enforce single-device policies, embed forensic watermarks in streamed content, communicate important account updates, and improve our platform.',
-  },
-  {
-    heading: '3. Forensic Watermarking',
-    body: 'A unique Watermark ID is assigned to your account and invisibly embedded in all video content you view. This allows us to identify the source of any unauthorized recordings or distributions. This process is transparent and required for platform integrity.',
-  },
-  {
-    heading: '4. Device Data',
-    body: 'We collect your device installation ID, model, and OS version to enforce our single-device login policy. No microphone, camera, or location data is ever collected without explicit user permission.',
-  },
-  {
-    heading: '5. Data Sharing',
-    body: 'We do not sell or rent your personal data to third parties. We may share data with instructors to the extent required to administer your enrollment. Service providers acting on our behalf are contractually bound to protect your data.',
-  },
-  {
-    heading: '6. Data Retention',
-    body: 'Account data is retained while your account is active and for a reasonable period afterward for audit and legal compliance purposes. You may request deletion of your account by contacting our support team.',
-  },
-  {
-    heading: '7. Security',
-    body: 'We use industry-standard encryption, secure authentication, and access controls to protect your data. Password changes invalidate all prior sessions immediately.',
-  },
-  {
-    heading: '8. Your Rights',
-    body: 'You have the right to access, correct, or request deletion of your personal data. To exercise these rights, please contact us through the Contact Us page.',
-  },
-  {
-    heading: '9. Changes to This Policy',
-    body: 'We may update this Privacy Policy periodically. We will notify you of significant changes through the app. Continued use after notification constitutes acceptance.',
-  },
-];
+/** Section numbers — the copy itself lives in the dictionaries. */
+const SECTION_NUMBERS = ['1', '2', '3', '4', '5', '6', '7', '8', '9'] as const;
 
 export default function PrivacyPage() {
   const isDark = useColorScheme() === 'dark';
   const c = isDark ? neuColors.dark : neuColors.light;
   const { t } = useTranslation();
   const layout = useLayout();
-  // Server-managed content (Super Admin → Platform → CMS Pages), with the
-  // bundled SECTIONS as the fallback whenever no body has been written.
-  const sections = useCmsSections('privacy_policy', SECTIONS);
+
+  // Server-managed content first; the translated built-in copy is the fallback.
+  const cmsSections = useCmsSections('privacy_policy', []);
+  const sections = cmsSections.length > 0
+    ? cmsSections
+    : SECTION_NUMBERS.map((n) => ({
+        heading: t(`privacy.s${n}h`),
+        body: t(`privacy.s${n}b`),
+      }));
+
   const iconSz  = layout.heroIconSize;
   const iconInner = Math.round(iconSz * 0.5);
 
@@ -82,7 +64,7 @@ export default function PrivacyPage() {
           <Shield size={iconInner} color={c.primary} />
         </View>
         <Text style={{ fontSize: layout.captionSize, ...mutedTextStyle(c, 0.4), textAlign: 'center' }}>
-          Last updated: July 2025
+          {t('legal.lastUpdated')}
         </Text>
       </View>
 

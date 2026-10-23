@@ -52,6 +52,20 @@ final class IntegrityService
     private const GOOGLE_API = 'https://playintegrity.googleapis.com';
     private const GOOGLE_OAUTH = 'https://oauth2.googleapis.com/token';
 
+    /**
+     * Maximum accepted age of the Google-signed token, in milliseconds.
+     * Google mints the token at request time and the client forwards it within
+     * seconds; 10 minutes is generous for a slow mobile connection while still
+     * bounding how long a minted token can be held before it is presented.
+     */
+    private const MAX_TOKEN_AGE_MS = 600_000;
+
+    /** Tolerated clock skew for a token that looks "from the future". */
+    private const MAX_CLOCK_SKEW_MS = 60_000;
+
+    /** Service-account access-token cache (OAuth tokens live ~1h). */
+    private static ?array $accessTokenCache = null;
+
     /** @var array<string, mixed>|null in-process policy cache */
     private static ?array $policyCache = null;
 
@@ -67,7 +81,8 @@ final class IntegrityService
      * out until an operator flips specific actions to "enforce".
      *
      * @return array{enabled:bool, actions:array<string,string>, app_verdicts:string[],
-     *               require_device_integrity:bool, require_cert_match:bool, verdict_ttl:int}
+     *               device_verdicts:string[], require_device_integrity:bool,
+     *               require_cert_match:bool, require_licensed:bool, verdict_ttl:int}
      */
     public static function policy(): array
     {
@@ -99,14 +114,31 @@ final class IntegrityService
             'enabled'                 => $enabled,
             // Known protected actions; unknown keys fall back to log_only.
             'actions'                 => array_merge([
-                'vdo_otp'     => 'log_only',
-                'redeem'      => 'log_only',
-                'device_bind' => 'log_only',
-                'financial'   => 'log_only',
+                'vdo_otp'       => 'log_only',
+                'redeem'        => 'log_only',
+                'device_bind'   => 'log_only',
+                'financial'     => 'log_only',
+                // Personalised lesson-PDF issuance: minting a copy is a
+                // high-value operation (it is the only path that can emit a
+                // student-identifiable document), so it is covered by the same
+                // tiered policy as playback. Default log_only, as everywhere.
+                'material_pdf'  => 'log_only',
             ], is_array($pi['actions'] ?? null) ? array_map('strval', $pi['actions']) : []),
             'app_verdicts'            => array_values(array_map('strval', $pi['app_verdicts'] ?? ['PLAY_RECOGNIZED'])),
+            // Device verdict labels that satisfy the policy. MEETS_BASIC_INTEGRITY
+            // is accepted by default so certified-but-out-of-date devices are not
+            // locked out; an operator can narrow this to MEETS_DEVICE_INTEGRITY
+            // (or STRONG) once telemetry shows the real distribution.
+            'device_verdicts'         => array_values(array_map('strval', $pi['device_verdicts'] ?? [
+                'MEETS_DEVICE_INTEGRITY',
+                'MEETS_BASIC_INTEGRITY',
+            ])),
             'require_device_integrity' => (bool) ($pi['require_device_integrity'] ?? true),
             'require_cert_match'      => (bool) ($pi['require_cert_match'] ?? true),
+            // Licensing is OFF by default: this app is distributed through
+            // Google Play AND direct install, so UNLICENSED is a legitimate
+            // state here. Operators that gate on Play entitlement opt in.
+            'require_licensed'        => (bool) ($pi['require_licensed'] ?? false),
             'verdict_ttl'             => max(60, min(900, (int) ($pi['verdict_ttl_seconds'] ?? 300))),
         ];
         return self::$policyCache;
@@ -196,44 +228,71 @@ final class IntegrityService
 
         // 3. requestPackageName — the token must be minted for OUR app.
         if ((string) ($details['requestPackageName'] ?? '') !== $packageName) {
-            throw new ApiException(403, 'Integrity verification failed');
+            self::reject($userId, $ip, 'package_mismatch');
         }
 
         // 4. requestHash — token must cover THIS challenge (anti-replay).
         if (!hash_equals($requestHash, (string) ($details['requestHash'] ?? ''))) {
-            throw new ApiException(403, 'Integrity verification failed');
+            self::reject($userId, $ip, 'request_hash_mismatch');
+        }
+
+        // 4b. FRESHNESS — the decoded payload must be recent. The single-use
+        //     challenge already bounds the window, but the timestamp is the
+        //     only field that proves WHEN Google minted the token, so a token
+        //     minted at challenge time cannot be carried around until the TTL
+        //     boundary. A missing/garbage timestamp fails closed.
+        if (!self::tokenIsFresh($details)) {
+            self::reject($userId, $ip, 'stale_or_undated_token');
         }
 
         // 5. App recognition + signing certificate (tampered/re-signed APK
         //    detection — the digest is reported BY GOOGLE, never by us).
         $appVerdict = (string) ($appInt['appRecognitionVerdict'] ?? '');
         if (!in_array($appVerdict, $policy['app_verdicts'], true)) {
-            throw new ApiException(403, 'Integrity verification failed');
+            self::reject($userId, $ip, 'app_not_recognized:' . $appVerdict);
         }
 
+        // 5a. certificateSha256Digest is BASE64URL in Google's payload; the
+        //     pinned values in security_config are HEX. Normalise both sides
+        //     (see normalizeCertDigest) — comparing the encodings directly is
+        //     how a pinned cert silently rejected every genuine client.
         $cert = '';
         $certs = $appInt['certificateSha256Digest'] ?? [];
+        if (is_string($certs)) {
+            $certs = [$certs];
+        }
         if (is_array($certs) && $certs !== []) {
-            $cert = strtolower(str_replace(':', '', (string) $certs[0]));
+            $cert = self::normalizeCertDigest((string) $certs[0]);
         }
         if ($policy['require_cert_match']) {
             $expected = self::expectedCertDigests();
-            if ($expected !== [] && !in_array($cert, $expected, true)) {
+            if ($expected !== [] && ($cert === '' || !in_array($cert, $expected, true))) {
                 // A re-signed APK presents a different certificate digest —
                 // exactly the signal the smali-tamper test exercised.
-                throw new ApiException(403, 'Integrity verification failed');
+                self::reject($userId, $ip, 'certificate_mismatch');
             }
         }
 
-        // 6. Device integrity (policy-tunable; basic-integrity devices are
-        //    accepted so legitimate low-end users are not locked out).
+        // 6. Device integrity (policy-tunable; the accepted labels live in
+        //    policy.device_verdicts so operators can narrow them without a
+        //    release).
+        $device = is_array($devInt['deviceRecognitionVerdict'] ?? null)
+            ? $devInt['deviceRecognitionVerdict']
+            : [];
         if ($policy['require_device_integrity']) {
-            $device = is_array($devInt['deviceRecognitionVerdict'] ?? null)
-                ? $devInt['deviceRecognitionVerdict']
-                : [];
-            if (!in_array('MEETS_DEVICE_INTEGRITY', $device, true)
-                && !in_array('MEETS_BASIC_INTEGRITY', $device, true)) {
-                throw new ApiException(403, 'Integrity verification failed');
+            if (array_intersect($policy['device_verdicts'], array_map('strval', $device)) === []) {
+                self::reject($userId, $ip, 'device_verdict:' . implode(',', array_map('strval', $device)));
+            }
+        }
+
+        // 6b. Play licensing entitlement — only when the operator opts in.
+        //     PLACEHOLDER: this app also ships outside Google Play, so an
+        //     UNLICENSED install is a legitimate state and must not be blocked
+        //     by default.
+        if ($policy['require_licensed']) {
+            $acct = is_array($payload['accountDetails'] ?? null) ? $payload['accountDetails'] : [];
+            if ((string) ($acct['appLicensingVerdict'] ?? '') !== 'LICENSED') {
+                self::reject($userId, $ip, 'not_licensed');
             }
         }
 
@@ -249,7 +308,7 @@ final class IntegrityService
                 Uuid::v4(), $userId, $requestHash, $action,
                 implode(';', array_filter([
                     $appVerdict,
-                    implode(',', is_array($devInt['deviceRecognitionVerdict'] ?? null) ? $devInt['deviceRecognitionVerdict'] : []),
+                    implode(',', array_map('strval', $device)),
                     $cert !== '' ? $cert : 'no-cert',
                 ])),
                 $cert !== '' ? $cert : null,
@@ -336,6 +395,83 @@ final class IntegrityService
     // Internals
     // ─────────────────────────────────────────────────────────────────────────
 
+    /**
+     * Record why verification failed, then throw the same 403 the caller would
+     * have received. The client never learns more than "failed"; the operator
+     * learns WHICH check failed, which is what makes staged rollout and
+     * false-positive analysis possible without touching client code.
+     */
+    private static function reject(string $userId, string $ip, string $reason): void
+    {
+        try {
+            (new SecurityService())->logEvent($userId, [
+                'event_type'       => 'play_integrity_failed',
+                'detection_method' => 'Play Integrity rejected server-side: ' . $reason,
+                'policy_action'    => 'log_only',
+                'risk_score'       => 40,
+                'platform'         => 'android',
+                'ip_address'       => $ip,
+            ]);
+        } catch (\Throwable) {
+            // Telemetry must never change the outcome.
+        }
+        throw new ApiException(403, 'Integrity verification failed');
+    }
+
+    /**
+     * The decoded token must carry a recent request timestamp.
+     *
+     * Google reports it as a STRING of epoch milliseconds. Absent, non-numeric
+     * or out-of-window values are all failures: "we could not establish when
+     * this was minted" is not a pass.
+     */
+    private static function tokenIsFresh(array $details): bool
+    {
+        $raw = $details['timestampMillis'] ?? null;
+        if (!is_int($raw) && !is_string($raw)) {
+            return false;
+        }
+        if (!is_numeric((string) $raw)) {
+            return false;
+        }
+        $issuedMs = (int) $raw;
+        $nowMs = (int) round(microtime(true) * 1000);
+        $ageMs = $nowMs - $issuedMs;
+        return $ageMs <= self::MAX_TOKEN_AGE_MS && $ageMs >= -self::MAX_CLOCK_SKEW_MS;
+    }
+
+    /**
+     * Normalise a SHA-256 signing-certificate digest to lowercase hex.
+     *
+     * WHY: Play Integrity returns appIntegrity.certificateSha256Digest as
+     * BASE64URL (43–44 chars), while security_config.expected_cert_sha256s
+     * stores 64-character HEX. The previous comparison ran the base64url value
+     * through a hex-shaped normaliser, so it could never equal a pinned hex
+     * fingerprint: with a pin configured every genuine client was rejected, and
+     * with no pin the check was a no-op. Accepting both encodings removes that
+     * failure mode from the deployment.
+     */
+    public static function normalizeCertDigest(string $raw): string
+    {
+        $value = str_replace(':', '', trim($raw));
+        if ($value === '') {
+            return '';
+        }
+        if (preg_match('/^[0-9A-Fa-f]{64}$/', $value) === 1) {
+            return strtolower($value);
+        }
+        $b64 = strtr($value, '-_', '+/');
+        $remainder = strlen($b64) % 4;
+        if ($remainder > 0) {
+            $b64 .= str_repeat('=', 4 - $remainder);
+        }
+        $bin = base64_decode($b64, true);
+        if ($bin !== false && strlen($bin) === 32) {
+            return bin2hex($bin);
+        }
+        return '';
+    }
+
     /** Production signing-cert digests from security_config.expected_cert_sha256s (+ legacy single column). */
     private static function expectedCertDigests(): array
     {
@@ -350,13 +486,15 @@ final class IntegrityService
             $list = json_decode((string) ($row['expected_cert_sha256s'] ?? '[]'), true);
             if (is_array($list)) {
                 foreach ($list as $d) {
-                    $d = strtolower(str_replace(':', '', trim((string) $d)));
+                    // Accept a hex fingerprint OR a base64url digest in config:
+                    // both normalise to the same lowercase hex here.
+                    $d = self::normalizeCertDigest((string) $d);
                     if ($d !== '') {
                         $digests[] = $d;
                     }
                 }
             }
-            $legacy = strtolower(str_replace(':', '', trim((string) ($row['expected_cert_sha256'] ?? ''))));
+            $legacy = self::normalizeCertDigest((string) ($row['expected_cert_sha256'] ?? ''));
             if ($legacy !== '') {
                 $digests[] = $legacy;
             }
@@ -395,8 +533,20 @@ final class IntegrityService
         curl_close($ch);
 
         if ($httpCode !== 200 || $response === false) {
-            // Google-side outage → fail CLOSED for protected actions.
-            throw new ApiException(503, 'Integrity verification unavailable');
+            // Fail CLOSED either way, but distinguish the two operational cases:
+            //   429/5xx/transport → Google-side transient (retryable, monitors
+            //   the quota), 4xx → our request or this token is invalid
+            //   (permanent, never retryable without a fresh token).
+            $transient = $httpCode === 0 || $httpCode === 429 || $httpCode >= 500;
+            error_log(sprintf(
+                '[medacademy] play integrity decode failed http=%d transient=%s',
+                $httpCode,
+                $transient ? 'yes' : 'no'
+            ));
+            throw new ApiException(
+                503,
+                $transient ? 'Integrity verification unavailable' : 'Integrity verification failed'
+            );
         }
 
         $data = json_decode((string) $response, true);
@@ -408,9 +558,23 @@ final class IntegrityService
         return $payload;
     }
 
-    /** Service-account → OAuth2 access token for the Play Integrity API. */
+    /**
+     * Service-account → OAuth2 access token for the Play Integrity API.
+     *
+     * Cached in-process until shortly before expiry (~55 min): every protected
+     * operation used to mint a fresh JWT and spend a second OAuth round-trip, so
+     * a burst of PDF downloads multiplied Google's token endpoint traffic and
+     * our latency for no security benefit. A token is not a verdict — the
+     * per-request authority is still the decoded Play Integrity payload.
+     */
     private static function googleAccessToken(array $sa): ?string
     {
+        $cacheKey = (string) ($sa['client_email'] ?? '') . '|' . (string) ($sa['private_key_id'] ?? '');
+        $cached = self::$accessTokenCache;
+        if (is_array($cached) && ($cached['key'] ?? '') === $cacheKey && (int) ($cached['expires_at'] ?? 0) > time()) {
+            return (string) $cached['token'];
+        }
+
         $b64 = static function (string $d): string {
             return rtrim(strtr(base64_encode($d), '+/', '-_'), '=');
         };
@@ -448,6 +612,17 @@ final class IntegrityService
         curl_close($ch);
 
         $data = json_decode((string) $response, true);
-        return is_array($data) ? ($data['access_token'] ?? null) : null;
+        $token = is_array($data) ? ($data['access_token'] ?? null) : null;
+        if (!is_string($token) || $token === '') {
+            return null;
+        }
+        $ttl = is_array($data) && isset($data['expires_in']) ? (int) $data['expires_in'] : 3600;
+        self::$accessTokenCache = [
+            'key'        => $cacheKey,
+            'token'      => $token,
+            // 60s safety margin; never cache a token for longer than it lives.
+            'expires_at' => time() + max(60, $ttl - 60),
+        ];
+        return $token;
     }
 }

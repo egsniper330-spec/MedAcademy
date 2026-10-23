@@ -11,6 +11,7 @@ use MedAcademy\Http\Request;
 use MedAcademy\Services\AuthService;
 use MedAcademy\Services\AuditService;
 use MedAcademy\Services\FeatureFlagService;
+use MedAcademy\Services\PublicUserIdService;
 use MedAcademy\Utils\Uuid;
 
 /**
@@ -115,6 +116,8 @@ final class StudentController
                 // trg_sync_auth_phone_on_profile_update → UPDATE users → Error
                 // 1442 → 500). The UPDATE profiles below performs the sync
                 // legally and writes users.phone back via the trigger.
+                // User-facing MED-##### id: one shared allocator for every
+                // creation path (doctor-created students included).
                 $db->insert(
                     'INSERT INTO users (id, email, encrypted_password, raw_user_meta_data, email_confirmed_at, phone_confirmed_at, created_at, updated_at)
                      VALUES (?, ?, ?, ?, UTC_TIMESTAMP(6), UTC_TIMESTAMP(6), UTC_TIMESTAMP(6), UTC_TIMESTAMP(6))',
@@ -122,7 +125,11 @@ final class StudentController
                         $newUserId,
                         $authEmail,
                         Password::hash($body['password']),
-                        json_encode(['full_name' => $fullName, 'phone' => $phone], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE),
+                        json_encode([
+                            'full_name' => $fullName,
+                            'phone' => $phone,
+                            'public_user_id' => PublicUserIdService::allocate(),
+                        ], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE),
                     ]
                 );
 

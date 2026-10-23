@@ -48,8 +48,11 @@ final class SecurityEvidenceService
     /** Evidence schema version — bump when the canonical structure changes. */
     public const EVIDENCE_VERSION = 2;
 
-    /** Actions for which a challenge may be issued (whitelist). */
-    private const KNOWN_ACTIONS = ['vdo_otp', 'redeem', 'device_bind', 'financial'];
+    /**
+     * Protected actions a client may request a challenge for (server-side
+     * whitelist — a client cannot invent privileged action names).
+     */
+    private const KNOWN_ACTIONS = ['vdo_otp', 'redeem', 'device_bind', 'financial', 'material_pdf'];
 
     private const CHALLENGE_TTL = 120;   // seconds
     private const EVIDENCE_TTL = 180;    // seconds — decision validity window
@@ -93,10 +96,12 @@ final class SecurityEvidenceService
 
         self::$policyCache = [
             'actions' => array_merge([
-                'vdo_otp'     => 'log_only',
-                'redeem'      => 'log_only',
-                'device_bind' => 'log_only',
-                'financial'   => 'log_only',
+                'vdo_otp'      => 'log_only',
+                'redeem'       => 'log_only',
+                'device_bind'  => 'log_only',
+                'financial'    => 'log_only',
+                // Lesson-PDF issuance: same tiered rollout as playback.
+                'material_pdf' => 'log_only',
             ], is_array($de['actions'] ?? null) ? array_map('strval', $de['actions']) : []),
             'require_registered_key' => (bool) ($de['require_registered_key'] ?? false),
             'challenge_ttl' => max(30, min(600, (int) ($de['challenge_ttl_seconds'] ?? self::CHALLENGE_TTL))),

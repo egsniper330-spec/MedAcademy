@@ -61,7 +61,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type React from 'react';
 import ReactDOM from 'react-dom';
-import { BackHandler, Dimensions, Platform, Pressable, StatusBar, Text, View, useWindowDimensions } from 'react-native';
+import { Alert, BackHandler, Dimensions, Platform, Pressable, StatusBar, Text, View, useWindowDimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as ScreenOrientation from 'expo-screen-orientation';
 import { ArrowLeft } from 'lucide-react-native';
@@ -459,6 +459,40 @@ function YouTubePlayerNative({
   const lastTimeRef      = useRef(initialResume);
   const wvRef            = useRef<WebView>(null);
 
+  // ── DEV-ONLY: one-tap centre-control diagnostic ───────────────────────
+  // The reported defect ("the centre button is still painted after the bar
+  // has gone") can only be CONFIRMED on a real device, so debug builds get a
+  // small DIAG pill over the player. One tap injects window.__plyrDiag() into
+  // the player document and shows the answer on screen: the lifecycle decision
+  // (data-meda-centre), the computed paint of the button, AND the bar's own
+  // state at the same instant. Verdict logic:
+  //   bar hidden + centre hidden → PASS (the fix holds on this device)
+  //   bar hidden + centre painted → the bug, with its numbers attached
+  //   bar shown                  → controls were still up; let them idle and
+  //                                re-run (not a failure)
+  // The pending flag means a diag reply is only surfaced for OUR request — an
+  // automatic diag (fullscreen transition) is logged, never alerted.
+  // Everything here is __DEV__-gated: a release build renders no pill and
+  // schedules no timer.
+  const diagPendingRef = useRef(false);
+  const diagTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const requestCentreDiag = useCallback(() => {
+    if (!__DEV__) return;
+    const wv = wvRef.current as unknown as { injectJavaScript?: (code: string) => void } | null;
+    // The channel is the native WebView bridge; the web build renders the
+    // player in an iframe with no injectJavaScript, so the pill is native-only
+    // (and this guard keeps a stray call harmless everywhere).
+    if (!wv || typeof wv.injectJavaScript !== 'function') return;
+    diagPendingRef.current = true;
+    if (diagTimerRef.current) clearTimeout(diagTimerRef.current);
+    // Never hijack a much later automatic diag reply if this one is lost.
+    diagTimerRef.current = setTimeout(() => { diagPendingRef.current = false; }, 4000);
+    wv.injectJavaScript('window.__plyrDiag && window.__plyrDiag(); true;');
+  }, []);
+  useEffect(() => () => {
+    if (diagTimerRef.current) clearTimeout(diagTimerRef.current);
+  }, []);
+
   //  Security-lock containment for THIS WebView player.
   //  A react-native-webview instance has no native `pause()` method, so the
   //  VdoPlayerView stopper cannot stop it. This registers a stopper that halts
@@ -602,6 +636,34 @@ function YouTubePlayerNative({
           // with a live on-page rect while the host reports a healthy frame
           // (the compositor-surface-loss evidence chain).
           console.log(`[PLYR_FS_MEDIA_ELEMENT] iframe=${(msg as any).iframe} iframeRect=${JSON.stringify((msg as any).iframeRect)} video=${(msg as any).video} videoRect=${JSON.stringify((msg as any).videoRect)} wm=${(msg as any).wm} doc=${(msg as any).docW}x${(msg as any).docH}`);
+          // DEV-ONLY: surface the centre-control answer for the one-tap
+          // diagnostic. State/dimensions only — the payload carries no URL,
+          // token or identity, so it is safe to show on screen.
+          if (__DEV__ && diagPendingRef.current) {
+            diagPendingRef.current = false;
+            if (diagTimerRef.current) { clearTimeout(diagTimerRef.current); diagTimerRef.current = null; }
+            const c = (msg as any).centre as
+              | { count?: number; state?: string | null; opacity?: string | null; visibility?: string | null; hideControls?: boolean; playing?: boolean; paused?: boolean; barOpacity?: string | null; barVisibility?: string | null }
+              | null
+              | undefined;
+            const text = !c
+              ? 'No centre control found in the player document.'
+              : [
+                  `centre: ${c.state ?? 'unknown'} (count ${c.count ?? 0})`,
+                  `button paint: opacity ${c.opacity ?? '?'} / visibility ${c.visibility ?? '?'}`,
+                  `bar: hidden-controls ${String(c.hideControls)} / opacity ${c.barOpacity ?? '?'} / visibility ${c.barVisibility ?? '?'}`,
+                  `state: playing ${String(c.playing)} / paused ${String(c.paused)}`,
+                  '',
+                  c.hideControls && c.visibility === 'hidden'
+                    ? 'PASS — the centre button is hidden together with the bar.'
+                    : c.hideControls
+                      ? 'FAIL — the bar is hidden but the centre button is still painted.'
+                      : 'Controls are SHOWN right now. Let the player go idle (do not touch it) and tap DIAG again.',
+                ].join('\n');
+            console.log(`[PLYR_CENTRE_DIAG] ${text.replace(/\n/g, ' | ')}`);
+            if (Platform.OS === 'web') console.log(text);
+            else Alert.alert('Player centre diagnostic', text);
+          }
           break;
         case 'yt:fullscreen':
           // Entry ask from the Plyr fullscreen button (capture-phase intercept
@@ -806,6 +868,34 @@ function YouTubePlayerNative({
         showsHorizontalScrollIndicator={false}
         showsVerticalScrollIndicator={false}
       />
+
+      {/* DEV-ONLY one-tap centre-control diagnostic. Debug builds only: a
+          release build renders nothing here (no pill, no handler work). Tap →
+          window.__plyrDiag() → on-screen verdict "centre hidden with the bar"
+          or the numbers that prove otherwise. Sits top-right so it never
+          overlaps the fullscreen exit arrow (top-left). */}
+      {__DEV__ && Platform.OS !== 'web' && (
+        <Pressable
+          onPress={requestCentreDiag}
+          style={{
+            position: 'absolute',
+            top: isFullscreen ? Math.max(8, insets.top + 6) : 8,
+            right: 8,
+            paddingHorizontal: 10,
+            height: 30,
+            borderRadius: 15,
+            backgroundColor: '#00000099',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 999,
+          }}
+          accessibilityLabel="Player centre-button diagnostic (debug builds)"
+          accessibilityRole="button"
+          hitSlop={{ top: 8, right: 8, bottom: 8, left: 8 }}
+        >
+          <Text style={{ color: '#fff', fontSize: 11, fontWeight: '700', letterSpacing: 0.5 }}>DIAG</Text>
+        </Pressable>
+      )}
 
       {/* EXIT-fullscreen control — back-arrow (same language as the VdoCipher
           and offline players). The Plyr fullscreen button ALSO exits (toggle

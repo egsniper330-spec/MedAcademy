@@ -22,10 +22,11 @@ $OUT = $WORK . '/out';
 
 /** id => [label, required, listKey (null = suite has no check list)] */
 $suites = [
-    'real_pipeline'  => ['Real PHP raster pipeline (personalization, geometry, pixels)', true, 'checks'],
+    'real_pipeline'  => ['Real PHP engine (personalization, page geometry, content, pixels)', true, 'checks'],
     'repo_verify'    => ['Repository integration test (backend/scripts/verify-watermark.php)', true, 'checks'],
     'error_handling' => ['Fail-closed error handling (malformed/encrypted/limits/missing deps)', true, 'cases'],
     'authorization'  => ['Authorization + token lifecycle incl. revocation', true, 'checks'],
+    'delivery'       => ['End-to-end delivery (personalization, cache, concurrency, cleanup)', true, 'checks'],
     'gallery'        => ['Visual gallery artifact (manual inspection)', false, null],
 ];
 
@@ -61,6 +62,7 @@ $versions = [
     'ghostscript' => null,
     'fpdf' => null,
     'fpdi' => null,
+    'tcpdf' => null,
     'composer' => null,
     'pdftotext' => null,
     'font' => getenv('PDF_WATERMARK_FONT') ?: '(service default)',
@@ -82,6 +84,9 @@ if (is_file($installed)) {
         }
         if (($pkg['name'] ?? '') === 'setasign/fpdi') {
             $versions['fpdi'] = (string) ($pkg['version'] ?? '?');
+        }
+        if (($pkg['name'] ?? '') === 'tecnickcom/tcpdf') {
+            $versions['tcpdf'] = (string) ($pkg['version'] ?? '?');
         }
     }
 }
@@ -201,7 +206,7 @@ foreach ($versions as $k => $v) {
 $md .= "\n## Artifacts (all inside the git-ignored test workspace)\n\n";
 $md .= "- Output directory: `{$summary['artifacts']['out_dir']}`\n";
 $md .= "- Machine-readable summary: `{$summary['artifacts']['summary_json']}`\n";
-foreach (['real_pipeline', 'repo_verify', 'error_handling', 'authorization', 'gallery'] as $id) {
+foreach (['real_pipeline', 'repo_verify', 'error_handling', 'authorization', 'delivery', 'gallery'] as $id) {
     $md .= "- Suite log: `{$OUT}/$id.log`\n";
 }
 if ($summary['artifacts']['gallery'] !== null) {

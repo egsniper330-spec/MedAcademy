@@ -61,6 +61,17 @@ $ErrorActionPreference = 'Continue'
 $ProgressPreference = 'SilentlyContinue'
 [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
 
+# ── Which engine this run exercises ─────────────────────────────────────────
+#   The product default is the pure-PHP VECTOR engine (FPDI + TCPDF): no
+#   binaries, works on ordinary cPanel hosting. Ghostscript + a TTF are needed
+#   ONLY by the opt-in raster engine, so their absence is a SKIP outside raster
+#   mode instead of a hard failure.
+$Mode = if ($env:PDF_WATERMARK_MODE) { $env:PDF_WATERMARK_MODE } else { 'vector' }
+if (@('raster', 'vector', 'auto') -notcontains $Mode) {
+    Fail "unknown PDF_WATERMARK_MODE=$Mode (use raster, vector or auto)" 2
+}
+$WantRaster = ($Mode -eq 'raster')
+
 # ── Layout and pinned, tested versions ───────────────────────────────────────
 $Harness       = $PSScriptRoot
 $RepoRoot      = (Resolve-Path (Join-Path $PSScriptRoot '..\..\..')).Path
@@ -309,10 +320,18 @@ if (-not $gsInfo -and -not $gsInWorkspace) {
          never elevates itself and never executes the installer on its own.
 '@
     Write-Host $disclosure
-    if (-not $AcceptGhostscriptLicense) {
-        Fail 'Ghostscript is required for the raster tests and no renderer was found. Choose option A above, or opt in with -AcceptGhostscriptLicense (option B).' 2
+    if (-not $WantRaster) {
+        # Vector mode: Ghostscript is optional (it only enables the pixel proof).
+        Write-Warn2 'Ghostscript not found - fine for the default VECTOR pipeline; the pixel proof will be reported as SKIPPED.'
+        if ($AcceptGhostscriptLicense) {
+            Fail 'Ghostscript opt-in requested but the run is in vector mode. Set PDF_WATERMARK_MODE=raster to run the raster suite.' 2
+        }
+        # Nothing to download in vector mode: fall through to the suites.
+    } elseif (-not $AcceptGhostscriptLicense) {
+        Fail 'PDF_WATERMARK_MODE=raster needs Ghostscript and none was found. Choose option A above, or opt in with -AcceptGhostscriptLicense (option B).' 2
     }
 
+if ($WantRaster -and $AcceptGhostscriptLicense) {
     Write-Step 'License opt-in accepted: downloading + SHA-512 verifying the official Ghostscript installer'
     $installer = Join-Path $Downloads $GsAsset
     Get-RemoteFile "$GsBase/SHA512SUMS" (Join-Path $Downloads 'SHA512SUMS') 'SHA512SUMS (Artifex)'
@@ -330,6 +349,7 @@ if (-not $gsInfo -and -not $gsInWorkspace) {
     Write-Host '  (or simply double-click the verified installer and choose the folder above.)'
     Fail "Ghostscript downloaded and verified; installation is left to you (this script never elevates or executes installers). The command above installs it into $GsDir." 2
 }
+}
 
 # ── 5. Watermark font (a TTF is REQUIRED by the raster engine) ───────────────
 function Find-Font {
@@ -342,10 +362,13 @@ function Find-Font {
     return $null
 }
 $font = Find-Font
-if (-not $font) {
+if ($font) {
+    Write-Ok "Font: $font (raster engine only)"
+} elseif ($WantRaster) {
     Fail "no TrueType font found (looked in $env:WINDIR\Fonts). Set PDF_WATERMARK_FONT to any .ttf path and re-run." 2
+} else {
+    Write-Ok "Font: not needed (the vector engine embeds TCPDF's bundled DejaVu face)"
 }
-Write-Ok "Font: $font"
 
 # ── 6. pdftotext (optional; text checks are reported as SKIPPED without it) ──
 function Find-Pdftotext {
@@ -366,13 +389,13 @@ if ($pdftotext) {
 }
 
 $gsInfo = Find-Ghostscript
-if (-not $gsInfo) { Fail 'renderer disappeared during bootstrap' 2 }
+if (-not $gsInfo -and $WantRaster) { Fail 'renderer disappeared during bootstrap' 2 }
 
 # ── 7. Environment for the suites ───────────────────────────────────────────
 $env:PDFTEST_WORKDIR     = $Work
-$env:PDF_WATERMARK_MODE  = 'raster'
-$env:GHOSTSCRIPT_BIN     = $gsInfo.bin
-$env:PDF_WATERMARK_FONT  = $font
+$env:PDF_WATERMARK_MODE  = $Mode
+if ($gsInfo) { $env:GHOSTSCRIPT_BIN = $gsInfo.bin } else { Remove-Item Env:GHOSTSCRIPT_BIN -ErrorAction SilentlyContinue }
+if ($font) { $env:PDF_WATERMARK_FONT = $font } else { Remove-Item Env:PDF_WATERMARK_FONT -ErrorAction SilentlyContinue }
 $env:PDF_WATERMARK_TEST_TMP = Join-Path $Out 'tmp'
 if ($pdftotext) { $env:PDFTOTEXT = $pdftotext } else { Remove-Item Env:PDFTOTEXT -ErrorAction SilentlyContinue }
 
@@ -404,6 +427,7 @@ $suiteDefs = @(
     @{ id = 'repo_verify';    script = (Join-Path $RepoRoot 'backend\scripts\verify-watermark.php') },
     @{ id = 'error_handling'; script = 'error_tests.php' },
     @{ id = 'authorization';  script = 'auth_tests.php' },
+    @{ id = 'delivery';       script = 'delivery_tests.php' },
     @{ id = 'gallery';        script = 'make_gallery.php' }
 )
 

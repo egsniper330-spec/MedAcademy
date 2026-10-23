@@ -542,38 +542,96 @@ console.log('── Focused fix pass (transition, card, drawer, About, watermark
   assert(!/\bDRM\b|Widevine|VdoCipher|FairPlay|decrypt|encryption\b/i.test(aboutBlock),
     'About tab contains no DRM/technical protection wording');
 
-  // Issue 6/3: the native watermark is a Plyr replica via the shared config.
+  // Issue 6/3: ONE watermark control, four renderers. Every renderer runs the
+  // continuous billiard model (elapsed-time motion + exact edge reflection),
+  // draws a two-line NAME/ID identity at a responsive size, and never fades.
+  // The retired 9-slot / 30–60 s glide is gone everywhere: a teleport with a
+  // glide is not "continuously moving", and its timer could clamp before the
+  // element had measured (the clipped/disappearing mark).
   {
     const cr = (src) => src.replace(/\r/g, '');
     const wmSrc = cr(fs.readFileSync(path.join(ROOT, 'src/components/NativeWatermarkOverlay.tsx'), 'utf8'));
     const cfgSrc = cr(fs.readFileSync(path.join(ROOT, 'src/lib/nativeWatermarkConfig.ts'), 'utf8'));
     const plyrSrc = cr(fs.readFileSync(path.join(ROOT, 'src/lib/plyr/playerScript.ts'), 'utf8'));
-    // Plyr slot table still intact in the SOURCE OF TRUTH (untouched).
-    assert(/var G\s*=\s*\[[\s\S]*?\];/.test(plyrSrc), 'Plyr source still contains its G table (source of truth intact)');
-    // Shared config carries the Plyr values verbatim.
-    assert(/0\.08, 0\.08/.test(cfgSrc) && /0\.72, 0\.74/.test(cfgSrc), 'shared config carries the Plyr 9-slot table verbatim');
-    assert(/WATERMARK_MOVE_MIN_MS  = 30_000/.test(cfgSrc) && /WATERMARK_MOVE_MAX_MS  = 60_000/.test(cfgSrc), 'move interval 30-60s (Plyr scheduleTick)');
-    assert(/WATERMARK_OPACITY_MIN      = 0\.38/.test(cfgSrc) && /WATERMARK_OPACITY_MAX      = 0\.58/.test(cfgSrc), 'opacity band 0.38-0.58 (Plyr move)');
-    assert(/WATERMARK_GLIDE_MS     =     600/.test(cfgSrc), '600ms glide (Plyr CSS transition)');
-    assert(/WATERMARK_ROTATION_DEG =       3/.test(cfgSrc), 'rotation jitter +-3 deg (Plyr)');
-    assert(!/__fwmPulse/.test(cfgSrc), 'no pulse animation in the Plyr-parity config');
-    // Native overlay: glides while visible (never hides), clamped, Plyr typography.
-    assert(!/withSequence/.test(wmSrc), 'no fade-teleport-fade sequence (Plyr glides, never hides)');
-    assert(/wmClampPosition/.test(wmSrc), 'whole-element clamp (Plyr mkTransform) prevents edge clipping');
-    assert(/color:\s+'#fff'/.test(wmSrc) && /fontSize:\s+WATERMARK_FONT_PX,/.test(wmSrc) && /fontWeight:\s+'600'/.test(wmSrc), 'native typography = Plyr (WATERMARK_FONT_PX/600/#fff — single canonical size)');
-    assert(/WATERMARK_FONT_PX = 15/.test(cfgSrc), 'canonical watermark size = 15px (Plyr 13px + ~15% per product request)');
-    // Web injection: Plyr parity in the VdoCipher WebView.
     const injSrc = cr(fs.readFileSync(path.join(ROOT, 'src/lib/watermarkInjection.ts'), 'utf8'));
-    assert(/0\.08,0\.08/.test(injSrc) && /0\.72,0\.74/.test(injSrc), 'web injection uses the Plyr G table');
-    assert(/transition:transform 0\.6s ease/.test(injSrc), 'web injection glides at 0.6s ease (Plyr)');
-    assert(!/__fwmPulse/.test(injSrc.replace(/^[\s*\/]+/gm, '').replace(/\/\*[\s\S]*?\*\//g, '')) || !/animation:__fwmPulse/.test(injSrc), 'web injection pulse animation removed (Plyr parity)');
-    assert(/rnd\(0\.38,0\.58\)/.test(injSrc), 'web injection opacity band = Plyr');
-    assert(/rnd\(30000,60000\)/.test(injSrc), 'web injection interval = Plyr (30-60s)');
-    assert(/font-size:\$\{WATERMARK_FONT_PX\}px/.test(injSrc) && /font-weight:600/.test(injSrc), 'web injection typography = Plyr (size from WATERMARK_FONT_PX)');
-    // Fullscreen DOM hook: same table/typography.
     const fsSrc = cr(fs.readFileSync(path.join(ROOT, 'src/hooks/useFullscreenWatermark.ts'), 'utf8'));
-    assert(/0\.08, 0\.08/.test(fsSrc) && /0\.72, 0\.74/.test(fsSrc), 'fullscreen DOM hook uses the Plyr G table');
-    assert(/font-size:' \+ WATERMARK_FONT_PX \+ 'px;font-weight:600/.test(fsSrc), 'fullscreen DOM hook typography = Plyr (size from WATERMARK_FONT_PX)');
+
+    // ── Shared tokens: responsive type + fixed visibility, no slot schedule ──
+    assert(!/WATERMARK_SLOTS|wmClampPosition|WATERMARK_GLIDE_MS|scheduleTick/.test(cfgSrc),
+      'shared config no longer publishes the retired 9-slot / glide / tick schedule');
+    assert(/WATERMARK_FONT_PX = 15/.test(cfgSrc), 'canonical watermark size = 15px');
+    assert(/WATERMARK_FONT_FRAC = 0\.062/.test(cfgSrc) &&
+           /WATERMARK_FONT_MIN_PX = 13/.test(cfgSrc) &&
+           /WATERMARK_FONT_MAX_PX = 34/.test(cfgSrc),
+      'responsive type rule published once (6.2 % of the smaller box, clamped 13-34 px)');
+    assert(/WATERMARK_OPACITY_MIN = 0\.38/.test(cfgSrc) && /WATERMARK_OPACITY_MAX = 0\.58/.test(cfgSrc),
+      'native opacity band stays inside the always-readable 0.38-0.58 range');
+    assert(/WATERMARK_ROTATION_DEG = 3/.test(cfgSrc), 'rotation jitter +-3 deg');
+    assert(!/__fwmPulse/.test(cfgSrc), 'no pulse animation in the shared config');
+
+    // ── Plyr in-HTML mark: real motion, fixed opacity, two-line identity ────
+    assert(!/var G\s*=\s*\[[\s\S]*?\];/.test(plyrSrc), 'Plyr slot table removed (a fixed slot grid is not motion)');
+    assert(/function step\(ts\)/.test(plyrSrc) && /_raf = requestAnimationFrame\(step\);/.test(plyrSrc),
+      'Plyr advances the mark on every animation frame');
+    assert(/var dt = \(ts - _last\) \/ 1000;/.test(plyrSrc) && /if \(dt > MAX_STEP_S\) dt = MAX_STEP_S;/.test(plyrSrc),
+      'Plyr motion is elapsed-time based and step-clamped (frame-rate independent, cannot tunnel an edge)');
+    assert(/function advance\(pos, vel, dt, max\)/.test(plyrSrc) && /next = 2 \* max - next/.test(plyrSrc),
+      'Plyr reflects the overshoot exactly off both edges of each axis (multi-directional bouncing)');
+    assert(/cancelAnimationFrame\(_raf\)/.test(plyrSrc), 'Plyr cancels its frame loop (no duplicate loops)');
+    assert(/opacity:0\.55/.test(plyrSrc) && !/rnd\(0\.38,0\.58\)/.test(plyrSrc),
+      'Plyr opacity is fixed — the mark never fades, blinks or hides');
+    assert(/_nEl\.textContent = name;/.test(plyrSrc) && /_iEl\.textContent = String\(id \|\| ''\);/.test(plyrSrc),
+      'Plyr identity is TWO lines: the name, then the id underneath');
+    assert(/var px = Math\.round\(base \* 0\.062\);/.test(plyrSrc) && /if \(px > 34\) px = 34;/.test(plyrSrc),
+      'Plyr type scales with the measured player box (readable in fullscreen)');
+    assert(/'pointer-events:none'/.test(plyrSrc) && /window\.addEventListener\('resize', onResize\)/.test(plyrSrc),
+      'Plyr mark never captures taps and re-bounds on resize/fullscreen');
+
+    // ── Native overlay (VdoCipher adapter + offline player) ────────────────
+    assert(!/withSequence/.test(wmSrc), 'no fade-teleport-fade sequence in the native overlay');
+    assert(/stepWatermarkMotion/.test(wmSrc) && /useFrameCallback/.test(wmSrc),
+      'native overlay runs the shared motion model on the UI thread (no per-frame React render)');
+    assert(/pointerEvents="none"/.test(wmSrc), 'native overlay never intercepts player gestures');
+    assert(/color:\s+'#fff'/.test(wmSrc) && /fontSize:\s+WATERMARK_FONT_PX,/.test(wmSrc) && /fontWeight:\s+'600'/.test(wmSrc),
+      'native typography matches the players (#fff / 600 / canonical size)');
+    assert(/WATERMARK_FONT_FRAC/.test(wmSrc) && /WATERMARK_FONT_MAX_PX/.test(wmSrc),
+      'native type is responsive via the shared tokens');
+    assert(/\{watermarkName\}/.test(wmSrc) && /\{watermarkId\}/.test(wmSrc) && /styles\.wmId/.test(wmSrc),
+      'native identity is two separate lines (name, then id)');
+
+    // ── VdoCipher WebView injection ────────────────────────────────────────
+    assert(/function step\(ts\)/.test(injSrc) && /_raf=requestAnimationFrame\(step\);/.test(injSrc),
+      'web injection advances the mark on every animation frame');
+    assert(/function advance\(pos,vel,dt,max\)/.test(injSrc) && /next=2\*max-next/.test(injSrc),
+      'web injection reflects exactly off each edge (multi-directional bouncing)');
+    assert(/if\(dt>MAX_STEP_S\)dt=MAX_STEP_S;/.test(injSrc) && /cancelAnimationFrame\(_raf\)/.test(injSrc),
+      'web injection is elapsed-time based and cancels its loop (no duplicate loops)');
+    assert(/opacity:0\.55/.test(injSrc) && !/rnd\(0\.38,0\.58\)/.test(injSrc),
+      'web injection opacity is fixed — never fades or blinks');
+    assert(!/scheduleTick/.test(injSrc) && !/rnd\(30000,60000\)/.test(injSrc),
+      'web injection no longer uses the 30-60s slot teleport');
+    assert(/_nEl\.textContent=WM_NAME/.test(injSrc) && /_iEl\.textContent=WM_ID/.test(injSrc),
+      'web injection prints the name line then the id line (no "ID:" prefix)');
+    assert(/px=Math\.round\(base\*0\.062\)/.test(injSrc) && /'pointer-events:none;'/.test(injSrc),
+      'web injection type scales with the viewport and never captures touches');
+    assert(/position:fixed/.test(injSrc) && /window\.addEventListener\('resize',onResize\)/.test(injSrc),
+      'web injection stays anchored in fullscreen and re-bounds on resize');
+
+    // ── Fullscreen DOM hook (web player) ──────────────────────────────────
+    assert(/raf = requestAnimationFrame\(step\);/.test(fsSrc) &&
+           /function advance\(pos: number, vel: number, dt: number, max: number\)/.test(fsSrc) &&
+           /next = 2 \* max - next/.test(fsSrc),
+      'fullscreen hook runs the same bouncing loop (elapsed time + edge reflection)');
+    assert(/cancelAnimationFrame\(raf\)/.test(fsSrc), 'fullscreen hook cancels its frame loop on teardown');
+    assert(/dataset\.wmLine === 'name'/.test(fsSrc) && /\[data-wm-line="id"\]\{font-weight:700;\}/.test(fsSrc),
+      'fullscreen hook renders name and id as separate styled lines');
+    assert(/fsEl\.appendChild\(el\)/.test(fsSrc) && /container\.appendChild\(el\)/.test(fsSrc),
+      'fullscreen hook re-parents the mark into the fullscreen element and back');
+    assert(/font-size:' \+ WATERMARK_FONT_PX \+ 'px;font-weight:600/.test(fsSrc),
+      'fullscreen hook typography falls back to the canonical size');
+    assert(/orientationchange/.test(fsSrc) && /fullscreenchange/.test(fsSrc),
+      'fullscreen hook re-bounds on orientation change and fullscreen transitions');
+
     assert(!/font-size:13px/.test(injSrc) && !/font-size:13px/.test(fsSrc) && !/fontSize:\s+13,/.test(wmSrc), 'no renderer hardcodes the retired 13px');
     // Web VdoCipher player: exactly ONE watermark (the in-HTML injection);
     // the second RN overlay layer is removed.

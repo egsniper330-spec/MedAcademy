@@ -130,7 +130,8 @@ check('tab labels are localized', /cb\.tab\.info/.test(builderSrc) && /cb\.tab\.
 check('lesson type/status helpers take the translator',
   /function lessonTypeLabel\(videoType: string \| undefined, t: Translate\)/.test(builderSrc)
   && /function lessonStatusLabel\(status: string \| undefined, t: Translate\)/.test(builderSrc));
-check('back/chevron icons flip for RTL', /I18nManager\.isRTL \? ArrowRight : ArrowLeft/.test(builderSrc));
+check('back/chevron icons flip for RTL', /const BackIcon = isRTL \? ArrowRight : ArrowLeft/.test(builderSrc)
+  && /const ChevronForward = isRTL \? ChevronLeft : ChevronRight/.test(builderSrc));
 check('EGP label uses a logical margin (marginEnd), not marginRight',
   /marginEnd: 8/.test(builderSrc) && !/color: c\.primary, marginRight: 8/.test(builderSrc));
 

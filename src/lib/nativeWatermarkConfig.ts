@@ -1,126 +1,73 @@
 /**
  * nativeWatermarkConfig.ts
  *
- * THE authoritative watermark configuration — extracted verbatim from the
- * Plyr/YouTube player's in-HTML watermark implementation
- * (src/lib/plyr/playerScript.ts, `injectWatermark`).
+ * Shared design tokens for the application-rendered forensic watermark
+ * (NativeWatermarkOverlay → VdoCipher native adapter + offline player).
  *
- * Chain of authority (per the watermark source-of-truth decision):
+ * ── ONE MARK, FOUR RENDERERS ─────────────────────────────────────────────────
+ * The watermark is a single product control with four implementations, so its
+ * numbers are published once here instead of being re-invented per renderer:
  *
- *   Plyr / YouTube player (playerScript.ts)  ← SOURCE OF TRUTH — DO NOT MODIFY
- *        ↓  same slot table, timing, opacity band, typography, glide
- *   nativeWatermarkConfig (this file)
- *        ↓
- *   NativeWatermarkOverlay  →  VdoCipher ONLINE (native adapter)
- *                           →  VdoCipher OFFLINE (offline player)
+ *   Plyr / YouTube in-HTML mark   src/lib/plyr/playerScript.ts
+ *   VdoCipher WebView injection   src/lib/watermarkInjection.ts
+ *   fullscreen DOM hook           src/hooks/useFullscreenWatermark.ts
+ *   native overlay                src/components/NativeWatermarkOverlay.tsx
  *
- * The Plyr implementation itself is NOT touched. This module only republishes
- * its constants so both native VdoCipher paths behave identically to it.
+ * Shared model (the three generated scripts interpolate the same rules):
+ *   • CONTINUOUS billiard motion — the position advances from ELAPSED TIME every
+ *     animation frame and reflects exactly off the four edges of the measured
+ *     video box, subtracting the mark's own size so it never clips. The mark is
+ *     independent of the playback-control idle timer: hiding the controls can
+ *     never hide it, and it never fades, blinks or sits still.
+ *   • TWO-LINE IDENTITY — the recipient's display name, then the complete public
+ *     id directly underneath, never an `ID:` prefix.
+ *   • RESPONSIVE TYPE — WATERMARK_FONT_FRAC of the smaller box dimension,
+ *     clamped to WATERMARK_FONT_MIN_PX…WATERMARK_FONT_MAX_PX, so the mark reads
+ *     on a phone and grows clearly larger in fullscreen.
+ *   • Typography — #fff, weight 600 (id line 700), letterSpacing 0.3, two-layer
+ *     text shadow, no background, one ellipsised line per identity part.
+ *   • pointer-events:none — the mark can never intercept a tap, seek or control.
  *
- * Plyr behavior being copied (verified against playerScript.ts):
- *   • 9-slot grid, 8 % inset from every edge (Plyr's `G` table).
- *   • Random no-repeat slot selection (Plyr `nxtSlot`).
- *   • Smooth 600 ms ease GLIDE to the next slot while staying visible —
- *     Plyr never fades out/teleports/hides the watermark (CSS transition
- *     on transform + opacity, 0.6 s ease).
- *   • Rotation jitter ±3° on every move (Plyr `rnd(-3, 3)`).
- *   • Opacity band 0.38–0.58 per move, initial 0.40–0.56 (Plyr `move`/mount).
- *   • Move every 30–60 s, random per tick (Plyr `scheduleTick`).
- *   • Clamp: whole element stays inside the player with ≥6 % inset
- *     (Plyr `mkTransform`).
- *   • Typography: #fff, 15 px (WATERMARK_FONT_PX — Plyr's 13 px raised
- *     ~15 % per product request for readability), weight 600,
- *     letterSpacing 0.3, two-layer text shadow, single line with ellipsis,
- *     max width min(320 px, 55 %).
- *   • Label format: `NAME • ID` (U+2022 bullet), or just `ID` when no name.
- *   • NO security pulse, NO hide gap, NO full fade-out — watermark is
- *     always on screen somewhere.
+ * The motion maths itself (bounds, reflection, clamping) lives in
+ * src/lib/watermarkMotion.ts. This module only publishes design tokens.
  */
 
-// ─── Slot table — verbatim from Plyr `G` (9 slots, 8 % inset) ──────────────────
-export const WATERMARK_SLOTS: ReadonlyArray<readonly [number, number]> = [
-  [0.08, 0.08], [0.42, 0.08], [0.72, 0.08],
-  [0.04, 0.42], [0.35, 0.42], [0.68, 0.42],
-  [0.08, 0.74], [0.42, 0.74], [0.72, 0.74],
-];
+// ─── Typography ───────────────────────────────────────────────────────────────
 
-// ─── Timing — verbatim from Plyr ────────────────────────────────────────────────
-export const WATERMARK_MOVE_MIN_MS  = 30_000; // Plyr scheduleTick lower bound
-export const WATERMARK_MOVE_MAX_MS  = 60_000; // Plyr scheduleTick upper bound
-export const WATERMARK_GLIDE_MS     =     600; // Plyr CSS transition 0.6s ease
-export const WATERMARK_ROTATION_DEG =       3; // Plyr rnd(-3, 3)
-
-// ─── Opacity band — verbatim from Plyr ─────────────────────────────────────────
-export const WATERMARK_OPACITY_MIN      = 0.38; // Plyr move()
-export const WATERMARK_OPACITY_MAX      = 0.58; // Plyr move()
-export const WATERMARK_OPACITY_INIT_MIN = 0.40; // Plyr mount()
-export const WATERMARK_OPACITY_INIT_MAX = 0.56; // Plyr mount()
-
-// ─── Layout — verbatim from Plyr ───────────────────────────────────────────────
-export const WATERMARK_INSET_FRACTION = 0.06; // Plyr mkTransform ≥6 % inset
-export const WATERMARK_MAX_WIDTH_CAP  = 320;  // Plyr max-width:min(320px,55%)
-export const WATERMARK_MAX_WIDTH_FRAC = 0.55;
-/**
- * Watermark font size in px — the ONE canonical size for every renderer
- * (Plyr in-HTML, VdoCipher WebView injection, fullscreen DOM hook, native
- * overlay). Plyr shipped 13px; raised to 15px (+~15%) per product request
- * for readability. Change it HERE only — every renderer interpolates it.
- */
+/** Canonical size before any measurement exists (and the CSS floor). */
 export const WATERMARK_FONT_PX = 15;
+/** Responsive rule: this fraction of the SMALLER box dimension. */
+export const WATERMARK_FONT_FRAC = 0.062;
+export const WATERMARK_FONT_MIN_PX = 13;
+export const WATERMARK_FONT_MAX_PX = 34;
+/** Name line renders slightly smaller than the id line. */
+export const WATERMARK_NAME_FONT_RATIO = 0.9;
 
-// ─── Random helpers (same semantics as Plyr) ──────────────────────────────────
+// ─── Visibility ───────────────────────────────────────────────────────────────
+
+/** Native per-mount opacity draw — always visible, never animated. */
+export const WATERMARK_OPACITY_MIN = 0.38;
+export const WATERMARK_OPACITY_MAX = 0.58;
+/** Per-mount tilt jitter, ±3°. */
+export const WATERMARK_ROTATION_DEG = 3;
+
+// ─── Layout ───────────────────────────────────────────────────────────────────
+
+export const WATERMARK_MAX_WIDTH_CAP = 320;
+export const WATERMARK_MAX_WIDTH_FRAC = 0.55;
+
+// ─── Random helpers ───────────────────────────────────────────────────────────
+
 export function wmRand(min: number, max: number): number {
   return min + Math.random() * (max - min);
 }
 
-/** Random slot, never the same as `exclude` (Plyr nxtSlot). */
-export function wmNextSlotIndex(exclude: number): number {
-  let n: number;
-  do { n = Math.floor(Math.random() * WATERMARK_SLOTS.length); } while (n === exclude);
-  return n;
-}
-
-/** Per-move rotation jitter in degrees (Plyr rnd(-3, 3), 1 decimal). */
+/** Per-mount rotation jitter in degrees (±WATERMARK_ROTATION_DEG, 1 decimal). */
 export function wmRandomRotation(): number {
   return Number(wmRand(-WATERMARK_ROTATION_DEG, WATERMARK_ROTATION_DEG).toFixed(1));
 }
 
-/**
- * Plyr `mkTransform` clamp as fractions→pixels: keep the WHOLE element inside
- * the container with a ≥6 % inset, so right/bottom slots can never clip the
- * text on narrow players (this was the native "parts of the watermark are
- * missing" bug when slots were clamped differently than Plyr).
- */
-export function wmClampPosition(
-  slot: readonly [number, number],
-  containerW: number,
-  containerH: number,
-  elementW: number,
-  elementH: number,
-): { x: number; y: number } {
-  const inset = Math.round(Math.min(containerW, containerH) * WATERMARK_INSET_FRACTION);
-  const x = Math.min(
-    Math.round(slot[0] * containerW),
-    Math.max(inset, containerW - elementW - inset),
-  );
-  const y = Math.min(
-    Math.round(slot[1] * containerH),
-    Math.max(inset, containerH - elementH - inset),
-  );
-  return { x: Math.max(x, inset), y: Math.max(y, inset) };
-}
-
-/** Plyr per-move opacity draw. */
+/** Per-mount opacity draw — inside the always-readable band. */
 export function wmRandomOpacity(): number {
   return Number(wmRand(WATERMARK_OPACITY_MIN, WATERMARK_OPACITY_MAX).toFixed(2));
-}
-
-/** Plyr initial opacity draw (mount). */
-export function wmInitialOpacity(): number {
-  return Number(wmRand(WATERMARK_OPACITY_INIT_MIN, WATERMARK_OPACITY_INIT_MAX).toFixed(2));
-}
-
-/** Plyr per-tick delay. */
-export function wmNextMoveDelayMs(): number {
-  return Math.round(wmRand(WATERMARK_MOVE_MIN_MS, WATERMARK_MOVE_MAX_MS));
 }

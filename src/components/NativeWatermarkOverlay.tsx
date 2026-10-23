@@ -58,6 +58,10 @@ import {
   WATERMARK_MAX_WIDTH_CAP,
   WATERMARK_MAX_WIDTH_FRAC,
   WATERMARK_FONT_PX,
+  WATERMARK_FONT_FRAC,
+  WATERMARK_FONT_MIN_PX,
+  WATERMARK_FONT_MAX_PX,
+  WATERMARK_NAME_FONT_RATIO,
   wmRandomOpacity,
   wmRandomRotation,
 } from '@/lib/nativeWatermarkConfig';
@@ -121,6 +125,12 @@ export function NativeWatermarkOverlay({
 
   const [maxPillWidth, setMaxPillWidth] = useState(WATERMARK_MAX_WIDTH_CAP);
 
+  // Responsive type, derived from the measured video box: 6.2 % of its smaller
+  // dimension, clamped 13–34 px. A phone player therefore reads at ~15–18 px
+  // and a fullscreen/full-bleed player grows to 30 px+, instead of the fixed
+  // 15 px that stayed tiny when the player expanded.
+  const [fontPx, setFontPx] = useState(WATERMARK_FONT_PX);
+
   const size = (): MotionSize => ({
     width: pillWRef.current > 0 ? pillWRef.current : 1,
     height: pillHRef.current > 0 ? pillHRef.current : 1,
@@ -175,6 +185,13 @@ export function NativeWatermarkOverlay({
     if (Math.abs(width - prev.width) > 0.5 || Math.abs(height - prev.height) > 0.5) {
       setMaxPillWidth(Math.min(width * WATERMARK_MAX_WIDTH_FRAC, WATERMARK_MAX_WIDTH_CAP));
     }
+    const nextFont = Math.round(
+      Math.max(
+        WATERMARK_FONT_MIN_PX,
+        Math.min(WATERMARK_FONT_MAX_PX, Math.min(width, height) * WATERMARK_FONT_FRAC),
+      ),
+    );
+    setFontPx((v) => (v === nextFont ? v : nextFont));
     containerWRef.current = width;
     containerHRef.current = height;
     syncMotion();
@@ -276,8 +293,6 @@ export function NativeWatermarkOverlay({
     transform: [{ rotate: `${rotation.value}deg` }],
   }));
 
-  // Single-line watermark: "NAME • ID" or "ID".
-  const label = watermarkName ? `${watermarkName} • ${watermarkId}` : watermarkId;
 
   return (
     <View
@@ -290,8 +305,21 @@ export function NativeWatermarkOverlay({
         style={[containerStyle, { maxWidth: maxPillWidth }]}
         onLayout={handlePillLayout}
       >
-        <Text style={styles.wmText} numberOfLines={1} ellipsizeMode="tail">
-          {label}
+        {/* Two lines: display name, then the complete public id underneath.
+            The name is its own block with ellipsis, so a very long name can
+            never push the id out of view (the old single line truncated the
+            id — the "id arrives cut" defect). */}
+        {watermarkName ? (
+          <Text
+            style={[styles.wmText, { fontSize: Math.round(fontPx * WATERMARK_NAME_FONT_RATIO) }]}
+            numberOfLines={1}
+            ellipsizeMode="tail"
+          >
+            {watermarkName}
+          </Text>
+        ) : null}
+        <Text style={[styles.wmText, styles.wmId, { fontSize: fontPx }]} numberOfLines={1}>
+          {watermarkId}
         </Text>
       </Animated.View>
     </View>
@@ -317,5 +345,9 @@ const styles = {
     textShadowColor:  'rgba(0,0,0,0.95)',
     textShadowOffset: { width: 0, height: 1 },
     textShadowRadius:  4,
+  },
+  wmId: {
+    fontWeight: '700' as const,
+    opacity: 0.95,
   },
 } as const;

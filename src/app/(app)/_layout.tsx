@@ -14,6 +14,7 @@ import { getProfile } from '@/lib/api';
 import { refreshAccountState, handleRefreshOutcome } from '@/lib/accountRefresh';
 import { ensureFeatureFlagsFresh } from '@/lib/featureFlags';
 import { isExpectedMaintenanceError } from '@/lib/maintenanceStateModel';
+import { isStaffConsoleRole, setRoleLocaleLock, STAFF_CONSOLE_LOCALE } from '@/lib/i18n';
 import { maintenanceEpoch } from '@/components/MaintenanceGate';
 import { UploadFAB } from '@/components/VideoUploadQueue';
 import { useSecurity } from '@/lib/SecurityContext';
@@ -42,6 +43,26 @@ function AppLayoutNav() {
   useDeviceHeartbeat(session?.user?.id);
   const { profile, isProfileLoading, setProfile, setProfileLoading, clearProfile } = useProfileStore();
   const router = useRouter();
+
+  /**
+   * STAFF CONSOLE LANGUAGE LOCK (Super Admin / Admin => English).
+   *
+   * The whole console translated through the shared dictionary, so it simply
+   * followed the Arabic device/preference — which is why the previous attempt
+   * (translating the landing page only) did not change what users saw on the
+   * nested screens. The lock lives in the i18n layer, so EVERY screen inside
+   * the console — titles, tabs, tables, dialogs, validation and empty states —
+   * switches at once, and it is released automatically when the role changes or
+   * the user signs out. Student/Doctor UIs keep their Arabic support.
+   */
+  useEffect(() => {
+    setRoleLocaleLock(isStaffConsoleRole(profile?.role) ? STAFF_CONSOLE_LOCALE : null);
+  }, [profile?.role]);
+
+  // Releasing on unmount keeps a signed-out device from staying in English for
+  // the sign-in screen if the user's language is Arabic.
+  useEffect(() => () => setRoleLocaleLock(null), []);
+
   const hasNavigated = useRef(false);
   // Guard: role-based redirect must only fire ONCE after login.
   // Any later store update (e.g. profile refresh from the Profile screen)

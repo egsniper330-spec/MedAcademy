@@ -208,8 +208,30 @@ final class StorageController
         $forDownload = filter_var($request->json()['download'] ?? false, FILTER_VALIDATE_BOOLEAN);
 
         $normalised = $this->normalisePath($path);
+        // The legacy `lesson-pdfs` bucket (the superseded `lesson_pdfs` table) is
+        // staff-only: those objects cannot be personalized, so a student who
+        // signed one would receive an unwatermarked PDF. Refused with the same
+        // code as a lesson-material PDF so the app can say something useful.
+        if ($bucket === 'lesson-pdfs' && !in_array((string) $request->user['role'], ['doctor', 'admin', 'super_admin'], true)) {
+            throw new ApiException(
+                403,
+                'Lecture notes are delivered as personalized lesson materials. Ask your instructor to upload them as material.',
+                'material_delivery_required'
+            );
+        }
         if (!$this->storage->canAccess($request->user['id'], $request->user['role'], $bucket, $normalised, $forDownload)) {
             throw new ApiException(403, 'Access denied');
+        }
+        // A lesson-material PDF is delivered ONLY by MaterialDeliveryController:
+        // every student copy must be personalized, and that endpoint re-checks
+        // enrollment at stream time. A storage signature can do neither, so it
+        // is refused here rather than handing out a raw path to the original.
+        if ($this->isLessonMaterialPdf($bucket, $normalised)) {
+            throw new ApiException(
+                403,
+                'Lesson PDFs are delivered as personalized copies. Open the material from the lesson screen.',
+                'material_delivery_required'
+            );
         }
         return ['signed_url' => $this->storage->signedUrl($bucket, $normalised, $expiresIn)];
     }
@@ -242,6 +264,17 @@ final class StorageController
         if (!in_array($bucket, self::PRIVATE_BUCKETS, true) || $path === '' || str_contains($path, '..')) {
             Response::error('File not found', 404, 'not_found');
         }
+        // Enforced at REDEMPTION too, not just when minting: a link issued
+        // before this rule existed (or cached by a client) must not hand a
+        // student the unwatermarked original for the rest of its TTL.
+        if ($this->isLessonMaterialPdf($bucket, $path)) {
+            Response::error(
+                'Lesson PDFs are delivered as personalized copies. Reopen the material.',
+                403,
+                'material_delivery_required'
+            );
+        }
+
         $expires = (int) $request->query('expires', 0);
         $sig = (string) ($request->query('sig', ''));
 
@@ -275,6 +308,12 @@ final class StorageController
 
     public function upload(Request $request): array
     {
+        // PHP silently empties $_POST and $_FILES when the multipart body exceeds
+        // post_max_size, so distinguish that hosting-limit case from a missing file.
+        if ($request->postBodyExceededLimit()) {
+            throw new ApiException(413, 'Upload exceeds the server request limit. Reduce the file size or ask the host to raise post_max_size.');
+        }
+
         // The backend client sends multipart form fields (bucket, path, file).
         // Read from $_POST first, JSON fallback for non-browser callers.
         $bucket = (string) ($_POST['bucket'] ?? $request->json()['bucket'] ?? '');
@@ -284,7 +323,20 @@ final class StorageController
         }
 
         $file = $request->file('file');
-        if ($file === null || ($file['error'] ?? 1) !== UPLOAD_ERR_OK) {
+        if ($file === null) {
+            throw new ApiException(400, 'file is required');
+        }
+        $uploadError = (int) ($file['error'] ?? UPLOAD_ERR_NO_FILE);
+        if ($uploadError !== UPLOAD_ERR_OK) {
+            if ($uploadError === UPLOAD_ERR_INI_SIZE || $uploadError === UPLOAD_ERR_FORM_SIZE) {
+                throw new ApiException(413, 'File exceeds the server upload size limit. Reduce the file size or ask the host to raise upload_max_filesize.');
+            }
+            if ($uploadError === UPLOAD_ERR_NO_TMP_DIR || $uploadError === UPLOAD_ERR_CANT_WRITE) {
+                throw new ApiException(500, 'The server could not prepare storage for this upload. Please contact support.');
+            }
+            if ($uploadError === UPLOAD_ERR_PARTIAL) {
+                throw new ApiException(400, 'The upload was interrupted. Please try again.');
+            }
             throw new ApiException(400, 'file is required');
         }
 
@@ -420,6 +472,35 @@ final class StorageController
         }
 
         return false;
+    }
+
+    /**
+     * True when the object is a PDF in the `lesson-materials` bucket — the only
+     * documents that must always be personalized.
+     *
+     * The extension is checked first (uploads always keep one); the database is
+     * consulted only when there is none, so this stays cheap on the hot path.
+     */
+    private function isLessonMaterialPdf(string $bucket, string $path): bool
+    {
+        if ($bucket !== 'lesson-materials') {
+            return false;
+        }
+        if (strtolower((string) pathinfo($path, PATHINFO_EXTENSION)) === 'pdf') {
+            return true;
+        }
+        try {
+            $type = (string) Database::instance()->value(
+                'SELECT file_type FROM lesson_materials WHERE storage_path = ? LIMIT 1',
+                [$path],
+                ''
+            );
+        } catch (\Throwable) {
+            // Unknown type: do not block a non-PDF attachment because a query
+            // failed; the extension check above already covered real PDFs.
+            return false;
+        }
+        return stripos($type, 'pdf') !== false;
     }
 
     private function normalisePath(string $input): string

@@ -14,18 +14,22 @@ import { neuColors, useLayout, mutedTextStyle } from '@/lib/neu';
 import { useEntranceAnim } from '@/lib/motion';
 import { Stethoscope, BookOpen, ShieldCheck, Zap } from 'lucide-react-native';
 import { useBranding } from '@/lib/branding';
+import { useTranslation } from '@/lib/i18n';
 
+// Labels/descriptions are translation keys: the page follows the app language
+// (this copy used to be hardcoded English inside the JSX).
 const PILLARS = [
-  { icon: BookOpen,     color: '#7C3AED', label: 'Expert-Led Content',     desc: 'Courses crafted by verified medical professionals with real clinical experience.' },
-  { icon: ShieldCheck,  color: '#16A34A', label: 'Secure Learning',        desc: 'Forensic watermarking and device enforcement protect every student and instructor.' },
-  { icon: Stethoscope,  color: '#2DA8FF', label: 'Clinical Focus',         desc: 'Curated for medical students — from anatomy to clinical rotations and beyond.' },
-  { icon: Zap,          color: '#D97706', label: 'Always Accessible',      desc: 'Mobile-first design so you can study anywhere — on the ward, at home, or on the go.' },
+  { icon: BookOpen,     color: '#7C3AED', titleKey: 'about.pillar1Title', bodyKey: 'about.pillar1Body' },
+  { icon: ShieldCheck,  color: '#16A34A', titleKey: 'about.pillar2Title', bodyKey: 'about.pillar2Body' },
+  { icon: Stethoscope,  color: '#2DA8FF', titleKey: 'about.pillar3Title', bodyKey: 'about.pillar3Body' },
+  { icon: Zap,          color: '#D97706', titleKey: 'about.pillar4Title', bodyKey: 'about.pillar4Body' },
 ];
 
 export default function AboutPage() {
   const isDark = useColorScheme() === 'dark';
   const c = isDark ? neuColors.dark : neuColors.light;
   const layout = useLayout();
+  const { t } = useTranslation();
   const { branding } = useBranding(); // server-managed display name (fails safe)
   // Optional server-managed About text (Super Admin → Platform → CMS Pages).
   // Empty body → nothing extra is rendered and the bundled copy stands alone.
@@ -44,7 +48,7 @@ export default function AboutPage() {
 
   return (
     <View style={{ flex: 1, backgroundColor: c.base }}>
-      <PageHeader title="About Us" showBack />
+      <PageHeader title={t('about.title')} showBack />
       <ScrollView
         style={{ flex: 1 }}
         contentContainerStyle={{ padding: layout.screenPx }}
@@ -106,7 +110,7 @@ export default function AboutPage() {
             marginBottom: layout.pad.sm,
           }}
         >
-          About Us
+          {t('about.title')}
         </Text>
 
         {/* Accent divider */}
@@ -131,17 +135,17 @@ export default function AboutPage() {
             paddingHorizontal: layout.screenPx,
           }}
         >
-          Empowering the next generation of medical professionals through world-class digital education.
+          {t('about.tagline')}
         </Text>
       </Animated.View>
 
       {/* Mission */}
       <NeuCard radius={layout.cardRadius} style={{ padding: layout.cardPx, marginBottom: layout.sectionGap }}>
         <Text style={{ fontSize: layout.captionSize, fontWeight: '800', color: c.primary, marginBottom: layout.pad.sm, textTransform: 'uppercase', letterSpacing: 1 }}>
-          Our Mission
+          {t('about.missionTitle')}
         </Text>
         <Text style={{ fontSize: layout.bodySize + 1, color: c.text, opacity: 0.75, lineHeight: (layout.bodySize + 1) * 1.6 }}>
-          {`${branding.app_name} was built to bridge the gap between medical theory and real-world clinical practice. We partner with leading doctors and specialists to deliver structured, high-quality, mobile-first courses that fit the demanding schedule of medical students.`}
+          {t('about.missionBody', { app: branding.app_name })}
         </Text>
       </NeuCard>
 
@@ -168,11 +172,11 @@ export default function AboutPage() {
 
       {/* Pillars */}
       <Text style={{ fontSize: layout.captionSize, fontWeight: '700', ...mutedTextStyle(c, 0.4), textTransform: 'uppercase', letterSpacing: 1.2, marginBottom: layout.pad.md }}>
-        What We Stand For
+        {t('about.standFor')}
       </Text>
       <View style={{ gap: layout.itemGap, marginBottom: layout.sectionGap }}>
         {PILLARS.map((p) => (
-          <NeuCard key={p.label} radius={layout.cardRadius} style={{ flexDirection: 'row', alignItems: 'center', padding: layout.cardPx, gap: layout.pad.md }}>
+          <NeuCard key={p.titleKey} radius={layout.cardRadius} style={{ flexDirection: 'row', alignItems: 'center', padding: layout.cardPx, gap: layout.pad.md }}>
             <View style={{
               width: pillarIconSz, height: pillarIconSz,
               borderRadius: layout.heroIconRadius / 2,
@@ -182,8 +186,8 @@ export default function AboutPage() {
               <p.icon size={Math.round(pillarIconSz * 0.5)} color={p.color} />
             </View>
             <View style={{ flex: 1 }}>
-              <Text style={{ fontSize: layout.bodySize, fontWeight: '700', color: c.text, marginBottom: 3 }}>{p.label}</Text>
-              <Text style={{ fontSize: layout.captionSize, ...mutedTextStyle(c, 0.55), lineHeight: layout.captionSize * 1.5 }}>{p.desc}</Text>
+              <Text style={{ fontSize: layout.bodySize, fontWeight: '700', color: c.text, marginBottom: 3 }}>{t(p.titleKey)}</Text>
+              <Text style={{ fontSize: layout.captionSize, ...mutedTextStyle(c, 0.55), lineHeight: layout.captionSize * 1.5 }}>{t(p.bodyKey)}</Text>
             </View>
           </NeuCard>
         ))}
@@ -192,7 +196,7 @@ export default function AboutPage() {
       {/* Footer note */}
       <NeuCard radius={layout.cardRadius} style={{ padding: layout.cardPx, alignItems: 'center' }}>
         <Text style={{ fontSize: layout.captionSize + 1, ...mutedTextStyle(c, 0.5), textAlign: 'center', lineHeight: (layout.captionSize + 1) * 1.6 }}>
-          {`${branding.app_name} is continuously evolving.`}{'\n'}Thank you for being part of our community.
+          {t('about.footer', { app: branding.app_name })}
         </Text>
       </NeuCard>
     </ScrollView>

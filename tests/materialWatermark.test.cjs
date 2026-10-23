@@ -2,14 +2,18 @@
 /**
  * tests/materialWatermark.test.cjs
  *
- * Personalized PDF watermarking + Preview-Only enforcement.
+ * Personalized PDF watermarking — MANDATORY policy.
  *
- * The PHP backend cannot be executed here, so this suite combines:
+ * The PHP backend cannot be executed from this suite, so it combines:
  *   • SOURCE assertions on the real committed PHP/SQL/TS files (the security
  *     invariants that must not silently drift), and
- *   • PURE MODELS of the two decisions that are easiest to get wrong — the
- *     delivery-token binding and the "may this request receive the original
- *     file?" decision — so their behaviour is executed, not just grepped.
+ *   • PURE MODELS of the decisions that are easiest to get wrong — the delivery
+ *     decision, the delivery-token binding, and the "which control do I get?"
+ *     mapping — so their behaviour is executed, not just grepped.
+ *
+ * The policy under test: a STUDENT always receives a personalized copy; a doctor
+ * can never disable it; a PDF original is reachable only through the token-gated
+ * delivery endpoint.
  */
 
 const fs = require('fs');
@@ -37,33 +41,41 @@ function section(title) {
   console.log('\n── ' + title + ' ──');
 }
 
-/* ══ 1. Migration — additive, safe, and the right shape ═══════════════════ */
+/* ══ 1. Migrations — additive, safe, and the right shape ══════════════════ */
 
-section('1. Migration 032');
+section('1. Migrations 032 + 035');
 
 {
   const sql = read('backend/database/mysql-migrations/032_lesson_material_watermark.sql');
+  const hard = read('backend/database/mysql-migrations/035_lesson_material_pdf_hardening.sql');
 
-  ok('adds watermark_enabled with DEFAULT 0 (nothing starts watermarking)',
-    /ADD COLUMN `watermark_enabled` TINYINT\(1\) NOT NULL DEFAULT 0/.test(sql));
-  ok('watermark toggle is independent of permission/download_enabled (no ALTER to them)',
-    !/ALTER TABLE `lesson_materials`[\s\S]{0,200}(permission|download_enabled)/.test(sql));
-  ok('creates the generated-copy registry',
+  ok('032 creates the generated-copy registry',
     /CREATE TABLE IF NOT EXISTS `lesson_material_pdfs`/.test(sql));
-  ok('registry is idempotent (CREATE TABLE IF NOT EXISTS)',
-    /CREATE TABLE IF NOT EXISTS/.test(sql));
-  ok('caches by (material, student, variant) — one copy per student',
+  ok('032 caches by (material, student, variant) — one copy per student',
     /UNIQUE KEY `uq_lesson_material_pdfs_variant` \(`material_id`, `student_id`, `variant_key`\)/.test(sql));
-  ok('source hash is stored so a replaced source invalidates copies',
+  ok('032 stores the source hash so a replaced source invalidates copies',
     /`source_hash`\s+CHAR\(64\)\s+NOT NULL/.test(sql));
-  ok('variant_key is stored (drives cache identity)',
-    /`variant_key`\s+CHAR\(64\)\s+NOT NULL/.test(sql));
-  ok('generated copies cascade-delete with the material',
+  ok('032 cascade-deletes copies with the material',
     /FOREIGN KEY \(`material_id`\) REFERENCES `lesson_materials` \(`id`\) ON DELETE CASCADE/.test(sql));
-  ok('generated copies cascade-delete with the student',
-    /FOREIGN KEY \(`student_id`\) REFERENCES `profiles` \(`id`\) ON DELETE CASCADE/.test(sql));
-  ok('migration does not touch existing rows or drop anything',
-    !/\b(DROP|DELETE FROM|UPDATE )\b/.test(sql));
+
+  ok('035 adds the cached source hash columns',
+    /ADD COLUMN `file_hash` CHAR\(64\) NULL/.test(hard) &&
+    /ADD COLUMN `file_hash_path` TEXT NULL/.test(hard) &&
+    /ADD COLUMN `file_hash_size` BIGINT NULL/.test(hard));
+  ok('035 is additive — it never DROPs or rewrites data',
+    !/\b(DROP COLUMN|DELETE FROM|TRUNCATE|UPDATE `?lesson_materials`? SET)\b/.test(hard));
+  ok('035 does NOT drop the legacy watermark_enabled column',
+    !/DROP COLUMN `watermark_enabled`/.test(hard));
+  ok('035 registers the two delivery audit actions',
+    /'material_pdf_delivered'/.test(hard) && /'material_pdf_failed'/.test(hard));
+  ok('035 re-adds the audit CHECK as a SUPERSET of 031 (no action is lost)',
+    (() => {
+      const list = (t) => new Set((t.match(/CHECK \(`action` IN \(([^)]*)\)\)/) || [, ''])[1]
+        .match(/'([^']+)'/g)?.map((s) => s.slice(1, -1)) || []);
+      const m31 = list(read('backend/database/mysql-migrations/031_audit_actions_security_vdocipher.sql'));
+      const m35 = list(hard);
+      return m31.size > 100 && [...m31].every((a) => m35.has(a));
+    })());
 }
 
 /* ══ 2. No direct route to a personalized copy ════════════════════════════ */
@@ -87,9 +99,62 @@ section('2. The generated bucket has no storage route');
     /public const BUCKET = 'lesson-material-pdfs';/.test(read('backend/src/Services/PdfWatermarkService.php')));
 }
 
-/* ══ 3. Watermarking is fail-closed ═══════════════════════════════════════ */
+/* ══ 3. Lesson-material PDFs cannot bypass the delivery endpoint ═══════════ */
 
-section('3. PDF engine is fail-closed');
+section('3. A student cannot obtain the ORIGINAL through storage');
+
+{
+  const ctl = read('backend/src/Controllers/StorageController.php');
+
+  ok('signed-URL minting refuses lesson-material PDFs',
+    /if \(\$this->isLessonMaterialPdf\(\$bucket, \$normalised\)\) \{[\s\S]{0,200}material_delivery_required/.test(ctl));
+  ok('the refusal happens BEFORE a signed URL is returned',
+    ctl.indexOf('isLessonMaterialPdf($bucket, $normalised)') <
+      ctl.indexOf('return [\'signed_url\' => $this->storage->signedUrl('));
+  ok('redemption refuses them too (a stale link dies immediately)',
+    /if \(\$this->isLessonMaterialPdf\(\$bucket, \$path\)\) \{[\s\S]{0,200}material_delivery_required/.test(ctl));
+  ok('the redemption refusal precedes the signature check',
+    ctl.indexOf('isLessonMaterialPdf($bucket, $path)') < ctl.indexOf('hash_equals($expected, $sig)'));
+  ok('PDF detection is bucket-scoped (other buckets unaffected)',
+    /if \(\$bucket !== 'lesson-materials'\) \{\s*return false;/.test(ctl));
+  ok('PDF detection also consults the stored file_type (extension may be absent)',
+    /SELECT file_type FROM lesson_materials WHERE storage_path = \?/.test(ctl));
+  ok('non-PDF attachments keep the existing signed-URL flow',
+    !/isLessonMaterialPdf[\s\S]{0,400}(\.docx|\.zip|BLOCKED_UPLOAD_EXTENSIONS)/.test(ctl));
+
+  // ── The legacy `lesson_pdfs` bucket ─────────────────────────────────────
+  // It used to be readable by ANY authenticated user. Those objects can never
+  // be personalized (there is no lesson_materials row to key a copy on), so
+  // leaving it open was a way to obtain an unwatermarked student PDF.
+  const storage = read('backend/src/Storage/StorageService.php');
+  ok('the legacy lesson-pdfs bucket no longer authorises students',
+    /if \(\$bucket === 'lesson-pdfs'\) \{[\s\S]{0,900}?return false;/.test(storage));
+  ok('staff keep the legacy bucket (canAccess returns true before the bucket checks)', (() => {
+    const guard = storage.indexOf("if (in_array($role, ['doctor', 'admin', 'super_admin'], true))");
+    const legacy = storage.indexOf("if ($bucket === 'lesson-pdfs')");
+    return guard !== -1 && legacy !== -1 && guard < legacy;
+  })());
+  ok('minting a legacy lecture note for a student is refused with a clear code',
+    /\$bucket === 'lesson-pdfs' && !in_array\(\(string\) \$request->user\['role'\], \['doctor', 'admin', 'super_admin'\], true\)[\s\S]{0,300}material_delivery_required/.test(ctl));
+  ok('that refusal precedes the generic authorisation branch',
+    ctl.indexOf("$bucket === 'lesson-pdfs' &&") < ctl.indexOf('canAccess($request->user[\'id\']'));
+
+  // Executed model of the two storage decisions.
+  const legacyAllowed = (role, bucket) => {
+    if (['doctor', 'admin', 'super_admin'].includes(role)) return true;
+    return bucket !== 'lesson-pdfs' && bucket !== 'lesson-materials';
+  };
+  ok('model: student + lesson-pdfs → refused', legacyAllowed('student', 'lesson-pdfs') === false);
+  ok('model: student + lesson-materials → refused here too (delivery endpoint only)',
+    legacyAllowed('student', 'lesson-materials') === false);
+  ok('model: student + avatars → unaffected', legacyAllowed('student', 'avatars') === true);
+  ok('model: doctor + lesson-pdfs → allowed', legacyAllowed('doctor', 'lesson-pdfs') === true);
+  ok('model: admin + lesson-pdfs → allowed', legacyAllowed('admin', 'lesson-pdfs') === true);
+}
+
+/* ══ 4. Watermarking is fail-closed ═══════════════════════════════════════ */
+
+section('4. The PDF engine is fail-closed');
 
 {
   const svc = read('backend/src/Services/PdfWatermarkService.php');
@@ -107,46 +172,85 @@ section('3. PDF engine is fail-closed');
     /catch \(\\Throwable \$e\)[\s\S]{0,240}throw new ApiException\(500/.test(svc));
   ok('output is verified to exist and be non-empty',
     /filesize\(\$outAbsPath\) === 0[\s\S]{0,120}ApiException\(500/.test(svc));
+  ok('an oversized source is refused before parsing',
+    /maxSourceBytes\(\)[\s\S]{0,200}ApiException\([\s\S]{0,120}422/.test(svc));
 
   ok('delivery refuses to stream when the personalized copy is missing',
     /personalized copy is not available[\s\S]{0,120}503, 'watermark_unavailable'/.test(delivery));
-  ok('the original is reachable ONLY in the non-watermarked else branch',
+  ok('the original is reachable ONLY in the staff branch',
     (() => {
       const stream = delivery.slice(delivery.indexOf('public function streamPdf'));
       return /\} else \{[\s\S]{0,200}'lesson-materials'/.test(stream) &&
         stream.indexOf('watermark_unavailable') < stream.indexOf("privateFilePath('lesson-materials'");
     })());
+  ok('a generation failure is audited and the request still fails',
+    /auditFailure\(\$material, \$userId, 'mint', \$e\);[\s\S]{0,40}throw \$e;/.test(delivery));
 }
 
-/* ══ 4. Background compositing + every page ═══════════════════════════════ */
+/* ══ 5. Layered marks, identity from the server ══════════════════════════ */
 
-section('4. Watermark is a per-page BACKGROUND');
+section('5. Watermark geometry, layers and identity');
 
 {
   const svc = read('backend/src/Services/PdfWatermarkService.php');
+  const baker = read('backend/src/Services/PdfWatermarkBaker.php');
+  const tplCall = '$pdf->useTemplate($tpl, 0, 0, $w, $h)';
 
-  ok('loops over EVERY imported page',
+  ok('loops over EVERY imported page (TCPDF engine)',
     /for \(\$pageNo = 1; \$pageNo <= \$pageCount; \$pageNo\+\+\)/.test(svc));
-  ok('the WATERMARK is drawn before the page is composited (background)',
-    svc.indexOf('// ── 1. Watermark layer, painted FIRST so it sits behind ──') <
-      svc.indexOf('$pdf->useTemplate($tpl, 0, 0, $w, $h)'));
-  ok('the original page is placed ON TOP of the watermark',
-    /ORIGINAL page, drawn ON TOP of the watermark[\s\S]{0,120}useTemplate/.test(svc));
-  ok('original page size/orientation is preserved per page',
-    /getTemplateSize\(\$tpl\)/.test(svc) && /AddPage\(\$orientation, \[\$w, \$h\]\)/.test(svc));
-  ok('watermark opacity is low (does not harm readability)',
-    /SetAlpha\(0\.10\)/.test(svc));
-  ok('diagonal placement (rotation applied)',
+  ok('a BACK layer is drawn before the page is placed',
+    svc.indexOf('$this->drawTcpdfBackLayer(') > 0 &&
+    svc.indexOf('$this->drawTcpdfBackLayer(') < svc.indexOf(tplCall));
+  ok('a FRONT layer is drawn after the page, so it covers the lecture',
+    svc.indexOf('$this->drawTcpdfFrontLayer(') > svc.indexOf(tplCall));
+  ok('the identity rails are drawn after the page (always readable)',
+    svc.indexOf('$this->drawTcpdfRails(') > svc.indexOf(tplCall));
+  ok('an interior anchor is drawn after the page AND after the rails',
+    svc.indexOf('$this->drawTcpdfAnchor(') > svc.indexOf('$this->drawTcpdfRails(') &&
+    /private function drawTcpdfAnchor\(\\TCPDF/.test(svc));
+  ok('the interior anchor is the dark layer (survives flatten + threshold + crop)',
+    /setAlpha\(0\.85\)/.test(svc) && /self::VECTOR_ANCHOR_PT, 6\.5, 5\.5/.test(svc));
+  ok('the interior anchor drops the "| MedAcademy" tail and falls back to the id',
+    /explode\('\|', \$identity\)\[0\]/.test(svc) &&
+    /str_contains\(\$identity, '\\u\{2022\}'\)/.test(svc));
+  ok('a non-text trace lattice is part of every page',
+    svc.indexOf('$this->drawTcpdfTraceLattice(') > svc.indexOf(tplCall) &&
+    /function traceBits\(/.test(svc) && /function traceCode\(/.test(svc));
+  ok('marks are BAKED inside each imported page stream (not one deletable block)',
+    /new PdfWatermarkBaker\(\)\)->bake\(/.test(svc) && /private function appendToForm\(/.test(baker) &&
+    /%MAC-WM-BAKED/.test(baker));
+  ok('baking fails open to the layered marks, never to a clean page',
+    /catch \(\\Throwable \$e\) \{\s*error_log\('\[pdf-watermark\] content bake failed/.test(svc));
+  ok('every mark is measured and clamped inside the page (never clipped)',
+    /private function fittedOrigin\(/.test(svc) &&
+    /if \(\$px \+ \$minX < \$margin - 0\.02 \|\| \$px \+ \$maxX > \$w - \$margin \+ 0\.02/.test(svc));
+  ok('placement is seeded per recipient and page (no fixed mask)',
+    /private function pageSeed\(/.test(svc) && /hash\(\s*'sha256',\s*self::LAYERS_VERSION/s.test(svc));
+  ok('front marks are a SEPARATE, lower-ceiling setting from the back grid',
+    /function vectorOpacity\(\)/.test(svc) && /function vectorForegroundOpacity\(\)/.test(svc) &&
+    /min\(0\.55, \$o\)/.test(svc));
+  ok('diagonal placement (45° rotation applied)',
     /Rotate\(45, \$x, \$y\)/.test(svc));
-  ok('watermark is written into the page content, not an annotation',
-    !/\/Annots|FreeText|Widget|SetXY|Write\(/.test(svc));
-  ok('identity text is sanitized before it reaches a PDF string',
+  ok('back-grid opacity is low enough to keep the lecture readable',
+    /return max\(0\.04, min\(0\.35, \$o\)\)/.test(svc));
+  ok('an embedded Unicode face is used (no external font file needed)',
+    /private const VECTOR_FONT = 'dejavusans'/.test(svc) && /setFontSubsetting\(true\)/.test(svc));
+  ok('page size/orientation is preserved per page',
+    /getTemplateSize\(\$tpl\)/.test(svc));
+  ok('the mark is drawn as TEXT in the page content, not an annotation',
+    !/\/Annots|FreeText|Widget/.test(svc));
+  ok('identity text is sanitized (control chars + bidi overrides stripped)',
     /sanitizeIdentityLine\(/.test(svc) && /\\x\{202A\}-\\x\{202E\}/.test(svc) && /mb_substr\(/.test(svc));
+  ok('a name that cannot be drawn falls back to the account id (never mojibake)',
+    /private function renderableName/.test(svc) && /return '';/.test(svc) &&
+    /\\x\{0590\}-\\x\{08FF\}/.test(svc));
+  ok('the raster engine is preserved as an opt-in, not the default',
+    /Config::string\('PDF_WATERMARK_MODE', self::MODE_AUTO\)/.test(svc));
 }
 
-/* ══ 5. Authorization is single-sourced and re-checked live ═══════════════ */
+/* ══ 6. Authorization is single-sourced and re-checked live ═══════════════ */
 
-section('5. A permission change kills an already-issued link');
+section('6. A permission change kills an already-issued link');
 
 {
   const delivery = read('backend/src/Controllers/MaterialDeliveryController.php');
@@ -166,9 +270,9 @@ section('5. A permission change kills an already-issued link');
     /in_array\(\$permission, \['hidden', 'disabled'\], true\)/.test(svc));
 }
 
-/* ══ 6. Token binding — executed model, not a grep ════════════════════════ */
+/* ══ 7. Delivery token — executed model ═══════════════════════════════════ */
 
-section('6. Delivery token binds material + student + intent + expiry');
+section('7. The delivery token binds material + student + intent + expiry');
 
 {
   const SECRET = 'test-secret';
@@ -194,192 +298,305 @@ section('6. Delivery token binds material + student + intent + expiry');
   const t = sign('mat-1', 'stu-A', 'view', now + 300);
   const good = verify(t, now);
   ok('a freshly minted token verifies', !good.error && good.materialId === 'mat-1' && good.studentId === 'stu-A');
-  ok('the token identifies the STUDENT (so a copy cannot be re-pointed)',
-    good.studentId === 'stu-A');
-  ok('an expired token is refused',
-    verify(t, now + 301).error === 'expired');
-  ok('a tampered body is refused',
-    (() => {
-      const forged = b64url('mat-2|stu-A|view|' + (now + 300) + '|' + '0'.repeat(64));
-      return verify(forged, now).error === 'invalid';
-    })());
-  ok('another student cannot reuse a token by editing the payload',
-    (() => {
-      const [body] = Buffer.from(t.replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString('utf8').split('|').slice(-1);
-      void body;
-      const forged = b64url('mat-1|stu-B|view|' + (now + 300) + '|' + crypto.createHmac('sha256', 'wrong').update('x').digest('hex'));
-      return verify(forged, now).error === 'invalid';
-    })());
+  ok('the token identifies the STUDENT (so a copy cannot be re-pointed)', good.studentId === 'stu-A');
+  ok('an expired token is refused', verify(t, now + 301).error === 'expired');
+  ok('a tampered body is refused', (() => {
+    const forged = b64url('mat-2|stu-A|view|' + (now + 300) + '|' + '0'.repeat(64));
+    return verify(forged, now).error === 'invalid';
+  })());
+  ok('another student cannot reuse a token by editing the payload', (() => {
+    const forged = b64url('mat-1|stu-B|view|' + (now + 300) + '|' + crypto.createHmac('sha256', 'wrong').update('x').digest('hex'));
+    return verify(forged, now).error === 'invalid';
+  })());
   ok('the token carries NO storage path or file name',
     !Buffer.from(t.replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString('utf8').includes('/'));
   ok('a download intent is signed in (cannot be flipped to view)',
     verify(sign('mat-1', 'stu-A', 'download', now + 300), now).intent === 'download');
 }
 
-/* ══ 7. Delivery decision — executed model ════════════════════════════════ */
+/* ══ 8. MANDATORY policy — executed model + source proof ═════════════════ */
 
-section('7. Which bytes may be served');
+section('8. Which bytes may be served (watermarking is mandatory)');
 
 {
-  // Mirror of MaterialDeliveryController::shouldWatermark + the canAccess rules.
-  const shouldWatermark = (material, role) => role === 'student' && Number(material.watermark_enabled) === 1;
-  const decide = ({ material, role, forDownload, enrolled, published, engineAvailable }) => {
-    const perm = String(material.permission ?? 'allow');
-    if (perm === 'hidden' || perm === 'disabled') return { deny: true };
+  // Mirror of MaterialDeliveryController::shouldWatermark: every role, always.
+  const shouldWatermark = (_role) => true;
+  const decide = ({ role, forDownload, enrolled, published, engineAvailable, legacyFlag }) => {
     if (published && !enrolled && role === 'student') return { deny: true };
-    if (forDownload && (perm === 'preview_only' || !material.download_enabled)) return { deny: true };
-    if (shouldWatermark(material, role)) {
+    if (forDownload && legacyFlag === 'ignored') return { deny: true };
+    if (shouldWatermark(role)) {
       return engineAvailable ? { watermarked: true } : { status: 503 };
     }
     return { original: true };
   };
 
-  const base = { permission: 'allow', download_enabled: 1, watermark_enabled: 0 };
+  ok('student → personalized copy', decide({ role: 'student', enrolled: true, published: true, engineAvailable: true }).watermarked === true);
+  ok('student + engine missing → 503, NEVER the original',
+    (() => { const d = decide({ role: 'student', enrolled: true, published: true, engineAvailable: false }); return d.status === 503 && !d.original; })());
+  ok('student + download intent → still personalized',
+    decide({ role: 'student', forDownload: true, enrolled: true, published: true, engineAvailable: true }).watermarked === true);
+  ok('doctor → ALSO personalized (the original is never served)',
+    decide({ role: 'doctor', enrolled: false, published: true, engineAvailable: true }).watermarked === true);
+  ok('doctor + engine missing → 503, never the original',
+    (() => { const d = decide({ role: 'doctor', published: true, engineAvailable: false }); return d.status === 503 && !d.original; })());
+  ok('admin → personalized too', decide({ role: 'admin', published: true, engineAvailable: true }).watermarked === true);
+  ok('un-enrolled student → denied', decide({ role: 'student', enrolled: false, published: true, engineAvailable: true }).deny === true);
 
-  ok('student + watermark ON → personalized copy',
-    decide({ material: { ...base, watermark_enabled: 1 }, role: 'student', forDownload: false, enrolled: true, published: true, engineAvailable: true }).watermarked === true);
-  ok('student + watermark ON + engine missing → 503, NEVER the original',
-    (() => { const d = decide({ material: { ...base, watermark_enabled: 1 }, role: 'student', forDownload: false, enrolled: true, published: true, engineAvailable: false }); return d.status === 503 && !d.original; })());
-  ok('watermark OFF → the original (permission permitting)',
-    decide({ material: base, role: 'student', forDownload: true, enrolled: true, published: true, engineAvailable: true }).original === true);
-  ok('teacher is not personalized even with watermark ON',
-    decide({ material: { ...base, watermark_enabled: 1 }, role: 'doctor', forDownload: false, enrolled: false, published: true, engineAvailable: true }).original === true);
-  ok('preview_only + download → denied',
-    decide({ material: { ...base, permission: 'preview_only' }, role: 'student', forDownload: true, enrolled: true, published: true, engineAvailable: true }).deny === true);
-  ok('preview_only + view → allowed (and personalized when watermark ON)',
-    decide({ material: { ...base, permission: 'preview_only', watermark_enabled: 1 }, role: 'student', forDownload: false, enrolled: true, published: true, engineAvailable: true }).watermarked === true);
-  ok('watermark ON + download allowed → still personalized',
-    decide({ material: { ...base, watermark_enabled: 1 }, role: 'student', forDownload: true, enrolled: true, published: true, engineAvailable: true }).watermarked === true);
-  ok('hidden → denied for both intents',
-    decide({ material: { ...base, permission: 'hidden' }, role: 'student', forDownload: false, enrolled: true, published: true, engineAvailable: true }).deny === true &&
-    decide({ material: { ...base, permission: 'hidden' }, role: 'student', forDownload: true, enrolled: true, published: true, engineAvailable: true }).deny === true);
-  ok('un-enrolled student → denied',
-    decide({ material: base, role: 'student', forDownload: false, enrolled: false, published: true, engineAvailable: true }).deny === true);
+  const delivery = read('backend/src/Controllers/MaterialDeliveryController.php');
+  ok('shouldWatermark takes ONLY the role (no material, no request field)',
+    /private function shouldWatermark\(string \$role\): bool/.test(delivery));
+  ok('it returns true for EVERY role, unconditionally',
+    /private function shouldWatermark\(string \$role\): bool\s*\{[^}]*return true;/.test(delivery));
+  ok('loadMaterial does not even SELECT the legacy column',
+    !/SELECT[^']*watermark_enabled[^']*FROM lesson_materials/.test(delivery));
+  ok('no code path reads a per-material watermark flag',
+    !/watermark_enabled'?\]/.test(delivery));
 }
 
-/* ══ 8. Frontend plumbing ═════════════════════════════════════════════════ */
+/* ══ 9. Doctor-facing control is GONE ═════════════════════════════════════ */
 
-section('8. Frontend: independent control, no client-supplied identity');
+section('9. No doctor-facing toggle anywhere');
 
 {
   const api = read('src/lib/api.ts');
+  const editor = read('src/app/(app)/lesson-editor/[id].tsx');
   const mats = read('src/lib/lessonMaterials.ts');
 
-  ok('upload payload carries watermark_enabled',
-    /watermark_enabled\?: boolean;/.test(api));
-  ok('a dedicated setter exists and is separate from permission',
-    /export async function updateMaterialWatermark\(id: string, watermarkEnabled: boolean\)/.test(api));
-  ok('the new delivery helper asks for a material id (not a path)',
-    /export async function getMaterialPdfUrl\(/.test(api) && /material_id: materialId, intent:/.test(api));
-  ok('the helper maps forDownload → download intent server-side',
-    /intent: forDownload \? 'download' : 'view'/.test(api));
-  ok('no client identity is ever sent to the watermarker',
-    (() => {
-      // Scope the check to the delivery helper: identity must come from the
-      // server's own profile row, never from the client payload.
-      const start = api.indexOf('export async function getMaterialPdfUrl');
-      const body = api.slice(start, start + 900);
-      return /material_id: materialId/.test(body) &&
-        !/full_name|public_user_id|student_name/.test(body);
-    })());
-  ok('the watermark helper defaults OFF for pre-migration rows',
-    /isMaterialWatermarkEnabled\(mat: any\): boolean \{[\s\S]{0,120}return false;/.test(mats));
-  ok('watermark state does not change materialAccess (preview_only stays view)',
-    /permission === 'preview_only'\) return 'view';/.test(mats));
-
-  const editor = read('src/app/(app)/lesson-editor/[id].tsx');
-  ok('the teacher UI exposes the watermark control',
-    /Personalized Student Watermark/.test(editor));
-  ok('the watermark control has its OWN handler (not the permission handler)',
-    /const handleUpdateWatermark = async \(materialId: string, enabled: boolean\)/.test(editor) &&
-    /updateMaterialWatermark\(materialId, enabled\)/.test(editor));
-  ok('the watermark toggle does not set `permission`',
-    !/handleUpdateWatermark[\s\S]{0,600}updateMaterialPermission/.test(editor));
-  ok('an optimistic flip is reverted when the write fails',
-    /watermark_enabled: enabled \? 0 : 1/.test(editor));
+  ok('updateMaterialWatermark is DELETED from the API client',
+    !/export async function updateMaterialWatermark/.test(api));
+  ok('the material update payload cannot set watermark_enabled',
+    !/watermark_enabled: boolean/.test(api));
+  ok('the read type marks the column LEGACY (read-only)',
+    /LEGACY \(migration 032\)/.test(api));
+  ok('the editor has no watermark handler',
+    !/handleUpdateWatermark/.test(editor));
+  ok('the editor calls no watermark setter',
+    !/updateMaterialWatermark/.test(editor));
+  ok('the editor no longer imports one',
+    !/updateMaterialWatermark,/.test(editor));
+  ok('the editor still explains that personalization is ALWAYS ON',
+    /t\('lessonEditor\.watermarkBody'\)/.test(editor) &&
+    /lessonEditor\.watermarkBody/.test(read('src/lib/i18n/resources.ts')));
+  ok('there is no switch/pressable for the watermark row',
+    !/onPress=\{[^}]*[Ww]atermark/.test(editor));
+  ok('lessonMaterials.ts no longer exposes a watermark switch reader',
+    !/isMaterialWatermarkEnabled/.test(mats));
+  ok('it documents that the server ignores the legacy column',
+    /consult `watermark_enabled` \(the legacy column is ignored server-side\)/.test(mats));
 }
 
-/* ══ 9. Flattened, image-based engine ════════════════════════════════════ */
+/* ══ 10. Frontend PDF delivery wiring ═════════════════════════════════════ */
 
-section('9. Flattened, image-based engine');
+section('10. Students open PDFs through the personalized endpoint');
+
+{
+  const api = read('src/lib/api.ts');
+  const lesson = read('src/app/(app)/lesson/[id].tsx');
+  const mats = read('src/lib/lessonMaterials.ts');
+
+  ok('getMaterialPdfUrl takes a material id (not a path)',
+    /export async function getMaterialPdfUrl\(\s*materialId: string/.test(api) && /material_id: materialId, intent:/.test(api));
+  ok('it maps forDownload → download intent server-side',
+    /intent: forDownload \? 'download' : 'view'/.test(api));
+  ok('no client identity is ever sent to the watermarker', (() => {
+    const start = api.indexOf('export async function getMaterialPdfUrl');
+    const body = api.slice(start, start + 900);
+    return /material_id: materialId/.test(body) && !/full_name|public_user_id|student_name/.test(body);
+  })());
+  ok('the lesson screen uses the delivery endpoint for PDFs',
+    /getMaterialPdfUrl\(String\(material\.id\), forDownload\)/.test(lesson));
+  // A helper that is not routed fails at runtime with "Unknown function": the
+  // delivery endpoint must exist in BOTH the PHP router and the PHP client map.
+  const phpClient = read('src/client/php.ts');
+  const routes = read('backend/routes/api.php');
+  ok('the delivery function is mapped to its PHP route in the backend client',
+    /'materials\/pdf-url':\s*'\/materials\/pdf-url'/.test(phpClient));
+  ok('the PHP router exposes POST /materials/pdf-url',
+    /\$router->post\('\/materials\/pdf-url'/.test(routes));
+  ok('the PHP router exposes GET /materials/pdf (token-gated stream)',
+    /\$router->get\('\/materials\/pdf'/.test(routes));
+  ok('the stream route is public-by-token (not behind the auth middleware)',
+    /\$router->get\('\/materials\/pdf', \[MaterialDeliveryController::class, 'streamPdf'\]\);/.test(routes));
+  ok('the status route is restricted to admins',
+    /material-watermark-status'[\s\S]{0,120}'role' => \['admin', 'super_admin'\]/.test(routes));
+  ok('the lesson screen still uses a signed URL for non-PDF attachments',
+    /getMaterialSignedUrl\(String\(path\), forDownload\)/.test(lesson));
+  ok('legacy lesson_pdfs are passed to staff only (never offered to a student)',
+    /pdfs=\{isStudent \? \[\] : \(lesson\.lesson_pdfs \?\? \[\]\)\}/.test(lesson) &&
+      !/pdfs=\{lesson\.lesson_pdfs/.test(lesson));
+  ok('both View and Download go through openMaterial (one flow)',
+    (lesson.match(/onOpenMaterial=\{openMaterial\}/g) || []).length >= 2);
+  ok('the material row passes the whole material (so the id is available)',
+    /onOpenMaterial\(mat, name, downloadable\)/.test(lesson));
+  ok('a watermark failure is surfaced with its own localized message',
+    /lesson\.materialWatermarkUnavailable/.test(lesson));
+  ok('the i18n key exists in English and Arabic', (() => {
+    const res = read('src/lib/i18n/resources.ts');
+    return (res.match(/'lesson\.materialWatermarkUnavailable'/g) || []).length === 2;
+  })());
+
+  // Executed model of the helper.
+  const isPdfMaterial = (mat) => {
+    const type = String(mat?.file_type ?? '').toLowerCase();
+    const name = String(mat?.file_name ?? '').toLowerCase();
+    return type.includes('pdf') || name.endsWith('.pdf');
+  };
+  ok('isPdfMaterial: pdf MIME → true', isPdfMaterial({ file_type: 'application/pdf' }) === true);
+  ok('isPdfMaterial: .PDF extension only → true', isPdfMaterial({ file_name: 'lecture.PDF' }) === true);
+  ok('isPdfMaterial: docx → false (keeps the signed-URL flow)', isPdfMaterial({ file_type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', file_name: 'notes.docx' }) === false);
+  ok('isPdfMaterial: zip → false', isPdfMaterial({ file_name: 'slides.zip' }) === false);
+  ok('isPdfMaterial: missing fields → false', isPdfMaterial({}) === false);
+  ok('the real helper matches the model',
+    /export function isPdfMaterial\(mat: any\): boolean \{[\s\S]{0,220}type\.includes\('pdf'\) \|\| name\.endsWith\('\.pdf'\)/.test(mats));
+}
+
+/* ══ 11. Cache identity, concurrency, resource limits, audit ═════════════ */
+
+section('11. Cache, concurrency and operational safety');
+
+{
+  const delivery = read('backend/src/Controllers/MaterialDeliveryController.php');
+  const svc = read('backend/src/Services/PdfWatermarkService.php');
+  const resp = read('backend/src/Http/Response.php');
+
+  ok('the variant key folds in the source hash + identity + settings',
+    /variantKey\(\$sourceHash, \$identityHash, \$this->watermark->variantSettings\(\$lines\)\)/.test(delivery));
+  ok('the cache identity includes the ENGINE (a switch regenerates)',
+    /'engine' => \$mode === self::MODE_RASTER\s*\? 'flatten-v2'\s*: 'vector-v4:'/.test(svc));
+  ok('the cache identity includes the LAYER LAYOUT (old copies are regenerated)',
+    /private const LAYERS_VERSION = 'layers-v4'/.test(svc) &&
+    /\$settings\['layers'\] = self::LAYERS_VERSION/.test(svc));
+  ok('the front opacity is part of the cache identity',
+    /\$settings\['vector_front_opacity'\] = \$this->vectorForegroundOpacity\(\)/.test(svc));
+  ok('a replaced source is detected via a CACHED hash, not a per-request one',
+    /private function sourceHashFor/.test(delivery) && /file_hash_path/.test(delivery));
+  ok('the cache is invalidated when the path, size or mtime changes',
+    /\$storedPath === \(string\) \$material\['storage_path'\]/.test(delivery)
+    && /\$storedSize !== null/.test(delivery)
+    && /file_hash_mtime/.test(delivery));
+  ok('a cached copy is only reused when the LIVE variant key matches',
+    /findPersonalizedCopy\(\$material, \$studentId, \$variantKey\)/.test(delivery)
+    && /\$expectedVariantKey !== null/.test(delivery));
+  ok('the vector opacity is part of the cache identity',
+    /\$settings\['vector_opacity'\] = \$this->vectorOpacity\(\)/.test(svc));
+  ok('a per-variant lock serialises generation',
+    /flock\(\$handle, LOCK_EX \| LOCK_NB\)/.test(delivery) && /private function withVariantLock/.test(delivery));
+  ok('the lock is re-checked after waiting (no double render)',
+    /another worker may have finished while we waited/.test(delivery));
+  ok('output is published atomically (rename from a .part sibling)',
+    /rename\(\$partAbs, \$finalAbs\)/.test(delivery));
+  ok('expired variants for the same student are purged',
+    /private function purgeStaleVariants/.test(delivery));
+  ok('purging validates the path prefix before deleting',
+    /str_starts_with\(\$path, \$prefix\)/.test(delivery));
+  ok('minting is rate limited per account',
+    /RateLimitService::perAccount\(\$request, 'material_pdf_mint'/.test(delivery));
+  ok('delivery is audited with ids only (no name/token/bytes)',
+    /'material_pdf_delivered'/.test(delivery) && !/full_name/.test(delivery.slice(delivery.indexOf('auditDelivery'), delivery.indexOf('auditDelivery') + 900)));
+  ok('the audit write cannot break a legitimate read',
+    /An audit failure must never block a legitimate read/.test(delivery));
+  ok('the stream is sent as private + no-store',
+    /'Cache-Control' => 'private, no-store, max-age=0'/.test(delivery));
+  ok('the file is streamed in chunks, not loaded into memory',
+    /public static function file\(/.test(resp) && /fread\(\$handle, 262144\)/.test(resp) && !/file_get_contents\(\$abs\)/.test(delivery));
+}
+
+/* ══ 12. Migration importable on a restricted cPanel MySQL user ═══════════ */
+
+section('12. Migrations avoid information_schema');
+
+{
+  for (const [name, file] of [
+    ['032', 'backend/database/mysql-migrations/032_lesson_material_watermark.sql'],
+    ['035', 'backend/database/mysql-migrations/035_lesson_material_pdf_hardening.sql'],
+  ]) {
+    const sqlCode = read(file).replace(/^\s*--.*$/gm, '');
+    ok(`${name}: no information_schema QUERY (cPanel #1044 regression)`, !/information_schema/i.test(sqlCode));
+  }
+}
+
+/* ══ 13. Deployment surface ══════════════════════════════════════════════ */
+
+section('13. Dependencies, diagnostics and cleanup are documented');
+
+{
+  const composer = JSON.parse(read('backend/composer.json'));
+  ok('backend/composer.json pins FPDI and TCPDF', !!composer.require['setasign/fpdi'] && !!composer.require['tecnickcom/tcpdf']);
+  ok('FPDF stays available for the minimal fallback engine', !!composer.require['setasign/fpdf']);
+  ok('both libraries are pure PHP (no ext beyond zlib)',
+    Object.keys(composer.require).filter((k) => k.startsWith('ext-')).join(',') === 'ext-zlib');
+  ok('a cleanup CLI exists (cron-ready, dry-run by default)',
+    read('backend/scripts/watermark-cleanup.php').includes('--apply'));
+  ok('a host diagnostics script exists',
+    read('backend/scripts/watermark-diagnostics.php').length > 200);
+  ok('the engine reports its driver + engine identity',
+    /'vector_engine' =>/.test(read('backend/src/Services/PdfWatermarkService.php')));
+  ok('the deployment checklist exists (uploads, cron, migration)', (() => {
+    const doc = read('backend/docs/PDF_WATERMARK_DEPLOYMENT.md');
+    return /cron/i.test(doc) && /backend\/vendor/.test(doc) && /035_lesson_material_pdf_hardening\.sql/.test(doc);
+  })());
+  ok('the end-to-end delivery suite is part of the harness', (() => {
+    return /delivery_tests\.php/.test(read('backend/tests/pdf-watermark/run.sh'))
+      && /delivery_tests\.php/.test(read('backend/tests/pdf-watermark/run.ps1'))
+      && /'delivery'/.test(read('backend/tests/pdf-watermark/summarize.php'));
+  })());
+  ok('the fixture generator builds a modern xref-stream PDF',
+    /source-xrefstream\.pdf/.test(read('backend/tests/pdf-watermark/make_fixture.php')));
+}
+
+/* ══ 14. Diagnosis + download UX regressions ══════════════════════════════ */
+
+section('14. The reported failure modes cannot return silently');
 
 {
   const svc = read('backend/src/Services/PdfWatermarkService.php');
-  const delivery = read('backend/src/Controllers/MaterialDeliveryController.php');
 
-  ok('engine selectors defined (raster/vector/auto)',
-    /MODE_RASTER = 'raster'/.test(svc) && /MODE_VECTOR = 'vector'/.test(svc) && /MODE_AUTO\s*=\s*'auto'/.test(svc));
-  ok('pages are rendered with a TRANSPARENT background (pngalpha device)',
-    /-sDEVICE=pngalpha/.test(svc));
-  ok('watermark canvas is built BEFORE the page composited on top (GD)',
-    (() => {
-      const gd = svc.slice(svc.indexOf('private function compositeGd'), svc.indexOf('private function watermarkPlacements'));
-      return gd.indexOf('imagefilledrectangle') !== -1 &&
-        gd.indexOf('imagefilledrectangle') < gd.indexOf('imagecopy($canvas, $fg');
-    })());
-  ok('watermark canvas is built BEFORE the page composited on top (Imagick)',
-    (() => {
-      const im = svc.slice(svc.indexOf('private function compositeImagick'), svc.indexOf('private function compositeGd'));
-      return im.indexOf('drawImage($draw)') !== -1 &&
-        im.indexOf('drawImage($draw)') < im.indexOf('compositeImage($fg');
-    })());
-  ok('raster engine requires Ghostscript + compositor + font + FPDF',
-    /\$rasterReady = \$canExec && \$gsVersion !== null && \$compositor !== null && \$font !== null && \$pdfWriter/.test(svc));
-  ok('page count is capped before processing',
-    /PDF_WATERMARK_MAX_PAGES/.test(svc) && /count\(\$pages\) > \$maxPages/.test(svc));
-  ok('a per-page pixel budget guards memory',
-    /maxPixels/.test(svc) && /\$w \* \$h > \$maxPixels/.test(svc));
-  ok('no text is drawn into the flattened PDF (image pages only)',
-    (() => {
-      const raster = svc.slice(svc.indexOf('private function renderRaster'), svc.indexOf('private function compositePage'));
-      return !/useTemplate|\$pdf->Text\(/.test(raster);
-    })());
-  ok('the vector engine is preserved (not removed)',
-    /private function renderWithFpdfFpdi/.test(svc) && /SetAlpha\(0\.10\)/.test(svc));
-  ok('variant cache identity includes the engine token + dpi',
-    /'engine' => 'flatten-v2'/.test(svc) && /'dpi' => \$this->dpi\(\)/.test(svc));
-  ok('delivery folds the engine settings into variantKey',
-    /variantKey\(\$sourceHash, \$identityHash, \$this->watermark->variantSettings\(\$lines\)\)/.test(delivery));
-  ok('env keys + requirements documented for deployment',
-    /PDF_WATERMARK_MODE=raster/.test(read('backend/NAMECHEAP_DEPLOYMENT.md')));
-  ok('server diagnostics + integration-test scripts exist',
-    read('backend/scripts/watermark-diagnostics.php').length > 200 &&
-    /LECTURE-TEXT-MARKER-ALPHA/.test(read('backend/scripts/verify-watermark.php')));
-  ok('a per-page memory guard prevents an uncatchable OOM',
-    /memoryLimitBytes/.test(svc) && /\$w \* \$h \* 8 >/.test(svc));
-  ok('the HTTP status surface never returns filesystem paths',
-    /'font_present' =>/.test(svc) && !/'font' => \$this->fontPath\(\)/.test(svc));
-  ok('a failed generation cannot leave an orphaned .part file',
-    /catch \(\\Throwable \$e\) \{\s*@unlink\(\$partAbs\);/.test(delivery));
-}
+  // BUG 1 — "no engine installed" was reported on a host that HAD the engine.
+  // rendererStatus() memoised a verdict probed BEFORE the vendored autoloader
+  // ran (loadLibraries was only called from isAvailable), so diagnostics said
+  // "missing" and every later isAvailable() in that request refused delivery.
+  const probe = svc.slice(svc.indexOf('public function rendererStatus'), svc.indexOf('$hasFpdi ='));
+  ok('rendererStatus() loads the vendored libraries BEFORE probing the engine',
+    /\$this->loadLibraries\(\);/.test(probe));
+  ok('loadLibraries() is idempotent (a second call is a no-op)',
+    /private function loadLibraries\(\): void\s*\{\s*if \(\$this->librariesLoaded\) \{\s*return;/.test(svc));
+  ok('the availability verdict still fails closed when no engine exists',
+    /no compatible engine is installed[\s\S]{0,80}503|ApiException\(503, 'PDF watermarking is not available on this server/.test(svc));
 
-/* ══ 9b. Migration is folded into the fresh-install schema ════════════════ */
+  // BUG 2 — the real reason (503 watermark_unavailable) reached the UI as
+  // "Could not generate a download link": the PHP client dropped status/code.
+  const php = read('src/client/php.ts');
+  const invoke = php.slice(php.indexOf('async function invokeFunction'), php.indexOf('// ── RPC ─'));
+  ok('the PHP client keeps the HTTP status and error code on function errors',
+    (invoke.match(/status: res\.error\.status, code: res\.error\.code/g) || []).length === 2);
+  ok('its declared result type exposes status/code to callers',
+    /error: \{ message: string; status\?: number; code\?: string/.test(invoke));
 
-section('9b. schema.sql carries the same objects as migration 032');
+  const api = read('src/lib/api.ts');
+  const helper = api.slice(api.indexOf('export async function invokeEdgeFunction'), api.indexOf('// ── Profiles ──'));
+  ok('invokeEdgeFunction falls back to the error\'s own status',
+    /typeof \(error as \{ status\?: unknown \}\)\.status === 'number'/.test(helper));
+  ok('invokeEdgeFunction falls back to the error\'s own code',
+    /if \(!errCode && typeof \(error as \{ code\?: unknown \}\)\.code === 'string'\)/.test(helper));
 
-{
-  const schema = read('backend/database/schema.sql');
-  ok('schema.sql includes the watermark_enabled column',
-    /`watermark_enabled` TINYINT\(1\) DEFAULT 0 NOT NULL/.test(schema));
-  ok('schema.sql includes the lesson_material_pdfs table',
-    /CREATE TABLE IF NOT EXISTS `lesson_material_pdfs`/.test(schema));
-  ok('schema.sql mirrors the per-student unique key',
-    /uq_lesson_material_pdfs_variant/.test(schema));
-}
-
-/* ══ 10. Migration must not require information_schema ════════════════════ */
-
-section('10. Migration 032 is importable on a restricted cPanel MySQL user');
-
-{
-  const sql = read('backend/database/mysql-migrations/032_lesson_material_watermark.sql');
-  // Strip SQL comments first: the docblock deliberately NAMES the denied
-  // object to explain the fix; the guard is about executable statements.
-  const sqlCode = sql.replace(/^\s*--.*$/gm, '');
-  ok('no information_schema QUERY (cPanel #1044 regression)',
-    !/information_schema/i.test(sqlCode));
-  ok('still adds the watermark column + the copy registry',
-    /ADD COLUMN `watermark_enabled`/.test(sql) && /CREATE TABLE IF NOT EXISTS `lesson_material_pdfs`/.test(sql));
+  // BUG 3 — on web the download only navigated to the URL, so a JSON refusal
+  // looked like "nothing downloaded" and no file was ever produced.
+  const lesson = read('src/app/(app)/lesson/[id].tsx');
+  const web = lesson.slice(lesson.indexOf("if (process.env.EXPO_OS === 'web') {"), lesson.indexOf('const urlExt'));
+  ok('web downloads FETCH the delivered URL before saving',
+    /await fetch\(signedUrl\)/.test(web));
+  ok('a refusal is detected from the status or a JSON content type',
+    /contentType\.includes\('json'\)/.test(web) && /if \(!res\.ok \|\|/.test(web));
+  ok('a real file is written through an anchor download',
+    /URL\.createObjectURL\(blob\)/.test(web) && /a\.download = downloadName|anchor\.download/.test(web) && /anchor\.click\(\)/.test(web));
+  ok('the error carries the HTTP status so the screen can map it',
+    /failure\.httpStatus = res\.status/.test(web));
+  ok('a cross-origin fetch failure still falls back to opening the URL',
+    /catch \{[\s\S]{0,400}Linking\.openURL\(signedUrl\)/.test(web));
+  ok('the missing-engine state is recognized by code OR message',
+    /code === 'watermark_unavailable'[\s\S]{0,80}watermarking is not available\/i\.test\(msg\)/.test(lesson));
+  ok('that state shows the dedicated watermark message (not the generic one)',
+    /engineMissing \|\| status === 503[\s\S]{0,120}materialWatermarkUnavailable/.test(lesson));
 }
 
 /* ── Summary ─────────────────────────────────────────────────────────────── */

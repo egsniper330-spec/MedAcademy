@@ -26,18 +26,106 @@ works in a desktop browser (that is how the bug was originally reproduced as "fi
 
 ### Fix (all inside the embedded player script — no React state simulation)
 
-- `injectControlCSS()` keeps `.plyr--playing .plyr__control--overlaid`
-  `visibility:visible; pointer-events:auto` (dimmed to `.35`, full opacity on
-  hover/focus), gives it `z-index:4` over the video wrapper (`z-index:0`) and promotes
-  it with `transform:translate3d(...)` + `will-change` so it keeps its own composited
-  layer above the iframe.
+- `injectControlCSS()` gives the centre control `z-index:4` over the video wrapper
+  (`z-index:0`) and promotes it with `transform:translate3d(...)` + `will-change` so it
+  keeps its own composited layer above the iframe. It contains **no visibility rule** —
+  visibility is decided per frame-state (see below).
 - `setCentreState()` swaps the button's `use` sprite between Plyr's **own**
   `play`/`pause` symbols and updates `aria-label`, driven by the player's real
   `play`/`pause`/`ended` events — never by the tap itself.
-- `togglePlayback()` reads the media's *current* state at the moment of the tap
-  (`!player.paused && !player.ended`) and issues a real `player.play()` /
-  `player.pause()`. Because it never consults a cached flag, N rapid taps always
-  alternate and each command is the one the state implied.
+
+### Idle lifecycle — the persistent centre button (second report)
+
+Reported after the first fix: *the large blue centre button stays painted over the
+video after the progress bar, title and all other transient controls have gone*.
+
+**Root cause.** `centreShouldShow()` had a second predicate ahead of the bar's own
+state:
+
+```js
+if (player.paused || player.ended) return true;   // ← the bug
+return !root.classList.contains('plyr--hide-controls');
+```
+
+For a YouTube embed Plyr does **not** read the media element for `paused`; it proxies
+`this.media.paused` where `media` is the embed wrapper `div` and the provider assigns
+that property itself on play/pause (`Plyr`'s embed `play`/`pause` wrappers). It can
+therefore disagree with the class Plyr actually paints from — and `player.ended` is a
+proxy of the same kind. When it said "paused" while the painted state was *playing +
+idle*, the first branch won and the script wrote `visibility:visible; opacity:.7` as
+**inline style**, which outranks Plyr's own `.plyr--playing .plyr__control--overlaid`
+hiding rule. The bar kept hiding (its class was correct); only the centre stayed up.
+A second, independent path produced the same symptom: `centreButton()` used
+`document.querySelector('.plyr__control--overlaid')`, i.e. the **first** such node in
+document order. After a provider rebuild that can be a leftover button from a detached
+root; every lifecycle write then landed on the wrong element while the live button kept
+Plyr's default paint.
+
+**Fix (single source of truth + live-root scoping).**
+
+- `centreShouldShow()` is now `!root.classList.contains('plyr--hide-controls')` on the
+  **live** root — the very class whose CSS hides the bar. No `player.paused`, no
+  `player.ended`, no timer copy. The centre can no longer drift from the bar by a frame,
+  an event or a provider rebuild.
+- Paused UX is preserved without a second predicate: Plyr's `toggleControls()` treats
+  `paused` as a show condition, so the bar (and therefore the centre Play control) stays
+  up whenever playback is paused.
+- `centreButton()` is scoped to `playerRoot()`; `hideStrayCentre()` closes (and
+  `dedupeCentre()` removes) any overlaid button that is not inside the live root, so a
+  stale node can never be left dressing the video.
+- The `MutationObserver` on the live root watches `class` **and** `childList` (a rebuild
+  that inserts a fresh button after the bar already hid), and still runs
+  `dedupeCentre() + applyCentreVisibility()` together.
+- One CSS mirror rule remains, keyed on the same class:
+  `.plyr.plyr--hide-controls .plyr__control--overlaid{opacity:0;visibility:hidden;pointer-events:none}`.
+  It never forces the button visible, so it cannot resurrect the bug, and it closes the
+  case where a new button is inserted and no event reaches the script.
+
+**Runtime verification** (real Chromium, the real generated document —
+`.freebuff/player-harness/native.html`, built from `PLAYER_SCRIPT` + `PLYR_JS`/`PLYR_CSS`,
+served over HTTP; and the web copy `public/player/index.html`):
+
+| Step | Result |
+| --- | --- |
+| paused / initial load | centre visible (0.9), glyph `play` |
+| play, controls still up | centre visible (0.7), glyph `pause` |
+| idle > Plyr timeout | bar `plyr--hide-controls`, centre `hidden`, opacity 0 |
+| 107 s of uninterrupted playback | centre stayed hidden in all 427 samples |
+| tap the surface | bar + centre reappear together |
+| idle again | both hide again |
+| pause | bar up, centre visible, glyph `play`, full-strength opacity |
+| centre tap | toggles exactly once (play → pause), glyph + `aria-label` follow |
+| landscape resize (900×420) | lifecycle unchanged, watermark re-measured |
+| duplicate/stale button injected | removed/closed; exactly one functional control |
+| console | no errors |
+
+### Confirming it on the reporter's device (debug builds only)
+
+Debug builds render a small `DIAG` pill at the top-right of the YouTube player
+(`src/components/YouTubePlayer.tsx`, gated on `__DEV__ && Platform.OS !== 'web'`). One tap
+injects `window.__plyrDiag()` into the player document and shows the answer on screen:
+
+```
+centre: hidden (count 1)
+button paint: opacity 0 / visibility hidden
+bar: hidden-controls true / opacity 0 / visibility visible
+state: playing true / paused false
+
+PASS — the centre button is hidden together with the bar.
+```
+
+The diagnostic asks for the button's paint **and** the bar's own state in the same reply,
+because "centre hidden" alone cannot tell the fix from the bug. A failing device reads
+`FAIL — the bar is hidden but the centre button is still painted`; a tap taken while the
+controls are still up says so instead of reporting a false pass. The reply is matched to
+that tap (4 s window), so the automatic fullscreen diagnostic is only logged, never
+popped up. The payload is state/dimensions only — no URL, token or recipient identity — so
+a screenshot of it is safe to send. Release builds render no pill and schedule nothing.
+- `togglePlayback()` reads the *current* state at the moment of the tap
+  (`realPlaying()` → the live root's `plyr--playing` class, the same state Plyr paints)
+  and issues a real `player.play()` / `player.pause()`. Because it never consults a
+  cached flag, N rapid taps always alternate and each command is the one the state
+  implied.
 - A capture-phase `click` delegate on `[data-plyr]` claims **only** the overlaid
   centre control (`stopImmediatePropagation` so Plyr's own handler cannot produce a
   second toggle) and leaves the bottom-bar play button to Plyr's working handler.

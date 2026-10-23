@@ -225,6 +225,14 @@ export interface SecurityEvidence {
   overlayCapableAppsCount?:  number;
   /** True when the native batch call could not run — flags are defaults, not measurements. */
   detectionUnavailable?:     boolean;
+  /**
+   * Individual checks that THREW or structurally could not run inside an
+   * otherwise successful batch (second pass): hidepid-blocked process scan,
+   * unreadable /proc/self/maps, missing native core, any runCatching failure.
+   * "unknown", never a clean result — and weight 0: a coverage gap is not a
+   * device violation (same philosophy as vpn_detection_degraded).
+   */
+  unavailableChecks?:        string[];
 }
 
 // ─── Risk Score Weights ───────────────────────────────────────────────────────
@@ -1782,6 +1790,7 @@ export async function runSecurityChecks(): Promise<SecurityCheckResult> {
     signatureSha256:         rawFlags?.signatureSha256 ?? undefined,
     overlayCapableAppsCount: rawFlags?.overlayCapableAppsCount ?? undefined,
     detectionUnavailable:    wasLastSecurityFlagsCallUnavailable(),
+    unavailableChecks:       rawFlags?.detectionsUnavailable ?? undefined,
   };
 
   // Delegates the AUTHORITATIVE policy evaluation to the PURE model
@@ -1806,6 +1815,16 @@ export async function runSecurityChecks(): Promise<SecurityCheckResult> {
     void reportDetectionUnavailableOnce();
   }
 
+  // ── Partial degradation (second pass) ───────────────────────────────────
+  // Individual checks inside an otherwise successful batch that threw or
+  // structurally could not run (e.g. the /proc cmdline scan under hidepid=2).
+  // Reported once per session with the check names — log_only, weight 0, never
+  // a block: a coverage gap must be auditable without punishing the user.
+  const unavailableChecks = rawFlags?.detectionsUnavailable ?? [];
+  if (unavailableChecks.length > 0 && process.env.EXPO_OS !== 'web') {
+    void reportPartialDetectionUnavailableOnce(unavailableChecks);
+  }
+
   return { threats: allThreats, riskScore, policies, blocksLogin, blocksVideo, hasWarnings, evidence };
 }
 
@@ -1820,6 +1839,24 @@ function reportDetectionUnavailableOnce(): void {
     policyAction: 'log_only',
     riskScore: 0,
     metadata: { platform: process.env.EXPO_OS, dev: __DEV__ === true },
+  }).catch(() => { /* never block user flow */ });
+}
+
+// Once-per-session guard for PARTIAL detection degradation (per-check, not
+// whole-batch). Separate from the guard above so either kind is always visible.
+let _partialDetectionUnavailableReported = false;
+function reportPartialDetectionUnavailableOnce(checks: string[]): void {
+  if (_partialDetectionUnavailableReported) return;
+  _partialDetectionUnavailableReported = true;
+  // Cap the payload: the list is bounded in Kotlin anyway, but telemetry must
+  // never grow unbounded if a native module misbehaves.
+  const bounded = checks.slice(0, 24);
+  void logSecurityEvent({
+    eventType: 'detection_unavailable',
+    detectionMethod: `Individual security checks unavailable: ${bounded.join(', ')}`,
+    policyAction: 'log_only',
+    riskScore: 0,
+    metadata: { platform: process.env.EXPO_OS, checks: bounded, dev: __DEV__ === true },
   }).catch(() => { /* never block user flow */ });
 }
 

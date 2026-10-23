@@ -14,6 +14,7 @@ import type { RelativePathString } from 'expo-router';
 import {
   Search, Users, MoreVertical, Mail, Phone,
   GraduationCap, Stethoscope, UserCog, CheckCircle, UserPlus,
+  Square, CheckSquare, X,
 } from 'lucide-react-native';
 import { PageHeader } from '@/components/PageHeader';
 import { NeuCard } from '@/components/NeuCard';
@@ -21,7 +22,7 @@ import { NeuButton } from '@/components/NeuButton';
 import { ActionMenu, type ActionKey } from '@/components/ActionMenu';
 import { EditUserDialog } from '@/components/EditUserDialog';
 import { DeviceManagerSheet } from '@/components/DeviceManagerSheet';
-import { BulkSelectBar, type BulkAction } from '@/components/BulkSelectBar';
+import { BulkUserMenu, type BulkUserAction } from '@/components/BulkUserMenu';
 import { DeleteAccountModal } from '@/components/DeleteAccountModal';
 import { ChangePasswordModal } from '@/components/ChangePasswordModal';
 import { useToast } from '@/components/Toast';
@@ -110,10 +111,12 @@ export default function SAUsers() {
   const [loginHistory, setLoginHistory] = useState<any[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
 
-  // Bulk select
+  // Bulk select — count, overflow menu, running batch, per-user result.
   const [bulkMode, setBulkMode] = useState(false);
   const [bulkSelected, setBulkSelected] = useState<Set<string>>(new Set());
-  const [bulkLoading, setBulkLoading] = useState(false);
+  const [bulkRunning, setBulkRunning] = useState<BulkUserAction | null>(null);
+  const [bulkMenuVisible, setBulkMenuVisible] = useState(false);
+  const [bulkResult, setBulkResult] = useState<{ succeeded: number; failed: number; message: string } | null>(null);
   const undoTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [undoInfo, setUndoInfo] = useState<{ id: string; name: string } | null>(null);
 
@@ -129,7 +132,11 @@ export default function SAUsers() {
     s.has(id) ? s.delete(id) : s.add(id);
     return s;
   });
-  const clearBulk = () => { setBulkSelected(new Set()); setBulkMode(false); };
+  const clearBulk = () => {
+    setBulkSelected(new Set());
+    setBulkMode(false);
+    setBulkMenuVisible(false);
+  };
 
   const showUndo = (id: string, name: string) => {
     if (undoTimer.current) clearTimeout(undoTimer.current);
@@ -180,25 +187,119 @@ export default function SAUsers() {
   // Trigger search whenever debounced query changes
   useEffect(() => { handleSearch(); }, [handleSearch]);
 
-  const handleBulkAction = async (action: BulkAction) => {
-    if (!bulkSelected.size) return;
-    setBulkLoading(true);
-    const ids = [...bulkSelected];
+  /**
+   * Run one bulk operation over `ids` and reconcile the UI with the server's
+   * per-user result.
+   *
+   * The backend answers with { succeeded, failed, errors[] } (see
+   * AdminController::bulkUserOps). This function:
+   *   • updates only the users the server actually changed (never a blanket
+   *     optimistic rewrite of the whole list),
+   *   • keeps the FAILED users selected so the admin can retry them,
+   *   • reports partial success instead of one "N updated" that hides refusals,
+   *   • lists the failures by name in a result sheet (no silent skipping).
+   */
+  const runBulk = async (action: BulkUserAction, ids: string[]) => {
+    if (!ids.length) return;
+    setBulkRunning(action);
     try {
-      if (action === 'trash') {
-        await bulkUserOps('trash', ids, 'Bulk delete by super admin');
-        setUsers(prev => prev.filter(u => !ids.includes(u.id)));
-      } else {
-        const res = await bulkUserOps(action as any, ids);
-        if (action === 'block' || action === 'unblock') {
-          const status = action === 'block' ? 'blocked' : 'active';
-          setUsers(prev => prev.map(u => ids.includes(u.id) ? { ...u, status } : u));
-        }
-        showToast({ type: 'success', message: `${res.succeeded} user(s) updated.` });
+      // The endpoint accepts at most 200 ids per call (AdminController enforces
+      // it). "Select all N matching" can exceed that on a large directory, so
+      // the batch is sent in 200-id chunks and the per-user results are merged —
+      // the alternative would be a 422 on a perfectly valid selection.
+      const CHUNK = 200;
+      const reason = action === 'trash' ? 'Bulk delete by super admin' : 'Bulk action by super admin';
+      const errors: { user_id: string; message: string }[] = [];
+      let succeeded = 0;
+      for (let i = 0; i < ids.length; i += CHUNK) {
+        const part = await bulkUserOps(action, ids.slice(i, i + CHUNK), reason);
+        succeeded += part?.succeeded ?? 0;
+        if (Array.isArray(part?.errors)) errors.push(...part.errors);
       }
-      clearBulk();
-    } catch (e) { showToast({ type: 'error', message: logAndParse(e, `bulk.${action}`) }); }
-    finally { setBulkLoading(false); }
+      const res = { succeeded, failed: errors.length, errors };
+      const failedIds = new Set(errors.map(e => e.user_id));
+      const okIds = ids.filter(id => !failedIds.has(id));
+
+      if (action === 'trash') {
+        setUsers(prev => prev.filter(u => !okIds.includes(u.id)));
+      } else if (action === 'suspend' || action === 'unsuspend') {
+        const status = action === 'suspend' ? 'suspended' : 'active';
+        setUsers(prev => prev.map(u => okIds.includes(u.id) ? { ...u, status } : u));
+      }
+
+      const total = ids.length;
+      const summary = res.failed > 0
+        ? `${res.succeeded} of ${total} updated · ${res.failed} failed`
+        : `${res.succeeded} user(s) updated.`;
+      showToast({ type: res.failed > 0 ? 'error' : 'success', message: summary });
+
+      if (res.failed > 0) {
+        const nameOf = (id: string) => users.find(u => u.id === id)?.full_name ?? id.slice(0, 8);
+        setBulkResult({
+          succeeded: res.succeeded,
+          failed: res.failed,
+          message: (res.errors ?? []).map(e => `${nameOf(e.user_id)}: ${e.message}`).join('\n')
+            || 'Some users could not be updated.',
+        });
+        // Retryable set = only what failed.
+        setBulkSelected(new Set(failedIds));
+      } else {
+        clearBulk();
+      }
+    } catch (e) {
+      showToast({ type: 'error', message: logAndParse(e, `bulk.${action}`) });
+    } finally {
+      setBulkRunning(null);
+    }
+  };
+
+  /**
+   * Entry point from the overflow menu. Destructive / security-sensitive
+   * operations are confirmed first, with the exact count and consequence.
+   */
+  const handleBulkAction = (action: BulkUserAction) => {
+    const ids = [...bulkSelected];
+    if (!ids.length) return;
+    setBulkMenuVisible(false);
+
+    const copy: Record<BulkUserAction, { title: string; message: string; label: string; danger?: boolean }> = {
+      suspend: {
+        title: `Suspend ${ids.length} user(s)?`,
+        message: 'They will be signed out of every device and will not be able to sign in until unsuspended. Super admin accounts are refused by the server.',
+        label: 'Suspend', danger: true,
+      },
+      unsuspend: {
+        title: `Unsuspend ${ids.length} user(s)?`,
+        message: 'Sign-in is restored. Existing security policies remain enforced.',
+        label: 'Unsuspend',
+      },
+      reset_devices: {
+        title: `Reset devices for ${ids.length} user(s)?`,
+        message: 'Every registered device and live session is revoked. They must sign in again.',
+        label: 'Reset devices', danger: true,
+      },
+      reset_password: {
+        title: `Send reset links to ${ids.length} user(s)?`,
+        message: 'Each user receives their own single-use link by email (valid 30 minutes). No password is set or shared, and accounts with no email address are reported as failed.',
+        label: 'Send links',
+      },
+      trash: {
+        title: `Move ${ids.length} user(s) to trash?`,
+        message: 'They lose access immediately and are restorable for 30 days.',
+        label: 'Move to trash', danger: true,
+      },
+    };
+    const c0 = copy[action];
+    setConfirm({
+      title: c0.title,
+      message: c0.message,
+      confirmLabel: c0.label,
+      destructive: c0.danger,
+      onConfirm: async () => {
+        setConfirm(null);
+        await runBulk(action, ids);
+      },
+    });
   };
 
   // ── Action handler ─────────────────────────────────────────────────────
@@ -353,6 +454,35 @@ export default function SAUsers() {
   const totalPages = Math.ceil(filtered.length / PAGE_SIZE);
   const paginated = filtered.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
 
+  // ── Selection scope ──────────────────────────────────────────────────────
+  // The list is fetched once and filtered/paginated in memory, so the two
+  // honest scopes are: the rows on THIS page, and the whole current RESULT SET
+  // (role tab + search applied). Both are labelled with their count — nothing
+  // claims to span server pages that are not loaded.
+  const pageIds = paginated.map(u => u.id);
+  const pageAllSelected = pageIds.length > 0 && pageIds.every(id => bulkSelected.has(id));
+  const resultAllSelected = filtered.length > 0 && filtered.every(u => bulkSelected.has(u.id));
+
+  const togglePageSelection = () => {
+    setBulkSelected(prev => {
+      const s = new Set(prev);
+      if (pageAllSelected) pageIds.forEach(id => s.delete(id));
+      else pageIds.forEach(id => s.add(id));
+      return s;
+    });
+  };
+
+  // Adds/removes ONLY the ids in the current result set. A blanket reset would
+  // silently drop users selected under another role tab or search.
+  const toggleResultSelection = () => {
+    setBulkSelected(prev => {
+      const s = new Set(prev);
+      if (resultAllSelected) filtered.forEach(u => s.delete(u.id));
+      else filtered.forEach(u => s.add(u.id));
+      return s;
+    });
+  };
+
   const loadingKeys = new Set<ActionKey>(
     isLoading('block')   ? ['block']   :
     isLoading('unblock') ? ['unblock'] :
@@ -465,6 +595,39 @@ export default function SAUsers() {
             </Text>
           )}
 
+          {/* Selection controls — scope is explicit, count is visible */}
+          {bulkMode && !loading && (
+            <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 10, marginBottom: 10 }}>
+              <Pressable
+                onPress={togglePageSelection}
+                accessibilityRole="checkbox"
+                accessibilityState={{ checked: pageAllSelected }}
+                accessibilityLabel={pageAllSelected ? 'Deselect this page' : `Select all ${pageIds.length} users on this page`}
+                style={[neuFlatStyle(isDark), { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 10 }]}
+              >
+                {pageAllSelected
+                  ? <CheckSquare size={16} color={c.primary} />
+                  : <Square size={16} color={`${c.text}70`} />}
+                <Text style={{ fontSize: 12, fontWeight: '700', color: c.text }}>
+                  {pageAllSelected ? 'Page selected' : `Select page (${pageIds.length})`}
+                </Text>
+              </Pressable>
+              {filtered.length > pageIds.length && (
+                <Pressable
+                  onPress={toggleResultSelection}
+                  accessibilityRole="checkbox"
+                  accessibilityState={{ checked: resultAllSelected }}
+                  accessibilityLabel={resultAllSelected ? 'Clear selection' : `Select all ${filtered.length} matching users`}
+                  style={{ paddingHorizontal: 10, paddingVertical: 8 }}
+                >
+                  <Text style={{ fontSize: 12, fontWeight: '700', color: c.primary }}>
+                    {resultAllSelected ? 'Clear all' : `Select all ${filtered.length} matching`}
+                  </Text>
+                </Pressable>
+              )}
+            </View>
+          )}
+
           {/* User list */}
           {loading ? (
             <ActivityIndicator color={c.primary} style={{ marginTop: 40 }} />
@@ -546,6 +709,12 @@ export default function SAUsers() {
                 {/* Action / select */}
                 <Pressable
                   onPress={() => bulkMode ? toggleBulk(user.id) : openMenu(user)}
+                  accessibilityRole={bulkMode ? 'checkbox' : 'button'}
+                  accessibilityState={bulkMode ? { checked: bulkSelected.has(user.id) } : undefined}
+                  accessibilityLabel={bulkMode
+                    ? `${bulkSelected.has(user.id) ? 'Deselect' : 'Select'} ${user.full_name}`
+                    : `Actions for ${user.full_name}`}
+                  hitSlop={6}
                   style={{
                     width: 36, height: 36, borderRadius: 10,
                     backgroundColor: bulkMode
@@ -587,16 +756,86 @@ export default function SAUsers() {
         </View>
       </ScrollView>
 
-      {/* Bulk select bar */}
-      {bulkMode && bulkSelected.size > 0 && (
-        <BulkSelectBar
-          count={bulkSelected.size}
-          role={activeTab === 'all' ? 'student' : activeTab}
-          loading={bulkLoading}
-          onAction={handleBulkAction}
-          onClear={clearBulk}
-        />
+      {/* Bulk selection bar — count + overflow menu (one menu, every action) */}
+      {bulkMode && (
+        <View style={{
+          backgroundColor: c.base,
+          borderTopWidth: 1,
+          borderTopColor: `${c.text}12`,
+          shadowColor: c.shadowDark,
+          shadowOffset: { width: 0, height: -4 },
+          shadowOpacity: 0.5,
+          shadowRadius: 12,
+          elevation: 10,
+          paddingHorizontal: 16,
+          paddingVertical: 10,
+          paddingBottom: safeBottom(layout.insets.bottom) + 10,
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: 10,
+        }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flexShrink: 1 }}>
+            <View style={{ backgroundColor: `${c.primary}20`, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 4 }}>
+              <Text style={{ fontSize: 13, fontWeight: '800', color: c.primary }}>
+                {bulkSelected.size} selected
+              </Text>
+            </View>
+            {bulkRunning && <ActivityIndicator size="small" color={c.primary} />}
+          </View>
+          <View style={{ flex: 1 }} />
+          <Pressable
+            onPress={() => bulkSelected.size > 0 && !bulkRunning && setBulkMenuVisible(true)}
+            disabled={!bulkSelected.size || !!bulkRunning}
+            accessibilityRole="button"
+            accessibilityLabel="Bulk actions"
+            accessibilityHint="Open the list of actions for the selected users"
+            accessibilityState={{ disabled: !bulkSelected.size || !!bulkRunning }}
+            hitSlop={8}
+            style={{
+              width: 38, height: 38, borderRadius: 10,
+              alignItems: 'center', justifyContent: 'center',
+              backgroundColor: `${c.primary}${bulkSelected.size ? '1F' : '0A'}`,
+              opacity: bulkSelected.size ? 1 : 0.5,
+            }}
+          >
+            <MoreVertical size={19} color={c.primary} />
+          </Pressable>
+          <Pressable
+            onPress={clearBulk}
+            accessibilityRole="button"
+            accessibilityLabel="Exit selection"
+            hitSlop={8}
+            style={{ width: 34, height: 34, borderRadius: 10, alignItems: 'center', justifyContent: 'center', backgroundColor: `${c.text}0F` }}
+          >
+            <X size={17} color={`${c.text}90`} />
+          </Pressable>
+        </View>
       )}
+
+      <BulkUserMenu
+        visible={bulkMenuVisible}
+        onClose={() => setBulkMenuVisible(false)}
+        count={bulkSelected.size}
+        running={bulkRunning}
+        onAction={handleBulkAction}
+      />
+
+      {/* Partial-success report — every refused user is named, never skipped */}
+      <ResponsiveModal
+        visible={!!bulkResult}
+        onClose={() => setBulkResult(null)}
+        title={bulkResult && bulkResult.failed > 0 ? 'Bulk action finished with errors' : 'Bulk action finished'}
+        subtitle={bulkResult ? `${bulkResult.succeeded} succeeded · ${bulkResult.failed} failed` : undefined}
+      >
+        <ScrollView style={{ maxHeight: 320 }} showsVerticalScrollIndicator={false}>
+          <Text style={{ fontSize: 13, color: `${c.text}CC`, lineHeight: 20 }}>
+            {bulkResult?.message}
+          </Text>
+          <Text style={{ fontSize: 12, color: `${c.text}77`, marginTop: 12 }}>
+            The failed users remain selected so you can retry them.
+          </Text>
+        </ScrollView>
+      </ResponsiveModal>
 
       {/* Action menu */}
       <ActionMenu

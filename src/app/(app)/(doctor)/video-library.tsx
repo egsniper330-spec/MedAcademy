@@ -24,7 +24,8 @@ import {
 import { neuColors, useLayout, neuFlatStyle, neuPressedStyle, safeBottom, zIndex, mutedTextStyle } from '@/lib/neu';
 import { PageHeader } from '@/components/PageHeader';
 import { AnchoredMenu } from '@/components/AnchoredMenu';
-import { t as translate } from '@/lib/i18n';
+import { useTranslation } from '@/lib/i18n';
+import { DATE_LOCALE_TAGS, formatLocalizedDate } from '@/lib/i18n/date';
 import { NeuCard } from '@/components/NeuCard';
 import { useToast } from '@/components/Toast';
 import { useProfileStore } from '@/lib/store';
@@ -57,23 +58,39 @@ function formatBytes(bytes: number | null): string {
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
-function formatDate(iso: string): string {
-  return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+/** Clock label for the sync status line, in the active app language. */
+function formatClock(date: Date, locale: 'ar' | 'en'): string {
+  return date.toLocaleTimeString(DATE_LOCALE_TAGS[locale], { hour: '2-digit', minute: '2-digit' });
 }
 
-const STATUS_FILTERS = [
-  { value: 'all',              label: 'All' },
-  { value: 'ready',            label: 'Ready' },
-  { value: 'processing',       label: 'Processing' },
-  { value: 'failed',           label: 'Failed' },
-]
+// Labels are translation KEYS: the screen must never render a hardcoded English
+// word while the app is in Arabic (this page was entirely English before).
+const STATUS_FILTERS: { value: 'all' | 'ready' | 'processing' | 'failed'; labelKey: string }[] = [
+  { value: 'all',        labelKey: 'videoLibrary.filterAll' },
+  { value: 'ready',      labelKey: 'videoLibrary.filterReady' },
+  { value: 'processing', labelKey: 'videoLibrary.filterProcessing' },
+  { value: 'failed',     labelKey: 'videoLibrary.filterFailed' },
+];
 
 const SORT_OPTIONS = [
-  { value: 'created_at',       label: 'Date' },
-  { value: 'title',            label: 'Title' },
-  { value: 'duration_seconds', label: 'Duration' },
-  { value: 'file_size_bytes',  label: 'Size' },
+  { value: 'created_at',       labelKey: 'videoLibrary.sortDate' },
+  { value: 'title',            labelKey: 'videoLibrary.sortTitle' },
+  { value: 'duration_seconds', labelKey: 'videoLibrary.sortDuration' },
+  { value: 'file_size_bytes',  labelKey: 'videoLibrary.sortSize' },
 ] as const;
+
+/** Localized status word for a library row (status values stay English in data). */
+function statusLabelKey(status: VideoAsset['status']): string {
+  switch (status) {
+    case 'ready':              return 'videoLibrary.statusReady';
+    case 'processing':         return 'videoLibrary.statusProcessing';
+    case 'failed':             return 'videoLibrary.statusFailed';
+    case 'missing':            return 'videoLibrary.statusMissing';
+    case 'remotely_deleted':   return 'videoLibrary.statusRemotelyDeleted';
+    case 'duplicate_removed':  return 'videoLibrary.statusDuplicateRemoved';
+    default:                   return 'videoLibrary.statusReady';
+  }
+}
 
 export default function VideoLibraryScreen() {
   const scheme = useColorScheme();
@@ -82,6 +99,7 @@ export default function VideoLibraryScreen() {
   const insets = layout.insets;
   const c = isDark ? neuColors.dark : neuColors.light;
   const { showToast } = useToast();
+  const { t, locale } = useTranslation();
   const { addTask, setQueueVisible } = useUploadQueueStore();
   const { retryUpload } = useVideoUploader();
   const profile = useProfileStore((s) => s.profile);
@@ -131,10 +149,10 @@ export default function VideoLibraryScreen() {
       const data = await getMyVideoLibrary({ search, status: statusFilter, sortBy, sortDir });
       setAssets(data);
     } catch (e) {
-      showToast({ type: 'error', message: friendlyError(e, 'Failed to load library.') });
+      showToast({ type: 'error', message: friendlyError(e, t('videoLibrary.loadFailed')) });
     }
     setLoading(false);
-  }, [search, statusFilter, sortBy, sortDir]);
+  }, [search, statusFilter, sortBy, sortDir, showToast, t]);
 
   // ── Doctor auto-reconciliation on screen focus ──
   // Doctors don't have a maintenance window; their library must reconcile
@@ -151,10 +169,11 @@ export default function VideoLibraryScreen() {
           .then((s) => {
             if (s.status === 'ok') {
               setSyncFailed(false);
-              setSyncSummary(
-                `Synchronized ${new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}` +
-                ` · ${s.remote_videos} remote · ${s.removed ?? s.marked_unavailable ?? 0} removed`,
-              );
+              setSyncSummary(t('videoLibrary.autoSynced', {
+                time: formatClock(new Date(), locale),
+                remote: s.remote_videos,
+                removed: s.removed ?? s.marked_unavailable ?? 0,
+              }));
               // Re-fetch: confirmed-remotely-deleted videos are removed by
               // the sync itself, so the library must reflect the cleanup.
               load();
@@ -165,7 +184,7 @@ export default function VideoLibraryScreen() {
           .catch(() => setSyncFailed(true));
       }
     }
-  }, [load, isStaff, canSync]));
+  }, [load, isStaff, canSync, t, locale]));
 
   // Re-fetch library when any upload reaches 'ready' — the new video should
   // appear immediately without requiring the user to leave and re-enter.
@@ -206,7 +225,7 @@ export default function VideoLibraryScreen() {
       const file = result.assets[0];
       const validation = validateVideoFile(file.name, file.mimeType, file.size ?? 0);
       if (!validation.ok) {
-        showToast({ type: 'error', message: validation.error?.message ?? 'Invalid video file.' });
+        showToast({ type: 'error', message: validation.error?.message ?? t('videoLibrary.invalidFile') });
         return;
       }
       setUploadingVideo(true);
@@ -231,9 +250,9 @@ export default function VideoLibraryScreen() {
       await createUploadRecord(task);
       addTask(task);
       setQueueVisible(true);
-      showToast({ type: 'success', message: `Queued: ${file.name}` });
+      showToast({ type: 'success', message: t('videoLibrary.queued', { name: file.name }) });
     } catch (e) {
-      showToast({ type: 'error', message: friendlyError(e, 'Could not queue video.') });
+      showToast({ type: 'error', message: friendlyError(e, t('videoLibrary.queueFailed')) });
     } finally {
       setUploadingVideo(false);
     }
@@ -257,7 +276,7 @@ export default function VideoLibraryScreen() {
       const usages = await getVideoAssetUsage(asset.id);
       setDeleteConfirm({ asset, usages });
     } catch (e) {
-      showToast({ type: 'error', message: friendlyError(e, 'Could not inspect video usage.') });
+      showToast({ type: 'error', message: friendlyError(e, t('videoLibrary.usageFailed')) });
     }
   };
 
@@ -266,18 +285,18 @@ export default function VideoLibraryScreen() {
     setDeleteSaving(true);
     try {
       const result = await deleteVideoAsset(deleteConfirm.asset.id);
-      if (!result.deleted) throw new Error('The video was not deleted.');
+      if (!result.deleted) throw new Error(t('videoLibrary.notDeleted'));
       setAssets(prev => prev.filter(a => a.id !== deleteConfirm.asset.id));
       setDeleteConfirm(null);
       const affected = result.affected_lessons ?? [];
       if (affected.length > 0) {
         const lessonNames = affected.map(l => l.lesson_title).join(', ');
-        showToast({ type: 'info', message: `Video deleted. ${affected.length} lesson(s) changed to Draft: ${lessonNames}` });
+        showToast({ type: 'info', message: t('videoLibrary.deletedWithLessons', { count: affected.length, lessons: lessonNames }) });
       } else {
-        showToast({ type: 'success', message: 'Video permanently deleted from library and VdoCipher.' });
+        showToast({ type: 'success', message: t('videoLibrary.deleted') });
       }
     } catch (e) {
-      showToast({ type: 'error', message: friendlyError(e, 'Permanent video deletion failed. Nothing was removed.') });
+      showToast({ type: 'error', message: friendlyError(e, t('videoLibrary.deleteFailed')) });
     }
     setDeleteSaving(false);
   };
@@ -295,21 +314,22 @@ export default function VideoLibraryScreen() {
     try {
       const s = await syncVideoLibraryWithVdoCipher(true, isStaff ? 'all' : 'mine');
       if (s.status === 'ok') {
-        setSyncSummary(
-          `Last synchronized: ${new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}` +
-          ` · ${s.remote_videos} remote · ${s.removed ?? s.marked_unavailable ?? 0} removed · ${s.reconciled} reconciled`,
-        );
+        setSyncSummary(t('videoLibrary.lastSync', {
+          time: formatClock(new Date(), locale),
+          remote: s.remote_videos,
+          removed: s.removed ?? s.marked_unavailable ?? 0,
+        }));
         await load();
-        showToast({ type: 'success', message: 'Video library synchronized with VdoCipher.' });
+        showToast({ type: 'success', message: t('videoLibrary.syncOk') });
       } else {
         setSyncSummary(null);
         setSyncFailed(true);
-        showToast({ type: 'error', message: s.error ?? 'Sync failed — library left unchanged. Nothing was marked deleted.' });
+        showToast({ type: 'error', message: s.error ?? t('videoLibrary.syncFailed') });
       }
     } catch (e) {
       setSyncSummary(null);
       setSyncFailed(true);
-      showToast({ type: 'error', message: friendlyError(e, 'Sync failed — library left unchanged.') });
+      showToast({ type: 'error', message: friendlyError(e, t('videoLibrary.syncFailed')) });
     }
     setSyncing(false);
   };
@@ -321,9 +341,9 @@ export default function VideoLibraryScreen() {
       await updateVideoAsset(renameAsset.id, { title: renameTitle.trim() });
       setAssets(prev => prev.map(a => a.id === renameAsset.id ? { ...a, title: renameTitle.trim() } : a));
       setRenameAsset(null);
-      showToast({ type: 'success', message: 'Video renamed.' });
+      showToast({ type: 'success', message: t('videoLibrary.renamed') });
     } catch (e) {
-      showToast({ type: 'error', message: friendlyError(e, 'Rename failed.') });
+      showToast({ type: 'error', message: friendlyError(e, t('videoLibrary.renameFailed')) });
     }
     setRenameSaving(false);
   };
@@ -365,21 +385,21 @@ export default function VideoLibraryScreen() {
           </View>
 
           <View style={{ flex: 1, padding: 12, gap: 4 }}>
-            <Text style={{ fontSize: 14, fontWeight: '700', color: c.text }} numberOfLines={2}>{item.title || 'Untitled Video'}</Text>
+            <Text style={{ fontSize: 14, fontWeight: '700', color: c.text }} numberOfLines={2}>{item.title || t('videoLibrary.untitled')}</Text>
 
             <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
               <View style={{ backgroundColor: `${statusColor(item.status)}18`, paddingHorizontal: 7, paddingVertical: 2, borderRadius: 6 }}>
                 <Text style={{ fontSize: 10, fontWeight: '700', color: statusColor(item.status) }}>
-                  {item.status.charAt(0).toUpperCase() + item.status.slice(1)}
+                  {t(statusLabelKey(item.status))}
                 </Text>
               </View>
               <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.45) }}>{formatBytes(item.file_size_bytes)}</Text>
-              <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.35) }}>{formatDate(item.created_at)}</Text>
+              <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.35) }}>{formatLocalizedDate(item.created_at, locale, { style: 'medium' })}</Text>
             </View>
 
             {/* VdoCipher ID */}
             <Text style={{ fontSize: 10, ...mutedTextStyle(c, 0.3) }} numberOfLines={1}>
-              ID: {item.provider_video_id}
+              {t('videoLibrary.videoId')}: {item.provider_video_id}
             </Text>
           </View>
         </View>
@@ -399,7 +419,7 @@ export default function VideoLibraryScreen() {
               <>
                 <BookOpen size={13} color={c.primary} />
                 <Text style={{ fontSize: 12, fontWeight: '700', color: c.primary }}>
-                  {item.lesson_count ?? 0} {(item.lesson_count ?? 0) === 1 ? 'lesson' : 'lessons'}
+                  {t('videoLibrary.lessonsLabel')}: {item.lesson_count ?? 0}
                 </Text>
                 {isExpanded ? <ChevronUp size={12} color={c.primary} /> : <ChevronDown size={12} color={c.primary} />}
               </>
@@ -411,7 +431,7 @@ export default function VideoLibraryScreen() {
             onPress={() => { setRenameAsset(item); setRenameTitle(item.title); }}
             style={{ flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 10, borderLeftWidth: 1, borderLeftColor: `${c.text}10` }}>
             <Edit2 size={13} color={c.text} opacity={0.5} />
-            <Text style={{ fontSize: 12, fontWeight: '700', ...mutedTextStyle(c, 0.6) }}>Rename</Text>
+            <Text style={{ fontSize: 12, fontWeight: '700', ...mutedTextStyle(c, 0.6) }}>{t('videoLibrary.rename')}</Text>
           </Pressable>
 
           {/* Delete */}
@@ -419,7 +439,7 @@ export default function VideoLibraryScreen() {
             onPress={() => handleDelete(item)}
             style={{ flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 10, borderLeftWidth: 1, borderLeftColor: `${c.text}10` }}>
             <Trash2 size={13} color="#DC2626" />
-            <Text style={{ fontSize: 12, fontWeight: '700', color: '#DC2626' }}>Delete</Text>
+            <Text style={{ fontSize: 12, fontWeight: '700', color: '#DC2626' }}>{t('videoLibrary.deleteVideo')}</Text>
           </Pressable>
         </View>
 
@@ -428,12 +448,12 @@ export default function VideoLibraryScreen() {
           <View style={{ borderTopWidth: 1, borderTopColor: `${c.text}10`, padding: 12, gap: 8 }}>
             {usages.length === 0 ? (
               <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.4), textAlign: 'center' }}>
-                Not used in any lesson yet.
+                {t('videoLibrary.notUsedYet')}
               </Text>
             ) : (
               <>
                 <Text style={{ fontSize: 11, fontWeight: '700', ...mutedTextStyle(c, 0.5), textTransform: 'uppercase', letterSpacing: 0.5 }}>
-                  Used In
+                  {t('videoLibrary.usedIn')}
                 </Text>
                 {usages.map((u) => (
                   <View key={u.lesson_id} style={[neuPressedStyle(isDark), { borderRadius: 10, padding: 10, flexDirection: 'row', alignItems: 'center', gap: 8 }]}>
@@ -459,12 +479,12 @@ export default function VideoLibraryScreen() {
       <Modal visible={!!renameAsset} transparent animationType="fade" onRequestClose={() => setRenameAsset(null)}>
         <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
           <View style={[neuFlatStyle(isDark), { width: '100%', maxWidth: 380, borderRadius: 22, padding: 24, gap: 16 }]}>
-            <Text style={{ fontSize: 17, fontWeight: '800', color: c.text }}>Rename Video</Text>
+            <Text style={{ fontSize: 17, fontWeight: '800', color: c.text }}>{t('videoLibrary.renameTitle')}</Text>
             <View style={[neuPressedStyle(isDark), { borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, minWidth: 0 }]}>
               <TextInput
                 value={renameTitle}
                 onChangeText={setRenameTitle}
-                placeholder="Video title"
+                placeholder={t('videoLibrary.titlePlaceholder')}
                 placeholderTextColor={`${c.text}55`}
                 style={{ flex: 1, minWidth: 0, fontSize: 14, color: c.text, paddingVertical: 0 }}
                 autoFocus
@@ -473,12 +493,12 @@ export default function VideoLibraryScreen() {
             <View style={{ flexDirection: 'row', gap: 12 }}>
               <Pressable onPress={() => setRenameAsset(null)}
                 style={[neuFlatStyle(isDark), { flex: 1, padding: 13, borderRadius: 12, alignItems: 'center' }]}>
-                <Text style={{ fontSize: 14, fontWeight: '700', ...mutedTextStyle(c, 0.6) }}>Cancel</Text>
+                <Text style={{ fontSize: 14, fontWeight: '700', ...mutedTextStyle(c, 0.6) }}>{t('common.cancel')}</Text>
               </Pressable>
               <Pressable onPress={handleRename} disabled={renameSaving}
                 style={{ flex: 1, padding: 13, borderRadius: 12, alignItems: 'center', backgroundColor: c.primary, flexDirection: 'row', justifyContent: 'center', gap: 8 }}>
                 {renameSaving && <ActivityIndicator size="small" color="#fff" />}
-                <Text style={{ fontSize: 14, fontWeight: '700', color: '#fff' }}>Save</Text>
+                <Text style={{ fontSize: 14, fontWeight: '700', color: '#fff' }}>{t('common.save')}</Text>
               </Pressable>
             </View>
           </View>
@@ -494,14 +514,14 @@ export default function VideoLibraryScreen() {
                 <Trash2 size={20} color="#DC2626" />
               </View>
               <View style={{ flex: 1 }}>
-                <Text style={{ fontSize: 16, fontWeight: '800', color: '#DC2626' }}>Delete Video Permanently?</Text>
+                <Text style={{ fontSize: 16, fontWeight: '800', color: '#DC2626' }}>{t('videoLibrary.deleteTitle')}</Text>
                 <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.55), marginTop: 2 }}>
-                  Used in {deleteConfirm?.usages.length ?? 0} {(deleteConfirm?.usages.length ?? 0) === 1 ? 'lesson' : 'lessons'}.
+                  {t('videoLibrary.usedInLessons', { count: deleteConfirm?.usages.length ?? 0 })}
                 </Text>
               </View>
             </View>
             <Text style={{ fontSize: 13, color: c.text, opacity: 0.7, lineHeight: 19 }}>
-              This removes the video from every listed lesson and permanently deletes the VdoCipher resource. Published lessons that lose their video will be automatically set to Draft.
+              {t('videoLibrary.deleteBody')}
             </Text>
             <ScrollView automaticallyAdjustKeyboardInsets={process.env.EXPO_OS === 'ios'} showsVerticalScrollIndicator={false} style={{ maxHeight: 220 }}>
               {(deleteConfirm?.usages ?? []).map((u) => (
@@ -514,96 +534,120 @@ export default function VideoLibraryScreen() {
                 </View>
               ))}
               {(deleteConfirm?.usages.length ?? 0) === 0 && (
-                <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.5), textAlign: 'center', padding: 10 }}>Not used in any lesson.</Text>
+                <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.5), textAlign: 'center', padding: 10 }}>{t('videoLibrary.notUsedInAnyLesson')}</Text>
               )}
             </ScrollView>
             <View style={{ flexDirection: 'row', gap: 12 }}>
               <Pressable onPress={() => setDeleteConfirm(null)} disabled={deleteSaving}
                 style={[neuFlatStyle(isDark), { flex: 1, padding: 13, borderRadius: 14, alignItems: 'center' }]}>
-                <Text style={{ fontSize: 14, fontWeight: '700', ...mutedTextStyle(c, 0.65) }}>Keep Video</Text>
+                <Text style={{ fontSize: 14, fontWeight: '700', ...mutedTextStyle(c, 0.65) }}>{t('videoLibrary.keepVideo')}</Text>
               </Pressable>
               <Pressable onPress={confirmDelete} disabled={deleteSaving}
                 style={{ flex: 1, padding: 13, borderRadius: 14, alignItems: 'center', justifyContent: 'center', backgroundColor: '#DC2626', flexDirection: 'row', gap: 8 }}>
                 {deleteSaving && <ActivityIndicator size="small" color="#fff" />}
-                <Text style={{ fontSize: 14, fontWeight: '700', color: '#fff' }}>Delete Permanently</Text>
+                <Text style={{ fontSize: 14, fontWeight: '700', color: '#fff' }}>{t('videoLibrary.deletePermanently')}</Text>
               </Pressable>
             </View>
           </View>
         </View>
       </Modal>
 
-      {/* ── Header — standard PageHeader: hamburger (drawer), title, right actions.
-          Replaces the old custom title row which had no hamburger, breaking the
-          drawer-navigation pattern every other hub/root page follows. ── */}
+      {/* Content column — capped on tablets/desktop so the action row, search
+          and filter chips never stretch into unusable full-width bars. */}
+      <View style={{ flex: 1, width: '100%', maxWidth: 960, alignSelf: 'center' }}>
+
+      {/* ── Header: title + subtitle only. The Upload/Sync controls moved OUT
+          of the title row (they used to crowd the title and hamburger into one
+          line) so the header reads as title → actions → status → search. ── */}
       <PageHeader
-        title="Video Library"
-        subtitle="One upload, reusable across any lesson"
-        rightAction={
-          <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center' }}>
-            {canSync && (
-              <Pressable
-                onPress={handleSync}
-                disabled={syncing}
-                accessibilityRole="button"
-                accessibilityLabel="Sync library with VdoCipher"
-                style={{ backgroundColor: syncing ? `${c.primary}66` : c.primary, borderRadius: 14, paddingHorizontal: 12, paddingVertical: 10, flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                {syncing
-                  ? <ActivityIndicator size="small" color="#fff" />
-                  : <RefreshCw size={15} color="#fff" />}
-                <Text style={{ color: '#fff', fontSize: 12, fontWeight: '800' }}>
-                  {syncing ? 'Syncing…' : 'Sync'}
-                </Text>
-              </Pressable>
-            )}
-            <Pressable
-              onPress={handleUploadVideo}
-              disabled={uploadingVideo}
-              style={{ backgroundColor: c.primary, borderRadius: 14, paddingHorizontal: 12, paddingVertical: 10, flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-              {uploadingVideo ? <ActivityIndicator size="small" color="#fff" /> : <Upload size={15} color="#fff" />}
-              <Text style={{ color: '#fff', fontSize: 12, fontWeight: '800' }}>Upload</Text>
-            </Pressable>
-          </View>
-        }
+        title={t('videoLibrary.title')}
+        subtitle={t('videoLibrary.subtitle')}
       />
 
-      {/* ── Sync status banner ── */}
-      {syncing && (
-        <View style={{ marginHorizontal: 16, marginBottom: 10, padding: 12, borderRadius: 14, flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: `${c.primary}14` }}>
-          <ActivityIndicator size="small" color={c.primary} />
-          <Text style={{ fontSize: 13, color: c.text, opacity: 0.7 }}>Syncing video library with VdoCipher…</Text>
-        </View>
-      )}
-      {!syncing && syncFailed && (
-        <View style={{ marginHorizontal: 16, marginBottom: 10, padding: 12, borderRadius: 14, flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#D9770612' }}>
-          <CloudOff size={13} color="#D97706" />
-          <Text style={{ fontSize: 12, color: '#92400E', flex: 1 }}>
-            VdoCipher sync was unavailable — showing last known state. Nothing was changed.
-          </Text>
-          <Pressable onPress={handleSync} disabled={syncing} hitSlop={6}>
-            <Text style={{ fontSize: 12, fontWeight: '700', color: '#D97706' }}>Retry</Text>
+      {/* ── Action row: two equal, balanced controls ── */}
+      <View style={{ paddingHorizontal: 16, flexDirection: 'row', gap: 10, marginBottom: 8 }}>
+        {canSync && (
+          <Pressable
+            onPress={handleSync}
+            disabled={syncing}
+            accessibilityRole="button"
+            accessibilityLabel={t('videoLibrary.syncAria')}
+            accessibilityState={{ disabled: syncing, busy: syncing }}
+            style={[
+              neuFlatStyle(isDark),
+              { flex: 1, height: 44, borderRadius: 14, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 },
+              syncing && { opacity: 0.55 },
+            ]}>
+            {syncing
+              ? <ActivityIndicator size="small" color={c.primary} />
+              : <RefreshCw size={16} color={c.primary} />}
+            <Text numberOfLines={1} style={{ fontSize: 13, fontWeight: '800', color: c.primary }}>
+              {syncing ? t('videoLibrary.syncing') : t('videoLibrary.sync')}
+            </Text>
           </Pressable>
+        )}
+        <Pressable
+          onPress={handleUploadVideo}
+          disabled={uploadingVideo}
+          accessibilityRole="button"
+          accessibilityLabel={t('videoLibrary.upload')}
+          accessibilityState={{ disabled: uploadingVideo, busy: uploadingVideo }}
+          style={{
+            flex: 1, height: 44, borderRadius: 14, flexDirection: 'row', alignItems: 'center',
+            justifyContent: 'center', gap: 8, backgroundColor: c.primary,
+            opacity: uploadingVideo ? 0.7 : 1,
+          }}>
+          {uploadingVideo ? <ActivityIndicator size="small" color="#fff" /> : <Upload size={16} color="#fff" />}
+          <Text numberOfLines={1} style={{ color: '#fff', fontSize: 13, fontWeight: '800' }}>
+            {uploadingVideo ? t('videoLibrary.uploading') : t('videoLibrary.upload')}
+          </Text>
+        </Pressable>
+      </View>
+
+      {/* ── Sync status: ONE compact secondary line (state + time · counts) ── */}
+      {(syncing || syncFailed || !!syncSummary) && (
+        <View style={{ paddingHorizontal: 16, marginBottom: 10, flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+          {syncing
+            ? <ActivityIndicator size="small" color={c.primary} />
+            : syncFailed
+              ? <CloudOff size={12} color="#D97706" />
+              : <RefreshCw size={12} color={c.text} opacity={0.4} />}
+          <Text numberOfLines={2} style={{ flex: 1, minWidth: 0, fontSize: 11.5, ...mutedTextStyle(c, 0.5) }}>
+            {syncing
+              ? t('videoLibrary.syncRunning')
+              : syncFailed
+                ? t('videoLibrary.syncUnavailable')
+                : syncSummary}
+          </Text>
+          {syncFailed && (
+            <Pressable onPress={handleSync} disabled={syncing} hitSlop={8}
+              accessibilityRole="button" accessibilityLabel={t('common.retry')}>
+              <Text style={{ fontSize: 12, fontWeight: '800', color: '#D97706' }}>{t('common.retry')}</Text>
+            </Pressable>
+          )}
         </View>
       )}
       {/* ── Live upload status strip (engine state, shown even when the queue panel is closed) ── */}
       {(activeUpload || recentFailed) && (() => {
-        const t: UploadTask = (activeUpload ?? recentFailed) as UploadTask;
+        // `task`, not `t`: `t` is the translation function on this screen.
+        const task: UploadTask = (activeUpload ?? recentFailed) as UploadTask;
         const stageLabel =
-          t.status === 'waiting' ? 'Preparing…' :
-          t.status === 'uploading' || t.status === 'resuming' ? `Uploading ${Math.round(t.progress)}%` :
-          t.status === 'paused' ? `Paused — ${Math.round(t.progress)}% uploaded` :
-          t.status === 'processing' ? 'Processing…' :
-          t.status === 'encoding' ? 'Processing video…' :
-          t.status === 'generating_streams' ? 'Processing video…' :
-          t.status === 'verifying' ? 'Verifying…' :
-          t.status === 'recovering' ? 'Restoring upload…' :
-          t.status === 'timeout' ? 'Processing timed out' : 'Upload failed';
-        const failed = t.status === 'failed' || t.status === 'timeout';
-        const indeterminate = ['waiting', 'processing', 'encoding', 'generating_streams', 'verifying', 'recovering'].includes(t.status);
+          task.status === 'waiting' ? t('videoLibrary.stagePreparing') :
+          task.status === 'uploading' || task.status === 'resuming' ? t('videoLibrary.stageUploading', { percent: Math.round(task.progress) }) :
+          task.status === 'paused' ? t('videoLibrary.stagePaused', { percent: Math.round(task.progress) }) :
+          task.status === 'processing' ? t('videoLibrary.stageProcessing') :
+          task.status === 'encoding' ? t('videoLibrary.stageProcessing') :
+          task.status === 'generating_streams' ? t('videoLibrary.stageProcessing') :
+          task.status === 'verifying' ? t('videoLibrary.stageVerifying') :
+          task.status === 'recovering' ? t('videoLibrary.stageRestoring') :
+          task.status === 'timeout' ? t('videoLibrary.stageTimedOut') : t('videoLibrary.stageFailed');
+        const failed = task.status === 'failed' || task.status === 'timeout';
+        const indeterminate = ['waiting', 'processing', 'encoding', 'generating_streams', 'verifying', 'recovering'].includes(task.status);
         return (
           <View style={{ marginHorizontal: 16, marginBottom: 10, padding: 12, borderRadius: 14, backgroundColor: failed ? '#DC262612' : `${c.primary}14`, gap: 8 }}>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
               <Text numberOfLines={1} style={{ fontSize: 13, fontWeight: '800', color: failed ? '#B91C1C' : c.text, flex: 1 }}>
-                {t.fileName}
+                {task.fileName}
               </Text>
               <Text style={{ fontSize: 12, fontWeight: '700', color: failed ? '#B91C1C' : c.text, opacity: 0.75 }}>
                 {stageLabel}
@@ -611,24 +655,20 @@ export default function VideoLibraryScreen() {
             </View>
             {failed
               ? (
-                <Pressable onPress={() => retryUpload(t.id)} hitSlop={6} style={{ alignSelf: 'flex-start', borderRadius: 10, paddingHorizontal: 12, paddingVertical: 6, backgroundColor: '#DC262618' }}>
-                  <Text style={{ fontSize: 12, fontWeight: '800', color: '#B91C1C' }}>Retry upload</Text>
+                <Pressable onPress={() => retryUpload(task.id)} hitSlop={6}
+                  accessibilityRole="button" accessibilityLabel={t('videoLibrary.retryUpload')}
+                  style={{ alignSelf: 'flex-start', borderRadius: 10, paddingHorizontal: 12, paddingVertical: 6, backgroundColor: '#DC262618' }}>
+                  <Text style={{ fontSize: 12, fontWeight: '800', color: '#B91C1C' }}>{t('videoLibrary.retryUpload')}</Text>
                 </Pressable>
               )
               : (
                 <View style={{ height: 6, borderRadius: 3, backgroundColor: `${c.text}14`, overflow: 'hidden' }}>
-                  <View style={{ height: 6, borderRadius: 3, width: indeterminate ? '40%' : `${Math.min(100, Math.max(2, t.progress))}%`, backgroundColor: c.primary, opacity: indeterminate ? 0.5 : 1 }} />
+                  <View style={{ height: 6, borderRadius: 3, width: indeterminate ? '40%' : `${Math.min(100, Math.max(2, task.progress))}%`, backgroundColor: c.primary, opacity: indeterminate ? 0.5 : 1 }} />
                 </View>
               )}
           </View>
         );
       })()}
-
-      {!syncing && syncSummary && (
-        <View style={{ marginHorizontal: 16, marginBottom: 10, padding: 12, borderRadius: 14, backgroundColor: `${c.primary}0D` }}>
-          <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.55) }}>{syncSummary}</Text>
-        </View>
-      )}
 
       {/* ── Search + Sort ── */}
       <View style={{ paddingHorizontal: 16, paddingBottom: 10, flexDirection: 'row', gap: 10 }}>
@@ -637,7 +677,8 @@ export default function VideoLibraryScreen() {
           <TextInput
             value={search}
             onChangeText={setSearch}
-            placeholder="Search by title…"
+            placeholder={t('videoLibrary.searchPlaceholder')}
+            accessibilityLabel={t('videoLibrary.searchPlaceholder')}
             placeholderTextColor={`${c.text}55`}
             style={{ flex: 1, minWidth: 0, fontSize: 14, color: c.text, paddingVertical: 0 }}
             returnKeyType="search"
@@ -660,7 +701,7 @@ export default function VideoLibraryScreen() {
             style={[neuFlatStyle(isDark), { height: 42, paddingHorizontal: 12, borderRadius: 14, flexDirection: 'row', alignItems: 'center', gap: 6 }]}>
             {sortDir === 'asc' ? <SortAsc size={15} color={c.primary} /> : <SortDesc size={15} color={c.primary} />}
             <Text style={{ fontSize: 12, fontWeight: '700', color: c.primary }}>
-              {SORT_OPTIONS.find(o => o.value === sortBy)?.label ?? 'Sort'}
+              {t(SORT_OPTIONS.find(o => o.value === sortBy)?.labelKey ?? 'videoLibrary.sort')}
             </Text>
             <ChevronDown size={13} color={c.primary} />
           </Pressable>
@@ -670,7 +711,7 @@ export default function VideoLibraryScreen() {
             onClose={() => setShowSortMenu(false)}
             anchorRef={sortAnchorRef}
             preferredWidth={180}
-            accessibilityLabel={translate('nav.closeMenu')}
+            accessibilityLabel={t('nav.closeMenu')}
             style={{ zIndex: zIndex.dropdown, minWidth: 160 }}
           >
               {SORT_OPTIONS.map(opt => (
@@ -686,7 +727,7 @@ export default function VideoLibraryScreen() {
                     { paddingHorizontal: 12, paddingVertical: 9, borderRadius: 10, flexDirection: 'row', alignItems: 'center', gap: 8 },
                   ]}>
                   <Text style={{ fontSize: 13, fontWeight: sortBy === opt.value ? '700' : '500', color: sortBy === opt.value ? c.primary : c.text }}>
-                    {opt.label}
+                    {t(opt.labelKey)}
                   </Text>
                   {sortBy === opt.value && (sortDir === 'asc' ? <SortAsc size={12} color={c.primary} /> : <SortDesc size={12} color={c.primary} />)}
                 </Pressable>
@@ -715,7 +756,7 @@ export default function VideoLibraryScreen() {
               { paddingHorizontal: 16, paddingVertical: 9, borderRadius: 20 },
             ]}>
             <Text style={{ fontSize: 13, fontWeight: '700', color: statusFilter === f.value ? c.primary : c.text, opacity: statusFilter === f.value ? 1 : 0.55 }}>
-              {f.label}
+              {t(f.labelKey)}
             </Text>
           </Pressable>
         ))}
@@ -725,7 +766,7 @@ export default function VideoLibraryScreen() {
       {loading ? (
         <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12 }}>
           <ActivityIndicator color={c.primary} size="large" />
-          <Text style={{ fontSize: 13, ...mutedTextStyle(c, 0.45) }}>Loading your library…</Text>
+          <Text style={{ fontSize: 13, ...mutedTextStyle(c, 0.45) }}>{t('videoLibrary.loading')}</Text>
         </View>
       ) : (
         <FlatList
@@ -740,10 +781,10 @@ export default function VideoLibraryScreen() {
                 <Film size={36} color={c.primary} opacity={0.35} />
               </View>
               <Text style={{ fontSize: 17, fontWeight: '700', color: c.text }}>
-                {search ? 'No videos found' : 'Your library is empty'}
+                {search ? t('videoLibrary.noResultsTitle') : t('videoLibrary.emptyTitle')}
               </Text>
               <Text style={{ fontSize: 13, ...mutedTextStyle(c, 0.45), textAlign: 'center', lineHeight: 19, maxWidth: 280 }}>
-                {search ? 'Try a different search term.' : 'Videos you upload to lessons will appear here and can be reused across any course.'}
+                {search ? t('videoLibrary.noResultsBody') : t('videoLibrary.emptyBody')}
               </Text>
             </View>
           }
@@ -751,6 +792,7 @@ export default function VideoLibraryScreen() {
           refreshing={loading}
         />
       )}
+      </View>
     </KeyboardAvoidingView>
   );
 }

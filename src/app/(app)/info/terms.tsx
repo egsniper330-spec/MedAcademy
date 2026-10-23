@@ -1,62 +1,45 @@
 /**
  * Terms & Conditions — static info page
+ *
+ * CONTENT SOURCE
+ *   • Built-in copy: this page's numbered sections, now held in the shared
+ *     translation dictionaries (`terms.s1h` … `terms.s9b`) so the page follows
+ *     the in-app language instead of always rendering English.
+ *   • Server-managed copy (Super Admin → Platform → CMS Pages) still wins when
+ *     a body has been written — the CMS text is single-language (as stored) and
+ *     is rendered verbatim. Clearing the CMS body falls back to these translated
+ *     sections, which also means switching language re-renders the fallback.
+ *
+ * LEGAL NOTE: the Arabic copy is a faithful translation of the English source —
+ * no clause was added, removed or weakened.
  */
 import { ScrollView, View, Text, useColorScheme } from 'react-native';
 import { PageHeader } from '@/components/PageHeader';
 import { useCmsSections } from '@/lib/cmsContent';
 import { NeuCard } from '@/components/NeuCard';
-import { neuColors, useLayout, safeBottom, mutedTextStyle } from '@/lib/neu';
+import { neuColors, useLayout, mutedTextStyle } from '@/lib/neu';
 import { FileText } from 'lucide-react-native';
 import { useTranslation } from '@/lib/i18n';
 
-const SECTIONS = [
-  {
-    heading: '1. Acceptance of Terms',
-    body: 'By accessing or using MedAcademy, you agree to be bound by these Terms & Conditions. If you do not agree to these terms, please do not use our platform.',
-  },
-  {
-    heading: '2. Account Responsibilities',
-    body: 'You are responsible for maintaining the confidentiality of your account credentials. Your account may only be used on one authorized device at a time. Sharing accounts or credentials is strictly prohibited and may result in suspension.',
-  },
-  {
-    heading: '3. Content Usage',
-    body: 'All course content — including videos, PDFs, and materials — is protected by copyright and may not be recorded, distributed, or reproduced in any form. Forensic watermarks are embedded in all streamed content to identify unauthorized sharing.',
-  },
-  {
-    heading: '4. Subscriptions & Access',
-    body: 'Course access is granted through enrollment by a Doctor or platform administrator. Access is personal and non-transferable. Completed or expired subscriptions do not entitle the user to a refund unless explicitly stated.',
-  },
-  {
-    heading: '5. Prohibited Conduct',
-    body: 'You agree not to attempt to circumvent security measures, use screen-recording software during content playback, or exploit technical vulnerabilities. Violations may result in immediate account termination.',
-  },
-  {
-    heading: '6. Intellectual Property',
-    body: 'All content, trademarks, and branding on MedAcademy are the exclusive property of the platform and its instructors. Unauthorized use constitutes an infringement of intellectual property rights.',
-  },
-  {
-    heading: '7. Disclaimer of Warranties',
-    body: 'The platform is provided "as-is" without warranties of any kind. We do not guarantee uninterrupted access, and we are not liable for content accuracy beyond our reasonable editorial standards.',
-  },
-  {
-    heading: '8. Amendments',
-    body: 'We reserve the right to update these Terms at any time. Continued use of the platform after changes are posted constitutes acceptance of the updated Terms.',
-  },
-  {
-    heading: '9. Governing Law',
-    body: 'These Terms are governed by applicable laws. Any disputes shall be resolved through negotiation, and if necessary, through the competent courts.',
-  },
-];
+/** Section numbers — the copy itself lives in the dictionaries. */
+const SECTION_NUMBERS = ['1', '2', '3', '4', '5', '6', '7', '8', '9'] as const;
 
 export default function TermsPage() {
   const isDark = useColorScheme() === 'dark';
   const c = isDark ? neuColors.dark : neuColors.light;
   const { t } = useTranslation();
   const layout = useLayout();
-  // Server-managed content (Super Admin → Platform → CMS Pages). Falls back to
-  // SECTIONS below whenever no body has been written, so this page is never
-  // blank and never depends on CMS availability.
-  const sections = useCmsSections('terms_conditions', SECTIONS);
+
+  // Server-managed content first; the translated built-in copy is the fallback.
+  // Passing [] (not the copy) keeps the fallback reactive to locale changes.
+  const cmsSections = useCmsSections('terms_conditions', []);
+  const sections = cmsSections.length > 0
+    ? cmsSections
+    : SECTION_NUMBERS.map((n) => ({
+        heading: t(`terms.s${n}h`),
+        body: t(`terms.s${n}b`),
+      }));
+
   const iconSz  = layout.heroIconSize;
   const iconInner = Math.round(iconSz * 0.5);
 
@@ -83,7 +66,7 @@ export default function TermsPage() {
           <FileText size={iconInner} color={c.primary} />
         </View>
         <Text style={{ fontSize: layout.captionSize, ...mutedTextStyle(c, 0.4), textAlign: 'center' }}>
-          Last updated: July 2025
+          {t('legal.lastUpdated')}
         </Text>
       </View>
 

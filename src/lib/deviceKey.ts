@@ -51,6 +51,23 @@ import { NativeModules } from 'react-native';
 import { getStoredDeviceFingerprint } from '@/lib/installationId';
 import { getIntegrityHash } from '@/lib/integrityClient';
 
+/**
+ * Protected actions the client may ask the server to bind evidence to.
+ *
+ * This list is a CLIENT CONVENIENCE, not an authority: the backend keeps its
+ * own whitelist (SecurityEvidenceService::KNOWN_ACTIONS /
+ * IntegrityService::policy()['actions']) and rejects unknown names. Keep the
+ * two in sync when adding an operation — `material_pdf` covers personalised
+ * lesson-PDF issuance, which is the only path that can emit a
+ * student-identifiable document.
+ */
+export type ProtectedAction =
+  | 'vdo_otp'
+  | 'redeem'
+  | 'device_bind'
+  | 'financial'
+  | 'material_pdf';
+
 // ── Native bridge ─────────────────────────────────────────────────────────────
 
 interface NativeDeviceKeyModule {
@@ -243,7 +260,7 @@ async function getConfigVersion(): Promise<number | undefined> {
  * @param fingerprint  this device's fingerprint (must match the registered device)
  */
 export async function getEvidenceHeaders(
-  action: 'vdo_otp' | 'redeem' | 'device_bind' | 'financial',
+  action: ProtectedAction,
   requestHash: string,
   fingerprint: string
 ): Promise<EvidenceHeaders | null> {
@@ -281,7 +298,25 @@ export async function getEvidenceHeaders(
         schema_version: 2,
         timestamp: Date.now(),
       };
-      const canonical = canonicalize(payload);
+      let canonical = canonicalize(payload);
+      // Server hard cap: MAX_EVIDENCE_BYTES = 8192 and an oversized payload is
+      // rejected as evidence_too_large (fail-closed). The OPTIONAL second-pass
+      // fields (root_evidence, checks_unavailable) are therefore dropped FIRST
+      // when the payload is already large — losing observability beats losing
+      // the evidence round itself. Budget sits well under the server cap so a
+      // genuine client can never trip it through these fields.
+      const OPTIONAL_EVIDENCE_BUDGET_BYTES = 7000;
+      if (canonical.length > OPTIONAL_EVIDENCE_BUDGET_BYTES) {
+        const ev = payload.evidence as Record<string, unknown>;
+        if (ev && typeof ev === 'object') {
+          delete ev.root_evidence;
+          canonical = canonicalize(payload);
+          if (canonical.length > OPTIONAL_EVIDENCE_BUDGET_BYTES) {
+            delete ev.checks_unavailable;
+            canonical = canonicalize(payload);
+          }
+        }
+      }
 
       // 4. Keystore signature over the canonical bytes (private key never leaves TEE).
       const payloadB64 = encodeUtf8ToBase64(canonical);
@@ -314,7 +349,7 @@ export async function getEvidenceHeaders(
 async function collectEvidenceFlags(): Promise<Record<string, unknown>> {
   const out: Record<string, unknown> = {};
   try {
-    const { getNativeSecurityFlags } = await import('@/lib/nativeSecurity');
+    const { getNativeSecurityFlags, getNativeRootArtifactEvidence } = await import('@/lib/nativeSecurity');
     const flags = await getNativeSecurityFlags();
     out.vpn = flags.vpnDetected === true;
     out.proxy = flags.proxyDetected === true;
@@ -339,6 +374,34 @@ async function collectEvidenceFlags(): Promise<Record<string, unknown>> {
     out.screen_recording = flags.screenBeingRecorded === true;
     out.signature_valid = flags.signatureValid === true;
     out.signature_mismatch = flags.signatureValid === false;
+    // Checks that threw or could not run in the native batch (second pass).
+    // Server-side: ignored by deriveAssurance (only the named blocking fields
+    // are read), but carried INSIDE the signed payload so the evidence row
+    // distinguishes "measured clean" from "could not measure". No backend
+    // change is required — unknown fields are tolerated by the v2 validator.
+    if (Array.isArray(flags.detectionsUnavailable) && flags.detectionsUnavailable.length > 0) {
+      out.checks_unavailable = flags.detectionsUnavailable.slice(0, 24);
+    }
+    // Root-artifact PROVENANCE (second pass): which probe layers actually
+    // fired (EACCES-based DenyList hit, mount view, PATH su, ...). Previously
+    // the getRootArtifactEvidence() surface had NO consumer anywhere in the
+    // app — it existed but never reached policy, diagnostics or evidence.
+    // Best-effort: the probe shares the batch's 2 s memo, so this is normally
+    // free. Server-side: ignored by deriveAssurance (unknown fields tolerated
+    // by the v2 validator) — evidence rows gain visibility, no deploy needed.
+    try {
+      const art = await getNativeRootArtifactEvidence();
+      if (art) {
+        out.root_evidence = {
+          root_framework_evidence: art.rootFrameworkEvidence === true,
+          denied: (art.denied ?? []).slice(0, 8),
+          present: (art.present ?? []).slice(0, 8),
+          mount_evidence: (art.mountEvidence ?? []).slice(0, 8),
+          su_on_path: (art.suOnPath ?? []).slice(0, 6),
+          bootloader_unlocked: art.bootloaderUnlocked === true,
+        };
+      }
+    } catch { /* evidence surface is optional — never blocks the round */ }
     const wireless = getDeviceKeyModule();
     if (wireless) {
       try { out.wireless_debugging = (await wireless.isWirelessDebuggingEnabled()) === true; } catch { /* absent */ }
@@ -396,7 +459,7 @@ export function resetDeviceKeyBootstrap(): void {
  * best-effort: absent headers mean the SERVER policy decides, never us.
  */
 export async function buildProtectedCallHeaders(
-  action: 'vdo_otp' | 'redeem' | 'device_bind' | 'financial',
+  action: ProtectedAction,
   body: Record<string, unknown>,
   fingerprint?: string
 ): Promise<Record<string, string>> {

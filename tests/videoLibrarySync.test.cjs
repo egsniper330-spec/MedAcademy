@@ -191,11 +191,11 @@ section('Video Library navigation (hamburger via standard PageHeader)');
   ok(screen.includes("import { PageHeader } from '@/components/PageHeader';"),
     'screen uses the shared PageHeader (standard drawer/back pattern)');
 
-  ok(/<PageHeader\s*\n\s*title="Video Library"/.test(screen),
-    'PageHeader renders the Video Library title (hamburger appears via DrawerContext)');
+  ok(/<PageHeader\s*\n\s*title=\{t\('videoLibrary\.title'\)\}/.test(screen),
+    'PageHeader renders the localized Video Library title (hamburger via DrawerContext)');
 
-  ok(screen.includes('rightAction=') && screen.includes('Sync') && screen.includes('Upload'),
-    'Sync + Upload preserved as header right actions');
+  ok(screen.includes("t('videoLibrary.syncAria')") && screen.includes("t('videoLibrary.upload')") && screen.includes('onPress={handleSync}') && screen.includes('onPress={handleUploadVideo}'),
+    'Sync + Upload preserved as a dedicated action row (handlers intact)');
 
   ok(screen.includes("syncVideoLibraryWithVdoCipher(true, 'mine')") &&
      screen.includes("isStaff ? 'all' : 'mine'"),
@@ -204,7 +204,7 @@ section('Video Library navigation (hamburger via standard PageHeader)');
   ok(screen.includes('AUTO_SYNC_INTERVAL_MS') && screen.includes('lastAutoSyncRef'),
     'auto-sync is throttled — no per-render VdoCipher calls');
 
-  ok(screen.includes('VdoCipher sync was unavailable') && screen.includes('Nothing was changed'),
+  ok(screen.includes("'videoLibrary.syncUnavailable'") && /'videoLibrary\.syncUnavailable':\s*\n?\s*'VdoCipher sync was unavailable — showing the last known state\. Nothing was changed\.'/.test(read('src/lib/i18n/resources.ts')),
     'deferred-sync notice explains a failed sync honestly (library stays usable)');
 
   ok(screen.includes('setSyncing(true)') && !/load\(\);\s*\n\s*setSyncing\(/.test(screen),
@@ -218,13 +218,13 @@ section('Upload progress visibility in Video Library');
   ok(screen.includes('const activeUpload = tasks.find') && screen.includes("includes(t.status)"),
     'library derives the live in-flight upload task from the queue store');
 
-  ok(screen.includes('`Uploading ${Math.round(t.progress)}%`'),
+  ok(screen.includes("t('videoLibrary.stageUploading', { percent: Math.round(task.progress) })"),
     'strip shows real byte progress percentage from the engine');
 
-  ok(screen.includes("t.status === 'encoding' ? 'Processing video…'"),
+  ok(screen.includes("task.status === 'encoding' ? t('videoLibrary.stageProcessing')"),
     'VdoCipher processing/encoding is shown as its own stage (not Ready)');
 
-  ok(screen.includes("t.status === 'failed' || t.status === 'timeout'") && screen.includes('retryUpload(t.id)'),
+  ok(screen.includes("task.status === 'failed' || task.status === 'timeout'") && screen.includes('retryUpload(task.id)'),
     'failed/timeout uploads expose an inline Retry wired to the engine retry');
 
   ok(/\{" height: 6, borderRadius: 3/.test(screen) === false,

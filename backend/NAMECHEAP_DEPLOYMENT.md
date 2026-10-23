@@ -34,34 +34,46 @@ default):
 
 `openssl` is **not** required (JWT uses `hash_hmac`).
 
-## B2. Personalized PDF watermarking — extra requirements (optional feature)
+## B2. Personalized PDF watermarking — required for every student PDF
 
-The flattened watermark engine is only active when a teacher switches
-"Personalized Student Watermark" on for a material. When it is on, delivery is
-REFUSED (HTTP 503) unless the engine is fully available — the unwatermarked
-original is never served as a fallback. Configure it with these `.env` keys
-(add them to `backend/.env` on the server — this file is not overwritten for you):
+**Mandatory, not optional.** Every lesson PDF delivered to a student is
+personalized with that student's name and public account id (`MED-####`).
+Doctors have no switch to turn it off; the legacy
+`lesson_materials.watermark_enabled` column is ignored by delivery. Doctors and
+administrators still receive the original for preview.
+
+Delivery is REFUSED (HTTP 503/422) unless the engine is fully available — the
+unwatermarked original is never served as a fallback, and `/storage/signed-url`
+refuses lesson-material PDFs for every role.
+
+The default engine is **pure PHP** (`setasign/fpdi` 2.x + `tecnickcom/tcpdf` 6.x):
+no Ghostscript, no shell, no system font. Full install steps, the cron task and
+the verification commands are in **[`docs/PDF_WATERMARK_DEPLOYMENT.md`](docs/PDF_WATERMARK_DEPLOYMENT.md)**.
+
+Short version:
+
+1. Upload `backend/vendor/` (from `composer install --no-dev` in `backend/`).
+2. Run migration `035_lesson_material_pdf_hardening.sql` in phpMyAdmin.
+3. Add the cron job for `backend/scripts/watermark-cleanup.php`.
+4. Legacy lecture notes (`lesson_pdfs`, bucket `lesson-pdfs`) are now staff-only —
+   they cannot be watermarked, so students can no longer sign them. Re-upload any
+   document that only exists there as a lesson material
+   (see `docs/PDF_WATERMARK_DEPLOYMENT.md` §7.1).
+5. Leave `.env` alone — the defaults are correct for shared hosting:
 
 ```
-PDF_WATERMARK_MODE=raster        # raster | vector | auto   (default: raster)
-PDF_WATERMARK_DPI=200            # 96–400; higher = sharper but larger
-PDF_WATERMARK_IMAGE_FORMAT=png   # png (lossless) | jpeg
-PDF_WATERMARK_JPEG_QUALITY=85    # used only when format = jpeg
-PDF_WATERMARK_OPACITY=0.15       # 0.05–0.5
+PDF_WATERMARK_MODE=auto          # auto | vector | raster   (auto = vector first)
+PDF_WATERMARK_OPACITY=0.15       # raster engine only
+PDF_WATERMARK_VECTOR_OPACITY=0.10  # vector engine (optional override)
 PDF_WATERMARK_MAX_PAGES=150
-PDF_WATERMARK_MAX_PIXELS_PER_PAGE=20000000
-PDF_WATERMARK_TIMEOUT_SECONDS=180
-GHOSTSCRIPT_BIN=gs
-PDF_WATERMARK_FONT=              # blank = auto-detect DejaVu/Liberation/FreeSans
+PDF_WATERMARK_MAX_SOURCE_BYTES=52428800
+MATERIAL_PDF_MINT_PER_MINUTE=60
 ```
 
-Engine requirements:
-
-| Engine | Requires | Notes |
-|---|---|---|
-| `raster` (flattened, no text layer) | Ghostscript CLI reachable via `proc_open` **+** a compositor (GD with FreeType **or** Imagick) **+** a TTF font **+** FPDF | Output pages are images: no selectable text, no removable annotation |
-| `vector` (FPDI/FPDF) | FPDF 1.8.x + FPDI 3 under `backend/lib/pdf` or `backend/vendor` | Keeps the text layer; used by hosts without a renderer |
-| `auto` | either of the above | Prefers `raster`, falls back to `vector` |
+The opt-in **raster** engine (flattened pages, no text layer) additionally needs
+Ghostscript + a compositor + a TTF, and is subject to the Ghostscript
+AGPL/commercial licensing decision in
+`backend/docs/PDF_WATERMARK_LICENSING.md`. Do not enable it without that review.
 
 PHP runtime limits: the web front controller does NOT raise `memory_limit` or
 `max_execution_time` (only `config/config.php`, used by CLI scripts, sets
@@ -70,24 +82,20 @@ PHP runtime limits: the web front controller does NOT raise `memory_limit` or
 
 | Setting | Recommended | Why |
 |---|---|---|
-| `memory_limit` | `512M` | two truecolor render layers per page; the service also refuses a page that would exceed ~60% of this |
-| `max_execution_time` | `300` or more | a multi-page render spawns Ghostscript; the request stays inside the service's own `PDF_WATERMARK_TIMEOUT_SECONDS` |
+| `memory_limit` | `256M` or more | FPDI parses the whole cross-reference of the source PDF; the raster engine needs far more |
+| `max_execution_time` | `120` or more | a large document is parsed page by page; output is cached, so this cost is paid once per student per document |
 
-Licensing: Ghostscript is dual-licensed **AGPL / commercial (Artifex)**. See
-`backend/docs/PDF_WATERMARK_LICENSING.md` before enabling the raster engine in
-production — this is a decision that needs explicit approval.
-
-Many shared cPanel hosts **disable `proc_open`** and/or have **no Ghostscript**.
-In that case leave `PDF_WATERMARK_MODE=vector` (or `auto`) so watermarking keeps
-working with the vector engine. Verify what the server supports AFTER upload:
+Verify what the server supports AFTER upload:
 
 ```bash
 cd /home/USERNAME/medacademy-api
-php backend/scripts/watermark-diagnostics.php   # prints the engine + missing pieces
+php backend/scripts/watermark-diagnostics.php   # engine + missing pieces
+php backend/scripts/verify-watermark.php        # real end-to-end check
 ```
 
-No database migration beyond `032_lesson_material_watermark.sql` is required,
-and no new files need special permissions.
+Databases: migrations `032_lesson_material_watermark.sql` and
+`035_lesson_material_pdf_hardening.sql` are both required; neither drops
+anything. No new files need special permissions.
 
 ## C. Create / configure the API subdomain
 

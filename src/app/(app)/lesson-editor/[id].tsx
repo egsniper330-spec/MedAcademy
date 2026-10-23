@@ -29,7 +29,7 @@ import { useProfileStore } from '@/lib/store';
 import { friendlyError } from '@/lib/validation';
 import {
   createLessonMaterial, deleteLessonMaterial, getLessonById,
-  updateLesson, updateMaterialPermission, updateMaterialWatermark,
+  updateLesson, updateMaterialPermission,
   uploadLessonMaterial, replaceLessonMaterialFile,
   getLessonVideoState, getVdoCipherVideoStatus, markLessonVideoMissing,
   getMyProviderPermissions,
@@ -52,28 +52,30 @@ import { useVideoUploader } from '@/lib/useVideoUploader';
 import { validateVideoFile, resolveUploadMime } from '@/lib/videoFormats';
 import { LargeFileWarning } from '@/components/LargeFileWarning';
 import { VideoThumbnailCard } from '@/components/VideoThumbnailCard';
+import { useTranslation } from '@/lib/i18n';
 
 /** Format seconds → "12m 34s" */
-function formatDuration(sec: number): string {
+function formatDuration(sec: number, locale: string): string {
   if (!sec || sec <= 0) return '—';
   const m = Math.floor(sec / 60);
   const s = Math.round(sec % 60);
-  return s > 0 ? `${m}m ${s}s` : `${m}m`;
+  const language = locale === 'ar' ? 'ar-EG' : 'en-US';
+  return s > 0 ? `${m.toLocaleString(language)}m ${s.toLocaleString(language)}s` : `${m.toLocaleString(language)}m`;
 }
 
 /** Friendly label for each upload status stage */
-function uploadStatusLabel(status: string): string {
+function uploadStatusLabel(status: string, t: (key: string) => string): string {
   switch (status) {
-    case 'waiting':            return 'Queued…';
-    case 'uploading':          return 'Uploading…';
-    case 'processing':         return 'Processing video…';
-    case 'encoding':           return 'Encoding…';
-    case 'generating_streams': return 'Generating streams…';
-    case 'verifying':          return 'Verifying…';
-    case 'ready':              return 'Ready';
-    case 'failed':             return 'Upload failed';
-    case 'timeout':            return 'Processing timed out';
-    case 'canceled':           return 'Canceled';
+    case 'waiting':            return t('lessonEditor.upload.queued');
+    case 'uploading':          return t('lessonEditor.upload.uploading');
+    case 'processing':         return t('lessonEditor.upload.processing');
+    case 'encoding':           return t('lessonEditor.upload.encoding');
+    case 'generating_streams': return t('lessonEditor.upload.generatingStreams');
+    case 'verifying':          return t('lessonEditor.upload.verifying');
+    case 'ready':              return t('lessonEditor.upload.ready');
+    case 'failed':             return t('lessonEditor.upload.failed');
+    case 'timeout':            return t('lessonEditor.upload.timedOut');
+    case 'canceled':           return t('lessonEditor.upload.canceled');
     default:                   return status;
   }
 }
@@ -99,26 +101,26 @@ function extractYouTubeId(input: string): string | null {
 }
 type LessonStatus = 'draft' | 'published' | 'hidden' | 'scheduled' | 'archived';
 
-const LESSON_STATUSES: { value: LessonStatus; label: string; color: string }[] = [
-  { value: 'draft',     label: 'Draft',     color: '#D97706' },
-  { value: 'published', label: 'Published', color: '#16A34A' },
-  { value: 'hidden',    label: 'Hidden',    color: '#6B7280' },
-  { value: 'scheduled', label: 'Scheduled', color: '#3B82F6' },
-  { value: 'archived',  label: 'Archived',  color: '#9CA3AF' },
+const LESSON_STATUSES: { value: LessonStatus; labelKey: string; color: string }[] = [
+  { value: 'draft',     labelKey: 'courseStatus.draft',     color: '#D97706' },
+  { value: 'published', labelKey: 'courseStatus.published', color: '#16A34A' },
+  { value: 'hidden',    labelKey: 'courseStatus.hidden',    color: '#6B7280' },
+  { value: 'scheduled', labelKey: 'courseStatus.scheduled', color: '#3B82F6' },
+  { value: 'archived',  labelKey: 'courseStatus.archived',  color: '#9CA3AF' },
 ];
 
-const PERMISSION_OPTIONS: { value: DownloadPermission; label: string; icon: any; color: string }[] = [
-  { value: 'allow',        label: 'Allow',       icon: Download, color: '#16A34A' },
-  { value: 'preview_only', label: 'Preview Only', icon: Eye,      color: '#3B82F6' },
-  { value: 'hidden',       label: 'Hidden',       icon: EyeOff,   color: '#6B7280' },
-  { value: 'disabled',     label: 'Disabled',     icon: Layers,   color: '#DC2626' },
+const PERMISSION_OPTIONS: { value: DownloadPermission; labelKey: string; icon: any; color: string }[] = [
+  { value: 'allow',        labelKey: 'lessonEditor.permission.allow',       icon: Download, color: '#16A34A' },
+  { value: 'preview_only', labelKey: 'lessonEditor.permission.previewOnly', icon: Eye,      color: '#3B82F6' },
+  { value: 'hidden',       labelKey: 'courseStatus.hidden',                  icon: EyeOff,   color: '#6B7280' },
+  { value: 'disabled',     labelKey: 'lessonEditor.permission.disabled',    icon: Layers,   color: '#DC2626' },
 ];
 
 /** Video source options shown to the doctor. */
-const VIDEO_TYPES: { value: VideoType; label: string; icon: any; color: string }[] = [
-  { value: 'vdocipher',   label: 'Video Lesson',  icon: Video, color: '#7C3AED' },
-  { value: 'youtube',     label: 'YouTube Video', icon: Film,  color: '#DC2626' },
-  { value: 'coming_soon', label: 'Coming Soon',   icon: Clock, color: '#D97706' },
+const VIDEO_TYPES: { value: VideoType; labelKey: string; icon: any; color: string }[] = [
+  { value: 'vdocipher',   labelKey: 'cb.lessonType.video',       icon: Video, color: '#7C3AED' },
+  { value: 'youtube',     labelKey: 'lessonEditor.video.youtube', icon: Film,  color: '#DC2626' },
+  { value: 'coming_soon', labelKey: 'cb.lessonType.comingSoon',  icon: Clock, color: '#D97706' },
 ];
 
 const FILE_ICONS: Record<string, { icon: any; color: string }> = {
@@ -134,21 +136,12 @@ function fileIcon(mimeType: string) {
   return FILE_ICONS[mimeType] ?? FILE_ICONS.default;
 }
 
-function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+function formatBytes(bytes: number, locale: string): string {
+  const language = locale === 'ar' ? 'ar-EG' : 'en-US';
+  if (bytes < 1024) return `${bytes.toLocaleString(language)} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toLocaleString(language, { maximumFractionDigits: 1 })} KB`;
+  return `${(bytes / (1024 * 1024)).toLocaleString(language, { maximumFractionDigits: 1 })} MB`;
 }
-
-/** Human-readable "Saved X min ago" label. */
-function savedLabel(date: Date): string {
-  const diffMin = Math.floor((Date.now() - date.getTime()) / 60_000);
-  if (diffMin < 1) return '✓ Saved just now';
-  if (diffMin === 1) return '✓ Saved 1 min ago';
-  if (diffMin < 60) return `✓ Saved ${diffMin} min ago`;
-  return `✓ Last saved: ${date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true })}`;
-}
-
 export default function LessonEditor() {
   const scheme = useColorScheme();
   const isDark = scheme === 'dark';
@@ -158,6 +151,7 @@ export default function LessonEditor() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const { profile } = useProfileStore();
   const { showToast } = useToast();
+  const { t, tCount, isRTL, locale } = useTranslation();
   const layout = useLayout();
   const insets = layout.insets;
 
@@ -297,7 +291,7 @@ export default function LessonEditor() {
       setScheduledAt(data.scheduled_at ?? '');
       setMaterials(data.lesson_materials ?? []);
     } catch (e) {
-      showToast({ type: 'error', message: friendlyError(e, 'Failed to load lesson.') });
+      showToast({ type: 'error', message: friendlyError(e, t('lessonEditor.loadFailed')) });
     }
     setLoading(false);
   }, [id]);
@@ -442,7 +436,7 @@ export default function LessonEditor() {
 
       await enqueueVideoUpload(file, courseId, isReplace ? (lesson.video_id ?? undefined) : undefined);
     } catch (e) {
-      showToast({ type: 'error', message: friendlyError(e, 'Failed to queue video.') });
+      showToast({ type: 'error', message: friendlyError(e, t('lessonEditor.queueFailed')) });
     }
   };
 
@@ -454,9 +448,9 @@ export default function LessonEditor() {
     try {
       await attachAssetToLesson(lesson.id, asset);
       await loadLesson();
-      showToast({ type: 'success', message: `"${asset.title || 'Video'}" linked to this lesson.` });
+      showToast({ type: 'success', message: t('lessonEditor.assetLinked', { title: asset.title || t('cb.lessonType.video') }) });
     } catch (e) {
-      showToast({ type: 'error', message: friendlyError(e, 'Failed to link video.') });
+      showToast({ type: 'error', message: friendlyError(e, t('lessonEditor.linkFailed')) });
     }
   };
 
@@ -509,7 +503,7 @@ export default function LessonEditor() {
     addTask(task);
     setCurrentUploadId(taskId);
     setQueueVisible(true);
-    showToast({ type: 'success', message: `Queued: ${file.name}` });
+    showToast({ type: 'success', message: t('lessonEditor.queuedFile', { name: file.name }) });
   };
 
   // ── Delete uploaded video with confirmation ───────────────────────────────
@@ -524,9 +518,9 @@ export default function LessonEditor() {
       if (activeTask) await cancelUpload(activeTask.id);
       // Refresh lesson
       await loadLesson();
-      showToast({ type: 'success', message: 'Video deleted.' });
+      showToast({ type: 'success', message: t('lessonEditor.videoDeleted') });
     } catch (e) {
-      showToast({ type: 'error', message: friendlyError(e, 'Failed to delete video.') });
+      showToast({ type: 'error', message: friendlyError(e, t('lessonEditor.deleteFailed')) });
     }
   };
 
@@ -568,9 +562,9 @@ export default function LessonEditor() {
         order_index: materials.length,
       });
       setMaterials(prev => [...prev, material]);
-      showToast({ type: 'success', message: `${file.name} uploaded.` });
+      showToast({ type: 'success', message: t('lessonEditor.fileUploaded', { name: file.name }) });
     } catch (e) {
-      showToast({ type: 'error', message: friendlyError(e, 'Upload failed.') });
+      showToast({ type: 'error', message: friendlyError(e, t('lessonEditor.uploadFailed')) });
     }
     setUploading(false);
   };
@@ -599,9 +593,9 @@ export default function LessonEditor() {
         file.size ?? 0,
       );
       setMaterials(prev => prev.map(m => m.id === material.id ? updated : m));
-      showToast({ type: 'success', message: 'File replaced.' });
+      showToast({ type: 'success', message: t('lessonEditor.fileReplaced') });
     } catch (e) {
-      showToast({ type: 'error', message: friendlyError(e, 'Replace failed.') });
+      showToast({ type: 'error', message: friendlyError(e, t('lessonEditor.replaceFailed')) });
     }
     setReplacingId(null);
   };
@@ -610,9 +604,9 @@ export default function LessonEditor() {
     try {
       await deleteLessonMaterial(material.id, material.storage_path);
       setMaterials(prev => prev.filter(m => m.id !== material.id));
-      showToast({ type: 'success', message: 'File deleted.' });
+      showToast({ type: 'success', message: t('lessonEditor.fileDeleted') });
     } catch (e) {
-      showToast({ type: 'error', message: friendlyError(e, 'Delete failed.') });
+      showToast({ type: 'error', message: friendlyError(e, t('lessonEditor.deleteMaterialFailed')) });
     }
   };
 
@@ -622,28 +616,7 @@ export default function LessonEditor() {
       setMaterials(prev => prev.map(m => m.id === materialId ? { ...m, permission } : m));
       setOpenPermMenu(null);
     } catch (e) {
-      showToast({ type: 'error', message: friendlyError(e, 'Failed to update permission.') });
-    }
-  };
-
-  /**
-   * Toggle the per-material "Personalized Student Watermark".
-   *
-   * Deliberately SEPARATE from handleUpdatePermission: the download permission
-   * and the watermark are independent settings (a Preview-Only material can be
-   * watermarked; a Preview+Download one can be left unmarked). The server owns
-   * the effect — it personalizes every delivered copy while this is on, and
-   * refuses to serve the unwatermarked original.
-   */
-  const handleUpdateWatermark = async (materialId: string, enabled: boolean) => {
-    // Optimistic flip, reverted on failure so the switch never lies.
-    setMaterials(prev => prev.map(m => m.id === materialId ? { ...m, watermark_enabled: enabled ? 1 : 0 } : m));
-    try {
-      await updateMaterialWatermark(materialId, enabled);
-      showToast({ type: 'success', message: enabled ? 'Personalized watermark enabled.' : 'Watermark disabled.' });
-    } catch (e) {
-      setMaterials(prev => prev.map(m => m.id === materialId ? { ...m, watermark_enabled: enabled ? 0 : 1 } : m));
-      showToast({ type: 'error', message: friendlyError(e, 'Failed to update watermark.') });
+      showToast({ type: 'error', message: friendlyError(e, t('lessonEditor.permissionFailed')) });
     }
   };
 
@@ -673,7 +646,7 @@ export default function LessonEditor() {
       }
       setLastSaved(new Date());
       setProviderSaveBlocked(null);
-      showToast({ type: 'success', message: 'Lesson saved.' });
+      showToast({ type: 'success', message: t('lessonEditor.lessonSaved') });
       router.back();
     } catch (e) {
       //  A disabled video provider is a DELIBERATE policy state, not a bug.
@@ -685,7 +658,7 @@ export default function LessonEditor() {
         setProviderSaveBlocked(msg);
         showToast({ type: 'info', message: msg });
       } else {
-        showToast({ type: 'error', message: friendlyError(e, 'Save failed.') });
+        showToast({ type: 'error', message: friendlyError(e, t('lessonEditor.saveFailed')) });
       }
     }
     setSaving(false);
@@ -701,14 +674,14 @@ export default function LessonEditor() {
     t => t.lessonId === id && t.status === 'timeout',
   );
 
-  if (loading) return (
-    <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: c.base }}>
+  if (loading) return (        <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: c.base }}>
+
       <ActivityIndicator color={c.primary} size="large" />
     </View>
   );
 
   return (
-    <KeyboardAvoidingView style={{ flex: 1, backgroundColor: c.base }}
+    <KeyboardAvoidingView style={{ flex: 1, backgroundColor: c.base, direction: isRTL ? 'rtl' : 'ltr' }}
       behavior={undefined} /* keyboard: native inset only */>
 
       {/* ══ Upload-Complete Dialog ══════════════════════════════════════════ */}
@@ -725,7 +698,7 @@ export default function LessonEditor() {
                 <CheckCircle size={36} color="#16A34A" />
               </View>
               <Text style={{ fontSize: 18, fontWeight: '800', color: c.text, textAlign: 'center' }}>
-                Video uploaded successfully
+                {t('lessonEditor.uploadComplete')}
               </Text>
 
               {/* Thumbnail */}
@@ -738,39 +711,39 @@ export default function LessonEditor() {
               ) : (
                 <View style={[neuPressedStyle(isDark), { width: '100%', height: 120, borderRadius: 14, alignItems: 'center', justifyContent: 'center', gap: 8 }]}>
                   <Video size={32} color={c.primary} opacity={0.4} />
-                  <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.4) }}>Generating thumbnail…</Text>
+                  <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.4) }}>{t('lessonEditor.generatingThumbnail')}</Text>
                 </View>
               )}
 
               {/* Duration + status row */}
-              <View style={{ flexDirection: 'row', gap: 12, width: '100%' }}>
+              <View style={{ flexDirection: 'row', direction: isRTL ? 'rtl' : 'ltr', gap: 12, width: '100%' }}>
                 {lesson?.video_duration_seconds > 0 && (
                   <View style={[neuPressedStyle(isDark), { flex: 1, padding: 12, borderRadius: 14, alignItems: 'center', gap: 4 }]}>
                     <Clock size={16} color={c.primary} />
                     <Text style={{ fontSize: 15, fontWeight: '800', color: c.text }}>
-                      {formatDuration(lesson.video_duration_seconds)}
+                      {formatDuration(lesson.video_duration_seconds, locale)}
                     </Text>
-                    <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.45) }}>Duration</Text>
+                    <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.45) }}>{t('lessonEditor.duration')}</Text>
                   </View>
                 )}
                 <View style={[neuPressedStyle(isDark), { flex: 1, padding: 12, borderRadius: 14, alignItems: 'center', gap: 4 }]}>
                   <CheckCircle size={16} color="#16A34A" />
-                  <Text style={{ fontSize: 13, fontWeight: '700', color: '#16A34A' }}>Ready</Text>
-                  <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.45) }}>Status</Text>
+                  <Text style={{ fontSize: 13, fontWeight: '700', color: '#16A34A' }}>{t('lessonEditor.ready')}</Text>
+                  <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.45) }}>{t('common.status')}</Text>
                 </View>
               </View>
 
               {/* Actions */}
-              <View style={{ flexDirection: 'row', gap: 12, width: '100%' }}>
+              <View style={{ flexDirection: 'row', direction: isRTL ? 'rtl' : 'ltr', gap: 12, width: '100%' }}>
                 <Pressable
                   onPress={() => { setShowUploadCompleteDialog(false); handleUploadVideo(); }}
                   style={[neuFlatStyle(isDark), { flex: 1, minWidth: 100, padding: 14, borderRadius: 14, alignItems: 'center' }]}>
-                  <Text style={{ fontSize: 14, fontWeight: '700', color: c.primary }} numberOfLines={1}>Upload Another</Text>
+                  <Text style={{ fontSize: 14, fontWeight: '700', color: c.primary }} numberOfLines={1}>{t('lessonEditor.uploadAnother')}</Text>
                 </Pressable>
                 <Pressable
                   onPress={() => setShowUploadCompleteDialog(false)}
                   style={{ flex: 1, minWidth: 100, padding: 14, borderRadius: 14, alignItems: 'center', backgroundColor: c.primary }}>
-                  <Text style={{ fontSize: 14, fontWeight: '700', color: '#fff' }} numberOfLines={1}>Done</Text>
+                  <Text style={{ fontSize: 14, fontWeight: '700', color: '#fff' }} numberOfLines={1}>{t('common.done')}</Text>
                 </Pressable>
               </View>
             </View>
@@ -796,48 +769,48 @@ export default function LessonEditor() {
       />
 
       {/* ── Header — spacing from headerTokens (EDGE_PAD=4, BREATHING=8) ── */}
-      <View style={{ paddingTop: layout.headerTop, paddingLeft: layout.headerLeft, paddingRight: layout.headerRight, paddingBottom: 12, flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+      <View style={{ paddingTop: layout.headerTop, paddingStart: isRTL ? layout.headerRight : layout.headerLeft, paddingEnd: isRTL ? layout.headerLeft : layout.headerRight, paddingBottom: 12, flexDirection: 'row', direction: isRTL ? 'rtl' : 'ltr', alignItems: 'center', gap: 12 }}>
         <Pressable onPress={() => router.back()}
           hitSlop={8}
           style={[neuFlatStyle(isDark), { width: 40, height: 40, borderRadius: 12, alignItems: 'center', justifyContent: 'center' }]}>
-          <ArrowLeft size={20} color={c.text} opacity={0.6} />
+          {isRTL ? <ChevronDown size={20} color={c.text} opacity={0.6} style={{ transform: [{ rotate: '90deg' }] }} /> : <ArrowLeft size={20} color={c.text} opacity={0.6} />}
         </Pressable>
         <View style={{ flex: 1 }}>
           <TextInput
-            value={title} onChangeText={setTitle} placeholder="Lesson Title"
-            placeholderTextColor={`${c.text}55`}
-            style={{ fontSize: 17, fontWeight: '800', color: c.text, padding: 0 }}
+            value={title} onChangeText={setTitle} placeholder={t('lessonEditor.titlePlaceholder')}
+            placeholderTextColor={c.mode === 'dark' ? c.textMuted : '#56657A'}
+            style={{ fontSize: 17, fontWeight: '800', color: c.text, padding: 0, textAlign: isRTL ? 'right' : 'left', writingDirection: isRTL ? 'rtl' : 'ltr' }}
           />
           {/* Transient ✓ Saved flash — no reserved layout space */}
           {savedVisible && (
-            <Animated.View style={{ position: 'absolute', bottom: -14, left: 0, ...savedFade.style, flexDirection: 'row', alignItems: 'center', gap: 3 }}>
+            <Animated.View style={{ position: 'absolute', bottom: -14, start: 0, ...savedFade.style, flexDirection: 'row', direction: isRTL ? 'rtl' : 'ltr', alignItems: 'center', gap: 3 }}>
               <Check size={10} color="#16A34A" />
-              <Text style={{ fontSize: 10, color: '#16A34A', fontWeight: '600' }}>Saved</Text>
+              <Text style={{ fontSize: 10, color: '#16A34A', fontWeight: '600' }}>{t('cb.saved')}</Text>
             </Animated.View>
           )}
         </View>
         <Pressable onPress={handleSave} disabled={saving}
           style={{ backgroundColor: c.primary, paddingHorizontal: 14, paddingVertical: 10, borderRadius: 12, flexDirection: 'row', alignItems: 'center', gap: 6 }}>
           {saving ? <ActivityIndicator size="small" color="#fff" /> : <Save size={15} color="#fff" />}
-          <Text style={{ fontSize: 13, fontWeight: '700', color: '#fff' }}>Save</Text>
+          <Text style={{ fontSize: 13, fontWeight: '700', color: '#fff' }}>{t('common.save')}</Text>
         </Pressable>
       </View>
 
       {/* ── Tab Bar ── */}
-      <View style={{ flexDirection: 'row', paddingHorizontal: layout.screenPx, gap: 8, marginBottom: 4 }}>
+      <View style={{ flexDirection: 'row', direction: isRTL ? 'rtl' : 'ltr', paddingHorizontal: layout.screenPx, gap: 8, marginBottom: 4 }}>
         {([
-          { key: 'video',      label: 'Video',     icon: Play },
-          { key: 'materials',  label: 'Materials', icon: Paperclip },
-          { key: 'settings',   label: 'Settings',  icon: Settings },
-        ] as { key: LessonTab; label: string; icon: any }[]).map(({ key, label, icon: Icon }) => (
+          { key: 'video',      labelKey: 'lessonEditor.tab.video',     icon: Play },
+          { key: 'materials',  labelKey: 'lessonEditor.tab.materials', icon: Paperclip },
+          { key: 'settings',   labelKey: 'lessonEditor.tab.settings', icon: Settings },
+        ] as { key: LessonTab; labelKey: string; icon: any }[]).map(({ key, labelKey, icon: Icon }) => (
           <Pressable key={key} onPress={() => setTab(key)}
             style={[
               tab === key ? neuPressedStyle(isDark) : neuFlatStyle(isDark),
-              { flex: 1, paddingVertical: 10, borderRadius: 14, alignItems: 'center', flexDirection: 'row', justifyContent: 'center', gap: 6 },
+              { flex: 1, paddingVertical: 10, borderRadius: 14, alignItems: 'center', flexDirection: 'row', direction: isRTL ? 'rtl' : 'ltr', justifyContent: 'center', gap: 6 },
             ]}>
             <Icon size={15} color={tab === key ? c.primary : c.text} opacity={tab === key ? 1 : 0.45} />
             <Text style={{ fontSize: 13, fontWeight: '700', color: tab === key ? c.primary : c.text, opacity: tab === key ? 1 : 0.55 }}>
-              {label}
+              {t(labelKey)}
             </Text>
             {key === 'materials' && materials.length > 0 && (
               <View style={{ width: 18, height: 18, borderRadius: 9, backgroundColor: c.primary, alignItems: 'center', justifyContent: 'center' }}>
@@ -858,7 +831,7 @@ export default function LessonEditor() {
           {/* ── Live upload / processing status card ─────────────────────── */}
           {activeTask && (
             <NeuCard style={{ padding: 16, gap: 12 }}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+              <View style={{ flexDirection: 'row', direction: isRTL ? 'rtl' : 'ltr', alignItems: 'center', gap: 12 }}>
                 {activeTask.status === 'failed' ? (
                   <View style={{ width: 36, height: 36, borderRadius: 10, backgroundColor: '#DC262618', alignItems: 'center', justifyContent: 'center' }}>
                     <AlertCircle size={18} color="#DC2626" />
@@ -870,7 +843,7 @@ export default function LessonEditor() {
                 )}
                 <View style={{ flex: 1 }}>
                   <Text style={{ fontSize: 14, fontWeight: '700', color: activeTask.status === 'failed' ? '#DC2626' : c.text }}>
-                    {uploadStatusLabel(activeTask.status)}
+                    {uploadStatusLabel(activeTask.status, t)}
                   </Text>
                   {activeTask.status === 'uploading' && activeTask.progress > 0 && (
                     <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.5), marginTop: 2 }}>
@@ -891,14 +864,14 @@ export default function LessonEditor() {
                 </View>
               )}
               {/* Stage dots */}
-              <View style={{ flexDirection: 'row', gap: 6, alignItems: 'center' }}>
+              <View style={{ flexDirection: 'row', direction: isRTL ? 'rtl' : 'ltr', gap: 6, alignItems: 'center' }}>
                 {(['waiting', 'uploading', 'processing', 'verifying'] as const).map((stage, i) => {
                   const stageOrder = ['waiting', 'uploading', 'processing', 'verifying'];
                   const curIdx = stageOrder.indexOf(activeTask.status);
                   const done = i < curIdx;
                   const active = i === curIdx;
                   return (
-                    <View key={stage} style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                    <View key={stage} style={{ flexDirection: 'row', direction: isRTL ? 'rtl' : 'ltr', alignItems: 'center', gap: 4 }}>
                       {i > 0 && <View style={{ width: 16, height: 1.5, borderRadius: 1, backgroundColor: done ? c.primary : `${c.text}20` }} />}
                       <View style={{
                         width: active ? 8 : 6, height: active ? 8 : 6, borderRadius: 4,
@@ -909,9 +882,7 @@ export default function LessonEditor() {
                   );
                 })}
                 <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.4), marginLeft: 4 }}>
-                  {(['Queued', 'Uploading', 'Processing', 'Verifying'] as const)[
-                    Math.min(['waiting', 'uploading', 'processing', 'verifying'].indexOf(activeTask.status), 3)
-                  ]}
+                  {uploadStatusLabel(activeTask.status, t)}
                 </Text>
               </View>
             </NeuCard>
@@ -922,17 +893,17 @@ export default function LessonEditor() {
               the Info tab, where doctors routinely overlooked it. It is the
               decision that gates student visibility, so it now appears first.
               Same five values and the same save payload — placement only. */}
-          <Field label="Lesson Status">
-            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+          <Field label={t('lessonEditor.lessonStatus')}>
+            <View        style={{ flexDirection: 'row', direction: isRTL ? 'rtl' : 'ltr', flexWrap: 'wrap', gap: 8 }}>
               {LESSON_STATUSES.map(ls => (
                 <Pressable key={ls.value} onPress={() => setStatus(ls.value)}
                   style={[
                     status === ls.value ? neuPressedStyle(isDark) : neuFlatStyle(isDark),
-                    { paddingHorizontal: 14, paddingVertical: 10, borderRadius: 12, flexDirection: 'row', alignItems: 'center', gap: 6 },
+                    { paddingHorizontal: 14, paddingVertical: 10, borderRadius: 12, flexDirection: 'row', direction: isRTL ? 'rtl' : 'ltr', alignItems: 'center', gap: 6 },
                   ]}>
                   <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: ls.color, opacity: status === ls.value ? 1 : 0.4 }} />
                   <Text style={{ fontSize: 13, fontWeight: '700', color: status === ls.value ? ls.color : c.text, opacity: status === ls.value ? 1 : 0.5 }}>
-                    {ls.label}
+                    {t(ls.labelKey)}
                   </Text>
                 </Pressable>
               ))}
@@ -941,15 +912,15 @@ export default function LessonEditor() {
             {/* Scheduled date — shown only when status=scheduled */}
             {status === 'scheduled' && (
               <View style={{ marginTop: 10 }}>
-                <Field label="Publish Date & Time">
+                <Field label={t('lessonEditor.publishDateTime')}>
                   <NeuInput
                     value={scheduledAt}
                     onChangeText={setScheduledAt}
-                    placeholder="YYYY-MM-DD HH:MM (e.g. 2025-09-01 09:00)"
+                    placeholder={t('lessonEditor.scheduledPlaceholder')}
                     isDark={isDark} c={c}
                   />
                   <Text style={{ fontSize: 11, color: '#3B82F6', opacity: 0.8, marginTop: 2 }}>
-                    Lesson will automatically become visible at this date/time.
+                    {t('lessonEditor.scheduledHelp')}
                   </Text>
                 </Field>
               </View>
@@ -957,14 +928,14 @@ export default function LessonEditor() {
           </Field>
 
           {/* Description */}
-          <Field label="Lesson Description">
+          <Field label={t('lessonEditor.description')}>
             <NeuInput value={description} onChangeText={setDescription}
-              placeholder="Briefly describe what this lesson covers…"
+              placeholder={t('lessonEditor.descriptionPlaceholder')}
               isDark={isDark} c={c} multiline style={{ minHeight: 80 }} />
           </Field>
 
           {/* Video Source Selector */}
-          <Field label="Video Source">
+          <Field label={t('lessonEditor.videoSource')}>
             {/* Provider availability gate — driven by the server's effective
                 policy (VideoProviderPolicyService via getMyProviderPermissions),
                 which now also answers for doctors (root-cause fix). Disabled
@@ -979,14 +950,14 @@ export default function LessonEditor() {
               return (
                 <>
                   {allBlocked && (
-                    <NeuCard style={{ marginBottom: 10, padding: 12, flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                    <NeuCard style={{ marginBottom: 10, padding: 12, flexDirection: 'row', direction: isRTL ? 'rtl' : 'ltr', alignItems: 'center', gap: 8 }}>
                       <AlertCircle size={16} color="#D97706" />
                       <Text style={{ flex: 1, fontSize: 12, color: '#92400E', fontWeight: '600' }}>
-                        Video uploads are currently disabled by the administrator.
+                        {t('lessonEditor.videoDisabled')}
                       </Text>
                     </NeuCard>
                   )}
-                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10 }}>
+                  <View style={{ flexDirection: 'row', direction: isRTL ? 'rtl' : 'ltr', flexWrap: 'wrap', gap: 10 }}>
                     {VIDEO_TYPES.map(vt => {
                       const Icon = vt.icon;
                       const selected = videoType === vt.value;
@@ -999,11 +970,11 @@ export default function LessonEditor() {
                         <Pressable key={vt.value} onPress={() => setVideoType(vt.value)}
                           style={[
                             selected ? neuPressedStyle(isDark) : neuFlatStyle(isDark),
-                            { paddingHorizontal: 14, paddingVertical: 10, borderRadius: 14, flexDirection: 'row', alignItems: 'center', gap: 8 },
+                            { paddingHorizontal: 14, paddingVertical: 10, borderRadius: 14, flexDirection: 'row', direction: isRTL ? 'rtl' : 'ltr', alignItems: 'center', gap: 8 },
                           ]}>
                           <Icon size={16} color={selected ? vt.color : c.text} opacity={selected ? 1 : 0.45} />
                           <Text style={{ fontSize: 13, fontWeight: '700', color: selected ? vt.color : c.text, opacity: selected ? 1 : 0.55 }}>
-                            {vt.label}
+                            {t(vt.labelKey)}
                           </Text>
                         </Pressable>
                       );
@@ -1052,14 +1023,14 @@ export default function LessonEditor() {
               {/* Duplicate detection dialog */}
               {duplicateInfo && (
                 <NeuCard style={[neuFlatStyle(isDark), { borderRadius: 16, padding: 16, gap: 12, borderLeftWidth: 3, borderLeftColor: '#D97706' }]}>
-                  <Text style={{ fontSize: 14, fontWeight: '700', color: '#D97706' }}>⚠️ Duplicate Video Detected</Text>
+                  <Text style={{ fontSize: 14, fontWeight: '700', color: '#D97706' }}>⚠️ {t('lessonEditor.duplicateVideoTitle')}</Text>
                   <Text style={{ fontSize: 13, color: c.text, opacity: 0.7, lineHeight: 18 }}>
-                    {`A file named "${duplicateInfo.fileName}" already exists in this course${duplicateInfo.existingLesson ? ` (lesson: ${duplicateInfo.existingLesson})` : ''}.`}
+                    {t('lessonEditor.duplicateVideoBody', { fileName: duplicateInfo.fileName, lesson: duplicateInfo.existingLesson ? t('lessonEditor.duplicateVideoLesson', { lesson: duplicateInfo.existingLesson }) : '' })}
                   </Text>
-                  <View style={{ flexDirection: 'row', gap: 10 }}>
+                  <View style={{ flexDirection: 'row', direction: isRTL ? 'rtl' : 'ltr', gap: 10 }}>
                     <Pressable onPress={() => { setDuplicateInfo(null); setPendingFile(null); }}
                       style={[neuFlatStyle(isDark), { flex: 1, padding: 11, borderRadius: 12, alignItems: 'center' }]}>
-                      <Text style={{ fontSize: 13, fontWeight: '700', ...mutedTextStyle(c, 0.6) }}>Cancel</Text>
+                      <Text style={{ fontSize: 13, fontWeight: '700', ...mutedTextStyle(c, 0.6) }}>{t('common.cancel')}</Text>
                     </Pressable>
                     <Pressable
                       onPress={async () => {
@@ -1069,7 +1040,7 @@ export default function LessonEditor() {
                         }
                       }}
                       style={{ flex: 1, padding: 11, borderRadius: 12, alignItems: 'center', backgroundColor: '#D97706' }}>
-                      <Text style={{ fontSize: 13, fontWeight: '700', color: '#fff' }}>Upload Anyway</Text>
+                      <Text style={{ fontSize: 13, fontWeight: '700', color: '#fff' }}>{t('lessonEditor.uploadAnyway')}</Text>
                     </Pressable>
                   </View>
                 </NeuCard>
@@ -1078,10 +1049,10 @@ export default function LessonEditor() {
               {/* Active upload status card — Cancel button always visible */}
               {activeTask && activeTask.status !== 'timeout' && (
                 <NeuCard style={[neuFlatStyle(isDark), { borderRadius: 16, padding: 14, gap: 10 }]}>
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                  <View style={{ flexDirection: 'row', direction: isRTL ? 'rtl' : 'ltr', alignItems: 'center', gap: 10 }}>
                     <View style={{ flex: 1 }}>
                       <Text style={{ fontSize: 13, fontWeight: '700', color: c.text }}>
-                        {uploadStatusLabel(activeTask.status)}
+                        {uploadStatusLabel(activeTask.status, t)}
                       </Text>
                       {activeTask.status === 'uploading' && (
                         <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.5), marginTop: 2 }}>
@@ -1091,11 +1062,11 @@ export default function LessonEditor() {
                     </View>
                     <Pressable
                       onPress={() => cancelUpload(activeTask.id)}
-                      style={{ flexDirection: 'row', alignItems: 'center', gap: 6,
+                      style={{ flexDirection: 'row', direction: isRTL ? 'rtl' : 'ltr', alignItems: 'center', gap: 6,
                         paddingHorizontal: 12, paddingVertical: 8, borderRadius: 10,
                         backgroundColor: '#DC262618', borderWidth: 1, borderColor: '#DC262630' }}>
                       <X size={13} color="#DC2626" />
-                      <Text style={{ fontSize: 12, fontWeight: '700', color: '#DC2626' }}>Cancel</Text>
+                      <Text style={{ fontSize: 12, fontWeight: '700', color: '#DC2626' }}>{t('common.cancel')}</Text>
                     </Pressable>
                   </View>
                   {/* Inline progress bar */}
@@ -1110,40 +1081,40 @@ export default function LessonEditor() {
               {/* Timeout card — Retry Processing / Replace / Delete Upload */}
               {timedOutTask && (
                 <NeuCard style={[neuFlatStyle(isDark), { borderRadius: 16, padding: 16, gap: 12, borderLeftWidth: 3, borderLeftColor: '#F97316' }]}>
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                  <View style={{ flexDirection: 'row', direction: isRTL ? 'rtl' : 'ltr', alignItems: 'center', gap: 8 }}>
                     <AlertCircle size={16} color="#F97316" />
-                    <Text style={{ fontSize: 14, fontWeight: '700', color: '#F97316' }}>Processing Timed Out</Text>
+                    <Text style={{ fontSize: 14, fontWeight: '700', color: '#F97316' }}>{t('lessonEditor.processingTimedOut')}</Text>
                   </View>
                   <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.6), lineHeight: 17 }}>
-                    The video was uploaded but VdoCipher did not finish encoding within 10 minutes.
-                    {'\n'}You can retry polling, replace with a new file, or delete the upload.
+                    {t('lessonEditor.processingTimedOutBody')}
+                    {'\n'}{t('lessonEditor.processingTimedOutActions')}
                   </Text>
-                  <View style={{ flexDirection: 'row', gap: 8 }}>
+                  <View style={{ flexDirection: 'row', direction: isRTL ? 'rtl' : 'ltr', gap: 8 }}>
                     {timedOutTask.vdoCipherVideoId && (
                       <Pressable
                         onPress={() => retryProcessing(timedOutTask.id)}
-                        style={{ flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6,
+                        style={{ flex: 1, flexDirection: 'row', direction: isRTL ? 'rtl' : 'ltr', alignItems: 'center', justifyContent: 'center', gap: 6,
                           paddingVertical: 10, borderRadius: 10,
                           backgroundColor: '#F9731618', borderWidth: 1, borderColor: '#F9731640' }}>
                         <RotateCcw size={13} color="#F97316" />
-                        <Text style={{ fontSize: 12, fontWeight: '700', color: '#F97316' }}>Retry</Text>
+                        <Text style={{ fontSize: 12, fontWeight: '700', color: '#F97316' }}>{t('common.retry')}</Text>
                       </Pressable>
                     )}
                     <Pressable
                       onPress={handleReplaceVideo}
-                      style={{ flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6,
+                      style={{ flex: 1, flexDirection: 'row', direction: isRTL ? 'rtl' : 'ltr', alignItems: 'center', justifyContent: 'center', gap: 6,
                         paddingVertical: 10, borderRadius: 10,
                         backgroundColor: '#7C3AED18', borderWidth: 1, borderColor: '#7C3AED40' }}>
                       <RefreshCw size={13} color="#7C3AED" />
-                      <Text style={{ fontSize: 12, fontWeight: '700', color: '#7C3AED' }}>Replace</Text>
+                      <Text style={{ fontSize: 12, fontWeight: '700', color: '#7C3AED' }}>{t('common.replace')}</Text>
                     </Pressable>
                     <Pressable
                       onPress={() => deleteVideo(timedOutTask.id)}
-                      style={{ flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6,
+                      style={{ flex: 1, flexDirection: 'row', direction: isRTL ? 'rtl' : 'ltr', alignItems: 'center', justifyContent: 'center', gap: 6,
                         paddingVertical: 10, borderRadius: 10,
                         backgroundColor: '#DC262618', borderWidth: 1, borderColor: '#DC262630' }}>
                       <Trash2 size={13} color="#DC2626" />
-                      <Text style={{ fontSize: 12, fontWeight: '700', color: '#DC2626' }}>Delete</Text>
+                      <Text style={{ fontSize: 12, fontWeight: '700', color: '#DC2626' }}>{t('common.delete')}</Text>
                     </Pressable>
                   </View>
                 </NeuCard>
@@ -1154,24 +1125,20 @@ export default function LessonEditor() {
                 videoMissing ? (
                   <NeuCard style={[neuFlatStyle(isDark), { borderRadius: 16, padding: 16, gap: 12,
                     borderLeftWidth: 3, borderLeftColor: '#DC2626' }]}>
-                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                    <View style={{ flexDirection: 'row', direction: isRTL ? 'rtl' : 'ltr', alignItems: 'center', gap: 10 }}>
                       <View style={{ width: 44, height: 44, borderRadius: 12,
                         backgroundColor: '#DC262618', alignItems: 'center', justifyContent: 'center' }}>
                         <ShieldAlert size={22} color="#DC2626" />
                       </View>
                       <View style={{ flex: 1 }}>
-                        <Text style={{ fontSize: 14, fontWeight: '800', color: '#DC2626' }}>
-                          Video Missing
-                        </Text>
+                        <Text style={{ fontSize: 14, fontWeight: '800', color: '#DC2626' }}>{t('lessonEditor.videoMissing')}</Text>
                         <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.55), marginTop: 2 }}>
-                          The video asset no longer exists on VdoCipher.
+                          {t('lessonEditor.videoMissingBody')}
                         </Text>
                       </View>
                     </View>
                     <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.65), lineHeight: 18 }}>
-                      {"This lesson's video was deleted or became unavailable on the provider."}
-                      {" Student progress for this lesson is preserved."}
-                      {" Upload a replacement to restore playback."}
+                      {t('lessonEditor.videoMissingExplanation')}
                     </Text>
                     <Pressable
                       onPress={() => handleUploadVideo(undefined, false)}
@@ -1179,11 +1146,11 @@ export default function LessonEditor() {
                         gap: 8, paddingVertical: 12, borderRadius: 12,
                         backgroundColor: c.primary }}>
                       <Upload size={16} color="#fff" />
-                      <Text style={{ fontSize: 14, fontWeight: '800', color: '#fff' }}>Re-upload Video</Text>
+                      <Text style={{ fontSize: 14, fontWeight: '800', color: '#fff' }}>{t('lessonEditor.reuploadVideo')}</Text>
                     </Pressable>
                     {auditingVideo && (
                       <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.4), textAlign: 'center' }}>
-                        Verifying with VdoCipher…
+                        {t('lessonEditor.verifying')}
                       </Text>
                     )}
                   </NeuCard>
@@ -1194,46 +1161,46 @@ export default function LessonEditor() {
                     <Video size={26} color={c.primary} />
                   </View>
                   <Text style={{ fontSize: 14, fontWeight: '700', color: c.text }}>
-                    {videoTitle || 'Video Uploaded'}
+                    {videoTitle || t('lessonEditor.videoUploaded')}
                   </Text>
                   <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.45), textAlign: 'center' }}>
-                    MedAcademy Video Library · Secure Playback
+                    {t('lessonEditor.securePlayback')}
                   </Text>
-                  <View style={{ flexDirection: 'row', gap: 10, marginTop: 4 }}>
+                  <View style={{ flexDirection: 'row', direction: isRTL ? 'rtl' : 'ltr', gap: 10, marginTop: 4 }}>
                     <Pressable onPress={handleOpenReplaceSheet}
                       style={{ flex: 1, paddingVertical: 10, borderRadius: 12,
-                        flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
+                        flexDirection: 'row', direction: isRTL ? 'rtl' : 'ltr', alignItems: 'center', justifyContent: 'center', gap: 8,
                         backgroundColor: '#7C3AED18', borderWidth: 1.5, borderColor: '#7C3AED40' }}>
                       <RefreshCw size={14} color="#7C3AED" />
-                      <Text style={{ fontSize: 13, fontWeight: '700', color: '#7C3AED' }}>Replace</Text>
+                      <Text style={{ fontSize: 13, fontWeight: '700', color: '#7C3AED' }}>{t('common.replace')}</Text>
                     </Pressable>
                     <Pressable onPress={() => setShowDeleteVideoDialog(true)}
                       style={{ flex: 1, paddingVertical: 10, borderRadius: 12,
-                        flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
+                        flexDirection: 'row', direction: isRTL ? 'rtl' : 'ltr', alignItems: 'center', justifyContent: 'center', gap: 8,
                         backgroundColor: '#DC262618', borderWidth: 1.5, borderColor: '#DC262630' }}>
                       <Trash2 size={14} color="#DC2626" />
-                      <Text style={{ fontSize: 13, fontWeight: '700', color: '#DC2626' }}>Delete</Text>
+                      <Text style={{ fontSize: 13, fontWeight: '700', color: '#DC2626' }}>{t('common.delete')}</Text>
                     </Pressable>
                   </View>
                   <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.35), textAlign: 'center' }}>
-                    Replacing keeps lesson progress and materials.{'\n'}Old video is removed only after replacement succeeds.
+                    {t('lessonEditor.replaceKeepsProgress')}{'\n'}{t('lessonEditor.replaceRemovesAfterSuccess')}
                   </Text>
 
                   {/* Delete confirmation inline dialog */}
                   {showDeleteVideoDialog && (
                     <NeuCard style={[neuFlatStyle(isDark), { borderRadius: 14, padding: 14, gap: 10, alignSelf: 'stretch', borderLeftWidth: 3, borderLeftColor: '#DC2626' }]}>
-                      <Text style={{ fontSize: 13, fontWeight: '700', color: '#DC2626' }}>Delete this video permanently?</Text>
+                      <Text style={{ fontSize: 13, fontWeight: '700', color: '#DC2626' }}>{t('lessonEditor.deleteVideoTitle')}</Text>
                       <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.6), lineHeight: 17 }}>
-                        The VdoCipher asset will be removed. Student progress for this lesson is preserved.
+                        {t('lessonEditor.deleteVideoBody')}
                       </Text>
-                      <View style={{ flexDirection: 'row', gap: 8 }}>
+                      <View style={{ flexDirection: 'row', direction: isRTL ? 'rtl' : 'ltr', gap: 8 }}>
                         <Pressable onPress={() => setShowDeleteVideoDialog(false)}
                           style={[neuFlatStyle(isDark), { flex: 1, padding: 10, borderRadius: 10, alignItems: 'center' }]}>
-                          <Text style={{ fontSize: 13, fontWeight: '700', ...mutedTextStyle(c, 0.6) }}>Cancel</Text>
+                          <Text style={{ fontSize: 13, fontWeight: '700', ...mutedTextStyle(c, 0.6) }}>{t('common.cancel')}</Text>
                         </Pressable>
                         <Pressable onPress={handleDeleteVideo}
                           style={{ flex: 1, padding: 10, borderRadius: 10, alignItems: 'center', backgroundColor: '#DC2626' }}>
-                          <Text style={{ fontSize: 13, fontWeight: '700', color: '#fff' }}>Yes, Delete</Text>
+                          <Text style={{ fontSize: 13, fontWeight: '700', color: '#fff' }}>{t('lessonEditor.yesDelete')}</Text>
                         </Pressable>
                       </View>
                     </NeuCard>
@@ -1246,28 +1213,28 @@ export default function LessonEditor() {
                   <View style={{ gap: 12 }}>
                     {/* Upload new */}
                     <Pressable onPress={() => handleUploadVideo()}
-                      style={[neuFlatStyle(isDark), { padding: layout.screenPx, borderRadius: 20, flexDirection: 'row', alignItems: 'center', gap: 16 }]}>
+                      style={[neuFlatStyle(isDark), { padding: layout.screenPx, borderRadius: 20, flexDirection: 'row', direction: isRTL ? 'rtl' : 'ltr', alignItems: 'center', gap: 16 }]}>
                       <View style={{ width: 52, height: 52, borderRadius: 14, backgroundColor: `${c.primary}15`, alignItems: 'center', justifyContent: 'center' }}>
                         <Upload size={24} color={c.primary} opacity={0.8} />
                       </View>
                       <View style={{ flex: 1 }}>
-                        <Text style={{ fontSize: 15, fontWeight: '800', color: c.text }}>Upload New Video</Text>
+                        <Text style={{ fontSize: 15, fontWeight: '800', color: c.text }}>{t('lessonEditor.uploadNewVideo')}</Text>
                         <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.45), marginTop: 3 }}>
-                          Pick a file — MP4, MOV, AVI, MKV up to 5 GB
+                          {t('lessonEditor.videoFileHint')}
                         </Text>
                       </View>
                     </Pressable>
 
                     {/* Choose from library */}
                     <Pressable onPress={() => setShowLibraryPicker(true)}
-                      style={[neuFlatStyle(isDark), { padding: layout.screenPx, borderRadius: 20, flexDirection: 'row', alignItems: 'center', gap: 16 }]}>
+                      style={[neuFlatStyle(isDark), { padding: layout.screenPx, borderRadius: 20, flexDirection: 'row', direction: isRTL ? 'rtl' : 'ltr', alignItems: 'center', gap: 16 }]}>
                       <View style={{ width: 52, height: 52, borderRadius: 14, backgroundColor: `${c.accent}15`, alignItems: 'center', justifyContent: 'center' }}>
                         <Film size={24} color={c.accent} opacity={0.8} />
                       </View>
                       <View style={{ flex: 1 }}>
-                        <Text style={{ fontSize: 15, fontWeight: '800', color: c.text }}>Choose From My Library</Text>
+                        <Text style={{ fontSize: 15, fontWeight: '800', color: c.text }}>{t('lessonEditor.chooseLibrary')}</Text>
                         <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.45), marginTop: 3 }}>
-                          Reuse an existing upload — no extra storage used
+                          {t('lessonEditor.reuseVideoHint')}
                         </Text>
                       </View>
                     </Pressable>
@@ -1289,24 +1256,24 @@ export default function LessonEditor() {
 
               {/* Video Title */}
               {videoId ? (
-                <Field label="Video Title">
-                  <NeuInput value={videoTitle} onChangeText={setVideoTitle} placeholder="Display title for the video" isDark={isDark} c={c} />
+                <Field label={t('lessonEditor.videoTitle')}>
+                  <NeuInput value={videoTitle} onChangeText={setVideoTitle} placeholder={t('lessonEditor.videoTitlePlaceholder')} isDark={isDark} c={c} />
                 </Field>
               ) : null}
 
               {/* Auto-calculated duration — read-only, set by upload pipeline */}
               {lesson?.video_duration_seconds > 0 && (
-                <NeuCard style={[neuPressedStyle(isDark), { padding: 14, flexDirection: 'row', alignItems: 'center', gap: 12 }]}>
+                <NeuCard style={[neuPressedStyle(isDark), { padding: 14, flexDirection: 'row', direction: isRTL ? 'rtl' : 'ltr', alignItems: 'center', gap: 12 }]}>
                   <View style={{ width: 36, height: 36, borderRadius: 10, backgroundColor: `${c.primary}18`, alignItems: 'center', justifyContent: 'center' }}>
                     <Clock size={18} color={c.primary} />
                   </View>
                   <View style={{ flex: 1 }}>
-                    <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.45), fontWeight: '600', textTransform: 'uppercase', letterSpacing: 0.5 }}>Duration</Text>
+                    <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.45), fontWeight: '600', textTransform: 'uppercase', letterSpacing: 0.5 }}>{t('lessonEditor.duration')}</Text>
                     <Text style={{ fontSize: 16, fontWeight: '800', color: c.text, marginTop: 1 }}>
-                      {formatDuration(lesson.video_duration_seconds)}
+                      {formatDuration(lesson.video_duration_seconds, locale)}
                     </Text>
                   </View>
-                  <Text style={{ fontSize: 11, color: c.primary, opacity: 0.6 }}>Auto-detected</Text>
+                  <Text style={{ fontSize: 11, color: c.primary, opacity: 0.6 }}>{t('lessonEditor.autoDetected')}</Text>
                 </NeuCard>
               )}
             </>
@@ -1316,9 +1283,9 @@ export default function LessonEditor() {
           {videoType === 'coming_soon' && (
             <NeuCard style={[neuPressedStyle(isDark), { padding: 24, alignItems: 'center', gap: 8 }]}>
               <Clock size={36} color="#D97706" opacity={0.6} />
-              <Text style={{ fontSize: 15, fontWeight: '700', color: c.text }}>Coming Soon</Text>
+              <Text style={{ fontSize: 15, fontWeight: '700', color: c.text }}>{t('courseStatus.comingSoon')}</Text>
               <Text style={{ fontSize: 13, ...mutedTextStyle(c, 0.45), textAlign: 'center' }}>
-                {'Students will see a "Coming Soon" placeholder for this lesson.'}
+                {t('lessonEditor.comingSoonHelp')}
               </Text>
             </NeuCard>
           )}
@@ -1326,17 +1293,17 @@ export default function LessonEditor() {
           {/* YouTube Video */}
           {videoType === 'youtube' && (
             <NeuCard style={{ gap: 14 }}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+              <View style={{ flexDirection: 'row', direction: isRTL ? 'rtl' : 'ltr', alignItems: 'center', gap: 10 }}>
                 <View style={{ width: 36, height: 36, borderRadius: 10, backgroundColor: '#DC262618', alignItems: 'center', justifyContent: 'center' }}>
                   <Film size={18} color="#DC2626" />
                 </View>
                 <View style={{ flex: 1 }}>
-                  <Text style={{ fontSize: 14, fontWeight: '700', color: c.text }}>YouTube Video</Text>
-                  <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.45) }}>Paste any YouTube URL or video ID</Text>
+                  <Text style={{ fontSize: 14, fontWeight: '700', color: c.text }}>{t('lessonEditor.video.youtube')}</Text>
+                  <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.45) }}>{t('lessonEditor.youtubePasteHint')}</Text>
                 </View>
                 {youtubeVideoId ? (
                   <View style={{ paddingHorizontal: 10, paddingVertical: 4, borderRadius: 20, backgroundColor: '#16A34A18' }}>
-                    <Text style={{ fontSize: 11, fontWeight: '700', color: '#16A34A' }}>Linked</Text>
+                    <Text style={{ fontSize: 11, fontWeight: '700', color: '#16A34A' }}>{t('lessonEditor.linked')}</Text>
                   </View>
                 ) : null}
               </View>
@@ -1347,7 +1314,7 @@ export default function LessonEditor() {
               {plyrBlocked || providerSaveBlocked ? (
                 <FeatureUnavailableState
                   compact
-                  title="YouTube video is unavailable"
+                  title={t('lessonEditor.youtubeUnavailable')}
                   description={providerSaveBlocked ?? providerBlockedMsg(plyrPerm, 'YouTube video')}
                 />
               ) : (
@@ -1368,10 +1335,10 @@ export default function LessonEditor() {
                   }}
                   onBlur={() => {
                     if (youtubeUrlInput.trim().length > 0 && !youtubeVideoId) {
-                      setYoutubeUrlError('Could not extract a YouTube video ID. Check the URL format.');
+                      setYoutubeUrlError(t('lessonEditor.youtubeUrlInvalid'));
                     }
                   }}
-                  placeholder="https://youtu.be/... or youtube.com/watch?v=..."
+                  placeholder={t('lessonEditor.youtubeUrlPlaceholder')}
                   isDark={isDark}
                   c={c}
                   autoCapitalize="none"
@@ -1381,8 +1348,8 @@ export default function LessonEditor() {
                 {youtubeUrlError ? (
                   <Text style={{ fontSize: 12, color: '#DC2626' }}>{youtubeUrlError}</Text>
                 ) : youtubeVideoId ? (
-                  <Text style={{ fontSize: 12, color: '#16A34A' }}>
-                    ✓ Video ID: {youtubeVideoId}
+                  <Text style={{ fontSize: 12, color: '#16A34A' }}>                      ✓ Video ID: {youtubeVideoId}
+
                   </Text>
                 ) : null}
               </View>
@@ -1390,7 +1357,7 @@ export default function LessonEditor() {
 
               {/* Supported formats hint */}
               <View style={{ backgroundColor: `${c.primary}08`, borderRadius: 10, padding: 10, gap: 3 }}>
-                <Text style={{ fontSize: 11, fontWeight: '700', ...mutedTextStyle(c, 0.5) }}>Supported formats</Text>
+                <Text style={{ fontSize: 11, fontWeight: '700', ...mutedTextStyle(c, 0.5) }}>{t('lessonEditor.supportedFormats')}</Text>
                 {[
                   'https://youtu.be/VIDEO_ID',
                   'https://youtube.com/watch?v=VIDEO_ID',
@@ -1406,9 +1373,9 @@ export default function LessonEditor() {
           )}
 
           {/* Lesson Notes */}
-          <Field label="Lesson Notes">
+          <Field label={t('lessonEditor.notes')}>
             <NeuInput value={notes} onChangeText={setNotes}
-              placeholder="Additional notes shown below the video…"
+              placeholder={t('lessonEditor.notesPlaceholder')}
               isDark={isDark} c={c} multiline style={{ minHeight: 100 }} />
           </Field>
 
@@ -1426,11 +1393,11 @@ export default function LessonEditor() {
               style={{ backgroundColor: c.primary, padding: 14, borderRadius: 14, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, opacity: uploading ? 0.7 : 1 }}>
               {uploading ? <ActivityIndicator size="small" color="#fff" /> : <Upload size={18} color="#fff" />}
               <Text style={{ fontSize: 15, fontWeight: '700', color: '#fff' }}>
-                {uploading ? 'Uploading…' : 'Upload File'}
+                {uploading ? t('lessonEditor.upload.uploading') : t('lessonEditor.uploadFile')}
               </Text>
             </Pressable>
-            <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.4), textAlign: 'center', marginTop: 6 }}>
-              PDF, PPTX, DOCX, XLSX, ZIP, images, audio, and more — up to 100 MB each
+            <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.4), textAlign: 'center', marginTop: 6 }}>                { t('lessonEditor.fileTypesHint') }
+
             </Text>
           </View>
 
@@ -1441,9 +1408,9 @@ export default function LessonEditor() {
             ListEmptyComponent={
               <View style={{ alignItems: 'center', paddingVertical: 60 }}>
                 <Paperclip size={44} color={c.primary} opacity={0.2} />
-                <Text style={{ ...mutedTextStyle(c, 0.4), marginTop: 12, fontSize: 15 }}>No attachments yet</Text>
+                <Text style={{ ...mutedTextStyle(c, 0.4), marginTop: 12, fontSize: 15 }}>{t('lessonEditor.noAttachments')}</Text>
                 <Text style={{ ...mutedTextStyle(c, 0.3), fontSize: 13, marginTop: 4 }}>
-                  Upload PDFs, slides, or any file — unlimited
+                  {t('lessonEditor.noAttachmentsHint')}
                 </Text>
               </View>
             }
@@ -1457,18 +1424,18 @@ export default function LessonEditor() {
               return (
                 <NeuCard style={{ padding: 12, gap: 10 }}>
                   {/* File row */}
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+                  <View style={{ flexDirection: 'row', direction: isRTL ? 'rtl' : 'ltr', alignItems: 'center', gap: 12 }}>
                     <View style={{ width: 44, height: 44, borderRadius: 12, backgroundColor: `${fi.color}18`, alignItems: 'center', justifyContent: 'center' }}>
                       <Icon size={22} color={fi.color} />
                     </View>
                     <View style={{ flex: 1 }}>
                       <Text style={{ fontSize: 14, fontWeight: '600', color: c.text }} numberOfLines={1}>{item.file_name}</Text>
                       <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.45), marginTop: 2 }}>
-                        {formatBytes(item.file_size)} · {item.file_type.split('/')[1]?.toUpperCase() ?? 'FILE'}
+                        {formatBytes(item.file_size, locale)} · {item.file_type.split('/')[1]?.toUpperCase() ?? t('lessonEditor.fileType')}
                       </Text>
                     </View>
                     {/* Action buttons */}
-                    <View style={{ flexDirection: 'row', gap: 6 }}>
+                    <View style={{ flexDirection: 'row', direction: isRTL ? 'rtl' : 'ltr', gap: 6 }}>
                       {/* Replace */}
                       <Pressable onPress={() => handleReplaceMaterial(item)} disabled={isReplacing} hitSlop={8}>
                         {isReplacing
@@ -1489,7 +1456,7 @@ export default function LessonEditor() {
                       onPress={() => setOpenPermMenu(isMenuOpen ? null : item.id)}
                       style={[neuFlatStyle(isDark), { borderRadius: 10, paddingHorizontal: 12, paddingVertical: 9, flexDirection: 'row', alignItems: 'center', gap: 8 }]}>
                       <PermIcon size={14} color={perm.color} />
-                      <Text style={{ flex: 1, fontSize: 13, fontWeight: '600', color: perm.color }}>{perm.label}</Text>
+                      <Text style={{ flex: 1, fontSize: 13, fontWeight: '600', color: perm.color }}>{t(perm.labelKey)}</Text>
                       <ChevronDown size={13} color={c.text} opacity={0.4} />
                     </Pressable>
                     {isMenuOpen && (
@@ -1502,7 +1469,7 @@ export default function LessonEditor() {
                                 backgroundColor: item.permission === opt.value ? `${opt.color}15` : 'transparent' }}>
                               <OIcon size={14} color={opt.color} />
                               <View style={{ flex: 1 }}>
-                                <Text style={{ fontSize: 13, fontWeight: '700', color: opt.color }}>{opt.label}</Text>
+                                <Text style={{ fontSize: 13, fontWeight: '700', color: opt.color }}>{t(opt.labelKey)}</Text>
                               </View>
                               {(item.permission ?? 'allow') === opt.value && (
                                 <CheckCircle size={13} color={opt.color} />
@@ -1511,31 +1478,28 @@ export default function LessonEditor() {
                           );
                         })}
 
-                        {/* Independent of the permission above: the watermark
-                            applies to HOW a copy is personalized, not to
-                            WHETHER the student may download it. */}
+                        {/* NOT a setting. Every student copy of a PDF is
+                            personalized with that student's name and public
+                            account id; there is no switch to turn it off, and
+                            this row only explains that. It is deliberately
+                            non-interactive so no doctor can believe they can
+                            disable traceability. */}
                         <View style={{ height: 1, backgroundColor: c.border, opacity: 0.4, marginVertical: 4 }} />
-                        <Pressable
-                          onPress={() => handleUpdateWatermark(item.id, !(Number(item.watermark_enabled) === 1))}
-                          style={{ flexDirection: 'row', alignItems: 'center', gap: 10, padding: 10, borderRadius: 8 }}>
+                        <View style={{ flexDirection: 'row', direction: isRTL ? 'rtl' : 'ltr', alignItems: 'center', gap: 10, padding: 10, borderRadius: 8 }}>
                           <ShieldAlert size={14} color='#7C3AED' />
                           <View style={{ flex: 1 }}>
                             <Text style={{ fontSize: 13, fontWeight: '700', color: '#7C3AED' }}>
-                              Personalized Student Watermark
+                              {t('lessonEditor.watermarkTitle')}
                             </Text>
                             <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.55) }}>
-                              Every delivered copy carries that student name and ID
+                              {t('lessonEditor.watermarkBody')}
                             </Text>
                           </View>
-                          {/* Pill switch — same visual language as the rest of
-                              the editor; no new component dependency. */}
-                          <View style={{ width: 38, height: 22, borderRadius: 11, padding: 2,
-                            backgroundColor: Number(item.watermark_enabled) === 1 ? '#7C3AED' : '#00000030',
-                            justifyContent: 'center',
-                            alignItems: Number(item.watermark_enabled) === 1 ? 'flex-end' : 'flex-start' }}>
-                            <View style={{ width: 18, height: 18, borderRadius: 9, backgroundColor: '#FFFFFF' }} />
+                          <View style={{ flexDirection: 'row', direction: isRTL ? 'rtl' : 'ltr', alignItems: 'center', gap: 4 }}>
+                            <CheckCircle size={13} color='#7C3AED' />
+                            <Text style={{ fontSize: 11, fontWeight: '700', color: '#7C3AED' }}>{t('common.on')}</Text>
                           </View>
-                        </Pressable>
+                        </View>
                       </NeuCard>
                     )}
                   </View>
@@ -1552,22 +1516,22 @@ export default function LessonEditor() {
       {tab === 'settings' && (
         <ScrollView automaticallyAdjustKeyboardInsets={process.env.EXPO_OS === 'ios'} keyboardShouldPersistTaps="handled"
           contentContainerStyle={{ padding: layout.screenPx, gap: 16 }}>
-          <Text style={{ fontSize: 16, fontWeight: '800', color: c.text, opacity: 0.7 }}>Lesson Access</Text>
+          <Text style={{ fontSize: 16, fontWeight: '800', color: c.text }}>{t('lessonEditor.lessonAccess')}</Text>
 
           <SettingToggle
-            icon={Eye} label="Free Preview" sub="Non-enrolled students can watch this lesson"
+            icon={Eye} label={t('lessonEditor.freePreview')} sub={t('lessonEditor.freePreviewHelp')}
             value={isPreview} onChange={setIsPreview} isDark={isDark} c={c} />
           <SettingToggle
-            icon={Download} label="Allow Download" sub="Students can download lesson materials"
+            icon={Download} label={t('lessonEditor.allowDownload')} sub={t('lessonEditor.allowDownloadHelp')}
             value={downloadEnabled} onChange={setDownloadEnabled} isDark={isDark} c={c} />
           <SettingToggle
-            icon={MessageCircle} label="Comments Enabled" sub="Students can comment on this lesson"
+            icon={MessageCircle} label={t('lessonEditor.commentsEnabled')} sub={t('lessonEditor.commentsEnabledHelp')}
             value={commentsEnabled} onChange={setCommentsEnabled} isDark={isDark} c={c} />
           <SettingToggle
-            icon={Layers} label="Visible" sub="Lesson is visible to enrolled students"
+            icon={Layers} label={t('lessonEditor.visible')} sub={t('lessonEditor.visibleHelp')}
             value={visible} onChange={setVisible} isDark={isDark} c={c} />
 
-          <NeuButton label="Save Settings" onPress={handleSave} loading={saving} fullWidth />
+          <NeuButton label={t('cb.saveSettings')} onPress={handleSave} loading={saving} fullWidth />
         </ScrollView>
       )}
     </KeyboardAvoidingView>
@@ -1579,24 +1543,31 @@ export default function LessonEditor() {
 
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
+  const { isRTL } = useTranslation();
+  const scheme = useColorScheme();
+  const c = scheme === 'dark' ? neuColors.dark : neuColors.light;
   return (
     <View style={{ gap: 6 }}>
-      <Text style={{ fontSize: 13, fontWeight: '700', opacity: 0.55 }}>{label}</Text>
+      <Text style={[{ fontSize: 13, fontWeight: '700', textAlign: isRTL ? 'right' : 'left' }, mutedTextStyle(c, 0.6)]}>{label}</Text>
       {children}
     </View>
   );
 }
 
 function NeuInput({ isDark, c, style, ...props }: any) {
+  const { isRTL } = useTranslation();
   return (
     <TextInput
-      placeholderTextColor={`${c.text}55`}
+      placeholderTextColor={c.mode === 'dark' ? c.textMuted : '#56657A'}
+      selectionColor={c.primary}
       style={[{
         ...neuPressedStyle(isDark),
         borderRadius: 12,
         padding: 14,
         fontSize: 14,
         color: c.text,
+        writingDirection: isRTL ? 'rtl' : 'ltr',
+        textAlign: isRTL ? 'right' : 'left',
         textAlignVertical: 'top',
       }, style]}
       {...props}
@@ -1609,15 +1580,16 @@ function SettingToggle({ icon: Icon, label, sub, value, onChange, isDark, c }: {
   value: boolean; onChange: (v: boolean) => void;
   isDark: boolean; c: any;
 }) {
+  const { isRTL } = useTranslation();
   return (
     <Pressable onPress={() => onChange(!value)}
-      style={[neuFlatStyle(isDark), { borderRadius: 16, padding: 16, flexDirection: 'row', alignItems: 'center', gap: 14 }]}>
+      style={[neuFlatStyle(isDark), { borderRadius: 16, padding: 16, flexDirection: 'row', direction: isRTL ? 'rtl' : 'ltr', alignItems: 'center', gap: 14 }]}>
       <View style={{ width: 40, height: 40, borderRadius: 12, backgroundColor: `${c.primary}15`, alignItems: 'center', justifyContent: 'center' }}>
         <Icon size={18} color={c.primary} opacity={0.8} />
       </View>
       <View style={{ flex: 1 }}>
-        <Text style={{ fontSize: 14, fontWeight: '700', color: c.text }}>{label}</Text>
-        <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.45), marginTop: 2 }}>{sub}</Text>
+        <Text style={{ fontSize: 14, fontWeight: '700', color: c.text, textAlign: isRTL ? 'right' : 'left' }}>{label}</Text>
+        <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.55), marginTop: 2, textAlign: isRTL ? 'right' : 'left' }}>{sub}</Text>
       </View>
       <View style={[
         value ? neuPressedStyle(isDark) : neuFlatStyle(isDark),

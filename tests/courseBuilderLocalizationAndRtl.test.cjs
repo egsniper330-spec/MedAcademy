@@ -1,0 +1,61 @@
+#!/usr/bin/env node
+'use strict';
+
+const fs = require('node:fs');
+const path = require('node:path');
+const vm = require('node:vm');
+const ts = require(path.join(__dirname, '..', 'node_modules/typescript'));
+const root = path.resolve(__dirname, '..');
+const read = p => fs.readFileSync(path.join(root, p), 'utf8');
+const resourceSource = read('src/lib/i18n/resources.ts');
+const compiledResources = ts.transpile(resourceSource, { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 });
+const resourceModule = { exports: {} };
+vm.runInNewContext(compiledResources, { exports: resourceModule.exports, module: resourceModule, require });
+const { en, ar } = resourceModule.exports;
+const courses = read('src/app/(app)/(doctor)/courses.tsx');
+const header = read('src/components/DashboardHeader.tsx');
+const overview = read('src/app/(app)/(doctor)/dr-overview.tsx');
+const builder = read('src/app/(app)/course-builder/[id].tsx');
+const lesson = read('src/app/(app)/lesson-editor/[id].tsx');
+const checks = [];
+const check = (name, ok) => checks.push([name, !!ok]);
+
+check('course page renders title before its live localized count', /greeting=\{t\('nav\.myCourses'\)\}[\s\S]*?roleLabel=\{tCount\('drCourses\.count', courses\.length\)\}[\s\S]*?roleLabelPosition="below"/.test(courses));
+check('new-course default title is localized', /title: t\('drCourses\.newCourseDefault'\)/.test(courses));
+check('shared dashboard header mirrors row and logical padding by active locale', /direction: isRTL \? 'rtl' : 'ltr'/.test(header) && /paddingStart: isRTL \? rightPad : leftPad \+ spacing\.sm/.test(header));
+check('dashboard title is aligned to locale and can shrink for long text', /textAlign: isRTL \? 'right' : 'left'/.test(header) && /minWidth: 0/.test(header));
+check('doctor greeting shows authenticated profile name and localized welcome', /roleLabel=\{t\('home\.welcome'\)\}/.test(overview) && /greeting=\{doctorName\}/.test(overview) && /profile\?\.full_name/.test(overview));
+check('notification count, tap route, and hamburger control remain wired', /router\.push\('\/\(app\)\/notifications'/.test(overview) && /unreadCount > 0/.test(overview) && /<HamburgerButton plain color=\{c\.text\}/.test(header));
+check('course builder subscribes to locale and sets screen direction', /const \{ t, tCount, isRTL \} = useTranslation\(\)/.test(builder) && /direction: isRTL \? 'rtl' : 'ltr'/.test(builder));
+check('course builder tab, search, section and lesson rows use mirrored layout', builder.includes("flexDirection: 'row', direction: isRTL ? 'rtl' : 'ltr', paddingHorizontal: layout.screenPx") && builder.includes("flexDirection: 'row', direction: isRTL ? 'rtl' : 'ltr', alignItems: 'center', padding: 14") && builder.includes('writingDirection: isRTL ? \'rtl\' : \'ltr\''));
+check('main course fields use shared theme-aware input, selection and placeholder colors', /function NeuInput/.test(builder) && /color: c\.text/.test(builder) && /placeholderTextColor=\{inputPlaceholderColor\(c\)\}/.test(builder) && /selectionColor=\{c\.primary\}/.test(builder));
+check('price and custom contact inputs have explicit readable foreground and placeholder colors', (builder.match(/placeholderTextColor=\{inputPlaceholderColor\(c\)\}/g) || []).length >= 6 && /textAlign: 'left', writingDirection: 'ltr'/.test(builder));
+check('section/lesson rename inputs align to active language', /writingDirection: isRTL \? 'rtl' : 'ltr', textAlign: isRTL \? 'right' : 'left'/.test(builder));
+check('save, publish, structure, bulk-import and delete actions stay present', ['handleSaveAndExit','handlePublish','handleAddSection','handleAddLesson','handleBulkImport','handleDeleteSection','handleDeleteLesson'].every(k => builder.includes(k)));
+check('lesson editor uses live locale subscription and locale-aware number formatting', /const \{ t, tCount, isRTL, locale \} = useTranslation\(\)/.test(lesson) && lesson.includes('formatDuration(lesson.video_duration_seconds, locale)') && lesson.includes('formatBytes(item.file_size, locale)'));
+check('lesson status, source, scheduled time, permissions and settings use translated labels', ['lessonEditor.lessonStatus','lessonEditor.publishDateTime','lessonEditor.videoSource','lessonEditor.lessonAccess','lessonEditor.freePreviewHelp','lessonEditor.visibleHelp'].every(k => lesson.includes(`'${k}'`)));
+check('lesson upload, validation, material and confirmation messages use translations', ['lessonEditor.upload.timedOut','lessonEditor.videoDisabled','lessonEditor.fileTypesHint','lessonEditor.watermarkBody','lessonEditor.deleteVideoBody','lessonEditor.uploadComplete','lessonEditor.duplicateVideoBody','lessonEditor.deleteMaterialFailed'].every(k => lesson.includes(`'${k}'`)));
+check('lesson inputs use theme-aware foreground, placeholder, selection and RTL writing direction', /color: c\.text/.test(lesson) && /placeholderTextColor=\{c\.mode === 'dark' \? c\.textMuted : '#56657A'\}/.test(lesson) && /selectionColor=\{c\.primary\}/.test(lesson) && /writingDirection: isRTL \? 'rtl' : 'ltr'/.test(lesson));
+check('lesson settings rows mirror and align labels by locale', /function SettingToggle[\s\S]*direction: isRTL \? 'rtl' : 'ltr'[\s\S]*textAlign: isRTL \? 'right' : 'left'/.test(lesson));
+const lessonKeys = [...lesson.matchAll(/t\('([\w.]+)'/g)].map(m => m[1]);
+check('every static lesson translation reference exists in English and Arabic', lessonKeys.every(k => k in en && k in ar));
+const cbKeys = Object.keys(en).filter(k => k.startsWith('cb.'));
+const lessonI18nKeys = Object.keys(en).filter(k => k.startsWith('lessonEditor.'));
+const placeholders = value => [...String(value).matchAll(/\{(\w+)\}/g)].map(m => m[1]).sort().join(',');
+check('all course-builder keys have Arabic counterparts and matching placeholders', cbKeys.every(k => k in ar && placeholders(en[k]) === placeholders(ar[k])));
+check('all lesson-editor keys have Arabic counterparts and matching placeholders', lessonI18nKeys.length >= 75 && lessonI18nKeys.every(k => k in ar && placeholders(en[k]) === placeholders(ar[k])));
+check('Arabic lesson-editor strings contain Arabic script', lessonI18nKeys.every(k => /[\u0600-\u06FF]/.test(ar[k])));
+const enSourceStart = resourceSource.indexOf('export const en');
+const arSourceStart = resourceSource.indexOf('export const ar');
+const enSource = resourceSource.slice(enSourceStart, arSourceStart);
+const arSource = resourceSource.slice(arSourceStart);
+const duplicateKeys = source => {
+  const keys = [...source.matchAll(/^\s*'([^']+)'\s*:/gm)].map(m => m[1]);
+  return keys.length !== new Set(keys).size;
+};
+check('English and Arabic dictionaries contain no duplicate object keys', !duplicateKeys(enSource) && !duplicateKeys(arSource));
+
+for (const [name, ok] of checks) console.log(`${ok ? '✓' : '✗'} ${name}`);
+const failed = checks.filter(([, ok]) => !ok);
+console.log(`\n${checks.length - failed.length} passed; ${failed.length} failed`);
+if (failed.length) process.exit(1);

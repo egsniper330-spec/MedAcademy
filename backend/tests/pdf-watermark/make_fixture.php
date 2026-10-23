@@ -16,8 +16,11 @@ declare(strict_types=1);
  *   fixtures/notapdf.pdf         literal garbage;
  *   fixtures/empty.pdf           zero bytes;
  *   fixtures/truncated.pdf       the first 400 bytes of source.pdf;
- *   fixtures/encrypted.pdf       source.pdf re-encoded by Ghostscript with
- *                                user+owner passwords (synthetic test data).
+ *   fixtures/source-xrefstream.pdf  a hand-built PDF 1.5 whose cross-reference
+ *                                table is a COMPRESSED STREAM (no classic
+ *                                `xref`): the structure the free FPDI parser
+ *                                cannot read. Used to prove the delivery path
+ *                                refuses it instead of serving the original.
  *
  * The source PDF carries a FPDF creation timestamp, so its bytes differ
  * between runs; page structure and text content are deterministic. Tests
@@ -131,37 +134,100 @@ for ($i = 1; $i <= 40; $i++) {
 $pdf->Output($out, 'F');
 $srcBytes = (string) file_get_contents($out);
 
+// ── Rotated fixture ─────────────────────────────────────────────────────────
+// Three A4 pages whose page dictionaries carry /Rotate 0, 90 and 180. A
+// watermarker that ignores /Rotate draws on the UN-rotated coordinate system,
+// so the mark lands sideways (or off the visible page). Built with TCPDF, which
+// can emit /Rotate directly; skipped when only FPDF is available.
+$rotated = $FIX . '/rotated.pdf';
+if (class_exists('\\TCPDF')) {
+    $rp = new \TCPDF('P', 'pt', 'A4', true, 'UTF-8', false);
+    $rp->setPrintHeader(false);
+    $rp->setPrintFooter(false);
+    $rp->SetAutoPageBreak(false, 0);
+    $rp->SetMargins(0, 0, 0);
+    foreach ([0, 90, 180] as $deg) {
+        $rp->AddPage('P', [595, 842, 'Rotate' => $deg]);
+        $rp->SetFont('helvetica', 'B', 18);
+        $rp->Text(40, 90, 'ROTATED PAGE ' . $deg . ' DEGREES');
+        $rp->SetFont('helvetica', '', 11);
+        $rp->Text(40, 130, 'Marker: LECTURE-TEXT-MARKER-ALPHA');
+    }
+    $rp->Output($rotated, 'F');
+} else {
+    @unlink($rotated);
+}
+
+// ── Modern (PDF 1.5) fixture with a CROSS-REFERENCE STREAM ──────────────────
+// Written by hand, with no external tool: the trailer's cross-reference table is
+// a compressed stream (/Type /XRef) and there is no classic `xref` table. This
+// is what Word, InDesign and current LaTeX exports produce by default, and it is
+// exactly what the FREE FPDI parser cannot read (it needs the commercial
+// "FPDI PDF-Parser" add-on). The delivery path must refuse such a document with
+// a clear 422 instead of serving the unwatermarked original.
+$modern = $FIX . '/source-xrefstream.pdf';
+$body = "%PDF-1.5\n%\xE2\xE3\xCF\xD3\n";
+$offsets = [];
+$addObj = static function (int $n, string $content) use (&$body, &$offsets): void {
+    $offsets[$n] = strlen($body);
+    $body .= $n . " 0 obj\n" . $content . "\nendobj\n";
+};
+$addObj(1, '<< /Type /Catalog /Pages 2 0 R >>');
+$addObj(2, '<< /Type /Pages /Kids [3 0 R] /Count 1 >>');
+$addObj(3, '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595.28 841.89] '
+    . '/Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>');
+$content = "BT /F1 18 Tf 40 790 Td (MODERN XREF-STREAM FIXTURE) Tj ET\n"
+    . "BT /F1 11 Tf 40 760 Td (Marker: LECTURE-TEXT-MARKER-ALPHA) Tj ET\n";
+$addObj(4, '<< /Length ' . strlen($content) . " >>\nstream\n" . $content . 'endstream');
+$addObj(5, '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>');
+$xrefAt = strlen($body);
+$rows = pack('C', 0) . pack('N', 0) . pack('n', 65535); // object 0: free
+foreach ([1, 2, 3, 4, 5] as $n) {
+    $rows .= pack('C', 1) . pack('N', $offsets[$n]) . pack('n', 0);
+}
+$rows .= pack('C', 1) . pack('N', $xrefAt) . pack('n', 0);     // the xref stream itself
+$body .= "6 0 obj\n<< /Type /XRef /Size 7 /W [1 4 2] /Root 1 0 R /Length "
+    . strlen($rows) . " >>\nstream\n" . $rows . "\nendstream\nendobj\n";
+$body .= "startxref\n" . $xrefAt . "\n%%EOF\n";
+file_put_contents($modern, $body);
+$modernBytes = (string) file_get_contents($modern);
+if (!str_contains($modernBytes, '/Type /XRef') || preg_match('/\nxref\r?\n/', $modernBytes) === 1) {
+    fwrite(STDERR, "FAIL: source-xrefstream.pdf does not carry a cross-reference stream.\n");
+    exit(1);
+}
+
 // ── Error-handling fixtures ─────────────────────────────────────────────────
 file_put_contents($FIX . '/notapdf.pdf', "THIS IS NOT A PDF AT ALL.\njust garbage bytes for the reject_non_pdf test.\n");
 file_put_contents($FIX . '/empty.pdf', '');
 file_put_contents($FIX . '/truncated.pdf', substr($srcBytes, 0, 400));
 
-// Encrypted fixture: re-encode with Ghostscript pdfwrite + passwords.
-$gs = (string) (getenv('GHOSTSCRIPT_BIN') ?: 'gs');
+// Encrypted fixture. TCPDF can emit a standard-security-handler PDF itself, so
+// this needs no Ghostscript — the whole point of these fixtures is to exercise
+// the PURE-PHP pipeline on a host that has no renderer.
 $enc = $FIX . '/encrypted.pdf';
 @unlink($enc);
-$argvGs = [$gs, '-q', '-dNOPAUSE', '-dBATCH', '-dSAFER', '-sDEVICE=pdfwrite',
-    '-sOwnerPassword=fixture-owner-pw', '-sUserPassword=fixture-user-pw',
-    '-sOutputFile=' . $enc, $out];
-$d = [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']];
-$p = @proc_open($argvGs, $d, $pipes);
-$gsRc = 127;
-$gsErr = 'proc_open failed';
-if (is_resource($p)) {
-    fclose($pipes[0]);
-    stream_get_contents($pipes[1]);
-    $gsErr = (string) stream_get_contents($pipes[2]);
-    fclose($pipes[1]);
-    fclose($pipes[2]);
-    $gsRc = proc_close($p);
+if (!class_exists('\\TCPDF')) {
+    fwrite(STDERR, "FAIL: TCPDF is required to build encrypted.pdf.\n");
+    exit(1);
 }
-if ($gsRc !== 0 || !is_file($enc)) {
-    fwrite(STDERR, "FAIL: could not build encrypted.pdf with Ghostscript (rc=$gsRc): $gsErr\n");
+$ep = new \TCPDF('P', 'pt', 'A4', true, 'UTF-8', false);
+$ep->setPrintHeader(false);
+$ep->setPrintFooter(false);
+// User password opens it; the owner password protects permissions.
+$ep->SetProtection(['print'], 'fixture-user-pw', 'fixture-owner-pw');
+$ep->AddPage();
+$ep->SetFont('helvetica', 'B', 18);
+$ep->Text(40, 90, 'ENCRYPTED FIXTURE — must be refused');
+$ep->Text(40, 130, 'Marker: LECTURE-TEXT-MARKER-ALPHA');
+$ep->Output($enc, 'F');
+
+if (!is_file($enc)) {
+    fwrite(STDERR, "FAIL: could not build encrypted.pdf.\n");
     exit(1);
 }
 $encBytes = (string) file_get_contents($enc);
 if (!str_contains($encBytes, '/Encrypt')) {
-    fwrite(STDERR, "FAIL: encrypted.pdf does not contain /Encrypt — Ghostscript did not encrypt it.\n");
+    fwrite(STDERR, "FAIL: encrypted.pdf does not contain /Encrypt — TCPDF did not encrypt it.\n");
     exit(1);
 }
 

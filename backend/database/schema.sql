@@ -108,7 +108,7 @@ CREATE TABLE IF NOT EXISTS `profiles` (
   `role` VARCHAR(16) DEFAULT 'student' NOT NULL COMMENT 'pg_default: ''student''',
   `status` VARCHAR(16) DEFAULT 'active' NOT NULL COMMENT 'pg_default: ''active''',
   `watermark_id` VARCHAR(64) NOT NULL UNIQUE COMMENT 'app-generated via watermark sequence table; pg_default: public.next_watermark_id()',
-  `public_user_id` VARCHAR(20) DEFAULT 'MED-0000' NOT NULL COMMENT 'public human-readable ID (MED-####) assigned by trg_on_auth_user_created; unique',
+  `public_user_id` VARCHAR(20) DEFAULT 'MED-0000' NOT NULL COMMENT 'public human-readable ID (MED-0001..MED-99999) assigned by trg_on_auth_user_created; UNIQUE (uq_profiles_public_user_id)',
   `avatar_url` TEXT,
   `created_at` DATETIME(6) DEFAULT CURRENT_TIMESTAMP NOT NULL COMMENT 'pg_default: now()',
   `updated_at` DATETIME(6) DEFAULT CURRENT_TIMESTAMP NOT NULL COMMENT 'pg_default: now()',
@@ -148,6 +148,11 @@ CREATE TABLE IF NOT EXISTS `profiles` (
   `doctor_global_price` DECIMAL(20,6) DEFAULT 0 NOT NULL COMMENT 'pg_default: 0',
   `doctor_pricing_mode` TEXT DEFAULT ('global') NOT NULL COMMENT 'pg_default: ''global''',
   PRIMARY KEY (`id`),
+  -- The user-facing id is UNIQUE: the allocator checks availability, but this
+  -- index is the hard guarantee that two rows can never share a MED-##### id
+  -- (concurrent registrations included). Added to existing databases by
+  -- migration 009/036; kept here so a fresh schema.sql install has it too.
+  UNIQUE KEY `uq_profiles_public_user_id` (`public_user_id`),
   CONSTRAINT `fk_profiles_id` FOREIGN KEY (`id`) REFERENCES `users` (`id`) ON DELETE CASCADE,
   CONSTRAINT `fk_profiles_doctor_id` FOREIGN KEY (`doctor_id`) REFERENCES `profiles` (`id`) ON DELETE SET NULL,
   CONSTRAINT `fk_profiles_university_id` FOREIGN KEY (`university_id`) REFERENCES `universities` (`id`) ON DELETE SET NULL,
@@ -778,7 +783,11 @@ CREATE TABLE IF NOT EXISTS `lesson_materials` (
   `created_at` DATETIME(6) DEFAULT CURRENT_TIMESTAMP NOT NULL COMMENT 'pg_default: now()',
   `updated_at` DATETIME(6) DEFAULT CURRENT_TIMESTAMP NOT NULL COMMENT 'pg_default: now()',
   `permission` VARCHAR(16) DEFAULT 'allow' NOT NULL COMMENT 'pg_default: ''allow''',
-  `watermark_enabled` TINYINT(1) DEFAULT 0 NOT NULL COMMENT 'Personalized Student Watermark: 1 = every delivered copy carries the student identity (migration 032)',
+  `watermark_enabled` TINYINT(1) DEFAULT 0 NOT NULL COMMENT 'LEGACY (migration 032): ignored by delivery — student copies are ALWAYS personalized (migration 035)',
+  `file_hash` CHAR(64) NULL COMMENT 'sha256 of the current source file; cached so a delivery does not re-hash the whole PDF (migration 035)',
+  `file_hash_path` TEXT NULL COMMENT 'storage_path the cached file_hash belongs to; a different path invalidates the cache (migration 035)',
+  `file_hash_size` BIGINT NULL COMMENT 'byte size the cached file_hash belongs to; a different size invalidates the cache (migration 035)',
+  `file_hash_mtime` BIGINT NULL COMMENT 'unix mtime the cached file_hash belongs to; a same-size in-place replacement is still detected (migration 035)',
   PRIMARY KEY (`id`),
   CONSTRAINT `fk_lesson_materials_lesson_id` FOREIGN KEY (`lesson_id`) REFERENCES `lessons` (`id`) ON DELETE CASCADE,
   CONSTRAINT `fk_lesson_materials_course_id` FOREIGN KEY (`course_id`) REFERENCES `courses` (`id`) ON DELETE CASCADE,
@@ -1475,7 +1484,7 @@ ALTER TABLE `courses` ADD CONSTRAINT `chk_courses_status` CHECK (`status` IN ('d
 ALTER TABLE `courses` ADD CONSTRAINT `chk_courses_difficulty` CHECK (`difficulty` IN ('beginner', 'intermediate', 'advanced', 'all_levels'));
 ALTER TABLE `lessons` ADD CONSTRAINT `chk_lessons_status` CHECK (`status` IN ('draft', 'published', 'hidden', 'scheduled', 'archived'));
 ALTER TABLE `lessons` ADD CONSTRAINT `chk_lessons_video_type` CHECK (`video_type` IN ('vdocipher', 'coming_soon', 'youtube'));
-ALTER TABLE `audit_logs` ADD CONSTRAINT `chk_audit_logs_action` CHECK (`action` IN ('login', 'logout', 'register', 'password_reset', 'course_created', 'course_updated', 'course_deleted', 'lesson_created', 'lesson_updated', 'lesson_deleted', 'video_uploaded', 'pdf_uploaded', 'pdf_deleted', 'credit_allocated', 'credit_consumed', 'credit_deducted', 'code_created', 'code_redeemed', 'code_deactivated', 'device_reset', 'device_force_logout', 'role_changed', 'permission_changed', 'user_suspended', 'user_activated', 'enrollment_created', 'security_event', 'initial_super_admin_created', 'password_changed', 'phone_login', 'user_searched', 'user_created', 'admin_created', 'super_admin_created', 'device_blocked', 'device_unblocked', 'device_registered', 'limit_changed', 'unlimited_enabled', 'unlimited_disabled', 'device_logout_all', 'device_revoked', 'user_deleted', 'student_created_by_doctor', 'student_bulk_imported', 'course_assigned_by_doctor', 'credit_consumed_by_doctor', 'temp_password_generated', 'password_changed_first_login', 'root_detected', 'jailbreak_detected', 'vpn_detected', 'proxy_detected', 'ssl_pinning_failure', 'screenshot_detected', 'screen_recording_detected', 'debug_detected', 'frida_detected', 'xposed_detected', 'app_integrity_compromised', 'security_policy_changed', 'user_trashed', 'user_restored', 'bulk_trash', 'bulk_restore', 'user_hard_deleted', 'bulk_permanent_delete', 'device_removed', 'undo_delete', 'trash_emptied', 'system_health_check', 'provider_changed', 'device_limit_changed', 'unlimited_devices_enabled', 'unlimited_devices_disabled', 'bulk_suspend', 'bulk_unsuspend', 'bulk_reset_devices', 'bulk_reset_password', 'account_restored', 'deletion_verification_failed', 'impersonation_started', 'impersonation_ended', 'code_deleted', 'video_play', 'video_play_failed', 'credit_refunded', 'credit_expired', 'subscription_created', 'subscription_removed', 'subscription_restored', 'profile_updated', 'avatar_updated', 'settings_changed', 'enrollment_created_by_admin', 'enrollment_removed_by_admin', 'enrollment_hidden_flag_set', 'enrollment_visibility_changed', 'account_permanently_deleted', 'platform_earnings_reset', 'doctor_approved', 'doctor_rejected', 'video_replaced', 'video_deleted', 'course_published', 'course_unpublished', 'category_created', 'category_updated', 'category_deleted', 'university_created', 'university_updated', 'university_deleted', 'notification_sent', 'admin_updated', 'admin_deleted', 'earnings_reset', 'activation_code_created', 'activation_code_used', 'course_archived', 'course_restored', 'course_price_changed', 'instructor_changed', 'thumbnail_changed', 'credits_added', 'credits_removed', 'enrollment_removed', 'password_reset_by_admin', 'email_changed', 'name_changed', 'avatar_changed', 'device_reset_by_admin', 'platform_settings_changed', 'code_activated', 'code_disabled', 'code_expired', 'custom_pricing_enabled', 'custom_pricing_disabled', 'earnings_settings_changed', 'revenue_settings_changed', 'update_earnings_settings', 'credit_price_changed', 'course_hidden', 'failed_login', 'session_revoked', 'bulk_device_reset', 'profile_name_changed', 'profile_avatar_changed', 'profile_email_changed', 'profile_phone_changed', 'doctor_created', 'role_changed_to_doctor', 'role_changed_to_admin', 'role_changed_to_super_admin', 'role_changed_to_student', 'password_changed_by_admin', 'user_blocked', 'user_unblocked', 'admin_action', 'codes_batch_cloned', 'codes_batch_created', 'codes_bulk_deleted', 'codes_deactivated', 'codes_reactivated', 'orphan_video_cleanup', 'student_removed_from_course', 'redeem_code_created', 'redeem_code_redeemed', 'redeem_code_revoked', 'app_update_config_changed', 'video_provider_global_updated', 'video_provider_doctor_override_updated', 'feature_flag_override_updated', 'redeem_code_deleted', 'redeem_code_archived', 'video_remote_sync', 'video_remote_missing', 'video_delete_requested', 'video_remote_delete_succeeded', 'video_remote_delete_failed', 'video_local_reconciled', 'video_duplicate_detected', 'release_created', 'release_updated', 'release_published', 'release_rollback', 'release_archived', 'impersonation_failed', 'data_exported','students_bulk_action'));
+ALTER TABLE `audit_logs` ADD CONSTRAINT `chk_audit_logs_action` CHECK (`action` IN ('login', 'logout', 'register', 'password_reset', 'course_created', 'course_updated', 'course_deleted', 'lesson_created', 'lesson_updated', 'lesson_deleted', 'video_uploaded', 'pdf_uploaded', 'pdf_deleted', 'credit_allocated', 'credit_consumed', 'credit_deducted', 'code_created', 'code_redeemed', 'code_deactivated', 'device_reset', 'device_force_logout', 'role_changed', 'permission_changed', 'user_suspended', 'user_activated', 'enrollment_created', 'security_event', 'initial_super_admin_created', 'password_changed', 'phone_login', 'user_searched', 'user_created', 'admin_created', 'super_admin_created', 'device_blocked', 'device_unblocked', 'device_registered', 'limit_changed', 'unlimited_enabled', 'unlimited_disabled', 'device_logout_all', 'device_revoked', 'user_deleted', 'student_created_by_doctor', 'student_bulk_imported', 'course_assigned_by_doctor', 'credit_consumed_by_doctor', 'temp_password_generated', 'password_changed_first_login', 'root_detected', 'jailbreak_detected', 'vpn_detected', 'proxy_detected', 'ssl_pinning_failure', 'screenshot_detected', 'screen_recording_detected', 'debug_detected', 'frida_detected', 'xposed_detected', 'app_integrity_compromised', 'security_policy_changed', 'user_trashed', 'user_restored', 'bulk_trash', 'bulk_restore', 'user_hard_deleted', 'bulk_permanent_delete', 'device_removed', 'undo_delete', 'trash_emptied', 'system_health_check', 'provider_changed', 'device_limit_changed', 'unlimited_devices_enabled', 'unlimited_devices_disabled', 'bulk_suspend', 'bulk_unsuspend', 'bulk_reset_devices', 'bulk_reset_password', 'account_restored', 'deletion_verification_failed', 'impersonation_started', 'impersonation_ended', 'code_deleted', 'video_play', 'video_play_failed', 'credit_refunded', 'credit_expired', 'subscription_created', 'subscription_removed', 'subscription_restored', 'profile_updated', 'avatar_updated', 'settings_changed', 'enrollment_created_by_admin', 'enrollment_removed_by_admin', 'enrollment_hidden_flag_set', 'enrollment_visibility_changed', 'account_permanently_deleted', 'platform_earnings_reset', 'doctor_approved', 'doctor_rejected', 'video_replaced', 'video_deleted', 'course_published', 'course_unpublished', 'category_created', 'category_updated', 'category_deleted', 'university_created', 'university_updated', 'university_deleted', 'notification_sent', 'admin_updated', 'admin_deleted', 'earnings_reset', 'activation_code_created', 'activation_code_used', 'course_archived', 'course_restored', 'course_price_changed', 'instructor_changed', 'thumbnail_changed', 'credits_added', 'credits_removed', 'enrollment_removed', 'password_reset_by_admin', 'email_changed', 'name_changed', 'avatar_changed', 'device_reset_by_admin', 'platform_settings_changed', 'code_activated', 'code_disabled', 'code_expired', 'custom_pricing_enabled', 'custom_pricing_disabled', 'earnings_settings_changed', 'revenue_settings_changed', 'update_earnings_settings', 'credit_price_changed', 'course_hidden', 'failed_login', 'session_revoked', 'bulk_device_reset', 'profile_name_changed', 'profile_avatar_changed', 'profile_email_changed', 'profile_phone_changed', 'doctor_created', 'role_changed_to_doctor', 'role_changed_to_admin', 'role_changed_to_super_admin', 'role_changed_to_student', 'password_changed_by_admin', 'user_blocked', 'user_unblocked', 'admin_action', 'codes_batch_cloned', 'codes_batch_created', 'codes_bulk_deleted', 'codes_deactivated', 'codes_reactivated', 'orphan_video_cleanup', 'student_removed_from_course', 'redeem_code_created', 'redeem_code_redeemed', 'redeem_code_revoked', 'app_update_config_changed', 'video_provider_global_updated', 'video_provider_doctor_override_updated', 'feature_flag_override_updated', 'redeem_code_deleted', 'redeem_code_archived', 'video_remote_sync', 'video_remote_missing', 'video_delete_requested', 'video_remote_delete_succeeded', 'video_remote_delete_failed', 'video_local_reconciled', 'video_duplicate_detected', 'release_created', 'release_updated', 'release_published', 'release_rollback', 'release_archived', 'impersonation_failed', 'data_exported', 'students_bulk_action', 'security_policy_update', 'security_vpn_whitelist_add', 'security_vpn_whitelist_remove', 'patch_uploaded', 'vdocipher_delete_failed', 'vdoapi_curl_error', 'material_pdf_delivered', 'material_pdf_failed'));
 ALTER TABLE `credit_transactions` ADD CONSTRAINT `chk_credit_transactions_transaction_type` CHECK (`transaction_type` IN ('allocation', 'consumption', 'deduction', 'restoration'));
 ALTER TABLE `notifications` ADD CONSTRAINT `chk_notifications_notification_type` CHECK (`notification_type` IN ('info', 'course', 'system', 'security', 'admin_broadcast', 'announcement', 'maintenance', 'broadcast'));
 ALTER TABLE `lesson_materials` ADD CONSTRAINT `chk_lesson_materials_permission` CHECK (`permission` IN ('allow', 'preview_only', 'hidden', 'disabled'));
@@ -1691,22 +1700,67 @@ CREATE TRIGGER trg_on_auth_user_created
 AFTER INSERT ON `users`
 FOR EACH ROW
 BEGIN
-  DECLARE v_num BIGINT;
-  DECLARE v_pub VARCHAR(20);
+  DECLARE v_num BIGINT DEFAULT 0;
+  DECLARE v_pub VARCHAR(20) DEFAULT '';
+  DECLARE v_supplied VARCHAR(20) DEFAULT '';
+  DECLARE v_taken INT DEFAULT 0;
+  DECLARE v_tries INT DEFAULT 0;
 
-  -- Atomic sequential draw (LAST_INSERT_ID trick: safe under concurrency).
-  -- v_num is BIGINT so the value can never pass through a DECIMAL — the exact
-  -- bug class that once produced 'MED-1.00' style corrupted values.
-  UPDATE public_user_id_seq SET next_val = LAST_INSERT_ID(next_val + 1) WHERE id = 1;
-  SET v_num = LAST_INSERT_ID();
-
-  -- Enforce the 4-digit contract: fail loudly instead of producing MED-10000.
-  IF v_num > 9999 THEN
-    SIGNAL SQLSTATE '45000'
-      SET MESSAGE_TEXT = 'public_user_id exhausted: 4-digit range MED-0001..MED-9999 is full';
+  -- ── 1. An id supplied by the application wins ──────────────────────────────
+  -- PublicUserIdService (PHP) allocates the id with the CSPRNG and passes it in
+  -- raw_user_meta_data.public_user_id. The trigger only ACCEPTS it when it is
+  -- canonical (MED- + 4/5 digits, value 1..99999 — never a sixth digit, never
+  -- MED-0000) and currently free, so a stale or forged meta value can never
+  -- become a stored id. When accepted, the sequence is NOT advanced again.
+  SET v_supplied = COALESCE(
+    JSON_UNQUOTE(JSON_EXTRACT(NEW.`raw_user_meta_data`, '$.public_user_id')),
+    ''
+  );
+  IF v_supplied REGEXP '^MED-[0-9]{4,5}$'
+     AND CAST(SUBSTRING(v_supplied, 5) AS UNSIGNED) BETWEEN 1 AND 99999
+     AND CONCAT('MED-', LPAD(CAST(SUBSTRING(v_supplied, 5) AS UNSIGNED), 4, '0')) = v_supplied THEN
+    SELECT COUNT(*) INTO v_taken FROM `profiles` WHERE `public_user_id` = v_supplied;
+    IF v_taken = 0 THEN
+      SET v_pub = v_supplied;
+    END IF;
   END IF;
 
-  SET v_pub = CONCAT('MED-', LPAD(v_num, 4, '0'));
+  -- ── 2. Sequential allocation while the namespace lasts (MED-0001..MED-99999)
+  -- Atomic draw (LAST_INSERT_ID trick: safe under concurrency — the row lock is
+  -- held to commit, so no two creations can obtain the same number). v_num is
+  -- BIGINT so the value never passes through a DECIMAL (the 'MED-1.00' bug).
+  IF v_pub = '' THEN
+    UPDATE `public_user_id_seq` SET `next_val` = LAST_INSERT_ID(`next_val` + 1) WHERE `id` = 1;
+    SET v_num = LAST_INSERT_ID();
+
+    IF v_num BETWEEN 1 AND 99999 THEN
+      SET v_pub = CONCAT('MED-', LPAD(v_num, 4, '0'));
+      -- A restored dump / hand-written row can already hold this number.
+      -- Never reuse it — fall through to the random tail instead.
+      SELECT COUNT(*) INTO v_taken FROM `profiles` WHERE `public_user_id` = v_pub;
+      IF v_taken > 0 THEN
+        SET v_pub = '';
+      END IF;
+    END IF;
+  END IF;
+
+  -- ── 3. Random five-digit fallback after MED-99999 ─────────────────────────
+  -- The whole 10000..99999 range has normally been drawn by then, so only the
+  -- values freed by gaps are available; the loop is BOUNDED and the failure is
+  -- explicit. It never emits a duplicate or a sixth digit.
+  WHILE v_pub = '' DO
+    IF v_tries >= 40 THEN
+      SIGNAL SQLSTATE '45000'
+        SET MESSAGE_TEXT = 'public_user_id exhausted: no free value remains in MED-0001..MED-99999';
+    END IF;
+    SET v_num = 10000 + FLOOR(RAND() * 90000);
+    SET v_pub = CONCAT('MED-', v_num);
+    SELECT COUNT(*) INTO v_taken FROM `profiles` WHERE `public_user_id` = v_pub;
+    IF v_taken > 0 THEN
+      SET v_pub = '';
+    END IF;
+    SET v_tries = v_tries + 1;
+  END WHILE;
 
   INSERT INTO `profiles` (`id`, `email`, `full_name`, `role`, `watermark_id`, `public_user_id`)
   VALUES (
@@ -2051,14 +2105,18 @@ CREATE TABLE IF NOT EXISTS `watermark_seq` (
 
 INSERT IGNORE INTO `watermark_seq` (`id`, `next_val`) VALUES (1, 1);
 
--- public_user_id_seq — sequential PUBLIC USER ID generator (MED-#### format).
--- Drawn atomically by trg_on_auth_user_created via LAST_INSERT_ID(next_val+1).
+-- public_user_id_seq — sequential PUBLIC USER ID generator
+-- (MED-0001 … MED-99999). Drawn atomically by trg_on_auth_user_created via
+-- LAST_INSERT_ID(next_val+1). Once the draw passes 99999 the trigger switches
+-- to the random five-digit fallback; the sequence is never reset or lowered.
 CREATE TABLE IF NOT EXISTS `public_user_id_seq` (
   `id` TINYINT NOT NULL PRIMARY KEY,
-  `next_val` BIGINT NOT NULL DEFAULT 1
+  -- next_val = the LAST ISSUED numeric value (0 = none issued yet), so the very
+  -- first draw is 1 → MED-0001. `watermark_seq` above uses the same convention.
+  `next_val` BIGINT NOT NULL DEFAULT 0
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-INSERT IGNORE INTO `public_user_id_seq` (`id`, `next_val`) VALUES (1, 1);
+INSERT IGNORE INTO `public_user_id_seq` (`id`, `next_val`) VALUES (1, 0);
 
 -- ─────────────────────────────────────────────────────────────────────────────
 -- support_settings — support channel configuration (phone, telegram, whatsapp,

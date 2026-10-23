@@ -89,22 +89,38 @@ Exit codes: `0` all required suites passed · `1` a required suite failed ·
 
 ## 2. What runs
 
-| Suite | Script | Checks (baseline) | Covers |
+| Suite | Script | Checks | Covers |
 |---|---|---|---|
-| `real_pipeline` | `backend/tests/pdf-watermark/run_real_test.php` | 21 | Real Ghostscript rasterization of a multi-page, mixed-orientation PDF; page count/geometry/orientation preserved per page; image-only output (no `/Type /Font` objects, image XObjects present); two students get distinct bytes; `pdftotext` finds the marker in the SOURCE and not in the output (skipped if absent); source bytes unchanged; no temp scratch left; every page renders non-blank; pixel proof the watermark sits *behind* the content |
-| `repo_verify` | `backend/scripts/verify-watermark.php` | 11 | The repository's own integration test, incl. the cross-platform `pdftotext` detection (env `PDFTOTEXT` → PATH, `proc_open` argv, no POSIX `command -v`) and the corrected font-object assertion (`/Type /Font` instead of the false-failing `/Font` dictionary key) |
-| `error_handling` | `backend/tests/pdf-watermark/error_tests.php` | 8 | Fail-closed: non-PDF bytes, empty file, truncated PDF, encrypted PDF, missing Ghostscript, missing font, page limit, oversized page — each must throw, produce **no** output file and leave **no** temp dir/`.part` |
-| `authorization` | `backend/tests/pdf-watermark/auth_tests.php` | 32 | `StorageService::canAccess` matrix, `shouldWatermark` role rules, token round-trip, forged identity → 403, expired → 410, malformed → 403, and **revocation after link issuance** (issued link keeps verifying cryptographically but is refused at stream time when the material is hidden or the enrollment suspended) |
+| `real_pipeline` | `backend/tests/pdf-watermark/run_real_test.php` | 30 (+3 skipped) | The production VECTOR engine on a real 4-page, mixed-orientation PDF: page count/size/orientation preserved, identity on every page, back layer before and front marks after the imported page, baked marks inside the page stream, two students → distinct bytes, `pdftotext` extraction, source bytes unchanged, no temp scratch left. The 3 skips are the raster/pixel proofs, which need Ghostscript |
+| `repo_verify` | `backend/scripts/verify-watermark.php` | 18 | The repository's own integration test: geometry, identity completeness, layer order, bake, per-recipient difference, untouched source |
+| `error_handling` | `backend/tests/pdf-watermark/error_tests.php` | 6 | Fail-closed: non-PDF bytes, empty/truncated/encrypted PDF, page limit, missing engine — each must throw, produce **no** output file and leave **no** temp dir/`.part` |
+| `authorization` | `backend/tests/pdf-watermark/auth_tests.php` | 37 | `StorageService::canAccess` matrix, `shouldWatermark` role rules, token round-trip, forged identity → 403, expired → 410, malformed → 403, and **revocation after link issuance** |
+| `delivery` | `backend/tests/pdf-watermark/delivery_tests.php` | 104 | End-to-end delivery: per-student personalization, cache keys per recipient, concurrent mint/lock, cleanup, no unwatermarked fallback |
 | `gallery` | `backend/tests/pdf-watermark/make_gallery.php` | artifact | Builds `out/gallery.html` for manual visual inspection (non-required suite) |
 
-**Expected result: 72/72 required checks pass (73 with the gallery artifact),
-exit 0** — matching the historical baseline (20/20 real-pipeline, 8/8 error,
-32/32 authorization in `.freebuff/pdfreal/REPORT.md`; the real-pipeline JSON
-has always contained 21 individual assertions).
+**Expected result (2026-10-23 run, PHP 8.3.35, FPDI 2.6.8, TCPDF 6.11.4):
+196 passed, 0 failed, 3 skipped — 199 checks, exit 0.** The skipped checks are
+the Ghostscript-dependent pixel proofs; the default engine is pure PHP.
 
-All suites drive the **actual PHP implementation and the actual renderer**.
-A Python/PDFium harness may exist elsewhere as supplemental design evidence —
-it is not part of this workflow and does not replace these tests.
+All suites drive the **actual PHP implementation and the actual generator**.
+
+### Removal-resistance measurements (separate, Python)
+
+`backend/tests/pdf-watermark/removal_attacks.py` attacks a **delivered** PDF and
+reports, per attack, how much watermark ink disappears and how much lecture
+content it costs. It is a developer tool (needs `pikepdf`, `pymupdf`, `numpy`,
+`pillow`, none of which the backend uses) and is *not* run by `run.ps1`:
+
+```bash
+python backend/tests/pdf-watermark/removal_attacks.py \
+    --pdf .freebuff/pdf-watermark-tests/out/student-a.pdf \
+    --source .freebuff/pdf-watermark-tests/fixtures/source.pdf \
+    --identity "Test Student Alpha • MED-0042" --id MED-0042 \
+    --outdir .freebuff/pdf-watermark-tests/removal/run1
+```
+
+Results and their interpretation live in
+[`PDF_WATERMARK_REMOVAL_RESISTANCE.md`](PDF_WATERMARK_REMOVAL_RESISTANCE.md).
 
 ### Visual inspection (manual)
 
@@ -225,8 +241,12 @@ as artifacts (never the PDFs/gallery, unless that is explicitly wanted).
   `canAccess` on a real server is not exercised here.
 - Linux `gs`, the cPanel PHP build's extensions/limits, and cPanel filesystem
   permissions are not covered by the Windows run (and vice versa).
-- **Excluded from the required set:** `.freebuff/pdfreal/delivery_tests.php`
-  (written after the baseline report) currently has 2 open failures around
-  `MaterialDeliveryController::streamPdf` path resolution; it is documented
-  here as known-failing work-in-progress and is *not* part of this workflow.
-  Investigating it is a separate task.
+- The delivery suite (`backend/tests/pdf-watermark/delivery_tests.php`, 104
+  checks) exercises the controller against an in-memory SQLite database and a
+  temporary storage root, not against MySQL and cPanel storage. The path/cache
+  logic is the same code, but file-system permission behaviour on the host is
+  not reproduced.
+- The removal-resistance numbers are measured on the fixture PDFs in this
+  workspace; a different source document (scanned pages, full-page images,
+  colour backgrounds) will produce different percentages for the image-domain
+  attacks.

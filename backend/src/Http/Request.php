@@ -170,4 +170,33 @@ final class Request
     {
         return $_FILES[$key] ?? null;
     }
+
+    /** Whether PHP discarded the multipart body because it exceeded post_max_size. */
+    public function postBodyExceededLimit(): bool
+    {
+        $contentLength = (int) ($_SERVER['CONTENT_LENGTH'] ?? 0);
+        if ($contentLength <= 0 || $_POST !== [] || $_FILES !== []) {
+            return false;
+        }
+
+        $postMaxBytes = self::iniBytes((string) ini_get('post_max_size'));
+        return $postMaxBytes > 0 && $contentLength > $postMaxBytes;
+    }
+
+    /** Convert PHP shorthand ini values (K/M/G) into bytes. */
+    private static function iniBytes(string $value): int
+    {
+        $value = trim($value);
+        if ($value === '' || $value === '0') {
+            return 0;
+        }
+        $unit = strtolower($value[strlen($value) - 1]);
+        $amount = (float) $value;
+        return (int) match ($unit) {
+            'g' => $amount * 1024 * 1024 * 1024,
+            'm' => $amount * 1024 * 1024,
+            'k' => $amount * 1024,
+            default => $amount,
+        };
+    }
 }

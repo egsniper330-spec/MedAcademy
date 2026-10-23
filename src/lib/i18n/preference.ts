@@ -48,6 +48,34 @@ export function parsePreference(raw: unknown): LanguagePreference | null {
 }
 
 /**
+ * Staff console roles.
+ *
+ * REQUIREMENT: the Super Admin (and Admin) console is presented in ENGLISH,
+ * regardless of the signed-in user's app language or device language. The
+ * previous implementation left these consoles on the shared locale, so an
+ * Arabic device (or an Arabic preference saved earlier) rendered the whole
+ * console in Arabic — every screen, because every SA/Admin screen translates
+ * through the same dictionary. There are no hardcoded Arabic UI strings in
+ * those screens (verified by scan); the language simply followed the device.
+ *
+ * The lock is a VIEW of the language layer, not a change to the stored
+ * preference: a doctor who switches to the Admin console sees English, and
+ * still gets their chosen language back in the Student/Doctor UI.
+ */
+export const STAFF_CONSOLE_ROLES = ['super_admin', 'admin'] as const;
+
+export type StaffConsoleRole = (typeof STAFF_CONSOLE_ROLES)[number];
+
+/** True for the roles whose console is English-only. */
+export function isStaffConsoleRole(role: string | null | undefined): role is StaffConsoleRole {
+  if (!role) return false;
+  return (STAFF_CONSOLE_ROLES as readonly string[]).includes(role);
+}
+
+/** The locale forced for a staff console (English). */
+export const STAFF_CONSOLE_LOCALE = 'en' as const;
+
+/**
  * Resolve the effective locale.
  *
  * @param storedPreference parsed preference (`null` when absent/invalid)

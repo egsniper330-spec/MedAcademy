@@ -15,7 +15,9 @@ declare(strict_types=1);
  *   xdg-open "<work-dir>/out/gallery.html"        (Linux)
  *
  * Requires the renders produced by run_real_test.php (src-p1..4.png,
- * out-p1..4.png) and a working Ghostscript.
+ * out-p1..4.png), which in turn need a working Ghostscript. Without a renderer
+ * there is nothing to look at, so the suite reports SKIPPED and exits 0 instead
+ * of failing — the vector pipeline itself needs no renderer at all.
  */
 
 if (PHP_SAPI !== 'cli') {
@@ -29,6 +31,34 @@ $gs = (string) (getenv('GHOSTSCRIPT_BIN') ?: 'gs');
 $dpi = max(96, min(400, (int) (getenv('PDF_WATERMARK_DPI') ?: 200)));
 
 $fail = [];
+
+// No renderer / no renders => nothing to build. This is a SKIP, not a failure.
+$probe = [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']];
+$ph = @proc_open([$gs, '--version'], $probe, $pp);
+$gsOk = false;
+if (is_resource($ph)) {
+    fclose($pp[0]);
+    stream_get_contents($pp[1]);
+    stream_get_contents($pp[2]);
+    fclose($pp[1]);
+    fclose($pp[2]);
+    $gsOk = proc_close($ph) === 0;
+}
+if (!$gsOk) {
+    $skip = [
+        'ok' => true,
+        'skipped' => 'no Ghostscript renderer available — the visual gallery needs page renders; the vector pipeline needs none',
+    ];
+    $json = json_encode($skip, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\n";
+    // The runner reads this file; without it a clean SKIP is reported as
+    // "suite crashed". Every suite must persist its verdict.
+    if (($jp = getenv('PDFTEST_JSON_OUT')) !== false && $jp !== '') {
+        @mkdir(dirname($jp), 0775, true);
+        file_put_contents($jp, $json);
+    }
+    echo $json;
+    exit(0);
+}
 
 function run(array $a): int
 {

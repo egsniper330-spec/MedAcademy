@@ -4,7 +4,7 @@ import { useFocusEffect, useRouter } from 'expo-router';
 import { BookOpen, Users, TrendingUp, Bell, Archive, GraduationCap, Ban, Zap, CreditCard, Plus, Calendar } from 'lucide-react-native';
 import { DashboardHeader } from '@/components/DashboardHeader';
 import { useProfileStore } from '@/lib/store';
-import { getCourses, getDoctorStudentEnrollments } from '@/lib/api';
+import { getCourses, getDoctorStudentEnrollments, getUnreadNotificationCount } from '@/lib/api';
 import { useCreditBalance } from '@/lib/useCreditBalance';
 import { getFirstName } from '@/lib/utils';
 import { NeuCard } from '@/components/NeuCard';
@@ -29,25 +29,30 @@ export default function DoctorDashboard() {
   const insets = layout.insets;
   const { profile } = useProfileStore();
   const router = useRouter();
-  const { t, locale } = useTranslation();
+  const { t, tCount, locale } = useTranslation();
 
   // ── Single source of truth for credits ──────────────────────────────────────
   const { balance: credits, loading: creditsLoading, refresh: refreshCredits } = useCreditBalance();
 
   const [courses, setCourses] = useState<any[]>([]);
   const [enrollments, setEnrollments] = useState<any[]>([]);
+  // Unread notifications drive the bell's dot + accessibility label, exactly
+  // like the student dashboard (the header used to show a bare bell here).
+  const [unreadCount, setUnreadCount] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
   const [loading, setLoading] = useState(true);
 
   const loadData = useCallback(async () => {
     if (!profile) return;
     try {
-      const [myCourses, enr] = await Promise.all([
+      const [myCourses, enr, unread] = await Promise.all([
         getCourses({ doctorId: profile.id }),
         getDoctorStudentEnrollments(profile.id),
+        getUnreadNotificationCount(profile.id),
       ]);
       setCourses(myCourses);
       setEnrollments(enr);
+      setUnreadCount(unread);
     } catch {}
     setLoading(false);
   }, [profile]);
@@ -80,6 +85,12 @@ export default function DoctorDashboard() {
   }, []));
 
   const firstName = getFirstName(profile?.full_name);
+  // Greeting pattern shared with the student dashboard: a localized "Welcome"
+  // overline + the signed-in account's own name as the headline. The name is
+  // the AUTHENTICATED profile value (never the literal word "Doctor" sprayed
+  // into the layout); the role word is only a last-resort fallback for a
+  // profile that failed to load.
+  const doctorName = String(profile?.full_name ?? '').trim() || firstName || t('role.doctor');
 
   // Derived KPIs
   const totalStudents     = enrollments.length;
@@ -108,20 +119,25 @@ export default function DoctorDashboard() {
     >
       {/* DashboardHeader sits OUTSIDE the inner padding view so it can own its own horizontal padding */}
       <DashboardHeader
-        roleLabel={t('drOverview.roleLabel')}
-        greeting={firstName ? `${firstName} 👋` : '👋'}
+        roleLabel={t('home.welcome')}
+        greeting={doctorName}
         rightActions={
+          // Identical control box, icon ratio, unread dot and label to the
+          // student dashboard, so the two headers read as one design system.
           <Pressable
             onPress={() => {
               // Opened from the dashboard (not the drawer) → destination shows Back.
               markEntryIntent('/(app)/notifications', 'nested');
               router.push('/(app)/notifications' as RelativePathString);
             }}
-            accessibilityLabel={t('nav.notifications')}
+            accessibilityLabel={unreadCount > 0 ? `${t('nav.notifications')}, ${tCount('common.unreadCount', unreadCount)}` : t('nav.notifications')}
             accessibilityRole="button"
-            style={[{ width: layout.touchTarget, height: layout.touchTarget, borderRadius: layout.cardRadius, alignItems: 'center', justifyContent: 'center' }, neuMicroStyle(isDark)]}
+            style={[{ width: layout.touchTarget + 2, height: layout.touchTarget + 2, borderRadius: layout.cardRadius, alignItems: 'center', justifyContent: 'center' }, neuMicroStyle(isDark)]}
           >
-            <Bell size={Math.round(layout.touchTarget * 0.44)} color={c.primary} />
+            <Bell size={Math.round((layout.touchTarget + 2) * 0.43)} color={c.primary} />
+            {unreadCount > 0 && (
+              <View style={{ position: 'absolute', top: layout.pad.sm, right: layout.pad.sm, width: layout.pad.sm, height: layout.pad.sm, borderRadius: layout.pad.xs, backgroundColor: '#EF4444' }} />
+            )}
           </Pressable>
         }
       />

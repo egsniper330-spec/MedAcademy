@@ -1,0 +1,23 @@
+{
+    "name": "medacademy/backend",
+    "description": "MedAcademy PHP backend. Composer is used ONLY for the pure-PHP PDF watermarking libraries (FPDI + TCPDF) that generate per-student lesson PDFs; the application itself has no other runtime dependencies.",
+    "type": "project",
+    "license": "proprietary",
+    "require": {
+        "php": ">=8.0",
+        "ext-zlib": "*",
+        "setasign/fpdf": "^1.8",
+        "setasign/fpdi": "^2.6",
+        "tecnickcom/tcpdf": "^6.7"
+    },
+    "config": {
+        "sort-packages": true,
+        "optimize-autoloader": true,
+        "preferred-install": "dist"
+    },
+    "scripts": {
+        "watermark-check": "php scripts/watermark-diagnostics.php",
+        "watermark-verify": "php scripts/verify-watermark.php",
+        "watermark-cleanup": "php scripts/watermark-cleanup.php"
+    }
+}

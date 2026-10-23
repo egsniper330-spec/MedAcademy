@@ -1,13 +1,14 @@
 {
     "name": "medacademy/pdf-watermark-tests",
-    "description": "Pinned FPDF/FPDI for the real PDF watermark test workflow. Installed into the git-ignored .freebuff/pdf-watermark-tests/lib directory, never into the repository tree.",
+    "description": "Pinned FPDF/FPDI/TCPDF for the real PDF watermark test workflow (the same versions backend/composer.json deploys). Installed into the git-ignored .freebuff/pdf-watermark-tests/lib directory, never into the repository tree.",
     "type": "project",
     "require": {
         "php": ">=8.1",
         "ext-gd": "*",
         "ext-zlib": "*",
         "setasign/fpdf": "1.9.0",
-        "setasign/fpdi": "2.6.8"
+        "setasign/fpdi": "2.6.8",
+        "tecnickcom/tcpdf": "^6.7"
     },
     "config": {
         "sort-packages": true,

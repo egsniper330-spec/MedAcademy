@@ -48,10 +48,15 @@
  *
  *   Movement strategy (mirrors watermarkInjection.ts for VdoCipher):
  *   • One element, never removed or recreated during normal playback.
- *   • Repositioned every 30–60 s via transform:translate3d() only — no top/left
- *     changes, no reflow, compositor-only update.
- *   • Smooth transition (600 ms ease) applied in the injected <style>. *   • MutationObserver watches for removal/tampering; recover() recreates and
- *   restarts the timer only when tampered — never during normal playback.
+ *   • CONTINUOUS billiard motion: requestAnimationFrame advances the position
+ *     from elapsed time and reflects the velocity off the four edges of the
+ *     measured video box, so the whole element stays inside the frame.
+ *   • transform:translate3d() only — no top/left, no reflow, no CSS transition.
+ *   • Two lines: display name, then the complete MED-#### id underneath.
+ *   • Fixed opacity — the mark never fades, blinks or hides, and it is
+ *     independent of the control-idle timer, so hiding controls cannot hide it.
+ *   • MutationObserver watches for removal/tampering; recover() recreates and
+ *     restarts the loop only when tampered — never during normal playback.
  *
  * ── Tap-to-toggle policy (IMPORTANT) ────────────────────────────────────────
  *   clickToPlay is false: a SINGLE tap on the video area never toggles playback.
@@ -69,7 +74,6 @@
  *   control (z-index 4) and the control bar (z-index 5), so it can never
  *   swallow a control tap. A single tap stays inert.
  */
-import { WATERMARK_FONT_PX } from '@/lib/nativeWatermarkConfig';
 
 export const PLAYER_SCRIPT = `
 (function () {
@@ -103,19 +107,36 @@ export const PLAYER_SCRIPT = `
       '.plyr__video-wrapper{z-index:0;}' +
       '.plyr__control--overlaid{z-index:4;transform:translate3d(-50%,-50%,0);' +
         'will-change:transform;touch-action:manipulation;}' +
-      // ── CENTRE CONTROL ROOT-CAUSE FIX ────────────────────────────────────
-      // Plyr ships '.plyr--playing .plyr__control--overlaid{opacity:0;
-      // visibility:hidden}'. Once playback starts the centre button is not
-      // just invisible — 'visibility:hidden' removes it from HIT TESTING, so
-      // the centre of the player had no target at all and the only way to
-      // pause was the auto-hiding bottom bar. Keep the control present and
-      // tappable while playing; dim it so it does not obscure the video, and
-      // restore full opacity on hover/focus. Its glyph is swapped to the pause
-      // icon from the player's real state (setCentreState below).
-      '.plyr--playing .plyr__control--overlaid{opacity:.35;visibility:visible;' +
-        'pointer-events:auto;}' +
-      '.plyr--playing .plyr__control--overlaid:hover,' +
-      '.plyr--playing .plyr__control--overlaid:focus{opacity:1;}' +
+      // ── CENTRE CONTROL — lifecycle is DRIVEN BY SCRIPT, not by CSS ────────
+      //
+      // WHY (the persistent centre button that two CSS attempts did not fix):
+      // the earlier fixes expressed the lifecycle as a CSS predicate on Plyr's
+      // state classes — first "always visible while .plyr--playing" (visible
+      // forever), then ".plyr--playing:not(.plyr--hide-controls)". Both assume
+      // the centre button belongs to the SAME root, in the SAME stylesheet
+      // cascade, at the SAME moment the control bar hides. A single stale node
+      // — a provider rebuild that leaves a second '.plyr' root behind, or a
+      // rebuild that inserts a fresh overlaid button whose root never enters
+      // the hidden-controls state — satisfies neither rule and keeps painting a
+      // full-opacity blue button over the video while the live bar is gone.
+      // No CSS predicate can tell the live button from the stale one.
+      //
+      // So the stylesheet is now ONLY stacking/compositing. Visibility is
+      // applied per frame-state by applyCentreVisibility() below, from the REAL
+      // player state ('paused'/'ended' + the live root's own hidden-controls
+      // class), as INLINE styles on the ONE surviving overlaid control — the
+      // same value Plyr itself uses to paint the bar, read at the same instant
+      // through a class MutationObserver. There is no CSS rule left that can
+      // keep the button visible, and no rule left that can hide it while paused.
+      '.plyr .plyr__control--overlaid{z-index:4;transform:translate3d(-50%,-50%,0);' +
+        'will-change:transform;touch-action:manipulation;}' +
+      // CSS MIRROR of the script lifecycle (defence in depth, not a workaround):
+      // if a provider rebuild inserts a button after the bar hid and no event
+      // reaches the script, this rule alone still closes it — the same class
+      // that hides the bar hides the centre control. It never forces the
+      // button visible, so it cannot resurrect the reported bug.
+      '.plyr.plyr--hide-controls .plyr__control--overlaid{' +
+        'opacity:0;visibility:hidden;pointer-events:none;}' +
       '.plyr__video .plyr__controls{z-index:5;touch-action:manipulation;}' +
       // ── Double-tap seek layer ────────────────────────────────────────────
       // Transparent, video-surface only, z-index 1: ABOVE the video/iframe
@@ -172,101 +193,150 @@ export const PLAYER_SCRIPT = `
         wm: !!document.getElementById('plyr-watermark'),
         docW: document.documentElement.clientWidth,
         docH: document.documentElement.clientHeight,
+        // Centre-control proof for device runs: which node is live, what the
+        // lifecycle decided, and the computed paint state that decision
+        // produced — TOGETHER WITH the bar's own state at the same instant.
+        // 'hidden' while the bar is up is the fix; 'visible' while the bar is
+        // hidden is the reported bug, so both facts must be in one reply to be
+        // decisive. State only — never a URL, token or identity.
+        centre: (function () {
+          var root = (player && player.elements && player.elements.container) ||
+                     document.querySelector('.plyr');
+          var b = root && root.querySelector
+            ? root.querySelector('.plyr__control--overlaid')
+            : document.querySelector('.plyr__control--overlaid');
+          if (!b) return null;
+          var cs = window.getComputedStyle ? window.getComputedStyle(b) : null;
+          var bar = root && root.querySelector ? root.querySelector('.plyr__controls') : null;
+          var bcs = bar && window.getComputedStyle ? window.getComputedStyle(bar) : null;
+          var cls = root && root.classList;
+          return {
+            count: document.querySelectorAll('.plyr__control--overlaid').length,
+            state: b.getAttribute('data-meda-centre'),
+            opacity: cs ? cs.opacity : null,
+            visibility: cs ? cs.visibility : null,
+            hideControls: !!(cls && cls.contains('plyr--hide-controls')),
+            playing: !!(cls && cls.contains('plyr--playing')),
+            paused: !!(cls && cls.contains('plyr--paused')),
+            barOpacity: bcs ? bcs.opacity : null,
+            barVisibility: bcs ? bcs.visibility : null,
+          };
+        })(),
       });
     } catch (e) {
       send({ type: 'yt:diag', error: String(e && e.message || e) });
     }
   };
 
-  // ── Watermark — one element, never recreated, moves every 30–60 s ──────────
+  // ── Forensic watermark — two lines, continuous billiard motion ─────────────
   //
-  //  Architecture mirrors watermarkInjection.ts (VdoCipher WebView):
-  //    • Single <div id="plyr-watermark"> appended once inside .plyr__video-wrapper.
-  //    • top:0 / left:0 fixed at mount; all positioning via transform:translate3d().
-  //    • Move timer writes ONLY el.style.transform + el.style.opacity — no reflow.
-  //    • <style> injects a 600 ms ease transition so each move is smooth.
-  //    • MutationObserver on the wrapper (childList) catches removal → recover().
-  //    • Attribute observer on the element itself catches style/class tampering.
-  //    • recover() is NEVER called during normal playback.
+  //  ADVANCED IN THREE WAYS over the previous 9-slot implementation:
   //
+  //  1. CONTINUOUS MOTION. The old code teleported to one of nine fixed slots
+  //     every 30–60 s with a 600 ms glide — visually stationary for half a
+  //     minute, then a slide to a predictable place. This is a real trajectory:
+  //     a requestAnimationFrame loop advances x/y from ELAPSED TIME (so the
+  //     path is identical at 30 or 120 Hz), and every edge of the measured
+  //     video box reflects the velocity exactly. It never pauses on a wall and
+  //     never intentionally disappears.
+  //
+  //  2. TWO LINES. The recipient's display name on the first line and the
+  //     complete public id (MED-####) directly underneath it. One line could
+  //     only be made readable by shrinking the type; two lines let the id stay
+  //     full-size, and the label no longer carries the "MedAcademy" brand.
+  //
+  //  3. RESPONSIVE SIZE. Font size is derived from the measured video box
+  //     (13 px floor on a small phone player, up to 34 px in fullscreen)
+  //     instead of the fixed 15 px that was barely visible when the host Modal
+  //     expanded the player. Re-measured on every resize/fullscreen transition.
+  //
+  //  The mark is NOT a control: nothing here reads Plyr's control-idle timer,
+  //  so hiding the controls can never hide it. pointer-events:none keeps every
+  //  tap, drag and seek gesture on the player. Opacity is fixed — no fade, no
+  //  blink, no hide gap. Only tampering (element removed or text changed)
+  //  triggers recover().
   function injectWatermark(name, id) {
     if (!name && !id) return;
 
-    var WM_ID   = 'plyr-watermark';
+    var WM_ID = 'plyr-watermark';
     var WM_ST_ID = 'plyr-wm-style';
 
-    // ── 9-slot grid [xFrac, yFrac] — 8 % inset from every edge ────────────
-    var G = [
-      [0.08,0.08],[0.42,0.08],[0.72,0.08],
-      [0.04,0.42],[0.35,0.42],[0.68,0.42],
-      [0.08,0.74],[0.42,0.74],[0.72,0.74],
-    ];
-    var cur = -1;
+    var _el = null, _nEl = null, _iEl = null;
+    var _raf = 0, _last = 0, _running = false, _lastTamperCheck = 0;
+    var _x = 0, _y = 0, _vx = 0, _vy = 0;
+    var _vw = 0, _vh = 0, _ew = 0, _eh = 0;
+    var _resizeBound = false;
+
+    // px/second inside the current video box. Slow enough to read, fast enough
+    // that the mark is visibly travelling (a 360 px-wide phone player is
+    // crossed in roughly 9 s).
+    var SPEED_MIN = 26, SPEED_MAX = 44;
+
+    // Largest simulation step. The reflection below FOLDS an overshoot
+    // mathematically (a step can never tunnel through an edge), so this cap
+    // only bounds how far one frame may travel. It must not be tiny: a
+    // throttled/backgrounded frame (rAF drops to ~1 Hz) would otherwise cap
+    // dt at a few ms and the mark would crawl instead of keeping its pace.
+    var MAX_STEP_S = 1.0;
 
     function rnd(a, b) { return a + Math.random() * (b - a); }
-    function nxtSlot() {
-      var n;
-      do { n = Math.floor(Math.random() * G.length); } while (n === cur);
-      cur = n;
-      return G[n];
+
+    function wrapper() {
+      return document.querySelector('.plyr__video-wrapper') ||
+             document.querySelector('.plyr') ||
+             document.body;
     }
 
-    // Viewport + element sizes captured per move (transform/opacity writes
-    // never invalidate layout, so these offsetWidth/Height reads are cheap and
-    // always clean — and re-reading each move keeps the watermark correct if
-    // the player resizes, e.g. pseudo-fullscreen on web).
-    var _vw = 0, _vh = 0, _ew = 0, _eh = 0;
-    function captureVP() {
-      var w = document.querySelector('.plyr__video-wrapper') || document.querySelector('.plyr');
-      _vw = (w && w.offsetWidth)  || window.innerWidth  || 320;
+    function measure() {
+      var w = wrapper();
+      _vw = (w && w.offsetWidth) || window.innerWidth || 320;
       _vh = (w && w.offsetHeight) || window.innerHeight || 180;
       if (_el) {
-        _ew = _el.offsetWidth  || 0;
+        _ew = _el.offsetWidth || 0;
         _eh = _el.offsetHeight || 0;
       }
     }
 
-    // Position the element's top-left corner so the WHOLE element stays inside
-    // the wrapper (≥6 % inset). Raw slot fractions can exceed the wrapper on
-    // narrow players (0.72 * vw + text width > vw) — that clipped the
-    // watermark at right/bottom slots.
-    function mkTransform(slot, deg) {
-      var inset = Math.round(Math.min(_vw, _vh) * 0.06);
-      var x = Math.min(
-        Math.round(slot[0] * _vw),
-        Math.max(inset, _vw - _ew - inset),
-      );
-      var y = Math.min(
-        Math.round(slot[1] * _vh),
-        Math.max(inset, _vh - _eh - inset),
-      );
-      return 'translate3d(' + x + 'px,' + y + 'px,0) rotate(' + deg + 'deg)';
+    function maxX() { var m = _vw - _ew; return m > 0 ? m : 0; }
+    function maxY() { var m = _vh - _eh; return m > 0 ? m : 0; }
+
+    // Responsive type: 6.2 % of the smaller video dimension, clamped.
+    function fontSize() {
+      var base = Math.min(_vw || 360, _vh || 202);
+      var px = Math.round(base * 0.062);
+      if (px < 13) px = 13;
+      if (px > 34) px = 34;
+      return px;
     }
 
-    // ── Inject transition <style> once ─────────────────────────────────────
+    function applyFont() {
+      var px = fontSize();
+      if (_nEl) _nEl.style.fontSize = Math.round(px * 0.9) + 'px';
+      if (_iEl) _iEl.style.fontSize = px + 'px';
+    }
+
+    // ── Style: no transform transition (motion is per-frame), fixed opacity ──
     function injectCSS() {
       if (document.getElementById(WM_ST_ID)) return;
       var s = document.createElement('style');
       s.id = WM_ST_ID;
       s.textContent =
         '#' + WM_ID + '{' +
-          'transition:transform 0.6s ease,opacity 0.6s ease;' +
-          'will-change:transform,opacity;' +
+          'transition:opacity 0.2s ease;' +
+          'will-change:transform;' +
+          'opacity:0.55;' +
+        '}' +
+        '#' + WM_ID + ' > div{' +
+          'font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;' +
+          'color:#fff;font-weight:600;letter-spacing:0.3px;white-space:nowrap;' +
+          'line-height:1.25;' +
+          'text-shadow:0 1px 4px rgba(0,0,0,0.95),0 0 10px rgba(0,0,0,0.7);' +
+          '-webkit-font-smoothing:antialiased;' +
         '}';
       (document.head || document.documentElement).appendChild(s);
     }
 
-    // ── Find parent wrapper ────────────────────────────────────────────────
-    function getWrapper() {
-      return document.querySelector('.plyr__video-wrapper') ||
-             document.querySelector('.plyr') ||
-             document.body;
-    }
-
-    // ── Live references — stored to avoid querySelectorAll in callbacks ────
-    var _el = null, _nEl = null, _iEl = null;
-
-    // ── Build element (called only at first mount or after tamper recovery) ─
+    // ── Build element (first mount or tamper recovery only) ─────────────────
     function buildEl() {
       var d = document.createElement('div');
       d.id = WM_ID;
@@ -278,102 +348,156 @@ export const PLAYER_SCRIPT = `
         'pointer-events:none',
         'user-select:none',
         '-webkit-user-select:none',
-        'max-width:min(320px,55%)',
-        'opacity:0',
+        'max-width:min(78%,420px)',
         'transform:translate3d(0,0,0)',
-        'line-height:1.4',
-        'font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif',
       ].join(';');
 
-      // Single-line format: "NAME • WM-NNNN"  (U+2022 bullet separator)
+      if (name) {
+        _nEl = document.createElement('div');
+        _nEl.textContent = name;
+        _nEl.style.fontWeight = '600';
+        _nEl.style.opacity = '0.92';
+        _nEl.style.overflow = 'hidden';
+        _nEl.style.textOverflow = 'ellipsis';
+        d.appendChild(_nEl);
+      }
       _iEl = document.createElement('div');
-      _iEl.style.cssText = [
-        'font-size:${WATERMARK_FONT_PX}px',
-        'font-weight:600',
-        'letter-spacing:0.3px',
-        'white-space:nowrap',
-        'overflow:hidden',
-        'text-overflow:ellipsis',
-        'color:#fff',
-        'text-shadow:0 1px 4px rgba(0,0,0,0.95),0 0 10px rgba(0,0,0,0.7)',
-      ].join(';');
-      _iEl.textContent = name ? name + ' \u2022 ' + String(id || '') : String(id || '');
+      _iEl.textContent = String(id || '');
+      _iEl.style.fontWeight = '700';
       d.appendChild(_iEl);
       return d;
     }
 
-    // ── Mount: append once, set initial position via double-rAF ───────────
+    function draw() {
+      if (!_el) return;
+      _el.style.transform = 'translate3d(' + Math.round(_x) + 'px,' + Math.round(_y) + 'px,0)';
+    }
+
+    // Exact reflection off both edges of one axis: the overshoot travels back,
+    // so speed is preserved and the mark never sticks to a wall.
+    function advance(pos, vel, dt, max) {
+      var next = pos + vel * dt;
+      var v = vel;
+      for (var i = 0; i < 4; i++) {
+        if (next < 0) { next = -next; v = -v; }
+        else if (next > max) { next = 2 * max - next; v = -v; }
+        else break;
+      }
+      if (next < 0) next = 0;
+      if (next > max) next = max;
+      return { pos: next, vel: v };
+    }
+
+    function step(ts) {
+      if (!_el || !_el.parentNode) { _raf = 0; _running = false; recover(); return; }
+      if (!_last) _last = ts;
+      var dt = (ts - _last) / 1000;
+      _last = ts;
+      if (!isFinite(dt) || dt < 0) dt = 0;
+      if (dt > MAX_STEP_S) dt = MAX_STEP_S;
+
+      var ax = advance(_x, _vx, dt, maxX());
+      var ay = advance(_y, _vy, dt, maxY());
+      _x = ax.pos; _vx = ax.vel;
+      _y = ay.pos; _vy = ay.vel;
+      draw();
+      // TAMPER RE-CHECK at 2 Hz, NOT per frame: this loop writes
+      // _el.style.transform on every frame, so observing the element's 'style'
+      // attribute would fire a MutationObserver 60×/s for the life of the
+      // player. A 500 ms computed-paint check catches a mark hidden by an
+      // injected stylesheet (which an inline-style check cannot see) with
+      // negligible cost.
+      var now = Date.now();
+      if (now - _lastTamperCheck > 500) {
+        _lastTamperCheck = now;
+        if (isTampered()) { recover(); return; }
+      }
+      _raf = requestAnimationFrame(step);
+    }
+
+    function startMotion() {
+      if (_raf) { cancelAnimationFrame(_raf); _raf = 0; }
+      _last = 0;
+      measure();
+      applyFont();
+      measure();
+
+      var mx = maxX(), my = maxY();
+      _x = mx * rnd(0.12, 0.88);
+      _y = my * rnd(0.12, 0.88);
+
+      // Diagonal start: every direction is visibly travelling on both axes,
+      // never sliding along one edge.
+      var speed = rnd(SPEED_MIN, SPEED_MAX);
+      var share = rnd(0.55, 0.85);
+      _vx = speed * share * (Math.random() < 0.5 ? -1 : 1);
+      _vy = speed * Math.sqrt(Math.max(0, 1 - share * share)) * (Math.random() < 0.5 ? -1 : 1);
+
+      draw();
+      _running = true;
+      _raf = requestAnimationFrame(step);
+    }
+
+    // Resize / fullscreen / rotation: re-measure, re-scale the type and clamp
+    // the position immediately. The trajectory continues (velocity is kept).
+    function onResize() {
+      if (!_el) return;
+      measure();
+      applyFont();
+      measure();
+      if (_x > maxX()) _x = maxX();
+      if (_y > maxY()) _y = maxY();
+      _el.style.opacity = '0.55';
+      draw();
+    }
+
     function mount() {
       if (document.getElementById(WM_ID)) return;
       injectCSS();
-      captureVP();
-      var w = getWrapper();
+      measure();
+      var w = wrapper();
       if (!w) return;
       if (w.style.position !== 'relative' && w.style.position !== 'absolute') {
         w.style.position = 'relative';
       }
       _el = buildEl();
       w.appendChild(_el);
-      // Double rAF: first rAF puts the element in the render tree at opacity:0,
-      // second rAF triggers the transition to the initial random position.
-      requestAnimationFrame(function () {
-        requestAnimationFrame(function () {
-          if (!_el) return;
-          captureVP(); // element now exists — measure it for clamped positioning
-          var slot = nxtSlot();
-          var deg  = rnd(-3, 3).toFixed(1);
-          _el.style.transform = mkTransform(slot, deg);
-          _el.style.opacity   = rnd(0.40, 0.56).toFixed(2);
-        });
-      });
+      startMotion();
+      if (!_resizeBound) { _resizeBound = true; window.addEventListener('resize', onResize); }
+      watch();
     }
 
-    // ── Move: write transform + opacity only — compositor-only, zero reflow ─
-    var _tmr = null;
-    function move() {
-      if (!_el || !_el.parentNode) { recover(); return; }
-      captureVP(); // re-measure wrapper + element (resize-safe, layout-clean)
-      var slot = nxtSlot();
-      var deg  = rnd(-3, 3).toFixed(1);
-      _el.style.transform = mkTransform(slot, deg);
-      _el.style.opacity   = rnd(0.38, 0.58).toFixed(2);
-    }
-
-    // Self-rescheduling timer — random 30–60 s interval each tick.
-    function scheduleTick() {
-      _tmr = setTimeout(function () { move(); scheduleTick(); }, rnd(30000, 60000));
-    }
-
-    // ── Tamper check — no getComputedStyle, no querySelectorAll ───────────
     function isTampered() {
       if (!_el || !_el.parentNode) return true;
-      if (_el.style.display === 'none')      return true;
+      if (_el.style.display === 'none') return true;
       if (_el.style.visibility === 'hidden') return true;
+      // Computed paint — catches a stylesheet/CSSOM rule that hides the mark
+      // (inline checks only see whatever this script itself wrote).
+      if (window.getComputedStyle) {
+        var cs = window.getComputedStyle(_el);
+        if (cs && (cs.display === 'none' || cs.visibility === 'hidden' || cs.opacity === '0')) return true;
+      }
       if (name && _nEl && _nEl.textContent !== name) return true;
-      if (_iEl && _iEl.textContent !== (name ? name + ' \u2022 ' + String(id || '') : String(id || ''))) return true;
+      if (_iEl && _iEl.textContent !== String(id || '')) return true;
       return false;
     }
 
-    // ── Recovery — only triggered by MutationObserver on tamper ──────────
+    // Tamper only — normal playback never reaches this path.
     function recover() {
-      if (_tmr) { clearTimeout(_tmr); _tmr = null; }
+      if (_raf) { cancelAnimationFrame(_raf); _raf = 0; }
+      _running = false;
       if (_el && _el.parentNode) { try { _el.parentNode.removeChild(_el); } catch (e) {} }
       _el = null; _nEl = null; _iEl = null;
-      cur = -1;
+      _last = 0;
       mount();
-      watch();     // re-attach observers to the new element
-      scheduleTick();
     }
 
-    // ── MutationObserver — minimal scope ──────────────────────────────────
     var _obs1 = null, _obs2 = null;
     function watch() {
       if (!window.MutationObserver) return;
-      // Disconnect previous observers if recovering
-      if (_obs1) { try { _obs1.disconnect(); } catch(e) {} }
-      if (_obs2) { try { _obs2.disconnect(); } catch(e) {} }
-      // Observer 1: wrapper direct children — catches node removal
-      var w = getWrapper();
+      if (_obs1) { try { _obs1.disconnect(); } catch (e) {} }
+      if (_obs2) { try { _obs2.disconnect(); } catch (e) {} }
+      var w = getWrapperSafe();
       if (w) {
         _obs1 = new MutationObserver(function (ms) {
           for (var i = 0; i < ms.length; i++) {
@@ -385,25 +509,37 @@ export const PLAYER_SCRIPT = `
         });
         _obs1.observe(w, { childList: true });
       }
-      // Observer 2: watermark element itself — catches style/class tampering
       if (_el) {
         _obs2 = new MutationObserver(function () {
           if (isTampered()) recover();
         });
+        // 'style' is deliberately NOT observed: the motion loop rewrites
+        // style.transform every frame (that would fire this observer 60×/s).
+        // Inline hiding is caught by the 2 Hz computed check in step().
         _obs2.observe(_el, {
           attributes: true,
           characterData: true,
           subtree: true,
-          attributeFilter: ['style', 'class', 'hidden'],
+          attributeFilter: ['class', 'hidden'],
         });
       }
     }
 
-    // ── Bootstrap ─────────────────────────────────────────────────────────
-    mount();
-    scheduleTick();
-    watch();
+    function getWrapperSafe() {
+      return document.querySelector('.plyr__video-wrapper') ||
+             document.querySelector('.plyr') ||
+             document.body;
+    }
+
+    // Bootstrap: double rAF so the element is painted and measurable first.
+    requestAnimationFrame(function () {
+      requestAnimationFrame(function () {
+        mount();
+        if (_el) _el.style.opacity = '0.55';
+      });
+    });
   }
+
 
   // ── Video-surface recovery (fullscreen/rotation black-frame fix) ──────────
   //
@@ -613,8 +749,108 @@ export const PLAYER_SCRIPT = `
   //       player's real play / pause / ended events;
   //     • toggle against the media's OWN paused/ended state at the moment of
   //       the tap, so rapid taps cannot both resolve to the same command.
+  /**
+   * The ONE centre button that belongs to the LIVE player — scoped to the live
+   * root on purpose.
+   *
+   *   document.querySelector('.plyr__control--overlaid') returns the FIRST such
+   *   node in document order, which after a provider rebuild can be a leftover
+   *   button from a detached root. Styling that node is a no-op for the live
+   *   player (its own button keeps Plyr's default paint: opacity .9, visible)
+   *   while the live bar hides — the exact "button stays while the bar goes"
+   *   symptom, and it also makes every write land on the wrong element. So the
+   *   lookup is scoped to the live root; strays are neutralised separately in
+   *   dedupeCentre().
+   */
   function centreButton() {
+    var root = playerRoot();
+    if (root && root.querySelector) return root.querySelector('.plyr__control--overlaid');
     return document.querySelector('.plyr__control--overlaid');
+  }
+
+  /** The ONE element Plyr is actually driving right now. */
+  function playerRoot() {
+    if (player && player.elements && player.elements.container) return player.elements.container;
+    return document.querySelector('.plyr');
+  }
+
+  /**
+   * SHOULD THE CENTRE CONTROL BE PAINTED RIGHT NOW?
+   *
+   *   EXACTLY the control bar's lifecycle and nothing else: painted while the
+   *   bar is up, gone the instant the bar goes. The single predicate is Plyr's
+   *   own 'plyr--hide-controls' class on the LIVE root — the very class whose
+   *   CSS rule hides the bar — so the centre control cannot drift from it by a
+   *   frame, an event, or a provider rebuild.
+   *
+   *   Paused-state UX is preserved WITHOUT a second predicate: Plyr's own
+   *   toggleControls() treats 'paused' as a show condition, so the bar (and
+   *   therefore the centre control) stays up whenever playback is paused. The
+   *   previous version read player.paused/player.ended itself; for a YouTube
+   *   embed those are proxies on the embed wrapper div (this.media.paused),
+   *   re-assigned by the provider on play/pause — i.e. state that can disagree
+   *   with the class Plyr paints from. That disagreement is what could keep the
+   *   button up while the bar was hidden.
+   */
+  function centreShouldShow() {
+    var root = playerRoot();
+    if (!root || !root.classList) return true;
+    return !root.classList.contains('plyr--hide-controls');
+  }
+
+  /**
+   * APPLY the lifecycle to the button, as INLINE style.
+   *
+   * Inline wins over every stylesheet rule (Plyr's own ".plyr--playing
+   * .plyr__control--overlaid{opacity:0;visibility:hidden}" included), so the
+   * state below is authoritative regardless of cascade order, injected style
+   * ordering, or a rules rewrite by a provider script. 'style.opacity = '''
+   * hands the paused state back to Plyr's own default (0.9) — we never hard-code
+   * the paused look ourselves.
+   */
+  function applyCentreVisibility() {
+    var root = playerRoot();
+    var playing = !!(root && root.classList && root.classList.contains('plyr--playing'));
+    var show = centreShouldShow();
+    var btn = centreButton();
+    if (btn && btn.style) {
+      if (show) {
+        btn.style.visibility = 'visible';
+        btn.style.pointerEvents = 'auto';
+        // Dimmed while playing-with-controls; full strength while paused, where
+        // Plyr's own stylesheet value is already what the design wants.
+        btn.style.opacity = playing ? '0.7' : '';
+        btn.removeAttribute('aria-hidden');
+      } else {
+        // display:none (not just opacity) so a hidden button can never be a
+        // hit target and can never be caught mid-transition over the video.
+        btn.style.opacity = '0';
+        btn.style.visibility = 'hidden';
+        btn.style.pointerEvents = 'none';
+        btn.setAttribute('aria-hidden', 'true');
+      }
+      btn.setAttribute('data-meda-centre', show ? 'visible' : 'hidden');
+    }
+    // Any overlaid button that is NOT inside the live root can never receive a
+    // lifecycle update from us (Plyr stopped painting its root long ago), so it
+    // is closed here rather than left dressing the video with a dead button.
+    hideStrayCentre();
+  }
+
+  function hideStrayCentre() {
+    var root = playerRoot();
+    if (!root) return;
+    var all = document.querySelectorAll('.plyr__control--overlaid');
+    for (var i = 0; i < all.length; i++) {
+      var n = all[i];
+      if (root.contains && root.contains(n)) continue;
+      if (!n.style) continue;
+      n.style.opacity = '0';
+      n.style.visibility = 'hidden';
+      n.style.pointerEvents = 'none';
+      n.setAttribute('data-meda-centre', 'stray');
+      n.setAttribute('aria-hidden', 'true');
+    }
   }
 
   function setCentreState(playing) {
@@ -640,23 +876,94 @@ export const PLAYER_SCRIPT = `
     }
   }
 
+  /** Real playback state, read from the class Plyr paints (not a proxy). */
   function realPlaying() {
-    return !!(player && !player.paused && !player.ended);
+    var root = playerRoot();
+    return !!(root && root.classList && root.classList.contains('plyr--playing'));
+  }
+
+  // Exactly ONE centre control — and it must be the LIVE one.
+  //
+  // Plyr rebuilds its control bar when the provider finishes loading; a rebuild
+  // can leave the previous overlaid node (or a whole previous root) behind. A
+  // leftover node is the worst case for a class-based CSS rule: its own root
+  // never enters the hidden-controls state, so a stylesheet predicate on
+  // '.plyr--hide-controls' can never hide it, and it keeps painting a blue
+  // button over the video after the live bar has gone. Resolution order:
+  //   1. an overlaid button INSIDE the live root is the one to keep;
+  //   2. any other overlaid node in the document is removed (stale root or
+  //      provider duplicate).
+  function dedupeCentre() {
+    var all = document.querySelectorAll('.plyr__control--overlaid');
+    if (!all || all.length < 2) return;
+    var root = playerRoot();
+    var keep = null;
+    for (var i = 0; i < all.length; i++) {
+      if (root && root.contains && root.contains(all[i])) { keep = all[i]; break; }
+    }
+    if (!keep) keep = all[0];
+    for (var j = 0; j < all.length; j++) {
+      var n = all[j];
+      if (n !== keep && n.parentNode) n.parentNode.removeChild(n);
+    }
   }
 
   function syncCentreState() {
+    dedupeCentre();
     setCentreState(realPlaying());
+    applyCentreVisibility();
+    observeCentre();
   }
+
+  // ── Centre-control lifecycle wiring ────────────────────────────────────────
+  // Three independent triggers, so no single missed event can leave the button
+  // in the wrong state:
+  //  1. CLASS OBSERVER on the live root — fires at the exact instant Plyr adds
+  //     or removes 'plyr--hide-controls', i.e. the same moment the bar changes.
+  //     This is the primary path and it does not depend on any provider event.
+  //  2. Plyr's OWN control visibility events ('controlsshown'/'controlshidden')
+  //     plus play/pause/ended/state events, for providers whose bar state and
+  //     event order differ.
+  //  3. A 1 Hz safety re-sync on the already-throttled progress path (below),
+  //     which costs one classList read when nothing changed.
+  var _centreObserver = null;
+  function observeCentre() {
+    if (!window.MutationObserver) return;
+    var root = playerRoot();
+    if (!root || root === (_centreObserver && _centreObserver.__medaRoot)) return;
+    if (_centreObserver) { try { _centreObserver.disconnect(); } catch (e) {} }
+    // dedupe first: a provider rebuild can insert its button in the same
+    // mutation batch that adds/removes the bar class, and the lifecycle must
+    // land on the live node.
+    var obs = new MutationObserver(function () { dedupeCentre(); applyCentreVisibility(); });
+    // class → the bar's idle lifecycle; childList → a provider rebuild that
+    // inserts a fresh overlaid button after the bar already hid.
+    obs.observe(root, { attributes: true, attributeFilter: ['class'], childList: true });
+    obs.__medaRoot = root;
+    _centreObserver = obs;
+  }
+
+  ['controlsshown', 'controlshidden', 'play', 'playing', 'pause', 'ended',
+   'ready', 'seeking', 'seeked', 'waiting', 'canplay', 'canplaythrough',
+   'loadeddata', 'loadstart', 'emptied'].forEach(function (evt) {
+    player.on(evt, syncCentreState);
+  });
 
   function togglePlayback() {
     // SECURITY: never restart a player the lock has contained.
     if (window.__medaSecurityStopped) return;
     // Authoritative toggle — read the media's own state now, not a cached flag.
-    if (realPlaying()) player.pause();
+    // The glyph flips on the tap (optimistic) because a YouTube play()/pause()
+    // round-trips through the iframe, and waiting for it is what made the
+    // centre tap feel slow; syncCentreState() reconciles with the real state.
+    var wasPlaying = realPlaying();
+    setCentreState(!wasPlaying);
+    if (wasPlaying) player.pause();
     else player.play();
     syncCentreState();
     // Provider commands are asynchronous: re-read on the next frame so the
-    // glyph follows what actually happened.
+    // glyph and the visibility follow what actually happened — a centre tap
+    // must not be able to leave the button up after playback resumes.
     if (typeof requestAnimationFrame === 'function') requestAnimationFrame(syncCentreState);
   }
 
@@ -765,10 +1072,13 @@ export const PLAYER_SCRIPT = `
     if (resumeAt > 0) player.currentTime = resumeAt;
     injectWatermark(wmName, wmId);
 
-    // Centre control glyph + double-tap seek layer. Both are idempotent, and
-    // 'ready' is late enough for the embed's controls (Plyr injects them in a
-    // deferred build) while still before the first user interaction.
+    // Centre control glyph + idle lifecycle + double-tap seek layer. All three
+    // are idempotent, and 'ready' is late enough for the embed's controls (Plyr
+    // injects them in a deferred build) while still before the first user
+    // interaction. observeCentre() rebinds to the live root, so a provider
+    // rebuild that replaces it cannot leave the observer on a stale element.
     syncCentreState();
+    observeCentre();
     installSeekGestures();
 
     send({ type: 'yt:ready' });
@@ -862,6 +1172,12 @@ export const PLAYER_SCRIPT = `
   // bridge traffic by ~75% with no perceptible UX impact.
   var _lastProgressSend = 0;
   player.on('timeupdate', function () {
+    // SAFETY RE-SYNC (1 Hz, deliberately BEFORE the bridge throttle): one
+    // classList read when nothing changed, and an authoritative re-apply of the
+    // centre-control lifecycle when something did. Covers a provider that never
+    // emits a state event and a rebuild that swapped the root under the
+    // observer — the two ways the button could otherwise stay stale.
+    applyCentreVisibility();
     var now = Date.now();
     if (now - _lastProgressSend < 1000) return;
     _lastProgressSend = now;

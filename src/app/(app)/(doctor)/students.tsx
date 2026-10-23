@@ -1,12 +1,12 @@
 import { useCallback, useState, useMemo } from 'react';
 import {
   View, Text, ScrollView, FlatList, useColorScheme, RefreshControl,
-  ActivityIndicator, TextInput, Pressable,
+  ActivityIndicator, TextInput, Pressable, Image, StyleSheet, useWindowDimensions,
 } from 'react-native';
 import { useFocusEffect, useRouter, RelativePathString } from 'expo-router';
 import {
   Users, Search, UserPlus, BookOpen, Ban, Play, Trash2, Eye, CreditCard, X,
-  Clock, GraduationCap, ChevronRight, CheckCircle, PlusCircle, Fingerprint, Copy,
+  Clock, GraduationCap, ChevronRight, CheckCircle, PlusCircle, Copy,
   Check, ListChecks,
 } from 'lucide-react-native';
 import * as Clipboard from 'expo-clipboard';
@@ -48,11 +48,62 @@ const TABS: { key: TabKey; labelKey: string; icon: React.ElementType }[] = [
   { key: 'recent',     labelKey: 'drStudents.tabRecent',   icon: Clock },
 ];
 
+/**
+ * Student avatar — the REAL uploaded profile photo.
+ *
+ * The doctor's student list previously drew an initials circle only. The
+ * backend already returns `student.avatar_url` (public object URL from the
+ * `user-avatars` bucket, set by the student from their profile screen), so the
+ * photo was fetched but never displayed. This renders it with:
+ *   • initials as the fallback for students WITHOUT a photo (no broken icon);
+ *   • an onError fallback so a stale/deleted object degrades to initials;
+ *   • no extra network/auth: avatar_url is a public URL, like the doctor's own
+ *     avatar on dr-profile, and only authorized enrollment data reaches this
+ *     screen in the first place (server-side visibility filter).
+ */
+function StudentAvatar({ student, size, radius, colors }: {
+  student: any; size: number; radius: number; colors: any;
+}) {
+  const [failed, setFailed] = useState(false);
+  const url = typeof student?.avatar_url === 'string' ? student.avatar_url.trim() : '';
+  const initial = String(student?.full_name ?? '?').trim().charAt(0).toUpperCase() || '?';
+
+  if (url !== '' && !failed) {
+    return (
+      <Image
+        source={{ uri: url }}
+        style={{ width: size, height: size, borderRadius: radius, backgroundColor: `${colors.primary}18` }}
+        onError={() => setFailed(true)}
+        resizeMode="cover"
+        accessibilityLabel={student?.full_name ? String(student.full_name) : undefined}
+      />
+    );
+  }
+  return (
+    <View style={{ width: size, height: size, borderRadius: radius, backgroundColor: `${colors.primary}18`, alignItems: 'center', justifyContent: 'center' }}>
+      <Text style={{ fontSize: size * 0.36, fontWeight: '800', color: colors.primary }}>{initial}</Text>
+    </View>
+  );
+}
+
 export default function DoctorStudents() {
+  // Responsive: two columns from tablet width up, one on phones. The card
+  // itself used to be a single full-width row at every size.
+  const { width: viewportWidth } = useWindowDimensions();
+  const twoColumn = viewportWidth >= 700;
+  const gridStyle = twoColumn
+    ? { flexDirection: 'row' as const, flexWrap: 'wrap' as const, justifyContent: 'space-between' as const }
+    : undefined;
+
   const scheme = useColorScheme();
   const isDark = scheme === 'dark';
   const c = isDark ? neuColors.dark : neuColors.light;
   const layout = useLayout();
+  // One bordered, divider-separated panel — not a stack of elevated cards.
+  const listPanel = {
+    backgroundColor: c.base, borderRadius: 14, overflow: 'hidden' as const,
+    borderWidth: StyleSheet.hairlineWidth, borderColor: `${c.text}14`,
+  };
   const { profile } = useProfileStore();
   const { showToast } = useToast();
   const router = useRouter();
@@ -306,108 +357,141 @@ export default function DoctorStudents() {
     setCreditSearchResults([]); setCreditError(''); setCreditStep(1);
   };
 
-  // ── Enrollment card ───────────────────────────────────────────────────────────
-  const renderEnrollmentCard = (enrollment: any, showCourse = true) => {
+  // ── Student row (compact) ────────────────────────────────────────────────────
+  // Redesign: one information-dense row instead of a full card. A 34 px photo,
+  // the name, the public id, the course and the status stay scannable at a
+  // glance; the three authorized actions are 30 px icon buttons (44 px touch
+  // target via hitSlop) instead of a button bar per student. Row height is
+  // 9 + 9 padding around 34 px content ≈ 52–56 px, so a phone shows ~9–11
+  // students where the old cards showed 3.
+  const iconBtn = {
+    width: 30, height: 30, borderRadius: 8,
+    alignItems: 'center' as const, justifyContent: 'center' as const,
+  };
+
+  const renderStudentRow = (enrollment: any, showCourse = true, withDate = false) => {
     const s = enrollment.student;
     const statusColor = STATUS_COLOR[enrollment.status] ?? '#6B7280';
     const isSelected = selected.has(enrollment.id);
+
+    // Secondary facts, most useful first, on ONE muted line. Long values
+    // ellipsize; the action column has a fixed width so nothing collides.
+    const meta: string[] = [];
+    // "Recently added" is ordered by enrollment date, so show it there.
+    if (withDate && enrollment.enrolled_at) {
+      meta.push(new Date(enrollment.enrolled_at).toLocaleDateString(
+        locale === 'ar' ? 'ar-EG' : 'en-US', { month: 'short', day: 'numeric' },
+      ));
+    }
+    if (showCourse && enrollment.course?.title) meta.push(String(enrollment.course.title));
+    if (typeof enrollment.progress_percent === 'number') meta.push(`${Math.round(enrollment.progress_percent)}%`);
+    if (!showCourse && s?.university?.name) meta.push(String(s.university.name));
+
+    // The copy affordance sits inside the pressable row; stop propagation so
+    // copying never also opens the details sheet (RN Web bubbles the click).
+    const copyId = (e?: any) => {
+      e?.stopPropagation?.();
+      void Clipboard.setStringAsync(String(s.public_user_id));
+      showToast({ type: 'success', message: t('drStudents.idCopied') });
+    };
+
     return (
       <Pressable
         key={enrollment.id}
-        disabled={!selectMode}
-        onPress={() => toggleSelect(enrollment.id)}
+        onPress={() => (selectMode ? toggleSelect(enrollment.id) : openAction(enrollment, 'profile'))}
+        // NOT `button` outside select mode: react-native-web renders a
+        // role="button" Pressable as a real <button>, and this row contains its
+        // own copy + action buttons — a <button> inside a <button> is invalid
+        // DOM (React logs a nesting error). The row stays a tappable surface,
+        // and every action in it is still a labelled, focusable button (the
+        // Profile one does exactly what the row tap does).
         accessibilityRole={selectMode ? 'checkbox' : undefined}
         accessibilityState={selectMode ? { checked: isSelected } : undefined}
-        accessibilityLabel={selectMode ? t('drStudents.selectA11y', { name: s?.full_name ?? t('drStudents.student') }) : undefined}
+        accessibilityLabel={
+          selectMode
+            ? t('drStudents.selectA11y', { name: s?.full_name ?? t('drStudents.student') })
+            : t('drStudents.profileTitle')
+        }
+        style={{
+          flexDirection: 'row', alignItems: 'center', gap: 9,
+          paddingHorizontal: 10, paddingVertical: 9,
+          borderBottomWidth: StyleSheet.hairlineWidth,
+          borderBottomColor: `${c.text}16`,
+          backgroundColor: selectMode && isSelected ? `${c.primary}10` : 'transparent',
+          ...(twoColumn ? { width: '49%' } : {}),
+        }}
       >
-      <NeuCard style={{
-        marginBottom: 10, padding: 16,
-        // Subtle selected state — same card, clearly marked (no redesign).
-        ...(selectMode && isSelected ? { borderWidth: 1.5, borderColor: c.primary } : {}),
-      }}>
-        <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 12 }}>
-          {/* Selection checkbox — compact, only in Select mode */}
-          {selectMode && (
-            <View style={{
-              width: 22, height: 22, borderRadius: 7, marginTop: 2,
-              borderWidth: 1.5,
-              borderColor: isSelected ? c.primary : `${c.text}30`,
-              backgroundColor: isSelected ? c.primary : 'transparent',
-              alignItems: 'center', justifyContent: 'center',
-            }}>
-              {isSelected && <Check size={14} color="#fff" strokeWidth={3} />}
-            </View>
-          )}
-          {/* Avatar */}
-          <View style={{ width: 42, height: 42, borderRadius: 14, backgroundColor: `${c.primary}18`, alignItems: 'center', justifyContent: 'center' }}>
-            <Text style={{ fontSize: 15, fontWeight: '800', color: c.primary }}>{s?.full_name?.[0]?.toUpperCase() ?? '?'}</Text>
+        {selectMode && (
+          <View style={{
+            width: 18, height: 18, borderRadius: 6, flexShrink: 0,
+            borderWidth: 1.5,
+            borderColor: isSelected ? c.primary : `${c.text}30`,
+            backgroundColor: isSelected ? c.primary : 'transparent',
+            alignItems: 'center', justifyContent: 'center',
+          }}>
+            {isSelected && <Check size={12} color="#fff" strokeWidth={3} />}
           </View>
+        )}
 
-          {/* Info */}
-          <View style={{ flex: 1 }}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 2 }}>
-              <Text style={{ fontSize: 14, fontWeight: '700', color: c.text }} numberOfLines={1}>{s?.full_name}</Text>
-              <View style={{ paddingHorizontal: 8, paddingVertical: 2, borderRadius: 8, backgroundColor: `${statusColor}18` }}>
-                <Text style={{ fontSize: 10, fontWeight: '700', color: statusColor }}>{statusLabel(enrollment.status, t)}</Text>
-              </View>
+        {/* Avatar — real uploaded photo, initials when absent or broken */}
+        <StudentAvatar student={s} size={34} radius={17} colors={c} />
+
+        <View style={{ flex: 1, minWidth: 0 }}>
+          {/* Name gets the full row width: it is the primary text, so the
+              status pill lives on the meta line instead of competing with it. */}
+          <Text style={{ fontSize: 13.5, fontWeight: '700', color: c.text }} numberOfLines={1}>
+            {s?.full_name ?? '—'}
+          </Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 2, minWidth: 0 }}>
+            <View style={{ flexShrink: 0, paddingHorizontal: 5, paddingVertical: 1, borderRadius: 5, backgroundColor: `${statusColor}18` }}>
+              <Text style={{ fontSize: 9, fontWeight: '800', color: statusColor, letterSpacing: 0.2 }}>
+                {statusLabel(enrollment.status, t)}
+              </Text>
             </View>
-            <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.5) }} numberOfLines={1}>{getContactDisplay(s)}</Text>
-            {/* ID — stored Public User ID (MED-XXXX), visible to doctor for enrolled students only */}
+            {/* ID — tap to copy, exactly as before */}
             {Boolean(s?.public_user_id) && (
-              <Pressable
-                onPress={() => { void Clipboard.setStringAsync(s.public_user_id); showToast({ type: 'success', message: t('drStudents.idCopied') }); }}
-                style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 3 }}
-              >
-                <Fingerprint size={11} color={c.primary} opacity={0.7} />
-                <Text style={{ fontSize: 11, fontWeight: '700', color: c.primary, opacity: 0.8, letterSpacing: 0.8, fontVariant: ['tabular-nums'] }}>{s.public_user_id}</Text>
-                <Copy size={10} color={c.primary} opacity={0.5} />
+              <Pressable onPress={copyId} hitSlop={6} accessibilityRole="button"
+                accessibilityLabel={t('drStudents.idCopied')}
+                style={{ flexDirection: 'row', alignItems: 'center', gap: 2, flexShrink: 0 }}>
+                <Text style={{ fontSize: 10.5, fontWeight: '700', color: c.primary, opacity: 0.85,
+                  letterSpacing: 0.4, fontVariant: ['tabular-nums'] }}>
+                  {s.public_user_id}
+                </Text>
+                <Copy size={9} color={c.primary} opacity={0.45} />
               </Pressable>
             )}
-            {showCourse && Boolean(enrollment.course?.title) && (
-              <Text style={{ fontSize: 11, color: c.primary, opacity: 0.8, marginTop: 2 }} numberOfLines={1}>{enrollment.course.title}</Text>
-            )}
-            <View style={{ flexDirection: 'row', gap: 12, marginTop: 6 }}>
-              {Boolean(s?.university?.name) && (
-                <Text style={{ fontSize: 10, ...mutedTextStyle(c, 0.4) }} numberOfLines={1}>{s.university.name}</Text>
-              )}
-              <Text style={{ fontSize: 10, ...mutedTextStyle(c, 0.35) }}>
-                {new Date(enrollment.enrolled_at).toLocaleDateString(locale === 'ar' ? 'ar-EG' : 'en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+            {meta.length > 0 && (
+              <Text style={{ flexShrink: 1, fontSize: 10.5, ...mutedTextStyle(c, 0.5) }} numberOfLines={1}>
+                {`· ${meta.join(' · ')}`}
               </Text>
-              {Boolean(enrollment.activation_method) && (
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3 }}>
-                  <CreditCard size={9} color={c.text} opacity={0.3} />
-                  <Text style={{ fontSize: 10, ...mutedTextStyle(c, 0.3) }}>{enrollment.activation_method === 'credits' ? t('drStudents.credits') : enrollment.activation_method}</Text>
-                </View>
-              )}
-            </View>
+            )}
           </View>
         </View>
 
-        {/* Actions row — hidden in Select mode (bulk actions replace them) */}
+        {/* Actions — icon buttons, hidden in Select mode (bulk bar takes over) */}
         {!selectMode && (
-        <View style={{ flexDirection: 'row', gap: 6, marginTop: 12 }}>
-          <Pressable onPress={() => openAction(enrollment, 'profile')}
-            style={{ flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 4, paddingVertical: 7, borderRadius: 10, backgroundColor: `${c.primary}12` }}>
-            <Eye size={13} color={c.primary} /><Text style={{ fontSize: 11, fontWeight: '600', color: c.primary }}>{t('common.profile')}</Text>
-          </Pressable>
-          {enrollment.status === 'active' ? (
-            <Pressable onPress={() => openAction(enrollment, 'suspend')}
-              style={{ flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 4, paddingVertical: 7, borderRadius: 10, backgroundColor: '#D9770618' }}>
-              <Ban size={13} color="#D97706" /><Text style={{ fontSize: 11, fontWeight: '600', color: '#D97706' }}>{t('drStudents.suspend')}</Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', flexShrink: 0 }}>
+            <Pressable onPress={() => openAction(enrollment, 'profile')} hitSlop={8}
+              accessibilityRole="button" accessibilityLabel={t('common.profile')} style={iconBtn}>
+              <Eye size={15} color={c.primary} />
             </Pressable>
-          ) : (
-            <Pressable onPress={() => openAction(enrollment, 'resume')}
-              style={{ flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 4, paddingVertical: 7, borderRadius: 10, backgroundColor: '#16A34A18' }}>
-              <Play size={13} color="#16A34A" /><Text style={{ fontSize: 11, fontWeight: '600', color: '#16A34A' }}>{t('drStudents.resume')}</Text>
+            {enrollment.status === 'active' ? (
+              <Pressable onPress={() => openAction(enrollment, 'suspend')} hitSlop={8}
+                accessibilityRole="button" accessibilityLabel={t('drStudents.suspend')} style={iconBtn}>
+                <Ban size={15} color="#D97706" />
+              </Pressable>
+            ) : (
+              <Pressable onPress={() => openAction(enrollment, 'resume')} hitSlop={8}
+                accessibilityRole="button" accessibilityLabel={t('drStudents.resume')} style={iconBtn}>
+                <Play size={15} color="#16A34A" />
+              </Pressable>
+            )}
+            <Pressable onPress={() => openAction(enrollment, 'remove')} hitSlop={8}
+              accessibilityRole="button" accessibilityLabel={t('drStudents.removeFromCourse')} style={iconBtn}>
+              <Trash2 size={15} color="#DC2626" />
             </Pressable>
-          )}
-          <Pressable onPress={() => openAction(enrollment, 'remove')}
-            style={{ width: 34, alignItems: 'center', justifyContent: 'center', paddingVertical: 7, borderRadius: 10, backgroundColor: '#DC262618' }}>
-            <Trash2 size={13} color="#DC2626" />
-          </Pressable>
-        </View>
+          </View>
         )}
-      </NeuCard>
       </Pressable>
     );
   };
@@ -420,7 +504,7 @@ export default function DoctorStudents() {
     if (activeTab === 'all') {
       return allFiltered.length === 0
         ? <EmptyState label={t('drStudents.noStudents')} />
-        : allFiltered.map(e => renderEnrollmentCard(e));
+        : <View style={[listPanel, gridStyle]}>{allFiltered.map(e => renderStudentRow(e))}</View>;
     }
 
     // BY COURSE
@@ -430,14 +514,14 @@ export default function DoctorStudents() {
       return courseGroups.map(({ course, items }) => {
         const open = expandCourse === course.id;
         return (
-          <View key={course.id} style={{ marginBottom: 12 }}>
+          <View key={course.id} style={{ marginBottom: 10 }}>
             <Pressable onPress={() => {
               if (selectMode && selectionCourse && selectionCourse.id !== course.id) exitSelectMode();
               setExpandCourse(open ? null : course.id);
             }}>
-              <NeuCard style={{ flexDirection: 'row', alignItems: 'center', padding: 14, gap: 12 }}>
-                <View style={{ width: 38, height: 38, borderRadius: 12, backgroundColor: `${c.primary}18`, alignItems: 'center', justifyContent: 'center' }}>
-                  <BookOpen size={18} color={c.primary} />
+              <NeuCard style={{ flexDirection: 'row', alignItems: 'center', padding: 10, gap: 10 }}>
+                <View style={{ width: 28, height: 28, borderRadius: 8, backgroundColor: `${c.primary}18`, alignItems: 'center', justifyContent: 'center' }}>
+                  <BookOpen size={15} color={c.primary} />
                 </View>
                 <View style={{ flex: 1 }}>
                   <Text style={{ fontSize: 14, fontWeight: '700', color: c.text }} numberOfLines={1}>{course.title}</Text>
@@ -448,7 +532,7 @@ export default function DoctorStudents() {
               </NeuCard>
             </Pressable>
             {open && (
-              <View style={{ paddingTop: 6, paddingHorizontal: 8 }}>
+              <View style={{ paddingTop: 4 }}>
                 {/*  COURSE-SCOPED SELECT ALL — selects only this course's
                     students (the group's own rows), never the whole platform
                     and never another course's list. */}
@@ -471,7 +555,7 @@ export default function DoctorStudents() {
                     </Text>
                   )}
                 </View>
-                {items.map(e => renderEnrollmentCard(e, false))}
+                <View style={[listPanel, gridStyle]}>{items.map(e => renderStudentRow(e, false))}</View>
               </View>
             )}
           </View>
@@ -483,52 +567,19 @@ export default function DoctorStudents() {
     if (activeTab === 'active') {
       return activeEnrollments.length === 0
         ? <EmptyState label={t('drStudents.noActive')} />
-        : activeEnrollments.map(e => renderEnrollmentCard(e));
+        : <View style={[listPanel, gridStyle]}>{activeEnrollments.map(e => renderStudentRow(e))}</View>;
     }
 
     // SUSPENDED
     if (activeTab === 'suspended') {
       return suspendedEnrollments.length === 0
         ? <EmptyState label={t('drStudents.noSuspended')} />
-        : suspendedEnrollments.map(e => renderEnrollmentCard(e));
+        : <View style={[listPanel, gridStyle]}>{suspendedEnrollments.map(e => renderStudentRow(e))}</View>;
     }
 
-    // RECENTLY ADDED
-    if (activeTab === 'recent') {
-      if (recentEnrollments.length === 0) return <EmptyState label={t('drStudents.noRecent')} />;
-      return recentEnrollments.slice(0, 30).map(e => {
-        const s = e.student;
-        return (
-          <NeuCard key={e.id} style={{ marginBottom: 8, padding: 14 }}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-              <View style={{ width: 38, height: 38, borderRadius: 12, backgroundColor: `${c.primary}18`, alignItems: 'center', justifyContent: 'center' }}>
-                <Text style={{ fontSize: 14, fontWeight: '800', color: c.primary }}>{s?.full_name?.[0]?.toUpperCase() ?? '?'}</Text>
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text style={{ fontSize: 13, fontWeight: '600', color: c.text }} numberOfLines={1}>{s?.full_name}</Text>
-                <Text style={{ fontSize: 11, color: c.primary, opacity: 0.8 }} numberOfLines={1}>{e.course?.title}</Text>
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 2 }}>
-                  <Text style={{ fontSize: 10, ...mutedTextStyle(c, 0.4) }}>
-                    {t('drStudents.addedOn', { date: new Date(e.enrolled_at).toLocaleDateString(locale === 'ar' ? 'ar-EG' : 'en-US', { month: 'short', day: 'numeric', year: 'numeric' }) })}
-                  </Text>
-                  {Boolean(e.activation_method) && (
-                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3 }}>
-                      <CreditCard size={9} color={c.text} opacity={0.3} />
-                      <Text style={{ fontSize: 10, ...mutedTextStyle(c, 0.3) }}>{e.activation_method === 'credits' ? t('drStudents.credits') : e.activation_method}</Text>
-                    </View>
-                  )}
-                </View>
-              </View>
-              <View style={{ paddingHorizontal: 8, paddingVertical: 2, borderRadius: 8, backgroundColor: `${STATUS_COLOR[e.status] ?? '#6B7280'}18` }}>
-                <Text style={{ fontSize: 10, fontWeight: '700', color: STATUS_COLOR[e.status] ?? '#6B7280' }}>{statusLabel(e.status, t)}</Text>
-              </View>
-            </View>
-          </NeuCard>
-        );
-      });
-    }
-
-    return null;
+    // RECENTLY ADDED — the same compact row, newest first (max 30).
+    if (recentEnrollments.length === 0) return <EmptyState label={t('drStudents.noRecent')} />;
+    return <View style={[listPanel, gridStyle]}>{recentEnrollments.slice(0, 30).map(e => renderStudentRow(e, true, true))}</View>;
   };
 
   // ── Tab badge counts ──────────────────────────────────────────────────────────
@@ -555,9 +606,9 @@ export default function DoctorStudents() {
         <View style={{ paddingHorizontal: layout.screenPx }}>
 
           {/* Action buttons row */}
-          <View style={{ flexDirection: 'row', gap: 10, marginBottom: 20 }}>
+          <View style={{ flexDirection: 'row', gap: 8, marginBottom: 10 }}>
             <Pressable onPress={openAddModal} style={{ flex: 1 }}>
-              <NeuCard style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: 14 }}>
+              <NeuCard style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7, paddingVertical: 9, borderRadius: 12 }}>
                 <UserPlus size={18} color={c.primary} />
                 <Text style={{ fontSize: 14, fontWeight: '700', color: c.primary }}>{t('drStudents.addStudent')}</Text>
               </NeuCard>
@@ -574,7 +625,7 @@ export default function DoctorStudents() {
               accessibilityRole="button"
               accessibilityLabel={t('drStudents.createStudent')}
             >
-              <NeuCard style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: 14 }}>
+              <NeuCard style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7, paddingVertical: 9, borderRadius: 12 }}>
                 <PlusCircle size={18} color="#22C55E" />
                 <Text style={{ fontSize: 14, fontWeight: '700', color: '#22C55E' }}>{t('drStudents.createStudent')}</Text>
               </NeuCard>
@@ -594,13 +645,13 @@ export default function DoctorStudents() {
               accessibilityLabel={t('drStudents.selectModeA11y')}
               style={{ alignSelf: 'flex-start', flexDirection: 'row', alignItems: 'center', gap: 6,
                 paddingHorizontal: 12, paddingVertical: 7, borderRadius: 10,
-                backgroundColor: `${c.primary}12`, marginBottom: 12 }}>
+                backgroundColor: `${c.primary}12`, marginBottom: 8 }}>
               <ListChecks size={14} color={c.primary} />
               <Text style={{ fontSize: 12.5, fontWeight: '700', color: c.primary }}>{t('drStudents.select')}</Text>
             </Pressable>
           ) : (
             /* Selection action bar — appears only when at least one is selected */
-            <View style={{ marginBottom: 12, gap: 10 }}>
+            <View style={{ marginBottom: 8, gap: 8 }}>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
                 <Pressable
                   onPress={selectAllVisible}
@@ -693,8 +744,8 @@ export default function DoctorStudents() {
           )}
 
           {/* Search bar */}
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 16,
-            backgroundColor: c.base, borderRadius: 14, paddingHorizontal: 14, paddingVertical: 12,
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 9, marginBottom: 10,
+            backgroundColor: c.base, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 9,
             minWidth: 0,
             shadowColor: c.shadowDark, shadowOffset: { width: 2, height: 2 }, shadowOpacity: 0.5, shadowRadius: 6 }}>
             <Search size={16} color={c.text} opacity={0.4} style={{ flexShrink: 0 }} />
@@ -713,8 +764,8 @@ export default function DoctorStudents() {
           </View>
 
           {/* Tab strip */}
-          <ScrollView automaticallyAdjustKeyboardInsets={process.env.EXPO_OS === 'ios'} horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 16 }}>
-            <View style={{ flexDirection: 'row', gap: 8 }}>
+          <ScrollView automaticallyAdjustKeyboardInsets={process.env.EXPO_OS === 'ios'} horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 10 }}>
+            <View style={{ flexDirection: 'row', gap: 6 }}>
               {TABS.map(tab => {
                 const Icon = tab.icon;
                 const active = activeTab === tab.key;
@@ -725,7 +776,7 @@ export default function DoctorStudents() {
                     if (tab.key !== activeTab) { if (selectMode) exitSelectMode(); setActiveTab(tab.key); }
                   }}
                     style={{ flexDirection: 'row', alignItems: 'center', gap: 6,
-                      paddingHorizontal: 14, paddingVertical: 9, borderRadius: 12,
+                      paddingHorizontal: 11, paddingVertical: 7, borderRadius: 10,
                       backgroundColor: active ? c.primary : c.base,
                       shadowColor: active ? c.primary : c.shadowDark,
                       shadowOffset: { width: active ? 0 : 2, height: active ? 0 : 2 },
@@ -939,6 +990,18 @@ export default function DoctorStudents() {
 
           return (
             <View style={{ gap: 0 }}>
+              {/* ── Identity header with the student's REAL photo ──
+                  The doctor could previously only see text rows here, so an
+                  uploaded profile picture was invisible even though the API
+                  had already returned it. */}
+              <View style={{ alignItems: 'center', gap: 6, paddingBottom: 14, marginBottom: 12, borderBottomWidth: 1, borderBottomColor: `${c.text}12` }}>
+                <StudentAvatar student={s} size={76} radius={26} colors={c} />
+                <Text style={{ fontSize: 16, fontWeight: '800', color: c.text, textAlign: 'center' }}>{s?.full_name ?? '—'}</Text>
+                {Boolean(s?.public_user_id) && (
+                  <Text style={{ fontSize: 11, fontWeight: '700', letterSpacing: 0.9, color: c.primary, opacity: 0.8 }}>{s.public_user_id}</Text>
+                )}
+              </View>
+
               {/* ── Student Information section ── */}
               <Text style={{ fontSize: 11, fontWeight: '700', letterSpacing: 1.1, textTransform: 'uppercase', ...mutedTextStyle(c, 0.4), marginBottom: 6 }}>
                 {t('drStudents.studentInformation')}

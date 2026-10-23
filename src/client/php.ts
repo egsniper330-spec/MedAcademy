@@ -1090,14 +1090,22 @@ function createStorageBucket(bucket: string) {
         const res = await globalThis.fetch(`${API_BASE}/storage/upload`, {
           method: 'POST', headers, body: formData,
         });
-        const data = await res.json();
+        const text = await res.text();
+        let data: any = null;
+        try { data = text ? JSON.parse(text) : null; } catch { /* proxy/PHP failures may return HTML */ }
         if (!res.ok) {
           const detail = typeof data?.error === 'object' ? data.error?.message : data?.error;
-          return { error: { message: detail ?? data?.message ?? `HTTP ${res.status}`, status: res.status } };
+          const message = detail ?? data?.message ?? (res.status === 413
+            ? 'Upload is too large for the server request limit. Choose a smaller file or contact support.'
+            : `Upload failed (HTTP ${res.status}). Please try again or contact support.`);
+          return { error: { message, status: res.status, code: data?.error?.code ?? data?.code } };
+        }
+        if (!data) {
+          return { error: { message: 'The server returned an invalid upload response. Please contact support.', status: res.status } };
         }
         return { error: null as { message: string; code?: string } | null };
       } catch (e: unknown) {
-        return { error: { message: e instanceof Error ? e.message : String(e) } };
+        return { error: { message: e instanceof Error ? e.message : String(e), status: 0 } };
       }
     },
     getPublicUrl: (path: string) => {
@@ -1151,6 +1159,10 @@ const EDGE_FUNCTION_MAP: Record<string, string> = {
   'admin-security-vpn-remove':     '/admin/security/vpn-whitelist/{id}',
   'get-security-version':   '/security/version',
   'get-signed-url':         '/storage/signed-url',
+  // Personalized lesson-PDF delivery. The URL this returns is a short-lived
+  // token that names the material + student + intent; it is the ONLY way a
+  // student can obtain a lesson PDF (/storage/signed-url refuses those).
+  'materials/pdf-url':      '/materials/pdf-url',
   'impersonate':            '/auth/impersonate',
   'impersonation-end':      '/auth/impersonation/end',
   'process-violation':      '/security/violations',
@@ -1204,7 +1216,11 @@ const FORCE_POST_FUNCTIONS = new Set(['vdocipher-upload-status']);
 async function invokeFunction<T = any>(
   name: string,
   opts: { body?: unknown; method?: string; headers?: Record<string, string> } = {}
-): Promise<{ data: T | null; error: { message: string; context?: { text: () => Promise<string> } } | null }> {
+  // `status` and `code` are part of the contract: callers (invokeEdgeFunction →
+  // the lesson screen) decide between "no access", "watermark engine missing"
+  // and "try again" from them. Dropping them here made every backend refusal
+  // reach the UI as an anonymous failure with a generic message.
+): Promise<{ data: T | null; error: { message: string; status?: number; code?: string; context?: { text: () => Promise<string> } } | null }> {
   const method = FORCE_PUT_FUNCTIONS.has(name)
     ? 'PUT'
     : FORCE_POST_FUNCTIONS.has(name) ? 'POST' : (opts.method ?? (GET_FUNCTIONS.has(name) ? 'GET' : 'POST'));
@@ -1315,7 +1331,7 @@ async function invokeFunction<T = any>(
       }, {})
     ).toString();
     const res = await apiFetch<T>(route + (qs ? '?' + qs : ''), { method: 'GET', headers: opts.headers });
-    if (res.error) return { data: null, error: { message: res.error.message } };
+    if (res.error) return { data: null, error: { message: res.error.message, status: res.error.status, code: res.error.code } };
     return { data: res.data, error: null };
   }
 
@@ -1326,7 +1342,7 @@ async function invokeFunction<T = any>(
   });
 
   if (res.error) {
-    return { data: null, error: { message: res.error.message } };
+    return { data: null, error: { message: res.error.message, status: res.error.status, code: res.error.code } };
   }
   return { data: res.data, error: null };
 }

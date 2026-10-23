@@ -95,3 +95,15 @@ package.json.*
 .gradle-build/
 .dev-api-proxy.log
 .expo-web-preview.log
+
+# ── PHP dependencies (Composer) ─────────────────────────────────────────────
+# Built with `composer install --no-dev` and uploaded to the host. The tree is
+# ~28 MB (mostly TCPDF's bundled font pack), so it is not committed.
+backend/vendor/
+backend/deploy-package/*/vendor-pdf-engine.zip
+
+# ── Backend runtime storage ─────────────────────────────────────────────────
+# Uploaded lesson documents and the generated personalized PDF copies live on
+# the server (private), never in git.
+backend/storage/private/lesson-materials/
+backend/storage/private/lesson-material-pdfs/

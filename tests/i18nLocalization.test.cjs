@@ -474,6 +474,80 @@ const MIGRATED_SCREENS = [
       'Edit Academic Info',
     ],
   },
+  // ── Doctor role: video library + credits, and the informational pages ────
+  {
+    file: 'src/app/(app)/(doctor)/video-library.tsx',
+    minKeys: 30,
+    retired: [
+      'One upload, reusable across any lesson',
+      'Search by title…',
+      'Untitled Video',
+      'Your library is empty',
+      'Loading your library…',
+      'Syncing video library with VdoCipher…',
+      'Delete Video Permanently?',
+      'Keep Video',
+      'Retry upload',
+      'Video renamed.',
+    ],
+  },
+  {
+    file: 'src/app/(app)/(hubs)/credits.tsx',
+    minKeys: 12,
+    retired: [
+      'Credit balance & history',
+      'Add credits with a redeem code',
+      'Available Credits',
+      'Total Allocated',
+      'Transaction History',
+      'No transactions yet',
+      'Enter a redeem code.',
+      'Credits are added to your existing balance after the server confirms the code.',
+    ],
+  },
+  {
+    file: 'src/app/(app)/info/about.tsx',
+    minKeys: 6,
+    retired: [
+      'Empowering the next generation of medical professionals',
+      'Our Mission',
+      'What We Stand For',
+      'Expert-Led Content',
+      'Always Accessible',
+    ],
+  },
+  {
+    file: 'src/app/(app)/info/contact.tsx',
+    minKeys: 8,
+    retired: [
+      'Unable to load Contact Us',
+      'Contact details are not yet configured.',
+      'Retry loading Contact Us',
+      'Please check back soon.',
+    ],
+  },
+  {
+    // Legal copy is keyed as `terms.s<N>h` / `terms.s<N>b` and mapped at render
+    // time, so only the page title + updated line are literal keys here.
+    file: 'src/app/(app)/info/terms.tsx',
+    minKeys: 2,
+    retired: [
+      'Acceptance of Terms',
+      'Account Responsibilities',
+      'Governing Law',
+      'Last updated: July 2025',
+    ],
+  },
+  {
+    file: 'src/app/(app)/info/privacy.tsx',
+    minKeys: 2,
+    retired: [
+      'Information We Collect',
+      'Forensic Watermarking',
+      'Changes to This Policy',
+      'Last updated: July 2025',
+    ],
+  },
 ];
 
 // Comments describe the UI ("Revenue Timeline chart"), so they are stripped

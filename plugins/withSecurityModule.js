@@ -37,6 +37,9 @@ import android.os.Debug
 import android.os.Handler
 import android.os.Looper
 import android.provider.Settings
+import android.system.ErrnoException
+import android.system.Os
+import android.system.OsConstants
 import android.util.Log
 import android.view.MotionEvent
 import android.view.View
@@ -51,9 +54,7 @@ import com.facebook.react.bridge.ReactMethod
 import com.facebook.react.bridge.WritableMap
 import com.facebook.react.modules.core.DeviceEventManagerModule
 // BuildConfig import removed — runtime equivalent used below to avoid AGP/Kotlin task-ordering issue
-import java.io.BufferedReader
 import java.io.File
-import java.io.InputStreamReader
 import java.lang.ref.WeakReference
 import java.util.zip.ZipFile
 import org.json.JSONObject
@@ -576,9 +577,43 @@ class SecurityModule(private val reactContext: ReactApplicationContext) :
      *   5. Shell command execution: run "which su" and check output
      *   6. Known root management packages: Magisk, SuperSU, KingRoot, etc.
      *
-     * Any single positive = rooted. All wrapped in runCatching for fail-safety.
+     * Any single positive = rooted. Each positive branch records WHICH signal
+     * fired into a provenance list (exported as rootEvidenceSignals), and the
+     * finally block writes it on every exit path — one opaque boolean no longer
+     * hides whether two detections shared a single underlying observation.
      */
     private fun detectRoot(): Boolean {
+        val signals = ArrayList<String>(6)
+        try {
+        // 0. Same DenyList-resistant metadata probe (EACCES on root-owned paths
+        //    and su binaries that DenyList has NOT unmounted).
+        val rootArtifacts = probeRootArtifacts()
+        if (hasRootFrameworkEvidence(rootArtifacts)) {
+            signals.add("artifact_probe")
+            Log.d(TAG, "[detectRoot] root-framework metadata evidence")
+            return true
+        }
+
+        // 0b. MOUNT-VIEW evidence — an overlay or bind mount that only a root
+        //     framework creates (overlayfs over /system backed by /data, module
+        //     bind mounts, Magisk's /debug_ramdisk). DenyList hides these from
+        //     OUR mount namespace, so a positive here means the app was NOT
+        //     hidden (attacker forgot, or a root solution without hide support).
+        val mountEvidence = inspectMountView()
+        if (mountEvidence.kinds.isNotEmpty()) {
+            signals.add("mount_view")
+            Log.d(TAG, "[detectRoot] mount-view evidence=" + mountEvidence.kinds.joinToString(","))
+            return true
+        }
+
+        // 0c. su reachable through the process PATH (stat-based, no subprocess).
+        val pathSu = suOnPath()
+        if (pathSu.isNotEmpty()) {
+            signals.add("su_on_path")
+            Log.d(TAG, "[detectRoot] su on PATH: " + pathSu.joinToString(","))
+            return true
+        }
+
         // 1. su binary path scan
         val suPaths = listOf(
             "/system/bin/su", "/system/xbin/su", "/system/app/Superuser.apk",
@@ -590,13 +625,14 @@ class SecurityModule(private val reactContext: ReactApplicationContext) :
         )
         val suFound = suPaths.any { File(it).exists() }
         Log.d(TAG, "[detectRoot] suBinaryFound=$suFound")
-        if (suFound) return true
+        if (suFound) { signals.add("su_binary_paths"); return true }
 
         // 2. Dangerous system properties
         val debuggable = runCatching { getSystemProperty("ro.debuggable") }.getOrDefault("")
         val secure     = runCatching { getSystemProperty("ro.secure") }.getOrDefault("1")
         Log.d(TAG, "[detectRoot] ro.debuggable=$debuggable ro.secure=$secure")
         if (debuggable == "1" && secure == "0") {
+            signals.add("build_props")
             Log.d(TAG, "[detectRoot] dangerous props detected")
             return true
         }
@@ -605,6 +641,7 @@ class SecurityModule(private val reactContext: ReactApplicationContext) :
         val buildTags = Build.TAGS ?: ""
         Log.d(TAG, "[detectRoot] Build.TAGS=$buildTags")
         if (buildTags.contains("test-keys")) {
+            signals.add("test_keys")
             Log.d(TAG, "[detectRoot] test-keys build tag detected")
             return true
         }
@@ -617,18 +654,15 @@ class SecurityModule(private val reactContext: ReactApplicationContext) :
             opened
         }.getOrDefault(false)
         Log.d(TAG, "[detectRoot] systemWritable=$writeTestResult")
-        if (writeTestResult) return true
+        if (writeTestResult) { signals.add("system_writable"); return true }
 
-        // 5. Shell command: "which su"
-        val whichSu = runCatching {
-            val process = Runtime.getRuntime().exec(arrayOf("which", "su"))
-            val reader  = BufferedReader(InputStreamReader(process.inputStream))
-            val output  = reader.readLine()?.trim() ?: ""
-            process.destroy()
-            output.isNotEmpty()
-        }.getOrDefault(false)
-        Log.d(TAG, "[detectRoot] whichSu=$whichSu")
-        if (whichSu) return true
+        // 5. REMOVED: Runtime.exec("which", "su").
+        //    It could never work: Android's toybox exposes "command -v", not
+        //    "which", so the exec always threw FileNotFound and the check
+        //    resolved to false on every device — including rooted ones. It was
+        //    replaced by the stat-based PATH probe in step 0c, which needs no
+        //    subprocess (spawning a shell is itself an instrumentation signal)
+        //    and cannot be defeated by SELinux exec policy.
 
         // 6. Known root management packages
         val rootPackages = listOf(
@@ -637,11 +671,21 @@ class SecurityModule(private val reactContext: ReactApplicationContext) :
             "com.thirdparty.superuser", "com.yellowes.su",
             "com.kingroot.kinguser", "com.kingo.root",
             "com.smedialink.oneclickroot", "com.zhiqupk.root.global",
-            "com.alephzain.framaroot", "com.topjohnwu.magisk"
+            "com.alephzain.framaroot", "com.topjohnwu.magisk",
+            // Modern manager IDs (SECOND-PASS FIX): the legacy IDs above miss
+            // current installs — Magisk v24+ ships io.github.topjohnwu.magisk,
+            // KernelSU ships me.weishu.kernelsu, APatch ships me.bmax.apatch.
+            // Package checks only RESOLVE on Android 11+ when the package is
+            // declared in <queries> — see SECURITY_CHECK_PACKAGES in this plugin.
+            "io.github.topjohnwu.magisk", "me.weishu.kernelsu", "me.bmax.apatch"
         )
         val rootPkgFound = rootPackages.any { isPackageInstalled(it) }
+        if (rootPkgFound) signals.add("root_packages")
         Log.d(TAG, "[detectRoot] rootPackageFound=$rootPkgFound")
-        return rootPkgFound
+        return signals.isNotEmpty()
+        } finally {
+            _lastRootSignals = signals.toList()
+        }
     }
 
     /** Read a system property via reflection (mirrors what Build reads internally). */
@@ -649,6 +693,125 @@ class SecurityModule(private val reactContext: ReactApplicationContext) :
         return Class.forName("android.os.SystemProperties")
             .getMethod("get", String::class.java)
             .invoke(null, key) as? String ?: ""
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // SHARED EVIDENCE HELPERS (second-pass audit)
+    //
+    // One getSecurityFlags() batch used to re-read /proc/self/maps up to three
+    // times (Frida x2, Magisk x1) and stat() the artifact set twice. All
+    // snapshot-style reads below are memoised for 2 s so a single batch sees
+    // ONE consistent view at a fraction of the I/O.
+    //
+    // INDEPENDENCE NOTE (honest): the Kotlin snapshot and the C++ core both
+    // read /proc/self/maps. They are TWO CODE PATHS over ONE kernel file —
+    // that raises the cost of a Kotlin/JS-only hook (the attacker must also
+    // spoof the JNI layer), but they are NOT independent evidence and neither
+    // survives an attacker who controls the kernel or the hooking root itself.
+    //
+    // AVAILABILITY (honest): an UNREADABLE source is recorded as unknown
+    // (detectionsUnavailable) — never silently folded into "clean".
+    // ══════════════════════════════════════════════════════════════════════════
+
+    /** /proc/self/maps snapshot (2 s). null = READ FAILED (unknown, not clean). */
+    private var _procMapsCache: List<String>? = null
+    private var _procMapsCacheAt: Long = 0L
+    private var _procMapsUnreadable: Boolean = false
+
+    private fun procMapsLines(): List<String>? {
+        val cached = _procMapsCache
+        if (cached != null && System.currentTimeMillis() - _procMapsCacheAt < 2000L) return cached
+        val lines = try {
+            File("/proc/self/maps").readLines()
+        } catch (_: Exception) {
+            _procMapsUnreadable = true
+            return null
+        }
+        _procMapsCache = lines
+        _procMapsCacheAt = System.currentTimeMillis()
+        _procMapsUnreadable = false
+        return lines
+    }
+
+    /** True when any snapshot line contains one of the (lowercase) needles. */
+    private fun mapsHas(needles: List<String>): Boolean {
+        val lines = procMapsLines() ?: return false
+        return lines.any { raw ->
+            val line = raw.lowercase()
+            needles.any { line.contains(it) }
+        }
+    }
+
+    /** C++ core (libmedasec) RASP aggregate, memoised per batch (2 s). */
+    private data class CoreRaspEvidence(
+        val available: Boolean,
+        val hookLibs: List<String>,   // lowercased path tails from /proc/self/maps
+        val fridaThreads: Int,        // -1 when unavailable
+        val threadMismatch: Boolean
+    )
+
+    private var _coreRaspCache: CoreRaspEvidence? = null
+    private var _coreRaspCacheAt: Long = 0L
+
+    private fun coreRaspEvidence(): CoreRaspEvidence {
+        val cached = _coreRaspCache
+        if (cached != null && System.currentTimeMillis() - _coreRaspCacheAt < 2000L) return cached
+        val evidence = try {
+            val j = nativeCoreRasp()
+            if (j.optBoolean("available", false)) {
+                val libs = ArrayList<String>(8)
+                val arr = j.optJSONArray("hook_lib_names")
+                if (arr != null) {
+                    for (i in 0 until arr.length()) {
+                        if (libs.size >= 8) break
+                        val v = arr.optString(i, "").lowercase()
+                        if (v.isNotEmpty()) libs.add(v)
+                    }
+                }
+                CoreRaspEvidence(
+                    true,
+                    libs,
+                    j.optInt("frida_thread_names", 0),
+                    j.optBoolean("thread_count_mismatch", false)
+                )
+            } else {
+                CoreRaspEvidence(false, emptyList(), -1, false)
+            }
+        } catch (_: Throwable) {
+            CoreRaspEvidence(false, emptyList(), -1, false)
+        }
+        _coreRaspCache = evidence
+        _coreRaspCacheAt = System.currentTimeMillis()
+        return evidence
+    }
+
+    // Needle sets shared by the Kotlin maps path and the C++ core path.
+    // VERDICT needles (the ones that can feed a detect* result) stay TIGHT to
+    // protect legitimate devices; the C++ evidence table is deliberately
+    // broader (it is evidence-only and never a verdict on its own).
+    private val FRIDA_LIB_NEEDLES = listOf("frida", "libgadget", "gum-js-loop")
+    private val XPOSED_LIB_NEEDLES = listOf(
+        "xposed", "lspd", "riru", "lsplant", "lspatch", "edxp", "yahfa", "substrate"
+    )
+    private val ZYGISK_LIB_NEEDLE = "zygisk"
+
+    // Per-signal provenance from the LAST run of each detector, exported in
+    // getSecurityFlags(). This makes "root AND magisk came from the SAME
+    // artifact probe" visible instead of two opaque booleans that look like
+    // two independent confirmations (they are one observation).
+    private var _lastRootSignals: List<String> = emptyList()
+    private var _lastMagiskSignals: List<String> = emptyList()
+    private var _lastFridaSignals: List<String> = emptyList()
+    private var _lastXposedSignals: List<String> = emptyList()
+
+    /** Sub-check availability: false = "could not run", reported as unknown. */
+    private var _fridaProcessScanAvailable: Boolean = true
+
+    /** Helper: push a List<String> into a WritableMap array field. */
+    private fun putStringList(r: WritableMap, key: String, values: List<String>) {
+        val arr = Arguments.createArray()
+        for (v in values) arr.pushString(v)
+        r.putArray(key, arr)
     }
 
     // ══════════════════════════════════════════════════════════════════════════
@@ -796,18 +959,61 @@ class SecurityModule(private val reactContext: ReactApplicationContext) :
     }
 
     private fun detectFrida(): Boolean {
+        val signals = ArrayList<String>(5)
+        _fridaProcessScanAvailable = true
+        try {
         // 1. Default Frida server port probe (27042)
-        if (probeTcpPort(27042)) { Log.d(TAG, "[detectFrida] port 27042 open"); return true }
+        if (probeTcpPort(27042)) {
+            signals.add("frida_default_port")
+            Log.d(TAG, "[detectFrida] port 27042 open")
+            return true
+        }
         // 2. Common Frida alternative ports
         for (port in listOf(27043, 27044, 27045)) {
-            if (probeTcpPort(port)) { Log.d(TAG, "[detectFrida] port $port open"); return true }
+            if (probeTcpPort(port)) {
+                signals.add("frida_alt_port")
+                Log.d(TAG, "[detectFrida] port $port open")
+                return true
+            }
         }
-        // 3. /proc/self/maps — look for frida-agent / gadget memory-mapped libs
-        if (checkProcMapsForFrida()) { Log.d(TAG, "[detectFrida] frida in /proc/self/maps"); return true }
-        // 4. Running processes / cmdline scan
-        if (scanProcessesForFrida()) { Log.d(TAG, "[detectFrida] frida process found"); return true }
-        // 5. Injected library presence
-        if (checkLoadedLibraries()) { Log.d(TAG, "[detectFrida] frida library in maps"); return true }
+        // 3. C++ core cross-read (libmedasec): decoded hook-lib path tails plus
+        //    injected thread names. A SECOND CODE PATH over the same /proc file
+        //    (see SHARED EVIDENCE HELPERS) — a Kotlin/JS-level hook must now also
+        //    spoof the JNI layer, but this is not an independent source of truth.
+        val core = coreRaspEvidence()
+        if (core.available) {
+            if (core.hookLibs.any { lib -> FRIDA_LIB_NEEDLES.any { lib.contains(it) } }) {
+                signals.add("core_hook_libs")
+                Log.d(TAG, "[detectFrida] hook-lib path seen by native core")
+                return true
+            }
+            // frida-class worker thread names in OUR task list (gum-js-loop,
+            // gmain/gdbus GLib loops). Honest FP note: a legit GLib-linked
+            // library in-process could produce gmain/gdbus; none ships with
+            // this app's React Native/Hermes stack.
+            if (core.fridaThreads > 0) {
+                signals.add("core_thread_names")
+                Log.d(TAG, "[detectFrida] frida-class thread names=" + core.fridaThreads)
+                return true
+            }
+        }
+        // 4. Kotlin /proc/self/maps snapshot (covers a build where the core .so
+        //    could not be loaded — unavailable core must not mean blind).
+        if (checkProcMapsForFrida()) {
+            signals.add("frida_maps")
+            Log.d(TAG, "[detectFrida] frida in /proc/self/maps")
+            return true
+        }
+        // 5. Cross-process cmdline scan — OPPORTUNISTIC ONLY (second-pass fix).
+        //    Android 10+ mounts procfs hidepid=2, so foreign /proc dirs are
+        //    absent from our listing and this scan structurally cannot see
+        //    frida-server. It now reports UNAVAILABLE on such devices instead
+        //    of implying "no frida process — clean".
+        if (scanProcessesForFrida()) {
+            signals.add("frida_process_scan")
+            Log.d(TAG, "[detectFrida] frida process found")
+            return true
+        }
         // 6. Known Frida temp files
         val fridaFiles = listOf(
             "/data/local/tmp/frida-server",
@@ -815,9 +1021,15 @@ class SecurityModule(private val reactContext: ReactApplicationContext) :
             "/data/local/tmp/re.frida.server",
             "/sdcard/frida-server"
         )
-        val fileFound = fridaFiles.any { File(it).exists() }
-        if (fileFound) Log.d(TAG, "[detectFrida] frida file found on disk")
-        return fileFound
+        if (fridaFiles.any { File(it).exists() }) {
+            signals.add("frida_files")
+            Log.d(TAG, "[detectFrida] frida file found on disk")
+            return true
+        }
+        return signals.isNotEmpty()
+        } finally {
+            _lastFridaSignals = signals.toList()
+        }
     }
 
     private fun probeTcpPort(port: Int): Boolean {
@@ -829,35 +1041,62 @@ class SecurityModule(private val reactContext: ReactApplicationContext) :
         } catch (_: Exception) { false }
     }
 
-    private fun checkProcMapsForFrida(): Boolean {
-        return try {
-            File("/proc/self/maps").readLines().any { line ->
-                val l = line.lowercase()
-                l.contains("frida") || l.contains("gadget") || l.contains("re.frida")
-            }
-        } catch (_: Exception) { false }
-    }
+    /**
+     * frida-class mappings in OUR process, from the shared 2 s snapshot.
+     * SECOND-PASS FIXES: (a) the bare "gadget" needle matched ANY path that
+     * merely contained the word — tightened to frida / libgadget / gum-js-loop;
+     * (b) this and the removed checkLoadedLibraries() scanned the same file for
+     * overlapping needles inside ONE detectFrida() run — two scans of one
+     * source are not two signals, so they are one snapshot read now.
+     */
+    private fun checkProcMapsForFrida(): Boolean = mapsHas(FRIDA_LIB_NEEDLES)
 
+    /**
+     * Cross-process cmdline scan — OPPORTUNISTIC ONLY (second-pass audit).
+     *
+     * Android 10+ mounts procfs with hidepid=2 (AOSP first-stage init), so
+     * other UIDs' /proc directories are ABSENT from our listing and SELinux
+     * independently blocks foreign cmdline reads. On those devices this scan
+     * structurally CANNOT see frida-server: a miss is "not visible", never
+     * "not present". The scan reports itself UNAVAILABLE (surfaced by the batch
+     * in detectionsUnavailable, never as a clean pass) when:
+     *   • the mount view shows hidepid >= 1, or
+     *   • many pid dirs are listed but zero cmdlines are readable, or
+     *   • the /proc listing itself fails.
+     * It still returns true when a foreign cmdline genuinely matches (older
+     * Android, test images and same-UID helpers remain coverable).
+     */
     private fun scanProcessesForFrida(): Boolean {
-        return try {
-            File("/proc").listFiles()?.any { procDir ->
-                if (!procDir.isDirectory || !procDir.name.all { it.isDigit() }) return@any false
-                val cmdline = File(procDir, "cmdline").runCatching {
-                    readText().replace('\u0000', ' ').lowercase()
-                }.getOrDefault("")
-                cmdline.contains("frida") || cmdline.contains("gadget")
-            } ?: false
-        } catch (_: Exception) { false }
-    }
-
-    private fun checkLoadedLibraries(): Boolean {
-        return try {
-            File("/proc/self/maps").readLines().any { line ->
-                val l = line.lowercase()
-                l.contains("frida-agent") || l.contains("frida-gadget") ||
-                l.contains("libfrida") || l.contains("gum-js-loop")
+        var listed = 0
+        var readable = 0
+        var hit = false
+        try {
+            val dirs = File("/proc").listFiles()
+            if (dirs == null) {
+                _fridaProcessScanAvailable = false
+                return false
             }
-        } catch (_: Exception) { false }
+            for (procDir in dirs) {
+                if (!procDir.isDirectory || procDir.name.isEmpty() || !procDir.name.all { it.isDigit() }) continue
+                listed++
+                if (listed > 512) break
+                val text = runCatching {
+                    File(procDir, "cmdline").readText().replace(Char(0), ' ').lowercase()
+                }.getOrNull()
+                if (text == null) continue
+                readable++
+                if (text.contains("frida") || text.contains("gadget")) hit = true
+            }
+        } catch (_: Exception) {
+            _fridaProcessScanAvailable = false
+            return false
+        }
+        // hidepid (or a fully filtered listing) makes a clean result meaningless.
+        inspectMountView()   // fills _procHidepid as a side effect (memoised)
+        if (_procHidepid == true || (listed > 4 && readable == 0)) {
+            _fridaProcessScanAvailable = false
+        }
+        return hit
     }
 
     // ══════════════════════════════════════════════════════════════════════════
@@ -875,13 +1114,32 @@ class SecurityModule(private val reactContext: ReactApplicationContext) :
     }
 
     private fun detectXposed(): Boolean {
-        // 1. Try loading XposedBridge class — will succeed only if Xposed is active
-        if (tryLoadClass("de.robv.android.xposed.XposedBridge")) return true
-        if (tryLoadClass("de.robv.android.xposed.XposedHelpers")) return true
-        if (tryLoadClass("org.lsposed.lspatch.loader.LSPApplication")) return true
+        val signals = ArrayList<String>(6)
+        try {
+        // 1. Try loading XposedBridge class — succeeds only if Xposed is active
+        //    and visible to OUR class loader. LSPosed can keep these classes out
+        //    of the app loader, so a miss here proves nothing (documented limit).
+        if (tryLoadClass("de.robv.android.xposed.XposedBridge")) { signals.add("xposed_class"); return true }
+        if (tryLoadClass("de.robv.android.xposed.XposedHelpers")) { signals.add("xposed_class"); return true }
+        if (tryLoadClass("org.lsposed.lspatch.loader.LSPApplication")) { signals.add("lspatch_class"); return true }
         // 2. Check stack trace for Xposed method interceptors
-        if (checkStackForXposed()) return true
-        // 3. Check installed packages
+        if (checkStackForXposed()) { signals.add("xposed_stack"); return true }
+        // 3. IN-PROCESS native artifacts (SECOND-PASS ADDITION). LSPosed injects
+        //    via Zygote (Zygisk) or Riru BEFORE this process exists, so its
+        //    libraries can appear in OUR OWN /proc/self/maps even when the
+        //    manager app is hidden and package visibility hides everything else.
+        //    Two code paths over one file (C++ core first, Kotlin snapshot as
+        //    fallback) — see SHARED EVIDENCE HELPERS for the honest limit:
+        //    a maps-hiding module (Shamiko-class) defeats BOTH, and absence of
+        //    these names is NOT evidence that no hooking framework is present.
+        val core = coreRaspEvidence()
+        if (core.available &&
+            core.hookLibs.any { lib -> XPOSED_LIB_NEEDLES.any { lib.contains(it) } }
+        ) { signals.add("core_hook_libs"); return true }
+        if (mapsHas(XPOSED_LIB_NEEDLES)) { signals.add("xposed_maps"); return true }
+        // 4. Installed packages — only RESOLVES on Android 11+ when declared in
+        //    <queries> (see SECURITY_CHECK_PACKAGES; enforced by
+        //    tests/rootDetectionSecondPass.test.cjs).
         val xposedPackages = listOf(
             "de.robv.android.xposed.installer",
             "org.meowcat.edxposed.manager",
@@ -892,15 +1150,19 @@ class SecurityModule(private val reactContext: ReactApplicationContext) :
             "io.github.vvb2060.magisk.module.xposed",
             "me.weishu.exp"
         )
-        if (xposedPackages.any { isPackageInstalled(it) }) return true
-        // 4. Check for XposedBridge.jar / native lib
+        if (xposedPackages.any { isPackageInstalled(it) }) { signals.add("xposed_packages"); return true }
+        // 5. Legacy on-disk artifacts (only visible when NOT hidden)
         val xposedFiles = listOf(
             "/system/framework/XposedBridge.jar",
             "/system/lib/libxposed_art.so",
             "/system/lib64/libxposed_art.so",
             "/data/data/de.robv.android.xposed.installer/conf/modules.list"
         )
-        return xposedFiles.any { File(it).exists() }
+        if (xposedFiles.any { File(it).exists() }) signals.add("xposed_files")
+        return signals.isNotEmpty()
+        } finally {
+            _lastXposedSignals = signals.toList()
+        }
     }
 
     private fun tryLoadClass(className: String): Boolean {
@@ -936,7 +1198,192 @@ class SecurityModule(private val reactContext: ReactApplicationContext) :
         }
     }
 
+    // ══════════════════════════════════════════════════════════════════════════
+    // ROOT-FRAMEWORK ARTIFACT PROBE — filesystem METADATA, not mounts
+    //
+    // WHY THIS EXISTS (Magisk DenyList false negative)
+    //   DenyList gives the app a SCRUBBED MOUNT NAMESPACE: the Magisk mounts,
+    //   /sbin/.magisk, the /system overlays that carry the su binary, and the
+    //   Magisk/LSPosed packages all disappear from what the app can see. Every
+    //   older signal below is one of those, so the whole detector goes quiet at
+    //   once. File.exists() makes it worse: it answers FALSE for EACCES, so
+    //   the two paths that DO still exist on a rooted device (/data/adb/magisk,
+    //   /data/adb/modules) never fired even before DenyList was used.
+    //
+    //   The DATA partition is not a mount DenyList can unmount. /data/adb is a
+    //   real directory owned by the root manager (0700 root:root), and stat()
+    //   needs search permission only on its PARENT (/data, mode 0771, world-x),
+    //   so an unprivileged app can still learn that it EXISTS. Its children
+    //   answer EACCES rather than ENOENT — a distinction Os.stat() preserves and
+    //   File.exists() destroys.
+    //
+    // HONEST LIMITS
+    //   • A root solution that keeps its data outside /data/adb is not seen.
+    //   • A hooked stat() (runtime instrumentation) can lie about all of this;
+    //     no local check is unbeatable. This is ONE independent signal.
+    //   • KernelSU/APatch use the same /data/adb convention, so they are covered.
+    //   • A bare, empty /data/adb alone is NOT enough to flag (see
+    //     hasRootFrameworkEvidence) — a child must also be reachable/denied, so
+    //     an unrelated leftover directory cannot block a legitimate device.
+    // ══════════════════════════════════════════════════════════════════════════
+
+    /** One filesystem probe outcome. ABSENT is not the same fact as DENIED. */
+    private enum class FsProbe { PRESENT, DENIED, ABSENT, UNKNOWN }
+
+    private data class RootArtifactReport(
+        val present: List<String>,
+        val denied: List<String>,
+        val unreadable: List<String>
+    )
+
+    /**
+     * stat() the root-manager paths and classify by ERRNO. "Permission denied"
+     * means something is there that this app may not read; "no such file" means
+     * it is not there. Collapsing the two is exactly how a rooted device used to
+     * look clean.
+     */
+    private fun probePath(path: String): FsProbe {
+        return try {
+            Os.stat(path)
+            FsProbe.PRESENT
+        } catch (e: ErrnoException) {
+            when (e.errno) {
+                OsConstants.EACCES, OsConstants.EPERM -> FsProbe.DENIED
+                OsConstants.ENOENT, OsConstants.ENOTDIR -> FsProbe.ABSENT
+                else -> FsProbe.UNKNOWN
+            }
+        } catch (_: Throwable) {
+            FsProbe.UNKNOWN
+        }
+    }
+
+    /** Bounded, read-only probe of the root-framework data directory and su paths. */
+    /** 2-s memo (second-pass): one batch runs this probe up to 3× (detectMagisk,
+     *  detectRoot, evidence read) — 19 stats each. One batch now performs ONE
+     *  probe pass, so all three consumers see the same consistent view. */
+    private var _rootArtifactsCache: RootArtifactReport? = null
+    private var _rootArtifactsCacheAt: Long = 0L
+
+    private fun probeRootArtifacts(): RootArtifactReport {
+        val cached = _rootArtifactsCache
+        if (cached != null && System.currentTimeMillis() - _rootArtifactsCacheAt < 2000L) return cached
+        val paths = listOf(
+            "/data/adb",
+            "/data/adb/magisk",
+            "/data/adb/magisk.db",
+            "/data/adb/modules",
+            "/data/adb/modules_update",
+            "/data/adb/post-fs-data.d",
+            "/data/adb/service.d",
+            "/data/adb/lspd",
+            "/data/adb/ksu",
+            "/data/adb/ksud",
+            "/data/adb/ap",
+            "/data/adb/apd",
+            "/system/bin/su",
+            "/system/xbin/su",
+            "/sbin/su",
+            "/su/bin/su",
+            "/debug_ramdisk/su",
+            "/debug_ramdisk/magisk",
+            "/data/local/bin/su"
+        )
+        val present = ArrayList<String>(4)
+        val denied = ArrayList<String>(4)
+        val unreadable = ArrayList<String>(4)
+        for (p in paths) {
+            when (probePath(p)) {
+                FsProbe.PRESENT -> if (present.size < 8) present.add(p)
+                FsProbe.DENIED -> if (denied.size < 8) denied.add(p)
+                FsProbe.UNKNOWN -> if (unreadable.size < 8) unreadable.add(p)
+                FsProbe.ABSENT -> Unit
+            }
+        }
+        val report = RootArtifactReport(present, denied, unreadable)
+        _rootArtifactsCache = report
+        _rootArtifactsCacheAt = System.currentTimeMillis()
+        return report
+    }
+
+    /**
+     * Evidence rule (deliberately conservative, to protect legitimate devices):
+     *   • ANY EACCES on the probe set is evidence — those paths are root-owned
+     *     and unreadable, so their existence alone means a root manager is
+     *     installed;
+     *   • a PRESENT path other than the /data/adb directory itself is evidence;
+     *   • the bare /data/adb directory alone is NOT (leftovers happen).
+     */
+    private fun hasRootFrameworkEvidence(r: RootArtifactReport): Boolean {
+        if (r.denied.isNotEmpty()) return true
+        return r.present.any { it != "/data/adb" }
+    }
+
+    /**
+     * Bootloader / verified-boot state. DenyList cannot virtualise kernel
+     * cmdline properties (a root tool CAN override them with resetprop, which is
+     * why this is EVIDENCE and is never folded into an enforcement verdict on
+     * its own). Reported for the signed evidence payload and diagnostics.
+     */
+    private fun isBootloaderUnlocked(): Boolean {
+        val state = runCatching { getSystemProperty("ro.boot.verifiedbootstate") }.getOrDefault("")
+        val locked = runCatching { getSystemProperty("ro.boot.flash.locked") }.getOrDefault("")
+        if (state.equals("orange", true) || state.equals("red", true)) return true
+        return locked == "0"
+    }
+
+    /**
+     * READ-ONLY evidence surface: the raw probe outcome, for diagnostics, the
+     * in-app security report and the signed evidence document. NOT an
+     * authorization decision — the backend judges the signed evidence.
+     */
+    @ReactMethod
+    fun getRootArtifactEvidence(promise: Promise) {
+        try {
+            val r = probeRootArtifacts()
+            val o = JSONObject()
+            o.put("available", true)
+            o.put("rootFrameworkEvidence", hasRootFrameworkEvidence(r))
+            o.put("present", JSONArray(r.present))
+            o.put("denied", JSONArray(r.denied))
+            o.put("unreadable", JSONArray(r.unreadable))
+            o.put("bootloaderUnlocked", isBootloaderUnlocked())
+            o.put("verifiedBootState", runCatching { getSystemProperty("ro.boot.verifiedbootstate") }.getOrDefault(""))
+            // Independent signals, reported separately so a support engineer can
+            // see WHICH layer fired instead of a single opaque boolean.
+            val mounts = inspectMountView()
+            o.put("mountEvidence", JSONArray(mounts.kinds))
+            o.put("mountSamples", JSONArray(mounts.sample))
+            o.put("suOnPath", JSONArray(suOnPath()))
+            o.put("systemWritable", runCatching { File("/system").canWrite() }.getOrDefault(false))
+            promise.resolve(o.toString())
+        } catch (e: Exception) {
+            // Rejection (never a silent "clean") — the caller reports UNKNOWN.
+            promise.reject("root_artifact_probe_failed", e)
+        }
+    }
+
     private fun detectMagisk(): Boolean {
+        val signals = ArrayList<String>(6)
+        try {
+        // 0. ROOT-FRAMEWORK DATA DIRECTORY — the DenyList-resistant signal.
+        //    It must run FIRST: everything below depends on artifacts DenyList
+        //    removes (mounts, packages, /sbin links), and File.exists() cannot
+        //    even see the two /data/adb paths that survive.
+        val artifacts = probeRootArtifacts()
+        Log.d(TAG, "[detectMagisk] artifact probe present=" + artifacts.present.size
+            + " denied=" + artifacts.denied.size + " unreadable=" + artifacts.unreadable.size)
+        if (hasRootFrameworkEvidence(artifacts)) {
+            signals.add("artifact_probe")
+            Log.d(TAG, "[detectMagisk] root-framework data directory detected (DenyList-resistant)")
+            return true
+        }
+        // 0b. Mount-view evidence (same rationale as detectRoot step 0b).
+        val mounts = inspectMountView()
+        if (mounts.kinds.isNotEmpty()) {
+            signals.add("mount_view")
+            Log.d(TAG, "[detectMagisk] mount-view evidence=" + mounts.kinds.joinToString(","))
+            return true
+        }
         // 1. Known Magisk binary / directory paths
         val magiskPaths = listOf(
             "/sbin/.magisk",
@@ -953,31 +1400,197 @@ class SecurityModule(private val reactContext: ReactApplicationContext) :
             "/sdcard/MagiskManager",
             "/system/app/MagiskManager"
         )
-        if (magiskPaths.any { File(it).exists() }) return true
-        // 2. Magisk app packages
+        if (magiskPaths.any { File(it).exists() }) { signals.add("magisk_paths"); return true }
+        // 2. Magisk app packages (declare each in <queries> — see
+        //    SECURITY_CHECK_PACKAGES; io.github.* is the ID since Magisk v24)
         val magiskPackages = listOf(
             "com.topjohnwu.magisk",
+            "io.github.topjohnwu.magisk",
             "com.topjohnwu.magisk.alpha",
             "io.github.huskydg.magisk",
             "io.github.vvb2060.magisk",
             "io.github.huskydg.kitsune"
         )
-        if (magiskPackages.any { isPackageInstalled(it) }) return true
-        // 3. Zygisk detection via /proc/modules
-        if (checkZygisk()) return true
-        // 4. Mount-point scan for Magisk mirrors
-        if (checkMagiskMounts()) return true
-        // 5. DenyList bypass: check if our own package is in a modified state
-        return checkMagiskDenyList()
+        if (magiskPackages.any { isPackageInstalled(it) }) { signals.add("magisk_packages"); return true }
+        // 3. Zygisk evidence (in-process maps + mount cross-check — the legacy
+        //    /proc/modules read was dead code and is gone)
+        if (checkZygisk()) { signals.add("zygisk_evidence"); return true }
+        // 4. Mount-point scan for Magisk mirrors (same kernel mount table as the
+        //    mountinfo view — a second reader, NOT an independent source)
+        if (checkMagiskMounts()) { signals.add("magisk_mounts"); return true }
+        // 5. Own /proc/self/maps view: a root framework mapping left in this
+        //    process (the "denied list" angle: hiding often forgets maps)
+        if (checkMagiskDenyList()) { signals.add("magisk_maps"); return true }
+        return signals.isNotEmpty()
+        } finally {
+            _lastMagiskSignals = signals.toList()
+        }
     }
 
+    /**
+     * Zygisk / root-framework MOUNT evidence.
+     *
+     * HONEST FIX (previous check was dead code): it read /proc/modules looking
+     * for "zygisk". Zygisk is a USERSPACE Zygote injection and never registers a
+     * kernel module, and Android kernels expose /proc/modules empty or not at
+     * all — so that probe could only ever answer false. What a root framework
+     * DOES leave is the mount view: an overlayfs over /system whose upper/lower
+     * directories live under /data, module bind mounts, and Magisk's
+     * /debug_ramdisk. The legacy modules read is kept only as a cheap extra
+     * needle (it costs one file read and is harmless when empty).
+     */
     private fun checkZygisk(): Boolean {
-        return try {
-            File("/proc/modules").readLines().any { line ->
-                val l = line.lowercase()
-                l.contains("zygisk") || l.contains("magisk")
+        // 1. IN-PROCESS: zygisk/module code mapped into THIS process (Kotlin
+        //    snapshot). Zygisk runs in the zygote before specialization; without
+        //    maps-hiding its libraries are visible here. A maps-hiding module
+        //    defeats this — absence is NOT a clean result.
+        val zygiskNeedle = ZYGISK_LIB_NEEDLE
+        if (mapsHas(listOf(zygiskNeedle))) return true
+        // 2. C++ core cross-read (second code path over the same file).
+        val core = coreRaspEvidence()
+        if (core.available && core.hookLibs.any { it.contains(zygiskNeedle) }) return true
+        // 3. Mount view (memoised) — the evidence detectMagisk() already saw at
+        //    step 0b; kept so any INDEPENDENT caller of this helper observes the
+        //    same mounts. The legacy /proc/modules read is deliberately GONE:
+        //    zygisk is a USERSPACE zygote injection and never registers a kernel
+        //    module, so that probe could only ever answer false.
+        if (inspectMountView().kinds.isNotEmpty()) return true
+        return false
+    }
+
+    /**
+     * su reachable through the process PATH — stat-based.
+     *
+     * Replaces Runtime.exec("which su"). PATH is inherited from the Zygote and
+     * is a legitimate part of the execution environment; an "su" on it is a real
+     * environment artifact rather than a filename guess, and the probe needs no
+     * subprocess, no exec permission and no shell.
+     *
+     * Bounded (≤32 entries) and read-only. PRESENT (stat succeeded) and DENIED
+     * (exists, unreadable — the DenyList-resistant case) both count; UNKNOWN
+     * does NOT (an unrelated syscall failure is not evidence).
+     */
+    private fun suOnPath(): List<String> {
+        val out = ArrayList<String>(2)
+        val path = runCatching { System.getenv("PATH") ?: "" }.getOrDefault("")
+        val dirs = path.split(':').filter { it.isNotEmpty() }.take(32)
+        for (dir in dirs) {
+            val candidate = if (dir.endsWith("/")) dir + "su" else dir + "/su"
+            val probe = probePath(candidate)
+            if ((probe == FsProbe.PRESENT || probe == FsProbe.DENIED) && candidate !in out && out.size < 6) {
+                out.add(candidate)
             }
-        } catch (_: Exception) { false }
+        }
+        return out
+    }
+
+    /** Mount-view evidence: which kinds were seen and a bounded sample. */
+    private data class MountEvidence(
+        val kinds: List<String>,
+        val sample: List<String>
+    )
+
+    /**
+     * /proc/self/mountinfo inspection — ROOT-FRAMEWORK mounts, not "any mount".
+     *
+     * WHY THE MOUNT VIEW: systemless root hides packages and su binaries but it
+     * still has to make module files visible to the system, which it does with
+     * mounts: overlayfs over /system whose upper/lower directories live under
+     * /data/adb, bind mounts sourced from /data/adb/modules, and Magisk's
+     * /debug_ramdisk. None of those exist on a stock device, so a match is
+     * evidence with a low false-positive rate.
+     *
+     * Deliberately NOT a match: a different mount namespace, a bind mount of an
+     * app data dir, tmpfs, or any mount outside the system partitions — apps and
+     * the platform legitimately create those and flagging them locked normal
+     * phones out in earlier versions.
+     *
+     * Format (Linux proc(5)):
+     *   id parent major:minor root mountpoint options [optional…] - fstype source superopts
+     */
+    /** 2-second memo: getSecurityFlags() calls the root path 3× per batch. */
+    private var _mountCache: MountEvidence? = null
+    private var _mountCacheAt: Long = 0L
+    /** hidepid on the procfs mount: true = other UIDs' /proc dirs are hidden
+     *  from us (Android 10+ default). null = the mount view could not say. */
+    private var _procHidepid: Boolean? = null
+
+    private fun inspectMountView(): MountEvidence {
+        val cached = _mountCache
+        if (cached != null && System.currentTimeMillis() - _mountCacheAt < 2000L) return cached
+        val kinds = LinkedHashSet<String>()
+        val sample = ArrayList<String>(4)
+        val systemRoots = arrayOf("/system", "/vendor", "/product", "/odm", "/system_ext")
+        try {
+            File("/proc/self/mountinfo").bufferedReader().useLines { lines ->
+                var scanned = 0
+                for (raw in lines) {
+                    if (++scanned > 512) break          // bounded
+                    val dash = raw.indexOf(" - ")
+                    if (dash <= 0) continue
+                    val left = raw.substring(0, dash).split(' ')
+                    val right = raw.substring(dash + 3).split(' ')
+                    if (left.size < 6 || right.size < 2) continue
+                    val fsRoot   = left[3]
+                    val mntPoint = left[4]
+                    val fstype   = right[0]
+                    val source   = right[1]
+                    // Scan the WHOLE line: an overlay's upperdir/lowerdir live in
+                    // the per-mount OPTIONS field (left[5]), not in the
+                    // comma-list after "-", so matching only the parsed
+                    // fstype/source would miss every Magisk overlay it exists
+                    // to catch. Digits-only id fields cannot collide with these
+                    // substrings, so including them costs nothing.
+                    val hay = raw.lowercase()
+
+                    // hidepid on the proc mount (Android 10+ mounts procfs with
+                    // hidepid=2): other UIDs' /proc dirs are structurally absent
+                    // for us, which makes the process-scan sub-check UNAVAILABLE
+                    // rather than clean. Captured here because this parser
+                    // already walks mountinfo once per memo window.
+                    if (fstype == "proc") {
+                        val hp = hay.indexOf("hidepid=")
+                        if (hp >= 0) {
+                            val hpVal = hay.substring(hp + 8).takeWhile { c -> c.isDigit() }
+                            _procHidepid = hpVal.isNotEmpty() && (hpVal.toIntOrNull() ?: 0) >= 1
+                        }
+                    }
+
+                    val overSystem = systemRoots.any { mntPoint == it || mntPoint.startsWith("\$it/") }
+                    val dataBacked = hay.contains("/data/adb") ||
+                        hay.contains("upperdir=/data") || hay.contains("lowerdir=/data")
+                    val magiskNamed = hay.contains("magisk") || hay.contains(".magisk")
+
+                    when {
+                        fstype == "overlay" && overSystem && (dataBacked || magiskNamed) -> {
+                            kinds.add("root_overlay_on_system")
+                            if (sample.size < 4) sample.add("overlay \$mntPoint")
+                        }
+                        // A DIRECTORY ON A SYSTEM PARTITION BACKED BY /data.
+                        // Stock Android never bind-mounts module content there;
+                        // systemless root does exactly that to replace a file.
+                        overSystem && dataBacked -> {
+                            kinds.add("root_module_mount")
+                            if (sample.size < 4) sample.add("\$fstype \$fsRoot -> \$mntPoint")
+                        }
+                        magiskNamed || mntPoint.startsWith("/data/adb") -> {
+                            kinds.add("root_module_mount")
+                            if (sample.size < 4) sample.add("\$fstype \$mntPoint")
+                        }
+                        source.startsWith("/debug_ramdisk") -> {
+                            kinds.add("magisk_debug_ramdisk")
+                            if (sample.size < 4) sample.add("\$source -> \$mntPoint")
+                        }
+                    }
+                }
+            }
+        } catch (_: Exception) {
+            // Unreadable mount view → NO evidence. Never a verdict either way.
+        }
+        val evidence = MountEvidence(kinds.toList(), sample)
+        _mountCache = evidence
+        _mountCacheAt = System.currentTimeMillis()
+        return evidence
     }
 
     private fun checkMagiskMounts(): Boolean {
@@ -990,11 +1603,11 @@ class SecurityModule(private val reactContext: ReactApplicationContext) :
     }
 
     private fun checkMagiskDenyList(): Boolean {
-        // If DenyList is active, Magisk hides itself — check for mount anomalies
-        return try {
-            val maps = File("/proc/self/maps").readLines()
-            maps.any { it.contains("/data/adb") || it.contains("magisk") }
-        } catch (_: Exception) { false }
+        // Own-process maps snapshot: a root framework mapping left inside THIS
+        // process (or /data/adb-backed content mapped in) — the artifact angle
+        // hiding configurations most often forget. Same 2 s snapshot as every
+        // other maps reader (one consistent view per batch).
+        return mapsHas(listOf("/data/adb", "magisk"))
     }
 
     // ══════════════════════════════════════════════════════════════════════════
@@ -1756,44 +2369,56 @@ class SecurityModule(private val reactContext: ReactApplicationContext) :
         try {
             val _t0 = System.currentTimeMillis()
             val r: WritableMap = Arguments.createMap()
+            // Checks that THREW are recorded here instead of silently resolving
+            // to their fail-safe defaults (false / true). "Unknown" must stay
+            // reportable: a failed check is not a clean check (second-pass fix —
+            // surfaced to JS as detectionsUnavailable, weight 0 in policy).
+            val unavailable = ArrayList<String>(6)
 
             // ── Phase 1 ────────────────────────────────────────────────────
             val devOpts = runCatching {
                 Settings.Global.getInt(reactContext.contentResolver,
                     Settings.Global.DEVELOPMENT_SETTINGS_ENABLED, 0) != 0
-            }.getOrDefault(false)
+            }.getOrElse { unavailable.add("developerOptions"); false }
             r.putBoolean("developerOptionsEnabled", devOpts)
             Log.d(TAG, "[getSecurityFlags] developerOptionsEnabled=$devOpts")
 
             val adb = runCatching {
                 Settings.Global.getInt(reactContext.contentResolver,
                     Settings.Global.ADB_ENABLED, 0) != 0
-            }.getOrDefault(false)
+            }.getOrElse { unavailable.add("adbEnabled"); false }
             r.putBoolean("adbEnabled", adb)
             Log.d(TAG, "[getSecurityFlags] adbEnabled=$adb")
 
-            val debugger = runCatching { Debug.isDebuggerConnected() }.getOrDefault(false)
+            val debugger = runCatching { Debug.isDebuggerConnected() }.getOrElse { unavailable.add("debugger"); false }
             r.putBoolean("debuggerAttached", debugger)
             Log.d(TAG, "[getSecurityFlags] debuggerAttached=$debugger")
 
             val testOnly = runCatching {
                 val info = reactContext.packageManager.getApplicationInfo(reactContext.packageName, 0)
                 (info.flags and ApplicationInfo.FLAG_TEST_ONLY) != 0
-            }.getOrDefault(false)
+            }.getOrElse { unavailable.add("testOnlyBuild"); false }
             r.putBoolean("testOnlyBuild", testOnly)
             Log.d(TAG, "[getSecurityFlags] testOnlyBuild=$testOnly")
 
-            val screenRec = runCatching { detectScreenRecording() }.getOrDefault(false)
+            val screenRec = runCatching { detectScreenRecording() }.getOrElse { unavailable.add("screenRecording"); false }
             r.putBoolean("screenBeingRecorded", screenRec)
             Log.d(TAG, "[getSecurityFlags] screenBeingRecorded=$screenRec")
 
             // ── Phase 2 ────────────────────────────────────────────────────
-            val frida   = runCatching { detectFrida()   }.getOrDefault(false)
-            val xposed  = runCatching { detectXposed()  }.getOrDefault(false)
-            val magisk  = runCatching { detectMagisk()  }.getOrDefault(false)
-            val overlay = runCatching { detectOverlay() }.getOrDefault(false)
-            val sigOk   = runCatching { checkSignatureValid() }.getOrDefault(true)
-            val tamper  = runCatching { detectTampering() }.getOrDefault(false)
+            val frida   = runCatching { detectFrida()   }.getOrElse { unavailable.add("frida"); false }
+            val xposed  = runCatching { detectXposed()  }.getOrElse { unavailable.add("xposed"); false }
+            val magisk  = runCatching { detectMagisk()  }.getOrElse { unavailable.add("magisk"); false }
+            val overlay = runCatching { detectOverlay() }.getOrElse { unavailable.add("overlay"); false }
+            val sigOk   = runCatching { checkSignatureValid() }.getOrElse {
+                // An EXCEPTION means the pin comparison did not run — it is not
+                // a pass. The VALUE keeps its fail-safe default (no new blocking
+                // path); the AVAILABILITY is reported so "verified against pin"
+                // and "could not verify" remain distinguishable downstream.
+                unavailable.add("signatureCheck")
+                true
+            }
+            val tamper  = runCatching { detectTampering() }.getOrElse { unavailable.add("tamper"); false }
             r.putBoolean("fridaDetected",   frida)
             r.putBoolean("xposedDetected",  xposed)
             r.putBoolean("magiskDetected",  magisk)
@@ -1849,13 +2474,42 @@ class SecurityModule(private val reactContext: ReactApplicationContext) :
             Log.d(TAG, "[getSecurityFlags] windowMode=$windowMode measured=$windowModeMeasured")
 
             // ── Phase 3 (new) ──────────────────────────────────────────────
-            val vpn      = runCatching { detectVpn()           }.getOrDefault(false)
-            val rooted   = runCatching { detectRoot()          }.getOrDefault(false)
-            val emulator = runCatching { detectEmulator()      }.getOrDefault(false)
+            val vpn      = runCatching { detectVpn()           }.getOrElse { unavailable.add("vpn"); false }
+            val rooted   = runCatching { detectRoot()          }.getOrElse { unavailable.add("root"); false }
+            val emulator = runCatching { detectEmulator()      }.getOrElse { unavailable.add("emulator"); false }
             r.putBoolean("vpnDetected",          vpn)
             r.putBoolean("rootDetected",         rooted)
             r.putBoolean("emulatorDetected",     emulator)
             Log.d(TAG, "[getSecurityFlags] vpn=$vpn rooted=$rooted emulator=$emulator")
+
+            // ── Evidence provenance + availability (second-pass audit) ───────
+            // Sub-checks that could NOT run are reported as UNKNOWN, never
+            // folded into the false/true defaults above: hidepid=2 kills the
+            // foreign process scan on Android 10+, an unreadable maps file
+            // blinds every maps check, and a missing libmedasec core removes
+            // the native cross-read. All three are coverage facts, not passes.
+            if (!_fridaProcessScanAvailable) unavailable.add("fridaProcessScan")
+            if (_procMapsUnreadable) unavailable.add("procMapsScan")
+            val core = coreRaspEvidence()
+            if (!core.available) unavailable.add("nativeCore")
+            putStringList(r, "detectionsUnavailable", unavailable)
+
+            // WHICH signal produced each verdict. root AND magisk can both be
+            // true from ONE artifact-probe observation — the signals make that
+            // shared source visible instead of two look-like confirmations.
+            putStringList(r, "rootEvidenceSignals", _lastRootSignals)
+            putStringList(r, "magiskEvidenceSignals", _lastMagiskSignals)
+            putStringList(r, "fridaEvidenceSignals", _lastFridaSignals)
+            putStringList(r, "xposedEvidenceSignals", _lastXposedSignals)
+
+            // C++ core (libmedasec) status — previously unreachable from JS
+            // (nothing ever called getNativeCoreSnapshot). Evidence only; the
+            // detect* verdicts above already consult coreRaspEvidence().
+            r.putBoolean("coreAvailable", core.available)
+            r.putBoolean("coreHookLibs", core.hookLibs.isNotEmpty())
+            putStringList(r, "coreHookLibNames", core.hookLibs)
+            r.putInt("coreFridaThreads", core.fridaThreads)
+            r.putBoolean("coreThreadMismatch", core.threadMismatch)
 
             val _elapsed = System.currentTimeMillis() - _t0
             Log.d(TAG, "[getSecurityFlags] ✅ all checks complete in \${_elapsed}ms")
@@ -3038,7 +3692,7 @@ const withMedaSslPins = (config) => {
 // survives expo prebuild --clean. Also emits assets/medasec_manifest.json
 // (critical-asset manifest) and the medasecManifest gradle digest task.
 // ─────────────────────────────────────────────────────────────────────────
-const MEDASEC_CPP = "/*\n * medasec_core.cpp — MedAcademy Native Security Core (Part 6/7 gap closure)\n * ─────────────────────────────────────────────────────────────────────────────\n * Purpose: move the expensive, patch-resistant parts of runtime inspection\n * (RASP) out of Kotlin/JS into a small C++ core. Every signal collected here\n * is EVIDENCE for the signed security-evidence schema — it is NOT an\n * authorization decision. The backend remains the final authority.\n *\n * No secrets live in this file. Nothing here can be an authorization oracle:\n * the results are signed (device Keystore) and judged server-side, where a\n * suppressed check is distinguishable from a clean one only through the\n * broader assurance model (tenure, violation history, Play Integrity layer).\n *\n * Design constraints:\n *   - No custom cryptography. Only hashing (SHA-256 via OpenSSL-style\n *     primitives is NOT needed — we use no crypto at all here; the only\n *     hashing happens in Kotlin over the measured bytes).\n *   - No writes outside the process, no network, no file writes.\n *     READ-ONLY inspection.\n *   - No unsafe C. Every allocation is bounded; every read is bounded.\n *   - Clean teardown: no leaked fds or memory (verified by design below).\n * ─────────────────────────────────────────════════════════════════════════════\n */\n#include <jni.h>\n#include <string>\n#include <vector>\n#include <fstream>\n#include <sstream>\n#include <cstring>\n#include <cctype>\n#include <dirent.h>\n#include <unistd.h>\n#include <cstdio>\n#include <cstdlib>\n#include <ctime>\n\nnamespace {\n\nstruct RaspSignals {\n    bool maps_ok = false;\n    bool maps_anon_exec = false;         // writable+executable private mappings\n    int  anon_exec_regions = 0;\n    bool maps_unexpected_hook_libs = false;\n    std::vector<std::string> hook_libs;  // bounded list (≤8 names)\n    bool maps_ok_status = false;\n    long vm_rss_kb = -1;\n    int  threads = -1;\n    bool status_ok = false;\n    long utime = -1, stime = -1;         // rusage-ish from /proc/self/stat\n    bool stat_ok = false;\n    bool cmdlines_ok = false;\n    int  frida_like_names = 0;\n    std::vector<std::string> frida_like;\n};\n\n/** Case-insensitive substring. */\nbool contains_ci(const std::string& hay, const std::string& needle) {\n    if (hay.size() < needle.size()) return false;\n    for (size_t i = 0; i + needle.size() <= hay.size(); ++i) {\n        size_t j = 0;\n        while (j < needle.size() &&\n               std::tolower((unsigned char)hay[i + j]) == std::tolower((unsigned char)needle[j])) ++j;\n        if (j == needle.size()) return true;\n    }\n    return false;\n}\n\n/**\n * Hook-indicator library names (indicative, not exhaustive; low FP by design).\n *\n * PART 1 CLASSIFICATION — this is STATIC STRING OBFUSCATION, not encryption.\n * Honest properties:\n *   - defeats naive `strings` dumps / grep-for-\"frida\" in the stripped .so;\n *   - a capable analyst reconstructs it from the .data segment trivially;\n *   - the bytes AND their transform (XOR) ship in the same binary;\n *   - NOT secret storage, NOT app authenticity, NOT a security boundary.\n * Kept because it raises the floor of the cheapest RE pass at ~zero cost.\n *\n * Per-row transform key (byte-position offset) instead of one obvious\n * constant, so the table is not uniformly decodable by replaying a single\n * key byte. The key table itself is, unavoidably, also in the binary.\n */\nconstexpr unsigned char kXorKey = 0x5A;            // base key (legacy rows)\nconstexpr unsigned char kThreadKey = 0x3C;         // thread-name table\n\nstruct EncName { unsigned char len; unsigned char bytes[20]; };\n\n// Encoded with: bytes[i] = plain[i] ^ 0x5A — VERIFIED programmatically\n// (.freebuff/check-xor-table.cjs decodes and compares before every commit).\nconstexpr EncName kHookIndicatorsEnc[] = {\n    {8,  {0x36,0x33,0x38,0x3c,0x28,0x33,0x3e,0x3b,0,0,0,0,0,0,0,0,0,0,0,0}},     // libfrida\n    {11, {0x3c,0x28,0x33,0x3e,0x3b,0x77,0x3b,0x3d,0x3f,0x34,0x2e,0,0,0,0,0,0,0,0,0}}, // frida-agent\n    {14, {0x36,0x33,0x38,0x3d,0x2f,0x37,0x77,0x30,0x29,0x77,0x36,0x35,0x35,0x2a,0,0,0,0,0,0}}, // libgum-js-loop\n    {6,  {0x3d,0x3b,0x3e,0x3d,0x3f,0x2e,0,0,0,0,0,0,0,0,0,0,0,0,0,0}},           // gadget\n    {9,  {0x36,0x33,0x38,0x22,0x2a,0x35,0x29,0x3f,0x3e,0,0,0,0,0,0,0,0,0,0,0}},  // libxposed\n    {12, {0x36,0x33,0x38,0x29,0x2f,0x38,0x29,0x2e,0x28,0x3b,0x2e,0x3f,0,0,0,0,0,0,0,0}}, // libsubstrate\n    {6,  {0x36,0x33,0x38,0x37,0x29,0x3c,0,0,0,0,0,0,0,0,0,0,0,0,0,0}},           // libmsf\n    {9,  {0x36,0x33,0x38,0x3d,0x3b,0x3e,0x3d,0x3f,0x2e,0,0,0,0,0,0,0,0,0,0,0}},  // libgadget\n    {15, {0x36,0x33,0x38,0x3d,0x3b,0x37,0x3f,0x3d,0x2f,0x3b,0x28,0x3e,0x33,0x3b,0x34,0,0,0,0,0}}, // libgameguardian\n    {5,  {0x36,0x33,0x38,0x3d,0x3d,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}},              // libgg\n};\n\n/**\n * Runtime reconstruction (bounded to the struct size; NUL-terminated when\n * len < sizeof(bytes)).\n */\nstd::string decodeEncName(const EncName& e) {\n    std::string out;\n    out.reserve(e.len);\n    for (unsigned char i = 0; i < e.len && i < sizeof(e.bytes); ++i) {\n        out += (char)(e.bytes[i] ^ kXorKey);\n    }\n    return out;\n}\n\nbool isHookIndicator(const std::string& path) {\n    for (const EncName& enc : kHookIndicatorsEnc) {\n        if (contains_ci(path, decodeEncName(enc))) return true;\n    }\n    return false;\n}\n\n/** Read a small text file fully, bounded to maxBytes (read-only inspection). */\nstd::string readSmallFile(const char* path, size_t maxBytes) {\n    std::ifstream f(path, std::ios::in | std::ios::binary);\n    if (!f.is_open()) return std::string();\n    std::string out;\n    out.reserve(4096);\n    char buf[8192];\n    while (out.size() < maxBytes) {\n        f.read(buf, sizeof(buf));\n        out.append(buf, (size_t)f.gcount());\n        if (!f) break;\n    }\n    return out;\n}\n\n/**\n * /proc/self/maps — writable+executable private mappings are a strong,\n * long-standing runtime-instrumentation signal when produced outside the\n * known runtime (ART, trampolines). We record COUNT + NAMES only.\n */\nvoid inspectMaps(RaspSignals& s) {\n    std::ifstream maps(\"/proc/self/maps\");\n    if (!maps.is_open()) return;\n    s.maps_ok = true;\n    std::string line;\n    while (std::getline(maps, line)) {\n        if (line.size() < 12) continue;\n        // perms field: chars 0..3 after leading blanks — cheap parse.\n        bool r = false, w = false, x = false;\n        size_t i = 0;\n        while (i < line.size() && line[i] != ' ' && i < 32) {\n            char c = line[i];\n            if (c == 'r') r = true;\n            if (c == 'w') w = true;\n            if (c == 'x') x = true;\n            ++i;\n}\n        if (!(r && w && x)) continue;\n        // Bounded region count; no unbounded growth.\n        if (s.anon_exec_regions < 4096) s.anon_exec_regions++;\n        s.maps_anon_exec = true;\n        // The pathname tail (may be empty for anon mappings).\n        std::string tail;\n        size_t p = line.find('/');\n        if (p != std::string::npos) tail = line.substr(p);\n        if (!tail.empty() && isHookIndicator(tail)) {\n            s.maps_unexpected_hook_libs = true;\n            if (s.hook_libs.size() < 8) s.hook_libs.push_back(tail.substr(0, 256));\n        }\n    }\n}\n\n/** /proc/self/status — thread count + RSS; detects heavy instrumentation. */\nvoid inspectStatus(RaspSignals& s) {\n    std::string st = readSmallFile(\"/proc/self/status\", 16384);\n    if (st.empty()) return;\n    s.status_ok = true;\n    size_t p = st.find(\"Threads:\");\n    if (p != std::string::npos) {\n        s.threads = std::atoi(st.c_str() + p + 8);\n    }\n    p = st.find(\"VmRSS:\");\n    if (p != std::string::npos) {\n        s.vm_rss_kb = std::atol(st.c_str() + p + 6);\n    }\n}\n\n/** /proc/self/task — directory listing count of threads (cross-check). */\nint countThreadsViaTask() {\n    DIR* d = opendir(\"/proc/self/task\");\n    if (!d) return -1;\n    int n = 0;\n    struct dirent* e;\n    while ((e = readdir(d)) != nullptr) {\n        if (e->d_name[0] == '.') continue;\n        if (++n > 4096) break;   // bounded\n    }\n    closedir(d);\n    return n;\n}\n\n// Thread-name indicators for injected runtimes (gmain/gdbus are GLib loops\n// used by Frida; \"frida\"/\"pool-frida\" are direct). XOR-obfuscated, Part 1.\nconstexpr unsigned char kThreadIndicatorsEnc[4][11] = {\n    {5, 0x5b,0x51,0x5d,0x55,0x52,0x00,0x00,0x00,0x00,0x00},   // gmain\n    {5, 0x5b,0x58,0x5e,0x49,0x4f,0x00,0x00,0x00,0x00,0x00},   // gdbus\n    {5, 0x5a,0x4e,0x55,0x58,0x5d,0x00,0x00,0x00,0x00,0x00},   // frida\n    {10, 0x4c,0x53,0x53,0x50,0x11,0x5a,0x4e,0x55,0x58,0x5d},  // pool-frida\n};\n\nstd::string decodeThreadName(unsigned char idx) {\n    std::string out;\n    if (idx >= 4) return out;\n    const auto& row = kThreadIndicatorsEnc[idx];\n    for (unsigned char i = 0; i < row[0] && i < 10; ++i) out += (char)(row[1 + i] ^ kThreadKey);\n    return out;\n}\n\n// /proc/self/task/<tid>/comm — Frida-class injected-thread names, bounded scan.\n// (Path written with <tid> so the glob never terminates this comment.)\nvoid inspectThreadNames(RaspSignals& s) {\n    DIR* d = opendir(\"/proc/self/task\");\n    if (!d) return;\n    int scanned = 0;\n    struct dirent* e;\n    while ((e = readdir(d)) != nullptr) {\n        if (e->d_name[0] == '.') continue;\n        if (++scanned > 512) break;   // bounded\n        std::string path = std::string(\"/proc/self/task/\") + e->d_name + \"/comm\";\n        std::string comm = readSmallFile(path.c_str(), 64);\n        if (comm.empty()) continue;\n        // Thread-name indicators — obfuscated (Part 1), same honest\n        // classification as the hook-lib table above.\n        if (contains_ci(comm, decodeThreadName(0)) || contains_ci(comm, decodeThreadName(1)) ||\n            contains_ci(comm, decodeThreadName(2)) || contains_ci(comm, decodeThreadName(3))) {\n            s.frida_like_names++;\n            if (s.frida_like_names < 100 && s.frida_like.size() < 8) s.frida_like.push_back(comm.substr(0, 32));\n        }\n    }\n    closedir(d);\n}\n\n\n// ═══════════════════════════════════════════════════════════════════\n// PART 3 — NATIVE NETWORK INSPECTION (evidence only).\n// Reads the KERNEL tables (/proc/net/dev, /proc/net/route) directly.\n// Value-add vs the Kotlin detector: a framework-level hook (Xposed\n// module faking NetworkCapabilities/NetworkInterface) does not edit\n// these kernel files, so the C++ layer gives an INDEPENDENT second\n// opinion on which interfaces and routes exist.\n// NOT a second authorization authority — an evidence signal inside\n// the same signed-evidence schema.\n// ═══════════════════════════════════════════════════════════════════\n// Tunnel-classifying name patterns. TUN-CLASS only says \"looks like a\n// tunnel\" — VDO/PPP legitimately create such interfaces (tethering,\n// some carriers). Never a verdict on its own; the framework layer\n// stays authoritative (TRANSPORT_VPN is decisive).\nconstexpr unsigned char kTunPatterns[][12] = {\n    {3, 0x2e,0x2f,0x34,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00},\n    {3, 0x2e,0x3b,0x2a,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00},\n    {3, 0x2a,0x2a,0x2a,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00},\n    {4, 0x2e,0x2f,0x34,0x6a,0x00,0x00,0x00,0x00,0x00,0x00,0x00},\n    {5, 0x2e,0x2f,0x34,0x36,0x6a,0x00,0x00,0x00,0x00,0x00,0x00},\n    {4, 0x2a,0x2a,0x2a,0x6a,0x00,0x00,0x00,0x00,0x00,0x00,0x00},\n    {5, 0x33,0x2a,0x29,0x3f,0x39,0x00,0x00,0x00,0x00,0x00,0x00},\n    {4, 0x3d,0x29,0x37,0x6a,0x00,0x00,0x00,0x00,0x00,0x00,0x00},\n};\n\nstd::string decodeTunName(const unsigned char (&row)[12]) {\n    unsigned char len = row[0];\n    std::string out;\n    for (unsigned char i = 0; i < len && i < 11; ++i) out += (char)(row[1 + i] ^ kXorKey);\n    return out;\n}\n\nbool looksLikeTunnelIface(const std::string& name) {\n    for (const auto& row : kTunPatterns) {\n        if (contains_ci(name, decodeTunName(row))) return true;\n    }\n    return false;\n}\n\nstruct NetSignals {\n    bool dev_ok = false;\n    bool route_ok = false;\n    int ifaces_total = 0;\n    int ifaces_tunnel_class = 0;\n    std::vector<std::string> tunnel_ifaces;   // bounded (≤8 names)\n    int default_routes = 0;\n    bool route_via_tunnel_class = false;\n};\n\n/** /proc/net/dev — interface inventory (bounded read, kernel table). */\nvoid inspectNetDev(NetSignals& s) {\n    std::ifstream f(\"/proc/net/dev\");\n    if (!f.is_open()) return;\n    s.dev_ok = true;\n    std::string line;\n    int scanned = 0;\n    while (std::getline(f, line)) {\n        size_t col = line.find(':');\n        if (col == std::string::npos) continue;   // header rows\n        std::string name = line.substr(0, col);\n        // trim\n        size_t b = name.find_first_not_of(\" \\t\");\n        if (b == std::string::npos) continue;\n        name = name.substr(b, name.find_last_not_of(\" \\t\") - b + 1);\n        if (++scanned > 64) break;                // bounded\n        s.ifaces_total++;\n        if (looksLikeTunnelIface(name)) {\n            s.ifaces_tunnel_class++;\n            if (s.tunnel_ifaces.size() < 8) s.tunnel_ifaces.push_back(name.substr(0, 32));\n        }\n    }\n}\n\n/** /proc/net/route — routing table (kernel table, bounded read). */\nvoid inspectNetRoute(NetSignals& s) {\n    std::ifstream f(\"/proc/net/route\");\n    if (!f.is_open()) return;\n    s.route_ok = true;\n    std::string line;\n    std::getline(f, line);                        // header\n    int scanned = 0;\n    while (std::getline(f, line)) {\n        std::istringstream iss(line);\n        std::string iface;\n        unsigned long destination = 0;\n        if (!(iss >> iface >> std::hex >> destination)) continue;\n        if (++scanned > 256) break;               // bounded\n        if (destination == 0) {\n            s.default_routes++;\n            if (looksLikeTunnelIface(iface)) s.route_via_tunnel_class = true;\n        }\n    }\n}\n\n// Forward declaration: jsonEscape is defined further below in this\n// anonymous namespace; declared here so networkEvidenceJson can use it.\nstd::string jsonEscape(const std::string& in);\n\nstd::string networkEvidenceJson(const NetSignals& s) {\n    std::ostringstream o;\n    o << \"{\";\n    o << \"\\\"available\\\":true\";\n    o << \",\\\"dev_ok\\\":\" << (s.dev_ok ? \"true\" : \"false\");\n    o << \",\\\"route_ok\\\":\" << (s.route_ok ? \"true\" : \"false\");\n    o << \",\\\"ifaces_total\\\":\" << s.ifaces_total;\n    o << \",\\\"ifaces_tunnel_class\\\":\" << s.ifaces_tunnel_class;\n    o << \",\\\"tunnel_ifaces\\\":[\";\n    for (size_t i = 0; i < s.tunnel_ifaces.size(); ++i) {\n        if (i) o << \",\";\n        o << \"\\\"\" << jsonEscape(s.tunnel_ifaces[i]) << \"\\\"\";\n    }\n    o << \"]\";\n    o << \",\\\"default_routes\\\":\" << s.default_routes;\n    o << \",\\\"route_via_tunnel_class\\\":\" << (s.route_via_tunnel_class ? \"true\" : \"false\");\n    o << \",\\\"ts\\\":\" << (long long)time(nullptr);\n    o << \"}\";\n    return o.str();\n}\n\n/** JSON string escape (RFC 8259; control chars < 0x20 escaped as \\u00XX). */\nstd::string jsonEscape(const std::string& in) {\n    std::string out;\n    out.reserve(in.size() + 8);\n    for (unsigned char c : in) {\n        switch (c) {\n            case '\"':  out += \"\\\\\\\"\"; break;\n            case '\\\\': out += \"\\\\\\\\\"; break;\n            case '\\b': out += \"\\\\b\";  break;\n            case '\\f': out += \"\\\\f\";  break;\n            case '\\n': out += \"\\\\n\";  break;\n            case '\\r': out += \"\\\\r\";  break;\n            case '\\t': out += \"\\\\t\";  break;\n            default:\n                if (c < 0x20) {\n                    char buf[8];\n                    std::snprintf(buf, sizeof(buf), \"\\\\u%04x\", c);\n                    out += buf;\n                } else {\n                    out += (char)c;\n                }\n        }\n    }\n    return out;\n}\n\n} // namespace\n\nextern \"C\" {\n\nJNIEXPORT jstring JNICALL\nJava_com_medacademy_security_SecurityNativeCore_nativeRaspAggregate(JNIEnv* env, jclass /*clazz*/) {\n    RaspSignals s;\n    inspectMaps(s);\n    inspectStatus(s);\n    inspectThreadNames(s);\n    s.frida_like_names = (int)s.frida_like.size();\n\n    int taskThreads = countThreadsViaTask();\n    bool threadMismatch = (taskThreads >= 0 && s.threads >= 0 && taskThreads != s.threads);\n\n    std::ostringstream o;\n    o << \"{\";\n    o << \"\\\"available\\\":true\";\n    o << \",\\\"maps_ok\\\":\" << (s.maps_ok ? \"true\" : \"false\");\n    o << \",\\\"maps_anon_exec\\\":\" << (s.maps_anon_exec ? \"true\" : \"false\");\n    o << \",\\\"maps_anon_exec_regions\\\":\" << s.anon_exec_regions;\n    o << \",\\\"maps_hook_libs\\\":\" << (s.maps_unexpected_hook_libs ? \"true\" : \"false\");\n    o << \",\\\"hook_lib_names\\\":[\";\n    for (size_t i = 0; i < s.hook_libs.size(); ++i) {\n        if (i) o << \",\";\n        o << \"\\\"\" << jsonEscape(s.hook_libs[i]) << \"\\\"\";\n    }\n    o << \"]\";\n    o << \",\\\"status_ok\\\":\" << (s.status_ok ? \"true\" : \"false\");\n    o << \",\\\"vm_rss_kb\\\":\" << s.vm_rss_kb;\n    o << \",\\\"threads_status\\\":\" << s.threads;\n    o << \",\\\"threads_task_dir\\\":\" << taskThreads;\n    o << \",\\\"thread_count_mismatch\\\":\" << (threadMismatch ? \"true\" : \"false\");\n    o << \",\\\"frida_thread_names\\\":\" << s.frida_like_names;\n    o << \",\\\"frida_thread_name_list\\\":[\";\n    for (size_t i = 0; i < s.frida_like.size(); ++i) {\n        if (i) o << \",\";\n        o << \"\\\"\" << jsonEscape(s.frida_like[i]) << \"\\\"\";\n    }\n    o << \"]\";\n    o << \",\\\"ts\\\":\" << (long long)time(nullptr);\n    o << \"}\";\n    return env->NewStringUTF(o.str().c_str());\n}\n\nJNIEXPORT jstring JNICALL\nJava_com_medacademy_security_SecurityNativeCore_nativeInspect(JNIEnv* env, jclass /*clazz*/) {\n    RaspSignals s;\n    inspectMaps(s);\n    std::ostringstream o;\n    o << \"{\";\n    o << \"\\\"available\\\":true\";\n    o << \",\\\"loaded_libs_sample\\\":[\";\n    // First 16 loaded .so paths from /proc/self/maps (bounded sample).\n    std::ifstream maps(\"/proc/self/maps\");\n    int listed = 0;\n    std::string line;\n    while (maps && std::getline(maps, line) && listed < 16) {\n        size_t p = line.find('/');\n        if (p == std::string::npos) continue;\n        std::string path = line.substr(p);\n        if (path.find(\".so\") == std::string::npos) continue;\n        if (listed) o << \",\";\n        o << \"\\\"\" << jsonEscape(path.substr(0, 256)) << \"\\\"\";\n        ++listed;\n    }\n    o << \"]\";\n    o << \",\\\"ts\\\":\" << (long long)time(nullptr);\n    o << \"}\";\n    return env->NewStringUTF(o.str().c_str());\n}\n\nJNIEXPORT jstring JNICALL\nJava_com_medacademy_security_SecurityNativeCore_nativeNetworkEvidence(JNIEnv* env, jclass /*clazz*/) {\n    NetSignals s;\n    inspectNetDev(s);\n    inspectNetRoute(s);\n    return env->NewStringUTF(networkEvidenceJson(s).c_str());\n}\n\nJNIEXPORT jboolean JNICALL\nJava_com_medacademy_security_SecurityNativeCore_isAvailable(JNIEnv* /*env*/, jclass /*clazz*/) {\n    // The core is available iff /proc is mounted (normal Android) — the\n    // inspection itself degrades honestly if individual files are unreadable.\n    return access(\"/proc/self/maps\", R_OK) == 0 ? JNI_TRUE : JNI_FALSE;\n}\n\n} // extern \"C\"\n";
+const MEDASEC_CPP = "/*\n * medasec_core.cpp — MedAcademy Native Security Core (Part 6/7 gap closure)\n * ─────────────────────────────────────────────────────────────────────────────\n * Purpose: move the expensive, patch-resistant parts of runtime inspection\n * (RASP) out of Kotlin/JS into a small C++ core. Every signal collected here\n * is EVIDENCE for the signed security-evidence schema — it is NOT an\n * authorization decision. The backend remains the final authority.\n *\n * No secrets live in this file. Nothing here can be an authorization oracle:\n * the results are signed (device Keystore) and judged server-side, where a\n * suppressed check is distinguishable from a clean one only through the\n * broader assurance model (tenure, violation history, Play Integrity layer).\n *\n * Design constraints:\n *   - No custom cryptography. Only hashing (SHA-256 via OpenSSL-style\n *     primitives is NOT needed — we use no crypto at all here; the only\n *     hashing happens in Kotlin over the measured bytes).\n *   - No writes outside the process, no network, no file writes.\n *     READ-ONLY inspection.\n *   - No unsafe C. Every allocation is bounded; every read is bounded.\n *   - Clean teardown: no leaked fds or memory (verified by design below).\n * ─────────────────────────────────────────════════════════════════════════════\n */\n#include <jni.h>\n#include <string>\n#include <vector>\n#include <fstream>\n#include <sstream>\n#include <cstring>\n#include <cctype>\n#include <dirent.h>\n#include <unistd.h>\n#include <cstdio>\n#include <cstdlib>\n#include <ctime>\n\nnamespace {\n\nstruct RaspSignals {\n    bool maps_ok = false;\n    bool maps_anon_exec = false;         // writable+executable private mappings\n    int  anon_exec_regions = 0;\n    bool maps_unexpected_hook_libs = false;\n    std::vector<std::string> hook_libs;  // bounded list (≤8 names)\n    bool maps_ok_status = false;\n    long vm_rss_kb = -1;\n    int  threads = -1;\n    bool status_ok = false;\n    long utime = -1, stime = -1;         // rusage-ish from /proc/self/stat\n    bool stat_ok = false;\n    bool cmdlines_ok = false;\n    int  frida_like_names = 0;\n    std::vector<std::string> frida_like;\n};\n\n/** Case-insensitive substring. */\nbool contains_ci(const std::string& hay, const std::string& needle) {\n    if (hay.size() < needle.size()) return false;\n    for (size_t i = 0; i + needle.size() <= hay.size(); ++i) {\n        size_t j = 0;\n        while (j < needle.size() &&\n               std::tolower((unsigned char)hay[i + j]) == std::tolower((unsigned char)needle[j])) ++j;\n        if (j == needle.size()) return true;\n    }\n    return false;\n}\n\n/**\n * Hook-indicator library names (indicative, not exhaustive; low FP by design).\n *\n * PART 1 CLASSIFICATION — this is STATIC STRING OBFUSCATION, not encryption.\n * Honest properties:\n *   - defeats naive `strings` dumps / grep-for-\"frida\" in the stripped .so;\n *   - a capable analyst reconstructs it from the .data segment trivially;\n *   - the bytes AND their transform (XOR) ship in the same binary;\n *   - NOT secret storage, NOT app authenticity, NOT a security boundary.\n * Kept because it raises the floor of the cheapest RE pass at ~zero cost.\n *\n * Per-row transform key (byte-position offset) instead of one obvious\n * constant, so the table is not uniformly decodable by replaying a single\n * key byte. The key table itself is, unavoidably, also in the binary.\n */\nconstexpr unsigned char kXorKey = 0x5A;            // base key (legacy rows)\nconstexpr unsigned char kThreadKey = 0x3C;         // thread-name table\n\nstruct EncName { unsigned char len; unsigned char bytes[20]; };\n\n// Encoded with: bytes[i] = plain[i] ^ 0x5A — VERIFIED programmatically\n// (.freebuff/check-xor-table.cjs decodes and compares before every commit).\nconstexpr EncName kHookIndicatorsEnc[] = {\n    {8,  {0x36,0x33,0x38,0x3c,0x28,0x33,0x3e,0x3b,0,0,0,0,0,0,0,0,0,0,0,0}},     // libfrida\n    {11, {0x3c,0x28,0x33,0x3e,0x3b,0x77,0x3b,0x3d,0x3f,0x34,0x2e,0,0,0,0,0,0,0,0,0}}, // frida-agent\n    {14, {0x36,0x33,0x38,0x3d,0x2f,0x37,0x77,0x30,0x29,0x77,0x36,0x35,0x35,0x2a,0,0,0,0,0,0}}, // libgum-js-loop\n    {6,  {0x3d,0x3b,0x3e,0x3d,0x3f,0x2e,0,0,0,0,0,0,0,0,0,0,0,0,0,0}},           // gadget\n    {9,  {0x36,0x33,0x38,0x22,0x2a,0x35,0x29,0x3f,0x3e,0,0,0,0,0,0,0,0,0,0,0}},  // libxposed\n    {12, {0x36,0x33,0x38,0x29,0x2f,0x38,0x29,0x2e,0x28,0x3b,0x2e,0x3f,0,0,0,0,0,0,0,0}}, // libsubstrate\n    {6,  {0x36,0x33,0x38,0x37,0x29,0x3c,0,0,0,0,0,0,0,0,0,0,0,0,0,0}},           // libmsf\n    {9,  {0x36,0x33,0x38,0x3d,0x3b,0x3e,0x3d,0x3f,0x2e,0,0,0,0,0,0,0,0,0,0,0}},  // libgadget\n    {15, {0x36,0x33,0x38,0x3d,0x3b,0x37,0x3f,0x3d,0x2f,0x3b,0x28,0x3e,0x33,0x3b,0x34,0,0,0,0,0}}, // libgameguardian\n    {5,  {0x36,0x33,0x38,0x3d,0x3d,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}},              // libgg\n    // Second-pass (2026-10): LSPosed/Riru/Zygisk/LSPatch-era in-process artifacts.\n    // Same 0x5A per-row transform; decode == comment is asserted by\n    // tests/rootDetectionSecondPass.test.cjs. Evidence-only (see file header).\n    {4,  {0x36,0x29,0x2a,0x3e,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}},                 // lspd\n    {4,  {0x28,0x33,0x28,0x2f,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}},                 // riru\n    {7,  {0x36,0x29,0x2a,0x36,0x3b,0x34,0x2e,0,0,0,0,0,0,0,0,0,0,0,0,0}},        // lsplant\n    {6,  {0x20,0x23,0x3d,0x33,0x29,0x31,0,0,0,0,0,0,0,0,0,0,0,0,0,0}},          // zygisk\n    {7,  {0x36,0x29,0x2a,0x3b,0x2e,0x39,0x32,0,0,0,0,0,0,0,0,0,0,0,0,0}},        // lspatch\n    {4,  {0x3f,0x3e,0x22,0x2a,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}},                 // edxp\n    {5,  {0x23,0x3b,0x32,0x3c,0x3b,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}},              // yahfa\n};\n\n/**\n * Runtime reconstruction (bounded to the struct size; NUL-terminated when\n * len < sizeof(bytes)).\n */\nstd::string decodeEncName(const EncName& e) {\n    std::string out;\n    out.reserve(e.len);\n    for (unsigned char i = 0; i < e.len && i < sizeof(e.bytes); ++i) {\n        out += (char)(e.bytes[i] ^ kXorKey);\n    }\n    return out;\n}\n\nbool isHookIndicator(const std::string& path) {\n    for (const EncName& enc : kHookIndicatorsEnc) {\n        if (contains_ci(path, decodeEncName(enc))) return true;\n    }\n    return false;\n}\n\n/** Read a small text file fully, bounded to maxBytes (read-only inspection). */\nstd::string readSmallFile(const char* path, size_t maxBytes) {\n    std::ifstream f(path, std::ios::in | std::ios::binary);\n    if (!f.is_open()) return std::string();\n    std::string out;\n    out.reserve(4096);\n    char buf[8192];\n    while (out.size() < maxBytes) {\n        f.read(buf, sizeof(buf));\n        out.append(buf, (size_t)f.gcount());\n        if (!f) break;\n    }\n    return out;\n}\n\n/**\n * /proc/self/maps — writable+executable private mappings are a strong,\n * long-standing runtime-instrumentation signal when produced outside the\n * known runtime (ART, trampolines). We record COUNT + NAMES only.\n */\nvoid inspectMaps(RaspSignals& s) {\n    std::ifstream maps(\"/proc/self/maps\");\n    if (!maps.is_open()) return;\n    s.maps_ok = true;\n    std::string line;\n    while (std::getline(maps, line)) {\n        if (line.size() < 12) continue;\n        // perms field: chars 0..3 after leading blanks — cheap parse.\n        bool r = false, w = false, x = false;\n        size_t i = 0;\n        while (i < line.size() && line[i] != ' ' && i < 32) {\n            char c = line[i];\n            if (c == 'r') r = true;\n            if (c == 'w') w = true;\n            if (c == 'x') x = true;\n            ++i;\n}\n        if (!(r && w && x)) continue;\n        // Bounded region count; no unbounded growth.\n        if (s.anon_exec_regions < 4096) s.anon_exec_regions++;\n        s.maps_anon_exec = true;\n        // The pathname tail (may be empty for anon mappings).\n        std::string tail;\n        size_t p = line.find('/');\n        if (p != std::string::npos) tail = line.substr(p);\n        if (!tail.empty() && isHookIndicator(tail)) {\n            s.maps_unexpected_hook_libs = true;\n            if (s.hook_libs.size() < 8) s.hook_libs.push_back(tail.substr(0, 256));\n        }\n    }\n}\n\n/** /proc/self/status — thread count + RSS; detects heavy instrumentation. */\nvoid inspectStatus(RaspSignals& s) {\n    std::string st = readSmallFile(\"/proc/self/status\", 16384);\n    if (st.empty()) return;\n    s.status_ok = true;\n    size_t p = st.find(\"Threads:\");\n    if (p != std::string::npos) {\n        s.threads = std::atoi(st.c_str() + p + 8);\n    }\n    p = st.find(\"VmRSS:\");\n    if (p != std::string::npos) {\n        s.vm_rss_kb = std::atol(st.c_str() + p + 6);\n    }\n}\n\n/** /proc/self/task — directory listing count of threads (cross-check). */\nint countThreadsViaTask() {\n    DIR* d = opendir(\"/proc/self/task\");\n    if (!d) return -1;\n    int n = 0;\n    struct dirent* e;\n    while ((e = readdir(d)) != nullptr) {\n        if (e->d_name[0] == '.') continue;\n        if (++n > 4096) break;   // bounded\n    }\n    closedir(d);\n    return n;\n}\n\n// Thread-name indicators for injected runtimes (gmain/gdbus are GLib loops\n// used by Frida; \"frida\"/\"pool-frida\" are direct). XOR-obfuscated, Part 1.\nconstexpr unsigned char kThreadIndicatorsEnc[4][11] = {\n    {5, 0x5b,0x51,0x5d,0x55,0x52,0x00,0x00,0x00,0x00,0x00},   // gmain\n    {5, 0x5b,0x58,0x5e,0x49,0x4f,0x00,0x00,0x00,0x00,0x00},   // gdbus\n    {5, 0x5a,0x4e,0x55,0x58,0x5d,0x00,0x00,0x00,0x00,0x00},   // frida\n    {10, 0x4c,0x53,0x53,0x50,0x11,0x5a,0x4e,0x55,0x58,0x5d},  // pool-frida\n};\n\nstd::string decodeThreadName(unsigned char idx) {\n    std::string out;\n    if (idx >= 4) return out;\n    const auto& row = kThreadIndicatorsEnc[idx];\n    for (unsigned char i = 0; i < row[0] && i < 10; ++i) out += (char)(row[1 + i] ^ kThreadKey);\n    return out;\n}\n\n// /proc/self/task/<tid>/comm — Frida-class injected-thread names, bounded scan.\n// (Path written with <tid> so the glob never terminates this comment.)\nvoid inspectThreadNames(RaspSignals& s) {\n    DIR* d = opendir(\"/proc/self/task\");\n    if (!d) return;\n    int scanned = 0;\n    struct dirent* e;\n    while ((e = readdir(d)) != nullptr) {\n        if (e->d_name[0] == '.') continue;\n        if (++scanned > 512) break;   // bounded\n        std::string path = std::string(\"/proc/self/task/\") + e->d_name + \"/comm\";\n        std::string comm = readSmallFile(path.c_str(), 64);\n        if (comm.empty()) continue;\n        // Thread-name indicators — obfuscated (Part 1), same honest\n        // classification as the hook-lib table above.\n        if (contains_ci(comm, decodeThreadName(0)) || contains_ci(comm, decodeThreadName(1)) ||\n            contains_ci(comm, decodeThreadName(2)) || contains_ci(comm, decodeThreadName(3))) {\n            s.frida_like_names++;\n            if (s.frida_like_names < 100 && s.frida_like.size() < 8) s.frida_like.push_back(comm.substr(0, 32));\n        }\n    }\n    closedir(d);\n}\n\n\n// ═══════════════════════════════════════════════════════════════════\n// PART 3 — NATIVE NETWORK INSPECTION (evidence only).\n// Reads the KERNEL tables (/proc/net/dev, /proc/net/route) directly.\n// Value-add vs the Kotlin detector: a framework-level hook (Xposed\n// module faking NetworkCapabilities/NetworkInterface) does not edit\n// these kernel files, so the C++ layer gives an INDEPENDENT second\n// opinion on which interfaces and routes exist.\n// NOT a second authorization authority — an evidence signal inside\n// the same signed-evidence schema.\n// ═══════════════════════════════════════════════════════════════════\n// Tunnel-classifying name patterns. TUN-CLASS only says \"looks like a\n// tunnel\" — VDO/PPP legitimately create such interfaces (tethering,\n// some carriers). Never a verdict on its own; the framework layer\n// stays authoritative (TRANSPORT_VPN is decisive).\nconstexpr unsigned char kTunPatterns[][12] = {\n    {3, 0x2e,0x2f,0x34,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00},\n    {3, 0x2e,0x3b,0x2a,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00},\n    {3, 0x2a,0x2a,0x2a,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00},\n    {4, 0x2e,0x2f,0x34,0x6a,0x00,0x00,0x00,0x00,0x00,0x00,0x00},\n    {5, 0x2e,0x2f,0x34,0x36,0x6a,0x00,0x00,0x00,0x00,0x00,0x00},\n    {4, 0x2a,0x2a,0x2a,0x6a,0x00,0x00,0x00,0x00,0x00,0x00,0x00},\n    {5, 0x33,0x2a,0x29,0x3f,0x39,0x00,0x00,0x00,0x00,0x00,0x00},\n    {4, 0x3d,0x29,0x37,0x6a,0x00,0x00,0x00,0x00,0x00,0x00,0x00},\n};\n\nstd::string decodeTunName(const unsigned char (&row)[12]) {\n    unsigned char len = row[0];\n    std::string out;\n    for (unsigned char i = 0; i < len && i < 11; ++i) out += (char)(row[1 + i] ^ kXorKey);\n    return out;\n}\n\nbool looksLikeTunnelIface(const std::string& name) {\n    for (const auto& row : kTunPatterns) {\n        if (contains_ci(name, decodeTunName(row))) return true;\n    }\n    return false;\n}\n\nstruct NetSignals {\n    bool dev_ok = false;\n    bool route_ok = false;\n    int ifaces_total = 0;\n    int ifaces_tunnel_class = 0;\n    std::vector<std::string> tunnel_ifaces;   // bounded (≤8 names)\n    int default_routes = 0;\n    bool route_via_tunnel_class = false;\n};\n\n/** /proc/net/dev — interface inventory (bounded read, kernel table). */\nvoid inspectNetDev(NetSignals& s) {\n    std::ifstream f(\"/proc/net/dev\");\n    if (!f.is_open()) return;\n    s.dev_ok = true;\n    std::string line;\n    int scanned = 0;\n    while (std::getline(f, line)) {\n        size_t col = line.find(':');\n        if (col == std::string::npos) continue;   // header rows\n        std::string name = line.substr(0, col);\n        // trim\n        size_t b = name.find_first_not_of(\" \\t\");\n        if (b == std::string::npos) continue;\n        name = name.substr(b, name.find_last_not_of(\" \\t\") - b + 1);\n        if (++scanned > 64) break;                // bounded\n        s.ifaces_total++;\n        if (looksLikeTunnelIface(name)) {\n            s.ifaces_tunnel_class++;\n            if (s.tunnel_ifaces.size() < 8) s.tunnel_ifaces.push_back(name.substr(0, 32));\n        }\n    }\n}\n\n/** /proc/net/route — routing table (kernel table, bounded read). */\nvoid inspectNetRoute(NetSignals& s) {\n    std::ifstream f(\"/proc/net/route\");\n    if (!f.is_open()) return;\n    s.route_ok = true;\n    std::string line;\n    std::getline(f, line);                        // header\n    int scanned = 0;\n    while (std::getline(f, line)) {\n        std::istringstream iss(line);\n        std::string iface;\n        unsigned long destination = 0;\n        if (!(iss >> iface >> std::hex >> destination)) continue;\n        if (++scanned > 256) break;               // bounded\n        if (destination == 0) {\n            s.default_routes++;\n            if (looksLikeTunnelIface(iface)) s.route_via_tunnel_class = true;\n        }\n    }\n}\n\n// Forward declaration: jsonEscape is defined further below in this\n// anonymous namespace; declared here so networkEvidenceJson can use it.\nstd::string jsonEscape(const std::string& in);\n\nstd::string networkEvidenceJson(const NetSignals& s) {\n    std::ostringstream o;\n    o << \"{\";\n    o << \"\\\"available\\\":true\";\n    o << \",\\\"dev_ok\\\":\" << (s.dev_ok ? \"true\" : \"false\");\n    o << \",\\\"route_ok\\\":\" << (s.route_ok ? \"true\" : \"false\");\n    o << \",\\\"ifaces_total\\\":\" << s.ifaces_total;\n    o << \",\\\"ifaces_tunnel_class\\\":\" << s.ifaces_tunnel_class;\n    o << \",\\\"tunnel_ifaces\\\":[\";\n    for (size_t i = 0; i < s.tunnel_ifaces.size(); ++i) {\n        if (i) o << \",\";\n        o << \"\\\"\" << jsonEscape(s.tunnel_ifaces[i]) << \"\\\"\";\n    }\n    o << \"]\";\n    o << \",\\\"default_routes\\\":\" << s.default_routes;\n    o << \",\\\"route_via_tunnel_class\\\":\" << (s.route_via_tunnel_class ? \"true\" : \"false\");\n    o << \",\\\"ts\\\":\" << (long long)time(nullptr);\n    o << \"}\";\n    return o.str();\n}\n\n/** JSON string escape (RFC 8259; control chars < 0x20 escaped as \\u00XX). */\nstd::string jsonEscape(const std::string& in) {\n    std::string out;\n    out.reserve(in.size() + 8);\n    for (unsigned char c : in) {\n        switch (c) {\n            case '\"':  out += \"\\\\\\\"\"; break;\n            case '\\\\': out += \"\\\\\\\\\"; break;\n            case '\\b': out += \"\\\\b\";  break;\n            case '\\f': out += \"\\\\f\";  break;\n            case '\\n': out += \"\\\\n\";  break;\n            case '\\r': out += \"\\\\r\";  break;\n            case '\\t': out += \"\\\\t\";  break;\n            default:\n                if (c < 0x20) {\n                    char buf[8];\n                    std::snprintf(buf, sizeof(buf), \"\\\\u%04x\", c);\n                    out += buf;\n                } else {\n                    out += (char)c;\n                }\n        }\n    }\n    return out;\n}\n\n} // namespace\n\nextern \"C\" {\n\nJNIEXPORT jstring JNICALL\nJava_com_medacademy_security_SecurityNativeCore_nativeRaspAggregate(JNIEnv* env, jclass /*clazz*/) {\n    RaspSignals s;\n    inspectMaps(s);\n    inspectStatus(s);\n    inspectThreadNames(s);\n    s.frida_like_names = (int)s.frida_like.size();\n\n    int taskThreads = countThreadsViaTask();\n    bool threadMismatch = (taskThreads >= 0 && s.threads >= 0 && taskThreads != s.threads);\n\n    std::ostringstream o;\n    o << \"{\";\n    o << \"\\\"available\\\":true\";\n    o << \",\\\"maps_ok\\\":\" << (s.maps_ok ? \"true\" : \"false\");\n    o << \",\\\"maps_anon_exec\\\":\" << (s.maps_anon_exec ? \"true\" : \"false\");\n    o << \",\\\"maps_anon_exec_regions\\\":\" << s.anon_exec_regions;\n    o << \",\\\"maps_hook_libs\\\":\" << (s.maps_unexpected_hook_libs ? \"true\" : \"false\");\n    o << \",\\\"hook_lib_names\\\":[\";\n    for (size_t i = 0; i < s.hook_libs.size(); ++i) {\n        if (i) o << \",\";\n        o << \"\\\"\" << jsonEscape(s.hook_libs[i]) << \"\\\"\";\n    }\n    o << \"]\";\n    o << \",\\\"status_ok\\\":\" << (s.status_ok ? \"true\" : \"false\");\n    o << \",\\\"vm_rss_kb\\\":\" << s.vm_rss_kb;\n    o << \",\\\"threads_status\\\":\" << s.threads;\n    o << \",\\\"threads_task_dir\\\":\" << taskThreads;\n    o << \",\\\"thread_count_mismatch\\\":\" << (threadMismatch ? \"true\" : \"false\");\n    o << \",\\\"frida_thread_names\\\":\" << s.frida_like_names;\n    o << \",\\\"frida_thread_name_list\\\":[\";\n    for (size_t i = 0; i < s.frida_like.size(); ++i) {\n        if (i) o << \",\";\n        o << \"\\\"\" << jsonEscape(s.frida_like[i]) << \"\\\"\";\n    }\n    o << \"]\";\n    o << \",\\\"ts\\\":\" << (long long)time(nullptr);\n    o << \"}\";\n    return env->NewStringUTF(o.str().c_str());\n}\n\nJNIEXPORT jstring JNICALL\nJava_com_medacademy_security_SecurityNativeCore_nativeInspect(JNIEnv* env, jclass /*clazz*/) {\n    RaspSignals s;\n    inspectMaps(s);\n    std::ostringstream o;\n    o << \"{\";\n    o << \"\\\"available\\\":true\";\n    o << \",\\\"loaded_libs_sample\\\":[\";\n    // First 16 loaded .so paths from /proc/self/maps (bounded sample).\n    std::ifstream maps(\"/proc/self/maps\");\n    int listed = 0;\n    std::string line;\n    while (maps && std::getline(maps, line) && listed < 16) {\n        size_t p = line.find('/');\n        if (p == std::string::npos) continue;\n        std::string path = line.substr(p);\n        if (path.find(\".so\") == std::string::npos) continue;\n        if (listed) o << \",\";\n        o << \"\\\"\" << jsonEscape(path.substr(0, 256)) << \"\\\"\";\n        ++listed;\n    }\n    o << \"]\";\n    o << \",\\\"ts\\\":\" << (long long)time(nullptr);\n    o << \"}\";\n    return env->NewStringUTF(o.str().c_str());\n}\n\nJNIEXPORT jstring JNICALL\nJava_com_medacademy_security_SecurityNativeCore_nativeNetworkEvidence(JNIEnv* env, jclass /*clazz*/) {\n    NetSignals s;\n    inspectNetDev(s);\n    inspectNetRoute(s);\n    return env->NewStringUTF(networkEvidenceJson(s).c_str());\n}\n\nJNIEXPORT jboolean JNICALL\nJava_com_medacademy_security_SecurityNativeCore_isAvailable(JNIEnv* /*env*/, jclass /*clazz*/) {\n    // The core is available iff /proc is mounted (normal Android) — the\n    // inspection itself degrades honestly if individual files are unreadable.\n    return access(\"/proc/self/maps\", R_OK) == 0 ? JNI_TRUE : JNI_FALSE;\n}\n\n} // extern \"C\"\n";
 const MEDASEC_CMAKE = "# Native Security Core (libmedasec) — Phase 2 gap closure, Part 6/7.\n# Small, hardening-focused C++ core: read-only /proc inspection emitting JSON\n# evidence for the signed security-evidence schema. No secrets, no crypto,\n# no writes. Enabled for BOTH debug and release so behavior is identical\n# in development (release security is NOT weaker than debug behavior here).\ncmake_minimum_required(VERSION 3.22.1)\nproject(medasec LANGUAGES CXX)\n\nadd_library(medasec SHARED medasec_core.cpp)\n\ntarget_compile_options(medasec PRIVATE\n    -O2\n    -fvisibility=hidden\n    -fstack-protector-strong\n    -Wall -Wextra\n)\n\ntarget_link_libraries(medasec\n    log\n)\n";
 const MEDASEC_WRAPPER_CMAKE = "# App-level CMake: builds BOTH the React Native New-Architecture app setup\n# (libappmodules + autolinked codegen libs) AND the MedAcademy native security\n# core (libmedasec) in one CMake project. Pointing externalNativeBuild straight\n# at the security-only CMakeLists replaced the RN build and crashed the app at\n# startup (PlatformConstants TurboModule missing, 2026-09-20).\ncmake_minimum_required(VERSION 3.13)\n\nproject(appmodules)\n\n# React Native application setup (libappmodules + codegen libs)\ninclude(${REACT_ANDROID_DIR}/cmake-utils/ReactNative-application.cmake)\n\n# MedAcademy native security core (libmedasec)\nadd_library(medasec SHARED ../cpp/medasec_core.cpp)\ntarget_compile_options(medasec PRIVATE\n    -O2\n    -fvisibility=hidden\n    -fstack-protector-strong\n    -Wall -Wextra\n)\ntarget_link_libraries(medasec\n    log\n)";
 
@@ -3172,13 +3826,49 @@ const TARGET_APP_CATALOG = [
   'com.lbe.parallel', 'com.jumobile.multiapp',
 ];
 
+/**
+ * Root/Magisk/Xposed manager packages that SecurityModule's PACKAGE checks
+ * probe (detectRoot / detectMagisk / detectXposed in SECURITY_MODULE_KT).
+ *
+ * SECOND-PASS FIX — these checks were DEAD CODE on Android 11+: package
+ * visibility makes getPackageInstalled() throw NameNotFound for every package
+ * not declared in <queries>, so the root/Magisk/Xposed package lists always
+ * answered "not installed" on modern devices (RootBeer has the same known
+ * issue: scottyab/rootbeer#167). Scoped <queries> entries are the supported,
+ * Play-policy-compliant remedy (QUERY_ALL_PACKAGES is NOT used).
+ *
+ * MUST stay in sync with the Kotlin lists —
+ * tests/rootDetectionSecondPass.test.cjs extracts both lists and fails on any
+ * package that is probed but not declared.
+ */
+const SECURITY_CHECK_PACKAGES = [
+  // detectRoot() rootPackages
+  'com.noshufou.android.su', 'com.noshufou.android.su.elite',
+  'eu.chainfire.supersu', 'com.koushikdutta.superuser',
+  'com.thirdparty.superuser', 'com.yellowes.su',
+  'com.kingroot.kinguser', 'com.kingo.root',
+  'com.smedialink.oneclickroot', 'com.zhiqupk.root.global',
+  'com.alephzain.framaroot', 'com.topjohnwu.magisk',
+  'io.github.topjohnwu.magisk', 'me.weishu.kernelsu', 'me.bmax.apatch',
+  // detectMagisk() magiskPackages
+  'com.topjohnwu.magisk.alpha',
+  'io.github.huskydg.magisk', 'io.github.vvb2060.magisk',
+  'io.github.huskydg.kitsune',
+  // detectXposed() xposedPackages (org.lsposed.manager and
+  // de.robv.android.xposed.installer also live in TARGET_APP_CATALOG —
+  // the injection below deduplicates)
+  'org.meowcat.edxposed.manager', 'com.solohsu.android.edxp.manager',
+  'io.github.lsposed.lspatch', 'com.rovo98.edxposed.manager',
+  'io.github.vvb2060.magisk.module.xposed', 'me.weishu.exp',
+];
+
 const withTargetAppQueries = (config) =>
   withAndroidManifest(config, (cfg) => {
     const manifest = cfg.modResults.manifest;
     if (!manifest.queries) manifest.queries = [];
     let queries = manifest.queries.find((q) => Array.isArray(q.package));
     if (!queries) { queries = { package: [] }; manifest.queries.push(queries); }
-    for (const name of TARGET_APP_CATALOG) {
+    for (const name of [...TARGET_APP_CATALOG, ...SECURITY_CHECK_PACKAGES]) {
       const exists = queries.package.some((pk) => pk.$ && pk.$['android:name'] === name);
       if (!exists) queries.package.push({ $: { 'android:name': name } });
     }

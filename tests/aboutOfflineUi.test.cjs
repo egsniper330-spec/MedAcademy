@@ -52,12 +52,10 @@ console.log('\n── About Us — build marker removed from user-facing UI ─�
 
   check('no build-marker debug icon import',
     !/FlaskConical/.test(about),
-    'the marker panel icon (FlaskConical) is still imported/rendered');
-
-  check('About Us page still renders its sections',
-    /PageHeader title="About Us"/.test(about) &&
-    /Our Mission/.test(about) &&
-    /What We Stand For/.test(about) &&
+    'the marker panel icon (FlaskConical) is still imported/rendered');      check('About Us page still renders its sections',
+    /PageHeader title=\{t\('about\.title'\)\}/.test(about) &&
+    /'about\.missionTitle'/.test(about) &&
+    /'about\.standFor'/.test(about) &&
     /useCmsSections\('about_us'/.test(about),
     'About Us content was broken by the removal');
 

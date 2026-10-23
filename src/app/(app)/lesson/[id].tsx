@@ -8,8 +8,8 @@ import {
   ArrowLeft, Check, CheckCircle, Clock, Download, Eye, FileText, Film,
   Lock, Paperclip, Pause, Play, RefreshCw, ShieldAlert, X,
 } from 'lucide-react-native';
-import { getLessonById, upsertLessonProgress, getMySubscriptions, getMaterialSignedUrl, getLessonPdfSignedUrl, getCourseById } from '@/lib/api';
-import { materialAccess, materialActionLabel, visibleMaterials } from '@/lib/lessonMaterials';
+import { getLessonById, upsertLessonProgress, getMySubscriptions, getMaterialSignedUrl, getMaterialPdfUrl, getLessonPdfSignedUrl, getCourseById } from '@/lib/api';
+import { isPdfMaterial, materialAccess, materialActionLabel, visibleMaterials } from '@/lib/lessonMaterials';
 import { backendClient } from '@/client/backendClient';
 import { useProfileStore } from '@/lib/store';
 import { isPreviewStudent } from '@/lib/previewAsStudent';
@@ -114,7 +114,7 @@ function MaterialsSection({
   pdfs: any[];
   canAccess: boolean;
   c: any;
-  onOpenMaterial: (storagePathOrUrl: string, displayName: string, forDownload: boolean) => void;
+  onOpenMaterial: (material: any, displayName: string, forDownload: boolean) => void;
   onOpenPdf: (fileUrlOrPath: string, displayName: string) => void;
 }) {
   const { t, tCount } = useTranslation();
@@ -149,7 +149,7 @@ function MaterialsSection({
             return (
               <Pressable
                 key={mat.id}
-                onPress={() => { if (path) onOpenMaterial(path, name, downloadable); }}
+                onPress={() => { if (path) onOpenMaterial(mat, name, downloadable); }}
                 accessibilityLabel={downloadable ? `Download ${name}` : `View ${name}`}
                 accessibilityRole="button"
               >
@@ -174,8 +174,9 @@ function MaterialsSection({
               </Pressable>
             );
           })}
-          {/* legacy lesson_pdfs — no per-material permission column; access is
-              governed by the enrollment gate (`canAccess`) as before. */}
+          {/* legacy lesson_pdfs — staff only (no per-material permission column,
+              and the bytes cannot be watermarked). The caller passes an empty
+              list for students, so this renders for doctors/admins only. */}
           {pdfs.map((pdf: any) => {
             const pdfName = pdf.title ?? pdf.file_name ?? 'Lecture Notes';
             return (
@@ -558,10 +559,53 @@ export default function LessonPlayer() {
   const downloadFile = useCallback(async (signedUrl: string, displayName: string) => {
     if (!signedUrl) return;
 
-    // ── Web fallback ───────────────────────────────────────────────────────
+    // ── Web: FETCH first, then save ────────────────────────────────────────
+    // Navigating to the URL only looked like "nothing happened": a refusal is
+    // a JSON body that renders as a blank tab, and no file is ever produced.
+    // Fetch it instead, so a failure becomes a visible, actionable message and
+    // a success becomes a real download with the document's own filename.
     if (process.env.EXPO_OS === 'web') {
-      const { Linking } = await import('react-native');
-      await Linking.openURL(signedUrl);
+      setDownloadState({ visible: true, fileName: displayName, progress: 0.15, status: 'downloading' });
+      let res: Response;
+      try {
+        res = await fetch(signedUrl);
+      } catch {
+        // Cross-origin fetch refused (deployment without a CORS header on this
+        // route): fall back to the historical navigation, which still works
+        // because the server marks the response as an attachment.
+        setDownloadState(prev => ({ ...prev, visible: false }));
+        const { Linking } = await import('react-native');
+        await Linking.openURL(signedUrl);
+        return;
+      }
+      const contentType = (res.headers.get('content-type') ?? '').toLowerCase();
+      if (!res.ok || contentType.includes('json')) {
+        let message = `Download failed (HTTP ${res.status}).`;
+        try {
+          const parsed = JSON.parse(await res.text()) as { error?: { message?: string }; message?: string };
+          message = parsed?.error?.message ?? parsed?.message ?? message;
+        } catch { /* non-JSON body: keep the HTTP status message */ }
+        const failure = new Error(message) as Error & { httpStatus?: number };
+        failure.httpStatus = res.status;
+        throw failure;
+      }
+      const blob = await res.blob();
+      if (blob.size === 0) throw new Error('The server returned an empty file.');
+      const safeName = displayName.replace(/[^\w.\-]/g, '_') || 'download';
+      const typeExt = contentType.includes('pdf')
+        ? 'pdf'
+        : (contentType.split('/')[1] ?? '').split(';')[0].trim();
+      const downloadName = safeName.includes('.') || !typeExt ? safeName : `${safeName}.${typeExt}`;
+      const objectUrl = URL.createObjectURL(blob);
+      const anchor = document.createElement('a');
+      anchor.href = objectUrl;
+      anchor.download = downloadName;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      setTimeout(() => URL.revokeObjectURL(objectUrl), 10_000);
+      setDownloadState(prev => ({ ...prev, progress: 1, status: 'success' }));
+      setTimeout(() => setDownloadState(prev => ({ ...prev, visible: false })), 1200);
       return;
     }
 
@@ -634,7 +678,16 @@ export default function LessonPlayer() {
   }, []);
 
   /**
-   * Open a lesson material through a fresh 1-hour signed URL.
+   * Open a lesson material.
+   *
+   * PDFs go through the personalized delivery endpoint, which returns a
+   * short-lived token URL for a copy watermarked with THIS student's name and
+   * public account id — both for viewing and for downloading. The watermarking
+   * is decided server-side from the authenticated role, so this screen cannot
+   * (and must not) ask for an unwatermarked copy.
+   *
+   * Every other attachment keeps the existing signed-storage flow: office
+   * documents, archives and images cannot be personalized and are unaffected.
    *
    * `forDownload` mirrors the action the student took: a `preview_only` material
    * (or one with downloads switched off) asks for a VIEW link, and the server
@@ -642,26 +695,44 @@ export default function LessonPlayer() {
    * per-material message rather than a generic failure.
    */
   const openMaterial = useCallback(async (
-    storagePathOrUrl: string,
+    material: any,
     displayName?: string,
     forDownload = true,
   ) => {
-    if (!storagePathOrUrl) return;
+    const name = displayName ?? t('lesson.courseMaterial');
+    const path = material?.storage_path ?? material?.file_url ?? '';
+    if (!path && !material?.id) return;
     try {
-      const signedUrl = await getMaterialSignedUrl(storagePathOrUrl, forDownload);
-      await downloadFile(signedUrl, displayName ?? 'Course Material');
+      let url: string;
+      if (isPdfMaterial(material) && material?.id) {
+        // The delivery endpoint mints a fresh token for every open, so a shared
+        // or expired link cannot be reused, and the bytes are always this
+        // student's personalized copy.
+        const delivery = await getMaterialPdfUrl(String(material.id), forDownload);
+        url = delivery.url;
+      } else {
+        url = await getMaterialSignedUrl(String(path), forDownload);
+      }
+      await downloadFile(url, name);
     } catch (e: any) {
       const msg = String(e?.message ?? '');
-      const refused = /access denied|403/i.test(msg);
-      console.error('[openMaterial] signed URL error:', msg);
+      const status = Number(e?.httpStatus ?? 0);
+      const code = String(e?.errorCode ?? '');
+      const refused = status === 403 || code === 'forbidden' || /access denied|forbidden/i.test(msg);
+      // A missing/unusable watermark engine (503) is its own state: the bytes
+      // were refused on purpose and retrying the download link cannot help.
+      const engineMissing = code === 'watermark_unavailable' || /watermarking is not available/i.test(msg);
+      console.error('[openMaterial] delivery error:', msg, { status, code });
       setDownloadState({
-        visible: true, fileName: displayName ?? t('lesson.courseMaterial'),
+        visible: true, fileName: name,
         progress: 0, status: 'error',
         errorMsg: refused
           ? (forDownload
               ? t('lesson.materialDownloadUnavailable')
               : t('lesson.materialNoAccess'))
-          : t('lesson.downloadLinkError'),
+          : (engineMissing || status === 503 || status === 422 || status === 500
+              ? t('lesson.materialWatermarkUnavailable')
+              : t('lesson.downloadLinkError')),
       });
     }
   }, [downloadFile, t]);
@@ -1241,11 +1312,15 @@ export default function LessonPlayer() {
             One shared renderer for both lesson layouts. It hides itself when the
             lesson has no accessible attachments, lists hidden/disabled ones to
             nobody, and offers View (not Download) for `preview_only` materials.
-            Shown below the player, lesson info and notes. */}
+            Shown below the player, lesson info and notes.
+            Legacy `lesson_pdfs` rows (superseded by lesson materials) are
+            staff-only: their bytes cannot be personalized, so no student is
+            offered them — listing one would only produce a dead button, as the
+            server refuses its signed URL. */}
         {!isFullscreen && (
           <MaterialsSection
             materials={lesson.lesson_materials ?? []}
-            pdfs={lesson.lesson_pdfs ?? []}
+            pdfs={isStudent ? [] : (lesson.lesson_pdfs ?? [])}
             canAccess={canAccessMaterials}
             c={c}
             onOpenMaterial={openMaterial}
@@ -1425,11 +1500,15 @@ export default function LessonPlayer() {
             One shared renderer for both lesson layouts. It hides itself when the
             lesson has no accessible attachments, lists hidden/disabled ones to
             nobody, and offers View (not Download) for `preview_only` materials.
-            Shown below the player, lesson info and notes. */}
+            Shown below the player, lesson info and notes.
+            Legacy `lesson_pdfs` rows (superseded by lesson materials) are
+            staff-only: their bytes cannot be personalized, so no student is
+            offered them — listing one would only produce a dead button, as the
+            server refuses its signed URL. */}
         {!isFullscreen && (
           <MaterialsSection
             materials={lesson.lesson_materials ?? []}
-            pdfs={lesson.lesson_pdfs ?? []}
+            pdfs={isStudent ? [] : (lesson.lesson_pdfs ?? [])}
             canAccess={canAccessMaterials}
             c={c}
             onOpenMaterial={openMaterial}

@@ -110,6 +110,17 @@ export async function invokeEdgeFunction<T = unknown>(
     if (ctx.context && typeof (ctx.context as Record<string, unknown>).status === 'number') {
       httpStatus = (ctx.context as { status: number }).status;
     }
+    // The PHP client reports the HTTP status and the machine-readable code on
+    // the error object itself (not only on a fetch-style `context`). Without
+    // these two fallbacks a 503 `watermark_unavailable` reached the lesson
+    // screen as status 0 and was rendered as "Could not generate a download
+    // link", hiding the real, actionable reason.
+    if (httpStatus === 0 && typeof (error as { status?: unknown }).status === 'number') {
+      httpStatus = (error as { status: number }).status;
+    }
+    if (!errCode && typeof (error as { code?: unknown }).code === 'string') {
+      errCode = (error as { code: string }).code;
+    }
 
     throw new DebugError({ message: msg, httpStatus, rawBody, errorCode: errCode, errorDetails: errDetails, functionName: name });
   }
@@ -1226,9 +1237,12 @@ export interface LessonMaterialPayload {
   download_enabled?: boolean;
   preview_enabled?: boolean;
   /**
-   * "Personalized Student Watermark" — INDEPENDENT of the download setting.
-   * When true, every student receives a copy carrying their own name + MED id.
-   * Defaults to false server-side, so omitting it preserves current behaviour.
+   * LEGACY (migration 032) — read-only and IGNORED by delivery.
+   *
+   * Watermarking is mandatory for students and decided server-side from the
+   * caller's role, so this value changes nothing. It is kept in the type only
+   * because `select('*')` still returns the column, which is deliberately NOT
+   * dropped (dropping it would be destructive and older builds read it).
    */
   watermark_enabled?: boolean;
   order_index?: number;
@@ -1250,7 +1264,7 @@ export async function createLessonMaterial(payload: LessonMaterialPayload) {
   return data;
 }
 
-export async function updateLessonMaterial(id: string, updates: Partial<{ file_name: string; download_enabled: boolean; preview_enabled: boolean; watermark_enabled: boolean; order_index: number }>) {
+export async function updateLessonMaterial(id: string, updates: Partial<{ file_name: string; download_enabled: boolean; preview_enabled: boolean; order_index: number }>) {
   const { data, error } = await backendClient.from('lesson_materials').update({ ...updates, updated_at: new Date().toISOString() }).eq('id', id).select().single();
   if (error) throw error;
   return data;
@@ -3790,46 +3804,41 @@ export async function updateMaterialPermission(id: string, permission: DownloadP
   return data;
 }
 
-/** Toggle the per-material "Personalized Student Watermark" switch.
- *
- *  INDEPENDENT of `permission` / `download_enabled`: a Preview-Only material can
- *  be watermarked, and a Preview + Download material can be left unmarked. The
- *  server owns the effect — it personalizes every delivered copy when this is on.
- */
-export async function updateMaterialWatermark(id: string, watermarkEnabled: boolean) {
-  const { data, error } = await backendClient
-    .from('lesson_materials')
-    .update({ watermark_enabled: watermarkEnabled, updated_at: new Date().toISOString() })
-    .eq('id', id)
-    .select()
-    .single();
-  if (error) throw error;
-  return data;
-}
-
 /**
  * Short-lived, authorized delivery URL for a lesson PDF.
  *
- * WHY THIS REPLACES getMaterialSignedUrl() FOR PDF MATERIALS
- * ─────────────────────────────────────────────────────────────
- * A plain storage signed URL encodes only a path and an expiry, so it cannot
- * carry the material's watermark/download policy and keeps working after the
- * teacher changes it. This endpoint returns a token naming the MATERIAL, the
- * STUDENT and the INTENT; the server re-reads the current permission and
- * enrollment when the token is redeemed, and it personalizes the copy when the
- * teacher enabled watermarking. The unwatermarked original is never returned
- * when watermarking is on.
+ * THIS IS THE ONLY WAY TO OPEN A LESSON PDF. `/storage/signed-url` refuses
+ * lesson-material PDFs for every role, so a client that still builds a storage
+ * link gets a 403 (`material_delivery_required`) rather than the original file.
  *
- * `forDownload` MUST be true only for the student's Download action — a
- * Preview-Only material refuses that intent server-side.
+ * The endpoint returns a token naming the MATERIAL, the STUDENT and the INTENT.
+ * The server resolves the student from the JWT (never from this payload),
+ * re-reads the current permission and enrollment when the token is redeemed,
+ * and — for every caller, staff included — always delivers a copy personalized
+ * with that caller's name and public account id. There is no switch to turn
+ * that off, so a doctor previewing a course downloads exactly what a student
+ * downloads.
+ *
+ * `forDownload` MUST be true only for the Download action — a Preview-Only
+ * material, or one with downloads disabled, refuses that intent server-side.
  */
 export async function getMaterialPdfUrl(
   materialId: string,
   forDownload = false,
 ): Promise<{ url: string; watermarked: boolean; expires_at: string }> {
+  // Issuance is a protected operation: the mint request carries the same two
+  // security layers as playback (X-Integrity-Hash + device-key evidence) for
+  // the 'material_pdf' action, so the backend can enforce its configured tier.
+  // Best-effort by design — a device that cannot produce evidence sends no
+  // header, and the SERVER (never this function) decides what that means.
+  const body = { material_id: materialId, intent: forDownload ? 'download' : 'view' };
+  const securityHeaders = await buildProtectedCallHeaders('material_pdf', body).catch(() => ({}));
   return invokeEdgeFunction<{ url: string; watermarked: boolean; expires_at: string }>(
     'materials/pdf-url',
-    { material_id: materialId, intent: forDownload ? 'download' : 'view' },
+    body,
+    undefined,
+    'POST',
+    securityHeaders,
   );
 }
 

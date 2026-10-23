@@ -96,6 +96,15 @@ final class AuthService
                 // The UPDATE profiles below (same transaction) performs the sync
                 // legally: its profile-update trigger writes users.phone back,
                 // so the end state (users.phone + profiles.phone_e164) is identical.
+                // Allocate the user-facing MED-##### id INSIDE the transaction.
+                // The DB trigger validates this value and stores it, so every
+                // application path draws from the one allocator
+                // (PublicUserIdService: 5-digit ceiling + secure random tail).
+                // A rolled-back creation also rolls the sequence draw back.
+                $metaWithPublicId = array_merge($meta, [
+                    'public_user_id' => PublicUserIdService::allocate(),
+                ]);
+
                 $db->insert(
                     'INSERT INTO users
                        (id, email, encrypted_password, raw_user_meta_data, email_confirmed_at, phone_confirmed_at, created_at, updated_at)
@@ -104,7 +113,7 @@ final class AuthService
                         $userId,
                         $email !== '' ? $email : null,
                         Password::hash($password),
-                        json_encode(array_merge(['full_name' => $fullName, 'role' => $role], $meta), JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE),
+                        json_encode(array_merge(['full_name' => $fullName, 'role' => $role], $metaWithPublicId), JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE),
                     ]
                 );
 
@@ -435,14 +444,21 @@ final class AuthService
     }
 
     // -----------------------------------------------------------------------
-    // Public User ID (MED-####) — canonical normalization + lookup
+    // Public User ID (MED-0001 … MED-99999) — canonical normalization + lookup
     // -----------------------------------------------------------------------
     /**
-     * Normalize a user-supplied Public User ID to its canonical "MED-####"
-     * form, or return null when the input is not an ID-shaped query.
+     * Normalize a user-supplied Public User ID to its canonical form
+     * (MED-0001 … MED-99999), or return null when the input is not an
+     * ID-shaped query.
      *
      * Accepts: "MED-0001", "med-0001", "Med-0001", "MED0001", "med0001",
-     *          " 0001 ", "1", "0001". Rejects: emails, names, phones.
+     *          " 0001 ", "1", "0001", "MED-10000", "10000", "med-48271".
+     * Rejects: emails, names, phones, and any value outside the five-digit
+     * namespace (0, 6+ digits) — an out-of-range number is never widened into
+     * an id.
+     *
+     * The canonical spelling comes from PublicUserIdService, so lookup and
+     * allocation can never disagree on padding or on the 4→5 digit transition.
      */
     public static function normalizePublicUserId(string $input): ?string
     {
@@ -455,7 +471,11 @@ final class AuthService
         if ($digits === null || $digits === '' || !ctype_digit($digits)) {
             return null;
         }
-        return 'MED-' . str_pad($digits, 4, '0', STR_PAD_LEFT);
+        $value = (int) $digits;
+        if ($value < PublicUserIdService::MIN_VALUE || $value > PublicUserIdService::MAX_VALUE) {
+            return null;
+        }
+        return PublicUserIdService::format($value);
     }
 
     /**

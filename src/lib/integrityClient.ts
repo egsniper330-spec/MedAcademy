@@ -37,7 +37,12 @@ import { requestPlayIntegrityToken } from '@/lib/nativeSecurity';
 /** Server verdict TTL is 300s; refresh our hash slightly before expiry. */
 const CACHE_TTL_MS = 4 * 60 * 1000;
 
-let _cached: { hash: string; fetchedAt: number } | null = null;
+// The challenge is bound to ONE action server-side, so the cache must be too.
+// A single shared slot made a second protected action inside the same 4-minute
+// window reuse the first action's hash: the backend then found no verdict row
+// for (user, hash, action=B) and — with B on the enforce tier — rejected a
+// genuine client. Keying by action keeps the reuse honest.
+let _cached: { action: string; hash: string; fetchedAt: number } | null = null;
 
 /** Test hook. */
 export function resetIntegrityCache(): void {
@@ -55,7 +60,7 @@ export async function getIntegrityHash(action: string): Promise<string | null> {
   try {
     if (Platform.OS !== 'android') return null;
 
-    if (_cached && Date.now() - _cached.fetchedAt < CACHE_TTL_MS) {
+    if (_cached && _cached.action === action && Date.now() - _cached.fetchedAt < CACHE_TTL_MS) {
       return _cached.hash;
     }
 
@@ -78,14 +83,21 @@ export async function getIntegrityHash(action: string): Promise<string | null> {
     );
     if (vErr || verdict?.passed !== true) return null;
 
-    _cached = { hash: requestHash, fetchedAt: Date.now() };
+    _cached = { action, hash: requestHash, fetchedAt: Date.now() };
     return requestHash;
   } catch {
     return null;
   }
 }
 
-/** Current hash if still fresh (no network); null otherwise. */
-export function peekIntegrityHash(): string | null {
-  return _cached && Date.now() - _cached.fetchedAt < CACHE_TTL_MS ? _cached.hash : null;
+/**
+ * Current hash for `action` if still fresh (no network); null otherwise.
+ * A hash minted for a DIFFERENT action is deliberately not returned — the
+ * server would reject it for this action, so pretending it is usable only
+ * turns a cache miss into a false authorization failure.
+ */
+export function peekIntegrityHash(action: string): string | null {
+  return _cached && _cached.action === action && Date.now() - _cached.fetchedAt < CACHE_TTL_MS
+    ? _cached.hash
+    : null;
 }

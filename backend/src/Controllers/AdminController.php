@@ -9,9 +9,12 @@ use MedAcademy\Auth\SessionManager;
 use MedAcademy\Database\Database;
 use MedAcademy\Http\ApiException;
 use MedAcademy\Http\Request;
+use MedAcademy\Notifications\EmailService;
 use MedAcademy\Services\AuthService;
 use MedAcademy\Services\AuditService;
 use MedAcademy\Services\FeatureFlagService;
+use MedAcademy\Services\PublicUserIdService;
+use MedAcademy\Utils\Config;
 use MedAcademy\Utils\Uuid;
 
 /**
@@ -347,20 +350,25 @@ final class AdminController
             throw new ApiException(422, 'Max 200 users per bulk operation');
         }
 
-        // Remove self from list
-        $userIds = array_values(array_filter($userIds, fn ($id) => $id !== $actorId));
+        // Normalise the ids but do NOT drop the actor's own row here: a
+        // blanket removal was a SILENT skip — the caller was told "3 updated"
+        // for a 4-user selection with no failure reported. Every operation now
+        // refuses self (or allows it) per user and reports the refusal back.
+        $userIds = array_values(array_unique(array_map('strval', $userIds)));
 
         $success = 0;
         $failed = 0;
         $errors = [];
 
         match ($operation) {
-            'trash' => $this->bulkTrash($userIds, $actorId, $reason, $success, $failed, $errors),
+            'trash' => $this->bulkTrash($userIds, $actorId, $actorRole, $reason, $success, $failed, $errors),
             'restore' => $this->bulkRestore($userIds, $actorId, $success, $failed, $errors),
-            'suspend' => $this->bulkStatus($userIds, 'suspended', $actorId, $actorName, $reason, $success),
-            'unsuspend' => $this->bulkStatus($userIds, 'active', $actorId, $actorName, $reason, $success),
-            'reset_devices' => $this->bulkResetDevices($userIds, $actorId, $actorName, $success),
-            'reset_password' => $this->bulkResetPassword($userIds, $actorId, $actorName, $success, $failed, $errors),
+            'suspend' => $this->bulkStatus($userIds, 'suspended', $actorId, $actorRole, $reason, $success, $failed, $errors),
+            'unsuspend' => $this->bulkStatus($userIds, 'active', $actorId, $actorRole, $reason, $success, $failed, $errors),
+            'reset_devices' => $this->bulkResetDevices($userIds, $actorId, $actorRole, $success, $failed, $errors),
+            // Resets are RESET LINKS, never a shared/unknown password — see
+            // bulkResetPassword(). The operation name is kept for clients.
+            'reset_password' => $this->bulkResetPassword($userIds, $actorId, $actorRole, $success, $failed, $errors),
             'permanent_delete' => $this->bulkPermanentDelete($userIds, $actorId, $reason, $success, $failed, $errors),
             default => throw new ApiException(422, "Unknown operation: {$operation}"),
         };
@@ -375,29 +383,66 @@ final class AdminController
         ];
     }
 
-    private function bulkTrash(array $userIds, string $actorId, string $reason, int &$success, int &$failed, array &$errors): void
-    {
+    /**
+     * Bulk soft delete — PER USER, with the same protections the other bulk
+     * operations apply. A blanket UPDATE previously let a plain admin trash a
+     * super_admin account (or their own) from one multi-select, and left the
+     * trashed accounts holding live sessions. Both are refusals now, reported
+     * per user instead of silently "succeeding".
+     */
+    private function bulkTrash(
+        array $userIds,
+        string $actorId,
+        string $actorRole,
+        string $reason,
+        int &$success,
+        int &$failed,
+        array &$errors
+    ): void {
         $db = Database::instance();
+        $sessions = new SessionManager();
         foreach ($userIds as $userId) {
             try {
-                $old = $db->value('SELECT status FROM profiles WHERE id = ?', [$userId]);
-                if ($old === null || $old === 'trashed') {
+                $row = $db->row('SELECT id, role, status FROM profiles WHERE id = ?', [$userId]);
+                if ($row === null || $row['status'] === 'trashed') {
                     $failed++;
                     $errors[] = ['user_id' => $userId, 'message' => 'User not found or already trashed'];
                     continue;
                 }
+                // Protected accounts: only a super_admin may trash a
+                // super_admin (mirrors deleteUser / bulkStatus).
+                if ($row['role'] === 'super_admin' && $actorRole !== 'super_admin') {
+                    $failed++;
+                    $errors[] = ['user_id' => $userId, 'message' => 'Only a super admin can trash a super admin account'];
+                    continue;
+                }
+                if ($userId === $actorId) {
+                    $failed++;
+                    $errors[] = ['user_id' => $userId, 'message' => 'Cannot trash your own account'];
+                    continue;
+                }
+                $old = (string) $row['status'];
                 $db->query(
                     "UPDATE profiles SET status = 'trashed', pre_trash_status = ?, trashed_at = UTC_TIMESTAMP(6),
                             trash_expires_at = DATE_ADD(UTC_TIMESTAMP(6), INTERVAL 30 DAY)
                       WHERE id = ?",
                     [$old, $userId]
                 );
+                // Same effect as the single-user trash: the account must not
+                // keep a working session on any device once it is trashed.
+                $sessions->revokeAllForUser($userId, 'bulk_trashed');
                 $success++;
             } catch (\Throwable $e) {
                 $failed++;
                 $errors[] = ['user_id' => $userId, 'message' => $e->getMessage()];
             }
         }
+
+        AuditService::write($actorId, 'bulk_trash', [
+            'affected_count' => $success,
+            'failed' => $failed,
+            'reason' => $reason,
+        ]);
     }
 
     private function bulkRestore(array $userIds, string $actorId, int &$success, int &$failed, array &$errors): void
@@ -424,47 +469,194 @@ final class AdminController
         }
     }
 
-    private function bulkStatus(array $userIds, string $newStatus, string $actorId, string $actorName, string $reason, int &$success): void
-    {
+    /**
+     * Bulk suspend / unsuspend — PER USER, with the same eligibility rules the
+     * single-user endpoint applies (setStatus). The previous version ran one
+     * `UPDATE … WHERE id IN (…)` and then reported every submitted id as a
+     * success: it could suspend a super_admin from an admin session, silently
+     * "succeed" on ids that do not exist, and leave the affected accounts with
+     * live sessions. Refusals are returned per user instead of being dropped.
+     */
+    private function bulkStatus(
+        array $userIds,
+        string $newStatus,
+        string $actorId,
+        string $actorRole,
+        string $reason,
+        int &$success,
+        int &$failed,
+        array &$errors
+    ): void {
         $db = Database::instance();
-        $db->query(
-            "UPDATE profiles SET status = ?, is_suspended = ? WHERE id IN (" . implode(',', array_fill(0, count($userIds), '?')) . ")",
-            array_merge([$newStatus, $newStatus === 'suspended' ? 1 : 0], $userIds)
-        );
-        $success = count($userIds);
+        $sessions = new SessionManager();
+
+        foreach ($userIds as $userId) {
+            try {
+                $row = $db->row('SELECT id, role, status FROM profiles WHERE id = ?', [$userId]);
+                if ($row === null) {
+                    $failed++;
+                    $errors[] = ['user_id' => $userId, 'message' => 'User not found'];
+                    continue;
+                }
+                // Protected accounts: only a super_admin may change another
+                // super_admin's status (mirrors setRole / adminChangePassword).
+                if ($row['role'] === 'super_admin' && $actorRole !== 'super_admin') {
+                    $failed++;
+                    $errors[] = ['user_id' => $userId, 'message' => 'Only a super admin can change a super admin account'];
+                    continue;
+                }
+                if ($userId === $actorId && $newStatus === 'suspended') {
+                    $failed++;
+                    $errors[] = ['user_id' => $userId, 'message' => 'Cannot suspend your own account'];
+                    continue;
+                }
+                if ($row['status'] === $newStatus) {
+                    // Already in the requested state: not a failure, not a write.
+                    $success++;
+                    continue;
+                }
+                $db->query(
+                    "UPDATE profiles SET status = ?, is_suspended = ?, suspension_at = NULL WHERE id = ?",
+                    [$newStatus, $newStatus === 'suspended' ? 1 : 0, $userId]
+                );
+                if ($newStatus === 'suspended') {
+                    // Same effect as the single-user path: a suspended account
+                    // must not keep a working session on any device.
+                    $sessions->revokeAllForUser($userId, 'bulk_suspended');
+                }
+                $success++;
+            } catch (\Throwable $e) {
+                $failed++;
+                $errors[] = ['user_id' => $userId, 'message' => $e->getMessage()];
+            }
+        }
 
         AuditService::write($actorId, $newStatus === 'suspended' ? 'bulk_suspend' : 'bulk_unsuspend', [
-            'affected_count' => count($userIds),
+            'affected_count' => $success,
+            'failed' => $failed,
             'reason' => $reason,
         ]);
     }
 
-    private function bulkResetDevices(array $userIds, string $actorId, string $actorName, int &$success): void
-    {
+    /**
+     * Bulk device reset — revokes every registered device AND the live session,
+     * exactly like POST /admin/users/{id}/devices/reset. Rows are only marked
+     * revoked (never deleted), so re-enabling restores the prior state.
+     */
+    private function bulkResetDevices(
+        array $userIds,
+        string $actorId,
+        string $actorRole,
+        int &$success,
+        int &$failed,
+        array &$errors
+    ): void {
         $db = Database::instance();
-        $db->query(
-            "UPDATE devices SET status = 'logged_out', trust_level = 'revoked',
-                    revoked_at = UTC_TIMESTAMP(6), revoked_reason = 'bulk_device_reset'
-              WHERE user_id IN (" . implode(',', array_fill(0, count($userIds), '?')) . ")",
-            $userIds
-        );
-        $success = count($userIds);
+        $sessions = new SessionManager();
+
+        foreach ($userIds as $userId) {
+            try {
+                $row = $db->row('SELECT id, role FROM profiles WHERE id = ?', [$userId]);
+                if ($row === null) {
+                    $failed++;
+                    $errors[] = ['user_id' => $userId, 'message' => 'User not found'];
+                    continue;
+                }
+                if ($row['role'] === 'super_admin' && $actorRole !== 'super_admin') {
+                    $failed++;
+                    $errors[] = ['user_id' => $userId, 'message' => 'Only a super admin can reset devices for a super admin account'];
+                    continue;
+                }
+                $db->query(
+                    "UPDATE devices SET status = 'logged_out', trust_level = 'revoked',
+                            revoked_at = UTC_TIMESTAMP(6), revoked_reason = 'bulk_device_reset'
+                      WHERE user_id = ?",
+                    [$userId]
+                );
+                $sessions->revokeAllForUser($userId, 'bulk_device_reset');
+                $success++;
+            } catch (\Throwable $e) {
+                $failed++;
+                $errors[] = ['user_id' => $userId, 'message' => $e->getMessage()];
+            }
+        }
 
         AuditService::write($actorId, 'bulk_reset_devices', [
-            'affected_count' => count($userIds),
+            'affected_count' => $success,
+            'failed' => $failed,
         ]);
     }
 
-    private function bulkResetPassword(array $userIds, string $actorId, string $actorName, int &$success, int &$failed, array &$errors): void
-    {
-        // Generate temporary passwords and update
+    /**
+     * Bulk password reset — SECURE RESET LINKS, never a password.
+     *
+     * The previous implementation generated a temporary password per user and
+     * then threw it away: the account was locked out with a password nobody
+     * knew. That is not a reset flow. This mirrors the individual "Reset
+     * Password (Email)" action and AuthService::forgotPassword(): a one-time
+     * token (30 min TTL, stored hashed) is issued per user and emailed to that
+     * user's own address. No shared password exists, nothing is returned to the
+     * caller, and no password material is ever logged.
+     *
+     * Eligibility per user: the actor role must be allowed to reset that role
+     * (admin → student/doctor, super_admin → all), the account must be usable,
+     * and it must have an email address. Every refusal is reported.
+     */
+    private function bulkResetPassword(
+        array $userIds,
+        string $actorId,
+        string $actorRole,
+        int &$success,
+        int &$failed,
+        array &$errors
+    ): void {
         $db = Database::instance();
+        $ttl = Config::int('PASSWORD_RESET_TTL_SECONDS', 1800);
+        $appUrl = Config::string('APP_URL');
+
         foreach ($userIds as $userId) {
             try {
-                $tempPassword = substr(str_replace(['/', '+', '='], '', base64_encode(random_bytes(12))), 0, 12) . '!';
-                $db->query(
-                    'UPDATE users SET encrypted_password = ?, updated_at = UTC_TIMESTAMP(6) WHERE id = ?',
-                    [Password::hash($tempPassword), $userId]
+                $row = $db->row('SELECT id, role, status, email FROM profiles WHERE id = ?', [$userId]);
+                if ($row === null) {
+                    $failed++;
+                    $errors[] = ['user_id' => $userId, 'message' => 'User not found'];
+                    continue;
+                }
+                $allowed = $actorRole === 'super_admin'
+                    ? ['student', 'doctor', 'admin', 'super_admin']
+                    : ['student', 'doctor'];
+                if (!in_array($row['role'], $allowed, true)) {
+                    $failed++;
+                    $errors[] = ['user_id' => $userId, 'message' => 'You are not allowed to reset this account password'];
+                    continue;
+                }
+                if (in_array($row['status'], ['trashed', 'deleted', 'suspended', 'blocked'], true)) {
+                    $failed++;
+                    $errors[] = ['user_id' => $userId, 'message' => 'Account is not active'];
+                    continue;
+                }
+                $email = trim((string) ($row['email'] ?? ''));
+                if ($email === '') {
+                    $failed++;
+                    $errors[] = ['user_id' => $userId, 'message' => 'No email address on file'];
+                    continue;
+                }
+
+                $token = bin2hex(random_bytes(32));
+                $db->insert(
+                    'INSERT INTO password_reset_tokens (id, user_id, token_hash, expires_at, ip_address, created_at)
+                     VALUES (?, ?, ?, DATE_ADD(UTC_TIMESTAMP(6), INTERVAL ? SECOND), NULL, UTC_TIMESTAMP(6))',
+                    [Uuid::v4(), $userId, hash('sha256', $token), $ttl]
+                );
+
+                $resetUrl = $appUrl . '/reset-password?token=' . $token;
+                EmailService::send(
+                    $email,
+                    'Reset your MedAcademy password',
+                    '<p>An administrator started a password reset for your account.</p>'
+                    . '<p>Use this link to choose a new password (valid 30 minutes):</p>'
+                    . '<p><a href="' . htmlspecialchars($resetUrl, ENT_QUOTES) . '">'
+                    . htmlspecialchars($resetUrl) . '</a></p>'
                 );
                 $success++;
             } catch (\Throwable $e) {
@@ -474,6 +666,7 @@ final class AdminController
         }
 
         AuditService::write($actorId, 'bulk_reset_password', [
+            'mode' => 'reset_links',
             'affected_count' => $success,
             'failed' => $failed,
         ]);
@@ -481,16 +674,21 @@ final class AdminController
 
     private function bulkPermanentDelete(array $userIds, string $actorId, string $reason, int &$success, int &$failed, array &$errors): void
     {
-        if ($actorId !== null) {
-            $actorRole = Database::instance()->value('SELECT role FROM profiles WHERE id = ?', [$actorId]);
-            if ($actorRole !== 'super_admin') {
-                throw new ApiException(403, 'Only super_admin can permanently delete accounts');
-            }
+        $actorRole = Database::instance()->value('SELECT role FROM profiles WHERE id = ?', [$actorId]);
+        if ($actorRole !== 'super_admin') {
+            throw new ApiException(403, 'Only super_admin can permanently delete accounts');
         }
 
         $db = Database::instance();
         foreach ($userIds as $userId) {
             try {
+                // Irreversible: never let the actor erase their own account from
+                // a multi-select (mirrors deleteUser's self guard).
+                if ($userId === $actorId) {
+                    $failed++;
+                    $errors[] = ['user_id' => $userId, 'message' => 'Cannot delete your own account'];
+                    continue;
+                }
                 $this->hardDeleteUser($db, $userId);
                 $success++;
             } catch (\Throwable $e) {
@@ -1148,6 +1346,9 @@ final class AdminController
             //    trg_on_auth_user_created fires and creates the profiles row;
             //    role is carried in raw_user_meta_data so that trigger (and its
             //    doctor-credits trigger) see the correct role.
+            // User-facing MED-##### id: allocated by the one shared allocator
+            // (5-digit ceiling, secure random tail) and validated/stored by the
+            // profiles trigger. Same call as register() and the student flow.
             $db->insert(
                 'INSERT INTO users (id, email, encrypted_password, raw_user_meta_data, created_at, updated_at)
                  VALUES (?, ?, ?, ?, UTC_TIMESTAMP(6), UTC_TIMESTAMP(6))',
@@ -1155,7 +1356,12 @@ final class AdminController
                     $userId,
                     $email,
                     $hashedPassword,
-                    json_encode(['full_name' => $fullName, 'role' => $role, 'phone' => $phone], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE),
+                    json_encode([
+                        'full_name' => $fullName,
+                        'role' => $role,
+                        'phone' => $phone,
+                        'public_user_id' => PublicUserIdService::allocate(),
+                    ], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE),
                 ]
             );
 

@@ -98,15 +98,28 @@ check($results, $fail, 'unknown material: DENIED',                      $can('s1
 check($results, $fail, 'doctor: allowed',                               $can('d1', 'doctor', 'm4.pdf', true) === true);
 check($results, $fail, 'admin: allowed',                                $can('a1', 'admin', 'm4.pdf', true) === true);
 
-// ── 2. shouldWatermark (staff never; students per material flag) ────────────
+// ── 2. shouldWatermark — MANDATORY for EVERY delivery ───────────────────────
+// The signature is `shouldWatermark(string $role)`: there is no material
+// argument any more, so nothing a doctor stores (or a client sends) can turn
+// personalization off. Verified by reflection so the ABSENCE of a second
+// parameter is itself asserted, and the result is asserted to be `true` for
+// every role (the unwatermarked original is never served by this endpoint).
 $ctrl = new MaterialDeliveryController();
 $should = new ReflectionMethod(MaterialDeliveryController::class, 'shouldWatermark');
 $should->setAccessible(true);
-$m = ['watermark_enabled' => 1];
-check($results, $fail, 'shouldWatermark: student + enabled => true',  $should->invoke($ctrl, $m, 'student') === true);
-check($results, $fail, 'shouldWatermark: student + disabled => false', $should->invoke($ctrl, ['watermark_enabled' => 0], 'student') === false);
-check($results, $fail, 'shouldWatermark: doctor => false',            $should->invoke($ctrl, $m, 'doctor') === false);
-check($results, $fail, 'shouldWatermark: admin => false',             $should->invoke($ctrl, $m, 'admin') === false);
+$params = $should->getParameters();
+check($results, $fail, 'shouldWatermark takes exactly ONE parameter (the role)', count($params) === 1, 'params=' . count($params));
+check($results, $fail, 'that parameter is the ROLE, not the material', ($params[0]->getType()?->getName() ?? '') === 'string', (string) ($params[0]->getType()?->getName() ?? 'none'));
+check($results, $fail, 'shouldWatermark: student => ALWAYS true', $should->invoke($ctrl, 'student') === true);
+check($results, $fail, 'shouldWatermark: doctor => true (a doctor gets the student bytes)', $should->invoke($ctrl, 'doctor') === true);
+check($results, $fail, 'shouldWatermark: admin => true', $should->invoke($ctrl, 'admin') === true);
+check($results, $fail, 'shouldWatermark: super_admin => true', $should->invoke($ctrl, 'super_admin') === true);
+check($results, $fail, 'shouldWatermark: unknown role => true (no role escapes personalization)', $should->invoke($ctrl, '') === true);
+// The legacy column must not be READ by delivery at all.
+$source = (string) file_get_contents(dirname(__DIR__, 2) . '/src/Controllers/MaterialDeliveryController.php');
+$loadBody = substr($source, (int) strpos($source, 'private function loadMaterial'), 1200);
+check($results, $fail, 'loadMaterial does NOT select watermark_enabled', !str_contains($loadBody, 'watermark_enabled,'));
+check($results, $fail, 'shouldWatermark does not reference watermark_enabled', !str_contains(substr($source, (int) strpos($source, 'private function shouldWatermark'), 400), 'watermark_enabled'));
 
 // ── 3. Token lifecycle ──────────────────────────────────────────────────────
 $sign = new ReflectionMethod(MaterialDeliveryController::class, 'signToken');

@@ -9,9 +9,10 @@ declare(strict_types=1);
  * (c) leave NO temporary scratch directory or .part file behind:
  *
  *   in-process:  non-PDF bytes, empty file, truncated PDF, encrypted PDF;
- *   child proc:  missing Ghostscript binary, missing font, page-count limit
- *                (PDF_WATERMARK_MAX_PAGES), oversized page
- *                (PDF_WATERMARK_MAX_PIXELS_PER_PAGE).
+ *   child proc:  page-count limit (PDF_WATERMARK_MAX_PAGES) — both engines;
+ *                raster only: missing Ghostscript binary, missing font,
+ *                oversized page (PDF_WATERMARK_MAX_PIXELS_PER_PAGE);
+ *                vector only: oversized source (PDF_WATERMARK_MAX_SOURCE_BYTES).
  *
  * The child processes give each config case a clean Config cache. Baseline: 8/8.
  */
@@ -134,12 +135,22 @@ foreach ([
 $PHP = PHP_BINARY;
 $prepend = __DIR__ . '/prepend.php';
 $baseEnv = getenv();
+// The limit cases depend on WHICH engine is resolved: a missing Ghostscript or a
+// missing TTF is fatal for the raster engine and irrelevant to the vector one,
+// while an oversized SOURCE is a vector-engine limit. Assert only what the
+// resolved engine actually enforces, so the suite cannot pass on a stale
+// assumption.
+$probeMode = (new PdfWatermarkService())->effectiveMode();
 $envCases = [
-    ['missing_ghostscript', ['GHOSTSCRIPT_BIN' => $WORK . '/does/not/exist/gs'], [503]],
-    ['missing_font',        ['PDF_WATERMARK_FONT' => $WORK . '/does/not/exist/font.ttf'], [503]],
-    ['too_many_pages',      ['PDF_WATERMARK_MAX_PAGES' => '2'], [422]],
-    ['page_too_large',      ['PDF_WATERMARK_MAX_PIXELS_PER_PAGE' => '1000'], [422]],
+    ['too_many_pages', ['PDF_WATERMARK_MAX_PAGES' => '2'], [422]],
 ];
+if ($probeMode === PdfWatermarkService::MODE_RASTER) {
+    $envCases[] = ['missing_ghostscript', ['GHOSTSCRIPT_BIN' => $WORK . '/does/not/exist/gs'], [503]];
+    $envCases[] = ['missing_font', ['PDF_WATERMARK_FONT' => $WORK . '/does/not/exist/font.ttf'], [503]];
+    $envCases[] = ['page_too_large', ['PDF_WATERMARK_MAX_PIXELS_PER_PAGE' => '1000'], [422]];
+} else {
+    $envCases[] = ['source_too_large', ['PDF_WATERMARK_MAX_SOURCE_BYTES' => '500'], [422]];
+}
 foreach ($envCases as [$label, $overrides, $codes]) {
     $env = array_merge($baseEnv, $overrides);
     $d = [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']];

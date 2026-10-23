@@ -69,10 +69,14 @@ import {
 
 export {
   effectiveLocale,
+  isStaffConsoleRole,
   LANGUAGE_PREFERENCES,
   LANGUAGE_PREFERENCE_STORAGE_KEY,
   parsePreference,
+  STAFF_CONSOLE_LOCALE,
+  STAFF_CONSOLE_ROLES,
   type LanguagePreference,
+  type StaffConsoleRole,
 } from './preference';
 export {
   createPreferenceStore,
@@ -175,11 +179,51 @@ function notifyListeners(): void {
 }
 
 /**
+ * Role-scoped locale lock.
+ *
+ * The Super Admin and Admin consoles must always be English. Rather than
+ * editing hundreds of screens, the language layer applies this lock to the
+ * EFFECTIVE locale: it wins over the stored preference and the device
+ * language, but the stored preference itself is untouched, so leaving the
+ * console restores the user's own language.
+ *
+ * `null` = no lock (normal device/preference resolution).
+ */
+let roleLocaleLock: Locale | null = null;
+
+/** Current lock (null when the signed-in role is not a staff console role). */
+export function getRoleLocaleLock(): Locale | null {
+  return roleLocaleLock;
+}
+
+/**
+ * Apply or clear the role-scoped locale lock. Idempotent: setting the same
+ * value does nothing, so a re-render cannot cause a language flip loop.
+ *
+ * Clearing re-resolves from the stored preference (which is why the lock is
+ * kept separate from the preference and never writes to storage).
+ */
+export function setRoleLocaleLock(locale: Locale | null): void {
+  if (locale === roleLocaleLock) return;
+  roleLocaleLock = locale;
+  if (roleLocaleLock !== null) {
+    setLocale(roleLocaleLock);
+    applyRTL(roleLocaleLock);
+  } else {
+    const next = effectiveLocale(getPreference(), getDeviceLanguageTags());
+    setLocale(next);
+    applyRTL(next);
+  }
+  notifyListeners();
+}
+
+/**
  * Resolve the effective locale for a preference and publish it.
- * Precedence: explicit override → device tags → English (see ./preference.ts).
+ * Precedence: role lock (staff console) → explicit override → device tags →
+ * English (see ./preference.ts).
  */
 function publishEffectiveLocale(pref: LanguagePreference): Locale {
-  const next = effectiveLocale(pref, getDeviceLanguageTags());
+  const next = roleLocaleLock ?? effectiveLocale(pref, getDeviceLanguageTags());
   setLocale(next);
   return next;
 }

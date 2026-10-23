@@ -1,0 +1,202 @@
+<?php
+
+declare(strict_types=1);
+
+namespace MedAcademy\Http;
+
+use MedAcademy\Utils\Json;
+
+final class Request
+{
+    private array $body;
+    private array $query;
+    private string $path;
+    private string $method;
+    private array $headers;
+
+    /** @var array<string,mixed> resolved route params ({id} etc.) */
+    public array $params = [];
+
+    /** @var array<string,mixed> authenticated user context (set by AuthMiddleware) */
+    public array $user = [];
+
+    private function __construct()
+    {
+        $this->method = strtoupper($_SERVER['REQUEST_METHOD'] ?? 'GET');
+        $rawPath = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH) ?: '/';
+        // Strip front-controller filename (e.g. /index.php/courses → /courses)
+        // so routes always match against the clean path.
+        if (preg_match('#/[^/]+\.php(/.*)$#', $rawPath, $m)) {
+            $rawPath = $m[1] ?: '/';
+        }
+        $this->path = $rawPath;
+        $this->query = $_GET;
+        $this->headers = self::extractHeaders();
+        $raw = file_get_contents('php://input') ?: '';
+        $contentType = strtolower((string) ($this->headers['content-type'] ?? ''));
+        // Only parse structured bodies. Raw binary payloads (e.g. octet-stream
+        // video chunks) must stay untouched — the consuming controller reads
+        // php://input directly. Without this guard, every binary POST 400s
+        // with "Invalid JSON body" before the route handler runs.
+        $isJson = str_contains($contentType, 'json') || $contentType === '';
+        if ($isJson) {
+            $this->body = Json::decode($raw);
+        } else {
+            $this->body = [];
+        }
+        if ($this->body === []) {
+            // allow form-encoded for tooling convenience
+            if ($contentType === 'application/x-www-form-urlencoded') {
+                $this->body = $_POST;
+            }
+        }
+    }
+
+    public static function capture(): self
+    {
+        return new self();
+    }
+
+    private static function extractHeaders(): array
+    {
+        $headers = [];
+        foreach ($_SERVER as $key => $value) {
+            if (str_starts_with($key, 'HTTP_')) {
+                $name = strtolower(str_replace('_', '-', substr($key, 5)));
+                $headers[$name] = (string) $value;
+            }
+        }
+        $headers['content-type'] = $_SERVER['CONTENT_TYPE'] ?? '';
+        return $headers;
+    }
+
+    public function method(): string
+    {
+        return $this->method;
+    }
+
+    public function path(): string
+    {
+        return $this->path;
+    }
+
+    public function header(string $name, ?string $default = null): ?string
+    {
+        return $this->headers[strtolower($name)] ?? $default;
+    }
+
+    public function bearerToken(): ?string
+    {
+        $auth = $this->header('authorization');
+        if ($auth !== null && preg_match('/^Bearer\s+(.+)$/i', $auth, $m)) {
+            return trim($m[1]);
+        }
+        return null;
+    }
+
+    public function json(): array
+    {
+        return $this->body;
+    }
+
+    public function input(string $key, mixed $default = null): mixed
+    {
+        return $this->body[$key] ?? $default;
+    }
+
+    public function has(string $key): bool
+    {
+        return array_key_exists($key, $this->body);
+    }
+
+    public function query(string $key, mixed $default = null): mixed
+    {
+        return $this->query[$key] ?? $default;
+    }
+
+    /**
+     * All raw query-string parameters (the full parsed $_GET array).
+     * Used by the generic DataController to implement Supabase-style
+     * select/order/limit/offset/count/head and filter parameters.
+     *
+     * @return array<string,mixed>
+     */
+    public function queryParams(): array
+    {
+        return $this->query;
+    }
+
+    /**
+     * Client IP used for rate limiting, audit trails and risk signals.
+     *
+     * TRUST POLICY: `X-Forwarded-For` and friends are DELIBERATELY ignored.
+     * Those headers are attacker-controlled on a direct-to-PHP deployment, so
+     * honouring them would let a client pick any bucket identity it likes and
+     * walk straight past a per-IP limit (or frame someone else's address).
+     * REMOTE_ADDR is the socket peer the web server actually accepted, which
+     * cannot be forged by the request.
+     *
+     * If this API is ever placed behind a reverse proxy, forwarded headers
+     * must only be honoured after explicitly validating that the immediate
+     * peer is a configured trusted proxy (and then taking the LAST untrusted
+     * hop) — never by default.
+     */
+    public function clientIp(): string
+    {
+        return $_SERVER['REMOTE_ADDR'] ?? '0.0.0.0';
+    }
+
+    public function userAgent(): string
+    {
+        return (string) ($_SERVER['HTTP_USER_AGENT'] ?? '');
+    }
+
+    public function platform(): string
+    {
+        $ua = $this->userAgent();
+        if (stripos($ua, 'android') !== false) {
+            return 'android';
+        }
+        if (stripos($ua, 'iphone') !== false || stripos($ua, 'ipad') !== false || stripos($ua, 'ios') !== false) {
+            return 'ios';
+        }
+        return 'web';
+    }
+
+    /**
+     * Read a raw uploaded file (multipart).
+     */
+    public function file(string $key): ?array
+    {
+        return $_FILES[$key] ?? null;
+    }
+
+    /** Whether PHP discarded the multipart body because it exceeded post_max_size. */
+    public function postBodyExceededLimit(): bool
+    {
+        $contentLength = (int) ($_SERVER['CONTENT_LENGTH'] ?? 0);
+        if ($contentLength <= 0 || $_POST !== [] || $_FILES !== []) {
+            return false;
+        }
+
+        $postMaxBytes = self::iniBytes((string) ini_get('post_max_size'));
+        return $postMaxBytes > 0 && $contentLength > $postMaxBytes;
+    }
+
+    /** Convert PHP shorthand ini values (K/M/G) into bytes. */
+    private static function iniBytes(string $value): int
+    {
+        $value = trim($value);
+        if ($value === '' || $value === '0') {
+            return 0;
+        }
+        $unit = strtolower($value[strlen($value) - 1]);
+        $amount = (float) $value;
+        return (int) match ($unit) {
+            'g' => $amount * 1024 * 1024 * 1024,
+            'm' => $amount * 1024 * 1024,
+            'k' => $amount * 1024,
+            default => $amount,
+        };
+    }
+}

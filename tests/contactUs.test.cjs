@@ -198,11 +198,11 @@ const brandingLibSrc = src('src/lib/branding.ts');
     'render is driven by the fetch STATUS (loaded/error terminal states)',
   );
   check(
-    /Unable to load Contact Us/.test(contactSrc) && /Retry/.test(contactSrc),
-    'error state shows "Unable to load Contact Us" with a Retry action',
+    /'contact\.errorTitle'/.test(contactSrc) && /'common\.retry'|'contact\.retryA11y'/.test(contactSrc),
+    'error state shows the localized "Unable to load Contact Us" with a Retry action',
   );
   check(
-    /Contact details are not yet configured\./.test(contactSrc),
+    /'contact\.emptyTitle'/.test(contactSrc),
     'empty state exists for no configured channels',
   );
   check(

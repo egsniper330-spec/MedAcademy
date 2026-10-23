@@ -153,7 +153,11 @@ final class StorageService
      * Authorisation check — port of the get-signed-url Edge Function:
      *   lesson-materials: doctor/admin/super_admin OR ENROLLED (non-suspended)
      *                     student on a PUBLISHED lesson/course OR preview lesson
-     *   lesson-pdfs:      any authenticated user
+     *   lesson-pdfs:      staff only. This is the LEGACY lecture-notes bucket
+     *                     (the `lesson_pdfs` table, superseded by
+     *                     `lesson_materials`); it used to be readable by ANY
+     *                     authenticated user, which made every object in it a
+     *                     student PDF with no watermark and no enrollment check.
      *
      * $forDownload distinguishes the app's "save this file" action from merely
      * VIEWING it. A material the doctor set to `preview_only` may be viewed but
@@ -169,7 +173,13 @@ final class StorageService
             return true;
         }
         if ($bucket === 'lesson-pdfs') {
-            return true;
+            // Refused for students: these bytes can never carry a watermark
+            // (there is no lesson_materials row to key a personalized copy on),
+            // so serving them would hand out an unwatermarked student PDF — the
+            // exact leak mandatory personalization exists to prevent. The notes
+            // belong in `lesson_materials`, where they are delivered as
+            // personalized copies. Staff keep access for reference and support.
+            return false;
         }
         if ($bucket === 'lesson-materials') {
             $row = Database::instance()->row(

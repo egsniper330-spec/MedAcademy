@@ -53,10 +53,10 @@ ok(/paddingBottom:\s*20/.test(notif),
 console.log('B. info/* PageHeader placement');
 // The title may be a literal or an i18n key — both are the same header row.
 const infoFiles = [
-  ['src/app/(app)/info/about.tsx', 'About Us', 'title="About Us"'],
+  ['src/app/(app)/info/about.tsx', 'About Us', "title=\\{t\\('about\\.title'\\)\\}"],
   ['src/app/(app)/info/privacy.tsx', 'Privacy Policy', "title=\\{t\\('studentProfile\\.privacy'\\)\\}"],
   ['src/app/(app)/info/terms.tsx', 'Terms & Conditions', "title=\\{t\\('studentProfile\\.terms'\\)\\}"],
-  ['src/app/(app)/info/contact.tsx', 'Contact Us', 'title="Contact Us"'],
+  ['src/app/(app)/info/contact.tsx', 'Contact Us', "title=\\{t\\('contact\\.title'\\)\\}"],
 ];
 for (const [rel, title, headerAttr] of infoFiles) {
   const src = read(rel);

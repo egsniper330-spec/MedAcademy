@@ -65,10 +65,14 @@
  *   Safari (iPhone):          No Document Fullscreen API — native player used;
  *                             VdoCipher annotate (server-side rtext) is primary
  *
- * ── Position grid ─────────────────────────────────────────────────────────────
- *   9 fixed slots as fractions of the viewport. Each slot keeps ≥8% inset from
- *   every edge. The watermark moves to a new slot every 30–60 s (random) using
- *   CSS transition on transform — zero layout recalculation.
+ * ── Movement ─────────────────────────────────────────────────────────────────
+ *   Continuous billiard motion, identical to the Plyr mark and the WebView
+ *   injection: position advances from elapsed time every animation frame and
+ *   reflects exactly off the four edges of the measured box (the mark's own
+ *   size is subtracted, so it never clips). Fixed opacity — the mark never
+ *   fades or blinks — and pointer-events:none, so it never eats a tap.
+ *   Fullscreen entry/exit, resize and orientation change re-measure and
+ *   restart the loop in the new box with the type scaled to it.
  */
 
 import { useEffect, useRef } from 'react';
@@ -85,16 +89,6 @@ interface WatermarkConfig {
 
 const WM_EL_ID   = 'vdo-wm-fs';
 const WM_ST_ID   = 'vdo-wm-fs-style';
-
-/**
- * 9-slot grid — VERBATIM from the Plyr watermark (playerScript.ts G table,
- * 8% inset) — the watermark source of truth shared by every player.
- */
-const GRID: [number, number][] = [
-  [0.08, 0.08], [0.42, 0.08], [0.72, 0.08],
-  [0.04, 0.42], [0.35, 0.42], [0.68, 0.42],
-  [0.08, 0.74], [0.42, 0.74], [0.72, 0.74],
-];
 
 // ─── Hook ──────────────────────────────────────────────────────────────────────
 
@@ -113,8 +107,6 @@ export function useFullscreenWatermark(
 ): void {
   // All state is managed in refs — no React re-renders needed.
   const elRef     = useRef<HTMLDivElement | null>(null);
-  const timerRef  = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const curSlot   = useRef(-1);
   const vwRef     = useRef(0);
   const vhRef     = useRef(0);
 
@@ -128,23 +120,93 @@ export function useFullscreenWatermark(
     // ── Helpers ────────────────────────────────────────────────────────────
 
     function rnd(a: number, b: number) { return a + Math.random() * (b - a); }
-    function nextSlot(): [number, number] {
-      let n: number;
-      do { n = Math.floor(Math.random() * GRID.length); } while (n === curSlot.current);
-      curSlot.current = n;
-      return GRID[n];
-    }
+
+    // ── Continuous billiard motion ─────────────────────────────────────────
+    // Same model as the Plyr watermark and the WebView injection: the position
+    // advances from ELAPSED TIME, velocity reflects exactly off the four edges
+    // of the measured box, and the element's own size is subtracted so the whole
+    // mark stays inside. No opacity animation, no hide gap, no slot teleport.
+    const mot = { x: 0, y: 0, vx: 0, vy: 0 };
+    let raf = 0;
+    let last = 0;
+    let ew = 0;
+    let eh = 0;
+    const SPEED_MIN = 26, SPEED_MAX = 44, MAX_STEP_S = 0.05;
 
     function captureVP(el: HTMLElement) {
       vwRef.current = el.clientWidth  || window.innerWidth  || 320;
       vhRef.current = el.clientHeight || window.innerHeight || 180;
+      const node = elRef.current;
+      if (node) { ew = node.offsetWidth || 0; eh = node.offsetHeight || 0; }
+    }
+    const maxX = () => Math.max(0, vwRef.current - ew);
+    const maxY = () => Math.max(0, vhRef.current - eh);
+
+    // Responsive type: 6.2 % of the smaller box, clamped 13–34 px.
+    function fontSize(): number {
+      const base = Math.min(vwRef.current || 360, vhRef.current || 202);
+      return Math.round(Math.min(34, Math.max(13, base * 0.062)));
+    }
+    function applyFont() {
+      const el = elRef.current;
+      if (!el) return;
+      const px = fontSize();
+      el.querySelectorAll('[data-wm-line]').forEach((n) => {
+        const node = n as HTMLElement;
+        node.style.fontSize = (node.dataset.wmLine === 'name' ? Math.round(px * 0.9) : px) + 'px';
+      });
     }
 
-    function mkTransform(slot: [number, number], deg: number): string {
-      return (
-        `translate3d(${Math.round(slot[0] * vwRef.current)}px,` +
-        `${Math.round(slot[1] * vhRef.current)}px,0) rotate(${deg.toFixed(1)}deg)`
-      );
+    function advance(pos: number, vel: number, dt: number, max: number) {
+      let next = pos + vel * dt;
+      let v = vel;
+      for (let i = 0; i < 4; i++) {
+        if (next < 0) { next = -next; v = -v; }
+        else if (next > max) { next = 2 * max - next; v = -v; }
+        else break;
+      }
+      return { pos: Math.max(0, Math.min(max, next)), vel: v };
+    }
+
+    function draw() {
+      const el = elRef.current;
+      if (!el) return;
+      el.style.transform = `translate3d(${Math.round(mot.x)}px,${Math.round(mot.y)}px,0)`;
+    }
+
+    function step(ts: number) {
+      const el = elRef.current;
+      if (!el) { raf = 0; return; }
+      if (!last) last = ts;
+      let dt = (ts - last) / 1000;
+      last = ts;
+      if (!isFinite(dt) || dt < 0) dt = 0;
+      if (dt > MAX_STEP_S) dt = MAX_STEP_S;
+      const ax = advance(mot.x, mot.vx, dt, maxX());
+      const ay = advance(mot.y, mot.vy, dt, maxY());
+      mot.x = ax.pos; mot.vx = ax.vel;
+      mot.y = ay.pos; mot.vy = ay.vel;
+      draw();
+      raf = requestAnimationFrame(step);
+    }
+
+    function startMotion() {
+      const el = elRef.current;
+      if (!el) return;
+      if (raf) { cancelAnimationFrame(raf); raf = 0; }
+      last = 0;
+      applyFont();
+      ew = el.offsetWidth || 0;
+      eh = el.offsetHeight || 0;
+      mot.x = maxX() * rnd(0.12, 0.88);
+      mot.y = maxY() * rnd(0.12, 0.88);
+      const speed = rnd(SPEED_MIN, SPEED_MAX);
+      const share = rnd(0.55, 0.85);
+      mot.vx = speed * share * (Math.random() < 0.5 ? -1 : 1);
+      mot.vy = speed * Math.sqrt(Math.max(0, 1 - share * share)) * (Math.random() < 0.5 ? -1 : 1);
+      el.style.opacity = '0.55';
+      draw();
+      raf = requestAnimationFrame(step);
     }
 
     // ── Inject <style> ─────────────────────────────────────────────────────
@@ -161,29 +223,26 @@ export function useFullscreenWatermark(
           'pointer-events:none;',
           'user-select:none;',
           '-webkit-user-select:none;',
-          'max-width:min(320px,55%);',
-          'opacity:0;',
+          'max-width:78%;',
+          'opacity:0.55;',
           'transform:translate3d(0,0,0);',
-          'line-height:1.4;',
+          'line-height:1.25;',
           'font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;',
-          'transition:transform 0.6s ease,opacity 0.6s ease;',
-          'will-change:transform,opacity;',
+          'will-change:transform;',
         '}',
         // Fullscreen variant — switch to fixed so it covers the viewport
         `#${WM_EL_ID}.fs-active{position:fixed;}`,
-        // Single-line label span: "NAME • WM-NNNN"
-        `#${WM_EL_ID} .wm-label{`,
+        // Two lines: name, then the id underneath. Font size is written by
+        // applyFont() from the measured box; the CSS value is the floor.
+        `#${WM_EL_ID} [data-wm-line]{`,
           'display:block;',
-          // PLYR PARITY typography: size from the canonical WATERMARK_FONT_PX
-          // (Plyr's 13px raised to 15px for readability — see config) / 600 /
-          // 0.3px tracking (playerScript.ts). String concatenation is safe
-          // here: this element is a real TS array, not a template literal.
           'font-size:' + WATERMARK_FONT_PX + 'px;font-weight:600;letter-spacing:0.3px;',
           'white-space:nowrap;overflow:hidden;text-overflow:ellipsis;',
           'color:#fff;',
           'text-shadow:0 1px 4px rgba(0,0,0,0.95),0 0 10px rgba(0,0,0,0.7);',
           '-webkit-font-smoothing:antialiased;',
         '}',
+        `#${WM_EL_ID} [data-wm-line="id"]{font-weight:700;}`,
       ].join('');
       (document.head || document.documentElement).appendChild(s);
     }
@@ -193,11 +252,17 @@ export function useFullscreenWatermark(
     function buildEl(): HTMLDivElement {
       const d = document.createElement('div');
       d.id = WM_EL_ID;
-      // Single-line combined label: "NAME • WM-NNNN" or "WM-NNNN"
-      const span = document.createElement('div');
-      span.className = 'wm-label';
-      span.textContent = watermarkName ? `${watermarkName} \u2022 ${watermarkId}` : watermarkId;
-      d.appendChild(span);
+      // Two lines: display name first, the complete public id underneath.
+      if (watermarkName) {
+        const nameEl = document.createElement('div');
+        nameEl.dataset.wmLine = 'name';
+        nameEl.textContent = watermarkName;
+        d.appendChild(nameEl);
+      }
+      const idEl = document.createElement('div');
+      idEl.dataset.wmLine = 'id';
+      idEl.textContent = watermarkId;
+      d.appendChild(idEl);
       return d;
     }
 
@@ -218,34 +283,11 @@ export function useFullscreenWatermark(
       elRef.current = el;
       container.appendChild(el);
 
-      // Double rAF — first paints at opacity:0, second triggers transition
+      // Paint first, then start the loop — the element must be measurable
+      // before the bounds can subtract its own size.
       requestAnimationFrame(() => {
-        requestAnimationFrame(() => {
-          if (!elRef.current) return;
-          const slot = nextSlot();
-          const deg  = rnd(-3, 3);
-          elRef.current.style.transform = mkTransform(slot, deg);
-          elRef.current.style.opacity   = rnd(0.38, 0.58).toFixed(2);
-        });
+        requestAnimationFrame(() => { startMotion(); });
       });
-    }
-
-    // ── Periodic move ──────────────────────────────────────────────────────
-
-    function move() {
-      const el = elRef.current;
-      if (!el) return;
-      const slot = nextSlot();
-      const deg  = rnd(-3, 3);
-      el.style.transform = mkTransform(slot, deg);
-      el.style.opacity   = rnd(0.38, 0.58).toFixed(2);
-    }
-
-    function scheduleTick() {
-      timerRef.current = setTimeout(() => {
-        move();
-        scheduleTick();
-      }, rnd(30_000, 60_000));
     }
 
     // ── Fullscreen transition ──────────────────────────────────────────────
@@ -280,13 +322,10 @@ export function useFullscreenWatermark(
         fsEl.appendChild(el);
         el.classList.add('fs-active');   // switch to position:fixed
 
-        // Recapture viewport dimensions from the fullscreen element
+        // Recapture viewport dimensions from the fullscreen element and
+        // restart the loop in the new, larger box (the type grows with it).
         captureVP(fsEl as HTMLElement);
-        // Immediately update position so it isn't stuck at 0,0
-        const slot = nextSlot();
-        const deg  = rnd(-3, 3);
-        el.style.transform = mkTransform(slot, deg);
-        el.style.opacity   = rnd(0.38, 0.58).toFixed(2);
+        startMotion();
       } else {
         // ── Exiting fullscreen ───────────────────────────────────────────
         el.classList.remove('fs-active'); // back to position:absolute
@@ -294,12 +333,9 @@ export function useFullscreenWatermark(
         const container = containerRef.current;
         if (container) {
           container.appendChild(el);
-          // Recapture for normal-mode dimensions
+          // Recapture for normal-mode dimensions and continue in that box.
           captureVP(container);
-          const slot = nextSlot();
-          const deg  = rnd(-3, 3);
-          el.style.transform = mkTransform(slot, deg);
-          el.style.opacity   = rnd(0.40, 0.56).toFixed(2);
+          startMotion();
         }
       }
     }
@@ -319,16 +355,17 @@ export function useFullscreenWatermark(
       const measureEl = (fsEl ?? containerRef.current) as HTMLElement | null;
       if (measureEl) {
         captureVP(measureEl);
-        const slot = nextSlot();
-        const deg  = rnd(-3, 3);
-        el.style.transform = mkTransform(slot, deg);
+        applyFont();
+        captureVP(measureEl);
+        if (mot.x > maxX()) mot.x = maxX();
+        if (mot.y > maxY()) mot.y = maxY();
+        draw();
       }
     }
 
     // ── Bootstrap ──────────────────────────────────────────────────────────
 
     mount();
-    scheduleTick();
 
     document.addEventListener('fullscreenchange',       handleFullscreenChange);
     document.addEventListener('webkitfullscreenchange', handleFullscreenChange);
@@ -340,10 +377,8 @@ export function useFullscreenWatermark(
     // ── Cleanup ────────────────────────────────────────────────────────────
 
     return () => {
-      if (timerRef.current !== null) {
-        clearTimeout(timerRef.current);
-        timerRef.current = null;
-      }
+      // Cancel the animation frame — no loop may outlive the player.
+      if (raf) { cancelAnimationFrame(raf); raf = 0; }
 
       document.removeEventListener('fullscreenchange',       handleFullscreenChange);
       document.removeEventListener('webkitfullscreenchange', handleFullscreenChange);

@@ -17,7 +17,8 @@
 #                                 licensing disclosure (still never auto-
 #                                 downloads on POSIX: Artifex publishes no
 #                                 official Linux/macOS binary we could verify,
-#                                 so this flag only unlocks the instructions)
+#                                 so this flag only unlocks the instructions).
+#                                 Only needed for PDF_WATERMARK_MODE=raster.
 #   --clean                       delete the workspace first
 #   -h | --help                   this text
 #
@@ -62,6 +63,20 @@ for arg in "$@"; do
         *) fail "unknown option: $arg (try --help)" 2 ;;
     esac
 done
+
+# WHICH ENGINE THIS RUN EXERCISES
+#   The product default is the pure-PHP VECTOR engine (FPDI + TCPDF), which needs
+#   no binaries and works on ordinary cPanel hosting. The raster engine is opt-in
+#   with PDF_WATERMARK_MODE=raster and is the ONLY mode that requires Ghostscript
+#   and a TTF font; without it the suite runs the vector pipeline and the pixel
+#   proof is reported as SKIPPED.
+MODE="${PDF_WATERMARK_MODE:-vector}"
+case "$MODE" in
+    raster|vector|auto) ;;
+    *) fail "unknown PDF_WATERMARK_MODE=$MODE (use raster, vector or auto)" 2 ;;
+esac
+WANT_RASTER=0
+[ "$MODE" = "raster" ] && WANT_RASTER=1
 
 sha256_of() {
     if command -v sha256sum >/dev/null 2>&1; then sha256sum "$1" | awk '{print $1}'
@@ -187,12 +202,18 @@ if ! find_gs; then
     - acknowledge this disclosure with --accept-ghostscript-license;
     - re-run this script.
 EOF
-    [ "$ACCEPT_GS" -eq 1 ] && fail "Ghostscript is required for the raster tests but none was found. Install it (instructions above) and re-run." 2
-    fail "Ghostscript is required for the raster tests and the licensing disclosure has not been acknowledged. Re-run with --accept-ghostscript-license after installing a renderer." 2
+    if [ "$WANT_RASTER" -eq 1 ]; then
+        [ "$ACCEPT_GS" -eq 1 ] && fail "PDF_WATERMARK_MODE=raster needs Ghostscript and none was found. Install it (above) and re-run." 2
+        fail "PDF_WATERMARK_MODE=raster needs Ghostscript. Install it and acknowledge the licensing disclosure with --accept-ghostscript-license, or run the default pure-PHP vector mode." 2
+    fi
+    warn "Ghostscript not found — ok for the default VECTOR pipeline; the pixel proof is reported as SKIPPED."
 fi
 [ "$ACCEPT_GS" -eq 1 ] && ok "Ghostscript license disclosure acknowledged (--accept-ghostscript-license)"
-GS_VERSION="$("$GS_FOUND" --version 2>/dev/null | head -n1 | grep -o '[0-9]\+\.[0-9]\+\(\.[0-9]\+\)\?' | head -n1)"
-ok "Ghostscript ${GS_VERSION:-unknown}  ($GS_FOUND)"
+GS_VERSION=""
+if [ -n "$GS_FOUND" ]; then
+    GS_VERSION="$("$GS_FOUND" --version 2>/dev/null | head -n1 | grep -o '[0-9]\+\.[0-9]\+\(\.[0-9]\+\)\?' | head -n1)"
+    ok "Ghostscript ${GS_VERSION:-unknown}  ($GS_FOUND)"
+fi
 
 # ── 5. Watermark font (a TTF is REQUIRED by the raster engine) ───────────────
 FONT="${PDF_WATERMARK_FONT:-}"
@@ -211,8 +232,13 @@ if [ -z "$FONT" ] || [ ! -f "$FONT" ]; then
         [ -f "$cand" ] && { FONT="$cand"; break; }
     done
 fi
-[ -n "$FONT" ] || fail "no TrueType font found (looked for DejaVu/Liberation/FreeSans/Arial Bold). Set PDF_WATERMARK_FONT to any .ttf path and re-run." 2
-ok "Font: $FONT"
+if [ -n "$FONT" ]; then
+    ok "Font: $FONT (raster engine only)"
+elif [ "$WANT_RASTER" -eq 1 ]; then
+    fail "no TrueType font found (looked for DejaVu/Liberation/FreeSans/Arial Bold). Set PDF_WATERMARK_FONT to any .ttf path and re-run." 2
+else
+    ok "Font: not needed (the vector engine embeds TCPDF's bundled DejaVu face)"
+fi
 
 # ── 6. pdftotext (optional; text checks are reported as SKIPPED without it) ──
 PDFTOTEXT="${PDFTOTEXT:-}"
@@ -228,9 +254,9 @@ fi
 
 # ── 7. Environment for the suites ───────────────────────────────────────────
 export PDFTEST_WORKDIR="$WORK"
-export PDF_WATERMARK_MODE="raster"
-export GHOSTSCRIPT_BIN="$GS_FOUND"
-export PDF_WATERMARK_FONT="$FONT"
+export PDF_WATERMARK_MODE="$MODE"
+if [ -n "$GS_FOUND" ]; then export GHOSTSCRIPT_BIN="$GS_FOUND"; fi
+if [ -n "$FONT" ]; then export PDF_WATERMARK_FONT="$FONT"; fi
 export PDF_WATERMARK_TEST_TMP="$OUT/tmp"
 if [ -n "$PDFTOTEXT" ]; then export PDFTOTEXT; else unset PDFTOTEXT 2>/dev/null || true; fi
 
@@ -273,6 +299,7 @@ run_suite real_pipeline  "$HARNESS/run_real_test.php"
 run_suite repo_verify    "$REPO_ROOT/backend/scripts/verify-watermark.php"
 run_suite error_handling "$HARNESS/error_tests.php"
 run_suite authorization  "$HARNESS/auth_tests.php"
+run_suite delivery       "$HARNESS/delivery_tests.php"
 run_suite gallery        "$HARNESS/make_gallery.php"
 printf '{%s}' "$EXITCODES_JSON" > "$OUT/exitcodes.json"
 
