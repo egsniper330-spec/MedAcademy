@@ -37,9 +37,8 @@ import { unregisterPushToken, cancelPushTokenRetry } from '@/lib/pushTokenServic
 import { isFeatureEnabled } from '@/lib/featureFlags';
 import { t, useTranslation } from '@/lib/i18n';
 import {
-  backdropEdgeStyle,
   drawerDirection,
-  panelEdgeStyle,
+  panelTrackStyle,
 } from '@/lib/ui/drawerDirection';
 import { markEntryIntent } from '@/lib/navigation/navIntent';
 
@@ -538,29 +537,38 @@ export default function DrawerNav() {
 
   return (
     <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 999, pointerEvents: isOpen ? 'auto' : 'none' }}>
-      {/* Overlay — only covers the area to the RIGHT of the drawer panel.
-          This prevents the animated opacity from intercepting pointer events
-          on the drawer panel itself (z-index alone is unreliable on web when
-          both elements create compositing layers via Animated). */}
+      {/* Scrim — the whole screen, BEHIND the panel (zIndex 1 vs 2). It used
+          to be a band on the panel's opposite edge, which meant its geometry
+          had to agree with the panel's; a full-screen scrim under the panel
+          cannot disagree, and a tap anywhere outside the panel still closes
+          the drawer. */}
       <Animated.View
         style={[
-          { position: 'absolute', top: 0, bottom: 0, zIndex: 1, backgroundColor: '#000',
+          { position: 'absolute', top: 0, bottom: 0, left: 0, right: 0, zIndex: 1,
+            backgroundColor: '#000',
             opacity: overlayAnim.interpolate({ inputRange: [0, 1], outputRange: [0, 0.5] }) },
-          // Backdrop covers the side the panel does NOT occupy: right of a
-          // left-hand panel (LTR), left of a right-hand panel (RTL).
-          backdropEdgeStyle(dir),
         ]}
       >
         <Pressable style={{ flex: 1 }} onPress={closeDrawer} accessibilityLabel={t('nav.closeMenu')} accessibilityRole="button" />
       </Animated.View>
 
-      {/* Drawer panel — zIndex:2 ensures it always renders above the overlay */}
+      {/* PANEL TRACK — the single direction-aware anchor.
+          The panel used to be pinned with physical `left: 0` / `right: 0`,
+          which Android's RTL layout direction can resolve against the writing
+          direction instead of the screen edge — the panel then slid in from the
+          right but settled on the left. Flexbox has no such ambiguity: the
+          forced `direction` + `justifyContent` below put the panel on the
+          inline-start edge of the app's OWN locale, on every RN version. */}
+      <View
+        pointerEvents="box-none"
+        style={[
+          { position: 'absolute', top: 0, bottom: 0, left: 0, right: 0, zIndex: 2 },
+          panelTrackStyle(dir),
+        ]}
+      >
       <Animated.View
         style={{
-          position: 'absolute', top: 0, bottom: 0,
-          // Pinned to the direction's own edge (right in RTL) — not `left: 0`.
-          ...panelEdgeStyle(dir),
-          zIndex: 2,
+          alignSelf: 'stretch',
           width: DRAWER_WIDTH,
           // The sidebar is its own layer of the ladder, not the page colour:
           // painting `base` made the drawer dissolve into the screen behind it.
@@ -750,6 +758,7 @@ export default function DrawerNav() {
           </View>
         </ScrollView>
       </Animated.View>
+      </View>
     </View>
   );
 }

@@ -1044,7 +1044,17 @@ async function detectSSLPinning(): Promise<SecurityThreat | null> {
     let originCategory: SslProbeFailureCategory = 'none';
     let originHttpStatus = -1;
     try {
-      const res = await fetchWithTimeout(phpApiUrl, 8000, 'GET');
+      // HEAD, not GET (resume latency): this probe only needs the TLS handshake
+      // to complete — the classification below keys off "any HTTP status" and
+      // the failure text, never the body. A GET downloaded the API root's
+      // payload on EVERY check, including every background→foreground resume,
+      // and its 8 s budget was the longest of any detector: because all
+      // detectors run in parallel the resume hold waits for the slowest one, so
+      // on a weak connection this single probe could hold the whole app for
+      // up to 8 s after returning from another app ("the loading takes very
+      // long on iOS"). HEAD + a 5 s bound keeps the exact same pass/fail
+      // semantics and can only shorten the hold.
+      const res = await fetchWithTimeout(phpApiUrl, 5000, 'HEAD');
       originHttpStatus = res.status;
       // Any HTTP response (even 4xx) means TLS handshook — identity accepted.
       originOk = res.status > 0;

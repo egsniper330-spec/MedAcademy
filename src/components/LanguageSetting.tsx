@@ -41,7 +41,11 @@ export function LanguageSetting({ style }: { style?: object }) {
   const isDark = scheme === 'dark';
   const c = isDark ? neuColors.dark : neuColors.light;
   const layout = useLayout();
-  const { t, preference, setPreference, rtlNeedsRestart } = useTranslation();
+  const { t, preference, setPreference, rtlNeedsRestart, isRTL } = useTranslation();
+  // Alignment is decided by the APP language, not by the script of each label:
+  // in English the Arabic option's name must not jump to the right edge just
+  // because the text is Arabic (bidi would otherwise do exactly that).
+  const labelAlign = isRTL ? 'right' as const : 'left' as const;
   const { showToast } = useToast();
   const [busy, setBusy] = useState(false);
 
@@ -86,7 +90,24 @@ export function LanguageSetting({ style }: { style?: object }) {
         </Text>
       </View>
 
-      <NeuCard radius={18} style={{ padding: 12 }}>
+      {/* One card, one row per option, each row a full-width tappable target
+          with its own border.
+
+          WHAT WAS WRONG BEFORE:
+            • rows used `justifyContent: 'space-between'` with a flex:1 label and
+              no separation, so the two options ran together inside one box;
+            • the selected indicator was a bare 18 dp Check floating at the
+              trailing edge of whichever row was selected (and a 18 dp spacer on
+              the others), so in RTL it could read as belonging to the gap
+              between rows rather than to the selected option;
+            • a long translated label (Arabic "استخدام لغة الجهاز") could push
+              the check right up against the text.
+
+          NOW: the marker is a fixed 22 dp radio that exists on EVERY row at the
+          LEADING edge (inline-start, so it mirrors with the language for free).
+          Its position never depends on label length, and the check can only
+          ever sit beside its own option. */}
+      <NeuCard radius={18} style={{ padding: 10, gap: 10 }}>
         {OPTIONS.map((opt) => {
           const selected = preference === opt.value;
           return (
@@ -96,24 +117,49 @@ export function LanguageSetting({ style }: { style?: object }) {
               disabled={busy}
               accessibilityRole="radio"
               accessibilityState={{ selected, disabled: busy, busy: busy && selected }}
-              accessibilityLabel={t(opt.labelKey)}
+              accessibilityLabel={opt.hintKey ? `${t(opt.labelKey)}. ${t(opt.hintKey)}` : t(opt.labelKey)}
               style={({ pressed }) => ({
                 flexDirection: 'row',
                 alignItems: 'center',
-                justifyContent: 'space-between',
-                paddingVertical: layout.pad.md,
-                paddingHorizontal: layout.pad.sm,
-                borderRadius: layout.pad.sm,
-                backgroundColor: selected ? `${c.primary}14` : pressed ? `${c.text}0A` : 'transparent',
+                gap: 12,
+                minHeight: 56,
+                paddingVertical: 12,
+                paddingHorizontal: 14,
+                borderRadius: 14,
+                borderWidth: 1,
+                borderColor: selected ? `${c.primary}66` : `${c.text}12`,
+                backgroundColor: selected ? `${c.primary}12` : pressed ? `${c.text}0A` : 'transparent',
                 opacity: busy ? 0.6 : 1,
               })}
             >
-              <View style={{ flex: 1, paddingEnd: 12 }}>
+              {/* Radio marker — leading edge, present on every row. */}
+              <View
+                style={{
+                  width: 22,
+                  height: 22,
+                  borderRadius: 11,
+                  borderWidth: 2,
+                  borderColor: selected ? c.primary : `${c.text}40`,
+                  backgroundColor: selected ? `${c.primary}18` : 'transparent',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  flexShrink: 0,
+                }}
+              >
+                {busy && selected ? (
+                  <ActivityIndicator size="small" color={c.primary} />
+                ) : selected ? (
+                  <Check size={14} color={c.primary} strokeWidth={3} />
+                ) : null}
+              </View>
+
+              <View style={{ flex: 1, minWidth: 0 }}>
                 <Text
                   style={{
                     fontSize: 15,
                     fontWeight: selected ? '800' : '600',
                     color: selected ? c.primary : c.text,
+                    textAlign: labelAlign,
                   }}
                 >
                   {t(opt.labelKey)}
@@ -124,20 +170,14 @@ export function LanguageSetting({ style }: { style?: object }) {
                       fontSize: layout.captionSize - 1,
                       ...mutedTextStyle(c, 0.5),
                       marginTop: 2,
+                      lineHeight: (layout.captionSize - 1) * 1.4,
+                      textAlign: labelAlign,
                     }}
                   >
                     {t(opt.hintKey)}
                   </Text>
                 ) : null}
               </View>
-
-              {busy && selected ? (
-                <ActivityIndicator size="small" color={c.primary} />
-              ) : selected ? (
-                <Check size={18} color={c.primary} />
-              ) : (
-                <View style={{ width: 18, height: 18 }} />
-              )}
             </Pressable>
           );
         })}

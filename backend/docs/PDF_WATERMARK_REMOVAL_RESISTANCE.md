@@ -69,11 +69,18 @@ the only one drawn opaque enough to remain below a 128 threshold; it crosses at
 most one line of lecture text.
 
 Baking is skipped (never on a best-effort basis) when the page does not match the
-expected shape: `/Rotate` ≠ 0, a Form `/BBox` offset, an indirect `/Length`, an
-exotic filter chain, or an xref-stream/object-stream file. In that case the five
-page-level layers (A–E) are still applied — a weaker hardening level, **never an
-unwatermarked document**. Every skip is logged (`[pdf-watermark] content bake
-skipped: …`).
+expected shape: a Form `/BBox` that is neither the page size nor its width/height
+swap, a non-identity page-level `cm`, an unparseable or singular Form `/Matrix`,
+an indirect `/Length`, an exotic filter chain, or an xref-stream/object-stream
+file. **Rotated source pages (`/Rotate` 90/180/270) DO bake**: FPDI carries the
+rotation in the Form's `/Matrix`, and the baker pre-multiplies that matrix's
+inverse into the appended block so the marks land upright in page coordinates —
+asserted for every rotated page by `run_real_test.php` (the scan decodes
+FlateDecode streams first; a raw-byte scan would report zero bakes on
+compressed output). In any skip case the five page-level layers (A–E) are still
+applied — a weaker hardening level, **never an unwatermarked document**. Every
+skip is logged with a per-page reason (`[pdf-watermark] content bake skipped:
+page N: …`).
 
 Layout is seeded from `sha256(layers-version | identity | page | page-size)`, so
 the same document always renders identically while two recipients get completely
@@ -186,3 +193,123 @@ python backend/tests/pdf-watermark/removal_attacks.py \
 pikepdf (content-stream editing, the same operations qpdf/mutool expose), MuPDF
 (rendering, text extraction, flattening), Pillow/NumPy (image-domain attacks).
 None of them is installed on the production host and none is needed there.
+
+---
+
+## 6. Flattened (raster) mode — measured on the delivered file
+
+Everything above is the **vector** engine. The opt-in flattened engine
+(`PDF_WATERMARK_MODE=raster`) is a different product: each page is rendered to a
+bitmap, ONE large centred mark is composited into that bitmap, and the result is
+embedded as a single full-page image. There is nothing to "remove": the file
+contains
+
+| Structure of a flattened copy (4-page fixture, measured) | Count |
+|---|---|
+| embedded image XObjects | 4 (one per page) |
+| `/Type /Font` objects | 0 |
+| annotations / widgets | 0 |
+| Form XObjects (imported original pages) | 0 |
+| optional-content groups (watermark layers) | 0 |
+| extractable text characters | 0 |
+| page content stream | 53 bytes: `q … cm /I1 Do Q` |
+
+So the object-level attacks that editors expose ("remove watermark", delete the
+watermark layer, delete the watermark text, delete the annotation) have **no
+target**. The only remaining approach is to rewrite the pixels.
+
+Measured with `raster_attacks.py` (PyMuPDF + NumPy; each attack applied to BOTH
+the delivered copy and the unwatermarked source, then differenced at the engine's
+own 200 DPI so glyph edges cancel):
+
+| Attack | Mark ink surviving | Lecture ink kept | Delivered page kept |
+|---|---|---|---|
+| delete every text-showing operator | **97.9 %** | 16.6 % | 100 % |
+| delete annotations / widgets | **100 %** | 100 % | 100 % |
+| delete image draw operators | mark gone **because the page is gone** | 100 % (source untouched) | **0.0 %** |
+| flatten + threshold < 190 | **64.2 %** | 175 %\* | 89.8 % |
+| flatten + threshold < 128 | **0.34 %** | 152 %\* | 49.9 % |
+| whiten the mid-grey band (90-235) | **0.57 %** | 100 % | 36.9 % |
+| opaque white box over the mark bbox | **0.0 %** | 2.1 % | 0.8 % |
+| crop 36 pt off every edge | **2.4 %** of the remaining area | 100 % | — |
+
+Baseline: the centred mark is 110 669 px = 2.86 % of a 1654×2339 page.
+
+\* "Lecture ink kept" above 100 % is not a gain: thresholding turns every
+antialiased glyph edge into solid black, so the count of dark pixels rises while
+the rendering is destroyed (colours and grey images are gone).
+
+Reading the table honestly:
+
+* **No non-destructive edit removes the mark.** Deleting text operators,
+  deleting annotations and cropping all leave 97-100 % of the mark ink; the only
+  way to drop the page image is to delete the page.
+* **Destructive "cleaning" does work, and is visible.** Thresholding at 128 or
+  whitening the grey band erases the mark, but leaves 37-50 % of the page's
+  pixels: every colour, every grey image, every antialiased edge and the whole
+  photographic content of a slide deck are gone. Covering the mark with a white
+  box (0 % mark) also destroys the content under it (2 % kept).
+* **The invisible-information attack is gone.** On the vector output, a
+  colour-preserving re-save can strip the mark while keeping the lecture text
+  selectable (see §4). On a flattened page there is no text layer to keep, so
+  that trade-off no longer exists.
+
+Reproduce:
+
+```bash
+python backend/tests/pdf-watermark/../../.freebuff/pdf-watermark-tests/raster_attacks.py \
+    --delivered <delivered.pdf> --source <original.pdf> \
+    --outdir /tmp/raster-attacks --dpi 200
+```
+
+It needs only `pymupdf` and `numpy` (no pikepdf, no Pillow) and writes
+`raster-attacks.json` next to one PDF per attack.
+
+---
+
+## 7. The 12 % mark: what the readability change costs (measured 2026-10-24)
+
+The single centred mark now composites at **`PDF_WATERMARK_OPACITY` = 0.12** in ONE
+pass, over a 107-grey face. Measured on blank paper (the only non-white pixel on
+the sheet is the mark, so its luminance *is* the result):
+
+| Engine | mark core luminance | measured effective opacity | mark vs white paper |
+|---|---|---|---|
+| `flatten` | 237 / 255 | **0.122** | 1.17 : 1 |
+| `raster` (Ghostscript 10.08.0) | 237 / 255 | **0.122** | 1.17 : 1 |
+
+Body text under the mark is unchanged: inside the mark's footprint the text ink
+measured **mean 9.2** (`flatten`) and **3.6** (`raster`) of 255, i.e. a **17 : 1**
+contrast ratio against the marked paper. Before the change the same setting
+produced a face at `0.55 + 1.5 × 0.15 = 0.775` alpha (≈ 132 luminance) with an
+eight-times-dilated white halo — the reason the delivered page read as a grey
+banner.
+
+### What that costs (attacks applied to the delivered page itself)
+
+Percentages are of the mark's OWN pixels (from the matching blank-page render),
+so no cross-render subtraction is involved:
+
+| Attack | mark survives (`flatten`) | mark survives (`raster`) | page content kept |
+|---|---|---|---|
+| binarize, threshold < 226 | 6.2 % | 16.0 % | greys/colour destroyed |
+| binarize, threshold < 190 | **0.6 %** | 13.2 % | greys/colour destroyed |
+| binarize, threshold < 128 | 0.2 % | 10.4 % | greys/colour destroyed |
+| whiten the 225–245 band | 3.5 % | 18.5 % | text kept, tint removed |
+| crop 36 pt off every edge | 100 % | 100 % | centred mark unaffected |
+
+**Conclusion, stated plainly:** a 12 % mark is comfortable to read under and easy
+to see, but it does **not** survive binarization or a narrow grey-window
+whitening — both of which destroy the document's colour, greys and photographic
+content. The heavier 0.78-alpha mark of the previous build survived the <190
+threshold (it came back as black ink); it did not survive <128 either. So the
+deterrence lost is one threshold step, and the readability gained is roughly a
+six-fold reduction in ink.
+
+**Recommendation.** Keep `PDF_WATERMARK_OPACITY=0.12` for reading comfort on
+lecture material. Where deterrence matters more than comfort (high-value decks,
+known leak), raise it to `0.20`–`0.25` — the same code path, no other change — or
+use the layered `vector` engine, whose marks are designed around the
+flatten-and-threshold attack. Do not go below `0.08`: at that point the mark is
+effectively invisible in ordinary viewing and on printouts, which the product
+does not consider watermarked.

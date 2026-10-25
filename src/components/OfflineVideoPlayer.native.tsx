@@ -96,6 +96,10 @@ export function OfflineVideoPlayer({ entry, shouldAllowPlayback, fullscreenVerdi
   const [error, setError] = useState<PlayerError | null>(null);
   const [ready, setReady] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  // Bumped by [Retry]: changes the native player's `key`, so a DRM/renderer
+  // failure (6120) is retried with a brand-new VdoPlayerView instead of the
+  // dead decoder instance. Exactly one player is alive at any moment.
+  const [playerAttempt, setPlayerAttempt] = useState(0);
   const insets = useSafeAreaInsets();
 
   // ── SECURITY CONTAINMENT: pause the native player the instant the central
@@ -119,6 +123,20 @@ export function OfflineVideoPlayer({ entry, shouldAllowPlayback, fullscreenVerdi
   // Server-issued rental window is authoritative for the pre-mount expiry
   // check (isExpired() is Android-only in the official SDK).
   const expired = useMemo(() => isOfflineVideoExpired(entry), [entry]);
+
+  // ── embedInfo IDENTITY (why offline playback hit 6120) ────────────────────
+  // The bridge's `setEmbedInfo` re-builds VdoInitParams and calls
+  // `vdoPlayer.load()` on EVERY new object it receives — it does not diff. An
+  // inline `{ offline: true, mediaId }` literal is new on every render (ready
+  // flag, fullscreen, error…), so this screen re-initialised the offline DRM
+  // session repeatedly while the user watched it. VdoCipher documents multiple
+  // concurrent player initialisations as the main cause of 6120 renderer
+  // errors. Memoised on mediaId: the native player is initialised exactly once
+  // per downloaded video.
+  const offlineEmbedInfo = useMemo(
+    () => ({ offline: true as const, mediaId: entry.meta.mediaId }),
+    [entry.meta.mediaId],
+  );
 
   // ── WHICH WATERMARK LAYER THIS SHOWS ──────────────────────────────────────
   // Downloaded playback has NO server annotate contract (the offline OTP is
@@ -209,6 +227,23 @@ export function OfflineVideoPlayer({ entry, shouldAllowPlayback, fullscreenVerdi
       expired: kind === 'expired',
     });
   }, [entry.meta.mediaId]);
+
+  /**
+   * Retry the offline load with a FRESH native player.
+   *
+   * Clearing the error re-renders the player tree and the attempt counter
+   * changes its `key`, which unmounts the failed VdoPlayerView (releasing its
+   * decoder/DRM session) before the new one initialises — the documented
+   * recovery for a 6120 renderer error, without asking the student to restart
+   * the app. Nothing about authorization changes: the offline entitlement, the
+   * rental window and the security gate are all re-checked by the normal mount
+   * path, and an EXPIRED license never reaches here (no retry is offered).
+   */
+  const retryPlayback = useCallback(() => {
+    setError(null);
+    setReady(false);
+    setPlayerAttempt((a) => a + 1);
+  }, []);
 
   // ── Fullscreen enter/exit (same player instance both ways) ────────────────
   const enterFullscreen = useCallback(async () => {
@@ -318,11 +353,16 @@ export function OfflineVideoPlayer({ entry, shouldAllowPlayback, fullscreenVerdi
         body={error.expired
           ? t('offline.expiredBodyShort')
           : t('offline.drmFail', { message: error.message })}
+        // A DRM/renderer failure (6120) is documented by VdoCipher as often
+        // transient: retrying with a FRESH native player is the supported
+        // recovery, so the student gets it in place instead of being told to
+        // force-quit the app. An expired rental is NOT retryable — that needs
+        // a new download, which the library/lesson row already offers.
+        actionLabel={error.expired ? undefined : t('common.retry')}
+        onAction={error.expired ? undefined : retryPlayback}
       />
     );
   }
-
-  const offlineEmbedInfo = { offline: true as const, mediaId: entry.meta.mediaId };
 
   return (
     // In-place fullscreen: when fullscreen, this container expands to fill the
@@ -361,6 +401,9 @@ export function OfflineVideoPlayer({ entry, shouldAllowPlayback, fullscreenVerdi
           promoting the surface above the React Native tree. */}
       <VdoPlayerView
         ref={playerRef}
+        // Stable per attempt: a retry replaces the native view (fresh decoder),
+        // a re-render never does.
+        key={`vdo-offline-${entry.meta.mediaId}-${playerAttempt}`}
         embedInfo={offlineEmbedInfo}
         showNativeControls
         autoPlay
@@ -404,11 +447,38 @@ export function OfflineVideoPlayer({ entry, shouldAllowPlayback, fullscreenVerdi
   );
 }
 
-function OfflinePlayerMessage({ title, body }: { title: string; body: string }) {
+function OfflinePlayerMessage({
+  title,
+  body,
+  actionLabel,
+  onAction,
+}: {
+  title: string;
+  body: string;
+  actionLabel?: string;
+  onAction?: () => void;
+}) {
   return (
     <View style={{ width: '100%', aspectRatio: 16 / 9, backgroundColor: '#0b1220', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
-      <Text style={{ color: '#fff', fontWeight: '700', fontSize: 16, marginBottom: 8 }}>{title}</Text>
+      <Text style={{ color: '#fff', fontWeight: '700', fontSize: 16, marginBottom: 8, textAlign: 'center' }}>{title}</Text>
       <Text style={{ color: '#ffffff99', fontSize: 13, textAlign: 'center', lineHeight: 19 }}>{body}</Text>
+      {actionLabel && onAction ? (
+        <Pressable
+          onPress={onAction}
+          accessibilityRole="button"
+          accessibilityLabel={actionLabel}
+          style={({ pressed }) => ({
+            marginTop: 14,
+            paddingHorizontal: 18,
+            paddingVertical: 9,
+            borderRadius: 12,
+            backgroundColor: '#1E90FF',
+            opacity: pressed ? 0.75 : 1,
+          })}
+        >
+          <Text style={{ color: '#fff', fontWeight: '700', fontSize: 13 }}>{actionLabel}</Text>
+        </Pressable>
+      ) : null}
     </View>
   );
 }

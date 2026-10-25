@@ -67,8 +67,8 @@ $ProgressPreference = 'SilentlyContinue'
 #   ONLY by the opt-in raster engine, so their absence is a SKIP outside raster
 #   mode instead of a hard failure.
 $Mode = if ($env:PDF_WATERMARK_MODE) { $env:PDF_WATERMARK_MODE } else { 'vector' }
-if (@('raster', 'vector', 'auto') -notcontains $Mode) {
-    Fail "unknown PDF_WATERMARK_MODE=$Mode (use raster, vector or auto)" 2
+if (@('raster', 'vector', 'flatten', 'auto') -notcontains $Mode) {
+    Fail "unknown PDF_WATERMARK_MODE=$Mode (use raster, vector, flatten or auto)" 2
 }
 $WantRaster = ($Mode -eq 'raster')
 
@@ -394,6 +394,14 @@ if (-not $gsInfo -and $WantRaster) { Fail 'renderer disappeared during bootstrap
 # ── 7. Environment for the suites ───────────────────────────────────────────
 $env:PDFTEST_WORKDIR     = $Work
 $env:PDF_WATERMARK_MODE  = $Mode
+# The raster engine is licence-gated in the product: it will not run unless the
+# operator records the Ghostscript licence position. `-AcceptGhostscriptLicense`
+# IS that acknowledgement, so the harness maps it onto the product switch.
+if ($WantRaster -and $AcceptGhostscriptLicense) {
+    $env:PDF_WATERMARK_ACCEPT_AGPL_RENDERER = '1'
+} else {
+    Remove-Item Env:PDF_WATERMARK_ACCEPT_AGPL_RENDERER -ErrorAction SilentlyContinue
+}
 if ($gsInfo) { $env:GHOSTSCRIPT_BIN = $gsInfo.bin } else { Remove-Item Env:GHOSTSCRIPT_BIN -ErrorAction SilentlyContinue }
 if ($font) { $env:PDF_WATERMARK_FONT = $font } else { Remove-Item Env:PDF_WATERMARK_FONT -ErrorAction SilentlyContinue }
 $env:PDF_WATERMARK_TEST_TMP = Join-Path $Out 'tmp'
@@ -428,6 +436,7 @@ $suiteDefs = @(
     @{ id = 'error_handling'; script = 'error_tests.php' },
     @{ id = 'authorization';  script = 'auth_tests.php' },
     @{ id = 'delivery';       script = 'delivery_tests.php' },
+    @{ id = 'flatten_engine'; script = 'flatten_engine_tests.php' },
     @{ id = 'gallery';        script = 'make_gallery.php' }
 )
 

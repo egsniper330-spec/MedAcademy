@@ -67,7 +67,7 @@ try {
   process.exit(1);
 }
 
-const { drawerDirection, panelEdgeStyle, backdropEdgeStyle } = require(
+const { drawerDirection, panelTrackStyle } = require(
   path.join(BUILD, 'drawerDirection.js'),
 );
 
@@ -82,7 +82,6 @@ check('panel is pinned to the LEFT edge', ltr.side === 'left');
 check('closed offset is -width (off-screen left)', ltr.closedOffset === -PHONE);
 check('open offset is 0', ltr.openOffset === 0);
 check('backdrop occupies the opposite (right) side', ltr.oppositeSide === 'right');
-check('backdrop width equals the drawer width', ltr.backdropWidth === PHONE);
 check('hairline border on the content-facing (right) edge', ltr.borderEdge === 'right');
 check('shadow points right (+1)', ltr.shadowSign === 1);
 check('forward chevron points right', ltr.forwardChevron === 'right');
@@ -112,24 +111,35 @@ for (const [label, model] of [['LTR', ltr], ['RTL', rtl]]) {
   check(`${label}: the panel opens to offset 0`, model.openOffset === 0);
 }
 
-/* ─────────────────────── position style helpers ────────────────────────── */
+/* ─────────────────── the panel track (the RTL anchor) ──────────────────── */
 
-console.log('\nposition helpers are mirrored');
-check('LTR panel is `left: 0`', panelEdgeStyle(ltr).left === 0 && panelEdgeStyle(ltr).right === undefined);
-check('RTL panel is `right: 0`', panelEdgeStyle(rtl).right === 0 && panelEdgeStyle(rtl).left === undefined);
-check('LTR backdrop is `right: 0` + width',
-  backdropEdgeStyle(ltr).right === 0 && backdropEdgeStyle(ltr).width === PHONE);
-check('RTL backdrop is `left: 0` + width',
-  backdropEdgeStyle(rtl).left === 0 && backdropEdgeStyle(rtl).width === PHONE);
-check('panel and backdrop never occupy the same edge',
-  panelEdgeStyle(ltr).left === 0 && backdropEdgeStyle(ltr).left === undefined);
+console.log('\npanel track is anchored by flex, not by physical edges');
+const ltrTrack = panelTrackStyle(ltr);
+const rtlTrack = panelTrackStyle(rtl);
+check('LTR track runs ltr and justifies to flex-start',
+  ltrTrack.direction === 'ltr' && ltrTrack.justifyContent === 'flex-start');
+check('RTL track runs rtl and justifies to flex-end',
+  rtlTrack.direction === 'rtl' && rtlTrack.justifyContent === 'flex-end');
+check('both tracks lay the panel out on one row',
+  ltrTrack.flexDirection === 'row' && rtlTrack.flexDirection === 'row');
+check('both tracks stretch the panel to full height',
+  ltrTrack.alignItems === 'stretch' && rtlTrack.alignItems === 'stretch');
+// The invariant the bug violated: the flex anchor and the slide direction must
+// agree about which edge is home. LTR closes leftwards from flex-start; RTL
+// closes rightwards from flex-end.
+check('LTR: flex-start anchor + negative closed offset agree',
+  ltrTrack.justifyContent === 'flex-start' && ltr.closedOffset < 0);
+check('RTL: flex-end anchor + positive closed offset agree',
+  rtlTrack.justifyContent === 'flex-end' && rtl.closedOffset > 0);
+check('the model carries no physical panel edge any more',
+  !('panelEdge' in ltr) && !('backdropWidth' in rtl));
 
 /* ───────────────────── tablet + degenerate widths ──────────────────────── */
 
 console.log('\nresponsive widths');
 const tabletRtl = drawerDirection(true, TABLET);
 check('tablet RTL closes by the tablet width', tabletRtl.closedOffset === TABLET);
-check('tablet RTL backdrop matches the panel', tabletRtl.backdropWidth === TABLET);
+check('tablet RTL keeps the rtl track', panelTrackStyle(tabletRtl).direction === 'rtl');
 const zero = drawerDirection(true, 0);
 check('a zero width does not produce NaN', Number.isFinite(zero.closedOffset) && zero.closedOffset === 0);
 const negative = drawerDirection(true, -50);
@@ -144,8 +154,11 @@ const drawer = stripComments(read('src/components/DrawerNav.tsx'));
 check('imports the pure direction model', /from '@\/lib\/ui\/drawerDirection'/.test(drawer));
 check('builds the model from the app direction', /drawerDirection\(isRTL, DRAWER_WIDTH\)/.test(drawer));
 check('reads isRTL from the i18n context', /useTranslation\(\)/.test(drawer));
-check('panel edge comes from panelEdgeStyle', /panelEdgeStyle\(dir\)/.test(drawer));
-check('backdrop edge comes from backdropEdgeStyle', /backdropEdgeStyle\(dir\)/.test(drawer));
+check('panel anchor comes from panelTrackStyle', /panelTrackStyle\(dir\)/.test(drawer));
+check('no physical left/right pin on the panel',
+  !/panelEdgeStyle/.test(drawer) && !/\.\.\.panelEdgeStyle\(/.test(drawer));
+check('the scrim covers the full screen behind the panel',
+  /backgroundColor: '#000',[\s\S]{0,200}opacity: overlayAnim\.interpolate/.test(drawer));
 check('slide starts at the model closed offset',
   /new Animated\.Value\(dir\.closedOffset\)/.test(drawer) &&
   /slideAnim\.setValue\(dir\.closedOffset\)/.test(drawer));

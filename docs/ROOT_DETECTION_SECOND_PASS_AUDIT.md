@@ -242,7 +242,8 @@ the real defence against).
 | `npx tsc --noEmit -p tsconfig.json` | clean |
 | `npx eslint src/lib/security.ts src/lib/nativeSecurity.ts src/lib/deviceKey.ts tests/rootDetectionSecondPass.test.cjs` | 0 errors (pre-existing warnings only) |
 | Brace-balance + `require()` structural check of every edited Kotlin function | balanced |
-| Full suite `node scripts/run-all-tests.cjs` | run at the end of the combined change set — see §12 |
+| `node scripts/validate-all.js` | all 4 stages PASSED (Kotlin template, Swift, native build, security param-authority) |
+| Full suite `node scripts/run-all-tests.cjs` | **107 suites, 107 passed, 0 failed** (231 s, exit 0) — run after the second-pass Kotlin/TS changes |
 
 **Not run:** Kotlin compilation (no Android SDK/NDK in this environment), any
 APK build, any device/emulator scenario, Play Integrity round-trip, PHP runtime.

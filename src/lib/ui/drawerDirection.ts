@@ -35,8 +35,6 @@ export interface DrawerDirectionModel {
   closedOffset: number;
   /** Panel translateX when open. */
   openOffset: number;
-  /** Width of the backdrop region (the non-panel area). */
-  backdropWidth: number;
   /** Edge that carries the panel's hairline border. */
   borderEdge: DrawerSide;
   /** Horizontal shadow direction: +1 rightwards, -1 leftwards. */
@@ -47,6 +45,13 @@ export interface DrawerDirectionModel {
   activeRuleEdge: DrawerSide;
   /** True for RTL — handy for callers that need one boolean. */
   isRTL: boolean;
+  /**
+   * Layout direction to force on the panel TRACK (see `panelTrackStyle`).
+   * Forcing it makes the anchor independent of the platform's RTL state.
+   */
+  layoutDirection: 'ltr' | 'rtl';
+  /** Row justification that puts the panel on the inline-start edge. */
+  justify: 'flex-start' | 'flex-end';
 }
 
 /**
@@ -65,12 +70,13 @@ export function drawerDirection(isRTL: boolean, width: number): DrawerDirectionM
       oppositeSide: 'left',
       closedOffset: safeWidth, // pushed off the RIGHT edge
       openOffset: 0,
-      backdropWidth: safeWidth,
       borderEdge: 'left', // inner edge of a right-hand panel
       shadowSign: -1, // casts to the left, over the content
       forwardChevron: 'left',
       activeRuleEdge: 'right',
       isRTL: true,
+      layoutDirection: 'rtl',
+      justify: 'flex-end',
     };
   }
 
@@ -79,27 +85,50 @@ export function drawerDirection(isRTL: boolean, width: number): DrawerDirectionM
     oppositeSide: 'right',
     closedOffset: -safeWidth, // pushed off the LEFT edge
     openOffset: 0,
-    backdropWidth: safeWidth,
     borderEdge: 'right',
     shadowSign: 1,
     forwardChevron: 'right',
     activeRuleEdge: 'left',
     isRTL: false,
+    layoutDirection: 'ltr',
+    justify: 'flex-start',
   };
 }
 
-/** The `position: absolute` edge pair that pins the panel to `side`. */
-export function panelEdgeStyle(model: DrawerDirectionModel): { left?: number; right?: number } {
-  return model.side === 'right' ? { right: 0 } : { left: 0 };
+/**
+ * The track that anchors the panel to the inline-start edge.
+ *
+ * ── WHY NOT `left`/`right` (THE ANDROID BUG THIS REPLACED)
+ * The panel used to be pinned with a physical `left: 0` (LTR) / `right: 0`
+ * (RTL) plus a `translateX` slide. Those two axes disagree under Android's
+ * RTL layout direction: which of `left`/`right` wins for an absolutely
+ * positioned view has changed across React Native / Yoga releases (Yoga 1
+ * resolved them against the writing direction, later Yoga resolves them
+ * physically), so on Android a `right: 0` panel could be laid out on the LEFT
+ * edge while the slide offset still moved it rightwards — the reported
+ * "opens from the right, settles on the left".
+ *
+ * Flexbox has no such ambiguity, and the direction here is FORCED from the app
+ * locale, so the anchor cannot depend on the platform's own RTL flag:
+ *   LTR → direction:ltr + flex-start → the panel's left edge is the screen's
+ *         left edge.
+ *   RTL → direction:rtl + flex-end   → the panel's right edge is the screen's
+ *         right edge.
+ * The slide (`translateX`) then travels along the same axis in both cases, so
+ * the open and closed positions can never disagree about which side is home.
+ */
+export function panelTrackStyle(model: DrawerDirectionModel): {
+  flexDirection: 'row';
+  direction: 'ltr' | 'rtl';
+  justifyContent: 'flex-start' | 'flex-end';
+  alignItems: 'stretch';
+} {
+  return {
+    flexDirection: 'row',
+    direction: model.layoutDirection,
+    justifyContent: model.justify,
+    alignItems: 'stretch',
+  };
 }
 
-/** The `position: absolute` edge pair (+ width) that leaves only the backdrop visible. */
-export function backdropEdgeStyle(model: DrawerDirectionModel): {
-  left?: number;
-  right?: number;
-  width: number;
-} {
-  return model.oppositeSide === 'right'
-    ? { right: 0, width: model.backdropWidth }
-    : { left: 0, width: model.backdropWidth };
-}
+

@@ -72,8 +72,8 @@ done
 #   proof is reported as SKIPPED.
 MODE="${PDF_WATERMARK_MODE:-vector}"
 case "$MODE" in
-    raster|vector|auto) ;;
-    *) fail "unknown PDF_WATERMARK_MODE=$MODE (use raster, vector or auto)" 2 ;;
+    raster|vector|flatten|auto) ;;
+    *) fail "unknown PDF_WATERMARK_MODE=$MODE (use raster, vector, flatten or auto)" 2 ;;
 esac
 WANT_RASTER=0
 [ "$MODE" = "raster" ] && WANT_RASTER=1
@@ -255,6 +255,14 @@ fi
 # ── 7. Environment for the suites ───────────────────────────────────────────
 export PDFTEST_WORKDIR="$WORK"
 export PDF_WATERMARK_MODE="$MODE"
+# The raster engine is licence-gated in the product and will not run unless the
+# operator records the Ghostscript licence position; --accept-ghostscript-license
+# is that acknowledgement, so the harness maps it onto the product switch.
+if [ "$WANT_RASTER" = "1" ] && [ "$ACCEPT_GS" = "1" ]; then
+    export PDF_WATERMARK_ACCEPT_AGPL_RENDERER=1
+else
+    unset PDF_WATERMARK_ACCEPT_AGPL_RENDERER 2>/dev/null || true
+fi
 if [ -n "$GS_FOUND" ]; then export GHOSTSCRIPT_BIN="$GS_FOUND"; fi
 if [ -n "$FONT" ]; then export PDF_WATERMARK_FONT="$FONT"; fi
 export PDF_WATERMARK_TEST_TMP="$OUT/tmp"
@@ -300,6 +308,7 @@ run_suite repo_verify    "$REPO_ROOT/backend/scripts/verify-watermark.php"
 run_suite error_handling "$HARNESS/error_tests.php"
 run_suite authorization  "$HARNESS/auth_tests.php"
 run_suite delivery       "$HARNESS/delivery_tests.php"
+run_suite flatten_engine "$HARNESS/flatten_engine_tests.php"
 run_suite gallery        "$HARNESS/make_gallery.php"
 printf '{%s}' "$EXITCODES_JSON" > "$OUT/exitcodes.json"
 

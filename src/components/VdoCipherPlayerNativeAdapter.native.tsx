@@ -434,6 +434,25 @@ export function VdoCipherPlayerNativeAdapter({
     return () => sub.remove();
   }, [isFullscreen, exitFullscreen]);
 
+  // ── embedInfo IDENTITY (the 6120 root cause) ─────────────────────────────
+  // The bridge's native `setEmbedInfo` does NOT diff: every time React hands it
+  // a new object it builds VdoInitParams and calls `vdoPlayer.load(params)`
+  // again. An inline literal (`embedInfo={{ otp, playbackInfo, ... }}`) is a new
+  // object on EVERY render, so each state change on this screen (loading flag,
+  // annotate flag, fullscreen, error, progress-driven re-render) re-INITIALISED
+  // the player underneath the user. VdoCipher's own error table lists multiple
+  // concurrent player initialisations as the most common cause of error 6120
+  // ("Renderer Error") — the DRM failure this screen reported.
+  //
+  // Memoising on the only two values that matter gives the native view ONE
+  // stable payload per session: `load()` runs once on mount and never again
+  // until the OTP itself changes. The view is never remounted either, so the
+  // decoder/DRM session survives fullscreen, rotation and re-renders.
+  const embedInfo = useMemo(
+    () => ({ otp: otp ?? '', playbackInfo: playbackInfo ?? '', enableAutoResume: true }),
+    [otp, playbackInfo],
+  );
+
   // ── Loading ───────────────────────────────────────────────────────────────
   if (loading) {
     return (
@@ -510,11 +529,7 @@ export function VdoCipherPlayerNativeAdapter({
       {isFullscreen && <StatusBar hidden />}
       <VdoPlayerView
         ref={playerRef}
-        embedInfo={{
-          otp,
-          playbackInfo,
-          enableAutoResume: true,
-        }}
+        embedInfo={embedInfo}
         showNativeControls
         autoPlay
         style={{ flex: 1 }}

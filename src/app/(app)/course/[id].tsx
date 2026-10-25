@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { View, Text, ScrollView, useColorScheme, Pressable, ActivityIndicator, RefreshControl, LayoutAnimation, Platform, UIManager } from 'react-native';
 import { Image } from 'expo-image';
-import { useFocusEffect, useRouter, useLocalSearchParams } from 'expo-router';
+import { useRouter, useLocalSearchParams } from 'expo-router';
 import {
   ArrowLeft, BookOpen, Calendar, ChevronDown, ChevronRight, Clock, GraduationCap,
   Globe, Tag, Play, Lock, MessageCircle, CheckCircle, Paperclip, Archive,
@@ -10,6 +10,7 @@ import {
 import { getCourseById, getCourseProgress, getLessonProgress, getMySubscriptions, calcCourseDuration, calcRemainingTime, calcCompletedTime, formatStudyTime } from '@/lib/api';
 import { prefetchCourseImages, courseImageUrlsFrom } from '@/lib/imagePrefetch';
 import { useProfileStore } from '@/lib/store';
+import { useStaleWhileRevalidateFocus } from '@/lib/useStaleWhileRevalidateFocus';
 import { NeuCard } from '@/components/NeuCard';
 import { NeuButton } from '@/components/NeuButton';
 import { CourseProgressBar } from '@/components/CourseProgressBar';
@@ -17,6 +18,8 @@ import { SubscribeSheet } from '@/components/SubscribeSheet';
 import { resolveCourseContact } from '@/lib/subscribeContact';
 import { neuColors, useLayout, safeTop, safeLeft, safeBottom, mutedTextStyle } from '@/lib/neu';
 import { isPreviewingCourse, stopPreviewAsStudent } from '@/lib/previewAsStudent';
+import { useTranslation } from '@/lib/i18n';
+import { formatLocalizedDate } from '@/lib/i18n/date';
 import type { RelativePathString } from 'expo-router';
 
 // Enable LayoutAnimation on Android
@@ -33,12 +36,28 @@ const DIFFICULTY_COLORS: Record<string, string> = {
   beginner: '#16A34A', intermediate: '#D97706', advanced: '#DC2626', all_levels: '#2563EB',
 };
 
-function formatRemaining(secs: number): string {
-  if (!secs || secs <= 0) return '';
-  const h = Math.floor(secs / 3600);
-  const m = Math.floor((secs % 3600) / 60);
-  if (h > 0) return `${h}h ${m}m remaining`;
-  return `${m}m remaining`;
+/**
+ * Difficulty is a controlled enum on `courses.difficulty`, so the badge can be
+ * localized. Unknown values (a future enum member) fall back to the raw value
+ * rather than showing a missing-key marker.
+ */
+const DIFFICULTY_KEYS: Record<string, string> = {
+  beginner: 'difficulty.beginner',
+  intermediate: 'difficulty.intermediate',
+  advanced: 'difficulty.advanced',
+  all_levels: 'difficulty.allLevels',
+};
+
+/**
+ * The builder stores the course language as one of a FIXED list of English
+ * names (LANGUAGES in course-builder/[id].tsx). Those known names are UI
+ * vocabulary, so they are translated; anything else is data and is shown
+ * verbatim.
+ */
+function languageKey(value: string): string | null {
+  const key = `languageName.${String(value).trim().toLowerCase()}`;
+  return ['arabic', 'english', 'french', 'german', 'spanish', 'turkish', 'urdu']
+    .some((n) => key === `languageName.${n}`) ? key : null;
 }
 
 export default function CourseDetail() {
@@ -50,6 +69,11 @@ export default function CourseDetail() {
   const insets = layout.insets;
   const { id } = useLocalSearchParams<{ id: string }>();
   const { profile } = useProfileStore();
+  const { t, tCount, locale, isRTL } = useTranslation();
+  // Direction-aware alignment for every label on this screen. Course titles,
+  // section/lesson titles and descriptions are DATA: they keep RTL/LTR
+  // auto-detection (no writingDirection override) but follow the app's edge.
+  const txtAlign = isRTL ? 'right' as const : 'left' as const;
 
   const [course, setCourse] = useState<any>(null);
   const [progress, setProgress] = useState<any[]>([]);
@@ -115,7 +139,32 @@ export default function CourseDetail() {
     setLoading(false);
   }, [id, profile]); // isPreviewingCourse read live — preview toggles re-render via previewMode state below
 
-  useFocusEffect(useCallback(() => { setLoading(true); loadData(); }, [loadData, previewMode]));
+  // Stale-while-revalidate: the FIRST entry shows the full-screen spinner, but
+  // returning to this course (from a lesson, the tab bar, or a pushed screen)
+  // refreshes in the BACKGROUND with the content still mounted. Previously
+  // every focus called setLoading(true) + a full refetch, so the most-tapped
+  // screen in the app blanked to a spinner every single time it regained
+  // focus — the "navigation keeps reloading" complaint. Identical requests,
+  // identical error semantics: only the spinner sequencing changed.
+  //
+  // `course.id === id` guards a reused route instance: navigating to a
+  // DIFFERENT course must never show the previous course's content while its
+  // own payload is in flight.
+  const hasCourseContent = useCallback(
+    () => !!course && (!id || course.id === id),
+    [course, id],
+  );
+  useStaleWhileRevalidateFocus(loadData, { setLoading, hasContent: hasCourseContent });
+
+  // Preview-as-Student is toggled from My Courses and lands here via replace,
+  // so the listening screen must re-derive its gates even if the focus event
+  // is coalesced. No spinner: the content on screen is still this course.
+  const previewModeRef = useRef(previewMode);
+  useEffect(() => {
+    if (previewModeRef.current === previewMode) return;
+    previewModeRef.current = previewMode;
+    void loadData();
+  }, [previewMode, loadData]);
   const onRefresh = async () => { setRefreshing(true); await loadData(); setRefreshing(false); };
 
   // Persist expanded state to session cache whenever it changes
@@ -181,7 +230,7 @@ export default function CourseDetail() {
   );
   if (!course) return (
     <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: c.base }}>
-      <Text style={{ ...mutedTextStyle(c, 0.5) }}>Course not found</Text>
+      <Text style={{ ...mutedTextStyle(c, 0.5), textAlign: 'center' }}>{t('course.notFound')}</Text>
     </View>
   );
 
@@ -207,7 +256,7 @@ export default function CourseDetail() {
       <View style={{ position: 'absolute', top: layout.headerTop, left: layout.headerLeft }}>
         <Pressable onPress={() => router.back()}
           hitSlop={8}
-          accessibilityLabel="Go back"
+          accessibilityLabel={t('common.back')}
           accessibilityRole="button"
           style={{ width: 40, height: 40, borderRadius: 12, backgroundColor: `${c.base}ee`, alignItems: 'center', justifyContent: 'center' }}>
           <ArrowLeft size={22} color={c.text} opacity={0.75} />
@@ -222,9 +271,12 @@ export default function CourseDetail() {
             backgroundColor: '#D9770618', borderWidth: 1, borderColor: '#D9770630' }}>
             <Archive size={15} color="#D97706" />
             <View style={{ flex: 1 }}>
-              <Text style={{ fontSize: 13, fontWeight: '700', color: '#D97706' }}>Course Archived</Text>
+              <Text style={{ fontSize: 13, fontWeight: '700', color: '#D97706' }}>
+                {t('course.archivedTitle')}
+              </Text>
               <Text style={{ fontSize: 11, color: '#D97706', opacity: 0.75 }}>
-                {`Archived ${new Date(course.archived_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}${course.archive_reason ? ` · ${course.archive_reason}` : ''}`}
+                {/* Date follows the app language; the reason is admin data. */}
+                {`${t('course.archivedOn', { date: formatLocalizedDate(course.archived_at, locale) })}${course.archive_reason ? ` · ${course.archive_reason}` : ''}`}
               </Text>
             </View>
           </View>
@@ -237,13 +289,15 @@ export default function CourseDetail() {
             backgroundColor: '#7C3AED18', borderWidth: 1, borderColor: '#7C3AED30' }}>
             <Eye size={15} color="#7C3AED" />
             <View style={{ flex: 1 }}>
-              <Text style={{ fontSize: 13, fontWeight: '700', color: '#7C3AED' }}>Preview as Student</Text>
-              <Text style={{ fontSize: 11, color: '#7C3AED', opacity: 0.75 }}>
-                You are seeing this course exactly as an enrolled student does. Draft lessons are hidden.
+              <Text style={{ fontSize: 13, fontWeight: '700', color: '#7C3AED' }}>
+                {t('course.previewTitle')}
+              </Text>
+              <Text style={{ fontSize: 11, color: '#7C3AED', opacity: 0.75, textAlign: txtAlign }}>
+                {t('course.previewBody')}
               </Text>
             </View>
             <Pressable onPress={() => { stopPreviewAsStudent(); router.replace(`/(app)/course/${id}` as RelativePathString); }}
-              hitSlop={8} accessibilityRole="button" accessibilityLabel="Exit student preview"
+              hitSlop={8} accessibilityRole="button" accessibilityLabel={t('course.previewExit')}
               style={{ width: 30, height: 30, borderRadius: 10, backgroundColor: '#7C3AED22', alignItems: 'center', justifyContent: 'center' }}>
               <X size={15} color="#7C3AED" />
             </Pressable>
@@ -253,12 +307,15 @@ export default function CourseDetail() {
         {/* Title + difficulty */}
         <View style={{ gap: 8 }}>
           <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 8 }}>
-            <Text style={{ flex: 1, fontSize: 22, fontWeight: '800', color: c.text }}>{course.title}</Text>
+            <Text style={{ flex: 1, fontSize: 22, fontWeight: '800', color: c.text, textAlign: txtAlign }}>{course.title}</Text>
             {course.difficulty ? (
               <View style={{ paddingHorizontal: 10, paddingVertical: 4, borderRadius: 20,
                 backgroundColor: `${DIFFICULTY_COLORS[course.difficulty] ?? c.primary}18` }}>
-                <Text style={{ fontSize: 11, fontWeight: '700', color: DIFFICULTY_COLORS[course.difficulty] ?? c.primary, textTransform: 'capitalize' }}>
-                  {course.difficulty.replace('_', ' ')}
+                <Text style={{ fontSize: 11, fontWeight: '700', color: DIFFICULTY_COLORS[course.difficulty] ?? c.primary,
+                  textTransform: DIFFICULTY_KEYS[course.difficulty] ? 'none' : 'capitalize' }}>
+                  {DIFFICULTY_KEYS[course.difficulty]
+                    ? t(DIFFICULTY_KEYS[course.difficulty])
+                    : String(course.difficulty).replace('_', ' ')}
                 </Text>
               </View>
             ) : null}
@@ -275,7 +332,9 @@ export default function CourseDetail() {
             {course.language ? (
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
                 <Globe size={13} color={c.primary} />
-                <Text style={{ fontSize: 13, ...mutedTextStyle(c, 0.6) }}>{course.language}</Text>
+                <Text style={{ fontSize: 13, ...mutedTextStyle(c, 0.6) }}>
+                  {languageKey(course.language) ? t(languageKey(course.language)!) : course.language}
+                </Text>
               </View>
             ) : null}
             {course.estimated_duration_hours ? (
@@ -288,7 +347,9 @@ export default function CourseDetail() {
             ) : null}
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
               <BookOpen size={13} color={c.primary} />
-              <Text style={{ fontSize: 13, ...mutedTextStyle(c, 0.6) }}>{allLessons.length} lessons</Text>
+              <Text style={{ fontSize: 13, ...mutedTextStyle(c, 0.6) }}>
+                {tCount('home.lessonsCount', allLessons.length)}
+              </Text>
             </View>
           </View>
 
@@ -313,7 +374,7 @@ export default function CourseDetail() {
               <Text style={{ fontSize: 16, fontWeight: '800',
                 color: (!course.price_egp || course.price_egp === 0) ? '#16A34A' : c.primary }}>
                 {(!course.price_egp || Number(course.price_egp) === 0)
-                  ? 'Free'
+                  ? t('home.free')
                   : `EGP ${Number(course.price_egp).toFixed(0)}`}
               </Text>
             </View>
@@ -335,9 +396,9 @@ export default function CourseDetail() {
           <NeuCard style={{ gap: 0, padding: 0, overflow: 'hidden' }}>
             <View style={{ flexDirection: 'row' }}>
               {[
-                { label: 'Total', value: formatStudyTime(totalStudyMin), color: c.primary },
-                { label: 'Completed', value: formatStudyTime(completedMin), color: '#16A34A' },
-                { label: 'Remaining', value: formatStudyTime(remainingMin), color: '#D97706' },
+                { label: t('common.total'), value: formatStudyTime(totalStudyMin), color: c.primary },
+                { label: t('course.statCompleted'), value: formatStudyTime(completedMin), color: '#16A34A' },
+                { label: t('course.statRemaining'), value: formatStudyTime(remainingMin), color: '#D97706' },
               ].map((stat, i) => (
                 <View key={stat.label} style={{ flex: 1, alignItems: 'center', paddingVertical: 14,
                   borderRightWidth: i < 2 ? 1 : 0, borderColor: `${c.text}10` }}>
@@ -356,7 +417,7 @@ export default function CourseDetail() {
 
         {/* Short description */}
         {course.short_description ? (
-          <Text style={{ fontSize: 14, ...mutedTextStyle(c, 0.65), lineHeight: 22 }}>
+          <Text style={{ fontSize: 14, ...mutedTextStyle(c, 0.65), lineHeight: 22, textAlign: txtAlign }}>
             {course.short_description}
           </Text>
         ) : null}
@@ -364,8 +425,10 @@ export default function CourseDetail() {
         {/* Full description */}
         {course.full_description && course.full_description !== course.short_description ? (
           <NeuCard>
-            <Text style={{ fontSize: 15, fontWeight: '700', color: c.text, marginBottom: 8 }}>About This Course</Text>
-            <Text style={{ fontSize: 14, ...mutedTextStyle(c, 0.65), lineHeight: 22 }}>
+            <Text style={{ fontSize: 15, fontWeight: '700', color: c.text, marginBottom: 8, textAlign: txtAlign }}>
+              {t('course.about')}
+            </Text>
+            <Text style={{ fontSize: 14, ...mutedTextStyle(c, 0.65), lineHeight: 22, textAlign: txtAlign }}>
               {course.full_description}
             </Text>
           </NeuCard>
@@ -373,21 +436,30 @@ export default function CourseDetail() {
 
         {/* Course features */}
         <NeuCard style={{ gap: 10 }}>
-          {course.certificate_enabled && <FeatureRow icon={CheckCircle} color="#16A34A" label="Certificate on completion" />}
-          {course.free_preview && <FeatureRow icon={Play} color="#2563EB" label="Free preview available" />}
-          {course.sequential_learning && <FeatureRow icon={BookOpen} color="#7C3AED" label="Sequential learning path" />}
+          {course.certificate_enabled && <FeatureRow icon={CheckCircle} color="#16A34A" label={t('course.featureCertificate')} />}
+          {course.free_preview && <FeatureRow icon={Play} color="#2563EB" label={t('course.featureFreePreview')} />}
+          {course.sequential_learning && <FeatureRow icon={BookOpen} color="#7C3AED" label={t('course.featureSequential')} />}
         </NeuCard>
 
         {/* Sections & Lessons */}
-        <Text style={{ fontSize: 18, fontWeight: '800', color: c.text }}>Course Content</Text>
-        <Text style={{ fontSize: 13, ...mutedTextStyle(c, 0.45), marginTop: -12 }}>
-          {`${(course.sections ?? []).length} sections \u00b7 ${allLessons.length} lessons${
+        <Text style={{ fontSize: 18, fontWeight: '800', color: c.text, textAlign: txtAlign }}>
+          {t('course.content')}
+        </Text>
+        <Text style={{ fontSize: 13, ...mutedTextStyle(c, 0.45), marginTop: -12, textAlign: txtAlign }}>
+          {[
+            // Plural-aware in BOTH languages: Arabic needs its own dual/plural
+            // forms, which a hand-built `n === 1 ? 'section' : 'sections'`
+            // ternary produced in English only.
+            tCount('course.sectionCount', (course.sections ?? []).length),
+            tCount('home.lessonsCount', allLessons.length),
             totalStudyMin > 0
-              ? ` \u00b7 ${formatStudyTime(totalStudyMin)} total`
+              ? t('course.totalTime', { time: formatStudyTime(totalStudyMin) })
               : courseProgress?.remaining_seconds > 0
-                ? ` \u00b7 ${formatRemaining(courseProgress.remaining_seconds)}`
-                : ''
-          }`}
+                ? t('course.timeRemaining', {
+                    time: tCount('home.minutes', Math.max(1, Math.round(courseProgress.remaining_seconds / 60))),
+                  })
+                : null,
+          ].filter(Boolean).join(' \u00b7 ')}
         </Text>
 
         {(course.sections ?? []).map((section: any, sIdx: number) => {
@@ -406,7 +478,7 @@ export default function CourseDetail() {
               {/* ── Section Header (always visible) ── */}
               <Pressable
                 onPress={() => toggleSection(section.id)}
-                accessibilityLabel={`${isOpen ? 'Collapse' : 'Expand'} section: ${section.title}`}
+                accessibilityLabel={t(isOpen ? 'course.collapseSection' : 'course.expandSection', { title: section.title })}
                 accessibilityRole="button"
                 style={{ flexDirection: 'row', alignItems: 'center', padding: 16, gap: 12 }}
               >
@@ -427,11 +499,11 @@ export default function CourseDetail() {
                   </Text>
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
                     <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.45) }}>
-                      {sectionLessons.length} lesson{sectionLessons.length !== 1 ? 's' : ''}
+                      {tCount('home.lessonsCount', sectionLessons.length)}
                     </Text>
                     {sectionCompleted > 0 && (
                       <Text style={{ fontSize: 11, color: '#16A34A', fontWeight: '600' }}>
-                        {sectionCompleted}/{sectionLessons.length} done
+                        {t('course.doneOfTotal', { done: sectionCompleted, total: sectionLessons.length })}
                       </Text>
                     )}
                   </View>
@@ -467,14 +539,17 @@ export default function CourseDetail() {
                     const locked = isLessonLocked(lesson, lIdx, section, contentUnlocked) || (!contentUnlocked && !lesson.is_preview);
                     const canAccess = !locked && !isScheduled;
                     const scheduledDate = isScheduled && lesson.scheduled_at
-                      ? new Date(lesson.scheduled_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+                      ? formatLocalizedDate(lesson.scheduled_at, locale)
                       : null;
 
                     return (
                       <Pressable
                         key={lesson.id}
                         onPress={() => canAccess && router.push(`/(app)/lesson/${lesson.id}` as RelativePathString)}
-                        accessibilityLabel={`${canAccess ? 'Open' : 'Locked:'} ${lIdx + 1}. ${lesson.title}`}
+                        accessibilityLabel={t(canAccess ? 'course.openLesson' : 'course.lockedLesson', {
+                          position: lIdx + 1,
+                          title: lesson.title,
+                        })}
                         accessibilityRole="button"
                         style={{
                           flexDirection: 'row', alignItems: 'center', padding: 14, gap: 12,
@@ -511,11 +586,11 @@ export default function CourseDetail() {
                               </Text>
                             ) : null}
                             {lesson.is_preview && !isSubscribed && (
-                              <Text style={{ fontSize: 11, color: '#16A34A', fontWeight: '600' }}>Free Preview</Text>
+                              <Text style={{ fontSize: 11, color: '#16A34A', fontWeight: '600' }}>{t('lesson.freePreview')}</Text>
                             )}
                             {isScheduled && scheduledDate && (
                               <Text style={{ fontSize: 11, color: '#3B82F6', fontWeight: '600' }}>
-                                Available {scheduledDate}
+                                {t('course.availableOn', { date: scheduledDate })}
                               </Text>
                             )}
                           </View>
@@ -550,7 +625,7 @@ export default function CourseDetail() {
             Hidden during "Preview as Student": the doctor is not actually a
             subscriber and must not be offered the student purchase flow. */}
         {!previewMode && !isSubscribed ? (
-          <NeuButton label="Subscribe" variant="primary"
+          <NeuButton label={t('course.subscribe')} variant="primary"
             icon={<MessageCircle size={16} color="#fff" />}
             onPress={() => setShowContact(true)} fullWidth />
         ) : null}

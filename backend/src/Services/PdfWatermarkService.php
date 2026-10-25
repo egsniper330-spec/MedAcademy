@@ -45,34 +45,60 @@ use MedAcademy\Utils\Config;
  * drop the rest of the page operators" — the one-line way to strip the previous
  * implementation — no longer yields a clean page.
  *
- * ── ENGINE B: "raster" (flattened, image-based) — opt-in only ──────────────
- * Every page is rendered to a bitmap, the student's watermark is composited
- * BELOW the lecture content, the two layers are flattened into a single opaque
- * page image, and each page image is placed into a new PDF. The result has NO
- * selectable text layer and no removable annotation — the mark is part of the
- * pixel data. This needs Ghostscript + a compositor and is therefore NOT
- * available on a stock shared host; it is kept for operators who can supply
- * those binaries.
+ * ── ENGINE B: "raster" (image per page) — DOUBLE-GATED, SEE LICENCE BELOW ──
+ * Every page is rendered to a bitmap and ONE centred, diagonal watermark is
+ * painted INTO that bitmap, and the flattened opaque page image is placed into
+ * a new PDF. Each output page is then a single full-page image: no selectable
+ * text layer, no separate watermark object, no annotation.
+ *
+ * The ONLY working renderer for this is Ghostscript, which is AGPL-3.0 or a
+ * paid Artifex licence; Artifex's published position is that an AGPL
+ * Ghostscript may not be used in a closed-source server-based service without
+ * disclosing that service's source. It is therefore gated TWICE: the mode must
+ * be asked for AND the operator must set PDF_WATERMARK_ACCEPT_AGPL_RENDERER=1.
+ * Without that flag the engine reports itself unavailable and delivery is
+ * refused (503) — it never silently runs AGPL code on a commercial install.
+ *
+ * ── ENGINE F: "flatten" — ONE centred mark INSIDE the page stream, no binary ─
+ * Same single centred diagonal mark as ENGINE B, but baked straight into each
+ * imported page's own content stream with operators (PdfWatermarkBaker) instead
+ * of into a bitmap. Nothing outside the vendored MIT/LGPL PHP libraries is
+ * executed: no Ghostscript, no shell, no network, no extra font file. The mark
+ * is page content, not an annotation, optional-content group or separate text
+ * object, so a reader's "remove watermark" command has nothing to target — but
+ * the lecture text layer survives, which is the documented trade-off versus
+ * ENGINE B.
+ *
+ * ── LICENSING (see backend/docs/PDF_WATERMARK_LICENSING.md) ────────────────
+ * ENGINES A/C/F: setasign/fpdf (MIT) + setasign/fpdi (MIT) + tecnickcom/tcpdf
+ * (LGPL-3.0-or-later, dynamically loaded PHP library) — no fee, no external
+ * process, no network. ENGINE B additionally needs Ghostscript (AGPL or
+ * commercial) and is gated as described above.
  *
  * ── ENGINE C: "vector" via FPDI + plain FPDF — fallback ────────────────────
  * Same ordering guarantee as ENGINE A using FPDF's core Helvetica instead of
  * TCPDF. Used only when TCPDF is absent; kept because it is the smallest
  * possible dependency set (FPDF 1.9 + FPDI 2.x).
  *
- * ── WHY THE WATERMARK IS TRULY "BEHIND" IN ENGINE A ────────────────────────
+ * ── HOW ENGINE B FLATTENS ONE CENTRED MARK INTO THE PAGE ───────────────────
  * The page is rendered with Ghostscript's `pngalpha` device, which leaves the
  * unpainted page background TRANSPARENT (a normal viewer shows white paper, but
  * there is no white fill in the raster). Compositing order is then:
  *
- *     (1) opaque background canvas: white fill + the student watermark
- *     (2) the transparent-content page bitmap composited ON TOP (alpha = how
- *         much ink is at that pixel)
+ *     (1) opaque background canvas: white paper + the transparent-content page
+ *         bitmap composited ON TOP (alpha = how much ink is at that pixel)
+ *     (2) ONE centred diagonal identity mark painted OVER that composite, in
+ *         ONE pass at exactly PDF_WATERMARK_OPACITY over a 107-grey face
  *     (3) flatten → one opaque page image
  *
- * Where the lecture has text/diagrams the page bitmap is opaque and covers the
- * watermark; in the empty margins the page bitmap is transparent and the
- * watermark shows through. The watermark is never painted over the content,
- * which is the exact failure mode of "rasterise first, then stamp" pipelines.
+ * A 0.12 alpha face over white paper lands at ~237/255: identifiable when you
+ * look for it, without competing with the lecture underneath. It is composited
+ * ONCE because any second pass (the old code drew a dilated white halo eight
+ * times) compounds the alpha and delivers a mark several times heavier than the
+ * setting. Because the mark is drawn into the SAME bitmap the lecture was
+ * rasterised into, the delivered page holds a single image: the watermark
+ * cannot be selected, deleted or "removed" as an object, and the lecture text
+ * is no longer a text layer that can be stripped.
  *
  * ── FAIL CLOSED ────────────────────────────────────────────────────────────
  * If the selected engine is not fully available the delivery is REFUSED
@@ -102,6 +128,7 @@ final class PdfWatermarkService
     /** Engine selectors (PDF_WATERMARK_MODE). */
     public const MODE_RASTER = 'raster';
     public const MODE_VECTOR = 'vector';
+    public const MODE_FLATTEN = 'flatten';
     public const MODE_AUTO   = 'auto';
 
     /** Vendored pure-PHP PDF libraries are looked for here first. */
@@ -133,6 +160,23 @@ final class PdfWatermarkService
 
     /** Version token of the layer layout; folded into the cache key. */
     private const LAYERS_VERSION = 'layers-v4';
+
+    /** Raster engine — angle of the single centred watermark, in degrees. */
+    private const RASTER_ANGLE_DEG = 35.0;
+
+    /**
+     * Raster-engine layout token, folded into the cache key: when the centred
+     * layout changes, every cached raster copy must be regenerated instead of
+     * serving bytes produced by the old tiled grid.
+     */
+    private const RASTER_LAYOUT = 'center-v1';
+
+    /**
+     * Flatten-engine layout token, folded into the cache key: it changes when the
+     * single centred baked mark changes shape, so cached copies drawn by an older
+     * layout are regenerated instead of served.
+     */
+    private const FLATTEN_LAYOUT = 'center-bake-v1';
 
     /**
      * Common Linux FreeType font locations, tried in order when
@@ -185,7 +229,7 @@ final class PdfWatermarkService
         // actually provides a renderer. A shared cPanel host never does, so the
         // default must not depend on Ghostscript.
         $mode = strtolower(trim(Config::string('PDF_WATERMARK_MODE', self::MODE_AUTO)));
-        return in_array($mode, [self::MODE_RASTER, self::MODE_VECTOR, self::MODE_AUTO], true)
+        return in_array($mode, [self::MODE_RASTER, self::MODE_VECTOR, self::MODE_FLATTEN, self::MODE_AUTO], true)
             ? $mode
             : self::MODE_AUTO;
     }
@@ -216,6 +260,8 @@ final class PdfWatermarkService
             'effective_mode' => $s['effective_mode'],
             'raster_ready' => $s['raster']['ready'],
             'vector_ready' => $s['vector']['ready'],
+            'flatten_ready' => $s['flatten']['ready'],
+            'agpl_renderer_accepted' => $s['raster']['licence_gate'] === 'accepted',
             'shell_execution' => $s['raster']['shell_execution'],
             'ghostscript_version' => $s['raster']['ghostscript_version'],
             'compositor' => $s['raster']['compositor'],
@@ -230,7 +276,7 @@ final class PdfWatermarkService
                 'jpeg_quality' => $this->jpegQuality(),
             ],
             'vector_engine' => $s['vector']['engine'],
-            'requirement' => 'vector engine (default): setasign/fpdi 2.x + tecnickcom/tcpdf 6.x under backend/vendor; fallback: fpdi + fpdf; raster engine (opt-in): Ghostscript CLI + (GD w/ FreeType or Imagick) + a TTF font.',
+            'requirement' => 'vector/flatten engine (default): setasign/fpdi 2.x + tecnickcom/tcpdf 6.x under backend/vendor; fallback: fpdi + fpdf; raster engine: additionally Ghostscript CLI + (GD w/ FreeType or Imagick) + a TTF font, AND an accepted AGPL-or-commercial Ghostscript licence (PDF_WATERMARK_ACCEPT_AGPL_RENDERER=1).',
             'behaviour_when_missing' => 'A student PDF is refused with HTTP 503 — the unwatermarked original is never served as a fallback.',
         ];
     }
@@ -260,10 +306,24 @@ final class PdfWatermarkService
         $font = $this->fontPath();
         // The flattened output is assembled with FPDF (image-only pages).
         $pdfWriter = class_exists(\FPDF::class);
-        $rasterReady = $canExec && $gsVersion !== null && $compositor !== null && $font !== null && $pdfWriter;
+        // ── LICENCE GATE ──
+        // Ghostscript is AGPL-3.0 or a paid Artifex licence, and Artifex's
+        // published position is that AGPL Ghostscript may not be shipped inside
+        // a closed-source server-based service without disclosing that service's
+        // source. So the binary being present is NOT enough: an operator has to
+        // declare the licence position explicitly. Without the flag the engine
+        // reports unavailable and delivery fails closed (503) — it never runs
+        // AGPL code on a commercial install by accident.
+        $agplAccepted = Config::bool('PDF_WATERMARK_ACCEPT_AGPL_RENDERER', false);
+        $rasterPrereq = $canExec && $gsVersion !== null && $compositor !== null && $font !== null && $pdfWriter;
+        $rasterReady = $rasterPrereq && $agplAccepted;
 
         $raster = [
             'ready' => $rasterReady,
+            'prerequisites_ready' => $rasterPrereq,
+            'licence_gate' => $agplAccepted
+                ? 'accepted'
+                : 'blocked (set PDF_WATERMARK_ACCEPT_AGPL_RENDERER=1 only with an Artifex licence or a documented AGPL position)',
             'shell_execution' => $canExec ? 'enabled' : 'disabled (proc_open unavailable/disabled)',
             'ghostscript_bin' => $gsBin,
             'ghostscript_version' => $gsVersion,
@@ -286,6 +346,17 @@ final class PdfWatermarkService
             'tcpdf' => class_exists(\TCPDF::class) ? 'present' : 'missing',
         ];
 
+        // ── Renderer-free flattened engine (MODE_FLATTEN) ──
+        // It bakes ONE centred mark into the page stream, reusing the DejaVu
+        // face TCPDF embeds, so it needs the TCPDF bridge and nothing else: no
+        // binary, no shell, no external font file, no network.
+        $flattenReady = $vectorEngine === 'tcpdf';
+        $flatten = [
+            'ready' => $flattenReady,
+            'engine' => $flattenReady ? 'tcpdf-bake' : null,
+            'requires' => 'setasign/fpdi + tecnickcom/tcpdf (no renderer binary)',
+        ];
+
         // ── Resolve the effective engine ──
         // `auto` prefers PURE PHP (no binaries, no shell, fits shared hosting);
         // the raster engine is only chosen when the operator explicitly asks
@@ -294,6 +365,8 @@ final class PdfWatermarkService
         $effective = null;
         if ($mode === self::MODE_RASTER) {
             $effective = $rasterReady ? self::MODE_RASTER : null;
+        } elseif ($mode === self::MODE_FLATTEN) {
+            $effective = $flattenReady ? self::MODE_FLATTEN : null;
         } elseif ($mode === self::MODE_VECTOR) {
             $effective = $vectorEngine !== null ? self::MODE_VECTOR : null;
         } else { // auto
@@ -304,7 +377,9 @@ final class PdfWatermarkService
 
         $driver = null;
         if ($effective === self::MODE_RASTER) {
-            $driver = 'raster: Ghostscript ' . ($gsVersion ?? '?') . ' + ' . $compositor . ' (flattened, no text layer)';
+            $driver = 'raster: Ghostscript ' . ($gsVersion ?? '?') . ' + ' . $compositor . ' (one image per page, no text layer) — AGPL/commercial Ghostscript licence accepted by the operator';
+        } elseif ($effective === self::MODE_FLATTEN) {
+            $driver = 'flatten: setasign/FPDI 2.x + TCPDF 6.x (one centred mark baked into each page stream; no renderer binary, no shell, no network)';
         } elseif ($effective === self::MODE_VECTOR) {
             $driver = $vectorEngine === 'tcpdf'
                 ? 'vector: setasign/FPDI 2.x + TCPDF 6.x (embedded DejaVu Sans)'
@@ -316,6 +391,7 @@ final class PdfWatermarkService
             'effective_mode' => $effective,
             'effective_driver' => $driver,
             'raster' => $raster,
+            'flatten' => $flatten,
             'vector' => $vector,
         ];
     }
@@ -478,12 +554,24 @@ final class PdfWatermarkService
         return max(60, min(95, Config::int('PDF_WATERMARK_JPEG_QUALITY', 85)));
     }
 
-    /** Watermark strength (0..1) used to pick the grey level on white. */
+    /**
+     * EFFECTIVE opacity of the flattened mark — the alpha the identity text is
+     * composited at, applied exactly once.
+     *
+     * Before 2026-10-24 this value was fed through `0.55 + 1.5x`, so the default
+     * 0.15 produced a 77.5 %-opaque face: a heavy grey banner that competed
+     * with the lecture. It is now used verbatim, which makes the setting mean
+     * what it says and keeps the mark a watermark rather than a headline.
+     *
+     * 0.10–0.14 is the designed band: on white paper a 0.12 mark over a
+     * 107-grey face lands at ~237/255 luminance — clearly identifiable when you
+     * look at it, no measurable effect on reading the text underneath.
+     */
     public function opacity(): float
     {
-        $raw = Config::string('PDF_WATERMARK_OPACITY', '0.15');
-        $o = is_numeric($raw) ? (float) $raw : 0.15;
-        return max(0.05, min(0.5, $o));
+        $raw = Config::string('PDF_WATERMARK_OPACITY', '0.12');
+        $o = is_numeric($raw) ? (float) $raw : 0.12;
+        return max(0.04, min(0.5, $o));
     }
 
     public function maxPages(): int
@@ -628,17 +716,29 @@ final class PdfWatermarkService
         // instead of serving bytes produced by a different pipeline.
         $settings = [
             'engine' => $mode === self::MODE_RASTER
-                ? 'flatten-v2'
-                : 'vector-v4:' . ($this->rendererStatus()['vector']['engine'] ?? 'none'),
+                ? 'flatten-v4-single'
+                : ($mode === self::MODE_FLATTEN
+                    ? self::FLATTEN_LAYOUT
+                    : 'vector-v4:' . ($this->rendererStatus()['vector']['engine'] ?? 'none')),
             'mode' => $mode,
             'lines' => $lines,
         ];
         if ($mode === self::MODE_RASTER) {
             // Raster-only knobs: they do not affect the vector output, so they
             // must not invalidate its cache when an operator tunes them.
+            $settings['raster_layout'] = self::RASTER_LAYOUT;
+            $settings['raster_angle'] = self::RASTER_ANGLE_DEG;
             $settings['opacity'] = $this->opacity();
             $settings['dpi'] = $this->dpi();
             $settings['format'] = $this->imageFormat();
+        } elseif ($mode === self::MODE_FLATTEN) {
+            // The flattened engine is pure PHP but is NOT cache-compatible with
+            // the vector one: it draws a different mark, so its own knobs go in.
+            $settings['flatten_layout'] = self::FLATTEN_LAYOUT;
+            $settings['flatten_angle'] = self::RASTER_ANGLE_DEG;
+            $settings['flatten_tone'] = $this->centerInk()['tone'];
+            $settings['opacity'] = $this->opacity();
+            $settings['flatten_font'] = self::VECTOR_FONT;
         } else {
             // The VECTOR opacity is a different knob (PDF_WATERMARK_VECTOR_OPACITY)
             // and it must be part of the cache identity: without it, tuning the
@@ -712,9 +812,14 @@ final class PdfWatermarkService
         }
 
         try {
-            $pages = $this->effectiveMode() === self::MODE_RASTER
-                ? $this->renderRaster($sourceAbsPath, $lines, $outAbsPath)
-                : $this->renderVector($sourceAbsPath, $lines, $outAbsPath);
+            $mode = $this->effectiveMode();
+            if ($mode === self::MODE_RASTER) {
+                $pages = $this->renderRaster($sourceAbsPath, $lines, $outAbsPath);
+            } elseif ($mode === self::MODE_FLATTEN) {
+                $pages = $this->renderFlatten($sourceAbsPath, $lines, $outAbsPath);
+            } else {
+                $pages = $this->renderVector($sourceAbsPath, $lines, $outAbsPath);
+            }
         } catch (ApiException $e) {
             throw $e;
         } catch (\Throwable $e) {
@@ -730,16 +835,328 @@ final class PdfWatermarkService
         return $pages;
     }
 
-    // ── ENGINE A: rasterise → composite (watermark behind) → flatten ──────────
+    // ── ENGINE F: renderer-free flattening (pure PHP, one centred mark) ──────
+
+    /**
+     * Flattened pipeline that needs NO renderer binary.
+     *
+     * Why this exists: the image-per-page engine (ENGINE B) can only be driven by
+     * Ghostscript, which is AGPL-3.0 or a paid Artifex licence — unusable in a
+     * closed-source commercial service without buying that licence. Every other
+     * renderer is either copyleft (Poppler: GPL-2.0-or-later, MuPDF: AGPL) or has
+     * no installable CLI (PDFium: BSD, but a library needing FFI and a VPS), and
+     * ImageMagick's PDF delegate simply calls Ghostscript again. So this engine
+     * removes the need for a renderer instead of substituting one: the same single
+     * centred diagonal mark is written as PDF operators INTO each imported page's
+     * own content stream, by PdfWatermarkBaker.
+     *
+     * What that buys, versus the layered vector engine (ENGINE A):
+     *   • ONE mark per page, not a grid of twelve;
+     *   • the mark is page CONTENT — no annotation, no optional-content group, no
+     *     separate text or image object with its own dictionary. A reader's
+     *     "remove watermark" command has nothing to select;
+     *   • deleting "the watermark block" is impossible: the operators live in the
+     *     stream that carries the lecture text, so any edit that removes them
+     *     edits the lecture too.
+     *
+     * What it does NOT buy, stated plainly: the lecture text stays a real text
+     * layer, so copy/paste and text extraction still work and the page is not one
+     * flat image. ENGINE B remains stronger where a licensed renderer exists.
+     *
+     * EVERY PAGE MUST CARRY EXACTLY ONE MARK. The bake covers the pages whose
+     * structure it can rewrite; the remaining pages get the IDENTICAL mark drawn
+     * at page level (still page content — no annotation, no OCG, no object of its
+     * own), so no page can be delivered blank and no page can get the mark twice.
+     * The page-level fallback is weaker (that block can be deleted from the page
+     * stream) and it is logged with the exact page numbers; it also removes the
+     * need to refuse a document the product already delivers today.
+     */
+    private function renderFlatten(string $source, array $lines, string $out): int
+    {
+        $engine = $this->rendererStatus()['vector']['engine'] ?? null;
+        if ($engine !== 'tcpdf') {
+            throw new ApiException(503, 'The flattened engine needs the TCPDF bridge (setasign/fpdi + tecnickcom/tcpdf) in backend/vendor. The unwatermarked original will not be served.');
+        }
+
+        $identity = trim((string) ($lines[0] ?? ''));
+        if ($identity === '') {
+            $identity = 'MedAcademy';
+        }
+
+        // ── Build with NO page-level marks; the bake supplies every page ──
+        $pageCount = $this->buildFlattenPass($source, $out, $identity);
+        $report = (new PdfWatermarkBaker())->bake($out, $this->lastFlattenBlocks, $this->opacity());
+        if ($report['baked'] === $pageCount) {
+            return $pageCount;
+        }
+
+        $skipped = array_values(array_unique(array_map('intval', $report['skipped_pages'] ?? [])));
+        if ($skipped === []) {
+            // The baker could not even start (unsupported xref shape, no font, …).
+            // Nothing page-specific to fall back to, so fail closed.
+            error_log('[pdf-watermark] flatten bake failed: ' . (string) ($report['reason'] ?? 'unknown'));
+            throw new ApiException(422, 'This PDF uses a structure the flattener cannot modify safely, so no copy was produced. Re-export the document and upload it again.');
+        }
+
+        // ── Pages whose imported Form cannot be rewritten ──
+        // Same mark, same operators, appended to the PAGE's own content stream by
+        // the baker instead (drawn on top of the imported page). Nothing is redrawn
+        // through TCPDF, so the fallback mark is identical in size, angle, position
+        // and alpha — it is only — marginally — easier to strip, because it is a
+        // separable block inside the page stream rather than part of the lecture
+        // Form. That is logged per page.
+        $fallback = [];
+        foreach ($skipped as $pageNo) {
+            $block = $this->lastFlattenBlocks[$pageNo - 1] ?? '';
+            if (is_string($block) && $block !== '') {
+                $fallback[$pageNo] = $block;
+            }
+        }
+        error_log(
+            '[pdf-watermark] flatten: form bake covered ' . $report['baked'] . '/' . $pageCount
+            . '; page-stream bake for ' . $this->pageList($pageCount, $skipped, true)
+            . ' (' . (string) ($report['reason'] ?? 'unknown') . ')'
+        );
+        $second = (new PdfWatermarkBaker())->bakeOnPages($out, $fallback, $this->opacity());
+        if ($second['baked'] !== count($fallback)) {
+            error_log(
+                '[pdf-watermark] flatten page bake incomplete: ' . $second['baked'] . ' of '
+                . count($fallback) . ' (' . (string) ($second['reason'] ?? 'unknown') . ')'
+            );
+            throw new ApiException(422, 'This PDF uses a structure the flattener cannot modify safely, so no copy was produced. Re-export the document and upload it again.');
+        }
+
+        return $pageCount;
+    }
+
+    /** @var array<int,?string> blocks produced by the last buildFlattenPass() */
+    private array $lastFlattenBlocks = [];
+
+    /**
+     * Build one flatten-mode PDF: every source page imported at its visible size,
+     * the DejaVu face seeded once, and either a baked-operator block (returned to
+     * the caller for PdfWatermarkBaker) or a page-level copy of the same mark for
+     * the pages in $pageLevelMarks (1-based).
+     *
+     * Returns the page count. The per-page blocks land in $lastFlattenBlocks, keyed
+     * positionally so the baker's page index lines up: a page-level mark contributes
+     * a null entry, which the baker treats as "skip this page".
+     *
+     */
+    private function buildFlattenPass(string $source, string $out, string $identity): int
+    {
+        $pdf = new \setasign\Fpdi\Tcpdf\Fpdi('P', 'pt', 'A4', true, 'UTF-8', false);
+        $pdf->setPrintHeader(false);
+        $pdf->setPrintFooter(false);
+        $pdf->SetAutoPageBreak(false, 0);
+        $pdf->SetMargins(0, 0, 0);
+        $pdf->SetCellPaddings(0, 0, 0, 0);
+        $pdf->setFontSubsetting(true);
+
+        try {
+            $pageCount = (int) $pdf->setSourceFile($source);
+        } catch (\Throwable $e) {
+            if ($this->isPdfParseFailure($e)) {
+                error_log('[pdf-watermark] unsupported pdf structure: ' . $e->getMessage());
+                throw new ApiException(422, 'This PDF uses a structure the watermarker cannot read (for example compressed cross-reference streams or encryption). It cannot be delivered to students.');
+            }
+            throw $e;
+        }
+        if ($pageCount < 1) {
+            throw new ApiException(422, 'This PDF has no pages.');
+        }
+        if ($pageCount > $this->maxPages()) {
+            throw new ApiException(422, 'This PDF has more pages than the watermarking limit (' . $this->maxPages() . ').');
+        }
+
+        $blocks = [];
+        for ($pageNo = 1; $pageNo <= $pageCount; $pageNo++) {
+            $tpl = $pdf->importPage($pageNo);
+            $size = $pdf->getTemplateSize($tpl);
+            $w = (float) ($size['width'] ?? 0);
+            $h = (float) ($size['height'] ?? 0);
+            if ($w <= 0.0 || $h <= 0.0) {
+                throw new ApiException(422, 'Page ' . $pageNo . ' has no usable dimensions.');
+            }
+            // FPDI reports the VISIBLE size, so a /Rotate 90 page arrives already
+            // swapped; adding the page that way keeps the mark aligned with what
+            // the reader sees, exactly like the layered engine.
+            $pdf->AddPage($w > $h ? 'L' : 'P', [$w, $h], false, false);
+            $pdf->useTemplate($tpl, 0, 0, $w, $h);
+
+            // The baked operators reuse /MACWMF0 — the DejaVu subset TCPDF embeds
+            // on first use — so the glyphs must be written once. At alpha 0 they
+            // are invisible; the visible mark is the baked (or page-level) one.
+            $this->seedBakedFont($pdf, $identity);
+            $blocks[] = $this->centeredBakedOps($pdf, $w, $h, $identity);
+        }
+
+        $pdf->Output($out, 'F');
+        $this->lastFlattenBlocks = $blocks;
+        return $pageCount;
+    }
+
+    /** 1,3,5 from a page count and a skipped set — for one log line. */
+    private function pageList(int $pageCount, array $skipped, bool $invert): string
+    {
+        $out = [];
+        for ($p = 1; $p <= $pageCount; $p++) {
+            if (in_array($p, $skipped, true) === $invert) {
+                $out[] = (string) $p;
+            }
+        }
+        return $out === [] ? 'none' : implode(',', $out);
+    }
+
+
+    /**
+     * Write the identity once at alpha 0 so TCPDF embeds the DejaVu subset the
+     * baked operators reference. Invisible on the page: nothing else is drawn at
+     * page level in this engine, so the delivered page carries exactly ONE visible
+     * mark, the baked one.
+     */
+    private function seedBakedFont(\TCPDF $pdf, string $identity): void
+    {
+        $pdf->SetAlpha(0);
+        $pdf->SetFont(self::VECTOR_FONT, 'B', 12);
+        $pdf->Text(2, 2, $identity);
+        $pdf->SetAlpha(1);
+    }
+
+    /**
+     * Raw operators for the ONE centred mark, in page coordinates (origin
+     * bottom-left). The run is rotated about its own visual centre, which is
+     * placed on the page centre, so mixed page sizes and orientations all get the
+     * same composition.
+     */
+    private function centeredBakedOps(\TCPDF $pdf, float $w, float $h, string $text): string
+    {
+        $mark = $this->centeredMarkGeometry($pdf, $w, $h, $text);
+        if ($mark === null) {
+            return '';
+        }
+        $size = $mark['size'];
+        $cos = $mark['cos'];
+        $sin = $mark['sin'];
+        $px = $mark['x'];
+        $py = $mark['y'];
+
+        $tone = $this->centerInk()['tone'] / 255;
+        // TCPDF writes the embedded Unicode face as UTF-16BE code units (the
+        // subset maps CID == code point), so a hex string is a valid operand.
+        $hex = strtoupper(bin2hex((string) mb_convert_encoding($text, 'UTF-16BE', 'UTF-8')));
+
+        return "q\n"
+            . '/' . PdfWatermarkBaker::GS_RES . " gs\n"
+            . $this->pdfNum($tone) . " g\n"
+            . "BT\n/" . PdfWatermarkBaker::FONT_RES . ' ' . $this->pdfNum($size) . " Tf\n"
+            . $this->pdfNum($cos) . ' ' . $this->pdfNum($sin) . ' '
+            . $this->pdfNum(-$sin) . ' ' . $this->pdfNum($cos) . ' '
+            . $this->pdfNum($px) . ' ' . $this->pdfNum($py) . " cm\n"
+            . '<' . $hex . "> Tj\nET\nQ\n";
+    }
+
+    /**
+     * Geometry of the ONE centred mark, in PDF user space (origin bottom-left,
+     * y UP): font size, rotation terms, and the baseline origin that puts the run's
+     * visual centre on the page centre.
+     *
+     * Shared by the baked operators and the page-level fallback, so both draw the
+     * SAME mark — a page that falls back is indistinguishable in appearance from a
+     * baked one.
+     *
+     * @return array{size:float,angle:float,cos:float,sin:float,x:float,y:float}|null
+     */
+    private function centeredMarkGeometry(\TCPDF $pdf, float $w, float $h, string $text): ?array
+    {
+        $size = $this->centeredBakeFontSize($pdf, $w, $h, $text);
+        if ($size === null) {
+            return null;
+        }
+        $pdf->SetFont(self::VECTOR_FONT, 'B', $size);
+        $runWidth = (float) $pdf->GetStringWidth($text);
+        if ($runWidth <= 0.1) {
+            return null;
+        }
+
+        $angle = self::RASTER_ANGLE_DEG;
+        $cos = cos(deg2rad($angle));
+        $sin = sin(deg2rad($angle));
+
+        // Visual centre of a horizontal run RELATIVE TO ITS BASELINE ORIGIN.
+        // +0.30em is roughly halfway between the ascender and the descender for
+        // the embedded face, so the mark looks centred rather than sitting low.
+        $uc = $runWidth / 2;
+        $vc = $size * 0.30;
+        // Rotate that offset, then place the origin so the offset lands on the
+        // page centre (PDF user space: y up, positive angle counter-clockwise).
+        return [
+            'size' => $size,
+            'angle' => $angle,
+            'cos' => $cos,
+            'sin' => $sin,
+            'x' => ($w / 2) - (($uc * $cos) - ($vc * $sin)),
+            'y' => ($h / 2) - (($uc * $sin) + ($vc * $cos)),
+        ];
+    }
+
+    /**
+     * Font size for the single centred mark: start DPI-independent, scale so the
+     * rotated run spans ~86 % of the usable box, then shrink until it fits both
+     * dimensions. A cap keeps a three-letter id from swallowing the page; the
+     * loop keeps a 60-character name from running off it. Null when even 4pt does
+     * not fit (degenerate page geometry).
+     */
+    private function centeredBakeFontSize(\TCPDF $pdf, float $w, float $h, string $text): ?float
+    {
+        $maxW = $w * 0.86;
+        $maxH = $h * 0.86;
+        if ($maxW <= 1.0 || $maxH <= 1.0) {
+            return null;
+        }
+        $cos = cos(deg2rad(self::RASTER_ANGLE_DEG));
+        $sin = sin(deg2rad(self::RASTER_ANGLE_DEG));
+        $size = min(0.10 * min($w, $h), 140.0);
+
+        for ($try = 0; $try < 10; $try++) {
+            $pdf->SetFont(self::VECTOR_FONT, 'B', $size);
+            $runWidth = (float) $pdf->GetStringWidth($text);
+            if ($runWidth <= 0.1) {
+                return null;
+            }
+            // Conservative height (ascender + descender) so the fit never clips.
+            $runHeight = $size * 0.95;
+            $rotW = $runWidth * $cos + $runHeight * $sin;
+            $rotH = $runWidth * $sin + $runHeight * $cos;
+            if ($rotW <= $maxW && $rotH <= $maxH) {
+                break;
+            }
+            $shrink = min($maxW / max(1.0, $rotW), $maxH / max(1.0, $rotH)) * 0.97;
+            $size *= max(0.5, $shrink);
+            if ($size <= 4.0) {
+                $size = 4.0;
+                break;
+            }
+        }
+
+        // Cap for very short identities, floor for float noise.
+        $size = min($size, 0.14 * min($w, $h));
+        return $size >= 4.0 ? $size : null;
+    }
+
+    // ── ENGINE B: rasterise → composite one centred mark → flatten ─────────
 
     /**
      * Flattened pipeline. Page order of operations per page:
      *   1. Ghostscript renders the ORIGINAL page to a transparent-background
      *      PNG (`pngalpha`) — the lecture ink, no white paper fill.
-     *   2. A white canvas is prepared and the student watermark is drawn on it.
-     *   3. The transparent page bitmap is composited ON TOP of the watermark.
-     *   4. The composite is flattened to one opaque image and placed full-page
-     *      into the output PDF (an image XObject — no text, no annotation).
+     *   2. A white canvas is prepared and the transparent page bitmap is
+     *      composited ON TOP of it, producing opaque "paper + lecture".
+     *   3. ONE centred diagonal identity mark is painted OVER that composite,
+     *      in a single pass at exactly PDF_WATERMARK_OPACITY (no halo: a
+     *      second pass would compound the alpha).
+     *   4. The flattened opaque page image is placed full-page into the output
+     *      PDF (an image XObject — no text, no annotation, no watermark object).
      *
      * Pages are handled one at a time (bitmap freed after each), and the whole
      * document is bounded by a page-count and per-page pixel limit.
@@ -789,6 +1206,25 @@ final class PdfWatermarkService
             }
             if (count($pages) > $maxPages) {
                 throw new ApiException(422, 'This PDF has more pages than the watermarking limit (' . $maxPages . ').');
+            }
+
+            // ── Never deliver a PARTIAL document ──────────────────────────
+            // Ghostscript can exit non-zero AFTER writing some pages (one
+            // damaged page in an otherwise valid file). Those pages would
+            // otherwise be assembled and delivered with content silently
+            // missing, so a non-zero exit refuses the whole document; so does a
+            // rendered page count below the source's.
+            if ($code !== 0) {
+                error_log(
+                    '[pdf-watermark] ghostscript exited ' . $code . ' after ' . count($pages) . ' page(s): '
+                    . substr($stderr, 0, 300)
+                );
+                throw new ApiException(422, 'A page of this PDF could not be rendered, so no copy was produced. Re-export the document and upload it again.');
+            }
+            $expectedPages = $this->sourcePageCount($source);
+            if ($expectedPages !== null && count($pages) !== $expectedPages) {
+                error_log('[pdf-watermark] rendered ' . count($pages) . ' of ' . $expectedPages . ' page(s)');
+                throw new ApiException(422, 'A page of this PDF could not be rendered, so no copy was produced. Re-export the document and upload it again.');
             }
 
             // 2. Flatten each page and assemble the output PDF incrementally.
@@ -849,8 +1285,25 @@ final class PdfWatermarkService
     }
 
     /**
-     * Composite ONE page: watermark (bottom) ← transparent page content (top).
-     * Dispatches to the detected compositor. $outImage is a PNG or JPEG.
+     * Page count read straight from the SOURCE bytes, or null when it cannot be
+     * determined (page objects hidden in an object stream, unreadable file).
+     * Used only to detect a TRUNCATED render: an unknown count skips this extra
+     * check, while the non-zero-exit check above still applies.
+     */
+    private function sourcePageCount(string $source): ?int
+    {
+        $raw = @file_get_contents($source);
+        if (!is_string($raw) || $raw === '') {
+            return null;
+        }
+        $n = (int) preg_match_all('#/Type\s*/Page[^s]#', $raw);
+        return $n > 0 ? $n : null;
+    }
+
+    /**
+     * Composite ONE page: opaque paper + transparent lecture on top, then the
+     * single centred watermark into the same bitmap. Dispatches to the detected
+     * compositor. $outImage is a PNG or JPEG.
      *
      * @param array{0:string,1:string} $lines
      */
@@ -887,26 +1340,60 @@ final class PdfWatermarkService
         int $quality,
         string $font
     ): void {
-        $base = (int) round(255 - $opacity * (255 - 90)); // 255 = white, lower = darker
+        $ink = $this->centerInk();
+
+        // 1. White paper + the lecture page (transparent background) on top.
         $canvas = new \Imagick();
         $canvas->newImage($w, $h, new \ImagickPixel('white'));
         $canvas->setImageFormat('png');
-
-        $draw = new \ImagickDraw();
-        $draw->setFillColor(new \ImagickPixel('rgb(' . $base . ',' . $base . ',' . $base . ')'));
-        $draw->setFont($font);
-        $draw->setFontSize(max(9, (int) round($dpi * 0.08)));
-
-        foreach ($this->watermarkPlacements($lines, $w, $h, $dpi, $font) as $p) {
-            $draw->push();
-            $draw->rotate($p['angle']);
-            $draw->annotation($p['x'], $p['y'], $p['text']);
-            $draw->pop();
-        }
-        $canvas->drawImage($draw);
-
         $fg = new \Imagick($pagePng);
         $canvas->compositeImage($fg, \Imagick::COMPOSITE_OVER, 0, 0);
+        $fg->clear();
+
+        // 2. The ONE centred mark, drawn on its own transparent layer so the
+        //    whole run can be rotated about the page centre.
+        $place = $this->centeredPlacement($lines, $w, $h, $dpi, $font);
+        if ($place !== null) {
+            $layer = new \Imagick();
+            $layer->newImage($w, $h, new \ImagickPixel('transparent'));
+            $layer->setImageFormat('png');
+
+            // Baseline point that leaves the UNROTATED run centred on the page:
+            // ImageMagick draws text from the baseline, so the vertical offset
+            // is the midpoint of (ascender, descender).
+            $probe = new \ImagickDraw();
+            $probe->setFont($font);
+            $probe->setFontSize($place['size']);
+            $metrics = $layer->queryFontMetrics($probe, $place['text']);
+            $probe->clear();
+            $textW = (float) ($metrics['textWidth'] ?? 0);
+            $asc = (float) ($metrics['ascender'] ?? $metrics['typoAscender'] ?? $place['size']);
+            $desc = (float) ($metrics['descender'] ?? $metrics['typoDescender'] ?? 0.0);
+            $tx = ($w - $textW) / 2;
+            $ty = ($h + $asc + $desc) / 2;
+
+            // ONE pass, ONE alpha: no halo, no stroke. Anything drawn twice
+            // would compound the alpha and make the delivered mark heavier
+            // than PDF_WATERMARK_OPACITY.
+            $face = new \ImagickDraw();
+            $face->setFont($font);
+            $face->setFontSize($place['size']);
+            $face->setFillColor(new \ImagickPixel(sprintf(
+                'rgba(%d,%d,%d,%.3f)',
+                $ink['tone'], $ink['tone'], $ink['tone'], $ink['cover']
+            )));
+            $layer->annotateImage($face, $tx, $ty, 0, $place['text']);
+            $face->clear();
+
+            // Rotate about the layer's own centre, so the mark keeps its page
+            // position. ImageMagick rotates clockwise for a positive angle, so
+            // −angle matches the GD path's counter-clockwise convention. The
+            // fit above guarantees the rotated box already lies inside the
+            // page, so nothing is clipped.
+            $layer->rotateImage(new \ImagickPixel('transparent'), -$place['angle'], false);
+            $canvas->compositeImage($layer, \Imagick::COMPOSITE_OVER, 0, 0);
+            $layer->clear();
+        }
 
         if ($format === 'jpeg') {
             $canvas->setImageFormat('jpeg');
@@ -919,8 +1406,6 @@ final class PdfWatermarkService
             $canvas->setImageType(\Imagick::IMGTYPE_TRUECOLOR);
         }
         $canvas->writeImage($outImage);
-
-        $fg->clear();
         $canvas->clear();
     }
 
@@ -944,17 +1429,7 @@ final class PdfWatermarkService
         $white = imagecolorallocate($canvas, 255, 255, 255);
         imagefilledrectangle($canvas, 0, 0, $w, $h, $white);
 
-        // Opacity is realised as a grey level on the white canvas: opacity 0 →
-        // pure white (invisible), higher → darker grey.
-        $base = (int) round(255 - $opacity * (255 - 90));
-        $ink = imagecolorallocate($canvas, $base, $base, $base);
-
-        $fontSize = max(9, (int) round($dpi * 0.08));
-        foreach ($this->watermarkPlacements($lines, $w, $h, $dpi, $font) as $p) {
-            imagettftext($canvas, $fontSize, $p['angle'], (int) $p['x'], (int) $p['y'], $ink, $font, $p['text']);
-        }
-
-        // Composite the transparent-content page bitmap ON TOP of the watermark.
+        // 1. White paper + the transparent-content page bitmap on top.
         $fg = @imagecreatefrompng($pagePng);
         if ($fg === false) {
             imagedestroy($canvas);
@@ -963,6 +1438,31 @@ final class PdfWatermarkService
         imagealphablending($canvas, true);
         imagecopy($canvas, $fg, 0, 0, 0, 0, $w, $h);
         imagedestroy($fg);
+
+        // 2. The ONE centred mark, painted OVER the lecture — ONE pass.
+        //
+        // GD blends a source colour's own alpha into the destination, so a
+        // second pass over the same pixels would compound (1-(1-a)^2, i.e. a
+        // 0.12 mark rendered at 0.22). The previous implementation drew a
+        // dilated white halo EIGHT times around the face, which is why the
+        // delivered mark was far heavier than the configured opacity.
+        $place = $this->centeredPlacement($lines, $w, $h, $dpi, $font);
+        if ($place !== null) {
+            $ink = $this->centerInk();
+            $faceA = (int) max(0, min(127, round(127 * (1.0 - $ink['cover']))));
+            $faceC = imagecolorallocatealpha($canvas, $ink['tone'], $ink['tone'], $ink['tone'], $faceA);
+            imagealphablending($canvas, true);
+            imagettftext(
+                $canvas,
+                $place['size'],
+                $place['angle'],
+                (int) round($place['x']),
+                (int) round($place['y']),
+                $faceC,
+                $font,
+                $place['text']
+            );
+        }
 
         if ($format === 'jpeg') {
             imagejpeg($canvas, $outImage, $quality);
@@ -973,50 +1473,162 @@ final class PdfWatermarkService
     }
 
     /**
-     * Repeated diagonal grid of identity text. Spacing adapts to the page so a
-     * small page is not over-stamped and a large one is not left bare. The two
-     * lines alternate. Returns absolute coordinates in image pixels.
+     * The SINGLE centred watermark of the raster engine.
      *
-     * This is the SINGLE source of placement for both compositors, so the
-     * "behind the content" arrangement is identical whichever one runs.
+     * The identity line is laid out horizontally, then SCALED so the rotated
+     * (35°) box spans ~86 % of the usable page width — a large, clearly visible
+     * centred mark — and finally shrunk if that still exceeds the usable
+     * height. That one fit covers every page shape — portrait, landscape,
+     * /Rotate'd or unusually sized — and guarantees the mark never runs off
+     * the sheet, however long the student's name is. A cap on the glyph size
+     * keeps a very short identity (a 3-letter code) from swallowing the page.
+     *
+     * Returns the text, font size, angle, and the point for GD's imagettftext
+     * (the LEFT-BASELINE origin, pre-compensated so the rotated glyph run
+     * lands centred on the page). Null when the geometry cannot hold a mark.
      *
      * @param array{0:string,1:string} $lines
-     * @return array<int,array{x:float,y:float,angle:int,text:string}>
+     * @return array{text:string,size:float,angle:float,x:float,y:float}|null
      */
-    private function watermarkPlacements(array $lines, int $w, int $h, int $dpi, string $font): array
+    private function centeredPlacement(array $lines, int $w, int $h, int $dpi, string $font): ?array
     {
-        $texts = array_values(array_filter($lines, static fn ($t) => $t !== ''));
-        if ($texts === []) {
-            $texts = ['MedAcademy'];
+        $text = (string) ($lines[0] ?? '');
+        if ($text === '') {
+            $text = (string) ($lines[1] ?? '');
         }
-        $fontSize = max(9, (int) round($dpi * 0.08));
+        if ($text === '') {
+            $text = 'MedAcademy';
+        }
 
-        // Measure a representative line to space the grid honestly. imagettfbbox
-        // only exists with GD, but the Imagick compositor does NOT require GD —
-        // so guard the call and fall back to a width estimate rather than
-        // fatally calling an undefined function.
-        $sample = $texts[0];
-        $box = function_exists('imagettfbbox') ? @imagettfbbox($fontSize, 0, $font, $sample) : false;
-        $textW = ($box !== false && is_array($box)) ? abs($box[4] - $box[0]) : (int) ($fontSize * strlen($sample) * 0.6);
-        $textH = ($box !== false && is_array($box)) ? abs($box[5] - $box[1]) : $fontSize;
+        $angle = self::RASTER_ANGLE_DEG;
+        $rad = deg2rad($angle);
+        $cos = cos($rad);
+        $sin = sin($rad);
+        $margin = max(8.0, 0.02 * (float) min($w, $h));
+        $maxW = (float) $w - 2 * $margin;
+        $maxH = (float) $h - 2 * $margin;
+        if ($maxW <= 0.0 || $maxH <= 0.0) {
+            return null;
+        }
 
-        $stepX = max(200.0, $textW * 1.8);
-        $stepY = max(140.0, $textH * 6.0);
+        // Start from a DPI-relative size, then SCALE so the rotated mark spans
+        // ~86 % of the usable width ("fit the watermark to the page width"),
+        // capped so a very short identity cannot grow into a page-swallowing
+        // glyph. The shrink loop below then guarantees the fit on every page.
+        $size = max(9.0, (float) round($dpi * 0.08));
+        $startBox = $this->textBox($size, $font, $text);
+        if ($startBox === null) {
+            return null;
+        }
+        $startRotW = $startBox['w'] * $cos + $startBox['h'] * $sin;
+        if ($startRotW > 1.0) {
+            $size *= (0.86 * $maxW) / $startRotW;
+        }
+        $size = min($size, 0.14 * (float) min($w, $h));
+        $size = max(6.0, $size);
 
-        $out = [];
-        $i = 0;
-        for ($y = $stepY; $y < $h + $stepY; $y += $stepY) {
-            for ($x = $stepX * 0.5; $x < $w + $stepX; $x += $stepX) {
-                $out[] = [
-                    'x' => $x,
-                    'y' => $y,
-                    'angle' => 45,
-                    'text' => $texts[$i % count($texts)],
+        $box = null;
+        $rotW = $rotH = 0.0;
+        for ($try = 0; $try < 8; $try++) {
+            $box = $this->textBox($size, $font, $text);
+            if ($box === null) {
+                return null;
+            }
+            $rotW = $box['w'] * $cos + $box['h'] * $sin;
+            $rotH = $box['w'] * $sin + $box['h'] * $cos;
+            if ($rotW <= $maxW && $rotH <= $maxH) {
+                break;
+            }
+            $shrink = min($maxW / max(1.0, $rotW), $maxH / max(1.0, $rotH)) * 0.98;
+            $size *= max(0.5, $shrink);
+            $box = null;
+        }
+        if ($box === null || $rotW > $maxW || $rotH > $maxH || $size < 4.0) {
+            return null;
+        }
+
+        // GD rotates the run about the returned origin, with positive angle =
+        // counter-clockwise on screen (y down), so the centre offset
+        // (bbox middle relative to the origin) is mapped by
+        //   x' =  cx·cos + cy·sin ,  y' = −cx·sin + cy·cos
+        // and the origin is chosen as page centre − that mapped offset.
+        $cx = $box['cx'];
+        $cy = $box['cy'];
+        $rx = $cx * $cos + $cy * $sin;
+        $ry = -$cx * $sin + $cy * $cos;
+
+        return [
+            'text' => $text,
+            'size' => $size,
+            'angle' => $angle,
+            'x' => ($w / 2) - $rx,
+            'y' => ($h / 2) - $ry,
+        ];
+    }
+
+    /**
+     * Measured box of one horizontal text run: width, height and the centre
+     * offset RELATIVE TO THE LEFT-BASELINE ORIGIN (what imagettftext rotates
+     * about). Uses imagettfbbox when GD is present; the raster engine already
+     * requires either GD or Imagick, and the fallback estimate keeps the fit
+     * conservative when GD is absent (Imagick path measures with its own API).
+     *
+     * @return array{w:float,h:float,cx:float,cy:float}|null
+     */
+    private function textBox(float $size, string $font, string $text): ?array
+    {
+        if (function_exists('imagettfbbox')) {
+            $b = @imagettfbbox($size, 0, $font, $text);
+            if (is_array($b) && count($b) === 8) {
+                $xs = [(float) $b[0], (float) $b[2], (float) $b[4], (float) $b[6]];
+                $ys = [(float) $b[1], (float) $b[3], (float) $b[5], (float) $b[7]];
+                $minX = min($xs);
+                $maxX = max($xs);
+                $minY = min($ys);
+                $maxY = max($ys);
+                return [
+                    'w' => max(1.0, $maxX - $minX),
+                    'h' => max(1.0, $maxY - $minY),
+                    'cx' => ($minX + $maxX) / 2,
+                    'cy' => ($minY + $maxY) / 2,
                 ];
-                $i++;
             }
         }
-        return $out;
+        // Deliberate over-estimate (0.62 em/char, plus ascender+descender):
+        // a larger assumed box only shrinks the fit, never clips the page.
+        $w = $size * 0.62 * (function_exists('mb_strlen') ? mb_strlen($text) : strlen($text));
+        if ($w < 1.0) {
+            return null;
+        }
+        return ['w' => $w, 'h' => $size * 1.15, 'cx' => $w / 2, 'cy' => -$size * 0.35];
+    }
+
+    /**
+     * Face colour and alpha of the single centred mark.
+     *
+     * ONE pass, ONE tone, no halo. That is deliberate:
+     *
+     *   • `cover` is exactly PDF_WATERMARK_OPACITY, so the rendered result is
+     *     the configured opacity instead of something stronger. The previous
+     *     version drew a dilated white halo at 90 % alpha plus a grey face at
+     *     ~78 %, which on white paper read as an opaque banner;
+     *   • `tone` is a restrained 107 grey (~42 %): dark enough to carry the
+     *     contrast on paper, light enough that a long diagonal run never looks
+     *     like a redaction bar;
+     *   • with no halo there is no second compositing pass, so overlapping
+     *     glyph edges cannot compound into a denser mark (the old GD path drew
+     *     the halo EIGHT times, one per dilation offset).
+     *
+     * Consequence, documented in PDF_WATERMARK_REMOVAL_RESISTANCE.md: over a
+     * dark photograph the mark is effectively invisible. That is the accepted
+     * cost of "does not obscure the content" — a mark that inverts itself to
+     * white over figures is exactly what made the old rendering distracting.
+     *
+     * @return array{tone:int,cover:float}
+     */
+    private function centerInk(): array
+    {
+        return ['tone' => 107, 'cover' => $this->opacity()];
     }
 
     /** Largest source PDF the vector pipeline will parse (bytes). */

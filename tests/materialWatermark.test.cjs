@@ -198,9 +198,16 @@ section('5. Watermark geometry, layers and identity');
 
   ok('loops over EVERY imported page (TCPDF engine)',
     /for \(\$pageNo = 1; \$pageNo <= \$pageCount; \$pageNo\+\+\)/.test(svc));
+  // Scoped to the layered TCPDF renderer: the renderer-free `flatten` engine also
+  // calls useTemplate(), and it appears earlier in the file, so a whole-file
+  // index comparison would compare positions across two different engines.
+  const tcpdfBody = svc.slice(
+    svc.indexOf('private function renderWithTcpdfFpdi('),
+    svc.indexOf('private function drawTcpdfBackLayer(')
+  );
   ok('a BACK layer is drawn before the page is placed',
-    svc.indexOf('$this->drawTcpdfBackLayer(') > 0 &&
-    svc.indexOf('$this->drawTcpdfBackLayer(') < svc.indexOf(tplCall));
+    tcpdfBody.indexOf('$this->drawTcpdfBackLayer(') > 0 &&
+    tcpdfBody.indexOf('$this->drawTcpdfBackLayer(') < tcpdfBody.indexOf(tplCall));
   ok('a FRONT layer is drawn after the page, so it covers the lecture',
     svc.indexOf('$this->drawTcpdfFrontLayer(') > svc.indexOf(tplCall));
   ok('the identity rails are drawn after the page (always readable)',
@@ -461,8 +468,15 @@ section('11. Cache, concurrency and operational safety');
 
   ok('the variant key folds in the source hash + identity + settings',
     /variantKey\(\$sourceHash, \$identityHash, \$this->watermark->variantSettings\(\$lines\)\)/.test(delivery));
+  // The engine tokens are PINNED on purpose: they must change whenever the
+  // rendered look changes (tiled grid -> single centred mark -> exact-opacity
+  // single pass bumped the raster token to flatten-v4-single; the new flatten
+  // engine carries its own center-bake token), otherwise a cached copy drawn by
+  // the old layout would keep being served.
   ok('the cache identity includes the ENGINE (a switch regenerates)',
-    /'engine' => \$mode === self::MODE_RASTER\s*\? 'flatten-v2'\s*: 'vector-v4:'/.test(svc));
+    /'engine' => \$mode === self::MODE_RASTER\s*\? 'flatten-v4-single'/.test(svc) &&
+    /self::MODE_FLATTEN\s*\? self::FLATTEN_LAYOUT/.test(svc) &&
+    /private const FLATTEN_LAYOUT = 'center-bake-v1'/.test(svc));
   ok('the cache identity includes the LAYER LAYOUT (old copies are regenerated)',
     /private const LAYERS_VERSION = 'layers-v4'/.test(svc) &&
     /\$settings\['layers'\] = self::LAYERS_VERSION/.test(svc));

@@ -22,13 +22,18 @@ interface Props {
   compact?: boolean;
 }
 
-function formatRemaining(secs: number): string {
+/**
+ * Remaining study time, localized. This component is rendered INSIDE the
+ * course details screen, so its labels are part of that screen's contract: in
+ * Arabic the old literal "2h 5m remaining" stayed English.
+ */
+function formatRemaining(secs: number, t: (key: string, params?: Record<string, string | number>) => string): string {
   if (!secs || secs <= 0) return '';
   const h = Math.floor(secs / 3600);
   const m = Math.floor((secs % 3600) / 60);
-  if (h > 0) return `${h}h ${m}m remaining`;
-  if (m > 0) return `${m}m remaining`;
-  return `${secs}s remaining`;
+  if (h > 0) return t('course.remainingHm', { h, m });
+  if (m > 0) return t('course.remainingMs', { m });
+  return t('course.remainingS', { s: secs });
 }
 
 export function CourseProgressBar({
@@ -50,7 +55,9 @@ export function CourseProgressBar({
     return (
       <View style={{ gap: 4 }}>
         <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-          <Text style={{ fontSize: 12, fontWeight: '600', color: LABEL_COLOR }}>{pct}% complete</Text>
+          <Text style={{ fontSize: 12, fontWeight: '600', color: LABEL_COLOR }}>
+            {t('course.pctComplete', { pct })}
+          </Text>
           <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.5) }}>{completedLessons}/{totalLessons}</Text>
         </View>
         {/* Track */}
@@ -108,10 +115,10 @@ export function CourseProgressBar({
 
       {/* Stats row */}
       <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
-        <Stat icon={CheckCircle} color="#16A34A" label={`${completedLessons}`} sub="done" isDark={isDark} c={c} />
-        <Stat icon={BookOpen}    color="#3B82F6" label={`${remaining}`}         sub="left" isDark={isDark} c={c} />
+        <Stat icon={CheckCircle} color="#16A34A" label={`${completedLessons}`} sub={t('course.doneShort')} isDark={isDark} c={c} />
+        <Stat icon={BookOpen}    color="#3B82F6" label={`${remaining}`}         sub={t('course.leftShort')} isDark={isDark} c={c} />
         {remainingSeconds > 0 && (
-          <Stat icon={Clock} color="#F97316" label={formatRemaining(remainingSeconds)} sub="" isDark={isDark} c={c} />
+          <Stat icon={Clock} color="#F97316" label={formatRemaining(remainingSeconds, t)} sub="" isDark={isDark} c={c} />
         )}
       </View>
     </View>

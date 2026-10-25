@@ -63,11 +63,21 @@ final class PdfWatermarkBaker
      *
      * @param array<int,string> $blocks PDF drawing operators, page coordinates
      *                                  (origin bottom-left), already wrapped in q/Q.
-     * @return array{baked:int,skipped:int,reason:?string}
+     * @return array{baked:int,skipped:int,reason:?string,skipped_pages:array<int,int>,baked_pages:array<int,int>}
      */
     public function bake(string $path, array $blocks, float $opacity): array
     {
-        $report = ['baked' => 0, 'skipped' => 0, 'reason' => null];
+        // `skipped_pages` / `baked_pages` are 1-based page numbers. A caller that
+        // needs EVERY page watermarked (the renderer-free flatten engine) uses
+        // them to draw a page-level mark on exactly the pages this class refused,
+        // instead of guessing or refusing the whole document.
+        $report = [
+            'baked' => 0,
+            'skipped' => 0,
+            'reason' => null,
+            'skipped_pages' => [],
+            'baked_pages' => [],
+        ];
         if ($blocks === []) {
             $report['reason'] = 'no blocks';
             return $report;
@@ -103,17 +113,23 @@ final class PdfWatermarkBaker
 
         $pageObjects = $this->pageObjects($doc['objects']);
         $index = 0;
+        $skippedPages = [];
+        $bakedPages = [];
         foreach ($pageObjects as $pageNum) {
             $block = $blocks[$index] ?? null;
             $index++;
             if ($block === null) {
                 $report['skipped']++;
+                $skippedPages[] = $index;
+                $report['reason'] = 'page ' . $index . ': no mark block for this page';
                 continue;
             }
             $pageRaw = $doc['objects'][$pageNum];
             $pageBox = $this->box($pageRaw, '/MediaBox');
             if ($pageBox === null || $this->hasRotation($pageRaw)) {
                 $report['skipped']++;
+                $skippedPages[] = $index;
+                $report['reason'] = 'page ' . $index . ': no MediaBox or page-level /Rotate';
                 continue;
             }
             // The lecture form: invoked by this page; its box matches the page
@@ -121,6 +137,8 @@ final class PdfWatermarkBaker
             $formNum = $this->importedForm($doc['objects'], $pageRaw, $pageBox);
             if ($formNum === null) {
                 $report['skipped']++;
+                $skippedPages[] = $index;
+                $report['reason'] = 'page ' . $index . ': no single identity lecture form';
                 continue;
             }
             $formRaw = $doc['objects'][$formNum];
@@ -133,6 +151,8 @@ final class PdfWatermarkBaker
             $matrix = $this->formMatrix($formRaw);
             if ($matrix === null) {
                 $report['skipped']++;
+                $skippedPages[] = $index;
+                $report['reason'] = 'page ' . $index . ': form /Matrix unparseable';
                 continue;
             }
             $transform = null;
@@ -143,6 +163,8 @@ final class PdfWatermarkBaker
                 $transform = $this->invertAffine($matrix);
                 if ($transform === null) {
                     $report['skipped']++;
+                    $skippedPages[] = $index;
+                    $report['reason'] = 'page ' . $index . ': form /Matrix is singular';
                     continue;
                 }
             }
@@ -151,6 +173,8 @@ final class PdfWatermarkBaker
             $updated = $this->appendToForm($formRaw, $block, $transform);
             if ($updated === null) {
                 $report['skipped']++;
+                $skippedPages[] = $index;
+                $report['reason'] = 'page ' . $index . ': form stream not appendable (indirect /Length, exotic filter, or already baked)';
                 continue;
             }
 
@@ -164,6 +188,8 @@ final class PdfWatermarkBaker
                     $resources = $this->patchDictObject($current, $fontRef, $gsNum);
                     if ($resources === null) {
                         $report['skipped']++;
+                        $skippedPages[] = $index;
+                        $report['reason'] = 'page ' . $index . ': shared resources patch failed';
                         continue;
                     }
                     $doc['objects'][$resNum] = $resources;
@@ -172,6 +198,8 @@ final class PdfWatermarkBaker
                 $withRes = $this->addResourcesToObject($updated, $fontRef, $gsNum);
                 if ($withRes === null) {
                     $report['skipped']++;
+                    $skippedPages[] = $index;
+                    $report['reason'] = 'page ' . $index . ': inline resources failed';
                     continue;
                 }
                 $updated = $withRes;
@@ -179,7 +207,11 @@ final class PdfWatermarkBaker
 
             $doc['objects'][$formNum] = $updated;
             $report['baked']++;
+            $bakedPages[] = $index;
         }
+
+        $report['skipped_pages'] = $skippedPages;
+        $report['baked_pages'] = $bakedPages;
 
         if ($report['baked'] === 0) {
             // Keep the LAST specific per-page reason (more actionable in the
@@ -203,6 +235,162 @@ final class PdfWatermarkBaker
             $report['baked'] = 0;
         }
         return $report;
+    }
+
+    /**
+     * Second-chance bake: append blocks to the PAGE's own content stream.
+     *
+     * `bake()` rewrites the imported lecture Form. Some legitimate documents have
+     * a page whose Form will not take the block (a /Rotate source, two XObjects
+     * invoked, an indirect /Length, an xref-stream export). For those pages the
+     * caller can still keep the mark INSIDE page content — on top of the imported
+     * page — by appending the very same operator block to the page's /Contents:
+     * the mark is then drawn by the page, not by an annotation, an optional-content
+     * group or a separate text object, and deleting it means editing the stream
+     * that also invokes the lecture.
+     *
+     * Resources are patched BEFORE the stream so a failure can never leave a page
+     * that draws /MACWMF0 without it being defined (that would break rendering).
+     *
+     * @param array<int,string> $blocks 1-based page number => operator block
+     * @return array{baked:int,skipped:int,reason:?string,baked_pages:array<int,int>,skipped_pages:array<int,int>}
+     */
+    public function bakeOnPages(string $path, array $blocks, float $opacity): array
+    {
+        $report = [
+            'baked' => 0,
+            'skipped' => 0,
+            'reason' => null,
+            'baked_pages' => [],
+            'skipped_pages' => [],
+        ];
+        if ($blocks === []) {
+            $report['reason'] = 'no blocks';
+            return $report;
+        }
+        $raw = @file_get_contents($path);
+        if ($raw === false || $raw === '') {
+            $report['reason'] = 'unreadable output';
+            return $report;
+        }
+        $doc = $this->parse($raw);
+        if ($doc === null) {
+            $report['reason'] = 'unsupported pdf structure';
+            return $report;
+        }
+        $fontRef = $this->findWatermarkFont($doc['objects']);
+        if ($fontRef === null) {
+            $report['reason'] = 'watermark font object not found';
+            return $report;
+        }
+
+        $gsNum = $doc['max'] + 1;
+        $doc['max'] = $gsNum;
+        $doc['objects'][$gsNum] = $gsNum . " 0 obj\n<< /Type /ExtGState /ca "
+            . $this->num($opacity) . ' /CA ' . $this->num($opacity) . " >>\nendobj";
+
+        // pageObjects() is the same ordering bake() uses, so a 1-based page number
+        // means the same page in both calls.
+        $pageObjects = $this->pageObjects($doc['objects']);
+        foreach ($blocks as $pageNo => $block) {
+            $pageNo = (int) $pageNo;
+            $pageNum = $pageObjects[$pageNo - 1] ?? null;
+            if ($pageNum === null || !is_string($block) || $block === '') {
+                $report['skipped']++;
+                $report['skipped_pages'][] = $pageNo;
+                $report['reason'] = 'page ' . $pageNo . ': no block or no such page';
+                continue;
+            }
+            if (!$this->patchPageResources($doc, $pageNum, $fontRef, $gsNum)) {
+                $report['skipped']++;
+                $report['skipped_pages'][] = $pageNo;
+                $report['reason'] = 'page ' . $pageNo . ': page /Resources not patchable';
+                continue;
+            }
+            if (!$this->appendToPageContent($doc, $pageNum, $block)) {
+                $report['skipped']++;
+                $report['skipped_pages'][] = $pageNo;
+                $report['reason'] = 'page ' . $pageNo . ': page content stream not appendable';
+                continue;
+            }
+            $report['baked']++;
+            $report['baked_pages'][] = $pageNo;
+        }
+
+        if ($report['baked'] === 0) {
+            return $report;
+        }
+        $built = $this->rebuild($doc);
+        if ($built === null || !$this->verify($built)) {
+            $report['reason'] = 'rebuilt file failed verification';
+            $report['baked'] = 0;
+            $report['baked_pages'] = [];
+            return $report;
+        }
+        $tmp = $path . '.' . bin2hex(random_bytes(4)) . '.pagebaked';
+        if (@file_put_contents($tmp, $built) !== strlen($built) || !@rename($tmp, $path)) {
+            @unlink($tmp);
+            $report['reason'] = 'could not replace the output file';
+            $report['baked'] = 0;
+            $report['baked_pages'] = [];
+        }
+        return $report;
+    }
+
+    /**
+     * Give the PAGE dictionary the watermark font + alpha state. Works for both an
+     * inline /Resources << … >> and an indirect /Resources n 0 R (which may be
+     * shared with the imported Form — then it is already prepared, which is
+     * success, not a reason to skip).
+     */
+    private function patchPageResources(array &$doc, int $pageNum, int $fontRef, int $gsNum): bool
+    {
+        $pageRaw = $doc['objects'][$pageNum] ?? '';
+        $value = $this->dictAfter($pageRaw, '/Resources');
+        if ($value === null) {
+            return false;
+        }
+        if (preg_match('#^(\d+)\s+0\s+R$#', trim($value), $m)) {
+            $num = (int) $m[1];
+            $current = $doc['objects'][$num] ?? '';
+            if (str_contains($current, '/' . self::FONT_RES)) {
+                return true;
+            }
+            $patched = $this->patchDictObject($current, $fontRef, $gsNum);
+            if ($patched === null) {
+                return false;
+            }
+            $doc['objects'][$num] = $patched;
+            return true;
+        }
+        $pos = strpos($pageRaw, $value);
+        if ($pos === false) {
+            return false;
+        }
+        $patched = $this->insertResources($value, $fontRef, $gsNum);
+        if ($patched === null) {
+            // Already carries our names (second page sharing one dict).
+            return str_contains($value, '/' . self::FONT_RES);
+        }
+        $doc['objects'][$pageNum] = substr($pageRaw, 0, $pos) . $patched
+            . substr($pageRaw, $pos + strlen($value));
+        return true;
+    }
+
+    /** Append the block to the page's own /Contents stream (identity, no /Matrix). */
+    private function appendToPageContent(array &$doc, int $pageNum, string $block): bool
+    {
+        $pageRaw = $doc['objects'][$pageNum] ?? '';
+        if (!preg_match('#/Contents\s+(\d+)\s+0\s+R#', $pageRaw, $m)) {
+            return false; // inline or multi-stream /Contents is not rewritten
+        }
+        $num = (int) $m[1];
+        $updated = $this->appendToForm($doc['objects'][$num] ?? '', $block, null);
+        if ($updated === null) {
+            return false;
+        }
+        $doc['objects'][$num] = $updated;
+        return true;
     }
 
     // ── Page · Form discovery ─────────────────────────────────────────────────
@@ -458,13 +646,31 @@ final class PdfWatermarkBaker
             return null;
         }
         $dict = substr($objectRaw, 0, $streamAt);
-        $body = substr($objectRaw, $streamAt);
-        $endAt = strrpos($body, 'endstream');
-        if ($endAt === false) {
-            return null;
+        $body = substr($objectRaw, $streamAt + strlen('stream'));
+
+        // Skip exactly ONE end-of-line after the `stream` keyword (PDF 32000-1
+        // §7.3.8.1),
+        // then take the payload from /Length when the dictionary gives a direct
+        // count. `trim($payload, "\r\n")` was wrong: a deflate stream may legally
+        // BEGIN or END with 0x0A/0x0D, and trimming it corrupted the data —
+        // gzuncompress() then failed and the page was reported as "not
+        // appendable" even though it was perfectly normal. That is exactly how a
+        // /Rotate page silently lost its content bake.
+        if (str_starts_with($body, "\r\n")) {
+            $body = substr($body, 2);
+        } elseif (str_starts_with($body, "\n") || str_starts_with($body, "\r")) {
+            $body = substr($body, 1);
         }
-        $payload = substr($body, strlen('stream'), $endAt - strlen('stream'));
-        $payload = trim($payload, "\r\n");
+        $indirectLength = (bool) preg_match('#/Length\s+\d+\s+0\s+R#', $dict);
+        if (!$indirectLength && preg_match('#/Length\s+(\d+)#', $dict, $len)) {
+            $payload = substr($body, 0, (int) $len[1]);
+        } else {
+            $endAt = strrpos($body, 'endstream');
+            if ($endAt === false) {
+                return null;
+            }
+            $payload = substr($body, 0, $endAt);
+        }
 
         $filter = $this->streamFilter($dict);
         if ($filter === 'flate') {

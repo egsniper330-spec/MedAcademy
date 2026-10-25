@@ -22,6 +22,20 @@ import { Platform } from 'react-native';
 const inFlight = new Set<string>();
 const warmed = new Set<string>();
 
+/**
+ * How many images a single data load may warm.
+ *
+ * WHY A CAP: the dashboard called this with EVERY published course right after
+ * login. On a catalog of a few dozen courses that is a burst of large image
+ * downloads competing for the same connection the list needs to render, so the
+ * thumbnails the student is actually looking at arrived LAST — the reported
+ * "course images take too long to appear after login". Warming only the first
+ * screenful keeps the benefit (cards at the top are ready) without turning the
+ * prefetch into a bandwidth hog. Everything else still loads on demand from
+ * expo-image's disk cache, which is warm for the next visit.
+ */
+export const PREFETCH_LIMIT = 8;
+
 /** Extract the image URL fields the course surfaces actually render. */
 export function courseImageUrlsFrom(items: unknown): string[] {
   if (!Array.isArray(items)) return [];
@@ -41,11 +55,15 @@ export function courseImageUrlsFrom(items: unknown): string[] {
  * data load: already-warmed URLs are skipped (no repeat downloads), an
  * in-flight URL is not started twice, and nothing is awaited.
  */
-export function prefetchCourseImages(urls: string[]): void {
+export function prefetchCourseImages(urls: string[], limit: number = PREFETCH_LIMIT): void {
   if (Platform.OS === 'web') return; // browser HTTP cache handles it
+  const budget = Number.isFinite(limit) ? Math.max(0, Math.floor(limit)) : PREFETCH_LIMIT;
+  let started = 0;
   for (const uri of urls) {
+    if (started >= budget) break;
     if (!uri || warmed.has(uri) || inFlight.has(uri)) continue;
     inFlight.add(uri);
+    started++;
     void Image.prefetch(uri)
       .then(() => { warmed.add(uri); })
       .catch(() => { /* cache-full/dead URL → card placeholder still applies */ })

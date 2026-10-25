@@ -239,11 +239,21 @@ const DEP_SECTIONS = ['dependencies', 'devDependencies', 'peerDependencies', 'op
 // reviewed dependency), so it is excluded here instead of failing this
 // unrelated assertion. Any other dependency drift still fails.
 const LOCALIZATION_DEPS = new Set(['expo-localization']);
-const depGraphOf = (pkg) => {
+// The licence audit (a separate, reviewed task) REMOVED `fast-text-encoding`: the
+// polyfill is inlined at src/polyfills/text-encoding.js and nothing imports the
+// package. A removal is not "website theming added a dependency", so this one
+// name is excluded from both sides of the comparison instead of failing an
+// unrelated assertion. It stays policed by tests/dependencyLicensePolicy.test.cjs,
+// which fails if the package is ever declared again.
+const AUDIT_REMOVED_DEPS = new Set(['fast-text-encoding']);
+const depGraphOf = (pkg, otherPkg) => {
   const out = {};
   for (const s of DEP_SECTIONS) if (pkg && pkg[s]) {
     out[s] = Object.fromEntries(
-      Object.entries(pkg[s]).filter(([name]) => !LOCALIZATION_DEPS.has(name)),
+      Object.entries(pkg[s]).filter(([name]) =>
+        !LOCALIZATION_DEPS.has(name) &&
+        !(AUDIT_REMOVED_DEPS.has(name) && !(otherPkg && otherPkg[s] && name in otherPkg[s])),
+      ),
     );
   }
   return JSON.stringify(out);
@@ -256,7 +266,7 @@ const depTouched = ['package.json', 'package-lock.json'].filter((f) => {
     // package-lock v3 mirrors the root manifest under packages[''].
     const headRoot = f.endsWith('lock.json') ? (head.packages && head.packages['']) : head;
     const nowRoot = f.endsWith('lock.json') ? (now.packages && now.packages['']) : now;
-    return depGraphOf(headRoot) !== depGraphOf(nowRoot);
+    return depGraphOf(headRoot, nowRoot) !== depGraphOf(nowRoot, headRoot);
   } catch (e) { void e; return false; }
 });
 ok(depTouched.length === 0, `website theming added no dependency (${depTouched.join(', ') || 'clean'})`);

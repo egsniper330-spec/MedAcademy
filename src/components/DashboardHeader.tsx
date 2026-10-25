@@ -23,13 +23,34 @@ interface DashboardHeaderProps {
   roleLabel?: string;
   /** Main greeting line, e.g. "Hi, Ahmed 👋" */
   greeting: string;
+  /**
+   * Account name rendered as the SECOND line under the greeting.
+   *
+   * This is DATA, not UI copy: it is the authenticated profile's own display
+   * name and must never be translated, transliterated or replaced by a role
+   * label. It therefore gets no `writingDirection` override either — the
+   * platform's bidi algorithm lays out an Arabic name right-to-left, a Latin
+   * name left-to-right and a mixed-script name correctly in one pass, while
+   * `textAlign` still follows the app's own direction so the block starts on
+   * the correct edge.
+   */
+  subtitle?: string;
   /** Optional right-side content (bell, key icon, etc.) */
   rightActions?: React.ReactNode;
   /** Place the secondary role/count line below the title for list-page headers. */
   roleLabelPosition?: 'above' | 'below';
+  /** Accessibility label for the subtitle line (defaults to the subtitle). */
+  subtitleAccessibilityLabel?: string;
 }
 
-export function DashboardHeader({ roleLabel, greeting, rightActions, roleLabelPosition = 'above' }: DashboardHeaderProps) {
+export function DashboardHeader({
+  roleLabel,
+  greeting,
+  subtitle,
+  rightActions,
+  roleLabelPosition = 'above',
+  subtitleAccessibilityLabel,
+}: DashboardHeaderProps) {
   const scheme  = useColorScheme();
   const isDark  = scheme === 'dark';
   const c       = isDark ? neuColors.dark : neuColors.light;
@@ -86,6 +107,24 @@ export function DashboardHeader({ roleLabel, greeting, rightActions, roleLabelPo
         >
           {greeting}
         </Text>
+        {subtitle ? (
+          <Text
+            accessibilityLabel={subtitleAccessibilityLabel ?? subtitle}
+            style={[
+              typography.bodyLg,
+              {
+                marginTop: 2,
+                color: c.text,
+                opacity: 0.85,
+                fontWeight: '600',
+                textAlign: isRTL ? 'right' : 'left',
+              },
+            ]}
+            numberOfLines={1}
+          >
+            {subtitle}
+          </Text>
+        ) : null}
         {roleLabel && roleLabelPosition === 'below' ? (
           <Text
             style={[

@@ -19,7 +19,8 @@
     "prebuild:validate": "node scripts/validate-all.js",
     "postinstall": "patch-package || true && node scripts/sync-android-version.js || true",
     "test:offline": "node scripts/run-state-tests.cjs offlineState.test.cjs offlinePipeline.test.cjs offlineEntitlement.test.cjs offlineMediaContract.test.cjs aboutOfflineUi.test.cjs",
-    "i18n:audit": "node scripts/i18n-coverage.js"
+    "i18n:audit": "node scripts/i18n-coverage.js",
+    "license:audit": "node scripts/dependency-license-audit.cjs"
   },
   "dependencies": {
     "@bottom-tabs/react-navigation": "^1.4.0",
@@ -91,7 +92,6 @@
     "expo-video": "~55.0.21",
     "expo-video-thumbnails": "~55.0.19",
     "expo-web-browser": "~55.0.20",
-    "fast-text-encoding": "^1.0.6",
     "lucide-react-native": "^1.11.0",
     "nativewind": "^4.2.3",
     "patch-package": "^8.0.0",

@@ -107,6 +107,15 @@ export default function StudentDashboard() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []));
 
+  // ── Greeting identity ─────────────────────────────────────────────────────
+  // Line 1 is the localized greeting ("Welcome" / "مرحباً"); line 2 is the
+  // authenticated account name. The name is DATA: never translated, never
+  // transliterated, never swapped for a role label like "Student" (the previous
+  // header showed the role where the name belongs and pushed the real name off
+  // the header entirely). An empty/missing name falls back to a localized
+  // "User" so the second line is never blank.
+  const accountName = profile?.full_name?.trim() || t('common.user');
+
   // ── Derived data ──────────────────────────────────────────────────────────
   const enrolledCourseIds = useMemo(
     () => new Set(subscriptions.map(s => s.course_id ?? s.course?.id)),
@@ -314,8 +323,9 @@ export default function StudentDashboard() {
     >
       {/* DashboardHeader owns its safe-area top padding — no paddingTop on outer View */}
       <DashboardHeader
-        roleLabel={t('role.student')}
         greeting={t('home.welcome')}
+        subtitle={accountName}
+        subtitleAccessibilityLabel={t('home.signedInAs', { name: accountName })}
         rightActions={
           <>
             <Pressable

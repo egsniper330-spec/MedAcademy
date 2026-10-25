@@ -80,9 +80,30 @@ export function useStaleWhileRevalidateFocus(
   // the screen has something to fall back to.
   const revalidatedRef = useRef(false);
 
+  /**
+   * CONCURRENCY GUARD — not a cache.
+   *
+   * Focus can fire more than once for one visit (nested navigators remount,
+   * a modal closes while the screen regains focus, a fast back-and-forward).
+   * Without a guard each event starts ANOTHER identical request batch, so the
+   * slowest response wins and the server sees duplicate reads for one visit —
+   * a direct contributor to "navigating around keeps reloading".
+   *
+   * A new load is skipped only while one is still running; the running load's
+   * own result is what renders, and the next focus (after it settles) fetches
+   * normally. No response is ever cached or reordered.
+   */
+  const inFlightRef = useRef(false);
+
   useFocusEffect(
     useCallback(() => {
       const showContent = revalidatedRef.current && hasContentRef.current();
+
+      if (inFlightRef.current) {
+        // A request batch for this screen is already running: let it land.
+        // (Nothing to clean up — this focus did not start work.)
+        return () => {};
+      }
 
       if (!showContent) {
         // Nothing proven on screen yet → old behaviour (full-screen spinner).
@@ -90,6 +111,7 @@ export function useStaleWhileRevalidateFocus(
       }
 
       let cancelled = false;
+      inFlightRef.current = true;
       void loadRef.current().then(
         () => {
           if (cancelled) return;
@@ -101,7 +123,9 @@ export function useStaleWhileRevalidateFocus(
         () => {
           /* load() implementations handle their own errors; never throw here. */
         },
-      );
+      ).finally(() => {
+        inFlightRef.current = false;
+      });
 
       // useFocusEffect cleanup: if the screen loses focus mid-flight we must
       // not flip loading state on an unmounted/de-focused screen.

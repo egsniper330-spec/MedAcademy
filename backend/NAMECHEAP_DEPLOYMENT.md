@@ -62,17 +62,20 @@ Short version:
 5. Leave `.env` alone — the defaults are correct for shared hosting:
 
 ```
-PDF_WATERMARK_MODE=auto          # auto | vector | raster   (auto = vector first)
-PDF_WATERMARK_OPACITY=0.15       # raster engine only
+PDF_WATERMARK_MODE=auto          # auto | vector | flatten | raster   (auto = vector first)
+PDF_WATERMARK_OPACITY=0.12       # single centred mark (flatten + raster engines)
 PDF_WATERMARK_VECTOR_OPACITY=0.10  # vector engine (optional override)
 PDF_WATERMARK_MAX_PAGES=150
 PDF_WATERMARK_MAX_SOURCE_BYTES=52428800
 MATERIAL_PDF_MINT_PER_MINUTE=60
 ```
 
-The opt-in **raster** engine (flattened pages, no text layer) additionally needs
-Ghostscript + a compositor + a TTF, and is subject to the Ghostscript
-AGPL/commercial licensing decision in
+The **flatten** engine (`PDF_WATERMARK_MODE=flatten`) needs nothing beyond the
+vendored PHP libraries: one centred 35° mark per page, written into the page
+content stream. The opt-in **raster** engine (one image per page, no text layer)
+additionally needs Ghostscript + a compositor + a TTF and will not run unless
+`PDF_WATERMARK_ACCEPT_AGPL_RENDERER=1` is also set; it is subject to the
+Ghostscript AGPL/commercial licensing decision in
 `backend/docs/PDF_WATERMARK_LICENSING.md`. Do not enable it without that review.
 
 PHP runtime limits: the web front controller does NOT raise `memory_limit` or

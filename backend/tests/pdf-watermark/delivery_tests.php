@@ -251,6 +251,107 @@ function pdfPageCount(string $file): int
     return (int) preg_match_all('#/Type\s*/Page[^s]#', (string) file_get_contents($file));
 }
 
+// ── Flattened-engine (raster) proof helpers ────────────────────────────────
+//
+// The raster engine writes NO text layer, so the per-page substring checks that
+// prove "this page carries student X" cannot run against it. Identity is proved
+// instead from the pixels that ARE in the file: every page is ONE embedded
+// full-page image, and the pipeline is deterministic (same source + same
+// identity + same settings => byte-identical image payloads). Regenerating a
+// REFERENCE copy in-process from a known identity and comparing the image
+// streams therefore binds a delivered copy to exactly one identity — verified
+// empirically in .freebuff/pdf-watermark-tests/probe_identity.php, and asserted
+// here by the negative checks (A must not match B's reference).
+
+/**
+ * sha256 of every embedded image XObject payload, in file order.
+ * One entry per page in a flattened copy.
+ *
+ * @return array<int,string>
+ */
+function imageStreams(string $file): array
+{
+    $raw = is_file($file) ? (string) file_get_contents($file) : '';
+    if ($raw === '') {
+        return [];
+    }
+    $out = [];
+    $off = 0;
+    while (($sp = strpos($raw, 'stream', $off)) !== false) {
+        $off = $sp + 6;
+        // The dictionary of THIS stream is the text between the last
+        // /Subtype /Image and the keyword. An `endstream` in between means the
+        // keyword belongs to a later object (a page content stream), not an
+        // image — skip it instead of reading a bogus /Length.
+        $head = substr($raw, max(0, $sp - 4000), min(4000, $sp));
+        $sub = strrpos($head, '/Subtype /Image');
+        if ($sub === false) {
+            continue;
+        }
+        $end = strrpos($head, 'endstream');
+        if ($end !== false && $end > $sub) {
+            continue;
+        }
+        $dict = substr($head, $sub);
+        if (!preg_match_all('#/Length\s+(\d+)\b#', $dict, $lm) || $lm[1] === []) {
+            continue;
+        }
+        $len = (int) end($lm[1]);
+        $ps = $sp + 6;
+        if (substr($raw, $ps, 2) === "\r\n") {
+            $ps += 2;
+        } elseif (substr($raw, $ps, 1) === "\n") {
+            $ps += 1;
+        } else {
+            continue;
+        }
+        $payload = substr($raw, $ps, $len);
+        if (strlen($payload) !== $len) {
+            continue;
+        }
+        $out[] = hash('sha256', $payload);
+    }
+    return $out;
+}
+
+/**
+ * Generate (once per source+identity) a reference copy with the SAME engine and
+ * settings, so its image streams can be compared with a delivered copy.
+ *
+ * @param array{0:string,1:string} $lines
+ */
+function rasterRef(PdfWatermarkService $wm, string $src, array $lines, string $tag): string
+{
+    global $OUT;
+    static $cache = [];
+    $key = $tag . '|' . hash('sha256', $src . '|' . implode('|', $lines));
+    if (isset($cache[$key])) {
+        return $cache[$key];
+    }
+    $safe = preg_replace('/[^a-z0-9]+/', '-', strtolower($tag)) ?: 'ref';
+    $ref = $OUT . '/raster-ref-' . $safe . '-' . substr(hash('sha256', $key), 0, 10) . '.pdf';
+    @unlink($ref);
+    $wm->personalize($src, $lines, $ref);
+    $cache[$key] = $ref;
+    return $ref;
+}
+
+/**
+ * Does this delivered copy carry EXACTLY the pixels of that identity?
+ *
+ * @return array{match:bool,pages:int,ref_pages:int}
+ */
+function rasterIdentityMatches(string $delivered, string $ref): array
+{
+    $a = imageStreams($delivered);
+    $b = imageStreams($ref);
+    return [
+        'match' => $a !== [] && $a === $b,
+        'pages' => count($a),
+        'ref_pages' => count($b),
+    ];
+}
+
 function rrmdir(string $dir): void
 {
     if (!is_dir($dir)) {
@@ -600,6 +701,13 @@ $personalDir = $storage->privateFilePath(PdfWatermarkService::BUCKET, '');
 
 // ── Engine sanity ──────────────────────────────────────────────────────────
 $wm = new PdfWatermarkService();
+// Which engine is under test decides HOW identity is proved: the vector engine
+// leaves a text layer (page-string checks), the flattened engine leaves pixels
+// (image-stream checks). Both are real assertions, not softer ones.
+$isRaster = $wm->effectiveMode() === PdfWatermarkService::MODE_RASTER;
+// MODE_FLATTEN is the renderer-free single-centred-mark engine: it keeps the
+// text layer (like vector) but draws exactly ONE mark per page (like raster).
+$isFlatten = $wm->effectiveMode() === PdfWatermarkService::MODE_FLATTEN;
 check('engine: a vector or raster engine is available', $wm->isAvailable(), (string) $wm->driver());
 $r = runChild(['status'], ['PDF_WATERMARK_MODE' => null]);
 $stDefault = jsonOf($r[1]);
@@ -656,14 +764,52 @@ $idB = 'Beta Two • MED-0099';
 $pagesA = is_file($file1) ? pdfPages($file1) : [];
 $pagesB = is_file($file2) ? pdfPages($file2) : [];
 check('identity: the SAME page count as the source', count($pagesA) === $srcPages && count($pagesB) === $srcPages, count($pagesA) . '/' . count($pagesB) . " src={$srcPages}");
-$everyPageA = $pagesA !== [] && !in_array(false, array_map(static fn ($t) => str_contains($t, $idA), $pagesA), true);
-$everyPageB = $pagesB !== [] && !in_array(false, array_map(static fn ($t) => str_contains($t, $idB), $pagesB), true);
-check('identity: EVERY page of student A carries name + MED id', $everyPageA, json_encode(array_map(static fn ($t) => str_contains($t, $idA), $pagesA)));
-check('identity: EVERY page of student B carries name + MED id', $everyPageB, json_encode(array_map(static fn ($t) => str_contains($t, $idB), $pagesB)));
-check('identity: student A copy does NOT contain student B identity', !str_contains(implode('', $pagesA), 'MED-0099'));
-check('identity: student B copy does NOT contain student A identity', !str_contains(implode('', $pagesB), 'MED-0042'));
-check('identity: repeated more than once per page (grid + edge line)',
-    $pagesA !== [] && min(array_map(static fn ($t) => substr_count($t, $idA), $pagesA)) >= 2);
+if ($isRaster) {
+    // ── Flattened engine: identity is proved from the embedded page images ──
+    $lecture = $materials . '/lecture.pdf';
+    $refA = rasterRef($wm, $lecture, $wm->watermarkLines('Alpha One', 'MED-0042'), 'student-a');
+    $refB = rasterRef($wm, $lecture, $wm->watermarkLines('Beta Two', 'MED-0099'), 'student-b');
+    $rawA = is_file($file1) ? (string) file_get_contents($file1) : '';
+    $rawB = is_file($file2) ? (string) file_get_contents($file2) : '';
+    check('identity: student A copy has NO text layer (flattened)', $rawA !== '' && !preg_match('#/Type\s*/Font#', $rawA));
+    check('identity: student B copy has NO text layer (flattened)', $rawB !== '' && !preg_match('#/Type\s*/Font#', $rawB));
+    check('identity: student A copy carries ONE full-page image per page',
+        count(imageStreams($file1)) === $srcPages, count(imageStreams($file1)) . " images / {$srcPages} pages");
+    check('identity: student B copy carries ONE full-page image per page',
+        count(imageStreams($file2)) === $srcPages, count(imageStreams($file2)) . " images / {$srcPages} pages");
+    $matchA = rasterIdentityMatches($file1, $refA);
+    $matchB = rasterIdentityMatches($file2, $refB);
+    $crossAB = rasterIdentityMatches($file1, $refB);
+    $crossBA = rasterIdentityMatches($file2, $refA);
+    check('identity: EVERY page of student A is rendered with the AUTHENTICATED identity',
+        $matchA['match'], json_encode($matchA));
+    check('identity: EVERY page of student B is rendered with the AUTHENTICATED identity',
+        $matchB['match'], json_encode($matchB));
+    check('identity: student A copy does NOT contain student B identity', !$crossAB['match'], json_encode($crossAB));
+    check('identity: student B copy does NOT contain student A identity', !$crossBA['match'], json_encode($crossBA));
+    skipCheck(
+        'identity: repeated more than once per page (grid + edge line)',
+        'vector-only layering — the flattened engine draws exactly ONE centred mark per page (asserted by the ' .
+        'centred-band pixel proof in run_real_test.php)'
+    );
+} else {
+    $everyPageA = $pagesA !== [] && !in_array(false, array_map(static fn ($t) => str_contains($t, $idA), $pagesA), true);
+    $everyPageB = $pagesB !== [] && !in_array(false, array_map(static fn ($t) => str_contains($t, $idB), $pagesB), true);
+    check('identity: EVERY page of student A carries name + MED id', $everyPageA, json_encode(array_map(static fn ($t) => str_contains($t, $idA), $pagesA)));
+    check('identity: EVERY page of student B carries name + MED id', $everyPageB, json_encode(array_map(static fn ($t) => str_contains($t, $idB), $pagesB)));
+    check('identity: student A copy does NOT contain student B identity', !str_contains(implode('', $pagesA), 'MED-0099'));
+    check('identity: student B copy does NOT contain student A identity', !str_contains(implode('', $pagesB), 'MED-0042'));
+    if ($isFlatten) {
+        skipCheck(
+            'identity: repeated more than once per page (grid + edge line)',
+            'MODE_FLATTEN draws exactly ONE centred mark per page by design ' .
+            '(pinned by flatten_engine_tests.php: exactly one run per page stream)'
+        );
+    } else {
+        check('identity: repeated more than once per page (grid + edge line)',
+            $pagesA !== [] && min(array_map(static fn ($t) => substr_count($t, $idA), $pagesA)) >= 2);
+    }
+}
 check('content: the personalized copy is NOT the original bytes', is_file($file1) && hash_file('sha256', $file1) !== $srcHash);
 check('content: the source PDF was not modified in place', hash_file('sha256', $materials . '/lecture.pdf') === $srcHash);
 
@@ -680,13 +826,21 @@ $r = runChild(['mint', 'm1', 's1', 'student', 'view', 'spoof']);
 $spoofAnswer = jsonOf($r[1]);
 check('spoof: a client-supplied name/id is ignored (mint still succeeds)', isset($spoofAnswer['url']), substr($r[1], 0, 240) . ' | stderr: ' . substr(preg_replace('/\s+/', ' ', $r[2]), 0, 2000));
 $rowsSpoof = registry('m1', 's1');
-$spoofText = '';
-if (($rowsSpoof[0]['storage_path'] ?? '') !== '') {
-    $p = $personalDir . '/' . $rowsSpoof[0]['storage_path'];
-    $spoofText = is_file($p) ? implode('', pdfPages($p)) : '';
+$spoofPath = ($rowsSpoof[0]['storage_path'] ?? '') !== ''
+    ? $personalDir . '/' . $rowsSpoof[0]['storage_path']
+    : '';
+if ($isRaster) {
+    $refAuth = rasterRef($wm, $materials . '/lecture.pdf', $wm->watermarkLines('Alpha One', 'MED-0042'), 'student-a');
+    $refForged = rasterRef($wm, $materials . '/lecture.pdf', $wm->watermarkLines('Mallory Attacker', 'MED-9999'), 'forged');
+    $spoofAuth = rasterIdentityMatches($spoofPath, $refAuth);
+    $spoofForged = rasterIdentityMatches($spoofPath, $refForged);
+    check('spoof: watermark still shows the AUTHENTICATED name and id', $spoofAuth['match'], json_encode($spoofAuth));
+    check('spoof: the forged identity never reaches the document', !$spoofForged['match'], json_encode($spoofForged));
+} else {
+    $spoofText = is_file($spoofPath) ? implode('', pdfPages($spoofPath)) : '';
+    check('spoof: watermark still shows the AUTHENTICATED name and id', str_contains($spoofText, $idA));
+    check('spoof: the forged identity never reaches the document', !str_contains($spoofText, 'Mallory') && !str_contains($spoofText, 'MED-9999'));
 }
-check('spoof: watermark still shows the AUTHENTICATED name and id', str_contains($spoofText, $idA));
-check('spoof: the forged identity never reaches the document', !str_contains($spoofText, 'Mallory') && !str_contains($spoofText, 'MED-9999'));
 check('spoof: the copy was not written under the forged student id', !str_contains((string) ($rowsSpoof[0]['storage_path'] ?? ''), '/s2/'));
 
 // ═══ 5/6. Streaming, preview vs download, staff (also personalized) ═══════
@@ -716,10 +870,21 @@ check('staff: the doctor receives a PERSONALIZED copy, not the original',
     str_starts_with($r[1], '%PDF-') && hash('sha256', $r[1]) !== $srcHash);
 $docProbe = tempnam(sys_get_temp_dir(), 'wmstaff');
 file_put_contents((string) $docProbe, $r[1]);
-$docText = implode('', pdfPages((string) $docProbe));
+if ($isRaster) {
+    $refDoc = rasterRef($wm, $materials . '/lecture.pdf', $wm->watermarkLines('Dr Instructor', 'MED-0001'), 'doctor');
+    $docMatch = rasterIdentityMatches((string) $docProbe, $refDoc);
+    $docAsStudent = rasterIdentityMatches(
+        (string) $docProbe,
+        rasterRef($wm, $materials . '/lecture.pdf', $wm->watermarkLines('Alpha One', 'MED-0042'), 'student-a')
+    );
+    check('staff: the doctor copy carries the DOCTOR identity', $docMatch['match'], json_encode($docMatch));
+    check('staff: the doctor copy is NOT the student copy', !$docAsStudent['match'], json_encode($docAsStudent));
+} else {
+    $docText = implode('', pdfPages((string) $docProbe));
+    check('staff: the doctor copy carries the DOCTOR identity',
+        str_contains($docText, 'Dr Instructor') && str_contains($docText, 'MED-0001'), substr($docText, 0, 120));
+}
 @unlink((string) $docProbe);
-check('staff: the doctor copy carries the DOCTOR identity',
-    str_contains($docText, 'Dr Instructor') && str_contains($docText, 'MED-0001'), substr($docText, 0, 120));
 check('staff: a student never receives the original', md5_file($file1) !== $srcHash);
 
 $r = runChild(['mint', 'm1', 'a1', 'admin', 'download']);
@@ -786,6 +951,23 @@ foreach ([['broken.pdf', 'a non-PDF source'], ['modern.pdf', 'a modern xref-stre
     $r = runChild(['mint', $mid, 's1', 'student', 'view']);
     $answer = jsonOf($r[1]);
     $after = count(filesUnder($personalDir));
+    if ($name === 'modern.pdf' && $isRaster) {
+        // The flattened engine renders with Ghostscript, which understands
+        // cross-reference STREAMS. The vector engine's FPDI cannot parse them
+        // and refuses (422) — that refusal is asserted on the vector path. Here
+        // the honest expectation is the opposite: the modern source is rendered
+        // like any other PDF, and a personalized copy is minted.
+        check('fail-closed: ' . $label . ' is NOT refused by the flattened engine (Ghostscript renders it)',
+            errStatus($answer) === 0 && isset($answer['url']),
+            (string) ($answer['error']['message'] ?? substr($r[1], 0, 160)));
+        check('renders: a copy was written for ' . $label, $after > $before, "before={$before} after={$after}");
+        check('renders: the flattened copy of ' . $label . ' has no text layer',
+            $after > $before && !preg_match('#/Type\s*/Font#', implode('', array_map(
+                static fn (string $rel): string => (string) @file_get_contents($personalDir . '/' . $rel),
+                array_filter(array_keys(filesUnder($personalDir)), static fn (string $p): bool => str_contains($p, '/m8/'))
+            ))));
+        continue;
+    }
     check('fail-closed: ' . $label . ' is refused with a 422 and a clear message',
         errStatus($answer) === 422 && stripos((string) ($answer['error']['message'] ?? ''), 'pdf') !== false,
         (string) ($answer['error']['message'] ?? substr($r[1], 0, 160)));
@@ -866,13 +1048,27 @@ check('replace: the variant key changed (new source identity)', ($after[0]['vari
 $afterPath = $personalDir . '/' . ($after[0]['storage_path'] ?? 'none');
 check('replace: a NEW file was produced', is_file($afterPath) && hash_file('sha256', $afterPath) !== $beforeHash);
 check('replace: the stale copy was reclaimed', !is_file($beforePath));
-$afterText = is_file($afterPath) ? implode('', pdfPages($afterPath)) : '';
-check('replace: the new copy is personalized for the same student', str_contains($afterText, $idA));
+if ($isRaster) {
+    $refReplaced = rasterRef($wm, $materials . '/replace.pdf', $wm->watermarkLines('Alpha One', 'MED-0042'), 'replace-a');
+    $replaced = rasterIdentityMatches($afterPath, $refReplaced);
+    check('replace: the new copy is personalized for the same student', $replaced['match'], json_encode($replaced));
+} else {
+    $afterText = is_file($afterPath) ? implode('', pdfPages($afterPath)) : '';
+    check('replace: the new copy is personalized for the same student', str_contains($afterText, $idA));
+}
 @unlink($materials . '/replace-old.pdf');
 
 // Engine/settings change => different variant, regenerated bytes.
+// The knob must be one that ACTUALLY affects the engine under test: the raster
+// cache identity carries dpi/format/opacity/raster_layout, while vector carries
+// vector_opacity/layers. Tuning an irrelevant knob must NOT invalidate the
+// cache (that is the reason the settings list is mode-specific), so the test
+// flips a knob of the current engine.
 $beforeSettings = registry('m6', 's1');
-$r = runChild(['mint', 'm6', 's1', 'student', 'view'], ['PDF_WATERMARK_VECTOR_OPACITY' => '0.22']);
+$settingsOverride = $isRaster
+    ? ['PDF_WATERMARK_DPI' => '150']
+    : ($isFlatten ? ['PDF_WATERMARK_OPACITY' => '0.22'] : ['PDF_WATERMARK_VECTOR_OPACITY' => '0.22']);
+$r = runChild(['mint', 'm6', 's1', 'student', 'view'], $settingsOverride);
 check('settings: a changed watermark setting still delivers', isset(jsonOf($r[1])['url']));
 $afterSettings = registry('m6', 's1');
 check('settings: a changed setting produces a NEW variant key', ($afterSettings[0]['variant_key'] ?? '') !== ($beforeSettings[0]['variant_key'] ?? ''));

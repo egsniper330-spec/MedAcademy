@@ -89,6 +89,50 @@ script; run them once, by hand, as part of the deploy window.
 `backend/NAMECHEAP_DEPLOYMENT.md`, `backend/docs/PDF_WATERMARK_LICENSING.md`,
 `backend/docs/PDF_WATERMARK_TESTING.md`, this file.
 
+### 1e. What changed on 2026-10-24 (subtle single mark; renderer-free flattening)
+
+Two backend files changed; **no migration, no new dependency, and no new
+environment variable is required for the default engine**:
+
+| File | Change |
+|---|---|
+| `backend/src/Services/PdfWatermarkService.php` | **New engine `flatten`** (`PDF_WATERMARK_MODE=flatten`): ONE centred 35° mark per page, written into each imported page's own content stream. No renderer, no shell, no network, no font upload — just FPDI + TCPDF. The single centred mark of the image engine is now drawn in **ONE pass at exactly `PDF_WATERMARK_OPACITY`** (default changed 0.15 → **0.12**, measured effective opacity **0.122**); the old code mapped the setting through `0.55 + 1.5x` and drew a dilated white halo eight times, so the default rendered at ~0.78 alpha. The raster engine is **licence-gated**: it will not run unless `PDF_WATERMARK_ACCEPT_AGPL_RENDERER=1` is also set. Cache token bumped to `flatten-v4-single`. |
+| `backend/src/Services/PdfWatermarkBaker.php` | Every skip still records **why**; the bake report now also returns `baked_pages` / `skipped_pages` (1-based). New `bakeOnPages()` appends a block to a PAGE's content stream for pages whose imported Form cannot be rewritten, so a document never needs the mark left out. **Bug fix:** `decodeStream()` used to `trim($payload, "\r\n")` the compressed stream, which corrupted deflate data when it legitimately began or ended with `0x0A`/`0x0D` — such a page was reported “not appendable” and silently lost its content bake. It now takes the payload from `/Length`. |
+
+Upload only these two files if the host already runs the 2026-10-23 package
+(`backend/deploy-package/2026-10-24-pdf-watermark-license-and-opacity/` contains
+exactly them plus a README). The **default engine and its behaviour are
+unchanged**: vector output, no binaries needed, no licence exposure.
+
+**Where the single centred mark comes from.** Two engines draw it, and neither is
+required for the other:
+
+| Mode | Page content | Needs a binary? | Licence |
+|---|---|---|---|
+| `flatten` (recommended) | ONE centred 35° mark baked into the page stream; lecture text stays selectable | **no** | MIT + LGPL only |
+| `raster` | ONE image per page; mark composited into the bitmap | Ghostscript + a TTF | AGPL/commercial — **gated** |
+
+The raster engine is the strongest form (no text layer, no Form XObject, nothing
+to select) but its only renderer is Ghostscript; see `PDF_WATERMARK_LICENSING.md`
+for why that is gated rather than default. Measured on the same 4-page fixture
+(6.8 KB source, second run of each engine, PNG at 200 DPI, Ghostscript 10.08.0):
+
+| Engine | Output | Per document |
+|---|---|---|
+| `vector` (layered grid) | 133,126 bytes | 123 ms |
+| `flatten` (one centred mark) | **64,326 bytes** | **94 ms** |
+| `raster` (one image per page) | 670,087 bytes | 4,663 ms |
+
+The flatten engine is also the SMALLEST of the three here: one mark per page
+compresses far better than a 12-mark grid.
+`PDF_WATERMARK_IMAGE_FORMAT=png` is the shipped default and it measured **both
+smaller and lossless** on the same text/diagram document at the new opacity:
+PNG **670,087 bytes** versus JPEG **1,359,670** at q82, **1,728,487** at q92 and
+**2,026,655** at q95 (JPEG spends its bytes on ringing around glyph edges and
+flat paper, where PNG compresses almost free). Switch to JPEG only for
+photographic/scan-heavy sources, where the opposite is typically true — that case
+was **not** measured here.
+
 ---
 
 ## 2. Server configuration
@@ -98,7 +142,9 @@ script; run them once, by hand, as part of the deploy window.
 The defaults are correct for shared hosting. Nothing here is required:
 
 ```
-PDF_WATERMARK_MODE=auto              # auto | vector | raster   (auto = pure PHP first)
+PDF_WATERMARK_MODE=auto              # auto | vector | flatten | raster  (auto = pure PHP first)
+PDF_WATERMARK_OPACITY=0.12           # single centred mark (flatten + raster)
+# PDF_WATERMARK_ACCEPT_AGPL_RENDERER=1   # raster ONLY; see licensing doc — do NOT enable casually
 PDF_WATERMARK_VECTOR_OPACITY=0.10    # BACK grid only (0.04–0.35)
 PDF_WATERMARK_VECTOR_FG_OPACITY=0.30  # marks that cross the lecture (0.08–0.55)
 PDF_WATERMARK_MAX_PAGES=150
@@ -286,9 +332,11 @@ migration with no benefit.
 * **Modern PDF structures.** The free FPDI parser cannot read a PDF whose
   cross-reference table is a compressed stream (`/Type /XRef`), which is what
   Word, InDesign and current LaTeX produce by default, nor PDFs that need the
-  commercial "FPDI PDF-Parser" add-on (object streams, some filters). Such a
-  document is **refused with HTTP 422** and a clear message — never delivered
-  unwatermarked. If the existing collection contains many of these, the options
+  commercial "FPDI PDF-Parser" add-on (object streams, some filters). In **vector
+  mode** such a document is **refused with HTTP 422** and a clear message — never
+  delivered unwatermarked. The **flattened** engine renders it with Ghostscript
+  like any other PDF (measured: a `/Type /XRef` fixture is delivered, not
+  refused), so enabling raster mode is also the way to serve modern sources. If the existing collection contains many of these, the options
   are (a) re-save the source as PDF 1.4/Acrobat-compatible before upload, or
   (b) purchase the paid parser (a licensing decision, see
   `PDF_WATERMARK_LICENSING.md`). The raster engine needs Ghostscript and is
@@ -296,21 +344,33 @@ migration with no benefit.
   default.
 * **Vector output keeps a text layer.** The watermark is embedded in the page
   content, so the lecture text stays selectable (copy/paste works). Flattening
-  is available only through the opt-in raster engine, which needs Ghostscript.
+  is available only through the opt-in raster engine, which needs Ghostscript:
+  there the page is ONE full-page image (no `/Type /Font`, no annotation, no Form
+  XObject, 0 extractable characters — measured), which is what makes text
+  extraction and object-level watermark removal fail together.
 * **Baking is skipped on some pages.** `PdfWatermarkBaker` only rewrites a Form
-  whose geometry it can verify: `/Rotate` must be 0, the `/BBox` must start at
-  the origin, `/Length` must be direct, the stream must be uncompressed or plain
-  FlateDecode, and the file must use a classic xref table. A page that fails
-  these checks keeps all five page-level marks — back grid, front marks, trace
-  lattice, edge rails and the interior anchor (still watermarked, just without
-  the in-stream copy) — and the reason is logged. Rotated source pages always
-  take this path.
+  whose geometry it can verify: the `/BBox` must equal the page box (directly or
+  with width/height swapped), any Form `/Matrix` must be invertible, `/Length`
+  must be direct, the stream must be uncompressed or plain FlateDecode, and the
+  file must use a classic xref table. Rotated source pages bake normally — FPDI
+  keeps the rotation in the Form `/Matrix` and the baker pre-multiplies its
+  inverse, so the appended marks land upright in page coordinates. A page that
+  fails these checks keeps all five page-level marks — back grid, front marks,
+  trace lattice, edge rails and the interior anchor (still watermarked, just
+  without the in-stream copy) — and a per-page reason is logged
+  (`content bake skipped: page N: …`).
 * **Tone-cleaning still removes most of the tint.** A student who rasterises the
   page, maps greys to white and crops the margins removes about 91 % of the
   watermark ink — but not the interior anchor or the edge rails, and at the cost
   of the text layer and the figures. The measured cost of each attack and what
   survives it are in `PDF_WATERMARK_REMOVAL_RESISTANCE.md`. Do not describe the
   watermark to staff as impossible to remove.
+  In **flattened** mode the same class of attack is the only one that works, and
+  it is measured there too: thresholding at 128 removes ~99.7 % of the mark ink
+  while wiping half the page's pixels (colours, images and antialiasing are
+  gone); whitening the mid-grey band removes ~99.4 % and wipes ~63 %. Every
+  *non-destructive* attempt — deleting text operators, deleting annotations,
+  cropping, "keep only the page image" — leaves the mark at 97-100 %.
 * **Encrypted PDFs** are refused (`422`) with an actionable message.
 * **Arabic-script names** are not shaped by the vector renderer; for such a name
   the identity line falls back to the account id, which is unique and stable and
