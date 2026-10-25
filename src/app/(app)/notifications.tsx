@@ -3,7 +3,6 @@ import {
   View, Text, ScrollView, useColorScheme, Pressable,
   RefreshControl, ActivityIndicator, useWindowDimensions,
 } from 'react-native';
-import { useFocusEffect } from 'expo-router';
 import { Bell, Check, Trash2 } from 'lucide-react-native';
 import { useProfileStore } from '@/lib/store';
 import { getNotifications, markNotificationRead, deleteNotification } from '@/lib/api';
@@ -14,6 +13,7 @@ import { DrawerProvider } from '@/components/DrawerContext';
 import DrawerNav from '@/components/DrawerNav';
 import { useTranslation } from '@/lib/i18n';
 import { localizeNotification } from '@/lib/notificationCopy';
+import { useStaleWhileRevalidateFocus } from '@/lib/useStaleWhileRevalidateFocus';
 
 function NotificationsContent() {
   const scheme = useColorScheme();
@@ -35,7 +35,16 @@ function NotificationsContent() {
     setLoading(false);
   }, [profile]);
 
-  useFocusEffect(useCallback(() => { setLoading(true); loadData(); }, [loadData]));
+  // STALE-WHILE-REVALIDATE (performance): returning to this screen used to
+  // raise a full-screen spinner and hide the notifications the user was just
+  // reading, because every focus did `setLoading(true)` + a refetch. The list
+  // now stays mounted and refreshes in the background; the spinner only appears
+  // when there is genuinely nothing to show (first entry / empty). The request
+  // itself is unchanged, and one focus can no longer start duplicate batches.
+  useStaleWhileRevalidateFocus(loadData, {
+    setLoading,
+    hasContent: () => notifications.length > 0,
+  });
   const onRefresh = async () => { setRefreshing(true); await loadData(); setRefreshing(false); };
 
   const handleRead = async (id: string) => {

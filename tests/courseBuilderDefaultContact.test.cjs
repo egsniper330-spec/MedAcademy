@@ -96,8 +96,13 @@ console.log('\n4. The disabled state is visible AND accessible');
     /accessibilityState=\{\{ selected, disabled: opt\.disabled \}\}/.test(builder));
   ok('the explanation is exposed as an accessibility hint',
     /accessibilityHint=\{opt\.hint \?\? undefined\}/.test(builder));
+  // Dimmed remains the "unavailable" signal, but a CONFIRMED missing default is
+  // additionally a red warning and keeps more contrast (0.85) so that warning
+  // stays readable in both themes. A merely-disabled row is dimmed to 0.55.
   ok('the unavailable row is visibly dimmed',
-    /opacity: opt\.disabled \? 0\.55 : 1/.test(builder));
+    /opacity: opt\.disabled \? \(opt\.warning \? 0\.85 : 0\.55\) : 1/.test(builder));
+  ok('the confirmed-missing row keeps enough contrast for its red warning',
+    /opt\.warning \? 0\.85/.test(builder));
   ok('the unavailable option cannot be selected by pressing it',
     /onPress=\{\(\) => \{ if \(!opt\.disabled\) setUseDefaultContact\(opt\.value\); \}\}/.test(builder));
 }

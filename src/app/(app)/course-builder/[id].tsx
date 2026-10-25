@@ -1127,13 +1127,22 @@ export default function CourseBuilder() {
                 value: true,
                 label: t('cb.contact.useDefault'),
                 disabled: !defaultContactUsable,
+                // `missing` is a CONFIRMED problem (the doctor has no usable
+                // default contact) and must be visually unmissable, so it is
+                // rendered as a red warning — see the hint style below.
+                // `unknown` is only "still checking" and stays muted: the two
+                // states must never look alike.
+                warning: defaultContactState === 'missing',
                 hint: defaultContactState === 'missing'
                   ? t('cb.contact.useDefaultUnavailable')
                   : (defaultContactState === 'unknown' ? t('cb.contact.useDefaultChecking') : null),
               },
-              { value: false, label: t('cb.contact.useCustom'), disabled: false, hint: null },
+              { value: false, label: t('cb.contact.useCustom'), disabled: false, warning: false, hint: null },
             ].map(opt => {
               const selected = useDefaultContact === opt.value;
+              // Dark theme needs a lighter red to keep contrast on the
+              // neumorphic base; both values are the same warning semantics.
+              const warningColor = isDark ? '#F87171' : '#DC2626';
               return (
               <Pressable
                 key={String(opt.value)}
@@ -1141,7 +1150,11 @@ export default function CourseBuilder() {
                 disabled={opt.disabled}
                 accessibilityRole="radio"
                 accessibilityState={{ selected, disabled: opt.disabled }}
-                accessibilityLabel={opt.label}
+                // The warning is part of the LABEL (not only the hint) so a
+                // VoiceOver user hears "Unavailable — configure it in your
+                // Profile page" when focusing the disabled option, on iOS as
+                // well as Android.
+                accessibilityLabel={opt.hint ? `${opt.label}. ${opt.hint}` : opt.label}
                 accessibilityHint={opt.hint ?? undefined}
                 style={{
                   flexDirection: 'row', direction: isRTL ? 'rtl' : 'ltr', alignItems: 'center', gap: 10,
@@ -1151,8 +1164,10 @@ export default function CourseBuilder() {
                   borderWidth: 1.5,
                   borderColor: selected && !opt.disabled ? c.primary : `${c.text}14`,
                   // Visually obvious disabled state: the unavailable option is
-                  // dimmed, so it cannot be mistaken for a live choice.
-                  opacity: opt.disabled ? 0.55 : 1,
+                  // dimmed, so it cannot be mistaken for a live choice. A
+                  // confirmed-missing default keeps more of its contrast so the
+                  // red warning stays readable.
+                  opacity: opt.disabled ? (opt.warning ? 0.85 : 0.55) : 1,
                 }}
               >
                 {/* Radio circle */}
@@ -1175,10 +1190,19 @@ export default function CourseBuilder() {
                     {opt.label}
                   </Text>
                   {opt.hint ? (
-                    <Text style={{
-                      fontSize: 11, marginTop: 2, ...mutedTextStyle(c, 0.45),
-                      textAlign: isRTL ? 'right' : 'left', writingDirection: isRTL ? 'rtl' : 'ltr',
-                    }}>
+                    <Text
+                      // Android: announce the state change instead of waiting
+                      // for the user to reach it.
+                      accessibilityLiveRegion="polite"
+                      style={opt.warning ? {
+                        fontSize: 11, marginTop: 2, fontWeight: '700',
+                        color: warningColor,
+                        textAlign: isRTL ? 'right' : 'left', writingDirection: isRTL ? 'rtl' : 'ltr',
+                      } : {
+                        fontSize: 11, marginTop: 2, ...mutedTextStyle(c, 0.45),
+                        textAlign: isRTL ? 'right' : 'left', writingDirection: isRTL ? 'rtl' : 'ltr',
+                      }}
+                    >
                       {opt.hint}
                     </Text>
                   ) : null}

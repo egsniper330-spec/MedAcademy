@@ -415,35 +415,67 @@ const DEFAULT_POLICIES: Record<DetectionType, PolicyAction> = {
   app_attest:        'block_login',
 };
 
-export async function getSecurityPolicies(): Promise<Record<DetectionType, PolicyAction>> {
-  // SERVER-SIDE POLICY SOURCE: /security/policies serves the authoritative
-  // security_policies table (validated allowlist of detection types + actions
-  // — no arbitrary config). Fail-secure: on fetch error the bundled safe
-  // defaults are used and cached briefly, never an empty/permissive map.
-  if (cachedPolicies && Date.now() < policyCacheExpiry) return cachedPolicies;
-  // OFFLINE FAST-PATH: with no connectivity the fetch can only burn its full
-  // timeout before hitting the SAME fail-secure fallback below. Skip straight
-  // to it — the network-reconnect listener invalidates and refetches the
-  // moment connectivity returns. No permissive default is introduced: the
-  // fallback IS the bundled safe policy set.
-  if (process.env.EXPO_OS !== 'web') {
+// ─── ONE CONFIG REQUEST FOR BOTH CACHES ──────────────────────────────────────
+//
+// ROOT CAUSE of the iPhone startup/resume latency regression:
+// `getSecurityPolicies()` and `getVpnWhitelist()` each performed their OWN
+// `get-security-policies` GET. The endpoint returns `{ policies, vpn_whitelist }`
+// in ONE payload, so every evaluation — cold start, post-resume, and the 30 s
+// periodic tick — made the SAME request twice, and because the whitelist fetch
+// ran INSIDE detectVPN() (before the native probe) while the policy fetch ran
+// AFTER the detector batch, the two round trips were also SERIALIZED with the
+// whole detector pipeline in between.
+//
+// The startup network lock defers every protected screen request until this
+// evaluation completes, so both round trips sat directly on the critical path
+// of "app is usable". On iOS — where each request also crosses the bridge and
+// often rides a slower cellular path — that read as "every screen shows a
+// loading state for a long time".
+//
+// The fix is a SINGLE-FLIGHT shared fetch: one request, one parse, both caches
+// populated, and `runSecurityChecks` starts it BEFORE the detectors so the
+// network wait overlaps the native probes. Nothing about the security decision
+// changes — same endpoint, same timeout, same fail-secure defaults, same 5-min
+// TTL, same mandatory connection floor.
+let securityConfigInFlight: Promise<void> | null = null;
+// Bumped by invalidatePolicyCache(): a response from a PREVIOUS account/session
+// must never repopulate the caches after a logout or identity switch.
+let securityConfigGeneration = 0;
+
+interface SecurityConfigPayload {
+  policies?: Record<string, { action?: string; enabled?: boolean }>;
+  vpn_whitelist?: unknown;
+}
+
+/**
+ * Fetch the authoritative security config ONCE and populate BOTH caches.
+ * Concurrent callers join the in-flight request (no duplicate round trip).
+ * A failed/timeout fetch leaves the caches untouched so the callers apply
+ * their existing fail-secure fallbacks.
+ */
+async function loadSecurityConfigOnce(): Promise<void> {
+  if (securityConfigInFlight) return securityConfigInFlight;
+  const generation = securityConfigGeneration;
+  const run = (async () => {
+    let payload: SecurityConfigPayload | null = null;
     try {
-      const Network = await import('expo-network');
-      const st = await Network.getNetworkStateAsync();
-      if (!(st.isConnected && st.isInternetReachable !== false)) {
-        cachedPolicies = applyMandatoryConnectionFloor({ ...DEFAULT_POLICIES });
-        policyCacheExpiry = Date.now() + POLICY_TTL_MS;
-        return cachedPolicies;
-      }
-    } catch { /* state unavailable → attempt the fetch as before */ }
-  }
-  try {
-    const { data } = await withTimeout(
-      backendClient.functions.invoke('get-security-policies', { method: 'GET' }),
-      DETECTOR_TIMEOUT_MS,
-      () => ({ data: null, error: null }),
-    );
-    const rows = (data as { policies?: Record<string, { action?: string; enabled?: boolean }> } | null)?.policies;
+      const { data } = await withTimeout(
+        backendClient.functions.invoke('get-security-policies', { method: 'GET' }),
+        DETECTOR_TIMEOUT_MS,
+        () => ({ data: null, error: null }),
+      );
+      payload = (data as SecurityConfigPayload | null) ?? null;
+    } catch {
+      payload = null;
+    }
+    // Invalidation happened while this was in flight → discard the result. The
+    // next caller issues a fresh request for the NEW identity.
+    if (generation !== securityConfigGeneration) return;
+
+    const now = Date.now();
+
+    // ── Policies (unchanged parsing + mandatory connection floor) ──────────
+    const rows = payload?.policies;
     if (rows && typeof rows === 'object') {
       const VALID_ACTIONS: PolicyAction[] = ['log_only', 'warn_only', 'block_video', 'block_login'];
       const merged = { ...DEFAULT_POLICIES } as Record<DetectionType, PolicyAction>;
@@ -472,13 +504,58 @@ export async function getSecurityPolicies(): Promise<Record<DetectionType, Polic
         // server serves the same floor, so this only closes the gaps created
         // by an older client, an offline launch, or a stale cache.
         cachedPolicies = applyMandatoryConnectionFloor(merged);
+        policyCacheExpiry = now + POLICY_TTL_MS;
+      }
+    }
+
+    // ── VPN whitelist (same key, same normalisation, same TTL) ─────────────
+    const list = payload?.vpn_whitelist;
+    if (Array.isArray(list)) {
+      vpnWhitelist = list
+        .filter((n): n is string => typeof n === 'string')
+        .map((n) => n.toLowerCase());
+      vpnWhitelistFetched = true;
+      vpnWhitelistExpiry = now + POLICY_TTL_MS;
+    }
+  })();
+  securityConfigInFlight = run;
+  try {
+    await run;
+  } finally {
+    // Always release the slot so a later evaluation can retry after a failure.
+    if (securityConfigInFlight === run) securityConfigInFlight = null;
+  }
+}
+
+export async function getSecurityPolicies(): Promise<Record<DetectionType, PolicyAction>> {
+  // SERVER-SIDE POLICY SOURCE: /security/policies serves the authoritative
+  // security_policies table (validated allowlist of detection types + actions
+  // — no arbitrary config). Fail-secure: on fetch error the bundled safe
+  // defaults are used and cached briefly, never an empty/permissive map.
+  if (cachedPolicies && Date.now() < policyCacheExpiry) return cachedPolicies;
+  // OFFLINE FAST-PATH: with no connectivity the fetch can only burn its full
+  // timeout before hitting the SAME fail-secure fallback below. Skip straight
+  // to it — the network-reconnect listener invalidates and refetches the
+  // moment connectivity returns. No permissive default is introduced: the
+  // fallback IS the bundled safe policy set.
+  if (process.env.EXPO_OS !== 'web') {
+    try {
+      const Network = await import('expo-network');
+      const st = await Network.getNetworkStateAsync();
+      if (!(st.isConnected && st.isInternetReachable !== false)) {
+        cachedPolicies = applyMandatoryConnectionFloor({ ...DEFAULT_POLICIES });
         policyCacheExpiry = Date.now() + POLICY_TTL_MS;
         return cachedPolicies;
       }
-    }
-  } catch {
-    // Server unreachable → keep fail-secure defaults below
+    } catch { /* state unavailable → attempt the fetch as before */ }
   }
+
+  // One shared request populates BOTH the policy and whitelist caches.
+  await loadSecurityConfigOnce();
+  if (cachedPolicies && Date.now() < policyCacheExpiry) return cachedPolicies;
+
+  // Server unreachable / payload unusable → fail-secure defaults, cached so a
+  // flapping network cannot turn every evaluation into a fetch.
   cachedPolicies = applyMandatoryConnectionFloor({ ...DEFAULT_POLICIES });
   policyCacheExpiry = Date.now() + POLICY_TTL_MS;
   return cachedPolicies;
@@ -490,6 +567,10 @@ export function invalidatePolicyCache() {
   vpnWhitelist = [];
   vpnWhitelistExpiry = 0;
   vpnWhitelistFetched = false;
+  // Drop any in-flight config response: it was requested for the PREVIOUS
+  // account and must not repopulate this session's caches.
+  securityConfigGeneration += 1;
+  securityConfigInFlight = null;
 }
 
 // ─── VPN Whitelist Cache ──────────────────────────────────────────────────────
@@ -514,24 +595,14 @@ export function isVpnWhitelistKnownNonEmpty(): boolean {
 
 async function getVpnWhitelist(): Promise<string[]> {
   if (vpnWhitelistFetched && Date.now() < vpnWhitelistExpiry) return vpnWhitelist;
-  try {
-    // Network-bound: bound the fetch so a hung request cannot stall the
-    // security pipeline (on timeout → empty list → detection stays active).
-    const { data } = await withTimeout(
-      backendClient.functions.invoke('get-security-policies', { method: 'GET' }),
-      DETECTOR_TIMEOUT_MS,
-      () => ({ data: null, error: null }),
-    );
-    const list = (data as { vpn_whitelist?: unknown } | null)?.vpn_whitelist;
-    vpnWhitelist = Array.isArray(list)
-      ? list.filter((n): n is string => typeof n === 'string').map((n) => n.toLowerCase())
-      : [];
-    vpnWhitelistFetched = true;
-    vpnWhitelistExpiry = Date.now() + POLICY_TTL_MS;
-    return vpnWhitelist;
-  } catch {
-    return [];
-  }
+  // Shares the ONE `get-security-policies` request with getSecurityPolicies()
+  // (see loadSecurityConfigOnce) — this used to be a second, identical GET.
+  // A failed/timeout fetch leaves `vpnWhitelistFetched` false, so the next
+  // evaluation retries instead of caching an empty whitelist as fact, and
+  // detection stays ACTIVE (fail closed).
+  await loadSecurityConfigOnce();
+  if (vpnWhitelistFetched && Date.now() < vpnWhitelistExpiry) return vpnWhitelist;
+  return [];
 }
 
 // ─── Fail-closed timeout helper ────────────────────────────────────────────
@@ -637,14 +708,13 @@ async function detectVPN(): Promise<SecurityThreat | null> {
   try {
     if (process.env.EXPO_OS === 'web') return null;
 
-    // If admin has whitelisted any VPNs, skip detection for this device
-    const whitelist = await getVpnWhitelist();
-    if (whitelist.length > 0) {
-      if (__DEV__) {
-        console.log('[SecurityCheck][VPN] skipped — admin VPN whitelist has entries');
-      }
-      return null;
-    }
+    // START the whitelist lookup — but do NOT await it here. The native tunnel
+    // probe below is independent of it, and awaiting first put a whole network
+    // round trip in front of the probe on EVERY cold start, resume and periodic
+    // tick (the whitelist lives in the same payload as the policy fetch). The
+    // security DECISION is unchanged: a non-empty whitelist still suppresses the
+    // finding — it is simply applied right after the probe instead of before it.
+    const whitelistP = getVpnWhitelist();
 
     if (process.env.EXPO_OS === 'ios') {
       // Diagnostic: always log on iOS so false-positive investigations have evidence.
@@ -665,6 +735,14 @@ async function detectVPN(): Promise<SecurityThreat | null> {
       const vpn = await isNativeVPNDetected();
       console.log('[SecurityCheck][VPN] iOS: raw result =', vpn,
         '| decision =', vpn ? '🔴 BLOCK (VPN active)' : '✅ PASS (no VPN)');
+      // Admin-whitelisted VPNs suppress the finding entirely (same rule as
+      // before — only the await point moved, to overlap with the probe).
+      if ((await whitelistP).length > 0) {
+        if (__DEV__) {
+          console.log('[SecurityCheck][VPN] skipped — admin VPN whitelist has entries');
+        }
+        return null;
+      }
       if (vpn) {
         return {
           type: 'vpn_detected',
@@ -704,6 +782,14 @@ async function detectVPN(): Promise<SecurityThreat | null> {
     // Positive signal from ANY plane → threat. A patched boolean with all
     // other planes reporting 'on' still blocks.
     const flags = await getNativeSecurityFlags();
+    // Admin-whitelisted VPNs suppress the finding (unchanged rule; the lookup
+    // overlapped with the native batch above instead of blocking it).
+    if ((await whitelistP).length > 0) {
+      if (__DEV__) {
+        console.log('[SecurityCheck][VPN] skipped — admin VPN whitelist has entries');
+      }
+      return null;
+    }
     const netTunnels = Number(flags.netNativeTunnelIfaces ?? 0);
     const vpnState = typeof flags.vpnState === 'string' ? flags.vpnState : 'unknown';
     if (!wasLastSecurityFlagsCallUnavailable()) {
@@ -1796,6 +1882,16 @@ export async function runSecurityChecks(
     }
   }
 
+  // ── START THE CONFIG FETCH NOW (not after the detectors) ─────────────────
+  // The policy+whitelist payload is network-bound and independent of every
+  // native probe, so waiting for the detector batch before requesting it added
+  // a FULL round trip to every evaluation — and the startup network lock holds
+  // every screen request until this evaluation finishes, which is exactly what
+  // made the iPhone feel slow to load. It is started here so the network wait
+  // overlaps the native probes. Single-flight: detectVPN's whitelist lookup
+  // joins this same request (no duplicate GET).
+  const policiesP = getSecurityPolicies();
+
   // Warm up the native flag batch cache ONCE so every detector re-uses it
   let rawFlags: Awaited<ReturnType<typeof getNativeSecurityFlags>> | null = null;
   try {
@@ -1876,7 +1972,7 @@ export async function runSecurityChecks(
   }
 
   const riskScore = computeRiskScore(allThreats);
-  const policies  = await getSecurityPolicies();
+  const policies  = await policiesP;
   if (__DEV__) {
     console.log('[SecurityCheck][runSecurityChecks] riskScore=', riskScore);
   }

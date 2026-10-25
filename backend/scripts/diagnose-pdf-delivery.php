@@ -132,26 +132,120 @@ $material = $stage('material_row', function () use ($materialId): array {
 $row = $material['row'];
 
 // ── 4. Source file ──────────────────────────────────────────────────────────
-$sourceAbs = $stage('source_file', function () use ($storage, $row): string {
-    $abs = $storage->privateFilePath('lesson-materials', (string) $row['storage_path']);
+// Reports the RESOLVED ABSOLUTE PATH, the byte count and whether the document
+// parses. Operator-only output (this script refuses a web SAPI), so a path here
+// cannot leak to a student.
+$sourceAbs = $stage('source_file', function () use ($storage, $row): array {
+    $rel = (string) ($row['storage_path'] ?? '');
+    $abs = $storage->privateFilePath('lesson-materials', $rel);
     if (!is_file($abs)) {
-        throw new ApiException(404, 'The source PDF is missing.', 'source_missing');
+        throw new ApiException(404, 'The source file is missing on disk.', 'source_missing');
     }
     $size = (int) @filesize($abs);
     if ($size <= 0) {
-        throw new ApiException(422, 'The source PDF is empty.', 'source_unreadable');
+        // THIS is the zero-byte upload: the row exists, the object exists, and
+        // it holds nothing. The upload handler now refuses to store such a body
+        // (UploadIntegrityService) — an existing 0-byte object therefore
+        // predates that fix, or was written by something outside the API.
+        throw new ApiException(
+            422,
+            'The stored file is 0 bytes. The upload never persisted any bytes, so there is nothing to watermark. '
+            . 'Re-upload the document after deploying the storage-upload integrity fix '
+            . '(UploadIntegrityService + POST /storage/upload).',
+            'source_unreadable'
+        );
     }
-    $head = (string) @file_get_contents($abs, false, null, 0, 1024);
-    if (!str_starts_with($head, '%PDF-')) {
-        throw new ApiException(422, 'The source is not a PDF.', 'source_not_pdf');
+    return [
+        'absolute_path' => $abs,
+        'storage_path' => $rel,
+        'bytes' => $size,
+        'readable' => is_readable($abs),
+        'recorded_file_size' => isset($row['file_size']) ? (int) $row['file_size'] : null,
+        'size_matches_record' => !isset($row['file_size']) || (int) $row['file_size'] === $size,
+    ];
+});
+
+// ── 4b. The document itself (same validation the upload path applies) ────────
+$stage('source_pdf_valid', function () use ($service, $sourceAbs): array {
+    $inspected = $service->inspect((string) $sourceAbs['absolute_path']);
+    return [
+        'page_count' => $inspected['page_count'],
+        'bytes' => $inspected['size'],
+        'encrypted' => false,
+    ];
+});
+
+// ── 4c. Cached source digest vs the bytes on disk ───────────────────────────
+// A stale cache is not fatal (the next delivery re-digests), but a MISMATCH on
+// path/size/mtime means the cache is describing a different object — which is
+// exactly what a failed replacement used to leave behind.
+$stage('hash_cache', function () use ($sourceAbs, $row): array {
+    $abs = (string) $sourceAbs['absolute_path'];
+    $actualSize = (int) @filesize($abs);
+    $actualMtime = (int) @filemtime($abs);
+    $recordedHash = (string) ($row['file_hash'] ?? '');
+    $out = [
+        'cache_present' => $recordedHash !== '',
+        'recorded_size' => isset($row['file_hash_size']) ? (int) $row['file_hash_size'] : null,
+        'actual_size' => $actualSize,
+        'size_matches' => !isset($row['file_hash_size']) || (int) $row['file_hash_size'] === $actualSize,
+        'path_matches' => !isset($row['file_hash_path']) || (string) $row['file_hash_path'] === (string) $sourceAbs['storage_path'],
+        'mtime_matches' => !isset($row['file_hash_mtime']) || (int) $row['file_hash_mtime'] === $actualMtime,
+    ];
+    if ($recordedHash !== '') {
+        $out['hash_matches'] = hash_equals($recordedHash, (string) @hash_file('sha256', $abs));
     }
-    return $abs;
+    return $out;
+});
+
+// ── 4d. Generated personalized copies: present, or stale? ───────────────────
+$stage('personalized_copies', function () use ($storage, $row): array {
+    $materialId = (string) ($row['id'] ?? '');
+    try {
+        $copies = Database::instance()->select(
+            'SELECT storage_path, variant_key, page_count FROM lesson_material_pdfs WHERE material_id = ?',
+            [$materialId]
+        );
+    } catch (\Throwable $e) {
+        throw new ApiException(500, 'The variant registry is unreadable (migration 032/035 not applied?).', 'schema', $e);
+    }
+    $missing = 0;
+    $bytes = 0;
+    foreach ($copies as $copy) {
+        $abs = $storage->privateFilePath(PdfWatermarkService::BUCKET, (string) ($copy['storage_path'] ?? ''));
+        if (!is_file($abs) || (int) @filesize($abs) === 0) {
+            $missing++;
+            continue;
+        }
+        $bytes += (int) @filesize($abs);
+    }
+    return [
+        'count' => count($copies),
+        'missing_files' => $missing,
+        'total_bytes' => $bytes,
+        'note' => $missing > 0
+            ? 'A registry row without a file makes delivery fail closed for that student; the next mint regenerates it.'
+            : 'All registered copies are present.',
+    ];
 });
 
 // ── 5. Registry table (variant_key / page_count must exist) ─────────────────
 $stage('registry_table', function (): string {
     Database::instance()->row('SELECT variant_key, page_count FROM lesson_material_pdfs LIMIT 1');
     return 'ok';
+});
+
+// ── 5b. Delete/replace cleanup machinery ────────────────────────────────────
+// A backlog here means deleted materials still have bytes on disk; nothing about
+// delivery is affected, but the storage cost is real and retryable.
+$stage('cleanup_health', function (): array {
+    $cleanup = new \MedAcademy\Services\MaterialFileCleanupService();
+    $health = $cleanup->queueHealth();
+    $orphans = $cleanup->scanOrphans(3600);
+    $health['orphan_files'] = count($orphans);
+    $health['orphan_bytes'] = array_sum(array_map(static fn (array $o): int => (int) $o['bytes'], $orphans));
+    $health['note'] = 'Run storage-cleanup.php --retry to drain the queue, --orphans to list unreferenced files.';
+    return $health;
 });
 
 // ── 6. The render itself (the expensive stage) ──────────────────────────────
@@ -163,7 +257,7 @@ $stage('render', function () use ($service, $sourceAbs): array {
     $out = $tmp . '.pdf';
     $started = microtime(true);
     $pages = $service->personalize(
-        $sourceAbs,
+        (string) $sourceAbs['absolute_path'],
         $service->watermarkLines('Diagnostic Reader', 'MED-DIAGNOSTIC'),
         $out
     );

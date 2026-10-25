@@ -7,7 +7,8 @@ import {
   Globe, Tag, Play, Lock, MessageCircle, CheckCircle, Paperclip, Archive,
   Eye, X,
 } from 'lucide-react-native';
-import { getCourseById, getCourseProgress, getLessonProgress, getMySubscriptions, calcCourseDuration, calcRemainingTime, calcCompletedTime, formatStudyTime } from '@/lib/api';
+import { getCourseById, getCourseProgress, getLessonProgress, calcCourseDuration, calcRemainingTime, calcCompletedTime, formatStudyTime } from '@/lib/api';
+import { getMySubscriptionsCached } from '@/lib/myCoursesCache';
 import { prefetchCourseImages, courseImageUrlsFrom } from '@/lib/imagePrefetch';
 import { useProfileStore } from '@/lib/store';
 import { useStaleWhileRevalidateFocus } from '@/lib/useStaleWhileRevalidateFocus';
@@ -16,6 +17,8 @@ import { NeuButton } from '@/components/NeuButton';
 import { CourseProgressBar } from '@/components/CourseProgressBar';
 import { SubscribeSheet } from '@/components/SubscribeSheet';
 import { resolveCourseContact } from '@/lib/subscribeContact';
+import { isFreeCourse, enrollInFreeCourse, EnrollmentError } from '@/lib/courseEnrollment';
+import { useToast } from '@/components/Toast';
 import { neuColors, useLayout, safeTop, safeLeft, safeBottom, mutedTextStyle } from '@/lib/neu';
 import { isPreviewingCourse, stopPreviewAsStudent } from '@/lib/previewAsStudent';
 import {
@@ -103,6 +106,10 @@ export default function CourseDetail() {
     () => id ? (_sectionStateCache.get(id) ?? new Set<string>()) : new Set<string>()
   );
   const [showContact, setShowContact] = useState(false);
+  // Free-course self-enrollment (see lib/courseEnrollment). `enrolling` both
+  // drives the button's busy state and blocks a double submit.
+  const [enrolling, setEnrolling] = useState(false);
+  const { showToast } = useToast();
 
   // "Preview as Student" — session-scoped flag; true only for the course the
   // doctor explicitly started previewing from My Courses.
@@ -130,7 +137,7 @@ export default function CourseDetail() {
       // NON-FATAL for the course itself: it costs the progress extras, never
       // the course page (previously it aborted the whole load and produced the
       // bogus "Course not found").
-      const subsP = wantsEnrollment ? getMySubscriptions(profile!.id) : null;
+      const subsP = wantsEnrollment ? getMySubscriptionsCached(profile!.id) : null;
       const cpP = wantsEnrollment
         ? getCourseProgress(profile!.id, id).catch(() => null)
         : null;
@@ -223,6 +230,49 @@ export default function CourseDetail() {
     void loadData();
   }, [previewMode, loadData]);
   const onRefresh = async () => { setRefreshing(true); await loadData(); setRefreshing(false); };
+
+  /**
+   * ── FREE COURSES ENROLL IMMEDIATELY ──────────────────────────────────────
+   * Tapping Subscribe on a genuinely free course used to open the doctor's
+   * contact sheet — the student was never enrolled. Now the server-side
+   * enrollment operation runs, access is activated, and the screen switches to
+   * the enrolled state. Nothing here can enroll a PAID course: the server reads
+   * the price from the published row and answers 402, in which case we fall
+   * back to the existing contact/purchase sheet.
+   *
+   * A success message is shown ONLY after the server confirmed enrollment; a
+   * failure never claims access was granted.
+   */
+  const handleEnrollFree = useCallback(async () => {
+    if (enrolling || !id) return;
+    setEnrolling(true);
+    try {
+      const res = await enrollInFreeCourse(id);
+      // Server-confirmed: the student now has an active enrollment.
+      setIsSubscribed(true);
+      showToast({
+        type: 'success',
+        message: res.alreadyEnrolled ? t('course.enrollAlready') : t('course.enrollSuccess'),
+      });
+      // Reconcile progress/extras from the server in the BACKGROUND — the
+      // content is already unlocked, so this never blocks the UI.
+      void loadData();
+    } catch (e) {
+      const code = e instanceof EnrollmentError ? e.code : 'failed';
+      if (code === 'paid_course') {
+        // Authoritative server price differs from what this screen displayed:
+        // a paid course keeps the existing contact/purchase flow.
+        setShowContact(true);
+      } else {
+        showToast({
+          type: 'error',
+          message: code === 'suspended' ? t('course.enrollSuspended') : t('course.enrollFailed'),
+        });
+      }
+    } finally {
+      setEnrolling(false);
+    }
+  }, [enrolling, id, loadData, showToast, t]);
 
   /** Manual retry from the failure state — resets the auto-retry budget. */
   const retryLoad = useCallback(() => {
@@ -733,9 +783,24 @@ export default function CourseDetail() {
             Hidden during "Preview as Student": the doctor is not actually a
             subscriber and must not be offered the student purchase flow. */}
         {!previewMode && !isSubscribed ? (
-          <NeuButton label={t('course.subscribe')} variant="primary"
-            icon={<MessageCircle size={16} color="#fff" />}
-            onPress={() => setShowContact(true)} fullWidth />
+          isFreeCourse(course) ? (
+            /* FREE course → enroll straight away (server operation). The
+               contact sheet is NOT part of this flow: there is nothing to buy
+               and nothing to arrange with the doctor. */
+            <NeuButton
+              label={enrolling ? t('course.enrolling') : t('course.enrollFree')}
+              variant="primary"
+              loading={enrolling}
+              disabled={enrolling}
+              icon={<CheckCircle size={16} color="#fff" />}
+              onPress={handleEnrollFree}
+              fullWidth
+            />
+          ) : (
+            <NeuButton label={t('course.subscribe')} variant="primary"
+              icon={<MessageCircle size={16} color="#fff" />}
+              onPress={() => setShowContact(true)} fullWidth />
+          )
         ) : null}
       </View>
 

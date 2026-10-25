@@ -10,6 +10,7 @@ use MedAcademy\Http\Request;
 use MedAcademy\Http\Response;
 use MedAcademy\Services\AuditService;
 use MedAcademy\Services\FeatureFlagService;
+use MedAcademy\Services\MaterialFileCleanupService;
 use MedAcademy\Services\RateLimitService;
 use MedAcademy\Services\VideoProviderPolicyService;
 use MedAcademy\Utils\Uuid;
@@ -563,6 +564,11 @@ final class RpcController
             throw new ApiException(404, 'Course not found');
         }
 
+        // Attachments + generated watermarked copies, captured BEFORE the cascade
+        // removes the rows that name them (a hard delete used to leak them).
+        $cleanup = new MaterialFileCleanupService();
+        $materialSnapshots = $cleanup->snapshotCourse($courseId);
+
         $db->beginTransaction();
         try {
             // Delete child records in correct order (respecting FK constraints)
@@ -596,7 +602,14 @@ final class RpcController
             throw $e;
         }
 
-        return ['success' => true];
+        // Post-commit only: the rows are the authority, bytes follow.
+        $retired = $cleanup->retire($materialSnapshots, 'course_hard_delete', $userId);
+
+        return [
+            'success' => true,
+            'storage_bytes_freed' => $retired['bytes'],
+            'cleanup_queued' => $retired['queued'],
+        ];
     }
 
     /**

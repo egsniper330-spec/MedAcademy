@@ -20,6 +20,7 @@ import { useTranslation } from '@/lib/i18n';
 import { markEntryIntent } from '@/lib/navigation/navIntent';
 import { courseStatusLabel } from '@/lib/i18n/labels';
 import { formatLocalizedDate } from '@/lib/i18n/date';
+import { markPerf, logPerfTimeline } from '@/lib/perfTimeline';
 
 export default function DoctorDashboard() {
   const scheme = useColorScheme();
@@ -55,6 +56,9 @@ export default function DoctorDashboard() {
       setUnreadCount(unread);
     } catch {}
     setLoading(false);
+    // DEV timing only: the doctor landing screen's first data has landed.
+    markPerf('screen-data');
+    logPerfTimeline();
   }, [profile]);
 
   // Stale-while-revalidate: first visit shows the spinner; every return to

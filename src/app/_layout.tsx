@@ -12,6 +12,12 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import * as NavigationBar from 'expo-navigation-bar';
 import { useSystemBars } from '@/lib/useSystemBars';
+// DEV-ONLY startup timing (see lib/perfTimeline). No product behaviour and no
+// cost in production: every entry point is a no-op outside a dev build.
+import { markPerf } from '@/lib/perfTimeline';
+
+// First observable stage: the root layout module has been evaluated.
+markPerf('js-start');
 // expo-screen-capture: import the JS module directly so we call the real
 // preventScreenCaptureAsync / allowScreenCaptureAsync wrapper functions.
 //

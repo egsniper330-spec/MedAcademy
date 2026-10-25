@@ -776,6 +776,89 @@ final class PdfWatermarkService
      *   • 415/422 when the source is not a usable PDF,
      *   • 500 when processing fails.
      */
+    /**
+     * Validate a PDF that is about to be STORED (an upload) or delivered, using
+     * the SAME rules the renderer applies — one definition of "a usable PDF".
+     *
+     * WHY THIS IS PUBLIC: the upload path must never accept a file that delivery
+     * would later refuse, and it must never accept a file that is not really a
+     * PDF at all. Before this the only gate was the filename extension, so a
+     * 0-byte (or truncated, or encrypted, or HTML-named-.pdf) attachment was
+     * stored as a "successful" material and only failed later, at a student's
+     * download.
+     *
+     * Returns the page count when the parser could determine it (null for a
+     * structurally valid document the bundled parser cannot read — the render
+     * failure for those is reported with its own code at delivery time).
+     *
+     * Throws ApiException with a stable code:
+     *   pdf_empty, source_too_large, pdf_invalid, pdf_encrypted, pdf_truncated.
+     */
+    public function inspect(string $absPath): array
+    {
+        $size = is_file($absPath) ? (int) @filesize($absPath) : 0;
+        if ($size <= 0) {
+            throw new ApiException(422, 'The file is empty.', 'pdf_empty');
+        }
+        if ($size > $this->maxSourceBytes()) {
+            throw new ApiException(
+                422,
+                'This PDF is larger than the watermarking limit ('
+                . (int) round($this->maxSourceBytes() / 1048576) . ' MB).',
+                'source_too_large'
+            );
+        }
+
+        $head = (string) @file_get_contents($absPath, false, null, 0, 1024);
+        if (!str_starts_with($head, '%PDF-')) {
+            throw new ApiException(422, 'This file is not a valid PDF.', 'pdf_invalid');
+        }
+
+        // A missing trailer means the transfer stopped early: the bytes on disk
+        // are a PREFIX of a real document. Catch it now, not at delivery.
+        $tail = (string) @file_get_contents($absPath, false, null, max(0, $size - 4096));
+        if (!str_contains($tail, '%%EOF')) {
+            throw new ApiException(
+                422,
+                'This PDF is incomplete (the file was cut short while uploading). Please upload it again.',
+                'pdf_truncated'
+            );
+        }
+        if (str_contains($tail, '/Encrypt')) {
+            throw new ApiException(422, 'This PDF is encrypted and cannot be watermarked. Upload an unencrypted PDF.', 'pdf_encrypted');
+        }
+
+        // Parser-grade check with the library that will actually render it. A
+        // document the engine cannot open is rejected HERE, where the doctor can
+        // still act on the message, instead of failing every student's download.
+        $pages = null;
+        if ($this->isAvailable() && class_exists('setasign\\Fpdi\\Fpdi')) {
+            try {
+                $reader = new \setasign\Fpdi\Fpdi();
+                $pages = (int) $reader->setSourceFile($absPath);
+                if ($pages < 1) {
+                    throw new \RuntimeException('no pages');
+                }
+            } catch (\Throwable $e) {
+                error_log('[pdf-inspect] parser rejected the document (' . get_class($e) . '): ' . $e->getMessage());
+                throw new ApiException(
+                    422,
+                    'This PDF could not be read (it may be damaged or use an unsupported format). Please upload a different copy.',
+                    'pdf_invalid',
+                    $e
+                );
+            } finally {
+                // FPDI keeps the source stream open for the reader's lifetime; on
+                // Windows an open handle blocks the rename that stores the file,
+                // so it must be released before the caller moves it.
+                unset($reader);
+                gc_collect_cycles();
+            }
+        }
+
+        return ['size' => $size, 'page_count' => $pages];
+    }
+
     public function personalize(string $sourceAbsPath, array $lines, string $outAbsPath): int
     {
         // ── RENDER BUDGET (delivery-stage fix) ────────────────────────────────

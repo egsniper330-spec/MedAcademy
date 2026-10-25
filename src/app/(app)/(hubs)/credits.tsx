@@ -73,7 +73,12 @@ export default function DoctorCredits() {
   // useCreditBalance already calls useFocusEffect internally; mirror for history
   useFocusEffect(useCallback(() => { loadHistory(); }, [loadHistory]));
 
-  const loading = balLoading || txLoading;
+  // INITIAL-LOAD-ONLY spinner (performance): `useCreditBalance` refetches on
+  // every focus, and the balance card used to be replaced by a spinner each
+  // time — so the balance the doctor just looked at vanished and came back.
+  // The spinner is now reserved for the case with nothing to show yet; later
+  // refreshes happen behind the already-rendered balance + history.
+  const loading = (balLoading || txLoading) && transactions.length === 0 && !credits;
 
   const onRefresh = async () => {
     setRefreshing(true);

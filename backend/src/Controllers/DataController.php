@@ -9,6 +9,8 @@ use MedAcademy\Http\Request;
 use MedAcademy\Http\Response;
 use MedAcademy\Http\ApiException;
 use MedAcademy\Services\FeatureFlagService;
+use MedAcademy\Services\UploadIntegrityService;
+use MedAcademy\Storage\StorageService;
 use MedAcademy\Utils\Uuid;
 
 /**
@@ -533,6 +535,18 @@ class DataController
             // RLS-equivalent owner enforcement on INSERT
             $row = $this->enforceOwnerOnWrite($table, $row, $request);
 
+            // ── A MATERIAL ROW MUST POINT AT REAL BYTES ────────────────────
+            // The zero-byte PDF incident created a `lesson_materials` row whose
+            // `storage_path` named an EMPTY object, and whose `file_size` was
+            // whatever the picker had claimed. Nothing verified the pair, so the
+            // row looked perfectly healthy until a student tried to open it.
+            // The storage object is now measured here and its size (never the
+            // client's number) is what gets recorded; a missing/empty/invalid
+            // object is refused outright with a clear code.
+            if ($table === 'lesson_materials') {
+                $row = $this->withVerifiedMaterialFile($row);
+            }
+
             foreach ($row as $column => $value) {
                 $row[$column] = $this->encodeJsonValue($table, $column, $value);
             }
@@ -608,6 +622,71 @@ class DataController
         Response::json(array_is_list($body) ? $inserted : $inserted[0], 201);
     }
 
+    /** Lazily built; only the material-write path instantiates them. */
+    private ?UploadIntegrityService $uploadIntegrity = null;
+    private ?StorageService $storageService = null;
+    /** null = not probed yet; false = migration 035 columns absent. */
+    private ?bool $hashCacheColumns = null;
+
+    /**
+     * Verify a `lesson_materials` write against the object it names.
+     *
+     * • `storage_path` empty/absent → nothing to verify (legacy rows keep working).
+     * • object missing, unreadable, empty or not a valid document → 422 with a
+     *   stable code (`material_file_missing` / `material_file_empty` / `pdf_*`).
+     * • otherwise `file_size` is REPLACED with the measured byte count and, when
+     *   migration 035 is applied, the source-hash cache is filled in from the
+     *   stored bytes so the first delivery does not have to re-digest them.
+     *
+     * @param array<string,mixed> $row
+     * @return array<string,mixed>
+     */
+    private function withVerifiedMaterialFile(array $row): array
+    {
+        $path = trim((string) ($row['storage_path'] ?? ''));
+        if ($path === '') {
+            return $row;
+        }
+
+        $this->uploadIntegrity ??= new UploadIntegrityService();
+        $this->storageService ??= new StorageService();
+
+        $isPdf = strtolower((string) pathinfo($path, PATHINFO_EXTENSION)) === 'pdf'
+            || stripos((string) ($row['file_type'] ?? ''), 'pdf') !== false;
+
+        $measured = $this->uploadIntegrity->inspectStored('lesson-materials', $path, $isPdf);
+
+        $row['file_size'] = $measured['size'];
+
+        if ($this->hashCacheColumnsAvailable()) {
+            $abs = $this->storageService->privateFilePath('lesson-materials', $path);
+            $row['file_hash'] = $measured['sha256'];
+            $row['file_hash_path'] = $path;
+            $row['file_hash_size'] = $measured['size'];
+            $mtime = @filemtime($abs);
+            if (is_int($mtime)) {
+                $row['file_hash_mtime'] = $mtime;
+            }
+        }
+
+        return $row;
+    }
+
+    /** Whether `lesson_materials.file_hash*` exists (migration 035 applied). */
+    private function hashCacheColumnsAvailable(): bool
+    {
+        if ($this->hashCacheColumns !== null) {
+            return $this->hashCacheColumns;
+        }
+        try {
+            Database::instance()->query('SELECT file_hash FROM lesson_materials LIMIT 1');
+            $this->hashCacheColumns = true;
+        } catch (\Throwable) {
+            $this->hashCacheColumns = false;
+        }
+        return $this->hashCacheColumns;
+    }
+
     /**
      * UPDATE table — PATCH /api/{table}?col=val
      */
@@ -661,6 +740,14 @@ class DataController
 
         // Remove protected columns (mass assignment prevention)
         $body = $this->filterProtectedColumns($body, $table);
+
+        // Re-pointing a material at a different object (a replacement made
+        // through the generic API rather than /materials/{id}/replace) must
+        // pass the same verification: the object exists, holds bytes, and is a
+        // real document. Sizes are re-measured, never taken from the request.
+        if ($table === 'lesson_materials' && array_key_exists('storage_path', $body)) {
+            $body = $this->withVerifiedMaterialFile($body);
+        }
 
         foreach ($body as $column => $value) {
             $body[$column] = $this->encodeJsonValue($table, $column, $value);

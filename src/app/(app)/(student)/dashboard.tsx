@@ -14,9 +14,14 @@ import { useProfileStore } from '@/lib/store';
 import { useStaleWhileRevalidateFocus } from '@/lib/useStaleWhileRevalidateFocus';
 import { prefetchCourseImages, courseImageUrlsFrom } from '@/lib/imagePrefetch';
 import {
-  getMySubscriptions, getUnreadNotificationCount,
+  getUnreadNotificationCount,
   getPublishedCourses, getCategories,
 } from '@/lib/api';
+// Enrollments are read through the short-TTL single-flight cache: the dashboard,
+// My Courses, Explore, Profile, course details and the lesson player all need
+// this same list, and each focus used to re-download it.
+import { getMySubscriptionsCached } from '@/lib/myCoursesCache';
+import { markPerf, logPerfTimeline } from '@/lib/perfTimeline';
 import { useTranslation } from '@/lib/i18n';
 import { NeuCard } from '@/components/NeuCard';
 import { NeuSearchBar } from '@/components/NeuInputRow';
@@ -66,7 +71,7 @@ export default function StudentDashboard() {
     try {
       if (!profile) { setLoading(false); return; }
       const [subs, count, courses, cats] = await Promise.all([
-        getMySubscriptions(profile.id),
+        getMySubscriptionsCached(profile.id),
         getUnreadNotificationCount(profile.id),
         getPublishedCourses(),
         getCategories(),
@@ -80,6 +85,9 @@ export default function StudentDashboard() {
       prefetchCourseImages(courseImageUrlsFrom(courses));
     } catch {}
     setLoading(false);
+    // DEV timing only: the landing screen's first data has landed.
+    markPerf('screen-data');
+    logPerfTimeline();
   }, [profile]);
 
   // Stale-while-revalidate: the FIRST visit shows the full-screen spinner,

@@ -6,6 +6,8 @@ import * as SecureStore from 'expo-secure-store';
 import { backendClient } from '@/client/backendClient';
 import { getInstallationId, getStoredDeviceFingerprint, clearDeviceFingerprint } from '@/lib/installationId';
 import { invalidateCreditCache } from '@/lib/creditService';
+import { invalidateMySubscriptionsCache } from '@/lib/myCoursesCache';
+import { markPerf } from '@/lib/perfTimeline';
 import { resetOfflineLibraryForAccountSwitch } from '@/lib/offlineVideoService';
 import { isExpectedMaintenanceError } from '@/lib/maintenanceStateModel';
 import { useProfileStore } from '@/lib/store';
@@ -350,6 +352,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
         setMaintenanceExemptionUserId(s?.user?.id ?? null)
       );
       setIsLoading(false);
+      markPerf('session-restored');
       authLog('setIsLoading(false)');
 
       // Only check on a truly RESTORED session (lastSignedInAt=0 means no
@@ -391,6 +394,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
         if (lastAccountUidRef.current && lastAccountUidRef.current !== s.user.id) {
           authLog(`account switch detected ${lastAccountUidRef.current.slice(0, 8)}… → ${s.user.id.slice(0, 8)}… — invalidating per-account caches`);
           invalidateCreditCache();
+          invalidateMySubscriptionsCache();
         }
         lastAccountUidRef.current = s.user.id;
 
@@ -466,6 +470,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
         seedRef.current = { confirmed: false, userId: null };
         // The next sign-in must never inherit this account's cached data.
         invalidateCreditCache();
+        invalidateMySubscriptionsCache();
         // Offline-library account isolation: drop the in-memory download
         // library so a subsequent login hydrates fresh (persisted rows are
         // owner-scoped and re-filter by the new user on hydration; DRM

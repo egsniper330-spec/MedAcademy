@@ -3,7 +3,7 @@ import { PageHeader } from '@/components/PageHeader';
 import { View, Text, useColorScheme, RefreshControl } from 'react-native';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useProfileStore } from '@/lib/store';
-import { getMySubscriptions } from '@/lib/api';
+import { getMySubscriptionsCached } from '@/lib/myCoursesCache';
 import { prefetchCourseImages, courseImageUrlsFrom } from '@/lib/imagePrefetch';
 import { CourseCard } from '@/components/CourseCard';
 import { neuColors, useLayout, safeBottom, mutedTextStyle } from '@/lib/neu';
@@ -28,7 +28,7 @@ export default function MyCourses() {
   const loadData = useCallback(async () => {
     if (!profile) return;
     try {
-      const data = await getMySubscriptions(profile.id);
+      const data = await getMySubscriptionsCached(profile.id);
       setSubscriptions(data);
       prefetchCourseImages(courseImageUrlsFrom(data));
     } catch {}

@@ -1064,7 +1064,7 @@ function createStorageBucket(bucket: string) {
       // representation per platform and rejects forbidden conversions
       // loudly instead of producing the runtime error.
       const part = toUploadPart(file, RNPlatform.OS);
-      if (part.kind === 'error') return { error: { message: part.message } };
+      if (part.kind === 'error') return { error: { message: part.message }, data: null };
       if (part.kind === 'descriptor') {
         formData.append('file', {
           uri: part.value.uri,
@@ -1084,7 +1084,7 @@ function createStorageBucket(bucket: string) {
       // multipart body cannot use the JSON client), so it must consult the lock
       // itself. Uploads are WRITES: refused, never queued for replay.
       if (isSecurityLocked()) {
-        return { error: { message: 'Upload blocked by the active security lock (your device is being verified).', code: 'SECURITY_LOCK', status: 0 } };
+        return { error: { message: 'Upload blocked by the active security lock (your device is being verified).', code: 'SECURITY_LOCK', status: 0 }, data: null };
       }
       try {
         const res = await globalThis.fetch(`${API_BASE}/storage/upload`, {
@@ -1098,14 +1098,32 @@ function createStorageBucket(bucket: string) {
           const message = detail ?? data?.message ?? (res.status === 413
             ? 'Upload is too large for the server request limit. Choose a smaller file or contact support.'
             : `Upload failed (HTTP ${res.status}). Please try again or contact support.`);
-          return { error: { message, status: res.status, code: data?.error?.code ?? data?.code } };
+          return { error: { message, status: res.status, code: data?.error?.code ?? data?.code }, data: null };
         }
         if (!data) {
-          return { error: { message: 'The server returned an invalid upload response. Please contact support.', status: res.status } };
+          return { error: { message: 'The server returned an invalid upload response. Please contact support.', status: res.status }, data: null };
         }
-        return { error: null as { message: string; code?: string } | null };
+        // The server measures what it actually persisted. Callers MUST treat a
+        // missing/zero `size` as a failed upload — that is exactly the condition
+        // that produced a stored 0-byte PDF with a 200 OK in the past.
+        const size = Number(data.size ?? 0);
+        if (!(size > 0)) {
+          return {
+            error: { message: 'The file did not arrive completely (0 bytes stored). Please try again.', code: 'upload_empty', status: res.status },
+            data: null,
+          };
+        }
+        return {
+          error: null as { message: string; code?: string } | null,
+          data: {
+            path: String(data.path ?? path),
+            url: typeof data.url === 'string' ? data.url : null,
+            size,
+            sha256: String(data.sha256 ?? ''),
+          },
+        };
       } catch (e: unknown) {
-        return { error: { message: e instanceof Error ? e.message : String(e), status: 0 } };
+        return { error: { message: e instanceof Error ? e.message : String(e), status: 0 }, data: null };
       }
     },
     getPublicUrl: (path: string) => {
@@ -1228,6 +1246,15 @@ async function invokeFunction<T = any>(
 
   // 1. Resolve the PHP route (static map, action dispatch, or special cases)
   let route = EDGE_FUNCTION_MAP[name];
+
+  // ── Lesson-material lifecycle ─────────────────────────────────────────────
+  // Both routes take the material id as `{id}`; the body's `material_id` is
+  // renamed here exactly like delete-course/delete-lesson do.
+  if (name === 'material-delete' || name === 'material-replace') {
+    route = name === 'material-delete' ? '/materials/{id}/delete' : '/materials/{id}/replace';
+    if (typeof payload.material_id === 'string') payload.id = payload.material_id;
+    delete payload.material_id;
+  }
 
   if (!route && EDGE_ACTION_MAP[name] && typeof payload.action === 'string') {
     route = EDGE_ACTION_MAP[name][payload.action] ?? undefined;

@@ -26,6 +26,7 @@ import { PageHeader } from '@/components/PageHeader';
 import { AnchoredMenu } from '@/components/AnchoredMenu';
 import { useTranslation } from '@/lib/i18n';
 import { DATE_LOCALE_TAGS, formatLocalizedDate } from '@/lib/i18n/date';
+import { useStaleWhileRevalidateFocus } from '@/lib/useStaleWhileRevalidateFocus';
 import { NeuCard } from '@/components/NeuCard';
 import { useToast } from '@/components/Toast';
 import { useProfileStore } from '@/lib/store';
@@ -107,6 +108,15 @@ export default function VideoLibraryScreen() {
 
   const [assets, setAssets] = useState<VideoAsset[]>([]);
   const [loading, setLoading] = useState(true);
+  // Pull-to-refresh indicator, kept SEPARATE from `loading`: `loading` now only
+  // means "nothing to show yet" (see the stale-while-revalidate note below), so
+  // it must not be reused for the refresh spinner.
+  const [refreshingList, setRefreshingList] = useState(false);
+  // What the doctor is TYPING vs. what the server is queried with. They used to
+  // be the same state, so every keystroke re-created `load` and re-ran the focus
+  // effect: one full-screen spinner and one GET per character, which is why
+  // filtering felt slow and why the library hammered the API while typing.
+  const [searchInput, setSearchInput] = useState('');
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<LibraryFilters['status']>('all');
   const [sortBy, setSortBy] = useState<LibraryFilters['sortBy']>('created_at');
@@ -143,8 +153,18 @@ export default function VideoLibraryScreen() {
   // Throttle: at most one auto-sync per 5 minutes per mounted session.
   const lastAutoSyncRef = useRef(0);
 
+  // DEBOUNCE the query (300 ms, same convention as Explore's search). One
+  // request per settled query instead of one per character.
+  useEffect(() => {
+    const next = searchInput.trim();
+    if (next === search) return;
+    const timer = setTimeout(() => setSearch(next), 300);
+    return () => clearTimeout(timer);
+  }, [searchInput, search]);
+
+  // The loader no longer raises the full-screen spinner: the list stays mounted
+  // and refreshes in place (see useStaleWhileRevalidateFocus below).
   const load = useCallback(async () => {
-    setLoading(true);
     try {
       const data = await getMyVideoLibrary({ search, status: statusFilter, sortBy, sortDir });
       setAssets(data);
@@ -154,13 +174,29 @@ export default function VideoLibraryScreen() {
     setLoading(false);
   }, [search, statusFilter, sortBy, sortDir, showToast, t]);
 
+  // Focus entry: fetch without discarding what is already on screen, and never
+  // run two batches for one visit.
+  useStaleWhileRevalidateFocus(load, {
+    setLoading,
+    hasContent: () => assets.length > 0,
+  });
+
+  // Filter/sort changes still refetch (as before), but WITHOUT blanking the
+  // list. Guarded by the previous key so a re-render cannot refetch on its own.
+  const filterKey = `${search}|${statusFilter}|${sortBy}|${sortDir}`;
+  const prevFilterKeyRef = useRef(filterKey);
+  useEffect(() => {
+    if (prevFilterKeyRef.current === filterKey) return;
+    prevFilterKeyRef.current = filterKey;
+    void load();
+  }, [filterKey, load]);
+
   // ── Doctor auto-reconciliation on screen focus ──
   // Doctors don't have a maintenance window; their library must reconcile
   // itself when they open it (throttled). Admins keep the manual Sync button
   // flow. Failure is non-blocking: the library stays usable with last-known
   // state and the deferred-sync note below explains what happened.
   useFocusEffect(useCallback(() => {
-    load();
     if (!isStaff && canSync) {
       const now = Date.now();
       if (now - lastAutoSyncRef.current > AUTO_SYNC_INTERVAL_MS) {
@@ -675,16 +711,19 @@ export default function VideoLibraryScreen() {
         <View style={[neuPressedStyle(isDark), { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 8, borderRadius: 14, paddingHorizontal: 12, paddingVertical: 11, minWidth: 0 }]}>
           <Search size={15} color={c.text} opacity={0.4} style={{ flexShrink: 0 }} />
           <TextInput
-            value={search}
-            onChangeText={setSearch}
+            // The INPUT is bound to what is being typed; `search` is only the
+            // debounced value the request uses. Binding the field to the
+            // debounced state would swallow keystrokes for 300 ms.
+            value={searchInput}
+            onChangeText={setSearchInput}
             placeholder={t('videoLibrary.searchPlaceholder')}
             accessibilityLabel={t('videoLibrary.searchPlaceholder')}
             placeholderTextColor={`${c.text}55`}
             style={{ flex: 1, minWidth: 0, fontSize: 14, color: c.text, paddingVertical: 0 }}
             returnKeyType="search"
           />
-          {search.length > 0 && (
-            <Pressable onPress={() => setSearch('')}>
+          {searchInput.length > 0 && (
+            <Pressable onPress={() => { setSearchInput(''); setSearch(''); }}>
               <X size={14} color={c.text} opacity={0.4} />
             </Pressable>
           )}
@@ -788,8 +827,8 @@ export default function VideoLibraryScreen() {
               </Text>
             </View>
           }
-          onRefresh={load}
-          refreshing={loading}
+          onRefresh={async () => { setRefreshingList(true); await load(); setRefreshingList(false); }}
+          refreshing={refreshingList}
         />
       )}
       </View>

@@ -191,9 +191,12 @@ check('B5 the pattern is still widespread — this change is incremental, not a 
 const course = read('src/app/(app)/course/[id].tsx');
 
 check('C1 the enrollment reads start CONCURRENTLY with the course read', () => {
-  const subsIdx = course.indexOf('getMySubscriptions(profile!.id)');
+  // The enrollment read now goes through the short-TTL single-flight cache
+  // (lib/myCoursesCache) so repeated visits do not re-download the list. It is
+  // still STARTED before the course payload — the ordering this check protects.
+  const subsIdx = course.indexOf('getMySubscriptionsCached(profile!.id)');
   const courseIdx = course.indexOf('getCourseById(id)');
-  ok(subsIdx >= 0, 'getMySubscriptions call not found');
+  ok(subsIdx >= 0, 'enrollment (cached) read call not found');
   ok(courseIdx >= 0, 'getCourseById call not found');
   ok(
     subsIdx < courseIdx,

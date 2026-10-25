@@ -21,25 +21,30 @@ import { neuColors, neuFlatStyle, neuPressedStyle, useLayout, mutedTextStyle } f
 import {
   formatBytes, formatSpeed, formatEta, type UploadTask, type UploadStatus,
 } from '@/lib/videoUploadEngine';
+// Every visible string in this panel goes through the app dictionary (the queue
+// is part of the doctor's Video Library flow, so it must follow the app locale
+// like the rest of that screen). `t` is used rather than `useTranslation` in the
+// module-level config below because those tables are plain data.
+import { t } from '@/lib/i18n';
 
 // Layout token alias for sub-components (avoids calling useLayout in every leaf)
 type QueueLayout = ReturnType<typeof useLayout>;
 
 // ─── Status display config ────────────────────────────────────────────────────
-const STATUS_CONFIG: Record<string, { label: string; color: string; Icon: any }> = {
-  waiting:            { label: 'Waiting…',              color: '#6B7280', Icon: Clock },
-  uploading:          { label: 'Uploading…',            color: '#3B82F6', Icon: Upload },
-  paused:             { label: 'Paused',                color: '#D97706', Icon: Pause },
-  resuming:           { label: 'Resuming…',             color: '#2DA8FF', Icon: RotateCcw },
-  processing:         { label: 'Processing…',           color: '#7C3AED', Icon: Loader },
-  encoding:           { label: 'Encoding…',             color: '#7C3AED', Icon: Loader },
-  generating_streams: { label: 'Generating streams…',   color: '#2563EB', Icon: Loader },
-  verifying:          { label: 'Verifying…',            color: '#2DA8FF', Icon: ShieldCheck },
-  ready:              { label: 'Ready to Watch',         color: '#16A34A', Icon: CheckCircle },
-  failed:             { label: 'Upload Failed',          color: '#DC2626', Icon: XCircle },
-  timeout:            { label: 'Processing Timed Out',   color: '#F97316', Icon: AlertTriangle },
-  canceled:           { label: 'Canceled',               color: '#9CA3AF', Icon: X },
-  recovering:         { label: 'Recovering…',            color: '#D97706', Icon: RotateCcw },
+const STATUS_CONFIG: Record<string, { labelKey: string; color: string; Icon: any }> = {
+  waiting:            { labelKey: 'uploadQueue.status.waiting',           color: '#6B7280', Icon: Clock },
+  uploading:          { labelKey: 'uploadQueue.status.uploading',         color: '#3B82F6', Icon: Upload },
+  paused:             { labelKey: 'uploadQueue.status.paused',            color: '#D97706', Icon: Pause },
+  resuming:           { labelKey: 'uploadQueue.status.resuming',          color: '#2DA8FF', Icon: RotateCcw },
+  processing:         { labelKey: 'uploadQueue.status.processing',        color: '#7C3AED', Icon: Loader },
+  encoding:           { labelKey: 'uploadQueue.status.encoding',          color: '#7C3AED', Icon: Loader },
+  generating_streams: { labelKey: 'uploadQueue.status.generatingStreams', color: '#2563EB', Icon: Loader },
+  verifying:          { labelKey: 'uploadQueue.status.verifying',         color: '#2DA8FF', Icon: ShieldCheck },
+  ready:              { labelKey: 'uploadQueue.status.ready',             color: '#16A34A', Icon: CheckCircle },
+  failed:             { labelKey: 'uploadQueue.status.failed',            color: '#DC2626', Icon: XCircle },
+  timeout:            { labelKey: 'uploadQueue.status.timeout',           color: '#F97316', Icon: AlertTriangle },
+  canceled:           { labelKey: 'uploadQueue.status.canceled',          color: '#9CA3AF', Icon: X },
+  recovering:         { labelKey: 'uploadQueue.status.recovering',        color: '#D97706', Icon: RotateCcw },
 };
 
 const STAGE_PROGRESS: Record<string, number> = {
@@ -95,13 +100,13 @@ function ProgressBar({ pct, color, isDark, lyt, indeterminate }: { pct: number; 
 }
 
 // ─── Stage indicator ──────────────────────────────────────────────────────────
-const STAGES: { key: string; label: string }[] = [
-  { key: 'uploading',          label: 'Upload' },
-  { key: 'processing',         label: 'Process' },
-  { key: 'encoding',           label: 'Encode' },
-  { key: 'generating_streams', label: 'Stream' },
-  { key: 'verifying',          label: 'Verify' },
-  { key: 'ready',              label: 'Ready' },
+const STAGES: { key: string; labelKey: string }[] = [
+  { key: 'uploading',          labelKey: 'uploadQueue.stage.upload' },
+  { key: 'processing',         labelKey: 'uploadQueue.stage.process' },
+  { key: 'encoding',           labelKey: 'uploadQueue.stage.encode' },
+  { key: 'generating_streams', labelKey: 'uploadQueue.stage.stream' },
+  { key: 'verifying',          labelKey: 'uploadQueue.stage.verify' },
+  { key: 'ready',              labelKey: 'uploadQueue.stage.ready' },
 ];
 const STAGE_ORDER = ['uploading', 'processing', 'encoding', 'generating_streams', 'verifying', 'ready'];
 
@@ -134,7 +139,7 @@ function StageIndicator({ status, isDark, lyt }: { status: string; isDark: boole
               color: active ? cfg.color : done ? '#16A34A' : `${c.text}50`,
               fontWeight: active ? '700' : '500',
             }} numberOfLines={1}>
-              {stage.label}
+              {t(stage.labelKey)}
             </Text>
           </View>
         );
@@ -170,7 +175,7 @@ function UploadItemCard({ task, isDark, lyt }: { task: UploadTask; isDark: boole
 
   const chunkLabel = (isActive || isPaused || task.status === 'resuming') &&
     task.totalChunks && task.totalChunks > 1
-    ? `${task.chunksCompleted ?? 0} / ${task.totalChunks} chunks`
+    ? t('uploadQueue.chunks', { done: task.chunksCompleted ?? 0, total: task.totalChunks })
     : null;
 
   // Adaptive thumb size: ~touchTarget (44–52dp) — keeps tap targets large
@@ -207,13 +212,13 @@ function UploadItemCard({ task, isDark, lyt }: { task: UploadTask; isDark: boole
             </Text>
             {task.isReplacement && (
               <View style={{ backgroundColor: '#7C3AED18', borderRadius: badgeR, paddingHorizontal: lyt.pad.sm, paddingVertical: 2 }}>
-                <Text style={{ fontSize: lyt.captionSize - 2, fontWeight: '800', color: '#7C3AED' }}>REPLACE</Text>
+                <Text style={{ fontSize: lyt.captionSize - 2, fontWeight: '800', color: '#7C3AED' }}>{t('uploadQueue.replace')}</Text>
               </View>
             )}
           </View>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: lyt.pad.sm, marginTop: lyt.pad.xs - 1 }}>
             <cfg.Icon size={statusIconSz} color={cfg.color} />
-            <Text style={{ fontSize: lyt.captionSize, fontWeight: '600', color: cfg.color }}>{cfg.label}</Text>
+            <Text style={{ fontSize: lyt.captionSize, fontWeight: '600', color: cfg.color }}>{t(cfg.labelKey)}</Text>
             {chunkLabel && (
               <Text style={{ fontSize: lyt.captionSize - 1, ...mutedTextStyle(c, 0.45) }}>· {chunkLabel}</Text>
             )}
@@ -237,14 +242,14 @@ function UploadItemCard({ task, isDark, lyt }: { task: UploadTask; isDark: boole
             <Pressable onPress={() => retryUpload(task.id)} hitSlop={8}
               style={[neuFlatStyle(isDark), { borderRadius: lyt.pad.md, padding: btnPad, flexDirection: 'row', alignItems: 'center', gap: lyt.pad.xs }]}>
               <RefreshCw size={actionIconSz} color="#3B82F6" />
-              <Text style={{ fontSize: lyt.captionSize - 1, fontWeight: '700', color: '#3B82F6' }}>Retry</Text>
+              <Text style={{ fontSize: lyt.captionSize - 1, fontWeight: '700', color: '#3B82F6' }}>{t('uploadQueue.retry')}</Text>
             </Pressable>
           )}
           {canRetryProcessing && (
             <Pressable onPress={() => retryProcessing(task.id)} hitSlop={8}
               style={[neuFlatStyle(isDark), { borderRadius: lyt.pad.md, padding: btnPad, flexDirection: 'row', alignItems: 'center', gap: lyt.pad.xs }]}>
               <RotateCcw size={actionIconSz - 1} color="#F97316" />
-              <Text style={{ fontSize: lyt.captionSize - 1, fontWeight: '700', color: '#F97316' }}>Retry</Text>
+              <Text style={{ fontSize: lyt.captionSize - 1, fontWeight: '700', color: '#F97316' }}>{t('uploadQueue.retry')}</Text>
             </Pressable>
           )}
           {(isActive || isPaused || task.status === 'waiting' || isRecovering || isProcessing || canCancelFailed) && (
@@ -299,7 +304,7 @@ function UploadItemCard({ task, isDark, lyt }: { task: UploadTask; isDark: boole
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: lyt.pad.sm,
           backgroundColor: '#2DA8FF15', borderRadius: lyt.pad.md, padding: lyt.pad.sm + 1 }}>
           <ShieldCheck size={lyt.captionSize} color="#2DA8FF" />
-          <Text style={{ fontSize: lyt.captionSize, color: '#2DA8FF', fontWeight: '600' }}>Integrity verified</Text>
+          <Text style={{ fontSize: lyt.captionSize, color: '#2DA8FF', fontWeight: '600' }}>{t('uploadQueue.integrityVerified')}</Text>
         </View>
       )}
 
@@ -320,7 +325,7 @@ function UploadItemCard({ task, isDark, lyt }: { task: UploadTask; isDark: boole
           backgroundColor: '#F9731615', borderRadius: lyt.pad.md, paddingHorizontal: lyt.pad.sm + 2, paddingVertical: lyt.pad.sm }}>
           <RotateCcw size={lyt.captionSize - 1} color="#F97316" />
           <Text style={{ fontSize: lyt.captionSize - 1, color: '#F97316', flex: 1, lineHeight: lyt.captionSize * 1.4 }}>
-            Processing timed out — tap Retry Processing to check encoding status.
+            {t('uploadQueue.timeoutHint')}
           </Text>
         </View>
       )}
@@ -331,7 +336,7 @@ function UploadItemCard({ task, isDark, lyt }: { task: UploadTask; isDark: boole
           backgroundColor: '#D9770615', borderRadius: lyt.pad.md, padding: lyt.pad.sm + 1 }}>
           <RotateCcw size={lyt.captionSize} color="#D97706" />
           <Text style={{ fontSize: lyt.captionSize - 1, color: '#D97706' }}>
-            Upload was interrupted. Tap ▶ to resume from last checkpoint.
+            {t('uploadQueue.recoveringHint')}
           </Text>
         </View>
       )}
@@ -342,7 +347,7 @@ function UploadItemCard({ task, isDark, lyt }: { task: UploadTask; isDark: boole
           backgroundColor: '#2DA8FF15', borderRadius: lyt.pad.md, padding: lyt.pad.sm + 1 }}>
           <RotateCcw size={lyt.captionSize} color="#2DA8FF" />
           <Text style={{ fontSize: lyt.captionSize - 1, color: '#2DA8FF' }}>
-            Resuming from chunk {task.chunksCompleted ?? 0} of {task.totalChunks}
+            {t('uploadQueue.resumingFrom', { done: task.chunksCompleted ?? 0, total: task.totalChunks })}
           </Text>
         </View>
       )}
@@ -353,7 +358,7 @@ function UploadItemCard({ task, isDark, lyt }: { task: UploadTask; isDark: boole
           backgroundColor: '#16A34A15', borderRadius: lyt.pad.md, padding: lyt.pad.sm + 2 }}>
           <CheckCircle size={lyt.captionSize + 1} color="#16A34A" />
           <Text style={{ fontSize: lyt.captionSize, color: '#16A34A', fontWeight: '600' }}>
-            ✓ Upload complete · {formatBytes(task.fileSize)}
+            {t('uploadQueue.complete', { size: formatBytes(task.fileSize) })}
           </Text>
         </View>
       )}
@@ -396,15 +401,15 @@ function RecoveryDialog({ isDark, lyt }: { isDark: boolean; lyt: QueueLayout }) 
             </View>
             <View style={{ flex: 1 }}>
               <Text style={{ fontSize: lyt.headingSize, fontWeight: '800', color: c.text }}>
-                Unfinished Uploads Found
+                {t('uploadQueue.recovery.title')}
               </Text>
               <Text style={{ fontSize: lyt.captionSize, ...mutedTextStyle(c, 0.5), marginTop: lyt.pad.xs - 1 }}>
-                {count} upload{count > 1 ? 's were' : ' was'} interrupted
+                {t('uploadQueue.recovery.interrupted', { count })}
               </Text>
             </View>
           </View>
           <Text style={{ fontSize: lyt.bodySize - 1, ...mutedTextStyle(c, 0.65), lineHeight: lyt.bodySize * 1.5 }}>
-            {"We found uploads that didn't complete. You can resume them now or discard them."}
+            {t('uploadQueue.recovery.body')}
           </Text>
           <View style={{ gap: lyt.pad.md }}>
             <Pressable onPress={resumeAllRecoverable}
@@ -415,18 +420,18 @@ function RecoveryDialog({ isDark, lyt }: { isDark: boolean; lyt: QueueLayout }) 
                 backgroundColor: c.primary,
               }]}>
               <Text style={{ fontSize: lyt.bodySize, fontWeight: '800', color: '#fff' }}>
-                Resume All ({count})
+                {t('uploadQueue.recovery.resumeAll', { count })}
               </Text>
             </Pressable>
             <Pressable onPress={() => setShowRecoveryDialog(false)}
               style={[neuFlatStyle(isDark), { padding: lyt.pad.md + 2, borderRadius: lyt.cardRadius, alignItems: 'center' }]}>
               <Text style={{ fontSize: lyt.bodySize - 1, fontWeight: '700', ...mutedTextStyle(c, 0.6) }}>
-                Resume Later
+                {t('uploadQueue.recovery.resumeLater')}
               </Text>
             </Pressable>
             <Pressable onPress={discardRecoverable} style={{ padding: lyt.pad.sm + 2, alignItems: 'center' }}>
               <Text style={{ fontSize: lyt.bodySize - 1, color: '#DC2626', fontWeight: '600' }}>
-                Discard All
+                {t('uploadQueue.recovery.discardAll')}
               </Text>
             </Pressable>
           </View>
@@ -463,7 +468,7 @@ function BulkActions({ isDark, lyt }: { isDark: boolean; lyt: QueueLayout }) {
             alignItems: 'center',
           }]}>
           <RefreshCw size={lyt.captionSize} color="#3B82F6" />
-          <Text style={{ fontSize: lyt.captionSize, fontWeight: '600', color: '#3B82F6' }}>Retry All Failed</Text>
+          <Text style={{ fontSize: lyt.captionSize, fontWeight: '600', color: '#3B82F6' }}>{t('uploadQueue.bulk.retryAllFailed')}</Text>
         </Pressable>
       )}
       {hasCompleted && (
@@ -476,7 +481,7 @@ function BulkActions({ isDark, lyt }: { isDark: boolean; lyt: QueueLayout }) {
             alignItems: 'center',
           }]}>
           <Trash2 size={lyt.captionSize} color={`${c.text}60`} />
-          <Text style={{ fontSize: lyt.captionSize, fontWeight: '600', color: `${c.text}70` }}>Clear Completed</Text>
+          <Text style={{ fontSize: lyt.captionSize, fontWeight: '600', color: `${c.text}70` }}>{t('uploadQueue.bulk.clearCompleted')}</Text>
         </Pressable>
       )}
     </View>
@@ -514,14 +519,16 @@ function QueueHeader({ isDark, onClose, lyt }: { isDark: boolean; onClose: () =>
         <Upload size={Math.round(iconBoxSz * 0.5)} color={c.primary} />
       </View>
       <View style={{ flex: 1 }}>
-        <Text style={{ fontSize: lyt.headingSize, fontWeight: '800', color: c.text }}>Upload Queue</Text>
+        <Text style={{ fontSize: lyt.headingSize, fontWeight: '800', color: c.text }}>{t('uploadQueue.title')}</Text>
         <Text style={{ fontSize: lyt.captionSize - 1, ...mutedTextStyle(c, 0.5), marginTop: lyt.pad.xs - 2 }}>
-          {uploading  > 0 ? `${uploading} uploading · `   : ''}
-          {waiting    > 0 ? `${waiting} waiting · `       : ''}
-          {recovering > 0 ? `${recovering} recovering · ` : ''}
-          {ready      > 0 ? `${ready} done · `            : ''}
-          {failed     > 0 ? `${failed} failed · `         : ''}
-          {tasks.length} total
+          {[
+            uploading  > 0 ? t('uploadQueue.summary.uploading',  { count: uploading })  : '',
+            waiting    > 0 ? t('uploadQueue.summary.waiting',    { count: waiting })    : '',
+            recovering > 0 ? t('uploadQueue.summary.recovering', { count: recovering }) : '',
+            ready      > 0 ? t('uploadQueue.summary.ready',      { count: ready })      : '',
+            failed     > 0 ? t('uploadQueue.summary.failed',     { count: failed })     : '',
+            t('uploadQueue.summary.total', { count: tasks.length }),
+          ].filter(Boolean).join(' · ')}
         </Text>
       </View>
       <Pressable onPress={onClose} hitSlop={8}

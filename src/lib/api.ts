@@ -1189,7 +1189,24 @@ export async function duplicateLesson(lessonId: string, newOrderIndex: number) {
 // REMOVED: uploadLessonVideo — dead code. Video files go directly to VdoCipher.
 // PDFs and lesson attachments continue to use uploadLessonMaterial() below.
 
-/** Replace an existing lesson material file — keeps the same DB record, swaps the storage object. */
+/**
+ * Replace an existing lesson material file — keeps the same DB record, swaps the
+ * storage object.
+ *
+ * ORDER MATTERS (this used to be wrong):
+ *   1. upload the NEW object (nothing else has changed yet),
+ *   2. let the SERVER commit the new path and retire the old bytes,
+ *   3. only then update local state.
+ *
+ * The previous version deleted the old object BEFORE the row was updated, so a
+ * failed update (or one rejected by the server's new integrity check) left the
+ * material pointing at a file that no longer existed: "download fails, file not
+ * found". The server now owns the whole swap, so a failed replacement leaves the
+ * old document perfectly usable.
+ *
+ * `oldStoragePath` is still accepted for call-site compatibility; the retired
+ * path is taken from the row by the server (never from the client).
+ */
 export async function replaceLessonMaterialFile(
   materialId: string,
   oldStoragePath: string,
@@ -1200,28 +1217,18 @@ export async function replaceLessonMaterialFile(
   mimeType: string,
   fileSize: number,
 ): Promise<any> {
-  // Upload new file
-  const { storagePath, publicUrl } = await uploadLessonMaterial(
-    courseId, lessonId, fileUri, fileName, mimeType,
+  void oldStoragePath;
+  const { storagePath, size, sha256 } = await uploadLessonMaterial(
+    courseId, lessonId, fileUri, fileName, mimeType, fileSize,
   );
-  // Delete old file from storage (best-effort)
-  await backendClient.storage.from('lesson-materials').remove([oldStoragePath]).catch(() => null);
-  // Update DB record
-  const { data, error } = await backendClient
-    .from('lesson_materials')
-    .update({
-      file_name: fileName,
-      file_url: publicUrl,
-      storage_path: storagePath,
-      file_type: mimeType,
-      file_size: fileSize,
-      updated_at: new Date().toISOString(),
-    })
-    .eq('id', materialId)
-    .select()
-    .single();
-  if (error) throw error;
-  return data;
+  return invokeEdgeFunction('material-replace', {
+    material_id: materialId,
+    storage_path: storagePath,
+    file_name: fileName,
+    file_type: mimeType,
+    file_size: size,
+    file_sha256: sha256,
+  });
 }
 
 // ── Lesson Materials ──────────────────────────────────────────────────────────
@@ -1270,11 +1277,24 @@ export async function updateLessonMaterial(id: string, updates: Partial<{ file_n
   return data;
 }
 
+/**
+ * Delete a lesson material AND its server-side bytes.
+ *
+ * The old implementation was client-orchestrated: storage delete first, then the
+ * DB row. Two things went wrong with that:
+ *   • a failed row delete left a material pointing at a missing file, and
+ *   • the personalized (watermarked) copies of that material were never
+ *     touched, so they sat in private storage forever.
+ *
+ * `POST /materials/{id}/delete` does both server-side: it re-checks ownership,
+ * removes the row and its generated copies in one transaction, then reclaims the
+ * files (with a retryable record if the filesystem refuses). `storagePath` is
+ * kept in the signature for call-site compatibility but is no longer trusted or
+ * sent — the server reads the path from the row it authorizes.
+ */
 export async function deleteLessonMaterial(id: string, storagePath: string) {
-  // Remove from storage first
-  await backendClient.storage.from('lesson-materials').remove([storagePath]);
-  const { error } = await backendClient.from('lesson_materials').delete().eq('id', id);
-  if (error) throw error;
+  void storagePath;
+  await invokeEdgeFunction('material-delete', { material_id: id });
 }
 
 // ── Course Cover Image ────────────────────────────────────────────────────────
@@ -1305,12 +1325,16 @@ export async function uploadCourseCover(
   // Unique path per upload — URL changes so CDN never serves stale content
   const storagePath = `${courseId}/${Date.now()}-cover.${ext}`;
 
-  const resp = await fetch(fileUri);
-  const blob = await resp.blob();
-
+  // Stream the picked file straight from disk (see uploadLessonMaterial): a
+  // `fetch(fileUri).blob()` round trip yields an EMPTY blob on React Native, so
+  // the cover was uploaded as 0 bytes and the course kept showing the old image.
   const { error: upErr } = await backendClient.storage
     .from('course-images')
-    .upload(storagePath, blob, { contentType: mimeType, upsert: false });
+    .upload(
+      storagePath,
+      { uri: fileUri, name: `cover.${ext}`, mimeType },
+      { contentType: mimeType, upsert: false },
+    );
   if (upErr) throw upErr;
 
   const { data: urlData } = backendClient.storage.from('course-images').getPublicUrl(storagePath);
@@ -1359,29 +1383,61 @@ export async function removeCourseCover(courseId: string, currentUrl: string): P
  *  the PHP storage layer rejects with "Bucket not found" because public
  *  access is disabled.  We store only the storage_path and generate a fresh
  *  signed URL at open-time via getMaterialSignedUrl().
+ *
+ *  WHY THE FILE URI IS SENT, NOT A `Blob` (the zero-byte upload incident)
+ *  ──────────────────────────────────────────────────────────────────────
+ *  This function used to read the picked file with
+ *  `const blob = await (await fetch(fileUri)).blob()` and append that Blob to
+ *  the multipart body. On React Native that round trip does NOT deliver the
+ *  file's bytes: `fetch()` of a local `file://`/`content://` URI resolves
+ *  immediately with an EMPTY body, `blob()` therefore yields a 0-byte Blob, and
+ *  FormData serialises it as an empty file part. The request finished instantly
+ *  (nothing was ever read from disk), the server stored a 0-byte object, and the
+ *  app happily inserted the material row on top of it — a PDF whose SHA-256 was
+ *  `e3b0c442…` (the digest of empty input).
+ *
+ *  The supported RN representation is the `{ uri, name, type }` descriptor: the
+ *  native networking layer streams the file from disk, so the bytes never pass
+ *  through JS memory and can never be silently empty. `toUploadPart()` in the
+ *  storage client is what enforces that. Avatar uploads already work this way —
+ *  lesson materials were the outlier.
+ *
+ *  The server independently refuses an empty/truncated body, so a future client
+ *  regression fails loudly instead of storing a phantom file.
  */
 export async function uploadLessonMaterial(
   courseId: string,
   lessonId: string,
   fileUri: string,
   fileName: string,
-  mimeType: string
-): Promise<{ storagePath: string; publicUrl: string }> {
+  mimeType: string,
+  declaredSize?: number,
+): Promise<{ storagePath: string; publicUrl: string; size: number; sha256: string }> {
   const storagePath = `${courseId}/${lessonId}/${Date.now()}_${fileName.replace(/[^a-zA-Z0-9._-]/g, '_')}`;
 
-  // Fetch file as blob
-  const resp = await fetch(fileUri);
-  const blob = await resp.blob();
-
-  const { error: upErr } = await backendClient.storage
+  const { error: upErr, data } = await backendClient.storage
     .from('lesson-materials')
-    .upload(storagePath, blob, { contentType: mimeType, upsert: false });
+    .upload(
+      storagePath,
+      { uri: fileUri, name: fileName, mimeType },
+      { contentType: mimeType, upsert: false },
+    );
   if (upErr) throw upErr;
+
+  // The upload is only successful if the SERVER persisted real bytes. `size` is
+  // measured from the stored object, never from the picker's metadata.
+  const size = Number(data?.size ?? 0);
+  if (!(size > 0)) {
+    throw new Error('The file could not be uploaded (no data was received). Please try again.');
+  }
+  if (__DEV__ && declaredSize && declaredSize > 0 && size < declaredSize) {
+    console.warn('[upload] stored fewer bytes than the picker reported', { declaredSize, size });
+  }
 
   // Return the storage path as the "publicUrl" placeholder so existing callers
   // that store file_url continue to work.  The actual URL is always generated
   // as a signed URL at read-time; this value is never opened directly.
-  return { storagePath, publicUrl: storagePath };
+  return { storagePath, publicUrl: storagePath, size, sha256: String(data?.sha256 ?? '') };
 }
 
 // ── Private Storage — Signed URL helpers ─────────────────────────────────────

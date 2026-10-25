@@ -19,6 +19,7 @@ import { maintenanceEpoch } from '@/components/MaintenanceGate';
 import { UploadFAB } from '@/components/VideoUploadQueue';
 import { useSecurity } from '@/lib/SecurityContext';
 import { useDeviceHeartbeat } from '@/lib/deviceHeartbeat';
+import { markPerf } from '@/lib/perfTimeline';
 import { SecurityGate } from '@/app/(app)/security-gate';
 import { useUpdate } from '@/lib/useForceUpdate';
 import ForceUpdateScreen from '@/components/ForceUpdateScreen';
@@ -305,6 +306,10 @@ function AppLayoutNav() {
           throw new Error('profile row incomplete (no role/status)');
         }
         setProfile(p as any);
+        // DEV timing only: the profile is now authoritative, so the role
+        // redirect can run — this is the last startup gate before a dashboard
+        // mounts and starts its own data batch.
+        markPerf('profile-resolved');
         // SERVER-AUTHORITATIVE ROLE/STATUS SYNC + FEATURE FLAG RE-HYDRATION:
         // immediately after the cold-start load, refresh against the server
         // (single-flight, offline-skipped). Catches USER→ADMIN / ADMIN→USER

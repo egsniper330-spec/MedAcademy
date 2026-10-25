@@ -3,7 +3,7 @@ import {
   View, Text, ScrollView, FlatList, useColorScheme, RefreshControl,
   ActivityIndicator, TextInput, Pressable, Image, StyleSheet, useWindowDimensions,
 } from 'react-native';
-import { useFocusEffect, useRouter, RelativePathString } from 'expo-router';
+import { useRouter, RelativePathString } from 'expo-router';
 import {
   Users, Search, UserPlus, BookOpen, Ban, Play, Trash2, Eye, CreditCard, X,
   Clock, GraduationCap, ChevronRight, CheckCircle, PlusCircle, Copy,
@@ -30,6 +30,7 @@ import { getContactDisplay, getPublicEmail } from '@/lib/api';
 import { friendlyError } from '@/lib/validation';
 import { useTranslation } from '@/lib/i18n';
 import { statusLabel } from '@/lib/i18n/labels';
+import { useStaleWhileRevalidateFocus } from '@/lib/useStaleWhileRevalidateFocus';
 
 type EnrollMethod = 'credits' | null;
 type ActionType   = 'suspend' | 'resume' | 'remove' | 'profile' | null;
@@ -172,7 +173,14 @@ export default function DoctorStudents() {
     setLoading(false);
   }, [profile]);
 
-  useFocusEffect(useCallback(() => { setLoading(true); loadData(); }, [loadData]));
+  // STALE-WHILE-REVALIDATE (performance): every focus used to blank the whole
+  // students list behind a spinner and refetch it. The list now stays mounted
+  // and refreshes in the background; the spinner is shown only when there is
+  // nothing to show yet, and a double focus can no longer issue two batches.
+  useStaleWhileRevalidateFocus(loadData, {
+    setLoading,
+    hasContent: () => enrollments.length > 0 || courses.length > 0,
+  });
   const onRefresh = async () => { setRefreshing(true); await Promise.all([loadData(), refreshCredits()]); setRefreshing(false); };
 
   // ── Tab data derivations ──────────────────────────────────────────────────────

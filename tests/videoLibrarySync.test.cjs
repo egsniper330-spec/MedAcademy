@@ -141,13 +141,15 @@ section('Upload state machine (real states, no fake success)');
   ok(hook.includes("markTimeout") && hook.includes('POLL_TIMEOUT_MS'),
     'bounded processing poll with explicit timeout state');
 
-  ok(queue.includes("'Ready to Watch'") && queue.includes("'Upload Failed'"),
+  // The labels are now dictionary keys (Arabic required), so the literal English
+  // copy is no longer in the component; the two states must still be distinct.
+  ok(queue.includes("'uploadQueue.status.ready'") && queue.includes("'uploadQueue.status.failed'"),
     'queue UI distinguishes Ready from Failed');
 
   ok(queue.includes('indeterminate') && queue.includes('formatBytes(task.bytesUploaded)'),
     'uploading shows real byte progress; post-upload stages use indeterminate sweep');
 
-  ok(queue.includes('{isReady && (') === false || queue.includes("'Ready to Watch'"),
+  ok(queue.includes('{isReady && (') === false || queue.includes("'uploadQueue.status.ready'"),
     'checkmark UI keyed to the ready state');
 
   ok(store.includes("t.status !== 'ready' && t.status !== 'canceled'") && store.includes("status: 'recovering'"),

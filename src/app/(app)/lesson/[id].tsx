@@ -8,7 +8,8 @@ import {
   ArrowLeft, Check, CheckCircle, Clock, Download, Eye, FileText, Film,
   Lock, Paperclip, Pause, Play, RefreshCw, ShieldAlert, X,
 } from 'lucide-react-native';
-import { getLessonById, upsertLessonProgress, getMySubscriptions, getMaterialSignedUrl, getMaterialPdfUrl, getLessonPdfSignedUrl, getCourseById } from '@/lib/api';
+import { getLessonById, upsertLessonProgress, getMaterialSignedUrl, getMaterialPdfUrl, getLessonPdfSignedUrl, getCourseById } from '@/lib/api';
+import { getMySubscriptionsCached } from '@/lib/myCoursesCache';
 import { isPdfMaterial, materialAccess, materialActionLabel, visibleMaterials } from '@/lib/lessonMaterials';
 import { backendClient } from '@/client/backendClient';
 import { useProfileStore } from '@/lib/store';
@@ -313,7 +314,7 @@ export default function LessonPlayer() {
       setLesson(data);
       // Check subscription
       if (profile?.role === 'student' && data.section?.course_id) {
-        const subs = await getMySubscriptions(profile.id);
+        const subs = await getMySubscriptionsCached(profile.id);
         setIsSubscribed(subs.some((s: any) => s.course_id === data.section.course_id));
       } else if (isPreviewStudent()) {
         // Preview: the doctor plays through the privileged OTP path; treat as

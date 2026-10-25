@@ -24,8 +24,9 @@ import type { RelativePathString } from 'expo-router';
 import { backendClient } from '@/client/backendClient';
 import { useProfileStore } from '@/lib/store';
 import { resolveImageMime, extFromMime, buildAvatarStoragePath, avatarFileName } from '@/lib/uploadPart';
+import { getMySubscriptionsCached } from '@/lib/myCoursesCache';
 import {
-  getProfile, getMySubscriptions, updateProfile, removeProfileAvatar,
+  getProfile, updateProfile, removeProfileAvatar,
   getUniversities, getFaculties, getAcademicLevels,
   changePassword, getPublicEmail, isInternalEmail,
 } from '@/lib/api';
@@ -421,7 +422,7 @@ export default function StudentProfile() {
         const freshProfile = await getProfile(user.id);
         if (freshProfile) setProfile(freshProfile as any);
       }
-      const subs = await getMySubscriptions(profile.id);
+      const subs = await getMySubscriptionsCached(profile.id);
       setSubscriptions(subs ?? []);
     } catch (e: any) {
       console.error('[Profile] loadData error:', e?.message ?? e);

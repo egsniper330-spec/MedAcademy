@@ -84,6 +84,7 @@ import {
 } from '@/lib/securityLock';
 import { useSession } from '@/ctx';
 import { useProfileStore } from '@/lib/store';
+import { markPerf } from '@/lib/perfTimeline';
 
 /** Lock holder names — one per independent signal source (they compose). */
 const LOCK_SRC_VERDICT    = 'verdict';      // authoritative policy decision
@@ -377,6 +378,9 @@ export function SecurityProvider({ children }: { children: React.ReactNode }) {
     }
     verdictNativeSeqRef.current = nativeSeqAtStart;
     setVerdictSerial((s) => s + 1);
+    // DEV timing only — this is the moment the verdict is published and the
+    // network lock can release, i.e. the end of the startup gate.
+    markPerf('security-verdict');
     return r;
   }, []);
 

@@ -163,6 +163,10 @@ export async function enrollStudentViaCredits(
 
   // Invalidate so next getCreditBalance() fetches fresh data from DB
   invalidateCreditCache();
+  // Credit activation creates an enrollment: the student's list must not serve a
+  // 30 s-old copy from before the purchase.
+  const { invalidateMySubscriptionsCache } = await import('./myCoursesCache');
+  invalidateMySubscriptionsCache();
 
   return {
     success:         result.success,

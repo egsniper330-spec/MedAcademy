@@ -55,6 +55,10 @@ import {
 import { OfflineVideoPlayer } from '@/components/OfflineVideoPlayer';
 import { resolveWatermarkIdentity } from '@/lib/watermarkIdentity';
 import { useSecurity } from '@/lib/SecurityContext';
+import { useTranslation } from '@/lib/i18n';
+
+/** Translator signature (resolved at render, never at module load). */
+type Translate = (key: string, params?: Record<string, string | number>) => string;
 
 function fmtBytes(n: number): string {
   if (!Number.isFinite(n) || n <= 0) return '';
@@ -63,13 +67,14 @@ function fmtBytes(n: number): string {
   return `${mb.toFixed(1)} MB`;
 }
 
-function fmtExpiry(iso: string): string | null {
-  const t = Date.parse(iso);
-  if (!Number.isFinite(t)) return null;
-  const days = Math.floor((t - Date.now()) / 86_400_000);
-  if (days <= 0) return 'Expires today';
-  if (days === 1) return 'Expires in 1 day';
-  return `Expires in ${days} days`;
+// LOCALIZED (was hardcoded English): the copy now follows the app language.
+function fmtExpiry(iso: string, tr: Translate): string | null {
+  const at = Date.parse(iso);
+  if (!Number.isFinite(at)) return null;
+  const days = Math.floor((at - Date.now()) / 86_400_000);
+  if (days <= 0) return tr('offline.expiresToday');
+  if (days === 1) return tr('offline.expiresInOneDay');
+  return tr('offline.expiresInDays', { days });
 }
 
 function fmtDuration(sec: number | null): string {
@@ -114,15 +119,19 @@ function CourseAvatar({ uri, fallbackInitial, fallbackColor }: {
   );
 }
 
-const STATE_LABEL: Record<OfflineVideoEntry['phase'], string> = {
-  authorizing: 'Preparing…',
-  pending: 'Queued',
-  processing: 'Processing',
-  paused: 'Paused',
-  downloading: 'Downloading',
-  completed: 'Downloaded',
-  failed: 'Failed',
-};
+/** Localized per-phase label (these were hardcoded English literals). */
+function stateLabel(phase: OfflineVideoEntry['phase'], tr: Translate): string {
+  switch (phase) {
+    case 'authorizing':  return tr('offlineCourse.phasePreparing');
+    case 'pending':      return tr('offlineCourse.phaseQueued');
+    case 'processing':   return tr('offlineCourse.phaseProcessing');
+    case 'paused':       return tr('offlineCourse.phasePaused');
+    case 'downloading':  return tr('offlineCourse.phaseDownloading');
+    case 'completed':    return tr('offlineCourse.phaseCompleted');
+    case 'failed':
+    default:             return tr('offlineCourse.phaseFailed');
+  }
+}
 
 export default function OfflineCourseScreen() {
   return (
@@ -136,6 +145,8 @@ export default function OfflineCourseScreen() {
 }
 
 function OfflineCourseContent() {
+  // Every visible string on this screen goes through the shared dictionaries.
+  const { t, tCount } = useTranslation();
   const router = useRouter();
   const sp = useNeuSpacing();
   const { courseId } = useLocalSearchParams<{ courseId: string }>();
@@ -179,13 +190,13 @@ function OfflineCourseContent() {
     if (!group) return [];
     const bySection = new Map<string, OfflineVideoEntry[]>();
     for (const e of group.lessons) {
-      const key = e.meta.sectionTitle?.trim() || 'Videos';
+      const key = e.meta.sectionTitle?.trim() || t('offlineCourse.sectionFallback');
       const list = bySection.get(key);
       if (list) list.push(e);
       else bySection.set(key, [e]);
     }
     return [...bySection.entries()].map(([title, lessons]) => ({ title, lessons }));
-  }, [group]);
+  }, [group, t]);
 
   useEffect(() => {
     // The security lock is the authoritative stop for ANY block (a VPN raises
@@ -196,12 +207,12 @@ function OfflineCourseContent() {
 
   const confirmDelete = useCallback((e: OfflineVideoEntry) => {
     Alert.alert(
-      'Delete this offline video?',
-      `“${safeDisplayTitle(e.meta)}” will be removed from this device. The online course is not affected.`,
+      t('offlineLibrary.deleteTitle'),
+      t('offlineLibrary.deleteBody', { title: safeDisplayTitle(e.meta) }),
       [
-        { text: 'Cancel', style: 'cancel' },
+        { text: t('common.cancel'), style: 'cancel' },
         {
-          text: 'Delete',
+          text: t('common.delete'),
           style: 'destructive',
           onPress: () => {
             LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
@@ -210,15 +221,15 @@ function OfflineCourseContent() {
         },
       ]
     );
-  }, []);
+  }, [t]);
 
   const startPlayback = useCallback((e: OfflineVideoEntry) => {
     if (isOfflineVideoExpired(e)) {
-      Alert.alert('Download expired', 'The offline license has expired. Reconnect and download again.');
+      Alert.alert(t('offlineCourse.expiredTitle'), t('offlineCourse.expiredBody'));
       return;
     }
     setPlaying(e);
-  }, []);
+  }, [t]);
 
   if (playing) {
     const playTitle = safeDisplayTitle(playing.meta);
@@ -228,7 +239,7 @@ function OfflineCourseContent() {
             arrow and title always clear the status bar / notch; no fixed
             offsets. Integrated ← (no ✕/"Close" text). */}
       <View style={[styles.playerHeader, { paddingTop: Math.max(insets.top, 8) + 6 }]}>
-          <Pressable onPress={() => setPlaying(null)} hitSlop={10} accessibilityRole="button" accessibilityLabel="Back to course">
+          <Pressable onPress={() => setPlaying(null)} hitSlop={10} accessibilityRole="button" accessibilityLabel={t('offlineCourse.backToCourse')}>
             <ArrowLeft size={22} color={colors.text} opacity={0.75} />
           </Pressable>
           <Text style={{ color: colors.text, fontWeight: '700', fontSize: 15, flex: 1, marginLeft: 10 }} numberOfLines={1}>
@@ -257,7 +268,7 @@ function OfflineCourseContent() {
   if (loading) {
     return (
       <View style={[styles.root, { backgroundColor: colors.base }]}>
-        <PageHeader title="Offline course" showBack />
+        <PageHeader title={t('offlineCourse.title')} showBack />
         <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
           <ActivityIndicator size="large" color={colors.primary} />
         </View>
@@ -268,12 +279,12 @@ function OfflineCourseContent() {
   if (!group) {
     return (
       <View style={[styles.root, { backgroundColor: colors.base }]}>
-        <PageHeader title="Offline course" showBack />
+        <PageHeader title={t('offlineCourse.title')} showBack />
         <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', padding: 32 }}>
           <DownloadCloud size={40} color={colors.text} style={{ opacity: 0.4 }} />
-          <Text style={{ color: colors.text, fontWeight: '700', fontSize: 16, marginTop: 12 }}>Nothing downloaded here yet</Text>
+          <Text style={{ color: colors.text, fontWeight: '700', fontSize: 16, marginTop: 12 }}>{t('offlineCourse.emptyTitle')}</Text>
           <Text style={{ color: colors.text, opacity: 0.55, fontSize: 13, textAlign: 'center', marginTop: 6 }}>
-            Downloads for this course will appear here.
+            {t('offlineCourse.emptyBody')}
           </Text>
         </View>
       </View>
@@ -285,7 +296,7 @@ function OfflineCourseContent() {
     .map((e) => Date.parse(e.meta.expiresAt))
     .filter((t) => Number.isFinite(t));
   const expiryLine = expiries.length
-    ? fmtExpiry(new Date(Math.min(...expiries)).toISOString())
+    ? fmtExpiry(new Date(Math.min(...expiries)).toISOString(), t)
     : null;
   const completedCount = group.completedCount;
   const totalDurationSec = group.lessons
@@ -297,7 +308,7 @@ function OfflineCourseContent() {
       <PageHeader
         title={group.courseName}
         showBack
-        subtitle={`${completedCount} video${completedCount === 1 ? '' : 's'} downloaded${group.activeCount > 0 ? ` · ${group.activeCount} in progress` : ''}`}
+        subtitle={`${tCount('offlineCourse.downloadedCount', completedCount)}${group.activeCount > 0 ? t('offlineCourse.inProgress', { count: group.activeCount }) : ''}`}
       />
 
       <ScrollView contentContainerStyle={{ paddingBottom: safeBottom(0, spacing.xxl) }}>
@@ -323,12 +334,12 @@ function OfflineCourseContent() {
               {group.courseName}
             </Text>
             <Text style={{ color: colors.text, opacity: 0.55, fontSize: 13, marginTop: 3 }} numberOfLines={1}>
-              {completedCount} video{completedCount === 1 ? '' : 's'} downloaded
+              {tCount('offlineCourse.downloadedCount', completedCount)}
               {!!expiryLine ? ` · ${expiryLine}` : ''}
             </Text>
             {totalDurationSec > 0 && (
               <Text style={{ color: colors.text, opacity: 0.45, fontSize: 12, marginTop: 2 }}>
-                {fmtDuration(totalDurationSec)} total watch time
+                {t('offlineCourse.totalWatchTime', { time: fmtDuration(totalDurationSec) })}
               </Text>
             )}
           </View>
@@ -336,23 +347,25 @@ function OfflineCourseContent() {
 
         {/* ── TABS — Videos / About, like the normal course page ───────────── */}
         <View style={[styles.tabsRow, { borderBottomColor: isDark ? '#ffffff14' : '#00000012' }]}>
-          {(['videos', 'about'] as const).map((t) => (
+          {/* NB: the map variable must NOT be named `t` — it would shadow the
+              translator and silently render the tab key instead of a label. */}
+          {(['videos', 'about'] as const).map((tabKey) => (
             <Pressable
-              key={t}
-              onPress={() => setTab(t)}
+              key={tabKey}
+              onPress={() => setTab(tabKey)}
               accessibilityRole="tab"
-              accessibilityState={{ selected: tab === t }}
+              accessibilityState={{ selected: tab === tabKey }}
               style={styles.tabBtn}
             >
               <Text style={{
-                color: tab === t ? colors.primary : colors.text,
-                opacity: tab === t ? 1 : 0.5,
-                fontWeight: tab === t ? '800' : '600',
+                color: tab === tabKey ? colors.primary : colors.text,
+                opacity: tab === tabKey ? 1 : 0.5,
+                fontWeight: tab === tabKey ? '800' : '600',
                 fontSize: 14,
               }}>
-                {t === 'videos' ? 'Videos' : 'About'}
+                {tabKey === 'videos' ? t('offlineCourse.tabVideos') : t('offlineCourse.tabAbout')}
               </Text>
-              {tab === t && <View style={[styles.tabUnderline, { backgroundColor: colors.primary }]} />}
+              {tab === tabKey && <View style={[styles.tabUnderline, { backgroundColor: colors.primary }]} />}
             </Pressable>
           ))}
         </View>
@@ -366,7 +379,7 @@ function OfflineCourseContent() {
                   {chapter.title}
                 </Text>
                 <Text style={{ color: colors.text, opacity: 0.45, fontSize: 12, marginTop: 1, marginBottom: 8 }}>
-                  {chapter.lessons.length} video{chapter.lessons.length === 1 ? '' : 's'}
+                  {tCount('offlineCourse.videoCount', chapter.lessons.length)}
                 </Text>
                 {chapter.lessons.map((e) => {
                   const expired = isOfflineVideoExpired(e);
@@ -387,7 +400,7 @@ function OfflineCourseContent() {
                         onPress={() => (playable ? startPlayback(e) : undefined)}
                         style={{ flexDirection: 'row', flex: 1, gap: 12, alignItems: 'center', minWidth: 0 }}
                         accessibilityRole={playable ? 'button' : 'none'}
-                        accessibilityLabel={playable ? `Play ${title}` : title}
+                        accessibilityLabel={playable ? `${t('offlineCourse.play')} ${title}` : title}
                       >
                         <View style={styles.thumbWrap}>
                           {thumb ? (
@@ -421,7 +434,7 @@ function OfflineCourseContent() {
                               <ArrowDownToLine size={11} color={stateColor} />
                             )}
                             <Text style={{ color: stateColor, fontSize: 11, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.4 }}>
-                              {expired ? 'Expired' : STATE_LABEL[e.phase]}
+                              {expired ? t('offlineCourse.expired') : stateLabel(e.phase, t)}
                             </Text>
                             {e.phase === 'downloading' && (
                               <Text style={{ color: colors.text, opacity: 0.5, fontSize: 11 }}>{Math.round(e.progress)}%</Text>
@@ -438,29 +451,29 @@ function OfflineCourseContent() {
                           {!!e.lastError && e.phase === 'failed' && (
                             <Text style={{ color: '#FF5A5A', fontSize: 11, marginTop: 4 }} numberOfLines={2}>{e.lastError}</Text>
                           )}
-                          {playable && fmtExpiry(e.meta.expiresAt) && (
-                            <Text style={{ color: colors.text, opacity: 0.4, fontSize: 11, marginTop: 4 }}>{fmtExpiry(e.meta.expiresAt)}</Text>
+                          {playable && fmtExpiry(e.meta.expiresAt, t) && (
+                            <Text style={{ color: colors.text, opacity: 0.4, fontSize: 11, marginTop: 4 }}>{fmtExpiry(e.meta.expiresAt, t)}</Text>
                           )}
                         </View>
                       </Pressable>
 
                       <View style={{ alignItems: 'flex-end', gap: 8 }}>
                         {e.phase === 'downloading' && (
-                          <Pressable onPress={() => void pauseOfflineVideo(e.meta.mediaId)} style={styles.iconBtn} accessibilityRole="button" accessibilityLabel={`Pause ${title}`}>
+                          <Pressable onPress={() => void pauseOfflineVideo(e.meta.mediaId)} style={styles.iconBtn} accessibilityRole="button" accessibilityLabel={`${t('offlineCourse.pause')} ${title}`}>
                             <Pause size={16} color={colors.text} />
                           </Pressable>
                         )}
                         {(e.phase === 'pending' || e.phase === 'authorizing') && (
-                          <Pressable onPress={() => void resumeOfflineVideo(e.meta.mediaId)} style={styles.iconBtn} accessibilityRole="button" accessibilityLabel={`Resume ${title}`}>
+                          <Pressable onPress={() => void resumeOfflineVideo(e.meta.mediaId)} style={styles.iconBtn} accessibilityRole="button" accessibilityLabel={`${t('offlineCourse.resume')} ${title}`}>
                             <Play size={16} color={colors.text} />
                           </Pressable>
                         )}
                         {e.phase === 'failed' && (
-                          <Pressable onPress={() => void retryOfflineVideo(e.meta.mediaId)} style={styles.iconBtn} accessibilityRole="button" accessibilityLabel={`Retry ${title}`}>
+                          <Pressable onPress={() => void retryOfflineVideo(e.meta.mediaId)} style={styles.iconBtn} accessibilityRole="button" accessibilityLabel={`${t('common.retry')} ${title}`}>
                             <RefreshCw size={16} color={colors.text} />
                           </Pressable>
                         )}
-                        <Pressable onPress={() => confirmDelete(e)} style={styles.iconBtn} accessibilityRole="button" accessibilityLabel={`Delete ${title}`}>
+                        <Pressable onPress={() => confirmDelete(e)} style={styles.iconBtn} accessibilityRole="button" accessibilityLabel={`${t('offlineCourse.delete')} ${title}`}>
                           <Trash2 size={16} color="#FF5A5A" />
                         </Pressable>
                       </View>
@@ -476,18 +489,23 @@ function OfflineCourseContent() {
             <View style={[styles.aboutCard, neuFlatStyle(isDark)]}>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
                 <Info size={16} color={colors.primary} />
-                <Text style={{ color: colors.text, fontWeight: '800', fontSize: 14.5 }}>About these downloads</Text>
+                <Text style={{ color: colors.text, fontWeight: '800', fontSize: 14.5 }}>{t('offlineCourse.aboutTitle')}</Text>
               </View>
               <Text style={{ color: colors.text, opacity: 0.65, fontSize: 13, lineHeight: 20, marginTop: 8 }}>
-                {completedCount} downloaded video{completedCount === 1 ? '' : 's'} from “{group.courseName}” are saved on this device.
-                You can watch them anytime without an internet connection{expiryLine ? ` — access renews on ${expiryLine.toLowerCase().replace('expires ', '')}` : ''}.
+                {t('offlineCourse.aboutBody', {
+                  count: completedCount,
+                  course: group.courseName,
+                  // The expiry clause is appended as a localized fragment; the
+                  // English "expires " stripping hack is gone (it broke Arabic).
+                  expiry: expiryLine ? ` — ${expiryLine}` : '',
+                })}
               </Text>
               <View style={[styles.aboutRow, { borderTopColor: isDark ? '#ffffff14' : '#00000010' }]}>
                 <Folder size={14} color={`${colors.text}66`} />
                 <Text style={{ color: colors.text, opacity: 0.6, fontSize: 12.5, flex: 1 }}>
                   {group.progressPercent >= 100
-                    ? `All ${completedCount} downloaded video${completedCount === 1 ? '' : 's'} on this device are ready to watch`
-                    : 'Only downloaded lessons appear here — you can download the rest while online'}
+                    ? t('offlineCourse.allReady', { count: completedCount })
+                    : t('offlineCourse.onlyDownloaded')}
                 </Text>
                 {group.progressPercent >= 100 && (
                   <Text style={{ color: '#16A34A', fontWeight: '800', fontSize: 12.5 }}>100%</Text>
@@ -496,7 +514,7 @@ function OfflineCourseContent() {
               <View style={[styles.aboutRow, { borderTopColor: isDark ? '#ffffff14' : '#00000010' }]}>
                 <DownloadCloud size={14} color={`${colors.text}66`} />
                 <Text style={{ color: colors.text, opacity: 0.6, fontSize: 12.5, flex: 1 }}>
-                  Deleting a download never affects the online course
+                  {t('offlineCourse.deleteSafe')}
                 </Text>
               </View>
             </View>

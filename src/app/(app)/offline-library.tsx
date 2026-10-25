@@ -74,6 +74,10 @@ import { PageHeader } from '@/components/PageHeader';
 import { DrawerProvider } from '@/components/DrawerContext';
 import DrawerNav from '@/components/DrawerNav';
 import NetInfo from '@react-native-community/netinfo';
+import { useTranslation } from '@/lib/i18n';
+
+/** Translator signature (resolved at render, never at module load). */
+type Translate = (key: string, params?: Record<string, string | number>) => string;
 
 /** Muted secondary text for both themes (gray-blue in light, steel-blue in dark). */
 const MUTED = { light: '#5A6B85', dark: '#8FA3BD' } as const;
@@ -86,13 +90,15 @@ function fmtBytes(n: number): string {
 }
 
 /** Relative rental-expiry line — used ONLY on the player screen (never on the course cards). */
-function fmtExpiry(iso: string): string | null {
-  const t = Date.parse(iso);
-  if (!Number.isFinite(t)) return null;
-  const days = Math.floor((t - Date.now()) / 86_400_000);
-  if (days <= 0) return 'Expires today';
-  if (days === 1) return 'Expires in 1 day';
-  return `Expires in ${days} days`;
+// LOCALIZED: the copy is resolved through the shared dictionaries (it used to
+// be hardcoded English, so Arabic students saw an English expiry line).
+function fmtExpiry(iso: string, tr: Translate): string | null {
+  const at = Date.parse(iso);
+  if (!Number.isFinite(at)) return null;
+  const days = Math.floor((at - Date.now()) / 86_400_000);
+  if (days <= 0) return tr('offline.expiresToday');
+  if (days === 1) return tr('offline.expiresInOneDay');
+  return tr('offline.expiresInDays', { days });
 }
 
 /** Tasteful initials fallback for courses without an image ("Pharmacology" → "P"). */
@@ -143,6 +149,8 @@ export default function OfflineLibraryScreen() {
 }
 
 function OfflineLibraryContent() {
+  // Every visible string on this screen goes through the shared dictionaries.
+  const { t } = useTranslation();
   const router = useRouter();
   const scheme = useColorScheme();
   const isDark = scheme === 'dark';
@@ -252,12 +260,12 @@ function OfflineLibraryContent() {
 
   const confirmDelete = useCallback((e: OfflineVideoEntry) => {
     Alert.alert(
-      'Delete this offline video?',
-      `“${safeDisplayTitle(e.meta)}” will be removed from this device. The online course is not affected — you can download it again while online.`,
+      t('offlineLibrary.deleteTitle'),
+      t('offlineLibrary.deleteBody', { title: safeDisplayTitle(e.meta) }),
       [
-        { text: 'Cancel', style: 'cancel' },
+        { text: t('common.cancel'), style: 'cancel' },
         {
-          text: 'Delete',
+          text: t('common.delete'),
           style: 'destructive',
           onPress: () => {
             LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
@@ -266,7 +274,7 @@ function OfflineLibraryContent() {
         },
       ]
     );
-  }, []);
+  }, [t]);
 
   if (playing) {
     const playTitle = safeDisplayTitle(playing.meta);
@@ -278,7 +286,7 @@ function OfflineLibraryContent() {
             No fixed offsets — responsive on every device. Integrated ← arrow
             (no ✕/"Close" text) — same language as the app's headers. */}
         <View style={[styles.playerHeader, { paddingTop: Math.max(insets.top, 8) + 6, paddingHorizontal: sp.screenPx }]}>
-          <Pressable onPress={() => setPlaying(null)} hitSlop={10} accessibilityRole="button" accessibilityLabel="Back to Offline Videos">
+          <Pressable onPress={() => setPlaying(null)} hitSlop={10} accessibilityRole="button" accessibilityLabel={t('offlineLibrary.backToVideos')}>
             <ArrowLeft size={22} color={colors.text} opacity={0.75} />
           </Pressable>
           <Text style={{ color: colors.text, fontWeight: '700', fontSize: 15, flex: 1, marginLeft: 10 }} numberOfLines={1}>
@@ -301,8 +309,8 @@ function OfflineLibraryContent() {
           {!!playing.meta.courseName && (
             <Text style={{ color: colors.text, opacity: 0.55, fontSize: 13, marginTop: 4 }}>{playing.meta.courseName}</Text>
           )}
-          {fmtExpiry(playing.meta.expiresAt) && (
-            <Text style={{ color: colors.text, opacity: 0.45, fontSize: 12, marginTop: 4 }}>{fmtExpiry(playing.meta.expiresAt)}</Text>
+          {fmtExpiry(playing.meta.expiresAt, t) && (
+            <Text style={{ color: colors.text, opacity: 0.45, fontSize: 12, marginTop: 4 }}>{fmtExpiry(playing.meta.expiresAt, t)}</Text>
           )}
         </View>
       </View>
@@ -311,16 +319,18 @@ function OfflineLibraryContent() {
 
   // Empty-space copy: contextual when downloads exist, true-empty otherwise.
   const hasDownloads = courses.length > 0 || downloading.length > 0 || failed.length > 0;
-  const emptyTitle = hasDownloads ? 'No other downloaded courses' : 'No downloaded courses';
+  const emptyTitle = hasDownloads
+    ? t('offlineLibrary.emptyTitleOther')
+    : t('offlineLibrary.emptyTitle');
   const emptyBody = hasDownloads
-    ? `You currently have ${courses.length} downloaded course${courses.length === 1 ? '' : 's'}.\nAny additional downloaded courses will appear here.`
-    : 'Downloaded videos will appear here for quick offline access.';
+    ? t('offlineLibrary.emptyBodyOther', { count: courses.length })
+    : t('offlineLibrary.emptyBody');
 
   return (
     <View style={[styles.root, { backgroundColor: colors.base }]}>
       {/* Normal MedAcademy header: hamburger + title + connectivity pill */}
       <PageHeader
-        title="Offline Videos"
+        title={t('offlineLibrary.title')}
         rightAction={<ConnectivityPill online={online} />}
       />
 
@@ -360,7 +370,7 @@ function OfflineLibraryContent() {
             {/* ── DOWNLOADING section (real SDK state; debug-look removed) ── */}
             {downloading.length > 0 && (
               <View style={{ marginBottom: sp.sectionGap }}>
-                <Text style={[styles.sectionTitle, { color: colors.textMuted }]}>DOWNLOADING</Text>
+                <Text style={[styles.sectionTitle, { color: colors.textMuted }]}>{t('offlineLibrary.sectionDownloading')}</Text>
                 {downloading.map((e) => {
                   const title = safeDisplayTitle(e.meta);
                   const bytesLabel = Platform.OS === 'android'
@@ -377,7 +387,9 @@ function OfflineLibraryContent() {
                           <Text style={{ color: colors.textMuted, fontSize: 12, marginTop: 1 }} numberOfLines={1}>{e.meta.courseName}</Text>
                         )}
                         <Text style={{ color: colors.primary, fontSize: 12.5, fontWeight: '700', marginTop: 6 }}>
-                          {e.phase === 'pending' || e.phase === 'authorizing' ? 'Queued…' : `Downloading… ${Math.round(e.progress)}%`}
+                          {e.phase === 'pending' || e.phase === 'authorizing'
+                            ? t('offlineLibrary.queued')
+                            : t('offlineLibrary.downloadingPct', { percent: Math.round(e.progress) })}
                         </Text>
                         <View style={[styles.progressTrack, { backgroundColor: isDark ? '#ffffff1f' : '#1E90FF1a' }]}>
                           <View style={[styles.progressFill, { width: `${Math.max(e.phase === 'pending' ? 2 : 4, Math.min(100, e.progress))}%` }]} />
@@ -385,7 +397,7 @@ function OfflineLibraryContent() {
                         <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 6, gap: 8 }}>
                           <Text style={{ color: colors.textMuted, fontSize: 11 }} numberOfLines={1}>
                             {/* Android: official byte fields. iOS: percent only — never faked. */}
-                            {bytesLabel || (e.phase === 'pending' ? 'Waiting for the download to start' : `${Math.round(e.progress)}%`)}
+                            {bytesLabel || (e.phase === 'pending' ? t('offlineLibrary.waitingStart') : `${Math.round(e.progress)}%`)}
                           </Text>
                           <View style={{ flexDirection: 'row', gap: 8 }}>
                             {e.phase === 'downloading' && (
@@ -393,20 +405,20 @@ function OfflineLibraryContent() {
                                 onPress={() => void pauseOfflineVideo(e.meta.mediaId)}
                                 style={[styles.chip, { backgroundColor: isDark ? '#ffffff14' : `${colors.text}0f` }]}
                                 accessibilityRole="button"
-                                accessibilityLabel={`Pause ${title}`}
+                                accessibilityLabel={`${t('offlineLibrary.pause')} ${title}`}
                               >
                                 <Pause size={13} color={colors.text} />
-                                <Text style={{ color: colors.text, fontSize: 11.5, fontWeight: '700' }}>Pause</Text>
+                                <Text style={{ color: colors.text, fontSize: 11.5, fontWeight: '700' }}>{t('offlineLibrary.pause')}</Text>
                               </Pressable>
                             )}
                             <Pressable
                               onPress={() => confirmDelete(e)}
                               style={[styles.chip, { backgroundColor: isDark ? '#FF5A5A22' : '#FF5A5A14' }]}
                               accessibilityRole="button"
-                              accessibilityLabel={`Cancel ${title}`}
+                              accessibilityLabel={`${t('common.cancel')} ${title}`}
                             >
                               <X size={13} color="#FF5A5A" />
-                              <Text style={{ color: '#FF5A5A', fontSize: 11.5, fontWeight: '700' }}>Cancel</Text>
+                              <Text style={{ color: '#FF5A5A', fontSize: 11.5, fontWeight: '700' }}>{t('common.cancel')}</Text>
                             </Pressable>
                           </View>
                         </View>
@@ -420,7 +432,7 @@ function OfflineLibraryContent() {
             {/* ── FAILED section (retry) ── */}
             {failed.length > 0 && (
               <View style={{ marginBottom: sp.sectionGap }}>
-                <Text style={[styles.sectionTitle, { color: colors.textMuted }]}>NEEDS ATTENTION</Text>
+                <Text style={[styles.sectionTitle, { color: colors.textMuted }]}>{t('offlineLibrary.sectionAttention')}</Text>
                 {failed.map((e) => {
                   const title = safeDisplayTitle(e.meta);
                   return (
@@ -431,17 +443,17 @@ function OfflineLibraryContent() {
                       <View style={{ flex: 1, minWidth: 0 }}>
                         <Text style={{ color: colors.text, fontWeight: '800', fontSize: 15 }} numberOfLines={2}>{title}</Text>
                         <Text style={{ color: '#FF5A5A', fontSize: 11.5, marginTop: 3 }} numberOfLines={2}>
-                          {e.lastError || 'Download failed'}
+                          {e.lastError || t('offlineLibrary.downloadFailed')}
                         </Text>
                       </View>
                       <Pressable
                         onPress={() => void retryOfflineVideo(e.meta.mediaId)}
                         style={[styles.chip, { backgroundColor: isDark ? '#1E90FF26' : '#1E90FF1a' }]}
                         accessibilityRole="button"
-                        accessibilityLabel={`Retry ${title}`}
+                        accessibilityLabel={`${t('common.retry')} ${title}`}
                       >
                         <RefreshCw size={13} color={colors.primary} />
-                        <Text style={{ color: colors.primary, fontSize: 11.5, fontWeight: '800' }}>Retry</Text>
+                        <Text style={{ color: colors.primary, fontSize: 11.5, fontWeight: '800' }}>{t('common.retry')}</Text>
                       </Pressable>
                     </View>
                   );
@@ -452,7 +464,7 @@ function OfflineLibraryContent() {
             {/* ── DOWNLOADED COURSES — reference-matched cards ── */}
             {courses.length > 0 && (
               <View>
-                <Text style={[styles.sectionTitle, { color: colors.textMuted }]}>DOWNLOADED COURSES</Text>
+                <Text style={[styles.sectionTitle, { color: colors.textMuted }]}>{t('offlineLibrary.sectionDownloaded')}</Text>
                 {courses.map((g) => {
                   // Course image: on-device cached copy → remote URL → lesson
                   // thumbnail (resolution done in exportOfflineCourseGroups).
@@ -471,7 +483,7 @@ function OfflineLibraryContent() {
                         { borderRadius: sp.cardRadius, opacity: pressed ? 0.95 : 1 },
                       ]}
                       accessibilityRole="button"
-                      accessibilityLabel={`Open offline course ${g.courseName}`}
+                      accessibilityLabel={`${t('offlineLibrary.openCourse')} ${g.courseName}`}
                     >
                       {/* LEFT: circular course image (same image as online) */}
                       <View style={[styles.courseAvatarWrap, { backgroundColor: isDark ? '#1E90FF26' : '#1E90FF14' }]}>
@@ -505,7 +517,7 @@ function OfflineLibraryContent() {
                             "1/1" redundancy; expiry/DRM noise never shown. */}
                         {count > 0 && (
                           <Text style={[styles.countLine, { color: colors.textMuted }]} numberOfLines={1}>
-                            {count} video{count === 1 ? '' : 's'} downloaded
+                            {t('offlineLibrary.videosDownloaded', { count })}
                           </Text>
                         )}
                         {/* REAL completion progress (reference design) — honest
@@ -549,7 +561,7 @@ function CloudFolderArt({ isDark }: { isDark: boolean }) {
   const folderDark = isDark ? '#33598a' : '#6ea3ec';
   const play = isDark ? '#7db4f5' : '#3d8bff';
   return (
-    <View style={styles.artWrap} pointerEvents="none" accessibilityLabel="No additional downloads illustration">
+    <View style={styles.artWrap} pointerEvents="none">
       <View style={[styles.artCloud, { backgroundColor: cloud }]} />
       <View style={[styles.artCloudDeep, { backgroundColor: cloudDeep }]} />
       <View style={[styles.artFolderBody, { backgroundColor: folder }]} />

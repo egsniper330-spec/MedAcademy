@@ -76,10 +76,34 @@ export function PageHeader({
   const leftPad  = safeLeft(insets.left || 0, sp.isTablet);
   const rightPad = safeRight(insets.right || 0);
 
+  /**
+   * ── ARABIC HEADER ALIGNMENT (root cause) ─────────────────────────────────
+   * The reported defect: with Arabic selected, the page title stayed against
+   * the LEFT edge. Nothing here was styled wrongly — the title simply had no
+   * `textAlign`, so React Native resolved it through `I18nManager.isRTL`, i.e.
+   * the NATIVE layout direction. That flag only changes after the relaunch
+   * `applyRTL()` schedules, so until that relaunch (and permanently on any
+   * build/orientation where the native RTL state is not set) Arabic copy was
+   * laid out with English direction rules.
+   *
+   * Fix: the header follows the APP locale it is already using for `t()` and
+   * for the back-arrow glyph above, never the native flag. Mirroring the row
+   * (`row-reverse`) puts the leading control on the right and keeps the title
+   * block beside it, and the explicit `textAlign` / `writingDirection` make the
+   * heading right-aligned in Arabic and left-aligned in English regardless of
+   * `I18nManager`. Only the direction-dependent spacing is mirrored — icons,
+   * the title text itself and every child component are untouched, so English
+   * layouts render exactly as before.
+   */
+  const textAlign = isRTL ? 'right' : 'left';
+
   return (
     <View style={{
-      flexDirection: 'row',
+      flexDirection: isRTL ? 'row-reverse' : 'row',
       alignItems: 'center',
+      // One gap instead of per-child margins: a physical marginLeft/Right would
+      // point the wrong way as soon as the row is mirrored.
+      gap: spacing.sm + spacing.xs,
       paddingTop: topPad,
       paddingBottom: spacing.md,
       paddingLeft: leftPad + spacing.sm,
@@ -100,7 +124,6 @@ export function PageHeader({
           style={{
             width: iconContainer.md.width,
             height: iconContainer.md.height,
-            marginRight: spacing.sm + spacing.xs,
             alignItems: 'center', justifyContent: 'center',
           }}
         >
@@ -120,7 +143,8 @@ export function PageHeader({
             fontWeight: '800',
             color: accentColor ?? c.text,
             lineHeight: sp.isTablet ? typography.h1.lineHeight : typography.h2.lineHeight,
-            marginLeft: spacing.sm + spacing.xs,
+            textAlign,
+            writingDirection: isRTL ? 'rtl' : 'ltr',
           }}
           numberOfLines={1}
         >
@@ -128,7 +152,11 @@ export function PageHeader({
         </Text>
         {!!subtitle && (
           <Text
-            style={{ ...typography.caption, ...mutedTextStyle(c, 0.45), marginTop: 2 }}
+            style={{
+              ...typography.caption, ...mutedTextStyle(c, 0.45), marginTop: 2,
+              textAlign,
+              writingDirection: isRTL ? 'rtl' : 'ltr',
+            }}
             numberOfLines={1}
           >
             {subtitle}
@@ -138,7 +166,7 @@ export function PageHeader({
 
       {/* ── Right actions ── */}
       {!!rightAction && (
-        <View style={{ marginLeft: spacing.sm }}>{rightAction}</View>
+        <View>{rightAction}</View>
       )}
     </View>
   );

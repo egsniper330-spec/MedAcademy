@@ -8,6 +8,7 @@ use MedAcademy\Database\Database;
 use MedAcademy\Http\ApiException;
 use MedAcademy\Http\Request;
 use MedAcademy\Http\Response;
+use MedAcademy\Services\UploadIntegrityService;
 use MedAcademy\Storage\StorageService;
 use MedAcademy\Utils\Config;
 use MedAcademy\Utils\Uuid;
@@ -29,8 +30,10 @@ final class StorageController
         'jsp', 'jspx', 'asp', 'aspx', 'ashx', 'htaccess', 'htpasswd', 'pem', 'key',
     ];
 
-    public function __construct(private readonly StorageService $storage = new StorageService())
-    {
+    public function __construct(
+        private readonly StorageService $storage = new StorageService(),
+        private readonly UploadIntegrityService $integrity = new UploadIntegrityService(),
+    ) {
     }
 
     /** Return bucket metadata only; file contents and private paths remain protected. */
@@ -324,20 +327,7 @@ final class StorageController
 
         $file = $request->file('file');
         if ($file === null) {
-            throw new ApiException(400, 'file is required');
-        }
-        $uploadError = (int) ($file['error'] ?? UPLOAD_ERR_NO_FILE);
-        if ($uploadError !== UPLOAD_ERR_OK) {
-            if ($uploadError === UPLOAD_ERR_INI_SIZE || $uploadError === UPLOAD_ERR_FORM_SIZE) {
-                throw new ApiException(413, 'File exceeds the server upload size limit. Reduce the file size or ask the host to raise upload_max_filesize.');
-            }
-            if ($uploadError === UPLOAD_ERR_NO_TMP_DIR || $uploadError === UPLOAD_ERR_CANT_WRITE) {
-                throw new ApiException(500, 'The server could not prepare storage for this upload. Please contact support.');
-            }
-            if ($uploadError === UPLOAD_ERR_PARTIAL) {
-                throw new ApiException(400, 'The upload was interrupted. Please try again.');
-            }
-            throw new ApiException(400, 'file is required');
+            throw new ApiException(400, 'file is required', 'upload_missing');
         }
 
         // Only fall back to a generated path when absent. Generated uploads
@@ -366,12 +356,29 @@ final class StorageController
         // — they are assembled by the video pipeline, not delivered to students.
         $this->assertUploadAllowed($bucket, $file, $dest);
 
+        // ── INTEGRITY: validate what actually arrived, then store it atomically ──
+        // Previously this handler went straight from `UPLOAD_ERR_OK` to
+        // `putFile()`: a successful transfer of ZERO bytes (which is what a
+        // client that never read the local file sends) passed every check, was
+        // moved into storage as a 0-byte object, and answered 200. The app then
+        // created the material row on top of it. See UploadIntegrityService for
+        // the full incident write-up; `validate()` now rejects an empty or
+        // truncated body and verifies PDFs with the same parser delivery uses,
+        // and `persist()` re-measures the stored object before we answer.
+        $validated = $this->integrity->validate($file, $dest, $bucket);
         $public = in_array($bucket, self::PUBLIC_BUCKETS, true);
-        $this->storage->putFile($bucket, $dest, (string) $file['tmp_name'], $public);
+        $stored = $this->integrity->persist($validated['tmp'], $validated['size'], $bucket, $dest, $public);
 
+        // The response now carries the MEASURED size and digest, so no caller has
+        // to trust (or persist) a client-declared `file_size` any more.
         return [
-            'path' => $dest,
-            'url' => $public ? $this->storage->publicUrl($bucket, $dest) : $this->storage->signedUrl($bucket, $dest),
+            'path' => $stored['path'],
+            'url' => $public
+                ? $this->storage->publicUrl($bucket, $stored['path'])
+                : $this->storage->signedUrl($bucket, $stored['path']),
+            'size' => $stored['size'],
+            'sha256' => $stored['sha256'],
+            'op' => $this->integrity->opId(),
         ];
     }
 
@@ -386,6 +393,13 @@ final class StorageController
         if (!$this->canWritePath((string) $request->user['id'], $role, $bucket, $path)) {
             throw new ApiException(403, 'Not authorized to delete this storage path');
         }
+        // NOTE: this generic object delete stays permissive on purpose. Builds
+        // that shipped before POST /materials/{id}/delete still remove the object
+        // here and then delete the row through the data API; refusing a
+        // referenced path would break "delete material" for every installed
+        // client. The replacement flow (server-side, row first) is what new
+        // builds use, and anything an older build leaves behind is reclaimed by
+        // `storage-cleanup.php --orphans` (nothing is ever left half-deleted).
         $public = in_array($bucket, self::PUBLIC_BUCKETS, true);
         $this->storage->delete($bucket, $path, $public);
         return ['success' => true];

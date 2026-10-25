@@ -7,6 +7,7 @@ namespace MedAcademy\Storage;
 use MedAcademy\Database\Database;
 use MedAcademy\Http\ApiException;
 use MedAcademy\Utils\Config;
+use Throwable;
 
 /**
  * Filesystem storage for the PHP/MySQL application.
@@ -107,30 +108,129 @@ final class StorageService
     }
 
     /**
-     * Move an uploaded temp file into storage.
-     * Returns the object path relative to the bucket.
+     * Move an uploaded temp file into storage. Returns the object path relative
+     * to the bucket.
+     *
+     * ── ATOMIC, AND MEASURED ──────────────────────────────────────────────────
+     * The temp file is first moved to a sibling `.part` name, its byte count is
+     * compared with what the caller already validated, and only then is it
+     * renamed onto the final name. Consequences:
+     *
+     *   • a reader can never open a half-written object (rename is atomic on the
+     *     same filesystem), and
+     *   • a short write (full disk, a truncated temp file, an interrupted move)
+     *     fails with `persist_mismatch` instead of leaving a 0-byte or partial
+     *     object under the real name — the failure mode that stored a "2 MB"
+     *     PDF as zero bytes and reported success.
+     *
+     * `$expectedBytes` is optional so non-upload callers keep their behaviour;
+     * the upload path always passes it.
      */
-    public function putFile(string $bucket, string $destPath, string $tmpPath, bool $public = false): string
-    {
+    public function putFile(
+        string $bucket,
+        string $destPath,
+        string $tmpPath,
+        bool $public = false,
+        ?int $expectedBytes = null
+    ): string {
         $rel = $this->bucketPath($bucket, $destPath);
         $root = $public ? $this->publicDir : $this->privateDir;
         $full = $root . '/' . $rel;
         $dir = dirname($full);
         if (!is_dir($dir) && !mkdir($dir, 0775, true) && !is_dir($dir)) {
-            throw new ApiException(500, 'Storage directory is not writable');
+            throw new ApiException(500, 'Storage directory is not writable', 'storage_unwritable');
         }
-        if (!move_uploaded_file($tmpPath, $full) && !rename($tmpPath, $full)) {
-            throw new ApiException(500, 'Failed to store file');
+
+        $part = $full . '.' . bin2hex(random_bytes(6)) . '.part';
+        // move_uploaded_file() is the hardened path for a real multipart upload
+        // (it also refuses a path PHP did not create). CLI tooling and tests hand
+        // us an ordinary temp file, where copy() is the equivalent.
+        $moved = @move_uploaded_file($tmpPath, $part) || @copy($tmpPath, $part);
+        if (!$moved || !is_file($part)) {
+            @unlink($part);
+            throw new ApiException(500, 'Failed to store file', 'storage_write_failed');
+        }
+
+        clearstatcache(true, $part);
+        $written = (int) @filesize($part);
+        if ($expectedBytes !== null && $written !== $expectedBytes) {
+            @unlink($part);
+            throw new ApiException(
+                500,
+                'The file could not be stored completely. Please try again.',
+                'persist_mismatch'
+            );
+        }
+
+        if (!@rename($part, $full)) {
+            @unlink($part);
+            throw new ApiException(500, 'Failed to store file', 'storage_write_failed');
         }
         return $rel;
     }
 
-    public function delete(string $bucket, string $path, bool $public = false): void
+    /**
+     * Delete a stored object. Returns TRUE when a file was actually removed
+     * (FALSE when it was already absent — deletion is idempotent by design).
+     */
+    public function delete(string $bucket, string $path, bool $public = false): bool
     {
-        $full = ($public ? $this->publicDir : $this->privateDir) . '/' . $this->bucketPath($bucket, $path);
-        if (is_file($full)) {
-            @unlink($full);
+        $abs = $this->absolutePath($bucket, $path, $public);
+        if ($abs === null || !is_file($abs)) {
+            return false;
         }
+        return (bool) @unlink($abs);
+    }
+
+    /**
+     * Absolute path of an object, or NULL when the resolved file would fall
+     * outside its bucket root (traversal, or a symlink pointing elsewhere) or
+     * when the target directory does not exist.
+     *
+     * This is the containment gate for DELETE operations: the generic signed /
+     * public readers already normalise `..` away, but a delete must additionally
+     * refuse a symlinked object, which would otherwise remove a file OUTSIDE the
+     * storage root.
+     */
+    public function absolutePath(string $bucket, string $path, bool $public = false): ?string
+    {
+        try {
+            $rel = $this->bucketPath($bucket, $path);
+        } catch (Throwable) {
+            return null;
+        }
+        $root = $public ? $this->publicDir : $this->privateDir;
+        $abs = $root . '/' . $rel;
+
+        if (is_link($abs)) {
+            return null; // never follow a symlink out of the root
+        }
+
+        $rootReal = realpath($root);
+        $dirReal = realpath(dirname($abs));
+        if ($rootReal === false || $dirReal === false) {
+            return null;
+        }
+        $rootReal = rtrim(str_replace('\\', '/', $rootReal), '/');
+        $dirReal = rtrim(str_replace('\\', '/', $dirReal), '/');
+        if ($dirReal !== $rootReal && !str_starts_with($dirReal . '/', $rootReal . '/')) {
+            return null;
+        }
+        return $abs;
+    }
+
+    /** True when a file exists at the given object path (containment-checked). */
+    public function exists(string $bucket, string $path, bool $public = false): bool
+    {
+        $abs = $this->absolutePath($bucket, $path, $public);
+        return $abs !== null && is_file($abs);
+    }
+
+    /** Byte size of a stored object, or 0 when it is missing. */
+    public function sizeOf(string $bucket, string $path, bool $public = false): int
+    {
+        $abs = $this->absolutePath($bucket, $path, $public);
+        return $abs !== null && is_file($abs) ? (int) @filesize($abs) : 0;
     }
 
     /**

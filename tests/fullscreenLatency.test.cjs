@@ -80,7 +80,11 @@ console.log('── Root cause: the fullscreen gate is network-bound ──');
   ok(/export async function runSecurityChecks/.test(security), 'runSecurityChecks() exists');
   ok(/runPlayIntegrityCheck\(\)/.test(security),
     'the pipeline awaits the NETWORK-bound Play Integrity check (backend nonce → Google → backend verify)');
-  ok(/await getSecurityPolicies\(\)/.test(security),
+  // The fetch is now STARTED before the detectors and awaited where its result is
+  // used (so the network wait overlaps the native probes instead of being
+  // serialised after them). The pipeline still AWAITS it — it is not
+  // fire-and-forget, and the decision still comes from the server.
+  ok(/await getSecurityPolicies\(\)/.test(security) || /const policies\s*= await policiesP;/.test(security),
     'the pipeline awaits the server security-policy fetch');
   ok(/genuinelyOffline \? Promise\.resolve\(null\) : runPlayIntegrityCheck\(\)/.test(security),
     'the offline fast-path skips only the genuinely-offline case (honest, not a bypass)');

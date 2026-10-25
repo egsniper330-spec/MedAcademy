@@ -3,15 +3,19 @@ import {
   View, Text, FlatList, useColorScheme, TextInput,
   RefreshControl, ActivityIndicator, Pressable,
 } from 'react-native';
-import { useFocusEffect, useRouter } from 'expo-router';
+import { useRouter } from 'expo-router';
 import { Search, X, BookOpen } from 'lucide-react-native';
 import { useProfileStore } from '@/lib/store';
-import { getFeaturedCourses, searchAllPublishedCourses, getMySubscriptions } from '@/lib/api';
+import { getFeaturedCourses, searchAllPublishedCourses } from '@/lib/api';
+import { getMySubscriptionsCached } from '@/lib/myCoursesCache';
 import { prefetchCourseImages, courseImageUrlsFrom } from '@/lib/imagePrefetch';
 import { CourseCard } from '@/components/CourseCard';
 import { SubscribeSheet, type SubscribeSheetContact } from '@/components/SubscribeSheet';
 // ONE shared contact resolver — the SAME rule the course-details screen uses.
 import { resolveCourseContact } from '@/lib/subscribeContact';
+import { isFreeCourse, enrollInFreeCourse, EnrollmentError } from '@/lib/courseEnrollment';
+import { useStaleWhileRevalidateFocus } from '@/lib/useStaleWhileRevalidateFocus';
+import { useToast } from '@/components/Toast';
 import { PageHeader } from '@/components/PageHeader';
 import { neuColors, useLayout, safeBottom, mutedTextStyle } from '@/lib/neu';
 import { NeuSearchBar } from '@/components/NeuInputRow';
@@ -81,6 +85,61 @@ function doctorOf(item: CourseItem): { id: string; full_name: string } | null {
   const [subscribeVisible, setSubscribeVisible] = useState(false);
   const [subscribeContact, setSubscribeContact] = useState<SubscribeSheetContact>({});
   const [subscribeCourseTitle, setSubscribeCourseTitle] = useState('');
+  // Free-course enrollment in flight (one at a time — a second tap on any card
+  // while a request is running is ignored, so no duplicate POST can be sent).
+  const [enrollingId, setEnrollingId] = useState<string | null>(null);
+  const { showToast } = useToast();
+
+  /**
+   * ── FREE COURSES ENROLL IMMEDIATELY ─────────────────────────────────────
+   * The card's Subscribe action used to open the doctor's contact sheet for
+   * EVERY course, including free ones — so a free course could never actually
+   * be joined from this list. A free course now calls the server enrollment
+   * operation and the card flips to "enrolled" at once.
+   *
+   * An authoritative 402 (the server's price is not actually 0) falls back to
+   * the unchanged contact/purchase sheet; nothing here can grant paid access.
+   */
+  const handleSubscribe = useCallback(async (item: CourseItem) => {
+    if (isFreeCourse(item)) {
+      if (enrollingId) return;
+      setEnrollingId(item.id);
+      try {
+        const res = await enrollInFreeCourse(item.id);
+        setEnrolledIds((prev) => {
+          const next = new Set(prev);
+          next.add(item.id);
+          return next;
+        });
+        setEnrollmentMap((prev) => ({ ...prev, [item.id]: 'active' }));
+        showToast({
+          type: 'success',
+          message: res.alreadyEnrolled ? t('course.enrollAlready') : t('course.enrollSuccess'),
+        });
+      } catch (e) {
+        const code = e instanceof EnrollmentError ? e.code : 'failed';
+        if (code === 'paid_course') {
+          const contact = resolveCourseContact(item);
+          setSubscribeCourseTitle(item.title);
+          setSubscribeContact(contact);
+          setSubscribeVisible(true);
+        } else {
+          showToast({
+            type: 'error',
+            message: code === 'suspended' ? t('course.enrollSuspended') : t('course.enrollFailed'),
+          });
+        }
+      } finally {
+        setEnrollingId(null);
+      }
+      return;
+    }
+    // PAID course — unchanged contact/purchase flow.
+    const contact = resolveCourseContact(item);
+    setSubscribeCourseTitle(item.title);
+    setSubscribeContact(contact);
+    setSubscribeVisible(true);
+  }, [enrollingId, showToast, t]);
 
   const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -89,7 +148,7 @@ function doctorOf(item: CourseItem): { id: string; full_name: string } | null {
     try {
       const [courses, subs] = await Promise.all([
         getFeaturedCourses(FEATURED_LIMIT),
-        profile ? getMySubscriptions(profile.id) : Promise.resolve([]),
+        profile ? getMySubscriptionsCached(profile.id) : Promise.resolve([]),
       ]);
       setFeatured(courses as unknown as CourseItem[]);
       prefetchCourseImages(courseImageUrlsFrom(courses));
@@ -111,12 +170,15 @@ function doctorOf(item: CourseItem): { id: string; full_name: string } | null {
     }
   }, [profile]);
 
-  useFocusEffect(
-    useCallback(() => {
-      setLoadingFeatured(true);
-      void loadFeatured();
-    }, [loadFeatured])
-  );
+  // STALE-WHILE-REVALIDATE (performance): the course list used to be replaced
+  // by a spinner on every focus — returning from a course, closing a sheet or
+  // switching tabs all blanked it. It now refreshes in the background and the
+  // spinner is reserved for the genuine first load. Same request, same
+  // freshness; a doubled focus can no longer start two batches.
+  useStaleWhileRevalidateFocus(loadFeatured, {
+    setLoading: setLoadingFeatured,
+    hasContent: () => featured.length > 0,
+  });
 
   const onRefresh = async () => {
     setRefreshing(true);
@@ -175,12 +237,7 @@ function doctorOf(item: CourseItem): { id: string; full_name: string } | null {
         compact
         onPress={() => router.push(`/(app)/course/${item.id}` as RelativePathString)}
         onAction={() => router.push(`/(app)/course/${item.id}` as RelativePathString)}
-        onSubscribe={() => {
-          const contact = resolveCourseContact(item);
-          setSubscribeCourseTitle(item.title);
-          setSubscribeContact(contact);
-          setSubscribeVisible(true);
-        }}
+        onSubscribe={() => { void handleSubscribe(item); }}
       />
     );
   };

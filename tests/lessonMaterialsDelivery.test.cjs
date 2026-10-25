@@ -270,9 +270,13 @@ console.log('── Student lesson screen: materials section + per-material poli
     && /CONTENT_LENGTH/.test(request)
     && /ini_get\('post_max_size'\)/.test(request),
     'PHP identifies post_max_size discard from request length and current INI setting');
+  // The per-`$_FILES['error']` mapping now lives in UploadIntegrityService (the
+  // controller delegates to it) — the DISTINCTIONS are still required, they are
+  // just owned by one service instead of being duplicated in the handler.
+  const uploadIntegrity = read('backend/src/Services/UploadIntegrityService.php');
   ok(/Upload exceeds the server request limit/.test(storage)
-    && /UPLOAD_ERR_INI_SIZE/.test(storage)
-    && /UPLOAD_ERR_CANT_WRITE/.test(storage)
+    && /UPLOAD_ERR_INI_SIZE/.test(uploadIntegrity)
+    && /UPLOAD_ERR_CANT_WRITE/.test(uploadIntegrity)
     && /Not authorized to upload to this storage path/.test(storage),
     'backend distinguishes request size, PHP upload, storage failure, and permission errors');
   ok(/upload_max_filesize=100M/.test(read('backend/.env.example'))

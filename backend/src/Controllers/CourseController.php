@@ -8,6 +8,7 @@ use MedAcademy\Database\Database;
 use MedAcademy\Http\ApiException;
 use MedAcademy\Http\Request;
 use MedAcademy\Services\AuditService;
+use MedAcademy\Services\MaterialFileCleanupService;
 use MedAcademy\Services\FeatureFlagService;
 use MedAcademy\Utils\Uuid;
 
@@ -242,9 +243,20 @@ final class CourseController
         $this->flags->assertEnabled('course_enrollment', $request);
 
         $courseId = Uuid::normalize((string) $request->params['id']);
-        $studentId = $request->user['id'];
+        // THE OWNER IS ALWAYS THE TOKEN SUBJECT. No request field can name a
+        // different student, so one account can never enroll another.
+        $studentId = (string) ($request->user['id'] ?? '');
+        $role      = (string) ($request->user['role'] ?? '');
 
-        $course = Database::instance()->row(
+        // SELF-ENROLLMENT IS A STUDENT OPERATION. Staff have the audited
+        // admin/credit enrollment paths (AdminController, RpcController) and
+        // must not create a student-owned enrollment for themselves here.
+        if ($role !== 'student') {
+            throw new ApiException(403, 'Only students can enroll themselves in a course');
+        }
+
+        $db = Database::instance();
+        $course = $db->row(
             'SELECT id, status, price_egp FROM courses WHERE id = ?',
             [$courseId]
         );
@@ -252,30 +264,76 @@ final class CourseController
             throw new ApiException(404, 'Course not found');
         }
 
-        // SERVER-SIDE ENFORCEMENT: enrollment is a PAID operation (credits).
-        // The creditless self-enroll path would let any student token create
-        // free enrollments on ANY published course by calling this endpoint
-        // directly — bypassing grant_course_access' atomic deduction entirely.
-        // Free courses (price 0) may still self-enroll.
+        // SERVER-SIDE PRICE AUTHORITY: the price is read from the published
+        // row, never from the client. Enrollment is a PAID operation (credits)
+        // for any course above zero; the creditless self-enroll path would let
+        // any student token create free enrollments on ANY published course by
+        // calling this endpoint directly — bypassing grant_course_access'
+        // atomic deduction entirely. Free (price 0) courses may self-enroll.
         $price = (int) ($course['price_egp'] ?? 0);
         if ($price > 0) {
             throw new ApiException(402, 'This course requires enrollment through the app (credit activation)');
         }
 
-        $already = (bool) Database::instance()->value(
-            'SELECT COUNT(*) FROM enrollments WHERE student_id = ? AND course_id = ?',
-            [$studentId, $courseId], 0
+        // ── IDEMPOTENT ───────────────────────────────────────────────────────
+        // A repeated tap, an app retry or a duplicate POST must NOT be an
+        // error: the first request already did the work, so the caller is told
+        // the truth (already enrolled) instead of showing a failure over a
+        // course the student is in. A SUSPENDED enrollment is NOT silently
+        // reactivated — access revocation stays authoritative.
+        $existing = $db->row(
+            'SELECT id, status FROM enrollments WHERE student_id = ? AND course_id = ?',
+            [$studentId, $courseId]
         );
-        if ($already) {
-            throw new ApiException(409, 'Already enrolled in this course');
+        if ($existing !== null) {
+            if (($existing['status'] ?? 'active') === 'suspended') {
+                throw new ApiException(403, 'Your enrollment in this course is suspended');
+            }
+            return [
+                'success'          => true,
+                'already_enrolled' => true,
+                'enrollment_id'    => (string) $existing['id'],
+                'status'           => (string) ($existing['status'] ?? 'active'),
+            ];
         }
-        Database::instance()->insert(
-            'INSERT INTO enrollments (id, student_id, course_id, status, enrolled_at)
-             VALUES (?, ?, ?, ?, UTC_TIMESTAMP(6))',
-            [Uuid::v4(), $studentId, $courseId, 'active']
-        );
-        AuditService::write($studentId, 'enrollment_created', ['course_id' => $courseId, 'method' => 'direct_free']);
-        return ['success' => true];
+
+        $enrollmentId = Uuid::v4();
+        try {
+            $db->insert(
+                "INSERT INTO enrollments (id, student_id, course_id, enrollment_method, status, enrolled_at)
+                 VALUES (?, ?, ?, 'direct', 'active', UTC_TIMESTAMP(6))",
+                [$enrollmentId, $studentId, $courseId]
+            );
+        } catch (\PDOException $e) {
+            // CONCURRENT REQUESTS: `enrollments` has a UNIQUE(student_id,
+            // course_id) index, so the loser of a race gets a duplicate-key
+            // violation. That is a success for the caller — never a 500, and
+            // never a second row.
+            if ((string) $e->getCode() !== '23000') {
+                throw $e;
+            }
+            $winner = $db->row(
+                'SELECT id, status FROM enrollments WHERE student_id = ? AND course_id = ?',
+                [$studentId, $courseId]
+            );
+            return [
+                'success'          => true,
+                'already_enrolled' => true,
+                'enrollment_id'    => $winner !== null ? (string) $winner['id'] : null,
+                'status'           => (string) ($winner['status'] ?? 'active'),
+            ];
+        }
+
+        AuditService::write($studentId, 'enrollment_created', [
+            'course_id' => $courseId,
+            'method'    => 'direct_free',
+        ]);
+        return [
+            'success'          => true,
+            'already_enrolled' => false,
+            'enrollment_id'    => $enrollmentId,
+            'status'           => 'active',
+        ];
     }
 
     public function archive(Request $request): array
@@ -478,6 +536,10 @@ final class CourseController
         if ($course === null) {
             throw new ApiException(404, 'Course not found');
         }        $db = Database::instance();
+        // Every attachment (and generated copy) of the whole course, captured
+        // before the cascade — deleting a course used to remove only rows.
+        $cleanup = new MaterialFileCleanupService();
+        $materialSnapshots = $cleanup->snapshotCourse($id);
         $lessonsDeleted = $db->value('SELECT COUNT(*) FROM lessons WHERE course_id = ?', [$id], 0);
         $studentsRemoved = $db->value('SELECT COUNT(*) FROM enrollments WHERE course_id = ?', [$id], 0);
         $videosDeleted = $db->value('SELECT COUNT(*) FROM video_uploads WHERE course_id = ?', [$id], 0);
@@ -497,16 +559,29 @@ final class CourseController
             $db->query('DELETE FROM courses WHERE id = ?', [$id]);
         });
 
+        // Post-commit: reclaim the attachments + personalized copies.
+        $retired = $cleanup->retire($materialSnapshots, 'course_delete', $request->user['id']);
+
         AuditService::write($request->user['id'], 'course_deleted', [
             'course_id' => $id,
             'lessons_deleted' => $lessonsDeleted,
             'students_removed' => $studentsRemoved,
             'videos_deleted' => $videosDeleted,
-            'storage_bytes_freed' => $storageFreed,
+            'storage_bytes_freed' => $storageFreed + $retired['bytes'],
+            'material_files_deleted' => $retired['deleted'],
+            'cleanup_queued' => $retired['queued'],
         ]);
 
 
-        return ['success' => true, 'title' => $course['title'], 'lessons_deleted' => $lessonsDeleted, 'students_removed' => $studentsRemoved, 'videos_deleted' => $videosDeleted, 'storage_bytes_freed' => $storageFreed];
+        return [
+            'success' => true,
+            'title' => $course['title'],
+            'lessons_deleted' => $lessonsDeleted,
+            'students_removed' => $studentsRemoved,
+            'videos_deleted' => $videosDeleted,
+            'storage_bytes_freed' => $storageFreed + $retired['bytes'],
+            'cleanup_queued' => $retired['queued'],
+        ];
     }
 
     /**
@@ -780,17 +855,19 @@ final class CourseController
             $vdoDeleted = true;
         }
 
-        // 2. Collect storage paths for cleanup
-        $storagePaths = [];
-        $pdfs = $db->select('SELECT file_url FROM lesson_pdfs WHERE lesson_id = ?', [$lessonId]);
-        foreach ($pdfs as $p) {
+        // 2. Snapshot every file this lesson owns BEFORE the cascade deletes the
+        //    rows that name them.
+        //
+        //    This replaces a `$storagePaths` array that was filled in and then
+        //    never used: deleting a lesson removed its materials from the
+        //    database but left the uploaded documents — and every generated,
+        //    watermarked per-student copy — on disk forever.
+        $cleanup = new MaterialFileCleanupService();
+        $materialSnapshots = $cleanup->snapshotLesson($lessonId);
+        $legacyPdfPaths = [];
+        foreach ($db->select('SELECT file_url FROM lesson_pdfs WHERE lesson_id = ?', [$lessonId]) as $p) {
             $path = $this->extractStoragePath($p['file_url'] ?? '');
-            if ($path) $storagePaths[] = $path;
-        }
-        $materials = $db->select('SELECT storage_path, file_url FROM lesson_materials WHERE lesson_id = ?', [$lessonId]);
-        foreach ($materials as $m) {
-            $path = $m['storage_path'] ?: $this->extractStoragePath($m['file_url'] ?? '');
-            if ($path) $storagePaths[] = $path;
+            if ($path) $legacyPdfPaths[] = $path;
         }
 
         // 3. Cascade DB delete
@@ -807,12 +884,25 @@ final class CourseController
             $db->query('DELETE FROM lessons WHERE id = ?', [$lessonId]);
         });
 
-        // 4. Audit log
+        // 4. Reclaim the bytes only AFTER the delete committed. A filesystem
+        //    failure is queued for `storage-cleanup.php --retry`; it must never
+        //    turn a completed lesson delete into an error.
+        $retired = $cleanup->retire($materialSnapshots, 'lesson_delete', $userId);
+        $legacyBytes = 0;
+        foreach ($legacyPdfPaths as $p) {
+            $outcome = $cleanup->deleteObject('lesson-pdfs', $p);
+            $legacyBytes += (int) $outcome['bytes'];
+        }
+
+        // 5. Audit log
         AuditService::write($userId, 'lesson_deleted', [
             'lesson_id' => $lessonId,
             'lesson_title' => $lesson['title'],
             'video_id' => $lesson['video_id'],
             'vdo_deleted' => $vdoDeleted,
+            'files_deleted' => $retired['deleted'] + ($legacyBytes > 0 ? 1 : 0),
+            'storage_bytes_freed' => $retired['bytes'] + $legacyBytes,
+            'cleanup_queued' => $retired['queued'],
         ]);
 
         return [
@@ -820,6 +910,8 @@ final class CourseController
             'lesson_id' => $lessonId,
             'vdo_deleted' => $vdoDeleted,
             'vdo_error' => $vdoError,
+            'storage_bytes_freed' => $retired['bytes'] + $legacyBytes,
+            'cleanup_queued' => $retired['queued'],
         ];
     }
 
@@ -892,6 +984,14 @@ final class CourseController
             $db->select('SELECT id FROM lessons WHERE section_id = ?', [$sectionId])
         );
 
+        // Files owned by the lessons about to be removed, captured while the
+        // rows that name them still exist (see MaterialFileCleanupService).
+        $cleanup = new MaterialFileCleanupService();
+        $materialSnapshots = [];
+        foreach ($lessonIds as $lessonId) {
+            $materialSnapshots = [...$materialSnapshots, ...$cleanup->snapshotLesson($lessonId)];
+        }
+
         try {
             $result = $db->transaction(function (Database $db) use ($sectionId, $courseId, $lessonIds): array {
                 if ($lessonIds !== []) {
@@ -958,12 +1058,18 @@ final class CourseController
             throw $e;
         }
 
+        // Post-commit: reclaim the attachments and their watermarked copies.
+        $retired = $cleanup->retire($materialSnapshots, 'section_delete', $userId);
+
         AuditService::write($userId, 'course_updated', [
             'course_id' => $courseId,
             'section_deleted' => true,
             'section_id' => $sectionId,
             'section_title' => $section['title'],
             'lessons_removed' => count($lessonIds),
+            'files_deleted' => $retired['deleted'],
+            'storage_bytes_freed' => $retired['bytes'],
+            'cleanup_queued' => $retired['queued'],
         ]);
 
         return [
@@ -973,6 +1079,8 @@ final class CourseController
             'section_title' => $section['title'],
             'removed_lessons' => count($lessonIds),
             'remaining_sections' => $result['remaining_sections'],
+            'storage_bytes_freed' => $retired['bytes'],
+            'cleanup_queued' => $retired['queued'],
         ];
     }
 

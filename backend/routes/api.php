@@ -22,6 +22,7 @@ use MedAcademy\Controllers\StudentBulkController;
 use MedAcademy\Controllers\RpcController;
 use MedAcademy\Controllers\RedeemCodeController;
 use MedAcademy\Controllers\DataController;
+use MedAcademy\Controllers\LessonMaterialController;
 use MedAcademy\Controllers\MaterialDeliveryController;
 use MedAcademy\Controllers\SupportController;
 use MedAcademy\Controllers\StorageController;
@@ -272,6 +273,15 @@ $router->post('/storage/delete', [StorageController::class, 'delete'], $auth);
 //   re-reads the CURRENT permission/enrollment before streaming, so a link
 //   issued before a permission change stops working immediately.
 // The token names the material, the student and the intent — never a path.
+// ── Lesson-material LIFECYCLE (delete / replace) ────────────────────────────
+// Uploading stays on POST /storage/upload. These two handlers own the ROW: they
+// re-check ownership from the material's course, commit the database change
+// first, and only then reclaim the old source object and its generated
+// (watermarked) copies. Doing this client-side removed the old file BEFORE the
+// commit and never touched the personalized copies at all.
+$router->post('/materials/{id}/delete', [LessonMaterialController::class, 'delete'], $auth + ['role' => ['doctor', 'admin', 'super_admin']]);
+$router->post('/materials/{id}/replace', [LessonMaterialController::class, 'replace'], $auth + ['role' => ['doctor', 'admin', 'super_admin']]);
+
 $router->post('/materials/pdf-url', [MaterialDeliveryController::class, 'pdfUrl'], $auth);
 $router->get('/materials/pdf', [MaterialDeliveryController::class, 'streamPdf']);
 $router->get('/admin/material-watermark-status', [MaterialDeliveryController::class, 'watermarkStatus'], $auth + ['role' => ['admin', 'super_admin']]);

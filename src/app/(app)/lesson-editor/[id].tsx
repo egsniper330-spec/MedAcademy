@@ -541,11 +541,21 @@ export default function LessonEditor() {
         return;
       }
 
+      // A picker that hands back a 0-byte asset (iCloud placeholder, a revoked
+      // content:// grant, an empty file) would otherwise be "uploaded" and then
+      // stored as a zero-byte document — the failure that reached production.
+      if (!(Number(file.size ?? 0) > 0)) {
+        showToast({ type: 'error', message: t('lessonEditor.uploadEmpty') });
+        return;
+      }
+
       setUploading(true);
       const courseId = lesson.section?.course_id ?? lesson.course_id;
-      const { storagePath, publicUrl } = await uploadLessonMaterial(
+      // `size` is what the SERVER actually persisted (never the picker's claim).
+      const { storagePath, publicUrl, size } = await uploadLessonMaterial(
         courseId, lesson.id, file.uri, file.name,
         file.mimeType ?? 'application/octet-stream',
+        file.size ?? 0,
       );
 
       const material = await createLessonMaterial({
@@ -556,7 +566,7 @@ export default function LessonEditor() {
         file_url: publicUrl,
         storage_path: storagePath,
         file_type: file.mimeType ?? 'application/octet-stream',
-        file_size: file.size ?? 0,
+        file_size: size,
         download_enabled: true,
         preview_enabled: true,
         order_index: materials.length,
@@ -580,6 +590,10 @@ export default function LessonEditor() {
       const replacePolicyError = validateMaterialFile({ name: file.name, size: file.size });
       if (replacePolicyError) {
         showToast({ type: 'error', message: replacePolicyError });
+        return;
+      }
+      if (!(Number(file.size ?? 0) > 0)) {
+        showToast({ type: 'error', message: t('lessonEditor.uploadEmpty') });
         return;
       }
 

@@ -72,7 +72,7 @@ The replacement must support these requirements:
 |---------|---------|-------------|
 | setasign/fpdf | MIT-ish | Only creates new PDFs; cannot import existing multipage PDFs |
 | setasign/fpdi | MIT-ish | Read-only FPDI import works, but combined with FPDF for output; license ambiguity |
-| TCPDF | LGPL-3.0-or-later | Cannot be used in proprietary production without linking exception; AGPL concerns if modified |
+| TCPDF (`tecnickcom/tcpdf`) | LGPL-3.0-or-later | Cannot be used in proprietary production without linking exception; AGPL concerns if modified |
 | DomPDF | MIT | Only creates new PDFs; cannot import existing multipage PDFs with forms/layers |
 | mpdf | MIT | Only creates new PDFs; no existing-document import |
 
