@@ -201,7 +201,65 @@ export interface SecurityCheckResult {
    * telemetry, etc.). Observability only — never adds to the risk score.
    */
   evidence?:   SecurityEvidence;
+  /**
+   * WHICH verification scope produced this verdict ('full' when omitted —
+   * every pre-existing caller keeps the complete pipeline). See
+   * SecurityCheckScope for the lifecycle rules.
+   */
+  scope?:      SecurityCheckScope;
+  /**
+   * Per-detector wall-clock cost in ms for THIS evaluation. Sanitized: names
+   * and durations only — never a value, a token, an id or a file path. Used by
+   * the resume diagnostics to show which detector actually costs the time.
+   */
+  timings?:    Record<string, number>;
 }
+
+/**
+ * ── VERIFICATION SCOPE (the resume-latency lifecycle) ──────────────────────
+ *
+ * 'full'   — every detector, every network probe. Session start, manual
+ *            re-checks, pre-video re-validation and post-update checks.
+ * 'resume' — a background→foreground transition. Identical security DECISION
+ *            (the same detectors feed the same policy model), but it reuses
+ *            evidence whose measurement cannot have changed while the app was
+ *            backgrounded and whose reuse window has NOT expired.
+ *
+ * The distinction is what a detector MEASURES, not how expensive it is:
+ *
+ *   | detector                         | can change while backgrounded? | resume |
+ *   |----------------------------------|-------------------------------|--------|
+ *   | vpn / proxy                      | YES (user toggles a tunnel)    | run    |
+ *   | debugger, developer options      | YES (Settings/ADB)             | run    |
+ *   | screen recording, overlay        | YES (other app starts one)     | run    |
+ *   | root/jailbreak, frida/xposed,    | practically NO within the       | run*   |
+ *   | magisk, tamper/signature         | reuse window                   |        |
+ *   | play integrity / app attest      | only on install/update/restore | TTL    |
+ *   | ssl pinning probe                | only when the TLS path changes | TTL    |
+ *   | policy fetch                     | only when an admin edits it    | TTL    |
+ *
+ * (*) the local detectors all read ONE cached native flag batch, so re-running
+ * them on resume is a single cheap call — they are NOT skipped. Skipping them
+ * would be a real weakening: developer options and USB debugging can be turned
+ * on in Settings while the app sits in the background.
+ *
+ * What IS reused on resume is evidence that is (a) network-bound, (b) attested
+ * by the SERVER, and (c) already cached with its own bounded TTL:
+ *   • Play Integrity / App Attest — verdict cached for PI_TTL_MS, bound to the
+ *     app version, and re-verified server-side per protected action anyway;
+ *   • the TLS probe — a PASS is reused for SSL_PROBE_REUSE_MS. A hostile TLS
+ *     change cannot hide in that window: the transport layer pins the same
+ *     chain, so every other request fails at the handshake.
+ * Nothing is cached for authorization. A cached PASS can never authorize a
+ * protected action; the server re-decides every protected request.
+ */
+export type SecurityCheckScope = 'full' | 'resume';
+
+/** How long a SUCCESSFUL TLS probe is reused inside the resume scope. */
+const SSL_PROBE_REUSE_MS = 90_000;
+
+/** Monotonic ms of the last probe that completed without a failure category. */
+let _sslProbePassedAt = 0;
 
 /** Evidence-quality + distribution telemetry attached to a security check. */
 export interface SecurityEvidence {
@@ -1137,6 +1195,10 @@ async function detectSSLPinning(): Promise<SecurityThreat | null> {
       };
     }
 
+    // A VERIFIED pin (the actual security property) — recorded so a resume
+    // within SSL_PROBE_REUSE_MS does not re-probe. Only this outcome is
+    // cached; an inconclusive probe is never reused as if it had passed.
+    _sslProbePassedAt = Date.now();
     return null;
   } catch {
     return null;
@@ -1689,9 +1751,25 @@ export function computeRiskScore(threats: SecurityThreat[]): number {
 
 // ─── Full Security Check ──────────────────────────────────────────────────────
 
-export async function runSecurityChecks(): Promise<SecurityCheckResult> {
+export async function runSecurityChecks(
+  options: { scope?: SecurityCheckScope } = {},
+): Promise<SecurityCheckResult> {
+  // Default is the COMPLETE pipeline, so every existing caller is unchanged.
+  const scope: SecurityCheckScope = options.scope === 'resume' ? 'resume' : 'full';
+  const timings: Record<string, number> = {};
+  const evaluationStart = Date.now();
+  let sslReused = false;
+  /** Measure ONE detector without changing what it decides. */
+  const track = async <T,>(name: string, run: () => Promise<T>): Promise<T> => {
+    const t0 = Date.now();
+    try {
+      return await run();
+    } finally {
+      timings[name] = Date.now() - t0;
+    }
+  };
   if (__DEV__) {
-    console.log('[SecurityCheck][runSecurityChecks] ▶ starting all checks on platform=', process.env.EXPO_OS);
+    console.log('[SecurityCheck][runSecurityChecks] ▶ starting checks on platform=', process.env.EXPO_OS, 'scope=', scope);
   }
 
   // ── OFFLINE FAST-PATH (genuine-offline detection only — no policy change) ──
@@ -1741,28 +1819,42 @@ export async function runSecurityChecks(): Promise<SecurityCheckResult> {
     // out detector resolves to its fail-safe value (null = no threat from that
     // detector this cycle) so the check always completes and the mutex below
     // (SecurityContext checkRef) is always released.
-    withTimeout(detectRootJailbreak(),        DETECTOR_TIMEOUT_MS, () => null),
-    withTimeout(detectVPN(),                  DETECTOR_TIMEOUT_MS, () => vpnDetectionDegradedThreat(
+    track('root',       () => withTimeout(detectRootJailbreak(),        DETECTOR_TIMEOUT_MS, () => null)),
+    track('vpn',        () => withTimeout(detectVPN(),                  DETECTOR_TIMEOUT_MS, () => vpnDetectionDegradedThreat(
       // A timed-out VPN probe is a coverage gap, not a clean device. The
       // fallback value keeps that distinction visible on iOS; on other
       // platforms the Android/Play-Integrity unavailable telemetry applies.
       process.env.EXPO_OS === 'ios'
         ? 'VPN check timed out on this device — result is NOT a verified clean state'
         : 'VPN check timed out — result is NOT a verified clean state'
-    )),
-    withTimeout(detectProxy(),                DETECTOR_TIMEOUT_MS, () => null),
-    withTimeout(detectDebug(),                DETECTOR_TIMEOUT_MS, () => null),
-    withTimeout(detectDeveloperOptions(),     DETECTOR_TIMEOUT_MS, () => null),
-    withTimeout(detectScreenRecording(),      DETECTOR_TIMEOUT_MS, () => null),
-    withTimeout(detectFrida(),                DETECTOR_TIMEOUT_MS, () => null),
-    withTimeout(detectXposed(),               DETECTOR_TIMEOUT_MS, () => null),
-    withTimeout(detectMagisk(),               DETECTOR_TIMEOUT_MS, () => null),
-    withTimeout(detectOverlay(),              DETECTOR_TIMEOUT_MS, () => null),
-    withTimeout(detectTamper(),               DETECTOR_TIMEOUT_MS, () => null),
+    ))),
+    track('proxy',      () => withTimeout(detectProxy(),                DETECTOR_TIMEOUT_MS, () => null)),
+    track('debug',      () => withTimeout(detectDebug(),                DETECTOR_TIMEOUT_MS, () => null)),
+    track('devOptions', () => withTimeout(detectDeveloperOptions(),     DETECTOR_TIMEOUT_MS, () => null)),
+    track('screenRec',  () => withTimeout(detectScreenRecording(),      DETECTOR_TIMEOUT_MS, () => null)),
+    track('frida',      () => withTimeout(detectFrida(),                DETECTOR_TIMEOUT_MS, () => null)),
+    track('xposed',     () => withTimeout(detectXposed(),               DETECTOR_TIMEOUT_MS, () => null)),
+    track('magisk',     () => withTimeout(detectMagisk(),               DETECTOR_TIMEOUT_MS, () => null)),
+    track('overlay',    () => withTimeout(detectOverlay(),              DETECTOR_TIMEOUT_MS, () => null)),
+    track('tamper',     () => withTimeout(detectTamper(),               DETECTOR_TIMEOUT_MS, () => null)),
     // Play Integrity is entirely network-bound (backend nonce → Google API).
     // Offline it can only burn its timeouts before returning null anyway.
-    withTimeout(genuinelyOffline ? Promise.resolve(null) : runPlayIntegrityCheck(), DETECTOR_TIMEOUT_MS, () => null),
-    withTimeout(detectSSLPinning(),           DETECTOR_TIMEOUT_MS, () => null),
+    track('platformIntegrity', () => withTimeout(
+      genuinelyOffline ? Promise.resolve(null) : runPlayIntegrityCheck(),
+      DETECTOR_TIMEOUT_MS,
+      () => null,
+    )),
+    // TLS probe — the one network-bound detector with no internal TTL, so it is
+    // the slowest thing a resume could still wait for. A VERIFIED pin is reused
+    // inside SSL_PROBE_REUSE_MS in the resume scope only; 'full' always probes.
+    track('ssl', () => {
+      if (scope === 'resume' && Date.now() - _sslProbePassedAt < SSL_PROBE_REUSE_MS) {
+        sslReused = true;
+        timings.ssl = 0;
+        return Promise.resolve(null);
+      }
+      return withTimeout(detectSSLPinning(), DETECTOR_TIMEOUT_MS, () => null);
+    }),
   ]);
   const integrityThreat = detectAppIntegrity();
 
@@ -1835,7 +1927,31 @@ export async function runSecurityChecks(): Promise<SecurityCheckResult> {
     void reportPartialDetectionUnavailableOnce(unavailableChecks);
   }
 
-  return { threats: allThreats, riskScore, policies, blocksLogin, blocksVideo, hasWarnings, evidence };
+  // ── Resume diagnostics (Phase E) ──────────────────────────────────────────
+  // One compact line: the scope, the total, whether the TLS probe was reused,
+  // and each detector's cost. Names + durations only — no token, no id, no
+  // payload, no device evidence. Printed in DEV or when the operator turns on
+  // EXPO_PUBLIC_SECURITY_DIAGNOSTICS=1, so a physical device can be measured
+  // without a debugger attached.
+  const totalMs = Date.now() - evaluationStart;
+  if (__DEV__ || process.env.EXPO_PUBLIC_SECURITY_DIAGNOSTICS === '1') {
+    const slowest = Object.entries(timings)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 3)
+      .map(([k, v]) => k + '=' + v + 'ms')
+      .join(' ');
+    console.log(
+      '[SecurityCheck][timing] scope=' + scope + ' total=' + totalMs + 'ms'
+      + ' sslReused=' + (sslReused ? 'yes' : 'no')
+      + ' threats=' + allThreats.length
+      + (slowest ? ' | ' + slowest : ''),
+    );
+  }
+
+  return {
+    threats: allThreats, riskScore, policies, blocksLogin, blocksVideo, hasWarnings, evidence,
+    scope, timings,
+  };
 }
 
 // Once-per-session guard for detection_unavailable telemetry.

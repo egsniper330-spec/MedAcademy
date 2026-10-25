@@ -323,7 +323,7 @@ export default function StudentDashboard() {
     >
       {/* DashboardHeader owns its safe-area top padding — no paddingTop on outer View */}
       <DashboardHeader
-        greeting={t('home.welcome')}
+        greeting={t('home.hello')}
         subtitle={accountName}
         subtitleAccessibilityLabel={t('home.signedInAs', { name: accountName })}
         rightActions={

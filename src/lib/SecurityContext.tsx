@@ -32,7 +32,7 @@ import Constants from 'expo-constants';
 import {
   runSecurityChecks, logThreats, getSecurityPolicies, clearAppAttestKey,
   invalidatePolicyCache, SECURITY_UNVERIFIED_WEIGHT,
-  type SecurityCheckResult, type SecurityThreat,
+  type SecurityCheckResult, type SecurityThreat, type SecurityCheckScope,
   type DetectionType, type PolicyAction,
 } from '@/lib/security';
 import {
@@ -349,7 +349,7 @@ export function SecurityProvider({ children }: { children: React.ReactNode }) {
   //  provisional holder and a legitimately-allowed VPN would stay locked.
   const [verdictSerial, setVerdictSerial] = useState(0);
 
-  const runGuardedCheck = useCallback(async (): Promise<SecurityCheckResult | null> => {
+  const runGuardedCheck = useCallback(async (reason = 'manual'): Promise<SecurityCheckResult | null> => {
     const gen = ++checkGenRef.current;
     //  Snapshot BEFORE the probes run: a VPN signal arriving mid-check is newer
     //  than this verdict's observation window and must not be cleared by it.
@@ -358,7 +358,19 @@ export function SecurityProvider({ children }: { children: React.ReactNode }) {
     //  answering. Set BEFORE the probes so a background transition during the
     //  check makes this result ineligible to release the hold.
     evaluationStartTokenRef.current = resumeTokenRef.current;
-    const r = await runSecurityChecks();
+    // ── SCOPE BY TRIGGER (see SecurityCheckScope in lib/security) ───────────
+    // A background→foreground transition and the periodic tick are CONTEXT
+    // CONTINUATIONS: the same detectors make the same decision, but evidence
+    // that cannot have changed while the app sat in the background (a
+    // server-attested integrity verdict, a verified TLS pin) is reused inside
+    // its bounded window instead of being fetched again. Session start, a
+    // manual re-check, pre-video re-validation and post-update checks stay
+    // 'full' — they are the moments a complete, freshly measured verdict is
+    // required.
+    const scope: SecurityCheckScope = (reason.startsWith('resume') || reason === 'periodic')
+      ? 'resume'
+      : 'full';
+    const r = await runSecurityChecks({ scope });
     if (gen !== checkGenRef.current) {
       if (__DEV__) console.log('[SecurityContext] discarding stale security result (gen superseded)');
       return null;
@@ -570,7 +582,7 @@ export function SecurityProvider({ children }: { children: React.ReactNode }) {
     }
     const started = (async () => {
       try {
-        return await runGuardedCheck();
+        return await runGuardedCheck(reason);
       } finally {
         inFlightEvaluationRef.current = null;
       }
@@ -731,7 +743,7 @@ export function SecurityProvider({ children }: { children: React.ReactNode }) {
       return false;
     }
     try {
-      const r = await runGuardedCheck();
+      const r = await runGuardedCheck('pre-video');
       if (!r) {
         // A newer check superseded this pre-video revalidation — publish
         // nothing; the newer verdict is authoritative. Fail-closed callers

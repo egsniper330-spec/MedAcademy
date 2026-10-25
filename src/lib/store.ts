@@ -24,6 +24,17 @@ export interface Profile {
   university?: { id: string; name: string } | null;
   faculty?: { id: string; name: string } | null;
   academic_level?: { id: string; name: string } | null;
+  /**
+   * DOCTOR DEFAULT CONTACT INFORMATION (profiles.contact_*).
+   *
+   * These are the values a course inherits when `use_default_contact` is on
+   * (lib/subscribeContact.resolveCourseContact), so any screen that offers that
+   * switch has to be able to SEE them. Declared optional because students never
+   * carry them and an older cached profile row may not include them.
+   */
+  contact_whatsapp?: string | null;
+  contact_telegram?: string | null;
+  contact_phone?: string | null;
 }
 
 interface ProfileStore {

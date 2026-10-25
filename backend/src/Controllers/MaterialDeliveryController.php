@@ -139,10 +139,16 @@ final class MaterialDeliveryController
             try {
                 $this->ensurePersonalizedCopy($material, $userId);
             } catch (ApiException $e) {
-                $this->auditFailure($material, $userId, 'mint', $e);
+                // The stage comes from the exception's own code (set by the
+                // service: engine_unavailable / source_not_pdf / pdf_parse /
+                // render_failed / output_missing / storage_unwritable …), so the
+                // audit row names WHERE delivery failed instead of a blanket
+                // "mint" that says nothing about the cause.
+                $this->auditFailure($material, $userId, $this->failureStage($e), $e);
                 throw $e;
             } catch (\Throwable $e) {
-                $this->auditFailure($material, $userId, 'mint', null);
+                $this->auditFailure($material, $userId, 'unexpected', null);
+                error_log('[material-delivery] unexpected mint failure (' . get_class($e) . '): ' . $e->getMessage());
                 throw $e;
             }
         }
@@ -376,7 +382,7 @@ final class MaterialDeliveryController
             $dir = dirname($finalAbs);
             if (!is_dir($dir) && !mkdir($dir, 0775, true) && !is_dir($dir)) {
                 @unlink($partAbs);
-                throw new ApiException(500, 'Could not create the storage directory.');
+                throw new ApiException(500, 'Could not create the storage directory.', 'storage_unwritable');
             }
             // Atomic publication: a concurrent reader can only ever see a
             // complete file (rename is atomic on the same filesystem).
@@ -385,20 +391,22 @@ final class MaterialDeliveryController
                 // Stays server-side: the client only gets the actionable message.
                 error_log('[material-delivery] could not publish the personalized PDF: ' . $why);
                 @unlink($partAbs);
-                throw new ApiException(500, 'Could not finalise the personalized PDF.');
+                throw new ApiException(500, 'Could not finalise the personalized PDF.', 'publish_failed');
             }
 
             $size = (int) @filesize($finalAbs);
-            Database::instance()->query(
-                'INSERT INTO lesson_material_pdfs
-                    (id, material_id, student_id, source_hash, variant_key, storage_path, file_size, page_count)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                 ON DUPLICATE KEY UPDATE storage_path = VALUES(storage_path),
-                                         file_size   = VALUES(file_size),
-                                         page_count  = VALUES(page_count),
-                                         updated_at  = CURRENT_TIMESTAMP(6)',
-                [Uuid::v4(), (string) $material['id'], $studentId, $sourceHash, $variantKey, $rel, $size, $pages]
-            );
+            // A missing `lesson_material_pdfs.variant_key` / `page_count` column
+            // (i.e. the migration for this feature was not applied to the live
+            // database) used to escape as a raw PDO error — a 500 with no
+            // explanation — after the PDF had already been written. Name it, and
+            // remove the orphaned file so a retry starts clean.
+            try {
+                $this->registerVariant($material, $studentId, $sourceHash, $variantKey, $rel, $size, $pages);
+            } catch (\Throwable $e) {
+                @unlink($finalAbs);
+                error_log('[material-delivery] could not register the personalized PDF: ' . $e->getMessage());
+                throw new ApiException(500, 'The personalized PDF could not be registered.', 'schema');
+            }
 
             // Stale variants for the SAME student/material (previous source
             // version or engine settings) are unreachable now, so their bytes
@@ -413,6 +421,28 @@ final class MaterialDeliveryController
                 'page_count' => $pages,
             ];
         });
+    }
+
+    /** Upsert the registry row for one personalized variant. */
+    private function registerVariant(
+        array $material,
+        string $studentId,
+        string $sourceHash,
+        string $variantKey,
+        string $rel,
+        int $size,
+        int $pages
+    ): void {
+            Database::instance()->query(
+                'INSERT INTO lesson_material_pdfs
+                    (id, material_id, student_id, source_hash, variant_key, storage_path, file_size, page_count)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                 ON DUPLICATE KEY UPDATE storage_path = VALUES(storage_path),
+                                         file_size   = VALUES(file_size),
+                                         page_count  = VALUES(page_count),
+                                         updated_at  = CURRENT_TIMESTAMP(6)',
+                [Uuid::v4(), (string) $material['id'], $studentId, $sourceHash, $variantKey, $rel, $size, $pages]
+            );
     }
 
     /**
@@ -650,6 +680,17 @@ final class MaterialDeliveryController
         }
     }
 
+    /**
+     * The machine-readable stage of a failed mint, taken from the exception's own
+     * code (see PdfWatermarkService). Falls back to a coarse stage so an
+     * untagged failure is still recorded rather than lost.
+     */
+    private function failureStage(ApiException $e): string
+    {
+        $code = $e->errors[0] ?? null;
+        return is_string($code) && $code !== '' ? $code : 'mint';
+    }
+
     private function auditFailure(array $material, string $userId, string $stage, ?ApiException $e): void
     {
         try {
@@ -659,6 +700,11 @@ final class MaterialDeliveryController
                 'stage' => $stage,
                 'status' => $e?->status,
                 'reason' => $e !== null ? $e->getMessage() : 'unexpected_error',
+                // The PREVIOUS exception is the real cause when the engine threw
+                // (class + message only; no path, no stack, no document bytes).
+                'cause' => $e?->getPrevious() !== null
+                    ? get_class($e->getPrevious()) . ': ' . mb_substr($e->getPrevious()->getMessage(), 0, 300)
+                    : null,
                 'description' => 'Personalized PDF could not be produced; delivery was refused',
             ]);
         } catch (\Throwable) {

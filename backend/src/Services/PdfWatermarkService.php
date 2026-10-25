@@ -778,11 +778,52 @@ final class PdfWatermarkService
      */
     public function personalize(string $sourceAbsPath, array $lines, string $outAbsPath): int
     {
+        // ── RENDER BUDGET (delivery-stage fix) ────────────────────────────────
+        // The layered vector engine is much heavier than the previous "one
+        // diagonal block" version (BASE grid + imported page + FRONT marks +
+        // trace lattice + rails + interior anchor + the content bake, per page).
+        // On shared cPanel hosting the default max_execution_time is 30 s, and
+        // because the layer token changed, EVERY cached copy had to be
+        // regenerated after the upgrade — so a large or complex source PDF could
+        // exhaust the worker mid-render for every student at once. A PHP fatal on
+        // timeout produces no JSON error at all (the client only sees the generic
+        // "personalized copy could not be prepared"), which is exactly the
+        // reported symptom.
+        //
+        // Raising the limit is bounded and explicit: the operator sets
+        // PDF_WATERMARK_TIME_LIMIT_SECONDS (default 90) and nothing else in the
+        // request may use it — the value is restored immediately after the
+        // render below. A timeout that still happens now fails with a NAMED
+        // exception instead of a bare fatal.
+        $previousTimeLimit = null;
+        try {
+            $previousTimeLimit = (int) ini_get('max_execution_time');
+        } catch (\Throwable) {
+            $previousTimeLimit = null;
+        }
+        $budget = max(30, Config::int('PDF_WATERMARK_TIME_LIMIT_SECONDS', 90));
+        if ($previousTimeLimit !== null && ($previousTimeLimit === 0 || $previousTimeLimit < $budget)) {
+            @set_time_limit($budget);
+        }
+        try {
+            return $this->personalizeWithinBudget($sourceAbsPath, $lines, $outAbsPath);
+        } finally {
+            // Restore the worker's own limit so the longer budget cannot leak
+            // into unrelated work on a reused FPM worker.
+            if ($previousTimeLimit !== null && $previousTimeLimit > 0) {
+                @set_time_limit($previousTimeLimit);
+            }
+        }
+    }
+
+    /** Body of personalize(), run under the bounded render budget above. */
+    private function personalizeWithinBudget(string $sourceAbsPath, array $lines, string $outAbsPath): int
+    {
         if (!$this->isAvailable()) {
-            throw new ApiException(503, 'PDF watermarking is not available on this server: no compatible engine is installed (' . $this->missingEngineDetail() . '). Install it in backend/vendor (composer install --no-dev, or upload vendor-pdf-engine.zip and extract it into backend/). The unwatermarked original will not be served.');
+            throw new ApiException(503, 'PDF watermarking is not available on this server: no compatible engine is installed (' . $this->missingEngineDetail() . '). Install it in backend/vendor (composer install --no-dev, or upload vendor-pdf-engine.zip and extract it into backend/). The unwatermarked original will not be served.', 'engine_unavailable');
         }
         if (!is_file($sourceAbsPath) || filesize($sourceAbsPath) === 0) {
-            throw new ApiException(422, 'The source PDF could not be read.');
+            throw new ApiException(422, 'The source PDF could not be read.', 'source_unreadable');
         }
         // Bound the parse itself: FPDI loads the cross-reference data of the
         // WHOLE document, so an absurd upload can exhaust the worker before a
@@ -792,23 +833,24 @@ final class PdfWatermarkService
             throw new ApiException(
                 422,
                 'This PDF is larger than the watermarking limit ('
-                . (int) round($this->maxSourceBytes() / 1048576) . ' MB).'
+                . (int) round($this->maxSourceBytes() / 1048576) . ' MB).',
+                'source_too_large'
             );
         }
 
         // ── Structural validation before handing anything to the engine ──
         $head = (string) @file_get_contents($sourceAbsPath, false, null, 0, 1024);
         if (!str_starts_with($head, '%PDF-')) {
-            throw new ApiException(422, 'This file is not a valid PDF and cannot be watermarked.');
+            throw new ApiException(422, 'This file is not a valid PDF and cannot be watermarked.', 'source_not_pdf');
         }
         $tail = (string) @file_get_contents($sourceAbsPath, false, null, max(0, (int) filesize($sourceAbsPath) - 4096));
         if (str_contains($tail, '/Encrypt')) {
-            throw new ApiException(422, 'This PDF is encrypted and cannot be watermarked. Upload an unencrypted PDF.');
+            throw new ApiException(422, 'This PDF is encrypted and cannot be watermarked. Upload an unencrypted PDF.', 'source_encrypted');
         }
 
         $dir = dirname($outAbsPath);
         if (!is_dir($dir) && !mkdir($dir, 0775, true) && !is_dir($dir)) {
-            throw new ApiException(500, 'Could not create the output directory for the personalized PDF.');
+            throw new ApiException(500, 'Could not create the output directory for the personalized PDF.', 'storage_unwritable');
         }
 
         try {
@@ -825,12 +867,24 @@ final class PdfWatermarkService
         } catch (\Throwable $e) {
             // Never leak a library stack trace to the client, and never fall back
             // to the original: the request fails closed.
-            error_log('[pdf-watermark] generation failed: ' . $e->getMessage());
-            throw new ApiException(500, 'The personalized PDF could not be generated.');
+            //
+            // STAGE DIAGNOSTICS: the class + message of the real cause are logged
+            // server-side (never in the response) and attached as `previous`, so
+            // ErrorHandler's log carries them too and the audit row can name the
+            // stage. Without this a failing engine only ever produced the generic
+            // "could not be generated", which is why the cause of a live delivery
+            // failure could not be identified from the API response alone.
+            error_log('[pdf-watermark] render failed (' . get_class($e) . '): ' . $e->getMessage());
+            throw new ApiException(
+                500,
+                'The personalized PDF could not be generated.',
+                'render_failed',
+                $e
+            );
         }
 
         if (!is_file($outAbsPath) || filesize($outAbsPath) === 0) {
-            throw new ApiException(500, 'The personalized PDF was not produced.');
+            throw new ApiException(500, 'The personalized PDF was not produced.', 'output_missing');
         }
         return $pages;
     }
@@ -875,7 +929,7 @@ final class PdfWatermarkService
     {
         $engine = $this->rendererStatus()['vector']['engine'] ?? null;
         if ($engine !== 'tcpdf') {
-            throw new ApiException(503, 'The flattened engine needs the TCPDF bridge (setasign/fpdi + tecnickcom/tcpdf) in backend/vendor. The unwatermarked original will not be served.');
+            throw new ApiException(503, 'The flattened engine needs the TCPDF bridge (setasign/fpdi + tecnickcom/tcpdf) in backend/vendor. The unwatermarked original will not be served.', 'engine_unavailable');
         }
 
         $identity = trim((string) ($lines[0] ?? ''));
@@ -1692,7 +1746,8 @@ final class PdfWatermarkService
                 error_log('[pdf-watermark] unsupported pdf structure: ' . $e->getMessage());
                 throw new ApiException(
                     422,
-                    'This PDF uses a structure the watermarker cannot read (for example compressed cross-reference streams or encryption). It cannot be delivered to students.'
+                    'This PDF uses a structure the watermarker cannot read (for example compressed cross-reference streams or encryption). It cannot be delivered to students.',
+                    'pdf_parse'
                 );
             }
             throw $e;

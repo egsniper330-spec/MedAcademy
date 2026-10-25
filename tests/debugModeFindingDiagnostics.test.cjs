@@ -319,7 +319,7 @@ console.log('\n6. detector separation / mapping / freshness');
   check('6e: sign-in evaluates the device BEFORE any session exists (fresh, not cached)',
     signIn.indexOf('const secResult = await check(installationId)') > 0 &&
     signIn.indexOf('await check(installationId)') < signIn.indexOf('signInWithPassword') &&
-    /await runGuardedCheck\(\)/.test(read('src/lib/SecurityContext.tsx')) &&
+    /await runGuardedCheck\(/.test(read('src/lib/SecurityContext.tsx')) &&
     // The __DEV__ producer keeps the exact detectionMethod the resolver matches
     // (any change to this string must be reflected in resolveFindingCopyKey).
     /type: 'debug_detected', detectionMethod: 'Debug mode active'/.test(SECURITY));

@@ -169,7 +169,14 @@ section('4. The PDF engine is fail-closed');
   ok('refuses an ENCRYPTED pdf explicitly (never ships the original)',
     /\/Encrypt[\s\S]{0,160}ApiException\(422/.test(svc));
   ok('a generation failure throws instead of returning the source',
-    /catch \(\\Throwable \$e\)[\s\S]{0,240}throw new ApiException\(500/.test(svc));
+    /catch \(\\Throwable \$e\)[\s\S]{0,900}throw new ApiException\(\s*500/.test(svc));
+  // Every refusal names its STAGE, so a live delivery failure can be located
+  // from the API code instead of the generic "could not be prepared" message.
+  ok('generation failures carry a stage code and the real cause',
+    /'render_failed',\s*\$e\s*\)/.test(svc) &&
+    /get_class\(\$e\)[\s\S]{0,40}\$e->getMessage\(\)/.test(svc));
+  ok('the engine-missing refusal carries a stage code',
+    /ApiException\(503,[\s\S]{0,400}'engine_unavailable'\)/.test(svc));
   ok('output is verified to exist and be non-empty',
     /filesize\(\$outAbsPath\) === 0[\s\S]{0,120}ApiException\(500/.test(svc));
   ok('an oversized source is refused before parsing',
@@ -183,8 +190,20 @@ section('4. The PDF engine is fail-closed');
       return /\} else \{[\s\S]{0,200}'lesson-materials'/.test(stream) &&
         stream.indexOf('watermark_unavailable') < stream.indexOf("privateFilePath('lesson-materials'");
     })());
-  ok('a generation failure is audited and the request still fails',
-    /auditFailure\(\$material, \$userId, 'mint', \$e\);[\s\S]{0,40}throw \$e;/.test(delivery));
+  // A coded ApiException used to reach the client as the generic 'api_error',
+  // so 'engine_unavailable' / 'watermark_busy' / 'pdf_parse' were
+  // indistinguishable and the same message was shown for all of them.
+  ok('a coded refusal surfaces its code to the client',
+    /foreach \(\$e->errors as \$candidate\)[\s\S]{0,160}\$code = \$candidate;/.test(
+      read('backend/src/Middleware/ErrorHandler.php')));
+  ok('an operator can name the failing stage on the server',
+    fs.existsSync(path.join(ROOT, 'backend/scripts/diagnose-pdf-delivery.php')) &&
+    /STOPPED at stage/.test(read('backend/scripts/diagnose-pdf-delivery.php')));
+
+  ok('a generation failure is audited (with its stage) and the request still fails',
+    /auditFailure\(\$material, \$userId, \$this->failureStage\(\$e\), \$e\);[\s\S]{0,40}throw \$e;/.test(delivery) &&
+    /private function failureStage\(ApiException \$e\): string/.test(delivery) &&
+    /'cause' => \$e\?->getPrevious\(\) !== null/.test(delivery));
 }
 
 /* ══ 5. Layered marks, identity from the server ══════════════════════════ */
@@ -608,7 +627,12 @@ section('14. The reported failure modes cannot return silently');
   ok('a cross-origin fetch failure still falls back to opening the URL',
     /catch \{[\s\S]{0,400}Linking\.openURL\(signedUrl\)/.test(web));
   ok('the missing-engine state is recognized by code OR message',
-    /code === 'watermark_unavailable'[\s\S]{0,80}watermarking is not available\/i\.test\(msg\)/.test(lesson));
+    /WATERMARK_STAGES\.includes\(code\)[\s\S]{0,80}watermarking is not available\/i\.test\(msg\)/.test(lesson));
+  ok('every personalized-delivery stage code is mapped to that state',
+    ['watermark_unavailable', 'watermark_busy', 'engine_unavailable', 'render_failed',
+      'pdf_parse', 'output_missing', 'publish_failed', 'source_missing',
+      'source_not_pdf', 'storage_unwritable', 'schema']
+      .every(c => lesson.includes(`'${c}'`)));
   ok('that state shows the dedicated watermark message (not the generic one)',
     /engineMissing \|\| status === 503[\s\S]{0,120}materialWatermarkUnavailable/.test(lesson));
 }

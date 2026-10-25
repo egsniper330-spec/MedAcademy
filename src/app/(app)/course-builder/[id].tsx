@@ -226,6 +226,52 @@ export default function CourseBuilder() {
   const [contactTelegram, setContactTelegram] = useState('');
   const [contactPhone, setContactPhone] = useState('');
 
+  /**
+   * ── DOCTOR DEFAULT CONTACT AVAILABILITY ─────────────────────────────────
+   * "Use my default contact information" does not copy anything at save time:
+   * it tells delivery to read the DOCTOR PROFILE's contact_whatsapp /
+   * contact_telegram / contact_phone (lib/subscribeContact.resolveCourseContact).
+   * When all three are empty the switch is a promise the course cannot keep —
+   * the Subscribe sheet ends up with no doctor contact at all — so it is not
+   * offered.
+   *
+   * THREE states, never two:
+   *   unknown   → the profile has not loaded (or failed to load). Saying "you
+   *               have no defaults" here would be a guess, and letting the user
+   *               pick it would be a promise we cannot verify. Disabled.
+   *   missing   → the profile loaded and genuinely carries no contact channel.
+   *   available → at least one channel is usable by contactUrl(): a number with
+   *               real digits, a Telegram handle, a dialable phone. A whitespace
+   *               or garbage-only value does NOT count (that is exactly the
+   *               "empty object that looks configured" trap).
+   *
+   * `profile` comes from the shared profile store, which dr-profile updates with
+   * the saved row, so configuring defaults in Profile and returning here
+   * re-evaluates availability without a reload.
+   */
+  const { isProfileLoading } = useProfileStore();
+  const defaultContactState: 'unknown' | 'available' | 'missing' = (() => {
+    if (!profile || isProfileLoading) return 'unknown';
+    const wa = (profile.contact_whatsapp ?? '').replace(/[^\d]/g, '');
+    const tg = (profile.contact_telegram ?? '').trim().replace(/^@/, '').replace(/^(?:t\.me|telegram\.me)\//i, '').replace(/\/+$/, '');
+    const ph = (profile.contact_phone ?? '').replace(/[^\d]/g, '');
+    const usable = wa.length >= 6 || /^[A-Za-z0-9_]{3,}$/.test(tg) || ph.length >= 4;
+    return usable ? 'available' : 'missing';
+  })();
+  const defaultContactUsable = defaultContactState === 'available';
+
+  /**
+   * A radio that shows the unavailable option as SELECTED would be a lie, so a
+   * confirmed-missing default moves the course to its own contact details. It
+   * never touches manually entered values, and it does not run while the state
+   * is still `unknown` (that would silently overwrite a choice on a slow load).
+   */
+  useEffect(() => {
+    if (defaultContactState !== 'missing') return;
+    if (!useDefaultContact) return;
+    setUseDefaultContact(false);
+  }, [defaultContactState, useDefaultContact]);
+
   // ── Settings fields
   const [sequential, setSequential] = useState(false);
   const [freePreview, setFreePreview] = useState(false);
@@ -1071,43 +1117,75 @@ export default function CourseBuilder() {
               {t('cb.contact.help')}
             </Text>
 
-            {/* Radio: use default vs custom */}
+            {/* Radio: use default vs custom.
+                "Use my default contact information" is DISABLED (and explained)
+                whenever the doctor's profile has no usable default (or it has
+                not loaded yet) — see defaultContactState above. `custom` is
+                never disabled: it is the always-available path. */}
             {[
-              { value: true,  label: t('cb.contact.useDefault') },
-              { value: false, label: t('cb.contact.useCustom') },
-            ].map(opt => (
+              {
+                value: true,
+                label: t('cb.contact.useDefault'),
+                disabled: !defaultContactUsable,
+                hint: defaultContactState === 'missing'
+                  ? t('cb.contact.useDefaultUnavailable')
+                  : (defaultContactState === 'unknown' ? t('cb.contact.useDefaultChecking') : null),
+              },
+              { value: false, label: t('cb.contact.useCustom'), disabled: false, hint: null },
+            ].map(opt => {
+              const selected = useDefaultContact === opt.value;
+              return (
               <Pressable
                 key={String(opt.value)}
-                onPress={() => setUseDefaultContact(opt.value)}
+                onPress={() => { if (!opt.disabled) setUseDefaultContact(opt.value); }}
+                disabled={opt.disabled}
+                accessibilityRole="radio"
+                accessibilityState={{ selected, disabled: opt.disabled }}
+                accessibilityLabel={opt.label}
+                accessibilityHint={opt.hint ?? undefined}
                 style={{
                   flexDirection: 'row', direction: isRTL ? 'rtl' : 'ltr', alignItems: 'center', gap: 10,
                   paddingVertical: 11, paddingHorizontal: 14,
                   borderRadius: 12, marginBottom: 8,
-                  backgroundColor: useDefaultContact === opt.value ? `${c.primary}12` : c.base,
+                  backgroundColor: selected && !opt.disabled ? `${c.primary}12` : c.base,
                   borderWidth: 1.5,
-                  borderColor: useDefaultContact === opt.value ? c.primary : `${c.text}14`,
+                  borderColor: selected && !opt.disabled ? c.primary : `${c.text}14`,
+                  // Visually obvious disabled state: the unavailable option is
+                  // dimmed, so it cannot be mistaken for a live choice.
+                  opacity: opt.disabled ? 0.55 : 1,
                 }}
               >
                 {/* Radio circle */}
                 <View style={{
                   width: 20, height: 20, borderRadius: 10,
                   borderWidth: 2,
-                  borderColor: useDefaultContact === opt.value ? c.primary : `${c.text}30`,
+                  borderColor: selected && !opt.disabled ? c.primary : `${c.text}30`,
                   alignItems: 'center', justifyContent: 'center',
                 }}>
-                  {useDefaultContact === opt.value && (
+                  {selected && !opt.disabled && (
                     <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: c.primary }} />
                   )}
                 </View>
-                <Text style={{
-                  flex: 1, fontSize: 13, fontWeight: useDefaultContact === opt.value ? '700' : '500',
-                  color: useDefaultContact === opt.value ? c.primary : c.text,
-                  textAlign: isRTL ? 'right' : 'left', writingDirection: isRTL ? 'rtl' : 'ltr',
-                }}>
-                  {opt.label}
-                </Text>
+                <View style={{ flex: 1, minWidth: 0 }}>
+                  <Text style={{
+                    fontSize: 13, fontWeight: selected && !opt.disabled ? '700' : '500',
+                    color: selected && !opt.disabled ? c.primary : c.text,
+                    textAlign: isRTL ? 'right' : 'left', writingDirection: isRTL ? 'rtl' : 'ltr',
+                  }}>
+                    {opt.label}
+                  </Text>
+                  {opt.hint ? (
+                    <Text style={{
+                      fontSize: 11, marginTop: 2, ...mutedTextStyle(c, 0.45),
+                      textAlign: isRTL ? 'right' : 'left', writingDirection: isRTL ? 'rtl' : 'ltr',
+                    }}>
+                      {opt.hint}
+                    </Text>
+                  ) : null}
+                </View>
               </Pressable>
-            ))}
+              );
+            })}
 
             {/* Custom contact fields — only shown when custom is selected */}
             {!useDefaultContact && (

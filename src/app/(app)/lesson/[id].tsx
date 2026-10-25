@@ -719,10 +719,22 @@ export default function LessonPlayer() {
       const status = Number(e?.httpStatus ?? 0);
       const code = String(e?.errorCode ?? '');
       const refused = status === 403 || code === 'forbidden' || /access denied|forbidden/i.test(msg);
-      // A missing/unusable watermark engine (503) is its own state: the bytes
-      // were refused on purpose and retrying the download link cannot help.
-      const engineMissing = code === 'watermark_unavailable' || /watermarking is not available/i.test(msg);
-      console.error('[openMaterial] delivery error:', msg, { status, code });
+      // ── PERSONALIZED-DELIVERY STAGES ─────────────────────────────────────
+      // The server now names the failing stage on the response code (see
+      // MaterialDeliveryController::failureStage and the codes thrown by
+      // PdfWatermarkService). They are all the SAME user-facing state — the
+      // personalized copy could not be produced, and the unwatermarked
+      // original will never be substituted — but the exact code is logged so a
+      // field report says WHERE it failed instead of "it failed".
+      const WATERMARK_STAGES = [
+        'watermark_unavailable', 'watermark_busy', 'engine_unavailable',
+        'render_failed', 'pdf_parse', 'output_missing', 'publish_failed',
+        'source_missing', 'source_unreadable', 'source_not_pdf',
+        'source_encrypted', 'source_too_large', 'storage_unwritable', 'schema',
+      ];
+      const engineMissing =
+        WATERMARK_STAGES.includes(code) || /watermarking is not available/i.test(msg);
+      console.error('[openMaterial] delivery error:', msg, { status, code, stage: code || 'unreported' });
       setDownloadState({
         visible: true, fileName: name,
         progress: 0, status: 'error',

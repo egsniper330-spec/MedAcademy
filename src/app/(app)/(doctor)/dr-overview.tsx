@@ -148,10 +148,18 @@ export default function DoctorDashboard() {
           <StatCard label={t('drOverview.totalStudents')}      value={totalStudents}       icon={<Users size={layout.captionSize + 2} color="#fff" />}        color="#7C3AED" />
           <StatCard label={t('status.active')}                 value={activeStudents}      icon={<GraduationCap size={layout.captionSize + 2} color="#fff" />} color="#16A34A" />
           <StatCard label={t('status.suspended')}              value={suspendedStudents}   icon={<Ban size={layout.captionSize + 2} color="#fff" />}          color="#D97706" />
-          <StatCard label={t('nav.myCourses')}                 value={totalCourses}        icon={<BookOpen size={layout.captionSize + 2} color="#fff" />}     color={c.primary} />
+          {/* `nav.myCourses` is the TAB label ("My Courses" / "دوراتي") and read
+              as a navigation item rather than a statistic, while the card after
+              it said only "Published" — which is a STATUS, not a count of the
+              instructor's courses. This card now states the statistic plainly:
+              how many courses this instructor owns. */}
+          <StatCard label={t('drOverview.courses')}            value={totalCourses}        icon={<BookOpen size={layout.captionSize + 2} color="#fff" />}     color={c.primary} />
           <StatCard label={t('nav.credits')}                   value={creditsRemaining}    icon={<CreditCard size={layout.captionSize + 2} color="#fff" />}   color="#2DA8FF" />
           <StatCard label={t('drOverview.todayActivations')}   value={todayActivations}    icon={<Zap size={layout.captionSize + 2} color="#fff" />}         color="#F59E0B" />
-          <StatCard label={t('drOverview.published')}          value={courses.filter(cr => cr.status === 'published').length} icon={<TrendingUp size={layout.captionSize + 2} color="#fff" />} color="#6366F1" />
+          {/* Still the PUBLISHED-ONLY subset — its scope is unchanged, but the
+              label now says so ("Published Courses"/"دورات منشورة") so it can
+              never be read as the total course count next to the real one. */}
+          <StatCard label={t('drOverview.publishedCourses')}    value={courses.filter(cr => cr.status === 'published').length} icon={<TrendingUp size={layout.captionSize + 2} color="#fff" />} color="#6366F1" />
         </View>
 
         {/* Quick Actions — shared tile component (fixed-square icon box; the

@@ -150,9 +150,50 @@ PDF_WATERMARK_VECTOR_FG_OPACITY=0.30  # marks that cross the lecture (0.08–0.5
 PDF_WATERMARK_MAX_PAGES=150
 PDF_WATERMARK_MAX_SOURCE_BYTES=52428800
 PDF_WATERMARK_LOCK_WAIT_SECONDS=25
+PDF_WATERMARK_TIME_LIMIT_SECONDS=90  # render budget (raised for the render only, then restored)
 MATERIAL_PDF_URL_TTL_SECONDS=300
 MATERIAL_PDF_MINT_PER_MINUTE=60
 ```
+
+`PDF_WATERMARK_TIME_LIMIT_SECONDS` (default 90, minimum 30) exists because the
+layered vector engine redraws every page with six layers plus a content bake. A
+shared host whose `max_execution_time` is 30 s can be exhausted mid-render by a
+large document, and a PHP fatal on timeout returns **no JSON at all** — the app
+can only show its generic "personalized copy could not be prepared" message.
+`PdfWatermarkService::personalize()` raises the limit for the render, restores the
+worker's original value immediately afterwards, and turns everything else it can
+catch into a NAMED stage (see §2.3).
+
+### 2.3 Diagnosing a failed delivery (stage codes)
+
+A refused mint now names its stage. The code is the response `code` field, the
+`stage` in the `material_pdf_failed` audit row, and the reason logged by
+`ErrorHandler`:
+
+| code | meaning | fix |
+|---|---|---|
+| `engine_unavailable` | no usable FPDI/TCPDF in `backend/vendor` | upload/extract `vendor-pdf-engine.zip`; `php backend/scripts/watermark-diagnostics.php` |
+| `pdf_parse` | FPDI cannot read this document (compressed xref / unsupported structure) | source-side problem; re-export the PDF |
+| `render_failed` | the engine threw while drawing | `cause` in the audit row / `error_log` names the class + message |
+| `output_missing` | render produced no file | usually memory or disk; check the PHP error log |
+| `publish_failed` | the finished file could not be renamed into place | permissions on `storage/private` |
+| `storage_unwritable` | a directory could not be created | permissions |
+| `schema` | `lesson_material_pdfs` is missing a column | apply the migration for this feature |
+| `source_*` | the stored source file is missing/empty/not a PDF/encrypted/oversized | re-upload the material |
+| `watermark_busy` | another worker is rendering the same variant | retry (short-lived) |
+
+End-to-end probe — walks the same stages the controller walks and stops at the
+first failure, printing the stage, exception class and API code:
+
+```
+php backend/scripts/diagnose-pdf-delivery.php                 # environment + engine only
+php backend/scripts/diagnose-pdf-delivery.php <material_id>   # full pipeline incl. a real render
+```
+
+Exit code 0 = every exercised stage passed. It prints no document bytes, no
+token, no student name and no id.
+
+
 
 `PDF_WATERMARK_TOKEN_SECRET` is **not** required: the token signs with
 `STORAGE_SIGNED_URL_SECRET`, falling back to `JWT_SECRET`, both of which are

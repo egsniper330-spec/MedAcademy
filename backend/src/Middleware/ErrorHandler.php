@@ -48,6 +48,21 @@ final class ErrorHandler
             // { error: { code: UPDATE_REQUIRED, latestVersion, latestVersionCode,
             //            minimumVersionCode, updateUrl, updateMode } }.
             $code = 'api_error';
+            // ── CODED REFUSALS MUST REACH THE CLIENT ───────────────────────────
+            // ApiException takes a machine-readable code as its third argument
+            // (e.g. 'engine_unavailable', 'watermark_busy', 'pdf_parse'). It used
+            // to be swallowed here, so EVERY coded refusal arrived as the generic
+            // 'api_error': the app could not tell "the PDF engine is missing" from
+            // "this document is being prepared" from "this file cannot be parsed",
+            // and rendered the same message for all of them. The code is chosen by
+            // the server, carries no data and is safe to expose (the specific
+            // overrides below still win).
+            foreach ($e->errors as $candidate) {
+                if (is_string($candidate) && $candidate !== '') {
+                    $code = $candidate;
+                    break;
+                }
+            }
             if ($e->status === 426 && $request !== null) {
                 $code = 'UPDATE_REQUIRED';
                 try {

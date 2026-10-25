@@ -113,15 +113,22 @@ ok('each tab still takes an equal share of the width',
 
 /* ───────────────────────── 4. the iOS native bar ──────────────────────── */
 
-section('4. iOS native bar: mirror only when the system will not');
-ok('the shell compares the APP direction with the platform direction',
+section('4. iOS native bar: the OFFICIAL layoutDirection prop (no array reversal)');
+// ROOT CAUSE of the reported bug: reversing the `<Screen>` array cannot reorder
+// a this-navigator's routes — Expo Router's `withLayoutContext` builds them from
+// the router's own file-system order (`useSortedScreens` → `getSortedChildren`)
+// and re-sorts our children by name. So the previous "manual mirror" was a no-op
+// and Arabic showed Profile at the far right. The library's `layoutDirection`
+// prop is applied natively as SwiftUI's `.environment(\.layoutDirection, …)` and
+// mirrors the real tab bar.
+ok('the native bar is driven by the official layoutDirection prop',
+  /layoutDirection=\{appRTL \? 'rtl' : 'ltr'\}/.test(iosShell));
+ok('it follows the APP locale (not the platform I18nManager state)',
   /const \{ isRTL: appRTL \} = useTranslation\(\)/.test(iosShell) &&
-  /I18nManager\.isRTL === true/.test(iosShell) &&
-  /const needsManualMirror = appRTL !== platformRTL/.test(iosShell));
-ok('it reverses a COPY of the visible tabs (registry array is not mutated)',
-  /\[\.\.\.visibleTabs\]\.reverse\(\)/.test(iosShell));
-ok('the mirror is applied only when needed',
-  /needsManualMirror \? \[\.\.\.visibleTabs\]\.reverse\(\) : visibleTabs/.test(iosShell));
+  !/I18nManager/.test(iosShell));
+ok('it does NOT reverse the array (that is a no-op and would double-mirror)',
+  !/\[\.\.\.visibleTabs\]\.reverse\(\)/.test(iosShell) &&
+  !/needsManualMirror/.test(iosShell));
 ok('hidden (drawer-only) screens are still excluded from the native bar',
   /tabs\.filter\(\(tab\) => tab\.hidden !== true\)/.test(iosShell));
 ok('screens are still registered by NAME (route mapping unchanged)',

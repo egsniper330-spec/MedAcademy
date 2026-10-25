@@ -370,6 +370,9 @@ export const en: TranslationDict = {
   'home.greetingFallback': 'Hello!',
   'home.welcomeBack': 'Welcome back',
   'home.welcome': 'Welcome',
+  // The student dashboard's greeting line above the account name. Kept separate
+  // from `home.welcome` because that one doubles as a role label elsewhere.
+  'home.hello': 'Hello',
   // Greeting subtitle accessibility label — the value is the account name
   // (data), so it is interpolated untouched.
   'home.signedInAs': 'Signed in as {name}',
@@ -1658,6 +1661,8 @@ export const en: TranslationDict = {
   'cb.contact.title': 'Contact Information',
   'cb.contact.help': 'Students will use these to subscribe to this course.',
   'cb.contact.useDefault': 'Use my default contact information',
+  'cb.contact.useDefaultUnavailable': 'Unavailable — configure this in your Profile page',
+  'cb.contact.useDefaultChecking': 'Checking your default contact information…',
   'cb.contact.useCustom': 'Use custom contact information for this course',
   'cb.contact.whatsapp': 'WhatsApp number — e.g. +201234567890',
   'cb.contact.telegram': 'Telegram — e.g. @username or https://t.me/…',
@@ -1764,6 +1769,12 @@ export const en: TranslationDict = {
   'drOverview.roleLabel': 'Doctor Panel',
   'drOverview.totalStudents': 'Total Students',
   'drOverview.todayActivations': "Today's Activations",
+  // A COUNT of courses, not a status. The card used to read "Published" beside
+  // the number, which described publication state rather than how many courses
+  // the instructor owns.
+  'drOverview.courses': 'Courses',
+  // The published SUBSET stays available but is now unmistakably a subset.
+  'drOverview.publishedCourses': 'Published Courses',
   'drOverview.published': 'Published',
   'drOverview.quickActions': 'Quick Actions',
   'drOverview.recentEnrollments': 'Recent Enrollments',
@@ -2569,6 +2580,7 @@ export const ar: TranslationDict = {
   'home.greetingFallback': 'مرحبًا!',
   'home.welcomeBack': 'مرحبًا بعودتك',
   'home.welcome': 'مرحباً',
+  'home.hello': 'مرحباً',
   'home.signedInAs': 'مسجّل الدخول باسم {name}',
   'home.noMatchingCourses': 'لا توجد كورسات مطابقة',
   'home.noEnrolledCourses': 'لم تشترك في أي كورسات بعد',
@@ -3839,6 +3851,8 @@ export const ar: TranslationDict = {
   'cb.contact.title': 'بيانات التواصل',
   'cb.contact.help': 'يستخدمها الطلاب للاشتراك في هذه الدورة.',
   'cb.contact.useDefault': 'استخدام بيانات التواصل الافتراضية',
+  'cb.contact.useDefaultUnavailable': 'غير متاحة — يمكن إعدادها من صفحة الملف الشخصي',
+  'cb.contact.useDefaultChecking': 'جارٍ التحقق من بيانات التواصل الافتراضية…',
   'cb.contact.useCustom': 'استخدام بيانات تواصل مخصصة لهذه الدورة',
   'cb.contact.whatsapp': 'رقم واتساب — مثال: +201234567890',
   'cb.contact.telegram': 'تيليجرام — مثال: @username أو https://t.me/…',
@@ -3945,6 +3959,8 @@ export const ar: TranslationDict = {
   'drOverview.roleLabel': 'لوحة الدكتور',
   'drOverview.totalStudents': 'إجمالي الطلاب',
   'drOverview.todayActivations': 'التفعيلات اليوم',
+  'drOverview.courses': 'عدد الدورات',
+  'drOverview.publishedCourses': 'دورات منشورة',
   'drOverview.published': 'منشور',
   'drOverview.quickActions': 'إجراءات سريعة',
   'drOverview.recentEnrollments': 'أحدث التسجيلات',

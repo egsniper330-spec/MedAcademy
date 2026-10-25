@@ -50,12 +50,34 @@ function ok(name, cond, detail) {
 console.log('\nStudent dashboard greeting');
 const dashboard = stripComments(read('src/app/(app)/(student)/dashboard.tsx'));
 
-ok("greeting is the localized welcome word (line 1)",
-  /<DashboardHeader[\s\S]*?greeting=\{t\('home\.welcome'\)\}/.test(dashboard));
+// The greeting line is `home.hello` ("Hello" / "مرحباً") — kept separate from
+// `home.welcome` because that key still serves as a role label on other
+// dashboards. Line 1 = greeting, line 2 = the account name (below).
+ok("greeting is the localized greeting word (line 1)",
+  /<DashboardHeader[\s\S]*?greeting=\{t\('home\.hello'\)\}/.test(dashboard));
 ok('the account name is the second line',
   /<DashboardHeader[\s\S]*?subtitle=\{accountName\}/.test(dashboard));
 ok('the account name comes from the authenticated profile (not a role label)',
   /profile\?\.full_name\?\.trim\(\)/.test(dashboard));
+
+/* ── the BLOCK, not just the text, must follow the locale ─────────────────
+ * The reported defect was "the greeting is still on the upper-left in Arabic"
+ * even though every Text already had `textAlign: 'right'`. The cause was in the
+ * shared header: the title stack is a COLUMN, so its `alignItems` resolves on
+ * the HORIZONTAL cross axis — and under `direction: 'rtl'` Yoga FLIPS that axis,
+ * so `flex-end` meant LEFT. rtl + flex-end mirrored twice and pinned the whole
+ * block (greeting + account name) to the left edge.
+ *
+ * The contract pinned here: the stack is physically anchored — pinned to ltr so
+ * `flex-end` IS the right edge — and the text inside still follows the locale. */
+const headerSrc = stripComments(read('src/components/DashboardHeader.tsx'));
+ok('the greeting stack anchors the whole block to the locale edge',
+  /alignItems: isRTL \? 'flex-end' : 'flex-start'/.test(headerSrc));
+ok('the stack is pinned to a physical direction (no double mirror)',
+  /flex: 1,[\s\S]{0,220}alignItems: isRTL \? 'flex-end' : 'flex-start',\s*direction: 'ltr',/.test(headerSrc) &&
+  !/alignItems: isRTL \? 'flex-end' : 'flex-start',\s*direction: isRTL \? 'rtl'/.test(headerSrc));
+ok('the greeting text itself still follows the locale',
+  /textAlign: isRTL \? 'right' : 'left'/.test(headerSrc));
 ok('an empty name falls back to a localized string',
   /profile\?\.full_name\?\.trim\(\)\s*\|\|\s*t\('common\.user'\)/.test(dashboard));
 ok('the translated ROLE label is no longer passed to the header',

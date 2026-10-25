@@ -419,5 +419,53 @@ console.log('\u2500\u2500 Part 6: existing behaviour unchanged \u2500\u2500');
       .every((f) => fs.existsSync(path.join(ROOT, 'tests', f + '.test.cjs'))));
 }
 
+// ── Part 7: verification SCOPE (what a resume may reuse) ─────────────────
+// The complaint behind this part: "returning to the app takes a very long time
+// on iPhone". The pipeline now separates checks by WHAT THEY MEASURE instead of
+// re-fetching everything: a resume reuses only evidence that cannot have changed
+// while the app sat in the background AND is already inside its bounded window
+// (a server-attested integrity verdict, a verified TLS pin). Every detector that
+// a backgrounded app CAN invalidate — VPN, proxy, debugger, developer options,
+// screen recording, overlay — still runs on resume. Nothing becomes authorization.
+console.log('\u2500\u2500 Part 7: verification scope by trigger \u2500\u2500');
+{
+  const SEC = read('src/lib/security.ts');
+  check('7a: the scope is an explicit, defaulted parameter (full when omitted)',
+    /export async function runSecurityChecks\(\s*options: \{ scope\?: SecurityCheckScope \} = \{\},\s*\)/.test(SEC)
+    && /const scope: SecurityCheckScope = options\.scope === 'resume' \? 'resume' : 'full';/.test(SEC));
+  check('7b: only a resume/periodic trigger narrows the scope',
+    /const scope: SecurityCheckScope = \(reason\.startsWith\('resume'\) \|\| reason === 'periodic'\)/.test(CONTEXT));
+  check('7c: the resume trigger is what requests it',
+    /requestResumeVerification\('resume'\)/.test(CONTEXT)
+    && /requestResumeVerification\('resume-vpn-settled'\)/.test(CONTEXT));
+  check('7d: pre-video, manual and post-update checks stay FULL',
+    /runGuardedCheck\('pre-video'\)/.test(CONTEXT)
+    && /runEvaluation\('manual'\)/.test(CONTEXT)
+    && /runPeriodicCheckRef\.current\(\)/.test(CONTEXT));
+  check('7e: only a VERIFIED TLS pin is recorded (never an inconclusive probe)',
+    /if \(outcome !== 'pin_verified'\)/.test(SEC)
+    && /_sslProbePassedAt = Date.now\(\);/.test(SEC));
+  check('7f: the pin is reused only inside a bounded window, only on resume',
+    /const SSL_PROBE_REUSE_MS = 90_000;/.test(SEC)
+    && /scope === 'resume' && Date\.now\(\) - _sslProbePassedAt < SSL_PROBE_REUSE_MS/.test(SEC));
+  check('7g: volatile signals are NEVER skipped in the resume scope',
+    /track\('vpn',/.test(SEC) && /track\('proxy',/.test(SEC)
+    && /track\('debug',/.test(SEC) && /track\('devOptions',/.test(SEC)
+    && /track\('screenRec',/.test(SEC) && /track\('overlay',/.test(SEC));
+  check('7h: the local detectors still run on every scope (one native batch)',
+    /track\('root',/.test(SEC) && /track\('tamper',/.test(SEC)
+    && /track\('frida',/.test(SEC) && /track\('magisk',/.test(SEC));
+  check('7i: the platform-integrity verdict keeps its own TTL',
+    /_piResult !== null && Date\.now\(\) < _piExpiry/.test(SEC)
+    && /const PI_TTL_MS = 10 \* 60 \* 1000;/.test(SEC));
+  check('7j: timings are recorded per detector and returned (sanitized)',
+    /timings\[name\] = Date\.now\(\) - t0;/.test(SEC)
+    && /scope, timings,/.test(SEC)
+    && /\[SecurityCheck\]\[timing\] scope='/.test(SEC));
+  check('7k: the policy model and fail-closed semantics are untouched',
+    /evaluateSecurityResult\(\{/.test(SEC)
+    && /blocksLogin: true,[\s\S]{0,120}blocksVideo: true/.test(CONTEXT));
+}
+
 console.log('\n' + passed + ' passed, ' + failed + ' failed');
 process.exit(failed ? 1 : 0);

@@ -54,9 +54,9 @@ const resources = read('src/lib/i18n/resources.ts');
 
 section('1. Doctor header — greeting, real name, and the bell');
 
-ok('the greeting line is the localized "Welcome" (same key as the student dashboard)',
+ok('the greeting line is localized (doctor: role label, student: greeting line)',
   /roleLabel=\{t\('home\.welcome'\)\}/.test(drOverview) &&
-  /greeting=\{t\('home\.welcome'\)\}/.test(studentDash));
+  /greeting=\{t\('home\.hello'\)\}/.test(studentDash));
 ok('the headline is the authenticated profile name, not a hardcoded string',
   /const doctorName = String\(profile\?\.full_name \?\? ''\)\.trim\(\) \|\| firstName \|\| t\('role\.doctor'\)/.test(drOverview) &&
   /greeting=\{doctorName\}/.test(drOverview));

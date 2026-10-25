@@ -85,15 +85,25 @@ export function DashboardHeader({
 
       {/* Title stack — gap from button. `minWidth: 0` lets a long display name
           truncate instead of pushing the trailing controls off the row.
-          `alignItems` anchors the WHOLE greeting block to the app locale's
-          starting edge (right in Arabic), so the greeting and the account name
-          below it line up on the same edge even if a text-level `textAlign`
-          were ever lost — the reported "Arabic greeting still aligned left". */}
+
+          THE `alignItems` BUG THAT KEPT THE ARABIC GREETING ON THE LEFT:
+          this is a COLUMN, so `alignItems` resolves against the HORIZONTAL
+          cross axis — and under `direction: 'rtl'` Yoga flips that axis, so
+          `flex-end` means LEFT. The previous code set rtl AND flex-end, i.e.
+          it mirrored twice and dropped the whole block (greeting + account
+          name) on the left edge in Arabic, no matter what `textAlign` said.
+
+          Now the container is pinned to `ltr`, so `flex-end` is PHYSICALLY the
+          right edge and `flex-start` the left edge — exactly one mirror, and
+          the same one every other drawer/tab surface uses. Children also
+          declare their own `textAlign`/`writingDirection`, so the text inside
+          the block still follows the locale while the block itself is anchored
+          to the correct edge. */}
       <View style={{
         flex: 1,
         minWidth: 0,
         alignItems: isRTL ? 'flex-end' : 'flex-start',
-        direction: isRTL ? 'rtl' : 'ltr',
+        direction: 'ltr',
         marginLeft: isRTL ? 0 : spacing.sm + spacing.xs,
         marginRight: isRTL ? spacing.sm + spacing.xs : 0,
       }}>

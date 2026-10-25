@@ -82,11 +82,16 @@ console.log('── Root cause: the fullscreen gate is network-bound ──');
     'the pipeline awaits the NETWORK-bound Play Integrity check (backend nonce → Google → backend verify)');
   ok(/await getSecurityPolicies\(\)/.test(security),
     'the pipeline awaits the server security-policy fetch');
-  ok(/withTimeout\(genuinelyOffline \? Promise\.resolve\(null\) : runPlayIntegrityCheck\(\)/.test(security),
+  ok(/genuinelyOffline \? Promise\.resolve\(null\) : runPlayIntegrityCheck\(\)/.test(security),
     'the offline fast-path skips only the genuinely-offline case (honest, not a bypass)');
   ok(/const checkBeforeVideo = useCallback\(async \(\): Promise<boolean> => \{/.test(ctx),
     'checkBeforeVideo() is async (callers must await a network round-trip)');
-  ok(/await runGuardedCheck\(\)/.test(ctx),
+  // Pre-video re-validation must be a FRESH, complete evaluation: it is the
+  // moment protected media is authorised, so it can never ride on cached
+  // evidence. The reason it passes is what selects the scope, and only a
+  // resume/periodic trigger may use the narrower one.
+  ok(/await runGuardedCheck\('pre-video'\)/.test(ctx) &&
+    /const scope: SecurityCheckScope = \(reason\.startsWith\('resume'\) \|\| reason === 'periodic'\)[\s\S]{0,120}\? 'resume'[\s\S]{0,40}: 'full'/.test(ctx),
     'checkBeforeVideo() runs a FULL fresh evaluation (not a cached verdict read)');
   ok(!/setTimeout/.test(fnBody(ctx, 'const checkBeforeVideo = useCallback')),
     'the delay is NOT an artificial timer — it is the evaluation itself');
