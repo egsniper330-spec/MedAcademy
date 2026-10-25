@@ -22,7 +22,15 @@ const check = (name, ok) => checks.push([name, !!ok]);
 
 check('course page renders title before its live localized count', /greeting=\{t\('nav\.myCourses'\)\}[\s\S]*?roleLabel=\{tCount\('drCourses\.count', courses\.length\)\}[\s\S]*?roleLabelPosition="below"/.test(courses));
 check('new-course default title is localized', /title: t\('drCourses\.newCourseDefault'\)/.test(courses));
-check('shared dashboard header mirrors row and logical padding by active locale', /direction: isRTL \? 'rtl' : 'ltr'/.test(header) && /paddingStart: isRTL \? rightPad : leftPad \+ spacing\.sm/.test(header));
+// The shared header mirrors with a PHYSICAL row order and physical padding.
+// `direction` is pinned to ltr so the platform's own RTL state cannot reverse
+// the row a second time (that double reversal is what put the Arabic greeting
+// at the trailing edge).
+check('shared dashboard header mirrors the row physically and pads by active locale',
+  /flexDirection: isRTL \? 'row-reverse' : 'row'/.test(header) &&
+  /direction: 'ltr'/.test(header) &&
+  /paddingLeft: isRTL \? rightPad : leftPad \+ spacing\.sm/.test(header) &&
+  /paddingRight: isRTL \? leftPad \+ spacing\.sm : rightPad/.test(header));
 check('dashboard title is aligned to locale and can shrink for long text', /textAlign: isRTL \? 'right' : 'left'/.test(header) && /minWidth: 0/.test(header));
 check('doctor greeting shows authenticated profile name and localized welcome', /roleLabel=\{t\('home\.welcome'\)\}/.test(overview) && /greeting=\{doctorName\}/.test(overview) && /profile\?\.full_name/.test(overview));
 check('notification count, tap route, and hamburger control remain wired', /router\.push\('\/\(app\)\/notifications'/.test(overview) && /unreadCount > 0/.test(overview) && /<HamburgerButton plain color=\{c\.text\}/.test(header));

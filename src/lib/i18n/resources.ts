@@ -446,6 +446,12 @@ export const en: TranslationDict = {
   // lesson titles, instructor names, tags, descriptions and the price amount
   // are DATA and are never routed through here.
   'course.notFound': 'Course not found',
+  // ── Course load FAILURE (not the same thing as not-found) ─────────────────
+  // A timeout, an aborted/queued request during device verification, an auth
+  // refresh or a 5xx must never be reported as "course not found": the course
+  // still exists and the student's access is unchanged.
+  'course.loadFailedTitle': 'Could not load this course',
+  'course.loadFailedBody': 'Your access has not changed. Check your connection and try again.',
   'course.archivedTitle': 'Course Archived',
   'course.archivedOn': 'Archived {date}',
   'course.previewTitle': 'Preview as Student',
@@ -457,6 +463,16 @@ export const en: TranslationDict = {
   'course.featureFreePreview': 'Free preview available',
   'course.featureSequential': 'Sequential learning path',
   'course.subscribe': 'Subscribe',
+  // ── Subscribe sheet (doctor / course contact flow) ────────────────────────
+  // Shared by the Explore list and the course page. These are
+  // application-owned labels only — the instructor's name, number, handle and
+  // any admin-provided custom label are DATA and are never translated.
+  'course.subscribeSheetTitle': 'Subscribe to this Course',
+  'course.subscribeSheetHint': 'Choose how you would like to contact the instructor.',
+  'course.subscribeSheetLoading': 'Loading contact options…',
+  'course.subscribeSheetError': 'Could not load the contact options.',
+  'course.subscribeSheetErrorHint': 'Check your connection and try again.',
+  'course.subscribeSheetEmpty': 'No contact methods are available for this course yet.',
   'course.selectSection': 'Select section {title}',
   'course.collapseSection': 'Collapse section: {title}',
   'course.expandSection': 'Expand section: {title}',
@@ -2624,6 +2640,10 @@ export const ar: TranslationDict = {
 
   // ── شاشة تفاصيل الدورة ─────────────────────────────────────────────────
   'course.notFound': 'الدورة غير موجودة',
+  // فشل التحميل ≠ عدم وجود الكورس: انتهاء المهلة أو انقطاع الشبكة لا يعني
+  // أن الكورس اختفى أو أن صلاحية الطالب تغيّرت.
+  'course.loadFailedTitle': 'تعذّر تحميل هذا الكورس',
+  'course.loadFailedBody': 'صلاحيتك لم تتغيّر. تحقّق من اتصالك وحاول مرة أخرى.',
   'course.archivedTitle': 'الدورة مؤرشفة',
   'course.archivedOn': 'أُرشفت في {date}',
   'course.previewTitle': 'معاينة كطالب',
@@ -2635,6 +2655,14 @@ export const ar: TranslationDict = {
   'course.featureFreePreview': 'معاينة مجانية متاحة',
   'course.featureSequential': 'مسار تعلّم متسلسل',
   'course.subscribe': 'اشترك',
+  // طقم «ورقة الاشتراك» — نصوص التطبيق فقط، أما اسم المدرّس ورقمه ومعرّفه
+  // فهي بيانات ولا تُترجم.
+  'course.subscribeSheetTitle': 'الاشتراك في هذا الكورس',
+  'course.subscribeSheetHint': 'اختر طريقة التواصل مع المدرّس.',
+  'course.subscribeSheetLoading': 'جارٍ تحميل وسائل التواصل…',
+  'course.subscribeSheetError': 'تعذّر تحميل وسائل التواصل.',
+  'course.subscribeSheetErrorHint': 'تحقّق من اتصالك ثم حاول مرة أخرى.',
+  'course.subscribeSheetEmpty': 'لا توجد وسائل تواصل متاحة لهذا الكورس حتى الآن.',
   'course.selectSection': 'اختر القسم {title}',
   'course.collapseSection': 'طيّ القسم: {title}',
   'course.expandSection': 'توسيع القسم: {title}',

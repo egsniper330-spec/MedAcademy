@@ -82,13 +82,15 @@ function AppLayoutNav() {
   //     with the correct new role → correct dashboard is pushed
   // ─────────────────────────────────────────────────────────────────────────
 
-  // reset() no longer called on foreground: nulling the verdict during the
-  // re-check created the BLOCKED→UNKNOWN→ALLOWED window (see AppState handler
-  // below). check() alone re-validates with native-state reads — policies use
-  // a short 5-min TTL cache by design; VPN/native flags are read fresh every
-  // call, so stale-cached "safe" results cannot persist here.
+  // reset() is never called on foreground: nulling the verdict during the
+  // re-check created the BLOCKED→UNKNOWN→ALLOWED window (see the AppState
+  // handler below). The post-resume re-validation is owned by SecurityContext
+  // (one evaluation, coalesced, fail-closed) — this layout does not duplicate
+  // it. Policies use a short 5-min TTL cache by design; VPN/native flags are
+  // read fresh on every evaluation, so a stale-cached "safe" result cannot
+  // persist across a resume.
   const {
-    check, onNewBlockingThreat, isSuperAdmin,
+    onNewBlockingThreat, isSuperAdmin,
     hasWarnings, blocksLogin, threats, riskScore,
   } = useSecurity();
 
@@ -205,26 +207,27 @@ function AppLayoutNav() {
       appStateRef.current = nextState;
       if (!wasBackground || !isForeground) return;
       ensureFeatureFlagsFresh();
-      // RACE-CONDITION FIX: do NOT reset() the verdict here. The previous
-      // reset() nulled the authoritative result for the entire duration of the
-      // fresh check — consumers fell back to an all-clear default, the gate
-      // unmounted, and the app was briefly fully usable under an ACTIVE
-      // security condition (Home → reopen → 2–3s unprotected window).
-      // Fail-closed instead: the LAST VERDICT stays mounted while check()
-      // re-runs with cached-state invalidation inside runSecurityChecks()
-      // (detectors re-read native state every call). The gate now renders
-      // BLOCKED → CHECKING/BLOCKED → SAFE-or-BLOCKED — never BLOCKED → ALLOWED.
-      void check().then((result) => {
-        // ALL blocking threats are enforced by the central SecurityGate overlay
-        // (non-dismissible, auto-unlocking). Do NOT navigate to security-warning
-        // for them — without the blocksLogin param that screen rendered in
-        // warn-mode WITH "Continue Anyway", a bypass of a block_login policy.
-        // Non-blocking warnings (hasWarnings only) still route there.
-        presentWarningScreen(result);
-      });
+      // NO SECOND VERIFICATION HERE (duplicate-work fix).
+      //
+      // SecurityContext runs the authoritative post-resume verification from its
+      // own AppState listener (`requestResumeVerification('resume')`, which
+      // already starts immediately, coalesces with any in-flight run and
+      // publishes the verdict). This layout used to call `check()` as well, so
+      // every resume ran TWO full evaluations — two native detector sweeps, two
+      // TLS probes and two policy fetches — while the network lock held every
+      // screen request. That duplicate work is a direct contributor to "it takes
+      // very long to load after coming back", and it also raced the resume
+      // token (a layout verdict could land after the context's newer one).
+      //
+      // Warnings are still presented on that single verdict: the
+      // verdict-change effect below (`hasWarnings` / `blocksLogin` / `threats` /
+      // `riskScore`) routes non-blocking findings to /security-warning, and the
+      // central SecurityGate owns every blocking one. Verdicts are never reset
+      // here, so the gate keeps its fail-closed behaviour
+      // (BLOCKED → CHECKING/BLOCKED → SAFE-or-BLOCKED, never BLOCKED → ALLOWED).
     });
     return () => sub.remove();
-  }, [check, presentWarningScreen]);
+  }, [presentWarningScreen]);
 
   // ── Continuous monitoring → forced redirect ────────────────────────────────
   // Subscribe to SecurityContext's periodic-check callback so that VPN / Developer

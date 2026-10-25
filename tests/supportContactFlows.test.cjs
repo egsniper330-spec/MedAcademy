@@ -153,9 +153,17 @@ console.log('── ONE shared flow: both Subscribe entry points use it ──')
     'the sheet falls back to the Super Admin support contacts when nothing is configured');
   ok(/safeSupportUrl/.test(sheet) && /contactUrl/.test(sheet),
     'every rendered destination is built/validated by the shared helpers');
-  ok(/Loading contact options/.test(sheet) && /No contact methods are available/.test(sheet) &&
-     /Could not load the contact options/.test(sheet),
+  // The three states are still distinct AND every one of them is translated
+  // (the sheet used to render hardcoded English under an Arabic UI).
+  ok(/course\.subscribeSheetLoading/.test(sheet) && /course\.subscribeSheetEmpty/.test(sheet) &&
+     /course\.subscribeSheetError/.test(sheet),
     'loading, empty and error states are all present');
+  ok(/course\.subscribeSheetTitle/.test(sheet) && /course\.subscribeSheetHint/.test(sheet),
+    'the sheet title and hint are localized, not hardcoded English');
+  ok(/direction: isRTL \? 'rtl' : 'ltr'/.test(sheet),
+    'the sheet lays itself out for the active locale (RTL mirrors rows and icons)');
+  ok(/CONTACT_LABEL_KEYS/.test(sheet),
+    'contact channel labels go through the dictionary while custom labels stay data');
   ok(/onPress=\{retry\}/.test(sheet), 'the error state offers a retry (no silent failure)');
   ok(!/\+?\d{9,}/.test(sheet.replace(/\/\/[^\n]*/g, '')), 'no hardcoded phone number anywhere in the sheet');
 }

@@ -89,8 +89,20 @@ ok('the hamburger/drawer header component is unchanged in use',
   /<DashboardHeader/.test(drOverview) && /<HamburgerButton plain color=\{c\.text\} \/>/.test(dashHeader));
 
 // Shared header hardening.
-ok('a long name truncates instead of pushing the controls (minWidth: 0)',
-  /flex: 1, minWidth: 0, marginStart: spacing\.sm \+ spacing\.xs/.test(dashHeader));
+// The title stack still takes the remaining width and may shrink to zero, so a
+// long display name truncates instead of pushing the actions off the row. The
+// gap is now expressed with PHYSICAL margins (the row is pinned to ltr so the
+// mirror is the single `flexDirection` in the model, not a second reversal).
+ok('a long name truncates instead of pushing the controls (flex 1 + minWidth 0)',
+  /flex: 1,\s*minWidth: 0,/.test(dashHeader));
+ok('the header gap follows the app direction with physical margins',
+  /marginLeft: isRTL \? 0 : spacing\.sm \+ spacing\.xs/.test(dashHeader) &&
+  /marginRight: isRTL \? spacing\.sm \+ spacing\.xs : 0/.test(dashHeader));
+ok('the greeting block is anchored to the locale start edge (right in Arabic)',
+  /alignItems: isRTL \? 'flex-end' : 'flex-start'/.test(dashHeader));
+ok('the header row mirrors physically, never via Yoga direction',
+  /flexDirection: isRTL \? 'row-reverse' : 'row',/.test(dashHeader) &&
+  /direction: 'ltr',/.test(dashHeader));
 ok('the greeting is single-line so it can never overlap the actions',
   /greeting\}?\s*<\/Text>/s.test(dashHeader) && (dashHeader.match(/numberOfLines=\{1\}/g) || []).length >= 2);
 ok('the Arabic overline drops Latin tracking (cursive joins stay intact)',

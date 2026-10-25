@@ -58,6 +58,29 @@
  *   This decision was derived from the reported production behaviour; it has
  *   NOT been re-confirmed on a physical Android device in this change.
  *
+ * ── 2026-10-25: THE LAYER IS NOW CHOSEN BY THE SERVER'S CONFIG ─────────────
+ * The iPhone report ("still the OLD watermark look, and it sits still for long
+ * stretches") is the provider `rtext` layer doing exactly what it is documented
+ * to do: it relocates once per `interval` (8 s). Continuous billiard motion is
+ * not available on that layer at any setting, so a provider-only session can
+ * never satisfy the motion requirement.
+ *
+ * The server therefore selects the layer with `VIDEO_WATERMARK_LAYER`
+ * (backend/src/Video/VdoCipherService.php):
+ *
+ *   app (default) → no `annotate` on the OTP, so `annotateApplied` is false and
+ *                   EVERY player path renders the app overlay: the RN overlay
+ *                   for the native SDK and the in-HTML watermark for the web
+ *                   player. One layer, continuous motion, Plyr-identical design.
+ *   provider      → attach `annotate`; this module then reports
+ *                   `provider_only` and the app overlay is suppressed, so the
+ *                   anti-duplication rule is preserved on both settings.
+ *
+ * Nothing here decides the policy — this module only reads `annotateApplied`.
+ * That keeps the "exactly one visible watermark" invariant true whichever
+ * setting the deployment runs, including an OLD server that still attaches
+ * `annotate` (the session then stays `provider_only`, as before).
+ *
  * ── PROVIDER LAYER: WHAT IT DOES AND DOES NOT DO ───────────────────────────
  * `buildAnnotate()` (backend/src/Video/VdoCipherService.php) now emits the
  * identity as `NAME` then the bare `MED-####` (no `ID:` prefix) and passes

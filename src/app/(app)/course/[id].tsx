@@ -18,6 +18,13 @@ import { SubscribeSheet } from '@/components/SubscribeSheet';
 import { resolveCourseContact } from '@/lib/subscribeContact';
 import { neuColors, useLayout, safeTop, safeLeft, safeBottom, mutedTextStyle } from '@/lib/neu';
 import { isPreviewingCourse, stopPreviewAsStudent } from '@/lib/previewAsStudent';
+import {
+  classifyCourseLoadError,
+  nextRetryDelayMs,
+  sanitizeLoadError,
+  shouldAutoRetry,
+  type CourseLoadError,
+} from '@/lib/courseLoadError';
 import { useTranslation } from '@/lib/i18n';
 import { formatLocalizedDate } from '@/lib/i18n/date';
 import type { RelativePathString } from 'expo-router';
@@ -81,6 +88,16 @@ export default function CourseDetail() {
   const [isSubscribed, setIsSubscribed] = useState(false);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  // Distinguishes "this course does not exist" from "this load failed".
+  const [loadError, setLoadError] = useState<CourseLoadError | null>(null);
+  // Generation guard: a resume/refocus can start a load while a previous one is
+  // still in flight (queued behind the security lock). Only the newest load may
+  // commit state, so a stale error can never replace fresh content — and a
+  // stale success can never resurrect a course the user already left.
+  const loadGenRef = useRef(0);
+  // Bounded auto-retry bookkeeping (transient failures only, never while
+  // content is on screen).
+  const autoRetryRef = useRef(0);
   // Initialise from session cache so state survives lesson → back navigation
   const [expandedSections, setExpandedSections] = useState<Set<string>>(
     () => id ? (_sectionStateCache.get(id) ?? new Set<string>()) : new Set<string>()
@@ -92,7 +109,12 @@ export default function CourseDetail() {
   const previewMode = isPreviewingCourse(id);
 
   const loadData = useCallback(async () => {
-    if (!id) return;
+    if (!id) {
+      setLoading(false);
+      return;
+    }
+    const gen = ++loadGenRef.current;
+    const startedAt = Date.now();
     try {
       const isStudent = profile?.role === 'student' || isPreviewingCourse(id);
       const wantsEnrollment = isStudent && !!profile;
@@ -103,13 +125,11 @@ export default function CourseDetail() {
       // serialization — this is the most-tapped screen in the app and the
       // extra round trip directly delayed content appearing.
       //
-      // Failure semantics are deliberately UNCHANGED: handlers are attached
-      // below, at the same point in the flow as before, so a rejected
-      // subscription read still skips setIsSubscribed/setCourseProgress and
-      // is caught by the outer try — and by then course/progress are already
-      // committed, exactly as they were with the sequential version. The
-      // early no-op catch only prevents a transient unhandled-rejection
-      // warning while phase 1 is still in flight.
+      // The early no-op catch only prevents a transient unhandled-rejection
+      // warning while phase 1 is still in flight. An enrollment failure is
+      // NON-FATAL for the course itself: it costs the progress extras, never
+      // the course page (previously it aborted the whole load and produced the
+      // bogus "Course not found").
       const subsP = wantsEnrollment ? getMySubscriptions(profile!.id) : null;
       const cpP = wantsEnrollment
         ? getCourseProgress(profile!.id, id).catch(() => null)
@@ -118,11 +138,27 @@ export default function CourseDetail() {
 
       const [courseData, prog] = await Promise.all([
         getCourseById(id),
-        profile ? getLessonProgress(profile.id, id) : Promise.resolve([]),
+        // Progress is a secondary read: a failure here must not blank the page.
+        profile ? getLessonProgress(profile.id, id).catch(() => []) : Promise.resolve([]),
       ]);
+      if (gen !== loadGenRef.current) return; // superseded by a newer load
+
+      if (!courseData) {
+        // A REAL not-found: `.single()` resolves with `data: null` and no error
+        // when the row does not exist (the adapter does not synthesise 404).
+        setCourse(null);
+        setLoadError({ kind: 'notFound' });
+        return;
+      }
+
       setCourse(courseData);
       setProgress(prog);
-      if (courseData) prefetchCourseImages(courseImageUrlsFrom([courseData]));
+      setLoadError(null);
+      autoRetryRef.current = 0;
+      if (__DEV__) {
+        console.log('[CourseDetail] loaded', `duration=${Date.now() - startedAt}ms`, `sections=${courseData?.sections?.length ?? 0}`);
+      }
+      prefetchCourseImages(courseImageUrlsFrom([courseData]));
       if (courseData?.sections?.length) {
         // Restore from session cache; only reset if no prior state exists for this course
         if (!_sectionStateCache.has(id!)) {
@@ -131,12 +167,33 @@ export default function CourseDetail() {
         // else: leave existing expanded state untouched — user may have expanded sections
       }
       if (subsP && cpP) {
-        const [subs, cp] = await Promise.all([subsP, cpP]);
-        setIsSubscribed(subs.some((s: any) => s.course_id === id || s.course?.id === id));
-        setCourseProgress(cp);
+        try {
+          const [subs, cp] = await Promise.all([subsP, cpP]);
+          if (gen !== loadGenRef.current) return;
+          setIsSubscribed(subs.some((s: any) => s.course_id === id || s.course?.id === id));
+          setCourseProgress(cp);
+        } catch (enrollErr) {
+          // Non-fatal by design: the course and its lessons are already shown;
+          // the subscribe button simply stays in its safe (not-subscribed) state.
+          if (__DEV__) console.warn('[CourseDetail] enrollment extras unavailable', sanitizeLoadError(enrollErr));
+        }
       }
-    } catch {}
-    setLoading(false);
+    } catch (err) {
+      if (gen !== loadGenRef.current) return;
+      const classified = classifyCourseLoadError(err);
+      // Diagnosable without any secret: status, code, duration, classification.
+      console.warn('[CourseDetail] load FAILED', {
+        durationMs: Date.now() - startedAt,
+        ...sanitizeLoadError(err),
+        classifiedAs: classified.kind,
+        retryable: classified.kind === 'transient' ? classified.retryable : false,
+      });
+      setLoadError(classified);
+    } finally {
+      // ALWAYS end the spinner for the newest load — a hung/queued request can
+      // never leave the screen spinning forever.
+      if (gen === loadGenRef.current) setLoading(false);
+    }
   }, [id, profile]); // isPreviewingCourse read live — preview toggles re-render via previewMode state below
 
   // Stale-while-revalidate: the FIRST entry shows the full-screen spinner, but
@@ -166,6 +223,38 @@ export default function CourseDetail() {
     void loadData();
   }, [previewMode, loadData]);
   const onRefresh = async () => { setRefreshing(true); await loadData(); setRefreshing(false); };
+
+  /** Manual retry from the failure state — resets the auto-retry budget. */
+  const retryLoad = useCallback(() => {
+    autoRetryRef.current = 0;
+    setLoadError(null);
+    setLoading(true);
+    void loadData();
+  }, [loadData]);
+
+  /**
+   * BOUNDED AUTO-RETRY (transient only).
+   *
+   * A resume that coincides with device verification can make the first read
+   * fail for a reason that clears itself within a second or two (the request is
+   * queued behind the lock and the bound expires, or the connection is still
+   * re-attaching). Two attempts with 0.8 s → 1.6 s backoff recover that case
+   * without the user tapping anything.
+   *
+   * It deliberately does NOT retry when:
+   *   • content is already on screen (the stale-while-revalidate path owns it),
+   *   • the failure is authoritative (401/403/suspended — a policy decision),
+   *   • the course is genuinely missing (not-found is not a transient state),
+   *   • the budget is spent. There is no timer chain and no polling.
+   */
+  useEffect(() => {
+    if (!shouldAutoRetry(loadError, { hasContent: !!course, attempt: autoRetryRef.current })) return;
+    const timer = setTimeout(() => {
+      autoRetryRef.current += 1;
+      void loadData();
+    }, nextRetryDelayMs(autoRetryRef.current));
+    return () => clearTimeout(timer);
+  }, [course, loadError, loadData]);
 
   // Persist expanded state to session cache whenever it changes
   useEffect(() => {
@@ -223,16 +312,35 @@ export default function CourseDetail() {
     return prev && !completedIds.has(prev.id);
   };
 
-  if (loading) return (
+  // Full-screen spinner ONLY while there is genuinely nothing to show. A
+  // background refresh keeps the course mounted (stale-while-revalidate).
+  if (loading && !course) return (
     <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: c.base }}>
       <ActivityIndicator color={c.primary} size="large" />
     </View>
   );
-  if (!course) return (
-    <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: c.base }}>
-      <Text style={{ ...mutedTextStyle(c, 0.5), textAlign: 'center' }}>{t('course.notFound')}</Text>
-    </View>
-  );
+  if (!course) {
+    // "Not found" is reserved for a real missing row. A failed load says so,
+    // reassures the student that access is unchanged, and offers a retry — the
+    // previous code rendered "Course not found" for every failure, including a
+    // timeout during post-resume device verification.
+    const isNotFound = loadError?.kind === 'notFound';
+    return (
+      <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', padding: 28, gap: 12, backgroundColor: c.base }}>
+        <Text style={{ fontSize: 17, fontWeight: '800', color: c.text, textAlign: 'center' }}>
+          {isNotFound ? t('course.notFound') : t('course.loadFailedTitle')}
+        </Text>
+        {!isNotFound && (
+          <Text style={{ ...mutedTextStyle(c, 0.5), fontSize: 13, textAlign: 'center', lineHeight: 19 }}>
+            {t('course.loadFailedBody')}
+          </Text>
+        )}
+        {!isNotFound && (
+          <NeuButton label={t('common.tryAgain')} variant="primary" onPress={retryLoad} />
+        )}
+      </View>
+    );
+  }
 
   const renderTree = (
     <ScrollView style={{ flex: 1, backgroundColor: c.base }}

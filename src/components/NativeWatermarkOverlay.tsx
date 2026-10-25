@@ -115,13 +115,29 @@ export function NativeWatermarkOverlay({
   // Motion state (x, y, vx, vy) — shared so the UI-thread frame loop owns it.
   const motionSV = useSharedValue<WatermarkMotionState | null>(null);
 
-  // Measured geometry. Kept in refs (read by the loop) and mirrored in state
-  // only where React must re-render (the responsive pill cap).
+  // Measured geometry.
+  //
+  // ── WHY SHARED VALUES *AND* REFS (the stationary-watermark root cause) ────
+  // The frame callback is a WORKLET: it runs on the UI thread. A plain JS ref
+  // (`containerWRef.current`) is captured by value when the worklet is created
+  // and mutations on the JS thread are NOT visible to it — so the loop read
+  // `0`, returned early on every frame, and the pill only ever moved when
+  // `syncMotion()` re-projected it from the JS thread (layout/resize). That is
+  // exactly the reported "stationary for long periods, moves occasionally".
+  // Geometry therefore lives in SHARED VALUES (which the UI thread reads
+  // live); the refs are kept for the JS-side placement math.
+  const containerWSV = useSharedValue(0);
+  const containerHSV = useSharedValue(0);
+  const pillWSV = useSharedValue(0);
+  const pillHSV = useSharedValue(0);
   const containerWRef = useRef(0);
   const containerHRef = useRef(0);
   const pillWRef = useRef(0);
   const pillHRef = useRef(0);
   const prevBoundsRef = useRef<MotionBounds>({ width: 0, height: 0 });
+  // DEV evidence hook: last reported position, so the heartbeat below can say
+  // whether the mark actually moved (dimensions/state only).
+  const lastProofRef = useRef<{ x: number; y: number } | null>(null);
 
   const [maxPillWidth, setMaxPillWidth] = useState(WATERMARK_MAX_WIDTH_CAP);
 
@@ -194,16 +210,24 @@ export function NativeWatermarkOverlay({
     setFontPx((v) => (v === nextFont ? v : nextFont));
     containerWRef.current = width;
     containerHRef.current = height;
+    containerWSV.value = width;
+    containerHSV.value = height;
     syncMotion();
     onContainerLayout?.(e);
-  }, [onContainerLayout, syncMotion]);
+  }, [containerHSV, containerWSV, onContainerLayout, syncMotion]);
 
   const handlePillLayout = useCallback((e: LayoutChangeEvent) => {
     const { width, height } = e.nativeEvent.layout;
-    if (width > 0) pillWRef.current = width;
-    if (height > 0) pillHRef.current = height;
+    if (width > 0) {
+      pillWRef.current = width;
+      pillWSV.value = width;
+    }
+    if (height > 0) {
+      pillHRef.current = height;
+      pillHSV.value = height;
+    }
     syncMotion();
-  }, [syncMotion]);
+  }, [pillHSV, pillWSV, syncMotion]);
 
   // ── Frame loop (UI thread) ────────────────────────────────────────────────
   // Armed only while there is a real motion state to advance. Reanimated
@@ -215,11 +239,13 @@ export function NativeWatermarkOverlay({
     if (dtMs == null || dtMs <= 0) return;
     const m = motionSV.value;
     if (m === null) return;
-    const w = containerWRef.current;
-    const h = containerHRef.current;
+    // Shared values only — a JS ref would be a stale copy on this thread and
+    // would silently freeze the mark (see the geometry note above).
+    const w = containerWSV.value;
+    const h = containerHSV.value;
     if (w <= 0 || h <= 0) return;
-    const pw = pillWRef.current;
-    const ph = pillHRef.current;
+    const pw = pillWSV.value;
+    const ph = pillHSV.value;
     if (pw <= 0 || ph <= 0) return;
 
     const dt = Math.min(dtMs / 1000, WM_MOTION_MAX_STEP_S);
@@ -254,6 +280,22 @@ export function NativeWatermarkOverlay({
       const w = containerWRef.current;
       const h = containerHRef.current;
       if (w <= 0 || h <= 0) return;
+
+      // ── MOTION PROOF (DEV) ────────────────────────────────────────────
+      // Every 2 s while mounted, report the position and the distance travelled
+      // since the previous sample. `moved: NO` is the signature of a dead frame
+      // loop (the reported defect); continuous movement shows a non-zero delta
+      // on each axis with periodic direction changes. Dimensions/state only —
+      // no identity, no token.
+      const prevSample = lastProofRef.current;
+      const dx = prevSample ? m.x - prevSample.x : 0;
+      const dy = prevSample ? m.y - prevSample.y : 0;
+      const travelled = Math.hypot(dx, dy);
+      lastProofRef.current = { x: m.x, y: m.y };
+      console.log(
+        `[VDO_WM_MOVE] moved=${travelled > 0.5 ? 'yes' : 'NO'} x=${Math.round(m.x)} y=${Math.round(m.y)} dx=${dx.toFixed(1)} dy=${dy.toFixed(1)} vx=${m.vx.toFixed(1)} vy=${m.vy.toFixed(1)} box=${w.toFixed(0)}x${h.toFixed(0)}`,
+      );
+
       const inBounds = isWatermarkMotionInBounds(m, { width: w, height: h }, size());
       if (!inBounds) {
         // Signals a real bug — surfaced without any identity/token data.

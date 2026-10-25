@@ -113,24 +113,36 @@ for (const [label, model] of [['LTR', ltr], ['RTL', rtl]]) {
 
 /* ─────────────────── the panel track (the RTL anchor) ──────────────────── */
 
-console.log('\npanel track is anchored by flex, not by physical edges');
+console.log('\npanel track is anchored by PHYSICAL flex order (never by Yoga direction)');
 const ltrTrack = panelTrackStyle(ltr);
 const rtlTrack = panelTrackStyle(rtl);
-check('LTR track runs ltr and justifies to flex-start',
-  ltrTrack.direction === 'ltr' && ltrTrack.justifyContent === 'flex-start');
-check('RTL track runs rtl and justifies to flex-end',
-  rtlTrack.direction === 'rtl' && rtlTrack.justifyContent === 'flex-end');
-check('both tracks lay the panel out on one row',
-  ltrTrack.flexDirection === 'row' && rtlTrack.flexDirection === 'row');
+// REGRESSION GUARD: the revision before this one anchored RTL with
+// `direction: 'rtl' + justifyContent: 'flex-end'`. Yoga reverses the main axis
+// for `row` under RTL, so flex-end is the LEFT edge there — the panel was laid
+// out left while its +width slide pointed right, and it visibly "changed
+// sides" on iPhone. `flexDirection` is physical and cannot be flipped, so the
+// mirror must live there and nowhere else.
+check('both tracks pin their own layout direction to ltr (kills double reversal)',
+  ltrTrack.direction === 'ltr' && rtlTrack.direction === 'ltr');
+check('both tracks justify to the main-start edge',
+  ltrTrack.justifyContent === 'flex-start' && rtlTrack.justifyContent === 'flex-start');
+check('LTR track is a plain row (panel on the LEFT edge)',
+  ltrTrack.flexDirection === 'row');
+check('RTL track is a row-reverse (panel on the RIGHT edge)',
+  rtlTrack.flexDirection === 'row-reverse');
+check('the RTL model no longer carries a flex-end justification',
+  !('justify' in rtl) && !('layoutDirection' in rtl));
+check('the panel re-declares the APP locale direction for its own content',
+  ltr.panelDirection === 'ltr' && rtl.panelDirection === 'rtl');
 check('both tracks stretch the panel to full height',
   ltrTrack.alignItems === 'stretch' && rtlTrack.alignItems === 'stretch');
-// The invariant the bug violated: the flex anchor and the slide direction must
-// agree about which edge is home. LTR closes leftwards from flex-start; RTL
-// closes rightwards from flex-end.
-check('LTR: flex-start anchor + negative closed offset agree',
-  ltrTrack.justifyContent === 'flex-start' && ltr.closedOffset < 0);
-check('RTL: flex-end anchor + positive closed offset agree',
-  rtlTrack.justifyContent === 'flex-end' && rtl.closedOffset > 0);
+// The invariant the bug violated: the physical anchor and the slide direction
+// must agree about which edge is home. LTR closes leftwards from a row anchor;
+// RTL closes rightwards from a row-reverse anchor.
+check('LTR: left-edge anchor + negative closed offset agree',
+  ltrTrack.flexDirection === 'row' && ltr.closedOffset < 0);
+check('RTL: right-edge anchor + positive closed offset agree',
+  rtlTrack.flexDirection === 'row-reverse' && rtl.closedOffset > 0);
 check('the model carries no physical panel edge any more',
   !('panelEdge' in ltr) && !('backdropWidth' in rtl));
 
@@ -139,7 +151,8 @@ check('the model carries no physical panel edge any more',
 console.log('\nresponsive widths');
 const tabletRtl = drawerDirection(true, TABLET);
 check('tablet RTL closes by the tablet width', tabletRtl.closedOffset === TABLET);
-check('tablet RTL keeps the rtl track', panelTrackStyle(tabletRtl).direction === 'rtl');
+check('tablet RTL keeps the right-hand (row-reverse) anchor',
+  panelTrackStyle(tabletRtl).flexDirection === 'row-reverse');
 const zero = drawerDirection(true, 0);
 check('a zero width does not produce NaN', Number.isFinite(zero.closedOffset) && zero.closedOffset === 0);
 const negative = drawerDirection(true, -50);

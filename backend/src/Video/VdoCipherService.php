@@ -81,6 +81,18 @@ final class VdoCipherService
      * Returns "" when there is nothing safe to render, so callers skip the field
      * entirely. The API secret is never part of this value.
      */
+    /**
+     * Which watermark layer this deployment renders: 'app' (default) or
+     * 'provider'. Unknown values fall back to 'app' — a typo in the .env must
+     * not silently switch a deployment to a layer whose motion the product does
+     * not expect.
+     */
+    private function streamWatermarkLayer(): string
+    {
+        $layer = strtolower(trim(Config::string('VIDEO_WATERMARK_LAYER', 'app')));
+        return $layer === 'provider' ? 'provider' : 'app';
+    }
+
     public function buildAnnotate(string $fullName, string $watermarkId): string
     {
         // IDENTITY LAYOUT: line 1 is the recipient's display name, line 2 is
@@ -228,7 +240,27 @@ final class VdoCipherService
         // watermark is present so it can suppress its own overlay — that flag is
         // what keeps this from regressing into the reported duplicate watermark.
         $annotated = false;
-        if (!$isPrivileged && $profile !== null) {
+        // ── WATERMARK LAYER POLICY (one layer, never two) ─────────────────
+        // `VIDEO_WATERMARK_LAYER` selects WHICH watermark this deployment
+        // renders:
+        //   'app'      (default) — the client overlay, which is the ONLY layer
+        //              that can carry continuous billiard motion and the
+        //              Plyr-identical design. Used on every player path
+        //              (RN overlay for the native SDK, in-HTML DOM overlay for
+        //              the WebView). No `annotate` is attached, so there is
+        //              nothing to duplicate.
+        //   'provider' — attach VdoCipher's burned-in `rtext` annotation and
+        //              let the app suppress its own overlay (`annotateApplied`
+        //              = true). Stronger forensic layer (present in the stream,
+        //              survives a modified client) but the provider owns its
+        //              position/timing: it relocates only every `interval` ms, so
+        //              continuous motion is impossible on it.
+        //
+        // This is a LABELLED, REVERSIBLE POLICY CHOICE, not a capability
+        // fallback: setting VIDEO_WATERMARK_LAYER=provider restores the exact
+        // pre-change behaviour without a code change. DRM, playback tokens and
+        // every access gate are untouched either way.
+        if ($this->streamWatermarkLayer() === 'provider' && !$isPrivileged && $profile !== null) {
             $name = trim((string) $profile['full_name']);
             $wmId = trim((string) ($profile['public_user_id'] ?? ''));
             if ($wmId === '') {

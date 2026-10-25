@@ -119,7 +119,24 @@ export type RandomFn = () => number;
 
 // ─── Internals ────────────────────────────────────────────────────────────────
 
-const clamp = (v: number, lo: number, hi: number): number => (v < lo ? lo : v > hi ? hi : v);
+/**
+ * ── WORKLET NOTE (why every function here is a worklet) ────────────────────
+ * `stepWatermarkMotion` is called from Reanimated's `useFrameCallback`, which
+ * runs on the UI thread. Under Reanimated 4 / react-native-worklets, a worklet
+ * may only call OTHER worklets — calling a plain JS function from the UI thread
+ * throws (`tried to synchronously call a non-worklet function`), and the frame
+ * callback then aborts. That is EXACTLY why the watermark sat still for long
+ * stretches and only "jumped" when a layout pass re-projected it: the physics
+ * ran once on the JS thread at placement and never again.
+ *
+ * The functions stay ordinary callable functions on the JS thread (a worklet is
+ * still a normal function), so the Node test suite and `syncMotion()` are
+ * unaffected. They must remain PURE — no imports, no globals, no React.
+ */
+const clamp = (v: number, lo: number, hi: number): number => {
+  'worklet';
+  return v < lo ? lo : v > hi ? hi : v;
+};
 
 /**
  * Largest legal top-left coordinate on one axis. Floors at 0 so an element
@@ -127,6 +144,7 @@ const clamp = (v: number, lo: number, hi: number): number => (v < lo ? lo : v > 
  * producing a negative range.
  */
 function maxCoord(container: number, element: number): number {
+  'worklet';
   const m = container - element;
   return m > 0 ? m : 0;
 }
@@ -144,6 +162,7 @@ function advanceAxis(
   dtSec: number,
   max: number,
 ): { pos: number; vel: number; reflected: boolean } {
+  'worklet';
   if (max <= 0 || vel === 0 || dtSec <= 0) {
     return { pos: clamp(pos, 0, max), vel, reflected: false };
   }
@@ -239,6 +258,7 @@ export function stepWatermarkMotion(
   bounds: MotionBounds,
   size: MotionSize,
 ): WatermarkMotionState {
+  'worklet';
   const dt = clamp(dtSec, 0, WM_MOTION_MAX_STEP_S);
   if (dt === 0) {
     return { ...state };

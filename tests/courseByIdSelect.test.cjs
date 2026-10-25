@@ -221,7 +221,7 @@ ok(offenders.length === 0, offenders.length === 0
 /* ══ 5. the error must not be swallowed into a misleading state ═══════════ */
 console.log('4. failure surfacing on the course screen');
 const course = read(path.join(ROOT, 'src', 'app', '(app)', 'course', '[id].tsx'));
-ok(/if \(!id\) return;/.test(course), 'loadData still no-ops when the route id is absent');
+ok(/if \(!id\) \{/.test(course) && /return;/.test(course), 'loadData still no-ops when the route id is absent');
 ok(/catch \{\}/.test(course) || /catch \(/.test(course), 'loadData still guards against unhandled rejections');
 
 /* ══ summary ════════════════════════════════════════════════════════════ */

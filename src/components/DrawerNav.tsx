@@ -368,6 +368,13 @@ export default function DrawerNav() {
 
   const slideAnim = useRef(new Animated.Value(dir.closedOffset)).current;
   const overlayAnim = useRef(new Animated.Value(0)).current;
+  // The side the animated value was last positioned for. A language switch can
+  // change the panel's home edge at ANY time (including while the drawer is
+  // open), and the OLD translateX belongs to the old edge — letting the spring
+  // travel from one side of the screen to the other is exactly the visible
+  // "it jumps sides" defect. When the edge changes we SNAP to the correct
+  // offset for the new edge first, then animate only if the drawer is open.
+  const sideRef = useRef(dir.side);
   // Track whether the component should remain mounted during close animation.
   // Without this, the component unmounts instantly on close (return null below)
   // and the overlay fade-out is cut short, creating a visual "two layers" effect
@@ -375,6 +382,15 @@ export default function DrawerNav() {
   const [shouldRender, setShouldRender] = useState(isOpen);
   const shouldRenderRef = useRef(shouldRender);
   shouldRenderRef.current = shouldRender;
+
+  // Direction change (language switched): re-home the panel on the NEW edge
+  // with no cross-screen animation. Runs before the open/close effect below,
+  // so that effect only ever animates the in-place slide.
+  useEffect(() => {
+    if (sideRef.current === dir.side) return;
+    sideRef.current = dir.side;
+    slideAnim.setValue(isOpen ? dir.openOffset : dir.closedOffset);
+  }, [dir.side, dir.closedOffset, dir.openOffset, isOpen, slideAnim]);
 
   useEffect(() => {
     if (isOpen) {
@@ -552,13 +568,13 @@ export default function DrawerNav() {
         <Pressable style={{ flex: 1 }} onPress={closeDrawer} accessibilityLabel={t('nav.closeMenu')} accessibilityRole="button" />
       </Animated.View>
 
-      {/* PANEL TRACK — the single direction-aware anchor.
-          The panel used to be pinned with physical `left: 0` / `right: 0`,
-          which Android's RTL layout direction can resolve against the writing
-          direction instead of the screen edge — the panel then slid in from the
-          right but settled on the left. Flexbox has no such ambiguity: the
-          forced `direction` + `justifyContent` below put the panel on the
-          inline-start edge of the app's OWN locale, on every RN version. */}
+      {/* PANEL TRACK — the single, PHYSICAL anchor.
+          The panel is placed by `flexDirection` alone (row = left edge,
+          row-reverse = right edge) with the track's own `direction` pinned to
+          ltr, so nothing can reverse it a second time. The previous revision
+          used `direction: rtl` + `justifyContent: flex-end`, which Yoga
+          resolves to the LEFT edge in an RTL row — the panel then animated
+          from the right onto the left ("it changes sides") on iPhone too. */}
       <View
         pointerEvents="box-none"
         style={[
@@ -570,6 +586,11 @@ export default function DrawerNav() {
         style={{
           alignSelf: 'stretch',
           width: DRAWER_WIDTH,
+          // The panel re-declares the APP LOCALE's direction (the track is
+          // pinned to ltr so the mirror above is the only one). Arabic content
+          // therefore still lays out RTL even on the launch before the native
+          // RTL relaunch has been applied.
+          direction: dir.panelDirection,
           // The sidebar is its own layer of the ladder, not the page colour:
           // painting `base` made the drawer dissolve into the screen behind it.
           backgroundColor: c.navSurface,

@@ -57,7 +57,10 @@ ok('the old spinner-on-every-focus path is gone',
   !/useFocusEffect\(useCallback\(\(\) => \{ setLoading\(true\); loadData\(\); \}/.test(course));
 ok('content is only considered valid for THIS course id',
   /course\.id === id/.test(course));
-ok('the first visit still shows the full-screen spinner', /if \(loading\) return \(/.test(course));
+ok('the first visit still shows the full-screen spinner',
+  /if \(loading && !course\) return \(/.test(course));
+ok('a background refresh never blanks content that is already on screen',
+  !/if \(loading\) return \(/.test(course));
 
 console.log('\nThe hook itself');
 const hook = stripComments(read('src/lib/useStaleWhileRevalidateFocus.ts'));

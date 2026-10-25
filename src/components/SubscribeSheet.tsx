@@ -27,10 +27,31 @@ import { X, UserCheck, RefreshCw } from 'lucide-react-native';
 import { neuColors, mutedTextStyle } from '@/lib/neu';
 import { getPublicSupportContacts, SUPPORT_ICONS } from '@/lib/api';
 import {
-  contactLabel, contactUrl, safeSupportUrl, supportPlatformKey,
+  contactUrl, safeSupportUrl, supportPlatformKey,
   SUBSCRIBE_CONTACT_ORDER,
   type SubscribeContact, type SubscribeContactKey,
 } from '@/lib/subscribeContact';
+import { useTranslation } from '@/lib/i18n';
+
+/**
+ * Localized label for each contact channel.
+ *
+ * `contactLabel()` in subscribeContact.ts stays the pure English fallback (it is
+ * also the accessibility fallback used before the i18n layer is ready). The
+ * channel names are UI vocabulary — "Call", "Email" and "Website" are
+ * translated, while product names (WhatsApp, Telegram, X, Facebook, Instagram)
+ * keep their brand spelling in both languages.
+ */
+const CONTACT_LABEL_KEYS: Record<SubscribeContactKey, string> = {
+  whatsapp:  'contact.whatsapp',
+  telegram:  'contact.telegram',
+  phone:     'contact.phone',
+  email:     'contact.email',
+  x:         'contact.twitter',
+  website:   'contact.website',
+  facebook:  'contact.facebook',
+  instagram: 'contact.instagram',
+};
 
 /** Kept as an alias so existing callers keep compiling. */
 export type SubscribeSheetContact = SubscribeContact;
@@ -70,6 +91,12 @@ export function SubscribeSheet({ visible, courseTitle, contact, onClose }: Props
   const c = isDark ? neuColors.dark : neuColors.light;
   const insets = useSafeAreaInsets();
   const { height: screenH } = useWindowDimensions();
+  // Every application-owned string in this flow is translated (it used to be
+  // hardcoded English, which is why Arabic users saw an English sheet). The
+  // sheet also declares the APP LOCALE's direction, so rows mirror (icon on
+  // the right) even on the launch before the native RTL relaunch lands.
+  const { t, isRTL } = useTranslation();
+  const txtAlign = isRTL ? 'right' as const : 'left' as const;
 
   // (1) Contacts supplied by the caller (doctor / course).
   const localEntries = useMemo<SheetEntry[]>(() => {
@@ -78,10 +105,10 @@ export function SubscribeSheet({ visible, courseTitle, contact, onClose }: Props
       const raw = contact?.[key];
       if (!raw || !raw.trim()) continue;         // disabled / empty ⇒ not offered
       const url = contactUrl(key, raw);
-      if (url) out.push({ key, label: contactLabel(key), url });
+      if (url) out.push({ key, label: t(CONTACT_LABEL_KEYS[key] ?? 'contact.title'), url });
     }
     return out;
-  }, [contact]);
+  }, [contact, t]);
 
   const needsFallback = localEntries.length === 0;
 
@@ -114,7 +141,9 @@ export function SubscribeSheet({ visible, courseTitle, contact, onClose }: Props
           if (!key || !url) continue;
           entries.push({
             key,
-            label: (item.label ?? '').trim() || contactLabel(key),
+            // A custom admin label is DATA and is shown verbatim; only the
+            // default per-channel label is translated.
+            label: (item.label ?? '').trim() || t(CONTACT_LABEL_KEYS[key] ?? 'contact.title'),
             url,
             order: typeof item.order === 'number' ? item.order : 0,
           });
@@ -130,7 +159,7 @@ export function SubscribeSheet({ visible, courseTitle, contact, onClose }: Props
       }
     })();
     return () => { cancelled = true; };
-  }, [visible, needsFallback, fallback, attempt]);
+  }, [visible, needsFallback, fallback, attempt, t]);
 
   const retry = useCallback(() => {
     setFallbackError(false);
@@ -166,6 +195,9 @@ export function SubscribeSheet({ visible, courseTitle, contact, onClose }: Props
         <View style={{
           // Elevated rung: the sheet must sit visibly ABOVE the page.
           backgroundColor: c.elevated,
+          // App-locale direction for the whole sheet: rows, icons and text
+          // align from the starting edge (right in Arabic).
+          direction: isRTL ? 'rtl' : 'ltr',
           borderTopLeftRadius: 28,
           borderTopRightRadius: 28,
           paddingTop: 12,
@@ -191,22 +223,25 @@ export function SubscribeSheet({ visible, courseTitle, contact, onClose }: Props
             paddingHorizontal: 24, marginBottom: 6,
           }}>
             <View style={{ flex: 1 }}>
-              <Text style={{ fontSize: 18, fontWeight: '800', color: c.text }}>
-                Subscribe to this Course
+              <Text style={{ fontSize: 18, fontWeight: '800', color: c.text, textAlign: txtAlign }}>
+                {t('course.subscribeSheetTitle')}
               </Text>
               <Text style={{
                 fontSize: 13, ...mutedTextStyle(c, 0.5),
-                marginTop: 3, lineHeight: 18,
+                marginTop: 3, lineHeight: 18, textAlign: txtAlign,
               }} numberOfLines={2}>
+                {/* Course title is DATA — shown verbatim in its own script. */}
                 {courseTitle}
               </Text>
             </View>
             <Pressable
               onPress={onClose}
               accessibilityRole="button"
-              accessibilityLabel="Close"
+              accessibilityLabel={t('common.close')}
               style={{
-                marginLeft: 12,
+                // `marginStart` follows the sheet's direction (left in LTR,
+                // right in RTL) so the control stays on the inner edge.
+                marginStart: 12,
                 width: 34, height: 34, borderRadius: 17,
                 alignItems: 'center', justifyContent: 'center',
                 backgroundColor: c.inputSurface,
@@ -224,11 +259,9 @@ export function SubscribeSheet({ visible, courseTitle, contact, onClose }: Props
           {/* Sub-label */}
           <Text style={{
             fontSize: 13, ...mutedTextStyle(c, 0.45),
-            paddingHorizontal: 24, marginBottom: 24, lineHeight: 18,
+            paddingHorizontal: 24, marginBottom: 24, lineHeight: 18, textAlign: txtAlign,
           }}>
-            {entries.length > 0
-              ? 'Choose how you would like to contact the instructor.'
-              : undefined}
+            {entries.length > 0 ? t('course.subscribeSheetHint') : undefined}
           </Text>
 
           {/* Scrollable content — enabled so long content scrolls on small devices */}
@@ -241,7 +274,7 @@ export function SubscribeSheet({ visible, courseTitle, contact, onClose }: Props
               <View style={{ alignItems: 'center', paddingVertical: 32, gap: 12 }}>
                 <ActivityIndicator color={c.primary} />
                 <Text style={{ fontSize: 13, ...mutedTextStyle(c, 0.45) }}>
-                  Loading contact options…
+                  {t('course.subscribeSheetLoading')}
                 </Text>
               </View>
             ) : fallbackError ? (
@@ -250,12 +283,12 @@ export function SubscribeSheet({ visible, courseTitle, contact, onClose }: Props
                   fontSize: 14, ...mutedTextStyle(c, 0.55),
                   textAlign: 'center', lineHeight: 20,
                 }}>
-                  Could not load the contact options.{'\n'}Check your connection and try again.
+                  {t('course.subscribeSheetError')}{'\n'}{t('course.subscribeSheetErrorHint')}
                 </Text>
                 <Pressable
                   onPress={retry}
                   accessibilityRole="button"
-                  accessibilityLabel="Retry loading contact options"
+                  accessibilityLabel={t('common.retry')}
                   style={{
                     flexDirection: 'row', alignItems: 'center', gap: 8,
                     paddingVertical: 10, paddingHorizontal: 16, borderRadius: 14,
@@ -263,7 +296,7 @@ export function SubscribeSheet({ visible, courseTitle, contact, onClose }: Props
                   }}
                 >
                   <RefreshCw size={15} color={c.primary} />
-                  <Text style={{ fontSize: 13, fontWeight: '700', color: c.primary }}>Try again</Text>
+                  <Text style={{ fontSize: 13, fontWeight: '700', color: c.primary }}>{t('common.tryAgain')}</Text>
                 </Pressable>
               </View>
             ) : showEmpty ? (
@@ -273,7 +306,7 @@ export function SubscribeSheet({ visible, courseTitle, contact, onClose }: Props
                   fontSize: 14, ...mutedTextStyle(c, 0.4),
                   textAlign: 'center', lineHeight: 20,
                 }}>
-                  No contact methods are available{'\n'}for this course yet.
+                  {t('course.subscribeSheetEmpty')}
                 </Text>
               </View>
             ) : (
@@ -312,6 +345,7 @@ interface ButtonProps {
 
 function ContactButton({ label, icon, accentColor, c, onPress }: ButtonProps) {
   const [pressed, setPressed] = React.useState(false);
+  const { isRTL } = useTranslation();
   return (
     <Pressable
       cssInterop={false}
@@ -348,7 +382,13 @@ function ContactButton({ label, icon, accentColor, c, onPress }: ButtonProps) {
         {icon}
       </View>
 
-      <Text style={{ flex: 1, fontSize: 15, fontWeight: '700', color: c.text }}>
+      <Text style={{
+        flex: 1,
+        fontSize: 15,
+        fontWeight: '700',
+        color: c.text,
+        textAlign: isRTL ? 'right' : 'left',
+      }}>
         {label}
       </Text>
 
@@ -358,7 +398,10 @@ function ContactButton({ label, icon, accentColor, c, onPress }: ButtonProps) {
         backgroundColor: `${accentColor}12`,
         alignItems: 'center', justifyContent: 'center',
       }}>
-        <Text style={{ fontSize: 14, color: accentColor, fontWeight: '800' }}>›</Text>
+        {/* Directional affordance: points along the reading direction. */}
+        <Text style={{ fontSize: 14, color: accentColor, fontWeight: '800' }}>
+          {isRTL ? '‹' : '›'}
+        </Text>
       </View>
     </Pressable>
   );

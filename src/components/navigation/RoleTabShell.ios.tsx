@@ -26,8 +26,8 @@
  * see (hubs)/_layout.tsx. DrawerNav remains a sibling of the navigator
  * (outside the tab scenes), exactly as before.
  */
-import { t } from '@/lib/i18n';
-import { View, useColorScheme } from 'react-native';
+import { t, useTranslation } from '@/lib/i18n';
+import { View, useColorScheme, I18nManager } from 'react-native';
 import { createNativeBottomTabNavigator } from '@bottom-tabs/react-navigation';
 import { withLayoutContext } from 'expo-router';
 import { DrawerProvider } from '@/components/DrawerContext';
@@ -53,6 +53,36 @@ export default function RoleTabShell({ tabs, initialRouteName }: RoleTabShellPro
   const isDark = useColorScheme() === 'dark';
   const c = isDark ? neuColors.dark : neuColors.light;
 
+  /**
+   * ── ARABIC TAB ORDER ON THE NATIVE BAR ───────────────────────────────────
+   * UITabBar/SwiftUI mirrors its items when the app's semantic content
+   * direction is RTL, i.e. `I18nManager.isRTL`. That state only exists AFTER
+   * the native relaunch that `applyRTL()` schedules, so on the launch where the
+   * user switches to Arabic the bar is still LTR. Rather than assume either
+   * way, the array is reversed EXACTLY when the app's direction and the native
+   * chrome's direction disagree — which is the only case where the system will
+   * not produce the required order by itself:
+   *
+   *   app RTL + platform LTR → reverse  (system draws LTR: Home would be left)
+   *   app RTL + platform RTL → as-is    (system already mirrors: Home right)
+   *   app LTR + platform LTR → as-is    (English order, correct)
+   *   app LTR + platform RTL → reverse  (system would mirror: cancel it)
+   *
+   * Only the RENDER ORDER changes — screen names, icons, `initialRouteName`,
+   * deep links and `backBehavior="history"` all still key off `tab.name`.
+   */
+  const { isRTL: appRTL } = useTranslation();
+  const platformRTL = (() => {
+    try {
+      return I18nManager.isRTL === true;
+    } catch {
+      return false;
+    }
+  })();
+  const needsManualMirror = appRTL !== platformRTL;
+  const visibleTabs = tabs.filter((tab) => tab.hidden !== true);
+  const orderedTabs = needsManualMirror ? [...visibleTabs].reverse() : visibleTabs;
+
   return (
     <DrawerProvider>
       <View style={{ flex: 1, backgroundColor: c.base }}>
@@ -76,11 +106,10 @@ export default function RoleTabShell({ tabs, initialRouteName }: RoleTabShellPro
           // from the content behind the bar. Older iOS gets the native
           // translucent default. No fake glass approximation anywhere.
         >
-          {tabs
+          {orderedTabs
             // Drawer-only screens are NOT native tab scenes (see file header):
             // registering them lets iOS 26's system back affordance walk
             // tab-scene history (duplicate back button, wrong destination).
-            .filter((tab) => tab.hidden !== true)
             .map((tab) => (
             <NativeBottomTabs.Screen
               key={tab.name}

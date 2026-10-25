@@ -15,9 +15,10 @@
  * Used by: Student, Doctor, Admin, Super Admin layouts.
  */
 import React, { useCallback } from 'react';
-import { View, Text, Pressable, StyleSheet, type ViewStyle } from 'react-native';
+import { View, Text, Pressable, StyleSheet } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { markEntryIntent } from '@/lib/navigation/navIntent';
+import { useTranslation } from '@/lib/i18n';
 
 /* ── Types (loose to avoid importing @react-navigation/bottom-tabs) ── */
 interface Props {
@@ -40,6 +41,23 @@ export default function ResponsiveTabBar({
   labelStyle: labelStyleProp,
 }: Props) {
   const insets = useSafeAreaInsets();
+  // ── ARABIC TAB ORDER (physical) ─────────────────────────────────────────
+  // Arabic must read right→left: Home rightmost, then Explore, My Courses and
+  // Profile on the left. That is the MIRROR of the English order, so it is
+  // expressed ONCE, physically: `flexDirection: 'row-reverse'`.
+  //
+  // `direction: 'ltr'` on the bar is load-bearing. React Navigation's own
+  // row uses the platform's layout direction, which reverses `row` under
+  // I18nManager RTL — combining that with our `row-reverse` would reverse
+  // twice and leave the English order in Arabic (the classic "it reverses, so
+  // it must already be handled" mistake). Pinning the container to ltr makes
+  // this the only mirror, on every platform and regardless of whether the
+  // native RTL relaunch has been applied yet.
+  //
+  // ROUTES ARE UNTOUCHED: this only changes the ORDER of the rendered items.
+  // Route names, icons, active state, deep links and navigation history all
+  // still key off `route.name` / `route.key` exactly as before.
+  const { isRTL } = useTranslation();
 
   const { routes, index: activeIndex } = state;
 
@@ -135,7 +153,13 @@ export default function ResponsiveTabBar({
   // Top padding: breathing room between screen content and the tab bar.
   const bottomPad = Math.max(insets.bottom, MIN_BOTTOM_PAD);
   return (
-    <View style={[styles.tabBar, tabBarStyleProp, { paddingTop: TOP_BREATHING, paddingBottom: bottomPad, minHeight: MIN_BAR_HEIGHT + bottomPad }]}>
+    <View style={[styles.tabBar, tabBarStyleProp, {
+      flexDirection: isRTL ? 'row-reverse' : 'row',
+      direction: 'ltr',
+      paddingTop: TOP_BREATHING,
+      paddingBottom: bottomPad,
+      minHeight: MIN_BAR_HEIGHT + bottomPad,
+    }]}>
       {visibleRoutes.map(({ route, descriptor, index }) => {
         const isFocused = activeIndex === index;
         const options = descriptor.options;

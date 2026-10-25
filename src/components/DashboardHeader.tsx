@@ -64,20 +64,39 @@ export function DashboardHeader({
 
   return (
     <View style={{
-      flexDirection: 'row',
-      direction: isRTL ? 'rtl' : 'ltr',
+      // PHYSICAL mirror, expressed once. `flexDirection` is never flipped by
+      // the layout direction, so this cannot double-reverse with an inherited
+      // RTL state; `direction: 'ltr'` on the row neutralises exactly that.
+      // (The previous `direction: isRTL ? 'rtl' : 'ltr'` version relied on Yoga
+      // to move the hamburger and left the greeting block at the trailing edge
+      // whenever the native RTL relaunch had not happened yet.)
+      flexDirection: isRTL ? 'row-reverse' : 'row',
+      direction: 'ltr',
       alignItems: 'center',
       paddingTop: topPad,
       paddingBottom: spacing.md,
-      paddingStart: isRTL ? rightPad : leftPad + spacing.sm,
-      paddingEnd: isRTL ? leftPad + spacing.sm : rightPad,
+      // Explicit physical padding: `paddingStart` would resolve against the
+      // forced ltr above, not against the app locale.
+      paddingLeft: isRTL ? rightPad : leftPad + spacing.sm,
+      paddingRight: isRTL ? leftPad + spacing.sm : rightPad,
     }}>
       {/* Transparent visual treatment; the 40dp control plus hit slop remains tappable. */}
       <HamburgerButton plain color={c.text} />
 
       {/* Title stack — gap from button. `minWidth: 0` lets a long display name
-          truncate instead of pushing the right-hand controls off the row. */}
-      <View style={{ flex: 1, minWidth: 0, marginStart: spacing.sm + spacing.xs }}>
+          truncate instead of pushing the trailing controls off the row.
+          `alignItems` anchors the WHOLE greeting block to the app locale's
+          starting edge (right in Arabic), so the greeting and the account name
+          below it line up on the same edge even if a text-level `textAlign`
+          were ever lost — the reported "Arabic greeting still aligned left". */}
+      <View style={{
+        flex: 1,
+        minWidth: 0,
+        alignItems: isRTL ? 'flex-end' : 'flex-start',
+        direction: isRTL ? 'rtl' : 'ltr',
+        marginLeft: isRTL ? 0 : spacing.sm + spacing.xs,
+        marginRight: isRTL ? spacing.sm + spacing.xs : 0,
+      }}>
         {roleLabel && roleLabelPosition === 'above' ? (
           <Text
             style={[
@@ -141,7 +160,14 @@ export function DashboardHeader({
 
       {/* Right actions */}
       {!!rightActions && (
-        <View style={{ flexDirection: 'row', gap: spacing.sm, alignItems: 'center', marginStart: spacing.sm, flexShrink: 0 }}>
+        <View style={{
+          flexDirection: isRTL ? 'row-reverse' : 'row',
+          gap: spacing.sm,
+          alignItems: 'center',
+          marginLeft: isRTL ? spacing.sm : 0,
+          marginRight: isRTL ? 0 : spacing.sm,
+          flexShrink: 0,
+        }}>
           {rightActions}
         </View>
       )}

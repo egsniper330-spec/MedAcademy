@@ -209,12 +209,17 @@ check('C2 the second batch is awaited at the same point in the flow as before', 
     'enrollment results must be applied AFTER course/progress are committed');
 });
 
-check('C3 a rejected subscription read still skips both enrollment setters', () => {
+check('C3 a rejected subscription read still cannot apply enrollment state', () => {
   const awaitIdx = course.indexOf('await Promise.all([subsP, cpP])');
   const setSubIdx = course.indexOf('setIsSubscribed(subs.some');
   ok(setSubIdx > awaitIdx, 'setIsSubscribed runs without awaiting the subscription read');
-  // The outer try/catch must still own the failure.
-  ok(/\} catch \{\}/.test(course), 'outer catch removed — failure semantics changed');
+  // The enrollment batch now has its OWN catch: a failure there costs the
+  // progress extras, never the course page. (The old bare `catch {}` also turned
+  // an enrollment failure into the false "Course not found".)
+  ok(/catch \(enrollErr\)/.test(course),
+    'enrollment failures are no longer isolated from the course payload');
+  ok(/classifiedAs/.test(course),
+    'course-load failures are no longer classified — a timeout would read as not-found again');
 });
 
 check('C4 the early rejection is neutralised so phase 1 cannot warn', () => {
