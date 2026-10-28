@@ -51,6 +51,25 @@ module.exports = defineConfig([
       },
     },
   },
+  // k6 load-test scripts: they run inside k6 (not Node), so `k6/*` modules are
+  // provided by the runtime and `__ENV`/`__VU`/`open` are injected globals.
+  // Without this override `npm run lint` failed on healthy load-test code
+  // (unresolved `k6/http`, undefined `__ENV`) and the failures were noise around
+  // a real suite.
+  {
+    files: ["scripts/loadtest/**/*.js", "scripts/loadtest/**/*.mjs"],
+    languageOptions: {
+      globals: {
+        __ENV: "readonly",
+        __VU: "readonly",
+        __ITER: "readonly",
+        open: "readonly",
+      },
+    },
+    rules: {
+      "import/no-unresolved": ["error", { ignore: ["^k6(/.*)?$"] }],
+    },
+  },
   // Vendored generated artifact (plugin-lucide-react-native.js is a checked-in
   // 3k-line generated Babel plugin): keep lint meaningful by not policing var
   // usage there.

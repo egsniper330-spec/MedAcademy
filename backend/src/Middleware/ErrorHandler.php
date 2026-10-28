@@ -36,10 +36,21 @@ final class ErrorHandler
     {
         if ($e instanceof ApiException) {
             if ($e->getPrevious()) {
+                // Connection-capacity exhaustion is a distinct operational
+                // signal: the server is up, this account's database connection
+                // quota is fully occupied. Tagged so a log search separates it
+                // from a real outage (see Database::isConnectionQuotaError).
+                $capacity = $e->status === 503
+                    && \MedAcademy\Database\Database::isConnectionQuotaError($e->getPrevious());
                 $logger->error($e->getMessage(), [
                     'status' => $e->status,
                     'previous' => $e->getPrevious()->getMessage(),
-                ]);
+                ] + ($capacity ? ['capacity' => 'db_connection_quota'] : []));
+                if ($capacity && !headers_sent()) {
+                    // Honest, non-amplifying back-off hint. The client is told to
+                    // wait; the server does NOT retry the connection itself.
+                    header('Retry-After: ' . \MedAcademy\Database\Database::BUSY_RETRY_AFTER_SECONDS);
+                }
             }
             $meta = Config::isDebug() ? self::debugMeta($e) : [];
             // App update enforcement (HTTP 426): enrich the error body with the
@@ -98,6 +109,19 @@ final class ErrorHandler
             if ($e instanceof \MedAcademy\Http\HandlerUnavailableException) {
                 $code = 'handler_unavailable';
                 $meta = array_merge($meta, ['handler' => $e->handler]);
+            }
+            // Upload refusals carry the operation id that the structured log uses
+            // (`storage-upload` lines: op + stage + reason + byte counts). Without
+            // it in the response, a failed upload leaves the doctor with
+            // "Upload failed." and the operator with a log full of candidates:
+            // the exact attempt cannot be identified, even though it WAS logged.
+            // The id is a random 6-byte token — no path, content or identity.
+            if ($e instanceof \MedAcademy\Http\UploadRefusedException) {
+                $meta = array_merge($meta, [
+                    'op' => $e->op,
+                    'stage' => $e->stage,
+                    'reason' => $e->reason(),
+                ]);
             }
 
             Response::error($e->getMessage(), $e->status, $code, $e->errors, $meta);

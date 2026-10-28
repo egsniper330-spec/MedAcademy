@@ -302,7 +302,10 @@ check("SecurityEvidenceService accepts a 'material_pdf' challenge",
 check('the delivery controller enforces the tier before rendering',
   /IntegrityService::assertActionAllowed\(\s*\n\s*\$userId,\s*\n\s*'material_pdf'/.test(DELIVERY_PHP));
 check('the enforcement call sits before the (expensive) mint',
-  DELIVERY_PHP.indexOf("'material_pdf'") < DELIVERY_PHP.indexOf('$this->ensurePersonalizedCopy('));
+  // Generation now lives in MaterialPdfVariantService; the check must still run
+  // before ANY cache/identity work and before the staff inline render.
+  DELIVERY_PHP.indexOf("'material_pdf'") < DELIVERY_PHP.indexOf('$this->variants->identity(') &&
+  DELIVERY_PHP.indexOf("'material_pdf'") < DELIVERY_PHP.indexOf('$this->variants->ensure('));
 check('the client type lists material_pdf as a protected action',
   /export type ProtectedAction =[\s\S]*?\| 'material_pdf'/.test(DEVICE_KEY));
 check('the client builds the headers for the mint call',

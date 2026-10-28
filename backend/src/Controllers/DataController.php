@@ -587,7 +587,33 @@ class DataController
                 }
             }
 
-            $db->query($sql, $bind);
+            try {
+                $db->query($sql, $bind);
+            } catch (\Throwable $e) {
+                // A lesson-material row that fails to insert (schema drift, a
+                // constraint, a deadlock) used to surface as a bare 500 whose
+                // SQLSTATE the app filters out — so the doctor saw only "Upload
+                // failed." while the bytes sat in storage. Name the stage and
+                // hand back a correlatable reference; the driver detail stays in
+                // the server log, never in the response.
+                if ($table === 'lesson_materials') {
+                    $ref = 'mw_' . bin2hex(random_bytes(4));
+                    error_log(sprintf(
+                        '[material-write] %s insert failed (lesson=%s storage_path=%s): %s',
+                        $ref,
+                        (string) ($row['lesson_id'] ?? '?'),
+                        (string) ($row['storage_path'] ?? '?'),
+                        $e->getMessage()
+                    ));
+                    throw new ApiException(
+                        500,
+                        'The document was uploaded but its lesson entry could not be saved. Please try again; if it keeps failing, quote reference ' . $ref . '.',
+                        'material_write_failed',
+                        $e
+                    );
+                }
+                throw $e;
+            }
 
             // Return the ACTUAL row (with DB defaults like created_at) so
             // callers chaining .select()/.single() get a usable object.
@@ -617,6 +643,8 @@ class DataController
                 }
             }
             $inserted[] = $saved ?? $row;
+
+
         }
 
         Response::json(array_is_list($body) ? $inserted : $inserted[0], 201);

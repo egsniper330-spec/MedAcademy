@@ -333,6 +333,31 @@ the plan it prints.
 
 ---
 
+## 6b. Pre-generation queue (cron worker)
+
+Generation no longer happens in the student request. A durable queue
+(`lesson_material_pdf_jobs`, migration **038**) and a bounded CLI worker produce
+copies in the background; the student's first open either finds a ready copy or
+is told `preparing` and polls.
+
+* Migration: `backend/database/mysql-migrations/038_pdf_watermark_queue.sql`
+  (additive; rollback in `…_down.sql`). **Not applied by this change.**
+* Worker: `backend/scripts/watermark-worker.php` — bounded by `--limit` and
+  `--max-seconds`, claims atomically, re-checks authorization, retries with
+  backoff and reclaims locks from a killed run. It also runs the 24-hour
+  retention sweep with `--retention --apply`.
+* Cron entries are **NOT configured**. The two lines and the schedule rationale
+  are in **`PDF_WATERMARK_QUEUE.md` §4**, together with the storage/retention
+  maths and the client contract.
+
+Run one batch by hand after deploying and applying 038:
+
+```
+php backend/scripts/watermark-worker.php --limit=3 --pretty
+```
+
+---
+
 ## 7. Frontend
 
 The student lesson screen already opens PDFs through `POST /materials/pdf-url`

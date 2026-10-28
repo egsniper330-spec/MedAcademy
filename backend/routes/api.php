@@ -51,8 +51,10 @@ $router->put('/admin/support-settings', [SupportController::class, 'adminUpdate'
 $router->get('/', [HealthController::class, 'root']);
 $router->get('/api/health', [HealthController::class, 'health']);
 $router->get('/health', [HealthController::class, 'health']);
-$router->get('/system-health', [HealthController::class, 'systemHealth']);
-$router->get('/provider-health', [HealthController::class, 'providerHealth']);
+// Detailed diagnostics are internal: admin / super_admin only. Public uptime
+// checks use /api/health and /health (service identity + DB ping, no detail).
+$router->get('/system-health', [HealthController::class, 'systemHealth'], $auth + ['role' => ['admin', 'super_admin']]);
+$router->get('/provider-health', [HealthController::class, 'providerHealth'], $auth + ['role' => ['admin', 'super_admin']]);
 
 // ---- Auth (public) ---------------------------------------------------------
 $router->post('/auth/register', [AuthController::class, 'register']);
@@ -224,6 +226,9 @@ $router->post('/video/upload-status', [VideoController::class, 'uploadStatus'], 
 $router->post('/video/delete', [VideoController::class, 'delete'], $auth);
 $router->post('/video/cancel-upload', [VideoController::class, 'cancelUpload'], $auth + ['role' => ['doctor', 'admin', 'super_admin']]);
 $router->post('/video/assets', [VideoController::class, 'assets'], $auth);
+// Explicit import of an EXISTING VdoCipher video. Sync never imports unknown
+// remote assets, and an id owned by another doctor is refused (409).
+$router->post('/video/import', [VideoController::class, 'importAsset'], $auth + ['role' => ['doctor', 'admin', 'super_admin']]);
 $router->post('/video/assets/delete', [VideoController::class, 'deleteAsset'], $auth + ['role' => ['doctor', 'admin', 'super_admin']]);
 $router->post('/video/webhook', [VideoController::class, 'webhook']);
 $router->post('/video/chunk', [VideoController::class, 'uploadChunk'], $auth);
@@ -265,6 +270,10 @@ $router->get('/storage/signed', [StorageController::class, 'signedFile']);
 $router->get('/storage/public/{bucket}/{path*}', [StorageController::class, 'publicFile']);
 $router->post('/storage/upload', [StorageController::class, 'upload'], $auth);
 $router->post('/storage/delete', [StorageController::class, 'delete'], $auth);
+// Reclaim an object that never became a material row (the upload was followed by a
+// DEFINITIVE 4xx on the insert). Refuses (409) a path a material still references,
+// so it can never delete a live document's bytes. See StorageController::discardUpload.
+$router->post('/storage/discard-upload', [StorageController::class, 'discardUpload'], $auth);
 
 // ---- Personalized lesson-PDF delivery (watermark + download policy) --------
 // POST /materials/pdf-url  — authorises the caller, ensures the correct variant
@@ -282,7 +291,13 @@ $router->post('/storage/delete', [StorageController::class, 'delete'], $auth);
 $router->post('/materials/{id}/delete', [LessonMaterialController::class, 'delete'], $auth + ['role' => ['doctor', 'admin', 'super_admin']]);
 $router->post('/materials/{id}/replace', [LessonMaterialController::class, 'replace'], $auth + ['role' => ['doctor', 'admin', 'super_admin']]);
 
+// POST /materials/pdf-url returns EITHER a ready short-lived URL or a pending
+// state ('preparing' / 'failed') while the cron worker renders the copy. A
+// student never renders inline; staff previews stay synchronous.
 $router->post('/materials/pdf-url', [MaterialDeliveryController::class, 'pdfUrl'], $auth);
+// GET /materials/pdf-status?material_id=… — read-only "is my copy ready?" for
+// bounded client polling. Same authorization, no token, no render.
+$router->get('/materials/pdf-status', [MaterialDeliveryController::class, 'pdfStatus'], $auth);
 $router->get('/materials/pdf', [MaterialDeliveryController::class, 'streamPdf']);
 $router->get('/admin/material-watermark-status', [MaterialDeliveryController::class, 'watermarkStatus'], $auth + ['role' => ['admin', 'super_admin']]);
 

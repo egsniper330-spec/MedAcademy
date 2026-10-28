@@ -250,3 +250,36 @@ as artifacts (never the PDFs/gallery, unless that is explicitly wanted).
   workspace; a different source document (scanned pages, full-page images,
   colour backgrounds) will produce different percentages for the image-domain
   attacks.
+
+## 9. Re-verification log (2026-10-26)
+
+Run on a Windows workstation with a portable **PHP 8.2.35** CLI
+(`pdo_sqlite`, `gd`, `curl`, `openssl`, `fileinfo`, `mbstring`, `zip`); no
+Ghostscript, so the raster pixel proofs stay SKIPPED by design.
+
+| Suite | Command | Result |
+|---|---|---|
+| Real engine + integration | `php -d auto_prepend_file=…/prepend.php backend/tests/pdf-watermark/run_real_test.php` | **ALL CHECKS PASSED** |
+| Error handling | `…/error_tests.php` | **ALL ERROR-HANDLING CHECKS PASSED** |
+| Authorization | `…/auth_tests.php` | **ALL AUTHORIZATION CHECKS PASSED** |
+| Delivery (end-to-end) | `…/delivery_tests.php` | **104/104 checks passed** |
+| Flatten engine | `…/flatten_engine_tests.php` | **35/35 checks passed** |
+| Shipped service end-to-end | `php backend/scripts/verify-watermark.php` | **ALL CHECKS PASSED** |
+| Material upload/lifecycle | `bash backend/tests/material-lifecycle/run.sh` | **33/33 checks passed** |
+
+Two harness defects were found and fixed while re-running this, and neither
+was a product bug:
+
+1. **`flatten_engine_tests.php` was not hermetic.** The inherited
+   `PDF_WATERMARK_MODE` / `PDF_WATERMARK_OPACITY` in `$_ENV` (populated at
+   process start) takes precedence over `putenv()`, so the suite could silently
+   run in the wrong engine mode depending on the caller's environment. It now
+   sets/restores both `$_ENV` and `putenv()` and calls `Config::init()`.
+2. **`delivery_tests.php` had a stale stat cache.** The cleanup assertions
+   stat()ed the orphan file in the parent process, then a *child* process
+   deleted it; PHP's stat cache still answered "exists", so
+   `cleanup: --apply removes the orphaned file` failed on a correct delete.
+   The check now calls `clearstatcache(true, $orphan)` first.
+
+Both were test-harness issues: the delivered bytes, the authorization decisions
+and the cleanup behaviour were already correct.

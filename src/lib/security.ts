@@ -728,13 +728,17 @@ async function detectVPN(): Promise<SecurityThreat | null> {
       // degraded signal is REPORTED as evidence (weight 0, never blocking) so
       // "could not verify" is never presented as "verified clean".
       lastVpnSignalPath = getIosVpnSignalPath();
-      console.log('[SecurityCheck][VPN] iOS: invoking isNativeVPNDetected…',
-        '| detector=IOSSecurityModule.checkVPNSafe (two-gate: NWPath+getifaddrs)',
-        '| fallback=NetInfo type===vpn only',
-        '| signalPath=', lastVpnSignalPath);
+      if (__DEV__) {
+        console.log('[SecurityCheck][VPN] iOS: invoking isNativeVPNDetected…',
+          '| detector=IOSSecurityModule.checkVPNSafe (two-gate: NWPath+getifaddrs)',
+          '| fallback=NetInfo type===vpn only',
+          '| signalPath=', lastVpnSignalPath);
+      }
       const vpn = await isNativeVPNDetected();
-      console.log('[SecurityCheck][VPN] iOS: raw result =', vpn,
-        '| decision =', vpn ? '🔴 BLOCK (VPN active)' : '✅ PASS (no VPN)');
+      if (__DEV__) {
+        console.log('[SecurityCheck][VPN] iOS: raw result =', vpn,
+          '| decision =', vpn ? '🔴 BLOCK (VPN active)' : '✅ PASS (no VPN)');
+      }
       // Admin-whitelisted VPNs suppress the finding entirely (same rule as
       // before — only the await point moved, to overlap with the probe).
       if ((await whitelistP).length > 0) {
@@ -793,7 +797,7 @@ async function detectVPN(): Promise<SecurityThreat | null> {
     const netTunnels = Number(flags.netNativeTunnelIfaces ?? 0);
     const vpnState = typeof flags.vpnState === 'string' ? flags.vpnState : 'unknown';
     if (!wasLastSecurityFlagsCallUnavailable()) {
-      console.log('[SecurityCheck][VPN] Android: raw vpnDetected =', flags.vpnDetected,
+      if (__DEV__) console.log('[SecurityCheck][VPN] Android: raw vpnDetected =', flags.vpnDetected,
         '| vpnState =', vpnState,
         '| netTunnels =', netTunnels,
         '| decision =', flags.vpnDetected ? '🔴 BLOCK' : '✅ PASS');

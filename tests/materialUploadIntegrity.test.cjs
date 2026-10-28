@@ -144,9 +144,30 @@ ok(/data:\s*null/.test(client), 'every upload failure branch returns data: null 
 console.log('── Server upload: validate the bytes, store atomically, verify ──');
 
 ok(/UploadIntegrityService/.test(storeCtrl), 'StorageController must use UploadIntegrityService');
+// The controller passes the SELECTED file's byte count as a 4th argument — the
+// only independent measurement that can say whether the body belongs to that
+// document (`$_FILES['size']` is filled by PHP from the bytes it received) —
+// together with its PROVENANCE, because provider metadata is a hint while a
+// filesystem stat is a measurement. Both must reach validate().
 ok(
-  /validate\(\$file, \$dest, \$bucket\)/.test(storeCtrl) && /persist\(\$validated\['tmp'\], \$validated\['size'\]/.test(storeCtrl),
-  'the controller must validate before writing and persist the validated byte count'
+  /validate\(\$file, \$dest, \$bucket, \$clientDeclared, \$declaredSource\)/.test(storeCtrl)
+    && /\$_POST\['declared_size'\]/.test(storeCtrl)
+    && /\$_POST\['declared_size_source'\]/.test(storeCtrl)
+    && /persist\(\$validated\['tmp'\], \$validated\['size'\]/.test(storeCtrl),
+  'the controller must validate (including the declared size AND its source) before writing and persist the validated byte count'
+);
+// A refusal must carry the operation id back to the app, otherwise "Upload
+// failed" cannot be matched to one `storage-upload` log line.
+ok(
+  /new UploadIntegrityService|new UploadRefusedException/.test(storeCtrl)
+    && /UploadRefusedException\(/.test(storeCtrl)
+    && /opId\(\)/.test(storeCtrl),
+  'an upload refusal must return the operation id (UploadRefusedException)'
+);
+ok(
+  /UploadRefusedException/.test(read('backend/src/Middleware/ErrorHandler.php'))
+    && /'op' => \$e->op/.test(read('backend/src/Middleware/ErrorHandler.php')),
+  'ErrorHandler must expose the upload operation id on the error object'
 );
 ok(
   /'size' => \$stored\['size'\]/.test(storeCtrl) && /'sha256' => \$stored\['sha256'\]/.test(storeCtrl),

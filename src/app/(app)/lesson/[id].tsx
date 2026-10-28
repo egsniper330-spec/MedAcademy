@@ -8,7 +8,14 @@ import {
   ArrowLeft, Check, CheckCircle, Clock, Download, Eye, FileText, Film,
   Lock, Paperclip, Pause, Play, RefreshCw, ShieldAlert, X,
 } from 'lucide-react-native';
-import { getLessonById, upsertLessonProgress, getMaterialSignedUrl, getMaterialPdfUrl, getLessonPdfSignedUrl, getCourseById } from '@/lib/api';
+import {
+  getLessonById, upsertLessonProgress, getMaterialSignedUrl, getMaterialPdfUrl,
+  getMaterialPdfStatus, getLessonPdfSignedUrl, getCourseById,
+} from '@/lib/api';
+import {
+  describeEta, describePrep, nextPollDelay, normalizePrepState, phaseOf,
+  pollBudgetExhausted, queuePositionView, PDF_POLL_FLOOR_MS, type PdfPrepPhase,
+} from '@/lib/pdfPreparation';
 import { getMySubscriptionsCached } from '@/lib/myCoursesCache';
 import { isPdfMaterial, materialAccess, materialActionLabel, visibleMaterials } from '@/lib/lessonMaterials';
 import { backendClient } from '@/client/backendClient';
@@ -41,6 +48,21 @@ import { ContentProtectionWarning } from '@/components/ContentProtectionWarning'
 import { RecordingBlockedOverlay } from '@/components/RecordingBlockedOverlay';
 import { VideoPlayer } from '@/components/VideoPlayer';
 import { useTranslation } from '@/lib/i18n';
+
+/**
+ * Bounded polling for a QUEUED personalized PDF.
+ *
+ * A student's copy is rendered by the server's cron worker, so a first open can
+ * legitimately answer "queued" or "generating". The budget, the backoff, the
+ * wording of every waiting state and the queue/ETA rules are PURE decisions in
+ * `@/lib/pdfPreparation` (unit-tested in tests/materialPdfWaiting.test.cjs);
+ * this screen only wires them to the modal. The loop never asks for the
+ * unwatermarked original, and a merely-slow copy is NEVER reported as a failure.
+ */
+
+function waitMs(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, Math.max(0, ms)));
+}
 
 /** Byte label for the download-progress line (Android-only official fields). */
 function fmtBytesLocal(n: number): string {
@@ -293,9 +315,39 @@ export default function LessonPlayer() {
     visible: boolean;
     fileName: string;
     progress: number; // 0–1
-    status: 'downloading' | 'success' | 'error';
+    /**
+     * `waiting` is the honest end of the polling budget: the copy is still
+     * queued and healthy, so it is NOT a failure and must not offer a Retry.
+     */
+    status: 'preparing' | 'downloading' | 'success' | 'error' | 'waiting';
     errorMsg?: string;
+    /** Which waiting phase the server last reported (status `preparing`). */
+    phase?: PdfPrepPhase;
+    /** Server-grounded estimate, when the server could ground one (else null). */
+    etaMinSeconds?: number | null;
+    etaMaxSeconds?: number | null;
+    /** Queue rank, shown only when meaningful (≥ 2). */
+    queuePosition?: number | null;
   }>({ visible: false, fileName: '', progress: 0, status: 'downloading' });
+
+  /**
+   * The material whose personalized copy could not be prepared, so the modal can
+   * offer ONE explicit retry. Cleared as soon as a new open starts or succeeds.
+   */
+  const [pdfRetry, setPdfRetry] = useState<{ materialId: string; forDownload: boolean; name: string } | null>(null);
+
+  /**
+   * The material whose copy is STILL queued after the polling budget: re-checking
+   * it is an ordinary read (no `retry` flag), never a re-queue.
+   */
+  const [pdfRecheck, setPdfRecheck] = useState<{ forDownload: boolean; name: string } | null>(null);
+
+  /** Run id: dismissing the modal (or opening another material) cancels the
+   *  in-flight poll loop without leaving a timer behind. */
+  const pdfRunRef = useRef(0);
+
+  /** The material behind the last PDF open, so Retry re-opens the same row. */
+  const lastPdfMaterialRef = useRef<any>(null);
 
   const loadData = useCallback(async () => {
     if (!id) return;
@@ -695,22 +747,150 @@ export default function LessonPlayer() {
    * refuses to mint a download link for it. A refusal is surfaced as the honest
    * per-material message rather than a generic failure.
    */
+  /** Surface a copy that could not be prepared, with one explicit retry. */
+  const showPrepareFailure = useCallback((name: string, materialId: string, forDownload: boolean) => {
+    setPdfRecheck(null);
+    setPdfRetry({ materialId, forDownload, name });
+    setDownloadState({
+      visible: true, fileName: name,
+      progress: 0, status: 'error',
+      errorMsg: t('lesson.materialPrepareFailed'),
+    });
+  }, [t]);
+
+  /**
+   * The polling budget is spent but the job is still queued and healthy.
+   *
+   * With a five-minute worker this is the NORMAL outcome for a student who
+   * arrives just after a tick, and the old code turned it into "Download Failed".
+   * The copy is still coming, so this state says so and offers a re-check.
+   */
+  const showStillWaiting = useCallback((name: string, forDownload: boolean) => {
+    setPdfRetry(null);
+    setPdfRecheck({ name, forDownload });
+    setDownloadState({ visible: true, fileName: name, progress: 0, status: 'waiting' });
+  }, []);
+
+  /**
+   * Fold the server's wait contract into the modal: phase, estimate and rank in
+   * ONE place, so pdf-url and pdf-status can never render differently.
+   */
+  const applyWaitState = useCallback((name: string, payload: {
+    status?: string | null;
+    state?: string | null;
+    eta_min_seconds?: number | null;
+    eta_max_seconds?: number | null;
+    queue_position?: number | null;
+  }) => {
+    setDownloadState({
+      visible: true, fileName: name, progress: 0, status: 'preparing',
+      phase: phaseOf(normalizePrepState(payload.status, payload.state)),
+      etaMinSeconds: payload.eta_min_seconds ?? null,
+      etaMaxSeconds: payload.eta_max_seconds ?? null,
+      queuePosition: payload.queue_position ?? null,
+    });
+  }, []);
+
+  /**
+   * Resolve a READY url for a personalized PDF, waiting (bounded) while the
+   * server's background worker produces it.
+   *
+   * Returns null when the modal already explains the state (queued, failed or
+   * cancelled) — the caller must NOT fall back to any other URL.
+   */
+  const waitForPersonalizedPdf = useCallback(async (
+    materialId: string,
+    name: string,
+    forDownload: boolean,
+    isRetry: boolean,
+    runId: number,
+  ): Promise<string | null> => {
+    setPdfRetry(null);
+    setPdfRecheck(null);
+    const delivery = await getMaterialPdfUrl(materialId, forDownload, isRetry);
+    if (delivery.status === 'ready' && delivery.url) return delivery.url;
+    if (normalizePrepState(delivery.status, delivery.state) === 'failed') {
+      showPrepareFailure(name, materialId, forDownload);
+      return null;
+    }
+
+    // Queued / rendering: acknowledge IMMEDIATELY (with the server's phase and
+    // estimate), then poll within a budget that outlasts the worker's interval.
+    // The server's `retry_after` is a polling interval and is honoured as one; it
+    // is never interpreted as an ETA.
+    applyWaitState(name, delivery);
+    const startedAt = Date.now();
+    let attempts = 0;
+    let delay = nextPollDelay(PDF_POLL_FLOOR_MS, delivery.retry_after);
+
+    while (!pollBudgetExhausted(startedAt, Date.now(), attempts)) {
+      attempts++;
+      await waitMs(delay);
+      if (runId !== pdfRunRef.current) return null; // dismissed or superseded
+      try {
+        const status = await getMaterialPdfStatus(materialId);
+        if (runId !== pdfRunRef.current) return null;
+        const state = normalizePrepState(status.status, status.state);
+        if (state === 'failed') {
+          showPrepareFailure(name, materialId, forDownload);
+          return null;
+        }
+        if (state === 'unavailable') {
+          // The server cannot read its own queue (e.g. migration 038 missing).
+          // No amount of polling fixes that, so stop and say so honestly instead
+          // of burning the budget and then blaming the document.
+          break;
+        }
+        if (state === 'ready') {
+          // Ready: mint the short-lived token now (it is never cached/reused).
+          const ready = await getMaterialPdfUrl(materialId, forDownload, false);
+          if (ready.status === 'ready' && ready.url) return ready.url;
+          if (normalizePrepState(ready.status, ready.state) === 'failed') {
+            showPrepareFailure(name, materialId, forDownload);
+            return null;
+          }
+          applyWaitState(name, ready);
+          delay = nextPollDelay(delay, ready.retry_after);
+          continue;
+        }
+        // Still queued or being generated: refresh the phase, the estimate and the
+        // rank from the server — the estimate moves as the queue drains.
+        applyWaitState(name, status);
+        delay = nextPollDelay(delay, status.retry_after);
+      } catch {
+        // A transient poll failure is not a verdict: keep backing off inside the
+        // budget, then report the honest "still waiting" state below.
+        delay = nextPollDelay(delay, 0);
+      }
+    }
+
+    // The budget is spent. The job may well still be healthy, so this is NOT a
+    // failure: say it is still queued and let the student check again.
+    showStillWaiting(name, forDownload);
+    return null;
+  }, [applyWaitState, showPrepareFailure, showStillWaiting]);
+
   const openMaterial = useCallback(async (
     material: any,
     displayName?: string,
     forDownload = true,
+    isRetry = false,
   ) => {
     const name = displayName ?? t('lesson.courseMaterial');
     const path = material?.storage_path ?? material?.file_url ?? '';
     if (!path && !material?.id) return;
+    const runId = ++pdfRunRef.current;
     try {
       let url: string;
       if (isPdfMaterial(material) && material?.id) {
         // The delivery endpoint mints a fresh token for every open, so a shared
         // or expired link cannot be reused, and the bytes are always this
-        // student's personalized copy.
-        const delivery = await getMaterialPdfUrl(String(material.id), forDownload);
-        url = delivery.url;
+        // student's personalized copy. A copy that is still being generated is
+        // reported as `preparing` and polled — never replaced by the original.
+        lastPdfMaterialRef.current = material;
+        const ready = await waitForPersonalizedPdf(String(material.id), name, forDownload, isRetry, runId);
+        if (!ready) return; // the modal already explains queued / failed
+        url = ready;
       } else {
         url = await getMaterialSignedUrl(String(path), forDownload);
       }
@@ -748,7 +928,7 @@ export default function LessonPlayer() {
               : t('lesson.downloadLinkError')),
       });
     }
-  }, [downloadFile, t]);
+  }, [downloadFile, t, waitForPersonalizedPdf]);
 
   /** Download a legacy lesson-pdf via a fresh 1-hour signed URL. */
   const openPdf = useCallback(async (fileUrlOrPath: string, displayName?: string) => {
@@ -817,6 +997,19 @@ export default function LessonPlayer() {
   // container style toggles between the inline 16:9 block and absolute fill.
   const isPinnedPlayer = !blocksVideo && !securityLockHard && playerVisible &&
     (lesson.video_type === 'vdocipher' || lesson.video_type === 'youtube');
+
+  // ── Waiting copy (localized, server-grounded) ─────────────────────────────
+  // Every string comes from the pure rules module, so what the user sees is
+  // exactly what tests/materialPdfWaiting.test.cjs exercises: the queue copy, the
+  // estimate (or the transparent fallback when the server measured nothing), and
+  // the queue rank only when it is meaningful.
+  const pdfPrepCopy = downloadState.status === 'preparing'
+    ? {
+        prep: describePrep(downloadState.phase ?? 'queued'),
+        eta: describeEta(downloadState.etaMinSeconds, downloadState.etaMaxSeconds),
+        position: queuePositionView(downloadState.queuePosition),
+      }
+    : null;
 
   // Header — spacing from headerTokens (EDGE_PAD=4, BREATHING=8)
   const headerBlock = (
@@ -1106,6 +1299,9 @@ export default function LessonPlayer() {
         backdropColor="rgba(0,0,0,0.45)"
         onRequestClose={() => {
           if (downloadState.status !== 'downloading') {
+            // Dismissing cancels any in-flight preparation poll, so no timer
+            // keeps running after the modal is gone.
+            pdfRunRef.current += 1;
             setDownloadState(prev => ({ ...prev, visible: false }));
           }
         }}
@@ -1126,12 +1322,19 @@ export default function LessonPlayer() {
                   ? <CheckCircle size={22} color="#16A34A" />
                   : downloadState.status === 'error'
                     ? <X size={22} color="#DC2626" />
-                    : <Download size={22} color={c.primary} />}
+                    : downloadState.status === 'waiting'
+                      ? <Clock size={22} color={c.primary} />
+                      : downloadState.status === 'preparing'
+                        ? <ActivityIndicator size="small" color={c.primary} />
+                        : <Download size={22} color={c.primary} />}
               </View>
               <View style={{ flex: 1 }}>
                 <Text style={{ fontSize: 15, fontWeight: '800', color: c.text }}>
                   {downloadState.status === 'success' ? 'Download Complete' :
                    downloadState.status === 'error'   ? 'Download Failed' :
+                   downloadState.status === 'waiting' ? t('lesson.materialWaitingTitle') :
+                   downloadState.status === 'preparing' && pdfPrepCopy
+                     ? t(pdfPrepCopy.prep.titleKey) :
                    'Downloading…'}
                 </Text>
                 <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.5), marginTop: 2 }} numberOfLines={1}>
@@ -1140,7 +1343,10 @@ export default function LessonPlayer() {
               </View>
               {downloadState.status !== 'downloading' && (
                 <Pressable
-                  onPress={() => setDownloadState(prev => ({ ...prev, visible: false }))}
+                  onPress={() => {
+                    pdfRunRef.current += 1; // cancel an in-flight preparation poll
+                    setDownloadState(prev => ({ ...prev, visible: false }));
+                  }}
                   accessibilityLabel={t('lesson.dismissPanel')}
                   accessibilityRole="button"
                   hitSlop={6} style={{ width: 32, height: 32, borderRadius: 9, backgroundColor: `${c.text}0D`, alignItems: 'center', justifyContent: 'center' }}
@@ -1165,11 +1371,85 @@ export default function LessonPlayer() {
               </View>
             )}
 
+            {/* Preparing — the cron worker is rendering the personalized copy.
+                `queued` and `generating` are worded differently, and the estimate
+                is shown ONLY when the server could measure one. */}
+            {downloadState.status === 'preparing' && pdfPrepCopy && (
+              <View style={{ gap: 6 }}>
+                <Text style={{ fontSize: 13, ...mutedTextStyle(c, 0.65), lineHeight: 19 }}>
+                  {t(pdfPrepCopy.prep.bodyKey)}
+                </Text>
+                <Text style={{ fontSize: 13, ...mutedTextStyle(c, 0.65), lineHeight: 19 }}>
+                  {t(pdfPrepCopy.eta.key, pdfPrepCopy.eta.params)}
+                </Text>
+                {pdfPrepCopy.position && (
+                  <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.5), lineHeight: 18 }}>
+                    {t(pdfPrepCopy.position.key, pdfPrepCopy.position.params)}
+                  </Text>
+                )}
+              </View>
+            )}
+
+            {/* Still queued after the deferral budget — NOT a failure. The job is
+                healthy, so the action re-checks the status instead of re-queueing
+                (a Retry here would reset a perfectly good job). */}
+            {downloadState.status === 'waiting' && (
+              <View style={{ gap: 10 }}>
+                <Text style={{ fontSize: 13, ...mutedTextStyle(c, 0.65), lineHeight: 19 }}>
+                  {t('lesson.materialWaitingDesc')}
+                </Text>
+                <Pressable
+                  onPress={() => {
+                    const again = pdfRecheck;
+                    const target = lastPdfMaterialRef.current;
+                    if (!again || !target) return;
+                    setPdfRecheck(null);
+                    void openMaterial(target, again.name, again.forDownload, false);
+                  }}
+                  accessibilityRole="button"
+                  accessibilityLabel={t('lesson.materialCheckAgain')}
+                  style={{
+                    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
+                    paddingVertical: 11, borderRadius: 12, backgroundColor: `${c.primary}15`,
+                  }}
+                >
+                  <RefreshCw size={15} color={c.primary} />
+                  <Text style={{ fontSize: 14, fontWeight: '800', color: c.primary }}>
+                    {t('lesson.materialCheckAgain')}
+                  </Text>
+                </Pressable>
+              </View>
+            )}
+
             {/* Error message */}
             {downloadState.status === 'error' && downloadState.errorMsg && (
               <Text style={{ fontSize: 13, color: '#DC2626', lineHeight: 19 }}>
                 {downloadState.errorMsg}
               </Text>
+            )}
+
+            {/* Explicit retry — the ONLY path that re-queues a failed copy. */}
+            {downloadState.status === 'error' && pdfRetry !== null && (
+              <Pressable
+                onPress={() => {
+                  const retry = pdfRetry;
+                  setPdfRetry(null);
+                  const target = lastPdfMaterialRef.current;
+                  if (!target) return;
+                  void openMaterial(target, retry.name, retry.forDownload, true);
+                }}
+                accessibilityRole="button"
+                accessibilityLabel={t('lesson.materialRetryPrepare')}
+                style={{
+                  flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
+                  paddingVertical: 11, borderRadius: 12, backgroundColor: `${c.primary}15`,
+                }}
+              >
+                <RefreshCw size={15} color={c.primary} />
+                <Text style={{ fontSize: 14, fontWeight: '800', color: c.primary }}>
+                  {t('lesson.materialRetryPrepare')}
+                </Text>
+              </Pressable>
             )}
 
             {/* Success hint */}

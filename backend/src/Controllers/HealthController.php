@@ -49,21 +49,64 @@ final class HealthController
         ];
     }
 
+    /**
+     * Admin-only diagnostics (route is gated to admin / super_admin).
+     * Each subsystem reports status and latency only. Errors are generic codes:
+     * raw exception text, SQL, hosts and paths are never returned.
+     */
     public function systemHealth(Request $request): array
     {
+        $subsystems = [];
+
+        $start = microtime(true);
+        try {
+            Database::instance()->value('SELECT 1');
+            $subsystems['database'] = [
+                'name' => 'Database',
+                'status' => 'ok',
+                'latencyMs' => (int) round((microtime(true) - $start) * 1000),
+            ];
+        } catch (\Throwable $e) {
+            $subsystems['database'] = [
+                'name' => 'Database',
+                'status' => 'error',
+                'latencyMs' => (int) round((microtime(true) - $start) * 1000),
+                'error' => 'database_unavailable',
+            ];
+        }
+
+        $storageWritable = is_writable(MEDACADEMY_BASE . '/storage');
+        $subsystems['storage'] = [
+            'name' => 'Local storage',
+            'status' => $storageWritable ? 'ok' : 'error',
+            'latencyMs' => 0,
+            'error' => $storageWritable ? '' : 'storage_not_writable',
+        ];
+
+        $overall = 'ok';
+        foreach ($subsystems as $s) {
+            if ($s['status'] !== 'ok') {
+                $overall = 'degraded';
+                break;
+            }
+        }
+
         return [
-            'status' => 'ok',
-            'database' => 'ok',
-            'storage_writable' => is_writable(MEDACADEMY_BASE . '/storage'),
+            'status' => $overall,
+            'version' => '1.0.0',
+            'subsystems' => $subsystems,
             'timestamp' => gmdate('Y-m-d\TH:i:s\Z'),
         ];
     }
 
+    /**
+     * Admin-only provider status. Internal fields (status_message, version)
+     * are excluded: they can contain provider account or error details.
+     */
     public function providerHealth(Request $request): array
     {
         $providers = Database::instance()->select(
-            'SELECT id, provider_key, display_name, category, is_active, is_default, status, status_message,
-                    last_health_check, version
+            'SELECT provider_key, display_name, category, is_active, is_default, status, last_health_check
                FROM provider_registry ORDER BY display_name'
         );
         return ['providers' => $providers];

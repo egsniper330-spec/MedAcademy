@@ -1,25 +1,25 @@
 {
-  "generatedAt": "2026-10-24T20:26:11.213Z",
+  "generatedAt": "2026-10-25T21:12:17.752Z",
   "project": {
     "name": "medacademy",
     "version": "2.0.1"
   },
   "summary": {
     "npm": {
-      "total": 1110,
+      "total": 1122,
       "byVerdict": {
-        "mit": 966,
-        "permissive": 138,
+        "mit": 979,
+        "permissive": 137,
         "unknown": 2,
         "weak-copyleft": 4
       },
       "byLicense": {
-        "MIT": 958,
+        "MIT": 971,
         "MIT OR Apache-2.0": 2,
         "Apache-2.0": 33,
         "MIT AND Apache-2.0": 1,
-        "BSD-3-Clause": 20,
         "ISC": 49,
+        "BSD-3-Clause": 19,
         "BSD-2-Clause": 19,
         "Python-2.0": 1,
         "Unlicense": 2,
@@ -85,9 +85,15 @@
         "AGPL-3.0 (or Artifex commercial)": 1
       }
     },
+    "ios": {
+      "total": 0,
+      "declared": 1,
+      "resolved": false
+    },
     "mitOnlyTarget": false
   },
   "blocking": [],
+  "blockingShipped": [],
   "weakCopyleft": [
     {
       "name": "lightningcss",
@@ -151,7 +157,11 @@
       "evidence": "pom",
       "evidenceRef": "com.android.installreferrer/installreferrer/2.2/pom",
       "production": true,
-      "scope": "native app runtime (releaseRuntimeClasspath)",
+      "shipped": "release",
+      "configurations": [
+        "releaseRuntimeClasspath"
+      ],
+      "scope": "native app runtime (published build)",
       "ecosystem": "android"
     },
     {
@@ -165,7 +175,11 @@
       "evidence": "pom",
       "evidenceRef": "com.google.android.gms/play-services-base/18.5.0/pom",
       "production": true,
-      "scope": "native app runtime (releaseRuntimeClasspath)",
+      "shipped": "release",
+      "configurations": [
+        "releaseRuntimeClasspath"
+      ],
+      "scope": "native app runtime (published build)",
       "ecosystem": "android"
     },
     {
@@ -179,7 +193,11 @@
       "evidence": "pom",
       "evidenceRef": "com.google.android.gms/play-services-basement/18.5.0/pom",
       "production": true,
-      "scope": "native app runtime (releaseRuntimeClasspath)",
+      "shipped": "release",
+      "configurations": [
+        "releaseRuntimeClasspath"
+      ],
+      "scope": "native app runtime (published build)",
       "ecosystem": "android"
     },
     {
@@ -193,7 +211,11 @@
       "evidence": "pom",
       "evidenceRef": "com.google.android.gms/play-services-cast/22.1.0/pom",
       "production": true,
-      "scope": "native app runtime (releaseRuntimeClasspath)",
+      "shipped": "release",
+      "configurations": [
+        "releaseRuntimeClasspath"
+      ],
+      "scope": "native app runtime (published build)",
       "ecosystem": "android"
     },
     {
@@ -207,7 +229,11 @@
       "evidence": "pom",
       "evidenceRef": "com.google.android.gms/play-services-cast-framework/22.1.0/pom",
       "production": true,
-      "scope": "native app runtime (releaseRuntimeClasspath)",
+      "shipped": "release",
+      "configurations": [
+        "releaseRuntimeClasspath"
+      ],
+      "scope": "native app runtime (published build)",
       "ecosystem": "android"
     },
     {
@@ -221,7 +247,11 @@
       "evidence": "pom",
       "evidenceRef": "com.google.android.gms/play-services-cloud-messaging/17.2.0/pom",
       "production": true,
-      "scope": "native app runtime (releaseRuntimeClasspath)",
+      "shipped": "release",
+      "configurations": [
+        "releaseRuntimeClasspath"
+      ],
+      "scope": "native app runtime (published build)",
       "ecosystem": "android"
     },
     {
@@ -235,7 +265,11 @@
       "evidence": "pom",
       "evidenceRef": "com.google.android.gms/play-services-cronet/18.0.1/pom",
       "production": true,
-      "scope": "native app runtime (releaseRuntimeClasspath)",
+      "shipped": "release",
+      "configurations": [
+        "releaseRuntimeClasspath"
+      ],
+      "scope": "native app runtime (published build)",
       "ecosystem": "android"
     },
     {
@@ -249,7 +283,11 @@
       "evidence": "pom",
       "evidenceRef": "com.google.android.gms/play-services-flags/18.1.0/pom",
       "production": true,
-      "scope": "native app runtime (releaseRuntimeClasspath)",
+      "shipped": "release",
+      "configurations": [
+        "releaseRuntimeClasspath"
+      ],
+      "scope": "native app runtime (published build)",
       "ecosystem": "android"
     },
     {
@@ -263,7 +301,11 @@
       "evidence": "pom",
       "evidenceRef": "com.google.android.gms/play-services-stats/17.0.2/pom",
       "production": true,
-      "scope": "native app runtime (releaseRuntimeClasspath)",
+      "shipped": "release",
+      "configurations": [
+        "releaseRuntimeClasspath"
+      ],
+      "scope": "native app runtime (published build)",
       "ecosystem": "android"
     },
     {
@@ -277,7 +319,11 @@
       "evidence": "pom",
       "evidenceRef": "com.google.android.gms/play-services-tasks/18.2.0/pom",
       "production": true,
-      "scope": "native app runtime (releaseRuntimeClasspath)",
+      "shipped": "release",
+      "configurations": [
+        "releaseRuntimeClasspath"
+      ],
+      "scope": "native app runtime (published build)",
       "ecosystem": "android"
     },
     {
@@ -291,7 +337,11 @@
       "evidence": "pom",
       "evidenceRef": "com.google.android.play/core-common/2.0.4/pom",
       "production": true,
-      "scope": "native app runtime (releaseRuntimeClasspath)",
+      "shipped": "release",
+      "configurations": [
+        "releaseRuntimeClasspath"
+      ],
+      "scope": "native app runtime (published build)",
       "ecosystem": "android"
     },
     {
@@ -305,7 +355,11 @@
       "evidence": "pom",
       "evidenceRef": "com.google.android.play/integrity/1.5.0/pom",
       "production": true,
-      "scope": "native app runtime (releaseRuntimeClasspath)",
+      "shipped": "release",
+      "configurations": [
+        "releaseRuntimeClasspath"
+      ],
+      "scope": "native app runtime (published build)",
       "ecosystem": "android"
     },
     {
@@ -319,7 +373,11 @@
       "evidence": "pom",
       "evidenceRef": "com.google.firebase/firebase-iid-interop/17.1.0/pom",
       "production": true,
-      "scope": "native app runtime (releaseRuntimeClasspath)",
+      "shipped": "release",
+      "configurations": [
+        "releaseRuntimeClasspath"
+      ],
+      "scope": "native app runtime (published build)",
       "ecosystem": "android"
     },
     {
@@ -333,7 +391,11 @@
       "evidence": "pom",
       "evidenceRef": "com.google.firebase/firebase-measurement-connector/19.0.0/pom",
       "production": true,
-      "scope": "native app runtime (releaseRuntimeClasspath)",
+      "shipped": "release",
+      "configurations": [
+        "releaseRuntimeClasspath"
+      ],
+      "scope": "native app runtime (published build)",
       "ecosystem": "android"
     }
   ],
@@ -374,7 +436,11 @@
       ],
       "evidence": "none",
       "production": true,
-      "scope": "native app runtime (releaseRuntimeClasspath)",
+      "shipped": "release",
+      "configurations": [
+        "releaseRuntimeClasspath"
+      ],
+      "scope": "native app runtime (published build)",
       "ecosystem": "android"
     },
     {
@@ -390,7 +456,11 @@
       "evidence": "pom",
       "evidenceRef": "org.chromium.net/cronet-api/72.3626.96/pom",
       "production": true,
-      "scope": "native app runtime (releaseRuntimeClasspath)",
+      "shipped": "release",
+      "configurations": [
+        "releaseRuntimeClasspath"
+      ],
+      "scope": "native app runtime (published build)",
       "ecosystem": "android"
     },
     {
@@ -1483,7 +1553,7 @@
     },
     {
       "name": "@expo/cli",
-      "version": "55.0.36",
+      "version": "55.0.37",
       "license": "MIT",
       "verdict": "mit",
       "notes": [],
@@ -1510,7 +1580,7 @@
     },
     {
       "name": "@expo/config-plugins",
-      "version": "55.0.11",
+      "version": "55.0.12",
       "license": "MIT",
       "verdict": "mit",
       "notes": [],
@@ -1528,7 +1598,7 @@
     },
     {
       "name": "@expo/devcert",
-      "version": "1.2.1",
+      "version": "1.2.2",
       "license": "MIT",
       "verdict": "mit",
       "notes": [],
@@ -1609,7 +1679,7 @@
     },
     {
       "name": "@expo/json-file",
-      "version": "11.0.1",
+      "version": "11.2.1",
       "license": "MIT",
       "verdict": "mit",
       "notes": [],
@@ -1662,8 +1732,17 @@
       "production": false
     },
     {
+      "name": "@expo/metro-runtime",
+      "version": "58.0.15",
+      "license": "MIT",
+      "verdict": "mit",
+      "notes": [],
+      "direct": true,
+      "production": false
+    },
+    {
       "name": "@expo/osascript",
-      "version": "2.7.1",
+      "version": "2.8.1",
       "license": "MIT",
       "verdict": "mit",
       "notes": [],
@@ -1672,7 +1751,7 @@
     },
     {
       "name": "@expo/package-manager",
-      "version": "1.13.1",
+      "version": "1.14.2",
       "license": "MIT",
       "verdict": "mit",
       "notes": [],
@@ -1718,6 +1797,15 @@
     {
       "name": "@expo/schema-utils",
       "version": "55.0.5",
+      "license": "MIT",
+      "verdict": "mit",
+      "notes": [],
+      "direct": false,
+      "production": false
+    },
+    {
+      "name": "@expo/schema-utils",
+      "version": "58.0.2",
       "license": "MIT",
       "verdict": "mit",
       "notes": [],
@@ -1771,9 +1859,9 @@
     },
     {
       "name": "@expo/xcpretty",
-      "version": "4.4.5",
-      "license": "BSD-3-Clause",
-      "verdict": "permissive",
+      "version": "4.4.7",
+      "license": "MIT",
+      "verdict": "mit",
       "notes": [],
       "direct": false,
       "production": false
@@ -2526,6 +2614,15 @@
       "production": true
     },
     {
+      "name": "@react-native-masked-view/masked-view",
+      "version": "0.3.2",
+      "license": "MIT",
+      "verdict": "mit",
+      "notes": [],
+      "direct": false,
+      "production": false
+    },
+    {
       "name": "@react-native/assets-registry",
       "version": "0.83.10",
       "license": "MIT",
@@ -2643,6 +2740,15 @@
       "production": false
     },
     {
+      "name": "@react-native/normalize-colors",
+      "version": "0.88.0",
+      "license": "MIT",
+      "verdict": "mit",
+      "notes": [],
+      "direct": false,
+      "production": false
+    },
+    {
       "name": "@react-native/virtualized-lists",
       "version": "0.83.10",
       "license": "MIT",
@@ -2662,7 +2768,7 @@
     },
     {
       "name": "@react-navigation/core",
-      "version": "7.21.12",
+      "version": "7.24.0",
       "license": "MIT",
       "verdict": "mit",
       "notes": [],
@@ -2707,7 +2813,7 @@
     },
     {
       "name": "@react-navigation/routers",
-      "version": "7.6.4",
+      "version": "7.6.5",
       "license": "MIT",
       "verdict": "mit",
       "notes": [],
@@ -3283,7 +3389,7 @@
     },
     {
       "name": "@xmldom/xmldom",
-      "version": "0.8.14",
+      "version": "0.8.15",
       "license": "MIT",
       "verdict": "mit",
       "notes": [],
@@ -3292,7 +3398,7 @@
     },
     {
       "name": "@xmldom/xmldom",
-      "version": "0.9.11",
+      "version": "0.9.12",
       "license": "MIT",
       "verdict": "mit",
       "notes": [],
@@ -3904,7 +4010,7 @@
     },
     {
       "name": "brace-expansion",
-      "version": "1.1.18",
+      "version": "1.1.21",
       "license": "MIT",
       "verdict": "mit",
       "notes": [],
@@ -3913,7 +4019,7 @@
     },
     {
       "name": "brace-expansion",
-      "version": "2.1.4",
+      "version": "2.1.7",
       "license": "MIT",
       "verdict": "mit",
       "notes": [],
@@ -3922,7 +4028,7 @@
     },
     {
       "name": "brace-expansion",
-      "version": "5.0.9",
+      "version": "5.0.12",
       "license": "MIT",
       "verdict": "mit",
       "notes": [],
@@ -5211,7 +5317,7 @@
     },
     {
       "name": "expo",
-      "version": "55.0.31",
+      "version": "55.0.32",
       "license": "MIT",
       "verdict": "mit",
       "notes": [],
@@ -5327,6 +5433,15 @@
       "production": false
     },
     {
+      "name": "expo-glass-effect",
+      "version": "58.0.5",
+      "license": "MIT",
+      "verdict": "mit",
+      "notes": [],
+      "direct": false,
+      "production": false
+    },
+    {
       "name": "expo-haptics",
       "version": "55.0.18",
       "license": "MIT",
@@ -5390,6 +5505,15 @@
       "production": true
     },
     {
+      "name": "expo-linking",
+      "version": "58.0.14",
+      "license": "MIT",
+      "verdict": "mit",
+      "notes": [],
+      "direct": true,
+      "production": true
+    },
+    {
       "name": "expo-localization",
       "version": "17.0.9",
       "license": "MIT",
@@ -5409,7 +5533,7 @@
     },
     {
       "name": "expo-modules-autolinking",
-      "version": "55.0.27",
+      "version": "55.0.28",
       "license": "MIT",
       "verdict": "mit",
       "notes": [],
@@ -5418,7 +5542,7 @@
     },
     {
       "name": "expo-modules-core",
-      "version": "55.0.26",
+      "version": "55.0.27",
       "license": "MIT",
       "verdict": "mit",
       "notes": [],
@@ -5462,6 +5586,15 @@
       "production": true
     },
     {
+      "name": "expo-router",
+      "version": "58.0.26",
+      "license": "MIT",
+      "verdict": "mit",
+      "notes": [],
+      "direct": true,
+      "production": true
+    },
+    {
       "name": "expo-screen-capture",
       "version": "55.0.18",
       "license": "MIT",
@@ -5498,6 +5631,15 @@
       "production": false
     },
     {
+      "name": "expo-server",
+      "version": "58.0.6",
+      "license": "MIT",
+      "verdict": "mit",
+      "notes": [],
+      "direct": false,
+      "production": false
+    },
+    {
       "name": "expo-sharing",
       "version": "55.0.24",
       "license": "MIT",
@@ -5525,8 +5667,26 @@
       "production": true
     },
     {
+      "name": "expo-status-bar",
+      "version": "58.0.4",
+      "license": "MIT",
+      "verdict": "mit",
+      "notes": [],
+      "direct": true,
+      "production": true
+    },
+    {
       "name": "expo-symbols",
       "version": "55.0.9",
+      "license": "MIT",
+      "verdict": "mit",
+      "notes": [],
+      "direct": false,
+      "production": false
+    },
+    {
+      "name": "expo-symbols",
+      "version": "58.0.4",
       "license": "MIT",
       "verdict": "mit",
       "notes": [],
@@ -6797,7 +6957,7 @@
     },
     {
       "name": "js-yaml",
-      "version": "3.15.1",
+      "version": "3.15.2",
       "license": "MIT",
       "verdict": "mit",
       "notes": [],
@@ -6806,7 +6966,7 @@
     },
     {
       "name": "js-yaml",
-      "version": "4.3.1",
+      "version": "4.3.2",
       "license": "MIT",
       "verdict": "mit",
       "notes": [],
@@ -7699,7 +7859,7 @@
     },
     {
       "name": "nativewind",
-      "version": "4.2.6",
+      "version": "4.2.7",
       "license": "MIT",
       "verdict": "mit",
       "notes": [],
@@ -8297,7 +8457,7 @@
     },
     {
       "name": "postcss-selector-parser",
-      "version": "6.1.4",
+      "version": "6.1.5",
       "license": "MIT",
       "verdict": "mit",
       "notes": [],
@@ -8549,7 +8709,7 @@
     },
     {
       "name": "react-native-css-interop",
-      "version": "0.2.6",
+      "version": "0.2.7",
       "license": "MIT",
       "verdict": "mit",
       "notes": [],
@@ -8564,6 +8724,15 @@
       "notes": [],
       "direct": true,
       "production": true
+    },
+    {
+      "name": "react-native-drawer-layout",
+      "version": "4.2.12",
+      "license": "MIT",
+      "verdict": "mit",
+      "notes": [],
+      "direct": false,
+      "production": false
     },
     {
       "name": "react-native-gesture-handler",
@@ -8613,6 +8782,15 @@
     {
       "name": "react-native-screens",
       "version": "4.23.0",
+      "license": "MIT",
+      "verdict": "mit",
+      "notes": [],
+      "direct": true,
+      "production": true
+    },
+    {
+      "name": "react-native-screens",
+      "version": "4.30.0",
       "license": "MIT",
       "verdict": "mit",
       "notes": [],
@@ -9170,7 +9348,7 @@
     },
     {
       "name": "shell-quote",
-      "version": "1.10.0",
+      "version": "1.12.0",
       "license": "MIT",
       "verdict": "mit",
       "notes": [],
@@ -9296,7 +9474,7 @@
     },
     {
       "name": "source-map-js",
-      "version": "1.2.1",
+      "version": "1.2.2",
       "license": "BSD-3-Clause",
       "verdict": "permissive",
       "notes": [],
@@ -9360,6 +9538,15 @@
     {
       "name": "stacktrace-parser",
       "version": "0.1.11",
+      "license": "MIT",
+      "verdict": "mit",
+      "notes": [],
+      "direct": false,
+      "production": false
+    },
+    {
+      "name": "standard-navigation",
+      "version": "0.0.5",
       "license": "MIT",
       "verdict": "mit",
       "notes": [],
@@ -10083,15 +10270,6 @@
     },
     {
       "name": "uuid",
-      "version": "7.0.3",
-      "license": "MIT",
-      "verdict": "mit",
-      "notes": [],
-      "direct": false,
-      "production": false
-    },
-    {
-      "name": "uuid",
       "version": "8.3.2",
       "license": "MIT",
       "verdict": "mit",
@@ -10301,7 +10479,7 @@
     },
     {
       "name": "ws",
-      "version": "8.21.3",
+      "version": "8.22.0",
       "license": "MIT",
       "verdict": "mit",
       "notes": [],
@@ -10310,7 +10488,7 @@
     },
     {
       "name": "xcode",
-      "version": "3.0.1",
+      "version": "4.0.0",
       "license": "Apache-2.0",
       "verdict": "permissive",
       "notes": [],
@@ -10467,12 +10645,18 @@
   "android": {
     "available": true,
     "configuration": "releaseRuntimeClasspath",
+    "configurations": [
+      "releaseRuntimeClasspath"
+    ],
     "report": "docs/android-dependency-report.txt",
     "byEvidence": {
       "pom": 244,
       "group-map": 39,
       "none": 1,
       "artifact": 2
+    },
+    "byShipped": {
+      "release": 286
     },
     "packages": [
       {
@@ -10486,7 +10670,11 @@
         "evidence": "pom",
         "evidenceRef": "androidx.activity/activity/1.11.0/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "androidx.activity:activity-ktx",
@@ -10499,7 +10687,11 @@
         "evidence": "pom",
         "evidenceRef": "androidx.activity/activity-ktx/1.11.0/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "androidx.annotation:annotation",
@@ -10512,7 +10704,11 @@
         "evidence": "pom",
         "evidenceRef": "androidx.annotation/annotation/1.9.1/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "androidx.annotation:annotation-experimental",
@@ -10525,7 +10721,11 @@
         "evidence": "pom",
         "evidenceRef": "androidx.annotation/annotation-experimental/1.4.1/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "androidx.annotation:annotation-jvm",
@@ -10538,7 +10738,11 @@
         "evidence": "pom",
         "evidenceRef": "androidx.annotation/annotation-jvm/1.9.1/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "androidx.appcompat:appcompat",
@@ -10551,7 +10755,11 @@
         "evidence": "pom",
         "evidenceRef": "androidx.appcompat/appcompat/1.7.1/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "androidx.appcompat:appcompat-resources",
@@ -10564,7 +10772,11 @@
         "evidence": "pom",
         "evidenceRef": "androidx.appcompat/appcompat-resources/1.7.1/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "androidx.arch.core:core-common",
@@ -10577,7 +10789,11 @@
         "evidence": "pom",
         "evidenceRef": "androidx.arch.core/core-common/2.2.0/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "androidx.arch.core:core-runtime",
@@ -10590,7 +10806,11 @@
         "evidence": "pom",
         "evidenceRef": "androidx.arch.core/core-runtime/2.2.0/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "androidx.asynclayoutinflater:asynclayoutinflater",
@@ -10603,7 +10823,11 @@
         "evidence": "pom",
         "evidenceRef": "androidx.asynclayoutinflater/asynclayoutinflater/1.0.0/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "androidx.autofill:autofill",
@@ -10616,7 +10840,11 @@
         "evidence": "pom",
         "evidenceRef": "androidx.autofill/autofill/1.1.0/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "androidx.biometric:biometric",
@@ -10629,7 +10857,11 @@
         "evidence": "pom",
         "evidenceRef": "androidx.biometric/biometric/1.1.0/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "androidx.browser:browser",
@@ -10642,7 +10874,11 @@
         "evidence": "pom",
         "evidenceRef": "androidx.browser/browser/1.6.0/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "androidx.cardview:cardview",
@@ -10655,7 +10891,11 @@
         "evidence": "pom",
         "evidenceRef": "androidx.cardview/cardview/1.0.0/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "androidx.collection:collection",
@@ -10668,7 +10908,11 @@
         "evidence": "pom",
         "evidenceRef": "androidx.collection/collection/1.4.2/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "androidx.collection:collection-jvm",
@@ -10681,7 +10925,11 @@
         "evidence": "pom",
         "evidenceRef": "androidx.collection/collection-jvm/1.4.2/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "androidx.collection:collection-ktx",
@@ -10694,7 +10942,11 @@
         "evidence": "pom",
         "evidenceRef": "androidx.collection/collection-ktx/1.4.2/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "androidx.concurrent:concurrent-futures",
@@ -10707,7 +10959,11 @@
         "evidence": "pom",
         "evidenceRef": "androidx.concurrent/concurrent-futures/1.1.0/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "androidx.concurrent:concurrent-futures-ktx",
@@ -10720,7 +10976,11 @@
         "evidence": "pom",
         "evidenceRef": "androidx.concurrent/concurrent-futures-ktx/1.1.0/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "androidx.constraintlayout:constraintlayout",
@@ -10733,7 +10993,11 @@
         "evidence": "pom",
         "evidenceRef": "androidx.constraintlayout/constraintlayout/2.2.1/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "androidx.constraintlayout:constraintlayout-core",
@@ -10746,7 +11010,11 @@
         "evidence": "pom",
         "evidenceRef": "androidx.constraintlayout/constraintlayout-core/1.1.1/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "androidx.coordinatorlayout:coordinatorlayout",
@@ -10759,7 +11027,11 @@
         "evidence": "pom",
         "evidenceRef": "androidx.coordinatorlayout/coordinatorlayout/1.2.0/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "androidx.core:core",
@@ -10772,7 +11044,11 @@
         "evidence": "pom",
         "evidenceRef": "androidx.core/core/1.17.0/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "androidx.core:core-ktx",
@@ -10785,7 +11061,11 @@
         "evidence": "pom",
         "evidenceRef": "androidx.core/core-ktx/1.17.0/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "androidx.core:core-viewtree",
@@ -10798,7 +11078,11 @@
         "evidence": "pom",
         "evidenceRef": "androidx.core/core-viewtree/1.0.0/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "androidx.cursoradapter:cursoradapter",
@@ -10811,7 +11095,11 @@
         "evidence": "pom",
         "evidenceRef": "androidx.cursoradapter/cursoradapter/1.0.0/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "androidx.customview:customview",
@@ -10824,7 +11112,11 @@
         "evidence": "pom",
         "evidenceRef": "androidx.customview/customview/1.1.0/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "androidx.customview:customview-poolingcontainer",
@@ -10837,7 +11129,11 @@
         "evidence": "pom",
         "evidenceRef": "androidx.customview/customview-poolingcontainer/1.0.0/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "androidx.databinding:databinding-adapters",
@@ -10850,7 +11146,11 @@
         "evidence": "pom",
         "evidenceRef": "androidx.databinding/databinding-adapters/8.13.0/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "androidx.databinding:databinding-common",
@@ -10863,7 +11163,11 @@
         "evidence": "pom",
         "evidenceRef": "androidx.databinding/databinding-common/8.13.0/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "androidx.databinding:databinding-ktx",
@@ -10876,7 +11180,11 @@
         "evidence": "pom",
         "evidenceRef": "androidx.databinding/databinding-ktx/8.13.0/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "androidx.databinding:databinding-runtime",
@@ -10889,7 +11197,11 @@
         "evidence": "pom",
         "evidenceRef": "androidx.databinding/databinding-runtime/8.13.0/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "androidx.databinding:viewbinding",
@@ -10902,7 +11214,11 @@
         "evidence": "pom",
         "evidenceRef": "androidx.databinding/viewbinding/8.13.0/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "androidx.datastore:datastore",
@@ -10915,7 +11231,11 @@
         "evidence": "pom",
         "evidenceRef": "androidx.datastore/datastore/1.1.7/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "androidx.datastore:datastore-android",
@@ -10928,7 +11248,11 @@
         "evidence": "pom",
         "evidenceRef": "androidx.datastore/datastore-android/1.1.7/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "androidx.datastore:datastore-core",
@@ -10941,7 +11265,11 @@
         "evidence": "pom",
         "evidenceRef": "androidx.datastore/datastore-core/1.1.7/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "androidx.datastore:datastore-core-android",
@@ -10954,7 +11282,11 @@
         "evidence": "pom",
         "evidenceRef": "androidx.datastore/datastore-core-android/1.1.7/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "androidx.datastore:datastore-core-okio",
@@ -10967,7 +11299,11 @@
         "evidence": "pom",
         "evidenceRef": "androidx.datastore/datastore-core-okio/1.1.7/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "androidx.datastore:datastore-core-okio-jvm",
@@ -10980,7 +11316,11 @@
         "evidence": "pom",
         "evidenceRef": "androidx.datastore/datastore-core-okio-jvm/1.1.7/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "androidx.datastore:datastore-preferences",
@@ -10993,7 +11333,11 @@
         "evidence": "pom",
         "evidenceRef": "androidx.datastore/datastore-preferences/1.1.7/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "androidx.datastore:datastore-preferences-android",
@@ -11006,7 +11350,11 @@
         "evidence": "pom",
         "evidenceRef": "androidx.datastore/datastore-preferences-android/1.1.7/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "androidx.datastore:datastore-preferences-core",
@@ -11019,7 +11367,11 @@
         "evidence": "pom",
         "evidenceRef": "androidx.datastore/datastore-preferences-core/1.1.7/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "androidx.datastore:datastore-preferences-core-android",
@@ -11032,7 +11384,11 @@
         "evidence": "pom",
         "evidenceRef": "androidx.datastore/datastore-preferences-core-android/1.1.7/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "androidx.datastore:datastore-preferences-external-protobuf",
@@ -11045,7 +11401,11 @@
         "evidence": "pom",
         "evidenceRef": "androidx.datastore/datastore-preferences-external-protobuf/1.1.7/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "androidx.datastore:datastore-preferences-proto",
@@ -11058,7 +11418,11 @@
         "evidence": "pom",
         "evidenceRef": "androidx.datastore/datastore-preferences-proto/1.1.7/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "androidx.documentfile:documentfile",
@@ -11071,7 +11435,11 @@
         "evidence": "pom",
         "evidenceRef": "androidx.documentfile/documentfile/1.1.0/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "androidx.drawerlayout:drawerlayout",
@@ -11084,7 +11452,11 @@
         "evidence": "pom",
         "evidenceRef": "androidx.drawerlayout/drawerlayout/1.1.1/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "androidx.dynamicanimation:dynamicanimation",
@@ -11097,7 +11469,11 @@
         "evidence": "pom",
         "evidenceRef": "androidx.dynamicanimation/dynamicanimation/1.1.0/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "androidx.emoji2:emoji2",
@@ -11110,7 +11486,11 @@
         "evidence": "pom",
         "evidenceRef": "androidx.emoji2/emoji2/1.3.0/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "androidx.emoji2:emoji2-views-helper",
@@ -11123,7 +11503,11 @@
         "evidence": "pom",
         "evidenceRef": "androidx.emoji2/emoji2-views-helper/1.3.0/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "androidx.exifinterface:exifinterface",
@@ -11136,7 +11520,11 @@
         "evidence": "pom",
         "evidenceRef": "androidx.exifinterface/exifinterface/1.4.1/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "androidx.fragment:fragment",
@@ -11149,7 +11537,11 @@
         "evidence": "pom",
         "evidenceRef": "androidx.fragment/fragment/1.8.9/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "androidx.fragment:fragment-ktx",
@@ -11162,7 +11554,11 @@
         "evidence": "pom",
         "evidenceRef": "androidx.fragment/fragment-ktx/1.8.9/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "androidx.graphics:graphics-shapes",
@@ -11175,7 +11571,11 @@
         "evidence": "pom",
         "evidenceRef": "androidx.graphics/graphics-shapes/1.0.1/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "androidx.graphics:graphics-shapes-android",
@@ -11188,7 +11588,11 @@
         "evidence": "pom",
         "evidenceRef": "androidx.graphics/graphics-shapes-android/1.0.1/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "androidx.interpolator:interpolator",
@@ -11201,7 +11605,11 @@
         "evidence": "pom",
         "evidenceRef": "androidx.interpolator/interpolator/1.0.0/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "androidx.legacy:legacy-support-core-ui",
@@ -11214,7 +11622,11 @@
         "evidence": "pom",
         "evidenceRef": "androidx.legacy/legacy-support-core-ui/1.0.0/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "androidx.legacy:legacy-support-core-utils",
@@ -11227,7 +11639,11 @@
         "evidence": "pom",
         "evidenceRef": "androidx.legacy/legacy-support-core-utils/1.0.0/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "androidx.legacy:legacy-support-v4",
@@ -11240,7 +11656,11 @@
         "evidence": "pom",
         "evidenceRef": "androidx.legacy/legacy-support-v4/1.0.0/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "androidx.lifecycle:lifecycle-common",
@@ -11253,7 +11673,11 @@
         "evidence": "pom",
         "evidenceRef": "androidx.lifecycle/lifecycle-common/2.9.3/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "androidx.lifecycle:lifecycle-common-java8",
@@ -11266,7 +11690,11 @@
         "evidence": "pom",
         "evidenceRef": "androidx.lifecycle/lifecycle-common-java8/2.9.3/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "androidx.lifecycle:lifecycle-common-jvm",
@@ -11279,7 +11707,11 @@
         "evidence": "pom",
         "evidenceRef": "androidx.lifecycle/lifecycle-common-jvm/2.9.3/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "androidx.lifecycle:lifecycle-livedata",
@@ -11292,7 +11724,11 @@
         "evidence": "pom",
         "evidenceRef": "androidx.lifecycle/lifecycle-livedata/2.9.3/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "androidx.lifecycle:lifecycle-livedata-core",
@@ -11305,7 +11741,11 @@
         "evidence": "pom",
         "evidenceRef": "androidx.lifecycle/lifecycle-livedata-core/2.9.3/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "androidx.lifecycle:lifecycle-livedata-core-ktx",
@@ -11318,7 +11758,11 @@
         "evidence": "pom",
         "evidenceRef": "androidx.lifecycle/lifecycle-livedata-core-ktx/2.9.3/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "androidx.lifecycle:lifecycle-process",
@@ -11331,7 +11775,11 @@
         "evidence": "pom",
         "evidenceRef": "androidx.lifecycle/lifecycle-process/2.9.3/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "androidx.lifecycle:lifecycle-runtime",
@@ -11344,7 +11792,11 @@
         "evidence": "pom",
         "evidenceRef": "androidx.lifecycle/lifecycle-runtime/2.9.3/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "androidx.lifecycle:lifecycle-runtime-android",
@@ -11357,7 +11809,11 @@
         "evidence": "pom",
         "evidenceRef": "androidx.lifecycle/lifecycle-runtime-android/2.9.3/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "androidx.lifecycle:lifecycle-runtime-ktx",
@@ -11370,7 +11826,11 @@
         "evidence": "pom",
         "evidenceRef": "androidx.lifecycle/lifecycle-runtime-ktx/2.9.3/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "androidx.lifecycle:lifecycle-runtime-ktx-android",
@@ -11383,7 +11843,11 @@
         "evidence": "pom",
         "evidenceRef": "androidx.lifecycle/lifecycle-runtime-ktx-android/2.9.3/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "androidx.lifecycle:lifecycle-service",
@@ -11396,7 +11860,11 @@
         "evidence": "pom",
         "evidenceRef": "androidx.lifecycle/lifecycle-service/2.9.3/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "androidx.lifecycle:lifecycle-viewmodel",
@@ -11409,7 +11877,11 @@
         "evidence": "pom",
         "evidenceRef": "androidx.lifecycle/lifecycle-viewmodel/2.9.3/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "androidx.lifecycle:lifecycle-viewmodel-android",
@@ -11422,7 +11894,11 @@
         "evidence": "pom",
         "evidenceRef": "androidx.lifecycle/lifecycle-viewmodel-android/2.9.3/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "androidx.lifecycle:lifecycle-viewmodel-ktx",
@@ -11435,7 +11911,11 @@
         "evidence": "pom",
         "evidenceRef": "androidx.lifecycle/lifecycle-viewmodel-ktx/2.9.3/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "androidx.lifecycle:lifecycle-viewmodel-savedstate",
@@ -11448,7 +11928,11 @@
         "evidence": "pom",
         "evidenceRef": "androidx.lifecycle/lifecycle-viewmodel-savedstate/2.9.3/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "androidx.lifecycle:lifecycle-viewmodel-savedstate-android",
@@ -11461,7 +11945,11 @@
         "evidence": "pom",
         "evidenceRef": "androidx.lifecycle/lifecycle-viewmodel-savedstate-android/2.9.3/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "androidx.loader:loader",
@@ -11474,7 +11962,11 @@
         "evidence": "pom",
         "evidenceRef": "androidx.loader/loader/1.0.0/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "androidx.localbroadcastmanager:localbroadcastmanager",
@@ -11487,7 +11979,11 @@
         "evidence": "pom",
         "evidenceRef": "androidx.localbroadcastmanager/localbroadcastmanager/1.0.0/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "androidx.media:media",
@@ -11500,7 +11996,11 @@
         "evidence": "pom",
         "evidenceRef": "androidx.media/media/1.7.0/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "androidx.media3:media3-common",
@@ -11513,7 +12013,11 @@
         "evidence": "pom",
         "evidenceRef": "androidx.media3/media3-common/1.8.0/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "androidx.media3:media3-container",
@@ -11526,7 +12030,11 @@
         "evidence": "pom",
         "evidenceRef": "androidx.media3/media3-container/1.8.0/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "androidx.media3:media3-database",
@@ -11539,7 +12047,11 @@
         "evidence": "pom",
         "evidenceRef": "androidx.media3/media3-database/1.8.0/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "androidx.media3:media3-datasource",
@@ -11552,7 +12064,11 @@
         "evidence": "pom",
         "evidenceRef": "androidx.media3/media3-datasource/1.8.0/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "androidx.media3:media3-datasource-cronet",
@@ -11565,7 +12081,11 @@
         "evidence": "pom",
         "evidenceRef": "androidx.media3/media3-datasource-cronet/1.8.0/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "androidx.media3:media3-datasource-okhttp",
@@ -11578,7 +12098,11 @@
         "evidence": "pom",
         "evidenceRef": "androidx.media3/media3-datasource-okhttp/1.8.0/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "androidx.media3:media3-decoder",
@@ -11591,7 +12115,11 @@
         "evidence": "pom",
         "evidenceRef": "androidx.media3/media3-decoder/1.8.0/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "androidx.media3:media3-exoplayer",
@@ -11604,7 +12132,11 @@
         "evidence": "pom",
         "evidenceRef": "androidx.media3/media3-exoplayer/1.8.0/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "androidx.media3:media3-exoplayer-dash",
@@ -11617,7 +12149,11 @@
         "evidence": "pom",
         "evidenceRef": "androidx.media3/media3-exoplayer-dash/1.8.0/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "androidx.media3:media3-exoplayer-hls",
@@ -11630,7 +12166,11 @@
         "evidence": "pom",
         "evidenceRef": "androidx.media3/media3-exoplayer-hls/1.8.0/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "androidx.media3:media3-exoplayer-smoothstreaming",
@@ -11643,7 +12183,11 @@
         "evidence": "pom",
         "evidenceRef": "androidx.media3/media3-exoplayer-smoothstreaming/1.8.0/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "androidx.media3:media3-extractor",
@@ -11656,7 +12200,11 @@
         "evidence": "pom",
         "evidenceRef": "androidx.media3/media3-extractor/1.8.0/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "androidx.media3:media3-session",
@@ -11669,7 +12217,11 @@
         "evidence": "pom",
         "evidenceRef": "androidx.media3/media3-session/1.8.0/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "androidx.media3:media3-ui",
@@ -11682,7 +12234,11 @@
         "evidence": "pom",
         "evidenceRef": "androidx.media3/media3-ui/1.8.0/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "androidx.mediarouter:mediarouter",
@@ -11695,7 +12251,11 @@
         "evidence": "pom",
         "evidenceRef": "androidx.mediarouter/mediarouter/1.8.1/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "androidx.multidex:multidex",
@@ -11708,7 +12268,11 @@
         "evidence": "pom",
         "evidenceRef": "androidx.multidex/multidex/2.0.1/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "androidx.palette:palette",
@@ -11721,7 +12285,11 @@
         "evidence": "pom",
         "evidenceRef": "androidx.palette/palette/1.0.0/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "androidx.print:print",
@@ -11734,7 +12302,11 @@
         "evidence": "pom",
         "evidenceRef": "androidx.print/print/1.0.0/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "androidx.profileinstaller:profileinstaller",
@@ -11747,7 +12319,11 @@
         "evidence": "pom",
         "evidenceRef": "androidx.profileinstaller/profileinstaller/1.4.1/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "androidx.recyclerview:recyclerview",
@@ -11760,7 +12336,11 @@
         "evidence": "pom",
         "evidenceRef": "androidx.recyclerview/recyclerview/1.4.0/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "androidx.resourceinspection:resourceinspection-annotation",
@@ -11773,7 +12353,11 @@
         "evidence": "pom",
         "evidenceRef": "androidx.resourceinspection/resourceinspection-annotation/1.0.1/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "androidx.room:room-common",
@@ -11786,7 +12370,11 @@
         "evidence": "pom",
         "evidenceRef": "androidx.room/room-common/2.6.1/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "androidx.room:room-ktx",
@@ -11799,7 +12387,11 @@
         "evidence": "pom",
         "evidenceRef": "androidx.room/room-ktx/2.6.1/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "androidx.room:room-runtime",
@@ -11812,7 +12404,11 @@
         "evidence": "pom",
         "evidenceRef": "androidx.room/room-runtime/2.6.1/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "androidx.savedstate:savedstate",
@@ -11825,7 +12421,11 @@
         "evidence": "pom",
         "evidenceRef": "androidx.savedstate/savedstate/1.3.1/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "androidx.savedstate:savedstate-android",
@@ -11838,7 +12438,11 @@
         "evidence": "pom",
         "evidenceRef": "androidx.savedstate/savedstate-android/1.3.1/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "androidx.savedstate:savedstate-ktx",
@@ -11851,7 +12455,11 @@
         "evidence": "pom",
         "evidenceRef": "androidx.savedstate/savedstate-ktx/1.3.1/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "androidx.slidingpanelayout:slidingpanelayout",
@@ -11864,7 +12472,11 @@
         "evidence": "pom",
         "evidenceRef": "androidx.slidingpanelayout/slidingpanelayout/1.0.0/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "androidx.sqlite:sqlite",
@@ -11877,7 +12489,11 @@
         "evidence": "pom",
         "evidenceRef": "androidx.sqlite/sqlite/2.4.0/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "androidx.sqlite:sqlite-framework",
@@ -11890,7 +12506,11 @@
         "evidence": "pom",
         "evidenceRef": "androidx.sqlite/sqlite-framework/2.4.0/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "androidx.startup:startup-runtime",
@@ -11903,7 +12523,11 @@
         "evidence": "pom",
         "evidenceRef": "androidx.startup/startup-runtime/1.1.1/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "androidx.swiperefreshlayout:swiperefreshlayout",
@@ -11916,7 +12540,11 @@
         "evidence": "pom",
         "evidenceRef": "androidx.swiperefreshlayout/swiperefreshlayout/1.1.0/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "androidx.tracing:tracing",
@@ -11929,7 +12557,11 @@
         "evidence": "pom",
         "evidenceRef": "androidx.tracing/tracing/1.2.0/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "androidx.tracing:tracing-ktx",
@@ -11942,7 +12574,11 @@
         "evidence": "pom",
         "evidenceRef": "androidx.tracing/tracing-ktx/1.2.0/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "androidx.transition:transition",
@@ -11955,7 +12591,11 @@
         "evidence": "pom",
         "evidenceRef": "androidx.transition/transition/1.5.0/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "androidx.vectordrawable:vectordrawable",
@@ -11968,7 +12608,11 @@
         "evidence": "pom",
         "evidenceRef": "androidx.vectordrawable/vectordrawable/1.1.0/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "androidx.vectordrawable:vectordrawable-animated",
@@ -11981,7 +12625,11 @@
         "evidence": "pom",
         "evidenceRef": "androidx.vectordrawable/vectordrawable-animated/1.1.0/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "androidx.versionedparcelable:versionedparcelable",
@@ -11994,7 +12642,11 @@
         "evidence": "pom",
         "evidenceRef": "androidx.versionedparcelable/versionedparcelable/1.1.1/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "androidx.viewpager:viewpager",
@@ -12007,7 +12659,11 @@
         "evidence": "pom",
         "evidenceRef": "androidx.viewpager/viewpager/1.0.0/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "androidx.viewpager2:viewpager2",
@@ -12020,7 +12676,11 @@
         "evidence": "pom",
         "evidenceRef": "androidx.viewpager2/viewpager2/1.1.0-beta02/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "androidx.webkit:webkit",
@@ -12033,7 +12693,11 @@
         "evidence": "pom",
         "evidenceRef": "androidx.webkit/webkit/1.14.0/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "androidx.work:work-runtime",
@@ -12046,7 +12710,11 @@
         "evidence": "pom",
         "evidenceRef": "androidx.work/work-runtime/2.10.4/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "androidx.work:work-runtime-ktx",
@@ -12059,7 +12727,11 @@
         "evidence": "pom",
         "evidenceRef": "androidx.work/work-runtime-ktx/2.10.4/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "com.android.installreferrer:installreferrer",
@@ -12072,7 +12744,11 @@
         "evidence": "pom",
         "evidenceRef": "com.android.installreferrer/installreferrer/2.2/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "com.caverock:androidsvg-aar",
@@ -12085,7 +12761,11 @@
         "evidence": "pom",
         "evidenceRef": "com.caverock/androidsvg-aar/1.4/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "com.facebook.device.yearclass:yearclass",
@@ -12098,7 +12778,11 @@
         "evidence": "pom",
         "evidenceRef": "com.facebook.device.yearclass/yearclass/2.1.0/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "com.facebook.fbjni:fbjni",
@@ -12111,7 +12795,11 @@
         "evidence": "pom",
         "evidenceRef": "com.facebook.fbjni/fbjni/0.7.0/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "com.facebook.fresco:animated-base",
@@ -12124,7 +12812,11 @@
         "evidence": "pom",
         "evidenceRef": "com.facebook.fresco/animated-base/3.6.0/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "com.facebook.fresco:animated-drawable",
@@ -12137,7 +12829,11 @@
         "evidence": "pom",
         "evidenceRef": "com.facebook.fresco/animated-drawable/3.6.0/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "com.facebook.fresco:animated-gif",
@@ -12150,7 +12846,11 @@
         "evidence": "pom",
         "evidenceRef": "com.facebook.fresco/animated-gif/3.6.0/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "com.facebook.fresco:drawee",
@@ -12163,7 +12863,11 @@
         "evidence": "pom",
         "evidenceRef": "com.facebook.fresco/drawee/3.6.0/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "com.facebook.fresco:fbcore",
@@ -12176,7 +12880,11 @@
         "evidence": "pom",
         "evidenceRef": "com.facebook.fresco/fbcore/3.6.0/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "com.facebook.fresco:fresco",
@@ -12189,7 +12897,11 @@
         "evidence": "pom",
         "evidenceRef": "com.facebook.fresco/fresco/3.6.0/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "com.facebook.fresco:imagepipeline",
@@ -12202,7 +12914,11 @@
         "evidence": "pom",
         "evidenceRef": "com.facebook.fresco/imagepipeline/3.6.0/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "com.facebook.fresco:imagepipeline-base",
@@ -12215,7 +12931,11 @@
         "evidence": "pom",
         "evidenceRef": "com.facebook.fresco/imagepipeline-base/3.6.0/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "com.facebook.fresco:imagepipeline-native",
@@ -12228,7 +12948,11 @@
         "evidence": "pom",
         "evidenceRef": "com.facebook.fresco/imagepipeline-native/3.6.0/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "com.facebook.fresco:imagepipeline-okhttp3",
@@ -12241,7 +12965,11 @@
         "evidence": "pom",
         "evidenceRef": "com.facebook.fresco/imagepipeline-okhttp3/3.6.0/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "com.facebook.fresco:memory-type-ashmem",
@@ -12254,7 +12982,11 @@
         "evidence": "pom",
         "evidenceRef": "com.facebook.fresco/memory-type-ashmem/3.6.0/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "com.facebook.fresco:memory-type-java",
@@ -12267,7 +12999,11 @@
         "evidence": "pom",
         "evidenceRef": "com.facebook.fresco/memory-type-java/3.6.0/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "com.facebook.fresco:memory-type-native",
@@ -12280,7 +13016,11 @@
         "evidence": "pom",
         "evidenceRef": "com.facebook.fresco/memory-type-native/3.6.0/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "com.facebook.fresco:middleware",
@@ -12293,7 +13033,11 @@
         "evidence": "pom",
         "evidenceRef": "com.facebook.fresco/middleware/3.6.0/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "com.facebook.fresco:nativeimagefilters",
@@ -12306,7 +13050,11 @@
         "evidence": "pom",
         "evidenceRef": "com.facebook.fresco/nativeimagefilters/3.6.0/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "com.facebook.fresco:nativeimagetranscoder",
@@ -12319,7 +13067,11 @@
         "evidence": "pom",
         "evidenceRef": "com.facebook.fresco/nativeimagetranscoder/3.6.0/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "com.facebook.fresco:soloader",
@@ -12332,7 +13084,11 @@
         "evidence": "pom",
         "evidenceRef": "com.facebook.fresco/soloader/3.6.0/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "com.facebook.fresco:ui-common",
@@ -12345,7 +13101,11 @@
         "evidence": "pom",
         "evidenceRef": "com.facebook.fresco/ui-common/3.6.0/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "com.facebook.fresco:ui-core",
@@ -12358,7 +13118,11 @@
         "evidence": "pom",
         "evidenceRef": "com.facebook.fresco/ui-core/3.6.0/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "com.facebook.fresco:urimod",
@@ -12371,7 +13135,11 @@
         "evidence": "pom",
         "evidenceRef": "com.facebook.fresco/urimod/3.6.0/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "com.facebook.fresco:vito-options",
@@ -12384,7 +13152,11 @@
         "evidence": "pom",
         "evidenceRef": "com.facebook.fresco/vito-options/3.6.0/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "com.facebook.fresco:vito-renderer",
@@ -12397,7 +13169,11 @@
         "evidence": "pom",
         "evidenceRef": "com.facebook.fresco/vito-renderer/3.6.0/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "com.facebook.fresco:vito-source",
@@ -12410,7 +13186,11 @@
         "evidence": "pom",
         "evidenceRef": "com.facebook.fresco/vito-source/3.6.0/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "com.facebook.fresco:webpsupport",
@@ -12423,7 +13203,11 @@
         "evidence": "pom",
         "evidenceRef": "com.facebook.fresco/webpsupport/3.6.0/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "com.facebook.hermes:hermes-android",
@@ -12436,7 +13220,11 @@
         "evidence": "pom",
         "evidenceRef": "com.facebook.hermes/hermes-android/0.14.1/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "com.facebook.infer.annotation:infer-annotation",
@@ -12449,7 +13237,11 @@
         "evidence": "pom",
         "evidenceRef": "com.facebook.infer.annotation/infer-annotation/0.18.0/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "com.facebook.react:react-android",
@@ -12462,7 +13254,11 @@
         "evidence": "pom",
         "evidenceRef": "com.facebook.react/react-android/0.83.10/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "com.facebook.soloader:annotation",
@@ -12475,7 +13271,11 @@
         "evidence": "pom",
         "evidenceRef": "com.facebook.soloader/annotation/0.12.1/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "com.facebook.soloader:nativeloader",
@@ -12488,7 +13288,11 @@
         "evidence": "pom",
         "evidenceRef": "com.facebook.soloader/nativeloader/0.12.1/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "com.facebook.soloader:soloader",
@@ -12501,7 +13305,11 @@
         "evidence": "pom",
         "evidenceRef": "com.facebook.soloader/soloader/0.12.1/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "com.facebook.yoga:proguard-annotations",
@@ -12514,7 +13322,11 @@
         "evidence": "pom",
         "evidenceRef": "com.facebook.yoga/proguard-annotations/1.19.0/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "com.fasterxml.jackson:jackson-bom",
@@ -12527,7 +13339,11 @@
         "evidence": "pom",
         "evidenceRef": "com.fasterxml.jackson/jackson-bom/2.20.0/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "com.fasterxml.jackson.core:jackson-annotations",
@@ -12540,7 +13356,11 @@
         "evidence": "pom",
         "evidenceRef": "com.fasterxml.jackson.core/jackson-annotations/2.20/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "com.fasterxml.jackson.core:jackson-core",
@@ -12553,7 +13373,11 @@
         "evidence": "pom",
         "evidenceRef": "com.fasterxml.jackson.core/jackson-core/2.20.0/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "com.fasterxml.jackson.core:jackson-databind",
@@ -12566,7 +13390,11 @@
         "evidence": "pom",
         "evidenceRef": "com.fasterxml.jackson.core/jackson-databind/2.20.0/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "com.github.bumptech.glide:annotations",
@@ -12581,7 +13409,11 @@
         "evidence": "pom",
         "evidenceRef": "com.github.bumptech.glide/annotations/5.0.5/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "com.github.bumptech.glide:avif-integration",
@@ -12596,7 +13428,11 @@
         "evidence": "pom",
         "evidenceRef": "com.github.bumptech.glide/avif-integration/5.0.5/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "com.github.bumptech.glide:disklrucache",
@@ -12611,7 +13447,11 @@
         "evidence": "pom",
         "evidenceRef": "com.github.bumptech.glide/disklrucache/5.0.5/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "com.github.bumptech.glide:gifdecoder",
@@ -12626,7 +13466,11 @@
         "evidence": "pom",
         "evidenceRef": "com.github.bumptech.glide/gifdecoder/5.0.5/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "com.github.bumptech.glide:glide",
@@ -12641,7 +13485,11 @@
         "evidence": "pom",
         "evidenceRef": "com.github.bumptech.glide/glide/5.0.5/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "com.github.bumptech.glide:okhttp3-integration",
@@ -12656,7 +13504,11 @@
         "evidence": "pom",
         "evidenceRef": "com.github.bumptech.glide/okhttp3-integration/5.0.5/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "com.github.penfeizhou.android.animation:apng",
@@ -12669,7 +13521,11 @@
         "evidence": "pom",
         "evidenceRef": "com.github.penfeizhou.android.animation/apng/3.0.5/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "com.github.penfeizhou.android.animation:avif",
@@ -12682,7 +13538,11 @@
         "evidence": "pom",
         "evidenceRef": "com.github.penfeizhou.android.animation/avif/3.0.5/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "com.github.penfeizhou.android.animation:awebp",
@@ -12695,7 +13555,11 @@
         "evidence": "pom",
         "evidenceRef": "com.github.penfeizhou.android.animation/awebp/3.0.5/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "com.github.penfeizhou.android.animation:frameanimation",
@@ -12708,7 +13572,11 @@
         "evidence": "pom",
         "evidenceRef": "com.github.penfeizhou.android.animation/frameanimation/3.0.5/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "com.github.penfeizhou.android.animation:gif",
@@ -12721,7 +13589,11 @@
         "evidence": "pom",
         "evidenceRef": "com.github.penfeizhou.android.animation/gif/3.0.5/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "com.github.penfeizhou.android.animation:glide-plugin",
@@ -12734,7 +13606,11 @@
         "evidence": "pom",
         "evidenceRef": "com.github.penfeizhou.android.animation/glide-plugin/3.0.5/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "com.google.android.datatransport:transport-api",
@@ -12747,7 +13623,11 @@
         "evidence": "pom",
         "evidenceRef": "com.google.android.datatransport/transport-api/3.1.0/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "com.google.android.datatransport:transport-backend-cct",
@@ -12760,7 +13640,11 @@
         "evidence": "pom",
         "evidenceRef": "com.google.android.datatransport/transport-backend-cct/3.1.9/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "com.google.android.datatransport:transport-runtime",
@@ -12773,7 +13657,11 @@
         "evidence": "pom",
         "evidenceRef": "com.google.android.datatransport/transport-runtime/3.1.9/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "com.google.android.gms:play-services-base",
@@ -12786,7 +13674,11 @@
         "evidence": "pom",
         "evidenceRef": "com.google.android.gms/play-services-base/18.5.0/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "com.google.android.gms:play-services-basement",
@@ -12799,7 +13691,11 @@
         "evidence": "pom",
         "evidenceRef": "com.google.android.gms/play-services-basement/18.5.0/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "com.google.android.gms:play-services-cast",
@@ -12812,7 +13708,11 @@
         "evidence": "pom",
         "evidenceRef": "com.google.android.gms/play-services-cast/22.1.0/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "com.google.android.gms:play-services-cast-framework",
@@ -12825,7 +13725,11 @@
         "evidence": "pom",
         "evidenceRef": "com.google.android.gms/play-services-cast-framework/22.1.0/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "com.google.android.gms:play-services-cloud-messaging",
@@ -12838,7 +13742,11 @@
         "evidence": "pom",
         "evidenceRef": "com.google.android.gms/play-services-cloud-messaging/17.2.0/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "com.google.android.gms:play-services-cronet",
@@ -12851,7 +13759,11 @@
         "evidence": "pom",
         "evidenceRef": "com.google.android.gms/play-services-cronet/18.0.1/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "com.google.android.gms:play-services-flags",
@@ -12864,7 +13776,11 @@
         "evidence": "pom",
         "evidenceRef": "com.google.android.gms/play-services-flags/18.1.0/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "com.google.android.gms:play-services-stats",
@@ -12877,7 +13793,11 @@
         "evidence": "pom",
         "evidenceRef": "com.google.android.gms/play-services-stats/17.0.2/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "com.google.android.gms:play-services-tasks",
@@ -12890,7 +13810,11 @@
         "evidence": "pom",
         "evidenceRef": "com.google.android.gms/play-services-tasks/18.2.0/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "com.google.android.material:material",
@@ -12903,7 +13827,11 @@
         "evidence": "pom",
         "evidenceRef": "com.google.android.material/material/1.14.0-alpha05/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "com.google.android.play:core-common",
@@ -12916,7 +13844,11 @@
         "evidence": "pom",
         "evidenceRef": "com.google.android.play/core-common/2.0.4/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "com.google.android.play:integrity",
@@ -12929,7 +13861,11 @@
         "evidence": "pom",
         "evidenceRef": "com.google.android.play/integrity/1.5.0/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "com.google.code.findbugs:jsr305",
@@ -12942,7 +13878,11 @@
         "evidence": "pom",
         "evidenceRef": "com.google.code.findbugs/jsr305/3.0.2/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "com.google.code.gson:gson",
@@ -12957,7 +13897,11 @@
         "evidence": "group-map",
         "evidenceRef": "ANDROID_GROUP_FALLBACKS",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "com.google.errorprone:error_prone_annotations",
@@ -12970,7 +13914,11 @@
         "evidence": "pom",
         "evidenceRef": "com.google.errorprone/error_prone_annotations/2.28.0/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "com.google.firebase:firebase-annotations",
@@ -12983,7 +13931,11 @@
         "evidence": "pom",
         "evidenceRef": "com.google.firebase/firebase-annotations/17.0.0/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "com.google.firebase:firebase-common",
@@ -12996,7 +13948,11 @@
         "evidence": "pom",
         "evidenceRef": "com.google.firebase/firebase-common/22.0.1/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "com.google.firebase:firebase-components",
@@ -13009,7 +13965,11 @@
         "evidence": "pom",
         "evidenceRef": "com.google.firebase/firebase-components/19.0.0/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "com.google.firebase:firebase-datatransport",
@@ -13022,7 +13982,11 @@
         "evidence": "pom",
         "evidenceRef": "com.google.firebase/firebase-datatransport/18.2.0/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "com.google.firebase:firebase-encoders",
@@ -13035,7 +13999,11 @@
         "evidence": "pom",
         "evidenceRef": "com.google.firebase/firebase-encoders/17.0.0/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "com.google.firebase:firebase-encoders-json",
@@ -13048,7 +14016,11 @@
         "evidence": "pom",
         "evidenceRef": "com.google.firebase/firebase-encoders-json/18.0.0/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "com.google.firebase:firebase-encoders-proto",
@@ -13061,7 +14033,11 @@
         "evidence": "pom",
         "evidenceRef": "com.google.firebase/firebase-encoders-proto/16.0.0/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "com.google.firebase:firebase-iid-interop",
@@ -13074,7 +14050,11 @@
         "evidence": "pom",
         "evidenceRef": "com.google.firebase/firebase-iid-interop/17.1.0/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "com.google.firebase:firebase-installations",
@@ -13087,7 +14067,11 @@
         "evidence": "pom",
         "evidenceRef": "com.google.firebase/firebase-installations/18.0.0/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "com.google.firebase:firebase-installations-interop",
@@ -13100,7 +14084,11 @@
         "evidence": "pom",
         "evidenceRef": "com.google.firebase/firebase-installations-interop/17.1.1/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "com.google.firebase:firebase-measurement-connector",
@@ -13113,7 +14101,11 @@
         "evidence": "pom",
         "evidenceRef": "com.google.firebase/firebase-measurement-connector/19.0.0/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "com.google.firebase:firebase-messaging",
@@ -13126,7 +14118,11 @@
         "evidence": "pom",
         "evidenceRef": "com.google.firebase/firebase-messaging/25.0.1/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "com.google.guava:failureaccess",
@@ -13141,7 +14137,11 @@
         "evidence": "group-map",
         "evidenceRef": "ANDROID_GROUP_FALLBACKS",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "com.google.guava:guava",
@@ -13156,7 +14156,11 @@
         "evidence": "group-map",
         "evidenceRef": "ANDROID_GROUP_FALLBACKS",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "com.google.guava:listenablefuture",
@@ -13171,7 +14175,11 @@
         "evidence": "group-map",
         "evidenceRef": "ANDROID_GROUP_FALLBACKS",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "com.google.j2objc:j2objc-annotations",
@@ -13184,7 +14192,11 @@
         "evidence": "pom",
         "evidenceRef": "com.google.j2objc/j2objc-annotations/3.0.0/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "com.google.protobuf:protobuf-javalite",
@@ -13199,7 +14211,11 @@
         "evidence": "group-map",
         "evidenceRef": "ANDROID_GROUP_FALLBACKS",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "com.parse.bolts:bolts-tasks",
@@ -13212,7 +14228,11 @@
         "evidence": "pom",
         "evidenceRef": "com.parse.bolts/bolts-tasks/1.4.0/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "com.squareup.okhttp3:logging-interceptor",
@@ -13225,7 +14245,11 @@
         "evidence": "pom",
         "evidenceRef": "com.squareup.okhttp3/logging-interceptor/4.12.0/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "com.squareup.okhttp3:okhttp",
@@ -13238,7 +14262,11 @@
         "evidence": "pom",
         "evidenceRef": "com.squareup.okhttp3/okhttp/4.12.0/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "com.squareup.okhttp3:okhttp-urlconnection",
@@ -13251,7 +14279,11 @@
         "evidence": "pom",
         "evidenceRef": "com.squareup.okhttp3/okhttp-urlconnection/4.9.2/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "com.squareup.okio:okio",
@@ -13264,7 +14296,11 @@
         "evidence": "pom",
         "evidenceRef": "com.squareup.okio/okio/3.9.1/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "com.squareup.okio:okio-jvm",
@@ -13277,7 +14313,11 @@
         "evidence": "pom",
         "evidenceRef": "com.squareup.okio/okio-jvm/3.9.1/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "com.vanniktech:android-image-cropper",
@@ -13290,7 +14330,11 @@
         "evidence": "pom",
         "evidenceRef": "com.vanniktech/android-image-cropper/4.7.0/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "com.vdocipher.aegis:vdocipher-android",
@@ -13304,7 +14348,11 @@
         ],
         "evidence": "none",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "commons-codec:commons-codec",
@@ -13319,7 +14367,11 @@
         "evidence": "artifact",
         "evidenceRef": "commons-codec/commons-codec/1.10/commons-codec-1.10.jar!META-INF/LICENSE.txt",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "commons-io:commons-io",
@@ -13334,7 +14386,11 @@
         "evidence": "artifact",
         "evidenceRef": "commons-io/commons-io/2.6/commons-io-2.6.jar!META-INF/LICENSE.txt",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "expo.modules.asset:expo.modules.asset",
@@ -13349,7 +14405,11 @@
         "evidence": "group-map",
         "evidenceRef": "ANDROID_GROUP_FALLBACKS",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "expo.modules.audio:expo.modules.audio",
@@ -13364,7 +14424,11 @@
         "evidence": "group-map",
         "evidenceRef": "ANDROID_GROUP_FALLBACKS",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "expo.modules.image:expo.modules.image",
@@ -13379,7 +14443,11 @@
         "evidence": "group-map",
         "evidenceRef": "ANDROID_GROUP_FALLBACKS",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "expo.modules.router:expo.modules.router",
@@ -13394,7 +14462,11 @@
         "evidence": "group-map",
         "evidenceRef": "ANDROID_GROUP_FALLBACKS",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "expo.modules.webview:expo.modules.webview",
@@ -13409,7 +14481,11 @@
         "evidence": "group-map",
         "evidenceRef": "ANDROID_GROUP_FALLBACKS",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "host.exp.exponent:expo.modules.application",
@@ -13424,7 +14500,11 @@
         "evidence": "group-map",
         "evidenceRef": "ANDROID_GROUP_FALLBACKS",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "host.exp.exponent:expo.modules.clipboard",
@@ -13439,7 +14519,11 @@
         "evidence": "group-map",
         "evidenceRef": "ANDROID_GROUP_FALLBACKS",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "host.exp.exponent:expo.modules.crypto",
@@ -13454,7 +14538,11 @@
         "evidence": "group-map",
         "evidenceRef": "ANDROID_GROUP_FALLBACKS",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "host.exp.exponent:expo.modules.device",
@@ -13469,7 +14557,11 @@
         "evidence": "group-map",
         "evidenceRef": "ANDROID_GROUP_FALLBACKS",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "host.exp.exponent:expo.modules.documentpicker",
@@ -13484,7 +14576,11 @@
         "evidence": "group-map",
         "evidenceRef": "ANDROID_GROUP_FALLBACKS",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "host.exp.exponent:expo.modules.filesystem",
@@ -13499,7 +14595,11 @@
         "evidence": "group-map",
         "evidenceRef": "ANDROID_GROUP_FALLBACKS",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "host.exp.exponent:expo.modules.font",
@@ -13514,7 +14614,11 @@
         "evidence": "group-map",
         "evidenceRef": "ANDROID_GROUP_FALLBACKS",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "host.exp.exponent:expo.modules.haptics",
@@ -13529,7 +14633,11 @@
         "evidence": "group-map",
         "evidenceRef": "ANDROID_GROUP_FALLBACKS",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "host.exp.exponent:expo.modules.imageloader",
@@ -13544,7 +14652,11 @@
         "evidence": "group-map",
         "evidenceRef": "ANDROID_GROUP_FALLBACKS",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "host.exp.exponent:expo.modules.imagepicker",
@@ -13559,7 +14671,11 @@
         "evidence": "group-map",
         "evidenceRef": "ANDROID_GROUP_FALLBACKS",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "host.exp.exponent:expo.modules.keepawake",
@@ -13574,7 +14690,11 @@
         "evidence": "group-map",
         "evidenceRef": "ANDROID_GROUP_FALLBACKS",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "host.exp.exponent:expo.modules.lineargradient",
@@ -13589,7 +14709,11 @@
         "evidence": "group-map",
         "evidenceRef": "ANDROID_GROUP_FALLBACKS",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "host.exp.exponent:expo.modules.linking",
@@ -13604,7 +14728,11 @@
         "evidence": "group-map",
         "evidenceRef": "ANDROID_GROUP_FALLBACKS",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "host.exp.exponent:expo.modules.localization",
@@ -13619,7 +14747,11 @@
         "evidence": "group-map",
         "evidenceRef": "ANDROID_GROUP_FALLBACKS",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "host.exp.exponent:expo.modules.medialibrary",
@@ -13634,7 +14766,11 @@
         "evidence": "group-map",
         "evidenceRef": "ANDROID_GROUP_FALLBACKS",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "host.exp.exponent:expo.modules.navigationbar",
@@ -13649,7 +14785,11 @@
         "evidence": "group-map",
         "evidenceRef": "ANDROID_GROUP_FALLBACKS",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "host.exp.exponent:expo.modules.network",
@@ -13664,7 +14804,11 @@
         "evidence": "group-map",
         "evidenceRef": "ANDROID_GROUP_FALLBACKS",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "host.exp.exponent:expo.modules.notifications",
@@ -13679,7 +14823,11 @@
         "evidence": "group-map",
         "evidenceRef": "ANDROID_GROUP_FALLBACKS",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "host.exp.exponent:expo.modules.screencapture",
@@ -13694,7 +14842,11 @@
         "evidence": "group-map",
         "evidenceRef": "ANDROID_GROUP_FALLBACKS",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "host.exp.exponent:expo.modules.screenorientation",
@@ -13709,7 +14861,11 @@
         "evidence": "group-map",
         "evidenceRef": "ANDROID_GROUP_FALLBACKS",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "host.exp.exponent:expo.modules.securestore",
@@ -13724,7 +14880,11 @@
         "evidence": "group-map",
         "evidenceRef": "ANDROID_GROUP_FALLBACKS",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "host.exp.exponent:expo.modules.sharing",
@@ -13739,7 +14899,11 @@
         "evidence": "group-map",
         "evidenceRef": "ANDROID_GROUP_FALLBACKS",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "host.exp.exponent:expo.modules.sqlite",
@@ -13754,7 +14918,11 @@
         "evidence": "group-map",
         "evidenceRef": "ANDROID_GROUP_FALLBACKS",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "host.exp.exponent:expo.modules.systemui",
@@ -13769,7 +14937,11 @@
         "evidence": "group-map",
         "evidenceRef": "ANDROID_GROUP_FALLBACKS",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "host.exp.exponent:expo.modules.taskmanager",
@@ -13784,7 +14956,11 @@
         "evidence": "group-map",
         "evidenceRef": "ANDROID_GROUP_FALLBACKS",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "host.exp.exponent:expo.modules.video",
@@ -13799,7 +14975,11 @@
         "evidence": "group-map",
         "evidenceRef": "ANDROID_GROUP_FALLBACKS",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "host.exp.exponent:expo.modules.videothumbnails",
@@ -13814,7 +14994,11 @@
         "evidence": "group-map",
         "evidenceRef": "ANDROID_GROUP_FALLBACKS",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "host.exp.exponent:expo.modules.webbrowser",
@@ -13829,7 +15013,11 @@
         "evidence": "group-map",
         "evidenceRef": "ANDROID_GROUP_FALLBACKS",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "host.exp.exponent:org.unimodules.apploader",
@@ -13844,7 +15032,11 @@
         "evidence": "group-map",
         "evidenceRef": "ANDROID_GROUP_FALLBACKS",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "io.coil-kt.coil3:coil",
@@ -13857,7 +15049,11 @@
         "evidence": "pom",
         "evidenceRef": "io.coil-kt.coil3/coil/3.0.2/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "io.coil-kt.coil3:coil-android",
@@ -13870,7 +15066,11 @@
         "evidence": "pom",
         "evidenceRef": "io.coil-kt.coil3/coil-android/3.0.2/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "io.coil-kt.coil3:coil-core",
@@ -13883,7 +15083,11 @@
         "evidence": "pom",
         "evidenceRef": "io.coil-kt.coil3/coil-core/3.0.2/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "io.coil-kt.coil3:coil-core-android",
@@ -13896,7 +15100,11 @@
         "evidence": "pom",
         "evidenceRef": "io.coil-kt.coil3/coil-core-android/3.0.2/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "io.coil-kt.coil3:coil-network-core",
@@ -13909,7 +15117,11 @@
         "evidence": "pom",
         "evidenceRef": "io.coil-kt.coil3/coil-network-core/3.0.2/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "io.coil-kt.coil3:coil-network-core-android",
@@ -13922,7 +15134,11 @@
         "evidence": "pom",
         "evidenceRef": "io.coil-kt.coil3/coil-network-core-android/3.0.2/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "io.coil-kt.coil3:coil-network-okhttp",
@@ -13935,7 +15151,11 @@
         "evidence": "pom",
         "evidenceRef": "io.coil-kt.coil3/coil-network-okhttp/3.0.2/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "io.coil-kt.coil3:coil-network-okhttp-jvm",
@@ -13948,7 +15168,11 @@
         "evidence": "pom",
         "evidenceRef": "io.coil-kt.coil3/coil-network-okhttp-jvm/3.0.2/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "io.coil-kt.coil3:coil-svg",
@@ -13961,7 +15185,11 @@
         "evidence": "pom",
         "evidenceRef": "io.coil-kt.coil3/coil-svg/3.0.2/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "io.coil-kt.coil3:coil-svg-android",
@@ -13974,7 +15202,11 @@
         "evidence": "pom",
         "evidenceRef": "io.coil-kt.coil3/coil-svg-android/3.0.2/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "javax.inject:javax.inject",
@@ -13987,7 +15219,11 @@
         "evidence": "pom",
         "evidenceRef": "javax.inject/javax.inject/1/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "jp.wasabeef:glide-transformations",
@@ -14000,7 +15236,11 @@
         "evidence": "pom",
         "evidenceRef": "jp.wasabeef/glide-transformations/4.3.0/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "me.leolin:ShortcutBadger",
@@ -14013,7 +15253,11 @@
         "evidence": "pom",
         "evidenceRef": "me.leolin/ShortcutBadger/1.1.22/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "org.aomedia.avif.android:avif",
@@ -14026,7 +15270,11 @@
         "evidence": "pom",
         "evidenceRef": "org.aomedia.avif.android/avif/1.1.1.14d8e3c4/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "org.checkerframework:checker-qual",
@@ -14039,7 +15287,11 @@
         "evidence": "pom",
         "evidenceRef": "org.checkerframework/checker-qual/3.43.0/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "org.chromium.net:cronet-api",
@@ -14054,7 +15306,11 @@
         "evidence": "pom",
         "evidenceRef": "org.chromium.net/cronet-api/72.3626.96/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "org.jetbrains:annotations",
@@ -14067,7 +15323,11 @@
         "evidence": "pom",
         "evidenceRef": "org.jetbrains/annotations/23.0.0/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "org.jetbrains.kotlin:kotlin-android-extensions-runtime",
@@ -14080,7 +15340,11 @@
         "evidence": "pom",
         "evidenceRef": "org.jetbrains.kotlin/kotlin-android-extensions-runtime/2.1.20/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "org.jetbrains.kotlin:kotlin-annotations-jvm",
@@ -14093,7 +15357,11 @@
         "evidence": "pom",
         "evidenceRef": "org.jetbrains.kotlin/kotlin-annotations-jvm/1.3.72/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "org.jetbrains.kotlin:kotlin-bom",
@@ -14106,7 +15374,11 @@
         "evidence": "pom",
         "evidenceRef": "org.jetbrains.kotlin/kotlin-bom/1.8.22/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "org.jetbrains.kotlin:kotlin-parcelize-runtime",
@@ -14119,7 +15391,11 @@
         "evidence": "pom",
         "evidenceRef": "org.jetbrains.kotlin/kotlin-parcelize-runtime/2.1.20/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "org.jetbrains.kotlin:kotlin-reflect",
@@ -14132,7 +15408,11 @@
         "evidence": "pom",
         "evidenceRef": "org.jetbrains.kotlin/kotlin-reflect/2.1.20/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "org.jetbrains.kotlin:kotlin-stdlib",
@@ -14145,7 +15425,11 @@
         "evidence": "pom",
         "evidenceRef": "org.jetbrains.kotlin/kotlin-stdlib/2.2.0/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "org.jetbrains.kotlin:kotlin-stdlib-jdk7",
@@ -14158,7 +15442,11 @@
         "evidence": "pom",
         "evidenceRef": "org.jetbrains.kotlin/kotlin-stdlib-jdk7/2.1.20/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "org.jetbrains.kotlin:kotlin-stdlib-jdk8",
@@ -14171,7 +15459,11 @@
         "evidence": "pom",
         "evidenceRef": "org.jetbrains.kotlin/kotlin-stdlib-jdk8/1.8.22/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "org.jetbrains.kotlinx:kotlinx-coroutines-android",
@@ -14184,7 +15476,11 @@
         "evidence": "pom",
         "evidenceRef": "org.jetbrains.kotlinx/kotlinx-coroutines-android/1.10.2/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "org.jetbrains.kotlinx:kotlinx-coroutines-bom",
@@ -14197,7 +15493,11 @@
         "evidence": "pom",
         "evidenceRef": "org.jetbrains.kotlinx/kotlinx-coroutines-bom/1.10.2/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "org.jetbrains.kotlinx:kotlinx-coroutines-core",
@@ -14210,7 +15510,11 @@
         "evidence": "pom",
         "evidenceRef": "org.jetbrains.kotlinx/kotlinx-coroutines-core/1.10.2/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "org.jetbrains.kotlinx:kotlinx-coroutines-core-jvm",
@@ -14223,7 +15527,11 @@
         "evidence": "pom",
         "evidenceRef": "org.jetbrains.kotlinx/kotlinx-coroutines-core-jvm/1.10.2/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "org.jetbrains.kotlinx:kotlinx-coroutines-play-services",
@@ -14236,7 +15544,11 @@
         "evidence": "pom",
         "evidenceRef": "org.jetbrains.kotlinx/kotlinx-coroutines-play-services/1.10.2/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "org.jetbrains.kotlinx:kotlinx-serialization-bom",
@@ -14249,7 +15561,11 @@
         "evidence": "pom",
         "evidenceRef": "org.jetbrains.kotlinx/kotlinx-serialization-bom/1.7.3/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "org.jetbrains.kotlinx:kotlinx-serialization-core",
@@ -14262,7 +15578,11 @@
         "evidence": "pom",
         "evidenceRef": "org.jetbrains.kotlinx/kotlinx-serialization-core/1.7.3/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "org.jetbrains.kotlinx:kotlinx-serialization-core-jvm",
@@ -14275,7 +15595,11 @@
         "evidence": "pom",
         "evidenceRef": "org.jetbrains.kotlinx/kotlinx-serialization-core-jvm/1.7.3/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       },
       {
         "name": "org.jspecify:jspecify",
@@ -14288,9 +15612,25 @@
         "evidence": "pom",
         "evidenceRef": "org.jspecify/jspecify/1.0.0/pom",
         "production": true,
-        "scope": "native app runtime (releaseRuntimeClasspath)"
+        "shipped": "release",
+        "configurations": [
+          "releaseRuntimeClasspath"
+        ],
+        "scope": "native app runtime (published build)"
       }
     ]
+  },
+  "ios": {
+    "available": false,
+    "podfile": true,
+    "declared": [
+      {
+        "name": "React-jsc",
+        "constraint": null
+      }
+    ],
+    "reason": "no ios/Podfile.lock or ios/Pods/Manifest.lock in this checkout — resolved pod versions are unknown until `pod install` runs on macOS",
+    "packages": []
   },
   "vendored": [
     {
@@ -14370,5 +15710,1407 @@
         "blocking set while it stays gated"
       ]
     }
-  ]
+  ],
+  "mitOnly": {
+    "scopeSize": 395,
+    "mitInScope": 163,
+    "covered": [],
+    "uncovered": [
+      {
+        "name": "class-variance-authority",
+        "ecosystem": "npm",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "lucide-react-native",
+        "ecosystem": "npm",
+        "license": "ISC",
+        "verdict": "permissive"
+      },
+      {
+        "name": "php-parser",
+        "ecosystem": "npm",
+        "license": "BSD-3-Clause",
+        "verdict": "permissive"
+      },
+      {
+        "name": "vdocipher-rn-bridge",
+        "ecosystem": "npm",
+        "license": "(none declared)",
+        "verdict": "unknown"
+      },
+      {
+        "name": "tecnickcom/tcpdf",
+        "ecosystem": "composer",
+        "license": "LGPL-3.0-or-later",
+        "verdict": "weak-copyleft"
+      },
+      {
+        "name": "androidx.activity:activity",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "androidx.activity:activity-ktx",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "androidx.annotation:annotation",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "androidx.annotation:annotation-experimental",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "androidx.annotation:annotation-jvm",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "androidx.appcompat:appcompat",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "androidx.appcompat:appcompat-resources",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "androidx.arch.core:core-common",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "androidx.arch.core:core-runtime",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "androidx.asynclayoutinflater:asynclayoutinflater",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "androidx.autofill:autofill",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "androidx.biometric:biometric",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "androidx.browser:browser",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "androidx.cardview:cardview",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "androidx.collection:collection",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "androidx.collection:collection-jvm",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "androidx.collection:collection-ktx",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "androidx.concurrent:concurrent-futures",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "androidx.concurrent:concurrent-futures-ktx",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "androidx.constraintlayout:constraintlayout",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "androidx.constraintlayout:constraintlayout-core",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "androidx.coordinatorlayout:coordinatorlayout",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "androidx.core:core",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "androidx.core:core-ktx",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "androidx.core:core-viewtree",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "androidx.cursoradapter:cursoradapter",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "androidx.customview:customview",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "androidx.customview:customview-poolingcontainer",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "androidx.databinding:databinding-adapters",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "androidx.databinding:databinding-common",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "androidx.databinding:databinding-ktx",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "androidx.databinding:databinding-runtime",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "androidx.databinding:viewbinding",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "androidx.datastore:datastore",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "androidx.datastore:datastore-android",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "androidx.datastore:datastore-core",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "androidx.datastore:datastore-core-android",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "androidx.datastore:datastore-core-okio",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "androidx.datastore:datastore-core-okio-jvm",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "androidx.datastore:datastore-preferences",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "androidx.datastore:datastore-preferences-android",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "androidx.datastore:datastore-preferences-core",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "androidx.datastore:datastore-preferences-core-android",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "androidx.datastore:datastore-preferences-external-protobuf",
+        "ecosystem": "android",
+        "license": "BSD-3-Clause",
+        "verdict": "permissive"
+      },
+      {
+        "name": "androidx.datastore:datastore-preferences-proto",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "androidx.documentfile:documentfile",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "androidx.drawerlayout:drawerlayout",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "androidx.dynamicanimation:dynamicanimation",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "androidx.emoji2:emoji2",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "androidx.emoji2:emoji2-views-helper",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "androidx.exifinterface:exifinterface",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "androidx.fragment:fragment",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "androidx.fragment:fragment-ktx",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "androidx.graphics:graphics-shapes",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "androidx.graphics:graphics-shapes-android",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "androidx.interpolator:interpolator",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "androidx.legacy:legacy-support-core-ui",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "androidx.legacy:legacy-support-core-utils",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "androidx.legacy:legacy-support-v4",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "androidx.lifecycle:lifecycle-common",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "androidx.lifecycle:lifecycle-common-java8",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "androidx.lifecycle:lifecycle-common-jvm",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "androidx.lifecycle:lifecycle-livedata",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "androidx.lifecycle:lifecycle-livedata-core",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "androidx.lifecycle:lifecycle-livedata-core-ktx",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "androidx.lifecycle:lifecycle-process",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "androidx.lifecycle:lifecycle-runtime",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "androidx.lifecycle:lifecycle-runtime-android",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "androidx.lifecycle:lifecycle-runtime-ktx",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "androidx.lifecycle:lifecycle-runtime-ktx-android",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "androidx.lifecycle:lifecycle-service",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "androidx.lifecycle:lifecycle-viewmodel",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "androidx.lifecycle:lifecycle-viewmodel-android",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "androidx.lifecycle:lifecycle-viewmodel-ktx",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "androidx.lifecycle:lifecycle-viewmodel-savedstate",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "androidx.lifecycle:lifecycle-viewmodel-savedstate-android",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "androidx.loader:loader",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "androidx.localbroadcastmanager:localbroadcastmanager",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "androidx.media:media",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "androidx.media3:media3-common",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "androidx.media3:media3-container",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "androidx.media3:media3-database",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "androidx.media3:media3-datasource",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "androidx.media3:media3-datasource-cronet",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "androidx.media3:media3-datasource-okhttp",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "androidx.media3:media3-decoder",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "androidx.media3:media3-exoplayer",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "androidx.media3:media3-exoplayer-dash",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "androidx.media3:media3-exoplayer-hls",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "androidx.media3:media3-exoplayer-smoothstreaming",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "androidx.media3:media3-extractor",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "androidx.media3:media3-session",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "androidx.media3:media3-ui",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "androidx.mediarouter:mediarouter",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "androidx.multidex:multidex",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "androidx.palette:palette",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "androidx.print:print",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "androidx.profileinstaller:profileinstaller",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "androidx.recyclerview:recyclerview",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "androidx.resourceinspection:resourceinspection-annotation",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "androidx.room:room-common",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "androidx.room:room-ktx",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "androidx.room:room-runtime",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "androidx.savedstate:savedstate",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "androidx.savedstate:savedstate-android",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "androidx.savedstate:savedstate-ktx",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "androidx.slidingpanelayout:slidingpanelayout",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "androidx.sqlite:sqlite",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "androidx.sqlite:sqlite-framework",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "androidx.startup:startup-runtime",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "androidx.swiperefreshlayout:swiperefreshlayout",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "androidx.tracing:tracing",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "androidx.tracing:tracing-ktx",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "androidx.transition:transition",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "androidx.vectordrawable:vectordrawable",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "androidx.vectordrawable:vectordrawable-animated",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "androidx.versionedparcelable:versionedparcelable",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "androidx.viewpager:viewpager",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "androidx.viewpager2:viewpager2",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "androidx.webkit:webkit",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "androidx.work:work-runtime",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "androidx.work:work-runtime-ktx",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "com.android.installreferrer:installreferrer",
+        "ecosystem": "android",
+        "license": "Proprietary",
+        "verdict": "proprietary"
+      },
+      {
+        "name": "com.caverock:androidsvg-aar",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "com.facebook.device.yearclass:yearclass",
+        "ecosystem": "android",
+        "license": "BSD-3-Clause",
+        "verdict": "permissive"
+      },
+      {
+        "name": "com.facebook.fbjni:fbjni",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "com.facebook.soloader:annotation",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "com.facebook.soloader:nativeloader",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "com.facebook.soloader:soloader",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "com.fasterxml.jackson:jackson-bom",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "com.fasterxml.jackson.core:jackson-annotations",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "com.fasterxml.jackson.core:jackson-core",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "com.fasterxml.jackson.core:jackson-databind",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "com.github.bumptech.glide:annotations",
+        "ecosystem": "android",
+        "license": "BSD-2-Clause OR Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "com.github.bumptech.glide:avif-integration",
+        "ecosystem": "android",
+        "license": "BSD-2-Clause OR Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "com.github.bumptech.glide:disklrucache",
+        "ecosystem": "android",
+        "license": "BSD-2-Clause OR Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "com.github.bumptech.glide:gifdecoder",
+        "ecosystem": "android",
+        "license": "BSD-2-Clause OR Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "com.github.bumptech.glide:glide",
+        "ecosystem": "android",
+        "license": "BSD-2-Clause OR Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "com.github.bumptech.glide:okhttp3-integration",
+        "ecosystem": "android",
+        "license": "BSD-2-Clause OR Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "com.github.penfeizhou.android.animation:apng",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "com.github.penfeizhou.android.animation:avif",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "com.github.penfeizhou.android.animation:awebp",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "com.github.penfeizhou.android.animation:frameanimation",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "com.github.penfeizhou.android.animation:gif",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "com.github.penfeizhou.android.animation:glide-plugin",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "com.google.android.datatransport:transport-api",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "com.google.android.datatransport:transport-backend-cct",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "com.google.android.datatransport:transport-runtime",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "com.google.android.gms:play-services-base",
+        "ecosystem": "android",
+        "license": "Proprietary",
+        "verdict": "proprietary"
+      },
+      {
+        "name": "com.google.android.gms:play-services-basement",
+        "ecosystem": "android",
+        "license": "Proprietary",
+        "verdict": "proprietary"
+      },
+      {
+        "name": "com.google.android.gms:play-services-cast",
+        "ecosystem": "android",
+        "license": "Proprietary",
+        "verdict": "proprietary"
+      },
+      {
+        "name": "com.google.android.gms:play-services-cast-framework",
+        "ecosystem": "android",
+        "license": "Proprietary",
+        "verdict": "proprietary"
+      },
+      {
+        "name": "com.google.android.gms:play-services-cloud-messaging",
+        "ecosystem": "android",
+        "license": "Proprietary",
+        "verdict": "proprietary"
+      },
+      {
+        "name": "com.google.android.gms:play-services-cronet",
+        "ecosystem": "android",
+        "license": "Proprietary",
+        "verdict": "proprietary"
+      },
+      {
+        "name": "com.google.android.gms:play-services-flags",
+        "ecosystem": "android",
+        "license": "Proprietary",
+        "verdict": "proprietary"
+      },
+      {
+        "name": "com.google.android.gms:play-services-stats",
+        "ecosystem": "android",
+        "license": "Proprietary",
+        "verdict": "proprietary"
+      },
+      {
+        "name": "com.google.android.gms:play-services-tasks",
+        "ecosystem": "android",
+        "license": "Proprietary",
+        "verdict": "proprietary"
+      },
+      {
+        "name": "com.google.android.material:material",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "com.google.android.play:core-common",
+        "ecosystem": "android",
+        "license": "Proprietary",
+        "verdict": "proprietary"
+      },
+      {
+        "name": "com.google.android.play:integrity",
+        "ecosystem": "android",
+        "license": "Proprietary",
+        "verdict": "proprietary"
+      },
+      {
+        "name": "com.google.code.findbugs:jsr305",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "com.google.code.gson:gson",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "com.google.errorprone:error_prone_annotations",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "com.google.firebase:firebase-annotations",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "com.google.firebase:firebase-common",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "com.google.firebase:firebase-components",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "com.google.firebase:firebase-datatransport",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "com.google.firebase:firebase-encoders",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "com.google.firebase:firebase-encoders-json",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "com.google.firebase:firebase-encoders-proto",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "com.google.firebase:firebase-iid-interop",
+        "ecosystem": "android",
+        "license": "Proprietary",
+        "verdict": "proprietary"
+      },
+      {
+        "name": "com.google.firebase:firebase-installations",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "com.google.firebase:firebase-installations-interop",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "com.google.firebase:firebase-measurement-connector",
+        "ecosystem": "android",
+        "license": "Proprietary",
+        "verdict": "proprietary"
+      },
+      {
+        "name": "com.google.firebase:firebase-messaging",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "com.google.guava:failureaccess",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "com.google.guava:guava",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "com.google.guava:listenablefuture",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "com.google.j2objc:j2objc-annotations",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "com.google.protobuf:protobuf-javalite",
+        "ecosystem": "android",
+        "license": "BSD-3-Clause",
+        "verdict": "permissive"
+      },
+      {
+        "name": "com.parse.bolts:bolts-tasks",
+        "ecosystem": "android",
+        "license": "BSD-3-Clause",
+        "verdict": "permissive"
+      },
+      {
+        "name": "com.squareup.okhttp3:logging-interceptor",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "com.squareup.okhttp3:okhttp",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "com.squareup.okhttp3:okhttp-urlconnection",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "com.squareup.okio:okio",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "com.squareup.okio:okio-jvm",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "com.vanniktech:android-image-cropper",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "com.vdocipher.aegis:vdocipher-android",
+        "ecosystem": "android",
+        "license": "(not resolved)",
+        "verdict": "unknown"
+      },
+      {
+        "name": "commons-codec:commons-codec",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "commons-io:commons-io",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "io.coil-kt.coil3:coil",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "io.coil-kt.coil3:coil-android",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "io.coil-kt.coil3:coil-core",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "io.coil-kt.coil3:coil-core-android",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "io.coil-kt.coil3:coil-network-core",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "io.coil-kt.coil3:coil-network-core-android",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "io.coil-kt.coil3:coil-network-okhttp",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "io.coil-kt.coil3:coil-network-okhttp-jvm",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "io.coil-kt.coil3:coil-svg",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "io.coil-kt.coil3:coil-svg-android",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "javax.inject:javax.inject",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "jp.wasabeef:glide-transformations",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "me.leolin:ShortcutBadger",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "org.aomedia.avif.android:avif",
+        "ecosystem": "android",
+        "license": "BSD-2-Clause",
+        "verdict": "permissive"
+      },
+      {
+        "name": "org.chromium.net:cronet-api",
+        "ecosystem": "android",
+        "license": "Chromium and built-in dependencies",
+        "verdict": "unknown"
+      },
+      {
+        "name": "org.jetbrains:annotations",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "org.jetbrains.kotlin:kotlin-android-extensions-runtime",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "org.jetbrains.kotlin:kotlin-annotations-jvm",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "org.jetbrains.kotlin:kotlin-bom",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "org.jetbrains.kotlin:kotlin-parcelize-runtime",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "org.jetbrains.kotlin:kotlin-reflect",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "org.jetbrains.kotlin:kotlin-stdlib",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "org.jetbrains.kotlin:kotlin-stdlib-jdk7",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "org.jetbrains.kotlin:kotlin-stdlib-jdk8",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "org.jetbrains.kotlinx:kotlinx-coroutines-android",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "org.jetbrains.kotlinx:kotlinx-coroutines-bom",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "org.jetbrains.kotlinx:kotlinx-coroutines-core",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "org.jetbrains.kotlinx:kotlinx-coroutines-core-jvm",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "org.jetbrains.kotlinx:kotlinx-coroutines-play-services",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "org.jetbrains.kotlinx:kotlinx-serialization-bom",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "org.jetbrains.kotlinx:kotlinx-serialization-core",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "org.jetbrains.kotlinx:kotlinx-serialization-core-jvm",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "org.jspecify:jspecify",
+        "ecosystem": "android",
+        "license": "Apache-2.0",
+        "verdict": "permissive"
+      },
+      {
+        "name": "DejaVu Sans (PDF watermark face)",
+        "ecosystem": "vendored",
+        "license": "Bitstream Vera Fonts Licence + Arev/DejaVu public-domain additions",
+        "verdict": "permissive"
+      },
+      {
+        "name": "VdoCipher React Native bridge + native SDK",
+        "ecosystem": "vendored",
+        "license": "(none declared)",
+        "verdict": "unknown"
+      },
+      {
+        "name": "AndroidX / Jetpack + Kotlin + Expo native modules",
+        "ecosystem": "vendored",
+        "license": "Apache-2.0 (dominant) / MIT",
+        "verdict": "permissive"
+      },
+      {
+        "name": "iOS CocoaPods (Expo modules, React Native)",
+        "ecosystem": "vendored",
+        "license": "MIT / Apache-2.0 (per upstream package)",
+        "verdict": "unknown"
+      }
+    ],
+    "exceptionsFile": false,
+    "exceptionsNote": null,
+    "exceptionPatterns": 0
+  }
 }

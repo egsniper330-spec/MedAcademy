@@ -8,6 +8,8 @@ use MedAcademy\Database\Database;
 use MedAcademy\Http\ApiException;
 use MedAcademy\Http\Request;
 use MedAcademy\Http\Response;
+use MedAcademy\Http\UploadRefusedException;
+use MedAcademy\Services\MaterialFileCleanupService;
 use MedAcademy\Services\UploadIntegrityService;
 use MedAcademy\Storage\StorageService;
 use MedAcademy\Utils\Config;
@@ -252,6 +254,11 @@ final class StorageController
             Response::error('Public file not found', 404, 'not_found');
         }
         $mime = mime_content_type($file) ?: 'application/octet-stream';
+        // The whole file is read into memory below, which can take seconds for a
+        // large document. Any database work this request needed is already done,
+        // so the connection slot is released first instead of being held for the
+        // entire read.
+        Database::instance()->release();
         Response::raw((string) file_get_contents($file), 200, $mime, ['Cache-Control' => 'public, max-age=31536000, immutable']);
     }
 
@@ -306,6 +313,10 @@ final class StorageController
             $name = basename($path) !== '' ? basename($path) : 'download';
             $headers['Content-Disposition'] = 'attachment; filename="' . rawurlencode($name) . '"';
         }
+        // Signature validation and the lesson-PDF guard above are the only
+        // database work on this route; the file read that follows can transfer
+        // hundreds of megabytes. Free the slot before it.
+        Database::instance()->release();
         Response::raw((string) file_get_contents($file), 200, $mime, $headers);
     }
 
@@ -314,7 +325,16 @@ final class StorageController
         // PHP silently empties $_POST and $_FILES when the multipart body exceeds
         // post_max_size, so distinguish that hosting-limit case from a missing file.
         if ($request->postBodyExceededLimit()) {
-            throw new ApiException(413, 'Upload exceeds the server request limit. Reduce the file size or ask the host to raise post_max_size.');
+            // State the host's real number: "reduce the file size" is useless
+            // without it, and this limit is the one shared hosts set lowest.
+            $postMax = (string) ini_get('post_max_size');
+            throw new ApiException(
+                413,
+                'Upload exceeds the server request limit'
+                . ($postMax !== '' ? ' (' . $postMax . ' per request)' : '')
+                . '. Reduce the file size or ask the host to raise post_max_size.',
+                'upload_too_large'
+            );
         }
 
         // The backend client sends multipart form fields (bucket, path, file).
@@ -365,9 +385,38 @@ final class StorageController
         // the full incident write-up; `validate()` now rejects an empty or
         // truncated body and verifies PDFs with the same parser delivery uses,
         // and `persist()` re-measures the stored object before we answer.
-        $validated = $this->integrity->validate($file, $dest, $bucket);
-        $public = in_array($bucket, self::PUBLIC_BUCKETS, true);
-        $stored = $this->integrity->persist($validated['tmp'], $validated['size'], $bucket, $dest, $public);
+        //
+        // `declared_size` is the PICKER's byte count, which the app sends for
+        // exactly this comparison: `$_FILES['size']` is filled by PHP from the
+        // received bytes, so on its own it can never prove that the bytes on the
+        // wire belong to the document the doctor selected. A divergence
+        // (stale `content://` URI, substituted asset, duplicated transfer) is
+        // refused before a byte is stored — see validate().
+        $clientDeclared = (int) ($_POST['declared_size'] ?? $request->json()['declared_size'] ?? 0);
+        // `declared_size_source` says how the client obtained that number. Only
+        // 'stat' (a real measurement of the selected file) may prove that the
+        // request carried a DIFFERENT file; 'picker' is provider metadata and is
+        // treated as a hint (see UploadIntegrityService::validate).
+        $declaredSource = (string) ($_POST['declared_size_source'] ?? $request->json()['declared_size_source'] ?? '');
+        try {
+            $validated = $this->integrity->validate($file, $dest, $bucket, $clientDeclared, $declaredSource);
+            $public = in_array($bucket, self::PUBLIC_BUCKETS, true);
+            $stored = $this->integrity->persist($validated['tmp'], $validated['size'], $bucket, $dest, $public);
+        } catch (UploadRefusedException $e) {
+            throw $e;
+        } catch (ApiException $e) {
+            // A refusal is where the correlation id matters most: the upload never
+            // succeeded, so there is no success body carrying `op`. Re-thrown with
+            // the id and stage attached, which ErrorHandler exposes to the app.
+            throw new UploadRefusedException(
+                $e->status,
+                $e->getMessage(),
+                $e->errors,
+                $this->integrity->opId(),
+                self::refusalStage((string) ($e->errors[0] ?? '')),
+                $e->getPrevious()
+            );
+        }
 
         // The response now carries the MEASURED size and digest, so no caller has
         // to trust (or persist) a client-declared `file_size` any more.
@@ -406,6 +455,62 @@ final class StorageController
     }
 
     /**
+     * POST /storage/discard-upload — reclaim bytes that never became a row.
+     *
+     * WHY A SEPARATE ROUTE. `/storage/delete` above is deliberately permissive
+     * (installed builds still delete the object and then the row), so it cannot
+     * refuse a path a material still references. This route exists for ONE
+     * caller — the lesson editor, after the server DEFINITIVELY refused to create
+     * the material (4xx) — and it REFUSES a path that is still referenced, so a
+     * duplicated, retried or mis-sequenced request can never remove the bytes of a
+     * live document. Old clients are untouched: they keep using /storage/delete.
+     *
+     * FAILS CLOSED: `isReferencedElsewhere()` treats a database error as "in use",
+     * and a missing object is an idempotent no-op rather than an error (a retried
+     * reclaim must not fail forever).
+     *
+     * Ownership: `canWritePath()` derives the allowed prefix from the authenticated
+     * user's own course/profile rows, so one doctor can never discard another
+     * doctor's object, and the bucket is fixed to the attachment bucket this flow
+     * writes to.
+     */
+    public function discardUpload(Request $request): array
+    {
+        $bucket = (string) ($request->json()['bucket'] ?? '');
+        $path = $this->normalisePath((string) ($request->json()['path'] ?? ''));
+        if ($bucket !== MaterialFileCleanupService::BUCKET || $path === '') {
+            throw new ApiException(400, 'bucket and path are required', 'discard_invalid');
+        }
+
+        $role = (string) $request->user['role'];
+        if (!$this->canWritePath((string) $request->user['id'], $role, $bucket, $path)) {
+            throw new ApiException(403, 'Not authorized to discard this storage path', 'discard_forbidden');
+        }
+
+        $cleanup = new MaterialFileCleanupService($this->storage);
+        if ($cleanup->isReferencedElsewhere($path)) {
+            // The row exists (or the database could not prove otherwise): the file
+            // is LIVE. Refusing is the only safe answer — the client wanted to
+            // clean up an orphan and this object is not one.
+            $this->integrity->log('discard', 'refused', ['bucket' => $bucket, 'path' => $path, 'reason' => 'referenced']);
+            throw new ApiException(
+                409,
+                'This file is still referenced by a lesson material and was not deleted.',
+                'object_referenced'
+            );
+        }
+
+        $outcome = $cleanup->deleteObject($bucket, $path);
+        $this->integrity->log('discard', $outcome['status'] === 'deleted' ? 'ok' : 'noop', [
+            'bucket' => $bucket,
+            'path' => $path,
+            'reason' => $outcome['reason'],
+        ]);
+
+        return ['discarded' => $outcome['status'] === 'deleted', 'status' => $outcome['status']];
+    }
+
+    /**
      * Server-side content policy for the lesson-attachment buckets.
      *
      *  • SIZE — capped at LESSON_MATERIAL_MAX_BYTES (default 100 MB, the figure
@@ -422,7 +527,10 @@ final class StorageController
             return;
         }
 
-        $max = Config::int('LESSON_MATERIAL_MAX_BYTES', 100 * 1024 * 1024);
+        // The effective cap, not the configured wish: PHP has already refused
+        // anything above upload_max_filesize, so the number in the message must
+        // be the one the host enforces (see UploadIntegrityService::maxBytes).
+        $max = $this->integrity->maxBytes();
         $size = (int) ($file['size'] ?? 0);
         // "$file['size']" is what PHP actually received; when it is unavailable
         // fall back to the temp file on disk so the cap cannot be bypassed.
@@ -430,7 +538,11 @@ final class StorageController
             $size = (int) filesize((string) $file['tmp_name']);
         }
         if ($size > $max) {
-            throw new ApiException(413, 'File is too large. Maximum size is ' . (int) round($max / 1048576) . ' MB.');
+            throw new ApiException(
+                413,
+                'File is too large. Maximum size is ' . (int) round($max / 1048576) . ' MB.',
+                'upload_too_large'
+            );
         }
 
         $ext = strtolower((string) pathinfo($dest, PATHINFO_EXTENSION));
@@ -486,6 +598,28 @@ final class StorageController
         }
 
         return false;
+    }
+
+    /**
+     * Which upload stage produced this refusal?
+     *
+     * The refusal's stable code already says WHAT was wrong; the stage says WHERE,
+     * which is what an operator needs to know before touching anything (a `pdf_*`
+     * code means the bytes arrived and were parsed; `upload_*` means they did not
+     * arrive intact; `persist`/`verify` mean storage disagreed with the transfer).
+     */
+    private static function refusalStage(string $code): string
+    {
+        if (str_starts_with($code, 'pdf_') || $code === 'source_too_large') {
+            return 'pdf';
+        }
+        if ($code === 'persist_mismatch' || $code === 'storage_write_failed') {
+            return 'persist';
+        }
+        if ($code === 'upload_storage_error') {
+            return 'persist';
+        }
+        return 'validate';
     }
 
     /**

@@ -26,11 +26,15 @@ check('new-course default title is localized', /title: t\('drCourses\.newCourseD
 // `direction` is pinned to ltr so the platform's own RTL state cannot reverse
 // the row a second time (that double reversal is what put the Arabic greeting
 // at the trailing edge).
+// The padding must clear the edge the LEADING control actually sits against:
+// left in English, right in Arabic (with that side's safe-area inset). The
+// earlier mapping added the leading gap to the wrong side in RTL, which put the
+// hamburger flush against the right screen edge.
 check('shared dashboard header mirrors the row physically and pads by active locale',
   /flexDirection: isRTL \? 'row-reverse' : 'row'/.test(header) &&
   /direction: 'ltr'/.test(header) &&
-  /paddingLeft: isRTL \? rightPad : leftPad \+ spacing\.sm/.test(header) &&
-  /paddingRight: isRTL \? leftPad \+ spacing\.sm : rightPad/.test(header));
+  /paddingLeft: isRTL \? leftPad : leftPad \+ spacing\.sm/.test(header) &&
+  /paddingRight: isRTL \? rightPad \+ spacing\.sm : rightPad/.test(header));
 check('dashboard title is aligned to locale and can shrink for long text', /textAlign: isRTL \? 'right' : 'left'/.test(header) && /minWidth: 0/.test(header));
 check('doctor greeting shows authenticated profile name and localized welcome', /roleLabel=\{t\('home\.welcome'\)\}/.test(overview) && /greeting=\{doctorName\}/.test(overview) && /profile\?\.full_name/.test(overview));
 check('notification count, tap route, and hamburger control remain wired', /router\.push\('\/\(app\)\/notifications'/.test(overview) && /unreadCount > 0/.test(overview) && /<HamburgerButton plain color=\{c\.text\}/.test(header));

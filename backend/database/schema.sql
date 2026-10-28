@@ -423,7 +423,7 @@ CREATE TABLE IF NOT EXISTS `enrollments` (
   `status` VARCHAR(191) DEFAULT 'active' NOT NULL COMMENT 'pg_default: ''active''',
   `activation_method` VARCHAR(64) GENERATED ALWAYS AS (`enrollment_method`) STORED COMMENT 'pg: GENERATED ALWAYS AS (enrollment_method) STORED',
   `hidden_from_instructor` TINYINT(1) DEFAULT 0 NOT NULL COMMENT 'pg_default: false',
-  `visibility_level` PUBLIC.ENROLLMENT_VISIBILITY DEFAULT 'all' NOT NULL COMMENT 'UNCONVERTED PG type: public.enrollment_visibility; pg_default: ''all''',
+  `visibility_level` VARCHAR(32) DEFAULT 'all' NOT NULL COMMENT 'was public.enrollment_visibility; values: all|admin_only|super_admin_only',
   `assigned_price` DECIMAL(20,6),
   PRIMARY KEY (`id`),
   UNIQUE (`student_id`, `course_id`),
@@ -431,7 +431,8 @@ CREATE TABLE IF NOT EXISTS `enrollments` (
   CONSTRAINT `fk_enrollments_course_id` FOREIGN KEY (`course_id`) REFERENCES `courses` (`id`) ON DELETE CASCADE,
   CONSTRAINT `fk_enrollments_last_lesson_id` FOREIGN KEY (`last_lesson_id`) REFERENCES `lessons` (`id`) ON DELETE SET NULL,
   CONSTRAINT `fk_enrollments_enrolled_by` FOREIGN KEY (`enrolled_by`) REFERENCES `profiles` (`id`) ON DELETE SET NULL,
-  CONSTRAINT `chk_enrollments_c0` CHECK ((progress_percent IS NULL OR (progress_percent >= 0 AND progress_percent <= 100)))
+  CONSTRAINT `chk_enrollments_c0` CHECK ((progress_percent IS NULL OR (progress_percent >= 0 AND progress_percent <= 100))),
+  CONSTRAINT `chk_enrollments_visibility` CHECK (`visibility_level` IN ('all', 'admin_only', 'super_admin_only'))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 -- ===========================================================================
 -- TABLE: lesson_progress
@@ -812,6 +813,37 @@ CREATE TABLE IF NOT EXISTS `lesson_material_pdfs` (
   KEY `idx_lesson_material_pdfs_student` (`student_id`),
   CONSTRAINT `fk_lesson_material_pdfs_material` FOREIGN KEY (`material_id`) REFERENCES `lesson_materials` (`id`) ON DELETE CASCADE,
   CONSTRAINT `fk_lesson_material_pdfs_student` FOREIGN KEY (`student_id`) REFERENCES `profiles` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+-- ===========================================================================
+-- TABLE: lesson_material_pdf_jobs (durable pre-generation queue — migration 038)
+-- One row per (material, student, variant) that still needs a personalized copy.
+-- The UNIQUE key is the duplicate guard; lock_token is the worker's claim.
+-- ===========================================================================
+CREATE TABLE IF NOT EXISTS `lesson_material_pdf_jobs` (
+  `id` CHAR(36) NOT NULL,
+  `material_id` CHAR(36) NOT NULL,
+  `student_id` CHAR(36) NOT NULL,
+  `source_hash` CHAR(64) NOT NULL,
+  `variant_key` CHAR(64) NOT NULL COMMENT 'same identity the delivery path uses',
+  `status` VARCHAR(16) NOT NULL DEFAULT 'queued' COMMENT 'queued|processing|ready|failed|skipped',
+  `priority` INT NOT NULL DEFAULT 10 COMMENT '0 = a student is waiting, 10 = upload pre-generation',
+  `attempts` INT NOT NULL DEFAULT 0,
+  `max_attempts` INT NOT NULL DEFAULT 4,
+  `lock_token` CHAR(36) DEFAULT NULL,
+  `locked_at` DATETIME(6) DEFAULT NULL,
+  `locked_by` VARCHAR(64) DEFAULT NULL,
+  `run_after` DATETIME(6) NOT NULL,
+  `last_error` VARCHAR(191) DEFAULT NULL COMMENT 'machine-readable stage, never content',
+  `ready_at` DATETIME(6) DEFAULT NULL,
+  `created_at` DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+  `updated_at` DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_lesson_material_pdf_jobs_variant` (`material_id`, `student_id`, `variant_key`),
+  KEY `idx_lesson_material_pdf_jobs_claim` (`status`, `run_after`, `priority`, `created_at`),
+  KEY `idx_lesson_material_pdf_jobs_student` (`student_id`, `status`),
+  KEY `idx_lesson_material_pdf_jobs_material` (`material_id`, `source_hash`),
+  CONSTRAINT `fk_lesson_material_pdf_jobs_material` FOREIGN KEY (`material_id`) REFERENCES `lesson_materials` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_lesson_material_pdf_jobs_student` FOREIGN KEY (`student_id`) REFERENCES `profiles` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 -- ===========================================================================
 -- TABLE: course_templates
@@ -1537,7 +1569,6 @@ CREATE UNIQUE INDEX `idx_profiles_qr_code_id` ON `profiles` (`qr_code_id`);
 CREATE INDEX `idx_profiles_phone_national` ON `profiles` (`phone_national`);
 -- SKIPPED (expression index): idx_profiles_email_lower ON profiles (lower(email))
 -- SKIPPED (expression index): idx_profiles_full_name_lower ON profiles (lower(full_name))
-CREATE UNIQUE INDEX `idx_profiles_phone_e164_unique` ON `profiles` (`phone_e164`);
 CREATE INDEX `idx_login_history_user_id` ON `login_history` (`user_id`);
 CREATE INDEX `idx_login_history_created_at` ON `login_history` (`created_at`);
 CREATE INDEX `idx_devices_user_status` ON `devices` (`user_id`, `status`);
@@ -1555,7 +1586,6 @@ CREATE INDEX `idx_fraud_flags_resolved` ON `fraud_flags` (`resolved`);
 CREATE INDEX `idx_fraud_flags_created` ON `fraud_flags` (`created_at`);
 CREATE INDEX `idx_credit_tx_expires` ON `credit_transactions` (`expires_at`);
 CREATE INDEX `idx_credit_tx_reference` ON `credit_transactions` (`reference_id`);
-CREATE INDEX `idx_devices_user_status` ON `devices` (`user_id`, `status`);
 CREATE INDEX `idx_lesson_materials_lesson` ON `lesson_materials` (`lesson_id`);
 CREATE INDEX `idx_lesson_materials_course` ON `lesson_materials` (`course_id`);
 CREATE INDEX `idx_courses_university` ON `courses` (`university_id`);
@@ -1603,30 +1633,24 @@ CREATE INDEX `idx_security_events_created_at` ON `security_events` (`created_at`
 CREATE INDEX `idx_security_events_device_id` ON `security_events` (`device_id`);
 CREATE INDEX `idx_violations_user_id` ON `content_protection_violations` (`user_id`);
 CREATE INDEX `idx_violations_created_at` ON `content_protection_violations` (`created_at`);
-CREATE INDEX `idx_enrollments_course_id` ON `enrollments` (`course_id`);
-CREATE INDEX `idx_enrollments_student_id` ON `enrollments` (`student_id`);
 CREATE UNIQUE INDEX `enrollments_active_unique` ON `enrollments` (`student_id`, `course_id`);
 CREATE INDEX `idx_credit_transactions_transaction_id` ON `credit_transactions` (`transaction_id`);
 CREATE INDEX `idx_credit_transactions_doctor_created` ON `credit_transactions` (`doctor_id`, `created_at`);
 CREATE UNIQUE INDEX `audit_logs_transaction_id_unique` ON `audit_logs` (`transaction_id`);
 CREATE INDEX `idx_audit_logs_transaction_id` ON `audit_logs` (`transaction_id`);
 CREATE INDEX `idx_audit_logs_actor_created` ON `audit_logs` (`actor_id`, `created_at`);
-CREATE INDEX `idx_audit_logs_resource` ON `audit_logs` (`resource_type`, `resource_id`);
 CREATE INDEX `idx_enrollments_student_status` ON `enrollments` (`student_id`, `status`);
 CREATE INDEX `idx_enrollments_course_status` ON `enrollments` (`course_id`, `status`);
-CREATE INDEX `idx_devices_user_status` ON `devices` (`user_id`, `status`);
-CREATE INDEX `idx_devices_installation_id` ON `devices` (`installation_id`);
+CREATE INDEX `idx_devices_installation_id_v2` ON `devices` (`installation_id`);
 CREATE INDEX `idx_security_events_user_created` ON `security_events` (`user_id`, `created_at`);
 CREATE INDEX `idx_content_protection_violations_user_created` ON `content_protection_violations` (`user_id`, `created_at`);
 CREATE INDEX `idx_courses_doctor_status` ON `courses` (`doctor_id`, `status`);
-CREATE INDEX `idx_lessons_section_order` ON `lessons` (`section_id`, `order_index`);
 CREATE INDEX `idx_push_tokens_user_id` ON `push_tokens` (`user_id`);
 CREATE INDEX `idx_deletion_records_actor` ON `deletion_records` (`actor_id`);
 CREATE INDEX `idx_deletion_records_status` ON `deletion_records` (`status`);
 CREATE INDEX `idx_deletion_records_created` ON `deletion_records` (`created_at`);
 CREATE INDEX `idx_profiles_trashed_at` ON `profiles` (`trashed_at`);
 CREATE INDEX `idx_profiles_trash_expires_at` ON `profiles` (`trash_expires_at`);
-CREATE INDEX `idx_profiles_status` ON `profiles` (`status`);
 CREATE INDEX `idx_lessons_video_type` ON `lessons` (`video_type`);
 CREATE INDEX `idx_profiles_profile_email` ON `profiles` (`profile_email`);
 CREATE INDEX `idx_upload_sessions_status_expires` ON `upload_sessions` (`status`, `expires_at`);
@@ -1635,13 +1659,9 @@ CREATE INDEX `idx_upload_sessions_provider_video_id` ON `upload_sessions` (`prov
 CREATE INDEX `idx_upload_sessions_last_heartbeat` ON `upload_sessions` (`last_heartbeat`);
 CREATE INDEX `idx_enrollments_visibility` ON `enrollments` (`visibility_level`);
 CREATE INDEX `idx_lessons_youtube_video_id` ON `lessons` (`youtube_video_id`);
-CREATE INDEX `idx_lessons_status` ON `lessons` (`status`);
 CREATE INDEX `idx_lessons_course_status` ON `lessons` (`course_id`, `status`);
 CREATE INDEX `idx_audit_logs_action` ON `audit_logs` (`action`);
 CREATE INDEX `idx_audit_logs_log_status` ON `audit_logs` (`log_status`);
-CREATE INDEX `idx_audit_logs_actor_id` ON `audit_logs` (`actor_id`);
-CREATE INDEX `idx_audit_logs_resource` ON `audit_logs` (`resource_type`, `resource_id`);
-CREATE INDEX `idx_audit_logs_created_at` ON `audit_logs` (`created_at`);
 -- SKIPPED (expression index): idx_audit_logs_target_name ON audit_logs (to_tsvector('simple', coalesce(target_name,'')))
 -- SKIPPED (expression index): idx_audit_logs_description ON audit_logs (to_tsvector('simple', coalesce(description,'')))
 CREATE INDEX `idx_dee_doctor` ON `doctor_earnings_events` (`doctor_id`);
@@ -1660,22 +1680,18 @@ CREATE INDEX `idx_det_doctor_id` ON `doctor_earnings_transactions` (`doctor_id`)
 CREATE INDEX `idx_det_course_id` ON `doctor_earnings_transactions` (`course_id`);
 CREATE INDEX `idx_det_created_at` ON `doctor_earnings_transactions` (`created_at`);
 CREATE INDEX `idx_dpr_doctor_id` ON `doctor_payout_requests` (`doctor_id`);
-CREATE INDEX `idx_courses_doctor_id` ON `courses` (`doctor_id`);
-CREATE INDEX `idx_courses_status` ON `courses` (`status`);
 CREATE INDEX `idx_courses_category_id` ON `courses` (`category_id`);
 CREATE INDEX `idx_notifications_created_at` ON `notifications` (`created_at`);
 CREATE INDEX `idx_notifications_user_read` ON `notifications` (`user_id`, `is_read`);
 CREATE INDEX `idx_lesson_progress_lesson_id` ON `lesson_progress` (`lesson_id`);
 CREATE INDEX `idx_lesson_progress_course_id` ON `lesson_progress` (`course_id`);
 CREATE INDEX `idx_video_uploads_lesson_id` ON `video_uploads` (`lesson_id`);
-CREATE INDEX `idx_video_uploads_status` ON `video_uploads` (`status`);
 CREATE INDEX `idx_credit_transactions_student_id` ON `credit_transactions` (`student_id`);
 CREATE INDEX `idx_credit_transactions_course_id` ON `credit_transactions` (`course_id`);
 CREATE INDEX `idx_dee_student_id` ON `doctor_earnings_events` (`student_id`);
-CREATE INDEX `idx_audit_logs_user_id` ON `audit_logs` (`user_id`);
 CREATE INDEX `idx_play_integrity_nonces_nonce` ON `play_integrity_nonces` (`nonce`);
 CREATE INDEX `idx_play_integrity_nonces_expires` ON `play_integrity_nonces` (`expires_at`);
-CREATE INDEX `idx_security_events_event_type` ON `security_events` (`event_type`, `created_at`);
+CREATE INDEX `idx_security_events_event_type_v2` ON `security_events` (`event_type`, `created_at`);
 CREATE INDEX `idx_security_events_user_recent` ON `security_events` (`user_id`, `created_at`);
 CREATE UNIQUE INDEX `uq_security_config_active` ON `security_config` (`is_active`);
 CREATE INDEX `idx_security_config_active` ON `security_config` (`is_active`, `updated_at`);

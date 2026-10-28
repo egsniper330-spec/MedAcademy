@@ -7,6 +7,13 @@ import { normalizePhoneE164 } from '@/lib/identifier';
 import { buildProtectedCallHeaders } from '@/lib/deviceKey';
 import { isMaintenanceError } from '@/lib/maintenanceStateModel';
 import { previousAvatarStoragePath } from '@/lib/uploadPart';
+import { createUploadTracker, uploadSizeMismatch, type UploadProgressSnapshot, type UploadStage } from '@/lib/uploadProgress';
+import {
+  declaresDifferentFile,
+  declaresTruncatedTransfer,
+  type DeclaredSizeSource,
+} from '@/lib/localFileSize';
+import type { UploadCancelSignal } from '@/lib/uploadTransport';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // SECURITY BOUNDARY
@@ -1216,10 +1223,15 @@ export async function replaceLessonMaterialFile(
   fileName: string,
   mimeType: string,
   fileSize: number,
+  options?: {
+    onProgress?: (snapshot: UploadProgressSnapshot) => void;
+    signal?: UploadCancelSignal | null;
+    declaredSizeSource?: DeclaredSizeSource;
+  },
 ): Promise<any> {
   void oldStoragePath;
   const { storagePath, size, sha256 } = await uploadLessonMaterial(
-    courseId, lessonId, fileUri, fileName, mimeType, fileSize,
+    courseId, lessonId, fileUri, fileName, mimeType, fileSize, options,
   );
   return invokeEdgeFunction('material-replace', {
     material_id: materialId,
@@ -1263,6 +1275,44 @@ export async function getLessonMaterials(lessonId: string) {
     .order('order_index');
   if (error) throw error;
   return data ?? [];
+}
+
+/**
+ * Reclaim a lesson-material object that never became a row.
+ *
+ * The upload and the row insert are two requests: when the SERVER refuses the
+ * row (4xx) after the bytes reached storage, nothing references those bytes and
+ * a retry would upload a second copy — leaving the first orphaned in private
+ * storage forever. Callers use this only when the outcome is known to be a
+ * refusal; for a 5xx/timeout/dropped connection the row may exist, so the
+ * object must be kept.
+ *
+ * Best-effort by design: reclaiming is housekeeping, and a failure here must
+ * never replace the real upload error the doctor needs to see.
+ *
+ * WHY NOT THE GENERIC STORAGE DELETE: `POST /storage/delete` is deliberately
+ * permissive (installed builds still delete the object and then the row), so it
+ * will happily remove a path a material references. This goes to
+ * `POST /storage/discard-upload` instead, which is authorized against the
+ * caller's own course rows and REFUSES (409 `object_referenced`) an object that
+ * is still referenced — so a duplicated or mis-sequenced call can never delete a
+ * live document's bytes. A 409 here is a normal, protective outcome: the row the
+ * server just created wins and nothing is lost.
+ */
+export async function discardUploadedMaterialObject(storagePath: string): Promise<void> {
+  const path = String(storagePath ?? '').trim();
+  if (path === '') return;
+  try {
+    const { error } = await apiFetch('/storage/discard-upload', {
+      method: 'POST',
+      body: { bucket: 'lesson-materials', path },
+    });
+    // `object_referenced` and any other refusal are intentionally ignored: the
+    // bytes are kept and the orphan scanner/retention tooling reclaims leftovers.
+    void error;
+  } catch (_) {
+    // Never fail the upload flow because housekeeping could not run.
+  }
 }
 
 export async function createLessonMaterial(payload: LessonMaterialPayload) {
@@ -1412,26 +1462,147 @@ export async function uploadLessonMaterial(
   fileName: string,
   mimeType: string,
   declaredSize?: number,
+  /**
+   * Optional byte-level progress + cancellation (see lib/uploadProgress.ts).
+   * The snapshots distinguish `uploading` (bytes on the wire) from
+   * `verifying` (the server measured the stored file) — they are NOT the same
+   * moment, and the UI must not claim success at 100 % transferred.
+   */
+  options?: {
+    onProgress?: (snapshot: UploadProgressSnapshot) => void;
+    signal?: UploadCancelSignal | null;
+    /**
+     * How `declaredSize` was obtained — see lib/localFileSize.ts. Defaults to
+     * 'picker' (a hint) so a caller that has not been updated can never turn a
+     * provider's wrong metadata into a failed upload.
+     */
+    declaredSizeSource?: DeclaredSizeSource;
+  },
 ): Promise<{ storagePath: string; publicUrl: string; size: number; sha256: string }> {
   const storagePath = `${courseId}/${lessonId}/${Date.now()}_${fileName.replace(/[^a-zA-Z0-9._-]/g, '_')}`;
 
-  const { error: upErr, data } = await backendClient.storage
-    .from('lesson-materials')
-    .upload(
-      storagePath,
-      { uri: fileUri, name: fileName, mimeType },
-      { contentType: mimeType, upsert: false },
-    );
-  if (upErr) throw upErr;
+  const tracker = createUploadTracker(Math.max(0, declaredSize ?? 0), Date.now());
+  const report = (stage: UploadStage) => {
+    if (!options?.onProgress) return;
+    tracker.setStage(stage);
+    options.onProgress(tracker.snapshot());
+  };
+  report('preparing');
+
+  let uploaded;
+  try {
+    uploaded = await backendClient.storage
+      .from('lesson-materials')
+      .upload(
+        storagePath,
+        { uri: fileUri, name: fileName, mimeType },
+        {
+          contentType: mimeType,
+          upsert: false,
+          // The byte count we reported for the selected file, so the SERVER can
+          // compare it with what actually arrived (`$_FILES['size']` cannot:
+          // PHP fills it from the received bytes). `declaredSizeSource` says
+          // whether that number was MEASURED ('stat') or came from provider
+          // metadata ('picker') — the server only treats a divergence as a
+          // wrong file when it was measured.
+          declaredSize: Number(declaredSize ?? 0),
+          declaredSizeSource: options?.declaredSizeSource ?? 'picker',
+          ...(options?.onProgress
+            ? {
+                signal: options?.signal ?? null,
+                onProgress: (p: { bytesSent: number; totalBytes: number }) => {
+                  tracker.setTotal(p.totalBytes);
+                  tracker.setStage('uploading');
+                  options.onProgress!(tracker.snapshot(p.bytesSent > 0 ? p.bytesSent : undefined));
+                },
+              }
+            : {}),
+        },
+      );
+  } catch (e) {
+    report('failed');
+    throw e;
+  }
+
+  const { error: upErr, data } = uploaded;
+  if (upErr) {
+    report('failed');
+    // Keep the transport's identity (ABORT_ERR / HTTP status) on the thrown
+    // error so the screen can say "cancelled" or "file too large" precisely.
+    // `op` is the server's operation id for THIS request: without it the doctor's
+    // "Upload failed" cannot be matched to a single line in the server log.
+    const err = new Error(upErr.message) as Error & { code?: string; status?: number; op?: string };
+    err.code = (upErr as { code?: string }).code;
+    err.status = Number((upErr as { status?: number }).status ?? 0);
+    const op = (upErr as { op?: string }).op;
+    if (typeof op === 'string' && op !== '') err.op = op;
+    throw err;
+  }
+
+  // Bytes have left the device; the server still has to confirm what it kept.
+  report('verifying');
 
   // The upload is only successful if the SERVER persisted real bytes. `size` is
   // measured from the stored object, never from the picker's metadata.
   const size = Number(data?.size ?? 0);
   if (!(size > 0)) {
-    throw new Error('The file could not be uploaded (no data was received). Please try again.');
+    const err = new Error('The file could not be uploaded (no data was received). Please try again.') as Error & { code?: string };
+    err.code = 'upload_empty';
+    throw err;
   }
-  if (__DEV__ && declaredSize && declaredSize > 0 && size < declaredSize) {
-    console.warn('[upload] stored fewer bytes than the picker reported', { declaredSize, size });
+  // ── SIZE CONSISTENCY (selection → upload) ────
+  // The server reports the byte count of the FILE PART it stored. Two different
+  // questions can be asked of it, and conflating them is what broke real
+  // uploads:
+  //
+  //   1. TRUNCATION — fewer bytes arrived than the file has. The multipart body
+  //      stopped early, so the document cannot be complete. Refused always.
+  //   2. SUBSTITUTION — MORE bytes arrived than a MEASURED file has. A stale
+  //      cache/`content://` URI, a provider that substituted an asset, or a
+  //      duplicated transfer. Refused only when the declared number was really
+  //      measured ('stat'): provider metadata is a hint (it reported 679 bytes
+  //      for a 140 KB PDF, and 9.5 MB arrived for a 200 KB pick), and a wrong
+  //      hint must not fail a genuine document.
+  const declaredBytes = Number(declaredSize ?? 0);
+  const declaredSource: DeclaredSizeSource = options?.declaredSizeSource ?? 'picker';
+
+  if (declaresTruncatedTransfer(declaredBytes, size, (d, r) => uploadSizeMismatch(d, r))) {
+    await discardUploadedMaterialObject(storagePath).catch(() => {});
+    const err = new Error(
+      `The upload stopped early (${size} of ${declaredBytes} bytes arrived). Please try again.`,
+    ) as Error & { code?: string; status?: number; op?: string };
+    err.code = 'upload_truncated';
+    err.status = 0;
+    err.op = String((data as { op?: string })?.op ?? '');
+    throw err;
+  }
+
+  if (declaresDifferentFile(declaredBytes, size, declaredSource, (d, r) => uploadSizeMismatch(d, r))) {
+    if (__DEV__) {
+      console.warn('[upload] stored size does not match the selected file', { declaredSize, size, storagePath });
+    }
+    // These bytes are not the document and no material row will reference
+    // them, so reclaim the object before failing (it is a fresh unique path).
+    await discardUploadedMaterialObject(storagePath).catch(() => {});
+    const err = new Error(
+      `The file that reached the server (${size} bytes) is not the file that was selected (${declaredBytes} bytes).`,
+    ) as Error & { code?: string; status?: number; op?: string };
+    err.code = 'upload_size_mismatch';
+    err.status = 0;
+    // The bytes ARE stored, so the operation id is the only handle on the
+    // object that has to be reclaimed: quote it and the server log names it.
+    const op = String((data as { op?: string })?.op ?? '');
+    if (op !== '') err.op = op;
+    throw err;
+  }
+
+  if (declaredBytes > 0 && declaredSource === 'picker' && uploadSizeMismatch(declaredBytes, size)) {
+    // Diagnostic only: the provider's metadata was wrong, the bytes are what the
+    // doctor picked. Recorded so a "why did the size say 679?" report is
+    // answerable without touching the file.
+    if (__DEV__) {
+      console.warn('[upload] picker size was inaccurate (upload kept)', { declaredSize, size, storagePath });
+    }
   }
 
   // Return the storage path as the "publicUrl" placeholder so existing callers
@@ -3878,23 +4049,116 @@ export async function updateMaterialPermission(id: string, permission: DownloadP
  * `forDownload` MUST be true only for the Download action — a Preview-Only
  * material, or one with downloads disabled, refuses that intent server-side.
  */
+/**
+ * The three states the delivery endpoint reports:
+ *   ready      — `url` is a short-lived token URL for a complete copy;
+ *   preparing  — a job is queued/rendering; poll `getMaterialPdfStatus` and try
+ *                again after `retry_after` seconds;
+ *   failed     — generation is permanently exhausted; `retry_allowed` offers the
+ *                user one explicit retry (`getMaterialPdfUrl(..., true)`).
+ *
+ * The server NEVER substitutes the unwatermarked original for a not-ready copy.
+ */
+export type MaterialPdfDeliveryStatus = 'ready' | 'preparing' | 'failed';
+
+/**
+ * The precise queue state behind `status`. `queued` vs `generating` is the
+ * difference between "waiting for the next worker tick" and "a worker is
+ * rendering it right now", and the waiting sheet words them differently.
+ */
+export type MaterialPdfState = 'queued' | 'generating' | 'ready' | 'failed' | 'unavailable';
+
+/**
+ * The server-grounded wait contract, carried by BOTH `pdf-url` and `pdf-status`.
+ *
+ * Nothing here is a client guess: the position is the job's real rank in the
+ * worker's claim order, and the estimate comes from the configured worker
+ * interval plus measured render durations. When the server has no measurement,
+ * every `eta_*` field is null and the app shows a transparent fallback rather
+ * than an invented duration.
+ */
+export interface MaterialPdfWait {
+  state: MaterialPdfState;
+  /**
+   * 1-based rank in the worker's claim order, counted over jobs that are DUE now
+   * (a job inside retry backoff blocks nobody). Null unless a copy is queued.
+   */
+  queue_position: number | null;
+  jobs_ahead: number | null;
+  /** Jobs being rendered right now. */
+  processing_now: number;
+  /** Conservative upper bound of the wait, in seconds. */
+  eta_seconds: number | null;
+  eta_min_seconds: number | null;
+  eta_max_seconds: number | null;
+  /** Why the numbers are what they are (measured_render_median, insufficient_samples, …). */
+  eta_basis: string;
+  /** How many render measurements backed the estimate. */
+  eta_samples: number;
+}
+
+export interface MaterialPdfDelivery extends MaterialPdfWait {
+  status: MaterialPdfDeliveryStatus;
+  url: string | null;
+  expires_at: string | null;
+  watermarked: boolean;
+  material_id: string;
+  /** Seconds before the next check — a POLLING INTERVAL, never an ETA. */
+  retry_after: number;
+  retry_allowed: boolean;
+  /** Machine-readable stage (engine_unavailable, render_failed, …). */
+  reason: string | null;
+  message?: string;
+}
+
 export async function getMaterialPdfUrl(
   materialId: string,
   forDownload = false,
-): Promise<{ url: string; watermarked: boolean; expires_at: string }> {
+  retry = false,
+): Promise<MaterialPdfDelivery> {
   // Issuance is a protected operation: the mint request carries the same two
   // security layers as playback (X-Integrity-Hash + device-key evidence) for
   // the 'material_pdf' action, so the backend can enforce its configured tier.
   // Best-effort by design — a device that cannot produce evidence sends no
   // header, and the SERVER (never this function) decides what that means.
-  const body = { material_id: materialId, intent: forDownload ? 'download' : 'view' };
+  const body: Record<string, unknown> = {
+    material_id: materialId,
+    intent: forDownload ? 'download' : 'view',
+  };
+  // Only sent for the user's explicit Retry action — never automatically, so a
+  // broken document cannot be re-queued in a loop by polling.
+  if (retry) body.retry = true;
   const securityHeaders = await buildProtectedCallHeaders('material_pdf', body).catch(() => ({}));
-  return invokeEdgeFunction<{ url: string; watermarked: boolean; expires_at: string }>(
+  return invokeEdgeFunction<MaterialPdfDelivery>(
     'materials/pdf-url',
     body,
     undefined,
     'POST',
     securityHeaders,
+  );
+}
+
+/**
+ * Cheap read-only companion used for polling: no token is minted and nothing is
+ * rendered. Polls are bounded (see `pollMaterialPdfUntilReady` in the lesson
+ * screen) so a slow render cannot turn into a request storm.
+ */
+export type MaterialPdfStatus = MaterialPdfWait & {
+  material_id: string;
+  status: MaterialPdfDeliveryStatus;
+  reason: string | null;
+  attempts: number;
+  max_attempts: number;
+  retry_after: number;
+  retry_allowed: boolean;
+};
+
+export async function getMaterialPdfStatus(materialId: string): Promise<MaterialPdfStatus> {
+  return invokeEdgeFunction(
+    'materials/pdf-status',
+    { material_id: materialId },
+    undefined,
+    'GET',
   );
 }
 

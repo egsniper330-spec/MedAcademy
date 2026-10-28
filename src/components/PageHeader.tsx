@@ -99,15 +99,34 @@ export function PageHeader({
 
   return (
     <View style={{
+      // ── THE HAMBURGER-STAYED-LEFT BUG ───────────────────────────────────
+      // `row-reverse` is NOT a physical direction in React Native: Yoga flips
+      // the main axis whenever the LAYOUT direction is RTL, and on a native
+      // Arabic launch `I18nManager.isRTL` is true. An unpinned `row-reverse`
+      // was therefore resolved back to left-to-right and the menu control sat
+      // in the top-LEFT corner of Video Library / Students / My Balance /
+      // Notifications on iOS and Android. The web build has no Yoga direction,
+      // so the browser preview looked correct — which is why this survived.
+      //
+      // `direction: 'ltr'` pins the row, so `row-reverse` means exactly "right
+      // edge, always": ONE physical mirror, the same contract DashboardHeader,
+      // ResponsiveTabBar and the drawer track already use. Children inherit the
+      // pin, and each title declares its own textAlign/writingDirection, so
+      // Arabic copy still lays out RTL while the row itself cannot re-flip.
       flexDirection: isRTL ? 'row-reverse' : 'row',
+      direction: 'ltr',
       alignItems: 'center',
       // One gap instead of per-child margins: a physical marginLeft/Right would
       // point the wrong way as soon as the row is mirrored.
       gap: spacing.sm + spacing.xs,
       paddingTop: topPad,
       paddingBottom: spacing.md,
-      paddingLeft: leftPad + spacing.sm,
-      paddingRight: rightPad,
+      // Physical padding for the PINNED row: the leading control must clear the
+      // safe-area edge it actually sits against — the right edge in Arabic (and
+      // with that inset, not the left one), the left edge in English. `paddingStart`
+      // would resolve against the pinned ltr and pad the wrong side.
+      paddingLeft: isRTL ? leftPad : leftPad + spacing.sm,
+      paddingRight: isRTL ? rightPad + spacing.sm : rightPad,
     }}>
       {/* ── Left control ── */}
       {!isMenu ? (

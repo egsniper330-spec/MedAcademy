@@ -831,8 +831,21 @@ final class PdfWatermarkService
         // Parser-grade check with the library that will actually render it. A
         // document the engine cannot open is rejected HERE, where the doctor can
         // still act on the message, instead of failing every student's download.
+        //
+        // WHICH engine will render decides whether this check is even relevant:
+        // the free FPDI parser cannot read COMPRESSED cross-reference streams
+        // (the layout Acrobat, Word and most "optimised" PDFs emit), while the
+        // RASTER engine hands the file to Ghostscript, which reads them fine. The
+        // check used to run unconditionally whenever FPDI merely existed, so a
+        // raster host refused perfectly deliverable documents at upload — and a
+        // vector host refused them with a message that said "damaged", which is
+        // both wrong and unactionable. Now the parse runs only when FPDI is the
+        // renderer, and its "cannot read this container" case is reported as its
+        // own, explained code.
+        $mode = $this->effectiveMode();
+        $fpdiRenders = $mode === self::MODE_VECTOR || $mode === self::MODE_FLATTEN;
         $pages = null;
-        if ($this->isAvailable() && class_exists('setasign\\Fpdi\\Fpdi')) {
+        if ($fpdiRenders && class_exists('setasign\\Fpdi\\Fpdi')) {
             try {
                 $reader = new \setasign\Fpdi\Fpdi();
                 $pages = (int) $reader->setSourceFile($absPath);
@@ -840,7 +853,23 @@ final class PdfWatermarkService
                     throw new \RuntimeException('no pages');
                 }
             } catch (\Throwable $e) {
-                error_log('[pdf-inspect] parser rejected the document (' . get_class($e) . '): ' . $e->getMessage());
+                $unsupported = $this->isUnsupportedContainer($e);
+                $encrypted = !$unsupported && $this->isEncryptedDocument($e);
+                error_log('[pdf-inspect] parser rejected the document (' . get_class($e) . ')'
+                    . ($unsupported ? ' [unsupported container]' : ($encrypted ? ' [encrypted]' : ' [damaged]'))
+                    . ': ' . $e->getMessage());
+                if ($unsupported) {
+                    throw new ApiException(
+                        422,
+                        'This PDF is saved in a compressed format the watermarking engine cannot read. Re-export it as a standard PDF '
+                        . '(in Acrobat/Word choose "Print to PDF", or save with PDF 1.4 compatibility) and upload that copy.',
+                        'pdf_unsupported_format',
+                        $e
+                    );
+                }
+                if ($encrypted) {
+                    throw new ApiException(422, 'This PDF is encrypted and cannot be watermarked. Upload an unencrypted PDF.', 'pdf_encrypted', $e);
+                }
                 throw new ApiException(
                     422,
                     'This PDF could not be read (it may be damaged or use an unsupported format). Please upload a different copy.',
@@ -857,6 +886,69 @@ final class PdfWatermarkService
         }
 
         return ['size' => $size, 'page_count' => $pages];
+    }
+
+    /**
+     * Did the parser fail because of the FILE's container format (compressed
+     * cross-reference / object streams) rather than because the document is
+     * damaged?
+     *
+     * The distinction is what makes the error actionable: "re-export as a
+     * standard PDF" fixes the first case, while a damaged file needs a new copy
+     * from wherever it came from. FPDI reports it as CrossReferenceException with
+     * a "compression technique ... not supported" message and the COMPRESSED_XREF
+     * code — but the SAME class is thrown for truly broken xref tables, which must
+     * stay pdf_invalid. So the message and that specific code are what is matched,
+     * never the class name alone.
+     */
+    private function isUnsupportedContainer(\Throwable $e): bool
+    {
+        for ($c = $e; $c !== null; $c = $c->getPrevious()) {
+            // The MESSAGE is checked first: it is what distinguishes "this parser
+            // cannot decompress the container" from the same exception class being
+            // thrown for genuine damage.
+            if (stripos($c->getMessage(), 'compression technique') !== false
+                || stripos($c->getMessage(), 'not supported by the free parser') !== false
+            ) {
+                return true;
+            }
+            // CrossReferenceException is ALSO thrown for real corruption — an xref
+            // position pointing at the wrong object type, a missing startxref, an
+            // object that is not where the table says. Classifying those as
+            // "compressed format, please re-export" told the doctor to redo work on
+            // a file that is actually broken, so only the one code that means
+            // "compressed xref/object streams" is treated as a container issue here.
+            if (class_exists('setasign\\Fpdi\\PdfParser\\CrossReference\\CrossReferenceException')
+                && $c instanceof \setasign\Fpdi\PdfParser\CrossReference\CrossReferenceException
+                && $c->getCode() === \setasign\Fpdi\PdfParser\CrossReference\CrossReferenceException::COMPRESSED_XREF
+            ) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Did the parser refuse because the document is encrypted?
+     *
+     * Necessary on top of the tail `/Encrypt` scan: the trailer that carries
+     * `/Encrypt` can sit further than 4 KB from EOF in a large document, and then
+     * the scan misses it while the parser still refuses the file.
+     */
+    private function isEncryptedDocument(\Throwable $e): bool
+    {
+        for ($c = $e; $c !== null; $c = $c->getPrevious()) {
+            if (stripos($c->getMessage(), 'encrypt') !== false) {
+                return true;
+            }
+            if (class_exists('setasign\\Fpdi\\PdfParser\\CrossReference\\CrossReferenceException')
+                && $c instanceof \setasign\Fpdi\PdfParser\CrossReference\CrossReferenceException
+                && $c->getCode() === \setasign\Fpdi\PdfParser\CrossReference\CrossReferenceException::ENCRYPTED
+            ) {
+                return true;
+            }
+        }
+        return false;
     }
 
     public function personalize(string $sourceAbsPath, array $lines, string $outAbsPath): int

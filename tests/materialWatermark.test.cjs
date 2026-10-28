@@ -184,11 +184,11 @@ section('4. The PDF engine is fail-closed');
 
   ok('delivery refuses to stream when the personalized copy is missing',
     /personalized copy is not available[\s\S]{0,120}503, 'watermark_unavailable'/.test(delivery));
-  ok('the original is reachable ONLY in the staff branch',
+  ok('the original is never streamed — a missing copy fails closed',
     (() => {
-      const stream = delivery.slice(delivery.indexOf('public function streamPdf'));
-      return /\} else \{[\s\S]{0,200}'lesson-materials'/.test(stream) &&
-        stream.indexOf('watermark_unavailable') < stream.indexOf("privateFilePath('lesson-materials'");
+      const stream = delivery.slice(delivery.indexOf('public function streamPdf'), delivery.indexOf('public function watermarkStatus'));
+      return stream.indexOf('watermark_unavailable') > 0 &&
+        !/privateFilePath\('lesson-materials'/.test(stream);
     })());
   // A coded ApiException used to reach the client as the generic 'api_error',
   // so 'engine_unavailable' / 'watermark_busy' / 'pdf_parse' were
@@ -421,7 +421,8 @@ section('10. Students open PDFs through the personalized endpoint');
   const mats = read('src/lib/lessonMaterials.ts');
 
   ok('getMaterialPdfUrl takes a material id (not a path)',
-    /export async function getMaterialPdfUrl\(\s*materialId: string/.test(api) && /material_id: materialId, intent:/.test(api));
+    /export async function getMaterialPdfUrl\(\s*materialId: string/.test(api) && /material_id: materialId,/.test(api) &&
+    /intent: forDownload \? 'download' : 'view'/.test(api));
   ok('it maps forDownload → download intent server-side',
     /intent: forDownload \? 'download' : 'view'/.test(api));
   ok('no client identity is ever sent to the watermarker', (() => {
@@ -430,7 +431,8 @@ section('10. Students open PDFs through the personalized endpoint');
     return /material_id: materialId/.test(body) && !/full_name|public_user_id|student_name/.test(body);
   })());
   ok('the lesson screen uses the delivery endpoint for PDFs',
-    /getMaterialPdfUrl\(String\(material\.id\), forDownload\)/.test(lesson));
+    /waitForPersonalizedPdf\(String\(material\.id\)/.test(lesson) &&
+    /getMaterialPdfUrl\(materialId, forDownload/.test(lesson));
   // A helper that is not routed fails at runtime with "Unknown function": the
   // delivery endpoint must exist in BOTH the PHP router and the PHP client map.
   const phpClient = read('src/client/php.ts');
@@ -482,11 +484,15 @@ section('11. Cache, concurrency and operational safety');
 
 {
   const delivery = read('backend/src/Controllers/MaterialDeliveryController.php');
+  // Generation now lives in ONE shared service (delivery, the queue and the
+  // cron worker all call it), so the cache/concurrency invariants are asserted
+  // against that file — the controller keeps only authorization and transport.
+  const variants = read('backend/src/Services/MaterialPdfVariantService.php');
   const svc = read('backend/src/Services/PdfWatermarkService.php');
   const resp = read('backend/src/Http/Response.php');
 
   ok('the variant key folds in the source hash + identity + settings',
-    /variantKey\(\$sourceHash, \$identityHash, \$this->watermark->variantSettings\(\$lines\)\)/.test(delivery));
+    /variantKey\(\s*\$sourceHash,\s*\$identityHash,\s*\$this->watermark->variantSettings\(\$lines\)/.test(variants));
   // The engine tokens are PINNED on purpose: they must change whenever the
   // rendered look changes (tiled grid -> single centred mark -> exact-opacity
   // single pass bumped the raster token to flatten-v4-single; the new flatten
@@ -502,26 +508,26 @@ section('11. Cache, concurrency and operational safety');
   ok('the front opacity is part of the cache identity',
     /\$settings\['vector_front_opacity'\] = \$this->vectorForegroundOpacity\(\)/.test(svc));
   ok('a replaced source is detected via a CACHED hash, not a per-request one',
-    /private function sourceHashFor/.test(delivery) && /file_hash_path/.test(delivery));
+    /public function sourceHashFor/.test(variants) && /file_hash_path/.test(variants));
   ok('the cache is invalidated when the path, size or mtime changes',
-    /\$storedPath === \(string\) \$material\['storage_path'\]/.test(delivery)
-    && /\$storedSize !== null/.test(delivery)
-    && /file_hash_mtime/.test(delivery));
+    /\$storedPath === \(string\) \(\$material\['storage_path'\]/.test(variants)
+    && /\$storedSize !== null/.test(variants)
+    && /file_hash_mtime/.test(variants));
   ok('a cached copy is only reused when the LIVE variant key matches',
-    /findPersonalizedCopy\(\$material, \$studentId, \$variantKey\)/.test(delivery)
-    && /\$expectedVariantKey !== null/.test(delivery));
+    /existing\(\$material, \$studentId, \$variantKey\)/.test(variants)
+    && /\$expectedVariantKey !== null/.test(variants));
   ok('the vector opacity is part of the cache identity',
     /\$settings\['vector_opacity'\] = \$this->vectorOpacity\(\)/.test(svc));
   ok('a per-variant lock serialises generation',
-    /flock\(\$handle, LOCK_EX \| LOCK_NB\)/.test(delivery) && /private function withVariantLock/.test(delivery));
+    /flock\(\$handle, LOCK_EX \| LOCK_NB\)/.test(variants) && /public function withVariantLock/.test(variants));
   ok('the lock is re-checked after waiting (no double render)',
-    /another worker may have finished while we waited/.test(delivery));
+    /another worker may have finished while we waited/.test(variants));
   ok('output is published atomically (rename from a .part sibling)',
-    /rename\(\$partAbs, \$finalAbs\)/.test(delivery));
+    /rename\(\$partAbs, \$finalAbs\)/.test(variants));
   ok('expired variants for the same student are purged',
-    /private function purgeStaleVariants/.test(delivery));
+    /public function purgeStale/.test(variants));
   ok('purging validates the path prefix before deleting',
-    /str_starts_with\(\$path, \$prefix\)/.test(delivery));
+    /str_starts_with\(\$path, \$prefix\)/.test(variants));
   ok('minting is rate limited per account',
     /RateLimitService::perAccount\(\$request, 'material_pdf_mint'/.test(delivery));
   ok('delivery is audited with ids only (no name/token/bytes)',

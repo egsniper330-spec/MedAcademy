@@ -8,7 +8,7 @@ generated — do not edit it by hand:
 node scripts/dependency-license-audit.cjs
 ```
 
-Generated: 2026-10-24T20:26:11.213Z
+Generated: 2026-10-25T21:12:17.752Z
 
 Full licence texts are installed alongside each package:
 `node_modules/<package>/LICENSE*` for JavaScript, `backend/vendor/<vendor>/<package>/`
@@ -124,7 +124,7 @@ neither MIT nor Apache-2.0 are listed explicitly:
 
 ## JavaScript / npm
 
-1110 installed packages. The table lists every non-MIT licence; all remaining packages
+1122 installed packages. The table lists every non-MIT licence; all remaining packages
 are MIT and are covered by the same notice text (see `node_modules/<package>/LICENSE`).
 
 | Package | Version | Licence |
@@ -135,7 +135,6 @@ are MIT and are covered by the same notice text (see `node_modules/<package>/LIC
 | @eslint/object-schema | 2.1.7 | [Apache-2.0](https://www.apache.org/licenses/LICENSE-2.0) |
 | @eslint/plugin-kit | 0.4.1 | [Apache-2.0](https://www.apache.org/licenses/LICENSE-2.0) |
 | @expo-google-fonts/material-symbols | 0.4.43 | MIT AND Apache-2.0 |
-| @expo/xcpretty | 4.4.5 | [BSD-3-Clause](https://opensource.org/license/bsd-3-clause) |
 | @humanfs/core | 0.19.2 | [Apache-2.0](https://www.apache.org/licenses/LICENSE-2.0) |
 | @humanfs/node | 0.16.8 | [Apache-2.0](https://www.apache.org/licenses/LICENSE-2.0) |
 | @humanfs/types | 0.15.0 | [Apache-2.0](https://www.apache.org/licenses/LICENSE-2.0) |
@@ -251,7 +250,7 @@ are MIT and are covered by the same notice text (see `node_modules/<package>/LIC
 | signal-exit | 3.0.7 | [ISC](https://opensource.org/license/isc-license-txt) |
 | source-map | 0.5.7 | [BSD-3-Clause](https://opensource.org/license/bsd-3-clause) |
 | source-map | 0.6.1 | [BSD-3-Clause](https://opensource.org/license/bsd-3-clause) |
-| source-map-js | 1.2.1 | [BSD-3-Clause](https://opensource.org/license/bsd-3-clause) |
+| source-map-js | 1.2.2 | [BSD-3-Clause](https://opensource.org/license/bsd-3-clause) |
 | sprintf-js | 1.0.3 | [BSD-3-Clause](https://opensource.org/license/bsd-3-clause) |
 | stream-buffers | 2.2.0 | [Unlicense](https://unlicense.org/) |
 | terser | 5.50.0 | [BSD-2-Clause](https://opensource.org/license/bsd-2-clause) |
@@ -268,7 +267,7 @@ are MIT and are covered by the same notice text (see `node_modules/<package>/LIC
 | which | 2.0.2 | [ISC](https://opensource.org/license/isc-license-txt) |
 | wrappy | 1.0.2 | [ISC](https://opensource.org/license/isc-license-txt) |
 | write-file-atomic | 4.0.2 | [ISC](https://opensource.org/license/isc-license-txt) |
-| xcode | 3.0.1 | [Apache-2.0](https://www.apache.org/licenses/LICENSE-2.0) |
+| xcode | 4.0.0 | [Apache-2.0](https://www.apache.org/licenses/LICENSE-2.0) |
 | y18n | 5.0.8 | [ISC](https://opensource.org/license/isc-license-txt) |
 | yallist | 3.1.1 | [ISC](https://opensource.org/license/isc-license-txt) |
 | yaml | 2.9.0 | [ISC](https://opensource.org/license/isc-license-txt) |

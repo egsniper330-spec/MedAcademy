@@ -59,6 +59,75 @@ function isArrayBufferLike(file: unknown): boolean {
 }
 
 /**
+ * Resolve an upload input into something FormData can actually carry.
+ *
+ * ── THE WEB BUG THIS FIXES ──────────────────────────────────────────────
+ * `toUploadPart()` returns the `{ uri, name, type }` descriptor, which is the
+ * supported representation ONLY on React Native: there the native networking
+ * layer streams the file from that URI. On the WEB there is no such hook —
+ * `FormData.append(name, {uri})` follows the HTML spec and stringifies the
+ * object, so the server received a 15-byte part reading `[object Object]` and
+ * answered `400 upload_missing`. The app then showed the "size" of the
+ * MULTIPART BODY (679 / 777 / 790 bytes, depending on the path) next to
+ * "فشل الرفع", which read like a truncated 140 KB PDF.
+ *
+ * On web the bytes must therefore be fetched from the picker's `blob:` (or
+ * `data:`) URL and appended as a real Blob/File. `fetchBlob` is injectable so
+ * the conversion is testable without a browser.
+ */
+export type ResolvedUploadPart =
+  | { kind: 'blob'; value: Blob }
+  | { kind: 'descriptor'; value: UploadFileDescriptor }
+  | { kind: 'error'; message: string };
+
+export async function resolveUploadPart(
+  file: UploadFileInput,
+  platform: PlatformId,
+  fetchBlob?: (uri: string) => Promise<Blob>,
+): Promise<ResolvedUploadPart> {
+  const decision = toUploadPart(file, platform);
+  if (decision.kind !== 'descriptor' || platform !== 'web') {
+    return decision;
+  }
+
+  const { uri, name, mimeType } = decision.value;
+  const load = fetchBlob ?? (async (u: string) => {
+    const res = await globalThis.fetch(u);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return res.blob();
+  });
+
+  let blob: Blob;
+  try {
+    blob = await load(uri);
+  } catch (e) {
+    return {
+      kind: 'error',
+      message:
+        'The selected file could not be read from the browser. Pick it again '
+        + `and retry. (${e instanceof Error ? e.message : String(e)})`,
+    };
+  }
+
+  if (!(blob.size > 0)) {
+    // A zero-byte part must never reach the server: it would be refused there,
+    // and a 200 with 0 stored bytes is the incident this pipeline exists to stop.
+    return { kind: 'error', message: 'The selected file is empty (0 bytes). Pick the file again.' };
+  }
+
+  const fileName = name ?? 'upload.bin';
+  const type = mimeType ?? (blob.type || 'application/octet-stream');
+  const FileCtor = (globalThis as { File?: new (parts: BlobPart[], name: string, opts?: { type?: string }) => Blob }).File;
+  const asFile = typeof FileCtor === 'function' ? new FileCtor([blob], fileName, { type }) : blob;
+  // Some engines produce a File whose size differs from the blob it wraps only
+  // when the constructor misbehaves; guard the contract explicitly.
+  if (asFile.size !== blob.size) {
+    return { kind: 'blob', value: blob };
+  }
+  return { kind: 'blob', value: asFile };
+}
+
+/**
  * Decide how a file input must be appended to FormData on the given platform.
  *
  * - `{ uri }` descriptor → passed straight through (Android + iOS): the native

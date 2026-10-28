@@ -202,6 +202,7 @@ final class LessonMaterialController
         ];
     }
 
+
     // ── Internals ────────────────────────────────────────────────────────────
 
     private function materialId(Request $request): string

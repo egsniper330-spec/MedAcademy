@@ -105,8 +105,26 @@ function pageBoxes(string $raw): array
 }
 
 // ── 1. Mode resolution and the licence gate ────────────────────────────────
-putenv('PDF_WATERMARK_MODE=flatten');
-putenv('PDF_WATERMARK_ACCEPT_AGPL_RENDERER');
+/**
+ * Config::get() reads `$_ENV[$k] ?? getenv($k)`. PHP populates $_ENV once at
+ * process start, so an INHERITED environment variable (run.ps1 exports
+ * PDF_WATERMARK_MODE=<the run's mode>) wins over any later putenv() and the
+ * suite would silently test the inherited mode instead of the one it asserts.
+ * Every override in this file therefore sets BOTH.
+ */
+function setEnv(string $key, ?string $value): void
+{
+    if ($value === null) {
+        putenv($key);
+        unset($_ENV[$key]);
+        return;
+    }
+    putenv($key . '=' . $value);
+    $_ENV[$key] = $value;
+}
+
+setEnv('PDF_WATERMARK_MODE', 'flatten');
+setEnv('PDF_WATERMARK_ACCEPT_AGPL_RENDERER', null);
 Config::init();
 $svc = new PdfWatermarkService();
 $status = $svc->status();
@@ -131,10 +149,13 @@ check(
 
 // The raster engine must refuse to run without the licence opt-in, even when the
 // binary exists. In-process this shows up as effective_mode = null.
-putenv('PDF_WATERMARK_MODE=raster');
+setEnv('PDF_WATERMARK_MODE', 'raster');
 Config::init();
 $rasterGated = new PdfWatermarkService();
 $gatedStatus = $rasterGated->status();
+// A copy left behind by an earlier run must not be mistaken for this run's
+// output: the two assertions below are about what THIS call produced.
+@unlink($OUT . '/gated.pdf');
 check(
     $cases,
     $fail,
@@ -154,7 +175,7 @@ check($cases, $fail, 'gate: delivery is REFUSED (503) with the gate closed', $re
 check($cases, $fail, 'gate: no file is produced when the gate is closed', !is_file($OUT . '/gated.pdf'));
 
 // ── 2. The engine, on real fixtures ────────────────────────────────────────
-putenv('PDF_WATERMARK_MODE=flatten');
+setEnv('PDF_WATERMARK_MODE', 'flatten');
 Config::init();
 $svc = new PdfWatermarkService();
 $opacity = $svc->opacity();
@@ -266,14 +287,11 @@ foreach (['source.pdf' => 4, 'rotated.pdf' => 3] as $fixture => $expectedPages) 
 
 // ── 3. Cache identity ──────────────────────────────────────────────────────
 $lines = $svc->watermarkLines('Alpha One', 'MED-0042');
-putenv('PDF_WATERMARK_MODE=flatten');
+setEnv('PDF_WATERMARK_MODE', 'flatten');
 Config::init();
 $before = (new PdfWatermarkService())->variantSettings($lines);
 $restore = $_ENV['PDF_WATERMARK_OPACITY'] ?? null;
-// $_ENV is populated at process start and takes precedence over putenv(), so a
-// test-only override must set both.
-$_ENV['PDF_WATERMARK_OPACITY'] = '0.22';
-putenv('PDF_WATERMARK_OPACITY=0.22');
+setEnv('PDF_WATERMARK_OPACITY', '0.22');
 Config::init();
 $after = (new PdfWatermarkService())->variantSettings($lines);
 check(
@@ -292,12 +310,8 @@ check(
 );
 
 // ── 4. Restore the environment for any later suite in the same process ─────
-putenv('PDF_WATERMARK_MODE');
-if ($restore === null) {
-    unset($_ENV['PDF_WATERMARK_OPACITY']);
-} else {
-    $_ENV['PDF_WATERMARK_OPACITY'] = $restore;
-}
+setEnv('PDF_WATERMARK_MODE', null);
+setEnv('PDF_WATERMARK_OPACITY', $restore);
 Config::init();
 
 $json = json_encode(['cases' => $cases, 'failures' => $fail, 'ok' => $fail === []], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);

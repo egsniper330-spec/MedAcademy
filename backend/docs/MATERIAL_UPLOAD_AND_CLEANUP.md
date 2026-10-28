@@ -171,6 +171,43 @@ registry (present vs missing files), and cleanup health (queue depth + orphan
 scan). A 0-byte source now says plainly that the upload never persisted bytes
 and how to fix it.
 
+### 3.6.1 "Upload failed." — diagnosing a REFUSED upload
+
+The doctor-facing sentence is the app's generic fallback, not the server's
+answer. The upload path answers with a stable code, and the exact failing stage is
+named by one command (read-only; it stores and deletes one tiny sample PDF):
+
+```bash
+cd /home/USER/medacademy-api
+php scripts/diagnose-upload.php                       # environment + full round trip
+php scripts/diagnose-upload.php --file=/path/doc.pdf   # also gate the doctor's own file
+php scripts/diagnose-upload.php --json                 # machine-readable
+```
+
+It prints one verdict per stage — `php.*` (limits), `storage.*` (roots, perms,
+free space), `engine.*`, `db.*` (migrations, and any NOT NULL column the app does
+not send), then the real pipeline: `upload.validate` → `upload.persist` →
+`upload.verify_stored`. The first `FAIL` is the cause; later stages depend on it.
+
+| code | meaning | what the doctor must do |
+| --- | --- | --- |
+| `pdf_unsupported_format` | the file uses a compressed cross-reference stream the bundled FPDI parser cannot read (common in Word/Acrobat exports) | re-export as a standard PDF ("Print to PDF", or PDF 1.4 compatibility) |
+| `pdf_invalid` | damaged / unreadable | upload a different copy |
+| `pdf_encrypted` | password-protected | remove the protection |
+| `pdf_truncated` | the transfer stopped early | upload again |
+| `upload_too_large` | above the host's `upload_max_filesize`/`post_max_size` (the message states the effective limit) | shrink or split the file, or raise the host limit |
+| `material_file_missing` / `material_file_empty` | the bytes were not where the row expected them | upload again (the diagnostic above says why) |
+| `material_write_failed` | the row could not be written after a good upload | retry; quote the `mw_…` reference from the message and the `[material-write]` log line |
+
+The server-side evidence is already structured — no document content, no user
+identity:
+
+```bash
+grep 'storage-upload' storage/logs/app.log | tail -20   # op/stage/result/reason per upload
+grep 'material-write' storage/logs/app.log | tail -20   # row-insert failures with a reference
+grep 'pdf-inspect'   storage/logs/app.log | tail -20   # which PDFs the engine refused, and why
+```
+
 `php backend/scripts/storage-cleanup.php` (CLI only):
 
 ```
@@ -202,6 +239,22 @@ and how to fix it.
 Upload all of them together: `routes/api.php` registers
 `LessonMaterialController`, and the Router answers `handler_unavailable` if the
 controller is missing (a partial upload fails only the new routes).
+
+### 4.1 Files for the refused-upload fix (see §3.6.1)
+
+| file | why |
+| --- | --- |
+| `backend/src/Services/PdfWatermarkService.php` | distinguishes an unsupported container (`pdf_unsupported_format`) from a damaged PDF, and only parses when FPDI is the renderer |
+| `backend/src/Services/UploadIntegrityService.php` | the attachment cap becomes `min(configured, upload_max_filesize)` |
+| `backend/src/Controllers/StorageController.php` | uses that cap, states `post_max_size` on 413, and adds `discardUpload()` (409 `object_referenced`) |
+| `backend/src/Controllers/DataController.php` | a refused material insert returns `material_write_failed` + an `mw_…` reference; the SQLSTATE stays in the log |
+| `backend/routes/api.php` | registers `POST /storage/discard-upload` |
+| `backend/scripts/diagnose-upload.php` | **new** operator tool |
+
+No migration, no cron change and no new configuration variable. The client half
+(the localized messages and the guarded reclaim call) needs a normal app build;
+until it is installed, refusals still work — they are just reported with the old
+generic sentence.
 
 ### Frontend
 
@@ -285,12 +338,109 @@ ship together.
   production request logs (see §2.3). The server half is reproduced and pinned
   by tests; the client half is fixed and pinned by a source-level regression
   check.
-* `backend/tests/material-lifecycle/` needs PHP 8.2+ with `pdo_sqlite`. It was
-  written but could not be executed in the environment where this change was
-  developed (no PHP binary); run it on the server or CI before relying on it.
+* `backend/tests/material-lifecycle/` needs PHP 8.2+ with `pdo_sqlite`. It has
+  since been **executed** against a portable PHP 8.2.35 CLI (pdo_sqlite, gd,
+  curl, openssl, fileinfo, mbstring, zip): **33 passed, 0 failed, 0 skipped**
+  (`bash backend/tests/material-lifecycle/run.sh`).
 * Orphan reconciliation is CLI-driven by design (no cron worker on shared
   hosting). Run `storage-cleanup.php --retry` periodically (e.g. monthly) or
   after any filesystem incident.
 * The pre-existing 0-byte record and its file are left untouched: they are
   evidence. Re-upload that document from the lesson editor; the new upload path
   will store real bytes.
+
+## 8. Byte-level upload progress and cancellation (follow-up)
+
+The incident above was about *correctness* (0 bytes stored). This section is
+about the doctor's *visibility* while the bytes move, which failed in a different
+way: the Materials tab showed a spinner and the single word "Uploading…" for the
+whole request.
+
+### 8.1 Why it looked hung
+
+`uploadLessonMaterial()` went through `backendClient.storage…upload()`, which is
+implemented with `fetch()`. **`fetch` has no upload-progress event**, so no code
+in the app could know how many bytes had been sent. A 40 MB scanned PDF on a
+slow mobile connection therefore produced one static label for minutes: the
+screen could not be distinguished from a dead request, the doctor could not
+cancel, and a drop was only discovered at the end as "Upload failed."
+
+There is a second, subtler problem this section fixes: **bytes transferred is
+not the same as success**. The last byte leaving the phone says nothing about
+whether PHP stored the file, measured its size, or computed its digest, and the
+old UI had no vocabulary for that difference.
+
+### 8.2 What was built
+
+| File | Role |
+|---|---|
+| `src/lib/uploadProgress.ts` | **Pure** helpers — percentage, smoothed speed, ETA, the stage vocabulary, and failure→message mapping. Dependency-free so the tests execute it for real. |
+| `src/lib/uploadTransport.ts` | Multipart `XMLHttpRequest` transport: real `xhr.upload.onprogress`, abort, timeout. The XHR constructor is injectable so all paths are testable off-device. |
+| `src/client/php.ts` | One contract, two transports: the XHR path only when a progress callback is passed, then the **same** body parsing, status mapping and zero-byte check as before. |
+| `src/lib/api.ts` | `uploadLessonMaterial(..., { onProgress, signal })`; wraps raw counters in a tracker and reports `verifying` after the response. |
+| `src/components/MaterialUploadProgress.tsx` | The card: file name, percentage, transferred/total, speed, ETA, real stage, cancel, actionable error. RTL-aware. |
+| `src/app/(app)/lesson-editor/[id].tsx` | Owns the transfer: one at a time, `AbortController` per transfer, cancel aborts only that transfer, button disabled while active. |
+
+Stages are deliberately distinct:
+
+```
+preparing → uploading → verifying → saving → done
+                 └──────────┬──────────┘
+                    failure/cancelled → failed | cancelled
+```
+
+`uploading` is the only measured part. 100 % on the bar means *sent*, not
+*saved*; `verifying` covers the server's measured size/digest, `saving` covers
+the `lesson_materials` insert.
+
+### 8.3 Failure handling
+
+| Condition | What the doctor sees |
+|---|---|
+| `413` (host request limit) | "This file is larger than the server accepts…" |
+| `429` | "Too many uploads at once…" (retryable) |
+| `401` / `403` | "Your session expired…" (sign in, then re-attach) |
+| `408` / `504` / transport timeout | "The upload timed out…" (retryable) |
+| dropped connection (`NETWORK`) | "The connection dropped…" (retryable) |
+| `5xx` | "The server could not accept the file right now…" |
+| `200` with 0 stored bytes | the existing `upload_empty` failure, never a success |
+| explicit cancel | "Upload cancelled." — **not** an error toast |
+
+### 8.4 Verification (executed)
+
+| Check | Command | Result |
+|---|---|---|
+| Progress maths + failure mapping + transport + wiring | `node tests/materialUploadProgress.test.cjs` | **111 passed, 0 failed** |
+| Material upload/lifecycle PHP suite | `bash backend/tests/material-lifecycle/run.sh` | **33 passed, 0 failed** |
+| Whole JS regression set | `node scripts/run-all-tests.cjs` | see the audit report |
+| Types | `npx tsc --noEmit` | exit 0 |
+
+The transport tests drive a fake XHR through: progress forwarding, header
+application, non-2xx resolve, pre-aborted signal, mid-flight abort (asserting
+`xhr.abort()` really ran and the listener was removed), network failure, and
+timeout.
+
+### 8.5 Deployment
+
+**Frontend-only.** Every file above ships in the app bundle; no backend file
+changes and no database migration is required for this section. The server
+contract (`POST /storage/upload`, multipart `file`/`bucket`/`path`, bearer auth,
+measured `size` + `sha256`) is unchanged, so an older client keeps working.
+
+### 8.6 Known limitations (this section)
+
+* **The transfer is still screen-bound.** Leaving the lesson editor does not
+  cancel it (the request belongs to the app process, not the component), but
+  the progress card lives on that screen. Videos already use the registered
+  queue (`lib/uploadQueueStore`, `lib/backgroundUploadService`,
+  `lib/nativeUploadBridge`); materials do **not** have an OS-managed background
+  transfer. On Android a single multipart XHR continues while the foreground
+  service keeps the process alive; on iOS it is suspended ~30 s after
+  backgrounding and resumes when the app returns. A registered, resumable
+  material transfer is not implemented and must not be claimed.
+* **Speed/ETA are estimates.** The first sample yields no ETA, and the value is
+  smoothed (EMA) so it does not jitter; a stalled socket shows the last known
+  speed until the request fails.
+* **No real-device verification** was performed for this change (no device was
+  attached in this environment); the behaviour is pinned by executed unit tests
+  plus source-contract tests, not by a physical-device run.

@@ -284,6 +284,165 @@ final class VideoController
     }
 
     /**
+     * POST /video/import — explicitly attach an EXISTING VdoCipher video to the
+     * calling doctor's library.
+     *
+     * WHY THIS IS EXPLICIT: the library sync (VideoLibrarySyncService) only
+     * reconciles LOCAL rows against the remote listing. It deliberately does NOT
+     * import unknown remote assets — one VdoCipher account serves the whole
+     * platform, so a listing contains every doctor's videos and "import all"
+     * would hand one doctor another's content.
+     *
+     * Validation order (every step fails closed):
+     *   1. the id has a plausible shape (no path/URL/whitespace);
+     *   2. an existing local row decides ownership — the caller's own row is an
+     *      idempotent success, ANOTHER doctor's row is a hard refusal;
+     *   3. the remote listing must succeed and contain the id (an unreachable
+     *      or partial listing imports nothing);
+     *   4. the remote asset must be READY (a processing/failed asset is refused);
+     *   5. the caller must acknowledge ownership (`confirm_ownership`) because
+     *      VdoCipher provides NO per-doctor ownership signal for an asset that
+     *      has no local row yet — see the response's `ownership_verified: false`.
+     *
+     * The owner recorded locally is ALWAYS the authenticated caller; an owner id
+     * in the request body is ignored. Duplicate imports are prevented by an
+     * `INSERT … WHERE NOT EXISTS` (concurrent requests cannot create two rows).
+     * Nothing is deleted or modified upstream.
+     */
+    public function importAsset(Request $request): array
+    {
+        $actorId = (string) $request->user['id'];
+        $body = $request->json();
+        $videoId = trim((string) ($body['video_id'] ?? ''));
+        if ($videoId === '' || !preg_match('/^[A-Za-z0-9_-]{6,191}$/', $videoId)) {
+            throw new ApiException(422, 'Enter a valid VdoCipher video ID.', 'invalid_video_id');
+        }
+        $confirmed = filter_var($body['confirm_ownership'] ?? false, FILTER_VALIDATE_BOOLEAN);
+
+        $db = Database::instance();
+
+        // ── 2. LOCAL ownership decides first (no network call needed) ──────
+        $existing = $db->select(
+            'SELECT id, doctor_id, provider_video_id, title, status
+               FROM video_assets WHERE provider_video_id = ?
+              ORDER BY created_at ASC',
+            [$videoId]
+        );
+        foreach ($existing as $row) {
+            if ((string) $row['doctor_id'] === $actorId) {
+                // Idempotent: importing twice returns the SAME row, no duplicate.
+                return [
+                    'status' => 'already_imported',
+                    'imported' => false,
+                    'asset' => [
+                        'id' => (string) $row['id'],
+                        'provider_video_id' => (string) $row['provider_video_id'],
+                        'title' => (string) ($row['title'] ?? ''),
+                        'status' => (string) ($row['status'] ?? ''),
+                    ],
+                    'ownership_verified' => true,
+                ];
+            }
+        }
+        if ($existing !== []) {
+            // Another doctor already owns a local record for this provider id.
+            // A video id alone is not proof of ownership — refuse.
+            throw new ApiException(
+                409,
+                'This video is already linked to another doctor\'s library. A video ID alone does not prove ownership, so it cannot be imported.',
+                'video_owned_by_another_doctor'
+            );
+        }
+
+        // ── 3. Remote existence, from the COMPLETE listing ─────────────────
+        $listing = $this->video->listAllVideos();
+        if (($listing['status'] ?? '') !== 'ok') {
+            throw new ApiException(
+                503,
+                'The video service could not be reached, so nothing was imported. Try again later.',
+                'video_service_unavailable'
+            );
+        }
+        $meta = $listing['videos'][$videoId] ?? null;
+        if (!is_array($meta)) {
+            throw new ApiException(404, 'No VdoCipher video with that ID exists.', 'video_not_found');
+        }
+
+        // ── 4. Only a READY asset is eligible ─────────────────────────────
+        $remoteStatus = strtolower(trim((string) ($meta['status'] ?? '')));
+        if ($remoteStatus !== 'ready') {
+            throw new ApiException(
+                409,
+                'That video is not ready yet (status: ' . ($remoteStatus !== '' ? $remoteStatus : 'unknown') . '). Import it once encoding has finished.',
+                'video_not_ready'
+            );
+        }
+
+        // ── 5. Explicit ownership acknowledgement ─────────────────────────
+        if (!$confirmed) {
+            throw new ApiException(
+                422,
+                'Confirm that this video belongs to you before importing it.',
+                'ownership_confirmation_required'
+            );
+        }
+
+        $assetId = Uuid::v4();
+        $title = trim((string) ($meta['title'] ?? ''));
+        if ($title === '') {
+            $title = 'Imported video';
+        }
+        $duration = isset($meta['duration']) && is_numeric($meta['duration']) ? (int) $meta['duration'] : null;
+
+        // No duplicate row even if two requests race: the INSERT only runs while
+        // the (doctor, provider id) pair is still absent.
+        $db->query(
+            "INSERT INTO video_assets
+                (id, doctor_id, provider_video_id, title, duration_seconds, status,
+                 remote_status, remote_synced_at, created_at, updated_at)
+             SELECT ?, ?, ?, ?, ?, 'ready', 'exists', UTC_TIMESTAMP(6),
+                    UTC_TIMESTAMP(6), UTC_TIMESTAMP(6)
+               FROM DUAL
+              WHERE NOT EXISTS (
+                    SELECT 1 FROM video_assets
+                     WHERE provider_video_id = ? AND doctor_id = ?)",
+            [$assetId, $actorId, $videoId, mb_substr($title, 0, 255), $duration, $videoId, $actorId]
+        );
+
+        $created = $db->row(
+            'SELECT id, title, status FROM video_assets WHERE provider_video_id = ? AND doctor_id = ? LIMIT 1',
+            [$videoId, $actorId]
+        );
+        if ($created === null) {
+            throw new ApiException(409, 'The video could not be imported.', 'import_failed');
+        }
+
+        AuditService::write($actorId, 'video_uploaded', [
+            'operation' => 'video_import',
+            'asset_id' => (string) $created['id'],
+            'provider_video_id' => $videoId,
+            'remote_status' => $remoteStatus,
+            // HONEST: no platform-side proof of ownership existed for this id.
+            'ownership' => 'unverified',
+            'description' => 'Existing VdoCipher video imported into a doctor library',
+        ]);
+
+        return [
+            'status' => 'imported',
+            'imported' => (string) $created['id'] === $assetId,
+            'asset' => [
+                'id' => (string) $created['id'],
+                'provider_video_id' => $videoId,
+                'title' => (string) ($created['title'] ?? ''),
+                'status' => (string) ($created['status'] ?? 'ready'),
+            ],
+            // VdoCipher has no per-doctor ownership signal for an asset with no
+            // local row, so this import rests on the doctor's confirmation.
+            'ownership_verified' => false,
+        ];
+    }
+
+    /**
      * POST /video/assets/delete — permanently remove an owned library asset.
      * All lesson references are detached in the same local transaction. The
      * transaction is rolled back if VdoCipher deletion fails, so the library

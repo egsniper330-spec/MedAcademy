@@ -113,6 +113,7 @@ use MedAcademy\Controllers\StorageController;
 use MedAcademy\Database\Database;
 use MedAcademy\Http\ApiException;
 use MedAcademy\Http\Request;
+use MedAcademy\Services\MaterialPdfQueueService;
 use MedAcademy\Services\PdfWatermarkService;
 use MedAcademy\Storage\StorageService;
 use MedAcademy\Utils\Config;
@@ -427,6 +428,49 @@ if (isset($argv[1])) {
                 echo json_encode((new MaterialDeliveryController())->pdfUrl($req));
                 break;
 
+            case 'worker':
+                // One pass of the cron worker, in-process. The student path never
+                // renders inline (it queues), so this is how the suite produces
+                // the copy a student would wait for in production. It claims,
+                // re-derives the variant from the LIVE source and publishes
+                // through the SAME service the CLI worker uses.
+                //
+                // `isStudentEligible()` is deliberately NOT called here: it reads
+                // profiles.status, which this SQLite harness does not model. Live
+                // eligibility is covered by backend/tests/material-queue and by
+                // the controller's own authorization checks above.
+                $queue = new MaterialPdfQueueService();
+                $variants = $queue->variants();
+                $jobs = $queue->claim(20, 'test-worker-' . getmypid());
+                $out = ['claimed' => count($jobs), 'ready' => 0, 'skipped' => 0, 'failed' => 0];
+                foreach ($jobs as $job) {
+                    $mid = (string) $job['material_id'];
+                    $sid = (string) $job['student_id'];
+                    $material = $queue->loadMaterial($mid);
+                    if ($material === null || !$queue->isPdf($material)) {
+                        $queue->markSkipped((string) $job['id'], (string) $job['lock_token'], 'material_missing');
+                        $out['skipped']++;
+                        continue;
+                    }
+                    try {
+                        $identity = $variants->identity($material, $sid);
+                        if ($identity['variant_key'] !== (string) $job['variant_key']) {
+                            $queue->markSkipped((string) $job['id'], (string) $job['lock_token'], 'stale_variant');
+                            $queue->enqueueStudent($material, $sid, MaterialPdfQueueService::PRIORITY_PREWARM, true);
+                            $out['skipped']++;
+                            continue;
+                        }
+                        $variants->ensure($material, $sid);
+                        $queue->markReady((string) $job['id'], (string) $job['lock_token']);
+                        $out['ready']++;
+                    } catch (\Throwable) {
+                        $queue->markFailed((string) $job['id'], (string) $job['lock_token'], 'render_failed');
+                        $out['failed']++;
+                    }
+                }
+                echo json_encode($out);
+                break;
+
             case 'stream':
                 $token = (string) ($argv[2] ?? '');
                 $req = makeRequest('GET', '/materials/pdf', ['token' => $token], []);
@@ -592,6 +636,26 @@ function finishChild($proc, array $pipes): array
 }
 
 /** Decode a child's JSON answer, or report the raw body. */
+/**
+ * Mint, and if the answer is "preparing" (the async student contract) run one
+ * worker pass and ask again. Returns the final child result, so every existing
+ * assertion still inspects a `ready` answer.
+ *
+ * This is exactly the production sequence: request → queued → cron renders →
+ * the client's next poll/delivery request succeeds.
+ */
+function mintReady(array $args, array $envOverrides = []): array
+{
+    $child = runChild($args, $envOverrides);
+    $answer = jsonOf($child[1]);
+    $status = (string) ($answer['status'] ?? '');
+    if ($answer === [] || !in_array($status, ['preparing', 'queued', 'processing'], true)) {
+        return $child;
+    }
+    runChild(['worker'], $envOverrides);
+    return runChild($args, $envOverrides);
+}
+
 function jsonOf(string $out): array
 {
     $data = json_decode($out, true);
@@ -642,6 +706,15 @@ $pdo->exec('CREATE TABLE lesson_material_pdfs (
     id TEXT PRIMARY KEY, material_id TEXT NOT NULL, student_id TEXT NOT NULL,
     source_hash TEXT NOT NULL, variant_key TEXT NOT NULL, storage_path TEXT NOT NULL,
     file_size INTEGER DEFAULT 0, page_count INTEGER DEFAULT 0,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP, updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (material_id, student_id, variant_key))');
+$pdo->exec('CREATE TABLE lesson_material_pdf_jobs (
+    id TEXT PRIMARY KEY, material_id TEXT NOT NULL, student_id TEXT NOT NULL,
+    source_hash TEXT NOT NULL, variant_key TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT \'queued\', priority INTEGER NOT NULL DEFAULT 10,
+    attempts INTEGER NOT NULL DEFAULT 0, max_attempts INTEGER NOT NULL DEFAULT 4,
+    lock_token TEXT, locked_at TEXT, locked_by TEXT, run_after TEXT NOT NULL,
+    last_error TEXT, ready_at TEXT,
     created_at TEXT DEFAULT CURRENT_TIMESTAMP, updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
     UNIQUE (material_id, student_id, variant_key))');
 $pdo->exec('CREATE TABLE rate_limits (
@@ -718,10 +791,50 @@ check(
     (string) ($stDefault['effective_mode'] ?? '')
 );
 
-// ═══ 1. Mandatory personalization, legacy flag ignored ═════════════════════
+// ═══ 1. The student path is ASYNC: queue first, never render inline ════════
+// The first request deliberately uses runChild (not mintReady) so the
+// preparing contract itself is asserted, not skipped over.
+$r = runChild(['mint', 'm1', 's1', 'student', 'view']);
+$pending = jsonOf($r[1]);
+check('queue: a first student request is answered "preparing" (no inline render)',
+    $r[0] === 0 && ($pending['status'] ?? '') === 'preparing' && ($pending['url'] ?? null) === null,
+    substr($r[1], 0, 240));
+check('queue: the pending answer still declares the delivery is watermarked',
+    ($pending['watermarked'] ?? false) === true);
+check('queue: the pending answer tells the client when to retry and offers no manual retry',
+    (int) ($pending['retry_after'] ?? 0) > 0 && ($pending['retry_allowed'] ?? true) === false,
+    json_encode(['retry_after' => $pending['retry_after'] ?? null, 'retry_allowed' => $pending['retry_allowed'] ?? null]));
+check('queue: the request itself wrote NO personalized copy',
+    (int) $pdo->query("SELECT COUNT(*) FROM lesson_material_pdfs WHERE material_id='m1'")->fetchColumn() === 0);
+check('queue: exactly ONE job was queued for that student',
+    (int) $pdo->query("SELECT COUNT(*) FROM lesson_material_pdf_jobs WHERE material_id='m1' AND student_id='s1'")->fetchColumn() === 1);
+
+// Three more requests for the SAME copy: the queue must not fan out.
+for ($i = 0; $i < 3; $i++) {
+    runChild(['mint', 'm1', 's1', 'student', 'view']);
+}
+check('queue: repeated requests never create a second job (unique material+student+variant)',
+    (int) $pdo->query("SELECT COUNT(*) FROM lesson_material_pdf_jobs WHERE material_id='m1' AND student_id='s1'")->fetchColumn() === 1);
+check('queue: a student request raises the job to "waiting" priority',
+    (int) $pdo->query("SELECT priority FROM lesson_material_pdf_jobs WHERE material_id='m1' AND student_id='s1'")->fetchColumn() === MaterialPdfQueueService::PRIORITY_STUDENT);
+
+// The cron worker is what produces the copy.
+$r = runChild(['worker']);
+$w = jsonOf($r[1]);
+check('worker: the queued job is claimed and rendered',
+    ($w['claimed'] ?? 0) === 1 && ($w['ready'] ?? 0) === 1 && ($w['failed'] ?? 0) === 0,
+    substr($r[1], 0, 240) . substr($r[2], 0, 300));
+check('worker: the job ends as ready, with no lock left behind',
+    (string) $pdo->query("SELECT status FROM lesson_material_pdf_jobs WHERE material_id='m1' AND student_id='s1'")->fetchColumn() === 'ready'
+    && $pdo->query("SELECT lock_token FROM lesson_material_pdf_jobs WHERE material_id='m1' AND student_id='s1'")->fetchColumn() === null);
+check('worker: a second pass has nothing to do (idempotent)', (jsonOf(runChild(['worker'])[1])['claimed'] ?? -1) === 0);
+
+// ═══ 1b. Once ready, the student gets the personalized copy ═══════════════
 $r = runChild(['mint', 'm1', 's1', 'student', 'view']);
 $a1 = jsonOf($r[1]);
-check('mint: student view succeeds', $r[0] === 0 && isset($a1['url']), substr($r[1], 0, 200) . substr($r[2], 0, 200));
+check('mint: student view succeeds once the copy is ready',
+    $r[0] === 0 && isset($a1['url']) && ($a1['status'] ?? '') === 'ready',
+    substr($r[1], 0, 200) . substr($r[2], 0, 200));
 check('mint: response says the copy is watermarked', ($a1['watermarked'] ?? false) === true);
 check(
     'mint: legacy watermark_enabled=0 on the material does NOT disable it',
@@ -736,8 +849,14 @@ if ($token1 === '' && isset($a1['url'])) {
 check('mint: returns a token-gated delivery URL (not a storage path)', str_contains((string) ($a1['url'] ?? ''), '/materials/pdf?token='));
 
 $r = runChild(['mint', 'm1', 's2', 'student', 'download']);
+check('queue: a SECOND student is queued too, never rendered inline',
+    (jsonOf($r[1])['status'] ?? '') === 'preparing');
+runChild(['worker']);
+$r = runChild(['mint', 'm1', 's2', 'student', 'download']);
 $a2 = jsonOf($r[1]);
 check('mint: student DOWNLOAD succeeds and is watermarked', ($a2['watermarked'] ?? false) === true && ($a2['intent'] ?? '') === 'download');
+check('registry: each student has their OWN copy (no sharing)',
+    count(registry('m1', 's1')) === 1 && count(registry('m1', 's2')) === 1);
 $token2 = '';
 if (isset($a2['url'])) {
     parse_str((string) parse_url((string) $a2['url'], PHP_URL_QUERY), $q);
@@ -822,7 +941,7 @@ if (is_string($staleCopy) && $staleCopy !== '') {
     clearstatcache(true);
 }
 $pdo->exec("DELETE FROM lesson_material_pdfs WHERE material_id='m1' AND student_id='s1'");
-$r = runChild(['mint', 'm1', 's1', 'student', 'view', 'spoof']);
+$r = mintReady(['mint', 'm1', 's1', 'student', 'view', 'spoof']);
 $spoofAnswer = jsonOf($r[1]);
 check('spoof: a client-supplied name/id is ignored (mint still succeeds)', isset($spoofAnswer['url']), substr($r[1], 0, 240) . ' | stderr: ' . substr(preg_replace('/\s+/', ' ', $r[2]), 0, 2000));
 $rowsSpoof = registry('m1', 's1');
@@ -847,7 +966,7 @@ check('spoof: the copy was not written under the forged student id', !str_contai
 $r = runChild(['stream', $token1]);
 check('stream: the student delivery returns PDF bytes', str_starts_with($r[1], '%PDF-'), substr($r[1], 0, 80) . ' / ' . substr($r[2], 0, 120));
 check('stream: the delivered bytes are the personalized copy', is_file($file1) && md5($r[1]) === md5_file($file1));
-$r = runChild(['mint', 'm1', 's1', 'student', 'download']);
+$r = mintReady(['mint', 'm1', 's1', 'student', 'download']);
 $d = jsonOf($r[1]);
 $dlToken = '';
 if (isset($d['url'])) {
@@ -857,7 +976,7 @@ if (isset($d['url'])) {
 $r = runChild(['stream', $dlToken]);
 check('download: the downloaded bytes are the SAME personalized copy (watermark retained)', str_starts_with($r[1], '%PDF-') && is_file($file1) && md5($r[1]) === md5_file($file1));
 
-$r = runChild(['mint', 'm1', 'd1', 'doctor', 'view']);
+$r = mintReady(['mint', 'm1', 'd1', 'doctor', 'view']);
 $doc = jsonOf($r[1]);
 check('staff: a doctor request IS watermarked (no unwatermarked original is served)', ($doc['watermarked'] ?? false) === true);
 $docToken = '';
@@ -887,21 +1006,21 @@ if ($isRaster) {
 @unlink((string) $docProbe);
 check('staff: a student never receives the original', md5_file($file1) !== $srcHash);
 
-$r = runChild(['mint', 'm1', 'a1', 'admin', 'download']);
+$r = mintReady(['mint', 'm1', 'a1', 'admin', 'download']);
 check('staff: an admin download is watermarked too', (jsonOf($r[1])['watermarked'] ?? false) === true);
 
 // ═══ 7. Refusals: suspended, unenrolled, hidden, preview-only download ═════
-$r = runChild(['mint', 'm1', 's3', 'student', 'view']);
+$r = mintReady(['mint', 'm1', 's3', 'student', 'view']);
 check('deny: a SUSPENDED enrollment cannot mint a link', errStatus(jsonOf($r[1])) === 403);
-$r = runChild(['mint', 'm1', 's4', 'student', 'view']);
+$r = mintReady(['mint', 'm1', 's4', 'student', 'view']);
 check('deny: a NON-ENROLLED student cannot mint a link', errStatus(jsonOf($r[1])) === 403);
-$r = runChild(['mint', 'm3', 's1', 'student', 'view']);
+$r = mintReady(['mint', 'm3', 's1', 'student', 'view']);
 check('deny: a HIDDEN material cannot be minted', errStatus(jsonOf($r[1])) === 403);
-$r = runChild(['mint', 'm4', 's1', 'student', 'download']);
+$r = mintReady(['mint', 'm4', 's1', 'student', 'download']);
 check('deny: preview_only refuses a DOWNLOAD intent', errStatus(jsonOf($r[1])) === 403);
-$r = runChild(['mint', 'm4', 's1', 'student', 'view']);
+$r = mintReady(['mint', 'm4', 's1', 'student', 'view']);
 check('allow: preview_only still allows a VIEW intent', isset(jsonOf($r[1])['url']));
-$r = runChild(['mint', 'm9', 's4', 'student', 'view']);
+$r = mintReady(['mint', 'm9', 's4', 'student', 'view']);
 check('allow: a free-preview lesson is open to an unenrolled user', isset(jsonOf($r[1])['url']));
 
 // Token lifecycle
@@ -938,8 +1057,17 @@ if ($rows !== []) {
 $r = runChild(['stream', $token2]);
 check('fail-closed: a missing personalized copy returns 503, not the original', childStatus($r) === 503 && !str_starts_with($r[1], '%PDF-'), 'status=' . childStatus($r) . ' ' . substr($r[1], 0, 120));
 check('fail-closed: the original was NOT delivered in that case', hash('sha256', $r[1]) !== $srcHash);
-$r = runChild(['mint', 'm1', 's2', 'student', 'view']);
+$r = mintReady(['mint', 'm1', 's2', 'student', 'view']);
 check('fail-closed: the next mint regenerates the missing copy', isset(jsonOf($r[1])['url']), substr($r[1], 0, 240));
+
+function filesForMaterial(string $materialId): array
+{
+    global $personalDir;
+    return array_filter(
+        array_keys(filesUnder($personalDir)),
+        static fn (string $p): bool => str_contains($p, '/' . $materialId . '/')
+    );
+}
 
 foreach ([['broken.pdf', 'a non-PDF source'], ['modern.pdf', 'a modern xref-stream source']] as [$name, $label]) {
     $mid = $name === 'broken.pdf' ? 'm7' : 'm8';
@@ -947,32 +1075,64 @@ foreach ([['broken.pdf', 'a non-PDF source'], ['modern.pdf', 'a modern xref-stre
         skipCheck('fail-closed: ' . $label . ' is refused', 'fixture source-xrefstream.pdf not generated');
         continue;
     }
-    $before = count(filesUnder($personalDir));
+    $before = filesForMaterial($mid);
+    // The request itself must never render, so a broken source is not detected
+    // here — it is queued like any other copy. The FAILURE is then produced by
+    // the worker and surfaced to the client as `failed`.
     $r = runChild(['mint', $mid, 's1', 'student', 'view']);
-    $answer = jsonOf($r[1]);
-    $after = count(filesUnder($personalDir));
+    check('fail-closed: ' . $label . ' is queued, not rendered inline',
+        (jsonOf($r[1])['status'] ?? '') === 'preparing' && !isset(jsonOf($r[1])['url']),
+        substr($r[1], 0, 200));
+
     if ($name === 'modern.pdf' && $isRaster) {
         // The flattened engine renders with Ghostscript, which understands
-        // cross-reference STREAMS. The vector engine's FPDI cannot parse them
-        // and refuses (422) — that refusal is asserted on the vector path. Here
-        // the honest expectation is the opposite: the modern source is rendered
-        // like any other PDF, and a personalized copy is minted.
+        // cross-reference STREAMS, so this source IS deliverable on that path.
+        runChild(['worker']);
+        $r = runChild(['mint', $mid, 's1', 'student', 'view']);
         check('fail-closed: ' . $label . ' is NOT refused by the flattened engine (Ghostscript renders it)',
-            errStatus($answer) === 0 && isset($answer['url']),
-            (string) ($answer['error']['message'] ?? substr($r[1], 0, 160)));
-        check('renders: a copy was written for ' . $label, $after > $before, "before={$before} after={$after}");
+            isset(jsonOf($r[1])['url']), substr($r[1], 0, 200));
+        $after = filesForMaterial($mid);
+        check('renders: a copy was written for ' . $label, count($after) > count($before), 'files=' . count($after));
         check('renders: the flattened copy of ' . $label . ' has no text layer',
-            $after > $before && !preg_match('#/Type\s*/Font#', implode('', array_map(
+            $after !== [] && !preg_match('#/Type\s*/Font#', implode('', array_map(
                 static fn (string $rel): string => (string) @file_get_contents($personalDir . '/' . $rel),
-                array_filter(array_keys(filesUnder($personalDir)), static fn (string $p): bool => str_contains($p, '/m8/'))
+                $after
             ))));
         continue;
     }
-    check('fail-closed: ' . $label . ' is refused with a 422 and a clear message',
-        errStatus($answer) === 422 && stripos((string) ($answer['error']['message'] ?? ''), 'pdf') !== false,
-        (string) ($answer['error']['message'] ?? substr($r[1], 0, 160)));
-    check('fail-closed: no copy was written for ' . $label, $after === $before);
-    check('fail-closed: no token was minted for ' . $label, !isset($answer['url']));
+
+    // Drive the worker until the job is terminal. Backoff (`run_after`) is
+    // cleared between passes so the retry happens immediately instead of after
+    // 30/60/120 s — the point here is the bounded retry, not the delay.
+    $job = null;
+    for ($pass = 0; $pass < 6; $pass++) {
+        runChild(['worker']);
+        // `query()->fetch()`, not a retained prepared statement: on WAL a live
+        // statement keeps a read transaction open and the CHILD's next write
+        // would then make this connection's write fail with "database is
+        // locked" (no busy handler on a lock upgrade).
+        $job = $pdo->query("SELECT status, attempts, max_attempts, last_error FROM lesson_material_pdf_jobs WHERE material_id = '{$mid}' AND student_id = 's1'")->fetch();
+        if (is_array($job) && in_array((string) $job['status'], ['failed', 'skipped'], true)) {
+            break;
+        }
+        $pdo->prepare("UPDATE lesson_material_pdf_jobs SET run_after = '2000-01-01 00:00:00' WHERE material_id = ? AND status = 'queued'")->execute([$mid]);
+    }
+    check('fail-closed: ' . $label . ' ends as a FAILED job with a machine-readable reason',
+        is_array($job) && (string) $job['status'] === 'failed' && (string) ($job['last_error'] ?? '') !== '',
+        json_encode($job));
+    check('fail-closed: the retries are bounded (attempts stop at max_attempts)',
+        is_array($job) && (int) $job['attempts'] >= (int) $job['max_attempts'], json_encode($job));
+    check('fail-closed: no personalized copy was written for ' . $label,
+        filesForMaterial($mid) === $before, json_encode(filesForMaterial($mid)));
+
+    $r = mintReady(['mint', $mid, 's1', 'student', 'view']);
+    $answer = jsonOf($r[1]);
+    check('fail-closed: the client is told "failed" and gets NO url',
+        ($answer['status'] ?? '') === 'failed' && ($answer['url'] ?? null) === null,
+        substr($r[1], 0, 240));
+    check('fail-closed: a manual retry is offered only after a permanent failure',
+        ($answer['retry_allowed'] ?? false) === true && ($answer['reason'] ?? '') !== '', json_encode($answer));
+    check('fail-closed: the failed answer never carries the original bytes', !str_starts_with($r[1], '%PDF-'));
 }
 
 // ═══ 9/10. Storage routes cannot expose originals ═════════════════════════
@@ -1016,7 +1176,7 @@ $r = runChild(['storage-redeem', 'lesson-materials', 'notes.docx']);
 check('non-PDF: the DOCX bytes are still delivered through the signed route', str_contains($r[1], 'not really a docx'));
 
 // ═══ 11. Replacement + settings changes invalidate the cache ══════════════
-$r = runChild(['mint', 'm6', 's1', 'student', 'view']);
+$r = mintReady(['mint', 'm6', 's1', 'student', 'view']);
 check('replace: first copy generated', isset(jsonOf($r[1])['url']));
 $before = registry('m6', 's1');
 $beforePath = $personalDir . '/' . ($before[0]['storage_path'] ?? 'none');
@@ -1040,7 +1200,7 @@ touch($materials . '/replace.pdf', time() + 2);
 clearstatcache(true, $materials . '/replace.pdf');
 check('replace: the fixture edit keeps the byte size identical', filesize($materials . '/replace.pdf') === strlen($original));
 
-$r = runChild(['mint', 'm6', 's1', 'student', 'view']);
+$r = mintReady(['mint', 'm6', 's1', 'student', 'view']);
 check('replace: mint succeeds after the source was replaced', isset(jsonOf($r[1])['url']));
 $after = registry('m6', 's1');
 check('replace: exactly ONE copy remains for that student', count($after) === 1, count($after));
@@ -1068,7 +1228,7 @@ $beforeSettings = registry('m6', 's1');
 $settingsOverride = $isRaster
     ? ['PDF_WATERMARK_DPI' => '150']
     : ($isFlatten ? ['PDF_WATERMARK_OPACITY' => '0.22'] : ['PDF_WATERMARK_VECTOR_OPACITY' => '0.22']);
-$r = runChild(['mint', 'm6', 's1', 'student', 'view'], $settingsOverride);
+$r = mintReady(['mint', 'm6', 's1', 'student', 'view'], $settingsOverride);
 check('settings: a changed watermark setting still delivers', isset(jsonOf($r[1])['url']));
 $afterSettings = registry('m6', 's1');
 check('settings: a changed setting produces a NEW variant key', ($afterSettings[0]['variant_key'] ?? '') !== ($beforeSettings[0]['variant_key'] ?? ''));
@@ -1076,6 +1236,8 @@ check('settings: still exactly one copy for the student', count($afterSettings) 
 check('settings: the old variant file was reclaimed', !is_file($personalDir . '/' . ($beforeSettings[0]['storage_path'] ?? 'none')));
 
 // ═══ 12. Concurrency ══════════════════════════════════════════════════════
+// Three students' first opens race. None of them may render (that is the whole
+// point of the queue) and together they must produce exactly ONE job.
 $procs = [];
 for ($i = 0; $i < 3; $i++) {
     $procs[] = spawnChild(['mint', 'm5', 's1', 'student', 'view']);
@@ -1084,18 +1246,19 @@ $answers = [];
 foreach ($procs as [$proc, $pipes]) {
     $answers[] = finishChild($proc, $pipes);
 }
-$okCount = 0;
-$busy = 0;
+$pendingCount = 0;
 foreach ($answers as [$code, $out]) {
     $a = jsonOf($out);
-    if (isset($a['url'])) {
-        $okCount++;
-    } elseif (errStatus($a) === 503) {
-        $busy++;
+    $status = (string) ($a['status'] ?? '');
+    if (in_array($status, ['preparing', 'ready'], true) && !isset($a['_raw'])) {
+        $pendingCount++;
     }
 }
-check('concurrency: every concurrent request either succeeds or reports "busy"',
-    $okCount + $busy === 3 && $okCount >= 1, "ok={$okCount} busy={$busy}");
+check('concurrency: no concurrent request blocks on a render',
+    $pendingCount === 3, "pending={$pendingCount}");
+check('concurrency: the race produced exactly ONE job row',
+    (int) $pdo->query("SELECT COUNT(*) FROM lesson_material_pdf_jobs WHERE material_id='m5' AND student_id='s1'")->fetchColumn() === 1);
+runChild(['worker']);
 $concRows = registry('m5', 's1');
 check('concurrency: exactly ONE registry row for the variant', count($concRows) === 1, count($concRows));
 $concFiles = filesUnder($personalDir);
@@ -1110,12 +1273,12 @@ check('concurrency: no temporary render directory is left behind', $scratch === 
 $pdo->exec("DELETE FROM rate_limits");
 $statuses = [];
 for ($i = 0; $i < 3; $i++) {
-    $r = runChild(['mint', 'm1', 's4x', 'student', 'view'], ['MATERIAL_PDF_MINT_PER_MINUTE' => '2']);
+    $r = mintReady(['mint', 'm1', 's4x', 'student', 'view'], ['MATERIAL_PDF_MINT_PER_MINUTE' => '2']);
     $statuses[] = errStatus(jsonOf($r[1])) ?: 200;
 }
 check('rate limit: the third mint in the window is refused with 429',
     $statuses === [403, 403, 429] || in_array(429, $statuses, true), json_encode($statuses));
-$r = runChild(['mint', 'm1', 's1', 'student', 'view'], ['MATERIAL_PDF_MINT_PER_MINUTE' => '0']);
+$r = mintReady(['mint', 'm1', 's1', 'student', 'view'], ['MATERIAL_PDF_MINT_PER_MINUTE' => '0']);
 check('rate limit: 0 disables the limiter (operator escape hatch)', isset(jsonOf($r[1])['url']));
 $pdo->exec("DELETE FROM rate_limits");
 
@@ -1147,6 +1310,10 @@ check('cleanup: the grace window protects recently written files', is_file($orph
 $r = runChild(['cleanup'], ['PDF_WATERMARK_CLEANUP_GRACE_SECONDS' => '1']);
 check('cleanup: the dry run reports work without deleting anything', is_file($orphan) && str_contains($r[1], 'DRY RUN'), substr($r[1], 0, 200));
 $r = runChild(['cleanup', '--apply'], ['PDF_WATERMARK_CLEANUP_GRACE_SECONDS' => '1']);
+// The child process deletes the file, but THIS process already stat()ed it
+// (the grace-window and dry-run checks above), so PHP's stat cache would still
+// answer "exists" and the assertion would fail on a clean delete.
+clearstatcache(true, $orphan);
 check('cleanup: --apply removes the orphaned file', !is_file($orphan), substr($r[1], -300));
 check('cleanup: --apply removes a registry row whose file is gone',
     (int) $pdo->query("SELECT COUNT(*) FROM lesson_material_pdfs WHERE id='row-missing'")->fetchColumn() === 0);

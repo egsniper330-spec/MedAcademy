@@ -295,3 +295,36 @@ export async function syncVideoLibraryWithVdoCipher(
   if (error) throw error;
   return (data ?? { status: 'error', error: 'No response' }) as VideoLibrarySyncSummary;
 }
+
+// ── Explicit VdoCipher import ────────────────────────────────────────────────
+// POST /video/import: attach an EXISTING VdoCipher asset to the caller's
+// library. The library sync NEVER does this — one VdoCipher account serves the
+// whole platform, so auto-importing unknown remote assets would hand a doctor
+// another doctor's videos.
+//
+// Safety contract enforced server-side:
+//   • an id that already belongs to the CALLER is an idempotent success;
+//   • an id whose local record belongs to ANOTHER doctor is refused (409) —
+//     a video id alone is not proof of ownership;
+//   • the remote asset must exist in the complete listing and be READY;
+//   • `confirmOwnership` is required, and the response says
+//     `ownership_verified: false` because VdoCipher exposes no per-doctor
+//     ownership signal for an asset with no local row.
+export interface VideoImportResult {
+  status: 'imported' | 'already_imported';
+  imported: boolean;
+  asset: { id: string; provider_video_id: string; title: string; status: string };
+  ownership_verified: boolean;
+}
+
+export async function importVdoCipherVideo(
+  videoId: string,
+  confirmOwnership: boolean,
+): Promise<VideoImportResult> {
+  const { data, error } = await backendClient.functions.invoke('video-import', {
+    body: { video_id: videoId.trim(), confirm_ownership: confirmOwnership },
+    method: 'POST',
+  });
+  if (error) throw error;
+  return data as VideoImportResult;
+}

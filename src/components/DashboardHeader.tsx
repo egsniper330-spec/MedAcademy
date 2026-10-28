@@ -77,8 +77,8 @@ export function DashboardHeader({
       paddingBottom: spacing.md,
       // Explicit physical padding: `paddingStart` would resolve against the
       // forced ltr above, not against the app locale.
-      paddingLeft: isRTL ? rightPad : leftPad + spacing.sm,
-      paddingRight: isRTL ? leftPad + spacing.sm : rightPad,
+      paddingLeft: isRTL ? leftPad : leftPad + spacing.sm,
+      paddingRight: isRTL ? rightPad + spacing.sm : rightPad,
     }}>
       {/* Transparent visual treatment; the 40dp control plus hit slop remains tappable. */}
       <HamburgerButton plain color={c.text} />
@@ -172,6 +172,10 @@ export function DashboardHeader({
       {!!rightActions && (
         <View style={{
           flexDirection: isRTL ? 'row-reverse' : 'row',
+          // Pinned for the same reason as the outer row (Yoga flips row/row-
+          // reverse under I18nManager RTL). It would inherit the parent's ltr,
+          // but an explicit pin cannot be lost to a later refactor.
+          direction: 'ltr',
           gap: spacing.sm,
           alignItems: 'center',
           marginLeft: isRTL ? spacing.sm : 0,

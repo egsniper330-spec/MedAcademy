@@ -1,0 +1,74 @@
+-- ============================================================================
+-- 037_perf_query_indexes.sql
+--
+-- Two query-shape indexes found during the 2026-10-26 production-readiness
+-- audit. PREPARED, NOT APPLIED — this file has not been run against the live
+-- database and must not be until the deployment window is agreed.
+--
+-- WHAT IT ADDS
+--   1. notifications (user_id, created_at)
+--      NotificationController::index runs, on every app open:
+--          SELECT ... FROM notifications WHERE user_id = ?
+--          ORDER BY created_at DESC LIMIT 100
+--      Today the optimizer uses idx_notifications_user_id (ref on user_id),
+--      then sorts the result in a filesort. The composite index supplies the
+--      ORDER BY, so the filesort disappears and no extra row reads are needed
+--      once a user has more than 100 notifications.
+--
+--      Measured locally (MariaDB 11.4.5, 50,020 notification rows, target user
+--      with 20 rows, `SET profiling=1`, three runs each):
+--          before: 3.67 ms / 0.66 ms / 1.35 ms   (filesort)
+--          after:  1.78 ms / 0.57 ms / 0.61 ms   (no filesort)
+--      The absolute gain is small at this data volume and grows with the row
+--      count; the important part is that the sort work is removed.
+--
+--   2. courses (status, created_at)
+--      CourseController::index filters on status for the student catalogue and
+--      ends with ORDER BY c.created_at DESC LIMIT 200. `idx_courses_status`
+--      exists (single column) but cannot supply the ordering.
+--
+--      NOTE: for a student the WHERE clause is
+--          c.status = 'published' OR EXISTS (SELECT 1 FROM enrollments ...)
+--      An OR across two tables cannot use a single index for the whole
+--      predicate; the index helps the published branch only. A rewrite to
+--      UNION (published ∪ enrolled) would be needed for a full index scan and
+--      is deliberately NOT done here — it changes the endpoint's SQL and needs
+--      its own review. Locally the optimizer still chooses a 12-row table
+--      scan, which is correct at that size.
+--
+-- WHAT IT DOES NOT DO
+--   • No column is added, altered or dropped; no row is touched.
+--   • It does not add an index on `lessons(status)`, `profiles(status)` etc.
+--     Those are low-cardinality flags; an index on them adds write cost on
+--     every insert/update without helping a selective query.
+--
+-- IDEMPOTENCY
+--   MySQL 8 has no `CREATE INDEX IF NOT EXISTS`. Running this file twice fails
+--   with #1061 "Duplicate key name". That is harmless and means "already
+--   applied". MariaDB users can add IF NOT EXISTS.
+--
+-- HOW TO APPLY (when approved)
+--   phpMyAdmin → select the database → Import → this file, in a low-traffic
+--   window. Both statements are online DDL in MySQL 8 InnoDB (INSTANT/INPLACE
+--   for a secondary index), but on a large `notifications` table expect a
+--   short period of extra I/O.
+--
+-- ROLLBACK
+--   ALTER TABLE `notifications` DROP INDEX `idx_notifications_user_created`;
+--   ALTER TABLE `courses`       DROP INDEX `idx_courses_status_created`;
+--   Dropping an index never loses data.
+-- ============================================================================
+
+-- 1. Notifications: supply the ORDER BY, drop the filesort.
+ALTER TABLE `notifications`
+  ADD INDEX `idx_notifications_user_created` (`user_id`, `created_at`);
+
+-- 2. Courses: help the published-branch filter and its ordering.
+ALTER TABLE `courses`
+  ADD INDEX `idx_courses_status_created` (`status`, `created_at`);
+
+-- NOTE: `idx_notifications_user_id` (user_id) becomes redundant once the
+-- composite above exists — its prefix is identical. It is left in place on
+-- purpose: dropping it is a separate, equally optional change and this file
+-- stays additive. If you do drop it later, use:
+--   ALTER TABLE `notifications` DROP INDEX `idx_notifications_user_id`;

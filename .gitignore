@@ -107,3 +107,15 @@ backend/deploy-package/*/vendor-pdf-engine.zip
 # the server (private), never in git.
 backend/storage/private/lesson-materials/
 backend/storage/private/lesson-material-pdfs/
+
+# ── Load-test secrets and results ──────────────────────────────────────────
+# Pre-issued load-test access tokens and per-run result files are credentials /
+# machine artefacts: they belong to the person running the test, never to git.
+scripts/loadtest/.tokens.json
+scripts/loadtest/results/
+.freebuff/loadtest-results/
+
+# Runtime artifacts (never committed)
+backend/storage/logs/
+backend/storage/private/.watermark-locks/
+backend/storage/private/.watermark-worker.lock*

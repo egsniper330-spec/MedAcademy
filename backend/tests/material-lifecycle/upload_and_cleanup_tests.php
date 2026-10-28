@@ -486,6 +486,67 @@ $retry = $cleanup->retryPending();
 check('C5.2 the retry reclaims the file', !is_file($queuedAbs));
 check('C5.3 nothing is left pending for that path', (int) $retry['remaining'] === 0, (string) $retry['remaining']);
 
+// ── D1–D6: discard an upload that never became a row ────────────────────────
+section('DISCARD UNREFERENCED UPLOAD (StorageController::discardUpload)');
+
+// The lesson editor reclaims the just-uploaded object when the material insert is
+// refused with a DEFINITIVE 4xx. This route must (a) delete only unreferenced
+// bytes, (b) refuse a path a material still references, and (c) be scoped to the
+// caller's own course. The generic /storage/delete is deliberately permissive, so
+// the guard has to live here.
+$OTHER_DOCTOR = '22222222-2222-4222-8222-222222222222';
+$OTHER_COURSE = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
+$OTHER_LESSON = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd';
+$pdo = connectDb();
+$pdo->exec("INSERT INTO courses (id, doctor_id) VALUES ('" . $OTHER_COURSE . "', '" . $OTHER_DOCTOR . "')");
+$pdo->exec("INSERT INTO lessons (id, course_id) VALUES ('" . $OTHER_LESSON . "', '" . $OTHER_COURSE . "')");
+
+/** Drive one POST /storage/discard-upload (JSON body injected: CLI has no php://input). */
+$runDiscard = function (string $bucket, string $path, string $role = 'doctor', string $userId = DOCTOR_ID) {
+    $_SERVER['REQUEST_METHOD'] = 'POST';
+    $_SERVER['REQUEST_URI'] = '/storage/discard-upload';
+    $_SERVER['CONTENT_LENGTH'] = '64';
+    $_SERVER['REMOTE_ADDR'] = '127.0.0.1';
+    $_POST = [];
+    $_FILES = [];
+    $request = Request::capture();
+    (new ReflectionProperty(Request::class, 'body'))->setValue($request, ['bucket' => $bucket, 'path' => $path]);
+    $request->user = ['id' => $userId, 'role' => $role];
+    return (new StorageController())->discardUpload($request);
+};
+
+// D1: unreferenced bytes are reclaimed.
+$orphanRel = COURSE_ID . '/' . LESSON_ID . '/orphan.pdf';
+$orphanAbs = objectPath($storage, 'lesson-materials', $orphanRel);
+@file_put_contents($orphanAbs, str_repeat('O', 2048));
+$response = $runDiscard('lesson-materials', $orphanRel);
+check('D1.1 an unreferenced upload is discarded', ($response['discarded'] ?? false) === true && !is_file($orphanAbs));
+
+// D2: a path a material still references is REFUSED and kept.
+$liveRel = COURSE_ID . '/' . LESSON_ID . '/live.pdf';
+$liveAbs = objectPath($storage, 'lesson-materials', $liveRel);
+@file_put_contents($liveAbs, str_repeat('L', 1024));
+$pdo->exec("INSERT INTO lesson_materials (id, lesson_id, course_id, storage_path) VALUES ('mat-live', '" . LESSON_ID . "', '" . COURSE_ID . "', '" . $liveRel . "')");
+$code = expectCode(fn () => $runDiscard('lesson-materials', $liveRel));
+check('D2.1 a referenced object is refused with object_referenced', $code === 'object_referenced', (string) $code);
+check('D2.2 the referenced object still exists', is_file($liveAbs));
+
+// D3: one doctor cannot discard another doctor's object.
+$foreignRel = $OTHER_COURSE . '/' . $OTHER_LESSON . '/theirs.pdf';
+$foreignAbs = objectPath($storage, 'lesson-materials', $foreignRel);
+@file_put_contents($foreignAbs, str_repeat('T', 1024));
+$code = expectCode(fn () => $runDiscard('lesson-materials', $foreignRel));
+check('D3.1 another doctor\'s path is refused with discard_forbidden', $code === 'discard_forbidden', (string) $code);
+check('D3.2 the other doctor\'s object is kept', is_file($foreignAbs));
+
+// D4/D5: only the attachment bucket, only a non-empty normalised path.
+check('D4 another bucket is refused', expectCode(fn () => $runDiscard('user-avatars', 'x/y.png')) === 'discard_invalid');
+check('D5 an empty path is refused', expectCode(fn () => $runDiscard('lesson-materials', '')) === 'discard_invalid');
+
+// D6: idempotent — a missing object is a no-op, not an error.
+$response = $runDiscard('lesson-materials', COURSE_ID . '/' . LESSON_ID . '/never-existed.pdf');
+check('D6 a missing object is a no-op', ($response['discarded'] ?? true) === false);
+
 // ── Summary ─────────────────────────────────────────────────────────────────
 echo "\n" . str_repeat('-', 60) . "\n";
 echo "{$PASSES} passed, {$FAILS} failed, {$SKIPS} skipped\n";

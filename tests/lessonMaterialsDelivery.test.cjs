@@ -172,9 +172,25 @@ console.log('── Signed-URL authorisation: suspension, publication, per-mater
 console.log('── Upload policy: size cap and blocked types, server + client in sync ──');
 {
   const ctl = read(STORE);
+  // The cap is defined ONCE (UploadIntegrityService, 100 MB default) and clamped
+  // to what the host accepts. StorageController delegates to it, so the number
+  // the picker advertises and the number the server enforces cannot drift — an
+  // earlier duplicate literal here claimed 100 MB on hosts that accept far less.
+  const integritySrc = read('backend/src/Services/UploadIntegrityService.php');
   ok(/private const BLOCKED_UPLOAD_EXTENSIONS/.test(ctl), 'StorageController: blocked-extension denylist exists');
-  ok(/LESSON_MATERIAL_MAX_BYTES', 100 \* 1024 \* 1024\)/.test(ctl),
-    'StorageController: 100 MB cap matches the advertised limit');
+  ok(/LESSON_MATERIAL_MAX_BYTES', 100 \* 1024 \* 1024\)/.test(integritySrc),
+    'UploadIntegrityService: 100 MB configured cap matches the advertised limit');
+  ok(/\$this->integrity->maxBytes\(\)/.test(ctl),
+    'StorageController: the policy enforces the single host-aware cap');
+  const ctlCode = ctl
+    .split('\n')
+    .filter((line) => {
+      const t = line.trim();
+      return !(t.startsWith('*') || t.startsWith('//') || t.startsWith('/*'));
+    })
+    .join('\n');
+  ok(!/LESSON_MATERIAL_MAX_BYTES/.test(ctlCode),
+    'StorageController: no second cap literal that could drift from the service');
   ok(/413/.test(ctl) && /415/.test(ctl),
     'StorageController: oversized (413) and blocked-type (415) uploads are rejected');
   ok(/in_array\(\$bucket, \['lesson-materials', 'lesson-pdfs'\], true\)/.test(ctl),
@@ -238,7 +254,10 @@ console.log('── Student lesson screen: materials section + per-material poli
   // signed storage URL.
   ok(/onOpenMaterial\(mat, name, downloadable\)/.test(s),
     'student screen: the item action forwards its own access level');
-  ok(/getMaterialPdfUrl\(String\(material\.id\), forDownload\)/.test(s),
+  // The screen resolves a READY personalized URL through the bounded wait/queue
+  // helper, which mints via getMaterialPdfUrl with the material id + intent.
+  ok(/waitForPersonalizedPdf\(String\(material\.id\)/.test(s) &&
+     /getMaterialPdfUrl\(materialId, forDownload/.test(s),
     'student screen: PDFs are delivered through the personalized endpoint');
   ok(/getMaterialSignedUrl\(String\(path\), forDownload\)/.test(s),
     'student screen: non-PDF attachments keep the signed-URL flow');
@@ -262,10 +281,18 @@ console.log('── Student lesson screen: materials section + per-material poli
     && /headers\['Authorization'\] = `Bearer \$\{token\}`/.test(phpClient)
     && !/headers\[['\"]Content-Type['\"]\]\s*=/.test(phpClient),
     'multipart upload keeps bearer auth and lets fetch generate the boundary');
-  ok(/status: res\.status/.test(phpClient)
-    && /Upload failed \(HTTP \$\{res\.status\}\)/.test(phpClient)
-    && /res\.status === 413/.test(phpClient),
-    'upload errors retain HTTP status and actionable size response (including non-JSON proxies)');
+  // The upload now has TWO transports behind ONE contract: fetch (no progress)
+  // and XMLHttpRequest (byte progress + cancel). Both normalise to a `status`
+  // local, so the pin is on the shared error path rather than on `res`.
+  ok(/status = res\.status/.test(phpClient)
+    && /status === 413/.test(phpClient)
+    && /Upload failed \(HTTP \$\{status\}\)/.test(phpClient)
+    // The error object is built as a multi-line literal now, so status, the
+    // server's stable code and the operation id are each pinned where they are
+    // set — a reformat must not be able to silently drop one of them.
+    && /status,\r?\n\s*code: data\?\.error\?\.code/.test(phpClient)
+    && /op: typeof data\?\.error\?\.op === 'string'/.test(phpClient),
+    'upload errors retain HTTP status, the server code and the operation id (including non-JSON proxies)');
   ok(/postBodyExceededLimit\(\)/.test(request)
     && /CONTENT_LENGTH/.test(request)
     && /ini_get\('post_max_size'\)/.test(request),

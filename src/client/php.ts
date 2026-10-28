@@ -16,7 +16,8 @@ import { getInstalledBuildNumber } from '@/lib/appIdentity';
 import { Platform as RNPlatform } from 'react-native';
 import { setMaintenanceControlFlowActive, isMaintenanceControlFlowActive } from '@/lib/maintenanceStateModel';
 import { classifyAuthHttpStatus, shouldClearSession } from '@/lib/authFailureModel';
-import { toUploadPart } from '@/lib/uploadPart';
+import { resolveUploadPart } from '@/lib/uploadPart';
+import { uploadWithProgress, type UploadCancelSignal } from '@/lib/uploadTransport';
 import {
   isSecurityLocked,
   registerProtectedAbort,
@@ -1054,7 +1055,38 @@ const authMethods = {
 
 function createStorageBucket(bucket: string) {
   return {
-    upload: async (path: string, file: Blob | ArrayBuffer | { uri: string; mimeType?: string; name?: string }, opts?: { contentType?: string; upsert?: boolean; cacheControl?: string; metadata?: Record<string, unknown> }) => {
+    upload: async (path: string, file: Blob | ArrayBuffer | { uri: string; mimeType?: string; name?: string }, opts?: {
+      contentType?: string;
+      upsert?: boolean;
+      cacheControl?: string;
+      metadata?: Record<string, unknown>;
+      /** Byte-level transfer progress. Passing it switches to XHR (fetch has no upload progress). */
+      onProgress?: (progress: { bytesSent: number; totalBytes: number }) => void;
+      /** Cancels this transfer only. */
+      signal?: UploadCancelSignal | null;
+      /** 0 = no artificial limit (server/proxy decide). */
+      uploadTimeoutMs?: number;
+      /**
+       * The byte count reported for the SELECTED file, sent as `declared_size`.
+       *
+       * The server cannot derive this from `$_FILES['size']` (PHP fills that
+       * from the bytes it received, so it always matches itself). Sending the
+       * selected file's number is what lets the server refuse a body that does
+       * not belong to that document. Omitted when unknown.
+       */
+      declaredSize?: number;
+      /**
+       * HOW that number was obtained, sent as `declared_size_source`:
+       * `stat` = measured from the file (authoritative), `picker` = provider
+       * metadata (a hint), `none` = unknown.
+       *
+       * This distinction is the fix for the two production refusals where the
+       * provider's metadata was simply wrong (679 bytes for a ~140 KB PDF, and
+       * a <200 KB pick logged as 9.5 MB): only a MEASURED divergence proves the
+       * request carried the wrong file.
+       */
+      declaredSizeSource?: 'stat' | 'picker' | 'none';
+    }) => {
       const formData = new FormData();
       // React Native cannot create Blobs from ArrayBuffer/ArrayBufferView
       // (BlobManager.createFromParts throws, and on iOS the invalid part
@@ -1063,8 +1095,13 @@ function createStorageBucket(bucket: string) {
       // networking layer streams from disk. toUploadPart() picks the correct
       // representation per platform and rejects forbidden conversions
       // loudly instead of producing the runtime error.
-      const part = toUploadPart(file, RNPlatform.OS);
-      if (part.kind === 'error') return { error: { message: part.message }, data: null };
+      // resolveUploadPart, not toUploadPart: on WEB the `{ uri }` descriptor is
+      // not a FormData value (the spec stringifies it to "[object Object]"), so
+      // the bytes are fetched from the picker's blob: URL and appended as a real
+      // File. On native it still returns the descriptor, where the networking
+      // layer streams the file from disk — unchanged.
+      const part = await resolveUploadPart(file, RNPlatform.OS);
+      if (part.kind === 'error') return { error: { message: part.message, code: 'upload_part_unreadable' }, data: null };
       if (part.kind === 'descriptor') {
         formData.append('file', {
           uri: part.value.uri,
@@ -1077,6 +1114,14 @@ function createStorageBucket(bucket: string) {
       formData.append('bucket', bucket);
       formData.append('path', path);
       if (opts?.contentType) formData.append('content_type', opts.contentType);
+      const declaredSize = Number(opts?.declaredSize ?? 0);
+      if (Number.isFinite(declaredSize) && declaredSize > 0) {
+        formData.append('declared_size', String(Math.trunc(declaredSize)));
+        const source = opts?.declaredSizeSource;
+        if (source === 'stat' || source === 'picker') {
+          formData.append('declared_size_source', source);
+        }
+      }
       const token = getToken();
       const headers: Record<string, string> = {};
       if (token) headers['Authorization'] = `Bearer ${token}`;
@@ -1087,21 +1132,54 @@ function createStorageBucket(bucket: string) {
         return { error: { message: 'Upload blocked by the active security lock (your device is being verified).', code: 'SECURITY_LOCK', status: 0 }, data: null };
       }
       try {
-        const res = await globalThis.fetch(`${API_BASE}/storage/upload`, {
-          method: 'POST', headers, body: formData,
-        });
-        const text = await res.text();
+        // TWO TRANSPORTS, ONE CONTRACT.
+        // A progress callback needs byte-level events, which fetch() does not
+        // expose, so that path uses XMLHttpRequest (see uploadTransport.ts).
+        // Everything after the response — auth already sent, body parsing, the
+        // status/zero-byte checks — is shared, so the two paths cannot drift.
+        let status: number;
+        let text: string;
+        if (typeof opts?.onProgress === 'function') {
+          const res = await uploadWithProgress({
+            url: `${API_BASE}/storage/upload`,
+            formData,
+            headers,
+            onProgress: opts.onProgress,
+            signal: opts?.signal ?? null,
+            timeoutMs: opts?.uploadTimeoutMs ?? 0,
+          });
+          status = res.status;
+          text = res.bodyText;
+        } else {
+          const res = await globalThis.fetch(`${API_BASE}/storage/upload`, {
+            method: 'POST', headers, body: formData,
+          });
+          status = res.status;
+          text = await res.text();
+        }
         let data: any = null;
         try { data = text ? JSON.parse(text) : null; } catch { /* proxy/PHP failures may return HTML */ }
-        if (!res.ok) {
+        if (!(status >= 200 && status < 300)) {
           const detail = typeof data?.error === 'object' ? data.error?.message : data?.error;
-          const message = detail ?? data?.message ?? (res.status === 413
+          const message = detail ?? data?.message ?? (status === 413
             ? 'Upload is too large for the server request limit. Choose a smaller file or contact support.'
-            : `Upload failed (HTTP ${res.status}). Please try again or contact support.`);
-          return { error: { message, status: res.status, code: data?.error?.code ?? data?.code }, data: null };
+            : `Upload failed (HTTP ${status}). Please try again or contact support.`);
+          // `op` is the server-side operation id (UploadRefusedException →
+          // ErrorHandler meta). It is the ONLY way to point at one attempt in a
+          // busy log, so it is carried on the error and shown to the doctor
+          // instead of being discarded with the response body.
+          return {
+            error: {
+              message,
+              status,
+              code: data?.error?.code ?? data?.code,
+              op: typeof data?.error?.op === 'string' ? data.error.op : undefined,
+            },
+            data: null,
+          };
         }
         if (!data) {
-          return { error: { message: 'The server returned an invalid upload response. Please contact support.', status: res.status }, data: null };
+          return { error: { message: 'The server returned an invalid upload response. Please contact support.', status }, data: null };
         }
         // The server measures what it actually persisted. Callers MUST treat a
         // missing/zero `size` as a failed upload — that is exactly the condition
@@ -1109,21 +1187,36 @@ function createStorageBucket(bucket: string) {
         const size = Number(data.size ?? 0);
         if (!(size > 0)) {
           return {
-            error: { message: 'The file did not arrive completely (0 bytes stored). Please try again.', code: 'upload_empty', status: res.status },
+            error: { message: 'The file did not arrive completely (0 bytes stored). Please try again.', code: 'upload_empty', status },
             data: null,
           };
         }
         return {
-          error: null as { message: string; code?: string } | null,
+          error: null as { message: string; code?: string; op?: string } | null,
           data: {
             path: String(data.path ?? path),
             url: typeof data.url === 'string' ? data.url : null,
             size,
             sha256: String(data.sha256 ?? ''),
+            // Correlation id for the upload that stored THESE bytes; callers keep
+            // it on a size-mismatch error so the stored object can be traced.
+            op: typeof data.op === 'string' ? data.op : '',
           },
         };
       } catch (e: unknown) {
-        return { error: { message: e instanceof Error ? e.message : String(e), status: 0 }, data: null };
+        // Preserve the transport failure's identity: an abort must be
+        // distinguishable from a dropped connection, otherwise the UI cannot
+        // say "cancelled" instead of showing an error for the user's own action.
+        const err = e as { name?: string; code?: string; status?: number; message?: string };
+        const cancelled = err?.name === 'AbortError';
+        return {
+          error: {
+            message: err?.message ?? String(e),
+            status: Number(err?.status ?? 0),
+            code: cancelled ? 'ABORT_ERR' : err?.code,
+          },
+          data: null,
+        };
       }
     },
     getPublicUrl: (path: string) => {
@@ -1181,6 +1274,9 @@ const EDGE_FUNCTION_MAP: Record<string, string> = {
   // token that names the material + student + intent; it is the ONLY way a
   // student can obtain a lesson PDF (/storage/signed-url refuses those).
   'materials/pdf-url':      '/materials/pdf-url',
+  // Read-only "is my personalized copy ready?" — GET with material_id as a
+  // query parameter, so bounded polling never mints a token or starts a render.
+  'materials/pdf-status':   '/materials/pdf-status',
   'impersonate':            '/auth/impersonate',
   'impersonation-end':      '/auth/impersonation/end',
   'process-violation':      '/security/violations',
@@ -1198,6 +1294,9 @@ const EDGE_FUNCTION_MAP: Record<string, string> = {
   'system-diagnostics-one': '/admin/system/diagnostics/{id}',
   'get-maintenance-status': '/maintenance',
   'set-maintenance-mode':   '/admin/maintenance',
+  // Explicit import of an EXISTING VdoCipher video. Never used by the library
+  // sync, which reconciles local rows only and imports nothing on its own.
+  'video-import':           '/video/import',
   'vdocipher-otp':          '/video/otp',
   'vdocipher-offline-authorize': '/video/offline-authorize',
   'verify-app-integrity':   '/integrity/app',

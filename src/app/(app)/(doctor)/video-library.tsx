@@ -18,7 +18,7 @@ import {
 import { Image } from 'expo-image';
 import { useFocusEffect } from 'expo-router';
 import {
-  BookOpen, ChevronDown, ChevronUp, Clock, CloudOff, Edit2, Film, RefreshCw,
+  BookOpen, Check, ChevronDown, ChevronUp, Clock, CloudOff, Edit2, Film, RefreshCw,
   Search, SortAsc, SortDesc, Trash2, X, Upload,
 } from 'lucide-react-native';
 import { neuColors, useLayout, neuFlatStyle, neuPressedStyle, safeBottom, zIndex, mutedTextStyle } from '@/lib/neu';
@@ -40,6 +40,7 @@ import { resolveUploadMime, validateVideoFile } from '@/lib/videoFormats';
 import {
   deleteVideoAsset, getMyVideoLibrary, getVideoAssetUsage,
   syncVideoLibraryWithVdoCipher,
+  importVdoCipherVideo,
   updateVideoAsset,
   type LibraryFilters, type VideoAsset, type VideoAssetUsage,
 } from '@/lib/videoLibraryApi';
@@ -146,6 +147,11 @@ export default function VideoLibraryScreen() {
   // (scope='mine', enforced server-side) — both roles get the Sync control.
   const isStaff = profile?.role === 'super_admin' || profile?.role === 'admin';
   const canSync = !!profile && (isStaff || profile.role === 'doctor');
+  // ── Explicit import (NOT sync: sync never imports unknown remote assets) ──
+  const [importOpen, setImportOpen] = useState(false);
+  const [importId, setImportId] = useState('');
+  const [importConfirmed, setImportConfirmed] = useState(false);
+  const [importBusy, setImportBusy] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [syncSummary, setSyncSummary] = useState<string | null>(null);
   const [syncFailed, setSyncFailed] = useState(false);
@@ -370,6 +376,33 @@ export default function VideoLibraryScreen() {
     setSyncing(false);
   };
 
+  /**
+   * Import an EXISTING VdoCipher video the doctor already owns.
+   *
+   * Deliberately separate from Sync: the server refuses an id that is linked to
+   * another doctor, requires a READY asset, and only binds the local row to the
+   * AUTHENTICATED caller — no owner id is ever sent from here.
+   */
+  const handleImport = async () => {
+    const id = importId.trim();
+    if (!id || !importConfirmed || importBusy) return;
+    setImportBusy(true);
+    try {
+      const result = await importVdoCipherVideo(id, true);
+      showToast({
+        type: 'success',
+        message: result.imported ? t('videoLibrary.importOk') : t('videoLibrary.importExists'),
+      });
+      setImportOpen(false);
+      setImportId('');
+      setImportConfirmed(false);
+      await load();
+    } catch (e) {
+      showToast({ type: 'error', message: friendlyError(e, t('videoLibrary.importFailed')) });
+    }
+    setImportBusy(false);
+  };
+
   const handleRename = async () => {
     if (!renameAsset || !renameTitle.trim()) return;
     setRenameSaving(true);
@@ -588,6 +621,110 @@ export default function VideoLibraryScreen() {
         </View>
       </Modal>
 
+      {/* ── Explicit import dialog (a video ID alone is not proof of ownership) ── */}
+      <Modal
+        visible={importOpen}
+        transparent
+        animationType="fade"
+        onRequestClose={() => { if (!importBusy) setImportOpen(false); }}
+      >
+        <KeyboardAvoidingView
+          behavior={process.env.EXPO_OS === 'ios' ? 'padding' : undefined}
+          style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', alignItems: 'center', justifyContent: 'center', padding: 20 }}
+        >
+          <View style={[neuFlatStyle(isDark), { width: '100%', maxWidth: 460, borderRadius: 20, padding: 20, gap: 12 }]}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+              <Film size={18} color={c.primary} />
+              <Text style={{ flex: 1, fontSize: 16, fontWeight: '800', color: c.text }}>
+                {t('videoLibrary.importTitle')}
+              </Text>
+              <Pressable
+                onPress={() => { if (!importBusy) setImportOpen(false); }}
+                accessibilityRole="button"
+                accessibilityLabel={t('common.cancel')}
+                hitSlop={8}
+              >
+                <X size={18} color={c.text} opacity={0.55} />
+              </Pressable>
+            </View>
+
+            <Text style={{ fontSize: 12.5, ...mutedTextStyle(c, 0.6), lineHeight: 18 }}>
+              {t('videoLibrary.importBody')}
+            </Text>
+
+            <Text style={{ fontSize: 12, fontWeight: '700', color: c.text }}>
+              {t('videoLibrary.importIdLabel')}
+            </Text>
+            <TextInput
+              value={importId}
+              onChangeText={setImportId}
+              autoCapitalize="none"
+              autoCorrect={false}
+              editable={!importBusy}
+              placeholder="e.g. 8f2c1d4e5b6a7c8d9e0f1a2b3c4d5e6f"
+              placeholderTextColor={`${c.text}45`}
+              style={[neuPressedStyle(isDark), {
+                borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12,
+                fontSize: 14, color: c.text,
+              }]}
+            />
+
+            <Pressable
+              onPress={() => setImportConfirmed(v => !v)}
+              disabled={importBusy}
+              accessibilityRole="checkbox"
+              accessibilityState={{ checked: importConfirmed, disabled: importBusy }}
+              style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}
+            >
+              <View style={{
+                width: 20, height: 20, borderRadius: 6,
+                borderWidth: 2, borderColor: importConfirmed ? c.primary : `${c.text}35`,
+                backgroundColor: importConfirmed ? c.primary : 'transparent',
+                alignItems: 'center', justifyContent: 'center',
+              }}>
+                {importConfirmed && <Check size={13} color={c.base} />}
+              </View>
+              <Text style={{ flex: 1, fontSize: 12.5, color: c.text }}>
+                {t('videoLibrary.importConfirm')}
+              </Text>
+            </Pressable>
+
+            <Text style={{ fontSize: 11.5, ...mutedTextStyle(c, 0.5), lineHeight: 17 }}>
+              {t('videoLibrary.importOwnershipNote')}
+            </Text>
+
+            <View style={{ flexDirection: 'row', gap: 12 }}>
+              <Pressable
+                onPress={() => { if (!importBusy) setImportOpen(false); }}
+                disabled={importBusy}
+                style={[neuFlatStyle(isDark), { flex: 1, padding: 13, borderRadius: 14, alignItems: 'center' }]}
+              >
+                <Text style={{ fontSize: 14, fontWeight: '700', ...mutedTextStyle(c, 0.65) }}>
+                  {t('common.cancel')}
+                </Text>
+              </Pressable>
+              <Pressable
+                onPress={handleImport}
+                disabled={importBusy || !importId.trim() || !importConfirmed}
+                accessibilityRole="button"
+                accessibilityLabel={t('videoLibrary.importCta')}
+                accessibilityState={{ disabled: importBusy || !importId.trim() || !importConfirmed, busy: importBusy }}
+                style={{
+                  flex: 1, padding: 13, borderRadius: 14, alignItems: 'center', justifyContent: 'center',
+                  flexDirection: 'row', gap: 8, backgroundColor: c.primary,
+                  opacity: importBusy || !importId.trim() || !importConfirmed ? 0.5 : 1,
+                }}
+              >
+                {importBusy && <ActivityIndicator size="small" color={c.base} />}
+                <Text style={{ fontSize: 14, fontWeight: '800', color: c.base }}>
+                  {t('videoLibrary.importCta')}
+                </Text>
+              </Pressable>
+            </View>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
+
       {/* Content column — capped on tablets/desktop so the action row, search
           and filter chips never stretch into unusable full-width bars. */}
       <View style={{ flex: 1, width: '100%', maxWidth: 960, alignSelf: 'center' }}>
@@ -663,6 +800,27 @@ export default function VideoLibraryScreen() {
           )}
         </View>
       )}
+      {/* ── Import an existing VdoCipher video (separate from Sync, which never
+          imports unknown remote assets). Its own compact row keeps Upload and
+          Sync as the two balanced primary controls above. ── */}
+      {canSync && (
+        <View style={{ paddingHorizontal: 16, marginBottom: 8 }}>
+          <Pressable
+            onPress={() => setImportOpen(true)}
+            accessibilityRole="button"
+            accessibilityLabel={t('videoLibrary.importAria')}
+            style={[
+              neuFlatStyle(isDark),
+              { height: 40, borderRadius: 12, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 },
+            ]}>
+            <Film size={15} color={c.primary} />
+            <Text style={{ fontSize: 13, fontWeight: '700', color: c.primary }} numberOfLines={1}>
+              {t('videoLibrary.importCta')}
+            </Text>
+          </Pressable>
+        </View>
+      )}
+
       {/* ── Live upload status strip (engine state, shown even when the queue panel is closed) ── */}
       {(activeUpload || recentFailed) && (() => {
         // `task`, not `t`: `t` is the translation function on this screen.

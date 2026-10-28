@@ -249,12 +249,19 @@ final class AuthService
             throw new ApiException(403, (string) $device['error'], 'device_blocked');
         }
 
+        // A credential-only login (no device payload) leaves $device null — the
+        // comment above requires that to be legal. Read the id through `?? null`
+        // so the common no-fingerprint case does not raise
+        // "Trying to access array offset on null" into the error log on every
+        // such request (and would 500 wherever warnings are converted).
+        $deviceId = $device['id'] ?? null;
+
         $this->recordLogin($userId, $request, true);
-        AuditService::write($userId, 'login', ['device_id' => $device['id']], $request->clientIp());
+        AuditService::write($userId, 'login', ['device_id' => $deviceId], $request->clientIp());
 
         return [
             'user' => $this->publicUser($userId),
-            'session' => $this->sessions->issue($userId, $account['role'], (int) $account['security_version'], $device['id']),
+            'session' => $this->sessions->issue($userId, $account['role'], (int) $account['security_version'], $deviceId),
             'device' => $device,
         ];
     }

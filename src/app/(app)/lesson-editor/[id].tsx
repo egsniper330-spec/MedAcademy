@@ -6,14 +6,16 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator, Animated, FlatList, KeyboardAvoidingView, Modal,
-  Pressable, ScrollView, Text, TextInput, useColorScheme, View,
+  Platform, Pressable, ScrollView, Text, TextInput, useColorScheme, View,
   useWindowDimensions,
 } from 'react-native';
+import { getInfoAsync } from 'expo-file-system/legacy';
+import { resolveDeclaredFileSize } from '@/lib/localFileSize';
 import { useFadeAnim } from '@/lib/motion';
 import { Image } from 'expo-image';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import {
-  ArrowLeft, Check, CheckCircle, ChevronDown, Clock, Download,
+  ArrowLeft, ArrowRight, Check, CheckCircle, ChevronDown, Clock, Download,
   Eye, EyeOff, FileText, Film,
   Layers, MessageCircle, Paperclip, Play, Plus, RefreshCw, Save,
   Settings, ShieldAlert, Trash2, Upload, Video, Calendar, AlertCircle, X, RotateCcw,
@@ -31,6 +33,7 @@ import {
   createLessonMaterial, deleteLessonMaterial, getLessonById,
   updateLesson, updateMaterialPermission,
   uploadLessonMaterial, replaceLessonMaterialFile,
+  discardUploadedMaterialObject,
   getLessonVideoState, getVdoCipherVideoStatus, markLessonVideoMissing,
   getMyProviderPermissions,
   type LessonBuilderPayload, type DownloadPermission, type TeacherProviderPermission,
@@ -53,6 +56,13 @@ import { validateVideoFile, resolveUploadMime } from '@/lib/videoFormats';
 import { LargeFileWarning } from '@/components/LargeFileWarning';
 import { VideoThumbnailCard } from '@/components/VideoThumbnailCard';
 import { useTranslation } from '@/lib/i18n';
+import { MaterialUploadProgress } from '@/components/MaterialUploadProgress';
+import {
+  classifyUploadFailure,
+  isServerRefusal,
+  isActiveStage,
+  type UploadProgressSnapshot,
+} from '@/lib/uploadProgress';
 
 /** Format seconds → "12m 34s" */
 function formatDuration(sec: number, locale: string): string {
@@ -167,6 +177,23 @@ export default function LessonEditor() {
     setTimeout(() => setSavedVisible(false), 1700);
   }, []);
   const [uploading, setUploading] = useState(false);
+  /**
+   * The material transfer that is visible in the Materials tab.
+   *
+   * This replaces a bare spinner: a 40 MB PDF on a slow link took minutes
+   * with no bytes, no percentage and no cancel, which is indistinguishable
+   * from a hung request. The snapshot is produced by lib/uploadProgress.ts
+   * and distinguishes uploading (bytes on the wire) from verifying/saving
+   * (server-side), so 100 % transferred is never shown as success.
+   */
+  const [materialTransfer, setMaterialTransfer] = useState<{
+    fileName: string;
+    snapshot: UploadProgressSnapshot;
+    error: string | null;
+    canRetry: boolean;
+  } | null>(null);
+  /** Aborts ONLY the in-flight material transfer the doctor started. */
+  const materialAbortRef = useRef<AbortController | null>(null);
   const [duplicateInfo, setDuplicateInfo] = useState<{ fileName: string; existingLesson?: string } | null>(null);
   const [pendingFile, setPendingFile] = useState<DocumentPicker.DocumentPickerAsset | null>(null);
   const [fileAnalysis, setFileAnalysis] = useState<FileAnalysis | null>(null);
@@ -524,6 +551,134 @@ export default function LessonEditor() {
     }
   };
 
+  // ── Material transfer (progress + cancellation) ──────────────────────────
+  /**
+   * Runs one material transfer and reports byte progress.
+   *
+   * ONE AT A TIME: a second call is ignored while a transfer is registered, so
+   * a double tap on "Upload file" cannot start two uploads for the same
+   * lesson (which used to leave a duplicate material and wasted bytes).
+   */
+  const runMaterialTransfer = async (
+    file: DocumentPicker.DocumentPickerAsset,
+    kind: 'new' | 'replace',
+    material?: any,
+  ) => {
+    if (!lesson || !profile) return;
+    if (materialAbortRef.current) return;
+    const controller = new AbortController();
+    materialAbortRef.current = controller;
+    // The byte count we declare must be a MEASUREMENT where possible: the
+    // picker's `size` is provider metadata that has reported 679 bytes for a
+    // 140 KB PDF. Stat the local file first and tell the server which number we
+    // sent (`stat` vs `picker`), so a bad hint can never refuse a real document.
+    const declared = await resolveDeclaredFileSize(
+      { uri: file.uri, pickerSize: file.size, platform: Platform.OS },
+      async (uri) => {
+        const info = await getInfoAsync(uri);
+        return info.exists && !info.isDirectory ? Number(info.size ?? 0) : 0;
+      },
+    );
+    const total = declared.size;
+    setMaterialTransfer({
+      fileName: file.name,
+      snapshot: {
+        stage: 'preparing', bytesSent: 0, totalBytes: total > 0 ? total : 0,
+        percent: null, speedBps: 0, etaSeconds: null, elapsedMs: 0,
+      },
+      error: null,
+      canRetry: false,
+    });
+    const onProgress = (snapshot: UploadProgressSnapshot) => {
+      setMaterialTransfer(prev => (prev ? { ...prev, snapshot } : prev));
+    };
+    const setStage = (stage: UploadProgressSnapshot["stage"]) => {
+      setMaterialTransfer(prev => (prev ? { ...prev, snapshot: { ...prev.snapshot, stage } } : prev));
+    };
+    try {
+      const courseId = lesson.section?.course_id ?? lesson.course_id;
+      if (kind === 'replace' && material) {
+        setReplacingId(material.id);
+        const updated = await replaceLessonMaterialFile(
+          material.id, material.storage_path,
+          courseId, lesson.id,
+          file.uri, file.name,
+          file.mimeType ?? 'application/octet-stream',
+          declared.size,
+          { onProgress, signal: controller.signal, declaredSizeSource: declared.source },
+        );
+        setMaterials(prev => prev.map(m => m.id === material.id ? updated : m));
+        showToast({ type: 'success', message: t('lessonEditor.fileReplaced') });
+      } else {
+        setUploading(true);
+        const { storagePath, publicUrl, size } = await uploadLessonMaterial(
+          courseId, lesson.id, file.uri, file.name,
+          file.mimeType ?? 'application/octet-stream',
+          declared.size,
+          { onProgress, signal: controller.signal, declaredSizeSource: declared.source },
+        );
+        // Bytes are stored; the row still has to be written.
+        setStage('saving');
+        let created;
+        try {
+          created = await createLessonMaterial({
+            lesson_id: lesson.id,
+            course_id: courseId,
+            uploaded_by: profile.id,
+            file_name: file.name,
+            file_url: publicUrl,
+            storage_path: storagePath,
+            file_type: file.mimeType ?? 'application/octet-stream',
+            file_size: size,
+            download_enabled: true,
+            preview_enabled: true,
+            order_index: materials.length,
+          });
+        } catch (e) {
+          // The row was REFUSED after the bytes were already stored. Nothing
+          // references that object, so a retry would upload it a second time and
+          // leave the first copy orphaned in private storage forever. Reclaim it
+          // only when the server definitively said no (4xx): a 5xx or a dropped
+          // connection has an UNKNOWN outcome, and deleting the bytes then could
+          // leave a material row pointing at nothing.
+          if (isServerRefusal(e as { status?: number })) {
+            void discardUploadedMaterialObject(storagePath);
+          }
+          throw e;
+        }
+        setMaterials(prev => [...prev, created]);
+        showToast({ type: 'success', message: t('lessonEditor.fileUploaded', { name: file.name }) });
+      }
+      setMaterialTransfer(prev => (prev
+        ? { ...prev, snapshot: { ...prev.snapshot, stage: 'done' as const, percent: 100 }, error: null, canRetry: false }
+        : prev));
+    } catch (e) {
+      // Distinguish the doctor's own cancel from a real failure, and map
+      // 413 / 429 / 401 / 5xx / dropped connection to actionable wording.
+      const info = classifyUploadFailure(e as { status?: number; code?: string; name?: string });
+      // Quote the server's operation id when the refusal carried one: it is the
+      // only way to point at THIS attempt in the upload log (`op` on the
+      // `storage-upload` lines) instead of describing the whole afternoon.
+      const op = String((e as { op?: string })?.op ?? '');
+      const message = info.stage === 'failed' && op !== ''
+        ? `${t(info.messageKey)}\n\n${t('lessonEditor.upload.reference', { op })}`
+        : t(info.messageKey);
+      setMaterialTransfer(prev => (prev
+        ? { ...prev, snapshot: { ...prev.snapshot, stage: info.stage }, error: message, canRetry: info.retryable }
+        : prev));
+      if (info.stage === 'failed') showToast({ type: 'error', message });
+    } finally {
+      materialAbortRef.current = null;
+      setUploading(false);
+      setReplacingId(null);
+    }
+  };
+
+  /** Cancel the registered material transfer only (never other work). */
+  const cancelMaterialTransfer = () => {
+    materialAbortRef.current?.abort();
+  };
+
   // ── Upload material
   const handleUploadMaterial = async () => {
     try {
@@ -549,34 +704,10 @@ export default function LessonEditor() {
         return;
       }
 
-      setUploading(true);
-      const courseId = lesson.section?.course_id ?? lesson.course_id;
-      // `size` is what the SERVER actually persisted (never the picker's claim).
-      const { storagePath, publicUrl, size } = await uploadLessonMaterial(
-        courseId, lesson.id, file.uri, file.name,
-        file.mimeType ?? 'application/octet-stream',
-        file.size ?? 0,
-      );
-
-      const material = await createLessonMaterial({
-        lesson_id: lesson.id,
-        course_id: courseId,
-        uploaded_by: profile.id,
-        file_name: file.name,
-        file_url: publicUrl,
-        storage_path: storagePath,
-        file_type: file.mimeType ?? 'application/octet-stream',
-        file_size: size,
-        download_enabled: true,
-        preview_enabled: true,
-        order_index: materials.length,
-      });
-      setMaterials(prev => [...prev, material]);
-      showToast({ type: 'success', message: t('lessonEditor.fileUploaded', { name: file.name }) });
+      await runMaterialTransfer(file, 'new');
     } catch (e) {
       showToast({ type: 'error', message: friendlyError(e, t('lessonEditor.uploadFailed')) });
     }
-    setUploading(false);
   };
 
   // ── Replace material file
@@ -597,21 +728,10 @@ export default function LessonEditor() {
         return;
       }
 
-      setReplacingId(material.id);
-      const courseId = lesson.section?.course_id ?? lesson.course_id;
-      const updated = await replaceLessonMaterialFile(
-        material.id, material.storage_path,
-        courseId, lesson.id,
-        file.uri, file.name,
-        file.mimeType ?? 'application/octet-stream',
-        file.size ?? 0,
-      );
-      setMaterials(prev => prev.map(m => m.id === material.id ? updated : m));
-      showToast({ type: 'success', message: t('lessonEditor.fileReplaced') });
+      await runMaterialTransfer(file, 'replace', material);
     } catch (e) {
       showToast({ type: 'error', message: friendlyError(e, t('lessonEditor.replaceFailed')) });
     }
-    setReplacingId(null);
   };
 
   const handleDeleteMaterial = async (material: any) => {
@@ -787,7 +907,14 @@ export default function LessonEditor() {
         <Pressable onPress={() => router.back()}
           hitSlop={8}
           style={[neuFlatStyle(isDark), { width: 40, height: 40, borderRadius: 12, alignItems: 'center', justifyContent: 'center' }]}>
-          {isRTL ? <ChevronDown size={20} color={c.text} opacity={0.6} style={{ transform: [{ rotate: '90deg' }] }} /> : <ArrowLeft size={20} color={c.text} opacity={0.6} />}
+          {/* Direction-aware arrow, never a rotated one: rotating an Svg icon by
+              style pushes its glyph outside the 20×20 viewport, which clips it
+              (the button then renders as an empty rounded square in Arabic).
+              Icons are not mirrored by the layout engine, so the glyph itself
+              is chosen from the app locale — same rule as the shared PageHeader. */}
+          {isRTL
+            ? <ArrowRight size={20} color={c.text} opacity={0.6} />
+            : <ArrowLeft  size={20} color={c.text} opacity={0.6} />}
         </Pressable>
         <View style={{ flex: 1 }}>
           <TextInput
@@ -1401,9 +1528,23 @@ export default function LessonEditor() {
       ══════════════════════════════════════════════════════════════════════ */}
       {tab === 'materials' && (
         <View style={{ flex: 1 }}>
+          {/* Material transfer — byte progress, stage and cancel */}
+          {materialTransfer && (
+            <View style={{ paddingHorizontal: layout.screenPx, paddingTop: 10 }}>
+              <MaterialUploadProgress
+                fileName={materialTransfer.fileName}
+                snapshot={materialTransfer.snapshot}
+                errorMessage={materialTransfer.error}
+                canRetry={materialTransfer.canRetry}
+                onCancel={cancelMaterialTransfer}
+                onDismiss={() => setMaterialTransfer(null)}
+              />
+            </View>
+          )}
+
           {/* Upload button */}
           <View style={{ paddingHorizontal: layout.screenPx, paddingVertical: 10 }}>
-            <Pressable onPress={handleUploadMaterial} disabled={uploading}
+            <Pressable onPress={handleUploadMaterial} disabled={uploading || !!materialTransfer && isActiveStage(materialTransfer.snapshot.stage)}
               style={{ backgroundColor: c.primary, padding: 14, borderRadius: 14, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, opacity: uploading ? 0.7 : 1 }}>
               {uploading ? <ActivityIndicator size="small" color="#fff" /> : <Upload size={18} color="#fff" />}
               <Text style={{ fontSize: 15, fontWeight: '700', color: '#fff' }}>
