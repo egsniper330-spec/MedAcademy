@@ -90,7 +90,7 @@ export default function SecurityCenter() {
         {/* Account Security Info */}
         <NeuCard style={{ marginBottom: 20, padding: 20 }}>
           <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 14 }}>
-            <View style={{ width: 44, height: 44, borderRadius: 14, backgroundColor: `${c.primary}18`, alignItems: 'center', justifyContent: 'center', marginRight: 12 }}>
+            <View style={{ width: 44, height: 44, borderRadius: 14, backgroundColor: `${c.primary}18`, alignItems: 'center', justifyContent: 'center', marginEnd: 12 }}>
               <Shield size={22} color={c.primary} />
             </View>
             <View>
@@ -99,7 +99,7 @@ export default function SecurityCenter() {
             </View>
           </View>
           <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: '#16A34A12', borderRadius: 10, padding: 10 }}>
-            <CheckCircle size={16} color="#16A34A" style={{ marginRight: 8 }} />
+            <CheckCircle size={16} color="#16A34A" style={{ marginEnd: 8 }} />
             <Text style={{ fontSize: 13, color: '#16A34A', fontWeight: '600' }}>{t('securityCenter.securedWith')}</Text>
           </View>
         </NeuCard>
@@ -147,7 +147,7 @@ export default function SecurityCenter() {
         {/* Change Password */}
         <NeuCard radius={22} style={{ padding: 22 }}>
           <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 20 }}>
-            <Lock size={20} color={c.primary} style={{ marginRight: 10 }} />
+            <Lock size={20} color={c.primary} style={{ marginEnd: 10 }} />
             <Text style={{ fontSize: 17, fontWeight: '800', color: c.text }}>{t('securityCenter.changePassword')}</Text>
           </View>
 
@@ -178,7 +178,7 @@ export default function SecurityCenter() {
 
           {error ? (
             <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 12 }}>
-              <AlertCircle size={14} color="#DC2626" style={{ marginRight: 6 }} />
+              <AlertCircle size={14} color="#DC2626" style={{ marginEnd: 6 }} />
               <Text style={{ color: '#DC2626', fontSize: 13 }}>{error}</Text>
             </View>
           ) : null}

@@ -559,7 +559,7 @@ export default function CourseDetail() {
                 { label: t('course.statRemaining'), value: formatStudyTime(remainingMin), color: '#D97706' },
               ].map((stat, i) => (
                 <View key={stat.label} style={{ flex: 1, alignItems: 'center', paddingVertical: 14,
-                  borderRightWidth: i < 2 ? 1 : 0, borderColor: `${c.text}10` }}>
+                  borderEndWidth: i < 2 ? 1 : 0, borderColor: `${c.text}10` }}>
                   <Text style={{ fontSize: 14, fontWeight: '800', color: stat.color }}>{stat.value}</Text>
                   <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.45), marginTop: 2 }}>{stat.label}</Text>
                 </View>

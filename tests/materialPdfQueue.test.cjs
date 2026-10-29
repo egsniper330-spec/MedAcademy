@@ -2,23 +2,20 @@
 /**
  * tests/materialPdfQueue.test.cjs
  *
- * Hybrid personalized-PDF pre-generation queue.
+ * Direct personalized-PDF delivery with retained queue maintenance.
  *
- * PHP cannot run in this suite, so this file combines:
- *   • SOURCE assertions over the real committed PHP/SQL/TS files — the
- *     durability, isolation and fail-closed invariants that must not drift, and
- *   • PURE MODELS of the decisions that are easy to get wrong (backoff, claim
- *     exclusivity, retention eligibility, client polling budget), executed here
- *     so their behaviour is tested rather than merely grepped.
+ * PHP cannot run in this suite, so this file combines source assertions over
+ * the real PHP/SQL/TS implementation with small pure models for queue-worker
+ * maintenance decisions that remain supported for backward compatibility.
  *
  * The properties under test:
  *   1. Duplicate prevention and atomic claiming.
  *   2. Bounded retries with backoff, and stale-lock recovery.
- *   3. A student request never renders inline and never gets the original.
+ *   3. A student request generates a missing personalized copy immediately.
  *   4. Re-authorization before every background render.
  *   5. Source-version invalidation.
- *   6. 90-day retention that never deletes originals or active work.
- *   7. Bounded client polling that surfaces preparing / failed honestly.
+ *   6. 24-hour retention that never deletes originals or active work.
+ *   7. Student delivery does not poll or wait on a queue.
  */
 
 const fs = require('fs');
@@ -158,7 +155,7 @@ section('3. Authorization is re-checked before every render');
     /e\.course_id = lm\.course_id/.test(queue));
 }
 
-/* ══ 4. Delivery: student never renders inline, never gets the original ═══ */
+/* ══ 4. Delivery: direct generation, never the original ═════════════════ */
 
 section('4. Delivery path');
 
@@ -166,15 +163,16 @@ section('4. Delivery path');
   const delivery = read(DELIVERY);
   const routes = read(ROUTES);
 
-  const studentBlock = delivery.slice(delivery.indexOf('STUDENT: queue it'));
-  ok('a student request queues instead of rendering',
-    /queue->prioritize\(/.test(studentBlock) && !/variants->ensure\(/.test(studentBlock));
-  ok('staff keep a bounded single inline preview render',
-    /if \(\$this->isStaff\(\$role\)\)[\s\S]*?variants->ensure\(\$material, \$userId\)/.test(delivery));
-  ok('the response reports a machine-readable status',
-    /'status' => 'ready'/.test(delivery) && /'status' => \$failed \? 'failed' : 'preparing'/.test(delivery));
-  ok('pending responses carry no url at all',
-    /'url' => null/.test(delivery));
+  ok('a student request calls the shared synchronous generation service',
+    /variants->ensure\(\$material, \$userId\)/.test(delivery));
+  ok('missing/expired copy generation is not conditional on staff role',
+    /Any authorized caller gets exactly one bounded render/.test(delivery)
+    && !/STUDENT: queue it/.test(delivery));
+  ok('the endpoint returns ready after generation and reuses cached copies',
+    /'status' => 'ready'/.test(delivery)
+    && /Fast path: a valid, current copy already exists/.test(delivery));
+  ok('the old queue remains only for compatibility/maintenance status paths',
+    /Compatibility status endpoint/.test(delivery) && /statusFor\(/.test(delivery));
   ok('there is no fallback to the unwatermarked original',
     !/lesson-materials', \(string\) \$material\['storage_path'\]\)[\s\S]{0,200}Response::file/.test(delivery));
   ok('streaming re-runs canAccess on every request',
@@ -253,12 +251,30 @@ section('7. 24-hour retention');
     /str_starts_with\(\$rel, \$prefix\)/.test(queue));
   ok('only registry rows are deleted, never lesson_materials originals',
     !/DELETE FROM `?lesson_materials`?/.test(queue));
-  ok('the sweep is a dry run unless applied', /if \(!\$apply\) \{\s*continue;/.test(queue));
+  const dryRunStart = queue.indexOf('if (!$apply) {');
+  const deleteStart = queue.indexOf('$deleted = Database::instance()->query', dryRunStart);
+  const dryRunBody = queue.slice(dryRunStart, deleteStart);
+  ok('dry-run reports planned files/bytes without incrementing deleted or mutating storage',
+    dryRunStart >= 0 && deleteStart > dryRunStart
+    && dryRunBody.includes("$stats['files'][]")
+    && dryRunBody.includes("$stats['bytes'] +=")
+    && dryRunBody.includes('return;')
+    && !dryRunBody.includes("$stats['deleted']++"));
   ok('the worker runs it behind an explicit flag', /--retention/.test(worker));
   ok('expiration is fixed from generation (no clock reset on serve)',
     /No-op: expiration is fixed|Fixed 24h retention from generation/.test(variants));
+  ok('expired variants are never selected for delivery',
+    /created_at >= \?/.test(variants) && /time\(\) - 86400/.test(variants));
   ok('retention uses created_at (generation time)',
     /WHERE p\.created_at < \?/.test(queue));
+  ok('expired variants are excluded from cache lookup',
+    /created_at >= \?/.test(variants) && /time\(\) - 86400/.test(variants));
+  ok('retention deletion uses the same variant lock as generation',
+    /withVariantLock\(/.test(queue));
+  ok('expired variants are excluded from cache lookup',
+    /created_at >= \?/.test(variants) && /time\(\) - 86400/.test(variants));
+  ok('retention takes the same per-variant lock before deleting',
+    /withVariantLock\(/.test(queue) && /LOCK_EX/.test(variants));
 }
 
 /* ══ 8. Worker is bounded and cron-safe ═══════════════════════════════════ */
@@ -290,7 +306,7 @@ section('8. CLI worker');
     /NOT configured by this change/.test(worker));
 }
 
-/* ══ 9. Client: preparing / failed states, bounded polling ════════════════ */
+/* ══ 9. Client: direct request, no queue polling ═════════════════════════ */
 
 section('9. Frontend');
 
@@ -300,46 +316,28 @@ section('9. Frontend');
   const lesson = read(LESSON);
   const i18n = read(I18N);
 
-  ok('the API type exposes all three states',
+  ok('the API compatibility types still represent legacy queued responses',
     /'ready' \| 'preparing' \| 'failed'/.test(api));
-  ok('pending responses carry retry_after and retry_allowed',
-    /retry_after: number;/.test(api) && /retry_allowed: boolean;/.test(api));
-  ok('retry is explicit, not automatic', /if \(retry\) body\.retry = true;/.test(api));
+  ok('the compatibility status endpoint remains callable outside the screen',
+    /getMaterialPdfStatus/.test(api));
   ok('a read-only status call exists and uses GET',
     /getMaterialPdfStatus/.test(api) && /materials\/pdf-status'[\s\S]{0,80}'GET'/.test(api));
   ok('the PHP client maps the status endpoint',
     /'materials\/pdf-status':\s*'\/materials\/pdf-status'/.test(client));
 
   const prep = read(PREP);
-  ok('polling is bounded', /PDF_POLL_MAX_ATTEMPTS = \d+/.test(prep) && /PDF_POLL_MAX_WAIT_MS/.test(prep));
-  // The budget has to outlast the worker's cron interval, or a healthy queued job
-  // is reported as a failure (the defect the waiting UX fixed).
-  ok('the polling budget outlasts a five-minute worker tick',
-    /PDF_POLL_MAX_WAIT_MS = 15 \* 60 \* 1_000/.test(prep));
-  ok('polling backs off and is capped',
-    /PDF_POLL_CEILING_MS = 20_000/.test(prep) && /PDF_POLL_GROWTH = 1\.6/.test(prep));
-  ok('a dismissed modal cancels the poll loop', /pdfRunRef\.current \+= 1/.test(lesson));
-  ok('the preparing state is shown, not a silent failure', /status: 'preparing'/.test(lesson));
-  ok('failed copies offer an explicit retry', /materialRetryPrepare/.test(lesson));
-  ok('a spent budget shows “still queued”, not a failure',
-    /showStillWaiting\(/.test(lesson) && /materialWaitingTitle/.test(lesson));
-  ok('the screen never falls back to the raw original on pending',
-    /if \(!ready\) return;/.test(lesson));
+  ok('lesson screen uses one direct personalized request and no queue/status poll',
+    /requestPersonalizedPdf\(/.test(lesson)
+    && !/getMaterialPdfStatus|waitForPersonalizedPdf|pollBudgetExhausted|nextPollDelay/.test(lesson));
+  ok('preparation ends in either downloaded result or explicit error',
+    /status: 'preparing'/.test(lesson) && /status: 'error'/.test(lesson));
+  ok('dismissal ignores any stale in-flight result', /pdfRunRef\.current \+= 1/.test(lesson));
+  ok('the screen never falls back to the raw original', /if \(!ready\) return;/.test(lesson));
 
-  const locales = ['lesson.materialPreparing', 'lesson.materialPreparingDesc', 'lesson.materialPrepareFailed', 'lesson.materialRetryPrepare'];
+  const locales = ['lesson.materialPrepareFailed'];
   ok('every new string exists in BOTH locales (en + ar)',
     locales.every((key) => (i18n.match(new RegExp(`'${key.replace(/\./g, '\\.')}':`, 'g')) || []).length === 2));
 
-  // Model the SHIPPED backoff (floor 5 s, ×1.6, ceiling 20 s) so a regression in
-  // the constants above is caught here as well as in the waiting-UX suite.
-  const delays = [];
-  let d = 5_000;
-  for (let i = 0; i < 4; i++) {
-    d = Math.min(20_000, Math.round(d * 1.6));
-    delays.push(d);
-  }
-  ok('client delay grows but never exceeds the cap',
-    delays.every((v) => v <= 20_000) && delays[3] > delays[0]);
 }
 
 /* ══ Report ═══════════════════════════════════════════════════════════════ */

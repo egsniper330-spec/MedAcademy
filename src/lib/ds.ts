@@ -779,11 +779,16 @@ export function useLayout() {
       headerLeft,
       headerRight,
       headerBottom: spacing.md,
+      // LOGICAL edges: `headerLeft` is the LEADING padding (the side that
+      // grows on tablets and carries the back/hamburger affordance), and
+      // `headerRight` is the TRAILING one. Using paddingStart/paddingEnd lets
+      // Yoga mirror them for Arabic — a physical paddingLeft would have kept
+      // the wider leading gutter on the left while the controls moved right.
       headerPadding: {
         paddingTop:    headerTop,
         paddingBottom: spacing.md,
-        paddingLeft:   headerLeft,
-        paddingRight:  headerRight,
+        paddingStart:  headerLeft,
+        paddingEnd:    headerRight,
       } as const,
 
       // ── Scroll / page bottom ──────────────────────────────────────────────

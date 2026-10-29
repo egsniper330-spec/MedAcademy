@@ -594,6 +594,17 @@ export const en: TranslationDict = {
   'lesson.materialWaitingTitle': 'Your request is still queued',
   'lesson.materialWaitingDesc': 'Your personalized copy is still being prepared and will become ready automatically. You can carry on with the lesson and check again in a moment.',
   'lesson.materialCheckAgain': 'Check again',
+  // ── Download / preparation panel ───────────────────────────────────────
+  // The panel is shown for EVERY material download (PDF personalization or a
+  // plain signed URL), so these four states are user-facing copy, not debug
+  // text. Personalization is generated DURING the request now — there is no
+  // background worker to wait for — so the preparing copy says exactly that.
+  'lesson.downloadComplete': 'Download Complete',
+  'lesson.downloadFailed': 'Download Failed',
+  'lesson.preparingPdf': 'Preparing your PDF…',
+  'lesson.downloadingNow': 'Downloading…',
+  'lesson.preparingPdfDesc': 'Preparing the personalized PDF for this account.',
+  'lesson.fileSavedShareSheet': 'File saved. The share sheet will open shortly.',
 
   // ── Profile / account ──────────────────────────────────────────────────
   'profile.title': 'Profile',
@@ -2964,6 +2975,13 @@ export const ar: TranslationDict = {
   'lesson.materialWaitingTitle': 'طلبك ما زال في قائمة الانتظار',
   'lesson.materialWaitingDesc': 'لا يزال تجهيز نسختك المخصّصة جاريًا وستصبح جاهزة تلقائيًا. يمكنك متابعة الدرس والتحقق مرة أخرى بعد قليل.',
   'lesson.materialCheckAgain': 'تحقق مرة أخرى',
+  // ── لوحة التنزيل / التجهيز ───────────────────────────────────────────
+  'lesson.downloadComplete': 'اكتمل التنزيل',
+  'lesson.downloadFailed': 'فشل التنزيل',
+  'lesson.preparingPdf': 'جارٍ تجهيز ملف PDF…',
+  'lesson.downloadingNow': 'جارٍ التنزيل…',
+  'lesson.preparingPdfDesc': 'جارٍ تجهيز نسخة PDF المخصّصة لهذا الحساب.',
+  'lesson.fileSavedShareSheet': 'تم حفظ الملف. ستُفتح قائمة المشاركة بعد قليل.',
 
   // ── Profile / account ──────────────────────────────────────────────────
   'profile.title': 'الملف الشخصي',

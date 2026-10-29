@@ -19,7 +19,8 @@ it:
 | 1 | Session restore | `SessionProvider` (`src/ctx.tsx`) — `backendClient.auth.getSession()` | the entire tree (spinner) | SecureStore reads, local |
 | 2 | Security verdict | `SecurityContext` → `runSecurityChecks()` (`src/lib/security.ts`), 13 detectors + policy GET | **every protected request** (`php.ts` defers them behind the lock, up to 20 s) | native probes + up to 3 network calls |
 | 3 | Profile | `(app)/_layout.tsx` → `getProfile()` | role redirect → the dashboard mount | 1 network call |
-| 4 | Screen data | dashboard `Promise.all([...])` | the screen's content | 3–4 parallel network calls |
+| 4 | Screen data (phase 1) | dashboard `Promise.all([subs, unread])` | the screen's content | 2 parallel network calls |
+| 5 | Screen data (phase 2) | dashboard `Promise.all([courses, categories])` | only the **Explore** section | 2 parallel network calls, started *after* the screen is usable |
 
 Verified details that matter:
 
@@ -31,6 +32,11 @@ Verified details that matter:
   `detectors + config`.
 * Independent requests inside a screen are already parallel (`Promise.all`) in
   the dashboard, doctor overview, students, explore and course details.
+* The dashboard is **two-phase**: the first usable screen depends only on the
+  student's OWN reads (enrollments + unread count); the public catalogue and the
+  near-static category list load behind it. Before that change all four were in
+  one `Promise.all` and the whole screen body sat behind a spinner until the
+  slowest — usually the largest — response arrived. See §3 and §6.
 * Image prefetch is capped at 8 URLs (`PREFETCH_LIMIT`) and fire-and-forget.
 * The `(app)` shell runs the security evaluation **once**: the layout no longer
   calls `check()` on resume (that duplicate was removed and is now guarded by a
@@ -65,7 +71,7 @@ Structural measurement (asserted by `tests/iphoneStartupPerformance.test.cjs`):
 
 | Screen | Current behaviour | Confirmed bottleneck | Evidence | Change / recommendation |
 | --- | --- | --- | --- | --- |
-| Student Dashboard | 4 parallel reads on first load; SWR on focus | enrollment list re-downloaded on every visit | 6 call sites for `getMySubscriptions` | **fixed**: reads through the 60 s cache (1 request per burst) |
+| Student Dashboard | **two-phase** load; SWR on focus | enrollment re-download (fixed) **and** the catalogue/categories gating the first paint (fixed) | 6 call sites for `getMySubscriptions`; `tests/dashboardLoadPhases.test.cjs` | **fixed**: reads through the 60 s cache (1 request per burst); catalogue + categories now start after `setLoading(false)` so the screen is usable without them |
 | Explore | featured + enrollments + search (parallel); SWR | same enrollment re-download | same | **fixed** |
 | My Courses | 1 read on focus | same enrollment re-download | same | **fixed** |
 | Student Profile | 1 read + profile | same enrollment re-download | same | **fixed** |
@@ -122,10 +128,10 @@ Also present (pre-existing): `[CourseDetail] loaded duration=…ms` in dev build
 | Dedupe identical in-flight requests | **implemented** where duplicates are proven (security config single-flight, credits cache, enrollment cache). A blanket transport-level dedupe was **rejected**: it would collide with the security-lock deferral queue and with POST semantics |
 | Parallelise independent requests | already done in every in-scope loader |
 | Avoid remounts / keep content on refresh | done earlier (`useStaleWhileRevalidateFocus`) |
-| Lazy-load nonessential data | open item: the dashboard's catalogue + categories still load with the first paint |
+| Lazy-load nonessential data | **implemented** for the dashboard: catalogue + categories moved to a second phase that starts after the first usable paint (`tests/dashboardLoadPhases.test.cjs`). The same trick is **not** applied to screens where the catalogue *is* the content (Explore, Course details) — there it would only move the spinner |
 | Pagination / smaller payloads | **recommended**, not done: `getMySubscriptions` embeds `courses(*)`; narrowing it touches 6 consumers and needs payload measurements first |
 | Image caching / thumbnails | already capped (8) and disk-cached by expo-image |
-| Defer nonessential init | open item: categories are near-static and could load after first paint |
+| Defer nonessential init | **implemented**: categories load in dashboard phase 2; image prefetch still runs on the catalogue response |
 | Backend indexes | `enrollments` fine; `courses(status, created_at)` would help the published list on a large catalogue (needs a migration) |
 
 ## 7. Security invariants (unchanged, asserted)

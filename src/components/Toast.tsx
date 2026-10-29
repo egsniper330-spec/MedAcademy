@@ -138,8 +138,13 @@ function ToastItem({ toast, onDismiss }: { toast: ToastItem; onDismiss: (t: Toas
           // A toast floats above everything, so it takes the elevated rung — on
           // the page colour it would blend into the screen it is interrupting.
           backgroundColor: c.elevated,
-          borderLeftWidth: 4,
-          borderLeftColor: config.accent,
+          // `borderStart*`, not `borderLeft*`: the accent bar must sit on the
+          // READING-START edge, so it belongs on the right in Arabic. `toast`
+          // uses an unpinned row, so the start edge mirrors with the locale and
+          // English keeps it on the left; a physical left border left the bar
+          // stranded on the trailing (close-button) side in Arabic.
+          borderStartWidth: 4,
+          borderStartColor: config.accent,
           opacity: toast.opacity,
           transform: [{ translateY: toast.translateY }],
           shadowColor: c.shadowDark,
@@ -156,7 +161,7 @@ function ToastItem({ toast, onDismiss }: { toast: ToastItem; onDismiss: (t: Toas
           {toast.message}
         </Text>
       </View>
-      <Pressable onPress={() => onDismiss(toast)} hitSlop={8} style={{ marginLeft: 8 }}>
+      <Pressable onPress={() => onDismiss(toast)} hitSlop={8} style={{ marginStart: 8 }}>
         <X size={16} color={c.text} opacity={0.45} />
       </Pressable>
     </Animated.View>

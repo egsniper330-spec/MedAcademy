@@ -147,7 +147,7 @@ export default function MyDevices() {
 
           {/* Device icon + history button row */}
           <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 20 }}>
-            <View style={[{ width: 48, height: 48, borderRadius: 16, backgroundColor: `${c.primary}18`, alignItems: 'center', justifyContent: 'center', marginRight: 12 }, Platform.select({ ios: { shadowColor: c.shadowDark, shadowOffset: { width: 3, height: 3 }, shadowOpacity: 0.5, shadowRadius: 6 }, android: { elevation: 3 } }) ?? {}]}>
+            <View style={[{ width: 48, height: 48, borderRadius: 16, backgroundColor: `${c.primary}18`, alignItems: 'center', justifyContent: 'center', marginEnd: 12 }, Platform.select({ ios: { shadowColor: c.shadowDark, shadowOffset: { width: 3, height: 3 }, shadowOpacity: 0.5, shadowRadius: 6 }, android: { elevation: 3 } }) ?? {}]}>
               <Smartphone size={24} color={c.primary} />
             </View>
             <View style={{ flex: 1 }}>

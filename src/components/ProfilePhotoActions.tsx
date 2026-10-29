@@ -132,7 +132,10 @@ export function ProfilePhotoActions({
         {!busy && (
           <View
             style={{
-              position: 'absolute', bottom: 0, right: 0,
+              // `end` keeps the badge on the TRAILING corner of the avatar: it
+              // sat on the physically-right corner in Arabic too, i.e. over the
+              // start of the name column instead of the trailing edge.
+              position: 'absolute', bottom: 0, end: 0,
               width: 28, height: 28, borderRadius: 14,
               backgroundColor: c.primary,
               alignItems: 'center', justifyContent: 'center',

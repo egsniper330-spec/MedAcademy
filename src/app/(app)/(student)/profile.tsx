@@ -595,7 +595,7 @@ export default function StudentProfile() {
                      marginTop: 14, paddingTop: 14, borderTopWidth: 1, borderTopColor: `${c.text}08` }}
           >
             <Pencil size={15} color={c.primary} />
-            <Text style={{ fontSize: 14, fontWeight: '700', color: c.primary, marginLeft: 7 }}>{t('studentProfile.editNameEmail')}</Text>
+            <Text style={{ fontSize: 14, fontWeight: '700', color: c.primary, marginStart: 7 }}>{t('studentProfile.editNameEmail')}</Text>
           </Pressable>
         </NeuCard>
 
@@ -613,7 +613,7 @@ export default function StudentProfile() {
                      marginTop: 14, paddingTop: 14, borderTopWidth: 1, borderTopColor: `${c.text}08` }}
           >
             <Pencil size={15} color={c.primary} />
-            <Text style={{ fontSize: 14, fontWeight: '700', color: c.primary, marginLeft: 7 }}>{t('studentProfile.editAcademic')}</Text>
+            <Text style={{ fontSize: 14, fontWeight: '700', color: c.primary, marginStart: 7 }}>{t('studentProfile.editAcademic')}</Text>
           </Pressable>
         </NeuCard>
 
@@ -647,7 +647,7 @@ export default function StudentProfile() {
                       borderBottomWidth: idx < Math.min(subscriptions.length, 5) - 1 ? 1 : 0,
                       borderBottomColor: `${c.text}08`,
                     }}>
-                    <View style={{ width: 36, height: 36, borderRadius: 10, backgroundColor: `${c.primary}15`, alignItems: 'center', justifyContent: 'center', marginRight: 12 }}>
+                    <View style={{ width: 36, height: 36, borderRadius: 10, backgroundColor: `${c.primary}15`, alignItems: 'center', justifyContent: 'center', marginEnd: 12 }}>
                       <BookOpen size={16} color={c.primary} />
                     </View>
                     <View style={{ flex: 1 }}>
@@ -755,7 +755,7 @@ export default function StudentProfile() {
           {editError ? (
             <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8 }}>
               <AlertCircle size={14} color="#DC2626" />
-              <Text style={{ color: '#DC2626', fontSize: 13, marginLeft: 6, flex: 1 }}>{editError}</Text>
+              <Text style={{ color: '#DC2626', fontSize: 13, marginStart: 6, flex: 1 }}>{editError}</Text>
             </View>
           ) : null}
         
@@ -809,7 +809,7 @@ export default function StudentProfile() {
               {pwdError ? (
                 <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 6 }}>
                   <AlertCircle size={14} color="#DC2626" />
-                  <Text style={{ color: '#DC2626', fontSize: 13, marginLeft: 6, flex: 1 }}>{pwdError}</Text>
+                  <Text style={{ color: '#DC2626', fontSize: 13, marginStart: 6, flex: 1 }}>{pwdError}</Text>
                 </View>
               ) : null}
             </>
@@ -837,13 +837,13 @@ export default function StudentProfile() {
         {acadError ? (
           <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 12 }}>
             <AlertCircle size={15} color="#DC2626" />
-            <Text style={{ color: '#DC2626', fontSize: 13, marginLeft: 7, flex: 1 }}>{acadError}</Text>
+            <Text style={{ color: '#DC2626', fontSize: 13, marginStart: 7, flex: 1 }}>{acadError}</Text>
           </View>
         ) : null}
         {acadSuccess ? (
           <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 4 }}>
             <CheckCircle size={15} color="#16A34A" />
-            <Text style={{ color: '#16A34A', fontSize: 13, marginLeft: 7 }}>{t('studentProfile.saved')}</Text>
+            <Text style={{ color: '#16A34A', fontSize: 13, marginStart: 7 }}>{t('studentProfile.saved')}</Text>
           </View>
         ) : null}
       </ResponsiveModal>

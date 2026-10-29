@@ -62,8 +62,8 @@ function SelectPicker({
         }}
       >
         {loading
-          ? <ActivityIndicator size="small" color={c.primary} style={{ marginRight: layout.pad.sm }} />
-          : <View style={{ marginRight: layout.pad.sm }}>
+          ? <ActivityIndicator size="small" color={c.primary} style={{ marginEnd: layout.pad.sm }} />
+          : <View style={{ marginEnd: layout.pad.sm }}>
               {icon === 'university' ? <Building2 size={layout.bodySize} color={c.text} opacity={0.4} />
                 : icon === 'faculty' ? <GraduationCap size={layout.bodySize} color={c.text} opacity={0.4} />
                 : <BookOpen size={layout.bodySize} color={c.text} opacity={0.4} />}
@@ -133,16 +133,19 @@ function CountryCodePicker({
           borderRadius: layout.cardRadius / 2,
           paddingHorizontal: layout.pad.md,
           paddingVertical: layout.pad.md,
-          marginRight: layout.pad.sm,
+          marginEnd: layout.pad.sm,
           shadowColor: c.shadowDark, shadowOffset: { width: 2, height: 2 },
           shadowOpacity: 0.6, shadowRadius: 5,
           // minWidth scales with device: compact needs less, tablet can show more
           minWidth: layout.isTablet ? 110 : layout.isCompact ? 80 : 88,
         }}
       >
-        {/* Flag emoji — always 20dp for legibility */}
-        <Text style={{ fontSize: 20, marginRight: layout.pad.xs }}>{value.flag}</Text>
-        <Text style={{ fontSize: layout.bodySize - 1, fontWeight: '700', color: c.text, marginRight: 2 }}>
+        {/* Flag emoji — always 20dp for legibility. Gaps in this form use
+            `marginEnd`/`marginStart` (not Left/Right): the form follows the
+            layout direction, so in Arabic the flag sits on the RIGHT of the
+            calling code and every adornment gap has to mirror with it. */}
+        <Text style={{ fontSize: 20, marginEnd: layout.pad.xs }}>{value.flag}</Text>
+        <Text style={{ fontSize: layout.bodySize - 1, fontWeight: '700', color: c.text, marginEnd: 2 }}>
           {value.callingCode}
         </Text>
         <ChevronDown size={layout.captionSize} color={c.text} opacity={0.4} />
@@ -182,7 +185,7 @@ function CountryCodePicker({
                 placeholder={t('signUp.searchCountry')}
                 placeholderTextColor={`${c.text}55`}
                 autoCapitalize="none"
-                style={{ flex: 1, marginLeft: layout.pad.sm, fontSize: layout.bodySize - 1, color: c.text }}
+                style={{ flex: 1, marginStart: layout.pad.sm, fontSize: layout.bodySize - 1, color: c.text }}
               />
             </View>
 
@@ -202,7 +205,7 @@ function CountryCodePicker({
                   }}
                 >
                   {/* Flag always 22dp for list legibility */}
-                  <Text style={{ fontSize: 22, marginRight: layout.pad.md }}>{item.flag}</Text>
+                  <Text style={{ fontSize: 22, marginEnd: layout.pad.md }}>{item.flag}</Text>
                   <Text style={{ flex: 1, fontSize: layout.bodySize, color: c.text, fontWeight: item.iso === value.iso ? '700' : '400' }}>
                     {item.name}
                   </Text>
@@ -548,9 +551,9 @@ export default function SignUp() {
             />
           </View>
           {phoneError ? (
-            <Text style={{ color: '#DC2626', fontSize: layout.captionSize, marginBottom: layout.pad.sm, marginLeft: 2 }}>{phoneError}</Text>
+            <Text style={{ color: '#DC2626', fontSize: layout.captionSize, marginBottom: layout.pad.sm, marginStart: 2 }}>{phoneError}</Text>
           ) : null}
-          <Text style={{ fontSize: layout.captionSize - 1, ...mutedTextStyle(c, 0.4), marginTop: phoneError ? 0 : -layout.pad.sm, marginBottom: layout.pad.md, marginLeft: 2 }}>
+          <Text style={{ fontSize: layout.captionSize - 1, ...mutedTextStyle(c, 0.4), marginTop: phoneError ? 0 : -layout.pad.sm, marginBottom: layout.pad.md, marginStart: 2 }}>
             {t('signUp.storedAs', { phone: buildE164(country, nationalPhone) ?? `${country.callingCode}…` })}
           </Text>
 

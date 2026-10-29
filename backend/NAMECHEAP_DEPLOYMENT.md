@@ -36,57 +36,53 @@ default):
 
 ## B2. Personalized PDF watermarking — required for every student PDF
 
-**Mandatory, not optional.** Every lesson PDF delivered to a student is
-personalized with that student's name and public account id (`MED-####`).
-Doctors have no switch to turn it off; the legacy
-`lesson_materials.watermark_enabled` column is ignored by delivery. Doctors and
-administrators still receive the original for preview.
+**Mandatory, not optional.** Every lesson PDF delivered through the material
+delivery endpoint is personalized with the authenticated user's name and public
+account id (`MED-####`), including staff previews. The legacy
+`lesson_materials.watermark_enabled` column is ignored by delivery; the
+unwatermarked original is never served through this endpoint.
 
 Delivery is REFUSED (HTTP 503/422) unless the engine is fully available — the
 unwatermarked original is never served as a fallback, and `/storage/signed-url`
 refuses lesson-material PDFs for every role.
 
-The default engine is **pure PHP** (`setasign/fpdi` 2.x + `tecnickcom/tcpdf` 6.x):
-no Ghostscript, no shell, no system font. Full install steps, the cron task and
-the verification commands are in **[`docs/PDF_WATERMARK_DEPLOYMENT.md`](docs/PDF_WATERMARK_DEPLOYMENT.md)**.
+Student delivery is **raster-only**: each source page is rendered and the
+identity mark is composited into a single image per output page. Legacy `auto`
+resolves to raster; explicit `vector` and `flatten` configurations fail closed.
+The image-only PDF has no selectable/searchable text. Full prerequisites, the
+cron task and verification commands are in
+**[`docs/PDF_WATERMARK_DEPLOYMENT.md`](docs/PDF_WATERMARK_DEPLOYMENT.md)**.
+
+This replaces the former pure-PHP default. Do not deploy until Ghostscript
+licensing and target-host compatibility have been reviewed and approved.
 
 Short version:
 
-1. Upload `backend/vendor/` (from `composer install --no-dev` in `backend/`).
-2. Run migration `035_lesson_material_pdf_hardening.sql` in phpMyAdmin.
-3. Add the cron job for `backend/scripts/watermark-cleanup.php`.
-4. Legacy lecture notes (`lesson_pdfs`, bucket `lesson-pdfs`) are now staff-only —
-   they cannot be watermarked, so students can no longer sign them. Re-upload any
-   document that only exists there as a lesson material
-   (see `docs/PDF_WATERMARK_DEPLOYMENT.md` §7.1).
-5. Leave `.env` alone — the defaults are correct for shared hosting:
+1. Confirm the Ghostscript AGPL/commercial licensing decision. Only then set
+   `PDF_WATERMARK_ACCEPT_AGPL_RENDERER=1` in the production environment.
+2. Verify Ghostscript, PHP `proc_open`, GD with FreeType or Imagick, a TTF font,
+   and the FPDF/FPDI/TCPDF dependencies on the target host.
+3. Upload `backend/vendor/` and the required backend files listed in
+   `docs/PDF_WATERMARK_DEPLOYMENT.md`.
+4. Apply migrations 032 (if absent) and 035; configure and verify the cleanup
+   cron before enabling it.
+5. Release the app build using the token-gated delivery route. Re-upload student
+   materials that exist only in the legacy `lesson_pdfs` table, now staff-only.
 
-```
-PDF_WATERMARK_MODE=auto          # auto | vector | flatten | raster   (auto = vector first)
-PDF_WATERMARK_OPACITY=0.12       # single centred mark (flatten + raster engines)
-PDF_WATERMARK_VECTOR_OPACITY=0.10  # vector engine (optional override)
-PDF_WATERMARK_MAX_PAGES=150
-PDF_WATERMARK_MAX_SOURCE_BYTES=52428800
-MATERIAL_PDF_MINT_PER_MINUTE=60
-```
-
-The **flatten** engine (`PDF_WATERMARK_MODE=flatten`) needs nothing beyond the
-vendored PHP libraries: one centred 35° mark per page, written into the page
-content stream. The opt-in **raster** engine (one image per page, no text layer)
-additionally needs Ghostscript + a compositor + a TTF and will not run unless
-`PDF_WATERMARK_ACCEPT_AGPL_RENDERER=1` is also set; it is subject to the
-Ghostscript AGPL/commercial licensing decision in
-`backend/docs/PDF_WATERMARK_LICENSING.md`. Do not enable it without that review.
+The mode defaults to raster; the previous `auto` value also resolves to raster.
+Do not set the acceptance flag without a documented licensing decision.
 
 PHP runtime limits: the web front controller does NOT raise `memory_limit` or
 `max_execution_time` (only `config/config.php`, used by CLI scripts, sets
-512M / no time limit). In cPanel → **Select PHP Version → Options**, set for the
-`api` domain:
+512M / no time limit). The local measured 40-page fixture took about 31 seconds
+and peaked at about 113 MiB; actual PDFs and hosts vary. In cPanel → **Select
+PHP Version → Options**, configure adequate headroom and validate representative
+files on the actual host:
 
 | Setting | Recommended | Why |
 |---|---|---|
-| `memory_limit` | `256M` or more | FPDI parses the whole cross-reference of the source PDF; the raster engine needs far more |
-| `max_execution_time` | `120` or more | a large document is parsed page by page; output is cached, so this cost is paid once per student per document |
+| `memory_limit` | `256M` or more; validate real PDFs | raster page buffers; scans and high-resolution pages may need more |
+| `max_execution_time` | `120` or more | large documents take longer to render; output is cached per recipient/material |
 
 Verify what the server supports AFTER upload:
 

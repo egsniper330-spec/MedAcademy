@@ -122,7 +122,7 @@ use MedAcademy\Utils\Config;
 
 $DB_FILE = $OUT . '/db.sqlite';
 $STORE = $OUT . '/storage/private';
-$MODE_LABEL = (string) (getenv('PDF_WATERMARK_MODE') ?: 'auto (product default)');
+$MODE_LABEL = (string) (getenv('PDF_WATERMARK_MODE') ?: 'raster (product default)');
 $PERSONAL = $STORE . '/' . PdfWatermarkService::BUCKET;
 
 // ── Test-only PDO: SQLite with the two MySQL-isms translated ────────────────
@@ -774,67 +774,41 @@ $personalDir = $storage->privateFilePath(PdfWatermarkService::BUCKET, '');
 
 // ── Engine sanity ──────────────────────────────────────────────────────────
 $wm = new PdfWatermarkService();
-// Which engine is under test decides HOW identity is proved: the vector engine
-// leaves a text layer (page-string checks), the flattened engine leaves pixels
-// (image-stream checks). Both are real assertions, not softer ones.
 $isRaster = $wm->effectiveMode() === PdfWatermarkService::MODE_RASTER;
-// MODE_FLATTEN is the renderer-free single-centred-mark engine: it keeps the
-// text layer (like vector) but draws exactly ONE mark per page (like raster).
-$isFlatten = $wm->effectiveMode() === PdfWatermarkService::MODE_FLATTEN;
-check('engine: a vector or raster engine is available', $wm->isAvailable(), (string) $wm->driver());
+$isFlatten = false;
+check('engine: raster-only delivery engine is available', $isRaster && $wm->isAvailable(), (string) $wm->driver());
 $r = runChild(['status'], ['PDF_WATERMARK_MODE' => null]);
 $stDefault = jsonOf($r[1]);
-check('engine: an absent mode resolves to "auto" (shipped default)', ($stDefault['configured_mode'] ?? '') === 'auto', (string) ($stDefault['configured_mode'] ?? ''));
-check(
-    'engine: "auto" resolves to an installed engine (pure-PHP vector first)',
-    in_array($stDefault['effective_mode'] ?? null, ['vector', 'raster'], true),
-    (string) ($stDefault['effective_mode'] ?? '')
-);
+check('engine: an absent mode resolves to raster-only delivery', ($stDefault['configured_mode'] ?? '') === 'raster', (string) ($stDefault['configured_mode'] ?? ''));
+check('engine: auto resolves to raster, never vector or flatten', ($stDefault['effective_mode'] ?? null) === 'raster', (string) ($stDefault['effective_mode'] ?? ''));
+$vectorStatus = jsonOf(runChild(['status'], ['PDF_WATERMARK_MODE' => 'vector'])[1]);
+$flattenStatus = jsonOf(runChild(['status'], ['PDF_WATERMARK_MODE' => 'flatten'])[1]);
+check('engine: legacy vector mode fails closed', array_key_exists('effective_mode', $vectorStatus) && $vectorStatus['effective_mode'] === null, json_encode($vectorStatus));
+check('engine: legacy flatten mode fails closed', array_key_exists('effective_mode', $flattenStatus) && $flattenStatus['effective_mode'] === null, json_encode($flattenStatus));
 
-// ═══ 1. The student path is ASYNC: queue first, never render inline ════════
-// The first request deliberately uses runChild (not mintReady) so the
-// preparing contract itself is asserted, not skipped over.
-$r = runChild(['mint', 'm1', 's1', 'student', 'view']);
-$pending = jsonOf($r[1]);
-check('queue: a first student request is answered "preparing" (no inline render)',
-    $r[0] === 0 && ($pending['status'] ?? '') === 'preparing' && ($pending['url'] ?? null) === null,
-    substr($r[1], 0, 240));
-check('queue: the pending answer still declares the delivery is watermarked',
-    ($pending['watermarked'] ?? false) === true);
-check('queue: the pending answer tells the client when to retry and offers no manual retry',
-    (int) ($pending['retry_after'] ?? 0) > 0 && ($pending['retry_allowed'] ?? true) === false,
-    json_encode(['retry_after' => $pending['retry_after'] ?? null, 'retry_allowed' => $pending['retry_allowed'] ?? null]));
-check('queue: the request itself wrote NO personalized copy',
-    (int) $pdo->query("SELECT COUNT(*) FROM lesson_material_pdfs WHERE material_id='m1'")->fetchColumn() === 0);
-check('queue: exactly ONE job was queued for that student',
-    (int) $pdo->query("SELECT COUNT(*) FROM lesson_material_pdf_jobs WHERE material_id='m1' AND student_id='s1'")->fetchColumn() === 1);
-
-// Three more requests for the SAME copy: the queue must not fan out.
-for ($i = 0; $i < 3; $i++) {
-    runChild(['mint', 'm1', 's1', 'student', 'view']);
-}
-check('queue: repeated requests never create a second job (unique material+student+variant)',
-    (int) $pdo->query("SELECT COUNT(*) FROM lesson_material_pdf_jobs WHERE material_id='m1' AND student_id='s1'")->fetchColumn() === 1);
-check('queue: a student request raises the job to "waiting" priority',
-    (int) $pdo->query("SELECT priority FROM lesson_material_pdf_jobs WHERE material_id='m1' AND student_id='s1'")->fetchColumn() === MaterialPdfQueueService::PRIORITY_STUDENT);
-
-// The cron worker is what produces the copy.
-$r = runChild(['worker']);
-$w = jsonOf($r[1]);
-check('worker: the queued job is claimed and rendered',
-    ($w['claimed'] ?? 0) === 1 && ($w['ready'] ?? 0) === 1 && ($w['failed'] ?? 0) === 0,
-    substr($r[1], 0, 240) . substr($r[2], 0, 300));
-check('worker: the job ends as ready, with no lock left behind',
-    (string) $pdo->query("SELECT status FROM lesson_material_pdf_jobs WHERE material_id='m1' AND student_id='s1'")->fetchColumn() === 'ready'
-    && $pdo->query("SELECT lock_token FROM lesson_material_pdf_jobs WHERE material_id='m1' AND student_id='s1'")->fetchColumn() === null);
-check('worker: a second pass has nothing to do (idempotent)', (jsonOf(runChild(['worker'])[1])['claimed'] ?? -1) === 0);
-
-// ═══ 1b. Once ready, the student gets the personalized copy ═══════════════
+// ═══ 1. Student requests generate missing PDFs directly and reuse cache ═══
 $r = runChild(['mint', 'm1', 's1', 'student', 'view']);
 $a1 = jsonOf($r[1]);
-check('mint: student view succeeds once the copy is ready',
+check('direct: first student request immediately returns a personalized URL',
     $r[0] === 0 && isset($a1['url']) && ($a1['status'] ?? '') === 'ready',
-    substr($r[1], 0, 200) . substr($r[2], 0, 200));
+    substr($r[1], 0, 240) . substr($r[2], 0, 240));
+check('direct: the first request generated and registered its copy',
+    count(registry('m1', 's1')) === 1);
+$firstPath = (string) (registry('m1', 's1')[0]['storage_path'] ?? '');
+$firstMtime = (string) (registry('m1', 's1')[0]['created_at'] ?? '');
+
+// Reopening the material reuses the completed copy; no queue entry or rerender.
+$r = runChild(['mint', 'm1', 's1', 'student', 'view']);
+$cached = jsonOf($r[1]);
+check('cache: an unexpired copy returns ready on the next request',
+    $r[0] === 0 && isset($cached['url']) && ($cached['status'] ?? '') === 'ready');
+check('cache: reuse does not create another row or change generation time',
+    count(registry('m1', 's1')) === 1
+    && (string) (registry('m1', 's1')[0]['created_at'] ?? '') === $firstMtime);
+check('queue: direct student requests do not enqueue cron-dependent work',
+    (int) $pdo->query("SELECT COUNT(*) FROM lesson_material_pdf_jobs WHERE material_id='m1' AND student_id='s1'")->fetchColumn() === 0);
+
+// ═══ 1b. The generated copy is personalized and token-gated ══════════════
 check('mint: response says the copy is watermarked', ($a1['watermarked'] ?? false) === true);
 check(
     'mint: legacy watermark_enabled=0 on the material does NOT disable it',
@@ -849,11 +823,9 @@ if ($token1 === '' && isset($a1['url'])) {
 check('mint: returns a token-gated delivery URL (not a storage path)', str_contains((string) ($a1['url'] ?? ''), '/materials/pdf?token='));
 
 $r = runChild(['mint', 'm1', 's2', 'student', 'download']);
-check('queue: a SECOND student is queued too, never rendered inline',
-    (jsonOf($r[1])['status'] ?? '') === 'preparing');
-runChild(['worker']);
-$r = runChild(['mint', 'm1', 's2', 'student', 'download']);
 $a2 = jsonOf($r[1]);
+check('isolation: a second student generates their own copy immediately',
+    isset($a2['url']) && ($a2['status'] ?? '') === 'ready');
 check('mint: student DOWNLOAD succeeds and is watermarked', ($a2['watermarked'] ?? false) === true && ($a2['intent'] ?? '') === 'download');
 check('registry: each student has their OWN copy (no sharing)',
     count(registry('m1', 's1')) === 1 && count(registry('m1', 's2')) === 1);
@@ -925,8 +897,7 @@ if ($isRaster) {
             '(pinned by flatten_engine_tests.php: exactly one run per page stream)'
         );
     } else {
-        check('identity: repeated more than once per page (grid + edge line)',
-            $pagesA !== [] && min(array_map(static fn ($t) => substr_count($t, $idA), $pagesA)) >= 2);
+        check('identity: legacy text layer is absent (raster-only contract)', false, 'vector/flatten delivery must not be used');
     }
 }
 check('content: the personalized copy is NOT the original bytes', is_file($file1) && hash_file('sha256', $file1) !== $srcHash);
@@ -1072,67 +1043,38 @@ function filesForMaterial(string $materialId): array
 foreach ([['broken.pdf', 'a non-PDF source'], ['modern.pdf', 'a modern xref-stream source']] as [$name, $label]) {
     $mid = $name === 'broken.pdf' ? 'm7' : 'm8';
     if ($name === 'modern.pdf' && !$haveModern) {
-        skipCheck('fail-closed: ' . $label . ' is refused', 'fixture source-xrefstream.pdf not generated');
+        skipCheck('direct: ' . $label . ' is delivered by the raster engine', 'fixture source-xrefstream.pdf not generated');
         continue;
     }
     $before = filesForMaterial($mid);
-    // The request itself must never render, so a broken source is not detected
-    // here — it is queued like any other copy. The FAILURE is then produced by
-    // the worker and surfaced to the client as `failed`.
     $r = runChild(['mint', $mid, 's1', 'student', 'view']);
-    check('fail-closed: ' . $label . ' is queued, not rendered inline',
-        (jsonOf($r[1])['status'] ?? '') === 'preparing' && !isset(jsonOf($r[1])['url']),
-        substr($r[1], 0, 200));
+    $answer = jsonOf($r[1]);
 
-    if ($name === 'modern.pdf' && $isRaster) {
-        // The flattened engine renders with Ghostscript, which understands
-        // cross-reference STREAMS, so this source IS deliverable on that path.
-        runChild(['worker']);
-        $r = runChild(['mint', $mid, 's1', 'student', 'view']);
-        check('fail-closed: ' . $label . ' is NOT refused by the flattened engine (Ghostscript renders it)',
-            isset(jsonOf($r[1])['url']), substr($r[1], 0, 200));
-        $after = filesForMaterial($mid);
-        check('renders: a copy was written for ' . $label, count($after) > count($before), 'files=' . count($after));
-        check('renders: the flattened copy of ' . $label . ' has no text layer',
-            $after !== [] && !preg_match('#/Type\s*/Font#', implode('', array_map(
-                static fn (string $rel): string => (string) @file_get_contents($personalDir . '/' . $rel),
-                $after
-            ))));
+    if ($name === 'broken.pdf') {
+        check('fail-closed: a non-PDF source is rejected during the direct request',
+            errStatus($answer) === 422 && ($answer['error']['code'] ?? '') === 'source_not_pdf',
+            substr($r[1], 0, 240));
+        check('fail-closed: a rejected source never returns a URL or original bytes',
+            !isset($answer['url']) && !str_starts_with($r[1], '%PDF-'));
+        check('fail-closed: a rejected source does not enqueue background work',
+            (int) $pdo->query("SELECT COUNT(*) FROM lesson_material_pdf_jobs WHERE material_id='m7' AND student_id='s1'")->fetchColumn() === 0);
+        check('fail-closed: no personalized output is written for the invalid source',
+            filesForMaterial($mid) === $before, json_encode(filesForMaterial($mid)));
         continue;
     }
 
-    // Drive the worker until the job is terminal. Backoff (`run_after`) is
-    // cleared between passes so the retry happens immediately instead of after
-    // 30/60/120 s — the point here is the bounded retry, not the delay.
-    $job = null;
-    for ($pass = 0; $pass < 6; $pass++) {
-        runChild(['worker']);
-        // `query()->fetch()`, not a retained prepared statement: on WAL a live
-        // statement keeps a read transaction open and the CHILD's next write
-        // would then make this connection's write fail with "database is
-        // locked" (no busy handler on a lock upgrade).
-        $job = $pdo->query("SELECT status, attempts, max_attempts, last_error FROM lesson_material_pdf_jobs WHERE material_id = '{$mid}' AND student_id = 's1'")->fetch();
-        if (is_array($job) && in_array((string) $job['status'], ['failed', 'skipped'], true)) {
-            break;
-        }
-        $pdo->prepare("UPDATE lesson_material_pdf_jobs SET run_after = '2000-01-01 00:00:00' WHERE material_id = ? AND status = 'queued'")->execute([$mid]);
-    }
-    check('fail-closed: ' . $label . ' ends as a FAILED job with a machine-readable reason',
-        is_array($job) && (string) $job['status'] === 'failed' && (string) ($job['last_error'] ?? '') !== '',
-        json_encode($job));
-    check('fail-closed: the retries are bounded (attempts stop at max_attempts)',
-        is_array($job) && (int) $job['attempts'] >= (int) $job['max_attempts'], json_encode($job));
-    check('fail-closed: no personalized copy was written for ' . $label,
-        filesForMaterial($mid) === $before, json_encode(filesForMaterial($mid)));
-
-    $r = mintReady(['mint', $mid, 's1', 'student', 'view']);
-    $answer = jsonOf($r[1]);
-    check('fail-closed: the client is told "failed" and gets NO url',
-        ($answer['status'] ?? '') === 'failed' && ($answer['url'] ?? null) === null,
-        substr($r[1], 0, 240));
-    check('fail-closed: a manual retry is offered only after a permanent failure',
-        ($answer['retry_allowed'] ?? false) === true && ($answer['reason'] ?? '') !== '', json_encode($answer));
-    check('fail-closed: the failed answer never carries the original bytes', !str_starts_with($r[1], '%PDF-'));
+    check('direct: ' . $label . ' returns a personalized URL without a worker',
+        isset($answer['url']) && ($answer['status'] ?? '') === 'ready', substr($r[1], 0, 240));
+    check('direct: ' . $label . ' does not enqueue background work',
+        (int) $pdo->query("SELECT COUNT(*) FROM lesson_material_pdf_jobs WHERE material_id='m8' AND student_id='s1'")->fetchColumn() === 0);
+    $rows = registry($mid, 's1');
+    $after = filesForMaterial($mid);
+    check('direct: a personalized copy was written for ' . $label,
+        count($rows) === 1 && count($after) > count($before), 'rows=' . count($rows) . ', files=' . count($after));
+    $output = $rows !== [] ? $personalDir . '/' . $rows[0]['storage_path'] : '';
+    check('direct: the rasterized xref-stream copy has one image per page and no text layer',
+        $output !== '' && is_file($output) && count(imageStreams($output)) === (count(pdfPages($output)) ?: -1)
+        && !preg_match('#/Type\s*/Font#', (string) @file_get_contents($output)));
 }
 
 // ═══ 9/10. Storage routes cannot expose originals ═════════════════════════
@@ -1218,16 +1160,9 @@ if ($isRaster) {
 }
 @unlink($materials . '/replace-old.pdf');
 
-// Engine/settings change => different variant, regenerated bytes.
-// The knob must be one that ACTUALLY affects the engine under test: the raster
-// cache identity carries dpi/format/opacity/raster_layout, while vector carries
-// vector_opacity/layers. Tuning an irrelevant knob must NOT invalidate the
-// cache (that is the reason the settings list is mode-specific), so the test
-// flips a knob of the current engine.
+// Changing raster resolution invalidates the cached variant.
 $beforeSettings = registry('m6', 's1');
-$settingsOverride = $isRaster
-    ? ['PDF_WATERMARK_DPI' => '150']
-    : ($isFlatten ? ['PDF_WATERMARK_OPACITY' => '0.22'] : ['PDF_WATERMARK_VECTOR_OPACITY' => '0.22']);
+$settingsOverride = ['PDF_WATERMARK_DPI' => '150'];
 $r = mintReady(['mint', 'm6', 's1', 'student', 'view'], $settingsOverride);
 check('settings: a changed watermark setting still delivers', isset(jsonOf($r[1])['url']));
 $afterSettings = registry('m6', 's1');
@@ -1236,8 +1171,8 @@ check('settings: still exactly one copy for the student', count($afterSettings) 
 check('settings: the old variant file was reclaimed', !is_file($personalDir . '/' . ($beforeSettings[0]['storage_path'] ?? 'none')));
 
 // ═══ 12. Concurrency ══════════════════════════════════════════════════════
-// Three students' first opens race. None of them may render (that is the whole
-// point of the queue) and together they must produce exactly ONE job.
+// Same-student first opens race under the per-variant lock; they may each
+// return a ready URL, but only one render/registry/file may be published.
 $procs = [];
 for ($i = 0; $i < 3; $i++) {
     $procs[] = spawnChild(['mint', 'm5', 's1', 'student', 'view']);
@@ -1246,19 +1181,17 @@ $answers = [];
 foreach ($procs as [$proc, $pipes]) {
     $answers[] = finishChild($proc, $pipes);
 }
-$pendingCount = 0;
+$readyCount = 0;
 foreach ($answers as [$code, $out]) {
     $a = jsonOf($out);
-    $status = (string) ($a['status'] ?? '');
-    if (in_array($status, ['preparing', 'ready'], true) && !isset($a['_raw'])) {
-        $pendingCount++;
+    if ($code === 0 && isset($a['url']) && ($a['status'] ?? '') === 'ready') {
+        $readyCount++;
     }
 }
-check('concurrency: no concurrent request blocks on a render',
-    $pendingCount === 3, "pending={$pendingCount}");
-check('concurrency: the race produced exactly ONE job row',
-    (int) $pdo->query("SELECT COUNT(*) FROM lesson_material_pdf_jobs WHERE material_id='m5' AND student_id='s1'")->fetchColumn() === 1);
-runChild(['worker']);
+check('concurrency: each request receives a ready personalized URL',
+    $readyCount === 3, "ready={$readyCount}");
+check('concurrency: direct requests create no queue jobs',
+    (int) $pdo->query("SELECT COUNT(*) FROM lesson_material_pdf_jobs WHERE material_id='m5' AND student_id='s1'")->fetchColumn() === 0);
 $concRows = registry('m5', 's1');
 check('concurrency: exactly ONE registry row for the variant', count($concRows) === 1, count($concRows));
 $concFiles = filesUnder($personalDir);

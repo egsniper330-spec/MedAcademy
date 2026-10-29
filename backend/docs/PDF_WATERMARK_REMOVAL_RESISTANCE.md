@@ -6,13 +6,21 @@ personalized PDF, measured on real files by
 It is deliberately honest: the watermark raises the cost of removal and makes
 tampering detectable. It is not, and does not claim to be, impossible to remove.
 
-Everything below was produced on the development machine (PHP 8.3.35, FPDI 2.6.8,
-TCPDF 6.11.4, MuPDF/pikepdf for rendering and editing). The production host runs
-the same pure-PHP pipeline; **no new dependency is required to ship the fix**.
+The historical vector-engine measurements in §§1–5 and the 2026-10-24
+opacity comparison in §7 were produced on the development machine (PHP 8.3.35,
+FPDI 2.6.8, TCPDF 6.11.4, MuPDF/pikepdf for rendering and editing). They describe
+an earlier implementation, **not current student delivery**. Since 2026-10-29,
+student delivery is raster-only: Ghostscript renders each page and the identity
+mark is composited into the pixels. Legacy vector and renderer-free flatten
+modes are refused for delivery. See §6 and
+[`PDF_WATERMARK_VERIFICATION_REPORT.md`](PDF_WATERMARK_VERIFICATION_REPORT.md)
+for current behavior and measured artifacts. Production enablement remains
+blocked pending Ghostscript licensing and target-host review; this document is
+not approval to deploy.
 
 ---
 
-## 1. Why the old watermark came off in one step
+## 1. Historical vector implementation — why its watermark came off in one step
 
 The previous implementation put every mark in ONE block of operators at the start
 of the *page* content stream, while the lecture itself was a single imported Form
@@ -38,7 +46,7 @@ page edge (that is why ids arrived as `MED-0…`).
 
 ---
 
-## 2. What the implementation does now
+## 2. Historical vector implementation (not used for current student delivery)
 
 Per page (`PdfWatermarkService::renderWithTcpdfFpdi`), six representations:
 
@@ -98,7 +106,7 @@ Reasons for the chosen parameters:
 
 ---
 
-## 3. Measured results
+## 3. Historical vector-engine measurements
 
 Fixture: `fixtures/source.pdf` — 4 pages (A4 text + vector chart, landscape
 table, US-Letter page, dense reference table). Compare the **old** delivered file
@@ -140,18 +148,16 @@ Coverage and cost:
 
 ---
 
-## 4. What still works, and why
+## 4. Historical vector-engine attack analysis (not current delivery behavior)
 
-* **Flatten → clean by tone/binarise** (`img_*`): the visible marks are a grey
-  overlay on a page whose content is mostly black-on-white, so a threshold or a
-  "grey → white" filter separates them. It costs the text layer (no selection, no
-  search, OCR needed for accessibility), it destroys colour figures and tables
-  (page 2 of the fixture keeps only 87.7 % of its content), and it cannot restore
-  anything the marks changed inside glyphs — but on a plain text page it is a
-  clean removal. **This is the remaining limitation; it cannot be fixed with an
-  overlay.** The only counter is rasterising the page and flattening the mark
-  into the pixel data (the opt-in engine B, which needs Ghostscript), and even
-  that leaves the same grey-vs-black separation.
+* **Flatten → clean by tone/binarise** (`img_*`) is a historical attack on the
+  vector output above: a threshold or a "grey → white" filter separates its
+  overlay from mostly black-on-white page content. That loses the text layer,
+  destroys colour figures and tables (page 2 of that fixture kept only 87.7 % of
+  its content), and cannot restore anything the marks changed inside glyphs.
+  Those results do not describe current delivery. Current delivery is already
+  rasterized; its measured image-domain attacks and content-loss trade-offs are
+  in §6. Rasterization does not make a watermark impossible to remove.
 * **White boxes over the marks** still hide most of the ink (84 %), but they now
   cover the lecture as well (content kept falls to 43 %). A student who does it
   hands in a visibly damaged document.
@@ -168,15 +174,16 @@ Coverage and cost:
   the region, and the code in the matrix (`PdfWatermarkService::traceCode()`) is
   what lets support staff prove a copy was issued to a given account.
 
-**Residual risk, stated clearly:** anyone who is willing to rasterise, clean by
-tone and accept a damaged/OCR-only copy can produce a document without a visible
-mark. The delivered PDF still identifies the recipient in its text layer, in the
-baked stream, in four rails and in the trace matrix, so a leaked copy usually
-survives *as evidence* even when the visible ink does not survive *as a mark*.
+**Historical residual risk of the vector output:** a person willing to rasterise
+and clean by tone could produce a damaged/OCR-only copy without a visible mark.
+That old output also retained the recipient in its text layer, baked stream,
+rails and trace matrix. Current raster output has no searchable identity/text
+layer; do not apply those historical evidence claims to it. Image-domain
+removal remains possible at the content-quality cost measured in §6.
 
 ---
 
-## 5. Reproducing the measurements
+## 5. Reproducing the historical vector-engine measurements
 
 The harness is a developer tool; it needs packages the product never uses:
 
@@ -196,15 +203,15 @@ None of them is installed on the production host and none is needed there.
 
 ---
 
-## 6. Flattened (raster) mode — measured on the delivered file
+## 6. Current student delivery — raster-only, measured on the delivered file
 
-Everything above is the **vector** engine. The opt-in flattened engine
-(`PDF_WATERMARK_MODE=raster`) is a different product: each page is rendered to a
-bitmap, ONE large centred mark is composited into that bitmap, and the result is
-embedded as a single full-page image. There is nothing to "remove": the file
-contains
+This section describes the **current** delivery engine; the preceding vector
+measurements are historical. Student PDFs are raster-only: each page is rendered
+to a bitmap, ONE large centered mark is composited into that bitmap, and the
+result is embedded as a single full-page image. There is no separate watermark
+object or text layer to remove. Current fixture structure:
 
-| Structure of a flattened copy (4-page fixture, measured) | Count |
+| Structure of a current raster copy (4-page fixture, measured) | Count |
 |---|---|
 | embedded image XObjects | 4 (one per page) |
 | `/Type /Font` objects | 0 |
@@ -216,7 +223,7 @@ contains
 
 So the object-level attacks that editors expose ("remove watermark", delete the
 watermark layer, delete the watermark text, delete the annotation) have **no
-target**. The only remaining approach is to rewrite the pixels.
+target**. Image-domain edits remain possible, as the measurements below show.
 
 Measured with `raster_attacks.py` (PyMuPDF + NumPy; each attack applied to BOTH
 the delivered copy and the unwatermarked source, then differenced at the engine's
@@ -249,10 +256,10 @@ Reading the table honestly:
   pixels: every colour, every grey image, every antialiased edge and the whole
   photographic content of a slide deck are gone. Covering the mark with a white
   box (0 % mark) also destroys the content under it (2 % kept).
-* **The invisible-information attack is gone.** On the vector output, a
-  colour-preserving re-save can strip the mark while keeping the lecture text
-  selectable (see §4). On a flattened page there is no text layer to keep, so
-  that trade-off no longer exists.
+* **The invisible-information attack is gone.** On the historical vector output,
+  a colour-preserving re-save could strip the mark while keeping lecture text
+  selectable (see §4). Current raster output has no text layer to retain; this
+  removes that specific trade-off, not all possible pixel-level removal.
 
 Reproduce:
 
@@ -267,23 +274,23 @@ It needs only `pymupdf` and `numpy` (no pikepdf, no Pillow) and writes
 
 ---
 
-## 7. The 12 % mark: what the readability change costs (measured 2026-10-24)
+## 7. Historical 12% opacity comparison (measured 2026-10-24; not current policy)
 
-The single centred mark now composites at **`PDF_WATERMARK_OPACITY` = 0.12** in ONE
-pass, over a 107-grey face. Measured on blank paper (the only non-white pixel on
-the sheet is the mark, so its luminance *is* the result):
+In the historical implementation, the single centred mark composited at
+**`PDF_WATERMARK_OPACITY` = 0.12** in ONE pass, over a 107-grey face. Measured on
+blank paper (the only non-white pixel on the sheet is the mark, so its luminance
+*is* the result):
 
-| Engine | mark core luminance | measured effective opacity | mark vs white paper |
+| Historical engine | mark core luminance | measured effective opacity | mark vs white paper |
 |---|---|---|---|
-| `flatten` | 237 / 255 | **0.122** | 1.17 : 1 |
+| `flatten` (legacy, refused for delivery) | 237 / 255 | **0.122** | 1.17 : 1 |
 | `raster` (Ghostscript 10.08.0) | 237 / 255 | **0.122** | 1.17 : 1 |
 
-Body text under the mark is unchanged: inside the mark's footprint the text ink
-measured **mean 9.2** (`flatten`) and **3.6** (`raster`) of 255, i.e. a **17 : 1**
-contrast ratio against the marked paper. Before the change the same setting
-produced a face at `0.55 + 1.5 × 0.15 = 0.775` alpha (≈ 132 luminance) with an
-eight-times-dilated white halo — the reason the delivered page read as a grey
-banner.
+In that historical comparison, body text under the mark measured **mean 9.2**
+(`flatten`) and **3.6** (`raster`) of 255, i.e. a **17 : 1** contrast ratio
+against the marked paper. Before that change the same setting produced a face
+at `0.55 + 1.5 × 0.15 = 0.775` alpha (≈ 132 luminance) with an eight-times-
+dilated white halo — the reason the delivered page read as a grey banner.
 
 ### What that costs (attacks applied to the delivered page itself)
 
@@ -306,10 +313,8 @@ threshold (it came back as black ink); it did not survive <128 either. So the
 deterrence lost is one threshold step, and the readability gained is roughly a
 six-fold reduction in ink.
 
-**Recommendation.** Keep `PDF_WATERMARK_OPACITY=0.12` for reading comfort on
-lecture material. Where deterrence matters more than comfort (high-value decks,
-known leak), raise it to `0.20`–`0.25` — the same code path, no other change — or
-use the layered `vector` engine, whose marks are designed around the
-flatten-and-threshold attack. Do not go below `0.08`: at that point the mark is
-effectively invisible in ordinary viewing and on printouts, which the product
-does not consider watermarked.
+This opacity comparison was measured on the prior implementation and is
+historical evidence only. The suggestion to use the layered vector engine is
+obsolete: vector and renderer-free flatten modes are refused for current student
+delivery. Current raster settings and the verified 2026-10-29 measurements are
+documented in [`PDF_WATERMARK_VERIFICATION_REPORT.md`](PDF_WATERMARK_VERIFICATION_REPORT.md).

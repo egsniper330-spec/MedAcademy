@@ -289,7 +289,7 @@ function OfflineLibraryContent() {
           <Pressable onPress={() => setPlaying(null)} hitSlop={10} accessibilityRole="button" accessibilityLabel={t('offlineLibrary.backToVideos')}>
             <ArrowLeft size={22} color={colors.text} opacity={0.75} />
           </Pressable>
-          <Text style={{ color: colors.text, fontWeight: '700', fontSize: 15, flex: 1, marginLeft: 10 }} numberOfLines={1}>
+          <Text style={{ color: colors.text, fontWeight: '700', fontSize: 15, flex: 1, marginStart: 10 }} numberOfLines={1}>
             {playTitle}
           </Text>
         </View>

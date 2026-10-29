@@ -12,14 +12,17 @@
   production database, PDF, credential or server is touched. Ghostscript is
   never downloaded without the explicit -AcceptGhostscriptLicense opt-in, and
   even then this script only downloads + verifies it; the (elevated) install
-  step is printed as a command for you to run yourself.
+  step is printed as a command for you to run yourself. Student delivery and
+  this harness are raster-only; Ghostscript and its explicit test acknowledgement
+  are mandatory for a full run.
 
   Quick start:
-    powershell -NoProfile -ExecutionPolicy Bypass -File backend\tests\pdf-watermark\run.ps1
+    powershell -NoProfile -ExecutionPolicy Bypass -File backend\tests\pdf-watermark\run.ps1 -AcceptGhostscriptLicense
 
 .PARAMETER BootstrapOnly
   Prepare the workspace (download + verify pinned dependencies, build fixtures)
-  without running the test suites.
+  without running the test suites. If a new Ghostscript download is needed, the
+  explicit -AcceptGhostscriptLicense acknowledgement is still required.
 
 .PARAMETER SkipBootstrap
   Skip dependency preparation and go straight to the suites (offline re-runs).
@@ -28,10 +31,12 @@
   Use a PHP found on PATH instead of downloading the pinned PHP 8.3.35 runtime.
 
 .PARAMETER AcceptGhostscriptLicense
-  Explicit opt-in required before Ghostscript is downloaded. Ghostscript is
-  dual-licensed AGPL v3 / commercial (Artifex); see
+  Explicit local test acknowledgement required to exercise Ghostscript.
+  Ghostscript is dual-licensed AGPL v3 / commercial (Artifex); see
   backend/docs/PDF_WATERMARK_LICENSING.md. Without this flag the workflow only
   DETECTS an already-installed renderer and otherwise stops with instructions.
+  The acknowledgement is required for every full run because student delivery
+  is raster-only. It is not production licensing approval.
 
 .PARAMETER Clean
   Delete the whole test workspace (.freebuff/pdf-watermark-tests) first.
@@ -62,15 +67,16 @@ $ProgressPreference = 'SilentlyContinue'
 [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
 
 # ── Which engine this run exercises ─────────────────────────────────────────
-#   The product default is the pure-PHP VECTOR engine (FPDI + TCPDF): no
-#   binaries, works on ordinary cPanel hosting. Ghostscript + a TTF are needed
-#   ONLY by the opt-in raster engine, so their absence is a SKIP outside raster
-#   mode instead of a hard failure.
-$Mode = if ($env:PDF_WATERMARK_MODE) { $env:PDF_WATERMARK_MODE } else { 'vector' }
+# Student delivery is raster-only; Ghostscript + a TTF are mandatory and the
+# explicit licence acknowledgement is required before the pixel suites run.
+$Mode = if ($env:PDF_WATERMARK_MODE) { $env:PDF_WATERMARK_MODE } else { 'raster' }
 if (@('raster', 'vector', 'flatten', 'auto') -notcontains $Mode) {
     Fail "unknown PDF_WATERMARK_MODE=$Mode (use raster, vector, flatten or auto)" 2
 }
-$WantRaster = ($Mode -eq 'raster')
+$WantRaster = ($Mode -eq 'raster' -or $Mode -eq 'auto')
+if (-not $WantRaster) {
+    Fail "PDF_WATERMARK_MODE=$Mode is not supported by student delivery; use raster (or legacy auto, which resolves to raster)." 2
+}
 
 # ── Layout and pinned, tested versions ───────────────────────────────────────
 $Harness       = $PSScriptRoot
@@ -321,14 +327,15 @@ if (-not $gsInfo -and -not $gsInWorkspace) {
 '@
     Write-Host $disclosure
     if (-not $WantRaster) {
-        # Vector mode: Ghostscript is optional (it only enables the pixel proof).
-        Write-Warn2 'Ghostscript not found - fine for the default VECTOR pipeline; the pixel proof will be reported as SKIPPED.'
+        # Rasterization is the only allowed delivery engine; fail instead of
+        # accepting structural-only coverage with pixel proofs skipped.
+        Write-Warn2 'Ghostscript is required because student delivery is raster-only.'
         if ($AcceptGhostscriptLicense) {
-            Fail 'Ghostscript opt-in requested but the run is in vector mode. Set PDF_WATERMARK_MODE=raster to run the raster suite.' 2
+            Fail 'Ghostscript opt-in is only accepted with PDF_WATERMARK_MODE=raster.' 2
         }
-        # Nothing to download in vector mode: fall through to the suites.
+        # Nothing to download without explicit licence opt-in.
     } elseif (-not $AcceptGhostscriptLicense) {
-        Fail 'PDF_WATERMARK_MODE=raster needs Ghostscript and none was found. Choose option A above, or opt in with -AcceptGhostscriptLicense (option B).' 2
+        Fail 'Raster-only student delivery needs Ghostscript. Install/locate it and pass -AcceptGhostscriptLicense after accepting its licence terms.' 2
     }
 
 if ($WantRaster -and $AcceptGhostscriptLicense) {
@@ -363,11 +370,11 @@ function Find-Font {
 }
 $font = Find-Font
 if ($font) {
-    Write-Ok "Font: $font (raster engine only)"
+    Write-Ok "Font: $font (raster delivery)"
 } elseif ($WantRaster) {
     Fail "no TrueType font found (looked in $env:WINDIR\Fonts). Set PDF_WATERMARK_FONT to any .ttf path and re-run." 2
 } else {
-    Write-Ok "Font: not needed (the vector engine embeds TCPDF's bundled DejaVu face)"
+    Fail 'Raster-only student delivery requires a TrueType font; set PDF_WATERMARK_FONT to an installed .ttf.' 2
 }
 
 # ── 6. pdftotext (optional; text checks are reported as SKIPPED without it) ──

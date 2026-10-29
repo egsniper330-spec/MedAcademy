@@ -270,8 +270,9 @@ section('5. Watermark geometry, layers and identity');
   ok('a name that cannot be drawn falls back to the account id (never mojibake)',
     /private function renderableName/.test(svc) && /return '';/.test(svc) &&
     /\\x\{0590\}-\\x\{08FF\}/.test(svc));
-  ok('the raster engine is preserved as an opt-in, not the default',
-    /Config::string\('PDF_WATERMARK_MODE', self::MODE_AUTO\)/.test(svc));
+  ok('the raster engine is the default and legacy auto resolves to raster',
+    /Config::string\('PDF_WATERMARK_MODE', self::MODE_RASTER\)/.test(svc)
+    && /if \(\$mode === self::MODE_AUTO\) \{\s*return self::MODE_RASTER;/.test(svc));
 }
 
 /* ══ 6. Authorization is single-sourced and re-checked live ═══════════════ */
@@ -430,9 +431,10 @@ section('10. Students open PDFs through the personalized endpoint');
     const body = api.slice(start, start + 900);
     return /material_id: materialId/.test(body) && !/full_name|public_user_id|student_name/.test(body);
   })());
-  ok('the lesson screen uses the delivery endpoint for PDFs',
-    /waitForPersonalizedPdf\(String\(material\.id\)/.test(lesson) &&
-    /getMaterialPdfUrl\(materialId, forDownload/.test(lesson));
+  ok('the lesson screen directly requests a personalized PDF without queue polling',
+    /requestPersonalizedPdf\(String\(material\.id\)/.test(lesson)
+    && /getMaterialPdfUrl\(materialId, forDownload\)/.test(lesson)
+    && !/waitForPersonalizedPdf|getMaterialPdfStatus/.test(lesson));
   // A helper that is not routed fails at runtime with "Unknown function": the
   // delivery endpoint must exist in BOTH the PHP router and the PHP client map.
   const phpClient = read('src/client/php.ts');
@@ -493,15 +495,11 @@ section('11. Cache, concurrency and operational safety');
 
   ok('the variant key folds in the source hash + identity + settings',
     /variantKey\(\s*\$sourceHash,\s*\$identityHash,\s*\$this->watermark->variantSettings\(\$lines\)/.test(variants));
-  // The engine tokens are PINNED on purpose: they must change whenever the
-  // rendered look changes (tiled grid -> single centred mark -> exact-opacity
-  // single pass bumped the raster token to flatten-v4-single; the new flatten
-  // engine carries its own center-bake token), otherwise a cached copy drawn by
-  // the old layout would keep being served.
-  ok('the cache identity includes the ENGINE (a switch regenerates)',
-    /'engine' => \$mode === self::MODE_RASTER\s*\? 'flatten-v4-single'/.test(svc) &&
-    /self::MODE_FLATTEN\s*\? self::FLATTEN_LAYOUT/.test(svc) &&
-    /private const FLATTEN_LAYOUT = 'center-bake-v1'/.test(svc));
+  // The published raster layout token is pinned so any renderer/layout change
+  // invalidates previously generated copies rather than reusing stale output.
+  ok('the cache identity pins the raster engine and its current layout',
+    /'engine' => 'raster-v6-single-unrotated-image'/.test(svc)
+    && /\$settings\['raster_layout'\] = 'center-horizontal-v2'/.test(svc));
   ok('the cache identity includes the LAYER LAYOUT (old copies are regenerated)',
     /private const LAYERS_VERSION = 'layers-v4'/.test(svc) &&
     /\$settings\['layers'\] = self::LAYERS_VERSION/.test(svc));

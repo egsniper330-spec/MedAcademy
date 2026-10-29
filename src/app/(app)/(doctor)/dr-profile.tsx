@@ -506,7 +506,10 @@ export default function DoctorProfile() {
           style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
                    marginTop: 14, paddingTop: 14, borderTopWidth: 1, borderTopColor: `${c.text}08` }}>
           <Pencil size={15} color={c.primary} />
-          <Text style={{ fontSize: 14, fontWeight: '700', color: c.primary, marginLeft: 7 }}>
+          {/* `marginStart`: the gap belongs on the trailing side of the icon, which
+              is the LEFT in Arabic — a physical marginLeft put it between the
+              icon and the screen edge instead of between icon and label. */}
+          <Text style={{ fontSize: 14, fontWeight: '700', color: c.primary, marginStart: 7 }}>
             {t('drProfile.editContact')}
           </Text>
         </Pressable>
@@ -539,7 +542,7 @@ export default function DoctorProfile() {
                      marginTop: 14, paddingTop: 14, borderTopWidth: 1, borderTopColor: `${c.text}08` }}
           >
             <Pencil size={15} color={c.primary} />
-            <Text style={{ fontSize: 14, fontWeight: '700', color: c.primary, marginLeft: 7 }}>{t('drProfile.editNameEmail')}</Text>
+            <Text style={{ fontSize: 14, fontWeight: '700', color: c.primary, marginStart: 7 }}>{t('drProfile.editNameEmail')}</Text>
           </Pressable>
         </NeuCard>
 
@@ -620,7 +623,7 @@ export default function DoctorProfile() {
             {editError ? (
               <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8 }}>
                 <AlertCircle size={14} color="#DC2626" />
-                <Text style={{ color: '#DC2626', fontSize: 13, marginLeft: 6, flex: 1 }}>{editError}</Text>
+                <Text style={{ color: '#DC2626', fontSize: 13, marginStart: 6, flex: 1 }}>{editError}</Text>
               </View>
             ) : null}
           
@@ -675,7 +678,7 @@ export default function DoctorProfile() {
                 {pwdError ? (
                   <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 6 }}>
                     <AlertCircle size={14} color="#DC2626" />
-                    <Text style={{ color: '#DC2626', fontSize: 13, marginLeft: 6, flex: 1 }}>{pwdError}</Text>
+                    <Text style={{ color: '#DC2626', fontSize: 13, marginStart: 6, flex: 1 }}>{pwdError}</Text>
                   </View>
                 ) : null}
               </>

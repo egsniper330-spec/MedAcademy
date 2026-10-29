@@ -18,7 +18,9 @@
 #                                 downloads on POSIX: Artifex publishes no
 #                                 official Linux/macOS binary we could verify,
 #                                 so this flag only unlocks the instructions).
-#                                 Only needed for PDF_WATERMARK_MODE=raster.
+#                                 Required for every full student-delivery run
+#                                 (raster-only); legacy vector/flatten modes
+#                                 are rejected by the harness.
 #   --clean                       delete the workspace first
 #   -h | --help                   this text
 #
@@ -65,18 +67,20 @@ for arg in "$@"; do
 done
 
 # WHICH ENGINE THIS RUN EXERCISES
-#   The product default is the pure-PHP VECTOR engine (FPDI + TCPDF), which needs
-#   no binaries and works on ordinary cPanel hosting. The raster engine is opt-in
-#   with PDF_WATERMARK_MODE=raster and is the ONLY mode that requires Ghostscript
-#   and a TTF font; without it the suite runs the vector pipeline and the pixel
-#   proof is reported as SKIPPED.
-MODE="${PDF_WATERMARK_MODE:-vector}"
+#   Student delivery is raster-only. Ghostscript, the image compositor, a TTF
+#   font and the explicit Ghostscript licence acknowledgement are mandatory.
+MODE="${PDF_WATERMARK_MODE:-raster}"
 case "$MODE" in
     raster|vector|flatten|auto) ;;
     *) fail "unknown PDF_WATERMARK_MODE=$MODE (use raster, vector, flatten or auto)" 2 ;;
 esac
 WANT_RASTER=0
-[ "$MODE" = "raster" ] && WANT_RASTER=1
+case "$MODE" in
+    raster|auto) WANT_RASTER=1 ;;
+esac
+if [ "$WANT_RASTER" -ne 1 ]; then
+    fail "PDF_WATERMARK_MODE=$MODE is not supported by student delivery; use raster (or legacy auto, which resolves to raster)." 2
+fi
 
 sha256_of() {
     if command -v sha256sum >/dev/null 2>&1; then sha256sum "$1" | awk '{print $1}'
@@ -202,11 +206,8 @@ if ! find_gs; then
     - acknowledge this disclosure with --accept-ghostscript-license;
     - re-run this script.
 EOF
-    if [ "$WANT_RASTER" -eq 1 ]; then
-        [ "$ACCEPT_GS" -eq 1 ] && fail "PDF_WATERMARK_MODE=raster needs Ghostscript and none was found. Install it (above) and re-run." 2
-        fail "PDF_WATERMARK_MODE=raster needs Ghostscript. Install it and acknowledge the licensing disclosure with --accept-ghostscript-license, or run the default pure-PHP vector mode." 2
-    fi
-    warn "Ghostscript not found — ok for the default VECTOR pipeline; the pixel proof is reported as SKIPPED."
+    [ "$ACCEPT_GS" -eq 1 ] && fail "Raster-only student delivery needs Ghostscript. Install it (above) and re-run." 2
+    fail "Raster-only student delivery needs Ghostscript. Install it and acknowledge the licensing disclosure with --accept-ghostscript-license." 2
 fi
 [ "$ACCEPT_GS" -eq 1 ] && ok "Ghostscript license disclosure acknowledged (--accept-ghostscript-license)"
 GS_VERSION=""
@@ -237,7 +238,7 @@ if [ -n "$FONT" ]; then
 elif [ "$WANT_RASTER" -eq 1 ]; then
     fail "no TrueType font found (looked for DejaVu/Liberation/FreeSans/Arial Bold). Set PDF_WATERMARK_FONT to any .ttf path and re-run." 2
 else
-    ok "Font: not needed (the vector engine embeds TCPDF's bundled DejaVu face)"
+    fail "Raster-only student delivery requires a TrueType font; set PDF_WATERMARK_FONT to an installed .ttf." 2
 fi
 
 # ── 6. pdftotext (optional; text checks are reported as SKIPPED without it) ──

@@ -1130,7 +1130,7 @@ final class MaterialPdfQueueService
         $stats = ['scanned' => 0, 'deleted' => 0, 'bytes' => 0, 'skipped_active' => 0, 'errors' => 0, 'files' => []];
 
         $rows = Database::instance()->select(
-            "SELECT p.id, p.material_id, p.student_id, p.storage_path, p.file_size,
+            "SELECT p.id, p.material_id, p.student_id, p.variant_key, p.storage_path, p.file_size,
                     lm.course_id
                FROM lesson_material_pdfs p
                JOIN lesson_materials lm ON lm.id = p.material_id
@@ -1144,44 +1144,78 @@ final class MaterialPdfQueueService
             $stats['scanned']++;
             $materialId = (string) $row['material_id'];
             $studentId = (string) $row['student_id'];
+            $variantKey = (string) $row['variant_key'];
 
-            $active = (int) Database::instance()->value(
-                "SELECT COUNT(*) FROM lesson_material_pdf_jobs
-                  WHERE material_id = ? AND student_id = ? AND status IN ('queued','processing')",
-                [$materialId, $studentId],
-                0
-            );
-            if ($active > 0) {
-                $stats['skipped_active']++;
-                continue;
-            }
-
-            $rel = (string) $row['storage_path'];
-            // Ownership guard: only files under this material+student folder.
-            $prefix = $this->variants->prefix(
-                ['id' => $materialId, 'course_id' => (string) ($row['course_id'] ?? '')],
-                $studentId
-            );
-            if ($rel === '' || str_contains($rel, '..') || !str_starts_with($rel, $prefix)) {
-                $stats['errors']++;
-                continue;
-            }
-
-            $stats['files'][] = $rel;
-            $stats['bytes'] += (int) ($row['file_size'] ?? 0);
-            $stats['deleted']++;
-            if (!$apply) {
-                continue;
-            }
             try {
-                Database::instance()->query('DELETE FROM lesson_material_pdfs WHERE id = ?', [(string) $row['id']]);
-                $abs = $this->variants->storage()->privateFilePath(PdfWatermarkService::BUCKET, $rel);
-                if (is_file($abs) && !@unlink($abs)) {
-                    $stats['errors']++;
-                }
+                $this->variants->withVariantLock(
+                    ['id' => $materialId, 'course_id' => (string) ($row['course_id'] ?? '')],
+                    $studentId,
+                    $variantKey,
+                    function () use ($row, $materialId, $studentId, $variantKey, $cutoff, $apply, &$stats): void {
+                        // Rendering may have refreshed this row while cleanup
+                        // waited for the lock. Re-read expiry under the lock so
+                        // a newly published cache can never be deleted as stale.
+                        $current = Database::instance()->row(
+                            'SELECT id, variant_key, storage_path, file_size
+                               FROM lesson_material_pdfs
+                              WHERE id = ? AND created_at < ? LIMIT 1',
+                            [(string) $row['id'], $cutoff]
+                        );
+                        if ($current === null || (string) $current['variant_key'] !== $variantKey) {
+                            return;
+                        }
+
+                        $active = (int) Database::instance()->value(
+                            "SELECT COUNT(*) FROM lesson_material_pdf_jobs
+                              WHERE material_id = ? AND student_id = ? AND status IN ('queued','processing')",
+                            [$materialId, $studentId],
+                            0
+                        );
+                        if ($active > 0) {
+                            $stats['skipped_active']++;
+                            return;
+                        }
+
+                        $rel = (string) $current['storage_path'];
+                        // Ownership guard: only files under this material+student folder.
+                        $prefix = $this->variants->prefix(
+                            ['id' => $materialId, 'course_id' => (string) ($row['course_id'] ?? '')],
+                            $studentId
+                        );
+                        if ($rel === '' || str_contains($rel, '..') || !str_starts_with($rel, $prefix)) {
+                            $stats['errors']++;
+                            return;
+                        }
+                        if (!$apply) {
+                            // Report the planned file and bytes without claiming
+                            // that a dry run actually deleted anything.
+                            $stats['files'][] = $rel;
+                            $stats['bytes'] += (int) ($current['file_size'] ?? 0);
+                            return;
+                        }
+                        try {
+                            $deleted = Database::instance()->query(
+                                'DELETE FROM lesson_material_pdfs WHERE id = ? AND created_at < ?',
+                                [(string) $current['id'], $cutoff]
+                            )->rowCount();
+                            if ($deleted > 0) {
+                                $stats['deleted']++;
+                                $stats['files'][] = $rel;
+                                $stats['bytes'] += (int) ($current['file_size'] ?? 0);
+                                $abs = $this->variants->storage()->privateFilePath(PdfWatermarkService::BUCKET, $rel);
+                                if (is_file($abs) && !@unlink($abs)) {
+                                    $stats['errors']++;
+                                }
+                            }
+                        } catch (\Throwable $e) {
+                            $stats['errors']++;
+                            error_log('[material-pdf-retention] ' . $e->getMessage());
+                        }
+                    }
+                );
             } catch (\Throwable $e) {
                 $stats['errors']++;
-                error_log('[material-pdf-retention] ' . $e->getMessage());
+                error_log('[material-pdf-retention] lock/delete failed: ' . $e->getMessage());
             }
         }
 

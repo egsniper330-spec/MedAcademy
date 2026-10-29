@@ -37,14 +37,12 @@ use MedAcademy\Utils\Config;
  * opening the same document at once could exhaust the pool.
  *
  * Now:
- *   • an upload enqueues durable jobs for every eligible enrolled student
- *     (MaterialPdfQueueService::enqueueMaterial), so copies are usually ready
- *     before anybody asks;
- *   • a STUDENT never renders inline — a missing copy is queued (their own job,
- *     highest priority, no duplicate) and the response says `preparing`, which
- *     the app polls;
- *   • STAFF keep the synchronous render for their own single preview copy: it is
- *     one document, it is what makes the lesson editor usable, and it is bounded.
+ *   • a valid copy younger than 24 hours is reused immediately;
+ *   • a missing/expired copy is generated in the request under a per-student,
+ *     per-material advisory lock, with atomic publication and strict renderer
+ *     licensing/prerequisite checks;
+ *   • the durable queue remains only for prewarm/maintenance compatibility; a
+ *     student never depends on cron to begin or complete a request.
  *
  * The unwatermarked original is NEVER served from this endpoint, and a copy is
  * only reused while its source hash and engine settings still match.
@@ -80,15 +78,10 @@ final class MaterialDeliveryController
      * POST /materials/pdf-url
      * Body: { material_id, intent: 'view' | 'download', retry?: bool }
      *
-     * Authorises the caller, then returns EITHER a short-lived URL for a ready
-     * personalized copy OR a structured pending state:
-     *
-     *   { status: 'ready',     url, expires_at, ... }
-     *   { status: 'preparing', retry_after, ... }   queued / being rendered
-     *   { status: 'failed',    reason, retry_allowed, ... }
-     *
-     * A student never gets the unwatermarked source, and never triggers an
-     * unbounded render in this request.
+     * Authorises the caller, reuses a valid sub-24-hour personalized copy, or
+     * generates this caller's copy immediately under the bounded variant lock.
+     * The response is ready or a fail-closed error; students never enter a
+     * queue/polling state and never receive the unwatermarked source.
      */
     public function pdfUrl(Request $request): array
     {
@@ -102,8 +95,8 @@ final class MaterialDeliveryController
             throw new ApiException(400, 'material_id is required');
         }
 
-        // Minting may enqueue work, so it is throttled per ACCOUNT (an
-        // account-scoped bucket is immune to shared carrier-NAT IPs).
+        // PDF rendering is throttled per ACCOUNT (an account-scoped bucket is
+        // immune to shared carrier-NAT IPs).
         RateLimitService::perAccount($request, 'material_pdf_mint', $this->mintPerMinute(), 60);
 
         $userId = (string) $request->user['id'];
@@ -140,7 +133,7 @@ final class MaterialDeliveryController
         // Fast path: a valid, current copy already exists.
         $copy = $this->variants->existing($material, $userId, $identity['variant_key']);
         if ($copy !== null) {
-            // Retention clock: a copy being opened today is never swept.
+            // Retention is fixed from generation time; opening does not extend it.
             $this->variants->touchServed($copy);
             return $this->readyResponse(
                 $materialId,
@@ -151,68 +144,44 @@ final class MaterialDeliveryController
             );
         }
 
-        // ── STAFF: render this one preview copy inline ──────────────────────
-        // Bounded by construction: it is the caller's own single document. The
-        // queue still pre-generated student copies in the background.
-        if ($this->isStaff($role)) {
-            try {
-                $copy = $this->variants->ensure($material, $userId);
-            } catch (ApiException $e) {
-                $this->auditFailure($material, $userId, $this->failureStage($e), $e);
-                throw $e;
-            } catch (\Throwable $e) {
-                $this->auditFailure($material, $userId, 'unexpected', null);
-                error_log('[material-delivery] unexpected mint failure (' . get_class($e) . '): ' . $e->getMessage());
-                throw $e;
+        // Any authorized caller gets exactly one bounded render inside their
+        // request. The per-material/student/variant lock coalesces concurrent
+        // requests, while the renderer and upload limits bound the work. Student
+        // access never waits for a scheduled queue worker to start generation.
+        if (!$this->isStaff($role)) {
+            $maxBytes = max(1, Config::int('PDF_WATERMARK_MAX_SOURCE_BYTES', 50 * 1024 * 1024));
+            $sourceAbs = $this->variants->sourcePath($material);
+            if (!is_file($sourceAbs) || (int) @filesize($sourceAbs) > $maxBytes) {
+                throw new ApiException(422, 'This document is too large to prepare for delivery.', 'source_too_large');
             }
-            $this->variants->touchServed($copy);
-            return $this->readyResponse(
-                $materialId,
-                $userId,
-                $intent,
-                (int) ($copy['page_count'] ?? 0),
-                (string) $copy['variant_key']
-            );
+        }
+        try {
+            $copy = $this->variants->ensure($material, $userId);
+        } catch (ApiException $e) {
+            $this->auditFailure($material, $userId, $this->failureStage($e), $e);
+            throw $e;
+        } catch (\Throwable $e) {
+            $this->auditFailure($material, $userId, 'unexpected', null);
+            error_log('[material-delivery] unexpected mint failure (' . get_class($e) . '): ' . $e->getMessage());
+            throw $e;
         }
 
-        // ── STUDENT: queue it, report honestly, never render here ───────────
-        // `retry` is the explicit user action after a permanent failure; it only
-        // ever re-queues THIS student's own failed job.
-        if (!empty($body['retry'])) {
-            $this->queue->retry($material, $userId);
-        }
-
-        $variantKey = $this->queue->prioritize($material, $userId, true);
-        if ($variantKey === null) {
-            throw new ApiException(503, 'This document cannot be prepared right now.', 'queue_unavailable');
-        }
-
-        $status = $this->queue->statusFor($material, $userId, $variantKey, false);
-
-        // A queued copy may have been completed between the cache check and the
-        // enqueue (another worker finishing): re-check before saying "wait".
-        $copy = $this->variants->existing($material, $userId, $variantKey);
-        if ($copy !== null) {
-            $this->variants->touchServed($copy);
-            return $this->readyResponse(
-                $materialId,
-                $userId,
-                $intent,
-                (int) ($copy['page_count'] ?? 0),
-                (string) $copy['variant_key']
-            );
-        }
-
-        return $this->pendingResponse($materialId, $intent, $status);
+        $this->variants->touchServed($copy);
+        return $this->readyResponse(
+            $materialId,
+            $userId,
+            $intent,
+            (int) ($copy['page_count'] ?? 0),
+            (string) $copy['variant_key']
+        );
     }
 
     /**
      * GET /materials/pdf-status?material_id=…
      *
-     * Read-only companion to pdf-url: it answers "is my copy ready?" WITHOUT
-     * minting a token or touching the render path, so the client can poll it
-     * cheaply with bounded backoff. It performs the same authorization check and
-     * never reports `ready` for a copy that is not valid right now.
+     * Compatibility status endpoint for already shipped clients. New clients do
+     * not poll: pdf-url generates a missing copy synchronously. It performs the
+     * same authorization check and reports ready only for a currently valid copy.
      *
      * Since the waiting UX was added it also carries the server-grounded wait
      * contract: `state` (queued | generating | ready | failed | unavailable),
@@ -256,7 +225,9 @@ final class MaterialDeliveryController
         }
 
         $copy = $this->variants->existing($material, $userId, $identity['variant_key']);
-        $status = $this->queue->statusFor($material, $userId, $identity['variant_key'], $copy !== null);
+        $status = $copy !== null
+            ? ['status' => MaterialPdfQueueService::STATUS_READY, 'state' => MaterialPdfQueueService::STATE_READY, 'reason' => null, 'attempts' => 0, 'max_attempts' => MaterialPdfQueueService::DEFAULT_MAX_ATTEMPTS, 'retry_after' => 0, 'queue_position' => null, 'jobs_ahead' => null, 'processing_now' => 0, 'eta_seconds' => null, 'eta_min_seconds' => null, 'eta_max_seconds' => null, 'eta_basis' => 'not_applicable', 'eta_samples' => 0]
+            : $this->queue->statusFor($material, $userId, $identity['variant_key'], false);
 
         return [
             'material_id' => $materialId,

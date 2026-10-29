@@ -76,7 +76,11 @@ export function NeuInputRow({
       ]}
     >
       {leftIcon ? (
-        <View style={{ marginRight: spacing.sm, flexShrink: 0 }}>
+        // `marginEnd`, not `marginRight`: this row follows the layout direction,
+        // so the leading icon must sit on the RIGHT in Arabic. A physical margin
+        // kept the gap on the wrong side and left the icon touching the field
+        // edge in RTL (the mirrored padding is why it looked merely "tight").
+        <View style={{ marginEnd: spacing.sm, flexShrink: 0 }}>
           {leftIcon}
         </View>
       ) : null}
@@ -99,7 +103,9 @@ export function NeuInputRow({
       />
 
       {rightElement ? (
-        <View style={{ marginLeft: spacing.sm, flexShrink: 0 }}>
+        // Trailing element (reveal-password eye, clear button, spinner): `marginStart`
+        // mirrors to the LEFT in Arabic, which is where the trailing edge is.
+        <View style={{ marginStart: spacing.sm, flexShrink: 0 }}>
           {rightElement}
         </View>
       ) : null}
@@ -154,7 +160,7 @@ export function NeuSearchBar({
         containerStyle,
       ]}
     >
-      <View style={{ marginRight: spacing.sm, flexShrink: 0 }}>
+      <View style={{ marginEnd: spacing.sm, flexShrink: 0 }}>
         {leftIcon ?? <Search size={16} color={isDark ? c.textMuted : c.text} opacity={isDark ? 1 : 0.38} />}
       </View>
       <TextInput
@@ -176,7 +182,7 @@ export function NeuSearchBar({
         }}
       />
       {value.length > 0 && onClear ? (
-        <Pressable onPress={onClear} style={{ padding: spacing.xs, marginLeft: spacing.xs, flexShrink: 0 }}>
+        <Pressable onPress={onClear} style={{ padding: spacing.xs, marginStart: spacing.xs, flexShrink: 0 }}>
           <X size={14} color={isDark ? c.textMuted : c.text} opacity={isDark ? 1 : 0.4} />
         </Pressable>
       ) : null}

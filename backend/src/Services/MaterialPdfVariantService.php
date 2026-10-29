@@ -151,7 +151,7 @@ final class MaterialPdfVariantService
             $finalAbs
         ): array {
             // Double-checked: another worker may have finished while we waited.
-            $now = $this->existing($material, $studentId);
+            $now = $this->existing($material, $studentId, $variantKey);
             if ($now !== null && (string) ($now['variant_key'] ?? '') === $variantKey) {
                 return $now;
             }
@@ -262,9 +262,9 @@ final class MaterialPdfVariantService
         $now = gmdate('Y-m-d H:i:s');
         $update = static fn (): int => $db->query(
             'UPDATE lesson_material_pdfs
-                SET storage_path = ?, file_size = ?, page_count = ?, updated_at = ?
+                SET storage_path = ?, file_size = ?, page_count = ?, created_at = ?, updated_at = ?
               WHERE material_id = ? AND student_id = ? AND variant_key = ?',
-            [$rel, $size, $pages, $now, (string) $material['id'], $studentId, $variantKey]
+            [$rel, $size, $pages, $now, $now, (string) $material['id'], $studentId, $variantKey]
         )->rowCount();
 
         // Update-then-insert instead of ON DUPLICATE KEY UPDATE: the same two
@@ -298,12 +298,15 @@ final class MaterialPdfVariantService
      */
     public function existing(array $material, string $studentId, ?string $expectedVariantKey = null): ?array
     {
+        // Retention is measured from successful generation, not last access.
+        // Filter in SQL so an expired row is never delivered even when the
+        // cleanup job has not run yet; cleanup remains a bounded maintenance task.
         $row = Database::instance()->row(
             'SELECT id, storage_path, source_hash, variant_key, page_count
                FROM lesson_material_pdfs
-              WHERE material_id = ? AND student_id = ?
-              ORDER BY updated_at DESC LIMIT 1',
-            [(string) $material['id'], $studentId]
+              WHERE material_id = ? AND student_id = ? AND created_at >= ?
+              ORDER BY created_at DESC LIMIT 1',
+            [(string) $material['id'], $studentId, gmdate('Y-m-d H:i:s', time() - 86400)]
         );
         if ($row === null) {
             return null;
@@ -422,11 +425,11 @@ final class MaterialPdfVariantService
     {
         $dir = $this->storage->privateDir() . '/.watermark-locks';
         if (!is_dir($dir) && !@mkdir($dir, 0775, true) && !is_dir($dir)) {
-            return $fn();
+            throw new ApiException(503, 'Secure document preparation is temporarily unavailable.', 'watermark_lock_unavailable');
         }
         $handle = @fopen($dir . '/' . $this->lockName($material, $studentId, $variantKey), 'c');
         if ($handle === false) {
-            return $fn();
+            throw new ApiException(503, 'Secure document preparation is temporarily unavailable.', 'watermark_lock_unavailable');
         }
         $deadline = microtime(true) + max(1, Config::int('PDF_WATERMARK_LOCK_WAIT_SECONDS', self::LOCK_WAIT_SECONDS));
         $locked = false;

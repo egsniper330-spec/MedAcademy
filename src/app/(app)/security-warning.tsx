@@ -460,7 +460,10 @@ export default function SecurityWarningScreen() {
             <View style={[flat, {
               borderRadius: layout.cardRadius, padding: layout.cardPx,
               flexDirection: 'row', alignItems: 'center', gap: layout.pad.md,
-              borderLeftWidth: 4, borderLeftColor: '#EF4444',
+              // `borderStart*`: the accent bar marks the READING-START edge of
+              // the card, so in Arabic it belongs on the RIGHT. A physical
+              // left border put the emphasis on the wrong side of the block.
+              borderStartWidth: 4, borderStartColor: '#EF4444',
             }]}>
               <WifiOff size={layout.bodySize + 4} color="#EF4444" />
               <Text style={{ flex: 1, fontSize: layout.captionSize, color: c.text, lineHeight: layout.captionSize * 1.5 }}>
@@ -503,7 +506,7 @@ export default function SecurityWarningScreen() {
             <View style={[flat, {
               borderRadius: layout.cardRadius, padding: layout.cardPx,
               flexDirection: 'row', alignItems: 'center', gap: layout.pad.md,
-              borderLeftWidth: 4, borderLeftColor: '#EF4444',
+              borderStartWidth: 4, borderStartColor: '#EF4444',
             }]}>
               <ShieldAlert size={layout.bodySize + 4} color="#EF4444" />
               <Text style={{ flex: 1, fontSize: layout.captionSize, color: c.text, lineHeight: layout.captionSize * 1.5 }}>
@@ -524,7 +527,7 @@ export default function SecurityWarningScreen() {
                 <View style={[flat, {
                   borderRadius: layout.cardRadius, padding: layout.cardPx,
                   flexDirection: 'row', alignItems: 'center', gap: layout.pad.md,
-                  borderLeftWidth: 4, borderLeftColor: '#F59E0B',
+                  borderStartWidth: 4, borderStartColor: '#F59E0B',
                 }]}>
                   <AlertTriangle size={layout.bodySize + 4} color="#F59E0B" />
                   <View style={{ flex: 1, gap: layout.pad.xs }}>
@@ -540,7 +543,7 @@ export default function SecurityWarningScreen() {
                 <View style={[flat, {
                   borderRadius: layout.cardRadius, padding: layout.cardPx,
                   flexDirection: 'row', alignItems: 'center', gap: layout.pad.md,
-                  borderLeftWidth: 4, borderLeftColor: `${c.text}33`,
+                  borderStartWidth: 4, borderStartColor: `${c.text}33`,
                 }]}>
                   <Phone size={layout.bodySize + 4} color={`${c.text}55`} />
                   <Text style={{ flex: 1, fontSize: layout.captionSize, color: `${c.text}66`, lineHeight: layout.captionSize * 1.5 }}>
@@ -572,7 +575,7 @@ export default function SecurityWarningScreen() {
             <View style={[flat, {
               borderRadius: layout.cardRadius, padding: layout.cardPx,
               flexDirection: 'row', alignItems: 'center', gap: layout.pad.md,
-              borderLeftWidth: 4, borderLeftColor: '#F59E0B',
+              borderStartWidth: 4, borderStartColor: '#F59E0B',
             }]}>
               <AlertTriangle size={layout.bodySize + 4} color="#F59E0B" />
               <Text style={{ flex: 1, fontSize: layout.captionSize, color: c.text, lineHeight: layout.captionSize * 1.5 }}>

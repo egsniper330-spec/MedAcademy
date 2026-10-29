@@ -53,6 +53,8 @@ export default function StudentDashboard() {
   // ── Data state ────────────────────────────────────────────────────────────
   const [subscriptions, setSubscriptions] = useState<any[]>([]);
   const [allCourses, setAllCourses] = useState<any[]>([]);
+  /** Phase-2 (catalogue/categories) still in flight — gates the Explore section. */
+  const [catalogueLoading, setCatalogueLoading] = useState(true);
   const [categories, setCategories] = useState<any[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -68,26 +70,54 @@ export default function StudentDashboard() {
     // profile store is empty (e.g. the profile fetch failed non-fatally), the
     // screen must still exit the loading state and render the empty states
     // instead of spinning forever.
+    //
+    // ── TWO-PHASE LOAD (startup-latency fix) ────────────────────────────────
+    // The screen used to await ONE Promise.all of four unrelated requests, so
+    // the whole dashboard (My Courses, stats, everything) stayed behind a
+    // spinner until the SLOWEST of them answered — including the public course
+    // catalogue and the category list, which the student's own content does
+    // not depend on at all.
+    //
+    // Now the first usable screen depends only on the student's OWN data
+    // (enrollments + unread count); the catalogue and categories load in a
+    // second phase and fill the Explore section when they land. Worst case is
+    // unchanged (everything still arrives), best case is materially earlier on
+    // a large catalogue. No request was added — the same four are still made
+    // once each, still concurrently within their phase.
+    //
+    // `catalogueLoading` exists so the Explore section shows its own indicator
+    // instead of the "no new courses" empty state while phase 2 is in flight
+    // (a false empty state would be a regression, not an optimisation).
     try {
-      if (!profile) { setLoading(false); return; }
-      const [subs, count, courses, cats] = await Promise.all([
+      if (!profile) { setLoading(false); setCatalogueLoading(false); return; }
+
+      // ── Phase 1 — the student's own data (blocks the first render) ──
+      const [subs, count] = await Promise.all([
         getMySubscriptionsCached(profile.id),
         getUnreadNotificationCount(profile.id),
-        getPublishedCourses(),
-        getCategories(),
       ]);
       setSubscriptions(subs);
       setUnreadCount(count);
+      setLoading(false);
+      // DEV timing only: the landing screen's first usable data has landed.
+      markPerf('screen-data');
+      logPerfTimeline();
+
+      // ── Phase 2 — catalogue + categories (non-blocking) ──
+      const [courses, cats] = await Promise.all([
+        getPublishedCourses(),
+        getCategories(),
+      ]);
       setAllCourses(courses);
       setCategories(cats);
       // Warm the image cache the instant course data lands — cards render
       // with their images instead of popping in late after login.
       prefetchCourseImages(courseImageUrlsFrom(courses));
-    } catch {}
-    setLoading(false);
-    // DEV timing only: the landing screen's first data has landed.
-    markPerf('screen-data');
-    logPerfTimeline();
+    } catch {} finally {
+      // Terminal state is always reached, whichever phase failed.
+      setLoading(false);
+      setCatalogueLoading(false);
+    }
   }, [profile]);
 
   // Stale-while-revalidate: the FIRST visit shows the full-screen spinner,
@@ -201,7 +231,7 @@ export default function StudentDashboard() {
     shadowOffset: { width: 2, height: 2 },
     shadowOpacity: active ? 0 : 0.45,
     shadowRadius: 4,
-    marginRight: layout.pad.sm,
+    marginEnd: layout.pad.sm,
   });
   const chipText = (active: boolean) => ({
     fontSize: layout.captionSize, fontWeight: '600' as const,
@@ -502,7 +532,13 @@ export default function StudentDashboard() {
             </View>
           </View>
 
-          {filteredExplore.length === 0 ? (
+          {catalogueLoading ? (
+            /* Phase 2 (catalogue + categories) is still loading. Show an
+               indicator rather than the "no new courses" empty state — an
+               empty state here would be a lie, and the old single-batch load
+               never exposed it because it held the whole screen. */
+            <ActivityIndicator color={c.primary} style={{ marginVertical: layout.pad.lg }} />
+          ) : filteredExplore.length === 0 ? (
             <NeuCard style={{ alignItems: 'center', padding: layout.cardPx * 1.5, marginBottom: layout.sectionGap }}>
               <Search size={Math.round(layout.touchTarget * 0.85)} color={c.primary} opacity={0.25} style={{ marginBottom: layout.pad.sm }} />
               <Text style={{ fontSize: layout.bodySize, fontWeight: '700', ...mutedTextStyle(c, 0.5), textAlign: 'center' }}>

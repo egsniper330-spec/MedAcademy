@@ -117,7 +117,7 @@ function NotificationsContent() {
                 width: 40, height: 40, borderRadius: 12,
                 backgroundColor: n.is_read ? `${c.text}10` : `${c.primary}18`,
                 alignItems: 'center', justifyContent: 'center',
-                marginRight: 12,
+                marginEnd: 12,
               }}>
                 <Bell size={18} color={n.is_read ? c.text : c.primary} opacity={n.is_read ? 0.4 : 1} />
               </View>
@@ -132,7 +132,7 @@ function NotificationsContent() {
                 </Text>
               </View>
 
-              <View style={{ flexDirection: 'column', gap: 8, marginLeft: 8 }}>
+              <View style={{ flexDirection: 'column', gap: 8, marginStart: 8 }}>
                 {!n.is_read && (
                   <Pressable
                     onPress={() => handleRead(n.id)}

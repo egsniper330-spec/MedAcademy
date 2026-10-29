@@ -1022,7 +1022,7 @@ export default function LessonEditor() {
                     </View>
                   );
                 })}
-                <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.4), marginLeft: 4 }}>
+                <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.4), marginStart: 4 }}>
                   {uploadStatusLabel(activeTask.status, t)}
                 </Text>
               </View>
@@ -1163,7 +1163,7 @@ export default function LessonEditor() {
 
               {/* Duplicate detection dialog */}
               {duplicateInfo && (
-                <NeuCard style={[neuFlatStyle(isDark), { borderRadius: 16, padding: 16, gap: 12, borderLeftWidth: 3, borderLeftColor: '#D97706' }]}>
+                <NeuCard style={[neuFlatStyle(isDark), { borderRadius: 16, padding: 16, gap: 12, borderStartWidth: 3, borderStartColor: '#D97706' }]}>
                   <Text style={{ fontSize: 14, fontWeight: '700', color: '#D97706' }}>⚠️ {t('lessonEditor.duplicateVideoTitle')}</Text>
                   <Text style={{ fontSize: 13, color: c.text, opacity: 0.7, lineHeight: 18 }}>
                     {t('lessonEditor.duplicateVideoBody', { fileName: duplicateInfo.fileName, lesson: duplicateInfo.existingLesson ? t('lessonEditor.duplicateVideoLesson', { lesson: duplicateInfo.existingLesson }) : '' })}
@@ -1221,7 +1221,7 @@ export default function LessonEditor() {
 
               {/* Timeout card — Retry Processing / Replace / Delete Upload */}
               {timedOutTask && (
-                <NeuCard style={[neuFlatStyle(isDark), { borderRadius: 16, padding: 16, gap: 12, borderLeftWidth: 3, borderLeftColor: '#F97316' }]}>
+                <NeuCard style={[neuFlatStyle(isDark), { borderRadius: 16, padding: 16, gap: 12, borderStartWidth: 3, borderStartColor: '#F97316' }]}>
                   <View style={{ flexDirection: 'row', direction: isRTL ? 'rtl' : 'ltr', alignItems: 'center', gap: 8 }}>
                     <AlertCircle size={16} color="#F97316" />
                     <Text style={{ fontSize: 14, fontWeight: '700', color: '#F97316' }}>{t('lessonEditor.processingTimedOut')}</Text>
@@ -1265,7 +1265,7 @@ export default function LessonEditor() {
                 // ── Video Missing card (consistency-audit detected asset gone) ────
                 videoMissing ? (
                   <NeuCard style={[neuFlatStyle(isDark), { borderRadius: 16, padding: 16, gap: 12,
-                    borderLeftWidth: 3, borderLeftColor: '#DC2626' }]}>
+                    borderStartWidth: 3, borderStartColor: '#DC2626' }]}>
                     <View style={{ flexDirection: 'row', direction: isRTL ? 'rtl' : 'ltr', alignItems: 'center', gap: 10 }}>
                       <View style={{ width: 44, height: 44, borderRadius: 12,
                         backgroundColor: '#DC262618', alignItems: 'center', justifyContent: 'center' }}>
@@ -1329,7 +1329,7 @@ export default function LessonEditor() {
 
                   {/* Delete confirmation inline dialog */}
                   {showDeleteVideoDialog && (
-                    <NeuCard style={[neuFlatStyle(isDark), { borderRadius: 14, padding: 14, gap: 10, alignSelf: 'stretch', borderLeftWidth: 3, borderLeftColor: '#DC2626' }]}>
+                    <NeuCard style={[neuFlatStyle(isDark), { borderRadius: 14, padding: 14, gap: 10, alignSelf: 'stretch', borderStartWidth: 3, borderStartColor: '#DC2626' }]}>
                       <Text style={{ fontSize: 13, fontWeight: '700', color: '#DC2626' }}>{t('lessonEditor.deleteVideoTitle')}</Text>
                       <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.6), lineHeight: 17 }}>
                         {t('lessonEditor.deleteVideoBody')}

@@ -2,10 +2,15 @@
 
 This is the **single entry point** for running the real MedAcademy PDF
 watermarking implementation (`backend/src/Services/PdfWatermarkService.php`)
-locally with real PDFs and a real renderer, from a clean checkout. It replaces
-the ad-hoc `.freebuff/pdfreal/` environment documented in
-`.freebuff/pdfreal/REPORT.md` (that report remains the historical baseline;
-this workflow reproduces it with pinned, verified dependencies).
+locally with real PDFs and the required raster renderer, from a clean checkout.
+Student delivery is raster-only; Ghostscript, image composition, a TTF font and
+explicit local acknowledgement of the Ghostscript licensing disclosure are
+required to run the full suites. See §5 and `PDF_WATERMARK_LICENSING.md` before
+proceeding. Local test acknowledgement is not production approval.
+It replaces the ad-hoc `.freebuff/pdfreal/` environment documented in
+`.freebuff/pdfreal/REPORT.md` (that report remains a historical baseline; this
+workflow exercises the current raster-only delivery contract with pinned,
+verified dependencies).
 
 Nothing here touches production: no production database, PDF, credential,
 upload, migration, deployment or mobile build is involved. All runtimes,
@@ -17,7 +22,7 @@ git-ignored directory: `.freebuff/pdf-watermark-tests/`.
 ## 1. Quick start (Windows — primary workflow)
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File backend\tests\pdf-watermark\run.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File backend\tests\pdf-watermark\run.ps1 -AcceptGhostscriptLicense
 ```
 
 Exit codes: `0` all required suites passed · `1` a required suite failed ·
@@ -39,9 +44,11 @@ Exit codes: `0` all required suites passed · `1` a required suite failed ·
    the workspace (`lib/vendor`). FPDF **1.9.0** + FPDI **2.6.8** — the exact
    versions of the baseline run. `COMPOSER_HOME` is redirected into the
    workspace, so no global Composer state is written.
-3. **Ghostscript — licensing gate.** If no renderer is found the workflow
-   prints the AGPL/commercial disclosure (see §5) and **stops with exit 2**
-   unless you opt in:
+3. **Ghostscript — licensing gate.** Raster delivery requires Ghostscript, and
+   the test harness also requires an explicit local acknowledgement to exercise
+   it. Read the AGPL/commercial disclosure (see §5); without the flag the
+   workflow stops with exit 2 or the raster suites cannot pass. The flag is not
+   production legal approval:
 
    ```powershell
    # opt in to the download (see §5 first!)
@@ -82,7 +89,7 @@ Exit codes: `0` all required suites passed · `1` a required suite failed ·
 | `-BootstrapOnly` | prepare workspace + fixtures, run no suites |
 | `-SkipBootstrap` | skip downloads/installs (offline re-runs), go straight to suites |
 | `-UseSystemPhp` | use PHP from PATH instead of the pinned runtime |
-| `-AcceptGhostscriptLicense` | licensing opt-in; enables the verified Ghostscript **download** only |
+| `-AcceptGhostscriptLicense` | explicit local test acknowledgement; permits a verified Ghostscript download when needed and sets the test-only product acknowledgement for the run |
 | `-Clean` | delete `.freebuff/pdf-watermark-tests/` first (forces a full fresh bootstrap) |
 
 ---
@@ -91,18 +98,28 @@ Exit codes: `0` all required suites passed · `1` a required suite failed ·
 
 | Suite | Script | Checks | Covers |
 |---|---|---|---|
-| `real_pipeline` | `backend/tests/pdf-watermark/run_real_test.php` | 30 (+3 skipped) | The production VECTOR engine on a real 4-page, mixed-orientation PDF: page count/size/orientation preserved, identity on every page, back layer before and front marks after the imported page, baked marks inside the page stream, two students → distinct bytes, `pdftotext` extraction, source bytes unchanged, no temp scratch left. The 3 skips are the raster/pixel proofs, which need Ghostscript |
-| `repo_verify` | `backend/scripts/verify-watermark.php` | 18 | The repository's own integration test: geometry, identity completeness, layer order, bake, per-recipient difference, untouched source |
-| `error_handling` | `backend/tests/pdf-watermark/error_tests.php` | 6 | Fail-closed: non-PDF bytes, empty/truncated/encrypted PDF, page limit, missing engine — each must throw, produce **no** output file and leave **no** temp dir/`.part` |
-| `authorization` | `backend/tests/pdf-watermark/auth_tests.php` | 37 | `StorageService::canAccess` matrix, `shouldWatermark` role rules, token round-trip, forged identity → 403, expired → 410, malformed → 403, and **revocation after link issuance** |
-| `delivery` | `backend/tests/pdf-watermark/delivery_tests.php` | 104 | End-to-end delivery: per-student personalization, cache keys per recipient, concurrent mint/lock, cleanup, no unwatermarked fallback |
+| `real_pipeline` | `backend/tests/pdf-watermark/run_real_test.php` | 33 | Raster delivery through the real PHP service: page count/geometry/orientation, per-page identity, one centered mark, image-only output, source unchanged, and small/large render benchmarks. One vector-layer-only proof is skipped because raster output is one composited image |
+| `repo_verify` | `backend/scripts/verify-watermark.php` | 14 | Repository integration verification through the shipped service |
+| `error_handling` | `backend/tests/pdf-watermark/error_tests.php` | 8 | Fail-closed handling for malformed, encrypted, oversized/page-limit inputs and missing renderer prerequisites |
+| `authorization` | `backend/tests/pdf-watermark/auth_tests.php` | 37 | Access matrix, token lifecycle, forged identity, expiry, malformed token and revocation after link issuance |
+| `delivery` | `backend/tests/pdf-watermark/delivery_tests.php` | 129 | End-to-end personalization, cache keys, concurrency/locking, cleanup, status and no unwatermarked fallback. One vector-layer-only proof is skipped |
+| `flatten_engine` | `backend/tests/pdf-watermark/flatten_engine_tests.php` | 12 | Legacy vector/flatten delivery modes are refused and default/`auto` resolve to raster |
 | `gallery` | `backend/tests/pdf-watermark/make_gallery.php` | artifact | Builds `out/gallery.html` for manual visual inspection (non-required suite) |
 
-**Expected result (2026-10-23 run, PHP 8.3.35, FPDI 2.6.8, TCPDF 6.11.4):
-196 passed, 0 failed, 3 skipped — 199 checks, exit 0.** The skipped checks are
-the Ghostscript-dependent pixel proofs; the default engine is pure PHP.
+**Current verified result (2026-10-29, Windows 11, PHP 8.3.35, Ghostscript
+10.08.0): 232 passed, 0 failed, 2 skipped of 234 total checks; every required
+suite exited 0.** The two skips are vector-layer proofs inapplicable to the
+image-only contract, not checks blocked by a missing Ghostscript installation.
+The harness required `-AcceptGhostscriptLicense` to set the test-only product
+acknowledgement and exercise Ghostscript locally; this does not resolve
+production licensing. Reproduce the recorded run with:
 
-All suites drive the **actual PHP implementation and the actual generator**.
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File backend\tests\pdf-watermark\run.ps1 -SkipBootstrap -AcceptGhostscriptLicense
+```
+
+All required suites drive the **actual PHP implementation and the actual
+generator**.
 
 ### Removal-resistance measurements (separate, Python)
 
@@ -174,8 +191,10 @@ Reset everything: `run.ps1 -Clean` (or `run.sh --clean`).
 | `pdftotext` (optional) | Xpdf **4.00** | already on PATH | detected at runtime; checks **skip** without it |
 | `memory_limit` / `proc_open` | 512M / enabled | workspace `php.ini` | runtime check |
 
-The vector implementation (FPDI/FPDF passthrough) is untouched by this
-workflow; no Poppler or other renderer was added.
+The delivery implementation exercised here is raster-only. FPDI/FPDF/TCPDF
+remain available for PDF output and legacy-engine policy tests; student delivery
+refuses vector and renderer-free flatten modes. No Poppler or other renderer was
+added.
 
 ---
 
@@ -192,7 +211,8 @@ workflow; no Poppler or other renderer was added.
   workspace plus the installer's own uninstall registration).
 - On Linux/macOS there is **no automated download path at all** (Artifex
   publishes no official binary archive we can pin and verify); the runner
-  detects an existing `gs` or stops with instructions.
+  detects an existing `gs` or stops with instructions. Because raster is now
+  mandatory, this prerequisite cannot be skipped for a passing full run.
 - **Passing these tests does not resolve licensing obligations**, does not
   constitute legal clearance, and does not prove compatibility with cPanel
   shared hosting. Those remain open decisions (see the licensing doc §8).
@@ -202,7 +222,7 @@ workflow; no Poppler or other renderer was added.
 ## 6. Linux / macOS
 
 ```bash
-bash backend/tests/pdf-watermark/run.sh              # full run
+bash backend/tests/pdf-watermark/run.sh --accept-ghostscript-license  # full run; requires gs + TTF + PHP raster prerequisites
 bash backend/tests/pdf-watermark/run.sh --help       # options
 ```
 
@@ -211,12 +231,13 @@ codes. Differences: PHP must already be installed (the script never installs
 system packages — it prints package-manager commands), Ghostscript is
 detected only (never downloaded), font detection probes DejaVu /
 Liberation / FreeSans / Arial Bold paths, and `--accept-ghostscript-license`
-acknowledges the disclosure but still only unlocks the instructions.
+sets the test-only acknowledgement after you review the disclosure. The flag
+does not install Ghostscript or resolve production licensing.
 
 > Honest scope note: the Linux/macOS runner is written to mirror `run.ps1` and
-> has been syntax-checked and logic-tested, but the documented, verified run
-> environment for this baseline is **Windows 11** (the platform where the
-> 20/20 · 8/8 · 32/32 baseline was produced).
+> has been syntax-checked and logic-tested, but the verified full raster run
+> documented here was performed on **Windows 11**. Linux/macOS host compatibility
+> and licensing remain unverified.
 
 ---
 
@@ -241,34 +262,36 @@ as artifacts (never the PDFs/gallery, unless that is explicitly wanted).
   `canAccess` on a real server is not exercised here.
 - Linux `gs`, the cPanel PHP build's extensions/limits, and cPanel filesystem
   permissions are not covered by the Windows run (and vice versa).
-- The delivery suite (`backend/tests/pdf-watermark/delivery_tests.php`, 104
-  checks) exercises the controller against an in-memory SQLite database and a
-  temporary storage root, not against MySQL and cPanel storage. The path/cache
-  logic is the same code, but file-system permission behaviour on the host is
-  not reproduced.
+- The delivery suite (`backend/tests/pdf-watermark/delivery_tests.php`, 129
+  checks in the 2026-10-29 run; one proof is inapplicable/skipped) exercises
+  the controller against an in-memory SQLite database and a temporary storage
+  root, not against MySQL and cPanel storage. The path/cache logic is the same
+  code, but file-system permission behaviour on the host is not reproduced.
 - The removal-resistance numbers are measured on the fixture PDFs in this
   workspace; a different source document (scanned pages, full-page images,
   colour backgrounds) will produce different percentages for the image-domain
   attacks.
 
-## 9. Re-verification log (2026-10-26)
+## 9. Re-verification log (2026-10-29)
 
-Run on a Windows workstation with a portable **PHP 8.2.35** CLI
-(`pdo_sqlite`, `gd`, `curl`, `openssl`, `fileinfo`, `mbstring`, `zip`); no
-Ghostscript, so the raster pixel proofs stay SKIPPED by design.
+Full run on Windows 11 with the pinned **PHP 8.3.35** CLI, `pdo_sqlite`, GD +
+FreeType, Ghostscript 10.08.0, FPDF 1.9.0, FPDI 2.6.8, TCPDF 6.11.4 and Arial
+Bold. The command below ran all required suites; its explicit acknowledgement
+is test-only and is not production licence approval.
 
-| Suite | Command | Result |
-|---|---|---|
-| Real engine + integration | `php -d auto_prepend_file=…/prepend.php backend/tests/pdf-watermark/run_real_test.php` | **ALL CHECKS PASSED** |
-| Error handling | `…/error_tests.php` | **ALL ERROR-HANDLING CHECKS PASSED** |
-| Authorization | `…/auth_tests.php` | **ALL AUTHORIZATION CHECKS PASSED** |
-| Delivery (end-to-end) | `…/delivery_tests.php` | **104/104 checks passed** |
-| Flatten engine | `…/flatten_engine_tests.php` | **35/35 checks passed** |
-| Shipped service end-to-end | `php backend/scripts/verify-watermark.php` | **ALL CHECKS PASSED** |
-| Material upload/lifecycle | `bash backend/tests/material-lifecycle/run.sh` | **33/33 checks passed** |
+| Suite | Result |
+|---|---|
+| Real raster pipeline | **32 passed, 1 inapplicable skip** |
+| Shipped service integration | **14/14 passed** |
+| Fail-closed error handling | **8/8 passed** |
+| Authorization and token lifecycle | **37/37 passed** |
+| End-to-end delivery | **128 passed, 1 inapplicable skip** |
+| Legacy vector/flatten policy | **12/12 passed** |
+| Gallery artifact | **1/1 passed** |
+| **Required suite total** | **232 passed, 0 failed, 2 skipped of 234 checks** |
 
-Two harness defects were found and fixed while re-running this, and neither
-was a product bug:
+Two harness defects were found and fixed while re-running this, neither a
+product bug:
 
 1. **`flatten_engine_tests.php` was not hermetic.** The inherited
    `PDF_WATERMARK_MODE` / `PDF_WATERMARK_OPACITY` in `$_ENV` (populated at
@@ -282,4 +305,7 @@ was a product bug:
    The check now calls `clearstatcache(true, $orphan)` first.
 
 Both were test-harness issues: the delivered bytes, the authorization decisions
-and the cleanup behaviour were already correct.
+and the cleanup behaviour were already correct. The exact command and full
+machine-readable output are recorded in the companion
+[`PDF_WATERMARK_VERIFICATION_REPORT.md`](PDF_WATERMARK_VERIFICATION_REPORT.md)
+and the ignored `.freebuff/pdf-watermark-tests/out/` artifacts.

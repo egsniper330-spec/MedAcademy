@@ -24,6 +24,8 @@ import {
 import { neuColors, useLayout, neuFlatStyle, neuPressedStyle, safeBottom, zIndex, mutedTextStyle } from '@/lib/neu';
 import { PageHeader } from '@/components/PageHeader';
 import { AnchoredMenu } from '@/components/AnchoredMenu';
+import { ResponsiveModal } from '@/components/ResponsiveModal';
+import { NeuButton } from '@/components/NeuButton';
 import { useTranslation } from '@/lib/i18n';
 import { DATE_LOCALE_TAGS, formatLocalizedDate } from '@/lib/i18n/date';
 import { useStaleWhileRevalidateFocus } from '@/lib/useStaleWhileRevalidateFocus';
@@ -544,35 +546,77 @@ export default function VideoLibraryScreen() {
   return (
     <KeyboardAvoidingView style={{ flex: 1, backgroundColor: c.base }} behavior={undefined} /* keyboard: native inset only */>
 
-      {/* ── Rename modal ── */}
-      <Modal visible={!!renameAsset} transparent animationType="fade" onRequestClose={() => setRenameAsset(null)}>
-        <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
-          <View style={[neuFlatStyle(isDark), { width: '100%', maxWidth: 380, borderRadius: 22, padding: 24, gap: 16 }]}>
-            <Text style={{ fontSize: 17, fontWeight: '800', color: c.text }}>{t('videoLibrary.renameTitle')}</Text>
-            <View style={[neuPressedStyle(isDark), { borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, minWidth: 0 }]}>
-              <TextInput
-                value={renameTitle}
-                onChangeText={setRenameTitle}
-                placeholder={t('videoLibrary.titlePlaceholder')}
-                placeholderTextColor={`${c.text}55`}
-                style={{ flex: 1, minWidth: 0, fontSize: 14, color: c.text, paddingVertical: 0 }}
-                autoFocus
-              />
-            </View>
-            <View style={{ flexDirection: 'row', gap: 12 }}>
-              <Pressable onPress={() => setRenameAsset(null)}
-                style={[neuFlatStyle(isDark), { flex: 1, padding: 13, borderRadius: 12, alignItems: 'center' }]}>
-                <Text style={{ fontSize: 14, fontWeight: '700', ...mutedTextStyle(c, 0.6) }}>{t('common.cancel')}</Text>
-              </Pressable>
-              <Pressable onPress={handleRename} disabled={renameSaving}
-                style={{ flex: 1, padding: 13, borderRadius: 12, alignItems: 'center', backgroundColor: c.primary, flexDirection: 'row', justifyContent: 'center', gap: 8 }}>
-                {renameSaving && <ActivityIndicator size="small" color="#fff" />}
-                <Text style={{ fontSize: 14, fontWeight: '700', color: '#fff' }}>{t('common.save')}</Text>
-              </Pressable>
-            </View>
+      {/* ── Rename modal ───────────────────────────────────────────────────
+          FIXES (reported: old name not visible, input too small, typed text
+          not rendering):
+
+          1. PRESENTATION — was a raw React Native <Modal>. ResponsiveModal's
+             own header documents why that is banned in this app on RN 0.83 +
+             New Architecture + edge-to-edge: every open/close cycle becomes a
+             native dialog WINDOW, and the window show/dismiss race produces
+             duplicated / stacked / flickering dialogs. The rename field could
+             therefore appear over an older frame ("typed text not showing").
+             It now uses the same single modal every other form in the app
+             uses, which also gives safe-area + keyboard clearance, a
+             scrollable body, responsive width (92% capped at 680) and the
+             shared RTL-aware layout.
+
+          2. INPUT HEIGHT — the field was a `flex: 1, paddingVertical: 0`
+             TextInput inside an AUTO-HEIGHT COLUMN. In a column, `flex: 1` is
+             a VERTICAL flex, so the box collapsed to the text height and the
+             zero vertical padding then clipped the glyphs on Android. It now
+             reuses the proven form-field metrics (fontSize 15 +
+             paddingVertical 12 + the themed recessed surface), which is the
+             same style the profile / contact / password fields use.
+
+          3. VALUE — still a plain controlled `value`/`onChangeText` pair
+             seeded from `item.title`, so the CURRENT name is visible and
+             typing updates it immediately (never `defaultValue`, which does
+             not re-seed when a different video is opened). */}
+      <ResponsiveModal
+        visible={!!renameAsset}
+        onClose={() => { if (!renameSaving) setRenameAsset(null); }}
+        title={t('videoLibrary.renameTitle')}
+        icon={<Edit2 size={20} color={c.primary} />}
+        isDirty={!!renameAsset && renameTitle.trim() !== (renameAsset.title ?? '')}
+        footer={
+          <View style={{ flexDirection: 'row', gap: 12 }}>
+            <NeuButton
+              label={t('common.cancel')}
+              onPress={() => setRenameAsset(null)}
+              variant="secondary"
+              disabled={renameSaving}
+              style={{ flex: 1 }}
+            />
+            <NeuButton
+              label={t('common.save')}
+              onPress={handleRename}
+              loading={renameSaving}
+              disabled={!renameTitle.trim()}
+              style={{ flex: 1 }}
+            />
           </View>
-        </View>
-      </Modal>
+        }
+      >
+        <TextInput
+          value={renameTitle}
+          onChangeText={setRenameTitle}
+          placeholder={t('videoLibrary.titlePlaceholder')}
+          placeholderTextColor={`${c.text}55`}
+          style={{
+            backgroundColor: c.inputSurface, borderRadius: 12,
+            paddingHorizontal: 14, paddingVertical: 12, minWidth: 0,
+            fontSize: 15, color: c.text,
+            shadowColor: c.shadowDark, shadowOffset: { width: 2, height: 2 },
+            shadowOpacity: 0.45, shadowRadius: 5,
+          }}
+          autoFocus
+          selectTextOnFocus
+          returnKeyType="done"
+          onSubmitEditing={handleRename}
+          accessibilityLabel={t('videoLibrary.renameTitle')}
+        />
+      </ResponsiveModal>
 
       {/* ── Permanent deletion confirmation ── */}
       <Modal visible={!!deleteConfirm} transparent animationType="fade" onRequestClose={() => setDeleteConfirm(null)}>

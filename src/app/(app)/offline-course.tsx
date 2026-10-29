@@ -242,7 +242,7 @@ function OfflineCourseContent() {
           <Pressable onPress={() => setPlaying(null)} hitSlop={10} accessibilityRole="button" accessibilityLabel={t('offlineCourse.backToCourse')}>
             <ArrowLeft size={22} color={colors.text} opacity={0.75} />
           </Pressable>
-          <Text style={{ color: colors.text, fontWeight: '700', fontSize: 15, flex: 1, marginLeft: 10 }} numberOfLines={1}>
+          <Text style={{ color: colors.text, fontWeight: '700', fontSize: 15, flex: 1, marginStart: 10 }} numberOfLines={1}>
             {playTitle}
           </Text>
         </View>
@@ -416,7 +416,7 @@ function OfflineCourseContent() {
                             </View>
                           )}
                         </View>
-                        <View style={{ flex: 1, minWidth: 0, marginLeft: 12 }}>
+                        <View style={{ flex: 1, minWidth: 0, marginStart: 12 }}>
                           <Text style={{ color: colors.text, fontWeight: '700', fontSize: 14.5 }} numberOfLines={2}>{title}</Text>
                           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 4, flexWrap: 'wrap' }}>
                             {!!fmtDuration(e.meta.durationSec) && (

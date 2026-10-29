@@ -141,6 +141,18 @@ final class Database
         if ($this->pdo === null) {
             return;
         }
+        // This connection-slot optimization is for the production MySQL pool.
+        // Keep injected SQLite connections attached in tests and local tooling;
+        // releasing those would make the next query attempt a MySQL reconnect.
+        try {
+            if ((string) $this->pdo->getAttribute(PDO::ATTR_DRIVER_NAME) !== 'mysql') {
+                return;
+            }
+        } catch (\Throwable) {
+            // If the driver cannot be established, retaining the connection is
+            // safer than dropping a handle that may still own a transaction.
+            return;
+        }
         try {
             if ($this->pdo->inTransaction()) {
                 return;

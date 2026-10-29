@@ -254,11 +254,12 @@ console.log('── Student lesson screen: materials section + per-material poli
   // signed storage URL.
   ok(/onOpenMaterial\(mat, name, downloadable\)/.test(s),
     'student screen: the item action forwards its own access level');
-  // The screen resolves a READY personalized URL through the bounded wait/queue
-  // helper, which mints via getMaterialPdfUrl with the material id + intent.
-  ok(/waitForPersonalizedPdf\(String\(material\.id\)/.test(s) &&
-     /getMaterialPdfUrl\(materialId, forDownload/.test(s),
-    'student screen: PDFs are delivered through the personalized endpoint');
+  // PDFs are requested directly; the server generates missing copies in this
+  // request, so student delivery must not depend on queue polling.
+  ok(/requestPersonalizedPdf\(String\(material\.id\)/.test(s) &&
+     /getMaterialPdfUrl\(materialId, forDownload\)/.test(s) &&
+     !/getMaterialPdfStatus|waitForPersonalizedPdf/.test(s),
+    'student screen: PDFs use direct personalized delivery without status polling');
   ok(/getMaterialSignedUrl\(String\(path\), forDownload\)/.test(s),
     'student screen: non-PDF attachments keep the signed-URL flow');
 

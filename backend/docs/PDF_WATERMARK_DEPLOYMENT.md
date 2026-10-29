@@ -1,10 +1,10 @@
 # Personalized PDF watermarking — deployment checklist
 
 Every lesson PDF delivered to a **student** is personalized with that student's
-name and public account id (`MED-####`). There is no toggle: the decision is
-made server-side from the caller's role (`student` → personalized, staff →
-original). A student can download and keep their copy; a doctor or administrator
-still receives the untouched original.
+name and public account id (`MED-####`). There is no toggle: every role receives
+a personalized copy, determined server-side from the authenticated account. A
+student, doctor or administrator can download and keep their own copy; the
+unwatermarked source is never served by the material-delivery endpoint.
 
 This file lists **exactly what must be uploaded** and the checks to run after the
 upload. Nothing here is executed automatically — the backend is deployed by
@@ -29,7 +29,7 @@ Only these files changed. Paths are relative to the repository root and map
 |---|---|
 | `backend/src/Controllers/MaterialDeliveryController.php` | The delivery endpoint: mandatory personalization, token mint/verify, cache + lock, live re-authorization, audit |
 | `backend/src/Controllers/StorageController.php` | Refuses `lesson-materials` PDFs on `/storage/signed-url` **and** on redemption (`material_delivery_required`); refuses the legacy `lesson-pdfs` bucket for students |
-| `backend/src/Services/PdfWatermarkService.php` | **CHANGED** — the renderer (FPDI 2.x + TCPDF 6 default, opt-in raster): layered marks, seeded layout, per-page bake call, limits, status |
+| `backend/src/Services/PdfWatermarkService.php` | **CHANGED** — raster-only student delivery; one centered mark baked into each page image; legacy vector/flatten choices fail closed; Ghostscript/licensing prerequisites and versioned cache identity |
 | `backend/src/Services/PdfWatermarkBaker.php` | **NEW** — appends marks INSIDE each imported page stream so "delete the watermark block" is no longer possible. Pure PHP, no dependency |
 | `backend/src/Http/Response.php` | `Response::file()` — chunked streaming so a large PDF is never loaded into memory |
 | `backend/src/Storage/StorageService.php` | `privateFilePath()` / `privateFileExists()` used by personalized delivery; students no longer authorise `lesson-pdfs` (§7.1) |
@@ -65,13 +65,11 @@ the tree becomes `backend/vendor/autoload.php`, `backend/vendor/setasign/...`,
 produce `backend/vendor-pdf-engine/vendor/...`, which the autoloader never sees)
 and do not rename the folder: the loader looks for `backend/vendor`.
 
-There is **no font to upload**: the default vector engine embeds TCPDF's own
-bundled DejaVu Sans, subset to the glyphs used (a few KB per document). A TTF is
-required only by the optional raster engine (`PDF_WATERMARK_FONT`).
-
-The libraries are pure PHP (`ext-zlib` is the only extra extension). No
-Ghostscript, ImageMagick, `proc_open` or shell access is needed for the default
-engine.
+A TTF font is required for the raster watermark (`PDF_WATERMARK_FONT`); the
+service can use an installed font path on the host. Raster delivery also requires
+Ghostscript, PHP `proc_open`, GD with FreeType or Imagick, and the FPDF writer.
+Separately, FPDI/FPDF/TCPDF remain required for PDF parsing/output. These are
+runtime prerequisites, not optional enhancements.
 
 ### 1c. Database migration (must be run once)
 
@@ -89,80 +87,54 @@ script; run them once, by hand, as part of the deploy window.
 `backend/NAMECHEAP_DEPLOYMENT.md`, `backend/docs/PDF_WATERMARK_LICENSING.md`,
 `backend/docs/PDF_WATERMARK_TESTING.md`, this file.
 
-### 1e. What changed on 2026-10-24 (subtle single mark; renderer-free flattening)
+### 1e. Raster-only delivery change (2026-10-29)
 
-Two backend files changed; **no migration, no new dependency, and no new
-environment variable is required for the default engine**:
+Student PDF delivery now accepts only raster output. The service renders each
+source page, composites one centered identity mark into the page bitmap, and
+writes a one-image-per-page PDF. Legacy vector and renderer-free flatten modes
+remain in the service for diagnostics and policy regression tests, but
+`personalize()` rejects them; there is no automatic fallback. The renderer/cache
+identity was versioned so stale vector/flatten copies are not reused.
 
-| File | Change |
-|---|---|
-| `backend/src/Services/PdfWatermarkService.php` | **New engine `flatten`** (`PDF_WATERMARK_MODE=flatten`): ONE centred 35° mark per page, written into each imported page's own content stream. No renderer, no shell, no network, no font upload — just FPDI + TCPDF. The single centred mark of the image engine is now drawn in **ONE pass at exactly `PDF_WATERMARK_OPACITY`** (default changed 0.15 → **0.12**, measured effective opacity **0.122**); the old code mapped the setting through `0.55 + 1.5x` and drew a dilated white halo eight times, so the default rendered at ~0.78 alpha. The raster engine is **licence-gated**: it will not run unless `PDF_WATERMARK_ACCEPT_AGPL_RENDERER=1` is also set. Cache token bumped to `flatten-v4-single`. |
-| `backend/src/Services/PdfWatermarkBaker.php` | Every skip still records **why**; the bake report now also returns `baked_pages` / `skipped_pages` (1-based). New `bakeOnPages()` appends a block to a PAGE's content stream for pages whose imported Form cannot be rewritten, so a document never needs the mark left out. **Bug fix:** `decodeStream()` used to `trim($payload, "\r\n")` the compressed stream, which corrupted deflate data when it legitimately began or ended with `0x0A`/`0x0D` — such a page was reported “not appendable” and silently lost its content bake. It now takes the payload from `/Length`. |
-
-Upload only these two files if the host already runs the 2026-10-23 package
-(`backend/deploy-package/2026-10-24-pdf-watermark-license-and-opacity/` contains
-exactly them plus a README). The **default engine and its behaviour are
-unchanged**: vector output, no binaries needed, no licence exposure.
-
-**Where the single centred mark comes from.** Two engines draw it, and neither is
-required for the other:
-
-| Mode | Page content | Needs a binary? | Licence |
-|---|---|---|---|
-| `flatten` (recommended) | ONE centred 35° mark baked into the page stream; lecture text stays selectable | **no** | MIT + LGPL only |
-| `raster` | ONE image per page; mark composited into the bitmap | Ghostscript + a TTF | AGPL/commercial — **gated** |
-
-The raster engine is the strongest form (no text layer, no Form XObject, nothing
-to select) but its only renderer is Ghostscript; see `PDF_WATERMARK_LICENSING.md`
-for why that is gated rather than default. Measured on the same 4-page fixture
-(6.8 KB source, second run of each engine, PNG at 200 DPI, Ghostscript 10.08.0):
-
-| Engine | Output | Per document |
-|---|---|---|
-| `vector` (layered grid) | 133,126 bytes | 123 ms |
-| `flatten` (one centred mark) | **64,326 bytes** | **94 ms** |
-| `raster` (one image per page) | 670,087 bytes | 4,663 ms |
-
-The flatten engine is also the SMALLEST of the three here: one mark per page
-compresses far better than a 12-mark grid.
-`PDF_WATERMARK_IMAGE_FORMAT=png` is the shipped default and it measured **both
-smaller and lossless** on the same text/diagram document at the new opacity:
-PNG **670,087 bytes** versus JPEG **1,359,670** at q82, **1,728,487** at q92 and
-**2,026,655** at q95 (JPEG spends its bytes on ringing around glyph edges and
-flat paper, where PNG compresses almost free). Switch to JPEG only for
-photographic/scan-heavy sources, where the opposite is typically true — that case
-was **not** measured here.
+This changes production prerequisites and licensing exposure. Raster delivery
+requires Ghostscript, PHP `proc_open`, GD with FreeType or Imagick, a TTF font,
+FPDF, and explicit Ghostscript licence acknowledgement. Student delivery fails
+closed with HTTP 503 when a required capability is absent. Resolve the AGPL /
+commercial decision before configuring the production acknowledgement flag.
+No production configuration, licence or host was changed in local verification.
 
 ---
 
 ## 2. Server configuration
 
-### 2.1 `.env` (only if you want to change a default)
+### 2.1 `.env` (production raster prerequisites)
 
-The defaults are correct for shared hosting. Nothing here is required:
+The mode defaults to raster (`auto` also resolves to raster). The licence flag
+below is intentionally commented: enable it only after the production legal /
+licensing decision is documented and the host prerequisites are verified.
 
 ```
-PDF_WATERMARK_MODE=auto              # auto | vector | flatten | raster  (auto = pure PHP first)
-PDF_WATERMARK_OPACITY=0.12           # single centred mark (flatten + raster)
-# PDF_WATERMARK_ACCEPT_AGPL_RENDERER=1   # raster ONLY; see licensing doc — do NOT enable casually
-PDF_WATERMARK_VECTOR_OPACITY=0.10    # BACK grid only (0.04–0.35)
-PDF_WATERMARK_VECTOR_FG_OPACITY=0.30  # marks that cross the lecture (0.08–0.55)
+PDF_WATERMARK_MODE=raster            # auto also resolves to raster; vector/flatten fail closed
+# PDF_WATERMARK_ACCEPT_AGPL_RENDERER=1  # set only after documented legal/licence approval
+PDF_WATERMARK_FONT=/path/to/font.ttf   # required TTF path
+PDF_WATERMARK_DPI=200
+PDF_WATERMARK_IMAGE_FORMAT=png
+PDF_WATERMARK_OPACITY=0.12
 PDF_WATERMARK_MAX_PAGES=150
 PDF_WATERMARK_MAX_SOURCE_BYTES=52428800
 PDF_WATERMARK_LOCK_WAIT_SECONDS=25
-PDF_WATERMARK_TIME_LIMIT_SECONDS=90  # render budget (raised for the render only, then restored)
+PDF_WATERMARK_TIME_LIMIT_SECONDS=90
 MATERIAL_PDF_URL_TTL_SECONDS=300
 MATERIAL_PDF_MINT_PER_MINUTE=60
 ```
 
-`PDF_WATERMARK_TIME_LIMIT_SECONDS` (default 90, minimum 30) exists because the
-layered vector engine redraws every page with six layers plus a content bake. A
-shared host whose `max_execution_time` is 30 s can be exhausted mid-render by a
-large document, and a PHP fatal on timeout returns **no JSON at all** — the app
-can only show its generic "personalized copy could not be prepared" message.
-`PdfWatermarkService::personalize()` raises the limit for the render, restores the
-worker's original value immediately afterwards, and turns everything else it can
-catch into a NAMED stage (see §2.3).
+`PDF_WATERMARK_TIME_LIMIT_SECONDS` (default 90, minimum 30) bounds the raster
+render. Local measurements were 3.18 seconds for 4 pages and 31.09 seconds for
+40 pages on the pinned Windows test host; production input PDFs and hardware can
+differ substantially. Validate realistic scans and page sizes on the target
+host, and set PHP execution/memory limits with headroom. The service restores
+the worker's previous time limit after rendering and reports named failure
+stages (see §2.3).
 
 ### 2.3 Diagnosing a failed delivery (stage codes)
 
@@ -172,7 +144,7 @@ A refused mint now names its stage. The code is the response `code` field, the
 
 | code | meaning | fix |
 |---|---|---|
-| `engine_unavailable` | no usable FPDI/TCPDF in `backend/vendor` | upload/extract `vendor-pdf-engine.zip`; `php backend/scripts/watermark-diagnostics.php` |
+| `engine_unavailable` | raster delivery prerequisites incomplete, renderer unlicensed/unacknowledged, or PDF writer unavailable | `php scripts/watermark-diagnostics.php`; verify Ghostscript, `proc_open`, GD/FreeType or Imagick, TTF, FPDF, and the reviewed production acknowledgement |
 | `pdf_parse` | FPDI cannot read this document (compressed xref / unsupported structure) | source-side problem; re-export the PDF |
 | `render_failed` | the engine threw while drawing | `cause` in the audit row / `error_log` names the class + message |
 | `output_missing` | render produced no file | usually memory or disk; check the PHP error log |
@@ -203,7 +175,7 @@ already set.
 
 | Setting | Recommended | Why |
 |---|---|---|
-| `memory_limit` | `256M` (512M if you enable raster) | FPDI parses the whole cross-reference of the source; the raster engine needs two truecolor layers per page |
+| `memory_limit` | `256M` or more; validate on representative PDFs | rasterization uses truecolor image buffers; scans/high-resolution pages can need additional memory |
 | `max_execution_time` | `120` | a large document is parsed page by page; the result is cached, so this is paid once per student per document |
 
 ### 2.3 Storage and permissions
@@ -263,42 +235,31 @@ Run these over SSH (or cPanel → Terminal), from the backend directory:
 php scripts/watermark-diagnostics.php
 ```
 
-Expect (default configuration): `mode: auto`, `effective: vector`, `vector:
-READY (FPDI 2.x + TCPDF 6.x)`. If it reports `NO ENGINE`, `backend/vendor` is
-missing or not readable.
+Expect only after the approved host configuration is installed: `mode: raster`,
+`effective: raster`, `raster: READY`, Ghostscript version present, compositor/font
+available, and the licence gate accepted. If any raster requirement is missing,
+the service intentionally reports unavailable and refuses delivery (HTTP 503);
+there is no vector/flatten fallback.
 
 ```bash
 php scripts/verify-watermark.php
 ```
 
-This renders a real fixture through the shipped service, then checks the page
-count, that **every page** carries the identity many times, that a back layer is
-drawn before the imported page and a front layer after it, that the marks are
-**baked into each imported page stream**, that two identities produce different
-bytes, and that the source file is untouched. Exit code `0` = pass.
+This renders a real fixture through the shipped service and checks page count,
+that each output page is a single raster image, every page carries one centered
+watermark, the PDF has no extractable source text/font/Form/annotation layer,
+two identities produce different bytes, and the source file remains untouched.
+Exit code `0` = pass. The tool runs locally; it does not validate the target
+production host.
 
-`removal_attacks.py` (Python, developer machine only) is the second half of the
-check: it takes a delivered file and measures what a real attacker can remove
-(`backend/docs/PDF_WATERMARK_REMOVAL_RESISTANCE.md`).
+Then, in the app, open a lesson as a student, **view** and **download** a PDF.
+Confirm the student's identity mark appears centered on every page and text is
+visually readable. Text is intentionally rasterized and is no longer selectable
+or searchable.
 
-Then, in the app: open a lesson as a student, **view** a PDF, and **download** the
-same PDF. Both files must show `<student name> • MED-####`
-
-* repeatedly, at several angles, **across the text and figures** (not just in
-  the margins),
-* on all four edges (two horizontal rails, two vertical),
-* once in the **middle of the sheet** as a darker anchor line (this is the mark
-  that survives "flatten, threshold, crop the margins"),
-* with the complete account id — never a truncated `MED-0…`,
-* plus a fine dot texture and a small 8x4 dot matrix in the bottom-right corner
-  (the per-recipient trace code, `PdfWatermarkService::traceCode()`).
-
-Open the same material as the doctor: it is watermarked with the **doctor's**
-identity. Since the "watermark everything" policy change, this endpoint never
-serves an unwatermarked original to anyone — so a doctor's download must show a
-watermark too. If it does not, the server is still running the previous
-`MaterialDeliveryController.php` (which exempted staff) and that file has not
-been uploaded yet.
+Open the same material as a doctor: it should be watermarked with the doctor's
+authenticated identity as well. The material-delivery endpoint does not serve
+the unwatermarked original to staff or students.
 
 > The ways the mark can and cannot be removed — with measured before/after
 > numbers — are in `PDF_WATERMARK_REMOVAL_RESISTANCE.md`. Do not promise staff
@@ -360,12 +321,11 @@ php backend/scripts/watermark-worker.php --limit=3 --pretty
 
 ## 7. Frontend
 
-The student lesson screen already opens PDFs through `POST /materials/pdf-url`
-for **both** preview and download, and keeps signed storage URLs for every
-non-PDF attachment. If the installed app build is older than this change it will
-call `/storage/signed-url` for a PDF and receive `403
-material_delivery_required` — a new app build is required for the in-app flow to
-work. No new native permission, dependency or rebuild of `ios/` is involved.
+The student lesson screen opens PDFs through `POST /materials/pdf-url` for
+both preview and download, and keeps signed storage URLs for non-PDF attachments.
+An older installed app build that requests a signed storage URL for a PDF receives
+`403 material_delivery_required`; release the app build containing the token-
+gated delivery flow. No new native permission or `ios/` rebuild is required.
 
 ---
 
@@ -395,52 +355,20 @@ migration with no benefit.
 
 ## 8. Known limitations
 
-* **Modern PDF structures.** The free FPDI parser cannot read a PDF whose
-  cross-reference table is a compressed stream (`/Type /XRef`), which is what
-  Word, InDesign and current LaTeX produce by default, nor PDFs that need the
-  commercial "FPDI PDF-Parser" add-on (object streams, some filters). In **vector
-  mode** such a document is **refused with HTTP 422** and a clear message — never
-  delivered unwatermarked. The **flattened** engine renders it with Ghostscript
-  like any other PDF (measured: a `/Type /XRef` fixture is delivered, not
-  refused), so enabling raster mode is also the way to serve modern sources. If the existing collection contains many of these, the options
-  are (a) re-save the source as PDF 1.4/Acrobat-compatible before upload, or
-  (b) purchase the paid parser (a licensing decision, see
-  `PDF_WATERMARK_LICENSING.md`). The raster engine needs Ghostscript and is
-  therefore subject to the AGPL/commercial question — it is **not** enabled by
-  default.
-* **Vector output keeps a text layer.** The watermark is embedded in the page
-  content, so the lecture text stays selectable (copy/paste works). Flattening
-  is available only through the opt-in raster engine, which needs Ghostscript:
-  there the page is ONE full-page image (no `/Type /Font`, no annotation, no Form
-  XObject, 0 extractable characters — measured), which is what makes text
-  extraction and object-level watermark removal fail together.
-* **Baking is skipped on some pages.** `PdfWatermarkBaker` only rewrites a Form
-  whose geometry it can verify: the `/BBox` must equal the page box (directly or
-  with width/height swapped), any Form `/Matrix` must be invertible, `/Length`
-  must be direct, the stream must be uncompressed or plain FlateDecode, and the
-  file must use a classic xref table. Rotated source pages bake normally — FPDI
-  keeps the rotation in the Form `/Matrix` and the baker pre-multiplies its
-  inverse, so the appended marks land upright in page coordinates. A page that
-  fails these checks keeps all five page-level marks — back grid, front marks,
-  trace lattice, edge rails and the interior anchor (still watermarked, just
-  without the in-stream copy) — and a per-page reason is logged
-  (`content bake skipped: page N: …`).
-* **Tone-cleaning still removes most of the tint.** A student who rasterises the
-  page, maps greys to white and crops the margins removes about 91 % of the
-  watermark ink — but not the interior anchor or the edge rails, and at the cost
-  of the text layer and the figures. The measured cost of each attack and what
-  survives it are in `PDF_WATERMARK_REMOVAL_RESISTANCE.md`. Do not describe the
-  watermark to staff as impossible to remove.
-  In **flattened** mode the same class of attack is the only one that works, and
-  it is measured there too: thresholding at 128 removes ~99.7 % of the mark ink
-  while wiping half the page's pixels (colours, images and antialiasing are
-  gone); whitening the mid-grey band removes ~99.4 % and wipes ~63 %. Every
-  *non-destructive* attempt — deleting text operators, deleting annotations,
-  cropping, "keep only the page image" — leaves the mark at 97-100 %.
+* **Host prerequisites and licensing.** Raster delivery depends on Ghostscript,
+  `proc_open`, GD/FreeType or Imagick, a TTF font, the FPDF writer and explicit
+  acceptance of the Ghostscript licence position. Production use remains blocked
+  until legal/licensing review and actual-host compatibility checks are complete.
+* **Source readability/quality.** The local suite verifies a compressed-xref
+  fixture renders and malformed, encrypted, over-limit and oversized fixtures
+  fail closed. Unusual real-world filters, damaged documents, scanned page
+  sizes and photographic output still need representative target-host review.
+* **Raster trade-off.** The watermark is baked into one image per page and source
+  text cannot be selected or copied. Watermark visibility/readability was
+  measured on the fixtures; this does not establish universal readability.
+* **Arabic-script names** were not validated in this run; confirm glyph coverage
+  and rendering with representative names and the actual production TTF.
 * **Encrypted PDFs** are refused (`422`) with an actionable message.
-* **Arabic-script names** are not shaped by the vector renderer; for such a name
-  the identity line falls back to the account id, which is unique and stable and
-  is the part that attributes a leaked copy. Arabic shaping is not attempted.
 * **Rate limiting** is per account (`MATERIAL_PDF_MINT_PER_MINUTE`, default 60
   per minute) and protects the expensive render path; the storage route is not
   rate limited.

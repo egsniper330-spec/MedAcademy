@@ -27,6 +27,7 @@ $suites = [
     'error_handling' => ['Fail-closed error handling (malformed/encrypted/limits/missing deps)', true, 'cases'],
     'authorization'  => ['Authorization + token lifecycle incl. revocation', true, 'checks'],
     'delivery'       => ['End-to-end delivery (personalization, cache, concurrency, cleanup)', true, 'checks'],
+    'flatten_engine' => ['Legacy vector/flatten delivery modes fail closed', true, 'cases'],
     'gallery'        => ['Visual gallery artifact (manual inspection)', false, null],
 ];
 
@@ -206,7 +207,7 @@ foreach ($versions as $k => $v) {
 $md .= "\n## Artifacts (all inside the git-ignored test workspace)\n\n";
 $md .= "- Output directory: `{$summary['artifacts']['out_dir']}`\n";
 $md .= "- Machine-readable summary: `{$summary['artifacts']['summary_json']}`\n";
-foreach (['real_pipeline', 'repo_verify', 'error_handling', 'authorization', 'delivery', 'gallery'] as $id) {
+foreach (['real_pipeline', 'repo_verify', 'error_handling', 'authorization', 'delivery', 'flatten_engine', 'gallery'] as $id) {
     $md .= "- Suite log: `{$OUT}/$id.log`\n";
 }
 if ($summary['artifacts']['gallery'] !== null) {

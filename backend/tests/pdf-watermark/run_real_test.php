@@ -11,25 +11,15 @@ declare(strict_types=1);
  * pixels. Two students are personalized from the same source. Never touches a
  * database.
  *
- * THE SUITE IS ENGINE-AWARE. `auto` resolves to the pure-PHP VECTOR engine
- * (FPDI + TCPDF) on any host with `backend/vendor`, and to the RASTER engine
- * only when Ghostscript + a compositor + a TTF are present:
+ * Student delivery must resolve to the RASTER engine, gated on Ghostscript,
+ * the configured compositor/font, and the operator's licence acknowledgement.
+ * Legacy vector and flatten modes are explicitly expected to fail closed:
  *
- *   both    : engine available; page count preserved; %PDF-/%%EOF; both students
- *             non-empty and byte-different; source unchanged; no scratch left;
- *             every page still carries the identity; lecture ink stays dark and
- *             readable under the marks.
- *   vector  : the identity appears MANY times on every page; a BACK layer is
- *             drawn before the imported page and a FRONT layer after it; the
- *             marks are ALSO baked into each imported page's own stream; the
- *             brand line is gone (the id gets that space); each page keeps its
- *             original point size and orientation; the original page survives as
- *             a vector Form XObject (text stays selectable, by design).
- *   raster  : no font objects at all; image XObjects present; the marker is NOT
- *             extractable from the output.
- *   rotated : a second fixture with /Rotate 90 and /Rotate 180 pages is
- *             personalized too — every page carries the identity and keeps its
- *             visible size.
+ *   raster  : page count preserved; both identities produce different pixels;
+ *             there are no font/form/vector/annotation objects or text layer;
+ *             every page passes a page-by-page centered single-mark pixel proof.
+ *   rotated : /Rotate 90 and /Rotate 180 pages are rasterized at visible size,
+ *             and each page passes its own centered-single-mark pixel proof.
  *
  * Artifacts (renders, student PDFs) land in $PDFTEST_WORKDIR/out.
  */
@@ -182,8 +172,8 @@ function findPdftotext(): ?string
     $configured = trim((string) getenv('PDFTOTEXT'));
     $candidates = $configured !== '' ? [$configured] : ['pdftotext'];
     foreach ($candidates as $bin) {
-        [$rc] = runArgv([$bin, '-v']);
-        if ($rc !== 127) {
+        [$rc, $stdout, $stderr] = runArgv([$bin, '-v']);
+        if ($rc !== 127 && (str_contains($stdout . $stderr, 'pdftotext version') || str_contains($stdout . $stderr, 'pdftotext '))) {
             return $bin;
         }
     }
@@ -245,15 +235,15 @@ function imageStreams(string $file): array
 }
 
 /**
- * Geometry of the DIFFERENCE between a clean source render and a delivered
- * render: how much ink the watermark adds, where its centre of mass is, how
- * wide its band is, and how many row runs it forms.
+ * Geometry of the DIFFERENCE between two personalized renders of the SAME
+ * source page: source pixels cancel, leaving only their different identity
+ * marks. The centroid, bounding box and row runs reveal a centered single line
+ * versus repeated/tiled copies without confusing dense source text with ink.
  *
- * Used to prove the FLATTENED layout really is ONE large centred mark per page
- * (a tiled grid would show a much larger bbox height, many more runs, and far
- * higher page coverage) and that it lands on rotated pages too.
+ * Also used against a clean source render for paper-visibility checks; the
+ * per-page single-mark assertion always uses two student renders.
  *
- * @return array{w:int,h:int,n:int,cover:float,cx:float,cy:float,band_frac:float,bbox_ratio:float,runs:int}|null
+ * @return array{w:int,h:int,n:int,cover:float,cx:float,cy:float,bbox_cx:float,bbox_cy:float,band_frac:float,bbox_ratio:float,runs:int}|null
  */
 function bandStats(string $srcPng, string $outPng): ?array
 {
@@ -316,8 +306,14 @@ function bandStats(string $srcPng, string $outPng): ?array
         'h' => $h,
         'n' => $n,
         'cover' => round($n / ($w * $h), 4),
+        // Ink centroid can shift with letter shape or a different student's
+        // glyphs even when the entire text run is geometrically centered. Use
+        // the extent midpoint for placement assertions; retain mass centroid
+        // as a diagnostic only.
         'cx' => round($sx / $n / $w, 3),
         'cy' => round($sy / $n / $h, 3),
+        'bbox_cx' => round((($minx + $maxx + 1) / 2) / $w, 3),
+        'bbox_cy' => round((($miny + $maxy + 1) / 2) / $h, 3),
         'band_frac' => round($bw / $w, 3),
         'bbox_ratio' => round($bh / $bw, 3),
         'runs' => $runs,
@@ -428,6 +424,10 @@ function pageInsight(string $file): ?array
 $service = new PdfWatermarkService();
 $status = $service->status();
 $mode = $service->effectiveMode();
+if ($mode !== PdfWatermarkService::MODE_RASTER) {
+    fwrite(STDERR, "FAIL: real pipeline requires raster delivery; resolved mode=" . var_export($mode, true) . "\n");
+    exit(1);
+}
 
 $src = $FIX . '/source.pdf';
 $outA = $OUT . '/student-a.pdf';
@@ -464,7 +464,7 @@ $bytesB = (string) file_get_contents($outB);
 
 // ── 2. Checks that hold for EVERY engine ────────────────────────────────────
 check($checks, $fail, 'engine available', $service->isAvailable(), (string) $service->driver());
-check($checks, $fail, 'an engine was resolved (vector, raster or flatten)', in_array($mode, [PdfWatermarkService::MODE_VECTOR, PdfWatermarkService::MODE_RASTER, PdfWatermarkService::MODE_FLATTEN], true), (string) $mode);
+check($checks, $fail, 'student delivery resolves to raster-only mode', $mode === PdfWatermarkService::MODE_RASTER, (string) $mode);
 check($checks, $fail, 'source has a text layer (/Type /Font present)', (bool) preg_match('#/Type\s*/Font#', (string) file_get_contents($src)));
 check($checks, $fail, 'source page count == 4', $srcPages === 4, "pages=$srcPages");
 check($checks, $fail, 'engine reported page count == source', $pagesA === $srcPages, "reported=$pagesA src=$srcPages");
@@ -541,6 +541,8 @@ if ($mode === PdfWatermarkService::MODE_VECTOR) {
 // flattened engine's image/XObject checks need no renderer. Every check that
 // DOES need pixels reports SKIPPED when this returns false, never "passed".
 $gsBin = (string) \MedAcademy\Utils\Config::string('GHOSTSCRIPT_BIN', 'gs');
+[$gsProbeRc] = runArgv([$gsBin, '--version']);
+check($checks, $fail, 'Ghostscript renderer is available for mandatory pixel proofs', $gsProbeRc === 0, $gsBin);
 $render = static function (string $pdf, string $png, int $page) use ($gsBin, $service): bool {
     @unlink($png);
     $argv = [$gsBin, '-q', '-dNOPAUSE', '-dBATCH', '-dSAFER', '-sDEVICE=png16m', '-r' . $service->dpi(),
@@ -555,8 +557,8 @@ $hasRenderer = $render($src, $OUT . '/src-p1.png', 1);
 $pdftotext = findPdftotext();
 $textReport = ['pdftotext' => $pdftotext];
 if ($pdftotext === null) {
-    skip($checks, 'pdftotext extracts the marker from the SOURCE', 'pdftotext not installed');
-    $textReport['skipped'] = true;
+    check($checks, $fail, 'pdftotext extracts the marker from the SOURCE', false, 'pdftotext is required for the text-layer proof');
+    $textReport['skipped'] = false;
 } else {
     [$rcS] = runArgv([$pdftotext, '-layout', $src, $OUT . '/source.txt']);
     [$rcO] = runArgv([$pdftotext, '-layout', $outA, $OUT . '/student-a.txt']);
@@ -568,12 +570,14 @@ if ($pdftotext === null) {
         'output_has_marker' => str_contains($outText, MARKER),
         'output_has_identity' => str_contains($outText, $identityA),
     ];
-    if ($rcS === 0) {
-        check($checks, $fail, 'pdftotext extracts the marker from the SOURCE', str_contains($srcText, MARKER));
-    }
+    check($checks, $fail, 'pdftotext extracts the marker from the SOURCE',
+        $rcS === 0 && str_contains($srcText, MARKER), 'exit=' . $rcS);
     if ($mode === PdfWatermarkService::MODE_RASTER) {
-        // Flattening is the point: the text layer must be gone entirely.
-        check($checks, $fail, 'flattened output exposes NO extractable text layer', $rcO === 0 && !str_contains($outText, 'MEDACADEMY'));
+        // Rasterization removes selectable source text. OCR may still recognize
+        // text in the page images; this only tests the ordinary PDF text layer.
+        check($checks, $fail, 'raster output exposes NO extractable source text layer',
+            $rcO === 0 && !str_contains($outText, MARKER) && !str_contains($outText, 'MED-0042') && !str_contains($outText, 'MEDACADEMY'),
+            'bytes=' . strlen($outText));
     } else {
         // The vector engine deliberately keeps the lecture text layer (a
         // documented trade-off), so extraction still yields the lecture — but a
@@ -595,7 +599,7 @@ if (is_file($rotSrc)) {
         check($checks, $fail, 'rotated fixture: page count preserved', $rotPages === pdfPageCount($rotSrc), "reported=$rotPages");
         $insight = pageInsight($rotOut);
         if ($insight === null) {
-            skip($checks, 'rotated fixture: identity on every page', 'output not parseable by FPDI');
+            check($checks, $fail, 'rotated fixture: output is readable and page count is preserved', false, 'output not parseable by FPDI');
         } else {
             $dims = [];
             foreach ($insight as $i => $p) {
@@ -614,23 +618,48 @@ if (is_file($rotSrc)) {
                     count($rotImages) === count($insight) && !preg_match('#/Type\s*/Font#', $rotRaw),
                     'images=' . count($rotImages) . ' pages=' . count($insight));
                 if (!$hasRenderer) {
-                    skip($checks, 'rotated fixture: EVERY page carries ONE centred watermark', 'no Ghostscript renderer available (pixel proof skipped)');
+                    check($checks, $fail, 'rotated fixture: EVERY page carries ONE centred watermark', false, 'Ghostscript failed to render source or output');
                 } else {
                     $bad = [];
+                    $rotOutB = $OUT . '/rotated-out-student-b.pdf';
+                    // Do not reuse a previous test run's PDF: stale rendering
+                    // settings or code can make a valid current Student A copy
+                    // appear off-center in a difference-image comparison.
+                    @unlink($rotOutB);
+                    try {
+                        $service->personalize($rotSrc, $linesB, $rotOutB);
+                    } catch (\Throwable $e) {
+                        check($checks, $fail, 'rotated fixture: student B copy generated for this run', false, get_class($e) . ': ' . $e->getMessage());
+                        $bad[] = ['page' => 1, 'error' => 'student B generation failed'];
+                    }
                     foreach ($insight as $i => $p) {
-                        $sp = $OUT . '/rot-src-' . ($i + 1) . '.png';
-                        $op = $OUT . '/rot-out-' . ($i + 1) . '.png';
-                        if (!$render($rotSrc, $sp, $i + 1) || !$render($rotOut, $op, $i + 1)) {
+                        $sp = $OUT . '/rot-student-a-' . ($i + 1) . '.png';
+                        $op = $OUT . '/rot-student-b-' . ($i + 1) . '.png';
+                        if (!$render($rotOut, $sp, $i + 1)) {
+                            $bad[] = ['page' => $i + 1, 'error' => 'student A render failed'];
+                            continue;
+                        }
+                        $rotOutB = $OUT . '/rotated-out-student-b.pdf';
+                        if ($i === 0 && !is_file($rotOutB)) {
+                            try {
+                                $service->personalize($rotSrc, $linesB, $rotOutB);
+                            } catch (\Throwable) {
+                                $bad[] = ['page' => $i + 1, 'error' => 'student B generation failed'];
+                                continue;
+                            }
+                        }
+                        if (!$render($rotOutB, $op, $i + 1)) {
                             $bad[] = ['page' => $i + 1, 'error' => 'render failed'];
                             continue;
                         }
                         $band = bandStats($sp, $op);
                         $okBand = $band !== null
                             && $band['n'] >= 2000
-                            && abs($band['cx'] - 0.5) <= 0.04
-                            && abs($band['cy'] - 0.5) <= 0.04
+                            && abs($band['bbox_cx'] - 0.5) <= 0.025
+                            && abs($band['bbox_cy'] - 0.5) <= 0.025
                             && $band['band_frac'] >= 0.45
-                            && $band['bbox_ratio'] <= 0.85;
+                            && $band['bbox_ratio'] <= 0.25
+                            && $band['runs'] <= 4;
                         if (!$okBand) {
                             $bad[] = ['page' => $i + 1] + ($band ?? ['error' => 'no mark ink']);
                         }
@@ -671,7 +700,9 @@ if (is_file($rotSrc)) {
             // /Rotate 90 must be re-laid-out as a landscape page, not squeezed
             // into a portrait one: the visible width stays the larger value.
             $second = $insight[1] ?? null;
-            check($checks, $fail, 'rotated fixture: a /Rotate 90 page keeps its VISIBLE orientation', $second !== null && $second['w'] > $second['h'], $second === null ? 'missing' : ($second['w'] . 'x' . $second['h']));
+            check($checks, $fail, 'rotated fixture: a /Rotate 90 page keeps its VISIBLE orientation',
+                $second !== null && $second['w'] > $second['h'],
+                $second === null ? 'missing' : ($second['w'] . 'x' . $second['h']));
         }
     } catch (\Throwable $e) {
         check($checks, $fail, 'rotated fixture: personalize succeeded', false, get_class($e) . ': ' . $e->getMessage());
@@ -687,23 +718,56 @@ check($checks, $fail, 'source PDF is unchanged', hash_file('sha256', $src) === $
 $leftover = glob($OUT . '/wm-*') ?: [];
 check($checks, $fail, 'no temporary scratch dirs left behind', $leftover === [], implode(',', array_map('basename', $leftover)));
 
-// ── 8. Pixel proof (needs a renderer; works for BOTH engines) ───────────────
+// ── 8. Mandatory page-by-page pixel proof ──────────────────────────────────
 $srcPng = $OUT . '/src-p1.png';
 $outPng = $OUT . '/out-p1.png';
 $pixelReport = null;
+$allPageBands = [];
+$badPageBands = [];
 $hasRenderer = $hasRenderer && $render($outA, $outPng, 1);
 
 if (!$hasRenderer) {
-    skip($checks, 'pixels: lecture text stays dark and readable under the marks', 'no Ghostscript renderer available (pixel proof skipped)');
-    skip(
-        $checks,
-        $mode === PdfWatermarkService::MODE_RASTER
-            ? 'pixels: ONE large centred watermark band (single mark, not a grid)'
-            : 'pixels: watermark ink is entangled with lecture ink (front layer really covers content)',
-        'no Ghostscript renderer available (pixel proof skipped)'
-    );
-    skip($checks, 'pixels: watermark strokes are visible on the paper', 'no Ghostscript renderer available (pixel proof skipped)');
+    check($checks, $fail, 'source/output pages render successfully for pixel proofs', false, 'Ghostscript failed to render source or output');
 } else {
+    for ($pageNo = 1; $pageNo <= $srcPages; $pageNo++) {
+        $sourcePagePng = $OUT . '/source-p' . $pageNo . '.png';
+        $outputPagePng = $OUT . '/output-p' . $pageNo . '.png';
+        $studentBPagePng = $OUT . '/student-b-p' . $pageNo . '.png';
+        if (!$render($src, $sourcePagePng, $pageNo)
+            || !$render($outA, $outputPagePng, $pageNo)
+            || !$render($outB, $studentBPagePng, $pageNo)) {
+            $badPageBands[] = ['page' => $pageNo, 'error' => 'source/output page render failed'];
+            continue;
+        }
+        if ($pageNo === 1) {
+            $srcPng = $sourcePagePng;
+            $outPng = $outputPagePng;
+        }
+        $geometryA = @getimagesize($outputPagePng);
+        $geometryB = @getimagesize($studentBPagePng);
+        $sameGeometry = is_array($geometryA) && is_array($geometryB)
+            && $geometryA[0] === $geometryB[0] && $geometryA[1] === $geometryB[1];
+        $pageBand = bandStats($outputPagePng, $studentBPagePng);
+        $pageBandOk = $sameGeometry && $pageBand !== null
+            && $pageBand['n'] >= 2000
+            && abs($pageBand['bbox_cx'] - 0.5) <= 0.025
+            && abs($pageBand['bbox_cy'] - 0.5) <= 0.025
+            && $pageBand['band_frac'] >= 0.45
+            && $pageBand['bbox_ratio'] <= 0.25
+            && $pageBand['runs'] <= 4;
+        $allPageBands[] = [
+            'page' => $pageNo,
+            'size_px' => $sameGeometry ? [$geometryA[0], $geometryA[1]] : null,
+            'stats' => $pageBand,
+            'ok' => $pageBandOk,
+        ];
+        if (!$pageBandOk) {
+            $badPageBands[] = ['page' => $pageNo, 'same_geometry' => $sameGeometry]
+                + ($pageBand ?? ['error' => 'no watermark ink']);
+        }
+    }
+    check($checks, $fail, 'pixels: every page has exactly ONE centered mark and no repeated copies (student A vs B; source pixels cancel)',
+        $badPageBands === [] && count($allPageBands) === $srcPages, json_encode($badPageBands));
     $a = imagecreatefrompng($srcPng);
     $b = imagecreatefrompng($outPng);
     $w = min(imagesx($a), imagesx($b));
@@ -790,31 +854,83 @@ if (!$hasRenderer) {
         "inkMean=$inkMean lt140=" . $inkLt140Pct . '%');
     if ($mode === PdfWatermarkService::MODE_RASTER) {
         // The raster layout must be ONE large centred mark, not a tiled grid.
-        // Measured from the difference against a clean render: a grid would show
-        // a much taller bbox in proportion to its width, many separated row
-        // runs, and far higher page coverage.
-        $band = bandStats($srcPng, $outPng);
-        check($checks, $fail, 'pixels: ONE large centred watermark band (single mark, not a grid)',
+        // Use the two personalized renders here too, so source page ink (notably
+        // the repeated marker in the dense appendix) cannot skew the centroid.
+        $band = bandStats($outPng, $OUT . '/student-b-p1.png');
+        check($checks, $fail,        'pixels: page 1 has ONE centered watermark band (student A vs B; no grid)',
             $band !== null
             && $band['n'] >= 2000
-            && abs($band['cx'] - 0.5) <= 0.04
-            && abs($band['cy'] - 0.5) <= 0.04
+            && abs($band['bbox_cx'] - 0.5) <= 0.025
+            && abs($band['bbox_cy'] - 0.5) <= 0.025
             && $band['band_frac'] >= 0.45
-            && $band['bbox_ratio'] <= 0.85
+            && $band['bbox_ratio'] <= 0.25
             && $band['runs'] <= 4,
             json_encode($band));
-        $pixelReport['raster_band'] = $band;
+        $pixelReport['raster_band_page1'] = $band;
+        $pixelReport['every_page_bands'] = $allPageBands;
+        check(
+            $checks,
+            $fail,
+            'pixels: watermark is baked into each raster page image',
+            count($imgA) === $srcPages
+                && !preg_match('#/Subtype\\s*/Form|/Type\\s*/Font|/Subtype\\s*/Annot#', $bytesA)
+                && strpos((string) file_get_contents($outA), MARKER) === false,
+            'images=' . count($imgA) . ' pages=' . $srcPages
+        );
         skip(
             $checks,
             'pixels: watermark ink is entangled with lecture ink (front layer really covers content)',
-            'vector-only layering — the flattened engine composites the mark into the same bitmap as the content; the ' .
-            'raster equivalent is the centred-band plus readable-ink proof above'
+            'not applicable to the raster engine: watermark and page imagery are already composited into one image XObject'
         );
     } else {
         check($checks, $fail, 'pixels: watermark ink is entangled with lecture ink (front layer really covers content)',
             $inkChangedPct >= 0.2, "changed=$inkChangedPct% of content ink px");
     }
     check($checks, $fail, 'pixels: watermark strokes are visible on the paper', $wmN > 300, "wm_px=$wmN of {$whiteN} paper px");
+}
+
+// ── 9. Small/large raster performance and output-size measurements ─────────
+// These deterministic fixtures are generated by the harness outside this file.
+// Keep measurements in the required suite result so the report and its claims
+// are tied to this exact renderer run, rather than to stale workspace artifacts.
+$benchmarks = [];
+foreach (['small' => 'benchmark-small.pdf', 'large' => 'benchmark-large.pdf'] as $label => $fixtureName) {
+    $benchSource = $OUT . '/' . $fixtureName;
+    if (!is_file($benchSource)) {
+        skip($checks, "benchmark $label fixture render", "fixture $fixtureName is not present");
+        continue;
+    }
+    $benchTarget = $OUT . '/benchmark-' . $label . '-watermarked.pdf';
+    @unlink($benchTarget);
+    // PHP's peak counter otherwise includes the earlier student render and
+    // makes the per-fixture value misleading. Keep this run-scoped when the
+    // runtime provides the reset API (PHP 8.2+).
+    if (function_exists('memory_reset_peak_usage')) {
+        memory_reset_peak_usage();
+    }
+    $benchStart = microtime(true);
+    try {
+        $benchPages = $service->personalize($benchSource, $linesA, $benchTarget);
+        $benchMs = (int) round((microtime(true) - $benchStart) * 1000);
+        $benchBytes = is_file($benchTarget) ? (int) filesize($benchTarget) : 0;
+        $benchmarks[$label] = [
+            'pages' => $benchPages,
+            'source_bytes' => (int) filesize($benchSource),
+            'output_bytes' => $benchBytes,
+            'ms' => $benchMs,
+            'peak_memory_bytes' => memory_get_peak_usage(true),
+        ];
+        check(
+            $checks,
+            $fail,
+            "benchmark $label: rendered all pages to a non-empty personalized PDF",
+            $benchPages === pdfPageCount($benchSource) && $benchBytes > 0,
+            json_encode($benchmarks[$label])
+        );
+    } catch (\Throwable $e) {
+        $benchmarks[$label] = ['error' => get_class($e) . ': ' . $e->getMessage()];
+        check($checks, $fail, "benchmark $label: render completed", false, $benchmarks[$label]['error']);
+    }
 }
 
 $report = [
@@ -828,6 +944,7 @@ $report = [
     'text_extraction' => $textReport,
     'vector_page_report' => $pageReport,
     'pixel_analysis' => $pixelReport,
+    'benchmarks' => $benchmarks,
     'checks' => $checks,
     'ok' => $fail === [],
 ];

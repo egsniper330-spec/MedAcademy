@@ -200,7 +200,13 @@ export function CourseCard({
         <CourseThumbnailBanner imageUrl={imageUrl} height={bannerH} primary={c.primary}>
           {showEnrollmentUI && isEnrolled && (
             <View style={{
-              position: 'absolute', top: layout.pad.sm, right: layout.pad.sm,
+              // `end` (not `right`): the enrolled badge must sit on the TRAILING
+              // edge — physically right in English, physically LEFT in Arabic.
+              // A physical `right` pinned it to the wrong corner in RTL (it
+              // collided with the header back affordance and looked detached
+              // from the reading order). `end` is resolved by Yoga from the
+              // layout direction, so no isRTL branch and no double mirroring.
+              position: 'absolute', top: layout.pad.sm, end: layout.pad.sm,
               backgroundColor: enrollmentStatus === 'completed' ? '#16A34A' : c.primary,
               borderRadius: layout.cardRadius, paddingHorizontal: layout.pad.sm, paddingVertical: 3,
               flexDirection: 'row', alignItems: 'center', gap: layout.pad.xs,
@@ -335,8 +341,11 @@ function CompactThumb({ imageUrl, primary, size, badge }: CompactThumbProps) {
       ) : (
         <BookOpen size={iconSz} color={primary} opacity={0.22} />
       )}
+      {/* `end` — trailing corner, mirrored by the layout direction (see the
+          enrolled-badge note above); a physical `right` put this badge in the
+          wrong corner in Arabic. */}
       {badge ? (
-        <View style={{ position: 'absolute', bottom: 4, right: 4,
+        <View style={{ position: 'absolute', bottom: 4, end: 4,
           backgroundColor: badge === 'done' ? '#16A34A' : primary,
           borderRadius: size / 4, padding: 3 }}>
           <CheckCircle size={Math.round(size * 0.14)} color="#fff" />

@@ -347,45 +347,27 @@ section('6. Bounded prewarm aging');
     /isStudentEligible\(\$materialId, \$studentId\)/.test(worker));
 }
 
-/* ══ 7. The screen wires the rules to the UI ═════════════════════════════ */
+/* ══ 7. The screen uses direct on-demand delivery ════════════════════════ */
 
-section('7. Screen wiring');
+section('7. Direct delivery wiring');
 
 {
   const lesson = read(LESSON);
   const api = read(API);
 
-  ok('the screen imports the shared rules instead of local constants',
-    /from '@\/lib\/pdfPreparation'/.test(lesson) && !/const PDF_POLL_MAX_ATTEMPTS/.test(lesson));
-  ok('the loop is bounded by the shared budget',
-    /pollBudgetExhausted\(startedAt, Date\.now\(\), attempts\)/.test(lesson));
-  ok('the server retry_after drives the delay through the rules',
-    /nextPollDelay\(delay, status\.retry_after\)/.test(lesson));
-  ok('a spent budget shows “still queued”, not a failure',
-    /showStillWaiting\(name, forDownload\)/.test(lesson)
-    && /status === 'waiting'/.test(lesson)
-    && /materialWaitingTitle/.test(lesson));
-  ok('re-checking a healthy queued job does NOT re-queue it',
-    /void openMaterial\(target, again\.name, again\.forDownload, false\)/.test(lesson)
-    && /void openMaterial\(target, retry\.name, retry\.forDownload, true\)/.test(lesson));
-  ok('the queued/generating copy and the estimate are rendered',
-    /describePrep\(downloadState\.phase/.test(lesson)
-    && /describeEta\(downloadState\.etaMinSeconds, downloadState\.etaMaxSeconds\)/.test(lesson)
-    && /queuePositionView\(downloadState\.queuePosition\)/.test(lesson));
-  ok('a ready copy still downloads automatically',
-    /if \(state === 'ready'\)/.test(lesson) && /return ready.url/.test(lesson));
-  ok('polling stops on a terminal failure and on dismissal',
-    /showPrepareFailure\(name, materialId, forDownload\)/.test(lesson)
-    && /runId !== pdfRunRef\.current/.test(lesson));
-  ok('an unreadable queue stops polling immediately (it cannot self-heal)',
-    /if \(state === 'unavailable'\) \{[\s\S]{0,400}?break;/.test(lesson));
-  ok('the API type carries the server-grounded wait contract',
-    /export type MaterialPdfState = 'queued' \| 'generating' \| 'ready' \| 'failed' \| 'unavailable'/.test(api)
-    && /export interface MaterialPdfWait/.test(api)
-    && /eta_min_seconds: number \| null;/.test(api)
-    && /queue_position: number \| null;/.test(api));
-  ok('the API still documents retry_after as a polling interval, not an ETA',
-    /POLLING INTERVAL, never an ETA/.test(api));
+  ok('the lesson screen requests one personalized URL per open',
+    /requestPersonalizedPdf\(String\(material\.id\), name, forDownload, runId\)/.test(lesson)
+    && /getMaterialPdfUrl\(materialId, forDownload\)/.test(lesson));
+  ok('the student screen no longer polls queue state',
+    !/getMaterialPdfStatus|waitForPersonalizedPdf|pollBudgetExhausted|nextPollDelay/.test(lesson));
+  ok('a direct-generation failure has an explicit error state',
+    /status: 'error'[\s\S]{0,180}materialPrepareFailed/.test(lesson));
+  ok('dismissal ignores a stale in-flight response',
+    /runId !== pdfRunRef\.current/.test(lesson) && /pdfRunRef\.current \+= 1/.test(lesson));
+  ok('a failed request never falls back to the original document',
+    /if \(!ready\) return;/.test(lesson));
+  ok('the compatibility status API remains available outside the student flow',
+    /getMaterialPdfStatus/.test(api) && !/getMaterialPdfStatus/.test(lesson));
 }
 
 /* ══ 8. Localization (Arabic + English) ══════════════════════════════════ */

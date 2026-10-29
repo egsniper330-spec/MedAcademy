@@ -1,29 +1,27 @@
 # PDF watermarking — renderer licensing, cost and the decision taken
 
-Flattening a watermark into a page has two possible shapes:
+The enforced delivery contract requires each page to be rasterized and emitted
+as one image, with the authenticated identity composited into the page pixels.
+This file records the renderer licence constraints and the production blocker;
+it is engineering evidence, not legal advice. The legacy pure-PHP vector and
+flatten engines remain for compatibility/policy tests but are refused for
+student delivery.
 
-- **write it into the page's own content stream** (pure PHP, no external program), or
-- **rasterise the page** (render it to a bitmap), which needs a *renderer*.
-
-Only the second needs a third-party program. This file records which programs were
-evaluated, what their licences actually require, what the running system uses
-today, and the decision that follows from it. It is engineering evidence, not
-legal advice.
-
-## 1. What the pipeline actually uses (verified in the repository, 2026-10-24)
+## 1. What the pipeline actually uses (verified in the repository, 2026-10-29)
 
 | Component | Version | How it runs | Licence (from installed metadata) | Cost |
 |---|---|---|---|---|
 | `setasign/fpdf` | 1.9.0 | PHP library, in-process | MIT | none |
-| `setasign/fpdi` | 2.6.9 | PHP library, in-process | MIT | none |
+| `setasign/fpdi` | 2.6.8 (test harness lock) | PHP library, in-process | MIT | none |
 | `tecnickcom/tcpdf` | 6.11.4 | PHP library, in-process | LGPL-3.0-or-later | none |
 | PHP GD (+ FreeType) | bundled with PHP | PHP extension | PHP licence (BSD-style) | none |
 | ImageMagick / Imagick | optional | PHP extension | ImageMagick licence (Apache-like) | none |
-| **Ghostscript** | 10.08.0 *(only if raster mode is enabled)* | separate `gs` process | **AGPL-3.0 or Artifex commercial** | **free only if you comply with the AGPL** |
+| **Ghostscript** | 10.08.0 (required by delivery) | separate `gs` process | **AGPL-3.0 or Artifex commercial** | **free only if you comply with the AGPL** |
 
 `composer.json` declares exactly three dependencies (`ext-zlib`, `setasign/fpdf`,
 `setasign/fpdi`, `tecnickcom/tcpdf`) and the application itself has no other
-runtime dependency. Versions above are read from `backend/vendor/composer/installed.json`.
+runtime dependency. The test harness run used the exact versions listed; production package versions
+should be confirmed from `backend/vendor/composer/installed.json` after building.
 
 **No external service is involved.** A search of
 `backend/src/Services/PdfWatermarkService.php`,
@@ -47,36 +45,35 @@ connection to watermark a document.
 Ghostscript publishes **no price list**: commercial terms are use-case specific
 and quoted by Artifex sales. We did not request a quote and did not buy anything.
 
-## 3. Decision (implemented)
+## 3. Decision and production blocker (implemented)
 
-The product needs a flattened, single-centred-mark page. Rasterisation is the only
-way to also remove the text layer, but every renderer that could run on this
-hosting is copyleft-or-paid, and none of the permissively licensed ones can be
-installed and verified on shared cPanel. So:
+**D1 — raster is the only permitted delivery engine.** `PDF_WATERMARK_MODE`
+defaults to `raster`; legacy `auto` also resolves to raster. Explicit `vector`
+and `flatten` modes are refused for student delivery because they preserve
+searchable source objects and do not satisfy the one-image-per-page contract.
+If raster rendering is unavailable or not explicitly licence-acknowledged,
+delivery fails closed with HTTP 503; the original is never a fallback.
 
-**D1 — the shipped flattened engine needs no renderer at all.**
-`PDF_WATERMARK_MODE=flatten` writes ONE centred diagonal mark as PDF operators into
-each imported page's own content stream (`PdfWatermarkBaker`). It executes nothing
-outside the vendored MIT/LGPL PHP libraries: no `gs`, no shell, no network, no
-extra font file. This is the free, commercially safe flattening path, and it is
-the one this task recommends for production.
+**D2 — Ghostscript use is explicitly gated, but the gate is not legal approval.**
+Raster delivery requires Ghostscript plus the compositor/font/output prerequisites
+and `PDF_WATERMARK_ACCEPT_AGPL_RENDERER=1`. Production must not set that flag
+until the operator has obtained an Artifex commercial licence or documented an
+AGPL compliance position with qualified counsel. Setting the environment flag
+merely records the operator's decision; it does not grant rights or establish
+compliance. Artifex's published licensing position and the potential scope of
+AGPL obligations require a case-specific legal review.
 
-**D2 — the raster engine stays, but is double-gated.**
-`PDF_WATERMARK_MODE=raster` now needs BOTH the mode *and*
-`PDF_WATERMARK_ACCEPT_AGPL_RENDERER=1`. Without the second switch the engine
-reports itself unavailable and delivery fails closed with **503** — it never runs
-AGPL software on a commercial install by accident. Set that switch only with an
-Artifex licence or a documented AGPL position (Artifex has enforced this licence in
-court: *Artifex Software, Inc. v. Hancom, Inc.*).
+**D3 — production deployment remains blocked.** The local Windows harness
+acknowledged Ghostscript solely to verify the raster implementation. No legal
+opinion, Artifex quote or purchase, cPanel compatibility check, or production
+configuration was obtained. Do not deploy/enable delivery until those decisions
+and host prerequisites are resolved.
 
-`PDF_WATERMARK_MODE=auto` never selects raster, so the default product path has
-no licence exposure and no binary requirement.
-
-**D3 — this was not silently decided.** If a fully rasterised page is required
-later, the licence-safe candidates are PDFium (BSD) on a VPS with `php-ffi`, or
-pdf.js + `@napi-rs/canvas` on a host running Node. Both are infrastructure
-changes that must be approved and verified on the target host first; neither is
-claimed here to work on the current shared hosting.
+**D4 — alternatives are not a workaround already approved.** PDFium (BSD) on
+infrastructure with a supported binding, or pdf.js + `@napi-rs/canvas` on a Node
+host, could be separately evaluated. Neither is integrated or verified for the
+current shared-hosting deployment; adopting one would require an approved
+infrastructure change and a new compatibility/security review.
 
 ## 4. Recurring cost of the current design
 
@@ -84,17 +81,19 @@ claimed here to work on the current shared hosting.
 |---|---|
 | FPDF, FPDI, TCPDF, GD, Imagick | **0** |
 | External APIs / subscriptions / per-document fees | **0** — nothing is sent off the machine |
-| Ghostscript | **0** while raster mode stays disabled; a paid Artifex licence if it is enabled commercially |
+| Ghostscript | Required by the implemented delivery path; commercial pricing was not requested and any AGPL use requires an independently reviewed compliance position |
 | Extra infrastructure | **0** — no VPS, no queue, no object store beyond the existing private bucket |
 
-The only obligations that are not monetary: keep the MIT notices for FPDF/FPDI and
-the LGPL notice for TCPDF (they ship inside `backend/vendor`, unmodified, which is
-what LGPL-3.0 requires for a dynamically loaded PHP library).
+The MIT notices for FPDF/FPDI and LGPL notice for TCPDF must also be preserved;
+confirm the exact shipped versions and applicable obligations when building
+`backend/vendor/`.
 
 ## 5. What was NOT verified
 
 - Artifex's commercial price for Ghostscript (not requested).
-- Whether any specific cPanel host ships `gs`, `pdftoppm` or Node. The code
-  detects each at runtime and fails closed when it is missing.
-- Legal advice. D2 encodes a conservative engineering position; a lawyer may
-  take a different view of subprocess use of GPL software.
+- Legal advice or whether the intended service can comply with AGPL obligations.
+- Whether the target cPanel host supplies Ghostscript, `proc_open`, GD/FreeType
+  or Imagick, an appropriate TTF font, and sufficient resource limits.
+- Arabic-script watermark rendering and representative production PDFs.
+- Whether PDFium or a Node-based renderer could be supported on an approved
+  alternative host.

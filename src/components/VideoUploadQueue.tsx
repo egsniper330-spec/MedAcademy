@@ -83,7 +83,10 @@ function ProgressBar({ pct, color, isDark, lyt, indeterminate }: { pct: number; 
         <Animated.View style={{
           height: '100%', borderRadius: barH / 2, backgroundColor: color,
           width: '38%',
-          marginLeft: sweep.interpolate({ inputRange: [0, 1], outputRange: ['-38%', '100%'] }),
+          // `marginStart` so the indeterminate shimmer travels in the READING
+          // direction: left→right in English, right→left in Arabic. A physical
+          // marginLeft made the bar sweep against the text flow in RTL.
+          marginStart: sweep.interpolate({ inputRange: [0, 1], outputRange: ['-38%', '100%'] }),
         }} />
       </View>
     );
@@ -514,7 +517,10 @@ function QueueHeader({ isDark, onClose, lyt }: { isDark: boolean; onClose: () =>
         borderRadius: lyt.pad.md,
         backgroundColor: `${c.primary}18`,
         alignItems: 'center', justifyContent: 'center',
-        marginRight: lyt.pad.md,
+        // `marginEnd`: the queue row follows the layout direction, so the icon
+        // box is the LEADING element in Arabic too — a physical marginRight put
+        // the gap on the outside edge and jammed the labels against the icon.
+        marginEnd: lyt.pad.md,
       }}>
         <Upload size={Math.round(iconBoxSz * 0.5)} color={c.primary} />
       </View>
