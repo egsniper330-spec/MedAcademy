@@ -1563,6 +1563,9 @@ export const en: TranslationDict = {
   'common.iUnderstand': 'I Understand',
 
   'landing.tagline': 'Best Educational Platform',
+  'startup.verifyingSecurity': 'Verifying app security and privacy...',
+  'startup.restoringSession': 'Restoring your sign-in session...',
+  'startup.preparingApp': 'Preparing the app...',
   'course.yourProgress': 'Your Progress',
   'explore.searchPlaceholder': 'Search all courses by title, description, instructor',
   'explore.recentlyPublished': 'Recently Published',
@@ -3931,6 +3934,9 @@ export const ar: TranslationDict = {
   'common.iUnderstand': 'فهمت',
 
   'landing.tagline': 'أفضل منصة تعليمية',
+  'startup.verifyingSecurity': 'جارٍ التحقق من أمان وخصوصية التطبيق...',
+  'startup.restoringSession': 'جارٍ استعادة جلسة تسجيل الدخول...',
+  'startup.preparingApp': 'جارٍ تجهيز التطبيق...',
   'course.yourProgress': 'تقدّمك',
   'explore.searchPlaceholder': 'ابحث في جميع الكورسات بالعنوان أو الوصف أو اسم الدكتور',
   'explore.recentlyPublished': 'أضيفت حديثاً',

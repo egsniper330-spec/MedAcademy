@@ -9,6 +9,7 @@ import { resolveStartupRoute, type StartupRoute } from '@/lib/startupStateModel'
 import { useBranding } from '@/lib/branding';
 import NetInfo from '@react-native-community/netinfo';
 import { useTranslation } from '@/lib/i18n';
+import { useSecurity } from '@/lib/SecurityContext';
 
 /**
  * Landing screen — routes through the PURE cold-start state machine
@@ -50,6 +51,10 @@ export default function LandingScreen() {
   // identically whether or not the branding API is reachable.
   const { branding } = useBranding();
   const { t } = useTranslation();
+  // Startup-stage status for the spinner. Derived only from real state: the
+  // session restore, the security verdict (SecurityContext has no verdict until
+  // a completed evaluation publishes one) and connectivity. Never a fixed timer.
+  const { hasVerdict: securityVerified } = useSecurity();
 
   // Connectivity tri-state mirroring offlineTransition.useConnectivity exactly
   // (isConnected && isInternetReachable !== false). null = not yet determined.
@@ -90,9 +95,22 @@ export default function LandingScreen() {
   // concrete connectivity value (never flash the landing UI — an unknown is
   // not "unauthenticated").
   if (route === 'spinner' || route === 'online' || route === 'offline') {
+    // Stage message reflects what is actually awaited right now.
+    const stageKey: 'startup.restoringSession' | 'startup.verifyingSecurity' | 'startup.preparingApp' =
+      isLoading
+        ? 'startup.restoringSession'
+        : session && !securityVerified
+          ? 'startup.verifyingSecurity'
+          : 'startup.preparingApp';
     return (
-      <View style={{ flex: 1, backgroundColor: c.base, alignItems: 'center', justifyContent: 'center' }}>
+      <View style={{ flex: 1, backgroundColor: c.base, alignItems: 'center', justifyContent: 'center', padding: 32 }}>
         <ActivityIndicator size="large" color="#1E90FF" />
+        <Text
+          accessibilityLiveRegion="polite"
+          style={{ fontSize: 15, ...mutedTextStyle(c, 0.7), marginTop: 16, textAlign: 'center' }}
+        >
+          {t(stageKey)}
+        </Text>
       </View>
     );
   }

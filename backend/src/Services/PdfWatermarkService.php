@@ -1024,6 +1024,15 @@ final class PdfWatermarkService
 
         try {
             if ($this->effectiveMode() !== self::MODE_RASTER) {
+                // Log WHY (presence flags only, no paths or secrets). The 503 body is
+                // generic and ErrorHandler does not log exceptions without a cause.
+                $r = $this->rendererStatus()['raster'];
+                error_log('[pdf-watermark] raster engine not ready: shell=' . $r['shell_execution']
+                    . ' ghostscript=' . ($r['ghostscript_version'] ?? 'missing')
+                    . ' compositor=' . ($r['compositor'] ?? 'missing')
+                    . ' font=' . ($r['font'] !== null ? 'present' : 'missing')
+                    . ' pdf_writer=' . $r['pdf_writer']
+                    . ' licence=' . ($r['licence_gate'] === 'accepted' ? 'accepted' : 'blocked'));
                 throw new ApiException(
                     503,
                     'The image-only PDF watermark engine is unavailable or not licensed on this server. The unwatermarked original will not be served.',
