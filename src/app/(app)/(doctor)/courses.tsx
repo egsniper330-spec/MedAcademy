@@ -49,7 +49,7 @@ function DoctorCourseCard({
   onPreview: () => void;
   onDelete: () => void;
 }) {
-  const { t, tCount } = useTranslation();
+  const { t, tCount, isRTL } = useTranslation();
   const [open, setOpen] = useState(false);
   const statusColor = STATUS_COLORS[course.status] ?? '#6B7280';
   const isArchived = !!course.archived_at;
@@ -73,7 +73,7 @@ function DoctorCourseCard({
         ...(isArchived ? { borderWidth: 1, borderColor: '#9CA3AF33' } : {}),
       }}
     >
-      <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: layout.pad.md }}>
+      <View style={{ direction: 'ltr', flexDirection: isRTL ? 'row-reverse' : 'row', alignItems: 'flex-start', gap: layout.pad.md }}>
         {/* Thumbnail — 56×56, falling back to a glyph instead of an empty box */}
         <Pressable
           onPress={onEdit}
@@ -93,9 +93,9 @@ function DoctorCourseCard({
 
         {/* Identity + metadata */}
         <View style={{ flex: 1, minWidth: 0, gap: 4 }}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+          <View style={{ direction: 'ltr', flexDirection: isRTL ? 'row-reverse' : 'row', alignItems: 'center', gap: 6 }}>
             <Pressable style={{ flex: 1, minWidth: 0 }} onPress={onEdit} accessibilityRole="button">
-              <Text style={{ fontSize: 14.5, fontWeight: '700', color: c.text }} numberOfLines={2}>
+              <Text style={{ fontSize: 14.5, fontWeight: '700', color: c.text, textAlign: isRTL ? 'right' : 'left' }} numberOfLines={2}>
                 {course.title}
               </Text>
             </Pressable>
@@ -123,7 +123,7 @@ function DoctorCourseCard({
           </View>
 
           {/* One wrapped meta line: lessons · sections · duration · difficulty · tags */}
-          <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 8, rowGap: 3 }}>
+          <View style={{ direction: 'ltr', flexDirection: isRTL ? 'row-reverse' : 'row', flexWrap: 'wrap', alignItems: 'center', gap: 8, rowGap: 3, justifyContent: isRTL ? 'flex-end' : 'flex-start' }}>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3 }}>
               <BookOpen size={10} color={c.primary} />
               <Text style={{ fontSize: 10.5, ...mutedTextStyle(c, 0.6) }}>

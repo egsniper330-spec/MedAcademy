@@ -33,6 +33,18 @@
         "EXPO_PUBLIC_PHP_API_URL": "https://api.medacademy.site/backend/public/index.php"
       }
     },
+    "security-test": {
+      "distribution": "internal",
+      "android": {
+        "buildType": "apk",
+        "gradleCommand": ":app:assembleRelease"
+      },
+      "env": {
+        "EXPO_PUBLIC_APP_ID": "app-czyg340mpc75",
+        "EXPO_PUBLIC_PHP_API_URL": "https://api.medacademy.site/backend/public/index.php",
+        "EXPO_PUBLIC_SECURITY_TEST_BUILD": "1"
+      }
+    },
     "release-apk": {
       "distribution": "internal",
       "android": {

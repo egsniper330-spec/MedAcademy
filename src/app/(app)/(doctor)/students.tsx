@@ -31,6 +31,7 @@ import { friendlyError } from '@/lib/validation';
 import { useTranslation } from '@/lib/i18n';
 import { statusLabel } from '@/lib/i18n/labels';
 import { useStaleWhileRevalidateFocus } from '@/lib/useStaleWhileRevalidateFocus';
+import { StudentAvatar } from '@/components/StudentAvatar';
 
 type EnrollMethod = 'credits' | null;
 type ActionType   = 'suspend' | 'resume' | 'remove' | 'profile' | null;
@@ -48,44 +49,6 @@ const TABS: { key: TabKey; labelKey: string; icon: React.ElementType }[] = [
   { key: 'suspended',  labelKey: 'status.suspended',       icon: Ban },
   { key: 'recent',     labelKey: 'drStudents.tabRecent',   icon: Clock },
 ];
-
-/**
- * Student avatar — the REAL uploaded profile photo.
- *
- * The doctor's student list previously drew an initials circle only. The
- * backend already returns `student.avatar_url` (public object URL from the
- * `user-avatars` bucket, set by the student from their profile screen), so the
- * photo was fetched but never displayed. This renders it with:
- *   • initials as the fallback for students WITHOUT a photo (no broken icon);
- *   • an onError fallback so a stale/deleted object degrades to initials;
- *   • no extra network/auth: avatar_url is a public URL, like the doctor's own
- *     avatar on dr-profile, and only authorized enrollment data reaches this
- *     screen in the first place (server-side visibility filter).
- */
-function StudentAvatar({ student, size, radius, colors }: {
-  student: any; size: number; radius: number; colors: any;
-}) {
-  const [failed, setFailed] = useState(false);
-  const url = typeof student?.avatar_url === 'string' ? student.avatar_url.trim() : '';
-  const initial = String(student?.full_name ?? '?').trim().charAt(0).toUpperCase() || '?';
-
-  if (url !== '' && !failed) {
-    return (
-      <Image
-        source={{ uri: url }}
-        style={{ width: size, height: size, borderRadius: radius, backgroundColor: `${colors.primary}18` }}
-        onError={() => setFailed(true)}
-        resizeMode="cover"
-        accessibilityLabel={student?.full_name ? String(student.full_name) : undefined}
-      />
-    );
-  }
-  return (
-    <View style={{ width: size, height: size, borderRadius: radius, backgroundColor: `${colors.primary}18`, alignItems: 'center', justifyContent: 'center' }}>
-      <Text style={{ fontSize: size * 0.36, fontWeight: '800', color: colors.primary }}>{initial}</Text>
-    </View>
-  );
-}
 
 export default function DoctorStudents() {
   // Responsive: two columns from tablet width up, one on phones. The card
@@ -108,7 +71,7 @@ export default function DoctorStudents() {
   const { profile } = useProfileStore();
   const { showToast } = useToast();
   const router = useRouter();
-  const { t, tCount, locale } = useTranslation();
+  const { t, tCount, locale, isRTL } = useTranslation();
 
   // ── Data ──────────────────────────────────────────────────────────────────────
   const [enrollments, setEnrollments] = useState<any[]>([]);
@@ -421,7 +384,10 @@ export default function DoctorStudents() {
             : t('drStudents.profileTitle')
         }
         style={{
-          flexDirection: 'row', alignItems: 'center', gap: 9,
+          // Pinned LTR so row-reverse is one physical mirror (see PageHeader):
+          // Arabic puts the avatar on the right with the name to its left.
+          direction: 'ltr',
+          flexDirection: isRTL ? 'row-reverse' : 'row', alignItems: 'center', gap: 9,
           paddingHorizontal: 10, paddingVertical: 9,
           borderBottomWidth: StyleSheet.hairlineWidth,
           borderBottomColor: `${c.text}16`,
@@ -447,10 +413,10 @@ export default function DoctorStudents() {
         <View style={{ flex: 1, minWidth: 0 }}>
           {/* Name gets the full row width: it is the primary text, so the
               status pill lives on the meta line instead of competing with it. */}
-          <Text style={{ fontSize: 13.5, fontWeight: '700', color: c.text }} numberOfLines={1}>
+          <Text style={{ fontSize: 13.5, fontWeight: '700', color: c.text, textAlign: isRTL ? 'right' : 'left' }} numberOfLines={1}>
             {s?.full_name ?? '—'}
           </Text>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 2, minWidth: 0 }}>
+          <View style={{ flexDirection: isRTL ? 'row-reverse' : 'row', alignItems: 'center', gap: 5, marginTop: 2, minWidth: 0 }}>
             <View style={{ flexShrink: 0, paddingHorizontal: 5, paddingVertical: 1, borderRadius: 5, backgroundColor: `${statusColor}18` }}>
               <Text style={{ fontSize: 9, fontWeight: '800', color: statusColor, letterSpacing: 0.2 }}>
                 {statusLabel(enrollment.status, t)}

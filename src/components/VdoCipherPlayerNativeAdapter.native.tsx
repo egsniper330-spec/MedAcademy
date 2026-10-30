@@ -65,7 +65,6 @@ import { ArrowLeft } from 'lucide-react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { VdoPlayerView } from 'vdocipher-rn-bridge';
 import { useFullscreenWindowDims } from '@/lib/useFullscreenWindowDims';
-import { beginFullscreenOrientation, releaseFullscreenOrientation } from '@/lib/fullscreenOrientation';
 import { useSecurityPlaybackStop } from '@/lib/useSecurityPlaybackStop';
 import { playerSessionMount, playerSessionUnmount } from '@/lib/vdoPlayerSession';
 import { getVideoPlaybackToken } from '@/lib/api';
@@ -252,6 +251,27 @@ export function VdoCipherPlayerNativeAdapter({
   }, [identity, isFullscreen]);
 
   // ── Orientation — Android-only locks; iOS is NEVER locked ─────────────────
+  // iOS keeps the orientation the user holds and the system Rotation Lock is
+  // never overridden (see the header comment). Android locks landscape while
+  // fullscreen and restores portrait on exit.
+  useEffect(() => {
+    if (Platform.OS !== 'android') return;
+    if (!isFullscreen) return;
+    void ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE).catch(() => {});
+    return () => {
+      void ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP).catch(() => {});
+    };
+  }, [isFullscreen]);
+
+  // Tracks mount state so an async security evaluation that resolves after
+  // navigation away cannot enter fullscreen (and strand the orientation).
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; };
+  }, []);
+
+  // ── (orientation handled above) ─────────────────────────────────────────────
   // iOS (the bug fixed here): NO orientation API is touched at all. Entering
   // fullscreen keeps whatever orientation the user is currently in (Portrait
   // stays Portrait, Landscape stays Landscape), the system Rotation Lock is
@@ -260,16 +280,6 @@ export function VdoCipherPlayerNativeAdapter({
   // Android: landscape while fullscreen, portrait otherwise (unchanged — the
   // in-place expansion + manifest configChanges keep the ONE player instance
   // alive through rotation; this is the 6120-safe path).
-  useEffect(() => {
-    if (Platform.OS !== 'android') return;
-    if (isFullscreen) {
-      ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE).catch(() => {});
-    } else {
-      ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP).catch(() => {});
-    }
-  }, [isFullscreen]);
-
-  // ── System bars while fullscreen (same controller as the offline player) ──
   useEffect(() => {
     if (!isFullscreen) return;
     void enterFullscreenSystemUi();
@@ -310,6 +320,7 @@ export function VdoCipherPlayerNativeAdapter({
     setOtp(null);
     setPlaybackInfo(null);
     setAnnotateApplied(false);
+    setIsFullscreen(false);
     durationSecRef.current = 0;
 
     (async () => {
@@ -367,11 +378,9 @@ export function VdoCipherPlayerNativeAdapter({
 
   // ── Fullscreen enter/exit (SAME player instance both ways) ────────────────
   const enterFullscreen = useCallback(async () => {
-    // ROTATION FIRST (latency fix, ordering only): the gate below is
-    // network-bound, so rotate while it evaluates instead of after it. A denial
-    // rolls the rotation back — fullscreen is still never committed unverified.
-    beginFullscreenOrientation();
-
+    // Rotation is requested by the isFullscreen effect above, once fullscreen
+    // is committed. (The early rotation that overlapped the security gate was
+    // removed: it could leave the device rotated if the gate refused.)
     // ── INSTANT ENTRY ON THE LIVE VERDICT (fullscreen latency) ───────────────
     // The host's PUBLISHED verdict decides entry synchronously, so fullscreen
     // commits in the same frame as the tap. The authoritative gate is NOT
@@ -386,7 +395,7 @@ export function VdoCipherPlayerNativeAdapter({
       } catch {
         allowedNow = false; // evaluation error → no fullscreen
       }
-      if (!allowedNow) { releaseFullscreenOrientation(); return; }
+      if (!allowedNow) return;
       setIsFullscreen(true);
       return;
     }
@@ -396,21 +405,32 @@ export function VdoCipherPlayerNativeAdapter({
     // thrown error all refuse fullscreen.
     if (shouldAllowFullscreen) {
       try {
-        if (!(await shouldAllowFullscreen())) {
-          releaseFullscreenOrientation();
-          return;
-        }
+        if (!(await shouldAllowFullscreen())) return;
       } catch {
-        releaseFullscreenOrientation();
         return;
       }
+      // Unmounted or lesson changed while the gate was pending: never enter.
+      if (!mountedRef.current) return;
     }
     setIsFullscreen(true);
   }, [shouldAllowFullscreen, fullscreenVerdictNow]);
 
-  const exitFullscreen = useCallback(() => {
+  // Local collapse only. Used by the SDK's own exit event, which has already
+  // left the SDK's fullscreen, so it must not call back into the SDK.
+  const collapseFullscreen = useCallback(() => {
     setIsFullscreen(false);
   }, []);
+
+  // App-initiated exit (back arrow, Android back): asks the SDK to leave its
+  // fullscreen too, so the SDK's state and the app's state stay in sync.
+  const exitFullscreen = useCallback(() => {
+    try {
+      playerRef.current?.exitFullscreenV2?.();
+    } catch {
+      /* player not ready — local state still collapses */
+    }
+    setIsFullscreen(false);
+  }, [playerRef]);
 
   // SDK fullscreen events — THE single fullscreen control on both platforms.
   // The SDK control-bar button (Android always; iOS since bridge 2.9.4) fires
@@ -420,8 +440,8 @@ export function VdoCipherPlayerNativeAdapter({
     void enterFullscreen();
   }, [enterFullscreen]);
   const handleSdkExitFullscreen = useCallback(() => {
-    exitFullscreen();
-  }, [exitFullscreen]);
+    collapseFullscreen();
+  }, [collapseFullscreen]);
 
   // Android hardware back collapses fullscreen (in-place → BackHandler, not
   // Modal onRequestClose).
@@ -539,7 +559,7 @@ export function VdoCipherPlayerNativeAdapter({
         onLoadError={handleLoadError}
         onEnterFullscreen={handleSdkEnterFullscreen}
         onExitFullscreen={handleSdkExitFullscreen}
-      />
+      >
       {/* Application watermark — the APP layer, with continuous billiard
           motion (watermarkMotion.ts) that reflects off the four bounds of the
           real video viewport.
@@ -559,7 +579,7 @@ export function VdoCipherPlayerNativeAdapter({
           and it maps into the in-place fullscreen state above — one fullscreen
           system, watermark overlay inside it. */}
 
-      {identity && watermarkLayers.appOverlay && (
+      {identity && watermarkLayers.appOverlay && Platform.OS !== 'ios' && (
         <NativeWatermarkOverlay
           watermarkId={identity.id}
           watermarkName={identity.name ?? undefined}
@@ -571,6 +591,22 @@ export function VdoCipherPlayerNativeAdapter({
             // landscape) — a stale portrait frame here means the overlay
             // hierarchy did not follow the fullscreen expansion; 0×0 means
             // the overlay's parent collapsed. Dimensions/state only.
+            const { width, height } = e.nativeEvent.layout;
+            if (RELEASE_DIAG || __DEV__) {
+              console.log(`[VDO_WM_OVERLAY_FRAME] w=${width.toFixed(0)} h=${height.toFixed(0)} fullscreen=${isFullscreen ? 'true' : 'false'}`);
+            }
+          }}
+        />
+      )}
+      </VdoPlayerView>
+
+      {identity && watermarkLayers.appOverlay && Platform.OS === 'ios' && (
+        <NativeWatermarkOverlay
+          watermarkId={identity.id}
+          watermarkName={identity.name ?? undefined}
+          debugProve={__DEV__}
+          onContainerLayout={(e) => {
+            // VDO_WM_OVERLAY_FRAME (iOS): see the Android overlay above.
             const { width, height } = e.nativeEvent.layout;
             if (RELEASE_DIAG || __DEV__) {
               console.log(`[VDO_WM_OVERLAY_FRAME] w=${width.toFixed(0)} h=${height.toFixed(0)} fullscreen=${isFullscreen ? 'true' : 'false'}`);

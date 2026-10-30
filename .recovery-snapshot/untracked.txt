@@ -1,0 +1,12 @@
+.expo-web.pid
+.recovery-snapshot/diff-stat-before.txt
+.recovery-snapshot/git-status-before.txt
+.recovery-snapshot/hashes-before.txt
+.recovery-snapshot/modified.txt
+.recovery-snapshot/untracked.txt
+expo-web.log
+pdfium-helper/pdfium_render.c
+plugins/withIosOrientation.js
+scripts/verify-vdocipher-patch.cjs
+src/components/StudentAvatar.tsx
+white-screen-check.png

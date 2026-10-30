@@ -17,7 +17,7 @@
     "validate:native": "node scripts/validate-native-build.js",
     "validate": "node scripts/validate-all.js",
     "prebuild:validate": "node scripts/validate-all.js",
-    "postinstall": "patch-package || true",
+    "postinstall": "patch-package --error-on-fail && node scripts/verify-vdocipher-patch.cjs",
     "test:offline": "node scripts/run-state-tests.cjs offlineState.test.cjs offlinePipeline.test.cjs offlineEntitlement.test.cjs offlineMediaContract.test.cjs aboutOfflineUi.test.cjs",
     "i18n:audit": "node scripts/i18n-coverage.js",
     "license:audit": "node scripts/dependency-license-audit.cjs"

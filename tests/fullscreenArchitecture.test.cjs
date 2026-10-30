@@ -433,6 +433,14 @@ console.log('── Native bridge patch: SDK fullscreen must never bury the RN w
     'iOS offline: get_video_qualities stage telemetry present (decisive evidence chain)');
   ok(patch.includes('stage=native_asset_init') && patch.includes('stage=native_asset_cache'),
     'iOS offline: asset-init/cache stage telemetry present');
+  // ANDROID watermark host: React children mount into a transparent overlay that
+  // sits above the SDK fragment and is managed by both ViewManager variants.
+  ok(patch.includes('private final FrameLayout overlayHost;') && patch.includes('public void addOverlayChild('),
+    'Android: player view exposes a React child overlay host');
+  ok(patch.includes('newarch/java/com/vdocipher/rnbridge/ReactVdoPlayerUIViewManager.java') && patch.includes('public void addView(ReactVdoPlayerUIView parent'),
+    'Android new-arch: ViewGroupManager child management delegated to the overlay host');
+  ok(patch.includes('oldarch/java/com/vdocipher/rnbridge/ReactVdoPlayerUIViewManager.java') && patch.includes('public int getChildCount(ReactVdoPlayerUIView parent)'),
+    'Android old-arch: ViewGroupManager child management delegated to the overlay host');
   // No credentials in telemetry.
   ok(!patch.includes('playbackInfo:') || !/print\(.*(otp|playbackInfo|token)/i.test(patch.split('MEDACADEMY').join('')),
     'telemetry logs no credentials');
@@ -480,11 +488,11 @@ console.log('── Single fullscreen entry: the SDK\'s OWN fullscreen button is
   // (5) patch-package compatibility: standard unified diff with balanced,
   // node_modules-relative headers (what `patch -p1` / patch-package reads).
   const diffSections = (bridgePatch.match(/^diff --git a\/.+ b\/.+$/gm) || []);
-  ok(diffSections.length === 4,
-    `patch: exactly 4 file sections (1 Android + 3 iOS) — got ${diffSections.length}`);
+  ok(diffSections.length === 6,
+    `patch: exactly 6 file sections (3 Android + 3 iOS) — got ${diffSections.length}`);
   const minusHeaders = (bridgePatch.match(/^--- a\/node_modules\/vdocipher-rn-bridge\//gm) || []);
   const plusHeaders = (bridgePatch.match(/^\+\+\+ b\/node_modules\/vdocipher-rn-bridge\//gm) || []);
-  ok(minusHeaders.length === 4 && plusHeaders.length === 4,
+  ok(minusHeaders.length === 6 && plusHeaders.length === 6,
     `patch: balanced --- a/ +++ b/ headers on node_modules paths (-p1) — ${minusHeaders.length}/${plusHeaders.length}`);
   ok(/^@@/m.test(bridgePatch), 'patch: hunk headers present');
   // Parse it with patch-package's OWN parser — the exact code postinstall runs.
@@ -529,6 +537,13 @@ console.log('── Single fullscreen entry: the SDK\'s OWN fullscreen button is
   // (7) The watermark self-proof must NEVER run in production.
   ok(/debugProve=\{__DEV__\}/.test(on),
     'online adapter: debugProve wired to __DEV__ (no prove loop in release)');
+  // Watermark placement: Android renders the overlay as a CHILD of VdoPlayerView
+  // (hosted above the SDK fragment); iOS keeps the sibling overlay.
+  ok(/<VdoPlayerView[\s\S]*?>[\s\S]*?<NativeWatermarkOverlay[\s\S]*?<\/VdoPlayerView>/.test(on) &&
+     /Platform\.OS !== 'ios'/.test(on),
+    'adapter: Android watermark overlay nested inside VdoPlayerView');
+  ok(/Platform\.OS === 'ios'[\s\S]*?<NativeWatermarkOverlay/.test(on),
+    'adapter: iOS watermark overlay keeps its sibling placement');
   ok(!/debugProve=\{true\}/.test(on + off),
     'players: no hard-coded debugProve={true} left');
   const wmOverlay = read('src/components/NativeWatermarkOverlay.tsx');

@@ -64,16 +64,13 @@ its `package.json` / Composer metadata is authoritative.
 - Evidence: cannot be verified without a macOS `pod install`; declared versions come from package.json only
 - Note: flagged unverified: the audited npm versions are the input, the resolved pods are not
 
-### Ghostscript
+### PDFium (pdfium-render helper)
 
-- Version: not a dependency of the default engine (10.08.0 present only on this Windows dev box)
-- Location: `external executable, gated behind PDF_WATERMARK_ACCEPT_AGPL_RENDERER=1`
-- Licence: AGPL-3.0 (or Artifex commercial)
-- Used for: optional raster engine — disabled by default
+- Version: 158.0.8125.0 (bblanchon/pdfium-binaries, chromium/8125)
+- Location: `backend/bin/pdfium_render` and `backend/pdfium/lib/libpdfium.so`
+- Licence: BSD-3-Clause (PDFium source); the builder scripts are MIT
+- Used for: student PDF raster engine (production)
 - Evidence: backend/docs/PDF_WATERMARK_LICENSING.md
-- Note: not a dependency of any shipped code path: `raster` needs both PDF_WATERMARK_MODE=raster and
-- Note: PDF_WATERMARK_ACCEPT_AGPL_RENDERER=1, and `auto` never selects it — so it is excluded from the
-- Note: blocking set while it stays gated
 
 ## PHP backend
 

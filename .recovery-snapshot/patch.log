@@ -1,0 +1,60 @@
+patch-package 8.0.1
+Applying patches...
+expo-router@55.0.5 ✔
+expo-screen-capture@55.0.16 ✔
+vdocipher-rn-bridge@2.0.1 ✔
+Unrecognized patch file in patches directory @shopify__react-native-skia@2.4.18.patch
+
+Warning: patch-package detected a patch file version mismatch
+
+  Don't worry! This is probably fine. The patch was still applied
+  successfully. Here's the deets:
+
+  Patch file created for
+
+    expo-router@55.0.5
+
+  applied to
+
+    expo-router@55.0.18
+  
+  At path
+  
+    node_modules/expo-router
+
+  This warning is just to give you a heads-up. There is a small chance of
+  breakage even though the patch was applied successfully. Make sure the package
+  still behaves like you expect (you wrote tests, right?) and then run
+
+    patch-package expo-router
+
+  to update the version in the patch file name and make this warning go away.
+
+
+Warning: patch-package detected a patch file version mismatch
+
+  Don't worry! This is probably fine. The patch was still applied
+  successfully. Here's the deets:
+
+  Patch file created for
+
+    expo-screen-capture@55.0.16
+
+  applied to
+
+    expo-screen-capture@55.0.18
+  
+  At path
+  
+    node_modules/expo-screen-capture
+
+  This warning is just to give you a heads-up. There is a small chance of
+  breakage even though the patch was applied successfully. Make sure the package
+  still behaves like you expect (you wrote tests, right?) and then run
+
+    patch-package expo-screen-capture
+
+  to update the version in the patch file name and make this warning go away.
+
+---
+patch-package finished with 3 warning(s).

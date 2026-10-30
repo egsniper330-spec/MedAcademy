@@ -11,7 +11,7 @@ declare(strict_types=1);
  * pixels. Two students are personalized from the same source. Never touches a
  * database.
  *
- * Student delivery must resolve to the RASTER engine, gated on Ghostscript,
+ * Student delivery must resolve to the RASTER engine, gated on the PDFium renderer,
  * the configured compositor/font, and the operator's licence acknowledgement.
  * Legacy vector and flatten modes are explicitly expected to fail closed:
  *
@@ -164,20 +164,6 @@ function runArgv(array $argv): array
     fclose($pipes[1]);
     fclose($pipes[2]);
     return [proc_close($p), (string) $out, (string) $err];
-}
-
-/** Locate pdftotext the cross-platform way (env PDFTOTEXT, then PATH). */
-function findPdftotext(): ?string
-{
-    $configured = trim((string) getenv('PDFTOTEXT'));
-    $candidates = $configured !== '' ? [$configured] : ['pdftotext'];
-    foreach ($candidates as $bin) {
-        [$rc, $stdout, $stderr] = runArgv([$bin, '-v']);
-        if ($rc !== 127 && (str_contains($stdout . $stderr, 'pdftotext version') || str_contains($stdout . $stderr, 'pdftotext '))) {
-            return $bin;
-        }
-    }
-    return null;
 }
 
 function pdfPageCount(string $file): int
@@ -537,56 +523,41 @@ if ($mode === PdfWatermarkService::MODE_VECTOR) {
 }
 
 // ── 3b. Renderer (shared by the pixel proofs below) ────────────────────────
-// Ghostscript is optional: the vector engine's structural checks and the
+// The renderer is optional: the vector engine's structural checks and the
 // flattened engine's image/XObject checks need no renderer. Every check that
 // DOES need pixels reports SKIPPED when this returns false, never "passed".
-$gsBin = (string) \MedAcademy\Utils\Config::string('GHOSTSCRIPT_BIN', 'gs');
-[$gsProbeRc] = runArgv([$gsBin, '--version']);
-check($checks, $fail, 'Ghostscript renderer is available for mandatory pixel proofs', $gsProbeRc === 0, $gsBin);
-$render = static function (string $pdf, string $png, int $page) use ($gsBin, $service): bool {
+$pdfiumBin = (string) (getenv('PDFIUM_RENDER_BIN') ?: dirname(__DIR__, 2) . '/bin/pdfium_render');
+[$pdfiumProbeRc, $pdfiumProbeOut] = runArgv([$pdfiumBin, '--check']);
+check($checks, $fail, 'PDFium renderer is available for mandatory pixel proofs', $pdfiumProbeRc === 0 && trim($pdfiumProbeOut) === 'pdfium-render ok', $pdfiumBin);
+// The helper renders pages 1..N (N = the requested page), then the wanted page is renamed.
+$render = static function (string $pdf, string $png, int $page) use ($pdfiumBin, $service): bool {
     @unlink($png);
-    $argv = [$gsBin, '-q', '-dNOPAUSE', '-dBATCH', '-dSAFER', '-sDEVICE=png16m', '-r' . $service->dpi(),
-             '-dTextAlphaBits=4', '-dGraphicsAlphaBits=4',
-             '-dFirstPage=' . $page, '-dLastPage=' . $page, '-dUseCropBox', '-sOutputFile=' . $png, $pdf, '-c', 'quit'];
-    [$rc] = runArgv($argv);
-    return $rc === 0 && is_file($png);
+    $prefix = $png . '.work';
+    [$rc] = runArgv([$pdfiumBin, $pdf, $prefix, (string) $service->dpi(), (string) $page]);
+    $rendered = $prefix . '-' . $page . '.png';
+    $ok = $rc === 0 && is_file($rendered);
+    if ($ok) {
+        rename($rendered, $png);
+    }
+    foreach (glob($prefix . '-*.png') ?: [] as $leftover) {
+        @unlink($leftover);
+    }
+    return $ok && is_file($png);
 };
 $hasRenderer = $render($src, $OUT . '/src-p1.png', 1);
 
-// ── 4. Text extraction (pdftotext, when installed) ──────────────────────────
-$pdftotext = findPdftotext();
-$textReport = ['pdftotext' => $pdftotext];
-if ($pdftotext === null) {
-    check($checks, $fail, 'pdftotext extracts the marker from the SOURCE', false, 'pdftotext is required for the text-layer proof');
-    $textReport['skipped'] = false;
-} else {
-    [$rcS] = runArgv([$pdftotext, '-layout', $src, $OUT . '/source.txt']);
-    [$rcO] = runArgv([$pdftotext, '-layout', $outA, $OUT . '/student-a.txt']);
-    $srcText = is_file($OUT . '/source.txt') ? (string) file_get_contents($OUT . '/source.txt') : '';
-    $outText = is_file($OUT . '/student-a.txt') ? (string) file_get_contents($OUT . '/student-a.txt') : '';
-    $textReport += [
-        'source_rc' => $rcS, 'output_rc' => $rcO,
-        'source_has_marker' => str_contains($srcText, MARKER),
-        'output_has_marker' => str_contains($outText, MARKER),
-        'output_has_identity' => str_contains($outText, $identityA),
-    ];
-    check($checks, $fail, 'pdftotext extracts the marker from the SOURCE',
-        $rcS === 0 && str_contains($srcText, MARKER), 'exit=' . $rcS);
-    if ($mode === PdfWatermarkService::MODE_RASTER) {
-        // Rasterization removes selectable source text. OCR may still recognize
-        // text in the page images; this only tests the ordinary PDF text layer.
-        check($checks, $fail, 'raster output exposes NO extractable source text layer',
-            $rcO === 0 && !str_contains($outText, MARKER) && !str_contains($outText, 'MED-0042') && !str_contains($outText, 'MEDACADEMY'),
-            'bytes=' . strlen($outText));
-    } else {
-        // The vector engine deliberately keeps the lecture text layer (a
-        // documented trade-off), so extraction still yields the lecture — but a
-        // 45° background mark is emitted BEFORE the page and therefore
-        // interleaves with it in extraction order, which makes an exact
-        // substring match meaningless. The identity is verified per page from
-        // the CONTENT STREAM above, which is the reliable proof.
-        check($checks, $fail, 'vector output still exposes a text layer (lecture text not rasterised)', $rcO === 0 && strlen($outText) > 200, 'bytes=' . strlen($outText));
-    }
+// ── 4. Image-only structure (no external tools) ─────────────────────────────
+// The raster output must be a sequence of page images with no font resources,
+// so no text layer (source or watermark) can be extracted. Checked from the raw
+// PDF structure, which needs neither pdftotext nor Ghostscript.
+if ($mode === PdfWatermarkService::MODE_RASTER) {
+    $outRaw = (string) file_get_contents($outA);
+    $outImages = imageStreams($outA);
+    $outPages = pdfPageCount($outA);
+    check($checks, $fail, 'raster output has NO font resources (no text layer)',
+        $outRaw !== '' && !preg_match('#/Type\s*/Font#', $outRaw), 'bytes=' . strlen($outRaw));
+    check($checks, $fail, 'raster output has exactly one image per page',
+        $outPages > 0 && count($outImages) === $outPages, 'images=' . count($outImages) . ' pages=' . $outPages);
 }
 
 // ── 5. Rotated pages + mixed sizes ──────────────────────────────────────────
@@ -609,7 +580,7 @@ if (is_file($rotSrc)) {
                 // Flattened engine: there is no text layer to read, so identity
                 // is proved from PIXELS — the mark is the only difference from a
                 // clean render of the same source page — and the structure from
-                // one image XObject per page. Ghostscript applies the source
+                // one image XObject per page. PDFium applies the source
                 // /Rotate itself, which is why the mark lands upright and
                 // centred on rotated pages too.
                 $rotRaw = (string) file_get_contents($rotOut);
@@ -618,7 +589,7 @@ if (is_file($rotSrc)) {
                     count($rotImages) === count($insight) && !preg_match('#/Type\s*/Font#', $rotRaw),
                     'images=' . count($rotImages) . ' pages=' . count($insight));
                 if (!$hasRenderer) {
-                    check($checks, $fail, 'rotated fixture: EVERY page carries ONE centred watermark', false, 'Ghostscript failed to render source or output');
+                    check($checks, $fail, 'rotated fixture: EVERY page carries ONE centred watermark', false, 'PDFium failed to render source or output');
                 } else {
                     $bad = [];
                     $rotOutB = $OUT . '/rotated-out-student-b.pdf';
@@ -727,7 +698,7 @@ $badPageBands = [];
 $hasRenderer = $hasRenderer && $render($outA, $outPng, 1);
 
 if (!$hasRenderer) {
-    check($checks, $fail, 'source/output pages render successfully for pixel proofs', false, 'Ghostscript failed to render source or output');
+    check($checks, $fail, 'source/output pages render successfully for pixel proofs', false, 'PDFium failed to render source or output');
 } else {
     for ($pageNo = 1; $pageNo <= $srcPages; $pageNo++) {
         $sourcePagePng = $OUT . '/source-p' . $pageNo . '.png';
@@ -768,6 +739,44 @@ if (!$hasRenderer) {
     }
     check($checks, $fail, 'pixels: every page has exactly ONE centered mark and no repeated copies (student A vs B; source pixels cancel)',
         $badPageBands === [] && count($allPageBands) === $srcPages, json_encode($badPageBands));
+
+    // Occlusion-independent placement: source ink can hide part of the mark and
+    // skew its bounding box, so also measure the mark on a BLANK page of the same
+    // size. Rendering a blank source through the same engine leaves nothing to
+    // occlude the mark, so its extent shows the true placement.
+    $blankSrc = $FIX . '/blank-reference.pdf';
+    $blankOutA = $OUT . '/blank-reference-a.pdf';
+    $blankOutB = $OUT . '/blank-reference-b.pdf';
+    $blankOk = false;
+    $blankDetail = '';
+    try {
+        @mkdir($FIX, 0775, true);
+        $blankPdf = new \FPDF('P', 'pt', 'A4');
+        $blankPdf->AddPage();
+        $blankPdf->Output($blankSrc, 'F');
+        @unlink($blankOutA);
+        @unlink($blankOutB);
+        $service->personalize($blankSrc, $linesA, $blankOutA);
+        $service->personalize($blankSrc, $linesB, $blankOutB);
+        $blankA = $OUT . '/blank-p1-a.png';
+        $blankB = $OUT . '/blank-p1-b.png';
+        if ($render($blankOutA, $blankA, 1) && $render($blankOutB, $blankB, 1)) {
+            $blankBand = bandStats($blankA, $blankB);
+            $blankOk = $blankBand !== null
+                && $blankBand['n'] >= 2000
+                && abs($blankBand['bbox_cx'] - 0.5) <= 0.025
+                && abs($blankBand['bbox_cy'] - 0.5) <= 0.025
+                && $blankBand['band_frac'] >= 0.45
+                && $blankBand['bbox_ratio'] <= 0.25
+                && $blankBand['runs'] <= 4;
+            $blankDetail = json_encode($blankBand);
+        } else {
+            $blankDetail = 'blank reference render failed';
+        }
+    } catch (\Throwable $e) {
+        $blankDetail = get_class($e) . ': ' . $e->getMessage();
+    }
+    check($checks, $fail, 'pixels: blank reference page has ONE centered mark (occlusion-independent)', $blankOk, $blankDetail);
     $a = imagecreatefrompng($srcPng);
     $b = imagecreatefrompng($outPng);
     $w = min(imagesx($a), imagesx($b));
@@ -941,7 +950,7 @@ $report = [
     'student_a' => ['identity' => implode(' | ', array_filter($linesA)), 'pages' => $pagesA, 'bytes' => strlen($bytesA), 'ms' => $msA, 'peak_mem_bytes' => $peakA],
     'student_b' => ['identity' => implode(' | ', array_filter($linesB)), 'pages' => $pagesB, 'bytes' => strlen($bytesB), 'ms' => $msB],
     'bytes_identical_between_students' => md5($bytesA) === md5($bytesB),
-    'text_extraction' => $textReport,
+    'image_structure' => ['pages' => $outPages ?? null, 'images' => isset($outImages) ? count($outImages) : null],
     'vector_page_report' => $pageReport,
     'pixel_analysis' => $pixelReport,
     'benchmarks' => $benchmarks,

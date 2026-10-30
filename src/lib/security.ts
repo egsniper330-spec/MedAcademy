@@ -76,6 +76,7 @@ import {
   DEVICE_CHECK_UNSUPPORTED,
 } from '@/lib/nativeSecurity';
 import { getSecurityGuards, getSecurityConfig } from '@/lib/securityConfigService';
+import { isSecurityTestBypassed } from '@/lib/securityTestBuild';
 // PURE state model (no react-native/expo imports) — risk scoring + policy
 // evaluation are delegated there so they are unit-testable with plain node.
 import {
@@ -1969,7 +1970,9 @@ export async function runSecurityChecks(
     devOptsThreat, screenRecThreat, integrityThreat,
     fridaThreat, xposedThreat, magiskThreat, overlayThreat,
     tamperThreat, piThreat, sslThreat,
-  ].filter((t): t is SecurityThreat => t !== null && t.detected);
+  ].filter((t): t is SecurityThreat => t !== null && t.detected)
+    // TEMPORARY SECURITY TEST BUILD: no-op unless EXPO_PUBLIC_SECURITY_TEST_BUILD=1.
+    .filter((t) => !isSecurityTestBypassed(t));
 
   if (__DEV__) {
     console.log('[SecurityCheck][runSecurityChecks] ✅ detected threats:', allThreats.map(t => t.type).join(', ') || 'none');

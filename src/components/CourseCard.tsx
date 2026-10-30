@@ -78,7 +78,7 @@ export function CourseCard({
   const isDark = scheme === 'dark';
   const c = isDark ? neuColors.dark : neuColors.light;
   const layout = useLayout();
-  const { t } = useTranslation();
+  const { t, isRTL } = useTranslation();
 
   // Fluid thumb size: ~20% of available width on phones, ~15% on tablets, min 64dp, max 100dp
   const availW     = layout.width - layout.screenPx * 2;
@@ -105,7 +105,9 @@ export function CourseCard({
       <Reanimated.View entering={FadeInDown.delay(index * 60).springify().damping(14)}>
         <Pressable onPress={onPress} style={{ marginBottom: layout.pad.sm }}>
           <NeuCard style={{ padding: 0, overflow: 'hidden' }}>
-          <View style={{ flexDirection: 'row', alignItems: 'stretch' }}>
+          {/* Pinned LTR so row-reverse is one physical mirror (see PageHeader):
+              Arabic puts the thumbnail on the right, text to its left. */}
+          <View style={{ direction: 'ltr', flexDirection: isRTL ? 'row-reverse' : 'row', alignItems: 'stretch' }}>
             {/* Thumbnail — fluid square */}
             <CompactThumb imageUrl={imageUrl} primary={c.primary} size={thumbSize}
               badge={showEnrollmentUI && isEnrolled ? (enrollmentStatus === 'completed' ? 'done' : 'enrolled') : undefined}
@@ -114,13 +116,13 @@ export function CourseCard({
             {/* Content */}
             <View style={{ flex: 1, paddingHorizontal: contentPx, paddingVertical: contentPy, justifyContent: 'space-between' }}>
               {/* Title */}
-              <Text style={{ fontSize: titleFs, fontWeight: '700', color: c.text, lineHeight: titleFs * 1.3 }} numberOfLines={2}>
+              <Text style={{ fontSize: titleFs, fontWeight: '700', color: c.text, lineHeight: titleFs * 1.3, textAlign: isRTL ? 'right' : 'left' }} numberOfLines={2}>
                 {title}
               </Text>
 
               {/* Doctor */}
               {doctorName ? (
-                <Text style={{ fontSize: metaFs, ...mutedTextStyle(c, 0.5), marginTop: layout.pad.xs }} numberOfLines={1}>
+                <Text style={{ fontSize: metaFs, ...mutedTextStyle(c, 0.5), marginTop: layout.pad.xs, textAlign: isRTL ? 'right' : 'left' }} numberOfLines={1}>
                   {t('studentProfile.doctorPrefix', { name: doctorName })}
                 </Text>
               ) : null}
@@ -128,7 +130,7 @@ export function CourseCard({
               {/* Price */}
               {priceEgp !== undefined && !isEnrolled ? (
                 <Text style={{ fontSize: priceFs, fontWeight: '800', marginTop: layout.pad.xs,
-                  color: (!priceEgp || priceEgp === 0) ? '#16A34A' : c.primary }}>
+                  color: (!priceEgp || priceEgp === 0) ? '#16A34A' : c.primary, textAlign: isRTL ? 'right' : 'left' }}>
                   {(!priceEgp || priceEgp === 0) ? t('home.free') : `EGP ${Number(priceEgp).toFixed(0)}`}
                 </Text>
               ) : null}
@@ -136,8 +138,8 @@ export function CourseCard({
               {/* Progress bar */}
               {progress !== undefined ? (
                 <View style={{ marginTop: layout.pad.xs }}>
-                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 2 }}>
-                    <Text style={{ fontSize: progressFs, ...mutedTextStyle(c, 0.45) }}>{t('course.progressLabel')}</Text>
+                  <View style={{ flexDirection: isRTL ? 'row-reverse' : 'row', justifyContent: 'space-between', marginBottom: 2 }}>
+                    <Text style={{ fontSize: progressFs, ...mutedTextStyle(c, 0.45), textAlign: isRTL ? 'right' : 'left' }}>{t('course.progressLabel')}</Text>
                     <Text style={{ fontSize: progressFs, color: PROGRESS_COLOR_DIM, fontWeight: '600' }}>{progress}%</Text>
                   </View>
                   <View style={{ height: 3, backgroundColor: isDark ? '#1a3a2a' : '#dcfce7', borderRadius: 2, overflow: 'hidden' }}>
@@ -220,25 +222,26 @@ export function CourseCard({
         </CourseThumbnailBanner>
 
         <View style={{ padding: contentPx }}>
-          <Text style={{ fontSize: titleFs, fontWeight: '700', color: c.text, marginBottom: 2 }} numberOfLines={2}>
+          {/* textAlign follows the APP locale, never the title's own language */}
+          <Text style={{ fontSize: titleFs, fontWeight: '700', color: c.text, marginBottom: 2, textAlign: isRTL ? 'right' : 'left' }} numberOfLines={2}>
             {title}
           </Text>
 
           {doctorName ? (
-            <Text style={{ fontSize: metaFs, ...mutedTextStyle(c, 0.55), marginBottom: layout.pad.xs }}>
+            <Text style={{ fontSize: metaFs, ...mutedTextStyle(c, 0.55), marginBottom: layout.pad.xs, textAlign: isRTL ? 'right' : 'left' }}>
               {t('studentProfile.doctorPrefix', { name: doctorName })}
             </Text>
           ) : null}
 
           {description ? (
-            <Text style={{ fontSize: metaFs, ...mutedTextStyle(c, 0.5), lineHeight: metaFs * 1.4, marginBottom: layout.pad.xs }} numberOfLines={1}>
+            <Text style={{ fontSize: metaFs, ...mutedTextStyle(c, 0.5), lineHeight: metaFs * 1.4, marginBottom: layout.pad.xs, textAlign: isRTL ? 'right' : 'left' }} numberOfLines={1}>
               {description}
             </Text>
           ) : null}
 
           {priceEgp !== undefined && !isEnrolled ? (
             <View style={{ alignSelf: 'flex-start', marginBottom: layout.pad.xs }}>
-              <Text style={{ fontSize: priceFs, fontWeight: '800',
+              <Text style={{ fontSize: priceFs, fontWeight: '800', textAlign: isRTL ? 'right' : 'left',
                 color: (!priceEgp || priceEgp === 0) ? '#16A34A' : c.primary }}>
                 {(!priceEgp || priceEgp === 0) ? t('home.free') : `EGP ${Number(priceEgp).toFixed(0)}`}
               </Text>
@@ -248,7 +251,7 @@ export function CourseCard({
           {progress !== undefined ? (
             <View style={{ marginBottom: layout.pad.xs }}>
               <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 3 }}>
-                <Text style={{ fontSize: progressFs, ...mutedTextStyle(c, 0.5) }}>{t('course.progressLabel')}</Text>
+                <Text style={{ fontSize: progressFs, ...mutedTextStyle(c, 0.5), textAlign: isRTL ? 'right' : 'left' }}>{t('course.progressLabel')}</Text>
                 <Text style={{ fontSize: progressFs, color: PROGRESS_COLOR_DIM, fontWeight: '600' }}>{progress}%</Text>
               </View>
               <View style={{ height: 3, backgroundColor: isDark ? '#1a3a2a' : '#dcfce7', borderRadius: 2, overflow: 'hidden' }}>

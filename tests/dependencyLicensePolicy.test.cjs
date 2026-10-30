@@ -249,13 +249,18 @@ ok('the parser ignores project deps', ![...sample.keys()].some((k) => k.includes
 
 section('5. AGPL renderer is unreachable from the default path');
 
-const gated = inv.vendored.filter((p) => p.gated);
-ok('Ghostscript is recorded as gated, not as a dependency', gated.some((g) => /Ghostscript/.test(g.name)));
-
 const wmService = read('backend/src/Services/PdfWatermarkService.php');
 ok(
-  'selecting the raster engine needs an explicit opt-in flag',
-  /PDF_WATERMARK_ACCEPT_AGPL_RENDERER/.test(wmService),
+  'the watermark service no longer invokes Ghostscript',
+  !/proc_open\(\s*\[\s*['"]gs['"]|GHOSTSCRIPT_BIN|PDF_WATERMARK_ACCEPT_AGPL_RENDERER/.test(wmService),
+);
+ok(
+  'the raster engine is the bundled PDFium helper (BSD-3-Clause)',
+  /pdfium_render/.test(wmService) && /BSD-3-Clause/.test(wmService),
+);
+ok(
+  'Ghostscript is no longer listed as a gated dependency',
+  !inv.vendored.some((g) => /Ghostscript/.test(g.name)),
 );
 
 /* ── 6. Notices ship with the code they cover ───────────────────────────── */

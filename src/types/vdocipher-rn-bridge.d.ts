@@ -104,6 +104,8 @@ declare module 'vdocipher-rn-bridge' {
     onEnterFullscreen?: () => void;
     onExitFullscreen?: () => void;
     onPictureInPictureModeChanged?: (event: { isInPictureInPictureMode: boolean }) => void;
+    /** Android: native child views (the watermark overlay) hosted above the SDK surface. */
+    children?: React.ReactNode;
   }
 
   // ── Component export ──────────────────────────────────────────────────────
@@ -120,6 +122,10 @@ declare module 'vdocipher-rn-bridge' {
     pause(): void;
     /** Resume playback (no-op if the player has not loaded). */
     play(): void;
+    /** Enter the SDK's fullscreen (native controls only). */
+    enterFullscreenV2(): void;
+    /** Exit the SDK's fullscreen so SDK and app state stay in sync. */
+    exitFullscreenV2(): void;
   }
   export default VdoPlayerView;
 }

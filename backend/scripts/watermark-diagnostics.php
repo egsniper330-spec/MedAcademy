@@ -11,7 +11,7 @@ declare(strict_types=1);
  *
  * OPERATOR-ONLY: this is a CLI script (it refuses a web SAPI) and lives outside
  * the document root, so it may print the full capability detail — including the
- * resolved font path and configured Ghostscript binary — which the admin-only
+ * resolved font path and configured PDFium render binary — which the admin-only
  * HTTP surface (RendererStatus::status()) deliberately omits. It still contains
  * no secrets, no database credentials, and no file bytes.
  *
@@ -49,7 +49,7 @@ if (($report['available'] ?? false) !== true) {
 
 if (($report['effective_mode'] ?? null) === PdfWatermarkService::MODE_VECTOR) {
     fwrite(STDERR, "\nNote: running the VECTOR engine — output keeps a selectable text layer.\n");
-    fwrite(STDERR, "For flattened image-only pages enable raster: install Ghostscript, GD (FreeType)\n");
+    fwrite(STDERR, "For flattened image-only pages enable raster: install the PDFium helper, GD (FreeType)\n");
     fwrite(STDERR, "or Imagick, and a TTF font, and allow proc_open.\n");
 }
 

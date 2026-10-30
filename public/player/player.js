@@ -701,10 +701,17 @@
     var FEEDBACK_MS = 650;
     var _lastTap = { t: 0, x: 0, y: 0, zone: null };
 
-    /** Pure tap classifier (also a test/diagnostic seam — dimensions only). */
+    /** Pure tap classifier (also a test/diagnostic seam — dimensions only).
+     *  Left 35% → back, right 35% → forward, centre 30% → null (no action,
+     *  never pairs with a neighbouring side tap). */
     window.__medaSeekTap = function (now, x, y, w, h) {
       if (!(w > 0) || !(h > 0)) return null;
-      var zone = x < w / 2 ? 'back' : 'forward';
+      var ratio = x / w;
+      if (ratio >= 0.35 && ratio <= 0.65) {
+        _lastTap = { t: 0, x: 0, y: 0, zone: null };
+        return null;
+      }
+      var zone = ratio < 0.5 ? 'back' : 'forward';
       var near = Math.abs(x - _lastTap.x) <= Math.max(48, w * 0.12) &&
                  Math.abs(y - _lastTap.y) <= Math.max(48, h * 0.25);
       var isDouble = _lastTap.zone === zone && near && (now - _lastTap.t) <= DOUBLE_TAP_MS;

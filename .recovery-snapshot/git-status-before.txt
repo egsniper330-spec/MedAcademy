@@ -1,0 +1,28 @@
+ M THIRD_PARTY_NOTICES.md
+ M app.json
+ M backend/scripts/watermark-diagnostics.php
+ M backend/src/Controllers/MaterialDeliveryController.php
+ M backend/src/Services/MaterialPdfVariantService.php
+ M backend/src/Services/PdfWatermarkService.php
+ M backend/tests/pdf-watermark/error_tests.php
+ M backend/tests/pdf-watermark/run_real_test.php
+ M docs/dependency-license-inventory.json
+ M package.json
+ M public/player/player.js
+ M scripts/dependency-license-audit.cjs
+ M src/app/(app)/(doctor)/courses.tsx
+ M src/app/(app)/(doctor)/dr-overview.tsx
+ M src/app/(app)/(doctor)/students.tsx
+ M src/components/CourseCard.tsx
+ M src/components/VdoCipherPlayerNativeAdapter.native.tsx
+ M src/lib/plyr/playerScript.ts
+ M src/types/vdocipher-rn-bridge.d.ts
+ M tests/dependencyLicensePolicy.test.cjs
+?? .expo-web.pid
+?? .recovery-snapshot/
+?? expo-web.log
+?? pdfium-helper/
+?? plugins/withIosOrientation.js
+?? scripts/verify-vdocipher-patch.cjs
+?? src/components/StudentAvatar.tsx
+?? white-screen-check.png

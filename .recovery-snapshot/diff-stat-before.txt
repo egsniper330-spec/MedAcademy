@@ -1,0 +1,21 @@
+ THIRD_PARTY_NOTICES.md                             |  13 +-
+ app.json                                           |   3 +-
+ backend/scripts/watermark-diagnostics.php          |   4 +-
+ .../src/Controllers/MaterialDeliveryController.php |  14 ++
+ backend/src/Services/MaterialPdfVariantService.php |   9 +-
+ backend/src/Services/PdfWatermarkService.php       | 148 ++++++++++-----------
+ backend/tests/pdf-watermark/error_tests.php        |   2 +-
+ backend/tests/pdf-watermark/run_real_test.php      | 135 ++++++++++---------
+ docs/dependency-license-inventory.json             |  17 +--
+ package.json                                       |   2 +-
+ public/player/player.js                            |  11 +-
+ scripts/dependency-license-audit.cjs               |  17 +--
+ src/app/(app)/(doctor)/courses.tsx                 |  10 +-
+ src/app/(app)/(doctor)/dr-overview.tsx             |  35 ++---
+ src/app/(app)/(doctor)/students.tsx                |  50 ++-----
+ src/components/CourseCard.tsx                      |  27 ++--
+ .../VdoCipherPlayerNativeAdapter.native.tsx        |  70 ++++++----
+ src/lib/plyr/playerScript.ts                       |   9 +-
+ src/types/vdocipher-rn-bridge.d.ts                 |   4 +
+ tests/dependencyLicensePolicy.test.cjs             |  15 ++-
+ 20 files changed, 311 insertions(+), 284 deletions(-)

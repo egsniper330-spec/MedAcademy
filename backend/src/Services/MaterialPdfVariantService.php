@@ -302,7 +302,7 @@ final class MaterialPdfVariantService
         // Filter in SQL so an expired row is never delivered even when the
         // cleanup job has not run yet; cleanup remains a bounded maintenance task.
         $row = Database::instance()->row(
-            'SELECT id, storage_path, source_hash, variant_key, page_count
+            'SELECT id, storage_path, source_hash, variant_key, page_count, file_size
                FROM lesson_material_pdfs
               WHERE material_id = ? AND student_id = ? AND created_at >= ?
               ORDER BY created_at DESC LIMIT 1',
@@ -317,7 +317,12 @@ final class MaterialPdfVariantService
         if (!$this->storage->privateFileExists(PdfWatermarkService::BUCKET, (string) $row['storage_path'])) {
             return null;
         }
-        $sourceAbs = $this->sourcePath($material);
+        // A truncated or partially written file must never be served: the
+        // on-disk size has to match the size recorded when it was published.
+        $copyAbs = $this->storage->privateFilePath(PdfWatermarkService::BUCKET, (string) $row['storage_path']);
+        if ((int) @filesize($copyAbs) !== (int) ($row['file_size'] ?? -1)) {
+            return null;
+        }        $sourceAbs = $this->sourcePath($material);
         if (!is_file($sourceAbs) || $this->sourceHashFor($material, $sourceAbs) !== (string) $row['source_hash']) {
             return null;
         }

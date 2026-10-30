@@ -12,6 +12,7 @@ import { StatCard } from '@/components/StatCard';
 import { QuickActionBtn } from '@/components/QuickActionBtn';
 import { neuColors, useLayout, neuMicroStyle, safeBottom, mutedTextStyle } from '@/lib/neu';
 import { CourseThumbnail } from '@/components/CourseThumbnail';
+import { StudentAvatar } from '@/components/StudentAvatar';
 import { useStaleWhileRevalidateFocus } from '@/lib/useStaleWhileRevalidateFocus';
 import type { RelativePathString } from 'expo-router';
 import { useNotificationPermission } from '@/hooks/useNotificationPermission';
@@ -30,7 +31,7 @@ export default function DoctorDashboard() {
   const insets = layout.insets;
   const { profile } = useProfileStore();
   const router = useRouter();
-  const { t, tCount, locale } = useTranslation();
+  const { t, tCount, locale, isRTL } = useTranslation();
 
   // ── Single source of truth for credits ──────────────────────────────────────
   const { balance: credits, loading: creditsLoading, refresh: refreshCredits } = useCreditBalance();
@@ -220,29 +221,29 @@ export default function DoctorDashboard() {
                   style={{ marginBottom: layout.itemGap, padding: layout.cardPx }}
                   accessibilityLabel={[studentName, courseTitle, dateLabel].filter(Boolean).join(' — ')}
                 >
-                  <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: layout.pad.md }}>
-                    <View style={{
-                      width: layout.touchTarget, height: layout.touchTarget, borderRadius: layout.cardRadius,
-                      backgroundColor: `${c.primary}18`, alignItems: 'center', justifyContent: 'center', flexShrink: 0,
-                    }}>
-                      <Text style={{ fontSize: layout.bodySize, fontWeight: '800', color: c.primary }}>
-                        {studentName ? String(studentName).trim().charAt(0).toUpperCase() : '?'}
-                      </Text>
-                    </View>
+                  {/* Pinned LTR so row-reverse is one physical mirror (see PageHeader):
+                      Arabic puts the avatar on the right, name block to its left. */}
+                  <View style={{ direction: 'ltr', flexDirection: isRTL ? 'row-reverse' : 'row', alignItems: 'flex-start', gap: layout.pad.md }}>
+                    <StudentAvatar
+                      student={enrollment.student}
+                      size={layout.touchTarget}
+                      radius={layout.cardRadius}
+                      colors={c}
+                    />
                     <View style={{ flex: 1, minWidth: 0, gap: 3 }}>
                       {studentName ? (
-                        <Text style={{ fontSize: layout.bodySize, fontWeight: '600', color: c.text }} numberOfLines={2}>
+                        <Text style={{ fontSize: layout.bodySize, fontWeight: '600', color: c.text, textAlign: isRTL ? 'right' : 'left' }} numberOfLines={2}>
                           {studentName}
                         </Text>
                       ) : null}
                       {courseTitle ? (
-                        <Text style={{ fontSize: layout.captionSize, ...mutedTextStyle(c, 0.55) }} numberOfLines={2}>
+                        <Text style={{ fontSize: layout.captionSize, ...mutedTextStyle(c, 0.55), textAlign: isRTL ? 'right' : 'left' }} numberOfLines={2}>
                           {courseTitle}
                         </Text>
                       ) : null}
-                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 2 }}>
+                      <View style={{ flexDirection: isRTL ? 'row-reverse' : 'row', alignItems: 'center', gap: 5, marginTop: 2 }}>
                         <Calendar size={11} color={c.text} opacity={0.35} />
-                        <Text style={{ flexShrink: 1, fontSize: layout.captionSize - 1, ...mutedTextStyle(c, 0.4) }} numberOfLines={1}>
+                        <Text style={{ flexShrink: 1, fontSize: layout.captionSize - 1, textAlign: isRTL ? 'right' : 'left', ...mutedTextStyle(c, 0.4) }} numberOfLines={1}>
                           {dateLabel}
                         </Text>
                       </View>
@@ -272,7 +273,7 @@ export default function DoctorDashboard() {
               markEntryIntent(`/(app)/course/${course.id}`, 'nested');
               router.push(`/(app)/course/${course.id}` as RelativePathString);
             }}
-            style={{ flexDirection: 'row', alignItems: 'center', gap: layout.pad.md, padding: layout.cardPx, marginBottom: layout.itemGap }}
+            style={{ direction: 'ltr', flexDirection: isRTL ? 'row-reverse' : 'row', alignItems: 'center', gap: layout.pad.md, padding: layout.cardPx, marginBottom: layout.itemGap }}
           >
             <CourseThumbnail
               imageUrl={course.image_url ?? course.thumbnail_url ?? course.cover_url}
@@ -283,8 +284,8 @@ export default function DoctorDashboard() {
             {/* Gap instead of marginLeft: physical margins land on the wrong
                 side once I18nManager mirrors `row` for Arabic. */}
             <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
-              <Text style={{ fontSize: layout.bodySize, fontWeight: '700', color: c.text }} numberOfLines={1}>{course.title}</Text>
-              <Text style={{ fontSize: layout.captionSize, ...mutedTextStyle(c, 0.45), marginTop: 2 }}>{course.category?.name ?? t('drOverview.generalCategory')}</Text>
+              <Text style={{ fontSize: layout.bodySize, fontWeight: '700', color: c.text, textAlign: isRTL ? 'right' : 'left' }} numberOfLines={1}>{course.title}</Text>
+              <Text style={{ fontSize: layout.captionSize, ...mutedTextStyle(c, 0.45), marginTop: 2, textAlign: isRTL ? 'right' : 'left' }}>{course.category?.name ?? t('drOverview.generalCategory')}</Text>
             </View>
             <View style={{ backgroundColor: statusColor(course.status) + '20', borderRadius: layout.cardRadius / 2, paddingHorizontal: layout.pad.sm, paddingVertical: layout.pad.xs }}>
               <Text style={{ fontSize: layout.captionSize - 1, fontWeight: '700', color: statusColor(course.status) }}>{courseStatusLabel(course.status, t)}</Text>

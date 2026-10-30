@@ -145,7 +145,7 @@ $envCases = [
     ['too_many_pages', ['PDF_WATERMARK_MAX_PAGES' => '2'], [422]],
 ];
 if ($probeMode === PdfWatermarkService::MODE_RASTER) {
-    $envCases[] = ['missing_ghostscript', ['GHOSTSCRIPT_BIN' => $WORK . '/does/not/exist/gs'], [503]];
+    $envCases[] = ['missing_pdfium', ['PDFIUM_RENDER_BIN' => $WORK . '/does/not/exist/pdfium_render'], [503]];
     $envCases[] = ['missing_font', ['PDF_WATERMARK_FONT' => $WORK . '/does/not/exist/font.ttf'], [503]];
     $envCases[] = ['page_too_large', ['PDF_WATERMARK_MAX_PIXELS_PER_PAGE' => '1000'], [422]];
 } else {

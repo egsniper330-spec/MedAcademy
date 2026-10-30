@@ -16,6 +16,7 @@ use MedAcademy\Services\PdfWatermarkService;
 use MedAcademy\Services\RateLimitService;
 use MedAcademy\Storage\StorageService;
 use MedAcademy\Utils\Config;
+use MedAcademy\Utils\Logger;
 
 /**
  * MaterialDeliveryController — the ONLY path that serves a lesson PDF.
@@ -132,9 +133,16 @@ final class MaterialDeliveryController
 
         // Fast path: a valid, current copy already exists.
         $copy = $this->variants->existing($material, $userId, $identity['variant_key']);
+        $studentRef = substr(hash('sha256', 'material-pdf-cache|' . $userId), 0, 12);
+        $cacheBase = [
+            'material_id' => (string) $material['id'],
+            'student_ref' => $studentRef,
+            'variant' => substr((string) $identity['variant_key'], 0, 12),
+        ];
         if ($copy !== null) {
             // Retention is fixed from generation time; opening does not extend it.
             $this->variants->touchServed($copy);
+            Logger::instance()->info('material-pdf-cache', $cacheBase + ['event' => 'cache_hit', 'renderer_run' => false]);
             return $this->readyResponse(
                 $materialId,
                 $userId,
@@ -143,6 +151,7 @@ final class MaterialDeliveryController
                 (string) $copy['variant_key']
             );
         }
+        Logger::instance()->info('material-pdf-cache', $cacheBase + ['event' => 'cache_miss', 'reason' => 'no_valid_copy']);
 
         // Any authorized caller gets exactly one bounded render inside their
         // request. The per-material/student/variant lock coalesces concurrent
@@ -155,16 +164,21 @@ final class MaterialDeliveryController
                 throw new ApiException(422, 'This document is too large to prepare for delivery.', 'source_too_large');
             }
         }
+        $genStart = microtime(true);
+        Logger::instance()->info('material-pdf-cache', $cacheBase + ['event' => 'generation_started']);
         try {
             $copy = $this->variants->ensure($material, $userId);
         } catch (ApiException $e) {
+            Logger::instance()->info('material-pdf-cache', $cacheBase + ['event' => 'generation_failed', 'duration_ms' => (int) ((microtime(true) - $genStart) * 1000)]);
             $this->auditFailure($material, $userId, $this->failureStage($e), $e);
             throw $e;
         } catch (\Throwable $e) {
+            Logger::instance()->info('material-pdf-cache', $cacheBase + ['event' => 'generation_failed', 'duration_ms' => (int) ((microtime(true) - $genStart) * 1000)]);
             $this->auditFailure($material, $userId, 'unexpected', null);
             error_log('[material-delivery] unexpected mint failure (' . get_class($e) . '): ' . $e->getMessage());
             throw $e;
         }
+        Logger::instance()->info('material-pdf-cache', $cacheBase + ['event' => 'generation_completed', 'duration_ms' => (int) ((microtime(true) - $genStart) * 1000)]);
 
         $this->variants->touchServed($copy);
         return $this->readyResponse(

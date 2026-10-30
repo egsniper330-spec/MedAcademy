@@ -1,8 +1,27 @@
 diff --git a/node_modules/vdocipher-rn-bridge/android/src/main/java/com/vdocipher/rnbridge/ReactVdoPlayerUIView.java b/node_modules/vdocipher-rn-bridge/android/src/main/java/com/vdocipher/rnbridge/ReactVdoPlayerUIView.java
-index 6f5c9db..ced6aba 100644
+index 6f5c9db..ce85330 100644
 --- a/node_modules/vdocipher-rn-bridge/android/src/main/java/com/vdocipher/rnbridge/ReactVdoPlayerUIView.java
 +++ b/node_modules/vdocipher-rn-bridge/android/src/main/java/com/vdocipher/rnbridge/ReactVdoPlayerUIView.java
-@@ -255,13 +255,24 @@ public class ReactVdoPlayerUIView extends LinearLayout implements LifecycleEvent
+@@ -57,6 +57,9 @@ public class ReactVdoPlayerUIView extends LinearLayout implements LifecycleEvent
+     private static final String TAG = "ReactVdoPlayerUIView";
+ 
+     private final ThemedReactContext themedReactContext;
++    // MEDACADEMY PATCH (vdocipher-rn-bridge 2.0.1): transparent host for React Native
++    // child views (e.g. the watermark overlay). Sits above the SDK fragment's frame.
++    private final FrameLayout overlayHost;
+     private final VdoEventEmitter eventEmitter;
+     private FullScreenActionListener fullscreenToggleListener;
+     private VdoPlayerUIFragment vdoPlayerUIFragment;
+@@ -101,6 +104,8 @@ public class ReactVdoPlayerUIView extends LinearLayout implements LifecycleEvent
+         frameLayoutId = UUID.randomUUID().toString().hashCode();
+         frameLayout.setId(frameLayoutId);
+         addView(frameLayout);
++        overlayHost = new FrameLayout(context);
++        addView(overlayHost);
+ 
+         frameLayout.addOnAttachStateChangeListener(new View.OnAttachStateChangeListener() {
+             @Override
+@@ -255,13 +260,24 @@ public class ReactVdoPlayerUIView extends LinearLayout implements LifecycleEvent
      private void setFullscreenActionListener() {
          fullscreenToggleListener = isFullscreen -> {
  
@@ -22,12 +41,128 @@ index 6f5c9db..ced6aba 100644
              } else {
                  eventEmitter.exitFullscreen();
              }
- 
+     
 -            return false;
 +            return true;
          };
      }
  
+@@ -420,6 +436,33 @@ public class ReactVdoPlayerUIView extends LinearLayout implements LifecycleEvent
+         post(measureAndLayout);
+     }
+ 
++    // MEDACADEMY PATCH (vdocipher-rn-bridge 2.0.1): keep the overlay host covering the
++    // whole view, above the SDK fragment, so RN children track the player's size.
++    @Override
++    protected void onLayout(boolean changed, int l, int t, int r, int b) {
++        super.onLayout(changed, l, t, r, b);
++        overlayHost.measure(
++                MeasureSpec.makeMeasureSpec(getWidth(), MeasureSpec.EXACTLY),
++                MeasureSpec.makeMeasureSpec(getHeight(), MeasureSpec.EXACTLY));
++        overlayHost.layout(0, 0, getWidth(), getHeight());
++    }
++
++    public void addOverlayChild(View child, int index) {
++        overlayHost.addView(child, index);
++    }
++
++    public int getOverlayChildCount() {
++        return overlayHost.getChildCount();
++    }
++
++    public View getOverlayChildAt(int index) {
++        return overlayHost.getChildAt(index);
++    }
++
++    public void removeOverlayChildAt(int index) {
++        overlayHost.removeViewAt(index);
++    }
++
+     private final Runnable measureAndLayout = () -> {
+         measure(
+                 MeasureSpec.makeMeasureSpec(getWidth(), MeasureSpec.EXACTLY),
+diff --git a/node_modules/vdocipher-rn-bridge/android/src/newarch/java/com/vdocipher/rnbridge/ReactVdoPlayerUIViewManager.java b/node_modules/vdocipher-rn-bridge/android/src/newarch/java/com/vdocipher/rnbridge/ReactVdoPlayerUIViewManager.java
+index cda7767..d8bef37 100644
+--- a/node_modules/vdocipher-rn-bridge/android/src/newarch/java/com/vdocipher/rnbridge/ReactVdoPlayerUIViewManager.java
++++ b/node_modules/vdocipher-rn-bridge/android/src/newarch/java/com/vdocipher/rnbridge/ReactVdoPlayerUIViewManager.java
+@@ -2,6 +2,7 @@ package com.vdocipher.rnbridge;
+ 
+ import android.util.Log;
+ import android.view.KeyEvent;
++import android.view.View;
+ 
+ import com.facebook.react.bridge.ReadableMap;
+ import com.facebook.react.common.MapBuilder;
+@@ -135,6 +136,28 @@ public class ReactVdoPlayerUIViewManager extends ViewGroupManager<ReactVdoPlayer
+         reactVdoPlayerUIViewManagerImpl.setAutoPlay(vdoPlayerView, autoPlay);
+     }
+ 
++    // MEDACADEMY PATCH (vdocipher-rn-bridge 2.0.1): React child management delegated to the
++    // view's overlay host (see ReactVdoPlayerUIView).
++    @Override
++    public void addView(ReactVdoPlayerUIView parent, View child, int index) {
++        parent.addOverlayChild(child, index);
++    }
++
++    @Override
++    public int getChildCount(ReactVdoPlayerUIView parent) {
++        return parent.getOverlayChildCount();
++    }
++
++    @Override
++    public View getChildAt(ReactVdoPlayerUIView parent, int index) {
++        return parent.getOverlayChildAt(index);
++    }
++
++    @Override
++    public void removeViewAt(ReactVdoPlayerUIView parent, int index) {
++        parent.removeOverlayChildAt(index);
++    }
++
+     public void play(ReactVdoPlayerUIView view) {
+         reactVdoPlayerUIViewManagerImpl.receiveCommand(view, "play", null);
+     }
+diff --git a/node_modules/vdocipher-rn-bridge/android/src/oldarch/java/com/vdocipher/rnbridge/ReactVdoPlayerUIViewManager.java b/node_modules/vdocipher-rn-bridge/android/src/oldarch/java/com/vdocipher/rnbridge/ReactVdoPlayerUIViewManager.java
+index 5a41712..9a8e909 100644
+--- a/node_modules/vdocipher-rn-bridge/android/src/oldarch/java/com/vdocipher/rnbridge/ReactVdoPlayerUIViewManager.java
++++ b/node_modules/vdocipher-rn-bridge/android/src/oldarch/java/com/vdocipher/rnbridge/ReactVdoPlayerUIViewManager.java
+@@ -2,6 +2,7 @@ package com.vdocipher.rnbridge;
+ 
+ import android.util.Log;
+ import android.view.KeyEvent;
++import android.view.View;
+ 
+ import com.facebook.react.bridge.ReadableMap;
+ import com.facebook.react.common.MapBuilder;
+@@ -26,6 +27,28 @@ public class ReactVdoPlayerUIViewManager extends ViewGroupManager<ReactVdoPlayer
+     private static final String TAG = "RctVdoPlayerUIViewMngr";
+     private ReactVdoPlayerUIViewManagerImpl reactVdoPlayerUIViewManagerImpl;
+ 
++    // MEDACADEMY PATCH (vdocipher-rn-bridge 2.0.1): React child management delegated to the
++    // view's overlay host (see ReactVdoPlayerUIView).
++    @Override
++    public void addView(ReactVdoPlayerUIView parent, View child, int index) {
++        parent.addOverlayChild(child, index);
++    }
++
++    @Override
++    public int getChildCount(ReactVdoPlayerUIView parent) {
++        return parent.getOverlayChildCount();
++    }
++
++    @Override
++    public View getChildAt(ReactVdoPlayerUIView parent, int index) {
++        return parent.getOverlayChildAt(index);
++    }
++
++    @Override
++    public void removeViewAt(ReactVdoPlayerUIView parent, int index) {
++        parent.removeOverlayChildAt(index);
++    }
++
+     private static final int COMMAND_PLAY = 1;
+     private static final int COMMAND_PAUSE = 2;
+     private static final int COMMAND_SEEK = 3;
 diff --git a/node_modules/vdocipher-rn-bridge/ios/AssetList.swift b/node_modules/vdocipher-rn-bridge/ios/AssetList.swift
 index 0d76ae8..6aba802 100644
 --- a/node_modules/vdocipher-rn-bridge/ios/AssetList.swift

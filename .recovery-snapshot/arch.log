@@ -1,0 +1,20 @@
+── No Modal/second native window in any fullscreen-capable player ──
+── Online VdoCipher adapter: ONE native player instance, in-place ──
+── iOS fullscreen contract: SDK-owned fullscreen button, NO forced landscape, no second presentation ──
+── Responsive rotation: NO forced orientation on iOS, OS-driven rotation allowed ──
+── Offline VdoCipher player: ONE native player instance, in-place ──
+── Plyr/YouTube player: ONE WebView instance, in-place fullscreen ──
+── Lesson screen: pinned-player layout (fullscreen covers the screen) ──
+── Props plumbing: gate + onFullscreen forwarded through wrappers ──
+── Server-side MOVING watermark: annotate restored, ONE watermark per playback ──
+── Canonical client watermark intact in every player ──
+── No fake visual suppression of the old watermark ──
+── Security surfaces untouched ──
+── DEV player-session observability: ONE mounted VdoPlayer invariant ──
+── Native bridge patch: SDK fullscreen must never bury the RN watermark ──
+── Single fullscreen entry: the SDK's OWN fullscreen button is restored ──
+── Plyr fullscreen surface diagnostics + identity stability ──
+── VdoCipher watermark geometry evidence chain ──
+──────────────────────────────────────────────
+── PIN 3: playback controls exist (SDK control bar stays enabled) ──
+RESULT: 191 passed, 0 failed

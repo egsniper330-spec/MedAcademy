@@ -173,7 +173,8 @@
       }
     ],
       "./plugins/withNativeUpload",
-      "./plugins/withPrivacyPermissions"
+      "./plugins/withPrivacyPermissions",
+      "./plugins/withIosOrientation"
     ],
     "extra": {
       "eas": {},      "medaPinnedHosts": ["api.medacademy.site"],

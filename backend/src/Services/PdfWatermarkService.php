@@ -17,8 +17,8 @@ use MedAcademy\Utils\Config;
  *
  * ── STUDENT DELIVERY: raster-only, one centered watermark ────────────────────
  * The output has one full-page image per source page and no searchable text,
- * vector content, or separate watermark object. Rasterization is gated by the
- * operator's explicit acceptance of Ghostscript's AGPL/commercial licence.
+ * vector content, or separate watermark object. Pages are rendered by the
+ * bundled PDFium helper (BSD-3-Clause), then composited and assembled with FPDF.
  *
  * ── LEGACY ENGINE A: "vector" via FPDI 2.x + TCPDF 6 ────────────────────────
  * Historical implementation described below; no longer valid for delivery.
@@ -54,19 +54,16 @@ use MedAcademy\Utils\Config;
  * a new PDF. Each output page is then a single full-page image: no selectable
  * text layer, no separate watermark object, no annotation.
  *
- * The ONLY working renderer for this is Ghostscript, which is AGPL-3.0 or a
- * paid Artifex licence; Artifex's published position is that an AGPL
- * Ghostscript may not be used in a closed-source server-based service without
- * disclosing that service's source. It is therefore gated TWICE: the mode must
- * be asked for AND the operator must set PDF_WATERMARK_ACCEPT_AGPL_RENDERER=1.
- * Without that flag the engine reports itself unavailable and delivery is
- * refused (503) — it never silently runs AGPL code on a commercial install.
+ * The renderer is the PDFium helper (pdfium-helper/, BSD-3-Clause), run as a
+ * separate process with no shell. Ghostscript is not used at all. When
+ * the helper is missing or fails its --check probe, the engine reports itself
+ * unavailable and delivery is refused (503).
  *
  * ── LEGACY ENGINE F: "flatten" — ONE centered mark INSIDE the page stream ───
  * Same single centred diagonal mark as ENGINE B, but baked straight into each
  * imported page's own content stream with operators (PdfWatermarkBaker) instead
  * of into a bitmap. Nothing outside the vendored MIT/LGPL PHP libraries is
- * executed: no Ghostscript, no shell, no network, no extra font file. The mark
+ * executed: no renderer binary, no shell, no network, no extra font file. The mark
  * is page content, not an annotation, optional-content group or separate text
  * object, so a reader's "remove watermark" command has nothing to target — but
  * the lecture text layer survives, which is the documented trade-off versus
@@ -75,8 +72,8 @@ use MedAcademy\Utils\Config;
  * ── LICENSING (see backend/docs/PDF_WATERMARK_LICENSING.md) ────────────────
  * ENGINES A/C/F: setasign/fpdf (MIT) + setasign/fpdi (MIT) + tecnickcom/tcpdf
  * (LGPL-3.0-or-later, dynamically loaded PHP library) — no fee, no external
- * process, no network. ENGINE B additionally needs Ghostscript (AGPL or
- * commercial) and is gated as described above.
+ * process, no network. ENGINE B uses the bundled PDFium helper (BSD-3-Clause).
+ * It needs no licence flag.
  *
  * ── LEGACY ENGINE C: "vector" via FPDI + plain FPDF ────────────────────────
  * Same ordering guarantee as ENGINE A using FPDF's core Helvetica instead of
@@ -84,7 +81,7 @@ use MedAcademy\Utils\Config;
  * possible dependency set (FPDF 1.9 + FPDI 2.x).
  *
  * ── HOW ENGINE B FLATTENS ONE CENTRED MARK INTO THE PAGE ───────────────────
- * The page is rendered with Ghostscript's `pngalpha` device, which leaves the
+ * The page is rendered with PDFium to an RGBA bitmap, which leaves the
  * unpainted page background TRANSPARENT (a normal viewer shows white paper, but
  * there is no white fill in the raster). Compositing order is then:
  *
@@ -121,7 +118,7 @@ use MedAcademy\Utils\Config;
  *     erase the visible grey marks (documented under "residual risk") — that is
  *     inherent to an overlay on bimodal content, and the lattice plus the four
  *     rails are what remain to attribute the copy.
- * Flattening (ENGINE B) is still the strongest mode where Ghostscript exists.
+ * Flattening (ENGINE B) is the strongest mode the delivery pipeline offers.
  */
 final class PdfWatermarkService
 {
@@ -257,7 +254,7 @@ final class PdfWatermarkService
         // This shape is what GET /admin/material-watermark-status returns. It is
         // admin-gated, and it deliberately OMITS absolute filesystem paths and
         // the configured binary path — only presence booleans, the compositor
-        // name and the Ghostscript version — so it cannot disclose server
+        // name and the PDFium version — so it cannot disclose server
         // layout even if the role gate is ever widened. The CLI diagnostics
         // script uses rendererStatus() for the full operator detail.
         return [
@@ -268,9 +265,8 @@ final class PdfWatermarkService
             'raster_ready' => $s['raster']['ready'],
             'vector_ready' => $s['vector']['ready'],
             'flatten_ready' => $s['flatten']['ready'],
-            'agpl_renderer_accepted' => $s['raster']['licence_gate'] === 'accepted',
             'shell_execution' => $s['raster']['shell_execution'],
-            'ghostscript_version' => $s['raster']['ghostscript_version'],
+            'pdfium_version' => $s['raster']['pdfium_version'],
             'compositor' => $s['raster']['compositor'],
             'font_present' => $s['raster']['font'] !== null,
             'pdf_writer_present' => $s['raster']['pdf_writer'] === 'FPDF',
@@ -283,7 +279,7 @@ final class PdfWatermarkService
                 'jpeg_quality' => $this->jpegQuality(),
             ],
             'vector_engine' => $s['vector']['engine'],
-            'requirement' => 'Student delivery requires the raster engine: Ghostscript CLI + (GD w/ FreeType or Imagick) + a TTF font, AND an explicitly accepted AGPL-or-commercial Ghostscript licence (PDF_WATERMARK_ACCEPT_AGPL_RENDERER=1). Vector and flatten modes are refused for student delivery; missing raster prerequisites fail closed.',
+            'requirement' => 'Student delivery requires the raster engine: PDFium render helper + (GD w/ FreeType or Imagick) + a TTF font. Vector and flatten modes are refused for student delivery; missing raster prerequisites fail closed.',
             'behaviour_when_missing' => 'A student PDF is refused with HTTP 503 — the unwatermarked original is never served as a fallback.',
         ];
     }
@@ -307,33 +303,20 @@ final class PdfWatermarkService
 
         // ── Raster engine prerequisites ──
         $canExec = $this->canExecute();
-        $gsBin = Config::string('GHOSTSCRIPT_BIN', 'gs');
-        $gsVersion = $canExec ? $this->probeGhostscript($gsBin) : null;
+        $pdfiumBin = $this->pdfiumBin();
+        $pdfiumVersion = $canExec ? $this->probePdfium($pdfiumBin) : null;
         $compositor = $this->detectCompositor();
         $font = $this->fontPath();
         // The flattened output is assembled with FPDF (image-only pages).
         $pdfWriter = class_exists(\FPDF::class);
-        // ── LICENCE GATE ──
-        // Ghostscript is AGPL-3.0 or a paid Artifex licence, and Artifex's
-        // published position is that AGPL Ghostscript may not be shipped inside
-        // a closed-source server-based service without disclosing that service's
-        // source. So the binary being present is NOT enough: an operator has to
-        // declare the licence position explicitly. Without the flag the engine
-        // reports unavailable and delivery fails closed (503) — it never runs
-        // AGPL code on a commercial install by accident.
-        $agplAccepted = Config::bool('PDF_WATERMARK_ACCEPT_AGPL_RENDERER', false);
-        $rasterPrereq = $canExec && $gsVersion !== null && $compositor !== null && $font !== null && $pdfWriter;
-        $rasterReady = $rasterPrereq && $agplAccepted;
+        // PDFium (BSD-3-Clause) renders the pages. No licence flag is needed.
+        $rasterReady = $canExec && $pdfiumVersion !== null && $compositor !== null && $font !== null && $pdfWriter;
 
         $raster = [
             'ready' => $rasterReady,
-            'prerequisites_ready' => $rasterPrereq,
-            'licence_gate' => $agplAccepted
-                ? 'accepted'
-                : 'blocked (set PDF_WATERMARK_ACCEPT_AGPL_RENDERER=1 only with an Artifex licence or a documented AGPL position)',
             'shell_execution' => $canExec ? 'enabled' : 'disabled (proc_open unavailable/disabled)',
-            'ghostscript_bin' => $gsBin,
-            'ghostscript_version' => $gsVersion,
+            'pdfium_bin' => $pdfiumBin,
+            'pdfium_version' => $pdfiumVersion,
             'compositor' => $compositor,
             'font' => $font,
             'pdf_writer' => $pdfWriter ? 'FPDF' : 'missing',
@@ -367,7 +350,7 @@ final class PdfWatermarkService
         // ── Resolve the ONLY permitted student-delivery engine ──
         // Vector and renderer-free flatten modes preserve searchable source
         // objects and are not valid delivery fallbacks. If raster prerequisites
-        // or the explicit Ghostscript licence acknowledgement are missing,
+        // or the PDFium render helper is missing,
         // delivery is unavailable and fails closed.
         $mode = $this->configuredMode();
         $effective = $mode === self::MODE_RASTER && $rasterReady
@@ -376,7 +359,7 @@ final class PdfWatermarkService
 
         $driver = null;
         if ($effective === self::MODE_RASTER) {
-            $driver = 'raster: Ghostscript ' . ($gsVersion ?? '?') . ' + ' . $compositor . ' (one image per page, no text layer) — AGPL/commercial Ghostscript licence accepted by the operator';
+            $driver = 'raster: PDFium (Chromium PDF engine, BSD-3-Clause) + ' . $compositor . ' (one image per page, no text layer)';
         } elseif ($effective === self::MODE_FLATTEN) {
             $driver = 'flatten: setasign/FPDI 2.x + TCPDF 6.x (one centred mark baked into each page stream; no renderer binary, no shell, no network)';
         } elseif ($effective === self::MODE_VECTOR) {
@@ -477,18 +460,28 @@ final class PdfWatermarkService
         return !in_array('proc_open', $disabled, true);
     }
 
-    /** Ghostscript version string, or null when the binary is absent. */
-    private function probeGhostscript(string $bin): ?string
+    /** Path to the PDFium render helper (PDFIUM_RENDER_BIN overrides the bundled default). */
+    private function pdfiumBin(): string
     {
+        $configured = Config::string('PDFIUM_RENDER_BIN', '');
+        return $configured !== '' ? $configured : dirname(__DIR__, 2) . '/bin/pdfium_render';
+    }
+
+    /** PDFium helper probe: its --check output, or null when the binary cannot run. */
+    private function probePdfium(string $bin): ?string
+    {
+        if (!is_file($bin) || !is_executable($bin)) {
+            return null;
+        }
         try {
-            [$code, $out] = $this->runProcess([$bin, '--version'], 10);
+            [$code, $out] = $this->runProcess([$bin, '--check'], 10);
         } catch (\Throwable $e) {
             return null;
         }
-        if ($code !== 0) {
+        if ($code !== 0 || trim($out) !== 'pdfium-render ok') {
             return null;
         }
-        return preg_match('/(\d+\.\d+(?:\.\d+)?)/', $out, $m) ? $m[1] : 'unknown';
+        return 'pdfium';
     }
 
     /**
@@ -829,7 +822,7 @@ final class PdfWatermarkService
         // WHICH engine will render decides whether this check is even relevant:
         // the free FPDI parser cannot read COMPRESSED cross-reference streams
         // (the layout Acrobat, Word and most "optimised" PDFs emit), while the
-        // RASTER engine hands the file to Ghostscript, which reads them fine. The
+        // RASTER engine hands the file to PDFium, which reads them fine. The
         // check used to run unconditionally whenever FPDI merely existed, so a
         // raster host refused perfectly deliverable documents at upload — and a
         // vector host refused them with a message that said "damaged", which is
@@ -1028,11 +1021,10 @@ final class PdfWatermarkService
                 // generic and ErrorHandler does not log exceptions without a cause.
                 $r = $this->rendererStatus()['raster'];
                 error_log('[pdf-watermark] raster engine not ready: shell=' . $r['shell_execution']
-                    . ' ghostscript=' . ($r['ghostscript_version'] ?? 'missing')
+                    . ' pdfium=' . ($r['pdfium_version'] ?? 'missing')
                     . ' compositor=' . ($r['compositor'] ?? 'missing')
                     . ' font=' . ($r['font'] !== null ? 'present' : 'missing')
-                    . ' pdf_writer=' . $r['pdf_writer']
-                    . ' licence=' . ($r['licence_gate'] === 'accepted' ? 'accepted' : 'blocked'));
+                    . ' pdf_writer=' . $r['pdf_writer']);
                 throw new ApiException(
                     503,
                     'The image-only PDF watermark engine is unavailable or not licensed on this server. The unwatermarked original will not be served.',
@@ -1074,12 +1066,12 @@ final class PdfWatermarkService
     /**
      * Flattened pipeline that needs NO renderer binary.
      *
-     * Why this exists: the image-per-page engine (ENGINE B) can only be driven by
-     * Ghostscript, which is AGPL-3.0 or a paid Artifex licence — unusable in a
-     * closed-source commercial service without buying that licence. Every other
-     * renderer is either copyleft (Poppler: GPL-2.0-or-later, MuPDF: AGPL) or has
-     * no installable CLI (PDFium: BSD, but a library needing FFI and a VPS), and
-     * ImageMagick's PDF delegate simply calls Ghostscript again. So this engine
+     * Why this exists: the image-per-page engine (ENGINE B) was historically driven by
+     * Ghostscript (AGPL-3.0 or paid), which was dropped in favour of PDFium.
+     * This engine still needs no renderer, so it keeps working without PDFium.
+     * Poppler (GPL-2.0-or-later) and MuPDF (AGPL) are copyleft and are not used.
+     * ImageMagick's PDF delegate calls Ghostscript again, so it is not an option.
+     * So this engine
      * removes the need for a renderer instead of substituting one: the same single
      * centred diagonal mark is written as PDF operators INTO each imported page's
      * own content stream, by PdfWatermarkBaker.
@@ -1382,7 +1374,7 @@ final class PdfWatermarkService
 
     /**
      * Flattened pipeline. Page order of operations per page:
-     *   1. Ghostscript renders the ORIGINAL page to a transparent-background
+     *   1. PDFium renders the ORIGINAL page to an opaque white-background
      *      PNG (`pngalpha`) — the lecture ink, no white paper fill.
      *   2. A white canvas is prepared and the transparent page bitmap is
      *      composited ON TOP of it, producing opaque "paper + lecture".
@@ -1404,7 +1396,7 @@ final class PdfWatermarkService
         $quality = $this->jpegQuality();
         $opacity = $this->opacity();
         $timeout = max(15, Config::int('PDF_WATERMARK_TIMEOUT_SECONDS', 180));
-        $gsBin = Config::string('GHOSTSCRIPT_BIN', 'gs');
+        $pdfiumBin = $this->pdfiumBin();
         $font = $this->fontPath();
         $compositor = $this->detectCompositor();
         $memBytes = $this->memoryLimitBytes();
@@ -1414,25 +1406,22 @@ final class PdfWatermarkService
 
         $work = $this->makeTempDir($out);
         try {
-            // 1. Render up to maxPages+1 pages in ONE Ghostscript pass writing one
-            //    PNG per page; rendering stops early so an oversized PDF cannot
-            //    exhaust time. pngalpha = transparent unpainted background.
-            $pattern = $work . '/page-%04d.png';
-            $argv = [
-                $gsBin, '-q', '-dNOPAUSE', '-dBATCH', '-dSAFER', '-dQUIET',
-                '-sDEVICE=pngalpha', '-r' . $dpi,
-                '-dTextAlphaBits=4', '-dGraphicsAlphaBits=4',
-                '-dFirstPage=1', '-dLastPage=' . ($maxPages + 1),
-                '-dUseCropBox',
-                '-sOutputFile=' . $pattern,
-                $source,
-                '-c', 'quit',
-            ];
-            [$code, , $stderr] = $this->runProcess($argv, $timeout);
-            $pages = glob($work . '/page-*.png') ?: [];
-            sort($pages, SORT_STRING);
+            // 1. PDFium renders the pages to one PNG per page. The helper prints
+            //    "pages N" first, so an oversized document is refused before any
+            //    page is rendered (maxPages+1 is passed as the render cap so the
+            //    count is still reported exactly).
+            $prefix = $work . '/page';
+            $argv = [$pdfiumBin, $source, $prefix, (string) $dpi, (string) ($maxPages + 1)];
+            [$code, $stdout, $stderr] = $this->runProcess($argv, $timeout);
+            $reported = preg_match('/^pages (\d+)$/m', $stdout, $pm) ? (int) $pm[1] : null;
+            if ($reported !== null && $reported > $maxPages) {
+                throw new ApiException(422, 'This PDF has more pages than the watermarking limit (' . $maxPages . ').');
+            }
+            $pages = glob($prefix . '-*.png') ?: [];
+            natsort($pages);
+            $pages = array_values($pages);
             if ($code !== 0 && $pages === []) {
-                error_log('[pdf-watermark] ghostscript failed: ' . substr($stderr, 0, 500));
+                error_log('[pdf-watermark] pdfium failed: ' . substr($stderr, 0, 500));
                 throw new ApiException(422, 'This PDF could not be rendered. It may be corrupt, encrypted or use an unsupported feature.');
             }
             if ($pages === []) {
@@ -1443,14 +1432,14 @@ final class PdfWatermarkService
             }
 
             // ── Never deliver a PARTIAL document ──────────────────────────
-            // Ghostscript can exit non-zero AFTER writing some pages (one
+            // PDFium can exit non-zero AFTER writing some pages (one
             // damaged page in an otherwise valid file). Those pages would
             // otherwise be assembled and delivered with content silently
             // missing, so a non-zero exit refuses the whole document; so does a
             // rendered page count below the source's.
             if ($code !== 0) {
                 error_log(
-                    '[pdf-watermark] ghostscript exited ' . $code . ' after ' . count($pages) . ' page(s): '
+                    '[pdf-watermark] pdfium exited ' . $code . ' after ' . count($pages) . ' page(s): '
                     . substr($stderr, 0, 300)
                 );
                 throw new ApiException(422, 'A page of this PDF could not be rendered, so no copy was produced. Re-export the document and upload it again.');
@@ -2666,6 +2655,9 @@ final class PdfWatermarkService
         $stderr = '';
         $start = microtime(true);
         $timedOut = false;
+        // proc_get_status() reaps the child the first time it sees it exited,
+        // so a later proc_close() returns -1. The code is kept from the status.
+        $exitCode = null;
         while (true) {
             $read = [$pipes[1], $pipes[2]];
             $write = null;
@@ -2683,6 +2675,7 @@ final class PdfWatermarkService
             }
             $status = proc_get_status($proc);
             if (!$status['running']) {
+                $exitCode = (int) $status['exitcode'];
                 break;
             }
             if (microtime(true) - $start > $timeout) {
@@ -2695,7 +2688,8 @@ final class PdfWatermarkService
         $stderr .= (string) stream_get_contents($pipes[2]);
         fclose($pipes[1]);
         fclose($pipes[2]);
-        $code = proc_close($proc);
+        $closed = proc_close($proc);
+        $code = $exitCode ?? $closed;
 
         if ($timedOut) {
             throw new ApiException(504, 'The PDF renderer timed out.');
