@@ -46,6 +46,32 @@
 //   NOT pinned: they are not ours to pin and their rotation would brick video.
 //   They keep the default base-config trust (system CAs).
 //
+// DEBUG-ONLY EXCEPTION FOR THE METRO PACKAGER (why a second file exists)
+//   Symptom on a real device: an Android DEBUG build dies at startup with
+//
+//       CLEARTEXT communication to localhost not permitted by network security
+//       policy
+//
+//   even though `adb reverse tcp:8081 tcp:8081` succeeded and Metro was up.
+//   The cause was NOT a missing useCleartextTraffic flag: the debug manifest
+//   already said android:usesCleartextTraffic="true". On API 24+ a
+//   <network-security-config> OVERRIDES that attribute, and the config this
+//   plugin generates sets cleartextTrafficPermitted="false" in <base-config>
+//   (correctly — it is the release posture). Metro's HTTP request to
+//   localhost:8081 was therefore refused by the platform, before any JS ran.
+//
+//   The fix is a DEBUG-SOURCE-SET override, written to
+//   android/app/src/debug/res/xml/network_security_config.xml. The android
+//   build-type source set takes resource precedence over src/main, so the
+//   packaged DEBUG app uses this file while RELEASE keeps the strict one. The
+//   debug file is the main config PLUS one <domain-config> that permits
+//   cleartext for loopback only (localhost / 127.0.0.1 / 10.0.2.2, the
+//   emulator alias for the host loopback). It keeps the pin-set and the
+//   user-CA exclusion, so pinning and trust posture are not weakened.
+//
+//   Nothing in src/debug is merged into a release build, so production keeps
+//   cleartext disabled and HTTPS enforced.
+//
 // PIN-STABILITY NOTE (do not turn this into a bricking change)
 //   <pin-set> passes when ANY pin matches ANY certificate in the chain. The pin
 //   list includes the Let's Encrypt INTERMEDIATE, not only the leaf, so routine
@@ -58,6 +84,21 @@ const path = require('path');
 const fs = require('fs');
 
 const CONFIG_RELATIVE = ['app', 'src', 'main', 'res', 'xml', 'network_security_config.xml'];
+
+/**
+ * The DEBUG-only override. It lives in the debug build-type source set, which
+ * wins resource merging over src/main for debug builds only — a release build
+ * never sees this file.
+ */
+const DEBUG_CONFIG_RELATIVE = ['app', 'src', 'debug', 'res', 'xml', 'network_security_config.xml'];
+
+/**
+ * Loopback names Metro is reached on. `localhost` / `127.0.0.1` come from
+ * `adb reverse tcp:8081 tcp:8081`; `10.0.2.2` is the Android emulator's alias
+ * for the host loopback. Nothing else gets a cleartext exception, and no
+ * wildcard/`includeSubdomains` is used.
+ */
+const DEBUG_CLEARTEXT_DOMAINS = ['localhost', '127.0.0.1', '10.0.2.2'];
 
 /** Android expects yyyy-MM-dd. Refresh with the pin list before this date. */
 const PIN_EXPIRATION = '2028-06-01';
@@ -134,6 +175,43 @@ function buildConfigXml(pins, hosts) {
   return lines.join('\n');
 }
 
+/**
+ * Build the DEBUG network security config.
+ *
+ * It is byte-for-byte the release config plus ONE loopback-only
+ * <domain-config cleartextTrafficPermitted="true">. Because it is derived from
+ * buildConfigXml(), the debug build keeps:
+ *   • the SPKI pin-set on the first-party API origin,
+ *   • `src="system"` only (a user-installed proxy CA is still not a trust
+ *     anchor for the API), and
+ *   • cleartext DISABLED as the base posture for every other host.
+ *
+ * Only the Metro/dev-server loopback is added, which is why this cannot become
+ * a blanket cleartext switch even in a debug build.
+ */
+function buildDebugConfigXml(pins, hosts) {
+  const release = buildConfigXml(pins, hosts);
+  const block = [
+    '',
+    '  <!-- DEBUG BUILD ONLY (src/debug source set — never merged into release):',
+    '       the Metro packager and packager proxy are plain HTTP on the device',
+    '       loopback (adb reverse tcp:8081 tcp:8081). Loopback only; no other',
+    '       host gains a cleartext exception, and the pin-set above still',
+    '       applies to the API origin. -->',
+    '  <domain-config cleartextTrafficPermitted="true">',
+    ...DEBUG_CLEARTEXT_DOMAINS.map(
+      (host) => `    <domain includeSubdomains="false">${escapeXml(host)}</domain>`
+    ),
+    '    <trust-anchors>',
+    '      <certificates src="system" />',
+    '    </trust-anchors>',
+    '  </domain-config>',
+  ].join('\n');
+  const marker = '</network-security-config>';
+  const at = release.lastIndexOf(marker);
+  return release.slice(0, at) + block + '\n' + release.slice(at);
+}
+
 /** Write res/xml/network_security_config.xml (survives prebuild via dangerous mod). */
 function withNetworkSecurityConfigFile(config) {
   const expoRoot = path.dirname(require.resolve('expo/package.json'));
@@ -150,10 +228,25 @@ function withNetworkSecurityConfigFile(config) {
       fs.mkdirSync(path.dirname(xmlPath), { recursive: true });
       fs.writeFileSync(xmlPath, buildConfigXml(pins, hosts), 'utf8');
 
+      // Debug build-type override. Resource merging gives src/debug precedence
+      // over src/main, so a debug APK uses this file and a release APK never
+      // does — the release posture above is unchanged.
+      const debugXmlPath = path.join(cfg.modRequest.platformProjectRoot, ...DEBUG_CONFIG_RELATIVE);
+      fs.mkdirSync(path.dirname(debugXmlPath), { recursive: true });
+      fs.writeFileSync(debugXmlPath, buildDebugConfigXml(pins, hosts), 'utf8');
+      if (cfg.extra?.medaDebugMetroCleartext === false) {
+        // Explicit opt-out for anyone who serves Metro over TLS with a real CA.
+        fs.rmSync(debugXmlPath, { force: true });
+      }
+
       if (pins.length > 0 && hosts.length > 0) {
         console.log(
           `[withNetworkSecurityConfig] pinned ${hosts.join(', ')} with ${pins.length} SPKI pin(s) ` +
             `(expires ${PIN_EXPIRATION}), cleartext disabled, user CAs excluded`
+        );
+        console.log(
+          '[withNetworkSecurityConfig] DEBUG override: cleartext permitted for ' +
+            DEBUG_CLEARTEXT_DOMAINS.join(', ') + ' only (src/debug res overlay)'
         );
       } else {
         console.log(
@@ -183,7 +276,9 @@ function withNetworkSecurityConfigManifest(config) {
     application.$ = application.$ || {};
     application.$['android:networkSecurityConfig'] = '@xml/network_security_config';
     // Explicit, belt-and-braces: the release manifest must never opt into
-    // cleartext. (android/src/debug keeps its own true override for Metro.)
+    // cleartext. NOTE this attribute alone cannot unblock Metro in debug: a
+    // network security config OVERRIDES it (API 24+), which is exactly why the
+    // debug build gets the src/debug res overlay written above.
     application.$['android:usesCleartextTraffic'] = 'false';
     return cfg;
   });
@@ -204,4 +299,7 @@ module.exports.__internal = {
   validHosts,
   PIN_EXPIRATION,
   CONFIG_RELATIVE,
+  DEBUG_CONFIG_RELATIVE,
+  DEBUG_CLEARTEXT_DOMAINS,
+  buildDebugConfigXml,
 };

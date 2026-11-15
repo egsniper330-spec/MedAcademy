@@ -1,7 +1,7 @@
 import { useCallback, useState } from 'react';
 import { PageHeader } from '@/components/PageHeader';
 import { View, Text, useColorScheme, RefreshControl } from 'react-native';
-import { useFocusEffect, useRouter } from 'expo-router';
+import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { useProfileStore } from '@/lib/store';
 import { getMySubscriptionsCached } from '@/lib/myCoursesCache';
 import { prefetchCourseImages, courseImageUrlsFrom } from '@/lib/imagePrefetch';
@@ -20,6 +20,8 @@ export default function MyCourses() {
   const insets = layout.insets;
   const { profile } = useProfileStore();
   const router = useRouter();
+  const { status: statusParam } = useLocalSearchParams<{ status?: string }>();
+  const statusFilter = statusParam === 'completed' || statusParam === 'in_progress' ? statusParam : null;
 
   const [subscriptions, setSubscriptions] = useState<any[]>([]);
   const [query, setQuery] = useState('');
@@ -38,16 +40,26 @@ export default function MyCourses() {
 
   const onRefresh = async () => { setRefreshing(true); await loadData(); setRefreshing(false); };
 
-  const filtered = subscriptions.filter(e =>
-    e.course?.title?.toLowerCase().includes(query.toLowerCase())
-  );
+  const filtered = subscriptions.filter(e => {
+    if (statusFilter === 'completed' && e.status !== 'completed') return false;
+    if (statusFilter === 'in_progress' && e.status === 'completed') return false;
+    return e.course?.title?.toLowerCase().includes(query.toLowerCase());
+  });
 
   return (
     <KeyboardAwareScrollView
       style={{ flex: 1, backgroundColor: c.base }}
-      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />} contentContainerStyle={{ paddingBottom: safeBottom(layout.insets.bottom) }}
+      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />} contentContainerStyle={{ paddingBottom: layout.roleTabsBottom() }}
     >
       <PageHeader title={t('nav.myCourses')} subtitle={t('course.subtitleMine')} />
+
+      {statusFilter ? (
+        <View style={{ paddingHorizontal: layout.screenPx, marginBottom: 12, flexDirection: 'row' }}>
+          <Text style={{ fontSize: 14, fontWeight: '700', color: c.primary }}>
+            {statusFilter === 'completed' ? t('home.completed') : t('home.inProgress')}
+          </Text>
+        </View>
+      ) : null}
 
       <View style={{ paddingHorizontal: layout.screenPx }}>
 

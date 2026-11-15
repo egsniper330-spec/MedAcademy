@@ -1,0 +1,31 @@
+# EXAMPLE unit template. Single instance enforced by a lock file. Not verified on a Linux host yet.
+[Unit]
+Description=PDF watermark expired-copy and orphan cleanup runner
+After=network-online.target pdf-watermark-api.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pdfsvc
+Group=pdfsvc
+WorkingDirectory=/opt/pdf-watermark-service
+EnvironmentFile=/etc/pdf-watermark/api.env
+ExecStart=/opt/pdf-watermark-service/.venv/bin/python -m app.cleanup_runner
+# SIGTERM finishes the current pass, then exits 0.
+KillSignal=SIGTERM
+TimeoutStopSec=120
+Restart=on-failure
+RestartSec=30
+# Exit code 3 means another cleanup holds the lock. Do not restart-loop on it.
+RestartPreventExitStatus=2 3
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/var/lib/pdf-watermark
+ReadOnlyPaths=/opt/pdf-watermark-service
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

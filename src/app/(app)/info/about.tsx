@@ -5,7 +5,8 @@
  * (expo version/versionCode/buildNumber) stays available to update,
  * diagnostics and integrity systems but is never shown to end users.
  */
-import { ScrollView, View, Text, useColorScheme, Animated } from 'react-native';
+import { useMemo } from 'react';
+import { ScrollView, View, Text, Pressable, Linking, useColorScheme, Animated } from 'react-native';
 import { PageHeader } from '@/components/PageHeader';
 import { NeuCard } from '@/components/NeuCard';
 import { useCmsSections } from '@/lib/cmsContent';
@@ -13,8 +14,34 @@ import { BrandLogo } from '@/components/BrandLogo';
 import { neuColors, useLayout, mutedTextStyle } from '@/lib/neu';
 import { useEntranceAnim } from '@/lib/motion';
 import { Stethoscope, BookOpen, ShieldCheck, Zap } from 'lucide-react-native';
-import { useBranding } from '@/lib/branding';
+import {
+  contactLinkHref, isSafeContactHref, parseContactLinks, platformIcon, useBranding,
+} from '@/lib/branding';
+import { PlatformBrandIcon, hasPlatformBrandIcon } from '@/components/PlatformBrandIcon';
 import { useTranslation } from '@/lib/i18n';
+
+/**
+ * Logo = the platform the DESTINATION belongs to, not the raw stored key.
+ * Admin-saved rows have carried a stale `platform` (e.g. three different social
+ * links all stored as `facebook`), and a WhatsApp link must never wear the
+ * Facebook mark. The stored label and URL are never rewritten.
+ */
+const PLATFORM_HOSTS: { platform: string; hosts: string[] }[] = [
+  { platform: 'whatsapp',  hosts: ['wa.me', 'api.whatsapp.com', 'whatsapp.com'] },
+  { platform: 'telegram',  hosts: ['t.me', 'telegram.me', 'telegram.org'] },
+  { platform: 'instagram', hosts: ['instagram.com', 'instagr.am'] },
+  { platform: 'facebook',  hosts: ['facebook.com', 'fb.com', 'fb.me'] },
+  { platform: 'x',         hosts: ['x.com', 'twitter.com'] },
+];
+
+function platformForDestination(stored: string, href: string): string {
+  let host = '';
+  try { host = new URL(href).hostname.toLowerCase(); } catch { return stored; }
+  const match = PLATFORM_HOSTS.find((entry) =>
+    entry.hosts.some((h) => host === h || host.endsWith(`.${h}`)),
+  );
+  return match ? match.platform : stored;
+}
 
 // Labels/descriptions are translation keys: the page follows the app language
 // (this copy used to be hardcoded English inside the JSX).
@@ -28,9 +55,28 @@ const PILLARS = [
 export default function AboutPage() {
   const isDark = useColorScheme() === 'dark';
   const c = isDark ? neuColors.dark : neuColors.light;
+
   const layout = useLayout();
   const { t } = useTranslation();
   const { branding } = useBranding(); // server-managed display name (fails safe)
+
+  /** Every enabled configured link, as its own row (keyed by destination). */
+  const socialLinks = useMemo(() => {
+    const parsed = parseContactLinks((branding as { contact_links?: unknown }).contact_links).filter((l) => l.enabled);
+    const seen = new Set<string>();
+    const rows: { key: string; platform: string; label: string; href: string }[] = [];
+    for (const link of parsed) {
+      const href = contactLinkHref(link);
+      if (!isSafeContactHref(href)) continue; // unusable destination is never shown
+      const destination = href.trim().toLowerCase().replace(/\/+$/, '');
+      if (seen.has(destination)) continue; // same URL twice = one row
+      seen.add(destination);
+      const platform = platformForDestination(link.platform, href);
+      rows.push({ key: `${platform}:${destination}`, platform, label: link.label, href });
+    }
+    return rows;
+  }, [branding]);
+
   // Optional server-managed About text (Super Admin → Platform → CMS Pages).
   // Empty body → nothing extra is rendered and the bundled copy stands alone.
   const aboutSections = useCmsSections('about_us', []);
@@ -192,6 +238,44 @@ export default function AboutPage() {
           </NeuCard>
         ))}
       </View>
+
+      {/* Configured social / contact links — one INDEPENDENT row per destination, read
+          from app_branding.contact_links (the single source of truth). Nothing is
+          hardcoded, merged, renamed or hidden, and duplicate detection is by URL, not by
+          platform: two different platforms must never collapse into one row. */}
+      {socialLinks.length > 0 && (
+        <>
+          <Text style={{ fontSize: layout.captionSize, fontWeight: '700', ...mutedTextStyle(c, 0.4), textTransform: 'uppercase', letterSpacing: 1.2, marginBottom: layout.pad.md }}>
+            {t('about.connect')}
+          </Text>
+          <View style={{ gap: layout.itemGap, marginBottom: layout.sectionGap }}>
+            {socialLinks.map((item) => (
+              <Pressable
+                key={item.key}
+                accessibilityRole="link"
+                accessibilityLabel={item.label}
+                onPress={() => { void Linking.openURL(item.href).catch(() => {}); }}
+                style={({ pressed }) => ({
+                  flexDirection: 'row', alignItems: 'center', gap: layout.pad.md,
+                  paddingVertical: layout.pad.md, paddingHorizontal: layout.cardPx,
+                  borderRadius: layout.cardRadius, backgroundColor: `${c.text}08`,
+                  opacity: pressed ? 0.7 : 1,
+                })}
+              >
+                <View style={{ width: 36, height: 36, alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                  {hasPlatformBrandIcon(item.platform)
+                    ? <PlatformBrandIcon platform={item.platform} size={22} accessibilityLabel={item.label} />
+                    : (() => { const Icon = platformIcon(item.platform); return <Icon size={20} color={c.text} />; })()}
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={{ fontSize: layout.bodySize, fontWeight: '700', color: c.text }}>{item.label}</Text>
+                  <Text style={{ fontSize: layout.captionSize, ...mutedTextStyle(c, 0.5) }} numberOfLines={1}>{item.href}</Text>
+                </View>
+              </Pressable>
+            ))}
+          </View>
+        </>
+      )}
 
       {/* Footer note */}
       <NeuCard radius={layout.cardRadius} style={{ padding: layout.cardPx, alignItems: 'center' }}>

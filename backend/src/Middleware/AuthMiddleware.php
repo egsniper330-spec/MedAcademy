@@ -9,6 +9,7 @@ use MedAcademy\Database\Database;
 use MedAcademy\Http\ApiException;
 use MedAcademy\Http\Request;
 use MedAcademy\Services\AppUpdateService;
+use MedAcademy\Services\PermissionService;
 
 /**
  * Authenticates the request from the Bearer access token and enforces:
@@ -94,17 +95,16 @@ final class AuthMiddleware
             throw new ApiException(426, $verdict['message'], 'UPDATE_REQUIRED');
         }
 
-        // Assistant permission enforcement
+        // Granular RBAC enforcement (single source of truth: PermissionService).
+        // Super Admin always passes; other admins need the key granted via
+        // their template plus per-admin overrides. Denials are HTTP 403.
         if (!empty($options['permission'])) {
-            $allowed = Database::instance()->value(
-                'SELECT enabled FROM assistant_permissions
-                  WHERE assistant_id = ? AND permission_key = ?',
-                [$profile['id'], $options['permission']],
-                false
-            );
-            if (!$allowed) {
-                throw new ApiException(403, 'Missing permission: ' . $options['permission']);
-            }
+            PermissionService::assert($profile['id'], $profile['role'], (string) $options['permission']);
+        }
+        // staff_permission: enforced only for admin accounts. Doctors (who own
+        // their courses) and Super Admins are not subject to it on shared routes.
+        if (!empty($options['staff_permission']) && $profile['role'] === 'admin') {
+            PermissionService::assert($profile['id'], $profile['role'], (string) $options['staff_permission']);
         }
     }
 }

@@ -10,27 +10,60 @@ interface StatCardProps {
   value: string | number;
   icon?: React.ReactNode;
   color?: string;
+  /** Optional navigation shortcut. Omit for decorative (non-clickable) cards. */
+  onPress?: () => void;
+  /**
+   * Take the full content width instead of sharing a wrapped row.
+   *
+   * Root cause of the reported doctor-dashboard layout: the card carried
+   * `flex: 1` inside a `flexWrap` row, so a row of three cards each got a third
+   * of the width while a lone trailing card (Balance, Today's Activations)
+   * stretched to 100 %. With 7 cards that produced cards that looked
+   * “half-positioned” on a phone and a narrow Published Courses tile. Full-width
+   * cards stack at one geometry on every screen size — no breakpoint guessing.
+   */
+  fullWidth?: boolean;
 }
 
-export function StatCard({ label, value, icon, color }: StatCardProps) {
+export function StatCard({ label, value, icon, color, onPress, fullWidth }: StatCardProps) {
   const scheme = useColorScheme();
   const isDark = scheme === 'dark';
   const c = isDark ? neuColors.dark : neuColors.light;
   return (
-    <NeuCard style={{ minWidth: 130, flex: 1, margin: spacing.xs, padding: spacing.md }}>
+    <NeuCard
+      style={fullWidth
+        ? { alignSelf: 'stretch', marginVertical: spacing.xs, padding: spacing.md }
+        : { minWidth: 130, flex: 1, margin: spacing.xs, padding: spacing.md }}
+      pressable={!!onPress}
+      onPress={onPress}
+      accessibilityLabel={label}
+    >
       <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: spacing.sm, gap: spacing.sm }}>
         {icon ? (
           <View style={{
             ...iconContainer.sm,
             backgroundColor: color ?? c.primary,
             alignItems: 'center', justifyContent: 'center',
+            // The badge is a fixed square and must never participate in flex
+            // shrinking: without flexShrink:0 the label could squeeze it below
+            // 32dp on narrow cards, which also stretched the glyph, because the
+            // icon then rendered larger than its container.
+            flexShrink: 0,
           }}>
             {icon}
           </View>
         ) : null}
-        <Text style={{ ...typography.caption, ...mutedTextStyle(c, 0.55), flex: 1 }} numberOfLines={1}>{label}</Text>
+        <Text
+          style={{ ...typography.caption, ...mutedTextStyle(c, 0.62), flex: 1, minWidth: 0 }}
+          numberOfLines={1}
+        >{label}</Text>
       </View>
-      <Text style={{ ...typography.display, color: color ?? c.primary }}>{value}</Text>
+      <Text
+        style={{ ...typography.display, color: color ?? c.primary, minHeight: typography.display.fontSize * 1.25 }}
+        numberOfLines={1}
+        adjustsFontSizeToFit
+        minimumFontScale={0.7}
+      >{value}</Text>
     </NeuCard>
   );
 }
@@ -44,6 +77,8 @@ export interface StatCardItem {
   icon: React.ReactNode;
   color: string;
   isFuture?: boolean;
+  /** Optional navigation shortcut. Omit for decorative (non-clickable) cards. */
+  onPress?: () => void;
 }
 
 const GAP = spacing.sm;
@@ -108,7 +143,13 @@ export function StatCardCarousel({ cards }: { cards: StatCardItem[] }) {
           overflow: Platform.OS === 'android' ? 'hidden' : 'visible',
         }}
       >
-        <NeuCard radius={layout.cardRadius} style={{ height: CARD_HEIGHT, padding: layout.cardPx, justifyContent: 'space-between' }}>
+        <NeuCard
+          radius={layout.cardRadius}
+          style={{ height: CARD_HEIGHT, padding: layout.cardPx, justifyContent: 'space-between' }}
+          pressable={!!item.onPress}
+          onPress={item.onPress}
+          accessibilityLabel={item.label}
+        >
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.sm }}>
             <View style={{
               // Icon container: fluid 32–44dp, tracks touchTarget

@@ -31,13 +31,11 @@
  * try/catch, so a player that has not mounted yet, has already unmounted, or
  * is mid-navigation degrades to a no-op instead of throwing inside containment.
  *
- * ONLY a security lock invokes this — and leaving the foreground NOW ENGAGES
- * one (the `background-resume` holder in SecurityContext), so an embedded
- * protected player is torn down on a Home press instead of continuing behind
- * it. Deliberate contract change: protected media must not keep decoding while
- * the app is backgrounded, and no protected screen may be briefly revealed on
- * return before the post-resume verification completes. The holder is released
- * as soon as that verification passes.
+ * ONLY a confirmed security lock invokes this DESTRUCTIVE path. A normal
+ * background/resume is owned by `ProtectedContentSurface`, which calls the
+ * non-destructive WEBVIEW_SOFT_PAUSE_SCRIPT (pause only; the session and
+ * position survive) and hides the native surface. The hard detach below is
+ * reserved for an app-access block (VPN, overlay, prohibited window mode, …).
  */
 
 import { useEffect } from 'react';
@@ -58,6 +56,61 @@ export interface StoppableWebView {
  * Written as an IIFE that always evaluates to `true` so react-native-webview's
  * `injectJavaScript` completes cleanly.
  */
+/**
+ * SOFT PAUSE for protected-content concealment (background / resume pending).
+ *
+ * Deliberately NON-DESTRUCTIVE: unlike WEBVIEW_CONTAINMENT_SCRIPT it never
+ * detaches the iframe or clears the media source, so the player session and
+ * playback position survive a lifecycle transition. It records whether media
+ * was actually playing so the reveal can resume exactly that state.
+ */
+export const WEBVIEW_SOFT_PAUSE_SCRIPT = `
+(function () {
+  try {
+    var wasPlaying = false;
+    var plyr = window.__plyr;
+    try {
+      if (plyr && (plyr.playing === true)) wasPlaying = true;
+      if (plyr && typeof plyr.pause === 'function') plyr.pause();
+    } catch (e) {}
+    try {
+      var media = document.querySelectorAll('video, audio');
+      for (var i = 0; i < media.length; i++) {
+        try { if (!media[i].paused) wasPlaying = true; } catch (e) {}
+        try { media[i].pause(); } catch (e) {}
+      }
+    } catch (e) {}
+    window.__medaProtectedWasPlaying = wasPlaying;
+  } catch (e) {}
+  true;
+})();
+`;
+
+/**
+ * Resume ONLY if the soft pause observed active playback. Never auto-starts a
+ * player the user had paused, and never creates a new player/OTP session.
+ */
+export const WEBVIEW_RESUME_SCRIPT = `
+(function () {
+  try {
+    if (!window.__medaProtectedWasPlaying) return true;
+    window.__medaProtectedWasPlaying = false;
+    var plyr = window.__plyr;
+    if (plyr && typeof plyr.play === 'function') {
+      try { plyr.play(); return true; } catch (e) {}
+    }
+    var media = document.querySelectorAll('video, audio');
+    for (var i = 0; i < media.length; i++) {
+      try {
+        var p = media[i].play();
+        if (p && typeof p.catch === 'function') p.catch(function () {});
+      } catch (e) {}
+    }
+  } catch (e) {}
+  true;
+})();
+`;
+
 export const WEBVIEW_CONTAINMENT_SCRIPT = `
 (function () {
   try {

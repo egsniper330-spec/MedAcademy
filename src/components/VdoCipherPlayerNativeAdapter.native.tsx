@@ -71,6 +71,7 @@ import { getVideoPlaybackToken } from '@/lib/api';
 import { neuColors, mutedTextStyle } from '@/lib/neu';
 import type { VdoCipherPlayerProps } from '@/components/VdoCipherPlayer';
 import { NativeWatermarkOverlay } from '@/components/NativeWatermarkOverlay';
+import { ProtectedContentSurface } from '@/components/ProtectedContentSurface';
 import { t } from '@/lib/i18n';
 import { resolveWatermarkIdentity } from '@/lib/watermarkIdentity';
 import { resolveWatermarkLayers, type WatermarkPlatform } from '@/lib/watermarkLayers';
@@ -167,6 +168,22 @@ export function VdoCipherPlayerNativeAdapter({
   // that also covers an in-place FULLSCREEN player. */}
   const playerRef = useSecurityPlaybackStop();
 
+  // ── PROTECTED CONTENT: pause/hide without destroying the session ──────────
+  // Concealment is driven by ProtectedContentSurface on the AppState edge. It
+  // pauses through the SDK's documented pause(), leaves the SDK fullscreen, and
+  // keeps the SAME player instance + OTP session alive. Position is preserved
+  // by the SDK (no seek, no reload, no new OTP). On reveal playback resumes ONLY
+  // if it was playing before concealment.
+  const playingRef = useRef(false);
+  // Fullscreen ref so the synchronous concealer can collapse fullscreen
+  // without waiting for a React render. Declared after the state below.
+  const isFullscreenRef = useRef(false);
+  const handlePlayerStateChanged = useCallback((event: any) => {
+    // Tracked so a reveal after concealment resumes only an actually-playing
+    // session (never auto-starts a paused player).
+    playingRef.current = event?.playWhenReady === true;
+  }, []);
+
   // WATERMARK IDENTITY — the ONE authoritative resolver (shared with offline).
   // Public MED-#### id only; a UUID in the id slot is dirty data and renders
   // nothing (never the internal DB user id). Stable across re-renders — the
@@ -220,6 +237,40 @@ export function VdoCipherPlayerNativeAdapter({
   // The same VdoPlayerView instance stays mounted through every transition;
   // only the container style toggles between INLINE_STYLE and FULLSCREEN_STYLE.
   const [isFullscreen, setIsFullscreen] = useState(false);
+
+  // ── PROTECTED CONTENT concealers (see ProtectedContentSurface) ────────────
+  // Synchronous: called on the AppState edge and on every app-level block.
+  // Pauses via the documented SDK API, leaves fullscreen, and NEVER destroys
+  // the player, OTP session or playback position.
+  useEffect(() => { isFullscreenRef.current = isFullscreen; }, [isFullscreen]);
+  const resumeOnRevealRef = useRef(false);
+  const concealPlayer = useCallback((_reason: string) => {
+    // Snapshot the pre-pause state: the SDK's own pause may emit a
+    // playWhenReady=false event, which must not erase the fact that playback
+    // was running when the app left the foreground.
+    resumeOnRevealRef.current = playingRef.current;
+    try {
+      playerRef.current?.pause?.();
+    } catch {
+      /* player not ready */
+    }
+    try {
+      playerRef.current?.exitFullscreenV2?.();
+    } catch {
+      /* no native controls / not fullscreen */
+    }
+    if (isFullscreenRef.current) setIsFullscreen(false);
+  }, [playerRef]);
+  const revealPlayer = useCallback(() => {
+    const shouldResume = resumeOnRevealRef.current;
+    resumeOnRevealRef.current = false;
+    if (!shouldResume) return;
+    try {
+      playerRef.current?.play?.();
+    } catch {
+      /* player released; the user can resume manually */
+    }
+  }, [playerRef]);
 
   // Explicit window pixels for the fullscreen container (ancestor-collapse fix
   // — same root cause as the Plyr fullscreen black frame).
@@ -359,6 +410,9 @@ export function VdoCipherPlayerNativeAdapter({
   // event.currentTime is in milliseconds.
   const handleProgress = useCallback((event: any) => {
     const currentTimeSec = (event?.currentTime ?? 0) / 1000;
+    // Progress is authoritative evidence that playback was actually running —
+    // used to decide whether a reveal should resume (never auto-start).
+    playingRef.current = true;
     onProgress?.(currentTimeSec, durationSecRef.current);
   }, [onProgress]);
 
@@ -533,8 +587,10 @@ export function VdoCipherPlayerNativeAdapter({
 
   return (
     <VdoSessionScope tag={sessionTag}>
-    <View
+    <ProtectedContentSurface
       style={isFullscreen ? fullscreenStyle(win) : INLINE_STYLE}
+      onConceal={concealPlayer}
+      onReveal={revealPlayer}
       onLayout={(e) => {
         // VDO_WM_FULLSCREEN_CONTAINER: the player/watermark container's ACTUAL
         // laid-out frame. Fullscreen must equal the current window dims — a
@@ -557,6 +613,7 @@ export function VdoCipherPlayerNativeAdapter({
         onProgress={handleProgress}
         onMediaEnded={handleMediaEnded}
         onLoadError={handleLoadError}
+        onPlayerStateChanged={handlePlayerStateChanged}
         onEnterFullscreen={handleSdkEnterFullscreen}
         onExitFullscreen={handleSdkExitFullscreen}
       >
@@ -660,7 +717,7 @@ export function VdoCipherPlayerNativeAdapter({
           <ArrowLeft size={22} color="#fff" />
         </Pressable>
       )}
-    </View>
+    </ProtectedContentSurface>
     </VdoSessionScope>
   );
 }

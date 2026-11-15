@@ -18,6 +18,8 @@ import {
   getPublicSupportContacts, type PublicSupportContact,
   SUPPORT_ICONS, SUPPORT_DEFAULT_LABELS, type SupportPlatformKey,
 } from '@/lib/api';
+import { platformDef } from '@/lib/branding';
+import { PlatformBrandIcon, hasPlatformBrandIcon } from '@/components/PlatformBrandIcon';
 import { useSecurity } from '@/lib/SecurityContext';
 import {
   hasConnectionFinding,
@@ -139,6 +141,16 @@ function ContactChooserModal({
             {/* Method buttons */}
             {methods.map(method => {
               const Icon = (SUPPORT_ICONS[method.platform] ?? Mail);
+              // NAME AND LOGO COME FROM THE PLATFORM KEY, never from the stored label.
+              // Root cause of “every method is called WhatsApp”: the label is saved
+              // per row by the admin editor and is sticky — a row that used to be
+              // WhatsApp and now points at Telegram kept `label:'WhatsApp'`, so
+              // several distinct destinations rendered with one name. The platform
+              // key is the stable identity (whatsapp / telegram / facebook / …),
+              // so it selects both the canonical name and the brand mark.
+              const label = SUPPORT_DEFAULT_LABELS[method.platform] ?? method.label;
+              const description = platformDef(method.platform).description;
+              const brand = hasPlatformBrandIcon(method.platform);
               const isPressed = pressed === method.platform;
               const shadowStyle = isPressed ? neuPressedStyle(isDark) : flat;
               return (
@@ -162,11 +174,16 @@ function ContactChooserModal({
                       backgroundColor: `${c.primary}18`,
                       alignItems: 'center', justifyContent: 'center',
                     }}>
-                      <Icon size={layout.bodySize + 4} color={c.primary} />
+                      {brand
+                        ? <PlatformBrandIcon platform={method.platform} size={layout.bodySize + 6} tint={c.primary} />
+                        : <Icon size={layout.bodySize + 4} color={c.primary} />}
                     </View>
                     <View style={{ flex: 1 }}>
-                      <Text style={{ fontSize: layout.bodySize, fontWeight: '700', color: c.text }}>{method.label}</Text>
-                      <Text style={{ fontSize: layout.captionSize, color: `${c.text}66` }} numberOfLines={1}>{method.url}</Text>
+                      <Text style={{ fontSize: layout.bodySize, fontWeight: '700', color: c.text }}>{label}</Text>
+                      {/* A description, not the raw destination: the URL used to be
+                          printed here, which exposed the configured address and told
+                          a blocked student nothing useful. */}
+                      <Text style={{ fontSize: layout.captionSize, color: `${c.text}66` }} numberOfLines={1}>{description}</Text>
                     </View>
                     <ArrowRight size={layout.captionSize + 2} color={`${c.text}44`} />
                   </View>
@@ -306,11 +323,16 @@ export default function SecurityWarningScreen() {
   // with URLs already built by the backend.
   const contactMethods: ContactMethod[] = React.useMemo(() => {
     if (!support || support.length === 0) return [];
-    return support.map(c => ({
-      platform: c.platform as SupportPlatformKey,
-      label:    c.label,
-      url:      c.url,
-    }));
+    const out: ContactMethod[] = [];
+    const seen = new Set<string>();
+    for (const c of support) {
+      const platform = c.platform as SupportPlatformKey;
+      if (seen.has(platform)) continue;          // one row per platform — no duplicates
+      if (!c.url) continue;                     // unconfigured → never rendered
+      seen.add(platform);
+      out.push({ platform, label: c.label, url: c.url });
+    }
+    return out;
   }, [support]);
 
   const handleContactSupport = () => {
@@ -338,7 +360,9 @@ export default function SecurityWarningScreen() {
     : contactMethods.length === 0
       ? t('security.supportNotConfigured')
       : contactMethods.length === 1
-        ? t('security.contactVia', { method: contactMethods[0].label })
+        // Canonical name for the platform key, same as the chooser rows — the
+        // stored label can be stale (“WhatsApp” on a Telegram destination).
+        ? t('security.contactVia', { method: SUPPORT_DEFAULT_LABELS[contactMethods[0].platform] ?? contactMethods[0].label })
         : t('support.title');
 
   return (

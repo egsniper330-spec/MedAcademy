@@ -1,0 +1,35 @@
+# EXAMPLE unit template. Paths and user are placeholders. Not verified on a Linux host yet.
+[Unit]
+Description=PDF watermark WAM model runtime (loopback only, loads one checkpoint)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pdfwam
+Group=pdfwam
+WorkingDirectory=/opt/pdf-watermark-service
+Environment=PYTHONPATH=/opt/pdf-watermark-service
+# Env file lives outside the web root and is readable only by root and this service user.
+EnvironmentFile=/etc/pdf-watermark/wam.env
+# Uses the WAM virtualenv (torch, pinned in docs/OPERATIONS.md), not the service venv.
+# app.wam_runtime refuses non-loopback binds and a missing PDF_SVC_WAM_HMAC_KEY (exit non-zero).
+ExecStart=/opt/pdf-watermark-wam/venv/bin/python -m app.wam_runtime
+KillSignal=SIGTERM
+TimeoutStopSec=60
+Restart=on-failure
+RestartSec=5
+# Checkpoint load is slow; allow startup time before systemd treats the unit as failed.
+TimeoutStartSec=300
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+# Read-only checkpoint and repo; writable only for the nonce store.
+ReadOnlyPaths=/opt/pdf-watermark-wam /opt/pdf-watermark-service
+ReadWritePaths=/var/lib/pdf-watermark/wam-state
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

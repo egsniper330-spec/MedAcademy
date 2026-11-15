@@ -1,0 +1,14 @@
+
+> medacademy-portal@0.0.0 build
+> tsc -b && vite build
+
+[36mvite v8.3.5 [32mbuilding client environment for production...[36m[39m
+transforming...
+✓ 2087 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/index.html                   0.98 kB │ gzip:   0.48 kB
+dist/assets/index-BU_VMDgZ.css   78.96 kB │ gzip:  15.76 kB
+dist/assets/index-CjWGJnVO.js   475.99 kB │ gzip: 135.90 kB
+
+[32m✓ built in 1.76s[39m

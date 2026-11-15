@@ -256,7 +256,8 @@ if (!HAS_ANDROID) {
     // .webp define the same resource in one res/ folder.
     for (const [dir, n] of [
       ['mipmap', 'ic_launcher'], ['mipmap', 'ic_launcher_round'],
-      ['mipmap', 'ic_launcher_foreground'], ['drawable', 'notification_icon'],
+      ['mipmap', 'ic_launcher_foreground'], ['mipmap', 'ic_launcher_monochrome'],
+      ['drawable', 'notification_icon'],
       ['drawable', 'splashscreen_logo'],
     ]) {
       const png = path.join(RES, dir + '-' + d, n + '.png');

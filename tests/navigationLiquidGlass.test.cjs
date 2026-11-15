@@ -10,7 +10,7 @@
  *   C. Architecture: iOS shell uses the REAL native tab bar
  *      (react-native-bottom-tabs), sets NO fake glass background, does not
  *      ship lucide/native requireNativeComponent off-platform; Android/web
- *      shell keeps the JS Tabs + ResponsiveTabBar implementation; role
+ *      shell mounts the same floating GlassTabBar the Android app uses; role
  *      layouts stay thin and route through the registry.
  *   D. Liquid Glass fidelity: no forced bar background/blur; tint + theme
  *      colors flow from the existing neu palette; per-role JS icon shrink
@@ -142,6 +142,10 @@ console.log('\n═══ C. Architecture ═══');
 
 const iosShell = readCode('src/components/navigation/RoleTabShell.ios.tsx');
 const jsShell = readCode('src/components/navigation/RoleTabShell.tsx');
+// 2026-11-15 refactor: navigator/provider/tab logic is shared by the Android and
+// web shells and lives in RoleTabShellBase.tsx (no bar imports there).
+const shellBase = readCode('src/components/navigation/RoleTabShellBase.tsx');
+const androidShell = readCode('src/components/navigation/RoleTabShell.android.tsx');
 const layouts = {
   student: readCode('src/app/(app)/(student)/_layout.tsx'),
   doctor: readCode('src/app/(app)/(doctor)/_layout.tsx'),
@@ -163,11 +167,20 @@ check('ios shell EXCLUDES drawer-only screens from the native tab navigator (no 
 check('ios shell sidebarAdaptable=false (bottom bar on iPad)', /sidebarAdaptable=\{false\}/.test(iosShell));
 check('ios shell no minimizeBehavior (native default kept)', !iosShell.includes('minimizeBehavior'));
 
-check('js shell still uses expo-router Tabs', jsShell.includes('Tabs') && jsShell.includes('ResponsiveTabBar'));
-check('js shell no native-tabs import', !jsShell.includes('@bottom-tabs') && !jsShell.includes('NativeTabsNavigator'));
+check('shared non-iOS shell still uses expo-router Tabs', shellBase.includes('<Tabs'));
+check('web shell supplies the SAME glass bar as Android (preview shows the real pill)',
+  jsShell.includes('<GlassTabBar') && jsShell.includes('RoleTabShellBase') && !jsShell.includes('ResponsiveTabBar'));
+check('android shell still supplies the glass bar', androidShell.includes('GlassTabBar') && androidShell.includes('RoleTabShellBase'));
+check('shared shell names NO bar implementation',
+  !/GlassTabBar|ResponsiveTabBar/.test(shellBase.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')));
+check('js shell no native-tabs import',
+  !jsShell.includes('@bottom-tabs') && !jsShell.includes('NativeTabsNavigator')
+  && !shellBase.includes('@bottom-tabs') && !shellBase.includes('NativeTabsNavigator'));
 // 2026-09-28 architecture fix: drawer-only screens are Stack screens in the
 // (hubs) group on every platform — href:null registration removed for parity.
-check('js shell EXCLUDES drawer-only screens from the JS tab navigator (no href:null scenes)', !jsShell.includes('href: tab.hidden ? null : undefined') && /\.filter\(\(tab\) => tab\.hidden !== true\)/.test(jsShell));
+check('shared shell EXCLUDES drawer-only screens from the tab navigator (no href:null scenes)',
+  !shellBase.includes('href: tab.hidden ? null : undefined')
+  && /\.filter\(\(tab\) => tab\.hidden !== true\)/.test(shellBase));
 
 for (const [role, code] of Object.entries(layouts)) {
   check(`${role} layout thin (registry-driven)`, code.includes('_TAB') && code.includes('RoleTabShell') && code.length < 700, `len=${code.length}`);
@@ -201,7 +214,7 @@ check('no extra window/screen-capture code introduced', !readCode('src/app/_layo
 // DrawerNav remains a sibling of the navigator in BOTH shells (drawer keeps
 // working above every platform's bar, exactly as before).
 check('ios shell keeps DrawerNav sibling', iosShell.includes('<DrawerNav />'));
-check('js shell keeps DrawerNav sibling', jsShell.includes('<DrawerNav />'));
+check('shared shell keeps DrawerNav sibling', shellBase.includes('<DrawerNav />') && shellBase.includes('DrawerProvider'));
 
 /* ═══════════════════ F. Liquid Glass is NEVER a hard requirement ═══════════════════ */
 

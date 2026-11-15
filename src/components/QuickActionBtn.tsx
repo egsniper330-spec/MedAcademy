@@ -33,13 +33,37 @@ interface QuickActionBtnProps {
   path: string;
   c: typeof neuColors.light;
   isDark: boolean;
+  /**
+   * Exact tile width in dp, computed by the caller from the content width and the
+   * number of columns.
+   *
+   * WHY THE CALLER COMPUTES IT: this tile used to be `width:'22%'` PLUS
+   * `maxWidth: touchTarget*1.6`. On a phone 22% was smaller than the cap, so four
+   * tiles filled the row; on a tablet/web (e.g. the 768dp-wide Preview panel) 22%
+   * was far LARGER than the cap, so each tile shrank to ~70dp while
+   * `justifyContent:'space-between'` still spread them across the full row. The
+   * result was exactly the reported defect: uneven gaps, icons that looked
+   * undersized next to their labels, and a layout that changed character between
+   * phone and tablet. A single caller-computed width removes the percentage/cap
+   * conflict and keeps every tile identical at every viewport.
+   */
+  width?: number | `${number}%`;
 }
 
-export function QuickActionBtn({ icon: Icon, label, color, path, c, isDark }: QuickActionBtnProps) {
+export function QuickActionBtn({ icon: Icon, label, color, path, c, isDark, width }: QuickActionBtnProps) {
   const router  = useRouter();
   const layout  = useLayout();
+  // Default: a percentage of the PARENT row, which is what actually needs to fit.
+  // A window-derived dp width was tried and rejected: the dashboard row is narrower
+  // than the window (drawer + content max-width), so dp tiles overflowed it and the
+  // fourth tile wrapped onto its own line. A percentage always tracks the real
+  // container, and with the maxWidth cap gone (the actual defect) the tiles are
+  // identical at every viewport.
+  const tileWidth = width ?? '22%';
   const btnSz   = layout.touchTarget + 10;
-  const iconInner = Math.round(btnSz * 0.42);
+  // One icon scale for every quick action (was `btnSz * 0.42`, which produced
+  // 23–24px on phones and 22px on tablets while StatCard icons stayed at 16px).
+  const iconInner = layout.iconSize.md;
   const [pressed, setPressed] = useState(false);
   return (
     <Pressable
@@ -54,7 +78,7 @@ export function QuickActionBtn({ icon: Icon, label, color, path, c, isDark }: Qu
       }}
       accessibilityLabel={label}
       accessibilityRole="button"
-      style={{ width: '22%', maxWidth: Math.round(layout.touchTarget * 1.6), alignItems: 'center', marginBottom: layout.pad.md }}
+      style={{ width: tileWidth, alignItems: 'center', marginBottom: layout.pad.md }}
     >
       <View style={[
         pressed ? neuPressedStyle(isDark) : neuFlatStyle(isDark),
@@ -62,7 +86,20 @@ export function QuickActionBtn({ icon: Icon, label, color, path, c, isDark }: Qu
       ]}>
         <Icon size={iconInner} color={color} />
       </View>
-      <Text style={{ fontSize: layout.captionSize - 1, fontWeight: '700', ...mutedTextStyle(c, 0.65), textAlign: 'center' }} numberOfLines={2}>{label}</Text>
+      {/* Reserved two-line height keeps every label baseline-aligned even when one
+          label wraps and another does not (Arabic strings are wider). */}
+      <Text
+        style={{
+          fontSize: layout.captionSize - 1,
+          fontWeight: '700',
+          lineHeight: Math.round((layout.captionSize - 1) * 1.35),
+          minHeight: Math.round((layout.captionSize - 1) * 1.35) * 2,
+          ...mutedTextStyle(c, 0.78),
+          textAlign: 'center',
+          width: '100%',
+        }}
+        numberOfLines={2}
+      >{label}</Text>
     </Pressable>
   );
 }

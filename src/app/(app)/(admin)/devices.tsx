@@ -104,7 +104,7 @@ export default function AdminDevices({ backTo }: { backTo?: string } = {}) {
   const [refreshing, setRefreshing] = useState(false);
   const [query, setQuery] = useState('');
   const [expandedUser, setExpandedUser] = useState<string | null>(null);
-  const [userDeviceMap, setUserDeviceMap] = useState<Record<string, { devices: DeviceRecord[]; loaded: boolean }>>({});
+  const [userDeviceMap, setUserDeviceMap] = useState<Record<string, { devices: DeviceRecord[]; loaded: boolean; failed?: boolean }>>({});
   const [action, setAction] = useState<DeviceAction>(null);
   const [blockReason, setBlockReason] = useState('');
   const [actionLoading, setActionLoading] = useState(false);
@@ -236,14 +236,15 @@ export default function AdminDevices({ backTo }: { backTo?: string } = {}) {
       // measured against it, so an admin whose own clock is off still sees the
       // right duration.
       setServerClock(res?.server_epoch_ms);
-      setUserDeviceMap(prev => ({ ...prev, [userId]: { devices: res.devices, loaded: true } }));
+      setUserDeviceMap(prev => ({ ...prev, [userId]: { devices: res.devices, loaded: true, failed: false } }));
     } catch (_) {
       // A failed read is NOT evidence that devices went offline: keep the last
-      // known snapshot (and its timestamps) instead of blanking the list.
+      // known snapshot (and its timestamps) instead of blanking the list, and
+      // flag the failure so the UI shows an error rather than "no devices".
       setUserDeviceMap(prev => (
         prev[userId]?.loaded
-          ? prev
-          : { ...prev, [userId]: { devices: [], loaded: true } }
+          ? { ...prev, [userId]: { ...prev[userId], failed: true } }
+          : { ...prev, [userId]: { devices: [], loaded: true, failed: true } }
       ));
     }
   }, []);
@@ -457,6 +458,13 @@ export default function AdminDevices({ backTo }: { backTo?: string } = {}) {
             {/* Devices list */}
             {!deviceData?.loaded ? (
               <ActivityIndicator color={c.primary} style={{ padding: 16 }} />
+            ) : deviceData?.failed && devices.length === 0 ? (
+              <View style={{ alignItems: 'center', paddingVertical: 20, gap: 8 }}>
+                <Text style={{ ...mutedTextStyle(c, 0.6), fontSize: 13 }}>{t('adminDevices.loadFailed')}</Text>
+                <Pressable onPress={() => refreshUserDevices(user.id)} accessibilityRole="button">
+                  <Text style={{ color: c.primary, fontSize: 13, fontWeight: '600' }}>{t('common.retry')}</Text>
+                </Pressable>
+              </View>
             ) : devices.length === 0 ? (
               <View style={{ alignItems: 'center', paddingVertical: 20 }}>
                 <Text style={{ ...mutedTextStyle(c, 0.4), fontSize: 13 }}>{t('adminDevices.noDevices')}</Text>
@@ -559,7 +567,7 @@ export default function AdminDevices({ backTo }: { backTo?: string } = {}) {
   return (
     <View style={{ flex: 1, backgroundColor: c.base }}>
       <ScrollView automaticallyAdjustKeyboardInsets={process.env.EXPO_OS === 'ios'}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />} contentContainerStyle={{ paddingBottom: safeBottom(layout.insets.bottom) }}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />} contentContainerStyle={{ paddingBottom: layout.roleTabsBottom() }}
       >
           {/* PageHeader sits OUTSIDE the inner padding view so it can own its own horizontal padding */}
           <PageHeader

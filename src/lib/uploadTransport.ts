@@ -31,7 +31,17 @@ export interface UploadCancelSignal {
 }
 
 export interface UploadXhrRequest {
-  upload?: { onprogress: ((event: { loaded?: number; total?: number; lengthComputable?: boolean }) => void) | null } | null;
+  upload?: {
+    onprogress: ((event: { loaded?: number; total?: number; lengthComputable?: boolean }) => void) | null;
+    /**
+     * Fires when the request BODY has been fully handed to the network — before
+     * the server has answered. This is the only honest "upload is over" signal:
+     * `xhr.onload` fires after the server finished its own work, which for a
+     * synchronous endpoint (the PDF Checker runs a full forensic scan) can be
+     * many seconds later. Without it the UI cannot separate upload from analysis.
+     */
+    onload?: (() => void) | null;
+  } | null;
   status: number;
   responseText: string;
   timeout: number;
@@ -50,6 +60,8 @@ export interface UploadTransportOptions {
   formData: FormData;
   headers?: Record<string, string>;
   onProgress?: (progress: UploadTransportProgress) => void;
+  /** Called once, when the body has been fully sent (server reply pending). */
+  onUploadComplete?: () => void;
   signal?: UploadCancelSignal | null;
   /** 0 (default) = no artificial limit; the server/proxy decides. */
   timeoutMs?: number;
@@ -103,7 +115,7 @@ function defaultFactory(): UploadXhrRequest {
  * exactly as it does for fetch); rejects only for transport-level failures.
  */
 export function uploadWithProgress(options: UploadTransportOptions): Promise<UploadTransportResponse> {
-  const { url, formData, headers = {}, onProgress, signal, timeoutMs = 0 } = options;
+  const { url, formData, headers = {}, onProgress, onUploadComplete, signal, timeoutMs = 0 } = options;
 
   if (signal?.aborted) return Promise.reject(abortError());
 
@@ -138,6 +150,14 @@ export function uploadWithProgress(options: UploadTransportOptions): Promise<Upl
         const total = Number(event?.total ?? 0);
         const loaded = Number(event?.loaded ?? 0);
         onProgress({ bytesSent: loaded, totalBytes: total });
+      };
+    }
+    if (onUploadComplete && xhr.upload) {
+      // Fires even when the server never answers 2xx: the body DID leave, and
+      // callers that show a separate "analysing" stage need that moment.
+      xhr.upload.onload = () => {
+        if (settled) return;
+        onUploadComplete();
       };
     }
 

@@ -60,6 +60,9 @@ function section(title) {
 const tabBar = stripComments(read('src/components/ResponsiveTabBar.tsx'));
 const iosShell = stripComments(read('src/components/navigation/RoleTabShell.ios.tsx'));
 const jsShell = stripComments(read('src/components/navigation/RoleTabShell.tsx'));
+// Shared non-iOS shell: owns the navigator, the registry mapping and the
+// hidden-tab filter for BOTH the Android glass shell and the web neu shell.
+const shellBase = stripComments(read('src/components/navigation/RoleTabShellBase.tsx'));
 const registry = stripComments(read('src/lib/nativeTabRegistry.tsx'));
 const resources = read('src/lib/i18n/resources.ts');
 
@@ -137,8 +140,10 @@ ok('the initial route is still chosen by name, not by position',
   /initialRouteName=\{initialRouteName\}/.test(iosShell));
 
 section('5. both shells stay wired to the same registry');
-ok('the JS shell renders the role registry it was given',
-  /tabs\s*\n?\s*\.filter\(\(tab\) => tab\.hidden !== true\)/.test(jsShell));
+ok('the shared shell renders the role registry it was given',
+  /tabs\s*\n?\s*\.filter\(\(tab\) => tab\.hidden !== true\)/.test(shellBase));
+ok('the web shell is the glass-bar wrapper over that shared shell',
+  /RoleTabShellBase/.test(jsShell) && /<GlassTabBar/.test(jsShell) && !/ResponsiveTabBar/.test(jsShell));
 ok('role layouts pass the registry, never a hand-built list',
   ['(student)', '(doctor)', '(admin)', '(superadmin)'].every((role) => {
     const p = `src/app/(app)/${role}/_layout.tsx`;

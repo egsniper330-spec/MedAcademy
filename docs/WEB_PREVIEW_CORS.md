@@ -34,9 +34,9 @@ The difference is the browser:
   JavaScript unless it carries `Access-Control-Allow-Origin`.
 
 `backend/src/Middleware/CorsMiddleware.php` implements this correctly, but it only
-answers origins listed in the server's `CORS_ALLOWED_ORIGINS` environment variable. On a
-server where that variable is missing or does not list the dev origin, the preflight
-falls through to the router and returns:
+answers origins listed in the server's `CORS_ALLOWED_ORIGINS` environment variable (plus
+the exact loopback preview origins built into the middleware). On a server where neither
+covers the dev origin, the preflight falls through to the router and returns:
 
 ```
 HTTP/1.1 404 Not Found
@@ -49,14 +49,17 @@ HTTP/1.1 404 Not Found
 
 ### 1. Permanent (server-side, one env var)
 
-In `backend/.env` on the host:
+In `backend/.env` on the host, list the real production web origin(s):
 
 ```dotenv
-CORS_ALLOWED_ORIGINS=https://medacademy.site,http://localhost:8081,http://127.0.0.1:8081
+CORS_ALLOWED_ORIGINS=https://medacademy.site
 ```
 
-No code change and no migration. Native clients are unaffected (they send no `Origin`).
-Remove the loopback origins if you never intend to serve the web build from a dev machine.
+`CorsMiddleware` also allows the exact loopback preview origins
+`http://localhost:8081`, `http://127.0.0.1:8081`, `http://localhost:8082` and
+`http://127.0.0.1:8082` — a closed list, never a pattern, and a wildcard is rejected.
+Disable them in a hardened deployment with `CORS_ALLOW_DEV_ORIGINS=false`. Native
+clients are unaffected (they send no `Origin`).
 
 ### 2. Local only (no server access needed)
 

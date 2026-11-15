@@ -1,0 +1,10 @@
+# Phase A runtime dependencies (pinned). All are permissively licensed.
+fastapi==0.115.6
+uvicorn==0.32.1
+pydantic-settings==2.6.1
+# Phase B rendering. pypdfium2 is pinned to 5.1.0 because 5.15.2 is yanked on PyPI.
+# pypdfium2: Apache-2.0 / BSD-3-Clause; PDFium: BSD-style. Pillow: MIT-CMU.
+pypdfium2==5.1.0
+pillow==12.0.0
+# Phase C issuance: pixel arrays between Pillow and the WAM adapter. BSD-3-Clause.
+numpy==2.5.4

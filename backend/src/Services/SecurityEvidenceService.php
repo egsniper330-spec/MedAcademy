@@ -613,7 +613,10 @@ final class SecurityEvidenceService
             (new SecurityService())->logEvent($userId, [
                 'event_type' => 'security_evidence_enforcement_failed',
                 'detection_method' => "Missing/invalid signed evidence for {$action} ({$reason})",
-                'policy_action' => 'block_login',
+                // Record the enforcement category the refused action really falls
+                // under. Only a login refusal is a login block; a refused vdo_otp is
+                // a video block; any other action has no closed-vocabulary value.
+                'policy_action' => self::refusalPolicyAction($action),
                 'risk_score' => 40,
                 'platform' => 'android',
                 'ip_address' => $ip,
@@ -623,6 +626,20 @@ final class SecurityEvidenceService
         }
 
         throw new ApiException(403, 'This action requires a verified device security check. Please reopen the app and try again.');
+    }
+
+    /**
+     * policy_action for a REFUSED evidence check. Login is the only action
+     * whose refusal is a login block; vdo_otp refusals are video blocks; every
+     * other action maps to NULL (no closed-vocabulary value fits).
+     */
+    private static function refusalPolicyAction(string $action): ?string
+    {
+        return match ($action) {
+            'login'   => 'block_login',
+            'vdo_otp' => 'block_video',
+            default   => null,
+        };
     }
 
     // ─────────────────────────────────────────────────────────────────────────

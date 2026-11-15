@@ -152,6 +152,21 @@ final class SystemDiagnosticsService
 
     private function checkVdoCipher(): array
     {
+        // RETIRED PROVIDER — VdoCipher is no longer active; YouTube is the only supported
+        // provider. This probe used to authenticate against dev.vdocipher.com with the
+        // server secret on every diagnostics run. It must not contact the provider any more,
+        // so it reports a stable "retired" result. The check KEY and shape are kept so the
+        // super-admin diagnostics page and its history stay intact.
+        return $this->result('vdocipher', 'VdoCipher', 'Video / DRM', self::STATUS_OK, [
+            'checks'  => [
+                'configuration'  => 'retired',
+                'connectivity'   => 'not tested',
+                'authentication' => 'not tested',
+                'api'            => 'not tested',
+            ],
+            'message' => 'VdoCipher is retired. YouTube is the only supported video provider.',
+        ]);
+
         $apiSecret = Config::string('VDOCIPHER_API_SECRET');
         $apiBase   = rtrim(Config::string('VDOCIPHER_API_BASE', 'https://dev.vdocipher.com/api'), '/');
         $configured = $apiSecret !== '' && $apiSecret !== 'CHANGE_ME';

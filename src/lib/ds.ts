@@ -35,7 +35,8 @@
  *   • Fluid values (lerp) preferred over step-function breakpoints
  */
 
-import { useWindowDimensions, PixelRatio, Easing } from 'react-native';
+import { useWindowDimensions, PixelRatio, Easing, Platform } from 'react-native';
+import { useRoleTabChrome } from '@/lib/roleTabChrome';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useMemo } from 'react';
 import { tabBarClearance } from '@/lib/tabBarClearance';
@@ -743,19 +744,46 @@ export function useLayout() {
   const headerRight  = safeRight(insets.right ?? 0);
 
   // ── Bottom navigation clearance ───────────────────────────────────────────
-  //   ANDROID / WEB: the JS tab bar is in the layout flow, so the screen's
-  //   viewport already ends above it → tabBarClearance() returns 0 and these
-  //   values are byte-for-byte what they were before.
+  //   ANDROID: the floating glass bar OVERLAYS content, so its height is
+  //   reserved — but ONLY inside a role tab layout (`inRoleTabs`). Drawer/hub
+  //   screens have no bottom bar, so they keep their previous spacing instead
+  //   of gaining 72 dp of dead space.
+  //   WEB: the JS tab bar is in the layout flow, so the screen's viewport
+  //   already ends above it → tabBarClearance() returns 0.
   //   iOS: the REAL native tab bar is drawn by UIKit outside the RN hierarchy
   //   and floats OVER the content, so the bar's own height must be reserved
-  //   here — see src/lib/tabBarClearance.ios.ts for the full root cause. One
-  //   shared number covers every screen, so no screen needs its own padding.
-  const barClearance = tabBarClearance(win.width > win.height);
+  //   here — see src/lib/tabBarClearance.ios.ts for the full root cause. That
+  //   implementation ignores the role-tab flag, so iOS is unchanged.
+  const inRoleTabs = useRoleTabChrome();
+  const barClearance = tabBarClearance(win.width > win.height, inRoleTabs);
 
   const pageBottom   = safeBottom(insets.bottom, barClearance);
   const scrollBottom = useMemo(
     () => (extra = 0) => safeBottom(insets.bottom, extra + barClearance),
     [insets.bottom, barClearance],
+  );
+
+  /**
+   * roleTabsBottom — trailing padding for content that lives INSIDE a role tab
+   * layout, i.e. the screens the floating glass bar overlays.
+   *
+   * Why not just `scrollBottom()`: `scrollBottom()` also carries the iOS native
+   * bar height, which the tab screens below never reserved (they used
+   * `safeBottom(insets.bottom)` directly). Using it here would silently add
+   * ~50 pt to every one of those lists on iOS — a spacing change this task must
+   * not make. So the clearance is added for the ANDROID floating bar only:
+   *   • Android, inside a role tab layout → safe-area + bar height + 10 gap
+   *   • Android, anywhere else            → safe-area only (unchanged)
+   *   • iOS / web                         → safe-area only (unchanged)
+   * `inRoleTabs` is the context flag from RoleTabChromeContext, so only screens
+   * that actually sit under the bar reserve its space.
+   */
+  const roleTabsBottom = useMemo(
+    () => (extra = 0) => safeBottom(
+      insets.bottom,
+      extra + (Platform.OS === 'android' && inRoleTabs ? barClearance : 0),
+    ),
+    [insets.bottom, barClearance, inRoleTabs],
   );
 
   return useMemo(() => {
@@ -794,6 +822,7 @@ export function useLayout() {
       // ── Scroll / page bottom ──────────────────────────────────────────────
       pageBottom,
       scrollBottom,
+      roleTabsBottom,
       /**
        * Space the bottom navigation occupies above the safe-area inset.
        * 0 on Android/web (bar is in the layout flow); the native bar's height

@@ -206,8 +206,10 @@ check('every drawer label is localized through t()',
   !/label: '(?!.*\(\')[A-Z][a-z]+ [A-Z]/.test(drawer));
 
 // The SAME component must be mounted by every role shell / hub group.
+// The non-iOS shells delegate to the shared base, so the DrawerProvider +
+// <DrawerNav/> pair now lives in RoleTabShellBase.tsx (2026-11-15 refactor).
 const SHELLS = [
-  'src/components/navigation/RoleTabShell.tsx',
+  'src/components/navigation/RoleTabShellBase.tsx',
   'src/components/navigation/RoleTabShell.ios.tsx',
   'src/app/(app)/(hubs)/_layout.tsx',
   'src/app/(app)/notifications.tsx',

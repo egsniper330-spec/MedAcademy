@@ -16,7 +16,7 @@ import type { RelativePathString } from 'expo-router';
 import {
   LayoutDashboard, BookOpen, Bell, Settings, LogOut, Users,
   Ticket, Shield, GraduationCap, Activity, Wrench,
-  DollarSign, Megaphone, Search, Database, Video, FileText,
+  DollarSign, Megaphone, Search, Database, Video, FileSearch, FileText,
   Layers, TrendingUp, AlertTriangle, Hash, UsersRound,
   Lock, User, Smartphone, ChevronLeft, ChevronRight, X, Stethoscope,
   BarChart2, CreditCard, ClipboardList, HeartPulse, Zap, ShieldAlert,
@@ -92,15 +92,19 @@ function getNavSections(
   if (role === 'doctor') {
     const doctorItems: NavItemType[] = [
       // Canonical doctor navigation order — do not reorder casually:
-      // Dashboard, My Courses, Video Library, Students, Credits,
+      // Dashboard, My Courses, PDF Checker, Students, Credits,
       // Notifications, Profile.
+      //
+      // PDF CHECKER replaces the retired Video Library entry: VdoCipher is no longer an
+      // active provider, and the checker is the doctor's document tool. Same slot, same
+      // navigation contract (a drawer row that opens a routed screen).
       //
       // BULK IMPORT: removed from the DOCTOR drawer on request. The admin-side
       // /bulk-import stays (unrelated role + workflow); only this entry was
       // dropped, so no empty section or spacer is left behind.
       { icon: LayoutDashboard, label: t('nav.dashboard'),      path: '/dr-overview',   color: c.primary  },
       { icon: BookOpen,        label: t('nav.myCourses'),     path: '/courses',       color: '#7C3AED'  },
-      { icon: Video,           label: t('nav.videoLibrary'),  path: '/video-library', color: '#0EA5E9'  },
+      { icon: FileSearch,      label: t('nav.pdfChecker'),   path: '/pdf-checker',   color: '#0EA5E9'  },
       { icon: Users,           label: t('nav.students'),       path: '/students',      color: '#D97706'  },
       { icon: Stethoscope,     label: t('nav.credits'),        path: '/credits',       color: '#2DA8FF'  },
       // EARNINGS: removed from the product (feature retired end-to-end). No

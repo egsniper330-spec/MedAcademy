@@ -35,6 +35,11 @@ final class ErrorHandler
     public static function render(Throwable $e, Logger $logger, ?Request $request = null): never
     {
         if ($e instanceof ApiException) {
+            // Source+identifier login cooldown: tell the client exactly how long
+            // this pair must wait. Only this exception carries a retry value.
+            if ($e instanceof \MedAcademy\Services\LoginCooldownException && !headers_sent()) {
+                header('Retry-After: ' . $e->retryAfter);
+            }
             if ($e->getPrevious()) {
                 // Connection-capacity exhaustion is a distinct operational
                 // signal: the server is up, this account's database connection

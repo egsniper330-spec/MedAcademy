@@ -6,7 +6,7 @@
  * Each role directory has two bar surfaces that must stay in sync:
  *   • iOS    → native system tab bar (SwiftUI/UITabBar via
  *              @bottom-tabs/react-navigation; see RoleTabShell.ios.tsx).
- *   • Others → the existing JS Tabs + ResponsiveTabBar (see RoleTabShell.tsx).
+ *   • Others → the existing JS Tabs + the floating Liquid Glass bar (see RoleTabShell.tsx).
  * Both shells consume this registry, so route lists, titles, order and
  * hidden flags can never drift between platforms.
  *
@@ -68,10 +68,12 @@ export const DOCTOR_TABS: RoleTabDef[] = [
   { name: 'dr-overview', title: 'Dashboard', titleKey: 'tabs.dashboard', icon: 'LayoutDashboard', sfSymbol: 'square.grid.2x2' },
   { name: 'courses',     title: 'Courses',   titleKey: 'tabs.courses',   icon: 'BookOpen',        sfSymbol: 'book' },
   { name: 'students',    title: 'Students',  titleKey: 'tabs.students',  icon: 'Users',           sfSymbol: 'person.2' },
-  // Video Library is a real BOTTOM TAB (it replaced the retired Earnings tab).
-  // It is the same screen the drawer used to open at /video-library — the route
-  // now lives in this group so the tab can own it (no duplicate screen).
-  { name: 'video-library', title: 'Video Library', titleKey: 'tabs.videoLibrary', icon: 'Video', sfSymbol: 'play.rectangle' },
+  // PDF Checker is a real BOTTOM TAB, in the exact slot the retired Video Library
+  // tab held. It is the same screen the drawer opens at /pdf-checker — the route
+  // lives in this group so the tab can own it (one screen, two entry points).
+  // VdoCipher is no longer an active provider, so a video-library tab has nothing
+  // left to manage; the checker replaced it on the dashboard bar.
+  { name: 'pdf-checker', title: 'PDF Checker', titleKey: 'tabs.pdfChecker', icon: 'FileSearch', sfSymbol: 'doc.text.magnifyingglass' },
   { name: 'dr-profile',  title: 'Profile',   titleKey: 'tabs.profile',   icon: 'UserCircle',      sfSymbol: 'person.crop.circle' },
   // Drawer-only screens — registered, navigable, no bar item.
   { name: 'credits',              title: 'My Credits',     hidden: true },
@@ -92,7 +94,6 @@ export const ADMIN_TABS: RoleTabDef[] = [
   { name: 'global-search',          title: 'Search',             hidden: true },
   { name: 'reports',                title: 'Reports',            hidden: true },
   { name: 'storage',                title: 'Storage',            hidden: true },
-  { name: 'video-settings',         title: 'Video Settings',     hidden: true },
   { name: 'cms',                    title: 'CMS Pages',          hidden: true },
   { name: 'admin-credits',          title: 'Credits',            hidden: true },
   { name: 'bulk-credits',           title: 'Bulk Credits',       hidden: true },
@@ -141,6 +142,8 @@ export const SUPERADMIN_TABS: RoleTabDef[] = [
   { name: 'sa-bulk-import',          title: 'Bulk Import',            hidden: true },
   { name: 'sa-courses',              title: 'Courses',                hidden: true },
   { name: 'sa-devices',              title: 'Devices',                hidden: true },
+  { name: 'sa-admin-management', title: 'Admin Management', hidden: true },
+  { name: 'sa-admin-permissions', title: 'Admin Permissions', hidden: true },
   { name: 'sa-notifications-center', title: 'Notifications',          hidden: true },
   { name: 'sa-global-search',        title: 'Global Search',          hidden: true },
   { name: 'sa-revenue-analytics',    title: 'Revenue Analytics',      hidden: true },
@@ -150,8 +153,6 @@ export const SUPERADMIN_TABS: RoleTabDef[] = [
   { name: 'sa-enrollment-manager',   title: 'Enrollment Manager',     hidden: true },
   { name: 'sa-system-providers',     title: 'System Diagnostics',     hidden: true },
   { name: 'sa-cms',                  title: 'CMS Pages',              hidden: true },
-  { name: 'sa-video-library',        title: 'Video Library',          hidden: true },
-  { name: 'sa-video-settings',       title: 'Video Settings',         hidden: true },
   { name: 'sa-support-settings',     title: 'Support Contact',        hidden: true },
   { name: 'sa-content-protection',   title: 'Watermark / DRM',        hidden: true },
   { name: 'sa-fraud-alerts',         title: 'Fraud Alerts',           hidden: true },

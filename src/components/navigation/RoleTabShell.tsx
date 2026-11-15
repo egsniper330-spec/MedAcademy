@@ -1,130 +1,72 @@
 /**
- * RoleTabShell — Android / Web / other platforms.
+ * RoleTabShell — WEB / other platforms (Web Preview uses this file).
  *
- * UNCHANGED from the previous implementation: JS `Tabs` with ResponsiveTabBar
- * and the neu-themed bar style, plus DrawerNav inside the same wrapper. On web
- * the custom `tabBar` prop is already a no-op (web renders DrawerNav only);
- * on Android this is the existing Material-ish neu bar — untouched by the
- * iOS Liquid Glass work.
+ * This file is a thin PLATFORM WRAPPER: it supplies the floating Liquid Glass
+ * bar and the glass navigator options to the shared shell. All
+ * navigator/provider/tab-mapping logic lives in `RoleTabShellBase.tsx` — one
+ * copy for every platform (see the header there for the full rationale).
  *
- * Icons: the registry carries lucide export NAMES; this shell owns the
- * name→component map via explicit named imports (the project's babel lucide
- * plugin only supports named identifier imports — namespace imports break
- * the web bundle).
+ * Platform resolution is BY FILE, never by a runtime branch:
+ *
+ *     android   → RoleTabShell.android.tsx   (GlassTabBar)
+ *     ios       → RoleTabShell.ios.tsx       (native system bar, untouched)
+ *     web       → RoleTabShell.tsx           (this file — GlassTabBar)
+ *
+ * WHY WEB NOW RENDERS THE SAME COMPONENT (not a mock-up)
+ * ──────────────────────────────────────────────────────
+ * The Liquid Glass pill is the design being reviewed, and it used to be visible
+ * only in a native Android build: web rendered the older in-flow neu bar, so
+ * every visual adjustment to the pill cost a full native build. Web now mounts
+ * the REAL `GlassTabBar` — the same file, the same constants, the same
+ * PanResponder and the same shared indicator — so the preview is a faithful
+ * preview and design work needs no rebuild.
+ *
+ * The bar adapts itself per platform internally (browser `backdrop-filter`
+ * blur instead of the native blur method); nothing here fakes its appearance.
+ *
+ * This file must never import `ResponsiveTabBar`, and the shared base must never
+ * import either bar. `tests/androidGlassTabBar.test.cjs` enforces both, so the
+ * obsolete bar cannot come back on any platform by accident.
  */
-import { t } from '@/lib/i18n';
-import React from 'react';
-import { View, useColorScheme } from 'react-native';
-import { Tabs } from 'expo-router';
-import {
-  LayoutDashboard,
-  Compass,
-  BookOpen,
-  UserCircle,
-  Users,
-  Smartphone,
-  GraduationCap,
-  Shield,
-  DollarSign,
-  BarChart2,
-  Settings2,
-  TrendingUp,
-  Video,
-  Circle,
-} from 'lucide-react-native';
-import { DrawerProvider } from '@/components/DrawerContext';
-import DrawerNav from '@/components/DrawerNav';
-import ResponsiveTabBar from '@/components/ResponsiveTabBar';
+import React, { useCallback } from 'react';
+import { useColorScheme } from 'react-native';
+import GlassTabBar from '@/components/navigation/GlassTabBar';
+import RoleTabShellBase, { type RoleTabShellProps } from '@/components/navigation/RoleTabShellBase';
+import { GLASS_TAB_BAR_SCREEN_OPTIONS } from '@/components/navigation/glassTabBarOptions';
 import { neuColors } from '@/lib/neu';
-import type { RoleTabDef } from '@/lib/nativeTabRegistry';
 
-export interface RoleTabShellProps {
-  tabs: RoleTabDef[];
-  initialRouteName?: string;
-  /** Student/doctor rendered visible JS-bar icons at size − 2 (original per-role convention). */
-  jsIconShrink?: boolean;
-}
-
-type IconComponent = React.ComponentType<{ size?: number; color?: string }>;
-
-/** Registry icon names → lucide components (names validated by tests). */
-const ICONS: Record<string, IconComponent> = {
-  LayoutDashboard,
-  Compass,
-  BookOpen,
-  UserCircle,
-  Users,
-  Smartphone,
-  GraduationCap,
-  Shield,
-  DollarSign,
-  BarChart2,
-  Settings2,
-  TrendingUp,
-  Video,
-};
-
-const lucideIcon = (name: string | undefined): IconComponent =>
-  (name && ICONS[name]) || Circle;
+/** Constant label style: keeps the bar's props referentially stable. */
+const LABEL_STYLE = { fontSize: 10, fontWeight: '700' as const, letterSpacing: 0.2, marginTop: 2 };
 
 export default function RoleTabShell({ tabs, initialRouteName, jsIconShrink }: RoleTabShellProps) {
-  const scheme = useColorScheme();
-  const isDark = scheme === 'dark';
+  const isDark = useColorScheme() === 'dark';
   const c = isDark ? neuColors.dark : neuColors.light;
 
+  /**
+   * Stable bar renderer: React Navigation calls it on every navigator render.
+   * A stable identity means the glass bar is re-rendered — never remounted —
+   * when the shell re-renders (theme, locale, profile store), so the indicator
+   * position and any in-progress drag survive.
+   */
+  const renderTabBar = useCallback(
+    (props: any) => (
+      <GlassTabBar
+        {...props}
+        activeTintColor={c.primary}
+        inactiveTintColor={`${c.text}${isDark ? '99' : '44'}`}
+        labelStyle={LABEL_STYLE}
+      />
+    ),
+    [c.primary, c.text, isDark],
+  );
+
   return (
-    <DrawerProvider>
-      <View style={{ flex: 1, backgroundColor: c.base }}>
-        <Tabs
-          initialRouteName={initialRouteName}
-          tabBar={(props) => (
-            <ResponsiveTabBar
-              {...props}
-              activeTintColor={c.primary}
-              // `${text}44` (26%) over the dark navy lands around 2.4:1 — the
-              // labels were technically "quiet" but effectively unreadable. Dark
-              // uses a readable 60% mix; Light keeps the original 26%.
-              inactiveTintColor={`${c.text}${isDark ? '99' : '44'}`}
-              labelStyle={{ fontSize: 10, fontWeight: '700', letterSpacing: 0.2, marginTop: 2 }}
-              style={{
-                // Navigation surface, one rung above the page — a bottom bar
-                // painted the page colour has no readable edge on dark.
-                backgroundColor: c.navSurface,
-                borderTopWidth: isDark ? 1 : 0,
-                borderTopColor: c.divider,
-                shadowColor: c.shadowDark,
-                shadowOffset: { width: 0, height: -4 },
-                shadowOpacity: 0.45,
-                shadowRadius: 12,
-                elevation: 16,
-              }}
-            />
-          )}
-          screenOptions={{ headerShown: false }}
-        >
-          {tabs
-            // Drawer-only screens are NOT tab scenes on any platform: they
-            // live in the (hubs) Stack group (JS-owned history, MedAcademy
-            // back button). Parity with RoleTabShell.ios.tsx — registering
-            // them here would put their switches into the tab navigator's
-            // history (visible via `backBehavior`) instead of the app stack.
-            .filter((tab) => tab.hidden !== true)
-            .map((tab) => (
-            <Tabs.Screen
-              key={tab.name}
-              name={tab.name}
-              options={{
-                title: t(tab.titleKey ?? tab.title),
-                tabBarIcon: ({ color, size }: { color: string; size: number }) => {
-                      const Icon = lucideIcon(tab.icon);
-                      return <Icon size={jsIconShrink ? size - 2 : size} color={color} />;
-                    },
-              }}
-            />
-          ))}
-        </Tabs>
-        <DrawerNav />
-      </View>
-    </DrawerProvider>
+    <RoleTabShellBase
+      tabs={tabs}
+      initialRouteName={initialRouteName}
+      jsIconShrink={jsIconShrink}
+      renderTabBar={renderTabBar}
+      screenOptions={GLASS_TAB_BAR_SCREEN_OPTIONS}
+    />
   );
 }

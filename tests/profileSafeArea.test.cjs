@@ -113,8 +113,11 @@ section('3. no double padding');
 /* ── 4. Android / web are provably unchanged ───────────────────────────── */
 section('4. Android + web invariance');
 {
-  ok(/export function tabBarClearance\(_isLandscape = false\): number \{\s*return 0;\s*\}/.test(andClear),
-    '4a: the Android/web clearance resolves to exactly 0');
+  // The floating pill overlays content on Android AND web, so the clearance
+  // is its height + gap — but ONLY inside a role tab navigator (drawer/hub
+  // screens still get zero, which is what "provably unchanged" meant here).
+  ok(/if \(!inRoleTabs\) return 0;/.test(andClear) && /return GLASS_TAB_BAR_HEIGHT \+ GLASS_TAB_BAR_GAP;/.test(andClear),
+    '4a: Android/web reserve the pill height only inside a role tab navigator');
   ok(/tabBarClearance/.test(ds),
     '4b: ds.ts consumes the platform-resolved clearance (so it is 0 off-iOS)');
   ok(/paddingBottom:\s*layout\.scrollBottom\(\)/.test(student),

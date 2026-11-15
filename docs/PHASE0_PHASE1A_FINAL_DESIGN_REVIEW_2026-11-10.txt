@@ -1,0 +1,201 @@
+MEDACADEMY - PHASE 0 + PHASE 1A FINAL DESIGN REVIEW
+Date: 2026-11-10
+Type: DESIGN REVIEW ONLY. No project file was changed except this report. No build, install, deploy, device, emulator, ADB, or live DB/server access.
+
+STATUS
+- Phase 0: CONDITIONALLY READY (narrow semantic fix, no enforcement change). See section 7 and 13.
+- Phase 1A: NO-GO until the decisions in section 13 are approved.
+
+LABELS
+[SI] source-inspected   [AT] existing automated test   [NR] not runtime-verified
+[A] assumption          [R] recommendation             [UNRESOLVED] not verified
+
+GAPS IN THIS REVIEW (must be read before any implementation)
+- [UNRESOLVED] Live DB schema. Only repo migrations and database/schema.sql were read. [NR]
+- [UNRESOLVED] Migration 017 read only to line 80 of 128. Migration 018 not read in full. Migration 019 not read. Migration 020 read to line 80 of 81.
+- [UNRESOLVED] AuthService::registerDevice and preLoginDeviceCheck (approx. lines 586-640) not read in full.
+- [UNRESOLVED] Mobile sign-in screen login error mapping for 429 is not fully traced.
+- [UNRESOLVED] Live cron/maintenance jobs. Only repo code was searched.
+- Earlier file docs/PHASE0_PHASE1A_REVIEW_2026-11-10.txt still cites login() at 176-259. Current range is 183-269.
+
+----------------------------------------------------------------
+1. EXECUTIVE SUMMARY
+----------------------------------------------------------------
+- Current login throttle is a fixed per-IP counter: rateLimit('login:'+ip, 10, 60) in AuthService::login (183-269). One IP can try hundreds of accounts at 10/min total. [SI]
+- Any account-wide delay lets an attacker lock a student out from anywhere. Rejected. The earlier 15-minute progressive delay is not approved.
+- [R] Throttle the (source, normalized account) pair. Attacker-triggered delay then applies only to the attacker's source. Use a short capped cooldown. Add a challenge only later, after frontend work is approved. Never hard-lock.
+- Confirmed correction [SI]: unknown-account failures write NO login_history row (recordLogin returns early when user id is null, AuthService 884-911). They are counted only in the per-IP limiter.
+- [R] Phase 0: fix the mislabel where non-login evidence is recorded as block_login (SecurityEvidenceService). Do not change enforcement. Do not flip log_only to enforce.
+- CORS fix (uncommitted, not deployed): backend/tests/cors.test.js 10/10 PASS [AT].
+
+----------------------------------------------------------------
+2. SOURCE FINDINGS
+----------------------------------------------------------------
+F1  login() order: IP limit -> validate -> resolveIdentifier -> wrong password -> suspended/blocked -> portal role gate -> user_login flag -> preLoginDeviceCheck -> registerDevice -> success.  backend/src/Services/AuthService.php 183-269. [SI]
+F2  Unknown identifier: recordLogin(null,...,'no_account') is a no-op; response 401 "Invalid login credentials". AuthService 884-911 (guard), login branch. [SI]
+F3  Wrong password: recordLogin(wrong_password) writes a row; response is the same 401. [SI]
+F4  Suspended/blocked: 403 account_suspended; login_history.failure_reason = suspended. [SI]
+F5  Per-IP limiter: rateLimit('login:'+ip, RATE_LIMIT_LOGIN_PER_MINUTE=10, 60). Shim AuthService 912-920 -> RateLimitService::legacy() 131 (operation 'auth'). [SI]
+F6  RateLimitService::hit() 68-98: fixed window intdiv(time(),w)*w; INSERT ... ON DUPLICATE KEY UPDATE; SELECT; 429 rate_limited when count > max. Disabled when max or window <= 0. [SI]
+F7  perAccount() 109 falls back to IP when anonymous. It cannot protect unauthenticated login as-is. [SI]
+F8  Identifier resolution AuthService 535-560: trim; public ID via findByPublicUserId first; otherwise one query matching LOWER(u.email), raw u.phone, LOWER(p.email), p.phone_e164, p.phone, LIMIT 1. No case folding for public IDs. Phone normalization path not fully traced. [SI] / [UNRESOLVED detail]
+F9  Mobile AuthController::login 33-38 requires only password; identifier from JSON body. Portal portalLogin 44-55 passes ['doctor','admin','super_admin']. [SI]
+F10 Portal client portal/src/lib/api.ts 256-266: sends identifier.trim(); 429/403 become a generic ApiError; no Retry-After handling. [SI]
+F11 Mobile client src/client/php.ts 872 and 1016 call /auth/login. account_suspended handled in src/lib/startupStateModel.ts ~308 and src/lib/courseLoadError.ts ~67. device_blocked handled in src/app/(auth)/sign-in.tsx 261. No 429/Retry-After login handling found. [SI]
+F12 forgotPassword AuthService 323-376: IP limit and per-identifier limit run BEFORE the password_reset flag and the lookup. Known and unknown identifiers both get success. [SI]
+F13 Reset token: 256-bit random, SHA-256 stored, TTL PASSWORD_RESET_TTL_SECONDS (default 1800), single-use. resetPassword 378-420 revokes all sessions. [SI]
+F14 resetPassword is limited per IP only (auth_reset_ip, 40/h). Not per account. [SI]
+F15 rate_limits (schema.sql 656-669): identifier VARCHAR(191), operation VARCHAR(191), window_start DATETIME(6), request_count INT, UNIQUE(identifier,operation,window_start). Index idx_rate_limits_lookup at 1562. [SI]
+F16 login_history (schema.sql 736-751): user_id NOT NULL, FK profiles ON DELETE CASCADE (749). Indexes 1572-1573. [SI]
+F17 No repo code deletes expired rate_limits rows. cron-trash-cleanup.php 85 deletes login_history only on account purge. Live cron jobs [NR]. [SI]
+F18 security_events.policy_action CHECK (schema.sql ~1524) allows log_only, warn_only, block_video, block_login. [SI]
+F19 IntegrityService::policy() defaults to log_only; reject() logs log_only on rejection. [SI]
+F20 SecurityEvidenceService::assertEvidenceAllowed() ~567-620 logs block_login for ALL actions, including non-login actions. This is the mislabel. [SI]
+F21 App Attest returns 503 deferral: IntegrityController.php ~130-150. Test: tests/appAttestDeferral.test.cjs keeps app_attest and play_integrity at block_login. [SI] [AT]
+F22 tests/rateLimiting.test.cjs 96-160: checks rate_limited code, window key shape, login/register independence. No backoff tests exist. [AT]
+F23 app.json (~line 24) entitlements contain only aps-environment. No App Attest entitlement. [SI]
+
+----------------------------------------------------------------
+3. ATTACKER-INDUCED DoS: OPTIONS A-F
+----------------------------------------------------------------
+Threat: attacker knows a student email or phone and guesses passwords to make the account unusable.
+
+A. Global per-account cooldown (all sources). Guessing: high. Distributed: high. DoS resistance: POOR (one IP locks the student everywhere). UX: poor. DB: low. Frontend: none. API: works, but 429 reveals account state.
+B. Per-account + per-IP counters, both blocking. Guessing: high. DoS resistance: POOR (per-account counter still hits the student). UX: poor. DB: medium. Frontend: minimal.
+C. Risk scoring with IP reputation / prefix. Guessing: medium. DoS resistance: medium (NAT false positives). DB: high (needs data). Frontend: minimal.
+D. Delay only the (source, account) pair, short capped cooldown. Guessing: high for single-source. Distributed: medium (attacker gets a new source). DoS resistance: GOOD (student unaffected from other sources). UX: good. DB: medium. Frontend: none. API: works.
+E. CAPTCHA / step-up after sustained failures. Guessing: high. DoS resistance: good. UX: medium. DB: high (provider, UI). Frontend: REQUIRED. API: needs new response field.
+F. Temporary challenge instead of block. Guessing: high. DoS resistance: good. UX: medium. Frontend: REQUIRED. API: needs new response shape.
+
+[R] Use D first. Keep the per-IP limiter (F5) as the throughput cap. Defer E/F until frontend work is approved.
+
+What happens under D [R]:
+- Same IP, one account: that pair is delayed. Student from another IP: not delayed.
+- Several IPs, one account: each pair has its own delay. Global IP limiter bounds total guessing. No account-wide lock.
+- One IP, hundreds of accounts: per-IP limiter caps throughput. Each pair stays short-delayed. Add per-IP alerting.
+- Student changes network or uses mobile data: new pair, no delay. Attacker history does not follow the student.
+- Student mistypes several times: short delay on that pair that expires. Successful login clears the pair.
+
+Honest limit: a distributed attacker rotating sources, combined with a student on a shared NAT address, is bounded by the IP limiter only. A challenge (E/F) is the only stronger lever, and it needs frontend work.
+
+----------------------------------------------------------------
+4. ACCOUNT IDENTITY AND ANTI-ENUMERATION
+----------------------------------------------------------------
+Identifier formats [SI, AuthService 535-560]: public ID (exact match first), email (case-insensitive on users and profiles), phone (raw users.phone, profiles.phone_e164, profiles.phone). Input is trimmed only. [UNRESOLVED] full phone normalization.
+
+[R] Key strategy: key the throttle on the normalized submitted identifier string, not on user_id. Normalize: trim; lowercase emails; keep public ID as-is; for phone use the same normalizer as resolveIdentifier. Hash the key with SHA-256 (no raw email or phone at rest). Unknown accounts then get the same counter behavior as known ones, so no timing or 429 difference reveals existence.
+Limit: aliases that resolve to the same account (email vs phone) get separate counters. Accepted; the global per-IP limiter still applies.
+
+Anti-enumeration rules [R]:
+1. Same 401 body and error code for all credential failures (already true: F2, F3).
+2. Throttle response must not reveal account state. Use the same 429 code and body for known and unknown identifiers.
+3. Retry-After is only sent when the throttle applied to the submitted pair, which is the same for known and unknown.
+4. Timing: do not claim equivalence without a measurement plan [NR]. Measure before release.
+
+----------------------------------------------------------------
+5. PROGRESSIVE BACKOFF: ALGORITHM [R]
+----------------------------------------------------------------
+The earlier schedule (failures 1-5 free, 30s, 2m, 10m, cap 15m) is NOT approved. Reasons: 10m and 15m delays are too long for students and still give repeated disruption to the attacker-chosen pair. Doctors and admins should get the same pair rule, with a lower threshold if approved.
+
+Proposed schedule (for approval, see section 13): failures 1-4 free; 5th and later: delay = min(2^(n-4) * 15s, 5min). Cap 5 minutes per pair. Successful login clears the pair.
+
+Rules:
+- Failure while a delay is active does NOT extend the delay. The counter increments only when the attempt is actually evaluated (not blocked).
+- Counter resets after 24h with no failure (decay).
+- Successful login clears the pair row.
+- Password reset (F13) clears all pair rows for the target account (needs a per-account key or a scan; see section 6).
+- Privileged accounts: same algorithm; a separate, lower threshold may be approved. No MFA in this phase.
+
+Pseudocode:
+
+function loginGate(ip, identifierKey):
+  pair = key(ip, identifierKey)
+  row = SELECT fail_count, next_allowed_at FROM login_pair_state WHERE pair_key = pair
+  if row and row.next_allowed_at > now:
+      return THROTTLED(retry_after = row.next_allowed_at - now)   // no counter increment
+  return ALLOWED
+
+function recordFailure(ip, identifierKey):
+  UPSERT login_pair_state(pair_key, fail_count=1, last_failure_at=now, next_allowed_at=null)
+    ON DUPLICATE KEY UPDATE
+      fail_count = IF(last_failure_at < now - 24h, 1, fail_count + 1),
+      last_failure_at = now
+  // next_allowed_at set in the same statement from the new fail_count, only when fail_count >= 5
+  // Concurrency: single-row UPSERT inside one statement; no read-modify-write in PHP.
+
+function recordSuccess(ip, identifierKey):
+  DELETE FROM login_pair_state WHERE pair_key = pair
+
+DB failure: if the state table is unavailable, fail OPEN for the pair check (allow the attempt), keep the existing per-IP limiter as the hard guard, and log an error. Reason: a temporary security feature must never become a login outage.
+
+Concurrency: two concurrent failures may both increment; the UPSERT keeps the count consistent. Two concurrent successes and failures on one pair: the success deletes the row; a failure that lands after it starts a new count of 1. Acceptable.
+
+----------------------------------------------------------------
+6. DATABASE DESIGN DECISION
+----------------------------------------------------------------
+Option A - reuse rate_limits: fixed-window semantics (F6, F15). Cannot express next_allowed_at or 24h decay without overloading the window column. REJECTED for backoff. Keep it for the IP limiter.
+
+Option B - new login_pair_state table (CHOSEN [R]). Only fields needed:
+- pair_key CHAR(64) NOT NULL PRIMARY KEY (SHA-256 of ip + normalized identifier, hashed).
+- fail_count INT NOT NULL DEFAULT 0.
+- last_failure_at DATETIME(6) NOT NULL.
+- next_allowed_at DATETIME(6) NULL.
+Not needed: user_id (privacy and unknown accounts), raw ip (hashed in pair_key), created_at/updated_at (last_failure_at is enough).
+Indexes: primary key only; cleanup uses last_failure_at (add INDEX on last_failure_at).
+Additive migration only. Does not alter login_history or rate_limits.
+
+Option C - separate per-IP and per-account tables: REJECTED. Per-IP is already covered by rate_limits (F5). Per-account blocking is the attack vector.
+
+Cleanup [R]: delete rows where last_failure_at < now - 24h, in batches. No repo job exists today (F17), so a new job is required and is part of Package B.
+
+Privacy: no raw identifier or IP stored. Account deletion: rows expire within 24h; no FK to profiles needed.
+
+Schema SQL (proposal only, NOT written, NOT executed):
+  CREATE TABLE login_pair_state (
+    pair_key CHAR(64) NOT NULL PRIMARY KEY,
+    fail_count INT NOT NULL DEFAULT 0,
+    last_failure_at DATETIME(6) NOT NULL,
+    next_allowed_at DATETIME(6) NULL,
+    INDEX idx_lps_last_failure (last_failure_at)
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+7. IMPLEMENTED CONTROL (Phase 1A)
+- Per-IP limiter unchanged: rateLimit('login:'+ip, 10, 60).
+- Pair throttle keyed on HMAC-SHA256(LOGIN_THROTTLE_HMAC_KEY, ip + '|' + normalized identifier).
+- Check runs before identifier resolution and password verification; read-only, so refused attempts never extend a cooldown.
+- Failure is one atomic upsert; a cooldown already in force is kept.
+- Success clears the pair row. Unknown and known identifiers take the same path.
+- Missing HMAC key disables only the pair throttle; the per-IP limiter still applies.
+
+8. ANTI-ENUMERATION (as implemented)
+- Same 429 body (code rate_limited) for known and unknown identifiers.
+- Retry-After is sent only when the submitted pair is in cooldown.
+- Unknown-account failures write no login_history row (existing behaviour).
+
+9. PASSWORD RESET LIMITATION [NR]
+- login_pair_state stores no user_id, so reset cannot find or delete pair rows.
+- Mitigation is bounded expiry: stale rows reset after 24h and are purged by the cron script.
+- A reset does not lift an active pair cooldown until it expires (max 300s by default).
+
+10. CLIENT BEHAVIOUR
+- Portal: ApiError.retryAfter from header; Login shows login.rateLimited (no countdown).
+- Mobile: parseRetryAfter in php.ts; sign-in shows seconds only when a valid Retry-After was received.
+- CORS exposes Retry-After to the portal origin; allowlist unchanged.
+
+11. TELEMETRY (Phase 0)
+- IntegrityService::reject records vdo_otp -> block_video, else NULL (no log_only for rejections).
+- SecurityEvidenceService::assertEvidenceAllowed records login -> block_login, vdo_otp -> block_video, else NULL.
+- CHECK constraint and vocabulary unchanged; NULL is allowed.
+
+12. ENFORCEMENT DEFAULTS
+- Play Integrity, Device Evidence and App Attest defaults are not modified.
+
+13. VERIFICATION STATUS
+- Node tests: telemetry 14/14, loginPairThrottle 10/10, rateLimiting 69/69, cors 11/11.
+- TypeScript: root and portal typecheck pass.
+- PHP: no PHP runtime on this machine; PHP is not syntax-checked or behaviour-tested.
+
+14. OPEN ITEMS BEFORE RELEASE
+- Decide whether a missing HMAC key should fail closed instead of disabling the pair throttle.
+- Run php -l and behavioural tests on a host with PHP and a test MySQL database.
+- Verify 429 handling on device and in the portal.

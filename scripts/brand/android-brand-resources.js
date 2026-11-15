@@ -329,11 +329,14 @@ function writeAndroidBrandResources(resDir, opts = {}) {
     // Android 13+ themed icon (the OS tints this stencil from the wallpaper
     // palette). A dedicated resource, not a shared alias, so a future
     // foreground change cannot silently alter the themed variant.
-    put(
-      path.join(resDir, 'mipmap-' + dir, 'ic_launcher_monochrome.png'),
-      adaptiveForeground(size(ADAPTIVE_DP)),
-      true
-    );
+    // `drop` is required here exactly as for the layers above: Expo's icon
+    // pipeline renders `adaptiveIcon.monochromeImage` to
+    // `ic_launcher_monochrome.webp` before this plugin runs, and Android's
+    // resource merger rejects a `.png` and a `.webp` that define the same
+    // `mipmap-<density>/ic_launcher_monochrome` resource.
+    const monoPath = path.join(resDir, 'mipmap-' + dir, 'ic_launcher_monochrome.png');
+    drop(monoPath);
+    put(monoPath, adaptiveForeground(size(ADAPTIVE_DP)), true);
 
     put(
       path.join(resDir, 'drawable-' + dir, 'notification_icon.png'),

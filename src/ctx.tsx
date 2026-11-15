@@ -5,6 +5,7 @@ import * as SecureStore from 'expo-secure-store';
 
 import { backendClient } from '@/client/backendClient';
 import { getInstallationId, getStoredDeviceFingerprint, clearDeviceFingerprint } from '@/lib/installationId';
+import { registerCurrentDevice } from '@/lib/deviceRegistration';
 import { invalidateCreditCache } from '@/lib/creditService';
 import { invalidateMySubscriptionsCache } from '@/lib/myCoursesCache';
 import { markPerf } from '@/lib/perfTimeline';
@@ -534,6 +535,10 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
     const { data: { subscription: pollingAuthSub } } = backendClient.auth.onAuthStateChange((event, s) => {
       if (event === 'SIGNED_IN' && s?.user?.id) subscribePolling(s.user.id);
       if (event === 'INITIAL_SESSION' && s?.user?.id) subscribePolling(s.user.id);
+      // Restored sessions never pass through sign-in, so refresh the device row here.
+      if (event === 'INITIAL_SESSION' && s?.user?.id) {
+        registerCurrentDevice().catch((err) => authLog(`device registration on session start failed (non-fatal): ${err}`));
+      }
       if (event === 'SIGNED_OUT') {
         if (pollingChannelRef.current) {
           backendClient.removePoller(pollingChannelRef.current);

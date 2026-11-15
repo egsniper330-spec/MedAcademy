@@ -48,7 +48,13 @@ import { View, Text, ActivityIndicator, useColorScheme } from 'react-native';
 import { getVideoPlaybackToken } from '@/lib/api';
 import { neuColors, mutedTextStyle } from '@/lib/neu';
 import { WebView } from 'react-native-webview';
-import { useSecurityWebViewStop, type StoppableWebView } from '@/lib/useSecurityWebViewStop';
+import {
+  useSecurityWebViewStop,
+  WEBVIEW_SOFT_PAUSE_SCRIPT,
+  WEBVIEW_RESUME_SCRIPT,
+  type StoppableWebView,
+} from '@/lib/useSecurityWebViewStop';
+import { ProtectedContentSurface } from '@/components/ProtectedContentSurface';
 import { buildWatermarkInjection } from '@/lib/watermarkInjection';
 import { resolveWatermarkLayers, type WatermarkPlatform } from '@/lib/watermarkLayers';
 import { useFullscreenWatermark } from '@/hooks/useFullscreenWatermark';
@@ -133,6 +139,24 @@ export function VdoCipherPlayerWebView({
   // halts loading and pauses/tears down the real player inside the document.
   const playerWebViewRef = useRef<StoppableWebView | null>(null);
   useSecurityWebViewStop(playerWebViewRef);
+
+  // ── PROTECTED CONTENT concealment (non-destructive) ───────────────────────
+  // Soft-pauses the media document instead of detaching the iframe, so the
+  // VdoCipher session and position survive a background/foreground cycle.
+  const concealWebPlayer = useCallback((_reason: string) => {
+    try {
+      playerWebViewRef.current?.injectJavaScript?.(WEBVIEW_SOFT_PAUSE_SCRIPT);
+    } catch {
+      /* webview not mounted */
+    }
+  }, []);
+  const revealWebPlayer = useCallback(() => {
+    try {
+      playerWebViewRef.current?.injectJavaScript?.(WEBVIEW_RESUME_SCRIPT);
+    } catch {
+      /* webview not mounted */
+    }
+  }, []);
 
   // TRUE when the OTP carries VdoCipher's burned-in MOVING watermark — the
   // injected DOM watermark is then suppressed so exactly one watermark shows.
@@ -348,7 +372,11 @@ export function VdoCipherPlayerWebView({
   );
 
   return (
-    <View style={containerStyleNative}>
+    <ProtectedContentSurface
+      style={containerStyleNative}
+      onConceal={concealWebPlayer}
+      onReveal={revealWebPlayer}
+    >
       <WebView
           key={`wm:${watermarkLayers.appOverlay ? watermarkId ?? '' : ''}|${watermarkLayers.appOverlay ? watermarkName ?? '' : ''}`}
           ref={(node: any) => {
@@ -369,6 +397,6 @@ export function VdoCipherPlayerWebView({
           req.url.startsWith('https://player.vdocipher.com')
         }
       />
-    </View>
+    </ProtectedContentSurface>
   );
 }

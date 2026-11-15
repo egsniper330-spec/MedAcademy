@@ -127,8 +127,20 @@ const PERMISSION_OPTIONS: { value: DownloadPermission; labelKey: string; icon: a
 ];
 
 /** Video source options shown to the doctor. */
+/**
+ * Kill switch for the retired VdoCipher upload path.
+ *
+ * Declared as a widened `boolean` (not the literal `false`) on purpose: with a literal,
+ * TypeScript treats the enclosing `&&` as unreachable and loses the `videoType` narrowing
+ * the block's own guards rely on. As a widened boolean the code is analysable but never
+ * renders, so no upload control exists while the engine is still imported.
+ */
+const VDOCIPHER_UPLOAD_ENABLED: boolean = false;
+
 const VIDEO_TYPES: { value: VideoType; labelKey: string; icon: any; color: string }[] = [
-  { value: 'vdocipher',   labelKey: 'cb.lessonType.video',       icon: Video, color: '#7C3AED' },
+  // VdoCipher is retired: its source button, upload flow and player are gone. A lesson
+  // either carries a YouTube URL or is marked coming soon. Lessons that still hold a
+  // VdoCipher id keep their record untouched and render the unavailable panel.
   { value: 'youtube',     labelKey: 'lessonEditor.video.youtube', icon: Film,  color: '#DC2626' },
   { value: 'coming_soon', labelKey: 'cb.lessonType.comingSoon',  icon: Clock, color: '#D97706' },
 ];
@@ -218,7 +230,7 @@ export default function LessonEditor() {
   const [materials, setMaterials] = useState<any[]>([]);
 
   // Video fields
-  const [videoType, setVideoType] = useState<VideoType>('vdocipher');
+  const [videoType, setVideoType] = useState<VideoType>('youtube');
   const [videoId, setVideoId] = useState('');
   const [videoTitle, setVideoTitle] = useState('');
   const [videoPlaybackId, setVideoPlaybackId] = useState('');
@@ -1098,34 +1110,16 @@ export default function LessonEditor() {
                       </Text>
                     </NeuCard>
                   )}
-                  <View style={{ flexDirection: 'row', direction: isRTL ? 'rtl' : 'ltr', flexWrap: 'wrap', gap: 10 }}>
-                    {VIDEO_TYPES.map(vt => {
-                      const Icon = vt.icon;
-                      const selected = videoType === vt.value;
-                      // Gate: hide a provider's button when its policy blocks
-                      // this account (plyr → YouTube path, vdocipher → DRM path;
-                      // 'coming_soon' is not a provider and stays untouched).
-                      if (vt.value === 'vdocipher' && vdoCipherBlocked) return null;
-                      if (vt.value === 'youtube' && plyrBlocked) return null;
-                      return (
-                        <Pressable key={vt.value} onPress={() => setVideoType(vt.value)}
-                          style={[
-                            selected ? neuPressedStyle(isDark) : neuFlatStyle(isDark),
-                            { paddingHorizontal: 14, paddingVertical: 10, borderRadius: 14, flexDirection: 'row', direction: isRTL ? 'rtl' : 'ltr', alignItems: 'center', gap: 8 },
-                          ]}>
-                          <Icon size={16} color={selected ? vt.color : c.text} opacity={selected ? 1 : 0.45} />
-                          <Text style={{ fontSize: 13, fontWeight: '700', color: selected ? vt.color : c.text, opacity: selected ? 1 : 0.55 }}>
-                            {t(vt.labelKey)}
-                          </Text>
-                        </Pressable>
-                      );
-                    })}
-                  </View>
-                  {vdoCipherBlocked && (
-                    <Text style={{ marginTop: 6, fontSize: 12, color: '#D97706' }}>
-                      {blockedMsg(vdoCipherPerm, 'VdoCipher')}
-                    </Text>
-                  )}
+                  {/*
+                   * No provider selector.
+                   *
+                   * YouTube is the ONLY video source now, so offering a row of source
+                   * buttons only added a click and a misleading choice: the retired
+                   * VdoCipher button rendered a "uploads disabled" notice (which read as
+                   * an error) and the doctor then had to click YouTube to reach the URL
+                   * field. Exactly one source remains, so the URL field below is shown
+                   * immediately and only a real provider block is reported here.
+                   */}
                   {plyrBlocked && !allBlocked && (
                     <Text style={{ marginTop: 6, fontSize: 12, color: '#D97706' }}>
                       {blockedMsg(plyrPerm, 'YouTube video')}
@@ -1136,8 +1130,11 @@ export default function LessonEditor() {
             })()}
           </Field>
 
-          {/* MedAcademy Video — queue-based upload */}
-          {videoType === 'vdocipher' && (
+          {/* The old "uploads have been disabled" notice is gone: it described an
+              internal retirement, not anything the doctor could act on, and it sat above
+              the field they actually needed. Legacy `vdocipher` lessons still open here
+              and the YouTube field is ready for a replacement link. */}
+          {VDOCIPHER_UPLOAD_ENABLED && videoType === 'vdocipher' && (
             <>
               {/* Large file warning modal */}
               <LargeFileWarning
@@ -1431,8 +1428,8 @@ export default function LessonEditor() {
             </NeuCard>
           )}
 
-          {/* YouTube Video */}
-          {videoType === 'youtube' && (
+          {/* YouTube Video — always visible (the only supported source). */}
+          {(videoType === 'youtube' || videoType === 'coming_soon' || videoType === 'vdocipher') && (
             <NeuCard style={{ gap: 14 }}>
               <View style={{ flexDirection: 'row', direction: isRTL ? 'rtl' : 'ltr', alignItems: 'center', gap: 10 }}>
                 <View style={{ width: 36, height: 36, borderRadius: 10, backgroundColor: '#DC262618', alignItems: 'center', justifyContent: 'center' }}>

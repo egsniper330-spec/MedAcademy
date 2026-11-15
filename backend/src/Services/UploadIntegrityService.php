@@ -43,8 +43,8 @@ use Throwable;
  *   • what is actually on disk now?                      → inspectStored()
  *
  * It never trusts a client-declared size, MIME type or hash: sizes come from
- * `filesize()`, digests from `hash_file()`, and PDF validity from the SAME
- * parser the watermark renderer uses (`PdfWatermarkService::inspect`), so a
+ * `filesize()`, digests from `hash_file()`, and PDF validity from the dedicated
+ * inspection service (`PdfInspectionService::inspect`), so a
  * file that would fail at a student's download is refused at upload instead.
  *
  * Diagnostics are structured and privacy-safe: an operation id, a stage, a
@@ -60,7 +60,7 @@ final class UploadIntegrityService
 
     public function __construct(
         private readonly StorageService $storage = new StorageService(),
-        private readonly PdfWatermarkService $pdf = new PdfWatermarkService(),
+        private readonly PdfInspectionService $inspection = new PdfInspectionService(),
     ) {
         $this->opId = 'up_' . bin2hex(random_bytes(6));
     }
@@ -460,7 +460,7 @@ final class UploadIntegrityService
     ): void {
         $bytes = is_file($abs) ? (int) @filesize($abs) : 0;
         try {
-            $this->pdf->inspect($abs);
+            $this->inspection->inspect($abs);
             $this->log('pdf', 'ok', ['bucket' => $bucket, 'bytes' => $bytes, 'source' => $source]);
         } catch (ApiException $e) {
             // A bare `bytes` count cannot answer "which document was that?". The

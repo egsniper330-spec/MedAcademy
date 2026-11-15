@@ -1,0 +1,34 @@
+# EXAMPLE unit template. Paths, user and bind values are placeholders to adapt on the VPS.
+# Not verified on a Linux host yet. See docs/OPERATIONS.md.
+[Unit]
+Description=PDF watermark issuance API (FastAPI, loopback or private bind)
+After=network-online.target pdf-watermark-wam.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pdfsvc
+Group=pdfsvc
+WorkingDirectory=/opt/pdf-watermark-service
+EnvironmentFile=/etc/pdf-watermark/api.env
+# app.server reads PDF_SVC_BIND_HOST / PDF_SVC_BIND_PORT from the env file and refuses to start on invalid config (exit 2).
+# This runs a single uvicorn process. Scale with multiple units on separate ports, not --workers, so the
+# cleanup runner stays the only cleanup loop. Confirm the concurrency model on the VPS before raising it.
+ExecStart=/opt/pdf-watermark-service/.venv/bin/python -m app.server
+# SIGTERM lets uvicorn finish in-flight requests before exit.
+KillSignal=SIGTERM
+TimeoutStopSec=30
+Restart=on-failure
+RestartSec=5
+# The API does not require WAM to be running; /readyz reports issuance unavailable instead.
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/var/lib/pdf-watermark
+ReadOnlyPaths=/opt/pdf-watermark-service
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,21 @@
+# WAM model runtime only (app.wam_runtime). Separate virtualenv on the VPS. Do NOT install into the API venv.
+# Pinned to the versions the approved checkpoint was verified with (real round trip, PSNR 27.90 dB).
+# CPU wheels only: install torch from the CPU index (see scripts/install_wam.sh).
+# Upstream watermark-anything (MIT code, commit 2c08af04d037d5667c02f6ddebbda9ff04581c3e) is cloned separately.
+torch==2.2.2+cpu
+torchvision==0.17.2+cpu
+numpy==1.26.4
+pillow==12.0.0
+fastapi==0.115.6
+uvicorn==0.32.1
+# app/config.py imports pydantic-settings, and app.wam_runtime imports app.config for key parsing.
+pydantic-settings==2.6.1
+# Upstream WAM requirements (pinned to the upstream file).
+einops==0.8.0
+timm==1.0.11
+opencv-python-headless==4.10.0.84
+omegaconf==2.3.0
+pycocotools==2.0.8
+lpips==0.1.4
+scikit-image==0.24.0
+scikit-learn==1.5.2

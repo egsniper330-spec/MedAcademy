@@ -180,8 +180,15 @@ console.log('\u2500\u2500 Part 3: blocking copy + honest limits \u2500\u2500');
     && M.windowModeBlockCopy(null) === split);
   check('3f: neither message claims an overlay was detected',
     !/overlay/i.test(split.message) && !/overlay/i.test(pip.message));
-  check('3g: the overlay copy is untouched and still its own message',
-    M.OVERLAY_WARNING_COPY.message.includes('overlay or another app may be interfering'));
+  // The specification requires ONE sentence on the blocking page, covering both
+  // "another app is covering us" and split-screen. Both states therefore render
+  // the same required message; only their titles/recovery steps differ.
+  const REQUIRED =
+    'MedAcademy cannot run while another app is covering it or split-screen ' +
+    'mode is active. Please close the other app and return to full-screen ' +
+    'mode to continue.';
+  check('3g: overlay and split-screen share the required sentence',
+    M.OVERLAY_WARNING_COPY.message === REQUIRED && split.message === REQUIRED);
 
   const splitSteps = M.windowModeBlockSteps('multi_window');
   const pipSteps = M.windowModeBlockSteps('picture_in_picture');
@@ -279,7 +286,24 @@ console.log('\u2500\u2500 Part 5: MainActivity forwarders (plugin) \u2500\u2500'
     : 'package com.medacademy.app\n\nimport android.os.Build\nimport android.os.Bundle\n\nimport com.facebook.react.ReactActivity\n\nclass MainActivity : ReactActivity() {\n  override fun getMainComponentName(): String = "main"\n}\n';
   const patched = plugin.patchMainActivityForWindowMode(source);
 
-  check('5c: the patch applies to the generated MainActivity', patched !== source);
+  // android/ is prebuild output: after a prebuild it already carries the
+  // forwarders, so the patch is a NO-OP there (that is 5h's idempotency, not a
+  // failure). Application is proven on the unpatched source shape instead.
+  const unpatched = `package com.medacademy.app
+
+import android.os.Build
+import android.os.Bundle
+
+import com.facebook.react.ReactActivity
+
+class MainActivity : ReactActivity() {
+  override fun getMainComponentName(): String = "main"
+}
+`;
+  check('5c: the patch applies to an unpatched MainActivity',
+    plugin.patchMainActivityForWindowMode(unpatched) !== unpatched);
+  check('5c-2: the generated MainActivity already carries the patch when present',
+    !fs.existsSync(realPath) || /WindowModeBridge\.report\(/.test(source));
   check('5d: it forwards the API 26+ multi-window overload',
     /override fun onMultiWindowModeChanged\(isInMultiWindowMode: Boolean, newConfig: Configuration\) \{\n\s+super\.onMultiWindowModeChanged\(isInMultiWindowMode, newConfig\)\n\s+WindowModeBridge\.report\(isInMultiWindowMode, isInPictureInPictureMode\(\)\)/.test(patched));
   check('5e: it ALSO forwards the API 24-25 overload (minSdk is 24, so both are needed)',

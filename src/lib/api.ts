@@ -5199,3 +5199,164 @@ export async function updateUserEmail(targetUserId: string, newEmail: string): P
     throw new Error((data as any).error);
   }
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Admin RBAC (Admin Management + granular permissions). Server enforces every
+// route; these helpers only transport requests and surface server errors.
+// ─────────────────────────────────────────────────────────────────────────────
+
+export type AdminPermissionGroup = {
+  key: string;
+  label: string;
+  permissions: { key: string; label: string }[];
+};
+
+export type PermissionTemplateSummary = {
+  id: string;
+  slug: string;
+  name: string;
+  description?: string | null;
+  permissions: string[];
+  is_system?: boolean;
+};
+
+export type MyAdminPermissions = {
+  user_id: string;
+  role: string;
+  is_super_admin: boolean;
+  permissions: string[];
+  permission_count: number;
+  total_permissions: number;
+  template: { id: string; slug: string; name: string } | null;
+};
+
+export type AdminAccountSummary = {
+  id: string;
+  full_name: string | null;
+  email: string | null;
+  role: 'admin' | 'super_admin';
+  status: 'active' | 'suspended' | 'blocked';
+  created_at?: string | null;
+  is_super_admin: boolean;
+  template: { id: string; name: string | null; slug: string | null } | null;
+  permission_count: number;
+  custom_override_count?: number;
+  catalog_total?: number;
+};
+
+export type AdminPermissionDetail = {
+  admin: AdminAccountSummary;
+  permissions: string[];
+  permission_count: number;
+  catalog_total: number;
+  template: { id: string; slug: string; name: string; permissions: string[] } | null;
+  overrides: Record<string, boolean>;
+  groups: AdminPermissionGroup[];
+  templates: PermissionTemplateSummary[];
+  can_edit: boolean;
+};
+
+function rbacError(error: unknown, fallback: string): Error {
+  return new Error(parseApiError(error, fallback));
+}
+
+export async function getMyAdminPermissions(): Promise<MyAdminPermissions> {
+  const { data, error } = await apiFetch<MyAdminPermissions>('/admin/permissions/me', { method: 'GET' });
+  if (error || !data) throw rbacError(error, 'Failed to load permissions');
+  return data;
+}
+
+export async function getAdminAccounts(params: { search?: string; status?: string; role?: string } = {}): Promise<{
+  admins: AdminAccountSummary[];
+  total: number;
+  catalog_total: number;
+}> {
+  const qs = new URLSearchParams();
+  if (params.search) qs.set('search', params.search);
+  if (params.status) qs.set('status', params.status);
+  if (params.role) qs.set('role', params.role);
+  const suffix = qs.toString() ? `?${qs.toString()}` : '';
+  const { data, error } = await apiFetch<{ admins: AdminAccountSummary[]; total: number; catalog_total: number }>(
+    `/admin/admins${suffix}`,
+    { method: 'GET' },
+  );
+  if (error || !data) throw rbacError(error, 'Failed to load administrators');
+  return data;
+}
+
+export async function createAdminAccount(input: {
+  email: string;
+  full_name: string;
+  password: string;
+  template_id?: string | null;
+}): Promise<AdminAccountSummary> {
+  const { data, error } = await apiFetch<{ admin: AdminAccountSummary }>('/admin/admins', { method: 'POST', body: input });
+  if (error || !data) throw rbacError(error, 'Failed to create administrator');
+  return data.admin;
+}
+
+export async function updateAdminAccount(
+  id: string,
+  input: { full_name?: string; status?: 'active' | 'suspended' | 'blocked'; template_id?: string | null },
+): Promise<AdminAccountSummary> {
+  const { data, error } = await apiFetch<{ admin: AdminAccountSummary }>(`/admin/admins/${id}`, { method: 'PATCH', body: input });
+  if (error || !data) throw rbacError(error, 'Failed to update administrator');
+  return data.admin;
+}
+
+export async function getAdminPermissionDetail(id: string): Promise<AdminPermissionDetail> {
+  const { data, error } = await apiFetch<AdminPermissionDetail>(`/admin/admins/${id}/permissions`, { method: 'GET' });
+  if (error || !data) throw rbacError(error, 'Failed to load permissions');
+  return data;
+}
+
+/** `permissions` is the COMPLETE desired set of granted keys. */
+export async function saveAdminPermissions(
+  id: string,
+  input: { permissions: string[]; template_id?: string | null },
+): Promise<void> {
+  const { error } = await apiFetch(`/admin/admins/${id}/permissions`, { method: 'PUT', body: input });
+  if (error) throw rbacError(error, 'Failed to save permissions');
+}
+
+export async function cloneAdminPermissions(id: string, sourceAdminId: string): Promise<void> {
+  const { error } = await apiFetch(`/admin/admins/${id}/clone-permissions`, {
+    method: 'POST',
+    body: { source_admin_id: sourceAdminId },
+  });
+  if (error) throw rbacError(error, 'Failed to clone permissions');
+}
+
+export async function getPermissionTemplates(): Promise<PermissionTemplateSummary[]> {
+  const { data, error } = await apiFetch<{ templates: PermissionTemplateSummary[] }>('/admin/permission-templates', { method: 'GET' });
+  if (error || !data) throw rbacError(error, 'Failed to load templates');
+  return data.templates ?? [];
+}
+
+export async function createPermissionTemplate(input: {
+  name: string;
+  description?: string;
+  permissions: string[];
+}): Promise<PermissionTemplateSummary> {
+  const { data, error } = await apiFetch<{ template: PermissionTemplateSummary }>('/admin/permission-templates', { method: 'POST', body: input });
+  if (error || !data) throw rbacError(error, 'Failed to create template');
+  return data.template;
+}
+
+export async function updatePermissionTemplate(
+  id: string,
+  input: { name?: string; description?: string; permissions?: string[] },
+): Promise<PermissionTemplateSummary> {
+  const { data, error } = await apiFetch<{ template: PermissionTemplateSummary }>(`/admin/permission-templates/${id}`, { method: 'PATCH', body: input });
+  if (error || !data) throw rbacError(error, 'Failed to update template');
+  return data.template;
+}
+
+export async function clonePermissionTemplate(id: string, name?: string): Promise<PermissionTemplateSummary> {
+  const { data, error } = await apiFetch<{ template: PermissionTemplateSummary }>(`/admin/permission-templates/${id}/clone`, {
+    method: 'POST',
+    body: name ? { name } : {},
+  });
+  if (error || !data) throw rbacError(error, 'Failed to clone template');
+  return data.template;
+}

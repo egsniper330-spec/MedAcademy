@@ -203,7 +203,7 @@ console.log('\u2500\u2500 Part 2: coalescing + chaining (the latency fix) \u2500
   check('2b: a request arriving mid-run is QUEUED, not dropped',
     /if \(inFlight\) \{\n\s+queuedEvaluationRef\.current = reason;/.test(CONTEXT));
   check('2c: the queued request is started the instant the current run finishes (chained, no timer)',
-    /queuedEvaluationRef\.current = null;\n\s+if \(__DEV__\)[\s\S]{0,200}void runEvaluationRef\.current\(queued\);/
+    /queuedEvaluationRef\.current = null;[\s\S]{0,700}void runEvaluationRef\.current\(queued\)/
       .test(CONTEXT.replace(/\n\s*\/\/[^\n]*/g, '')));
   check('2d: a coalesced caller gets null — never a fabricated or claimed-fresh verdict',
     /if \(!r\) \{\n\s+console\.log\('\[SecurityContext\]\[Stage-6\] check\(\) coalesced[\s\S]{0,120}return result \?\? BLOCKING_UNKNOWN_RESULT;/
@@ -226,32 +226,39 @@ console.log('\u2500\u2500 Part 2: coalescing + chaining (the latency fix) \u2500
   // is what lets a clean post-resume verdict release the hold instead of
   // waiting for the next 30 s periodic tick. Still fired, never awaited.
   check('2j: the request is fired, never awaited (the listener returns immediately)',
-    /void runAndPublish\(reason\);/.test(CONTEXT)
+    /void verifyProtectedContentRef\.current\(reason\);/.test(CONTEXT)
     && !/await requestResumeVerification\(/.test(CONTEXT));
   check('2j-2: the resume verification PUBLISHES its verdict (a clean resume releases at once)',
-    /const runAndPublish = async \(why: string\) => \{[\s\S]{0,300}const r = await runEvaluationRef\.current\(why\);[\s\S]{0,200}publishVerdictRef\.current\(r\);/.test(CONTEXT)
-    && /const publishVerdict = useCallback\(\(r: SecurityCheckResult\) => \{[\s\S]{0,700}maybeReleaseBackgroundHold\(r\);/.test(CONTEXT));
+    /const r = await runEvaluation\(reason\);/.test(CONTEXT)
+    && /if \(r\) publishVerdictRef\.current\(r\);/.test(CONTEXT)
+    && /const publishVerdict = useCallback\(\(r: SecurityCheckResult\) => \{[\s\S]{0,1600}settleProtectedContentFromVerdict\(r\);/.test(CONTEXT));
   check('2k: only the VPN case keeps its settle debounce, and it still verifies',
     /vpnRecheckTimer\.current = setTimeout\(\(\) => \{\n\s+requestResumeVerification\('resume-vpn-settled'\);/.test(CONTEXT)
     && /VPN_RECHECK_DEBOUNCE_MS/.test(CONTEXT));
-  check('2l: repeated resumes re-arm ONE watchdog instead of stacking timers',
-    /if \(resumeWatchdogRef\.current\) \{\n\s+clearTimeout\(resumeWatchdogRef\.current\);\n\s+resumeWatchdogRef\.current = null;\n\s+\}\n\s+resumeWatchdogRef\.current = setTimeout\(/.test(CONTEXT));
+  check('2l: repeated resumes re-arm ONE protected-content watchdog instead of stacking timers',
+    /if \(protectedWatchdogRef\.current\) clearTimeout\(protectedWatchdogRef\.current\);\n\s+protectedWatchdogRef\.current = setTimeout\(/.test(CONTEXT));
   check('2m: multiple foreground events cannot start duplicate jobs (queue + token bump)',
     /resumeTokenRef\.current \+= 1;/.test(CONTEXT)
     && /queuedEvaluationRef\.current = reason;/.test(CONTEXT));
-  check('2n: the watchdog retries ONCE per resume, and only while the hold is live',
-    /if \(resumeRetriedRef\.current\) return; \/\/ one bounded retry per resume/.test(CONTEXT)
-    && /if \(!backgroundHeldRef\.current\) return;/.test(CONTEXT));
+  check('2n: the watchdog is a single bounded timeout that only conceals (never authorizes)',
+    /PROTECTED_CONTENT_VERIFICATION_TIMEOUT_MS/.test(CONTEXT)
+    && /dispatchProtectedContent\(\{ type: 'check-error', requestId, reason: 'timeout' \}\);/.test(CONTEXT)
+    && /setProtectedContentConcealed\(true, 'timeout'\);/.test(CONTEXT)
+    && !/resumeRetriedRef\.current = true/.test(CONTEXT));
   check('2o: a session change clears the queue, the pending marker and the watchdog',
     /queuedEvaluationRef\.current = null;\n\s+inFlightEvaluationRef\.current = null;\n\s+resumePendingSinceRef\.current = null;/.test(CONTEXT));
 
-  // Latency is MEASURED, so "resume felt slow" has a number.
-  check('2p: the hold engage is timestamped on the monotonic clock',
-    /markResumeHoldEngaged\(\);/.test(CONTEXT) && /export function markResumeHoldEngaged\(\)/.test(LOCK_SRC));
-  check('2q: the deciding verdict publishes the measured resume duration',
+  // The resume path no longer engages a GLOBAL hold: only layer 2 (protected
+  // content) is contained. The security lock's own resume counters stay in the
+  // module for diagnostics and are exercised below.
+  check('2p: an ordinary resume does NOT engage the global app-access hold',
+    !/enterBackgroundHold\('resumed'\)/.test(CONTEXT)
+    && !/enterBackgroundHold\('appstate='/.test(CONTEXT)
+    && /enterBackgroundHold\('session-start'\)/.test(CONTEXT));
+  check('2q: the deciding verdict still records its measured duration',
     /markResumeVerdictResolved\(\);/.test(CONTEXT) && /lastResumeVerificationMs/.test(LOCK_SRC));
-  check('2r: an overdue verification is recorded as evidence',
-    /markResumeVerificationOverdue\(\);/.test(CONTEXT) && /resumeVerificationsOverdue/.test(LOCK_SRC));
+  check('2r: the protected-content timeout is reported as an error, not an allow',
+    /type: 'check-error'[\s\S]{0,80}reason: 'timeout'/.test(CONTEXT));
   check('2s: the lock module exposes the resume counters',
     (() => {
       const d = lock.getContainmentDiagnostics();
@@ -321,15 +328,16 @@ console.log('\u2500\u2500 Part 3: presentation + routing \u2500\u2500');
 // ── Part 4: protected access stays closed while the decision is pending ────
 console.log('\u2500\u2500 Part 4: containment during the pending window \u2500\u2500');
 {
-  check('4a: the resume hold is engaged HARD (players unmount, not just pause)',
-    /engageSecurityLock\(LOCK_SRC_BACKGROUND, \{ hard: true \}\)/.test(CONTEXT));
-  check('4b: it is engaged the moment the app is backgrounded, before any render',
-    /if \(nextState === 'background'\) \{[\s\S]{0,900}enterBackgroundHold\('appstate=' \+ nextState\);/.test(CONTEXT));
-  check('4c: it is re-asserted on resume (a rapid re-background cannot slip through)',
-    /resumeTokenRef\.current \+= 1;\n\s+enterBackgroundHold\('resumed'\);/.test(CONTEXT));
-  check('4d: the ONLY release is a clean post-resume verdict',
-    (CONTEXT.match(/releaseSecurityLock\(LOCK_SRC_BACKGROUND\)/g) || []).length === 1
-    && /if \(!acceptsResumeVerification\(\{[\s\S]{0,1600}releaseSecurityLock\(LOCK_SRC_BACKGROUND\);/.test(CONTEXT));
+  check('4a: backgrounding contains PROTECTED CONTENT, not the whole app (no global lock)',
+    /if \(leavingForeground && !protectedHiddenRef\.current\)/.test(CONTEXT)
+    && /setProtectedContentConcealed\(true, 'appstate=' \+ nextState\);/.test(CONTEXT)
+    && !/enterBackgroundHold\('appstate='/.test(CONTEXT));
+  check('4b: concealment happens synchronously on the background edge, before any render',
+    /dispatchProtectedContent\(\{\s*type: 'background',[\s\S]{0,200}setProtectedContentConcealed\(true, 'appstate=' \+ nextState\);/.test(CONTEXT));
+  check('4c: it stays concealed on resume while the verification runs (rapid re-background safe)',
+    /resumeTokenRef\.current \+= 1;\n\s+protectedHiddenRef\.current = false;\n\s+setProtectedContentConcealed\(true, 'resume-verification'\);/.test(CONTEXT));
+  check('4d: the ONLY reveal is a clean verdict that started at/after the resume',
+    /if \(!acceptsResumeVerification\(\{[\s\S]{0,2200}setProtectedContentConcealed\(false, 'verdict-clean'\);/.test(CONTEXT));
   check('4e: the release also consults the pure gate rule (blocking verdict keeps it held)',
     /const stillBlocked = resolveBackgroundResumeGate\(\{[\s\S]{0,200}if \(stillBlocked\) return;/.test(CONTEXT));
   check('4f: protected requests are refused at the transport while locked',
@@ -383,13 +391,12 @@ console.log('\u2500\u2500 Part 5: failures are reported, never mistaken for clea
     && !/setResult\(fallback\)/.test(CONTEXT));
   check('5b: the caller still gets a fail-closed sentinel for a raced sensitive action',
     /blocksLogin: true,\n\s+blocksVideo: true,/.test(CONTEXT));
-  check('5c: an unresolved check never releases access on timeout',
-    !/isResumeVerificationOverdue[\s\S]{0,200}releaseSecurityLock/.test(CONTEXT)
-    && /if \(!isResumeVerificationOverdue\(\{/.test(CONTEXT));
-  check('5d: the watchdog is a single bounded retry (no loop, no unbounded recursion)',
-    (CONTEXT.match(/setTimeout\(\(\) => \{\n\s+resumeWatchdogRef\.current = null;/g) || []).length === 1
-    // Scoped to the watchdog block: no loop/recurrence may extend the retries.
-    && !/while \(/.test(CONTEXT.slice(CONTEXT.indexOf('resumeWatchdogRef = useRef'), CONTEXT.indexOf('const check = useCallback'))));
+  check('5c: an unresolved protected-content check never releases access on timeout',
+    !/PROTECTED_CONTENT_VERIFICATION_TIMEOUT_MS[\s\S]{0,300}setProtectedContentConcealed\(false/.test(CONTEXT)
+    && /setProtectedContentConcealed\(true, 'timeout'\);/.test(CONTEXT));
+  check('5d: the protected-content watchdog is one bounded timeout (no loop, no retry)',
+    (CONTEXT.match(/protectedWatchdogRef\.current = setTimeout\(/g) || []).length === 1
+    && !/PROTECTED_CONTENT_VERIFICATION_TIMEOUT_MS[\s\S]{0,400}verifyProtectedContent\(/.test(CONTEXT));
   check('5e: an unmeasured detector result is reported as evidence, not as a violation',
     /detection_unavailable/.test(read('src/lib/security.ts')));
   check('5f: the transport surfaces a locked refusal as an explicit error, not silent success',

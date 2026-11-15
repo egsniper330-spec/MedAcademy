@@ -1,6 +1,7 @@
 {
   "expo": {
     "name": "MedAcademy",
+    "description": "University courses and study material for students and instructors across all faculties and disciplines.",
     "slug": "medacademy",
     "scheme": "medacademy",
     "version": "1.0.0",

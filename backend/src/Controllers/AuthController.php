@@ -39,6 +39,26 @@ final class AuthController
         return $this->auth->login($request, $request->json());
     }
 
+    /**
+     * POST /portal/auth/login — staff-only web portal sign-in.
+     *
+     * Same credential, status, device and audit pipeline as the mobile login;
+     * the ONLY difference is the server-side role allow-list, evaluated before
+     * a session is issued. Students receive HTTP 403 and no token.
+     */
+    public function portalLogin(Request $request): array
+    {
+        $v = Validator::make($request->json(), [
+            'password' => ['required', 'string'],
+        ]);
+        $v->throwIfInvalid();
+        return $this->auth->login(
+            $request,
+            $request->json(),
+            ['doctor', 'admin', 'super_admin']
+        );
+    }
+
     public function refresh(Request $request): array
     {
         return $this->auth->refresh($request);
@@ -204,6 +224,12 @@ final class AuthController
 
         if ($profile['status'] === 'trashed') {
             throw new ApiException(409, 'User is already trashed');
+        }
+        // Same privilege boundary as AdminController: an Admin may not trash
+        // another Admin/Super Admin account. Only a Super Admin may.
+        if ($request->user['role'] !== 'super_admin'
+            && in_array((string) $profile['role'], ['admin', 'super_admin'], true)) {
+            throw new ApiException(403, 'Only a Super Admin can trash an administrator account');
         }
 
         $retentionDays = (int) $db->value('SELECT retention_days FROM trash_config LIMIT 1', [], 30);

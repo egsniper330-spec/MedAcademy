@@ -282,7 +282,7 @@ export default function AcademicManagement({ backTo }: { backTo?: string } = {})
   return (
     <View style={{ flex: 1, backgroundColor: c.base }}>
       <KeyboardAwareScrollView
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />} contentContainerStyle={{ paddingBottom: safeBottom(layout.insets.bottom) }}>
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />} contentContainerStyle={{ paddingBottom: layout.roleTabsBottom() }}>
           <PageHeader
             title={t('adminAcademic.title')}
             subtitle={t('adminAcademic.subtitle')}

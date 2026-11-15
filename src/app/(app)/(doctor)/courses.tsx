@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { View, Text, ScrollView, StyleSheet, useColorScheme, Pressable, RefreshControl, TextInput, ActivityIndicator, useWindowDimensions } from 'react-native';
 import { Image } from 'expo-image';
-import { useFocusEffect, useRouter } from 'expo-router';
+import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { Plus, BookOpen, Search, Archive, CheckCircle, Clock, GraduationCap, MoreVertical, Trash2, Pencil, AlertTriangle, FileText, Globe, Eye, LayoutGrid, Layers, X } from 'lucide-react-native';
 import { PortalOverlay } from '@/components/PortalOverlay';
 import { DashboardHeader } from '@/components/DashboardHeader';
@@ -221,6 +221,12 @@ export default function DoctorCourses() {
   const [creating, setCreating] = useState(false);
   const [statusFilter, setStatusFilter] = useState<'all' | 'draft' | 'published'>('all');
   const { showToast } = useToast();
+  // Dashboard shortcuts pass ?status=draft|published; keep the filter in sync.
+  const { status: statusParam } = useLocalSearchParams<{ status?: string }>();
+  useEffect(() => {
+    if (statusParam === 'draft' || statusParam === 'published') setStatusFilter(statusParam);
+    else if (statusParam === 'all') setStatusFilter('all');
+  }, [statusParam]);
 
   // A response that lands after the screen unmounts must not call setState.
   const cancelledRef = useRef(false);
@@ -367,7 +373,10 @@ export default function DoctorCourses() {
   return (
     <>
       <ScrollView automaticallyAdjustKeyboardInsets={process.env.EXPO_OS === 'ios'} style={{ flex: 1, backgroundColor: c.base }}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}>
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+        // Trailing clearance for the floating glass bar; the helper is 0 extra
+        // wherever the bar does not float over the content.
+        contentContainerStyle={{ paddingBottom: layout.roleTabsBottom() }}>
         {/* Header — uses DashboardHeader for consistent safe-area + hamburger alignment */}
         <DashboardHeader
           greeting={t('nav.myCourses')}

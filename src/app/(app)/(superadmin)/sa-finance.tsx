@@ -91,7 +91,7 @@ export default function SAFinance() {
   return (
     <ScrollView
       style={{ flex: 1, backgroundColor: c.base }}
-      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />} contentContainerStyle={{ paddingBottom: safeBottom(layout.insets.bottom) }}
+      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />} contentContainerStyle={{ paddingBottom: layout.roleTabsBottom() }}
     >
       {/* PageHeader sits OUTSIDE the inner padding view so it can own its own horizontal padding */}
       <PageHeader title="Finance" subtitle="Revenue, ledger & analytics" accentColor="#16A34A" rightAction={<Bell />} />

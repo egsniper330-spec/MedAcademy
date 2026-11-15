@@ -304,10 +304,17 @@ async function refreshAccessToken(): Promise<boolean> {
   return refreshPromise;
 }
 
+/** Whole-second Retry-After from a 429; undefined when absent or not a positive integer. */
+function parseRetryAfter(raw: string | null): number | undefined {
+  if (!raw || !/^\d+$/.test(raw.trim())) return undefined;
+  const seconds = Number(raw.trim());
+  return seconds > 0 ? seconds : undefined;
+}
+
 async function apiFetch<T = unknown>(
   path: string,
   opts: { method?: string; body?: unknown; headers?: Record<string, string> } = {}
-): Promise<{ data: T | null; error: { message: string; code?: string; status?: number } | null }> {
+): Promise<{ data: T | null; error: { message: string; code?: string; status?: number; retryAfter?: number } | null }> {
   const result = await apiFetchOnce<T>(path, opts);
   // Expired/invalid ACCESS token → refresh the pair once, then retry the
   // original request exactly once with the new token.
@@ -322,7 +329,7 @@ async function apiFetch<T = unknown>(
 async function apiFetchOnce<T = unknown>(
   path: string,
   opts: { method?: string; body?: unknown; headers?: Record<string, string> } = {}
-): Promise<{ data: T | null; error: { message: string; code?: string; status?: number } | null }> {
+): Promise<{ data: T | null; error: { message: string; code?: string; status?: number; retryAfter?: number } | null }> {
   const method = opts.method ?? 'GET';
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
@@ -365,8 +372,18 @@ async function apiFetchOnce<T = unknown>(
 
   // 30s request timeout — a hung request must never leave a screen in an
   // eternal loading state (e.g. the dashboard's Promise.all).
+  //
+  // ONE EXCEPTION: personalized-PDF delivery. `/materials/pdf-url` generates the
+  // copy inside the request (upload master → preprocess → WAM embed per page →
+  // hash verify → store). Measured on production: 41 s for an 8-page document,
+  // and 60 s+ for larger ones. The old flat 30 s abort fired mid-generation,
+  // which is exactly the `delivery error: signal is aborted without reason` the
+  // student saw, and it also discarded the work already done. Delivery therefore
+  // gets its own budget; every other request keeps the 30 s cap.
+  const DELIVERY_PATHS = ['/materials/pdf-url'];
+  const requestTimeoutMs = DELIVERY_PATHS.some((p) => path.includes(p)) ? 240000 : 30000;
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 30000);
+  const timer = setTimeout(() => controller.abort(), requestTimeoutMs);
   // Register the controller so activating the lock aborts THIS request
   // immediately (no waiting for the 30s timeout). Unregistered on settle.
   //
@@ -460,6 +477,7 @@ async function apiFetchOnce<T = unknown>(
       return {
         data: null,
         error: {
+          retryAfter: res.status === 429 ? parseRetryAfter(res.headers.get('Retry-After')) : undefined,
           message:
             (errObj.message as string) ??
             (inner?.message as string) ??
@@ -1606,7 +1624,7 @@ async function rpc<T = any>(
   procedure: string,
   params?: Record<string, unknown>,
   _options?: unknown
-): Promise<{ data: T | null; error: { message: string; code?: string; status?: number } | null }> {
+): Promise<{ data: T | null; error: { message: string; code?: string; status?: number; retryAfter?: number } | null }> {
   let route = RPC_MAP[procedure];
   if (!route) {
     return { data: null, error: { message: `Unknown RPC: ${procedure}` } };

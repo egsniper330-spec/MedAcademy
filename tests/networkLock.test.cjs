@@ -314,11 +314,12 @@ console.log('\n4. SecurityContext — triggers, ordering and release');
   check('4e: one publish path writes the verdict, the callbacks, the log and the hold release',
     /const publishVerdict = useCallback\(\(r: SecurityCheckResult\) => \{[\s\S]{0,700}setResult\(r\);[\s\S]{0,500}blockingCbsRef\.current\.forEach\(\(cb\) => cb\(r\)\);[\s\S]{0,200}maybeReleaseBackgroundHold\(r\);/.test(CONTEXT_CODE));
   check('4f: the resume verification publishes what it measured',
-    /const runAndPublish = async \(why: string\) => \{[\s\S]{0,300}const r = await runEvaluationRef\.current\(why\);[\s\S]{0,300}publishVerdictRef\.current\(r\);/.test(CONTEXT_CODE));
-  check('4g: the resume watchdog retry publishes too (bounded retry, no silent drop)',
-    /void runAndPublish\('resume-retry'\);/.test(CONTEXT_CODE));
-  check('4h: a coalesced/superseded run is NOT published (no stale verdict)',
-    /if \(!r\) return;[\s\S]{0,120}publishVerdictRef\.current\(r\);/.test(CONTEXT_CODE));
+    /const r = await runEvaluation\(reason\);[\s\S]{0,300}if \(r\) publishVerdictRef\.current\(r\);/.test(CONTEXT_CODE));
+  check('4g: the chained (queued) evaluation publishes too — no silent drop',
+    /void runEvaluationRef\.current\(queued\)\.then\(\(r\) => \{\n\s+if \(r\) publishVerdictRef\.current\(r\);/.test(CONTEXT_CODE));
+  check('4h: a coalesced/superseded run is NOT published (null is never a verdict)',
+    /if \(r\) publishVerdictRef\.current\(r\);/.test(CONTEXT_CODE)
+    && /if \(gen !== checkGenRef\.current\)[\s\S]{0,200}return null;/.test(CONTEXT_CODE));
 
   // EXPOSED STATE
   check('4i: the context exposes networkLocked and networkAccessState',
@@ -341,9 +342,9 @@ console.log('\n5. YouTube / protected playback scenarios');
   const YT_CODE     = read(YT_PLAYER);
 
   // 1. Resume while a video is playing.
-  check('5.1a: leaving the foreground engages a HARD lock, so the player unmounts',
-    /enterBackgroundHold\('appstate=' \+ nextState\);/.test(CONTEXT_CODE)
-    && /engageSecurityLock\(LOCK_SRC_BACKGROUND, \{ hard: true \}\)/.test(CONTEXT_CODE));
+  check('5.1a: leaving the foreground conceals the player without unmounting it',
+    /setProtectedContentConcealed\(true, 'appstate=' \+ nextState\);/.test(CONTEXT_CODE)
+    && !/enterBackgroundHold\('appstate='/.test(CONTEXT_CODE));
   check('5.1b: containment stops the WebView player immediately (load halted, Plyr paused, frame detached)',
     /wv\.stopLoading\?\.\(\);/.test(read('src/lib/useSecurityWebViewStop.ts'))
     && /__medaSecurityStopped/.test(read('src/lib/useSecurityWebViewStop.ts'))
@@ -380,10 +381,10 @@ console.log('\n5. YouTube / protected playback scenarios');
   // 6. A failure does not release the lock.
   check('5.6a: a thrown evaluation publishes nothing (no synthetic clean verdict)',
     !/catch \(e\) \{[\s\S]{0,200}setResult\(/.test(CONTEXT_CODE.slice(CONTEXT_CODE.indexOf('const check = useCallback'), CONTEXT_CODE.indexOf('const checkBeforeVideo'))));
-  check('5.6b: the watchdog retries once and never authorizes',
-    /if \(resumeRetriedRef\.current\) return;/.test(CONTEXT_CODE)
-    && /markResumeVerificationOverdue\(\);/.test(CONTEXT_CODE)
-    && !/isResumeVerificationOverdue[\s\S]{0,200}releaseSecurityLock/.test(CONTEXT_CODE));
+  check('5.6b: the protected-content timeout conceals and never authorizes',
+    /dispatchProtectedContent\(\{ type: 'check-error', requestId, reason: 'timeout' \}\);/.test(CONTEXT_CODE)
+    && /setProtectedContentConcealed\(true, 'timeout'\);/.test(CONTEXT_CODE)
+    && !/PROTECTED_CONTENT_VERIFICATION_TIMEOUT_MS[\s\S]{0,300}setProtectedContentConcealed\(false/.test(CONTEXT_CODE));
 
   // 7. No alternate network path from the player surfaces.
   check('5.7a: the video player is mounted from exactly ONE place in the app',

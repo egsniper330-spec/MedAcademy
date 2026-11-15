@@ -148,7 +148,10 @@ final class CourseController
         $isPrivileged = in_array($role, ['doctor', 'admin', 'super_admin'], true);
 
         $sql = "SELECT l.id, l.section_id, l.title, l.description, l.duration_seconds, l.status,
-                       l.order_index, l.scheduled_at, l.is_preview,
+                       l.order_index, l.scheduled_at, l.is_preview, l.video_type,
+                       l.youtube_video_id, l.video_title, l.video_thumbnail_url,
+                       l.download_enabled, l.comments_enabled, l.visible, l.notes,
+                       l.estimated_minutes, l.video_asset_id,
                        l.video_id, lm.file_url AS material_url, lm.file_name AS material_name
                   FROM lessons l
                   LEFT JOIN lesson_materials lm ON lm.lesson_id = l.id
@@ -235,6 +238,121 @@ final class CourseController
         Database::instance()->query('UPDATE courses SET ' . implode(', ', $sets) . ' WHERE id = ?', $params);
         AuditService::write($request->user['id'], 'course_updated', ['course_id' => $id]);
         return ['course' => Database::instance()->row('SELECT * FROM courses WHERE id = ?', [$id])];
+    }
+
+    /**
+     * POST /courses/import — server-authoritative CSV import for doctors.
+     *
+     * The client may only submit course content fields. Ownership is always the
+     * authenticated account, imports are always drafts, and duplicates are
+     * refused rather than overwritten. Every row is validated independently and
+     * the response reports per-row outcomes.
+     */
+    public function importCsv(Request $request): array
+    {
+        $this->flags->assertEnabled('course_creation', $request);
+
+        $rows = $request->json()['rows'] ?? null;
+        if (!is_array($rows) || $rows === []) {
+            throw new ApiException(422, 'rows must be a non-empty array');
+        }
+        if (count($rows) > 200) {
+            throw new ApiException(422, 'A maximum of 200 courses can be imported at once');
+        }
+
+        $db = Database::instance();
+        $userId = (string) $request->user['id'];
+        $doctorName = $db->value('SELECT full_name FROM profiles WHERE id = ? LIMIT 1', [$userId], null);
+        $languages = ['Arabic', 'English', 'French', 'German', 'Spanish', 'Turkish', 'Urdu'];
+        $results = [];
+        $imported = 0;
+        $failed = 0;
+        $seen = [];
+
+        foreach ($rows as $index => $row) {
+            $line = $index + 2; // CSV header occupies row 1
+            if (!is_array($row)) {
+                $failed++;
+                $results[] = ['row' => $line, 'status' => 'failed', 'message' => 'Invalid row'];
+                continue;
+            }
+
+            $title = trim((string) ($row['title'] ?? ''));
+            $short = trim((string) ($row['short_description'] ?? ''));
+            $full = trim((string) ($row['full_description'] ?? $row['description'] ?? ''));
+            $language = trim((string) ($row['language'] ?? 'Arabic'));
+            $priceRaw = trim((string) ($row['price_egp'] ?? '0'));
+
+            if ($title === '' || mb_strlen($title) > 255) {
+                $failed++;
+                $results[] = ['row' => $line, 'status' => 'failed', 'message' => 'Title is required and must be 255 characters or fewer'];
+                continue;
+            }
+            if (mb_strlen($short) > 2000 || mb_strlen($full) > 20000) {
+                $failed++;
+                $results[] = ['row' => $line, 'status' => 'failed', 'message' => 'Description is too long'];
+                continue;
+            }
+            if (!in_array($language, $languages, true)) {
+                $failed++;
+                $results[] = ['row' => $line, 'status' => 'failed', 'message' => 'Unsupported language'];
+                continue;
+            }
+            if ($priceRaw !== '' && (!is_numeric($priceRaw) || (float) $priceRaw < 0 || (float) $priceRaw > 99999999)) {
+                $failed++;
+                $results[] = ['row' => $line, 'status' => 'failed', 'message' => 'Price must be a non-negative number'];
+                continue;
+            }
+
+            $key = mb_strtolower($title);
+            if (isset($seen[$key])) {
+                $failed++;
+                $results[] = ['row' => $line, 'status' => 'failed', 'message' => 'Duplicate title in this file'];
+                continue;
+            }
+            $seen[$key] = true;
+
+            $duplicate = $db->value(
+                'SELECT COUNT(*) FROM courses WHERE doctor_id = ? AND LOWER(title) = LOWER(?) AND permanently_deleted = 0',
+                [$userId, $title],
+                0
+            );
+            if ((int) $duplicate > 0) {
+                $failed++;
+                $results[] = ['row' => $line, 'status' => 'failed', 'message' => 'A course with this title already exists'];
+                continue;
+            }
+
+            try {
+                $id = Uuid::v4();
+                $db->insert(
+                    'INSERT INTO courses (id, doctor_id, title, description, short_description, full_description,
+                                          status, language, difficulty, credits_required, price_egp, instructor_name,
+                                          created_at, updated_at)
+                     VALUES (?, ?, ?, ?, ?, ?, \'draft\', ?, \'all_levels\', 1, ?, ?, UTC_TIMESTAMP(6), UTC_TIMESTAMP(6))',
+                    [$id, $userId, $title, $full, $short !== '' ? $short : null, $full !== '' ? $full : null,
+                     $language, (float) ($priceRaw !== '' ? $priceRaw : 0), $doctorName]
+                );
+                AuditService::write($userId, 'course_created', [
+                    'course_id' => $id,
+                    'title' => $title,
+                    'source' => 'csv_import',
+                ]);
+                $imported++;
+                $results[] = ['row' => $line, 'status' => 'succeeded', 'course_id' => $id, 'title' => $title];
+            } catch (\Throwable $e) {
+                $failed++;
+                $results[] = ['row' => $line, 'status' => 'failed', 'message' => 'The course could not be created'];
+            }
+        }
+
+        return [
+            'success' => true,
+            'imported' => $imported,
+            'failed' => $failed,
+            'total' => count($rows),
+            'results' => $results,
+        ];
     }
 
     public function enroll(Request $request): array
@@ -830,30 +948,16 @@ final class CourseController
             throw new ApiException(403, 'You do not own this lesson');
         }
 
-        // 1. Delete VdoCipher video if present
-        $vdoDeleted = false;
+        // 1. VdoCipher is retired — the provider is never contacted.
+        //
+        //    This used to DELETE the remote asset through dev.vdocipher.com (with a
+        //    broken CURLOPT_DELETE call that never even executed a request). With the
+        //    provider retired there is no credential to use and no reason to reach it:
+        //    the local `video_uploads` row is still removed by the cascade below, and the
+        //    remote object is left exactly as the provider holds it. Lesson deletion must
+        //    never depend on an external API, so the outcome is reported as 'detached'.
+        $vdoDeleted = true;
         $vdoError = null;
-        if ($lesson['video_id']) {
-            try {
-                $apiSecret = \MedAcademy\Utils\Config::string('VDOCIPHER_API_SECRET', '');
-                if ($apiSecret !== '') {
-                    $ch = curl_init('https://dev.vdocipher.com/api/videos/' . rawurlencode($lesson['video_id']));
-                    curl_setopt_array($ch, [
-                        CURLOPT_DELETE => true,
-                        CURLOPT_HTTPHEADER => ['Authorization: Apisecret ' . $apiSecret, 'Accept: application/json'],
-                        CURLOPT_RETURNTRANSFER => true,
-                        CURLOPT_TIMEOUT => 15,
-                    ]);
-                    $vdoStatus = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-                    curl_close($ch);
-                    $vdoDeleted = ($vdoStatus === 200 || $vdoStatus === 404);
-                }
-            } catch (\Throwable $e) {
-                $vdoError = $e->getMessage();
-            }
-        } else {
-            $vdoDeleted = true;
-        }
 
         // 2. Snapshot every file this lesson owns BEFORE the cascade deletes the
         //    rows that name them.

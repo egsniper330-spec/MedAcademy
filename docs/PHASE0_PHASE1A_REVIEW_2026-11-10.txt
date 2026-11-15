@@ -1,0 +1,371 @@
+PHASE 0 AND PHASE 1A READINESS REVIEW - MedAcademy
+Date: 2026-11-10
+Status: REVIEW ONLY. No source, config, schema, test, or lockfile was changed.
+        No build, install, migration, Expo prebuild, EAS, Gradle, ADB, or deploy was run.
+
+LABELS
+  [SI] source inspection (read in repo)
+  [AT] existing automated test (exists in repo; result noted where run)
+  [NR] not runtime-verified (no device, no live DB, no PHP binary)
+  [A]  assumption (needs approval)
+  [R]  recommendation
+
+SCOPE LIMITS OF THIS PASS
+  - Migrations 017-020 were checked for their table names, not read line by line.
+  - RateLimitService.php lines 143-202 were not read.
+  - The AuthController.php login response mapping was not read.
+  - The live database schema was not inspected. All table facts come from repo
+    migrations 001-039 and database/schema.sql.
+
+
+==================================================================
+1. EXECUTIVE SUMMARY
+==================================================================
+
+- Phase 0 (telemetry and logging accuracy) is ready for a short design step
+  and then small code changes. The changes must not alter any enforcement
+  decision.
+- Phase 1A (per-account login protection) is NOT ready for implementation.
+  Login has only a per-IP limiter. There is no per-account failure state.
+  A naive per-account lock would let one attacker lock any student out, so
+  the algorithm must be approved first (section 5).
+- Correction to the earlier report: unknown accounts do NOT create a
+  "no_account" login_history row. [SI] recordLogin() returns early when
+  $userId is null, and login_history.user_id is NOT NULL. Failed attempts
+  against unknown accounts are visible only in the per-IP counter in
+  rate_limits.
+- Recommendation: approve Phase 0 design now. Hold Phase 1A until the
+  decisions in section 13 are made.
+
+
+==================================================================
+2. VERIFIED CURRENT BEHAVIOR
+==================================================================
+
+Claim                                                          Label  Source
+-------------------------------------------------------------  -----  --------------------------------------------
+Login rate limit is per IP, 10 per 60 s, runs first            [SI]   AuthService::login() ~176-259;
+                                                                      RATE_LIMIT_LOGIN_PER_MINUTE default 10
+rateLimit() shim calls RateLimitService::legacy(), op "auth"   [SI]   AuthService.php ~913; RateLimitService.php ~131
+Counter is a fixed window in rate_limits                       [SI]   RateLimitService::hit() 68-98;
+  (identifier, operation, window_start, request_count),               schema.sql 656-669 (UNIQUE on the 3 key cols)
+  atomic INSERT ... ON DUPLICATE KEY UPDATE, then SELECT
+Counter throws 429 rate_limited when count > max               [SI]   RateLimitService::hit() ~91-93
+perAccount() exists but login does not call it                 [SI]   RateLimitService.php 109-118
+Unknown account: 401 "Invalid login credentials", no row       [SI]   login(); recordLogin() ~884-911 returns early
+Wrong password: same 401, login_history row, reason             [SI]   login(); recordLogin()
+  "wrong_password"
+Suspended or blocked: 403 account_suspended (after password    [SI]   login()
+  check, so it reveals the account only to someone who
+  already has the password)
+Device block: 403 device_blocked after password check          [SI]   preLoginDeviceCheck() ~586
+Identifier lookup: public ID, lower(email), phone,             [SI]   resolveIdentifier() 535-560
+  profile_email, phone_e164
+login_history.user_id NOT NULL, FK profiles ON DELETE CASCADE  [SI]   schema.sql 736-751, index 1572-1573
+Rate-limit contract test (login/register identifiers,          [AT]   tests/rateLimiting.test.cjs (not run in this pass)
+  rate_limited code)
+CORS suite: 10 of 10 pass                                      [AT]   backend/tests/cors.test.js (earlier run)
+
+
+==================================================================
+3. PHASE 0 FINDINGS AND RECOMMENDATIONS
+==================================================================
+
+3.1 Logging accuracy [SI]
+
+  a) IntegrityService::reject() logs policy_action = "log_only" even when
+     the policy would block. Fix: log the policy's real action. Do not change
+     the decision.
+  b) SecurityEvidenceService::assertEvidenceAllowed() (~567-620) logs
+     "block_login" for every action, even non-login actions. Fix: log the
+     action's own configured policy.
+  c) [R] Add an explicit enforcement_mode column or field ("log_only" or
+     "enforce") so the label cannot be confused with the decision.
+  d) Constraint: security_events.policy_action has a CHECK constraint
+     (schema.sql ~1524) allowing only log_only, warn_only, block_video,
+     block_login. Any new value needs a migration. Do not add values silently.
+
+3.2 Telemetry coverage
+
+  Metric                                       Derivable today?
+  -------------------------------------------  --------------------------------
+  Integrity verdicts per action                Partly. play_integrity_verdicts
+                                               exists (017). Action column
+                                               must be confirmed. [NR]
+  TRUSTED / DEGRADED / UNTRUSTED distribution  Only if security_evidence stores
+                                               the tier (018). Confirm. [NR]
+  Missing / invalid / expired / replayed       Partly, via failure_reason
+    evidence                                   strings. Not a stable enum.
+  Google outage vs negative verdict            Not separated. [R] add an
+                                               explicit upstream_error reason.
+  Device key status and promotion              Partly. device_keys (018) plus
+                                               verified_at and
+                                               verification_note (019).
+  Login failures per account                   Known accounts only, as
+                                               login_history rows.
+
+  [R] Minimum additions, all additive: a stable failure_reason enum for new
+  events, enforcement_mode, and a request_id for correlation.
+
+3.3 Privacy [SI] [R]
+
+  - Confirm no new code path stores passwords, JWTs, refresh tokens, or raw
+    attestation tokens.
+  - ip_address is stored as TEXT today with no retention rule. [A] [R] set
+    90 days for login and failure rows and 180 days for security events,
+    with a named owner.
+  - [R] Hash device identifiers in new telemetry if clear values are not needed.
+  - [R] Restrict telemetry export to super_admin, and audit every export.
+
+3.4 Baseline measurement [R]
+
+  - Read-only queries over security_events, play_integrity_verdicts,
+    security_evidence, and login_history can produce counts per action and
+    per reason, plus unique accounts and devices.
+  - A false-positive rate cannot be derived from stored data. There is no
+    ground-truth label. Report only "rejections later overridden", which
+    needs a new field. Do not estimate it.
+  - An additive migration is needed only for enforcement_mode and the new
+    reason enum.
+
+3.5 Phase 0 acceptance criteria [R]
+
+  1. Integrity rejection under log_only logs policy_action=log_only and
+     enforcement_mode=log_only.
+  2. Same rejection under enforce logs enforce and returns the same blocked
+     response as today (golden test).
+  3. A non-login evidence rejection never logs block_login.
+  4. No telemetry row contains a password, token, or raw attestation payload
+     (fixture assertion).
+  5. The baseline query matches a manual count on a seeded fixture.
+  6. Enforcement responses are byte-identical before and after.
+
+
+==================================================================
+4. PHASE 1A THREAT MODEL
+==================================================================
+
+ #  Scenario                              Response under recommended design
+ --  ------------------------------------  ---------------------------------------------
+ 1  Password guessing on one account      Per-account delay grows, capped at 15 min.
+                                          Account stays reachable after the cap.
+ 2  Credential stuffing across accounts   Existing per-IP limiter applies. Add a
+                                          per-IP cap that counts across accounts.
+ 3  Password spraying (one password,      Per-IP cross-account counter catches it.
+    many accounts)                        Per-account delays stay small.
+ 4  Distributed attack, many IPs          Per-account delay still applies; it does
+                                          not depend on IP.
+ 5  Attacker locks a victim out on        MAIN RISK. Delays are temporary and capped.
+    purpose                               No permanent lock. Victim succeeds after the
+                                          delay expires or via password reset.
+ 6  Unknown-account enumeration           Same response and timing for unknown and
+                                          known accounts. Counter key is normalized.
+ 7  Concurrent attempts on one account    Atomic counter update (section 6). Each
+                                          attempt is counted once.
+ 8  Privileged accounts                   Stricter delay cap and alerting. No MFA in
+                                          this phase.
+ 9  Legitimate user mistypes             First 5 failures give no delay. A success
+                                          clears the state.
+10  DB or cache failure during check     [R] Fail open for the per-account check only.
+                                          Keep the IP limiter. Log at error level.
+                                          Failing closed would turn a DB outage into
+                                          a login outage.
+
+
+==================================================================
+5. RECOMMENDED ACCOUNT PROTECTION ALGORITHM
+==================================================================
+
+5.1 Options compared [R]
+
+  1. Hard lock after N failures ........ REJECTED. Any attacker can lock any
+                                         account out.
+  2. Progressive delay per account ..... RECOMMENDED as the base. Temporary,
+                                         capped.
+  3. IP throttling plus risk score ..... RECOMMENDED as a companion.
+  4. CAPTCHA after suspicion ........... DEFER. Adds a frontend contract.
+  5. Temporary challenge flow .......... DEFER until a challenge flow exists.
+
+5.2 Proposed values [A] (need approval)
+
+  - Failures 1-5: no delay.
+  - Failure 6: 30 s. Failure 7: 2 min. Failure 8: 10 min. Cap: 15 min.
+  - A successful login clears the account state.
+  - A failure during an active delay does not extend it.
+
+5.3 Where it applies [R]
+
+  - After the account is found AND the password is checked, so unknown and
+    wrong-password requests take the same path.
+  - The delay response is the same generic 401 body and the same timing.
+    Send Retry-After only for the wall-clock wait.
+
+5.4 Open concern: account existence leak
+
+  A 429 for a known account but a 401 for an unknown one reveals which
+  accounts exist. [R] Either return the same 429 for both once the key has
+  history, or add a fixed minimum response time on every login. The second
+  option adds latency for every user. This needs a decision (section 13).
+
+
+==================================================================
+6. DATABASE AND MIGRATION PROPOSAL
+==================================================================
+
+6.1 Preferred: reuse rate_limits [R]
+
+  - New operation name, e.g. login_account, keyed by a normalized account key
+    (lowercased resolved user_id, not the raw typed identifier).
+  - Fits the existing UNIQUE key and atomic INSERT ... ON DUPLICATE KEY UPDATE.
+    [SI] schema.sql 656-669; RateLimitService::hit() 68-98.
+  - No new table required.
+
+6.2 Limit of reuse [SI] [R]
+
+  Fixed windows cannot express "wait 30 s after the 5th failure". The
+  per-account state needs a last-failure timestamp and a failure count that
+  reset on success. Options:
+    a) Add columns to a new table account_login_state (user_id PK, failure_count,
+       last_failure_at, locked_until). Preferred for clarity.
+    b) Encode state in rate_limits rows. Works but is harder to read.
+
+6.3 Proposed migration (not written) [A]
+
+  - Migration number: next free after 039, to be confirmed.
+  - Additive only. No change to login_history, rate_limits, or security_events
+    rows.
+  - Index on last_failure_at for cleanup.
+
+6.4 Cleanup [R]
+
+  - Delete state rows older than 24 h with no active delay.
+  - Run from an existing maintenance path, not a new cron.
+
+
+==================================================================
+7. API AND FRONTEND COMPATIBILITY
+==================================================================
+
+  - Keep the 401 body "Invalid login credentials" for unknown and wrong-password
+    cases. [SI] AuthService::login().
+  - The delay response uses HTTP 429 with error code rate_limited (existing
+    code, [AT] rateLimiting.test.cjs) and a Retry-After header. [R]
+  - Frontend (mobile and web) must read Retry-After and show a neutral message.
+    The message text is English-only today. [SI] Keep that unchanged in this
+    phase.
+  - Do not change the 403 account_suspended path.
+  - [NR] Frontend handling of 429 on login was not checked on a device.
+
+
+==================================================================
+8. PRIVACY AND TELEMETRY
+==================================================================
+
+  - Per-account state stores the user_id and counters only. No IP, password,
+    or token. [R]
+  - login_history keeps its current fields. New events use the enum from
+    section 3.2.
+  - Retention and access rules are in section 3.3.
+  - Users can see their own failure history only if an existing endpoint
+    already exposes it. [SI] DeviceController::getLoginHistory ~710 reads
+    login_history by user_id. No change is proposed.
+
+
+==================================================================
+9. AUTOMATED TEST MATRIX
+==================================================================
+
+  Test                                              Phase  Type
+  ------------------------------------------------  -----  ----------------
+  Existing rate-limit contract (tests/rateLimiting)  1A     [AT] extend
+  Existing CORS suite (backend/tests/cors.test.js)   -      [AT] 10/10 earlier
+  Existing App Attest deferral test                   0      [AT] keep
+  Integrity log_only label on reject                 0      NEW unit
+  Integrity enforce response unchanged               0      NEW golden
+  Evidence non-login never logs block_login          0      NEW unit
+  No secrets in telemetry rows                       0      NEW fixture
+  Baseline query vs manual count                     0      NEW fixture
+  Delay: first 5 failures no delay                   1A     NEW unit
+  Delay: 6th failure returns 429 and Retry-After     1A     NEW unit
+  Success clears state                               1A     NEW unit
+  Unknown and wrong password take same path         1A     NEW golden
+  Unknown and known account: same 429 behavior       1A     NEW golden
+  Concurrent failures counted once each              1A     NEW DB test
+  DB failure fails open for account check           1A     NEW unit
+  Two-account isolation (one lock does not affect other) 1A NEW unit
+  Manual device test: student login after delay     1A     [NR] manual
+
+
+==================================================================
+10. IMPLEMENTATION PACKAGES AND EXACT FILE LIST
+==================================================================
+
+ PHASE 0 (after approval)
+  P0-1  backend/src/Services/IntegrityService.php   fix reject() policy label
+  P0-2  backend/src/Services/SecurityEvidenceService.php   per-action label
+  P0-3  database/mysql-migrations/0NN_enforcement_mode.sql   additive column
+  P0-4  backend/tests/ (new)   label, golden, and secret-fixture tests
+  P0-5  docs/ (update)   telemetry field reference
+
+ PHASE 1A (after approval of section 13 decisions)
+  P1A-1 database/mysql-migrations/0NN_account_login_state.sql   new table
+  P1A-2 backend/src/Services/AccountLoginGuard.php (new)   delay logic
+  P1A-3 backend/src/Services/AuthService.php   call guard after password check
+  P1A-4 backend/src/Services/RateLimitService.php   no change expected
+  P1A-5 backend/tests/ and tests/rateLimiting.test.cjs   extend
+  P1A-6 frontend login error handling (mobile and web)   Retry-After message
+
+ [A] Exact migration numbers depend on the next free number after 039.
+ [NR] The PHP upload list depends on which deploy-package files are current.
+      deploy-package/ copies are old and must not be used as source.
+
+
+==================================================================
+11. ROLLBACK PLAN
+==================================================================
+
+  Phase 0:
+   - Revert the PHP label changes. No enforcement change, so no user impact.
+   - Additive columns can stay; they are unused once the code is reverted.
+
+  Phase 1A:
+   - Feature flag in security_config.extras (e.g. account_login_guard.enabled),
+     default off until the baseline is measured.
+   - Setting it off returns login to today's behavior at once.
+   - Table can stay; it is ignored when the flag is off.
+   - Verify rollback by flipping the flag on a staging copy of the database.
+
+
+==================================================================
+12. RISKS AND OPEN QUESTIONS
+==================================================================
+
+  R1  Attacker-induced lockout of a student (main risk, see section 4 row 5).
+  R2  Account existence leak through 429 vs 401 (section 5.4).
+  R3  DB outage: fail-open choice must be approved (section 4 row 10).
+  R4  Live schema unknown. Repo migrations 001-039 only. [NR]
+  R5  Migrations 017-020 not read line by line. [NR] Confirm action and tier
+      columns before writing Phase 0 queries.
+  R6  RateLimitService 143-202 not read.
+  R7  AuthController login response mapping not read.
+  R8  No Android device or emulator. Frontend 429 handling is [NR].
+  R9  No local PHP binary, so php -l cannot run. Syntax is unverified.
+  R10 Apple App Attest is deferred per docs/PRODUCTION_READINESS_AUDIT.md section 8.
+      Accepted gap, not a bug. Not part of Phase 0 or 1A.
+  R11 Earlier claim of a "no_account" login_history row is WRONG (section 1).
+
+
+==================================================================
+13. FINAL GO / NO-GO RECOMMENDATION
+==================================================================
+
+  PHASE 0: GO for design approval. Code can follow once approved.
+  PHASE 1A: NO-GO for implementation until these are decided:
+    D1. Approve progressive delay values in section 5.2 (or replace them).
+    D2. Choose account-existence-leak option in section 5.4.
+    D3. Approve fail-open for the per-account check (section 4 row 10).
+    D4. Approve table design: new account_login_state (section 6.2a).
+    D5. Confirm feature flag default off (section 11).
+    D6. Confirm the live schema matches repo migrations (R4) before migration.
+
+  STOP. No changes have been made. Waiting for approval before implementation.

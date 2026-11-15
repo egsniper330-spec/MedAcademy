@@ -1,0 +1,347 @@
+MEDACADEMY SECURITY REMEDIATION ASSESSMENT
+Date: 2026-11-10
+Type: Review and planning only. No source, schema, config, or deployment file was modified.
+Not run: builds, installs, migrations, ADB, emulators, EAS, prebuild, deployments.
+
+LABELS
+[SI] Verified by source inspection
+[AT] Verified by existing automated tests
+[NR] Not runtime-verified (no device or live server test)
+[A]  Assumption
+[R]  Recommendation
+
+==============================================================
+1. EXECUTIVE SUMMARY
+==============================================================
+
+- Common root cause [SI]: the enforcement machinery for Play Integrity and device evidence is built, but the default policy keeps it in log_only. Results are recorded but do not block. Most remaining work is policy, verification and rollout, not new cryptography.
+- Play Integrity [SI]: IntegrityService::policy() defaults all five actions to log_only with enabled=false. Tokens are fully verified, but a failure does not stop the action.
+- Device evidence [SI]: SecurityEvidenceService::policy() defaults to log_only. require_registered_key defaults to false and only lowers the tier to DEGRADED. It never blocks on its own.
+- iOS App Attest [SI][AT]: the 503 is intentional. docs/PRODUCTION_READINESS_AUDIT.md section 8 defers App Attest, and tests/appAttestDeferral.test.cjs checks that deferral. Client code exists, but there is no server verifier and no App Attest entitlement. This is an accepted gap, not a regression.
+- MFA [SI]: no TOTP, recovery-code or MFA tables or code exist in backend/src or migrations 015-020. The prior audit finding is correct.
+- Lockout [SI]: login throttling is per IP only (rateLimit('login:'+ip, RATE_LIMIT_LOGIN_PER_MINUTE=10, 60) in AuthService::login()). There is no per-account failure counter, lockout or backoff.
+- Recommendation [R]: do not flip every log_only to enforce. Choose a verdict per action after a measured baseline. The best first step is per-account login protection, which does not depend on device signals and has low false-positive risk.
+
+CORRECTION TO THE PRIOR AUDIT [SI]
+The Play Integrity request hash does not bind operation parameters. It binds the user, the action and a single-use server nonce. The client requests the hash before it knows the video or PDF ID, so a valid token can be replayed against a different resource within verdict_ttl_seconds (60-900). Device evidence hashes the request body and is the control that binds the exact operation.
+
+SEPARATE COMPLETED WORK
+CORS fix for localhost:8082: backend/src/Middleware/CorsMiddleware.php uses an explicit allowlist, never reflects Origin, rejects "*" and sends no credentials header. backend/tests/cors.test.js passes 10/10 [AT]. Login through the web preview is statically verified only [NR]. Not deployed; needs your approval.
+
+==============================================================
+2. CURRENT IMPLEMENTATION FINDINGS
+==============================================================
+
+2.1  Play Integrity defaults log_only for all five actions; enabled=false. [SI] IntegrityService.php policy(), assertActionAllowed() (~349).
+2.2  Rejections are logged as policy_action=log_only even when the request is rejected. [SI] IntegrityService.php reject(). Logging-accuracy defect.
+2.3  Device evidence defaults to log_only; require_registered_key defaults false. [SI] SecurityEvidenceService.php policy() (~60-110).
+2.4  require_registered_key only adds a key_not_confirmed warning, lowering the tier to DEGRADED. [SI] deriveAssurance() (~643-730).
+2.5  Unverified keys stay capped at DEGRADED until promoted: 24 h warm-up, no violations, active device, 7 days of anchored integrity history. [SI] tryPromoteKey() (~731).
+2.6  Evidence denials are logged as block_login even for non-login actions. [SI] assertEvidenceAllowed() (~567-620).
+2.7  Login rate limit is per IP only. [SI] AuthService::login() (~183-257); RATE_LIMIT_LOGIN_PER_MINUTE.
+2.8  A failed login is recorded only as recordLogin(..., false, ...). An unknown account returns 401 with a no_account row. [SI] recordLogin() (~884).
+2.9  Device registration runs after the credential check. A device-block error returns 403 device_blocked after the password was already verified. [SI] AuthService::login() tail (~257-300).
+2.10 Android key security level (tee / software; StrongBox requested with fallback) is reported to the client. I found no server-side check that requires tee or StrongBox. [SI][A] plugins/withSecurityModule.js ~2610, ~2643-2651.
+2.11 App Attest verify/assert/attest return 503 by design. [SI] IntegrityController.php (~130-150).
+2.12 No com.apple.developer.app-attest-environment entitlement; app.json has only aps-environment. [SI] app.json (~line 24).
+2.13 No MFA of any kind. [SI] backend/src, migrations 015-020.
+
+==============================================================
+3. PLAY INTEGRITY DETAILED ASSESSMENT
+==============================================================
+
+3.1 Flow [SI]
+1. get_nonce (src/lib/integrityClient.ts ~70-72) returns a single-use 256-bit request_hash bound to (user, action).
+2. The native module requests a Play token with that hash as the classic nonce (src/lib/nativeSecurity.ts ~774).
+3. verify (IntegrityService::verifyToken()) decodes the token via Google. It checks nonce single-use and expiry, package name, hash_equals on the request hash, timestamp (10 min, 60 s skew), PLAY_RECOGNIZED, certificate pin, device verdict, and licensing (off by default).
+4. Google outage: decodeWithGoogle() returns 503 on outage and 403 on 4xx. The rejection is persisted, but policy does not block.
+
+3.2 Per-action analysis
+
+Action        | Why log_only | Reaches authz? | Missing attestation | Replay / staleness               | Recommended verdict
+--------------|--------------|----------------|---------------------|-----------------------------------|----------------------------------------------------------
+vdo_otp       | default      | No             | Allowed             | Nonce single-use; verdict reusable within TTL | PLAY_RECOGNIZED + MEETS_BASIC_INTEGRITY. Phase 2.
+material_pdf  | default      | No             | Allowed             | Same                              | Same, enforced after vdo_otp.
+redeem        | default      | No             | Allowed             | Same                              | PLAY_RECOGNIZED only at first. Brute-force protection (section 7) matters more.
+device_bind   | default      | No             | Allowed             | Same                              | Keep log_only until section 4 is confirmed. Then MEETS_BASIC_INTEGRITY only.
+financial     | default      | No             | Allowed             | Same                              | MEETS_DEVICE_INTEGRITY + step-up MFA (section 6). Not attestation alone.
+
+Hash binding, all actions: user + action + nonce, not the video or PDF ID.
+Repackaging [SI]: package name and cert pin cover re-signed builds. A release-key rotation without updating the pin would block all users. [R] Keep the pin in config and check it in CI before enforcement.
+Google outage [R]: do not enforce on a Google 503 alone. Add a google_unavailable decision that falls back to device evidence and is logged as a degraded state.
+False positives [A]: rooted and older devices are the main risk for MEETS_DEVICE_INTEGRITY. Baseline data (section 11) should decide the final verdict.
+
+==============================================================
+4. DEVICE EVIDENCE DETAILED ASSESSMENT
+==============================================================
+
+4.1 Key generation and hardware backing
+- Keys are generated in Android Keystore (plugins/withSecurityModule.js ~2579-2706). StrongBox is requested with fallback (~2610).
+- deviceKeySecurityLevel() returns tee or software (~2643-2651). This value goes to the client only. No server-side check requires tee or StrongBox. [SI]
+- Whether production devices produce hardware-backed keys is not confirmed. [NR]
+
+4.2 Registration and authentication
+- issueChallenge() requires an active devices row, so a key cannot be registered for an unknown device. [SI]
+- Abuse path: registering a new key for an existing device. The 24 h warm-up limits its effect on protected actions. I did not confirm that new key registration requires a fresh session or step-up. [A]
+- [R] Require step-up MFA (section 6) before registering a new key on an existing device.
+
+4.3 Counter, signatures and rollback
+- Counter must strictly increase, with a gap cap of 1000 (min_counter_gap). Signatures are ECDSA P-256 over canonical JSON. [SI]
+- Rollback: restoring an old app-data backup gives an older counter. The server rejects it, so the user is locked out of enforced actions until the key is re-registered. [A] Re-registration should be a defined recovery path.
+- Challenges are single-use, user-bound, action-bound, device-bound, session-bound and request-hash-bound. [SI]
+
+4.4 Revocation
+- Keys of a revoked device remain in device_keys until status changes. Verify that revoking a device sets the key inactive in the same transaction. [A] Not yet confirmed.
+
+4.5 Enforcement path
+- assertEvidenceAllowed() returns early unless the tier is enforce or enforce_strict. enforce_strict requires TRUSTED. Rejected integrity rows are always denied. [SI]
+- Call sites: VideoController (~74, 84, 139, 146); MaterialDeliveryController (~121); RedeemCodeController (~357, 366); DeviceController (~74, 83); SecurityEvidenceController (~121).
+
+4.6 Recommendation [R]
+- Enforce device evidence on vdo_otp and material_pdf first (tier enforce, not enforce_strict).
+- Keep device_bind on log_only until registration is protected by step-up.
+- Do not require tee or StrongBox until baseline data shows the hardware-backed share.
+
+==============================================================
+5. iOS APP ATTEST FAILURE ANALYSIS
+==============================================================
+
+5.1 What exists [SI]
+- Native: plugins/ios/IOSSecurityModule.swift (DCAppAttestService generateKey, attest, assert; DCDevice fallback) and IOSSecurityModule.m.
+- Client: src/lib/nativeSecurity.ts (~694-762); src/lib/security.ts runAppAttestCheck (~1594).
+- Server: IntegrityController.php returns 503 'App Attest server verification is not configured' for attest_key, verify_assertion and verify.
+- Decision record: docs/PRODUCTION_READINESS_AUDIT.md section 8 (TEMPORARILY DEFERRED). [AT] tests/appAttestDeferral.test.cjs.
+
+5.2 What is missing [SI]
+- No server-side attestation object parsing or Apple certificate chain validation.
+- No challenge storage bound to a key ID.
+- No assertion counter validation.
+- No App Attest entitlement in app.json (only aps-environment).
+- No Apple Developer credentials in the repo. [A]
+
+5.3 Required implementation (if approved) [R]
+- Entitlement: add com.apple.developer.app-attest-environment (production) to ios.entitlements.
+- Server: verify the attestation object (CBOR, x5c chain to the Apple App Attest root, nonce = SHA-256(authData || clientDataHash), rpIdHash = SHA-256(appId), counter 0, aaguid for production).
+- Store key ID, public key and counter per device. Reject assertions whose counter does not increase.
+- Challenges: single-use, short TTL, user- and action-bound.
+
+5.4 Options
+A. Implement in PHP. Pros: no third-party cost, full control. Cons: certificate chain and CBOR parsing must be correct; ongoing maintenance.
+B. External service (for example Approov). Pros: faster integration, maintained verification. Cons: recurring cost, a vendor dependency on the authorization path, and data sent to a third party. [A] Pricing and features not verified in this review.
+[R] Option A if the team can maintain it. Otherwise B, after a cost check.
+
+==============================================================
+6. MFA ARCHITECTURE PROPOSAL
+==============================================================
+
+6.1 Current state [SI]: no MFA exists.
+
+6.2 Design [R]
+- TOTP (RFC 6238) with a per-user secret encrypted at rest. Enrollment requires a valid current code before activation.
+- Ten single-use backup recovery codes, stored as hashes, shown once.
+- Step-up: a short-lived 'mfa_verified' claim on the session for sensitive actions (financial, role change, new device key, password change).
+- Mandatory for Super Admin and Admin. Mandatory for Doctor accounts that can access protected material [A]. Optional for students.
+- Avoid email OTP as the only factor for privileged accounts.
+
+6.3 Interaction with JWT and refresh tokens [R]
+- Access token carries mfa_at (auth time) and amr claims. Refresh keeps them; the step-up window is server-side.
+- Refresh rotation unchanged. Bump security_version on MFA disable or recovery so existing sessions are revoked.
+- Device management: a new device login for a privileged account requires MFA.
+- Password reset: revoke sessions; require MFA on next login for privileged accounts.
+- Admin permission changes and financial operations require a fresh step-up.
+
+6.4 Recovery [R]
+- Recovery codes first. If lost, a second admin with MFA can reset, with an audit event. No self-service reset by email alone for privileged accounts.
+
+==============================================================
+7. ACCOUNT LOCKOUT ARCHITECTURE PROPOSAL
+==============================================================
+
+7.1 Current state [SI]: IP-only limit of 10 per minute. No per-account failures, lockout or backoff.
+
+7.2 Design [R]
+- Per-account failure counter (login_failures table or a column set), keyed by normalized email plus user ID when it exists.
+- Progressive backoff: after 5 failures, delay grows (for example 30 s, 2 min, 10 min, capped at 15 min). Lockout is temporary; no permanent lock.
+- Track failures per IP and per network prefix so one IP cannot lock an account for everyone. Use a CAPTCHA or step-up challenge instead of a hard lock when risk is high.
+- Anti-enumeration: identical response and timing for unknown and known accounts.
+- Credential stuffing and spraying: alert when many accounts see one failure from one IP range, or one password across many accounts.
+- Audit events: lockout, unlock, suspicious spike. Alert admins on lockouts of privileged accounts.
+- Recovery: a verified email reset clears the lock; an admin can unlock with audit.
+
+7.3 Abuse guard [R]
+- Lockout must never block the legitimate owner indefinitely. Cap duration and do not let failures from unknown IPs lock accounts forever.
+
+==============================================================
+8. UNIFIED SECURITY POLICY DESIGN
+==============================================================
+
+8.1 Principle [R]: the PHP backend is authoritative. The client never decides enforcement. Native results are inputs, not verdicts.
+
+8.2 Decision inputs
+- Play Integrity verdict (per action, from verdict store).
+- Device evidence assurance (TRUSTED / DEGRADED / UNTRUSTED) and integrity history.
+- Account state: role, MFA status, step-up freshness, security_version.
+- Device state: active, blocked, key status.
+- Risk signals: login failure spike, IP reputation (if available).
+
+8.3 Decision outputs
+- ALLOW, STEP_UP (require MFA or re-attest), DENY, and DEGRADED_ALLOW (logged, limited to low-risk actions).
+
+8.4 Per-action matrix [R]
+
+Action        | Play Integrity          | Device evidence     | MFA / step-up       | Outage behaviour
+--------------|-------------------------|---------------------|---------------------|-----------------------------
+vdo_otp       | PLAY_RECOGNIZED         | enforce (TRUSTED or DEGRADED) | none           | DEGRADED_ALLOW with alert
+material_pdf  | PLAY_RECOGNIZED         | enforce             | none                | DEGRADED_ALLOW with alert
+redeem        | PLAY_RECOGNIZED         | log_only then enforce | none              | Allow with rate limit
+device_bind   | log_only                | log_only            | step-up for new key | Allow with alert
+financial     | MEETS_DEVICE_INTEGRITY  | enforce_strict      | required            | DENY until restored
+
+8.5 Client rules [R]
+- The client sends evidence but does not decide. Local security flags must not skip server checks.
+- Suppressing a native detector result must produce the same server outcome as a failure.
+
+8.6 Unsupported devices and upgrades [R]
+- Unsupported devices (no Play services, old OS) get DEGRADED, not DENY, for low-risk actions.
+- After an app upgrade, the first request may be DEGRADED until integrity history re-anchors.
+
+==============================================================
+9. SOURCE FILES AND ENDPOINTS
+==============================================================
+
+Backend services [SI]
+- backend/src/Services/IntegrityService.php: policy(), assertActionAllowed(), verifyToken(), decodeWithGoogle(), reject().
+- backend/src/Services/SecurityEvidenceService.php: policy(), issueChallenge(), verifyEvidence(), deriveAssurance(), tryPromoteKey(), assertEvidenceAllowed().
+- backend/src/Services/AuthService.php: login() (~183-300), refresh(), recordLogin() (~884).
+- backend/src/Services/RateLimitService.php: login limits.
+- backend/src/Middleware/CorsMiddleware.php: CORS (completed).
+
+Controllers and endpoints [SI]
+- IntegrityController.php: verify-play-integrity (get_nonce, verify); App Attest actions (503).
+- SecurityEvidenceController.php: evidence endpoint (~121).
+- VideoController.php: vdo_otp (~74, 84, 139, 146).
+- MaterialDeliveryController.php: material_pdf (~121).
+- RedeemCodeController.php: redeem (~357, 366).
+- DeviceController.php: device_bind (~74, 83).
+- AuthController.php: login and refresh.
+
+Client and native [SI]
+- src/lib/integrityClient.ts, src/lib/nativeSecurity.ts, src/lib/security.ts, src/lib/deviceKey.ts.
+- plugins/withSecurityModule.js (Android keystore), plugins/ios/IOSSecurityModule.swift and .m (App Attest).
+- app.json (iOS entitlements).
+
+Tests [AT]
+- backend/tests/cors.test.js (10/10 passing).
+- tests/appAttestDeferral.test.cjs (124 checks, reported passing in docs).
+- tests/serverSideSecurityEnforcement.test.cjs.
+
+==============================================================
+10. DATABASE MIGRATION PLAN
+==============================================================
+
+Existing tables [SI]: play_integrity_nonces, play_integrity_verdicts, security_challenges, security_evidence, device_keys, devices, login_history. Policy is stored in security_config.extras (JSON).
+
+Proposed (not created) [R]
+- mfa_factors (user_id, type, encrypted_secret, status, created_at, last_used_at).
+- mfa_recovery_codes (user_id, code_hash, used_at).
+- login_failures or account_lockouts (account_key, failure_count, locked_until, last_ip_prefix, updated_at).
+- Optional: mfa_verified_at column on sessions.
+
+Rules
+- Additive migrations only. No destructive change to existing tables.
+- Apply to staging first. Production migration needs separate approval.
+- Each migration has a documented down step that drops only the new tables.
+
+==============================================================
+11. FALSE-POSITIVE AND USER-LOCKOUT RISKS
+==============================================================
+
+- Rooted or old devices failing MEETS_DEVICE_INTEGRITY [A]: high impact for financial. Mitigation: step-up, not hard block.
+- Certificate pin mismatch after key rotation [SI]: would block all users. Mitigation: pin check in CI and a staged pin list.
+- Google outage [A]: could block all protected actions. Mitigation: DEGRADED_ALLOW with alert.
+- Device reset or backup restore [A]: old counter causes lockout. Mitigation: defined re-registration path.
+- Lockout abuse [R]: a permanent lock is a denial-of-service tool. Mitigation: temporary, capped lockouts and IP-aware counters.
+- Student lockout by MFA [R]: optional for students; mandatory only for privileged roles.
+- Baseline required [R]: collect at least two weeks of log_only verdicts per action before enforcing.
+
+==============================================================
+12. IMPLEMENTATION ROADMAP (each phase needs separate approval)
+==============================================================
+
+Phase 0: Telemetry and baseline (no enforcement change) [R]
+- Keep all log_only. Fix the reject() logging defect (2.2) and the block_login label (2.6).
+- Collect verdict and tier distributions per action for at least two weeks.
+- Test accounts on real Android devices (rooted, non-Play, old OS) for each action.
+- Files: IntegrityService.php, SecurityEvidenceService.php. No schema change.
+
+Phase 1: Android attestation and device evidence [R]
+- Enforce PLAY_RECOGNIZED for vdo_otp, then material_pdf, then redeem.
+- Enforce device evidence (tier enforce) for vdo_otp and material_pdf.
+- Add google_unavailable degraded handling.
+- Keep device_bind on log_only.
+- Rollback: set the action back to log_only in security_config.extras (single config change).
+
+Phase 2: iOS attestation [R]
+- Add App Attest entitlement; native integration; PHP attestation and assertion verification; counter and replay storage.
+- Migration: App Attest key table (additive).
+- Remove the 503 only after verification tests pass.
+
+Phase 3: Privileged account security [R]
+- TOTP with recovery codes; step-up for financial and role changes.
+- Per-account lockout with progressive backoff.
+- Migrations: mfa_factors, mfa_recovery_codes, lockout table.
+
+Phase 4: Unified policy [R]
+- Central decision service used by all protected endpoints.
+- Audit alerts for lockouts, attestation spikes and degraded decisions.
+
+==============================================================
+13. ESTIMATED COST
+==============================================================
+
+Effort is an estimate from source size, not a measured plan. [A]
+- Phase 0: 3-5 days engineering plus 2 weeks of observation.
+- Phase 1: 1-2 weeks engineering, plus device test matrix.
+- Phase 2: 2-4 weeks (App Attest in PHP) or 1-2 weeks plus vendor cost (external service). Apple Developer account required (existing cost).
+- Phase 3: 2-3 weeks (TOTP, recovery, step-up, lockout).
+- Phase 4: 1-2 weeks.
+External costs: Apple Developer membership (existing); external attestation vendor pricing not verified; no new SMS costs if email-free MFA is used.
+
+==============================================================
+14. ACCEPTANCE CRITERIA PER PHASE
+==============================================================
+
+Phase 0
+- Baseline report exists with per-action verdict counts for two weeks.
+- reject() logs the true policy action. block_login is used only for login.
+- Test devices cover a rooted device, a non-Play device, an old OS and a current device.
+
+Phase 1
+- Enforced action blocks a tampered test build and a stale token; a valid device passes.
+- Google outage test yields DEGRADED_ALLOW with alert, not silent allow or hard deny.
+- Rollback to log_only takes effect with one config change, verified on staging.
+
+Phase 2
+- Valid App Attest attestation accepted; replayed or wrong-counter assertion rejected; 503 removed only after this passes.
+- No change to Android behaviour.
+
+Phase 3
+- Privileged accounts cannot log in without MFA after enrollment deadline.
+- Recovery codes work once. Lockout triggers after 5 failures and clears after the cap.
+- Two-account isolation and anti-enumeration verified.
+
+Phase 4
+- All protected endpoints use one decision service.
+- Alerts fire on test lockout and degraded decision.
+
+==============================================================
+LIMITATIONS OF THIS REVIEW
+==============================================================
+- No device, emulator or live server was used. No runtime behaviour is verified. [NR]
+- Items marked [A] were not confirmed in source.
+- Migrations 017-020 and tests/ coverage were not read in full.
+- Apple and Google service behaviour and pricing were not checked live.
+
+CORS fix for localhost:8082 is local only and not deployed. Login through the web preview is statically verified only.
+
+END OF REPORT

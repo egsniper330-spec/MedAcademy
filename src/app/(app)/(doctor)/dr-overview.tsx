@@ -103,6 +103,21 @@ export default function DoctorDashboard() {
   const suspendedStudents = enrollments.filter(e => e.status === 'suspended').length;
   const totalCourses      = courses.length;
   const creditsRemaining  = credits.remaining;
+
+  // Dashboard shortcuts: open the matching doctor list with its filter applied.
+  const openStudents = (tab: 'all' | 'active' | 'suspended') => {
+    markEntryIntent('/(app)/(doctor)/students', 'nested');
+    router.push((tab === 'all' ? '/(app)/(doctor)/students' : `/(app)/(doctor)/students?tab=${tab}`) as RelativePathString);
+  };
+  const openCourses = (status?: 'published') => {
+    markEntryIntent('/(app)/(doctor)/courses', 'nested');
+    router.push((status ? `/(app)/(doctor)/courses?status=${status}` : '/(app)/(doctor)/courses') as RelativePathString);
+  };
+  /** Balance → the existing credits/balance screen (same route the drawer uses). */
+  const openCredits = () => {
+    markEntryIntent('/(app)/(hubs)/credits', 'nested');
+    router.push('/(app)/(hubs)/credits' as RelativePathString);
+  };
   const today             = new Date().toDateString();
   const todayActivations  = enrollments.filter(e => new Date(e.created_at).toDateString() === today).length;
   const recentEnrollments = enrollments.slice(0, 5);
@@ -121,6 +136,10 @@ export default function DoctorDashboard() {
     <ScrollView
       style={{ flex: 1, backgroundColor: c.base }}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />}
+      // Trailing clearance for the floating glass bar (this screen ends with a
+      // list, and the bar overlays content). The helper resolves to the plain
+      // safe-area bottom everywhere the bar is not floating over the content.
+      contentContainerStyle={{ paddingBottom: layout.roleTabsBottom() }}
     >
       {/* DashboardHeader sits OUTSIDE the inner padding view so it can own its own horizontal padding */}
       <DashboardHeader
@@ -148,30 +167,66 @@ export default function DoctorDashboard() {
       />
       <View style={{ paddingHorizontal: layout.screenPx }}>
 
-        {/* 7-tile KPI Grid */}
-        <View style={{ flexDirection: 'row', flexWrap: 'wrap', marginBottom: layout.sectionGap }}>
-          <StatCard label={t('drOverview.totalStudents')}      value={totalStudents}       icon={<Users size={layout.captionSize + 2} color="#fff" />}        color="#7C3AED" />
-          <StatCard label={t('status.active')}                 value={activeStudents}      icon={<GraduationCap size={layout.captionSize + 2} color="#fff" />} color="#16A34A" />
-          <StatCard label={t('status.suspended')}              value={suspendedStudents}   icon={<Ban size={layout.captionSize + 2} color="#fff" />}          color="#D97706" />
-          {/* `nav.myCourses` is the TAB label ("My Courses" / "دوراتي") and read
-              as a navigation item rather than a statistic, while the card after
-              it said only "Published" — which is a STATUS, not a count of the
-              instructor's courses. This card now states the statistic plainly:
-              how many courses this instructor owns. */}
-          <StatCard label={t('drOverview.courses')}            value={totalCourses}        icon={<BookOpen size={layout.captionSize + 2} color="#fff" />}     color={c.primary} />
-          <StatCard label={t('nav.credits')}                   value={creditsRemaining}    icon={<CreditCard size={layout.captionSize + 2} color="#fff" />}   color="#2DA8FF" />
-          <StatCard label={t('drOverview.todayActivations')}   value={todayActivations}    icon={<Zap size={layout.captionSize + 2} color="#fff" />}         color="#F59E0B" />
-          {/* Still the PUBLISHED-ONLY subset — its scope is unchanged, but the
-              label now says so ("Published Courses"/"دورات منشورة") so it can
-              never be read as the total course count next to the real one. */}
-          <StatCard label={t('drOverview.publishedCourses')}    value={courses.filter(cr => cr.status === 'published').length} icon={<TrendingUp size={layout.captionSize + 2} color="#fff" />} color="#6366F1" />
+        {/*
+          KPI grid — TWO cards per row; an odd final card spans the full row.
+
+          The cards are declared once in reading order and chunked in pairs, so
+          the pairing follows the CARD COUNT instead of being hand-positioned:
+          adding or removing a KPI re-flows the rows automatically and the last
+          card full-spans only when the count is odd (no empty half-row).
+
+          Each row is a plain `flexDirection:'row'` and every card keeps
+          `flex: 1` (see StatCard), which makes the two cards in a row exactly
+          equal; a row holding one card gives that card the whole content width.
+          No fixed/device widths, no absolute positioning, no breakpoints — the
+          parent width decides, in RTL and LTR alike.
+        */}
+        <View style={{ marginBottom: layout.sectionGap }}>
+          {(() => {
+            const kpis = [
+              { key: 'totalStudents', card: <StatCard label={t('drOverview.totalStudents')}      value={totalStudents}       icon={<Users size={layout.captionSize + 2} color="#fff" />}        color="#7C3AED" onPress={() => openStudents('all')} /> },
+              { key: 'activeStudents', card: <StatCard label={t('status.active')}                 value={activeStudents}      icon={<GraduationCap size={layout.captionSize + 2} color="#fff" />} color="#16A34A" onPress={() => openStudents('active')} /> },
+              { key: 'suspendedStudents', card: <StatCard label={t('status.suspended')}              value={suspendedStudents}   icon={<Ban size={layout.captionSize + 2} color="#fff" />}          color="#D97706" onPress={() => openStudents('suspended')} /> },
+              // `nav.myCourses` is the TAB label ("My Courses" / "دوراتي") and read
+              // as a navigation item rather than a statistic, while the card after
+              // it said only "Published" — which is a STATUS, not a count of the
+              // instructor's courses. This card states the statistic plainly:
+              // how many courses this instructor owns.
+              { key: 'courses', card: <StatCard label={t('drOverview.courses')}            value={totalCourses}        icon={<BookOpen size={layout.captionSize + 2} color="#fff" />}     color={c.primary} onPress={() => openCourses()} /> },
+              // Balance was decorative; it now opens the EXISTING credits screen
+              // (same destination as the drawer entry). Sizing is identical to the
+              // other cards — the grid decides its width, not a special case.
+              { key: 'credits', card: <StatCard label={t('nav.credits')}                   value={creditsRemaining}    icon={<CreditCard size={layout.captionSize + 2} color="#fff" />}   color="#2DA8FF" onPress={openCredits} /> },
+              { key: 'todayActivations', card: <StatCard label={t('drOverview.todayActivations')}   value={todayActivations}    icon={<Zap size={layout.captionSize + 2} color="#fff" />}         color="#F59E0B" /> },
+              // Still the PUBLISHED-ONLY subset — its scope is unchanged, but the
+              // label says so ("Published Courses"/"دورات منشورة") so it can never
+              // be read as the total course count next to the real one.
+              { key: 'publishedCourses', card: <StatCard label={t('drOverview.publishedCourses')}    value={courses.filter(cr => cr.status === 'published').length} icon={<TrendingUp size={layout.captionSize + 2} color="#fff" />} color="#6366F1" onPress={() => openCourses('published')} /> },
+            ];
+            const rows: (typeof kpis)[] = [];
+            for (let i = 0; i < kpis.length; i += 2) rows.push(kpis.slice(i, i + 2));
+            return rows.map((row, rowIndex) => (
+              <View key={`kpi-row-${rowIndex}`} style={{ flexDirection: 'row', alignItems: 'stretch' }}>
+                {row.map((entry) => (
+                  <View key={entry.key} style={{ flex: 1 }}>{entry.card}</View>
+                ))}
+              </View>
+            ));
+          })()}
         </View>
 
         {/* Quick Actions — shared tile component (fixed-square icon box; the
             previous flexGrow wrap-row variant stretched into tall rectangles
             on Android). */}
         <Text style={{ fontSize: layout.bodySize + 1, fontWeight: '800', color: c.text, marginBottom: layout.pad.md }}>{t('drOverview.quickActions')}</Text>
-        <View style={{ flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', marginBottom: layout.sectionGap }}>
+        {/* Quick actions — four equal tiles, one geometry at every width.
+            Root cause of the reported inconsistency: the tile carried `width:'22%'`
+            AND `maxWidth: touchTarget*1.6`. On a phone the cap never engaged; on a
+            tablet / the 768dp Preview panel 22% was much wider than the cap, so each
+            tile shrank to ~70dp while `space-between` still spread them over the whole
+            row — uneven gaps and icons that looked undersized beside their labels. The
+            cap is gone and the tile tracks its parent, so all four are identical. */}
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', rowGap: layout.pad.md, marginBottom: layout.sectionGap }}>
           {[
             { labelKey: 'nav.myCourses', icon: BookOpen,  color: c.primary, route: '/(app)/(doctor)/courses' },
             { labelKey: 'nav.students',  icon: Users,     color: '#7C3AED', route: '/(app)/(doctor)/students' },

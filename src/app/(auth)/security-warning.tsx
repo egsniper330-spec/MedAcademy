@@ -19,9 +19,11 @@ import {
 } from '@/lib/securityStateModel';
 import {
   getPublicSupportContacts, type PublicSupportContact,
-  SUPPORT_ICONS, type SupportPlatformKey,
+  SUPPORT_ICONS, SUPPORT_DEFAULT_LABELS, type SupportPlatformKey,
   type SupportContactEntry,
 } from '@/lib/api';
+import { platformDef } from '@/lib/branding';
+import { PlatformBrandIcon, hasPlatformBrandIcon } from '@/components/PlatformBrandIcon';
 
 // ─── Threat display metadata ──────────────────────────────────────────────────
 // Only human-readable labels and icons — no internal method details shown to users.
@@ -137,6 +139,12 @@ function ContactChooserModal({
             {/* Method buttons */}
             {methods.map(method => {
               const Icon = (SUPPORT_ICONS[method.platform] ?? Mail);
+              // Identity comes from the platform key (see the (app) variant): a
+              // stored label left over from another platform made several methods
+              // render as “WhatsApp”. The key also selects the built-in brand mark.
+              const label = SUPPORT_DEFAULT_LABELS[method.platform] ?? method.label;
+              const description = platformDef(method.platform).description;
+              const brand = hasPlatformBrandIcon(method.platform);
               const isPressed = pressed === method.platform;
               const shadowStyle = isPressed ? neuPressedStyle(isDark) : flat;
               return (
@@ -160,11 +168,13 @@ function ContactChooserModal({
                       backgroundColor: `${c.primary}18`,
                       alignItems: 'center', justifyContent: 'center',
                     }}>
-                      <Icon size={layout.bodySize + 4} color={c.primary} />
+                      {brand
+                        ? <PlatformBrandIcon platform={method.platform} size={layout.bodySize + 6} tint={c.primary} />
+                        : <Icon size={layout.bodySize + 4} color={c.primary} />}
                     </View>
                     <View style={{ flex: 1 }}>
-                      <Text style={{ fontSize: layout.bodySize, fontWeight: '700', color: c.text }}>{method.label}</Text>
-                      <Text style={{ fontSize: layout.captionSize, color: `${c.text}66` }} numberOfLines={1}>{method.url}</Text>
+                      <Text style={{ fontSize: layout.bodySize, fontWeight: '700', color: c.text }}>{label}</Text>
+                      <Text style={{ fontSize: layout.captionSize, color: `${c.text}66` }} numberOfLines={1}>{description}</Text>
                     </View>
                     <ArrowRight size={layout.captionSize + 2} color={`${c.text}44`} />
                   </View>
@@ -269,11 +279,16 @@ export default function SecurityWarningScreen() {
   // Build enabled contact methods list from the PUBLIC endpoint (no auth needed).
   const contactMethods: ContactMethod[] = React.useMemo(() => {
     if (!support || support.length === 0) return [];
-    return support.map(c => ({
-      platform: c.platform as SupportPlatformKey,
-      label:    c.label,
-      url:      c.url,
-    }));
+    const out: ContactMethod[] = [];
+    const seen = new Set<string>();
+    for (const c of support) {
+      const platform = c.platform as SupportPlatformKey;
+      if (seen.has(platform)) continue;          // one row per platform — no duplicates
+      if (!c.url) continue;                     // unconfigured → never rendered
+      seen.add(platform);
+      out.push({ platform, label: c.label, url: c.url });
+    }
+    return out;
   }, [support]);
 
   const handleContactSupport = () => {

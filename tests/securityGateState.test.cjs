@@ -242,8 +242,9 @@ console.log('── Part 7: which states offer a recheck control ──');
 console.log('── Part 8: overlay copy and documented detection limits ──');
 {
   const required =
-    'An overlay or another app may be interfering with MedAcademy. ' +
-    'Close the interfering app and verify security to continue.';
+    'MedAcademy cannot run while another app is covering it or split-screen ' +
+    'mode is active. Please close the other app and return to full-screen ' +
+    'mode to continue.';
   check('8a: the overlay warning message matches the specification verbatim',
     M.OVERLAY_WARNING_COPY.message === required);
   check('8b: the overlay warning is titled "Security warning"',
@@ -256,6 +257,14 @@ console.log('── Part 8: overlay copy and documented detection limits ──'
     M.OVERLAY_DETECTION_LIMITS.some((l) => /enumerate/i.test(l)));
   check('8f: the limits state the system-overlay exemption',
     M.OVERLAY_DETECTION_LIMITS.some((l) => /system-signed/i.test(l)));
+  check('8g: the split-screen page carries the same required sentence',
+    M.MULTI_WINDOW_WARNING_COPY.message === required);
+  const oSteps = M.overlayBlockSteps();
+  check('8h: the overlay page lists actionable recovery steps',
+    Array.isArray(oSteps) && oSteps.length >= 3
+    && oSteps.some((s) => /full screen/i.test(s)));
+  check('8i: the overlay steps never claim to identify the covering app',
+    !oSteps.some((s) => /identify|which app|enumerate/i.test(s)));
 }
 
 console.log('\n' + passed + ' passed, ' + failed + ' failed');

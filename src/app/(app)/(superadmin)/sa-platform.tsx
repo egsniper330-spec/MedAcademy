@@ -74,7 +74,7 @@ export default function SAPlatform() {
   const layout = useLayout();
 
   return (
-    <ScrollView style={{ flex: 1, backgroundColor: c.base }} contentContainerStyle={{ paddingBottom: safeBottom(layout.insets.bottom) }}>
+    <ScrollView style={{ flex: 1, backgroundColor: c.base }} contentContainerStyle={{ paddingBottom: layout.roleTabsBottom() }}>
       {/* PageHeader sits OUTSIDE the inner padding view so it can own its own horizontal padding */}
       <PageHeader title="Platform" subtitle="All settings & integrations" accentColor="#6B7280" rightAction={<Bell />} />
 
@@ -112,7 +112,7 @@ export default function SAPlatform() {
 
         {/* ── User Management ──────────────────────────────────────────── */}
         <SectionLabel title="User Management" c={c} />
-        <NavItem icon={UserCog}       label="Admin Management"  description="Super-admin and admin accounts"          color="#EF4444" path="/sa-users"              c={c} isDark={isDark} />
+        <NavItem icon={UserCog}       label="Admin Management"  description="Super-admin and admin accounts"          color="#EF4444" path="/sa-admin-management"  c={c} isDark={isDark} />
         <NavItem icon={HeartHandshake} label="Impersonation"   description="Log in as any user for debugging"        color="#2DA8FF" path="/impersonation"       c={c} isDark={isDark} />
         <NavItem icon={Smartphone}    label="Device Management" description="User device limits & revocation"        color="#16A34A" path="/sa-devices"              c={c} isDark={isDark} />
 

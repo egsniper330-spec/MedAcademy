@@ -174,7 +174,13 @@ final class AuthService
     // -----------------------------------------------------------------------
     // Login
     // -----------------------------------------------------------------------
-    public function login(Request $request, array $data): array
+    /**
+     * @param list<string>|null $allowedRoles When set, the AUTHENTICATED
+     *        profile role must be in this list or no session is issued. The
+     *        portal passes ['doctor','admin','super_admin']; mobile passes
+     *        null so student login is unchanged.
+     */
+    public function login(Request $request, array $data, ?array $allowedRoles = null): array
     {
         $this->rateLimit('login:' . $request->clientIp(), Config::int('RATE_LIMIT_LOGIN_PER_MINUTE', 10), 60);
 
@@ -184,17 +190,27 @@ final class AuthService
             throw new ApiException(422, 'Identifier and password are required');
         }
 
+        // Source+identifier cooldown. Checked BEFORE the credentials are read so
+        // a known and an unknown identifier are treated identically here, and
+        // before Password::verify so a locked pair cannot be used to brute force.
+        $pairThrottle = new LoginPairThrottleService();
+        $pairThrottle->assertAllowed($request->clientIp(), $identifier);
+
         $account = $this->resolveIdentifier($identifier);
         if ($account === null) {
+            $pairThrottle->recordFailure($request->clientIp(), $identifier);
             $this->recordLogin(null, $request, false, 'no_account');
             throw new ApiException(401, 'Invalid login credentials');
         }
         $userId = $account['id'];
         $hash = $account['encrypted_password'] ?? '';
         if (!Password::verify($password, $hash)) {
+            $pairThrottle->recordFailure($request->clientIp(), $identifier);
             $this->recordLogin($userId, $request, false, 'wrong_password');
             throw new ApiException(401, 'Invalid login credentials');
         }
+        // Credentials verified: the pair's failure history is cleared.
+        $pairThrottle->clear($request->clientIp(), $identifier);
 
         // transparent re-hash (upgrades Supabase $2a$ hashes to $2y$)
         if (Password::needsRehash($hash)) {
@@ -212,6 +228,19 @@ final class AuthService
         if (in_array($account['status'], ['trashed', 'deleted'], true)) {
             $this->recordLogin($userId, $request, false, 'deleted');
             throw new ApiException(401, 'Invalid login credentials');
+        }
+
+        // ── Portal role gate ────────────────────────────────────────────────
+        // Checked from the credential-verified account row, BEFORE any feature
+        // flag, device registration or session issue. A student who signs in to
+        // the staff portal therefore receives no token at all.
+        if ($allowedRoles !== null && !in_array((string) ($account['role'] ?? ''), $allowedRoles, true)) {
+            $this->recordLogin($userId, $request, false, 'portal_role_forbidden');
+            throw new ApiException(
+                403,
+                'This portal is for doctors, administrators and super administrators only. Students must use the mobile app.',
+                'portal_role_forbidden'
+            );
         }
 
         // ── Feature flag: user_login ────────────────────────────────────────

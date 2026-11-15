@@ -695,8 +695,7 @@ export function canClearOverlayBlock(input: {
 export const OVERLAY_WARNING_COPY = {
   title: 'Security warning',
   message:
-    'An overlay or another app may be interfering with MedAcademy. ' +
-    'Close the interfering app and verify security to continue.',
+    'MedAcademy cannot run while another app is covering it or split-screen mode is active. Please close the other app and return to full-screen mode to continue.',
 } as const;
 
 // ─── Multi-window / split-screen gate (mandatory full-screen usage) ──────────
@@ -731,9 +730,7 @@ export function isProhibitedWindowMode(mode: WindowMode | string | null | undefi
 export const MULTI_WINDOW_WARNING_COPY = {
   title: 'Full-screen required',
   message:
-    'Split-screen detected. MedAcademy must be used full-screen, so protected '
-    + 'content is hidden until you close split-screen and the app is back to '
-    + 'normal full-screen usage.',
+    'MedAcademy cannot run while another app is covering it or split-screen mode is active. Please close the other app and return to full-screen mode to continue.',
 } as const;
 
 export const PICTURE_IN_PICTURE_WARNING_COPY = {
@@ -769,6 +766,21 @@ export function windowModeBlockSteps(mode: WindowMode | string | null | undefine
     'Open the recent-apps view (the square/gesture button) and choose "Full screen" / drag the divider to the top or bottom edge.',
     'Or close the app paired with MedAcademy and reopen MedAcademy on its own.',
     'Access returns automatically as soon as MedAcademy is back to full-screen.',
+  ];
+}
+
+/**
+ * What the user must do while the OVERLAY hold is engaged. The overlay and
+ * split-screen pages share one required sentence, but the recovery actions are
+ * different, so the steps are kept next to the window-mode steps and rendered by
+ * the same list. Nothing here claims the app can identify WHICH app is drawing
+ * over it — only that the condition must end and a fresh check must pass.
+ */
+export function overlayBlockSteps(): readonly string[] {
+  return [
+    'Close the app, floating window or screen-capture tool that is covering MedAcademy.',
+    'Return to MedAcademy in full screen (do not leave it in split-screen or picture-in-picture).',
+    'Access returns automatically once a fresh security check passes.',
   ];
 }
 

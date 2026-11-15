@@ -47,7 +47,7 @@
  * is cached across mounts.
  */
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator, BackHandler, Platform, Pressable, StatusBar, Text, View,
 } from 'react-native';
@@ -64,6 +64,7 @@ import {
 import { resolveWatermarkIdentity } from '@/lib/watermarkIdentity';
 import { resolveWatermarkLayers, type WatermarkPlatform } from '@/lib/watermarkLayers';
 import { NativeWatermarkOverlay } from '@/components/NativeWatermarkOverlay';
+import { ProtectedContentSurface } from '@/components/ProtectedContentSurface';
 import {
   enterFullscreenSystemUi,
   exitFullscreenSystemUi,
@@ -106,6 +107,30 @@ export function OfflineVideoPlayer({ entry, shouldAllowPlayback, fullscreenVerdi
   // security lock engages (identical contract to the online adapter — see
   // src/lib/useSecurityPlaybackStop.ts). */}
   const playerRef = useSecurityPlaybackStop();
+
+  // ── PROTECTED CONTENT: pause/hide on lifecycle edges, keep the session ────
+  // Same contract as the online adapter: the SAME VdoPlayerView instance and
+  // offline DRM session stay alive; only pause + concealment happen. The
+  // native control bar still owns all playback controls.
+  const playingRef = useRef(false);
+  const isFullscreenRef = useRef(false);
+  useEffect(() => { isFullscreenRef.current = isFullscreen; }, [isFullscreen]);
+  const resumeOnRevealRef = useRef(false);
+  const concealPlayer = useCallback((_reason: string) => {
+    resumeOnRevealRef.current = playingRef.current;
+    try { playerRef.current?.pause?.(); } catch { /* player not ready */ }
+    try { playerRef.current?.exitFullscreenV2?.(); } catch { /* not fullscreen */ }
+    if (isFullscreenRef.current) setIsFullscreen(false);
+  }, [playerRef]);
+  const revealPlayer = useCallback(() => {
+    const shouldResume = resumeOnRevealRef.current;
+    resumeOnRevealRef.current = false;
+    if (!shouldResume) return;
+    try { playerRef.current?.play?.(); } catch { /* user can resume manually */ }
+  }, [playerRef]);
+  const handlePlayerStateChanged = useCallback((event: any) => {
+    playingRef.current = event?.playWhenReady === true;
+  }, []);
 
   // ── WATERMARK IDENTITY — one authoritative resolution ─────────────────────
   // Explicit props (the screens pass the profile-derived public id) win;
@@ -371,7 +396,9 @@ export function OfflineVideoPlayer({ entry, shouldAllowPlayback, fullscreenVerdi
     // re-measures the container; nothing is torn down. When not fullscreen it
     // is the normal 16:9 block under the watch header.
     <VdoSessionScope tag={sessionTag}>
-    <View
+    <ProtectedContentSurface
+      onConceal={concealPlayer}
+      onReveal={revealPlayer}
       style={
         isFullscreen
           ? {
@@ -411,6 +438,7 @@ export function OfflineVideoPlayer({ entry, shouldAllowPlayback, fullscreenVerdi
         onLoaded={() => setReady(true)}
         onLoadError={handleLoadError}
         onError={handleLoadError}
+        onPlayerStateChanged={handlePlayerStateChanged}
         onEnterFullscreen={enterFullscreen}
         onExitFullscreen={exitFullscreen}
       />
@@ -442,7 +470,7 @@ export function OfflineVideoPlayer({ entry, shouldAllowPlayback, fullscreenVerdi
           <ArrowLeft size={22} color="#fff" />
         </Pressable>
       )}
-    </View>
+    </ProtectedContentSurface>
     </VdoSessionScope>
   );
 }

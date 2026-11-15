@@ -23,17 +23,17 @@
  *
  * BACKGROUND/RESUME (behavior changed deliberately — see below)
  * ─────────────────────────────────────────────────────────────────────────
- * This hook used to state that backgrounding never invoked the stopper, so
- * intentional background playback survived a Home press. That is no longer the
- * contract: the centralized security gate holds a HARD lock the instant the app
- * leaves the foreground (`background-resume` in SecurityContext), precisely so
- * protected lecture audio/video cannot keep running while the app is not in the
- * foreground and cannot be briefly revealed on return before the post-resume
- * checks finish. `Container.test` / `securityGate.test.cjs` assert this.
+ * Backgrounding no longer engages a global lock. The PROTECTED CONTENT layer
+ * owns that transition: `ProtectedContentSurface` registers a synchronous
+ * concealer that pauses this same player (via the identical documented
+ * `pause()` call) and hides its native surface, so lecture audio/video cannot
+ * keep running or be briefly revealed on return. The player instance, OTP
+ * session and playback position are preserved — a permanent lock/unmount is
+ * reserved for a CONFIRMED app-access violation.
  *
- * Everything else still holds: a lock is the ONLY thing that stops playback
- * early, it is released as soon as the post-resume verification passes, and
- * public/auth traffic is never contained (see the transport gate in php.ts).
+ * This stopper remains the containment path for the central security lock
+ * (verdict, native VPN, overlay, prohibited window mode), and public/auth
+ * traffic is never contained by it (see the transport gate in php.ts).
  */
 
 import { useEffect, useRef } from 'react';

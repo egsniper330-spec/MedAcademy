@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use MedAcademy\Controllers\AdminController;
+use MedAcademy\Controllers\AdminRbacController;
 use MedAcademy\Controllers\AnalyticsController;
 use MedAcademy\Controllers\EnrollmentStatsController;
 use MedAcademy\Controllers\AuthController;
@@ -14,6 +15,7 @@ use MedAcademy\Controllers\IntegrityController;
 use MedAcademy\Controllers\MaintenanceController;
 use MedAcademy\Middleware\MaintenanceMiddleware;
 use MedAcademy\Controllers\NotificationController;
+use MedAcademy\Controllers\PdfForensicController;
 use MedAcademy\Controllers\PlatformController;
 use MedAcademy\Controllers\SecurityController;
 use MedAcademy\Controllers\SecurityEvidenceController;
@@ -32,6 +34,7 @@ use MedAcademy\Controllers\AppReleaseController;
 use MedAcademy\Controllers\UpdateConfigController;
 use MedAcademy\Controllers\VideoController;
 use MedAcademy\Controllers\VideoProviderController;
+use MedAcademy\Http\ApiException;
 
 /*
  * MedAcademy REST API route table — 95+ routes.
@@ -53,12 +56,15 @@ $router->get('/api/health', [HealthController::class, 'health']);
 $router->get('/health', [HealthController::class, 'health']);
 // Detailed diagnostics are internal: admin / super_admin only. Public uptime
 // checks use /api/health and /health (service identity + DB ping, no detail).
-$router->get('/system-health', [HealthController::class, 'systemHealth'], $auth + ['role' => ['admin', 'super_admin']]);
-$router->get('/provider-health', [HealthController::class, 'providerHealth'], $auth + ['role' => ['admin', 'super_admin']]);
+$router->get('/system-health', [HealthController::class, 'systemHealth'], $auth + ['role' => ['admin', 'super_admin'], 'permission' => 'manage_system_health']);
+$router->get('/provider-health', [HealthController::class, 'providerHealth'], $auth + ['role' => ['admin', 'super_admin'], 'permission' => 'manage_system_health']);
 
 // ---- Auth (public) ---------------------------------------------------------
 $router->post('/auth/register', [AuthController::class, 'register']);
 $router->post('/auth/login', [AuthController::class, 'login']);
+// Staff-only web portal login: identical credential pipeline, but a student
+// receives 403 before any session is issued (mobile student login unchanged).
+$router->post('/portal/auth/login', [AuthController::class, 'portalLogin']);
 $router->post('/auth/refresh', [AuthController::class, 'refresh']);
 
 // ---- Maintenance Mode (server-authoritative) -------------------------------
@@ -121,13 +127,13 @@ $router->post('/auth/devices/revoke', [AuthController::class, 'revokeDevice'], $
 $router->post('/device-binding', [DeviceController::class, 'handle'], $auth);
 
 // ---- Student operations -----------------------------------------------------
-$router->post('/student-operations', [StudentController::class, 'handle'], $auth + ['role' => ['doctor', 'admin', 'super_admin']]);
+$router->post('/student-operations', [StudentController::class, 'handle'], $auth + ['role' => ['doctor', 'admin', 'super_admin'], 'staff_permission' => 'manage_students']);
 
 // ---- Bulk student actions (same per-row authorization as individual actions) ----
-$router->post('/students/bulk-action', [StudentBulkController::class, 'handle'], $auth + ['role' => ['doctor', 'admin', 'super_admin']]);
+$router->post('/students/bulk-action', [StudentBulkController::class, 'handle'], $auth + ['role' => ['doctor', 'admin', 'super_admin'], 'staff_permission' => 'manage_students']);
 
 // ---- Trash / restore --------------------------------------------------------
-$router->post('/users/{id}/trash', [AuthController::class, 'trashUser'], $auth + ['role' => ['admin', 'super_admin']]);
+$router->post('/users/{id}/trash', [AuthController::class, 'trashUser'], $auth + ['role' => ['admin', 'super_admin'], 'permission' => 'delete_students']);
 
 // ---- Impersonate ------------------------------------------------------------
 $router->post('/auth/impersonate', [AuthController::class, 'impersonate'], $auth + ['role' => ['super_admin']]);
@@ -148,18 +154,19 @@ $router->get('/courses/{id}/lessons', [CourseController::class, 'lessons'], $aut
 // Section deletion is transactional + dependency-aware (see the controller).
 // POST (not the generic DELETE /api/{table}) so the dependency chain, the
 // cross-course guard and the ownership check are all enforced in one place.
-$router->post('/courses/{id}/sections/{section_id}/delete', [CourseController::class, 'deleteSection'], $auth + ['role' => ['doctor', 'admin', 'super_admin']]);
+$router->post('/courses/{id}/sections/{section_id}/delete', [CourseController::class, 'deleteSection'], $auth + ['role' => ['doctor', 'admin', 'super_admin'], 'staff_permission' => 'manage_courses']);
 $router->get('/courses/{id}/progress', [CourseController::class, 'progress'], $auth);
-$router->post('/courses', [CourseController::class, 'create'], $auth + ['role' => ['doctor', 'admin', 'super_admin']]);
-$router->patch('/courses/{id}', [CourseController::class, 'update'], $auth + ['role' => ['doctor', 'admin', 'super_admin']]);
+$router->post('/courses', [CourseController::class, 'create'], $auth + ['role' => ['doctor', 'admin', 'super_admin'], 'staff_permission' => 'manage_courses']);
+$router->post('/courses/import', [CourseController::class, 'importCsv'], $auth + ['role' => ['doctor', 'admin', 'super_admin'], 'staff_permission' => 'manage_courses']);
+$router->patch('/courses/{id}', [CourseController::class, 'update'], $auth + ['role' => ['doctor', 'admin', 'super_admin'], 'staff_permission' => 'edit_any_course']);
 $router->post('/courses/{id}/enroll', [CourseController::class, 'enroll'], $auth);
-$router->post('/courses/{id}/archive', [CourseController::class, 'archive'], $auth + ['role' => ['doctor', 'admin', 'super_admin']]);
-$router->post('/courses/{id}/publish', [CourseController::class, 'publish'], $auth + ['role' => ['doctor', 'admin', 'super_admin']]);
-$router->post('/courses/{id}/unpublish', [CourseController::class, 'unpublish'], $auth + ['role' => ['doctor', 'admin', 'super_admin']]);
-$router->post('/courses/{id}/restore', [CourseController::class, 'restore'], $auth + ['role' => ['doctor', 'admin', 'super_admin']]);
-$router->post('/courses/{id}/delete', [CourseController::class, 'deleteCourse'], $auth + ['role' => ['doctor', 'admin', 'super_admin']]);
-$router->post('/courses/{id}/duplicate', [CourseController::class, 'duplicate'], $auth + ['role' => ['doctor', 'admin', 'super_admin']]);
-$router->post('/courses/grant-access', [CourseController::class, 'grantAccess'], $auth + ['role' => ['admin', 'super_admin']]);
+$router->post('/courses/{id}/archive', [CourseController::class, 'archive'], $auth + ['role' => ['doctor', 'admin', 'super_admin'], 'staff_permission' => 'manage_courses']);
+$router->post('/courses/{id}/publish', [CourseController::class, 'publish'], $auth + ['role' => ['doctor', 'admin', 'super_admin'], 'staff_permission' => 'publish_courses']);
+$router->post('/courses/{id}/unpublish', [CourseController::class, 'unpublish'], $auth + ['role' => ['doctor', 'admin', 'super_admin'], 'staff_permission' => 'publish_courses']);
+$router->post('/courses/{id}/restore', [CourseController::class, 'restore'], $auth + ['role' => ['doctor', 'admin', 'super_admin'], 'staff_permission' => 'manage_courses']);
+$router->post('/courses/{id}/delete', [CourseController::class, 'deleteCourse'], $auth + ['role' => ['doctor', 'admin', 'super_admin'], 'staff_permission' => 'delete_any_course']);
+$router->post('/courses/{id}/duplicate', [CourseController::class, 'duplicate'], $auth + ['role' => ['doctor', 'admin', 'super_admin'], 'staff_permission' => 'manage_courses']);
+$router->post('/courses/grant-access', [CourseController::class, 'grantAccess'], $auth + ['role' => ['admin', 'super_admin'], 'permission' => 'manage_students']);
 
 $router->get('/categories', [CourseController::class, 'categories'], $auth);
 $router->get('/universities', [CourseController::class, 'universities'], $auth);
@@ -169,10 +176,10 @@ $router->get('/faculties/{id}/levels', [CourseController::class, 'academicLevels
 // ---- Credits -----------------------------------------------------------------
 $router->get('/credits/me', [CreditController::class, 'me'], $auth);
 $router->get('/credits/transactions', [CreditController::class, 'transactions'], $auth);
-$router->post('/credits/allocate', [CreditController::class, 'allocate'], $auth + ['role' => ['admin', 'super_admin']]);
-$router->post('/credits/refund', [CreditController::class, 'refund'], $auth + ['role' => ['admin', 'super_admin']]);
-$router->post('/credits/revoke', [CreditController::class, 'revoke'], $auth + ['role' => ['admin', 'super_admin']]);
-$router->post('/credits/bulk-allocate', [CreditController::class, 'bulkAllocate'], $auth + ['role' => ['admin', 'super_admin']]);
+$router->post('/credits/allocate', [CreditController::class, 'allocate'], $auth + ['role' => ['admin', 'super_admin'], 'permission' => 'manage_doctor_credits']);
+$router->post('/credits/refund', [CreditController::class, 'refund'], $auth + ['role' => ['admin', 'super_admin'], 'permission' => 'manage_doctor_credits']);
+$router->post('/credits/revoke', [CreditController::class, 'revoke'], $auth + ['role' => ['admin', 'super_admin'], 'permission' => 'manage_doctor_credits']);
+$router->post('/credits/bulk-allocate', [CreditController::class, 'bulkAllocate'], $auth + ['role' => ['admin', 'super_admin'], 'permission' => 'manage_doctor_credits']);
 // EARNINGS RETIRED: GET /credits/doctor/{id} (doctor earnings dashboard) is no
 // longer served. Credit balances/ledgers remain available through
 // /credits/me, /credits/transactions and the ledger/analytics endpoints.
@@ -194,9 +201,9 @@ $router->get('/security/policies', [SecurityController::class, 'policies'], $aut
 $router->get('/security/version', [SecurityController::class, 'version'], $auth);
 $router->post('/security/events', [SecurityController::class, 'reportEvent'], $auth);
 $router->post('/security/violations', [SecurityController::class, 'reportViolation'], $auth);
-$router->post('/security/bump-version/{id}', [SecurityController::class, 'bumpVersion'], $auth + ['role' => ['admin', 'super_admin']]);
-$router->post('/security/devices/{id}/block', [SecurityController::class, 'blockDevice'], $auth + ['role' => ['admin', 'super_admin']]);
-$router->post('/security/devices/{id}/unblock', [SecurityController::class, 'unblockDevice'], $auth + ['role' => ['admin', 'super_admin']]);
+$router->post('/security/bump-version/{id}', [SecurityController::class, 'bumpVersion'], $auth + ['role' => ['admin', 'super_admin'], 'permission' => 'manage_security']);
+$router->post('/security/devices/{id}/block', [SecurityController::class, 'blockDevice'], $auth + ['role' => ['admin', 'super_admin'], 'permission' => 'manage_security']);
+$router->post('/security/devices/{id}/unblock', [SecurityController::class, 'unblockDevice'], $auth + ['role' => ['admin', 'super_admin'], 'permission' => 'manage_security']);
 // ── Security Policies management (Super Admin only) ────────────────────────
 // Server-authoritative policy administration: read the full rows for the SA
 // UI, update one detection bucket (validated against the schema CHECK
@@ -218,25 +225,39 @@ $router->post('/security/challenge', [SecurityEvidenceController::class, 'challe
 $router->post('/security/evidence', [SecurityEvidenceController::class, 'submit'], $auth);
 $router->post('/security/device-keys/{id}/revoke', [SecurityEvidenceController::class, 'revokeKey'], $auth);
 
-// ---- Video (VdoCipher) -----------------------------------------------------
-$router->post('/video/otp', [VideoController::class, 'otp'], $auth);
-$router->post('/video/offline-authorize', [VideoController::class, 'offlineAuthorize'], $auth);
-$router->post('/video/upload-init', [VideoController::class, 'uploadInit'], $auth);
-$router->post('/video/upload-status', [VideoController::class, 'uploadStatus'], $auth);
-$router->post('/video/delete', [VideoController::class, 'delete'], $auth);
-$router->post('/video/cancel-upload', [VideoController::class, 'cancelUpload'], $auth + ['role' => ['doctor', 'admin', 'super_admin']]);
-$router->post('/video/assets', [VideoController::class, 'assets'], $auth);
-// Explicit import of an EXISTING VdoCipher video. Sync never imports unknown
-// remote assets, and an id owned by another doctor is refused (409).
-$router->post('/video/import', [VideoController::class, 'importAsset'], $auth + ['role' => ['doctor', 'admin', 'super_admin']]);
-$router->post('/video/assets/delete', [VideoController::class, 'deleteAsset'], $auth + ['role' => ['doctor', 'admin', 'super_admin']]);
-$router->post('/video/webhook', [VideoController::class, 'webhook']);
-$router->post('/video/chunk', [VideoController::class, 'uploadChunk'], $auth);
-$router->post('/video/assemble', [VideoController::class, 'assembleUpload'], $auth + ['role' => ['doctor', 'admin', 'super_admin']]);
-$router->post('/video/health-scan', [VideoController::class, 'healthScan'], $auth + ['role' => ['admin', 'super_admin']]);
-// Authoritative VdoCipher status (Super Admin): live API listing + webhook
-// contract diagnostics. Server-side API secret; sanitized response only.
-$router->get('/video/vdocipher-status', [VideoController::class, 'vdocipherStatus'], $auth + ['role' => ['super_admin']]);
+// ---- Video (VdoCipher) — RETIRED -------------------------------------------
+// VdoCipher is no longer an active provider: YouTube is the only supported video
+// source, and both clients (mobile + portal) have had their upload/playback UIs
+// removed. Every endpoint that used to mint playback or upload tokens, accept
+// chunks, import library assets, attach an asset to a lesson, reconcile the remote
+// library or report VdoCipher diagnostics now answers a deliberate, documented
+// 410 `video_provider_retired` — it cannot mint a token, touch a lesson or contact
+// the provider. Old `video_assets` rows, lesson metadata and course relationships
+// are preserved untouched.
+$videoRetired = static function (): array {
+    throw new ApiException(
+        410,
+        'Video provider retired: YouTube is the only supported video source.',
+        ['video_provider_retired']
+    );
+};
+
+$router->post('/video/otp', $videoRetired, $auth);
+$router->post('/video/offline-authorize', $videoRetired, $auth);
+$router->post('/video/upload-init', $videoRetired, $auth);
+$router->post('/video/upload-status', $videoRetired, $auth);
+$router->post('/video/delete', $videoRetired, $auth);
+$router->post('/video/cancel-upload', $videoRetired, $auth + ['role' => ['doctor', 'admin', 'super_admin']]);
+$router->post('/video/assets', $videoRetired, $auth);
+$router->post('/video/import', $videoRetired, $auth + ['role' => ['doctor', 'admin', 'super_admin'], 'staff_permission' => 'upload_videos']);
+$router->post('/video/attach-lesson', $videoRetired, $auth + ['role' => ['doctor', 'admin', 'super_admin'], 'staff_permission' => 'upload_videos']);
+$router->post('/video/assets/delete', $videoRetired, $auth + ['role' => ['doctor', 'admin', 'super_admin']]);
+// The provider webhook is retired too: accepting it would keep VdoCipher state live.
+$router->post('/video/webhook', $videoRetired);
+$router->post('/video/chunk', $videoRetired, $auth);
+$router->post('/video/assemble', $videoRetired, $auth + ['role' => ['doctor', 'admin', 'super_admin'], 'staff_permission' => 'upload_videos']);
+$router->post('/video/health-scan', $videoRetired, $auth + ['role' => ['admin', 'super_admin'], 'permission' => 'manage_courses']);
+$router->get('/video/vdocipher-status', $videoRetired, $auth + ['role' => ['super_admin']]);
 
 // ---- Video Provider Control Center (Super Admin) ----------------------------
 // Global availability + per-doctor three-state overrides over the REAL
@@ -246,14 +267,14 @@ $router->get('/video-providers', [VideoProviderController::class, 'index'], $aut
 $router->put('/video-providers/{key}/global', [VideoProviderController::class, 'setGlobal'], $auth + ['role' => ['super_admin']]);
 $router->get('/video-providers/teachers/{id}', [VideoProviderController::class, 'teacher'], $auth + ['role' => ['super_admin']]);
 $router->put('/video-providers/teachers/{id}', [VideoProviderController::class, 'setTeacher'], $auth + ['role' => ['super_admin']]);
-$router->post('/video/upload-patch', [VideoController::class, 'uploadPatch'], $auth + ['role' => ['super_admin']]);
-$router->post('/video/orphan-cleanup', [VideoController::class, 'orphanCleanup'], $auth + ['role' => ['admin', 'super_admin']]);
+$router->post('/video/upload-patch', $videoRetired, $auth + ['role' => ['super_admin']]);
+$router->post('/video/orphan-cleanup', $videoRetired, $auth + ['role' => ['admin', 'super_admin'], 'permission' => 'manage_courses']);
 // VdoCipher ↔ Video Library reconciliation (paginated remote listing →
 // missing/duplicate repair). Admin: whole platform; Doctor: their own library
 // (scope clamped server-side) — doctors must be able to reconcile their own
 // library against VdoCipher without a Super Admin round-trip.
-$router->post('/video/sync-library', [VideoController::class, 'syncLibrary'], $auth + ['role' => ['doctor', 'admin', 'super_admin']]);
-$router->post('/lessons/{id}/delete', [CourseController::class, 'deleteLesson'], $auth + ['role' => ['doctor', 'admin', 'super_admin']]);
+$router->post('/video/sync-library', $videoRetired, $auth + ['role' => ['doctor', 'admin', 'super_admin']]);
+$router->post('/lessons/{id}/delete', [CourseController::class, 'deleteLesson'], $auth + ['role' => ['doctor', 'admin', 'super_admin'], 'staff_permission' => 'manage_lessons']);
 
 // ---- Integrity (Play Integrity / App Integrity) -----------------------------
 $router->post('/integrity/play', [IntegrityController::class, 'playIntegrity'], $auth);
@@ -263,7 +284,7 @@ $router->post('/integrity/app', [IntegrityController::class, 'appIntegrity'], $a
 $router->get('/storage/buckets', [StorageController::class, 'buckets'], $auth);
 // Real storage statistics (Admin/Super Admin): measured disk, physical upload
 // sizes and database size. Read-only diagnostics — nothing is modified.
-$router->get('/storage/stats', [StorageController::class, 'stats'], $auth + ['role' => ['admin', 'super_admin']]);
+$router->get('/storage/stats', [StorageController::class, 'stats'], $auth + ['role' => ['admin', 'super_admin'], 'permission' => 'storage_management']);
 $router->get('/storage/signed-url', [StorageController::class, 'signedUrl'], $auth);
 $router->post('/storage/signed-url', [StorageController::class, 'signedUrl'], $auth); // EF get-signed-url POSTs a JSON body
 $router->get('/storage/signed', [StorageController::class, 'signedFile']);
@@ -299,49 +320,76 @@ $router->post('/materials/pdf-url', [MaterialDeliveryController::class, 'pdfUrl'
 // bounded client polling. Same authorization, no token, no render.
 $router->get('/materials/pdf-status', [MaterialDeliveryController::class, 'pdfStatus'], $auth);
 $router->get('/materials/pdf', [MaterialDeliveryController::class, 'streamPdf']);
-$router->get('/admin/material-watermark-status', [MaterialDeliveryController::class, 'watermarkStatus'], $auth + ['role' => ['admin', 'super_admin']]);
+$router->get('/admin/material-watermark-status', [MaterialDeliveryController::class, 'watermarkStatus'], $auth + ['role' => ['admin', 'super_admin'], 'permission' => 'manage_courses']);
+
+// ---- PDF Checker (forensic inspection) ------------------------------------
+// Upload a suspect PDF and read the forensic payload from its page images.
+// Authorization is enforced in the controller: a doctor may only inspect
+// documents of materials they can access and only sees their own issuances; an
+// admin is held to the same material-level scope; a super admin sees the
+// platform. Every run is written to audit_logs and pdf_forensic_checks.
+$router->post('/pdf-forensic/check', [PdfForensicController::class, 'check'], $auth + ['role' => ['doctor', 'admin', 'super_admin']]);
+$router->get('/pdf-forensic/issuances', [PdfForensicController::class, 'issuances'], $auth + ['role' => ['doctor', 'admin', 'super_admin']]);
 
 // ---- Admin ----------------------------------------------------------------
-$router->get('/admin/users', [AdminController::class, 'users'], $auth + ['role' => ['admin', 'super_admin']]);
-$router->get('/admin/users/{id}', [AdminController::class, 'userDetail'], $auth + ['role' => ['admin', 'super_admin']]);
-$router->post('/admin/users/{id}/role', [AdminController::class, 'setRole'], $auth + ['role' => ['admin', 'super_admin']]);
-$router->post('/admin/users/{id}/status', [AdminController::class, 'setStatus'], $auth + ['role' => ['admin', 'super_admin']]);
-$router->post('/admin/users/{id}/block', [AdminController::class, 'blockUser'], $auth + ['role' => ['admin', 'super_admin']]);
-$router->post('/admin/users/{id}/restore', [AdminController::class, 'restoreUser'], $auth + ['role' => ['admin', 'super_admin']]);
-$router->post('/admin/users/{id}/devices/reset', [AdminController::class, 'resetDevices'], $auth + ['role' => ['admin', 'super_admin']]);
-$router->get('/admin/audit-logs', [AdminController::class, 'auditLogs'], $auth + ['role' => ['admin', 'super_admin']]);
+$router->get('/admin/users', [AdminController::class, 'users'], $auth + ['role' => ['admin', 'super_admin'], 'permission' => 'view_students']);
+$router->get('/admin/users/{id}', [AdminController::class, 'userDetail'], $auth + ['role' => ['admin', 'super_admin'], 'permission' => 'view_students']);
+$router->post('/admin/users/{id}/role', [AdminController::class, 'setRole'], $auth + ['role' => ['admin', 'super_admin'], 'permission' => 'manage_roles']);
+$router->post('/admin/users/{id}/status', [AdminController::class, 'setStatus'], $auth + ['role' => ['admin', 'super_admin'], 'permission' => 'manage_students']);
+$router->post('/admin/users/{id}/block', [AdminController::class, 'blockUser'], $auth + ['role' => ['admin', 'super_admin'], 'permission' => 'block_students']);
+$router->post('/admin/users/{id}/restore', [AdminController::class, 'restoreUser'], $auth + ['role' => ['admin', 'super_admin'], 'permission' => 'unblock_students']);
+$router->post('/admin/users/{id}/devices/reset', [AdminController::class, 'resetDevices'], $auth + ['role' => ['admin', 'super_admin'], 'permission' => 'manage_security']);
+$router->get('/admin/audit-logs', [AdminController::class, 'auditLogs'], $auth + ['role' => ['admin', 'super_admin'], 'permission' => 'view_audit_logs']);
 $router->post('/admin/audit-logs', [AdminController::class, 'writeAuditLog'], $auth);
-$router->get('/admin/stats', [AdminController::class, 'stats'], $auth + ['role' => ['admin', 'super_admin']]);
-$router->get('/admin/security-config', [AdminController::class, 'securityConfig'], $auth + ['role' => ['admin', 'super_admin']]);
+$router->get('/admin/stats', [AdminController::class, 'stats'], $auth + ['role' => ['admin', 'super_admin'], 'permission' => 'view_statistics']);
+$router->get('/admin/security-config', [AdminController::class, 'securityConfig'], $auth + ['role' => ['admin', 'super_admin'], 'permission' => 'manage_security']);
 $router->patch('/admin/security-config', [AdminController::class, 'updateSecurityConfig'], $auth + ['role' => ['super_admin']]);
-$router->post('/admin/bulk-user-ops', [AdminController::class, 'bulkUserOps'], $auth + ['role' => ['admin', 'super_admin']]);
-$router->post('/admin/trash-cleanup', [AdminController::class, 'runTrashCleanup'], $auth + ['role' => ['admin', 'super_admin']]);
-$router->post('/admin/enrollment', [AdminController::class, 'adminEnrollment'], $auth + ['role' => ['admin', 'super_admin']]);
+$router->post('/admin/bulk-user-ops', [AdminController::class, 'bulkUserOps'], $auth + ['role' => ['admin', 'super_admin'], 'permission' => 'manage_students']);
+$router->post('/admin/trash-cleanup', [AdminController::class, 'runTrashCleanup'], $auth + ['role' => ['admin', 'super_admin'], 'permission' => 'delete_students']);
+$router->post('/admin/enrollment', [AdminController::class, 'adminEnrollment'], $auth + ['role' => ['admin', 'super_admin'], 'permission' => 'manage_students']);
 $router->post('/admin/update-email', [AdminController::class, 'adminUpdateEmail'], $auth + ['role' => ['super_admin']]);
-$router->post('/admin/delete-user', [AdminController::class, 'deleteUser'], $auth + ['role' => ['admin', 'super_admin']]);
-$router->get('/admin/delete-user/preflight', [AdminController::class, 'deleteUserPreflight'], $auth + ['role' => ['admin', 'super_admin']]);
+$router->post('/admin/delete-user', [AdminController::class, 'deleteUser'], $auth + ['role' => ['admin', 'super_admin'], 'permission' => 'delete_students']);
+$router->get('/admin/delete-user/preflight', [AdminController::class, 'deleteUserPreflight'], $auth + ['role' => ['admin', 'super_admin'], 'permission' => 'view_students']);
 $router->post('/admin/user-lookup', [AdminController::class, 'userLookup'], $auth + ['role' => ['doctor', 'admin', 'super_admin']]);
-$router->post('/admin/user-management', [AdminController::class, 'userManagement'], $auth + ['role' => ['admin', 'super_admin']]);
+$router->post('/admin/user-management', [AdminController::class, 'userManagement'], $auth + ['role' => ['admin', 'super_admin'], 'permission' => 'manage_students']);
 $router->post('/admin/data-export', [AdminController::class, 'dataExport'], $auth + ['role' => ['super_admin']]);
 
+// ---- Admin Management & granular RBAC ---------------------------------------
+// Authorization is enforced server-side in PermissionService (single source of
+// truth). `permission` gates each action; the controller additionally blocks
+// delegation beyond the actor's own grants and protects Super Admin accounts.
+$router->get('/admin/permissions/me', [AdminRbacController::class, 'me'], $auth + ['role' => ['admin', 'super_admin']]);
+$router->get('/admin/permissions/catalog', [AdminRbacController::class, 'catalog'], $auth + ['role' => ['admin', 'super_admin'], 'permission' => 'manage_admins']);
+$router->get('/admin/admins', [AdminRbacController::class, 'index'], $auth + ['role' => ['admin', 'super_admin'], 'permission' => 'manage_admins']);
+$router->post('/admin/admins', [AdminRbacController::class, 'create'], $auth + ['role' => ['admin', 'super_admin'], 'permission' => 'manage_admins']);
+$router->get('/admin/admins/{id}', [AdminRbacController::class, 'show'], $auth + ['role' => ['admin', 'super_admin'], 'permission' => 'manage_admins']);
+$router->patch('/admin/admins/{id}', [AdminRbacController::class, 'update'], $auth + ['role' => ['admin', 'super_admin'], 'permission' => 'manage_admins']);
+$router->get('/admin/admins/{id}/permissions', [AdminRbacController::class, 'permissions'], $auth + ['role' => ['admin', 'super_admin'], 'permission' => 'manage_admins']);
+$router->put('/admin/admins/{id}/permissions', [AdminRbacController::class, 'updatePermissions'], $auth + ['role' => ['admin', 'super_admin'], 'permission' => 'manage_permissions']);
+$router->post('/admin/admins/{id}/clone-permissions', [AdminRbacController::class, 'clonePermissions'], $auth + ['role' => ['admin', 'super_admin'], 'permission' => 'manage_permissions']);
+$router->get('/admin/permission-templates', [AdminRbacController::class, 'templates'], $auth + ['role' => ['admin', 'super_admin'], 'permission' => 'manage_roles']);
+$router->post('/admin/permission-templates', [AdminRbacController::class, 'createTemplate'], $auth + ['role' => ['admin', 'super_admin'], 'permission' => 'manage_roles']);
+$router->patch('/admin/permission-templates/{id}', [AdminRbacController::class, 'updateTemplate'], $auth + ['role' => ['admin', 'super_admin'], 'permission' => 'manage_roles']);
+$router->post('/admin/permission-templates/{id}/clone', [AdminRbacController::class, 'cloneTemplate'], $auth + ['role' => ['admin', 'super_admin'], 'permission' => 'manage_roles']);
+
 // ---- Analytics / RPCs -------------------------------------------------------
-$router->get('/analytics/security-stats', [AnalyticsController::class, 'securityStats'], $auth + ['role' => ['admin', 'super_admin']]);
-$router->get('/analytics/user-activity/{id}', [AnalyticsController::class, 'userActivity'], $auth + ['role' => ['admin', 'super_admin']]);
-$router->get('/analytics/user-profile/{id}', [AnalyticsController::class, 'userProfile'], $auth + ['role' => ['admin', 'super_admin']]);
-$router->get('/analytics/trash-list', [AnalyticsController::class, 'trashList'], $auth + ['role' => ['admin', 'super_admin']]);
-$router->get('/analytics/trash-stats', [AnalyticsController::class, 'trashStats'], $auth + ['role' => ['admin', 'super_admin']]);
-$router->get('/analytics/deletion-stats', [AnalyticsController::class, 'deletionStats'], $auth + ['role' => ['admin', 'super_admin']]);
-$router->get('/analytics/archive-analytics', [AnalyticsController::class, 'archiveAnalytics'], $auth + ['role' => ['admin', 'super_admin']]);
+$router->get('/analytics/security-stats', [AnalyticsController::class, 'securityStats'], $auth + ['role' => ['admin', 'super_admin'], 'permission' => 'manage_security']);
+$router->get('/analytics/user-activity/{id}', [AnalyticsController::class, 'userActivity'], $auth + ['role' => ['admin', 'super_admin'], 'permission' => 'view_students']);
+$router->get('/analytics/user-profile/{id}', [AnalyticsController::class, 'userProfile'], $auth + ['role' => ['admin', 'super_admin'], 'permission' => 'view_students']);
+$router->get('/analytics/trash-list', [AnalyticsController::class, 'trashList'], $auth + ['role' => ['admin', 'super_admin'], 'permission' => 'view_reports']);
+$router->get('/analytics/trash-stats', [AnalyticsController::class, 'trashStats'], $auth + ['role' => ['admin', 'super_admin'], 'permission' => 'view_reports']);
+$router->get('/analytics/deletion-stats', [AnalyticsController::class, 'deletionStats'], $auth + ['role' => ['admin', 'super_admin'], 'permission' => 'view_reports']);
+$router->get('/analytics/archive-analytics', [AnalyticsController::class, 'archiveAnalytics'], $auth + ['role' => ['admin', 'super_admin'], 'permission' => 'view_reports']);
 // The Doctor dashboard quick action opens this list, so doctors are allowed —
 // scoped to their OWN archived courses by the controller (staff see all).
 $router->get('/analytics/archived-courses', [AnalyticsController::class, 'archivedCourses'], $auth + ['role' => ['doctor', 'admin', 'super_admin']]);
 $router->get('/analytics/course-delete-stats/{id}', [AnalyticsController::class, 'courseDeleteStats'], $auth); // owner-aware: admins + the owning doctor
-$router->get('/analytics/risky-devices', [AnalyticsController::class, 'riskyDevices'], $auth + ['role' => ['admin', 'super_admin']]);
+$router->get('/analytics/risky-devices', [AnalyticsController::class, 'riskyDevices'], $auth + ['role' => ['admin', 'super_admin'], 'permission' => 'manage_security']);
 // Recent security events with server-side user-identity join (Security
 // Dashboard) — replaces the broken generic-API embed (see controller docblock).
-$router->get('/analytics/security-events', [AnalyticsController::class, 'securityEvents'], $auth + ['role' => ['admin', 'super_admin']]);
+$router->get('/analytics/security-events', [AnalyticsController::class, 'securityEvents'], $auth + ['role' => ['admin', 'super_admin'], 'permission' => 'manage_security']);
 $router->get('/analytics/video-asset-usage', [AnalyticsController::class, 'videoAssetUsage'], $auth); // ownership enforced in controller (doctors may query their own assets)
-$router->post('/analytics/db-audit', [AnalyticsController::class, 'dbAudit'], $auth + ['role' => ['admin', 'super_admin']]);
+$router->post('/analytics/db-audit', [AnalyticsController::class, 'dbAudit'], $auth + ['role' => ['admin', 'super_admin'], 'permission' => 'manage_system_health']);
 // EARNINGS RETIRED: recalculate/reset doctor + platform earnings endpoints are
 // no longer routed. Historical earnings rows are retained (see
 // backend/docs/EARNINGS_FEATURE_RETIREMENT.md); nothing is deleted.
@@ -350,11 +398,11 @@ $router->post('/analytics/db-audit', [AnalyticsController::class, 'dbAudit'], $a
 // Two explicitly separate metrics: `unique_students` (distinct accounts) and
 // `enrollments` (one per student per course). Same pair set, same eligibility
 // rules; see EnrollmentStatsController's docblock for the counting contract.
-$router->get('/analytics/enrollment-stats', [EnrollmentStatsController::class, 'summary'], $auth + ['role' => ['admin', 'super_admin']]);
-$router->get('/analytics/enrollment-stats/doctors', [EnrollmentStatsController::class, 'doctors'], $auth + ['role' => ['admin', 'super_admin']]);
-$router->get('/analytics/enrollment-stats/courses', [EnrollmentStatsController::class, 'courses'], $auth + ['role' => ['admin', 'super_admin']]);
-$router->get('/analytics/enrollment-stats/doctors/{id}', [EnrollmentStatsController::class, 'doctorDetail'], $auth + ['role' => ['admin', 'super_admin']]);
-$router->get('/analytics/enrollment-stats/courses/{id}', [EnrollmentStatsController::class, 'courseDetail'], $auth + ['role' => ['admin', 'super_admin']]);
+$router->get('/analytics/enrollment-stats', [EnrollmentStatsController::class, 'summary'], $auth + ['role' => ['admin', 'super_admin'], 'permission' => 'view_statistics']);
+$router->get('/analytics/enrollment-stats/doctors', [EnrollmentStatsController::class, 'doctors'], $auth + ['role' => ['admin', 'super_admin'], 'permission' => 'view_statistics']);
+$router->get('/analytics/enrollment-stats/courses', [EnrollmentStatsController::class, 'courses'], $auth + ['role' => ['admin', 'super_admin'], 'permission' => 'view_statistics']);
+$router->get('/analytics/enrollment-stats/doctors/{id}', [EnrollmentStatsController::class, 'doctorDetail'], $auth + ['role' => ['admin', 'super_admin'], 'permission' => 'view_statistics']);
+$router->get('/analytics/enrollment-stats/courses/{id}', [EnrollmentStatsController::class, 'courseDetail'], $auth + ['role' => ['admin', 'super_admin'], 'permission' => 'view_statistics']);
 
 // ---- System diagnostics (Super Admin) --------------------------------------
 // Safe, sanitized infrastructure checks. NEVER returns secret values — only
@@ -383,23 +431,23 @@ $router->get('/rpc/doctor-credit-transactions/{doctorId}', [RpcController::class
 // profile modal endpoint are no longer routed (feature removed end-to-end).
 
 // Course RPCs
-$router->post('/rpc/create-course-audited', [RpcController::class, 'createCourseAudited'], $auth + ['role' => ['doctor', 'admin', 'super_admin']]);
-$router->post('/rpc/update-course-audited', [RpcController::class, 'updateCourseAudited'], $auth + ['role' => ['doctor', 'admin', 'super_admin']]);
-$router->post('/rpc/permanently-delete-course', [RpcController::class, 'permanentlyDeleteCourse'], $auth + ['role' => ['admin', 'super_admin']]);
+$router->post('/rpc/create-course-audited', [RpcController::class, 'createCourseAudited'], $auth + ['role' => ['doctor', 'admin', 'super_admin'], 'staff_permission' => 'manage_courses']);
+$router->post('/rpc/update-course-audited', [RpcController::class, 'updateCourseAudited'], $auth + ['role' => ['doctor', 'admin', 'super_admin'], 'staff_permission' => 'edit_any_course']);
+$router->post('/rpc/permanently-delete-course', [RpcController::class, 'permanentlyDeleteCourse'], $auth + ['role' => ['admin', 'super_admin'], 'permission' => 'delete_any_course']);
 
 // Doctor pricing RPCs
 // EARNINGS RETIRED: /rpc/set-doctor-credit-price (the admin per-doctor credit
 // price editor that lived in the earnings console) is no longer routed.
-$router->post('/rpc/set-enrollment-assigned-price', [RpcController::class, 'setEnrollmentAssignedPrice'], $auth + ['role' => ['doctor', 'admin', 'super_admin']]);
+$router->post('/rpc/set-enrollment-assigned-price', [RpcController::class, 'setEnrollmentAssignedPrice'], $auth + ['role' => ['doctor', 'admin', 'super_admin'], 'staff_permission' => 'edit_course_prices']);
 
 // Video provider permissions RPCs
-$router->post('/rpc/upsert-teacher-provider-permission', [RpcController::class, 'upsertTeacherProviderPermission'], $auth + ['role' => ['admin', 'super_admin']]);
+$router->post('/rpc/upsert-teacher-provider-permission', [RpcController::class, 'upsertTeacherProviderPermission'], $auth + ['role' => ['admin', 'super_admin'], 'permission' => 'manage_doctors']);
 $router->get('/rpc/teacher-provider-permissions', [RpcController::class, 'getTeacherProviderPermissions'], $auth + ['role' => ['doctor', 'admin', 'super_admin']]);
 
 // Deletion/health RPCs
-$router->get('/rpc/orphan-deletion-records', [RpcController::class, 'getOrphanDeletionRecords'], $auth + ['role' => ['admin', 'super_admin']]);
-$router->post('/rpc/mark-deletion-repaired', [RpcController::class, 'markDeletionRepaired'], $auth + ['role' => ['admin', 'super_admin']]);
-$router->post('/rpc/mark-lesson-video-missing', [RpcController::class, 'markLessonVideoMissing'], $auth + ['role' => ['admin', 'super_admin']]);
+$router->get('/rpc/orphan-deletion-records', [RpcController::class, 'getOrphanDeletionRecords'], $auth + ['role' => ['admin', 'super_admin'], 'permission' => 'view_reports']);
+$router->post('/rpc/mark-deletion-repaired', [RpcController::class, 'markDeletionRepaired'], $auth + ['role' => ['admin', 'super_admin'], 'permission' => 'manage_system_health']);
+$router->post('/rpc/mark-lesson-video-missing', [RpcController::class, 'markLessonVideoMissing'], $auth + ['role' => ['admin', 'super_admin'], 'permission' => 'manage_courses']);
 
 // Lesson video state RPC
 $router->get('/rpc/lesson-video-state', [RpcController::class, 'getLessonVideoState'], $auth);
@@ -408,16 +456,16 @@ $router->get('/rpc/lesson-video-state', [RpcController::class, 'getLessonVideoSt
 $router->post('/rpc/enum-values-bulk', [RpcController::class, 'getEnumValuesBulk'], $auth);
 
 // Audit log search RPC
-$router->get('/rpc/search-audit-logs', [RpcController::class, 'searchAuditLogs'], $auth + ['role' => ['admin', 'super_admin']]);
+$router->get('/rpc/search-audit-logs', [RpcController::class, 'searchAuditLogs'], $auth + ['role' => ['admin', 'super_admin'], 'permission' => 'view_audit_logs']);
 
 // Admin violation/device RPCs
-$router->post('/rpc/admin-reset-violations', [RpcController::class, 'adminResetViolations'], $auth + ['role' => ['admin', 'super_admin']]);
+$router->post('/rpc/admin-reset-violations', [RpcController::class, 'adminResetViolations'], $auth + ['role' => ['admin', 'super_admin'], 'permission' => 'manage_security']);
 // Doctor's launch recovery scan calls this for its own stale sessions (the
 // handler owner-scopes non-staff callers); admin/super_admin get the global sweep.
 $router->post('/rpc/recover-stale-upload-sessions', [RpcController::class, 'recoverStaleUploadSessions'], $auth + ['role' => ['doctor', 'admin', 'super_admin']]);
 
 // Remaining missing RPC equivalents
 $router->get('/rpc/chunk-upload-state', [RpcController::class, 'getChunkUploadState'], $auth);
-$router->post('/rpc/remove-course-enrollment', [RpcController::class, 'removeCourseEnrollment'], $auth + ['role' => ['admin', 'super_admin']]);
-$router->post('/rpc/remove-student-and-record-earnings', [RpcController::class, 'removeStudentAndRecordEarnings'], $auth + ['role' => ['doctor', 'admin', 'super_admin']]);
-$router->post('/rpc/reset-user-password-by-admin', [RpcController::class, 'resetUserPasswordByAdmin'], $auth + ['role' => ['admin', 'super_admin']]);
+$router->post('/rpc/remove-course-enrollment', [RpcController::class, 'removeCourseEnrollment'], $auth + ['role' => ['admin', 'super_admin'], 'permission' => 'manage_students']);
+$router->post('/rpc/remove-student-and-record-earnings', [RpcController::class, 'removeStudentAndRecordEarnings'], $auth + ['role' => ['doctor', 'admin', 'super_admin'], 'staff_permission' => 'manage_students']);
+$router->post('/rpc/reset-user-password-by-admin', [RpcController::class, 'resetUserPasswordByAdmin'], $auth + ['role' => ['admin', 'super_admin'], 'permission' => 'reset_passwords']);

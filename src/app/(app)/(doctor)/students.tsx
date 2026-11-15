@@ -1,9 +1,9 @@
-import { useCallback, useState, useMemo } from 'react';
+import { useCallback, useEffect, useState, useMemo } from 'react';
 import {
   View, Text, ScrollView, FlatList, useColorScheme, RefreshControl,
   ActivityIndicator, TextInput, Pressable, Image, StyleSheet, useWindowDimensions,
 } from 'react-native';
-import { useRouter, RelativePathString } from 'expo-router';
+import { useLocalSearchParams, useRouter, RelativePathString } from 'expo-router';
 import {
   Users, Search, UserPlus, BookOpen, Ban, Play, Trash2, Eye, CreditCard, X,
   Clock, GraduationCap, ChevronRight, CheckCircle, PlusCircle, Copy,
@@ -84,7 +84,46 @@ export default function DoctorStudents() {
 
   // ── Tab & Search ─────────────────────────────────────────────────────────────
   const [activeTab,     setActiveTab]     = useState<TabKey>('all');
+  // Dashboard shortcuts pass ?tab=active|suspended; keep the tab in sync.
+  const { tab: tabParam, student: studentParam } = useLocalSearchParams<{ tab?: string; student?: string }>();
+  useEffect(() => {
+    if (tabParam === 'active' || tabParam === 'suspended' || tabParam === 'all') setActiveTab(tabParam);
+  }, [tabParam]);
   const [query,         setQuery]         = useState('');
+
+  /**
+   * Deep link from the PDF Checker (“بيانات الطالب”).
+   *
+   * Opens the EXACT same profile sheet the eye icon opens — same enrollment row, same
+   * component, same sections, same data that is already loaded for this list. Nothing is
+   * re-fetched and no second student-details screen exists, so the checker cannot show a
+   * different (or partial) record than Students → eye.
+   *
+   * The row lookup goes through the doctor's own enrollments, so a student of another
+   * doctor simply has no row here — the screen then filters to nothing instead of opening
+   * someone else's record (the backend is still the authority for the payload).
+   */
+  const [autoOpenedStudent, setAutoOpenedStudent] = useState<string | null>(null);
+  /** Deep link pointed at a student this doctor has no enrollment for. */
+  const [studentParamError, setStudentParamError] = useState(false);
+  useEffect(() => {
+    if (!studentParam || autoOpenedStudent === studentParam) return;
+    const row = enrollments.find((e: any) =>
+      String(e?.student?.id ?? e?.student_id ?? '') === String(studentParam));
+    if (row) {
+      setAutoOpenedStudent(String(studentParam));
+      setActionTarget(row);
+      setActionType('profile');
+      return;
+    }
+    if (!loading) {
+      // Loaded, and this student is not among this doctor's enrollments.
+      // Showing the list silently looked like a redirect to Students; the user
+      // now gets an explicit, translated message instead.
+      setAutoOpenedStudent(String(studentParam));
+      setStudentParamError(true);
+    }
+  }, [studentParam, autoOpenedStudent, enrollments, loading]);
   const [expandCourse,  setExpandCourse]  = useState<string | null>(null);
 
   // ── Add Student modal ────────────────────────────────────────────────────────
@@ -251,6 +290,22 @@ export default function DoctorStudents() {
       setActionTarget(null); setActionType(null);
     } catch (e) { showToast({ type: 'error', message: friendlyError(e, t('drStudents.actionFailed')) }); }
     setActionLoading(false);
+  };
+
+  /**
+   * Remove the `student` param from the route and re-arm the auto-open guard, so
+   * the checker can deep-link the same student again after the sheet was closed.
+   */
+  const clearStudentParam = () => {
+    if (!studentParam) return;
+    setAutoOpenedStudent(null);
+    try { router.setParams({ student: undefined } as never); } catch { /* web shim */ }
+  };
+
+  const closeStudentParamError = () => {
+    setStudentParamError(false);
+    setAutoOpenedStudent(null);
+    try { router.setParams({ student: undefined } as never); } catch { /* web shim */ }
   };
 
   const openAction = (enrollment: any, type: ActionType) => { setActionTarget(enrollment); setActionType(type); };
@@ -569,7 +624,7 @@ export default function DoctorStudents() {
   return (
     <View style={{ flex: 1, backgroundColor: c.base }}>
       <ScrollView automaticallyAdjustKeyboardInsets={process.env.EXPO_OS === 'ios'}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />} contentContainerStyle={{ paddingBottom: safeBottom(layout.insets.bottom) }}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />} contentContainerStyle={{ paddingBottom: layout.roleTabsBottom() }}
       >
           <PageHeader
             title={t('nav.students')}
@@ -915,10 +970,30 @@ export default function DoctorStudents() {
         )}
       </ResponsiveModal>
 
+      {/* ── Deep link could not resolve to a student in this doctor's courses ── */}
+      <ResponsiveModal
+        visible={studentParamError}
+        onClose={closeStudentParamError}
+        title={t('drStudents.studentNotFound')}
+      >
+        <View style={{ gap: 16 }}>
+          <Text style={{ fontSize: 14, color: c.text, opacity: 0.7, textAlign: 'center' }}>
+            {t('drStudents.studentNotFoundBody')}
+          </Text>
+          <NeuButton label={t('common.close')} onPress={closeStudentParamError} />
+        </View>
+      </ResponsiveModal>
+
       {/* ── Student profile modal ─────────────────────────────────────────────── */}
         <ResponsiveModal
           visible={!!actionTarget && actionType === 'profile'}
-          onClose={() => { setActionTarget(null); setActionType(null); }}
+          onClose={() => {
+            setActionTarget(null); setActionType(null);
+            // Drop the deep-link parameter with the sheet: leaving it in the route
+            // meant a second tap on the same student could never re-open the sheet,
+            // because the "already opened" guard saw the same id.
+            clearStudentParam();
+          }}
           title={t('drStudents.profileTitle')}
         >
           {actionTarget && actionType === 'profile' && (() => {

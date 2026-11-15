@@ -218,6 +218,14 @@ class SecurityModule(private val reactContext: ReactApplicationContext) :
     // ══════════════════════════════════════════════════════════════════════════
 
     private val mainHandler = Handler(Looper.getMainLooper())
+
+    /**
+     * The live Activity, or null when no activity is resumed. A
+     * ReactContextBaseJavaModule does not expose one - the property lives on
+     * ReactContext - so it is resolved through the context this module holds.
+     */
+    private val hostActivity: Activity?
+        get() = reactContext.currentActivity
     private var vpnNetworkCallback: ConnectivityManager.NetworkCallback? = null
 
     /**
@@ -1744,7 +1752,7 @@ class SecurityModule(private val reactContext: ReactApplicationContext) :
         Log.d(TAG, "[enableOverlayProtection] ▶ called")
         mainHandler.post {
             try {
-                val activity = currentActivity
+                val activity = hostActivity
                 if (activity == null) {
                     Log.d(TAG, "[enableOverlayProtection] no current activity")
                     promise.resolve(false)
@@ -1765,23 +1773,33 @@ class SecurityModule(private val reactContext: ReactApplicationContext) :
                 }
 
                 // ── Layer 2: TOUCH FILTERING (all levels) ─────────────────
-                applyObscuredTouchFilter(decor)
+                // Every view BELOW the decor root is filtered. The root itself is
+                // deliberately left unfiltered: a filtered root discards an
+                // obscured event inside dispatchTouchEvent, before any listener
+                // (layer 3) could observe it - and the obscured tap still never
+                // reaches a button because the content views drop it.
+                if (decor is ViewGroup) {
+                    for (i in 0 until decor.childCount) applyObscuredTouchFilter(decor.getChildAt(i))
+                } else {
+                    applyObscuredTouchFilter(decor)
+                }
 
-                // ── Layer 3: OBSERVATION (API 31+) ────────────────────────
-                // OnFilterTouchEventListener is the documented "a touch was
-                // filtered" callback. On older levels the filter still discards
-                // the touch; there is simply no callback to observe it, so JS
-                // learns about it from the NEXT security evaluation instead.
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && !overlayProtectionInstalled) {
+                // ── Layer 3: OBSERVATION ───────────────────────────
+                // Android exposes NO "your window was obscured" callback, so
+                // the documented evidence is the framework flag on a delivered
+                // touch: MotionEvent.FLAG_WINDOW_IS_OBSCURED and
+                // FLAG_WINDOW_IS_PARTIALLY_OBSCURED (set by the system from
+                // API 29). A listener on the unfiltered decor root reads that
+                // flag and ALWAYS returns false, so it never consumes or alters
+                // a gesture; layer 2 is what discards an obscured tap.
+                if (!overlayProtectionInstalled) {
                     try {
-                        decor.setOnFilterTouchEventListener(
-                            View.OnFilterTouchEventListener { _: View, event: MotionEvent ->
-                                observeObscured(event)
-                                false
-                            }
-                        )
+                        decor.setOnTouchListener { _: View, event: MotionEvent ->
+                            observeObscured(event)
+                            false
+                        }
                     } catch (e: Exception) {
-                        Log.d(TAG, "[enableOverlayProtection] filter-touch listener unavailable: \${e.message}")
+                        Log.d(TAG, "[enableOverlayProtection] touch listener unavailable: \${e.message}")
                     }
                 }
 
@@ -1919,7 +1937,7 @@ class SecurityModule(private val reactContext: ReactApplicationContext) :
     fun getWindowMode(promise: Promise) {
         mainHandler.post {
             try {
-                val mode = readWindowMode(currentActivity)
+                val mode = readWindowMode(hostActivity)
                 if (mode != WINDOW_MODE_UNKNOWN) publishWindowMode(mode, "read")
                 val reading = Arguments.createMap()
                 reading.putString("mode", mode)
@@ -1983,7 +2001,7 @@ class SecurityModule(private val reactContext: ReactApplicationContext) :
                 Log.d(TAG, "[windowMode] lifecycle listener unavailable: \${e.message}")
             }
         }
-        attachLayoutWatcher(currentActivity)
+        attachLayoutWatcher(hostActivity)
     }
 
     /**
@@ -2034,7 +2052,7 @@ class SecurityModule(private val reactContext: ReactApplicationContext) :
      * nothing is published.
      */
     private fun refreshWindowMode(source: String): String {
-        val mode = readWindowMode(currentActivity)
+        val mode = readWindowMode(hostActivity)
         if (mode == WINDOW_MODE_UNKNOWN) return windowMode
         publishWindowMode(mode, source)
         return mode

@@ -86,6 +86,7 @@ import {
   connectionBlockInstructions,
   rendersBlockScreen,
   windowModeBlockSteps,
+  overlayBlockSteps,
 } from '@/lib/securityStateModel';
 
 /**
@@ -259,10 +260,14 @@ export function SecurityGate() {
   // ONE step list for both actionable window/connection causes (same markup, one
   // source per cause in the pure model): returning to full screen for the
   // multi-window restriction, switching the VPN/proxy off for a connection block.
-  const stepsLabel = windowModeBlockedState ? t('security.gate.stepsWindow') : t('security.gate.stepsVpn');
-  const steps = windowModeBlockedState
-    ? windowModeBlockSteps(windowMode)
-    : (vpnBlocked ? connectionBlockInstructions(Platform.OS) : []);
+  const stepsLabel = overlayBlocked
+    ? t('security.gate.stepsOverlay')
+    : (windowModeBlockedState ? t('security.gate.stepsWindow') : t('security.gate.stepsVpn'));
+  const steps = overlayBlocked
+    ? overlayBlockSteps()
+    : windowModeBlockedState
+      ? windowModeBlockSteps(windowMode)
+      : (vpnBlocked ? connectionBlockInstructions(Platform.OS) : []);
   // Only the two user-actionable causes offer a recheck control.
   const recheckable = isGateRecheckable(gateState);
   const types = liveBlocking ? liveCopyKeys : stickyTypes;

@@ -1,10 +1,10 @@
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { PageHeader } from '@/components/PageHeader';
 import {
   View, Text, ScrollView, useColorScheme, Pressable, RefreshControl,
   TextInput, ActivityIndicator, Modal, FlatList,
 } from 'react-native';
-import { useFocusEffect, useRouter } from 'expo-router';
+import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { Search, Users, MoreVertical, Phone, Mail, UserPlus, Eye, EyeOff, ChevronDown, CheckCircle, CheckSquare, AlertTriangle } from 'lucide-react-native';
 import { displayPhoneNational } from '@/lib/phone';
 import { normalizePhoneE164 } from '@/lib/identifier';
@@ -85,7 +85,7 @@ function AdminCountryPicker({ value, onChange, c }: { value: Country; onChange: 
                   <Text style={{ flex: 1, fontSize: 14, color: c.text, fontWeight: item.iso === value.iso ? '700' : '400' }} numberOfLines={1}>{item.name}</Text>
                   <Text style={{ fontSize: 13, color: c.primary, fontWeight: '600' }}>{item.callingCode}</Text>
                 </Pressable>
-              )} contentContainerStyle={{ paddingBottom: safeBottom(layout.insets.bottom) }}
+              )} contentContainerStyle={{ paddingBottom: layout.roleTabsBottom() }}
             />
           </Pressable>
         </Pressable>
@@ -130,6 +130,12 @@ export default function AdminUsers() {
   const debouncedQuery = useDebounce(query, 400);
   const [roleFilter, setRoleFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
+  // Dashboard shortcuts pass ?role=… / ?status=…; seed the matching chip.
+  const { role: roleParam, status: statusParam } = useLocalSearchParams<{ role?: string; status?: string }>();
+  useEffect(() => {
+    if (roleParam !== undefined) setRoleFilter(roleParam);
+    if (statusParam !== undefined) setStatusFilter(statusParam);
+  }, [roleParam, statusParam]);
   const [searching, setSearching] = useState(false);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -504,7 +510,7 @@ export default function AdminUsers() {
   );
   const dropList = (items: any[], selected: string, onSelect: (id: string) => void) => (
     <View style={{ backgroundColor: c.base, borderRadius: 12, marginBottom: 14, shadowColor: c.shadowDark, shadowOffset: { width: 2, height: 2 }, shadowOpacity: 0.5, shadowRadius: 5, maxHeight: 180, overflow: 'hidden' }}>
-      <ScrollView automaticallyAdjustKeyboardInsets={process.env.EXPO_OS === 'ios'} nestedScrollEnabled keyboardShouldPersistTaps="handled" contentContainerStyle={{ paddingBottom: safeBottom(layout.insets.bottom) }}>
+      <ScrollView automaticallyAdjustKeyboardInsets={process.env.EXPO_OS === 'ios'} nestedScrollEnabled keyboardShouldPersistTaps="handled" contentContainerStyle={{ paddingBottom: layout.roleTabsBottom() }}>
         {items.map(item => (
           <Pressable key={item.id} onPress={() => onSelect(item.id)} style={{ paddingHorizontal: 14, paddingVertical: 11, backgroundColor: selected === item.id ? `${c.primary}18` : 'transparent', borderBottomWidth: 0.5, borderBottomColor: `${c.text}12` }}>
             <Text style={{ fontSize: 14, color: selected === item.id ? c.primary : c.text, fontWeight: selected === item.id ? '700' : '400' }}>{item.name}</Text>
@@ -517,7 +523,7 @@ export default function AdminUsers() {
   return (
     <View style={{ flex: 1, backgroundColor: c.base }}>
       <ScrollView automaticallyAdjustKeyboardInsets={process.env.EXPO_OS === 'ios'}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />} contentContainerStyle={{ paddingBottom: safeBottom(layout.insets.bottom) }}>
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />} contentContainerStyle={{ paddingBottom: layout.roleTabsBottom() }}>
           {/* PageHeader sits OUTSIDE the inner padding view so it can own its own horizontal padding */}
           <PageHeader
             title={t('adminUsers.title')}

@@ -228,12 +228,12 @@ final class IntegrityService
 
         // 3. requestPackageName — the token must be minted for OUR app.
         if ((string) ($details['requestPackageName'] ?? '') !== $packageName) {
-            self::reject($userId, $ip, 'package_mismatch');
+            self::reject($userId, $ip, 'package_mismatch', $action);
         }
 
         // 4. requestHash — token must cover THIS challenge (anti-replay).
         if (!hash_equals($requestHash, (string) ($details['requestHash'] ?? ''))) {
-            self::reject($userId, $ip, 'request_hash_mismatch');
+            self::reject($userId, $ip, 'request_hash_mismatch', $action);
         }
 
         // 4b. FRESHNESS — the decoded payload must be recent. The single-use
@@ -242,14 +242,14 @@ final class IntegrityService
         //     minted at challenge time cannot be carried around until the TTL
         //     boundary. A missing/garbage timestamp fails closed.
         if (!self::tokenIsFresh($details)) {
-            self::reject($userId, $ip, 'stale_or_undated_token');
+            self::reject($userId, $ip, 'stale_or_undated_token', $action);
         }
 
         // 5. App recognition + signing certificate (tampered/re-signed APK
         //    detection — the digest is reported BY GOOGLE, never by us).
         $appVerdict = (string) ($appInt['appRecognitionVerdict'] ?? '');
         if (!in_array($appVerdict, $policy['app_verdicts'], true)) {
-            self::reject($userId, $ip, 'app_not_recognized:' . $appVerdict);
+            self::reject($userId, $ip, 'app_not_recognized:' . $appVerdict, $action);
         }
 
         // 5a. certificateSha256Digest is BASE64URL in Google's payload; the
@@ -269,7 +269,7 @@ final class IntegrityService
             if ($expected !== [] && ($cert === '' || !in_array($cert, $expected, true))) {
                 // A re-signed APK presents a different certificate digest —
                 // exactly the signal the smali-tamper test exercised.
-                self::reject($userId, $ip, 'certificate_mismatch');
+                self::reject($userId, $ip, 'certificate_mismatch', $action);
             }
         }
 
@@ -281,7 +281,7 @@ final class IntegrityService
             : [];
         if ($policy['require_device_integrity']) {
             if (array_intersect($policy['device_verdicts'], array_map('strval', $device)) === []) {
-                self::reject($userId, $ip, 'device_verdict:' . implode(',', array_map('strval', $device)));
+                self::reject($userId, $ip, 'device_verdict:' . implode(',', array_map('strval', $device)), $action);
             }
         }
 
@@ -292,7 +292,7 @@ final class IntegrityService
         if ($policy['require_licensed']) {
             $acct = is_array($payload['accountDetails'] ?? null) ? $payload['accountDetails'] : [];
             if ((string) ($acct['appLicensingVerdict'] ?? '') !== 'LICENSED') {
-                self::reject($userId, $ip, 'not_licensed');
+                self::reject($userId, $ip, 'not_licensed', $action);
             }
         }
 
@@ -401,13 +401,17 @@ final class IntegrityService
      * learns WHICH check failed, which is what makes staged rollout and
      * false-positive analysis possible without touching client code.
      */
-    private static function reject(string $userId, string $ip, string $reason): void
+    private static function reject(string $userId, string $ip, string $reason, string $action = ''): void
     {
         try {
             (new SecurityService())->logEvent($userId, [
                 'event_type'       => 'play_integrity_failed',
                 'detection_method' => 'Play Integrity rejected server-side: ' . $reason,
-                'policy_action'    => 'log_only',
+                // Telemetry must describe what actually happened: the request was
+                // refused (403) below. Record the enforcement category only when it
+                // is one the closed policy_action vocabulary can express for this
+                // action. Otherwise store NULL rather than a misleading value.
+                'policy_action'    => self::rejectPolicyAction($action),
                 'risk_score'       => 40,
                 'platform'         => 'android',
                 'ip_address'       => $ip,
@@ -416,6 +420,20 @@ final class IntegrityService
             // Telemetry must never change the outcome.
         }
         throw new ApiException(403, 'Integrity verification failed');
+    }
+
+    /**
+     * Maps a protected action to the closed policy_action vocabulary for a
+     * REJECTED request. Only video OTP issuance is a video block; no integrity
+     * action in this service is a login block, and an unknown action is not
+     * guessed at.
+     */
+    private static function rejectPolicyAction(string $action): ?string
+    {
+        return match ($action) {
+            'vdo_otp' => 'block_video',
+            default   => null,
+        };
     }
 
     /**

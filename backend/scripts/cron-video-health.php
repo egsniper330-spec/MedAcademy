@@ -10,6 +10,12 @@ if (PHP_SAPI !== 'cli') {
     exit('CLI only');
 }
 
+// RETIRED PROVIDER — VdoCipher is no longer active (YouTube is the only supported
+// source), so there is nothing for a provider health scan to do. Exiting here keeps the
+// cron entry valid without ever contacting dev.vdocipher.com or writing fake health rows.
+fwrite(STDERR, "cron-video-health: VdoCipher is retired - no scan performed.\n");
+exit(0);
+
 /**
  * cron-video-health.php — PHP CLI equivalent of the video-daily-health Edge Function.
  *

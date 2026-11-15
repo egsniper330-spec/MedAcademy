@@ -216,11 +216,19 @@ export default function StudentDashboard() {
   const hasActiveFilters = filters.category || filters.teacher || filters.priceType !== 'all';
   const activeFilterCount = [filters.category, filters.teacher, filters.priceType !== 'all' ? 1 : null].filter(Boolean).length;
 
+  const openMyCourses = (status?: 'in_progress' | 'completed') => {
+    router.push((status ? `/(app)/(student)/my-courses?status=${status}` : '/(app)/(student)/my-courses') as RelativePathString);
+  };
+
   const statCards: StatCardItem[] = [
-    { id: 'subscribed', label: t('home.myCourses'),    value: subscriptions.length, icon: <BookOpen size={18} color="#fff" />, color: c.primary },
-    { id: 'progress',   label: t('home.inProgress'),   value: inProgressCount,      icon: <TrendingUp size={18} color="#fff" />, color: '#D97706' },
-    { id: 'completed',  label: t('home.completed'),      value: completedCount,        icon: <Award size={18} color="#fff" />,     color: '#16A34A' },
-    { id: 'notifs',     label: t('common.notifications'),  value: unreadCount,          icon: <Bell size={18} color="#fff" />,      color: '#1E90FF' },
+    { id: 'subscribed', label: t('home.myCourses'),    value: subscriptions.length, icon: <BookOpen size={18} color="#fff" />, color: c.primary, onPress: () => openMyCourses() },
+    { id: 'progress',   label: t('home.inProgress'),   value: inProgressCount,      icon: <TrendingUp size={18} color="#fff" />, color: '#D97706', onPress: () => openMyCourses('in_progress') },
+    { id: 'completed',  label: t('home.completed'),      value: completedCount,        icon: <Award size={18} color="#fff" />,     color: '#16A34A', onPress: () => openMyCourses('completed') },
+    { id: 'notifs',     label: t('common.notifications'),  value: unreadCount,          icon: <Bell size={18} color="#fff" />,      color: '#1E90FF', onPress: () => {
+      // Dashboard entry (not the drawer) → notifications shows Back.
+      markEntryIntent('/(app)/notifications', 'nested');
+      router.push('/(app)/notifications' as RelativePathString);
+    } },
   ];
 
   // ── Helpers ───────────────────────────────────────────────────────────────
@@ -358,6 +366,9 @@ export default function StudentDashboard() {
     <ScrollView automaticallyAdjustKeyboardInsets={process.env.EXPO_OS === 'ios'}
       style={{ flex: 1, backgroundColor: c.base }}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />}
+      // The floating bar overlays this screen's list: the helper adds its
+      // clearance on top of the safe-area inset (and nothing extra elsewhere).
+      contentContainerStyle={{ paddingBottom: layout.roleTabsBottom() }}
     >
       {/* DashboardHeader owns its safe-area top padding — no paddingTop on outer View */}
       <DashboardHeader

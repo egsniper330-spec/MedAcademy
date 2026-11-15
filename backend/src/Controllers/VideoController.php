@@ -443,6 +443,80 @@ final class VideoController
     }
 
     /**
+     * POST /video/attach-lesson — link a READY owned library asset to a lesson.
+     *
+     * The browser never supplies an arbitrary provider video ID: the asset must
+     * already exist in the caller's library, and the lesson's course must belong
+     * to the caller (admins may manage any course). Both checks are server-side.
+     */
+    public function attachLesson(Request $request): array
+    {
+        $body = $request->json();
+        $lessonId = Uuid::normalize((string) ($body['lesson_id'] ?? ''));
+        $assetId = Uuid::normalize((string) ($body['asset_id'] ?? ''));
+        if ($lessonId === '' || $assetId === '') {
+            throw new ApiException(422, 'lesson_id and asset_id are required');
+        }
+
+        $db = Database::instance();
+        $asset = $db->row(
+            'SELECT id, doctor_id, provider_video_id, title, duration_seconds, thumbnail_url, status
+               FROM video_assets WHERE id = ?',
+            [$assetId]
+        );
+        if ($asset === null) {
+            throw new ApiException(404, 'Video asset not found');
+        }
+        $role = (string) $request->user['role'];
+        $actorId = (string) $request->user['id'];
+        if (!in_array($role, ['admin', 'super_admin'], true) && (string) $asset['doctor_id'] !== $actorId) {
+            throw new ApiException(403, 'You do not own this video asset');
+        }
+        if ((string) ($asset['status'] ?? '') !== 'ready') {
+            throw new ApiException(409, 'The video is still processing. Attach it once it is ready.');
+        }
+
+        $lesson = $db->row(
+            'SELECT l.id, l.title, l.course_id, c.doctor_id
+               FROM lessons l JOIN courses c ON c.id = l.course_id
+              WHERE l.id = ?',
+            [$lessonId]
+        );
+        if ($lesson === null) {
+            throw new ApiException(404, 'Lesson not found');
+        }
+        if (!in_array($role, ['admin', 'super_admin'], true) && (string) $lesson['doctor_id'] !== $actorId) {
+            throw new ApiException(403, 'Not authorized for this course');
+        }
+
+        $db->query(
+            "UPDATE lessons SET video_asset_id = ?, video_id = ?, video_type = 'vdocipher',
+                    video_status = 'ready', video_upload_id = NULL,
+                    video_duration_seconds = ?, video_thumbnail_url = ?, updated_at = UTC_TIMESTAMP(6)
+              WHERE id = ?",
+            [$assetId, (string) $asset['provider_video_id'], $asset['duration_seconds'], $asset['thumbnail_url'], $lessonId]
+        );
+        AuditService::write($actorId, 'lesson_video_attached', [
+            'lesson_id' => $lessonId,
+            'course_id' => (string) $lesson['course_id'],
+            'asset_id' => $assetId,
+            'provider_video_id' => (string) $asset['provider_video_id'],
+        ]);
+
+        return [
+            'success' => true,
+            'lesson_id' => $lessonId,
+            'asset' => [
+                'id' => $assetId,
+                'provider_video_id' => (string) $asset['provider_video_id'],
+                'title' => (string) ($asset['title'] ?? ''),
+                'duration_seconds' => $asset['duration_seconds'],
+                'thumbnail_url' => $asset['thumbnail_url'],
+            ],
+        ];
+    }
+
+    /**
      * POST /video/assets/delete — permanently remove an owned library asset.
      * All lesson references are detached in the same local transaction. The
      * transaction is rolled back if VdoCipher deletion fails, so the library

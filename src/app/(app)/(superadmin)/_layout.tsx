@@ -2,7 +2,7 @@
  * Super Admin RoleTabShell — (superadmin) role's tab layout content.
  *
  * iOS  → native system tab bar / Liquid Glass (RoleTabShell.ios.tsx)
- * Else → JS Tabs + ResponsiveTabBar (RoleTabShell.tsx) — unchanged behavior.
+ * Else → JS Tabs + the floating Liquid Glass bar (RoleTabShell.tsx).
  */
 import RoleTabShell from '@/components/navigation/RoleTabShell';
 import { useRoleTabGuard } from '@/components/navigation/useRoleTabGuard';

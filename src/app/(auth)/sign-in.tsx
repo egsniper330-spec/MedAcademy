@@ -191,6 +191,20 @@ export default function SignIn() {
       if (authError) {
         const msg = authError.message ?? '';
 
+        // 429: too many attempts for this account from this network. Not a
+        // network failure and not a bad password. Show the server's wait only
+        // when it sent one; never invent a countdown.
+        if (authError.status === 429) {
+          const retryAfter = (authError as { retryAfter?: number }).retryAfter;
+          setError(
+            retryAfter
+              ? t('auth.rateLimitedWithSeconds', { seconds: retryAfter })
+              : t('auth.rateLimited'),
+          );
+          setLoading(false);
+          return;
+        }
+
         // Distinguish network failures from credential failures.
         // On iOS JSC a network-layer failure produces "Network request failed"
         // (from whatwg-fetch / NSURLSession) — this is NOT a bad-credentials error.

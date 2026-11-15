@@ -6,7 +6,7 @@ import { Image } from 'expo-image';
 import { useFocusEffect, useRouter, useLocalSearchParams } from 'expo-router';
 import {
   ArrowLeft, Check, CheckCircle, Clock, Download, Eye, FileText, Film,
-  Lock, Paperclip, Pause, Play, RefreshCw, ShieldAlert, X,
+  Lock, Paperclip, Pause, Play, RefreshCw, ShieldAlert, X, AlertCircle,
 } from 'lucide-react-native';
 import {
   getLessonById, upsertLessonProgress, getMaterialSignedUrl, getMaterialPdfUrl,
@@ -29,6 +29,14 @@ import {
   deleteAsync,
   getInfoAsync,
 } from 'expo-file-system/legacy';
+import {
+  createDeliveryTracker,
+  verifyStoredDownload,
+  deliveryStageKey,
+  describeTransfer,
+  shouldEmitProgress,
+  type DeliveryStage,
+} from '@/lib/pdfDeliveryProgress';
 import * as Sharing from 'expo-sharing';
 import * as MediaLibrary from 'expo-media-library';
 import { useSecurity } from '@/lib/SecurityContext';
@@ -310,8 +318,16 @@ export default function LessonPlayer() {
   const [downloadState, setDownloadState] = useState<{
     visible: boolean;
     fileName: string;
-    progress: number; // 0–1
+    /** 0–1. Only ever derived from received/total bytes (see lib/pdfDeliveryProgress). */
+    progress: number;
     status: 'preparing' | 'downloading' | 'success' | 'error';
+    /** Which real stage we are in — server work is never shown as a percentage. */
+    stage?: DeliveryStage;
+    /** True while the size is unknown: the panel shows a spinner, never a fake %. */
+    indeterminate?: boolean;
+    receivedBytes?: number;
+    totalBytes?: number;
+    speedBps?: number;
     errorMsg?: string;
   }>({ visible: false, fileName: '', progress: 0, status: 'downloading' });
 
@@ -587,7 +603,21 @@ export default function LessonPlayer() {
     // Fetch it instead, so a failure becomes a visible, actionable message and
     // a success becomes a real download with the document's own filename.
     if (process.env.EXPO_OS === 'web') {
-      setDownloadState({ visible: true, fileName: displayName, progress: 0.15, status: 'downloading' });
+      // ROOT-CAUSE FIX for the "stuck at 15 %" bar.
+      //
+      // This branch used to set a hardcoded 0.15 and then `await res.blob()`,
+      // which reports no byte callbacks, so the panel showed 15 % for the whole
+      // transfer and jumped to 100 % at the end. There is no placeholder now:
+      // the body is read as a stream and every update comes from received bytes.
+      // When the size is unknown (cross-origin Content-Length not exposed) the
+      // panel is INDETERMINATE instead of inventing a number.
+      const tracker = createDeliveryTracker(Date.now());
+      tracker.setStage('downloading');
+      let lastEmit: { percent: number | null; atMs: number } | null = null;
+      setDownloadState({
+        visible: true, fileName: displayName, progress: 0, status: 'downloading',
+        stage: 'downloading', indeterminate: true, receivedBytes: 0, totalBytes: 0,
+      });
       let res: Response;
       try {
         res = await fetch(signedUrl);
@@ -611,8 +641,62 @@ export default function LessonPlayer() {
         failure.httpStatus = res.status;
         throw failure;
       }
-      const blob = await res.blob();
+      // A reliable total only when the API exposes Content-Length cross-origin
+      // (Access-Control-Expose-Headers). 0 ⇒ unknown ⇒ indeterminate UI.
+      const declared = Number(res.headers.get('content-length') ?? 0);
+      if (Number.isFinite(declared) && declared > 0) tracker.setTotal(declared);
+
+      const parts: BlobPart[] = [];
+      let received = 0;
+      const emit = (bytes: number) => {
+        const now = Date.now();
+        const snap = tracker.snapshot(bytes, now);
+        if (!shouldEmitProgress(lastEmit, snap, now)) return;
+        lastEmit = { percent: snap.percent, atMs: now };
+        setDownloadState(prev => ({
+          ...prev,
+          stage: 'downloading',
+          indeterminate: !snap.determinate,
+          // A determinate bar never reaches 100 % here: the bytes are still in
+          // memory until the file is handed to the browser below.
+          progress: snap.percent === null ? 0 : Math.min(0.99, snap.percent / 100),
+          receivedBytes: snap.bytesReceived,
+          totalBytes: snap.totalBytes,
+          speedBps: snap.speedBps,
+        }));
+      };
+
+      const reader = res.body?.getReader?.();
+      if (reader) {
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          if (value && value.byteLength > 0) {
+            parts.push(value as unknown as BlobPart);
+            received += value.byteLength;
+            emit(received);
+          }
+        }
+      } else {
+        // No streaming body on this engine: read it in one go. Progress stays
+        // indeterminate because no bytes are observable while it happens.
+        const buffer = new Uint8Array(await res.arrayBuffer());
+        parts.push(buffer as unknown as BlobPart);
+        received = buffer.byteLength;
+        emit(received);
+      }
+
+      const blob = new Blob(parts, { type: contentType || 'application/pdf' });
       if (blob.size === 0) throw new Error('The server returned an empty file.');
+
+      // Transfer finished; the file is not "done" until it is handed over.
+      tracker.setStage('saving');
+      setDownloadState(prev => ({
+        ...prev, stage: 'saving', indeterminate: false,
+        progress: prev.indeterminate ? 0 : Math.min(0.99, prev.progress),
+        receivedBytes: blob.size, totalBytes: blob.size,
+      }));
+
       const safeName = displayName.replace(/[^\w.\-]/g, '_') || 'download';
       const typeExt = contentType.includes('pdf')
         ? 'pdf'
@@ -626,7 +710,11 @@ export default function LessonPlayer() {
       anchor.click();
       anchor.remove();
       setTimeout(() => URL.revokeObjectURL(objectUrl), 10_000);
-      setDownloadState(prev => ({ ...prev, progress: 1, status: 'success' }));
+      // 100 % only now: the browser has the complete file.
+      setDownloadState(prev => ({
+        ...prev, progress: 1, status: 'success', stage: 'done', indeterminate: false,
+        receivedBytes: blob.size, totalBytes: blob.size,
+      }));
       setTimeout(() => setDownloadState(prev => ({ ...prev, visible: false })), 1200);
       return;
     }
@@ -641,7 +729,13 @@ export default function LessonPlayer() {
     const baseDir = Platform.OS === 'ios' ? documentDirectory : cacheDirectory;
     const destUri = `${baseDir ?? ''}${localName}`;
 
-    setDownloadState({ visible: true, fileName: displayName, progress: 0, status: 'downloading' });
+    const tracker = createDeliveryTracker(Date.now());
+    tracker.setStage('downloading');
+    let lastEmit: { percent: number | null; atMs: number } | null = null;
+    setDownloadState({
+      visible: true, fileName: displayName, progress: 0, status: 'downloading',
+      stage: 'downloading', indeterminate: true, receivedBytes: 0, totalBytes: 0,
+    });
 
     try {
       // Remove stale file so we always get a fresh download
@@ -654,17 +748,58 @@ export default function LessonPlayer() {
         destUri,
         {},
         ({ totalBytesWritten, totalBytesExpectedToWrite }) => {
-          const pct = totalBytesExpectedToWrite > 0
-            ? totalBytesWritten / totalBytesExpectedToWrite
-            : 0;
-          setDownloadState(prev => ({ ...prev, progress: Math.min(0.98, pct) }));
+          // Real counters only. `totalBytesExpectedToWrite` is -1/0 when the
+          // server sends no Content-Length (chunked): that is an UNKNOWN total,
+          // not 0 % — the panel goes indeterminate instead of freezing at 0.
+          const total = Number(totalBytesExpectedToWrite);
+          if (Number.isFinite(total) && total > 0) tracker.setTotal(total);
+          const now = Date.now();
+          const snap = tracker.snapshot(Number(totalBytesWritten) || 0, now);
+          if (!shouldEmitProgress(lastEmit, snap, now)) return;
+          lastEmit = { percent: snap.percent, atMs: now };
+          setDownloadState(prev => ({
+            ...prev,
+            stage: 'downloading',
+            indeterminate: !snap.determinate,
+            progress: snap.percent === null ? 0 : Math.min(0.99, snap.percent / 100),
+            receivedBytes: snap.bytesReceived,
+            totalBytes: snap.totalBytes,
+            speedBps: snap.speedBps,
+          }));
         },
       );
 
       const result = await task.downloadAsync();
       if (!result?.uri) throw new Error('Download produced no output file.');
 
-      setDownloadState(prev => ({ ...prev, progress: 1, status: 'success' }));
+      // The transfer is over but the bytes are only "received" in the sense of
+      // being written: verify the stored file before claiming completion.
+      tracker.setStage('saving');
+      setDownloadState(prev => ({ ...prev, stage: 'saving', indeterminate: false }));
+      const stored = await getInfoAsync(result.uri);
+      const storedBytes = Number((stored as { size?: number })?.size ?? 0);
+      // "File exists and is non-empty" is NOT completion. When the server
+      // declared a size, the file on disk must be exactly that size — a short
+      // file is a truncated document and must never be reported as downloaded.
+      // With no declared size no number is invented; a real, non-empty file is
+      // the strongest signal this platform gives us.
+      const verified = verifyStoredDownload({
+        exists: Boolean(stored?.exists),
+        storedBytes,
+        expectedBytes: tracker.totalBytes,
+      });
+      if (!verified.ok) {
+        throw new Error(
+          verified.reason === 'short' || verified.reason === 'long'
+            ? 'The downloaded file is incomplete. Please try again.'
+            : 'The downloaded file could not be saved.',
+        );
+      }
+
+      setDownloadState(prev => ({
+        ...prev, progress: 1, status: 'success', stage: 'done',
+        indeterminate: false, receivedBytes: storedBytes, totalBytes: prev.totalBytes || storedBytes,
+      }));
 
       // ── Persist / share 1.2 s after success ────────────────────────────
       setTimeout(async () => {
@@ -723,7 +858,12 @@ export default function LessonPlayer() {
     forDownload: boolean,
     runId: number,
   ): Promise<string | null> => {
-    setDownloadState({ visible: true, fileName: name, progress: 0, status: 'preparing' });
+    // Server-side personalization is its own stage — it has no byte progress and
+    // must never be presented as a stalled download.
+    setDownloadState({
+      visible: true, fileName: name, progress: 0, status: 'preparing',
+      stage: 'generating', indeterminate: true,
+    });
     const delivery = await getMaterialPdfUrl(materialId, forDownload);
     if (runId !== pdfRunRef.current) return null;
     if (delivery.status === 'ready' && delivery.url) return delivery.url;
@@ -1173,10 +1313,16 @@ export default function LessonPlayer() {
                 backgroundColor: downloadState.status === 'error' ? '#DC262615' : `${c.primary}15`,
                 alignItems: 'center', justifyContent: 'center',
               }}>
+                {/* ERROR STATE — the badge used to render a red `X` here, directly
+                    beside the small grey `X` dismiss button. Two identical-looking
+                    controls in one row, only one of them interactive: the red one is a
+                    status GLYPH, not a button, so tapping it did nothing. The badge now
+                    shows an alert mark (state) and `X` is reserved for dismissal
+                    (action), which is the only X the panel renders. */}
                 {downloadState.status === 'success'
                   ? <CheckCircle size={22} color="#16A34A" />
                   : downloadState.status === 'error'
-                    ? <X size={22} color="#DC2626" />
+                    ? <AlertCircle size={22} color="#DC2626" />
                     : downloadState.status === 'preparing'
                         ? <ActivityIndicator size="small" color={c.primary} />
                         : <Download size={22} color={c.primary} />}
@@ -1185,8 +1331,9 @@ export default function LessonPlayer() {
                 <Text style={{ fontSize: 15, fontWeight: '800', color: c.text }}>
                   {downloadState.status === 'success' ? t('lesson.downloadComplete') :
                    downloadState.status === 'error'   ? t('lesson.downloadFailed') :
-                   downloadState.status === 'preparing' ? t('lesson.preparingPdf') :
-                   t('lesson.downloadingNow')}
+                   // The STAGE decides the label, so server-side generation and the
+                   // device write are never disguised as download progress.
+                   t(deliveryStageKey(downloadState.stage ?? (downloadState.status === 'preparing' ? 'generating' : 'downloading')))}
                 </Text>
                 <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.5), marginTop: 2 }} numberOfLines={1}>
                   {downloadState.fileName}
@@ -1200,25 +1347,45 @@ export default function LessonPlayer() {
                   }}
                   accessibilityLabel={t('lesson.dismissPanel')}
                   accessibilityRole="button"
-                  hitSlop={6} style={{ width: 32, height: 32, borderRadius: 9, backgroundColor: `${c.text}0D`, alignItems: 'center', justifyContent: 'center' }}
+                  hitSlop={10}
+                  // 40×40 visual + 10dp hitSlop → ≥44dp effective touch target on
+                  // phones, still comfortable for a mouse on web.
+                  style={{ width: 40, height: 40, borderRadius: 11, backgroundColor: `${c.text}0D`, alignItems: 'center', justifyContent: 'center' }}
                 >
-                  <X size={15} color={c.text} />
+                  <X size={17} color={c.text} />
                 </Pressable>
               )}
             </View>
 
-            {/* Progress bar — only shown while downloading */}
+            {/* Transfer progress — a percentage exists ONLY when bytes/total are real. */}
             {downloadState.status === 'downloading' && (
               <View>
-                <View style={{ height: 8, backgroundColor: `${c.text}10`, borderRadius: 4, overflow: 'hidden' }}>
-                  <View style={{
-                    height: 8, borderRadius: 4, backgroundColor: c.primary,
-                    width: `${Math.round(downloadState.progress * 100)}%` as `${number}%`,
-                  }} />
+                {downloadState.indeterminate ? (
+                  // Unknown total (no Content-Length): a spinner, never a fake number.
+                  <View style={{ height: 8, backgroundColor: `${c.text}10`, borderRadius: 4, overflow: 'hidden', alignItems: 'center', justifyContent: 'center' }}>
+                    <ActivityIndicator size="small" color={c.primary} />
+                  </View>
+                ) : (
+                  <View style={{ height: 8, backgroundColor: `${c.text}10`, borderRadius: 4, overflow: 'hidden' }}>
+                    <View style={{
+                      height: 8, borderRadius: 4, backgroundColor: c.primary,
+                      width: `${Math.round(downloadState.progress * 100)}%` as `${number}%`,
+                    }} />
+                  </View>
+                )}
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: 8, marginTop: 6 }}>
+                  <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.5), flexShrink: 1 }} numberOfLines={1}>
+                    {describeTransfer(downloadState.receivedBytes ?? 0, downloadState.totalBytes ?? 0)}
+                  </Text>
+                  <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.5) }}>
+                    {downloadState.indeterminate ? '' : `${Math.round(downloadState.progress * 100)}%`}
+                  </Text>
                 </View>
-                <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.5), marginTop: 6, textAlign: 'right' }}>
-                  {Math.round(downloadState.progress * 100)}%
-                </Text>
+                {downloadState.indeterminate && (
+                  <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.45), marginTop: 4 }}>
+                    {t('lesson.sizeUnknown')}
+                  </Text>
+                )}
               </View>
             )}
 

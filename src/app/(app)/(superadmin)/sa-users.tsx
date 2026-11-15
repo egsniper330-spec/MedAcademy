@@ -502,7 +502,7 @@ export default function SAUsers() {
   return (
     <View style={{ flex: 1, backgroundColor: c.base }}>
       <ScrollView automaticallyAdjustKeyboardInsets={process.env.EXPO_OS === 'ios'}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />} contentContainerStyle={{ paddingBottom: safeBottom(layout.insets.bottom) }}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />} contentContainerStyle={{ paddingBottom: layout.roleTabsBottom() }}
       >
           {/* PageHeader sits OUTSIDE the inner padding view so it can own its own horizontal padding */}
           <PageHeader

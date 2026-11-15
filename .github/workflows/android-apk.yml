@@ -1,0 +1,378 @@
+name: Android APK Build
+
+# ─── What this workflow is ────────────────────────────────────────────────────
+# A standalone, MANUAL-ONLY Android APK build that runs entirely on GitHub's
+# infrastructure, so no local Android/Gradle build is ever needed.
+#
+# Independence (hard requirement):
+#   • Trigger: `workflow_dispatch` only — no push/PR/schedule, and no
+#     `workflow_call`, so it can never fire on its own.
+#   • It does NOT call, is not called by, and shares no state with the iOS
+#     workflow (`.github/workflows/ios-build.yml`, "iOS Unsigned Build") or
+#     `.github/workflows/native-build-validation.yml`. Those files are not
+#     modified in any way; this file only reads the repo's existing config.
+#   • Own concurrency group and own artifact names, so it cannot cancel or
+#     overwrite an IPA run.
+#
+# Build system: Gradle on a GitHub-hosted `ubuntu-latest` runner —
+#   `expo prebuild --platform android` (regenerates the gitignored `android/`
+#   from app.json + the repo's config plugins) followed by
+#   `:app:assembleRelease`. This mirrors the repo's established CI pattern
+#   (the IPA is produced the same way on a macOS runner) and reuses the
+#   project's own `plugins/withProductionSigning.js` signing wiring, so the APK
+#   is signed with the SAME stable production identity as every existing
+#   installation (updates stay installable over the previous APK).
+#
+# Why not EAS Build: `app.json` has no linked EAS project (`extra.eas` is `{}`)
+# and no workflow holds an `EXPO_TOKEN`, so `eas build` cannot run as-is. This
+# workflow instead reproduces the semantics of the existing `release-apk`
+# profile in `eas.json` (distribution internal, `buildType: apk`,
+# `:app:assembleRelease`, same `EXPO_PUBLIC_*` env). No AAB is produced —
+# Gradle `assembleRelease` emits `app-release.apk` only.
+#
+# Required repository secrets (Settings → Secrets and variables → Actions):
+#   ANDROID_KEYSTORE_BASE64      base64 of ~/.medacademy/medacademy-release.keystore
+#   MEDA_UPLOAD_STORE_PASSWORD   keystore password
+#   MEDA_UPLOAD_KEY_PASSWORD     key password
+#   MEDA_UPLOAD_KEY_ALIAS        optional; defaults to `medacademy-prod`
+# The certificate fingerprint (`MEDA_EXPECTED_CERT_SHA256`) is NOT a separate
+# secret: it is public material derived from the keystore at build time, which
+# cannot drift from the key that actually signs the APK.
+# No value of any secret is ever printed; the keystore is written to the
+# ephemeral runner temp dir with 0600 permissions and never uploaded.
+
+on:
+  workflow_dispatch:
+    inputs:
+      reason:
+        description: 'Why is this APK being built? (shown in the run summary)'
+        required: false
+        default: 'Manual Android APK build'
+        type: string
+      retention_days:
+        description: 'How many days to keep the APK artifact'
+        required: false
+        default: '30'
+        type: choice
+        options:
+          - '7'
+          - '14'
+          - '30'
+          - '90'
+
+# Least privilege: the workflow only reads the repository. No `contents: write`,
+# no packages, no id-token.
+permissions:
+  contents: read
+
+concurrency:
+  # Independent group, and never cancels an in-flight build (a cancelled
+  # Gradle release build wastes ~20 minutes of runner time and can leave a
+  # half-tested artifact queue).
+  group: android-apk-${{ github.ref }}
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  android-apk:
+    name: Build Signed Android APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+
+    env:
+      # Public client configuration — identical to the values `eas.json`
+      # (`release-apk`) and the iOS workflow bake into the JS bundle. These are
+      # NOT credentials.
+      EXPO_PUBLIC_APP_ID: app-czyg340mpc75
+      EXPO_PUBLIC_PHP_API_URL: https://api.medacademy.site/backend/public/index.php
+      CI: '1'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+
+      - name: Setup Java (JDK 17)
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      # ── Fail fast (before any 20-minute build) on missing credentials ───────
+      - name: Preflight — required signing secrets
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          STORE_PASSWORD: ${{ secrets.MEDA_UPLOAD_STORE_PASSWORD }}
+          KEY_PASSWORD: ${{ secrets.MEDA_UPLOAD_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          missing=()
+          [ -n "${KEYSTORE_B64:-}" ]    || missing+=("ANDROID_KEYSTORE_BASE64")
+          [ -n "${STORE_PASSWORD:-}" ]  || missing+=("MEDA_UPLOAD_STORE_PASSWORD")
+          [ -n "${KEY_PASSWORD:-}" ]    || missing+=("MEDA_UPLOAD_KEY_PASSWORD")
+          if [ "${#missing[@]}" -gt 0 ]; then
+            {
+              echo "### Missing signing secrets — build not started"
+              echo ""
+              echo "Add these repository secrets (Settings → Secrets and variables → Actions):"
+              echo ""
+              for name in "${missing[@]}"; do echo "- \`$name\`"; done
+              echo ""
+              echo "\`ANDROID_KEYSTORE_BASE64\` is the base64 of the EXISTING production"
+              echo "keystore (\`~/.medacademy/medacademy-release.keystore\`). The signing"
+              echo "identity must not be regenerated: a new key would orphan every"
+              echo "installed copy of the app."
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "::error::Missing repository secrets: ${missing[*]}"
+            exit 1
+          fi
+          echo "Required signing secrets are present (values are never printed)."
+
+      - name: Install Node dependencies (npm)
+        run: npm ci --no-audit --no-fund
+
+      # ── Restore the production keystore + derive the public cert pin ───────
+      - name: Restore production keystore and derive cert fingerprint
+        id: signing
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          STORE_PASSWORD: ${{ secrets.MEDA_UPLOAD_STORE_PASSWORD }}
+          ALIAS_INPUT: ${{ secrets.MEDA_UPLOAD_KEY_ALIAS }}
+        run: |
+          set -euo pipefail
+          umask 077
+          KS_PATH="$RUNNER_TEMP/medacademy-release.keystore"
+          printf '%s' "$KEYSTORE_B64" | base64 --decode > "$KS_PATH"
+          chmod 600 "$KS_PATH"
+          ALIAS="${ALIAS_INPUT:-medacademy-prod}"
+
+          # Loading the key proves password + alias are correct NOW, instead of
+          # failing 20 minutes into Gradle. The password is passed through an
+          # environment variable (:env), never through argv/process list.
+          if ! MEDA_UPLOAD_STORE_PASSWORD="$STORE_PASSWORD" keytool -list -v \
+                -keystore "$KS_PATH" \
+                -storepass:env MEDA_UPLOAD_STORE_PASSWORD \
+                -alias "$ALIAS" > "$RUNNER_TEMP/keytool.txt" 2>&1; then
+            echo "::error::Cannot open the keystore with the given alias/password. Check ANDROID_KEYSTORE_BASE64, MEDA_UPLOAD_STORE_PASSWORD and MEDA_UPLOAD_KEY_ALIAS."
+            rm -f "$RUNNER_TEMP/keytool.txt"
+            exit 1
+          fi
+
+          PIN="$(sed -n 's/.*SHA256: *//p' "$RUNNER_TEMP/keytool.txt" | head -1 | tr -d ':[:space:]' | tr '[:lower:]' '[:upper:]')"
+          rm -f "$RUNNER_TEMP/keytool.txt"
+          if ! printf '%s' "$PIN" | grep -Eq '^[0-9A-F]{64}$'; then
+            echo "::error::Could not read a 64-hex SHA-256 certificate fingerprint from the keystore (alias '$ALIAS')."
+            exit 1
+          fi
+
+          {
+            echo "MEDA_UPLOAD_STORE_FILE=$KS_PATH"
+            echo "MEDA_UPLOAD_KEY_ALIAS=$ALIAS"
+            echo "MEDA_EXPECTED_CERT_SHA256=$PIN"
+            echo "SIGNING_CERT_SHA256=$PIN"
+          } >> "$GITHUB_ENV"
+
+          echo "Keystore restored to \$RUNNER_TEMP (alias: $ALIAS, permissions 0600)."
+          echo "Production certificate SHA-256 (public material): $PIN"
+
+      # ── Generate android/ exactly as a local build would ────────────────────
+      - name: Expo prebuild — Android (clean)
+        run: npx expo prebuild --platform android --clean --no-install
+
+      # ── Prove the generated project is release-signable before building ────
+      - name: Verify generated Android build configuration
+        run: |
+          set -euo pipefail
+          GRADLE=android/app/build.gradle
+          fail() { echo "::error::$1"; exit 1; }
+
+          [ -f "$GRADLE" ] || fail "prebuild did not generate android/app/build.gradle"
+          grep -q 'signingConfigs.release' "$GRADLE" \
+            || fail "plugins/withProductionSigning.js did not inject signingConfigs.release"
+          grep -q 'signingConfig signingConfigs.release' "$GRADLE" \
+            || fail "the release buildType is not pointed at the production signingConfig"
+          grep -q 'EXPECTED_CERT_SHA256' "$GRADLE" \
+            || fail "the integrity pin buildConfigField (EXPECTED_CERT_SHA256) is missing"
+          grep -q 'APP_VERSION_CODE' android/gradle.properties \
+            || fail "APP_VERSION_CODE is missing from gradle.properties"
+          grep -q "applicationId 'com.medacademy.app'" "$GRADLE" \
+            || fail "unexpected applicationId in the generated build.gradle"
+          # Fail-closed check: only buildTypes.debug may reference the debug
+          # keystore. A second occurrence means release fell back to debug.
+          if [ "$(grep -c 'signingConfig signingConfigs.debug' "$GRADLE")" -ne 1 ]; then
+            fail "release buildType falls back to the DEBUG keystore — refusing to build a release APK"
+          fi
+
+          echo "Generated config OK:"
+          grep -nE "applicationId|versionCode|versionName|minSdkVersion|targetSdkVersion" "$GRADLE" | head -8
+          grep -nE "^APP_VERSION_(NAME|CODE)=" android/gradle.properties
+
+      - name: Ensure Android SDK platform 36 is installed
+        run: |
+          set -euo pipefail
+          SDK="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
+          [ -n "$SDK" ] || { echo "::error::ANDROID_HOME is not set on this runner"; exit 1; }
+          echo "ANDROID_HOME=$SDK"
+          # app.json → expo-build-properties: compileSdk/targetSdk 36.
+          if [ -d "$SDK/platforms/android-36" ]; then
+            echo "platforms;android-36 already present"
+          else
+            SDKMANAGER="$(command -v sdkmanager || echo "$SDK/cmdline-tools/latest/bin/sdkmanager")"
+            yes | "$SDKMANAGER" --licenses > /dev/null || true
+            "$SDKMANAGER" 'platforms;android-36'
+          fi
+          ls "$SDK/platforms"
+
+      # ── The build itself ────────────────────────────────────────────────────
+      - name: Build signed release APK (Gradle)
+        id: build
+        working-directory: android
+        env:
+          MEDA_UPLOAD_STORE_PASSWORD: ${{ secrets.MEDA_UPLOAD_STORE_PASSWORD }}
+          MEDA_UPLOAD_KEY_PASSWORD: ${{ secrets.MEDA_UPLOAD_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          # `pipefail` above is what makes the log tee transparent to failures:
+          # the step fails on Gradle's exit status, and the log is kept for the
+          # `if: failure()` artifact upload.
+          ./gradlew :app:assembleRelease \
+            --stacktrace \
+            -PexpectedCertSha256="$MEDA_EXPECTED_CERT_SHA256" \
+            2>&1 | tee "$RUNNER_TEMP/gradle.log"
+          echo "Gradle finished: $(grep -c '^' "$RUNNER_TEMP/gradle.log") log lines"
+
+      # ── Verify the artifact really is a production-signed release APK ───────
+      - name: Verify APK signature, identity and checksum
+        id: apk
+        run: |
+          set -euo pipefail
+          fail() { echo "::error::$1"; exit 1; }
+
+          SRC=android/app/build/outputs/apk/release/app-release.apk
+          [ -f "$SRC" ] || { ls -R android/app/build/outputs 2>/dev/null || true; fail "release APK not found at $SRC"; }
+
+          # An AAB is NOT an acceptable output for this workflow.
+          if find android/app/build/outputs -name '*.aab' | grep -q .; then
+            fail "an AAB was produced; this workflow must ship an APK only"
+          fi
+
+          VERSION_NAME="$(node -p "require('./app.json').expo.version")"
+          VERSION_CODE="$(node -p "String(require('./app.json').expo.android.versionCode ?? 1)")"
+          ARTIFACT="MedAcademy-v${VERSION_NAME}-${VERSION_CODE}.apk"
+          OUT="$RUNNER_TEMP/$ARTIFACT"
+          cp "$SRC" "$OUT"
+          chmod 644 "$OUT"
+
+          SIZE_BYTES="$(stat -c%s "$OUT")"
+          [ "$SIZE_BYTES" -ge 10000000 ] || fail "APK is suspiciously small ($SIZE_BYTES bytes)"
+
+          BT="$(ls -d "$ANDROID_HOME"/build-tools/* 2>/dev/null | sort -V | tail -1)"
+          [ -n "$BT" ] || fail "no Android build-tools found"
+          echo "Using build-tools: $BT"
+
+          # --print-certs also verifies the signature (v1/v2/v3 scheme).
+          "$BT/apksigner" verify --print-certs "$OUT" > "$RUNNER_TEMP/apksigner.txt" 2>&1 \
+            || { cat "$RUNNER_TEMP/apksigner.txt"; fail "apksigner rejected the APK signature"; }
+          APK_CERT="$(sed -n 's/.*certificate SHA-256 digest: //p' "$RUNNER_TEMP/apksigner.txt" | head -1 | tr -d ':[:space:]' | tr '[:lower:]' '[:upper:]')"
+          [ -n "$APK_CERT" ] || fail "could not read the signing certificate from the APK"
+          if [ "$APK_CERT" != "$SIGNING_CERT_SHA256" ]; then
+            fail "APK is signed by $APK_CERT but the project's production identity is $SIGNING_CERT_SHA256"
+          fi
+          echo "Signature OK — signed with the production identity $APK_CERT"
+          grep -E 'Verified using' "$RUNNER_TEMP/apksigner.txt" || true
+
+          # Package identity + version, read from the APK itself.
+          AAPT="$BT/aapt"
+          [ -x "$AAPT" ] || AAPT="$BT/aapt2"
+          BADGING="$("$AAPT" dump badging "$OUT")"
+          PKG="$(printf '%s\n' "$BADGING" | sed -n "s/^package: name='\([^']*\)'.*/\1/p" | head -1)"
+          APK_VCODE="$(printf '%s\n' "$BADGING" | sed -n "s/.*versionCode='\([0-9]*\)'.*/\1/p" | head -1)"
+          APK_VNAME="$(printf '%s\n' "$BADGING" | sed -n "s/.*versionName='\([^']*\)'.*/\1/p" | head -1)"
+          [ "$PKG" = "com.medacademy.app" ] || fail "unexpected package name in APK: $PKG"
+          if printf '%s\n' "$BADGING" | grep -q 'application-debuggable'; then
+            fail "APK is debuggable — this is not a release build"
+          fi
+
+          SHA256="$(sha256sum "$OUT" | cut -d' ' -f1)"
+          ( cd "$RUNNER_TEMP" && sha256sum "$ARTIFACT" > "$ARTIFACT.sha256" )
+
+          {
+            echo "APK_PATH=$OUT"
+            echo "APK_ARTIFACT_FILE=$ARTIFACT"
+            echo "APK_SHA256=$SHA256"
+            echo "APK_SIZE_MB=$(( SIZE_BYTES / 1048576 ))"
+            echo "APK_CERT_SHA256=$APK_CERT"
+            echo "APK_PACKAGE=$PKG"
+            echo "APK_VERSION=$APK_VNAME"
+            echo "APK_VERSION_CODE=$APK_VCODE"
+          } >> "$GITHUB_ENV"
+
+          echo "APK ready: $ARTIFACT ($(( SIZE_BYTES / 1048576 )) MB), sha256=$SHA256"
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: MedAcademy-Android-APK
+          path: |
+            ${{ runner.temp }}/MedAcademy-*.apk
+            ${{ runner.temp }}/MedAcademy-*.apk.sha256
+          retention-days: ${{ inputs.retention_days }}
+          if-no-files-found: error
+          # The APK is already a compressed archive; re-compressing it only
+          # burns runner minutes.
+          compression-level: 0
+
+      - name: Upload Gradle log (on failure)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-gradle-log
+          path: ${{ runner.temp }}/gradle.log
+          retention-days: 7
+          if-no-files-found: ignore
+
+      - name: Build summary
+        if: always()
+        env:
+          BUILD_OUTCOME: ${{ steps.build.outcome }}
+          APK_OUTCOME: ${{ steps.apk.outcome }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          TRIGGER_REASON: ${{ inputs.reason }}
+          RETENTION_DAYS: ${{ inputs.retention_days }}
+        run: |
+          {
+            echo "## Android APK build"
+            echo ""
+            echo "| | |"
+            echo "|---|---|"
+            echo "| Result | **${BUILD_OUTCOME:-skipped} / ${APK_OUTCOME:-skipped}** |"
+            echo "| Trigger reason | ${TRIGGER_REASON:-n/a} |"
+            echo "| Commit | \`${GITHUB_SHA}\` |"
+            if [ "${APK_OUTCOME:-}" = "success" ]; then
+              echo "| APK | \`${APK_ARTIFACT_FILE}\` (${APK_SIZE_MB} MB) |"
+              echo "| Package / version | \`${APK_PACKAGE}\` ${APK_VERSION} (code ${APK_VERSION_CODE}) |"
+              echo "| SHA-256 | \`${APK_SHA256}\` |"
+              echo "| Signing cert SHA-256 | \`${APK_CERT_SHA256}\` (existing production identity) |"
+              echo "| Artifact | \`MedAcademy-Android-APK\` — kept ${RETENTION_DAYS:-30} days |"
+            fi
+            echo ""
+            if [ "${APK_OUTCOME:-}" = "success" ]; then
+              echo "**Download:** open this run → *Artifacts* → **MedAcademy-Android-APK**, unzip, install the \`.apk\`."
+            else
+              echo "**Failed.** Open the step log above; the Gradle log is attached as the \`android-gradle-log\` artifact."
+            fi
+            echo ""
+            echo "**Build system:** Gradle \`:app:assembleRelease\` on \`ubuntu-latest\` (the Android equivalent of the repo's \`eas.json\` \`release-apk\` profile). EAS Build is not linked for this project, so no EAS build URL exists for this run."
+            echo ""
+            echo "**Run:** $RUN_URL"
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -94,6 +94,15 @@ final class AdminController
         if ($old === null) {
             throw new ApiException(404, 'User not found');
         }
+        // Privilege boundary: an Admin may manage learners and doctors only.
+        // They can neither promote into an administrative role nor demote or
+        // otherwise alter an existing Admin / Super Admin account.
+        if ($actorRole !== 'super_admin') {
+            if (in_array((string) $old, ['admin', 'super_admin'], true)
+                || in_array($newRole, ['admin', 'super_admin'], true)) {
+                throw new ApiException(403, 'Only a Super Admin can manage administrator accounts or assign administrative roles');
+            }
+        }
 
         Database::instance()->transaction(function (Database $db) use ($userId, $newRole, $old) {
             $db->query(
@@ -130,6 +139,7 @@ final class AdminController
         if ($old === null) {
             throw new ApiException(404, 'User not found');
         }
+        $this->assertCanManageAccount($request, $userId);
 
         if (in_array($status, ['deleted', 'trashed'], true)) {
             $db->query(
@@ -157,6 +167,7 @@ final class AdminController
     public function blockUser(Request $request): array
     {
         $userId = \MedAcademy\Utils\Uuid::normalize((string) $request->params['id']);
+        $this->assertCanManageAccount($request, $userId);
         $reason = (string) ($request->json()['reason'] ?? 'Blocked by administrator');
         Database::instance()->query(
             "UPDATE profiles SET status = 'blocked', suspension_reason = ? WHERE id = ?",
@@ -170,6 +181,7 @@ final class AdminController
     public function restoreUser(Request $request): array
     {
         $userId = \MedAcademy\Utils\Uuid::normalize((string) $request->params['id']);
+        $this->assertCanManageAccount($request, $userId);
         $db = Database::instance();
 
         // Check if user is trashed
@@ -223,6 +235,7 @@ final class AdminController
         (new FeatureFlagService())->assertEnabled('device_management', $request);
 
         $userId = \MedAcademy\Utils\Uuid::normalize((string) $request->params['id']);
+        $this->assertCanManageAccount($request, $userId);
         Database::instance()->query(
             "UPDATE devices SET status = 'logged_out', trust_level = 'revoked',
                     revoked_at = UTC_TIMESTAMP(6), revoked_reason = 'admin_device_reset'
@@ -232,6 +245,28 @@ final class AdminController
         (new SessionManager())->revokeAllForUser($userId, 'admin_device_reset');
         AuditService::write($request->user['id'], 'device_reset', ['user_id' => $userId]);
         return ['success' => true];
+    }
+
+    /**
+     * Privilege boundary for account management.
+     *
+     * A Super Admin may manage every account. An Admin may manage learners,
+     * doctors and assistants, but never another administrator: allowing that
+     * would let an Admin demote or lock out a Super Admin (horizontal/vertical
+     * privilege escalation). The target role is read from the database, never
+     * from the request body.
+     */
+    private function assertCanManageAccount(Request $request, string $targetUserId): void
+    {
+        $actorRole = (string) ($request->user['role'] ?? '');
+        if ($actorRole === 'super_admin') return;
+        if ($actorRole !== 'admin') {
+            throw new ApiException(403, 'Account management requires an administrator role');
+        }
+        $targetRole = Database::instance()->value('SELECT role FROM profiles WHERE id = ?', [$targetUserId]);
+        if (in_array((string) $targetRole, ['admin', 'super_admin'], true)) {
+            throw new ApiException(403, 'Only a Super Admin can manage administrator accounts');
+        }
     }
 
     public function auditLogs(Request $request): array
@@ -362,7 +397,7 @@ final class AdminController
 
         match ($operation) {
             'trash' => $this->bulkTrash($userIds, $actorId, $actorRole, $reason, $success, $failed, $errors),
-            'restore' => $this->bulkRestore($userIds, $actorId, $success, $failed, $errors),
+            'restore' => $this->bulkRestore($userIds, $actorId, $actorRole, $success, $failed, $errors),
             'suspend' => $this->bulkStatus($userIds, 'suspended', $actorId, $actorRole, $reason, $success, $failed, $errors),
             'unsuspend' => $this->bulkStatus($userIds, 'active', $actorId, $actorRole, $reason, $success, $failed, $errors),
             'reset_devices' => $this->bulkResetDevices($userIds, $actorId, $actorRole, $success, $failed, $errors),
@@ -411,9 +446,9 @@ final class AdminController
                 }
                 // Protected accounts: only a super_admin may trash a
                 // super_admin (mirrors deleteUser / bulkStatus).
-                if ($row['role'] === 'super_admin' && $actorRole !== 'super_admin') {
+                if (in_array((string) $row['role'], ['admin', 'super_admin'], true) && $actorRole !== 'super_admin') {
                     $failed++;
-                    $errors[] = ['user_id' => $userId, 'message' => 'Only a super admin can trash a super admin account'];
+                    $errors[] = ['user_id' => $userId, 'message' => 'Only a Super Admin can trash an administrator account'];
                     continue;
                 }
                 if ($userId === $actorId) {
@@ -445,7 +480,7 @@ final class AdminController
         ]);
     }
 
-    private function bulkRestore(array $userIds, string $actorId, int &$success, int &$failed, array &$errors): void
+    private function bulkRestore(array $userIds, string $actorId, string $actorRole, int &$success, int &$failed, array &$errors): void
     {
         $db = Database::instance();
         foreach ($userIds as $userId) {
@@ -454,6 +489,12 @@ final class AdminController
                 if ($old === null) {
                     $failed++;
                     $errors[] = ['user_id' => $userId, 'message' => 'User not found or not trashed'];
+                    continue;
+                }
+                $role = $db->value('SELECT role FROM profiles WHERE id = ?', [$userId]);
+                if (in_array((string) $role, ['admin', 'super_admin'], true) && $actorRole !== 'super_admin') {
+                    $failed++;
+                    $errors[] = ['user_id' => $userId, 'message' => 'Only a Super Admin can restore an administrator account'];
                     continue;
                 }
                 $db->query(
@@ -500,9 +541,9 @@ final class AdminController
                 }
                 // Protected accounts: only a super_admin may change another
                 // super_admin's status (mirrors setRole / adminChangePassword).
-                if ($row['role'] === 'super_admin' && $actorRole !== 'super_admin') {
+                if (in_array((string) $row['role'], ['admin', 'super_admin'], true) && $actorRole !== 'super_admin') {
                     $failed++;
-                    $errors[] = ['user_id' => $userId, 'message' => 'Only a super admin can change a super admin account'];
+                    $errors[] = ['user_id' => $userId, 'message' => 'Only a Super Admin can change an administrator account'];
                     continue;
                 }
                 if ($userId === $actorId && $newStatus === 'suspended') {
@@ -562,9 +603,9 @@ final class AdminController
                     $errors[] = ['user_id' => $userId, 'message' => 'User not found'];
                     continue;
                 }
-                if ($row['role'] === 'super_admin' && $actorRole !== 'super_admin') {
+                if (in_array((string) $row['role'], ['admin', 'super_admin'], true) && $actorRole !== 'super_admin') {
                     $failed++;
-                    $errors[] = ['user_id' => $userId, 'message' => 'Only a super admin can reset devices for a super admin account'];
+                    $errors[] = ['user_id' => $userId, 'message' => 'Only a Super Admin can reset devices for an administrator account'];
                     continue;
                 }
                 $db->query(
@@ -1042,43 +1083,21 @@ final class AdminController
         if ($target === null) {
             throw new ApiException(404, 'User not found');
         }
-        if ($target['role'] === 'super_admin' && $request->user['role'] !== 'super_admin') {
-            throw new ApiException(403, 'Only super_admin can delete a super_admin');
-        }
+        $this->assertCanManageAccount($request, $targetUserId);
 
-        // 1. Collect VdoCipher video IDs (before DB delete)
-        $vdoVideoIds = [];
-        if ($target['role'] === 'doctor') {
-            $videos = $db->select('SELECT provider_video_id FROM video_uploads WHERE doctor_id = ?', [$targetUserId]);
-            foreach ($videos as $v) {
-                if ($v['provider_video_id']) $vdoVideoIds[] = $v['provider_video_id'];
-            }
-        }
+        // 1. No remote provider cleanup: VdoCipher is retired and never contacted.
+        //    (This used to collect provider video ids before the delete so it could
+        //    issue best-effort DELETE calls to dev.vdocipher.com.)
 
         // 2. DB cascade delete via shared helper (transaction-safe)
         $db->transaction(function (Database $db) use ($targetUserId) {
             $this->hardDeleteUser($db, $targetUserId);
         });
 
-        // 3. VdoCipher cleanup (best-effort)
+        // 3. No remote cleanup: VdoCipher is retired and never contacted. `videos_removed`
+        //    stays in the audit payload (0) so historical comparisons and dashboards keep
+        //    the same shape; the local rows are already covered by the cascade above.
         $videosRemoved = 0;
-        $apiSecret = \MedAcademy\Utils\Config::string('VDOCIPHER_API_SECRET', '');
-        if ($apiSecret !== '' && count($vdoVideoIds) > 0) {
-            foreach ($vdoVideoIds as $vid) {
-                try {
-                    $ch = curl_init('https://dev.vdocipher.com/api/videos/' . rawurlencode($vid));
-                    curl_setopt_array($ch, [
-                        CURLOPT_DELETE => true,
-                        CURLOPT_HTTPHEADER => ['Authorization: Apisecret ' . $apiSecret],
-                        CURLOPT_RETURNTRANSFER => true,
-                        CURLOPT_TIMEOUT => 10,
-                    ]);
-                    $status = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-                    curl_close($ch);
-                    if ($status === 200 || $status === 404) $videosRemoved++;
-                } catch (\Throwable) {}
-            }
-        }
 
         AuditService::write($request->user['id'], 'user_hard_deleted', [
             'target_user_id' => $targetUserId,

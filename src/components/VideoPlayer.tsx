@@ -1,23 +1,27 @@
 /**
  * VideoPlayer.tsx
  *
- * Provider router — selects the correct player based on the lesson's
- * video_type.  All lesson screens use <VideoPlayer> exclusively;
- * they never import VdoCipherPlayer or YouTubePlayer directly.
+ * Provider router for lesson video. YouTube is the ONLY supported provider.
  *
- * ── Provider routing ────────────────────────────────────────────────────────
+ * ── Why the VdoCipher branch is gone ────────────────────────────────────────
+ * VdoCipher was retired as an active provider: its player, SDK, OTP and
+ * playback-token flows are no longer part of the app. Lessons created before the
+ * retirement still carry `video_type = 'vdocipher'`, and they are NOT rewritten or
+ * deleted — this router simply renders an explicit "video unavailable" panel for
+ * them instead of a broken player, which is exactly how an out-of-service provider
+ * must behave. Content owners can supply a YouTube replacement.
  *
- *   video_type = 'vdocipher'  →  VdoCipherPlayer
- *   video_type = 'youtube'    →  YouTubePlayer (Plyr)
- *
- * ── Adding a new provider ────────────────────────────────────────────────────
+ * ── Adding a new provider ───────────────────────────────────────────────────
  *   1. Create `NewProvider.tsx` implementing VideoPlayerProps
  *   2. Add the new `video_type` value to the DB enum
  *   3. Add a `case` branch below — nothing else changes
  */
 
-import { VdoCipherPlayer } from '@/components/VdoCipherPlayer';
+import { StyleSheet, Text, View, useColorScheme } from 'react-native';
+import { VideoOff } from 'lucide-react-native';
 import { YouTubePlayer, extractYouTubeVideoId } from '@/components/YouTubePlayer';
+import { useTranslation } from '@/lib/i18n';
+import { neuColors, mutedTextStyle } from '@/lib/neu';
 
 // ─── Shared props interface ───────────────────────────────────────────────────
 
@@ -25,8 +29,8 @@ export interface VideoPlayerProps {
   /** DB lesson.video_type — determines which player adapter is used */
   videoType: 'vdocipher' | 'youtube' | string;
 
-  // ── VdoCipher-specific ────────────────────────────────────────────────────
-  /** VdoCipher opaque video ID (required when videoType = 'vdocipher') */
+  // ── Legacy VdoCipher fields — kept only so old callers still type-check ────
+  /** Legacy VdoCipher opaque video ID (no longer used to play anything) */
   videoId?: string;
   /** Student WM-NNNN sequential watermark identifier */
   watermarkId?: string;
@@ -65,11 +69,9 @@ export interface VideoPlayerProps {
 
 export function VideoPlayer({
   videoType,
-  videoId,
   watermarkId,
   watermarkName,
   youtubeVideoId,
-  lessonId,
   resumePosition = 0,
   onReady,
   onProgress,
@@ -103,24 +105,43 @@ export function VideoPlayer({
     );
   }
 
-  // Default / vdocipher — keeps all existing behavior unchanged
-  if (videoType === 'vdocipher' && videoId) {
-    return (
-      <VdoCipherPlayer
-        videoId={videoId}
-        lessonId={lessonId}
-        watermarkId={watermarkId}
-        watermarkName={watermarkName}
-        onReady={onReady}
-        onProgress={(currentTime, duration) => onProgress?.(currentTime, duration)}
-        onEnd={onEnd}
-        onError={onError}
-        onFullscreen={onFullscreen}
-        shouldAllowFullscreen={shouldAllowFullscreen}
-        fullscreenVerdictNow={fullscreenVerdictNow}
-      />
-    );
-  }
-
-  return null;
+  // Any other provider (including every legacy `vdocipher` lesson) is unavailable.
+  return <UnavailableVideoPlayer videoType={videoType} />;
 }
+
+/**
+ * Out-of-service provider panel.
+ *
+ * Deliberately NOT a silent `null`: a blank area reads as a loading failure, and the
+ * student would keep waiting. It states the fact and does not touch the lesson record.
+ */
+function UnavailableVideoPlayer({ videoType }: { videoType: string }) {
+  const scheme = useColorScheme();
+  const c = scheme === 'dark' ? neuColors.dark : neuColors.light;
+  const { t } = useTranslation();
+
+  return (
+    <View style={[styles.wrap, { backgroundColor: c.base, borderColor: c.border }]}>
+      <VideoOff size={28} color={c.primary} opacity={0.7} />
+      <Text style={[styles.title, { color: c.text }]}>{t('video.unavailableTitle')}</Text>
+      <Text style={[styles.body, mutedTextStyle(c, 0.7)]}>
+        {videoType === 'vdocipher' ? t('video.unavailableLegacy') : t('video.unavailableBody')}
+      </Text>
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  wrap: {
+    width: '100%',
+    aspectRatio: 16 / 9,
+    borderRadius: 16,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 20,
+    gap: 8,
+  },
+  title: { fontSize: 15, fontWeight: '800', textAlign: 'center' },
+  body: { fontSize: 12.5, textAlign: 'center', lineHeight: 18 },
+});

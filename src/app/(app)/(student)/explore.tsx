@@ -318,7 +318,9 @@ function doctorOf(item: CourseItem): { id: string; full_name: string } | null {
         renderItem={renderItem}
         ListHeaderComponent={ListHeader}
         ListEmptyComponent={ListEmpty}
-        contentContainerStyle={{ paddingHorizontal: layout.screenPx }}
+        // Trailing clearance so the last card can scroll clear of the floating
+        // bar (0 extra on screens where the bar is not floating over content).
+        contentContainerStyle={{ paddingHorizontal: layout.screenPx, paddingBottom: layout.roleTabsBottom() }}
         keyboardShouldPersistTaps="handled"
         keyboardDismissMode="on-drag"
         /* keyboard: native iOS inset, once — no KeyboardAvoidingView stacking a

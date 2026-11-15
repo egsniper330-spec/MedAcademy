@@ -83,10 +83,11 @@ export default function SAContentHub() {
         <NavItem icon={FileText}  label="CMS Pages"         description="Static content and landing pages"        color="#16A34A" path="/sa-cms"            c={c} isDark={isDark} />
         <NavItem icon={Paintbrush} label="Branding"         description="Logo, colours, platform identity"        color="#7C3AED" path="/branding"          c={c} isDark={isDark} />
 
-        <SectionLabel title="Video Library & Delivery" c={c} />
-        <NavItem icon={Video}     label="Video Library"     description="Manage uploaded videos"                  color="#7C3AED" path="/sa-video-library"  c={c} isDark={isDark} />
-        <NavItem icon={Layers}    label="Video Providers"   description="CDN and video platform settings"         color="#2DA8FF" path="/video-providers"   c={c} isDark={isDark} />
-        <NavItem icon={Settings}  label="Video Settings"    description="Player config, quality & encoding"       color="#6B7280" path="/sa-video-settings" c={c} isDark={isDark} />
+        {/* Video Library and Video Settings are gone with the VdoCipher retirement: there
+            is no provider library or provider status page left to manage. YouTube provider
+            controls stay, because YouTube is the only supported player. */}
+        <SectionLabel title="Video Delivery" c={c} />
+        <NavItem icon={Layers}    label="Video Providers"   description="YouTube provider availability"           color="#2DA8FF" path="/video-providers"   c={c} isDark={isDark} />
 
         <SectionLabel title="Health & Protection" c={c} />
         <NavItem icon={Eye}        label="Watermark / DRM"  description="Screenshot & recording prevention"       color="#DC2626" path="/content-protection" c={c} isDark={isDark} />

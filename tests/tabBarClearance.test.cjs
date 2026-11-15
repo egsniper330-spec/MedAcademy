@@ -68,21 +68,33 @@ ok(IOS_26.LIQUID_GLASS_TAB_BAR === true && IOS_18.LIQUID_GLASS_TAB_BAR === false
 ok(IOS_18.tabBarClearance() === 49,
   'portrait is the default (no argument)');
 
-/* ───── 2. Android / web: the JS bar is in the flow → NO extra space ─────── */
+/* ── 2. Android / web: the SAME floating pill → its height is reserved ──── */
 
-const OTHER = loadModule('src/lib/tabBarClearance.ts', { OS: 'android', Version: 34 });
-ok(OTHER.tabBarClearance(false) === 0 && OTHER.tabBarClearance(true) === 0,
-  'Android/web: zero extra clearance (the in-flow JS bar already shrinks the viewport)');
+const ANDROID = loadModule('src/lib/tabBarClearance.ts', { OS: 'android', Version: 34 });
+const WEB = loadModule('src/lib/tabBarClearance.ts', { OS: 'web', Version: undefined });
+
+// The pill floats over the content on BOTH platforms now (Web Preview mounts
+// GlassTabBar), so a role-tab screen must reserve its height + gap.
+for (const [label, mod] of [['Android', ANDROID], ['Web', WEB]]) {
+  ok(mod.tabBarClearance(false, true) === 72 && mod.tabBarClearance(true, true) === 72,
+    label + ': a role-tab screen reserves the floating pill (62 + 10) in both orientations');
+  ok(mod.tabBarClearance(false, false) === 0 && mod.tabBarClearance(true, false) === 0,
+    label + ': a drawer/hub screen with NO bottom bar reserves nothing');
+  ok(mod.GLASS_TAB_BAR_HEIGHT === 62 && mod.GLASS_TAB_BAR_GAP === 10,
+    label + ': the reserved height is the bar\'s published pill geometry');
+}
+ok(ANDROID.tabBarClearance(false, true) === WEB.tabBarClearance(false, true),
+  'Android and Web reserve exactly the same space (one bar, one number)');
 ok(!/from 'react-native'/.test(read('src/lib/tabBarClearance.ts')),
-  'the non-iOS module imports nothing native (safe for the web bundle)');
+  'the non-iOS module imports nothing from react-native (safe for the web bundle)');
 
 /* ───── 3. one shared wiring point feeds every screen ───────────────────── */
 
 const ds = read('src/lib/ds.ts');
 ok(/import \{ tabBarClearance \} from '@\/lib\/tabBarClearance'/.test(ds),
   'useLayout() pulls the platform clearance from the shared module');
-ok(/const barClearance = tabBarClearance\(win\.width > win\.height\)/.test(ds),
-  'clearance is recomputed on orientation change (width > height)');
+ok(/const barClearance = tabBarClearance\(win\.width > win\.height, inRoleTabs\)/.test(ds),
+  'clearance is recomputed on orientation change (width > height) and scoped to role-tab screens');
 ok(/const pageBottom\s*=\s*safeBottom\(insets\.bottom, barClearance\)/.test(ds),
   'non-scrolling page padding includes the bar clearance');
 ok(/\(extra = 0\) => safeBottom\(insets\.bottom, extra \+ barClearance\)/.test(ds),

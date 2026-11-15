@@ -27,6 +27,17 @@ export default function AdminDashboard() {
   const { profile } = useProfileStore();
   const router = useRouter();
 
+  // Dashboard shortcuts: open the matching admin list with its filter applied.
+  const openUsers = (filters: { role?: string; status?: string }) => {
+    markEntryIntent('/(app)/(admin)/users', 'nested');
+    const qs = new URLSearchParams(filters as Record<string, string>).toString();
+    router.push(`/(app)/(admin)/users?${qs}` as RelativePathString);
+  };
+  const openDevices = () => {
+    markEntryIntent('/(app)/(admin)/devices', 'nested');
+    router.push('/(app)/(admin)/devices' as RelativePathString);
+  };
+
   const [stats, setStats] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -76,6 +87,8 @@ export default function AdminDashboard() {
     <ScrollView
       style={{ flex: 1, backgroundColor: c.base }}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />}
+      // Trailing clearance for the floating glass bar (see layout.scrollBottom).
+      contentContainerStyle={{ paddingBottom: layout.roleTabsBottom() }}
     >
       <DashboardHeader
         roleLabel={t('adminOverview.roleLabel')}
@@ -104,9 +117,9 @@ export default function AdminDashboard() {
           <>
             <Text style={{ fontSize: layout.captionSize, fontWeight: '800', ...mutedTextStyle(c, 0.4), marginBottom: layout.pad.sm, textTransform: 'uppercase', letterSpacing: 1 }}>{t('adminOverview.platformOverview')}</Text>
             <View style={{ flexDirection: 'row', flexWrap: 'wrap', marginBottom: layout.pad.xs }}>
-              <StatCard label={t('adminOverview.kpi.students')}    value={stats.totalStudents}    icon={<Users size={layout.captionSize + 2} color="#fff" />}        color="#7C3AED" />
-              <StatCard label={t('adminOverview.kpi.doctors')}     value={stats.totalDoctors}     icon={<Stethoscope size={layout.captionSize + 2} color="#fff" />}  color="#16A34A" />
-              <StatCard label={t('adminOverview.kpi.devices')}     value={stats.totalDevices}     icon={<Smartphone size={layout.captionSize + 2} color="#fff" />}   color="#D97706" />
+              <StatCard label={t('adminOverview.kpi.students')}    value={stats.totalStudents}    icon={<Users size={layout.captionSize + 2} color="#fff" />}        color="#7C3AED" onPress={() => openUsers({ role: 'student' })} />
+              <StatCard label={t('adminOverview.kpi.doctors')}     value={stats.totalDoctors}     icon={<Stethoscope size={layout.captionSize + 2} color="#fff" />}  color="#16A34A" onPress={() => openUsers({ role: 'doctor' })} />
+              <StatCard label={t('adminOverview.kpi.devices')}     value={stats.totalDevices}     icon={<Smartphone size={layout.captionSize + 2} color="#fff" />}   color="#D97706" onPress={() => openDevices()} />
               <StatCard label={t('adminOverview.kpi.credits')}     value={stats.totalCredits}     icon={<CreditCard size={layout.captionSize + 2} color="#fff" />}   color="#16A34A" />
               <StatCard label={t('adminOverview.kpi.consumed')}    value={stats.usedCredits}      icon={<CreditCard size={layout.captionSize + 2} color="#fff" />}   color="#D97706" />
               <StatCard label={t('adminOverview.kpi.courses')}     value={stats.totalCourses}     icon={<BookOpen size={layout.captionSize + 2} color="#fff" />}     color="#2DA8FF" />

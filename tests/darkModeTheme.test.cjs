@@ -172,7 +172,10 @@ const CASES = [
   ['src/components/NeuInputRow.tsx', /backgroundColor: c\.inputSurface/, 'NeuInputRow uses the recessed input rung'],
   ['src/components/NeuInputRow.tsx', /placeholderTextColor=\{isDark \? c\.textSubtle/, 'input placeholders use a readable tier on dark'],
   ['src/components/NeuButton.tsx', /variant === 'primary' \? c\.primary : variant === 'danger' \? '#DC2626' : c\.inputSurface/, 'secondary buttons use a recessed fill; danger keeps its deep fill for white ink'],
-  ['src/components/navigation/RoleTabShell.tsx', /backgroundColor: c\.navSurface/, 'Android/web tab bar uses the navigation rung'],
+  // The floating glass pill owns its own surface on Android AND web: a
+  // translucent tint over a blur, never the opaque navigation rung.
+  ['src/components/navigation/GlassTabBar.tsx', /backgroundColor: isDark \? 'rgba\(11,35,55,0\.62\)'/, 'the glass pill keeps a translucent dark surface (not an opaque fill)'],
+  ['src/components/navigation/GlassTabBar.tsx', /backgroundColor: isDark \? 'rgba\(9,28,45,0\.50\)'/, 'the glass tint wash stays translucent on dark'],
   ['src/components/navigation/RoleTabShell.tsx', /inactiveTintColor=\{`\$\{c\.text\}\$\{isDark \? '99' : '44'\}`\}/, 'tab labels are readable (not 26% alpha) on dark'],
   ['src/components/DrawerNav.tsx', /backgroundColor: c\.navSurface/, 'drawer panel uses the navigation rung'],
   ['src/components/DrawerNav.tsx', /isDark \? '2B' : '1F'/, 'active nav item gets a stronger brand tint on dark'],

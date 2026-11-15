@@ -83,10 +83,14 @@ for (const [group, visible] of Object.entries(visibleByRole)) {
 console.log('── 3. Shells exclude hidden entries (no tabBarItemHidden / href:null scene registration) ──');
 const iosShell = read(path.join(ROOT, 'src', 'components', 'navigation', 'RoleTabShell.ios.tsx'));
 const jsShell = read(path.join(ROOT, 'src', 'components', 'navigation', 'RoleTabShell.tsx'));
+// 2026-11-15: the Android and web shells share one base component, so the
+// hidden-tab filter lives there (and is inherited by BOTH bars).
+const shellBase = read(path.join(ROOT, 'src', 'components', 'navigation', 'RoleTabShellBase.tsx'));
 ok(/\.filter\(\(tab\) => tab\.hidden !== true\)/.test(iosShell), 'iOS shell filters hidden tabs');
-ok(/\.filter\(\(tab\) => tab\.hidden !== true\)/.test(jsShell), 'JS shell filters hidden tabs (parity)');
+ok(/\.filter\(\(tab\) => tab\.hidden !== true\)/.test(shellBase), 'shared shell filters hidden tabs (parity)');
+ok(/RoleTabShellBase/.test(jsShell), 'the web shell inherits that filter through the shared shell');
 ok(!iosShell.includes('tabBarItemHidden'), 'iOS shell no longer uses tabBarItemHidden scene registration');
-ok(!jsShell.includes('href: tab.hidden ? null : undefined'), 'JS shell no longer registers href:null hidden scenes');
+ok(!shellBase.includes('href: tab.hidden ? null : undefined'), 'shared shell no longer registers href:null hidden scenes');
 
 console.log('── 3b. Doctor drawer canonical order ──');
 // The doctor drawer must present its main items in exactly this order.

@@ -10,9 +10,8 @@ use MedAcademy\Http\Request;
 use MedAcademy\Http\Response;
 use MedAcademy\Services\AuditService;
 use MedAcademy\Services\IntegrityService;
-use MedAcademy\Services\MaterialPdfQueueService;
+use MedAcademy\Services\MaterialForensicPdfService;
 use MedAcademy\Services\MaterialPdfVariantService;
-use MedAcademy\Services\PdfWatermarkService;
 use MedAcademy\Services\RateLimitService;
 use MedAcademy\Storage\StorageService;
 use MedAcademy\Utils\Config;
@@ -69,9 +68,8 @@ final class MaterialDeliveryController
 
     public function __construct(
         private readonly StorageService $storage = new StorageService(),
-        private readonly PdfWatermarkService $watermark = new PdfWatermarkService(),
         private readonly MaterialPdfVariantService $variants = new MaterialPdfVariantService(),
-        private readonly MaterialPdfQueueService $queue = new MaterialPdfQueueService(),
+        private readonly MaterialForensicPdfService $forensic = new MaterialForensicPdfService(),
     ) {
     }
 
@@ -127,68 +125,21 @@ final class MaterialDeliveryController
 
         $this->shouldWatermark($role); // policy is unconditional; kept explicit
 
-        // Cache identity of THIS student's copy of THIS material. Throws 404 when
-        // the source vanished and 403 when there is no profile to personalize to.
-        $identity = $this->variants->identity($material, $userId);
-
-        // Fast path: a valid, current copy already exists.
-        $copy = $this->variants->existing($material, $userId, $identity['variant_key']);
-        $studentRef = substr(hash('sha256', 'material-pdf-cache|' . $userId), 0, 12);
-        $cacheBase = [
-            'material_id' => (string) $material['id'],
-            'student_ref' => $studentRef,
-            'variant' => substr((string) $identity['variant_key'], 0, 12),
-        ];
-        if ($copy !== null) {
-            // Retention is fixed from generation time; opening does not extend it.
-            $this->variants->touchServed($copy);
-            Logger::instance()->info('material-pdf-cache', $cacheBase + ['event' => 'cache_hit', 'renderer_run' => false]);
-            return $this->readyResponse(
-                $materialId,
-                $userId,
-                $intent,
-                (int) ($copy['page_count'] ?? 0),
-                (string) $copy['variant_key']
-            );
+        // ── THE ONLY PERSONALIZATION PATH ───────────────────────────────────
+        // The forensic service produces every personalized copy: image-only pages, an
+        // opaque payload per issuance, an absolute 24h lifetime. Authorization, the
+        // integrity policy and the rate limit above are unchanged.
+        //
+        // The legacy in-house renderer and its queue are retired: there is no second
+        // path that could produce a different copy of the same document. If the
+        // service is not configured we fail closed — never an unwatermarked original.
+        if (!MaterialForensicPdfService::enabled()) {
+            Logger::instance()->error('pdf-forensic-disabled', ['material_id' => $materialId]);
+            throw new ApiException(503, 'The personalized copy service is not available.', 'forensic_unavailable');
         }
-        Logger::instance()->info('material-pdf-cache', $cacheBase + ['event' => 'cache_miss', 'reason' => 'no_valid_copy']);
-
-        // Any authorized caller gets exactly one bounded render inside their
-        // request. The per-material/student/variant lock coalesces concurrent
-        // requests, while the renderer and upload limits bound the work. Student
-        // access never waits for a scheduled queue worker to start generation.
-        if (!$this->isStaff($role)) {
-            $maxBytes = max(1, Config::int('PDF_WATERMARK_MAX_SOURCE_BYTES', 50 * 1024 * 1024));
-            $sourceAbs = $this->variants->sourcePath($material);
-            if (!is_file($sourceAbs) || (int) @filesize($sourceAbs) > $maxBytes) {
-                throw new ApiException(422, 'This document is too large to prepare for delivery.', 'source_too_large');
-            }
-        }
-        $genStart = microtime(true);
-        Logger::instance()->info('material-pdf-cache', $cacheBase + ['event' => 'generation_started']);
-        try {
-            $copy = $this->variants->ensure($material, $userId);
-        } catch (ApiException $e) {
-            Logger::instance()->info('material-pdf-cache', $cacheBase + ['event' => 'generation_failed', 'duration_ms' => (int) ((microtime(true) - $genStart) * 1000)]);
-            $this->auditFailure($material, $userId, $this->failureStage($e), $e);
-            throw $e;
-        } catch (\Throwable $e) {
-            Logger::instance()->info('material-pdf-cache', $cacheBase + ['event' => 'generation_failed', 'duration_ms' => (int) ((microtime(true) - $genStart) * 1000)]);
-            $this->auditFailure($material, $userId, 'unexpected', null);
-            error_log('[material-delivery] unexpected mint failure (' . get_class($e) . '): ' . $e->getMessage());
-            throw $e;
-        }
-        Logger::instance()->info('material-pdf-cache', $cacheBase + ['event' => 'generation_completed', 'duration_ms' => (int) ((microtime(true) - $genStart) * 1000)]);
-
-        $this->variants->touchServed($copy);
-        return $this->readyResponse(
-            $materialId,
-            $userId,
-            $intent,
-            (int) ($copy['page_count'] ?? 0),
-            (string) $copy['variant_key']
-        );
+        return $this->forensicPdfUrl($material, $materialId, $userId, $role, $intent);
     }
+
 
     /**
      * GET /materials/pdf-status?material_id=…
@@ -200,7 +151,7 @@ final class MaterialDeliveryController
      * Since the waiting UX was added it also carries the server-grounded wait
      * contract: `state` (queued | generating | ready | failed | unavailable),
      * `queue_position` / `jobs_ahead`, `processing_now` and an `eta_*` range that
-     * is NULL unless it is measured (see MaterialPdfQueueService::statusFor).
+     * is NULL unless it is measured (see MaterialForensicPdfService).
      * `retry_after` remains a POLLING INTERVAL, never an ETA.
      */
     public function pdfStatus(Request $request): array
@@ -227,11 +178,11 @@ final class MaterialDeliveryController
             // verdict, not a queue state — and it must never look like `ready`.
             return [
                 'material_id' => $materialId,
-                'status' => MaterialPdfQueueService::STATUS_FAILED,
-                'state' => MaterialPdfQueueService::STATE_FAILED,
+                'status' => 'failed',
+                'state' => 'failed',
                 'reason' => $this->failureStage($e),
                 'attempts' => 0,
-                'max_attempts' => MaterialPdfQueueService::DEFAULT_MAX_ATTEMPTS,
+                'max_attempts' => 3,
                 'retry_after' => 0,
                 'retry_allowed' => false,
                 'watermarked' => true,
@@ -240,8 +191,8 @@ final class MaterialDeliveryController
 
         $copy = $this->variants->existing($material, $userId, $identity['variant_key']);
         $status = $copy !== null
-            ? ['status' => MaterialPdfQueueService::STATUS_READY, 'state' => MaterialPdfQueueService::STATE_READY, 'reason' => null, 'attempts' => 0, 'max_attempts' => MaterialPdfQueueService::DEFAULT_MAX_ATTEMPTS, 'retry_after' => 0, 'queue_position' => null, 'jobs_ahead' => null, 'processing_now' => 0, 'eta_seconds' => null, 'eta_min_seconds' => null, 'eta_max_seconds' => null, 'eta_basis' => 'not_applicable', 'eta_samples' => 0]
-            : $this->queue->statusFor($material, $userId, $identity['variant_key'], false);
+            ? ['status' => 'ready', 'state' => 'ready', 'reason' => null, 'attempts' => 0, 'max_attempts' => 3, 'retry_after' => 0, 'queue_position' => null, 'jobs_ahead' => null, 'processing_now' => 0, 'eta_seconds' => null, 'eta_min_seconds' => null, 'eta_max_seconds' => null, 'eta_basis' => 'not_applicable', 'eta_samples' => 0]
+            : ['status' => 'preparing', 'state' => 'generating', 'reason' => null, 'attempts' => 0, 'max_attempts' => 3, 'retry_after' => 5, 'queue_position' => null, 'jobs_ahead' => null, 'processing_now' => 1, 'eta_seconds' => null, 'eta_min_seconds' => null, 'eta_max_seconds' => null, 'eta_basis' => 'not_applicable', 'eta_samples' => 0];
 
         return [
             'material_id' => $materialId,
@@ -254,7 +205,7 @@ final class MaterialDeliveryController
             'attempts' => $status['attempts'],
             'max_attempts' => $status['max_attempts'],
             'retry_after' => $status['retry_after'],
-            'retry_allowed' => $status['status'] === MaterialPdfQueueService::STATUS_FAILED,
+            'retry_allowed' => $status['status'] === 'failed',
             'watermarked' => true,
         ] + $this->waitFields($status);
     }
@@ -297,7 +248,7 @@ final class MaterialDeliveryController
             Response::error('The personalized copy is not available.', 503, 'watermark_unavailable');
         }
 
-        $abs = $this->storage->privateFilePath(PdfWatermarkService::BUCKET, (string) $copy['storage_path']);
+        $abs = $this->storage->privateFilePath(MaterialForensicPdfService::BUCKET, (string) $copy['storage_path']);
         if (!is_file($abs)) {
             Response::error('The personalized copy is not available.', 503, 'watermark_unavailable');
         }
@@ -305,6 +256,22 @@ final class MaterialDeliveryController
         $pageCount = (int) ($copy['page_count'] ?? 0);
         $variantKey = (string) ($copy['variant_key'] ?? '');
         $fileName = (string) ($material['file_name'] ?? 'material.pdf');
+
+        // Count the delivery against the forensic issuance. This never extends the 24h
+        // lifetime: expires_at is fixed when the copy was published.
+        if (MaterialForensicPdfService::enabled()) {
+            try {
+                $issuance = Database::instance()->row(
+                    'SELECT id FROM pdf_forensic_issuances WHERE student_id = ? AND material_id = ? AND expires_at > ? ORDER BY issued_at DESC LIMIT 1',
+                    [$studentId, $materialId, gmdate('Y-m-d H:i:s')]
+                );
+                if ($issuance !== null) {
+                    $this->forensic->recordDownload((string) $issuance['id']);
+                }
+            } catch (\Throwable) {
+                // A counter failure must not block an authorized download.
+            }
+        }
 
         // Delivery audit: ids and outcomes only — never the name, the token or
         // any document content.
@@ -337,14 +304,34 @@ final class MaterialDeliveryController
     /** Super-admin health surface for the watermarking + queue capability. */
     public function watermarkStatus(Request $request): array
     {
-        $status = $this->watermark->status();
+        $db = Database::instance();
+        $stats = ['issued_today' => 0, 'live' => 0, 'expired_unpurged' => 0, 'last_issued_at' => null];
         try {
-            $status['queue'] = $this->queue->health();
+            $stats['issued_today'] = (int) $db->value(
+                'SELECT COUNT(*) FROM pdf_forensic_issuances WHERE issued_at >= ?',
+                [gmdate('Y-m-d 00:00:00')],
+                0
+            );
+            $stats['live'] = (int) $db->value(
+                'SELECT COUNT(*) FROM pdf_forensic_issuances WHERE purged_at IS NULL AND expires_at > ?',
+                [gmdate('Y-m-d H:i:s')],
+                0
+            );
+            $stats['expired_unpurged'] = (int) $db->value(
+                'SELECT COUNT(*) FROM pdf_forensic_issuances WHERE purged_at IS NULL AND expires_at <= ?',
+                [gmdate('Y-m-d H:i:s')],
+                0
+            );
+            $stats['last_issued_at'] = $db->value('SELECT MAX(issued_at) FROM pdf_forensic_issuances', [], null);
         } catch (\Throwable $e) {
-            // Migration 038 not applied yet: report it instead of a 500.
-            $status['queue'] = ['error' => 'queue_table_missing', 'detail' => $e->getMessage()];
+            Logger::instance()->warning('pdf-forensic-status-failed', ['error' => get_class($e)]);
         }
-        return $status;
+        return [
+            'engine' => 'pdf_forensic',
+            'enabled' => MaterialForensicPdfService::enabled(),
+            'ttl_seconds' => 86400,
+            'issuances' => $stats,
+        ];
     }
 
     // ──────────────────────────────────────────────────────────────────────────
@@ -357,6 +344,42 @@ final class MaterialDeliveryController
      * cannot disable it, a stale database value cannot disable it, and a client
      * cannot ask for it to be skipped.
      */
+    /**
+     * Forensic delivery: reuse a live copy or generate one through the VPS service.
+     *
+     * The caller is already authorized (see pdfUrl). This method only decides WHICH copy
+     * this person receives. A failure produces an error, never the unwatermarked original.
+     */
+    private function forensicPdfUrl(array $material, string $materialId, string $studentId, string $role, string $intent): array
+    {
+        $identity = $this->variants->identity($material, $studentId);
+        $variantKey = (string) $identity['variant_key'];
+
+        $copy = $this->forensic->existing($material, $studentId, $variantKey);
+        if ($copy !== null) {
+            Logger::instance()->info('material-pdf-cache', [
+                'material_id' => (string) ($material['id'] ?? ''),
+                'event' => 'cache_hit',
+                'engine' => 'forensic',
+                'renderer_run' => false,
+            ]);
+            return $this->readyResponse($materialId, $studentId, $intent, (int) ($copy['page_count'] ?? 0), $variantKey);
+        }
+
+        try {
+            $copy = $this->forensic->ensure($material, $studentId);
+        } catch (ApiException $e) {
+            Logger::instance()->warning('pdf-forensic-delivery-failed', [
+                'material_id' => (string) ($material['id'] ?? ''),
+                'stage' => $this->failureStage($e),
+            ]);
+            throw $e;
+        }
+
+        return $this->readyResponse($materialId, $studentId, $intent, (int) ($copy['page_count'] ?? 0),
+            (string) ($copy['variant_key'] ?? $variantKey));
+    }
+
     private function shouldWatermark(string $role): bool
     {
         unset($role); // kept in the signature: the policy must not depend on it
@@ -423,7 +446,7 @@ final class MaterialDeliveryController
 
         return [
             'status' => 'ready',
-            'state' => MaterialPdfQueueService::STATE_READY,
+            'state' => 'ready',
             'url' => $url,
             'expires_at' => gmdate('c', $expires),
             'intent' => $intent,
@@ -470,7 +493,11 @@ final class MaterialDeliveryController
      */
     private function clientStatus(array $status): string
     {
-        return $status['status'] === MaterialPdfQueueService::STATUS_FAILED ? 'failed' : 'preparing';
+        $value = (string) ($status['status'] ?? 'preparing');
+        if ($value === 'ready' || $value === 'failed') {
+            return $value;
+        }
+        return 'preparing';
     }
 
     /**
@@ -480,7 +507,7 @@ final class MaterialDeliveryController
      */
     private function pendingResponse(string $materialId, string $intent, array $status): array
     {
-        $failed = $status['status'] === MaterialPdfQueueService::STATUS_FAILED;
+        $failed = $status['status'] === 'failed';
         return [
             'status' => $failed ? 'failed' : 'preparing',
             'url' => null,
@@ -494,8 +521,8 @@ final class MaterialDeliveryController
             'retry_allowed' => $failed,
             'reason' => $status['reason'] ?? null,
             'state' => $status['state'] ?? ($failed
-                ? MaterialPdfQueueService::STATE_FAILED
-                : MaterialPdfQueueService::STATE_QUEUED),
+                ? 'failed'
+                : 'queued'),
             // The client shows localized copy from `state`; this is a fallback.
             'message' => $failed
                 ? 'The personalized copy could not be prepared.'
@@ -545,7 +572,7 @@ final class MaterialDeliveryController
 
     /**
      * The machine-readable stage of a failed mint, taken from the exception's own
-     * code (see PdfWatermarkService). Falls back to a coarse stage so an
+     * code (see MaterialForensicPdfService). Falls back to a coarse stage so an
      * untagged failure is still recorded rather than lost.
      */
     private function failureStage(ApiException $e): string

@@ -48,7 +48,12 @@ export const TAB_BAR_CLASSIC_LANDSCAPE = 32;
 export const TAB_BAR_LIQUID_PORTRAIT = 56;
 export const TAB_BAR_LIQUID_LANDSCAPE = 44;
 
-export function tabBarClearance(isLandscape = false): number {
+/**
+ * `_inRoleTabs` is accepted only for signature parity with the Android/web
+ * implementation and is deliberately IGNORED here: on iOS the native bar has
+ * always floated over every screen, and its clearance is unchanged.
+ */
+export function tabBarClearance(isLandscape = false, _inRoleTabs = false): number {
   if (LIQUID_GLASS_TAB_BAR) {
     return isLandscape ? TAB_BAR_LIQUID_LANDSCAPE : TAB_BAR_LIQUID_PORTRAIT;
   }

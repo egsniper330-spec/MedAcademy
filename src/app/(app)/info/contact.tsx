@@ -1,24 +1,32 @@
 /**
  * Contact Us — MedAcademy identity + Super-Admin-configured contact links.
+ * ENGLISH-ONLY BY PRODUCT DECISION: this page must read in English for every
+ * app language (an Arabic user still sees English here), so no string on this
+ * screen goes through the i18n catalog. Every other screen is untouched.
  *
  * DATA FLOW (all live, nothing hardcoded):
  *   Platform → Branding          → logo_url, legacy channels (email/phone/…)
  *   Platform → CMS → Contact Us  → intro text (built-in fallback when unset)
  *   Platform → Branding          → contact_links[] (platform/label/url/enabled)
  *
- * LOADING CONTRACT (infinite-spinner fix): the previous implementation
- * initialised `loading=true` and NEVER fetched branding (setLoading was never
- * called) — the page spun forever for every user. The screen now always
- * reaches a terminal state:
- *   • loaded  → logo + intro + contact link rows
- *   • empty   → friendly card when no channel is configured
- *   • error   → "Unable to load Contact Us" + Retry (branding fetch failed)
- * A CMS/branding failure is a data problem, never a security/auth problem:
- * the session is untouched and the user is never redirected to Login.
+ * ROOT CAUSE of “every method is called WhatsApp, and logos are missing”:
+ * the admin editor stores a LABEL per row, and that label is sticky — a row
+ * whose URL was changed from WhatsApp to Telegram kept `label:'Whatsapp'`, so
+ * three different destinations all rendered as “WhatsApp”. The label was
+ * trusted as display text. It is no longer: the displayed NAME comes from the
+ * platform registry for the row's effective platform, and the stored label is
+ * only used as data (never as the heading). The effective platform — and with
+ * it the logo — is resolved from the destination host (wa.me → WhatsApp,
+ * t.me → Telegram, …), because the stored `platform` is equally stale (the live
+ * rows save several destinations as `platform:'facebook'`).
+ *
+ * ORDER is fixed by product request and independent of storage order:
+ *   1 WhatsApp · 2 Telegram · 3 Facebook · 4 Website · 5 Email
+ * Rows for other platforms (Instagram, X, Phone…) follow, then anything unknown.
  *
  * PRIVACY CONTRACT: raw destinations are never rendered. Each row shows the
- * friendly label + description from the platform registry; the URL only goes
- * to Linking.openURL() (safety-checked by isSafeContactHref()).
+ * registry label + description; the URL only goes to Linking.openURL()
+ * (safety-checked by isSafeContactHref()).
  */
 import React, { useState } from 'react';
 import {
@@ -35,31 +43,66 @@ import {
   useBranding, parseContactLinks, contactLinkHref, isSafeContactHref,
   platformDef, platformIcon,
 } from '@/lib/branding';
-import { HeartHandshake, ChevronRight, RefreshCw, Link2, AlertTriangle } from 'lucide-react-native';
-import { useTranslation } from '@/lib/i18n';
+import { HeartHandshake, ChevronRight, RefreshCw, AlertTriangle } from 'lucide-react-native';
+import { PlatformBrandIcon, brandIconTint, hasPlatformBrandIcon } from '@/components/PlatformBrandIcon';
+
+/** Fixed presentation order. Anything not listed here follows, alphabetically. */
+const PLATFORM_ORDER = ['whatsapp', 'telegram', 'facebook', 'website', 'email'];
+
+/** English-only copy for this page (deliberately outside the i18n catalog). */
+const COPY = {
+  title: 'Contact Us',
+  introFallback: 'We are here to help. Use any channel below to reach the MedAcademy team.',
+  open: 'Open',
+  emptyTitle: 'No contact methods configured yet',
+  emptyBody: 'The administrator has not published any contact channel. Please try again later.',
+  errorTitle: 'Unable to load Contact Us',
+  errorBody: 'We could not load the contact methods. Check your connection and try again.',
+  retry: 'Retry',
+  retryA11y: 'Retry loading contact methods',
+  unknownDesc: 'Contact us through this channel.',
+};
 
 /**
- * Localized label/description per platform. Admin-configured CUSTOM labels and
- * destinations are data and stay as configured; the DEFAULT identity (the
- * registry label, which the backend stores when the admin did not customize it)
- * is localized so an Arabic user never sees "Send us an email." in English.
+ * Which platform a stored row actually points at.
+ *
+ * The destination is ground truth for BOTH the name and the logo: the live
+ * `contact_links` rows carry `platform:'facebook'` for WhatsApp and Telegram
+ * destinations, which is why the page previously showed one name three times.
  */
-const CONTACT_TEXT_KEYS: Record<string, { label: string; desc: string }> = {
-  email:     { label: 'contact.email',     desc: 'contact.emailDesc' },
-  phone:     { label: 'contact.phone',     desc: 'contact.phoneDesc' },
-  whatsapp:  { label: 'contact.whatsapp',  desc: 'contact.whatsappDesc' },
-  telegram:  { label: 'contact.telegram',  desc: 'contact.telegramDesc' },
-  website:   { label: 'contact.website',   desc: 'contact.websiteDesc' },
-  facebook:  { label: 'contact.facebook',  desc: 'contact.facebookDesc' },
-  instagram: { label: 'contact.instagram', desc: 'contact.instagramDesc' },
-  twitter:   { label: 'contact.twitter',   desc: 'contact.twitterDesc' },
-};
+const PLATFORM_HOSTS: { platform: string; hosts: string[] }[] = [
+  { platform: 'whatsapp',  hosts: ['wa.me', 'api.whatsapp.com', 'whatsapp.com'] },
+  { platform: 'telegram',  hosts: ['t.me', 'telegram.me', 'telegram.org'] },
+  { platform: 'instagram', hosts: ['instagram.com', 'instagr.am'] },
+  { platform: 'facebook',  hosts: ['facebook.com', 'fb.com', 'fb.me'] },
+  { platform: 'x',         hosts: ['x.com', 'twitter.com'] },
+];
+
+function effectivePlatform(storedPlatform: string, href: string): string {
+  // mailto:/tel: always win — a host parse on those returns nothing useful.
+  if (/^mailto:/i.test(href)) return 'email';
+  if (/^tel:/i.test(href)) return 'phone';
+  let host = '';
+  try { host = new URL(href).hostname.toLowerCase(); } catch { return storedPlatform; }
+  const match = PLATFORM_HOSTS.find((entry) =>
+    entry.hosts.some((h) => host === h || host.endsWith(`.${h}`)),
+  );
+  return match ? match.platform : storedPlatform;
+}
+
+/** sort index for the fixed order (unknown platforms after the known ones). */
+function orderIndex(platform: string): number {
+  const i = PLATFORM_ORDER.indexOf(platform);
+  return i === -1 ? PLATFORM_ORDER.length : i;
+}
 
 // ── Contact channel definition ────────────────────────────────────────────────
 type ContactItem = {
-  /** Stable platform key (registry id) — the row's React key. */
+  /** Stable platform key (registry id) — selects the label/logo registry. */
   platform: string;
-  /** Admin-configured label, or the registry default. */
+  /** Unique identity of THIS row (platform + destination) — the React key. */
+  key: string;
+  /** Registry label (English), never the stale stored label. */
   label: string;
   /** Registry description (never the raw URL). */
   description: string;
@@ -72,9 +115,6 @@ function BrandHeaderLogo({ remoteUrl, size }: { remoteUrl?: string; size: number
     remoteUrl ? 'remote' : 'fallback',
   );
 
-  // Remote logo failed / invalid → bundled full logo (same identity source as
-  // the rest of the app). If even the bundle is somehow unavailable, the
-  // HeartHandshake mark keeps the header presentable.
   if (state === 'fallback') return <BrandLogo size={size} />;
   if (state === 'error') {
     return (
@@ -99,10 +139,11 @@ function ContactCard({ item }: { item: ContactItem }) {
   const isDark = useColorScheme() === 'dark';
   const c = isDark ? neuColors.dark : neuColors.light;
   const layout = useLayout();
-  const { t } = useTranslation();
 
   const def = platformDef(item.platform);
   const Icon = platformIcon(item.platform);
+  const hasBrand = hasPlatformBrandIcon(item.platform);
+  const iconTint = hasBrand ? brandIconTint(item.platform, isDark, c.text) : def.color;
   const press = usePressAnim();
   const iconSz    = layout.touchTarget + 8;
   const iconInner = Math.round(iconSz * 0.46);
@@ -118,15 +159,17 @@ function ContactCard({ item }: { item: ContactItem }) {
       >
         <NeuCard radius={layout.cardRadius} style={{ flexDirection: 'row', alignItems: 'center', padding: layout.cardPx, gap: layout.pad.md }}>
 
-          {/* Platform icon badge — color + glyph from the registry */}
+          {/* Platform icon badge — brand mark when one exists, line icon otherwise */}
           <View style={{
             width: iconSz, height: iconSz,
             borderRadius: layout.heroIconRadius / 1.5,
-            backgroundColor: `${def.color}15`,
+            backgroundColor: `${iconTint}15`,
             alignItems: 'center', justifyContent: 'center',
             flexShrink: 0,
           }}>
-            <Icon size={iconInner} color={def.color} />
+            {hasBrand
+              ? <PlatformBrandIcon platform={item.platform} size={iconInner} tint={iconTint} />
+              : <Icon size={iconInner} color={def.color} />}
           </View>
 
           {/* Label + description — the destination itself is NEVER rendered */}
@@ -153,7 +196,7 @@ function ContactCard({ item }: { item: ContactItem }) {
             backgroundColor: `${def.color}14`,
             flexShrink: 0,
           }}>
-            <Text style={{ fontSize: layout.captionSize, fontWeight: '700', color: def.color }}>{t('contact.open')}</Text>
+            <Text style={{ fontSize: layout.captionSize, fontWeight: '700', color: def.color }}>{COPY.open}</Text>
             <ChevronRight size={layout.captionSize + 1} color={def.color} strokeWidth={2.5} />
           </View>
 
@@ -168,93 +211,88 @@ export default function ContactPage() {
   const isDark = useColorScheme() === 'dark';
   const c = isDark ? neuColors.dark : neuColors.light;
   const layout = useLayout();
-  const { t } = useTranslation();
 
-  /** Localized label/description for a platform, with a safe generic fallback. */
-  const platformText = (platform: string): { label: string; description: string } => {
-    const keys = CONTACT_TEXT_KEYS[platform];
-    if (!keys) return { label: platformDef(platform).label, description: t('contact.unknownDesc') };
-    return { label: t(keys.label), description: t(keys.desc) };
-  };
-
-  // Branding (logo, legacy channels, contact_links) + fetch status for the
-  // terminal error state. refresh() is the Retry action.
   const { branding, status: brandingStatus, refresh } = useBranding();
   const [retrying, setRetrying] = useState(false);
 
-  // Server-managed intro text (Super Admin → Platform → CMS Pages → Contact
-  // Us). Falls back to the bundled copy while loading / when unset.
-  // [] as the fallback keeps the built-in intro reactive to a language change.
   const intro = useCmsSections('contact_us', []);
-
-  // Hero entrance
   const heroEntrance = useEntranceAnim({ offsetY: 12, duration: 460 });
 
+  // The CMS intro is admin-authored content; it is shown as configured, with the
+  // built-in English fallback when the admin left it empty.
   const cmsIntro = intro
     .map((section) => (section.heading !== '' ? `${section.heading}: ${section.body}` : section.body).trim())
     .filter((part) => part !== '')
     .join('\n');
-  const introText = cmsIntro !== '' ? cmsIntro : t('contact.introFallback');
+  const introText = cmsIntro !== '' ? cmsIntro : COPY.introFallback;
 
-  // ── Build the channel list ────────────────────────────────────────────────
-  // 1) Admin-configured links first, in the admin's order. Disabled links stay
-  //    saved on the server but are never rendered. A destination that fails the
-  //    safety check is refused here (defense in depth — the backend already
-  //    rejects such values at save time).
-  const contacts: ContactItem[] = [];
-  const customLinks = parseContactLinks((branding as unknown as Record<string, unknown>)?.contact_links)
-    .filter((l) => l.enabled);
-  for (const link of customLinks) {
-    const href = contactLinkHref(link);
-    if (!isSafeContactHref(href)) continue; // malformed/dangerous URL → never rendered
-    const text = platformText(link.platform);
-    contacts.push({
-      platform: link.platform,
-      // A label the admin replaced with their own text is preserved verbatim;
-      // the untouched registry default follows the app language.
-      label: link.label === platformDef(link.platform).label ? text.label : link.label,
-      description: text.description,
+  /**
+   * Build the channel list.
+   *
+   * One row per PLATFORM (the product asks for exactly one entry per method):
+   * the first enabled, safe destination for a platform wins, so a repeated
+   * Facebook row cannot appear twice. Name and logo both come from the
+   * effective platform, which is resolved from the destination.
+   */
+  const byPlatform = new Map<string, ContactItem>();
+  const b = branding as unknown as Record<string, unknown>;
+
+  const addRow = (storedPlatform: string, href: string) => {
+    if (!isSafeContactHref(href)) return false; // malformed/dangerous URL → never rendered
+    const platform = effectivePlatform(storedPlatform, href);
+    if (byPlatform.has(platform)) return true;  // already configured — first one wins
+    const def = platformDef(platform);
+    byPlatform.set(platform, {
+      platform,
+      key: platform,
+      label: def.label,
+      description: def.description || COPY.unknownDesc,
       onPress: () => {
-        if (!isSafeContactHref(href)) return;
-        void Linking.openURL(href).catch(() => {});
+        const safe = contactLinkHref({ platform: storedPlatform, label: '', url: href, enabled: true });
+        if (!isSafeContactHref(safe)) return;
+        void Linking.openURL(safe).catch(() => {});
       },
     });
+    return true;
+  };
+
+  // 1) Admin-configured links (order is imposed later, not taken from storage).
+  for (const link of parseContactLinks(b?.contact_links).filter((l) => l.enabled)) {
+    addRow(link.platform, contactLinkHref(link));
   }
 
-  // 2) Legacy branding channels — only for platforms NOT covered above, so
-  //    nothing is ever shown twice (configured link = authoritative entry).
-  //    Legacy DB values are never deleted; they simply yield to newer config.
-  const configured = new Set(customLinks.map((l) => l.platform));
-  const b = branding as unknown as Record<string, unknown>;
-  const legacy: ContactItem[] = [];
-  if (b?.contact_email && !configured.has('email')) {
-    legacy.push({ platform: 'email', label: platformText('email').label, description: platformText('email').description, onPress: () => { void Linking.openURL(`mailto:${b.contact_email}`).catch(() => {}); } });
+  // 2) Legacy branding channels — only for platforms not already configured, so
+  //    nothing is shown twice. Legacy DB values are never deleted.
+  if (typeof b?.contact_email === 'string' && b.contact_email !== '') {
+    addRow('email', `mailto:${String(b.contact_email)}`);
   }
-  if (b?.contact_phone && !configured.has('phone')) {
-    legacy.push({ platform: 'phone', label: platformText('phone').label, description: platformText('phone').description, onPress: () => { void Linking.openURL(`tel:${b.contact_phone}`).catch(() => {}); } });
+  if (typeof b?.contact_phone === 'string' && b.contact_phone !== '') {
+    addRow('phone', `tel:${String(b.contact_phone)}`);
   }
-  if (b?.whatsapp_url && !configured.has('whatsapp')) {
+  if (typeof b?.whatsapp_url === 'string' && b.whatsapp_url !== '') {
     const raw = String(b.whatsapp_url);
-    const href = /^https?:\/\//i.test(raw) ? raw : `https://wa.me/${String(raw).replace(/\D/g, '')}`;
-    legacy.push({ platform: 'whatsapp', label: platformText('whatsapp').label, description: platformText('whatsapp').description, onPress: () => { void Linking.openURL(href).catch(() => {}); } });
+    addRow('whatsapp', /^https?:\/\//i.test(raw) ? raw : `https://wa.me/${raw.replace(/\D/g, '')}`);
   }
-  if (b?.telegram_url && !configured.has('telegram')) {
+  if (typeof b?.telegram_url === 'string' && b.telegram_url !== '') {
     const raw = String(b.telegram_url);
-    const href = /^https?:\/\//i.test(raw) ? raw : `https://t.me/${String(raw).replace('@', '')}`;
-    legacy.push({ platform: 'telegram', label: platformText('telegram').label, description: platformText('telegram').description, onPress: () => { void Linking.openURL(href).catch(() => {}); } });
+    addRow('telegram', /^https?:\/\//i.test(raw) ? raw : `https://t.me/${raw.replace('@', '')}`);
   }
-  if (b?.website_url && !configured.has('website')) {
-    legacy.push({ platform: 'website', label: platformText('website').label, description: platformText('website').description, onPress: () => { void Linking.openURL(String(b.website_url)).catch(() => {}); } });
+  if (typeof b?.website_url === 'string' && b.website_url !== '') {
+    addRow('website', String(b.website_url));
   }
-  contacts.push(...legacy);
 
-  const heroIconSz  = layout.heroIconSize * 1.1;
+  // Fixed presentation order: WhatsApp, Telegram, Facebook, Website, Email, then
+  // any other configured platform (Instagram, X, Phone …).
+  const contacts = Array.from(byPlatform.values()).sort((a, z) => {
+    const d = orderIndex(a.platform) - orderIndex(z.platform);
+    return d !== 0 ? d : a.platform.localeCompare(z.platform);
+  });
+
+  const heroIconSz = layout.heroIconSize * 1.1;
 
   const runRetry = () => {
     setRetrying(true);
     refresh();
-    // The hook re-fetches; clear the retry spinner on the next tick regardless
-    // of outcome — status flips to ok/error and the correct state renders.
     setTimeout(() => setRetrying(false), 400);
   };
 
@@ -262,7 +300,7 @@ export default function ContactPage() {
 
   return (
     <View style={{ flex: 1, backgroundColor: c.base }}>
-      <PageHeader title={t('contact.title')} showBack />
+      <PageHeader title={COPY.title} showBack />
       <ScrollView
         style={{ flex: 1 }}
         contentContainerStyle={{
@@ -282,16 +320,16 @@ export default function ContactPage() {
             <AlertTriangle size={Math.round(layout.heroIconSize * 0.5)} color="#EF4444" />
           </View>
           <Text style={{ fontSize: layout.bodySize + 1, fontWeight: '800', color: c.text, textAlign: 'center' }}>
-            {t('contact.errorTitle')}
+            {COPY.errorTitle}
           </Text>
           <Text style={{ fontSize: layout.captionSize, ...mutedTextStyle(c, 0.5), textAlign: 'center' }}>
-            {t('contact.errorBody')}
+            {COPY.errorBody}
           </Text>
           <Pressable
             onPress={runRetry}
             disabled={retrying}
             accessibilityRole="button"
-            accessibilityLabel={t('contact.retryA11y')}
+            accessibilityLabel={COPY.retryA11y}
             style={{
               flexDirection: 'row', alignItems: 'center', gap: 8,
               paddingHorizontal: layout.pad.lg, paddingVertical: layout.pad.md,
@@ -303,7 +341,7 @@ export default function ContactPage() {
               ? <ActivityIndicator size="small" color="#FFFFFF" />
               : <RefreshCw size={layout.captionSize + 4} color="#FFFFFF" />}
             <Text style={{ fontSize: layout.bodySize, fontWeight: '700', color: '#FFFFFF' }}>
-              {t('common.retry')}
+              {COPY.retry}
             </Text>
           </Pressable>
         </NeuCard>
@@ -317,19 +355,14 @@ export default function ContactPage() {
             marginTop: layout.pad.xs,
             ...heroEntrance.style,
           }}>
-            {/* Platform logo — bundled identity, remote override if configured.
-                Explicit dimensions on the network image (RN requirement); a
-                failed/invalid logo degrades to the bundled logo and never
-                blanks the page or blocks the links below. */}
             <View style={{ marginBottom: layout.pad.lg }}>
               <BrandHeaderLogo remoteUrl={(b?.logo_url as string) || undefined} size={layout.touchTarget * 1.6} />
             </View>
 
             <Text style={{ fontSize: layout.titleSize * 0.85, fontWeight: '800', color: c.text, marginBottom: layout.pad.sm }}>
-              {t('contact.title')}
+              {COPY.title}
             </Text>
 
-            {/* Accent divider */}
             <View style={{
               width: layout.pad.xxl, height: 3, borderRadius: 2,
               backgroundColor: c.primary, opacity: 0.55,
@@ -348,18 +381,18 @@ export default function ContactPage() {
           {/* ── Content: loaded list / empty state ─────────────────────────── */}
           {contacts.length === 0 ? (
             <NeuCard radius={layout.cardRadius} style={{ padding: layout.cardPx * 2, alignItems: 'center', gap: layout.pad.md }}>
-              <HeartHandshake size={layout.heroIconSize} color={c.primary} opacity={0.22} />
+              <HeartHandshake size={heroIconSz} color={c.primary} opacity={0.22} />
               <Text style={{ fontSize: layout.bodySize + 1, fontWeight: '700', ...mutedTextStyle(c, 0.5), textAlign: 'center' }}>
-                {t('contact.emptyTitle')}
+                {COPY.emptyTitle}
               </Text>
               <Text style={{ fontSize: layout.captionSize, ...mutedTextStyle(c, 0.35), textAlign: 'center' }}>
-                {t('contact.emptyBody')}
+                {COPY.emptyBody}
               </Text>
             </NeuCard>
           ) : (
             <View style={{ gap: layout.itemGap }}>
               {contacts.map((item) => (
-                <ContactCard key={item.platform} item={item} />
+                <ContactCard key={item.key} item={item} />
               ))}
             </View>
           )}

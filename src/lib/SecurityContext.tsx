@@ -8,6 +8,16 @@
  *   - Any new blocking threat during the session triggers immediate redirect.
  *   - Play Integrity checks are rate-limited to every 10 min (quota safety).
  *
+ * TWO INDEPENDENT SECURITY LAYERS (lifecycle refactor):
+ *   • APP ACCESS  — the central security lock + SecurityGate. Blocked only by
+ *     a confirmed violation or live prohibited signal; continuous monitoring
+ *     (periodic + native VPN callback + overlay/multi-window signals) is
+ *     unchanged. Leaving the app does NOT engage this layer.
+ *   • PROTECTED CONTENT — the fail-closed protectedContentState machine. A
+ *     background edge conceals/pauses video synchronously; a resume keeps it
+ *     hidden while the same authoritative evaluation re-runs and reveals it
+ *     only on a clean post-resume verdict. Non-video screens stay usable.
+ *
  * Runtime re-validation triggers (hardened, v427):
  *   - Before every protected video playback (checkBeforeVideo)
  *   - After returning from an external app (AppState active transition)
@@ -24,7 +34,7 @@
  *     cleared because the profile store is also cleared.
  */
 import React, {
-  createContext, useContext, useState, useCallback, useRef, useEffect,
+  createContext, useContext, useState, useReducer, useCallback, useRef, useEffect,
 } from 'react';
 import { AppState, Platform, NativeEventEmitter, NativeModules } from 'react-native';
 import NetInfo from '@react-native-community/netinfo';
@@ -46,8 +56,7 @@ import {
   canClearOverlayBlock,
   canClearMultiWindowBlock,
   isProhibitedWindowMode,
-  isResumeVerificationOverdue,
-  RESUME_VERIFICATION_TIMEOUT_MS,
+  rendersBlockScreen,
   type GatePhase,
   type SecurityGateState,
 } from '@/lib/securityStateModel';
@@ -56,6 +65,14 @@ import {
   prewarmSecurityConfig,
   invalidateSecurityConfig,
 } from '@/lib/securityConfigService';
+import {
+  INITIAL_PROTECTED_CONTENT_STATE,
+  PROTECTED_CONTENT_VERIFICATION_TIMEOUT_MS,
+  reduceProtectedContent,
+  isProtectedContentVisible,
+  type ProtectedContentState,
+} from '@/lib/protectedContentState';
+import { setProtectedContentConcealed } from '@/lib/protectedContentVisibility';
 import {
   onNativeJailbreakDetected,
   onNativeDebuggerAttached,
@@ -76,10 +93,7 @@ import {
   getSecurityLockState,
   subscribeSecurityLock,
   markNativeVpnSignal,
-  markResumeHoldEngaged,
-  markResumeEvaluationStarted,
   markResumeVerdictResolved,
-  markResumeVerificationOverdue,
   type SecurityLockState,
 } from '@/lib/securityLock';
 import { useSession } from '@/ctx';
@@ -180,6 +194,32 @@ interface SecurityContextValue {
    * render from this instead of re-deriving a boolean from several flags.
    */
   gateState: SecurityGateState;
+  /**
+   * APP ACCESS SECURITY (layer 1) — TRUE while a state that blocks or takes
+   * over the whole app is authoritative. This is deliberately SEPARATE from
+   * `protectedContent`: an ordinary background/resume does NOT set it, because
+   * the user must be able to use non-video screens while the post-resume
+   * verification runs. Only confirmed violations (VPN, root, overlay,
+   * multi-window, …) do.
+   */
+  appAccessBlocked: boolean;
+  /**
+   * PROTECTED CONTENT ACCESS (layer 2) — the independent, fail-closed state of
+   * protected VdoCipher content. Only `allowed` may render video frames.
+   *
+   *   allowed            validated: the player may be visible
+   *   background_hidden  the app is backgrounded (concealed + paused)
+   *   checking           a verification is running (concealed)
+   *   blocked            a blocking verdict/signal is in force (concealed)
+   *   error              the verification could not decide (concealed)
+   *
+   * The native surface is concealed SYNCHRONOUSLY on the AppState edge; this
+   * state is the render/decision mirror. A successful app-level security state
+   * does NOT automatically keep a video visible across a lifecycle transition.
+   */
+  protectedContent: ProtectedContentState & { visible: boolean };
+  /** Re-run the protected-content verification (bounded, fail-closed). */
+  verifyProtectedContent: (reason?: string) => Promise<void>;
   /** A live obscured-window/overlay signal holds the gate. */
   overlayBlocked: boolean;
   /** The platform reports this app in a prohibited multi-window mode. */
@@ -302,6 +342,9 @@ const SecurityContext = createContext<SecurityContextValue>({
   multiWindowBlocked: false,
   windowMode:       'unknown',
   backgroundBlocked: false,
+  appAccessBlocked: true,
+  protectedContent: { ...INITIAL_PROTECTED_CONTENT_STATE, visible: false },
+  verifyProtectedContent: async () => {},
   verifySecurity:   async () => {},
   check:            async () => DEFAULT_RESULT,
   checkBeforeVideo: async () => false,
@@ -313,6 +356,20 @@ export function SecurityProvider({ children }: { children: React.ReactNode }) {
   const [result, setResult]     = useState<SecurityCheckResult | null>(null);
   const [checking, setChecking] = useState(false);
   const [evaluating, setEvaluating] = useState(false);
+  // ── PROTECTED CONTENT ACCESS (layer 2) ───────────────────────────────────
+  // Independent of the security verdict: a clean app-level state does NOT keep
+  // protected video visible across a background/foreground transition. The
+  // pure reducer owns the decision; the native surface is concealed
+  // synchronously through protectedContentVisibility on every edge.
+  const [protectedContent, dispatchProtectedContent] = useReducer(
+    reduceProtectedContent,
+    INITIAL_PROTECTED_CONTENT_STATE,
+  );
+  /** Monotonic id of the newest protected-content verification. */
+  const protectedRequestIdRef = useRef(0);
+  const protectedWatchdogRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** TRUE between a foreground-exit edge and the next active edge. */
+  const protectedHiddenRef = useRef(false);
   // NOTE: the old single-flight guard (`checkRef`) is gone. It REJECTED a request
   // that arrived while an evaluation ran, which is exactly how the post-resume
   // re-check used to be dropped. runEvaluation now coalesces and CHAINS instead;
@@ -384,6 +441,91 @@ export function SecurityProvider({ children }: { children: React.ReactNode }) {
     return r;
   }, []);
 
+  /**
+   * Start a protected-content verification: bump the request id (invalidating
+   * any older in-flight result), hide the native surface synchronously and
+   * move the state to `checking`. Returns the id this verification owns.
+   */
+  const beginProtectedContentVerification = useCallback((reason: string): number => {
+    const requestId = ++protectedRequestIdRef.current;
+    dispatchProtectedContent({ type: 'check-started', requestId, reason });
+    setProtectedContentConcealed(true, reason);
+    return requestId;
+  }, []);
+
+  /**
+   * Layer 2 response to an APP-LEVEL block (confirmed verdict, live VPN signal,
+   * overlay, prohibited window mode). Conceals immediately and invalidates any
+   * in-flight protected-content verification so a stale clean result cannot
+   * uncover the player while the app itself is blocked.
+   */
+  const blockProtectedContent = useCallback((reason: string) => {
+    const requestId = ++protectedRequestIdRef.current;
+    if (protectedWatchdogRef.current) {
+      clearTimeout(protectedWatchdogRef.current);
+      protectedWatchdogRef.current = null;
+    }
+    dispatchProtectedContent({ type: 'app-blocked', requestId, reason });
+    setProtectedContentConcealed(true, reason);
+  }, []);
+
+  /**
+   * Settle protected content from a COMPLETED authoritative verdict.
+   *
+   * Fail-closed rules:
+   *   • A blocking verdict hides video and moves to `blocked` regardless of
+   *     any pending request (it also invalidates that request).
+   *   • A clean verdict may only ALLOW when the app is in the foreground AND
+   *     the evaluation started at/after the most recent resume
+   *     (acceptsResumeVerification) — a pre-resume verdict can never uncover
+   *     the player.
+   *   • In the background nothing is ever revealed.
+   */
+  const settleProtectedContentFromVerdict = useCallback((r: SecurityCheckResult) => {
+    // A completed verdict resolves the pending verification (whatever it was),
+    // so the timeout watchdog must not later report an error over it.
+    if (protectedWatchdogRef.current) {
+      clearTimeout(protectedWatchdogRef.current);
+      protectedWatchdogRef.current = null;
+    }
+    if (r.blocksLogin || r.blocksVideo) {
+      blockProtectedContent('app-security-block');
+      return;
+    }
+    if (!appActiveRef.current) return;
+    if (!acceptsResumeVerification({
+      evaluationStartedToken: evaluationStartTokenRef.current,
+      liveResumeToken:       resumeTokenRef.current,
+    })) {
+      if (__DEV__) console.log('[SecurityContext] protected content stays hidden — verdict predates the current resume');
+      return;
+    }
+    // LAYER-1 CROSS-CHECK: a clean verdict may not uncover video while a
+    // window-state containment is still in force, nor when it started BEFORE a
+    // newer native VPN signal. Without this, a check that began before a VPN
+    // engaged could land later and reveal the player while the app is (still)
+    // contained by that newer signal — the exact stale-evidence race the
+    // native-signal sequence exists to close.
+    const liveLock = getSecurityLockState();
+    if (liveLock.sources.includes(LOCK_SRC_OVERLAY) || liveLock.sources.includes(LOCK_SRC_WINDOW_MODE)) {
+      if (__DEV__) console.log('[SecurityContext] protected content stays hidden — window-state containment is live');
+      return;
+    }
+    if (verdictNativeSeqRef.current < nativeSignalSeqRef.current) {
+      if (__DEV__) console.log('[SecurityContext] protected content stays hidden — verdict predates the latest native VPN signal');
+      return;
+    }
+    dispatchProtectedContent({
+      type: 'check-succeeded',
+      requestId: protectedRequestIdRef.current,
+      reason: 'verdict-clean',
+    });
+    setProtectedContentConcealed(false, 'verdict-clean');
+  }, [blockProtectedContent]);
+
+  /** Forward reference: requestResumeVerification is registered before the
+   *  protected-content verifier is defined (both are callbacks reading refs). */
+  const verifyProtectedContentRef = useRef<(reason?: string) => Promise<void>>(async () => {});
   const intervalRef        = useRef<ReturnType<typeof setInterval> | null>(null);
   const configTimerRef     = useRef<ReturnType<typeof setInterval> | null>(null);
   const appActiveRef       = useRef(true);
@@ -482,6 +624,15 @@ export function SecurityProvider({ children }: { children: React.ReactNode }) {
   const verdictSerialRef = useRef(0);
 
   /**
+   * Native window/overlay PREFLIGHT. Re-reads the AUTHORITATIVE Android state
+   * immediately before protected playback is authorised (see checkBeforeVideo).
+   * Held in a ref because applyWindowModeReading() — which owns the engage and
+   * release bookkeeping — is declared later in this component; routing the call
+   * through a ref keeps the closure live without reordering hooks.
+   */
+  const nativeWindowPreflightRef = useRef<() => Promise<boolean>>(async () => false);
+
+  /**
    * Engage the background/resume hold. Hard, so screens UNMOUNT the native
    * player (a soft hold would only pause it), and idempotent.
    *
@@ -557,7 +708,11 @@ export function SecurityProvider({ children }: { children: React.ReactNode }) {
     // Releases the resume/startup hold ONLY on a clean verdict that started at
     // or after the current resume (acceptsResumeVerification inside).
     maybeReleaseBackgroundHold(r);
-  }, [maybeReleaseBackgroundHold]);
+    // Layer 2: protected content is independently controlled by this verdict.
+    // A clean verdict reveals video only when it started at/after the resume;
+    // a blocking verdict conceals immediately (and invalidates pending work).
+    settleProtectedContentFromVerdict(r);
+  }, [maybeReleaseBackgroundHold, settleProtectedContentFromVerdict]);
   // Stable handle for the resume scheduler (registered once, reads through ref).
   const publishVerdictRef = useRef(publishVerdict);
   publishVerdictRef.current = publishVerdict;
@@ -598,7 +753,18 @@ export function SecurityProvider({ children }: { children: React.ReactNode }) {
     if (queued !== null) {
       queuedEvaluationRef.current = null;
       if (__DEV__) console.log('[SecurityContext] starting queued evaluation immediately: ' + queued);
-      void runEvaluationRef.current(queued);
+      // Publish the chained evaluation's result: it is the authoritative
+      // verdict for the request that was coalesced (previously it ran and its
+      // result was discarded, leaving a resume verification unresolved until
+      // the next periodic tick).
+      void runEvaluationRef.current(queued).then((r) => {
+        if (r) publishVerdictRef.current(r);
+      }).catch((e) => {
+        // A failed chained evaluation is a failure state, never a verdict; the
+        // protected-content watchdog and the next periodic tick keep media
+        // hidden and recover automatically.
+        if (__DEV__) console.warn('[SecurityContext] chained evaluation failed:', e);
+      });
     }
     return result;
   }, [runGuardedCheck]);
@@ -606,54 +772,23 @@ export function SecurityProvider({ children }: { children: React.ReactNode }) {
   runEvaluationRef.current = runEvaluation;
 
   /**
-   * Request a RESUME verification: one evaluation (queued if one is already
-   * running) plus a bounded watchdog that reports an overdue verification and
-   * retries it ONCE.
+   * A foreground RESUME now runs the PROTECTED CONTENT verification, not a
+   * global app-access hold.
    *
-   * What this deliberately does NOT do:
-   *   • it never waits for anything before returning — the caller (the AppState
-   *     listener) returns immediately and the app shell stays responsive;
-   *   • it never releases the hold: only a clean verdict that STARTED at or after
-   *     this resume can (maybeReleaseBackgroundHold);
-   *   • a watchdog fire is evidence + one retry — never authorization. An
-   *     unresolved mandatory check stays closed.
+   * BEHAVIOUR CHANGE (the lifecycle defect): this used to engage the HARD
+   * `background-resume` security lock. That lock unmounted the native player,
+   * suspended the app's own network traffic and made the whole shell appear
+   * blocked until a verdict landed. App access must only be blocked by a
+   * CONFIRMED violation; an ordinary resume is a layer-2 (protected content)
+   * transition. The evaluation itself is unchanged and still authoritative:
+   * if it finds a violation, the normal verdict lock + SecurityGate engage.
+   *
+   * It returns immediately (the AppState handler must never await), a newer
+   * request id invalidates older results, and a timeout can only keep video
+   * hidden — never authorize.
    */
   const requestResumeVerification = useCallback((reason: string) => {
-    /**
-     * Run one evaluation and PUBLISH it (see publishVerdict). Defined here so it
-     * closes over refs only and needs no dependency list of its own.
-     */
-    const runAndPublish = async (why: string) => {
-      const r = await runEvaluationRef.current(why);
-      // Coalesced/superseded (null) → the run that superseded this one publishes
-      // its own result; publishing an older one would be a stale verdict.
-      if (!r) return;
-      publishVerdictRef.current(r);
-    };
-
-    resumePendingSinceRef.current = Date.now();
-    resumeRetriedRef.current = false;
-    markResumeHoldEngaged();
-    if (resumeWatchdogRef.current) {
-      clearTimeout(resumeWatchdogRef.current);
-      resumeWatchdogRef.current = null;
-    }
-    resumeWatchdogRef.current = setTimeout(() => {
-      resumeWatchdogRef.current = null;
-      if (!backgroundHeldRef.current) return;
-      if (!isResumeVerificationOverdue({
-        pendingSinceMs: resumePendingSinceRef.current,
-        nowMs: Date.now(),
-      })) return;
-      markResumeVerificationOverdue();
-      if (resumeRetriedRef.current) return; // one bounded retry per resume
-      resumeRetriedRef.current = true;
-      markResumeEvaluationStarted();
-      if (__DEV__) console.warn('[SecurityContext] resume verification overdue — retrying once; protected access stays closed');
-      void runAndPublish('resume-retry');
-    }, RESUME_VERIFICATION_TIMEOUT_MS);
-    markResumeEvaluationStarted();
-    void runAndPublish(reason);
+    void verifyProtectedContentRef.current(reason);
   }, []);
 
   // ── Pre-warm cache from SecureStore on mount (before any session) ──────────
@@ -692,6 +827,7 @@ export function SecurityProvider({ children }: { children: React.ReactNode }) {
       // Track whether a VPN threat is currently active for stale-state monitoring
       hasActiveVpnThreat.current = r.threats.some(t => t.type === 'vpn_detected');
       maybeReleaseBackgroundHold(r);
+      settleProtectedContentFromVerdict(r);
       void logThreats(r.threats, r.policies, r.riskScore, deviceId, r.evidence);
       return r;
     } catch (e) {
@@ -733,7 +869,7 @@ export function SecurityProvider({ children }: { children: React.ReactNode }) {
       setChecking(false);
       setEvaluating(false);
     }
-  }, [isSuperAdmin, result, runEvaluation, maybeReleaseBackgroundHold]);
+  }, [isSuperAdmin, result, runEvaluation, maybeReleaseBackgroundHold, settleProtectedContentFromVerdict]);
 
   /**
    * Pre-video re-validation — called by video player screens before showing the player.
@@ -746,6 +882,21 @@ export function SecurityProvider({ children }: { children: React.ReactNode }) {
       if (__DEV__) console.log('[SecurityContext] Super Admin bypass — video always allowed');
       return false;
     }
+    // NATIVE AUTHORITY, re-read here rather than trusted from the last event:
+    // the window-mode / obscured window may have changed without a delivered
+    // touch or callback yet, and a player that starts in split-screen would
+    // open a VdoCipher session for a state that cannot legally play. A
+    // prohibited reading blocks WITHOUT running the policy check, so no OTP or
+    // session is created for a state that is already refused.
+    if (Platform.OS === 'android') {
+      try {
+        if (await nativeWindowPreflightRef.current()) return true;
+      } catch {
+        // An unreadable preflight must not be treated as clearance: fall
+        // through to the authoritative evaluation below, whose gate state
+        // still withholds protection until a fresh verdict lands.
+      }
+    }
     try {
       const r = await runGuardedCheck('pre-video');
       if (!r) {
@@ -756,6 +907,7 @@ export function SecurityProvider({ children }: { children: React.ReactNode }) {
       }
       setResult(r);
       maybeReleaseBackgroundHold(r);
+      settleProtectedContentFromVerdict(r);
       void logThreats(r.threats, r.policies, r.riskScore, undefined, r.evidence);
       // Fire blocking callbacks for both login-blocking and video-blocking threats
       // so _layout.tsx can redirect even when checkBeforeVideo is the trigger.
@@ -764,7 +916,7 @@ export function SecurityProvider({ children }: { children: React.ReactNode }) {
     } catch {
       return false; // fail-open for non-security errors (network down etc.)
     }
-  }, [isSuperAdmin, runGuardedCheck, maybeReleaseBackgroundHold]);
+  }, [isSuperAdmin, runGuardedCheck, maybeReleaseBackgroundHold, settleProtectedContentFromVerdict]);
 
   const reset = useCallback(() => {
     // FAIL-CLOSED reset: the previous verdict is retained (NOT nulled) so the
@@ -824,6 +976,7 @@ export function SecurityProvider({ children }: { children: React.ReactNode }) {
           overlayEngagedSerialRef.current = verdictSerialRef.current;
           if (__DEV__) console.log('[SecurityContext] OVERLAY BLOCK — obscured touch observed; gate engaged');
           engageSecurityLock(LOCK_SRC_OVERLAY, { hard: true });
+          blockProtectedContent('overlay');
         }
         return;
       }
@@ -832,7 +985,7 @@ export function SecurityProvider({ children }: { children: React.ReactNode }) {
       tryReleaseOverlayLock();
     });
     return unsub;
-  }, [isSuperAdmin, tryReleaseOverlayLock]);
+  }, [isSuperAdmin, tryReleaseOverlayLock, blockProtectedContent]);
 
   // ── Android multi-window / split-screen signal → security gate ────────────
   /**
@@ -878,12 +1031,54 @@ export function SecurityProvider({ children }: { children: React.ReactNode }) {
         windowModeEngagedModeRef.current = mode;
         if (__DEV__) console.log('[SecurityContext] MULTI-WINDOW BLOCK — platform reports mode=' + mode + '; gate engaged');
         engageSecurityLock(LOCK_SRC_WINDOW_MODE, { hard: true });
+        blockProtectedContent('multi-window');
       }
       return;
     }
     tryReleaseWindowModeLock();
     if (requestVerdict && mode === 'fullscreen') void check();
-  }, [check, isSuperAdmin, tryReleaseWindowModeLock]);
+  }, [check, isSuperAdmin, tryReleaseWindowModeLock, blockProtectedContent]);
+
+  /**
+   * The implementation behind nativeWindowPreflightRef, bound to the live
+   * readers. Order matters: the OVERLAY signal is checked first because a live
+   * obscured window outranks a window-mode reading, exactly as the gate's state
+   * precedence does. A prohibited/obscured result engages the SAME locks the
+   * event paths engage, so a playback attempt can never observe a weaker
+   * containment than the event stream would have produced.
+   *
+   * `unknown` is not a prohibition and not a clearance: the preflight returns
+   * the current belief so an unmeasurable moment cannot open a blocked state.
+   */
+  nativeWindowPreflightRef.current = async (): Promise<boolean> => {
+    let obscured = false;
+    try {
+      obscured = await isNativeWindowObscured();
+    } catch {
+      // Unreadable is not clear: fall through with the previous belief intact.
+      obscured = overlaySignalRef.current;
+    }
+    overlaySignalRef.current = obscured;
+    if (obscured) {
+      if (!isSuperAdmin && !getSecurityLockState().sources.includes(LOCK_SRC_OVERLAY)) {
+        overlayEngagedSerialRef.current = verdictSerialRef.current;
+        if (__DEV__) console.log('[SecurityContext] PRE-PLAY overlay preflight blocked playback');
+        engageSecurityLock(LOCK_SRC_OVERLAY, { hard: true });
+        blockProtectedContent('overlay');
+      }
+      return true;
+    }
+    try {
+      const reading = await getNativeWindowMode();
+      if (reading.measured) {
+        applyWindowModeReading(reading.mode, false);
+        return isProhibitedWindowMode(reading.mode);
+      }
+    } catch {
+      // Unreadable: keep whatever the last measurement established.
+    }
+    return isProhibitedWindowMode(windowModeRef.current);
+  };
 
   // SEPARATE INPUT, not a lifecycle proxy — the same rule the overlay signal
   // follows. This subscription carries the PLATFORM's own window-mode
@@ -901,6 +1096,56 @@ export function SecurityProvider({ children }: { children: React.ReactNode }) {
     });
     return unsub;
   }, [applyWindowModeReading]);
+
+  /**
+   * PROTECTED CONTENT verification (layer 2).
+   *
+   * Runs ONE authoritative evaluation (coalesced through runEvaluation), then
+   * settles through the normal publish path. It never reveals video by itself:
+   * only a completed clean verdict that started at/after the current resume
+   * can (settleProtectedContentFromVerdict). A timeout or exception moves the
+   * state to `error` and keeps the surface concealed.
+   *
+   * This is NOT an app-access block: during it the app shell, navigation and
+   * non-video API traffic keep working normally.
+   */
+  const verifyProtectedContent = useCallback(async (reason = 'protected-content') => {
+    if (isSuperAdmin) {
+      dispatchProtectedContent({
+        type: 'check-succeeded',
+        requestId: protectedRequestIdRef.current,
+        reason: 'super-admin',
+      });
+      setProtectedContentConcealed(false, 'super-admin');
+      return;
+    }
+    const requestId = beginProtectedContentVerification(reason);
+    if (protectedWatchdogRef.current) clearTimeout(protectedWatchdogRef.current);
+    protectedWatchdogRef.current = setTimeout(() => {
+      protectedWatchdogRef.current = null;
+      if (requestId !== protectedRequestIdRef.current) return;
+      if (__DEV__) console.warn('[SecurityContext] protected-content verification overdue — media stays hidden');
+      dispatchProtectedContent({ type: 'check-error', requestId, reason: 'timeout' });
+      setProtectedContentConcealed(true, 'timeout');
+    }, PROTECTED_CONTENT_VERIFICATION_TIMEOUT_MS);
+
+    try {
+      const r = await runEvaluation(reason);
+      if (requestId !== protectedRequestIdRef.current) return; // superseded
+      // null means coalesced: the queued evaluation publishes through the
+      // shared publish path (publishVerdict → settleProtectedContentFromVerdict).
+      if (r) publishVerdictRef.current(r);
+    } catch {
+      if (requestId !== protectedRequestIdRef.current) return;
+      if (protectedWatchdogRef.current) {
+        clearTimeout(protectedWatchdogRef.current);
+        protectedWatchdogRef.current = null;
+      }
+      dispatchProtectedContent({ type: 'check-error', requestId, reason: 'exception' });
+      setProtectedContentConcealed(true, 'exception');
+    }
+  }, [beginProtectedContentVerification, isSuperAdmin, runEvaluation]);
+  verifyProtectedContentRef.current = verifyProtectedContent;
 
   /**
    * Manual recheck (the overlay / resume gate control).
@@ -988,6 +1233,19 @@ export function SecurityProvider({ children }: { children: React.ReactNode }) {
       verdictSerialRef.current = 0;
       resumeTokenRef.current = 0;
       evaluationStartTokenRef.current = 0;
+      // Protected content is SESSION-SCOPED too: fail closed immediately so
+      // the next identity can never inherit a visible player surface.
+      protectedHiddenRef.current = false;
+      if (protectedWatchdogRef.current) {
+        clearTimeout(protectedWatchdogRef.current);
+        protectedWatchdogRef.current = null;
+      }
+      dispatchProtectedContent({
+        type: 'reset',
+        requestId: ++protectedRequestIdRef.current,
+        reason: 'session-reset',
+      });
+      setProtectedContentConcealed(true, 'session-reset');
       void invalidateSecurityConfig();
       void clearAppAttestKey();
       // Server policy + VPN whitelist caches are session-scoped: drop them on
@@ -1051,6 +1309,7 @@ export function SecurityProvider({ children }: { children: React.ReactNode }) {
           blockingCbsRef.current.forEach((cb) => cb(r));
         }
         maybeReleaseBackgroundHold(r);
+        settleProtectedContentFromVerdict(r);
       } catch { /* non-fatal */ }
     };
     // Keep the stable ref up-to-date with the latest closure
@@ -1066,57 +1325,63 @@ export function SecurityProvider({ children }: { children: React.ReactNode }) {
     void runPeriodicCheckRef.current();
 
     // ── Background → resume gate ───────────────────────────────────────────
-    // TWO directions, and both are load-bearing:
+    // TWO directions, and the layers are now SEPARATED:
     //
-    //   LEAVING the foreground  → engage the hold IMMEDIATELY (before any React
-    //     render, synchronously with the state change): protected playback is
-    //     paused, in-flight protected requests are aborted, and new ones are
-    //     refused by the transport gate. Previously nothing was held here, so
-    //     protected content stayed live behind the Home button and the last
-    //     pre-background verdict kept the app usable after returning.
+    //   LEAVING the foreground  → conceal PROTECTED CONTENT immediately:
+    //     pause the native player (synchronous concealer), hide its surface and
+    //     move the protected-content state to `background_hidden`. The app
+    //     access lock is NOT engaged — the user only left the app, which is not
+    //     a security violation, and non-video screens must remain usable.
     //
-    //   RETURNING to the foreground → the hold STAYS ENGAGED (containment is what
-    //     protects protected content), a post-resume evaluation starts at once,
-    //     and the app SHELL is restored immediately. The hold is no longer
-    //     rendered as a full-screen VERIFYING page: protected operations are
-    //     refused by the transport gate, protected playback stays stopped by the
-    //     hard lock, and the shell is usable. A confirmed violation is routed to
-    //     its own blocking screen the moment the verdict lands.
+    //   RETURNING to the foreground → the shell/navigation is available at
+    //     once, video stays CONCEALED, and a fresh evaluation runs immediately.
+    //     Only a clean verdict that started at/after this resume reveals video.
+    //     A confirmed violation is routed to the authoritative blocking screen
+    //     by the normal verdict path (verdict → SecurityGate).
     //
-    // Super Admin sessions bypass the hold (matching every other enforcement
-    // path). The hold is SESSION-SCOPED: `!session` releases all holders, so
-    // the next identity never inherits it.
-    // (enterBackgroundHold / maybeReleaseBackgroundHold are provider-scope
-    //  callbacks — every publish path must be able to release the hold.)
+    // Continuous monitoring, the periodic cadence, the native VPN callback,
+    // overlay/multi-window monitoring and every detector are unchanged.
+    // Super Admin sessions bypass enforcement (matching every other path).
 
     // Track foreground/background; trigger re-validation on return from external app
     const appStateSub = AppState.addEventListener('change', (nextState) => {
       const wasActive = appActiveRef.current;
       appActiveRef.current = nextState === 'active';
 
-      if (nextState === 'background') {
-        // Left the foreground → hold at once (hard: screens unmount the player).
-        //
-        // Only 'background', deliberately NOT 'inactive'. On Android a real
-        // stop (Home, recents, app switch) is the only thing that reports
-        // 'background' — a system dialog, the keyboard, or a trusted system UI
-        // surface keeps the activity visible and does NOT produce one, so those
-        // legitimate cases cannot trip the gate. On iOS 'inactive' additionally
-        // fires for the app switcher, a call banner and Control Centre, and
-        // gating on it would block every benign interruption; iOS keeps its
-        // existing resume re-check behavior.
-        enterBackgroundHold('appstate=' + nextState);
+      // A real foreground exit. On Android only 'background' is reported for
+      // Home/recents/app-switch (system dialogs and trusted system UI keep the
+      // activity visible). iOS also reports 'inactive' for the app switcher,
+      // so video is concealed there too — fail-closed, and it is only layer 2.
+      const leavingForeground =
+        nextState === 'background' ||
+        (Platform.OS === 'ios' && nextState === 'inactive');
+
+      if (leavingForeground && !protectedHiddenRef.current) {
+        protectedHiddenRef.current = true;
+        // Invalidate any in-flight protected-content verification and hide the
+        // native surface synchronously (before the app is actually paused).
+        const requestId = ++protectedRequestIdRef.current;
+        if (protectedWatchdogRef.current) {
+          clearTimeout(protectedWatchdogRef.current);
+          protectedWatchdogRef.current = null;
+        }
+        dispatchProtectedContent({
+          type: 'background',
+          requestId,
+          reason: 'appstate=' + nextState,
+        });
+        setProtectedContentConcealed(true, 'appstate=' + nextState);
+        return;
       }
 
       if (nextState === 'active' && !wasActive) {
-        // Resume: bump the token FIRST so any evaluation already in flight is
-        // ineligible to clear this hold, then keep the CONTAINMENT engaged until a
-        // fresh post-resume verification completes. The hold is no longer
-        // rendered as a page (see rendersBlockScreen): the app shell comes back
-        // immediately, while protected operations stay refused and protected
-        // media stays stopped until the verdict lands.
+        // Resume: bump the resume token FIRST so an evaluation that started
+        // before this resume can never clear the new verification, then keep
+        // protected content concealed until a fresh verdict lands. App access
+        // is NOT blocked here — only a confirmed violation can block it.
         resumeTokenRef.current += 1;
-        enterBackgroundHold('resumed');
+        protectedHiddenRef.current = false;
+        setProtectedContentConcealed(true, 'resume-verification');
         // Re-assert the native overlay protection on the (possibly recreated)
         // activity — Android can rebuild the window across a background cycle.
         void enableNativeOverlayProtection();
@@ -1148,14 +1413,14 @@ export function SecurityProvider({ children }: { children: React.ReactNode }) {
         // Also re-check whenever returning from background for the first time.
         // FIX: use runPeriodicCheckRef.current so the AppState handler always
         // calls the latest closure (avoids stale-closure VPN re-check bug).
-        // ── Resume verification ────────────────────────────────────────────────
-        // ALWAYS requested on a real background→foreground transition, started
-        // at once (no artificial delay) and queued rather than dropped if an
-        // evaluation is already running. The VPN case keeps its short debounce
-        // alone, because that one waits for the network stack to settle after a
-        // tunnel teardown — the hold stays engaged for those 1.5 s, and the
-        // value read afterwards is the first one that can speak for the new
-        // transport state.
+        // ── Resume verification (PROTECTED CONTENT layer) ─────────────────────
+        // ALWAYS runs on a real background→foreground transition, started at
+        // once (no artificial delay) and queued rather than dropped if an
+        // evaluation is already running. Video stays concealed meanwhile; the
+        // app shell and non-video screens are NOT blocked. The VPN case keeps
+        // its short debounce alone, because that one waits for the network
+        // stack to settle after a tunnel teardown — the value read afterwards
+        // is the first one that can speak for the new transport state.
         if (hasActiveVpnThreat.current) {
           if (vpnRecheckTimer.current) clearTimeout(vpnRecheckTimer.current);
           vpnRecheckTimer.current = setTimeout(() => {
@@ -1230,6 +1495,11 @@ export function SecurityProvider({ children }: { children: React.ReactNode }) {
             releaseSecurityLock(LOCK_SRC_NATIVE_VPN);
           } else if (event?.vpnActive === true && !isVpnWhitelistKnownNonEmpty()) {
             engageSecurityLock(LOCK_SRC_NATIVE_VPN);
+            // Layer 2 reacts at the same OS-level instant: a VPN that appears
+            // during protected playback must conceal it before the
+            // network-bound verdict lands. A whitelisted VPN never reaches here
+            // and a clean verdict can reveal the player again.
+            blockProtectedContent('native-vpn');
             if (signalTimeMs > 0 && event?.vpnActive) {
               const lockEngageMs = Date.now();
               diagnosticsRef.current = { nativeVPNSignalTimeMs: signalTimeMs, lockEngagedTimeMs: lockEngageMs };
@@ -1288,6 +1558,19 @@ export function SecurityProvider({ children }: { children: React.ReactNode }) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session?.user?.id, isSuperAdmin]);
 
+  // Super Admin: the bypass covers protected content too (matching every other
+  // enforcement path). Without this, a surface would stay concealed because the
+  // protected-content machine's fail-closed default is `checking`.
+  useEffect(() => {
+    if (!isSuperAdmin) return;
+    dispatchProtectedContent({
+      type: 'check-succeeded',
+      requestId: protectedRequestIdRef.current,
+      reason: 'super-admin',
+    });
+    setProtectedContentConcealed(false, 'super-admin');
+  }, [isSuperAdmin]);
+
   // When Super Admin bypass is active, always expose a clean zero-threat result
   // regardless of what runSecurityChecks() may have returned previously.
   // Otherwise serve the LAST COMPLETED verdict; while none exists (cold start,
@@ -1332,6 +1615,10 @@ export function SecurityProvider({ children }: { children: React.ReactNode }) {
 
     if (!isSuperAdmin && hasVerdict && (r.blocksLogin || r.blocksVideo)) {
       engageSecurityLock(LOCK_SRC_VERDICT, { hard: true });
+      // Defense in depth for layer 2: the publish paths already settle
+      // protected content, but any path that installs a blocking verdict must
+      // also guarantee the video surface is concealed.
+      blockProtectedContent('verdict');
       return;
     }
     releaseSecurityLock(LOCK_SRC_VERDICT);
@@ -1347,7 +1634,7 @@ export function SecurityProvider({ children }: { children: React.ReactNode }) {
     } else if (hasVerdict && __DEV__) {
       console.log('[SecurityContext] holding provisional VPN containment — verdict predates the latest native signal');
     }
-  }, [isSuperAdmin, hasVerdict, r.blocksLogin, r.blocksVideo, verdictTypes, tryReleaseOverlayLock, tryReleaseWindowModeLock, verdictSerial]);
+  }, [isSuperAdmin, hasVerdict, r.blocksLogin, r.blocksVideo, verdictTypes, tryReleaseOverlayLock, tryReleaseWindowModeLock, verdictSerial, blockProtectedContent]);
 
   const phase: GatePhase = resolveGatePhase({
     hasVerdict,
@@ -1414,6 +1701,22 @@ export function SecurityProvider({ children }: { children: React.ReactNode }) {
       multiWindowBlocked,
       windowMode:          multiWindowBlocked ? windowModeEngagedModeRef.current : windowModeRef.current,
       backgroundBlocked,
+      // LAYER 1 — only a state that takes over the app counts as an app-access
+      // block. The resume hold is contained inside the lock, never a page.
+      appAccessBlocked:    rendersBlockScreen(gateState),
+      // LAYER 2 — independent of the app-access decision above.
+      protectedContent:    isSuperAdmin
+        ? {
+            status: 'allowed' as const,
+            requestId: protectedContent.requestId,
+            reason: 'super-admin',
+            visible: true,
+          }
+        : {
+            ...protectedContent,
+            visible: isProtectedContentVisible(protectedContent),
+          },
+      verifyProtectedContent,
       verifySecurity,
       check,
       checkBeforeVideo,

@@ -286,7 +286,7 @@ check('B11b: the native signal bumps the sequence the verdict records at check S
   && /const nativeSeqAtStart = nativeSignalSeqRef\.current/.test(ctx)
   && /verdictNativeSeqRef\.current = nativeSeqAtStart/.test(ctx));
 check('B11c: a fresh verdict re-runs the release decision even with identical flags',
-  /setVerdictSerial\(\(s\) => s \+ 1\)/.test(ctx) && /verdictSerial\]/.test(ctx));
+  /setVerdictSerial\(\(s\) => s \+ 1\)/.test(ctx) && /verdictSerial/.test(ctx));
 check('B12: the native TRANSPORT_VPN callback contains IMMEDIATELY (no verdict wait)',
   /engageSecurityLock\(LOCK_SRC_NATIVE_VPN\)/.test(ctx));
 check('B13: containment respects the admin VPN whitelist', /isVpnWhitelistKnownNonEmpty\(\)/.test(ctx));

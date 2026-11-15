@@ -2,7 +2,7 @@
  * Admin RoleTabShell — (admin) role's tab layout content.
  *
  * iOS  → native system tab bar / Liquid Glass (RoleTabShell.ios.tsx)
- * Else → JS Tabs + ResponsiveTabBar (RoleTabShell.tsx) — unchanged behavior.
+ * Else → JS Tabs + the floating Liquid Glass bar (RoleTabShell.tsx).
  *
  * NOTE: this role directory contains screen files that the previous JS-Tabs
  * layout never registered (fraud-alerts.tsx, db-audit.tsx). They are listed

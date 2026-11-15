@@ -134,12 +134,12 @@ console.log('── Part 4: SecurityContext wiring ──');
     ['4f: the overlay lock is engaged HARD (players unmount)', /engageSecurityLock\(LOCK_SRC_OVERLAY, \{ hard: true \}\)/],
     ['4g: overlay release uses the two-condition rule', /canClearOverlayBlock\(\{/],
     ['4h: the overlay hold records the verdict serial at engage time', /overlayEngagedSerialRef\.current = verdictSerialRef\.current/],
-    ['4i: the background hold is engaged HARD', /engageSecurityLock\(LOCK_SRC_BACKGROUND, \{ hard: true \}\)/],
-    ['4j: the background hold is released only through the resolver', /resolveBackgroundResumeGate\(\{/],
+    ['4i: the global background hold still exists for the STARTUP gate only', /enterBackgroundHold\('session-start'\)/],
+    ['4j: the startup hold is released only through the resolver', /resolveBackgroundResumeGate\(\{/],
     ['4k: the resume token invalidates pre-resume verdicts', /resumeTokenRef\.current \+= 1;/],
     ['4l: an evaluation records the token live when it started', /evaluationStartTokenRef\.current = resumeTokenRef\.current;/],
-    ['4m: AppState is the trigger, only on a REAL background', /if \(nextState === 'background'\) \{/],
-    ['4n: iOS \u2018inactive\u2019 is deliberately NOT treated as leaving the foreground', /deliberately NOT 'inactive'/],
+    ['4m: AppState is the lifecycle trigger', /const leavingForeground =/],
+    ['4n: iOS \u2018inactive\u2019 conceals protected content (layer 2 only, never a global lock)', /Platform\.OS === 'ios' && nextState === 'inactive'/],
     ['4o: the hold is released from the main check path', /maybeReleaseBackgroundHold\(r\);/],
     ['4p: ... and from the periodic check path', /maybeReleaseBackgroundHold\(r\);/],
     ['4q: a manual recheck re-reads the native signal', /overlaySignalRef\.current = await isNativeWindowObscured\(\);/],
@@ -152,6 +152,13 @@ console.log('── Part 4: SecurityContext wiring ──');
       /backgroundHeldRef\.current = false;/],
   ];
   for (const [name, re] of pairs) check(name, re.test(CONTEXT));
+
+  check('4i-2: lifecycle transitions never engage the global app-access hold',
+    !/enterBackgroundHold\('appstate='/.test(CONTEXT)
+    && !/enterBackgroundHold\('resumed'\)/.test(CONTEXT));
+  check('4i-3: protected content is contained on every lifecycle edge (fail-closed)',
+    /setProtectedContentConcealed\(true, 'appstate=' \+ nextState\);/.test(CONTEXT)
+    && /setProtectedContentConcealed\(true, 'resume-verification'\);/.test(CONTEXT));
 
   const occurrences = (CONTEXT.match(/maybeReleaseBackgroundHold\(r\);/g) || []).length;
   check('4w: every publish path can release the hold (' + occurrences + ' call sites, need >= 3)',

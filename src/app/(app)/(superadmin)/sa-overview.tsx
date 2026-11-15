@@ -232,7 +232,6 @@ export default function SuperAdminDashboard() {
     {
       title: t('nav.contentMedia'),
       items: [
-        { icon: Video,        label: t('nav.videoLibrary'),            description: t('saOverview.nav.videoLibraryDesc'), color: '#7C3AED',  path: '/sa-video-library' },
         { icon: AlertOctagon, label: t('saOverview.nav.watermark'),     description: t('saOverview.nav.watermarkDesc'),    color: '#DC2626',  path: '/content-protection' },
         { icon: HardDrive,    label: t('saOverview.nav.storage'),       description: t('saOverview.nav.storageDesc'),      color: '#6B7280',  path: '/sa-storage' },
       ],
@@ -273,7 +272,7 @@ export default function SuperAdminDashboard() {
   return (
     <ScrollView
       style={{ flex: 1, backgroundColor: c.base }}
-      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />} contentContainerStyle={{ paddingBottom: safeBottom(layout.insets.bottom) }}
+      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />} contentContainerStyle={{ paddingBottom: layout.roleTabsBottom() }}
     >
       <DashboardHeader
         roleLabel={t('role.superAdmin')}
@@ -313,7 +312,7 @@ export default function SuperAdminDashboard() {
             <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: layout.itemGap }}>
               <KpiCard label={t('saOverview.kpi.totalDoctors')} value={stats.totalDoctors}   icon={Stethoscope}    color="#16A34A" path="/sa-users"       c={c} isDark={isDark} />
               <KpiCard label={t('saOverview.kpi.totalStudents')} value={stats.totalStudents}  icon={GraduationCap}  color="#7C3AED" path="/sa-users"       c={c} isDark={isDark} />
-              <KpiCard label={t('saOverview.kpi.totalCourses')} value={stats.totalCourses}   icon={BookOpen}       color="#2DA8FF" path="/global-search"       c={c} isDark={isDark} />
+              <KpiCard label={t('saOverview.kpi.totalCourses')} value={stats.totalCourses}   icon={BookOpen}       color="#2DA8FF" path="/sa-courses"       c={c} isDark={isDark} />
               <KpiCard label={t('saOverview.kpi.totalDevices')} value={stats.totalDevices}   icon={UserCog}        color="#D97706" path="/sa-devices"       c={c} isDark={isDark} />
             </View>
 
@@ -321,15 +320,15 @@ export default function SuperAdminDashboard() {
             <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: layout.itemGap }}>
               <KpiCard label={t('saOverview.kpi.totalCredits')} value={stats.totalCredits.toLocaleString('en-US')}  icon={CreditCard}  color="#16A34A" path="/sa-credits"    c={c} isDark={isDark} />
               <KpiCard label={t('saOverview.kpi.usedCredits')} value={stats.usedCredits.toLocaleString('en-US')}   icon={Coins}       color="#D97706" path="/sa-credits"      c={c} isDark={isDark} />
-              <KpiCard label={t('saOverview.kpi.published')} value={stats.publishedCourses}               icon={BookOpen}    color="#2DA8FF" path="/global-search"       c={c} isDark={isDark} />
-              <KpiCard label={t('saOverview.kpi.draftCourses')} value={stats.draftCourses}                   icon={FileText}    color="#6B7280" path="/global-search"       c={c} isDark={isDark} />
+              <KpiCard label={t('saOverview.kpi.published')} value={stats.publishedCourses}               icon={BookOpen}    color="#2DA8FF" path="/sa-courses"       c={c} isDark={isDark} />
+              <KpiCard label={t('saOverview.kpi.draftCourses')} value={stats.draftCourses}                   icon={FileText}    color="#6B7280" path="/sa-courses"       c={c} isDark={isDark} />
             </View>
 
             <SectionLabel label={t('saOverview.section.snapshot')} c={c} />
             <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: layout.itemGap }}>
               <KpiCard label={t('saOverview.kpi.universities')} value={stats.totalUniversities}  icon={GraduationCap}  color="#2DA8FF" path="/sa-academic"     c={c} isDark={isDark} />
               <KpiCard label={t('saOverview.kpi.faculties')} value={stats.totalFaculties}     icon={BookOpen}       color="#7C3AED" path="/sa-academic"     c={c} isDark={isDark} />
-              <KpiCard label={t('saOverview.kpi.adminStaff')} value={stats.totalAdmins}        icon={UserCog}        color="#EF4444" path="/sa-users"  c={c} isDark={isDark} />
+              <KpiCard label={t('saOverview.kpi.adminStaff')} value={stats.totalAdmins}        icon={UserCog}        color="#EF4444" path="/sa-admin-management"  c={c} isDark={isDark} />
               <KpiCard label={t('saOverview.kpi.totalUsers')} value={stats.totalUsers}         icon={Users}          color={c.primary} path="/sa-users" c={c} isDark={isDark} />
             </View>
 

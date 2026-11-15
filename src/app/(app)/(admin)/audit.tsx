@@ -436,7 +436,8 @@ export default function AdminAudit() {
         <FlatList
           data={entries}
           keyExtractor={item => item.id}
-          contentContainerStyle={{ paddingHorizontal: 16 }}
+          // Trailing clearance for the floating glass bar.
+          contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: layout.roleTabsBottom() }}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />}
           onEndReached={loadMore}
           onEndReachedThreshold={0.3}
