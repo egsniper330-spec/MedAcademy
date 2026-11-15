@@ -11,13 +11,16 @@ if (PHP_SAPI !== 'cli') {
 /**
  * login-pair-cleanup.php — removes expired login cooldown state.
  *
- * Cron schedule (suggested): every 30 minutes
- *   */30 * * * * /usr/local/bin/php /path/to/backend/scripts/login-pair-cleanup.php
+ * Cron schedule (suggested): every 30 minutes. The literal schedule line is
+ * kept in // comments below because a cron expression contains the block
+ * comment terminator and would end this docblock early.
  *
  * Rows are removed once their last failure is older than the 24 h decay window
  * (they would be reset on next use anyway). Deletes run in bounded batches so a
  * large backlog never holds a long table lock. Safe to run at any frequency.
  */
+// Cron: every 30 minutes
+// /usr/local/bin/php /path/to/backend/scripts/login-pair-cleanup.php
 
 require dirname(__DIR__) . '/src/bootstrap.php';
 

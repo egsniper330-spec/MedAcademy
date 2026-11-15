@@ -8,7 +8,7 @@ import { api, errorMessage, uploadFile, ApiError } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { useI18n } from '../lib/i18n';
 import { useDocumentTitle } from '../lib/hooks';
-import { Badge, Button, Card, EmptyState, ErrorState, InlineError, PageHeader, Spinner } from '../components/ui';
+import { Badge, Button, Card, EmptyState, InlineError, PageHeader, Spinner } from '../components/ui';
 
 /**
  * PDF forensic checker.

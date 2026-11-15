@@ -79,7 +79,10 @@ defaults:
 jobs:
   android-apk:
     name: Build Signed Android APK
-    runs-on: ubuntu-latest
+    # Pinned rather than `ubuntu-latest`: GitHub is migrating the `latest` label
+    # to Ubuntu 26 (runner-images#14748), and this build depends on the Android
+    # SDK / JDK layout of the image. Pin explicitly, bump deliberately.
+    runs-on: ubuntu-24.04
     timeout-minutes: 90
 
     env:
@@ -92,24 +95,25 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           persist-credentials: false
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: '20'
           cache: npm
 
       - name: Setup Java (JDK 17)
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: '17'
 
       # ── Fail fast (before any 20-minute build) on missing credentials ───────
       - name: Preflight — required signing secrets
+        id: preflight
         env:
           KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
           STORE_PASSWORD: ${{ secrets.MEDA_UPLOAD_STORE_PASSWORD }}
@@ -132,6 +136,16 @@ jobs:
               echo "keystore (\`~/.medacademy/medacademy-release.keystore\`). The signing"
               echo "identity must not be regenerated: a new key would orphan every"
               echo "installed copy of the app."
+              echo ""
+              echo "Generate the value locally in PowerShell (copies it, prints nothing):"
+              echo ""
+              echo '```powershell'
+              echo '[Convert]::ToBase64String([IO.File]::ReadAllBytes("$env:USERPROFILE\\.medacademy\\medacademy-release.keystore")) | Set-Clipboard'
+              echo '```'
+              echo ""
+              echo "Both password secrets use the keystore password (\`~/.medacademy/release-keystore.password\`);"
+              echo "for this PKCS12 keystore the store and key passwords are identical. The alias is"
+              echo "optional and defaults to \`medacademy-prod\`."
             } >> "$GITHUB_STEP_SUMMARY"
             echo "::error::Missing repository secrets: ${missing[*]}"
             exit 1
@@ -320,7 +334,7 @@ jobs:
           echo "APK ready: $ARTIFACT ($(( SIZE_BYTES / 1048576 )) MB), sha256=$SHA256"
 
       - name: Upload APK artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: MedAcademy-Android-APK
           path: |
@@ -333,8 +347,8 @@ jobs:
           compression-level: 0
 
       - name: Upload Gradle log (on failure)
-        if: failure()
-        uses: actions/upload-artifact@v4
+        if: failure() && steps.build.outcome != 'skipped'
+        uses: actions/upload-artifact@v6
         with:
           name: android-gradle-log
           path: ${{ runner.temp }}/gradle.log
@@ -344,18 +358,29 @@ jobs:
       - name: Build summary
         if: always()
         env:
+          PREFLIGHT_OUTCOME: ${{ steps.preflight.outcome }}
           BUILD_OUTCOME: ${{ steps.build.outcome }}
           APK_OUTCOME: ${{ steps.apk.outcome }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           TRIGGER_REASON: ${{ inputs.reason }}
           RETENTION_DAYS: ${{ inputs.retention_days }}
         run: |
+          if [ "${APK_OUTCOME:-}" = "success" ]; then
+            RESULT="✅ Success — signed production APK produced"
+          elif [ "${PREFLIGHT_OUTCOME:-}" != "success" ]; then
+            RESULT="❌ Not built — the signing-credentials gate failed (see the step log)"
+          elif [ "${BUILD_OUTCOME:-}" != "success" ]; then
+            RESULT="❌ Failed during the Gradle build (log attached as \`android-gradle-log\`)"
+          else
+            RESULT="❌ Failed during APK verification or upload"
+          fi
+
           {
             echo "## Android APK build"
             echo ""
             echo "| | |"
             echo "|---|---|"
-            echo "| Result | **${BUILD_OUTCOME:-skipped} / ${APK_OUTCOME:-skipped}** |"
+            echo "| Result | ${RESULT} |"
             echo "| Trigger reason | ${TRIGGER_REASON:-n/a} |"
             echo "| Commit | \`${GITHUB_SHA}\` |"
             if [ "${APK_OUTCOME:-}" = "success" ]; then
@@ -368,11 +393,13 @@ jobs:
             echo ""
             if [ "${APK_OUTCOME:-}" = "success" ]; then
               echo "**Download:** open this run → *Artifacts* → **MedAcademy-Android-APK**, unzip, install the \`.apk\`."
+            elif [ "${PREFLIGHT_OUTCOME:-}" != "success" ]; then
+              echo "**Nothing was built.** Add the signing secrets listed above, then re-run this workflow."
             else
-              echo "**Failed.** Open the step log above; the Gradle log is attached as the \`android-gradle-log\` artifact."
+              echo "**Failed.** Open the failing step above; the Gradle log is attached as the \`android-gradle-log\` artifact."
             fi
             echo ""
-            echo "**Build system:** Gradle \`:app:assembleRelease\` on \`ubuntu-latest\` (the Android equivalent of the repo's \`eas.json\` \`release-apk\` profile). EAS Build is not linked for this project, so no EAS build URL exists for this run."
+            echo "**Build system:** Gradle \`:app:assembleRelease\` on \`ubuntu-24.04\` (the Android equivalent of the repo's \`eas.json\` \`release-apk\` profile). EAS Build is not linked for this project, so no EAS build URL exists for this run."
             echo ""
             echo "**Run:** $RUN_URL"
           } >> "$GITHUB_STEP_SUMMARY"
