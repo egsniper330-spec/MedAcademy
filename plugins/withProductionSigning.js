@@ -105,7 +105,19 @@ function withProductionSigning(config) {
     // reader uses a DIRECT static reference (com.medacademy.app.BuildConfig
     // .EXPECTED_CERT_SHA256), which must compile in debug builds too.
     if (!c.includes('EXPECTED_CERT_SHA256')) {
-      const anchor = `buildConfigField "String", "REACT_NATIVE_RELEASE_LEVEL"`;
+      // ANCHOR — inject as the FIRST statements inside `defaultConfig {`.
+      //
+      // The previous anchor was the 2-argument PREFIX of the template's single
+      // statement (expo-template-bare-minimum, android/app/build.gradle line 98):
+      //   buildConfigField "String", "REACT_NATIVE_RELEASE_LEVEL", "\"${...}\""
+      // Replacing that prefix spliced the injected block INTO the statement, so
+      // every release build from a clean prebuild failed during configuration:
+      //   * Where: android/app/build.gradle line: 98
+      //   Could not find method buildConfigField() for arguments
+      //   [String, REACT_NATIVE_RELEASE_LEVEL] on DefaultConfig$AgpDecorated
+      // It only ever worked on machines whose android/ had been hand-patched
+      // (the EXPECTED_CERT_SHA256 guard below then skipped injection entirely).
+      const anchor = /^([ \t]*)defaultConfig[ \t]*\{[ \t]*\r?\n/m;
       const injection = [
         `        // ── Integrity bootstrap pin (public material, safe to embed) ──────────`,
         `        // SHA-256 of the PRODUCTION signing cert, read at Gradle-configuration`,
@@ -132,12 +144,14 @@ function withProductionSigning(config) {
         // the shipped posture.
         '        buildConfigField "String", "API_SPKI_PINS", "\\"${(findProperty(\'apiSpkiPins\') ?: \'\').toString()}\\""',
       ].join('\n');
-      if (c.includes(anchor)) {
-        c = c.replace(anchor, anchor + '\n' + injection);
+      const anchorMatch = anchor.exec(c);
+      if (anchorMatch) {
+        const insertAt = anchorMatch.index + anchorMatch[0].length;
+        c = c.slice(0, insertAt) + injection + '\n' + c.slice(insertAt);
       } else {
         // Fail loudly rather than silently shipping without the integrity pin.
         throw new Error(
-          '[withProductionSigning] cannot inject EXPECTED_CERT_SHA256: the REACT_NATIVE_RELEASE_LEVEL buildConfigField anchor is missing from android/app/build.gradle. The build.gradle template changed — update plugins/withProductionSigning.js anchors.',
+          '[withProductionSigning] cannot inject EXPECTED_CERT_SHA256: no `defaultConfig {` block found in android/app/build.gradle. The build.gradle template changed — update plugins/withProductionSigning.js anchors.',
         );
       }
     }
