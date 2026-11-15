@@ -23,6 +23,8 @@
 import { NativeModules, NativeEventEmitter, Platform } from 'react-native';
 // PURE vocabulary only (type import — no runtime dependency on the model).
 import type { VpnSignalPath } from './securityStateModel';
+// PURE root-detection model (ids, confidence rules, payload validation).
+import { parseRootDiagnostics, type RootDiagnosticsReport } from './rootDetectionModel';
 import NetInfo from '@react-native-community/netinfo';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -104,6 +106,15 @@ export interface NativeSecurityFlags {
   magiskEvidenceSignals?:   string[];
   fridaEvidenceSignals?:    string[];
   xposedEvidenceSignals?:   string[];
+  /**
+   * STRUCTURED root diagnostics (Android, false-positive investigation): one
+   * classified entry per detection signal — id, category, result
+   * (positive/negative/inconclusive), evidence, confidence and whether it fed
+   * the verdict — plus which positives fed BOTH verdicts. Parsed from the native
+   * batch's `rootDiagnostics` JSON (see src/lib/rootDetectionModel.ts). Absent on
+   * iOS and on an older native module; the verdicts themselves are unchanged.
+   */
+  rootDiagnostics?:        RootDiagnosticsReport;
   /** Kernel-plane tunnel-class interface count (/proc/net/dev via C++). */
   netNativeTunnelIfaces?:  number;
   /** Kernel routing table has a default route via a tunnel-class interface. */
@@ -228,6 +239,24 @@ export function getNativeSecurityFlagsSync(): NativeSecurityFlags {
 }
 
 /**
+ * Parses the native batch's STRUCTURED root diagnostics (Android only).
+ *
+ * The Kotlin batch carries it as a JSON string (a WritableMap cannot hold nested
+ * objects). Anything unusable is DROPPED instead of being replaced by an empty
+ * report — an empty report would read as "nothing found" (measured clean),
+ * which is the exact confusion the structured report exists to remove.
+ */
+function withRootDiagnostics(flags: NativeSecurityFlags): NativeSecurityFlags {
+  const raw = (flags as unknown as { rootDiagnostics?: unknown }).rootDiagnostics;
+  if (typeof raw !== 'string') return flags;
+  const parsed = parseRootDiagnostics(raw);
+  if (parsed) return { ...flags, rootDiagnostics: parsed };
+  const stripped: NativeSecurityFlags = { ...flags };
+  delete stripped.rootDiagnostics;
+  return stripped;
+}
+
+/**
  * One real native round-trip. `measured:false` means the returned object is the
  * fail-safe default, NOT a measurement.
  */
@@ -240,7 +269,7 @@ async function readNativeSecurityFlagsOnce(): Promise<{ flags: NativeSecurityFla
     }
     try {
       const flags = await mod.getSecurityFlags() as NativeSecurityFlags;
-      const merged = { ...SAFE_FLAGS, ...flags };
+      const merged = withRootDiagnostics({ ...SAFE_FLAGS, ...flags });
       _lastMeasuredFlags = merged;
       return { flags: merged, measured: true };
     } catch (e) {
@@ -257,7 +286,7 @@ async function readNativeSecurityFlagsOnce(): Promise<{ flags: NativeSecurityFla
     }
     try {
       const flags = await mod.getSecurityFlags() as NativeSecurityFlags;
-      const merged = { ...SAFE_FLAGS, ...flags };
+      const merged = withRootDiagnostics({ ...SAFE_FLAGS, ...flags });
       // FIX: the iOS branch previously did not refresh the sync snapshot, so
       // getNativeSecurityFlagsSync() (used by detectAppIntegrity) kept reading
       // SAFE_FLAGS on iOS even after a successful measurement.
@@ -429,6 +458,17 @@ export interface NativeRootArtifactEvidence {
   denied: string[];
   /** Probes that failed for an unrelated reason; not evidence either way. */
   unreadable: string[];
+  /**
+   * /data/adb children that answered EACCES. Only meaningful together with a
+   * PRESENT /data/adb — never evidence on its own (optional: older modules).
+   */
+  managerDenied?: string[];
+  /**
+   * Paths whose errno cannot decide anything — the parent is root-only on stock
+   * Android (/debug_ramdisk) or SELinux/OEM-dependent (/data/local). These were
+   * the clean-device "evidence" behind the reported false positives. Optional.
+   */
+  indeterminate?: string[];
   /** Verified-boot / bootloader state. Evidence only — never a sole verdict. */
   bootloaderUnlocked: boolean;
   verifiedBootState: string;
@@ -462,6 +502,30 @@ export async function getNativeRootArtifactEvidence(): Promise<NativeRootArtifac
     if (parsed?.available !== true || typeof parsed.rootFrameworkEvidence !== 'boolean') return null;
     if (!Array.isArray(parsed.present) || !Array.isArray(parsed.denied)) return null;
     return parsed;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * On-demand STRUCTURED root diagnostics — "why was this device classified as
+ * rooted?" without a debugger.
+ *
+ * Returns one classified entry per native check (id, category, positive /
+ * negative / inconclusive, evidence, confidence, contributes) plus which
+ * positives fed BOTH verdicts. NULL on iOS, on an older native module, and
+ * whenever the report is unusable — callers must treat null as UNKNOWN, never as
+ * a clean device. Internal diagnostics only: no student-facing UI reads this and
+ * the evidence strings hold system artifact paths, package ids and counts — no
+ * user data, tokens or identifiers.
+ */
+export async function getRootDetectionDiagnostics(): Promise<RootDiagnosticsReport | null> {
+  if (Platform.OS !== 'android') return null;
+  const mod = getModule();
+  if (!mod || typeof mod.getRootDiagnostics !== 'function') return null;
+  try {
+    const raw = await mod.getRootDiagnostics() as string | null;
+    return parseRootDiagnostics(raw);
   } catch {
     return null;
   }

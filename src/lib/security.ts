@@ -75,6 +75,8 @@ import {
   APP_ATTEST_UNSUPPORTED,
   DEVICE_CHECK_UNSUPPORTED,
 } from '@/lib/nativeSecurity';
+// PURE root-diagnostics vocabulary (ids/confidence) for the diagnostic log line.
+import { describeRootDiagnostics } from './rootDetectionModel';
 import { getSecurityGuards, getSecurityConfig } from '@/lib/securityConfigService';
 import { isSecurityTestBypassed } from '@/lib/securityTestBuild';
 // PURE state model (no react-native/expo imports) — risk scoring + policy
@@ -633,8 +635,11 @@ function withTimeout<T>(p: Promise<T>, ms: number, onTimeout: () => T): Promise<
 
 /**
  * Root / Jailbreak detection.
- * Android: SecurityModule.getSecurityFlags().rootDetected (6 heuristics: su paths, props,
- *          test-keys, /system write test, which su, root packages).
+ * Android: SecurityModule.getSecurityFlags().rootDetected — the projection of the
+ *          ROOT PRIVILEGES checks (su binary paths, su on PATH, writable /system,
+ *          dangerous build props, root-framework artifact, root-framework mount;
+ *          test-keys is reported but too weak to decide). Per-check detail rides
+ *          along as flags.rootDiagnostics (see src/lib/rootDetectionModel.ts).
  * iOS:     IOSSecurityModule.getSecurityFlags().jailbreakDetected (10 independent heuristics).
  */
 async function detectRootJailbreak(): Promise<SecurityThreat | null> {
@@ -661,6 +666,15 @@ async function detectRootJailbreak(): Promise<SecurityThreat | null> {
           magiskDetected: flags.magiskDetected,
           tampered: flags.tampered,
         }));
+    }
+    // STRUCTURED EVIDENCE (false-positive investigation): the checks that fed the
+    // verdict, with their confidence, so "root_detected" is traceable to a named
+    // observation instead of an opaque boolean. Diagnostics only — the verdict
+    // itself already comes from the native projection.
+    if (flags.rootDiagnostics
+      && (__DEV__ || process.env.EXPO_PUBLIC_SECURITY_DIAGNOSTICS === '1')) {
+      console.log('[SecurityCheck][RootJailbreak] diagnostics:',
+        describeRootDiagnostics(flags.rootDiagnostics));
     }
     if (!flags.rootDetected) return null;
     return {
@@ -1303,6 +1317,12 @@ async function detectMagisk(): Promise<SecurityThreat | null> {
     const flags = await getNativeSecurityFlags();
     if (__DEV__) {
       console.log('[SecurityCheck][Magisk] magiskDetected=', flags.magiskDetected);
+    }
+    // Which root-MANAGEMENT checks fired (independent of the privilege verdict).
+    if (flags.rootDiagnostics
+      && (__DEV__ || process.env.EXPO_PUBLIC_SECURITY_DIAGNOSTICS === '1')) {
+      console.log('[SecurityCheck][Magisk] diagnostics:',
+        describeRootDiagnostics(flags.rootDiagnostics));
     }
     if (!flags.magiskDetected) return null;
     return {

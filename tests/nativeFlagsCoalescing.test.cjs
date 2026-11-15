@@ -106,6 +106,21 @@ console.log('\u2500\u2500 Behavioural: one native read per cycle \u2500\u2500');
     module.exports = { addEventListener: () => () => {}, fetch: async () => ({ isConnected: true }), useNetInfo: () => ({}) };
   `);
 
+  // nativeSecurity.ts imports the PURE root-detection model (root false-positive
+  // fix). Compile it into the same sandbox directory so the rewritten module
+  // graph resolves — it has no imports of its own.
+  const tsPlugins = () => [
+    [require(path.join(ROOT, 'node_modules', '@babel', 'plugin-transform-typescript')), { isTSX: false, allExtensions: true }],
+    require(path.join(ROOT, 'node_modules', '@babel', 'plugin-transform-modules-commonjs')),
+  ];
+  const modelCode = babel.transformSync(read('src/lib/rootDetectionModel.ts'), {
+    filename: 'rootDetectionModel.ts',
+    configFile: false,
+    babelrc: false,
+    plugins: tsPlugins(),
+  }).code;
+  fs.writeFileSync(path.join(outDir, 'rootDetectionModel.js'), modelCode);
+
   const { code } = babel.transformSync(read('src/lib/nativeSecurity.ts'), {
     filename: 'nativeSecurity.ts',
     configFile: false,

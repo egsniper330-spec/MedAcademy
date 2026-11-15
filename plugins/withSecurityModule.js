@@ -72,6 +72,23 @@ import java.security.MessageDigest
 
 private const val TAG = "SecurityModule"
 
+// ─── Root-detection result vocabulary (structured diagnostics) ───────────────
+// Every root / root-management check reports exactly one of these, plus the
+// confidence of its evidence and whether it fed the final verdict. The strings
+// are mirrored in src/lib/rootDetectionModel.ts and kept in sync by
+// tests/rootFalsePositive.test.cjs, so "why was this device flagged?" is
+// answerable without a debugger (getSecurityFlags().rootDiagnostics /
+// getRootDiagnostics()). They are internal diagnostics — the student-facing
+// gate only renders event copy.
+private const val ROOT_CAT_PRIVILEGES = "root_privileges"
+private const val ROOT_CAT_MANAGEMENT = "root_management"
+private const val ROOT_RESULT_POSITIVE = "positive"
+private const val ROOT_RESULT_NEGATIVE = "negative"
+private const val ROOT_RESULT_INCONCLUSIVE = "inconclusive"
+private const val ROOT_CONF_HIGH = "high"
+private const val ROOT_CONF_MEDIUM = "medium"
+private const val ROOT_CONF_LOW = "low"
+
 // ─── Multi-window / split-screen vocabulary (THIS app's window STATE) ────────
 // A deliberately small, closed set so JS policy switches on four named values
 // instead of interpreting booleans, and so an unmeasured state is its OWN
@@ -577,120 +594,382 @@ class SecurityModule(private val reactContext: ReactApplicationContext) :
     }
 
     /**
-     * Multi-method root detection (6 independent heuristics):
-     *   1. su binary: scan 20+ well-known paths for the su executable
-     *   2. Dangerous system properties: ro.debuggable=1, ro.secure=0
-     *   3. Build tags: "test-keys" in ro.build.tags (indicates unofficial/rooted ROM)
-     *   4. /system write test: attempt to open /system/medacademy-rwtest for writing
-     *   5. Shell command execution: run "which su" and check output
-     *   6. Known root management packages: Magisk, SuperSU, KingRoot, etc.
+     * ── STRUCTURED ROOT DETECTION — one classified check list, two verdicts ──
      *
-     * Any single positive = rooted. Each positive branch records WHICH signal
-     * fired into a provenance list (exported as rootEvidenceSignals), and the
-     * finally block writes it on every exit path — one opaque boolean no longer
-     * hides whether two detections shared a single underlying observation.
+     * WHY THE EARLY-RETURN CHAIN WAS REPLACED
+     *   detectRoot() and detectMagisk() each returned true from their FIRST
+     *   positive branch, and BOTH started with the same root-framework artifact
+     *   probe. A single EACCES therefore produced rootDetected AND
+     *   magiskDetected — "Root privileges detected" plus "A root management tool
+     *   is installed on your device" — from ONE observation. On a clean device
+     *   that observation existed only because /debug_ramdisk is mounted
+     *   0700 root:root from Android 11 on, so stat("/debug_ramdisk/su") answers
+     *   EACCES even though nothing is there: the errno proved only "parent not
+     *   searchable", never "su exists".
+     *
+     * WHAT IT DOES NOW
+     *   Every observation becomes a named, individually classified check and the
+     *   two verdicts are PROJECTIONS over that list:
+     *
+     *   | id                    | category                   | confidence |
+     *   |-----------------------|----------------------------|------------|
+     *   | artifact_probe        | both (reported as shared)  | high/medium|
+     *   | su_binary_paths       | root_privileges            | high       |
+     *   | su_on_path            | root_privileges            | high       |
+     *   | system_writable       | root_privileges            | high       |
+     *   | build_props           | root_privileges            | medium     |
+     *   | mount_view            | both (reported as shared)  | medium     |
+     *   | test_keys             | root_privileges            | low        |
+     *   | root_manager_packages | root_management            | high       |
+     *   | magisk_packages       | root_management            | high       |
+     *   | magisk_paths          | root_management            | high       |
+     *   | zygisk_evidence       | root_management            | medium     |
+     *   | magisk_mounts         | root_management            | medium     |
+     *   | magisk_maps           | root_management            | medium     |
+     *   | artifact_probe_visibility | both                   | low (inconclusive) |
+     *   | package_lookup        | root_management            | low (inconclusive) |
+     *
+     * CONFIDENCE RULES (mirrored in src/lib/rootDetectionModel.ts)
+     *   high   — proves the condition (a present su binary, a present
+     *            /data/adb/modules, a resolved root-manager package).
+     *   medium — strong but inferential (dangerous build props, a root-framework
+     *            mount shape, a /data/adb data dir with unreadable children).
+     *   low    — corroborating only (a test-keys ROM is a build-signing fact, not
+     *            proof of root, as RootBeer/AOSP document).
+     * A low-confidence positive and every inconclusive result does NOT feed a
+     * verdict, so no weak or ambiguous indicator can decide on its own. A
+     * low-confidence positive is still REPORTED (visible in diagnostics) and a
+     * genuinely rooted device keeps firing high-confidence checks.
+     */
+    private data class RootCheck(
+        val id: String,
+        val category: String,
+        val result: String,
+        val evidence: String,
+        val confidence: String,
+        val contributes: Boolean
+    )
+
+    private fun rootCheck(
+        id: String,
+        category: String,
+        positive: Boolean,
+        evidence: String,
+        confidence: String,
+        inconclusive: Boolean = false
+    ): RootCheck {
+        val result = when {
+            inconclusive -> ROOT_RESULT_INCONCLUSIVE
+            positive -> ROOT_RESULT_POSITIVE
+            else -> ROOT_RESULT_NEGATIVE
+        }
+        val contributes = positive && !inconclusive && confidence != ROOT_CONF_LOW
+        return RootCheck(id, category, result, evidence, confidence, contributes)
+    }
+
+    /** su binaries a root solution leaves behind (visible when not hidden). */
+    private val SU_BINARY_PATHS = listOf(
+        "/system/bin/su", "/system/xbin/su", "/system/app/Superuser.apk",
+        "/sbin/su", "/data/local/su", "/data/local/bin/su", "/data/local/xbin/su",
+        "/system/sd/xbin/su", "/system/bin/failsafe/su", "/data/local/tmp/su",
+        "/dev/com.koushikdutta.superuser.daemon/", "/system/usr/we-need-root/su",
+        "/system/bin/.ext/su", "/system/xbin/mu", "/system/bin/daemonsu",
+        "/system/etc/init.d/99SuperSUDaemon", "/system/app/SuperSU.apk"
+    )
+
+    /** Magisk/KernelSU/APatch on-disk artifacts (visible when not hidden). */
+    private val MAGISK_PATHS = listOf(
+        "/sbin/.magisk",
+        "/sbin/magisk",
+        "/data/adb/magisk",
+        "/data/adb/magisk.db",
+        "/data/adb/modules",
+        "/cache/.disable_magisk",
+        "/dev/magisk",
+        "/proc/self/root/sbin/.magisk",
+        "/sbin/.core/mirror",
+        "/sbin/.core/img",
+        "/data/local/tmp/magisk.apk",
+        "/sdcard/MagiskManager",
+        "/system/app/MagiskManager"
+    )
+
+    /**
+     * Root-MANAGEMENT packages (SuperSU, KingRoot, Framaroot, ...). These are
+     * manager applications, so they classify as root_management — never as
+     * privileges on their own.
+     *
+     * Android 11+ package visibility: every name here is declared in the
+     * manifest <queries> block (SECURITY_CHECK_PACKAGES in this plugin), which
+     * is what makes a lookup possible at all. A failed lookup is therefore
+     * ABSENT (declared, not installed); a lookup that THROWS for any other
+     * reason is reported as INCONCLUSIVE by packageProbe() and never counts.
+     */
+    private val ROOT_MANAGER_PACKAGES = listOf(
+        "com.noshufou.android.su", "com.noshufou.android.su.elite",
+        "eu.chainfire.supersu", "com.koushikdutta.superuser",
+        "com.thirdparty.superuser", "com.yellowes.su",
+        "com.kingroot.kinguser", "com.kingo.root",
+        "com.smedialink.oneclickroot", "com.zhiqupk.root.global",
+        "com.alephzain.framaroot", "com.topjohnwu.magisk",
+        // Modern manager IDs: Magisk v24+ ships io.github.topjohnwu.magisk,
+        // KernelSU me.weishu.kernelsu, APatch me.bmax.apatch.
+        "io.github.topjohnwu.magisk", "me.weishu.kernelsu", "me.bmax.apatch"
+    )
+
+    private val MAGISK_PACKAGES = listOf(
+        "com.topjohnwu.magisk",
+        "io.github.topjohnwu.magisk",
+        "com.topjohnwu.magisk.alpha",
+        "io.github.huskydg.magisk",
+        "io.github.vvb2060.magisk",
+        "io.github.huskydg.kitsune"
+    )
+
+    /** One consistent view of every raw root observation (2 s memo, one batch). */
+    private data class RootObservations(
+        val artifacts: RootArtifactReport,
+        val mounts: MountEvidence,
+        val suOnPath: List<String>,
+        val suBinaryPaths: List<String>,
+        val dangerousProps: String,
+        val testKeys: String,
+        val systemWritable: Boolean,
+        val rootManagerPackages: List<String>,
+        val magiskPackages: List<String>,
+        val magiskPaths: List<String>,
+        val zygiskEvidence: Boolean,
+        val magiskMounts: Boolean,
+        val magiskMaps: Boolean,
+        val packageLookupUnknown: List<String>
+    )
+
+    private var _rootObsCache: RootObservations? = null
+    private var _rootObsCacheAt: Long = 0L
+    private var _rootChecksCache: List<RootCheck>? = null
+    private var _rootChecksCacheAt: Long = 0L
+
+    /**
+     * Package presence WITHOUT trusting a failed lookup as proof of absence.
+     *   "present" — resolved.
+     *   "absent"  — NameNotFoundException for a package the manifest <queries>
+     *               declares, i.e. a real "not installed".
+     *   "unknown" — the lookup itself failed (SecurityException, OEM policy,
+     *               PackageManager death): INCONCLUSIVE, never evidence.
+     */
+    private fun packageProbe(pkg: String): String {
+        return try {
+            reactContext.packageManager.getPackageInfo(pkg, 0)
+            "present"
+        } catch (_: PackageManager.NameNotFoundException) {
+            "absent"
+        } catch (_: Throwable) {
+            "unknown"
+        }
+    }
+
+    private fun packagesPresent(pkgs: List<String>, unknownOut: MutableList<String>): List<String> {
+        val found = ArrayList<String>(2)
+        for (p in pkgs) {
+            when (packageProbe(p)) {
+                "present" -> if (found.size < 8) found.add(p)
+                "unknown" -> if (unknownOut.size < 8) unknownOut.add(p)
+                else -> Unit
+            }
+        }
+        return found
+    }
+
+    private fun rootObservations(): RootObservations {
+        val cached = _rootObsCache
+        if (cached != null && System.currentTimeMillis() - _rootObsCacheAt < 2000L) return cached
+        val unknownPkgs = ArrayList<String>(2)
+        val debuggable = runCatching { getSystemProperty("ro.debuggable") }.getOrDefault("")
+        val secure     = runCatching { getSystemProperty("ro.secure") }.getOrDefault("1")
+        val tags       = Build.TAGS ?: ""
+        val obs = RootObservations(
+            artifacts = probeRootArtifacts(),
+            mounts = inspectMountView(),
+            suOnPath = suOnPath(),
+            suBinaryPaths = SU_BINARY_PATHS.filter { File(it).exists() },
+            dangerousProps = if (debuggable == "1" && secure == "0") "ro.debuggable=1,ro.secure=0" else "",
+            testKeys = if (tags.contains("test-keys")) "Build.TAGS=" + tags else "",
+            systemWritable = runCatching {
+                val f = File("/system/medacademy-rwtest-\${System.currentTimeMillis()}")
+                val opened = f.createNewFile()
+                if (opened) f.delete()
+                opened
+            }.getOrDefault(false),
+            rootManagerPackages = packagesPresent(ROOT_MANAGER_PACKAGES, unknownPkgs),
+            magiskPackages = packagesPresent(MAGISK_PACKAGES, unknownPkgs),
+            magiskPaths = MAGISK_PATHS.filter { File(it).exists() },
+            zygiskEvidence = checkZygisk(),
+            magiskMounts = checkMagiskMounts(),
+            magiskMaps = checkMagiskDenyList(),
+            packageLookupUnknown = unknownPkgs
+        )
+        _rootObsCache = obs
+        _rootObsCacheAt = System.currentTimeMillis()
+        return obs
+    }
+
+    /** Classified artifact-probe outcome (see probeRootArtifacts for the policy). */
+    private data class ArtifactVerdict(
+        val positive: Boolean,
+        val inconclusive: Boolean,
+        val confidence: String,
+        val evidence: String
+    )
+
+    private fun artifactVerdict(r: RootArtifactReport): ArtifactVerdict {
+        // HIGH: a root-manager path that is neither "nowhere" nor the bare
+        // /data/adb directory — either it exists and is readable, or it exists
+        // and is unreadable on a parent this app CAN traverse (so the leaf
+        // provably exists).
+        val strong = r.present.filter { it != "/data/adb" }
+        if (strong.isNotEmpty()) {
+            return ArtifactVerdict(true, false, ROOT_CONF_HIGH, "present=" + strong.joinToString(","))
+        }
+        if (r.denied.isNotEmpty()) {
+            return ArtifactVerdict(true, false, ROOT_CONF_HIGH, "denied=" + r.denied.joinToString(","))
+        }
+        // MEDIUM: the /data/adb data directory exists AND at least one of its
+        // children is unreadable. /data/adb is never created by stock Android;
+        // if it existed as a leftover the children would answer ENOENT, not
+        // EACCES. (The bare directory alone stays NON-evidence.)
+        if (r.dataDirWithDeniedChildren) {
+            return ArtifactVerdict(true, false, ROOT_CONF_MEDIUM,
+                "data_dir=/data/adb unreadable=" + r.managerDenied.joinToString(","))
+        }
+        // INCONCLUSIVE: paths the errno cannot decide (root-only parents such as
+        // /debug_ramdisk on a stock device). Reported, never counted.
+        if (r.indeterminate.isNotEmpty()) {
+            return ArtifactVerdict(false, true, ROOT_CONF_LOW,
+                "unreadable_scope=" + r.indeterminate.joinToString(","))
+        }
+        return ArtifactVerdict(false, false, ROOT_CONF_HIGH, "no root-manager artifact")
+    }
+
+    /** The ONE classified check list both verdicts project from. */
+    private fun rootCheckResults(): List<RootCheck> {
+        val cached = _rootChecksCache
+        if (cached != null && System.currentTimeMillis() - _rootChecksCacheAt < 2000L) return cached
+        val o = rootObservations()
+        val art = artifactVerdict(o.artifacts)
+        val checks = ArrayList<RootCheck>(20)
+
+        // ── ROOT PRIVILEGES — can this device act as root? ───────────────────
+        checks.add(rootCheck("artifact_probe", ROOT_CAT_PRIVILEGES, art.positive,
+            art.evidence, art.confidence, art.inconclusive))
+        checks.add(rootCheck("su_binary_paths", ROOT_CAT_PRIVILEGES, o.suBinaryPaths.isNotEmpty(),
+            if (o.suBinaryPaths.isEmpty()) "no su binary at a known path"
+            else "present=" + o.suBinaryPaths.joinToString(","), ROOT_CONF_HIGH))
+        checks.add(rootCheck("su_on_path", ROOT_CAT_PRIVILEGES, o.suOnPath.isNotEmpty(),
+            if (o.suOnPath.isEmpty()) "no su on the process PATH"
+            else "path=" + o.suOnPath.joinToString(","), ROOT_CONF_HIGH))
+        checks.add(rootCheck("system_writable", ROOT_CAT_PRIVILEGES, o.systemWritable,
+            if (o.systemWritable) "/system accepted a write" else "/system is read-only", ROOT_CONF_HIGH))
+        checks.add(rootCheck("build_props", ROOT_CAT_PRIVILEGES, o.dangerousProps.isNotEmpty(),
+            if (o.dangerousProps.isEmpty()) "ro.debuggable/ro.secure are release values"
+            else o.dangerousProps, ROOT_CONF_MEDIUM))
+        checks.add(rootCheck("mount_view", ROOT_CAT_PRIVILEGES, o.mounts.kinds.isNotEmpty(),
+            if (o.mounts.kinds.isEmpty()) "no root-framework mount"
+            else "kinds=" + o.mounts.kinds.joinToString(","), ROOT_CONF_MEDIUM))
+        // LOW: test-keys is a build-signing fact (RootBeer/AOSP), present on some
+        // OEM/dev images that are not rooted. Reported, never a verdict.
+        checks.add(rootCheck("test_keys", ROOT_CAT_PRIVILEGES, o.testKeys.isNotEmpty(),
+            if (o.testKeys.isEmpty()) "release-keys build" else o.testKeys, ROOT_CONF_LOW))
+
+        // ── ROOT MANAGEMENT — is a manager installed? ────────────────────────
+        checks.add(rootCheck("artifact_probe", ROOT_CAT_MANAGEMENT, art.positive,
+            art.evidence, art.confidence, art.inconclusive))
+        checks.add(rootCheck("root_manager_packages", ROOT_CAT_MANAGEMENT, o.rootManagerPackages.isNotEmpty(),
+            if (o.rootManagerPackages.isEmpty()) "no root-manager package resolved"
+            else "present=" + o.rootManagerPackages.joinToString(","), ROOT_CONF_HIGH))
+        checks.add(rootCheck("magisk_packages", ROOT_CAT_MANAGEMENT, o.magiskPackages.isNotEmpty(),
+            if (o.magiskPackages.isEmpty()) "no Magisk/KernelSU/APatch package resolved"
+            else "present=" + o.magiskPackages.joinToString(","), ROOT_CONF_HIGH))
+        checks.add(rootCheck("magisk_paths", ROOT_CAT_MANAGEMENT, o.magiskPaths.isNotEmpty(),
+            if (o.magiskPaths.isEmpty()) "no Magisk artifact on disk"
+            else "present=" + o.magiskPaths.joinToString(","), ROOT_CONF_HIGH))
+        checks.add(rootCheck("mount_view", ROOT_CAT_MANAGEMENT, o.mounts.kinds.isNotEmpty(),
+            if (o.mounts.kinds.isEmpty()) "no root-framework mount"
+            else "kinds=" + o.mounts.kinds.joinToString(","), ROOT_CONF_MEDIUM))
+        checks.add(rootCheck("zygisk_evidence", ROOT_CAT_MANAGEMENT, o.zygiskEvidence,
+            if (o.zygiskEvidence) "zygisk/module code mapped in this process" else "no zygisk mapping",
+            ROOT_CONF_MEDIUM))
+        checks.add(rootCheck("magisk_mounts", ROOT_CAT_MANAGEMENT, o.magiskMounts,
+            if (o.magiskMounts) "magisk entry in /proc/self/mounts" else "no magisk mount entry",
+            ROOT_CONF_MEDIUM))
+        checks.add(rootCheck("magisk_maps", ROOT_CAT_MANAGEMENT, o.magiskMaps,
+            if (o.magiskMaps) "root-manager path mapped in this process" else "no root-manager mapping",
+            ROOT_CONF_MEDIUM))
+
+        // ── INCONCLUSIVE — coverage gaps, never evidence ─────────────────────
+        if (o.artifacts.indeterminate.isNotEmpty()) {
+            val detail = "unreadable_scope=" + o.artifacts.indeterminate.joinToString(",")
+            checks.add(rootCheck("artifact_probe_visibility", ROOT_CAT_PRIVILEGES, false, detail, ROOT_CONF_LOW, true))
+            checks.add(rootCheck("artifact_probe_visibility", ROOT_CAT_MANAGEMENT, false, detail, ROOT_CONF_LOW, true))
+        }
+        if (o.packageLookupUnknown.isNotEmpty()) {
+            checks.add(rootCheck("package_lookup", ROOT_CAT_MANAGEMENT, false,
+                "lookup_unavailable=" + o.packageLookupUnknown.joinToString(","), ROOT_CONF_LOW, true))
+        }
+
+        _rootChecksCache = checks
+        _rootChecksCacheAt = System.currentTimeMillis()
+        return checks
+    }
+
+    /** Structured diagnostic document: checks + verdicts + shared sources. */
+    private fun rootDiagnosticsJson(): String {
+        val checks = rootCheckResults()
+        val arr = JSONArray()
+        for (c in checks) {
+            val j = JSONObject()
+            j.put("id", c.id)
+            j.put("category", c.category)
+            j.put("result", c.result)
+            j.put("evidence", c.evidence)
+            j.put("confidence", c.confidence)
+            j.put("contributes", c.contributes)
+            arr.put(j)
+        }
+        // Which positives feed BOTH verdicts — the transparency the old shared
+        // boolean lacked ("root AND magisk from one artifact probe").
+        val shared = ArrayList<String>(4)
+        for (c in checks) {
+            if (c.category != ROOT_CAT_PRIVILEGES || c.result != ROOT_RESULT_POSITIVE) continue
+            val inBoth = checks.any { m ->
+                m.category == ROOT_CAT_MANAGEMENT && m.result == ROOT_RESULT_POSITIVE && m.id == c.id
+            }
+            if (inBoth && !shared.contains(c.id) && shared.size < 8) shared.add(c.id)
+        }
+        val o = JSONObject()
+        o.put("checks", arr)
+        o.put("sharedObservations", JSONArray(shared))
+        o.put("rootDetected", checks.any { it.category == ROOT_CAT_PRIVILEGES && it.contributes })
+        o.put("rootManagementDetected", checks.any { it.category == ROOT_CAT_MANAGEMENT && it.contributes })
+        o.put("lowConfidenceOnly",
+            checks.any { it.result == ROOT_RESULT_POSITIVE && !it.contributes })
+        return o.toString()
+    }
+
+    /**
+     * ROOT PRIVILEGES verdict — a projection over the structured checks.
+     * Records every positive contributing signal in the provenance array, so a
+     * caller can see WHY (multiple named checks, never one anonymous boolean).
      */
     private fun detectRoot(): Boolean {
         val signals = ArrayList<String>(6)
         try {
-        // 0. Same DenyList-resistant metadata probe (EACCES on root-owned paths
-        //    and su binaries that DenyList has NOT unmounted).
-        val rootArtifacts = probeRootArtifacts()
-        if (hasRootFrameworkEvidence(rootArtifacts)) {
-            signals.add("artifact_probe")
-            Log.d(TAG, "[detectRoot] root-framework metadata evidence")
-            return true
-        }
-
-        // 0b. MOUNT-VIEW evidence — an overlay or bind mount that only a root
-        //     framework creates (overlayfs over /system backed by /data, module
-        //     bind mounts, Magisk's /debug_ramdisk). DenyList hides these from
-        //     OUR mount namespace, so a positive here means the app was NOT
-        //     hidden (attacker forgot, or a root solution without hide support).
-        val mountEvidence = inspectMountView()
-        if (mountEvidence.kinds.isNotEmpty()) {
-            signals.add("mount_view")
-            Log.d(TAG, "[detectRoot] mount-view evidence=" + mountEvidence.kinds.joinToString(","))
-            return true
-        }
-
-        // 0c. su reachable through the process PATH (stat-based, no subprocess).
-        val pathSu = suOnPath()
-        if (pathSu.isNotEmpty()) {
-            signals.add("su_on_path")
-            Log.d(TAG, "[detectRoot] su on PATH: " + pathSu.joinToString(","))
-            return true
-        }
-
-        // 1. su binary path scan
-        val suPaths = listOf(
-            "/system/bin/su", "/system/xbin/su", "/system/app/Superuser.apk",
-            "/sbin/su", "/data/local/su", "/data/local/bin/su", "/data/local/xbin/su",
-            "/system/sd/xbin/su", "/system/bin/failsafe/su", "/data/local/tmp/su",
-            "/dev/com.koushikdutta.superuser.daemon/", "/system/usr/we-need-root/su",
-            "/system/bin/.ext/su", "/system/xbin/mu", "/system/bin/daemonsu",
-            "/system/etc/init.d/99SuperSUDaemon", "/system/app/SuperSU.apk"
-        )
-        val suFound = suPaths.any { File(it).exists() }
-        Log.d(TAG, "[detectRoot] suBinaryFound=$suFound")
-        if (suFound) { signals.add("su_binary_paths"); return true }
-
-        // 2. Dangerous system properties
-        val debuggable = runCatching { getSystemProperty("ro.debuggable") }.getOrDefault("")
-        val secure     = runCatching { getSystemProperty("ro.secure") }.getOrDefault("1")
-        Log.d(TAG, "[detectRoot] ro.debuggable=$debuggable ro.secure=$secure")
-        if (debuggable == "1" && secure == "0") {
-            signals.add("build_props")
-            Log.d(TAG, "[detectRoot] dangerous props detected")
-            return true
-        }
-
-        // 3. Build tags — test-keys means the ROM was built with test signing keys (unofficial/rooted)
-        val buildTags = Build.TAGS ?: ""
-        Log.d(TAG, "[detectRoot] Build.TAGS=$buildTags")
-        if (buildTags.contains("test-keys")) {
-            signals.add("test_keys")
-            Log.d(TAG, "[detectRoot] test-keys build tag detected")
-            return true
-        }
-
-        // 4. /system write test — on truly un-rooted devices /system is mounted read-only
-        val writeTestResult = runCatching {
-            val f = File("/system/medacademy-rwtest-\${System.currentTimeMillis()}")
-            val opened = f.createNewFile()
-            if (opened) f.delete()
-            opened
-        }.getOrDefault(false)
-        Log.d(TAG, "[detectRoot] systemWritable=$writeTestResult")
-        if (writeTestResult) { signals.add("system_writable"); return true }
-
-        // 5. REMOVED: Runtime.exec("which", "su").
-        //    It could never work: Android's toybox exposes "command -v", not
-        //    "which", so the exec always threw FileNotFound and the check
-        //    resolved to false on every device — including rooted ones. It was
-        //    replaced by the stat-based PATH probe in step 0c, which needs no
-        //    subprocess (spawning a shell is itself an instrumentation signal)
-        //    and cannot be defeated by SELinux exec policy.
-
-        // 6. Known root management packages
-        val rootPackages = listOf(
-            "com.noshufou.android.su", "com.noshufou.android.su.elite",
-            "eu.chainfire.supersu", "com.koushikdutta.superuser",
-            "com.thirdparty.superuser", "com.yellowes.su",
-            "com.kingroot.kinguser", "com.kingo.root",
-            "com.smedialink.oneclickroot", "com.zhiqupk.root.global",
-            "com.alephzain.framaroot", "com.topjohnwu.magisk",
-            // Modern manager IDs (SECOND-PASS FIX): the legacy IDs above miss
-            // current installs — Magisk v24+ ships io.github.topjohnwu.magisk,
-            // KernelSU ships me.weishu.kernelsu, APatch ships me.bmax.apatch.
-            // Package checks only RESOLVE on Android 11+ when the package is
-            // declared in <queries> — see SECURITY_CHECK_PACKAGES in this plugin.
-            "io.github.topjohnwu.magisk", "me.weishu.kernelsu", "me.bmax.apatch"
-        )
-        val rootPkgFound = rootPackages.any { isPackageInstalled(it) }
-        if (rootPkgFound) signals.add("root_packages")
-        Log.d(TAG, "[detectRoot] rootPackageFound=$rootPkgFound")
-        return signals.isNotEmpty()
+            for (c in rootCheckResults()) {
+                if (c.category == ROOT_CAT_PRIVILEGES && c.result == ROOT_RESULT_POSITIVE && c.contributes) {
+                    signals.add(c.id)
+                    Log.d(TAG, "[detectRoot] signal=" + c.id + " confidence=" + c.confidence)
+                }
+            }
+            return signals.isNotEmpty()
         } finally {
             _lastRootSignals = signals.toList()
         }
@@ -1238,10 +1517,65 @@ class SecurityModule(private val reactContext: ReactApplicationContext) :
     /** One filesystem probe outcome. ABSENT is not the same fact as DENIED. */
     private enum class FsProbe { PRESENT, DENIED, ABSENT, UNKNOWN }
 
+    /**
+     * What an EACCES on a probe path PROVES — which depends entirely on what
+     * stock Android does with that path's PARENT directory:
+     *
+     *   SYSTEM_PARENT       stock parent is world-traversable (/system/bin,
+     *                       /sbin, /su): the lookup can only fail on the child
+     *                       itself, so EACCES implies the child EXISTS.
+     *   ROOT_ONLY_PARENT    stock parent exists but is root-only. Android 11+
+     *                       mounts /debug_ramdisk 0700 root:root, so
+     *                       "/debug_ramdisk/su" answers EACCES on EVERY clean
+     *                       device although nothing is there. EACCES proves only
+     *                       "parent not searchable" — NEVER evidence. Treating it
+     *                       as evidence was the reported false positive: that one
+     *                       stat set rootDetected AND magiskDetected.
+     *   ROOT_MANAGER_PARENT /data/adb children. Stock Android never creates
+     *                       /data/adb, so the DIRECTORY's presence is the signal;
+     *                       a child EACCES is only counted alongside it.
+     *   AMBIGUOUS_PARENT    SELinux/OEM-dependent parent (/data/local): EACCES
+     *                       cannot distinguish the two cases — inconclusive.
+     */
+    private enum class ProbePolicy { SYSTEM_PARENT, ROOT_ONLY_PARENT, ROOT_MANAGER_PARENT, AMBIGUOUS_PARENT }
+
+    private data class ProbeTarget(val path: String, val policy: ProbePolicy)
+
     private data class RootArtifactReport(
         val present: List<String>,
+        /** Child exists, unreadable on a traversable parent — high confidence. */
         val denied: List<String>,
+        /** /data/adb child EACCES — medium, only meaningful with the data dir. */
+        val managerDenied: List<String>,
+        /** Errno cannot decide (root-only or OEM-dependent parent). */
+        val indeterminate: List<String>,
         val unreadable: List<String>
+    ) {
+        /** /data/adb EXISTS and at least one of its children is unreadable. */
+        val dataDirWithDeniedChildren: Boolean
+            get() = present.contains("/data/adb") && managerDenied.isNotEmpty()
+    }
+
+    private val ROOT_PROBE_TARGETS: List<ProbeTarget> = listOf(
+        ProbeTarget("/data/adb", ProbePolicy.ROOT_MANAGER_PARENT),
+        ProbeTarget("/data/adb/magisk", ProbePolicy.ROOT_MANAGER_PARENT),
+        ProbeTarget("/data/adb/magisk.db", ProbePolicy.ROOT_MANAGER_PARENT),
+        ProbeTarget("/data/adb/modules", ProbePolicy.ROOT_MANAGER_PARENT),
+        ProbeTarget("/data/adb/modules_update", ProbePolicy.ROOT_MANAGER_PARENT),
+        ProbeTarget("/data/adb/post-fs-data.d", ProbePolicy.ROOT_MANAGER_PARENT),
+        ProbeTarget("/data/adb/service.d", ProbePolicy.ROOT_MANAGER_PARENT),
+        ProbeTarget("/data/adb/lspd", ProbePolicy.ROOT_MANAGER_PARENT),
+        ProbeTarget("/data/adb/ksu", ProbePolicy.ROOT_MANAGER_PARENT),
+        ProbeTarget("/data/adb/ksud", ProbePolicy.ROOT_MANAGER_PARENT),
+        ProbeTarget("/data/adb/ap", ProbePolicy.ROOT_MANAGER_PARENT),
+        ProbeTarget("/data/adb/apd", ProbePolicy.ROOT_MANAGER_PARENT),
+        ProbeTarget("/system/bin/su", ProbePolicy.SYSTEM_PARENT),
+        ProbeTarget("/system/xbin/su", ProbePolicy.SYSTEM_PARENT),
+        ProbeTarget("/sbin/su", ProbePolicy.SYSTEM_PARENT),
+        ProbeTarget("/su/bin/su", ProbePolicy.SYSTEM_PARENT),
+        ProbeTarget("/debug_ramdisk/su", ProbePolicy.ROOT_ONLY_PARENT),
+        ProbeTarget("/debug_ramdisk/magisk", ProbePolicy.ROOT_ONLY_PARENT),
+        ProbeTarget("/data/local/bin/su", ProbePolicy.AMBIGUOUS_PARENT)
     )
 
     /**
@@ -1275,54 +1609,49 @@ class SecurityModule(private val reactContext: ReactApplicationContext) :
     private fun probeRootArtifacts(): RootArtifactReport {
         val cached = _rootArtifactsCache
         if (cached != null && System.currentTimeMillis() - _rootArtifactsCacheAt < 2000L) return cached
-        val paths = listOf(
-            "/data/adb",
-            "/data/adb/magisk",
-            "/data/adb/magisk.db",
-            "/data/adb/modules",
-            "/data/adb/modules_update",
-            "/data/adb/post-fs-data.d",
-            "/data/adb/service.d",
-            "/data/adb/lspd",
-            "/data/adb/ksu",
-            "/data/adb/ksud",
-            "/data/adb/ap",
-            "/data/adb/apd",
-            "/system/bin/su",
-            "/system/xbin/su",
-            "/sbin/su",
-            "/su/bin/su",
-            "/debug_ramdisk/su",
-            "/debug_ramdisk/magisk",
-            "/data/local/bin/su"
-        )
         val present = ArrayList<String>(4)
         val denied = ArrayList<String>(4)
+        val managerDenied = ArrayList<String>(4)
+        val indeterminate = ArrayList<String>(4)
         val unreadable = ArrayList<String>(4)
-        for (p in paths) {
-            when (probePath(p)) {
-                FsProbe.PRESENT -> if (present.size < 8) present.add(p)
-                FsProbe.DENIED -> if (denied.size < 8) denied.add(p)
-                FsProbe.UNKNOWN -> if (unreadable.size < 8) unreadable.add(p)
+        for (t in ROOT_PROBE_TARGETS) {
+            when (probePath(t.path)) {
+                FsProbe.PRESENT -> if (present.size < 8) present.add(t.path)
+                FsProbe.DENIED -> when (t.policy) {
+                    // Child exists and this app may not read it.
+                    ProbePolicy.SYSTEM_PARENT -> if (denied.size < 8) denied.add(t.path)
+                    // Only meaningful next to a PRESENT /data/adb (see report).
+                    ProbePolicy.ROOT_MANAGER_PARENT -> if (managerDenied.size < 8) managerDenied.add(t.path)
+                    // Root-only or OEM-dependent parent: the errno cannot
+                    // distinguish "exists but hidden" from "parent is not
+                    // searchable" — it must NEVER become evidence.
+                    else -> if (indeterminate.size < 8) indeterminate.add(t.path)
+                }
+                FsProbe.UNKNOWN -> if (unreadable.size < 8) unreadable.add(t.path)
                 FsProbe.ABSENT -> Unit
             }
         }
-        val report = RootArtifactReport(present, denied, unreadable)
+        val report = RootArtifactReport(present, denied, managerDenied, indeterminate, unreadable)
         _rootArtifactsCache = report
         _rootArtifactsCacheAt = System.currentTimeMillis()
         return report
     }
 
     /**
-     * Evidence rule (deliberately conservative, to protect legitimate devices):
-     *   • ANY EACCES on the probe set is evidence — those paths are root-owned
-     *     and unreadable, so their existence alone means a root manager is
-     *     installed;
+     * Evidence rule (conservative, and now SOUND about errno semantics):
      *   • a PRESENT path other than the /data/adb directory itself is evidence;
-     *   • the bare /data/adb directory alone is NOT (leftovers happen).
+     *   • a DENIED path whose PARENT is traversable on stock Android is evidence
+     *     — the child exists and is root-owned (the DenyList-resistant case);
+     *   • /data/adb PRESENT **plus** at least one unreadable child is evidence;
+     *   • the bare /data/adb directory alone is NOT (leftovers happen);
+     *   • an EACCES under a root-only parent (/debug_ramdisk) or an
+     *     OEM/SELinux-dependent parent (/data/local) is NOT evidence at all —
+     *     that is the clean-device case the old "any EACCES = rooted" rule
+     *     misread as a root manager.
      */
     private fun hasRootFrameworkEvidence(r: RootArtifactReport): Boolean {
         if (r.denied.isNotEmpty()) return true
+        if (r.dataDirWithDeniedChildren) return true
         return r.present.any { it != "/data/adb" }
     }
 
@@ -1363,6 +1692,13 @@ class SecurityModule(private val reactContext: ReactApplicationContext) :
             o.put("mountSamples", JSONArray(mounts.sample))
             o.put("suOnPath", JSONArray(suOnPath()))
             o.put("systemWritable", runCatching { File("/system").canWrite() }.getOrDefault(false))
+            // Second-pass false-positive fix: the buckets the old payload hid.
+            // managerDenied = /data/adb children that answered EACCES (counted
+            // only next to a present data dir); indeterminate = paths whose
+            // errno cannot decide anything (root-only parents).
+            o.put("managerDenied", JSONArray(r.managerDenied))
+            o.put("indeterminate", JSONArray(r.indeterminate))
+            o.put("rootDiagnostics", rootDiagnosticsJson())
             promise.resolve(o.toString())
         } catch (e: Exception) {
             // Rejection (never a silent "clean") — the caller reports UNKNOWN.
@@ -1370,66 +1706,52 @@ class SecurityModule(private val reactContext: ReactApplicationContext) :
         }
     }
 
+    /**
+     * STRUCTURED ROOT DIAGNOSTICS — the answer to "why was this device
+     * classified as rooted?".
+     *
+     * Returns ONE JSON document:
+     *   { checks: [ { id, category, result, evidence, confidence, contributes } ],
+     *     sharedObservations: [ checkId, ... ],
+     *     rootDetected: Boolean, rootManagementDetected: Boolean,
+     *     lowConfidenceOnly: Boolean }
+     *
+     * "result" is positive / negative / inconclusive, "confidence" is
+     * high / medium / low, and "contributes" says whether that result fed the
+     * final verdict (only positive, non-low checks can). Evidence strings contain
+     * system artifact paths, package ids and counts — never user data, tokens,
+     * identifiers or URLs. Internal diagnostics only: the student-facing gate
+     * never renders this.
+     *
+     * Rejects on failure: a diagnostics read that throws must not be mistaken
+     * for a clean report.
+     */
+    @ReactMethod
+    fun getRootDiagnostics(promise: Promise) {
+        try {
+            promise.resolve(rootDiagnosticsJson())
+        } catch (e: Exception) {
+            promise.reject("root_diagnostics_failed", e)
+        }
+    }
+
+    /**
+     * ROOT MANAGEMENT verdict — a projection over the same structured checks,
+     * restricted to the root_management category. It is INDEPENDENT of the
+     * privilege verdict: a manager application installed on its own is a
+     * management finding, and root privileges need privilege evidence (su,
+     * writable /system, dangerous props, a root-framework artifact).
+     */
     private fun detectMagisk(): Boolean {
         val signals = ArrayList<String>(6)
         try {
-        // 0. ROOT-FRAMEWORK DATA DIRECTORY — the DenyList-resistant signal.
-        //    It must run FIRST: everything below depends on artifacts DenyList
-        //    removes (mounts, packages, /sbin links), and File.exists() cannot
-        //    even see the two /data/adb paths that survive.
-        val artifacts = probeRootArtifacts()
-        Log.d(TAG, "[detectMagisk] artifact probe present=" + artifacts.present.size
-            + " denied=" + artifacts.denied.size + " unreadable=" + artifacts.unreadable.size)
-        if (hasRootFrameworkEvidence(artifacts)) {
-            signals.add("artifact_probe")
-            Log.d(TAG, "[detectMagisk] root-framework data directory detected (DenyList-resistant)")
-            return true
-        }
-        // 0b. Mount-view evidence (same rationale as detectRoot step 0b).
-        val mounts = inspectMountView()
-        if (mounts.kinds.isNotEmpty()) {
-            signals.add("mount_view")
-            Log.d(TAG, "[detectMagisk] mount-view evidence=" + mounts.kinds.joinToString(","))
-            return true
-        }
-        // 1. Known Magisk binary / directory paths
-        val magiskPaths = listOf(
-            "/sbin/.magisk",
-            "/sbin/magisk",
-            "/data/adb/magisk",
-            "/data/adb/magisk.db",
-            "/data/adb/modules",
-            "/cache/.disable_magisk",
-            "/dev/magisk",
-            "/proc/self/root/sbin/.magisk",
-            "/sbin/.core/mirror",
-            "/sbin/.core/img",
-            "/data/local/tmp/magisk.apk",
-            "/sdcard/MagiskManager",
-            "/system/app/MagiskManager"
-        )
-        if (magiskPaths.any { File(it).exists() }) { signals.add("magisk_paths"); return true }
-        // 2. Magisk app packages (declare each in <queries> — see
-        //    SECURITY_CHECK_PACKAGES; io.github.* is the ID since Magisk v24)
-        val magiskPackages = listOf(
-            "com.topjohnwu.magisk",
-            "io.github.topjohnwu.magisk",
-            "com.topjohnwu.magisk.alpha",
-            "io.github.huskydg.magisk",
-            "io.github.vvb2060.magisk",
-            "io.github.huskydg.kitsune"
-        )
-        if (magiskPackages.any { isPackageInstalled(it) }) { signals.add("magisk_packages"); return true }
-        // 3. Zygisk evidence (in-process maps + mount cross-check — the legacy
-        //    /proc/modules read was dead code and is gone)
-        if (checkZygisk()) { signals.add("zygisk_evidence"); return true }
-        // 4. Mount-point scan for Magisk mirrors (same kernel mount table as the
-        //    mountinfo view — a second reader, NOT an independent source)
-        if (checkMagiskMounts()) { signals.add("magisk_mounts"); return true }
-        // 5. Own /proc/self/maps view: a root framework mapping left in this
-        //    process (the "denied list" angle: hiding often forgets maps)
-        if (checkMagiskDenyList()) { signals.add("magisk_maps"); return true }
-        return signals.isNotEmpty()
+            for (c in rootCheckResults()) {
+                if (c.category == ROOT_CAT_MANAGEMENT && c.result == ROOT_RESULT_POSITIVE && c.contributes) {
+                    signals.add(c.id)
+                    Log.d(TAG, "[detectMagisk] signal=" + c.id + " confidence=" + c.confidence)
+                }
+            }
+            return signals.isNotEmpty()
         } finally {
             _lastMagiskSignals = signals.toList()
         }
@@ -1565,8 +1887,13 @@ class SecurityModule(private val reactContext: ReactApplicationContext) :
                     }
 
                     val overSystem = systemRoots.any { mntPoint == it || mntPoint.startsWith("\$it/") }
-                    val dataBacked = hay.contains("/data/adb") ||
-                        hay.contains("upperdir=/data") || hay.contains("lowerdir=/data")
+                    // MUST reference /data/adb — the module store Magisk,
+                    // KernelSU, APatch and LSPosed all use. A generic
+                    // "upperdir=/data" / "lowerdir=/data" is AMBIGUOUS: several
+                    // OEM builds mount STOCK overlays over system partitions
+                    // backed by /data, and counting those turned clean devices
+                    // into "root management tool detected".
+                    val dataBacked = hay.contains("/data/adb")
                     val magiskNamed = hay.contains("magisk") || hay.contains(".magisk")
 
                     when {
@@ -2517,6 +2844,10 @@ class SecurityModule(private val reactContext: ReactApplicationContext) :
             // shared source visible instead of two look-like confirmations.
             putStringList(r, "rootEvidenceSignals", _lastRootSignals)
             putStringList(r, "magiskEvidenceSignals", _lastMagiskSignals)
+            // Structured per-check diagnostics (false-positive investigation):
+            // id / result / evidence / confidence / contributes, plus which
+            // positives fed BOTH verdicts. Same JSON as getRootDiagnostics().
+            r.putString("rootDiagnostics", rootDiagnosticsJson())
             putStringList(r, "fridaEvidenceSignals", _lastFridaSignals)
             putStringList(r, "xposedEvidenceSignals", _lastXposedSignals)
 

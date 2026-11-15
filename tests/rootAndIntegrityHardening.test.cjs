@@ -99,8 +99,16 @@ console.log('\n\u2500\u2500 1. Dead root checks are gone, real ones are wired \u
 
 const detectRoot = ktFunction('detectRoot');
 check('detectRoot() exists', detectRoot.length > 0);
-check('detectRoot() consults the mount view', /inspectMountView\(\)/.test(detectRoot));
-check('detectRoot() consults the PATH probe', /suOnPath\(\)/.test(detectRoot));
+// Root false-positive fix: detectRoot() is now a projection over the classified
+// check list, and the raw observations (mount view, PATH probe, artifact probe)
+// are read once inside rootObservations().
+const rootObservations = ktFunction('rootObservations');
+const rootChecks = ktFunction('rootCheckResults');
+check('the mount view is consulted once, in the observation snapshot',
+  /mounts = inspectMountView\(\)/.test(rootObservations) && /o\.mounts\.kinds/.test(rootChecks));
+check('the PATH probe is consulted once, in the observation snapshot',
+  /suOnPath = suOnPath\(\)/.test(rootObservations) && /o\.suOnPath/.test(rootChecks));
+check('detectRoot() projects the structured checks', /rootCheckResults\(\)/.test(detectRoot));
 check(
   'the dead `Runtime.exec("which su")` probe is removed',
   !/exec\(arrayOf\("which"/.test(KT) && !/whichSu/.test(KT),
@@ -149,9 +157,11 @@ function classifyMountLine(raw) {
 
   const overSystem = ['/system', '/vendor', '/product', '/odm', '/system_ext']
     .some((root) => mountPoint === root || mountPoint.startsWith(`${root}/`));
-  const dataBacked = hay.includes('/data/adb')
-    || hay.includes('upperdir=/data')
-    || hay.includes('lowerdir=/data');
+  // Only /data/adb (the module store). Generic upperdir/lowerdir=/data is
+  // ambiguous — several OEM builds mount stock overlays over system partitions
+  // backed by /data, which produced "root management tool detected" on clean
+  // devices (root false-positive fix).
+  const dataBacked = hay.includes('/data/adb');
   const magiskNamed = hay.includes('magisk') || hay.includes('.magisk');
 
   if (fstype === 'overlay' && overSystem && (dataBacked || magiskNamed)) return 'root_overlay_on_system';
@@ -172,6 +182,9 @@ const BENIGN_MOUNTS = [
   '58 25 0:49 / /system_ext rw,nosuid,nodev,noatime 0 0 - overlay overlay rw,lowerdir=/system_ext',
   // Read-only /system on a stock, verified-boot device.
   '30 25 253:2 / /system ro,seclabel,relatime 0 0 - ext4 /dev/block/dm-2 ro,seclabel',
+  // OEM stock overlay over a system partition whose backing happens to live
+  // under /data (NOT /data/adb). Ambiguous → must stay clean.
+  '58 25 0:49 / /product rw,nosuid,nodev,noatime 0 0 - overlay overlay rw,upperdir=/data/vendor_overlay/product,lowerdir=/product',
 ];
 
 const ROOT_MOUNTS = [

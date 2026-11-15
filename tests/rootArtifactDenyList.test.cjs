@@ -67,24 +67,32 @@ ok('classifies ENOENT/ENOTDIR as ABSENT',
   /OsConstants\.ENOENT, OsConstants\.ENOTDIR -> FsProbe\.ABSENT/.test(plugin));
 ok('keeps a three-state result (PRESENT / DENIED / ABSENT) plus UNKNOWN',
   /private enum class FsProbe \{ PRESENT, DENIED, ABSENT, UNKNOWN \}/.test(plugin));
-ok('carries the three buckets as separate lists',
-  /private data class RootArtifactReport\(\s*val present: List<String>,\s*val denied: List<String>,\s*val unreadable: List<String>/.test(plugin));
+ok('carries the buckets as separate lists (incl. the false-positive split)',
+  /private data class RootArtifactReport\(\s*val present: List<String>/.test(plugin) &&
+  ['denied', 'managerDenied', 'indeterminate', 'unreadable']
+    .every((f) => new RegExp(`val ${f}: List<String>`).test(plugin)));
 ok('buffers are bounded (no unbounded path list growth)',
-  /if \(present\.size < 8\) present\.add\(p\)/.test(plugin) &&
-  /if \(denied\.size < 8\) denied\.add\(p\)/.test(plugin));
+  /if \(present\.size < 8\) present\.add\(t\.path\)/.test(plugin) &&
+  /if \(denied\.size < 8\) denied\.add\(t\.path\)/.test(plugin) &&
+  /if \(indeterminate\.size < 8\) indeterminate\.add\(t\.path\)/.test(plugin));
 
 /* The paths that survive DenyList: the data directory and its children. */
 section('2. The probe targets the paths DenyList cannot unmount');
 {
+  // The probe set moved into ROOT_PROBE_TARGETS (path + policy per target) so
+  // each path declares what an EACCES on it actually proves. The probe function
+  // itself only classifies.
+  const targetsStart = plugin.indexOf('private val ROOT_PROBE_TARGETS');
+  const targets = targetsStart < 0 ? '' : plugin.slice(targetsStart, plugin.indexOf('\n    )', targetsStart));
+  ok('stats the /data/adb directory itself', /"\/data\/adb",/.test(targets));
+  ok('stats Magisk data children', /"\/data\/adb\/magisk"/.test(targets) && /"\/data\/adb\/magisk\.db"/.test(targets));
+  ok('stats /data/adb/modules (module inventory)', /"\/data\/adb\/modules"/.test(targets));
+  ok('stats the LSPosed module data dir', /"\/data\/adb\/lspd"/.test(targets));
+  ok('covers KernelSU and APatch conventions', /"\/data\/adb\/ksu"/.test(targets) && /"\/data\/adb\/ap"/.test(targets));
+  ok('still probes classic su binaries (visible when NOT on the DenyList)',
+    /"\/system\/bin\/su"/.test(targets) && /"\/debug_ramdisk\/su"/.test(targets));
   const probeFn = plugin.slice(plugin.indexOf('private fun probeRootArtifacts()'));
   const body = probeFn.slice(0, probeFn.indexOf('private fun hasRootFrameworkEvidence'));
-  ok('stats the /data/adb directory itself', /"\/data\/adb",/.test(body));
-  ok('stats Magisk data children', /"\/data\/adb\/magisk"/.test(body) && /"\/data\/adb\/magisk\.db"/.test(body));
-  ok('stats /data/adb/modules (module inventory)', /"\/data\/adb\/modules"/.test(body));
-  ok('stats the LSPosed module data dir', /"\/data\/adb\/lspd"/.test(body));
-  ok('covers KernelSU and APatch conventions', /"\/data\/adb\/ksu"/.test(body) && /"\/data\/adb\/ap"/.test(body));
-  ok('still probes classic su binaries (visible when NOT on the DenyList)',
-    /"\/system\/bin\/su"/.test(body) && /"\/debug_ramdisk\/su"/.test(body));
   ok('the probe itself never uses File.exists() (it would drop EACCES)',
     !/File\(/.test(body), 'File() appears in probeRootArtifacts');
 }
@@ -95,62 +103,64 @@ section('3. Evidence rule (executed model)');
 
 /** Mirrors hasRootFrameworkEvidence() in the Kotlin template. */
 function hasRootFrameworkEvidence(r) {
+  const managerDenied = r.managerDenied ?? [];
   if (r.denied.length > 0) return true;
+  if (r.present.includes('/data/adb') && managerDenied.length > 0) return true;
   return r.present.some((p) => p !== '/data/adb');
 }
 
 ok('bare /data/adb only → NOT evidence (legitimate leftover cannot block)',
   hasRootFrameworkEvidence({ present: ['/data/adb'], denied: [], unreadable: [] }) === false);
-ok('unreadable child (EACCES) → evidence',
-  hasRootFrameworkEvidence({ present: ['/data/adb'], denied: ['/data/adb/magisk'], unreadable: [] }) === true);
+ok('unreadable child on a traversable parent (EACCES) → evidence',
+  hasRootFrameworkEvidence({ present: [], denied: ['/system/bin/su'], unreadable: [] }) === true);
+ok('/data/adb PRESENT with unreadable children → evidence (DenyList case)',
+  hasRootFrameworkEvidence({ present: ['/data/adb'], denied: [], managerDenied: ['/data/adb/magisk'] }) === true);
 ok('visible su binary → evidence',
   hasRootFrameworkEvidence({ present: ['/system/bin/su'], denied: [], unreadable: [] }) === true);
 ok('nothing found → no evidence',
   hasRootFrameworkEvidence({ present: [], denied: [], unreadable: [] }) === false);
 ok('probe errors alone are not evidence (UNKNOWN ≠ clean, UNKNOWN ≠ guilty)',
   hasRootFrameworkEvidence({ present: [], denied: [], unreadable: ['/data/adb'] }) === false);
+ok('FALSE-POSITIVE GUARD: an unreadable root-only parent is not evidence',
+  hasRootFrameworkEvidence({
+    present: [], denied: [], managerDenied: [],
+    indeterminate: ['/debug_ramdisk/su', '/debug_ramdisk/magisk'], unreadable: [],
+  }) === false);
 ok('the Kotlin rule matches the model',
-  /fun hasRootFrameworkEvidence\(r: RootArtifactReport\): Boolean \{\s*if \(r\.denied\.isNotEmpty\(\)\) return true\s*return r\.present\.any \{ it != "\/data\/adb" \}/.test(plugin));
+  /fun hasRootFrameworkEvidence\(r: RootArtifactReport\): Boolean \{\s*if \(r\.denied\.isNotEmpty\(\)\) return true\s*if \(r\.dataDirWithDeniedChildren\) return true\s*return r\.present\.any \{ it != "\/data\/adb" \}/.test(plugin));
 
 /* ── 4. Wiring: the probe runs BEFORE the artifact-dependent checks ───────── */
 
 section('4. Wiring order in the generated Kotlin');
 
 {
-  const magiskIdx = plugin.indexOf('private fun detectMagisk(): Boolean {');
-  const rootIdx = plugin.indexOf('private fun detectRoot(): Boolean {');
-  // Slice to the NEXT member, not a fixed byte count: the detectors legitimately
-  // grew (mount-view + PATH probes), and a fixed window silently truncated the
-  // su path list and made this ordering assertion fail for the wrong reason.
-  const bodyOfKt = (start, fallbackLen) => {
-    if (start < 0) return '';
-    const next = plugin.indexOf('\n    private fun ', start + 10);
-    return plugin.slice(start, next === -1 ? start + fallbackLen : next);
-  };
-  const magiskBody = bodyOfKt(magiskIdx, 2600);
-  const rootBody = bodyOfKt(rootIdx, 2600);
+  const at = (needle) => plugin.indexOf(needle);
+  const observeStart = at('private fun rootObservations()');
+  const observeBody = observeStart < 0 ? '' : plugin.slice(observeStart, plugin.indexOf('\n    /** Classified artifact-probe outcome', observeStart));
+  const checksStart = at('private fun rootCheckResults()');
+  const checksBody = checksStart < 0 ? '' : plugin.slice(checksStart, at('\n    /** Structured diagnostic document'));
 
-  ok('detectMagisk() probes first, before the visible-path list',
-    magiskBody.indexOf('probeRootArtifacts()') !== -1 &&
-    magiskBody.indexOf('probeRootArtifacts()') < magiskBody.indexOf('1. Known Magisk binary'));
-  ok('detectMagisk() returns true on the metadata evidence',
-    /hasRootFrameworkEvidence\(artifacts\)[\s\S]{0,160}return true/.test(magiskBody));
-  ok('detectRoot() probes first, before the su path list',
-    rootBody.indexOf('probeRootArtifacts()') !== -1 &&
-    rootBody.indexOf('1. su binary path scan') !== -1 &&
-    rootBody.indexOf('probeRootArtifacts()') < rootBody.indexOf('1. su binary path scan'));
-  // The DenyList-resistant probe must also precede the two checks added with the
-  // mount-view/PATH work — those are independent evidence, never a substitute.
-  ok('detectRoot() probes before the mount-view and PATH checks',
-    rootBody.indexOf('probeRootArtifacts()') < rootBody.indexOf('inspectMountView()') &&
-    rootBody.indexOf('probeRootArtifacts()') < rootBody.indexOf('suOnPath()'));
-  ok('detectRoot() returns true on the metadata evidence',
-    /hasRootFrameworkEvidence\(rootArtifacts\)[\s\S]{0,160}return true/.test(rootBody));
+  // The probe and every other observation now live in ONE snapshot, and BOTH
+  // verdicts are projections over the classified checks — the shared-boolean
+  // path that produced "root AND magisk from one EACCES" no longer exists.
+  ok('the artifact probe is part of the single observation snapshot',
+    /artifacts = probeRootArtifacts\(\)/.test(observeBody));
+  ok('artifact_probe is emitted FIRST in the check list (DenyList-resistant priority)',
+    checksBody.indexOf('rootCheck("artifact_probe"') !== -1 &&
+    checksBody.indexOf('rootCheck("artifact_probe"') < checksBody.indexOf('rootCheck("su_binary_paths"'));
+  ok('the artifact verdict is shared by both categories explicitly',
+    /rootCheck\("artifact_probe", ROOT_CAT_PRIVILEGES/.test(checksBody) &&
+    /rootCheck\("artifact_probe", ROOT_CAT_MANAGEMENT/.test(checksBody));
+  ok('detectRoot() projects root_privileges only',
+    /rootCheckResults\(\)/.test(plugin.slice(at('private fun detectRoot()'), at('private fun detectRoot()') + 600)) &&
+    /c\.category == ROOT_CAT_PRIVILEGES/.test(plugin.slice(at('private fun detectRoot()'), at('private fun detectRoot()') + 600)));
+  ok('detectMagisk() projects root_management only',
+    /c\.category == ROOT_CAT_MANAGEMENT/.test(plugin.slice(at('private fun detectMagisk()'), at('private fun detectMagisk()') + 600)));
   ok('the flags batch still reads magisk/root through these detectors (no parallel path)',
     /val magisk\s+= runCatching \{ detectMagisk\(\)\s*\}/.test(plugin) &&
     /detectRoot\(\)/.test(plugin));
   ok('the old package-name check is retained (cheap, still valid off-DenyList)',
-    /"com\.topjohnwu\.magisk"/.test(magiskBody));
+    /val MAGISK_PACKAGES = listOf\([\s\S]{0,200}"com\.topjohnwu\.magisk"/.test(plugin));
 }
 
 /* ── 5. Evidence bridge is fail-closed ───────────────────────────────────── */
@@ -158,8 +168,17 @@ section('4. Wiring order in the generated Kotlin');
 section('5. Evidence bridge: reject, never "clean"');
 
 {
+  // Brace-bounded slice: the next member (getRootDiagnostics) also resolves a
+  // promise, so a fixed byte window would make the fail-closed assertion lie.
   const methodIdx = plugin.indexOf('fun getRootArtifactEvidence(promise: Promise)');
-  const method = plugin.slice(methodIdx, methodIdx + 1400);
+  const start = methodIdx < 0 ? -1 : plugin.indexOf('{', methodIdx);
+  let depth = 0;
+  let end = start;
+  for (let i = start; i >= 0 && i < plugin.length; i++) {
+    if (plugin[i] === '{') depth++;
+    else if (plugin[i] === '}') { depth--; if (depth === 0) { end = i + 1; break; } }
+  }
+  const method = methodIdx < 0 ? '' : plugin.slice(methodIdx, end);
   ok('exposes the probe as a @ReactMethod', /@ReactMethod\s*fun getRootArtifactEvidence\(promise: Promise\)/.test(plugin));
   ok('returns JSON, not a bare boolean',
     /o\.put\("present", JSONArray\(r\.present\)\)/.test(method) &&

@@ -166,9 +166,13 @@ function jsStringList(constName) {
   return [...m[1].matchAll(/'([^']+)'/g)].map((x) => x[1]);
 }
 
+// The root package catalog moved out of detectRoot() into a class member when the
+// verdicts became projections over the structured check list (root false-positive
+// fix). The list contents — and the <queries> requirement they imply — are
+// unchanged.
 const kotlinPackages = [
-  ...ktStringList('rootPackages'),
-  ...ktStringList('magiskPackages'),
+  ...ktStringList('ROOT_MANAGER_PACKAGES'),
+  ...ktStringList('MAGISK_PACKAGES'),
   ...ktStringList('xposedPackages'),
 ];
 const queriesPackages = [
@@ -341,8 +345,13 @@ for (const [fn, field] of [
   check(`${fn}() records provenance in a finally block`,
     new RegExp(`finally \\{\\s*\\n\\s*${field} = signals\\.toList\\(\\)`).test(body),
     body.slice(-200));
+  // detectRoot()/detectMagisk() were restructured into projections over the
+  // classified check list (root false-positive fix): they record the ID of every
+  // positive contributing check instead of naming inline branches. Both forms
+  // satisfy the invariant — the provenance array names the individual signals.
   check(`${fn}() names its individual signals`,
-    (body.match(/signals\.add\("/g) || []).length >= 4);
+    (body.match(/signals\.add\("/g) || []).length >= 4
+    || (/signals\.add\(c\.id\)/.test(body) && /rootCheckResults\(\)/.test(body)));
 }
 check('batch exports all four provenance arrays',
   ['rootEvidenceSignals', 'magiskEvidenceSignals', 'fridaEvidenceSignals', 'xposedEvidenceSignals']

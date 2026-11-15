@@ -29,6 +29,9 @@ const SOURCES = [
   'src/lib/securityStateModel.ts',
   'src/lib/startupStateModel.ts',
   'src/lib/maintenanceStateModel.ts',
+  // PURE root-detection verdict model (Android false-positive regression suite:
+  // tests/rootFalsePositive.test.cjs). No imports by design.
+  'src/lib/rootDetectionModel.ts',
 ];
 
 /** Compiled model filenames, e.g. ['securityStateModel.js', …]. */
