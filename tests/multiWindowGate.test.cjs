@@ -237,8 +237,8 @@ console.log('\u2500\u2500 Part 4: native detection (Kotlin) \u2500\u2500');
     ['4l: the resume hook re-reads the mode', /override fun onHostResume\(\) \{/],
     ['4m: repeated reports of the same mode are deduplicated (no event storm)',
       /val changed = mode != windowMode \|\| !windowModeMeasured/],
-    ['4n: monitoring is installed with the module (not only from JS)',
-      /Handler\(Looper\.getMainLooper\(\)\)\.post \{ installWindowModeMonitoring\(\) \}/],
+    ['4n: monitoring is installed from the lifecycle hook, i.e. AFTER construction',
+      /override fun initialize\(\) \{\n\s+super\.initialize\(\)\n\s+ensureWindowModeMonitoringInstalled\(\)/],
     ['4o: everything is torn down with the module',
       /tearDownWindowModeMonitoring\(\)/],
     ['4p: getSecurityFlags() carries the window-mode evidence',
@@ -252,6 +252,40 @@ console.log('\u2500\u2500 Part 4: native detection (Kotlin) \u2500\u2500');
     ['4t: the OEM floating-window limit is documented', /OEM floating-window|vendor UI/],
   ];
   for (const [name, re] of pairs) check(name, re.test(KT));
+
+  // ── CRASH REGRESSION (Android v222 — every launch, phone and tablet) ──────
+  // The module used to post `installWindowModeMonitoring()` from its `init`
+  // block. `Handler.post` hands that work to the UI thread immediately, and the
+  // UI thread does not wait for the constructor to finish: the posted task could
+  // run while the constructor was still assigning the properties declared BELOW
+  // `init` — `windowModeLayoutListener` among them — and so attached a NULL
+  // listener to the window's decor view. The framework list has no null guard,
+  // so the null stayed there and the next layout pass died with
+  //   NullPointerException: Attempt to invoke interface method 'void
+  //   android.view.View$OnLayoutChangeListener.onLayoutChange(...)'
+  //   on a null object reference        at android.view.View.layout
+  // The install must therefore never be reachable from the constructor.
+  {
+    // Comments are stripped: the crash explanation in the constructor names the
+    // very APIs it forbids, and a comment must neither satisfy nor defeat this.
+    const modInit = (KT.match(/\n {4}init \{[\s\S]*?\n {4}\}\n/) || [''])[0]
+      .split('\n')
+      .map((l) => l.replace(/(^|[^:])\/\/.*$/, '$1'))
+      .join('\n');
+    check('4z1: the constructor itself never starts window-mode monitoring',
+      modInit.trim().length > 0
+      && !/installWindowModeMonitoring|attachLayoutWatcher|decorView|windowModeLayoutListener/.test(modInit));
+    check('4z2: the installer is only reachable from post-construction entry points',
+      /override fun initialize\(\) \{\n\s+super\.initialize\(\)\n\s+ensureWindowModeMonitoringInstalled\(\)\n\s+\}/.test(KT)
+      && /ensureWindowModeMonitoringInstalled\(\)\n\s+refreshWindowModeOnMain\("flags"\)/.test(KT)
+      && /installWindowModeMonitoring\(\)\n\s+val mode = readWindowMode\(hostActivity\)/.test(KT));
+    check('4z3: the UI-thread installer stays idempotent (no duplicate listeners)',
+      /private fun ensureWindowModeMonitoringInstalled\(\) \{\n\s+if \(windowModeMonitoringInstalled\) return\n\s+mainHandler\.post \{/.test(KT));
+    check('4z4: detaching the decor-view listener is marshalled to the UI thread',
+      /if \(Looper\.myLooper\(\) == Looper\.getMainLooper\(\)\) remove\.run\(\) else mainHandler\.post\(remove\)/.test(KT));
+    check('4z5: no listener is written to the window from a constructor-posted task',
+      !/Handler\(Looper\.getMainLooper\(\)\)\.post \{[^}]*attachLayoutWatcher/.test(KT));
+  }
 
   check('4u: an unreadable/absent activity reports "unknown", never "fullscreen"',
     /private fun readWindowMode\(activity: Activity\?\): String \{\n\s+if \(activity == null\) return WINDOW_MODE_UNKNOWN/.test(KT));

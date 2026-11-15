@@ -200,12 +200,50 @@ class SecurityModule(private val reactContext: ReactApplicationContext) :
     init {
         Log.d(TAG, "◀▶ SecurityModule INSTANTIATED — module is live and registered")
         registerVpnNetworkCallback()
-        // Multi-window monitoring starts WITH the module so the first evaluation
-        // already has a real measurement, and an app launched DIRECTLY into
-        // split-screen is never missed. Posted to the UI thread because the
-        // module is constructed on the native-modules thread while window reads
-        // and window listeners are UI-thread operations.
-        Handler(Looper.getMainLooper()).post { installWindowModeMonitoring() }
+        // Multi-window monitoring is deliberately NOT started from here.
+        //
+        // CRASH REGRESSION (v222, every launch, phone and tablet):
+        // Handler.post hands the work to the UI thread at once, and the UI
+        // thread does not wait for this constructor to finish. The properties
+        // declared further down the class body — windowModeLayoutListener
+        // among them — are assigned only when construction reaches their
+        // declaration, so a task posted here can run while they are still null.
+        // Attaching a null listener to the window's decor view poisons that
+        // view's listener list for the rest of the process (the framework list
+        // has no null guard), and the next layout pass dies with
+        //   NullPointerException: Attempt to invoke interface method
+        //   'void android.view.View$OnLayoutChangeListener.onLayoutChange(...)'
+        //   on a null object reference        at android.view.View.layout
+        // Monitoring is installed from the POST-construction entry points only
+        // (initialize() and the native methods JS calls at startup), where every
+        // property is guaranteed to be initialised.
+    }
+
+    /**
+     * RN's module lifecycle hook. It runs AFTER the constructor has completed,
+     * which makes it the earliest point where queued UI work may safely read the
+     * module's listener fields.
+     */
+    override fun initialize() {
+        super.initialize()
+        ensureWindowModeMonitoringInstalled()
+    }
+
+    /**
+     * Install the window-mode monitoring from an already constructed module.
+     * Idempotent, UI-thread posted, and safe to call from any module-thread
+     * entry point (startup security flags, a window read, or JS re-asserting on
+     * resume). Never call the installer itself from the constructor.
+     */
+    private fun ensureWindowModeMonitoringInstalled() {
+        if (windowModeMonitoringInstalled) return
+        mainHandler.post {
+            try {
+                installWindowModeMonitoring()
+            } catch (e: Exception) {
+                Log.d(TAG, "[windowMode] install failed: \${e.message}")
+            }
+        }
     }
 
     // ══════════════════════════════════════════════════════════════════════════
@@ -2264,6 +2302,11 @@ class SecurityModule(private val reactContext: ReactApplicationContext) :
     fun getWindowMode(promise: Promise) {
         mainHandler.post {
             try {
+                // A window read implies monitoring: install it here — on the UI
+                // thread and after construction — so an app LAUNCHED directly
+                // into split-screen is measured without any constructor-time
+                // listener work.
+                installWindowModeMonitoring()
                 val mode = readWindowMode(hostActivity)
                 if (mode != WINDOW_MODE_UNKNOWN) publishWindowMode(mode, "read")
                 val reading = Arguments.createMap()
@@ -2352,14 +2395,21 @@ class SecurityModule(private val reactContext: ReactApplicationContext) :
 
     private fun detachLayoutWatcher() {
         val previous = watchedActivity?.get()
-        if (previous != null) {
+        watchedActivity = null
+        if (previous == null) return
+        // Teardown runs on the native-modules thread (onCatalystInstanceDestroy),
+        // while a window's listener list is plain framework state that may only
+        // be mutated on the UI thread. Mutating it from another thread races the
+        // layout traversal and can hand it a null entry — the same crash class
+        // as the constructor-time install above — so the removal is marshalled.
+        val remove = Runnable {
             try {
                 previous.window.decorView.removeOnLayoutChangeListener(windowModeLayoutListener)
             } catch (_: Exception) {
                 // A window being torn down must not break containment.
             }
         }
-        watchedActivity = null
+        if (Looper.myLooper() == Looper.getMainLooper()) remove.run() else mainHandler.post(remove)
     }
 
     /** Re-read on the UI thread from whichever thread called in. */
@@ -2810,6 +2860,7 @@ class SecurityModule(private val reactContext: ReactApplicationContext) :
             // is driven by the live window-mode signal, not by this snapshot.
             // windowModeMeasured=false means "not measurable here", which is
             // never the same as "full-screen".
+            ensureWindowModeMonitoringInstalled()
             refreshWindowModeOnMain("flags")
             r.putString("windowMode", windowMode)
             r.putBoolean("windowModeMeasured", windowModeMeasured)
