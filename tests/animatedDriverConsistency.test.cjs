@@ -142,7 +142,10 @@ for (const file of files) {
   if (!src.includes('Animated.View')) continue;
   const drivers = driverMap(src);
   if (drivers.size === 0) continue;
-  for (const tag of animatedViewTags(src)) {
+  for (const rawTag of animatedViewTags(src)) {
+    // Comments inside the tag mention value names (e.g. "... animated opacity
+    // that could be left at 0"); they are prose, not props.
+    const tag = rawTag.replace(/\/\/[^\n]*/g, '');
     const native = [];
     const js = [];
     for (const [name, set] of drivers) {
@@ -168,18 +171,23 @@ const tabBar = fs.readFileSync(path.join(SRC, 'components/navigation/GlassTabBar
 const tabDrivers = driverMap(tabBar);
 
 check('the shared indicator values all stay JS-driven', () => {
-  for (const name of ['fade', 'translateX', 'stretch']) {
+  for (const name of ['translateX', 'stretch']) {
     assert.ok(tabDrivers.has(name), `${name} must be animated`);
     assert.deepStrictEqual(
       [...tabDrivers.get(name)],
       ['js'],
-      `${name} lives on the same Animated.View as the JS-driven transform, so it must never be native-driven`,
+      `${name} lives on the one indicator view, so it must never be native-driven`,
     );
   }
 });
 
+check('the indicator view derives its opacity instead of animating it', () => {
+  assert.match(tabBar, /opacity:\s*indicatorWidth > 0 \? 1 : 0,/);
+  assert.doesNotMatch(tabBar, /opacity:\s*fade/);
+});
+
 check('the indicator view still carries opacity + translateX + scaleX together', () => {
-  assert.match(tabBar, /opacity:\s*fade,\s*\n\s*transform:\s*\[\{\s*translateX\s*\},\s*\{\s*scaleX:\s*stretch\s*\}\]/);
+  assert.match(tabBar, /opacity:\s*indicatorWidth > 0 \? 1 : 0,\s*\n\s*transform:\s*\[\{\s*translateX\s*\},\s*\{\s*scaleX:\s*stretch\s*\}\]/);
 });
 
 check('the crash rule is documented next to the effect', () => {

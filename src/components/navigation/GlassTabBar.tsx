@@ -143,9 +143,15 @@ export default function GlassTabBar({
   /* ── Shared indicator ──────────────────────────────────────────────────── */
   const translateX = useRef(new Animated.Value(0)).current;
   const stretch = useRef(new Animated.Value(1)).current;
-  const fade = useRef(new Animated.Value(0)).current;
   const [indicatorWidth, setIndicatorWidth] = useState(0);
-  const positioned = useRef(false);
+  /**
+   * Identity of the placement the bubble is currently sitting on. `''` means
+   * "never placed yet". Route identity — not a pixel value — is what decides
+   * whether the bubble has to travel: two different routes can share an x
+   * (e.g. a hidden tab removed from the row), and a layout re-measure of the
+   * SAME route must snap rather than animate.
+   */
+  const placedKey = useRef('');
   const lastTarget = useRef<number | null>(null);
 
   /* ── Drag state. Refs, never state: a finger moving across the bar must not
@@ -219,8 +225,8 @@ export default function GlassTabBar({
   );
 
   /* ── ONE DRIVER PER VIEW (Android crash guard) ──────────────────────────
-   * `fade`, `translateX` and `stretch` are all applied to the SAME
-   * Animated.View (the shared indicator pill, `styles.indicator`). React
+   * `translateX` and `stretch` are both applied to the SAME Animated.View (the
+   * shared indicator pill, `styles.indicator`), and both are JS-driven. React
    * Native marks EVERY animated value attached to a view as "native" as soon
    * as one animation on that view runs with `useNativeDriver: true`
    * (AnimatedProps.__makeNative → node.__makeNative for each style node).
@@ -232,66 +238,95 @@ export default function GlassTabBar({
    *
    * That is fatal on Android (the exception is rethrown on the native-modules
    * thread and kills the process) — it crashed the app on launch as soon as
-   * the dashboard mounted the tab bar. `translateX`/`stretch` must stay
-   * JS-driven (the finger writes `translateX` directly from touch
-   * coordinates), so `fade` — which only ever lives on this one view — is
-   * JS-driven too. Never make a single property of this view native while the
-   * transform siblings are JS: the whole view has to share one driver.
+   * the dashboard mounted the tab bar. The finger writes `translateX` directly
+   * from touch coordinates, so that value can never be native; the pill's
+   * opacity is therefore a plain derived value (see the render) instead of a
+   * second animated value on the same view.
+   */
+  /* ── Route → indicator sync (the bubble ALWAYS sits on the active tab) ────
+   *
+   * The bubble's position is DERIVED state: it is a pure function of
+   *   (1) the active route index reported by React Navigation, and
+   *   (2) that route's measured x (or the flex fallback).
+   *
+   * The previous implementation kept its own "have I placed it yet?" flag plus
+   * a "last target" pixel value and skipped work when those looked unchanged.
+   * That bookkeeping could disagree with reality: a transient render without a
+   * measurement, a route change that resolved to the same pixel, or an
+   * interrupted animation left the bubble parked on the PREVIOUS tab (Home)
+   * while the route had already moved to Profile — and because navigation is
+   * driven by the ROUTE, tapping the (stale) bubble hit the tab underneath it
+   * and navigated back to Home.
+   *
+   * Now the decision is identity-based:
+   *   • route changed (or first placement) → travel + stretch, then FORCE the
+   *     exact final x when the animation ends, so an interrupted or skipped
+   *     frame can never leave a residual offset;
+   *   • same route, different geometry (rotation, RTL flip, split screen) → snap;
+   *   • no measurement at all this render → keep the last placement. A missing
+   *     layout is a transient, never a reason to hide the bubble.
+   *
+   * Visibility is derived from the measurement too (see `indicatorWidth > 0`
+   * in the render): the bubble no longer owns an animated opacity that could
+   * stay at 0 after a layout hiccup — that is what made it "disappear".
    */
   useEffect(() => {
     tabDiag('sync', {
-      activeVisible, activeIndex, tabCount, isRTL, rowWidth,
+      activeVisible, activeIndex, routeKey: activeKey, tabCount, isRTL, rowWidth,
       measuredKeys: Object.keys(layouts).length,
       measuredX: visibleRoutes.map((e) => layouts[e.route.key]?.x ?? null),
-      isEmpty: !activeLayout, targetX,
-      lastTarget: lastTarget.current, positioned: positioned.current, dragging: dragging.current,
+      measuredW: visibleRoutes.map((e) => layouts[e.route.key]?.width ?? null),
+      isEmpty: !activeLayout, targetX, placedKey: placedKey.current,
+      lastTarget: lastTarget.current, dragging: dragging.current,
     });
-    // A finger owns the position while dragging; the route-driven animation
-    // must not pull the bubble out from under it (re-render, layout change…).
+    // A finger owns the position while dragging; the route-driven placement
+    // resumes from the release handler (finishDrag / cancelDrag clear this).
     if (dragging.current) return;
-
-    if (!activeLayout) {
-      Animated.timing(fade, { toValue: 0, duration: 140, useNativeDriver: false }).start();
-      return;
-    }
+    // Nothing measurable yet — keep the current placement, do not hide.
+    if (!activeLayout) return;
 
     const width = Math.max(activeLayout.width - INDICATOR_INSET * 2, 0);
-    setIndicatorWidth(width);
-    // Keep the JS mirror authoritative. It is written HERE (and in settleAt /
-    // onPanResponderMove) rather than only by the Animated value listener:
-    // on RN Web that listener is not guaranteed to fire for every driven value,
-    // and a stale 0 makes a drag start from the left edge.
+    setIndicatorWidth((prev) => (Math.abs(prev - width) < 0.5 ? prev : width));
+
+    const routeKey = activeKey ?? `#${activeVisible}`;
+    const firstPlacement = placedKey.current === '';
+    const routeChanged = placedKey.current !== routeKey;
+    placedKey.current = routeKey;
+
+    // Keep the JS mirror authoritative for hit-testing (see the drag handler).
     liveX.current = targetX;
 
-    if (!positioned.current) {
-      // First paint (or first measurement after a rotation): land exactly
-      // instead of sliding in from the previous value.
+    if (!firstPlacement && !routeChanged) {
+      // Same route: geometry may have changed (rotation, RTL flip, split
+      // screen). Snap instead of sliding, so the bubble can never sit at a
+      // stale measured position.
+      if (lastTarget.current !== targetX) {
+        lastTarget.current = targetX;
+        translateX.setValue(targetX);
+        tabDiag('snap', { targetX });
+      }
+      return;
+    }
+
+    if (firstPlacement) {
+      // First paint: land exactly, no travel from a meaningless 0.
       translateX.setValue(targetX);
-      fade.setValue(1);
-      positioned.current = true;
       lastTarget.current = targetX;
+      tabDiag('first', { targetX, width });
       return;
     }
 
-    if (lastTarget.current === targetX) {
-      // Layout changed without a tab change (rotation, font scale, RTL flip).
-      translateX.setValue(targetX);
-      return;
-    }
-
-    const movingRight = targetX > (lastTarget.current ?? 0);
+    const movingRight = targetX > (lastTarget.current ?? targetX);
     lastTarget.current = targetX;
 
-    // Travel + deformation, all on the native driver: the bubble stretches
-    // along its axis for the first ~40% of the move and settles back, so the
-    // eye reads one travelling droplet instead of a jump.
+    // Travel + deformation on the JS driver (the drag writes the same values
+    // from touch coordinates, and one view cannot mix drivers — see below).
     Animated.parallel([
       Animated.spring(translateX, {
         toValue: targetX,
         damping: 19,
         stiffness: 190,
         mass: 0.85,
-        // JS driver: the drag writes this exact value from touch coordinates.
         useNativeDriver: false,
       }),
       Animated.sequence([
@@ -302,9 +337,13 @@ export default function GlassTabBar({
         }),
         Animated.spring(stretch, { toValue: 1, damping: 14, stiffness: 170, useNativeDriver: false }),
       ]),
-      Animated.timing(fade, { toValue: 1, duration: 140, useNativeDriver: false }),
-    ]).start();
-  }, [activeLayout, targetX, translateX, stretch, fade]);
+    ]).start(({ finished }) => {
+      // Convergence guarantee: whatever the frames did, end exactly on target.
+      translateX.setValue(targetX);
+      stretch.setValue(1);
+      tabDiag('travel-done', { targetX, finished });
+    });
+  }, [activeKey, activeVisible, activeLayout, targetX, translateX, stretch]);
 
   /* ── Keyboard: the pill drops out of the way, then returns. Two listeners,
    * no polling, no render loop. */
@@ -566,7 +605,10 @@ export default function GlassTabBar({
               width: indicatorWidth,
               backgroundColor: isDark ? 'rgba(125,175,225,0.20)' : `${activeTint}1F`,
               borderColor: isDark ? 'rgba(125,175,225,0.38)' : `${activeTint}40`,
-              opacity: fade,
+              // Derived, not animated: the bubble is shown exactly when a real
+              // measurement exists. An animated opacity that could be left at 0
+              // by a transient layout hiccup is what made it vanish.
+              opacity: indicatorWidth > 0 ? 1 : 0,
               transform: [{ translateX }, { scaleX: stretch }],
             },
           ]}
