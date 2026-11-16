@@ -192,14 +192,7 @@ check('package id and version name unchanged', () => {
 console.log('\n── 5. Restoration restores protection ──');
 
 const switchSrc = read('src/lib/securityTestBuild.ts');
-const switchExpr = (() => {
-  const m = switchSrc.match(/export const SECURITY_TEST_BUILD: boolean =\s*([\s\S]*?);\s*\n/);
-  assert.ok(m, 'SECURITY_TEST_BUILD assignment not found');
-  return m[1];
-})();
-
-/** Evaluate the ACTUAL shipped switch expression against an env object. */
-const evalSwitch = (env) => new Function('process', `return (${switchExpr});`)({ env });
+const flagSrc = read('src/lib/diagnosticBuildFlag.ts');
 
 /** The env a NORMAL build of this workflow would provide. */
 function envWithoutSuspension() {
@@ -210,22 +203,35 @@ function envWithoutSuspension() {
   return env;
 }
 
-check('armed workflow env → switch ON', () => {
-  assert.strictEqual(evalSwitch(jobEnv), true);
+check('the repository flag is false — a normal build compiles the switch off', () => {
+  assert.ok(
+    /export const DIAGNOSTIC_BUILD_FLAG: boolean = false;/.test(flagSrc),
+    'the committed flag must be false; `true` would ship the suspension in every build',
+  );
 });
 
-check('workflow env with the three keys removed → switch OFF (protection restored)', () => {
+check('the switch is bound to that flag and to no build-environment variable', () => {
+  assert.ok(
+    /export const SECURITY_TEST_BUILD: boolean = DIAGNOSTIC_BUILD_FLAG;/.test(switchSrc),
+    'SECURITY_TEST_BUILD must be bound to DIAGNOSTIC_BUILD_FLAG',
+  );
+  // Code only: the module's documentation explains why env vars are NOT used.
+  const switchCode = switchSrc
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/^\s*\/\/.*$/gm, '');
+  assert.ok(!/process\.env/.test(switchCode), 'the switch must not read process.env');
+});
+
+check('removing the three workflow keys leaves a normal environment', () => {
   const restored = envWithoutSuspension();
-  assert.strictEqual(evalSwitch(restored), false);
+  assert.ok(!(FLAG in restored) && !(ACK in restored) && !(MARKER in restored));
   // The unrelated public config must survive the reversion untouched.
   assert.strictEqual(restored.EXPO_PUBLIC_APP_ID, 'app-czyg340mpc75');
   assert.strictEqual(restored.CI, '1');
-});
-
-check('removing only ONE key is not enough to keep the suspension', () => {
-  const partial = { ...jobEnv };
-  delete partial[ACK];
-  assert.strictEqual(evalSwitch(partial), false, 'the acknowledgement key must be mandatory');
+  assert.ok(
+    /export const DIAGNOSTIC_BUILD_FLAG: boolean = false;/.test(flagSrc),
+    'and the flag file is already false, so the switch is off',
+  );
 });
 
 const GUARD = path.join(ROOT, 'scripts', 'check-diagnostic-build-guards.cjs');

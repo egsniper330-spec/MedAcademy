@@ -72,46 +72,55 @@ function switchExpression() {
   return m[1];
 }
 
-/** Evaluate the ACTUAL shipped expression against a fake process.env. */
-function evalSwitch(env) {
+/**
+ * Evaluate the ACTUAL shipped expression with a given flag value. The switch is
+ * a plain constant now (see src/lib/diagnosticBuildFlag.ts): build-environment
+ * variables no longer reach it, because the Metro worker that transforms a
+ * release bundle was observed inlining `undefined` for them.
+ */
+function evalSwitch(flagValue) {
   // eslint-disable-next-line no-new-func
-  return new Function('process', `return (${switchExpression()});`)({ env });
+  return new Function('DIAGNOSTIC_BUILD_FLAG', `return (${switchExpression()});`)(flagValue);
 }
 
-check('both keys present and correct → enabled', () => {
-  assert.strictEqual(evalSwitch({ [FLAG]: '1', [ACK]: ACK_VALUE }), true);
+check('armed flag → enabled', () => {
+  assert.strictEqual(evalSwitch(true), true);
 });
 
-check('flag alone → NOT enabled', () => {
-  assert.strictEqual(evalSwitch({ [FLAG]: '1' }), false);
+check('repository default flag (false) → NOT enabled', () => {
+  assert.strictEqual(evalSwitch(false), false);
 });
 
-check('acknowledgement alone → NOT enabled', () => {
-  assert.strictEqual(evalSwitch({ [ACK]: ACK_VALUE }), false);
+check('undefined flag → NOT enabled', () => {
+  assert.ok(!evalSwitch(undefined), 'an unarmed module must never read as enabled');
 });
 
-check('empty environment → NOT enabled', () => {
-  assert.strictEqual(evalSwitch({}), false);
-});
-
-check('wrong acknowledgement value → NOT enabled', () => {
-  assert.strictEqual(evalSwitch({ [FLAG]: '1', [ACK]: 'production' }), false);
-});
-
-check('non-strict flag value ("true") → NOT enabled', () => {
-  assert.strictEqual(evalSwitch({ [FLAG]: 'true', [ACK]: ACK_VALUE }), false);
+check('the switch is a pure reference to the flag (no coercion, no fallback)', () => {
+  assert.strictEqual(switchExpression().trim(), 'DIAGNOSTIC_BUILD_FLAG');
 });
 
 // ── 2. Compile-time only ────────────────────────────────────────────────────
 console.log('\n── 2. Build-time only, no runtime input ──');
 
-check('flag compared with a literal member access and strict "1"', () => {
-  assert.ok(switchCode.includes(`process.env.${FLAG} === '1'`),
-    'must compare process.env.' + FLAG + ' === \'1\' (Metro inlines only static access)');
+check('the switch is a constant bound to the flag module', () => {
+  assert.ok(
+    /export const SECURITY_TEST_BUILD: boolean = DIAGNOSTIC_BUILD_FLAG;/.test(switchCode),
+    'SECURITY_TEST_BUILD must be bound to DIAGNOSTIC_BUILD_FLAG',
+  );
 });
 
-check('acknowledgement compared with a literal member access', () => {
-  assert.ok(switchCode.includes(`process.env.${ACK} === '${ACK_VALUE}'`));
+check('the switch reads no environment variable at all', () => {
+  assert.ok(!/process\.env/.test(switchCode),
+    'build-environment values are inlined by the Metro worker and proved unreliable in CI');
+});
+
+check('the committed flag module holds a literal false', () => {
+  const flagSrc = require('node:fs').readFileSync(
+    require('node:path').join(__dirname, '..', 'src', 'lib', 'diagnosticBuildFlag.ts'),
+    'utf8',
+  );
+  assert.ok(/export const DIAGNOSTIC_BUILD_FLAG: boolean = false;/.test(flagSrc),
+    'the repository copy must stay false — the build guard enforces it');
 });
 
 check('no dynamic process.env[...] access', () => {

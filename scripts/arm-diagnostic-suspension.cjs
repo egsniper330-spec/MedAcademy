@@ -1,48 +1,59 @@
 #!/usr/bin/env node
 /**
- * TEMPORARY SECURITY SUSPENSION — arming and verification of the build-time
- * diagnostic switch (`src/lib/securityTestBuild.ts`).
+ * TEMPORARY SECURITY SUSPENSION — arm, verify, disarm.
  *
- * WHY THIS SCRIPT EXISTS
- * ----------------------
- * A release bundle does not read `process.env` at runtime. Inside Metro/Babel,
- * `babel-preset-expo/build/inline-env-vars.js` replaces every
- * `process.env.EXPO_PUBLIC_*` read with the VALUE PRESENT IN THE BUNDLER
- * PROCESS at transform time:
+ * ─── WHY THIS SCRIPT EXISTS ──────────────────────────────────────────────────
+ * The diagnostic switch (`src/lib/securityTestBuild.ts`) waives the local
+ * device-environment findings so a crash can be reproduced on a tablet with ADB
+ * attached. Actor 1 of this mechanism used `process.env.EXPO_PUBLIC_*`, which a
+ * release bundle inlines at transform time
+ * (`babel-preset-expo/build/inline-env-vars.js`: `t.valueToNode(process.env[key])`
+ * in production mode). Android builds 223 and 43926766869 proved that channel
+ * unusable end to end:
  *
- *     if (isProduction) path.replaceWith(t.valueToNode(process.env[key]));
- *     else              path.replaceWith(memberExpression(<expo/virtual/env>, key));
+ *   • job-level `env:` did not reach the bundle (223);
+ *   • writing the keys into every `.env` channel DID get loaded — the Gradle
+ *     bundle task printed
+ *       `env: load .env.production.local .env.local .env.production .env`
+ *     and the pre-build gate in the SAME job compiled the switch to `true`;
+ *   • yet the shipped, minified bundle contained no marker at all, i.e. the
+ *     Metro worker that transformed the file had inlined `void 0`, and terser
+ *     then deleted the diagnostic code as dead code.
  *
- * So the two keys must exist in the environment of the process that compiles
- * the bundle — the node process Gradle starts for
- * `:app:createBundleReleaseJsAndAssets`. Job-level `env:` alone proved
- * unreliable for that (build 223 shipped a bundle with no marker while the
- * build itself succeeded), while the same task demonstrably runs Expo's env
- * loader (its log shows `env: load …` / `env: export …`). This script therefore
- * writes the keys into the project's env FILES, which that loader reads, and
- * then verifies the whole chain end to end before a 30-minute Gradle build.
+ * So the switch is now a plain source constant,
+ * `src/lib/diagnosticBuildFlag.ts`. It cannot be misread by a worker, and the
+ * minifier keeps it exactly as written. This script owns that file:
  *
- * ENV FILE PRECEDENCE (from `node_modules/@expo/env`, `getEnvFiles()`)
- *   highest -> lowest:  .env.<mode>.local, .env.local, .env.<mode>, .env
- *   (`.env.local` is skipped in `test` mode; when NODE_ENV is unset only
- *    `.env.local` and `.env` are consulted.)
- * `loadEnvFiles()` never overwrites a variable already present in the system
- * environment — which is why a stray `EXPO_PUBLIC_SECURITY_TEST_BUILD=0` in
- * the shell can never be "fixed up" here, and must fail loudly instead.
+ *   arm     both keys present in the environment → flag := true
+ *   disarm  flag := false and remove the env lines this script added
+ *   verify  prove the whole chain before a 30-minute Gradle build
+ *   status  report what is armed, and from where
  *
- * The keys are the literal, non-secret strings below. They are written by
- * `arm` on the runner only; a committed copy is rejected by
- * `scripts/check-diagnostic-build-guards.cjs`.
+ * ─── THE TWO KEYS ARE STILL THE AUTHORISATION ───────────────────────────────
+ *   EXPO_PUBLIC_SECURITY_TEST_BUILD=1
+ *   EXPO_PUBLIC_SECURITY_TEST_BUILD_ACK=security-test
+ * `arm` refuses to touch the flag unless BOTH are in its environment, so a
+ * stray variable can never arm it (and a wrong value is never "corrected").
+ * The workflow sets them at job level; `eas.json`'s `security-test` profile
+ * declares them too.
+ *
+ * ─── ENV FILES (diagnostic channel only) ────────────────────────────────────
+ * `arm` also writes the two keys into the project's env files, in the order
+ * Expo's loader prefers them (`node_modules/@expo/env`, `getEnvFiles()`):
+ *
+ *   highest → lowest: .env.<mode>.local, .env.local, .env.<mode>, .env
+ *
+ * They are not what enables the build any more; they make the intent visible in
+ * the bundle log (`env: export …`) and keep the EAS `security-test` path
+ * consistent. A checkout whose env files declare the keys is rejected by
+ * `scripts/check-diagnostic-build-guards.cjs`, and the checked-in flag is
+ * `false`, so an ordinary build cannot inherit the suspension.
  *
  * USAGE
- *   node scripts/arm-diagnostic-suspension.cjs arm    [--root DIR] [--mode production]
- *   node scripts/arm-diagnostic-suspension.cjs verify [--root DIR] [--mode production]
- *   node scripts/arm-diagnostic-suspension.cjs status [--root DIR] [--mode production]
- *
- * REMOVAL (restores normal security everywhere): delete this script, its two
- * workflow steps, the job `env:` keys and the verify/summary blocks — see
- * docs/TEMP_SECURITY_SUSPENSION.md. `src/` needs no change: without the keys
- * the switch compiles to `false`.
+ *   node scripts/arm-diagnostic-suspension.cjs arm    [--root DIR] [--mode production] [--flag FILE]
+ *   node scripts/arm-diagnostic-suspension.cjs verify [--root DIR] [--mode production] [--flag FILE]
+ *   node scripts/arm-diagnostic-suspension.cjs disarm [--root DIR] [--mode production] [--flag FILE]
+ *   node scripts/arm-diagnostic-suspension.cjs status [--root DIR] [--mode production] [--flag FILE]
  */
 
 'use strict';
@@ -51,6 +62,8 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const ROOT = path.resolve(__dirname, '..');
+const FLAG_FILE_REL = 'src/lib/diagnosticBuildFlag.ts';
+const FLAG_DECLARATION = /export const DIAGNOSTIC_BUILD_FLAG: boolean = (true|false);/;
 
 const FLAG_KEY = 'EXPO_PUBLIC_SECURITY_TEST_BUILD';
 const ACK_KEY = 'EXPO_PUBLIC_SECURITY_TEST_BUILD_ACK';
@@ -60,9 +73,11 @@ const PAIRS = [
   [FLAG_KEY, FLAG_VALUE],
   [ACK_KEY, ACK_VALUE],
 ];
+const BLOCK_COMMENT = '# TEMPORARY security suspension (crash investigation)';
 
-/** File that the switch's visible marker lives in, asserted after compilation. */
-const MARKER = 'DIAGNOSTIC BUILD';
+/** The marker the shipped UI must contain, and the Logcat one-shot marker. */
+const UI_MARKER = 'DIAGNOSTIC BUILD';
+const LOG_MARKER = '[DIAG-BUILD]';
 
 /** The eight findings the switch is allowed to waive — nothing else. */
 const EXPECTED_WAIVED = [
@@ -91,13 +106,15 @@ function fail(msg) {
 }
 
 function parseArgs(argv) {
-  const opts = { command: argv[0] || 'status', root: ROOT, mode: 'production' };
+  const opts = { command: argv[0] || 'status', root: ROOT, mode: 'production', flag: null };
   for (let i = 1; i < argv.length; i++) {
     const arg = argv[i];
     if (arg === '--root') opts.root = path.resolve(argv[++i]);
     else if (arg === '--mode') opts.mode = argv[++i];
+    else if (arg === '--flag') opts.flag = path.resolve(argv[++i]);
     else fail(`Unknown argument: ${arg}`);
   }
+  opts.flagFile = opts.flag || path.join(opts.root, FLAG_FILE_REL);
   return opts;
 }
 
@@ -115,10 +132,6 @@ function readDefinitions(file) {
   return found;
 }
 
-/**
- * Inspect a target file without touching it: which of the two pairs are
- * missing, and which are already defined with a different value.
- */
 function analyzeFile(file) {
   const exists = fs.existsSync(file);
   const current = readDefinitions(file);
@@ -131,126 +144,161 @@ function analyzeFile(file) {
   return { exists, current, conflicts, missing };
 }
 
-/** Append the missing pairs, preserving every unrelated line in the file. */
 function writeMissing(file, { exists, missing }) {
   const prefix = exists && fs.readFileSync(file, 'utf8').length > 0 ? '\n' : '';
   const body = missing.map(([key, value]) => `${key}=${value}`).join('\n');
-  fs.appendFileSync(
-    file,
-    `${prefix}# TEMPORARY security suspension (crash investigation) — remove to restore enforcement\n${body}\n`,
-    'utf8',
-  );
+  fs.appendFileSync(file, `${prefix}${BLOCK_COMMENT} — remove to restore enforcement\n${body}\n`, 'utf8');
 }
 
-/** Channels, in the order the env loader prefers them. */
+/** Channels, in the order the Expo env loader prefers them. */
 function candidateFiles(mode) {
-  return [
-    `.env.${mode}.local`, // highest priority, git-ignored (`.env*.local`)
-    '.env.local', // loaded in every non-test mode, git-ignored
-    `.env.${mode}`, // production-mode fallback, NOT git-ignored (guard rejects a local copy)
-    '.env', // mode-independent, always loaded, lowest priority
-  ];
+  return [`.env.${mode}.local`, '.env.local', `.env.${mode}`, '.env'];
 }
 
-function commandArm({ root, mode }) {
-  console.log('Arming the temporary security suspension (env files only, no secrets):');
+// ── The flag module ─────────────────────────────────────────────────────────
 
-  // Phase 1 — inspect EVERY target first, so a conflict cannot leave the
-  // project half-armed (some files written, others refused).
+function readFlag(file) {
+  if (!fs.existsSync(file)) fail(`flag module not found: ${file}`);
+  const match = FLAG_DECLARATION.exec(fs.readFileSync(file, 'utf8'));
+  if (!match) fail(`cannot read DIAGNOSTIC_BUILD_FLAG from ${file}`);
+  return match[1] === 'true';
+}
+
+function writeFlag(file, value) {
+  if (!fs.existsSync(file)) fail(`flag module not found: ${file}`);
+  const source = fs.readFileSync(file, 'utf8');
+  if (!FLAG_DECLARATION.test(source)) fail(`cannot find the flag declaration in ${file}`);
+  const next = source.replace(
+    FLAG_DECLARATION,
+    `export const DIAGNOSTIC_BUILD_FLAG: boolean = ${value};`,
+  );
+  if (next !== source) fs.writeFileSync(file, next, 'utf8');
+  const now = readFlag(file);
+  if (now !== value) fail(`failed to set DIAGNOSTIC_BUILD_FLAG to ${value} in ${file}`);
+}
+
+/** Fail unless both build-time keys authorise the suspension, with exact values. */
+function requireAuthorisation() {
+  // Literal member access on purpose: dynamic `process.env[...]` reads are
+  // banned by the project's lint rules, because Metro never inlines them.
+  const seen = {
+    [FLAG_KEY]: process.env.EXPO_PUBLIC_SECURITY_TEST_BUILD,
+    [ACK_KEY]: process.env.EXPO_PUBLIC_SECURITY_TEST_BUILD_ACK,
+  };
+  for (const [key, value] of PAIRS) {
+    const actual = seen[key];
+    if (actual === undefined) {
+      fail(
+        `refusing to arm: ${key} is not set.\n` +
+          '  Both keys must be present in the environment (the workflow sets them at\n' +
+          '  job level; eas.json\'s security-test profile declares them too).',
+      );
+    }
+    if (actual !== value) {
+      fail(
+        `refusing to arm: ${key} is "${actual}" but "${value}" is required.\n` +
+          '  A conflicting value is never silently corrected.',
+      );
+    }
+  }
+  ok(`both authorisation keys present (${FLAG_KEY}=1, ${ACK_KEY}=security-test)`);
+}
+
+// ── Commands ────────────────────────────────────────────────────────────────
+
+function commandArm({ root, mode, flagFile }) {
+  console.log('Arming the temporary security suspension (compile-time constant):');
+  requireAuthorisation();
+
+  // Env files are a diagnostic channel only; validate every target first so a
+  // conflict cannot leave the project half-armed.
   const plan = candidateFiles(mode).map((name) => {
     const file = path.join(root, name);
     return { name, file, ...analyzeFile(file) };
   });
-  const conflicts = plan.flatMap((entry) =>
-    entry.conflicts.map((conflict) => `${entry.name}: ${conflict}`),
-  );
+  const conflicts = plan.flatMap((entry) => entry.conflicts.map((c) => `${entry.name}: ${c}`));
   if (conflicts.length > 0) {
     fail(
       'conflicting definitions found (nothing was written):\n  ' +
         conflicts.join('\n  ') +
-        '\n\n  The suspension must never be armed on top of a conflicting local value.\n' +
-        '  Remove those lines and re-run.',
+        '\n\n  Remove those lines and re-run.',
     );
   }
-
-  // Phase 2 — write only what is missing.
-  const written = [];
   for (const entry of plan) {
     if (entry.missing.length === 0) {
       info(`${entry.name}: already carries both keys`);
       continue;
     }
     writeMissing(entry.file, entry);
-    written.push(entry.name);
     info(`${entry.name}: wrote ${entry.missing.map(([key]) => key).join(', ')}`);
   }
 
-  const armed = readDefinitions(path.join(root, '.env'));
-  console.log(
-    `\nArmed via: ${written.length > 0 ? written.join(', ') : '(already present)'}\n` +
-      `Directory now defines: ${[...armed.keys()].join(', ') || '(none)'} in .env\n` +
-      'Values are the literal strings documented in docs/TEMP_SECURITY_SUSPENSION.md.',
-  );
+  writeFlag(flagFile, true);
+  ok(`DIAGNOSTIC_BUILD_FLAG = true in ${path.relative(ROOT, flagFile) || flagFile}`);
+  console.log('\nA normal build compiles the switch to `false` again once this file is `false`.');
 }
 
-/**
- * Verify the full chain, exactly as Metro/Babel will execute it:
- *   1. Expo's env loader reads the project's .env files
- *   2. the two keys are present in the process environment
- *   3. Babel compiles the switch in PRODUCTION mode (no `expo/virtual/env` reference)
- *   4. the compiled module evaluates to `SECURITY_TEST_BUILD === true`
- *   5. the waived set is exactly the eight intended findings, and unrelated
- *      findings still block
- */
-function commandVerify({ root, mode }) {
-  console.log(`Verifying the suspension chain (root=${root}, mode=${mode}):`);
+function commandDisarm({ root, mode, flagFile }) {
+  console.log('Disarming the temporary security suspension:');
+  writeFlag(flagFile, false);
+  ok(`DIAGNOSTIC_BUILD_FLAG = false in ${path.relative(ROOT, flagFile) || flagFile}`);
 
-  const expoEnv = require('@expo/env');
-  const activeFiles = expoEnv.getEnvFiles({ mode, silent: true });
-  const present = activeFiles.filter((name) => fs.existsSync(path.join(root, name)));
-  console.log(`  env files consulted for this mode: ${activeFiles.join(' -> ')}`);
-  console.log(`  present on disk: ${present.join(', ') || '(none)'}`);
-
-  const loaded = expoEnv.loadProjectEnv(root, { mode, silent: true });
-  const env = process.env;
-
-  for (const [key, value] of PAIRS) {
-    if (env[key] === value) {
-      ok(`${key} is "${value}" in the bundler environment`);
-    } else if (env[key] === undefined) {
-      fail(
-        `${key} is not defined for mode "${mode}".\n` +
-          `  Files present: ${present.join(', ') || '(none)'}\n` +
-          '  The suspension would compile to `false` and the APK would ship un-suspended.',
-      );
+  const keyLine = new RegExp(`^\\s*(?:${FLAG_KEY}|${ACK_KEY})\\s*=`);
+  for (const name of candidateFiles(mode)) {
+    const file = path.join(root, name);
+    if (!fs.existsSync(file)) continue;
+    const lines = fs.readFileSync(file, 'utf8').split(/\r?\n/);
+    const kept = lines.filter((l) => !keyLine.test(l) && !l.includes(BLOCK_COMMENT));
+    if (kept.length === lines.length) continue;
+    const body = kept.join('\n').replace(/\n{3,}/g, '\n\n').replace(/\s+$/, '');
+    if (body.trim() === '') {
+      fs.unlinkSync(file);
+      info(`${name}: removed (it only held suspension keys)`);
     } else {
-      fail(
-        `${key} is "${env[key]}" but "${value}" is required.\n` +
-          '  A value already present in the system environment is never overwritten by\n' +
-          '  the env files — remove the conflicting export and re-run.',
-      );
+      fs.writeFileSync(file, body + '\n', 'utf8');
+      info(`${name}: stripped the suspension lines`);
     }
   }
-  if (loaded && loaded.result === 'skipped') {
-    info('env loader reported "skipped" (another loader already ran in this process)');
-  }
+  console.log('\nThe repository copy of the flag file must stay `false` (the build guard enforces it).');
+}
 
-  // ── Compile the switch the way the Android release bundle does ────────────
+async function commandVerify({ root, mode, flagFile }) {
+  console.log(`Verifying the suspension chain (root=${root}, mode=${mode}):`);
+
+  requireAuthorisation();
+
+  const expoEnv = require('@expo/env');
+  const consulted = expoEnv.getEnvFiles({ mode, silent: true });
+  const present = consulted.filter((name) => fs.existsSync(path.join(root, name)));
+  console.log(`  env files consulted for this mode: ${consulted.join(' -> ')}`);
+  console.log(`  present on disk: ${present.join(', ') || '(none)'}`);
+
+  if (readFlag(flagFile) !== true) {
+    fail(
+      `${path.relative(ROOT, flagFile) || flagFile} is \`false\` — nothing is armed.\n` +
+        '  Run `arm` first, or the APK would ship un-suspended.',
+    );
+  }
+  ok('DIAGNOSTIC_BUILD_FLAG = true');
+
+  // ── Compile the switch exactly as the Android release bundle does ─────────
   const babel = require('@babel/core');
-  const source = path.join(ROOT, 'src/lib/securityTestBuild.ts');
+  // Compiled from `root`, so the check exercises the flag module that the
+  // bundler will actually use (and so the suite can verify a temp copy).
+  const source = path.join(root, 'src/lib/securityTestBuild.ts');
   if (!fs.existsSync(source)) fail(`switch source not found: ${source}`);
 
   const caller = {
     name: 'metro',
     platform: 'android',
     bundler: 'metro',
-    isDev: false, // ← release build: values are inlined as literals
+    isDev: false, // release build
     isServer: false,
     isReactServer: false,
     isNodeModule: false,
     isHMREnabled: false,
     // CommonJS output so the compiled switch can be evaluated in-process.
-    // (Metro's own caller uses `true`; the inlining above is identical either way.)
+    // (Metro's own caller uses `true`; the flag constant is identical either way.)
     supportsStaticESM: false,
   };
   const { code } = babel.transformFileSync(source, {
@@ -260,115 +308,99 @@ function commandVerify({ root, mode }) {
     configFile: false,
     caller,
   });
+  ok('switch compiled in production mode');
 
-  if (/expo\/virtual\/env/.test(code)) {
-    fail(
-      'the switch compiled in DEVELOPMENT mode (it still reads `expo/virtual/env`).\n' +
-        '  A release bundle would not evaluate the keys. The Gradle bundle task must\n' +
-        '  run with `--dev false` / NODE_ENV=production.',
-    );
-  }
-  ok('switch compiled in production mode (env values inlined as literals)');
-
-  // ── Evaluate the compiled module to read the real switch value ────────────
   const sandboxModule = { exports: {} };
-  const unexpectedRequire = (id) => {
+  // The only module the compiled switch may pull in is the flag module; wire it
+  // to the flag file on disk so the evaluation uses the real, armed value.
+  const sandboxRequire = (id) => {
+    if (/diagnosticBuildFlag$/.test(id)) {
+      const value = readFlag(flagFile);
+      return { DIAGNOSTIC_BUILD_FLAG: value };
+    }
     throw new Error(`compiled switch unexpectedly required "${id}"`);
   };
   new Function('exports', 'require', 'module', code)(
     sandboxModule.exports,
-    unexpectedRequire,
+    sandboxRequire,
     sandboxModule,
   );
   const mod = sandboxModule.exports;
 
   if (mod.SECURITY_TEST_BUILD !== true) {
-    fail(
-      `compiled SECURITY_TEST_BUILD is ${String(mod.SECURITY_TEST_BUILD)}, expected true.\n` +
-        '  The keys reached Babel but the switch still evaluates false.',
-    );
+    fail(`compiled SECURITY_TEST_BUILD is ${String(mod.SECURITY_TEST_BUILD)}, expected true.`);
   }
   ok('compiled SECURITY_TEST_BUILD === true');
 
   const waived = Array.isArray(mod.DIAGNOSTIC_WAIVED_CHECKS) ? mod.DIAGNOSTIC_WAIVED_CHECKS : [];
-  const waivedSet = [...waived].sort().join(',');
-  if (waivedSet !== [...EXPECTED_WAIVED].sort().join(',')) {
+  if ([...waived].sort().join(',') !== [...EXPECTED_WAIVED].sort().join(',')) {
     fail(
       `waived findings differ from the documented set.\n  expected: ${EXPECTED_WAIVED.join(', ')}\n  actual:   ${waived.join(', ')}`,
     );
   }
   ok(`exactly ${waived.length} findings are waived: ${waived.join(', ')}`);
 
-  // `isSecurityTestBypassed` takes a threat object (`{ type }`), exactly what
-  // security.ts passes from its `.filter((t) => …)` before computeRiskScore.
   for (const type of EXPECTED_WAIVED) {
-    if (mod.isSecurityTestBypassed({ type }) !== true) {
-      fail(`expected "${type}" to be waived, but it still blocks`);
-    }
+    if (mod.isSecurityTestBypassed({ type }) !== true) fail(`expected "${type}" to be waived`);
   }
-  ok('waived findings are excluded from the blocking verdict');
-
   for (const type of STILL_BLOCKING) {
     if (mod.isSecurityTestBypassed({ type }) !== false) {
-      fail(`"${type}" must still block, but the switch waives it — refusing this build`);
+      fail(`"${type}" must still block, but the switch waives it`);
     }
   }
   ok(`unrelated findings still block: ${STILL_BLOCKING.join(', ')}`);
 
-  if (typeof mod.logDiagnosticBuildStatus === 'function') {
-    const original = console.warn;
-    let emitted = '';
-    console.warn = (...args) => {
-      emitted += args.join(' ');
-    };
-    try {
-      mod.logDiagnosticBuildStatus();
-    } finally {
-      console.warn = original;
-    }
-    if (!emitted.includes('DIAG-BUILD')) {
-      fail('logDiagnosticBuildStatus() did not emit the [DIAG-BUILD] marker');
-    }
-    ok('the one-shot [DIAG-BUILD] marker is emitted by the compiled module');
-  }
-
-  const markerSource = fs.readFileSync(
-    path.join(ROOT, 'src/components/DiagnosticModeBanner.tsx'),
-    'utf8',
-  );
-  if (!markerSource.includes(MARKER)) {
+  // ── The decisive check: the marker must SURVIVE MINIFICATION ──────────────
+  // This is precisely what failed in builds 223 / 43926766869: a `false` (or
+  // undefined-tainted) constant let terser delete every marker as dead code.
+  const { minify } = require('terser');
+  const minified = await minify(code, { compress: true, mangle: true });
+  if (!minified.code || !minified.code.includes(LOG_MARKER)) {
     fail(
-      `src/components/DiagnosticModeBanner.tsx no longer contains "${MARKER}" —\n` +
-        '  the APK bundle check would have nothing to find.',
+      `the minified switch module no longer contains ${LOG_MARKER}.\n` +
+        '  The diagnostic code is being treated as dead code — this APK would ship un-suspended.',
     );
   }
-  ok(`the visible "${MARKER}" marker is present in the shipped UI source`);
+  ok(`the ${LOG_MARKER} marker survives Terser minification`);
 
-  console.log('\n\u2713 Suspension chain verified: env files -> Metro/Babel -> true switch.\n');
+  const bannerSource = fs.readFileSync(
+    path.join(root, 'src/components/DiagnosticModeBanner.tsx'),
+    'utf8',
+  );
+  if (!bannerSource.includes(UI_MARKER)) {
+    fail(`src/components/DiagnosticModeBanner.tsx no longer contains "${UI_MARKER}"`);
+  }
+  if (!/if \(!SECURITY_TEST_BUILD\) return null;/.test(bannerSource)) {
+    fail('the banner must remain gated on SECURITY_TEST_BUILD');
+  }
+  ok(`the visible "${UI_MARKER}" marker is gated on the switch`);
+
+  console.log('\n\u2713 Suspension chain verified: flag -> switch true -> markers survive minification.\n');
 }
 
-function commandStatus({ root, mode }) {
+function commandStatus({ root, mode, flagFile }) {
   console.log(`Suspension status (root=${root}, mode=${mode}):`);
-  let any = false;
+  const flag = fs.existsSync(flagFile) ? readFlag(flagFile) : null;
+  console.log(`  ${path.relative(ROOT, flagFile) || flagFile}: ${flag === null ? '(missing)' : flag ? 'true (ARMED)' : 'false (normal build)'}`);
   for (const name of candidateFiles(mode)) {
     const defs = readDefinitions(path.join(root, name));
-    if (defs.size === 0) continue;
-    any = true;
-    console.log(`  ${name}: ${[...defs.keys()].join(', ')}`);
+    if (defs.size > 0) console.log(`  ${name}: ${[...defs.keys()].join(', ')}`);
   }
   const envArmed = process.env[FLAG_KEY] === FLAG_VALUE && process.env[ACK_KEY] === ACK_VALUE;
-  console.log(`  process environment: ${envArmed ? 'armed' : 'not armed'}`);
-  if (!any && !envArmed) {
-    console.log('  -> no suspension source found: a normal build compiles the switch to false');
-  }
+  console.log(`  authorisation keys in this environment: ${envArmed ? 'present' : 'absent'}`);
+  if (flag === false) console.log('  -> normal build: the switch compiles to false');
 }
 
-function main() {
+async function main() {
   const opts = parseArgs(process.argv.slice(2));
   if (opts.command === 'arm') return commandArm(opts);
   if (opts.command === 'verify') return commandVerify(opts);
+  if (opts.command === 'disarm') return commandDisarm(opts);
   if (opts.command === 'status') return commandStatus(opts);
-  fail(`Unknown command "${opts.command}" (expected arm | verify | status)`);
+  fail(`Unknown command "${opts.command}" (expected arm | verify | disarm | status)`);
 }
 
-main();
+main().catch((error) => {
+  console.error(error);
+  process.exit(1);
+});

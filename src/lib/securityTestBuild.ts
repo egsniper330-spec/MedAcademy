@@ -49,6 +49,8 @@
  * See docs/DIAGNOSTIC_SECURITY_BUILD.md for the operator instructions.
  */
 
+import { DIAGNOSTIC_BUILD_FLAG } from './diagnosticBuildFlag';
+
 /**
  * Local device-environment findings waived in a diagnostic build. Kept as a
  * frozen list (not just a Set) so the banner, the docs and the tests all name
@@ -68,12 +70,19 @@ export const DIAGNOSTIC_WAIVED_CHECKS: readonly string[] = Object.freeze([
 const DIAGNOSTIC_WAIVED_SET: ReadonlySet<string> = new Set(DIAGNOSTIC_WAIVED_CHECKS);
 
 /**
- * TRUE only when BOTH build-time keys were present while the bundle was built.
- * Statically inlined by Metro — never read from storage, network or props.
+ * TRUE only in a build whose flag module was armed before compilation.
+ *
+ * The value comes from `./diagnosticBuildFlag`, a plain constant, NOT from
+ * `process.env`: a release bundle inlines `EXPO_PUBLIC_*` inside the Metro
+ * worker, and Android builds 223 / 43926766869 showed that worker can inline
+ * `undefined` even when the bundling process itself sees the keys — the minifier
+ * then deletes every diagnostic marker as dead code. A source constant cannot be
+ * misread that way; `scripts/arm-diagnostic-suspension.cjs` writes it, and only
+ * when both build-time keys are present (see that script and the flag module).
+ *
+ * Never read from storage, network, props, route params or remote config.
  */
-export const SECURITY_TEST_BUILD: boolean =
-  process.env.EXPO_PUBLIC_SECURITY_TEST_BUILD === '1' &&
-  process.env.EXPO_PUBLIC_SECURITY_TEST_BUILD_ACK === 'security-test';
+export const SECURITY_TEST_BUILD: boolean = DIAGNOSTIC_BUILD_FLAG;
 
 /** True when this finding is a local device-environment finding waived for the diagnostic build. */
 export function isSecurityTestBypassed(threat: { type: string }): boolean {

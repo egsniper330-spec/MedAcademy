@@ -156,11 +156,25 @@ function codeOnly(src) {
 }
 
 const switchSrc = codeOnly(read('src/lib/securityTestBuild.ts'));
-if (!switchSrc.includes(`process.env.${FLAG} === '1'`)) {
-  fail(`src/lib/securityTestBuild.ts must compare process.env.${FLAG} === '1' with a LITERAL member access (Metro only inlines static EXPO_PUBLIC_* access).`);
+const flagSrc = codeOnly(read('src/lib/diagnosticBuildFlag.ts'));
+// The switch is a source CONSTANT, not `process.env`: a release bundle inlines
+// EXPO_PUBLIC_* inside the Metro worker, and builds 223 / 43926766869 showed that
+// worker can inline `undefined` while the bundling process itself sees the keys —
+// after which the minifier deletes every diagnostic marker as dead code.
+if (!/export const DIAGNOSTIC_BUILD_FLAG: boolean = false;/.test(flagSrc)) {
+  fail(
+    'src/lib/diagnosticBuildFlag.ts must declare `export const DIAGNOSTIC_BUILD_FLAG: boolean = false;`.\n' +
+    '         A committed `true` would ship the security suspension in EVERY build.',
+  );
 }
-if (!switchSrc.includes(`process.env.${ACK} === '${ACK_VALUE}'`)) {
-  fail(`src/lib/securityTestBuild.ts must compare process.env.${ACK} === '${ACK_VALUE}' with a LITERAL member access.`);
+if (/export\s+(?:let|var)\b/.test(flagSrc)) {
+  fail('src/lib/diagnosticBuildFlag.ts must export only a `const` (never a runtime-reassignable flag).');
+}
+if (!switchSrc.includes("import { DIAGNOSTIC_BUILD_FLAG } from './diagnosticBuildFlag';")) {
+  fail("src/lib/securityTestBuild.ts must import DIAGNOSTIC_BUILD_FLAG from './diagnosticBuildFlag'.");
+}
+if (!/export const SECURITY_TEST_BUILD: boolean = DIAGNOSTIC_BUILD_FLAG;/.test(switchSrc)) {
+  fail('src/lib/securityTestBuild.ts must bind SECURITY_TEST_BUILD directly to DIAGNOSTIC_BUILD_FLAG.');
 }
 if (/process\.env\[/.test(switchSrc)) {
   fail('src/lib/securityTestBuild.ts must not use dynamic process.env[...] access — Metro does not inline it.');
