@@ -99,6 +99,10 @@ export function useScreenCapture(opts: Options = {}) {
   // Super Admin bypass: do not install listener — SA is allowed to screenshot.
   useEffect(() => {
     if (process.env.EXPO_OS === 'web') return;
+    // Same temporary switch as the FLAG_SECURE gate: while capture protection is
+    // disabled, taking a screenshot must not be reported as a security violation
+    // (a report can cost a student account a strike on the device under test).
+    if (!ScreenCaptureLib.isScreenCaptureProtectionEnabled()) return;
     if (isSuperAdmin) return;
 
     const subscription = ScreenCaptureLib.addScreenshotListener(() => {

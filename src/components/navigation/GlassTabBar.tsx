@@ -61,6 +61,13 @@ import { markEntryIntent } from '@/lib/navigation/navIntent';
 import { useTranslation } from '@/lib/i18n';
 import { neuColors } from '@/lib/neu';
 
+// TEMP-DIAG — tab-bar state tracing for the on-device diagnosis. Removed again
+// in the fix commit; it is plain logging, not a build mechanism.
+const TAB_DIAG = true;
+const tabDiag = (...args: unknown[]) => {
+  if (TAB_DIAG) console.log('[TAB-DIAG]', ...args);
+};
+
 const BAR_HEIGHT = 62;
 const FLOAT_GAP = 10;
 const SIDE_INSET = 14;
@@ -232,6 +239,13 @@ export default function GlassTabBar({
    * transform siblings are JS: the whole view has to share one driver.
    */
   useEffect(() => {
+    tabDiag('sync', {
+      activeVisible, activeIndex, tabCount, isRTL, rowWidth,
+      measuredKeys: Object.keys(layouts).length,
+      measuredX: visibleRoutes.map((e) => layouts[e.route.key]?.x ?? null),
+      isEmpty: !activeLayout, targetX,
+      lastTarget: lastTarget.current, positioned: positioned.current, dragging: dragging.current,
+    });
     // A finger owns the position while dragging; the route-driven animation
     // must not pull the bubble out from under it (re-render, layout change…).
     if (dragging.current) return;
@@ -314,6 +328,7 @@ export default function GlassTabBar({
    * NAME. No local selection state is written. */
   const handlePress = useCallback(
     (routeKey: string, routeIndex: number, routeName: string) => {
+      tabDiag('press', { routeName, routeIndex, activeIndex });
       const event = navigation.emit({ type: 'tabPress', target: routeKey, canPreventDefault: true });
       if (activeIndex !== routeIndex && !event.defaultPrevented) {
         markEntryIntent('/' + routeName, 'main');
@@ -380,6 +395,7 @@ export default function GlassTabBar({
 
   /** Release: snap to the nearest valid tab and activate it. */
   const finishDrag = useCallback((dx: number) => {
+    tabDiag('release', { dx, origin: dragOriginX.current, targets: targetsRef.current, activeVisible: activeVisibleRef.current });
     dragging.current = false;
     const targets = targetsRef.current;
     const maxX = Math.max(rowWidthRef.current - indicatorWidthRef.current, 0);
