@@ -25,6 +25,7 @@ import {
   onScreenRecordingStopped,
   onNativeScreenshotTaken,
 } from '@/lib/nativeSecurity';
+import { isScreenCaptureProtectionEnabled } from '@/lib/screenCaptureGuard';
 
 export type ViolationAction = 'warning' | 'logout' | 'suspend' | 'ban';
 
@@ -166,6 +167,10 @@ export function useContentProtection(
   useEffect(() => {
     if (!enabled || process.env.EXPO_OS !== 'android') return;
     if (isSuperAdmin) return;
+    // TEMPORARY (same switch as the FLAG_SECURE gate): while capture protection
+    // is disabled, a screen recording must not pause the video, raise the block
+    // overlay or report a violation — recording is explicitly allowed right now.
+    if (!isScreenCaptureProtectionEnabled()) return;
 
     let alreadyReported = false;
 

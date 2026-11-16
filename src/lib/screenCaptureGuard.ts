@@ -95,25 +95,46 @@ function warnUnavailable(api: string) {
   }
 }
 
-// ═══ SCREEN-CAPTURE PROTECTION — RESTORED (production default: ON) ═════════
-// Native FLAG_SECURE blocking is ACTIVE. The previous blanket debug gate that
-// force-disabled it in every build (including release) has been removed.
+// ═══════════════════════════════════════════════════════════════════════════
+// TEMPORARY SWITCH — SCREEN-CAPTURE (FLAG_SECURE) PROTECTION
 //
-// The only remaining escape hatch is an explicit DEVELOPMENT-build opt-in, for
-// the case where an engineer must capture on-device evidence with ADB
+//   true  → protection ACTIVE  (production default; restore this)
+//   false → protection TEMPORARILY DISABLED: no FLAG_SECURE is ever applied,
+//           no screenshot/recording detection or violation reporting runs.
+//
+// WHY IT LIVES HERE: every FLAG_SECURE activation in the app goes through
+// `preventScreenCaptureAsync` in THIS module — the root layout ('root-shell'),
+// the authenticated shell ((app)/_layout, 'app-shell'), the security gate
+// ('security-gate'), the lesson screen ('lesson') and useScreenCapture
+// ('screen-capture'). Each of them re-applies the flag on mount/focus/resume,
+// so gating this one function is what actually prevents the flag from coming
+// back; gating a call site would only hide it until the next re-apply.
+//
+// Re-enable by setting this to `true` (single line, no other change needed).
+// ═══════════════════════════════════════════════════════════════════════════
+export const SCREEN_CAPTURE_PROTECTION_ENABLED = false;
+
+/** Read the switch from call sites that gate their own listeners/polling. */
+export function isScreenCaptureProtectionEnabled(): boolean {
+  return SCREEN_CAPTURE_PROTECTION_ENABLED;
+}
+
+// ═══ SCREEN-CAPTURE PROTECTION ═════════════════════════════════════════════
+// The switch above is authoritative. The second, pre-existing escape hatch is
+// the DEVELOPMENT-build opt-in used to capture on-device evidence with ADB
 // `screencap`:
 //
 //     EXPO_PUBLIC_DISABLE_CAPTURE_PROTECTION=1     # .env.local, dev builds only
 //
-// The `__DEV__` conjunct makes this opt-out UNREACHABLE from a release bundle:
-// the release compiler folds `__DEV__` to `false`, so the constant is `false`
-// no matter what the environment contains. A shipped production release can
-// therefore never lose screenshot/recording protection.
+// Its `__DEV__` conjunct makes it UNREACHABLE from a release bundle: the
+// release compiler folds `__DEV__` to `false`, so this half can never switch a
+// shipped production release off on its own.
 // ═══════════════════════════════════════════════════════════════════════════
 const CAPTURE_PROTECTION_DISABLED =
-  typeof __DEV__ !== 'undefined' &&
-  __DEV__ === true &&
-  process.env.EXPO_PUBLIC_DISABLE_CAPTURE_PROTECTION === '1';
+  !SCREEN_CAPTURE_PROTECTION_ENABLED ||
+  (typeof __DEV__ !== 'undefined' &&
+    __DEV__ === true &&
+    process.env.EXPO_PUBLIC_DISABLE_CAPTURE_PROTECTION === '1');
 
 /**
  * Keyed prevent. The FIRST key to arrive while no native lock is held performs
