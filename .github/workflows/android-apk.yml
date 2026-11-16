@@ -285,14 +285,40 @@ jobs:
           MEDA_UPLOAD_KEY_PASSWORD: ${{ secrets.MEDA_UPLOAD_KEY_PASSWORD }}
         run: |
           set -euo pipefail
-          # `pipefail` above is what makes the log tee transparent to failures:
-          # the step fails on Gradle's exit status, and the log is kept for the
-          # `if: failure()` artifact upload.
-          ./gradlew :app:assembleRelease \
-            --stacktrace \
-            -PexpectedCertSha256="$MEDA_EXPECTED_CERT_SHA256" \
-            2>&1 | tee "$RUNNER_TEMP/gradle.log"
-          echo "Gradle finished: $(grep -c '^' "$RUNNER_TEMP/gradle.log") log lines"
+          # ── Bounded retries (infrastructure, not code) ─────────────────────
+          # The first failure of this workflow was NOT a compile error: Maven
+          # Central answered `429 Too Many Requests` while Gradle resolved the
+          # settings-plugin classpath (com.google.code.gson:gson:2.9.1), so the
+          # build died in 34s before a single source file was compiled. Shared
+          # GitHub-runner IPs hit that limit; the pause is what clears it.
+          # A genuine compile failure fails every attempt and still stops the
+          # build, exactly as before.
+          MAX_ATTEMPTS=3
+          LOG="$RUNNER_TEMP/gradle.log"
+          : > "$LOG"
+          for attempt in $(seq 1 "$MAX_ATTEMPTS"); do
+            echo "──────── Gradle :app:assembleRelease — attempt $attempt/$MAX_ATTEMPTS ────────" | tee -a "$LOG"
+            # `pipefail` is what makes the tee transparent to failures: the step
+            # fails on Gradle's exit status, and the log (all attempts) is kept
+            # for the `if: failure()` artifact upload.
+            if ./gradlew :app:assembleRelease \
+                  --stacktrace \
+                  -PexpectedCertSha256="$MEDA_EXPECTED_CERT_SHA256" \
+                  2>&1 | tee -a "$LOG"; then
+              echo "Gradle finished on attempt $attempt: $(grep -c '^' "$LOG") log lines"
+              exit 0
+            fi
+            if [ "$attempt" -eq "$MAX_ATTEMPTS" ]; then
+              echo "::error::Gradle failed $MAX_ATTEMPTS times; the last log is attached as android-gradle-log."
+              exit 1
+            fi
+            if grep -qE "status code 429|Too Many Requests|Could not resolve all|Could not GET" "$LOG"; then
+              echo "::warning::Attempt $attempt failed while DOWNLOADING dependencies (Maven rate limit / network). Retrying in 90s."
+            else
+              echo "::warning::Attempt $attempt failed. Retrying in 30s."
+            fi
+            sleep 90
+          done
 
       # ── Verify the artifact really is a production-signed release APK ───────
       - name: Verify APK signature, identity and checksum
