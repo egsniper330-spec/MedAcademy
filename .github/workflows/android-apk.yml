@@ -93,34 +93,6 @@ jobs:
       EXPO_PUBLIC_PHP_API_URL: https://api.medacademy.site/backend/public/index.php
       CI: '1'
 
-      # ══════════════════════════════════════════════════════════════════════
-      # ⚠️  TEMPORARY SECURITY SUSPENSION — CRASH-INVESTIGATION BUILD ONLY
-      # ──────────────────────────────────────────────────────────────────────
-      # Arms the build-time diagnostic switch (src/lib/securityTestBuild.ts) so
-      # the APK from THIS workflow lets the app reach the dashboard on a device
-      # with Developer Options / USB debugging / Magisk / Xposed enabled.
-      #
-      # WAIVED from the local BLOCKING decision only:
-      #   developer_options_enabled, adb_enabled, debugger_attached,
-      #   debug_detected, root_detected, magisk_detected, xposed_detected,
-      #   frida_detected
-      #
-      # STILL ENFORCED: authentication and authorization, session validation,
-      # backend access control, VPN/overlay policy, screen-recording detection,
-      # signature / Play Integrity / tamper checks, certificate pinning,
-      # multi-window enforcement, watermarks and PDF protection. Every detector
-      # still runs and every finding is still reported to the backend — only the
-      # local blocking verdict ignores the types listed above.
-      #
-      # TO RESTORE NORMAL SECURITY: delete these three variables (keep `CI: '1'`),
-      # delete the step named "Verify APK bundle contains the diagnostic switch"
-      # and the TEMPORARY line in "Build summary", then rebuild. Nothing in src/
-      # needs to change: without these keys the switch compiles to `false`.
-      # Full checklist: docs/TEMP_SECURITY_SUSPENSION.md
-      # ══════════════════════════════════════════════════════════════════════
-      EXPO_PUBLIC_SECURITY_TEST_BUILD: '1'
-      EXPO_PUBLIC_SECURITY_TEST_BUILD_ACK: security-test
-      MEDACADEMY_SECURITY_SUSPENSION: workflow
 
     steps:
       - name: Checkout
@@ -184,34 +156,6 @@ jobs:
       - name: Install Node dependencies (npm)
         run: npm ci --no-audit --no-fund
 
-      # ── TEMPORARY (security suspension): make the switch reach Metro ────────
-      # WHY THIS EXISTS — the release build inlines `process.env.EXPO_PUBLIC_*`
-      # AS A LITERAL at transform time (babel-preset-expo/inline-env-vars.js:
-      # `path.replaceWith(t.valueToNode(process.env[key]))` when isProd). The
-      # value must therefore be present in the METRO process, and Gradle's
-      # `createBundleReleaseJsAndAssets` does not reliably forward the job
-      # environment into that node process. Expo's env loader demonstrably runs
-      # inside the bundle task (the log shows `env: load …`), so the keys are
-      # also written to a RUNNER-LOCAL, never-committed `.env.production`.
-      # A real supply-chain rule stays intact: this file is created here, holds
-      # no secrets, and exists only for the duration of the job.
-      # REMOVE THIS STEP when restoring normal security enforcement.
-      # The keys must exist in the process that COMPILES the bundle, because a
-      # release bundle inlines `process.env.EXPO_PUBLIC_*` as a literal at
-      # transform time (babel-preset-expo/inline-env-vars.js). Job-level `env:`
-      # alone proved insufficient for build 223, so the keys are also written to
-      # the project's env files — the channel the Gradle bundle task
-      # demonstrably reads (its log shows `env: load …` / `env: export …`).
-      # The script owns the file precedence, refuses conflicts, and is tested by
-      # tests/diagnosticSuspensionArm.test.cjs.
-      - name: Arm the temporary security suspension for the bundle
-        run: node scripts/arm-diagnostic-suspension.cjs arm
-
-      # Fail in seconds, not after a 30-minute Gradle build: this proves the
-      # whole chain (env files -> Expo loader -> Babel inlining -> switch true ->
-      # exactly eight waived findings, unrelated findings still blocking).
-      - name: Verify the suspension reaches the compiler (pre-build gate)
-        run: node scripts/arm-diagnostic-suspension.cjs verify
 
       # ── Restore the production keystore + derive the public cert pin ───────
       - name: Restore production keystore and derive cert fingerprint
@@ -306,6 +250,7 @@ jobs:
           ls "$SDK/platforms"
 
       # ── The build itself ────────────────────────────────────────────────────
+
       - name: Build signed release APK (Gradle)
         id: build
         working-directory: android
@@ -417,52 +362,6 @@ jobs:
 
           echo "APK ready: $ARTIFACT ($(( SIZE_BYTES / 1048576 )) MB), sha256=$SHA256"
 
-      # ── TEMPORARY (security suspension): prove the waiver is in the APK ─────
-      # The switch is inlined at BUNDLE time by Metro. If an env change, a Metro
-      # cache or a Babel change ever silently dropped it, the APK would look
-      # normal and block login again — the exact failure this step makes
-      # impossible to miss. It reads the APK's own JS bundle, not the sources.
-      # REMOVE THIS STEP when restoring normal security enforcement.
-      - name: Verify APK bundle contains the diagnostic switch
-        run: |
-          set -euo pipefail
-          APK="${APK_PATH:-android/app/build/outputs/apk/release/app-release.apk}"
-          [ -f "$APK" ] || { echo "::error::APK not found at $APK"; exit 1; }
-          # python3 (always present on the runner image) rather than unzip: a
-          # missing or failing extraction tool must be a loud error, never a
-          # silent "marker not found" that blocks a perfectly good APK.
-          python3 - "$APK" "$RUNNER_TEMP/shipped.bundle" <<'PY'
-          import sys, zipfile
-          apk, out = sys.argv[1], sys.argv[2]
-          try:
-              z = zipfile.ZipFile(apk)
-          except Exception as exc:
-              sys.exit(f"::error::cannot open the APK as a zip archive: {exc}")
-          with z:
-              bundles = [n for n in z.namelist() if n.endswith(".bundle")]
-              print("JS bundle entries in the APK:", bundles or "(none)")
-              candidates = [n for n in bundles if n.endswith("index.android.bundle")] or bundles
-              if not candidates:
-                  sys.exit("::error::the APK contains no JS bundle entry at all")
-              data = z.read(candidates[0])
-          with open(out, "wb") as fh:
-              fh.write(data)
-          print(f"extracted {candidates[0]} ({len(data)} bytes)")
-          PY
-          B="$RUNNER_TEMP/shipped.bundle"
-          MARKERS="$(grep -a -o -E 'DIAGNOSTIC BUILD|DIAG-BUILD' "$B" | sort -u || true)"
-          echo "Diagnostic markers in the shipped bundle:"
-          printf '%s\n' "${MARKERS:-(none)}"
-          if ! printf '%s' "$MARKERS" | grep -q 'DIAGNOSTIC BUILD'; then
-            echo "::group::why the marker is missing"
-            echo "bundle size: $(stat -c%s "$B") bytes"
-            echo "dev-style env references (non-zero => bundle was NOT built in production mode):"
-            grep -a -c 'EXPO_PUBLIC_SECURITY_TEST_BUILD' "$B" || true
-            echo "::endgroup::"
-            echo "::error::The APK bundle has no diagnostic marker — the temporary security suspension did NOT reach the bundle (env / Metro / Babel). Refusing to publish this APK."
-            exit 1
-          fi
-          echo "OK — the APK's JS bundle contains the diagnostic build marker."
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v6
@@ -512,11 +411,6 @@ jobs:
             echo "| | |"
             echo "|---|---|"
             echo "| Result | ${RESULT} |"
-            # TEMPORARY (security suspension) — remove together with the job env
-            # block marked "TEMPORARY SECURITY SUSPENSION".
-            if [ -n "${MEDACADEMY_SECURITY_SUSPENSION:-}" ]; then
-              echo "| ⚠️ Security | **TEMPORARY SUSPENSION ACTIVE** — local device-environment checks (ADB / Developer Options / root / Xposed) do not block this APK |"
-            fi
             echo "| Trigger reason | ${TRIGGER_REASON:-n/a} |"
             echo "| Commit | \`${GITHUB_SHA}\` |"
             if [ "${APK_OUTCOME:-}" = "success" ]; then

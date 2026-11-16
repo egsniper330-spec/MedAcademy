@@ -78,7 +78,7 @@ import {
 // PURE root-diagnostics vocabulary (ids/confidence) for the diagnostic log line.
 import { describeRootDiagnostics } from './rootDetectionModel';
 import { getSecurityGuards, getSecurityConfig } from '@/lib/securityConfigService';
-import { isSecurityTestBypassed } from '@/lib/securityTestBuild';
+
 // PURE state model (no react-native/expo imports) — risk scoring + policy
 // evaluation are delegated there so they are unit-testable with plain node.
 import {
@@ -1850,6 +1850,38 @@ export async function clearAppAttestKey(): Promise<void> {
   try { await SecureStore.deleteItemAsync(ATTEST_KEY_STORE, ATTEST_KEY_OPTIONS); } catch { /* ignore */ }
 }
 
+// ─── Temporarily disabled checks ─────────────────────────────────────────────
+
+/**
+ * TEMPORARILY DISABLED SECURITY CHECKS.
+ *
+ * Each entry disables ONE finding type for the whole local decision path: the
+ * finding is dropped from `allThreats` before the risk score is computed, so it
+ * cannot block login, cannot trigger a security warning and adds nothing to the
+ * score. The detectors themselves still run (they are upstream of this filter);
+ * their results are simply not acted on for these four types.
+ *
+ * TO RE-ENABLE A CHECK: set its entry to `false` (or delete the line) and ship
+ * a new build. Nothing else needs to change, and no build flag/env var is
+ * involved — this is a plain source constant, so it is visible in every diff.
+ *
+ * Only these four local device-environment signals are disabled. Every other
+ * check — root (non-Magisk), Frida, debugger, tamper/integrity, Play Integrity,
+ * certificate pinning, VPN/proxy, overlay/tapjacking, screen recording, and all
+ * authentication/backend authorization — remains fully enforced.
+ */
+export const TEMPORARILY_DISABLED_CHECKS: Readonly<Record<string, boolean>> = Object.freeze({
+  adb_enabled: true,
+  xposed_detected: true,
+  magisk_detected: true,
+  developer_options_enabled: true,
+});
+
+/** True when this finding type is temporarily disabled (see the table above). */
+export function isCheckTemporarilyDisabled(threat: { type: string }): boolean {
+  return TEMPORARILY_DISABLED_CHECKS[threat.type] === true;
+}
+
 // ─── Risk Score Calculator ────────────────────────────────────────────────────
 
 export function computeRiskScore(threats: SecurityThreat[]): number {
@@ -1991,8 +2023,10 @@ export async function runSecurityChecks(
     fridaThreat, xposedThreat, magiskThreat, overlayThreat,
     tamperThreat, piThreat, sslThreat,
   ].filter((t): t is SecurityThreat => t !== null && t.detected)
-    // TEMPORARY SECURITY TEST BUILD: no-op unless EXPO_PUBLIC_SECURITY_TEST_BUILD=1.
-    .filter((t) => !isSecurityTestBypassed(t));
+    // Temporarily disabled checks (adb_enabled, xposed_detected, magisk_detected,
+    // developer_options_enabled) are dropped HERE, before the risk score and
+    // before every blocking/warning decision. See TEMPORARILY_DISABLED_CHECKS.
+    .filter((t) => !isCheckTemporarilyDisabled(t));
 
   if (__DEV__) {
     console.log('[SecurityCheck][runSecurityChecks] ✅ detected threats:', allThreats.map(t => t.type).join(', ') || 'none');
