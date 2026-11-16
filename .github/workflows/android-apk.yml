@@ -196,37 +196,22 @@ jobs:
       # A real supply-chain rule stays intact: this file is created here, holds
       # no secrets, and exists only for the duration of the job.
       # REMOVE THIS STEP when restoring normal security enforcement.
+      # The keys must exist in the process that COMPILES the bundle, because a
+      # release bundle inlines `process.env.EXPO_PUBLIC_*` as a literal at
+      # transform time (babel-preset-expo/inline-env-vars.js). Job-level `env:`
+      # alone proved insufficient for build 223, so the keys are also written to
+      # the project's env files — the channel the Gradle bundle task
+      # demonstrably reads (its log shows `env: load …` / `env: export …`).
+      # The script owns the file precedence, refuses conflicts, and is tested by
+      # tests/diagnosticSuspensionArm.test.cjs.
       - name: Arm the temporary security suspension for the bundle
-        run: |
-          set -euo pipefail
-          # PRIMARY channel: the tracked .env file. PROOF it works in this job:
-          # the bundle log prints `env: load .env` and `env: export …,` i.e.
-          # Expo's loader reads this file in the SAME process that runs the
-          # Metro bundle task and exports its keys there. Appending here cannot
-          # depend on how Gradle forwards the job environment to that process.
-          if grep -q '^EXPO_PUBLIC_SECURITY_TEST_BUILD=' .env; then
-            echo "::error::.env already declares EXPO_PUBLIC_SECURITY_TEST_BUILD — refusing to append a second definition."
-            exit 1
-          fi
-          printf '%s\n' \
-            'EXPO_PUBLIC_SECURITY_TEST_BUILD=1' \
-            'EXPO_PUBLIC_SECURITY_TEST_BUILD_ACK=security-test' >> .env
+        run: node scripts/arm-diagnostic-suspension.cjs arm
 
-          # SECONDARY channel: .env.production, which the loader also reads when
-          # NODE_ENV=production. Created only if absent; runner-local only.
-          if [ -e .env.production ]; then
-            echo "::warning::.env.production already exists — leaving it untouched."
-          else
-            printf '%s\n' \
-              'EXPO_PUBLIC_SECURITY_TEST_BUILD=1' \
-              'EXPO_PUBLIC_SECURITY_TEST_BUILD_ACK=security-test' > .env.production
-            chmod 600 .env.production
-          fi
-
-          echo "Suspension keys now present in (names only):"
-          grep -l 'EXPO_PUBLIC_SECURITY_TEST_BUILD' .env .env.production 2>/dev/null || true
-          echo "-- sanity check: Node sees them --"
-          node -e "console.log('flag=', process.env.EXPO_PUBLIC_SECURITY_TEST_BUILD ?? '(unset in this shell)'); console.log('ack=', process.env.EXPO_PUBLIC_SECURITY_TEST_BUILD_ACK ?? '(unset in this shell)');"
+      # Fail in seconds, not after a 30-minute Gradle build: this proves the
+      # whole chain (env files -> Expo loader -> Babel inlining -> switch true ->
+      # exactly eight waived findings, unrelated findings still blocking).
+      - name: Verify the suspension reaches the compiler (pre-build gate)
+        run: node scripts/arm-diagnostic-suspension.cjs verify
 
       # ── Restore the production keystore + derive the public cert pin ───────
       - name: Restore production keystore and derive cert fingerprint

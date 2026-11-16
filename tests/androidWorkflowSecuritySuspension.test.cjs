@@ -280,20 +280,27 @@ check('workflow itself warns that the build is temporarily suspended', () => {
     'the workflow must carry the temporary-suspension banner comment');
 });
 
-check('workflow arms the bundle through the tracked .env (proven channel)', () => {
+check('workflow arms the env files before the Gradle bundle task', () => {
   const step = steps.find((s) => /Arm the temporary security suspension/.test(String(s.name ?? '')));
   assert.ok(step, 'the arming step is missing');
   const run = scriptOf(step);
-  assert.ok(run.includes('EXPO_PUBLIC_SECURITY_TEST_BUILD=1'), 'must write the flag');
-  assert.ok(run.includes('EXPO_PUBLIC_SECURITY_TEST_BUILD_ACK=security-test'), 'must write the acknowledgement key');
-  // The env loader demonstrably reads .env inside the Gradle bundle task, while
-  // the job environment is not reliably forwarded to that node process.
-  assert.ok(/>>\s*\.env\b/.test(run), 'must append to the tracked .env file');
-  assert.ok(/\.env\.production/.test(run), 'must also cover .env.production (NODE_ENV=production)');
-  assert.ok(/refusing to append a second definition/.test(run), 'must refuse a duplicate definition');
+  assert.match(run, /node scripts\/arm-diagnostic-suspension\.cjs arm/,
+    'the arming step must use the tested arming script');
   const idxArm = stepNames.indexOf(step.name);
   const idxBuild = stepNames.indexOf('Build signed release APK (Gradle)');
   assert.ok(idxArm > -1 && idxBuild > -1 && idxArm < idxBuild, 'must run before the bundle is built');
+});
+
+check('workflow proves the chain compiles true before the long build', () => {
+  const step = steps.find((s) => /pre-build gate/.test(String(s.name ?? '')));
+  assert.ok(step, 'the pre-build verification gate is missing');
+  const run = scriptOf(step);
+  assert.match(run, /node scripts\/arm-diagnostic-suspension\.cjs verify/,
+    'the gate must run the verification command');
+  const idxVerify = stepNames.indexOf(step.name);
+  const idxBuild = stepNames.indexOf('Build signed release APK (Gradle)');
+  assert.ok(idxVerify > -1 && idxBuild > -1 && idxVerify < idxBuild,
+    'the gate must run before Gradle starts Metro');
 });
 
 check('no .env.production is present or tracked in the project', () => {

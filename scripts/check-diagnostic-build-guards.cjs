@@ -172,17 +172,32 @@ for (const forbidden of ['AsyncStorage', 'SecureStore', 'expo-constants', 'Const
 }
 
 // ── 5b. No env file on disk may arm the switch by itself ─────────────────────
-// The release bundle inlines EXPO_PUBLIC_* at transform time, and Expo's env
-// loader reads .env.production when NODE_ENV=production. A committed (or
-// accidentally left-behind) .env.production carrying the keys would arm the
-// suspension in EVERY build, which is exactly the hidden bypass to avoid.
-// The workflow writes that file on the runner only; it must not exist here.
-const strayEnvProd = path.join(ROOT, '.env.production');
-if (fs.existsSync(strayEnvProd)) {
+// Release bundles inline EXPO_PUBLIC_* at transform time, and Expo's loader
+// reads `.env.<mode>.local` -> `.env.local` -> `.env.<mode>` -> `.env`.
+// A committed (or accidentally left-behind) env file carrying the two keys
+// would arm the suspension in EVERY build of this checkout — the exact hidden
+// bypass this guard exists to prevent. The workflow writes those files on the
+// RUNNER only, through scripts/arm-diagnostic-suspension.cjs.
+//
+// `MEDACADEMY_GUARD_ENV_ROOT` lets the test suite point this scan at a temp
+// directory instead of the real project.
+const envRoot = process.env.MEDACADEMY_GUARD_ENV_ROOT || ROOT;
+const ARMED_KEYS = ['EXPO_PUBLIC_SECURITY_TEST_BUILD', 'EXPO_PUBLIC_SECURITY_TEST_BUILD_ACK'];
+const strayEnvFiles = ['.env', '.env.local', '.env.production', '.env.production.local']
+  .map((name) => path.join(envRoot, name))
+  .filter((file) => {
+    if (!fs.existsSync(file)) return false;
+    const body = fs.readFileSync(file, 'utf8');
+    return ARMED_KEYS.some((key) => new RegExp(`^\\s*${key}\\s*=`, 'm').test(body));
+  });
+if (strayEnvFiles.length > 0) {
   fail(
-    'A .env.production file exists in the project root. The temporary suspension is\n' +
-    '         armed by the workflow on the runner only — a local or committed\n' +
-    '         .env.production would arm it in every build. Delete the file.',
+    `An env file in this checkout declares the suspension keys: ${strayEnvFiles
+      .map((f) => path.basename(f))
+      .join(', ')}.\n` +
+      '         The temporary suspension is armed by the workflow ON THE RUNNER only.\n' +
+      '         A local or committed env file would arm it in every build. Remove those\n' +
+      '         lines (and delete .env.production / .env.production.local if present).',
   );
 }
 

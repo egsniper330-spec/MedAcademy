@@ -57,7 +57,9 @@ this cannot silently arm an ordinary build.
 | `eas.json` | `security-test` profile carries the two keys (unrelated to this workflow) | unchanged by this task |
 | `package.json` | `validate` / `prebuild:validate` also run the build guard | keep |
 | `scripts/check-diagnostic-build-guards.cjs` | guard; now also accepts `MEDACADEMY_SECURITY_SUSPENSION=workflow` as the second sanctioned arming path | keep |
+| `scripts/arm-diagnostic-suspension.cjs` | `arm` / `verify` / `status` for the env-file arming; owns the file precedence, refuses conflicts, and proves the compiled switch is `true` | delete when restoring |
 | `tests/androidWorkflowSecuritySuspension.test.cjs` | regression suite for this suspension + its restoration | keep |
+| `tests/diagnosticSuspensionArm.test.cjs` | regression suite for the arming/verification script (9 assertions) | delete with the script |
 | `tests/diagnosticSecurityBuild.test.cjs` | regression suite for the switch itself | keep |
 | `docs/DIAGNOSTIC_SECURITY_BUILD.md` | switch documentation | keep |
 
@@ -131,6 +133,30 @@ mode) and then fails, so an un-suspended APK is never published. The extraction
 uses `python3`, so a missing archive tool can no longer masquerade as
 “marker not found”.
 
+### The two steps that make the keys reach the compiler
+
+1. **Arm the temporary security suspension for the bundle** —
+   `node scripts/arm-diagnostic-suspension.cjs arm`. Writes the two keys into
+   every env-file channel the Expo loader consults, in its own precedence order
+   (`.env.<mode>.local` → `.env.local` → `.env.<mode>` → `.env`), preserving all
+   unrelated values. It refuses a conflicting definition (e.g. a leftover
+   `EXPO_PUBLIC_SECURITY_TEST_BUILD=0`) and writes nothing in that case, so the
+   checkout can never end up half-armed. The runner-side files are not
+   committed: `.env.local` and `.env.production.local` are git-ignored, and the
+   build guard rejects any checkout whose env files declare the keys.
+2. **Verify the suspension reaches the compiler (pre-build gate)** —
+   `node scripts/arm-diagnostic-suspension.cjs verify`. Runs in seconds and
+   proves the real chain before Gradle spends 30 minutes: Expo's loader reads
+   those files → the two keys are in the bundler environment → Babel compiles
+   `src/lib/securityTestBuild.ts` in production mode with the values **inlined
+   as literals** (no `expo/virtual/env` reference) → the compiled module
+   evaluates `SECURITY_TEST_BUILD === true` → exactly the eight documented
+   findings are waived → `vpn_detected`, `screen_recording` and
+   `signature_invalid` still block.
+
+Both commands accept `--root DIR` and `--mode production` and are exercised
+end-to-end by `tests/diagnosticSuspensionArm.test.cjs`.
+
 ## 4. Verify on the tablet
 
 ```bash
@@ -149,10 +175,14 @@ Expected: `[DIAG-BUILD] ACTIVE …`, the red banner at the top of every screen, 
 1. **Revert the workflow** — in `.github/workflows/android-apk.yml`:
    - delete the job-`env:` block that starts with
      `# ⚠️  TEMPORARY SECURITY SUSPENSION` (the three variables);
-   - delete the step `Verify APK bundle contains the diagnostic switch`
-     (the comment above it starts `# ── TEMPORARY (security suspension)`);
+   - delete the step `Arm the temporary security suspension for the bundle`
+     (and the comment block above it) and the step
+     `Verify the suspension reaches the compiler (pre-build gate)`;
+   - delete the step `Verify APK bundle contains the diagnostic switch`;
    - delete the `⚠️ Security` block in `Build summary` (comment
-     `# TEMPORARY (security suspension)`).
+     `# TEMPORARY (security suspension)`);
+   - delete `scripts/arm-diagnostic-suspension.cjs` and
+     `tests/diagnosticSuspensionArm.test.cjs`.
 2. **Set the versionCode** in `app.json` to the next version you intend to ship
    (`223` was the suspended build — publish `224` or higher).
 3. **Leave the switch code in place** — with no keys it is inert:
