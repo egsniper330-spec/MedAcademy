@@ -211,13 +211,33 @@ export default function GlassTabBar({
     [visibleRoutes, layouts, isRTL, effectiveRowWidth, fallbackTabWidth],
   );
 
+  /* ── ONE DRIVER PER VIEW (Android crash guard) ──────────────────────────
+   * `fade`, `translateX` and `stretch` are all applied to the SAME
+   * Animated.View (the shared indicator pill, `styles.indicator`). React
+   * Native marks EVERY animated value attached to a view as "native" as soon
+   * as one animation on that view runs with `useNativeDriver: true`
+   * (AnimatedProps.__makeNative → node.__makeNative for each style node).
+   * A JS-driven animation on such a value then throws in Animation.start:
+   *
+   *   Error: Attempting to run JS driven animation on animated node that has
+   *   been moved to "native" earlier by starting an animation with
+   *   `useNativeDriver: true`
+   *
+   * That is fatal on Android (the exception is rethrown on the native-modules
+   * thread and kills the process) — it crashed the app on launch as soon as
+   * the dashboard mounted the tab bar. `translateX`/`stretch` must stay
+   * JS-driven (the finger writes `translateX` directly from touch
+   * coordinates), so `fade` — which only ever lives on this one view — is
+   * JS-driven too. Never make a single property of this view native while the
+   * transform siblings are JS: the whole view has to share one driver.
+   */
   useEffect(() => {
     // A finger owns the position while dragging; the route-driven animation
     // must not pull the bubble out from under it (re-render, layout change…).
     if (dragging.current) return;
 
     if (!activeLayout) {
-      Animated.timing(fade, { toValue: 0, duration: 140, useNativeDriver: true }).start();
+      Animated.timing(fade, { toValue: 0, duration: 140, useNativeDriver: false }).start();
       return;
     }
 
@@ -268,7 +288,7 @@ export default function GlassTabBar({
         }),
         Animated.spring(stretch, { toValue: 1, damping: 14, stiffness: 170, useNativeDriver: false }),
       ]),
-      Animated.timing(fade, { toValue: 1, duration: 140, useNativeDriver: true }),
+      Animated.timing(fade, { toValue: 1, duration: 140, useNativeDriver: false }),
     ]).start();
   }, [activeLayout, targetX, translateX, stretch, fade]);
 
