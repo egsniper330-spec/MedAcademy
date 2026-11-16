@@ -29,6 +29,8 @@
  *  4. Environment (the build actually about to run):
  *       • the flag alone is a FAILURE — the acknowledgement key is required;
  *       • if EAS_BUILD_PROFILE is present it must be `security-test`;
+ *       • with no profile, MEDACADEMY_SECURITY_SUSPENSION=workflow is required
+ *         (the temporary suspension in .github/workflows/android-apk.yml);
  *       • neither key may be set while building any other profile.
  *  5. Source: the switch is compile-time only (literal process.env member
  *     access, strict equality) and reads no runtime/storage/remote input.
@@ -47,6 +49,9 @@ const FLAG = 'EXPO_PUBLIC_SECURITY_TEST_BUILD';
 const ACK = 'EXPO_PUBLIC_SECURITY_TEST_BUILD_ACK';
 const ACK_VALUE = 'security-test';
 const DIAGNOSTIC_PROFILE = 'security-test';
+/** Second sanctioned arming path: the temporary suspension in the GH workflow. */
+const WORKFLOW_MARKER = 'MEDACADEMY_SECURITY_SUSPENSION';
+const WORKFLOW_MARKER_VALUE = 'workflow';
 
 const failures = [];
 const notes = [];
@@ -108,6 +113,7 @@ if (eas) {
 const envFlag = process.env[FLAG];
 const envAck = process.env[ACK];
 const envProfile = process.env.EAS_BUILD_PROFILE;
+const envSuspension = process.env[WORKFLOW_MARKER];
 
 if (envFlag !== undefined || envAck !== undefined) {
   if (envFlag !== '1') {
@@ -119,15 +125,20 @@ if (envFlag !== undefined || envAck !== undefined) {
   if (envProfile !== undefined && envProfile !== DIAGNOSTIC_PROFILE) {
     fail(`The diagnostic keys are set while building profile "${envProfile}". They are only allowed for "${DIAGNOSTIC_PROFILE}".`);
   }
-  if (envProfile === undefined) {
+  // Two sanctioned ways to arm the switch, both explicit and both build-time:
+  //   • EAS `security-test` profile (EAS_BUILD_PROFILE=security-test)
+  //   • the temporary suspension in .github/workflows/android-apk.yml
+  //     (MEDACADEMY_SECURITY_SUSPENSION=workflow)
+  // Neither key set on its own, and no other profile, is accepted.
+  if (envProfile === undefined && envSuspension !== WORKFLOW_MARKER_VALUE) {
     fail(
-      `The diagnostic keys are set in the local environment with no EAS_BUILD_PROFILE.\n` +
-      `         Run the diagnostic build with EAS_BUILD_PROFILE=${DIAGNOSTIC_PROFILE} so it is unambiguous,\n` +
-      `         or unset ${FLAG} / ${ACK} before building anything else.`,
+      `The diagnostic keys are set with neither EAS_BUILD_PROFILE=${DIAGNOSTIC_PROFILE}\n` +
+      `         nor MEDACADEMY_SECURITY_SUSPENSION=${WORKFLOW_MARKER_VALUE}. An ambiguous enablement is refused.\n` +
+      `         Unset ${FLAG} / ${ACK} before building anything else.`,
     );
   }
   if (failures.length === 0) {
-    note(`Diagnostic build requested for profile "${envProfile ?? DIAGNOSTIC_PROFILE}" — allowed (internal only).`);
+    note(`Diagnostic build requested via ${envProfile ? `profile "${envProfile}"` : `the workflow marker (${WORKFLOW_MARKER})`} — allowed.`);
   }
 }
 

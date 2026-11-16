@@ -93,6 +93,35 @@ jobs:
       EXPO_PUBLIC_PHP_API_URL: https://api.medacademy.site/backend/public/index.php
       CI: '1'
 
+      # ══════════════════════════════════════════════════════════════════════
+      # ⚠️  TEMPORARY SECURITY SUSPENSION — CRASH-INVESTIGATION BUILD ONLY
+      # ──────────────────────────────────────────────────────────────────────
+      # Arms the build-time diagnostic switch (src/lib/securityTestBuild.ts) so
+      # the APK from THIS workflow lets the app reach the dashboard on a device
+      # with Developer Options / USB debugging / Magisk / Xposed enabled.
+      #
+      # WAIVED from the local BLOCKING decision only:
+      #   developer_options_enabled, adb_enabled, debugger_attached,
+      #   debug_detected, root_detected, magisk_detected, xposed_detected,
+      #   frida_detected
+      #
+      # STILL ENFORCED: authentication and authorization, session validation,
+      # backend access control, VPN/overlay policy, screen-recording detection,
+      # signature / Play Integrity / tamper checks, certificate pinning,
+      # multi-window enforcement, watermarks and PDF protection. Every detector
+      # still runs and every finding is still reported to the backend — only the
+      # local blocking verdict ignores the types listed above.
+      #
+      # TO RESTORE NORMAL SECURITY: delete these three variables (keep `CI: '1'`),
+      # delete the step named "Verify APK bundle contains the diagnostic switch"
+      # and the TEMPORARY line in "Build summary", then rebuild. Nothing in src/
+      # needs to change: without these keys the switch compiles to `false`.
+      # Full checklist: docs/TEMP_SECURITY_SUSPENSION.md
+      # ══════════════════════════════════════════════════════════════════════
+      EXPO_PUBLIC_SECURITY_TEST_BUILD: '1'
+      EXPO_PUBLIC_SECURITY_TEST_BUILD_ACK: security-test
+      MEDACADEMY_SECURITY_SUSPENSION: workflow
+
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -333,6 +362,24 @@ jobs:
 
           echo "APK ready: $ARTIFACT ($(( SIZE_BYTES / 1048576 )) MB), sha256=$SHA256"
 
+      # ── TEMPORARY (security suspension): prove the waiver is in the APK ─────
+      # The switch is inlined at BUNDLE time by Metro. If an env change, a Metro
+      # cache or a Babel change ever silently dropped it, the APK would look
+      # normal and block login again — the exact failure this step makes
+      # impossible to miss. It reads the APK's own JS bundle, not the sources.
+      # REMOVE THIS STEP when restoring normal security enforcement.
+      - name: Verify APK bundle contains the diagnostic switch
+        run: |
+          set -euo pipefail
+          APK="${APK_PATH:-android/app/build/outputs/apk/release/app-release.apk}"
+          [ -f "$APK" ] || { echo "::error::APK not found at $APK"; exit 1; }
+          MARKERS="$(unzip -p "$APK" assets/index.android.bundle | grep -a -o -E 'DIAGNOSTIC BUILD|DIAG-BUILD' | sort -u || true)"
+          echo "Diagnostic markers found in the APK bundle:"
+          printf '%s\n' "${MARKERS:-(none)}"
+          printf '%s' "$MARKERS" | grep -q 'DIAGNOSTIC BUILD' \
+            || { echo "::error::The APK bundle has no diagnostic marker — the temporary security suspension did NOT reach the bundle (env / Metro / Babel). Refusing to publish this APK."; exit 1; }
+          echo "OK — the APK's JS bundle contains the diagnostic build marker."
+
       - name: Upload APK artifact
         uses: actions/upload-artifact@v6
         with:
@@ -381,6 +428,11 @@ jobs:
             echo "| | |"
             echo "|---|---|"
             echo "| Result | ${RESULT} |"
+            # TEMPORARY (security suspension) — remove together with the job env
+            # block marked "TEMPORARY SECURITY SUSPENSION".
+            if [ -n "${MEDACADEMY_SECURITY_SUSPENSION:-}" ]; then
+              echo "| ⚠️ Security | **TEMPORARY SUSPENSION ACTIVE** — local device-environment checks (ADB / Developer Options / root / Xposed) do not block this APK |"
+            fi
             echo "| Trigger reason | ${TRIGGER_REASON:-n/a} |"
             echo "| Commit | \`${GITHUB_SHA}\` |"
             if [ "${APK_OUTCOME:-}" = "success" ]; then
