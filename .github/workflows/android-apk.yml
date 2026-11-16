@@ -184,6 +184,50 @@ jobs:
       - name: Install Node dependencies (npm)
         run: npm ci --no-audit --no-fund
 
+      # ── TEMPORARY (security suspension): make the switch reach Metro ────────
+      # WHY THIS EXISTS — the release build inlines `process.env.EXPO_PUBLIC_*`
+      # AS A LITERAL at transform time (babel-preset-expo/inline-env-vars.js:
+      # `path.replaceWith(t.valueToNode(process.env[key]))` when isProd). The
+      # value must therefore be present in the METRO process, and Gradle's
+      # `createBundleReleaseJsAndAssets` does not reliably forward the job
+      # environment into that node process. Expo's env loader demonstrably runs
+      # inside the bundle task (the log shows `env: load …`), so the keys are
+      # also written to a RUNNER-LOCAL, never-committed `.env.production`.
+      # A real supply-chain rule stays intact: this file is created here, holds
+      # no secrets, and exists only for the duration of the job.
+      # REMOVE THIS STEP when restoring normal security enforcement.
+      - name: Arm the temporary security suspension for the bundle
+        run: |
+          set -euo pipefail
+          # PRIMARY channel: the tracked .env file. PROOF it works in this job:
+          # the bundle log prints `env: load .env` and `env: export …,` i.e.
+          # Expo's loader reads this file in the SAME process that runs the
+          # Metro bundle task and exports its keys there. Appending here cannot
+          # depend on how Gradle forwards the job environment to that process.
+          if grep -q '^EXPO_PUBLIC_SECURITY_TEST_BUILD=' .env; then
+            echo "::error::.env already declares EXPO_PUBLIC_SECURITY_TEST_BUILD — refusing to append a second definition."
+            exit 1
+          fi
+          printf '%s\n' \
+            'EXPO_PUBLIC_SECURITY_TEST_BUILD=1' \
+            'EXPO_PUBLIC_SECURITY_TEST_BUILD_ACK=security-test' >> .env
+
+          # SECONDARY channel: .env.production, which the loader also reads when
+          # NODE_ENV=production. Created only if absent; runner-local only.
+          if [ -e .env.production ]; then
+            echo "::warning::.env.production already exists — leaving it untouched."
+          else
+            printf '%s\n' \
+              'EXPO_PUBLIC_SECURITY_TEST_BUILD=1' \
+              'EXPO_PUBLIC_SECURITY_TEST_BUILD_ACK=security-test' > .env.production
+            chmod 600 .env.production
+          fi
+
+          echo "Suspension keys now present in (names only):"
+          grep -l 'EXPO_PUBLIC_SECURITY_TEST_BUILD' .env .env.production 2>/dev/null || true
+          echo "-- sanity check: Node sees them --"
+          node -e "console.log('flag=', process.env.EXPO_PUBLIC_SECURITY_TEST_BUILD ?? '(unset in this shell)'); console.log('ack=', process.env.EXPO_PUBLIC_SECURITY_TEST_BUILD_ACK ?? '(unset in this shell)');"
+
       # ── Restore the production keystore + derive the public cert pin ───────
       - name: Restore production keystore and derive cert fingerprint
         id: signing
@@ -399,11 +443,40 @@ jobs:
           set -euo pipefail
           APK="${APK_PATH:-android/app/build/outputs/apk/release/app-release.apk}"
           [ -f "$APK" ] || { echo "::error::APK not found at $APK"; exit 1; }
-          MARKERS="$(unzip -p "$APK" assets/index.android.bundle | grep -a -o -E 'DIAGNOSTIC BUILD|DIAG-BUILD' | sort -u || true)"
-          echo "Diagnostic markers found in the APK bundle:"
+          # python3 (always present on the runner image) rather than unzip: a
+          # missing or failing extraction tool must be a loud error, never a
+          # silent "marker not found" that blocks a perfectly good APK.
+          python3 - "$APK" "$RUNNER_TEMP/shipped.bundle" <<'PY'
+          import sys, zipfile
+          apk, out = sys.argv[1], sys.argv[2]
+          try:
+              z = zipfile.ZipFile(apk)
+          except Exception as exc:
+              sys.exit(f"::error::cannot open the APK as a zip archive: {exc}")
+          with z:
+              bundles = [n for n in z.namelist() if n.endswith(".bundle")]
+              print("JS bundle entries in the APK:", bundles or "(none)")
+              candidates = [n for n in bundles if n.endswith("index.android.bundle")] or bundles
+              if not candidates:
+                  sys.exit("::error::the APK contains no JS bundle entry at all")
+              data = z.read(candidates[0])
+          with open(out, "wb") as fh:
+              fh.write(data)
+          print(f"extracted {candidates[0]} ({len(data)} bytes)")
+          PY
+          B="$RUNNER_TEMP/shipped.bundle"
+          MARKERS="$(grep -a -o -E 'DIAGNOSTIC BUILD|DIAG-BUILD' "$B" | sort -u || true)"
+          echo "Diagnostic markers in the shipped bundle:"
           printf '%s\n' "${MARKERS:-(none)}"
-          printf '%s' "$MARKERS" | grep -q 'DIAGNOSTIC BUILD' \
-            || { echo "::error::The APK bundle has no diagnostic marker — the temporary security suspension did NOT reach the bundle (env / Metro / Babel). Refusing to publish this APK."; exit 1; }
+          if ! printf '%s' "$MARKERS" | grep -q 'DIAGNOSTIC BUILD'; then
+            echo "::group::why the marker is missing"
+            echo "bundle size: $(stat -c%s "$B") bytes"
+            echo "dev-style env references (non-zero => bundle was NOT built in production mode):"
+            grep -a -c 'EXPO_PUBLIC_SECURITY_TEST_BUILD' "$B" || true
+            echo "::endgroup::"
+            echo "::error::The APK bundle has no diagnostic marker — the temporary security suspension did NOT reach the bundle (env / Metro / Babel). Refusing to publish this APK."
+            exit 1
+          fi
           echo "OK — the APK's JS bundle contains the diagnostic build marker."
 
       - name: Upload APK artifact

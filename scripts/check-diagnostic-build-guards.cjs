@@ -171,6 +171,21 @@ for (const forbidden of ['AsyncStorage', 'SecureStore', 'expo-constants', 'Const
   }
 }
 
+// ── 5b. No env file on disk may arm the switch by itself ─────────────────────
+// The release bundle inlines EXPO_PUBLIC_* at transform time, and Expo's env
+// loader reads .env.production when NODE_ENV=production. A committed (or
+// accidentally left-behind) .env.production carrying the keys would arm the
+// suspension in EVERY build, which is exactly the hidden bypass to avoid.
+// The workflow writes that file on the runner only; it must not exist here.
+const strayEnvProd = path.join(ROOT, '.env.production');
+if (fs.existsSync(strayEnvProd)) {
+  fail(
+    'A .env.production file exists in the project root. The temporary suspension is\n' +
+    '         armed by the workflow on the runner only — a local or committed\n' +
+    '         .env.production would arm it in every build. Delete the file.',
+  );
+}
+
 // ── 6. The visible indicator must exist, be gated, and be mounted ────────────
 const bannerSrc = read('src/components/DiagnosticModeBanner.tsx');
 if (!bannerSrc.includes("from '@/lib/securityTestBuild'")) {

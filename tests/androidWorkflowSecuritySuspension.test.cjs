@@ -156,7 +156,9 @@ check('workflow verifies the APK bundle contains the diagnostic marker', () => {
   const step = steps.find((s) => /Verify APK bundle contains the diagnostic switch/.test(String(s.name ?? '')));
   assert.ok(step, 'the APK-bundle verification step is missing');
   const run = scriptOf(step);
-  assert.ok(run.includes('assets/index.android.bundle'), 'must inspect the APK JS bundle');
+  assert.ok(/index\.android\.bundle/.test(run), 'must inspect the APK JS bundle entry');
+  assert.ok(/zipfile/.test(run), 'must extract the bundle from the APK itself');
+  assert.ok(/no JS bundle entry at all/.test(run), 'must fail loudly when the APK holds no bundle');
   assert.ok(run.includes('DIAGNOSTIC BUILD'), 'must assert the diagnostic banner marker');
   assert.ok(/exit 1/.test(run), 'must fail the build when the marker is absent');
 });
@@ -276,6 +278,32 @@ check('suspension and restoration are documented', () => {
 check('workflow itself warns that the build is temporarily suspended', () => {
   assert.ok(/TEMPORARY SECURITY SUSPENSION/.test(workflowSrc),
     'the workflow must carry the temporary-suspension banner comment');
+});
+
+check('workflow arms the bundle through the tracked .env (proven channel)', () => {
+  const step = steps.find((s) => /Arm the temporary security suspension/.test(String(s.name ?? '')));
+  assert.ok(step, 'the arming step is missing');
+  const run = scriptOf(step);
+  assert.ok(run.includes('EXPO_PUBLIC_SECURITY_TEST_BUILD=1'), 'must write the flag');
+  assert.ok(run.includes('EXPO_PUBLIC_SECURITY_TEST_BUILD_ACK=security-test'), 'must write the acknowledgement key');
+  // The env loader demonstrably reads .env inside the Gradle bundle task, while
+  // the job environment is not reliably forwarded to that node process.
+  assert.ok(/>>\s*\.env\b/.test(run), 'must append to the tracked .env file');
+  assert.ok(/\.env\.production/.test(run), 'must also cover .env.production (NODE_ENV=production)');
+  assert.ok(/refusing to append a second definition/.test(run), 'must refuse a duplicate definition');
+  const idxArm = stepNames.indexOf(step.name);
+  const idxBuild = stepNames.indexOf('Build signed release APK (Gradle)');
+  assert.ok(idxArm > -1 && idxBuild > -1 && idxArm < idxBuild, 'must run before the bundle is built');
+});
+
+check('no .env.production is present or tracked in the project', () => {
+  assert.ok(!fs.existsSync(path.join(ROOT, '.env.production')),
+    'a .env.production in the repo would arm the suspension in every build');
+  const tracked = spawnSync('git', ['ls-files', '--error-unmatch', '.env.production'], {
+    cwd: ROOT,
+    encoding: 'utf8',
+  });
+  assert.notStrictEqual(tracked.status, 0, '.env.production must never be tracked by git');
 });
 
 // ── Summary ────────────────────────────────────────────────────────────────

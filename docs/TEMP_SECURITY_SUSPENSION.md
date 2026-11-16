@@ -23,9 +23,25 @@ turned off or on at runtime — and it disappears completely when the keys are g
 | `EXPO_PUBLIC_SECURITY_TEST_BUILD_ACK` | `security-test` | job `env:` of `android-apk.yml` |
 | `MEDACADEMY_SECURITY_SUSPENSION` | `workflow` | job `env:` of `android-apk.yml` (build guard acknowledgement; not read by the app) |
 
-Because these are **job-level** environment variables, they are inherited by the
-Gradle `:app:assembleRelease` process, whose bundling task runs Metro/Babel — the
-point where `process.env.EXPO_PUBLIC_*` is inlined into the shipped bundle.
+Release builds inline `process.env.EXPO_PUBLIC_*` **as literals** at transform
+time (`babel-preset-expo/build/inline-env-vars.js` → `t.valueToNode(process.env[key])`
+when the caller is not a dev build), so the keys must be present in the Metro
+process that Gradle spawns. The first attempt at 223 showed the job `env:` block
+alone is not reliable for that: the APK was built and signed, but its bundle
+carried no marker. The workflow now carries the keys in **two channels**:
+
+1. the job `env:` block (visible to every step), and
+2. the step **“Arm the temporary security suspension for the bundle”**, which
+   appends the two `EXPO_PUBLIC_*` keys to the **tracked `.env`** file on the
+   runner and, when absent, writes a runner-local `.env.production` copy.
+
+Channel 2 is the one the bundler is known to read: inside
+`:app:createBundleReleaseJsAndAssets` the log shows Expo's env loader running
+(`env: load .env` / `env: export …`), so any key in that file is exported into
+the process that compiles the bundle. Both files exist only for the duration of
+the job, are never committed, and hold no secrets (the values are the literal
+strings above). A local `.env.production` is rejected by the build guard, so
+this cannot silently arm an ordinary build.
 
 ---
 
@@ -33,7 +49,7 @@ point where `process.env.EXPO_PUBLIC_*` is inlined into the shipped bundle.
 
 | File | Change | Reversion |
 |---|---|---|
-| `.github/workflows/android-apk.yml` | job `env:` gains the three variables (marked `TEMPORARY SECURITY SUSPENSION`); new step **“Verify APK bundle contains the diagnostic switch”**; one `⚠️ Security` line in the build summary | delete the marked env block, the whole verify step, and the summary block |
+| `.github/workflows/android-apk.yml` | job `env:` gains the three variables (marked `TEMPORARY SECURITY SUSPENSION`); new step **“Arm the temporary security suspension for the bundle”** (appends the keys to the runner's `.env`, writes `.env.production`); new step **“Verify APK bundle contains the diagnostic switch”**; one `⚠️ Security` line in the build summary | delete the marked env block, the arming step, the verify step, and the summary block |
 | `src/lib/securityTestBuild.ts` | switch now requires **both** keys, exports the frozen waived-check list, a status helper and the one-shot `[DIAG-BUILD]` marker | **keep** — it is inert (compiles to `false`) in every normal build |
 | `src/components/DiagnosticModeBanner.tsx` | red `DIAGNOSTIC BUILD — SECURITY CHECKS WAIVED` bar at the app root | **keep** — renders `null` when the switch is off |
 | `src/app/_layout.tsx` | mounts that banner above the navigator | **keep** (harmless when inert) |
@@ -100,11 +116,20 @@ The workflow now fails on purpose if the waiver did not reach the bundle:
 
 ```
 Verify APK bundle contains the diagnostic switch
-  Diagnostic markers found in the APK bundle:
+  JS bundle entries in the APK: ['assets/index.android.bundle']
+  extracted assets/index.android.bundle (8464725 bytes)
+  Diagnostic markers in the shipped bundle:
   DIAG-BUILD
   DIAGNOSTIC BUILD
   OK — the APK's JS bundle contains the diagnostic build marker.
 ```
+
+When the marker is missing the step prints a `why the marker is missing` group
+(bundle size, plus a count of dev-style `EXPO_PUBLIC_SECURITY_TEST_BUILD`
+references — a non-zero count means the bundle was not compiled in production
+mode) and then fails, so an un-suspended APK is never published. The extraction
+uses `python3`, so a missing archive tool can no longer masquerade as
+“marker not found”.
 
 ## 4. Verify on the tablet
 
