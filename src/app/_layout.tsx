@@ -42,6 +42,8 @@ import { SessionProvider, useSession } from '@/ctx';
 import { I18nProvider } from '@/lib/i18n';
 import { ToastProvider } from '@/components/Toast';
 import { ImpersonationBanner } from '@/components/ImpersonationBanner';
+// Diagnostic (security-test) builds only — renders null in every production build.
+import DiagnosticModeBanner from '@/components/DiagnosticModeBanner';
 import { rearmImpersonationAfterReload } from '@/lib/impersonationService';
 import { SecurityProvider, useSecurity } from '@/lib/SecurityContext';
 import { SecureAppOverlay } from '@/components/SecureAppOverlay';
@@ -422,6 +424,11 @@ const RootLayout: React.FC = () => {
                   <View style={{ flex: 1 }}>
                     {/* Impersonation banner — shown above everything when Login As is active */}
                     <ImpersonationBanner />
+                    {/* DIAGNOSTIC BUILDS ONLY — renders nothing unless the build-time
+                        diagnostic switch (src/lib/securityTestBuild.ts) is enabled. Present
+                        above the navigator so it is visible on every route, including the
+                        dashboard we are trying to reach on the test tablet. */}
+                    <DiagnosticModeBanner />
                     <RootLayoutNav />
                   </View>
                   {/* Recent Apps protection: opaque overlay on inactive/background */}
