@@ -67,8 +67,13 @@ import * as ScreenOrientation from 'expo-screen-orientation';
 import { ArrowLeft } from 'lucide-react-native';
 import { WebView, type WebViewMessageEvent } from 'react-native-webview';
 import type { VideoWatermarkProps } from './VideoWatermark';
+import { ProtectedContentSurface } from './ProtectedContentSurface';
+import {
+  useSecurityWebViewStop,
+  WEBVIEW_RESUME_SCRIPT,
+  WEBVIEW_SOFT_PAUSE_SCRIPT,
+} from '@/lib/useSecurityWebViewStop';
 import { PLAYER_SCRIPT } from '../lib/plyr/playerScript';
-import { useSecurityWebViewStop } from '../lib/useSecurityWebViewStop';
 import { beginFullscreenOrientation, releaseFullscreenOrientation } from '../lib/fullscreenOrientation';
 import { PLYR_CSS, PLYR_JS } from '../lib/plyr/plyrBundle';
 import {
@@ -501,6 +506,36 @@ function YouTubePlayerNative({
   //  engages instead of continuing to play behind the security gate.
   useSecurityWebViewStop(wvRef);
 
+  // ── PROTECTED CONTENT concealment (background / security block) ───────────
+  //
+  // ROOT CAUSE of "the video keeps playing when I press Home": the live lesson
+  // player is this WebView. The concealment bus (protectedContentVisibility.ts)
+  // and `ProtectedContentSurface` shipped with the VdoCipher players, and when
+  // the provider was retired nothing registered the YouTube/Plyr player with
+  // it — so the background edge paused nothing and covered nothing, while the
+  // destructive lock stopper above (which DOES exist for this WebView) only runs
+  // for a confirmed app-level violation.
+  //
+  // The surface owns the decision (fail-closed: hidden until a validated
+  // `allowed`) and calls these synchronously on the AppState edge. The injected
+  // scripts pause the real Plyr/YT instance and remember whether it was
+  // actually playing, so a reveal resumes exactly that state — never a player
+  // the student had paused, and never before re-validation.
+  const concealWebPlayer = useCallback((_reason: string) => {
+    try {
+      wvRef.current?.injectJavaScript?.(WEBVIEW_SOFT_PAUSE_SCRIPT);
+    } catch {
+      /* webview not ready / tearing down: nothing is decoding yet */
+    }
+  }, []);
+  const revealWebPlayer = useCallback(() => {
+    try {
+      wvRef.current?.injectJavaScript?.(WEBVIEW_RESUME_SCRIPT);
+    } catch {
+      /* webview not ready / tearing down */
+    }
+  }, []);
+
   // ── Player HTML (memoized for the lifetime of the WebView) ─────────────────
   // NEVER rebuild after mount: any identity change in the source prop reloads
   // the WebView (hard player teardown). Deps: video identity + watermark +
@@ -850,24 +885,36 @@ function YouTubePlayerNative({
       }
     >
       {isFullscreen && <StatusBar hidden />}
-      <WebView
-        ref={wvRef}
-        source={{ html: playerHtml, baseUrl: 'https://medacademy.app' }}
-        style={{ flex: 1, backgroundColor: '#000' }}
-        allowsInlineMediaPlayback
-        mediaPlaybackRequiresUserAction={false}
-        // No native WebView fullscreen path can engage: Plyr never calls
-        // requestFullscreen (capture-phase intercept), and the WebChromeClient
-        // fullscreen support is disabled outright — RN owns fullscreen.
-        allowsFullscreenVideo={false}
-        javaScriptEnabled
-        domStorageEnabled
-        originWhitelist={['*']}
-        onMessage={onMessage}
-        scrollEnabled={false}
-        showsHorizontalScrollIndicator={false}
-        showsVerticalScrollIndicator={false}
-      />
+      {/* The video surface is concealed by the SAME boundary every other player
+          uses: an opaque cover is painted above the WebView and the player is
+          paused synchronously the moment the app leaves the foreground, so no
+          frame is visible and no audio continues in the background. The WebView
+          stays MOUNTED (layout and playback position survive) — only its
+          visibility and playback state change. */}
+      <ProtectedContentSurface
+        style={{ flex: 1 }}
+        onConceal={concealWebPlayer}
+        onReveal={revealWebPlayer}
+      >
+        <WebView
+          ref={wvRef}
+          source={{ html: playerHtml, baseUrl: 'https://medacademy.app' }}
+          style={{ flex: 1, backgroundColor: '#000' }}
+          allowsInlineMediaPlayback
+          mediaPlaybackRequiresUserAction={false}
+          // No native WebView fullscreen path can engage: Plyr never calls
+          // requestFullscreen (capture-phase intercept), and the WebChromeClient
+          // fullscreen support is disabled outright — RN owns fullscreen.
+          allowsFullscreenVideo={false}
+          javaScriptEnabled
+          domStorageEnabled
+          originWhitelist={['*']}
+          onMessage={onMessage}
+          scrollEnabled={false}
+          showsHorizontalScrollIndicator={false}
+          showsVerticalScrollIndicator={false}
+        />
+      </ProtectedContentSurface>
 
       {/* DEV-ONLY one-tap centre-control diagnostic. Debug builds only: a
           release build renders nothing here (no pill, no handler work). Tap →

@@ -93,6 +93,12 @@ export const WEBVIEW_SOFT_PAUSE_SCRIPT = `
 export const WEBVIEW_RESUME_SCRIPT = `
 (function () {
   try {
+    // The app-level containment flag is cleared by an AUTHORIZED reveal only:
+    // ProtectedContentSurface reveals when a fresh verdict proved the app may
+    // show protected frames. Leaving the flag set would freeze this player for
+    // the rest of the session (its own play/pause and seek helpers refuse to
+    // act while it is true) even though the violation is gone.
+    window.__medaSecurityStopped = false;
     if (!window.__medaProtectedWasPlaying) return true;
     window.__medaProtectedWasPlaying = false;
     var plyr = window.__plyr;

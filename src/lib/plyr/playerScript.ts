@@ -1191,10 +1191,50 @@ export const PLAYER_SCRIPT = `
     send({ type: 'yt:progress', currentTime: player.currentTime, duration: player.duration });
   });
 
+  // ── FIRST-PLAY AUDIO (mute reconciliation) ────────────────────────────────
+  //
+  // ROOT CAUSE (reported: the FIRST play is silent, and pausing then playing
+  // again brings audio back): Plyr's YouTube provider starts the embed through
+  // the IFrame API. When the platform withholds audio permission for that FIRST
+  // start (the Android WebView / WKWebView autoplay policy), YouTube begins a
+  // MUTED playback session. That mute lives on the provider's own player — not
+  // in this document — so nothing here ever reconciled it, and it persisted for
+  // the whole of that playback. Only a NEW user-initiated play re-negotiated
+  // audio, which is exactly the "works after pause and play" symptom.
+  //
+  // The reconciliation is deliberately minimal and gesture-bound: it runs ONCE,
+  // on the first 'play' event (a play event IS a user gesture, so this can never
+  // bypass an autoplay restriction and can never force unexpected audio), and
+  // only when the STUDENT did not mute the player.
+  var audioPolicyApplied = false;
+  var userChoseMute = false;
+  // The student's own mute always wins: record it from the control itself.
+  document.addEventListener('click', function (e) {
+    var t = e.target;
+    if (!t || !t.closest) return;
+    var el = t.closest('[data-plyr]');
+    if (el && el.getAttribute('data-plyr') === 'mute') userChoseMute = true;
+  }, true);
+
+  function reconcileFirstPlayAudio() {
+    if (audioPolicyApplied) return;
+    audioPolicyApplied = true;
+    try {
+      if (userChoseMute) return;          // the student muted it — leave it
+      if (player.muted !== true) return;  // already audible
+      player.muted = false;               // unMute() on a provider player
+      if (!(player.volume > 0)) player.volume = 1;
+      send({ type: 'yt:audio-restored' });
+    } catch (e) {
+      /* a provider that refuses the write simply stays as it was */
+    }
+  }
+
   // Play / pause state — used by the host to restore state after modal closes.
   player.on('play', function () {
     syncCentreState();
     send({ type: 'yt:playing' });
+    reconcileFirstPlayAudio();
   });
   player.on('pause', function () {
     syncCentreState();

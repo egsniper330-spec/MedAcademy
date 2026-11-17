@@ -633,6 +633,26 @@ export function SecurityProvider({ children }: { children: React.ReactNode }) {
   const nativeWindowPreflightRef = useRef<() => Promise<boolean>>(async () => false);
 
   /**
+   * Authoritative window-state RE-ASSERT — runs at the start of EVERY
+   * evaluation (periodic tick, resume verification, pre-video, manual recheck,
+   * post-login).
+   *
+   * WHY (the detection-coverage defect): overlay prevention and multi-window
+   * monitoring are installed once per session, and the app-level gate was fed
+   * ONLY by the native event stream (activity callback, layout pass, host
+   * resume). Any missed edge — monitoring installed after the activity was
+   * already in a prohibited mode, the activity recreated under a new window, a
+   * dropped emitter event, or the first install resolving false because the
+   * activity was not attached yet — left the violation undetected until the
+   * process restarted, because nothing ever re-read the platform state.
+   *
+   * Re-installing (idempotent on the native side) and re-reading the documented
+   * Activity APIs on every evaluation makes the gate converge on the truth
+   * within one cadence instead of depending on a single delivery.
+   */
+  const nativeWindowReassertRef = useRef<() => Promise<void>>(async () => {});
+
+  /**
    * Engage the background/resume hold. Hard, so screens UNMOUNT the native
    * player (a soft hold would only pause it), and idempotent.
    *
@@ -741,6 +761,10 @@ export function SecurityProvider({ children }: { children: React.ReactNode }) {
     }
     const started = (async () => {
       try {
+        // Re-read the AUTHORITATIVE platform window/overlay state before the
+        // policy evaluation: an event stream can miss an edge, the platform
+        // APIs cannot lie about the current mode.
+        await nativeWindowReassertRef.current();
         return await runGuardedCheck(reason);
       } finally {
         inFlightEvaluationRef.current = null;
@@ -1078,6 +1102,25 @@ export function SecurityProvider({ children }: { children: React.ReactNode }) {
       // Unreadable: keep whatever the last measurement established.
     }
     return isProhibitedWindowMode(windowModeRef.current);
+  };
+
+  /**
+   * The implementation behind nativeWindowReassertRef (bound to the live
+   * readers/appliers). Android-only by construction; on any other platform both
+   * helpers degrade to a no-op, so no branch is needed here.
+   */
+  nativeWindowReassertRef.current = async (): Promise<void> => {
+    // Idempotent re-install: restores setHideOverlayWindows + the obscured-touch
+    // filter after an activity recreation, and retries an install that resolved
+    // false at session start (activity not attached yet).
+    await enableNativeOverlayProtection();
+    const measuring = await enableNativeWindowModeMonitoring();
+    if (!measuring) return; // the platform cannot answer — not a clearance
+    const reading = await getNativeWindowMode();
+    if (!reading.measured) return; // unmeasured is never a finding
+    // A prohibited mode engages the SAME hard lock the event path engages; a
+    // full-screen reading hands control to the release rule (fresh verdict).
+    applyWindowModeReading(reading.mode, false);
   };
 
   // SEPARATE INPUT, not a lifecycle proxy — the same rule the overlay signal
