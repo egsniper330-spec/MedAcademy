@@ -624,9 +624,10 @@ export default function CourseBuilder() {
       issues.push(t('cb.issue.contactRequired'));
     }
     if (sections.length === 0) issues.push(t('cb.issue.sectionRequired'));
-    sections.forEach(s => {
-      if ((s.lessons ?? []).length === 0) issues.push(t('cb.issue.sectionNoLessons', { title: s.title }));
-    });
+    // EMPTY SECTIONS ARE ALLOWED. A section with no lessons yet is a legitimate
+    // part of a course skeleton (the doctor adds lessons later), so it must
+    // never be a publish blocker and must never be pruned. Only lessons that
+    // exist are validated — see the shared rule below.
     const allLessons = sections.flatMap(s => s.lessons ?? []);
     allLessons.forEach(l => {
       // ONE shared rule (src/lib/publishValidation.ts): a stored YouTube URL is
@@ -659,9 +660,8 @@ export default function CourseBuilder() {
         issues.push(t('cb.issue.contactRequired'));
       }
       if (sects.length === 0) issues.push(t('cb.issue.sectionRequired'));
-      sects.forEach(s => {
-        if ((s.lessons ?? []).length === 0) issues.push(t('cb.issue.sectionNoLessons', { title: s.title }));
-      });
+      // Empty sections are valid (see the local check above): they are kept,
+      // published and shown to students as an empty section.
       sects.flatMap(s => s.lessons ?? []).forEach(l => {
         if (!lessonHasVideo(l)) issues.push(t('cb.issue.lessonNoVideo', { title: l.title }));
       });

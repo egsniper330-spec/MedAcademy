@@ -98,4 +98,78 @@ check('both publish checks call lessonHasVideo (no youtube_video_id-only test)',
   assert.ok(!/l\.youtube_video_id\?\.trim\(\)/.test(builder), 'the phantom field is no longer trusted alone');
 });
 
+console.log('\nThe declared type never overrides a real YouTube reference');
+
+check('a YouTube reference in youtube_video_id wins over a stale video_type', () => {
+  // The exact build-230 report: the lesson was created with the retired default
+  // type, then given a YouTube URL. The reference was saved, the declared type
+  // was not, and publishing refused the lesson as "no video".
+  assert.strictEqual(lessonHasVideo({ video_type: 'vdocipher', youtube_video_id: 'dQw4w9WgXcQ' }), true);
+  assert.strictEqual(lessonVideoType({ video_type: 'vdocipher', youtube_video_id: 'dQw4w9WgXcQ' }), 'youtube');
+});
+
+check('a YouTube URL stored in video_id wins over a stale video_type', () => {
+  assert.strictEqual(
+    lessonHasVideo({ video_type: '', video_id: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ' }),
+    true,
+  );
+});
+
+check('an empty lesson with a stale type still fails (no weakening)', () => {
+  assert.strictEqual(lessonHasVideo({ video_type: 'vdocipher', video_id: '', youtube_video_id: '' }), false);
+  assert.strictEqual(lessonHasVideo({ video_type: 'youtube', video_id: 'not a video' }), false);
+});
+
+check('every supported YouTube URL shape is accepted', () => {
+  for (const url of [
+    'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
+    'https://youtu.be/dQw4w9WgXcQ',
+    'https://www.youtube.com/embed/dQw4w9WgXcQ',
+    'https://m.youtube.com/watch?app=desktop&v=dQw4w9WgXcQ',
+    'https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ',
+  ]) {
+    assert.strictEqual(lessonHasVideo({ video_type: 'youtube', video_id: url }), true, url);
+  }
+});
+
+console.log('\nThe editor writes BOTH columns (the reference cannot be lost again)');
+
+check('the save payload mirrors the YouTube id into video_id', () => {
+  const editor = fs.readFileSync(
+    path.join(__dirname, '..', 'src', 'app', '(app)', 'lesson-editor', '[id].tsx'),
+    'utf8',
+  );
+  const mirrors = editor.match(/video_id: videoType === 'youtube' \? \(youtubeVideoId \|\| videoId\) : videoId/g) || [];
+  assert.ok(mirrors.length >= 2, `expected the explicit save and the auto-save to mirror it, found ${mirrors.length}`);
+  // Entering a URL also selects the YouTube type, so a stale type cannot win.
+  assert.match(editor, /setYoutubeVideoId\(extracted\)[\s\S]{0,400}setVideoType\('youtube'\)/);
+  // Reopening reads the reference from either column.
+  assert.match(editor, /isYoutubeReference\(data\.video_id\)/);
+});
+
+console.log('\nEmpty sections are allowed');
+
+check('the builder no longer rejects a section with no lessons', () => {
+  const builder = fs.readFileSync(
+    path.join(__dirname, '..', 'src', 'app', '(app)', 'course-builder', '[id].tsx'),
+    'utf8',
+  );
+  assert.ok(
+    !/issue\.sectionNoLessons/.test(builder),
+    'an empty section must not contribute a publish blocker',
+  );
+  // The other requirements are untouched.
+  assert.match(builder, /issue\.sectionRequired/);
+  assert.match(builder, /issue\.titleRequired|cb\.issue\.titleRequired/);
+});
+
+check('the backend publish path imposes no section/lesson count', () => {
+  const php = fs.readFileSync(
+    path.join(__dirname, '..', 'backend', 'src', 'Controllers', 'CourseController.php'),
+    'utf8',
+  );
+  const publish = php.slice(php.indexOf('public function publish('));
+  assert.ok(!/sectionNoLessons|COUNT\(\*\) FROM lessons/i.test(publish.slice(0, 6000)));
+});
+
 console.log(`\n${passed} passed${process.exitCode ? ', some FAILED' : ''}`);

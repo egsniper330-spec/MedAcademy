@@ -1158,6 +1158,9 @@ export const PLAYER_SCRIPT = `
       if (isCentre) {
         e.stopImmediatePropagation();
         e.preventDefault();
+        // A real press on the play control: the audio reconciliation may now
+        // act on a muted provider (see reconcileFirstPlayAudio).
+        userGestureSeen = true;
         // toggles the REAL player (play/pause), never a visual simulation
         togglePlayback();
         return;
@@ -1206,22 +1209,48 @@ export const PLAYER_SCRIPT = `
   // on the first 'play' event (a play event IS a user gesture, so this can never
   // bypass an autoplay restriction and can never force unexpected audio), and
   // only when the STUDENT did not mute the player.
-  var audioPolicyApplied = false;
+  // WHETHER A REAL USER GESTURE HAS HAPPENED — and NOT a one-shot latch. The
+  // first version latched on the FIRST 'play' event, but that event also fires
+  // for a programmatic/autoplay start that the platform muted, so the latch was
+  // consumed before the student ever pressed play: the reconciliation either
+  // ran too early (nothing to fix yet) or was already spent when the audible
+  // start happened. That is why build 230 still had a silent first play.
+  //
+  // The rule now: a play event only lets us fix mute state when a user gesture
+  // has already occurred, and the fix itself is idempotent, so it may run on
+  // every play until the provider is audible. It never fights the student: a
+  // deliberate mute is recorded (and refreshed on every toggle) and is left
+  // completely alone.
+  var userGestureSeen = false;
   var userChoseMute = false;
-  // The student's own mute always wins: record it from the control itself.
   document.addEventListener('click', function (e) {
+    userGestureSeen = true;
     var t = e.target;
     if (!t || !t.closest) return;
     var el = t.closest('[data-plyr]');
-    if (el && el.getAttribute('data-plyr') === 'mute') userChoseMute = true;
+    if (el && el.getAttribute('data-plyr') === 'mute') {
+      // The control's own action runs after this capture-phase listener, so the
+      // new mute state is read on the next tick — and it can go BOTH ways (a
+      // student who un-mutes must not be treated as muted forever).
+      setTimeout(function () {
+        try { userChoseMute = player.muted === true; } catch (err) { userChoseMute = false; }
+      }, 0);
+    }
   }, true);
 
   function reconcileFirstPlayAudio() {
-    if (audioPolicyApplied) return;
-    audioPolicyApplied = true;
     try {
+      if (!userGestureSeen) return;       // never fight an autoplay restriction
       if (userChoseMute) return;          // the student muted it — leave it
-      if (player.muted !== true) return;  // already audible
+      var iframeMuted = false;
+      try {
+        // Plyr's YouTube provider keeps the real mute state on the embed; the
+        // wrapper flag can read false while the iframe is silent.
+        iframeMuted = !!(player.embed && player.embed.getIframe &&
+          player.embed.getPlayer && player.embed.getPlayer().isMuted &&
+          player.embed.getPlayer().isMuted());
+      } catch (err) { iframeMuted = false; }
+      if (player.muted !== true && !iframeMuted) return;  // already audible
       player.muted = false;               // unMute() on a provider player
       if (!(player.volume > 0)) player.volume = 1;
       send({ type: 'yt:audio-restored' });

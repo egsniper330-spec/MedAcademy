@@ -598,30 +598,52 @@ export default function GlassTabBar({
           ]}
         />
 
-        {/* ONE shared indicator, behind every tab. */}
+        {/* ONE shared indicator, behind every tab.
+
+            ANDROID LAYERING — the reason it was invisible on the tablet:
+            this view carried `elevation: 6` inside a parent that is
+            `overflow: 'hidden'` with a borderRadius. React Native's Android
+            renderer promotes an elevated child to its own layer, and inside a
+            clipped, rounded parent that layer is composited away entirely —
+            the bubble painted nothing on the device while its geometry and its
+            animated position were correct the whole time (the same geometry
+            drove the drag hit-test, which worked). Elevation is therefore
+            gone, and z-order is explicit: the row sits above the bubble
+            (`zIndex: 1` on the row), the bubble above the glass layers
+            (`zIndex: 0` inside its own stacking context). */}
         <Animated.View
           pointerEvents="none"
           style={[
             styles.indicator,
             {
               width: indicatorWidth,
-              // Approved Light-Mode refinement: a clearly readable liquid
-              // indicator instead of a barely-there wash. Dark keeps the same
-              // luminous blue, only lighter.
-              backgroundColor: isDark ? 'rgba(96,165,250,0.30)' : 'rgba(30,144,255,0.20)',
+              // The bubble's own liquid fill: a gradient reads as a lit droplet
+              // instead of a flat wash, and it stays visible over the frosted
+              // surface in Light Mode.
               borderColor: isDark ? 'rgba(148,200,255,0.62)' : 'rgba(30,144,255,0.52)',
               shadowColor: isDark ? 'rgba(96,165,250,0.55)' : 'rgba(30,144,255,0.45)',
               shadowOpacity: 1,
               shadowRadius: 10,
               shadowOffset: { width: 0, height: 2 },
-              elevation: 6,
               // Derived, never animated: the bubble is painted exactly when its
               // geometry exists, so a skipped effect can never leave it at 0.
               opacity: indicatorWidth > 0 ? 1 : 0,
               transform: [{ translateX }, { scaleX: stretch }],
             },
           ]}
-        />
+        >
+          <LinearGradient
+            pointerEvents="none"
+            colors={
+              isDark
+                ? (['rgba(96,165,250,0.44)', 'rgba(96,165,250,0.18)'] as const)
+                : (['rgba(30,144,255,0.26)', 'rgba(30,144,255,0.10)'] as const)
+            }
+            start={{ x: 0.2, y: 0 }}
+            end={{ x: 0.8, y: 1 }}
+            style={StyleSheet.absoluteFill}
+          />
+        </Animated.View>
 
         <View
           style={[styles.row, { flexDirection: isRTL ? 'row-reverse' : 'row', direction: 'ltr' }]}
@@ -727,11 +749,17 @@ const styles = StyleSheet.create({
     height: INDICATOR_HEIGHT,
     borderRadius: INDICATOR_HEIGHT / 2,
     borderWidth: 1,
+    // NO elevation (see the render note): an elevated child inside a clipped,
+    // rounded parent is composited away on Android. The row is lifted above it
+    // instead. `overflow: 'hidden'` keeps the gradient inside the pill.
+    zIndex: 0,
+    overflow: 'hidden',
   },
   row: {
     flexDirection: 'row',
     alignItems: 'center',
     height: BAR_HEIGHT,
+    zIndex: 1,
   },
   tab: {
     flex: 1,

@@ -167,10 +167,26 @@ object WindowModeBridge {
      * The ONE mapping from the platform booleans to the JS vocabulary.
      *
      * Order matters: PiP and multi-window are POSITIVE, documented platform
-     * states and always win. "Foreign window" is only reachable when the app is
-     * resumed in full screen and the activity has lost window focus, which is
-     * what a floating window from another task produces. A paused app is not a
-     * violation (the user simply switched apps), hence appResumed.
+     * states and always win.
+     *
+     * "Foreign window" is reachable ONLY when our window is still on screen and
+     * another window holds focus AND this activity is PAUSED. That last
+     * condition is the whole correction (two opposite bugs came from ignoring
+     * it):
+     *
+     *   • FALSE POSITIVE — the notification shade, a system dialog and our own
+     *     dialogs take window focus while the activity stays RESUMED. Treating
+     *     "no focus while resumed" as a foreign window made the full-screen
+     *     warning appear on every shade pull and on every return from another
+     *     app.
+     *   • MISSED DETECTION — an app floating over us becomes the top RESUMED
+     *     activity, so OUR activity pauses while its window is still visible.
+     *     Requiring appResumed for the foreign mode excluded exactly the state
+     *     the feature exists for.
+     *
+     * foreignWindowFocused therefore means "another window is in front while
+     * our window is still visible", and appResumed = false is what makes it
+     * confirmed. A fully backgrounded app (window gone) never qualifies.
      */
     fun modeOf(
         isInMultiWindowMode: Boolean,
@@ -180,7 +196,7 @@ object WindowModeBridge {
     ): String {
         if (isInPictureInPictureMode) return WINDOW_MODE_PIP
         if (isInMultiWindowMode) return WINDOW_MODE_MULTI
-        if (foreignWindowFocused && appResumed) return WINDOW_MODE_FOREIGN
+        if (foreignWindowFocused && !appResumed) return WINDOW_MODE_FOREIGN
         return WINDOW_MODE_FULLSCREEN
     }
 }
@@ -3646,23 +3662,77 @@ const WINDOW_MODE_ACTIVITY_OVERRIDES = `
    */
   private var foreignWindowCheck: Runnable? = null
 
+  /** True between onPause and onResume: another task/activity is on top of us. */
+  private var activityPaused = false
+
+  /**
+   * OUR window is still being displayed but another window holds focus, WHILE
+   * our activity is paused. That is the only combination Android exposes that
+   * an app floating over this one produces.
+   *
+   * The three exclusions are each a real, reported bug:
+   *   • the notification shade / a system dialog keeps the activity RESUMED
+   *     (activityPaused == false) and must never raise the warning;
+   *   • a fully backgrounded app has windowVisibility != VISIBLE and must not
+   *     be reported as "covered" either;
+   *   • our own dialog pauses nothing and reports focus back, so it is filtered
+   *     before a report is made (and again in JS while a dialog is open).
+   */
+  private fun windowCoveredByOtherTask(): Boolean {
+    val w = window ?: return false
+    if (isFinishing) return false
+    val decor = w.decorView
+    if (decor.windowVisibility != View.VISIBLE) return false
+    if (decor.hasWindowFocus()) return false
+    return activityPaused
+  }
+
+  private fun cancelForeignCheck() {
+    foreignWindowCheck?.let { window?.decorView?.removeCallbacks(it) }
+    foreignWindowCheck = null
+  }
+
+  /**
+   * One settled re-check after a focus change. The delay filters the momentary
+   * focus churn of any transition; the state is then read LIVE, never taken
+   * from the event that scheduled it.
+   */
+  private fun scheduleForeignCheck() {
+    cancelForeignCheck()
+    val check = Runnable {
+      foreignWindowCheck = null
+      if (windowCoveredByOtherTask()) {
+        WindowModeBridge.report(isInMultiWindowMode(), isInPictureInPictureMode(), true, false)
+      }
+    }
+    foreignWindowCheck = check
+    window?.decorView?.postDelayed(check, 700L)
+  }
+
+  override fun onPause() {
+    super.onPause()
+    activityPaused = true
+    // A floating window from another app pauses us exactly here.
+    scheduleForeignCheck()
+  }
+
+  override fun onResume() {
+    super.onResume()
+    activityPaused = false
+    cancelForeignCheck()
+    // Returning to the front is authoritative: full-screen, focused, resumed.
+    // The JS release rule still requires a fresh verdict before content shows.
+    WindowModeBridge.report(isInMultiWindowMode(), isInPictureInPictureMode(), false, true)
+  }
+
   override fun onWindowFocusChanged(hasFocus: Boolean) {
     super.onWindowFocusChanged(hasFocus)
-    foreignWindowCheck?.let { window.decorView.removeCallbacks(it) }
-    foreignWindowCheck = null
-    if (!hasFocus) {
-      val check = Runnable {
-        // Re-read the LIVE focus: our own dialog (which also steals focus and
-        // then returns it) has usually closed by now.
-        if (window?.decorView?.hasWindowFocus() == false && !isFinishing) {
-          WindowModeBridge.report(isInMultiWindowMode(), isInPictureInPictureMode(), true, true)
-        }
-      }
-      foreignWindowCheck = check
-      window?.decorView?.postDelayed(check, 700L)
+    if (hasFocus) {
+      cancelForeignCheck()
+      WindowModeBridge.report(isInMultiWindowMode(), isInPictureInPictureMode(), false, true)
       return
     }
-    WindowModeBridge.report(isInMultiWindowMode(), isInPictureInPictureMode(), false, true)
+    scheduleForeignCheck()
   }
 `;
 
@@ -3690,6 +3760,15 @@ function patchMainActivityForWindowMode(contents) {
       );
     } else if (/^import /m.test(next)) {
       next = next.replace(/^(import )/m, 'import android.content.res.Configuration\n$1');
+    }
+  }
+  if (!/^import android\.view\.View$/m.test(next)) {
+    // Needed by the foreign-window check (View.VISIBLE): "our window is still
+    // being displayed".
+    if (/^import android\.os\.Bundle$/m.test(next)) {
+      next = next.replace(/^import android\.os\.Bundle$/m, 'import android.os.Bundle\nimport android.view.View');
+    } else if (/^import /m.test(next)) {
+      next = next.replace(/^(import )/m, 'import android.view.View\n$1');
     }
   }
   if (!/^import com\.medacademy\.security\.WindowModeBridge$/m.test(next)) {

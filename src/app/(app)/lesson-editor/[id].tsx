@@ -40,6 +40,7 @@ import {
   type LessonBuilderPayload, type DownloadPermission, type TeacherProviderPermission,
 } from '@/lib/api';
 import { validateMaterialFile } from '@/lib/lessonMaterials';
+import { isYoutubeReference } from '@/lib/publishValidation';
 import {
   attachAssetToLesson, getVideoAssetUsage,
   type VideoAsset,
@@ -318,8 +319,13 @@ export default function LessonEditor() {
       setVideoTitle(data.video_title ?? '');
       setVideoPlaybackId(data.video_playback_id ?? '');
       setVideoThumbnail(data.video_thumbnail ?? '');
-      // YouTube
-      const ytId = data.youtube_video_id ?? '';
+      // YouTube. The reference can live in EITHER column: the editor itself
+      // writes both on save (see the payload below), but records created before
+      // that normalisation — or by an older build — may carry only
+      // `video_id`. Without this fallback the saved URL looked empty on reopen
+      // while the lesson really had one.
+      const ytId = data.youtube_video_id
+        || (isYoutubeReference(data.video_id) ? (extractYouTubeId(data.video_id ?? '') || data.video_id) : '');
       setYoutubeVideoId(ytId);
       setYoutubeUrlInput(ytId ? `https://youtu.be/${ytId}` : '');
       setVideoThumbnailUrl(data.video_thumbnail_url ?? null);
@@ -398,7 +404,13 @@ export default function LessonEditor() {
     if (!lesson) return;
     scheduleAutoSave({
       title, description, notes, status,
-      video_type: videoType, video_id: videoId, video_title: videoTitle,
+      video_type: videoType,
+      // ONE reference, TWO columns, written together: `video_id` is what every
+      // consumer (course builder, player, duplication) reads, and
+      // `youtube_video_id` is the legacy/editor column. Writing only one of them
+      // is what made a saved YouTube lesson look empty at publish time.
+      video_id: videoType === 'youtube' ? (youtubeVideoId || videoId) : videoId,
+      video_title: videoTitle,
       video_playback_id: videoPlaybackId, video_thumbnail: videoThumbnail,
       youtube_video_id: youtubeVideoId || undefined,
       is_preview: isPreview, download_enabled: downloadEnabled,
@@ -779,7 +791,9 @@ export default function LessonEditor() {
     try {
       const saved = await updateLesson(id, {
         title, description, notes, status,
-        video_type: videoType, video_id: videoId, video_title: videoTitle,
+        video_type: videoType,
+        video_id: videoType === 'youtube' ? (youtubeVideoId || videoId) : videoId,
+        video_title: videoTitle,
         video_playback_id: videoPlaybackId, video_thumbnail: videoThumbnail,
         youtube_video_id: youtubeVideoId || undefined,
         is_preview: isPreview, download_enabled: downloadEnabled,
@@ -1466,6 +1480,11 @@ export default function LessonEditor() {
                     const extracted = extractYouTubeId(text);
                     if (extracted) {
                       setYoutubeVideoId(extracted);
+                      // Entering a YouTube reference IS choosing YouTube: a
+                      // lesson created with another/retired type would
+                      // otherwise be saved as that type with an empty own id,
+                      // and publishing would report "no video".
+                      setVideoType('youtube');
                     } else if (text.trim().length > 0) {
                       setYoutubeVideoId('');
                     } else {
