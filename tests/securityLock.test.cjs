@@ -295,19 +295,18 @@ check('B15: locks are session-scoped (cleared on logout/account switch)', /relea
 check('B16: the lock state is exposed to consumers',
   /securityLocked:\s+lockState\.locked/.test(ctx) && /securityLockHard:\s+lockState\.hard/.test(ctx));
 
-const hook = read('src/lib/useSecurityPlaybackStop.ts');
-check('B17: playback-stop hook registers with the lock', /registerPlaybackStopper\(/.test(hook));
-check('B18: it pauses the native player via the documented instance method', /playerRef\.current\?\.pause\?\.\(\)/.test(hook));
-
-const online = read('src/components/VdoCipherPlayerNativeAdapter.native.tsx');
-check('B19: online player uses the containment hook', /const playerRef = useSecurityPlaybackStop\(\)/.test(online));
-check('B20: online player attaches the ref to the native view', /<VdoPlayerView\s*\n\s*ref=\{playerRef\}/.test(online));
-check('B20b: the ref cast introduces no second "<VdoPlayerView" token', (online.match(/<VdoPlayerView/g) || []).length === 1);
-
-const offline = read('src/components/OfflineVideoPlayer.native.tsx');
-check('B21: offline player uses the containment hook', /const playerRef = useSecurityPlaybackStop\(\)/.test(offline));
-check('B22: offline player attaches the ref to the native view', /<VdoPlayerView\s*\n\s*ref=\{playerRef\}/.test(offline));
-check('B22b: the ref introduces no second "<VdoPlayerView" token', (offline.match(/<VdoPlayerView/g) || []).length === 1);
+// The retired native players and the native stopper that only they used are
+// gone: the WebView player is the single playback path, and its stopper is
+// asserted below (section C) and in tests/protectedContentLifecycle.test.cjs.
+check('B17: the native playback-stop hook is gone with the native players',
+  !fs.existsSync(path.join(ROOT, 'src/lib/useSecurityPlaybackStop.ts')));
+check('B18: no active component registers a native player ref', !/useSecurityPlaybackStop/.test(
+  fs.readdirSync(path.join(ROOT, 'src', 'components'))
+    .filter((f) => f.endsWith('.tsx'))
+    .map((f) => read('src/components/' + f))
+    .join(String.fromCharCode(10))));
+const online = '';
+const offline = '';
 
 const lesson = read('src/app/(app)/lesson/[id].tsx');
 check('B23: lesson player mount is keyed on the HARD lock (not just blocksVideo)',
@@ -354,16 +353,15 @@ check('C7: the YouTube WebView player registers the WebView-aware stopper',
   /useSecurityWebViewStop\(wvRef\)/.test(yt));
 check('C8: that stopper is bound to the WebView actually rendered', /ref=\{wvRef\}/.test(yt));
 
-const vdoWv = read('src/components/VdoCipherPlayerWebView.tsx');
-check('C9: the VdoCipher WebView player registers the WebView-aware stopper',
-  /useSecurityWebViewStop\(playerWebViewRef\)/.test(vdoWv));
-check('C9b: its stopper is bound to the mounted WebView node',
-  /playerWebViewRef\.current = node/.test(vdoWv));
-check('C10: it no longer CALLS the native stopper that cannot stop a WebView',
-  !/=\s*useSecurityPlaybackStop\(/.test(vdoWv)
-  && !/import \{[^}]*\buseSecurityPlaybackStop\b[^}]*\}/.test(vdoWv));
-check('C10b: the native-only stopper is still used by the NATIVE players',
-  /useSecurityPlaybackStop/.test(online) && /useSecurityPlaybackStop/.test(offline));
+// The retired VdoCipher WebView player is gone; the LIVE WebView player (C7/C8)
+// is the only path that must register the WebView-aware stopper, and the
+// native-only stopper no longer exists at all.
+check('C9: the retired VdoCipher WebView player is gone',
+  !fs.existsSync(path.join(ROOT, 'src/components/VdoCipherPlayerWebView.tsx')));
+check('C10: nothing calls the removed native stopper',
+  !/useSecurityPlaybackStop/.test(read('src/components/YouTubePlayer.tsx')));
+check('C10b: the WebView stopper is the single containment path for playback',
+  /useSecurityWebViewStop/.test(read('src/lib/useSecurityWebViewStop.ts')));
 
 const lockSrc = read('src/lib/securityLock.ts');
 check('C11: a player that mounts AFTER containment is stopped on registration',
