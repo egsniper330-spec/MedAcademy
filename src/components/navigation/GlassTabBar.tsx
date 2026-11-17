@@ -137,13 +137,23 @@ export default function GlassTabBar({
    *     could raise, a skipped run left it at 0 — invisible while still there.
    *
    * The tabs are `flex: 1` on one row, so their geometry is EXACT arithmetic:
-   *     tabWidth = rowWidth / tabCount
-   *     x(i)     = isRTL ? rowWidth - (i + 1) * tabWidth : i * tabWidth
-   * `rowWidth` is ONE measurement of the row itself (window width as the
-   * pre-layout fallback), so a per-tab measurement can never be zero, stale or
-   * mirrored — and the bubble is placed from the SAME index the icon tint is
-   * derived from, so route and position cannot disagree.
+   *     x(i) = isRTL ? rowSpan - (i + 1) * tabWidth : i * tabWidth
+   * What measurement is trusted was established on the device: a TAB's width is
+   * reported correctly, while the row's own `onLayout` width comes back as 0 in
+   * this RTL configuration (deriving from it left the bubble with no width at
+   * all) and a tab's `x` can be stale/mirrored. So the LARGEST measured tab
+   * width is the one input, and every position is derived from it. The bubble is
+   * then placed from the SAME index the icon tint is derived from, so route and
+   * position cannot disagree.
    */
+  const [layouts, setLayouts] = useState<Record<string, { width: number }>>({});
+  const onTabLayout = useCallback((key: string, width: number) => {
+    setLayouts((prev) => {
+      const current = prev[key];
+      if (current && Math.abs(current.width - width) < 0.5) return prev;
+      return { ...prev, [key]: { width } };
+    });
+  }, []);
   const translateX = useRef(new Animated.Value(0)).current;
   const stretch = useRef(new Animated.Value(1)).current;
   /** The x the bubble last landed on (animation bookkeeping only). */
@@ -172,21 +182,31 @@ export default function GlassTabBar({
     return () => translateX.removeListener(id);
   }, [translateX]);
 
-  /* Row width: ONE measurement of the row itself, mirrored for RTL, with the
-   * window width as the pre-layout fallback. The tabs are `flex: 1`, so the
-   * tab width derived from it is exact — no per-tab measurement is needed. */
-  const [rowWidth, setRowWidth] = useState(0);
+  /* Tab width: the largest width any tab reported (a zero or partial measurement
+   * can never win), with the window width as the pre-layout fallback. */
+  const measuredTabWidth = useMemo(() => {
+    let max = 0;
+    for (const entry of visibleRoutes) {
+      const w = layouts[entry.route.key]?.width ?? 0;
+      if (Number.isFinite(w) && w > max) max = w;
+    }
+    return max;
+  }, [visibleRoutes, layouts]);
+
   const { width: windowWidth } = useWindowDimensions();
-  const derivedRowWidth = Math.max(windowWidth - SIDE_INSET * 2 - 2, 0);
-  const effectiveRowWidth = rowWidth > 0 ? rowWidth : derivedRowWidth;
   const tabCount = visibleRoutes.length;
-  const tabWidth = tabCount > 0 ? effectiveRowWidth / tabCount : 0;
+  const derivedTabWidth = tabCount > 0
+    ? Math.max(windowWidth - SIDE_INSET * 2 - 2, 0) / tabCount
+    : 0;
+  const tabWidth = measuredTabWidth > 0 ? measuredTabWidth : derivedTabWidth;
+  /** Width the tabs span together — the bubble's travel range. */
+  const rowSpan = tabWidth * tabCount;
   const indicatorWidth = Math.max(tabWidth - INDICATOR_INSET * 2, 0);
 
   /** Physical (left-anchored) x of visible tab `i`. RTL mirrors the order. */
   const tabX = useCallback(
-    (i: number) => (isRTL ? effectiveRowWidth - (i + 1) * tabWidth : i * tabWidth),
-    [isRTL, effectiveRowWidth, tabWidth],
+    (i: number) => (isRTL ? rowSpan - (i + 1) * tabWidth : i * tabWidth),
+    [isRTL, rowSpan, tabWidth],
   );
   /* ── Resting x of EVERY tab, in the same physical (left-anchored) space the
    * animation uses. Used for the grab hit-test and the release snap, so a drag
@@ -327,7 +347,7 @@ export default function GlassTabBar({
    *   • A cancelled gesture snaps back without navigating.
    */
   useEffect(() => { targetsRef.current = tabTargets; }, [tabTargets]);
-  useEffect(() => { rowWidthRef.current = effectiveRowWidth; }, [effectiveRowWidth]);
+  useEffect(() => { rowWidthRef.current = rowSpan; }, [rowSpan]);
   useEffect(() => { indicatorWidthRef.current = indicatorWidth; }, [indicatorWidth]);
   useEffect(() => { activeVisibleRef.current = activeVisible; }, [activeVisible]);
   useEffect(() => { pressRef.current = handlePress; }, [handlePress]);
@@ -345,8 +365,20 @@ export default function GlassTabBar({
     // split screen and font-scale changes all land here.
     pillRef.current?.measureInWindow((x, y, width, height) => {
       pillRect.current = { x, y, width, height, known: width > 0 && height > 0 };
+      // TEMP-DIAG (branch diag/bar-geometry only)
+      console.log('[BAR-DIAG] pill', JSON.stringify({ x, y, width, height }));
     });
   }, []);
+
+  // TEMP-DIAG (branch diag/bar-geometry only): the geometry the bubble is
+  // painted from, so the on-device values can be read from logcat.
+  useEffect(() => {
+    console.log('[BAR-DIAG] geo', JSON.stringify({
+      activeIndex, activeVisible, isRTL, tabCount,
+      windowWidth, measuredTabWidth, derivedTabWidth, tabWidth, rowSpan, indicatorWidth,
+      layouts: Object.keys(layouts),
+    }));
+  });
 
   /** Animate to a resting position and remember it as the settled target. */
   const settleAt = useCallback((toX: number) => {
@@ -542,7 +574,6 @@ export default function GlassTabBar({
 
         <View
           style={[styles.row, { flexDirection: isRTL ? 'row-reverse' : 'row', direction: 'ltr' }]}
-          onLayout={(event) => setRowWidth(event.nativeEvent.layout.width)}
         >
           {visibleRoutes.map(({ route, descriptor, routeIndex }) => {
             const isFocused = routeIndex === activeIndex;
@@ -554,6 +585,7 @@ export default function GlassTabBar({
               <Pressable
                 key={route.key}
                 style={styles.tab}
+                onLayout={(event) => onTabLayout(route.key, event.nativeEvent.layout.width)}
                 onPress={() => handlePress(route.key, routeIndex, route.name)}
                 onLongPress={() => navigation.emit({ type: 'tabLongPress', target: route.key })}
                 accessibilityRole="button"
