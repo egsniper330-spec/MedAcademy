@@ -40,12 +40,6 @@ import {
 import * as Sharing from 'expo-sharing';
 import * as MediaLibrary from 'expo-media-library';
 import { useSecurity } from '@/lib/SecurityContext';
-import {
-  deleteOfflineVideo, getOfflineVideos, hydrateOfflineLibrary, isOfflineVideoExpired,
-  pauseOfflineVideo,
-  syncOfflineEntry, resumeOfflineVideo, safeDisplayTitle,
-  startOfflineDownload, subscribeOfflineVideos, type OfflineVideoEntry,
-} from '@/lib/offlineVideoService';
 import { useScreenCapture } from '@/lib/useScreenCapture';
 import { useContentProtection } from '@/lib/useContentProtection';
 import { ContentProtectionWarning } from '@/components/ContentProtectionWarning';
@@ -442,73 +436,6 @@ export default function LessonPlayer() {
     return () => { alive = false; };
   }, [lesson?.section?.course_id]);
 
-  // (auth/entitlement/security) and issues a finite rental license. The SDK
-  // then fetches DRM-protected media; progress/complete/fail flow through
-  // offlineVideoService into the Offline Library. Security gate first.
-  const [offlineBusy, setOfflineBusy] = useState(false);
-  const [offlineMsg, setOfflineMsg] = useState<string | null>(null);
-  // Live state machine for the Download button — reconciled from the
-  // authoritative offlineVideoService (SDK events + MedAcademy metadata),
-  // not from a snapshot taken at mount.
-  const [dlEntry, setDlEntry] = useState<OfflineVideoEntry | null>(null);
-  const handleDownloadForOffline = useCallback(async () => {
-    if (!profile || !lesson) return;
-    if (lesson.video_type !== 'vdocipher' || !isVdoCipherVideoId(lesson.video_id)) return;
-    if (!isSuperAdmin) {
-      if (blocksVideo) return;
-      try {
-        const blocked = await checkBeforeVideo();
-        if (blocked) return;
-      } catch { return; }
-    }
-    setOfflineBusy(true);
-    setOfflineMsg(null);
-    try {
-      const res = await startOfflineDownload({
-        userId: profile.id,
-        videoId: lesson.video_id,
-        lessonId: lesson.id,
-        courseId: lesson.section?.course_id ?? null,
-        // MedAcademy course/lesson metadata persisted NOW (authorize time) so
-        // the Offline Library renders its own titles/images — never VdoCipher
-        // names or internal ids. courseImageUrl = the online course's image.
-        courseName: courseTitle,
-        courseImageUrl,
-        sectionTitle: (lesson.section as any)?.title ?? null,
-        title: safeDisplayTitle({
-          lessonTitle: lesson.title,
-          title: lesson.video_title,
-        }),
-        lessonTitle: lesson.title,
-        lessonThumbnailUrl: lesson.video_thumbnail ?? null,
-        lessonOrder: typeof lesson.order_index === 'number' ? lesson.order_index : null,
-      });
-      setOfflineMsg(res.ok
-        ? 'Downloading — track progress here or in Offline Videos.'
-        : (res.error || 'Could not start the download.'));
-    } catch (e:any) {
-      setOfflineMsg(e?.message ?? 'Could not start the download.');
-    } finally {
-      setOfflineBusy(false);
-    }
-  }, [profile, lesson, isSuperAdmin, blocksVideo, checkBeforeVideo, courseTitle]);
-
-  // Authoritative download state for THIS lesson: live subscription to the
-  // offlineVideoService store (SDK events + MedAcademy metadata) — the button
-  // reacts to queued/downloading/completed/failed without remounting.
-  useEffect(() => {
-    if (!lesson) return;
-    let mounted = true;
-    const pick = (list: OfflineVideoEntry[]) => {
-      if (!mounted) return;
-      setDlEntry(list.find((e) => e.meta.lessonId === lesson.id) ?? null);
-    };
-    pick(getOfflineVideos());
-    void hydrateOfflineLibrary(profile?.id ?? '').catch(() => {});
-    const unsub = subscribeOfflineVideos(pick);
-    return () => { mounted = false; unsub(); };
-  }, [lesson?.id, profile?.id]);
-
   // 6120 SAFETY: an online native player must NEVER survive navigation into
   // offline playback. The player is unmount-gated behind playerVisible; hiding
   // it on screen-blur guarantees ZERO online VdoPlayerView instances while any
@@ -520,33 +447,6 @@ export default function LessonPlayer() {
       return () => { setPlayerVisible(false); };
     }, []),
   );
-
-  // SDK RECONCILE ON FOCUS: the Lesson row must observe the SAME authoritative
-  // state the Offline Library sees. Early native events can fire before the
-  // listeners/row exist (or while the screen was navigated away); one official
-  // VdoDownload.query on every focus re-syncs the row — no timers, no faking.
-  useEffect(() => {
-    const mid = dlEntry?.meta.mediaId;
-    if (!mid) return;
-    let cancelled = false;
-    void syncOfflineEntry(mid).catch(() => {});
-    return () => { cancelled = true; void cancelled; };
-  }, [dlEntry?.meta.mediaId]);
-
-  // Cancel an in-flight/queued download (official remove; metadata dropped).
-  const handleCancelDownload = useCallback(() => {
-    if (!dlEntry) return;
-    void deleteOfflineVideo(dlEntry.meta.mediaId);
-    setOfflineMsg(null);
-  }, [dlEntry]);
-
-  // EXPIRED → [Redownload]: drop the stale local row (official remove), then
-  // run the normal authorize+download flow for a fresh finite rental license.
-  const handleRedownload = useCallback(async () => {
-    if (dlEntry) await deleteOfflineVideo(dlEntry.meta.mediaId);
-    setDlEntry(null);
-    await handleDownloadForOffline();
-  }, [dlEntry, handleDownloadForOffline]);
 
   // Progress tick from player → keep watch-position ref current (no re-render)
   const handleVideoProgress = useCallback((currentTime: number) => {
@@ -1117,132 +1017,6 @@ export default function LessonPlayer() {
                   </View>
                 )}
               </Pressable>
-            )}
-            {/* VdoCipher-only: show stored video title if it is not an internal filename.
-                NOTE: `!!lesson.video_title` — an empty-string title would otherwise
-                short-circuit this && chain to '' which React renders as a raw text
-                node inside a <View> ("Unexpected text node" warning). */}
-            {lesson.video_type === 'vdocipher' && !!lesson.video_title && !isInternalFilename(lesson.video_title) && isVdoCipherVideoId(lesson.video_id) && (
-              <View style={{ padding: 14 }}>
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-                  <Text style={{ fontSize: 14, fontWeight: '600', color: c.text, flex: 1 }} numberOfLines={2}>{lesson.video_title}</Text>
-                  {/* ── Download button state machine (authoritative SDK state) ── */}
-                  {(() => {
-                    const expired = dlEntry ? isOfflineVideoExpired(dlEntry) : false;
-                    const phase = dlEntry?.phase;
-                    const pill = (bg: string) => ({
-                      flexDirection: 'row' as const, alignItems: 'center' as const, gap: 6,
-                      paddingHorizontal: 12, paddingVertical: 8, borderRadius: 12, backgroundColor: bg,
-                    });
-                    const busy = offlineBusy;
-                    if (dlEntry && expired) {
-                      return (
-                        <Pressable onPress={handleRedownload} disabled={busy} accessibilityRole="button" accessibilityLabel={t('lesson.redownloadExpired')} style={pill('#FFB02022')}>
-                          <RefreshCw size={15} color="#FFB020" />
-                          <Text style={{ fontSize: 12, fontWeight: '700', color: '#FFB020' }}>{t('lesson.redownload')}</Text>
-                        </Pressable>
-                      );
-                    }
-                    // The retired Offline Video page is gone, so a completed
-                    // download no longer offers a route into it.
-                    if (phase === 'paused') {
-                      return (
-                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                          <Pressable onPress={() => void resumeOfflineVideo(dlEntry!.meta.mediaId)} accessibilityRole="button" accessibilityLabel={t('lesson.resumeDownload')} style={pill(`${c.primary}22`)}>
-                            <Download size={15} color={c.text} />
-                            <Text style={{ fontSize: 12, fontWeight: '700', color: c.text }}>{t('course.resume')}</Text>
-                          </Pressable>
-                          <Pressable onPress={handleCancelDownload} accessibilityRole="button" accessibilityLabel={t('lesson.cancelDownload')} style={pill(`${c.text}14`)}>
-                            <X size={14} color={c.text} />
-                            <Text style={{ fontSize: 12, fontWeight: '700', color: c.text }}>{t('common.cancel')}</Text>
-                          </Pressable>
-                        </View>
-                      );
-                    }
-                    if (phase === 'processing') {
-                      return (
-                        <View style={pill(`${c.primary}22`)}>
-                          <Download size={15} color={c.text} />
-                          <Text style={{ fontSize: 12, fontWeight: '700', color: c.text }}>{t('lesson.processing')}</Text>
-                        </View>
-                      );
-                    }
-                    if (phase === 'downloading') {
-                      return (
-                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                          <Pressable onPress={() => void pauseOfflineVideo(dlEntry!.meta.mediaId)} accessibilityRole="button" accessibilityLabel={t('lesson.pauseDownload')} style={pill(`${c.primary}22`)}>
-                            <Pause size={15} color={c.text} />
-                            <Text style={{ fontSize: 12, fontWeight: '700', color: c.text }}>{Math.round(dlEntry!.progress)}%</Text>
-                          </Pressable>
-                          <Pressable onPress={handleCancelDownload} accessibilityRole="button" accessibilityLabel={t('lesson.cancelDownload')} style={pill(`${c.text}14`)}>
-                            <X size={14} color={c.text} />
-                            <Text style={{ fontSize: 12, fontWeight: '700', color: c.text }}>{t('common.cancel')}</Text>
-                          </Pressable>
-                        </View>
-                      );
-                    }
-                    if (phase === 'pending' || phase === 'authorizing') {
-                      return (
-                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                          <View style={pill(`${c.primary}22`)}>
-                            <Download size={15} color={c.text} />
-                            <Text style={{ fontSize: 12, fontWeight: '700', color: c.text }}>{t('lesson.queued')}</Text>
-                          </View>
-                          <Pressable onPress={handleCancelDownload} accessibilityRole="button" accessibilityLabel={t('lesson.cancelDownload')} style={pill(`${c.text}14`)}>
-                            <X size={14} color={c.text} />
-                            <Text style={{ fontSize: 12, fontWeight: '700', color: c.text }}>{t('common.cancel')}</Text>
-                          </Pressable>
-                        </View>
-                      );
-                    }
-                    if (phase === 'failed') {
-                      return (
-                        <Pressable onPress={() => void resumeOfflineVideo(dlEntry!.meta.mediaId)} accessibilityRole="button" accessibilityLabel={t('lesson.retryDownload')} style={pill('#FF5A5A1F')}>
-                          <RefreshCw size={15} color="#FF5A5A" />
-                          <Text style={{ fontSize: 12, fontWeight: '700', color: '#FF5A5A' }}>{t('common.retry')}</Text>
-                        </Pressable>
-                      );
-                    }
-                    return (
-                      <Pressable onPress={handleDownloadForOffline} disabled={busy} accessibilityRole="button" accessibilityLabel={t('lesson.downloadForOffline')} style={pill(busy ? `${c.primary}33` : `${c.primary}22`)}>
-                        <Download size={15} color={c.text} />
-                        <Text style={{ fontSize: 12, fontWeight: '700', color: c.text }}>{busy ? t('lesson.starting') : t('lesson.download')}</Text>
-                      </Pressable>
-                    );
-                  })()}
-                </View>
-
-                {/* In-flight progress details: percentage, bytes (Android only —
-                    official SDK byte fields; never faked on iOS), pause/cancel. */}
-                {(dlEntry?.phase === 'downloading' || dlEntry?.phase === 'paused') && (
-                  <View style={{ marginTop: 10 }}>
-                    <View style={{ height: 6, borderRadius: 3, backgroundColor: `${c.text}14`, overflow: 'hidden' }}>
-                      <View style={{ height: 6, borderRadius: 3, backgroundColor: c.primary, width: `${Math.max(3, Math.min(100, dlEntry.progress))}%` }} />
-                    </View>
-                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 4 }}>
-                      <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.5) }}>
-                        {Math.round(dlEntry.progress)}%
-                        {Platform.OS === 'android' && dlEntry.totalSizeBytes
-                          ? ` · ${fmtBytesLocal(dlEntry.bytesDownloaded)} / ${fmtBytesLocal(dlEntry.totalSizeBytes)}`
-                          : ''}
-                      </Text>
-                    </View>
-                  </View>
-                )}
-                {!!dlEntry?.lastError && dlEntry.phase === 'failed' && (
-                  <Text style={{ fontSize: 11, color: '#FF5A5A', marginTop: 6 }} numberOfLines={2}>{dlEntry.lastError}</Text>
-                )}
-                {dlEntry && dlEntry.phase === 'completed' && !isOfflineVideoExpired(dlEntry) && (
-                  <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.45), marginTop: 6 }}>
-                    Downloaded — available in Offline Videos until the license expires.
-                  </Text>
-                )}
-              </View>
-            )}
-            {!!offlineMsg && (
-              <Text style={{ paddingHorizontal: 14, paddingBottom: 12, fontSize: 12, ...mutedTextStyle(c, 0.6) }} numberOfLines={3}>
-                {offlineMsg}
-              </Text>
             )}
           </NeuCard>
         )}

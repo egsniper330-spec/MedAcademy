@@ -148,7 +148,10 @@ export default function GlassTabBar({
    * position cannot disagree.
    */
   const [layouts, setLayouts] = useState<Record<string, { width: number }>>({});
+  /** The pill's own measured width — the geometry source that is known to work. */
+  const [pillWidth, setPillWidth] = useState(0);
   const onTabLayout = useCallback((key: string, width: number) => {
+    if (!Number.isFinite(width)) return;
     setLayouts((prev) => {
       const current = prev[key];
       if (current && Math.abs(current.width - width) < 0.5) return prev;
@@ -194,16 +197,22 @@ export default function GlassTabBar({
     return max;
   }, [visibleRoutes, layouts]);
 
-  const { width: windowWidth } = useWindowDimensions();
+  /* Window width is sanitised at the source. A non-finite (or 0) width here
+   * used to poison `Math.max`, every tab x and the bubble's width at once — a
+   * single NaN is enough to make the indicator paint NOTHING, however correct
+   * the rest of the arithmetic is. Nothing derived is ever allowed to see it. */
+  const { width: rawWindowWidth } = useWindowDimensions();
+  const windowWidth = Number.isFinite(rawWindowWidth) && rawWindowWidth > 0 ? rawWindowWidth : 0;
   const tabCount = visibleRoutes.length;
-  /* The span the tabs occupy. TWO independent candidates, and the LARGER wins:
-   * the measured tabs' total and the window width minus the pill's insets. A
-   * candidate can be 0 on a device (a failed measurement, a pre-layout pass),
-   * but both can never be 0 on a laid-out screen — so the bubble always has a
-   * real width, which is exactly what made it vanish before. */
-  const derivedSpan = Math.max(windowWidth - SIDE_INSET * 2 - 2, 0);
-  const rowSpan = Math.max(measuredTabWidth * tabCount, derivedSpan);
-  const tabWidth = tabCount > 0 ? rowSpan / tabCount : 0;
+  /* The span the tabs occupy. THREE independent candidates, largest wins, and
+   * every one of them is finite: the measured tabs' total, the window width, and
+   * the pill's own measured width (the one measurement that is known to work —
+   * it drives the drag hit-test). A device can fail one of them; it cannot fail
+   * all three on a laid-out screen, so the bubble always has a real width. */
+  const windowSpan = windowWidth > 0 ? Math.max(windowWidth - SIDE_INSET * 2 - 2, 0) : 0;
+  const pillSpan = pillWidth > 0 ? Math.max(pillWidth - 2, 0) : 0;
+  const rowSpan = Math.max(measuredTabWidth * tabCount, windowSpan, pillSpan, 0);
+  const tabWidth = tabCount > 0 && Number.isFinite(rowSpan) ? rowSpan / tabCount : 0;
   const indicatorWidth = tabCount > 0 ? Math.max(tabWidth - INDICATOR_INSET * 2, 24) : 0;
 
   /** Physical (left-anchored) x of visible tab `i`. RTL mirrors the order. */
@@ -252,6 +261,9 @@ export default function GlassTabBar({
     if (activeVisible < 0) return;
 
     const target = tabX(activeVisible) + INDICATOR_INSET;
+    // A non-finite position would be written straight into the transform and
+    // the bubble would silently stop painting. Never let one through.
+    if (!Number.isFinite(target)) return;
     const previous = lastTarget.current;
     // Keep the JS mirror authoritative. It is written HERE (and in settleAt /
     // onPanResponderMove) rather than only by the Animated value listener:
@@ -368,6 +380,8 @@ export default function GlassTabBar({
     // split screen and font-scale changes all land here.
     pillRef.current?.measureInWindow((x, y, width, height) => {
       pillRect.current = { x, y, width, height, known: width > 0 && height > 0 };
+      // The pill's real width is also a geometry candidate (see rowSpan).
+      if (Number.isFinite(width) && width > 0) setPillWidth((prev) => (Math.abs(prev - width) < 0.5 ? prev : width));
     });
   }, []);
 

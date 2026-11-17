@@ -63,12 +63,22 @@ check('the largest measured tab width wins (a zero/partial measurement cannot)',
   assert.match(code, /if \(Number\.isFinite\(w\) && w > max\) max = w;/);
 });
 
-check('the span takes the LARGER of the two independent candidates', () => {
-  // Two candidates (measured tabs vs the window) and the larger wins, so a
-  // device whose measurement reports 0 can never produce a zero-width bubble.
-  assert.match(code, /const derivedSpan = Math\.max\(windowWidth - SIDE_INSET \* 2 - 2, 0\);/);
-  assert.match(code, /const rowSpan = Math\.max\(measuredTabWidth \* tabCount, derivedSpan\);/);
-  assert.match(code, /const tabWidth = tabCount > 0 \? rowSpan \/ tabCount : 0;/);
+check('the span takes the LARGER of independent, sanitised candidates', () => {
+  // Measured tabs, the window and the pill's own width are all candidates and
+  // the largest wins, so a device whose measurement reports 0 can never produce
+  // a zero-width bubble.
+  assert.match(code, /const windowWidth = Number\.isFinite\(rawWindowWidth\) && rawWindowWidth > 0 \? rawWindowWidth : 0;/);
+  assert.match(code, /const pillSpan = pillWidth > 0 \? Math\.max\(pillWidth - 2, 0\) : 0;/);
+  assert.match(
+    code,
+    /const rowSpan = Math\.max\(measuredTabWidth \* tabCount, windowSpan, pillSpan, 0\);/,
+  );
+  assert.match(code, /const tabWidth = tabCount > 0 && Number\.isFinite\(rowSpan\) \? rowSpan \/ tabCount : 0;/);
+});
+
+check('a non-finite position or width can never reach the transform', () => {
+  assert.match(code, /if \(!Number\.isFinite\(target\)\) return;/);
+  assert.match(code, /if \(!Number\.isFinite\(width\)\) return;/);
 });
 
 check('tab x is exact arithmetic from the solved tab width, mirrored for RTL', () => {

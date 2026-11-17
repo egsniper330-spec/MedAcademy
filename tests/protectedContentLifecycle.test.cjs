@@ -66,9 +66,9 @@ const P = build('src/lib/protectedContentState.ts');
 const M = build('src/lib/securityStateModel.ts');
 const CONTEXT = read('src/lib/SecurityContext.tsx');
 const SURFACE = read('src/components/ProtectedContentSurface.tsx');
-const NATIVE = read('src/components/VdoCipherPlayerNativeAdapter.native.tsx');
-const OFFLINE = read('src/components/OfflineVideoPlayer.native.tsx');
-const WEBVIEW = read('src/components/VdoCipherPlayerWebView.tsx');
+// The retired native VdoCipher players and the offline player are gone; the
+// LIVE player is the WebView one (YouTubePlayer), which is what must comply.
+const WEBVIEW = read('src/components/YouTubePlayer.tsx');
 const VISIBILITY = read('src/lib/protectedContentVisibility.ts');
 const WEBVIEW_STOP = read('src/lib/useSecurityWebViewStop.ts');
 const LOCK = read('src/lib/securityLock.ts');
@@ -232,25 +232,9 @@ console.log('\u2500\u2500 Part 5: native concealment and VdoCipher preservation 
     /const visible = allowedByState && !concealedRef\.current;/.test(SURFACE)
     && /concealedRef\.current = true;/.test(SURFACE)
     && /concealedRef\.current = false;/.test(SURFACE));
-  check('5d: online native player is inside the protected surface',
-    /<ProtectedContentSurface/.test(NATIVE) && /<\/ProtectedContentSurface>/.test(NATIVE));
-  check('5e: online native player pauses and leaves fullscreen on conceal (no teardown)',
-    /playerRef\.current\?\.pause\?\.\(\)/.test(NATIVE)
-    && /playerRef\.current\?\.exitFullscreenV2\?\.\(\)/.test(NATIVE)
-    && !/release\(|destroy\(/.test(NATIVE));
-  check('5f: playback resumes only if it was playing before concealment',
-    /resumeOnRevealRef\.current = playingRef\.current;/.test(NATIVE)
-    && /if \(!shouldResume\) return;/.test(NATIVE));
-  check('5g: exactly ONE native player instance and ONE OTP fetch remain',
-    (NATIVE.match(/<VdoPlayerView/g) || []).length === 1
-    && (NATIVE.match(/getVideoPlaybackToken\(/g) || []).length === 1);
-  check('5h: the app watermark still renders inside the same container',
-    /<NativeWatermarkOverlay/.test(NATIVE)
-    && NATIVE.indexOf('<ProtectedContentSurface') < NATIVE.indexOf('<NativeWatermarkOverlay')
-    && NATIVE.indexOf('<NativeWatermarkOverlay') < NATIVE.indexOf('</ProtectedContentSurface>'));
-  check('5i: the offline native player uses the same protected surface',
-    /<ProtectedContentSurface/.test(OFFLINE)
-    && /playerRef\.current\?\.pause\?\.\(\)/.test(OFFLINE));
+  check('5d: the retired native/offline players are gone (single player path)',
+    !fs.existsSync(path.join(ROOT, 'src/components/VdoCipherPlayerNativeAdapter.native.tsx'))
+    && !fs.existsSync(path.join(ROOT, 'src/components/OfflineVideoPlayer.native.tsx')));
   check('5j: the WebView fallback soft-pauses (does NOT detach the iframe) on conceal',
     /WEBVIEW_SOFT_PAUSE_SCRIPT/.test(WEBVIEW)
     && /<ProtectedContentSurface/.test(WEBVIEW)

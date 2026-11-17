@@ -9,7 +9,6 @@ import { registerCurrentDevice } from '@/lib/deviceRegistration';
 import { invalidateCreditCache } from '@/lib/creditService';
 import { invalidateMySubscriptionsCache } from '@/lib/myCoursesCache';
 import { markPerf } from '@/lib/perfTimeline';
-import { resetOfflineLibraryForAccountSwitch } from '@/lib/offlineVideoService';
 import { isExpectedMaintenanceError } from '@/lib/maintenanceStateModel';
 import { useProfileStore } from '@/lib/store';
 import { UserRole, type UserRole as UserRoleType } from '@/lib/enums';
@@ -472,11 +471,6 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
         // The next sign-in must never inherit this account's cached data.
         invalidateCreditCache();
         invalidateMySubscriptionsCache();
-        // Offline-library account isolation: drop the in-memory download
-        // library so a subsequent login hydrates fresh (persisted rows are
-        // owner-scoped and re-filter by the new user on hydration; DRM
-        // licenses remain device-bound in the VdoCipher registry).
-        resetOfflineLibraryForAccountSwitch();
         lastAccountUidRef.current = null;
 
         // ── Upload-queue account scoping ────────────────────────────────────
