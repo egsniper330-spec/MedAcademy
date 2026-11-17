@@ -79,7 +79,7 @@ ok(/const touchStart = useRef\(/.test(glass), 'the touch start point is captured
 ok(/translateX\.setValue\(next\)/.test(glass), 'during the drag the indicator is driven by the touch coordinate');
 ok(/onPanResponderRelease/.test(glass) && /finishDrag/.test(glass), 'release resolves the drop position');
 ok(/Math\.abs\(tabX - landed\)/.test(glass), 'release snaps to the NEAREST tab, measured (never hardcoded)');
-ok(/useNativeDriver: false/.test(glass.slice(glass.indexOf('Animated.spring(translateX, {\n        toValue: targetX'))),
+ok(/useNativeDriver: false/.test(glass.slice(glass.indexOf('Animated.spring(translateX, {'))),
   'translateX is JS-driven so the finger can write it directly');
 ok(/\.\.\.panResponder\.panHandlers/.test(glass), 'the gesture is attached to the glass pill itself');
 ok(/onPanResponderTerminationRequest: \(\) => false/.test(glass), 'an active drag cannot be stolen mid-gesture');

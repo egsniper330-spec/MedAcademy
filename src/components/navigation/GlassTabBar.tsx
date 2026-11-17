@@ -45,9 +45,10 @@
  * STATE SOURCE OF TRUTH
  *   No local navigation state. The active tab is `state.index` from React
  *   Navigation — the same value Expo Router updates for taps, back, deep links
- *   and programmatic navigation. Positions come from each tab's own `onLayout`,
- *   so RTL, tablets, split screen and orientation changes are measured rather
- *   than assumed, and any tab count works.
+  *     and programmatic navigation. Positions come from the ROW's measured width
+ *   and the tab count (the tabs are `flex: 1`), so RTL, tablets, split screen
+ *   and orientation changes are derived exactly rather than assumed, any tab
+ *   count works, and a single mis-measured tab cannot displace the bubble.
  */
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -85,8 +86,6 @@ interface Props {
   style?: any;
 }
 
-type TabLayout = { x: number; width: number };
-
 export default function GlassTabBar({
   state,
   descriptors,
@@ -123,22 +122,31 @@ export default function GlassTabBar({
 
   const activeVisible = visibleRoutes.findIndex((entry) => entry.routeIndex === activeIndex);
 
-  /* ── Measured geometry ─────────────────────────────────────────────────── */
-  const [layouts, setLayouts] = useState<Record<string, TabLayout>>({});
-  const onTabLayout = useCallback((key: string, x: number, width: number) => {
-    setLayouts((prev) => {
-      const current = prev[key];
-      if (current && Math.abs(current.x - x) < 0.5 && Math.abs(current.width - width) < 0.5) return prev;
-      return { ...prev, [key]: { x, width } };
-    });
-  }, []);
-
-  /* ── Shared indicator ──────────────────────────────────────────────────── */
+  /* ── Indicator geometry — DERIVED, never measured per tab ────────────────
+   *
+   * ROOT CAUSE (proven on the tablet, Samsung SM-T505N / Android 12):
+   *   • the tab ICONS and LABELS followed the route correctly, while the bubble
+   *     was ABSENT on Home, Explore and My Materials and sat under Home while
+   *     Profile was open. Correct route + wrong/absent bubble splits the two
+   *     inputs apart: the route was fine, the bubble's OWN geometry was not;
+   *   • that geometry came from each tab's `onLayout` (x/width) plus an animated
+   *     opacity (`fade`). In this RTL row a tab can report width 0 (or a
+   *     mirrored x) during the first layout pass, and the value was then kept:
+   *     a 0-width bubble paints nothing, and a stale x parks it on the previous
+   *     tab. Because visibility lived in an Animated value that only an effect
+   *     could raise, a skipped run left it at 0 — invisible while still there.
+   *
+   * The tabs are `flex: 1` on one row, so their geometry is EXACT arithmetic:
+   *     tabWidth = rowWidth / tabCount
+   *     x(i)     = isRTL ? rowWidth - (i + 1) * tabWidth : i * tabWidth
+   * `rowWidth` is ONE measurement of the row itself (window width as the
+   * pre-layout fallback), so a per-tab measurement can never be zero, stale or
+   * mirrored — and the bubble is placed from the SAME index the icon tint is
+   * derived from, so route and position cannot disagree.
+   */
   const translateX = useRef(new Animated.Value(0)).current;
   const stretch = useRef(new Animated.Value(1)).current;
-  const fade = useRef(new Animated.Value(0)).current;
-  const [indicatorWidth, setIndicatorWidth] = useState(0);
-  const positioned = useRef(false);
+  /** The x the bubble last landed on (animation bookkeeping only). */
   const lastTarget = useRef<number | null>(null);
 
   /* ── Drag state. Refs, never state: a finger moving across the bar must not
@@ -164,116 +172,86 @@ export default function GlassTabBar({
     return () => translateX.removeListener(id);
   }, [translateX]);
 
-  /* Row width is a second, independent measurement. Per-tab `onLayout` is the
-   * precise source, but some surfaces (RN Web's Pressable today) never emit it;
-   * without a fallback the bubble would simply stay hidden there. With the
-   * row's own width the geometry is still measured, and because the tabs are
-   * `flex: 1` the fallback is exact rather than approximate. Mirrored for RTL,
-   * where `row-reverse` puts the first tab on the physical right. */
+  /* Row width: ONE measurement of the row itself, mirrored for RTL, with the
+   * window width as the pre-layout fallback. The tabs are `flex: 1`, so the
+   * tab width derived from it is exact — no per-tab measurement is needed. */
   const [rowWidth, setRowWidth] = useState(0);
-  // Second fallback: the window width minus THIS bar's own horizontal insets.
-  // Equally-flexed tabs are exact multiples of it, so this is derived geometry,
-  // not a hardcoded screen coordinate: it tracks tablets, split screen and both
-  // orientations automatically. It only applies when neither measurement above
-  // is available (a surface that never emits onLayout).
   const { width: windowWidth } = useWindowDimensions();
   const derivedRowWidth = Math.max(windowWidth - SIDE_INSET * 2 - 2, 0);
-
-  const activeKey = activeVisible >= 0 ? visibleRoutes[activeVisible]?.route.key : undefined;
-  const measured = activeKey ? layouts[activeKey] : undefined;
-  const tabCount = visibleRoutes.length;
   const effectiveRowWidth = rowWidth > 0 ? rowWidth : derivedRowWidth;
-  const fallbackTabWidth = tabCount > 0 ? effectiveRowWidth / tabCount : 0;
-  const fallbackX = (() => {
-    if (activeVisible < 0) return 0;
-    return isRTL
-      ? effectiveRowWidth - (activeVisible + 1) * fallbackTabWidth
-      : activeVisible * fallbackTabWidth;
-  })();
-  const activeLayout: TabLayout | undefined = measured
-    ?? (fallbackTabWidth > 0 ? { x: fallbackX, width: fallbackTabWidth } : undefined);
-  const targetX = activeLayout ? activeLayout.x + INDICATOR_INSET : 0;
+  const tabCount = visibleRoutes.length;
+  const tabWidth = tabCount > 0 ? effectiveRowWidth / tabCount : 0;
+  const indicatorWidth = Math.max(tabWidth - INDICATOR_INSET * 2, 0);
 
+  /** Physical (left-anchored) x of visible tab `i`. RTL mirrors the order. */
+  const tabX = useCallback(
+    (i: number) => (isRTL ? effectiveRowWidth - (i + 1) * tabWidth : i * tabWidth),
+    [isRTL, effectiveRowWidth, tabWidth],
+  );
   /* ── Resting x of EVERY tab, in the same physical (left-anchored) space the
-   * animation uses. Measured per tab, with the exact flex fallback mirrored for
-   * RTL — nothing hardcoded. Used for hit-testing the grab and for the release
-   * snap, so dragging onto an area between two tabs still resolves to a tab. */
+   * animation uses. Used for the grab hit-test and the release snap, so a drag
+   * released between two tabs still resolves to the nearer one. */
   const tabTargets = useMemo(
-    () => visibleRoutes.map((entry, i) => {
-      const measuredLayout = layouts[entry.route.key];
-      if (measuredLayout) return measuredLayout.x + INDICATOR_INSET;
-      if (fallbackTabWidth <= 0) return 0;
-      const rawX = isRTL
-        ? effectiveRowWidth - (i + 1) * fallbackTabWidth
-        : i * fallbackTabWidth;
-      return rawX + INDICATOR_INSET;
-    }),
-    [visibleRoutes, layouts, isRTL, effectiveRowWidth, fallbackTabWidth],
+    () => visibleRoutes.map((_, i) => tabX(i) + INDICATOR_INSET),
+    [visibleRoutes, tabX],
   );
 
   /* ── ONE DRIVER PER VIEW (Android crash guard) ──────────────────────────
-   * `fade`, `translateX` and `stretch` are all applied to the SAME
-   * Animated.View (the shared indicator pill, `styles.indicator`). React
-   * Native marks EVERY animated value attached to a view as "native" as soon
-   * as one animation on that view runs with `useNativeDriver: true`
-   * (AnimatedProps.__makeNative → node.__makeNative for each style node).
-   * A JS-driven animation on such a value then throws in Animation.start:
+   * `translateX` and `stretch` are both applied to the SAME Animated.View (the
+   * shared indicator pill) and both stay JS-driven, because the finger writes
+   * `translateX` straight from touch coordinates during a drag.
+   *
+   * React Native marks EVERY animated value attached to a view as "native" as
+   * soon as ONE animation on that view runs with `useNativeDriver: true`
+   * (AnimatedProps.__makeNative → node.__makeNative for each style node), and a
+   * JS-driven animation on such a value then throws — fatal on Android:
    *
    *   Error: Attempting to run JS driven animation on animated node that has
    *   been moved to "native" earlier by starting an animation with
    *   `useNativeDriver: true`
    *
-   * That is fatal on Android (the exception is rethrown on the native-modules
-   * thread and kills the process) — it crashed the app on launch as soon as
-   * the dashboard mounted the tab bar. `translateX`/`stretch` must stay
-   * JS-driven (the finger writes `translateX` directly from touch
-   * coordinates), so `fade` — which only ever lives on this one view — is
-   * JS-driven too. Never make a single property of this view native while the
-   * transform siblings are JS: the whole view has to share one driver.
+   * That crashed the app on launch once. The bubble's opacity is therefore NOT
+   * an animated value any more: it is derived from the geometry (see the
+   * render), which also removes the failure mode where a skipped effect left
+   * the bubble invisible at opacity 0.
    */
+  /* ── Route → bubble placement (route identity is the ONLY input) ──────── */
   useEffect(() => {
     // A finger owns the position while dragging; the route-driven animation
     // must not pull the bubble out from under it (re-render, layout change…).
     if (dragging.current) return;
+    // Pre-layout: no width yet (first frame, or a zero-width row). Keep the
+    // current placement instead of hiding — a measurement is never a reason to
+    // remove the navigation affordance.
+    if (indicatorWidth <= 0) return;
+    // The active route is not one of the visible tabs (a drawer/hub screen
+    // rendered inside this navigator): keep the bubble where it is.
+    if (activeVisible < 0) return;
 
-    if (!activeLayout) {
-      Animated.timing(fade, { toValue: 0, duration: 140, useNativeDriver: false }).start();
-      return;
-    }
-
-    const width = Math.max(activeLayout.width - INDICATOR_INSET * 2, 0);
-    setIndicatorWidth(width);
+    const target = tabX(activeVisible) + INDICATOR_INSET;
+    const previous = lastTarget.current;
     // Keep the JS mirror authoritative. It is written HERE (and in settleAt /
     // onPanResponderMove) rather than only by the Animated value listener:
     // on RN Web that listener is not guaranteed to fire for every driven value,
     // and a stale 0 makes a drag start from the left edge.
-    liveX.current = targetX;
+    liveX.current = target;
 
-    if (!positioned.current) {
-      // First paint (or first measurement after a rotation): land exactly
-      // instead of sliding in from the previous value.
-      translateX.setValue(targetX);
-      fade.setValue(1);
-      positioned.current = true;
-      lastTarget.current = targetX;
+    if (previous === null || Math.abs(previous - target) < 0.5) {
+      // First placement (or pure geometry change: rotation, RTL flip, split
+      // screen, font scale): land exactly instead of sliding from nowhere.
+      translateX.setValue(target);
+      lastTarget.current = target;
       return;
     }
 
-    if (lastTarget.current === targetX) {
-      // Layout changed without a tab change (rotation, font scale, RTL flip).
-      translateX.setValue(targetX);
-      return;
-    }
+    const movingRight = target > previous;
+    lastTarget.current = target;
 
-    const movingRight = targetX > (lastTarget.current ?? 0);
-    lastTarget.current = targetX;
-
-    // Travel + deformation, all on the native driver: the bubble stretches
-    // along its axis for the first ~40% of the move and settles back, so the
-    // eye reads one travelling droplet instead of a jump.
+    // Travel + deformation: the bubble stretches along its axis as it moves and
+    // relaxes on arrival, so the eye reads one travelling droplet.
     Animated.parallel([
       Animated.spring(translateX, {
-        toValue: targetX,
+        toValue: target,
         damping: 19,
         stiffness: 190,
         mass: 0.85,
@@ -288,9 +266,13 @@ export default function GlassTabBar({
         }),
         Animated.spring(stretch, { toValue: 1, damping: 14, stiffness: 170, useNativeDriver: false }),
       ]),
-      Animated.timing(fade, { toValue: 1, duration: 140, useNativeDriver: false }),
-    ]).start();
-  }, [activeLayout, targetX, translateX, stretch, fade]);
+    ]).start(() => {
+      // Convergence guarantee: whatever the frames did (an interrupted spring, a
+      // re-render that snapped it, a dropped frame), end EXACTLY on the tab.
+      translateX.setValue(target);
+      stretch.setValue(1);
+    });
+  }, [activeVisible, indicatorWidth, tabX, translateX, stretch]);
 
   /* ── Keyboard: the pill drops out of the way, then returns. Two listeners,
    * no polling, no render loop. */
@@ -550,7 +532,9 @@ export default function GlassTabBar({
               width: indicatorWidth,
               backgroundColor: isDark ? 'rgba(125,175,225,0.20)' : `${activeTint}1F`,
               borderColor: isDark ? 'rgba(125,175,225,0.38)' : `${activeTint}40`,
-              opacity: fade,
+              // Derived, never animated: the bubble is painted exactly when its
+              // geometry exists, so a skipped effect can never leave it at 0.
+              opacity: indicatorWidth > 0 ? 1 : 0,
               transform: [{ translateX }, { scaleX: stretch }],
             },
           ]}
@@ -572,10 +556,6 @@ export default function GlassTabBar({
                 style={styles.tab}
                 onPress={() => handlePress(route.key, routeIndex, route.name)}
                 onLongPress={() => navigation.emit({ type: 'tabLongPress', target: route.key })}
-                onLayout={(event) => {
-                  const { x, width } = event.nativeEvent.layout;
-                  onTabLayout(route.key, x, width);
-                }}
                 accessibilityRole="button"
                 accessibilityLabel={options.tabBarAccessibilityLabel ?? label}
                 accessibilityState={{ selected: isFocused }}

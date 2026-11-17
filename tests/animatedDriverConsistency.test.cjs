@@ -168,7 +168,7 @@ const tabBar = fs.readFileSync(path.join(SRC, 'components/navigation/GlassTabBar
 const tabDrivers = driverMap(tabBar);
 
 check('the shared indicator values all stay JS-driven', () => {
-  for (const name of ['fade', 'translateX', 'stretch']) {
+  for (const name of ['translateX', 'stretch']) {
     assert.ok(tabDrivers.has(name), `${name} must be animated`);
     assert.deepStrictEqual(
       [...tabDrivers.get(name)],
@@ -176,10 +176,17 @@ check('the shared indicator values all stay JS-driven', () => {
       `${name} lives on the same Animated.View as the JS-driven transform, so it must never be native-driven`,
     );
   }
+  // The bubble's opacity must NOT be an animated value any more: it is derived
+  // from the geometry, so a skipped effect cannot leave a present-but-invisible
+  // bubble (the reported "indicator missing" defect).
+  assert.ok(!tabDrivers.has('fade'), 'the indicator opacity must stay derived, not animated');
 });
 
-check('the indicator view still carries opacity + translateX + scaleX together', () => {
-  assert.match(tabBar, /opacity:\s*fade,\s*\n\s*transform:\s*\[\{\s*translateX\s*\},\s*\{\s*scaleX:\s*stretch\s*\}\]/);
+check('the indicator view carries a derived opacity + translateX + scaleX together', () => {
+  assert.match(
+    tabBar,
+    /opacity:\s*indicatorWidth > 0 \? 1 : 0,\s*\n\s*transform:\s*\[\{\s*translateX\s*\},\s*\{\s*scaleX:\s*stretch\s*\}\]/,
+  );
 });
 
 check('the crash rule is documented next to the effect', () => {
