@@ -32,7 +32,6 @@ const tabPaths = (tabs: { name: string; hidden?: boolean }[]): string[] =>
 /** Drawer-only destinations (no bar item) per role. */
 const DRAWER_ONLY: Record<NavRole, string[]> = {
   student: [
-    '/offline-library',
     '/notifications',
     '/info/about',
     '/info/contact',

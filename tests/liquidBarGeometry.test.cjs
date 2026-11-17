@@ -53,26 +53,37 @@ const code = src
 
 console.log('\nGeometry is derived, not measured per tab');
 
-check('no per-tab layout measurement participates in the indicator', () => {
-  assert.ok(!/onTabLayout/.test(code), 'per-tab onLayout must not drive the bubble');
-  assert.ok(!/layouts\[/.test(code), 'per-tab measurements must not be consulted');
+check('a tab reports only its WIDTH (a stale or mirrored x is never used)', () => {
+  assert.match(code, /onTabLayout\(route\.key, event\.nativeEvent\.layout\.width\)/);
+  assert.ok(!/layout\.x/.test(code), 'per-tab x must not participate in the geometry');
 });
 
-check('tab width comes from the row width and the tab count', () => {
-  assert.match(code, /const tabWidth = tabCount > 0 \? effectiveRowWidth \/ tabCount : 0;/);
-  assert.match(code, /const indicatorWidth = Math\.max\(tabWidth - INDICATOR_INSET \* 2, 0\);/);
+check('the largest measured tab width wins (a zero/partial measurement cannot)', () => {
+  assert.match(code, /const measuredTabWidth = useMemo\(\(\) => \{/);
+  assert.match(code, /if \(Number\.isFinite\(w\) && w > max\) max = w;/);
 });
 
-check('tab x is exact arithmetic, mirrored for RTL', () => {
+check('the span takes the LARGER of the two independent candidates', () => {
+  // Two candidates (measured tabs vs the window) and the larger wins, so a
+  // device whose measurement reports 0 can never produce a zero-width bubble.
+  assert.match(code, /const derivedSpan = Math\.max\(windowWidth - SIDE_INSET \* 2 - 2, 0\);/);
+  assert.match(code, /const rowSpan = Math\.max\(measuredTabWidth \* tabCount, derivedSpan\);/);
+  assert.match(code, /const tabWidth = tabCount > 0 \? rowSpan \/ tabCount : 0;/);
+});
+
+check('tab x is exact arithmetic from the solved tab width, mirrored for RTL', () => {
+  assert.match(code, /const rowSpan = /);
   assert.match(
     code,
-    /const tabX = useCallback\(\s*\(i: number\) => \(isRTL \? effectiveRowWidth - \(i \+ 1\) \* tabWidth : i \* tabWidth\),/,
+    /\(i: number\) => \(isRTL \? rowSpan - \(i \+ 1\) \* tabWidth : i \* tabWidth\),/,
   );
 });
 
-check('the row width keeps an exact pre-layout fallback (no hardcoded pixels)', () => {
-  assert.match(code, /const derivedRowWidth = Math\.max\(windowWidth - SIDE_INSET \* 2 - 2, 0\);/);
-  assert.match(code, /const effectiveRowWidth = rowWidth > 0 \? rowWidth : derivedRowWidth;/);
+check('the bubble width is derived from the solved tab width and never collapses', () => {
+  assert.match(
+    code,
+    /const indicatorWidth = tabCount > 0 \? Math\.max\(tabWidth - INDICATOR_INSET \* 2, 24\) : 0;/,
+  );
 });
 
 console.log('\nVisibility can never be lost');

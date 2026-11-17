@@ -3,6 +3,7 @@
  * Replaces the separate Edit Profile + Security pages for students.
  */
 import { useState, useCallback } from 'react';
+import { AppModal } from '@/components/AppModal';
 import {
   View, Text, ScrollView, useColorScheme, Pressable, I18nManager,
   ActivityIndicator, RefreshControl, Modal, TextInput,
@@ -172,7 +173,7 @@ function PickerRow({
       </Pressable>
 
       {/* statusBarTranslucent: scrim covers the Android status bar correctly */}
-      <Modal
+      <AppModal
         visible={open}
         transparent
         animationType="slide"
@@ -240,7 +241,7 @@ function PickerRow({
             </ScrollView>
           </View>
         </Pressable>
-      </Modal>
+      </AppModal>
     </View>
   );
 }

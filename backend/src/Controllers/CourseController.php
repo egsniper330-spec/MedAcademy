@@ -667,15 +667,30 @@ final class CourseController
         // row is deleted: course_lifecycle_logs.course_id references courses.id
         // (ON DELETE SET NULL), so an insert after the DELETE would violate the
         // FK and fail the whole request even though the deletion succeeded.
-        $db->transaction(function (Database $db) use ($id, $course, $request) {
-            $this->logLifecycle($id, $course['title'] ?? '', 'permanently_deleted', $request->user['id']);
-            $db->query('DELETE FROM lesson_materials WHERE lesson_id IN (SELECT id FROM lessons WHERE course_id = ?)', [$id]);
-            $db->query('DELETE FROM video_uploads WHERE course_id = ?', [$id]);
-            $db->query('DELETE FROM lessons WHERE course_id = ?', [$id]);
-            $db->query('DELETE FROM sections WHERE course_id = ?', [$id]);
-            $db->query('DELETE FROM enrollments WHERE course_id = ?', [$id]);
-            $db->query('DELETE FROM courses WHERE id = ?', [$id]);
-        });
+        // credit_transactions.course_id is a NULLABLE RESTRICT foreign key: a
+        // PUBLISHED course always has at least one credit transaction (the
+        // enrollment that paid for it), so `DELETE FROM courses` violated the FK
+        // and the whole request died as a 500. Draft courses have no such rows,
+        // which is exactly why only published courses failed. The ledger rows are
+        // PRESERVED — only their course reference is detached (they keep the
+        // amount, doctor, student and notes for accounting).
+        try {
+            $db->transaction(function (Database $db) use ($id, $course, $request) {
+                $this->logLifecycle($id, $course['title'] ?? '', 'permanently_deleted', $request->user['id']);
+                $db->query('DELETE FROM lesson_materials WHERE lesson_id IN (SELECT id FROM lessons WHERE course_id = ?)', [$id]);
+                $db->query('DELETE FROM video_uploads WHERE course_id = ?', [$id]);
+                $db->query('DELETE FROM lessons WHERE course_id = ?', [$id]);
+                $db->query('DELETE FROM sections WHERE course_id = ?', [$id]);
+                $db->query('DELETE FROM enrollments WHERE course_id = ?', [$id]);
+                $db->query('UPDATE credit_transactions SET course_id = NULL WHERE course_id = ?', [$id]);
+                $db->query('DELETE FROM courses WHERE id = ?', [$id]);
+            });
+        } catch (\Throwable $e) {
+            // A dependent record we do not own blocked the delete: report what
+            // happened instead of the generic 500 the doctor used to see.
+            error_log('[course_delete] ' . $id . ' failed: ' . $e->getMessage());
+            throw new ApiException(409, 'This course could not be deleted because related records still reference it. Nothing was deleted — please contact support with the course id.');
+        }
 
         // Post-commit: reclaim the attachments + personalized copies.
         $retired = $cleanup->retire($materialSnapshots, 'course_delete', $request->user['id']);
@@ -754,12 +769,14 @@ final class CourseController
                 foreach ($lessons as $lesson) {
                     $newLessonId = Uuid::v4();
                     $db->insert(
+                        // The video reference is copied too: a duplicated course
+                        // with every lesson emptied of its video is not a copy.
                         'INSERT INTO lessons (id, section_id, course_id, title, description, duration_seconds,
                                               video_id, status, order_index, video_type, is_preview, created_at, updated_at)
                          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP(6), UTC_TIMESTAMP(6))',
                         [
                             $newLessonId, $newSectionId, $newCourseId, $lesson['title'], $lesson['description'],
-                            $lesson['duration_seconds'], null, 'draft', $lesson['order_index'],
+                            $lesson['duration_seconds'], $lesson['video_id'] ?? null, 'draft', $lesson['order_index'],
                             $lesson['video_type'] ?? 'coming_soon', $lesson['is_preview'] ?? 0,
                         ]
                     );

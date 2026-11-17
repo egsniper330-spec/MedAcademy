@@ -1143,32 +1143,8 @@ export default function LessonPlayer() {
                         </Pressable>
                       );
                     }
-                    if (phase === 'completed') {
-                      return (
-                        <Pressable
-                          onPress={() => {
-                            // 6120 ROOT-CAUSE GUARD: the online VdoCipher player
-                            // is still mounted behind this navigation. VdoCipher
-                            // documents error 6120 (renderer error) as much more
-                            // common with >1 VdoPlayer instance — mounting the
-                            // offline player while this one holds its decoder
-                            // surface is exactly that scenario. Tear the online
-                            // player down FIRST so exactly ONE VdoPlayer exists
-                            // for the offline playback session.
-                            setPlayerVisible(false);
-                            router.push(dlEntry?.meta.courseId
-                              ? { pathname: '/offline-course', params: { courseId: dlEntry.meta.courseId } }
-                              : '/offline-library');
-                          }}
-                          accessibilityRole="button"
-                          accessibilityLabel={t('lesson.watchOffline')}
-                          style={pill('#22C55E1F')}
-                        >
-                          <Check size={15} color="#22C55E" />
-                          <Text style={{ fontSize: 12, fontWeight: '700', color: '#22C55E' }}>{t('lesson.watchOfflineTitle')}</Text>
-                        </Pressable>
-                      );
-                    }
+                    // The retired Offline Video page is gone, so a completed
+                    // download no longer offers a route into it.
                     if (phase === 'paused') {
                       return (
                         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>

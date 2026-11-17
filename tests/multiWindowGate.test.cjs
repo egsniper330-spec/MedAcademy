@@ -221,7 +221,9 @@ console.log('\u2500\u2500 Part 4: native detection (Kotlin) \u2500\u2500');
     ['4a: reads Activity.isInMultiWindowMode()', /activity\.isInMultiWindowMode\(\)/],
     ['4b: reads Activity.isInPictureInPictureMode()', /activity\.isInPictureInPictureMode\(\)/],
     ['4c: PiP is classified BEFORE multi-window (PiP implies multi-window)',
-      /fun modeOf\(isInMultiWindowMode: Boolean, isInPictureInPictureMode: Boolean\): String \{\n\s+if \(isInPictureInPictureMode\) return WINDOW_MODE_PIP\n\s+if \(isInMultiWindowMode\) return WINDOW_MODE_MULTI\n\s+return WINDOW_MODE_FULLSCREEN/],
+      // The signature gained optional "another app's window has focus" inputs
+      // (see tests/floatingWindowGuard.test.cjs); the ORDER is what matters.
+      /fun modeOf\([\s\S]*?\): String \{\n\s+if \(isInPictureInPictureMode\) return WINDOW_MODE_PIP\n\s+if \(isInMultiWindowMode\) return WINDOW_MODE_MULTI\n[\s\S]*?return WINDOW_MODE_FULLSCREEN/],
     ['4d: exposes getWindowMode() to JS', /fun getWindowMode\(promise: Promise\)/],
     ['4e: exposes enableWindowModeMonitoring() to JS', /fun enableWindowModeMonitoring\(promise: Promise\)/],
     ['4f: pushes real transitions to JS', /emit\("windowModeChanged", params\)/],
@@ -513,7 +515,7 @@ console.log('\u2500\u2500 Part 9: existing controls unchanged \u2500\u2500');
   // still the Super Admin check (and the gate state for it) that decides, never a
   // client-supplied value or a route param (see scripts/check-security-param-authority.js).
   check('9g: the Super Admin exemption still applies to the multi-window cause',
-    /const applyWindowModeReading = useCallback\(\(mode: string, requestVerdict: boolean\) => \{\n\s+windowModeRef\.current = mode;\n\s+if \(isSuperAdmin\) return;/.test(CONTEXT));
+    /const applyWindowModeReading = useCallback\(\([^)]*\) => \{[\s\S]{0,700}?if \(isSuperAdmin\) return;/.test(CONTEXT));
   check('9h: the gate state is forced ALLOWED for a Super Admin session (unchanged)',
     /const gateState: SecurityGateState = isSuperAdmin\s*\n?\s*\? 'ALLOWED'/.test(CONTEXT));
 }

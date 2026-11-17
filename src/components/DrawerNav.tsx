@@ -79,7 +79,6 @@ function getNavSections(
         items: [
           { icon: LayoutDashboard, label: t('nav.dashboard'),     path: '/dashboard', color: c.primary  },
           { icon: BookOpen,        label: t('nav.myCourses'),    path: '/my-courses', color: '#7C3AED' },
-          { icon: DownloadCloud,   label: t('nav.offlineVideos'), path: '/offline-library', color: '#0EA5E9' },
           { icon: Bell,            label: t('nav.notifications'), path: '/notifications',         color: c.primary },
           { icon: User,            label: t('nav.profile'),       path: '/profile',    color: '#16A34A' },
           { icon: Info,            label: t('nav.aboutUs'),      path: '/info/about',           color: '#2DA8FF' },
@@ -768,9 +767,7 @@ export default function DrawerNav() {
                     onPress={() => navigate(item.path)}
                     c={c}
                     isDark={isDark}
-                    // Active-route highlight: Offline Videos stays highlighted
-                    // on both /offline-library and /offline-course.
-                    active={pathname === item.path || (item.path === '/offline-library' && pathname?.startsWith('/offline-'))}
+                    active={pathname === item.path}
                   />
                 ))}
               </View>

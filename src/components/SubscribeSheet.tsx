@@ -18,6 +18,7 @@
  * only — a stored value can never inject another scheme into Linking).
  */
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { AppModal } from '@/components/AppModal';
 import {
   View, Text, Modal, Pressable, Linking, ActivityIndicator,
   useColorScheme, ScrollView, useWindowDimensions,
@@ -177,7 +178,7 @@ export function SubscribeSheet({ visible, courseTitle, contact, onClose }: Props
   };
 
   return (
-    <Modal
+    <AppModal
       visible={visible}
       animationType="slide"
       transparent
@@ -329,7 +330,7 @@ export function SubscribeSheet({ visible, courseTitle, contact, onClose }: Props
           </ScrollView>
         </View>
       </Pressable>
-    </Modal>
+    </AppModal>
   );
 }
 

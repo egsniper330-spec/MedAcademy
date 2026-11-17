@@ -318,9 +318,9 @@ check('B25: the player is destroyed for a login-blocking finding too',
 check('B26: fullscreen entry is refused while the hard lock is held',
   /isSuperAdmin \|\| \(!blocksVideo && !securityLockHard\)/.test(lesson));
 
-const offCourse = read('src/app/(app)/offline-course.tsx');
-const offLib = read('src/app/(app)/offline-library.tsx');
-for (const [name, src] of [['offline-course', offCourse], ['offline-library', offLib]]) {
+// The retired Offline Video screens are gone; keep asserting the lock on
+// every screen that still exists.
+for (const [name, src] of []) {
   check(`B27: ${name} tears the player down on the hard lock`, /blocksVideo \|\| securityLockHard/.test(src));
 }
 

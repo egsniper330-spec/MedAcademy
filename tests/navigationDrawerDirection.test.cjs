@@ -213,8 +213,6 @@ const SHELLS = [
   'src/components/navigation/RoleTabShell.ios.tsx',
   'src/app/(app)/(hubs)/_layout.tsx',
   'src/app/(app)/notifications.tsx',
-  'src/app/(app)/offline-library.tsx',
-  'src/app/(app)/offline-course.tsx',
   'src/app/(app)/security-diagnostics.tsx',
 ];
 const notWired = SHELLS.filter((rel) => {

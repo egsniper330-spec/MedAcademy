@@ -9,6 +9,7 @@
  *   - Confirms selection and returns the chosen VideoAsset
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { AppModal } from '@/components/AppModal';
 import {
   ActivityIndicator,
   FlatList,
@@ -198,7 +199,7 @@ export function VideoLibraryPicker({ visible, onClose, onSelect }: Props) {
   };
 
   return (
-    <Modal
+    <AppModal
       visible={visible}
       animationType="slide"
       presentationStyle="pageSheet"
@@ -336,6 +337,6 @@ export function VideoLibraryPicker({ visible, onClose, onSelect }: Props) {
           />
         )}
       </View>
-    </Modal>
+    </AppModal>
   );
 }

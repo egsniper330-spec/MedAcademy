@@ -20,11 +20,12 @@
  * duplicated.
  *
  * Both modals render through <ResponsiveModal> → <PortalOverlay>, i.e. the
- * app's single window. React Native's <Modal> is deliberately NOT used: its
+ * app's single window. React Native's <AppModal> is deliberately NOT used: its
  * Android dialog-window show/dismiss race produces stacked/flickering windows.
  */
 
 import React, { useState } from 'react';
+import { AppModal } from '@/components/AppModal';
 import { View, Text, Pressable, ActivityIndicator } from 'react-native';
 import { User, Camera, Trash2, ImageIcon, AlertTriangle } from 'lucide-react-native';
 import { Image } from 'expo-image';

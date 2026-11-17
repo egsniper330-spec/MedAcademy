@@ -87,7 +87,9 @@ export default function LandingScreen() {
 
   useEffect(() => {
     if (route !== 'online' && route !== 'offline') return;
-    router.replace(route === 'offline' ? '/offline-library' : '/(app)');
+    // The retired Offline Video page is gone; every signed-in route now
+    // enters the app shell (offline access is handled inside it).
+    router.replace('/(app)');
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [route]);
 

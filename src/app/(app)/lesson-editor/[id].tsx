@@ -4,6 +4,7 @@
  * Auto-saves on field changes after 1.5 s debounce.
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { AppModal } from '@/components/AppModal';
 import {
   ActivityIndicator, Animated, FlatList, KeyboardAvoidingView, Modal,
   Platform, Pressable, ScrollView, Text, TextInput, useColorScheme, View,
@@ -831,7 +832,7 @@ export default function LessonEditor() {
       behavior={undefined} /* keyboard: native inset only */>
 
       {/* ══ Upload-Complete Dialog ══════════════════════════════════════════ */}
-      <Modal
+      <AppModal
         visible={showUploadCompleteDialog}
         transparent
         animationType="fade"
@@ -895,7 +896,7 @@ export default function LessonEditor() {
             </View>
           </Pressable>
         </View>
-      </Modal>
+      </AppModal>
       {/* ── Video Library Picker (no-video flow: "Choose From Library") ── */}
       <VideoLibraryPicker
         visible={showLibraryPicker}

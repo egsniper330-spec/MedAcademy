@@ -6,6 +6,7 @@
  * Auto-saves every 1.5 s after any change.
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { AppModal } from '@/components/AppModal';
 import { useFocusEffect } from 'expo-router';
 import {
   ActivityIndicator, Animated, FlatList, KeyboardAvoidingView, Modal, Pressable,
@@ -52,6 +53,7 @@ import { useFeatureFlags } from '@/lib/featureFlags';
 import { FeatureUnavailableState } from '@/components/ScreenState';
 import { isFeatureEnabled } from '@/lib/featureFlags';
 import { sectionDeleteErrorKey } from '@/lib/sectionDelete';
+import { lessonHasVideo } from '@/lib/publishValidation';
 import { useTranslation } from '@/lib/i18n';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -627,16 +629,9 @@ export default function CourseBuilder() {
     });
     const allLessons = sections.flatMap(s => s.lessons ?? []);
     allLessons.forEach(l => {
-      const vt = l.video_type ?? 'vdocipher';
-      let hasVideo = false;
-      if (vt === 'coming_soon') {
-        hasVideo = true;
-      } else if (vt === 'youtube') {
-        hasVideo = !!(l.youtube_video_id?.trim());
-      } else {
-        hasVideo = !!l.video_id || l.video_status === 'ready' || !!l.video_upload_id;
-      }
-      if (!hasVideo) {
+      // ONE shared rule (src/lib/publishValidation.ts): a stored YouTube URL is
+      // `video_id`, so checking only `youtube_video_id` refused valid lessons.
+      if (!lessonHasVideo(l)) {
         issues.push(t('cb.issue.lessonNoVideo', { title: l.title }));
       }
     });
@@ -668,16 +663,7 @@ export default function CourseBuilder() {
         if ((s.lessons ?? []).length === 0) issues.push(t('cb.issue.sectionNoLessons', { title: s.title }));
       });
       sects.flatMap(s => s.lessons ?? []).forEach(l => {
-        const vt = l.video_type ?? 'vdocipher';
-        let hasVideo = false;
-        if (vt === 'coming_soon') {
-          hasVideo = true;
-        } else if (vt === 'youtube') {
-          hasVideo = !!(l.youtube_video_id?.trim());
-        } else {
-          hasVideo = !!l.video_id || l.video_status === 'ready' || !!l.video_upload_id;
-        }
-        if (!hasVideo) issues.push(t('cb.issue.lessonNoVideo', { title: l.title }));
+        if (!lessonHasVideo(l)) issues.push(t('cb.issue.lessonNoVideo', { title: l.title }));
       });
       return issues;
     };
@@ -933,7 +919,7 @@ export default function CourseBuilder() {
       </View>
 
       {/* ── Overflow Menu Modal (narrow toolbar) ── */}
-      <Modal visible={showOverflowMenu} transparent animationType="fade" onRequestClose={() => setShowOverflowMenu(false)}>
+      <AppModal visible={showOverflowMenu} transparent animationType="fade" onRequestClose={() => setShowOverflowMenu(false)}>
         <Pressable style={{ flex: 1, backgroundColor: '#0006', justifyContent: 'flex-end' }}
           onPress={() => setShowOverflowMenu(false)}>
           <Pressable onPress={e => e.stopPropagation()}>
@@ -971,7 +957,7 @@ export default function CourseBuilder() {
             </View>
           </Pressable>
         </Pressable>
-      </Modal>
+      </AppModal>
 
       {/* ── Tab Bar ── */}
       <View style={{ flexDirection: 'row', direction: isRTL ? 'rtl' : 'ltr', paddingHorizontal: layout.screenPx, gap: 8, marginBottom: 4 }}>
@@ -1681,7 +1667,7 @@ export default function CourseBuilder() {
       )}
 
       {/* ── Start Modal (Blank or Template) ── */}
-      <Modal visible={showStartModal} transparent animationType="fade">
+      <AppModal visible={showStartModal} transparent animationType="fade">
         <View style={{ flex: 1, backgroundColor: '#000a', justifyContent: 'center', alignItems: 'center', padding: 20 }}>
           <Pressable onPress={e => e.stopPropagation()}>
             <NeuCard style={{ width: Math.min(screenWidth - 40, 440) }}>
@@ -1725,10 +1711,10 @@ export default function CourseBuilder() {
             </NeuCard>
           </Pressable>
         </View>
-      </Modal>
+      </AppModal>
 
       {/* ── Archive Confirmation Modal ── */}
-      <Modal visible={showArchiveModal} transparent animationType="fade">
+      <AppModal visible={showArchiveModal} transparent animationType="fade">
         <View style={{ flex: 1, backgroundColor: '#000a', justifyContent: 'center', alignItems: 'center', padding: 20 }}>
           <Pressable onPress={e => e.stopPropagation()}>
             <NeuCard style={{ width: Math.min(screenWidth - 40, 420) }}>
@@ -1769,10 +1755,10 @@ export default function CourseBuilder() {
             </NeuCard>
           </Pressable>
         </View>
-      </Modal>
+      </AppModal>
 
       {/* ── Delete Section Confirmation ── */}
-      <Modal visible={!!deleteSectionTarget} transparent animationType="fade"
+      <AppModal visible={!!deleteSectionTarget} transparent animationType="fade"
         onRequestClose={() => { if (!deletingSection) setDeleteSectionTarget(null); }}>
         <View style={{ flex: 1, backgroundColor: '#000a', justifyContent: 'center', alignItems: 'center', padding: 20 }}>
           <Pressable onPress={e => e.stopPropagation()}>
@@ -1827,10 +1813,10 @@ export default function CourseBuilder() {
             </NeuCard>
           </Pressable>
         </View>
-      </Modal>
+      </AppModal>
 
       {/* ── Save as Template Modal ── */}
-      <Modal visible={showSaveTemplate} transparent animationType="fade">
+      <AppModal visible={showSaveTemplate} transparent animationType="fade">
         <View style={{ flex: 1, backgroundColor: '#000a', justifyContent: 'center', alignItems: 'center', padding: 20 }}>
           <Pressable onPress={e => e.stopPropagation()}>
             <NeuCard style={{ width: Math.min(screenWidth - 40, 400) }}>
@@ -1851,7 +1837,7 @@ export default function CourseBuilder() {
             </NeuCard>
           </Pressable>
         </View>
-      </Modal>
+      </AppModal>
     </KeyboardAvoidingView>
     </>
   );

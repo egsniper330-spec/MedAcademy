@@ -19,6 +19,7 @@
  */
 
 import React from 'react';
+import { AppModal } from '@/components/AppModal';
 import {
   Modal,
   Pressable,
@@ -105,7 +106,7 @@ export function PermissionRationaleModal({
   };
 
   return (
-    <Modal
+    <AppModal
       visible={visible}
       transparent
       animationType="fade"
@@ -205,7 +206,7 @@ export function PermissionRationaleModal({
           </ScrollView>
         </Pressable>
       </Pressable>
-    </Modal>
+    </AppModal>
   );
 }
 

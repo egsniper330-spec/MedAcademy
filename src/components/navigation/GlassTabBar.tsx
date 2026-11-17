@@ -58,6 +58,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { BlurView } from 'expo-blur';
+import { LinearGradient } from 'expo-linear-gradient';
 import { markEntryIntent } from '@/lib/navigation/navIntent';
 import { useTranslation } from '@/lib/i18n';
 import { neuColors } from '@/lib/neu';
@@ -137,13 +138,23 @@ export default function GlassTabBar({
    *     could raise, a skipped run left it at 0 — invisible while still there.
    *
    * The tabs are `flex: 1` on one row, so their geometry is EXACT arithmetic:
-   *     tabWidth = rowWidth / tabCount
-   *     x(i)     = isRTL ? rowWidth - (i + 1) * tabWidth : i * tabWidth
-   * `rowWidth` is ONE measurement of the row itself (window width as the
-   * pre-layout fallback), so a per-tab measurement can never be zero, stale or
-   * mirrored — and the bubble is placed from the SAME index the icon tint is
-   * derived from, so route and position cannot disagree.
+   *     x(i) = isRTL ? rowSpan - (i + 1) * tabWidth : i * tabWidth
+   * What measurement is trusted was established on the device: a TAB's width is
+   * reported correctly, while the row's own `onLayout` width comes back as 0 in
+   * this RTL configuration (deriving from it left the bubble with no width at
+   * all) and a tab's `x` can be stale/mirrored. So the LARGEST measured tab
+   * width is the one input, and every position is derived from it. The bubble is
+   * then placed from the SAME index the icon tint is derived from, so route and
+   * position cannot disagree.
    */
+  const [layouts, setLayouts] = useState<Record<string, { width: number }>>({});
+  const onTabLayout = useCallback((key: string, width: number) => {
+    setLayouts((prev) => {
+      const current = prev[key];
+      if (current && Math.abs(current.width - width) < 0.5) return prev;
+      return { ...prev, [key]: { width } };
+    });
+  }, []);
   const translateX = useRef(new Animated.Value(0)).current;
   const stretch = useRef(new Animated.Value(1)).current;
   /** The x the bubble last landed on (animation bookkeeping only). */
@@ -172,21 +183,33 @@ export default function GlassTabBar({
     return () => translateX.removeListener(id);
   }, [translateX]);
 
-  /* Row width: ONE measurement of the row itself, mirrored for RTL, with the
-   * window width as the pre-layout fallback. The tabs are `flex: 1`, so the
-   * tab width derived from it is exact — no per-tab measurement is needed. */
-  const [rowWidth, setRowWidth] = useState(0);
+  /* Tab width: the largest width any tab reported (a zero or partial measurement
+   * can never win), with the window width as the pre-layout fallback. */
+  const measuredTabWidth = useMemo(() => {
+    let max = 0;
+    for (const entry of visibleRoutes) {
+      const w = layouts[entry.route.key]?.width ?? 0;
+      if (Number.isFinite(w) && w > max) max = w;
+    }
+    return max;
+  }, [visibleRoutes, layouts]);
+
   const { width: windowWidth } = useWindowDimensions();
-  const derivedRowWidth = Math.max(windowWidth - SIDE_INSET * 2 - 2, 0);
-  const effectiveRowWidth = rowWidth > 0 ? rowWidth : derivedRowWidth;
   const tabCount = visibleRoutes.length;
-  const tabWidth = tabCount > 0 ? effectiveRowWidth / tabCount : 0;
-  const indicatorWidth = Math.max(tabWidth - INDICATOR_INSET * 2, 0);
+  /* The span the tabs occupy. TWO independent candidates, and the LARGER wins:
+   * the measured tabs' total and the window width minus the pill's insets. A
+   * candidate can be 0 on a device (a failed measurement, a pre-layout pass),
+   * but both can never be 0 on a laid-out screen — so the bubble always has a
+   * real width, which is exactly what made it vanish before. */
+  const derivedSpan = Math.max(windowWidth - SIDE_INSET * 2 - 2, 0);
+  const rowSpan = Math.max(measuredTabWidth * tabCount, derivedSpan);
+  const tabWidth = tabCount > 0 ? rowSpan / tabCount : 0;
+  const indicatorWidth = tabCount > 0 ? Math.max(tabWidth - INDICATOR_INSET * 2, 24) : 0;
 
   /** Physical (left-anchored) x of visible tab `i`. RTL mirrors the order. */
   const tabX = useCallback(
-    (i: number) => (isRTL ? effectiveRowWidth - (i + 1) * tabWidth : i * tabWidth),
-    [isRTL, effectiveRowWidth, tabWidth],
+    (i: number) => (isRTL ? rowSpan - (i + 1) * tabWidth : i * tabWidth),
+    [isRTL, rowSpan, tabWidth],
   );
   /* ── Resting x of EVERY tab, in the same physical (left-anchored) space the
    * animation uses. Used for the grab hit-test and the release snap, so a drag
@@ -327,7 +350,7 @@ export default function GlassTabBar({
    *   • A cancelled gesture snaps back without navigating.
    */
   useEffect(() => { targetsRef.current = tabTargets; }, [tabTargets]);
-  useEffect(() => { rowWidthRef.current = effectiveRowWidth; }, [effectiveRowWidth]);
+  useEffect(() => { rowWidthRef.current = rowSpan; }, [rowSpan]);
   useEffect(() => { indicatorWidthRef.current = indicatorWidth; }, [indicatorWidth]);
   useEffect(() => { activeVisibleRef.current = activeVisible; }, [activeVisible]);
   useEffect(() => { pressRef.current = handlePress; }, [handlePress]);
@@ -480,6 +503,28 @@ export default function GlassTabBar({
         { paddingBottom: bottomPad, transform: [{ translateY: keyboardOffset }] },
       ]}
     >
+      {/* Approved Light-Mode refinement: a soft, water-like luminous bloom
+          UNDER the pill (rendered first, so it sits behind the surface). */}
+      <LinearGradient
+        pointerEvents="none"
+        colors={
+          isDark
+            ? (['rgba(61,159,255,0)', 'rgba(61,159,255,0.22)'] as const)
+            : (['rgba(30,144,255,0)', 'rgba(30,144,255,0.18)'] as const)
+        }
+        start={{ x: 0.5, y: 0 }}
+        end={{ x: 0.5, y: 1 }}
+        style={{
+          position: 'absolute',
+          left: SIDE_INSET + 10,
+          right: SIDE_INSET + 10,
+          bottom: bottomPad,
+          height: BAR_HEIGHT + 26,
+          borderRadius: (BAR_HEIGHT + 26) / 2,
+          opacity: 0.85,
+        }}
+      />
+
       <View
         ref={pillRef}
         // Needed on Android so `measureInWindow` reports real bounds.
@@ -509,6 +554,22 @@ export default function GlassTabBar({
           pointerEvents="none"
         />
 
+        {/* Approved Light-Mode refinement: the liquid sheen INSIDE the glass —
+            a diagonal luminous wash that gives the surface depth without
+            changing the pill's layout or colour identity. */}
+        <LinearGradient
+          pointerEvents="none"
+          colors={
+            isDark
+              ? (['rgba(96,165,250,0.16)', 'rgba(96,165,250,0.02)', 'rgba(255,255,255,0.06)'] as const)
+              : (['rgba(255,255,255,0.55)', 'rgba(30,144,255,0.10)', 'rgba(255,255,255,0.30)'] as const)
+          }
+          locations={[0, 0.55, 1]}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+          style={StyleSheet.absoluteFill}
+        />
+
         {/* Tint wash + top highlight: gives the surface a glass body even on
             devices where the OS declines to blur. */}
         <View
@@ -530,8 +591,16 @@ export default function GlassTabBar({
             styles.indicator,
             {
               width: indicatorWidth,
-              backgroundColor: isDark ? 'rgba(125,175,225,0.20)' : `${activeTint}1F`,
-              borderColor: isDark ? 'rgba(125,175,225,0.38)' : `${activeTint}40`,
+              // Approved Light-Mode refinement: a clearly readable liquid
+              // indicator instead of a barely-there wash. Dark keeps the same
+              // luminous blue, only lighter.
+              backgroundColor: isDark ? 'rgba(96,165,250,0.30)' : 'rgba(30,144,255,0.20)',
+              borderColor: isDark ? 'rgba(148,200,255,0.62)' : 'rgba(30,144,255,0.52)',
+              shadowColor: isDark ? 'rgba(96,165,250,0.55)' : 'rgba(30,144,255,0.45)',
+              shadowOpacity: 1,
+              shadowRadius: 10,
+              shadowOffset: { width: 0, height: 2 },
+              elevation: 6,
               // Derived, never animated: the bubble is painted exactly when its
               // geometry exists, so a skipped effect can never leave it at 0.
               opacity: indicatorWidth > 0 ? 1 : 0,
@@ -542,7 +611,6 @@ export default function GlassTabBar({
 
         <View
           style={[styles.row, { flexDirection: isRTL ? 'row-reverse' : 'row', direction: 'ltr' }]}
-          onLayout={(event) => setRowWidth(event.nativeEvent.layout.width)}
         >
           {visibleRoutes.map(({ route, descriptor, routeIndex }) => {
             const isFocused = routeIndex === activeIndex;
@@ -554,6 +622,7 @@ export default function GlassTabBar({
               <Pressable
                 key={route.key}
                 style={styles.tab}
+                onLayout={(event) => onTabLayout(route.key, event.nativeEvent.layout.width)}
                 onPress={() => handlePress(route.key, routeIndex, route.name)}
                 onLongPress={() => navigation.emit({ type: 'tabLongPress', target: route.key })}
                 accessibilityRole="button"

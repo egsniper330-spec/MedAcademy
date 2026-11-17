@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { AppModal } from '@/components/AppModal';
 import {
   View, Text, ScrollView, Linking, Modal, Pressable, useColorScheme, ActivityIndicator, Platform,
 } from 'react-native';
@@ -120,7 +121,7 @@ function ContactChooserModal({
   };
 
   return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
+    <AppModal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
       <Pressable
         style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)', justifyContent: 'center', alignItems: 'center', padding: layout.screenPx }}
         onPress={onClose}
@@ -193,7 +194,7 @@ function ContactChooserModal({
           </View>
         </Pressable>
       </Pressable>
-    </Modal>
+    </AppModal>
   );
 }
 

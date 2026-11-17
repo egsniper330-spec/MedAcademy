@@ -66,8 +66,8 @@ export const neuColors = {
     // Flattened equivalents of the existing `color: text, opacity: 0.5 / 0.38`
     // idiom, so a caller that adopts the solid tiers still gets today's Light
     // appearance pixel-for-pixel.
-    textMuted: '#788496',
-    textSubtle: '#939DAD',
+    textMuted: '#5B6779',
+    textSubtle: '#6E7A8C',
     border: 'rgba(160,185,215,0.55)',
     borderSoft: 'rgba(160,185,215,0.35)',
     divider: 'rgba(8,26,53,0.08)',

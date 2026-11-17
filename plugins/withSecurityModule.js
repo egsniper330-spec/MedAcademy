@@ -96,6 +96,13 @@ private const val ROOT_CONF_LOW = "low"
 private const val WINDOW_MODE_FULLSCREEN = "fullscreen"
 private const val WINDOW_MODE_MULTI = "multi_window"
 private const val WINDOW_MODE_PIP = "picture_in_picture"
+// Another task's window (a floating / "pop-up view" app, a chat bubble panel,
+// a system-managed mini window) is focused OVER this app. Android exposes no
+// window enumeration to a normal app, so this is derived from the ACTIVITY's
+// own, documented onWindowFocusChanged(false) WHILE we are resumed, full screen
+// and not in PiP: our task keeps running and the platform says the focused
+// window is not ours.
+private const val WINDOW_MODE_FOREIGN = "foreign_window"
 private const val WINDOW_MODE_UNKNOWN = "unknown"
 
 /**
@@ -145,16 +152,35 @@ object WindowModeBridge {
      * our own PiP (PiP is documented as a special case of multi-window), so PiP
      * is classified FIRST and reported as its own mode.
      */
-    fun report(isInMultiWindowMode: Boolean, isInPictureInPictureMode: Boolean) {
-        val mode = modeOf(isInMultiWindowMode, isInPictureInPictureMode)
+    fun report(
+        isInMultiWindowMode: Boolean,
+        isInPictureInPictureMode: Boolean,
+        foreignWindowFocused: Boolean = false,
+        appResumed: Boolean = true,
+    ) {
+        val mode = modeOf(isInMultiWindowMode, isInPictureInPictureMode, foreignWindowFocused, appResumed)
         lastReported = mode
         try { listener?.invoke(mode) } catch (_: Exception) { /* a throwing subscriber cannot break the activity callback */ }
     }
 
-    /** The ONE mapping from the platform booleans to the JS vocabulary. */
-    fun modeOf(isInMultiWindowMode: Boolean, isInPictureInPictureMode: Boolean): String {
+    /**
+     * The ONE mapping from the platform booleans to the JS vocabulary.
+     *
+     * Order matters: PiP and multi-window are POSITIVE, documented platform
+     * states and always win. "Foreign window" is only reachable when the app is
+     * resumed in full screen and the activity has lost window focus, which is
+     * what a floating window from another task produces. A paused app is not a
+     * violation (the user simply switched apps), hence appResumed.
+     */
+    fun modeOf(
+        isInMultiWindowMode: Boolean,
+        isInPictureInPictureMode: Boolean,
+        foreignWindowFocused: Boolean = false,
+        appResumed: Boolean = true,
+    ): String {
         if (isInPictureInPictureMode) return WINDOW_MODE_PIP
         if (isInMultiWindowMode) return WINDOW_MODE_MULTI
+        if (foreignWindowFocused && appResumed) return WINDOW_MODE_FOREIGN
         return WINDOW_MODE_FULLSCREEN
     }
 }
@@ -2279,6 +2305,9 @@ class SecurityModule(private val reactContext: ReactApplicationContext) :
     private var hostResumeListener: LifecycleEventListener? = null
     private var watchedActivity: WeakReference<Activity>? = null
 
+    /** Mirrors the host activity's resumed state (set by the lifecycle listener). */
+    @Volatile private var hostResumed: Boolean = false
+
     /**
      * A layout pass re-reads the mode. The listener does the minimum possible
      * work (one posted read) and is replaced when the activity changes; there
@@ -2358,9 +2387,10 @@ class SecurityModule(private val reactContext: ReactApplicationContext) :
                     // Foreground return, or the first resume after a cold start:
                     // a mandatory re-check, because the mode may have changed
                     // while another app was in front.
+                    hostResumed = true
                     mainHandler.post { refreshWindowMode("resume") }
                 }
-                override fun onHostPause() { }
+                override fun onHostPause() { hostResumed = false }
                 override fun onHostDestroy() { watchedActivity = null }
             }
             try {
@@ -2440,9 +2470,15 @@ class SecurityModule(private val reactContext: ReactApplicationContext) :
         if (activity == null) return WINDOW_MODE_UNKNOWN
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.N) return WINDOW_MODE_UNKNOWN
         return try {
+            // Focus participates here too, so the periodic re-assert, the
+            // pre-video preflight and the activity callback can never disagree
+            // about the same physical state.
+            val focused = try { !activity.window.decorView.hasWindowFocus() } catch (_: Exception) { false }
             WindowModeBridge.modeOf(
                 activity.isInMultiWindowMode(),
                 activity.isInPictureInPictureMode(),
+                focused,
+                hostResumed,
             )
         } catch (_: Exception) {
             WINDOW_MODE_UNKNOWN
@@ -3592,6 +3628,41 @@ const WINDOW_MODE_ACTIVITY_OVERRIDES = `
   override fun onPictureInPictureModeChanged(isInPictureInPictureMode: Boolean, newConfig: Configuration) {
     super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
     WindowModeBridge.report(isInMultiWindowMode(), isInPictureInPictureMode)
+  }
+
+  /**
+   * MedAcademy floating-window guard (injected by plugins/withSecurityModule.js).
+   *
+   * Android has no API that enumerates another app's windows, so "an app is
+   * floating over us" cannot be read directly. What IS documented is the
+   * ACTIVITY's own window focus: a floating window from another task takes
+   * focus while our task stays resumed — so losing focus while resumed, full
+   * screen and not in PiP is the platform's own answer to "another window is
+   * in front of ours". Notifications and the keyboard never take window focus.
+   *
+   * A short settle delay filters the momentary focus churn of transitions and
+   * of our OWN dialogs: the state is re-read after focus had a chance to come
+   * back, and only a still-unfocused, still-resumed activity is reported.
+   */
+  private var foreignWindowCheck: Runnable? = null
+
+  override fun onWindowFocusChanged(hasFocus: Boolean) {
+    super.onWindowFocusChanged(hasFocus)
+    foreignWindowCheck?.let { window.decorView.removeCallbacks(it) }
+    foreignWindowCheck = null
+    if (!hasFocus) {
+      val check = Runnable {
+        // Re-read the LIVE focus: our own dialog (which also steals focus and
+        // then returns it) has usually closed by now.
+        if (window?.decorView?.hasWindowFocus() == false && !isFinishing) {
+          WindowModeBridge.report(isInMultiWindowMode(), isInPictureInPictureMode(), true, true)
+        }
+      }
+      foreignWindowCheck = check
+      window?.decorView?.postDelayed(check, 700L)
+      return
+    }
+    WindowModeBridge.report(isInMultiWindowMode(), isInPictureInPictureMode(), false, true)
   }
 `;
 

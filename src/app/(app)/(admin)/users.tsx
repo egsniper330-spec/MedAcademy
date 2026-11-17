@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { AppModal } from '@/components/AppModal';
 import { PageHeader } from '@/components/PageHeader';
 import {
   View, Text, ScrollView, useColorScheme, Pressable, RefreshControl,
@@ -63,7 +64,7 @@ function AdminCountryPicker({ value, onChange, c }: { value: Country; onChange: 
         <Text style={{ fontSize: 14, fontWeight: '700', color: c.text, marginRight: 2 }}>{value.callingCode}</Text>
         <ChevronDown size={12} color={c.text} style={{ opacity: 0.4 }} />
       </Pressable>
-      <Modal visible={open} transparent animationType="slide" onRequestClose={() => setOpen(false)}>
+      <AppModal visible={open} transparent animationType="slide" onRequestClose={() => setOpen(false)}>
         <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' }} onPress={() => setOpen(false)}>
           <Pressable style={{ backgroundColor: c.base, borderTopLeftRadius: 24, borderTopRightRadius: 24, width: '100%', maxHeight: '72%', padding: 20 }} onPress={e => e.stopPropagation()}>
             <View style={{ width: 36, height: 4, borderRadius: 2, backgroundColor: `${c.text}20`, alignSelf: 'center', marginBottom: 14 }} />
@@ -89,7 +90,7 @@ function AdminCountryPicker({ value, onChange, c }: { value: Country; onChange: 
             />
           </Pressable>
         </Pressable>
-      </Modal>
+      </AppModal>
     </>
   );
 }

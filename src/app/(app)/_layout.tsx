@@ -482,8 +482,6 @@ function AppLayoutNav() {
       <Stack.Screen name="login-history" />
       <Stack.Screen name="user-activity" />
       <Stack.Screen name="archived-courses" />
-      <Stack.Screen name="offline-library" />
-      <Stack.Screen name="offline-course" />
       <Stack.Screen name="force-password-change" />
       <Stack.Screen name="security-warning" />
       <Stack.Screen name="account-suspended" />

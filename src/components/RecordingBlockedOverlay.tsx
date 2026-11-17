@@ -6,12 +6,13 @@
  * Rendered as a Modal so it covers the entire screen regardless of parent layout.
  */
 import React from 'react';
+import { AppModal } from '@/components/AppModal';
 import { View, Text, Modal } from 'react-native';
 import { VideoOff } from 'lucide-react-native';
 
 export function RecordingBlockedOverlay() {
   return (
-    <Modal visible transparent animationType="fade" statusBarTranslucent>
+    <AppModal visible transparent animationType="fade" statusBarTranslucent>
       <View style={{ flex: 1, backgroundColor: '#000', alignItems: 'center', justifyContent: 'center', gap: 20, paddingHorizontal: 32 }}>
         <View style={{ width: 80, height: 80, borderRadius: 40, backgroundColor: 'rgba(239,68,68,0.15)', alignItems: 'center', justifyContent: 'center' }}>
           <VideoOff size={40} color="#EF4444" />
@@ -26,6 +27,6 @@ export function RecordingBlockedOverlay() {
           Please stop the recording to continue watching.
         </Text>
       </View>
-    </Modal>
+    </AppModal>
   );
 }

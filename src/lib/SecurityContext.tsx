@@ -60,6 +60,7 @@ import {
   type GatePhase,
   type SecurityGateState,
 } from '@/lib/securityStateModel';
+import { hasOwnDialogOpen } from '@/lib/ownDialogs';
 import {
   checkAndRefreshSecurityConfig,
   prewarmSecurityConfig,
@@ -1046,7 +1047,14 @@ export function SecurityProvider({ children }: { children: React.ReactNode }) {
    *   is never treated as restored either (the release rule sees a prohibited
    *   hold as still-active until the platform positively reports full screen).
    */
-  const applyWindowModeReading = useCallback((mode: string, requestVerdict: boolean) => {
+  const applyWindowModeReading = useCallback((incomingMode: string, requestVerdict: boolean) => {
+    // A floating window from ANOTHER app takes the activity's window focus —
+    // exactly what one of OUR OWN dialogs does. While one of ours is open the
+    // reading is not evidence of a foreign window, so it is treated as the
+    // neutral state instead of tripping the gate behind a confirm dialog.
+    const mode = incomingMode === 'foreign_window' && hasOwnDialogOpen()
+      ? 'fullscreen'
+      : incomingMode;
     windowModeRef.current = mode;
     if (isSuperAdmin) return;
     if (isProhibitedWindowMode(mode)) {

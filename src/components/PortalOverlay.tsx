@@ -1,10 +1,10 @@
 /**
  * PortalOverlay — presents overlay content (sheets, dialogs, panels) inside the
  * app's SINGLE main window via @rn-primitives/portal, replacing React Native's
- * window-based `<Modal>` presentation for every overlay in the app.
+ * window-based `<AppModal>` presentation for every overlay in the app.
  *
  * ── WHY THIS EXISTS (root cause of duplicate/flickering sheets) ──────────────
- * RN's Android `<Modal>` renders each open/close cycle as a NATIVE DIALOG
+ * RN's Android `<AppModal>` renders each open/close cycle as a NATIVE DIALOG
  * WINDOW (ReactModalHostView → ComponentDialog). Two problems are inherent to
  * that lifecycle on RN 0.83 + New Architecture + edge-to-edge:
  *
@@ -34,6 +34,7 @@
  */
 
 import React, { useEffect, useRef, useState } from 'react';
+import { AppModal } from '@/components/AppModal';
 import {
   Animated,
   BackHandler,

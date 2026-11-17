@@ -12,6 +12,7 @@
  * Only Super Admins can reach this screen (guarded by Stack.Protected in root layout).
  */
 import { useCallback, useState, useRef } from 'react';
+import { AppModal } from '@/components/AppModal';
 import {
   View, Text, ScrollView, FlatList, Pressable, TextInput,
   useColorScheme, ActivityIndicator, RefreshControl, Modal,
@@ -316,7 +317,7 @@ function DirectionDropdown({
         <ChevronDown size={layout.captionSize - 1} color={value ? '#fff' : c.text} opacity={value ? 0.8 : 0.4} />
       </Pressable>
 
-      <Modal transparent visible={open} animationType="fade" onRequestClose={() => setOpen(false)}>
+      <AppModal transparent visible={open} animationType="fade" onRequestClose={() => setOpen(false)}>
         <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.35)' }} onPress={() => setOpen(false)} accessibilityLabel="Close" accessibilityRole="button">
           <View style={{
             position: 'absolute', top: 180, left: layout.pad.lg, right: layout.pad.lg,
@@ -347,7 +348,7 @@ function DirectionDropdown({
             ))}
           </View>
         </Pressable>
-      </Modal>
+      </AppModal>
     </>
   );
 }

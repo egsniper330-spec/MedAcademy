@@ -22,6 +22,7 @@
  */
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { AppModal } from '@/components/AppModal';
 import {
   Animated,
   Pressable,
@@ -58,7 +59,7 @@ export interface AnchoredMenuProps {
   /**
    * Render in place instead of through the root portal.
    *
-   * Required when the trigger already lives inside a native `<Modal>` (e.g.
+   * Required when the trigger already lives inside a native `<AppModal>` (e.g.
    * VideoLibraryPicker): on Android a portal renders in the MAIN window and
    * would appear UNDER that modal's separate window. Placement math is
    * identical — the computed window coordinates are converted back into the

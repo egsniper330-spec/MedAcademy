@@ -16,6 +16,7 @@
  * a fixed pad with no explanation.
  */
 import { useCallback, useState } from 'react';
+import { AppModal } from '@/components/AppModal';
 import {
   View, Text, Pressable, ActivityIndicator, TextInput, useColorScheme,
   RefreshControl, Modal, useWindowDimensions,
@@ -348,7 +349,7 @@ export default function ArchivedCoursesScreen() {
       </KeyboardAwareScrollView>
 
       {/* ── Restore Confirmation ── */}
-      <Modal visible={!!showRestoreConfirm} transparent animationType="fade">
+      <AppModal visible={!!showRestoreConfirm} transparent animationType="fade">
         <View style={{ flex: 1, backgroundColor: '#000a', justifyContent: 'center', alignItems: 'center', padding: 24 }}>
           <NeuCard style={{ width: '100%', maxWidth: 400 }}>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 8 }}>
@@ -379,10 +380,10 @@ export default function ArchivedCoursesScreen() {
             </View>
           </NeuCard>
         </View>
-      </Modal>
+      </AppModal>
 
       {/* ── Permanent Delete Confirmation (Super Admin only) ── */}
-      <Modal visible={!!showDeleteConfirm} transparent animationType="fade">
+      <AppModal visible={!!showDeleteConfirm} transparent animationType="fade">
         <View style={{ flex: 1, backgroundColor: '#000a', justifyContent: 'center', alignItems: 'center', padding: 24 }}>
           <NeuCard style={{ width: '100%', maxWidth: 420 }}>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 12 }}>
@@ -439,7 +440,7 @@ export default function ArchivedCoursesScreen() {
             </View>
           </NeuCard>
         </View>
-      </Modal>
+      </AppModal>
     </View>
   );
 }

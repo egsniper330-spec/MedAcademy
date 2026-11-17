@@ -13,7 +13,7 @@
  *
  * Overlay content is presented through the app's SINGLE main window via
  * <PortalOverlay> (@rn-primitives/portal → root PortalHost). It must NOT be
- * switched back to React Native's <Modal>: RN's Android Modal renders every
+ * switched back to React Native's <AppModal>: RN's Android Modal renders every
  * open/close cycle as a native dialog WINDOW, and on RN 0.83 + New
  * Architecture + edge-to-edge the window show/dismiss race produces
  * duplicated, stacked, flickering windows.
@@ -46,6 +46,7 @@
  */
 
 import React, { useEffect, useRef, useState } from 'react';
+import { AppModal } from '@/components/AppModal';
 import {
   View,
   Text,

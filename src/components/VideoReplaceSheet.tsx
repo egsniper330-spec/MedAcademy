@@ -11,6 +11,7 @@
  *   "Replace only this lesson" vs "Replace every lesson using this video"
  */
 import { useState } from 'react';
+import { AppModal } from '@/components/AppModal';
 import {
   ActivityIndicator, Modal, Pressable, Text, useColorScheme, View,
 } from 'react-native';
@@ -103,7 +104,7 @@ export function VideoReplaceSheet({
 
   return (
     <>
-      <Modal
+      <AppModal
         visible={visible && !showLibraryPicker}
         animationType="slide"
         // presentationStyle="formSheet" gives the native detent sheet on iOS.
@@ -241,7 +242,7 @@ export function VideoReplaceSheet({
             )}
           </View>
         </View>
-      </Modal>
+      </AppModal>
 
       {/* Library picker — shown as a separate modal on top */}
       <VideoLibraryPicker

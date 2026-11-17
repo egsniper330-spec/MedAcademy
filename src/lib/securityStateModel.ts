@@ -714,11 +714,24 @@ export const OVERLAY_WARNING_COPY = {
  * `unknown` (the fourth platform value) is NOT listed as a prohibited mode: an
  * unmeasurable signal must never become a confirmed finding.
  */
-export type WindowMode = 'fullscreen' | 'multi_window' | 'picture_in_picture' | 'unknown';
+export type WindowMode =
+  | 'fullscreen'
+  | 'multi_window'
+  | 'picture_in_picture'
+  | 'foreign_window'
+  | 'unknown';
 
-/** True for the modes in which protected content must not be presented. */
+/**
+ * True for the modes in which protected content must not be presented.
+ *
+ * `foreign_window` is the floating-window case: our activity is resumed in full
+ * screen but the platform reports the focused window is not ours, which is what
+ * another app's floating / pop-up window does. It is a prohibited mode like the
+ * other two, and it clears the same way (the native reading returns to
+ * fullscreen + a fresh verdict lands).
+ */
 export function isProhibitedWindowMode(mode: WindowMode | string | null | undefined): boolean {
-  return mode === 'multi_window' || mode === 'picture_in_picture';
+  return mode === 'multi_window' || mode === 'picture_in_picture' || mode === 'foreign_window';
 }
 
 /**
@@ -746,8 +759,26 @@ export function windowModeBlockCopy(mode: WindowMode | string | null | undefined
   title: string;
   message: string;
 } {
-  return mode === 'picture_in_picture' ? PICTURE_IN_PICTURE_WARNING_COPY : MULTI_WINDOW_WARNING_COPY;
+  if (mode === 'picture_in_picture') return PICTURE_IN_PICTURE_WARNING_COPY;
+  if (mode === 'foreign_window') return FOREIGN_WINDOW_WARNING_COPY;
+  return MULTI_WINDOW_WARNING_COPY;
 }
+
+/**
+ * Copy for a window from ANOTHER app floating over MedAcademy. Only what the
+ * platform actually told us is claimed: another window has focus over ours.
+ * The other app is never named (Android cannot enumerate it) and the condition
+ * is never called a screen overlay (that is a separate, separately-measured
+ * signal).
+ */
+export const FOREIGN_WINDOW_WARNING_COPY = {
+  title: 'Close the floating window',
+  message:
+    'Another app is showing in a floating window over MedAcademy. MedAcademy '
+    + 'cannot run while another window is in front of it. Close the floating '
+    + 'window (or the mini-window / pop-up view) and access is restored '
+    + 'automatically.',
+} as const;
 
 /**
  * What the user must do, per mode. Rendered on the blocking screen; kept here
@@ -755,6 +786,13 @@ export function windowModeBlockCopy(mode: WindowMode | string | null | undefined
  * the gate and any other surface.
  */
 export function windowModeBlockSteps(mode: WindowMode | string | null | undefined): readonly string[] {
+  if (mode === 'foreign_window') {
+    return [
+      'Close the app that is floating over MedAcademy (close its pop-up / mini window, or drag it to the edge to dismiss it).',
+      'Bring MedAcademy back to the front — it must be the app you see.',
+      'Access returns automatically once the floating window is gone and a fresh check passes.',
+    ];
+  }
   if (mode === 'picture_in_picture') {
     return [
       'Close the floating MedAcademy window (drag it to the bottom of the screen, or open the app from Recents).',

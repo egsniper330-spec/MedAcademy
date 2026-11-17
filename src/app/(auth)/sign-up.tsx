@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { AppModal } from '@/components/AppModal';
 import {
   View, Text, ScrollView, KeyboardAvoidingView,
   Pressable, useColorScheme, ActivityIndicator, FlatList, Modal, TextInput,
@@ -151,7 +152,7 @@ function CountryCodePicker({
         <ChevronDown size={layout.captionSize} color={c.text} opacity={0.4} />
       </Pressable>
 
-      <Modal visible={open} transparent animationType="slide" onRequestClose={() => setOpen(false)}>
+      <AppModal visible={open} transparent animationType="slide" onRequestClose={() => setOpen(false)}>
         <Pressable
           style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' }}
           onPress={() => setOpen(false)}
@@ -217,7 +218,7 @@ function CountryCodePicker({
             />
           </Pressable>
         </Pressable>
-      </Modal>
+      </AppModal>
     </>
   );
 }
