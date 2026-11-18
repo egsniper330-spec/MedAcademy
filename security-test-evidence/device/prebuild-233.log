@@ -1,0 +1,80 @@
+env: load .env.local .env
+env: export EXPO_PUBLIC_APP_ID EXPO_PUBLIC_APP_SCHEME EXPO_PUBLIC_PHP_API_URL
+- Creating native directory (./android)
+✔ Created native directory | reusing /android
+- Updating package.json
+✔ Updated package.json | no changes
+- Running prebuild
+[withNativeUpload] Android: injected ForegroundUploadService.kt
+- Running prebuild
+[withNativeUpload] Android: injected UploadBridgeModule.kt
+- Running prebuild
+[withNativeUpload] Android: injected UploadPackage.kt
+- Running prebuild
+[withAndroidBranding] removed stale mipmap-mdpi\ic_launcher.webp
+- Running prebuild
+[withAndroidBranding] removed stale mipmap-mdpi\ic_launcher_round.webp
+- Running prebuild
+[withAndroidBranding] removed stale mipmap-mdpi\ic_launcher_foreground.webp
+- Running prebuild
+[withAndroidBranding] removed stale mipmap-mdpi\ic_launcher_monochrome.webp
+- Running prebuild
+[withAndroidBranding] wrote drawable-mdpi\notification_icon.png
+- Running prebuild
+[withAndroidBranding] removed stale mipmap-hdpi\ic_launcher.webp
+- Running prebuild
+[withAndroidBranding] removed stale mipmap-hdpi\ic_launcher_round.webp
+- Running prebuild
+[withAndroidBranding] removed stale mipmap-hdpi\ic_launcher_foreground.webp
+- Running prebuild
+[withAndroidBranding] removed stale mipmap-hdpi\ic_launcher_monochrome.webp
+- Running prebuild
+[withAndroidBranding] wrote drawable-hdpi\notification_icon.png
+- Running prebuild
+[withAndroidBranding] removed stale mipmap-xhdpi\ic_launcher.webp
+- Running prebuild
+[withAndroidBranding] removed stale mipmap-xhdpi\ic_launcher_round.webp
+- Running prebuild
+[withAndroidBranding] removed stale mipmap-xhdpi\ic_launcher_foreground.webp
+- Running prebuild
+[withAndroidBranding] removed stale mipmap-xhdpi\ic_launcher_monochrome.webp
+- Running prebuild
+[withAndroidBranding] wrote drawable-xhdpi\notification_icon.png
+- Running prebuild
+[withAndroidBranding] removed stale mipmap-xxhdpi\ic_launcher.webp
+- Running prebuild
+[withAndroidBranding] removed stale mipmap-xxhdpi\ic_launcher_round.webp
+- Running prebuild
+[withAndroidBranding] removed stale mipmap-xxhdpi\ic_launcher_foreground.webp
+- Running prebuild
+[withAndroidBranding] removed stale mipmap-xxhdpi\ic_launcher_monochrome.webp
+- Running prebuild
+[withAndroidBranding] wrote drawable-xxhdpi\notification_icon.png
+- Running prebuild
+[withAndroidBranding] removed stale mipmap-xxxhdpi\ic_launcher.webp
+- Running prebuild
+[withAndroidBranding] removed stale mipmap-xxxhdpi\ic_launcher_round.webp
+- Running prebuild
+[withAndroidBranding] removed stale mipmap-xxxhdpi\ic_launcher_foreground.webp
+- Running prebuild
+[withAndroidBranding] removed stale mipmap-xxxhdpi\ic_launcher_monochrome.webp
+- Running prebuild
+[withAndroidBranding] wrote drawable-xxxhdpi\notification_icon.png
+- Running prebuild
+[withAndroidBranding] wrote mipmap-anydpi-v26\ic_launcher.xml
+- Running prebuild
+[withAndroidBranding] wrote mipmap-anydpi-v26\ic_launcher_round.xml
+- Running prebuild
+[withAndroidBranding] wrote values\styles.xml
+- Running prebuild
+[withAndroidBranding] 8 resource(s) updated, 20 stale file(s) removed — launcher, adaptive, monochrome, notification and splash now match assets/
+- Running prebuild
+[withGradleWrapper] Pinned gradle-wrapper.properties to Gradle 8.13
+- Running prebuild
+[withGradleWrapper] Normalized gradle.properties (single canonical jvmargs/toolchain/daemon block)
+- Running prebuild
+[withNetworkSecurityConfig] pinned api.medacademy.site with 6 SPKI pin(s) (expires 2028-06-01), cleartext disabled, user CAs excluded
+- Running prebuild
+[withNetworkSecurityConfig] DEBUG override: cleartext permitted for localhost, 127.0.0.1, 10.0.2.2 only (src/debug res overlay)
+- Running prebuild
+✔ Finished prebuild

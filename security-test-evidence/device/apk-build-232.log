@@ -1118,3 +1118,21 @@ w: file:///D:/v3/android/app/src/main/java/com/medacademy/security/SecurityModul
 > Task :app:minifyReleaseWithR8
 > Task :app:lintVitalReportRelease UP-TO-DATE
 > Task :app:lintVitalRelease
+> Task :app:compileReleaseArtProfile
+> Task :app:convertShrunkResourcesToBinaryRelease
+> Task :app:optimizeReleaseResources
+> Task :app:packageRelease
+> Task :app:createReleaseApkListingFileRedirect
+> Task :app:assembleRelease
+
+[Incubating] Problems report is available at: file:///D:/v3/android/build/reports/problems/problems-report.html
+
+Deprecated Gradle features were used in this build, making it incompatible with Gradle 9.0.
+
+You can use '--warning-mode all' to show the individual deprecation warnings and determine if they come from your own scripts or plugins.
+
+For more on this, please refer to https://docs.gradle.org/8.13/userguide/command_line_interface.html#sec:command_line_warnings in the Gradle documentation.
+
+BUILD SUCCESSFUL in 25m 27s
+770 actionable tasks: 82 executed, 688 up-to-date
+GRADLE_EXIT=0

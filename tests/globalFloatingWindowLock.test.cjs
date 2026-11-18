@@ -262,9 +262,16 @@ check('D1: the row is reversed ONCE and never double-mirrored',
   /isRTL \? \[\.\.\.visibleRoutes\]\.reverse\(\) : visibleRoutes/.test(TABS_CODE)
   && !/row-reverse/.test(TABS_CODE));
 
-check('D2: slot position is direction-independent arithmetic',
-  /\(i: number\) => \(Number\.isFinite\(tabWidth\) && tabWidth > 0 \? i \* tabWidth : 0\)/.test(TABS_CODE)
-  && !/rowSpan - \(i \+ 1\) \* tabWidth/.test(TABS_CODE));
+// RN SWAPS `left`/`right` in RTL (doLeftAndRightSwapInRTL), proven on the tablet:
+// a plain `left: i * tabWidth` put the selected Home slot under Profile. The
+// mapping is therefore written from the swapped edge when the platform swaps.
+check('D2: the slot mapping accounts for the platform RTL edge swap',
+  /const swapEdges = I18nManager\.isRTL && I18nManager\.doLeftAndRightSwapInRTL !== false;/.test(TABS_CODE)
+  && /swapEdges\s*\n?\s*\? Math\.max\(rowSpan - \(i \+ 1\) \* tabWidth, 0\)\s*\n?\s*: i \* tabWidth;/.test(TABS_CODE));
+
+check('D2-2: the drag hit-test and travel are converted through the same model',
+  /const bubbleStart = specifiedToPhysical\(liveX\.current\);/.test(TABS_CODE)
+  && /\* \(swapEdges \? -1 : 1\)/.test(TABS_CODE));
 
 check('D3: the span is measured on the row itself and bounded by the pill',
   /onRowLayout\(event\.nativeEvent\.layout\.width\)/.test(TABS)

@@ -88,20 +88,21 @@ check('a non-finite position or width can never reach the transform', () => {
   assert.match(code, /if \(!Number\.isFinite\(width\)\) return;/);
 });
 
-check('slot x is plain arithmetic: the list is reversed ONCE, never double-mirrored', () => {
-  // The old code mirrored RTL twice (an arithmetic mirror AND a `row-reverse`
-  // row). Two mirrorings of one list can disagree, and a mirrored index lands
-  // on the OPPOSITE end of the bar — exactly the reported Home/Profile and
-  // Explore/My Courses swaps. The list is now reversed explicitly and the row
-  // stays left-to-right, so slot i is always at i * tabWidth.
+check('slot x accounts for BOTH RTL mirrors: row order and the left/right swap', () => {
+  // Measured on the tablet (build 232): the platform laid a plain
+  // `left: 3 * tabWidth` out at the OPPOSITE end, because React Native swaps
+  // `left`/`right` styles in RTL. The bug therefore needed two independent
+  // mirrors, and the fix states both explicitly instead of assuming one.
   assert.match(code, /const orderedRoutes = useMemo\(/);
   assert.match(code, /isRTL \? \[\.\.\.visibleRoutes\]\.reverse\(\) : visibleRoutes/);
-  assert.match(
-    code,
-    /\(i: number\) => \(Number\.isFinite\(tabWidth\) && tabWidth > 0 \? i \* tabWidth : 0\),/,
-  );
-  assert.ok(!/rowSpan - \(i \+ 1\) \* tabWidth/.test(code), 'no arithmetic RTL mirroring remains');
+  assert.match(code, /const swapEdges = I18nManager\.isRTL && I18nManager\.doLeftAndRightSwapInRTL !== false;/);
+  assert.match(code, /swapEdges\s*\n?\s*\? Math\.max\(rowSpan - \(i \+ 1\) \* tabWidth, 0\)/);
   assert.ok(!/row-reverse/.test(code), 'the row is not mirrored a second time');
+});
+
+check('the drag follows the finger and grabs the bubble where it is painted', () => {
+  assert.match(code, /const bubbleStart = specifiedToPhysical\(liveX\.current\);/);
+  assert.match(code, /const delta = \(gesture\.dx - dragStartDx\.current\) \* \(swapEdges \? -1 : 1\);/);
 });
 
 check('render, geometry and navigation all use the SAME ordered list', () => {
@@ -156,13 +157,16 @@ console.log('\nGestures');
 
 check('the drag writes the finger coordinate straight into the bubble', () => {
   assert.match(code, /translateX\.setValue\(next\);/);
-  assert.match(code, /const delta = gesture\.dx - dragStartDx\.current;/);
+  // Sign-corrected for the RTL edge swap, so the bubble follows the finger.
+  assert.match(code, /const delta = \(gesture\.dx - dragStartDx\.current\) \* \(swapEdges \? -1 : 1\);/);
 });
 
 check('the grab is hit-tested against the measured pill rect', () => {
   assert.match(code, /measureInWindow/);
   assert.match(code, /const touchX = start\.x - rect\.x;/);
-  assert.match(code, /const bubbleStart = liveX\.current;/);
+  // Compared in PHYSICAL pixels: the animated value is converted on a
+  // swapped-edge device, so the grab area is where the bubble is painted.
+  assert.match(code, /const bubbleStart = specifiedToPhysical\(liveX\.current\);/);
 });
 
 check('release snaps to the NEAREST tab and only then navigates', () => {

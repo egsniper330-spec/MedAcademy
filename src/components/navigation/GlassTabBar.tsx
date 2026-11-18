@@ -54,7 +54,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View, Text, Pressable, StyleSheet, Platform, Keyboard, useColorScheme, Animated, useWindowDimensions,
-  PanResponder,
+  PanResponder, I18nManager,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { BlurView } from 'expo-blur';
@@ -300,18 +300,56 @@ export default function GlassTabBar({
     ? Math.max(tabWidth - INDICATOR_INSET * 2, 24)
     : 0;
 
-  /**
-   * Physical (left-anchored) x of rendered slot `i`.
+  /* ── RTL EDGE SEMANTICS (measured on the tablet, build 232) ──────────────
    *
-   * The list handed to the row is ALREADY in visual order (orderedRoutes), so
-   * this is the same arithmetic in LTR and RTL: slot 0 is always the leftmost
-   * rendered tab. No mirroring, therefore no possibility of a mirrored index —
-   * and, because `tabWidth` is derived from a span bounded by the pill, no
-   * possibility of a negative `left` being clipped away.
+   * This is the second half of the intermittent wrong-tab bug, and it can only
+   * be seen on a device. React Native swaps the `left` and `right` STYLE props
+   * when the UI is RTL (`I18nManager.doLeftAndRightSwapInRTL`, default true).
+   * So on an Arabic device `left: 3 * tabWidth` is laid out as `right: 3 *
+   * tabWidth`, i.e. at the OPPOSITE end of the bar.
+   *
+   * PROVEN on the tablet with the plain `left: i * tabWidth` version: the Home
+   * tab (slot 3) was selected, its icon and label were tinted correctly, and
+   * the bubble sat under slot 0. That is exactly the mirrored position, and it
+   * is exactly the "Home appears under Profile" report — which is why the old
+   * mirroring arithmetic LOOKED right in code and still failed on device.
+   *
+   * TWO mirrors therefore exist, and both must be accounted for:
+   *   • the ROW is laid out right-to-left (the platform mirrors a `row`), and
+   *   • `left`/`right` styles are swapped.
+   * The rendered list is already in visual order (orderedRoutes), so when the
+   * edge is swapped the slot must be expressed from the RIGHT: right = rowSpan
+   * - (i + 1) * tabWidth puts slot i at physical left = i * tabWidth. Where the
+   * platform does NOT swap, the plain physical `left` is used instead. Both
+   * branches are checked on the device, never assumed.
    */
+  const swapEdges = I18nManager.isRTL && I18nManager.doLeftAndRightSwapInRTL !== false;
   const tabX = useCallback(
-    (i: number) => (Number.isFinite(tabWidth) && tabWidth > 0 ? i * tabWidth : 0),
-    [tabWidth],
+    (i: number) => {
+      if (!(Number.isFinite(tabWidth) && tabWidth > 0) || !(rowSpan > 0)) return 0;
+      return swapEdges
+        ? Math.max(rowSpan - (i + 1) * tabWidth, 0)
+        : i * tabWidth;
+    },
+    [swapEdges, rowSpan, tabWidth],
+  );
+
+  /**
+   * Convert a bubble `left`-space value into REAL physical pixels in the pill.
+   *
+   * The drag hit-test compares the finger's physical position with the bubble,
+   * so on a swapped-edge device the animated value must be converted first —
+   * without this the grab area was mirrored too (the bubble could be grabbed
+   * from the opposite end of the bar).
+   */
+  const specifiedToPhysical = useCallback(
+    (specified: number) => {
+      const span = rowWidthRef.current;
+      const width = indicatorWidthRef.current;
+      if (!swapEdges || !(span > 0)) return specified;
+      return Math.max(span - specified - width, 0);
+    },
+    [swapEdges],
   );
   /* Keep the animated layout width in step with the derived geometry. */
   useEffect(() => {
@@ -510,7 +548,7 @@ export default function GlassTabBar({
     dragging.current = false;
     const targets = targetsRef.current;
     const maxX = Math.max(rowWidthRef.current - indicatorWidthRef.current, 0);
-    const landed = Math.min(Math.max(dragOriginX.current + dx, 0), maxX);
+    const landed = Math.min(Math.max(dragOriginX.current + dx * (swapEdges ? -1 : 1), 0), maxX);
 
     if (targets.length === 0) {
       // No tabs to bind to (layout not ready) — settle where it was dropped.
@@ -538,7 +576,7 @@ export default function GlassTabBar({
 
     const info = tabsInfoRef.current[nearest];
     if (info) pressRef.current(info.key, info.routeIndex, info.name);
-  }, [settleAt]);
+  }, [settleAt, swapEdges]);
 
   /** Gesture cancelled by the system: return to the active tab, do not navigate. */
   const cancelDrag = useCallback(() => {
@@ -571,8 +609,8 @@ export default function GlassTabBar({
       // Geometry not measured yet (first frame) → stay usable rather than dead.
       if (!rect.known || !start.known) return true;
 
-      const touchX = start.x - rect.x; // pill-local, physical, RTL-agnostic
-      const bubbleStart = liveX.current;
+      const touchX = start.x - rect.x; // pill-local, PHYSICAL
+      const bubbleStart = specifiedToPhysical(liveX.current);
       const bubbleEnd = bubbleStart + indicatorWidthRef.current;
       return touchX >= bubbleStart - GRAB_SLOP && touchX <= bubbleEnd + GRAB_SLOP;
     },
@@ -600,7 +638,10 @@ export default function GlassTabBar({
 
     onPanResponderMove: (_event, gesture) => {
       const maxX = Math.max(rowWidthRef.current - indicatorWidthRef.current, 0);
-      const delta = gesture.dx - dragStartDx.current;
+      // On a swapped-edge (RTL) device a finger moving RIGHT decreases the
+      // `left`-space value: the drag must follow the finger, not run away from
+      // it. Same conversion the hit-test uses.
+      const delta = (gesture.dx - dragStartDx.current) * (swapEdges ? -1 : 1);
       const next = Math.min(Math.max(dragOriginX.current + delta, 0), maxX);
       // The finger's actual position, written straight into the indicator.
       translateX.setValue(next);
@@ -613,7 +654,7 @@ export default function GlassTabBar({
     onPanResponderTerminate: () => cancelDrag(),
     // Once grabbed, the drag owns the touch; a scroll view cannot take it back.
     onPanResponderTerminationRequest: () => false,
-  }), [cancelDrag, finishDrag, stretch, translateX]);
+  }), [cancelDrag, finishDrag, specifiedToPhysical, stretch, swapEdges, translateX]);
 
   const bottomPad = Math.max(insets.bottom, 0) + FLOAT_GAP;
 
