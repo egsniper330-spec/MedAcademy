@@ -194,7 +194,7 @@ final class RpcController
      * get_doctor_credit_transactions — Paginated credit transactions for a doctor.
      *
      * • Doctors may only read their OWN history; admins/super admins may read
-     *   any doctor's (mirrors VideoController's ownership model).
+     *   any doctor's (mirrors the lesson/document ownership model).
      * • LIMIT/OFFSET are clamped ints interpolated into SQL — PDO emulated
      *   prepares bind them as strings and MariaDB rejects "LIMIT '5'".
      * • Selects the real schema columns (notes — NOT description, which does
@@ -871,7 +871,7 @@ final class RpcController
         $db->insert(
             'INSERT INTO video_health_alerts (id, lesson_id, alert_type, message, created_at)
              VALUES (?, ?, ?, ?, UTC_TIMESTAMP(6))',
-            [$alertId, $lessonId, 'video_missing', 'Video asset not found on VdoCipher']
+            [$alertId, $lessonId, 'video_missing', 'Video asset not found']
         );
 
         // Update lesson to flag missing video

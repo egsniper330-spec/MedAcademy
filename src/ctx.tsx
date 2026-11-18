@@ -12,11 +12,6 @@ import { markPerf } from '@/lib/perfTimeline';
 import { isExpectedMaintenanceError } from '@/lib/maintenanceStateModel';
 import { useProfileStore } from '@/lib/store';
 import { UserRole, type UserRole as UserRoleType } from '@/lib/enums';
-import {
-  setUploadQueueSessionProvider,
-  migrateLegacyQueue,
-  useUploadQueueStore,
-} from '@/lib/uploadQueueStore';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // AUTH TIMELINE LOGGER — silent in production, active only in __DEV__ builds
@@ -398,46 +393,6 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
         }
         lastAccountUidRef.current = s.user.id;
 
-        // ── Upload-queue account scoping ────────────────────────────────────
-        // Point the queue's ownership provider at the live session, then
-        // reconcile the persisted queue for THIS account:
-        //   • SIGNED_IN with a DIFFERENT user than the loaded queue → the old
-        //     account's in-memory tasks are dropped (its persisted state stays
-        //     under its own scoped key) and the new account's queue hydrates.
-        //   • Legacy global-key tasks are migrated once and stamped with the
-        //     current owner so pre-ownership installs don't lose data.
-        setUploadQueueSessionProvider(() => {
-          try {
-            const s = backendClient.auth.getSession?.();
-            // getSession may be async on some adapters — read the stored session
-            // synchronously through the same key the client uses.
-            if (s && typeof (s as any).then !== 'function') {
-              return (s as any)?.data?.session?.user?.id ?? null;
-            }
-          } catch { /* fall through */ }
-          return null;
-        });
-        (async () => {
-          try {
-            const session = await backendClient.auth.getSession();
-            const uid = session?.data?.session?.user?.id ?? null;
-            setUploadQueueSessionProvider(() => uid);
-            await migrateLegacyQueue(uid);
-            const queue = useUploadQueueStore.getState();
-            if (queue.ownerUserId && uid && queue.ownerUserId !== uid) {
-              // Different account signed in — drop the previous account's
-              // in-memory queue (its persisted state remains under its key).
-              queue.clearForAccountSwitch();
-            } else if (!queue.ownerUserId && uid) {
-              // Same account re-login (or first sign-in): rehydrate THIS
-              // account's persisted queue by forcing a persist re-read.
-              useUploadQueueStore.persist.rehydrate();
-            }
-            if (uid) useUploadQueueStore.setState({ ownerUserId: uid });
-          } catch (e) {
-            if (__DEV__) console.warn('[ctx] upload-queue account scoping failed (non-fatal):', e);
-          }
-        })();
 
         // Mark the version seed UNCONFIRMED for this sign-in, then seed from the
         // user's OWN profiles.security_version row — the exact column
@@ -473,17 +428,6 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
         invalidateMySubscriptionsCache();
         lastAccountUidRef.current = null;
 
-        // ── Upload-queue account scoping ────────────────────────────────────
-        // Deactivate the ownership provider FIRST so any in-flight async
-        // callback that resolves after logout is rejected by the store's
-        // cross-account guards, then drop the in-memory queue. The previous
-        // account's persisted tasks remain under their own scoped key.
-        setUploadQueueSessionProvider(() => null);
-        try {
-          useUploadQueueStore.getState().clearForAccountSwitch();
-        } catch (e) {
-          if (__DEV__) console.warn('[ctx] upload-queue clear on sign-out failed (non-fatal):', e);
-        }
       }
 
       if (event === 'USER_UPDATED') {

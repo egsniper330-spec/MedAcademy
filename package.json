@@ -117,7 +117,6 @@
     "sf-symbols-typescript": "^2.2.0",
     "tailwind-merge": "^3.5.0",
     "tailwindcss-animate": "^1.0.7",
-    "vdocipher-rn-bridge": "2.0.1",
     "zustand": "^5.0.14"
   },
   "devDependencies": {

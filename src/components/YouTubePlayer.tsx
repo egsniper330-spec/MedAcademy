@@ -70,7 +70,6 @@ import type { VideoWatermarkProps } from './VideoWatermark';
 import { ProtectedContentSurface } from './ProtectedContentSurface';
 import {
   useSecurityWebViewStop,
-  WEBVIEW_RESUME_SCRIPT,
   WEBVIEW_SOFT_PAUSE_SCRIPT,
 } from '@/lib/useSecurityWebViewStop';
 import { PLAYER_SCRIPT } from '../lib/plyr/playerScript';
@@ -528,12 +527,23 @@ function YouTubePlayerNative({
       /* webview not ready / tearing down: nothing is decoding yet */
     }
   }, []);
+  /**
+   * Reveal is NOT a resume.
+   *
+   * The previous implementation injected the resume script, which called
+   * `plyr.play()` whenever the player had been playing before concealment — so
+   * returning to the app continued the video at the old position without any
+   * security verdict and without a student action. That is exactly the
+   * reported bug.
+   *
+   * Now the surface UNMOUNTS this WebView while concealed, so a reveal can only
+   * ever happen on a freshly created player. This callback deliberately does
+   * nothing to playback: the new instance is paused/ready and starts solely
+   * from the student's own Play tap in the host screen, which runs a fresh
+   * security preflight first.
+   */
   const revealWebPlayer = useCallback(() => {
-    try {
-      wvRef.current?.injectJavaScript?.(WEBVIEW_RESUME_SCRIPT);
-    } catch {
-      /* webview not ready / tearing down */
-    }
+    // Intentionally no play()/resume call. See the note above.
   }, []);
 
   // ── Player HTML (memoized for the lifetime of the WebView) ─────────────────

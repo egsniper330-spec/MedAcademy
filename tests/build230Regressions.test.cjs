@@ -53,18 +53,20 @@ check('the indicator carries NO elevation (elevation inside a clipped rounded pa
   assert.ok(!/elevation\s*:/.test(style.slice(0, style.indexOf('row: {'))), 'styles.indicator must not set elevation');
 });
 
-check('z-order is explicit: the bubble sits under the row, above the glass layers', () => {
-  assert.match(bar, /zIndex: 0[\s\S]{0,200}row: \{|zIndex: 0/);
-  const style = bar.slice(bar.indexOf('indicator: {'));
-  assert.match(style.slice(0, style.indexOf('row: {')), /zIndex:\s*0/);
-  assert.match(style.slice(style.indexOf('row: {')), /zIndex:\s*1/);
-});
-
-check('the approved liquid gradient lives INSIDE the bubble (not only a flat wash)', () => {
+check('the bubble is a PLAIN filled view: no transform / zIndex / overflow / child view', () => {
   const indicator = bar.slice(bar.indexOf('styles.indicator,'));
-  const block = indicator.slice(0, indicator.indexOf('</Animated.View>'));
-  assert.match(block, /<LinearGradient/);
-  assert.match(block, /colors=/);
+  const block = indicator.slice(0, indicator.indexOf('/>'));
+  // Position and width are animated LAYOUT values, not a transform.
+  assert.match(bar, /left: translateX,/);
+  assert.match(bar, /width: indicatorWidthAnim,/);
+  assert.match(bar, /backgroundColor: isDark \? 'rgba\(96,165,250,0\.30\)' : 'rgba\(30,144,255,0\.22\)',/);
+  assert.ok(!/transform:/.test(block), 'the bubble must not rely on a transform layer');
+  assert.ok(!/zIndex/.test(block), 'the bubble must not rely on zIndex inside the clipped pill');
+  assert.ok(!/<LinearGradient/.test(block), 'the bubble must not depend on a child native view');
+  const style = bar.slice(bar.indexOf('indicator: {'));
+  const styleBlock = style.slice(0, style.indexOf('row: {'));
+  assert.ok(!/zIndex/.test(styleBlock) && !/overflow/.test(styleBlock),
+    'the bubble style must not clip or stack itself');
 });
 
 check('the bubble is placed from the route on the first frame (no effect that must "win")', () => {
@@ -115,30 +117,30 @@ console.log('\nWindow focus: foreign windows are caught, system UI is not');
 
 const plugin = read('plugins/withSecurityModule.js');
 
-check('foreign_window requires a PAUSED activity (another task took the top-resumed slot)', () => {
-  assert.match(plugin, /if \(foreignWindowFocused && !appResumed\) return WINDOW_MODE_FOREIGN/);
+check('foreign_window is reported on ANY focus loss (paused OR resumed — the missed pop-up case)', () => {
+  assert.match(plugin, /if \(foreignWindowFocused\) return WINDOW_MODE_FOREIGN/);
+  assert.ok(!/foreignWindowFocused && !appResumed/.test(plugin),
+    'requiring a paused activity is exactly what missed a pop-up over a resumed app');
 });
 
-check('the activity reports its own paused state and checks the window is still visible', () => {
+check('the activity checks its window is still visible before reporting a foreign window', () => {
   assert.match(plugin, /private var activityPaused = false/);
   assert.match(plugin, /override fun onPause\(\)[\s\S]{0,200}activityPaused = true/);
   assert.match(plugin, /override fun onResume\(\)[\s\S]{0,200}activityPaused = false/);
   assert.match(plugin, /decor\.windowVisibility != View\.VISIBLE\) return false/);
-  assert.match(plugin, /return activityPaused/);
+  // The focus loss alone is the finding: a paused-only rule missed the attack.
+  assert.match(plugin, /if \(decor\.hasWindowFocus\(\)\) return false\s*\n\s*return true/);
 });
 
 check('returning to the front reports full-screen/focused at once', () => {
   assert.match(plugin, /override fun onResume\(\)[\s\S]{0,500}WindowModeBridge\.report\(isInMultiWindowMode\(\), isInPictureInPictureMode\(\), false, true\)/);
 });
 
-check('a focus loss no longer reports foreign while the app is resumed', () => {
-  // The old call hard-coded appResumed = true, which made a shade pull a
-  // confirmed foreign window.
-  assert.ok(
-    !/report\(isInMultiWindowMode\(\), isInPictureInPictureMode\(\), true, true\)/.test(plugin),
-    'focus loss must not be reported as a foreign window while resumed',
-  );
-  assert.match(plugin, /if \(windowCoveredByOtherTask\(\)\) \{\s*WindowModeBridge\.report\(isInMultiWindowMode\(\), isInPictureInPictureMode\(\), true, false\)/);
+check('a focus loss IS reported while the app is resumed (the floating-window attack)', () => {
+  // A pop-up over a still-resumed MedAcademy previously produced focus loss
+  // with appResumed=true and was classified full screen — the whole bug. The
+  // live lifecycle flag is now forwarded instead of hard-coded.
+  assert.match(plugin, /WindowModeBridge\.report\(\s*\n\s*isInMultiWindowMode\(\),\s*\n\s*isInPictureInPictureMode\(\),\s*\n\s*true,\s*\n\s*!activityPaused,\s*\n\s*\)/);
 });
 
 check('our own dialogs still cannot trip the gate', () => {

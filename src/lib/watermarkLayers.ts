@@ -105,9 +105,10 @@ export type WatermarkPlatform = 'android' | 'ios' | 'web';
 
 /**
  * Which renderer draws the player.
- *  - 'native'   — vdocipher-rn-bridge VdoPlayerView (Android/iOS).
- *  - 'webview'  — WebView/iframe VdoCipher player (web always; also the
- *                 rollback path when USE_NATIVE_VDOCIPHER_PLAYER is false).
+ *  - 'native'   — the native player surface (Android/iOS).
+ *  - 'webview'  — WebView/iframe player (web always).
+ * The retired VdoCipher bridge/player used to fill both roles; the types are
+ * kept because the watermark layout maths still branches on them.
  */
 export type WatermarkPlayerKind = 'native' | 'webview';
 

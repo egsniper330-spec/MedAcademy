@@ -323,9 +323,12 @@ for (const [name, src] of []) {
   check(`B27: ${name} tears the player down on the hard lock`, /blocksVideo \|\| securityLockHard/.test(src));
 }
 
-// The bridge declaration must expose the pause method the hook relies on.
-const dts = read('src/types/vdocipher-rn-bridge.d.ts');
-check('B28: bridge declaration exposes the documented pause()', /pause\(\): void;/.test(dts));
+// The native VdoCipher bridge (and its .d.ts) was removed with the provider;
+// nothing may reference or re-add it.
+check('B28: the retired native video bridge is gone', () => {
+  assert.ok(!fs.existsSync(path.join(ROOT, 'src/types/vdocipher-rn-bridge.d.ts')));
+  assert.ok(!fs.existsSync(path.join(ROOT, 'src/lib/vdoCipherUpload.ts')));
+});
 
 // ── Part C: WebView-player containment + containment instrumentation ─────────
 // A react-native-webview instance has NO native `pause()`. Registering the

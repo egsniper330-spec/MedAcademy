@@ -169,24 +169,30 @@ object WindowModeBridge {
      * Order matters: PiP and multi-window are POSITIVE, documented platform
      * states and always win.
      *
-     * "Foreign window" is reachable ONLY when our window is still on screen and
-     * another window holds focus AND this activity is PAUSED. That last
-     * condition is the whole correction (two opposite bugs came from ignoring
-     * it):
+     * "Foreign window" means OUR window is still on screen but ANOTHER window
+     * holds focus. Android exposes no window enumeration, so this focus loss is
+     * the platform's only answer to "a floating / pop-up app is in front".
      *
-     *   • FALSE POSITIVE — the notification shade, a system dialog and our own
-     *     dialogs take window focus while the activity stays RESUMED. Treating
-     *     "no focus while resumed" as a foreign window made the full-screen
-     *     warning appear on every shade pull and on every return from another
-     *     app.
-     *   • MISSED DETECTION — an app floating over us becomes the top RESUMED
-     *     activity, so OUR activity pauses while its window is still visible.
-     *     Requiring appResumed for the foreign mode excluded exactly the state
-     *     the feature exists for.
+     * ROOT CAUSE of the missed floating-window block (measured on the tablet):
+     * the previous rule required appResumed == false as well, i.e. it only reported
+     * foreign window when our activity had already been PAUSED. A Samsung
+     * pop-up / mini window over a RESUMED MedAcademy (and any overlay that
+     * leaves our task resumed) therefore produced focus loss with
+     * appResumed = true and was silently classified as FULL SCREEN — the exact
+     * attack the feature exists for.
      *
-     * foreignWindowFocused therefore means "another window is in front while
-     * our window is still visible", and appResumed = false is what makes it
-     * confirmed. A fully backgrounded app (window gone) never qualifies.
+     * A focus loss while our window is visible is now ALWAYS reported as
+     * foreign_window. The severity is decided in JS by whether the app is in
+     * the foreground: a resumed app keeps the app shell usable but loses
+     * protected video (and must re-verify), while a paused app is already
+     * backgrounded. Our own dialogs are filtered before a report is made, and
+     * again in JS while one is open (hasOwnDialogOpen).
+     *
+     * PLATFORM LIMIT, stated honestly: the notification shade and a passive
+     * overlay that does not take focus are indistinguishable to an ordinary
+     * app. Fail-closed is therefore the rule — focus loss blocks playback — but
+     * an overlay that never removes focus and never obscures a touch cannot be
+     * proven by any API available to a non-privileged app.
      */
     fun modeOf(
         isInMultiWindowMode: Boolean,
@@ -196,7 +202,10 @@ object WindowModeBridge {
     ): String {
         if (isInPictureInPictureMode) return WINDOW_MODE_PIP
         if (isInMultiWindowMode) return WINDOW_MODE_MULTI
-        if (foreignWindowFocused && !appResumed) return WINDOW_MODE_FOREIGN
+        // Focus lost while our window is still displayed — foreign window,
+        // resumed or paused. (See the note above: requiring !appResumed was the
+        // missed-detection bug.)
+        if (foreignWindowFocused) return WINDOW_MODE_FOREIGN
         return WINDOW_MODE_FULLSCREEN
     }
 }
@@ -3666,17 +3675,21 @@ const WINDOW_MODE_ACTIVITY_OVERRIDES = `
   private var activityPaused = false
 
   /**
-   * OUR window is still being displayed but another window holds focus, WHILE
-   * our activity is paused. That is the only combination Android exposes that
-   * an app floating over this one produces.
+   * OUR window is still being displayed but another window holds focus.
    *
-   * The three exclusions are each a real, reported bug:
-   *   • the notification shade / a system dialog keeps the activity RESUMED
-   *     (activityPaused == false) and must never raise the warning;
-   *   • a fully backgrounded app has windowVisibility != VISIBLE and must not
-   *     be reported as "covered" either;
-   *   • our own dialog pauses nothing and reports focus back, so it is filtered
-   *     before a report is made (and again in JS while a dialog is open).
+   * This is the ONLY signal Android gives an ordinary app for "something is in
+   * front of us": a foreign floating / pop-up window takes focus while our
+   * window stays visible. It deliberately no longer requires activityPaused
+   * — a pop-up over a RESUMED activity produced exactly that combination and
+   * was missed (see WindowModeBridge.modeOf).
+   *
+   * The remaining exclusions are the ones that are provably NOT a foreign
+   * window: a finishing activity, and a window that is no longer visible
+   * (fully backgrounded — nothing is covered). Our own dialogs also take
+   * focus; they are filtered by the 700 ms settle below (the state is re-read
+   * live) and again in JS while a dialog is open. A notification shade is NOT
+   * distinguishable from an overlay here, so it is treated fail-closed: it
+   * blocks protected playback and requires re-verification.
    */
   private fun windowCoveredByOtherTask(): Boolean {
     val w = window ?: return false
@@ -3684,7 +3697,7 @@ const WINDOW_MODE_ACTIVITY_OVERRIDES = `
     val decor = w.decorView
     if (decor.windowVisibility != View.VISIBLE) return false
     if (decor.hasWindowFocus()) return false
-    return activityPaused
+    return true
   }
 
   private fun cancelForeignCheck() {
@@ -3702,7 +3715,14 @@ const WINDOW_MODE_ACTIVITY_OVERRIDES = `
     val check = Runnable {
       foreignWindowCheck = null
       if (windowCoveredByOtherTask()) {
-        WindowModeBridge.report(isInMultiWindowMode(), isInPictureInPictureMode(), true, false)
+        // appResumed reflects the LIVE lifecycle flag; the mode mapping no
+        // longer depends on it, but it is still reported for diagnostics.
+        WindowModeBridge.report(
+          isInMultiWindowMode(),
+          isInPictureInPictureMode(),
+          true,
+          !activityPaused,
+        )
       }
     }
     foreignWindowCheck = check

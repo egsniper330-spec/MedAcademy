@@ -1,14 +1,15 @@
 /**
  * VIDEO PROVIDER POLICY — the ONE authoritative client-side implementation of
  * effective provider availability. Backend remains the enforcement authority
- * (VideoProviderPolicyService — /video/otp, /video/offline-authorize,
- * /video/upload-init and the lessons write path all re-check server-side);
+ * (VideoProviderPolicyService and the lessons write path re-check server-side);
  * this module only mirrors the SAME decision so the UI can hide/disable
  * unavailable providers before a user ever attempts them.
  *
  * Providers are the application's REAL ones (never invented):
  *   plyr       — YouTube/Plyr playback path   (lessons.video_type = 'youtube')
- *   vdocipher  — VdoCipher DRM playback path  (lessons.video_type = 'vdocipher')
+ *   vdocipher  — RETIRED (commit 269c806): the key is still readable so historic
+ *                policy rows and `video_type = 'vdocipher'` lessons stay
+ *                auditable, but no client path can play or upload it.
  *
  * Three-state override (identical semantics to the backend):
  *   'inherit'  → the GLOBAL default decides

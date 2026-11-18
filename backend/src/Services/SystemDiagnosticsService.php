@@ -64,7 +64,6 @@ final class SystemDiagnosticsService
         $this->results = [];
         foreach ([
             'checkDatabase'      => ['database',   'Database',            'Infrastructure'],
-            'checkVdoCipher'     => ['vdocipher',  'VdoCipher',           'Video / DRM'],
             'checkSmtp'          => ['smtp_email', 'Email (SMTP)',        'Notifications'],
             'checkStorage'       => ['storage',    'File Storage',        'Infrastructure'],
             'checkJwt'           => ['jwt_auth',   'Auth / JWT',          'Security'],
@@ -150,117 +149,6 @@ final class SystemDiagnosticsService
         }
     }
 
-    private function checkVdoCipher(): array
-    {
-        // RETIRED PROVIDER — VdoCipher is no longer active; YouTube is the only supported
-        // provider. This probe used to authenticate against dev.vdocipher.com with the
-        // server secret on every diagnostics run. It must not contact the provider any more,
-        // so it reports a stable "retired" result. The check KEY and shape are kept so the
-        // super-admin diagnostics page and its history stay intact.
-        return $this->result('vdocipher', 'VdoCipher', 'Video / DRM', self::STATUS_OK, [
-            'checks'  => [
-                'configuration'  => 'retired',
-                'connectivity'   => 'not tested',
-                'authentication' => 'not tested',
-                'api'            => 'not tested',
-            ],
-            'message' => 'VdoCipher is retired. YouTube is the only supported video provider.',
-        ]);
-
-        $apiSecret = Config::string('VDOCIPHER_API_SECRET');
-        $apiBase   = rtrim(Config::string('VDOCIPHER_API_BASE', 'https://dev.vdocipher.com/api'), '/');
-        $configured = $apiSecret !== '' && $apiSecret !== 'CHANGE_ME';
-
-        if (!$configured) {
-            return $this->result('vdocipher', 'VdoCipher', 'Video / DRM', self::STATUS_MISCONFIGURED, [
-                'checks'   => ['configuration' => 'failed', 'connectivity' => 'not tested', 'authentication' => 'not tested', 'api' => 'not tested'],
-                'message'  => 'VdoCipher credentials are not configured on the server.',
-                'errorCode' => self::ERROR_CONFIG,
-                'recommendedAction' => 'Set VDOCIPHER_API_SECRET in the server environment. The value itself is never exposed here.',
-            ]);
-        }
-
-        $started = microtime(true);
-        // Safe authenticated probe: list videos (page 1, size 1). Proves DNS,
-        // TLS, connectivity, authentication AND response shape in one call.
-        // Shape note (verified live 2026-09): the listing returns
-        // { "rows": [...], "count": N } — older API versions returned
-        // { "videos": [...] } or a bare array; all three are valid.
-        [$status, $body, $curlErr, $curlErrNo] = $this->http($apiBase . '/videos?page=1&limit=1', [
-            'Authorization: Apisecret ' . $apiSecret,
-            'Accept: application/json',
-        ]);
-        $latency = $this->latencyMs($started);
-
-        if ($curlErr !== '' || $body === null) {
-            return $this->result('vdocipher', 'VdoCipher', 'Video / DRM', $this->networkStatus($curlErrNo), [
-                'checks'   => ['configuration' => 'passed', 'connectivity' => 'failed', 'authentication' => 'not tested', 'api' => 'not tested'],
-                'message'  => $this->networkMessage($curlErrNo, 'VdoCipher API could not be reached.'),
-                'errorCode' => $this->networkErrorCode($curlErrNo),
-                'latencyMs' => $latency,
-                'recommendedAction' => 'Verify outbound HTTPS connectivity from the API server to the VdoCipher endpoint.',
-                'exceptionDetail' => $this->redact($curlErr),
-            ]);
-        }
-
-        if ($status === 401 || $status === 403) {
-            return $this->result('vdocipher', 'VdoCipher', 'Video / DRM', self::STATUS_AUTH_FAILED, [
-                'checks'   => ['configuration' => 'passed', 'connectivity' => 'passed', 'authentication' => 'failed', 'api' => 'not tested'],
-                'message'  => 'VdoCipher authentication failed. The configured secret was rejected.',
-                'errorCode' => self::ERROR_AUTH,
-                'httpStatus' => $status,
-                'latencyMs' => $latency,
-                'recommendedAction' => 'Verify the VdoCipher API secret configured on the server.',
-            ]);
-        }
-
-        if ($status >= 500) {
-            return $this->result('vdocipher', 'VdoCipher', 'Video / DRM', self::STATUS_UNAVAILABLE, [
-                'checks'   => ['configuration' => 'passed', 'connectivity' => 'passed', 'authentication' => 'passed', 'api' => 'failed'],
-                'message'  => 'VdoCipher API returned a server error.',
-                'errorCode' => self::ERROR_HTTP_5XX,
-                'httpStatus' => $status,
-                'latencyMs' => $latency,
-                'recommendedAction' => 'Retry later; if persistent, contact VdoCipher support.',
-            ]);
-        }
-
-        if ($status >= 400) {
-            return $this->result('vdocipher', 'VdoCipher', 'Video / DRM', self::STATUS_WARNING, [
-                'checks'   => ['configuration' => 'passed', 'connectivity' => 'passed', 'authentication' => 'passed', 'api' => 'failed'],
-                'message'  => 'VdoCipher API rejected the diagnostic request.',
-                'errorCode' => self::ERROR_HTTP_4XX,
-                'httpStatus' => $status,
-                'latencyMs' => $latency,
-                'recommendedAction' => 'Verify the VdoCipher account permissions for API access.',
-            ]);
-        }
-
-        $decoded = json_decode($body, true);
-        // Accept every listing shape VdoCipher has used: {rows,count} (current),
-        // {videos,...} (legacy), or a bare array. Non-JSON bodies (HTML/error
-        // pages, redirects) fail json_decode and land here as invalid.
-        $isListShape = is_array($decoded)
-            && (isset($decoded['rows']) || isset($decoded['videos'])
-                || ($decoded !== [] && array_keys($decoded) === range(0, count($decoded) - 1)));
-        if (!$isListShape) {
-            return $this->result('vdocipher', 'VdoCipher', 'Video / DRM', self::STATUS_WARNING, [
-                'checks'   => ['configuration' => 'passed', 'connectivity' => 'passed', 'authentication' => 'passed', 'api' => 'failed'],
-                'message'  => 'VdoCipher responded with an unexpected payload shape.',
-                'errorCode' => self::ERROR_RESPONSE,
-                'httpStatus' => $status,
-                'latencyMs' => $latency,
-                'recommendedAction' => 'Confirm the VdoCipher API contract has not changed.',
-            ]);
-        }
-
-        return $this->result('vdocipher', 'VdoCipher', 'Video / DRM', self::STATUS_HEALTHY, [
-            'checks'   => ['configuration' => 'passed', 'connectivity' => 'passed', 'authentication' => 'passed', 'api' => 'passed'],
-            'message'  => 'Credentials present; authenticated API call succeeded.',
-            'httpStatus' => $status,
-            'latencyMs' => $latency,
-        ]);
-    }
 
     private function checkSmtp(): array
     {

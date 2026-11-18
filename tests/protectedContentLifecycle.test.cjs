@@ -219,19 +219,25 @@ console.log('\u2500\u2500 Part 5: native concealment and VdoCipher preservation 
   check('5a: concealment bus is fail-closed before any decision',
     /let concealed = true;/.test(VISIBILITY)
     && /if \(concealed\) \{[\s\S]{0,160}concealer\.conceal\(lastReason\);/.test(VISIBILITY));
-  check('5b: surface conceals NON-destructively (alpha + opaque native cover, no layout removal)',
-    /hostConcealed: \{\s*opacity: 0,/.test(SURFACE)
-    && /backgroundColor: '#000',\s*zIndex: 9998,\s*elevation: 30,/.test(SURFACE)
-    && !/display: 'none'/.test(SURFACE)
-    && /setNativeProps\(\{ style: \{ opacity: 1 \} \}\)/.test(SURFACE));
+  // ROOT CAUSE (device-proven): alpha-only concealment left the WebView mounted
+  // and, on this device, a composited alpha/zIndex layer inside a clipped parent
+  // painted nothing — so the video stayed visible and kept decoding. The boundary
+  // now UNMOUNTS the player while concealed (no frame, no media request) and the
+  // cover is a plain filled view with no layering tricks.
+  check('5b: surface DESTROYS the player while concealed (unmount, not alpha)',
+    /\{visible \? \(/.test(SURFACE)
+    && /\{children\}/.test(SURFACE)
+    && !/hostConcealed/.test(SURFACE)
+    && !/zIndex: 9998/.test(SURFACE)
+    && !/elevation: 30/.test(SURFACE));
   check('5c: surface applies concealment synchronously on the AppState edge',
     /registerProtectedContentConcealer\(\{/.test(SURFACE)
     && /conceal: \(reason\) => \{/.test(SURFACE)
     && /setNativeProps/.test(SURFACE));
-  check('5c-2: the synchronous bus is authoritative over a stale render',
-    /const visible = allowedByState && !concealedRef\.current;/.test(SURFACE)
-    && /concealedRef\.current = true;/.test(SURFACE)
-    && /concealedRef\.current = false;/.test(SURFACE));
+  check('5c-2: concealment is RENDER state, so the unmount cannot be skipped',
+    /const visible = allowedByState && !busConcealed;/.test(SURFACE)
+    && /setBusConcealed\(true\)/.test(SURFACE)
+    && /setBusConcealed\(false\)/.test(SURFACE));
   check('5d: the retired native/offline players are gone (single player path)',
     !fs.existsSync(path.join(ROOT, 'src/components/VdoCipherPlayerNativeAdapter.native.tsx'))
     && !fs.existsSync(path.join(ROOT, 'src/components/OfflineVideoPlayer.native.tsx')));

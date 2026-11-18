@@ -100,7 +100,9 @@ Implements all 5 student-operations modes:
 ### 8. Cron Scripts (NEW)
 **Files:**
 - `backend/scripts/cron-trash-cleanup.php` — daily trash purge
-- `backend/scripts/cron-video-health.php` — daily video health check
+- ~~`backend/scripts/cron-video-health.php` — daily video health check~~ **RETIRED**: the
+  script and the whole `/video/*` surface were removed with the VdoCipher retirement
+  (commit 269c806). Do not schedule this cron on the server; remove any existing entry.
 
 ---
 

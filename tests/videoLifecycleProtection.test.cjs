@@ -59,10 +59,11 @@ function check(name, fn) {
 
 console.log('\nForeground exit — live WebView player');
 
-check('YouTubePlayer imports ProtectedContentSurface and the soft pause/resume scripts', () => {
+check('YouTubePlayer imports ProtectedContentSurface and the soft pause script (no resume import)', () => {
   assert.match(player, /import \{ ProtectedContentSurface \} from '\.\/ProtectedContentSurface'/);
   assert.match(player, /WEBVIEW_SOFT_PAUSE_SCRIPT/);
-  assert.match(player, /WEBVIEW_RESUME_SCRIPT/);
+  // Auto-resume was the reported bug: returning to the app continued playback.
+  assert.ok(!/WEBVIEW_RESUME_SCRIPT/.test(player), 'the player must not import an auto-resume script');
 });
 
 check('the WebView is rendered INSIDE ProtectedContentSurface (not merely nearby)', () => {
@@ -80,9 +81,12 @@ check('conceal pauses the real player through the non-destructive script', () =>
   assert.match(player, /onConceal=\{concealWebPlayer\}/);
 });
 
-check('reveal resumes through the script that only resumes what was playing', () => {
+check('reveal NEVER restarts playback (a new explicit Play tap is required)', () => {
   assert.match(player, /const revealWebPlayer = useCallback\(/);
-  assert.match(player, /injectJavaScript\?\.\(WEBVIEW_RESUME_SCRIPT\)/);
+  assert.ok(
+    !/injectJavaScript\?\.\(WEBVIEW_RESUME_SCRIPT\)/.test(player),
+    'reveal must not auto-resume the previous position',
+  );
   assert.match(player, /onReveal=\{revealWebPlayer\}/);
 });
 
@@ -113,7 +117,7 @@ check('an authorized reveal releases the app-level containment flag', () => {
 
 check('the surface is fail-closed and registered with the synchronous bus', () => {
   assert.match(surface, /registerProtectedContentConcealer\(/);
-  assert.match(surface, /const visible = allowedByState && !concealedRef\.current;/);
+  assert.match(surface, /const visible = allowedByState && !busConcealed;/);
   assert.match(visibility, /let concealed = true;/);
 });
 
@@ -132,10 +136,12 @@ check('video is not revealed until a post-resume verdict passes', () => {
 console.log('\nPlyr first-play audio');
 
 check('the first play reconciles a provider-applied mute exactly once', () => {
-  assert.match(playerScript, /var audioPolicyApplied = false;/);
+  // The one-shot latch was replaced by the gesture gate (see
+  // build230Regressions: no `audioPolicyApplied` remains).
+  assert.match(playerScript, /var userGestureSeen = false;/);
   assert.match(playerScript, /function reconcileFirstPlayAudio\(\)/);
-  assert.match(playerScript, /if \(audioPolicyApplied\) return;/);
-  assert.match(playerScript, /audioPolicyApplied = true;/);
+  assert.match(playerScript, /if \(!userGestureSeen\) return;/);
+  assert.match(playerScript, /if \(userChoseMute\) return;/);
 });
 
 check('the reconciliation runs from the play event (a real user gesture)', () => {
@@ -153,7 +159,7 @@ check('it only clears a mute the PLATFORM applied, never the student\'s own', ()
 });
 
 check('it never writes audio state for an already-audible player', () => {
-  assert.match(playerScript, /if \(player\.muted !== true\) return;/);
+  assert.match(playerScript, /if \(player\.muted !== true && !iframeMuted\) return;/);
   assert.match(playerScript, /if \(!\(player\.volume > 0\)\) player\.volume = 1;/);
 });
 

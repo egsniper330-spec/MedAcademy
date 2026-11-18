@@ -44,8 +44,6 @@ import {
   uploadCourseCover, removeCourseCover,
   type CourseBuilderPayload,
 } from '@/lib/api';
-import { getCoursePublishBlockers } from '@/lib/videoUploadEngine';
-import { useUploadQueueStore } from '@/lib/uploadQueueStore';
 import type { RelativePathString } from 'expo-router';
 import { usePermission } from '@/hooks/usePermission';
 import { PermissionRationaleModal } from '@/components/PermissionRationaleModal';
@@ -356,21 +354,6 @@ export default function CourseBuilder() {
   // to see the latest video_type and youtube_video_id saved in the lesson editor.
   useFocusEffect(useCallback(() => { loadCourse(); }, [loadCourse]));
 
-  // ── Auto-refresh when any upload for this course reaches 'ready' ────────────
-  const { tasks } = useUploadQueueStore();
-  const prevCourseTasksRef = useRef<typeof tasks>([]);
-  useEffect(() => {
-    const prev = prevCourseTasksRef.current;
-    prevCourseTasksRef.current = tasks;
-    if (!courseId) return;
-    const courseTasks = tasks.filter(t => t.courseId === courseId);
-    const prevCourse  = prev.filter(t => t.courseId === courseId);
-    const justReady   = courseTasks.some(
-      t => t.status === 'ready' && !prevCourse.find(p => p.id === t.id && p.status === 'ready'),
-    );
-    if (justReady) loadCourse();
-  }, [tasks, courseId, loadCourse]);
-
   // ── Create course on first interaction if new
   const ensureCourse = async (): Promise<string> => {
     if (courseId) return courseId;
@@ -549,7 +532,7 @@ export default function CourseBuilder() {
       const lesson = await createLesson({
         section_id: sectionId, course_id: cid,
         title: t('cb.newLessonName'), order_index: orderIndex,
-        video_type: 'vdocipher', status: 'draft',
+        video_type: 'youtube', status: 'draft',
       });
       setSections(prev => prev.map(s =>
         s.id === sectionId ? { ...s, lessons: [...(s.lessons ?? []), lesson] } : s
@@ -671,12 +654,13 @@ export default function CourseBuilder() {
     const issues = getIssues(freshSections);
     // Sync state so the rest of the UI reflects the fresh data
     if (freshData?.sections) setSections(freshSections);
-    // Also check video upload statuses from DB
-    const cid = courseId;
-    if (cid) {
-      const blockers = await getCoursePublishBlockers(cid);
-      setVideoBlockers(blockers);
-      if (issues.length > 0 || blockers.length > 0) { setShowPublishCheck(true); return; }
+    // Every video rule lives in the shared lesson rule (publishValidation.ts) and
+    // is already part of `issues` above: there is no longer an upload queue or a
+    // provider-side asset status to wait for, so a second blocker source would
+    // only be a weaker duplicate.
+    setVideoBlockers([]);
+    if (courseId) {
+      if (issues.length > 0) { setShowPublishCheck(true); return; }
     } else if (issues.length > 0) {
       setVideoBlockers([]);
       setShowPublishCheck(true);

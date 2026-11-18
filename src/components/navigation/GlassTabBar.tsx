@@ -158,8 +158,32 @@ export default function GlassTabBar({
       return { ...prev, [key]: { width } };
     });
   }, []);
+  /**
+   * Indicator position — applied as a LAYOUT `left`, not a transform.
+   *
+   * ROOT CAUSE (measured on the tablet, SM-T505N / Android 12, build 230):
+   *   the bubble was an absolutely-positioned view carrying `translateX` +
+   *   `scaleX` transforms, `zIndex` and `overflow:'hidden'`, inside the pill
+   *   (which is itself `overflow:'hidden'` + rounded). Its geometry was proven
+   *   CORRECT — the drag hit-test uses the same numbers and dragging the
+   *   invisible bubble from the Home tab to the left really did activate
+   *   "My Courses" — and its opacity was 1 (width > 0). Yet a full pixel scan
+   *   of the bar (1200x2000 screenshot, columns 830-1180) found no bubble at
+   *   all: only the icon glyph and the pill's own sheen ramp. So the view was
+   *   laid out, hit-testable and alpha-1, but its composited/transformed layer
+   *   painted NOTHING.
+   *
+   *   The fix removes every mechanism that can produce that empty layer: the
+   *   bubble is now a PLAIN filled view whose position and width are animated
+   *   as layout (left/width, JS driver). No transform, no zIndex, no elevation,
+   *   no overflow clip and no child view — the same primitives the glass layers
+   *   and the tab row already use, which paint correctly on this device.
+   */
   const translateX = useRef(new Animated.Value(0)).current;
+  /** 1 → stretched while travelling; multiplies the measured bubble width. */
   const stretch = useRef(new Animated.Value(1)).current;
+  /** The bubble's real (measured) width in dp, as an animated layout value. */
+  const indicatorBase = useRef(new Animated.Value(0)).current;
   /** The x the bubble last landed on (animation bookkeeping only). */
   const lastTarget = useRef<number | null>(null);
 
@@ -220,6 +244,15 @@ export default function GlassTabBar({
     (i: number) => (isRTL ? rowSpan - (i + 1) * tabWidth : i * tabWidth),
     [isRTL, rowSpan, tabWidth],
   );
+  /* Keep the animated layout width in step with the derived geometry. */
+  useEffect(() => {
+    indicatorBase.setValue(indicatorWidth);
+  }, [indicatorWidth, indicatorBase]);
+  /** Animated LAYOUT width: base width × travel stretch. */
+  const indicatorWidthAnim = useMemo(
+    () => Animated.multiply(indicatorBase, stretch),
+    [indicatorBase, stretch],
+  );
   /* ── Resting x of EVERY tab, in the same physical (left-anchored) space the
    * animation uses. Used for the grab hit-test and the release snap, so a drag
    * released between two tabs still resolves to the nearer one. */
@@ -279,7 +312,6 @@ export default function GlassTabBar({
       return;
     }
 
-    const movingRight = target > previous;
     lastTarget.current = target;
 
     // Travel + deformation: the bubble stretches along its axis as it moves and
@@ -290,12 +322,13 @@ export default function GlassTabBar({
         damping: 19,
         stiffness: 190,
         mass: 0.85,
-        // JS driver: the drag writes this exact value from touch coordinates.
+        // JS driver: the drag writes this exact value from touch coordinates,
+        // and `left`/`width` are layout props that cannot run natively.
         useNativeDriver: false,
       }),
       Animated.sequence([
         Animated.timing(stretch, {
-          toValue: movingRight ? 1.1 : -1.1,
+          toValue: 1.08,
           duration: 130,
           useNativeDriver: false,
         }),
@@ -600,50 +633,31 @@ export default function GlassTabBar({
 
         {/* ONE shared indicator, behind every tab.
 
-            ANDROID LAYERING — the reason it was invisible on the tablet:
-            this view carried `elevation: 6` inside a parent that is
-            `overflow: 'hidden'` with a borderRadius. React Native's Android
-            renderer promotes an elevated child to its own layer, and inside a
-            clipped, rounded parent that layer is composited away entirely —
-            the bubble painted nothing on the device while its geometry and its
-            animated position were correct the whole time (the same geometry
-            drove the drag hit-test, which worked). Elevation is therefore
-            gone, and z-order is explicit: the row sits above the bubble
-            (`zIndex: 1` on the row), the bubble above the glass layers
-            (`zIndex: 0` inside its own stacking context). */}
+            PAINTED AS A PLAIN FILLED VIEW (see the root-cause note above):
+            position and width are ANIMATED LAYOUT values (`left`, `width`),
+            there is no transform, no zIndex, no elevation and no overflow
+            clip on it, and it has no child view — just a solid rounded
+            background. Those are exactly the primitives the glass layers
+            behind it and the tab row in front of it already paint with on this
+            device, so the bubble cannot end up as an empty composited layer.
+            It is declared after the glass and before the row, so document
+            order puts it above the glass and below the icons/labels without
+            any stacking-context tricks. */}
         <Animated.View
           pointerEvents="none"
           style={[
             styles.indicator,
             {
-              width: indicatorWidth,
-              // The bubble's own liquid fill: a gradient reads as a lit droplet
-              // instead of a flat wash, and it stays visible over the frosted
-              // surface in Light Mode.
-              borderColor: isDark ? 'rgba(148,200,255,0.62)' : 'rgba(30,144,255,0.52)',
-              shadowColor: isDark ? 'rgba(96,165,250,0.55)' : 'rgba(30,144,255,0.45)',
-              shadowOpacity: 1,
-              shadowRadius: 10,
-              shadowOffset: { width: 0, height: 2 },
+              left: translateX,
+              width: indicatorWidthAnim,
+              backgroundColor: isDark ? 'rgba(96,165,250,0.30)' : 'rgba(30,144,255,0.22)',
+              borderColor: isDark ? 'rgba(148,200,255,0.62)' : 'rgba(30,144,255,0.55)',
               // Derived, never animated: the bubble is painted exactly when its
               // geometry exists, so a skipped effect can never leave it at 0.
               opacity: indicatorWidth > 0 ? 1 : 0,
-              transform: [{ translateX }, { scaleX: stretch }],
             },
           ]}
-        >
-          <LinearGradient
-            pointerEvents="none"
-            colors={
-              isDark
-                ? (['rgba(96,165,250,0.44)', 'rgba(96,165,250,0.18)'] as const)
-                : (['rgba(30,144,255,0.26)', 'rgba(30,144,255,0.10)'] as const)
-            }
-            start={{ x: 0.2, y: 0 }}
-            end={{ x: 0.8, y: 1 }}
-            style={StyleSheet.absoluteFill}
-          />
-        </Animated.View>
+        />
 
         <View
           style={[styles.row, { flexDirection: isRTL ? 'row-reverse' : 'row', direction: 'ltr' }]}
@@ -739,27 +753,18 @@ const styles = StyleSheet.create({
   },
   indicator: {
     position: 'absolute',
-    // Explicit PHYSICAL anchor. Without `left: 0` an absolutely positioned
-    // child has no resolved inset and falls back to its static position — which
-    // in RTL is the RIGHT edge, putting the bubble off-screen. `left`/`top` are
-    // physical in CSS and Yoga, so this anchor is identical in Arabic and
-    // English; `translateX` then comes straight from the measured tab x.
-    left: 0,
+    // `left` is PHYSICAL (Yoga), so the same anchor is correct in Arabic and
+    // English; the animated value is the tab's measured physical x. No
+    // stacking, clipping or transform tricks — see the render note.
     top: (BAR_HEIGHT - INDICATOR_HEIGHT) / 2,
     height: INDICATOR_HEIGHT,
     borderRadius: INDICATOR_HEIGHT / 2,
     borderWidth: 1,
-    // NO elevation (see the render note): an elevated child inside a clipped,
-    // rounded parent is composited away on Android. The row is lifted above it
-    // instead. `overflow: 'hidden'` keeps the gradient inside the pill.
-    zIndex: 0,
-    overflow: 'hidden',
   },
   row: {
     flexDirection: 'row',
     alignItems: 'center',
     height: BAR_HEIGHT,
-    zIndex: 1,
   },
   tab: {
     flex: 1,

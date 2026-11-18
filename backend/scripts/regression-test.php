@@ -164,12 +164,15 @@ $routes = [
     ['POST', '/security/devices/00000000-0000-0000-0000-000000000000/block',   true, ['admin','super_admin'], 'security'],
     ['POST', '/security/devices/00000000-0000-0000-0000-000000000000/unblock', true, ['admin','super_admin'], 'security'],
 
-    // ── Video / VdoCipher (auth) ──
-    ['POST', '/video/otp',                   true,  null, 'video'],
-    ['POST', '/video/upload-init',           true,  null, 'video'],
-    ['POST', '/video/upload-status',         true,  null, 'video'],
-    ['POST', '/video/delete',                true,  null, 'video'],
-    ['POST', '/video/assets',                true,  null, 'video'],
+    // ── Video provider policy (super_admin) ──
+    // The retired VdoCipher /video/* surface is NOT listed here: every entry in
+    // this inventory is expected to ANSWER something. The retired routes are
+    // asserted absent in Phase 4b, and the generic provider-policy control
+    // centre (YouTube/Plyr policy + per-doctor overrides) is asserted present.
+    ['GET',  '/video-providers',             true,  ['super_admin'], 'video'],
+    ['GET',  '/video-providers/teachers/00000000-0000-0000-0000-000000000000', true, ['super_admin'], 'video'],
+    ['GET',  '/rpc/lesson-video-state',      true,  null, 'video'],
+    ['GET',  '/analytics/video-asset-usage', true,  null, 'video'],
 
     // ── Storage (auth) ──
     ['GET',  '/storage/signed-url',          true,  null, 'storage'],
@@ -197,11 +200,19 @@ $base   = rtrim(Config::get('APP_URL', 'http://localhost'), '/');
 $results = [];
 $stats   = ['passed' => 0, 'failed' => 0, 'blocked' => 0, 'skipped' => 0, 'total' => 0];
 
-// A server without the video provider secret cannot answer the /video/* routes;
-// those responses are reported as SKIP rather than FAIL (see the auth_accept
-// branch). On production the secret is set, so the check is a real assertion.
-$videoSecret = Config::string('VDOCIPHER_API_SECRET');
-$videoConfigured = $videoSecret !== '' && $videoSecret !== 'CHANGE_ME_VDOCIPHER_API_SECRET';
+// Retired provider surface (commit 269c806). MedAcademy no longer ships a
+// VdoCipher integration, so these paths must not be registered at all. The
+// router answers an unmatched method+path with HTTP 404 and error.code
+// 'not_found' (Http/Router.php), before any auth middleware runs — that exact
+// contract is what Phase 4b asserts. No provider secret is read or required by
+// this script any more.
+$retiredRoutes = [
+    ['POST', '/video/otp'],
+    ['POST', '/video/upload-init'],
+    ['POST', '/video/upload-status'],
+    ['POST', '/video/delete'],
+    ['POST', '/video/assets'],
+];
 
 // Unique tag per run: 8 random hex chars + timestamp suffix
 $runTag    = bin2hex(random_bytes(4));
@@ -231,11 +242,6 @@ $routeBodies = [
     'POST /security/bump-version/00000000-0000-0000-0000-000000000000' => fn() => json_encode([]),
     'POST /security/devices/00000000-0000-0000-0000-000000000000/block' => fn() => json_encode(['reason' => 'regression test']),
     'POST /security/devices/00000000-0000-0000-0000-000000000000/unblock' => fn() => json_encode([]),
-    'POST /video/otp' => fn() => json_encode(['video_id' => 'test-video-id']),
-    'POST /video/upload-init' => fn() => json_encode(['title' => 'Regression Test Video']),
-    'POST /video/upload-status' => fn() => json_encode(['upload_id' => 'test-upload-id']),
-    'POST /video/delete' => fn() => json_encode(['video_id' => 'test-video-id']),
-    'POST /video/assets' => fn() => json_encode([]),
     'POST /storage/upload' => fn() => json_encode(['bucket' => 'avatars', 'path' => 'test']),
     'POST /storage/delete' => fn() => json_encode(['bucket' => 'avatars', 'path' => 'test']),
     'POST /notifications/read' => fn() => json_encode(['ids' => []]),
@@ -413,22 +419,6 @@ if ($testToken !== null) {
             $stats['passed']++;
             $results[] = ['endpoint' => "$method $path", 'status' => $status, 'result' => 'PASS', 'test' => 'auth_accept', 'group' => $group];
             echo "  ✓ $method $path → {$status}" . PHP_EOL;
-        } elseif ($status >= 500 && !$videoConfigured && preg_match('/service not configured/i', $detail)) {
-            // CONFIG-DEPENDENT SKIP, not a pass: the video endpoints answer 500
-            // "Video service not configured" when VDOCIPHER_API_SECRET is empty.
-            // That is correct behaviour for an unconfigured server, so it is
-            // skipped here instead of being reported as a failure — the check
-            // still runs (and fails) on any server that HAS the secret.
-            $stats['skipped']++;
-            $results[] = ['endpoint' => "$method $path", 'status' => $status, 'result' => 'SKIP', 'detail' => 'provider not configured on this server', 'test' => 'auth_accept', 'group' => $group];
-            echo "  ⊘ $method $path → {$status} (skipped: provider not configured)" . PHP_EOL;
-        } elseif ($status === 502 && preg_match('/upstream (40[0-9]|404)/', $detail)) {
-            // VdoCipher integration: upstream returned a client error (invalid
-            // resource). This confirms the endpoint reached the external API and
-            // correctly surfaced the upstream response. PASS for integration test.
-            $stats['passed']++;
-            $results[] = ['endpoint' => "$method $path", 'status' => $status, 'result' => 'PASS', 'test' => 'external_api_reached', 'detail' => $detail, 'group' => $group];
-            echo "  ✓ $method $path → 502 (VdoCipher reached, upstream rejected — expected)" . PHP_EOL;
         } else {
             $stats['failed']++;
             $results[] = ['endpoint' => "$method $path", 'status' => $status, 'result' => 'FAIL', 'detail' => $detail, 'test' => 'auth_accept', 'group' => $group];
@@ -444,6 +434,28 @@ if ($testToken !== null) {
         $results[] = ['endpoint' => "$method $path", 'status' => null, 'result' => 'BLOCKED', 'detail' => 'No test token (Phase 3 failed)', 'group' => $group];
     }
     echo "  ⊘ All auth routes BLOCKED (Phase 3 failed to obtain token)" . PHP_EOL;
+}
+
+// ── Phase 4b: retired provider routes ──
+// Guard against the retired surface coming back: an unmapped route must answer
+// 404/'not_found' (never 200, never 5xx, never a provider call).
+echo PHP_EOL . "=== Phase 4b: retired provider routes (expect 404 not_found) ===" . PHP_EOL;
+
+foreach ($retiredRoutes as [$method, $path]) {
+    $stats['total']++;
+    $r = http_request($method, $base . $path, ['Content-Type: application/json'], '{}');
+    $code = $r['body']['error']['code'] ?? null;
+    $detail = $r['body']['error']['message'] ?? ($r['error'] ?: 'empty response');
+
+    if ($r['status'] === 404 && $code === 'not_found') {
+        $stats['passed']++;
+        $results[] = ['endpoint' => "$method $path", 'status' => 404, 'result' => 'PASS', 'test' => 'retired_route_absent', 'detail' => 'retired provider route is not registered', 'group' => 'video'];
+        echo "  ✓ $method $path → 404 not_found (retired, as intended)" . PHP_EOL;
+    } else {
+        $stats['failed']++;
+        $results[] = ['endpoint' => "$method $path", 'status' => $r['status'], 'result' => 'FAIL', 'test' => 'retired_route_absent', 'detail' => 'expected 404/not_found, got ' . $r['status'] . ' ' . $code . ': ' . $detail, 'group' => 'video'];
+        echo "  ✗ $method $path → {$r['status']} (expected 404 not_found)" . PHP_EOL;
+    }
 }
 
 // ── Phase 5: Post-cleanup ──

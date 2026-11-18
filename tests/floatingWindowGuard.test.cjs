@@ -57,17 +57,20 @@ check('a new prohibited mode exists for another app\'s window', () => {
   assert.match(plugin, /WINDOW_MODE_FOREIGN = "foreign_window"/);
 });
 
-check('focus only counts while the app is RESUMED and not already multi-window/PiP', () => {
+check('focus counts while RESUMED too, and never outranks multi-window/PiP', () => {
   const modeOf = plugin.slice(plugin.indexOf('fun modeOf('), plugin.indexOf('fun modeOf(') + 1200);
   assert.match(modeOf, /if \(isInPictureInPictureMode\) return WINDOW_MODE_PIP/);
   assert.match(modeOf, /if \(isInMultiWindowMode\) return WINDOW_MODE_MULTI/);
-  assert.match(modeOf, /if \(foreignWindowFocused && appResumed\) return WINDOW_MODE_FOREIGN/);
+  // ROOT CAUSE: the old rule required !appResumed, so a pop-up over a RESUMED
+  // app was classified full screen and playback continued.
+  assert.match(modeOf, /if \(foreignWindowFocused\) return WINDOW_MODE_FOREIGN/);
+  assert.ok(!/foreignWindowFocused && appResumed/.test(modeOf));
 });
 
 check('the activity forwards window focus loss and re-reads it before reporting', () => {
   assert.match(plugin, /override fun onWindowFocusChanged\(hasFocus: Boolean\)/);
-  assert.match(plugin, /window\?\.decorView\?\.hasWindowFocus\(\) == false/);
-  assert.match(plugin, /WindowModeBridge\.report\(isInMultiWindowMode\(\), isInPictureInPictureMode\(\), true, true\)/);
+  assert.match(plugin, /val focused = try \{ !activity\.window\.decorView\.hasWindowFocus\(\) \}/);
+  assert.match(plugin, /WindowModeBridge\.report\(\s*\n\s*isInMultiWindowMode\(\),\s*\n\s*isInPictureInPictureMode\(\),\s*\n\s*true,\s*\n\s*!activityPaused,/);
 });
 
 check('the periodic re-assert and the preflight read the same focus state', () => {

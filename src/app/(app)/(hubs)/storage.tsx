@@ -21,7 +21,7 @@ import { useFocusEffect } from 'expo-router';
 import { Database, HardDrive, Image, Film, FileText, RefreshCw, AlertTriangle, CircleCheck } from 'lucide-react-native';
 import { PageHeader } from '@/components/PageHeader';
 import { getRealStorageStats, type RealStorageStats } from '@/lib/api';
-import { formatBytes } from '@/lib/videoUploadEngine';
+import { formatBytes } from '@/lib/storageStats';
 import { NeuCard } from '@/components/NeuCard';
 import { neuColors, useLayout, safeBottom, mutedTextStyle } from '@/lib/neu';
 
@@ -257,7 +257,7 @@ export default function StorageMonitorScreen({ backTo }: { backTo?: string } = {
             <NeuCard style={{ marginBottom: 16, padding: 14, flexDirection: 'row', gap: 10, alignItems: 'center' }}>
               <Film size={16} color="#2DA8FF" />
               <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.55), flex: 1 }}>
-                Lesson videos are streamed from VdoCipher (external CDN) and do not consume application storage. Live VdoCipher metrics live in Video Settings.
+                Video lessons are streamed from YouTube and do not consume application storage.
               </Text>
             </NeuCard>
 

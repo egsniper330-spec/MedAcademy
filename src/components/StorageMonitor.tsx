@@ -9,7 +9,7 @@ import { useFocusEffect } from 'expo-router';
 import { HardDrive, Film, TrendingUp, Maximize2 } from 'lucide-react-native';
 import { NeuCard } from '@/components/NeuCard';
 import { neuColors, neuFlatStyle, neuPressedStyle, mutedTextStyle } from '@/lib/neu';
-import { getDoctorStorageStats, formatBytes, type DoctorStorageStats } from '@/lib/videoUploadEngine';
+import { getDoctorStorageStats, formatBytes, type DoctorStorageStats } from '@/lib/storageStats';
 import { useProfileStore } from '@/lib/store';
 
 function StatRow({

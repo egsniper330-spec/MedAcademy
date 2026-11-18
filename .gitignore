@@ -119,3 +119,6 @@ scripts/loadtest/results/
 backend/storage/logs/
 backend/storage/private/.watermark-locks/
 backend/storage/private/.watermark-worker.lock*
+
+# Local security test APK evidence
+/security-test-evidence/device/base.apk

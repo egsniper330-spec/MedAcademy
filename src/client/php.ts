@@ -1314,17 +1314,8 @@ const EDGE_FUNCTION_MAP: Record<string, string> = {
   'set-maintenance-mode':   '/admin/maintenance',
   // Explicit import of an EXISTING VdoCipher video. Never used by the library
   // sync, which reconciles local rows only and imports nothing on its own.
-  'video-import':           '/video/import',
-  'vdocipher-otp':          '/video/otp',
-  'vdocipher-offline-authorize': '/video/offline-authorize',
   'verify-app-integrity':   '/integrity/app',
   'verify-play-integrity':  '/integrity/play',
-  'video-health-scan':      '/video/health-scan',
-  'vdocipher-upload-init':  '/video/upload-init',
-  'vdocipher-upload-status':'/video/upload-status',
-  'vdocipher-delete-video': '/video/delete',
-  'vdocipher-cancel-upload': '/video/cancel-upload',
-  'video-assemble-upload':  '/video/assemble',
   'delete-lesson':          '/lessons/{id}/delete',
   'bulk-user-ops':          '/admin/bulk-user-ops',
   'trash-cleanup':          '/admin/trash-cleanup',
@@ -1343,11 +1334,6 @@ const EDGE_ACTION_MAP: Record<string, Record<string, string>> = {
 const GET_FUNCTIONS = new Set(['get-security-config', 'get-security-policies', 'get-security-version', 'provider-health', 'get-app-update-config', 'system-diagnostics', 'system-diagnostics-one', 'get-maintenance-status']);
 // Edge Functions whose PHP routes REQUIRE PUT (the upsert contract)
 const FORCE_PUT_FUNCTIONS = new Set(['set-app-update-config', 'admin-security-policy-update']);
-// Edge Functions whose PHP routes are POST-only regardless of the caller's
-// requested method (the original vdocipher-upload-status EF used GET; the PHP
-// route /video/upload-status accepts POST with a JSON body).
-const FORCE_POST_FUNCTIONS = new Set(['vdocipher-upload-status']);
-
 async function invokeFunction<T = any>(
   name: string,
   opts: { body?: unknown; method?: string; headers?: Record<string, string> } = {}
@@ -1356,9 +1342,7 @@ async function invokeFunction<T = any>(
   // and "try again" from them. Dropping them here made every backend refusal
   // reach the UI as an anonymous failure with a generic message.
 ): Promise<{ data: T | null; error: { message: string; status?: number; code?: string; context?: { text: () => Promise<string> } } | null }> {
-  const method = FORCE_PUT_FUNCTIONS.has(name)
-    ? 'PUT'
-    : FORCE_POST_FUNCTIONS.has(name) ? 'POST' : (opts.method ?? (GET_FUNCTIONS.has(name) ? 'GET' : 'POST'));
+  const method: string = FORCE_PUT_FUNCTIONS.has(name) ? 'PUT' : 'POST';
   const payload = (opts.body ?? {}) as Record<string, unknown>;
 
   // 1. Resolve the PHP route (static map, action dispatch, or special cases)
@@ -1531,8 +1515,6 @@ const RPC_MAP: Record<string, string> = {
   'get_user_activity':                '/analytics/user-activity/{id}',
   'get_user_profile_summary':         '/analytics/user-profile/{id}',
   'get_video_asset_usage':            '/analytics/video-asset-usage',
-  'delete_video_asset':               '/video/assets/delete',
-  'sync_vdocipher_library':           '/video/sync-library',
   'grant_course_access':              '/courses/grant-access',
   'lookup_user_by_identifier':        '/admin/user-lookup',
   'mark_deletion_repaired':           '/rpc/mark-deletion-repaired',

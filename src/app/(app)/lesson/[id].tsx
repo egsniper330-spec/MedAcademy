@@ -10,7 +10,7 @@ import {
 } from 'lucide-react-native';
 import {
   getLessonById, upsertLessonProgress, getMaterialSignedUrl, getMaterialPdfUrl,
-  getLessonPdfSignedUrl, getCourseById,
+  getLessonPdfSignedUrl,
 } from '@/lib/api';
 import { getMySubscriptionsCached } from '@/lib/myCoursesCache';
 import { isPdfMaterial, materialAccess, materialActionLabel, visibleMaterials } from '@/lib/lessonMaterials';
@@ -243,7 +243,7 @@ export default function LessonPlayer() {
   const { t } = useTranslation();
   const { id } = useLocalSearchParams<{ id: string }>();
   const { profile } = useProfileStore();
-  const { blocksVideo, hasWarnings, riskScore, threats, isSuperAdmin, checkBeforeVideo, securityLockHard } = useSecurity();
+  const { blocksVideo, hasWarnings, riskScore, threats, isSuperAdmin, checkBeforeVideo, securityLockHard, protectedContent } = useSecurity();
 
   // Enable screenshot/recording protection while this screen is mounted.
   // Super Admin bypass: SA sessions are exempt — they can screenshot/record freely.
@@ -307,6 +307,28 @@ export default function LessonPlayer() {
     setIsFullscreen(false);
     setPlayerVisible(false);
   }, [blocksVideo, securityLockHard]);
+
+  // ── LIFECYCLE INTERRUPTION DESTROYS THE PLAYER ────────────────────────────
+  //
+  // ROOT CAUSE of "the video is still visible/playable when I come back": the
+  // player was only ever CONCEALED (alpha + an opaque sibling) and stayed
+  // mounted, and on return the protected-content state flipped back to
+  // `allowed` and the player's resume script started the previous position
+  // again. A mounted WebView keeps its media session and can issue requests
+  // behind a cover, and on this device an alpha-composited layer inside a
+  // clipped parent can paint nothing at all (proven by the Liquid Bar bubble).
+  //
+  // `protectedContent.visible` is TRUE only for a COMPLETED clean verdict.
+  // While it is false — left the app, floating window, VPN/proxy, split-screen,
+  // PiP, in-flight verification, failure — the player is UNMOUNTED. Returning
+  // therefore presents an opaque protected cover, then a fresh preflight, and
+  // playback resumes only from a NEW explicit Play tap (handlePlay), never
+  // automatically and never at the old position.
+  useEffect(() => {
+    if (protectedContent.visible) return;
+    setIsFullscreen(false);
+    setPlayerVisible(false);
+  }, [protectedContent.visible]);
 
   // ── Download state ────────────────────────────────────────────────────────
   const [downloadState, setDownloadState] = useState<{
@@ -411,37 +433,10 @@ export default function LessonPlayer() {
     setPlayerVisible(true);
   }, [lesson, isSuperAdmin, blocksVideo, checkBeforeVideo]);
 
-  // ── OFFLINE DOWNLOAD (official VdoCipher DRM flow) ─────────────────────
-  // Backend /video/offline-authorize runs the SAME gates as playback OTP
-  // MedAcademy course title for the offline metadata — persisted at authorize
-  // time so the Offline Library groups under the real course name (online
-  // fetch; harmless offline where it stays null → generic grouping label).
-  const [courseTitle, setCourseTitle] = useState<string | null>(null);
-  // Course IMAGE + section title are persisted at authorize time so the
-  // Offline Library shows the SAME course image as the online course.
-  const [courseImageUrl, setCourseImageUrl] = useState<string | null>(null);
-  useEffect(() => {
-    const cid = lesson?.section?.course_id;
-    if (!cid) { setCourseTitle(null); setCourseImageUrl(null); return; }
-    let alive = true;
-    void (async () => {
-      try {
-        const c = (await getCourseById(cid)) as any;
-        if (alive) {
-          setCourseTitle(c?.title ?? null);
-          setCourseImageUrl(c?.image_url ?? c?.cover_url ?? c?.thumbnail_url ?? null);
-        }
-      } catch { if (alive) { setCourseTitle(null); setCourseImageUrl(null); } }
-    })();
-    return () => { alive = false; };
-  }, [lesson?.section?.course_id]);
-
-  // 6120 SAFETY: an online native player must NEVER survive navigation into
-  // offline playback. The player is unmount-gated behind playerVisible; hiding
-  // it on screen-blur guarantees ZERO online VdoPlayerView instances while any
-  // offline watch screen (or any other screen) is in front. Playback position
-  // is already persisted continuously by onProgress, and enableAutoResume
-  // seeks back on the next play — nothing is lost by unmounting here.
+  // Player lifecycle: the embedded player is unmount-gated behind playerVisible
+  // and torn down whenever the screen loses focus, so no playback session can
+  // survive navigation. Playback position is persisted continuously by
+  // onProgress, so nothing is lost by unmounting here.
   useFocusEffect(
     useCallback(() => {
       return () => { setPlayerVisible(false); };
@@ -946,7 +941,22 @@ export default function LessonPlayer() {
               ? { padding: 0, position: 'absolute', top: 0, left: 0, width: fsWin.width, height: fsWin.height, zIndex: 110, backgroundColor: '#000', borderRadius: 0 }
               : { padding: 0 }}
           >
-            {playerVisible ? (
+            {!protectedContent.visible ? (
+              // OPAQUE PROTECTED COVER — shown while the video is not
+              // authorised (left the app, floating window, VPN/proxy,
+              // split-screen, PiP, verification in flight, or a failure). The
+              // player is NOT mounted behind it, so no frame is visible and no
+              // media request can be issued. It clears only on a fresh clean
+              // verdict; playback then needs an explicit Play tap.
+              <View
+                accessible
+                accessibilityLabel="Protected video locked pending security verification"
+                style={{ width: '100%', aspectRatio: 16 / 9, backgroundColor: '#000', alignItems: 'center', justifyContent: 'center', gap: 10 }}
+              >
+                <ShieldAlert size={26} color="#ffffff" opacity={0.85} />
+                <ActivityIndicator color="#ffffff" />
+              </View>
+            ) : playerVisible ? (
               // ── Inline player — replaces thumbnail once Play is tapped ─────
               <VideoPlayer
                 videoType={lesson.video_type}

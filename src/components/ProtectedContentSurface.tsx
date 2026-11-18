@@ -46,7 +46,7 @@
  * with the video (no watermark floating over a concealed player).
  */
 
-import React, { useCallback, useEffect, useRef } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { StyleSheet, View, type LayoutChangeEvent, type StyleProp, type ViewStyle } from 'react-native';
 import { useSecurity } from '@/lib/SecurityContext';
 import { isProtectedContentVisible } from '@/lib/protectedContentState';
@@ -87,8 +87,19 @@ export function ProtectedContentSurface({
   // The synchronous bus is AUTHORITATIVE across renders. React state can lag a
   // concealment by a frame; a re-render for an unrelated prop must not re-show
   // a surface the security context has already concealed.
-  const concealedRef = useRef(isProtectedContentConcealed());
-  const visible = allowedByState && !concealedRef.current;
+  //
+  // WHY STATE AND NOT A REF (root cause of "the video is still visible after I
+  // come back"): concealment used to be expressed ONLY as alpha (opacity 0 on
+  // the player host + an opaque cover sibling) while the WebView stayed
+  // mounted. A ref change re-renders nothing, and on this device an
+  // alpha/zIndex-composited layer inside a clipped parent can paint nothing at
+  // all (proven by the Liquid Bar bubble, which was laid out, hit-testable and
+  // alpha-1 yet invisible in a full pixel scan). Concealment therefore could
+  // not be trusted to hide — or to stop — a decoding player. The boundary now
+  // RE-RENDERS on every concealment/reveal and UNMOUNTS the player while
+  // concealed, so no frame and no media request can survive an interruption.
+  const [busConcealed, setBusConcealed] = useState(() => isProtectedContentConcealed());
+  const visible = allowedByState && !busConcealed;
 
   // Stable indirection so the registered concealer always calls the latest
   // callbacks without re-registering (which could momentarily drop the surface
@@ -126,22 +137,27 @@ export function ProtectedContentSurface({
   useEffect(() => {
     return registerProtectedContentConcealer({
       conceal: (reason) => {
-        concealedRef.current = true;
-        applyNativeConcealment(true);
+        // Stop the player FIRST (pause/teardown of the host), then let the
+        // re-render remove it from the tree.
         try {
           concealRef.current?.(reason);
         } catch {
           /* containment must never throw into the lifecycle handler */
         }
+        applyNativeConcealment(true);
+        setBusConcealed(true);
       },
       reveal: () => {
-        concealedRef.current = false;
+        // Reveal is NOT an authorization and never restarts playback: the
+        // player is re-created from scratch, paused/ready, and only an
+        // explicit Play action starts it (see the lesson screen).
+        applyNativeConcealment(false);
+        setBusConcealed(false);
         try {
           revealRef.current?.();
         } catch {
           /* reveal failure must not break the transition */
         }
-        applyNativeConcealment(false);
       },
     });
   }, [applyNativeConcealment]);
@@ -152,8 +168,8 @@ export function ProtectedContentSurface({
   // which is only driven by a validated `allowed` decision.
   useEffect(() => {
     if (visible) return;
-    concealedRef.current = true;
     applyNativeConcealment(true);
+    setBusConcealed(true);
     try {
       concealRef.current?.('render-state');
     } catch {
@@ -171,23 +187,28 @@ export function ProtectedContentSurface({
 
   return (
     <View style={style} onLayout={handleLayout}>
-      <View
-        ref={hostRef}
-        style={[styles.fill, visible ? styles.hostVisible : styles.hostConcealed]}
-        pointerEvents={visible ? 'auto' : 'none'}
-        importantForAccessibility={visible ? 'auto' : 'no-hide-descendants'}
-        accessibilityElementsHidden={!visible}
-      >
-        {children}
-      </View>
-      {/* Opaque cover above the native surface while concealed. The existing
-          watermark overlay proves RN siblings paint above this player's native
-          surface in both inline and fullscreen layouts. */}
-      <View
-        ref={coverRef}
-        pointerEvents="none"
-        style={[styles.cover, visible ? styles.coverHidden : styles.coverShown]}
-      />
+      {/* The player exists ONLY while the content is authorised. While
+          concealed it is removed from the tree: a mounted WebView can keep
+          its media session and issue requests even behind an opaque view, so
+          "covered" is not the same as "stopped". Unmounting is the only
+          control this player architecture offers that provably stops both. */}
+      {visible ? (
+        <View
+          ref={hostRef}
+          style={[styles.fill, styles.hostVisible]}
+          pointerEvents="auto"
+        >
+          {children}
+        </View>
+      ) : (
+        /* Opaque cover: a PLAIN filled view (no zIndex, no elevation, no
+           transform, no children) — the paint-safe primitive on this device. */
+        <View
+          ref={coverRef}
+          pointerEvents="auto"
+          style={[styles.fill, styles.cover]}
+        />
+      )}
     </View>
   );
 }
@@ -196,26 +217,11 @@ const styles = StyleSheet.create({
   fill: {
     flex: 1,
   },
-  /**
-   * Alpha-only concealment. Layout, view identity and native surface stay
-   * intact, which is what preserves the DRM/OTP session and playback position.
-   */
-  hostConcealed: {
-    opacity: 0,
-  },
   hostVisible: {
     opacity: 1,
   },
+  /** Opaque, paint-safe cover (no composited layer). */
   cover: {
-    ...StyleSheet.absoluteFillObject,
     backgroundColor: '#000',
-    zIndex: 9998,
-    elevation: 30,
-  },
-  coverShown: {
-    opacity: 1,
-  },
-  coverHidden: {
-    opacity: 0,
   },
 });

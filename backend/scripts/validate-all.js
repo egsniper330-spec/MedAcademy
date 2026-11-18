@@ -58,7 +58,7 @@ const files = [
   'backend/src/Controllers/StorageController.php',
   'backend/src/Controllers/StudentController.php',
   'backend/src/Controllers/UserController.php',
-  'backend/src/Controllers/VideoController.php',
+  'backend/src/Controllers/VideoProviderController.php',
   'backend/src/Controllers/RpcController.php',
   'backend/src/Controllers/IntegrityController.php',
   'backend/src/Controllers/NotificationController.php',

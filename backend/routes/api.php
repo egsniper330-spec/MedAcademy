@@ -32,8 +32,6 @@ use MedAcademy\Controllers\SystemDiagnosticsController;
 use MedAcademy\Controllers\UserController;
 use MedAcademy\Controllers\AppReleaseController;
 use MedAcademy\Controllers\UpdateConfigController;
-use MedAcademy\Controllers\VideoController;
-use MedAcademy\Controllers\VideoProviderController;
 use MedAcademy\Http\ApiException;
 
 /*
@@ -46,6 +44,8 @@ $auth = ['auth' => true];
 // GET  /support/contact            — PUBLIC, no auth. Blocked screen reads this.
 // GET  /admin/support-settings     — Super Admin: full settings.
 // PUT  /admin/support-settings     — Super Admin: upsert all platforms.
+use MedAcademy\Controllers\VideoProviderController;
+
 $router->get('/support/contact', [SupportController::class, 'publicContact']);
 $router->get('/admin/support-settings', [SupportController::class, 'adminIndex'], $auth + ['role' => ['super_admin']]);
 $router->put('/admin/support-settings', [SupportController::class, 'adminUpdate'], $auth + ['role' => ['super_admin']]);
@@ -225,56 +225,15 @@ $router->post('/security/challenge', [SecurityEvidenceController::class, 'challe
 $router->post('/security/evidence', [SecurityEvidenceController::class, 'submit'], $auth);
 $router->post('/security/device-keys/{id}/revoke', [SecurityEvidenceController::class, 'revokeKey'], $auth);
 
-// ---- Video (VdoCipher) — RETIRED -------------------------------------------
-// VdoCipher is no longer an active provider: YouTube is the only supported video
-// source, and both clients (mobile + portal) have had their upload/playback UIs
-// removed. Every endpoint that used to mint playback or upload tokens, accept
-// chunks, import library assets, attach an asset to a lesson, reconcile the remote
-// library or report VdoCipher diagnostics now answers a deliberate, documented
-// 410 `video_provider_retired` — it cannot mint a token, touch a lesson or contact
-// the provider. Old `video_assets` rows, lesson metadata and course relationships
-// are preserved untouched.
-$videoRetired = static function (): array {
-    throw new ApiException(
-        410,
-        'Video provider retired: YouTube is the only supported video source.',
-        ['video_provider_retired']
-    );
-};
-
-$router->post('/video/otp', $videoRetired, $auth);
-$router->post('/video/offline-authorize', $videoRetired, $auth);
-$router->post('/video/upload-init', $videoRetired, $auth);
-$router->post('/video/upload-status', $videoRetired, $auth);
-$router->post('/video/delete', $videoRetired, $auth);
-$router->post('/video/cancel-upload', $videoRetired, $auth + ['role' => ['doctor', 'admin', 'super_admin']]);
-$router->post('/video/assets', $videoRetired, $auth);
-$router->post('/video/import', $videoRetired, $auth + ['role' => ['doctor', 'admin', 'super_admin'], 'staff_permission' => 'upload_videos']);
-$router->post('/video/attach-lesson', $videoRetired, $auth + ['role' => ['doctor', 'admin', 'super_admin'], 'staff_permission' => 'upload_videos']);
-$router->post('/video/assets/delete', $videoRetired, $auth + ['role' => ['doctor', 'admin', 'super_admin']]);
-// The provider webhook is retired too: accepting it would keep VdoCipher state live.
-$router->post('/video/webhook', $videoRetired);
-$router->post('/video/chunk', $videoRetired, $auth);
-$router->post('/video/assemble', $videoRetired, $auth + ['role' => ['doctor', 'admin', 'super_admin'], 'staff_permission' => 'upload_videos']);
-$router->post('/video/health-scan', $videoRetired, $auth + ['role' => ['admin', 'super_admin'], 'permission' => 'manage_courses']);
-$router->get('/video/vdocipher-status', $videoRetired, $auth + ['role' => ['super_admin']]);
-
 // ---- Video Provider Control Center (Super Admin) ----------------------------
-// Global availability + per-doctor three-state overrides over the REAL
-// providers (plyr, vdocipher). Writes audited (video_provider_global_updated /
-// video_provider_doctor_override_updated); reads expose only policy state.
+// Global availability + per-doctor three-state overrides over the provider policy
+// (YouTube/Plyr is the only supported source; retired keys stay readable so
+// historical rows remain valid and auditable). Writes audited; reads expose only
+// policy state.
 $router->get('/video-providers', [VideoProviderController::class, 'index'], $auth + ['role' => ['super_admin']]);
 $router->put('/video-providers/{key}/global', [VideoProviderController::class, 'setGlobal'], $auth + ['role' => ['super_admin']]);
 $router->get('/video-providers/teachers/{id}', [VideoProviderController::class, 'teacher'], $auth + ['role' => ['super_admin']]);
 $router->put('/video-providers/teachers/{id}', [VideoProviderController::class, 'setTeacher'], $auth + ['role' => ['super_admin']]);
-$router->post('/video/upload-patch', $videoRetired, $auth + ['role' => ['super_admin']]);
-$router->post('/video/orphan-cleanup', $videoRetired, $auth + ['role' => ['admin', 'super_admin'], 'permission' => 'manage_courses']);
-// VdoCipher ↔ Video Library reconciliation (paginated remote listing →
-// missing/duplicate repair). Admin: whole platform; Doctor: their own library
-// (scope clamped server-side) — doctors must be able to reconcile their own
-// library against VdoCipher without a Super Admin round-trip.
-$router->post('/video/sync-library', $videoRetired, $auth + ['role' => ['doctor', 'admin', 'super_admin']]);
-$router->post('/lessons/{id}/delete', [CourseController::class, 'deleteLesson'], $auth + ['role' => ['doctor', 'admin', 'super_admin'], 'staff_permission' => 'manage_lessons']);
 
 // ---- Integrity (Play Integrity / App Integrity) -----------------------------
 $router->post('/integrity/play', [IntegrityController::class, 'playIntegrity'], $auth);

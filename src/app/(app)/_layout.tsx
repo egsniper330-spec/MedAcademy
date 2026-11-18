@@ -16,7 +16,6 @@ import { ensureFeatureFlagsFresh } from '@/lib/featureFlags';
 import { isExpectedMaintenanceError } from '@/lib/maintenanceStateModel';
 import { isStaffConsoleRole, setRoleLocaleLock, STAFF_CONSOLE_LOCALE } from '@/lib/i18n';
 import { maintenanceEpoch } from '@/components/MaintenanceGate';
-import { UploadFAB } from '@/components/VideoUploadQueue';
 import { useSecurity } from '@/lib/SecurityContext';
 import { useDeviceHeartbeat } from '@/lib/deviceHeartbeat';
 import { markPerf } from '@/lib/perfTimeline';
@@ -517,7 +516,6 @@ export default function AppLayout() {
       {/* Upload queue FAB — only mounted for roles that can upload videos.
           Lives here (not root layout) so it never appears on auth/login screens,
           and persists across course-builder & lesson-editor Stack pushes. */}
-      {canUpload && <UploadFAB />}
       {/* ── Central security gate (ALL mandatory blocks) ────────────────────
           Rendered ABOVE the entire authenticated Stack + FAB whenever a
           blocking threat is live: VPN, Developer Options, ADB, attached

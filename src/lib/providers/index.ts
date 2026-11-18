@@ -10,13 +10,14 @@
  *   2. Replace the register call below — zero other changes needed.
  */
 
-// ── Video Provider (existing registry) ───────────────────────────────────────
-import { registerProvider as registerVideoLegacy, getProvider, getDefaultProvider } from '../videoProvider';
-import { medAcademyProvider } from './medacademy';
+// ── Video providers ───────────────────────────────────────────────────────────
+// No video provider is registered: playback is YouTube/Plyr-only since the
+// VdoCipher retirement (commit 269c806). `src/lib/videoProvider.ts` is kept as a
+// types-only contract; nothing may register a provider that calls a VdoCipher
+// endpoint again.
 
 // ── Master Registry ───────────────────────────────────────────────────────────
 import {
-  registerVideoProvider,
   registerStorageProvider,
   registerNotificationProvider,
   registerEmailProvider,
@@ -45,10 +46,6 @@ import {
 
 // ── Registration ──────────────────────────────────────────────────────────────
 
-// Video — dual-register: legacy video registry + master registry
-registerVideoLegacy(medAcademyProvider);
-registerVideoProvider(medAcademyProvider as any);
-
 // Active providers (current implementations)
 registerStorageProvider(backendStorageProvider);
 registerNotificationProvider(expoNotificationProvider);
@@ -71,5 +68,4 @@ registerAiProvider(stubAiProvider);
 // registerPaymentProvider(paymobProvider);
 // registerAiProvider(openAiProvider);
 
-export { getProvider, getDefaultProvider };
 export { providers, checkAllProviderHealth, listRegisteredProviders } from './registry';

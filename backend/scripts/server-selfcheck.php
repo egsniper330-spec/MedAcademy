@@ -52,7 +52,13 @@ $envPath = MEDACADEMY_BASE . '/.env';
 $add('.env file present', is_file($envPath), is_file($envPath) ? 'found' : 'missing — copy .env.example to .env');
 $add('APP_URL set', Config::string('APP_URL') !== '', Config::string('APP_URL', '') !== '' ? 'configured' : 'unset');
 $add('JWT_SECRET configured', Config::string('JWT_SECRET') !== '' && !str_starts_with(Config::string('JWT_SECRET'), 'CHANGE_ME'), Config::string('JWT_SECRET') !== '' ? 'length ' . strlen(Config::string('JWT_SECRET')) : 'unset');
-$add('VDOCIPHER_API_SECRET configured', Config::string('VDOCIPHER_API_SECRET') !== '' && !str_starts_with(Config::string('VDOCIPHER_API_SECRET'), 'CHANGE_ME'), Config::string('VDOCIPHER_API_SECRET') !== '' ? 'length ' . strlen(Config::string('VDOCIPHER_API_SECRET')) : 'unset');
+// VdoCipher was retired (commit 269c806): the API has no video-provider secret
+// and must not require one. Assert the retirement from the live route file so a
+// stale upload of the old routes/api.php is caught by the self-check.
+$routesSrc = (string) @file_get_contents(MEDACADEMY_BASE . '/routes/api.php');
+$retiredPatterns = ["'/video/otp'", "'/video/upload-init'", "'/video/upload-status'", "'/video/delete'", "'/video/assets'"];
+$retiredHits = array_values(array_filter($retiredPatterns, static fn($p) => str_contains($routesSrc, $p)));
+$add('VdoCipher /video/* routes removed', $routesSrc !== '' && $retiredHits === [], $retiredHits === [] ? 'no retired route registered' : 'still registered: ' . implode(', ', $retiredHits));
 
 // --- Database config values (safe diagnostics) ---------------------------------
 $dbHost = Config::string('DB_HOST', 'localhost');

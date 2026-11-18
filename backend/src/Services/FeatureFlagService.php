@@ -168,7 +168,7 @@ final class FeatureFlagService
         ],
         'video_library_sync' => [
             'label'       => 'Video Library Sync',
-            'description' => 'Super Admin reconciliation of the Video Library with VdoCipher (remotely deleted / duplicate repair). Enforced on POST /video/sync-library. A disabled flag blocks new syncs only — it never marks anything deleted.',
+            'description' => 'RETIRED. The VdoCipher video provider and its /video/* routes were removed from the API; YouTube is the only supported video source. The flag key is kept so existing admin rows and audit history stay valid, and it no longer guards any live endpoint.',
             'category'    => 'video',
             'default'     => true,
             'superadmin_exempt' => true,

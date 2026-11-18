@@ -35,28 +35,15 @@ import {
   updateLesson, updateMaterialPermission,
   uploadLessonMaterial, replaceLessonMaterialFile,
   discardUploadedMaterialObject,
-  getLessonVideoState, getVdoCipherVideoStatus, markLessonVideoMissing,
+  getLessonVideoState, markLessonVideoMissing,
   getMyProviderPermissions,
   type LessonBuilderPayload, type DownloadPermission, type TeacherProviderPermission,
 } from '@/lib/api';
 import { validateMaterialFile } from '@/lib/lessonMaterials';
 import { isYoutubeReference } from '@/lib/publishValidation';
-import {
-  attachAssetToLesson, getVideoAssetUsage,
-  type VideoAsset,
-} from '@/lib/videoLibraryApi';
-import { VideoLibraryPicker } from '@/components/VideoLibraryPicker';
-import { VideoReplaceSheet } from '@/components/VideoReplaceSheet';
 import { isProviderDisabledError, describeProviderError } from '@/lib/videoProviderPolicy';
 import { FeatureUnavailableState } from '@/components/ScreenState';
-import { useUploadQueueStore } from '@/lib/uploadQueueStore';import {
-  createUploadRecord, checkDuplicateVideo, analyzeFile, clearLessonVideoRef,
-  type FileAnalysis,
-} from '@/lib/videoUploadEngine';
-import { useVideoUploader } from '@/lib/useVideoUploader';
-import { validateVideoFile, resolveUploadMime } from '@/lib/videoFormats';
-import { LargeFileWarning } from '@/components/LargeFileWarning';
-import { VideoThumbnailCard } from '@/components/VideoThumbnailCard';
+
 import { useTranslation } from '@/lib/i18n';
 import { MaterialUploadProgress } from '@/components/MaterialUploadProgress';
 import {
@@ -128,16 +115,7 @@ const PERMISSION_OPTIONS: { value: DownloadPermission; labelKey: string; icon: a
   { value: 'disabled',     labelKey: 'lessonEditor.permission.disabled',    icon: Layers,   color: '#DC2626' },
 ];
 
-/** Video source options shown to the doctor. */
-/**
- * Kill switch for the retired VdoCipher upload path.
- *
- * Declared as a widened `boolean` (not the literal `false`) on purpose: with a literal,
- * TypeScript treats the enclosing `&&` as unreachable and loses the `videoType` narrowing
- * the block's own guards rely on. As a widened boolean the code is analysable but never
- * renders, so no upload control exists while the engine is still imported.
- */
-const VDOCIPHER_UPLOAD_ENABLED: boolean = false;
+
 
 const VIDEO_TYPES: { value: VideoType; labelKey: string; icon: any; color: string }[] = [
   // VdoCipher is retired: its source button, upload flow and player are gone. A lesson
@@ -208,24 +186,7 @@ export default function LessonEditor() {
   } | null>(null);
   /** Aborts ONLY the in-flight material transfer the doctor started. */
   const materialAbortRef = useRef<AbortController | null>(null);
-  const [duplicateInfo, setDuplicateInfo] = useState<{ fileName: string; existingLesson?: string } | null>(null);
-  const [pendingFile, setPendingFile] = useState<DocumentPicker.DocumentPickerAsset | null>(null);
-  const [fileAnalysis, setFileAnalysis] = useState<FileAnalysis | null>(null);
-  const [showLargeFileWarning, setShowLargeFileWarning] = useState(false);
-  const [pendingReplaceOldPath, setPendingReplaceOldPath] = useState<string | null>(null);
-  const [videoThumbnailUrl, setVideoThumbnailUrl] = useState<string | null>(null);
-  const [autoThumbnailUrl, setAutoThumbnailUrl] = useState<string | null>(null);
-  const [currentUploadId, setCurrentUploadId] = useState<string | null>(null);
-  const { addTask, setQueueVisible, tasks } = useUploadQueueStore();
-  const { cancelUpload, retryProcessing, deleteVideo } = useVideoUploader();
 
-  // Upload-complete dialog
-  const [showUploadCompleteDialog, setShowUploadCompleteDialog] = useState(false);
-  const [completedTaskSnapshot, setCompletedTaskSnapshot] = useState<any>(null);
-  const [showDeleteVideoDialog, setShowDeleteVideoDialog] = useState(false);
-  const [videoMissing, setVideoMissing] = useState(false);
-  const [auditingVideo, setAuditingVideo] = useState(false);
-  const prevTasksRef = useRef<typeof tasks>([]);
 
   // Lesson metadata
   const [lesson, setLesson] = useState<any>(null);
@@ -267,9 +228,7 @@ export default function LessonEditor() {
   //  Effective provider availability for THIS account — the exact mirror of
   //  VideoProviderPolicyService. Hoisted here (previously computed inline in
   //  the picker) so the video entry area can render the same decision.
-  const vdoCipherPerm = providerPerms.find(p => p.provider_key === 'vdocipher');
   const plyrPerm      = providerPerms.find(p => p.provider_key === 'plyr');
-  const vdoCipherBlocked = vdoCipherPerm ? !vdoCipherPerm.final_enabled : false;
   const plyrBlocked      = plyrPerm ? !plyrPerm.final_enabled : false;
   const providerBlockedMsg = (perm: TeacherProviderPermission | undefined, name: string) =>
     perm && !perm.global_enabled
@@ -282,11 +241,8 @@ export default function LessonEditor() {
 
   // ── Video Library state ───────────────────────────────────────────────────
   // Picker shown when no video is linked yet ("Choose From Library")
-  const [showLibraryPicker, setShowLibraryPicker] = useState(false);
   // Replace sheet shown when a video is already linked ("Replace")
-  const [showReplaceSheet, setShowReplaceSheet] = useState(false);
   // How many lessons share the current video_asset_id (for replace-scope prompt)
-  const [sharedLessonCount, setSharedLessonCount] = useState(0);
 
   // Auto-save timer
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -328,8 +284,6 @@ export default function LessonEditor() {
         || (isYoutubeReference(data.video_id) ? (extractYouTubeId(data.video_id ?? '') || data.video_id) : '');
       setYoutubeVideoId(ytId);
       setYoutubeUrlInput(ytId ? `https://youtu.be/${ytId}` : '');
-      setVideoThumbnailUrl(data.video_thumbnail_url ?? null);
-      setAutoThumbnailUrl(data.video_thumbnail_url ?? null);
       setIsPreview(data.is_preview ?? false);
       setDownloadEnabled(data.download_enabled ?? true);
       setCommentsEnabled(data.comments_enabled ?? true);
@@ -356,49 +310,6 @@ export default function LessonEditor() {
     })();
   }, [profile]);
 
-  // ── Consistency audit: verify provider_video_id exists in VdoCipher ──────
-  // Runs whenever the lesson loads and has video_status='ready' + a video_id.
-  // If VdoCipher reports the asset is missing, marks the lesson 'video_missing'
-  // so the doctor sees a clear "Re-upload" prompt instead of a broken player.
-  useEffect(() => {
-    if (!lesson || !id) return;
-    if (lesson.video_status !== 'ready' && lesson.video_status !== 'video_missing') return;
-    if (!lesson.video_id) return;
-    // Skip if there's already an active upload for this lesson
-    const hasActiveTask = tasks.some(
-      (t) => t.lessonId === id && !['ready', 'canceled', 'failed', 'timeout'].includes(t.status),
-    );
-    if (hasActiveTask) return;
-
-    (async () => {
-      setAuditingVideo(true);
-      try {
-        const result = await getVdoCipherVideoStatus(lesson.video_id);
-        if (result?.status === 'failed' || result?.error) {
-          // Asset is confirmed gone on VdoCipher side
-          console.warn('[consistencyAudit] VdoCipher asset missing for lesson', {
-            lessonId: id, videoId: lesson.video_id, result,
-          });
-          await markLessonVideoMissing(id);
-          setVideoMissing(true);
-          setVideoId('');
-        } else {
-          // Asset exists — clear any previous missing flag
-          if (lesson.video_status === 'video_missing') {
-            // Was previously marked missing but is now found — refresh lesson
-            await loadLesson();
-          }
-          setVideoMissing(false);
-        }
-      } catch (e) {
-        // Network error — don't mark missing; surface silently
-        console.warn('[consistencyAudit] check failed (non-fatal):', e);
-      } finally {
-        setAuditingVideo(false);
-      }
-    })();
-  }, [lesson?.id, lesson?.video_status, lesson?.video_id]);  // eslint-disable-line react-hooks/exhaustive-deps
-
   // Trigger auto-save on field changes
   useEffect(() => {
     if (!lesson) return;
@@ -420,162 +331,7 @@ export default function LessonEditor() {
   }, [title, description, notes, status, videoType, videoId, videoTitle, videoPlaybackId,
     videoThumbnail, youtubeVideoId, isPreview, downloadEnabled, commentsEnabled, visible, scheduledAt]);
 
-  // ── Auto-refresh + upload-complete dialog when this lesson's task becomes ready
-  useEffect(() => {
-    const prev = prevTasksRef.current;
-    prevTasksRef.current = tasks;
-    const cur  = tasks.find(t => t.lessonId === id);
-    const old  = prev.find(t => t.lessonId === id);
-    if (cur?.status === 'ready' && old?.status !== 'ready') {
-      loadLesson();
-      setCompletedTaskSnapshot({ ...cur });
-      setShowUploadCompleteDialog(true);
-    }
-  }, [tasks, id, loadLesson]);
-
-  // ── Queue-based video upload (MedAcademy Video type)
-  const handleUploadVideo = async (forceFile?: DocumentPicker.DocumentPickerAsset, isReplace = false) => {
-    try {
-      let file = forceFile;
-      if (!file) {
-        const result = await DocumentPicker.getDocumentAsync({ type: ['video/*'], multiple: false });
-        if (result.canceled || !result.assets?.[0]) return;
-        file = result.assets[0];
-      }
-      if (!lesson) return;
-
-      // ── Format validation (MIME-first, extension fallback) ─────────────────
-      const validation = validateVideoFile(
-        file.name,
-        file.mimeType,
-        file.size ?? 0,
-      );
-      if (!validation.ok) {
-        const e = validation.error!;
-        console.warn('[LessonEditor] video validation failed', {
-          fileName: e.fileName,
-          detectedExtension: e.detectedExtension,
-          detectedMime: e.detectedMime,
-          resolvedMime: e.resolvedMime,
-          fileSize: e.fileSize,
-          code: e.code,
-        });
-        showToast({ type: 'error', message: e.message });
-        return;
-      }
-
-      // Pre-upload file analysis — warn for large files
-      const analysis = analyzeFile(file.size ?? 0, file.name);
-      if (analysis.isLarge) {
-        setFileAnalysis(analysis);
-        setPendingFile(file);
-        setPendingReplaceOldPath(isReplace ? (lesson.video_id ?? null) : null);
-        setShowLargeFileWarning(true);
-        return;
-      }
-
-      const courseId = lesson.section?.course_id ?? lesson.course_id;
-
-      // Duplicate detection (skip for explicit replacement)
-      if (!isReplace) {
-        const dupCheck = await checkDuplicateVideo(courseId, file.name, file.size ?? 0);
-        if (dupCheck.isDuplicate) {
-          setDuplicateInfo({ fileName: file.name, existingLesson: dupCheck.existingLessonTitle });
-          setPendingFile(file);
-          return;
-        }
-      }
-
-      await enqueueVideoUpload(file, courseId, isReplace ? (lesson.video_id ?? undefined) : undefined);
-    } catch (e) {
-      showToast({ type: 'error', message: friendlyError(e, t('lessonEditor.queueFailed')) });
-    }
-  };
-
-  const handleReplaceVideo = () => handleUploadVideo(undefined, true);
-
   // ── Attach a library asset to this lesson (no upload needed) ─────────────
-  const handleAttachLibraryAsset = async (asset: VideoAsset) => {
-    if (!lesson) return;
-    try {
-      await attachAssetToLesson(lesson.id, asset);
-      await loadLesson();
-      showToast({ type: 'success', message: t('lessonEditor.assetLinked', { title: asset.title || t('cb.lessonType.video') }) });
-    } catch (e) {
-      showToast({ type: 'error', message: friendlyError(e, t('lessonEditor.linkFailed')) });
-    }
-  };
-
-  // ── Open replace sheet — pre-load shared lesson count ────────────────────
-  const handleOpenReplaceSheet = async () => {
-    if (lesson?.video_asset_id) {
-      try {
-        const usages = await getVideoAssetUsage(lesson.video_asset_id);
-        setSharedLessonCount(usages.length);
-      } catch (_) {
-        setSharedLessonCount(0);
-      }
-    } else {
-      setSharedLessonCount(0);
-    }
-    setShowReplaceSheet(true);
-  };
-
-  const enqueueVideoUpload = async (
-    file: DocumentPicker.DocumentPickerAsset,
-    courseId: string,
-    oldVdoCipherVideoId?: string,   // VdoCipher ID of the video being replaced
-  ) => {
-    setDuplicateInfo(null);
-    setPendingFile(null);
-    setShowLargeFileWarning(false);
-    setFileAnalysis(null);
-    const taskId = randomUUID();
-    const task = {
-      id: taskId,
-      ownerUserId: profile?.id,
-      lessonId: lesson!.id,
-      courseId,
-      doctorId: profile?.id,
-      fileUri: file.uri,
-      fileName: file.name,
-      fileSize: file.size ?? 0,
-      mimeType: resolveUploadMime(file.name, file.mimeType),
-      status: 'waiting' as const,
-      progress: 0,
-      bytesUploaded: 0,
-      speedBps: 0,
-      etaSeconds: 0,
-      retryCount: 0,
-      createdAt: Date.now(),
-      isReplacement:      !!oldVdoCipherVideoId,
-      oldVdoCipherVideoId: oldVdoCipherVideoId,
-    };
-    await createUploadRecord(task);
-    addTask(task);
-    setCurrentUploadId(taskId);
-    setQueueVisible(true);
-    showToast({ type: 'success', message: t('lessonEditor.queuedFile', { name: file.name }) });
-  };
-
-  // ── Delete uploaded video with confirmation ───────────────────────────────
-  const handleDeleteVideo = async () => {
-    setShowDeleteVideoDialog(false);
-    if (!lesson) return;
-    try {
-      // VdoCipher asset management is admin-only; only clear the lesson ref here.
-      await clearLessonVideoRef(lesson.id);
-      // Also cancel any in-flight upload task for this lesson
-      const activeTask = tasks.find(t => t.lessonId === lesson.id);
-      if (activeTask) await cancelUpload(activeTask.id);
-      // Refresh lesson
-      await loadLesson();
-      showToast({ type: 'success', message: t('lessonEditor.videoDeleted') });
-    } catch (e) {
-      showToast({ type: 'error', message: friendlyError(e, t('lessonEditor.deleteFailed')) });
-    }
-  };
-
   // ── Material transfer (progress + cancellation) ──────────────────────────
   /**
    * Runs one material transfer and reports byte progress.
@@ -825,16 +581,6 @@ export default function LessonEditor() {
     setSaving(false);
   };
 
-  // Derive active task for this lesson (any non-terminal status)
-  const activeTask = tasks.find(
-    t => t.lessonId === id &&
-      !['ready', 'canceled', 'failed'].includes(t.status),
-  );
-  // Timed-out task for this lesson — may still have VdoCipher asset
-  const timedOutTask = tasks.find(
-    t => t.lessonId === id && t.status === 'timeout',
-  );
-
   if (loading) return (        <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: c.base }}>
 
       <ActivityIndicator color={c.primary} size="large" />
@@ -844,90 +590,6 @@ export default function LessonEditor() {
   return (
     <KeyboardAvoidingView style={{ flex: 1, backgroundColor: c.base, direction: isRTL ? 'rtl' : 'ltr' }}
       behavior={undefined} /* keyboard: native inset only */>
-
-      {/* ══ Upload-Complete Dialog ══════════════════════════════════════════ */}
-      <AppModal
-        visible={showUploadCompleteDialog}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setShowUploadCompleteDialog(false)}>
-        <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
-          <Pressable onPress={e => e.stopPropagation()}>
-            <View style={[neuFlatStyle(isDark), { width: Math.min(screenWidth - 40, 400), borderRadius: 24, padding: 24, gap: 20, alignItems: 'center' }]}>
-              {/* Success icon */}
-              <View style={{ width: 64, height: 64, borderRadius: 32, backgroundColor: '#16A34A18', alignItems: 'center', justifyContent: 'center' }}>
-                <CheckCircle size={36} color="#16A34A" />
-              </View>
-              <Text style={{ fontSize: 18, fontWeight: '800', color: c.text, textAlign: 'center' }}>
-                {t('lessonEditor.uploadComplete')}
-              </Text>
-
-              {/* Thumbnail */}
-              {completedTaskSnapshot?.thumbnailUrl ? (
-                <Image
-                  source={{ uri: completedTaskSnapshot.thumbnailUrl }}
-                  style={{ width: '100%', height: 160, borderRadius: 14 }}
-                  contentFit="cover"
-                />
-              ) : (
-                <View style={[neuPressedStyle(isDark), { width: '100%', height: 120, borderRadius: 14, alignItems: 'center', justifyContent: 'center', gap: 8 }]}>
-                  <Video size={32} color={c.primary} opacity={0.4} />
-                  <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.4) }}>{t('lessonEditor.generatingThumbnail')}</Text>
-                </View>
-              )}
-
-              {/* Duration + status row */}
-              <View style={{ flexDirection: 'row', direction: isRTL ? 'rtl' : 'ltr', gap: 12, width: '100%' }}>
-                {lesson?.video_duration_seconds > 0 && (
-                  <View style={[neuPressedStyle(isDark), { flex: 1, padding: 12, borderRadius: 14, alignItems: 'center', gap: 4 }]}>
-                    <Clock size={16} color={c.primary} />
-                    <Text style={{ fontSize: 15, fontWeight: '800', color: c.text }}>
-                      {formatDuration(lesson.video_duration_seconds, locale)}
-                    </Text>
-                    <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.45) }}>{t('lessonEditor.duration')}</Text>
-                  </View>
-                )}
-                <View style={[neuPressedStyle(isDark), { flex: 1, padding: 12, borderRadius: 14, alignItems: 'center', gap: 4 }]}>
-                  <CheckCircle size={16} color="#16A34A" />
-                  <Text style={{ fontSize: 13, fontWeight: '700', color: '#16A34A' }}>{t('lessonEditor.ready')}</Text>
-                  <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.45) }}>{t('common.status')}</Text>
-                </View>
-              </View>
-
-              {/* Actions */}
-              <View style={{ flexDirection: 'row', direction: isRTL ? 'rtl' : 'ltr', gap: 12, width: '100%' }}>
-                <Pressable
-                  onPress={() => { setShowUploadCompleteDialog(false); handleUploadVideo(); }}
-                  style={[neuFlatStyle(isDark), { flex: 1, minWidth: 100, padding: 14, borderRadius: 14, alignItems: 'center' }]}>
-                  <Text style={{ fontSize: 14, fontWeight: '700', color: c.primary }} numberOfLines={1}>{t('lessonEditor.uploadAnother')}</Text>
-                </Pressable>
-                <Pressable
-                  onPress={() => setShowUploadCompleteDialog(false)}
-                  style={{ flex: 1, minWidth: 100, padding: 14, borderRadius: 14, alignItems: 'center', backgroundColor: c.primary }}>
-                  <Text style={{ fontSize: 14, fontWeight: '700', color: '#fff' }} numberOfLines={1}>{t('common.done')}</Text>
-                </Pressable>
-              </View>
-            </View>
-          </Pressable>
-        </View>
-      </AppModal>
-      {/* ── Video Library Picker (no-video flow: "Choose From Library") ── */}
-      <VideoLibraryPicker
-        visible={showLibraryPicker}
-        onClose={() => setShowLibraryPicker(false)}
-        onSelect={handleAttachLibraryAsset}
-      />
-
-      {/* ── Replace Sheet (linked-video flow: "Replace" button) ── */}
-      <VideoReplaceSheet
-        visible={showReplaceSheet}
-        lessonId={id ?? ''}
-        currentAssetId={lesson?.video_asset_id ?? null}
-        sharedLessonCount={sharedLessonCount}
-        onClose={() => setShowReplaceSheet(false)}
-        onUploadNew={() => { setShowReplaceSheet(false); handleUploadVideo(undefined, true); }}
-        onAssetAttached={async () => { setShowReplaceSheet(false); await loadLesson(); }}
-      />
 
       {/* ── Header — spacing from headerTokens (EDGE_PAD=4, BREATHING=8) ── */}
       <View style={{ paddingTop: layout.headerTop, paddingStart: isRTL ? layout.headerRight : layout.headerLeft, paddingEnd: isRTL ? layout.headerLeft : layout.headerRight, paddingBottom: 12, flexDirection: 'row', direction: isRTL ? 'rtl' : 'ltr', alignItems: 'center', gap: 12 }}>
@@ -995,442 +657,6 @@ export default function LessonEditor() {
       {tab === 'video' && (
         <ScrollView automaticallyAdjustKeyboardInsets={process.env.EXPO_OS === 'ios'} keyboardShouldPersistTaps="handled"
           contentContainerStyle={{ padding: layout.screenPx, gap: 16 }}>
-
-          {/* ── Live upload / processing status card ─────────────────────── */}
-          {activeTask && (
-            <NeuCard style={{ padding: 16, gap: 12 }}>
-              <View style={{ flexDirection: 'row', direction: isRTL ? 'rtl' : 'ltr', alignItems: 'center', gap: 12 }}>
-                {activeTask.status === 'failed' ? (
-                  <View style={{ width: 36, height: 36, borderRadius: 10, backgroundColor: '#DC262618', alignItems: 'center', justifyContent: 'center' }}>
-                    <AlertCircle size={18} color="#DC2626" />
-                  </View>
-                ) : (
-                  <View style={{ width: 36, height: 36, borderRadius: 10, backgroundColor: `${c.primary}18`, alignItems: 'center', justifyContent: 'center' }}>
-                    <ActivityIndicator size="small" color={c.primary} />
-                  </View>
-                )}
-                <View style={{ flex: 1 }}>
-                  <Text style={{ fontSize: 14, fontWeight: '700', color: activeTask.status === 'failed' ? '#DC2626' : c.text }}>
-                    {uploadStatusLabel(activeTask.status, t)}
-                  </Text>
-                  {activeTask.status === 'uploading' && activeTask.progress > 0 && (
-                    <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.5), marginTop: 2 }}>
-                      {activeTask.progress.toFixed(0)}% · {activeTask.fileName}
-                    </Text>
-                  )}
-                  {activeTask.status === 'failed' && activeTask.errorMessage && (
-                    <Text style={{ fontSize: 12, color: '#DC2626', opacity: 0.7, marginTop: 2 }} numberOfLines={2}>
-                      {activeTask.errorMessage}
-                    </Text>
-                  )}
-                </View>
-              </View>
-              {/* Progress bar — only during uploading */}
-              {activeTask.status === 'uploading' && (
-                <View style={{ height: 4, borderRadius: 2, backgroundColor: `${c.primary}20`, overflow: 'hidden' }}>
-                  <View style={{ height: '100%', borderRadius: 2, backgroundColor: c.primary, width: `${activeTask.progress}%` }} />
-                </View>
-              )}
-              {/* Stage dots */}
-              <View style={{ flexDirection: 'row', direction: isRTL ? 'rtl' : 'ltr', gap: 6, alignItems: 'center' }}>
-                {(['waiting', 'uploading', 'processing', 'verifying'] as const).map((stage, i) => {
-                  const stageOrder = ['waiting', 'uploading', 'processing', 'verifying'];
-                  const curIdx = stageOrder.indexOf(activeTask.status);
-                  const done = i < curIdx;
-                  const active = i === curIdx;
-                  return (
-                    <View key={stage} style={{ flexDirection: 'row', direction: isRTL ? 'rtl' : 'ltr', alignItems: 'center', gap: 4 }}>
-                      {i > 0 && <View style={{ width: 16, height: 1.5, borderRadius: 1, backgroundColor: done ? c.primary : `${c.text}20` }} />}
-                      <View style={{
-                        width: active ? 8 : 6, height: active ? 8 : 6, borderRadius: 4,
-                        backgroundColor: done ? c.primary : active ? c.primary : `${c.text}25`,
-                        opacity: done ? 0.7 : active ? 1 : 0.4,
-                      }} />
-                    </View>
-                  );
-                })}
-                <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.4), marginStart: 4 }}>
-                  {uploadStatusLabel(activeTask.status, t)}
-                </Text>
-              </View>
-            </NeuCard>
-          )}
-
-          {/* ── PUBLICATION STATE — leads the form ────────────────────────
-              This control used to sit below Lesson Notes, at the very bottom of
-              the Info tab, where doctors routinely overlooked it. It is the
-              decision that gates student visibility, so it now appears first.
-              Same five values and the same save payload — placement only. */}
-          <Field label={t('lessonEditor.lessonStatus')}>
-            <View        style={{ flexDirection: 'row', direction: isRTL ? 'rtl' : 'ltr', flexWrap: 'wrap', gap: 8 }}>
-              {LESSON_STATUSES.map(ls => (
-                <Pressable key={ls.value} onPress={() => setStatus(ls.value)}
-                  style={[
-                    status === ls.value ? neuPressedStyle(isDark) : neuFlatStyle(isDark),
-                    { paddingHorizontal: 14, paddingVertical: 10, borderRadius: 12, flexDirection: 'row', direction: isRTL ? 'rtl' : 'ltr', alignItems: 'center', gap: 6 },
-                  ]}>
-                  <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: ls.color, opacity: status === ls.value ? 1 : 0.4 }} />
-                  <Text style={{ fontSize: 13, fontWeight: '700', color: status === ls.value ? ls.color : c.text, opacity: status === ls.value ? 1 : 0.5 }}>
-                    {t(ls.labelKey)}
-                  </Text>
-                </Pressable>
-              ))}
-            </View>
-
-            {/* Scheduled date — shown only when status=scheduled */}
-            {status === 'scheduled' && (
-              <View style={{ marginTop: 10 }}>
-                <Field label={t('lessonEditor.publishDateTime')}>
-                  <NeuInput
-                    value={scheduledAt}
-                    onChangeText={setScheduledAt}
-                    placeholder={t('lessonEditor.scheduledPlaceholder')}
-                    isDark={isDark} c={c}
-                  />
-                  <Text style={{ fontSize: 11, color: '#3B82F6', opacity: 0.8, marginTop: 2 }}>
-                    {t('lessonEditor.scheduledHelp')}
-                  </Text>
-                </Field>
-              </View>
-            )}
-          </Field>
-
-          {/* Description */}
-          <Field label={t('lessonEditor.description')}>
-            <NeuInput value={description} onChangeText={setDescription}
-              placeholder={t('lessonEditor.descriptionPlaceholder')}
-              isDark={isDark} c={c} multiline style={{ minHeight: 80 }} />
-          </Field>
-
-          {/* Video Source Selector */}
-          <Field label={t('lessonEditor.videoSource')}>
-            {/* Provider availability gate — driven by the server's effective
-                policy (VideoProviderPolicyService via getMyProviderPermissions),
-                which now also answers for doctors (root-cause fix). Disabled
-                providers are hidden from selection; the backend re-enforces
-                every authorization, so hiding is UX, never the enforcement. */}
-            {(() => {
-              const allBlocked = providerPerms.length > 0 && providerPerms.every(p => !p.final_enabled);
-              // vdoCipherBlocked / plyrBlocked / providerBlockedMsg are derived
-              // ONCE in the component body so the video entry area renders the
-              // exact same decision (see providerSaveBlocked).
-              const blockedMsg = providerBlockedMsg;
-              return (
-                <>
-                  {allBlocked && (
-                    <NeuCard style={{ marginBottom: 10, padding: 12, flexDirection: 'row', direction: isRTL ? 'rtl' : 'ltr', alignItems: 'center', gap: 8 }}>
-                      <AlertCircle size={16} color="#D97706" />
-                      <Text style={{ flex: 1, fontSize: 12, color: '#92400E', fontWeight: '600' }}>
-                        {t('lessonEditor.videoDisabled')}
-                      </Text>
-                    </NeuCard>
-                  )}
-                  {/*
-                   * No provider selector.
-                   *
-                   * YouTube is the ONLY video source now, so offering a row of source
-                   * buttons only added a click and a misleading choice: the retired
-                   * VdoCipher button rendered a "uploads disabled" notice (which read as
-                   * an error) and the doctor then had to click YouTube to reach the URL
-                   * field. Exactly one source remains, so the URL field below is shown
-                   * immediately and only a real provider block is reported here.
-                   */}
-                  {plyrBlocked && !allBlocked && (
-                    <Text style={{ marginTop: 6, fontSize: 12, color: '#D97706' }}>
-                      {blockedMsg(plyrPerm, 'YouTube video')}
-                    </Text>
-                  )}
-                </>
-              );
-            })()}
-          </Field>
-
-          {/* The old "uploads have been disabled" notice is gone: it described an
-              internal retirement, not anything the doctor could act on, and it sat above
-              the field they actually needed. Legacy `vdocipher` lessons still open here
-              and the YouTube field is ready for a replacement link. */}
-          {VDOCIPHER_UPLOAD_ENABLED && videoType === 'vdocipher' && (
-            <>
-              {/* Large file warning modal */}
-              <LargeFileWarning
-                visible={showLargeFileWarning}
-                analysis={fileAnalysis}
-                fileName={pendingFile?.name ?? ''}
-                onProceed={async () => {
-                  if (!pendingFile || !lesson) return;
-                  const courseId = lesson.section?.course_id ?? lesson.course_id;
-                  const isReplace = !!pendingReplaceOldPath;
-                  const dupCheck = !isReplace
-                    ? await checkDuplicateVideo(courseId, pendingFile.name, pendingFile.size ?? 0)
-                    : { isDuplicate: false };
-                  if (!isReplace && dupCheck.isDuplicate) {
-                    setShowLargeFileWarning(false);
-                    setDuplicateInfo({ fileName: pendingFile.name, existingLesson: (dupCheck as any).existingLessonTitle });
-                    return;
-                  }
-                  await enqueueVideoUpload(pendingFile, courseId, pendingReplaceOldPath ?? undefined);
-                }}
-                onCancel={() => { setShowLargeFileWarning(false); setPendingFile(null); setFileAnalysis(null); }}
-              />
-
-              {/* Duplicate detection dialog */}
-              {duplicateInfo && (
-                <NeuCard style={[neuFlatStyle(isDark), { borderRadius: 16, padding: 16, gap: 12, borderStartWidth: 3, borderStartColor: '#D97706' }]}>
-                  <Text style={{ fontSize: 14, fontWeight: '700', color: '#D97706' }}>⚠️ {t('lessonEditor.duplicateVideoTitle')}</Text>
-                  <Text style={{ fontSize: 13, color: c.text, opacity: 0.7, lineHeight: 18 }}>
-                    {t('lessonEditor.duplicateVideoBody', { fileName: duplicateInfo.fileName, lesson: duplicateInfo.existingLesson ? t('lessonEditor.duplicateVideoLesson', { lesson: duplicateInfo.existingLesson }) : '' })}
-                  </Text>
-                  <View style={{ flexDirection: 'row', direction: isRTL ? 'rtl' : 'ltr', gap: 10 }}>
-                    <Pressable onPress={() => { setDuplicateInfo(null); setPendingFile(null); }}
-                      style={[neuFlatStyle(isDark), { flex: 1, padding: 11, borderRadius: 12, alignItems: 'center' }]}>
-                      <Text style={{ fontSize: 13, fontWeight: '700', ...mutedTextStyle(c, 0.6) }}>{t('common.cancel')}</Text>
-                    </Pressable>
-                    <Pressable
-                      onPress={async () => {
-                        if (pendingFile) {
-                          const courseId = lesson?.section?.course_id ?? lesson?.course_id;
-                          await enqueueVideoUpload(pendingFile, courseId);
-                        }
-                      }}
-                      style={{ flex: 1, padding: 11, borderRadius: 12, alignItems: 'center', backgroundColor: '#D97706' }}>
-                      <Text style={{ fontSize: 13, fontWeight: '700', color: '#fff' }}>{t('lessonEditor.uploadAnyway')}</Text>
-                    </Pressable>
-                  </View>
-                </NeuCard>
-              )}
-
-              {/* Active upload status card — Cancel button always visible */}
-              {activeTask && activeTask.status !== 'timeout' && (
-                <NeuCard style={[neuFlatStyle(isDark), { borderRadius: 16, padding: 14, gap: 10 }]}>
-                  <View style={{ flexDirection: 'row', direction: isRTL ? 'rtl' : 'ltr', alignItems: 'center', gap: 10 }}>
-                    <View style={{ flex: 1 }}>
-                      <Text style={{ fontSize: 13, fontWeight: '700', color: c.text }}>
-                        {uploadStatusLabel(activeTask.status, t)}
-                      </Text>
-                      {activeTask.status === 'uploading' && (
-                        <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.5), marginTop: 2 }}>
-                          {activeTask.progress}%
-                        </Text>
-                      )}
-                    </View>
-                    <Pressable
-                      onPress={() => cancelUpload(activeTask.id)}
-                      style={{ flexDirection: 'row', direction: isRTL ? 'rtl' : 'ltr', alignItems: 'center', gap: 6,
-                        paddingHorizontal: 12, paddingVertical: 8, borderRadius: 10,
-                        backgroundColor: '#DC262618', borderWidth: 1, borderColor: '#DC262630' }}>
-                      <X size={13} color="#DC2626" />
-                      <Text style={{ fontSize: 12, fontWeight: '700', color: '#DC2626' }}>{t('common.cancel')}</Text>
-                    </Pressable>
-                  </View>
-                  {/* Inline progress bar */}
-                  {['uploading', 'processing', 'encoding', 'generating_streams', 'verifying'].includes(activeTask.status) && (
-                    <View style={{ height: 4, borderRadius: 2, backgroundColor: `${c.text}15` }}>
-                      <View style={{ height: 4, borderRadius: 2, width: `${activeTask.progress}%` as any, backgroundColor: c.primary }} />
-                    </View>
-                  )}
-                </NeuCard>
-              )}
-
-              {/* Timeout card — Retry Processing / Replace / Delete Upload */}
-              {timedOutTask && (
-                <NeuCard style={[neuFlatStyle(isDark), { borderRadius: 16, padding: 16, gap: 12, borderStartWidth: 3, borderStartColor: '#F97316' }]}>
-                  <View style={{ flexDirection: 'row', direction: isRTL ? 'rtl' : 'ltr', alignItems: 'center', gap: 8 }}>
-                    <AlertCircle size={16} color="#F97316" />
-                    <Text style={{ fontSize: 14, fontWeight: '700', color: '#F97316' }}>{t('lessonEditor.processingTimedOut')}</Text>
-                  </View>
-                  <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.6), lineHeight: 17 }}>
-                    {t('lessonEditor.processingTimedOutBody')}
-                    {'\n'}{t('lessonEditor.processingTimedOutActions')}
-                  </Text>
-                  <View style={{ flexDirection: 'row', direction: isRTL ? 'rtl' : 'ltr', gap: 8 }}>
-                    {timedOutTask.vdoCipherVideoId && (
-                      <Pressable
-                        onPress={() => retryProcessing(timedOutTask.id)}
-                        style={{ flex: 1, flexDirection: 'row', direction: isRTL ? 'rtl' : 'ltr', alignItems: 'center', justifyContent: 'center', gap: 6,
-                          paddingVertical: 10, borderRadius: 10,
-                          backgroundColor: '#F9731618', borderWidth: 1, borderColor: '#F9731640' }}>
-                        <RotateCcw size={13} color="#F97316" />
-                        <Text style={{ fontSize: 12, fontWeight: '700', color: '#F97316' }}>{t('common.retry')}</Text>
-                      </Pressable>
-                    )}
-                    <Pressable
-                      onPress={handleReplaceVideo}
-                      style={{ flex: 1, flexDirection: 'row', direction: isRTL ? 'rtl' : 'ltr', alignItems: 'center', justifyContent: 'center', gap: 6,
-                        paddingVertical: 10, borderRadius: 10,
-                        backgroundColor: '#7C3AED18', borderWidth: 1, borderColor: '#7C3AED40' }}>
-                      <RefreshCw size={13} color="#7C3AED" />
-                      <Text style={{ fontSize: 12, fontWeight: '700', color: '#7C3AED' }}>{t('common.replace')}</Text>
-                    </Pressable>
-                    <Pressable
-                      onPress={() => deleteVideo(timedOutTask.id)}
-                      style={{ flex: 1, flexDirection: 'row', direction: isRTL ? 'rtl' : 'ltr', alignItems: 'center', justifyContent: 'center', gap: 6,
-                        paddingVertical: 10, borderRadius: 10,
-                        backgroundColor: '#DC262618', borderWidth: 1, borderColor: '#DC262630' }}>
-                      <Trash2 size={13} color="#DC2626" />
-                      <Text style={{ fontSize: 12, fontWeight: '700', color: '#DC2626' }}>{t('common.delete')}</Text>
-                    </Pressable>
-                  </View>
-                </NeuCard>
-              )}
-
-              {videoId ? (
-                // ── Video Missing card (consistency-audit detected asset gone) ────
-                videoMissing ? (
-                  <NeuCard style={[neuFlatStyle(isDark), { borderRadius: 16, padding: 16, gap: 12,
-                    borderStartWidth: 3, borderStartColor: '#DC2626' }]}>
-                    <View style={{ flexDirection: 'row', direction: isRTL ? 'rtl' : 'ltr', alignItems: 'center', gap: 10 }}>
-                      <View style={{ width: 44, height: 44, borderRadius: 12,
-                        backgroundColor: '#DC262618', alignItems: 'center', justifyContent: 'center' }}>
-                        <ShieldAlert size={22} color="#DC2626" />
-                      </View>
-                      <View style={{ flex: 1 }}>
-                        <Text style={{ fontSize: 14, fontWeight: '800', color: '#DC2626' }}>{t('lessonEditor.videoMissing')}</Text>
-                        <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.55), marginTop: 2 }}>
-                          {t('lessonEditor.videoMissingBody')}
-                        </Text>
-                      </View>
-                    </View>
-                    <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.65), lineHeight: 18 }}>
-                      {t('lessonEditor.videoMissingExplanation')}
-                    </Text>
-                    <Pressable
-                      onPress={() => handleUploadVideo(undefined, false)}
-                      style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
-                        gap: 8, paddingVertical: 12, borderRadius: 12,
-                        backgroundColor: c.primary }}>
-                      <Upload size={16} color="#fff" />
-                      <Text style={{ fontSize: 14, fontWeight: '800', color: '#fff' }}>{t('lessonEditor.reuploadVideo')}</Text>
-                    </Pressable>
-                    {auditingVideo && (
-                      <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.4), textAlign: 'center' }}>
-                        {t('lessonEditor.verifying')}
-                      </Text>
-                    )}
-                  </NeuCard>
-                ) : (
-                // ── Video already linked — Replace + Delete ────────────────────
-                <NeuCard style={[neuPressedStyle(isDark), { padding: layout.screenPx, alignItems: 'center', gap: 10 }]}>
-                  <View style={{ width: 52, height: 52, borderRadius: 26, backgroundColor: `${c.primary}18`, alignItems: 'center', justifyContent: 'center' }}>
-                    <Video size={26} color={c.primary} />
-                  </View>
-                  <Text style={{ fontSize: 14, fontWeight: '700', color: c.text }}>
-                    {videoTitle || t('lessonEditor.videoUploaded')}
-                  </Text>
-                  <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.45), textAlign: 'center' }}>
-                    {t('lessonEditor.securePlayback')}
-                  </Text>
-                  <View style={{ flexDirection: 'row', direction: isRTL ? 'rtl' : 'ltr', gap: 10, marginTop: 4 }}>
-                    <Pressable onPress={handleOpenReplaceSheet}
-                      style={{ flex: 1, paddingVertical: 10, borderRadius: 12,
-                        flexDirection: 'row', direction: isRTL ? 'rtl' : 'ltr', alignItems: 'center', justifyContent: 'center', gap: 8,
-                        backgroundColor: '#7C3AED18', borderWidth: 1.5, borderColor: '#7C3AED40' }}>
-                      <RefreshCw size={14} color="#7C3AED" />
-                      <Text style={{ fontSize: 13, fontWeight: '700', color: '#7C3AED' }}>{t('common.replace')}</Text>
-                    </Pressable>
-                    <Pressable onPress={() => setShowDeleteVideoDialog(true)}
-                      style={{ flex: 1, paddingVertical: 10, borderRadius: 12,
-                        flexDirection: 'row', direction: isRTL ? 'rtl' : 'ltr', alignItems: 'center', justifyContent: 'center', gap: 8,
-                        backgroundColor: '#DC262618', borderWidth: 1.5, borderColor: '#DC262630' }}>
-                      <Trash2 size={14} color="#DC2626" />
-                      <Text style={{ fontSize: 13, fontWeight: '700', color: '#DC2626' }}>{t('common.delete')}</Text>
-                    </Pressable>
-                  </View>
-                  <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.35), textAlign: 'center' }}>
-                    {t('lessonEditor.replaceKeepsProgress')}{'\n'}{t('lessonEditor.replaceRemovesAfterSuccess')}
-                  </Text>
-
-                  {/* Delete confirmation inline dialog */}
-                  {showDeleteVideoDialog && (
-                    <NeuCard style={[neuFlatStyle(isDark), { borderRadius: 14, padding: 14, gap: 10, alignSelf: 'stretch', borderStartWidth: 3, borderStartColor: '#DC2626' }]}>
-                      <Text style={{ fontSize: 13, fontWeight: '700', color: '#DC2626' }}>{t('lessonEditor.deleteVideoTitle')}</Text>
-                      <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.6), lineHeight: 17 }}>
-                        {t('lessonEditor.deleteVideoBody')}
-                      </Text>
-                      <View style={{ flexDirection: 'row', direction: isRTL ? 'rtl' : 'ltr', gap: 8 }}>
-                        <Pressable onPress={() => setShowDeleteVideoDialog(false)}
-                          style={[neuFlatStyle(isDark), { flex: 1, padding: 10, borderRadius: 10, alignItems: 'center' }]}>
-                          <Text style={{ fontSize: 13, fontWeight: '700', ...mutedTextStyle(c, 0.6) }}>{t('common.cancel')}</Text>
-                        </Pressable>
-                        <Pressable onPress={handleDeleteVideo}
-                          style={{ flex: 1, padding: 10, borderRadius: 10, alignItems: 'center', backgroundColor: '#DC2626' }}>
-                          <Text style={{ fontSize: 13, fontWeight: '700', color: '#fff' }}>{t('lessonEditor.yesDelete')}</Text>
-                        </Pressable>
-                      </View>
-                    </NeuCard>
-                  )}
-                </NeuCard>
-                )  // closes: videoMissing ? <missing card> : ( <linked card> )
-              ) : (
-                // No video yet — two options: upload new OR choose from library
-                !activeTask && !timedOutTask && (
-                  <View style={{ gap: 12 }}>
-                    {/* Upload new */}
-                    <Pressable onPress={() => handleUploadVideo()}
-                      style={[neuFlatStyle(isDark), { padding: layout.screenPx, borderRadius: 20, flexDirection: 'row', direction: isRTL ? 'rtl' : 'ltr', alignItems: 'center', gap: 16 }]}>
-                      <View style={{ width: 52, height: 52, borderRadius: 14, backgroundColor: `${c.primary}15`, alignItems: 'center', justifyContent: 'center' }}>
-                        <Upload size={24} color={c.primary} opacity={0.8} />
-                      </View>
-                      <View style={{ flex: 1 }}>
-                        <Text style={{ fontSize: 15, fontWeight: '800', color: c.text }}>{t('lessonEditor.uploadNewVideo')}</Text>
-                        <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.45), marginTop: 3 }}>
-                          {t('lessonEditor.videoFileHint')}
-                        </Text>
-                      </View>
-                    </Pressable>
-
-                    {/* Choose from library */}
-                    <Pressable onPress={() => setShowLibraryPicker(true)}
-                      style={[neuFlatStyle(isDark), { padding: layout.screenPx, borderRadius: 20, flexDirection: 'row', direction: isRTL ? 'rtl' : 'ltr', alignItems: 'center', gap: 16 }]}>
-                      <View style={{ width: 52, height: 52, borderRadius: 14, backgroundColor: `${c.accent}15`, alignItems: 'center', justifyContent: 'center' }}>
-                        <Film size={24} color={c.accent} opacity={0.8} />
-                      </View>
-                      <View style={{ flex: 1 }}>
-                        <Text style={{ fontSize: 15, fontWeight: '800', color: c.text }}>{t('lessonEditor.chooseLibrary')}</Text>
-                        <Text style={{ fontSize: 12, ...mutedTextStyle(c, 0.45), marginTop: 3 }}>
-                          {t('lessonEditor.reuseVideoHint')}
-                        </Text>
-                      </View>
-                    </Pressable>
-                  </View>
-                )
-              )}
-
-              {/* Thumbnail card — shown once video is ready */}
-              {videoThumbnailUrl && lesson?.id && currentUploadId && (
-                <VideoThumbnailCard
-                  thumbnailUrl={videoThumbnailUrl}
-                  autoThumbnailUrl={autoThumbnailUrl}
-                  uploadId={currentUploadId}
-                  lessonId={lesson.id}
-                  courseId={lesson.section?.course_id ?? lesson.course_id}
-                  onThumbnailChange={(url) => setVideoThumbnailUrl(url)}
-                />
-              )}
-
-              {/* Video Title */}
-              {videoId ? (
-                <Field label={t('lessonEditor.videoTitle')}>
-                  <NeuInput value={videoTitle} onChangeText={setVideoTitle} placeholder={t('lessonEditor.videoTitlePlaceholder')} isDark={isDark} c={c} />
-                </Field>
-              ) : null}
-
-              {/* Auto-calculated duration — read-only, set by upload pipeline */}
-              {lesson?.video_duration_seconds > 0 && (
-                <NeuCard style={[neuPressedStyle(isDark), { padding: 14, flexDirection: 'row', direction: isRTL ? 'rtl' : 'ltr', alignItems: 'center', gap: 12 }]}>
-                  <View style={{ width: 36, height: 36, borderRadius: 10, backgroundColor: `${c.primary}18`, alignItems: 'center', justifyContent: 'center' }}>
-                    <Clock size={18} color={c.primary} />
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    <Text style={{ fontSize: 11, ...mutedTextStyle(c, 0.45), fontWeight: '600', textTransform: 'uppercase', letterSpacing: 0.5 }}>{t('lessonEditor.duration')}</Text>
-                    <Text style={{ fontSize: 16, fontWeight: '800', color: c.text, marginTop: 1 }}>
-                      {formatDuration(lesson.video_duration_seconds, locale)}
-                    </Text>
-                  </View>
-                  <Text style={{ fontSize: 11, color: c.primary, opacity: 0.6 }}>{t('lessonEditor.autoDetected')}</Text>
-                </NeuCard>
-              )}
-            </>
-          )}
 
           {/* Coming Soon */}
           {videoType === 'coming_soon' && (

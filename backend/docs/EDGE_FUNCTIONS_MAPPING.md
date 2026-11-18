@@ -44,12 +44,12 @@ All functions are **recreated from the actual source** in
 | `vdocipher-debug-creds` | DEBUG ONLY — do not migrate | — | SKIP (debug) |
 | `vdocipher-delete-video` | Delete VdoCipher video + clear lesson ref | `VideoController::delete` + `POST /video/delete` | PORTED |
 | `vdocipher-orphan-cleanup` | DEBUG ROLLBACK — cleanup disabled | — | SKIP (disabled) |
-| `vdocipher-otp` | OTP playback token + dynamic watermark | `VdoCipherService::otp` + `POST /video/otp` | PORTED |
+| `vdocipher-otp` | OTP playback token + dynamic watermark | — (removed with the VdoCipher retirement, commit 269c806) | RETIRED |
 | `vdocipher-upload-init` | Create video entry + upload credentials | `VdoCipherService::uploadInit` + `POST /video/upload-init` | PORTED |
 | `vdocipher-upload-status` | Poll encoding status | `VdoCipherService::uploadStatus` + `POST /video/upload-status` | PORTED |
 | `verify-play-integrity` | Play Integrity token verification | `SecurityService::verifyPlayIntegrity` (Phase 2 — needs Google creds) | PHASE 2 |
 | `video-assemble-upload` | Assemble chunks from video-chunks bucket | `VideoService::assembleChunks` (Phase 2) | PHASE 2 |
-| `video-daily-health` | Scheduled daily health scan | `scripts/cron-video-health.php` (Phase 2) | PHASE 2 |
+| `video-daily-health` | Scheduled daily health scan | — (script removed with the VdoCipher retirement, commit 269c806) | RETIRED |
 | `video-health-scan` | Video health scan | `HealthController` + `video_health_scans` writes (Phase 2) | PHASE 2 |
 | `video-upload-chunk` | Store a binary chunk (video-chunks bucket) | `StorageController::upload` chunk variant (Phase 2) | PARTIAL |
 
@@ -58,8 +58,9 @@ All functions are **recreated from the actual source** in
 - **Auth/authorization** in every Edge Function (`requireAuth`, `requireRole`)
   is reproduced by `Middleware/AuthMiddleware` (JWT + account status +
   security_version + role allow-list).
-- **Secrets**: `SUPABASE_SERVICE_ROLE_KEY`, `VDOCIPHER_API_SECRET`,
-  `VDOCIPHER_WEBHOOK_SECRET` etc. become PHP environment variables in `.env`
+- **Secrets**: `SUPABASE_SERVICE_ROLE_KEY` etc. became PHP environment variables in
+  `.env`. `VDOCIPHER_API_SECRET` / `VDOCIPHER_WEBHOOK_SECRET` are no longer used at
+  all (VdoCipher retired, commit 269c806); do not set them on new installs.
   — never client-side.
 - **Cron-style Edge Functions** (`trash-cleanup`, `video-daily-health`) become
   cPanel cron jobs invoking PHP CLI scripts (`scripts/`).

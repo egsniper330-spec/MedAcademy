@@ -512,6 +512,14 @@ export function SecurityProvider({ children }: { children: React.ReactNode }) {
       if (__DEV__) console.log('[SecurityContext] protected content stays hidden — window-state containment is live');
       return;
     }
+    // A foreign-window reading holds protected content WITHOUT taking the
+    // app-wide lock (see applyWindowModeReading). A clean verdict must not
+    // uncover a player while the platform still says another window is in
+    // front of us — only a full-screen reading may release it.
+    if (isProhibitedWindowMode(windowModeRef.current)) {
+      if (__DEV__) console.log('[SecurityContext] protected content stays hidden — window mode is still prohibited');
+      return;
+    }
     if (verdictNativeSeqRef.current < nativeSignalSeqRef.current) {
       if (__DEV__) console.log('[SecurityContext] protected content stays hidden — verdict predates the latest native VPN signal');
       return;
@@ -1057,6 +1065,26 @@ export function SecurityProvider({ children }: { children: React.ReactNode }) {
       : incomingMode;
     windowModeRef.current = mode;
     if (isSuperAdmin) return;
+    // ── FOREIGN (floating / pop-up) WINDOW — PROTECTED CONTENT ONLY ─────────
+    // ROOT CAUSE of the missed floating-window block: the native side only
+    // reported this mode when our activity was already PAUSED, so a pop-up over
+    // a suspended-but-resumed MedAcademy was classified as full screen and
+    // playback continued. It is now reported on ANY focus loss while our window
+    // is visible.
+    //
+    // SEVERITY: this does NOT take over the app. Losing window focus is also
+    // what the notification shade and our own dialogs do, and an app-wide block
+    // on every shade pull would be a false positive wave (a previously reported
+    // bug). What must never happen is PLAYBACK in an unverified window state,
+    // so the player is concealed/destroyed at once and can only come back
+    // through a fresh preflight plus an explicit Play tap.
+    if (mode === 'foreign_window') {
+      if (appActiveRef.current) {
+        if (__DEV__) console.log('[SecurityContext] FOREIGN WINDOW — focused by another window; protected video blocked');
+        blockProtectedContent('foreign-window');
+      }
+      return;
+    }
     if (isProhibitedWindowMode(mode)) {
       if (!getSecurityLockState().sources.includes(LOCK_SRC_WINDOW_MODE)) {
         windowModeEngagedSerialRef.current = verdictSerialRef.current;

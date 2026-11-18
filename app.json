@@ -65,7 +65,7 @@
         "monochromeImage": "./assets/adaptive-icon-monochrome.png"
       },
       "predictiveBackGestureEnabled": false,
-      "versionCode": 230,
+      "versionCode": 231,
       "package": "com.medacademy.app",
       "softwareKeyboardLayoutMode": "resize"
     },

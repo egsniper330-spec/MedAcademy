@@ -165,7 +165,7 @@ console.log('\nPreserved design');
 
 check('the shared pill, blur and stretch survive', () => {
   assert.match(code, /<BlurView/);
-  assert.match(code, /scaleX: stretch/);
+  assert.match(code, /Animated\.multiply\(indicatorBase, stretch\)/);
   assert.match(code, /borderRadius: INDICATOR_HEIGHT \/ 2/);
 });
 

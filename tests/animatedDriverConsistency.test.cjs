@@ -182,10 +182,14 @@ check('the shared indicator values all stay JS-driven', () => {
   assert.ok(!tabDrivers.has('fade'), 'the indicator opacity must stay derived, not animated');
 });
 
-check('the indicator view carries a derived opacity + translateX + scaleX together', () => {
+check('the indicator view carries derived opacity + ANIMATED LAYOUT left/width (no transform)', () => {
   assert.match(
     tabBar,
-    /opacity:\s*indicatorWidth > 0 \? 1 : 0,\s*\n\s*transform:\s*\[\{\s*translateX\s*\},\s*\{\s*scaleX:\s*stretch\s*\}\]/,
+    /left: translateX,\s*\n\s*width: indicatorWidthAnim,\s*\n\s*backgroundColor:[\s\S]{0,400}opacity: indicatorWidth > 0 \? 1 : 0,/,
+  );
+  assert.ok(
+    !/transform:\s*\[\{\s*translateX/.test(tabBar),
+    'the bubble must not be painted through a transform layer (it painted nothing on the tablet)',
   );
 });
 
