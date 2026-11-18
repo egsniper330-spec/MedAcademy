@@ -143,7 +143,13 @@ console.log('── Part 4: SecurityContext wiring ──');
     ['4o: the hold is released from the main check path', /maybeReleaseBackgroundHold\(r\);/],
     ['4p: ... and from the periodic check path', /maybeReleaseBackgroundHold\(r\);/],
     ['4q: a manual recheck re-reads the native signal', /overlaySignalRef\.current = await isNativeWindowObscured\(\);/],
-    ['4r: the gate state is computed from all four inputs', /resolveSecurityGateState\(\{/],
+    // 4r — the gate state is still computed from ALL four independent inputs;
+    // the inputs are now named once (`gateInputs`) so the SAME set also feeds
+    // the complete `gateReasons` list (one lock, every reason). Asserting the
+    // shared object is STRONGER than the old inline-literal match: the primary
+    // state and the reason set can no longer diverge.
+    ['4r: the gate state is computed from all four inputs',
+      /const gateInputs = \{[\s\S]{0,700}?resolveSecurityGateState\(gateInputs\)/],
     ['4s: the context exposes gateState', /gateState,\n/],
     ['4t: the context exposes verifySecurity', /verifySecurity,/],
     ['4u: overlay/background state is read from the LOCK (one source of truth)',

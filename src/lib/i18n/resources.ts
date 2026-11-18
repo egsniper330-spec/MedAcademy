@@ -709,6 +709,9 @@ export const en: TranslationDict = {
   'billing.amount': 'Amount',
 
   // ── Security screens ───────────────────────────────────────────────────
+  'shell.profileLoadFailedTitle': 'Couldn’t load your account',
+  'shell.profileLoadFailedBody': 'Your session is still signed in. Check your connection and try again — no need to sign out or reinstall.',
+  'shell.retry': 'Try again',
   'security.warning': 'Security Warning',
   'security.deviceRiskScore': 'Device Risk Score: {score}',
   'security.detectedIssues': 'Detected Issues ({count})',
@@ -893,6 +896,7 @@ export const en: TranslationDict = {
   'security.gate.title': 'SECURITY BLOCK ACTIVE',
   'security.gate.subtitle': 'Your device does not currently meet MedAcademy’s security requirements.',
   'security.gate.detectedIssues': 'DETECTED ISSUES',
+  'security.gate.activeViolations': 'ACTIVE VIOLATIONS',
   'security.gate.verify': 'Verify security and continue',
   'security.gate.verifying': 'Verifying…',
   'security.gate.riskScore': 'Risk Score: {score}',
@@ -3154,6 +3158,9 @@ export const ar: TranslationDict = {
   'billing.amount': 'المبلغ',
 
   // ── Security screens ───────────────────────────────────────────────────
+  'shell.profileLoadFailedTitle': 'تعذّر تحميل حسابك',
+  'shell.profileLoadFailedBody': 'جلستك ما زالت مسجّلة. تحقق من اتصالك وحاول مرة أخرى — لا حاجة لتسجيل الخروج أو إعادة التثبيت.',
+  'shell.retry': 'إعادة المحاولة',
   'security.warning': 'تحذير أمني',
   'security.deviceRiskScore': 'درجة مخاطرة الجهاز: {score}',
   'security.detectedIssues': 'المشكلات المكتشفة ({count})',
@@ -3338,6 +3345,7 @@ export const ar: TranslationDict = {
   'security.gate.title': 'الحماية مفعّلة — الوصول محظور',
   'security.gate.subtitle': 'جهازك لا يستوفي متطلبات الأمان في MedAcademy حاليًا.',
   'security.gate.detectedIssues': 'المشكلات المكتشفة',
+  'security.gate.activeViolations': 'المخالفات النشطة',
   'security.gate.verify': 'تحقق من الأمان والمتابعة',
   'security.gate.verifying': 'جارٍ التحقق…',
   'security.gate.riskScore': 'درجة الخطورة: {score}',

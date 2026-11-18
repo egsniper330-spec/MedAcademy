@@ -65,7 +65,7 @@
         "monochromeImage": "./assets/adaptive-icon-monochrome.png"
       },
       "predictiveBackGestureEnabled": false,
-      "versionCode": 233,
+      "versionCode": 234,
       "package": "com.medacademy.app",
       "softwareKeyboardLayoutMode": "resize"
     },
@@ -158,27 +158,31 @@
           }
         }
       ],
-      "./plugins/withIosJsc","./plugins/withSecurityModule",
-        "./plugins/withNetworkSecurityConfig",
-        "./plugins/withProductionSigning",
+      "./plugins/withIosJsc",
+      "./plugins/withSecurityModule",
+      "./plugins/withNetworkSecurityConfig",
+      "./plugins/withProductionSigning",
       "./plugins/withProguardRules",
       "./plugins/withDynamicVersions",
       "./plugins/withGradleWrapper",
       "./plugins/withSystemBars",
       "./plugins/withAndroidBranding",
-    [
-      "expo-navigation-bar",
-      {
-        "barStyle": "dark",
-        "enforceContrast": false
-      }
-    ],
+      [
+        "expo-navigation-bar",
+        {
+          "barStyle": "dark",
+          "enforceContrast": false
+        }
+      ],
       "./plugins/withNativeUpload",
       "./plugins/withPrivacyPermissions",
       "./plugins/withIosOrientation"
     ],
     "extra": {
-      "eas": {},      "medaPinnedHosts": ["api.medacademy.site"],
+      "eas": {},
+      "medaPinnedHosts": [
+        "api.medacademy.site"
+      ],
       "medaSslPins": [
         "YgE8xZrTDWipiJkwnrLtxhuvJ/hgbAALB0GeAm+Lsqs=",
         "nWN7PSep5XDQdge5zK24CnCRXHr3KvzhKEGxsdqCX9E=",

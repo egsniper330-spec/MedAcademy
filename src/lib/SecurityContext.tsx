@@ -57,6 +57,8 @@ import {
   canClearMultiWindowBlock,
   isProhibitedWindowMode,
   rendersBlockScreen,
+  resolveGateReasons,
+  type GateReason,
   type GatePhase,
   type SecurityGateState,
 } from '@/lib/securityStateModel';
@@ -94,6 +96,7 @@ import {
   getSecurityLockState,
   subscribeSecurityLock,
   markNativeVpnSignal,
+  getContainmentDiagnostics,
   markResumeVerdictResolved,
   type SecurityLockState,
 } from '@/lib/securityLock';
@@ -195,6 +198,13 @@ interface SecurityContextValue {
    * render from this instead of re-deriving a boolean from several flags.
    */
   gateState: SecurityGateState;
+  /**
+   * EVERY live violation reason, in deterministic order (overlay → window →
+   * vpn → violation). The gate renders all of them on ONE screen: a second
+   * violation must never open a second screen, and clearing one reason must
+   * never clear another.
+   */
+  gateReasons: GateReason[];
   /**
    * APP ACCESS SECURITY (layer 1) — TRUE while a state that blocks or takes
    * over the whole app is authoritative. This is deliberately SEPARATE from
@@ -339,6 +349,7 @@ const SecurityContext = createContext<SecurityContextValue>({
   networkAccessState: 'NETWORK_OPEN',
   securityLockHard: false,
   gateState:        'CHECKING',
+  gateReasons:      [],
   overlayBlocked:   false,
   multiWindowBlocked: false,
   windowMode:       'unknown',
@@ -1610,6 +1621,17 @@ export function SecurityProvider({ children }: { children: React.ReactNode }) {
             releaseSecurityLock(LOCK_SRC_NATIVE_VPN);
           }
 
+          // MEASURED CONTAINMENT LATENCY (receipt → lock engaged). Emitted
+          // unconditionally so the number is readable from logcat on a RELEASE
+          // build during physical verification: it is the only honest measure
+          // of "how fast did the app react" that does not depend on a dev build.
+          // Timestamps/counts only — no URL, host, token or identity.
+          const cdiag = getContainmentDiagnostics();
+          if (cdiag.lockEngagedMs !== null && cdiag.jsReceiptMs !== null) {
+            console.log('[SecurityContext][VpnCallback] containment latency ms=',
+              Math.max(0, cdiag.lockEngagedMs - cdiag.jsReceiptMs).toFixed(1));
+          }
+
           if (!appActiveRef.current) return;
           // Immediate re-check — no debounce needed because the NetworkCallback
           // already confirmed the VPN state changed. Use the VPN_RECHECK_DEBOUNCE_MS
@@ -1769,16 +1791,26 @@ export function SecurityProvider({ children }: { children: React.ReactNode }) {
   // control — i.e. the correct finding, the wrong screen and no way to recover
   // after switching the proxy off.
   const vpnBlocked        = liveBlocking && hasConnectionFinding(r.threats);
+  // ── ONE LOCK, EVERY REASON ────────────────────────────────────────────────
+  // The state below is the PRESENTATION precedence (which copy is primary);
+  // `gateReasons` is the complete SET of live violations. Both are derived from
+  // the same independent inputs, so no detector can clear another detector's
+  // reason — a VPN followed by a floating window keeps BOTH reasons live, and
+  // resolving either one leaves the other holding the lock.
+  const gateInputs = {
+    evaluating:             evaluating || checking,
+    hasVerdict,
+    overlayBlocked,
+    multiWindowBlocked,
+    backgroundResumeBlocked: backgroundBlocked,
+    vpnBlocked,
+    violationBlocked:        liveBlocking && !vpnBlocked,
+    windowMode:              multiWindowBlocked ? windowModeEngagedModeRef.current : windowModeRef.current,
+  };
+  const gateReasons: GateReason[] = isSuperAdmin ? [] : resolveGateReasons(gateInputs);
   const gateState: SecurityGateState = isSuperAdmin
-    ? 'ALLOWED'      : resolveSecurityGateState({
-        evaluating:             evaluating || checking,
-        hasVerdict,
-        overlayBlocked,
-        multiWindowBlocked,
-        backgroundResumeBlocked: backgroundBlocked,
-        vpnBlocked,
-        violationBlocked:        liveBlocking && !vpnBlocked,
-      });
+    ? 'ALLOWED'
+    : resolveSecurityGateState(gateInputs);
 
   return (
     <SecurityContext.Provider value={{
@@ -1798,6 +1830,7 @@ export function SecurityProvider({ children }: { children: React.ReactNode }) {
       networkAccessState:  resolveNetworkAccessState({ locked: lockState.locked }),
       securityLockHard:    lockState.hard,
       gateState,
+      gateReasons,
       overlayBlocked,
       multiWindowBlocked,
       windowMode:          multiWindowBlocked ? windowModeEngagedModeRef.current : windowModeRef.current,

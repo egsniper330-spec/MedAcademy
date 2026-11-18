@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Stack, useRouter, usePathname } from 'expo-router';
-import { AppState, View, ActivityIndicator } from 'react-native';
+import { AppState, View, ActivityIndicator, Pressable, Text } from 'react-native';
+import NetInfo from '@react-native-community/netinfo';
 // Fix: import JS wrapper module directly (not requireOptionalNativeModule).
 // requireOptionalNativeModule returns the raw native proxy which only has
 // .preventScreenCapture() / .allowScreenCapture() (no key arg, no async wrapper).
@@ -14,7 +15,7 @@ import { getProfile } from '@/lib/api';
 import { refreshAccountState, handleRefreshOutcome } from '@/lib/accountRefresh';
 import { ensureFeatureFlagsFresh } from '@/lib/featureFlags';
 import { isExpectedMaintenanceError } from '@/lib/maintenanceStateModel';
-import { isStaffConsoleRole, setRoleLocaleLock, STAFF_CONSOLE_LOCALE } from '@/lib/i18n';
+import { t, isStaffConsoleRole, setRoleLocaleLock, STAFF_CONSOLE_LOCALE } from '@/lib/i18n';
 import { maintenanceEpoch } from '@/components/MaintenanceGate';
 import { useSecurity } from '@/lib/SecurityContext';
 import { useDeviceHeartbeat } from '@/lib/deviceHeartbeat';
@@ -32,6 +33,28 @@ const UPLOAD_ROLES = new Set(['doctor', 'admin', 'super_admin']);
 // ('lesson') for the violation-reporting layer on top of this one.
 // Root _layout.tsx also holds 'root-shell' which covers auth screens.
 const APP_SC_KEY = 'app-shell';
+
+/**
+ * BOUNDED PROFILE BOOTSTRAP (the iOS second-loading-screen fix).
+ *
+ * The shell's profile fetch has three independent ways to stop making progress
+ * on a real device, and NONE of them was bounded before this round:
+ *
+ *   1. a transport that never settles (half-open TLS socket after a long
+ *      background);
+ *   2. a request frozen behind the security lock's deferral bound while a
+ *      mandatory post-resume verification runs;
+ *   3. an authoritative-but-empty result (a network failure is deliberately
+ *      non-fatal, so `profile` stays null).
+ *
+ * In all three the `awaitingProfile` overlay (a bare ActivityIndicator with no
+ * message) stayed on screen forever, because the only thing that could clear it
+ * was the fetch's own `finally`. The two bounds below guarantee a terminal
+ * state: the WATCHDOG removes the blocking overlay, and the GRACE delays the
+ * recoverable screen just enough to avoid flashing it during a normal load.
+ */
+const PROFILE_BOOTSTRAP_WATCHDOG_MS = 20_000;
+const PROFILE_BOOTSTRAP_GRACE_MS = 1_200;
 
 function AppLayoutNav() {
   const { session } = useSession();
@@ -281,6 +304,47 @@ function AppLayoutNav() {
   // left the (app)/index spinner as the only visible state with no owner.
   const [awaitingProfile, setAwaitingProfile] = useState(false);
 
+  // ── Bounded, retryable bootstrap bookkeeping ──────────────────────────────
+  // `bootstrapNonce` re-runs the SAME single bootstrap (never a parallel copy).
+  // `bootGrace` suppresses the recoverable screen for the first moments so a
+  // normal cold start never flashes an error.
+  const [bootstrapNonce, setBootstrapNonce] = useState(0);
+  const [bootGrace, setBootGrace] = useState(false);
+  const profileRef = useRef(profile);
+  profileRef.current = profile;
+  const uidRef = useRef<string | null>(null);
+  uidRef.current = session?.user?.id ?? null;
+
+  /**
+   * User-driven / lifecycle recovery. Supersedes any in-flight attempt (via the
+   * same generation guard the identity switch uses), so a stale response can
+   * never install over the retry's result.
+   */
+  const retryBootstrap = useCallback(() => {
+    if (!uidRef.current) return;
+    bootGeneration.current += 1;
+    setAwaitingProfile(true);
+    setBootstrapNonce((n) => n + 1);
+    markPerf('profile-bootstrap-retry');
+  }, []);
+
+  useEffect(() => {
+    const timer = setTimeout(() => setBootGrace(true), PROFILE_BOOTSTRAP_GRACE_MS);
+    return () => clearTimeout(timer);
+  }, []);
+
+  // The overlay may never outlive the bound: if the fetch has not settled (hung
+  // transport / frozen refresh / native stall), stop covering the shell so the
+  // recoverable retry screen below becomes reachable.
+  useEffect(() => {
+    if (!awaitingProfile) return;
+    const timer = setTimeout(() => {
+      setAwaitingProfile(false);
+      markPerf('profile-bootstrap-timeout');
+    }, PROFILE_BOOTSTRAP_WATCHDOG_MS);
+    return () => clearTimeout(timer);
+  }, [awaitingProfile]);
+
   useEffect(() => {
     if (!session?.user) {
       bootGeneration.current += 1; // invalidate any in-flight fetch
@@ -293,6 +357,7 @@ function AppLayoutNav() {
     // refetching — the profile for THIS user id is already authoritative.
     const myGen = ++bootGeneration.current;
     setAwaitingProfile(true);
+    markPerf('profile-bootstrap-start');
     (async () => {
       setProfileLoading(true);
       try {
@@ -360,8 +425,14 @@ function AppLayoutNav() {
         // All other failures are intentionally non-fatal — the session is
         // still valid. Network failures must NOT sign the user out (offline
         // startup contract); the profile simply stays as-is (null on true
-        // cold start with no cache — recovered by the authoritative refresh
-        // once connectivity returns, or by the foreground trigger).
+        // cold start with no cache).
+        //
+        // RECOVERY (previously missing): with no profile the role redirect can
+        // never fire, so the shell entry spinner used to stay up forever. The
+        // failure is now REPORTED (markPerf + the recoverable screen) and
+        // retried by the user, by the next foreground return, and by the next
+        // connectivity restore — never by restarting the whole app.
+        markPerf('profile-bootstrap-failed');
         console.error('[AppLayout] getProfile FAILED (non-fatal, keeping session):', err);
       } finally {
         if (myGen === bootGeneration.current) {
@@ -371,7 +442,35 @@ function AppLayoutNav() {
       }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [session?.user?.id]);
+  }, [session?.user?.id, bootstrapNonce]);
+
+  // ── Recovery triggers (foreground return + connectivity restore) ──────────
+  // BOTH re-run the SAME bounded bootstrap only when the authoritative profile
+  // is genuinely missing, so a healthy session pays nothing: no duplicate
+  // request, no second initialization.
+  useEffect(() => {
+    if (process.env.EXPO_OS === 'web') return;
+    const sub = AppState.addEventListener('change', (next) => {
+      if (next !== 'active') return;
+      if (!uidRef.current || profileRef.current) return;
+      retryBootstrap();
+    });
+    return () => sub.remove();
+  }, [retryBootstrap]);
+
+  useEffect(() => {
+    if (process.env.EXPO_OS === 'web') return;
+    let wasConnected: boolean | null = null;
+    const unsub = NetInfo.addEventListener((state) => {
+      const connected = !!state.isConnected && state.isInternetReachable !== false;
+      const transitioned = wasConnected === false && connected;
+      wasConnected = connected;
+      if (!transitioned) return;
+      if (!uidRef.current || profileRef.current) return;
+      retryBootstrap();
+    });
+    return () => unsub();
+  }, [retryBootstrap]);
 
   // One-shot role-redirect guard must reset on EVERY identity change —
   // impersonation swaps Super Admin ↔ target WITHOUT the session ever going
@@ -442,6 +541,13 @@ function AppLayoutNav() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [epoch]);
 
+  // A session exists, nothing is loading, and there is still no authoritative
+  // profile: the bootstrap failed (or timed out). Show a RECOVERABLE state
+  // instead of an endless spinner. `bootGrace` keeps a normal cold start from
+  // flashing it.
+  const profileUnavailable = !!session?.user && !profile && !isProfileLoading
+    && !awaitingProfile && bootGrace;
+
   // CRITICAL: Stack MUST always render unconditionally — same principle as root _layout.tsx.
   // Returning a spinner here unmounts the Stack navigator on every profile-load cycle,
   // destroying all navigation state and causing blank screens / Unmatched Route errors.
@@ -459,6 +565,38 @@ function AppLayoutNav() {
     {awaitingProfile && (
       <View style={{ position: 'absolute', left: 0, right: 0, top: 0, bottom: 0, alignItems: 'center', justifyContent: 'center', backgroundColor: 'transparent', zIndex: 5, pointerEvents: 'box-only' }}>
         <ActivityIndicator size="large" />
+      </View>
+    )}
+    {/* RECOVERABLE BOOTSTRAP FAILURE: a terminal, actionable state. The screen
+        never claims the session is invalid and never asks for a reinstall — the
+        session is preserved; only the profile read is retried. */}
+    {profileUnavailable && (
+      <View
+        style={{
+          position: 'absolute', left: 0, right: 0, top: 0, bottom: 0,
+          alignItems: 'center', justifyContent: 'center', padding: 32, zIndex: 6,
+        }}
+      >
+        <ActivityIndicator size="small" />
+        <Text
+          accessibilityRole="header"
+          style={{ marginTop: 16, fontSize: 16, fontWeight: '700', textAlign: 'center' }}
+        >
+          {t('shell.profileLoadFailedTitle')}
+        </Text>
+        <Text style={{ marginTop: 8, fontSize: 14, opacity: 0.7, textAlign: 'center' }}>
+          {t('shell.profileLoadFailedBody')}
+        </Text>
+        <Pressable
+          onPress={retryBootstrap}
+          accessibilityRole="button"
+          style={({ pressed }) => ({
+            marginTop: 20, paddingHorizontal: 24, paddingVertical: 12, borderRadius: 12,
+            backgroundColor: pressed ? '#1C7ED6' : '#1E90FF',
+          })}
+        >
+          <Text style={{ color: '#FFFFFF', fontWeight: '700' }}>{t('shell.retry')}</Text>
+        </Pressable>
       </View>
     )}
     <Stack screenOptions={{ headerShown: false }}>

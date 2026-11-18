@@ -342,6 +342,60 @@ export interface SecurityGateInputs {
   vpnBlocked: boolean;
   /** Any other policy blocking finding (root, tamper, overlay policy, etc.). */
   violationBlocked: boolean;
+  /**
+   * The window mode the live window restriction is ABOUT. Optional: it only
+   * labels the reason (a split screen and a floating window are different
+   * conditions); it never changes the decision.
+   */
+  windowMode?: string;
+}
+
+// ─── EVERY ACTIVE VIOLATION (one lock, ALL reasons) ─────────────────────────
+//
+// ROOT CAUSE this closes (reported on device): the gate rendered from
+// `resolveSecurityGateState`, which returns ONE state by precedence. That is
+// right for "which copy is primary" but wrong for "what is wrong right now":
+// a VPN block followed by a floating window replaced the VPN copy with the
+// window copy, and resolving the window could leave the screen describing only
+// one of two live violations. The user could not see that two independent
+// violations were active, and the presentation flipped between reasons.
+//
+// The state above stays the single PRIMARY (deterministic precedence, one
+// screen). This list is the complete SET of live reasons, derived from the same
+// independent inputs, so:
+//   • a second violation never opens a second screen (there is one gate);
+//   • the screen lists EVERY active reason;
+//   • clearing one reason removes only that row and keeps the lock held by the
+//     remaining ones (each detector owns only its own input).
+
+export type GateReasonKind = 'overlay' | 'window' | 'vpn' | 'violation';
+
+export interface GateReason {
+  kind: GateReasonKind;
+  /** Stable identity for rendering/dedupe: 'overlay' | 'window:<mode>' | 'vpn' | 'violation'. */
+  key: string;
+  /** For kind 'window': the mode the platform reported. */
+  mode?: string;
+}
+
+/**
+ * ALL live violation reasons, in deterministic presentation order
+ * (overlay → window → vpn → other policy violation).
+ *
+ * Pure and total: the same inputs always produce the same ordered list, and an
+ * inactive input contributes nothing. One input can never clear another — each
+ * reason is read from its own flag only.
+ */
+export function resolveGateReasons(input: SecurityGateInputs): GateReason[] {
+  const reasons: GateReason[] = [];
+  if (input.overlayBlocked) reasons.push({ kind: 'overlay', key: 'overlay' });
+  if (input.multiWindowBlocked) {
+    const mode = input.windowMode ?? 'multi_window';
+    reasons.push({ kind: 'window', key: `window:${mode}`, mode });
+  }
+  if (input.vpnBlocked) reasons.push({ kind: 'vpn', key: 'vpn' });
+  if (input.violationBlocked) reasons.push({ kind: 'violation', key: 'violation' });
+  return reasons;
 }
 
 /**

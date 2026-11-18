@@ -43,14 +43,26 @@ export type PerfStage =
   | 'js-start'
   | 'session-restored'
   | 'security-verdict'
+  | 'profile-bootstrap-start'
   | 'profile-resolved'
+  | 'profile-bootstrap-failed'
+  | 'profile-bootstrap-timeout'
+  | 'profile-bootstrap-retry'
   | 'screen-data';
 
 const STAGE_ORDER: PerfStage[] = [
   'js-start',
   'session-restored',
   'security-verdict',
+  'profile-bootstrap-start',
   'profile-resolved',
+  // Failure / recovery events. They only appear when the shell bootstrap did
+  // NOT settle on the first try, which is exactly the "second loading screen"
+  // report: a timestamped failure, timeout or retry names the responsible phase
+  // instead of leaving an unexplained delay.
+  'profile-bootstrap-failed',
+  'profile-bootstrap-timeout',
+  'profile-bootstrap-retry',
   'screen-data',
 ];
 

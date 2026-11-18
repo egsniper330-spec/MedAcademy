@@ -171,6 +171,7 @@ export function SecurityGate() {
     // reported mode at engage time), so the copy cannot drift to "you are fine"
     // while the fresh post-full-screen verdict is still pending.
     windowMode,
+    gateReasons,
   } = useSecurity();
   const [verifying, setVerifying] = useState(false);
   const scheme = useColorScheme();
@@ -277,6 +278,31 @@ export function SecurityGate() {
   const revalidating = !liveBlocking && !overlayBlocked
     && !windowModeBlockedState && (checking || evaluating);
 
+  // ── EVERY ACTIVE REASON ON THE ONE SCREEN ─────────────────────────────────
+  // `gateState` decides the PRIMARY copy above (deterministic precedence). This
+  // list is every LIVE violation, so a VPN that is followed by a floating
+  // window keeps both visible here instead of the second cause overwriting the
+  // first — and resolving one removes only its own row. There is still exactly
+  // ONE gate: this list never mounts another screen.
+  const activeReasonRows = gateReasons.map((reason) => {
+    if (reason.kind === 'window') {
+      const mode = reason.mode ?? 'multi_window';
+      const key = mode === 'picture_in_picture'
+        ? 'security.window.pip'
+        : mode === 'foreign_window'
+          ? 'security.window.foreign'
+          : 'security.window.multi';
+      return { key: reason.key, title: t(`${key}.title`), message: t(`${key}.message`) };
+    }
+    if (reason.kind === 'overlay') {
+      return { key: reason.key, title: t('security.overlay.title'), message: t('security.overlay.message') };
+    }
+    if (reason.kind === 'vpn') {
+      return { key: reason.key, title: t('security.vpn.title'), message: t('security.vpn.message') };
+    }
+    return { key: reason.key, title: t('security.gate.title'), message: t('security.gate.subtitle') };
+  });
+
   const onVerify = () => {
     if (verifying) return;
     setVerifying(true);
@@ -363,6 +389,42 @@ export function SecurityGate() {
                 ? t('security.vpn.message')
                 : t('security.gate.subtitle')}
         </Text>
+
+        {/* ALL ACTIVE VIOLATIONS — rendered only when more than one cause is
+            live, so the common single-cause page is unchanged. Each row is one
+            independent detector's reason: no row can clear another, and this
+            is the same gate instance (never a second screen). */}
+        {activeReasonRows.length > 1 && (
+          <>
+            <Text
+              style={[styles.sectionLabel, { color: `${c.text}80`, fontSize: layout.captionSize }]}
+              accessibilityRole="header"
+            >
+              {t('security.gate.activeViolations')}
+            </Text>
+            <View style={styles.findingsList}>
+              {activeReasonRows.map((row) => (
+                <View
+                  key={row.key}
+                  style={[styles.findingRow, { borderColor: `${c.text}1F` }]}
+                  accessibilityRole="text"
+                >
+                  <View style={[styles.findingIcon, { backgroundColor: '#EF444414' }]}>
+                    <ShieldAlert size={18} color="#EF4444" />
+                  </View>
+                  <View style={styles.findingText}>
+                    <Text style={{ color: c.text, fontSize: Math.max(14, layout.bodySize), fontWeight: '700' }}>
+                      {row.title}
+                    </Text>
+                    <Text style={{ color: `${c.text}B3`, fontSize: layout.captionSize + 1, lineHeight: (layout.captionSize + 1) * 1.45, marginTop: 2 }}>
+                      {row.message}
+                    </Text>
+                  </View>
+                </View>
+              ))}
+            </View>
+          </>
+        )}
 
         {/* Detected issues — EVERY live finding on ONE page. Rendered only for
             the policy-driven states; the overlay / resume states explain
