@@ -80,9 +80,13 @@ check('geometry cannot be poisoned by a non-finite measurement', () => {
   assert.match(bar, /Math\.max\(tabWidth - INDICATOR_INSET \* 2, 24\)/);
 });
 
-check('RTL ordering is unchanged', () => {
-  assert.match(bar, /isRTL \? rowSpan - \(i \+ 1\) \* tabWidth : i \* tabWidth/);
-  assert.match(bar, /flexDirection: isRTL \? 'row-reverse' : 'row'/);
+check('RTL ordering is the SAME visual order (reversed once, never double-mirrored)', () => {
+  // The old contract was arithmetic mirroring PLUS a `row-reverse` row. Two
+  // mirrorings of one list can disagree (a mirrored index lands on the opposite
+  // tab), so the order is now reversed explicitly and the row stays ltr.
+  assert.match(bar, /isRTL \? \[\.\.\.visibleRoutes\]\.reverse\(\) : visibleRoutes/);
+  assert.match(bar, /i \* tabWidth/);
+  assert.match(bar, /style=\{\[styles\.row, \{ direction: 'ltr' \}\]\}/);
 });
 
 /* ───────────────────────────── 2. Plyr first-play audio ─────────────────── */
@@ -128,8 +132,12 @@ check('the activity checks its window is still visible before reporting a foreig
   assert.match(plugin, /override fun onPause\(\)[\s\S]{0,200}activityPaused = true/);
   assert.match(plugin, /override fun onResume\(\)[\s\S]{0,200}activityPaused = false/);
   assert.match(plugin, /decor\.windowVisibility != View\.VISIBLE\) return false/);
-  // The focus loss alone is the finding: a paused-only rule missed the attack.
-  assert.match(plugin, /if \(decor\.hasWindowFocus\(\)\) return false\s*\n\s*return true/);
+  // Focus loss alone is no longer the finding: it is a foreign APPLICATION only
+  // when another activity owns the top-resumed slot, which is what makes an
+  // app-wide lock safe (the notification shade leaves us top-resumed).
+  assert.match(plugin, /if \(decor\.hasWindowFocus\(\)\) return false/);
+  assert.match(plugin, /SDK_INT >= 29 && topResumedActivity\) return false[\s\S]{0,80}return true/);
+  assert.match(plugin, /override fun onTopResumedActivityChanged\(isTopResumed: Boolean\)/);
 });
 
 check('returning to the front reports full-screen/focused at once', () => {

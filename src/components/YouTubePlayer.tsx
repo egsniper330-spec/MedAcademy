@@ -63,6 +63,7 @@ import type React from 'react';
 import ReactDOM from 'react-dom';
 import { Alert, BackHandler, Dimensions, Platform, Pressable, StatusBar, Text, View, useWindowDimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { isSecurityLocked } from '@/lib/securityLock';
 import * as ScreenOrientation from 'expo-screen-orientation';
 import { ArrowLeft } from 'lucide-react-native';
 import { WebView, type WebViewMessageEvent } from 'react-native-webview';
@@ -72,7 +73,7 @@ import {
   useSecurityWebViewStop,
   WEBVIEW_SOFT_PAUSE_SCRIPT,
 } from '@/lib/useSecurityWebViewStop';
-import { PLAYER_SCRIPT } from '../lib/plyr/playerScript';
+import { PLAYER_SCRIPT, PLAYER_METADATA_GUARD } from '../lib/plyr/playerScript';
 import { beginFullscreenOrientation, releaseFullscreenOrientation } from '../lib/fullscreenOrientation';
 import { PLYR_CSS, PLYR_JS } from '../lib/plyr/plyrBundle';
 import {
@@ -193,6 +194,10 @@ ${PLYR_CSS}
 <body>
   <div data-plyr-provider="youtube" data-plyr-embed-id="" id="player"></div>
   <script>window.__PLAYER_CONFIG__ = ${JSON.stringify(cfg)};</script>
+  <!-- Before the library loads: refuse third-party video-metadata (oEmbed /
+       noembed) requests, which Plyr issues for the video TITLE. See
+       PLAYER_METADATA_GUARD for the full root cause. -->
+  <script>${PLAYER_METADATA_GUARD}</script>
   <script>${PLYR_JS}</script>
   <script>${PLAYER_SCRIPT}</script>
 </body>
@@ -920,6 +925,20 @@ function YouTubePlayerNative({
           domStorageEnabled
           originWhitelist={['*']}
           onMessage={onMessage}
+          // ── NO NEW PLAYER/METADATA NAVIGATION WHILE THE APP IS LOCKED ──────
+          // Destroying the WebView is the primary stop, but a document load can
+          // already be in flight when the lock engages (the embed and the
+          // YouTube player page navigate themselves). Refusing the navigation
+          // here prevents the app's OWN WebView from starting or continuing a
+          // player/metadata request after the lock, which is the part
+          // MedAcademy actually controls. No URL is logged (privacy).
+          onShouldStartLoadWithRequest={() => {
+            if (isSecurityLocked()) {
+              if (__DEV__) console.log('[YouTubePlayer] navigation refused — security lock is held');
+              return false;
+            }
+            return true;
+          }}
           scrollEnabled={false}
           showsHorizontalScrollIndicator={false}
           showsVerticalScrollIndicator={false}

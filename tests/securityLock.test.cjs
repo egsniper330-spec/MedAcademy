@@ -287,8 +287,11 @@ check('B11b: the native signal bumps the sequence the verdict records at check S
   && /verdictNativeSeqRef\.current = nativeSeqAtStart/.test(ctx));
 check('B11c: a fresh verdict re-runs the release decision even with identical flags',
   /setVerdictSerial\(\(s\) => s \+ 1\)/.test(ctx) && /verdictSerial/.test(ctx));
-check('B12: the native TRANSPORT_VPN callback contains IMMEDIATELY (no verdict wait)',
-  /engageSecurityLock\(LOCK_SRC_NATIVE_VPN\)/.test(ctx));
+// HARD containment: the lesson screen only unmounts the player on a hard lock,
+// so a soft holder let the WebView keep issuing YouTube requests for the whole
+// network-bound verdict window (the reported leak).
+check('B12: the native TRANSPORT_VPN callback contains IMMEDIATELY with a HARD lock',
+  /engageSecurityLock\(LOCK_SRC_NATIVE_VPN, \{ hard: true \}\)/.test(ctx));
 check('B13: containment respects the admin VPN whitelist', /isVpnWhitelistKnownNonEmpty\(\)/.test(ctx));
 check('B14: Super Admin is exempt from containment', /if \(isSuperAdmin\) \{\s*\n\s*releaseSecurityLock\(LOCK_SRC_NATIVE_VPN\)/.test(ctx));
 check('B15: locks are session-scoped (cleared on logout/account switch)', /releaseAllSecurityLocks\(\)/.test(ctx));
@@ -387,7 +390,7 @@ check('C16: diagnostics carry timestamps and counts only (privacy-safe)',
   && !/ContainmentDiagnostics[\s\S]{0,900}(url|token|header|body|email|userId)/i.test(lockSrc));
 check('C17: JS receipt is stamped BEFORE containment runs in the VPN handler',
   ctx.indexOf('markNativeVpnSignal(') > -1
-  && ctx.indexOf('markNativeVpnSignal(') < ctx.indexOf('engageSecurityLock(LOCK_SRC_NATIVE_VPN)'));
+  && ctx.indexOf('markNativeVpnSignal(') < ctx.indexOf('engageSecurityLock(LOCK_SRC_NATIVE_VPN, { hard: true })'));
 
 console.log(`\nRESULT: ${passed} passed, ${failed} failed`);
 process.exit(failed === 0 ? 0 : 1);

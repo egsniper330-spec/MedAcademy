@@ -121,7 +121,34 @@ export default function GlassTabBar({
     return out;
   }, [routes, descriptors]);
 
-  const activeVisible = visibleRoutes.findIndex((entry) => entry.routeIndex === activeIndex);
+  /* ── ONE AUTHORITATIVE MAPPING (route → rendered slot → bubble) ───────────
+   *
+   * ROOT CAUSE of the INTERMITTENT missing / wrong-tab bubble (reproduced on
+   * the tablet AND on a second phone):
+   *
+   *   the bubble mirrored RTL by ARITHMETIC — `rowSpan - (i + 1) * tabWidth` —
+   *   while the row itself was mirrored by `flexDirection: 'row-reverse'`.
+   *   Two independent mirrorings of the same list MUST agree, and they did not
+   *   have to: a reversed order change, a late measurement, or a re-render that
+   *   read one of them a frame later maps every index onto the OPPOSITE end of
+   *   the bar. That is exactly the reported symptom set (Home under Profile,
+   *   Explore under My Courses — the two mirrored pairs).
+   *
+   *   It also explains the invisible phase: an oversized `rowSpan` (the old
+   *   max-of-three-candidates fallback could exceed the real row) mirrors to a
+   *   NEGATIVE `left`, which the pill's `overflow:'hidden'` clips away — an
+   *   invisible bubble whose drag hit-test still worked.
+   *
+   * The fix removes the second mirroring entirely: the render list is reversed
+   * ONCE, explicitly, and the row is a plain left-to-right row. Slot i is then
+   * always at `i * tabWidth`, in both directions, so there is no
+   * direction-dependent arithmetic left that can disagree with the layout.
+   */
+  const orderedRoutes = useMemo(
+    () => (isRTL ? [...visibleRoutes].reverse() : visibleRoutes),
+    [visibleRoutes, isRTL],
+  );
+  const activeVisible = orderedRoutes.findIndex((entry) => entry.routeIndex === activeIndex);
 
   /* ── Indicator geometry — DERIVED, never measured per tab ────────────────
    *
@@ -150,6 +177,29 @@ export default function GlassTabBar({
   const [layouts, setLayouts] = useState<Record<string, { width: number }>>({});
   /** The pill's own measured width — the geometry source that is known to work. */
   const [pillWidth, setPillWidth] = useState(0);
+  /**
+   * The TAB ROW's own measured width — the ONE authoritative span.
+   *
+   * The tabs are `flex: 1` inside this row, so `tabWidth = rowWidth / count` is
+   * exact by construction. It is measured on the row itself (not inferred from
+   * the window or the pill) and clamped to the pill, so a stale or oversized
+   * value can never push the bubble outside the pill's clip.
+   */
+  const [rowWidth, setRowWidth] = useState(0);
+  /**
+   * Layout epoch — STALE-CALLBACK GUARD.
+   *
+   * Every asynchronous measurement and animation settles against the epoch it
+   * started in. A measureInWindow callback that returns after a newer layout
+   * pass cannot overwrite fresher geometry, which is what left the bubble offset
+   * (or outside the pill) after a rotation / split-screen resize.
+   */
+  const layoutEpoch = useRef(0);
+  const onRowLayout = useCallback((width: number) => {
+    layoutEpoch.current += 1;
+    if (!Number.isFinite(width) || width <= 0) return;
+    setRowWidth((prev) => (Math.abs(prev - width) < 0.5 ? prev : width));
+  }, []);
   const onTabLayout = useCallback((key: string, width: number) => {
     if (!Number.isFinite(width)) return;
     setLayouts((prev) => {
@@ -235,14 +285,33 @@ export default function GlassTabBar({
    * all three on a laid-out screen, so the bubble always has a real width. */
   const windowSpan = windowWidth > 0 ? Math.max(windowWidth - SIDE_INSET * 2 - 2, 0) : 0;
   const pillSpan = pillWidth > 0 ? Math.max(pillWidth - 2, 0) : 0;
-  const rowSpan = Math.max(measuredTabWidth * tabCount, windowSpan, pillSpan, 0);
-  const tabWidth = tabCount > 0 && Number.isFinite(rowSpan) ? rowSpan / tabCount : 0;
-  const indicatorWidth = tabCount > 0 ? Math.max(tabWidth - INDICATOR_INSET * 2, 24) : 0;
+  const measuredSpan = Number.isFinite(measuredTabWidth) ? measuredTabWidth * tabCount : 0;
+  /* Priority: the ROW's own measurement, then the measured tabs' total, then
+   * the pill, then the window. Every candidate is finite and the result is
+   * bounded by the pill — the bubble can never be laid out outside its clip. */
+  const rawSpan = rowWidth > 0
+    ? rowWidth
+    : (measuredSpan > 0 ? measuredSpan : (pillSpan > 0 ? pillSpan : windowSpan));
+  const rowSpan = Number.isFinite(rawSpan) && rawSpan > 0
+    ? (pillSpan > 0 ? Math.min(rawSpan, pillSpan) : rawSpan)
+    : 0;
+  const tabWidth = tabCount > 0 && rowSpan > 0 ? rowSpan / tabCount : 0;
+  const indicatorWidth = tabCount > 0 && tabWidth > 0
+    ? Math.max(tabWidth - INDICATOR_INSET * 2, 24)
+    : 0;
 
-  /** Physical (left-anchored) x of visible tab `i`. RTL mirrors the order. */
+  /**
+   * Physical (left-anchored) x of rendered slot `i`.
+   *
+   * The list handed to the row is ALREADY in visual order (orderedRoutes), so
+   * this is the same arithmetic in LTR and RTL: slot 0 is always the leftmost
+   * rendered tab. No mirroring, therefore no possibility of a mirrored index —
+   * and, because `tabWidth` is derived from a span bounded by the pill, no
+   * possibility of a negative `left` being clipped away.
+   */
   const tabX = useCallback(
-    (i: number) => (isRTL ? rowSpan - (i + 1) * tabWidth : i * tabWidth),
-    [isRTL, rowSpan, tabWidth],
+    (i: number) => (Number.isFinite(tabWidth) && tabWidth > 0 ? i * tabWidth : 0),
+    [tabWidth],
   );
   /* Keep the animated layout width in step with the derived geometry. */
   useEffect(() => {
@@ -257,8 +326,8 @@ export default function GlassTabBar({
    * animation uses. Used for the grab hit-test and the release snap, so a drag
    * released between two tabs still resolves to the nearer one. */
   const tabTargets = useMemo(
-    () => visibleRoutes.map((_, i) => tabX(i) + INDICATOR_INSET),
-    [visibleRoutes, tabX],
+    () => orderedRoutes.map((_, i) => tabX(i) + INDICATOR_INSET),
+    [orderedRoutes, tabX],
   );
 
   /* ── ONE DRIVER PER VIEW (Android crash guard) ──────────────────────────
@@ -400,18 +469,24 @@ export default function GlassTabBar({
   useEffect(() => { activeVisibleRef.current = activeVisible; }, [activeVisible]);
   useEffect(() => { pressRef.current = handlePress; }, [handlePress]);
   useEffect(() => {
-    tabsInfoRef.current = visibleRoutes.map((entry) => ({
+    // The SAME ordered list the row renders, so a drag's `nearest` index and the
+    // route it activates can never refer to different tabs.
+    tabsInfoRef.current = orderedRoutes.map((entry) => ({
       key: entry.route.key,
       routeIndex: entry.routeIndex,
       name: entry.route.name,
     }));
-  }, [visibleRoutes]);
+  }, [orderedRoutes]);
 
   const measurePill = useCallback(() => {
     // Page coordinates, so the captured touch point can be converted into the
     // pill's own left-anchored space. Re-measured on every layout: rotation,
     // split screen and font-scale changes all land here.
+    const epoch = layoutEpoch.current;
     pillRef.current?.measureInWindow((x, y, width, height) => {
+      // A newer layout pass superseded this measurement — drop it instead of
+      // overwriting fresher geometry with stale numbers.
+      if (epoch !== layoutEpoch.current) return;
       pillRect.current = { x, y, width, height, known: width > 0 && height > 0 };
       // The pill's real width is also a geometry candidate (see rowSpan).
       if (Number.isFinite(width) && width > 0) setPillWidth((prev) => (Math.abs(prev - width) < 0.5 ? prev : width));
@@ -660,9 +735,14 @@ export default function GlassTabBar({
         />
 
         <View
-          style={[styles.row, { flexDirection: isRTL ? 'row-reverse' : 'row', direction: 'ltr' }]}
+          // ONE direction rule: the list is reversed EXPLICITLY (orderedRoutes)
+          // and the row is always left-to-right. `direction: 'ltr'` pins the
+          // flex start edge so the platform's own RTL mirroring cannot reverse
+          // this row a second time.
+          onLayout={(event) => onRowLayout(event.nativeEvent.layout.width)}
+          style={[styles.row, { direction: 'ltr' }]}
         >
-          {visibleRoutes.map(({ route, descriptor, routeIndex }) => {
+          {orderedRoutes.map(({ route, descriptor, routeIndex }) => {
             const isFocused = routeIndex === activeIndex;
             const options = descriptor.options ?? {};
             const label = options.title ?? route.name;

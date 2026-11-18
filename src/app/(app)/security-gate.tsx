@@ -343,7 +343,9 @@ export function SecurityGate() {
             : windowModeBlockedState
               ? t(windowMode === 'picture_in_picture'
                   ? 'security.window.pip.title'
-                  : 'security.window.multi.title').toUpperCase()
+                  : windowMode === 'foreign_window'
+                    ? 'security.window.foreign.title'
+                    : 'security.window.multi.title').toUpperCase()
               : vpnBlocked
                 ? t('security.vpn.title').toUpperCase()
                 : t('security.gate.title')}
@@ -354,7 +356,9 @@ export function SecurityGate() {
             : windowModeBlockedState
               ? t(windowMode === 'picture_in_picture'
                   ? 'security.window.pip.message'
-                  : 'security.window.multi.message')
+                  : windowMode === 'foreign_window'
+                    ? 'security.window.foreign.message'
+                    : 'security.window.multi.message')
               : vpnBlocked
                 ? t('security.vpn.message')
                 : t('security.gate.subtitle')}

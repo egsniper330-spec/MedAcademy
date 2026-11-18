@@ -1065,22 +1065,37 @@ export function SecurityProvider({ children }: { children: React.ReactNode }) {
       : incomingMode;
     windowModeRef.current = mode;
     if (isSuperAdmin) return;
-    // ── FOREIGN (floating / pop-up) WINDOW — PROTECTED CONTENT ONLY ─────────
-    // ROOT CAUSE of the missed floating-window block: the native side only
-    // reported this mode when our activity was already PAUSED, so a pop-up over
-    // a suspended-but-resumed MedAcademy was classified as full screen and
-    // playback continued. It is now reported on ANY focus loss while our window
-    // is visible.
+    // ── FOREIGN (floating / pop-up) WINDOW — APP-WIDE LOCK ──────────────────
     //
-    // SEVERITY: this does NOT take over the app. Losing window focus is also
-    // what the notification shade and our own dialogs do, and an app-wide block
-    // on every shade pull would be a false positive wave (a previously reported
-    // bug). What must never happen is PLAYBACK in an unverified window state,
-    // so the player is concealed/destroyed at once and can only come back
-    // through a fresh preflight plus an explicit Play tap.
+    // ROOT CAUSE of "only the video was protected": this branch deliberately did
+    // NOT take the app lock — it called blockProtectedContent() and returned, so
+    // dashboards, profile screens, lesson content and navigation all stayed
+    // usable behind a floating app. The reason was a false-positive worry about
+    // the notification shade, which also removes window FOCUS.
+    //
+    // That worry is now resolved at the SIGNAL, not by weakening the response:
+    // the native side reports foreign_window only when another ACTIVITY took the
+    // top-resumed slot (onTopResumedActivityChanged), so the shade / volume / IME
+    // can never produce this reading. A reading that does arrive is therefore
+    // the platform stating another application's window is in front of ours, and
+    // the correct fail-closed response is the SAME lock split-screen engages:
+    // the whole app is covered by the gate, interaction is blocked, navigation
+    // and content access stop, the player is destroyed, protected traffic is
+    // refused and in-flight protected requests are aborted.
+    //
+    // RELEASE is not special-cased either: it goes through
+    // canClearMultiWindowBlock — the platform must positively report full screen
+    // AND a completed verdict NEWER than this engage must exist. A stale verdict
+    // can never clear it, and no tap can dismiss it.
     if (mode === 'foreign_window') {
       if (appActiveRef.current) {
-        if (__DEV__) console.log('[SecurityContext] FOREIGN WINDOW — focused by another window; protected video blocked');
+        if (!getSecurityLockState().sources.includes(LOCK_SRC_WINDOW_MODE)) {
+          windowModeEngagedSerialRef.current = verdictSerialRef.current;
+          windowModeEngagedModeRef.current = mode;
+          if (__DEV__) console.log('[SecurityContext] FOREIGN WINDOW — another application window is in front; APP LOCKED');
+          engageSecurityLock(LOCK_SRC_WINDOW_MODE, { hard: true });
+        }
+        // Layer 2 at the same instant: the player must be gone, not paused.
         blockProtectedContent('foreign-window');
       }
       return;
@@ -1573,7 +1588,14 @@ export function SecurityProvider({ children }: { children: React.ReactNode }) {
           if (isSuperAdmin) {
             releaseSecurityLock(LOCK_SRC_NATIVE_VPN);
           } else if (event?.vpnActive === true && !isVpnWhitelistKnownNonEmpty()) {
-            engageSecurityLock(LOCK_SRC_NATIVE_VPN);
+            // HARD, not provisional. The lesson screen destroys the player only
+            // for a HARD lock (`securityLockHard`), so a soft engage left the
+            // WebView mounted and fetching for the whole network-bound verdict
+            // window — the reported YouTube requests after VPN detection. A
+            // TRANSPORT_VPN observation is an OS-level FACT, so containment is
+            // authoritative here; a clean verdict (including a whitelisted VPN)
+            // still releases it through the normal verdict effect.
+            engageSecurityLock(LOCK_SRC_NATIVE_VPN, { hard: true });
             // Layer 2 reacts at the same OS-level instant: a VPN that appears
             // during protected playback must conceal it before the
             // network-bound verdict lands. A whitelisted VPN never reaches here

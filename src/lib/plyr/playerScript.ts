@@ -75,6 +75,51 @@
  *   swallow a control tap. A single tap stays inert.
  */
 
+/**
+ * ─── THIRD-PARTY METADATA REQUEST GUARD (root-cause fix for noembed.com) ───
+ *
+ * Plyr's YouTube provider resolves the video TITLE through a third-party oEmbed
+ * proxy, hardcoded in its own defaults:
+ *
+ *     urls.youtube.api = https://noembed.com/embed?url=https://www.youtube.com/watch?v={0}
+ *     getTitle(id) → fetch(api.replace('{0}', id)).then(json → config.title = json.title)
+ *
+ * That is the request observed after a VPN was detected: the URL carries the
+ * video id, and the JSON response carries the title (and video dimensions). It
+ * is NOT the stream and NOT YouTube itself — it is metadata that MedAcademy
+ * never uses (the title is not rendered by the app; it only lands in Plyr's
+ * `config.title` / aria label). There is no MedAcademy source reference to
+ * noembed anywhere: it comes entirely from this vendored library.
+ *
+ * The guard refuses exactly those metadata/oEmbed URLs in the player document
+ * and passes every other request straight through to the real fetch. Plyr's
+ * getTitle() has a `.catch`, so a refusal is handled and playback/layout are
+ * unaffected — the leak is removed rather than merely hidden. Because it is
+ * installed BEFORE the Plyr bundle loads, the provider can never issue the
+ * request, and it stays true for the whole life of the player document.
+ */
+export const PLAYER_METADATA_GUARD = `
+(function () {
+  try {
+    if (window.__medaMetadataGuard) return;
+    window.__medaMetadataGuard = true;
+    var nativeFetch = window.fetch;
+    if (typeof nativeFetch !== 'function') return;
+    var BLOCKED = /noembed\\.com|youtube\\.com\\/oembed|vimeo\\.com\\/api\\/oembed/i;
+    window.fetch = function (input) {
+      var url = '';
+      try {
+        url = typeof input === 'string' ? input : (input && input.url) || '';
+      } catch (e) { url = ''; }
+      if (BLOCKED.test(url)) {
+        return Promise.reject(new Error('blocked third-party video metadata request'));
+      }
+      return nativeFetch.apply(window, arguments);
+    };
+  } catch (e) {}
+})();
+`;
+
 export const PLAYER_SCRIPT = `
 (function () {
   'use strict';

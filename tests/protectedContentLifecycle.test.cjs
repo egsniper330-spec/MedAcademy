@@ -177,8 +177,11 @@ console.log('\u2500\u2500 Part 4: app access vs protected content \u2500\u2500')
   check('4f: continuous monitoring cadence is unchanged (30 s scheduler remains)',
     /const CONTINUOUS_CHECK_INTERVAL_MS = 30_000;/.test(CONTEXT)
     && /setInterval\(\(\) => \{ void runPeriodicCheckRef\.current\(\); \}, CONTINUOUS_CHECK_INTERVAL_MS\)/.test(CONTEXT));
-  check('4g: the native VPN callback still contains app access immediately',
-    /engageSecurityLock\(LOCK_SRC_NATIVE_VPN\);/.test(CONTEXT)
+  // HARD containment, not provisional: a soft holder left the WebView mounted
+  // (screens destroy the player only on `securityLockHard`), so the embedded
+  // YouTube player kept issuing requests for the whole verdict window.
+  check('4g: the native VPN callback contains app access immediately with a HARD lock',
+    /engageSecurityLock\(LOCK_SRC_NATIVE_VPN, \{ hard: true \}\);/.test(CONTEXT)
     && /blockProtectedContent\('native-vpn'\);/.test(CONTEXT));
   check('4h: overlay/multi-window blocks still conceal protected content',
     /blockProtectedContent\('overlay'\);/.test(CONTEXT)

@@ -63,17 +63,24 @@ check('the largest measured tab width wins (a zero/partial measurement cannot)',
   assert.match(code, /if \(Number\.isFinite\(w\) && w > max\) max = w;/);
 });
 
-check('the span takes the LARGER of independent, sanitised candidates', () => {
-  // Measured tabs, the window and the pill's own width are all candidates and
-  // the largest wins, so a device whose measurement reports 0 can never produce
-  // a zero-width bubble.
+check('the span is the ROW\'s own measurement, BOUNDED by the pill', () => {
+  // ROOT CAUSE of the intermittent invisible / wrong-tab bubble: the span was
+  // the MAX of independent candidates, so it could exceed the row the tabs are
+  // actually laid out in — and an oversized span mirrors to a `left` outside the
+  // pill, which `overflow:'hidden'` clips away. The row is now measured itself
+  // and the result is clamped to the pill, so the bubble can never leave it.
+  assert.match(code, /onLayout=\{\(event\) => onRowLayout\(event\.nativeEvent\.layout\.width\)\}/);
   assert.match(code, /const windowWidth = Number\.isFinite\(rawWindowWidth\) && rawWindowWidth > 0 \? rawWindowWidth : 0;/);
   assert.match(code, /const pillSpan = pillWidth > 0 \? Math\.max\(pillWidth - 2, 0\) : 0;/);
-  assert.match(
-    code,
-    /const rowSpan = Math\.max\(measuredTabWidth \* tabCount, windowSpan, pillSpan, 0\);/,
-  );
-  assert.match(code, /const tabWidth = tabCount > 0 && Number\.isFinite\(rowSpan\) \? rowSpan \/ tabCount : 0;/);
+  assert.match(code, /const rawSpan = rowWidth > 0/);
+  assert.match(code, /const rowSpan = Number\.isFinite\(rawSpan\) && rawSpan > 0/);
+  assert.match(code, /Math\.min\(rawSpan, pillSpan\)/);
+  assert.match(code, /const tabWidth = tabCount > 0 && rowSpan > 0 \? rowSpan \/ tabCount : 0;/);
+});
+
+check('a stale layout callback cannot overwrite fresher geometry', () => {
+  assert.match(code, /const epoch = layoutEpoch\.current;/);
+  assert.match(code, /if \(epoch !== layoutEpoch\.current\) return;/);
 });
 
 check('a non-finite position or width can never reach the transform', () => {
@@ -81,19 +88,32 @@ check('a non-finite position or width can never reach the transform', () => {
   assert.match(code, /if \(!Number\.isFinite\(width\)\) return;/);
 });
 
-check('tab x is exact arithmetic from the solved tab width, mirrored for RTL', () => {
-  assert.match(code, /const rowSpan = /);
+check('slot x is plain arithmetic: the list is reversed ONCE, never double-mirrored', () => {
+  // The old code mirrored RTL twice (an arithmetic mirror AND a `row-reverse`
+  // row). Two mirrorings of one list can disagree, and a mirrored index lands
+  // on the OPPOSITE end of the bar — exactly the reported Home/Profile and
+  // Explore/My Courses swaps. The list is now reversed explicitly and the row
+  // stays left-to-right, so slot i is always at i * tabWidth.
+  assert.match(code, /const orderedRoutes = useMemo\(/);
+  assert.match(code, /isRTL \? \[\.\.\.visibleRoutes\]\.reverse\(\) : visibleRoutes/);
   assert.match(
     code,
-    /\(i: number\) => \(isRTL \? rowSpan - \(i \+ 1\) \* tabWidth : i \* tabWidth\),/,
+    /\(i: number\) => \(Number\.isFinite\(tabWidth\) && tabWidth > 0 \? i \* tabWidth : 0\),/,
   );
+  assert.ok(!/rowSpan - \(i \+ 1\) \* tabWidth/.test(code), 'no arithmetic RTL mirroring remains');
+  assert.ok(!/row-reverse/.test(code), 'the row is not mirrored a second time');
+});
+
+check('render, geometry and navigation all use the SAME ordered list', () => {
+  assert.match(code, /\{orderedRoutes\.map\(\(\{ route, descriptor, routeIndex \}\)/);
+  assert.match(code, /() => orderedRoutes\.map\(\(_, i\) => tabX\(i\) \+ INDICATOR_INSET\)/);
+  assert.match(code, /tabsInfoRef\.current = orderedRoutes\.map\(/);
+  assert.match(code, /const activeVisible = orderedRoutes\.findIndex\(\(entry\) => entry\.routeIndex === activeIndex\)/);
 });
 
 check('the bubble width is derived from the solved tab width and never collapses', () => {
-  assert.match(
-    code,
-    /const indicatorWidth = tabCount > 0 \? Math\.max\(tabWidth - INDICATOR_INSET \* 2, 24\) : 0;/,
-  );
+  assert.match(code, /const indicatorWidth = tabCount > 0 && tabWidth > 0/);
+  assert.match(code, /Math\.max\(tabWidth - INDICATOR_INSET \* 2, 24\)/);
 });
 
 console.log('\nVisibility can never be lost');
@@ -151,8 +171,11 @@ check('release snaps to the NEAREST tab and only then navigates', () => {
   assert.match(code, /pressRef\.current\(info\.key, info\.routeIndex, info\.name\)/);
 });
 
-check('the drag targets are derived, so a mis-measured tab cannot skew them', () => {
-  assert.match(code, /\(\) => visibleRoutes\.map\(\(_, i\) => tabX\(i\) \+ INDICATOR_INSET\)/);
+check('the drag targets are derived from the SAME ordered list that is rendered', () => {
+  // Positional truth must come from the list the row actually renders: with
+  // `visibleRoutes` the drag could resolve to a different slot than the bubble.
+  assert.match(code, /\(\) => orderedRoutes\.map\(\(_, i\) => tabX\(i\) \+ INDICATOR_INSET\)/);
+  assert.match(code, /tabsInfoRef\.current = orderedRoutes\.map\(/);
 });
 
 check('a cancelled gesture returns to the active tab without navigating', () => {

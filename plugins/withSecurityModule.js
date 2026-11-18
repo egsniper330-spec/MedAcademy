@@ -181,18 +181,22 @@ object WindowModeBridge {
      * appResumed = true and was silently classified as FULL SCREEN — the exact
      * attack the feature exists for.
      *
-     * A focus loss while our window is visible is now ALWAYS reported as
-     * foreign_window. The severity is decided in JS by whether the app is in
-     * the foreground: a resumed app keeps the app shell usable but loses
-     * protected video (and must re-verify), while a paused app is already
-     * backgrounded. Our own dialogs are filtered before a report is made, and
-     * again in JS while one is open (hasOwnDialogOpen).
+     * A focus loss while our window is visible is reported as foreign_window
+     * ONLY when another ACTIVITY took the top-resumed slot (see
+     * onTopResumedActivityChanged in the injected MainActivity overrides).
+     * That is what makes an APP-WIDE lock safe: the notification shade, the
+     * volume/power dialogs and the IME take window focus without taking the
+     * top-resumed slot, so pulling the shade can never lock the app, while a
+     * real floating/pop-up app can. JS then engages the SAME global window-mode
+     * lock that split-screen uses (BLOCKED_MULTI_WINDOW + hard containment).
      *
-     * PLATFORM LIMIT, stated honestly: the notification shade and a passive
-     * overlay that does not take focus are indistinguishable to an ordinary
-     * app. Fail-closed is therefore the rule — focus loss blocks playback — but
-     * an overlay that never removes focus and never obscures a touch cannot be
-     * proven by any API available to a non-privileged app.
+     * Our own dialogs are filtered before a report is made, and again in JS
+     * while one is open (hasOwnDialogOpen).
+     *
+     * PLATFORM LIMIT, stated honestly: Android exposes no window enumeration to
+     * an ordinary app, and a PASSIVE overlay (a floating window that never
+     * takes focus, never obscures a touch and never owns the top-resumed slot)
+     * cannot be proven by any API available to a non-privileged app.
      */
     fun modeOf(
         isInMultiWindowMode: Boolean,
@@ -3675,6 +3679,30 @@ const WINDOW_MODE_ACTIVITY_OVERRIDES = `
   private var activityPaused = false
 
   /**
+   * TRUE while THIS activity owns the TOP-RESUMED slot (API 29+).
+   *
+   * THE DISCRIMINATOR the app-wide floating-window lock depends on:
+   *
+   *   • a FOREIGN ACTIVITY (a Samsung pop-up / freeform app window, a floating
+   *     panel that hosts an activity, a translucent activity from another app)
+   *     takes the top-resumed slot while our window is still displayed →
+   *     onTopResumedActivityChanged(false);
+   *   • the NOTIFICATION SHADE, the volume/power dialogs and the IME take
+   *     WINDOW FOCUS but are system windows, not activities, so the top-resumed
+   *     slot stays ours.
+   *
+   * Without this discriminator, focus loss alone had to be reported as a
+   * foreign window, and locking the whole app on it would have fired on every
+   * shade pull. That is exactly why the previous implementation only blocked
+   * the video. With it, "another app is in front of us" is provable, so the
+   * whole application locks and the shade stays harmless.
+   *
+   * Defaults to true: on API < 29 the callback does not exist, and the legacy
+   * fail-closed focus rule stays in force (see windowCoveredByOtherTask).
+   */
+  private var topResumedActivity = true
+
+  /**
    * OUR window is still being displayed but another window holds focus.
    *
    * This is the ONLY signal Android gives an ordinary app for "something is in
@@ -3697,6 +3725,12 @@ const WINDOW_MODE_ACTIVITY_OVERRIDES = `
     val decor = w.decorView
     if (decor.windowVisibility != View.VISIBLE) return false
     if (decor.hasWindowFocus()) return false
+    // API 29+: focus loss is a FOREIGN APPLICATION only when another activity
+    // took the top-resumed slot. A shade pull / system dialog leaves us
+    // top-resumed, and locking the whole app for it would be a false positive.
+    // Pre-29 the top-resumed callback does not exist, so the legacy fail-closed
+    // focus rule is kept (an older device over-blocks rather than under-blocks).
+    if (android.os.Build.VERSION.SDK_INT >= 29 && topResumedActivity) return false
     return true
   }
 
@@ -3754,6 +3788,35 @@ const WINDOW_MODE_ACTIVITY_OVERRIDES = `
     }
     scheduleForeignCheck()
   }
+
+  /**
+   * THE APP-WIDE FLOATING-WINDOW SIGNAL (API 29+).
+   *
+   * Reported IMMEDIATELY (no 700 ms settle): the top-resumed slot changing
+   * hands is dispositive — the platform states that another activity is on top
+   * of ours — so the window in which a player could still mount and fetch is
+   * closed at once. That immediacy is what removes the "video plays for a few
+   * seconds, then stops" sequence observed with a floating VPN app open.
+   *
+   * Returning the slot to us re-reads the live focus state and reports full
+   * screen; JS still refuses to unlock until a FRESH verdict lands.
+   */
+  override fun onTopResumedActivityChanged(isTopResumed: Boolean) {
+    if (android.os.Build.VERSION.SDK_INT >= 29) {
+      super.onTopResumedActivityChanged(isTopResumed)
+    }
+    topResumedActivity = isTopResumed
+    if (!isTopResumed) {
+      cancelForeignCheck()
+      if (!activityPaused && !isFinishing && window?.decorView?.windowVisibility == View.VISIBLE) {
+        WindowModeBridge.report(isInMultiWindowMode(), isInPictureInPictureMode(), true, true)
+      }
+      return
+    }
+    if (window?.decorView?.hasWindowFocus() == true) {
+      WindowModeBridge.report(isInMultiWindowMode(), isInPictureInPictureMode(), false, true)
+    }
+  }
 `;
 
 /**
@@ -3765,11 +3828,30 @@ const WINDOW_MODE_ACTIVITY_OVERRIDES = `
  */
 function patchMainActivityForWindowMode(contents) {
   if (typeof contents !== 'string' || contents.length === 0) return contents;
-  if (contents.includes(WINDOW_MODE_ACTIVITY_MARKER)) return contents;
   if (!/\boverride\s+fun\b/.test(contents)) return contents;
   if (!/class\s+MainActivity\b/.test(contents)) return contents;
 
   let next = contents;
+
+  // ── UPGRADE PATH for an already-patched activity ────────────────────────
+  // The injected block is APPENDED, so a marker check alone would make every
+  // future change unreachable: a project prebuilt with an older plugin would
+  // keep its old overrides forever (this is exactly how the new
+  // onTopResumedActivityChanged override would have been lost). When the marker
+  // is present but the CURRENT contract is not, the old block is removed in
+  // full — from its doc comment to the class's closing brace — and re-injected
+  // below. Anything outside that block is untouched.
+  if (contents.includes(WINDOW_MODE_ACTIVITY_MARKER)) {
+    const upToDate =
+      /override fun onTopResumedActivityChanged\(isTopResumed: Boolean\)/.test(contents) &&
+      /topResumedActivity/.test(contents);
+    if (upToDate) return contents;
+    const markerIndex = contents.indexOf(WINDOW_MODE_ACTIVITY_MARKER);
+    const blockStart  = contents.lastIndexOf('/**', markerIndex);
+    const classBrace  = contents.lastIndexOf('}');
+    if (blockStart < 0 || classBrace <= markerIndex) return contents;
+    next = contents.slice(0, blockStart) + contents.slice(classBrace);
+  }
 
   // 1. Imports (idempotent, anchored on the generated import block).
   if (!/^import android\.content\.res\.Configuration$/m.test(next)) {

@@ -374,6 +374,32 @@
   // YouTube-DOM/CSS manipulation.
 
   // ── Initialize Plyr ──────────────────────────────────────────────────────────
+  // ── THIRD-PARTY METADATA REQUEST GUARD (web twin of PLAYER_METADATA_GUARD) ──
+  // Plyr's YouTube provider fetches the video TITLE from a third-party oEmbed
+  // proxy (noembed.com), which discloses the video id and returns the title.
+  // MedAcademy never renders it, so the request is refused outright; Plyr's
+  // getTitle() catches the rejection and playback is unaffected. Installed
+  // BEFORE `new Plyr` so the provider can never issue it.
+  (function () {
+    try {
+      if (window.__medaMetadataGuard) return;
+      window.__medaMetadataGuard = true;
+      var nativeFetch = window.fetch;
+      if (typeof nativeFetch !== 'function') return;
+      var BLOCKED = /noembed\.com|youtube\.com\/oembed|vimeo\.com\/api\/oembed/i;
+      window.fetch = function (input) {
+        var url = '';
+        try {
+          url = typeof input === 'string' ? input : (input && input.url) || '';
+        } catch (e) { url = ''; }
+        if (BLOCKED.test(url)) {
+          return Promise.reject(new Error('blocked third-party video metadata request'));
+        }
+        return nativeFetch.apply(window, arguments);
+      };
+    } catch (e) {}
+  })();
+
   var player = new Plyr('#player', {
     // ── Control layout — matches official Plyr demo exactly ──────────────────
     // 'captions' : shows closed-caption toggle (auto-hidden when none available)
