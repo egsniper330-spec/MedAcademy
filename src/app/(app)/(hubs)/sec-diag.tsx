@@ -41,7 +41,6 @@ const CHECK_ROWS: CheckRow[] = [
   { key: 'fridaDetected',           label: 'Frida Detected',      description: 'Port probe 27042-27045 + /proc/maps + process scan + disk files',  threatWhenTrue: true,  icon: Layers },
   { key: 'xposedDetected',          label: 'Xposed / LSPosed',    description: 'XposedBridge class load + package scan + stack trace',             threatWhenTrue: true,  icon: Cpu },
   { key: 'magiskDetected',          label: 'Magisk / Zygisk',     description: 'Magisk paths + mount points + packages + DenyList',                threatWhenTrue: true,  icon: ShieldX },
-  { key: 'overlayDetected',         label: 'Overlay Attack',      description: 'SYSTEM_ALERT_WINDOW + suspicious overlay packages',                threatWhenTrue: true,  icon: Layers },
   { key: 'tampered',                label: 'App Tampered',        description: 'Installer source + native lib presence',                           threatWhenTrue: true,  icon: ShieldAlert },
   { key: 'signatureValid',          label: 'Signature Valid',     description: 'Cert SHA-256 vs trusted fingerprints',                             threatWhenTrue: false, icon: Fingerprint },
 ];

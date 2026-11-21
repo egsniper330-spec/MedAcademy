@@ -1,0 +1,414 @@
+diff --git a/node_modules/react-native-webview/android/src/main/java/com/reactnativecommunity/webview/RNCWebView.java b/node_modules/react-native-webview/android/src/main/java/com/reactnativecommunity/webview/RNCWebView.java
+index 80c6803..486a066 100644
+--- a/node_modules/react-native-webview/android/src/main/java/com/reactnativecommunity/webview/RNCWebView.java
++++ b/node_modules/react-native-webview/android/src/main/java/com/reactnativecommunity/webview/RNCWebView.java
+@@ -77,6 +77,19 @@ public class RNCWebView extends WebView implements LifecycleEventListener {
+     private OnScrollDispatchHelper mOnScrollDispatchHelper;
+     protected boolean hasScrollEvent = false;
+     protected boolean nestedScrollEnabled = false;
++
++    /**
++     * MedAcademy fork: native network gate state.
++     *
++     * networkGateEnabled  — this view must not start any network load until
++     *                       RNCWebViewNetworkGate authorizes it (set from the
++     *                       `networkGate` prop; decided before the first load).
++     * networkGateAuthorized — a FRESH native no-VPN snapshot allowed the first
++     *                       document. Once true it is never reset to true by JS:
++     *                       a later VPN raise blocks the view natively.
++     */
++    protected boolean networkGateEnabled = false;
++    protected boolean networkGateAuthorized = false;
+     protected ProgressChangedFilter progressChangedFilter;
+ 
+     /**
+@@ -410,6 +423,9 @@ public class RNCWebView extends WebView implements LifecycleEventListener {
+     }
+ 
+     protected void cleanupCallbacksAndDestroy() {
++        // MedAcademy fork: drop the gate registration BEFORE destroying, so a
++        // later VPN block can never touch a destroyed WebView. Idempotent.
++        RNCWebViewNetworkGate.INSTANCE.unregister(this);
+         setWebViewClient(null);
+         destroy();
+     }
+diff --git a/node_modules/react-native-webview/android/src/main/java/com/reactnativecommunity/webview/RNCWebViewManagerImpl.kt b/node_modules/react-native-webview/android/src/main/java/com/reactnativecommunity/webview/RNCWebViewManagerImpl.kt
+index f83033b..28ae465 100644
+--- a/node_modules/react-native-webview/android/src/main/java/com/reactnativecommunity/webview/RNCWebViewManagerImpl.kt
++++ b/node_modules/react-native-webview/android/src/main/java/com/reactnativecommunity/webview/RNCWebViewManagerImpl.kt
+@@ -277,6 +277,10 @@ class RNCWebViewManagerImpl(private val newArch: Boolean = false) {
+ 
+     fun onDropViewInstance(viewWrapper: RNCWebViewWrapper) {
+         val webView = viewWrapper.webView
++        // MedAcademy fork: never keep a stale gate registration for a dropped
++        // (possibly destroyed) view. cleanupCallbacksAndDestroy() also removes
++        // it; this is the earliest, lifecycle-explicit point.
++        RNCWebViewNetworkGate.unregister(webView)
+         webView.themedReactContext.removeLifecycleEventListener(webView)
+         webView.cleanupCallbacksAndDestroy()
+         webView.mWebChromeClient = null
+@@ -382,8 +386,63 @@ class RNCWebViewManagerImpl(private val newArch: Boolean = false) {
+         mPendingSource = source
+     }
+ 
++    /**
++     * MedAcademy fork: enable/disable the NATIVE network gate for this view.
++     *
++     * Enabling it BLOCKS network loads immediately, i.e. at prop-application
++     * time, which is before `onAfterUpdateTransaction` loads the first source.
++     * The document is therefore never mounted first and "toggled off": the
++     * WebView is born blocked and only unblocked by a fresh native
++     * authorization in [loadSource].
++     */
++    fun setNetworkGate(viewWrapper: RNCWebViewWrapper, value: Boolean) {
++        val webView = viewWrapper.webView
++        webView.networkGateEnabled = value
++        if (!value) {
++            RNCWebViewNetworkGate.unregister(webView)
++            return
++        }
++        webView.networkGateAuthorized = false
++        try {
++            webView.settings.blockNetworkLoads = true
++        } catch (t: Throwable) {
++            Log.w(TAG, "network gate: could not block at creation", t)
++        }
++        RNCWebViewNetworkGate.register(webView)
++        Log.i(RNCWebViewNetworkGate.TAG, "[WebViewGate] view created BLOCKED")
++    }
++
+     private fun loadSource(viewWrapper: RNCWebViewWrapper, source: ReadableMap?) {
+         val view = viewWrapper.webView
++        // ── MedAcademy fork: NATIVE AUTHORIZATION BEFORE THE FIRST LOAD ───────
++        // A gated view is blocked from creation. The first document is loaded
++        // ONLY after the app's authorizer answers from a FRESH native VPN
++        // snapshot. Denial (VPN active, UNKNOWN, no authorizer, throw) leaves
++        // the WebView blocked and loads nothing at all. No JS call can grant
++        // this — the prop only ENABLES the gate.
++        if (view.networkGateEnabled && !view.networkGateAuthorized) {
++            val decision = RNCWebViewNetworkGate.authorize(view.context)
++            if (!decision.allowed) {
++                Log.i(
++                    RNCWebViewNetworkGate.TAG,
++                    "[WebViewGate] initial load REFUSED reason=" + decision.reason,
++                )
++                return
++            }
++            view.networkGateAuthorized = true
++            try {
++                // Authorized BEFORE anything was displayed, so no reload() is
++                // needed for already-loaded content.
++                view.settings.blockNetworkLoads = false
++            } catch (t: Throwable) {
++                Log.w(TAG, "network gate: could not unblock after authorization", t)
++                return
++            }
++            Log.i(
++                RNCWebViewNetworkGate.TAG,
++                "[WebViewGate] initial load AUTHORIZED reason=" + decision.reason,
++            )
++        }
+         if (source != null) {
+             if (source.hasKey("html")) {
+                 val html = source.getString("html")
+diff --git a/node_modules/react-native-webview/android/src/main/java/com/reactnativecommunity/webview/RNCWebViewNetworkGate.kt b/node_modules/react-native-webview/android/src/main/java/com/reactnativecommunity/webview/RNCWebViewNetworkGate.kt
+new file mode 100644
+index 0000000..3cacecf
+--- /dev/null
++++ b/node_modules/react-native-webview/android/src/main/java/com/reactnativecommunity/webview/RNCWebViewNetworkGate.kt
+@@ -0,0 +1,208 @@
++package com.reactnativecommunity.webview
++
++import android.content.Context
++import android.os.Handler
++import android.os.Looper
++import android.os.SystemClock
++import android.util.Log
++import android.os.Build
++import android.webkit.ServiceWorkerController
++import android.webkit.WebView
++import java.lang.ref.WeakReference
++
++/**
++ * MedAcademy fork: NATIVE WebView network gate.
++ *
++ * WHY THIS EXISTS
++ * ---------------
++ * A WebView starts its own network activity the instant a source is loaded, and
++ * React Native needs a JS round trip (plus a render) before it can unmount the
++ * view. A VPN that becomes active in that window is therefore detected natively
++ * but the requests it should have prevented have already left.
++ *
++ * This gate closes that window natively:
++ *
++ *   • A gated WebView is created with `WebSettings.setBlockNetworkLoads(true)`,
++ *     before any document exists.
++ *   • The FIRST document is only loaded after an AUTHORIZER installed by the
++ *     app returns an allow decision from a FRESH reading of the current VPN
++ *     state. There is no JS path that can authorize, unblock or override.
++ *   • When the app's VPN watch raises, it calls [blockAll]: on the main thread
++ *     every live gated WebView gets `blockNetworkLoads = true` and
++ *     `stopLoading()`, immediately — no React render required.
++ *
++ * HONEST LIMITATION (do not overstate this): a request that the WebView handed
++ * to the network stack BEFORE the block was applied cannot be recalled. The
++ * gate removes requests that would start AFTER it, not ones already in flight.
++ * `blockNetworkLoads` cancels the *loading* of new network resources; it does
++ * not rewind a dispatch that already happened.
++ *
++ * AUTHORIZATION IS FAIL-CLOSED: no authorizer, a throwing authorizer, a VPN, or
++ * an UNKNOWN/absent native answer all deny. Denial leaves the WebView blocked.
++ *
++ * RELOAD SEMANTICS: unblocking after content is already displayed would need a
++ * `reload()` for the displayed document's subresources. This gate therefore
++ * authorizes BEFORE the first load, so no reload is ever required; a later VPN
++ * raise blocks and the app unmounts the view.
++ */
++object RNCWebViewNetworkGate {
++
++    const val TAG = "MedAcademyWebViewGate"
++
++    /** One authorization answer. Only [allowed] grants a load. */
++    class Decision(val allowed: Boolean, val reason: String)
++
++    /**
++     * Implemented by the app's native security module. MUST read the CURRENT
++     * VPN state (never a cached verdict) and MUST fail closed.
++     */
++    fun interface Authorizer {
++        fun authorize(context: Context): Decision
++    }
++
++    @Volatile
++    private var authorizer: Authorizer? = null
++
++    /** Instances are held WEAKLY and pruned on every pass: no stale view leaks. */
++    private val views = ArrayList<WeakReference<WebView>>()
++
++    private val main = Handler(Looper.getMainLooper())
++
++    /** Install (or clear) the app's authorizer. Idempotent; any thread. */
++    fun installAuthorizer(next: Authorizer?) {
++        authorizer = next
++        Log.i(TAG, "[WebViewGate] authorizer " + (if (next == null) "cleared" else "installed"))
++    }
++
++    fun hasAuthorizer(): Boolean = authorizer != null
++
++    /**
++     * Ask the app for a FRESH authorization. Fail closed on every doubt:
++     * missing/cleared authorizer, an exception, or a malformed answer.
++     */
++    fun authorize(context: Context): Decision {
++        val current = authorizer ?: return Decision(false, "no-native-authorizer")
++        return try {
++            current.authorize(context)
++        } catch (t: Throwable) {
++            Log.i(TAG, "[WebViewGate] authorizer threw: " + t.message)
++            Decision(false, "authorizer-error")
++        }
++    }
++
++    /** Register a gated view. Duplicate registration is a no-op. */
++    @Synchronized
++    fun register(view: WebView?) {
++        if (view == null) return
++        prune()
++        for (ref in views) {
++            if (ref.get() === view) return
++        }
++        views.add(WeakReference(view))
++        Log.i(TAG, "[WebViewGate] registered live=" + views.size)
++    }
++
++    /** Unregister on drop/destroy. Safe to call twice, from any thread. */
++    @Synchronized
++    fun unregister(view: WebView?) {
++        if (view == null) return
++        val it = views.iterator()
++        while (it.hasNext()) {
++            val live = it.next().get()
++            if (live == null || live === view) it.remove()
++        }
++    }
++
++    @Synchronized
++    private fun prune() {
++        val it = views.iterator()
++        while (it.hasNext()) {
++            if (it.next().get() == null) it.remove()
++        }
++    }
++
++    @Synchronized
++    private fun liveViews(): List<WebView> {
++        prune()
++        val out = ArrayList<WebView>(views.size)
++        for (ref in views) {
++            val live = ref.get()
++            if (live != null) out.add(live)
++        }
++        return out
++    }
++
++    /**
++     * Block EVERY live gated WebView. Callable from any thread (VPN callbacks
++     * arrive on a ConnectivityManager binder thread); the property is applied
++     * on the Android main thread so it can never race a WebView that is being
++     * laid out or destroyed.
++     */
++    fun blockAll(reason: String) {
++        val targets = liveViews()
++        if (Looper.myLooper() == Looper.getMainLooper()) {
++            applyBlock(targets, reason)
++        } else {
++            main.post { applyBlock(targets, reason) }
++        }
++    }
++
++    /**
++     * SERVICE-WORKER COVERAGE (the documented gap in `shouldInterceptRequest`).
++     *
++     * Requests made BY a service worker are NOT delivered to
++     * `WebViewClient.shouldInterceptRequest` — they belong to the page's
++     * service-worker client — so a page-level interstitial cannot see them.
++     * The framework exposes ServiceWorkerController / ServiceWorkerWebSettings
++     * .setBlockNetworkLoads for exactly this (API 24+, i.e. every supported
++     * device). It is a PROCESS-WIDE setting and must be applied before a page
++     * loads, which is why it is set at app start rather than per view.
++     *
++     * The androidx.webkit COMPAT setter is deliberately NOT used: this app's
++     * resolved androidx.webkit build does not expose it (`serviceWorkerWebSettingsCompat`
++     * is unresolved here), and the framework API is present at minSdk 24
++     * anyway. No compat behaviour is claimed.
++     *
++     * FAILURE IS REPORTED, NOT CLAIMED: the return value is true only when the
++     * platform API exists; a swallowed exception is logged and never reported
++     * as coverage.
++     *
++     * @return true only when the platform provides the service-worker setting.
++     */
++    fun blockServiceWorkerNetworkLoads(): Boolean {
++        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.N) {
++            Log.i(TAG, "[ServiceWorker] block UNSUPPORTED (API " + Build.VERSION.SDK_INT + ")")
++            return false
++        }
++        val apply = Runnable {
++            try {
++                ServiceWorkerController.getInstance()
++                    .serviceWorkerWebSettings
++                    .blockNetworkLoads = true
++                Log.i(TAG, "[ServiceWorker] network loads BLOCKED")
++            } catch (t: Throwable) {
++                Log.i(TAG, "[ServiceWorker] block failed: " + t.message)
++            }
++        }
++        if (Looper.myLooper() == Looper.getMainLooper()) apply.run() else main.post(apply)
++        return true
++    }
++
++    private fun applyBlock(targets: List<WebView>, reason: String) {
++        val at = SystemClock.elapsedRealtime()
++        for (view in targets) {
++            try {
++                // 1. No NEW network load may start.
++                view.settings.blockNetworkLoads = true
++                // 2. Stop the load that is in progress (already-dispatched
++                //    requests are residual exposure — see the class note).
++                view.stopLoading()
++                Log.i(TAG, "[WebViewGate] block applied at=" + at + " reason=" + reason)
++            } catch (t: Throwable) {
++                // A destroyed WebView (or a detached one) is not an error: the
++                // React Native teardown is expected to follow.
++                Log.i(TAG, "[WebViewGate] block skipped reason=" + reason + " error=" + t.message)
++            }
++        }
++    }
++}
+diff --git a/node_modules/react-native-webview/android/src/newarch/com/reactnativecommunity/webview/RNCWebViewManager.java b/node_modules/react-native-webview/android/src/newarch/com/reactnativecommunity/webview/RNCWebViewManager.java
+index 4709e28..2002408 100644
+--- a/node_modules/react-native-webview/android/src/newarch/com/reactnativecommunity/webview/RNCWebViewManager.java
++++ b/node_modules/react-native-webview/android/src/newarch/com/reactnativecommunity/webview/RNCWebViewManager.java
+@@ -436,6 +436,15 @@ public class RNCWebViewManager extends ViewGroupManager<RNCWebViewWrapper>
+         mRNCWebViewManagerImpl.setUserAgent(view, value);
+     }
+ 
++    /**
++     * MedAcademy fork: native network gate. Enabling it blocks network loads at
++     * prop-application time, i.e. before the first source is loaded.
++     */
++    @ReactProp(name = "networkGate")
++    public void setNetworkGate(RNCWebViewWrapper view, boolean value) {
++        mRNCWebViewManagerImpl.setNetworkGate(view, value);
++    }
++
+   @Override
+   public void goBack(RNCWebViewWrapper view) {
+     view.getWebView().goBack();
+diff --git a/node_modules/react-native-webview/android/src/oldarch/com/reactnativecommunity/webview/RNCWebViewManager.java b/node_modules/react-native-webview/android/src/oldarch/com/reactnativecommunity/webview/RNCWebViewManager.java
+index 974337f..8cbcafb 100644
+--- a/node_modules/react-native-webview/android/src/oldarch/com/reactnativecommunity/webview/RNCWebViewManager.java
++++ b/node_modules/react-native-webview/android/src/oldarch/com/reactnativecommunity/webview/RNCWebViewManager.java
+@@ -279,6 +279,15 @@ public class RNCWebViewManager extends ViewGroupManager<RNCWebViewWrapper> {
+         mRNCWebViewManagerImpl.setPaymentRequestEnabled(view, value);
+     }
+ 
++    /**
++     * MedAcademy fork: native network gate. Enabling it blocks network loads at
++     * prop-application time, i.e. before the first source is loaded.
++     */
++    @ReactProp(name = "networkGate")
++    public void setNetworkGate(RNCWebViewWrapper view, boolean value) {
++        mRNCWebViewManagerImpl.setNetworkGate(view, value);
++    }
++
+     @Override
+     protected void addEventEmitters(@NonNull ThemedReactContext reactContext, RNCWebViewWrapper viewWrapper) {
+         // Do not register default touch emitter and let WebView implementation handle touches
+diff --git a/node_modules/react-native-webview/lib/RNCWebViewNativeComponent.js b/node_modules/react-native-webview/lib/RNCWebViewNativeComponent.js
+index 25d09e9..57f86df 100644
+--- a/node_modules/react-native-webview/lib/RNCWebViewNativeComponent.js
++++ b/node_modules/react-native-webview/lib/RNCWebViewNativeComponent.js
+@@ -1 +1 @@
+-var _interopRequireDefault=require("@babel/runtime/helpers/interopRequireDefault");Object.defineProperty(exports,"__esModule",{value:true});exports.default=exports.__INTERNAL_VIEW_CONFIG=exports.Commands=void 0;var _codegenNativeComponent=_interopRequireDefault(require("react-native/Libraries/Utilities/codegenNativeComponent"));var _codegenNativeCommands=_interopRequireDefault(require("react-native/Libraries/Utilities/codegenNativeCommands"));var NativeComponentRegistry=require('react-native/Libraries/NativeComponent/NativeComponentRegistry');var _require=require('react-native/Libraries/NativeComponent/ViewConfigIgnore'),ConditionallyIgnoredEventHandlers=_require.ConditionallyIgnoredEventHandlers;var _require2=require("react-native/Libraries/ReactNative/RendererProxy"),dispatchCommand=_require2.dispatchCommand;var nativeComponentName='RNCWebView';var __INTERNAL_VIEW_CONFIG=exports.__INTERNAL_VIEW_CONFIG={uiViewClassName:'RNCWebView',directEventTypes:{topContentSizeChange:{registrationName:'onContentSizeChange'},topRenderProcessGone:{registrationName:'onRenderProcessGone'},topContentProcessDidTerminate:{registrationName:'onContentProcessDidTerminate'},topCustomMenuSelection:{registrationName:'onCustomMenuSelection'},topFileDownload:{registrationName:'onFileDownload'},topLoadingError:{registrationName:'onLoadingError'},topLoadingSubResourceError:{registrationName:'onLoadingSubResourceError'},topLoadingFinish:{registrationName:'onLoadingFinish'},topLoadingProgress:{registrationName:'onLoadingProgress'},topLoadingStart:{registrationName:'onLoadingStart'},topHttpError:{registrationName:'onHttpError'},topMessage:{registrationName:'onMessage'},topOpenWindow:{registrationName:'onOpenWindow'},topScroll:{registrationName:'onScroll'},topShouldStartLoadWithRequest:{registrationName:'onShouldStartLoadWithRequest'}},validAttributes:Object.assign({allowFileAccess:true,allowsProtectedMedia:true,allowsFullscreenVideo:true,androidLayerType:true,cacheMode:true,domStorageEnabled:true,downloadingMessage:true,forceDarkOn:true,geolocationEnabled:true,lackPermissionToDownloadMessage:true,messagingModuleName:true,minimumFontSize:true,mixedContentMode:true,nestedScrollEnabled:true,overScrollMode:true,saveFormDataDisabled:true,scalesPageToFit:true,setBuiltInZoomControls:true,setDisplayZoomControls:true,setSupportMultipleWindows:true,textZoom:true,thirdPartyCookiesEnabled:true,hasOnScroll:true,allowingReadAccessToURL:true,allowsBackForwardNavigationGestures:true,allowsInlineMediaPlayback:true,allowsPictureInPictureMediaPlayback:true,allowsAirPlayForMediaPlayback:true,allowsLinkPreview:true,automaticallyAdjustContentInsets:true,autoManageStatusBarEnabled:true,bounces:true,contentInset:true,contentInsetAdjustmentBehavior:true,contentMode:true,dataDetectorTypes:true,decelerationRate:true,directionalLockEnabled:true,enableApplePay:true,hideKeyboardAccessoryView:true,keyboardDisplayRequiresUserAction:true,limitsNavigationsToAppBoundDomains:true,mediaCapturePermissionGrantType:true,pagingEnabled:true,pullToRefreshEnabled:true,refreshControlLightMode:true,scrollEnabled:true,sharedCookiesEnabled:true,textInteractionEnabled:true,useSharedProcessPool:true,menuItems:true,suppressMenuItems:true,hasOnFileDownload:true,fraudulentWebsiteWarningEnabled:true,allowFileAccessFromFileURLs:true,allowUniversalAccessFromFileURLs:true,applicationNameForUserAgent:true,basicAuthCredential:true,cacheEnabled:true,incognito:true,injectedJavaScript:true,injectedJavaScriptBeforeContentLoaded:true,injectedJavaScriptForMainFrameOnly:true,injectedJavaScriptBeforeContentLoadedForMainFrameOnly:true,javaScriptCanOpenWindowsAutomatically:true,javaScriptEnabled:true,webviewDebuggingEnabled:true,mediaPlaybackRequiresUserAction:true,messagingEnabled:true,hasOnOpenWindowEvent:true,showsHorizontalScrollIndicator:true,showsVerticalScrollIndicator:true,indicatorStyle:true,newSource:true,userAgent:true,injectedJavaScriptObject:true,paymentRequestEnabled:true},ConditionallyIgnoredEventHandlers({onContentSizeChange:true,onRenderProcessGone:true,onContentProcessDidTerminate:true,onCustomMenuSelection:true,onFileDownload:true,onLoadingError:true,onLoadingSubResourceError:true,onLoadingFinish:true,onLoadingProgress:true,onLoadingStart:true,onHttpError:true,onMessage:true,onOpenWindow:true,onScroll:true,onShouldStartLoadWithRequest:true}))};var _default=exports.default=NativeComponentRegistry.get(nativeComponentName,function(){return __INTERNAL_VIEW_CONFIG;});var Commands=exports.Commands={goBack:function goBack(ref){dispatchCommand(ref,"goBack",[]);},goForward:function goForward(ref){dispatchCommand(ref,"goForward",[]);},reload:function reload(ref){dispatchCommand(ref,"reload",[]);},stopLoading:function stopLoading(ref){dispatchCommand(ref,"stopLoading",[]);},injectJavaScript:function injectJavaScript(ref,javascript){dispatchCommand(ref,"injectJavaScript",[javascript]);},requestFocus:function requestFocus(ref){dispatchCommand(ref,"requestFocus",[]);},postMessage:function postMessage(ref,data){dispatchCommand(ref,"postMessage",[data]);},loadUrl:function loadUrl(ref,url){dispatchCommand(ref,"loadUrl",[url]);},clearFormData:function clearFormData(ref){dispatchCommand(ref,"clearFormData",[]);},clearCache:function clearCache(ref,includeDiskFiles){dispatchCommand(ref,"clearCache",[includeDiskFiles]);},clearHistory:function clearHistory(ref){dispatchCommand(ref,"clearHistory",[]);}};
+\ No newline at end of file
++var _interopRequireDefault=require("@babel/runtime/helpers/interopRequireDefault");Object.defineProperty(exports,"__esModule",{value:true});exports.default=exports.__INTERNAL_VIEW_CONFIG=exports.Commands=void 0;var _codegenNativeComponent=_interopRequireDefault(require("react-native/Libraries/Utilities/codegenNativeComponent"));var _codegenNativeCommands=_interopRequireDefault(require("react-native/Libraries/Utilities/codegenNativeCommands"));var NativeComponentRegistry=require('react-native/Libraries/NativeComponent/NativeComponentRegistry');var _require=require('react-native/Libraries/NativeComponent/ViewConfigIgnore'),ConditionallyIgnoredEventHandlers=_require.ConditionallyIgnoredEventHandlers;var _require2=require("react-native/Libraries/ReactNative/RendererProxy"),dispatchCommand=_require2.dispatchCommand;var nativeComponentName='RNCWebView';var __INTERNAL_VIEW_CONFIG=exports.__INTERNAL_VIEW_CONFIG={uiViewClassName:'RNCWebView',directEventTypes:{topContentSizeChange:{registrationName:'onContentSizeChange'},topRenderProcessGone:{registrationName:'onRenderProcessGone'},topContentProcessDidTerminate:{registrationName:'onContentProcessDidTerminate'},topCustomMenuSelection:{registrationName:'onCustomMenuSelection'},topFileDownload:{registrationName:'onFileDownload'},topLoadingError:{registrationName:'onLoadingError'},topLoadingSubResourceError:{registrationName:'onLoadingSubResourceError'},topLoadingFinish:{registrationName:'onLoadingFinish'},topLoadingProgress:{registrationName:'onLoadingProgress'},topLoadingStart:{registrationName:'onLoadingStart'},topHttpError:{registrationName:'onHttpError'},topMessage:{registrationName:'onMessage'},topOpenWindow:{registrationName:'onOpenWindow'},topScroll:{registrationName:'onScroll'},topShouldStartLoadWithRequest:{registrationName:'onShouldStartLoadWithRequest'}},validAttributes:Object.assign({allowFileAccess:true,allowsProtectedMedia:true,allowsFullscreenVideo:true,androidLayerType:true,cacheMode:true,domStorageEnabled:true,downloadingMessage:true,forceDarkOn:true,geolocationEnabled:true,lackPermissionToDownloadMessage:true,messagingModuleName:true,minimumFontSize:true,mixedContentMode:true,nestedScrollEnabled:true,overScrollMode:true,saveFormDataDisabled:true,scalesPageToFit:true,setBuiltInZoomControls:true,setDisplayZoomControls:true,setSupportMultipleWindows:true,textZoom:true,thirdPartyCookiesEnabled:true,hasOnScroll:true,allowingReadAccessToURL:true,allowsBackForwardNavigationGestures:true,allowsInlineMediaPlayback:true,allowsPictureInPictureMediaPlayback:true,allowsAirPlayForMediaPlayback:true,allowsLinkPreview:true,automaticallyAdjustContentInsets:true,autoManageStatusBarEnabled:true,bounces:true,contentInset:true,contentInsetAdjustmentBehavior:true,contentMode:true,dataDetectorTypes:true,decelerationRate:true,directionalLockEnabled:true,enableApplePay:true,hideKeyboardAccessoryView:true,keyboardDisplayRequiresUserAction:true,limitsNavigationsToAppBoundDomains:true,mediaCapturePermissionGrantType:true,pagingEnabled:true,pullToRefreshEnabled:true,refreshControlLightMode:true,scrollEnabled:true,sharedCookiesEnabled:true,textInteractionEnabled:true,useSharedProcessPool:true,menuItems:true,suppressMenuItems:true,hasOnFileDownload:true,fraudulentWebsiteWarningEnabled:true,allowFileAccessFromFileURLs:true,allowUniversalAccessFromFileURLs:true,applicationNameForUserAgent:true,basicAuthCredential:true,cacheEnabled:true,incognito:true,injectedJavaScript:true,injectedJavaScriptBeforeContentLoaded:true,injectedJavaScriptForMainFrameOnly:true,injectedJavaScriptBeforeContentLoadedForMainFrameOnly:true,javaScriptCanOpenWindowsAutomatically:true,javaScriptEnabled:true,webviewDebuggingEnabled:true,mediaPlaybackRequiresUserAction:true,messagingEnabled:true,hasOnOpenWindowEvent:true,showsHorizontalScrollIndicator:true,showsVerticalScrollIndicator:true,indicatorStyle:true,newSource:true,userAgent:true,injectedJavaScriptObject:true,paymentRequestEnabled:true,networkGate:true},ConditionallyIgnoredEventHandlers({onContentSizeChange:true,onRenderProcessGone:true,onContentProcessDidTerminate:true,onCustomMenuSelection:true,onFileDownload:true,onLoadingError:true,onLoadingSubResourceError:true,onLoadingFinish:true,onLoadingProgress:true,onLoadingStart:true,onHttpError:true,onMessage:true,onOpenWindow:true,onScroll:true,onShouldStartLoadWithRequest:true}))};var _default=exports.default=NativeComponentRegistry.get(nativeComponentName,function(){return __INTERNAL_VIEW_CONFIG;});var Commands=exports.Commands={goBack:function goBack(ref){dispatchCommand(ref,"goBack",[]);},goForward:function goForward(ref){dispatchCommand(ref,"goForward",[]);},reload:function reload(ref){dispatchCommand(ref,"reload",[]);},stopLoading:function stopLoading(ref){dispatchCommand(ref,"stopLoading",[]);},injectJavaScript:function injectJavaScript(ref,javascript){dispatchCommand(ref,"injectJavaScript",[javascript]);},requestFocus:function requestFocus(ref){dispatchCommand(ref,"requestFocus",[]);},postMessage:function postMessage(ref,data){dispatchCommand(ref,"postMessage",[data]);},loadUrl:function loadUrl(ref,url){dispatchCommand(ref,"loadUrl",[url]);},clearFormData:function clearFormData(ref){dispatchCommand(ref,"clearFormData",[]);},clearCache:function clearCache(ref,includeDiskFiles){dispatchCommand(ref,"clearCache",[includeDiskFiles]);},clearHistory:function clearHistory(ref){dispatchCommand(ref,"clearHistory",[]);}};
+\ No newline at end of file
+diff --git a/node_modules/react-native-webview/lib/WebViewTypes.d.ts b/node_modules/react-native-webview/lib/WebViewTypes.d.ts
+index 998cc88..da2252c 100644
+--- a/node_modules/react-native-webview/lib/WebViewTypes.d.ts
++++ b/node_modules/react-native-webview/lib/WebViewTypes.d.ts
+@@ -1113,5 +1113,7 @@ export interface WebViewSharedProps extends ViewProps {
+      * Enables support for the Payment Request API for the WebView
+      */
+     paymentRequestEnabled?: boolean;
++  /** MedAcademy fork: native network gate (see patches/react-native-webview+13.16.0.patch). */
++  networkGate?: boolean;
+ }
+ export {};
+diff --git a/node_modules/react-native-webview/src/RNCWebViewNativeComponent.ts b/node_modules/react-native-webview/src/RNCWebViewNativeComponent.ts
+index 7f4e6c4..63925f2 100644
+--- a/node_modules/react-native-webview/src/RNCWebViewNativeComponent.ts
++++ b/node_modules/react-native-webview/src/RNCWebViewNativeComponent.ts
+@@ -295,6 +295,10 @@ export interface NativeProps extends ViewProps {
+   userAgent?: string;
+   injectedJavaScriptObject?: string;
+   paymentRequestEnabled?: boolean;
++  // MedAcademy fork: native WebView network gate. When true the view is
++  // created with blockNetworkLoads(true) and its first source is only loaded
++  // after the app's native authorizer returns a FRESH no-VPN decision.
++  networkGate?: WithDefault<boolean, false>;
+ }
+ 
+ export interface NativeCommands {
+diff --git a/node_modules/react-native-webview/src/WebViewTypes.ts b/node_modules/react-native-webview/src/WebViewTypes.ts
+index eca8141..d9dc57a 100644
+--- a/node_modules/react-native-webview/src/WebViewTypes.ts
++++ b/node_modules/react-native-webview/src/WebViewTypes.ts
+@@ -1357,4 +1357,6 @@ export interface WebViewSharedProps extends ViewProps {
+    * Enables support for the Payment Request API for the WebView
+    */
+   paymentRequestEnabled?: boolean;
++  /** MedAcademy fork: native network gate (see patches/react-native-webview+13.16.0.patch). */
++  networkGate?: boolean;
+ }

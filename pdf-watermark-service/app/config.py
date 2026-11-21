@@ -74,6 +74,23 @@ class Settings(BaseSettings):
     # Directory for the WAM runtime's persistent replay-nonce database (see app/wam_runtime.py).
     wam_state_dir: Path = Field(Path("./wam-state"))
 
+    # Personalised-page encoding. `balanced` embeds a baseline JPEG instead of a lossless PNG
+    # (see app/pdf_optimize.py and docs/PDF_COMPRESSION.md). It is part of the issuance cache key,
+    # so changing it never reuses a copy encoded by another profile.
+    pdf_compression_profile: str = Field("balanced", description="conservative|balanced|aggressive|lossless")
+
+    # Image-only forensic verification (app/image_forensics.py).
+    image_max_bytes: int = Field(12 * 1024 * 1024, ge=1024, le=52_428_800)
+    # Bounded per-upload work: each candidate is one model forward pass.
+    image_max_candidates: int = Field(7, ge=1, le=16)
+    # Concurrent image verifications in this process. The WAM runtime serves ONE embed/extract at
+    # a time, so a larger number only queues requests and inflates peak memory.
+    image_max_concurrency: int = Field(2, ge=1, le=4)
+    image_confirm_score: float = Field(0.90, ge=0.5, le=1.0)
+    image_probable_score: float = Field(0.75, ge=0.5, le=1.0)
+    # A single region this strong may conclude (reported as `probable`, never `confirmed`).
+    image_single_strong_score: float = Field(0.97, ge=0.5, le=1.0)
+
     # Cleanup runner (python -m app.cleanup_runner): expired-file deletion and orphan sweep interval.
     cleanup_interval_seconds: int = Field(300, ge=60, le=900)
 

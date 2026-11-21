@@ -87,15 +87,14 @@ const state = (over) => M.resolveSecurityGateState({ ...NO_INPUT, ...over });
 // ── Part 1: the closed vocabulary ────────────────────────────────────────────
 console.log('── Part 1: state vocabulary ──');
 {
-  // Seven states now: the multi-window/split-screen restriction (a WINDOW-STATE
-  // cause, added for mandatory full-screen usage) sits directly below the live
-  // overlay signal and above the background/resume hold — see the precedence
-  // block below.
+  // Six states: the overlay state was removed with the floating-window /
+  // overlay protection subsystem. The multi-window/split-screen restriction (a
+  // WINDOW-STATE cause) is now first and sits above the background/resume hold.
   const expected = [
-    'CHECKING', 'BLOCKED_OVERLAY', 'BLOCKED_MULTI_WINDOW', 'BLOCKED_BACKGROUND_RESUME',
+    'CHECKING', 'BLOCKED_MULTI_WINDOW', 'BLOCKED_BACKGROUND_RESUME',
     'BLOCKED_VPN', 'BLOCKED_SECURITY_VIOLATION', 'ALLOWED',
   ];
-  check('1a: exactly the seven required states are enumerated',
+  check('1a: exactly the six required states are enumerated',
     JSON.stringify(M.SECURITY_GATE_STATES) === JSON.stringify(expected));
 }
 
@@ -104,9 +103,9 @@ console.log('── Part 2: precedence ──');
 {
   check('2a: nothing blocking + verdict → ALLOWED', state({}) === 'ALLOWED');
 
-  check('2b: overlay outranks every other cause',
+  check('2b: a residual overlayBlocked key has no effect (input removed)',
     state({ overlayBlocked: true, backgroundResumeBlocked: true, vpnBlocked: true, violationBlocked: true })
-      === 'BLOCKED_OVERLAY');
+      === 'BLOCKED_VPN');
 
   // A prohibited window mode (split-screen / other multi-window mode / our own
   // PiP) outranks the resume hold: it is a live, user-visible condition, and the
@@ -114,8 +113,8 @@ console.log('── Part 2: precedence ──');
   check('2b-2: multi-window outranks background/resume, VPN and a violation',
     state({ multiWindowBlocked: true, backgroundResumeBlocked: true, vpnBlocked: true, violationBlocked: true })
       === 'BLOCKED_MULTI_WINDOW');
-  check('2b-3: the live overlay signal still outranks multi-window',
-    state({ overlayBlocked: true, multiWindowBlocked: true }) === 'BLOCKED_OVERLAY');
+  check('2b-3: the removed overlay input cannot outrank multi-window',
+    state({ overlayBlocked: true, multiWindowBlocked: true }) === 'BLOCKED_MULTI_WINDOW');
 
   // CHANGED deliberately: the resume hold is an INTERIM state with NO screen
   // (rendersBlockScreen is false). If it outranked the policy states, a
@@ -157,7 +156,7 @@ console.log('── Part 3: fail-closed on an unverified state ──');
   check('3d: CHECKING is not a block (the gate does not mount)',
     M.isGateBlocked('CHECKING') === false && M.isGateBlocked('ALLOWED') === false);
   check('3e: every BLOCKED_* state is a block',
-    ['BLOCKED_OVERLAY', 'BLOCKED_MULTI_WINDOW', 'BLOCKED_BACKGROUND_RESUME', 'BLOCKED_VPN', 'BLOCKED_SECURITY_VIOLATION']
+    ['BLOCKED_MULTI_WINDOW', 'BLOCKED_BACKGROUND_RESUME', 'BLOCKED_VPN', 'BLOCKED_SECURITY_VIOLATION']
       .every((s) => M.isGateBlocked(s) === true));
 }
 
@@ -197,22 +196,23 @@ console.log('── Part 5: stale asynchronous results ──');
   check('5e: a superseded older evaluation can never look fresh', a(1, 9) === false);
 }
 
-// ── Part 6: overlay release rule (no dismiss-the-warning bypass) ────────────
-console.log('── Part 6: overlay gate release rule ──');
+// ── Part 6: the overlay release rule is REMOVED with its subsystem ──────────
+console.log('── Part 6: overlay gate release rule removed ──');
 {
-  const c = (signalCleared, hasFreshVerdict) => M.canClearOverlayBlock({ signalCleared, hasFreshVerdict });
-
-  check('6a: signal cleared AND a fresh verdict → may clear', c(true, true) === true);
-  check('6b: acknowledging the warning with the signal still live CANNOT clear', c(false, true) === false);
-  check('6c: a cleared signal with NO fresh verdict cannot clear (dismiss is not verification)',
-    c(true, false) === false);
-  check('6d: neither condition → cannot clear', c(false, false) === false);
+  check('6a: no overlay release rule is exported any more',
+    typeof M.canClearOverlayBlock === 'undefined');
+  check('6b: no overlay warning copy is exported any more',
+    typeof M.OVERLAY_WARNING_COPY === 'undefined');
+  check('6c: no overlay detection limits are exported any more',
+    typeof M.OVERLAY_DETECTION_LIMITS === 'undefined');
+  check('6d: no overlay steps are exported any more',
+    typeof M.overlayBlockSteps === 'undefined');
 }
 
 // ── Part 7: recheck control eligibility ────────────────────────────────────
 console.log('── Part 7: which states offer a recheck control ──');
 {
-  check('7a: overlay is recheckable', M.isGateRecheckable('BLOCKED_OVERLAY') === true);
+  check('7a: the removed overlay state is not recheckable', M.isGateRecheckable('BLOCKED_OVERLAY') === false);
   // CHANGED deliberately: the resume hold renders no page, and its verification
   // always starts and completes on its own — there is no control to offer, and
   // nothing a user could press could clear it faster (the previous Continue
@@ -238,33 +238,31 @@ console.log('── Part 7: which states offer a recheck control ──');
   check('7e: ALLOWED / CHECKING offer nothing', !M.isGateRecheckable('ALLOWED') && !M.isGateRecheckable('CHECKING'));
 }
 
-// ── Part 8: required copy + documented platform limits ─────────────────────
-console.log('── Part 8: overlay copy and documented detection limits ──');
+// ── Part 8: copy + documented limits after the overlay removal ─────────────
+console.log('── Part 8: retained copy and removed overlay artifacts ──');
 {
   const required =
-    'MedAcademy cannot run while another app is covering it or split-screen ' +
-    'mode is active. Please close the other app and return to full-screen ' +
+    'MedAcademy cannot run in split-screen. Return the app to full-screen ' +
     'mode to continue.';
-  check('8a: the overlay warning message matches the specification verbatim',
-    M.OVERLAY_WARNING_COPY.message === required);
-  check('8b: the overlay warning is titled "Security warning"',
-    M.OVERLAY_WARNING_COPY.title === 'Security warning');
-  check('8c: the platform limits are documented (>= 4 honest statements)',
-    Array.isArray(M.OVERLAY_DETECTION_LIMITS) && M.OVERLAY_DETECTION_LIMITS.length >= 4);
-  check('8d: the limits name the API-29 flag-reporting floor',
-    M.OVERLAY_DETECTION_LIMITS.some((l) => /API 29/.test(l)));
-  check('8e: the limits state that another app\u2019s windows cannot be enumerated',
-    M.OVERLAY_DETECTION_LIMITS.some((l) => /enumerate/i.test(l)));
-  check('8f: the limits state the system-overlay exemption',
-    M.OVERLAY_DETECTION_LIMITS.some((l) => /system-signed/i.test(l)));
-  check('8g: the split-screen page carries the same required sentence',
+  check('8a: every overlay copy artifact was removed with the subsystem',
+    M.OVERLAY_WARNING_COPY === undefined
+    && M.OVERLAY_DETECTION_LIMITS === undefined
+    && M.overlayBlockSteps === undefined);
+  check('8b: the split-screen page carries its own window-mode sentence',
     M.MULTI_WINDOW_WARNING_COPY.message === required);
-  const oSteps = M.overlayBlockSteps();
-  check('8h: the overlay page lists actionable recovery steps',
-    Array.isArray(oSteps) && oSteps.length >= 3
-    && oSteps.some((s) => /full screen/i.test(s)));
-  check('8i: the overlay steps never claim to identify the covering app',
-    !oSteps.some((s) => /identify|which app|enumerate/i.test(s)));
+  check('8c: the retained copy never claims an overlay was detected',
+    !/overlay/i.test(M.MULTI_WINDOW_WARNING_COPY.message));
+  check('8d: the documented window limits survive the removal',
+    Array.isArray(M.MULTI_WINDOW_DETECTION_LIMITS)
+    && M.MULTI_WINDOW_DETECTION_LIMITS.length >= 4);
+  check('8e: the limits state that another app\u2019s windows cannot be enumerated',
+    M.MULTI_WINDOW_DETECTION_LIMITS.some((l) => /enumerate/i.test(l)));
+  const wSteps = M.windowModeBlockSteps('multi_window');
+  check('8f: the split-screen page lists actionable recovery steps',
+    Array.isArray(wSteps) && wSteps.length >= 3
+    && wSteps.some((s) => /full screen/i.test(s)));
+  check('8g: the steps never claim to identify another app',
+    !wSteps.some((s) => /identify|which app|enumerate/i.test(s)));
 }
 
 console.log('\n' + passed + ' passed, ' + failed + ' failed');

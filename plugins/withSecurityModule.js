@@ -53,6 +53,10 @@ import com.facebook.react.bridge.ReactContextBaseJavaModule
 import com.facebook.react.bridge.ReactMethod
 import com.facebook.react.bridge.WritableMap
 import com.facebook.react.modules.core.DeviceEventManagerModule
+// MedAcademy fork of react-native-webview (patches/react-native-webview+13.16.0.patch):
+// the NATIVE WebView network gate. blockNetworkLoads is applied from here, on the
+// VPN callback, before React can unmount anything.
+import com.reactnativecommunity.webview.RNCWebViewNetworkGate
 // BuildConfig import removed — runtime equivalent used below to avoid AGP/Kotlin task-ordering issue
 import java.io.File
 import java.lang.ref.WeakReference
@@ -96,14 +100,43 @@ private const val ROOT_CONF_LOW = "low"
 private const val WINDOW_MODE_FULLSCREEN = "fullscreen"
 private const val WINDOW_MODE_MULTI = "multi_window"
 private const val WINDOW_MODE_PIP = "picture_in_picture"
-// Another task's window (a floating / "pop-up view" app, a chat bubble panel,
-// a system-managed mini window) is focused OVER this app. Android exposes no
-// window enumeration to a normal app, so this is derived from the ACTIVITY's
-// own, documented onWindowFocusChanged(false) WHILE we are resumed, full screen
-// and not in PiP: our task keeps running and the platform says the focused
-// window is not ours.
-private const val WINDOW_MODE_FOREIGN = "foreign_window"
 private const val WINDOW_MODE_UNKNOWN = "unknown"
+
+// ─── Traffic-interception tool catalog (INSTALLED-package evidence) ──────────
+// Real application ids of apps built to intercept HTTPS, capture or analyse
+// traffic. Declared in the manifest <queries> block (SECURITY_CHECK_PACKAGES),
+// so no QUERY_ALL_PACKAGES is required. Ordinary VPN clients are NOT listed:
+// a VPN capability alone is not an interception tool, and an active tunnel is
+// already blocked by VpnWatch / the kernel-route check.
+private data class InterceptionTool(val pkg: String, val label: String)
+
+private val INTERCEPTION_TOOLS = listOf(
+    // Each id below is a VERIFIED Google Play / official-distribution
+    // application id. Nothing speculative is listed: a wrong id would either
+    // never match (no benefit) or match an unrelated app (false positive).
+    InterceptionTool("com.network.proxy", "ProxyPin"),
+    InterceptionTool("com.reqable.android", "Reqable"),
+    InterceptionTool("tech.httptoolkit.android.v1", "HTTP Toolkit"),
+    InterceptionTool("com.proxyman.proxymanandroid", "Proxyman"),
+    InterceptionTool("com.shafayat.proxly", "Proxio"),
+    InterceptionTool("com.guoshi.httpcanary", "HttpCanary"),
+    InterceptionTool("com.guoshi.httpcanary.premium", "HttpCanary Premium"),
+    InterceptionTool("com.emanuelef.remote_capture", "PCAPdroid"),
+    InterceptionTool("app.greyshirts.sslcapture", "Packet Capture"),
+    // Second catalog expansion — same evidence bar (published application id).
+    InterceptionTool("com.wujiuye.apicatcher", "ApiCatcher"),
+    InterceptionTool("com.anetcapture.mock", "HTTP Sniffer"),
+    InterceptionTool("com.moni.proxy", "Moni Proxy"),
+    InterceptionTool("com.nutiverse.httpglass", "HTTPGlass"),
+    InterceptionTool("com.realsignal.packetcapturepro", "Packet Capture Pro"),
+    InterceptionTool("com.minhui.networkcapture", "NetCapture"),
+)
+
+// Package id -> pinned signer SHA-256. EMPTY on purpose: no independently
+// verified digest database ships with this build, and an unverifiable pin would
+// produce false "counterfeit" claims. The comparison mechanism is live, so a
+// future verified digest can be pinned without a code change.
+private val INTERCEPTION_TOOL_SIGNERS: Map<String, String> = emptyMap()
 
 /**
  * Process-wide window-mode relay.
@@ -119,24 +152,59 @@ private const val WINDOW_MODE_UNKNOWN = "unknown"
  */
 object WindowModeBridge {
 
-    /** Last mode an Activity actually reported ("unknown" until then). */
+
+    /** Last mode the aggregator ACCEPTED ("unknown" until one is accepted). */
     @Volatile
     var lastReported: String = WINDOW_MODE_UNKNOWN
         private set
 
+    /** True only once a REAL measurement was accepted (never set by a failure). */
     @Volatile
-    private var listener: ((String) -> Unit)? = null
+    var measured: Boolean = false
+        private set
+
+
+
+    /** Duplicate observations collapsed since the last accepted transition. */
+    @Volatile
+    var suppressed: Int = 0
+        private set
+
+
 
     /**
-     * Subscribe the live module instance. Replays the last reported mode (when
+     * Duplicate count that the LAST accepted transition collapsed.
+     * Reported in the accepted timeline mark, so a burst of identical reports is
+     * explained by ONE entry instead of flooding the bounded ring buffer.
+     */
+    @Volatile
+    var lastCollapsed: Int = 0
+        private set
+
+    /**
+     * Dropped by the activity, so no counter-based sequence is needed for
+     * ordering here; seq is retained for the JS mirror and diagnostics.
+     */
+    @Volatile
+    var lastSeq: Long = 0L
+        private set
+    private var seqCounter: Long = 0L
+
+    /** (mode, source, decision) — one event per REAL transition only. */
+    @Volatile
+    private var listener: ((String, String, String) -> Unit)? = null
+
+
+    /**
+     * Subscribe the live module instance. Replays the last ACCEPTED mode (when
      * one exists) so a module created after the app was ALREADY launched into
      * split-screen still learns the current mode immediately.
      */
-    fun subscribe(cb: (String) -> Unit) {
+    fun subscribe(cb: (String, String, String) -> Unit) {
         listener = cb
         val current = lastReported
         if (current != WINDOW_MODE_UNKNOWN) {
-            try { cb(current) } catch (_: Exception) { /* the subscriber logs its own failures */ }
+            try { cb(current, "replay", "replay") } catch (_: Exception) { /* the subscriber logs its own failures */ }
         }
     }
 
@@ -152,65 +220,783 @@ object WindowModeBridge {
      * our own PiP (PiP is documented as a special case of multi-window), so PiP
      * is classified FIRST and reported as its own mode.
      */
-    fun report(
-        isInMultiWindowMode: Boolean,
-        isInPictureInPictureMode: Boolean,
-        foreignWindowFocused: Boolean = false,
-        appResumed: Boolean = true,
-    ) {
-        val mode = modeOf(isInMultiWindowMode, isInPictureInPictureMode, foreignWindowFocused, appResumed)
-        lastReported = mode
-        try { listener?.invoke(mode) } catch (_: Exception) { /* a throwing subscriber cannot break the activity callback */ }
-    }
-
     /**
-     * The ONE mapping from the platform booleans to the JS vocabulary.
-     *
-     * Order matters: PiP and multi-window are POSITIVE, documented platform
-     * states and always win.
-     *
-     * "Foreign window" means OUR window is still on screen but ANOTHER window
-     * holds focus. Android exposes no window enumeration, so this focus loss is
-     * the platform's only answer to "a floating / pop-up app is in front".
-     *
-     * ROOT CAUSE of the missed floating-window block (measured on the tablet):
-     * the previous rule required appResumed == false as well, i.e. it only reported
-     * foreign window when our activity had already been PAUSED. A Samsung
-     * pop-up / mini window over a RESUMED MedAcademy (and any overlay that
-     * leaves our task resumed) therefore produced focus loss with
-     * appResumed = true and was silently classified as FULL SCREEN — the exact
-     * attack the feature exists for.
-     *
-     * A focus loss while our window is visible is reported as foreign_window
-     * ONLY when another ACTIVITY took the top-resumed slot (see
-     * onTopResumedActivityChanged in the injected MainActivity overrides).
-     * That is what makes an APP-WIDE lock safe: the notification shade, the
-     * volume/power dialogs and the IME take window focus without taking the
-     * top-resumed slot, so pulling the shade can never lock the app, while a
-     * real floating/pop-up app can. JS then engages the SAME global window-mode
-     * lock that split-screen uses (BLOCKED_MULTI_WINDOW + hard containment).
-     *
-     * Our own dialogs are filtered before a report is made, and again in JS
-     * while one is open (hasOwnDialogOpen).
-     *
-     * PLATFORM LIMIT, stated honestly: Android exposes no window enumeration to
-     * an ordinary app, and a PASSIVE overlay (a floating window that never
-     * takes focus, never obscures a touch and never owns the top-resumed slot)
-     * cannot be proven by any API available to a non-privileged app.
+     * Map the platform's two documented window-state booleans to the JS
+     * vocabulary. PiP is classified first: the platform documents PiP as a
+     * special case of multi-window, and MedAcademy blocks both.
      */
     fun modeOf(
         isInMultiWindowMode: Boolean,
         isInPictureInPictureMode: Boolean,
-        foreignWindowFocused: Boolean = false,
-        appResumed: Boolean = true,
     ): String {
         if (isInPictureInPictureMode) return WINDOW_MODE_PIP
         if (isInMultiWindowMode) return WINDOW_MODE_MULTI
-        // Focus lost while our window is still displayed — foreign window,
-        // resumed or paused. (See the note above: requiring !appResumed was the
-        // missed-detection bug.)
-        if (foreignWindowFocused) return WINDOW_MODE_FOREIGN
         return WINDOW_MODE_FULLSCREEN
+    }
+
+    fun report(
+        isInMultiWindowMode: Boolean,
+        isInPictureInPictureMode: Boolean,
+        source: String = "activity",
+    ) {
+        val mode = modeOf(isInMultiWindowMode, isInPictureInPictureMode)
+        observe(mode, source)
+    }
+
+    /**
+     * THE ONE FUNNEL. Every producer — the activity callbacks and the module's
+     * own reads — arrives here, and this is the only place that decides whether
+     * an observation changes the authoritative state.
+     *
+     * Returns "accept" | "duplicate" | "rejected" | "unknown".
+     */
+    fun observe(mode: String, source: String): String {
+        val decision = decide(mode, source)
+        if (decision == "accept") {
+            try { listener?.invoke(mode, source, decision) } catch (_: Exception) { /* a throwing subscriber cannot break the caller */ }
+        }
+        return decision
+    }
+
+    /** Activity-level evidence is dispositive; a snapshot of the same state is not. */
+    private fun isAuthoritative(source: String): Boolean =
+        source == "lifecycle" || source == "mode-change" || source == "replay"
+
+    /**
+     * THE DECISION TABLE (mirrored by src/lib/windowModeAggregator.ts).
+     *
+     *   1. raise immediately, from ANY producer, for a prohibited reading;
+     *   2. deduplicate a reading identical to the state already in force —
+     *      no containment action, no emission, no timeline mark;
+     *   3. only activity-level evidence may clear a prohibited reading;
+     *      a snapshot can raise but never release.
+     */
+    private fun decide(mode: String, source: String): String {
+        if (mode == WINDOW_MODE_UNKNOWN) return "unknown"
+        seqCounter += 1
+        lastSeq = seqCounter
+        val authoritative = isAuthoritative(source)
+
+        if (measured && mode == lastReported) {
+            suppressed += 1
+            return "duplicate"
+        }
+
+        val prohibited = mode == WINDOW_MODE_MULTI || mode == WINDOW_MODE_PIP
+        if (prohibited) {
+            // FAIL CLOSED, IMMEDIATELY. Raising is never debounced and never
+            // waits for a second opinion.
+            accept(mode, source)
+            return "accept"
+        }
+
+        // mode == FULLSCREEN: releasing a split-screen / PiP block needs no
+        // hysteresis — those are positive platform states, so the platform's own
+        // exit callback is the evidence.
+        accept(mode, source)
+        return "accept"
+    }
+
+    private fun accept(mode: String, source: String) {
+        lastCollapsed = suppressed
+        suppressed = 0
+        lastReported = mode
+        measured = true
+    }
+
+}
+
+/**
+ * VpnWatch — the EARLIEST, continuously-live VPN state, owned by the process and
+ * INDEPENDENT of React Native.
+ *
+ * WHY THIS EXISTS (the reported leak): the only VPN watcher used to be created in
+ * SecurityModule.init, i.e. when the RN bridge loads, and every JS decision then
+ * waited for the full 14-detector suite (measured 2218 ms, of which 2082 ms was
+ * the TLS probe). A video surface could therefore be created and start loading
+ * its iframe before the app had decided anything about the VPN.
+ *
+ * REGISTRATION POINT: MainActivity.onResume (injected) and SecurityModule.init,
+ * which run BEFORE React Native's JS is initialised. The activity owns the
+ * process's first frame; the module only ATTACHES to this state later.
+ *
+ * CORRECT CALLBACK SEMANTICS (Android docs): onAvailable() must not be used to
+ * query capabilities synchronously — they may not be settled yet. The authority
+ * here is onCapabilitiesChanged(), which delivers the NetworkCapabilities that
+ * actually describe the app's DEFAULT network:
+ *   • transportActive — the default network carries TRANSPORT_VPN, i.e. this
+ *     app's own traffic is tunnelled. This is the fact a video barrier needs.
+ *   • vpnPresent — ANY active network carries TRANSPORT_VPN (a VPN exists on the
+ *     device even if it is not the app's default route).
+ * They are deliberately distinct: "a VPN exists" is not "our traffic uses it".
+ *
+ * This is NOT a packet firewall. A request already handed to the kernel before
+ * the callback runs cannot be recalled — see the honest limitation documented in
+ * the barrier's notes.
+ */
+object VpnWatch {
+
+    /** TRUE when THIS app's default network is VPN-tunnelled. */
+    @Volatile
+    var transportActive: Boolean = false
+        private set
+
+    /** TRUE when ANY network on the device carries TRANSPORT_VPN. */
+    @Volatile
+    var vpnPresent: Boolean = false
+        private set
+
+    /** TRUE once a real registration succeeded. FALSE means UNKNOWN, never "clean". */
+    @Volatile
+    var registered: Boolean = false
+        private set
+
+    /** Monotonic ms of the last state CHANGE (0 = never changed). */
+    @Volatile
+    var lastChangeMs: Long = 0L
+        private set
+
+    /** Monotonic ms the state was last brought up to date (snapshot or callback). */
+    @Volatile
+    var lastSignalledMs: Long = 0L
+        private set
+
+    /** The module instance, when one exists (may be null before RN attaches). */
+    @Volatile
+    private var listener: ((Boolean) -> Unit)? = null
+
+    private var defaultCallback: ConnectivityManager.NetworkCallback? = null
+    private var vpnCallback: ConnectivityManager.NetworkCallback? = null
+
+    fun attachListener(cb: (Boolean) -> Unit) {
+        listener = cb
+    }
+
+    /** -1 = never measured. Ages are monotonic, so they are comparable in a trace. */
+    fun ageSinceChangeMs(): Long {
+        if (lastChangeMs == 0L) return -1L
+        return android.os.SystemClock.elapsedRealtime() - lastChangeMs
+    }
+
+    /**
+     * Register once, on the first Activity callback. Idempotent and safe from any
+     * thread. A failure leaves registered=false, which every caller must treat as
+     * UNKNOWN (fail closed) rather than "no VPN".
+     */
+    fun ensure(context: Context?) {
+        // Install the WebView network-gate authorizer FIRST (idempotent): a
+        // gated WebView refuses to load until this native answer exists, so it
+        // must be in place before the first video surface can be created.
+        installWebViewGate()
+        // Service-worker network loads: process-wide, applied before any page
+        // loads (this runs from the activity, before JS). Requests made BY a
+        // service worker never reach shouldInterceptRequest, so this is the
+        // only supported way to cover them; the call reports whether the
+        // platform feature exists instead of assuming it.
+        RNCWebViewNetworkGate.blockServiceWorkerNetworkLoads()
+        if (registered || context == null) return
+        synchronized(this) {
+            if (registered) return
+            val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE)
+                as? ConnectivityManager ?: return
+            if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.N) return
+            try {
+                // 1. The app's DEFAULT network: the only network a request goes out on.
+                val defaultCb = object : ConnectivityManager.NetworkCallback() {
+                    override fun onCapabilitiesChanged(
+                        network: Network,
+                        caps: NetworkCapabilities,
+                    ) {
+                        // THE documented place for this decision.
+                        apply(
+                            caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN),
+                            hasAnyVpnNetwork(cm),
+                            "default",
+                        )
+                    }
+                    override fun onLost(network: Network) {
+                        // The default network went away: re-snapshot, never assume clean.
+                        apply(hasDefaultVpn(cm), hasAnyVpnNetwork(cm), "default-lost")
+                    }
+                }
+                // 2. Any VPN network appearing/leaving, so "a VPN exists" is live too.
+                val vpnCb = object : ConnectivityManager.NetworkCallback() {
+                    override fun onCapabilitiesChanged(
+                        network: Network,
+                        caps: NetworkCapabilities,
+                    ) {
+                        apply(hasDefaultVpn(cm), hasAnyVpnNetwork(cm), "vpn-net")
+                    }
+                    override fun onLost(network: Network) {
+                        apply(hasDefaultVpn(cm), hasAnyVpnNetwork(cm), "vpn-net-lost")
+                    }
+                }
+                cm.registerDefaultNetworkCallback(defaultCb)
+                val request = NetworkRequest.Builder()
+                    .addTransportType(NetworkCapabilities.TRANSPORT_VPN)
+                    .removeCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN)
+                    .build()
+                cm.registerNetworkCallback(request, vpnCb)
+                defaultCallback = defaultCb
+                vpnCallback = vpnCb
+                registered = true
+                // Paint the CURRENT truth immediately: a VPN that was already up
+                // before this process started must be known on the first frame.
+                apply(hasDefaultVpn(cm), hasAnyVpnNetwork(cm), "initial")
+                Log.i(TAG, "[VpnWatch] registered (transport=" + transportActive +
+                    " present=" + vpnPresent + ")")
+            } catch (e: Exception) {
+                Log.i(TAG, "[VpnWatch] registration failed: " + e.message)
+            }
+        }
+    }
+
+    /**
+     * Install the react-native-webview network-gate authorizer (idempotent).
+     *
+     * The gate asks THIS for a FRESH reading every time a gated WebView is about
+     * to load its first document. It never reads a cached JS verdict:
+     *   • watch not registered               → DENY (UNKNOWN is not "clean")
+     *   • fresh read unavailable/exception   → DENY
+     *   • a VPN is active (our route or not) → DENY
+     *   • only a fresh NO-VPN reading        → ALLOW
+     * Installing nothing also denies, so a failure here is fail-closed.
+     */
+    fun installWebViewGate() {
+        try {
+            RNCWebViewNetworkGate.installAuthorizer(
+                RNCWebViewNetworkGate.Authorizer { ctx ->
+                    if (!registered) {
+                        RNCWebViewNetworkGate.Decision(false, "vpn-watch-unregistered")
+                    } else {
+                        val fresh = freshSnapshot(ctx)
+                        when {
+                            fresh == null -> RNCWebViewNetworkGate.Decision(false, "vpn-unknown")
+                            fresh -> RNCWebViewNetworkGate.Decision(false, "vpn-active")
+                            else -> RNCWebViewNetworkGate.Decision(true, "no-vpn")
+                        }
+                    }
+                }
+            )
+        } catch (t: Throwable) {
+            // No authorizer installed ⇒ every gated WebView stays blocked.
+            Log.i(TAG, "[VpnWatch] webview gate authorizer install failed: " + t.message)
+        }
+    }
+
+    /**
+     * A FRESH, SYNCHRONOUS reading of the CURRENT VPN state, used ONLY by the
+     * native WebView gate. Distinct from the cached watcher state on purpose:
+     * authorization must never be granted from a value measured earlier.
+     * Returns null for UNKNOWN (watch unregistered, unsupported platform or an
+     * exception) — callers must treat null as DENY.
+     */
+    fun freshSnapshot(context: Context?): Boolean? {
+        if (!registered) return null
+        val cm = (context ?: return null).getSystemService(Context.CONNECTIVITY_SERVICE)
+            as? ConnectivityManager ?: return null
+        if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.M) return null
+        return try {
+            // Same all-VPN policy as the watcher: our route OR any VPN present.
+            hasDefaultVpn(cm) || hasAnyVpnNetwork(cm)
+        } catch (t: Throwable) {
+            null
+        }
+    }
+
+    private fun hasAnyVpnNetwork(cm: ConnectivityManager): Boolean {
+        return try {
+            if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.M) return false
+            for (net in cm.allNetworks) {
+                val caps = cm.getNetworkCapabilities(net) ?: continue
+                if (caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN)) return true
+            }
+            false
+        } catch (_: Exception) { false }
+    }
+
+    private fun hasDefaultVpn(cm: ConnectivityManager): Boolean {
+        return try {
+            if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.M) return false
+            val active = cm.activeNetwork ?: return false
+            val caps = cm.getNetworkCapabilities(active) ?: return false
+            caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN)
+        } catch (_: Exception) { false }
+    }
+
+    /**
+     * Apply one live reading. A CHANGE raises/clears the INDEPENDENT vpn reason
+     * immediately (never waiting for the 14-detector JS suite), and marks why.
+     */
+    private fun apply(nextTransport: Boolean, nextPresent: Boolean, source: String) {
+        val now = android.os.SystemClock.elapsedRealtime()
+        synchronized(this) {
+            val changed = nextTransport != transportActive || nextPresent != vpnPresent
+            transportActive = nextTransport
+            vpnPresent = nextPresent
+            lastSignalledMs = now
+            if (!changed) return
+            lastChangeMs = now
+            SecurityContainment.noteVpnTransition(nextTransport || nextPresent, source)
+            if (nextTransport) {
+                // 1. NATIVE WEBVIEW NETWORK GATE — blockNetworkLoads(true) +
+                //    stopLoading() on every gated WebView, posted to the main
+                //    thread from this callback thread. This happens BEFORE the
+                //    JS gate can mount or React can unmount (the request race).
+                //    Requests already dispatched are residual exposure.
+                RNCWebViewNetworkGate.blockAll("vpn-transport:" + source)
+                // 2. OUR traffic is tunnelled: contain at once, before any JS verdict.
+                SecurityContainment.raise(SecurityContainment.REASON_VPN, "vpn-transport:" + source)
+            } else if (nextPresent) {
+                // A VPN exists but is not our route: still a device-level finding.
+                RNCWebViewNetworkGate.blockAll("vpn-present:" + source)
+                SecurityContainment.raise(SecurityContainment.REASON_VPN, "vpn-present:" + source)
+            } else {
+                // Only the OS reporting NO VPN on NO network clears this reason.
+                SecurityContainment.clear(SecurityContainment.REASON_VPN, "vpn-transport-lost:" + source)
+            }
+            try {
+                listener?.invoke(nextTransport || nextPresent)
+            } catch (_: Exception) {
+                // A dead bridge must never break native containment.
+            }
+            Log.i(TAG, "[VpnWatch] change source=" + source + " transport=" + nextTransport +
+                " present=" + nextPresent)
+        }
+    }
+}
+
+/**
+ * SecurityContainment — NATIVE containment on the same frame as the signal.
+ *
+ * WHY THIS EXISTS (measured on the physical tablet): every containment path in
+ * this project used to run through JavaScript — a native detector emitted an
+ * event, React updated state, a render committed, and only then was the screen
+ * covered. That round trip is the reported "extremely slow" response, and it
+ * is also why a violation could be shown and then lost again when a later JS
+ * decision (a clean touch, a resume, a periodic verdict) overwrote it.
+ *
+ * WHAT IT DOES NOW (two independent platform signals, no focus inference):
+ *
+ *   1. COVER - a full-screen surface is attached to THIS window's decor view
+ *      on the UI thread that received the signal. It is part of our own
+ *      window, so it cannot be dismissed by back, navigation, a route change
+ *      or a React reload, and it is not an overlay another app can hide.
+ *   2. LATCH - a confirmed violation is HELD here until an evidence path this
+ *      module actually owns says it is gone (see the clearing policy below).
+ *      No resume, focus regain, VPN teardown, timeout or missing event clears
+ *      it.
+ *
+ * CLEARING POLICY (honest, and only signals Android really provides):
+ *   - window   cleared only when the ACTIVITY reports a permitted window mode
+ *              again (full-screen; the platform fact split-screen/PiP ended).
+ *              A focus change alone does not do it.
+ *   - vpn      cleared only when the OS reports no VPN transport, or when a
+ *              COMPLETED policy verdict says the tunnel is allowed (admin
+ *              whitelist). The VPN callback stopping never clears a window
+ *              reason.
+ *
+ * REMOVED (do not reintroduce): the floating-window / overlay protection
+ * subsystem. It inferred "another app is over us" from window FOCUS, which
+ * Recents, ordinary app switching, a system dialog and our own dialogs all
+ * change, so it produced false locks and could never be proven with public
+ * APIs. Its detectors, listeners, latch, permission and gate page are gone;
+ * this module keeps no overlay reason and no touch-flag observation.
+ */
+object SecurityContainment {
+
+    const val REASON_WINDOW = "window"
+    const val REASON_VPN = "vpn"
+
+    /**
+     * Minimum spacing between REJECTED / DEFERRED window-mode timeline marks.
+     *
+     * An ACCEPTED transition is always recorded — it is a real state change.
+     * A rejection or a deferred recovery can repeat many times inside one
+     * transition storm (188 marks were dropped inside ~220 ms on build 235c), so
+     * non-accepted decisions are recorded with a coalesced count instead of
+     * flooding the bounded ring buffer that the release build is read from.
+     */
+    private const val WINDOW_MODE_MARK_MIN_MS = 250L
+
+    private val mainHandler = android.os.Handler(android.os.Looper.getMainLooper())
+
+    /**
+     * THE VIOLATION STATE. Guarded by its own monitor because it is written from
+     * MORE THAN ONE THREAD:
+     *   • window-mode reports arrive on the UI thread,
+     *   • the VPN callback arrives on a ConnectivityManager binder thread,
+     *   • a policy clear can arrive on the React Native modules thread.
+     * A plain LinkedHashSet is not safe under that mix, and a corrupted set is a
+     * security-state corruption — hence every read/write below goes through
+     * synchronized(reasons).
+     */
+    private val reasons = java.util.LinkedHashSet<String>()
+
+    /**
+     * Monotonic timestamp of the moment the CURRENT violation set became
+     * non-empty, on the same clock as every other measurement here. A latch is a
+     * fact with a time, not a boolean that can be inferred away.
+     */
+    @Volatile private var latchedAtElapsed: Long = 0L
+
+    /**
+     * Bounded in-memory timeline of the containment path.
+     *
+     * WHY IN MEMORY (not Log): the release build strips every android.util.Log
+     * call via '-assumenosideeffects class android.util.Log' in proguard-rules,
+     * so a Log-only trace can never be read on the APK the user actually runs.
+     * This ring buffer is exposed through getContainmentTimeline() and printed
+     * from JS (ReactNativeJS lines survive), which is what makes the native →
+     * bridge → gate latency measurable on a RELEASE build.
+     */
+    private val timeline = java.util.ArrayDeque<String>()
+    private val timelineLock = Any()
+    private var timelineOverflow = 0
+
+    @Volatile private var moduleRef: WeakReference<SecurityModule>? = null
+    @Volatile private var activityRef: WeakReference<Activity>? = null
+    @Volatile private var coverView: android.view.View? = null
+    @Volatile private var coverBody: android.widget.TextView? = null
+    @Volatile private var jsGateVisible: Boolean = false
+    @Volatile private var lastSignalElapsed: Long = 0L
+    @Volatile private var lastSignalSource: String = ""
+
+    /** The mode the native window read last reported (for JS/diagnostics). */
+    @Volatile var windowMode: String = WINDOW_MODE_FULLSCREEN
+        private set
+
+    fun attach(module: SecurityModule) {
+        moduleRef = WeakReference(module)
+        // A reason raised before the module existed (cold start, or a touch that
+        // arrived while React was still booting) must reach JS as soon as there
+        // is a bridge to carry it.
+        // Unsynchronized reads of the shared set are NOT allowed here: a VPN
+        // callback can be writing on a binder thread while React attaches.
+        if (activeReasonCount() > 0) emitToJs("attach")
+    }
+
+    fun detach() {
+        moduleRef = null
+        removeCover()
+    }
+
+    fun attachActivity(activity: Activity) {
+        activityRef = WeakReference(activity)
+    }
+
+    fun snapshotCsv(): String = synchronized(reasons) { reasons.joinToString(",") }
+
+    /** True when this reason is currently held (used for cross-evidence markers). */
+    fun isReasonActive(reason: String): Boolean = synchronized(reasons) { reasons.contains(reason) }
+
+    /**
+     * Start the process-wide VPN watcher from an ACTIVITY callback.
+     *
+     * Delegated so the injected MainActivity needs no extra import, and so the
+     * watcher can exist before React Native (and therefore before any player or
+     * WebView) does. Idempotent.
+     */
+    fun ensureVpnWatch(context: android.content.Context?) {
+        VpnWatch.ensure(context)
+    }
+
+    /** Timeline marker for a VPN evidence transition (own stage, own reason). */
+    fun noteVpnTransition(active: Boolean, source: String) {
+        mark(
+            if (active) "vpn-active" else "vpn-cleared",
+            "source=" + source + " transport=" + VpnWatch.transportActive +
+                " present=" + VpnWatch.vpnPresent,
+        )
+    }
+
+    /** Monotonic ms the current violation set was latched (0 when clear). */
+    fun latchedAtMs(): Long = latchedAtElapsed
+
+    /** Monotonic ms from latch to now — the age of an unbroken violation. */
+    fun latchAgeMs(): Long {
+        val at = latchedAtElapsed
+        if (at == 0L) return -1L
+        return android.os.SystemClock.elapsedRealtime() - at
+    }
+
+    /** Append one stage mark to the bounded timeline (thread-safe). */
+    private fun mark(stage: String, detail: String) {
+        val now = android.os.SystemClock.elapsedRealtime()
+        val at = lastSignalElapsed
+        val delta = if (at == 0L) -1L else now - at
+        val entry = stage + "@" + now + "|sinceSignalMs=" + delta +
+            "|blockedMs=" + latchAgeMs() + "|" + detail + "|active=" + snapshotCsv()
+        synchronized(timelineLock) {
+            if (timeline.size >= 64) {
+                timeline.pollFirst()
+                timelineOverflow++
+            }
+            timeline.addLast(entry)
+        }
+        // Debug-build visibility only (release strips android.util.Log); the
+        // ring buffer above is the authoritative, release-readable record.
+        Log.i(TAG, "[Containment][timeline] " + entry)
+    }
+
+    /** Snapshot of the timeline, newest last. */
+    fun timelineEntries(): List<String> = synchronized(timelineLock) { ArrayList(timeline) }
+
+    fun timelineDropped(): Int = timelineOverflow
+
+    fun activeReasonCount(): Int = synchronized(reasons) { reasons.size }
+
+    fun lastSignalAgeMs(): Long {
+        if (lastSignalElapsed == 0L) return -1L
+        return android.os.SystemClock.elapsedRealtime() - lastSignalElapsed
+    }
+
+    /** Add a reason. Idempotent per reason; the cover appears at once. */
+    fun raise(reason: String, source: String) {
+        var isNew = false
+        var wasEmpty = false
+        synchronized(reasons) {
+            wasEmpty = reasons.isEmpty()
+            isNew = reasons.add(reason)
+            if (wasEmpty && isNew) latchedAtElapsed = android.os.SystemClock.elapsedRealtime()
+        }
+        lastSignalElapsed = android.os.SystemClock.elapsedRealtime()
+        lastSignalSource = source
+        Log.i(TAG, "[Containment] raise reason=" + reason + " source=" + source +
+            " new=" + isNew + " active=" + snapshotCsv())
+        mark("raise:" + reason, "source=" + source + " new=" + isNew)
+        if (isNew) refreshCoverText()
+        showCover(source)
+        emitToJs(source)
+    }
+
+    /** Remove a reason — only from a path that OWNS the evidence (see header). */
+    fun clear(reason: String, source: String) {
+        var removed = false
+        var nowEmpty = false
+        synchronized(reasons) {
+            removed = reasons.remove(reason)
+            nowEmpty = reasons.isEmpty()
+            if (nowEmpty) latchedAtElapsed = 0L
+        }
+        Log.i(TAG, "[Containment] clear reason=" + reason + " source=" + source +
+            " removed=" + removed + " active=" + snapshotCsv())
+        if (!removed) return
+        mark("clear:" + reason, "source=" + source)
+        if (nowEmpty) removeCover() else refreshCoverText()
+        emitToJs(source)
+    }
+
+    /** Last mode containment ITSELF acted on (second, independent dedup guard). */
+    @Volatile
+    private var lastContainmentWindowMode: String = WINDOW_MODE_UNKNOWN
+
+    private val windowMarkLock = Any()
+    private var windowMarkAtElapsed = 0L
+    private var windowMarkCoalesced = 0
+
+    /**
+     * Record a window-mode decision in the containment timeline.
+     *
+     * This is the marker requirement: the timeline must say WHY an observation
+     * was accepted, rejected, deduplicated or held back for confirmation —
+     * without itself becoming the flood it is supposed to explain.
+     */
+    fun noteWindowDecision(
+        decision: String,
+        mode: String,
+        source: String,
+        detail: String,
+        always: Boolean,
+    ) {
+        val now = android.os.SystemClock.elapsedRealtime()
+        synchronized(windowMarkLock) {
+            if (!always && windowMarkAtElapsed != 0L &&
+                now - windowMarkAtElapsed < WINDOW_MODE_MARK_MIN_MS
+            ) {
+                windowMarkCoalesced += 1
+                return
+            }
+            val extra = if (windowMarkCoalesced > 0) " coalesced=" + windowMarkCoalesced else ""
+            windowMarkAtElapsed = now
+            windowMarkCoalesced = 0
+            mark(
+                "window-mode-" + decision,
+                "mode=" + mode + " source=" + source + " " + detail + extra,
+            )
+        }
+    }
+
+    /**
+     * The platform's window-mode reading, mirrored into a containment reason.
+     *
+     * ONE action per authoritative state. Repeating a reading that is already in
+     * force must not re-mark, re-raise the cover or re-emit the reason set — that
+     * repetition is what produced the cover flap and the dropped timeline marks.
+     */
+    fun reportWindowMode(mode: String, source: String) {
+        if (mode == WINDOW_MODE_UNKNOWN) return
+        if (mode == lastContainmentWindowMode) return
+        lastContainmentWindowMode = mode
+        windowMode = mode
+        val prohibited = mode == WINDOW_MODE_MULTI || mode == WINDOW_MODE_PIP
+        if (prohibited) {
+            raise(REASON_WINDOW, "window:" + source)
+        } else if (mode == WINDOW_MODE_FULLSCREEN) {
+            clear(REASON_WINDOW, "window:" + source)
+        }
+        // 'unknown' is neither a finding nor a clearance: it changes nothing.
+    }
+
+    /** JS tells us its gate is on screen (it hides our cover) or gone. */
+    fun setJsGateVisible(visible: Boolean) {
+        jsGateVisible = visible
+        if (visible) {
+            mark("js-gate-mounted", "source=" + lastSignalSource)
+            // The native REASON SET is untouched: the React gate renders it and
+            // cannot clear it. Unmounting the gate makes the cover return.
+            removeCover()
+            return
+        }
+        mark("js-gate-unmounted", "active=" + snapshotCsv())
+        if (activeReasonCount() > 0) showCover("js-gate-unmounted")
+    }
+
+    private fun showCover(source: String) {
+        if (jsGateVisible) return
+        if (activeReasonCount() == 0) return
+        if (android.os.Looper.myLooper() != android.os.Looper.getMainLooper()) {
+            mainHandler.post { showCover(source) }
+            return
+        }
+        val activity = activityRef?.get() ?: return
+        if (coverView != null) {
+            refreshCoverText()
+            return
+        }
+        val decor = activity.window?.decorView as? android.view.ViewGroup ?: return
+        val startedNanos = android.os.SystemClock.elapsedRealtimeNanos()
+        try {
+            val view = buildCover(activity)
+            decor.addView(
+                view,
+                android.view.ViewGroup.LayoutParams(
+                    android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+                    android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+                ),
+            )
+            coverView = view
+            val us = (android.os.SystemClock.elapsedRealtimeNanos() - startedNanos) / 1000L
+            mark("cover-shown", "source=" + source + " buildUs=" + us)
+            Log.i(TAG, "[Containment][timeline] cover-shown source=" + source +
+                " buildUs=" + us + " sinceSignalMs=" + lastSignalAgeMs() +
+                " active=" + snapshotCsv())
+        } catch (e: Exception) {
+            Log.i(TAG, "[Containment] cover failed: " + e.message)
+        }
+    }
+
+    private fun removeCover() {
+        if (android.os.Looper.myLooper() != android.os.Looper.getMainLooper()) {
+            mainHandler.post { removeCover() }
+            return
+        }
+        val view = coverView ?: return
+        try {
+            (view.parent as? android.view.ViewGroup)?.removeView(view)
+        } catch (_: Exception) {
+            // A window being torn down must not break containment.
+        }
+        coverView = null
+        coverBody = null
+        mark("cover-removed", "source=visibility")
+        Log.i(TAG, "[Containment] cover-removed active=" + snapshotCsv())
+    }
+
+    private fun refreshCoverText() {
+        mainHandler.post {
+            val body = coverBody ?: return@post
+            body.text = reasonLines()
+        }
+    }
+
+    private fun reasonLines(): String {
+        // ONE synchronized snapshot: the cover text must describe a consistent
+        // state even while another thread raises or clears a reason.
+        val active: Set<String> = synchronized(reasons) { HashSet(reasons) }
+        val lines = ArrayList<String>()
+        if (active.contains(REASON_WINDOW)) {
+            lines.add("• نافذة عائمة أو وضع تقسيم الشاشة — يجب أن يعمل التطبيق بملء الشاشة")
+        }
+        if (active.contains(REASON_VPN)) {
+            lines.add("• اتصال VPN أو وكيل (Proxy) نشط")
+        }
+        if (lines.isEmpty()) lines.add("• تحقق أمني مطلوب")
+        lines.add("")
+        lines.add("أغلق النافذة العائمة أو وضع تقسيم الشاشة أولاً، ثم اضغط «إعادة التحقق».")
+        return lines.joinToString(System.lineSeparator())
+    }
+
+    /**
+     * The cover is OUR view inside OUR window: opaque, full-bleed, focusable and
+     * scroll-free. It carries no app content, only the reason list.
+     */
+    private fun buildCover(activity: Activity): android.view.View {
+        val density = activity.resources.displayMetrics.density
+        fun dp(value: Int): Int = (value * density).toInt()
+
+        val root = android.widget.FrameLayout(activity)
+        root.setBackgroundColor(android.graphics.Color.rgb(8, 15, 30))
+        root.isClickable = true
+        root.isFocusable = true
+        root.contentDescription = "MedAcademy security block"
+
+        val column = android.widget.LinearLayout(activity)
+        column.orientation = android.widget.LinearLayout.VERTICAL
+        column.gravity = android.view.Gravity.CENTER
+        column.setPadding(dp(28), dp(28), dp(28), dp(28))
+
+        val title = android.widget.TextView(activity)
+        title.text = "تم إيقاف الوصول مؤقتاً"
+        title.setTextColor(android.graphics.Color.WHITE)
+        title.textSize = 22f
+        title.gravity = android.view.Gravity.CENTER
+        title.setTypeface(null, android.graphics.Typeface.BOLD)
+        column.addView(title)
+
+        val body = android.widget.TextView(activity)
+        body.setTextColor(android.graphics.Color.rgb(226, 232, 240))
+        body.textSize = 16f
+        body.gravity = android.view.Gravity.CENTER
+        body.setPadding(0, dp(18), 0, dp(18))
+        body.text = reasonLines()
+        coverBody = body
+        column.addView(body)
+
+        val action = android.widget.Button(activity)
+        action.text = "إعادة التحقق"
+        action.setOnClickListener {
+            moduleRef?.get()?.emitContainmentRevalidateRequest()
+        }
+        column.addView(action)
+
+        root.addView(
+            column,
+            android.widget.FrameLayout.LayoutParams(
+                android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+                android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+            ),
+        )
+        return root
+    }
+
+    private fun emitToJs(source: String) {
+        val module = moduleRef?.get() ?: return
+        try {
+            module.emitContainmentState(snapshotCsv(), windowMode, source)
+        } catch (_: Exception) {
+            // A dead bridge must never break native containment.
+        }
     }
 }
 
@@ -225,9 +1011,9 @@ object WindowModeBridge {
  *   Frida detection     — port probe + process scan + library scan + /proc maps
  *   Xposed detection    — class load + package scan + stack trace analysis
  *   Magisk/Zygisk       — path scan + mount point + package check + DenyList
- *   Overlay attack      — targeted known-abusive package capability scan.
- *                         (Aggregate permission COUNT is capability evidence,
- *                         never proof of an active overlay — see detectOverlay.)
+ *   (Overlay/tapjacking detection was REMOVED with the floating-window
+ *   protection subsystem: a package capability scan cannot prove an overlay is
+ *   on screen, and the touch-flag path produced false locks.)
  *   Signature check     — SHA-256 cert fingerprint vs expected production hash
  *   Anti-tamper         — signature + native lib presence (distribution-aware;
  *                         installer source is telemetry, not tamper evidence)
@@ -254,7 +1040,15 @@ class SecurityModule(private val reactContext: ReactApplicationContext) :
 
     init {
         Log.d(TAG, "◀▶ SecurityModule INSTANTIATED — module is live and registered")
+        // Join the process-wide containment holder FIRST: a reason raised before
+        // this instance existed (a touch during boot) must reach JS now.
+        SecurityContainment.attach(this)
         registerVpnNetworkCallback()
+        // Join the PROCESS-WIDE watcher (started by the activity, possibly long
+        // before this module existed) so early evidence is never lost, and route
+        // its transitions to the bridge.
+        VpnWatch.attachListener { active -> emitVpnStateChanged(active) }
+        VpnWatch.ensure(reactContext)
         // Multi-window monitoring is deliberately NOT started from here.
         //
         // CRASH REGRESSION (v222, every launch, phone and tablet):
@@ -382,6 +1176,11 @@ class SecurityModule(private val reactContext: ReactApplicationContext) :
                 override fun onAvailable(network: Network) {
                     Log.d(TAG, "[VpnCallback] onAvailable — VPN network active: \$network")
                     callbackSeesVpn = true
+                    // NATIVE CONTAINMENT FIRST, in the callback's own thread-turn:
+                    // TRANSPORT_VPN is an OS-level fact, so the cover is attached
+                    // before the bridge event is even emitted (the JS lock then
+                    // takes over without ever showing an unprotected frame).
+                    SecurityContainment.raise(SecurityContainment.REASON_VPN, "vpn-callback")
                     emitVpnStateChanged(true)
                 }
                 override fun onLost(network: Network) {
@@ -392,6 +1191,9 @@ class SecurityModule(private val reactContext: ReactApplicationContext) :
                     upgradeVpnState()
                     val stillActive = runCatching { detectVpn() }.getOrDefault(false)
                     Log.d(TAG, "[VpnCallback] onLost re-check stillActive=\$stillActive")
+                    // Only the OS reporting "no tunnel" clears the VPN reason.
+                    // A teardown never touches the overlay/window reasons.
+                    if (!stillActive) SecurityContainment.clear(SecurityContainment.REASON_VPN, "vpn-callback-lost")
                     emitVpnStateChanged(stillActive)
                 }
             }
@@ -436,6 +1238,7 @@ class SecurityModule(private val reactContext: ReactApplicationContext) :
         // module never leaves a stale listener behind. The ACTIVITY's own state
         // is not touched.
         tearDownWindowModeMonitoring()
+        SecurityContainment.detach()
         val cb = vpnNetworkCallback ?: return
         try {
             val cm = reactContext.getSystemService(Context.CONNECTIVITY_SERVICE)
@@ -2038,248 +2841,155 @@ class SecurityModule(private val reactContext: ReactApplicationContext) :
         return mapsHas(listOf("/data/adb", "magisk"))
     }
 
-    // ══════════════════════════════════════════════════════════════════════════
-    // PHASE 2 — OVERLAY / TAPJACKING DETECTION
-    // ══════════════════════════════════════════════════════════════════════════
-
-    @ReactMethod
-    fun isOverlayDetected(promise: Promise) {
-        Log.d(TAG, "[isOverlayDetected] ▶ called")
-        runSafe(promise) {
-            val result = detectOverlay()
-            Log.d(TAG, "[isOverlayDetected] result=$result")
-            result
-        }
-    }
-
-    /** Capability evidence from the most recent detectOverlay() run. */
-    private var _lastOverlayCapableAppsCount: Int = 0
-
     /**
-     * Overlay / tapjacking detection — evidence-graded.
+     * FAST MANDATORY VPN PREFLIGHT — no network, no detector suite.
      *
-     * FALSE-POSITIVE FIX (root-cause audit): the previous implementation returned
-     * true when MORE THAN FIVE installed packages held SYSTEM_ALERT_WINDOW. That
-     * is a capability heuristic, not evidence of an active overlay: on a normal
-     * phone many legitimate apps (Messenger chat heads, browsers, launchers,
-     * screen recorders, OEM assistants) hold the permission without ever drawing
-     * over this app. Android defines SYSTEM_ALERT_WINDOW as the CAPABILITY to
-     * create overlay windows; Settings.canDrawOverlays() checks the capability
-     * and never whether an overlay is actually on screen.
+     * This is the barrier a video surface must consult BEFORE it creates a
+     * WebView/iframe or starts a protected request. It reads the atomic state the
+     * ConnectivityManager callbacks maintain, so it answers in well under a
+     * millisecond instead of waiting for the 14-detector evaluation (measured
+     * 2218 ms, dominated by the TLS probe).
      *
-     * The platform does not expose an API for a regular app to enumerate other
-     * apps' windows, so "an overlay is being drawn over our window right now"
-     * cannot be measured directly. A POSITIVE is therefore only reported when we
-     * hold targeted evidence: an installed, non-system package that is on the
-     * known screen-overlay/abuse tool list AND holds the permission. The raw
-     * capability count is exported as evidence (overlayCapableAppsCount) for
-     * backend observability — it is never itself a threat signal.
+     * registered=false means UNKNOWN, which a caller must treat as BLOCKED: an
+     * unmeasured network is not a clean network.
      */
-    private fun detectOverlay(): Boolean {
-        var capableApps = 0
+    @ReactMethod
+    fun getVpnSnapshot(promise: Promise) {
         try {
-            val pm = reactContext.packageManager
-            val packages = pm.getInstalledApplications(PackageManager.GET_META_DATA)
-            // Known screen-overlay / tapjacking tool packages (targeted capability check).
-            val abusiveOverlayPackages = setOf(
-                "com.perfectlysoft.screengrabber",
-                "com.tapjack.example",
-                "land.clover.screenmirror",
-                "com.mobizen.miing.service"
-            )
-            for (appInfo in packages) {
-                val holdsPermission = try {
-                    pm.checkPermission(
-                        android.Manifest.permission.SYSTEM_ALERT_WINDOW,
-                        appInfo.packageName
-                    ) == PackageManager.PERMISSION_GRANTED
-                } catch (_: Exception) { false }
-                if (!holdsPermission || appInfo.packageName == reactContext.packageName) continue
-                capableApps++
-                // POSITIVE only on targeted evidence — never on the aggregate count.
-                if (appInfo.packageName in abusiveOverlayPackages) {
-                    Log.d(TAG, "[detectOverlay] known abusive overlay package present: \${appInfo.packageName}")
-                    _lastOverlayCapableAppsCount = capableApps
-                    return true
-                }
-            }
-        } catch (_: Exception) { /* non-fatal — capability count stays best-effort */ }
-        _lastOverlayCapableAppsCount = capableApps
-        Log.d(TAG, "[detectOverlay] no abusive overlay package; overlayCapableAppsCount=\$capableApps (capability evidence only, NOT a threat)")
-        return false
+            val out = Arguments.createMap()
+            out.putBoolean("vpnTransport", VpnWatch.transportActive)
+            out.putBoolean("vpnPresent", VpnWatch.vpnPresent)
+            out.putBoolean("registered", VpnWatch.registered)
+            out.putDouble("ageSinceChangeMs", VpnWatch.ageSinceChangeMs().toDouble())
+            out.putDouble("signalMs", android.os.SystemClock.elapsedRealtime().toDouble())
+            promise.resolve(out)
+        } catch (e: Exception) {
+            promise.resolve(null)
+        }
     }
 
-    // ══════════════════════════════════════════════════════════════════════════
-    // PHASE 2 — LIVE OBSCURED-WINDOW / OVERLAY PROTECTION (real-time)
-    // ══════════════════════════════════════════════════════════════════════════
-    //
-    // detectOverlay() above answers a DIFFERENT question — "is a known-abusive
-    // overlay-capable package INSTALLED?" — a capability check that can never
-    // observe an overlay actually drawn over this window. A regular app has no
-    // API to enumerate another app's windows, so an ACTIVE overlay is only
-    // observable (and preventable) through the signals below.
-    //
-    // THREE LAYERS, strongest first:
-    //   1. PREVENTION (API 31+) — Window.setHideOverlayWindows(true) makes the
-    //      system HIDE every non-system overlay window while our window is
-    //      focused. There is nothing to detect because the overlay cannot be
-    //      shown. Needs the normal (install-time, no prompt) permission
-    //      android.permission.HIDE_OVERLAY_WINDOWS.
-    //   2. TOUCH FILTERING (all API levels) — View.setFilterTouchesWhenObscured
-    //      makes the framework DISCARD a touch that arrives while this window is
-    //      obscured, so a tapjacking tap never reaches a button. The flag is set
-    //      on the decor view and recursively on every view added afterwards.
-    //   3. OBSERVATION — a filter-touch listener reports when a touch WAS
-    //      filtered, so JS raises the security gate instead of the tap simply
-    //      vanishing.
-    //
-    // HONEST LIMITATIONS (documented, not papered over):
-    //   • An app CANNOT enumerate other apps' windows. There is no
-    //     "an overlay is on screen right now" API — layers 1-3 are the only
-    //     supported signals.
-    //   • MotionEvent.FLAG_WINDOW_IS_OBSCURED / FLAG_WINDOW_IS_PARTIALLY_OBSCURED
-    //     are only SET by the framework from API 29 (Q). On API 24-28 layer 3
-    //     reports nothing; only layers 1-2 protect those devices, and layer 1
-    //     needs API 31+.
-    //   • Layer 3 requires the user to TOUCH the screen: a passive overlay that
-    //     is never touched is invisible to every app-side check.
-    //   • A SYSTEM-signed overlay, or one drawn by the device owner/profile
-    //     owner, can be neither hidden nor filtered. Android protects no app
-    //     from that, and this module does not claim otherwise.
-    //   • setHideOverlayWindows only takes effect while OUR window is focused.
-
-    /** Live obscured-window belief, set ONLY from the framework's touch filter. */
-    @Volatile private var windowObscured: Boolean = false
-    private var overlayProtectionInstalled = false
-
-    /**
-     * True when the last observed touch was filtered by the framework because
-     * this window was obscured. Cleared by the next clean touch. Read by
-     * getSecurityFlags() and pushed to JS as the obscuredStateChanged event.
-     */
+    /** Ensure the process-wide watcher is running (self-healing from JS). */
     @ReactMethod
-    fun isWindowObscured(promise: Promise) {
-        runSafe(promise) { windowObscured }
+    fun ensureVpnWatchRegistration(promise: Promise) {
+        VpnWatch.ensure(reactContext)
+        promise.resolve(VpnWatch.registered)
     }
 
     /**
-     * Install overlay protection on the CURRENT activity's window.
-     * Idempotent; safe to call on every foreground/resume.
-     * Resolves true when at least the touch filter was applied.
+     * The complete native containment state (reasons + mode + latch). JS reads
+     * this on mount and after a resume so its reason set can never drift from
+     * the state the native cover was raised from.
      */
     @ReactMethod
-    fun enableOverlayProtection(promise: Promise) {
-        Log.d(TAG, "[enableOverlayProtection] ▶ called")
-        mainHandler.post {
-            try {
-                val activity = hostActivity
-                if (activity == null) {
-                    Log.d(TAG, "[enableOverlayProtection] no current activity")
-                    promise.resolve(false)
-                    return@post
-                }
-                val window = activity.window
-                val decor = window.decorView
-
-                // ── Layer 1: PREVENTION (API 31+) ─────────────────────────
-                // Non-system overlays are hidden outright while we are focused.
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                    try {
-                        window.setHideOverlayWindows(true)
-                        Log.d(TAG, "[enableOverlayProtection] setHideOverlayWindows(true) applied")
-                    } catch (e: Exception) {
-                        Log.d(TAG, "[enableOverlayProtection] setHideOverlayWindows unavailable: \${e.message}")
-                    }
-                }
-
-                // ── Layer 2: TOUCH FILTERING (all levels) ─────────────────
-                // Every view BELOW the decor root is filtered. The root itself is
-                // deliberately left unfiltered: a filtered root discards an
-                // obscured event inside dispatchTouchEvent, before any listener
-                // (layer 3) could observe it - and the obscured tap still never
-                // reaches a button because the content views drop it.
-                if (decor is ViewGroup) {
-                    for (i in 0 until decor.childCount) applyObscuredTouchFilter(decor.getChildAt(i))
-                } else {
-                    applyObscuredTouchFilter(decor)
-                }
-
-                // ── Layer 3: OBSERVATION ───────────────────────────
-                // Android exposes NO "your window was obscured" callback, so
-                // the documented evidence is the framework flag on a delivered
-                // touch: MotionEvent.FLAG_WINDOW_IS_OBSCURED and
-                // FLAG_WINDOW_IS_PARTIALLY_OBSCURED (set by the system from
-                // API 29). A listener on the unfiltered decor root reads that
-                // flag and ALWAYS returns false, so it never consumes or alters
-                // a gesture; layer 2 is what discards an obscured tap.
-                if (!overlayProtectionInstalled) {
-                    try {
-                        decor.setOnTouchListener { _: View, event: MotionEvent ->
-                            observeObscured(event)
-                            false
-                        }
-                    } catch (e: Exception) {
-                        Log.d(TAG, "[enableOverlayProtection] touch listener unavailable: \${e.message}")
-                    }
-                }
-
-                // Newly attached sub-trees (RN mounts views long after onCreate)
-                // must inherit at least the root flag — re-apply on hierarchy
-                // changes rather than walking the tree on every layout pass.
-                if (!overlayProtectionInstalled && decor is ViewGroup) {
-                    decor.setOnHierarchyChangeListener(
-                        object : ViewGroup.OnHierarchyChangeListener {
-                            override fun onChildViewAdded(parent: View, child: View) {
-                                applyObscuredTouchFilter(child)
-                            }
-                            override fun onChildViewRemoved(parent: View, child: View) { }
-                        }
-                    )
-                }
-
-                overlayProtectionInstalled = true
-                promise.resolve(true)
-            } catch (e: Exception) {
-                Log.d(TAG, "[enableOverlayProtection] failed: \${e.message}")
-                promise.resolve(false)
-            }
+    fun getContainmentState(promise: Promise) {
+        try {
+            val reading = Arguments.createMap()
+            reading.putString("reasons", SecurityContainment.snapshotCsv())
+            reading.putString("mode", SecurityContainment.windowMode)
+            reading.putDouble("nativeMs", android.os.SystemClock.elapsedRealtime().toDouble())
+            reading.putString("touchEvidence", SecurityContainment.lastTouchEvidence())
+            promise.resolve(reading)
+        } catch (e: Exception) {
+            promise.resolve(null)
         }
     }
 
     /**
-     * Recursively set the obscured-touch filter. Bounded by the real view
-     * count of this app's hierarchy (never user data), and idempotent.
+     * JS gate mounted: it covers the screen now, so the native cover stands
+     * down. The native REASON SET is untouched — the gate renders it.
      */
-    private fun applyObscuredTouchFilter(view: View) {
-        try {
-            view.filterTouchesWhenObscured = true
-            if (view is ViewGroup) {
-                for (i in 0 until view.childCount) applyObscuredTouchFilter(view.getChildAt(i))
-            }
-        } catch (_: Exception) {
-            // A view being torn down mid-walk must not break containment.
-        }
+    @ReactMethod
+    fun reportGateMounted(promise: Promise) {
+        SecurityContainment.setJsGateVisible(true)
+        promise.resolve(true)
     }
 
     /**
-     * Read the framework's own obscured-window evidence off a touch event and
-     * push a state change to JS only when the belief actually changes.
+     * The containment timeline (monotonic ms marks, newest last).
+     *
+     * This is how the native → bridge → gate latency is READ on a release APK:
+     * android.util.Log is stripped by ProGuard, so a Log-only trace would be
+     * unreadable exactly where it matters. JS prints this as ReactNativeJS
+     * lines, which survive.
      */
-    private fun observeObscured(event: MotionEvent) {
+    @ReactMethod
+    fun getContainmentTimeline(promise: Promise) {
         try {
-            val obscured = (event.flags and MotionEvent.FLAG_WINDOW_IS_OBSCURED) != 0 ||
-                (event.flags and MotionEvent.FLAG_WINDOW_IS_PARTIALLY_OBSCURED) != 0
-            if (obscured == windowObscured) return
-            windowObscured = obscured
-            Log.d(TAG, "[observeObscured] windowObscured=\$obscured")
+            val out = Arguments.createMap()
+            val arr = Arguments.createArray()
+            for (entry in SecurityContainment.timelineEntries()) arr.pushString(entry)
+            out.putArray("entries", arr)
+            out.putInt("dropped", SecurityContainment.timelineDropped())
+            out.putString("reasons", SecurityContainment.snapshotCsv())
+            out.putString("mode", SecurityContainment.windowMode)
+            out.putDouble("latchAgeMs", SecurityContainment.latchAgeMs().toDouble())
+            out.putDouble("nativeMs", android.os.SystemClock.elapsedRealtime().toDouble())
+            // Window-mode aggregation counters: how much duplicate
+            // evidence the single decision point collapsed. This is how
+            // the churn is measured on a release build instead of inferred.
+            out.putInt("windowSuppressed", WindowModeBridge.suppressed)
+            out.putInt("windowCollapsed", WindowModeBridge.lastCollapsed)
+            promise.resolve(out)
+        } catch (e: Exception) {
+            promise.resolve(null)
+        }
+    }
+
+    /** JS gate unmounted: if a native reason is still held, cover again. */
+    @ReactMethod
+    fun reportGateUnmounted(promise: Promise) {
+        SecurityContainment.setJsGateVisible(false)
+        promise.resolve(true)
+    }
+
+    /**
+     * Clear ONE reason from the policy path (admin-whitelisted VPN). JS may not
+     * clear the overlay or window reasons — those belong to the platform
+     * evidence alone.
+     */
+    @ReactMethod
+    fun clearContainmentReason(reason: String, promise: Promise) {
+        if (reason == SecurityContainment.REASON_WINDOW ||
+            reason == SecurityContainment.REASON_VPN
+        ) {
+            SecurityContainment.clear(reason, "js-policy")
+            promise.resolve(true)
+            return
+        }
+        promise.resolve(false)
+    }
+
+    /** Emitted by the native cover's own button so JS can run a fresh check. */
+    internal fun emitContainmentRevalidateRequest() {
+        try {
             if (!reactContext.hasActiveReactInstance()) return
-            val params = Arguments.createMap()
-            params.putBoolean("obscured", obscured)
-            params.putDouble("signalTimeMs", System.currentTimeMillis().toDouble())
             reactContext
                 .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
-                .emit("obscuredStateChanged", params)
+                .emit("containmentRevalidateRequested", Arguments.createMap())
         } catch (_: Exception) { }
+    }
+
+    /** ONE state event for the whole native containment set. */
+    internal fun emitContainmentState(
+        reasonsCsv: String,
+        mode: String,
+        source: String,
+    ) {
+        try {
+            if (!reactContext.hasActiveReactInstance()) return
+            val params = Arguments.createMap()
+            params.putString("reasons", reasonsCsv)
+            params.putString("mode", mode)
+            params.putString("source", source)
+            params.putDouble("nativeMs", android.os.SystemClock.elapsedRealtime().toDouble())
+            reactContext
+                .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
+                .emit("containmentStateChanged", params)
+            Log.i(TAG, "[Containment] emitted reasons=" + reasonsCsv + " mode=" + mode +
+                " source=" + source)
+        } catch (e: Exception) {
+            Log.d(TAG, "[Containment] emit failed: " + e.message)
+        }
     }
 
     // ══════════════════════════════════════════════════════════════════════════
@@ -2309,11 +3019,9 @@ class SecurityModule(private val reactContext: ReactApplicationContext) :
     //   • OEM floating-window features (MIUI / Samsung / EMUI floating windows)
     //     are vendor UI layered over the documented state; no API reports them
     //     and no claim is made about them.
-    //   • "Another app is drawn OVER us" is a DIFFERENT question, answered
-    //     separately and honestly by the obscured-touch evidence above
-    //     (API 29+ framework flags, touch-dependent) plus prevention via
-    //     setHideOverlayWindows on API 31+. A multi-window state is never
-    //     presented as an overlay, and vice versa.
+    //   • "Another app is drawn OVER us" is NOT measured at all: the overlay /
+    //     floating-window protection subsystem was removed (see SecurityContainment's
+    //     header). A window mode is never presented as an overlay.
     //
     // THREE INDEPENDENT TRIGGERS, ONE AUTHORITATIVE STATE (no polling timer):
     //   1. the activity callback relayed by WindowModeBridge (real transition),
@@ -2409,7 +3117,9 @@ class SecurityModule(private val reactContext: ReactApplicationContext) :
 
     /** Attach the relay, the RN lifecycle listener and the layout watcher. */
     private fun installWindowModeMonitoring() {
-        WindowModeBridge.subscribe { mode -> publishWindowMode(mode, "activity") }
+        WindowModeBridge.subscribe { mode, source, decision ->
+            onWindowModeDecision(mode, source, decision)
+        }
         if (!windowModeMonitoringInstalled) {
             val listener = object : LifecycleEventListener {
                 override fun onHostResume() {
@@ -2490,6 +3200,14 @@ class SecurityModule(private val reactContext: ReactApplicationContext) :
     private fun refreshWindowMode(source: String): String {
         val mode = readWindowMode(hostActivity)
         if (mode == WINDOW_MODE_UNKNOWN) return windowMode
+        // WINDOW-STATE SCOPE (floating-window protection removed): this module
+        // reports ONLY split-screen / freeform and PiP -- the two window states
+        // Android documents for an app. A paused-but-visible window from another
+        // app (a pinned panel, a Samsung pop-up view) is deliberately NOT
+        // classified here: it produced repeated false positives, and an ordinary
+        // app has no window enumeration to prove it. That class is covered by
+        // the traffic-interception detector instead (the tool must be installed,
+        // and an active VPN/proxy tunnel is blocked independently).
         publishWindowMode(mode, source)
         return mode
     }
@@ -2499,30 +3217,60 @@ class SecurityModule(private val reactContext: ReactApplicationContext) :
         if (activity == null) return WINDOW_MODE_UNKNOWN
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.N) return WINDOW_MODE_UNKNOWN
         return try {
-            // Focus participates here too, so the periodic re-assert, the
-            // pre-video preflight and the activity callback can never disagree
-            // about the same physical state.
-            val focused = try { !activity.window.decorView.hasWindowFocus() } catch (_: Exception) { false }
             WindowModeBridge.modeOf(
                 activity.isInMultiWindowMode(),
                 activity.isInPictureInPictureMode(),
-                focused,
-                hostResumed,
             )
         } catch (_: Exception) {
             WINDOW_MODE_UNKNOWN
         }
     }
 
-    /** Store and push, but only when the belief actually changes. */
+    /**
+     * The aggregator's ONE decision, turned into action.
+     *
+     * ACCEPT (and the replay that a freshly created module gets) is the only
+     * case that touches containment or emits to JS. A rejected weak snapshot is
+     * recorded — rate-limited — and changes nothing, so a layout pass can
+     * neither release the cover nor add a bridge event.
+     */
+    private fun onWindowModeDecision(mode: String, source: String, decision: String) {
+        val accepted = decision == "accept" || decision == "replay"
+        if (accepted) {
+            // Same frame: the native cover and the reason set follow the accepted
+            // reading (reportWindowMode is itself idempotent per mode).
+            SecurityContainment.reportWindowMode(mode, source)
+            SecurityContainment.noteWindowDecision(
+                "accept",
+                mode,
+                source,
+                "collapsed=" + WindowModeBridge.lastCollapsed,
+                true,
+            )
+            val changed = mode != windowMode || !windowModeMeasured
+            windowMode = mode
+            windowModeMeasured = true
+            if (changed || decision == "replay") {
+                Log.d(TAG, "\$mode (source=\$source decision=\$decision)")
+                emitWindowModeChanged(mode, source)
+            }
+            return
+        }
+        if (decision == "duplicate" || decision == "unknown") return
+        // 'rejected': record WHY, never change the state.
+        SecurityContainment.noteWindowDecision(decision, mode, source, "", false)
+    }
+
+    /**
+     * Store and push, but only when the aggregator accepts the reading.
+     *
+     * This used to call SecurityContainment.reportWindowMode() BEFORE its own
+     * change check, so every duplicate report still marked the timeline and
+     * re-ran raise/clear. The aggregator now owns that decision, once.
+     */
     private fun publishWindowMode(mode: String, source: String) {
         if (mode == WINDOW_MODE_UNKNOWN) return
-        val changed = mode != windowMode || !windowModeMeasured
-        windowMode = mode
-        windowModeMeasured = true
-        if (!changed) return
-        Log.d(TAG, "[windowMode] \$mode (source=\$source)")
-        emitWindowModeChanged(mode, source)
+        WindowModeBridge.observe(mode, source)
     }
 
     /** One event per real transition — never one per check or per layout pass. */
@@ -2869,7 +3617,6 @@ class SecurityModule(private val reactContext: ReactApplicationContext) :
             val frida   = runCatching { detectFrida()   }.getOrElse { unavailable.add("frida"); false }
             val xposed  = runCatching { detectXposed()  }.getOrElse { unavailable.add("xposed"); false }
             val magisk  = runCatching { detectMagisk()  }.getOrElse { unavailable.add("magisk"); false }
-            val overlay = runCatching { detectOverlay() }.getOrElse { unavailable.add("overlay"); false }
             val sigOk   = runCatching { checkSignatureValid() }.getOrElse {
                 // An EXCEPTION means the pin comparison did not run — it is not
                 // a pass. The VALUE keeps its fail-safe default (no new blocking
@@ -2882,7 +3629,6 @@ class SecurityModule(private val reactContext: ReactApplicationContext) :
             r.putBoolean("fridaDetected",   frida)
             r.putBoolean("xposedDetected",  xposed)
             r.putBoolean("magiskDetected",  magisk)
-            r.putBoolean("overlayDetected", overlay)
             r.putBoolean("signatureValid",  sigOk)
             r.putBoolean("tampered",        tamper)
 
@@ -2908,13 +3654,7 @@ class SecurityModule(private val reactContext: ReactApplicationContext) :
             r.putBoolean("expectedCertConfigured", expectedCertSha256().isNotEmpty())
             val sigHex = runCatching { getSignatureSha256Hex() }.getOrNull()
             if (sigHex != null) r.putString("signatureSha256", sigHex)
-            r.putInt("overlayCapableAppsCount", _lastOverlayCapableAppsCount)
-            // Live obscured-window evidence (the framework's own touch filter).
-            // Deliberately NOT the capability count: this is true only when a
-            // touch was actually delivered through an obscured window.
-            r.putBoolean("windowObscured", windowObscured)
-            r.putBoolean("overlayProtectionInstalled", overlayProtectionInstalled)
-            Log.d(TAG, "[getSecurityFlags] frida=$frida xposed=$xposed magisk=$magisk overlay=$overlay sigOk=$sigOk tamper=$tamper")
+            Log.d(TAG, "[getSecurityFlags] frida=$frida xposed=$xposed magisk=$magisk sigOk=$sigOk tamper=$tamper")
 
             // ── Multi-window / split-screen state (window-state evidence) ──
             // The LAST MEASURED value (the activity callback, the layout watcher
@@ -2942,6 +3682,45 @@ class SecurityModule(private val reactContext: ReactApplicationContext) :
             r.putBoolean("rootDetected",         rooted)
             r.putBoolean("emulatorDetected",     emulator)
             Log.d(TAG, "[getSecurityFlags] vpn=$vpn rooted=$rooted emulator=$emulator")
+
+            // ── System proxy (three-tier probe) ────────────────────────────
+            // This value was previously NOT published here (only the aggregate
+            // VPN model consumed it), so the JS proxy detector always read an
+            // absent field. Report the real measurement instead of a default.
+            val proxy = runCatching { detectProxy() }.getOrElse {
+                unavailable.add("proxy"); false
+            }
+            r.putBoolean("proxyDetected", proxy)
+
+            // ── Traffic-interception tools (INSTALLED-PACKAGE evidence) ────
+            // Targeted package visibility only: every id below is declared in
+            // the manifest <queries> block (INTERCEPTION_TOOLS in this plugin),
+            // so no QUERY_ALL_PACKAGES is needed. The result is an INSTALLED
+            // fact — it does not prove interception is happening, and an
+            // unknown / renamed tool is NOT detectable this way.
+            val interception = runCatching { detectInterceptionTools() }
+                .getOrElse {
+                    unavailable.add("interceptionTools")
+                    Triple(emptyList<String>(), emptyList<String>(), emptyList<String>())
+                }
+            putStringList(r, "interceptionToolPackages", interception.first)
+            putStringList(r, "interceptionToolLabels", interception.second)
+            putStringList(r, "interceptionSignerMismatches", interception.third)
+            Log.d(TAG, "[getSecurityFlags] proxy=$proxy interception=\${interception.second}")
+
+            // ── User-installed CA certificates (trust-store evidence) ──────
+            // INDEPENDENT of the installed-app catalog: this reads the trust
+            // store itself, so a CA installed by Reqable / ProxyPin / Burp
+            // Suite is still detected after that app is uninstalled.
+            // INCONCLUSIVE is reported as an UNAVAILABLE check (never as a
+            // threat and never as a clean result).
+            val userCa = runCatching { inspectUserCaStore() }.getOrElse {
+                "inconclusive" to 0
+            }
+            if (userCa.first == "inconclusive") unavailable.add("userCaStore")
+            r.putString("userCaStatus", userCa.first)
+            r.putInt("userCaCount", userCa.second)
+            Log.d(TAG, "[getSecurityFlags] userCaStatus=\${userCa.first} count=\${userCa.second}")
 
             // ── Evidence provenance + availability (second-pass audit) ───────
             // Sub-checks that could NOT run are reported as UNKNOWN, never
@@ -2997,6 +3776,147 @@ class SecurityModule(private val reactContext: ReactApplicationContext) :
             if (method != null) return method.invoke(wm) as? Boolean == true
         }
         return detectRecordingViaServices()
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // TRAFFIC-INTERCEPTION TOOL DETECTION (installed-package evidence)
+    //
+    // WHAT THIS IS: a curated catalog of Android apps whose purpose is HTTPS
+    // interception, local-proxy capture or traffic analysis. Each id is a real
+    // application id, and each is declared in the manifest <queries> block, so
+    // getPackageInfo() answers truthfully on Android 11+ WITHOUT
+    // QUERY_ALL_PACKAGES (which Google Play restricts to specific permitted
+    // use cases and is deliberately not used here).
+    //
+    // WHAT THIS IS NOT: proof of interception. It is an INSTALLED fact:
+    //   • a tool that is installed but never started IS reported (the user can
+    //     start it at any time, and it can attach a local proxy without a VPN);
+    //   • a RENAMED / repackaged build (different application id) is NOT
+    //     reported — public APIs cannot enumerate unknown tools;
+    //   • interception performed off-device (router, gateway) is invisible.
+    // Live interception is covered by the INDEPENDENT signals: active VPN
+    // transport (VpnWatch), kernel tunnel routes and the system proxy probe.
+    //
+    // SIGNATURES: the signer digest of every found package is computed and
+    // compared ONLY when a pinned digest is configured below. No verified
+    // official digest database is shipped (an unverifiable pin would be worse
+    // than none), so a mismatch is EVIDENCE, never a claim of authentic/
+    // counterfeit; the field is empty in the current build.
+    // ═══════════════════════════════════════════════════════════════════
+    private fun detectInterceptionTools(): Triple<List<String>, List<String>, List<String>> {
+        val foundPackages = ArrayList<String>()
+        val foundLabels = ArrayList<String>()
+        val signerMismatches = ArrayList<String>()
+        val pm = reactContext.packageManager
+        for (tool in INTERCEPTION_TOOLS) {
+            val installed = try {
+                pm.getPackageInfo(tool.pkg, 0)
+                true
+            } catch (_: PackageManager.NameNotFoundException) {
+                false
+            } catch (_: Exception) {
+                false
+            }
+            if (!installed) continue
+            foundPackages.add(tool.pkg)
+            foundLabels.add(tool.label)
+            val pinned = INTERCEPTION_TOOL_SIGNERS[tool.pkg]
+            if (pinned != null) {
+                val actual = runCatching { signerSha256Hex(tool.pkg) }.getOrNull()
+                if (actual == null || !actual.equals(pinned, ignoreCase = true)) {
+                    signerMismatches.add(tool.pkg)
+                }
+            }
+        }
+        return Triple(foundPackages, foundLabels, signerMismatches)
+    }
+
+    // ══════════════════════════════════════════════════════════════════════
+    /** SHA-256 (hex) of a package's current signing certificate. Public data. */
+    private fun signerSha256Hex(pkg: String): String? {
+        val pm = reactContext.packageManager
+        val signatures = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            val info = pm.getPackageInfo(pkg, PackageManager.GET_SIGNING_CERTIFICATES)
+            info.signingInfo?.apkContentsSigners
+        } else {
+            @Suppress("DEPRECATION")
+            val info = pm.getPackageInfo(pkg, PackageManager.GET_SIGNATURES)
+            @Suppress("DEPRECATION")
+            info.signatures
+        } ?: return null
+        val first = signatures.firstOrNull() ?: return null
+        val digest = java.security.MessageDigest.getInstance("SHA-256")
+        return digest.digest(first.toByteArray()).joinToString("") { b ->
+            String.format("%02x", b)
+        }
+    }
+
+    // USER-INSTALLED CA CERTIFICATES (trust-store evidence)
+    // ══════════════════════════════════════════════════════════════════════
+    // WHAT IT MEASURES: whether THIS user's CA trust store contains at least
+    // one certificate the user added. It says nothing about who issued it, and
+    // it needs no knowledge of the app that installed it — so a CA left behind
+    // by an uninstalled interception tool is still found.
+    //
+    // HOW (public API only): "AndroidCAStore" is the platform's documented
+    // read-only KeyStore view of the CA store (KeyStore type table, API 14+).
+    // Its aliases carry AOSP Conscrypt's own convention
+    // (TrustedCertificateStore): "user:" + subject hash for a certificate in
+    // the mutable user directory (cacerts-added), "system:" + hash for one in
+    // the immutable system directory. The store lists an alias only when the
+    // certificate behind it actually parses, and it elides the zero-length
+    // tombstone a deleted user CA leaves behind — so a REMOVED certificate is
+    // not reported and a re-verification clears the finding.
+    //
+    // NOT USED: root, reflection, non-SDK APIs, filesystem paths under
+    // /data/misc, shell commands, permissions, or issuer/subject/CN/O and
+    // fingerprint matching. A certificate is user-installed because the
+    // platform says it lives in the user store, never because of its name.
+    //
+    // HONEST LIMITS: a secondary user or work-profile store is a different
+    // user and is not visible from this process; an OEM that replaces the CA
+    // store or hides it may answer differently. Those cases must never read as
+    // "clean": an unreadable, empty or unrecognised store is INCONCLUSIVE.
+    //
+    // Returns (status, userCaCount) where status is one of:
+    //   "clean"        every alias resolved and none was user-added
+    //   "user_ca"      at least one user-added CA certificate is installed
+    //   "inconclusive" could not read, listed nothing, or listed something
+    //                  this classification cannot explain
+    private fun inspectUserCaStore(): Pair<String, Int> {
+        return try {
+            val store = java.security.KeyStore.getInstance("AndroidCAStore")
+            store.load(null, null)
+            var aliasCount = 0
+            var userCount = 0
+            val aliases = store.aliases()
+            while (aliases.hasMoreElements()) {
+                val alias = aliases.nextElement()
+                if (alias == null) return "inconclusive" to 0
+                aliasCount++
+                if (alias.startsWith("user:")) {
+                    // The platform calls it a user CA: it must resolve to a real
+                    // X.509 certificate, else this store is not one we can
+                    // classify reliably.
+                    val cert = store.getCertificate(alias)
+                    if (cert !is java.security.cert.X509Certificate) return "inconclusive" to 0
+                    userCount++
+                } else if (!alias.startsWith("system:")) {
+                    // Outside the documented alias convention — do not guess.
+                    return "inconclusive" to 0
+                }
+            }
+            when {
+                // An empty enumeration is indistinguishable from a store we
+                // failed to read. It is never evidence of a clean device.
+                aliasCount == 0 -> "inconclusive" to 0
+                userCount > 0 -> "user_ca" to userCount
+                else -> "clean" to 0
+            }
+        } catch (_: Throwable) {
+            // An exception is UNKNOWN, not clean.
+            "inconclusive" to 0
+        }
     }
 
     private fun detectRecordingViaServices(): Boolean {
@@ -3645,178 +4565,36 @@ const WINDOW_MODE_ACTIVITY_OVERRIDES = `
    */
   override fun onMultiWindowModeChanged(isInMultiWindowMode: Boolean, newConfig: Configuration) {
     super.onMultiWindowModeChanged(isInMultiWindowMode, newConfig)
-    WindowModeBridge.report(isInMultiWindowMode, isInPictureInPictureMode())
+    WindowModeBridge.report(isInMultiWindowMode, isInPictureInPictureMode(), "mode-change")
   }
 
   @Deprecated("Deprecated in Java")
   override fun onMultiWindowModeChanged(isInMultiWindowMode: Boolean) {
     super.onMultiWindowModeChanged(isInMultiWindowMode)
-    WindowModeBridge.report(isInMultiWindowMode, isInPictureInPictureMode())
+    WindowModeBridge.report(isInMultiWindowMode, isInPictureInPictureMode(), "mode-change")
   }
 
   override fun onPictureInPictureModeChanged(isInPictureInPictureMode: Boolean, newConfig: Configuration) {
     super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
-    WindowModeBridge.report(isInMultiWindowMode(), isInPictureInPictureMode)
+    WindowModeBridge.report(isInMultiWindowMode(), isInPictureInPictureMode, "mode-change")
   }
 
-  /**
-   * MedAcademy floating-window guard (injected by plugins/withSecurityModule.js).
-   *
-   * Android has no API that enumerates another app's windows, so "an app is
-   * floating over us" cannot be read directly. What IS documented is the
-   * ACTIVITY's own window focus: a floating window from another task takes
-   * focus while our task stays resumed — so losing focus while resumed, full
-   * screen and not in PiP is the platform's own answer to "another window is
-   * in front of ours". Notifications and the keyboard never take window focus.
-   *
-   * A short settle delay filters the momentary focus churn of transitions and
-   * of our OWN dialogs: the state is re-read after focus had a chance to come
-   * back, and only a still-unfocused, still-resumed activity is reported.
-   */
-  private var foreignWindowCheck: Runnable? = null
-
-  /** True between onPause and onResume: another task/activity is on top of us. */
-  private var activityPaused = false
-
-  /**
-   * TRUE while THIS activity owns the TOP-RESUMED slot (API 29+).
-   *
-   * THE DISCRIMINATOR the app-wide floating-window lock depends on:
-   *
-   *   • a FOREIGN ACTIVITY (a Samsung pop-up / freeform app window, a floating
-   *     panel that hosts an activity, a translucent activity from another app)
-   *     takes the top-resumed slot while our window is still displayed →
-   *     onTopResumedActivityChanged(false);
-   *   • the NOTIFICATION SHADE, the volume/power dialogs and the IME take
-   *     WINDOW FOCUS but are system windows, not activities, so the top-resumed
-   *     slot stays ours.
-   *
-   * Without this discriminator, focus loss alone had to be reported as a
-   * foreign window, and locking the whole app on it would have fired on every
-   * shade pull. That is exactly why the previous implementation only blocked
-   * the video. With it, "another app is in front of us" is provable, so the
-   * whole application locks and the shade stays harmless.
-   *
-   * Defaults to true: on API < 29 the callback does not exist, and the legacy
-   * fail-closed focus rule stays in force (see windowCoveredByOtherTask).
-   */
-  private var topResumedActivity = true
-
-  /**
-   * OUR window is still being displayed but another window holds focus.
-   *
-   * This is the ONLY signal Android gives an ordinary app for "something is in
-   * front of us": a foreign floating / pop-up window takes focus while our
-   * window stays visible. It deliberately no longer requires activityPaused
-   * — a pop-up over a RESUMED activity produced exactly that combination and
-   * was missed (see WindowModeBridge.modeOf).
-   *
-   * The remaining exclusions are the ones that are provably NOT a foreign
-   * window: a finishing activity, and a window that is no longer visible
-   * (fully backgrounded — nothing is covered). Our own dialogs also take
-   * focus; they are filtered by the 700 ms settle below (the state is re-read
-   * live) and again in JS while a dialog is open. A notification shade is NOT
-   * distinguishable from an overlay here, so it is treated fail-closed: it
-   * blocks protected playback and requires re-verification.
-   */
-  private fun windowCoveredByOtherTask(): Boolean {
-    val w = window ?: return false
-    if (isFinishing) return false
-    val decor = w.decorView
-    if (decor.windowVisibility != View.VISIBLE) return false
-    if (decor.hasWindowFocus()) return false
-    // API 29+: focus loss is a FOREIGN APPLICATION only when another activity
-    // took the top-resumed slot. A shade pull / system dialog leaves us
-    // top-resumed, and locking the whole app for it would be a false positive.
-    // Pre-29 the top-resumed callback does not exist, so the legacy fail-closed
-    // focus rule is kept (an older device over-blocks rather than under-blocks).
-    if (android.os.Build.VERSION.SDK_INT >= 29 && topResumedActivity) return false
-    return true
-  }
-
-  private fun cancelForeignCheck() {
-    foreignWindowCheck?.let { window?.decorView?.removeCallbacks(it) }
-    foreignWindowCheck = null
-  }
-
-  /**
-   * One settled re-check after a focus change. The delay filters the momentary
-   * focus churn of any transition; the state is then read LIVE, never taken
-   * from the event that scheduled it.
-   */
-  private fun scheduleForeignCheck() {
-    cancelForeignCheck()
-    val check = Runnable {
-      foreignWindowCheck = null
-      if (windowCoveredByOtherTask()) {
-        // appResumed reflects the LIVE lifecycle flag; the mode mapping no
-        // longer depends on it, but it is still reported for diagnostics.
-        WindowModeBridge.report(
-          isInMultiWindowMode(),
-          isInPictureInPictureMode(),
-          true,
-          !activityPaused,
-        )
-      }
-    }
-    foreignWindowCheck = check
-    window?.decorView?.postDelayed(check, 700L)
-  }
 
   override fun onPause() {
     super.onPause()
-    activityPaused = true
-    // A floating window from another app pauses us exactly here.
-    scheduleForeignCheck()
   }
 
   override fun onResume() {
     super.onResume()
-    activityPaused = false
-    cancelForeignCheck()
+    // EARLIEST VPN SNAPSHOT: onResume runs before React Native's JS is
+    // initialised, so the mandatory VPN barrier has a real, live answer by the
+    // time the first video surface can appear. Idempotent.
+    SecurityContainment.ensureVpnWatch(applicationContext)
     // Returning to the front is authoritative: full-screen, focused, resumed.
     // The JS release rule still requires a fresh verdict before content shows.
-    WindowModeBridge.report(isInMultiWindowMode(), isInPictureInPictureMode(), false, true)
+    WindowModeBridge.report(isInMultiWindowMode(), isInPictureInPictureMode(), "lifecycle")
   }
 
-  override fun onWindowFocusChanged(hasFocus: Boolean) {
-    super.onWindowFocusChanged(hasFocus)
-    if (hasFocus) {
-      cancelForeignCheck()
-      WindowModeBridge.report(isInMultiWindowMode(), isInPictureInPictureMode(), false, true)
-      return
-    }
-    scheduleForeignCheck()
-  }
-
-  /**
-   * THE APP-WIDE FLOATING-WINDOW SIGNAL (API 29+).
-   *
-   * Reported IMMEDIATELY (no 700 ms settle): the top-resumed slot changing
-   * hands is dispositive — the platform states that another activity is on top
-   * of ours — so the window in which a player could still mount and fetch is
-   * closed at once. That immediacy is what removes the "video plays for a few
-   * seconds, then stops" sequence observed with a floating VPN app open.
-   *
-   * Returning the slot to us re-reads the live focus state and reports full
-   * screen; JS still refuses to unlock until a FRESH verdict lands.
-   */
-  override fun onTopResumedActivityChanged(isTopResumed: Boolean) {
-    if (android.os.Build.VERSION.SDK_INT >= 29) {
-      super.onTopResumedActivityChanged(isTopResumed)
-    }
-    topResumedActivity = isTopResumed
-    if (!isTopResumed) {
-      cancelForeignCheck()
-      if (!activityPaused && !isFinishing && window?.decorView?.windowVisibility == View.VISIBLE) {
-        WindowModeBridge.report(isInMultiWindowMode(), isInPictureInPictureMode(), true, true)
-      }
-      return
-    }
-    if (window?.decorView?.hasWindowFocus() == true) {
-      WindowModeBridge.report(isInMultiWindowMode(), isInPictureInPictureMode(), false, true)
-    }
-  }
 `;
 
 /**
@@ -3842,9 +4620,18 @@ function patchMainActivityForWindowMode(contents) {
   // full — from its doc comment to the class's closing brace — and re-injected
   // below. Anything outside that block is untouched.
   if (contents.includes(WINDOW_MODE_ACTIVITY_MARKER)) {
+    // The CONTRACT, not just a name: each addition below is a change that an
+    // older injected block would silently keep missing (this is exactly how the
+    // window-mode SOURCE labels and the shared top-resumed fact would have been
+    // lost when an already-patched activity was reused).
     const upToDate =
-      /override fun onTopResumedActivityChanged\(isTopResumed: Boolean\)/.test(contents) &&
-      /topResumedActivity/.test(contents);
+      // RETIRED SUBSYSTEM: an activity that still forwards focus-loss,
+      // obscured-touch or overlay-prevention evidence belongs to the removed
+      // floating-window protection and must be replaced, not kept.
+      !/onTopResumedActivityChanged|topResumedActivity|cancelForeignCheck|foreignWindowCheck|dispatchTouchEvent|observeTouch|applyHideOverlayWindows/.test(contents) &&
+      // The earliest VPN snapshot lives in onResume: an already-patched activity
+      // that lacks it must be UPGRADED, or the barrier would start late again.
+      /SecurityContainment\.ensureVpnWatch\(applicationContext\)/.test(contents);
     if (upToDate) return contents;
     const markerIndex = contents.indexOf(WINDOW_MODE_ACTIVITY_MARKER);
     const blockStart  = contents.lastIndexOf('/**', markerIndex);
@@ -3864,15 +4651,6 @@ function patchMainActivityForWindowMode(contents) {
       next = next.replace(/^(import )/m, 'import android.content.res.Configuration\n$1');
     }
   }
-  if (!/^import android\.view\.View$/m.test(next)) {
-    // Needed by the foreign-window check (View.VISIBLE): "our window is still
-    // being displayed".
-    if (/^import android\.os\.Bundle$/m.test(next)) {
-      next = next.replace(/^import android\.os\.Bundle$/m, 'import android.os.Bundle\nimport android.view.View');
-    } else if (/^import /m.test(next)) {
-      next = next.replace(/^(import )/m, 'import android.view.View\n$1');
-    }
-  }
   if (!/^import com\.medacademy\.security\.WindowModeBridge$/m.test(next)) {
     if (/^import com\.facebook\.react\.ReactActivity$/m.test(next)) {
       next = next.replace(
@@ -3882,6 +4660,13 @@ function patchMainActivityForWindowMode(contents) {
     } else if (/^import /m.test(next)) {
       next = next.replace(/^(import )/m, 'import com.medacademy.security.WindowModeBridge\n$1');
     }
+  }
+  if (!/^import com\.medacademy\.security\.SecurityContainment$/m.test(next)) {
+    // Needed by onResume: the earliest (pre-JS) VPN snapshot barrier.
+    next = next.replace(
+      /^import com\.medacademy\.security\.WindowModeBridge$/m,
+      'import com.medacademy.security.SecurityContainment\nimport com.medacademy.security.WindowModeBridge'
+    );
   }
 
   // 2. The overrides themselves, before the final closing brace of the class.
@@ -3895,6 +4680,7 @@ function patchMainActivityForWindowMode(contents) {
   const complete =
     /import android\.content\.res\.Configuration/.test(patched) &&
     /import com\.medacademy\.security\.WindowModeBridge/.test(patched) &&
+    /import com\.medacademy\.security\.SecurityContainment/.test(patched) &&
     /override fun onMultiWindowModeChanged\(isInMultiWindowMode: Boolean, newConfig: Configuration\)/.test(patched) &&
     /override fun onMultiWindowModeChanged\(isInMultiWindowMode: Boolean\)/.test(patched) &&
     /override fun onPictureInPictureModeChanged\(isInPictureInPictureMode: Boolean, newConfig: Configuration\)/.test(patched);
@@ -4512,6 +5298,17 @@ const SECURITY_CHECK_PACKAGES = [
   'org.meowcat.edxposed.manager', 'com.solohsu.android.edxp.manager',
   'io.github.lsposed.lspatch', 'com.rovo98.edxposed.manager',
   'io.github.vvb2060.magisk.module.xposed', 'me.weishu.exp',
+  // detectInterceptionTools() catalog — targeted visibility for the apps whose
+  // ONLY purpose is HTTPS interception / traffic capture (see INTERCEPTION_TOOLS
+  // in the Kotlin template). Ordinary VPN clients are deliberately absent.
+  'com.network.proxy', 'com.reqable.android',
+  'tech.httptoolkit.android.v1', 'com.proxyman.proxymanandroid',
+  'com.shafayat.proxly',
+  'com.guoshi.httpcanary', 'com.guoshi.httpcanary.premium',
+  'com.emanuelef.remote_capture', 'app.greyshirts.sslcapture',
+  'com.wujiuye.apicatcher', 'com.anetcapture.mock',
+  'com.moni.proxy', 'com.nutiverse.httpglass',
+  'com.realsignal.packetcapturepro', 'com.minhui.networkcapture',
 ];
 
 const withTargetAppQueries = (config) =>
@@ -4527,29 +5324,6 @@ const withTargetAppQueries = (config) =>
     return cfg;
   });
 
-/**
- * android.permission.HIDE_OVERLAY_WINDOWS — install-time (normal) permission,
- * no runtime prompt. It is what lets SecurityModule call
- * Window.setHideOverlayWindows(true) (API 31+), which makes the SYSTEM hide
- * every non-system overlay window while this app is focused.
- *
- * This is the strongest supported overlay protection available to a regular
- * app: prevention instead of detection. Without the permission the call is a
- * silent no-op (caught in Kotlin), so the app degrades to touch filtering
- * rather than failing — but it must be declared for the protection to exist.
- */
-const withOverlayWindowPermission = (config) =>
-  withAndroidManifest(config, (cfg) => {
-    const manifest = cfg.modResults.manifest;
-    if (!manifest['uses-permission']) manifest['uses-permission'] = [];
-    const name = 'android.permission.HIDE_OVERLAY_WINDOWS';
-    const exists = manifest['uses-permission'].some(
-      (p) => p.$ && p.$['android:name'] === name
-    );
-    if (!exists) manifest['uses-permission'].push({ $: { 'android:name': name } });
-    return cfg;
-  });
-
 const withSecurityModule = (config) => {
   config = withMedaSslPins(config);
   // Android
@@ -4558,7 +5332,6 @@ const withSecurityModule = (config) => {
   config = withMainActivityWindowMode(config);
   config = withSecNativeCoreSources(config);
   config = withTargetAppQueries(config);
-  config = withOverlayWindowPermission(config);
   // iOS
   config = withIOSSwiftSources(config);
   config = withIOSEmbedPodsFrameworks(config);

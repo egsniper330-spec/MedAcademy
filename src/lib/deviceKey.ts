@@ -370,7 +370,8 @@ async function collectEvidenceFlags(): Promise<Record<string, unknown>> {
     out.debugger = flags.debuggerAttached === true;
     out.test_only = flags.testOnlyBuild === true;
     out.tampered = flags.tampered === true;
-    out.overlay = flags.overlayDetected === true;
+    // The overlay/tapjacking detector was removed with the floating-window
+    // protection subsystem: no overlay field is measured or sent any more.
     out.screen_recording = flags.screenBeingRecorded === true;
     out.signature_valid = flags.signatureValid === true;
     out.signature_mismatch = flags.signatureValid === false;

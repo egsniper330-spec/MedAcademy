@@ -69,7 +69,7 @@ from "does this cause take over the screen?" (`rendersBlockScreen`).
 ### Precedence (changed deliberately)
 
 ```
-BLOCKED_OVERLAY > BLOCKED_MULTI_WINDOW > BLOCKED_VPN > BLOCKED_SECURITY_VIOLATION
+BLOCKED_MULTI_WINDOW > BLOCKED_VPN > BLOCKED_SECURITY_VIOLATION
                 > BLOCKED_BACKGROUND_RESUME > CHECKING > ALLOWED
 ```
 

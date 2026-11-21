@@ -3,9 +3,10 @@
  *
  * Regression suite for the THREE reported defects fixed in this round:
  *
- *   A. A foreign floating / pop-up window must lock the WHOLE application
- *      (not just the video player), and only a positive full-screen reading
- *      plus a FRESH verdict may release it.
+ *   A. The floating-window (focus-loss) detector is REMOVED — completely, from
+ *      the native template, the JS model, the gate copy and both locales — and
+ *      a window-mode lock still needs a restored mode plus a FRESH verdict to
+ *      release it.
  *
  *   B. VPN / proxy detection must destroy the player IMMEDIATELY (hard
  *      containment), so MedAcademy's own WebView cannot keep issuing player or
@@ -91,8 +92,10 @@ const TOP_RESUMED = (() => {
 console.log('\nA. App-wide lock for a foreign floating window');
 // ══════════════════════════════════════════════════════════════════════════
 
-check('A1: the model treats a foreign window as a prohibited window mode',
-  M.isProhibitedWindowMode('foreign_window') === true);
+check('A1: a foreign (floating) window is NO LONGER a prohibited window mode',
+  M.isProhibitedWindowMode('foreign_window') === false
+  && M.isProhibitedWindowMode('multi_window') === true
+  && M.isProhibitedWindowMode('picture_in_picture') === true);
 
 check('A2: a prohibited window mode renders the full-screen block page',
   M.rendersBlockScreen('BLOCKED_MULTI_WINDOW') === true
@@ -102,22 +105,21 @@ check('A2: a prohibited window mode renders the full-screen block page',
     vpnBlocked: false, violationBlocked: false,
   }) === 'BLOCKED_MULTI_WINDOW');
 
-check('A3: the JS applier takes the GLOBAL window-mode lock for a foreign window',
-  /engageSecurityLock\(LOCK_SRC_WINDOW_MODE, \{ hard: true \}\)/.test(FOREIGN));
+check('A3: no foreign branch survives in the JS applier',
+  FOREIGN === '' && !/foreign_window/.test(APPLY));
 
-check('A4: the lock is HARD, so screens unmount the player',
-  FOREIGN.includes('{ hard: true }'));
+check('A4: split-screen / PiP take the HARD lock (screens unmount the player)',
+  /if \(isProhibitedWindowMode\(mode\)\) \{[\s\S]{0,600}engageSecurityLock\(LOCK_SRC_WINDOW_MODE, \{ hard: true \}\)/.test(APPLY));
 
-check('A5: it still conceals/destroys protected content at the same instant',
-  /blockProtectedContent\('foreign-window'\)/.test(FOREIGN));
+check('A5: they still conceal/destroy protected content at the same instant',
+  /blockProtectedContent\('multi-window'\)/.test(APPLY));
 
-check('A6: the branch no longer returns after a video-only response',
-  FOREIGN.indexOf('engageSecurityLock') < FOREIGN.indexOf("blockProtectedContent('foreign-window')")
-  && /engageSecurityLock/.test(FOREIGN));
+check('A6: the lock engages before the content block (no video-only window)',
+  APPLY.indexOf('engageSecurityLock') < APPLY.indexOf("blockProtectedContent('multi-window')"));
 
 check('A7: the engaged mode is remembered for the gate copy',
-  /windowModeEngagedModeRef\.current = mode;/.test(FOREIGN)
-  && /windowModeEngagedSerialRef\.current = verdictSerialRef\.current;/.test(FOREIGN));
+  /windowModeEngagedModeRef\.current = mode;/.test(APPLY)
+  && /windowModeEngagedSerialRef\.current = verdictSerialRef\.current/.test(APPLY));
 
 check('A8: release needs a restored mode AND a strictly newer verdict',
   M.canClearMultiWindowBlock({ modeRestored: false, hasFreshVerdict: true }) === false
@@ -127,34 +129,41 @@ check('A8: release needs a restored mode AND a strictly newer verdict',
 check('A9: a stale verdict cannot release the hold (serial is compared, not a boolean)',
   /hasFreshVerdict: verdictSerialRef\.current > windowModeEngagedSerialRef\.current/.test(CONTEXT));
 
-check('A10: the gate has a dedicated foreign-window page (not the split-screen copy)',
-  GATE.includes("windowMode === 'foreign_window'")
-  && GATE.includes("'security.window.foreign.title'")
-  && GATE.includes("'security.window.foreign.message'"));
+check('A10: the gate has NO foreign-window page left',
+  !GATE.includes('foreign_window') && !GATE.includes('security.window.foreign'));
 
-check('A11: the foreign page copy exists in BOTH locales (en + ar)',
-  (RES.match(/'security\.window\.foreign\.title'/g) || []).length === 2
-  && (RES.match(/'security\.window\.foreign\.message'/g) || []).length === 2);
+check('A11: no foreign-window copy survives in either locale',
+  !/security\.window\.foreign/.test(RES)
+  && !/security\.window\.foreign/.test(read('src/lib/i18n/resources.ts')));
 
-check('A12: the model\u2019s foreign copy never names the other app',
-  !/package|com\.[a-z]+\./i.test(M.windowModeBlockCopy('foreign_window').message));
+check('A12: the multi-window copy never claims an overlay or another app',
+  !/overlay/i.test(M.windowModeBlockCopy('multi_window').message)
+  && !/another app is showing/i.test(M.windowModeBlockCopy('multi_window').message));
 
 check('A13: the gate traps the hardware back button while the page is up',
   /BackHandler\.addEventListener\('hardwareBackPress', \(\) => true\)/.test(GATE));
 
 // ── Native signal ─────────────────────────────────────────────────────────
-check('A14: the activity reports a foreign window only when ANOTHER ACTIVITY owns the top-resumed slot',
-  TOP_RESUMED.length > 0 && /topResumedActivity = isTopResumed/.test(TOP_RESUMED));
+check('A14: the top-resumed / focus-loss override is GONE from the activity',
+  TOP_RESUMED === '' && !/onTopResumedActivityChanged/.test(PLUGIN.slice(0, PLUGIN.indexOf('const WINDOW_MODE_ACTIVITY_MARKER'))));
 
-check('A15: that signal is reported IMMEDIATELY (no 700 ms settle)',
-  /WindowModeBridge\.report\(isInMultiWindowMode\(\), isInPictureInPictureMode\(\), true, true\)/.test(TOP_RESUMED)
-  && !/scheduleForeignCheck/.test(TOP_RESUMED));
+check('A15: no settled focus re-check (700 ms) remains in the emitted Kotlin',
+  // The JS upgrade guard NAMES the retired symbols on purpose (so an already
+  // patched MainActivity is re-injected); the Kotlin TEMPLATE must not contain
+  // them. Only the template is scanned, so the guard's own regex cannot count.
+  !/scheduleForeignCheck|cancelForeignCheck|activityPaused|foreignWindowCheck|onTopResumedActivityChanged/
+    .test(PLUGIN.slice(0, PLUGIN.indexOf('const WINDOW_MODE_ACTIVITY_MARKER'))));
 
-check('A16: the notification shade cannot be mistaken for a foreign app (API 29+)',
-  /SDK_INT >= 29 && topResumedActivity\) return false/.test(PLUGIN));
+check('A16: the activity still reports real mode changes and resume',
+  /WindowModeBridge\.report\(isInMultiWindowMode, isInPictureInPictureMode\(\), "mode-change"\)/.test(PLUGIN)
+  && /WindowModeBridge\.report\(isInMultiWindowMode\(\), isInPictureInPictureMode\(\), "lifecycle"\)/.test(PLUGIN));
 
-check('A17: returning the top-resumed slot reports full screen again',
-  /WindowModeBridge\.report\(isInMultiWindowMode\(\), isInPictureInPictureMode\(\), false, true\)/.test(TOP_RESUMED));
+check('A17: overlay prevention (permission, focus hook, listener) is removed',
+  // The Kotlin template only: the JS upgrade guard names retired symbols.
+  !/applyHideOverlayWindows|HIDE_OVERLAY_WINDOWS|enableOverlayProtection/.test(
+    PLUGIN.slice(0, PLUGIN.indexOf('const WINDOW_MODE_ACTIVITY_MARKER')))
+  && !/onWindowFocusChanged/.test(PLUGIN.slice(0, PLUGIN.indexOf('const WINDOW_MODE_ACTIVITY_MARKER')))
+  && !/observeTouch|isWindowObscured/.test(PLUGIN.slice(0, PLUGIN.indexOf('const WINDOW_MODE_ACTIVITY_MARKER'))));
 
 check('A18: an already-patched MainActivity is UPGRADED, not skipped',
   /UPGRADE PATH for an already-patched activity/.test(PLUGIN)

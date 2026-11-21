@@ -288,6 +288,9 @@ $router->get('/admin/material-watermark-status', [MaterialDeliveryController::cl
 // admin is held to the same material-level scope; a super admin sees the
 // platform. Every run is written to audit_logs and pdf_forensic_checks.
 $router->post('/pdf-forensic/check', [PdfForensicController::class, 'check'], $auth + ['role' => ['doctor', 'admin', 'super_admin']]);
+// Image-only verification: a screenshot, crop or photograph of ONE page. Same auth,
+// same scoping, same audit table as the PDF check.
+$router->post('/pdf-forensic/check-image', [PdfForensicController::class, 'checkImage'], $auth + ['role' => ['doctor', 'admin', 'super_admin']]);
 $router->get('/pdf-forensic/issuances', [PdfForensicController::class, 'issuances'], $auth + ['role' => ['doctor', 'admin', 'super_admin']]);
 
 // ---- Admin ----------------------------------------------------------------

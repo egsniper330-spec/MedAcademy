@@ -98,11 +98,11 @@ check('A4: split-screen and a floating window are different reasons',
   keys(M.resolveGateReasons(win('multi_window'))).join(',') === 'window:multi_window'
   && keys(M.resolveGateReasons(win('picture_in_picture'))).join(',') === 'window:picture_in_picture');
 
-check('A5: overlay + window + vpn + violation all coexist, in one fixed order',
+check('A5: window + vpn + violation all coexist, in one fixed order',
   keys(M.resolveGateReasons(inputs({
-    overlayBlocked: true, multiWindowBlocked: true, windowMode: 'foreign_window',
+    multiWindowBlocked: true, windowMode: 'multi_window',
     vpnBlocked: true, violationBlocked: true,
-  }))).join(',') === 'overlay,window:foreign_window,vpn,violation');
+  }))).join(',') === 'window:multi_window,vpn,violation');
 
 check('A6: an unmeasured window mode still produces a reason (never a silent drop)',
   keys(M.resolveGateReasons(inputs({ multiWindowBlocked: true }))).join(',') === 'window:multi_window');
@@ -262,9 +262,9 @@ check('C2: the gate consumes the reason set (not a second, local derivation)',
   /gateReasons,?\s*\n\s*\} = useSecurity\(\)/.test(GATE)
   && /const activeReasonRows = gateReasons\.map/.test(GATE));
 
-check('C3: every reason kind has copy on the same page',
+check('C3: every remaining reason kind has copy on the same page',
   /reason\.kind === 'window'/.test(GATE)
-  && /reason\.kind === 'overlay'/.test(GATE)
+  && !/reason\.kind === 'overlay'/.test(GATE)
   && /reason\.kind === 'vpn'/.test(GATE)
   && /t\('security\.gate\.activeViolations'\)/.test(GATE));
 

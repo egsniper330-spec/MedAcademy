@@ -1,15 +1,16 @@
 #!/usr/bin/env node
 /**
- * Regression: another app floating OVER MedAcademy went undetected while
- * split-screen worked.
+ * FLOATING-WINDOW PROTECTION — REMOVAL CONTRACT.
  *
- * Split-screen is positive platform state (Activity.isInMultiWindowMode). A
- * floating window from another task keeps our task resumed and full screen but
- * takes the ACTIVITY's window focus — the one documented signal an ordinary app
- * has. It is now reported as its own mode (`foreign_window`), so the existing
- * security gate, preflight and release rules apply unchanged.
+ * The floating-window ("another app is over MedAcademy") subsystem was removed
+ * after repeated false positives: it was derived from the activity's window
+ * FOCUS, which Recents, an app switch, a system dialog, a Samsung pop-up view
+ * being closed and even our own cover view all change. Android exposes no window
+ * enumeration to an ordinary app, so the condition could neither be proven nor
+ * made reliable. This suite fails if any part of it comes back, and pins what
+ * must remain independent of it.
  *
- * The app's own dialogs also take window focus, so they must suppress it.
+ * Run: node tests/floatingWindowGuard.test.cjs
  */
 const assert = require('node:assert');
 const fs = require('node:fs');
@@ -22,6 +23,10 @@ const read = (...p) => fs.readFileSync(path.join(__dirname, '..', ...p), 'utf8')
 const plugin = read('plugins', 'withSecurityModule.js');
 const model = read('src', 'lib', 'securityStateModel.ts');
 const securityContext = read('src', 'lib', 'SecurityContext.tsx');
+const aggregator = read('src', 'lib', 'windowModeAggregator.ts');
+const gate = read('src', 'app', '(app)', 'security-gate.tsx');
+const resources = read('src', 'lib', 'i18n', 'resources.ts');
+const nativeSecurity = read('src', 'lib', 'nativeSecurity.ts');
 const appModal = read('src', 'components', 'AppModal.tsx');
 const ownDialogs = read('src', 'lib', 'ownDialogs.ts');
 
@@ -51,61 +56,90 @@ const check = (name, fn) => {
   }
 };
 
-console.log('Native signal');
+/** The Kotlin template (module + injected activity), without the JS upgrade guard. */
+const KT = plugin.slice(0, plugin.indexOf('const WINDOW_MODE_ACTIVITY_MARKER'));
+const OVERRIDES_START = plugin.indexOf('const WINDOW_MODE_ACTIVITY_OVERRIDES');
+const OVERRIDES = plugin.slice(
+  OVERRIDES_START,
+  plugin.indexOf('`;', OVERRIDES_START) + 2, // the template literal itself, not the JS around it
+);
 
-check('a new prohibited mode exists for another app\'s window', () => {
-  assert.match(plugin, /WINDOW_MODE_FOREIGN = "foreign_window"/);
+console.log('Removal is complete');
+
+check('no foreign-window mode, mode mapping or focus detector in the native template', () => {
+  assert.ok(!/WINDOW_MODE_FOREIGN/.test(KT));
+  assert.ok(!/foreignWindowFocused|topResumedSlot|setTopResumed/.test(KT));
+  assert.ok(!/windowCoveredByOtherTask|scheduleForeignCheck|cancelForeignCheck/.test(KT));
 });
 
-check('focus counts while RESUMED too, and never outranks multi-window/PiP', () => {
-  const modeOf = plugin.slice(plugin.indexOf('fun modeOf('), plugin.indexOf('fun modeOf(') + 1200);
-  assert.match(modeOf, /if \(isInPictureInPictureMode\) return WINDOW_MODE_PIP/);
-  assert.match(modeOf, /if \(isInMultiWindowMode\) return WINDOW_MODE_MULTI/);
-  // ROOT CAUSE: the old rule required !appResumed, so a pop-up over a RESUMED
-  // app was classified full screen and playback continued.
-  assert.match(modeOf, /if \(foreignWindowFocused\) return WINDOW_MODE_FOREIGN/);
-  assert.ok(!/foreignWindowFocused && appResumed/.test(modeOf));
+check('the injected activity no longer overrides onTopResumedActivityChanged', () => {
+  assert.ok(!/onTopResumedActivityChanged[\s\S]{0,120}super\./.test(OVERRIDES));
+  assert.ok(!/topResumedActivity|foreignWindowCheck|activityPaused/.test(OVERRIDES));
 });
 
-check('the activity forwards window focus loss and re-reads it before reporting', () => {
-  assert.match(plugin, /override fun onWindowFocusChanged\(hasFocus: Boolean\)/);
-  assert.match(plugin, /val focused = try \{ !activity\.window\.decorView\.hasWindowFocus\(\) \}/);
-  assert.match(plugin, /WindowModeBridge\.report\(\s*\n\s*isInMultiWindowMode\(\),\s*\n\s*isInPictureInPictureMode\(\),\s*\n\s*true,\s*\n\s*!activityPaused,/);
+check('the JS model has no foreign mode, copy or steps', () => {
+  assert.ok(!/foreign_window|FOREIGN_WINDOW/.test(model));
+  assert.strictEqual(modelMod.isProhibitedWindowMode('foreign_window'), false);
+  assert.strictEqual(modelMod.isProhibitedWindowMode('multi_window'), true);
+  assert.strictEqual(modelMod.isProhibitedWindowMode('picture_in_picture'), true);
 });
 
-check('the periodic re-assert and the preflight read the same focus state', () => {
-  const readMode = plugin.slice(plugin.indexOf('private fun readWindowMode'), plugin.indexOf('private fun readWindowMode') + 900);
-  assert.match(readMode, /val focused = try \{ !activity\.window\.decorView\.hasWindowFocus\(\) \}/);
-  assert.match(readMode, /focused,\s*\n\s*hostResumed,/);
+check('the aggregator has no sticky-foreign / deferred-confirmation machinery', () => {
+  const code = aggregator.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1');
+  assert.ok(!/foreign|sticky|defer-confirm/i.test(code));
 });
 
-check('split-screen protection is untouched (still reported first)', () => {
-  assert.match(plugin, /Activity\.isInMultiWindowMode\(\)/);
-  assert.match(plugin, /WINDOW_MODE_MULTI/);
-  assert.match(plugin, /isInMultiWindowMode\(\)/);
+check('the JS applier and the gate have no foreign branch or page', () => {
+  assert.ok(!/foreign_window/.test(securityContext));
+  assert.ok(!/foreign_window|security\.window\.foreign/.test(gate));
 });
 
-console.log('\nJS policy');
-
-check('the model treats a foreign window as prohibited', () => {
-  assert.strictEqual(modelMod.isProhibitedWindowMode('foreign_window'), true);
-  assert.strictEqual(modelMod.isProhibitedWindowMode('fullscreen'), false);
-  assert.strictEqual(modelMod.isProhibitedWindowMode('unknown'), false);
+check('both locales dropped the floating-window copy', () => {
+  assert.ok(!/security\.window\.foreign/.test(resources));
 });
 
-check('it has its own blocking copy and steps (never called an overlay)', () => {
-  const copy = modelMod.windowModeBlockCopy('foreign_window');
-  assert.match(copy.title, /floating window/i);
-  assert.match(copy.message, /floating window/i);
-  assert.ok(!/overlay/i.test(copy.message), 'the overlay signal is separate and must not be claimed here');
-  assert.strictEqual(modelMod.windowModeBlockSteps('foreign_window').length, 3);
+check('the native flags advertise no obscured-window field at all', () => {
+  // Removed end to end: no flag field, no protection field, no overlay verdict.
+  assert.ok(!/windowObscured/.test(nativeSecurity));
+  assert.ok(!/overlayProtectionInstalled/.test(nativeSecurity));
+  assert.ok(!/overlayDetected/.test(nativeSecurity));
 });
 
-check('the gate suppresses it while one of our own dialogs is open', () => {
-  assert.match(securityContext, /incomingMode === 'foreign_window' && hasOwnDialogOpen\(\)/);
+console.log('\nPreserved, independent protections');
+
+check('split-screen and PiP are still prohibited and gated', () => {
+  assert.ok(/if \(isInMultiWindowMode\) return WINDOW_MODE_MULTI/.test(KT));
+  assert.ok(/if \(isInPictureInPictureMode\) return WINDOW_MODE_PIP/.test(KT));
+  assert.ok(/ENGAGE|engageSecurityLock\(LOCK_SRC_WINDOW_MODE, \{ hard: true \}\)/.test(securityContext.replace('ENGAGE|', '')));
 });
 
-check('every RN Modal in the app is now an AppModal (own dialogs are tracked)', () => {
+check('the obscured-touch (tapjacking) latch is GONE from the native template', () => {
+  assert.ok(!KT.includes('FLAG_WINDOW_IS_OBSCURED'));
+  assert.ok(!KT.includes('FLAG_WINDOW_IS_PARTIALLY_OBSCURED'));
+  assert.ok(!KT.includes('revalidate-region-verified'));
+  assert.ok(!/observeTouch|isOverlayLatched|coveredPoints/.test(KT));
+});
+
+check('overlay PREVENTION and its permission are gone too', () => {
+  // KT only: the JS upgrade guard names retired symbols on purpose.
+  assert.ok(!/applyHideOverlayWindows/.test(KT));
+  assert.ok(!/HIDE_OVERLAY_WINDOWS/.test(KT));
+  assert.ok(!/enableOverlayProtection|isWindowObscured/.test(KT));
+});
+
+check('VPN / proxy detection is untouched', () => {
+  assert.ok(/object VpnWatch \{/.test(KT));
+  assert.ok(/REASON_VPN/.test(KT));
+  assert.ok(/fun detectProxy\(\): Boolean/.test(KT));
+});
+
+check('the release rule still needs a restored mode AND a fresh verdict', () => {
+  assert.strictEqual(modelMod.canClearMultiWindowBlock({ modeRestored: false, hasFreshVerdict: true }), false);
+  assert.strictEqual(modelMod.canClearMultiWindowBlock({ modeRestored: true, hasFreshVerdict: false }), false);
+  assert.strictEqual(modelMod.canClearMultiWindowBlock({ modeRestored: true, hasFreshVerdict: true }), true);
+});
+
+check('every RN Modal in the app is still an AppModal (own dialogs are tracked)', () => {
   const files = [];
   const walk = (dir) => {
     for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
@@ -116,11 +150,10 @@ check('every RN Modal in the app is now an AppModal (own dialogs are tracked)', 
   };
   walk(path.join(__dirname, '..', 'src'));
   const offenders = files
-    .filter((f) => !f.endsWith(`AppModal.tsx`))
+    .filter((f) => !f.endsWith('AppModal.tsx'))
     .filter((f) => /<Modal[\s/>]/.test(fs.readFileSync(f, 'utf8')));
   assert.deepStrictEqual(offenders, [], `raw <Modal> left in: ${offenders.join(', ')}`);
   assert.match(appModal, /registerOwnDialog\(\)/);
-  assert.match(appModal, /<Modal visible=\{visible\} \{\.\.\.rest\} \/>/);
 });
 
 check('the own-dialog counter is reference-counted', () => {

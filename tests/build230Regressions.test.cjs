@@ -115,53 +115,41 @@ check('the provider-level mute is probed, not just the Plyr wrapper flag', () =>
   assert.match(playerScript, /player\.embed\.getPlayer\(\)\.isMuted\(\)/);
 });
 
-/* ───────────────── 3 + 4. Foreign-window detection and false warnings ───── */
+/* ──────── 3 + 4. Floating-window detector REMOVED, Recents safe ────────── */
 
-console.log('\nWindow focus: foreign windows are caught, system UI is not');
+console.log('\nWindow state: only split-screen / PiP are classified');
 
 const plugin = read('plugins/withSecurityModule.js');
 
-check('foreign_window is reported on ANY focus loss (paused OR resumed — the missed pop-up case)', () => {
-  assert.match(plugin, /if \(foreignWindowFocused\) return WINDOW_MODE_FOREIGN/);
-  assert.ok(!/foreignWindowFocused && !appResumed/.test(plugin),
-    'requiring a paused activity is exactly what missed a pop-up over a resumed app');
+check('the floating-window classification is GONE from the native template', () => {
+  assert.ok(!/WINDOW_MODE_FOREIGN/.test(plugin), 'no foreign mode may survive');
+  assert.ok(!/foreignWindowFocused|WindowModeBridge\.setTopResumed/.test(plugin));
 });
 
-check('the activity checks its window is still visible before reporting a foreign window', () => {
-  assert.match(plugin, /private var activityPaused = false/);
-  assert.match(plugin, /override fun onPause\(\)[\s\S]{0,200}activityPaused = true/);
-  assert.match(plugin, /override fun onResume\(\)[\s\S]{0,200}activityPaused = false/);
-  assert.match(plugin, /decor\.windowVisibility != View\.VISIBLE\) return false/);
-  // Focus loss alone is no longer the finding: it is a foreign APPLICATION only
-  // when another activity owns the top-resumed slot, which is what makes an
-  // app-wide lock safe (the notification shade leaves us top-resumed).
-  assert.match(plugin, /if \(decor\.hasWindowFocus\(\)\) return false/);
-  assert.match(plugin, /SDK_INT >= 29 && topResumedActivity\) return false[\s\S]{0,80}return true/);
-  assert.match(plugin, /override fun onTopResumedActivityChanged\(isTopResumed: Boolean\)/);
+check('the activity no longer keeps focus-loss bookkeeping', () => {
+  assert.ok(!/activityPaused/.test(plugin));
+  assert.ok(!/windowCoveredByOtherTask/.test(plugin));
+  assert.ok(!/override fun onTopResumedActivityChanged/.test(plugin));
+  // Focus gains still re-apply overlay PREVENTION (that is window state, not a finding).
+  assert.match(plugin, /override fun onWindowFocusChanged\(hasFocus: Boolean\)[\s\S]{0,160}if \(hasFocus\) applyHideOverlayWindows\(\)/);
 });
 
-check('returning to the front reports full-screen/focused at once', () => {
-  assert.match(plugin, /override fun onResume\(\)[\s\S]{0,500}WindowModeBridge\.report\(isInMultiWindowMode\(\), isInPictureInPictureMode\(\), false, true\)/);
+check('returning to the front still reports the real window mode (activity evidence)', () => {
+  assert.match(plugin, /override fun onResume\(\)[\s\S]{0,1400}WindowModeBridge\.report\(isInMultiWindowMode\(\), isInPictureInPictureMode\(\), "lifecycle"\)/);
 });
 
-check('a focus loss IS reported while the app is resumed (the floating-window attack)', () => {
-  // A pop-up over a still-resumed MedAcademy previously produced focus loss
-  // with appResumed=true and was classified full screen — the whole bug. The
-  // live lifecycle flag is now forwarded instead of hard-coded.
-  assert.match(plugin, /WindowModeBridge\.report\(\s*\n\s*isInMultiWindowMode\(\),\s*\n\s*isInPictureInPictureMode\(\),\s*\n\s*true,\s*\n\s*!activityPaused,\s*\n\s*\)/);
-});
-
-check('our own dialogs still cannot trip the gate', () => {
+check('no focus reading is treated as a finding anywhere in JS', () => {
   const ctx = read('src/lib/SecurityContext.tsx');
-  assert.match(ctx, /incomingMode === 'foreign_window' && hasOwnDialogOpen\(\)/);
+  assert.ok(!/foreign_window/.test(ctx));
+  assert.ok(!/hasOwnDialogOpen\(\)/.test(ctx.split('applyWindowModeReading')[1] || ''));
 });
 
-check('split-screen and PiP still outrank the focus-based mode', () => {
-  const modeOf = plugin.slice(plugin.indexOf('fun modeOf('), plugin.indexOf('fun modeOf(') + 700);
+check('split-screen and PiP remain the only prohibited window modes', () => {
+  const modeOf = plugin.slice(plugin.indexOf('fun modeOf('), plugin.indexOf('fun modeOf(') + 800);
   const pipIdx = modeOf.indexOf('if (isInPictureInPictureMode) return WINDOW_MODE_PIP');
   const multiIdx = modeOf.indexOf('if (isInMultiWindowMode) return WINDOW_MODE_MULTI');
-  const foreignIdx = modeOf.indexOf('WINDOW_MODE_FOREIGN');
-  assert.ok(pipIdx >= 0 && multiIdx > pipIdx && foreignIdx > multiIdx, 'PiP, then multi-window, then foreign');
+  assert.ok(pipIdx >= 0 && multiIdx > pipIdx, 'PiP first, then multi-window');
+  assert.match(modeOf, /return WINDOW_MODE_FULLSCREEN/);
 });
 
 console.log(`\n${passed} passed${process.exitCode ? ', some FAILED' : ''}`);

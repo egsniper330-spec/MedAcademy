@@ -183,9 +183,9 @@ console.log('\u2500\u2500 Part 4: app access vs protected content \u2500\u2500')
   check('4g: the native VPN callback contains app access immediately with a HARD lock',
     /engageSecurityLock\(LOCK_SRC_NATIVE_VPN, \{ hard: true \}\);/.test(CONTEXT)
     && /blockProtectedContent\('native-vpn'\);/.test(CONTEXT));
-  check('4h: overlay/multi-window blocks still conceal protected content',
-    /blockProtectedContent\('overlay'\);/.test(CONTEXT)
-    && /blockProtectedContent\('multi-window'\);/.test(CONTEXT));
+  check('4h: the multi-window block still conceals protected content (no overlay path)',
+    /blockProtectedContent\('multi-window'\);/.test(CONTEXT)
+    && !/blockProtectedContent\('overlay'\);/.test(CONTEXT));
   check('4i: exactly ONE AppState listener exists in the security context',
     (CONTEXT.match(/AppState\.addEventListener\('change',/g) || []).length === 1);
   check('4j: the resume path runs the SAME authoritative evaluation (no weaker checks)',
@@ -196,7 +196,8 @@ console.log('\u2500\u2500 Part 4: app access vs protected content \u2500\u2500')
     && /setProtectedContentConcealed\(false, 'verdict-clean'\);/.test(CONTEXT));
   check('4k-2: a clean verdict cannot reveal video over a newer VPN/window signal',
     /verdictNativeSeqRef\.current < nativeSignalSeqRef\.current/.test(CONTEXT)
-    && /liveLock\.sources\.includes\(LOCK_SRC_OVERLAY\) \|\| liveLock\.sources\.includes\(LOCK_SRC_WINDOW_MODE\)/.test(CONTEXT));
+    && /liveLock\.sources\.includes\(LOCK_SRC_WINDOW_MODE\)/.test(CONTEXT)
+    && !/LOCK_SRC_OVERLAY/.test(CONTEXT));
   check('4l: transport/network lock still exists for confirmed app blocks',
     /if \(isSecurityLocked\(\) && !isLockExempt\(path\)\) \{/.test(read('src/client/php.ts')));
   check('4m: server-side security enforcement is unchanged (no bypass added)',
@@ -207,7 +208,7 @@ console.log('\u2500\u2500 Part 4: app access vs protected content \u2500\u2500')
     && M.rendersBlockScreen('ALLOWED') === false
     && M.rendersBlockScreen('BLOCKED_BACKGROUND_RESUME') === false);
   check('4o: confirmed violations still render the authoritative block page',
-    ['BLOCKED_VPN', 'BLOCKED_SECURITY_VIOLATION', 'BLOCKED_OVERLAY', 'BLOCKED_MULTI_WINDOW']
+    ['BLOCKED_VPN', 'BLOCKED_SECURITY_VIOLATION', 'BLOCKED_MULTI_WINDOW']
       .every((s) => M.rendersBlockScreen(s) === true));
   check('4p: the gate state during a pending resume is CHECKING, never ALLOWED',
     M.resolveSecurityGateState({

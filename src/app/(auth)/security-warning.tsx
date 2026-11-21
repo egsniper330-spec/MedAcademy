@@ -54,7 +54,6 @@ const THREAT_META: Record<string, {
   frida_detected:            { icon: Fingerprint },
   xposed_detected:           { icon: Fingerprint },
   magisk_detected:           { icon: ShieldAlert },
-  overlay_detected:          { icon: Lock },
   app_integrity_compromised: { icon: Lock },
   tamper_detected:           { icon: Lock },
   signature_invalid:         { icon: Lock },

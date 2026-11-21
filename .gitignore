@@ -122,3 +122,21 @@ backend/storage/private/.watermark-worker.lock*
 
 # Local security test APK evidence
 /security-test-evidence/device/base.apk
+# Python generated files
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+# Generated Android device test evidence
+
+# Generated Android device test evidence
+/security-test-evidence/device/
+
+# Generated Android device test evidence
+/security-test-evidence/device/
+
+# Local security test evidence - do not commit
+/security-test-evidence/

@@ -283,10 +283,10 @@ export function resolveGatePhase(input: {
 // common vocabulary)
 // ─────────────────────────────────────────────────────────────────────────────
 // The gate used to be driven by ONE derived boolean (`phase === 'blocked'`),
-// which was computed from the policy verdict alone. Overlay/obscured-window
-// protection and the background→resume lock are DIFFERENT inputs with
-// different lifecycles — an overlay is not a policy finding, and a resume is
-// not a device violation — so folding them into `blocksLogin` would have made
+// which was computed from the policy verdict alone. The window-state lock and
+// the background→resume lock are DIFFERENT inputs with different lifecycles
+// — a window state is not a policy finding, and a resume is not a device
+// violation — so folding them into `blocksLogin` would have made
 // the copy wrong and the recovery paths indistinguishable.
 //
 // This enum is the ONE vocabulary every consumer renders from. It is explicit
@@ -295,7 +295,6 @@ export function resolveGatePhase(input: {
 
 export type SecurityGateState =
   | 'CHECKING'
-  | 'BLOCKED_OVERLAY'
   | 'BLOCKED_MULTI_WINDOW'
   | 'BLOCKED_BACKGROUND_RESUME'
   | 'BLOCKED_VPN'
@@ -305,7 +304,6 @@ export type SecurityGateState =
 /** Every state, for exhaustive tests / future consumers. */
 export const SECURITY_GATE_STATES: readonly SecurityGateState[] = [
   'CHECKING',
-  'BLOCKED_OVERLAY',
   'BLOCKED_MULTI_WINDOW',
   'BLOCKED_BACKGROUND_RESUME',
   'BLOCKED_VPN',
@@ -318,12 +316,6 @@ export interface SecurityGateInputs {
   evaluating: boolean;
   /** At least one COMPLETED evaluation has been published for this session. */
   hasVerdict: boolean;
-  /**
-   * A live obscured-window / overlay signal holds the gate. This is the
-   * attacker-present-in-the-touch-path signal: it outranks every other cause
-   * because anything rendered or tapped while it is live is untrusted.
-   */
-  overlayBlocked: boolean;
   /**
    * The platform reports THIS app in a prohibited window mode (split-screen /
    * other multi-window mode, or our own picture-in-picture). A window-state
@@ -340,7 +332,12 @@ export interface SecurityGateInputs {
   backgroundResumeBlocked: boolean;
   /** The live policy verdict pairs a VPN/proxy transport finding with a block. */
   vpnBlocked: boolean;
-  /** Any other policy blocking finding (root, tamper, overlay policy, etc.). */
+  /**
+   * A user-installed CA certificate is installed (trust-store finding). A hard
+   * trust-store violation, not a connection condition.
+   */
+  userCaBlocked?: boolean;
+  /** Any other policy blocking finding (root, tamper, etc.). */
   violationBlocked: boolean;
   /**
    * The window mode the live window restriction is ABOUT. Optional: it only
@@ -368,11 +365,11 @@ export interface SecurityGateInputs {
 //   • clearing one reason removes only that row and keeps the lock held by the
 //     remaining ones (each detector owns only its own input).
 
-export type GateReasonKind = 'overlay' | 'window' | 'vpn' | 'violation';
+export type GateReasonKind = 'window' | 'user_ca' | 'vpn' | 'violation';
 
 export interface GateReason {
   kind: GateReasonKind;
-  /** Stable identity for rendering/dedupe: 'overlay' | 'window:<mode>' | 'vpn' | 'violation'. */
+  /** Stable identity for rendering/dedupe: 'window:<mode>' | 'vpn' | 'violation'. */
   key: string;
   /** For kind 'window': the mode the platform reported. */
   mode?: string;
@@ -380,19 +377,22 @@ export interface GateReason {
 
 /**
  * ALL live violation reasons, in deterministic presentation order
- * (overlay → window → vpn → other policy violation).
+ * (window → vpn → other policy violation).
  *
  * Pure and total: the same inputs always produce the same ordered list, and an
  * inactive input contributes nothing. One input can never clear another — each
  * reason is read from its own flag only.
+ *
+ * The former 'overlay' reason was removed together with the floating-window /
+ * obscured-window protection subsystem: there is no overlay input any more.
  */
 export function resolveGateReasons(input: SecurityGateInputs): GateReason[] {
   const reasons: GateReason[] = [];
-  if (input.overlayBlocked) reasons.push({ kind: 'overlay', key: 'overlay' });
   if (input.multiWindowBlocked) {
     const mode = input.windowMode ?? 'multi_window';
     reasons.push({ kind: 'window', key: `window:${mode}`, mode });
   }
+  if (input.userCaBlocked) reasons.push({ kind: 'user_ca', key: 'user_ca' });
   if (input.vpnBlocked) reasons.push({ kind: 'vpn', key: 'vpn' });
   if (input.violationBlocked) reasons.push({ kind: 'violation', key: 'violation' });
   return reasons;
@@ -403,18 +403,18 @@ export function resolveGateReasons(input: SecurityGateInputs): GateReason[] {
  *
  * Precedence (documented, fail-closed, most-trusted-blocker first):
  *
- *   1. BLOCKED_OVERLAY             — an untrusted window is in the touch path.
- *   2. BLOCKED_MULTI_WINDOW        — this app is in a prohibited window mode.
- *   3. BLOCKED_VPN                 — policy block caused by a VPN/proxy.
- *   4. BLOCKED_SECURITY_VIOLATION  — any other policy block.
- *   5. BLOCKED_BACKGROUND_RESUME   — left the foreground; not yet re-verified.
- *   6. CHECKING                    — no completed verdict, or a check running.
- *   7. ALLOWED                     — completed verdict, nothing blocking.
+ *   1. BLOCKED_MULTI_WINDOW        — this app is in a prohibited window mode.
+ *   2. BLOCKED_VPN                 — policy block caused by a VPN/proxy.
+ *   3. BLOCKED_SECURITY_VIOLATION  — any other policy block.
+ *   4. BLOCKED_BACKGROUND_RESUME   — left the foreground; not yet re-verified.
+ *   5. CHECKING                    — no completed verdict, or a check running.
+ *   6. ALLOWED                     — completed verdict, nothing blocking.
  *
- * BLOCKED_MULTI_WINDOW ranks directly below BLOCKED_OVERLAY because both are
- * WINDOW-STATE causes rather than policy verdicts: the cause and the recovery
+ * BLOCKED_MULTI_WINDOW ranks above the policy states because it is a
+ * WINDOW-STATE cause rather than a policy verdict: the cause and the recovery
  * are the same window, so the screen must speak about the window rather than
- * list policy findings.
+ * list policy findings. (The former overlay block state was removed with the
+ * floating-window protection subsystem.)
  *
  * WHY A CONFIRMED POLICY BLOCK OUTRANKS THE RESUME HOLD (changed deliberately):
  * the resume hold is an INTERIM state with no screen of its own — the app shell
@@ -436,10 +436,15 @@ export function resolveGateReasons(input: SecurityGateInputs): GateReason[] {
  *     cleared (the startup-flash fix, preserved).
  */
 export function resolveSecurityGateState(input: SecurityGateInputs): SecurityGateState {
-  if (input.overlayBlocked) return 'BLOCKED_OVERLAY';
   if (input.multiWindowBlocked) return 'BLOCKED_MULTI_WINDOW';
   // A CONFIRMED violation always wins over the interim resume hold (see the
   // precedence note above): the hold has no screen, the violation has one.
+  // A user-installed CA certificate is a hard trust-store violation. It is
+  // reported BEFORE the connection states so the dedicated certificate copy is
+  // the primary screen (a live VPN/proxy stays listed in gateReasons). It uses
+  // the generic violation state because the vocabulary is closed — the copy is
+  // selected from the finding itself, not from a new state.
+  if (input.userCaBlocked) return 'BLOCKED_SECURITY_VIOLATION';
   if (input.vpnBlocked) return 'BLOCKED_VPN';
   if (input.violationBlocked) return 'BLOCKED_SECURITY_VIOLATION';
   if (input.backgroundResumeBlocked) return 'BLOCKED_BACKGROUND_RESUME';
@@ -461,16 +466,14 @@ export function resolveSecurityGateState(input: SecurityGateInputs): SecurityGat
  * seconds, plus a Continue control that could not clear it).
  */
 export function rendersBlockScreen(state: SecurityGateState): boolean {
-  return state === 'BLOCKED_OVERLAY'
-    || state === 'BLOCKED_MULTI_WINDOW'
+  return state === 'BLOCKED_MULTI_WINDOW'
     || state === 'BLOCKED_VPN'
     || state === 'BLOCKED_SECURITY_VIOLATION';
 }
 
 /** True for the states in which protected content must not be visible. */
 export function isGateBlocked(state: SecurityGateState): boolean {
-  return state === 'BLOCKED_OVERLAY'
-    || state === 'BLOCKED_MULTI_WINDOW'
+  return state === 'BLOCKED_MULTI_WINDOW'
     || state === 'BLOCKED_BACKGROUND_RESUME'
     || state === 'BLOCKED_VPN'
     || state === 'BLOCKED_SECURITY_VIOLATION';
@@ -479,9 +482,8 @@ export function isGateBlocked(state: SecurityGateState): boolean {
 /**
  * True when the user can clear the state by acting and then re-verifying.
  *
- * Only states the USER can resolve by acting get the control: an overlay app
- * they can close, a backgrounded session that re-verifies on return, and — new
- * in this round — a VPN/proxy they can switch off. The reported flow is exactly
+ * Only states the USER can resolve by acting get the control: a backgrounded
+ * session that re-verifies on return, and a VPN/proxy they can switch off. The reported flow is exactly
  * "turn the VPN off, then get back in": the control only REQUESTs a re-check, it
  * can never force the gate open (the state clears when a FRESH authoritative
  * evaluation finds no blocking finding), so it is not a dismiss path.
@@ -503,8 +505,7 @@ export function isGateBlocked(state: SecurityGateState): boolean {
  * evaluation was already running; see the resume-verification suite).
  */
 export function isGateRecheckable(state: SecurityGateState): boolean {
-  return state === 'BLOCKED_OVERLAY'
-    || state === 'BLOCKED_VPN';
+  return state === 'BLOCKED_VPN';
 }
 
 // ─── NETWORK LOCK (temporary suspension of the app's own traffic) ───────────
@@ -570,6 +571,45 @@ export const NETWORK_LOCK_SCOPE = {
   mitigation: 'stop-load + player teardown + unmount gate; never claimed to be a device-wide block',
 } as const;
 
+// ─── USER-INSTALLED CA CERTIFICATES (trust-store evidence) ──────────────────
+//
+// Android's user CA store is read through the public read-only KeyStore view
+// ("AndroidCAStore"), whose aliases carry AOSP Conscrypt's own prefix: "user:"
+// for a certificate the user added, "system:" for a preinstalled one. The
+// native detector classifies ONLY by that prefix — never by issuer, subject,
+// organization or a fingerprint — and reports exactly one status.
+//
+// The mapping below is TOTAL: anything that is not an explicit 'clean' or
+// 'user_ca' is INCONCLUSIVE, so a missing field (older native module, iOS, web)
+// can never be read as a verified clean device.
+
+export type UserCaOutcome = 'CLEAN' | 'USER_CA_DETECTED' | 'INCONCLUSIVE';
+
+/** detectionMethod of the trust-store finding (the gate resolves its copy). */
+export const USER_CA_DETECTION_METHOD = 'User-installed security certificate detected';
+
+export function resolveUserCaOutcome(status: string | null | undefined): UserCaOutcome {
+  if (status === 'user_ca') return 'USER_CA_DETECTED';
+  if (status === 'clean') return 'CLEAN';
+  return 'INCONCLUSIVE';
+}
+
+/**
+ * True for the trust-store finding. It rides the existing certificate-trust
+ * event type (`ssl_pinning_failure`, policy block_login) so no server policy or
+ * schema change is needed, and is distinguished by its detectionMethod — the
+ * same pattern the interception-tool finding uses on `proxy_detected`.
+ */
+export function isUserCaFinding(threat: {
+  type: string;
+  detectionMethod?: string | null;
+  detected?: boolean;
+}): boolean {
+  if (threat.detected === false) return false;
+  return threat.type === 'ssl_pinning_failure'
+    && (threat.detectionMethod ?? '').toLowerCase().includes('user-installed security certificate');
+}
+
 // ─── Finding → user-facing copy key ─────────────────────────────────────────
 
 /**
@@ -600,6 +640,20 @@ export const NETWORK_LOCK_SCOPE = {
  * accurate because the condition is no longer evaluated.
  */
 export function resolveFindingCopyKey(type: string, detectionMethod?: string | null): string {
+  // An INSTALLED traffic-interception tool shares the `proxy_detected` event and
+  // policy bucket (block_login) so no server policy/schema change is needed, but
+  // it is a DIFFERENT condition from "a proxy is configured right now" and must
+  // say so. The native detector prefixes its evidence with this exact phrase.
+  if (type === 'proxy_detected') {
+    const m = (detectionMethod ?? '').toLowerCase();
+    if (m.includes('interception tool')) return 'interception_tool_detected';
+    return type;
+  }
+  // A user-installed CA is a different condition from a failed pin check: it
+  // says the device's TRUST STORE was changed, not that the API's certificate
+  // failed verification. Both share the certificate-trust event (and its
+  // block_login policy); only the copy differs.
+  if (isUserCaFinding({ type, detectionMethod })) return 'user_ca_detected';
   if (type !== 'debug_detected') return type;
   const method = (detectionMethod ?? '').toLowerCase();
   if (method.includes('emulator') || method.includes('debug environment')) return 'virtual_device_detected';
@@ -718,40 +772,6 @@ export function acceptsResumeVerification(input: {
   return input.evaluationStartedToken >= input.liveResumeToken;
 }
 
-// ─── Overlay / obscured-window gate ──────────────────────────────────────────
-
-/**
- * The overlay lock may only release when BOTH hold:
- *
- *   • the native obscured-window signal has CLEARED, and
- *   • a FRESH security evaluation has completed.
- *
- * The second condition is the explicit "do not automatically trust the app
- * merely because the warning was dismissed" rule: pressing the recheck control
- * does not clear the gate — it requests a re-check, and the gate clears only
- * if the platform independently reports the obscured signal gone AND policy
- * still passes. A user cannot dismiss their way past a live overlay.
- */
-export function canClearOverlayBlock(input: {
-  /** The native obscured-window signal is currently clear. */
-  signalCleared: boolean;
-  /** A COMPLETED evaluation has landed since the recheck was requested. */
-  hasFreshVerdict: boolean;
-}): boolean {
-  return input.signalCleared && input.hasFreshVerdict;
-}
-
-/**
- * Exact overlay copy required by the security specification. Exported from the
- * state model (not the screen) so the wording is unit-testable and cannot
- * drift between the full-screen gate and any other surface.
- */
-export const OVERLAY_WARNING_COPY = {
-  title: 'Security warning',
-  message:
-    'MedAcademy cannot run while another app is covering it or split-screen mode is active. Please close the other app and return to full-screen mode to continue.',
-} as const;
-
 // ─── Multi-window / split-screen gate (mandatory full-screen usage) ──────────
 
 /**
@@ -772,32 +792,31 @@ export type WindowMode =
   | 'fullscreen'
   | 'multi_window'
   | 'picture_in_picture'
-  | 'foreign_window'
   | 'unknown';
 
 /**
  * True for the modes in which protected content must not be presented.
  *
- * `foreign_window` is the floating-window case: our activity is resumed in full
- * screen but the platform reports the focused window is not ours, which is what
- * another app's floating / pop-up window does. It is a prohibited mode like the
- * other two, and it clears the same way (the native reading returns to
- * fullscreen + a fresh verdict lands).
+ * Only the two window states Android documents for an app are prohibited:
+ * split-screen / freeform multi-window and picture-in-picture. Another app's
+ * floating window is NOT classified here — that detector was removed (it was
+ * focus-loss based, false-positive prone and unprovable with public APIs);
+ * interception tools are handled by the traffic-interception detector instead.
  */
 export function isProhibitedWindowMode(mode: WindowMode | string | null | undefined): boolean {
-  return mode === 'multi_window' || mode === 'picture_in_picture' || mode === 'foreign_window';
+  return mode === 'multi_window' || mode === 'picture_in_picture';
 }
 
 /**
- * Exact copy for the two prohibited window modes. Split-screen and a floating
- * window are DIFFERENT conditions with different recovery actions, and neither
- * is an overlay — so the wording never claims an overlay was detected (an
- * overlay is a separate, separately-measured signal: OVERLAY_WARNING_COPY).
+ * Exact copy for the two prohibited window modes. Split-screen and PiP are
+ * DIFFERENT conditions with different recovery actions, and neither claims an
+ * overlay or another app was detected: the overlay protection subsystem was
+ * removed, so the wording speaks only about THIS app's window mode.
  */
 export const MULTI_WINDOW_WARNING_COPY = {
   title: 'Full-screen required',
   message:
-    'MedAcademy cannot run while another app is covering it or split-screen mode is active. Please close the other app and return to full-screen mode to continue.',
+    'MedAcademy cannot run in split-screen. Return the app to full-screen mode to continue.',
 } as const;
 
 export const PICTURE_IN_PICTURE_WARNING_COPY = {
@@ -814,25 +833,8 @@ export function windowModeBlockCopy(mode: WindowMode | string | null | undefined
   message: string;
 } {
   if (mode === 'picture_in_picture') return PICTURE_IN_PICTURE_WARNING_COPY;
-  if (mode === 'foreign_window') return FOREIGN_WINDOW_WARNING_COPY;
   return MULTI_WINDOW_WARNING_COPY;
 }
-
-/**
- * Copy for a window from ANOTHER app floating over MedAcademy. Only what the
- * platform actually told us is claimed: another window has focus over ours.
- * The other app is never named (Android cannot enumerate it) and the condition
- * is never called a screen overlay (that is a separate, separately-measured
- * signal).
- */
-export const FOREIGN_WINDOW_WARNING_COPY = {
-  title: 'Close the floating window',
-  message:
-    'Another app is showing in a floating window over MedAcademy. MedAcademy '
-    + 'cannot run while another window is in front of it. Close the floating '
-    + 'window (or the mini-window / pop-up view) and access is restored '
-    + 'automatically.',
-} as const;
 
 /**
  * What the user must do, per mode. Rendered on the blocking screen; kept here
@@ -840,13 +842,6 @@ export const FOREIGN_WINDOW_WARNING_COPY = {
  * the gate and any other surface.
  */
 export function windowModeBlockSteps(mode: WindowMode | string | null | undefined): readonly string[] {
-  if (mode === 'foreign_window') {
-    return [
-      'Close the app that is floating over MedAcademy (close its pop-up / mini window, or drag it to the edge to dismiss it).',
-      'Bring MedAcademy back to the front — it must be the app you see.',
-      'Access returns automatically once the floating window is gone and a fresh check passes.',
-    ];
-  }
   if (mode === 'picture_in_picture') {
     return [
       'Close the floating MedAcademy window (drag it to the bottom of the screen, or open the app from Recents).',
@@ -862,29 +857,14 @@ export function windowModeBlockSteps(mode: WindowMode | string | null | undefine
 }
 
 /**
- * What the user must do while the OVERLAY hold is engaged. The overlay and
- * split-screen pages share one required sentence, but the recovery actions are
- * different, so the steps are kept next to the window-mode steps and rendered by
- * the same list. Nothing here claims the app can identify WHICH app is drawing
- * over it — only that the condition must end and a fresh check must pass.
- */
-export function overlayBlockSteps(): readonly string[] {
-  return [
-    'Close the app, floating window or screen-capture tool that is covering MedAcademy.',
-    'Return to MedAcademy in full screen (do not leave it in split-screen or picture-in-picture).',
-    'Access returns automatically once a fresh security check passes.',
-  ];
-}
-
-/**
  * The multi-window lock may only release when BOTH hold:
  *
  *   • the platform reports the app back in FULL SCREEN, and
  *   • a FRESH security evaluation has completed.
  *
- * Same two-condition shape as the overlay rule, for the same reason: the first
- * condition is the required proof that the prohibited state is gone, and the
- * second one guarantees the app never unblocks on a verdict that predates it.
+ * The first condition is the required proof that the prohibited state is gone,
+ * and the second one guarantees the app never unblocks on a verdict that
+ * predates it.
  * There is deliberately NO third, user-tappable condition — the user cannot
  * acknowledge their way past this restriction. Both are read from the
  * authoritative lock/verdict state, never from UI state.
@@ -909,7 +889,7 @@ export const MULTI_WINDOW_DETECTION_LIMITS = [
   'Activity.isInPictureInPictureMode() (API 24+) reports only that THIS app is floating in PiP. Another app being in PiP, split-screen, or a floating window is NOT observable: Android provides no public API for one app to enumerate another app\u2019s windows.',
   'AccessibilityService.getWindows() could observe other apps\u2019 windows, but it requires an accessibility service \u2014 a broad, sensitive permission this app deliberately does not request for a learning product (privacy, and Play policy). No permission is requested for multi-window detection: the APIs above need none.',
   'OEM floating-window features (MIUI, One UI, EMUI and similar) are vendor UI layered over the documented APIs. When a vendor puts MedAcademy itself in a resizable/floating window the documented multi-window state reports it; when a vendor feature only affects OTHER apps, nothing is claimed.',
-  'The multi-window signal and the obscured-window/overlay signal are DIFFERENT measurements and are never conflated: a prohibited window mode is never reported as an overlay, and the touch-path overlay evidence is never reported as a split screen.',
+  'The obscured-window/overlay signal does not exist any more: that subsystem was removed because it inferred another app\u2019s window from focus loss and touch flags, which produced false locks. A prohibited window mode is the only window-state finding.',
   'A failed, absent or not-yet-available measurement reports "unknown" and is treated as "not measurable on this device" \u2014 never as proof of full-screen use, and never as a confirmed finding.',
 ] as const;
 
@@ -919,9 +899,9 @@ export const MULTI_WINDOW_DETECTION_LIMITS = [
 export type VpnBlockCopy = { title: string; message: string };
 
 /**
- * Exact copy for the mandatory VPN/proxy block. Lives in the pure model (like
- * OVERLAY_WARNING_COPY) so the wording is unit-testable, shared by the
- * authenticated gate AND the pre-login block screen, and cannot drift.
+ * Exact copy for the mandatory VPN/proxy block. Lives in the pure model so the
+ * wording is unit-testable, shared by the authenticated gate AND the pre-login
+ * block screen, and cannot drift.
  *
  * It deliberately does NOT claim the app can disable a third-party VPN: iOS
  * gives an app no API to stop a Network Extension another app owns.
@@ -962,7 +942,7 @@ export function connectionBlockInstructions(platform: string): readonly string[]
 
 /**
  * What iOS can and cannot tell us — the honest limits, surfaced verbatim in the
- * implementation report (mirrors OVERLAY_DETECTION_LIMITS).
+ * implementation report.
  */
 export const VPN_DETECTION_LIMITS = [
   'iOS never names the VPN vendor: NO public API lets an app enumerate VPN configurations or read the active tunnel\u2019s owner.',
@@ -971,14 +951,6 @@ export const VPN_DETECTION_LIMITS = [
   'DNS-only VPNs, per-app VPNs that never become the active path transport, and iCloud Private Relay (Apple surfaces it as .wifi/.cellular) are accepted gaps, not detections.',
   'Proxy detection uses CFNetworkCopySystemProxySettings (HTTP/HTTPS/SOCKS); a PAC/auto-config URL is reported as a proxy configuration.',
   'An app cannot turn a third-party VPN off: the blocking screen must instruct the user, and only the fresh security evaluation can restore access.',
-] as const;
-
-export const OVERLAY_DETECTION_LIMITS = [
-  'Android exposes no API for one app to enumerate another app\u2019s windows, so "an overlay is on screen right now" cannot be measured directly.',
-  'MotionEvent.FLAG_WINDOW_IS_OBSCURED / FLAG_WINDOW_IS_PARTIALLY_OBSCURED are only set by the framework from API 29 (Q).',
-  'Observation requires the user to touch the screen; a passive overlay that is never touched is invisible to app-side checks.',
-  'setHideOverlayWindows(true) (API 31+) prevents non-system overlays while the app is focused — prevention, not detection.',
-  'A system-signed overlay, or one drawn by the device/profile owner, can be neither hidden nor filtered.',
 ] as const;
 
 // ─── Update verdict (versionCode is authoritative; names never compared) ─────

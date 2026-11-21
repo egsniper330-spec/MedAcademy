@@ -23,13 +23,32 @@ import { Badge, Button, Card, EmptyState, InlineError, PageHeader, Spinner } fro
  * and already scoped to the caller's role.
  */
 
-type Verdict = 'confirmed' | 'probable' | 'no_mark' | 'ambiguous' | 'unsupported';
+type Verdict = 'confirmed' | 'probable' | 'no_mark' | 'ambiguous' | 'unsupported' | 'insufficient_quality';
+
+/**
+ * What is being inspected. The two modes hit DIFFERENT endpoints but share the same
+ * authorization, the same audit table and the same identity resolution: the payload in
+ * the pixels is the only input in both cases.
+ */
+type InputMode = 'pdf' | 'image';
+
+/** Stable reason codes the service returns for an unusable image. */
+type QualityReason = 'low_resolution' | 'blurry' | 'low_contrast';
 
 interface Course { id: string }
 
 interface CheckResult {
   verdict: Verdict;
+  /** Identical to verdict for the PDF path; for images it adds the four-way outcome. */
+  input?: 'pdf' | 'image';
+  result_state?: 'identified' | 'unmatched_payload' | 'no_mark' | 'insufficient_quality';
   matched: boolean;
+  score?: number;
+  agreement?: number;
+  candidates_analyzed?: number;
+  candidates_readable?: number;
+  candidates_total?: number;
+  quality?: { ok: boolean; reasons?: QualityReason[]; width?: number | null; height?: number | null };
   note?: string;
   issuance?: {
     watermark_record: string;
@@ -53,6 +72,8 @@ interface CheckResult {
 type Stage = 'idle' | 'preparing' | 'uploading' | 'uploaded' | 'analyzing' | 'done' | 'failed';
 
 const MAX_BYTES = 26214400;
+/** Matches the backend/service image ceiling; enforced here so the upload is not wasted. */
+const MAX_IMAGE_BYTES = 12582912;
 
 const VERDICT_TONE: Record<Verdict, string> = {
   confirmed: 'green',
@@ -60,6 +81,7 @@ const VERDICT_TONE: Record<Verdict, string> = {
   ambiguous: 'amber',
   no_mark: 'slate',
   unsupported: 'slate',
+  insufficient_quality: 'slate',
 };
 
 function VerdictIcon({ verdict }: { verdict: Verdict }) {
@@ -95,6 +117,7 @@ export default function PdfChecker() {
 
   const [scopeCourseCount, setScopeCourseCount] = useState<number | null>(null);
 
+  const [mode, setMode] = useState<InputMode>('pdf');
   const [file, setFile] = useState<File | null>(null);
   const [stage, setStage] = useState<Stage>('idle');
   const [progress, setProgress] = useState(0);
@@ -133,6 +156,18 @@ export default function PdfChecker() {
     return Number.isNaN(date.getTime()) ? value : dateFormatter.format(date);
   };
 
+  /** Switching the input changes what a valid file is, so the previous pick is dropped. */
+  const changeMode = (next: InputMode) => {
+    if (next === mode || running) return;
+    setMode(next);
+    setFile(null);
+    setResult(null);
+    setFormError(null);
+    setProgress(0);
+    setStage('idle');
+    if (fileInput.current) fileInput.current.value = '';
+  };
+
   const pickFile = (selected: File | null) => {
     setResult(null);
     setFormError(null);
@@ -142,15 +177,29 @@ export default function PdfChecker() {
       setFile(null);
       return;
     }
-    if (!/\.pdf$/i.test(selected.name) && selected.type !== 'application/pdf') {
-      setFile(null);
-      setFormError(t('pdfcheck.notPdf'));
-      return;
-    }
-    if (selected.size > MAX_BYTES) {
-      setFile(null);
-      setFormError(t('pdfcheck.tooLarge'));
-      return;
+    if (mode === 'pdf') {
+      if (!/\.pdf$/i.test(selected.name) && selected.type !== 'application/pdf') {
+        setFile(null);
+        setFormError(t('pdfcheck.notPdf'));
+        return;
+      }
+      if (selected.size > MAX_BYTES) {
+        setFile(null);
+        setFormError(t('pdfcheck.tooLarge'));
+        return;
+      }
+    } else {
+      // The server re-checks the file SIGNATURE; this is only a fast, friendly gate.
+      if (!/^image\/(jpeg|png|webp)$/i.test(selected.type) && !/\.(jpe?g|png|webp)$/i.test(selected.name)) {
+        setFile(null);
+        setFormError(t('pdfcheck.notImage'));
+        return;
+      }
+      if (selected.size > MAX_IMAGE_BYTES) {
+        setFile(null);
+        setFormError(t('pdfcheck.imageTooLarge'));
+        return;
+      }
     }
     setFile(selected);
   };
@@ -172,8 +221,11 @@ export default function PdfChecker() {
       await new Promise((resolve) => setTimeout(resolve, 0)); // let the "preparing" paint
       setStage('uploading');
 
+      // Image input goes to its own endpoint: no PDF container, no page loop. Both
+      // endpoints share authorization, audit and payload->issuance resolution.
+      const endpoint = mode === 'pdf' ? '/pdf-forensic/check' : '/pdf-forensic/check-image';
       const data = await uploadFile<CheckResult>(
-        '/pdf-forensic/check',
+        endpoint,
         body,
         (percent) => {
           setProgress(percent);
@@ -193,7 +245,7 @@ export default function PdfChecker() {
     } finally {
       abortRef.current = null;
     }
-  }, [file, running, t]);
+  }, [file, mode, running, t]);
 
   const cancel = () => {
     abortRef.current?.abort();
@@ -238,9 +290,38 @@ export default function PdfChecker() {
       <PageHeader title={t('pdfcheck.title')} subtitle={t('pdfcheck.subtitle')} />
 
       <Card>
+        {/* INPUT MODE — a PDF, or ONE image of a page. The image path needs no PDF,
+            no page set and no student id: the mark in the pixels is the only input. */}
+        <div className="stack-tight">
+          <span className="muted small">{t('pdfcheck.mode')}</span>
+          <div className="button-row" role="group" aria-label={t('pdfcheck.mode')}>
+            <Button
+              type="button"
+              variant={mode === 'pdf' ? 'primary' : 'secondary'}
+              aria-pressed={mode === 'pdf'}
+              disabled={running}
+              onClick={() => changeMode('pdf')}
+            >
+              {t('pdfcheck.mode.pdf')}
+            </Button>
+            <Button
+              type="button"
+              variant={mode === 'image' ? 'primary' : 'secondary'}
+              aria-pressed={mode === 'image'}
+              disabled={running}
+              onClick={() => changeMode('image')}
+            >
+              {t('pdfcheck.mode.image')}
+            </Button>
+          </div>
+          {mode === 'image' && <p className="muted small">{t('pdfcheck.modeHint')}</p>}
+        </div>
+
         <div className="detail-grid">
           <div>
-            <span id="pdf-checker-file-label" className="muted small">{t('pdfcheck.file')}</span>
+            <span id="pdf-checker-file-label" className="muted small">
+              {mode === 'pdf' ? t('pdfcheck.file') : t('pdfcheck.image')}
+            </span>
             <div className="row-actions">
               <Button
                 type="button"
@@ -249,7 +330,9 @@ export default function PdfChecker() {
                 disabled={running}
                 onClick={() => fileInput.current?.click()}
               >
-                {file ? t('pdfcheck.changeFile') : t('pdfcheck.chooseFile')}
+                {mode === 'pdf'
+                  ? (file ? t('pdfcheck.changeFile') : t('pdfcheck.chooseFile'))
+                  : (file ? t('pdfcheck.changeImage') : t('pdfcheck.chooseImage'))}
               </Button>
               <span className="muted small file-name" dir="ltr" title={file?.name ?? undefined}>
                 {file ? file.name : t('pdfcheck.noFile')}
@@ -259,13 +342,15 @@ export default function PdfChecker() {
               id="pdf-checker-file"
               ref={fileInput}
               type="file"
-              accept="application/pdf,.pdf"
+              accept={mode === 'pdf' ? 'application/pdf,.pdf' : 'image/jpeg,image/png,image/webp'}
               className="sr-only"
               aria-labelledby="pdf-checker-file-label"
               disabled={running}
               onChange={(event) => pickFile(event.target.files?.[0] ?? null)}
             />
-            <p className="muted small">{t('pdfcheck.fileHint')}</p>
+            <p className="muted small">
+              {mode === 'pdf' ? t('pdfcheck.fileHint') : t('pdfcheck.imageHint')}
+            </p>
           </div>
           <div className="align-end">
             {running ? (
@@ -274,7 +359,7 @@ export default function PdfChecker() {
               </Button>
             ) : (
               <Button variant="primary" icon={<ScanSearch size={16} />} disabled={!file} onClick={() => void submit()}>
-                {t('pdfcheck.run')}
+                {mode === 'pdf' ? t('pdfcheck.run') : t('pdfcheck.runImage')}
               </Button>
             )}
           </div>
@@ -356,7 +441,25 @@ export default function PdfChecker() {
                   <p className="result-value">{t(`pdfcheck.verdict.${result.verdict}`)}</p>
                   <p className="muted small">{t('pdfcheck.matched')}</p>
                 </section>
+
+                {/* IMAGE EVIDENCE — how strong the reading was, and over how many regions.
+                    A photograph or crop carries less page area than a whole PDF, so the
+                    doctor must see the basis of the identification. */}
+                {result.input === 'image' && (
+                  <section className="result-section">
+                    <h4><ScanSearch size={15} aria-hidden="true" /> {t('pdfcheck.confidence')}</h4>
+                    <p className="result-value">
+                      {Math.round((result.score ?? 0) * 100)}%
+                    </p>
+                    <p className="muted small">
+                      {t('pdfcheck.candidates')}: {result.candidates_readable ?? 0}/{result.candidates_total ?? 0}
+                    </p>
+                  </section>
+                )}
               </div>
+              {result.input === 'image' && (
+                <p className="muted small">{t('pdfcheck.imageNote')}</p>
+              )}
 
               {result.verdict === 'ambiguous' && <p className="muted">{t('pdfcheck.ambiguousHint')}</p>}
 
@@ -374,8 +477,23 @@ export default function PdfChecker() {
                 <h4><ShieldAlert size={15} aria-hidden="true" /> {t('pdfcheck.status')}</h4>
                 <p className="result-value">{t(`pdfcheck.verdict.${result.verdict}`)}</p>
                 <p className="muted small">
-                  {result.note ?? (result.verdict === 'no_mark' ? t('pdfcheck.noMark') : t('pdfcheck.unmatched'))}
+                  {result.result_state === 'insufficient_quality'
+                    ? t('pdfcheck.insufficientQuality')
+                    : (result.note ?? (result.verdict === 'no_mark' ? t('pdfcheck.noMark') : t('pdfcheck.unmatched')))}
                 </p>
+                {/* WHY the image was rejected — low resolution, blur or flat contrast. */}
+                {result.result_state === 'insufficient_quality'
+                  && (result.quality?.reasons?.length ?? 0) > 0 && (
+                    <p className="muted small">
+                      <strong>{t('pdfcheck.quality.reasons')}:</strong>{' '}
+                      {(result.quality?.reasons ?? [])
+                        .map((reason) => t(`pdfcheck.quality.reason.${reason}`))
+                        .join(' \u00b7 ')}
+                    </p>
+                  )}
+                {result.input === 'image' && (
+                  <p className="muted small">{t('pdfcheck.imageNote')}</p>
+                )}
               </section>
               <div className="result-actions">
                 <Button variant="secondary" icon={<FileUp size={16} />} onClick={reset}>{t('pdfcheck.reset')}</Button>

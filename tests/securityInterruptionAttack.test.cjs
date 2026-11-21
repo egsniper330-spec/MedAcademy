@@ -157,46 +157,41 @@ check('A11: generation guards reject a stale evaluation result', () => {
   assert.match(CONTEXT, /if \(requestId !== protectedRequestIdRef\.current\) return;/);
 });
 
-/* ───────── B. Floating / pop-up window over a RESUMED app ───────────────── */
+/* ───────── B. Focus-loss window detection REMOVED (no false positives) ───── */
 
-console.log('\nB. Floating window over a resumed app blocks playback');
+console.log('\nB. Focus loss is no longer a security finding');
 
-check('B1: the native mapping reports foreign_window on focus loss, resumed or not', () => {
-  assert.match(PLUGIN, /if \(foreignWindowFocused\) return WINDOW_MODE_FOREIGN/);
-  assert.ok(
-    !/foreignWindowFocused && !appResumed/.test(PLUGIN),
-    'requiring a paused activity is exactly the missed pop-up case',
-  );
+// The Kotlin MODULE template and the injected ACTIVITY overrides, without the
+// JS-side upgrade guard (which only NAMES the retired symbols so an already
+// patched MainActivity is re-injected instead of reused).
+const KT = PLUGIN.slice(0, PLUGIN.indexOf('const WINDOW_MODE_ACTIVITY_MARKER'));
+const OVERRIDES_START = PLUGIN.indexOf('const WINDOW_MODE_ACTIVITY_OVERRIDES');
+const OVERRIDES = PLUGIN.slice(OVERRIDES_START, OVERRIDES_START + 6000);
+
+check('B1: the native template has no foreign-window mode left', () => {
+  assert.ok(!/WINDOW_MODE_FOREIGN/.test(KT));
+  assert.ok(!/foreignWindowFocused/.test(KT));
+  assert.ok(!/onTopResumedActivityChanged[\s\S]{0,120}super\./.test(OVERRIDES));
 });
 
-check('B2: the coverage check no longer requires the activity to be paused', () => {
-  const covered = PLUGIN.slice(
-    PLUGIN.indexOf('private fun windowCoveredByOtherTask'),
-    PLUGIN.indexOf('private fun cancelForeignCheck'),
-  );
-  assert.match(covered, /if \(decor\.hasWindowFocus\(\)\) return false/);
-  assert.match(covered, /return true/);
-  assert.ok(!/return activityPaused/.test(covered), 'a resumed app must still be reportable');
+check('B2: the focus-loss detector and its settle timer are gone', () => {
+  // KT only: the JS upgrade guard names retired symbols on purpose.
+  assert.ok(!/windowCoveredByOtherTask|scheduleForeignCheck|cancelForeignCheck/.test(KT));
+  assert.ok(!/postDelayed\(check, 700L\)/.test(KT));
 });
 
-check('B3: a live focus loss schedules a settled re-read (no stale event state)', () => {
-  assert.match(PLUGIN, /override fun onWindowFocusChanged\(hasFocus: Boolean\)/);
-  assert.match(PLUGIN, /postDelayed\(check, 700L\)/);
-  assert.match(PLUGIN, /if \(windowCoveredByOtherTask\(\)\)/);
+check('B3: overlay prevention and its focus hook are removed', () => {
+  assert.ok(!/applyHideOverlayWindows|HIDE_OVERLAY_WINDOWS|enableOverlayProtection/.test(KT));
+  assert.ok(!/onWindowFocusChanged/.test(KT));
 });
 
-check('B4: JS blocks PROTECTED CONTENT for a foreign window without taking over the app', () => {
+check('B4: JS has no foreign-window branch and no focus-derived content block', () => {
   const apply = CONTEXT.slice(
     CONTEXT.indexOf('const applyWindowModeReading'),
     CONTEXT.indexOf('nativeWindowPreflightRef.current = async'),
   );
-  assert.match(apply, /if \(mode === 'foreign_window'\) \{/);
-  assert.match(apply, /blockProtectedContent\('foreign-window'\)/);
-  // No hard app-wide lock for a focus loss (shade / own dialog are the same signal).
-  assert.ok(
-    !/engageSecurityLock\(LOCK_SRC_WINDOW_MODE, \{ hard: true \}\);\s*\n\s*blockProtectedContent\('foreign-window'\)/.test(apply),
-    'a focus loss must not raise the app-wide gate',
-  );
+  assert.ok(!/foreign_window/.test(apply));
+  assert.ok(!/blockProtectedContent\('foreign-window'\)/.test(apply));
 });
 
 check('B5: a clean verdict cannot reveal video while the window mode is prohibited', () => {
@@ -204,8 +199,8 @@ check('B5: a clean verdict cannot reveal video while the window mode is prohibit
   assert.match(CONTEXT, /protected content stays hidden — window mode is still prohibited/);
 });
 
-check('B6: our own dialogs still cannot trip the gate', () => {
-  assert.match(CONTEXT, /incomingMode === 'foreign_window' && hasOwnDialogOpen\(\)/);
+check('B6: our own dialogs no longer need to mask a window reading', () => {
+  assert.ok(!/incomingMode === 'foreign_window' && hasOwnDialogOpen\(\)/.test(CONTEXT));
 });
 
 check('B7: split-screen and PiP keep their hard app-level block', () => {

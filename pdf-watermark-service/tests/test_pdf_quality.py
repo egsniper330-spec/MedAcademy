@@ -58,7 +58,7 @@ def master(tmp_path: Path):
 def test_page_count_order_and_point_size_match_master(master):
     storage, manifest = master
     data = issuance.build_personalised_pdf(storage=storage, manifest=manifest, model=FakeModel(),
-                                           payload=1, lossless_png_dpi=manifest["settings"]["dpi"])
+                                           payload=1, source_dpi=manifest["settings"]["dpi"])
     doc = pdfium.PdfDocument(data)
     assert len(doc) == len(manifest["pages"])
     for i, page_meta in enumerate(manifest["pages"]):
@@ -73,7 +73,7 @@ def test_page_count_order_and_point_size_match_master(master):
 def test_embedded_image_resolution_equals_master_pixels(master):
     storage, manifest = master
     data = issuance.build_personalised_pdf(storage=storage, manifest=manifest, model=FakeModel(),
-                                           payload=1, lossless_png_dpi=manifest["settings"]["dpi"])
+                                           payload=1, source_dpi=manifest["settings"]["dpi"])
     doc = pdfium.PdfDocument(data)
     for i, page_meta in enumerate(manifest["pages"]):
         bitmap = doc[i].render(scale=manifest["settings"]["dpi"] / 72.0).to_pil()
@@ -85,7 +85,7 @@ def test_rebuilt_pages_are_readable_at_master_dpi(master):
     """Body text (11 pt on a 150 DPI master) must still show dark ink after reconstruction."""
     storage, manifest = master
     data = issuance.build_personalised_pdf(storage=storage, manifest=manifest, model=FakeModel(),
-                                           payload=1, lossless_png_dpi=manifest["settings"]["dpi"])
+                                           payload=1, source_dpi=manifest["settings"]["dpi"])
     doc = pdfium.PdfDocument(data)
     page = doc[0].render(scale=manifest["settings"]["dpi"] / 72.0).to_pil().convert("L")
     ink_rebuilt = (np.asarray(page) < 128).mean()
@@ -100,7 +100,7 @@ def test_original_pdf_bytes_are_not_modified_by_rebuild(master):
     storage, manifest = master
     before = storage.get_bytes("originals/mat/v1.pdf")
     issuance.build_personalised_pdf(storage=storage, manifest=manifest, model=FakeModel(),
-                                    payload=1, lossless_png_dpi=manifest["settings"]["dpi"])
+                                    payload=1, source_dpi=manifest["settings"]["dpi"])
     assert storage.get_bytes("originals/mat/v1.pdf") == before
 
 
@@ -109,7 +109,7 @@ def test_master_assets_are_not_student_specific(master):
     storage, manifest = master
     first_masters = [storage.get_bytes(p["key"]) for p in manifest["pages"]]
     issuance.build_personalised_pdf(storage=storage, manifest=manifest, model=FakeModel(), payload=1,
-                                    lossless_png_dpi=manifest["settings"]["dpi"])
+                                    source_dpi=manifest["settings"]["dpi"])
     issuance.build_personalised_pdf(storage=storage, manifest=manifest, model=FakeModel(), payload=2,
-                                    lossless_png_dpi=manifest["settings"]["dpi"])
+                                    source_dpi=manifest["settings"]["dpi"])
     assert [storage.get_bytes(p["key"]) for p in manifest["pages"]] == first_masters

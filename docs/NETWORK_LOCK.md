@@ -17,7 +17,7 @@ Canonical scope list (also exported and asserted in tests):
 | **Resume** from background (and the instant the app is backgrounded) | AppState listener — `enterBackgroundHold('appstate=…')` / `'resumed'` | hard |
 | Native **VPN/proxy transport** signal (before the verdict) | `nativeStateChanged` handler | soft (provisional) |
 | Confirmed **policy violation** | verdict effect — `LOCK_SRC_VERDICT` | hard |
-| Live **obscured-window** signal / prohibited **window mode** | native overlay + window-mode handlers | hard |
+| Prohibited **window mode** (split-screen / PiP) | native window-mode handler | hard |
 
 All holders compose by source name, so one release can never clear a lock another
 holder still owns.

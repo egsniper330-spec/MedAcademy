@@ -7,8 +7,8 @@
  *
  * Phase 2 detectors (Android):
  *   Frida, Xposed/LSPosed/EdXposed, Magisk/Zygisk,
- *   Overlay Attack, App Signature, Anti-Tamper,
- *   Play Integrity API (server-verified)
+ *   App Signature, Anti-Tamper, Play Integrity API (server-verified)
+ *   (Overlay Attack was REMOVED with the floating-window protection subsystem.)
  *
  * Phase 2 detectors (iOS):
  *   Jailbreak (10 methods via IOSSecurityModule), Debugger (sysctl P_TRACED),
@@ -21,7 +21,7 @@
  *   tampered/signature 40 | root/jailbreak 35 | frida 30 | play_integrity 30 |
  *   app_attest 30 | magisk 25 | xposed 25 | debugger_attached 25 |
  *   developer_options 25 | adb 20 | debug 20 | app_integrity 20 |
- *   ssl_pinning 20 | vpn 15 | proxy 15 | overlay 15 | screen_recording 10
+ *   ssl_pinning 20 | vpn 15 | proxy 15 | screen_recording 10
  *
  * ENFORCEMENT POLICY (default — fail-secure):
  *   root_jailbreak    → block_login
@@ -35,7 +35,6 @@
  *   ssl_pinning       → block_login
  *   debug             → block_login
  *   vpn               → block_login
- *   overlay           → block_video + warn
  *   screen_recording  → block_video
  *   proxy             → warn_only
  *   app_integrity     → warn_only
@@ -86,6 +85,9 @@ import {
   evaluateSecurityResult,
   applyMandatoryConnectionFloor,
   VPN_SIGNAL_DEGRADED_EVENT,
+  resolveUserCaOutcome,
+  isUserCaFinding,
+  USER_CA_DETECTION_METHOD,
   type VpnSignalPath,
 } from './securityStateModel';
 
@@ -116,7 +118,6 @@ export type SecurityEventType =
   | 'frida_detected'
   | 'xposed_detected'
   | 'magisk_detected'
-  | 'overlay_detected'
   | 'signature_invalid'
   | 'tamper_detected'
   | 'play_integrity_failed'
@@ -174,7 +175,6 @@ export type DetectionType =
   | 'frida'
   | 'xposed'
   | 'magisk'
-  | 'overlay'
   | 'tamper'
   | 'play_integrity'
   | 'app_attest';
@@ -216,6 +216,13 @@ export interface SecurityCheckResult {
    * the resume diagnostics to show which detector actually costs the time.
    */
   timings?:    Record<string, number>;
+  /**
+   * Detectors that produced NO VERDICT this cycle (threw, or hit
+   * DETECTOR_TIMEOUT_MS). Empty means every detector actually measured. A caller
+   * that REQUIRES a verdict must treat membership as fail-closed — playback does
+   * (PRE_PLAYBACK_MANDATORY_DETECTORS).
+   */
+  degradedDetectors?: string[];
 }
 
 /**
@@ -234,7 +241,7 @@ export interface SecurityCheckResult {
  *   |----------------------------------|-------------------------------|--------|
  *   | vpn / proxy                      | YES (user toggles a tunnel)    | run    |
  *   | debugger, developer options      | YES (Settings/ADB)             | run    |
- *   | screen recording, overlay        | YES (other app starts one)     | run    |
+ *   | screen recording                 | YES (other app starts one)     | run    |
  *   | root/jailbreak, frida/xposed,    | practically NO within the       | run*   |
  *   | magisk, tamper/signature         | reuse window                   |        |
  *   | play integrity / app attest      | only on install/update/restore | TTL    |
@@ -282,8 +289,6 @@ export interface SecurityEvidence {
   expectedCertConfigured?:   boolean;
   /** SHA-256 fingerprint of the current signing cert (public material). */
   signatureSha256?:          string | null;
-  /** Installed non-self packages holding SYSTEM_ALERT_WINDOW (capability count — NOT a threat). */
-  overlayCapableAppsCount?:  number;
   /** True when the native batch call could not run — flags are defaults, not measurements. */
   detectionUnavailable?:     boolean;
   /**
@@ -316,7 +321,6 @@ const WEIGHTS: Record<SecurityEventType, number> = {
   ssl_pinning_failure:       20,
   vpn_detected:              15,
   proxy_detected:            15,
-  overlay_detected:          15,
   screen_recording_detected: 10,
   screenshot_detected:        5,
   // Observability-only event (native module unavailable). Never a threat on
@@ -360,7 +364,6 @@ const DETECTION_TO_EVENT: Record<DetectionType, SecurityEventType[]> = {
   frida:             ['frida_detected'],
   xposed:            ['xposed_detected'],
   magisk:            ['magisk_detected'],
-  overlay:           ['overlay_detected'],
   tamper:            ['tamper_detected', 'signature_invalid'],
   play_integrity:    ['play_integrity_failed'],
   app_attest:        ['app_attest_failed'],
@@ -412,7 +415,6 @@ const DEFAULT_POLICIES: Record<DetectionType, PolicyAction> = {
   frida:             'block_login',
   xposed:            'block_login',
   magisk:            'block_login',
-  overlay:           'block_video',
   tamper:            'block_login',
   play_integrity:    'block_login',
   app_attest:        'block_login',
@@ -903,6 +905,94 @@ async function detectProxy(): Promise<SecurityThreat | null> {
 }
 
 /**
+ * Traffic-interception TOOL detection (Android).
+ *
+ * Reports the INSTALLED-package evidence from the curated native catalog
+ * (ProxyPin, Reqable, HTTP Toolkit, HttpCanary, PCAPdroid) through TARGETED
+ * package visibility — no QUERY_ALL_PACKAGES.
+ *
+ * Confidence, stated honestly:
+ *   • an installed interception tool is a REAL finding (it can attach a local
+ *     proxy or a VPN tunnel at any moment, with no further install step);
+ *   • it does NOT prove interception is happening: live interception is covered
+ *     by the independent VPN / kernel-route / system-proxy signals;
+ *   • a renamed or repackaged tool, and interception performed off-device, are
+ *     NOT detectable through public Android APIs.
+ *
+ * The finding is reported in the existing `proxy_detected` event bucket (policy
+ * block_login) so no server-side policy/schema change is needed; the
+ * detectionMethod names the tool so the UI copy and the event trail stay
+ * accurate. iOS returns null (no equivalent visibility).
+ */
+async function detectInterceptionTools(): Promise<SecurityThreat | null> {
+  try {
+    if (process.env.EXPO_OS !== 'android') return null;
+    const flags = await getNativeSecurityFlags();
+    const packages = Array.isArray(flags.interceptionToolPackages) ? flags.interceptionToolPackages : [];
+    if (packages.length === 0) return null;
+    const labels = Array.isArray(flags.interceptionToolLabels) ? flags.interceptionToolLabels : [];
+    const named = labels.length > 0 ? labels.join(', ') : packages.join(', ');
+    const unverified = Array.isArray(flags.interceptionSignerMismatches) && flags.interceptionSignerMismatches.length > 0
+      ? ` (signer differs from the pinned value for: ${flags.interceptionSignerMismatches.join(', ')})`
+      : '';
+    if (__DEV__) {
+      console.log('[SecurityCheck][Interception] installed tool(s):', packages.join(', '));
+    }
+    return {
+      type: 'proxy_detected',
+      detectionMethod: `Traffic interception tool installed: ${named}${unverified}`,
+      detected: true,
+    };
+  } catch (e) {
+    if (__DEV__) console.log('[SecurityCheck][Interception] exception:', e);
+    // A thrown package scan is NOT a clean device, but it is also not proof of
+    // anything: it is reported as an unavailable check, never as a threat.
+    return null;
+  }
+}
+
+/**
+ * USER-INSTALLED CA CERTIFICATE (Android trust store).
+ *
+ * INDEPENDENT of the installed-app catalog: the native check enumerates the
+ * device's user CA store, so a CA installed by Reqable / ProxyPin / Burp Suite
+ * is still found after that application is uninstalled. It is an INSTALLED
+ * fact about the trust store — not proof that traffic is being intercepted.
+ *
+ * The finding rides the certificate-trust event (`ssl_pinning_failure`, policy
+ * block_login) so no server policy/schema change is needed; the copy key comes
+ * from the detectionMethod. The engine forces the block for this finding (see
+ * runSecurityChecks), so a weakened/disabled server policy row cannot downgrade
+ * it.
+ *
+ * INCONCLUSIVE is NOT a finding and NOT a clean result: the native batch adds
+ * `userCaStore` to detectionsUnavailable, which surfaces as an unavailable
+ * check (evidence + diagnostics) exactly like every other coverage gap.
+ */
+async function detectUserCaCertificate(): Promise<SecurityThreat | null> {
+  try {
+    if (process.env.EXPO_OS !== 'android') return null;
+    const flags = await getNativeSecurityFlags();
+    const outcome = resolveUserCaOutcome(flags.userCaStatus);
+    if (__DEV__) {
+      console.log('[SecurityCheck][UserCA] status=', flags.userCaStatus, 'outcome=', outcome);
+    }
+    if (outcome === 'CLEAN') return null;
+    if (outcome === 'INCONCLUSIVE') {
+      // Never clean, never a threat. The named unavailable check carries it.
+      return null;
+    }
+    return {
+      type: 'ssl_pinning_failure',
+      detectionMethod: USER_CA_DETECTION_METHOD,
+      detected: true,
+    };
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Debug / emulator detection.
  * Android: SecurityModule.getSecurityFlags().emulatorDetected (Build fingerprint/model/
  *          manufacturer/QEMU props/sensor count) PLUS __DEV__ JS flag.
@@ -1333,28 +1423,6 @@ async function detectMagisk(): Promise<SecurityThreat | null> {
   } catch (e) {
     if (__DEV__) {
       console.log('[SecurityCheck][Magisk] exception:', e);
-    }
-    return null;
-  }
-}
-
-/** Overlay / tapjacking — Android only (SYSTEM_ALERT_WINDOW has no iOS equivalent) */
-async function detectOverlay(): Promise<SecurityThreat | null> {
-  try {
-    if (process.env.EXPO_OS !== 'android') return null;
-    const flags = await getNativeSecurityFlags();
-    if (__DEV__) {
-      console.log('[SecurityCheck][Overlay] overlayDetected=', flags.overlayDetected);
-    }
-    if (!flags.overlayDetected) return null;
-    return {
-      type: 'overlay_detected',
-      detectionMethod: 'Screen overlay detected',
-      detected: true,
-    };
-  } catch (e) {
-    if (__DEV__) {
-      console.log('[SecurityCheck][Overlay] exception:', e);
     }
     return null;
   }
@@ -1867,7 +1935,7 @@ export async function clearAppAttestKey(): Promise<void> {
  *
  * Only these four local device-environment signals are disabled. Every other
  * check — root (non-Magisk), Frida, debugger, tamper/integrity, Play Integrity,
- * certificate pinning, VPN/proxy, overlay/tapjacking, screen recording, and all
+ * certificate pinning, VPN/proxy, screen recording, and all
  * authentication/backend authorization — remains fully enforced.
  */
 export const TEMPORARILY_DISABLED_CHECKS: Readonly<Record<string, boolean>> = Object.freeze({
@@ -1924,7 +1992,7 @@ export async function runSecurityChecks(
   // OFFLINE is honest: they cannot produce evidence offline either way, and
   // the connectivity-restore listener re-runs the full pipeline the moment
   // the network returns. EVERY LOCAL detector (root, emulator,
-  // developer options, USB debugging, debugger, frida/xposed/magisk, overlay,
+  // developer options, USB debugging, debugger, frida/xposed/magisk,
   // screen recording, tamper/signature) still runs — genuine violations still
   // block offline exactly as online.
   let genuinelyOffline = false;
@@ -1962,18 +2030,33 @@ export async function runSecurityChecks(
     }
   }
 
+  // ── Degradation ledger ─────────────────────────────────────────────────────
+  // A detector that throws or times out produced NO VERDICT. The pipeline still
+  // completes (every detector stays individually bounded), but "no verdict" must
+  // never be read as "verified clean" where a verdict is MANDATORY — which is
+  // what the per-detector fallback used to do silently. `degradedDetectors`
+  // lets a caller that REQUIRES a verdict (protected playback, see
+  // PRE_PLAYBACK_MANDATORY_DETECTORS in SecurityContext) fail closed.
+  // Names only: no value, token, id or evidence can appear here.
+  const degradedDetectors: string[] = [];
+  /** withTimeout() that also RECORDS that the fallback, not a measurement, ran. */
+  const bounded = <T,>(name: string, p: Promise<T>, fallback: () => T): Promise<T> =>
+    withTimeout(p, DETECTOR_TIMEOUT_MS, () => {
+      degradedDetectors.push(name);
+      return fallback();
+    });
+
   const [
-    rootThreat, vpnThreat, proxyThreat, debugThreat, devOptsThreat, screenRecThreat,
-    fridaThreat, xposedThreat, magiskThreat, overlayThreat, tamperThreat,
+    rootThreat, vpnThreat, proxyThreat, interceptionThreat, userCaThreat, debugThreat, devOptsThreat, screenRecThreat,
+    fridaThreat, xposedThreat, magiskThreat, tamperThreat,
     piThreat, sslThreat,
   ] = await Promise.all([
-    // Every detector is individually bounded (DETECTOR_TIMEOUT_MS): a single
-    // hung native/network call can no longer stall the whole pipeline. A timed-
-    // out detector resolves to its fail-safe value (null = no threat from that
-    // detector this cycle) so the check always completes and the mutex below
-    // (SecurityContext checkRef) is always released.
-    track('root',       () => withTimeout(detectRootJailbreak(),        DETECTOR_TIMEOUT_MS, () => null)),
-    track('vpn',        () => withTimeout(detectVPN(),                  DETECTOR_TIMEOUT_MS, () => vpnDetectionDegradedThreat(
+    // Every detector is individually bounded (DETECTOR_TIMEOUT_MS) and they all
+    // run CONCURRENTLY: the wall-clock cost of this block is the SLOWEST
+    // detector, not the sum. A hung native/network call can no longer stall the
+    // whole pipeline or hold the checkRef mutex.
+    track('root',       () => bounded('root',        detectRootJailbreak(),     () => null)),
+    track('vpn',        () => bounded('vpn',         detectVPN(),               () => vpnDetectionDegradedThreat(
       // A timed-out VPN probe is a coverage gap, not a clean device. The
       // fallback value keeps that distinction visible on iOS; on other
       // platforms the Android/Play-Integrity unavailable telemetry applies.
@@ -1981,20 +2064,27 @@ export async function runSecurityChecks(
         ? 'VPN check timed out on this device — result is NOT a verified clean state'
         : 'VPN check timed out — result is NOT a verified clean state'
     ))),
-    track('proxy',      () => withTimeout(detectProxy(),                DETECTOR_TIMEOUT_MS, () => null)),
-    track('debug',      () => withTimeout(detectDebug(),                DETECTOR_TIMEOUT_MS, () => null)),
-    track('devOptions', () => withTimeout(detectDeveloperOptions(),     DETECTOR_TIMEOUT_MS, () => null)),
-    track('screenRec',  () => withTimeout(detectScreenRecording(),      DETECTOR_TIMEOUT_MS, () => null)),
-    track('frida',      () => withTimeout(detectFrida(),                DETECTOR_TIMEOUT_MS, () => null)),
-    track('xposed',     () => withTimeout(detectXposed(),               DETECTOR_TIMEOUT_MS, () => null)),
-    track('magisk',     () => withTimeout(detectMagisk(),               DETECTOR_TIMEOUT_MS, () => null)),
-    track('overlay',    () => withTimeout(detectOverlay(),              DETECTOR_TIMEOUT_MS, () => null)),
-    track('tamper',     () => withTimeout(detectTamper(),               DETECTOR_TIMEOUT_MS, () => null)),
+    track('proxy',      () => bounded('proxy',       detectProxy(),             () => null)),
+    // Installed interception tools (targeted <queries> visibility). Shares the
+    // `proxy` policy bucket by design (see detectInterceptionTools).
+    track('interception', () => bounded('interception', detectInterceptionTools(), () => null)),
+    // User-installed CA certificates (trust-store evidence). One batch read from
+    // native flags — no extra bridge crossing, no main-thread work.
+    track('userCa', () => bounded('userCa', detectUserCaCertificate(), () => null)),
+    track('debug',      () => bounded('debug',       detectDebug(),             () => null)),
+    track('devOptions', () => bounded('devOptions',  detectDeveloperOptions(),  () => null)),
+    track('screenRec',  () => bounded('screenRec',   detectScreenRecording(),   () => null)),
+    track('frida',      () => bounded('frida',       detectFrida(),             () => null)),
+    track('xposed',     () => bounded('xposed',      detectXposed(),            () => null)),
+    track('magisk',     () => bounded('magisk',      detectMagisk(),            () => null)),
+    track('tamper',     () => bounded('tamper',      detectTamper(),            () => null)),
     // Play Integrity is entirely network-bound (backend nonce → Google API).
-    // Offline it can only burn its timeouts before returning null anyway.
-    track('platformIntegrity', () => withTimeout(
+    // Offline it can only burn its timeouts before returning null anyway, so a
+    // genuinely offline device (a supported state, re-checked when connectivity
+    // returns) is skipped rather than recorded as a degraded verdict.
+    track('platformIntegrity', () => bounded(
+      'platformIntegrity',
       genuinelyOffline ? Promise.resolve(null) : runPlayIntegrityCheck(),
-      DETECTOR_TIMEOUT_MS,
       () => null,
     )),
     // TLS probe — the one network-bound detector with no internal TTL, so it is
@@ -2006,7 +2096,7 @@ export async function runSecurityChecks(
         timings.ssl = 0;
         return Promise.resolve(null);
       }
-      return withTimeout(detectSSLPinning(), DETECTOR_TIMEOUT_MS, () => null);
+      return bounded('ssl', detectSSLPinning(), () => null);
     }),
   ]);
   const integrityThreat = detectAppIntegrity();
@@ -2018,9 +2108,9 @@ export async function runSecurityChecks(
   }
 
   const allThreats: SecurityThreat[] = [
-    rootThreat, vpnThreat, proxyThreat, debugThreat,
+    rootThreat, vpnThreat, proxyThreat, interceptionThreat, userCaThreat, debugThreat,
     devOptsThreat, screenRecThreat, integrityThreat,
-    fridaThreat, xposedThreat, magiskThreat, overlayThreat,
+    fridaThreat, xposedThreat, magiskThreat,
     tamperThreat, piThreat, sslThreat,
   ].filter((t): t is SecurityThreat => t !== null && t.detected)
     // Temporarily disabled checks (adb_enabled, xposed_detected, magisk_detected,
@@ -2047,7 +2137,6 @@ export async function runSecurityChecks(
     installerSource:         rawFlags?.installerSource ?? undefined,
     expectedCertConfigured:  rawFlags?.expectedCertConfigured ?? false,
     signatureSha256:         rawFlags?.signatureSha256 ?? undefined,
-    overlayCapableAppsCount: rawFlags?.overlayCapableAppsCount ?? undefined,
     detectionUnavailable:    wasLastSecurityFlagsCallUnavailable(),
     unavailableChecks:       rawFlags?.detectionsUnavailable ?? undefined,
   };
@@ -2064,6 +2153,16 @@ export async function runSecurityChecks(
     weights: WEIGHTS,
   });
   const { blocksLogin, blocksVideo, hasWarnings } = verdict;
+
+  // ── MANDATORY USER-CA BLOCK ───────────────────────────────────────────────
+  // A live trust-store finding must never be delegable to a policy row: the
+  // server's ssl_pinning row could be weakened or disabled, and the requirement
+  // is unconditional (block until the certificate is removed). The finding
+  // therefore forces login + video blocks, exactly like the mandatory
+  // connection floor forces vpn/proxy to block_login.
+  const userCaForcesBlock = allThreats.some(isUserCaFinding);
+  const effectiveBlocksLogin = blocksLogin || userCaForcesBlock;
+  const effectiveBlocksVideo = blocksVideo || userCaForcesBlock;
 
   // ── P4: report detection degradation for observability ────────────────────
   // When the native batch was unavailable, the flags above are fail-safe
@@ -2091,23 +2190,29 @@ export async function runSecurityChecks(
   // EXPO_PUBLIC_SECURITY_DIAGNOSTICS=1, so a physical device can be measured
   // without a debugger attached.
   const totalMs = Date.now() - evaluationStart;
-  if (__DEV__ || process.env.EXPO_PUBLIC_SECURITY_DIAGNOSTICS === '1') {
-    const slowest = Object.entries(timings)
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 3)
-      .map(([k, v]) => k + '=' + v + 'ms')
-      .join(' ');
+  // ALWAYS reported, on every build. Per-detector timings used to be printed
+  // only in DEV or behind EXPO_PUBLIC_SECURITY_DIAGNOSTICS, so on the release APK
+  // the users install there was NO way to attribute "video startup is slow" to a
+  // named detector — which is precisely the question this line answers. The
+  // detectors run concurrently (one Promise.all), so `total` is the SLOWEST
+  // detector plus a few ms, not the sum.
+  //
+  // PRIVACY: detector names and millisecond durations only. No token, identity,
+  // URL or device evidence can appear in this line.
+  {
+    const ordered = Object.entries(timings).sort((a, b) => b[1] - a[1]);
     console.log(
       '[SecurityCheck][timing] scope=' + scope + ' total=' + totalMs + 'ms'
       + ' sslReused=' + (sslReused ? 'yes' : 'no')
       + ' threats=' + allThreats.length
-      + (slowest ? ' | ' + slowest : ''),
+      + ' detectors=' + ordered.map(([k, v]) => k + ':' + v).join(','),
     );
   }
 
   return {
-    threats: allThreats, riskScore, policies, blocksLogin, blocksVideo, hasWarnings, evidence,
-    scope, timings,
+    threats: allThreats, riskScore, policies,
+    blocksLogin: effectiveBlocksLogin, blocksVideo: effectiveBlocksVideo,
+    hasWarnings, evidence, scope, timings, degradedDetectors,
   };
 }
 
@@ -2199,7 +2304,6 @@ export async function logThreats(
         expected_cert_configured:   evidence?.expectedCertConfigured ?? null,
         signature_sha256:           evidence?.signatureSha256 ?? null,
         installer_source:           evidence?.installerSource ?? null,
-        overlay_capable_apps_count: evidence?.overlayCapableAppsCount ?? null,
         detection_unavailable:      evidence?.detectionUnavailable ?? false,
         // WHICH iOS VPN signal path produced this check ('native' /
         // 'netinfo-fallback' / 'unavailable', null elsewhere) — lets the

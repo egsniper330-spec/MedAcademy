@@ -10,6 +10,7 @@ use MedAcademy\Http\Request;
 use MedAcademy\Services\AuditService;
 use MedAcademy\Services\PdfForensicClient;
 use MedAcademy\Services\PdfForensicException;
+use MedAcademy\Services\RateLimitService;
 use MedAcademy\Storage\StorageService;
 use MedAcademy\Utils\Logger;
 use MedAcademy\Utils\Uuid;
@@ -33,7 +34,11 @@ use MedAcademy\Utils\Uuid;
  */
 final class PdfForensicController
 {
-    private const MAX_UPLOAD_BYTES = 26214400; // 25 MiB
+    private const MAX_UPLOAD_BYTES = 26214400; // 25 MiB (PDF)
+    private const MAX_IMAGE_BYTES = 12582912;  // 12 MiB — matches the service's image limit
+    /** Image verifications allowed per staff account / per IP per minute. */
+    private const IMAGE_RATE_ACCOUNT = 30;
+    private const IMAGE_RATE_IP = 60;
 
     public function __construct(
         private readonly ?PdfForensicClient $client = null,
@@ -197,6 +202,217 @@ final class PdfForensicController
             $body['note'] = 'No forensic mark was read from this document.';
         }
         return $body;
+    }
+
+    /**
+     * POST /pdf-forensic/check-image  (multipart: file = image, optional material_id)
+     *
+     * Verify a leaked page from an IMAGE ONLY: a screenshot, a crop of a page, a
+     * WhatsApp-compressed picture or a photograph of a printed page. No PDF, no page
+     * set, and no student identifier is required — the watermark payload inside the
+     * page pixels is the only input, exactly as in the PDF workflow.
+     *
+     * WHAT THE RESULT SAYS (four distinct outcomes, never conflated):
+     *   identified            — mark recovered AND an issuance inside the caller's scope;
+     *   unmatched_payload     — a mark was read but no issuance in scope matches it (this
+     *                           also covers a corrupted/foreign token: identity is NEVER
+     *                           resolved from a payload that does not map to a record);
+     *   no_mark               — the image was readable and carried no recoverable mark;
+     *   insufficient_quality  — the image could not carry evidence (too small, blurry,
+     *                           blank). This does NOT mean the copy is unwatermarked.
+     */
+    public function checkImage(Request $request): array
+    {
+        $userId = (string) $request->user['id'];
+        $role = (string) $request->user['role'];
+        if (!in_array($role, ['doctor', 'admin', 'super_admin'], true)) {
+            throw new ApiException(403, 'Access denied');
+        }
+        // Resource guard: image verification runs a model pass per candidate region.
+        RateLimitService::perIp($request, 'pdf_forensic_image_ip', self::IMAGE_RATE_IP, 60);
+        RateLimitService::perAccount($request, 'pdf_forensic_image', self::IMAGE_RATE_ACCOUNT, 60);
+
+        $file = $request->file('file');
+        if ($file === null || (int) ($file['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK) {
+            throw new ApiException(400, 'An image file is required.');
+        }
+        if ((int) ($file['size'] ?? 0) <= 0 || (int) $file['size'] > self::MAX_IMAGE_BYTES) {
+            throw new ApiException(413, 'The image is too large to inspect.');
+        }
+        $tmp = (string) ($file['tmp_name'] ?? '');
+        if ($tmp === '' || !is_uploaded_file($tmp)) {
+            throw new ApiException(400, 'The upload could not be read.');
+        }
+        $timingStart = (float) ($_SERVER['REQUEST_TIME_FLOAT'] ?? microtime(true));
+        // The SIGNATURE decides the type, never the client-supplied filename or MIME.
+        $mime = $this->sniffImageMime($tmp);
+        if ($mime === null) {
+            $this->audit($userId, 'pdf_forensic_image_check_failed',
+                ['reason' => 'invalid_image'], $request);
+            throw new ApiException(422, 'The uploaded file is not a supported image (JPEG, PNG or WebP).');
+        }
+        $fileSha256 = (string) hash_file('sha256', $tmp);
+
+        $materialId = trim((string) ($request->input('material_id') ?? ($_POST['material_id'] ?? $request->query('material_id', ''))));
+        $material = null;
+        if ($materialId !== '') {
+            $material = $this->loadMaterial($materialId);
+            if (!$this->storage->canAccess($userId, $role, 'lesson-materials', (string) $material['storage_path'], false)
+                || !$this->withinScope($userId, $role, $material)) {
+                $this->audit($userId, 'pdf_forensic_image_check_denied',
+                    ['material_id' => $materialId, 'reason' => 'forbidden'], $request);
+                throw new ApiException(403, 'Access denied');
+            }
+        }
+
+        $detectStart = microtime(true);
+        $client = $this->client ?? new PdfForensicClient();
+        try {
+            $result = $client->detectImageFile($tmp, $mime, $fileSha256);
+        } catch (PdfForensicException $e) {
+            $this->audit($userId, 'pdf_forensic_image_check_failed',
+                ['material_id' => $materialId, 'reason' => $e->code()], $request);
+            throw new ApiException(503, 'The image could not be inspected.', 'forensic_' . $e->code());
+        } finally {
+            // The upload is not needed after forwarding and nothing suspicious is retained.
+            @unlink($tmp);
+        }
+        $detectDone = microtime(true);
+
+        $serviceVerdict = (string) ($result['verdict'] ?? 'no_mark');
+        $verdict = $serviceVerdict === 'insufficient_quality' ? 'insufficient' : $serviceVerdict;
+        $payload = isset($result['payload']) ? (int) $result['payload'] : null;
+        $issuance = null;
+        if ($payload !== null && in_array($serviceVerdict, ['confirmed', 'probable'], true)) {
+            $issuance = $this->findIssuance($payload, $userId, $role, $materialId === '' ? null : $materialId);
+        }
+        $state = $issuance !== null ? 'identified'
+            : ($serviceVerdict === 'insufficient_quality' ? 'insufficient_quality'
+                : ($payload !== null ? 'unmatched_payload' : 'no_mark'));
+
+        $quality = is_array($result['quality'] ?? null) ? $result['quality'] : [];
+        $reasons = array_values(array_filter((array) ($quality['reasons'] ?? []), 'is_string'));
+        $notes = 'image_input';
+        if (isset($result['candidates_total'])) {
+            $notes .= ';candidates=' . (int) $result['candidates_total']
+                . ';readable=' . (int) ($result['candidates_readable'] ?? 0);
+        }
+        if ($reasons !== []) {
+            $notes .= ';quality=' . substr(implode(',', $reasons), 0, 64);
+        }
+
+        Database::instance()->query(
+            'INSERT INTO pdf_forensic_checks
+                (id, actor_id, actor_role, material_id, scope_course_id, file_sha256, verdict, payload,
+                 score, agreement, pages_analyzed, matched_issuance_id, notes, created_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP(6))',
+            [
+                Uuid::v4(), $userId, $role, $materialId === '' ? null : $materialId,
+                (string) ($material['course_id'] ?? $issuance['course_id'] ?? '') ?: null,
+                $fileSha256, substr($verdict, 0, 16), $payload,
+                (float) ($result['score'] ?? 0), (float) ($result['agreement'] ?? 0),
+                (int) ($result['candidates_analyzed'] ?? 0),
+                $issuance['id'] ?? null,
+                substr($state === 'unmatched_payload' ? 'payload_unmatched;' . $notes : $notes, 0, 191),
+            ]
+        );
+        $this->audit($userId, 'pdf_forensic_image_check', [
+            'material_id' => $materialId === '' ? null : $materialId,
+            'resolution' => $materialId === '' ? 'auto' : 'material',
+            'verdict' => $serviceVerdict,
+            'state' => $state,
+            'matched' => $issuance !== null,
+            'quality' => $reasons === [] ? 'ok' : implode(',', $reasons),
+        ], $request);
+
+        $timings = [
+            'bytes' => (int) ($file['size'] ?? 0),
+            'receive_ms' => (int) round(($detectStart - $timingStart) * 1000),
+            'detect_ms' => (int) round(($detectDone - $detectStart) * 1000),
+            'forwarded_ms' => (int) round($client->lastRequestSeconds() * 1000),
+            'total_ms' => (int) round((microtime(true) - $timingStart) * 1000),
+        ];
+        Logger::instance()->info('pdf-forensic-image', $timings + [
+            'verdict' => $serviceVerdict,
+            'state' => $state,
+            'reasons' => implode(',', $reasons),
+        ]);
+
+        $body = [
+            'input' => 'image',
+            'verdict' => $serviceVerdict,
+            'result_state' => $state,
+            'score' => (float) ($result['score'] ?? 0),
+            'agreement' => (float) ($result['agreement'] ?? 0),
+            'candidates_analyzed' => (int) ($result['candidates_analyzed'] ?? 0),
+            'candidates_readable' => (int) ($result['candidates_readable'] ?? 0),
+            'candidates_total' => (int) ($result['candidates_total'] ?? 0),
+            // Quality is returned as REASONS + measurable properties only (no pixels).
+            'quality' => $reasons === [] ? ['ok' => true] : [
+                'ok' => false,
+                'reasons' => $reasons,
+                'width' => isset($quality['width']) ? (int) $quality['width'] : null,
+                'height' => isset($quality['height']) ? (int) $quality['height'] : null,
+            ],
+            'matched' => $issuance !== null,
+            'timings' => $timings,
+        ];
+        if ($issuance !== null) {
+            $body['issuance'] = [
+                'watermark_record' => (string) $issuance['id'],
+                'issued_at' => (string) $issuance['issued_at'],
+                'expires_at' => (string) $issuance['expires_at'],
+                'course_id' => (string) $issuance['course_id'],
+                'course_title' => $issuance['course_title'] ?? null,
+                'material_id' => (string) $issuance['material_id'],
+                'material_name' => $issuance['material_name'] ?? null,
+                'student' => [
+                    'id' => (string) $issuance['student_id'],
+                    'name' => $issuance['full_name'] ?? null,
+                    'public_user_id' => $issuance['public_user_id'] ?? null,
+                    'avatar_url' => $issuance['avatar_url'] ?? null,
+                    'enrolled_courses' => $this->studentCourseCount(
+                        (string) $issuance['student_id'], $userId, $role
+                    ),
+                ],
+                'doctor' => $issuance['doctor_id'] === null ? null : [
+                    'id' => (string) $issuance['doctor_id'],
+                    'name' => $issuance['doctor_name'] ?? null,
+                ],
+            ];
+        } elseif ($state === 'insufficient_quality') {
+            $body['note'] = 'The image is not clear enough to verify: '
+                . ($reasons === [] ? 'insufficient detail' : implode(', ', $reasons))
+                . '. Take a sharper, higher-resolution picture of a full page.';
+        } elseif ($state === 'unmatched_payload') {
+            // A payload that maps to no issuance is treated as invalid: never an identity.
+            $body['note'] = 'A mark was read but it does not match any issuance in your scope. It is not treated as valid evidence.';
+        } else {
+            $body['note'] = 'No forensic mark could be read from this image.';
+        }
+        return $body;
+    }
+
+    /**
+     * Identify an uploaded image by its FILE SIGNATURE (not the extension or the client MIME).
+     * Returns the MIME the service expects, or null when the bytes are not JPEG/PNG/WebP.
+     */
+    public static function sniffImageMime(string $path): ?string
+    {
+        $head = (string) @file_get_contents($path, false, null, 0, 12);
+        if (strlen($head) < 4) {
+            return null;
+        }
+        if (str_starts_with($head, "\xFF\xD8\xFF")) {
+            return 'image/jpeg';
+        }
+        if (str_starts_with($head, "\x89PNG\r\n\x1A\n")) {
+            return 'image/png';
+        }
+        if (strlen($head) >= 12 && substr($head, 0, 4) === 'RIFF' && substr($head, 8, 4) === 'WEBP') {
+            return 'image/webp';
+        }
+        return null;
     }
 
     /** GET /pdf-forensic/issuances?material_id=… — audit view, scoped by role. */

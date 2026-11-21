@@ -6,7 +6,7 @@
  *
  * Android module: SecurityModule (Kotlin)
  *   Phase 1: developer options, ADB, debugger, screen recording
- *   Phase 2: Frida, Xposed/LSPosed, Magisk/Zygisk, overlay, signature,
+ *   Phase 2: Frida, Xposed/LSPosed, Magisk/Zygisk, signature,
  *             anti-tamper, Play Integrity token request
  *
  * iOS module: IOSSecurityModule (Swift)
@@ -40,7 +40,6 @@ export interface NativeSecurityFlags {
   fridaDetected:   boolean;
   xposedDetected:  boolean;
   magiskDetected:  boolean;
-  overlayDetected: boolean;
   signatureValid:  boolean;
   tampered:        boolean;
   // Phase 3 — new native checks (Android; iOS maps jailbreak/vpn to same keys)
@@ -68,9 +67,6 @@ export interface NativeSecurityFlags {
   expectedCertConfigured?: boolean;
   /** SHA-256 fingerprint of the current signing cert (public material). */
   signatureSha256?:        string | null;
-  /** Count of installed non-self packages holding SYSTEM_ALERT_WINDOW.
-   *  Capability evidence only — a high count is NOT an active overlay. */
-  overlayCapableAppsCount?: number;
   // ── Phase 4 signal plane (Part 1 redesign + Part 6/12) ────────────────────
   /** Native aggregate VPN model: 'on' | 'off' | 'suspicious' | 'unknown'.
    *  'suspicious' = callback observed a VPN that point sensors no longer
@@ -123,18 +119,35 @@ export interface NativeSecurityFlags {
   tamperToolPackages?:     number;
   /** True when PackageManager confirms the OFFICIAL application id at runtime. */
   packageIdentityValid?:   boolean;
+  // ── Traffic-interception tools (INSTALLED-package evidence, Android) ──────
   /**
-   * LIVE obscured-window evidence: the framework filtered a touch because this
-   * window was obscured by another visible window. This is real-time
-   * observation, NOT the installed-package capability count above.
-   *
-   * Platform limits (documented, not worked around): the flag is only SET by
-   * the framework from API 29, and only observed when the user touches the
-   * screen — see the native module for the full list.
+   * Application ids of installed apps from the curated interception catalog
+   * (ProxyPin, Reqable, HTTP Toolkit, HttpCanary, PCAPdroid). This is an
+   * INSTALLED fact obtained through targeted <queries> visibility — NOT proof
+   * that the app is running, and blind to renamed/repackaged or unknown tools.
    */
-  windowObscured?:              boolean;
-  /** True once the native overlay protection was installed on the activity. */
-  overlayProtectionInstalled?:  boolean;
+  interceptionToolPackages?: string[];
+  /** Human-readable labels of the same packages (never used as evidence). */
+  interceptionToolLabels?:   string[];
+  /**
+   * Packages whose signer digest did NOT match a configured pin. Empty in
+   * builds without a verified digest database — a mismatch is evidence of a
+   * different signer, never proof of interception.
+   */
+  interceptionSignerMismatches?: string[];
+  // ── User-installed CA certificates (trust-store evidence, Android) ───────
+  /**
+   * Result of enumerating the device's CA store through the public read-only
+   * `AndroidCAStore` KeyStore view:
+   *   'clean'        every alias resolved and none was user-added
+   *   'user_ca'      at least one USER-ADDED CA certificate is installed
+   *   'inconclusive' unreadable, empty or unclassifiable store — NEVER clean
+   * Absent on an older native module / iOS, which the JS mapping treats as
+   * inconclusive (never as a clean device).
+   */
+  userCaStatus?: 'clean' | 'user_ca' | 'inconclusive';
+  /** Number of user-added CA certificates the store listed (diagnostics only). */
+  userCaCount?: number;
   // ── Multi-window / split-screen state (window-state evidence) ─────────────
   /**
    * Last measured window mode of THIS app: 'fullscreen' | 'multi_window' |
@@ -160,7 +173,6 @@ const SAFE_FLAGS: NativeSecurityFlags = {
   fridaDetected:           false,
   xposedDetected:          false,
   magiskDetected:          false,
-  overlayDetected:         false,
   signatureValid:          true,   // assume valid on non-Android (safe default)
   tampered:                false,
   // Phase 3
@@ -177,9 +189,6 @@ const SAFE_FLAGS: NativeSecurityFlags = {
   netNativeRouteTunnel: false,
   tamperToolPackages: 0,
   packageIdentityValid: true,
-  // Fail-closed defaults: "unknown" must never read as "no overlay".
-  windowObscured: false,
-  overlayProtectionInstalled: false,
   // Multi-window: 'unknown' + measured:false is the honest default — it is the
   // same state as "this platform could not answer" (web / iOS / module absent)
   // and is never treated as a confirmed full-screen measurement.
@@ -187,6 +196,15 @@ const SAFE_FLAGS: NativeSecurityFlags = {
   inMultiWindowMode: false,
   inPictureInPictureMode: false,
   windowModeMeasured: false,
+  // No tool list is the honest default for "the module could not answer":
+  // an installed-package scan that did not run must never read as "clean",
+  // which is why the JS detector reports it as INCONCLUSIVE, not as zero.
+  interceptionToolPackages: [],
+  interceptionToolLabels: [],
+  interceptionSignerMismatches: [],
+  // No status means the store was NOT read: 'inconclusive', never 'clean'.
+  userCaStatus: 'inconclusive',
+  userCaCount: 0,
   // iOS extras default to safe
   jailbreakDetected:       false,
   proxyDetected:           false,
@@ -531,12 +549,6 @@ export async function getRootDetectionDiagnostics(): Promise<RootDiagnosticsRepo
   }
 }
 
-export async function isNativeOverlayDetected(): Promise<boolean> {
-  const mod = getModule();  // Android-only — SYSTEM_ALERT_WINDOW is Android-only
-  if (!mod) return false;
-  try { return await mod.isOverlayDetected() as boolean; } catch { return false; }
-}
-
 export async function isNativeSignatureValid(): Promise<boolean> {
   const mod = getModule();
   if (!mod) return true; // safe default on non-Android
@@ -867,65 +879,190 @@ function getIOSEmitter(): NativeEventEmitter | null {
 export type RecordingEventCallback  = () => void;
 export type ScreenshotEventCallback = () => void;
 
-/* ─────────────────── Live obscured-window / overlay protection ──────────────
- * See plugins/withSecurityModule.js (Android, SecurityModule.kt) for the native
- * implementation and its documented platform limits. These three functions are
- * the whole JS surface of it:
+/* ─────────────── NATIVE CONTAINMENT (the fast path, Android only) ────────
+ * SecurityContainment.kt owns two things natively, before any React work:
+ *   • the LATCH that keeps a confirmed window-mode / VPN violation confirmed,
+ *   • a full-screen COVER attached to this app's own window, so the screen is
+ *     blocked on the same frame as the signal rather than after a bridge round
+ *     trip, a React render and a navigation commit.
  *
- *   enableNativeOverlayProtection() — install the window protection
- *   isNativeWindowObscured()        — read the current native belief
- *   onNativeObscuredChanged(cb)     — push updates when the belief flips
+ * The floating-window / overlay evidence path (obscured touches, the overlay
+ * latch, its permission and JS events) was REMOVED with that subsystem.
  *
- * All three degrade to a safe no-op off Android (Expo Go, web, iOS), so callers
- * never branch on platform and never mistake "module absent" for "safe".
+ * These functions are the whole JS surface. All degrade to a safe no-op off
+ * Android, so callers never branch on platform and never read "module absent"
+ * as "safe".
  */
 
-/**
- * Install native overlay protection on the current activity window.
- *
- * Idempotent and safe to call on every foreground transition. Resolves true
- * when at least the touch filter was applied, false when the native module is
- * unavailable (Expo Go / web / iOS) — callers must NOT treat `false` as proof
- * of safety, only as "this platform cannot enforce it natively".
- */
-export async function enableNativeOverlayProtection(): Promise<boolean> {
+export type NativeContainmentReason = 'window' | 'vpn';
+
+export interface NativeContainmentState {
+  /** Every reason the NATIVE side currently holds (ordered, deduped). */
+  reasons: NativeContainmentReason[];
+  /** The platform's window-mode reading mirrored natively. */
+  mode: string;
+  /** Native monotonic ms (elapsedRealtime) at emit time. */
+  signalMs: number;
+  /** Which native path produced this state (diagnostics only). */
+  source: string;
+}
+
+const EMPTY_CONTAINMENT: NativeContainmentState = {
+  reasons: [],
+  mode: 'unknown',
+  signalMs: 0,
+  source: 'unavailable',
+};
+
+function normaliseReasons(raw: unknown): NativeContainmentReason[] {
+  if (typeof raw !== 'string' || raw.length === 0) return [];
+  const out: NativeContainmentReason[] = [];
+  for (const part of raw.split(',')) {
+    const value = part.trim();
+    if (value === 'window' || value === 'vpn') {
+      if (!out.includes(value)) out.push(value);
+    }
+  }
+  return out;
+}
+
+function toContainmentState(raw: unknown): NativeContainmentState {
+  if (!raw || typeof raw !== 'object') return EMPTY_CONTAINMENT;
+  const r = raw as Record<string, unknown>;
+  return {
+    reasons: normaliseReasons(r.reasons),
+    mode: typeof r.mode === 'string' && r.mode.length > 0 ? r.mode : 'unknown',
+    signalMs: typeof r.nativeMs === 'number' ? r.nativeMs : 0,
+    source: typeof r.source === 'string' ? r.source : 'native',
+  };
+}
+
+/** One authoritative native containment reading (used on mount and on resume). */
+export async function getNativeContainmentState(): Promise<NativeContainmentState> {
   const mod = getModule();
-  if (!mod || typeof mod.enableOverlayProtection !== 'function') return false;
+  if (!mod || typeof mod.getContainmentState !== 'function') return EMPTY_CONTAINMENT;
   try {
-    return (await mod.enableOverlayProtection()) === true;
+    return toContainmentState(await mod.getContainmentState());
   } catch {
-    return false;
+    return EMPTY_CONTAINMENT;
   }
 }
 
 /**
- * Read the live obscured-window belief. `false` means "no obscured touch has
- * been observed", NOT "the device is proven overlay-free" — the platform has
- * no such API (see the native module's documented limitations).
+ * Live native containment state. Emitted on every reason change (raise/clear),
+ * so one subscription carries window + VPN without any polling.
  */
-export async function isNativeWindowObscured(): Promise<boolean> {
-  const mod = getModule();
-  if (!mod || typeof mod.isWindowObscured !== 'function') return false;
-  try {
-    return (await mod.isWindowObscured()) === true;
-  } catch {
-    return false;
-  }
-}
-
-/**
- * Subscribe to live obscured-window state changes.
- * Fires only when the native belief actually flips, so a tapjacking attempt
- * produced exactly one event per transition rather than one per touch.
- */
-export function onNativeObscuredChanged(cb: (obscured: boolean) => void): () => void {
+export function onNativeContainmentChanged(
+  cb: (state: NativeContainmentState) => void,
+): () => void {
   if (Platform.OS !== 'android') return () => {};
   const emitter = getAndroidEmitter();
   if (!emitter) return () => {};
-  const sub = emitter.addListener('obscuredStateChanged', (evt: { obscured?: boolean }) => {
-    cb(evt?.obscured === true);
+  const sub = emitter.addListener('containmentStateChanged', (evt: unknown) => {
+    cb(toContainmentState(evt));
   });
   return () => sub.remove();
+}
+
+/** The native cover's own recheck button asked for a verification. */
+export function onNativeContainmentRevalidateRequested(cb: () => void): () => void {
+  if (Platform.OS !== 'android') return () => {};
+  const emitter = getAndroidEmitter();
+  if (!emitter) return () => {};
+  const sub = emitter.addListener('containmentRevalidateRequested', () => cb());
+  return () => sub.remove();
+}
+
+/**
+ * Tell the native side the React gate is now on screen: the native cover stands
+ * down, so the user sees exactly ONE lock screen. The native REASON SET stays
+ * authoritative — unmounting the React gate makes the cover return.
+ */
+export async function reportNativeGateMounted(): Promise<void> {
+  const mod = getModule();
+  if (!mod || typeof mod.reportGateMounted !== 'function') return;
+  try { await mod.reportGateMounted(); } catch { /* diagnostics only */ }
+}
+
+export async function reportNativeGateUnmounted(): Promise<void> {
+  const mod = getModule();
+  if (!mod || typeof mod.reportGateUnmounted !== 'function') return;
+  try { await mod.reportGateUnmounted(); } catch { /* diagnostics only */ }
+}
+
+/**
+ * Native containment timeline (monotonic ms marks).
+ *
+ * RELEASE-BUILD REASON: every `android.util.Log` call is stripped by
+ * `-assumenosideeffects` in proguard-rules, so native logging cannot be read on
+ * the APK users install. The native side keeps this bounded ring buffer instead
+ * and we print it from JS (`ReactNativeJS` lines are not stripped), which makes
+ * detection → cover → bridge → gate latency measurable on a release build.
+ *
+ * PRIVACY: stage names, reason names, counts and timestamps ONLY — no URL,
+ * token, identity or payload can appear in it.
+ */
+export interface NativeContainmentTimeline {
+  entries: string[];
+  /** Marks dropped after the 64-entry bound was reached. */
+  dropped: number;
+  /** The live reason CSV at read time. */
+  reasons: string;
+  mode: string;
+  /** Age of the unbroken violation (monotonic ms); -1 when clear. */
+  latchAgeMs: number;
+  /**
+   * Window-mode aggregation counters (see src/lib/windowModeAggregator.ts).
+   * They make the churn MEASURABLE on a release build: how many duplicate
+   * reports the single decision point collapsed, how many weak full-screen
+   * snapshots it refused while a foreign window was in force, and how many
+   * recoveries it held back for a confirming read.
+   */
+  windowSuppressed: number;
+  /** Duplicates collapsed by the last ACCEPTED transition. */
+  windowCollapsed: number;
+}
+
+export async function getNativeContainmentTimeline(): Promise<NativeContainmentTimeline | null> {
+  const mod = getModule();
+  if (!mod || typeof mod.getContainmentTimeline !== 'function') return null;
+  try {
+    const raw = await mod.getContainmentTimeline();
+    if (!raw || typeof raw !== 'object') return null;
+    const r = raw as Record<string, unknown>;
+    const entries = Array.isArray(r.entries)
+      ? (r.entries as unknown[]).filter((e): e is string => typeof e === 'string')
+      : [];
+    return {
+      entries,
+      dropped: typeof r.dropped === 'number' ? r.dropped : 0,
+      reasons: typeof r.reasons === 'string' ? r.reasons : '',
+      mode: typeof r.mode === 'string' ? r.mode : 'unknown',
+      latchAgeMs: typeof r.latchAgeMs === 'number' ? r.latchAgeMs : -1,
+      windowSuppressed: typeof r.windowSuppressed === 'number' ? r.windowSuppressed : 0,
+
+      windowCollapsed: typeof r.windowCollapsed === 'number' ? r.windowCollapsed : 0,
+    };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Clear ONE native reason from the POLICY path only (a completed verdict saying
+ * an admin-whitelisted VPN is allowed). Window reasons are platform evidence and
+ * are never cleared from JS decisions. (The overlay reason no longer exists.)
+ */
+export async function clearNativeContainmentReason(
+  reason: NativeContainmentReason,
+): Promise<boolean> {
+  const mod = getModule();
+  if (!mod || typeof mod.clearContainmentReason !== 'function') return false;
+  try {
+    return (await mod.clearContainmentReason(reason)) === true;
+  } catch {
+    return false;
+  }
 }
 
 /* ─────────────── Multi-window / split-screen (mandatory full-screen) ───────
@@ -976,6 +1113,61 @@ function toWindowModeReading(raw: unknown): NativeWindowModeReading {
     inPictureInPicture: r.inPictureInPicture === true,
     measured: r.measured === true,
   };
+}
+
+/**
+ * THE PROCESS-WIDE VPN STATE (native `VpnWatch`).
+ *
+ * `vpnTransport` is the fact a video barrier needs: THIS app's default network
+ * carries `NetworkCapabilities.TRANSPORT_VPN`, i.e. our own traffic is tunnelled.
+ * `vpnPresent` only says a VPN exists somewhere on the device. They are kept
+ * apart deliberately — "a VPN exists" is not "our traffic uses it".
+ *
+ * `registered: false` means UNKNOWN (the watcher could not start). Callers must
+ * treat that as BLOCKED: an unmeasured network is not a clean network.
+ */
+export interface NativeVpnSnapshot {
+  vpnTransport: boolean;
+  vpnPresent: boolean;
+  registered: boolean;
+  /** Monotonic age of the last state change; -1 when it has never changed. */
+  ageSinceChangeMs: number;
+}
+
+/**
+ * Make sure the native watcher is running. The activity starts it on resume, so
+ * this is only a self-heal for the case where the JS layer is reached first.
+ */
+export async function ensureNativeVpnWatch(): Promise<boolean> {
+  const mod = getModule();
+  if (!mod || typeof mod.ensureVpnWatchRegistration !== 'function') return false;
+  try {
+    return (await mod.ensureVpnWatchRegistration()) === true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * FAST mandatory VPN preflight: one bridge call, no network, no detector suite.
+ * Resolves null when the module or the reading is unavailable (fail closed).
+ */
+export async function getNativeVpnSnapshot(): Promise<NativeVpnSnapshot | null> {
+  const mod = getModule();
+  if (!mod || typeof mod.getVpnSnapshot !== 'function') return null;
+  try {
+    const raw = await mod.getVpnSnapshot();
+    if (!raw || typeof raw !== 'object') return null;
+    const r = raw as Record<string, unknown>;
+    return {
+      vpnTransport: r.vpnTransport === true,
+      vpnPresent: r.vpnPresent === true,
+      registered: r.registered === true,
+      ageSinceChangeMs: typeof r.ageSinceChangeMs === 'number' ? r.ageSinceChangeMs : -1,
+    };
+  } catch {
+    return null;
+  }
 }
 
 /**

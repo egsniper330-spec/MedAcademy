@@ -126,13 +126,6 @@ const DETECTOR_META: Record<string, { label: string; apiExplain: string; falseOn
     restricted: true,
     restrictedReason: 'Another app\u2019s split-screen, PiP or OEM floating-window state is not observable by a normal app (AccessibilityService.getWindows() would require an accessibility service, which this app deliberately does not request). Only MedAcademy\u2019s OWN window mode is measured.',
   },
-  overlayDetected: {
-    label: 'Overlay / Tapjacking',
-    apiExplain: 'Targeted capability scan: flags an installed package ONLY when it is on the known screen-overlay/abuse tool list AND holds SYSTEM_ALERT_WINDOW. The aggregate count of overlay-capable apps is exported as evidence (overlayCapableAppsCount) but is NEVER itself a threat — Android defines SYSTEM_ALERT_WINDOW as a capability, and legitimate apps (chat heads, browsers, launchers) hold it without drawing over this app. Active overlay windows of other apps cannot be enumerated by a regular app on Android 11+.',
-    falseOnStock: true,
-    restricted: true,
-    restrictedReason: 'Android 11+ blocks getRunningAppProcesses() for apps not in the same UID group. Active overlay enumeration requires BIND_ACCESSIBILITY_SERVICE which the app does not hold. Detection is targeted package-capability based only — a sophisticated attacker can bypass by not holding the permission globally.',
-  },
   signatureValid: {
     label: 'App Signature Valid',
     apiExplain: 'PackageManager.GET_SIGNING_CERTIFICATES (API 28+) or GET_SIGNATURES (API <28) — reads the APK signing certificate. Computes SHA-256 of the signing cert bytes and compares against BuildConfig.EXPECTED_CERT_SHA256 injected at build time. Returns TRUE (valid) in debug builds where EXPECTED_CERT_SHA256 is empty — the check is intentionally skipped.',

@@ -115,8 +115,8 @@ console.log('\u2500\u2500 Part 1: gate state + precedence \u2500\u2500');
   check('1d: it outranks the background/resume hold, VPN and any policy violation',
     state({ multiWindowBlocked: true, backgroundResumeBlocked: true, vpnBlocked: true, violationBlocked: true })
       === 'BLOCKED_MULTI_WINDOW');
-  check('1e: the live overlay signal still outranks it (untrusted touch path first)',
-    state({ multiWindowBlocked: true, overlayBlocked: true }) === 'BLOCKED_OVERLAY');
+  check('1e: a residual overlayBlocked key cannot produce any state (input removed)',
+    state({ multiWindowBlocked: true, overlayBlocked: true }) === 'BLOCKED_MULTI_WINDOW');
   check('1f: a live block outranks a check in flight (no BLOCKED \u2192 CHECKING \u2192 TEMP-ALLOWED race)',
     state({ multiWindowBlocked: true, evaluating: true, hasVerdict: false }) === 'BLOCKED_MULTI_WINDOW');
   // Requiring BOTH missing inputs false is what keeps a window-mode restriction
@@ -128,9 +128,9 @@ console.log('\u2500\u2500 Part 1: gate state + precedence \u2500\u2500');
   // the prohibited state is live. No recheck button, no dismiss, no acknowledgement.
   check('1h: the multi-window state offers NO recheck/dismiss control',
     M.isGateRecheckable('BLOCKED_MULTI_WINDOW') === false);
-  check('1i: ... while the causes a user can act on still do offer one',
-    M.isGateRecheckable('BLOCKED_OVERLAY') === true
-    && M.isGateRecheckable('BLOCKED_VPN') === true);
+  check('1i: ... while the remaining actionable cause still offers one',
+    M.isGateRecheckable('BLOCKED_VPN') === true
+    && M.isGateRecheckable('BLOCKED_OVERLAY') === false);
   // The resume hold has no page and always completes on its own, so it offers
   // no control (and no way to mistake one for a dismiss path).
   check('1i-2: the resume hold offers no control (no page, self-completing)',
@@ -184,11 +184,10 @@ console.log('\u2500\u2500 Part 3: blocking copy + honest limits \u2500\u2500');
   // "another app is covering us" and split-screen. Both states therefore render
   // the same required message; only their titles/recovery steps differ.
   const REQUIRED =
-    'MedAcademy cannot run while another app is covering it or split-screen ' +
-    'mode is active. Please close the other app and return to full-screen ' +
+    'MedAcademy cannot run in split-screen. Return the app to full-screen ' +
     'mode to continue.';
-  check('3g: overlay and split-screen share the required sentence',
-    M.OVERLAY_WARNING_COPY.message === REQUIRED && split.message === REQUIRED);
+  check('3g: the split copy is window-mode only and no overlay copy remains',
+    split.message === REQUIRED && M.OVERLAY_WARNING_COPY === undefined);
 
   const splitSteps = M.windowModeBlockSteps('multi_window');
   const pipSteps = M.windowModeBlockSteps('picture_in_picture');
@@ -208,8 +207,8 @@ console.log('\u2500\u2500 Part 3: blocking copy + honest limits \u2500\u2500');
     limits.some((l) => /No permission|no permission/i.test(l)));
   check('3n: they state that accessibility-based observation was deliberately not used',
     limits.some((l) => /accessibility service/i.test(l)));
-  check('3o: they state that multi-window and overlay are different measurements',
-    limits.some((l) => /never conflated|DIFFERENT measurements/i.test(l)));
+  check('3o: they state that the overlay/obscured signal no longer exists',
+    limits.some((l) => /does not exist any more/i.test(l)));
   check('3p: they state that an unavailable measurement is "unknown", not "full-screen"',
     limits.some((l) => /unknown/i.test(l) && /never as proof/i.test(l)));
 }
@@ -341,7 +340,9 @@ class MainActivity : ReactActivity() {
   check('5c-2: the generated MainActivity already carries the patch when present',
     !fs.existsSync(realPath) || /WindowModeBridge\.report\(/.test(source));
   check('5d: it forwards the API 26+ multi-window overload',
-    /override fun onMultiWindowModeChanged\(isInMultiWindowMode: Boolean, newConfig: Configuration\) \{\n\s+super\.onMultiWindowModeChanged\(isInMultiWindowMode, newConfig\)\n\s+WindowModeBridge\.report\(isInMultiWindowMode, isInPictureInPictureMode\(\)\)/.test(patched));
+    // The report now names its source ("mode-change"), which the aggregator
+    // ranks as activity-level evidence.
+    /override fun onMultiWindowModeChanged\(isInMultiWindowMode: Boolean, newConfig: Configuration\) \{\n\s+super\.onMultiWindowModeChanged\(isInMultiWindowMode, newConfig\)\n\s+WindowModeBridge\.report\(isInMultiWindowMode, isInPictureInPictureMode\(\), "mode-change"\)/.test(patched));
   check('5e: it ALSO forwards the API 24-25 overload (minSdk is 24, so both are needed)',
     /@Deprecated\("Deprecated in Java"\)\n\s+override fun onMultiWindowModeChanged\(isInMultiWindowMode: Boolean\) \{/.test(patched));
   check('5f: it forwards the picture-in-picture transition too',
@@ -423,8 +424,8 @@ console.log('\u2500\u2500 Part 7: enforcement wiring (SecurityContext) \u2500\u2
     ['7j: the resume path re-installs the triggers and re-reads', /getNativeWindowMode\(\)[\s\S]{0,120}reading\.measured/],
     ['7k: a manual re-verify re-reads the window mode',
       /const reading = await getNativeWindowMode\(\);/],
-    ['7l: the re-verify also re-evaluates the multi-window release',
-      /tryReleaseOverlayLock\(\);\n\s+tryReleaseWindowModeLock\(\);/],
+    ['7l: the re-verify re-evaluates the multi-window release',
+      /await check\(\);\n\s+tryReleaseWindowModeLock\(\);/],
     ['7m: every landed verdict gives the hold its chance to release',
       /tryReleaseWindowModeLock\(\);/],
     ['7n: the belief is session-scoped (reset on sign-out)',
@@ -439,10 +440,10 @@ console.log('\u2500\u2500 Part 7: enforcement wiring (SecurityContext) \u2500\u2
 
   check('7r: the multi-window state is read from the LOCK (one source of truth)',
     /lockState\.sources\.includes\(LOCK_SRC_WINDOW_MODE\)/.test(CONTEXT));
-  check('7s: the overlay path is untouched by this work (its signal, engage and release remain)',
-    /onNativeObscuredChanged\(\(obscured\) => \{/.test(CONTEXT)
-    && /engageSecurityLock\(LOCK_SRC_OVERLAY, \{ hard: true \}\)/.test(CONTEXT)
-    && /canClearOverlayBlock\(\{/.test(CONTEXT));
+  check('7s: the overlay path does not exist any more (no signal, engage or release)',
+    !/onNativeObscuredChanged/.test(CONTEXT)
+    && !/LOCK_SRC_OVERLAY/.test(CONTEXT)
+    && !/canClearOverlayBlock/.test(CONTEXT));
 }
 
 // ── Part 8: the gate renders the restriction with no way past it ───────────
@@ -457,9 +458,9 @@ console.log('\u2500\u2500 Part 8: gate presentation \u2500\u2500');
     ['8c: recovery steps come from the pure model', /windowModeBlockSteps\(windowMode\)/],
     ['8d: the steps section is labelled for this cause', /t\('security\.gate\.stepsWindow'\)/],
     ['8e: the policy finding list is suppressed for this window-state cause',
-      /overlayBlocked \|\| windowModeBlockedState \? \[\] : gateFindings\(types\)/],
+      /windowModeBlockedState \|\| userCaBlocked\s*\? \[\]\s*: gateFindings\(types, interceptionNames\)/],
     ['8f: no risk score is presented for a non-policy window state',
-      /hasVerdict && !overlayBlocked && !windowModeBlockedState/],
+      /hasVerdict && !windowModeBlockedState/],
     ['8g: the screen states that access returns automatically', /t\('security\.gate\.footerWindow'\)/],
     ['8h: the hardware back button cannot dismiss it', /hardwareBackPress', \(\) => true/],
     ['8i: FLAG_SECURE is held while this block is up', /preventScreenCaptureAsync\('security-gate'\)/],
@@ -505,9 +506,10 @@ console.log('\u2500\u2500 Part 9: existing controls unchanged \u2500\u2500');
     ].includes(p) || !/ACCESSIBILITY|USAGE_STATS|TASKS|OVERLAY_WINDOWS|SYSTEM_ALERT/.test(p)));
   check('9e: the proguard keep rules still cover the security package (nothing stripped)',
     /-keep class com\.medacademy\.security\.\*\*/.test(read('plugins/withProguardRules.js')));
-  check('9f: VPN / overlay / screenshot / forced-update suites still exist and are wired',
+  check('9f: VPN / removal-contract / screenshot / forced-update suites still exist and are wired',
     fs.existsSync(path.join(ROOT, 'tests/vpnMandatoryBlock.test.cjs'))
-    && fs.existsSync(path.join(ROOT, 'tests/overlayLifecycleWiring.test.cjs'))
+    && fs.existsSync(path.join(ROOT, 'tests/floatingWindowRemoval.test.cjs'))
+    && fs.existsSync(path.join(ROOT, 'tests/floatingWindowGuard.test.cjs'))
     && fs.existsSync(path.join(ROOT, 'tests/updateDetection.test.cjs')));
 
   // ROLE EXEMPTION UNCHANGED: the backend-verified Super Admin bypass keeps
@@ -515,7 +517,11 @@ console.log('\u2500\u2500 Part 9: existing controls unchanged \u2500\u2500');
   // still the Super Admin check (and the gate state for it) that decides, never a
   // client-supplied value or a route param (see scripts/check-security-param-authority.js).
   check('9g: the Super Admin exemption still applies to the multi-window cause',
-    /const applyWindowModeReading = useCallback\(\([^)]*\) => \{[\s\S]{0,700}?if \(isSuperAdmin\) return;/.test(CONTEXT));
+    // The window widened when the reading gained the aggregation step: the
+    // Super Admin exemption must still short-circuit BEFORE any lock is engaged.
+    /const applyWindowModeReading = useCallback\(\([\s\S]{0,400}?\) => \{[\s\S]{0,2600}?if \(isSuperAdmin\) return;/.test(CONTEXT) &&
+      CONTEXT.indexOf('if (isSuperAdmin) return;', CONTEXT.indexOf('const applyWindowModeReading')) <
+        CONTEXT.indexOf('engageSecurityLock(', CONTEXT.indexOf('const applyWindowModeReading')));
   check('9h: the gate state is forced ALLOWED for a Super Admin session (unchanged)',
     /const gateState: SecurityGateState = isSuperAdmin\s*\n?\s*\? 'ALLOWED'/.test(CONTEXT));
 }

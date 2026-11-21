@@ -21,6 +21,7 @@ import hashlib
 import json
 
 from . import auth
+from .pdf_optimize import resolve_profile
 from .config import Settings, load_settings
 from .db import StateDB, open_connection
 from .issuance import _HEX64, IssuanceError, check_ref, issue
@@ -35,6 +36,8 @@ from .preprocess import (
     master_prefix,
     pdf_renderer_version,
 )
+from . import image_forensics
+from .image_forensics import ImageRejected
 from .wam_client import WamRuntimeClient
 from .storage import LocalPrivateStorage, StorageKeyError, validate_key
 from .worker import WorkerPool
@@ -179,6 +182,8 @@ def create_app(settings: Settings | None = None, handlers: dict | None = None) -
             return wam_cache["client"]
 
         app.state.wam_model = _get_wam
+        # Bounded image verification concurrency (see Settings.image_max_concurrency).
+        app.state.image_semaphore = asyncio.Semaphore(settings.image_max_concurrency)
         pool.start()
         app.state.pool = pool
         try:
@@ -197,8 +202,14 @@ def create_app(settings: Settings | None = None, handlers: dict | None = None) -
 
     @app.middleware("http")
     async def limit_body_and_security_headers(request: Request, call_next):
+        # The image endpoint has its own (larger) limit: a phone photo is bigger than
+        # any JSON request this service otherwise accepts. Every other route keeps the
+        # small limit, so raising one door does not widen the others.
+        limit = (max(settings.max_request_bytes, settings.image_max_bytes)
+                 if request.url.path == "/internal/detect-image"
+                 else settings.max_request_bytes)
         length = request.headers.get("content-length")
-        if length is not None and length.isdigit() and int(length) > settings.max_request_bytes:
+        if length is not None and length.isdigit() and int(length) > limit:
             return JSONResponse({"error": "payload_too_large"}, status_code=413)
         response = await call_next(request)
         response.headers["Cache-Control"] = "no-store"
@@ -221,12 +232,13 @@ def create_app(settings: Settings | None = None, handlers: dict | None = None) -
                 "issuance": "available" if wam_ok else "unavailable"}
         return JSONResponse(body, status_code=200 if wam_ok else 503)
 
-    async def require_hmac(request: Request) -> bytes:
+    async def require_hmac(request: Request, max_bytes: int | None = None) -> bytes:
         """Verify HMAC and nonce for an internal request. Returns the raw body on success."""
+        limit = settings.max_request_bytes if max_bytes is None else max_bytes
         buf = bytearray()
         async for chunk in request.stream():
             buf.extend(chunk)
-            if len(buf) > settings.max_request_bytes:
+            if len(buf) > limit:
                 raise _Reject(413, "payload_too_large")
         body = bytes(buf)
         path_with_query = request.url.path
@@ -307,6 +319,62 @@ def create_app(settings: Settings | None = None, handlers: dict | None = None) -
                 doc.close()
 
         return await run_in_threadpool(_analyze)
+
+    @app.post("/internal/detect-image")
+    async def detect_image(request: Request) -> dict:
+        """Read the forensic payload from ONE uploaded IMAGE (screenshot, crop, photo).
+
+        Body: the image bytes (JPEG, PNG or WebP; the signature is checked, not a header).
+        Auth: the same internal HMAC + nonce scheme as every other /internal route.
+
+        Difference from /internal/detect: there is no PDF container and no page loop. The
+        image is analysed at several bounded regions (`candidate_regions`), the SAME WAM
+        model decodes each one, and the answer is the payload the regions agree on. The
+        service returns EVIDENCE (payload + score + agreement + quality + how many regions
+        were readable), never an identity and never an accession number.
+
+        Distinctions the caller must preserve:
+          • verdict `no_mark`             — regions were readable, none was a mark;
+          • verdict `insufficient_quality`— the upload could not carry evidence (too small,
+                                            blurry, blank). This is NOT "unwatermarked";
+          • a payload that matches no issuance in the caller's scope — the caller's
+                                            business, never decided here.
+
+        The upload is never written to storage: `verify_image_bytes()` works on an in-memory
+        buffer, so nothing suspicious is retained and there is no temporary file to clean up.
+        """
+        body = await require_hmac(request, max_bytes=settings.image_max_bytes)
+        try:
+            image_forensics.sniff_format(body)
+        except ImageRejected as exc:
+            raise _Reject(422, exc.code) from exc
+        if len(body) > settings.image_max_bytes:
+            raise _Reject(413, "payload_too_large")
+
+        def _analyze() -> dict:
+            model = app.state.wam_model()
+            return image_forensics.verify_image_bytes(
+                body,
+                model.extract_image,
+                max_candidates=settings.image_max_candidates,
+                confirm_score=settings.image_confirm_score,
+                probable_score=settings.image_probable_score,
+                single_strong_score=settings.image_single_strong_score,
+            )
+
+        try:
+            async with app.state.image_semaphore:
+                result = await run_in_threadpool(_analyze)
+        except ImageRejected as exc:
+            raise _Reject(422, exc.code) from exc
+        except Exception as exc:  # model/runtime failure: never a 500 with internals
+            log.warning("image verification failed: %s", type(exc).__name__)
+            raise _Reject(503, "extract_failed") from exc
+        # Diagnostics only: bytes, verdict, timing. Never the image, never an identity.
+        log.info("detect-image bytes=%s verdict=%s candidates=%s readable=%s",
+                 len(body), result.get("verdict"), result.get("candidates_total"),
+                 result.get("candidates_readable"))
+        return result
 
     @app.get("/internal/queue/stats")
     async def queue_stats(request: Request) -> dict:
@@ -447,6 +515,7 @@ def create_app(settings: Settings | None = None, handlers: dict | None = None) -
                 conn=conn, storage=app_.state.storage, model=app_.state.wam_model(),
                 manifest=manifest, identity=identity, ttl_seconds=settings.issuance_ttl_seconds,
                 lease_seconds=settings.issuance_lease_seconds,
+                profile=resolve_profile(settings.pdf_compression_profile),
             )
         finally:
             conn.close()

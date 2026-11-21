@@ -13,8 +13,9 @@
  *   3. the filter runs on the aggregated threat list BEFORE the risk score and
  *      before the blocking decision;
  *   4. every other detector is still invoked and every other finding still
- *      reaches the list (root, frida, debugger, screen recording, overlay,
- *      tamper, Play Integrity, TLS pinning, VPN);
+ *      reaches the list (root, frida, debugger, screen recording, tamper,
+ *      Play Integrity, TLS pinning, VPN) — the overlay detector was removed
+ *      with the floating-window protection subsystem and is asserted absent;
  *   5. the earlier diagnostic build machinery is gone (no env-var switch, no
  *      bundle-marker step, no separate build profile, no arming script).
  */
@@ -144,7 +145,6 @@ check('every other detector is still invoked', () => {
     'detectXposed',
     'detectMagisk',
     'detectScreenRecording',
-    'detectOverlay',
     'detectTamper',
     'runPlayIntegrityCheck',
     'detectSSLPinning',
@@ -176,7 +176,6 @@ check('no detector was removed from the threat list', () => {
     'fridaThreat',
     'xposedThreat',
     'magiskThreat',
-    'overlayThreat',
     'tamperThreat',
     'piThreat',
     'sslThreat',

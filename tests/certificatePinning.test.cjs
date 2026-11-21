@@ -182,6 +182,45 @@ check('B7 no pinning is emitted when no pins are configured (dev)', () => {
   assert.ok(!empty.includes('<pin-set'), 'unconfigured builds must not emit a pin-set');
   assert.ok(empty.includes('cleartextTrafficPermitted="false"'), 'cleartext must still be off');
 });
+check('B8 the DEBUG config also excludes user CAs and keeps cleartext off by default', () => {
+  const debugXml = nscPlugin.__internal.buildDebugConfigXml(pins, hosts);
+  assert.ok(!debugXml.includes('src="user"'), 'the debug build must not trust user CAs either');
+  assert.ok(debugXml.includes('<certificates src="system" />'));
+  assert.ok(debugXml.includes('<base-config cleartextTrafficPermitted="false">'));
+  // The ONLY cleartext exception is the packager loopback, and it is scoped.
+  const loopback = debugXml.match(/<domain-config cleartextTrafficPermitted="true">([\s\S]*?)<\/domain-config>/g) || [];
+  assert.equal(loopback.length, 1, 'exactly one debug cleartext exception may exist');
+  for (const host of nscPlugin.__internal.DEBUG_CLEARTEXT_DOMAINS) {
+    assert.ok(loopback[0].includes(`>${host}</domain>`), `missing loopback host ${host}`);
+  }
+  assert.ok(!/includeSubdomains="true"[^>]*>localhost/.test(debugXml));
+});
+check('B9 no <debug-overrides> and no overridePins anywhere (release posture cannot be widened)', () => {
+  // <debug-overrides> would let a debug build add trust anchors; overridePins
+  // would disable the pin check. Neither may be generated at all.
+  const allXml = generatedXml + nscPlugin.__internal.buildDebugConfigXml(pins, hosts);
+  assert.ok(!/debug-overrides/.test(allXml.replace(/<!--[\s\S]*?-->/g, '')));
+  assert.ok(!/overridePins/.test(allXml));
+  const src = read('plugins/withNetworkSecurityConfig.js').replace(/\/\/[^\n]*/g, '');
+  assert.ok(!/overridePins\s*=\s*["']true/.test(src), 'overridePins must never be emitted');
+});
+check('B10 every <trust-anchors> block is system-only', () => {
+  const xml = generatedXml + nscPlugin.__internal.buildDebugConfigXml(pins, hosts);
+  const blocks = xml.match(/<trust-anchors>[\s\S]*?<\/trust-anchors>/g) || [];
+  assert.ok(blocks.length >= 2, 'base + pinned domain must each declare trust anchors');
+  for (const b of blocks) assert.ok(!/src="user"/.test(b), 'a user CA must never be a trust anchor');
+});
+check('B11 no CA certificate is bundled into production resources', () => {
+  // A bundled interception CA would be a trust anchor handed to the attacker.
+  for (const dir of ['android/app/src/main/res/raw', 'android/app/src/main/assets']) {
+    const p = path.join(ROOT, dir);
+    if (!fs.existsSync(p)) continue;
+    const found = fs.readdirSync(p).filter((f) => /\.(crt|cer|pem|der|p12|bks)$/i.test(f));
+    assert.deepEqual(found, [], `certificate material found in ${dir}: ${found.join(', ')}`);
+  }
+  const nscSrc = read('plugins/withNetworkSecurityConfig.js');
+  assert.ok(!/src="user"/.test(nscSrc.replace(/\/\/.*$/gm, '')), 'the plugin must not emit src="user"');
+});
 check('C1 the manifest mod points <application> at @xml/network_security_config', () => {
   const src = read('plugins/withNetworkSecurityConfig.js');
   assert.ok(

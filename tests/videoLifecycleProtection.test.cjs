@@ -174,9 +174,9 @@ check('every evaluation re-reads the authoritative platform window state', () =>
   assert.ok(guardedIndex > reassertIndex, 'the re-read must precede the policy evaluation');
 });
 
-check('the re-read reinstalls overlay protection and multi-window monitoring', () => {
+check('the re-read reinstalls multi-window monitoring (overlay protection is removed)', () => {
   const body = context.slice(context.indexOf('nativeWindowReassertRef.current = async'));
-  assert.match(body, /await enableNativeOverlayProtection\(\);/);
+  assert.ok(!/enableNativeOverlayProtection/.test(body));
   assert.match(body, /await enableNativeWindowModeMonitoring\(\);/);
   assert.match(body, /const reading = await getNativeWindowMode\(\);/);
 });
@@ -196,8 +196,8 @@ check('a prohibited mode engages the same hard lock the event path engages', () 
   assert.match(apply, /engageSecurityLock\(LOCK_SRC_WINDOW_MODE, \{ hard: true \}\)/);
 });
 
-check('overlay and multi-window blocks render the authoritative gate', () => {
-  assert.match(context, /lockState\.sources\.includes\(LOCK_SRC_OVERLAY\)/);
+check('the multi-window block renders the authoritative gate (no overlay lock)', () => {
+  assert.ok(!/LOCK_SRC_OVERLAY/.test(context));
   assert.match(context, /lockState\.sources\.includes\(LOCK_SRC_WINDOW_MODE\)/);
 });
 

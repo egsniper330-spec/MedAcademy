@@ -134,8 +134,8 @@ console.log('\u2500\u2500 Part 1: resume state semantics \u2500\u2500');
     M.isGateBlocked('BLOCKED_BACKGROUND_RESUME') === true);
   check('1b: ... but it renders NO full-screen page',
     M.rendersBlockScreen('BLOCKED_BACKGROUND_RESUME') === false);
-  check('1c: the four authoritative causes DO render their page',
-    ['BLOCKED_OVERLAY', 'BLOCKED_MULTI_WINDOW', 'BLOCKED_VPN', 'BLOCKED_SECURITY_VIOLATION']
+  check('1c: the three authoritative causes DO render their page',
+    ['BLOCKED_MULTI_WINDOW', 'BLOCKED_VPN', 'BLOCKED_SECURITY_VIOLATION']
       .every((s) => M.rendersBlockScreen(s) === true));
   check('1d: CHECKING / ALLOWED render nothing',
     M.rendersBlockScreen('CHECKING') === false && M.rendersBlockScreen('ALLOWED') === false);
@@ -150,15 +150,15 @@ console.log('\u2500\u2500 Part 1: resume state semantics \u2500\u2500');
     state({ backgroundResumeBlocked: true, violationBlocked: true }) === 'BLOCKED_SECURITY_VIOLATION');
   check('1h: both together resolve to the VPN screen (its own recovery steps)',
     state({ backgroundResumeBlocked: true, vpnBlocked: true, violationBlocked: true }) === 'BLOCKED_VPN');
-  check('1i: the window-state causes still outrank everything',
-    state({ overlayBlocked: true, vpnBlocked: true, backgroundResumeBlocked: true }) === 'BLOCKED_OVERLAY'
+  check('1i: the remaining window-state cause still outranks everything',
+    state({ overlayBlocked: true, vpnBlocked: true, backgroundResumeBlocked: true }) === 'BLOCKED_VPN'
     && state({ multiWindowBlocked: true, vpnBlocked: true, backgroundResumeBlocked: true }) === 'BLOCKED_MULTI_WINDOW');
   check('1j: the resume hold still outranks CHECKING (fail-closed, no temporary all-clear)',
     state({ backgroundResumeBlocked: true, evaluating: true, hasVerdict: false }) === 'BLOCKED_BACKGROUND_RESUME');
   check('1k: no control is offered for a state that renders no page',
     M.isGateRecheckable('BLOCKED_BACKGROUND_RESUME') === false);
-  check('1l: the causes a user can act on still offer one',
-    M.isGateRecheckable('BLOCKED_OVERLAY') === true && M.isGateRecheckable('BLOCKED_VPN') === true);
+  check('1l: the cause a user can act on still offers one',
+    M.isGateRecheckable('BLOCKED_OVERLAY') === false && M.isGateRecheckable('BLOCKED_VPN') === true);
 
   // ''Clean resume'' release rule (unchanged, re-asserted).
   const g = (over) => M.resolveBackgroundResumeGate({

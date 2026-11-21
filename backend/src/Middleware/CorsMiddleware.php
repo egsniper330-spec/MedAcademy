@@ -91,7 +91,10 @@ final class CorsMiddleware
         // web client could not report progress and showed a fixed 15 % placeholder
         // instead (see src/lib/pdfDeliveryProgress.ts). Only sizes and the download
         // filename are revealed — no identity, no token, no document content.
-        header('Access-Control-Expose-Headers: Retry-After, Content-Length, Content-Disposition, Content-Type');
+        // Accept-Ranges/Content-Range are exposed for the same reason as
+        // Content-Length: a browser may resume or partially fetch a large
+        // attachment only if it can see that the server allows ranges.
+        header('Access-Control-Expose-Headers: Retry-After, Content-Length, Content-Disposition, Content-Type, Accept-Ranges, Content-Range, ETag');
         header('Access-Control-Max-Age: 86400');
 
         if ($method === 'OPTIONS') {

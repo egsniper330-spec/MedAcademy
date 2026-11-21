@@ -42,6 +42,25 @@ background→resume hold). Consequently:
 | Live **transitions** in and out of any of the above | `Activity.onMultiWindowModeChanged` / `onPictureInPictureModeChanged` (both overloads), relayed from `MainActivity` as described in §4 | Reliable; combined with the layout and resume triggers below it also survives a lost callback. |
 | Transitions the callback cannot see (e.g. no callback delivered) | decor-view **layout pass** (entering/leaving split-screen resizes our window) + **host resume** re-read | Defensive triggers, event-driven — see §4. |
 
+### 2.1 Removed: the focus-loss "floating window" detector
+
+An earlier build derived a `foreign_window` mode from the activity's **window
+focus**: losing focus while resumed and full-screen was reported as "another
+app is floating over us", with an app-wide lock and its own blocking page. It was
+**removed** because:
+
+* Recents, an app switch, our own cover view, a system dialog and the teardown of
+a Samsung pop-up view all change window focus — the reported false positives;
+* it could not be made reliable: Android exposes no window enumeration, so the
+  condition is unprovable, and the lock flapped in and out with the focus churn;
+* the real-world case it was meant to catch (a pinned panel from an interception
+  app) is addressed by the **traffic-interception detector** (installed tool) and
+  by the independent VPN / system-proxy / kernel-route signals.
+
+Nothing in the app reports, reads or reasons about `foreign_window` any more.
+Recents, app switching, returning to the app and closing a pop-up view produce no
+warning, no lock and no stale state.
+
 ## 3. What is NOT detected — stated plainly, never as a finding
 
 Android gives a normal app **no API to enumerate another app's windows**. So:
@@ -49,14 +68,13 @@ Android gives a normal app **no API to enumerate another app's windows**. So:
 * **"Another app is in split-screen / picture-in-picture next to us"** — not
   observable at all. Nothing in this feature claims it, and no finding is ever
   raised for it.
-* **"Another app is floating over / drawn on top of us"** — the *overlay*
-  question. It is a **different measurement** with its own honest limits
-  (`OVERLAY_DETECTION_LIMITS`, `docs/DEVICE_VALIDATION_CHECKLIST.md` §1): the
-  framework's obscured-touch flags (`FLAG_WINDOW_IS_OBSCURED` /
-  `FLAG_WINDOW_IS_PARTIALLY_OBSCURED`, set from API 29, and only when the user
-  actually touches the screen) plus prevention via `setHideOverlayWindows(true)`
-  (API 31+). A prohibited window mode is never presented as an overlay, and the
-  overlay evidence is never presented as a split screen.
+* **"Another app is floating over / drawn on top of us"** — **not detected at
+  all**, and no finding is ever raised for it. The overlay / obscured-touch
+  subsystem (obscured-touch flags, `setHideOverlayWindows`, the overlay lock
+  reason) was **removed entirely**: it inferred another app's window from focus
+  loss and touch flags, which produced false locks, and it could never identify
+  the covering app. There is no overlay input, reason, event or copy any more; a
+  prohibited window mode is the only window-state finding.
 * **OEM floating-window features** (MIUI, One UI, EMUI and similar) are vendor UI
   layered over the documented APIs, with no public API of their own. When such a
   feature puts **MedAcademy itself** in a resizable/floating window the
@@ -120,7 +138,7 @@ The published limits are exported as `MULTI_WINDOW_DETECTION_LIMITS` in
   degrade to `'unknown'`/no-op off Android, and an absent module or a thrown call
   is **unmeasured**, never "full-screen".
 * `src/lib/securityStateModel.ts` — the new `BLOCKED_MULTI_WINDOW` gate state
-  (precedence: `BLOCKED_OVERLAY` → **`BLOCKED_MULTI_WINDOW`** →
+  (precedence: **`BLOCKED_MULTI_WINDOW`** →
   `BLOCKED_BACKGROUND_RESUME` → `BLOCKED_VPN` → `BLOCKED_SECURITY_VIOLATION` →
   `CHECKING` → `ALLOWED`), `isProhibitedWindowMode()`, the split-screen and PiP
   copy (`windowModeBlockCopy` / `windowModeBlockSteps`), the release rule

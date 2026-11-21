@@ -278,11 +278,21 @@ def verify_pdf(data: bytes, expected_pages: list[tuple[int, int]]) -> None:
         doc.close()
 
 
-def build_personalised_pdf(*, storage, manifest: dict, model, payload: int, lossless_png_dpi: int) -> bytes:
+def build_personalised_pdf(*, storage, manifest: dict, model, payload: int, source_dpi: int,
+                           profile=None) -> bytes:
     """Embed `payload` in every master page and rebuild a PDF whose page order and sizes match.
 
     Pages are read from the master assets only (never the original PDF). Output is assembled in
     memory and returned; the caller writes it to a temp key before publishing.
+
+    `source_dpi` is the DPI the master rasters were rendered at; the emitted page size in POINTS is
+    derived from the encoded pixel size and the DPI actually used, so a profile that caps the
+    resolution keeps the page's physical size while carrying fewer pixels.
+
+    `profile` is a pdf_optimize.CompressionProfile. The DEFAULT (balanced) embeds a baseline JPEG
+    instead of a lossless PNG: that single change removes the 6–7 MB page-image bloat (see
+    docs/PDF_COMPRESSION.md for the measurements and for the WAM round-trip proof required before
+    trusting a profile). The `lossless` profile reproduces the previous PNG output exactly.
     """
     import io
 
@@ -290,30 +300,58 @@ def build_personalised_pdf(*, storage, manifest: dict, model, payload: int, loss
     import pypdfium2 as pdfium
     from PIL import Image
 
+    from .pdf_optimize import encode_page, resolve_profile
+
+    profile = profile or resolve_profile(None)
     out = pdfium.PdfDocument.new()
     try:
         for page_meta in manifest["pages"]:
             png = storage.get_bytes(page_meta["key"])
-            rgb = Image.open(io.BytesIO(png)).convert("RGB")
+            with Image.open(io.BytesIO(png)) as src:
+                rgb = src.convert("RGB")
+            # A near-uniform page carries no ink to mark and no text to read: emit a
+            # blank page instead of a ~400 KB raster of white. The page still exists
+            # (count, order and size are unchanged) and detection skips it exactly as
+            # it skips any other unreadable page.
+            if _is_blank(rgb):
+                width_pt = rgb.width * 72.0 / source_dpi
+                height_pt = rgb.height * 72.0 / source_dpi
+                blank = out.new_page(width_pt, height_pt)
+                blank.gen_content()
+                rgb.close()
+                continue
             arr = np.asarray(rgb).astype(np.float32) / 255.0
             chw = np.transpose(arr, (2, 0, 1))
             marked = np.asarray(model.embed_image(chw, payload), dtype=np.float32)
             out_arr = (np.clip(np.transpose(marked, (1, 2, 0)), 0.0, 1.0) * 255.0 + 0.5).astype(np.uint8)
             image = Image.fromarray(out_arr, mode="RGB")
-            buf = io.BytesIO()
-            image.save(buf, format="PNG")
-            pil = Image.open(io.BytesIO(buf.getvalue())).convert("RGB")
-            page_w_pt = pil.width * 72.0 / lossless_png_dpi
-            page_h_pt = pil.height * 72.0 / lossless_png_dpi
-            bitmap = pdfium.PdfBitmap.from_pil(pil)
-            img_obj = pdfium.PdfImage.new(out)
-            img_obj.set_bitmap(bitmap)
-            img_obj.set_matrix(pdfium.PdfMatrix(page_w_pt, 0, 0, page_h_pt, 0, 0))
+            try:
+                data, width_px, height_px, dpi = encode_page(image, profile, source_dpi)
+            finally:
+                image.close()
+                rgb.close()
+            page_w_pt = width_px * 72.0 / dpi
+            page_h_pt = height_px * 72.0 / dpi
             new_page = out.new_page(page_w_pt, page_h_pt)
+            if profile.lossless:
+                # Previous behaviour, byte-for-byte: Flate-encoded RGB raster.
+                with Image.open(io.BytesIO(data)) as pil:
+                    bitmap = pdfium.PdfBitmap.from_pil(pil.convert("RGB"))
+                try:
+                    img_obj = pdfium.PdfImage.new(out)
+                    img_obj.set_bitmap(bitmap)
+                finally:
+                    bitmap.close()
+            else:
+                # /DCTDecode image straight from the JPEG bytes. `inline=True`
+                # copies the stream into the document, so the buffer may be dropped
+                # immediately (otherwise PDFium would keep the file open and the save
+                # below would fail on Windows).
+                img_obj = pdfium.PdfImage.new(out)
+                img_obj.load_jpeg(io.BytesIO(data), inline=True)
+            img_obj.set_matrix(pdfium.PdfMatrix(page_w_pt, 0, 0, page_h_pt, 0, 0))
             new_page.insert_obj(img_obj)
             new_page.gen_content()
-            bitmap.close()
-            pil.close()
         buf = io.BytesIO()
         out.save(buf)
         return buf.getvalue()
@@ -322,11 +360,38 @@ def build_personalised_pdf(*, storage, manifest: dict, model, payload: int, loss
 
 
 ALGORITHM = "wam_mit"
-CONFIG_VERSION = "wam-mit-v1/pypdfium2-png-v1"
+# Encoding version. It is part of the issuance cache key, so changing the way a
+# page raster is embedded cannot silently reuse a copy produced by another
+# encoder: a 24h-old PNG copy and a new JPEG copy are different artifacts with
+# different forensic properties.
+CONFIG_VERSION_PREFIX = "wam-mit-v1/pypdfium2"
+CONFIG_VERSION = CONFIG_VERSION_PREFIX + "-jpeg-v2:balanced"  # legacy default, kept for imports
+
+
+def _is_blank(rgb, threshold: float = 2.0) -> bool:
+    """True when a page is essentially uniform (blank sheet / full-bleed colour).
+
+    Uses the standard deviation of the luminance channel: text, rules and images all
+    raise it well above 2, while a blank page sits near 0. Erring towards "not
+    blank" is deliberate — a page wrongly treated as blank would lose its mark.
+    """
+    import numpy as np
+
+    gray = np.asarray(rgb.convert("L"), dtype=np.float32)
+    # Near-WHITE and uniform only. A solid dark/coloured page is left as a raster: it
+    # is content the reader sees, and skipping it would be an assumption about a
+    # document we know nothing about.
+    return float(gray.std()) < threshold and float(gray.mean()) > 250.0
+
+
+def config_version_for(profile) -> str:
+    """Stable config id for one compression profile (part of the cache key)."""
+    return f"{CONFIG_VERSION_PREFIX}-jpeg-v2:{profile.name}"
 
 
 def issue(*, conn: sqlite3.Connection, storage, model, manifest: dict, identity: dict,
-          ttl_seconds: int, lease_seconds: int, now: int | None = None) -> dict:
+          ttl_seconds: int, lease_seconds: int, now: int | None = None,
+          profile=None) -> dict:
     """Return a ready personalised copy for `identity`, generating it if necessary.
 
     `identity` holds: student_ref, doctor_ref, material_id, version_id, course_ref, source_sha256.
@@ -335,11 +400,15 @@ def issue(*, conn: sqlite3.Connection, storage, model, manifest: dict, identity:
     Returns {"watermark_id", "status": "ready", "reused": bool, "expires_at", "file_sha256"}
     or raises IssuanceError (code 'in_progress' when another worker holds a live lease).
     """
+    from .pdf_optimize import resolve_profile
+
+    profile = profile or resolve_profile(None)
+    config_version = config_version_for(profile)
     key = cache_key(student_ref=identity["student_ref"], doctor_ref=identity["doctor_ref"],
                     material_id=identity["material_id"], version_id=identity["version_id"],
                     source_course_id=identity["course_ref"], source_sha256=identity["source_sha256"],
-                    algorithm_version=f"{ALGORITHM}:{CONFIG_VERSION}")
-    full_identity = dict(identity, algorithm=ALGORITHM, config_version=CONFIG_VERSION,
+                    algorithm_version=f"{ALGORITHM}:{config_version}")
+    full_identity = dict(identity, algorithm=ALGORITHM, config_version=config_version,
                          master_fingerprint=manifest["source_sha256"][:24])
     action, row = claim(conn, key=key, identity=full_identity, lease_seconds=lease_seconds, now=now)
     ts = utc_now() if now is None else now
@@ -361,7 +430,8 @@ def issue(*, conn: sqlite3.Connection, storage, model, manifest: dict, identity:
             raise IssuanceError("lease_lost", "generation lease was lost before rendering")
         # No DB lock is held during rendering, WAM embedding or PDF reconstruction.
         data = build_personalised_pdf(storage=storage, manifest=manifest, model=model,
-                                      payload=row.payload, lossless_png_dpi=manifest["settings"]["dpi"])
+                                      payload=row.payload, source_dpi=manifest["settings"]["dpi"],
+                                      profile=profile)
         verify_pdf(data, [(p["width"], p["height"]) for p in manifest["pages"]])
         file_sha = hashlib.sha256(data).hexdigest()
         # Per-attempt keys: a stale worker can only ever touch its own files, never a newer result.

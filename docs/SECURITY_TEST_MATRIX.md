@@ -107,28 +107,30 @@ and to contain no `EXPECTED_CERT_SHA256` in BuildConfig)
 
 ---
 
-## Test 7 — Legitimate accessibility service → no false overlay block
+## Test 7 — Legitimate accessibility service → no false lock
 
 | Step | Action | Expected |
-|------|--------|----------|
+|------|--------|
 | 1 | Enable a legitimate accessibility service (e.g. TalkBack, screen reader) | — |
-| 2 | Launch app + log in | No `overlay_detected` — accessibility capability was never part of the overlay verdict (only the 4 known abuse packages are), and the aggregate count is evidence-only |
+| 2 | Launch app + log in | No security lock. Accessibility capability was never part of any verdict, and the overlay subsystem that once consumed window signals no longer exists. |
 
 **Status: PHYSICAL DEVICE VERIFICATION REQUIRED** (logic: SOURCE VERIFIED)
 
 ---
 
-## Test 8 — Actual suspicious overlay → detected
+## Test 8 — Notification shade, dialog and app switch → no false overlay block
 
 | Step | Action | Expected |
 |------|--------|----------|
-| 1 | Install an app on the known abuse list (e.g. `com.mobizen.miing.service`) and grant it overlay permission | — |
-| 2 | Launch app + log in | `overlay_detected` fires; `overlayCapableAppsCount` in event metadata includes the abusive package |
+| 1 | Open the notification shade over the app, dismiss it, switch to another app and return | — |
+| 2 | Observe the gate | No lock, no `overlay_detected` finding, no stale state. The overlay/obscured-touch subsystem was removed; a prohibited window mode (split-screen / PiP) is the only window-state finding. |
 
-Honest limitation: a *non-listed* malicious overlay app cannot be proven active
-from a regular app on modern Android — the platform does not expose other apps'
-windows. The backend admin can extend `abusiveOverlayPackages` as new abuse
-tools are identified.
+**Status: PHYSICAL DEVICE VERIFICATION REQUIRED** (logic: SOURCE VERIFIED)
+
+Honest limitation: another app's windows cannot be enumerated on modern Android,
+so MedAcademy makes no claim about what is drawn over it. Denylisted
+interception-tool detection (§ Trafic interception) reports *installation* only —
+never that traffic was intercepted.
 
 **Status: PHYSICAL DEVICE VERIFICATION REQUIRED** (logic: SOURCE VERIFIED)
 

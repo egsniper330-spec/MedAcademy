@@ -192,8 +192,13 @@ console.log('\n\u2500\u2500 B: shipped client policy + copy \u2500\u2500');
     /applyMandatoryConnectionFloor,/.test(readCode('src/lib/security.ts')));
   check('B6: VPN/proxy risk weights are unchanged (15 / 15)',
     /vpn_detected:\s+15/.test(security) && /proxy_detected:\s+15/.test(security));
+  // Both detectors must still be wired and individually bounded. The bounding
+  // moved into the shared `bounded()` helper (which also records a degraded
+  // verdict when the detector produces none).
   check('B7: both detectors are still wired into the pipeline',
-    /withTimeout\(detectVPN\(\)/.test(security) && /withTimeout\(detectProxy\(\)/.test(security));
+    /bounded\(\s*'vpn',\s*detectVPN\(\)/.test(security) &&
+      /bounded\(\s*'proxy',\s*detectProxy\(\)/.test(security) &&
+      /const bounded = <T,>\(name: string, p: Promise<T>, fallback: \(\) => T\): Promise<T> =>\s*withTimeout\(p, DETECTOR_TIMEOUT_MS/.test(security));
 
   // Copy + honest limits live in the pure model (testable, shared by both gates).
   check('B8: the mandatory page copy names the VPN/proxy block',

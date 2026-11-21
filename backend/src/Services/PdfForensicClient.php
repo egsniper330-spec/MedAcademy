@@ -269,6 +269,51 @@ final class PdfForensicClient
         return $json;
     }
 
+    /**
+     * Ask the service to read the forensic payload from ONE IMAGE (screenshot, crop, photo).
+     *
+     * Same signed, streamed transport as detectFile(): the image is never loaded into PHP
+     * memory, only hashed (streamed) and sent from disk. The image bytes are never stored
+     * by the service or by this client.
+     *
+     * The service answers EVIDENCE, never an identity: `verdict` is one of
+     * confirmed | probable | ambiguous | no_mark | insufficient_quality, `payload` may be
+     * null, and `quality.reasons` explains an `insufficient_quality` result
+     * (low_resolution | blurry | low_contrast).
+     *
+     * @return array{verdict:string,payload:?int,score:float,agreement:float,
+     *               candidates_analyzed:int,candidates_readable:int,candidates_total:int,
+     *               quality?:array,regions?:array}
+     */
+    public function detectImageFile(string $path, string $mime, ?string $sha256 = null): array
+    {
+        if (!is_file($path) || !is_readable($path)) {
+            throw new PdfForensicException('invalid_image', 'the uploaded image is not readable');
+        }
+        if (!in_array($mime, ['image/jpeg', 'image/png', 'image/webp'], true)) {
+            throw new PdfForensicException('invalid_image', 'unsupported image type');
+        }
+        $size = (int) filesize($path);
+        if ($size <= 0) {
+            throw new PdfForensicException('invalid_image', 'the uploaded image is empty');
+        }
+        $sha = $sha256 !== null && preg_match('/^[0-9a-f]{64}$/', $sha256) === 1
+            ? $sha256
+            : (string) hash_file('sha256', $path);
+        if ($sha === '') {
+            throw new PdfForensicException('invalid_image', 'the uploaded image could not be hashed');
+        }
+        $response = $this->request(
+            'POST', '/internal/detect-image', [], null, self::TIMEOUT_RENDER, true,
+            ['path' => $path, 'size' => $size, 'sha256' => $sha], $mime
+        );
+        $json = $response['json'];
+        if (!is_array($json) || !isset($json['verdict'])) {
+            throw new PdfForensicException('invalid_response', 'image detection returned no verdict');
+        }
+        return $json;
+    }
+
     /** Fetch the issued PDF bytes for a key the service handed back. */
     public function download(string $storageKey): string
     {
@@ -343,6 +388,7 @@ final class PdfForensicClient
         int $timeout,
         bool $signed = true,
         ?array $stream = null,
+        string $contentType = 'application/pdf',
     ): array {
         $base = $this->baseUrl();
         if ($base === '') {
@@ -354,7 +400,7 @@ final class PdfForensicClient
 
         $headers = ['Accept: application/json'];
         if ($body !== null || $stream !== null) {
-            $headers[] = 'Content-Type: application/pdf';
+            $headers[] = 'Content-Type: ' . $contentType;
         }
         if ($signed) {
             $keyId = $this->keyId();

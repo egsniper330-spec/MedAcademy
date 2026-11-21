@@ -11,7 +11,7 @@
  * TWO INDEPENDENT SECURITY LAYERS (lifecycle refactor):
  *   • APP ACCESS  — the central security lock + SecurityGate. Blocked only by
  *     a confirmed violation or live prohibited signal; continuous monitoring
- *     (periodic + native VPN callback + overlay/multi-window signals) is
+ *     (periodic + native VPN callback + multi-window signals) is
  *     unchanged. Leaving the app does NOT engage this layer.
  *   • PROTECTED CONTENT — the fail-closed protectedContentState machine. A
  *     background edge conceals/pauses video synchronously; a resume keeps it
@@ -52,8 +52,8 @@ import {
   acceptsResumeVerification,
   resolveNetworkAccessState,
   hasConnectionFinding,
+  isUserCaFinding,
   type NetworkAccessState,
-  canClearOverlayBlock,
   canClearMultiWindowBlock,
   isProhibitedWindowMode,
   rendersBlockScreen,
@@ -62,6 +62,12 @@ import {
   type GatePhase,
   type SecurityGateState,
 } from '@/lib/securityStateModel';
+import {
+  decideWindowMode,
+  initialWindowModeState,
+  type WindowModeEvidence,
+  type WindowModeName,
+} from '@/lib/windowModeAggregator';
 import { hasOwnDialogOpen } from '@/lib/ownDialogs';
 import {
   checkAndRefreshSecurityConfig,
@@ -80,12 +86,16 @@ import {
   onNativeJailbreakDetected,
   onNativeDebuggerAttached,
   onNativeIntegrityFailed,
-  onNativeObscuredChanged,
-  isNativeWindowObscured,
-  enableNativeOverlayProtection,
   onNativeWindowModeChanged,
   getNativeWindowMode,
   enableNativeWindowModeMonitoring,
+  onNativeContainmentChanged,
+  onNativeContainmentRevalidateRequested,
+  getNativeContainmentState,
+  clearNativeContainmentReason,
+  ensureNativeVpnWatch,
+  getNativeVpnSnapshot,
+  type NativeContainmentState,
 } from '@/lib/nativeSecurity';
 import { isVpnWhitelistKnownNonEmpty } from '@/lib/security';
 import {
@@ -107,13 +117,11 @@ import { markPerf } from '@/lib/perfTimeline';
 /** Lock holder names — one per independent signal source (they compose). */
 const LOCK_SRC_VERDICT    = 'verdict';      // authoritative policy decision
 const LOCK_SRC_NATIVE_VPN = 'native-vpn';   // fast native TRANSPORT_VPN signal
-/** Live obscured-window / overlay signal (see the Android security module). */
-const LOCK_SRC_OVERLAY    = 'overlay';
 /**
  * Prohibited window mode (split-screen / other multi-window mode, or our own
  * picture-in-picture) reported by the platform for THIS app. A window-state
  * cause, not a policy finding — kept as its own lock source so its copy, its
- * release rule and its evidence stay independent of the overlay signal.
+ * release rule and its evidence stay independent of every policy verdict.
  */
 const LOCK_SRC_WINDOW_MODE = 'window-mode';
 /** The app left the foreground and has not yet re-verified after resuming. */
@@ -128,6 +136,24 @@ const NETWORK_RECONNECT_DEBOUNCE_MS = 3_000;
 // VPN-specific re-check: after VPN detected, re-check on every foreground to
 // clear the stale threat once the user disconnects the VPN.
 const VPN_RECHECK_DEBOUNCE_MS = 1_500;
+
+// How long a caller may JOIN an in-flight FULL security evaluation instead of
+// starting a second one. Every detector is individually bounded by
+// DETECTOR_TIMEOUT_MS (10 s), so a run inside this window is a complete, fresh
+// measurement — this shares WORK, it never reuses a stored verdict.
+const SHARED_FULL_EVAL_MAX_MS = 10_000;
+
+/**
+ * Detectors whose verdict is MANDATORY before protected playback.
+ *
+ * If one of them produced NO verdict (it threw, or it hit DETECTOR_TIMEOUT_MS),
+ * playback is refused: "unavailable" is not "clean". VPN and TLS pinning are
+ * included because a silent gap in either is exactly the state an attacker would
+ * create, and Play Integrity because it is the only server-attested app verdict.
+ * A genuinely OFFLINE device is not degraded (the pipeline skips those probes by
+ * design and the connectivity listener re-runs the full pipeline on return).
+ */
+const PRE_PLAYBACK_MANDATORY_DETECTORS: readonly string[] = ['vpn', 'platformIntegrity', 'ssl'];
 
 interface SecurityContextValue {
   result:      SecurityCheckResult | null;
@@ -193,13 +219,13 @@ interface SecurityContextValue {
   securityLockHard: boolean;
   /**
    * THE single authoritative gate state (securityStateModel.ts): one closed
-   * vocabulary covering policy blocks, the live overlay signal, the
+   * vocabulary covering policy blocks, the live window signal, the
    * background→resume hold, in-flight checks and the allowed case. Consumers
    * render from this instead of re-deriving a boolean from several flags.
    */
   gateState: SecurityGateState;
   /**
-   * EVERY live violation reason, in deterministic order (overlay → window →
+   * EVERY live violation reason, in deterministic order (window →
    * vpn → violation). The gate renders all of them on ONE screen: a second
    * violation must never open a second screen, and clearing one reason must
    * never clear another.
@@ -210,7 +236,7 @@ interface SecurityContextValue {
    * over the whole app is authoritative. This is deliberately SEPARATE from
    * `protectedContent`: an ordinary background/resume does NOT set it, because
    * the user must be able to use non-video screens while the post-resume
-   * verification runs. Only confirmed violations (VPN, root, overlay,
+   * verification runs. Only confirmed violations (VPN, root,
    * multi-window, …) do.
    */
   appAccessBlocked: boolean;
@@ -231,8 +257,6 @@ interface SecurityContextValue {
   protectedContent: ProtectedContentState & { visible: boolean };
   /** Re-run the protected-content verification (bounded, fail-closed). */
   verifyProtectedContent: (reason?: string) => Promise<void>;
-  /** A live obscured-window/overlay signal holds the gate. */
-  overlayBlocked: boolean;
   /** The platform reports this app in a prohibited multi-window mode. */
   multiWindowBlocked: boolean;
   /**
@@ -244,11 +268,11 @@ interface SecurityContextValue {
   /** The app is backgrounded, or resumed and not yet re-verified. */
   backgroundBlocked: boolean;
   /**
-   * Re-verify security on demand (the overlay / resume recheck control).
-   * Re-reads the native obscured signal, runs a fresh evaluation, and bumps
-   * the resume token so the released state is provably post-request. It can
-   * only REQUEST a recheck — the gate clears solely on a clean platform signal
-   * plus a clean verdict, so the warning cannot be dismissed away.
+   * Re-verify security on demand (the VPN / resume recheck control).
+   * Re-reads the platform window mode, runs a fresh evaluation, and bumps the
+   * resume token so the released state is provably post-request. It can only
+   * REQUEST a recheck — the gate clears solely on a clean platform signal plus
+   * a clean verdict, so the warning cannot be dismissed away.
    */
   verifySecurity: () => Promise<void>;
   /** Run all security checks. Returns the result. */
@@ -350,7 +374,6 @@ const SecurityContext = createContext<SecurityContextValue>({
   securityLockHard: false,
   gateState:        'CHECKING',
   gateReasons:      [],
-  overlayBlocked:   false,
   multiWindowBlocked: false,
   windowMode:       'unknown',
   backgroundBlocked: false,
@@ -454,6 +477,40 @@ export function SecurityProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   /**
+   * Run — or JOIN — one FULL evaluation.
+   *
+   * `checkBeforeVideo()` used to call `runGuardedCheck('pre-video')` directly.
+   * Two surfaces request it inside one playback gesture (the player mounting,
+   * then `shouldAllowPlayback()` authorising it) and a bootstrap or resume
+   * evaluation may still be in flight; `runGuardedCheck`'s generation guard then
+   * DISCARDS the older run, so the full 14-detector pipeline (including the
+   * network-bound Play Integrity nonce round trip and the TLS probe) ran twice
+   * and one verdict was thrown away. Joining the in-flight run removes exactly
+   * that duplicate work.
+   *
+   * SECURITY INVARIANT: nothing is cached. Only a run that is STILL IN FLIGHT is
+   * joined, so a completed verdict can never survive an invalidating change
+   * (VPN/window signal, resume, build change) — those all invalidate by
+   * starting a NEW evaluation, which is never served from here.
+   */
+  const runSharedFullCheck = useCallback(async (reason: string): Promise<SecurityCheckResult | null> => {
+    const inFlight = sharedFullEvalRef.current;
+    if (inFlight && Date.now() - inFlight.startedAt <= SHARED_FULL_EVAL_MAX_MS) {
+      if (__DEV__) console.log('[SecurityContext] full evaluation joined (one in flight): ' + reason);
+      return await inFlight.promise;
+    }
+    const startedAt = Date.now();
+    const promise = runGuardedCheck(reason);
+    sharedFullEvalRef.current = { promise, startedAt };
+    try {
+      return await promise;
+    } finally {
+      // Only clear OUR slot: a newer run must keep its own.
+      if (sharedFullEvalRef.current?.promise === promise) sharedFullEvalRef.current = null;
+    }
+  }, [runGuardedCheck]);
+
+  /**
    * Start a protected-content verification: bump the request id (invalidating
    * any older in-flight result), hide the native surface synchronously and
    * move the state to `checking`. Returns the id this verification owns.
@@ -467,7 +524,7 @@ export function SecurityProvider({ children }: { children: React.ReactNode }) {
 
   /**
    * Layer 2 response to an APP-LEVEL block (confirmed verdict, live VPN signal,
-   * overlay, prohibited window mode). Conceals immediately and invalidates any
+   * prohibited window mode). Conceals immediately and invalidates any
    * in-flight protected-content verification so a stale clean result cannot
    * uncover the player while the app itself is blocked.
    */
@@ -519,14 +576,12 @@ export function SecurityProvider({ children }: { children: React.ReactNode }) {
     // contained by that newer signal — the exact stale-evidence race the
     // native-signal sequence exists to close.
     const liveLock = getSecurityLockState();
-    if (liveLock.sources.includes(LOCK_SRC_OVERLAY) || liveLock.sources.includes(LOCK_SRC_WINDOW_MODE)) {
+    if (liveLock.sources.includes(LOCK_SRC_WINDOW_MODE)) {
       if (__DEV__) console.log('[SecurityContext] protected content stays hidden — window-state containment is live');
       return;
     }
-    // A foreign-window reading holds protected content WITHOUT taking the
-    // app-wide lock (see applyWindowModeReading). A clean verdict must not
-    // uncover a player while the platform still says another window is in
-    // front of us — only a full-screen reading may release it.
+    // A prohibited window mode (split-screen / PiP) must not be uncovered by a
+    // clean verdict — only a full-screen reading may release it.
     if (isProhibitedWindowMode(windowModeRef.current)) {
       if (__DEV__) console.log('[SecurityContext] protected content stays hidden — window mode is still prohibited');
       return;
@@ -619,14 +674,16 @@ export function SecurityProvider({ children }: { children: React.ReactNode }) {
     async () => null,
   );
 
-  // ── Overlay gate bookkeeping ────────────────────────────────────────────
-  // `overlaySignalRef`      — the native obscured-window belief (live).
-  // `overlayEngagedSerialRef` — the verdict serial current when the overlay
-  //   lock engaged. The lock clears only when the signal is CLEAR *and* a
-  //   NEWER completed verdict exists (canClearOverlayBlock) — so dismissing or
-  //   ignoring the warning can never clear it.
-  const overlaySignalRef = useRef(false);
-  const overlayEngagedSerialRef = useRef(-1);
+  // ── NATIVE containment latch (authoritative, Android) ───────────────────
+  // The native side (SecurityContainment.kt) owns the window/VPN evidence and
+  // LATCHES it. These refs mirror that latch so this context can never release
+  // a reason the platform still holds.
+  const nativeWindowLatchedRef = useRef(false);
+  const nativeVpnLatchedRef = useRef(false);
+  /** The full native reason set, for the gate's own reason list. */
+  const [nativeReasons, setNativeReasons] = useState<string[]>([]);
+  /** Recheck asked for by the NATIVE cover's own button. */
+  const requestRecheckRef = useRef<() => void>(() => {});
   // ── Multi-window gate bookkeeping ───────────────────────────────────────
   // `windowModeRef`           — the platform's last reported window mode.
   // `windowModeEngagedSerialRef` — the verdict serial current when the lock
@@ -643,8 +700,31 @@ export function SecurityProvider({ children }: { children: React.ReactNode }) {
   const windowModeEngagedSerialRef = useRef(-1);
   const verdictSerialRef = useRef(0);
 
+  // ── Window-mode AGGREGATION (one authoritative belief, not three) ────────
+  // The native side has several triggers (activity callback, flag batch) and
+  // emits only ACCEPTED transitions. This reducer is the JS mirror: it makes a
+  // weak snapshot unable to release a split-screen / PiP lock the activity
+  // callback raised. See src/lib/windowModeAggregator.ts.
+  const windowModeChainRef = useRef(initialWindowModeState());
+  const windowModeObsSeqRef = useRef(0);
+
   /**
-   * Native window/overlay PREFLIGHT. Re-reads the AUTHORITATIVE Android state
+   * ONE in-flight FULL evaluation, joined by concurrent callers.
+   *
+   * checkBeforeVideo() runs a complete 14-detector pipeline. Two surfaces ask
+   * for it in the same playback gesture (the player mounting, then
+   * shouldAllowPlayback) and a bootstrap/resume evaluation can still be in
+   * flight — and runGuardedCheck's generation guard DISCARDS the older run, so
+   * the same work was performed twice and one verdict was thrown away. Joining
+   * an IN-FLIGHT full run removes the duplicate work only; no completed verdict
+   * is ever cached, so nothing stale can survive an invalidating change.
+   */
+  const sharedFullEvalRef = useRef<
+    { promise: Promise<SecurityCheckResult | null>; startedAt: number } | null
+  >(null);
+
+  /**
+   * Native window PREFLIGHT. Re-reads the AUTHORITATIVE Android state
    * immediately before protected playback is authorised (see checkBeforeVideo).
    * Held in a ref because applyWindowModeReading() — which owns the engage and
    * release bookkeeping — is declared later in this component; routing the call
@@ -657,7 +737,7 @@ export function SecurityProvider({ children }: { children: React.ReactNode }) {
    * evaluation (periodic tick, resume verification, pre-video, manual recheck,
    * post-login).
    *
-   * WHY (the detection-coverage defect): overlay prevention and multi-window
+   * WHY (the detection-coverage defect): native window-mode
    * monitoring are installed once per session, and the app-level gate was fed
    * ONLY by the native event stream (activity callback, layout pass, host
    * resume). Any missed edge — monitoring installed after the activity was
@@ -781,7 +861,7 @@ export function SecurityProvider({ children }: { children: React.ReactNode }) {
     }
     const started = (async () => {
       try {
-        // Re-read the AUTHORITATIVE platform window/overlay state before the
+        // Re-read the AUTHORITATIVE platform window state before the
         // policy evaluation: an event stream can miss an edge, the platform
         // APIs cannot lie about the current mode.
         await nativeWindowReassertRef.current();
@@ -921,17 +1001,34 @@ export function SecurityProvider({ children }: { children: React.ReactNode }) {
    * Returns true if video should be blocked.
    */
   const checkBeforeVideo = useCallback(async (): Promise<boolean> => {
+    // NOTE: runs ONE shared full evaluation (see runSharedFullCheck) — a second
+    // concurrent caller joins it instead of duplicating the 14-detector work.
     // Super Admin sessions are never blocked from video playback
     if (isSuperAdmin) {
       if (__DEV__) console.log('[SecurityContext] Super Admin bypass — video always allowed');
       return false;
     }
     // NATIVE AUTHORITY, re-read here rather than trusted from the last event:
-    // the window-mode / obscured window may have changed without a delivered
+    // the window mode may have changed without a delivered
     // touch or callback yet, and a player that starts in split-screen would
     // open a VdoCipher session for a state that cannot legally play. A
     // prohibited reading blocks WITHOUT running the policy check, so no OTP or
     // session is created for a state that is already refused.
+    // ── FAST MANDATORY VPN BARRIER (one bridge call, no network) ────────────
+    // This runs BEFORE the 14-detector evaluation because it is the only check a
+    // capturing proxy can defeat by DELAY: the video surface must be refused in
+    // milliseconds, not after the TLS probe (measured 2082 ms of a 2218 ms
+    // suite). `registered:false` is UNKNOWN, not clean → refuse.
+    if (Platform.OS === 'android') {
+      try {
+        await ensureNativeVpnWatch();
+        const vpn = await getNativeVpnSnapshot();
+        if (!vpn || !vpn.registered) return true; // unmeasured ≠ clean
+        if (vpn.vpnTransport || vpn.vpnPresent) return true;
+      } catch {
+        return true; // an unreadable network state is never a clearance
+      }
+    }
     if (Platform.OS === 'android') {
       try {
         if (await nativeWindowPreflightRef.current()) return true;
@@ -942,12 +1039,25 @@ export function SecurityProvider({ children }: { children: React.ReactNode }) {
       }
     }
     try {
-      const r = await runGuardedCheck('pre-video');
+      const r = await runSharedFullCheck('pre-video');
       if (!r) {
-        // A newer check superseded this pre-video revalidation — publish
-        // nothing; the newer verdict is authoritative. Fail-closed callers
-        // re-check via the gate's live blocksVideo mirror either way.
-        return false;
+        // NO VERDICT IS NOT A CLEAN VERDICT. A mandatory pre-playback verdict
+        // that is missing (superseded / never produced) must refuse playback —
+        // previously this returned false, which let a player start on the
+        // strength of an evaluation that never reported.
+        return true;
+      }
+      // MANDATORY VERDICT MISSING → FAIL CLOSED. A detector that timed out or
+      // threw contributed no finding, and treating that as "clean" would let a
+      // player start on an unmeasured device. The last verdict is deliberately
+      // NOT republished: this refusal is about the missing measurement.
+      const missing = (r.degradedDetectors ?? []).filter((d) =>
+        PRE_PLAYBACK_MANDATORY_DETECTORS.includes(d));
+      if (missing.length > 0) {
+        if (__DEV__) {
+          console.warn('[SecurityContext] pre-video blocked — no verdict from mandatory detector(s): ' + missing.join(','));
+        }
+        return true;
       }
       setResult(r);
       maybeReleaseBackgroundHold(r);
@@ -960,7 +1070,7 @@ export function SecurityProvider({ children }: { children: React.ReactNode }) {
     } catch {
       return false; // fail-open for non-security errors (network down etc.)
     }
-  }, [isSuperAdmin, runGuardedCheck, maybeReleaseBackgroundHold, settleProtectedContentFromVerdict]);
+  }, [isSuperAdmin, runSharedFullCheck, maybeReleaseBackgroundHold, settleProtectedContentFromVerdict]);
 
   const reset = useCallback(() => {
     // FAIL-CLOSED reset: the previous verdict is retained (NOT nulled) so the
@@ -978,59 +1088,6 @@ export function SecurityProvider({ children }: { children: React.ReactNode }) {
     return () => { blockingCbsRef.current.delete(cb); };
   }, []);
 
-  // ── Android live obscured-window / overlay signal → security gate ─────────
-  /**
-   * Release the overlay hold only when the platform signal is CLEAR and a
-   * completed verdict NEWER than the engage has landed (canClearOverlayBlock).
-   * Not callable by UI code: the recheck control calls verifySecurity(), which
-   * RE-READS the native signal instead of asserting it. `getSecurityLockState()`
-   * is the synchronous module state — reading React state here would go stale
-   * inside the event listener.
-   */
-  const tryReleaseOverlayLock = useCallback(() => {
-    if (!getSecurityLockState().sources.includes(LOCK_SRC_OVERLAY)) return;
-    const clears = canClearOverlayBlock({
-      signalCleared:   !overlaySignalRef.current,
-      hasFreshVerdict: verdictSerialRef.current > overlayEngagedSerialRef.current,
-    });
-    if (!clears) return;
-    if (__DEV__) console.log('[SecurityContext] overlay lock cleared — signal gone and a fresh verdict landed');
-    overlayEngagedSerialRef.current = -1;
-    releaseSecurityLock(LOCK_SRC_OVERLAY);
-  }, []);
-
-  // SEPARATE INPUT, not a lifecycle proxy. The security specification is
-  // explicit that an AppState listener alone must not stand in for overlay
-  // detection: this subscription carries the FRAMEWORK's own "a touch arrived
-  // through an obscured window" evidence from Android (SecurityModule.kt),
-  // which a lifecycle transition cannot produce.
-  //
-  // On a positive signal the gate engages AT ONCE and the lock is hard, so
-  // protected playback is unmounted, in-flight protected requests are aborted
-  // and the transport refuses new ones. Only the NATIVE side sets this belief.
-  useEffect(() => {
-    if (Platform.OS !== 'android') return;
-    const unsub = onNativeObscuredChanged((obscured) => {
-      if (isSuperAdmin) return;
-      overlaySignalRef.current = obscured;
-      if (obscured) {
-        if (!getSecurityLockState().sources.includes(LOCK_SRC_OVERLAY)) {
-          // Remember the verdict serial at engage time: only a NEWER completed
-          // verdict may clear this block, so the warning cannot be dismissed.
-          overlayEngagedSerialRef.current = verdictSerialRef.current;
-          if (__DEV__) console.log('[SecurityContext] OVERLAY BLOCK — obscured touch observed; gate engaged');
-          engageSecurityLock(LOCK_SRC_OVERLAY, { hard: true });
-          blockProtectedContent('overlay');
-        }
-        return;
-      }
-      // Signal cleared. A cleared signal alone is NOT verification — a fresh
-      // verdict is still required (canClearOverlayBlock).
-      tryReleaseOverlayLock();
-    });
-    return unsub;
-  }, [isSuperAdmin, tryReleaseOverlayLock, blockProtectedContent]);
-
   // ── Android multi-window / split-screen signal → security gate ────────────
   /**
    * Release the multi-window hold only when BOTH hold (canClearMultiWindowBlock):
@@ -1042,6 +1099,10 @@ export function SecurityProvider({ children }: { children: React.ReactNode }) {
    */
   const tryReleaseWindowModeLock = useCallback(() => {
     if (!getSecurityLockState().sources.includes(LOCK_SRC_WINDOW_MODE)) return;
+    // A window reason held natively is released by the
+    // platform reporting a permitted mode again — never by a resume, a focus
+    // regain or a missing event interpreted as "gone".
+    if (nativeWindowLatchedRef.current) return;
     const clears = canClearMultiWindowBlock({
       modeRestored:    !isProhibitedWindowMode(windowModeRef.current),
       hasFreshVerdict: verdictSerialRef.current > windowModeEngagedSerialRef.current,
@@ -1066,51 +1127,39 @@ export function SecurityProvider({ children }: { children: React.ReactNode }) {
    *   is never treated as restored either (the release rule sees a prohibited
    *   hold as still-active until the platform positively reports full screen).
    */
-  const applyWindowModeReading = useCallback((incomingMode: string, requestVerdict: boolean) => {
-    // A floating window from ANOTHER app takes the activity's window focus —
-    // exactly what one of OUR OWN dialogs does. While one of ours is open the
-    // reading is not evidence of a foreign window, so it is treated as the
-    // neutral state instead of tripping the gate behind a confirm dialog.
-    const mode = incomingMode === 'foreign_window' && hasOwnDialogOpen()
-      ? 'fullscreen'
-      : incomingMode;
+  const applyWindowModeReading = useCallback((
+    incomingMode: string,
+    requestVerdict: boolean,
+    evidence: WindowModeEvidence = 'read',
+  ) => {
+    // Our own dialogs are irrelevant to window MODE: they never change it. The
+    // removed floating-window detector misread their focus loss as another
+    // app's window; nothing here interprets focus any more.
+    const raw = incomingMode;
+    // ── ONE AUTHORITATIVE BELIEF ──────────────────────────────────────────
+    // Native emits only ACCEPTED transitions, so an event carries
+    // activity-level evidence. A preflight/reassert read is a snapshot of the
+    // same physical state: it may engage (fail closed) but it may never release
+    // a prohibited-mode hold, and it may never flap the belief.
+    const transition = decideWindowMode(windowModeChainRef.current, {
+      mode: raw as WindowModeName,
+      evidence,
+      seq: ++windowModeObsSeqRef.current,
+    });
+    windowModeChainRef.current = transition.state;
+    // duplicate / rejected / ignore-unknown: the belief does not change.
+    if (transition.decision !== 'accept' || !transition.acceptedMode) return;
+    const mode: string = transition.acceptedMode;
     windowModeRef.current = mode;
     if (isSuperAdmin) return;
-    // ── FOREIGN (floating / pop-up) WINDOW — APP-WIDE LOCK ──────────────────
+    // ── SPLIT-SCREEN / PiP — APP-WIDE LOCK ──────────────────────────────────
     //
-    // ROOT CAUSE of "only the video was protected": this branch deliberately did
-    // NOT take the app lock — it called blockProtectedContent() and returned, so
-    // dashboards, profile screens, lesson content and navigation all stayed
-    // usable behind a floating app. The reason was a false-positive worry about
-    // the notification shade, which also removes window FOCUS.
-    //
-    // That worry is now resolved at the SIGNAL, not by weakening the response:
-    // the native side reports foreign_window only when another ACTIVITY took the
-    // top-resumed slot (onTopResumedActivityChanged), so the shade / volume / IME
-    // can never produce this reading. A reading that does arrive is therefore
-    // the platform stating another application's window is in front of ours, and
-    // the correct fail-closed response is the SAME lock split-screen engages:
-    // the whole app is covered by the gate, interaction is blocked, navigation
-    // and content access stop, the player is destroyed, protected traffic is
-    // refused and in-flight protected requests are aborted.
-    //
-    // RELEASE is not special-cased either: it goes through
-    // canClearMultiWindowBlock — the platform must positively report full screen
-    // AND a completed verdict NEWER than this engage must exist. A stale verdict
-    // can never clear it, and no tap can dismiss it.
-    if (mode === 'foreign_window') {
-      if (appActiveRef.current) {
-        if (!getSecurityLockState().sources.includes(LOCK_SRC_WINDOW_MODE)) {
-          windowModeEngagedSerialRef.current = verdictSerialRef.current;
-          windowModeEngagedModeRef.current = mode;
-          if (__DEV__) console.log('[SecurityContext] FOREIGN WINDOW — another application window is in front; APP LOCKED');
-          engageSecurityLock(LOCK_SRC_WINDOW_MODE, { hard: true });
-        }
-        // Layer 2 at the same instant: the player must be gone, not paused.
-        blockProtectedContent('foreign-window');
-      }
-      return;
-    }
+    // Both are positive platform states, so the response is the hard lock: the
+    // whole app is covered by the gate, interaction is blocked, navigation and
+    // content access stop, the player is destroyed, protected traffic is
+    // refused and in-flight protected requests are aborted. RELEASE goes through
+    // canClearMultiWindowBlock: the platform must positively report full screen
+    // AND a completed verdict NEWER than this engage must exist.
     if (isProhibitedWindowMode(mode)) {
       if (!getSecurityLockState().sources.includes(LOCK_SRC_WINDOW_MODE)) {
         windowModeEngagedSerialRef.current = verdictSerialRef.current;
@@ -1124,36 +1173,78 @@ export function SecurityProvider({ children }: { children: React.ReactNode }) {
     tryReleaseWindowModeLock();
     if (requestVerdict && mode === 'fullscreen') void check();
   }, [check, isSuperAdmin, tryReleaseWindowModeLock, blockProtectedContent]);
+  // ── NATIVE CONTAINMENT → the ONE gate (a reason set, not a boolean) ───────
+  //
+  // The native side raises a reason the instant it has evidence, covers the
+  // screen on that same frame and emits THIS event. The React gate then takes
+  // over the presentation and lists every active reason; the native latch stays
+  // authoritative, so the gate cannot be dismissed while the platform still
+  // holds a violation.
+  //
+  // This is what makes a VPN + a floating window ONE screen with BOTH reasons:
+  // each reason engages only its own lock holder, and no reason can clear
+  // another's.
+  useEffect(() => {
+    if (Platform.OS !== 'android') return;
+
+    const applyNativeContainment = (state: NativeContainmentState) => {
+      if (isSuperAdmin) return;
+      const hasWindow = state.reasons.includes('window');
+      const hasVpn = state.reasons.includes('vpn');
+      nativeWindowLatchedRef.current = hasWindow;
+      nativeVpnLatchedRef.current = hasVpn;
+      setNativeReasons(state.reasons);
+      if (state.mode && state.mode !== 'unknown') windowModeRef.current = state.mode;
+
+      if (hasVpn) {
+        // A native VPN reason is a NEWER signal than any verdict in flight, so
+        // bump the sequence: a verdict that started before it cannot release
+        // containment (see nativeSignalSeqRef).
+        nativeSignalSeqRef.current += 1;
+        markNativeVpnSignal(state.signalMs > 0 ? state.signalMs : null);
+      }
+
+      if (hasWindow) {
+        if (!getSecurityLockState().sources.includes(LOCK_SRC_WINDOW_MODE)) {
+          windowModeEngagedSerialRef.current = verdictSerialRef.current;
+          windowModeEngagedModeRef.current = state.mode !== 'unknown' ? state.mode : 'multi_window';
+          if (__DEV__) console.log('[SecurityContext] NATIVE window violation — gate engaged');
+          engageSecurityLock(LOCK_SRC_WINDOW_MODE, { hard: true });
+          blockProtectedContent('native-window');
+        }
+      } else if (getSecurityLockState().sources.includes(LOCK_SRC_WINDOW_MODE)) {
+        tryReleaseWindowModeLock();
+      }
+
+      if (hasVpn && !getSecurityLockState().sources.includes(LOCK_SRC_NATIVE_VPN)) {
+        engageSecurityLock(LOCK_SRC_NATIVE_VPN, { hard: true });
+        blockProtectedContent('native-vpn');
+      }
+      // An ABSENT vpn reason never releases here: policy owns that release (an
+      // admin-whitelisted tunnel is allowed) and it runs through the verdict.
+    };
+
+    const unsub = onNativeContainmentChanged(applyNativeContainment);
+    void getNativeContainmentState().then(applyNativeContainment).catch(() => {});
+    const unsubRecheck = onNativeContainmentRevalidateRequested(() => {
+      requestRecheckRef.current();
+    });
+    return () => {
+      unsub();
+      unsubRecheck();
+    };
+  }, [isSuperAdmin, tryReleaseWindowModeLock, blockProtectedContent, check]);
 
   /**
    * The implementation behind nativeWindowPreflightRef, bound to the live
-   * readers. Order matters: the OVERLAY signal is checked first because a live
-   * obscured window outranks a window-mode reading, exactly as the gate's state
-   * precedence does. A prohibited/obscured result engages the SAME locks the
-   * event paths engage, so a playback attempt can never observe a weaker
-   * containment than the event stream would have produced.
+   * readers. A prohibited window-mode reading engages the SAME lock the event
+   * paths engage, so a playback attempt can never observe a weaker containment
+   * than the event stream would have produced.
    *
    * `unknown` is not a prohibition and not a clearance: the preflight returns
    * the current belief so an unmeasurable moment cannot open a blocked state.
    */
   nativeWindowPreflightRef.current = async (): Promise<boolean> => {
-    let obscured = false;
-    try {
-      obscured = await isNativeWindowObscured();
-    } catch {
-      // Unreadable is not clear: fall through with the previous belief intact.
-      obscured = overlaySignalRef.current;
-    }
-    overlaySignalRef.current = obscured;
-    if (obscured) {
-      if (!isSuperAdmin && !getSecurityLockState().sources.includes(LOCK_SRC_OVERLAY)) {
-        overlayEngagedSerialRef.current = verdictSerialRef.current;
-        if (__DEV__) console.log('[SecurityContext] PRE-PLAY overlay preflight blocked playback');
-        engageSecurityLock(LOCK_SRC_OVERLAY, { hard: true });
-        blockProtectedContent('overlay');
-      }
-      return true;
-    }
     try {
       const reading = await getNativeWindowMode();
       if (reading.measured) {
@@ -1172,10 +1263,9 @@ export function SecurityProvider({ children }: { children: React.ReactNode }) {
    * helpers degrade to a no-op, so no branch is needed here.
    */
   nativeWindowReassertRef.current = async (): Promise<void> => {
-    // Idempotent re-install: restores setHideOverlayWindows + the obscured-touch
-    // filter after an activity recreation, and retries an install that resolved
-    // false at session start (activity not attached yet).
-    await enableNativeOverlayProtection();
+    // Idempotent re-install of the window-mode monitoring after an activity
+    // recreation; retries an install that resolved false at session start
+    // (activity not attached yet).
     const measuring = await enableNativeWindowModeMonitoring();
     if (!measuring) return; // the platform cannot answer — not a clearance
     const reading = await getNativeWindowMode();
@@ -1185,7 +1275,7 @@ export function SecurityProvider({ children }: { children: React.ReactNode }) {
     applyWindowModeReading(reading.mode, false);
   };
 
-  // SEPARATE INPUT, not a lifecycle proxy — the same rule the overlay signal
+  // SEPARATE INPUT, not a lifecycle proxy.
   // follows. This subscription carries the PLATFORM's own window-mode
   // transitions (activity callback relayed by MainActivity, window layout pass,
   // host resume) so a cold start that lands DIRECTLY in split-screen and a live
@@ -1197,7 +1287,8 @@ export function SecurityProvider({ children }: { children: React.ReactNode }) {
     const unsub = onNativeWindowModeChanged((reading) => {
       // requestVerdict: returning to full screen must be re-verified by a FRESH
       // authoritative evaluation before the gate opens (never by the event alone).
-      applyWindowModeReading(reading.mode, true);
+      // 'activity' evidence: native emits only ACCEPTED transitions.
+      applyWindowModeReading(reading.mode, true, 'activity');
     });
     return unsub;
   }, [applyWindowModeReading]);
@@ -1253,23 +1344,19 @@ export function SecurityProvider({ children }: { children: React.ReactNode }) {
   verifyProtectedContentRef.current = verifyProtectedContent;
 
   /**
-   * Manual recheck (the overlay / resume gate control).
+   * Manual recheck (the VPN / resume gate control).
    *
-   * RE-READS the native obscured signal AND the platform window mode,
-   * invalidates verdicts that predate the request (so an older in-flight check
-   * cannot clear the hold), runs a fresh evaluation, then re-evaluates both
-   * release conditions. It cannot force the gate open: clearing still requires
+   * RE-READS the platform window mode, invalidates verdicts that predate the
+   * request (so an older in-flight check cannot clear the hold), runs a fresh
+   * evaluation, then re-evaluates both release conditions. It cannot force the gate open: clearing still requires
    * the platform to report the condition gone AND policy to pass. The
    * multi-window restriction deliberately offers no control of its own (see
    * isGateRecheckable) — the platform's own signal is what clears it.
    */
   const verifySecurity = useCallback(async () => {
     if (Platform.OS === 'android') {
-      try {
-        overlaySignalRef.current = await isNativeWindowObscured();
-      } catch {
-        // Keep the last known belief — an unreadable signal is NOT a clear one.
-      }
+      // Re-READ the platform window mode. The window restriction is cleared by
+      // the platform reporting a permitted mode, never by this press.
       try {
         const reading = await getNativeWindowMode();
         if (reading.measured) applyWindowModeReading(reading.mode, false);
@@ -1279,9 +1366,11 @@ export function SecurityProvider({ children }: { children: React.ReactNode }) {
     }
     resumeTokenRef.current += 1;
     await check();
-    tryReleaseOverlayLock();
     tryReleaseWindowModeLock();
-  }, [applyWindowModeReading, check, tryReleaseOverlayLock, tryReleaseWindowModeLock]);
+  }, [applyWindowModeReading, check, tryReleaseWindowModeLock]);
+  // The native cover's own recheck button asks the SAME path to run, so the two
+  // recovery controls can never diverge.
+  requestRecheckRef.current = () => { void verifySecurity(); };
 
   // ── Native iOS security event bridge → unified logging pipeline ───────────
   // Subscribe to IOSSecurityModule events; map each to the existing logSecurityEvent
@@ -1328,8 +1417,6 @@ export function SecurityProvider({ children }: { children: React.ReactNode }) {
         clearTimeout(resumeWatchdogRef.current);
         resumeWatchdogRef.current = null;
       }
-      overlaySignalRef.current = false;
-      overlayEngagedSerialRef.current = -1;
       // The window-mode belief is session-scoped too: 'unknown' (not
       // 'fullscreen') so the next identity cannot inherit this one's reading.
       windowModeRef.current = 'unknown';
@@ -1445,7 +1532,7 @@ export function SecurityProvider({ children }: { children: React.ReactNode }) {
     //     by the normal verdict path (verdict → SecurityGate).
     //
     // Continuous monitoring, the periodic cadence, the native VPN callback,
-    // overlay/multi-window monitoring and every detector are unchanged.
+    // multi-window monitoring and every detector are unchanged.
     // Super Admin sessions bypass enforcement (matching every other path).
 
     // Track foreground/background; trigger re-validation on return from external app
@@ -1487,9 +1574,8 @@ export function SecurityProvider({ children }: { children: React.ReactNode }) {
         resumeTokenRef.current += 1;
         protectedHiddenRef.current = false;
         setProtectedContentConcealed(true, 'resume-verification');
-        // Re-assert the native overlay protection on the (possibly recreated)
+        // Re-assert the multi-window triggers on the (possibly recreated)
         // activity — Android can rebuild the window across a background cycle.
-        void enableNativeOverlayProtection();
         // Same for the multi-window triggers (the activity can be recreated, so
         // the layout watcher is gone) plus a fresh reading: returning from
         // another app is exactly when a split-screen change may have happened.
@@ -1649,9 +1735,6 @@ export function SecurityProvider({ children }: { children: React.ReactNode }) {
     }
 
     void checkAndRefreshSecurityConfig();
-    // Install the native overlay protection as soon as an authenticated
-    // session exists. Idempotent; resolves false on platforms without it.
-    void enableNativeOverlayProtection();
     // Install the multi-window triggers (activity callback relay, window layout
     // watcher, host-resume hook) and take ONE authoritative reading — this is
     // what catches an app that was LAUNCHED directly into split-screen, where an
@@ -1724,12 +1807,11 @@ export function SecurityProvider({ children }: { children: React.ReactNode }) {
   // the whitelist), and the provisional holder must still be released then.
   const verdictTypes = r.threats.map((t) => t.type).join(',');
   useEffect(() => {
-    // Publish the new verdict serial to the ref FIRST (the overlay gate's
+    // Publish the new verdict serial to the ref FIRST (the window-mode gate's
     // engage-time snapshot and its release test both read the ref from contexts
-    // where React state would already be stale), then give the overlay gate its
+    // where React state would already be stale), then give the window hold its
     // chance to clear now that a NEWER completed verdict exists.
     verdictSerialRef.current = verdictSerial;
-    tryReleaseOverlayLock();
     // Same hand-off for the multi-window hold: a NEWER completed verdict is one
     // of its two release conditions (canClearMultiWindowBlock). The other one —
     // the platform reporting full screen — is owned by the native signal, so a
@@ -1754,10 +1836,28 @@ export function SecurityProvider({ children }: { children: React.ReactNode }) {
     // signal lands a fresh verdict that can legitimately release containment.
     if (hasVerdict && verdictNativeSeqRef.current >= nativeSignalSeqRef.current) {
       releaseSecurityLock(LOCK_SRC_NATIVE_VPN);
+      // POLICY is the only authority that may clear a VPN reason while the OS
+      // still reports a tunnel (an admin-whitelisted corporate VPN). The window
+      // reason is platform evidence and is never cleared from here.
+      if (nativeVpnLatchedRef.current) {
+        // A JS verdict saying "clean" is NOT authority to release a VPN reason:
+        // the JS detector reads THIS app's active network, and a per-app VPN
+        // (measured on the tablet: ProxyPin installs no `ip rule` for our uid, so
+        // our default network stays NOT_VPN) leaves the device-wide tunnel up
+        // while the verdict reads clean. Only the OS itself reporting NO VPN on
+        // NO network may clear it — the native watcher decides that, and here we
+        // merely confirm it against a fresh snapshot before clearing.
+        void getNativeVpnSnapshot().then((snap) => {
+          if (!snap || !snap.registered) return; // unknown is not clearance
+          if (snap.vpnTransport || snap.vpnPresent) return; // tunnel still up
+          nativeVpnLatchedRef.current = false;
+          void clearNativeContainmentReason('vpn');
+        });
+      }
     } else if (hasVerdict && __DEV__) {
       console.log('[SecurityContext] holding provisional VPN containment — verdict predates the latest native signal');
     }
-  }, [isSuperAdmin, hasVerdict, r.blocksLogin, r.blocksVideo, verdictTypes, tryReleaseOverlayLock, tryReleaseWindowModeLock, verdictSerial, blockProtectedContent]);
+  }, [isSuperAdmin, hasVerdict, r.blocksLogin, r.blocksVideo, verdictTypes, tryReleaseWindowModeLock, verdictSerial, blockProtectedContent]);
 
   const phase: GatePhase = resolveGatePhase({
     hasVerdict,
@@ -1768,18 +1868,17 @@ export function SecurityProvider({ children }: { children: React.ReactNode }) {
 
   // ── THE CENTRALIZED GATE STATE ───────────────────────────────────────────
   // One closed vocabulary (securityStateModel.resolveSecurityGateState) built
-  // from ALL FOUR independent inputs, so every consumer renders from the same
-  // decision instead of re-deriving a boolean from a different subset of flags:
+  // from ALL THREE remaining independent inputs, so every consumer renders from
+  // the same decision instead of re-deriving a boolean from a different subset:
   //
   //   • policy verdict        → vpn / violation blocks
-  //   • live overlay signal   → overlay block (from the native touch filter)
+  //   • window state          → prohibited window-mode block
   //   • foreground lifecycle  → background/resume hold (the security lock)
   //   • evaluation progress   → CHECKING (never a fabricated block)
   //
-  // The overlay and background causes are read from the LOCK, not from a
+  // The window and background causes are read from the LOCK, not from a
   // separate React flag: the lock is the single source of truth for "protected
   // content is contained", so the gate and the transport can never disagree.
-  const overlayBlocked    = !isSuperAdmin && lockState.sources.includes(LOCK_SRC_OVERLAY);
   const multiWindowBlocked = !isSuperAdmin && lockState.sources.includes(LOCK_SRC_WINDOW_MODE);
   const backgroundBlocked = !isSuperAdmin && lockState.sources.includes(LOCK_SRC_BACKGROUND);
   const liveBlocking      = r.blocksLogin && r.threats.length > 0;
@@ -1790,7 +1889,18 @@ export function SecurityProvider({ children }: { children: React.ReactNode }) {
   // BLOCKED_SECURITY_VIOLATION page, which has no recovery steps and no recheck
   // control — i.e. the correct finding, the wrong screen and no way to recover
   // after switching the proxy off.
-  const vpnBlocked        = liveBlocking && hasConnectionFinding(r.threats);
+  // A native VPN reason must render the connection page AT ONCE, without waiting
+  // for the network-bound verdict: that wait was the reported slow response,
+  // and the native cover is already up in the meantime. The reason clears only
+  // when the OS reports no tunnel or a completed verdict allows it (whitelist).
+  const nativeVpnHeld     = !isSuperAdmin && nativeReasons.includes('vpn');
+  const vpnBlocked        = nativeVpnHeld || (liveBlocking && hasConnectionFinding(r.threats));
+  // USER-INSTALLED CA CERTIFICATE: a trust-store finding, not a connection
+  // condition. The engine already forces blocksLogin for it; here it becomes its
+  // own reason so the ONE gate names the certificate instead of a generic
+  // "security violation", and so clearing it (removing the CA + a fresh
+  // verification) removes only its row.
+  const userCaBlocked     = !isSuperAdmin && liveBlocking && r.threats.some(isUserCaFinding);
   // ── ONE LOCK, EVERY REASON ────────────────────────────────────────────────
   // The state below is the PRESENTATION precedence (which copy is primary);
   // `gateReasons` is the complete SET of live violations. Both are derived from
@@ -1800,11 +1910,11 @@ export function SecurityProvider({ children }: { children: React.ReactNode }) {
   const gateInputs = {
     evaluating:             evaluating || checking,
     hasVerdict,
-    overlayBlocked,
     multiWindowBlocked,
     backgroundResumeBlocked: backgroundBlocked,
     vpnBlocked,
-    violationBlocked:        liveBlocking && !vpnBlocked,
+    userCaBlocked,
+    violationBlocked:        liveBlocking && !vpnBlocked && !userCaBlocked,
     windowMode:              multiWindowBlocked ? windowModeEngagedModeRef.current : windowModeRef.current,
   };
   const gateReasons: GateReason[] = isSuperAdmin ? [] : resolveGateReasons(gateInputs);
@@ -1831,7 +1941,6 @@ export function SecurityProvider({ children }: { children: React.ReactNode }) {
       securityLockHard:    lockState.hard,
       gateState,
       gateReasons,
-      overlayBlocked,
       multiWindowBlocked,
       windowMode:          multiWindowBlocked ? windowModeEngagedModeRef.current : windowModeRef.current,
       backgroundBlocked,

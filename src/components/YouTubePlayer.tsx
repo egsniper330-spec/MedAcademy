@@ -73,9 +73,11 @@ import {
   useSecurityWebViewStop,
   WEBVIEW_SOFT_PAUSE_SCRIPT,
 } from '@/lib/useSecurityWebViewStop';
+import { ensureNativeVpnWatch, getNativeVpnSnapshot } from '@/lib/nativeSecurity';
 import { PLAYER_SCRIPT, PLAYER_METADATA_GUARD } from '../lib/plyr/playerScript';
 import { beginFullscreenOrientation, releaseFullscreenOrientation } from '../lib/fullscreenOrientation';
 import { PLYR_CSS, PLYR_JS } from '../lib/plyr/plyrBundle';
+import { PLYR_SPRITE } from '../lib/plyr/plyrSprite';
 import {
   enterFullscreenSystemUi,
   exitFullscreenSystemUi,
@@ -193,6 +195,11 @@ ${PLYR_CSS}
 </head>
 <body>
   <div data-plyr-provider="youtube" data-plyr-embed-id="" id="player"></div>
+  <!-- Plyr icon sprite, bundled locally. Plyr only fetches its CDN sprite
+       (https://cdn.plyr.io/<version>/plyr.svg) when NO element with the id
+       "sprite-plyr" exists, so shipping it inline removes that cold-cache
+       third-party request while keeping every control icon. -->
+  <div id="sprite-plyr" hidden>${PLYR_SPRITE}</div>
   <script>window.__PLAYER_CONFIG__ = ${JSON.stringify(cfg)};</script>
   <!-- Before the library loads: refuse third-party video-metadata (oEmbed /
        noembed) requests, which Plyr issues for the video TITLE. See
@@ -509,6 +516,51 @@ function YouTubePlayerNative({
   //  cross-origin iframe player — so the video actually stops when the VPN lock
   //  engages instead of continuing to play behind the security gate.
   useSecurityWebViewStop(wvRef);
+
+  // ── PRE-NETWORK PLAYBACK BARRIER (the player itself is gated) ─────────────
+  //
+  // The YouTube iframe begins its own network activity the instant the WebView
+  // is created, and those are exactly the requests a capturing proxy sees. The
+  // Play button check alone is therefore not a barrier: this component must not
+  // create the WebView at all until the PROCESS-WIDE VPN state is measured and
+  // clean. It answers in one bridge call (no network, no detector suite), so it
+  // adds no visible delay, and `registered:false` (unknown) is treated as
+  // blocked — an unmeasured network is not a clean network.
+  //
+  // THIS IS THE SECOND OF TWO LAYERS, not the load barrier itself:
+  //   1. NATIVE (authoritative): the WebView below is created with
+  //      `networkGate`, so Android starts it with blockNetworkLoads(true) and
+  //      its first document is only loaded after a FRESH ConnectivityManager
+  //      reading taken natively (see patches/react-native-webview). That
+  //      closes the "one or two requests leave during teardown" race.
+  //   2. THIS JS BARRIER (defence in depth, and it keeps a blocked WebView from
+  //      even being created when the state is already known to be dirty).
+  // Neither replaces the other: this snapshot is a bridge call that can be
+  // stale by a millisecond, and the native gate cannot decide when to CREATE a
+  // view. Requests already dispatched before the native callback reached
+  // Android are residual exposure and are not claimed as prevented.
+  const [vpnBarrierClear, setVpnBarrierClear] = useState(false);
+  useEffect(() => {
+    if (Platform.OS !== 'android') {
+      // iOS/web have their own windowing/VPN models; this barrier is Android's.
+      setVpnBarrierClear(true);
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      try {
+        await ensureNativeVpnWatch();
+        const snap = await getNativeVpnSnapshot();
+        if (cancelled) return;
+        setVpnBarrierClear(!!snap && snap.registered && !snap.vpnTransport && !snap.vpnPresent);
+      } catch {
+        if (!cancelled) setVpnBarrierClear(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // ── PROTECTED CONTENT concealment (background / security block) ───────────
   //
@@ -874,6 +926,12 @@ function YouTubePlayerNative({
     return () => sub.remove();
   }, [isFullscreen, exitFullscreen]);
 
+  // FAIL CLOSED: no WebView, no iframe, no protected request until the barrier
+  // has positively cleared. A 16:9 placeholder keeps the layout stable.
+  if (!vpnBarrierClear) {
+    return <View style={{ width: '100%', aspectRatio: 16 / 9, backgroundColor: '#000' }} />;
+  }
+
   return (
     // In-place fullscreen container: when fullscreen, absolute-fill of the
     // SCREEN ROOT (the lesson screen hosts this player as a direct child of
@@ -913,6 +971,15 @@ function YouTubePlayerNative({
       >
         <WebView
           ref={wvRef}
+          // NATIVE NETWORK GATE (patches/react-native-webview+13.16.0.patch):
+          // the view is created with blockNetworkLoads(true) and its first
+          // document is only loaded after the app's native security module
+          // answers from a FRESH VPN reading (VPN/UNKNOWN/no-authorizer →
+          // denied, nothing loads). On a native VPN raise the view is blocked
+          // and stopLoading() is called on the main thread immediately —
+          // before React can unmount it. There is deliberately no JS method
+          // that can unblock or override this.
+          networkGate
           source={{ html: playerHtml, baseUrl: 'https://medacademy.app' }}
           style={{ flex: 1, backgroundColor: '#000' }}
           allowsInlineMediaPlayback

@@ -91,22 +91,57 @@
  * `config.title` / aria label). There is no MedAcademy source reference to
  * noembed anywhere: it comes entirely from this vendored library.
  *
- * The guard refuses exactly those metadata/oEmbed URLs in the player document
- * and passes every other request straight through to the real fetch. Plyr's
- * getTitle() has a `.catch`, so a refusal is handled and playback/layout are
- * unaffected — the leak is removed rather than merely hidden. Because it is
- * installed BEFORE the Plyr bundle loads, the provider can never issue the
- * request, and it stays true for the whole life of the player document.
+ * THE TRANSPORT (verified against the vendored 3.8.4 bundle): Plyr's `Ee()`
+ * helper is XMLHttpRequest — NOT fetch. The original guard patched only
+ * `window.fetch`, so it never saw the request at all. It is therefore extended
+ * here to cover both, and the two transports are handled DIFFERENTLY on
+ * purpose:
+ *
+ *   fetch  → refused (a rejected promise is the documented guard behaviour).
+ *   XHR    → REWRITTEN to a local blob: document. A refused XHR would never
+ *            fire `load`, and Plyr's helper rejects only on `error` by throwing
+ *            inside the listener — so the getTitle() promise would never
+ *            settle and `ready()` would hang. Rewriting keeps the caller's
+ *            promise settling while no byte leaves the device.
+ *
+ * `PLAYER_SCRIPT` additionally points `config.urls.youtube.api` at the same
+ * local document, so in the normal path the lookup never even reaches the
+ * guard. The guard is the belt to that braces: it is installed BEFORE the Plyr
+ * bundle loads and stays true for the whole life of the player document.
+ *
+ * The rewrite is deliberately NARROW — only noembed.com / youtube.com/oembed /
+ * vimeo oEmbed URLs — so nothing the YouTube IFrame API, Plyr, or the app
+ * itself does is affected (verified: playback, seeking, fullscreen, captions).
  */
 export const PLAYER_METADATA_GUARD = `
 (function () {
   try {
     if (window.__medaMetadataGuard) return;
     window.__medaMetadataGuard = true;
+    // ── LOCAL metadata document (no network) ────────────────────────────────
+    // Plyr's getTitle() reads {title,width,height} from its oEmbed URL. This
+    // blob: document is created in THIS page, so the lookup resolves locally:
+    // no third-party host is contacted, and the promise still settles. The
+    // static title is empty — MedAcademy never renders it (the app supplies its
+    // own lesson title) and the dimensions only set an already-16:9 ratio.
+    var localUrl = '';
+    try {
+      localUrl = URL.createObjectURL(new Blob(
+        ['{"title":"","width":1280,"height":720}'],
+        { type: 'application/json' }
+      ));
+    } catch (e) {
+      // Fallback: a data: URL, still entirely local.
+      localUrl = 'data:application/json;base64,eyJ0aXRsZSI6IiIsIndpZHRoIjoxMjgwLCJoZWlnaHQiOjcyMH0=';
+    }
+    window.__medaLocalMetadataUrl = localUrl;
+
+    // NOTE: there is deliberately NO early return when fetch is missing — the
+    // XHR branch below must always be installed, because Plyr 3.8.4 uses XHR
+    // and an early return here would leave the metadata lookup unguarded.
     var nativeFetch = window.fetch;
-    if (typeof nativeFetch !== 'function') return;
-    var BLOCKED = /noembed\\.com|youtube\\.com\\/oembed|vimeo\\.com\\/api\\/oembed/i;
-    window.fetch = function (input) {
+    var BLOCKED = /noembed\\.com|youtube\\.com(?:\\/api)?\\/oembed|vimeo\\.com\\/api\\/oembed/i;
+    if (typeof nativeFetch === 'function') window.fetch = function (input) {
       var url = '';
       try {
         url = typeof input === 'string' ? input : (input && input.url) || '';
@@ -116,6 +151,24 @@ export const PLAYER_METADATA_GUARD = `
       }
       return nativeFetch.apply(window, arguments);
     };
+
+    // ── XHR: the transport Plyr 3.8.4 actually uses (Ee) ────────────────────
+    // Rewrite ONLY the three metadata hosts to the local document. Everything
+    // else (the YouTube IFrame API, googlevideo, ad/analytics hosts) is passed
+    // through untouched, so this cannot change how the embed behaves.
+    try {
+      var nativeOpen = XMLHttpRequest.prototype.open;
+      XMLHttpRequest.prototype.open = function (method, url) {
+        try {
+          if (typeof url === 'string' && BLOCKED.test(url) && localUrl) {
+            var args = Array.prototype.slice.call(arguments);
+            args[1] = localUrl;
+            return nativeOpen.apply(this, args);
+          }
+        } catch (e) {}
+        return nativeOpen.apply(this, arguments);
+      };
+    } catch (e) {}
   } catch (e) {}
 })();
 `;
@@ -744,6 +797,23 @@ export const PLAYER_SCRIPT = `
       origin:          'https://medacademy.app',
     },
   });
+
+  // ── NO THIRD-PARTY TITLE LOOKUP (Plyr's noembed.com oEmbed request) ───────
+  //   Plyr's YouTube provider calls getTitle() from the IFrame API's onReady,
+  //   which is necessarily LATER than this constructor (the SDK loads over the
+  //   network first), and getTitle reads config.urls.youtube.api at call
+  //   time. Pointing that value at the local blob: document created by
+  //   PLAYER_METADATA_GUARD therefore removes the third-party request on the
+  //   normal path — the app never uses the remote title. If the guard was
+  //   somehow absent, its XHR rewrite still catches the request; if this
+  //   assignment fails, Plyr behaves exactly as before.
+  try {
+    var ytUrls = player.config && player.config.urls && player.config.urls.youtube;
+    if (ytUrls && window.__medaLocalMetadataUrl) {
+      ytUrls.api = window.__medaLocalMetadataUrl;
+      player.config.title = '';
+    }
+  } catch (e) {}
 
   // Expose for external seeks (e.g. inline WebView re-sync after modal closes).
   window.__plyr = player;

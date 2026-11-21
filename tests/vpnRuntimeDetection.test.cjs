@@ -421,8 +421,11 @@ console.log('\n\u2500\u2500 Part B3: detection and policy were NOT weakened \u25
 
   check('VPN detection still runs on iOS', /isNativeVPNDetected\(\)/.test(security));
   check('proxy detection still runs on iOS', /isNativeProxyDetected\(\)/.test(security));
+  // Each detector may be wrapped in bounded()/withTimeout() — either way it must
+  // still run inside the shared Promise.all pipeline.
   check('both detectors remain wired into runSecurityChecks',
-    /withTimeout\(detectVPN\(\)/.test(security) && /withTimeout\(detectProxy\(\)/.test(security));
+    /(?:withTimeout|bounded)\((?:'vpn',\s*)?detectVPN\(\)/.test(security)
+    && /(?:withTimeout|bounded)\((?:'proxy',\s*)?detectProxy\(\)/.test(security));
 
   // The shipped fallback policy must block BOTH connection detectors.
   check('VPN default policy is still block_login', /vpn:\s*'block_login'/.test(security));

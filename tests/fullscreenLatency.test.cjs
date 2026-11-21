@@ -94,7 +94,9 @@ console.log('── Root cause: the fullscreen gate is network-bound ──');
   // moment protected media is authorised, so it can never ride on cached
   // evidence. The reason it passes is what selects the scope, and only a
   // resume/periodic trigger may use the narrower one.
-  ok(/await runGuardedCheck\('pre-video'\)/.test(ctx) &&
+  // runSharedFullCheck() still runs a COMPLETE 'full' evaluation; it only joins
+  // an evaluation that is ALREADY IN FLIGHT (nothing is cached).
+  ok(/await runSharedFullCheck\('pre-video'\)/.test(ctx) &&
     /const scope: SecurityCheckScope = \(reason\.startsWith\('resume'\) \|\| reason === 'periodic'\)[\s\S]{0,120}\? 'resume'[\s\S]{0,40}: 'full'/.test(ctx),
     'checkBeforeVideo() runs a FULL fresh evaluation (not a cached verdict read)');
   ok(!/setTimeout/.test(fnBody(ctx, 'const checkBeforeVideo = useCallback')),

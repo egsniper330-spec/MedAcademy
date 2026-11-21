@@ -23,17 +23,11 @@
  *      instead of the mislabeled 'tamper_detected' that showed "App Integrity
  *      Compromised" on OFFICIAL installs at every cold start.
  *
- * OVERLAY + BACKGROUND/RESUME EXTENSION (latest round):
+ * WINDOW + BACKGROUND/RESUME EXTENSION (latest round):
  *   The gate is now driven by ONE centralized state
  *   (securityStateModel.resolveSecurityGateState) instead of a locally
  *   re-derived boolean, so all four independent inputs share a vocabulary:
  *
- *     BLOCKED_OVERLAY            a live obscured-window signal from the
- *                                Android touch filter. Copy is exactly
- *                                OVERLAY_WARNING_COPY; a recheck control is
- *                                offered but cannot dismiss the block — it
- *                                clears only when the platform reports the
- *                                signal gone AND a fresh evaluation passes.
  *     BLOCKED_MULTI_WINDOW       the platform reports THIS app in a prohibited
  *                                window mode (split-screen / other multi-window
  *                                mode, or our own picture-in-picture). Copy is
@@ -76,6 +70,12 @@ import * as ScreenCaptureLib from '@/lib/screenCaptureGuard';
 import { ShieldAlert, WifiOff, Smartphone } from 'lucide-react-native';
 import { neuColors, useLayout } from '@/lib/neu';
 import { useSecurity } from '@/lib/SecurityContext';
+import {
+  getNativeContainmentTimeline,
+  onNativeContainmentChanged,
+  reportNativeGateMounted,
+  reportNativeGateUnmounted,
+} from '@/lib/nativeSecurity';
 import { t } from '@/lib/i18n';
 import {
   nextStickyTypes,
@@ -83,10 +83,10 @@ import {
   isGateRecheckable,
   resolveFindingCopyKey,
   isConnectionFinding,
+  isUserCaFinding,
   connectionBlockInstructions,
   rendersBlockScreen,
   windowModeBlockSteps,
-  overlayBlockSteps,
 } from '@/lib/securityStateModel';
 
 /**
@@ -117,7 +117,6 @@ const GATE_EVENT_KEYS: ReadonlySet<string> = new Set([
   'ssl_pinning_failure',
   'play_integrity_failed',
   'app_attest_failed',
-  'overlay_detected',
   'screen_recording_detected',
   'security_unverified',
 ]);
@@ -127,6 +126,12 @@ interface GateFinding {
   title: string;
   instruction: string;
   icon: 'vpn' | 'shield';
+  /**
+   * Machine-derived specifics for THIS finding — currently the exact names of
+   * the detected interception applications. Never localized, never invented:
+   * it is the catalog label the native scan actually matched.
+   */
+  detail?: string;
 }
 
 /**
@@ -137,9 +142,9 @@ interface GateFinding {
  * `keys` are COPY KEYS (resolveFindingCopyKey), not raw event types — the same
  * event type can describe different conditions (see GATE_EVENT_KEYS).
  */
-function gateFindings(keys: string[]): GateFinding[] {
+function gateFindings(keys: string[], interceptionNames = ''): GateFinding[] {
   const matched = keys
-    .map((type) => {
+    .map((type): GateFinding | null => {
       if (!GATE_EVENT_KEYS.has(type)) return null;
       // Resolve at RENDER time so the label follows the seeded device locale.
       return {
@@ -147,6 +152,13 @@ function gateFindings(keys: string[]): GateFinding[] {
         title: t(`security.gate.event.${type}.title`),
         instruction: t(`security.gate.event.${type}.instruction`),
         icon: (isConnectionFinding(type) ? 'vpn' : 'shield') as GateFinding['icon'],
+        // The policy names the offending app: the user must know WHAT to
+        // uninstall. Only a real detection produces this string; it is empty
+        // when the finding came from a sticky copy key with no live threat.
+        detail:
+          type === 'interception_tool_detected' && interceptionNames
+            ? interceptionNames
+            : undefined,
       };
     })
     .filter((f): f is GateFinding => f !== null);
@@ -187,6 +199,13 @@ export function SecurityGate() {
   // flashes a temporary all-clear.
   const gateTypesRef = useRef<string[]>([]);
   const liveBlocking = blocksLogin && threats.length > 0;
+  // USER-INSTALLED CA CERTIFICATE — a trust-store finding. It rides the
+  // certificate-trust event type (block_login, forced by the engine), so the
+  // gate STATE is BLOCKED_SECURITY_VIOLATION; the copy below is dedicated to
+  // it. No control is offered: removing the certificate in Settings is the only
+  // way out, and the foreground re-verification clears it automatically — a
+  // "Verify" button here would read as an acknowledgement/bypass.
+  const userCaBlocked = liveBlocking && threats.some(isUserCaFinding);
   // Findings travel as COPY KEYS, not raw event types: three unrelated
   // conditions share `debug_detected` (see resolveFindingCopyKey), so the label
   // must come from the engine's own detectionMethod. The block, the policy and
@@ -218,7 +237,6 @@ export function SecurityGate() {
   // computed once in SecurityContext), not by a locally re-derived boolean.
   // Every cause of a block is one named state:
   //
-  //   BLOCKED_OVERLAY            live obscured-window signal (native touch filter)
   //   BLOCKED_MULTI_WINDOW       this app is in a prohibited window mode
   //   BLOCKED_VPN                policy block caused by a VPN/proxy
   //   BLOCKED_SECURITY_VIOLATION any other policy block
@@ -244,11 +262,10 @@ export function SecurityGate() {
   // blocksLogin) do not gate — they surface on the security-warning screen.
   const blocking = isGateBlocked(gateState);
   const blockScreen = rendersBlockScreen(gateState);
-  const overlayBlocked = gateState === 'BLOCKED_OVERLAY';
   // The multi-window restriction. Copy comes from the pure model, selected by
   // the mode the platform ACTUALLY reported (a split screen and a floating
   // picture-in-picture window are different conditions with different recovery
-  // actions — and neither is ever worded as an overlay).
+  // actions).
   const windowModeBlockedState = gateState === 'BLOCKED_MULTI_WINDOW';
   // A VPN/proxy block renders the MANDATORY connection page: it states the
   // policy, tells the user exactly where to switch the VPN/proxy off (the app
@@ -261,41 +278,53 @@ export function SecurityGate() {
   // ONE step list for both actionable window/connection causes (same markup, one
   // source per cause in the pure model): returning to full screen for the
   // multi-window restriction, switching the VPN/proxy off for a connection block.
-  const stepsLabel = overlayBlocked
-    ? t('security.gate.stepsOverlay')
-    : (windowModeBlockedState ? t('security.gate.stepsWindow') : t('security.gate.stepsVpn'));
-  const steps = overlayBlocked
-    ? overlayBlockSteps()
-    : windowModeBlockedState
-      ? windowModeBlockSteps(windowMode)
-      : (vpnBlocked ? connectionBlockInstructions(Platform.OS) : []);
+  const stepsLabel = windowModeBlockedState
+    ? t('security.gate.stepsWindow')
+    : t('security.gate.stepsVpn');
+  const steps = windowModeBlockedState
+    ? windowModeBlockSteps(windowMode)
+    : (vpnBlocked ? connectionBlockInstructions(Platform.OS) : []);
   // Only the two user-actionable causes offer a recheck control.
   const recheckable = isGateRecheckable(gateState);
   const types = liveBlocking ? liveCopyKeys : stickyTypes;
-  // Overlay / resume states carry their own dedicated copy — listing policy
+  // Window / resume states carry their own dedicated copy — listing policy
   // findings would be misleading when the cause is not a policy finding.
-  const findings = overlayBlocked || windowModeBlockedState ? [] : gateFindings(types);
-  const revalidating = !liveBlocking && !overlayBlocked
+  // The EXACT application names the native catalog matched. Derived from the
+  // finding's own detectionMethod ("Traffic interception tool installed: X, Y
+  // (signer differs…)"), so the page names what was actually found and never a
+  // package id or a guess.
+  const interceptionNames = threats
+    .filter((th) => resolveFindingCopyKey(th.type, th.detectionMethod) === 'interception_tool_detected')
+    .map((th) =>
+      String(th.detectionMethod || '')
+        .replace(/^Traffic interception tool installed:\s*/i, '')
+        .replace(/\s*\(signer differs[\s\S]*$/i, '')
+        .trim(),
+    )
+    .filter(Boolean)
+    .join(', ');
+  const findings = windowModeBlockedState || userCaBlocked
+    ? []
+    : gateFindings(types, interceptionNames);
+  const revalidating = !liveBlocking
     && !windowModeBlockedState && (checking || evaluating);
 
   // ── EVERY ACTIVE REASON ON THE ONE SCREEN ─────────────────────────────────
   // `gateState` decides the PRIMARY copy above (deterministic precedence). This
-  // list is every LIVE violation, so a VPN that is followed by a floating
-  // window keeps both visible here instead of the second cause overwriting the
-  // first — and resolving one removes only its own row. There is still exactly
-  // ONE gate: this list never mounts another screen.
+  // list is every LIVE violation, so a VPN that is followed by split-screen
+  // keeps both visible here instead of the second cause overwriting the first —
+  // and resolving one removes only its own row. There is still exactly ONE
+  // gate: this list never mounts another screen.
   const activeReasonRows = gateReasons.map((reason) => {
     if (reason.kind === 'window') {
       const mode = reason.mode ?? 'multi_window';
       const key = mode === 'picture_in_picture'
         ? 'security.window.pip'
-        : mode === 'foreign_window'
-          ? 'security.window.foreign'
-          : 'security.window.multi';
+        : 'security.window.multi';
       return { key: reason.key, title: t(`${key}.title`), message: t(`${key}.message`) };
     }
-    if (reason.kind === 'overlay') {
-      return { key: reason.key, title: t('security.overlay.title'), message: t('security.overlay.message') };
+    if (reason.kind === 'user_ca') {
+      return { key: reason.key, title: t('security.userCa.title'), message: t('security.userCa.message') };
     }
     if (reason.kind === 'vpn') {
       return { key: reason.key, title: t('security.vpn.title'), message: t('security.vpn.message') };
@@ -320,6 +349,74 @@ export function SecurityGate() {
     const sub = BackHandler.addEventListener('hardwareBackPress', () => true); // consume
     return () => sub.remove();
   }, [blockScreen]);
+
+  // ── ONE LOCK SCREEN — the native cover hands over to this gate ─────────────
+  //
+  // The native side contains a violation on the frame it is observed, by
+  // attaching its own full-screen cover. This gate is the richer surface, so it
+  // tells the native side it is on screen and the cover stands down — the user
+  // sees exactly ONE lock, and the native REASON SET stays authoritative. If
+  // this gate unmounts while the platform still holds a reason, the cover comes
+  // back on its own; there is no frame in which neither surface is shown.
+  useEffect(() => {
+    if (Platform.OS !== 'android') return;
+    if (!blockScreen) return;
+    void (async () => {
+      // The mount is what stops the native cover. The native reason set is NOT
+      // touched by either side, so neither surface can clear the other.
+      await reportNativeGateMounted();
+      // MEASURED LATENCY, readable on a release build (native Log is stripped):
+      // the native clock marks detection, cover, bridge emit and this mount, so
+      // the numbers below are the real containment latency, not an estimate.
+      try {
+        const timeline = await getNativeContainmentTimeline();
+        if (timeline) {
+          console.log(
+            '[SecurityGate][containmentTimeline] latchAgeMs=',
+            timeline.latchAgeMs,
+            'reasons=', timeline.reasons || '(none)',
+            'mode=', timeline.mode,
+            'dropped=', timeline.dropped,
+            'window=dup', timeline.windowSuppressed,
+            'collapsed', timeline.windowCollapsed,
+            'marks=', JSON.stringify(timeline.entries.slice(-12)),
+          );
+        }
+      } catch {
+        // Diagnostics only: a failed read must never affect the gate.
+      }
+    })();
+    return () => {
+      void reportNativeGateUnmounted();
+    };
+  }, [blockScreen]);
+
+  // ── PER-STEP TIMELINE EVIDENCE (physical verification) ────────────────────
+  // Every native reason change prints the bounded timeline, so a rejected
+  // revalidation, a refused weak full-screen snapshot or a region-verified
+  // recovery is READABLE on a release build (native Log is stripped) instead of
+  // being inferred from a screenshot. Stage names and timings only.
+  useEffect(() => {
+    if (Platform.OS !== 'android') return;
+    return onNativeContainmentChanged(() => {
+      void (async () => {
+        try {
+          const timeline = await getNativeContainmentTimeline();
+          if (!timeline) return;
+          console.log(
+            '[SecurityGate][containmentStep] reasons=',
+            timeline.reasons || '(none)',
+            'mode=', timeline.mode,
+            'latchAgeMs=', timeline.latchAgeMs,
+            'windowSuppressed=', timeline.windowSuppressed,
+            'marks=', JSON.stringify(timeline.entries.slice(-16)),
+          );
+        } catch {
+          // Diagnostics only.
+        }
+      })();
+    });
+  }, []);
 
   // ── FLAG_SECURE while gated (defense in depth, preserved) ─────────────────
   // The gate is a block_screen: whatever is underneath it (or captured while
@@ -364,27 +461,23 @@ export function SecurityGate() {
           style={[styles.title, { color: c.text, fontSize: layout.titleSize }]}
           accessibilityRole="header"
         >
-          {overlayBlocked
-            ? t('security.overlay.title').toUpperCase()
-            : windowModeBlockedState
-              ? t(windowMode === 'picture_in_picture'
-                  ? 'security.window.pip.title'
-                  : windowMode === 'foreign_window'
-                    ? 'security.window.foreign.title'
-                    : 'security.window.multi.title').toUpperCase()
+          {windowModeBlockedState
+            ? t(windowMode === 'picture_in_picture'
+                ? 'security.window.pip.title'
+                : 'security.window.multi.title').toUpperCase()
+            : userCaBlocked
+              ? t('security.userCa.title').toUpperCase()
               : vpnBlocked
                 ? t('security.vpn.title').toUpperCase()
                 : t('security.gate.title')}
         </Text>
         <Text style={[styles.subtitle, { color: `${c.text}CC`, fontSize: layout.bodySize }]}>
-          {overlayBlocked
-            ? t('security.overlay.message')
-            : windowModeBlockedState
-              ? t(windowMode === 'picture_in_picture'
-                  ? 'security.window.pip.message'
-                  : windowMode === 'foreign_window'
-                    ? 'security.window.foreign.message'
-                    : 'security.window.multi.message')
+          {windowModeBlockedState
+            ? t(windowMode === 'picture_in_picture'
+                ? 'security.window.pip.message'
+                : 'security.window.multi.message')
+            : userCaBlocked
+              ? t('security.userCa.message')
               : vpnBlocked
                 ? t('security.vpn.message')
                 : t('security.gate.subtitle')}
@@ -456,6 +549,14 @@ export function SecurityGate() {
                       <Text style={{ color: `${c.text}B3`, fontSize: layout.captionSize + 1, lineHeight: (layout.captionSize + 1) * 1.45, marginTop: 2 }}>
                         {finding.instruction}
                       </Text>
+                      {finding.detail ? (
+                        <Text
+                          style={{ color: '#EF4444', fontSize: layout.captionSize + 1, fontWeight: '700', marginTop: 4 }}
+                          accessibilityLabel={finding.detail}
+                        >
+                          {finding.detail}
+                        </Text>
+                      ) : null}
                     </View>
                   </View>
                 );
@@ -499,9 +600,8 @@ export function SecurityGate() {
           </>
         )}
 
-        {/* SAFE RECHECK — offered for the causes the USER can actually remove: an
-            overlay to close, a backgrounded session to re-verify, or a VPN/proxy
-            to switch off. It only REQUESTs a recheck; it cannot force the gate
+        {/* SAFE RECHECK — offered for the causes the USER can actually remove: a
+            backgrounded session to re-verify, or a VPN/proxy to switch off. It only REQUESTs a recheck; it cannot force the gate
             open — the state clears when a FRESH authoritative evaluation finds
             no blocking finding (the native vpnStateChanged signal and every
             foreground return also trigger that re-check automatically). A
@@ -533,7 +633,7 @@ export function SecurityGate() {
             Rendered ONLY from a completed verdict (hasVerdict): the
             fail-closed sentinel's weight can no longer surface here as a
             fake "Risk Score: 10" — pending states never mount this page. */}
-        {hasVerdict && !overlayBlocked && !windowModeBlockedState && (
+        {hasVerdict && !windowModeBlockedState && (
           <View style={[styles.pill, { backgroundColor: '#EF444418' }]}>
             <Text style={{ fontSize: layout.captionSize, fontWeight: '700', color: '#EF4444' }}>
               {t('security.gate.riskScore', { score: riskScore })}
@@ -565,10 +665,10 @@ export function SecurityGate() {
             }}
             accessibilityRole="text"
           >
-            {overlayBlocked
-              ? t('security.gate.footerOverlay')
-              : windowModeBlockedState
-                ? t('security.gate.footerWindow')
+            {windowModeBlockedState
+              ? t('security.gate.footerWindow')
+              : userCaBlocked
+                ? t('security.gate.footerUserCa')
                 : vpnBlocked
                   ? t('security.gate.footerVpn')
                   : t('security.gate.footerDefault')}

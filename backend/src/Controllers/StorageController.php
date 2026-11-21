@@ -253,13 +253,22 @@ final class StorageController
         if (!is_file($file)) {
             Response::error('Public file not found', 404, 'not_found');
         }
+        // The type is read from the file's own header bytes (finfo), never from
+        // the client's filename or Content-Type.
         $mime = mime_content_type($file) ?: 'application/octet-stream';
-        // The whole file is read into memory below, which can take seconds for a
-        // large document. Any database work this request needed is already done,
-        // so the connection slot is released first instead of being held for the
-        // entire read.
+        // Any database work this request needed is already done, so the
+        // connection slot is released before the transfer starts instead of being
+        // held for its whole duration.
         Database::instance()->release();
-        Response::raw((string) file_get_contents($file), 200, $mime, ['Cache-Control' => 'public, max-age=31536000, immutable']);
+        // STREAM, DO NOT BUFFER: `file_get_contents()` + `Response::raw()` used to
+        // read the entire object into the PHP heap before the first byte left the
+        // server, so time-to-first-byte equalled the full read and peak memory was
+        // the whole file. `Response::file()` streams it (with Content-Length and
+        // range support) instead. Public buckets keep their immutable caching.
+        Response::file($file, $mime, [
+            'Cache-Control' => 'public, max-age=31536000, immutable',
+            'X-Content-Type-Options' => 'nosniff',
+        ]);
     }
 
     /**
@@ -317,7 +326,10 @@ final class StorageController
         // database work on this route; the file read that follows can transfer
         // hundreds of megabytes. Free the slot before it.
         Database::instance()->release();
-        Response::raw((string) file_get_contents($file), 200, $mime, $headers);
+        // Streamed with Content-Length + Range support: a 25 MB attachment used to
+        // be buffered whole (no Content-Length at all → the app could not show a
+        // determinate bar and could never resume an interrupted transfer).
+        Response::file($file, $mime, $headers);
     }
 
     public function upload(Request $request): array

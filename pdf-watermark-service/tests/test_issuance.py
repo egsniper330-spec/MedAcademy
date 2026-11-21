@@ -76,7 +76,7 @@ def test_build_personalised_pdf_keeps_page_count_order_and_size(tmp_path: Path):
     storage, manifest = _master(tmp_path, pages=3)
     model = FakeModel()
     data = issuance.build_personalised_pdf(storage=storage, manifest=manifest, model=model,
-                                           payload=0xBEEF, lossless_png_dpi=72)
+                                           payload=0xBEEF, source_dpi=72)
     issuance.verify_pdf(data, [(p["width"], p["height"]) for p in manifest["pages"]])
     assert model.payloads == [0xBEEF] * 3
     assert len(data) > 0
@@ -85,7 +85,7 @@ def test_build_personalised_pdf_keeps_page_count_order_and_size(tmp_path: Path):
 def test_verify_pdf_rejects_wrong_page_count(tmp_path: Path):
     storage, manifest = _master(tmp_path, pages=2)
     data = issuance.build_personalised_pdf(storage=storage, manifest=manifest, model=FakeModel(),
-                                           payload=1, lossless_png_dpi=72)
+                                           payload=1, source_dpi=72)
     with pytest.raises(Exception):
         issuance.verify_pdf(data, [(120, 160)])
 
