@@ -2887,7 +2887,6 @@ class SecurityModule(private val reactContext: ReactApplicationContext) :
             reading.putString("reasons", SecurityContainment.snapshotCsv())
             reading.putString("mode", SecurityContainment.windowMode)
             reading.putDouble("nativeMs", android.os.SystemClock.elapsedRealtime().toDouble())
-            reading.putString("touchEvidence", SecurityContainment.lastTouchEvidence())
             promise.resolve(reading)
         } catch (e: Exception) {
             promise.resolve(null)
